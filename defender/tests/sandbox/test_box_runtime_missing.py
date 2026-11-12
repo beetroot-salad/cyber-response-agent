@@ -94,52 +94,16 @@ def test_the_unsandboxed_opt_out_still_degrades_a_missing_runtime(tmp_path, monk
     assert box.name == "", "the opt-out did not degrade to the host"
 
 
-# ---- the operator's run preflight (run.py) ---------------------------------------------------------------------------
-def _ready_image_docker(runtimes: tuple[str, ...] | None) -> RuntimesDocker:
-    """A daemon that holds the box image (`image inspect` answers 0, as `RecordingDocker` does) and lists `runtimes`."""
-    return RuntimesDocker(runtimes)
+def test_a_daemon_is_asked_for_a_runtime_it_has_once_per_process_and_for_one_it_lacks_every_time(tmp_path, sandboxed):
+    """A daemon's runtimes change only when it restarts: a runtime found is not asked again of the same daemon; a
+    missing one is, so a host fixed under a running worker is seen at its next start."""
+    has = RuntimesDocker(("runc", "runsc"))
+    for _ in range(2):
+        box_mod.require_runtime(has, "runsc")
+    assert subcommands(has.calls).count("info") == 1, has.calls
 
-
-def test_the_run_preflight_refuses_a_host_without_runsc_naming_the_remedy():
-    from defender import run as run_py
-
-    docker = _ready_image_docker(("runc",))
-    refusal = run_py.box_host_refusal({}, docker)
-    assert refusal is not None
-    assert "no runtime 'runsc' registered" in refusal, refusal
-    assert "DEFENDER_BOX_RUNTIME=runc" in refusal, refusal
-    assert not {"run", "create"} & set(subcommands(docker.calls)), docker.calls
-
-
-@pytest.mark.parametrize(("environ", "runtimes"), [
-    ({}, ("runc", "runsc")),
-    ({box_mod.BoxSpec.ENV_VAR: "runc"}, ("runc",)),
-    ({"DEFENDER_ALLOW_UNSANDBOXED": "1"}, ("runc",)),
-], ids=["runsc-registered", "runc-chosen", "unsandboxed-opt-out"])
-def test_the_run_preflight_passes_a_host_that_can_start_the_box_or_need_not(environ, runtimes):
-    from defender import run as run_py
-
-    assert run_py.box_host_refusal(environ, _ready_image_docker(runtimes)) is None
-
-
-def test_the_run_preflight_refuses_an_unknown_runtime_setting():
-    from defender import run as run_py
-
-    refusal = run_py.box_host_refusal({box_mod.BoxSpec.ENV_VAR: "crun"}, _ready_image_docker(("runc",)))
-    assert refusal is not None
-    assert "is not a known box runtime" in refusal, refusal
-
-
-def test_the_operator_run_asks_the_host_preflight_and_a_job_container_s_run_does_not():
-    """`main`'s default preflight is the host one; the job entries keep the role-models one (their box is their
-    helper's)."""
-    import inspect
-
-    from defender import run as run_py
-
-    def default(fn):
-        return inspect.signature(fn).parameters["preflight"].default
-
-    assert default(run_py.main) is run_py.preflight_run_host
-    assert default(run_py.job_main) is run_py.preflight_role_models
-    assert default(run_py.serve_job) is run_py.preflight_role_models
+    lacks = RuntimesDocker(("runc",))
+    for _ in range(2):
+        with pytest.raises(BoxFault):
+            box_mod.require_runtime(lacks, "runsc")
+    assert subcommands(lacks.calls).count("info") == 2, lacks.calls

@@ -37,7 +37,6 @@ from ._container import (
     job_container_name,
     make_socket_folder,
     container_run_argv,
-    require_runtime,
     socket_folder,
     socket_path,
     start,
@@ -201,7 +200,6 @@ def _start(session: Session, spec: KindSpec, signals: _Signals, hold: contextlib
             except OSError as e:
                 raise StartFailed(f"the job socket {path} could not be opened: {e}") from None
             argv = container_run_argv(session, path, session.prepared.command)
-            require_runtime(session)
             signals.raising = False  # from here a signal stops the container gracefully
             if session.signalled.is_set():
                 raise StartFailed("the helper was told to stop before its container started; none was started")

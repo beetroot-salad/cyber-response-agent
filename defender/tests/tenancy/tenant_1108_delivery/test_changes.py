@@ -422,7 +422,7 @@ def test_the_commit_maker_takes_no_lock_and_leaves_main_the_index_and_the_checko
 def test_every_tenant_commit_is_the_commit_maker_s_whatever_identity_the_shell_has(repo, tmp_path, monkeypatch, shell):
     """#1484: a shell whose git has no identity (an operator's `tenant.py propose`, a job container's bare uid) still
     commits, and an exported identity never reaches the tenant's history: author and committer are the product's."""
-    from defender.learning.author.version_control.repository import COMMIT_IDENTITY
+    from defender._git import PRODUCT_IDENTITY as COMMIT_IDENTITY
 
     http = ForgeHTTP()
     d = delivery(repo, http)

@@ -1662,12 +1662,8 @@ def test_m4_the_job_entry_has_exactly_the_ratified_parameters_and_refuses_any_ot
     parameters = inspect.signature(run_py.job_main).parameters
     assert list(parameters) == ["argv", "environ", "lifecycle", "visualize", "preflight", "roster"]
     main_defaults = {n: p.default for n, p in inspect.signature(run_py.main).parameters.items() if n != "argv"}
-    for seam in ("lifecycle", "visualize", "roster"):
+    for seam in ("lifecycle", "visualize", "preflight", "roster"):
         assert parameters[seam].default is main_defaults[seam], f"{seam}: the job entry's default is not the operator run's own"
-    # The preflights differ by design (#1484): the operator's also asks its own host whether it can start the run's box;
-    # a job's box is its helper's, which asks its own host, so the job entry checks the role models only.
-    assert parameters["preflight"].default is run_py.preflight_role_models
-    assert main_defaults["preflight"] is run_py.preflight_run_host
     assert main_defaults["lifecycle"] is run_py._run_investigation_lifecycle, "the production lifecycle (D-k)"
     assert [n for n, p in parameters.items() if p.kind is inspect.Parameter.KEYWORD_ONLY] == list(parameters)[1:]
     for extra in ("case_ticket", "ticket_writer", "enqueue", "oracle", "verifier", "update_ticket", "anything_else",

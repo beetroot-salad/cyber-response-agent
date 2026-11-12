@@ -9,6 +9,7 @@ import json
 import os
 import re
 import subprocess
+import weakref
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -109,20 +110,42 @@ _RUNTIME_REMEDY = {
 }
 
 
+#: The runtimes each daemon was seen to have registered, by its `docker` seam (#1484): a daemon's runtimes change only
+#: when it restarts, so a process asks once per runtime. Only a runtime found is kept: a missing one is asked again,
+#: so a host fixed while a worker runs is seen at its next start.
+_FOUND_RUNTIMES: weakref.WeakKeyDictionary[Any, set[str]] = weakref.WeakKeyDictionary()
+
+
 def require_runtime(docker: DockerFn, runtime: str) -> None:
     """Confirm the daemon has `runtime` registered before any create names it (#1484); raise `BoxFault` with its
     remedy if not. Like `require_image`, decided by asking the daemon, never by a create's error text. A daemon that
     cannot say (no answer, or an answer naming no runtime: a daemon always has its default) is not refused here: a
     create then faults in docker's own words."""
     try:
+        if runtime in _FOUND_RUNTIMES.get(docker, ()):
+            return
+    except TypeError:  # a seam that cannot be weakly referenced is asked every time
+        pass
+    try:
         proc = _call(docker, ["docker", "info", "--format", "{{json .Runtimes}}"])
         runtimes = json.loads(proc.stdout or "") if proc.returncode == 0 else None
     except (BoxFault, ValueError):
         return
-    if not isinstance(runtimes, dict) or not runtimes or runtime in runtimes:
+    if not isinstance(runtimes, dict) or not runtimes:
+        return
+    if runtime in runtimes:
+        with contextlib.suppress(TypeError):
+            _FOUND_RUNTIMES.setdefault(docker, set()).add(runtime)
         return
     remedy = _RUNTIME_REMEDY.get(runtime, "register it with Docker, or set DEFENDER_BOX_RUNTIME to another box runtime")
     raise BoxFault(f"Docker on this host has no runtime {runtime!r} registered: {remedy}")
+
+
+def require_startable(docker: DockerFn, rootfs: Rootfs, runtime: str) -> None:
+    """What a box needs of its host before its create: its image (`require_image`) and its runtime
+    (`require_runtime`), each a refusal of its own with its remedy."""
+    require_image(docker, rootfs)
+    require_runtime(docker, runtime)
 
 
 # The full container id as docker writes it into every container's own mount table.

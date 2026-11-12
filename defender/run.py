@@ -257,36 +257,6 @@ def _branching_roles() -> dict[AgentRole, Callable[[], str]]:
             AgentRole.ORACLE_CHECK: config.oracle_check_effort}
 
 
-def preflight_run_host(model_override: str | None = None, *, branching: bool = False) -> int:
-    """The operator's run preflight: the role models (`preflight_role_models`), then whether this host can start the
-    run's box (`box_host_refusal`, #1484), so a host that cannot refuses before the run is made, in one line. A job
-    container's run asks only the role models: its box is its helper's, which checks its own host."""
-    rc = preflight_role_models(model_override, branching=branching)
-    if rc:
-        return rc
-    refusal = box_host_refusal()
-    if refusal is not None:
-        _logger.error(f"preflight: this host cannot start the run's box: {refusal}")
-        return 2
-    return 0
-
-
-def box_host_refusal(environ: Mapping[str, str] = os.environ,
-                     docker: Callable[..., Any] = box_mod.run_docker) -> str | None:
-    """Why this host cannot start a run box, with its remedy, or `None`: the box runtime setting, then the same image
-    and runtime checks the box start makes before its create. `None` with the unsandboxed opt-out set: the box start
-    then degrades to the host instead."""
-    if environ.get("DEFENDER_ALLOW_UNSANDBOXED") == "1":
-        return None
-    try:
-        spec = box_mod.BoxSpec.from_env(environ)
-        box_mod.require_image(docker, box_mod.resolve_rootfs(spec.rootfs, DEFENDER_DIR))
-        box_mod.require_runtime(docker, spec.runtime)
-    except (ValueError, box_mod.BoxFault) as cannot:
-        return str(cannot)
-    return None
-
-
 def preflight_role_models(  # noqa: C901 — one fail-fast check per role, plus the branching roles' efforts
         model_override: str | None = None, *, branching: bool = False) -> int:
     """Check every registered role's model config at startup and fail fast if a provider key
@@ -559,8 +529,8 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     start_box: Callable[..., Any] = box_mod.start_box,
     stop_box: Callable[..., None] = box_mod.stop_box,
     scrub: Callable[..., None] = box_mod.scrub,
-    #: A job-lane run (#1342): its box start never degrades to host execution (R2), and a start
-    #: fault leaves as `BoxStartFault` (M3), told from a teardown fault by its type.
+    #: A job-lane run (#1342): its box start never degrades to host execution (R2). On either lane a
+    #: start fault leaves as `BoxStartFault` (M3, #1484), told from a teardown fault by its type.
     job_lane: bool = False,
     #: The box's start token, when the caller minted it (#1342 r5 C1: a job's launch record
     #: carries its worker's); `None`, the box mints its own.
@@ -594,16 +564,12 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     staged: dict[str, Any] = {name: value for name, value in (
         ("staged_token", getattr(tenant, "stage_token", None)), ("start_token", start_token), ("relay", relay))
         if value is not None}
-    if not job_lane:
+    try:
         box = start_box(run_dir, defender_dir, tenant_agent=tenant.agent,
-                        tenant_id=tenant.tenant_id, write_verdict=write_verdict, **staged)
-    else:
-        try:
-            box = start_box(run_dir, defender_dir, tenant_agent=tenant.agent,
-                            tenant_id=tenant.tenant_id, write_verdict=write_verdict,
-                            require_sandbox=True, **staged)
-        except box_mod.BoxFault as fault:
-            raise box_mod.BoxStartFault(f"the run's box did not start: {fault}") from fault
+                        tenant_id=tenant.tenant_id, write_verdict=write_verdict,
+                        **({"require_sandbox": True} if job_lane else {}), **staged)
+    except box_mod.BoxFault as fault:
+        raise box_mod.BoxStartFault(f"the run's box did not start: {fault}") from fault
     if job_facts is not None:
         job_facts.box = _BOX_STARTED
     drive = _judged(investigate, systems)
@@ -1332,7 +1298,7 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
     ticket_writer: Any = _default_ticket_writer,
     enqueue: Callable[..., bool] = _run.enqueue_curation,
     enqueue_feedback: Callable[..., bool] = _run.enqueue_feedback_issue,
-    preflight: Callable[..., int] = preflight_run_host,
+    preflight: Callable[..., int] = preflight_role_models,
     materialize: Callable[..., Run] = _materialize_run,
     oracle: Any = None,
     verifier: Any = None,
@@ -1409,7 +1375,8 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
 
                 run_state = RunState(run_dir, run_dir.name)
                 try:
-                    summary = lifecycle(**started.lifecycle_kwargs(ns), **in_container, run_state=run_state)
+                    with _unstarted_box_ends_the_run(operator=request is None):
+                        summary = lifecycle(**started.lifecycle_kwargs(ns), **in_container, run_state=run_state)
                 except (ServingAbort, BaseExceptionGroup) as escaped:
                     return _unservable_exit(escaped, world=world, episode=episode,
                                             lost=started.minting.access_lost())
@@ -1808,6 +1775,20 @@ def _exit_code(summary: dict) -> int:
     if code and truncated_by is not None:
         _logger.error(_EXIT_WORDS.get(truncated_by, f"the run ended {truncated_by}"))
     return code
+
+
+@contextlib.contextmanager
+def _unstarted_box_ends_the_run(*, operator: bool) -> Iterator[None]:
+    """An operator's run whose box did not start (#1484) ends with one error line saying why, the box start's own
+    refusal and remedy (a runtime or an image the host lacks), and exit 1: nothing ran, and a traceback would add
+    nothing. A job's is raised on: its entry records `box: start_failed` from it (#1342 M3)."""
+    try:
+        yield
+    except box_mod.BoxStartFault as unstarted:
+        if not operator:
+            raise
+        _logger.error(str(unstarted))
+        raise SystemExit(1) from None
 
 
 def _serving_abort(exc: BaseException) -> ServingAbort | None:

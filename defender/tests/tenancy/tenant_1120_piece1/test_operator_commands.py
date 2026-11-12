@@ -506,3 +506,34 @@ def test_1186_learning_operator_cli_meets_the_explicit_tenants_busy_lane(
         "the command took the work waiting behind the tenant's busy lane")
     assert {p.name for p in data_root.iterdir() if p.name != H.TID} <= ambient | {".host-locks"}, (
         "retired ambient root received state")
+
+
+def test_1484_an_operator_run_whose_box_start_is_refused_exits_1_in_one_line_and_investigates_nothing(
+        data_root: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """#1484: the real run lifecycle with a box start that refuses (as a host without the box's runtime does): the
+    refusal leaves the lifecycle as `BoxStartFault`, the run exits 1 with the refusal in one ERROR line, no CRITICAL
+    record or traceback, and nothing is investigated."""
+    H.cloned_tenant(tmp_path, data_root)
+    investigated: list[dict] = []
+
+    def start_box(*args: Any, **kwargs: Any) -> Any:
+        raise box_mod.BoxFault("Docker on this host has no runtime 'runsc' registered: install gVisor")
+
+    lifecycle = functools.partial(
+        run_py._run_investigation_lifecycle,
+        investigate=lambda **kw: investigated.append(kw) or {"output": "", "requests": 0, "truncated_by": None},
+        start_box=start_box, stop_box=lambda *a, **k: None, scrub=lambda tree, **kw: None)
+    rec = H.RunRecorder(tmp_path / "run")
+    from defender.tests.support.tenancy._launch_publish_p4 import with_publish
+
+    argv = [str(H.plant_alert(tmp_path / "in")), "--tenant", H.TID, "--no-learn"]
+    capsys.readouterr()
+    with pytest.raises(SystemExit) as e:
+        run_py.main(argv, **with_publish({**rec.seams(), "lifecycle": lifecycle}, argv))
+    assert e.value.code == 1
+    assert not investigated
+    err = capsys.readouterr().err
+    assert " CRITICAL " not in err, err
+    assert "Traceback" not in err, err
+    [line] = [ln for ln in err.splitlines() if "no runtime 'runsc' registered: install gVisor" in ln]
+    assert "the run's box did not start" in line, line
