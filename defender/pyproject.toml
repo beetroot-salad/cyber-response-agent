@@ -89,9 +89,8 @@ box = [
 # own extra because the API is its own program — it never loads the investigation or learning
 # modules, and neither the runtime nor the box image needs a web framework.
 api = [
-    "fastapi>=0.115",
-    # The ASGI server behind `api/serve.py`, the local dev entry point.
-    "uvicorn>=0.30",
+    # fastapi, and uvicorn, the ASGI server behind `api/serve.py` (the local dev entry point).
+    "defender[web]",
     # Verifies the sign-in provider's ID tokens (`identity/keycloak.py`); `[crypto]` brings the RSA
     # support RS256 needs.
     "pyjwt[crypto]",
@@ -101,8 +100,34 @@ api = [
     # The people, memberships and tenants stores (#1306, #1214).
     "defender[database]",
 ]
+# The web framework and server, shared by `api` and `credential-proxy` so their floors cannot drift.
+web = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+]
+# The credential proxy (`defender/credential_proxy/`, #1163), in its own image
+# (`.devcontainer/Dockerfile.credential-proxy`, #1482): everything that image needs so that every
+# module of `defender.credential_proxy` and `defender.tenancy` imports, which CI's `proxy-image`
+# job checks inside it. Its own extra, not `api` plus `runtime`, so the proxy image carries neither
+# the investigation stack nor the API's sign-in libraries, and the worker image no web framework.
+credential-proxy = [
+    "defender[web]",
+    "httpx",
+    # Imported directly by the proxy, though today they arrive only as other packages'
+    # dependencies (the reason core declares typing-extensions): starlette (fastapi's), anyio
+    # (httpx's, starlette's), certifi (httpx's) and h11, the protocol behind uvicorn's
+    # `h11_impl`, which the proxy subclasses (`_connections.py`).
+    "starlette",
+    "anyio",
+    "certifi",
+    "h11",
+    # The proxy server itself reads only the data root's exports, but its package also holds the
+    # launcher (`_launcher.py`, run by the worker and runs) and `defender.tenancy` holds the
+    # tenant-record stores, and both import the database packages.
+    "defender[database]",
+]
 # The database packages (#1339, #1214): what the API and the host processes need to reach
-# PostgreSQL. Included by `api` and `runtime`; never by `box`.
+# PostgreSQL. Included by `api`, `runtime` and `credential-proxy`; never by `box`.
 database = [
     # The Postgres driver; `[binary]` ships libpq.
     "psycopg[binary]>=3.2",
