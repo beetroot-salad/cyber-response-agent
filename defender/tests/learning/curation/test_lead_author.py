@@ -847,7 +847,7 @@ def test_invoke_agent_pending_drafts_reach_engine_user_prompt(run_dir: Path, mon
     pending = [{"draft_path": "agent/skills/elastic/_draft/falco-na.md",
                 "system": "elastic",
                 "skill_path": "agent/skills/elastic/SKILL.md"}]
-    rc = lead_author.invoke_agent(run_dir, handoffs, pending)
+    rc = lead_author.invoke_agent(run_dir, handoffs, pending, systems=("elastic", "wazuh"))  # (#1366 R16) the spawn scope's systems are handed
     assert rc == 0
     prompt = cap["user_prompt"]
     assert re.search(r"<run-[0-9a-f]+-handoffs>", prompt)
