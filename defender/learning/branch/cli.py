@@ -721,9 +721,9 @@ def _handed_records(container: JobContainer) -> Any:
     from defender.tenancy.models import TenantRecords
 
     try:
-        return TenantRecords.from_wire(container.launch.get("records"))
+        return TenantRecords.handed(container.launch)
     except ValueError as bad:
-        raise TenantRefused(f"the job's host helper handed no usable tenant records: {bad}") from bad
+        raise TenantRefused(str(bad)) from bad
 
 
 def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, then the episode, in order

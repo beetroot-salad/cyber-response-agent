@@ -26,7 +26,7 @@ from defender.credential_proxy import PASS_LIFETIME_SEC
 from defender.job_socket import Refused
 
 from ._common import answer_pass, first_pass, grant, mirror_run_page, settle_knowledge, start_run_box
-from ._session import DOCKER_DID_NOT_RUN, KindSpec, Prepared, Registry, Session, SetupRefused
+from ._session import DOCKER_DID_NOT_RUN, KindSpec, Prepared, Registry, Session, SetupRefused, setup_step
 
 _logger = logging.getLogger(__name__)
 
@@ -42,15 +42,6 @@ class _State:
     copy: Any
     tenant: Any
     box_token: str
-
-
-def _shared(step: Any, *args: Any, **kwargs: Any) -> Any:
-    """One step of run setup's shared host half (`run_common`, the operator command's too, A6): its `SystemExit`
-    refusal is this job's `setup: refused`, its message the cause."""
-    try:
-        return step(*args, **kwargs)
-    except SystemExit as refused:
-        raise SetupRefused(str(refused.code)) from None
 
 
 def _materialize(session: Session, accepted: Any, run: Any, launch: Any, mapping: Any, source: Any) -> Any:
@@ -95,8 +86,8 @@ def prepare(session: Session, hold: contextlib.ExitStack) -> Prepared:  # noqa: 
         raise SetupRefused(f"the launch check refused the job: {refused}") from None
     # The tenant's current records, read once here (#1366 O6): a tenant not imported is refused before its alert
     # mapping is read (R8). The container reads no database; it is handed these in the launch facts.
-    current = _shared(run_common.read_records, records, accepted.id)
-    mapping = _shared(run_common.read_alert_mapping, records, accepted.id)
+    current = setup_step(run_common.read_records, records, accepted.id)
+    mapping = setup_step(run_common.read_alert_mapping, records, accepted.id)
     source = settle_knowledge(session, accepted, records)
     try:
         run = accepted.runs_repository().launched(launch)
@@ -104,21 +95,21 @@ def prepare(session: Session, hold: contextlib.ExitStack) -> Prepared:  # noqa: 
         raise SetupRefused(str(refused)) from None
     cleanup = contextlib.ExitStack()
     try:
-        copy = _shared(run_common.copy_knowledge, accepted, source, inv)
+        copy = setup_step(run_common.copy_knowledge, accepted, source, inv)
         cleanup.callback(copy.remove)
         try:
-            run_tenant = _shared(run_common.run_tenant_or_exit, accepted, dispatches_lead_zero=True,
+            run_tenant = setup_step(run_common.run_tenant_or_exit, accepted, dispatches_lead_zero=True,
                                  records=current, copy=copy)
         except TenantRefused as refused:
             raise SetupRefused(f"this job's tenant cannot be used: {refused}") from None
         # The tenant's systems over the catalog (read cold: no adapter code runs here, N7), its grants narrowed to the
         # systems it has enabled records of (#1366 R12), so the pass names none it has not; the container warns.
-        roster = _shared(run_common.run_roster, session.defender_dir)
-        verdict = _shared(run_common.tenant_verdict, run_tenant, roster, warn=False)
+        roster = setup_step(run_common.run_roster, session.defender_dir)
+        verdict = setup_step(run_common.tenant_verdict, run_tenant, roster, warn=False)
         reads = grant(verdict.tenant)
         passes = first_pass(session, accepted, records, reads)
         made = _materialize(session, accepted, run, launch, mapping, source)
-        _shared(run_common.write_versions_record, Path(made.run_dir), current)
+        setup_step(run_common.write_versions_record, Path(made.run_dir), current)
     except BaseException:
         cleanup.close()
         raise

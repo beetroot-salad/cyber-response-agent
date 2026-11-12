@@ -52,7 +52,7 @@ from defender import job_socket
 from defender.job_socket import Refused
 
 from ._common import answer_pass, first_pass, grant, mirror_run_page, settle_knowledge, start_run_box
-from ._session import DOCKER_DID_NOT_RUN, HandBack, KindSpec, Prepared, Registry, Session, SetupRefused
+from ._session import DOCKER_DID_NOT_RUN, HandBack, KindSpec, Prepared, Registry, Session, SetupRefused, setup_step
 
 if TYPE_CHECKING:
     from defender.records.formats import Episode
@@ -113,14 +113,6 @@ def _state(session: Session, kind: type) -> Any:
 
 # --- the host halves ----------------------------------------------------------------------------------------------------
 
-def _setup_step(step: Any, *args: Any, **kwargs: Any) -> Any:
-    """One step of run setup's shared host half (`run_common`): its `SystemExit` refusal is this job's setup refusal."""
-    try:
-        return step(*args, **kwargs)
-    except SystemExit as refused:
-        raise SetupRefused(str(refused.code)) from None
-
-
 def _hold_within_wait(session: Session, hold: contextlib.ExitStack) -> None:
     """The tenant's lock taken shared within `LOCK_WAIT_SECONDS` (held on `hold`), or `HandBack`. The admission after
     it then records this helper and holds the lock shared itself."""
@@ -171,7 +163,7 @@ def _prepare_learning(session: Session, hold: contextlib.ExitStack) -> Prepared:
     accepted, records = admitted.tenant, admitted.directory
     # The tenant's current records, read once for the whole job (#1366 O6; a tenant not imported refused, R8): the
     # container, which reads no database, is handed them in the launch facts, and so is each sibling's run.
-    current = _setup_step(run_common.read_records, records, accepted.id)
+    current = setup_step(run_common.read_records, records, accepted.id)
     source = settle_knowledge(session, accepted, records)
     try:
         export = session.inside_tenant(accepted.export_folder(source.commit))
@@ -181,8 +173,8 @@ def _prepare_learning(session: Session, hold: contextlib.ExitStack) -> Prepared:
     except (TenantRefused, Refused) as refused:
         raise SetupRefused(f"this job's tenant cannot be used: {refused}") from None
     # Narrowed to the systems the tenant has enabled records of (#1366 R12), read cold (no adapter code, N7).
-    roster = _setup_step(run_common.run_roster, session.defender_dir)
-    ready = _setup_step(run_common.tenant_verdict, ready, roster, warn=False).tenant
+    roster = setup_step(run_common.run_roster, session.defender_dir)
+    ready = setup_step(run_common.tenant_verdict, ready, roster, warn=False).tenant
     # The grant is the launch export's, not the family's pinned commit (which the container settles later): the proxy
     # serves a system only by its declaration in the tenant's `current` export, and this helper holds the tenant's
     # lock for the whole job, so no publish moves `current` under it. A grant from an older pin could only add systems

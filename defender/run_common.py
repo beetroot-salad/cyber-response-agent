@@ -706,6 +706,6 @@ def handed_records(launch: Any, *, label: str) -> TenantRecords:
     from defender.tenancy.record_values import TenantRecords
 
     try:
-        return TenantRecords.from_wire(launch.get("records"))
+        return TenantRecords.handed(launch)
     except ValueError as bad:
-        sys.exit(f"[run.py] {label}: the job's host helper handed no usable tenant records: {bad}")
+        sys.exit(f"[run.py] {label}: {bad}")

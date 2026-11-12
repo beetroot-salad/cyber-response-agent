@@ -57,6 +57,16 @@ class TenantRecords:
         }
 
     @classmethod
+    def handed(cls, launch: Mapping[str, Any]) -> TenantRecords:
+        """Inside a job container (#1170 A6, #1366 O6): the records the job's host helper read at setup and handed over
+        in the launch facts (`records`), or `ValueError` saying why they are not usable. The container reads no
+        database."""
+        try:
+            return cls.from_wire(launch.get("records"))
+        except ValueError as bad:
+            raise ValueError(f"the job's host helper handed no usable tenant records: {bad}") from None
+
+    @classmethod
     def from_wire(cls, wire: object) -> TenantRecords:
         """The records `as_wire` wrote, or `ValueError` naming the first field that is not as it wrote it."""
         def field(obj: object, key: str, kind: type | tuple[type, ...], where: str) -> Any:
