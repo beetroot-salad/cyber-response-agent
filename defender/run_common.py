@@ -160,6 +160,10 @@ def _admit_input(alert: Path, *, mapping: AlertMapping | None, world: ResumeWorl
         return _FrontDoor(raw=raw, record=text)
     assert mapping is not None  # materialize_run: a fresh run is handed it
     facts = formats.derive_facts(admitted.document, mapping)
+    if unresolved := formats.unresolved_entries(admitted.document, mapping):
+        _logger.warning(
+            "the tenant's alert mapping finds nothing in this alert for: %s — the run reads each as absent "
+            "(check the mapped paths against the alert's keys)", ", ".join(unresolved))
     return _FrontDoor(raw=raw, record=formats.record_text(admitted.digest, facts))
 
 

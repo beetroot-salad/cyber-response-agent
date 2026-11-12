@@ -220,14 +220,39 @@ class AlertFacts:
         return {k: v for k, v in dataclasses.asdict(self).items() if v is not None}
 
 
+_MISSING: Any = object()
+
+
+def _find(current: Any, segments: list[str], start: int) -> Any:
+    """The value `segments[start:]` spell under `current`, or `_MISSING` (#1481). A key may hold one segment (a nested
+    alert) or several joined by dots (an alert stored with flat dotted keys), and any mix. Each step tries the shortest
+    run of segments first, so an alert that has both shapes reads the nested value as before, and moves to a longer run
+    when the shorter one leads nowhere. Every node is reached by one key, so the search visits each node at most once."""
+    if start == len(segments):
+        return current
+    if not isinstance(current, dict):
+        return _MISSING
+    for end in range(start + 1, len(segments) + 1):
+        key = ".".join(segments[start:end])
+        if key in current:
+            found = _find(current[key], segments, end)
+            if found is not _MISSING:
+                return found
+    return _MISSING
+
+
 def _walk(document: Mapping[str, Any], dotted: str) -> Any:
-    """The value at `dotted` (a walk over JSON objects only), or `None`."""
-    current: Any = document
-    for key in dotted.split("."):
-        if not isinstance(current, dict) or key not in current:
-            return None
-        current = current[key]
-    return current
+    """The value at `dotted` (a walk over JSON objects only, nested or flat-dotted keys), or `None`."""
+    found = _find(document, dotted.split("."), 0)
+    return None if found is _MISSING else found
+
+
+def unresolved_entries(document: Mapping[str, Any], mapping: AlertMapping) -> list[str]:
+    """The mapped entries (#1481) whose path finds no key in `document`, in `MAPPING_KEYS` order: a mapping that
+    reads nothing off an alert is worth saying so. An unmapped entry is not named, nor one whose path finds a value
+    that is then no fact (null, blank, a list)."""
+    return [entry for entry in MAPPING_KEYS
+            if (path := mapping.path_of(entry)) is not None and _find(document, path.split("."), 0) is _MISSING]
 
 
 def _scalar_text(value: Any) -> str | None:
