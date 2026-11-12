@@ -238,7 +238,7 @@ def mistake_key_of(row: Mapping[str, Any], item_key: str) -> str:
     return _digest(list(pitfall_key({**row, "pitfall_id": item_key})))
 
 
-def _refuse_unstorable(value: Any) -> None:
+def _refuse_unholdable(value: Any) -> None:
     """Refuse, before anything is written, a value PostgreSQL could never hold (`postgres_cannot_hold`): every store
     verb screens all the text it was given."""
     why = postgres_cannot_hold(value)
@@ -340,7 +340,7 @@ class LearningStore(FeedbackVerbs):
         """Queue `rows` as `kind`: `(added, duplicates)`. A finding id is unique for good (O14)."""
         if LANE_OF.get(kind) != AUTHOR_LANE:
             raise ValueError(f"not a findings kind: {kind}")
-        _refuse_unstorable([run_id, *rows])
+        _refuse_unholdable([run_id, *rows])
         for row in rows:
             _refuse_unkeyed(row)
         added = 0
@@ -352,7 +352,7 @@ class LearningStore(FeedbackVerbs):
 
     async def add_pitfall(self, tenant: str, row: Mapping[str, Any]) -> bool:
         """Queue one pitfall occurrence; a repeated pitfall id is ignored, a keyless row is keyed by its digest."""
-        _refuse_unstorable(row)
+        _refuse_unholdable(row)
         key = str(row["pitfall_id"]) if row.get("pitfall_id") else _digest(dict(row))
         mistake = mistake_key_of(row, key)
         async with self._sessions.begin() as s:
@@ -362,7 +362,7 @@ class LearningStore(FeedbackVerbs):
 
     async def enqueue_request(self, tenant: str, run_id: str, case_id: str, spec: Mapping[str, Any]) -> bool:
         """File a curation request for `case_id`; the later run wins: an older waiting request is skipped, superseded."""
-        _refuse_unstorable([run_id, case_id, spec])
+        _refuse_unholdable([run_id, case_id, spec])
         async with self._sessions.begin() as s:
             await self._require_active(s, tenant)
             await _settle_requests(s, tenant)
@@ -395,13 +395,20 @@ class LearningStore(FeedbackVerbs):
 
     # -- views -------------------------------------------------------------------------------------------------
 
-    async def work(self, tenant: str) -> list[WorkItem]:
-        """The tenant's items. A waiting item is in no batch: the batch it last left (kept on its row) and that batch's
-        PR are not reported as its own."""
+    async def work(self, tenant: str, *, statuses: Sequence[str] | None = None,
+                   kind: str | None = None) -> list[WorkItem]:
+        """The tenant's items, only those in `statuses` and of `kind` when given: published and skipped items are
+        history that is never purged, so a reader that needs only open work asks for it. A waiting item is in no
+        batch: the batch it last left (kept on its row) and that batch's PR are not reported as its own."""
+        where = [_I.c.tenant_id == TenantId(tenant)]
+        if statuses is not None:
+            where.append(_I.c.status.in_(list(statuses)))
+        if kind is not None:
+            where.append(_I.c.kind == kind)
         async with self._sessions() as s:
             rows = (await s.execute(
                 select(_I, _B.c.pr_number).select_from(_I.outerjoin(_B, _I.c.batch_id == _B.c.id))
-                .where(_I.c.tenant_id == TenantId(tenant)).order_by(_I.c.kind, _I.c.item_key))).all()
+                .where(*where).order_by(_I.c.kind, _I.c.item_key))).all()
         return [WorkItem(kind=r.kind, key=r.item_key, status=r.status, reason=r.reason, fault=r.fault,
                          batch_id=None if r.status == "waiting" else r.batch_id,
                          pr_number=None if r.status == "waiting" else r.pr_number, attempts=r.attempts, deferrals=r.deferrals,

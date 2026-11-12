@@ -109,10 +109,10 @@ class FeedbackVerbs:
                                      lookups: Sequence[Mapping[str, Any]]) -> bool:
         """File a run's open-issue request: a row with no issue number. False when the run is already filed (nothing
         changes); `TenantInactive` off active; `ItemRefused` for text the store cannot hold."""
-        from ._store import _refuse_unstorable
+        from ._store import _refuse_unholdable
 
         rows = [dict(lk) for lk in lookups]
-        _refuse_unstorable([run_id, case_id, outcome, rows])
+        _refuse_unholdable([run_id, case_id, outcome, rows])
         async with self._sessions.begin() as s:
             await self._require_active(s, tenant)
             done = (await s.execute(pg_insert(_FI).values(
@@ -218,10 +218,10 @@ class FeedbackVerbs:
         """One issue's read, in one transaction: the comments taken in are stored (one already there is kept as it
         was), every judged id (taken or passed over) is added to the run's judged ids, and `listed` is set when the
         read was the issue's whole listing. `TenantInactive` off active: nothing is stored."""
-        from ._store import _refuse_unstorable
+        from ._store import _refuse_unholdable
 
         rows = [dict(c) for c in taken]
-        _refuse_unstorable(rows)
+        _refuse_unholdable(rows)
         ids = {int(i) for i in judged} | {int(c["comment_id"]) for c in rows}
         async with self._sessions.begin() as s:
             await self._tick_guard(s, held)
@@ -265,10 +265,10 @@ class FeedbackVerbs:
         """Record the comment's decision where it has none, and, in the same transaction, its instruction as a waiting
         `feedback_instruction` item keyed by the comment id (one per comment, for good). False: the comment was
         already decided, and nothing changes. `TenantInactive` off active: nothing is recorded."""
-        from ._store import _refuse_unstorable
+        from ._store import _refuse_unholdable
 
         made, row = dict(decision), dict(instruction) if instruction is not None else None
-        _refuse_unstorable([made, row])
+        _refuse_unholdable([made, row])
         async with self._sessions.begin() as s:
             await self._tick_guard(s, held)
             await self._require_active(s, str(held.tenant_id))
@@ -288,10 +288,10 @@ class FeedbackVerbs:
     async def settle_entry(self, held: FeedbackHeld, comment_id: int, entry_id: str, how: Mapping[str, Any]) -> bool:
         """Settle one approved entry of the comment's decision where it is unsettled. False: it was settled already
         (the first settlement stays), or the decision names no such entry."""
-        from ._store import _refuse_unstorable
+        from ._store import _refuse_unholdable
 
         settled = dict(how)
-        _refuse_unstorable(settled)
+        _refuse_unholdable(settled)
         async with self._sessions.begin() as s:
             await self._tick_guard(s, held)
             current = (await s.execute(select(_FC.c.decision).where(
