@@ -83,6 +83,39 @@ are fixed when a container is created, and the running one has neither. And set
 `POSTGRES_USER`/`POSTGRES_PASSWORD` in `docker-compose.yml`); apply the schema once with
 `python -m defender.migrations upgrade`. A database made elsewhere (CI, a hosted unit) has its own DSN.
 
+## Running jobs live from the dev container (#1170, #1475)
+
+A job's helper must share the docker daemon's mount paths and pid namespace
+(`decisions/vps-compose-deployment.md`, brain confinement). The host daemon behind
+`/var/run/docker.sock` shares neither with the dev container, so a job started through it
+fails. The dev container therefore carries a second daemon of its own, with gVisor registered
+for the boxes; it runs inside the container and shares both. Nothing is installed on the host.
+
+It needs the dev container rebuilt once (the editor's rebuild-container command): the image
+gains the daemon and gVisor, and the container becomes privileged with a `jobs-docker-data`
+volume for the daemon's images. Then, in the dev container, start the daemon (it is not
+started with the container; the command is idempotent) and build its images, from the
+repository root:
+
+```bash
+start-jobs-docker
+export DOCKER_HOST=unix:///var/run/docker-jobs.sock
+docker build -f .devcontainer/Dockerfile.job -t defender-job:latest .
+python3 defender/box/image_cli.py build
+```
+
+Then run the live job tests through it (from `defender/`):
+
+```bash
+DOCKER_HOST=unix:///var/run/docker-jobs.sock \
+DEFENDER_TEST_POSTGRES_DSN=postgresql://defender:dev-only-change-me@postgres:5432/postgres \
+  defender-pytest .venv/bin/python -m pytest tests/e2e/test_job_box_boundary_e2e.py -n 0
+```
+
+Set `DOCKER_HOST` only for these commands. Everything else (the playground, the runtime
+image, the other compose services) uses the host daemon. The daemon's log is
+`/var/log/docker-jobs.log`; it stops with the container, and `start-jobs-docker` starts it again.
+
 ## Tenant version control credentials (PR #1253)
 
 Since #1108 P4 every corpus write goes through `defender.learning.author.version_control.TenantDelivery`:
