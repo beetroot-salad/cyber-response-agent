@@ -229,7 +229,8 @@ class SystemPut(_Request):
 
 class AlertMapping(_Request):
     """The tenant's alert mapping, as a PUT names it and a GET answers it (#1345): the dotted path in the raw alert
-    where each fact lives, or null for an entry the tenant leaves unmapped. A PUT replaces the whole mapping, so NO
+    where each fact lives, or null for an entry the tenant leaves unmapped. A path reads nested keys, keys holding dots
+    (`alert.rule.id` as one key), or a mix; where both hold a value, the nested key wins (#1481). A PUT replaces the whole mapping, so NO
     entry has a default (D4): it names all six. The entries and the path rule are `records`' (`check_mapping`)."""
 
     signature: str | None
