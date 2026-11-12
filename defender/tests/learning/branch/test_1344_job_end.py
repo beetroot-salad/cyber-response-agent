@@ -446,6 +446,115 @@ def test_a_failed_control_ends_failed_control_failed_and_no_other_sibling_starts
     assert ran.judge.calls == 0
 
 
+class BreaksSigningAfter(J.FakeSibling):
+    """A sibling double that, once world `after` has run, makes the tenant's token unsignable (`breaks()`), as a
+    rotation or an offboarding during a long job would."""
+
+    def __init__(self, *, after: str, breaks, **kw) -> None:
+        super().__init__(**kw)
+        self.after, self.breaks = after, breaks
+
+    def __call__(self, argv, **kw):
+        code = super().__call__(argv, **kw)
+        if _world(argv) == self.after:
+            self.breaks()
+        return code
+
+
+class BreaksSigningWhenAsked(S.ScriptedModel):
+    """The oracle double that, on its first turn (pre-flight's calibration, after pre-flight signed), makes the
+    tenant's token unsignable (`breaks()`)."""
+
+    def __init__(self, *moves, breaks, **kw) -> None:
+        super().__init__(*moves, name="oracle", **kw)
+        self.breaks = breaks
+
+    def __call__(self, messages, info):
+        self.breaks()
+        return super().__call__(messages, info)
+
+
+@pytest.mark.parametrize("cause", ["offboarded", "unreadable for one check", "offboarded during pre-flight",
+                                   "records intact"])
+def test_1449_a_token_that_can_no_longer_be_signed_stops_the_family_before_the_next_sibling(
+        tmp_path, monkeypatch, data_root, cause):
+    """The operator's job lane (`--job-id`, on the host, holding the tenant's records). Pre-flight proved the read
+    token can be signed; the tenant is then offboarded while the control runs. The job checks again before each
+    later sibling (#1449): no later world starts, the control that finished is still verified (archived, or a record
+    of its own), and the job is refused `launch_refused` with pre-flight's sign cause, never `control_failed`,
+    `family_unusable` or completed. Control: with the records intact every world starts and the job completes.
+    Records unreadable for one check only still stop the family: no world after the refused one starts, though its
+    own check would pass. Offboarded during pre-flight's calibration, after it signed: the control itself is kept
+    from starting, and the job is still `launch_refused`, not `control_failed`."""
+    from defender.tenancy import TenantDirectory
+    from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
+    from defender.tests.learning.oracle.live_contracts import test_preflight_proxy as P
+
+    with P.rig(tmp_path, monkeypatch, data_root) as r, A.proxy_for(r.t, r.store) as (url, _tap):
+        live, gone = r.records._open, r.t.repository_with(generations=[])  # noqa: SLF001 — the rig's own twin
+        broken: list[bool] = []
+        once = cause == "unreadable for one check"
+
+        def repository():
+            if not broken:
+                return live()
+            if once:
+                broken.clear()
+            return gone
+
+        directory = TenantDirectory(repository)
+        def breaks() -> None:
+            if not broken:
+                broken.append(True)
+
+        early = cause == "offboarded during pre-flight"
+        spawn = BreaksSigningAfter(after="a", breaks=(lambda: None) if cause == "records intact" or early
+                                   else breaks)
+        oracle = BreaksSigningWhenAsked(then=S.submit(r.idp.payload, S.EMPTY_CLAIM),
+                                        breaks=breaks if early else (lambda: None))
+        run = S.launch(tmp_path, r.est, calls=r.calls, after_source=r.after_source, oracle=oracle,
+                       verifier=S.passing_verifier(), spawn=spawn, argv_extra=("--job-id", JOB),
+                       issuer_transport=r.bao, directory=directory, proxy_url=url)
+    if cause == "records intact":
+        assert spawn.worlds == ["a", "b", "c"], spawn.worlds
+        assert run.rc == 0, run.message
+        return
+    assert run.rc == 2, (run.rc, run.message)
+    assert "a sibling was not started" in run.message, run.message
+    assert "cannot be signed" in run.message, run.message
+    if early:
+        # Refused on the control's own turn: nothing ran, and the control is not called failed.
+        assert spawn.worlds == [], spawn.worlds
+        control = S.read_world_record(run.ep, "a")
+        assert control is not None, "the control the stop kept from starting has no record"
+        assert "cannot be signed" in control["detail"], control
+        return
+    assert spawn.worlds == ["a"], spawn.worlds
+    archived = (run.ep / "worlds" / T.world_id(run.ep, "a")).is_dir()
+    assert archived or S.read_world_record(run.ep, "a") is not None, (
+        "the control finished, but the stop skipped its verification")
+    never = S.read_world_record(run.ep, "b")
+    assert never is not None, "the world the stop kept from starting has no record"
+    assert "cannot be signed" in never["detail"], never
+
+
+def test_1449_in_a_job_container_the_launcher_makes_no_records_check_of_its_own(tmp_path, monkeypatch, data_root):
+    """In its job container the launcher holds no tenant records: the host helper signs each pass (#1170 O5). With a
+    grant that reaches the proxy, every sibling starts and the job completes; the records-only check before each
+    sibling (#1449) is the host lane's, and here would refuse the control of every job that reads through the
+    proxy."""
+    from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
+    from defender.tests.learning.oracle.live_contracts import test_preflight_proxy as P
+
+    with P.rig(tmp_path, monkeypatch, data_root) as r, A.proxy_for(r.t, r.store) as (url, _tap):
+        spawn = J.FakeSibling()
+        ran = run_entry(tmp_path, estate=lambda _root: r.est, calls=r.calls, after_source=r.after_source,
+                        oracle=S.oracle(then=S.submit(r.idp.payload, S.EMPTY_CLAIM)), issuer_transport=r.bao,
+                        directory=r.records, proxy_url=url, helper_grant=("crm", "idp"), spawn=spawn)
+    assert spawn.worlds == ["a", "b", "c"], spawn.worlds
+    _ended(ran, "completed", None)
+
+
 def test_knowledge_the_tenant_cannot_pin_ends_failed_launch_refused(tmp_path):
     """A source that ran at a knowledge commit the tenant's clone does not hold: refused before any spend. (r5 table)"""
     def unpinnable(src: Path) -> None:

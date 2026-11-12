@@ -72,11 +72,15 @@
 # worker is included (Orborus bind-mounts the socket into it); the
 # Shuffle app containers the worker then spawns are not, so an app
 # container that acquires a sensitive mount still alerts.
+#
+# The lab's endpoint-query service (#1391) holds the socket too: it is host-state's query API,
+# and its start would otherwise land a container-escape-shaped alert in the defender's evidence.
 - list: soar_socket_mount_images
   items:
     - ghcr.io/shuffle/shuffle-backend
     - ghcr.io/shuffle/shuffle-orborus
     - ghcr.io/shuffle/shuffle-worker
+    - soc-playground/endpoint-query
 
 - macro: user_sensitive_mount_containers
   override:

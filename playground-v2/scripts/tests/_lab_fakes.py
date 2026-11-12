@@ -1450,7 +1450,15 @@ def rules_tar(rules: dict) -> bytes:
     return tar_bytes({name: json.dumps(rule).encode() for name, rule in rules.items()})
 
 
-PARTS = {"stubs.tar": stub_dump(), "proc-tree.txt": b"PID PPID\n1 0 init\n", RULES_PART: rules_tar(RULES)}
+#: The role host every rig freeze committed (#1391 r6 O9: a launch serves host-state from the
+#: freeze's hosts, and refuses a freeze with none).
+FROZEN_HOST = "web-1"
+HOST_PARTS = {f"image-{FROZEN_HOST}.tar": b"saved image of web-1",
+              f"proc-tree-{FROZEN_HOST}.txt": b"PID PPID\n1 0 init\n",
+              f"volume-{FROZEN_HOST}-var-log.tar": tar_bytes({"auth.log": b"sshd: accepted\n"}),
+              f"volume-{FROZEN_HOST}-var-lib-elastic-agent.tar": tar_bytes({"state.enc": b"x"})}
+PARTS = {"stubs.tar": stub_dump(), "proc-tree.txt": b"PID PPID\n1 0 init\n", RULES_PART: rules_tar(RULES),
+         **HOST_PARTS}
 ROW_KEYS = {"slug", "run_id", "binding", "verdict", "reason", "verified_at", "knowledge"}
 RUN_ID = "5b0d1f2e-3c4d-4e5f-8a6b-7c8d9e0f1a2b"
 
@@ -1484,7 +1492,7 @@ class LabRig:
     * the frozen cluster (`rig.cluster`, a `FakeCluster`), reached only through the real curl path
       (`ops.frozen_es()`, curl run inside the frozen node's container), never through `es=`;
     * the environment the lab layer reads (`V2_RUNS_DIR` holding `rig.live_runs`, `V2_FROZEN_PARTS_DIR` holding
-      the freeze's parts and a second freeze's stub dump carrying `rig.tickets`, `V2_FROZEN_READONLY_PASSWORD` =
+      the freeze's parts and a second freeze's stub dump carrying `rig.tickets`, the lab .env (`V2_LAB_ENV_FILE`) holding `V2_DEFENDER_READONLY_PASSWORD` =
       `rig.password`); a source set to None is unset;
     * the lock store, the clock and the journal, as before.
 
@@ -1550,6 +1558,7 @@ class LabRig:
         self.index = tmp_path / "ops" / "held-out-index.jsonl"
         self.index.parent.mkdir()
         self.runs = tmp_path / "runs"
+        self.lab_env = tmp_path / "lab.env"     # the lab .env the launcher reads the password from
         self.run_rc = run_rc
         self.run_out = f"run_id={RUN_ID}\n" if run_out is None else run_out
         self.argv = self.env = None
@@ -1566,7 +1575,7 @@ class LabRig:
 
     def _ops_kw(self) -> dict:
         return {"tenant_dir": self.tenant_dir, "tenant_hosts": TENANT_HOSTS, "frozen_endpoint": FROZEN_ENDPOINT,
-                "audit_path": FROZEN_AUDIT, "live_audit_path": LIVE_AUDIT}
+                "audit_path": FROZEN_AUDIT, "live_audit_path": LIVE_AUDIT, "lab_env_file": self.lab_env}
 
     @staticmethod
     def _deployed(docker) -> None:
@@ -1624,9 +1633,13 @@ class LabRig:
         side = self.parts / "f-tickets"
         side.mkdir(exist_ok=True)
         (side / "stubs.tar").write_bytes(stub_dump(sorted(self._tickets or ())))
+        lab_env = self.lab_env
+        lab_env.write_text(f"V2_OTHER=x\nV2_DEFENDER_READONLY_PASSWORD={self._password}\n")
         for var, value in (("V2_RUNS_DIR", None if self._live_runs is None and not self.nested_live_runs else self.runs),
                            ("V2_FROZEN_PARTS_DIR", None if self._tickets is None else self.parts),
-                           ("V2_FROZEN_READONLY_PASSWORD", self._password)):
+                           ("V2_LAB_ENV_FILE", lab_env),
+                           # an operator's stale export: the launcher must not read it
+                           ("V2_DEFENDER_READONLY_PASSWORD", "stale-exported-password")):
             if value is None:
                 os.environ.pop(var, None)
             else:

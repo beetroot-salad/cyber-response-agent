@@ -59,7 +59,8 @@ class Recorder:
 
     def __call__(self, argv, **kw):
         self.calls.append((list(argv), kw))
-        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+        out = "sha256:" + "ab" * 32 if "{{.Id}}" in argv else ""   # an image's id on the lab server
+        return subprocess.CompletedProcess(argv, 0, stdout=out, stderr="")
 
     def blob(self):
         parts = []

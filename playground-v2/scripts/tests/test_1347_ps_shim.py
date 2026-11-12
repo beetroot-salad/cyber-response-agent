@@ -52,3 +52,21 @@ def test_the_unprefixed_PS_SHIM_TREE_alone_has_no_effect(tmp_path):
     tree.write_bytes(TREE)
     proc = _run({"PS_SHIM_TREE": str(tree)})
     assert proc.returncode != 0 and proc.stdout == b"", proc
+
+
+def test_a_replica_refuses_every_other_argv_rather_than_answer_with_its_live_processes(tmp_path):
+    """#1391: with a captured tree set (a replica), another argv is a non-zero exit with nothing on
+    stdout, never the replica's own live process list."""
+    tree = tmp_path / "tree.txt"
+    tree.write_bytes(TREE)
+    for argv in (["-ef"], ["aux"], ["-eo", "pid,cmd", "--forest"], []):
+        proc = subprocess.run([str(SHIM), *argv], capture_output=True,
+                              env={"PATH": "/usr/bin:/bin", "V2_PS_SHIM_TREE": str(tree)})
+        assert proc.returncode != 0 and proc.stdout == b"" and b"answers only" in proc.stderr, argv
+
+
+def test_a_live_host_with_no_tree_runs_the_real_ps_for_any_other_argv():
+    """The shim is dormant on live hosts: no tree set, another argv is the real ps."""
+    proc = subprocess.run([str(SHIM), "-p", "1", "-o", "pid="], capture_output=True, env={"PATH": "/usr/bin:/bin"})
+    real = subprocess.run(["/bin/ps", "-p", "1", "-o", "pid="], capture_output=True)
+    assert (proc.returncode, proc.stdout) == (real.returncode, real.stdout)
