@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 import unicodedata
+from collections.abc import Mapping
 from typing import Any
 
 from defender._tsv import flatten_cell
@@ -53,7 +54,7 @@ def postgres_cannot_hold(value: Any) -> str | None:
             return None
         return ("a NUL character cannot be stored" if "\x00" in value
                 else "text that is not valid UTF-8 (a lone surrogate) cannot be stored")
-    if isinstance(value, dict):
+    if isinstance(value, Mapping):
         children: Any = [*value.keys(), *value.values()]
     elif isinstance(value, (list, tuple)):
         children = value
