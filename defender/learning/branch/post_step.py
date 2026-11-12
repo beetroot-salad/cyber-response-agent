@@ -95,10 +95,15 @@ def _store_dsn() -> str:
     return dsn
 
 
-def _default_waiting(paths: Any, *, tenant_id: str) -> bool:  # noqa: ARG001 — the seam's shape
-    """Whether the store holds work this post-step could act on (Wake): the author drain's own wake test."""
+def _default_waiting(paths: Any, *, tenant_id: str) -> bool:
+    """Whether the store holds work this post-step could act on (Wake): a batch of any lane not yet
+    ended, or what opens the author drain's gate."""
     from defender.learning.core.drains import author_work_waiting
+    from defender.learning.store import blocking
 
+    with blocking(_store_dsn()) as store:
+        if any(batch.phase != "ended" for batch in store.batches(tenant_id)):
+            return True
     return author_work_waiting(paths)
 
 
