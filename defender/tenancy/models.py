@@ -122,6 +122,16 @@ async def offboard(executor: AsyncConnection | AsyncSession, tenant_id: TenantId
     raise Conflict("only a creating or active tenant can be offboarded")
 
 
+async def share_tenant(executor: AsyncConnection | AsyncSession, tenant_id: TenantId) -> str | None:
+    """The tenant's state, read with a share lock on its row, held until the caller's transaction ends (#1454 P-L,
+    #1360 Flow 2). Take it before any other lock: a write that shares first makes `offboard` wait and then end the row
+    it made; an offboard that wrote first makes the share wait and read the new state. `None` for an absent tenant.
+    The one owner of this lock: the job store and the identity repositories both call it."""
+    table: Table = TenantRecord.__table__  # type: ignore[assignment]
+    return (await executor.execute(
+        select(table.c.state).where(table.c.id == tenant_id).with_for_update(read=True))).scalar()
+
+
 class ForgeWiring(Base, kw_only=True):
     """The tenant's repository on the forge: recorded, never derived (the lab keeps `tenants/playground`)."""  # lint-shippable: ok — names the lab tenant that adoption keeps
 

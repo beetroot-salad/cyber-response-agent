@@ -26,16 +26,19 @@ def test_a_tenant_id_off_the_grammar_is_422_on_every_tenant_route(tenant: str) -
         _problem(ops.request(method, f"/admin/tenants/{tenant}{path}"), 422)
 
 
-STATES = ["creating", "offboarding", "offboarded"]
+#: Invitations are written while a tenant is `active` (P-L), so the tenant then moves: a `creating` one never holds any.
+STATES = ["offboarding", "offboarded"]
 
 
 @pytest.mark.parametrize("state", STATES)
 def test_me_omits_an_open_invitation_to_a_tenant_that_is_not_active(state: str) -> None:
-    """An invitation to a creating, offboarding or offboarded tenant is not shown; the active tenant's is (r9 Identity seam)."""
+    """An invitation made while the tenant was active is not shown once it is offboarding or offboarded; the active tenant's is (r9 Identity seam, P-L)."""
     world = World(administrators=[OPS], tenants={LAB: [ME]})
     member = world.sign_in(ME)
-    world.register(T1, state=state)
+    world.register(T1)
     world.register(T2)
     world.seed_first_members(T1, [ME])
     world.seed_first_members(T2, [ME])
+    assert {row["tenant_id"] for row in me(member)["invitations"]} == {T1, T2}  # control: both offered while active
+    world.move_tenant(T1, state)
     assert [row["tenant_id"] for row in me(member)["invitations"]] == [T2]

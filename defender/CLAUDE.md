@@ -42,7 +42,7 @@ A tenant's systems and its case record are versioned records in the database, wr
 its records name (`tenant.py catalog` lists the adapters a record may name). Credentials live at a
 per-generation path `<tenant>/<system>/g<N>`. Once:
 
-1. Run migrations (revision `0012_system_records`). It also creates the NOLOGIN role
+1. Run migrations (revision `0013_system_records`). It also creates the NOLOGIN role
    `defender_proxy_reader` (SELECT on `tenancy.system_versions` and `tenancy.records_mark` only):
    create a login that is a member of it and set the proxy config's `records_dsn` to that login's
    DSN in place of `data_root` (an old config refuses to start).
@@ -66,6 +66,14 @@ keeps the system enabled or disabled as it is; `--disabled` or `--enabled` chang
 change of its base, CA or auth block raises its credential generation, and its credentials are
 set again. Connect hands its result to the operator as such a folder: its validator takes
 `--handoff <folder>` and no longer `--tenant`.
+
+## Upgrade from before #1454
+
+Programs (#1307) now have their own table, `identity.programs`; users and memberships are people only. Run migrations
+(revision `0012_programs_table`). It stops, changing nothing, while any program row exists (a `users` row of kind
+`program`) or any membership's role is not `admin`: no deployment created a program through the #1307 API, so
+remove any left in a development database first. Stop the API and the
+lifecycle service before migrating; an older process fails on every program read once the columns are gone.
 
 ## Upgrade from before #1170
 

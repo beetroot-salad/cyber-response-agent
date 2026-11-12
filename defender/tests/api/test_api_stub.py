@@ -251,7 +251,7 @@ class Scripted:
 
     def transaction(self, tenant_id: str, principal: Any) -> _ScriptedTransaction:
         # Conflict updated (#1307 D6): the transaction takes the principal in place of the bare actor id.
-        return _ScriptedTransaction(self, tenant_id, principal.user_id)
+        return _ScriptedTransaction(self, tenant_id, principal.actor_id)
 
     def __getattr__(self, name: str) -> Callable[..., Any]:
         if name.startswith("_"):
@@ -1245,7 +1245,7 @@ def test_an_id_outside_the_grammar_cannot_be_served(bad: str) -> None:
 def test_a_principal_carries_a_checked_tenant(legacy) -> None:
     """`Principal`'s tenant is grammar-checked (#1382: as pydantic's own pattern error)."""
     with pytest.raises(ValidationError):
-        Principal(tenant_id=legacy, user_id=USER)
+        Principal(tenant_id=legacy, actor_id=USER)
 
 
 def test_a_naive_time_cannot_be_served() -> None:
@@ -1534,7 +1534,7 @@ def test_every_fake_port_method_is_a_coroutine_function_and_a_transaction_an_asy
     assert len(implemented) >= 9
     assert ("InMemoryStore", "AlertsRepository") in implemented
     assert ("_InMemoryTransaction", "WriteTransaction") in implemented
-    transaction = InMemoryStore(lambda: NOW).transaction(A, Principal(tenant_id=A, user_id=USER))  # the principal, not the bare id (#1307 D6)
+    transaction = InMemoryStore(lambda: NOW).transaction(A, Principal(tenant_id=A, actor_id=USER))  # the principal, not the bare id (#1307 D6)
     assert hasattr(transaction, "__aenter__")
     assert hasattr(transaction, "__aexit__")
 

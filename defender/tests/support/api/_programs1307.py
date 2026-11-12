@@ -30,7 +30,7 @@ Every test-facing interface the design leaves open is fixed HERE, once (forced c
 - FC-8 tenant audit events (`api/fakes.AuditEvent`) carry `credential_id` (None for a person); identity audit
   records are unchanged in shape (no credential_id). Actions: `PROGRAM_CREATE`, `PROGRAM_REMOVE`,
   `CREDENTIAL_CREATE`, `CREDENTIAL_REVOKE`, `CLIENT_DELETE` (D6).
-- FC-11 `User.kind` / `.created_by`, `Membership.role`; key hash = hex SHA-256 (as sessions); expiry outside
+- FC-11 `Membership.role` (people roles only, #1454); key hash = hex SHA-256 (as sessions); expiry outside
   7..365 days -> 422; `ensure_invitation` for a program raises `DataRuleViolation`.
 """
 from __future__ import annotations

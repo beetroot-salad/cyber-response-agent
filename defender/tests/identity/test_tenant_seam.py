@@ -130,8 +130,8 @@ async def test_a_tenant_created_by_request_is_not_existing_until_active(world):
     assert await world.identity.tenant_exists(record.id) is False
 
 
-async def test_accepting_an_invitation_needs_the_tenant_active_in_the_same_statement(world):
-    """An invitation of a tenant that went offboarding does not accept; the row stays invited; an active tenant's accepts (DC-6)."""
+async def test_an_invitation_of_a_tenant_that_went_offboarding_does_not_accept(world):
+    """An invitation of a tenant that went offboarding does not accept (False); the row stays invited; an active tenant's accepts (DC-6, P-L)."""
     other = fixture_uuid("tenant:1214-seam-2")
     for tenant in (T1, other):
         await world.seed(tenant)

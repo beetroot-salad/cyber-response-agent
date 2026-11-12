@@ -13,6 +13,11 @@ class CredentialCapReached(DataRuleViolation):
     refusal of `add_credential` a caller answers as a conflict; any other is a fault."""
 
 
+class TenantNotActive(DataRuleViolation):
+    """A write that makes something live in a tenant (a program, an invitation) found the tenant not `active`
+    while holding its row (#1454 P-L): refused, and nothing was written."""
+
+
 class BootstrapRefused(Exception):
     """The bootstrap file cannot be applied safely; the message names the email or tenant id."""
 

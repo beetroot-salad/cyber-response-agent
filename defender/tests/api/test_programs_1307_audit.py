@@ -213,3 +213,35 @@ def test_a_keys_expiry_writes_nothing_but_an_oauth_clients_cleanup_is_audited(ca
     assert audit.since(mark) == []
     s.world.call(s.world.service.reconcile_program_clients)
     assert [(e.action, e.actor, e.target) for e in audit.since(mark)] == [(CLIENT_DELETE, SYSTEM, oauth)]
+
+
+# --- #1454 ---------------------------------------------------------------------------------------------
+
+MEMBER_REMOVE = "member.remove"
+
+
+def test_1454_offboarding_removes_the_tenants_active_programs_and_ends_its_people_with_todays_audit_lines(caplog) -> None:
+    """`end_tenant`: each active program's credentials revoked then `program.remove`, the person's membership ended with
+    `member.remove`, all by the system; a program removed earlier is not touched; a second run emits nothing (O-E, O-A)."""
+    audit = AuditLog(caplog)
+    s = soar()
+    oauth = issue_oauth(s.ann, T1, s.program_id)
+    earlier = str(create_program(s.ann, T1, "Earlier")["id"])
+    issue_key(s.ann, T1, earlier)
+    assert s.ann.delete(f"/tenants/{T1}/programs/{earlier}").status_code == 204
+    mark = audit.mark()
+    s.world.call(s.world.lifecycle_service().end_tenant, T1, now=s.world.clock())
+    events = [(e.action, e.actor, e.tenant_id, e.target) for e in audit.since(mark)]
+    assert sorted(events) == sorted([
+        (CREDENTIAL_REVOKE, SYSTEM, T1, s.key_id), (CREDENTIAL_REVOKE, SYSTEM, T1, oauth),
+        (PROGRAM_REMOVE, SYSTEM, T1, s.program_id), (MEMBER_REMOVE, SYSTEM, T1, user_id(s.ann))])
+    removal = events.index((PROGRAM_REMOVE, SYSTEM, T1, s.program_id))
+    assert {e[3] for e in events[:removal] if e[0] == CREDENTIAL_REVOKE} == {s.key_id, oauth}  # revokes, then the removal
+    program = s.world.call(s.world.raw_repo.program, s.program_id)
+    assert (program.removed_by, program.removed_at) == (None, s.world.clock())
+    assert {r.state for r in s.world.credentials(s.program_id)} == {"revoked"}
+    assert [(str(m.user_id), m.status) for m in s.world.call(s.world.raw_repo.memberships_of_tenant, T1)] == [
+        (user_id(s.ann), "ended")]
+    mark = audit.mark()
+    s.world.call(s.world.lifecycle_service().end_tenant, T1, now=s.world.clock())
+    assert audit.since(mark) == []  # idempotent: nothing left to end

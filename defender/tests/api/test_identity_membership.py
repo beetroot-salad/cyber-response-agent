@@ -15,6 +15,8 @@ from defender.tests.support.api._identity1306 import (  # noqa: E402
     BOB,
     DAY,
     HOUR,
+    LAB,
+    ME,
     NEW,
     NINA,
     SEVEN_DAYS,
@@ -107,23 +109,23 @@ def test_a_notified_invitation_lasts_seven_days_from_the_send_not_the_request() 
     assert tenants_of(bob) == {T1, T2}
 
 
-def test_an_invitation_into_a_tenant_that_does_not_exist_is_neither_offered_nor_accepted() -> None:
-    """/me lists, and accept and first sign-in take, only invitations whose tenant exists (flows 2, 3)."""
-    world = World(tenants={T1: [ANN], T2: [BOB]}, failing_writes=True)
-    ann, bob = world.sign_in(ANN), world.sign_in(BOB)
+def test_an_invitation_into_a_tenant_that_is_not_active_is_neither_offered_nor_accepted() -> None:
+    """/me lists, and accept and first sign-in take, only invitations whose tenant is active (flows 2, 3; #1454: a real state, no scripted tenant)."""
+    world = World(tenants={T1: [ANN], T2: [BOB], LAB: [ME]})
+    ann, bob, lab_member = world.sign_in(ANN), world.sign_in(BOB), world.sign_in(ME)
     row = world.invite(bob, T2, ANN).json()["id"]
+    elsewhere = world.invite(lab_member, LAB, ANN).json()["id"]
     world.invite(ann, T1, NEW)
     world.invite(bob, T2, NEW)
     world.send_pending()
-    assert [r["id"] for r in me(ann)["invitations"]] == [row]  # control: offered while T2 exists
-    world.repo.missing_tenants.add(T2)
-    assert me(ann)["invitations"] == []
+    assert {r["id"] for r in me(ann)["invitations"]} == {row, elsewhere}  # control: offered while T2 is active
+    world.move_tenant(T2, "offboarded")
+    assert [r["id"] for r in me(ann)["invitations"]] == [elsewhere]
     assert ann.post(f"/invitations/{row}/accept").status_code == 404
     assert tenants_of(ann) == {T1}
     assert tenants_of(world.sign_in(NEW)) == {T1}
-    world.repo.missing_tenants.clear()  # control: the same row, its tenant back, is accepted
-    assert ann.post(f"/invitations/{row}/accept").status_code == 200
-    assert tenants_of(ann) == {T1, T2}
+    assert ann.post(f"/invitations/{elsewhere}/accept").status_code == 200  # control: an active tenant's invitation is accepted
+    assert tenants_of(ann) == {T1, LAB}
 
 
 def test_removing_a_member_ends_only_that_membership() -> None:
