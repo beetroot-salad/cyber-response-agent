@@ -530,7 +530,7 @@ class LabOps:
         if not isinstance(value, str) or not value:
             raise LabOpsError(f"{READONLY_PASSWORD_ENV} is not set in {self.lab_env_file}: the current password "
                               "of the lab's read-only Elasticsearch user")
-        return value
+        return value.replace("$$", "$")     # the rendered config escapes `$` as `$$`; es-init gets one
 
     def create_readonly_user(self, password: str) -> None:
         """The proxy's read-only user in the frozen cluster: `read` on the lab's fixed read-only

@@ -340,9 +340,11 @@ def _compose_runs() -> bool:
 
 
 @pytest.mark.skipif(not _compose_runs(), reason="needs the docker compose CLI (no daemon)")
-@pytest.mark.parametrize("written", ['"pw-1"', "pw-1 # rotated today", "'pw-1'", "pw-1   "])
+@pytest.mark.parametrize("written,password", [('"pw-1"', "pw-1"), ("pw-1 # rotated today", "pw-1"),
+                                              ("'pw-1'", "pw-1"), ("pw-1   ", "pw-1"),
+                                              ("'pw$1'", "pw$1")])   # compose prints a `$` as `$$`
 def test_the_launcher_reads_the_password_as_compose_gives_it_to_es_init_not_as_the_line_is_written(
-        tmp_path, monkeypatch, written):
+        tmp_path, monkeypatch, written, password):
     """#1391: real compose renders the lab's own compose.yml, so a quoted, commented or padded
     value is the password es-init sets, and an operator's stale export is not consulted."""
     playground = Path(lab_ops.PLAYGROUND)
@@ -355,7 +357,7 @@ def test_the_launcher_reads_the_password_as_compose_gives_it_to_es_init_not_as_t
     monkeypatch.setenv(lab_ops.READONLY_PASSWORD_ENV, "stale-exported-password")
     monkeypatch.setenv("DOCKER_HOST", "unix:///nonexistent.sock")   # config needs no daemon; never reach one
     ops = lab_ops.LabOps(run=subprocess.run, lab_env_file=tmp_path / ".env")
-    assert ops.current_password() == "pw-1"
+    assert ops.current_password() == password
 
 
 def _saved(rig) -> list[str]:
