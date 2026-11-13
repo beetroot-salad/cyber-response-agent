@@ -154,7 +154,7 @@ _VALUED = frozenset({"--name", "--user", "--label", "--runtime", "--tmpfs", "--s
                      "--mount", "--workdir", "--env"})
 #: Each flag the job container may carry before its image, with how many times: exactly these and no other (O1, A7, H9;
 #: `--network` only when the deployment names one, `--env` once per setting).
-_FLAG_COUNTS = {"-i": 1, "--rm": 1, "--init": 1, "--name": 1, "--user": 1, "--label": 3, "--pull=never": 1,
+_FLAG_COUNTS = {"-i": 1, "--rm": 1, "--init": 1, "--name": 1, "--user": 1, "--label": 4, "--pull=never": 1,
                 "--runtime": 1, "--read-only": 1, "--tmpfs": 1, "--security-opt": 1, "--cap-drop": 1, "--mount": 3,
                 "--workdir": 1}
 
@@ -178,8 +178,8 @@ def _run_flags(argv: list[str], image: str) -> list[tuple[str, str | None]]:
 
 def test_o1_the_job_containers_start_carries_exactly_the_allowed_flags_with_the_box_runtime_and_its_hardening(
         scene, monkeypatch):
-    """Before the image, the job container's `docker run` carries exactly `-i --rm --init --name --user`, three
-    `--label`s, `--pull=never`, `--runtime` the box runtime the deployment sets, `--read-only`, one `--tmpfs`,
+    """Before the image, the job container's `docker run` carries exactly `-i --rm --init --name --user`, four
+    `--label`s (tenant, claim, job kind, helper), `--pull=never`, `--runtime` the box runtime the deployment sets, `--read-only`, one `--tmpfs`,
     `--security-opt no-new-privileges`, `--cap-drop ALL`, at most one `--network` (the job network, N5), three
     `--mount`s, `--workdir` and `--env`s: nothing else (`--pid host`, `--privileged`, `--cap-add`, `-v`, a second
     runtime). (O1, A7, H9, N5)"""

@@ -246,7 +246,9 @@ folder at the same path (read-write), the worker's code copy (read-only, no `.en
 and its job socket's folder, and nothing else: no other tenant's folder, no
 `.host-locks`, no host `/tmp`, no secret file, no Docker socket. Its environment is the
 settings the job reads minus secrets and cross-tenant addresses, plus the provider key
-the helper resolved. It runs as the uid that owns the data root, read-only, with every
+the helper resolved, handed to `docker run` by name only so it is on no command line. It
+joins the network `DEFENDER_JOB_NETWORK` names, required outside `dev` and never `host`.
+It runs as the uid that owns the data root, read-only, with every
 capability dropped. The job asks the helper over the job socket (`defender.job_socket`)
 for its launch facts, its passes and its boxes; the helper answers only that
 container's processes, and answers each request by job kind. A fence or the worker's

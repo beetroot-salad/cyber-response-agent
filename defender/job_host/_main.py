@@ -31,6 +31,8 @@ import uuid
 from collections.abc import Iterator
 from typing import Any
 
+from defender.job_socket import HELPER_FAILED
+
 from . import _common, _investigation, _learning
 from ._container import (
     STOP_GRACE,
@@ -244,7 +246,7 @@ def main(argv: list[str], *, docker: Any = None, signer: Any = None, publish: An
     """The helper for one job (module doc). `docker` is the docker seam (the box package's real one by default),
     `signer` the request signer (the tenant's sign login), `publish` the launch-time publish (the real child),
     `forge` the forge credential's builder (the learning kinds'), `command` a container command line in place of the
-    kind's entry, `client` the forge client the drain's delivery uses (a new one by default). Returns the container's exit status, or 1 for an ending decided before it."""
+    kind's entry, `client` the forge client the drain's delivery uses (a new one by default). Returns the container's exit status, 1 for an ending decided before it (written), or `HELPER_FAILED` when the helper could not serve the job at all and wrote nothing."""
     from defender import tenancy
     from defender._parent_tie import require_parent, tie_to_parent
     from defender._paths import process_defender_dir
@@ -259,11 +261,11 @@ def main(argv: list[str], *, docker: Any = None, signer: Any = None, publish: An
         root = tenancy.resolve_data_root()
     except TenantRefused as refused:
         sys.stderr.write(f"[job_host] this job's tenant cannot be used: {refused}\n")
-        return 1
+        return HELPER_FAILED
     claim = os.environ.get(CLAIM_ENV) or uuid.uuid4().hex
     if not _CLAIM.fullmatch(claim):
         sys.stderr.write(f"[job_host] {CLAIM_ENV} is not a claim token the worker mints; nothing was started\n")
-        return 1
+        return HELPER_FAILED
     os.environ[CLAIM_ENV] = claim  # every box the helper starts carries the claim's label
     session = Session(kind=ns.kind, job_id=ns.job, tenant_id=tenant_id, source=ns.source, root=root,
                       root_folder=tenancy.data_root_for_child(root), claim=claim,
@@ -274,9 +276,20 @@ def main(argv: list[str], *, docker: Any = None, signer: Any = None, publish: An
     spec = registry().kinds.get(ns.kind)
     if spec is None:
         _tell(session, f"the helper serves no {ns.kind} job yet; nothing was started")
-        return 1
+        return HELPER_FAILED
     with _signals(session) as signals:
         return _run(session, spec, signals)
+
+
+def entry(argv: list[str], run: Any = None) -> int:
+    """The helper's process entry: `main` (or `run`, a stand-in for it), and any fault that escapes it (after the
+    container started, or while cleaning up) logged and turned into `HELPER_FAILED`, never a status a job container
+    gives, so the worker can tell the helper's own failure from the job's."""
+    try:
+        return int((run or main)(argv))
+    except Exception:  # noqa: BLE001 — the helper's own fault, told to the worker by its exit status
+        _logger.exception("the job's helper failed")
+        return HELPER_FAILED
 
 
 @contextlib.contextmanager

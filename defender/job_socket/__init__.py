@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any
 
 __all__ = [
-    "FORGE_TOKEN_CAP", "IMAGE_ENV", "JOB_LABEL", "MAX_MESSAGE", "SOCKET_ENV", "Refused", "ask",
+    "FORGE_TOKEN_CAP", "HELPER_FAILED", "HELPER_LABEL", "IMAGE_ENV", "JOB_LABEL", "MAX_MESSAGE", "SOCKET_ENV", "Refused", "ask",
     "from_environ", "read_message", "sigterm_on_stdin_eof", "write_message",
 ]
 
@@ -35,6 +35,13 @@ SOCKET_ENV = "DEFENDER_JOB_SOCKET"
 #: The label every job container carries (its value: the job's kind), beside the tenant's and the claim's: the worker's
 #: start sweep removes every container carrying it (#1170 A5).
 JOB_LABEL = "defender.job"
+#: The label naming the helper that holds a job container, as `<pid>-<start time>` (`tenancy.process_start`): the
+#: worker's start sweep spares a container whose helper still runs, so a worker on a shared daemon never removes
+#: another worker's live jobs.
+HELPER_LABEL = "defender.job-host"
+#: The helper's exit status when it failed on its own (an uncaught fault, a refusal of its own arguments), never a job
+#: container's: the worker ends a row whose helper exited so, with no end record, as the worker's error.
+HELPER_FAILED = 199
 #: The setting naming the job container's image (#1170 A7).
 IMAGE_ENV = "DEFENDER_JOB_IMAGE"
 

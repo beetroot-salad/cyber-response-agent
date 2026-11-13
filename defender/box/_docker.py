@@ -341,20 +341,29 @@ def _remove_container(docker: DockerFn, name: str) -> str | None:
 
 
 def remove_labelled_containers(label: str, value: str | None = None, *, docker: DockerFn = run_docker,
-                               whose: str = "the labelled") -> str | None:
+                               whose: str = "the labelled",
+                               spare: tuple[str, Callable[[str], bool]] | None = None) -> str | None:
     """Remove every container carrying the label `label` (with the value `value`, or any value when `value` is
     None), each through `_remove_container`, paused or not: `None` once none is left, else why not, naming
-    `whose` containers. A host with no docker binary has no box to remove."""
+    `whose` containers. `spare`, a label and a test of its value (empty when the container lacks it), keeps each
+    container whose value passes. A host with no docker binary has no box to remove."""
     selector = label if value is None else f"{label}={value}"
+    argv = (["docker", "ps", "-aq", "--filter", f"label={selector}"] if spare is None
+            else ["docker", "ps", "-a", "--filter", f"label={selector}", "--format", '{{.ID}} {{.Label "' + spare[0] + '"}}'])
     try:
-        listed = docker(["docker", "ps", "-aq", "--filter", f"label={selector}"])
+        listed = docker(argv)
     except FileNotFoundError:
         return None
     except (OSError, subprocess.SubprocessError) as e:
         return f"could not invoke docker: {e}"
     if listed.returncode != 0:
         return f"docker could not list {whose} containers: {(listed.stderr or '').strip()}"
-    faults = [f"{name}: {why}" for name in listed.stdout.split() if (why := _remove_container(docker, name)) is not None]
+    if spare is None:
+        names = listed.stdout.split()
+    else:
+        rows = [line.split(None, 1) for line in listed.stdout.splitlines() if line.strip()]
+        names = [row[0] for row in rows if not spare[1](row[1].strip() if len(row) > 1 else "")]
+    faults = [f"{name}: {why}" for name in names if (why := _remove_container(docker, name)) is not None]
     return f"docker could not remove {whose} containers: {'; '.join(faults)}" if faults else None
 
 

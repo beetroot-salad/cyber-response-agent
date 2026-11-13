@@ -108,6 +108,14 @@ def deployment_unset(monkeypatch) -> None:
     monkeypatch.delenv(DEPLOYMENT_ENV, raising=False)
 
 
+@pytest.fixture(autouse=True)
+def job_network_named(monkeypatch) -> None:
+    """Every test's job container joins docker's default network by name, as a deployment that set
+    `DEFENDER_JOB_NETWORK` does: unset, a `production` helper refuses every job (#1170 N5). A test of
+    that refusal deletes it."""
+    monkeypatch.setenv("DEFENDER_JOB_NETWORK", "bridge")
+
+
 @pytest.fixture(autouse=True, scope="session")
 def session_data_root(tmp_path_factory) -> Iterator[Path]:
     """The data root for module- and class-scoped fixtures, which are set up before a test's own

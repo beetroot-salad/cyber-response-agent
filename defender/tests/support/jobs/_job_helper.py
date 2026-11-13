@@ -391,15 +391,17 @@ class ContainerStandIn(RecordingDocker):
         argv = list(argv)
         self.log.append(argv)
         if len(argv) > 1 and argv[1] == "run":
-            return self._run(argv)
+            return self._run(argv, kw.get("env"))
         if len(argv) > 1 and argv[1] == "exec" and self.exec_writer is not None:
             self.calls.append(argv)
             return subprocess.Popen(self.exec_writer, **kw)
         return super().popen(argv, **kw)
 
-    def _run(self, argv: list[str]) -> _ContainerProc:
+    def _run(self, argv: list[str], cli_env: dict[str, str] | None = None) -> _ContainerProc:
         name = (flag_values(argv, "--name") or [f"job-{len(self.boxes)}"])[0]
-        box = Container(argv, name, parse_env(argv), parse_mounts(argv), parse_labels(argv))
+        # A bare `--env NAME` takes its value from the docker command's own environment, as docker does.
+        env = {k: (v if v is not None else (cli_env or {}).get(k)) for k, v in parse_env(argv).items()}
+        box = Container(argv, name, env, parse_mounts(argv), parse_labels(argv))
         self.boxes.append(box)
         if self.run_fault is not None:
             return _ContainerProc(None, box, rc=self.run_fault[0], stderr=self.run_fault[1].encode())
