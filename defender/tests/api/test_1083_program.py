@@ -16,6 +16,7 @@ from defender.tests.support.api._server1083 import (
     FAULTS,
     FRONT,
     OPS,
+    ORIGIN,
     PROGRAMS_REALM,
     REALMS,
     SETTING_NAMES,
@@ -61,17 +62,28 @@ def _refused(child: Child, *, mentions: tuple[str, ...]):
 
 # --- settings and the probe, as classes ----------------------------------------------------------------
 
-#: A bad value of the setting's own type, with a label; each is one the program must refuse (Am-7, FC-3).
 def _shape_violations(name: str, tmp_path: Path) -> list[tuple[str, str]]:
+    """Bad values of the setting's own type, with a label; each one the program must refuse (Am-7, FC-3)."""
     cases: list[tuple[str, str]] = []
     if name == "DEFENDER_API_PORT":
         cases += [("port 0", "0"), ("port 70000", "70000"), ("port negative", "-1"), ("port not an integer", "eighty")]
     if name == "DEFENDER_DATABASE_DSN":
         cases.append(("unparsable dsn", "not a dsn"))
+    if name == "DEFENDER_API_FRONTEND_ORIGIN":
+        cases += [("origin with a path", f"{ORIGIN}/app"), ("origin with no scheme", "localhost:8000")]
+    if name == "DEFENDER_KEYCLOAK_REDIRECT_URI":
+        cases += [("redirect uri relative", "/auth/callback"), ("redirect uri not http", "ftp://localhost:8000/cb"),
+                  ("redirect uri no scheme", "localhost:8000/auth/callback")]
     if name.endswith("_ISSUER"):
         cases += [("issuer without a realm", f"{FRONT}/elsewhere"), ("issuer with no realm name", f"{FRONT}/realms/")]
     if name == "DEFENDER_KEYCLOAK_SERVER_URL":
         cases.append(("server url with a path", f"{BACK}/realms/{SIGNIN_REALM}"))
+    return cases + _file_violations(name, tmp_path)
+
+
+def _file_violations(name: str, tmp_path: Path) -> list[tuple[str, str]]:
+    """Bad files for the secret-file settings and the administrators file."""
+    cases: list[tuple[str, str]] = []
     if name.endswith("_SECRET_FILE"):
         cases += [("secret file absent", str(tmp_path / "no-such-secret")), ("secret file a directory", str(tmp_path))]
         for label, text in (("empty", ""), ("only a newline", "\n"), ("two lines", "one\ntwo\n")):
@@ -91,8 +103,17 @@ def _shape_violations(name: str, tmp_path: Path) -> list[tuple[str, str]]:
     return cases
 
 
-#: Generated junk for any setting: either it starts or it refuses naming the setting; nothing else may happen.
-JUNK = {"whitespace": " \t ", "multi-line": "a\nb\n", "junk bytes": "\x01\x7f\ufffd"}
+def _junk(healthy: str) -> list[tuple[str, str]]:
+    """Junk derived from a setting's healthy value: edge whitespace, a line break, each non-printable, embedded."""
+    mid = len(healthy) // 2
+    cases = [("leading space", " " + healthy), ("leading tab", "\t" + healthy), ("leading newline", "\n" + healthy),
+             ("trailing space", healthy + " "), ("trailing tab", healthy + "\t"), ("trailing newline", healthy + "\n"),
+             ("embedded line break", healthy[:mid] + "\n" + healthy[mid:])]
+    unprintable = [*range(0x20), 0x7F, *range(0x80, 0xA0), 0x2028, 0x2029]
+    for code in unprintable:
+        assert not chr(code).isprintable()
+        cases.append((f"embedded U+{code:04X}", healthy[:mid] + chr(code) + healthy[mid:]))
+    return cases
 
 
 async def _attempt(case: str, environ: dict[str, str], dsn: str, fails: tuple[Fail, ...] = ()) -> str | None:
@@ -122,16 +143,13 @@ def test_the_probe_failure_table_covers_every_step_of_both_realms():
 
 @pytest.mark.postgres
 @pytest.mark.parametrize("name", SETTING_NAMES)
-async def test_a_setting_missing_empty_junk_or_misshapen_starts_or_refuses_naming_only_it(
-        tmp_path, migrated_database, name):
-    """Each setting, missing, empty, junk or misshapen: it starts, or refuses naming that setting alone. (O1, Am-7)"""
+async def test_a_setting_missing_empty_or_misshapen_refuses_naming_only_it(tmp_path, migrated_database, name):
+    """Each setting, missing, empty or misshapen: refuses to start naming that setting alone. (O1, Am-7)"""
     healthy = environment(tmp_path, dsn=migrated_database)
     assert await _attempt("healthy", healthy, migrated_database) is None  # positive control: the unspoiled environment starts
-    cases: list[tuple[str, str | None, bool]] = [("missing", None, True), ("empty", "", True)]
-    cases += [(label, value, False) for label, value in JUNK.items()]
-    cases += [(label, value, True) for label, value in _shape_violations(name, tmp_path)]
-    refused = 0
-    for label, value, must_refuse in cases:
+    cases: list[tuple[str, str | None]] = [("missing", None), ("empty", "")]
+    cases += _shape_violations(name, tmp_path)
+    for label, value in cases:
         environ = {**healthy, "DEFENDER_API_PORT": str(free_port())}
         if value is None:
             del environ[name]
@@ -139,15 +157,25 @@ async def test_a_setting_missing_empty_junk_or_misshapen_starts_or_refuses_namin
             environ[name] = value
         case = f"{name} {label}"
         message = await _attempt(case, environ, migrated_database)
-        if message is None:
-            assert not must_refuse, f"{case} started"
-            continue
-        refused += 1
+        assert message is not None, f"{case} started"
         stripped = message.replace(value or "\0", "")
         assert [n for n in SETTING_NAMES if n in message] == [name], (case, message)
         if "PROGRAMS" not in name:
             assert PROGRAMS_REALM not in stripped, (case, message)
-    assert refused >= 2  # the missing and the empty value, at least
+
+
+def test_every_setting_with_junk_derived_from_its_healthy_value_refuses_naming_only_it(tmp_path):
+    """Edge whitespace, a line break or a non-printable in any setting refuses, naming that setting. (O1, Am-7)"""
+    from defender.api_server import Settings, StartRefused
+
+    healthy = environment(tmp_path, dsn="postgresql://defender:pw@localhost:5432/defender")
+    Settings.from_environ(healthy)  # positive control: the healthy environment parses
+    for name in SETTING_NAMES:
+        for label, value in _junk(healthy[name]):
+            with pytest.raises(StartRefused) as refused:
+                Settings.from_environ({**healthy, name: value})
+            message = str(refused.value)
+            assert [n for n in SETTING_NAMES if n in message] == [name], (name, label, message)
 
 
 @pytest.mark.postgres

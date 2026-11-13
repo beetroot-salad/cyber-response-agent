@@ -295,7 +295,11 @@ class FakeKeycloak(httpx.AsyncBaseTransport):
     def _token(self, realm: str, request: httpx.Request, kind: str | None) -> httpx.Response | None:
         if urllib.parse.parse_qs(request.content.decode()).get("grant_type") != ["client_credentials"]:
             return None
-        if kind == "bad_secret" or not self._is_admin_client(realm, request):
+        client = self._basic_client(request)
+        if client is None or client[0] != self.admin_clients[realm][0]:  # unknown id, or no client authentication
+            return httpx.Response(401, json={
+                "error": "invalid_client", "error_description": "Invalid client or Invalid client credentials"})
+        if kind == "bad_secret" or client != self.admin_clients[realm]:  # a known id, the wrong secret
             return httpx.Response(401, json={
                 "error": "unauthorized_client", "error_description": "Invalid client or Invalid client credentials"})
         return httpx.Response(200, json={"access_token": f"admin-{realm}", "token_type": "Bearer", "expires_in": 300})
@@ -308,16 +312,17 @@ class FakeKeycloak(httpx.AsyncBaseTransport):
             return httpx.Response(200, json=[])
         return httpx.Response(403, json={"error": "HTTP 403 Forbidden"})
 
-    def _is_admin_client(self, realm: str, request: httpx.Request) -> bool:
-        """The client authenticates with HTTP basic auth, as the adapters send it."""
+    @staticmethod
+    def _basic_client(request: httpx.Request) -> tuple[str, str] | None:
+        """The (id, secret) of HTTP basic client authentication, as the adapters send it; None if absent."""
         scheme, _, encoded = request.headers.get("authorization", "").partition(" ")
         if scheme.lower() != "basic":
-            return False
+            return None
         try:
             client_id, _, secret = base64.b64decode(encoded).decode().partition(":")
         except ValueError:
-            return False
-        return (urllib.parse.unquote_plus(client_id), urllib.parse.unquote_plus(secret)) == self.admin_clients[realm]
+            return None
+        return urllib.parse.unquote_plus(client_id), urllib.parse.unquote_plus(secret)
 
 
 # --- the program in a child -------------------------------------------------------------------------
@@ -365,6 +370,15 @@ class _Pump:
         return "".join(self._lines)
 
 
+def _die_with_parent() -> None:
+    """Child-side, before exec: ask the kernel to SIGKILL this process when its parent dies. No-op off Linux."""
+    try:
+        import ctypes
+        ctypes.CDLL(None, use_errno=True).prctl(1, signal.SIGKILL)  # PR_SET_PDEATHSIG == 1
+    except Exception:  # noqa: BLE001 - harmless where unavailable
+        pass
+
+
 class Child:
     """The program in a child process with only `environ`'s `DEFENDER_*` settings (plus the failures).
 
@@ -374,7 +388,10 @@ class Child:
 
     For `Child.faked`: `stalled()` waits for a stalled discovery to begin (a start under way); `reported()` reads
     the entry's `run returned <n>` line; the entry then holds, alive, until `release()` (which `ended()` does), so
-    a test can observe the database between `run`'s return and the process's exit."""
+    a test can observe the database between `run`'s return and the process's exit.
+
+    On Linux the child is killed with the parent (`PR_SET_PDEATHSIG`, SIGKILL), so a crashed test worker leaves no
+    orphan. That signal follows the parent *thread*: spawn a `Child` from the main thread."""
 
     def __init__(self, argv: list[str], environ: Mapping[str, str], *, holds: bool = False) -> None:
         env = {k: v for k, v in os.environ.items() if not k.startswith(("DEFENDER_", FAULTS_ENV))}
@@ -382,7 +399,7 @@ class Child:
         env.update(environ)
         self.environ = dict(environ)
         self.process = subprocess.Popen(argv, cwd=str(REPO), env=env, text=True, stdout=subprocess.PIPE,
-                                        stderr=subprocess.PIPE,
+                                        stderr=subprocess.PIPE, preexec_fn=_die_with_parent,
                                         stdin=subprocess.PIPE if holds else subprocess.DEVNULL)
         self._out = _Pump(self.process.stdout)
         self._err = _Pump(self.process.stderr)

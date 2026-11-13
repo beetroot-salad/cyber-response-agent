@@ -541,7 +541,7 @@ async def test_o5_the_programs_realm_token_is_admitted_for_its_audience_signer_a
     assert (await served.client.get(path, headers=served.bearer(right))).status_code == 200
     wrong = {
         "audience": program_token(served.keycloak, token_credential, audience="defender-api"),
-        "signed for the sign-in realm": program_token(served.keycloak, token_credential, realm=SIGNIN_REALM),
+        "issued by the sign-in realm": program_token(served.keycloak, token_credential, realm=SIGNIN_REALM),
         "expired": program_token(served.keycloak, token_credential, lifetime=-dt.timedelta(minutes=1)),
         "not a token": "not.a.token",
     }
@@ -596,10 +596,45 @@ def _body(method: str, path: str) -> dict[str, Any]:
             else SYSTEM if "/systems/" in path else {}}
 
 
-def _refusal(declared: str, outsider: bool, is_person: bool, is_admin: bool) -> int | None:
-    """The status a refused caller must get from the permission table (#1307 D4), None for one the route lets in."""
-    from defender.identity.roles import grants
+# Copied literally from tests/api/test_programs_1307_roles.py (PERMISSION_OF, AUTOMATION): the oracle for a program
+# caller is this table, never production's `grants` or `ROLE_PERMISSIONS`.
+TENANT = "/tenants/{}"
+PERMISSION_OF = {
+    ("GET", f"{TENANT}/alerts"): "work.read",
+    ("GET", f"{TENANT}/alerts/{{}}"): "work.read",
+    ("POST", f"{TENANT}/investigations"): "investigations.run",
+    ("GET", f"{TENANT}/investigations"): "work.read",
+    ("GET", f"{TENANT}/investigations/{{}}"): "work.read",
+    ("POST", f"{TENANT}/investigations/{{}}/cancel"): "investigations.run",
+    ("DELETE", f"{TENANT}/investigations/{{}}"): "investigations.delete",
+    ("GET", f"{TENANT}/investigations/{{}}/artifacts/{{}}"): "work.read",
+    ("POST", f"{TENANT}/learning-jobs"): "learning.run",
+    ("GET", f"{TENANT}/learning-jobs"): "work.read",
+    ("GET", f"{TENANT}/learning-jobs/{{}}"): "work.read",
+    ("GET", f"{TENANT}/lessons"): "work.read",
+    ("GET", f"{TENANT}/systems"): "config.read",
+    ("PUT", f"{TENANT}/systems/{{}}"): "config.write",
+    ("PUT", f"{TENANT}/systems/{{}}/credentials"): "config.write",
+    ("POST", f"{TENANT}/systems/{{}}/check"): "config.write",
+    ("GET", f"{TENANT}/alert-mapping"): "config.read",
+    ("PUT", f"{TENANT}/alert-mapping"): "config.write",
+    ("GET", f"{TENANT}/members"): "people.manage",
+    ("DELETE", f"{TENANT}/members/{{}}"): "people.manage",
+    ("GET", f"{TENANT}/invitations"): "people.manage",
+    ("POST", f"{TENANT}/invitations"): "people.manage",
+    ("DELETE", f"{TENANT}/invitations/{{}}"): "people.manage",
+    ("POST", f"{TENANT}/programs"): "people.manage",
+    ("GET", f"{TENANT}/programs"): "people.manage",
+    ("DELETE", f"{TENANT}/programs/{{}}"): "people.manage",
+    ("POST", f"{TENANT}/programs/{{}}/credentials"): "people.manage",
+    ("GET", f"{TENANT}/programs/{{}}/credentials"): "people.manage",
+    ("DELETE", f"{TENANT}/programs/{{}}/credentials/{{}}"): "people.manage",
+}
+AUTOMATION = {"work.read", "investigations.run"}
 
+
+def _refusal(method: str, path: str, declared: str, outsider: bool, is_person: bool, is_admin: bool) -> int | None:
+    """The status a refused caller must get from the permission table (#1307 D4), None for one the route lets in."""
     if outsider:
         return 404  # a non-member, an administrator included, and a program of another tenant
     if declared == "platform":
@@ -608,17 +643,19 @@ def _refusal(declared: str, outsider: bool, is_person: bool, is_admin: bool) -> 
         return None if is_person else 403
     if declared in {"any", "public"}:
         return None
-    return None if is_person or grants("automation", declared) else 403
+    if path.startswith("/tenants/"):
+        key = (method, re.sub(r"\{\w+(?::\w+)?\}", "{}", path))
+        assert declared == PERMISSION_OF[key], (key, declared)  # the served declaration is the literal table's
+        return None if is_person or PERMISSION_OF[key] in AUTOMATION else 403
+    return None if is_person else 403
 
 
 @pytest.mark.postgres
 async def test_o5_every_route_answers_every_caller_as_the_permission_table_says(served, token_credential):
     """Each route, by each caller: refusals are the table's exact status, nothing is 500, only systems and lessons are 501. (O5, O8, O3)"""
-    from defender.identity.roles import ROLE_PERMISSIONS
-
     table = _route_table(served.app)
     kinds = {declared for _, _, declared in table}
-    assert set(ROLE_PERMISSIONS["admin"]) | {"platform"} <= kinds, kinds  # the table covers every permission and the administrator
+    assert set(PERMISSION_OF.values()) | {"platform"} <= kinds, kinds  # the table covers every permission and the administrator
     token = program_token(served.keycloak, token_credential)
     tenant_a, tenant_b = A, B
     callers = {  # name -> (headers, is a person, tenant it is a member of, platform administrator)
@@ -636,10 +673,11 @@ async def test_o5_every_route_answers_every_caller_as_the_permission_table_says(
                 got = (await served.client.request(method, url, headers=headers, **_body(method, path))).status_code
                 who = f"{name} {method} {url} ({declared})"
                 assert got != 500, who
-                expected = _refusal(declared, tenant_route and member_of != acts_in, is_person, is_admin)
+                expected = _refusal(method, path, declared, tenant_route and member_of != acts_in, is_person, is_admin)
                 if expected is not None:
                     assert got == expected, who
                     seen[name, "refused"] += 1
+                    seen[name, str(expected)] += 1
                     continue
                 seen[name, "passed"] += 1
                 assert got not in (401, 403), who
@@ -650,3 +688,5 @@ async def test_o5_every_route_answers_every_caller_as_the_permission_table_says(
     assert set(anonymous.values()) == {401}, {k: v for k, v in anonymous.items() if v != 401}
     # Every caller has been both let in and refused somewhere, so none of the table was vacuous.
     assert all(seen[name, outcome] for name in callers for outcome in ("passed", "refused")), seen
+    # A program is refused for want of permission (403) as well as for being an outsider (404): the automation row is not everything.
+    assert all(seen[name, "403"] for name in ("key", "token")), seen

@@ -1629,27 +1629,63 @@ def test_the_demo_store_keeps_the_audit_events_its_writes_announce() -> None:
 
 
 class _AuditLog(list[Any]):
-    """The demo store's `audit_events`, noting for each event whether the write it announces was visible on arrival."""
+    """The demo store's `audit_events`, noting for each event whether the write it announces was visible on arrival.
 
-    def __init__(self, visible: Callable[[], Awaitable[bool]]) -> None:
+    Every list mutator goes through `_arrive`; `fail` makes the announcement itself raise."""
+
+    def __init__(self, *, fail: bool = False) -> None:
         super().__init__()
-        self._visible = visible
+        self.fail = fail
+        self.probe: Callable[[], Awaitable[bool]] | None = None  # bound after `demo_deps` returns
         self.visible_on_arrival: list[bool] = []
+        self.probe_errors: list[BaseException] = []
 
     def _write_is_visible(self) -> bool:
+        probe = self.probe
+        assert probe is not None, "the probe is bound before any request"
         seen: list[bool] = []
-        probe = threading.Thread(target=lambda: seen.append(anyio.run(self._visible)))  # a loop of its own, through the ports
-        probe.start()
-        probe.join()
+
+        def run() -> None:
+            try:
+                seen.append(anyio.run(probe))  # a loop of its own, through the ports
+            except BaseException as error:  # noqa: BLE001 - carried to the test thread
+                self.probe_errors.append(error)
+
+        thread = threading.Thread(target=run)
+        thread.start()
+        thread.join(10)
+        if thread.is_alive():
+            self.probe_errors.append(TimeoutError("the visibility probe did not end in 10 s"))
         return seen == [True]
 
+    def _arrive(self, events: Any) -> None:
+        if self.fail:
+            raise RuntimeError("the audit log refuses the announcement")
+        for _ in events:
+            self.visible_on_arrival.append(self._write_is_visible())
+
     def append(self, event: Any) -> None:
-        self.visible_on_arrival.append(self._write_is_visible())
+        self._arrive([event])
         super().append(event)
 
     def extend(self, events: Any) -> None:
-        for event in events:
-            self.append(event)
+        events = list(events)
+        self._arrive(events)
+        super().extend(events)
+
+    def insert(self, index: Any, event: Any) -> None:
+        self._arrive([event])
+        super().insert(index, event)
+
+    def __iadd__(self, events: Any) -> _AuditLog:  # type: ignore[misc]
+        events = list(events)
+        self._arrive(events)
+        super().extend(events)
+        return self
+
+    def __setitem__(self, index: Any, value: Any) -> None:
+        self._arrive(list(value) if isinstance(index, slice) else [value])
+        super().__setitem__(index, value)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1738,19 +1774,31 @@ def test_every_announcing_write_the_demo_serves_is_in_the_table() -> None:
     assert set(DEMO_WRITES) == WRITES
 
 
-@pytest.mark.parametrize("name", sorted(WRITES))
-def test_the_demo_announces_each_successful_write_once_after_it_is_visible_and_a_failed_write_never(
-    name: str, caplog: pytest.LogCaptureFixture,
-) -> None:
-    """One audit event per successful write (action, actor, credential, target, detail), after the write is visible;
-    none on a failed write; a generated secret is in no audit record or log line. (Am-2, P2, FC-14)"""
-    caplog.set_level(logging.DEBUG)
+#: The writes whose failing request reaches the write port (the job store's four): only there is "announces nothing"
+#: a claim about a refused write. The other three stop at a 422 or 404 before the port (accepted trade-off).
+_PORT_REACHED = {"create_investigation", "cancel_investigation", "delete_investigation", "create_learning_job"}
+
+
+def _demo_with_audit_log(
+    name: str, monkeypatch: pytest.MonkeyPatch, *, fail: bool = False,
+) -> tuple[_DemoWrite, ApiDeps, _AuditLog, TestClient, dict[str, str], str, str, Callable[[tuple[str, str, dict[str, Any]]], Any]]:
+    """A demo whose store was built with an `_AuditLog` (so every holder of `audit_events` shares it), probe bound after."""
+    logs: list[_AuditLog] = []
+    original = InMemoryStore.__init__
+
+    def init(self: InMemoryStore, *args: Any, **kwargs: Any) -> None:
+        original(self, *args, **kwargs)
+        self.audit_events = log = _AuditLog(fail=fail)
+        logs.append(log)
+
+    # No seam: `demo_deps` builds its own store, so the log can only be installed at construction by wrapping this.
+    monkeypatch.setattr(InMemoryStore, "__init__", init)
     case = DEMO_WRITES[name]
     secret = secrets.token_hex(24)
     deps = anyio.run(demo_deps, (DEMO_ONE,), lambda: NOW)
-    store = deps.writes
-    log = _AuditLog(lambda: case.visible(deps, secret))
-    store.audit_events = log
+    [log] = logs
+    assert deps.writes.audit_events is log
+    log.probe = lambda: case.visible(deps, secret)
     client = TestClient(create_app(deps), base_url=BASE, raise_server_exceptions=False)
     auth = _session(demo_sessions((DEMO_ONE,))[f"{DEMO_ONE}-analyst"], deps.frontend_origin)
     user_id = client.get("/me", headers=auth).json()["user"]["id"]
@@ -1761,18 +1809,47 @@ def test_the_demo_announces_each_successful_write_once_after_it_is_visible_and_a
             body = {"kind": "static", "credentials": {"api_token": secret}}
         return client.request(method, path, headers=auth, json=body or None)
 
+    return case, deps, log, client, auth, user_id, secret, send
+
+
+@pytest.mark.parametrize("name", sorted(WRITES))
+def test_the_demo_announces_each_successful_write_once_after_it_is_visible(
+    name: str, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One audit event per successful write (action, actor, target, detail), after the write is visible, with
+    no generated secret in any record or log line; where the failing request reaches the port, it announces nothing. (Am-2, P2, FC-14)"""
+    caplog.set_level(logging.DEBUG)
+    case, deps, log, _client, _auth, user_id, secret, send = _demo_with_audit_log(name, monkeypatch)
+
     refused = send(case.failing)
     assert 400 <= refused.status_code < 500, refused.text
-    assert log == [], "a failed write announces nothing"
+    if name in _PORT_REACHED:
+        assert log == [], "a failed write announces nothing"
 
+    assert not anyio.run(case.visible, deps, secret), "control: the write is not yet visible"
     served = send(case.request)
     assert served.status_code < 300, served.text
+    if log.probe_errors:
+        raise log.probe_errors[0]
     [event] = log
     assert (event.tenant_id, event.user_id, event.credential_id, event.action, event.target, event.detail) == (
         DEMO_ONE, user_id, None, case.action, case.target(served), case.detail)
     assert log.visible_on_arrival == [True], "the event arrives after the write is visible"
     assert secret not in "\n".join(repr(e) for e in log) + caplog.text
     assert anyio.run(case.visible, deps, secret), "control: the write stands"
+
+
+@pytest.mark.parametrize("name", sorted(WRITES))
+def test_a_demo_announcement_that_fails_after_the_write_answers_500_and_the_write_stands(
+    name: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A write whose audit announcement raises answers 500, and the write is visible afterwards. (Am-2)"""
+    case, deps, log, _client, _auth, _user_id, secret, send = _demo_with_audit_log(name, monkeypatch, fail=True)
+    assert not anyio.run(case.visible, deps, secret), "control: the write is not yet visible"
+    served = send(case.request)
+    assert served.status_code == 500, served.text
+    assert log == []
+    assert anyio.run(case.visible, deps, secret), "the write stands"
 
 
 def test_the_demo_store_keys_records_by_tenant() -> None:
