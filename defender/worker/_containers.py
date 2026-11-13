@@ -5,7 +5,7 @@ left under that name is not this job's and is left in place (r5 C1).
 
 At start the worker also removes every leftover job container, by the label every per-job host
 helper stamps on its container (`job_socket.JOB_LABEL`, #1170 A5), sparing each whose helper still
-runs (`job_socket.HELPER_LABEL`: its pid and start time), so a worker sharing a daemon with another
+runs (`job_socket.HELPER_LABEL`: its `tenancy.process_mark`), so a worker sharing a daemon with another
 never removes that worker's live jobs. A helper in another pid namespace than this worker's reads as
 gone: the daemon is shared only by workers on one host."""
 from __future__ import annotations
@@ -16,12 +16,13 @@ from defender.box import (
     BoxFault,
     DockerFn,
     container_present,
+    labelled_containers,
     remove_claimed_containers,
-    remove_labelled_containers,
+    remove_containers,
     run_docker,
 )
 from defender.job_socket import HELPER_LABEL, JOB_LABEL
-from defender.tenancy import process_start
+from defender.tenancy import mark_alive
 
 
 class Containers(Protocol):
@@ -60,16 +61,9 @@ class DockerContainers:
             raise BoxFault(reason)
 
     def remove_job_containers(self) -> None:
-        reason = remove_labelled_containers(JOB_LABEL, docker=self._docker, whose="the job",
-                                            spare=(HELPER_LABEL, helper_alive))
+        gone = [name for name, helper in labelled_containers(JOB_LABEL, read=HELPER_LABEL, docker=self._docker)
+                if not mark_alive(helper)]
+        reason = remove_containers(gone, docker=self._docker, whose="the job")
         if reason is not None:
             raise BoxFault(reason)
 
-
-def helper_alive(label: str) -> bool:
-    """Whether the helper a `HELPER_LABEL` value names (`<pid>-<start time>`) still runs: the same pid with the same
-    start time, so a reused pid does not count. A missing or malformed value is a helper gone."""
-    pid, sep, start = label.partition("-")
-    if not sep or not pid.isdigit() or not start:
-        return False
-    return process_start(int(pid)) == start

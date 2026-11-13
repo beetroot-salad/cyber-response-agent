@@ -17,7 +17,6 @@ from defender.tests.support.jobs._jobs1342 import (
 )
 from defender.tests.support.jobs._worker1342 import (
     CASES,
-    EXIT,
     MARKER,
     _child,
     _committed,
@@ -53,8 +52,8 @@ for _key, _words in (("setup", ("refused", "crashed", "done")), ("box", ("not_st
     for _word in _words:
         for _how, _spell in _SPELLINGS.items():
             CASES[f"1-job-end-{_key}-word-{_word}-{_how.replace(' ', '-')}"] = _spec(
-                files=_committed(**{"{id}.job-end.json": _job_end_with(**{_key: _spell(_word)})}), exit=EXIT,
-                expect=("failed", "no_report", None), code=EXIT)
+                files=_committed(**{"{id}.job-end.json": _job_end_with(**{_key: _spell(_word)})}), exit=0,
+                expect=("failed", "no_report", None))
 
 
 @pytest.mark.parametrize("case", list(CASES))
@@ -124,7 +123,7 @@ async def test_o8_o9_a_failed_jobs_message_names_its_class_beside_the_existing_w
 async def test_o8_child_text_in_the_cut_short_fact_never_reaches_the_job_message(world, text):
     """The record is refused outside the vocabulary, so the fixed message cannot carry a child's words. (O8)"""
     record = _job_end_with(cut_short=text)
-    _inv, stored = await _run_one(world, _child(world, exit=5, files=_committed(**{"{id}.job-end.json": record})))
+    _inv, stored = await _run_one(world, _child(world, exit=0, files=_committed(**{"{id}.job-end.json": record})))
     assert (stored["stage"], stored["failure_reason"]) == ("failed", "no_report")
     _no_run_text(stored)
     assert "box-lost" not in stored["failure_message"], "a refused record was still read for its word"
@@ -179,11 +178,11 @@ def test_o8_no_junk_character_leading_trailing_or_inside_a_job_end_word_makes_it
 
 
 @pytest.mark.parametrize("junk", _JUNK, ids=lambda c: f"U{ord(c):04X}")
-async def test_o8_a_job_end_word_with_junk_anywhere_is_a_failed_run_with_the_exit_code(world, junk):
-    """Per junk character, one worker drain over leading, trailing and interior (the word rotating with the character): failed/no_report naming the exit code. (O8, M3)"""
+async def test_o8_a_job_end_word_with_junk_anywhere_is_a_failed_run_with_no_report(world, junk):
+    """Per junk character, one worker drain over leading, trailing and interior (the word rotating with the character): failed/no_report. The helper served each job (exit 0, #1170), so no exit code is the run's to name. (O8, M3)"""
     base = _JUNK.index(junk)
     variants = [(*_JOB_END_WORDS[(base + n) % len(_JOB_END_WORDS)], where) for n, where in enumerate(_JUNK_SPELLINGS)]
-    child = _child(world, exit=EXIT, printed=MARKER)
+    child = _child(world, exit=0, printed=MARKER)
     order: list[tuple[str, str, str]] = []
 
     def argv(launch):
@@ -201,5 +200,4 @@ async def test_o8_a_job_end_word_with_junk_anywhere_is_a_failed_run_with_the_exi
     for inv in ids:
         stored = row(world["dsn"], inv)
         assert (stored["stage"], stored["disposition"], stored["failure_reason"]) == ("failed", None, "no_report"), stored
-        assert _names_code(stored, inv, EXIT), ("exit code", stored["failure_message"])
         _no_run_text(stored)

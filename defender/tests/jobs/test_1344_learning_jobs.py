@@ -396,15 +396,16 @@ async def test_the_exit_code_never_decides_the_row(world, record, exit_code, sta
 
 @pytest.mark.parametrize(("ends", "reason"), [
     pytest.param({"exit": 0}, "exited_without_result", id="exit-0"),
-    pytest.param({"exit": 7}, "exited_without_result", id="exit-7"),
-    # The child is the job's helper (#1170): a signal of its own is the helper's death, so the worker's error.
+    # The child is the job's helper (#1170): any other status is the helper failing, so the worker's error.
+    pytest.param({"exit": 7}, "worker_error", id="exit-7"),
     pytest.param({"die_by": int(signal.SIGKILL)}, "worker_error", id="dies-by-SIGKILL"),
     pytest.param({"die_by": int(signal.SIGSEGV)}, "worker_error", id="dies-by-SIGSEGV"),
 ])
-async def test_no_record_from_a_child_nobody_signalled_is_exited_without_result(world, ends, reason):
-    """No end record and no signal from the worker: a child that exited (0 or not) is `failed`/`exited_without_result`;
-    one that died by a signal of its own is the job's helper dying, `failed`/`worker_error` (#1170). Either way our own
-    message, never run text, and no retry. (End record, O12)"""
+async def test_no_record_from_a_child_nobody_signalled_is_exited_without_result_or_the_helpers_failure(
+        world, ends, reason):
+    """No end record and no signal from the worker: a child (the job's helper, #1170) that exited 0 served the job,
+    which left no result: `failed`/`exited_without_result`; any other exit is the helper failing: `failed`/
+    `worker_error`. Either way our own message, never run text, and no retry. (End record, O12)"""
     job_proc = job_child(world, printed=RUN_TEXT, **ends)
     post = post_child(world)
     async with job_store(world["dsn"]) as store:

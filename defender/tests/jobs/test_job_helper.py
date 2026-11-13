@@ -1214,11 +1214,12 @@ def test_o7_a_helper_whose_parent_is_not_the_pid_it_was_handed_does_nothing_and_
 def test_o7_a_container_that_ran_and_exited_without_an_end_record_gets_none_from_the_helper(scene, rc):
     """The job container ran the job and exited with `rc` writing no end record: the helper writes none either (the
     worker then ends the row as the job left no report); only a `docker run` that never ran the job is the helper's to
-    record as a start failure (`test_a3_o11_a_container_that_cannot_start...`). (O7, A3)"""
+    record as a start failure (`test_a3_o11_a_container_that_cannot_start...`). The helper served the job, so it exits
+    0 whatever the container's status (#1170). (O7, A3)"""
     inv, docker, ran, _s = _go(scene, lambda c: rc)
 
     assert docker.job_ran, "control: the job ran in its container"
-    assert ran.rc == rc, ran.rc
+    assert ran.rc == 0, ran.rc
     assert scene.end(inv) is None, f"the helper wrote an end record for a job that ran: {scene.end(inv)}"
 
 

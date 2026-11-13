@@ -357,14 +357,16 @@ class ContainerStandIn(RecordingDocker):
     (rc, stderr) makes the `docker run` end at once, nothing run (an image missing: docker's rc 125).
     `exec_writer`, when set, is the host command a `docker exec` runs instead (a real writer). `stubborn`: the job ignores
     the graceful stop, so `docker stop --time N` blocks (as docker's does) until `rm -f` removes the container or N seconds
-    pass; the job waits on `container.removed`."""
+    pass; the job waits on `container.removed`. `networks`: what `docker network inspect` answers per name (a dict
+    docker would print, or None for no such network); a name it does not list is a bridge network made for the jobs."""
 
     def __init__(self, job: Callable[[Container], int] | None = None, *,
                  run_fault: tuple[int, str] | None = None, exec_writer: list[str] | None = None,
                  init: bool = False, queue: Path | None = None, stubborn: bool = False,
-                 runtimes: tuple[str, ...] | None = None) -> None:
+                 runtimes: tuple[str, ...] | None = None, networks: dict[str, dict | None] | None = None) -> None:
         super().__init__(runtimes=runtimes)
         self.job = job
+        self.networks = networks or {}
         self.stubborn = stubborn
         self.init = init
         self._queue = queue  # where an `init=True` container's init finds its commands
@@ -434,6 +436,8 @@ class ContainerStandIn(RecordingDocker):
         pids = self._process_question(argv, sub)
         if pids is not None:
             return pids
+        if sub == "network" and argv[2:3] == ["inspect"]:
+            return self._network(argv)
         if self._asks_a_free_name(argv, sub):
             # Per name, as a daemon answers: a name never created holds nothing, whatever state `status`/`phase`
             # model for the boxes that were (one shared phase would make every fresh name look taken to the
@@ -456,6 +460,14 @@ class ContainerStandIn(RecordingDocker):
                         box.stopping.set()  # `rm -f` kills a running container, as docker does
                         box.removed.set()
         return got
+
+    def _network(self, argv: list[str]) -> subprocess.CompletedProcess:
+        """`docker network inspect <name>`: `networks`' answer, a bridge made for the jobs by default."""
+        self.calls.append(argv)
+        found = self.networks.get(argv[-1], {"Name": argv[-1], "Driver": "bridge", "Options": {}})
+        if found is None:
+            return subprocess.CompletedProcess(argv, 1, "", f"Error response from daemon: network {argv[-1]} not found\n")
+        return subprocess.CompletedProcess(argv, 0, json.dumps(found) + "\n", "")
 
     def _asks_a_free_name(self, argv: list[str], sub: str) -> bool:
         """A `docker inspect -f {{.State.Status}} <name>` of a name no `create`/`run` ever made."""
@@ -854,6 +866,9 @@ _SHIM = textwrap.dedent("""\
                 if sub == "rm":
                     rec.unlink()
         sys.exit(0)
+    if sub == "network" and argv[1:2] == ["inspect"]:  # every network is a bridge made for the jobs
+        print(json.dumps({"Name": argv[-1], "Driver": "bridge", "Options": {}}))
+        sys.exit(0)
     if sub in ("inspect", "wait"):
         sys.exit(1)
     sys.exit(0)
@@ -931,3 +946,13 @@ def pid_alive(pid: int) -> bool:
     except OSError:
         return False
     return stat[stat.rindex(")") + 2] != "Z"
+
+
+def ensure_job_network(docker: Callable[..., subprocess.CompletedProcess]) -> str:
+    """The tests' job network (`DEFENDER_JOB_NETWORK`, set by the suite's conftest) on a real daemon: made as a bridge
+    network when it is missing, as `start-jobs-docker` makes the dev one. Its name."""
+    name = os.environ["DEFENDER_JOB_NETWORK"]
+    if docker(["docker", "network", "inspect", name]).returncode != 0:
+        made = docker(["docker", "network", "create", "--driver", "bridge", name])
+        assert made.returncode == 0 or "already exists" in (made.stderr or ""), made.stderr
+    return name

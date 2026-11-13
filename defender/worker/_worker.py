@@ -67,7 +67,6 @@ from defender.jobs import LearningProgress, is_outage, is_refusal
 from defender.jobs.audit import SYSTEM, announce
 from defender.box import CLAIM_ENV, container_name
 from defender.execution import kill_group, wait_group_gone
-from defender.job_socket import HELPER_FAILED
 from defender.records import job_facts, job_lane
 from defender.records.formats import DataRoot, digest_of
 from defender.tenancy import data_root_for_child, data_root_from_path
@@ -180,16 +179,14 @@ def _exit_words(returncode: int) -> str:
 
 
 def _helper_failed(returncode: int, held: Held) -> bool:
-    """Whether the job's helper itself died or failed (#1170): killed by a signal no stop or fence of this worker sent,
-    or exited `HELPER_FAILED`. A job container's own status never reads so: the helper hands it on as a status >= 0."""
-    if held.fenced or held.signalled:
-        return False
-    return returncode < 0 or returncode == HELPER_FAILED
+    """Whether the job's helper itself failed (#1170): any status but 0, which the helper gives exactly when it
+    served the job to its end, whatever its container's status (the helper logs that). A stop or fence of this
+    worker's is not the helper's failure."""
+    return returncode != 0 and not (held.fenced or held.signalled)
 
 
 def _helper_words(returncode: int) -> str:
-    return (f"the job's helper was killed by signal {-returncode}" if returncode < 0
-            else "the job's helper failed")
+    return f"the job's helper {_exit_words(returncode)}"
 
 
 def _learning_without_end(held: Held, returncode: int, progress: LearningProgress | None) -> LearningOutcome:
@@ -201,7 +198,8 @@ def _learning_without_end(held: Held, returncode: int, progress: LearningProgres
         return LearningOutcome(job_lane.LEARNING_FAILED, job_lane.WORKER_ERROR,
                                f"{_helper_words(returncode)} before the job recorded its end", progress)
     return LearningOutcome(job_lane.LEARNING_FAILED, job_lane.EXITED_WITHOUT_RESULT,
-                           f"the job's child left no readable end record; it {_exit_words(returncode)}", progress)
+                           "the job left no readable end record; its container's status is in the helper's log",
+                           progress)
 
 
 def _ending_from(end: job_lane.JobEnd | None, returncode: int,
@@ -214,7 +212,7 @@ def _ending_from(end: job_lane.JobEnd | None, returncode: int,
                       failure_message=f"{_helper_words(returncode)} before the job recorded its end")
     if end is None:
         return Ending(_FAILED, failure_reason=_NO_REPORT,
-                       failure_message=f"the run left no job-end record; the child {_exit_words(returncode)}")
+                       failure_message="the run left no job-end record; its container's status is in the helper's log")
     if end.setup == job_facts.SETUP_REFUSED:
         return Ending(_FAILED, failure_reason=_SETUP_REFUSED,
                        failure_message="run setup refused the job", decided_by_run=True)
@@ -373,7 +371,7 @@ class Worker:
         """At start, before anything is claimed: every container carrying the job-container label
         (`job_socket.JOB_LABEL`) whose helper no longer runs is removed; its helper died with a previous
         worker, claim tokens included (#1170 A5). A live helper's container, another worker's on a
-        shared daemon, is spared (`_containers.helper_alive`). Never an error: what
+        shared daemon, is spared (`tenancy.mark_alive`). Never an error: what
         cannot be removed is logged, and the tenant's teardown removes it by the tenant's label."""
         try:
             await asyncio.to_thread(self._containers.remove_job_containers)
