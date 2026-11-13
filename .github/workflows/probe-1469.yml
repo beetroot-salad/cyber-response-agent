@@ -7,50 +7,13 @@ on:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
-      - name: Build the box image
-        run: python3 defender/box/image_cli.py build
-      - name: Build the job image
-        run: docker build -f .devcontainer/Dockerfile.job -t defender-job:latest .
-      - uses: astral-sh/setup-uv@v7
-      - run: uv python install 3.11
-      - working-directory: defender
-        run: uv sync --extra dev --extra runtime --extra api --locked
       - uses: ./.github/actions/install-gvisor
-      - name: Start PostgreSQL
+      - name: Probe C - docker info JSON for runtimes (as main registers runsc)
         run: |
-          docker run -d --name defender-postgres --runtime runc -e POSTGRES_PASSWORD=postgres \
-            -p 127.0.0.1:5432:5432 postgres:17.11
-          timeout 60 sh -c 'until docker exec defender-postgres pg_isready -h 127.0.0.1 -q; do sleep 1; done'
-
-      - name: Probe A - what the peer check sees (daemon-wide --host-uds=open, as main)
-        working-directory: defender
-        env:
-          DEFENDER_TEST_POSTGRES_DSN: postgresql://postgres:postgres@127.0.0.1:5432/postgres
-        run: uv run pytest tests/e2e/test_probe_1469_peer.py -s -v -p no:cacheprovider
-
-      - name: Probe B - two runtimes, plain runsc vs runsc-job, connecting to a host socket
-        run: |
-          set -x
-          sudo runsc install -- --oci-seccomp
+          docker info --format '{{json .Runtimes}}' | python3 -c "import json,sys; d=json.load(sys.stdin); print(json.dumps({k: {kk: vv for kk, vv in v.items() if kk != 'status'} for k, v in d.items()}, indent=1)); print('KEYS', {k: sorted(v) for k, v in d.items()})"
           sudo runsc install --runtime runsc-job -- --oci-seccomp --host-uds=open
-          cat /etc/docker/daemon.json
           sudo systemctl restart docker
-          docker info --format '{{.Runtimes}}' | tr ' ' '\n' | grep -o 'runsc[a-z-]*' | sort -u
-          d=$(mktemp -d); chmod 755 "$d"
-          python3 - "$d/s" <<'EOF' &
-          import socket, sys
-          s = socket.socket(socket.AF_UNIX); s.bind(sys.argv[1]); s.listen(8)
-          import os; os.chmod(sys.argv[1], 0o777)
-          while True:
-              c, _ = s.accept(); c.sendall(b"hello"); c.close()
-          EOF
-          sleep 1
-          for rt in runsc runsc-job runc; do
-            echo "--- runtime $rt"
-            docker run --rm --runtime "$rt" --network none -v "$d:$d" defender-job:latest \
-              python3 -c "import socket,sys; s=socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); print('CONNECTED', s.recv(5))" "$d/s" \
-              || echo "FAILED rt=$rt"
-          done
+          docker info --format '{{json .Runtimes}}' | python3 -c "import json,sys; d=json.load(sys.stdin); print(json.dumps({k: {kk: vv for kk, vv in v.items() if kk != 'status'} for k, v in d.items()}, indent=1))"
