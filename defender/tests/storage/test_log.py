@@ -337,11 +337,10 @@ def test_an_operator_run_whose_box_did_not_start_ends_in_one_logged_line_naming_
                                     "registered: install gVisor")
 
     capsys.readouterr()
-    with pytest.raises(SystemExit) as e:
-        RunWithPublish(T.mod("run")).main([str(RunPaths(src).alert), "--tenant", base.parent.name, "--no-learn"],
-                          lifecycle=lifecycle, visualize=lambda p, **kw: None,
-                          preflight=T.no_preflight)
-    assert e.value.code == 1
+    rc = RunWithPublish(T.mod("run")).main([str(RunPaths(src).alert), "--tenant", base.parent.name, "--no-learn"],
+                                           lifecycle=lifecycle, visualize=lambda p, **kw: None,
+                                           preflight=T.no_preflight)
+    assert rc == 1
     err = capsys.readouterr().err
     assert " CRITICAL " not in err, err
     assert "Traceback" not in err, err

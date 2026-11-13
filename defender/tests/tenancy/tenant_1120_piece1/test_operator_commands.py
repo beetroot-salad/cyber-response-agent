@@ -528,9 +528,7 @@ def test_1484_an_operator_run_whose_box_start_is_refused_exits_1_in_one_line_and
 
     argv = [str(H.plant_alert(tmp_path / "in")), "--tenant", H.TID, "--no-learn"]
     capsys.readouterr()
-    with pytest.raises(SystemExit) as e:
-        run_py.main(argv, **with_publish({**rec.seams(), "lifecycle": lifecycle}, argv))
-    assert e.value.code == 1
+    assert run_py.main(argv, **with_publish({**rec.seams(), "lifecycle": lifecycle}, argv)) == 1
     assert not investigated
     err = capsys.readouterr().err
     assert " CRITICAL " not in err, err

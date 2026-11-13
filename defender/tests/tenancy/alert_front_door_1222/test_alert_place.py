@@ -711,7 +711,7 @@ _BAD_SOURCES: dict[str, Callable[[Path], None]] = {
 def _start_over(tmp_path: Path, shape: Callable[[Path], None]) -> tuple[Any, Any, Path | None]:
     """One run whose input directory is put into `shape` just before its box starts; returns the
     scripted daemon, what the box start refused with, and the run folder. An operator's run whose
-    box did not start exits 1 (#1484), so the refusal is read at the box start itself."""
+    box did not start ends with exit 1 (#1484), so the refusal is read at the box start itself."""
     daemon = _scripted_daemon()
     seen: dict[str, Any] = {}
     start = _start_with(daemon)
@@ -728,16 +728,10 @@ def _start_over(tmp_path: Path, shape: Callable[[Path], None]) -> tuple[Any, Any
             seen["refused"] = e
             raise
 
-    exit_code: Any = None
-    try:
-        _main_boxed(tmp_path, S.plant_tenant(), S.alert_bytes(S.generic_alert()),
-                    start_box=start_box, investigate=_noop_investigate, around=around)
-    except SystemExit as stop:
-        exit_code = stop.code
+    rc = _main_boxed(tmp_path, S.plant_tenant(), S.alert_bytes(S.generic_alert()),
+                     start_box=start_box, investigate=_noop_investigate, around=around)
     if "refused" in seen:
-        assert exit_code == 1, f"a run whose box did not start exited {exit_code!r}, not 1"
-    else:
-        assert exit_code is None, f"the run exited ({exit_code!r}) without its box start refusing"
+        assert rc == 1, f"a run whose box did not start ended {rc!r}, not 1"
     return daemon, seen.get("refused"), seen.get("run_dir")
 
 

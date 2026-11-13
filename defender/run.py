@@ -1375,11 +1375,10 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
 
                 run_state = RunState(run_dir, run_dir.name)
                 try:
-                    with _unstarted_box_ends_the_run(operator=request is None):
-                        summary = lifecycle(**started.lifecycle_kwargs(ns), **in_container, run_state=run_state)
-                except (ServingAbort, BaseExceptionGroup) as escaped:
-                    return _unservable_exit(escaped, world=world, episode=episode,
-                                            lost=started.minting.access_lost())
+                    summary = lifecycle(**started.lifecycle_kwargs(ns), **in_container, run_state=run_state)
+                except (box_mod.BoxStartFault, ServingAbort, BaseExceptionGroup) as escaped:
+                    return _escaped_exit(escaped, operator=request is None, world=world, episode=episode,
+                                         lost=started.minting.access_lost())
 
                 def ticket_and_curation() -> None:
                     # No automatic feed into the learning pipeline; only catalog curation is
@@ -1777,20 +1776,6 @@ def _exit_code(summary: dict) -> int:
     return code
 
 
-@contextlib.contextmanager
-def _unstarted_box_ends_the_run(*, operator: bool) -> Iterator[None]:
-    """An operator's run whose box did not start (#1484) ends with one error line saying why, the box start's own
-    refusal and remedy (a runtime or an image the host lacks), and exit 1: nothing ran, and a traceback would add
-    nothing. A job's is raised on: its entry records `box: start_failed` from it (#1342 M3)."""
-    try:
-        yield
-    except box_mod.BoxStartFault as unstarted:
-        if not operator:
-            raise
-        _logger.error(str(unstarted))
-        raise SystemExit(1) from None
-
-
 def _serving_abort(exc: BaseException) -> ServingAbort | None:
     """The `ServingAbort` an escaping exception carries (an exception group may wrap it)."""
     if isinstance(exc, ServingAbort):
@@ -1801,6 +1786,20 @@ def _serving_abort(exc: BaseException) -> ServingAbort | None:
             if found is not None:
                 return found
     return None
+
+
+def _escaped_exit(escaped: BaseException, *, operator: bool, world: Any, episode: Episode | None,
+                  lost: str | None = None) -> int:
+    """The exit of a run the lifecycle ended early. An operator's run whose box did not start (#1484) ends with one
+    error line saying why, the box start's own refusal and remedy (a runtime or an image the host lacks), and exit 1:
+    nothing ran, and a traceback would add nothing; a job's is raised on, so its entry records `box: start_failed`
+    (#1342 M3). Anything else is `_unservable_exit`'s."""
+    if isinstance(escaped, box_mod.BoxStartFault):
+        if not operator:
+            raise escaped
+        _logger.error(str(escaped))
+        return 1
+    return _unservable_exit(escaped, world=world, episode=episode, lost=lost)
 
 
 def _unservable_exit(escaped: BaseException, *, world: Any, episode: Episode | None,

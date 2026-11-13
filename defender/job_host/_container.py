@@ -146,13 +146,19 @@ def job_container_name(session: Session) -> str:
 
 def container_run_argv(session: Session, socket: Path, command: list[str], environ: Mapping[str, str] = os.environ
                        ) -> list[str]:
-    """The job container's attached `docker run` (module doc)."""
-    from defender.box import CLAIM_LABEL, TENANT_LABEL, BoxSpec
+    """The job container's attached `docker run` (module doc). The runtime it names is asked of the daemon here
+    (#1484, `box.require_runtime`), while a stop still unwinds the helper's setup, so a host without it refuses naming
+    the remedy rather than in docker's words."""
+    from defender.box import CLAIM_LABEL, TENANT_LABEL, BoxFault, BoxSpec, require_runtime
 
     try:
         runtime = BoxSpec.from_env(environ).runtime
     except ValueError as unknown:
         raise StartFailed(str(unknown)) from None
+    try:
+        require_runtime(session.docker, runtime)
+    except BoxFault as missing:
+        raise StartFailed(str(missing)) from None
     if session.tenant_folder is None:
         raise StartFailed("the job's tenant was not accepted: there is no tenant folder to bind")
     uid, gid = owner(session)
@@ -184,18 +190,10 @@ def container_run_argv(session: Session, socket: Path, command: list[str], envir
 
 
 def start(session: Session, argv: list[str]) -> Any:
-    """The container, attached: its input a pipe this helper holds and never writes (A5); its output the helper's. The
-    runtime `argv` names is asked of the daemon first (#1484, `box.require_runtime`), so a host without it refuses
-    naming the remedy rather than in docker's words."""
-    from defender.box import BoxFault, require_runtime
-
+    """The container, attached: its input a pipe this helper holds and never writes (A5); its output the helper's."""
     popen = getattr(session.docker, "popen", None)
     if popen is None:
         raise StartFailed("the docker seam has no attached start (`popen`)")
-    try:
-        require_runtime(session.docker, argv[argv.index("--runtime") + 1])
-    except BoxFault as missing:
-        raise StartFailed(str(missing)) from None
     try:
         return popen(argv, stdin=subprocess.PIPE)
     except (OSError, subprocess.SubprocessError) as cannot:

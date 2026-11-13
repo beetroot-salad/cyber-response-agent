@@ -347,8 +347,9 @@ class ContainerStandIn(RecordingDocker):
 
     def __init__(self, job: Callable[[Container], int] | None = None, *,
                  run_fault: tuple[int, str] | None = None, exec_writer: list[str] | None = None,
-                 init: bool = False, queue: Path | None = None, stubborn: bool = False) -> None:
-        super().__init__()
+                 init: bool = False, queue: Path | None = None, stubborn: bool = False,
+                 runtimes: tuple[str, ...] | None = None) -> None:
+        super().__init__(runtimes=runtimes)
         self.job = job
         self.stubborn = stubborn
         self.init = init

@@ -1261,16 +1261,6 @@ def test_a3_o11_a_container_that_cannot_start_ends_the_row_as_a_box_start_failur
     assert end.setup != SETUP_REFUSED
 
 
-class _NoRunscStandIn(ContainerStandIn):
-    """A daemon that lists only Docker's default runtime (`docker info`)."""
-
-    def __call__(self, argv, **kw) -> subprocess.CompletedProcess:
-        if list(argv)[1:2] == ["info"]:
-            self.log.append(list(argv))
-            return subprocess.CompletedProcess(argv, 0, json.dumps({"runc": {"path": "runc"}}) + "\n", "")
-        return super().__call__(argv, **kw)
-
-
 def test_a_worker_host_without_runsc_ends_the_row_as_a_box_start_failure_naming_the_remedy_and_starts_nothing(
         scene, capsys):
     """#1484: the helper asks its daemon for the job's runtime before the container's start: none is started, the end
@@ -1278,7 +1268,7 @@ def test_a_worker_host_without_runsc_ends_the_row_as_a_box_start_failure_naming_
     from defender.records.job_facts import BOX_START_FAILED
 
     inv, argv = _investigation(scene)
-    docker = _NoRunscStandIn(lambda c: 0)
+    docker = ContainerStandIn(lambda c: 0, runtimes=("runc",))
     ran = drive_helper(scene, argv, docker=docker, signer=make_signer())
 
     assert ran.raised is None, ran.raised
