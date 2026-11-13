@@ -118,13 +118,22 @@ class RealBackend:
         return ids
 
     async def learning_jobs(self, tenant: str, times: list[dt.datetime]) -> list[str]:
+        """Each job's id read from its table by its own investigation, in creation order: never from the read under test."""
+        from sqlalchemy import select
+
+        from defender.jobs.models import LearningJobRow
+
+        ids = []
         for n, t in enumerate(times):
             alert = await _alert(self.store, tenant, f"J-{n}")
             self.clock.at = t
-            await _ended(self.store, self.reads, alert, tenant=tenant, disposition="benign", cost_usd=1.0)  # the end queues the auto job, stamped now
+            investigation = await _ended(self.store, self.reads, alert, tenant=tenant, disposition="benign", cost_usd=1.0)  # the end queues the auto job, stamped now
+            async with self.store._sessions() as session:
+                found = (await session.execute(select(LearningJobRow.id).where(LearningJobRow.investigation_id == investigation))).scalars().all()
+            assert len(found) == 1, "one auto job per ended investigation"
+            ids.append(str(found[0]))
         self.clock.at = AT
-        found = await self.reads.list_learning_jobs(tenant, investigation_id=None, after=None, limit=1000)
-        return [str(j.learning_job_id) for j in found]
+        return ids
 
 
 class FakeBackend:

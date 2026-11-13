@@ -10,10 +10,13 @@ import dataclasses
 import datetime as dt
 import json
 import logging
+import re
+import uuid
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
+import anyio
 import httpx
 import pytest
 
@@ -22,14 +25,21 @@ from defender.tests.support.api._server1083 import (
     ANN,
     B,
     ORIGIN,
+    BOB,
+    OPS,
+    PROGRAMS_REALM,
+    SIGNIN_REALM,
     Child,
     FakeKeycloak,
     Seeded,
+    TokenCredential,
     environment,
     free_port,
     person,
     program,
+    program_token,
     seed_identity,
+    seed_token_credential,
 )
 from defender.tests.support.jobs._jobs1342 import (
     ALERT_BYTES,
@@ -47,6 +57,7 @@ pytestmark = pytest.mark.anyio
 WORK_ACTIONS = ("investigation.start", "investigation.cancel", "investigation.delete", "learning_job.start",
                 "alert_mapping.update")
 MAPPING_ENTRIES = ("signature", "event_time", "summary", "case_key", "title", "description")
+C = "0b6f1c1e-3c55-4a4e-9a51-1083000000cc"
 NOON = dt.datetime(2026, 11, 1, 12, tzinfo=dt.UTC)
 
 
@@ -69,6 +80,9 @@ class Served:
 
     def program(self) -> dict[str, str]:
         return program(self.seeded.program_key)
+
+    def bearer(self, token: str) -> dict[str, str]:
+        return program(token)
 
     def user_id(self, email: str) -> str:
         [(found,)] = execute(self.dsn, "SELECT id FROM identity.users WHERE email = %s", (email,))
@@ -94,6 +108,12 @@ async def served(tenants: str, tmp_path: Path) -> AsyncIterator[Served]:
             httpx.AsyncClient(transport=httpx.ASGITransport(app=running.app), base_url=ORIGIN) as client:
         yield Served(client, running.app, tenants, tmp_path, keycloak, seeded)
     assert keycloak.unmodelled == []
+
+
+@pytest.fixture
+async def token_credential(served: Served) -> TokenCredential:
+    """A live OAuth credential of the seeded program, so the programs realm's tokens can be minted for it."""
+    return await seed_token_credential(served.dsn, served.seeded)
 
 
 async def _alerts(dsn: str, tenant: str, *fired: dt.datetime) -> list[str]:
@@ -319,9 +339,61 @@ async def test_o7_an_administrator_creates_a_tenant_row_the_lifecycle_will_work(
     read = await served.client.get(f"/admin/tenants/{tenant_id}", headers=served.ops())
     assert read.status_code == 200
     assert tenant_id in {t["tenant_id"] for t in (await served.client.get("/admin/tenants", headers=served.ops())).json()["items"]}
-    # The caller is judged by the identity store: a member who is no platform administrator is refused.
-    assert (await served.client.post("/admin/tenants", headers=served.ann())).status_code in (403, 404)
-    assert len(execute(served.dsn, "SELECT id FROM tenancy.tenants WHERE id = %s", (tenant_id,))) == 1
+    # The caller is judged by the identity store: a member who is no platform administrator is refused, and no row is made.
+    before = execute(served.dsn, "SELECT count(*) FROM tenancy.tenants")
+    assert before == [(3,)]  # A, B and the one just created
+    refused = await served.client.post("/admin/tenants", headers=served.ann())
+    assert refused.status_code == 403
+    assert execute(served.dsn, "SELECT count(*) FROM tenancy.tenants") == before
+
+
+@pytest.mark.postgres
+async def test_o7_an_administrator_invites_an_existing_user_into_an_empty_tenant_by_rows_and_a_logged_notice(
+        served, caplog):
+    """The invitation writes an invited membership and a notice request, logs the notice, and writes nothing to Keycloak. (O7, N10)"""
+    register_tenant(served.dsn, C)
+    caplog.set_level(logging.INFO)
+    invited = await served.client.post(f"/admin/tenants/{C}/invitations", headers=served.ops(), json={"email": BOB})
+    assert invited.status_code == 202
+    invitation_id = invited.json()["id"]
+    assert execute(served.dsn, "SELECT m.status, u.email, m.invited_by FROM identity.memberships m "
+                   "JOIN identity.users u ON u.id = m.user_id WHERE m.tenant_id = %s", (C,)) == [
+        ("invited", BOB, uuid.UUID(served.user_id(OPS)))]
+    # The sender is the identity loop's, on its own interval: the notice reaches the log, naming who, where and which.
+    with anyio.fail_after(60):
+        while not any(invitation_id in r.getMessage() and BOB in r.getMessage() and C in r.getMessage()
+                      for r in caplog.records):
+            await anyio.sleep(0.5)
+    assert [m for m in served.keycloak.seen if m[0] != "GET" and "/admin/realms/" in m[1]] == []
+    # Control: the same route refuses a tenant that has members.
+    assert (await served.client.post(f"/admin/tenants/{A}/invitations", headers=served.ops(),
+                                     json={"email": BOB})).status_code == 409
+
+
+@pytest.mark.postgres
+async def test_o7_an_administrator_offboards_a_tenant_and_its_queued_investigation_is_aborted(served):
+    """Offboarding moves the tenant to `offboarding`, aborts its queued investigation and ends its members' access. (O7)"""
+    [alert_id], [other_alert] = await _alerts(served.dsn, A, NOON), await _alerts(served.dsn, B, NOON)
+    queued = (await _start(served, alert_id, "req-1")).json()["investigation_id"]
+    other = (await served.client.post(f"/tenants/{B}/investigations", headers=served.bob(),
+                                      json={"alert_id": other_alert, "client_request_id": "req-1"})).json()["investigation_id"]
+    assert row(served.dsn, queued)["stage"] == "queued"  # premise
+
+    refused = await served.client.post(f"/admin/tenants/{A}/offboard", headers=served.ann())
+    assert refused.status_code == 403
+    assert execute(served.dsn, "SELECT state FROM tenancy.tenants WHERE id = %s", (A,)) == [("active",)]
+
+    done = await served.client.post(f"/admin/tenants/{A}/offboard", headers=served.ops())
+    assert done.status_code == 202
+    assert (done.json()["state"], done.json()["pending_action"]) == ("offboarding", "offboard")
+    assert execute(served.dsn, "SELECT state, pending_action FROM tenancy.tenants WHERE id = %s", (A,)) == [
+        ("offboarding", "offboard")]
+    assert execute(served.dsn, "SELECT stage, failure_reason FROM jobs.investigations WHERE id = %s", (queued,)) == [
+        ("aborted", "tenant_offboarded")]
+    assert (await served.client.get(f"/tenants/{A}/alerts", headers=served.ann(write=False))).status_code == 404
+    # Control: another tenant's queued investigation and access are untouched.
+    assert row(served.dsn, other)["stage"] == "queued"
+    assert (await served.client.get(f"/tenants/{B}/alerts", headers=served.bob(write=False))).status_code == 200
 
 
 # --- unbacked families ------------------------------------------------------------------------------
@@ -442,3 +514,139 @@ async def test_o9_each_work_action_is_announced_once_naming_its_caller(served, c
         event = named[action, target]
         assert (event.actor, event.credential_id, event.tenant_id) == (ann_id, None, A), action
     assert named["learning_job.start", job].detail == f"investigation {done}; trigger=explicit"
+
+
+@pytest.mark.postgres
+async def test_o9_a_start_through_a_client_credentials_token_names_that_credential(served, token_credential, caplog):
+    """A start by a program's access token is announced with the token credential, not the key's. (O9)"""
+    [alert_id] = await _alerts(served.dsn, A, NOON)
+    caplog.set_level(logging.DEBUG)
+    caplog.clear()
+    token = program_token(served.keycloak, token_credential)
+    started = await _start(served, alert_id, "ci-token-1", served.bearer(token))
+    assert started.status_code == 201
+    [event] = [e for e in _announced(caplog) if e.action == "investigation.start"]
+    assert (event.actor, event.credential_id, event.target) == (
+        served.seeded.program_id, token_credential.credential_id, started.json()["investigation_id"])
+    assert token_credential.credential_id != served.seeded.credential_id
+
+
+# --- callers by routes ------------------------------------------------------------------------------
+
+@pytest.mark.postgres
+async def test_o5_the_programs_realm_token_is_admitted_for_its_audience_signer_and_lifetime_only(served, token_credential):
+    """A token with the right audience passes; a wrong audience, signer or lifetime is refused 401, as is a stranger's bearer. (O5)"""
+    path = f"/tenants/{A}/alerts"
+    right = program_token(served.keycloak, token_credential)
+    assert (await served.client.get(path, headers=served.bearer(right))).status_code == 200
+    wrong = {
+        "audience": program_token(served.keycloak, token_credential, audience="defender-api"),
+        "signed for the sign-in realm": program_token(served.keycloak, token_credential, realm=SIGNIN_REALM),
+        "expired": program_token(served.keycloak, token_credential, lifetime=-dt.timedelta(minutes=1)),
+        "not a token": "not.a.token",
+    }
+    for why, token in wrong.items():
+        refused = await served.client.get(path, headers=served.bearer(token))
+        assert refused.status_code == 401, why
+        assert refused.headers["www-authenticate"].startswith("Bearer"), why
+    assert PROGRAMS_REALM != SIGNIN_REALM  # the control's premise: two realms, two keys
+
+
+def _declarations(dependant: Any) -> set[str]:
+    found = {sub.call.declares for sub in dependant.dependencies if getattr(sub.call, "declares", None)}
+    for sub in dependant.dependencies:
+        found |= _declarations(sub)
+    return found
+
+
+def _route_table(app: Any) -> list[tuple[str, str, str]]:
+    """Every served operation as (method, path, declaration): the permission it names, else `platform`, else its category."""
+    from defender.api.app import _served_routes
+    from defender.identity.roles import ROLE_PERMISSIONS
+
+    permissions = set(ROLE_PERMISSIONS["admin"])
+    table = set()
+    for route in _served_routes(app.routes):
+        found = _declarations(route.dependant)
+        [declared] = (found & {"platform"}) or (found & permissions) or (found - {"person"} or {"person"})
+        table |= {(method, route.path, declared) for method in route.methods if method not in {"HEAD", "OPTIONS"}}
+    return sorted(table)
+
+
+UNKNOWN = "0b6f1c1e-3c55-4a4e-9a51-1083000000ff"
+
+
+def _concrete(path: str, tenant: str) -> str:
+    """`path` with the tenant the caller acts in (on a tenant's routes), a system named `tix`, any other id one nothing holds."""
+    def fill(found: re.Match[str]) -> str:
+        name = found.group(1)
+        return "tix" if name == "system_id" else tenant if name == "tenant_id" and path.startswith("/tenants/") else UNKNOWN
+    return re.sub(r"\{(\w+)(?::\w+)?\}", fill, path)
+
+
+SYSTEM = {"kind": "ticket", "display_name": "Tickets", "enabled": True, "settings": {}}
+CREDENTIALS = {"kind": "static", "credentials": {"api_token": "a-secret-of-sixteen-or-more"}}
+
+
+def _body(method: str, path: str) -> dict[str, Any]:
+    """A body that gets past validation where a route's answer would otherwise be its 422: the systems' bodies."""
+    if method not in {"POST", "PUT", "PATCH"}:
+        return {}
+    return {"json": CREDENTIALS if path.endswith("/credentials") and "/systems" in path
+            else SYSTEM if "/systems/" in path else {}}
+
+
+def _refusal(declared: str, outsider: bool, is_person: bool, is_admin: bool) -> int | None:
+    """The status a refused caller must get from the permission table (#1307 D4), None for one the route lets in."""
+    from defender.identity.roles import grants
+
+    if outsider:
+        return 404  # a non-member, an administrator included, and a program of another tenant
+    if declared == "platform":
+        return None if is_admin else 403
+    if declared == "person":
+        return None if is_person else 403
+    if declared in {"any", "public"}:
+        return None
+    return None if is_person or grants("automation", declared) else 403
+
+
+@pytest.mark.postgres
+async def test_o5_every_route_answers_every_caller_as_the_permission_table_says(served, token_credential):
+    """Each route, by each caller: refusals are the table's exact status, nothing is 500, only systems and lessons are 501. (O5, O8, O3)"""
+    from defender.identity.roles import ROLE_PERMISSIONS
+
+    table = _route_table(served.app)
+    kinds = {declared for _, _, declared in table}
+    assert set(ROLE_PERMISSIONS["admin"]) | {"platform"} <= kinds, kinds  # the table covers every permission and the administrator
+    token = program_token(served.keycloak, token_credential)
+    tenant_a, tenant_b = A, B
+    callers = {  # name -> (headers, is a person, tenant it is a member of, platform administrator)
+        "ann": (served.ann(), True, tenant_a, False), "ops": (served.ops(), True, None, True),
+        "bob": (served.bob(), True, tenant_b, False), "key": (served.program(), False, tenant_a, False),
+        "token": (served.bearer(token), False, tenant_a, False)}
+    seen: collections.Counter[tuple[str, str]] = collections.Counter()
+    for method, path, declared in table:
+        if declared == "public" or path == "/auth/logout":  # sign-in redirects reach the identity provider; logout ends the session the matrix uses
+            continue
+        tenant_route = path.startswith("/tenants/")
+        for name, (headers, is_person, member_of, is_admin) in callers.items():
+            for acts_in in ((A, B) if tenant_route else (None,)):
+                url = _concrete(path, acts_in or A)
+                got = (await served.client.request(method, url, headers=headers, **_body(method, path))).status_code
+                who = f"{name} {method} {url} ({declared})"
+                assert got != 500, who
+                expected = _refusal(declared, tenant_route and member_of != acts_in, is_person, is_admin)
+                if expected is not None:
+                    assert got == expected, who
+                    seen[name, "refused"] += 1
+                    continue
+                seen[name, "passed"] += 1
+                assert got not in (401, 403), who
+                unbacked = "/systems" in path or "/lessons" in path
+                assert (got == 501) == unbacked, who
+    anonymous = {(m, p): (await served.client.request(m, _concrete(p, A), **_body(m, p))).status_code
+                 for m, p, d in table if d not in {"public"} and p != "/auth/logout"}
+    assert set(anonymous.values()) == {401}, {k: v for k, v in anonymous.items() if v != 401}
+    # Every caller has been both let in and refused somewhere, so none of the table was vacuous.
+    assert all(seen[name, outcome] for name in callers for outcome in ("passed", "refused")), seen

@@ -1,7 +1,7 @@
 """#1083 piece 1: the server program's settings, start refusals, stop and close (`python -m defender.api_server`).
 
-Refusals and stops run the program as a child (`Child`); the close promise is also observed in-process through
-`defender.api_server.serving`, because a child's exit drops its connections either way."""
+The settings and the probe are covered as classes in-process (`Settings.from_environ`, `serving`); a child process
+(`Child`) is kept for one case per step kind and for the stop, where the child's own `run` reports its return."""
 from __future__ import annotations
 
 import socket
@@ -12,17 +12,22 @@ import pytest
 from defender.tests.support.api._server1083 import (
     ADMIN_READ,
     ANN,
+    BACK,
+    FAULTS,
+    FRONT,
     OPS,
     PROGRAMS_REALM,
     REALMS,
     SETTING_NAMES,
     SIGNIN_REALM,
+    STEPS,
     Child,
+    Fail,
     FakeKeycloak,
-    Faults,
     closed_port,
     environment,
     free_port,
+    realms_named,
     seed_identity,
 )
 from defender.tests.support.jobs._jobs1342 import register_tenant
@@ -45,87 +50,130 @@ def _backends(dsn: str) -> int:
 
 
 def _refused(child: Child, *, mentions: tuple[str, ...]):
-    """The program ended with a refusal: non-zero, `mentions` on stderr, no traceback."""
+    """The program ended with a refusal: exit above 0 (not a signal death), `mentions` on stderr, no traceback."""
     ended = child.ended()
-    assert ended.returncode not in (0, -9999), ended.stderr
+    assert ended.returncode > 0, (ended.returncode, ended.stderr)
     for text in mentions:
         assert text in ended.stderr, ended.stderr
     assert "Traceback" not in ended.stderr
     return ended
 
 
-def _names_realm(stderr: str, realm: str) -> bool:
-    """The realm is named by its own name; `defender` is also a prefix of `defender-programs`."""
-    return PROGRAMS_REALM in stderr if realm == PROGRAMS_REALM else SIGNIN_REALM in stderr.replace(PROGRAMS_REALM, "")
+# --- settings and the probe, as classes ----------------------------------------------------------------
 
-
-# --- settings --------------------------------------------------------------------------------------
-
-def test_the_full_environment_parses_and_each_missing_setting_refuses_naming_it(tmp_path):
-    """`Settings.from_environ` parses the full environment; each setting missing refuses, naming it. (O1, Am-7)"""
-    from defender.api_server import Settings, StartRefused
-
-    environ = environment(tmp_path, dsn="postgresql://defender@127.0.0.1:1/none")
-    assert Settings.from_environ(environ) is not None  # positive control
-    for name in SETTING_NAMES:
-        without = {k: v for k, v in environ.items() if k != name}
-        with pytest.raises(StartRefused, match=name):
-            Settings.from_environ(without)
-
-
-def _invalid_settings(tmp_path: Path) -> list[tuple[str, str, str]]:
-    """`(case, setting, bad value)` for every setting where invalid is meaningful, generated from the names:
-    a port that is not an integer, a secret file that cannot be read (absent; a directory), an administrators file
-    that is not the FC-4 shape (absent; a list; the retired `tenants` section; a string for the list; not an
-    email; empty)."""
-    cases = []
-    for name in SETTING_NAMES:
-        if name.endswith("_SECRET_FILE"):
-            cases.append(("absent", name, str(tmp_path / "no-such-secret")))
-            cases.append(("directory", name, str(tmp_path)))
-        if name == "DEFENDER_API_PORT":
-            cases.append(("not-an-integer", name, "eighty"))
-        if name == "DEFENDER_API_ADMINISTRATORS_FILE":
-            cases.append(("absent", name, str(tmp_path / "no-such-administrators")))
-            for label, text in (("list", "- ops@platform.example\n"),
-                                ("tenants-section", "tenants: {}\nadministrators: [ops@platform.example]\n"),
-                                ("string", "administrators: ops@platform.example\n"),
-                                ("not-an-email", "administrators: [not-an-email]\n"),
-                                ("empty", "")):
-                path = tmp_path / f"administrators-{label}.yaml"
-                path.write_text(text)
-                cases.append((label, name, str(path)))
+#: A bad value of the setting's own type, with a label; each is one the program must refuse (Am-7, FC-3).
+def _shape_violations(name: str, tmp_path: Path) -> list[tuple[str, str]]:
+    cases: list[tuple[str, str]] = []
+    if name == "DEFENDER_API_PORT":
+        cases += [("port 0", "0"), ("port 70000", "70000"), ("port negative", "-1"), ("port not an integer", "eighty")]
+    if name == "DEFENDER_DATABASE_DSN":
+        cases.append(("unparsable dsn", "not a dsn"))
+    if name.endswith("_ISSUER"):
+        cases += [("issuer without a realm", f"{FRONT}/elsewhere"), ("issuer with no realm name", f"{FRONT}/realms/")]
+    if name == "DEFENDER_KEYCLOAK_SERVER_URL":
+        cases.append(("server url with a path", f"{BACK}/realms/{SIGNIN_REALM}"))
+    if name.endswith("_SECRET_FILE"):
+        cases += [("secret file absent", str(tmp_path / "no-such-secret")), ("secret file a directory", str(tmp_path))]
+        for label, text in (("empty", ""), ("only a newline", "\n"), ("two lines", "one\ntwo\n")):
+            path = tmp_path / f"secret-{label.replace(' ', '-')}"
+            path.write_text(text)
+            cases.append((f"secret file {label}", str(path)))
+    if name == "DEFENDER_API_ADMINISTRATORS_FILE":
+        cases.append(("administrators file absent", str(tmp_path / "no-such-administrators")))
+        for label, text in (("list", "- ops@platform.example\n"),
+                            ("tenants-section", "tenants: {}\nadministrators: [ops@platform.example]\n"),
+                            ("string", "administrators: ops@platform.example\n"),
+                            ("not-an-email", "administrators: [not-an-email]\n"),
+                            ("empty", "")):
+            path = tmp_path / f"administrators-{label}.yaml"
+            path.write_text(text)
+            cases.append((f"administrators file {label}", str(path)))
     return cases
 
 
-def test_each_invalid_setting_refuses_naming_it(tmp_path):
-    """`Settings.from_environ` refuses every invalid value, naming its setting. (O1, Am-7)"""
-    from defender.api_server import Settings, StartRefused
-
-    environ = environment(tmp_path, dsn="postgresql://defender@127.0.0.1:1/none")
-    cases = _invalid_settings(tmp_path)
-    assert {name for _, name, _ in cases} >= {n for n in SETTING_NAMES if n.endswith("_SECRET_FILE")}
-    for _case, name, bad in cases:
-        with pytest.raises(StartRefused, match=name):
-            Settings.from_environ({**environ, name: bad})
+#: Generated junk for any setting: either it starts or it refuses naming the setting; nothing else may happen.
+JUNK = {"whitespace": " \t ", "multi-line": "a\nb\n", "junk bytes": "\x01\x7f\ufffd"}
 
 
+async def _attempt(case: str, environ: dict[str, str], dsn: str, fails: tuple[Fail, ...] = ()) -> str | None:
+    """Parse and start in-process; None if it started (and stopped), else the refusal's message. Leaves no
+    connection of the database behind either way; any other exception fails the case."""
+    from defender.api_server import Settings, StartRefused, serving
+
+    message = None
+    try:
+        async with serving(Settings.from_environ(environ), transport=FakeKeycloak(fails)):
+            pass
+    except StartRefused as refused:
+        message = str(refused)
+    except Exception as unexpected:  # noqa: BLE001 - the promise is that nothing else escapes
+        pytest.fail(f"{case}: {type(unexpected).__name__}: {unexpected}")
+    assert _backends(dsn) == 0, case
+    return message
+
+
+def test_the_probe_failure_table_covers_every_step_of_both_realms():
+    """The fault table has failures for every probe step of both realms; no setting name hides in another. (O3, Am-7)"""
+    assert set(FAULTS) == {(realm, step) for realm in REALMS for step in STEPS}
+    assert STEPS[0] == "discovery"
+    assert all(FAULTS.values())
+    assert not [(a, b) for a in SETTING_NAMES for b in SETTING_NAMES if a != b and a in b]
+
+
+@pytest.mark.postgres
 @pytest.mark.parametrize("name", SETTING_NAMES)
-def test_the_command_refuses_a_missing_setting_naming_it(tmp_path, name):
-    """The shipped command, one setting missing: that setting on stderr, non-zero, no traceback. (O1, Am-3)"""
+async def test_a_setting_missing_empty_junk_or_misshapen_starts_or_refuses_naming_only_it(
+        tmp_path, migrated_database, name):
+    """Each setting, missing, empty, junk or misshapen: it starts, or refuses naming that setting alone. (O1, Am-7)"""
+    healthy = environment(tmp_path, dsn=migrated_database)
+    assert await _attempt("healthy", healthy, migrated_database) is None  # positive control: the unspoiled environment starts
+    cases: list[tuple[str, str | None, bool]] = [("missing", None, True), ("empty", "", True)]
+    cases += [(label, value, False) for label, value in JUNK.items()]
+    cases += [(label, value, True) for label, value in _shape_violations(name, tmp_path)]
+    refused = 0
+    for label, value, must_refuse in cases:
+        environ = {**healthy, "DEFENDER_API_PORT": str(free_port())}
+        if value is None:
+            del environ[name]
+        else:
+            environ[name] = value
+        case = f"{name} {label}"
+        message = await _attempt(case, environ, migrated_database)
+        if message is None:
+            assert not must_refuse, f"{case} started"
+            continue
+        refused += 1
+        stripped = message.replace(value or "\0", "")
+        assert [n for n in SETTING_NAMES if n in message] == [name], (case, message)
+        if "PROGRAMS" not in name:
+            assert PROGRAMS_REALM not in stripped, (case, message)
+    assert refused >= 2  # the missing and the empty value, at least
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize(("realm", "step"), list(FAULTS))
+async def test_every_failure_of_a_probe_step_refuses_naming_that_realm_alone(tmp_path, migrated_database, realm, step):
+    """Each failure kind at each realm's probe step refuses start naming that realm, no other, no setting. (O3, FC-6)"""
+    environ = environment(tmp_path, dsn=migrated_database)
+    assert await _attempt("healthy", environ, migrated_database) is None  # positive control
+    for kind in FAULTS[(realm, step)]:
+        case = f"{realm} {step} {kind}"
+        message = await _attempt(case, {**environ, "DEFENDER_API_PORT": str(free_port())}, migrated_database,
+                                 (Fail(realm, step, kind),))
+        assert message is not None, f"{case} started"
+        assert realms_named(message) == {realm}, (case, message)
+        assert [n for n in SETTING_NAMES if n in message] == [], (case, message)
+        if step == "discovery":
+            assert "discovery" in message, (case, message)
+
+
+def test_the_command_refuses_one_missing_setting_naming_it(tmp_path):
+    """The shipped command with a setting missing: that setting alone on stderr, non-zero, no traceback. (O1, Am-3)"""
+    name = "DEFENDER_KEYCLOAK_ISSUER"
     environ = environment(tmp_path, dsn=UNREACHABLE_DSN.format(port=1))
     del environ[name]
-    _refused(Child.real(environ), mentions=(name,))
-
-
-def test_the_program_refuses_each_invalid_setting_naming_it(tmp_path):
-    """Each invalid setting ends the program with that setting on stderr, non-zero, no traceback. (O1, Am-3)"""
-    cases = _invalid_settings(tmp_path)
-    for case, name, bad in cases:
-        environ = environment(tmp_path, dsn=UNREACHABLE_DSN.format(port=1))
-        environ[name] = bad
-        ended = _refused(Child.faked(environ), mentions=(name,))
-        assert ended.returncode > 0, case
+    ended = _refused(Child.real(environ), mentions=(name,))
+    assert [n for n in SETTING_NAMES if n in ended.stderr] == [name]
 
 
 # --- refusals at each later step --------------------------------------------------------------------
@@ -167,34 +215,18 @@ def test_an_unreachable_keycloak_refuses_start_naming_realm_step_and_address(tmp
     assert SIGNIN_REALM in ended.stderr.replace(f"127.0.0.1:{port}", "")
 
 
-def _faults(realm: str) -> dict[str, Faults]:
-    """One fault per kind the fake can produce, on `realm` alone."""
-    return {
-        "missing realm": Faults(missing=(realm,)),
-        "wrong issuer": Faults(issuer={realm: "http://elsewhere.example/realms/other"}),
-        "bad secret": Faults(bad_secret=(realm,)),
-        "no role": Faults(no_role=(realm,)),
-    }
-
-
 @pytest.mark.postgres
-def test_every_realm_probe_failure_refuses_start_naming_that_realm(tmp_path, migrated_database):
-    """Each fault of each realm refuses start naming that realm and no other, after a clean start works. (O3)"""
+def test_a_failing_probe_step_refuses_the_program_naming_the_realm(tmp_path, migrated_database):
+    """A failing probe step ends the program, naming that realm alone; the same environment healthy serves. (O3, Am-3)"""
     environ = environment(tmp_path, dsn=migrated_database)
     healthy = Child.faked(environ)
     try:
-        assert healthy.ready()  # positive control: no fault, the same environment serves
+        assert healthy.ready()  # positive control: no failure, the same environment serves
     finally:
         healthy.stop()
-    for realm in REALMS:
-        other = PROGRAMS_REALM if realm == SIGNIN_REALM else SIGNIN_REALM
-        for kind, faults in _faults(realm).items():
-            ended = _refused(Child.faked({**environ, "DEFENDER_API_PORT": str(free_port())}, faults), mentions=())
-            assert _names_realm(ended.stderr, realm), (realm, kind, ended.stderr)
-            if other == PROGRAMS_REALM:
-                assert PROGRAMS_REALM not in ended.stderr, (realm, kind, ended.stderr)
-            if kind in ("missing realm", "wrong issuer"):
-                assert "discovery" in ended.stderr, (realm, kind, ended.stderr)
+    fail = Fail(PROGRAMS_REALM, "keys", "empty")
+    ended = _refused(Child.faked({**environ, "DEFENDER_API_PORT": str(free_port())}, [fail]), mentions=())
+    assert realms_named(ended.stderr) == {PROGRAMS_REALM}, ended.stderr
 
 
 @pytest.mark.postgres
@@ -236,19 +268,28 @@ def _handled_signals() -> tuple[int, ...]:
 
 
 @pytest.mark.postgres
+@pytest.mark.parametrize("phase", ["ready", "during start"])
 @pytest.mark.parametrize("sig", _handled_signals())
-def test_a_ready_program_stopped_by_each_handled_signal_exits_zero_and_leaves_the_database(
-        tmp_path, migrated_database, sig):
-    """Each signal uvicorn handles stops a ready program with exit 0, no traceback, nothing attached. (Am-3)"""
-    child = Child.faked(environment(tmp_path, dsn=migrated_database))
+def test_each_handled_signal_unwinds_a_ready_or_starting_program_to_exit_zero_with_nothing_attached(
+        tmp_path, migrated_database, sig, phase):
+    """Each signal uvicorn handles, ready or mid-start, makes `run` return 0 with no backend left. (Am-3)"""
+    stalling = [Fail(SIGNIN_REALM, "discovery", "stall")] if phase == "during start" else []
+    child = Child.faked(environment(tmp_path, dsn=migrated_database), stalling)
     try:
-        assert child.ready()
-        assert _backends(migrated_database) > 0  # control: a serving program holds connections
-        ended = child.stop(sig)
+        if stalling:
+            assert child.stalled(), "the start should be waiting on discovery"
+        else:
+            assert child.ready()
+            assert _backends(migrated_database) > 0  # control: a serving program holds connections
+        child.send_signal(sig)
+        reported = child.reported()
+        left = _backends(migrated_database)  # the child is held alive after reporting, so this is its own doing
+        ended = child.ended()
     finally:
         child.kill()
+    assert reported == 0, ended.stderr
+    assert left == 0
     assert (ended.returncode, "Traceback" in ended.stderr) == (0, False), ended.stderr
-    assert _backends(migrated_database) == 0
 
 
 @pytest.mark.postgres

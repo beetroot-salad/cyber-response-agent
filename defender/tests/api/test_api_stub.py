@@ -8,10 +8,13 @@ import dataclasses
 import datetime as _dt
 import inspect
 import json
+import logging
+import secrets
+import threading
 from http import HTTPStatus
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -62,7 +65,7 @@ from defender.identity import (  # noqa: E402
 from defender.tenancy import InMemoryTenantRepository  # noqa: E402
 from defender.records._tenant_id import TenantId  # noqa: E402
 from pydantic import ValidationError  # noqa: E402
-from defender.records.formats import AlertId  # noqa: E402
+from defender.records.formats import AlertId, InvestigationId  # noqa: E402
 from defender.tests.support.tenancy._mapping1345 import ALERT_MAPPING_ROUTE, alert_mapping_url  # noqa: E402
 from defender.tests.support.api._programs1307 import NoProgramsRealm  # noqa: E402
 
@@ -247,15 +250,13 @@ class Scripted:
     """Every port the routes call: `answers` maps a method name to its return value, an exception
     to raise, or a callable that answers the call; an unscripted call fails the test.
 
-    A write that does not raise is recorded in `written` (the write stands) and then, unless the scripted
-    `announcement` is an exception, in `announced`; the audit-only port's `announce` records into `audits`.
-    A failing write records neither."""
+    A write that does not raise is recorded in `written`; the audit-only port's `announce` records into `audits`.
+    This port announces nothing for a write: announcing is the real ports' job (the demo ports, tested over the demo)."""
 
     def __init__(self, answers: dict[str, Any]) -> None:
         self.answers = answers
         self.calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
         self.written: list[tuple[str, Principal]] = []
-        self.announced: list[tuple[str, Principal]] = []
         self.audits: list[tuple[str, str, str, str, str]] = []
 
     async def announce(self, principal: Principal, action: str, target: str, detail: str = "") -> None:
@@ -280,9 +281,6 @@ class Scripted:
             result = answer(*args, **kwargs) if callable(answer) else answer
             if name in WRITES:
                 self.written.append((name, args[0]))
-                if isinstance(announcement := self.answers.get("announcement"), BaseException):
-                    raise announcement
-                self.announced.append((name, args[0]))
             return result
 
         return call
@@ -569,8 +567,8 @@ def test_a_create_is_a_201_with_location_only_when_the_store_created(
     assert response.json() == record.model_dump(mode="json")
     [((principal, *rest), kwargs)] = created.ports.called(port)
     assert (principal, rest, kwargs) == (Principal(tenant_id=A, actor_id=created.user), [*body.values()], {})
-    assert [name for name, _ in created.ports.announced] == [port]
-    assert created.ports.audits == [], "the write announces; the route does not"
+    assert [name for name, _ in created.ports.written] == [port]
+    assert created.ports.audits == [], "the route announces nothing"
 
     replayed = Api(**{port: (record, False)})
     response = replayed.client.post(path, headers=AUTH, json=body)
@@ -601,17 +599,18 @@ def test_a_create_answered_for_another_target_is_a_500_over_the_committed_write(
 
 @pytest.mark.parametrize(("route", "path", "body", "answers"), [row for row in HAPPY if any(n in WRITES for n in row[3])],
                          ids=lambda v: str(v))
-def test_an_announcement_that_fails_after_the_write_answers_500_and_the_write_stands(
+def test_a_write_port_that_raises_answers_500_with_the_write_called_and_the_route_announces_nothing(
     route: tuple[str, str], path: str, body: dict[str, Any] | None, answers: dict[str, Any],
 ) -> None:
-    """Every announcing write: a failed announcement is a 500 after the write, which stands; with none failing the call is served. (Am-2, P2)"""
+    """Every announcing write: a port exception is a 500 after the write call was made; the route announces nothing. (Am-2, P2)"""
     served = Api(**answers)
     assert served.client.request(route[0], path, headers=AUTH, json=body).status_code < 400  # control
-    failing = Api(**answers, announcement=RuntimeError("announcement down"))
+    [name] = WRITES & answers.keys()
+    failing = Api(**{**answers, name: RuntimeError("port down")})
     response = failing.lenient().request(route[0], path, headers=AUTH, json=body)
     assert response.status_code == 500
-    assert [name for name, _ in failing.ports.written] == [name for name, _ in served.ports.written] != []
-    assert failing.ports.announced == []
+    assert failing.ports.called(name) != []
+    assert failing.ports.audits == []
 
 
 def test_put_system_is_a_201_at_its_own_url_when_created_and_200_when_replaced() -> None:
@@ -619,7 +618,7 @@ def test_put_system_is_a_201_at_its_own_url_when_created_and_200_when_replaced()
     created = Api(put_system=(SETTINGS, True), has_credentials=False)
     response = created.client.put(f"{T}/systems/tix", headers=AUTH, json=body)  # R7-2: a stray `x=1` here is now refused, see below
     assert (response.status_code, response.headers["Location"]) == (201, BASE + f"{T}/systems/tix")
-    # FORCED CHOICE FC-13: the systems port's `put_system(principal, system_id, body)`: the principal replaces the tenant.
+    # FORCED CHOICE FC-12: the systems port's `put_system(principal, system_id, body)`: the principal replaces the tenant.
     ((principal, system_id, sent), kwargs), = created.ports.called("put_system")
     assert (principal.tenant_id, principal.actor_id, system_id, sent.model_dump(), kwargs) == (
         A, created.user, "tix", body, {})
@@ -801,7 +800,7 @@ def test_a_cancel_or_delete_is_one_write_call_naming_the_principal_and_the_route
     api = Api(**{port: answer})
     assert api.client.request(method, path, headers=AUTH).status_code < 400
     assert api.ports.called(port) == [((Principal(tenant_id=A, actor_id=api.user), "b1000000-0000-4000-8000-000000000001"), {})]
-    assert [name for name, _ in api.ports.announced] == [port]
+    assert [name for name, _ in api.ports.written] == [port]
     assert api.ports.audits == []
 
 
@@ -848,7 +847,7 @@ def test_a_store_refusal_maps_to_its_status_and_writes_and_announces_nothing(
     assert response.headers["Content-Type"] == "application/problem+json"
     assert response.json() == {"type": "about:blank", "title": HTTPStatus(code).phrase,
                                "status": code, "detail": "x"}
-    assert (api.ports.written, api.ports.announced, api.ports.audits) == ([], [], []), "a refused write announces nothing"
+    assert (api.ports.written, api.ports.audits) == ([], []), "a refused write is not recorded and the route announces nothing"
 
 
 # --- artifacts -----------------------------------------------------------------------------
@@ -917,7 +916,7 @@ def test_credentials_are_written_through_and_never_echoed_or_announced_by_the_ro
     response = api.client.put(f"{T}/systems/tix/credentials", headers=AUTH,
                               json={"kind": "static", "credentials": {"api_token": secret}})
     assert (response.status_code, response.content) == (204, b"")
-    # FORCED CHOICE FC-13: the secret port's `put_credentials(principal, system_id, kind, fields)`: the principal replaces the tenant.
+    # FORCED CHOICE FC-12: the secret port's `put_credentials(principal, system_id, kind, fields)`: the principal replaces the tenant.
     assert api.ports.called("put_credentials") == [
         ((Principal(tenant_id=A, actor_id=api.user), "tix", "static", {"api_token": secret}), {})]
     assert api.ports.called("has_credentials") == [], "an existence check, not a read"
@@ -925,12 +924,12 @@ def test_credentials_are_written_through_and_never_echoed_or_announced_by_the_ro
 
 
 def test_a_failed_credentials_write_announces_nothing() -> None:
-    """A failed write announces nothing: no write stands, no announcement, none by the route. (Am-2)"""
+    """A failed credentials write answers 500 and the route announces nothing. (Am-2)"""
     api = Api(get_system=SETTINGS, put_credentials=RuntimeError("vault down"))
     response = api.lenient().put(f"{T}/systems/tix/credentials", headers=AUTH,
                                  json={"kind": "static", "credentials": {"api_token": LONG}})
     assert response.status_code == 500
-    assert (api.ports.written, api.ports.announced, api.ports.audits) == ([], [], [])
+    assert (api.ports.written, api.ports.audits) == ([], [])
 
 
 #: Each as it is spelled inside a JSON string, so the body is valid JSON that decodes to it.
@@ -1627,6 +1626,153 @@ def test_the_demo_store_keeps_the_audit_events_its_writes_announce() -> None:
     events = deps.writes.audit_events  # type: ignore[attr-defined]
     assert [(e.tenant_id, e.user_id, e.action, e.target) for e in events] == [
         (DEMO_ONE, user_id, "investigation.start", created.json()["investigation_id"])]
+
+
+class _AuditLog(list[Any]):
+    """The demo store's `audit_events`, noting for each event whether the write it announces was visible on arrival."""
+
+    def __init__(self, visible: Callable[[], Awaitable[bool]]) -> None:
+        super().__init__()
+        self._visible = visible
+        self.visible_on_arrival: list[bool] = []
+
+    def _write_is_visible(self) -> bool:
+        seen: list[bool] = []
+        probe = threading.Thread(target=lambda: seen.append(anyio.run(self._visible)))  # a loop of its own, through the ports
+        probe.start()
+        probe.join()
+        return seen == [True]
+
+    def append(self, event: Any) -> None:
+        self.visible_on_arrival.append(self._write_is_visible())
+        super().append(event)
+
+    def extend(self, events: Any) -> None:
+        for event in events:
+            self.append(event)
+
+
+@dataclasses.dataclass(frozen=True)
+class _DemoWrite:
+    """One announcing write as the demo serves it: a request that succeeds, one that fails, and what each announces."""
+
+    request: tuple[str, str, dict[str, Any]]
+    failing: tuple[str, str, dict[str, Any]]
+    action: str
+    target: Callable[[Any], str]
+    detail: str
+    visible: Callable[[ApiDeps, str], Awaitable[bool]]
+
+
+_DONE = demo_id(InvestigationId, DEMO_ONE, "inv-completed")
+_RUNNING = demo_id(InvestigationId, DEMO_ONE, "inv-running")
+_DEMO_T = f"/tenants/{DEMO_ONE}"
+_UNKNOWN = "f0000000-0000-4000-8000-000000000000"
+_NEW_NAME = "Renamed by the test"
+
+
+async def _a_new_investigation(deps: ApiDeps, _secret: str) -> bool:
+    return bool(await deps.investigations.list_investigations(
+        DEMO_ONE, alert_id=demo_id(AlertId, DEMO_ONE, "alert-0003"), after=None, limit=5))
+
+
+async def _a_cancelled_investigation(deps: ApiDeps, _secret: str) -> bool:
+    found = await deps.investigations.get_investigation(DEMO_ONE, _RUNNING)
+    return found is not None and found.status == "aborted"
+
+
+async def _a_deleted_investigation(deps: ApiDeps, _secret: str) -> bool:
+    return await deps.investigations.get_investigation(DEMO_ONE, _DONE) is None
+
+
+async def _a_new_learning_job(deps: ApiDeps, _secret: str) -> bool:
+    jobs = await deps.learning_jobs.list_learning_jobs(DEMO_ONE, investigation_id=_DONE, after=None, limit=10)
+    return any(job.trigger == "explicit" for job in jobs)
+
+
+async def _a_saved_mapping(deps: ApiDeps, _secret: str) -> bool:
+    return await deps.alert_mapping.get_alert_mapping(DEMO_ONE) is not None
+
+
+async def _a_replaced_system(deps: ApiDeps, _secret: str) -> bool:
+    found = await deps.systems.get_system(DEMO_ONE, "siem")
+    return found is not None and found.display_name == _NEW_NAME
+
+
+async def _stored_credentials(deps: ApiDeps, _secret: str) -> bool:
+    return await deps.secrets.has_credentials(DEMO_ONE, "siem")
+
+
+DEMO_WRITES = {
+    "create_investigation": _DemoWrite(
+        ("POST", f"{_DEMO_T}/investigations", {"alert_id": demo_id(AlertId, DEMO_ONE, "alert-0003"), "client_request_id": "r1"}),
+        ("POST", f"{_DEMO_T}/investigations", {"alert_id": _UNKNOWN, "client_request_id": "r1"}),
+        "investigation.start", lambda response: response.json()["investigation_id"],
+        f"alert {demo_id(AlertId, DEMO_ONE, 'alert-0003')}", _a_new_investigation),
+    "cancel_investigation": _DemoWrite(
+        ("POST", f"{_DEMO_T}/investigations/{_RUNNING}/cancel", {}), ("POST", f"{_DEMO_T}/investigations/{_DONE}/cancel", {}),
+        "investigation.cancel", lambda _response: _RUNNING, "", _a_cancelled_investigation),
+    "delete_investigation": _DemoWrite(
+        ("DELETE", f"{_DEMO_T}/investigations/{_DONE}", {}), ("DELETE", f"{_DEMO_T}/investigations/{_RUNNING}", {}),
+        "investigation.delete", lambda _response: _DONE, "", _a_deleted_investigation),
+    "create_learning_job": _DemoWrite(
+        ("POST", f"{_DEMO_T}/learning-jobs", {"investigation_id": _DONE, "client_request_id": "r1"}),
+        ("POST", f"{_DEMO_T}/learning-jobs", {"investigation_id": _UNKNOWN, "client_request_id": "r1"}),
+        "learning_job.start", lambda response: response.json()["learning_job_id"],
+        f"investigation {_DONE}; trigger=explicit", _a_new_learning_job),
+    "put_alert_mapping": _DemoWrite(
+        ("PUT", alert_mapping_url(DEMO_ONE), MAPPING_BODY), ("PUT", alert_mapping_url(DEMO_ONE), {**MAPPING_BODY, "summary": 7}),
+        "alert_mapping.update", lambda _response: DEMO_ONE, "", _a_saved_mapping),
+    "put_system": _DemoWrite(
+        ("PUT", f"{_DEMO_T}/systems/siem", {"kind": "siem", "display_name": _NEW_NAME, "enabled": True, "settings": {}}),
+        ("PUT", f"{_DEMO_T}/systems/siem", {"display_name": _NEW_NAME}),
+        "system.update", lambda _response: "siem", "", _a_replaced_system),
+    "put_credentials": _DemoWrite(
+        ("PUT", f"{_DEMO_T}/systems/siem/credentials", {}), ("PUT", f"{_DEMO_T}/systems/nope/credentials", {}),
+        "system.credentials", lambda _response: "siem", "fields: api_token", _stored_credentials),
+}
+
+
+def test_every_announcing_write_the_demo_serves_is_in_the_table() -> None:
+    """The demo cases cover exactly the stub's announcing writes. (Am-2, Am-6)"""
+    assert set(DEMO_WRITES) == WRITES
+
+
+@pytest.mark.parametrize("name", sorted(WRITES))
+def test_the_demo_announces_each_successful_write_once_after_it_is_visible_and_a_failed_write_never(
+    name: str, caplog: pytest.LogCaptureFixture,
+) -> None:
+    """One audit event per successful write (action, actor, credential, target, detail), after the write is visible;
+    none on a failed write; a generated secret is in no audit record or log line. (Am-2, P2, FC-14)"""
+    caplog.set_level(logging.DEBUG)
+    case = DEMO_WRITES[name]
+    secret = secrets.token_hex(24)
+    deps = anyio.run(demo_deps, (DEMO_ONE,), lambda: NOW)
+    store = deps.writes
+    log = _AuditLog(lambda: case.visible(deps, secret))
+    store.audit_events = log
+    client = TestClient(create_app(deps), base_url=BASE, raise_server_exceptions=False)
+    auth = _session(demo_sessions((DEMO_ONE,))[f"{DEMO_ONE}-analyst"], deps.frontend_origin)
+    user_id = client.get("/me", headers=auth).json()["user"]["id"]
+
+    def send(request: tuple[str, str, dict[str, Any]]) -> Any:
+        method, path, body = request
+        if name == "put_credentials":
+            body = {"kind": "static", "credentials": {"api_token": secret}}
+        return client.request(method, path, headers=auth, json=body or None)
+
+    refused = send(case.failing)
+    assert 400 <= refused.status_code < 500, refused.text
+    assert log == [], "a failed write announces nothing"
+
+    served = send(case.request)
+    assert served.status_code < 300, served.text
+    [event] = log
+    assert (event.tenant_id, event.user_id, event.credential_id, event.action, event.target, event.detail) == (
+        DEMO_ONE, user_id, None, case.action, case.target(served), case.detail)
+    assert log.visible_on_arrival == [True], "the event arrives after the write is visible"
+    assert secret not in "\n".join(repr(e) for e in log) + caplog.text
+    assert anyio.run(case.visible, deps, secret), "control: the write stands"
 
 
 def test_the_demo_store_keys_records_by_tenant() -> None:

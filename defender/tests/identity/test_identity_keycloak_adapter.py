@@ -25,13 +25,17 @@ from defender.tests.support.api._server1083 import (
     ADMIN_CLIENTS,
     ADMIN_READ,
     BACK,
+    ELSEWHERE_ISSUER,
+    FAULTS,
     FRONT,
     PROGRAMS_REALM,
     REALMS,
     SIGNIN_REALM,
+    STEP_KINDS,
+    Fail,
     FakeKeycloak,
-    Faults,
     closed_port,
+    realms_named,
 )
 from defender.identity.keycloak import KeycloakPrograms, KeycloakSignIn
 
@@ -720,11 +724,8 @@ def admin_reads(fake: FakeKeycloak) -> list[str]:
     return [path for method, path in paths(fake) if method == "GET" and path.startswith("admin/")]
 
 
-def the_fault_kinds(realm: str) -> dict[str, Faults]:
-    return {"missing": Faults(missing=(realm,)),
-            "issuer": Faults(issuer={realm: "http://localhost:8080/realms/elsewhere"}),
-            "secret": Faults(bad_secret=(realm,)),
-            "role": Faults(no_role=(realm,))}
+def _sibling(realm: str) -> str:
+    return next(r for r in REALMS if r != realm)
 
 
 @pytest.mark.parametrize("realm", REALMS)
@@ -767,57 +768,102 @@ async def test_1083_am9_the_other_resource_is_refused_to_the_realms_admin_client
 @pytest.mark.parametrize("realm", REALMS)
 async def test_1083_o3_a_missing_realm_refuses_at_discovery_naming_the_realm(realm):
     """A realm Keycloak does not have refuses at discovery naming the realm; its sibling still passes. (O3)"""
-    fake = FakeKeycloak(Faults(missing=(realm,)))
+    fake = FakeKeycloak([Fail(realm, "discovery", "not_found")])
     message = await refusal_of(realm, fake)
-    assert realm in message
+    assert realms_named(message) == {realm}
     assert "discovery" in message
     assert admin_reads(fake) == []
     assert not any(method == "POST" for method, _ in paths(fake))
-    sibling = next(r for r in REALMS if r != realm)
-    assert await probe_of(sibling, fake) is None
+    assert await probe_of(_sibling(realm), fake) is None
 
 
 @pytest.mark.parametrize("realm", REALMS)
 async def test_1083_o3_discovery_naming_another_issuer_refuses_naming_both(realm):
     """Discovery naming an issuer other than the configured one refuses, naming both and the step. (O3)"""
-    named = "http://localhost:8080/realms/elsewhere"
-    fake = FakeKeycloak(Faults(issuer={realm: named}))
+    fake = FakeKeycloak([Fail(realm, "discovery", "wrong_issuer")])
     message = await refusal_of(realm, fake)
-    assert all(part in message for part in (realm, "discovery", f"{FRONT}/realms/{realm}", named)), message
+    assert all(part in message for part in (realm, "discovery", f"{FRONT}/realms/{realm}", ELSEWHERE_ISSUER)), message
     assert admin_reads(fake) == []
-    sibling = next(r for r in REALMS if r != realm)
-    assert await probe_of(sibling, fake) is None
+    assert await probe_of(_sibling(realm), fake) is None
 
 
 @pytest.mark.parametrize("realm", REALMS)
 async def test_1083_o3_a_wrong_admin_secret_refuses_at_the_token_step_naming_the_realm(realm):
     """A refused admin client secret refuses naming the realm, with no admin read made; its sibling passes. (O3)"""
-    fake = FakeKeycloak(Faults(bad_secret=(realm,)))
+    fake = FakeKeycloak([Fail(realm, "token", "bad_secret")])
     message = await refusal_of(realm, fake)
     assert realm in message
     assert ("POST", f"realms/{realm}/protocol/openid-connect/token") in paths(fake)
     assert admin_reads(fake) == []
-    sibling = next(r for r in REALMS if r != realm)
-    assert await probe_of(sibling, fake) is None
+    assert await probe_of(_sibling(realm), fake) is None
 
 
 @pytest.mark.parametrize("realm", REALMS)
 async def test_1083_o3_an_admin_read_refused_for_want_of_the_role_refuses_naming_the_realm(realm):
     """A service account without the role covering the read refuses naming the realm; its sibling passes. (O3)"""
-    fake = FakeKeycloak(Faults(no_role=(realm,)))
+    fake = FakeKeycloak([Fail(realm, "admin", "no_role")])
     message = await refusal_of(realm, fake)
     assert realm in message
     assert admin_reads(fake) == [f"admin/realms/{realm}/{ADMIN_READ[realm]}"]
-    sibling = next(r for r in REALMS if r != realm)
-    assert await probe_of(sibling, fake) is None
+    assert await probe_of(_sibling(realm), fake) is None
+
+
+@pytest.mark.parametrize(("realm", "step", "kind"),
+                         [(realm, step, kind) for (realm, step), kinds in FAULTS.items() for kind in kinds])
+async def test_1083_o3_every_failure_of_every_step_refuses_naming_the_realm_alone(realm, step, kind):
+    """Each failure kind of each probe step refuses, naming its realm and not the other; the sibling passes. (O3, FC-6)"""
+    fake = FakeKeycloak([Fail(realm, step, kind)])
+    message = await refusal_of(realm, fake)
+    assert realms_named(message) == {realm}, message
+    if step == "discovery":
+        assert "discovery" in message
+    assert await probe_of(_sibling(realm), fake) is None
 
 
 @pytest.mark.parametrize("realm", REALMS)
-async def test_1083_o3_every_failing_step_gets_its_own_message(realm):
-    """The four failures of one realm are told apart by their messages, each naming the realm. (O3, FC-6)"""
-    messages = {kind: await refusal_of(realm, FakeKeycloak(faults)) for kind, faults in the_fault_kinds(realm).items()}
+async def test_1083_o3_a_key_set_with_no_usable_key_refuses_apart_from_the_other_steps(realm):
+    """A keys answer that fails or holds no signing key refuses with a message no other step's failure gives. (O3, FC-6)"""
+    other_steps = {await refusal_of(realm, FakeKeycloak([Fail(realm, step, kind)]))
+                   for step in STEP_KINDS if step != "keys" for kind in STEP_KINDS[step]}
+    assert await probe_of(realm, FakeKeycloak()) is None  # positive control: the intact set passes
+    for kind in STEP_KINDS["keys"]:
+        message = await refusal_of(realm, FakeKeycloak([Fail(realm, "keys", kind)]))
+        assert message not in other_steps, (kind, message)
+
+
+@pytest.mark.parametrize("realm", REALMS)
+async def test_1083_o3_the_four_representative_failures_get_four_messages(realm):
+    """The four steps' failures of one realm are told apart by their messages, each naming the realm. (O3, FC-6)"""
+    representative = {"discovery": "not_found", "keys": "empty", "token": "bad_secret", "admin": "no_role"}
+    messages = {step: await refusal_of(realm, FakeKeycloak([Fail(realm, step, kind)]))
+                for step, kind in representative.items()}
     assert all(realm in message for message in messages.values())
     assert len(set(messages.values())) == len(messages)
+
+
+async def test_1083_f13_the_fake_answers_only_the_back_channel_host_and_refuses_an_unknown_bearer():
+    """The fake 404s another host (unmodelled) and 401s an unknown bearer, as the host it models would. (FC-17)"""
+    realm = SIGNIN_REALM
+    fake = FakeKeycloak()
+    async with httpx.AsyncClient(transport=fake) as client:
+        discovery = f"/realms/{realm}/.well-known/openid-configuration"
+        assert (await client.get(f"{BACK}{discovery}")).status_code == 200  # control: the back-channel host
+        other = await client.get(f"{FRONT}{discovery}")
+        assert other.status_code == 404
+        users = f"{BACK}/admin/realms/{realm}/users"
+        assert (await client.get(users, headers={"Authorization": f"Bearer admin-{realm}"})).status_code == 200
+        assert (await client.get(users, headers={"Authorization": "Bearer not-a-token"})).status_code == 401
+        assert (await client.get(users)).status_code == 401
+    assert fake.unmodelled == [("GET", f"{FRONT}{discovery}")]
+
+
+def test_1083_f13_the_fake_keeps_each_realms_signing_key_for_minting():
+    """The fake publishes each realm's signing key from the private key it keeps; the realms' keys differ. (FC-17)"""
+    fake = FakeKeycloak()
+    for realm in REALMS:
+        [signing] = [k for k in fake.keys[realm] if k["use"] == "sig"]
+        assert signing["n"] == _int_b64(fake.signing_keys[realm].public_key().public_numbers().n)
+    assert fake.signing_keys[SIGNIN_REALM] is not fake.signing_keys[PROGRAMS_REALM]
 
 
 @pytest.mark.parametrize("realm", REALMS)

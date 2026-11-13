@@ -2,11 +2,15 @@
 
 - `environment(tmp_path, dsn=..., ...)`: every setting the program reads (design FC-3), valid; `SETTING_NAMES` is
   that full set.
-- `FakeKeycloak`: both realms on the back channel, answering as the dev Keycloak was observed to answer (code map,
-  2026-11-13, rule R11), with per-realm faults. Anything it does not model is answered 404 and kept in `unmodelled`.
+- `FakeKeycloak`: both realms on the back channel (and only that host), answering as the dev Keycloak was observed
+  to answer (code map, 2026-11-13, rule R11), with failures at a given (realm, step, kind) (`Fail`, `FAULTS`).
+  Anything it does not model, any other host included, is answered 404 and kept in `unmodelled`. It keeps each
+  realm's private signing key in `signing_keys[realm]`; `program_token(...)` mints a programs-realm access token with it.
 - `Child`: the program in a child process. `Child.real(environ)` runs the shipped command
-  (`python -m defender.api_server`, real network); `Child.faked(environ, faults=...)` runs this module's entry, which
-  only calls `defender.api_server.run(os.environ, transport=FakeKeycloak(...))`.
+  (`python -m defender.api_server`, real network); `Child.faked(environ, fails=...)` runs this module's entry, which
+  calls `defender.api_server.run(os.environ, transport=FakeKeycloak(...))`, reports `run returned <n>` on stdout,
+  holds until `release()` (or `ended()`), then exits with `n`.
+- `seed_token_credential(dsn, seeded)`: a live `oauth_client` credential for the seeded program, for `program_token`.
 - `seed_identity(dsn)`: Ann (tenant A admin), Bob (tenant B admin), Ops (a listed administrator, one-time-code
   session) and a program of A with a live API key.
 
@@ -14,21 +18,27 @@ Run as `python -m defender.tests.support.api._server1083` it is the test-support
 from __future__ import annotations
 
 import base64
+import contextlib
 import dataclasses
 import datetime as dt
 import json
 import os
 import secrets
+import functools
+import re
 import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 import urllib.parse
-from collections.abc import Mapping
+import uuid
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
+import anyio
 import httpx
 
 DEFENDER = Path(__file__).resolve().parents[3]
@@ -43,6 +53,8 @@ ORIGIN = "http://localhost:8000"
 #: As observed: discovery names the front-channel host; the API reaches Keycloak on the back channel.
 FRONT, BACK = "http://localhost:8080", "http://keycloak:8080"
 SIGNIN_REALM, PROGRAMS_REALM = "defender", "defender-programs"
+#: The audience `environment()` configures for the programs realm's access tokens.
+PROGRAMS_AUDIENCE = "defender-api-programs"
 REALMS = (SIGNIN_REALM, PROGRAMS_REALM)
 #: The admin read each realm's probe makes (design O3 / r5 Am-9): users in the sign-in realm, clients in programs.
 ADMIN_READ = {SIGNIN_REALM: "users", PROGRAMS_REALM: "clients"}
@@ -50,7 +62,7 @@ ADMIN_READ = {SIGNIN_REALM: "users", PROGRAMS_REALM: "clients"}
 #: endpoint with the observed 401, so a program that sends the wrong id, or a secret file's text unstripped, is refused.
 ADMIN_CLIENTS = {SIGNIN_REALM: ("defender-api-admin", "signin-admin-secret-value"),
                  PROGRAMS_REALM: ("defender-api-programs-admin", "programs-admin-secret-value")}
-#: The child's fault knobs travel in this variable (JSON for `Faults`); it is not a setting of the program.
+#: The child's failures travel in this variable (JSON list of `Fail`); it is not a setting of the program.
 FAULTS_ENV = "CF1083_KEYCLOAK_FAULTS"
 
 SETTING_NAMES = (
@@ -111,7 +123,7 @@ def environment(tmp_path: Path, *, dsn: str, keycloak: str = BACK, port: int | N
         "DEFENDER_KEYCLOAK_ADMIN_CLIENT_ID": "defender-api-admin",
         "DEFENDER_KEYCLOAK_ADMIN_CLIENT_SECRET_FILE": secret("signin-admin-secret"),
         "DEFENDER_KEYCLOAK_PROGRAMS_ISSUER": f"{FRONT}/realms/{PROGRAMS_REALM}",
-        "DEFENDER_KEYCLOAK_PROGRAMS_AUDIENCE": "defender-api-programs",
+        "DEFENDER_KEYCLOAK_PROGRAMS_AUDIENCE": PROGRAMS_AUDIENCE,
         "DEFENDER_KEYCLOAK_PROGRAMS_ADMIN_CLIENT_ID": "defender-api-programs-admin",
         "DEFENDER_KEYCLOAK_PROGRAMS_ADMIN_CLIENT_SECRET_FILE": secret("programs-admin-secret"),
     }
@@ -125,52 +137,102 @@ def _b64(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
 
 
-def published_keys() -> list[dict[str, Any]]:
-    """As observed on both realms: one RS256 signing key and one RSA-OAEP encryption key."""
+SIGNING_KID, ENCRYPTION_KID = "sig-1", "enc-1"
+
+
+@functools.cache
+def _realm_keys(realm: str) -> tuple[Any, Any]:
+    """The realm's (signing, encryption) private RSA keys; minted once per process and shared by every fake."""
     from cryptography.hazmat.primitives.asymmetric import rsa
 
-    keys = []
-    for kid, use, alg in (("sig-1", "sig", "RS256"), ("enc-1", "enc", "RSA-OAEP")):
-        numbers = rsa.generate_private_key(public_exponent=65537, key_size=2048).public_key().public_numbers()
-        keys.append({"kid": kid, "kty": "RSA", "use": use, "alg": alg,
-                     "n": _b64(numbers.n.to_bytes((numbers.n.bit_length() + 7) // 8, "big")), "e": "AQAB"})
-    return keys
+    return (rsa.generate_private_key(public_exponent=65537, key_size=2048),
+            rsa.generate_private_key(public_exponent=65537, key_size=2048))
+
+
+def _jwk(private: Any, kid: str, use: str, alg: str) -> dict[str, Any]:
+    numbers = private.public_key().public_numbers()
+    return {"kid": kid, "kty": "RSA", "use": use, "alg": alg,
+            "n": _b64(numbers.n.to_bytes((numbers.n.bit_length() + 7) // 8, "big")), "e": "AQAB"}
+
+
+#: The probe's steps (FC-6; only the first step's name, "discovery", is pinned): the discovery document, the signing
+#: keys, the admin client's token request, the admin read.
+STEPS = ("discovery", "keys", "token", "admin")
+#: The failure kinds each step can show, each one an answer the dev Keycloak was observed to give or one HTTP
+#: answers generically. `not_found` at discovery is a realm that does not exist (observed: 404 on every path of it).
+#: `unreadable` is a 200 whose body is not JSON; `enc_only` and `empty` are key sets with no key to verify with
+#: (observed: the realms publish one signing and one encryption key); `bad_secret` and `no_role` are observed.
+STEP_KINDS: dict[str, tuple[str, ...]] = {
+    "discovery": ("not_found", "server_error", "unreadable", "wrong_issuer"),
+    "keys": ("not_found", "server_error", "unreadable", "enc_only", "empty"),
+    "token": ("not_found", "server_error", "unreadable", "bad_secret"),
+    "admin": ("not_found", "server_error", "no_role"),
+}
+#: Discovery that never answers: waits until the request is cancelled (the during-start signal case). Not in the
+#: table, because a start that is not signalled never ends.
+STALL = "stall"
+#: Every failure the program must refuse start for, as `(realm, step) -> kinds`.
+FAULTS: dict[tuple[str, str], tuple[str, ...]] = {
+    (realm, step): kinds for realm in REALMS for step, kinds in STEP_KINDS.items()}
+#: The wrong issuer discovery names (a realm the configured issuer is not).
+ELSEWHERE_ISSUER = f"{FRONT}/realms/elsewhere"
 
 
 @dataclasses.dataclass(frozen=True)
-class Faults:
-    """Per-realm departures from a healthy Keycloak, each one an answer the dev Keycloak was observed to give.
+class Fail:
+    """One failure: at `realm`'s `step`, the answer of `kind` (`STEP_KINDS`, or `STALL` at discovery)."""
+    realm: str
+    step: str
+    kind: str
 
-    - `missing`: the realm does not exist (discovery 404, as an unknown realm answers).
-    - `issuer`: discovery names this issuer instead of the realm's own.
-    - `bad_secret`: the admin token request answers 401 `unauthorized_client` (as a wrong client secret does).
-    - `no_role`: the admin read answers 403 `{"error":"HTTP 403 Forbidden"}` (as a service account without the
-      role covering that resource does)."""
-    missing: tuple[str, ...] = ()
-    issuer: Mapping[str, str] = dataclasses.field(default_factory=dict)
-    bad_secret: tuple[str, ...] = ()
-    no_role: tuple[str, ...] = ()
+    def __post_init__(self) -> None:
+        assert self.realm in REALMS, self.realm
+        assert self.kind in STEP_KINDS.get(self.step, ()) or (self.step, self.kind) == ("discovery", STALL), self
 
-    def to_json(self) -> str:
-        return json.dumps(dataclasses.asdict(self))
 
-    @classmethod
-    def from_json(cls, text: str) -> Faults:
-        raw = json.loads(text)
-        return cls(missing=tuple(raw["missing"]), issuer=dict(raw["issuer"]), bad_secret=tuple(raw["bad_secret"]),
-                   no_role=tuple(raw["no_role"]))
+ALL_FAILS = tuple(Fail(realm, step, kind) for (realm, step), kinds in FAULTS.items() for kind in kinds)
+
+
+def fails_to_json(fails: Iterable[Fail]) -> str:
+    return json.dumps([dataclasses.asdict(f) for f in fails])
+
+
+def fails_from_json(text: str) -> tuple[Fail, ...]:
+    return tuple(Fail(**raw) for raw in json.loads(text))
+
+
+def realms_named(text: str) -> set[str]:
+    """The realms `text` names by their own name (`defender` is also a prefix of `defender-programs` and of the
+    admin client ids, which are not realms)."""
+    return {realm for realm in REALMS if re.search(rf"(?<![\w-]){re.escape(realm)}(?![\w-])", text)}
+
+
+def _unreadable() -> httpx.Response:
+    return httpx.Response(200, content=b"<html>not what was asked for</html>", headers={"content-type": "text/html"})
 
 
 class FakeKeycloak(httpx.AsyncBaseTransport):
-    """Both realms, answering as observed on the dev Keycloak (code map 2026-11-13). Records every request in
-    `seen` as `(method, "host:port/path")`; anything unmodelled is answered 404 and kept in `unmodelled`."""
+    """Both realms, answering as observed on the dev Keycloak (code map 2026-11-13), and only on the back-channel
+    host (`back`): a request to any other host is answered 404 and kept in `unmodelled`, as is anything else the
+    fake does not model. Records every request in `seen` as `(method, "host:port/path")`.
 
-    def __init__(self, faults: Faults | None = None, *, front: str = FRONT,
-                 admin_clients: Mapping[str, tuple[str, str]] = ADMIN_CLIENTS) -> None:
-        self.faults = faults or Faults()
+    `fails` are failures at (realm, step); at most one per (realm, step). `on_stall(realm)` runs when a stalled
+    discovery begins. Each realm's private signing key is `signing_keys[realm]` (published as kid `SIGNING_KID`)."""
+
+    def __init__(self, fails: Iterable[Fail] = (), *, front: str = FRONT, back: str = BACK,
+                 admin_clients: Mapping[str, tuple[str, str]] = ADMIN_CLIENTS,
+                 on_stall: Callable[[str], None] | None = None) -> None:
+        self.fails = {(f.realm, f.step): f.kind for f in fails}
         self.admin_clients = dict(admin_clients)
         self.front = front
-        self.keys = {realm: published_keys() for realm in REALMS}
+        parsed = urllib.parse.urlsplit(back)
+        self.back_host, self.back_port = parsed.hostname, parsed.port
+        self.on_stall = on_stall
+        self.signing_keys = {realm: _realm_keys(realm)[0] for realm in REALMS}
+        self.encryption_keys = {realm: _realm_keys(realm)[1] for realm in REALMS}
+        self.keys = {realm: [_jwk(self.signing_keys[realm], SIGNING_KID, "sig", "RS256"),
+                             _jwk(self.encryption_keys[realm], ENCRYPTION_KID, "enc", "RSA-OAEP")]
+                     for realm in REALMS}
         self.seen: list[tuple[str, str]] = []
         self.unmodelled: list[tuple[str, str]] = []
 
@@ -181,41 +243,70 @@ class FakeKeycloak(httpx.AsyncBaseTransport):
         await request.aread()
         method, path = request.method, request.url.path
         self.seen.append((method, f"{request.url.host}:{request.url.port}{path}"))
-        for realm in REALMS:
-            if path.startswith((f"/realms/{realm}/", f"/admin/realms/{realm}/")):
-                answer = self._answer(realm, request)
-                if answer is not None:
-                    return answer
+        if (request.url.host, request.url.port) == (self.back_host, self.back_port):
+            for realm in REALMS:
+                if path.startswith((f"/realms/{realm}/", f"/admin/realms/{realm}/")):
+                    answer = await self._answer(realm, request)
+                    if answer is not None:
+                        return answer
         self.unmodelled.append((method, str(request.url)))
         return httpx.Response(404)
 
-    def _answer(self, realm: str, request: httpx.Request) -> httpx.Response | None:
-        method, path, auth = request.method, request.url.path, request.headers.get("authorization")
-        if realm in self.faults.missing:
+    @staticmethod
+    def _step(realm: str, request: httpx.Request) -> str | None:
+        route = (request.method, request.url.path)
+        return {("GET", f"/realms/{realm}/.well-known/openid-configuration"): "discovery",
+                ("GET", f"/realms/{realm}/protocol/openid-connect/certs"): "keys",
+                ("POST", f"/realms/{realm}/protocol/openid-connect/token"): "token",
+                ("GET", f"/admin/realms/{realm}/users"): "admin",
+                ("GET", f"/admin/realms/{realm}/clients"): "admin"}.get(route)
+
+    async def _answer(self, realm: str, request: httpx.Request) -> httpx.Response | None:
+        step = self._step(realm, request)
+        if self.fails.get((realm, "discovery")) == "not_found":  # the realm does not exist: every path of it
             return httpx.Response(404, json={"error": "Realm does not exist"})
+        if step is None:
+            return None
+        kind = self.fails.get((realm, step))
+        if kind == STALL:
+            if self.on_stall is not None:
+                self.on_stall(realm)
+            await anyio.sleep_forever()
+        if kind == "not_found":
+            return httpx.Response(404, json={"error": "HTTP 404 Not Found"})
+        if kind == "server_error":
+            return httpx.Response(503, content=b"Service Unavailable")
+        if kind == "unreadable":
+            return _unreadable()
+        return {"discovery": self._discovery, "keys": self._keys, "token": self._token,
+                "admin": self._admin}[step](realm, request, kind)
+
+    def _discovery(self, realm: str, request: httpx.Request, kind: str | None) -> httpx.Response:
         issuer = self.issuer(realm)
-        if (method, path) == ("GET", f"/realms/{realm}/.well-known/openid-configuration"):
-            return httpx.Response(200, json={
-                "issuer": self.faults.issuer.get(realm, issuer),
-                "token_endpoint": f"{issuer}/protocol/openid-connect/token",
-                "jwks_uri": f"{issuer}/protocol/openid-connect/certs"})
-        if (method, path) == ("GET", f"/realms/{realm}/protocol/openid-connect/certs"):
-            return httpx.Response(200, json={"keys": self.keys[realm]})
-        if (method, path) == ("POST", f"/realms/{realm}/protocol/openid-connect/token") \
-                and urllib.parse.parse_qs(request.content.decode()).get("grant_type") == ["client_credentials"]:
-            if realm in self.faults.bad_secret or not self._is_admin_client(realm, request):
-                return httpx.Response(401, json={
-                    "error": "unauthorized_client",
-                    "error_description": "Invalid client or Invalid client credentials"})
-            return httpx.Response(200, json={"access_token": f"admin-{realm}", "token_type": "Bearer",
-                                             "expires_in": 300})
-        if method == "GET" and auth == f"Bearer admin-{realm}" \
-                and path in (f"/admin/realms/{realm}/users", f"/admin/realms/{realm}/clients"):
-            # As observed: each admin client's role covers only its own resource; the other answers 403.
-            if path.endswith(f"/{ADMIN_READ[realm]}") and realm not in self.faults.no_role:
-                return httpx.Response(200, json=[])
-            return httpx.Response(403, json={"error": "HTTP 403 Forbidden"})
-        return None
+        return httpx.Response(200, json={
+            "issuer": ELSEWHERE_ISSUER if kind == "wrong_issuer" else issuer,
+            "token_endpoint": f"{issuer}/protocol/openid-connect/token",
+            "jwks_uri": f"{issuer}/protocol/openid-connect/certs"})
+
+    def _keys(self, realm: str, request: httpx.Request, kind: str | None) -> httpx.Response:
+        keys = {"enc_only": self.keys[realm][1:], "empty": []}.get(kind or "", self.keys[realm])
+        return httpx.Response(200, json={"keys": keys})
+
+    def _token(self, realm: str, request: httpx.Request, kind: str | None) -> httpx.Response | None:
+        if urllib.parse.parse_qs(request.content.decode()).get("grant_type") != ["client_credentials"]:
+            return None
+        if kind == "bad_secret" or not self._is_admin_client(realm, request):
+            return httpx.Response(401, json={
+                "error": "unauthorized_client", "error_description": "Invalid client or Invalid client credentials"})
+        return httpx.Response(200, json={"access_token": f"admin-{realm}", "token_type": "Bearer", "expires_in": 300})
+
+    def _admin(self, realm: str, request: httpx.Request, kind: str | None) -> httpx.Response:
+        if request.headers.get("authorization") != f"Bearer admin-{realm}":  # an unknown (or no) bearer
+            return httpx.Response(401, json={"error": "HTTP 401 Unauthorized"})
+        # As observed: each admin client's role covers only its own resource; the other answers 403.
+        if request.url.path.endswith(f"/{ADMIN_READ[realm]}") and kind != "no_role":
+            return httpx.Response(200, json=[])
+        return httpx.Response(403, json={"error": "HTTP 403 Forbidden"})
 
     def _is_admin_client(self, realm: str, request: httpx.Request) -> bool:
         """The client authenticates with HTTP basic auth, as the adapters send it."""
@@ -238,20 +329,63 @@ class Ended:
     stderr: str
 
 
+class _Pump:
+    """Reads one of the child's pipes on a thread, so a test can wait for a line while the child lives and still
+    get the whole text after it ends."""
+
+    def __init__(self, stream: Any) -> None:
+        self._stream = stream
+        self._lines: list[str] = []
+        self._changed = threading.Condition()
+        self._thread = threading.Thread(target=self._read, daemon=True)
+        self._thread.start()
+
+    def _read(self) -> None:
+        for line in self._stream:
+            with self._changed:
+                self._lines.append(line)
+                self._changed.notify_all()
+        with self._changed:
+            self._changed.notify_all()
+
+    def line_starting(self, prefix: str, timeout: float) -> str | None:
+        deadline = time.monotonic() + timeout
+        with self._changed:
+            while True:
+                for line in self._lines:
+                    if line.startswith(prefix):
+                        return line.rstrip("\n")
+                left = deadline - time.monotonic()
+                if left <= 0 or not self._thread.is_alive():
+                    return None
+                self._changed.wait(min(left, 0.5))
+
+    def text(self) -> str:
+        self._thread.join(10)
+        return "".join(self._lines)
+
+
 class Child:
-    """The program in a child process with only `environ`'s `DEFENDER_*` settings (plus the fault knobs).
+    """The program in a child process with only `environ`'s `DEFENDER_*` settings (plus the failures).
 
     `ended()` waits for a program that should refuse to start (cut off after `timeout`, failing the caller's
-    assertion on returncode). `ready()` waits until it answers HTTP on its port. `stop(sig)` sends `sig` to this
-    child's PID only (never a process group, never `pkill`) and waits for its exit."""
+    assertion on returncode). `ready()` waits until it answers HTTP on its port. `send_signal(sig)` and `stop(sig)` send
+    `sig` to this child's PID only (never a process group, never `pkill`).
 
-    def __init__(self, argv: list[str], environ: Mapping[str, str]) -> None:
+    For `Child.faked`: `stalled()` waits for a stalled discovery to begin (a start under way); `reported()` reads
+    the entry's `run returned <n>` line; the entry then holds, alive, until `release()` (which `ended()` does), so
+    a test can observe the database between `run`'s return and the process's exit."""
+
+    def __init__(self, argv: list[str], environ: Mapping[str, str], *, holds: bool = False) -> None:
         env = {k: v for k, v in os.environ.items() if not k.startswith(("DEFENDER_", FAULTS_ENV))}
         env["PYTHONPATH"] = os.pathsep.join(p for p in (str(REPO), os.environ.get("PYTHONPATH", "")) if p)
         env.update(environ)
         self.environ = dict(environ)
-        self.process = subprocess.Popen(argv, cwd=str(REPO), env=env, stdout=subprocess.PIPE,
-                                        stderr=subprocess.PIPE, text=True)
+        self.process = subprocess.Popen(argv, cwd=str(REPO), env=env, text=True, stdout=subprocess.PIPE,
+                                        stderr=subprocess.PIPE,
+                                        stdin=subprocess.PIPE if holds else subprocess.DEVNULL)
+        self._out = _Pump(self.process.stdout)
+        self._err = _Pump(self.process.stderr)
 
     @classmethod
     def real(cls, environ: Mapping[str, str]) -> Child:
@@ -259,23 +393,40 @@ class Child:
         return cls([sys.executable, "-m", "defender.api_server"], environ)
 
     @classmethod
-    def faked(cls, environ: Mapping[str, str], faults: Faults | None = None) -> Child:
-        """`defender.api_server.run` over a `FakeKeycloak` with `faults`, through this module's entry."""
+    def faked(cls, environ: Mapping[str, str], fails: Iterable[Fail] = ()) -> Child:
+        """`defender.api_server.run` over a `FakeKeycloak` with `fails`, through this module's entry."""
         return cls([sys.executable, "-m", "defender.tests.support.api._server1083"],
-                   {**environ, FAULTS_ENV: (faults or Faults()).to_json()})
+                   {**environ, FAULTS_ENV: fails_to_json(fails)}, holds=True)
 
     @property
     def base_url(self) -> str:
         return f"http://{self.environ['DEFENDER_API_HOST']}:{self.environ['DEFENDER_API_PORT']}"
 
+    def stalled(self, timeout: float = 60) -> bool:
+        """True once the fake's stalled discovery has begun: the program is mid-start, waiting on Keycloak."""
+        return self._out.line_starting("stalled ", timeout) is not None
+
+    def reported(self, timeout: float = 60) -> int | None:
+        """The value the entry says `run` returned; None if it never said (killed, or `run` never returned)."""
+        line = self._out.line_starting("run returned ", timeout)
+        return None if line is None else int(line.rsplit(" ", 1)[1])
+
+    def release(self) -> None:
+        """Let a held entry exit (idempotent)."""
+        if self.process.stdin is not None and not self.process.stdin.closed:
+            with contextlib.suppress(OSError):
+                self.process.stdin.close()
+
     def ended(self, timeout: float = 90) -> Ended:
+        self.release()
         try:
-            out, err = self.process.communicate(timeout=timeout)
+            self.process.wait(timeout)
         except subprocess.TimeoutExpired:
             self.process.kill()
-            out, err = self.process.communicate()
-            return Ended(-9999, out, "the program kept running when it should have ended\n" + err)
-        return Ended(self.process.returncode, out, err)
+            self.process.wait()
+            return Ended(-9999, self._out.text(), "the program kept running when it should have ended\n"
+                         + self._err.text())
+        return Ended(self.process.returncode, self._out.text(), self._err.text())
 
     def ready(self, timeout: float = 60) -> bool:
         """True once `GET /openapi.json` answers 200; False if the child exits or the time runs out first."""
@@ -291,16 +442,20 @@ class Child:
             time.sleep(0.2)
         return False
 
-    def stop(self, sig: int = signal.SIGTERM, timeout: float = 60) -> Ended:
+    def send_signal(self, sig: int = signal.SIGTERM) -> None:
         if self.process.poll() is None:
             os.kill(self.process.pid, sig)
+
+    def stop(self, sig: int = signal.SIGTERM, timeout: float = 60) -> Ended:
+        self.send_signal(sig)
         return self.ended(timeout)
 
     def kill(self) -> None:
         """Cleanup for a test that failed mid-way: SIGKILL this child only, if still running."""
         if self.process.poll() is None:
             self.process.kill()
-            self.process.communicate()
+        self.release()
+        self.process.wait()
 
 
 # --- identity seed ----------------------------------------------------------------------------------
@@ -347,6 +502,49 @@ async def seed_identity(dsn: str) -> Seeded:
         await repo.close()
 
 
+@dataclasses.dataclass(frozen=True)
+class TokenCredential:
+    credential_id: str
+    service_account_id: str
+
+
+async def seed_token_credential(dsn: str, seeded: Seeded) -> TokenCredential:
+    """A live `oauth_client` credential of the seeded program, as the programs realm's client would be (a service
+    account id recorded when it went live). It takes the program's second credential slot."""
+    from defender.identity.postgres import PostgresIdentityRepository
+    from defender.records.formats import CredentialId, ProgramId
+
+    now = dt.datetime.now(dt.UTC)
+    service_account = str(uuid.uuid4())
+    repo = PostgresIdentityRepository(dsn)
+    try:
+        program = await repo.program(ProgramId(seeded.program_id))
+        assert program is not None
+        credential_id = CredentialId.mint()
+        await repo.add_credential(program.id, kind="oauth_client", name="ci-token", created_by=program.created_by,
+                                  expires_at=now + dt.timedelta(days=30), now=now, credential_id=credential_id)
+        assert await repo.go_live(credential_id, service_account_id=service_account, now=now)
+        return TokenCredential(str(credential_id), service_account)
+    finally:
+        await repo.close()
+
+
+def program_token(keycloak: FakeKeycloak, credential: TokenCredential, *, audience: str = PROGRAMS_AUDIENCE,
+                  realm: str = PROGRAMS_REALM, lifetime: dt.timedelta = dt.timedelta(minutes=5)) -> str:
+    """The client-credentials access token the programs realm issues for `credential` (claims as observed, #1307
+    C21/C22), signed with the fake's published key of `realm` and valid now. A wrong `audience` or `realm` makes
+    the token one the server must refuse."""
+    from defender.tests.identity.test_1307_keycloak_programs import token_claims
+    from defender.tests.identity.test_identity_keycloak_adapter import Signer
+
+    signer = Signer(SIGNING_KID)
+    signer.key = keycloak.signing_keys[realm]
+    now = dt.datetime.now(dt.UTC)
+    return signer.sign(token_claims(iss=keycloak.issuer(realm), aud=[audience, "account"], azp=credential.credential_id,
+                                    sub=credential.service_account_id, iat=int(now.timestamp()) - 10,
+                                    exp=int((now + lifetime).timestamp())))
+
+
 def person(session: str, *, write: bool = False) -> dict[str, str]:
     """A person's request headers; `write` adds the origin a cookie-authenticated write needs."""
     headers = {"Cookie": f"{SESSION_COOKIE}={session}"}
@@ -360,10 +558,14 @@ def program(key: str) -> dict[str, str]:
 # --- test-support entry -----------------------------------------------------------------------------
 
 def _main() -> int:
+    """Calls `run`, reports its return on stdout, then (held until the parent releases stdin) exits with it."""
     from defender.api_server import run
 
-    faults = Faults.from_json(os.environ[FAULTS_ENV]) if FAULTS_ENV in os.environ else Faults()
-    return run(os.environ, transport=FakeKeycloak(faults))
+    fails = fails_from_json(os.environ[FAULTS_ENV]) if FAULTS_ENV in os.environ else ()
+    returned = run(os.environ, transport=FakeKeycloak(fails, on_stall=lambda realm: print(f"stalled {realm}", flush=True)))
+    print(f"run returned {returned}", flush=True)
+    sys.stdin.readline()  # hold: the parent observes the database, then closes stdin
+    return returned
 
 
 if __name__ == "__main__":
