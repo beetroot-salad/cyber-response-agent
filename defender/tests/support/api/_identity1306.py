@@ -659,6 +659,7 @@ class World:
             artifact_links=StubArtifactLinks(),
             identity=self.service, frontend_origin=FRONTEND_ORIGIN, tenants=self.tenants,
             offboarding=self.offboarding,
+            alert_mapping=self.store, audit=self.store,  # FC-14: the in-memory store serves both new ports (Am-5)
         ))
 
     def restart(self, *, administrators: Sequence[str] = (),

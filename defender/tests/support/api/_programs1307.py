@@ -404,6 +404,7 @@ class ProgramsWorld(World):
             artifact_links=StubArtifactLinks(),
             offboarding=InMemoryOffboarding(self.tenants, self.store, self.clock),
             identity=self.service, frontend_origin=FRONTEND_ORIGIN, tenants=self.tenants,
+            alert_mapping=self.store, audit=self.store,  # FC-14 (Am-5)
         ))
 
     def bearer(self, value: str, *, origin: str | None = None, scheme: str = "Bearer",

@@ -1212,6 +1212,94 @@ async def test_o13_a_replay_emits_no_second_start(dsn, caplog):
     assert [(e.action, e.actor) for e in audit.events()] == [("investigation.start", "u-1")]
 
 
+# --- #1083: the announcements carry the credential and the moved details; each write is announced once -------------
+
+async def _complete(store: Any, tenant: str, *, ticket: str = "T-1") -> Any:
+    """An investigation of a fresh alert, taken through the store's own claim and ended `completed` (its auto learning job queued)."""
+    alert = await an_alert(store, tenant, ticket=ticket)
+    inv, _ = await store.create_investigation(tenant, alert.alert_id, "k1", actor="setup")
+    claimed = await store.claim()
+    assert claimed is not None
+    assert claimed.record.investigation_id == inv.investigation_id
+    await store.finish(tenant, inv.investigation_id, stage="completed", disposition="benign", cost_usd=1.0)
+    return alert, inv
+
+
+def _the_operation(store: Any, operation: str, keyword: dict[str, str]) -> Any:
+    """(setup coroutine, act coroutine factory, action, target, detail) for one of the five audited writes."""
+    async def start() -> Any:
+        alert = await an_alert(store, T1)
+        return lambda: store.create_investigation(T1, alert.alert_id, "k1", actor="u-1", **keyword), \
+            "investigation.start", None, f"alert {alert.alert_id}"
+
+    async def cancel() -> Any:
+        alert = await an_alert(store, T1)
+        inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="setup")
+        return lambda: store.cancel_investigation(T1, inv.investigation_id, actor="u-1", **keyword), \
+            "investigation.cancel", inv.investigation_id, None
+
+    async def delete() -> Any:
+        alert = await an_alert(store, T1)
+        inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="setup")
+        await store.cancel_investigation(T1, inv.investigation_id, actor="setup")
+        return lambda: store.delete_investigation(T1, inv.investigation_id, actor="u-1", **keyword), \
+            "investigation.delete", inv.investigation_id, None
+
+    async def learning() -> Any:
+        _, inv = await _complete(store, T1)
+        return lambda: store.create_learning_job(T1, inv.investigation_id, "c-1", actor="u-1", **keyword), \
+            "learning_job.start", None, f"investigation {inv.investigation_id}; trigger=explicit"
+
+    async def mapping() -> Any:
+        return lambda: store.put_alert_mapping(T1, mapping_value(TITLE_ON_A), actor="u-1", **keyword), \
+            "alert_mapping.update", T1, None
+
+    return {"start": start, "cancel": cancel, "delete": delete, "learning": learning, "mapping": mapping}[operation]()
+
+
+@pytest.mark.parametrize("keyword", [{"credential_id": "c-1"}, {}], ids=["with a credential", "no credential given"])
+@pytest.mark.parametrize("operation", ["start", "cancel", "delete", "learning", "mapping"])
+async def test_1083_each_write_is_announced_once_naming_its_credential_and_the_moved_details(dsn, caplog, operation, keyword):
+    """One event per write: the actor, the tenant, the credential when given (none by default), and the start details moved from the routes. (#1083 O9, P2)"""
+    audit = JobsAudit(caplog)
+    async with job_store(dsn) as store:
+        act, action, target, detail = await _the_operation(store, operation, keyword)
+        before = len(audit.records())
+        result = await act()
+    new = audit.records()[before:]
+    assert [r.action for r in new] == [action], "exactly one event, of the write's own action"
+    [event] = new
+    assert (event.actor, event.tenant_id) == ("u-1", T1)
+    assert getattr(event, "credential_id", None) == keyword.get("credential_id")
+    if target is not None:
+        assert event.target == target
+    else:
+        assert event.target == (result[0].investigation_id if operation == "start" else result[0].learning_job_id)
+    if detail is not None:
+        assert event.detail == detail
+
+
+async def test_1083_a_credential_given_to_a_refused_or_replayed_write_announces_nothing(dsn, caplog):
+    """A replay, an unknown alert and an ended cancel announce nothing even with a credential; the first create did announce. (#1083 O9, P2)"""
+    from defender.jobs import Conflict, UnknownReference
+
+    audit = JobsAudit(caplog)
+    async with job_store(dsn) as store:
+        alert = await an_alert(store, T1)
+        inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1", credential_id="c-1")
+        before = len(audit.records())
+        again, created = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1", credential_id="c-1")
+        with pytest.raises(UnknownReference):
+            await store.create_investigation(T1, str(uuid.uuid4()), "k2", actor="u-1", credential_id="c-1")
+        await store.cancel_investigation(T1, inv.investigation_id, actor="u-1", credential_id="c-1")
+        mid = len(audit.records())
+        with pytest.raises(Conflict):
+            await store.cancel_investigation(T1, inv.investigation_id, actor="u-1", credential_id="c-1")
+    assert (again.investigation_id, created) == (inv.investigation_id, False)
+    assert [r.action for r in audit.records()[before:mid]] == ["investigation.cancel"]
+    assert len(audit.records()) == mid
+
+
 _BOOM = """CREATE CONSTRAINT TRIGGER boom_1342 AFTER INSERT OR UPDATE OR DELETE ON jobs.investigations
            DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION public.boom_1342()"""
 
@@ -1412,7 +1500,7 @@ async def test_o5_no_knowledge_is_sql_null_not_a_json_null(dsn):
 
 # --- #1345: the alert mapping in the store (O1 store side, O2, M3, O4) -------------------------------------
 #
-# Names r5 gives (design "Where it lives"): `JobStore.put_alert_mapping(tenant_id, mapping, actor="u-1") -> created: bool` (the one
+# Names r5 gives (design "Where it lives"): `JobStore.put_alert_mapping(tenant_id, mapping, actor="u-1") -> (stored mapping, created)` [#1083 Am-8; was `created: bool`] (the one
 # writer, M1), `JobStore.get_alert_mapping(tenant_id) -> mapping | None`, `insert_alert` without `title`/`description`.
 # `mapping` is `records`' mapping type: built by `mapping_value` (`.paths`: mapped entries only, an assumption).
 # Assumed, r5 names none: the store's own re-check of an invalid mapping raises `records`' `AlertMappingFault`, and
@@ -1444,10 +1532,15 @@ async def test_1345_o1_a_mapping_is_absent_until_saved_then_replaced_whole_and_a
 
     async with job_store(dsn) as store:
         assert await store.get_alert_mapping(T1) is None
-        created = await store.put_alert_mapping(T1, mapping_value({"signature": "rule.id", **TITLE_ON_RULE}), actor="u-1")
+        first, created = await store.put_alert_mapping(  # #1083 Am-8 (CONFLICT: it returned a bool): the stored mapping and created
+            T1, mapping_value({"signature": "rule.id", **TITLE_ON_RULE}), actor="u-1")
         assert created is True
-        created = await store.put_alert_mapping(T1, mapping_value(TITLE_ON_RULE), actor="u-1")
+        assert first.paths == {"signature": "rule.id", **TITLE_ON_RULE}
+        assert first == await store.get_alert_mapping(T1)
+        second, created = await store.put_alert_mapping(T1, mapping_value(TITLE_ON_RULE), actor="u-1")
         assert created is False
+        assert second.paths == TITLE_ON_RULE
+        assert second == await store.get_alert_mapping(T1)
         assert (await store.get_alert_mapping(T1)).paths == TITLE_ON_RULE, "a replace is whole: signature is gone"
         alert = await _insert(store, T1, ticket="T-1")
 
@@ -3685,3 +3778,76 @@ async def test_1360_o4_an_offboard_that_meets_an_uncommitted_create_waits_for_it
         assert (row(dsn, new)["stage"], row(dsn, new)["failure_reason"]) == ("aborted", OFFBOARDED)
     else:
         assert (_learning(dsn, new)["status"], _learning(dsn, new)["reason"]) == ("skipped", OFFBOARDED)
+
+
+# --- #1083: the store's list and learning-job reads --------------------------------------------------------------
+#
+# FORCED CHOICE FC-13 (the design names the reads, not their signatures): `list_alerts(tenant_id, *, fired_after,
+# fired_before, after, limit)`, `list_investigations(tenant_id, *, alert_id, after, limit)`, `list_learning_jobs(tenant_id,
+# *, investigation_id, after, limit)` and `get_learning_job(tenant_id, learning_job_id)`, each tenant-first, answering the
+# store's own records (`StoredAlert`, `InvestigationRecord`, `LearningJobRecord`); `after` is `(time, id)`, as the ports'.
+# The ports' ordering and window rules are pinned through the adapter (`tests/api/test_1083_port_contract.py`); here
+# only what is the store's: tenant keying, the filters, and the record types.
+
+async def _three_each(store: Any) -> dict[str, list[str]]:
+    """T1: three alerts, an investigation of each, each ended `completed` (so three auto learning jobs); T2: one of each.
+    Every row is stamped by the one fixed clock, so every time ties."""
+    ids: dict[str, list[str]] = {"alerts": [], "investigations": [], "jobs": [], "theirs": []}
+    for tenant, count in ((T1, 3), (T2, 1)):
+        for n in range(count):
+            alert, inv = await _complete(store, tenant, ticket=f"R-{tenant[:4]}-{n}")
+            key = "theirs" if tenant == T2 else None
+            if key:
+                ids[key] += [alert.alert_id, inv.investigation_id]
+            else:
+                ids["alerts"].append(alert.alert_id)
+                ids["investigations"].append(inv.investigation_id)
+    return ids
+
+
+async def test_1083_the_store_lists_one_tenants_rows_as_its_own_record_types_with_ties_by_id_descending(dsn):
+    """Each list answers the tenant's rows only, as records, in `(time, id)` descending; the other tenant's list holds its own. (#1083 Data)"""
+    from defender.jobs import InvestigationRecord, LearningJobRecord, StoredAlert
+
+    async with job_store(dsn) as store:
+        ids = await _three_each(store)
+        window: dict[str, Any] = {"fired_after": None, "fired_before": None, "after": None, "limit": 50}
+        alerts = await store.list_alerts(T1, **window)
+        investigations = await store.list_investigations(T1, alert_id=None, after=None, limit=50)
+        jobs = await store.list_learning_jobs(T1, investigation_id=None, after=None, limit=50)
+        theirs = await store.list_alerts(T2, **window)
+    assert all(isinstance(a, StoredAlert) for a in alerts)
+    assert all(isinstance(i, InvestigationRecord) for i in investigations)
+    assert all(isinstance(j, LearningJobRecord) for j in jobs)
+    assert [a.alert_id for a in alerts] == sorted(ids["alerts"], reverse=True)
+    assert [i.investigation_id for i in investigations] == sorted(ids["investigations"], reverse=True)
+    assert [j.learning_job_id for j in jobs] == sorted((j.learning_job_id for j in jobs), reverse=True)
+    assert sorted(j.investigation_id for j in jobs) == sorted(ids["investigations"]), "one auto job per ended investigation"
+    assert [a.alert_id for a in theirs] == ids["theirs"][:1], "control: the other tenant lists its own"
+
+
+async def test_1083_the_store_lists_filter_by_alert_and_by_investigation_and_page_strictly_after_a_position(dsn):
+    """`alert_id` and `investigation_id` narrow their lists; `after=(time, id)` serves only rows strictly after it. (#1083 Data)"""
+    async with job_store(dsn) as store:
+        ids = await _three_each(store)
+        newest_first = sorted(ids["investigations"], reverse=True)
+        [one] = await store.list_investigations(T1, alert_id=(await store.get_investigation(T1, newest_first[0])).alert_id,
+                                                after=None, limit=50)
+        [job] = await store.list_learning_jobs(T1, investigation_id=newest_first[0], after=None, limit=50)
+        rest = await store.list_investigations(T1, alert_id=None, after=(NOW, newest_first[0]), limit=50)
+    assert one.investigation_id == newest_first[0]
+    assert job.investigation_id == newest_first[0]
+    assert [i.investigation_id for i in rest] == newest_first[1:]
+
+
+async def test_1083_a_learning_job_reads_by_id_for_its_tenant_only(dsn):
+    """`get_learning_job` answers the record under its tenant, and `None` under another's or for an unknown id. (#1083 Data, O10)"""
+    async with job_store(dsn) as store:
+        _, inv = await _complete(store, T1)
+        [listed] = await store.list_learning_jobs(T1, investigation_id=inv.investigation_id, after=None, limit=5)
+        found = await store.get_learning_job(T1, listed.learning_job_id)
+        elsewhere = await store.get_learning_job(T2, listed.learning_job_id)
+        unknown = await store.get_learning_job(T1, str(uuid.uuid4()))
+    assert found == listed
+    assert (found.trigger, found.status, found.investigation_id) == ("auto", "queued", inv.investigation_id)
+    assert (elsewhere, unknown) == (None, None)
