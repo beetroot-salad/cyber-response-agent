@@ -146,13 +146,19 @@ def job_container_name(session: Session) -> str:
 
 def container_run_argv(session: Session, socket: Path, command: list[str], environ: Mapping[str, str] = os.environ
                        ) -> list[str]:
-    """The job container's attached `docker run` (module doc)."""
-    from defender.box import CLAIM_LABEL, TENANT_LABEL, BoxSpec
+    """The job container's attached `docker run` (module doc). The runtime it names is asked of the daemon here
+    (#1484, `box.require_runtime`), while a stop still unwinds the helper's setup, so a host without it refuses naming
+    the remedy rather than in docker's words."""
+    from defender.box import CLAIM_LABEL, TENANT_LABEL, BoxFault, BoxSpec, require_runtime
 
     try:
         runtime = BoxSpec.from_env(environ).runtime
     except ValueError as unknown:
         raise StartFailed(str(unknown)) from None
+    try:
+        require_runtime(session.docker, runtime)
+    except BoxFault as missing:
+        raise StartFailed(str(missing)) from None
     if session.tenant_folder is None:
         raise StartFailed("the job's tenant was not accepted: there is no tenant folder to bind")
     uid, gid = owner(session)

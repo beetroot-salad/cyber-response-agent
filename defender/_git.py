@@ -17,6 +17,17 @@ REPO_LOCATING_ENV = (
 )
 
 
+#: Who every commit the product makes in a tenant repository is by (#1484): author and committer both, whatever
+#: identity the shell's git has, or whether it has one at all (a job container runs as a bare uid with no git config).
+#: Given as environment, which beats any configured identity; the tenant template's first commit carries it too.
+PRODUCT_IDENTITY: Mapping[str, str] = {
+    "GIT_AUTHOR_NAME": "defender",
+    "GIT_AUTHOR_EMAIL": "defender@bots.invalid",
+    "GIT_COMMITTER_NAME": "defender",
+    "GIT_COMMITTER_EMAIL": "defender@bots.invalid",
+}
+
+
 def env_for_cwd() -> dict[str, str]:
     """This process's environment without the variables that would override `cwd=`, for a
     call that must act on the repository at its `cwd` and nowhere else (a tenant's own repo,

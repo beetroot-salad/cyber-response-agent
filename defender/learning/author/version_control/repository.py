@@ -234,7 +234,8 @@ class LocalRepository:
         if tree == self._git(["rev-parse", f"{parent}^{{tree}}"]):
             raise DeliveryRefused("the change set changes nothing")
         return self._git(
-            ["commit-tree", tree, "-p", parent, "-F", "-"], input=message
+            ["commit-tree", tree, "-p", parent, "-F", "-"], input=message,
+            env={**_local_env(), **_git.PRODUCT_IDENTITY},
         ), after
 
     def move_branch(self, branch: str, commit: str, old: str | None) -> None:
