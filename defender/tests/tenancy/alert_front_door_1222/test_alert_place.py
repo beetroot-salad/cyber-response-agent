@@ -710,21 +710,35 @@ _BAD_SOURCES: dict[str, Callable[[Path], None]] = {
 
 def _start_over(tmp_path: Path, shape: Callable[[Path], None]) -> tuple[Any, Any, Path | None]:
     """One run whose input directory is put into `shape` just before its box starts; returns the
-    scripted daemon, what `run.main` raised, and the run folder."""
+    scripted daemon, what the box start refused with, and the run folder. An operator's run whose
+    box did not start exits 1 (#1484), so the refusal is read at the box start itself."""
     daemon = _scripted_daemon()
-    seen: dict[str, Path] = {}
+    seen: dict[str, Any] = {}
+    start = _start_with(daemon)
 
     def around(prod: Callable[..., dict], kw: dict) -> dict:
         seen["run_dir"] = Path(kw["run"].run_dir)
         shape(Path(kw["run"].run_dir))
         return prod(**kw)
 
+    def start_box(*a: Any, **kw: Any) -> Any:
+        try:
+            return start(*a, **kw)
+        except Exception as e:  # noqa: BLE001 — the refusal is the observation
+            seen["refused"] = e
+            raise
+
+    exit_code: Any = None
     try:
         _main_boxed(tmp_path, S.plant_tenant(), S.alert_bytes(S.generic_alert()),
-                    start_box=_start_with(daemon), investigate=_noop_investigate, around=around)
-    except Exception as e:  # noqa: BLE001 — the refusal is the observation
-        return daemon, e, seen.get("run_dir")
-    return daemon, None, seen.get("run_dir")
+                    start_box=start_box, investigate=_noop_investigate, around=around)
+    except SystemExit as stop:
+        exit_code = stop.code
+    if "refused" in seen:
+        assert exit_code == 1, f"a run whose box did not start exited {exit_code!r}, not 1"
+    else:
+        assert exit_code is None, f"the run exited ({exit_code!r}) without its box start refusing"
+    return daemon, seen.get("refused"), seen.get("run_dir")
 
 
 def test_p153_box_created_while_the_directory_is_missing_or_no(tmp_path, monkeypatch):

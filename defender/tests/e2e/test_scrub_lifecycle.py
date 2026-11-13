@@ -33,6 +33,7 @@ from pydantic_ai.exceptions import ModelRetry  # noqa: E402
 
 from defender.box import (  # noqa: E402
     BoxFault,
+    BoxStartFault,
     BoxResult,
     Finding,
     RunTainted,
@@ -679,9 +680,9 @@ def test_box_construction_failure_refuses_the_run(tmp_path):
         log.append("start-refused")
         raise fault
 
-    with pytest.raises(BoxFault) as e:
+    with pytest.raises(BoxStartFault) as e:
         _drive_lifecycle(tmp_path, rec, start_box=refusing_start)
-    assert e.value is fault
+    assert e.value.__cause__ is fault, "the start's own refusal is not carried as the cause"
     assert "investigate" not in log, \
         "the investigation ran despite the box refusing to build — untrusted input was " \
         "processed outside a box"
