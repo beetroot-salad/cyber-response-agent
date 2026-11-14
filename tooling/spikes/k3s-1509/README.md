@@ -5,8 +5,8 @@ work item 1). It is throwaway tooling: nothing in the product imports it.
 
 `run-all.sh` builds a one-node k3d cluster with two gVisor runtime classes, runs every probe, writes
 `out/run-all-<date>.txt`, deletes the cluster, and judges the output with `verdict.py`, which exits non-zero naming
-every probe that disagrees with the design. Set `KEEP=1` to keep the cluster. CI runs it as the `k3s spike` workflow
-(`.github/workflows/k3s-spike.yml`) whenever this folder changes, or by hand.
+every probe that disagrees with the design. Set `KEEP=1` to keep the cluster. It is a one-time check and is not run in CI;
+the lasting checks of these properties belong to the launcher's own tests (design work item 7).
 
 ## Run it
 
@@ -14,7 +14,7 @@ In the dev container:
 
 ```sh
 start-jobs-docker                       # the dev container's own Docker daemon
-K3D=/path/to/k3d sh tooling/spikes/k3s-1509/run-all.sh
+sh tooling/spikes/k3s-1509/run-all.sh   # k3d on PATH, or K3D=/path/to/k3d
 ```
 
 Requirements:
@@ -37,7 +37,7 @@ A run takes about five minutes. It leaves the k3s and k3d helper images in the d
 | 5 | Box pod create-to-ready time, first exec, and delete. |
 | 6 | The job's volume is deleted with its job pod, and a box that still mounts it holds it until the box goes. |
 
-Not covered: the CI runner; several nodes; a k3s server restart; real file deletion on the shared volume (the
+Not covered: a CI runner; several nodes; a k3s server restart; real file deletion on the shared volume (the
 probe moves files instead); a real cloud metadata endpoint.
 
 ## Result, 2026-11-14 (dev leg)

@@ -605,7 +605,8 @@ claim-scoped keys with confined readers.
 **Then the boundaries work**, each a later issue:
 
 1. **Spike, go or no-go (#1509):** dev leg run on 2026-11-14, every probe passes (`tooling/spikes/k3s-1509/`). Still to
-   run: the CI runner, several nodes, a k3s server restart.
+   run: several nodes and a k3s server restart. It is a one-time check, kept for reruns by hand; the lasting checks of
+   O4, O5 and O7, in CI as well, are the launcher's own tests in work item 7.
 2. The claim on the row; passes name their claim; the proxy's claim check and audit in PostgreSQL.
 3. #1491: model and forge calls through the proxy, the raw forge token retired, proxy replicas, per-route egress
    (#1501).
@@ -642,7 +643,7 @@ claim-scoped keys with confined readers.
 ## Remaining decisions
 
 - VPS providers and sizes, and actual resource budgets.
-- The spike's CI leg, several nodes and a k3s restart (work item 1, #1509); the dev leg passed. The fallback applies if they fail.
+- Several nodes and a k3s restart (work item 1, #1509); the spike's dev leg passed. The fallback applies if they fail.
 - Membership and enrollment owner, token lifetime and refresh configuration, and identity-provider setup.
 - Issuer bootstrap and live Forgejo integration; when to adopt automatic unsealing.
 - Exact artifact CSP values and the complete inventory of HTML-producing paths.
@@ -660,8 +661,8 @@ ordered checklist. #1502 (containerisation) is rewritten as work item 7; #1491 i
 
 Revision 2026-11-14, at source base `a8143a4bc`. The boundaries design went through four independent reviews (general,
 trust boundaries, and two on the helper channel), each sorted by a fresh reader before revision. Kubernetes and gVisor
-behaviour was then probed by the spike in the dev container's own Docker daemon (B-G7: the dev leg holds; the CI runner,
-several nodes and a k3s restart stay unprobed).
+behaviour was then probed by the spike in the dev container's own Docker daemon (B-G7: the dev leg holds; several nodes and a
+k3s restart stay unprobed).
 Earlier revisions: 2026-10-22 and 2026-10-22b (Compose per host, backend-held sessions, one tenant per user, the
 artifact domain, the OpenBao unseal posture); their claims are kept below.
 
@@ -722,8 +723,8 @@ claims:
     verdict: holds
   - id: B-G7b
     kind: behavior
-    claim: "The same holds on the CI runner, across several nodes, and through a k3s server restart (exec streams in flight)."
-    probe: "the spike's CI leg and a two-node run"
+    claim: "The same holds across several nodes and through a k3s server restart (exec streams in flight); on a CI runner it is covered by work item 7's tests, not by the spike."
+    probe: "a two-node run; the launcher's tests in work item 7"
     probe_kind: executed
     observed: "not run"
     verdict: unprobed

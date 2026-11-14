@@ -3,7 +3,7 @@
 # gVisor: the host's runsc, its shim, and (this runsc release) its sidecar folder gvisor-bin, mounted into the node.
 set -eu
 S=$(cd "$(dirname "$0")" && pwd); export DOCKER_HOST=unix:///var/run/docker-jobs.sock
-"${K3D:-$S/bin/k3d}" cluster create spike1509 --image rancher/k3s:v1.33.9-k3s1 --servers 1 --agents 0 --no-lb \
+"${K3D:-k3d}" cluster create spike1509 --image rancher/k3s:v1.33.9-k3s1 --servers 1 --agents 0 --no-lb \
   --api-port 127.0.0.1:16443 --servers-memory 3g \
   --k3s-arg '--disable=traefik,servicelb,metrics-server@server:0' \
   --volume /usr/bin/runsc:/usr/local/bin/runsc@server:0 \

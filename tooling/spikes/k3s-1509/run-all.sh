@@ -9,7 +9,9 @@ mkdir -p "$S/out"; OUT=${OUT:-$S/out/run-all-$(date +%F).txt}
 sec(){ echo; echo "## $1"; }
 {
 sec "versions"; "${K3D:-k3d}" version; runsc --version | head -1; docker version --format 'docker {{.Server.Version}}'
-sec "cluster"; sh "$S/up.sh" 2>&1 | tail -1; sleep 20; $K get nodes -o wide | awk '{print $1,$2,$5,$NF}'
+sec "cluster"; sh "$S/up.sh" 2>&1 | tail -1
+if ! docker inspect "$N" >/dev/null 2>&1; then echo "SETUP FAILED: the cluster was not created; no probe ran"; exit 3; fi
+sleep 20; $K get nodes -o wide | awk '{print $1,$2,$5,$NF}'
 $K apply -f - < "$S/m/01-runtime.yaml" >/dev/null; $K apply -f - < "$S/m/02-targets.yaml" >/dev/null
 $K wait --for=condition=Ready pod --all -n jobs --timeout=180s >/dev/null; $K wait --for=condition=Ready pod --all -n control --timeout=180s >/dev/null
 sec "probe 1: gVisor runtime classes (interfaces and routes)"
@@ -57,5 +59,6 @@ sec "probe 4b: launcher rights"; sh "$S/probe-rbac.sh"
 sec "probe 5: box timing"; sh "$S/probe-timing.sh"
 sec "probe 6: volume lifetime"; sh "$S/probe-volume-life.sh"
 } 2>&1 | tee "$OUT"
+grep -q "^SETUP FAILED" "$OUT" && exit 3
 [ "${KEEP:-0}" = 1 ] || "${K3D:-k3d}" cluster delete spike1509 >/dev/null 2>&1
 echo; python3 "$S/verdict.py" "$OUT"
