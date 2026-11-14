@@ -201,7 +201,7 @@ verb from the query body. Do **not** build a catalog from API docs — the
 offline lead-author mints the rest from real runs.
 
 `knowledge/tenant-template/settings/verb-grants.yaml` and
-`knowledge/tenant-fixture/settings/verb-grants.yaml` in this repo, and the connected
+`defender/tests/fixtures/tenant-fixture/settings/verb-grants.yaml` in this repo, and the connected
 tenant's own `settings/verb-grants.yaml` — **adapter path only: one row per verb the
 adapter declares, `health-check` included, in every one of those tables.** The adapter is
 shared code, so every table must decide it: grant it in the tenant you are connecting,
@@ -266,7 +266,7 @@ the branch and just leave the files in place for review:
 git checkout -b connect/{system}
 git add defender/integrations/{system}_adapter.py \
         knowledge/tenant-template/settings/verb-grants.yaml \
-        knowledge/tenant-fixture/settings/verb-grants.yaml
+        defender/tests/fixtures/tenant-fixture/settings/verb-grants.yaml
 # add pyproject.toml / uv.lock only if a dependency was added
 ```
 

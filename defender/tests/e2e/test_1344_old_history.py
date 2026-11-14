@@ -3,7 +3,7 @@
 The fixture `tests/fixtures/e2e/old-history-d59e24acb.tar.gz` is that commit's replay-harness run (append, one
 `gather` l-001 reaching a stand-in elastic, append, append, close), `sessions.db` (user_version 2, with
 `fork_snapshot`) and `run/` minus its wire logs; its `gather` is row 10. To regenerate: `git archive d59e24acb defender
-knowledge/tenant-fixture` to a scratch folder, drive `_1255_snapshot.drive_source` there, `VACUUM INTO` the store,
+defender/tests/fixtures/tenant-fixture` to a scratch folder, drive `_1255_snapshot.drive_source` there, `VACUUM INTO` the store,
 drop `run/wire_logs`, tar sorted with mtime 0, gzip -9n. Each test unpacks it into its own tmp_path; none writes to it."""
 from __future__ import annotations
 

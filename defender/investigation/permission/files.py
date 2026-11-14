@@ -101,6 +101,30 @@ def build_named_write_allow(root: Path, names: tuple[str, ...]) -> tuple[re.Patt
     return tuple(re.compile(base + "/" + re.escape(name)) for name in names)
 
 
+def names_checkout_tests(rp: Path, defender_dir: Path, run_dir: Path) -> bool:
+    """True iff a resolved path sits under the checkout's `tests/` and outside the run dir. The
+    tests hold fixture tenants (their `settings/` included) and lab snapshots: test data no run
+    reads (#1503 moved the fixture tenant there). A run dir a test placed under them stays its
+    own."""
+    tests = Path(defender_dir).resolve() / "tests"
+    return _is_within(rp, tests) and not _is_within(rp, Path(run_dir).resolve())
+
+
+TESTS_DENY_REASON = (
+    "Blocked: the checkout's tests/ is not a readable path for any agent — it holds test "
+    "fixtures, not this tenant's knowledge."
+)
+
+
+def _always_denied(rp: Path, defender_dir: Path, run_dir: Path) -> str | None:
+    """The deny reason for a path no agent reads whatever its grants, else `None`."""
+    if names_wire_log_dir(rp):
+        return WIRE_LOG_DENY_REASON
+    if names_checkout_tests(rp, defender_dir, run_dir):
+        return TESTS_DENY_REASON
+    return None
+
+
 def read_allowed_path(
     path: str | Path, *, run_dir: Path | None, defender_dir: Path | None,
     policy: AgentPolicy,
@@ -118,7 +142,7 @@ def read_allowed_path(
         roots = resolved_read_roots(policy, run_dir, defender_dir)
     except RESOLVE_ERRORS:
         return False
-    if denylisted(rp) or names_wire_log_dir(rp):
+    if denylisted(rp) or names_wire_log_dir(rp) or names_checkout_tests(rp, defender_dir, run_dir):
         return False
     return any(_is_within(rp, root) for root in roots)
 
@@ -149,10 +173,11 @@ def decide_read(
     # gray-box actor the payloads it must not see. Reading one needs a shape that names it.
     if _names_raw(rp) and not admitted:
         return Decision(False, RAW_DENY_REASON)
-    # Wire logs are denied unconditionally: no agent should read host observability, and the
-    # judge's `under(run, TREE)` scope would otherwise admit them.
-    if names_wire_log_dir(rp):
-        return Decision(False, WIRE_LOG_DENY_REASON)
+    # Wire logs and the checkout's tests are denied unconditionally: no agent should read host
+    # observability (the judge's `under(run, TREE)` scope would otherwise admit them) or test data.
+    always = _always_denied(rp, defender_dir, rd)
+    if always is not None:
+        return Decision(False, always)
     if names_run_provenance(rp, rd):
         return Decision(False, PROVENANCE_DENY_REASON)
     if names_branching_page(rp):

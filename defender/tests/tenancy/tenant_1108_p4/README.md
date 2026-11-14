@@ -9,7 +9,7 @@ the whole record a code session needs; the working notes it was built from are n
 - Design: issue #1108 comment "#1108 P4 — the switch: current intent + design (r3, 2026-10-22)",
   sha256 `04283016b7fe7cbbe8ee53267b658af111fae0b79dfe3258df5fc3eb8b21efba`, plus **amendment A**
   (human, 2026-10-23, below). P3's amendments 2 and 3 stand except where r3 names otherwise.
-- Shared machinery: `_support.py` (fixture tenant `knowledge/tenant-fixture/`, git-init plus a
+- Shared machinery: `_support.py` (fixture tenant `defender/tests/fixtures/tenant-fixture/`, git-init plus a
   **real** P3 publish: `published_tenant`, `second_tenant`, `place_fixture`, `publish_placed`,
   `publish_once`, `bind_forge`/`unbind_forge`, pytest fixture `p4_tenant`), `_s_b_support.py`
   (run start, publish child, report-line vocabulary), `_drain_support.py` (drains, lanes, AppRole
@@ -52,7 +52,7 @@ logs in to OpenBao itself with AppRole). Human decisions U1–U8 are in r3; U9�
   host-side. Test: `e2e/test_branch_resume.py::test_od21_a_resumed_box_sees_neither_the_source_run_page_nor_its_raw_knowledge_reason`.
 - **U15 (tenant template catalog):** the tenant template ships an empty catalog; the implementer
   adds it. `tests/tenancy/test_tenant_settings_location.py::test_the_templates_lead_zero_names_an_established_template_in_the_catalog`
-  stays as written. Scope: the tenant template's `agent/` content.
+  stayed as written until #1503 retired it (the lead binds no saved query, and the template ships none). Scope: the tenant template's `agent/` content.
 
 ### Agent decisions (binding for this contract; for the owner to confirm or change)
 
@@ -159,7 +159,7 @@ Spelled as the tests call them. One line each; the test file named holds the ful
 - `validate_scaffold.py <system> --tenant <T> --staged <dir>`: the skill and template checks read the staged (agent-root-shaped) directory, the adapter checks the code tree (`DEFENDER_DIR`). `--tenant` exists today; `--staged` is the missing flag (U13).
 
 **Readers and run tenant**
-- `systems.run_tenant.resolve_run_tenant(settings_root, *, agent_root, dispatches_lead_zero)`; `RunTenant(..., agent_root=, settings_root=)` whose `.agent`/`.settings` are those roots.
+- `systems.run_tenant.resolve_run_tenant(settings_root, *, dispatches_lead_zero)` (#1503 dropped `agent_root`: no catalog is read at run start); `RunTenant(..., agent_root=, settings_root=)` whose `.agent`/`.settings` are those roots.
 - `KnowledgePaths(agent_root)` without `agent_rel`; `deps.knowledge.agent_root` is the run's agent root.
 - `serialize.build_view(agent_root=)` (posture page; groups `{defender, questioner}`).
 - `record_lesson_load.lesson_name(path, agent_root=)` (recognised by the served run copy).
@@ -295,18 +295,18 @@ Repair round r4 (this round), all additive or stricter:
   refused-whole reset asserts every draft file single-linked (L3, owner ruling 2).
 - `test_refused_claims.py`: lead claim refused for an out-of-lane path; pitfalls claim refused → rc 0, one attempt, dead-lettered at the
   ceiling naming `DeliveryRefused` (with its unrefused control) (L4).
-- Support: `_tenants1106.plant_census_catalog(folder)` plants the lead-zero template into each tenant folder's `agent/skills/gather/queries/` (R-2);
+- Support: `_tenants1106.plant_census_catalog(folder)` planted the lead-zero template into each tenant folder's catalog (R-2; retired by #1503, which binds the lead no saved query);
   `_spec1107.plant` re-plants in place keeping `.git`, and the publish stand-in `_launch_publish_p4` fails a lost `.git` (`pytest.fail`) instead of
   starting the remote anew, and reads `LockBusy` as `stale:transient` (R-3); the fixture tenant ships
   `agent/skills/tacit-knowledge/SKILL.md`, re-asserted by `tenancy/test_tacit_knowledge_registry.py` (R-5).
 - Older suites reading the product content P4 deleted (item 13), re-spelled, nothing deleted: `invlang/validation/test_lessons_frontier_scale.py` (4)
   and `learning/retrieval/test_container_lesson_recall.py` (7) rank against the pre-P4 shipped lessons, now the committed test fixture
-  `tests/fixtures/pre-p4-shipped/agent/` (byte-identical to base `0f62791e`; helper `support/shared/_pre_p4_shipped.py`);
+  `tests/fixtures/pre-p4-shipped/agent/` (byte-identical to base `0f62791e` except its lessons, which #1503 replaced with nine made-up ones keeping their selectors; helper `support/shared/_pre_p4_shipped.py`);
   `invlang/validation/test_frontier_shared_walk.py`'s straddle case recalls from the run copy's `agent/lessons`;
   `integrations/test_scaffold_rules.py`'s template sweep covers every committed `knowledge/*/agent` catalog plus that fixture's (which carries
   the `_draft`); `learning/curation/test_tacit_registry_authoring.py` gates the fixture tenant's and the pre-P4 registry and reads its worked
   example from the pre-P4 copy; `tooling/layout_contracts/test_1080_lints_and_pointers.py::test_staying_commands_import_modules_that_have_moved`
-  runs `tacit_cli check --defender-dir knowledge/tenant-fixture/agent` (an agent root under the existing flag; not yet named in §2).
+  runs `tacit_cli check --defender-dir defender/tests/fixtures/tenant-fixture/agent` (an agent root under the existing flag; not yet named in §2).
 - Deleted with production code the cleanup removed (OD12 class i):
   - `shared/process/test_git.py`: the `git_rev_list_count` half of the head-sha case, `test_git_commit_pathspec_scoped_and_trailers`,
     `test_git_commit_no_op_returns_none`, `test_git_worktree_add_remove`, `test_git_worktree_add_branch`, `test_git_push_sets_upstream`,
@@ -339,7 +339,7 @@ Repair round r5:
   `e2e/test_box_boundary_e2e.py::test_write_under_defender_dir_fails_erofs_by_errno` (the poisoned write goes under `skills/gather/`, a folder
   the product still ships, so the probe meets the ro bind rather than ENOENT; box-only, not run locally).
 - `tooling/layout_contracts/test_1080_lints_and_pointers.py::test_ci_step_and_docs_invoke_a_command_by_a_path_or_module_that_must_keep_working`
-  (class ii): the expected CI `tacit_cli check` step carries `--defender-dir knowledge/tenant-fixture/agent`, the spelling the r4 respell of
+  (class ii): the expected CI `tacit_cli check` step carries `--defender-dir defender/tests/fixtures/tenant-fixture/agent`, the spelling the r4 respell of
   `::test_staying_commands_import_modules_that_have_moved` runs (the golden stays the pre-move recording; the move is applied in the test).
 - `e2e/test_training_spine.py` (class ii, repair-list class D): `TriggerRecorder` takes the batch the drain hands it and runs the REAL findings curator
   over that batch's draft lanes with `batch=` (as `_drain_support.CuratorTrigger`), not over checkout trees. It records `completed`, and every
@@ -358,7 +358,7 @@ Collateral still naming deleted files: `tests/_shard_weights.json`, `learning/st
   - about 10 run-page and 26 ticket cases, behind `resolve_run_tenant(agent_root=)`.
 - **Never run against a stand-in:** the run-page cases, the host-record cases, and the box-tamper cases (stamp forged during the box window). Check that they reach their own assertions.
 - Controls that pass today only because the seam fault is dead-lettered (the U10 `gate-rejection`/`unrelated` lead controls) become meaningful after P4.
-- `test_tenant_settings_location::test_the_templates_lead_zero_names_an_established_template_in_the_catalog` is red by **owner ruling U15**: the tenant template ships an empty catalog; the implementer adds it. Not a seam; the test stays as written.
+- `test_tenant_settings_location::test_the_templates_lead_zero_names_an_established_template_in_the_catalog` was red by **owner ruling U15** until #1503 retired it: the lead binds no saved query, and the tenant template ships none.
 
 ## 6. Known gaps (not covered)
 

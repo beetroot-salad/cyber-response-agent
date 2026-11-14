@@ -133,7 +133,7 @@ def test_1120_run_tenant_is_the_accepted_tenant_plus_its_grants_and_dispatch(
     assert Path(run_tenant.grants.path).parent == Path(run_tenant.settings)
     assert {(s, v) for s, v, *_ in run_tenant.grants.gather.entries} == set(D995.GATHER_CENSUS)
     assert run_tenant.correlation is not None, "a fresh run carries its lead-zero dispatch"
-    assert run_tenant.correlation.template_id == H.FIXTURE_CORRELATION_TEMPLATE
+    assert run_tenant.correlation.system == "elastic"
 
     # The sibling: the same accepted Tenant, and no turn-0 dispatch.
     src = _source_under(data_root)

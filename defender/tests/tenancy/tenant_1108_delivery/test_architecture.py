@@ -161,7 +161,8 @@ def _agent_facing_text():
             continue
         yield path
     for tree in ("tenant-template", "tenant-fixture"):
-        yield from (p for p in sorted((DEFENDER.parent / "knowledge" / tree / "agent").rglob("*"))
+        from defender.tests.support.tenancy._tenants1106 import committed_folder
+        yield from (p for p in sorted((committed_folder(DEFENDER.parent, tree) / "agent").rglob("*"))
                     if p.is_file())
 
 def _folded(node):

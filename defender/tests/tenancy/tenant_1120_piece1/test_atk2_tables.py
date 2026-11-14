@@ -1,6 +1,6 @@
 # ruff: noqa: PT018
-"""#1214 W4-3 (owner ruling): `accept_tenant` itself parses the two reviewed tables, `verb-grants.yaml` and `lead-zero.yaml`.
-Asserted on `accept_tenant`, not through a consumer's own parse."""
+"""#1214 W4-3 (owner ruling): `accept_tenant` itself parses the reviewed table, `verb-grants.yaml` (#1503 retired
+`lead-zero.yaml`). Asserted on `accept_tenant`, not through a consumer's own parse."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -13,7 +13,7 @@ from defender.tests.support.shared._locations_1210 import fixture_data_root
 from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
 
 #: table -> (its one known top-level key, a value for it)
-TABLES = {"verb-grants.yaml": "dispositions", "lead-zero.yaml": "correlation_template"}
+TABLES = {"verb-grants.yaml": "dispositions"}
 
 
 def _damages(key: str) -> dict[str, str]:

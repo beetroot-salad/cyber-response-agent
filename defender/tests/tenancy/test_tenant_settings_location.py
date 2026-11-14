@@ -69,19 +69,6 @@ def test_the_template_table_is_total_over_the_real_adapters():
     assert not gaps, gaps
 
 
-def test_the_templates_lead_zero_names_an_established_template_in_the_catalog():
-    """The template's `lead-zero.yaml` names a template that exists in its own `agent/`
-    catalog (the one a run resolves the id against, never the checkout's), so an operator who
-    grants the lead its pair later has nothing else to fix."""
-    from defender.knowledge._corpus import is_established, iter_query_templates
-
-    lz = T.mod("systems.lead_zero_config")
-    template_id = lz.load_correlation_template(lz.lead_zero_config_path(T.TEMPLATE_SETTINGS))
-    catalog = T.TEMPLATE_AGENT / "skills" / "gather" / "queries"
-    assert [t.id for t in iter_query_templates(catalog)
-            if t.id == template_id and is_established(t)] == [template_id]
-
-
 def test_a_tenant_copied_from_the_template_resolves_and_grants_gather_nothing(tmp_path):
     root = tmp_path / "tenants"
     shutil.copytree(T.TEMPLATE_DIR, root / fixture_uuid("tenant:newco") / "knowledge")
@@ -92,16 +79,14 @@ def test_a_tenant_copied_from_the_template_resolves_and_grants_gather_nothing(tm
     assert grants.correlation_system is None
 
 
-def test_every_committed_tenant_and_the_template_loads_its_table_and_lead_zero():
+def test_every_committed_tenant_and_the_template_loads_its_table():
     vd = T.mod("systems.verb_dispositions")
-    lz = T.mod("systems.lead_zero_config")
     folders = [*(d / "settings" for d in _committed_tenant_dirs()), T.TEMPLATE_SETTINGS]
     assert T.FIXTURE_SETTINGS in folders
     for settings in folders:
         with warnings.catch_warnings():
             warnings.simplefilter("error", vd.DispositionWarning)
             assert vd.load_dispositions(vd.dispositions_path(settings)), settings
-        assert lz.load_correlation_template(lz.lead_zero_config_path(settings)), settings
 
 
 def _reader_policies(run_dir: Path):
@@ -137,7 +122,7 @@ def test_every_settings_file_is_denied_by_both_read_surfaces_and_a_corpus_file_i
     files = _settings_files(leftover)
     names = {p.name for p in files}
     # The census is non-vacuous: every kind is present to be denied.
-    assert {"verb-grants.yaml", "lead-zero.yaml", "case-record.yaml", "config.env", "access.yaml"} <= names, names
+    assert {"verb-grants.yaml", "case-record.yaml", "config.env", "access.yaml"} <= names, names
     control = T.DEFENDER / "skills" / "gather" / "SKILL.md"
     for role, policy in _reader_policies(run_dir).items():
         allowed = [
@@ -167,7 +152,6 @@ def injected(tmp_path) -> Path:
     root = tmp_path / "injected-root"
     S.plant(
         root, T.PLAYGROUND_ID, table=T.TABLE_B, marker=MARK,
-        lead_zero=T.lead_zero_text("elastic.injected-tenant-template"),
         case_body=INJECTED_BODY,
     )
     td = T.accept(root, T.PLAYGROUND_ID)
@@ -258,14 +242,6 @@ def test_the_record_leg_comments_to_the_injected_tenants_store_with_its_case_rec
 
 
 # ---- lead-zero ---------------------------------------------------------------------------------
-
-def test_the_lead_zero_config_is_read_from_the_injected_tenant(injected):
-    lz = T.mod("systems.lead_zero_config")
-    assert lz.load_correlation_template(lz.lead_zero_config_path(injected)) == \
-        "elastic.injected-tenant-template"
-    assert lz.load_correlation_template(lz.lead_zero_config_path(T.FIXTURE_SETTINGS)) != \
-        "elastic.injected-tenant-template"
-
 
 def _pairs(grant) -> set[tuple[str, str]]:
     return {(s, v) for s, v, _ in grant.entries}
