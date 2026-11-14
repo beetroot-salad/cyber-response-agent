@@ -2,8 +2,9 @@
 
 Reads the real `detection-rules/*.json` at activate time and builds two sets:
 
-  * rule-key fields — from both `threshold.field` (where `source.ip` and some
-    `host.name` keys live) and the parsed query/EQL text; either alone misses some.
+  * rule-key fields — from a threshold's `field` and `cardinality[].field` (where `source.ip`,
+    `user.name` and some `host.name` keys live) and the parsed query/EQL text; either alone
+    misses some.
   * rule-read datasets — the dataset behind each rule's `index` pattern
     (`logs-system.auth-*` -> `system.auth`), or behind each source an ES|QL
     rule's query reads, taken from the product's one reader
@@ -51,12 +52,16 @@ def _load_rules(rules_dir: Path) -> list[dict[str, Any]]:
 
 
 def rule_key_fields(rules_dir: Path) -> set[str]:
-    """Every field any rule's threshold or query/EQL text keys on."""
+    """Every field any rule's threshold (its group-by `field` and each `cardinality[].field` it
+    counts distinct values of) or query/EQL text keys on."""
     fields: set[str] = set()
     for rule in _load_rules(rules_dir):
         threshold = rule.get("threshold") or {}
         for field in threshold.get("field") or []:
             fields.add(field)
+        for counted in threshold.get("cardinality") or []:
+            if isinstance(counted, dict) and counted.get("field"):
+                fields.add(counted["field"])
         fields.update(_FIELD_RE.findall(rule.get("query") or ""))
     return fields
 

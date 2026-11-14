@@ -3,10 +3,10 @@
 The guard reads the real `detection-rules/*.json` at activate time and builds
 two sets:
 
-  * rule-key fields — from the `threshold.field` JSON array *and* from the
-    parsed query/EQL string. Reading only the query string is the design's own
+  * rule-key fields — from the threshold (its `field` array and each
+    `cardinality[].field`) *and* from the parsed query/EQL string. Reading only the query string is the design's own
     stated near-miss: `source.address` is keyed on by v2-nginx-path-enumeration and
-    `user.name` by the postgres and squid thresholds, and neither appears
+    `user.name` by squid's threshold `field` and postgres's `cardinality`, and neither appears
     **anywhere** in any rule's query text.
   * rule-read datasets — the dataset behind each rule's `index` pattern.
 
@@ -28,7 +28,7 @@ from chaos.guard import GuardRefused, check_mutations, check_profile, rule_key_f
 from chaos.mutations import UnresolvableProfile, resolve_mutations
 from chaos.profiles import list_profiles, load_profile
 
-# Keyed on only via `threshold.field` — a query-string-only parser misses these.
+# Keyed on only via the threshold — a query-string-only parser misses these.
 THRESHOLD_ONLY_FIELDS = ["source.address", "user.name", "falco.output_fields.container.name"]
 # Keyed on only via the query/EQL text.
 QUERY_ONLY_FIELDS = ["process.name", "event.outcome", "falco.rule"]
@@ -51,6 +51,24 @@ def test_rule_key_fields_covers_threshold_array_and_query_text(rules_dir):
         assert field in fields, f"{field} missing from rule-key fields"
     for field in SAFE_DRIFT_FIELDS:
         assert field not in fields, f"{field} wrongly treated as a rule-key field"
+
+
+def test_a_threshold_cardinality_field_is_a_rule_key_field(tmp_path, profiles_dir):
+    """A threshold rule also keys on each `threshold.cardinality[].field` (the distinct values it
+    counts): v2-postgres-password-guessing counts distinct `user.name` there, and renaming that
+    field silences its "several accounts" condition."""
+    rules_dir = tmp_path / "rules"
+    rules_dir.mkdir()
+    (rules_dir / "r.json").write_text(json.dumps({
+        "rule_id": "r", "type": "threshold", "query": "", "index": ["logs-system.auth-*"],
+        "threshold": {"field": ["host.name"], "value": 5,
+                      "cardinality": [{"field": "system.auth.ssh.method", "value": 3}]},
+    }))
+    assert "system.auth.ssh.method" in rule_key_fields(rules_dir)
+    write_profile(profiles_dir, "drift-card", "schema-drift",
+                  {"rename": {"from": "system.auth.ssh.method", "to": "ssh_method"}})
+    with pytest.raises(GuardRefused):
+        check_profile(load_profile("drift-card", profiles_dir=profiles_dir), rules_dir=rules_dir)
 
 
 def test_rule_read_datasets_is_every_rule_index_dataset(rules_dir):
@@ -209,7 +227,7 @@ def test_schema_drift_renaming_onto_a_rule_key_field_is_refused(profiles_dir, ru
     rule-key field (or an ancestor of one) writes foreign values into what
     the rule keys on — polluting evidence rather than silencing it, which
     is still the rule being degraded."""
-    write_profile(profiles_dir, "drift-onto", "schema-drift", {"rename": {"from": "user.name", "to": to}})
+    write_profile(profiles_dir, "drift-onto", "schema-drift", {"rename": {"from": "source.port", "to": to}})
     with pytest.raises(GuardRefused):
         check_profile(load_profile("drift-onto", profiles_dir=profiles_dir), rules_dir=rules_dir)
 
@@ -217,7 +235,9 @@ def test_schema_drift_renaming_onto_a_rule_key_field_is_refused(profiles_dir, ru
 # -- data-drop: datasets --------------------------------------------------------------
 
 
-@pytest.mark.parametrize("dataset", ["system.auth", "falco.alerts"])
+@pytest.mark.parametrize("dataset", [
+    "system.auth", "falco.alerts", "nginx.access", "postgresql.log", "squid.access", "keycloak.events",
+])
 def test_data_drop_on_a_rule_read_dataset_is_refused(profiles_dir, rules_dir, dataset):
     """Any drop on a rule-read dataset breaks the two EQL sequence rules at
     any nonzero rate — the reason selective auth drops were deferred."""
@@ -307,7 +327,7 @@ def test_rule_key_fields_and_datasets_are_empty_for_an_empty_rules_dir(tmp_path)
 
 def test_guard_reacts_to_a_rule_not_in_the_committed_set(tmp_path, profiles_dir):
     """A synthetic rule the committed detection-rules/ doesn't have, keying on
-    a field this suite otherwise treats as safe (user.name) over a dataset
+    a field this suite otherwise treats as safe (source.port) over a dataset
     this suite otherwise treats as safe (system.syslog). If the guard
     answers from the real committed rules alone rather than `rules_dir`, both
     profiles below wrongly activate."""
@@ -318,14 +338,14 @@ def test_guard_reacts_to_a_rule_not_in_the_committed_set(tmp_path, profiles_dir)
             {
                 "rule_id": "new-rule",
                 "query": "",
-                "threshold": {"field": ["user.name"]},
+                "threshold": {"field": ["source.port"]},
                 "index": ["logs-system.syslog-*"],
             }
         )
     )
 
     write_profile(
-        profiles_dir, "drift-newly-bad", "schema-drift", {"rename": {"from": "user.name", "to": "user.id"}}
+        profiles_dir, "drift-newly-bad", "schema-drift", {"rename": {"from": "source.port", "to": "source.client_port"}}
     )
     with pytest.raises(GuardRefused):
         check_profile(load_profile("drift-newly-bad", profiles_dir=profiles_dir), rules_dir=rules_dir)

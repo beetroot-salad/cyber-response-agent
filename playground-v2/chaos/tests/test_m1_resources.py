@@ -112,7 +112,7 @@ def test_a_second_activation_on_an_owned_pipeline_is_refused(profiles_dir, rules
     with a whole-body PUT, silently overwrite it while its ledger record
     still says live)."""
     write_profile(profiles_dir, "drift-a", "schema-drift", {"rename": {"from": "source.port", "to": "source.client_port"}})
-    write_profile(profiles_dir, "drift-b", "schema-drift", {"remove": "source.port"})
+    write_profile(profiles_dir, "drift-b", "schema-drift", {"remove": "system.auth.ssh.method"})
     execer = FakeExecSeam()
     first = _activate("drift-a", profiles_dir, rules_dir, ledger_dir, execer)
 
