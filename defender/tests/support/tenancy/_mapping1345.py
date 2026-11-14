@@ -15,7 +15,7 @@ test of absence opts out by passing `alert_mapping=None` (a parameter, never a m
 - `ALERT_MAPPING_ROUTE` / `alert_mapping_url(tenant)`: the one spelling of the API route (r5.1); the refusal-wording
   checks (`assert_missing_wording_names_verb_and_route`) take the route's tail from it.
 - `remove_postgres_mapping(dsn, tenant)`: the one raw-SQL deletion of a mapping row (r5.1 repair 13).
-- `seed_postgres(dsn, tenant, entries)`: through `JobStore.put_alert_mapping(tenant_id, mapping, actor="u-1") -> created`.
+- `seed_postgres(dsn, tenant, entries)`: through `JobStore.put_alert_mapping(tenant_id, mapping, actor="u-1")`.
 """
 from __future__ import annotations
 import datetime as _dt

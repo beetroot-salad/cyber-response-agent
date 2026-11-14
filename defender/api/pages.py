@@ -13,6 +13,8 @@ from typing import Generic, Literal, TypeVar
 from fastapi import HTTPException
 from pydantic import BaseModel, ValidationError
 
+from defender.records.formats import IdRefused
+
 from .models import Instant, RecordId
 from .ports import StoreBrokePromise, TimePosition
 
@@ -47,12 +49,23 @@ class Order(Generic[T, P]):
         self.load = load
 
 
-def newest_first(at: Callable[[T], _dt.datetime], ident: Callable[[T], str]) -> Order[T, TimePosition]:
+def newest_first(at: Callable[[T], _dt.datetime], ident: Callable[[T], str],
+                 id_family: Callable[[str], str]) -> Order[T, TimePosition]:
+    """Newest first by `(at, id)`. A cursor's id is read by `id_family` (the items' own id class), so a cursor
+    carrying anything but such an id is not a position in this list (422), never a store error."""
+    def load(body: _CursorBody) -> TimePosition | None:
+        if body.at is None:
+            return None
+        try:
+            return body.at, id_family(body.id)
+        except IdRefused:
+            return None
+
     return Order(
         position=lambda item: (at(item), ident(item)),
         precedes=lambda a, b: a > b,
         dump=lambda pos: (pos[0], pos[1]),
-        load=lambda body: None if body.at is None else (body.at, body.id),
+        load=load,
     )
 
 
