@@ -6,9 +6,13 @@ the run lane's `start_box`, on `BoxRequest` (optional), and on the oracle chain;
 `refused <errno>`; the check's docker call carrying `timeout=30`."""
 from __future__ import annotations
 
+import contextlib
 import gc
 import os
 import re
+import subprocess
+import sys
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -616,3 +620,237 @@ def test_d3_the_oracle_s_box_start_fault_carries_a_failed_check_in_its_chain(tmp
         _start("oracle", tmp_path, docker)
     assert isinstance(refused.value.__cause__, _failed()), refused.value.__cause__
     assert docker.create_argv is None
+
+
+# --- D2 (G1): the registration key, over every input it is made of -----------------------------------------------------------
+
+_BASE_ENTRY = {"path": "/usr/bin/runsc", "runtimeArgs": ["--oci-seccomp"], "status": {"features": {"v": 1}}}
+
+
+def _listed(entry: dict | None = None, **others: dict) -> dict:
+    return {"runc": {"path": "runc"}, **others, "runsc": _BASE_ENTRY if entry is None else entry}
+
+
+class _InfoDaemon(RecordingDocker):
+    """A healthy daemon whose `docker info` can fail one of its two questions (`{{.ID}}`, `{{json .Runtimes}}`) alone."""
+
+    fail_info: tuple[str, ...] = ()
+
+    def __call__(self, argv, **kw):  # noqa: ANN001
+        argv = list(argv)
+        if argv[1:2] == ["info"] and "--format" in argv and any(q in argv[argv.index("--format") + 1] for q in self.fail_info):
+            self.calls.append(argv)
+            return _cp(1, "", "Error: the daemon could not answer that\n")
+        return super().__call__(argv, **kw)
+
+
+#: (name, what the daemon answers instead, whether the `(ID, entry)` pair is the one that passed: True the same, False
+#: another, None one half cannot be read). Written from the key's own words, not from how it is hashed.
+_KEY_INPUTS = [
+    ("path", {"runtimes": _listed({**_BASE_ENTRY, "path": "/opt/gvisor/runsc"})}, False),
+    ("runtime-args", {"runtimes": _listed({**_BASE_ENTRY, "runtimeArgs": ["--oci-seccomp", "--host-uds=open"]})}, False),
+    ("status", {"runtimes": _listed({**_BASE_ENTRY, "status": {"features": {"v": 2}}})}, False),
+    ("daemon-id", {"daemon_id": "daemon-2"}, False),
+    ("entry-key-order", {"runtimes": _listed(dict(reversed(list(_BASE_ENTRY.items()))))}, True),
+    ("another-runtime-changed", {"runtimes": {"runc": {"path": "/elsewhere/runc"}, "runsc": _BASE_ENTRY}}, True),
+    ("id-only", {"runtimes": None}, None),
+    ("runtimes-only", {"daemon_id": None}, None),
+    ("nonzero-exit", {"info_fails": True}, None),
+    ("empty", {"runtimes": None, "daemon_id": None}, None),
+    ("runtime-absent", {"runtimes": {}}, None),
+    ("id-query-fails", {"fail_info": ("{{.ID}}",)}, None),
+    ("runtimes-query-fails", {"fail_info": ("{{json .Runtimes}}",)}, None),
+]
+
+
+@pytest.mark.parametrize(("change", "same_pair"), [(c, same) for _n, c, same in _KEY_INPUTS],
+                         ids=[n for n, _c, _s in _KEY_INPUTS])
+def test_d2_the_check_runs_again_exactly_when_the_id_and_entry_pair_differs_or_a_half_cannot_be_read_and_an_unreadable_key_is_never_kept(
+        tmp_path, change, same_pair):
+    """After a pass on one `(daemon ID, runsc entry)` pair, ONE input changes (or `docker info` stops answering in part)
+    and the box is created twice more: the first create re-checks unless the pair is the one that passed; the second
+    re-checks only when a half cannot be read, whatever the first did: a pair that could not be named is never kept."""
+    docker = _InfoDaemon(runtimes=_listed(), daemon_id="daemon-1")
+    _BUILT.append(docker)
+    _start("request", tmp_path / "pass", docker)
+    assert len(docker.checks.box_runs()) == 1, "premise: the first create ran its check"
+    for name, value in change.items():
+        setattr(docker, name, value)
+    seen = [len(docker.checks.box_runs())]
+    for n in range(2):
+        _start("request", tmp_path / f"again{n}", docker)
+        seen.append(len(docker.checks.box_runs()))
+    reran = [b - a for a, b in zip(seen, seen[1:], strict=False)]
+    expected = [0, 0] if same_pair else [1, 0] if same_pair is False else [1, 1]
+    assert reran == expected, (reran, expected)
+    assert docker.create_argv is not None, "a create did not follow the check"
+
+
+# --- D1 (G2): check containers are named once and none is left live -----------------------------------------------------------
+
+class _LifecycleDaemon(RecordingDocker):
+    """A daemon that models a check container's life: a name still live makes the next `docker run` with it exit 125
+    (name in use); a run that outlives the host's timeout leaves its container live until `docker rm -f <name>`; a `--rm`
+    run that ends is gone."""
+
+    def __init__(self, **kw: Any) -> None:
+        super().__init__(**kw)
+        self.live: set[str] = set()
+        self.run_names: list[str] = []
+
+    def __call__(self, argv, **kw):  # noqa: ANN001
+        argv = list(argv)
+        if K.is_check_run(argv):
+            name = K.flag_value(argv, "--name") or ""
+            self.run_names.append(name)
+            if name in self.live:
+                self.calls.append(argv)
+                return _cp(125, "", f'docker: Error response from daemon: Conflict. The container name "/{name}" is already in use\n')
+            try:
+                return super().__call__(argv, **kw)
+            except subprocess.TimeoutExpired:
+                self.live.add(name)
+                raise
+        if argv[1:2] == ["rm"]:
+            self.live.difference_update(a for a in argv[2:] if not a.startswith("-"))
+        return super().__call__(argv, **kw)
+
+
+@pytest.mark.parametrize("hung", ["box", "control"])
+def test_d1_a_hung_check_container_is_removed_and_a_second_check_after_it_reuses_no_name(tmp_path, hung):
+    """Each run of a check hangs in turn; a second check follows on a healthy host: no check container is left live, no
+    name was used twice (a live one would exit 125 'in use'), and within a check the box run and the control are named
+    apart. (D1, timeout)"""
+    docker = _LifecycleDaemon(runtimes=LISTED, daemon_id="daemon-1",
+                              check=K.CheckPlan(box=K.HANGS) if hung == "box" else K.CheckPlan(control=K.HANGS))
+    _BUILT.append(docker)
+    with pytest.raises(BoxFault):
+        _start("request", tmp_path / "hung", docker)
+    assert docker.live == set(), f"the {hung} run's container was left live after the timeout: {docker.live}"
+    docker.checks.plan = K.CheckPlan()
+    assert _start("request", tmp_path / "second", docker).name, "the check after a hung one did not pass"
+    assert docker.live == set(), docker.live
+    assert len(docker.run_names) >= 3, docker.run_names
+    assert "" not in docker.run_names, docker.run_names
+    assert len(set(docker.run_names)) == len(docker.run_names), f"a check container name was used twice: {docker.run_names}"
+
+
+# --- D1 (G3): the listener counts every connect, and the check never changes the process's folder ----------------------------
+
+class _CwdWatch:
+    """A thread that records every working folder the process has while it runs."""
+
+    def __init__(self) -> None:
+        self.seen: set[str] = set()
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._loop, daemon=True, name="cwd-watch")
+
+    def _loop(self) -> None:
+        while not self._stop.is_set():
+            try:
+                self.seen.add(os.getcwd())
+            except OSError as e:  # the folder it stood in is gone
+                self.seen.add(f"<{e.__class__.__name__}>")
+
+    def __enter__(self) -> _CwdWatch:
+        self._thread.start()
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self._stop.set()
+        self._thread.join()
+
+
+@pytest.mark.parametrize("starved", [False, True], ids=["connect-returns-at-once", "listener-cannot-accept-meanwhile"])
+@pytest.mark.parametrize("who", ["box-run", "control"])
+def test_d1_a_connect_docker_returns_before_the_listener_accepts_is_still_counted_and_the_check_never_changes_the_working_folder(
+        tmp_path, who, starved):
+    """The fake daemon connects for real and returns the moment `connect()` does, so the stream may still be in the
+    listener's backlog when the run ends (with `starved`, the process also has no descriptor to accept it with for the rest
+    of the run, then gets them back). A box run so connected (it printed `refused`: only the listener knows) is a failed
+    check; a control so connected passes: every completed connect is counted. Over many checks, with the process's working
+    folder watched from another thread and a switch interval short enough for an accept thread to start late: a check
+    never changes the folder the process stands in. (D1, listener; the working folder is process-wide)"""
+    cell = K.Cell(K.REFUSED, True, wait=False, starved=starved)
+    plan = K.CheckPlan(box=cell) if who == "box-run" else K.CheckPlan(control=K.Cell(K.CONNECTED, True, wait=False, starved=starved))
+    here = os.getcwd()
+    interval = sys.getswitchinterval()
+    sys.setswitchinterval(1e-6)
+    try:
+        with _CwdWatch() as watch:
+            for n in range(3 if starved else 40):
+                docker = _daemon(plan)
+                if who == "box-run":
+                    with pytest.raises(_failed(), match="host socket"):
+                        _start("request", tmp_path / f"c{n}", docker)
+                    assert docker.create_argv is None
+                else:
+                    assert _start("request", tmp_path / f"c{n}", docker).name, f"check {n}: a connected control went uncounted"
+    finally:
+        sys.setswitchinterval(interval)
+    assert os.getcwd() == here
+    assert watch.seen == {here}, f"the process's working folder was seen to change: {sorted(watch.seen)}"
+
+
+# --- D1 (G4): the folder and its parent after every outcome ---------------------------------------------------------------------
+
+_OUTCOMES = {
+    "pass": K.CheckPlan(),
+    "failed": K.CheckPlan(box=K.LEAKS),
+    "inconclusive": K.CheckPlan(box=K.NO_MARKER),
+    "box-run-times-out": K.CheckPlan(box=K.HANGS),
+    "control-times-out": K.CheckPlan(control=K.HANGS),
+    "box-does-not-start": K.CheckPlan(box=K.START_FAILS),
+    "control-refused": K.CheckPlan(control=K.REFUSES),
+}
+
+
+@pytest.mark.parametrize("parent", ["fresh-data-root", "existing-0700"])
+@pytest.mark.parametrize("outcome", sorted(_OUTCOMES))
+def test_d1_whatever_the_check_ends_in_it_leaves_no_folder_and_made_its_parent_traverse_only_and_its_folder_and_socket_open_under_a_narrow_umask(
+        tmp_path, outcome, parent):
+    """Under `umask 077`, with a `.box-checks` that already exists as 0700 or none at all: the daemon sees the parent 0711,
+    the check's folder and socket 0777, and afterwards `.box-checks` lists nothing, for every way a check can end. (D1)"""
+    root = _data_root(tmp_path)
+    if parent == "existing-0700":
+        (root / ".box-checks").mkdir(mode=0o700)
+        os.chmod(root / ".box-checks", 0o700)
+    docker = _daemon(_OUTCOMES[outcome])
+    before = os.umask(0o077)
+    try:
+        with contextlib.suppress(BoxFault):
+            _start("request", tmp_path, docker, data_root=root)
+    finally:
+        os.umask(before)
+    assert docker.checks.runs, "premise: the check ran"
+    for run in docker.checks.runs:
+        assert (run.parent_mode, run.folder_mode, run.socket_mode) == (0o711, 0o777, 0o777), (outcome, run)
+        assert run.folder.parent == root / ".box-checks", run.folder
+    assert (root / ".box-checks").is_dir()
+    assert list((root / ".box-checks").iterdir()) == [], f"the check left {list((root / '.box-checks').iterdir())} behind"
+
+
+# --- D1 (G7): every runtime but `runc` is checked ----------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("lane", ["run-dir", "request"])
+@pytest.mark.parametrize("runtime", ["runsc-job", "kata", "runsc2"])
+def test_d1_every_runtime_but_runc_runs_the_check_and_one_that_leaks_is_refused_unstarted(tmp_path, runtime, lane):
+    """A runtime nobody meant to name is proven like `runsc`, not started unchecked: its leak is a failed check and no
+    box is created; its pass starts the box after a check run under that very name. `runc` alone runs none. (S3, D1)"""
+    listed = {**LISTED, runtime: {"path": f"/usr/bin/{runtime}"}}
+    spec = BoxSpec(rootfs=ROOTFS, runtime=runtime)
+    leaking = _daemon(K.CheckPlan(box=K.LEAKS), runtimes=listed)
+    with pytest.raises(_failed()):
+        _start(lane, tmp_path / "leak", leaking, spec=spec)
+    assert leaking.create_argv is None, f"a box was created under {runtime} with no passing check"
+    assert [r.runtime for r in leaking.checks.box_runs()] == [runtime]
+
+    healthy = _daemon(runtimes=listed)
+    assert _start(lane, tmp_path / "ok", healthy, spec=spec).name
+    assert [r.runtime for r in healthy.checks.box_runs()] == [runtime]
+    assert healthy.checks.control_runs()
+    assert healthy.create_argv is not None
+
+    runc = _daemon(K.CheckPlan(box=K.LEAKS))
+    assert _start(lane, tmp_path / "runc", runc, spec=RUNC).name
+    assert runc.checks.runs == []

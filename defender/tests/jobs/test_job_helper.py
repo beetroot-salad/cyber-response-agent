@@ -1384,6 +1384,33 @@ def test_d4_nothing_is_logged_when_the_helper_was_told_to_stop(scene, capsys):
     assert _D4_CAUSE not in err, err
 
 
+@pytest.mark.parametrize("signalled", [False, True], ids=["not-signalled", "signalled"])
+@pytest.mark.parametrize("accepted", [False, True], ids=["never-accepted", "accepted"])
+@pytest.mark.parametrize("rc", [0, 1, 7, 124, 125, 126, 127, 137])
+def test_d4_the_runtime_remedy_is_logged_exactly_for_a_container_that_failed_unsignalled_and_never_connected(
+        scene, capsys, caplog, rc, accepted, signalled):
+    """The grid of D4's own words: over the container's exit status, whether the job's server ever accepted a connection
+    and whether the helper was told to stop, the remedy is on stderr and in the log exactly when the status is not 0 and
+    not docker's did-not-run (125-127), nothing was ever accepted and the helper was not signalled. The container's own
+    status is logged whatever the cell says, and the helper's exit stays 0 (#1492). (#1469 D4)"""
+    def job(c) -> int:
+        if accepted:
+            c.request("launch")
+        if signalled:
+            os.kill(os.getpid(), signal.SIGTERM)
+            assert c.stopping.wait(15), "the helper never stopped the container"
+        return rc
+
+    with caplog.at_level(logging.DEBUG):
+        _job_id, docker, ran, err = _d4(scene, job, capsys)
+    assert docker.job_error is None, docker.job_error
+    assert ran.rc == 0, ran.rc
+    assert f"its container exited with status {rc}" in err, err
+    expected = rc not in (0, 125, 126, 127) and not accepted and not signalled
+    assert (_D4_CAUSE in err) is expected, (rc, accepted, signalled, err)
+    assert (_D4_CAUSE in caplog.text) is expected, (rc, accepted, signalled, caplog.text)
+
+
 def test_a3_an_investigations_helper_waits_for_a_busy_tenant_lock_and_then_runs(scene):
     """The tenant's lock held exclusive (prepare, teardown) for a while: the helper waits, writes no end record while it is
     held, and starts its container once the lock is free. (A3, O11; learning's 30 s is its own)"""
