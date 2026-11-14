@@ -202,3 +202,72 @@ def test_1470_g6_the_schemas_refusal_is_its_own_exception_type_apart_from_the_st
 
     assert issubclass(CredentialRefused, Exception)
     assert not issubclass(CredentialRefused, RecordRefused)
+
+
+#: The schemes whose value is sent in a header as it is, so it must be ASCII (the design's schema: bearer, header).
+_SENT_IN_A_HEADER = {"bearer", "header"}
+#: Characters of each class a value rule tells apart: printable ASCII (`:` and space included), C0/DEL/C1 controls,
+#: non-printable characters that are not controls (format, separators, unassigned), printable non-ASCII up to four bytes.
+_POOLS = {
+    "ascii": [chr(c) for c in range(0x20, 0x7F)],
+    "control": [chr(c) for c in (*range(0x00, 0x20), 0x7F, *range(0x80, 0xA0))],
+    "unprintable": ["­", "​", " ", " ", " ", "　", "﻿", "\U000e0001", "͸"],
+    "wide": ["é", "ж", "あ", "€", "😀", "\U00020000"],
+}
+
+
+def _expected_faulty(scheme: str, field: str, secret: bool, value: str) -> bool:
+    """The design's value rules, as stated: empty, not printable, not ASCII where sent in a header, `:` in a basic
+    username, or a secret shorter than the minimum counted in characters (code points)."""
+    return (value == "" or not value.isprintable() or (scheme in _SENT_IN_A_HEADER and not value.isascii())
+            or (scheme == "basic" and field == "username" and ":" in value) or (secret and len(value) < 16))
+
+
+def _generated_values(rng) -> list[str]:
+    """Values of length 0-24 (straddling the minimum), mostly printable ASCII with characters of every other class mixed
+    in, plus one per class member at each length about the minimum (so each rule meets a value it alone refuses)."""
+    values = []
+    for _ in range(600):
+        mix = rng.random()
+        values.append("".join(rng.choice(_POOLS["ascii"] if rng.random() > mix * 0.3 else _POOLS[rng.choice(
+            ["control", "unprintable", "wide"])]) for _ in range(rng.randint(0, 24))))
+    for pool in _POOLS.values():
+        for char in pool:
+            for length in (1, 8, 15, 16, 17):
+                values += [char * length, "k" * (length - 1) + char]
+    return values
+
+
+def test_1470_o7_check_credentials_faults_exactly_when_a_value_rule_says_for_any_text_in_any_field_of_any_scheme():
+    """A generated sweep over every scheme, every field of its set and unicode text: `check_credentials` refuses exactly
+    when the value is empty, not printable, not ASCII where sent in a header, a basic username holding `:`, or a secret
+    shorter than the minimum in code points (bytes do not count). (O7, schema: every value rule)"""
+    import random
+
+    from defender.kit.access import SCHEMES as DECLARED, CredentialRefused, check_credentials
+
+    assert {auth.scheme for auth, _, _ in SCHEMES.values()} == set(DECLARED), "premise: every scheme the kit declares"
+    rng = random.Random(1470)
+    values = _generated_values(rng)
+    wrong, seen = [], set()
+    for name, (auth, secret, fitting) in SCHEMES.items():
+        for field, is_secret in secret.items():
+            for value in values:
+                try:
+                    check_credentials(auth, {**fitting, field: value})
+                    refused = False
+                except CredentialRefused:
+                    refused = True
+                expected = _expected_faulty(auth.scheme, field, is_secret, value)
+                seen.add(expected)
+                if not value.isprintable() and not any(c in _POOLS["control"] for c in value):
+                    seen.add(("unprintable, no control", name))
+                if is_secret and len(value) < 16 <= len(value.encode("utf-8")) and not _expected_faulty(
+                        auth.scheme, field, False, value):
+                    seen.add(("short in code points only", name))
+                if refused != expected:
+                    wrong.append((name, field, ascii(value)))
+    assert seen >= {True, False}, "premise: the sweep meets both outcomes"
+    assert ("unprintable, no control", "oauth") in seen, "premise: an unprintable non-control value in an oauth set"
+    assert {("short in code points only", n) for n in ("basic", "oauth")} <= seen, "premise: short in code points only"
+    assert wrong == [], wrong[:10]
