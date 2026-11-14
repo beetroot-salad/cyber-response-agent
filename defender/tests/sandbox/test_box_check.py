@@ -7,9 +7,11 @@ the run lane's `start_box`, on `BoxRequest` (optional), and on the oracle chain;
 from __future__ import annotations
 
 import contextlib
+import errno
 import gc
 import os
 import re
+import resource
 import subprocess
 import sys
 import threading
@@ -828,6 +830,61 @@ def test_d1_whatever_the_check_ends_in_it_leaves_no_folder_and_made_its_parent_t
         assert run.folder.parent == root / ".box-checks", run.folder
     assert (root / ".box-checks").is_dir()
     assert list((root / ".box-checks").iterdir()) == [], f"the check left {list((root / '.box-checks').iterdir())} behind"
+
+
+@contextlib.contextmanager
+def _descriptors_left(free: int):
+    """This process has `free` file descriptors left to give: the soft limit is lowered to the highest one in use and every
+    free number below it is taken but `free` of them. Everything is given back, and the limit restored, on exit, so a test
+    asserts only after the `with` has closed. (Every test here runs in an xdist worker that may host others.)"""
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    held: list[int] = []
+    try:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (max(int(n) for n in os.listdir("/proc/self/fd")) + 1, hard))
+        while True:
+            try:
+                held.append(os.open(os.devnull, os.O_RDONLY))
+            except OSError:
+                break
+        for _ in range(free):
+            os.close(held.pop())
+        yield
+    finally:
+        for fd in held:
+            os.close(fd)
+        resource.setrlimit(resource.RLIMIT_NOFILE, (soft, hard))
+
+
+def _open_descriptors() -> list[str]:
+    return sorted(os.listdir("/proc/self/fd"), key=int)
+
+
+@pytest.mark.parametrize("free", [0, 1], ids=["no-descriptor-for-the-folder", "one-descriptor-for-the-folder-none-for-the-socket"])
+def test_d1_a_check_whose_listener_cannot_be_opened_for_want_of_descriptors_is_inconclusive_and_leaves_no_folder_and_no_descriptor(
+        tmp_path, free):
+    """The process is out of file descriptors when the check opens its listener (with `free=1` the folder's handle gets the
+    last one and the socket none): the start is refused as a check that could not say (a `BoxFault`, not a failed check)
+    naming the socket error, `.box-checks` lists nothing (removing the folder needs no descriptor of its own), no check
+    container ran, no box was created, and no descriptor the failed open took is still open once the start has failed. (D1, G4)"""
+    root = _data_root(tmp_path)
+    docker = _daemon()
+    request = _request(tmp_path, data_root=root, require_sandbox=True)
+    before = _open_descriptors()
+    caught: BaseException | None = None
+    with _descriptors_left(free):
+        try:
+            box_mod.start_box(request, docker=docker)
+        except BaseException as e:  # noqa: BLE001 — asserted below, once the descriptors are back
+            caught = e
+    after = _open_descriptors()
+    assert isinstance(caught, BoxFault), f"a start with no descriptor for the check's listener ended in {caught!r}"
+    assert not isinstance(caught, _failed()), f"an exhausted process is not a leaking runtime: {caught}"
+    assert "could not open its socket" in str(caught), str(caught)
+    assert os.strerror(errno.EMFILE) in str(caught), str(caught)
+    assert docker.checks.runs == [], "a check container ran with no listener to watch it"
+    assert docker.create_argv is None, "a box was created after a check that could not run"
+    assert list((root / ".box-checks").iterdir()) == [], f"the check left {list((root / '.box-checks').iterdir())} behind"
+    assert after == before, f"descriptors left open by the failed start: {sorted(set(after) - set(before), key=int)}"
 
 
 # --- D1 (G7): every runtime but `runc` is checked ----------------------------------------------------------------------------------
