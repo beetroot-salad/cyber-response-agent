@@ -83,7 +83,7 @@ class PostgresSystemRecords:
             row = self._read(self._connect(left()), left(), tenant_id, system_id, reused=False)
         known, version, adapter_id, enabled, settings, access, generation, deleted = row
         if not known:
-            raise ConfigFault("the request token's tenant is not an active tenant, so it has no system records")
+            raise ConfigFault("the request token's tenant is not one with system records")
         if version is None or deleted:
             return None
         return SystemRecord(system_id=system_id, version=version, adapter_id=adapter_id, enabled=enabled,
