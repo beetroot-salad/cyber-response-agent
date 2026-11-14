@@ -3,7 +3,8 @@
 In order: tied to the worker (its parent; `--parent-pid`), the kind's host half (`prepare`: the tenant's lock and
 admission, ..., the first pass, the run folder), the job socket in its per-claim folder, the job container started
 attached as this process's child, the socket served until the container exits, then everything the job had removed
-by its claim's label, what the helper made removed, the lock released, and the container's exit status returned.
+by its claim's label, what the helper made removed, and the lock released. The helper exits 0 once it served the job to
+its end, whatever the container's own status (logged); any other exit is the helper's own failure.
 
 An ending decided before the container starts is written by the helper in the kind's vocabulary (A3): a setup
 refusal; a job that cannot be started confined (no socket, an image missing, a refusing runtime, or the helper
@@ -36,7 +37,7 @@ from ._container import (
     STOP_GRACE,
     job_container_name,
     make_socket_folder,
-    container_run_argv,
+    container_launch,
     socket_folder,
     socket_path,
     start,
@@ -199,11 +200,11 @@ def _start(session: Session, spec: KindSpec, signals: _Signals, hold: contextlib
                 server = Server(session, registry(), path)
             except OSError as e:
                 raise StartFailed(f"the job socket {path} could not be opened: {e}") from None
-            argv = container_run_argv(session, path, session.prepared.command)
+            launch = container_launch(session, path, session.prepared.command)
             signals.raising = False  # from here a signal stops the container gracefully
             if session.signalled.is_set():
                 raise StartFailed("the helper was told to stop before its container started; none was started")
-            proc = start(session, argv)
+            proc = start(session, launch)
         except SetupRefused as refused:
             ending = ("refused", f"setup refused: {refused}")
         except StartFailed as failed:
@@ -229,11 +230,12 @@ def _run(session: Session, spec: KindSpec, signals: _Signals) -> int:
         if ending is not None:
             _tell(session, ending[1])
             spec.end(session, ending[0])
-            return 1
+            return 0
         rc = _await_container(session, proc)
+        _tell(session, f"its container exited with status {rc}")
         if session.prepared is not None and session.prepared.exited is not None:
             session.prepared.exited(session, rc)
-        return rc
+        return 0
     finally:
         signals.raising = False
         _finish(session, proc, server, hold)
@@ -244,7 +246,9 @@ def main(argv: list[str], *, docker: Any = None, signer: Any = None, publish: An
     """The helper for one job (module doc). `docker` is the docker seam (the box package's real one by default),
     `signer` the request signer (the tenant's sign login), `publish` the launch-time publish (the real child),
     `forge` the forge credential's builder (the learning kinds'), `command` a container command line in place of the
-    kind's entry, `client` the forge client the drain's delivery uses (a new one by default). Returns the container's exit status, or 1 for an ending decided before it."""
+    kind's entry, `client` the forge client the drain's delivery uses (a new one by default). Returns 0 once the helper served the job to its end (its container ran and exited, whatever its status, or the
+    helper wrote the ending it decided before the container), else non-zero: the worker reads any other status, with
+    no end record, as the helper's own failure (`worker._helper_failure`)."""
     from defender import tenancy
     from defender._parent_tie import require_parent, tie_to_parent
     from defender._paths import process_defender_dir

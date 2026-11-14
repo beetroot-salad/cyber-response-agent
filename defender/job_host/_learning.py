@@ -233,6 +233,8 @@ def _discard_batches(state: _PostStep) -> None:
 # --- endings before the container (A3) ----------------------------------------------------------------------------------
 
 def _write_learning_end(session: Session, status: str, reason: str | None, message: str) -> None:
+    """A learning end record the helper decided. One that cannot be written raises: the helper then exits non-zero,
+    which the worker reads as the helper's own failure."""
     from defender.records import job_lane
 
     record = job_lane.LearningEnd(status=status, reason=reason, message=message, fork_message_id=None, stage=None)
@@ -241,8 +243,6 @@ def _write_learning_end(session: Session, status: str, reason: str | None, messa
             lane.write_learning_end(str(session.job_id), record)
     except FileExistsError:
         _logger.error("job %s: a learning end record is already there; it is kept", session.job_id)
-    except (OSError, job_lane.JobLaneRefused) as e:
-        _logger.error("job %s: the learning end record could not be written: %s", session.job_id, e)
 
 
 def _learning_end(session: Session, cause: str) -> None:

@@ -88,7 +88,6 @@ from defender.tests.support.jobs._worker1342 import (
     _job_end_with,
     _kill_whatever_remains,
     _lanes_failing,
-    _names_code,
     _no_run_text,
     _queued,
     _refused,
@@ -407,7 +406,8 @@ async def test_s1_a_branch_arm_sharing_the_database_counts_only_its_own_run(worl
 
 async def test_o8_a_run_that_crashed_still_has_its_spend_recorded(world):
     """A failed row (no job-end) carries the ledger's sum for its run. (O8 cost, S1)"""
-    child = _child(world, files={"{id}.session-pointer.json": session_pointer(CASE)}, exit=1)
+    # The run's container crashed; its helper served the job to that end, so it exits 0 (#1170).
+    child = _child(world, files={"{id}.session-pointer.json": session_pointer(CASE)}, exit=0)
     _, stored = await _run_spent(world, child, [("claude-sonnet-4-6", {"output_tokens": 1_000_000})])
 
     assert (stored["stage"], stored["failure_reason"]) == ("failed", "no_report")
@@ -527,8 +527,9 @@ async def test_s2_s4_the_final_cost_and_its_lower_limit_mark_follow_the_flag_tab
     files = _committed(**{"{id}.job-end.json": job_end_text}) if job_end_text is not None else {}
     if ledger != "no pointer":
         files["{id}.session-pointer.json"] = session_pointer(CASE)
-    code = EXIT if ending.endswith(f"exit {EXIT}") else 0
-    child = _child(world, files=files, exit=code)
+    # The `exit N` of a case is its container's; its helper served the job either way and exits 0 (#1170), so the
+    # worker sees 0 for every case, as the flag table's own rule says: the mark is not read from an exit code.
+    child = _child(world, files=files, exit=0)
     if ledger == "unreadable database":
         _break_database(world["runs"], CASE)
     spend = {"sealed rows": _LEDGER, "unsealed rows": _LEDGER, "sealed, no rows": [], "unsealed, no rows": [], "no ledger table": _LEDGER}.get(ledger)
@@ -541,7 +542,7 @@ async def test_s2_s4_the_final_cost_and_its_lower_limit_mark_follow_the_flag_tab
     if expect[1] is None:
         assert stored["failure_message"] is None, stored["failure_message"]
     else:
-        assert _names_code(stored, inv, code), ("the no-report ending names the child's exit", stored["failure_message"])
+        assert stored["failure_message"], "a failed row carries our own message"
 
 
 # --- knowledge --------------------------------------------------------------------------------------
@@ -578,7 +579,7 @@ async def test_o8_knowledge_is_the_host_record_mapped_to_the_api_shape(world, na
 
 async def test_o8_a_started_run_with_no_record_is_stale_operator(world):
     """The run folder exists but the record is missing → `{stale, operator, null}`, even on a failed row. (O8 knowledge, M6)"""
-    child = _child(world, dirs=["{id}"], exit=1)
+    child = _child(world, dirs=["{id}"], exit=0)  # the helper served it (#1170): a failed run, not a failed helper
     _, stored = await _run_one(world, child)
     assert (stored["stage"], stored["failure_reason"]) == ("failed", "no_report")
     assert stored["knowledge"] == STALE_OPERATOR
@@ -676,12 +677,11 @@ async def test_a5_the_start_sweep_of_dead_helpers_containers_ends_before_any_row
 async def test_o7_the_sweep_runs_for_a_run_that_failed_and_never_writes_the_row(world, tmp_path):
     """A failed run's leftover box (its child's claim) is removed; the row keeps the rules' verdict. (O7, M8, r5 C1)"""
     containers = StandInContainers(tmp_path / "containers")
-    child = _child(world, exit=EXIT, box_dir=containers.where)  # no job-end record: rule 1
+    child = _child(world, exit=0, box_dir=containers.where)  # no job-end record: rule 1 (the helper served it)
     inv, stored = await _run_one(world, child, containers=containers)
 
     assert not containers.held(f"defender-run-{inv}")
     assert (stored["stage"], stored["failure_reason"]) == ("failed", "no_report")
-    assert _names_code(stored, inv, EXIT), stored["failure_message"]
 
 
 async def test_o7_the_sweep_and_then_the_name_check_run_after_the_child_has_exited(world, tmp_path):
@@ -1386,12 +1386,11 @@ async def test_m1_a_symlinked_or_oversize_host_record_is_unreadable_not_followed
     caplog.set_level(logging.INFO, logger=WORKER_LOGGER)
     plant_sessions(world["runs"], CASE, [("main", "claude-sonnet-4-6", {"input_tokens": 1_000_000})])
     files, extra = _tampered(world, which, shape)
-    child = _child(world, files=files, exit=EXIT, **extra)
+    child = _child(world, files=files, exit=0, **extra)  # the helper served it (#1170)
     inv, stored = await _run_one(world, child)
 
     if which == "job-end":  # unreadable = absent: rule 1
         assert (stored["stage"], stored["failure_reason"]) == ("failed", "no_report")
-        assert _names_code(stored, inv, EXIT), stored["failure_message"]
     else:
         assert (stored["stage"], stored["disposition"]) == ("completed", "inconclusive")
     if which == "knowledge":
@@ -1506,7 +1505,7 @@ async def test_o13_claim_and_finish_are_audited_as_the_system_after_commit(world
 async def test_o13_a_failed_finish_names_stage_and_reason_in_its_detail(world, caplog):
     """The finish event for a failed row carries the stage and the failure reason. (O13)"""
     audit = JobsAudit(caplog)
-    inv, _ = await _run_one(world, _child(world, exit=2))
+    inv, _ = await _run_one(world, _child(world, exit=0))  # no record, the helper served it (#1170): no_report
 
     finish = [e for e in audit.events() if e.action == "investigation.finish"]
     assert [(e.target, e.actor) for e in finish] == [(inv, "system")]

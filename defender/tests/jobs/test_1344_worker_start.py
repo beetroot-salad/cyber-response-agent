@@ -75,6 +75,19 @@ def test_o15_an_empty_or_unset_build_stamp_refuses_before_serving_and_before_the
     assert list(data_root.iterdir()) == [], "the refusal touched the data root"
 
 
+def test_n5_a_worker_with_no_job_network_named_refuses_before_serving_and_before_the_copy(source, data_root):
+    """#1170 N5: the job network is judged once, at the worker's start; unset, the start is refused (exit 2) naming it,
+    before the database or the data mount is touched."""
+    env = W.worker_env(data_root)
+    env.pop("DEFENDER_JOB_NETWORK")
+    ran = W.run_to_exit(source, env)
+
+    assert "No module named" not in ran.stderr, f"the worker cannot be started: {ran.stderr[-300:]}"
+    assert ran.returncode == 2, (ran.returncode, ran.stderr[-800:])
+    assert "DEFENDER_JOB_NETWORK" in ran.stderr, ran.stderr[-800:]
+    assert list(data_root.iterdir()) == [], "the refusal touched the data root"
+
+
 @pytest.mark.postgres
 @pytest.mark.parametrize("stamp", [W.STAMP[:7], (W.STAMP * 2)[:64]], ids=["7", "64"])
 def test_o15_a_build_stamp_of_7_or_64_lowercase_hex_characters_starts(source, data_root, db, stamp):
