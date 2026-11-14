@@ -125,12 +125,40 @@ async def test_o2_each_adapters_served_entry_is_what_its_module_declares(scripte
     assert item["lab_example"] is bool(module.EXAMPLE), (adapter, item)
 
 
-@pytest.mark.parametrize("adapter", sorted(R.FIXTURE_FOLDERS))
+#: Every adapter module the checkout carries (the catalog's members, by what is on disk).
+_ON_DISK = sorted(p.stem.removesuffix("_adapter").replace("_", "-") for p in (REPO / "defender/integrations").glob("*_adapter.py"))
+
+
+def _sample_read_cold(adapter: str) -> object:
+    """The module's `SAMPLE_SETTINGS` as written in its source (a literal, read without importing the module)."""
+    import ast
+
+    source = (REPO / "defender/integrations" / f"{adapter.replace('-', '_')}_adapter.py").read_text("utf-8")
+    found = [node.value for node in ast.parse(source).body
+             if isinstance(node, ast.Assign | ast.AnnAssign) and node.value is not None
+             and any(isinstance(t, ast.Name) and t.id == "SAMPLE_SETTINGS"
+                     for t in (node.targets if isinstance(node, ast.Assign) else [node.target]))]
+    assert len(found) == 1, f"{adapter} declares SAMPLE_SETTINGS once"
+    return ast.literal_eval(found[0])
+
+
+def _access_for(adapter: str, sample: dict[str, str]) -> str:
+    """The fixture's access folder where it has one; jira and servicenow, which it lacks, get one built here, covering
+    the comment route their sample settings name."""
+    if adapter in R.FIXTURE_FOLDERS:
+        return R.FIXTURE_FOLDERS[adapter][1]
+    routes = {"jira": ("POST", "/rest/api/3/issue/*/comment"),
+              "servicenow": ("PATCH", f"/api/now/table/{sample.get('SERVICENOW_TABLE')}/*")}
+    return R.declaration(f"https://{adapter}.example", writes=(routes[adapter],))
+
+
+@pytest.mark.parametrize("adapter", _ON_DISK)
 async def test_o2_each_adapters_own_check_accepts_the_sample_settings_the_catalog_serves(scripted, adapter):
-    """A record of each adapter that has an access folder in the fixture (seven of the nine; jira and servicenow need an
-    access declaration the fixture lacks) carrying exactly its served sample settings is stored (201). (O2)"""
+    """For every adapter in the catalog: the served `sample_settings` is its module's `SAMPLE_SETTINGS` read cold, and a
+    record of it carrying exactly those settings is stored (201): its own check accepts them. (O2, D11)"""
     sample = {i["adapter_id"]: i["sample_settings"] for i in (await scripted.get("/adapters")).json()["items"]}[adapter]
-    saved = await scripted.put_system(adapter, 0, settings=sample, access=R.FIXTURE_FOLDERS[adapter][1])
+    assert sample == _sample_read_cold(adapter), adapter
+    saved = await scripted.put_system(adapter, 0, settings=sample, access=_access_for(adapter, sample))
     assert saved.status_code == 201, saved.text
     assert saved.json()["settings"] == sample
 
