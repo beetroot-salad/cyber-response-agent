@@ -163,6 +163,51 @@ async def test_o2_each_adapters_own_check_accepts_the_sample_settings_the_catalo
     assert saved.json()["settings"] == sample
 
 
+# --- each version row's author ----------------------------------------------------------------------------------------
+
+def _version_row_writes(app) -> list[tuple[str, str]]:
+    """Every config write route the app serves that writes a record version: its systems and case-record PUT and DELETE
+    (the credentials route writes the secret store, not a version row)."""
+    from defender.tests.support.api._config1470 import served_config_routes
+
+    return sorted(r for r in served_config_routes(app) if r[0] in ("PUT", "DELETE") and not r[1].endswith("/credentials"))
+
+
+async def test_1470_each_version_row_a_config_write_inserts_names_the_acting_member_as_its_author(scripted):
+    """Over every config write route that inserts a version row (read from the app's own table), with the version it
+    replaces planted by another author: the route adds one row, and its author is the acting member's id (Ann), neither
+    the tenant's id nor the replaced row's author. (Design: each version row's author is the acting member's id; O4-O6)"""
+    from defender.tests.support.shared._postgres1339 import execute
+
+    ann = scripted.user_id(ANN)
+    assert ann != A, "premise: the acting member's id is not the tenant's"
+    routes = _version_row_writes(scripted.app)
+    assert {m for m, _ in routes} == {"PUT", "DELETE"} and len(routes) >= 4, routes  # noqa: PLR2004 — premise: found
+    scripted.plant_version(TICKET, 1)  # the case record's system, for its cover
+    authors: dict[tuple[str, str], tuple[int, str]] = {}
+    for method, template in routes:
+        case = template.endswith("/case-record")
+        rows = (lambda: [(c.version, c.author) for c in R.case_versions(scripted.dsn, A)]) if case else (
+            lambda: [(v.version, v.author) for v in scripted.versions(ELASTIC)])
+        version = (rows()[-1][0] if rows() else 0) + 1
+        if case:
+            execute(scripted.dsn, "INSERT INTO tenancy.case_versions (tenant_id, version, system_id, comment_body, deleted, "
+                                  "author, written_at) VALUES (%s, %s, %s, %s, false, 'planted', now())",
+                    (A, version, TICKET, BODY))
+            body = {"replaces": version, "system_id": TICKET, "comment_body": BODY}
+        else:
+            scripted.plant_version(ELASTIC, version, settings=ELASTIC_SETTINGS, access=ELASTIC_ACCESS)
+            body = {"replaces": version, "enabled": True, "settings": ELASTIC_SETTINGS, "access": ELASTIC_ACCESS}
+        path = template.replace("{}", A, 1).replace("{}", ELASTIC, 1)
+        kw = {"json": body} if method == "PUT" else {"params": {"replaces": version}}
+        answered = await scripted.client.request(method, path, headers=scripted.ann(), **kw)
+        assert answered.status_code < 300, (method, template, answered.text)  # noqa: PLR2004
+        after = rows()
+        assert [n for n, _ in after][-2:] == [version, version + 1], ((method, template), "one row added", after)
+        authors[(method, template)] = after[-1]
+    assert {route: author for route, (_, author) in authors.items()} == dict.fromkeys(routes, ann), authors
+
+
 # --- O3 / O4: save and read a system ---------------------------------------------------------------------------------
 
 async def test_o3_o4_a_system_is_created_201_replaced_200_and_read_back_as_stored(configured):
