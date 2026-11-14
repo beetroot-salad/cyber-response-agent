@@ -13,6 +13,8 @@
   calls `defender.api_server.run(os.environ, transport=FakeKeycloak(...))`, reports `run returned <n>` on stdout,
   holds until `release()` (or `ended()`), then exits with `n`.
 - `seed_token_credential(dsn, seeded)`: a live `oauth_client` credential for the seeded program, for `program_token`.
+- `environment` also holds the API's OpenBao settings (#1470 G4); tests that start the program give `serving`/`run` an
+  `openbao_transport=ScriptedOpenBao()` (`_openbao1470`), as they give Keycloak's `transport`.
 - `seed_identity(dsn)`: Ann (tenant A admin), Bob (tenant B admin), Ops (a listed administrator, one-time-code
   session) and a program of A with a live API key.
 
@@ -42,6 +44,8 @@ from typing import Any
 
 import anyio
 import httpx
+
+from defender.tests.support.api._openbao1470 import KV_MOUNT, WRITER_TOKEN, ScriptedOpenBao
 
 DEFENDER = Path(__file__).resolve().parents[3]
 REPO = DEFENDER.parent
@@ -84,7 +88,13 @@ SETTING_NAMES = (
     "DEFENDER_KEYCLOAK_PROGRAMS_AUDIENCE",
     "DEFENDER_KEYCLOAK_PROGRAMS_ADMIN_CLIENT_ID",
     "DEFENDER_KEYCLOAK_PROGRAMS_ADMIN_CLIENT_SECRET_FILE",
+    "DEFENDER_OPENBAO_ADDR",
+    "DEFENDER_OPENBAO_KV_MOUNT",
+    "DEFENDER_API_OPENBAO_TOKEN_FILE",
 )
+#: #1470 G4: where the API's secret store is by default in `environment`: an address nothing answers, since a test that
+#: starts the program gives `serving` a `ScriptedOpenBao` (or `openbao=` the address of one listening).
+OPENBAO_ADDR = "http://127.0.0.1:1"
 
 
 # --- ports ------------------------------------------------------------------------------------------
@@ -102,13 +112,17 @@ closed_port = free_port
 # --- settings ---------------------------------------------------------------------------------------
 
 def environment(tmp_path: Path, *, dsn: str, keycloak: str = BACK, port: int | None = None,
-                administrators: tuple[str, ...] = (OPS,)) -> dict[str, str]:
-    """Every setting the real program reads, valid (design FC-3). Secrets are files with a trailing newline."""
+                administrators: tuple[str, ...] = (OPS,), openbao: str = OPENBAO_ADDR,
+                kv_mount: str = KV_MOUNT, token: str = WRITER_TOKEN) -> dict[str, str]:
+    """Every setting the real program reads, valid (design FC-3). Secrets are files with a trailing newline; the
+    OpenBao token file holds `token` (#1470 G4)."""
     def secret(name: str) -> str:
         path = tmp_path / name
         path.write_text(f"{name}-value\n")
         return str(path)
 
+    token_file = tmp_path / "openbao-token"
+    token_file.write_text(f"{token}\n")
     admins = tmp_path / "administrators.yaml"
     admins.write_text("administrators:\n" + "".join(f"  - {email}\n" for email in administrators))
     environ = {
@@ -128,6 +142,9 @@ def environment(tmp_path: Path, *, dsn: str, keycloak: str = BACK, port: int | N
         "DEFENDER_KEYCLOAK_PROGRAMS_AUDIENCE": PROGRAMS_AUDIENCE,
         "DEFENDER_KEYCLOAK_PROGRAMS_ADMIN_CLIENT_ID": "defender-api-programs-admin",
         "DEFENDER_KEYCLOAK_PROGRAMS_ADMIN_CLIENT_SECRET_FILE": secret("programs-admin-secret"),
+        "DEFENDER_OPENBAO_ADDR": openbao,
+        "DEFENDER_OPENBAO_KV_MOUNT": kv_mount,
+        "DEFENDER_API_OPENBAO_TOKEN_FILE": str(token_file),
     }
     assert tuple(environ) == SETTING_NAMES
     return environ
@@ -637,7 +654,7 @@ def _main() -> int:
 
     fails = fails_from_json(os.environ[FAULTS_ENV]) if FAULTS_ENV in os.environ else ()
     keycloak = FakeKeycloak(fails, on_stall=lambda realm: print(f"stalled {realm}", flush=True))
-    returned = run(os.environ, transport=keycloak)
+    returned = run(os.environ, transport=keycloak, openbao_transport=ScriptedOpenBao())
     print(f"unmodelled {json.dumps(keycloak.unmodelled)}", flush=True)
     print(f"run returned {returned}", flush=True)
     sys.stdin.readline()  # hold: the parent observes the database, then closes stdin

@@ -391,18 +391,20 @@ def test_1366_o7_the_records_port_reuses_its_connection_and_still_reads_the_newe
 @pytest.mark.postgres
 def test_1470_o8_the_tenant_row_tells_an_unknown_tenant_from_a_tenant_with_no_such_system(migrated_database):  # noqa: F811
     """An active tenant with no records (no mark: #1470 removed it) has no record for the system; a tenant whose row is
-    missing, offboarding or offboarded is an unknown tenant (an unlabelled `ConfigFault`, the proxy's access).
+    missing or whose state is creating, offboarding or offboarded is an unknown tenant (an unlabelled `ConfigFault`,
+    the proxy's access): one rule, known iff active.
     (#1470 O8, #1363; replaces #1366 R8's mark rule)"""
     from defender.credential_proxy._records import PostgresSystemRecords
     from defender.kit.faults import ConfigFault
 
-    active, offboarding, offboarded, missing = (str(uuid.uuid4()) for _ in range(4))
+    active, creating, offboarding, offboarded, missing = (str(uuid.uuid4()) for _ in range(5))
     register_tenant(migrated_database, active, records=None)
+    register_tenant(migrated_database, creating, state="creating", records=None)
     register_tenant(migrated_database, offboarding, state="offboarding", records=None)
     register_tenant(migrated_database, offboarded, state="offboarded", records=None)
     with R.proxy_login(migrated_database) as login, contextlib.closing(PostgresSystemRecords(login)) as port:
         assert port.current_system(active, "cmdb") is None
-        for unknown in (offboarding, offboarded, missing):
+        for unknown in (creating, offboarding, offboarded, missing):
             with pytest.raises(ConfigFault) as refused:
                 port.current_system(unknown, "cmdb")
             assert getattr(refused.value, "origin", None) is None, "the unknown tenant's fault is left for the proxy to label"
@@ -513,14 +515,15 @@ _INSERT = ("INSERT INTO tenancy.system_versions (tenant_id, system_id, version, 
     pytest.param("DELETE FROM tenancy.system_versions WHERE tenant_id = %s", id="delete"),
     pytest.param("TRUNCATE tenancy.system_versions", id="truncate"),
     pytest.param("SELECT count(*) FROM tenancy.case_versions WHERE tenant_id = %s", id="read-case-table"),
-    pytest.param("DELETE FROM tenancy.records_mark WHERE tenant_id = %s", id="delete-mark"),
-    pytest.param("SELECT count(*) FROM tenancy.tenants WHERE id = %s", id="read-tenants"),
+    pytest.param("SELECT created_at FROM tenancy.tenants WHERE id = %s", id="read-a-tenant-column-other-than-id-state"),
+    pytest.param("SELECT pending_action FROM tenancy.tenants WHERE id = %s", id="read-the-pending-action"),
+    pytest.param("UPDATE tenancy.tenants SET state = 'offboarded' WHERE id = %s", id="write-the-state"),
 ])
 def test_1366_r14_a_member_of_the_proxy_role_reads_current_records_and_is_refused_everything_else(
         statement, migrated_database):  # noqa: F811
     """A login that is a member of `defender_proxy_reader` reads the system versions (control); each write to them, and a
-    read of the case table or the tenants table, and a write to the mark, is refused for lack of privilege, and the rows are unchanged.
-    (#1366 R14)"""
+    read of the case table, of any tenant column but `id` and `state`, and a write to the tenant row, is refused for lack of
+    privilege, and the rows are unchanged (`id` and `state` readable: the migration's column grants test). (#1366 R14, #1470 O8)"""
     import psycopg
 
     tid = str(uuid.uuid4())

@@ -420,7 +420,6 @@ for name in filter(None, seeded):
     if held is not None:
         case = held["case"]
         added = twin.add_records(name, TenantRecords(
-            imported=True,
             systems={s: SystemRecord(system_id=s, version=r["version"], adapter_id=r["adapter"], enabled=r["enabled"],
                                      settings=r["settings"], access=r["access"], credential_generation=r["generation"])
                      for s, r in held["systems"].items()},

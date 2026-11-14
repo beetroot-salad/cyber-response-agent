@@ -19,6 +19,7 @@ import anyio
 import httpx
 import pytest
 
+from defender.tests.support.api._openbao1470 import ScriptedOpenBao
 from defender.tests.support.api._server1083 import (
     A,
     ANN,
@@ -103,7 +104,7 @@ async def served(tenants: str, tmp_path: Path) -> AsyncIterator[Served]:
 
     seeded = await seed_identity(tenants)
     keycloak = FakeKeycloak()
-    async with serving(Settings.from_environ(environment(tmp_path, dsn=tenants)), transport=keycloak) as running, \
+    async with serving(Settings.from_environ(environment(tmp_path, dsn=tenants)), transport=keycloak, openbao_transport=ScriptedOpenBao()) as running, \
             httpx.AsyncClient(transport=httpx.ASGITransport(app=running.app), base_url=ORIGIN) as client:
         yield Served(client, running.app, tenants, tmp_path, keycloak, seeded)
     assert keycloak.unmodelled == []
@@ -416,9 +417,9 @@ async def test_o7_an_administrator_offboards_a_tenant_and_its_queued_investigati
 # --- unbacked families ------------------------------------------------------------------------------
 
 def _unbacked(document: dict[str, Any]) -> list[tuple[str, str]]:
-    """Every operation of the documented routes on systems and lessons: (path, method)."""
+    """Every operation of the documented routes still refusing 501: the lessons and the connection check (#1470 O15)."""
     return [(path, method) for path, item in document["paths"].items() for method in item
-            if ("/systems" in path or "/lessons" in path) and method in ("get", "put", "post", "delete")]
+            if ("/lessons" in path or path.endswith("/check")) and method in ("get", "put", "post", "delete")]
 
 
 @pytest.mark.postgres
@@ -439,20 +440,16 @@ async def test_o8_lessons_refuse_501_naming_their_issue_after_membership(served)
 
 
 @pytest.mark.postgres
-async def test_o8_the_real_servers_openapi_declares_the_501_on_every_systems_and_lessons_route(served):
-    """On the real and the demo server, the operations declaring 501 are exactly those on systems and lessons. (O8, Am-2)"""
-    from defender.api.app import create_app
-    from defender.api.demo import demo_deps
-
-    real = (await served.client.get("/openapi.json")).json()
-    demo = json.loads(json.dumps(create_app(await demo_deps((A,))).openapi()))
-    for server, document in (("real", real), ("demo", demo)):
-        unbacked = set(_unbacked(document))
-        assert len(unbacked) >= 5, server
-        declaring = {(path, method) for path, item in document["paths"].items() for method, op in item.items()
-                     if "501" in op["responses"]}
-        assert declaring == unbacked, (server, declaring ^ unbacked)
-        assert "not yet real" not in document["info"].get("summary", "")
+async def test_o8_the_real_servers_openapi_declares_the_501_on_exactly_the_lessons_and_the_check(served):
+    """The operations declaring 501 are exactly the lessons route and the connection check; the config routes declare
+    their real answers. (O8, Am-2; #1470 O15, G2)"""
+    document = (await served.client.get("/openapi.json")).json()
+    unbacked = set(_unbacked(document))
+    assert len(unbacked) == 2, unbacked
+    declaring = {(path, method) for path, item in document["paths"].items() for method, op in item.items()
+                 if "501" in op["responses"]}
+    assert declaring == unbacked, declaring ^ unbacked
+    assert "not yet real" not in document["info"].get("summary", "")
 
 
 @pytest.mark.postgres
@@ -601,8 +598,9 @@ def _concrete(path: str, tenant: str) -> str:
     return re.sub(r"\{(\w+)(?::\w+)?\}", fill, path)
 
 
-SYSTEM = {"kind": "ticket", "display_name": "Tickets", "enabled": True, "settings": {}}
-CREDENTIALS = {"kind": "static", "credentials": {"api_token": "a-secret-of-sixteen-or-more"}}
+SYSTEM = {"replaces": 0, "enabled": True, "settings": {}, "access": ""}
+CREDENTIALS = {"for_version": 1, "credentials": {"api_key": "a-secret-of-sixteen-or-more"}}
+CASE = {"replaces": 0, "system_id": "ticket", "comment_body": "{disposition}"}
 
 
 def _body(method: str, path: str) -> dict[str, Any]:
@@ -610,7 +608,7 @@ def _body(method: str, path: str) -> dict[str, Any]:
     if method not in {"POST", "PUT", "PATCH"}:
         return {}
     return {"json": CREDENTIALS if path.endswith("/credentials") and "/systems" in path
-            else SYSTEM if "/systems/" in path else {}}
+            else SYSTEM if "/systems/" in path else CASE if path.endswith("/case-record") else {}}
 
 
 # Copied literally from tests/api/test_programs_1307_roles.py (PERMISSION_OF, AUTOMATION): the oracle for a program
@@ -629,8 +627,14 @@ PERMISSION_OF = {
     ("GET", f"{TENANT}/learning-jobs"): "work.read",
     ("GET", f"{TENANT}/learning-jobs/{{}}"): "work.read",
     ("GET", f"{TENANT}/lessons"): "work.read",
+    ("GET", f"{TENANT}/adapters"): "config.read",
     ("GET", f"{TENANT}/systems"): "config.read",
+    ("GET", f"{TENANT}/systems/{{}}"): "config.read",
     ("PUT", f"{TENANT}/systems/{{}}"): "config.write",
+    ("DELETE", f"{TENANT}/systems/{{}}"): "config.write",
+    ("GET", f"{TENANT}/case-record"): "config.read",
+    ("PUT", f"{TENANT}/case-record"): "config.write",
+    ("DELETE", f"{TENANT}/case-record"): "config.write",
     ("PUT", f"{TENANT}/systems/{{}}/credentials"): "config.write",
     ("POST", f"{TENANT}/systems/{{}}/check"): "config.write",
     ("GET", f"{TENANT}/alert-mapping"): "config.read",
@@ -669,7 +673,7 @@ def _refusal(method: str, path: str, declared: str, outsider: bool, is_person: b
 
 @pytest.mark.postgres
 async def test_o5_every_route_answers_every_caller_as_the_permission_table_says(served, token_credential):
-    """Each route, by each caller: refusals are the table's exact status, nothing is 500, only systems and lessons are 501. (O5, O8, O3)"""
+    """Each route, by each caller: refusals are the table's exact status, nothing is 500, only the lessons and the check are 501. (O5, O8, O3)"""
     table = _route_table(served.app)
     kinds = {declared for _, _, declared in table}
     assert set(PERMISSION_OF.values()) | {"platform"} <= kinds, kinds  # the table covers every permission and the administrator
@@ -698,7 +702,7 @@ async def test_o5_every_route_answers_every_caller_as_the_permission_table_says(
                     continue
                 seen[name, "passed"] += 1
                 assert got not in (401, 403), who
-                unbacked = "/systems" in path or "/lessons" in path
+                unbacked = "/lessons" in path or path.endswith("/check")  # #1470: the rest of config is real
                 assert (got == 501) == unbacked, who
     # Anonymous, from the frontend's origin (so the origin layer lets a state change through to sign-in): 401 everywhere.
     rows = [(m, p) for m, p, d in table if d not in {"public"} and p != "/auth/logout"]

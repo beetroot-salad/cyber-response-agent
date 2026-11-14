@@ -18,6 +18,12 @@ pytestmark = [
 
 import datetime as _dt  # noqa: E402
 
+from defender.tests.support.api._config1470 import (  # noqa: E402
+    CONFIG_BODIES,
+    CONFIG_ROUTES,
+    config_call,
+    config_route,
+)
 from defender.tests.support.api._identity1306 import (  # noqa: E402
     ALERT,
     ANN,
@@ -39,9 +45,11 @@ from defender.tests.support.api._routes1307a import (  # noqa: E402
     concrete,
     route_id,
 )
+from defender.tests.support.api._server1083 import ORIGIN
 
 KINDS = ("key", "oauth_client")
-ROUTES = authenticating_routes()
+#: The config routes run over the real record store below (#1470 O14), not over this module's in-memory world.
+ROUTES = [r for r in authenticating_routes() if not config_route(r)]
 
 
 # --- A refused credential leaves no trace (Keys: "hash lookup -> usable -> program active -> last_used written") -------------
@@ -275,3 +283,25 @@ def test_a_valid_credential_with_a_malformed_body_is_a_422() -> None:
     s = soar()
     response = s.program().post(f"/tenants/{T1}/investigations", headers=_JSON, content=_MALFORMED)
     assert response.status_code == 422, response.text
+
+
+# --- #1470 O14: the config writes over the real record store -----------------------------------------------------------
+
+_BODYFUL = sorted(r for r in CONFIG_ROUTES if r in CONFIG_BODIES)
+
+
+@pytest.mark.anyio
+@pytest.mark.postgres
+@pytest.mark.parametrize("route", _BODYFUL, ids=route_id)
+async def test_an_invalid_or_missing_credential_is_401_whatever_the_body_of_a_config_write_holds(scripted, route) -> None:
+    """A malformed body on a config write does not turn a refused credential into a 422; past authentication the same
+    body is 422 with `errors`, so the sweep can tell the two apart. (O14, O1)"""
+    refused = [await config_call(scripted, route, {"Authorization": value, **_JSON}, content=_MALFORMED)
+               for value in ("Bearer garbage", "Bearer ", "Basic abc")]
+    refused.append(await config_call(scripted, route, {"Origin": ORIGIN, **_JSON}, content=_MALFORMED))
+    assert [r.status_code for r in refused] == [401] * len(refused), [(r.status_code, r.text) for r in refused]
+    past = await config_call(scripted, route, {**scripted.ann(), **_JSON}, content=_MALFORMED)
+    assert past.status_code == 422
+    assert past.json()["errors"], past.text
+    assert scripted.versions("ticket") == []
+    assert scripted.scripted.calls == []

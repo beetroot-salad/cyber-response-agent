@@ -35,7 +35,7 @@ SEED_AUTHOR = "test seed"
 REAL = ("elastic", "jira", "servicenow")
 EXAMPLES = ("change-mgmt", "cmdb", "host-state", "identity", "threat-intel", "ticket")
 KV_MOUNT = "kv"
-PROXY_ROLE = "defender_proxy_reader"  # R14: NOLOGIN, SELECT on tenancy.system_versions and records_mark only (migration 0013)
+PROXY_ROLE = "defender_proxy_reader"  # R14: NOLOGIN; SELECT on tenancy.system_versions and the tenant row's id, state (#1470)
 #: The records tables (schema `tenancy`); columns in shared-interface.md.
 SYSTEM_VERSIONS, CASE_VERSIONS, RECORDS_MARK = "system_versions", "case_versions", "records_mark"
 
@@ -319,38 +319,46 @@ def bare_records(*systems: str, case: CaseSpec | None = None) -> RecordsSpec:
 
 
 def value_of(records: Any) -> Any:
-    """Production's `TenantRecords` for a `RecordsSpec`, `None` (NOT imported: `imported=False`, empty), or a
+    """Production's `TenantRecords` for a `RecordsSpec`, `None` (#1470 O8: an active tenant with no records, empty), or a
     `TenantRecords` already."""
     if records is None:
-        from defender.tenancy.models import TenantRecords
-
-        return TenantRecords(imported=False, systems={}, case=None)
+        return records_value({}, None)
     return to_value(records) if isinstance(records, RecordsSpec) else records
 
 
+def records_value(systems: Mapping[str, Any], case: Any) -> Any:
+    """`TenantRecords(systems=, case=)`: the one constructor the support uses. #1470 O8 removes the `imported` field;
+    until the code stage does, it is passed as True so a seeded tenant reads as one with records (a base-only shim,
+    delete with the field)."""
+    import dataclasses
+
+    from defender.tenancy.models import TenantRecords
+
+    extra = {"imported": True} if "imported" in {f.name for f in dataclasses.fields(TenantRecords)} else {}
+    return TenantRecords(systems=systems, case=case, **extra)
+
+
 def to_value(spec: RecordsSpec) -> Any:
-    """Production's `TenantRecords(imported=True, ...)` for `spec` (fields in shared-interface.md)."""
-    from defender.tenancy.models import CaseRecord, SystemRecord, TenantRecords
+    """Production's `TenantRecords` for `spec` (fields in shared-interface.md)."""
+    from defender.tenancy.models import CaseRecord, SystemRecord
 
     systems = {s: SystemRecord(system_id=s, version=v.version, adapter_id=v.adapter or s, enabled=v.enabled,
                                settings=dict(v.settings), access=v.access, credential_generation=v.generation)
                for s, v in spec.systems.items()}
     case = None if spec.case is None else CaseRecord(version=spec.case.version, system_id=spec.case.system_id,
                                                      comment_body=spec.case.comment_body)
-    return TenantRecords(imported=True, systems=systems, case=case)
+    return records_value(systems, case)
 
 
 # --- seeders: the planting helpers call these (R8: the memory twin defaults to NOT imported) -------------------------
 
 def seed_twin_records(twin: Any, data_root: Path | str | None, tenant: str, records: Any = DERIVED) -> None:
-    """Make `tenant` imported in the memory twin with `records` (`twin.add_records`, a public seeder beside
-    `add_generation`; the tenant must exist). `records=None` seeds nothing: the tenant stays not imported."""
-    spec = resolve(records, data_root, str(tenant))
-    if spec is None:
-        return
+    """Give `tenant` in the memory twin `records` (`twin.add_records`, a public seeder beside `add_generation`; the tenant
+    must exist). `records=None` is a tenant with none (#1470 O8: no "not imported" state)."""
     from defender.tests.support.tenancy._active1214 import _await, run_sync
 
-    run_sync(_await(twin.add_records(str(tenant), to_value(spec))))
+    spec = resolve(records, data_root, str(tenant))
+    run_sync(_await(twin.add_records(str(tenant), value_of(spec))))
 
 
 def directory_with_twin(data_root: Path | str, tenant: str, records: Any = DERIVED) -> tuple[Any, Any]:
@@ -377,13 +385,14 @@ def write_twin_records(twin: Any, tenant: str, records: Any) -> None:
 
 
 def seed_postgres_records(dsn: str, tenant: str, records: Any = DERIVED, data_root: Path | str | None = None) -> None:
-    """Make `tenant` (a registered row) imported in Postgres with `records`, through the store's own import door
-    (`RecordStore.import_tenant`) under an accept-all judge: first versions only (version and generation 1)."""
+    """Give `tenant` (a registered, ACTIVE row) `records` in Postgres through the store's own writes: each system
+    `put_system(replaces=0)`, then the case record `put_case(replaces=0)`, under an accept-all judge: first versions
+    only (version and generation 1). `records=None` writes nothing (an active tenant with none, #1470 O8)."""
     spec = resolve(records, data_root, str(tenant))
     if spec is None:
         return
     if any(v.version != 1 or v.generation != 1 for v in spec.systems.values()) or (spec.case and spec.case.version != 1):
-        raise ValueError("the Postgres seeder writes first versions; edit through the operator command")
+        raise ValueError("the Postgres seeder writes first versions; edit through the store")
     from defender.tests.support.tenancy._active1214 import run_sync
 
     async def put() -> None:
@@ -392,7 +401,13 @@ def seed_postgres_records(dsn: str, tenant: str, records: Any = DERIVED, data_ro
 
         store = RecordStore(dsn, clock=fixed_clock, judge=lambda after, before: [])
         try:
-            await store.import_tenant(str(tenant), to_value(spec), author=SEED_AUTHOR)
+            for system, v in sorted(spec.systems.items()):
+                # `adapter=` is the store's present parameter; whether P4 keeps it is the design's open point.
+                await store.put_system(str(tenant), system, replaces=0, adapter=v.adapter or system, enabled=v.enabled,
+                                       settings=dict(v.settings), access=v.access, author=SEED_AUTHOR)
+            if spec.case is not None:
+                await store.put_case(str(tenant), replaces=0, system_id=spec.case.system_id,
+                                     comment_body=spec.case.comment_body, author=SEED_AUTHOR)
         finally:
             await store.close()
 
@@ -535,7 +550,7 @@ class RecordsPort:
     """A hermetic `SystemRecordsPort` over RECORDS (not folders) for the proxy tests: `source` is a mapping
     `{tenant id: RecordsSpec | TenantRecords}` or a callable `tenant id -> RecordsSpec | TenantRecords | None`, read on
     each call (a test may swap what it holds). `current_system` answers the system's current record, `None` for none, and
-    raises an unlabelled `ConfigFault` for a tenant not imported, as `PostgresSystemRecords` does. Decides nothing (a disabled record is returned as it is: the proxy refuses it). New proxy tests seed
+    raises an unlabelled `ConfigFault` for a tenant the source does not hold (#1470 O8), as `PostgresSystemRecords` does. Decides nothing (a disabled record is returned as it is: the proxy refuses it). New proxy tests seed
     Postgres and use `PostgresSystemRecords` instead; run-side tests hand the same value to the run (`value_of`)."""
 
     def __init__(self, source: Mapping[str, Any] | Any) -> None:
@@ -549,8 +564,8 @@ class RecordsPort:
         from defender.kit.faults import ConfigFault
 
         records = self._records(tenant_id)
-        if records is None or not records.imported:
-            raise ConfigFault("the request token's tenant has no system records (it is not imported)")  # as the real port: unlabelled
+        if records is None:
+            raise ConfigFault("the request token's tenant is not one with system records")  # as the real port: unlabelled
         return records.systems.get(system_id)
 
 

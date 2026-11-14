@@ -530,60 +530,84 @@ def test_1345_o6_the_verb_records_who_replaced_the_mapping_on_the_job_stores_aud
 
 # --- #1470 O10 / O11: the operator's record commands are removed, and nothing shipped names them ---------------------
 
-#: O10's list, spelled here as the oracle for the constant `tenant.py` drops them by.
-REMOVED_1470 = {"set-alert-mapping", "set-system", "delete-system", "set-case", "delete-case", "systems",
-                "set-credentials", "catalog", "import"}
+#: O10's list: the oracle for both tests below (the design names no constant `tenant.py` drops them by).
+REMOVED_1470 = frozenset({"set-alert-mapping", "set-system", "delete-system", "set-case", "delete-case", "systems",
+                          "set-credentials", "catalog", "import"})
+KEPT_1470 = frozenset({"check", "update", "propose"})
+_HYPHENATED = sorted(c for c in REMOVED_1470 if "-" in c)
+#: A removed hyphenated command named anywhere, or a plain-word one named as `tenant.py <word>`.
+_NAMES_A_REMOVED_COMMAND = re.compile(
+    rf"(?<![\w-])(?:{'|'.join(map(re.escape, _HYPHENATED))})(?![\w-])"
+    rf"|tenant\.py[`'\"]?\s+(?:{'|'.join(map(re.escape, sorted(REMOVED_1470 - set(_HYPHENATED))))})(?![\w-])")
 
 
-def _removed() -> tuple[str, ...]:
-    # FORCED CHOICE (sketch): the design says the census takes the set "from the same place tenant.py drops them
-    # from" without naming it; `REMOVED_COMMANDS` on the command module is the sketch's guess.
-    return tuple(_cli().REMOVED_COMMANDS)
+def test_1470_o11_the_census_pattern_finds_each_way_a_removed_command_is_named_and_not_the_kept_ones():
+    """Control for the census below: it finds each removed command in the forms shipped text names it, and none of the
+    kept commands or plain words. (O11)"""
+    for command in REMOVED_1470:
+        named = [f"run `python3 defender/cli/tenant.py {command} <id>`", f"tenant.py {command}", f"`tenant.py` {command} x"]
+        assert all(_NAMES_A_REMOVED_COMMAND.search(line) for line in named[:2]), command
+    for command in _HYPHENATED:
+        assert _NAMES_A_REMOVED_COMMAND.search(f"use `{command}` then"), command
+    for innocent in ("tenant.py check <id>", "tenant.py update", "tenant.py propose x", "the systems list", "set-systems-up",
+                     "an import statement", "the catalog of adapters", "tenant.py"):
+        assert not _NAMES_A_REMOVED_COMMAND.search(innocent), innocent
 
 
-def test_1470_o10_each_removed_record_command_is_refused_and_absent_from_help(capsys):
-    """Each of O10's nine subcommands is refused by the parser and not offered in `--help`; `check` still is. (O10)"""
+def test_1470_o10_each_removed_record_command_is_an_invalid_choice_and_only_the_kept_ones_are_offered(capsys):
+    """Each of O10's nine subcommands is refused by argparse as an invalid choice (exit 2, no pointer shim) and is not
+    offered in `--help`; `check`, `update` and `propose` still are. (O10, principle 3)"""
     with pytest.raises(SystemExit) as helped:
         _cli().main(["--help"])
     assert helped.value.code == 0
     offered = set(re.search(r"\{([\w,-]+)\}", capsys.readouterr().out).group(1).split(","))  # argparse's choices
-    assert "check" in offered, "control: a kept command is offered"
-    assert not offered & REMOVED_1470, offered & REMOVED_1470
+    assert offered == KEPT_1470
     for command in sorted(REMOVED_1470):
         with pytest.raises(SystemExit) as refused:
             _cli().main([command, str(uuid.uuid4())])
-        assert refused.value.code not in (0, None), command
-    assert set(_removed()) == REMOVED_1470  # the constant O11's census reads
+        assert refused.value.code == 2, command  # noqa: PLR2004 — argparse's usage error
+        assert "invalid choice" in capsys.readouterr().err, command
+
+
+@pytest.mark.parametrize("argv", [["--help"], *([c, "--help"] for c in sorted(KEPT_1470))], ids=lambda a: " ".join(a))
+def test_1470_o11_the_commands_help_text_names_no_removed_command(argv, capsys):
+    """`tenant.py --help` and each kept command's help name no removed command. (O11)"""
+    with pytest.raises(SystemExit) as helped:
+        _cli().main(argv)
+    assert helped.value.code == 0
+    shown = capsys.readouterr().out
+    assert len(shown) > 100, "premise: help was printed"  # noqa: PLR2004
+    assert [line for line in shown.splitlines() if _NAMES_A_REMOVED_COMMAND.search(line)] == []
 
 
 _DEFENDER = __import__("pathlib").Path(__file__).resolve().parents[3]
 _SHIPPED_SUFFIXES = {".py", ".md", ".yaml", ".yml", ".txt", ".sh", ".toml", ".json"}
+_UPGRADE_NOTES = "## Upgrade from before"
 
 
 def _shipped_lines() -> list[tuple[str, int, str]]:
-    """Every line of shipped text under `defender/` (not tests, not the archive), less `CLAUDE.md`'s upgrade notes."""
+    """Every line of shipped text under `defender/` (all but the tests and dependencies), less the sections an
+    `## Upgrade from before` heading opens (to the next `## `): the one place a removed command may be named."""
     found = []
     for path in sorted(_DEFENDER.rglob("*")):
         rel = path.relative_to(_DEFENDER).as_posix()
-        if (not path.is_file() or path.is_symlink() or path.suffix not in _SHIPPED_SUFFIXES or rel.startswith(("tests/", "docs/archive/"))
+        if (not path.is_file() or path.is_symlink() or path.suffix not in _SHIPPED_SUFFIXES or rel.startswith("tests/")
                 or any(part in {".venv", "__pycache__", "node_modules"} for part in path.parts)):
             continue
         in_upgrade_notes = False
         for number, line in enumerate(path.read_text("utf-8", errors="replace").splitlines(), 1):
-            if rel == "CLAUDE.md" and line.startswith("## "):
-                in_upgrade_notes = line.startswith("## Upgrade from before")
+            if line.startswith("## "):
+                in_upgrade_notes = line.startswith(_UPGRADE_NOTES)
             if not in_upgrade_notes:
                 found.append((rel, number, line))
     return found
 
 
 def test_1470_o11_no_shipped_text_outside_the_upgrade_notes_names_a_removed_command():
-    """No refusal, skill, doc or help line names `tenant.py <removed>` or a backticked removed hyphenated command. (O11)"""
-    removed = _removed()
-    hyphenated = [c for c in removed if "-" in c]
-    pattern = re.compile(rf"tenant\.py[`'\"]?\s+({'|'.join(map(re.escape, removed))})(?![\w-])"
-                         rf"|`({'|'.join(map(re.escape, hyphenated))})(?![\w-])")
+    """No refusal, skill, doc, help or code text under `defender/` names a removed subcommand, except in an
+    `## Upgrade from before` section. (O11)"""
     lines = _shipped_lines()
-    assert len({rel for rel, _, _ in lines}) > 200, "premise: the scan reads the shipped tree"
-    naming = [f"{rel}:{n}: {line.strip()[:120]}" for rel, n, line in lines if pattern.search(line)]
+    assert len({rel for rel, _, _ in lines}) > 200, "premise: the scan reads the shipped tree"  # noqa: PLR2004
+    assert {"skills", "docs", "cli", "systems"} <= {rel.split("/")[0] for rel, _, _ in lines}, "premise: skills and docs too"
+    naming = [f"{rel}:{n}: {line.strip()[:120]}" for rel, n, line in lines if _NAMES_A_REMOVED_COMMAND.search(line)]
     assert naming == []
