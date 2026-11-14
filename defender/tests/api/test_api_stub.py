@@ -327,7 +327,7 @@ def _deps(ports: Any) -> tuple[ApiDeps, dict[str, str]]:
     identity, users, tenants = _identity()
     return ApiDeps(
         identity=identity, tenants=tenants, frontend_origin=ORIGIN,
-        alerts=ports, investigations=ports, learning_jobs=ports, lessons=ports,
+        alerts=ports, investigations=ports, learning_jobs=ports, learning_work=ports, lessons=ports,
         systems=ports, writes=ports, secrets=ports, checker=ports, artifact_links=ports, offboarding=ports,
         alert_mapping=ports, audit=ports,  # FC-11 and the audit-only port (Am-5: every construction site)
     ), users

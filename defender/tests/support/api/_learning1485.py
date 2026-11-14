@@ -46,7 +46,7 @@ class LearningWorld(World):
     store lives on the world's loop and is closed there (`close`)."""
 
     def __init__(self, dsn: str, **kw: Any) -> None:
-        self.dsn = dsn
+        self.learning_dsn = dsn  # the world's own `dsn` is None without `database=True` (#1496): this one is the seeded database
         self.learning_store: Any = None
         super().__init__(**kw)
 
@@ -56,13 +56,14 @@ class LearningWorld(World):
 
         super().build(administrators=administrators, tenants=tenants)
         if self.learning_store is None:
-            self.learning_store = LearningStore(self.dsn)
+            self.learning_store = LearningStore(self.learning_dsn)
         self.app = create_app(dataclasses.replace(self.app.state.deps,
                                                   learning_work=StoreLearningWork(self.learning_store)))
 
     def close(self) -> None:
-        if self.learning_store is not None:
+        if self.learning_store is not None and self._finalizer.alive:  # close is idempotent (#1496)
             self.call(self.learning_store.close)
+            self.learning_store = None
         super().close()
 
 
