@@ -333,15 +333,13 @@ Tenant identities, authorization at the API boundary; no separate internal user-
 tenant/source bindings + credentials). Internal workers use service identity. All writes and artifact
 reads are tenant-scoped audit events.
 
-**Where audit events live.** Audit events are rows in the same Postgres as the records. The store
-provides the transaction and the API writes into it: a route writes the record **and** its audit row
-through one transaction, so a create, cancel, delete or settings change is audited exactly when it
-commits, and a retry that replays it adds nothing and loses nothing. Which actions are audited, and with
-what, is the API's (its tests pin it); that the two commit together is the store's. An artifact read is
-audited in a transaction of its own once the signed link is issued, committed before the link is handed
-out. A credentials write goes to the secret store, outside the database: its audit row is written first
-and committed after the secret write, so a failed audit write stops the secret write, and only a commit
-failing after the secret is stored can leave it unaudited.
+**Where audit events live.** An audited action is announced as a log event, once, by the code that
+commits it, after its commit (#1342 O13, #1083 P2): the job store announces the work actions (start, cancel,
+delete, learning-job start, mapping replace), the tenant-administration routes and the identity service
+announce their own. A failed write announces nothing; an event can be lost in a crash between the commit
+and its emission. There is no audit table. Which actions are audited, and with what, is pinned by tests.
+An artifact read is announced by the route once the signed link is issued. A credentials write goes to the
+secret store, outside the database, which announces after its write.
 
 ---
 

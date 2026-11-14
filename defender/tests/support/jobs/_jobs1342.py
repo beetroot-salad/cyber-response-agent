@@ -204,6 +204,10 @@ class JobsAudit:
                       getattr(r, "detail", None))
                 for r in self._caplog.records if r.name == JOBS_AUDIT_LOGGER]
 
+    def records(self) -> list[Any]:
+        """The raw audit records, for an extra the `Event` shape does not carry (#1083: `credential_id`)."""
+        return [r for r in self._caplog.records if r.name == JOBS_AUDIT_LOGGER]
+
 
 class VisibleAtEmit(logging.Handler):
     """On each audit event, reads the target row's stage from a separate connection: an event
