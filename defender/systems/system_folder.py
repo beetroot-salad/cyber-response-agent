@@ -1,13 +1,12 @@
-"""A system's folder (#1366 O9, O11, DC8): `config.env` plus `access.yaml`, the shape the operator's `set-system` takes,
-`systems --export` writes, connect hands off and the import reads from a tenant's retired `settings/systems/<s>/`.
+"""A system's folder (#1366 O9, O11, DC8): `config.env` plus `access.yaml`, the shape connect writes and its validator
+reads before the tenant admin enters the folder's settings and access through `PUT /systems/{id}` (#1470).
 
-One reader for all four, so a folder means the same thing wherever it is handed in. A record holds exactly what the
+One reader, so a folder means the same thing wherever it is read. A record holds exactly what the
 folder says: every `KEY=value` line of `config.env` is a setting, and a line a parser could ignore or override (an
 `export` line, a key set twice) is refused rather than dropped, so a value on such a line never becomes, or hides
-behind, a stored setting. Each part is held to the one settings-file size (`SETTINGS_MAX_BYTES`) at every door, so the
-import cannot store what `set-system` refuses. A missing `config.env` is no settings and a missing `access.yaml` is no declaration: what
+behind, a stored setting. Each part is held to the one settings-file size (`SETTINGS_MAX_BYTES`). A missing `config.env` is no settings and a missing `access.yaml` is no declaration: what
 that leaves unusable is the record judgement's to say (`system_rules`), not the reader's. Faults name the folder's
-parts through the caller's locator (DC6): the record's words for `set-system`, the file for the import and connect."""
+parts through the caller's locator (DC6): the file, for connect."""
 from __future__ import annotations
 
 import dataclasses

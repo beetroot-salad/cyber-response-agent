@@ -42,36 +42,32 @@ until it finishes: on a large alerts table, a running intake or worker would sta
 
 ## Upgrade from before #1366
 
-A tenant's systems and its case record are versioned records in the database, written only by
-`defender/cli/tenant.py` (its top describes the subcommands); nothing reads a tenant's
-`settings/systems/` or `settings/case-record.yaml` any more, and a tenant's systems are only those
-its records name (`tenant.py catalog` lists the adapters a record may name). Credentials live at a
-per-generation path `<tenant>/<system>/g<N>`. Once:
+A tenant's systems and its case record are versioned records in the database, and a tenant's
+systems are exactly those its records name, from its creation; nothing reads a tenant's
+`settings/systems/` or `settings/case-record.yaml` any more. A tenant admin writes them through the
+API (#1470): `PUT /systems/<id>` (settings, access declaration, enabled), `PUT
+/systems/<id>/credentials` and `PUT /case-record`; `GET /adapters` lists the adapters a record may
+name. Credentials live at a per-generation path `<tenant>/<system>/g<N>`. Once:
 
-1. Run migrations (revision `0015_system_records`). It also creates the NOLOGIN role
-   `defender_proxy_reader` (SELECT on `tenancy.system_versions` and `tenancy.records_mark` only):
-   create a login that is a member of it and set the proxy config's `records_dsn` to that login's
-   DSN in place of `data_root` (an old config refuses to start).
-2. Per tenant that existed before this change (one created after it needs none): publish its
-   merged knowledge (`tenant.py update <tenant-id>`: the import reads the published export, not
-   the clone), then `python3 defender/cli/tenant.py import <tenant-id> --dry-run`, fix every file
-   it names in the tenant's repo, publish again, and `tenant.py import <tenant-id>`. It runs once
-   per tenant, writes every system and the case record at version 1, credential generation 1, and
-   copies no credential. Until then the tenant's runs are refused and `tenant check` reports it,
-   each naming the import.
-3. Per system, at generation 1: `tenant.py set-credentials <tenant-id> <system> <file> --for-version 1
-   --token-file <operator token file>` (the file is JSON `{"kind": ..., "fields": {...}}`). The set
-   at the old path `<tenant>/<system>` is never read again; until this is done the proxy refuses the
-   system and `tenant check` reports it.
-4. Delete `settings/systems/` and `settings/case-record.yaml` from the tenant's repository:
+1. Stop the API, the credential proxy and the workers (an old process reads a table this upgrade
+   drops), then run migrations (revisions `0015_system_records` and `0017_drop_records_mark`). They
+   create the NOLOGIN role `defender_proxy_reader`, which reads `tenancy.system_versions` and the
+   `id` and `state` columns of `tenancy.tenants`, nothing else: create a login that is a member of
+   it and set the proxy config's `records_dsn` to that login's DSN in place of `data_root` (an old
+   config refuses to start). `0017_drop_records_mark` stops, changing nothing, while any tenant
+   that is not offboarded predates #1366's records (its systems never moved onto them): without
+   them it would read as a tenant with no systems. Recreate such a development database.
+2. Rebuild the job image on every execution host (`docker build -f .devcontainer/Dockerfile.job -t
+   defender-job:latest .` from the repository root, or the image `DEFENDER_JOB_IMAGE` names): an
+   old job image refuses the new records wire.
+3. Delete `settings/systems/` and `settings/case-record.yaml` from the tenant's repository:
    `tenant check` reports them as retired until they are gone.
 
-From then on: change a system with `tenant.py systems <tenant-id> --export <dir>`, edit the
-folder, `tenant.py set-system <tenant-id> <system> <dir>/<system> --replaces <its version>` (it
-keeps the system enabled or disabled as it is; `--disabled` or `--enabled` changes that); a
-change of its base, CA or auth block raises its credential generation, and its credentials are
-set again. Connect hands its result to the operator as such a folder: its validator takes
-`--handoff <folder>` and no longer `--tenant`.
+From then on the tenant admin changes a system with `PUT /systems/<id>`, naming the version it
+replaces (`GET /systems` shows it) and whether it is enabled; a change of its base, CA or auth block
+raises its credential generation, and its credentials are set again (`PUT
+/systems/<id>/credentials`). Connect hands its result to the tenant admin as a folder: its
+validator takes `--handoff <folder>` and no longer `--tenant`.
 
 ## Upgrade from before #1278
 
@@ -161,8 +157,8 @@ The tenant's alert mapping lives in the database; nothing reads `settings/alert-
 
 1. Add `title` and `description` to the tenant's `settings/alert-mapping.yaml`, if its alerts should have them: the file
    does not name them, and an entry left out is unmapped, so its alerts would list with neither.
-2. `python3 defender/cli/tenant.py set-alert-mapping <tenant-id> <that file>`. The top of `defender/cli/tenant.py`
-   describes the six entries.
+2. A tenant admin saves the mapping with `PUT /tenants/<tenant-id>/alert-mapping` (the six entries, as `GET` on the same
+   route answers them).
 3. Delete the file from the tenant's repository.
 
 ## Upgrade from before #1377
