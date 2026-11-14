@@ -196,20 +196,11 @@ def test_a_tenant_with_no_case_record_is_not_refused_and_reaches_the_box(world):
     assert len(start.calls) == 1, start.calls
 
 
-def test_a_tenant_missing_another_required_file_refuses_before_the_box(world, capsys):
-    _published_without(world, fixture_uuid("tenant:acme"), "verb-grants.yaml")
+@pytest.mark.parametrize("missing", ["verb-grants.yaml", "lead-zero.yaml"])
+def test_a_tenant_missing_another_required_file_refuses_before_the_box(world, capsys, missing):
+    _published_without(world, fixture_uuid("tenant:acme"), missing)
     text, _ = _refusal(world, capsys)
-    assert _settings_named(text, "verb-grants.yaml"), text
-
-
-def test_a_tenant_granting_the_correlation_lead_but_naming_no_query_refuses_before_the_box(
-        world, capsys):
-    """`lead-zero.yaml` is optional (#1503), but this tenant's table grants the correlation lead
-    a query verb, so naming no saved query is refused, naming the file and the grant."""
-    _published_without(world, fixture_uuid("tenant:acme"), "lead-zero.yaml")
-    text, _ = _refusal(world, capsys)
-    assert _settings_named(text, "lead-zero.yaml"), text
-    assert "lead-zero-correlation" in text, text
+    assert _settings_named(text, missing), text
 
 
 def test_a_tenant_copied_from_the_template_refuses_at_start_naming_its_table(world, capsys):

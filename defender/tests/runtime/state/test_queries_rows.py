@@ -46,11 +46,10 @@ def _assert_no_call_id(rows: list[dict], where: str, *, seeded: int = 0) -> None
         f"{where}: {len(carrying)} query row(s) in the model's table carry `{W.CALL_ID}`: "
         f"{carrying[:2]}")
     # An inherited row (the first `seeded`) from a source recorded before #1385 has no
-    # `received_at`, and one recorded before #1503 no `engine` / `body_param` (readers tolerate
-    # their absence); every row the run wrote is the writer's full set.
-    legacy = {W.ROW_COLUMNS[:-3], W.ROW_COLUMNS[:-2]}
+    # `received_at` (readers tolerate its absence); every row the run wrote is the writer's full set.
+    legacy = W.ROW_COLUMNS[:-1]
     shaped = [tuple(r) for i, r in enumerate(rows)
-              if tuple(r) != W.ROW_COLUMNS and not (i < seeded and tuple(r) in legacy)]
+              if tuple(r) != W.ROW_COLUMNS and not (i < seeded and tuple(r) == legacy)]
     assert not shaped, (
         f"{where}: query rows whose columns are not the writer's columns (a column carrying "
         f"the id under another name is the same leak): {shaped[:2]}")

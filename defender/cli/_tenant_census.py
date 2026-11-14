@@ -165,9 +165,6 @@ def _lead_zero_fault(settings: Path, rows: tuple, catalog: list[QueryTemplate]) 
         template_id = correlation_dispatch(settings, catalog, correlation_grant(rows)).template_id
     except (LeadZeroConfigError, lead_zero_mod.CorrelationDispatchError, GrantError) as e:
         return str(e)
-    if template_id is None:
-        # No saved correlation query and the lead withheld (#1503): nothing to check.
-        return None
     if not any(t.id == template_id and is_established(t) for t in catalog):
         return (f"{lead_zero_config_path(settings)}: correlation_template {template_id!r} names no "
                 "established template in the catalog (the table withholds the lead, so no run "

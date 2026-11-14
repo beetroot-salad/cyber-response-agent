@@ -30,10 +30,10 @@ TEMPLATE_AGENT = TEMPLATE_DIR / "agent"
 #: The files run start requires, relative to a tenant's `settings/`. A system's `config.env` is
 #: deliberately not here: some adapters need none, and a missing one fails only that system's
 #: settings check, so the system is down, not the run (#1256). The case-record file is optional
-#: (#1359 r3 "Tenant case-record settings": a tenant with no case system loads and runs), and so
-#: is `lead-zero.yaml` (#1503: a tenant with no saved correlation query names none).
+#: (#1359 r3 "Tenant case-record settings": a tenant with no case system loads and runs).
 REQUIRED_FILES: tuple[str, ...] = (
     "verb-grants.yaml",
+    "lead-zero.yaml",
 )
 
 #: The tenant's optional case-record file under `settings/` (#1359 r4 Data): `system:` names the

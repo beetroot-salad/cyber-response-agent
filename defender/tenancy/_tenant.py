@@ -6,9 +6,9 @@ import dataclasses
 import os
 import re
 import stat
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, TypeVar
 
 from defender.records.formats import (
     DataRoot,
@@ -540,16 +540,15 @@ def _check_knowledge(
             "secrets) out of the data root")
     for name in (SETTINGS_HALF, AGENT_HALF):
         _half(_real_io.stat_entry(bound, name), folder / name, name)
-    for rel, found in _settings_files(bound, f"{SETTINGS_HALF}/"):
-        _required_setting(found, folder / SETTINGS_HALF / rel)
+    for rel in REQUIRED_SETTINGS:
+        _required_setting(_real_io.stat_entry(bound, f"{SETTINGS_HALF}/{rel}"),
+                          folder / SETTINGS_HALF / rel)
     for name in (SETTINGS_HALF, AGENT_HALF):
         _refuse_links_and_special_files(bound, folder, name)
     # After the link walk: each table is read no-follow, but a link at its name is the walk's.
     for rel, (what, known) in (SETTINGS_TABLES if parse_tables else {}).items():
-        table = bound.read(f"{SETTINGS_HALF}/{rel}")
-        if table.absent:  # an optional table; a required one's absence was refused above
-            continue
-        _table_parses(table, folder / SETTINGS_HALF / rel, what=what, known=known)
+        _table_parses(bound.read(f"{SETTINGS_HALF}/{rel}"), folder / SETTINGS_HALF / rel,
+                      what=what, known=known)
     tenant_id_file = folder / TENANT_ID_FILE
     if tenant_id is None and _real_io.stat_entry(bound, TENANT_ID_FILE).absent:
         return
@@ -567,18 +566,8 @@ def check_run_settings(settings: Path) -> None:
     The alert mapping is not among them: it lives in the database (#1345 O5)."""
     settings = Path(settings)
     with _real_io.bind(settings) as bound:
-        for rel, found in _settings_files(bound, ""):
-            _required_setting(found, settings / rel)
-
-
-def _settings_files(bound: Any, prefix: str) -> Iterator[tuple[str, _real_io.StatRead]]:
-    """Each settings file held to the plain-file rules, with its no-follow stat: every one of
-    `REQUIRED_SETTINGS`, and an optional table (`lead-zero.yaml`, #1503) when an entry is at
-    its name — absent is allowed, a link or a non-file is not."""
-    for rel in dict.fromkeys((*REQUIRED_SETTINGS, *SETTINGS_TABLES)):
-        found = _real_io.stat_entry(bound, f"{prefix}{rel}")
-        if rel in REQUIRED_SETTINGS or not found.absent:
-            yield rel, found
+        for rel in REQUIRED_SETTINGS:
+            _required_setting(_real_io.stat_entry(bound, rel), settings / rel)
 
 
 def _required_setting(found: _real_io.StatRead, path: Path) -> None:

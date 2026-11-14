@@ -42,10 +42,6 @@ class ExecutedLead:
     #: `QueryRow.is_sentinel`, carried so collectors partition on the projection's predicate
     #: rather than re-deriving it from `query_id`. Defaults `False` for hand-built rows.
     is_sentinel: bool = False
-    #: `QueryRow.engine` / `.body_param`: the query language the call's adapter declared and
-    #: the param carrying its text, recorded when it ran (#1503). Default: a plain call.
-    engine: str = "none"
-    body_param: str | None = None
 
 
 _VALID_PAYLOAD_STATUSES = frozenset(
@@ -94,8 +90,6 @@ def extract_from_joined(joined_leads: list) -> list[ExecutedLead]:
                     payload_digest=str(q.payload_digest)[:200],
                     error_class=q.error_class,
                     is_sentinel=q.is_sentinel,
-                    engine=q.engine,
-                    body_param=q.body_param,
                 )
             )
     return out

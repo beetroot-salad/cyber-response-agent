@@ -32,6 +32,7 @@ from defender.learning.leads.lead_extraction import (
     collect_general_failures,
 )
 from defender.learning.leads.path_validation import SKILLS_PREFIX as SKILLS_REL
+from defender.systems.verbs import engine_for
 from defender.tests.support.runtime.engine._declared869 import LeadAuthorSpawn, seed_executed_query, seed_tree
 from defender.tests.support.learning.curation._lead_author_1134 import (
     OUT_ID,
@@ -110,13 +111,12 @@ def resolver(s: Scene) -> _scaffold_rules.VerbResolver:
 
 
 def _lead(query_id: str, *, system: str, verb: str, params: dict | None = None,
-          error_class: str | None = None, **language: str) -> ExecutedLead:
-    """`language`: the `engine` / `body_param` the writer records for the call (#1503)."""
+          error_class: str | None = None) -> ExecutedLead:
     return ExecutedLead(
         lead_id="l-001", query_index=0, is_multi_query=False, entry_index=0,
         query_id=query_id, system=system, verb=verb, params=params or {},
         raw_command="cli", goal_text="probe the thing", what_to_summarize=(), raw_ref=None,
-        payload_status="ok", payload_digest="2 bytes", error_class=error_class, **language,
+        payload_status="ok", payload_digest="2 bytes", error_class=error_class,
     )
 
 
@@ -516,10 +516,8 @@ def test_a_minted_draft_departs_only_when_nothing_stands_at_its_name(scene, stat
 
 SYSTEMS = frozenset({"elastic", "wazuh"})
 WAZUH_LEAD = _lead("wazuh.hunt-creds", system="wazuh", verb="esql", params={"query": "FROM logs"})
-#: The product's `elastic.esql` declares ES|QL in `query`, so its row records that; `wazuh` has no
-#: product adapter, so its row is a plain call.
 ELASTIC_LEAD = _lead("elastic.hunt-creds", system="elastic", verb="esql",
-                     params={"query": "FROM logs"}, engine="esql", body_param="query")
+                     params={"query": "FROM logs"})
 
 
 def draft_of(lead: ExecutedLead) -> tuple[str, str]:
@@ -529,7 +527,7 @@ def draft_of(lead: ExecutedLead) -> tuple[str, str]:
     record = _executed_query(lead) or "# (no command captured for this query)"
     text = _draft_skeleton(
         lead.query_id, f"{lead.system}.{suffix}", lead.verb, _draft_params(lead),
-        lead.goal_text, record, lead.engine,
+        lead.goal_text, record, engine_for(lead.system, lead.verb),
     )
     return f"gather/queries/{lead.system}/_draft/{suffix}.md", text
 

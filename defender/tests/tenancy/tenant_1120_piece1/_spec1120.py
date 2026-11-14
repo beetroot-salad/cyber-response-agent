@@ -42,10 +42,10 @@ ROW_NAME = "tenant.json"
 ROW_PATH_PROPERTY = "row_path"
 
 #: Files required under `settings/`, spelled as literals so a test can disagree with the
-#: production constant. `lead-zero.yaml` is optional since #1503: a tenant with no saved
-#: correlation query names none (`test_no_correlation_query_1503.py`).
+#: production constant.
 REQUIRED_SETTINGS = (
     "verb-grants.yaml",
+    "lead-zero.yaml",
 )
 
 #: The per-tenant id file, relative to `knowledge/`.

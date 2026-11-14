@@ -162,6 +162,23 @@ if TYPE_CHECKING:
     _: type[_kit.VerbContext] = VerbContext
 
 
+_ENGINE_DECL: dict[tuple[str, str], tuple[str, str]] = {
+    ("elastic", "esql"): ("esql", "query"),          # lint-shippable: ok — real queries-table `system` value
+    ("elastic", "query"): ("lucene", "native_query"),   # lint-shippable: ok — real queries-table `system` value
+    ("elastic", "alerts"): ("lucene", "native_query"),  # lint-shippable: ok — real queries-table `system` value
+}
+
+
+def engine_for(system: str, verb_name: str) -> str:
+    decl = _ENGINE_DECL.get((system, verb_name))
+    return decl[0] if decl else "none"
+
+
+def body_param_for(system: str, verb_name: str) -> str | None:
+    decl = _ENGINE_DECL.get((system, verb_name))
+    return decl[1] if decl else None
+
+
 _NONE_TYPE = type(None)
 
 
@@ -699,6 +716,8 @@ __all__ = [
     "VerbContext",
     "VerbDecision",
     "VerbRegistry",
+    "body_param_for",
+    "engine_for",
     "is_system_name",
     "read_roster",
     "validate_params",

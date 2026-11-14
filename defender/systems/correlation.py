@@ -5,7 +5,6 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any
 from defender._model import model
 
 from defender._agent_role import CORRELATION_GRANT_HOLDER
@@ -56,13 +55,12 @@ class CorrelationDispatch:
     """Item 3's dispatch identity, derived once at run start and carried to the frames that
     act on it rather than re-derived there.
 
-    `system is None` means the table withheld the lead and the id was not checked; the id is
-    `None` when the tenant names no template (no saved correlation query, #1503). Otherwise
+    `system is None` means the table withheld the lead and the id was not checked. Otherwise
     `template_id` resolved to exactly one established template filed under `system` and
     binding the holder's one query pair.
     """
 
-    template_id: str | None
+    template_id: str
     system: str | None
     grant: VerbGrant
 
@@ -72,26 +70,11 @@ def _pair(system: str, verb: str) -> str:
     return f"{system}.{verb}"
 
 
-def _granted_template(template_id: str | None, granted: str, grant: VerbGrant, at: Any) -> str:
-    """`template_id`, or `LeadZeroConfigError` when a granted lead names none (#1503)."""
-    if template_id is None:
-        # The fault is the config's (it names nothing), so it is the config's error type.
-        from defender.systems.lead_zero_config import LeadZeroConfigError
-
-        raise LeadZeroConfigError(at(
-            f"no correlation template is named (the file is absent), but the table grants "
-            f"{granted} to the correlation lead (`{grant.role}`) — name the saved query it runs "
-            "(`correlation_template: <id>`), or withhold the lead in the table"))
-    return template_id
-
-
 def resolve_correlation_dispatch(
-    template_id: str | None, templates: Iterable[QueryTemplate], grant: VerbGrant, *,
+    template_id: str, templates: Iterable[QueryTemplate], grant: VerbGrant, *,
     source: Path | None = None, table: Path | None = None,
 ) -> CorrelationDispatch:
-    """Resolve `template_id` against `templates` and check it agrees with `grant`. `None` (the
-    tenant names no template) is skipped when the grant withholds the lead and refused when it
-    grants it a query pair (`LeadZeroConfigError`): a granted step with nothing to run (#1503)."""
+    """Resolve `template_id` against `templates` and check it agrees with `grant`."""
     def at(message: str, where: Path | None = source) -> str:
         return message if where is None else f"{where}: {message}"
 
@@ -112,7 +95,6 @@ def resolve_correlation_dispatch(
         ))
     table_system, table_verb = query_pairs[0]
     granted = _pair(table_system, table_verb)
-    template_id = _granted_template(template_id, granted, grant, at)
 
     matches = [t for t in templates if t.id == template_id and is_established(t)]
     if not matches:

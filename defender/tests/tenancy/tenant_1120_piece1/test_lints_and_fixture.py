@@ -328,11 +328,9 @@ def test_1159_the_census_lint_keeps_exit_2_and_its_own_framing_when_the_census_i
 @pytest.mark.parametrize("folder", [H.FIXTURE, H.TEMPLATE], ids=["fixture", "template"])
 def test_1366_o9_the_shipped_tenant_folders_carry_no_system_folders_or_case_record(folder: Path) -> None:
     """The committed template and fixture drop `settings/systems/` and `settings/case-record.yaml` (a system's settings
-    are a database record now); the two tables a tenant still owns remain. (#1366 O9) The template names no
-    correlation query, so it has no `lead-zero.yaml` (#1503)."""
+    are a database record now); the two tables a tenant still owns remain. (#1366 O9)"""
     settings = folder / "settings"
-    tables = ["verb-grants.yaml"] if folder == H.TEMPLATE else ["lead-zero.yaml", "verb-grants.yaml"]
-    assert sorted(p.name for p in settings.iterdir()) == tables, list(settings.iterdir())
+    assert sorted(p.name for p in settings.iterdir()) == ["lead-zero.yaml", "verb-grants.yaml"], list(settings.iterdir())
     H.assert_clean(H.check(tenant_py, None, "--folder", str(folder)))
 
 

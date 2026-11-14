@@ -35,6 +35,7 @@ from defender.learning.author._config import GIT_TIMEOUT_SECONDS
 from defender.learning.author.version_control import DeliveryRefused
 from defender.learning.leads import lead_render
 from defender import box as _box
+from defender.systems.verbs import engine_for
 
 if TYPE_CHECKING:
     from defender.systems.catalog import Catalog, TenantSystems
@@ -603,6 +604,7 @@ __all__ = [
     "collect_general_failures",
     "dataclass",
     "discover_system_drafts",
+    "engine_for",
     "extract",
     "extract_from_joined",
     "functools",

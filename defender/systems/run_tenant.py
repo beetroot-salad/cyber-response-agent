@@ -144,20 +144,19 @@ def _agent_beside(settings: Path) -> Path:
 def correlation_dispatch(
     settings: Path, templates: Iterable[QueryTemplate], grant: VerbGrant,
 ) -> CorrelationDispatch:
-    """Item 3's dispatch identity for one tenant: its `lead-zero.yaml` id (none when the file
-    is absent, #1503), resolved against
+    """Item 3's dispatch identity for one tenant: its `lead-zero.yaml` id, resolved against
     `templates` and checked for agreement with `grant`, its table's correlation grant.
     Raises `LeadZeroConfigError`, `CorrelationDispatchError` or `GrantError`, each naming the
     file an operator edits: `verb-grants.yaml` for a correlation grant of the wrong shape,
     `lead-zero.yaml` for everything else."""
     from defender.systems import correlation
-    from defender.systems.lead_zero_config import configured_template, lead_zero_config_path
+    from defender.systems.lead_zero_config import lead_zero_config_path, load_correlation_template
     from defender.systems.verb_dispositions import dispositions_path
 
     config = lead_zero_config_path(settings)
-    table = dispositions_path(settings)
+    template_id = load_correlation_template(config)
     return correlation.resolve_correlation_dispatch(
-        configured_template(config), templates, grant, source=config, table=table)
+        template_id, templates, grant, source=config, table=dispositions_path(settings))
 
 
 def refusals() -> tuple[type[Exception], ...]:

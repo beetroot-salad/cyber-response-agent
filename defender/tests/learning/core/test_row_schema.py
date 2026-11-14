@@ -49,8 +49,6 @@ def _row(seq: int, **overrides) -> dict:
         "payload_status": "ok", "payload_digest": f"{seq + 10} bytes, 1 line(s)",
         "payload_sha256": SHA_MARKER, "system_key": "",
         "received_at": "2026-07-28T15:00:00+00:00",
-        # What the product adapter's `elastic.query` declares, recorded at run time (#1503).
-        "engine": "lucene", "body_param": "native_query",
     }
     row.update(overrides)
     return row

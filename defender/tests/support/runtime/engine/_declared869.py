@@ -275,7 +275,7 @@ def seed_executed_query(
     from defender._io import read_jsonl_rows
     from defender.records import Run, RunPaths
     from defender.investigation.run_state import RunState
-    from defender.investigation.record_query import append_query_row, declared_language
+    from defender.investigation.record_query import append_query_row
 
     gather = RunPaths(run_dir).gather_raw
     gather.mkdir(parents=True, exist_ok=True)
@@ -295,21 +295,7 @@ def seed_executed_query(
         # `system` is the dispatched name here, so the row keys as itself and the fingerprint
         # column is empty.
         system_key="",
-        # The language the real adapter declares, as the query tool records it (#1503).
-        language=declared_language(_product_verb(system, verb)),
     )
-
-
-def _product_verb(system: str, verb: str):
-    """The product adapter's function for `system.verb`, or `None` (a system the product
-    ships no adapter for, or a verb it does not declare)."""
-    import importlib
-
-    try:
-        module = importlib.import_module(f"defender.integrations.{system.replace('-', '_')}_adapter")
-    except ImportError:
-        return None
-    return getattr(module, "VERBS", {}).get(verb)
 
 
 class Spawn:

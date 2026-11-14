@@ -51,7 +51,6 @@ from defender.systems.verbs import (  # noqa: E402
     VerbContext,
 )
 from defender.kit.faults import ConfigFault, TransportFault, UpstreamFault  # noqa: E402
-from defender.kit.verbs import verb  # noqa: E402
 from defender.systems.verbs import read_roster  # noqa: E402
 
 pytestmark = pytest.mark.e2e
@@ -155,10 +154,8 @@ DONE = Turn(text="Summary: measured the lead.")
 
 def elastic_ok(rec: VerbRecorder) -> FakeVerbs:
     """The happy-path registry: one system, one verb, two declared params (`native_query`
-    REQUIRED, `limit` optional). The signature IS the param contract the tool validates, and the
-    declaration the product adapter's `query` carries (Lucene in `native_query`, #1503)."""
+    REQUIRED, `limit` optional). The signature IS the param contract the tool validates."""
 
-    @verb(engine="lucene", body_param="native_query")
     def query(ctx: VerbContext, *, native_query: str, limit: int = 10) -> list[dict]:
         rec.record("query", ctx, {"native_query": native_query, "limit": limit})
         return PAYLOAD
@@ -769,8 +766,6 @@ ROW_KEYS = {
     "payload_sha256",
     "system_key",
     "received_at",
-    "engine",
-    "body_param",
 }
 
 
@@ -791,8 +786,6 @@ def test_row_contract_frozen(tmp_path):
     assert row["query_id"] == "elastic.sshd-auth-history"
     assert row["params"] == {"native_query": "FROM logs | LIMIT 2", "limit": 2}
     assert "arg0" not in row["params"]
-    # The adapter's own declaration, recorded at run time (#1503).
-    assert (row["engine"], row["body_param"]) == ("lucene", "native_query")
     assert row["exit_code"] == 0
     assert row["error_class"] is None
     assert row["payload_status"] == "ok"

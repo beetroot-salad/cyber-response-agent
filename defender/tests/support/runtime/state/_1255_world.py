@@ -15,7 +15,7 @@ from defender.tests.support.shared.filesystem._handoff import updating, write_wh
 ROW_COLUMNS = (
     "lead_id", "seq", "system", "verb", "query_id", "params", "raw_command", "payload_path",
     "exit_code", "error_class", "payload_status", "payload_digest", "payload_sha256",
-    "system_key", "received_at", "engine", "body_param",
+    "system_key", "received_at",
 )
 
 #: The column name kept out of the model's table.
