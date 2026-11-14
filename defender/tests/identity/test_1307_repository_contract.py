@@ -66,6 +66,7 @@ from defender.tests.identity.test_identity_repository_contract import (  # noqa:
 from defender.tests.support.identity._tenant_states1454 import NOT_ACTIVE, leave_active
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.shared._pglocks1339 import TIMEOUT, blocked, holding_row, until, until_blocked
+from defender.tests.support.identity._seed1496 import seed_membership, seed_user
 
 pytestmark = pytest.mark.anyio
 
@@ -130,11 +131,11 @@ async def test_a_person_has_an_admin_membership_and_no_kind(seeded):
 
 @pytest.mark.parametrize("attempt", [
     pytest.param(lambda r, p, a: r.ensure_invitation(_as_user(p), T2, invited_by=None, now=NOW), id="invitation-of-a-program"),
-    pytest.param(lambda r, p, a: r.add_membership(_as_user(p), T2, status="active", invited_by=None, created_at=NOW,
+    pytest.param(lambda r, p, a: seed_membership(r, _as_user(p), T2, status="active", invited_by=None, created_at=NOW,
                                                   accepted_at=NOW, role="admin"), id="membership-of-a-program"),
-    pytest.param(lambda r, p, a: r.add_membership(a.id, T2, status="active", invited_by=None, created_at=NOW,
+    pytest.param(lambda r, p, a: seed_membership(r, a.id, T2, status="active", invited_by=None, created_at=NOW,
                                                   accepted_at=NOW, role="automation"), id="person-automation"),
-    pytest.param(lambda r, p, a: r.add_user(None, created_at=NOW), id="person-without-email"),
+    pytest.param(lambda r, p, a: seed_user(r, None, created_at=NOW), id="person-without-email"),
     pytest.param(lambda r, p, a: r.add_program(T1, display_name="By nobody", created_by=NO_SUCH_USER, now=NOW),
                  id="program-by-nobody"),
     pytest.param(lambda r, p, a: r.add_credential(a.id, kind="key", name="k", created_by=a.id, expires_at=EXPIRES,

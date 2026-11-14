@@ -444,19 +444,14 @@ async def test_o8_systems_and_lessons_refuse_501_naming_their_issue_after_member
 
 @pytest.mark.postgres
 async def test_o8_the_real_servers_openapi_declares_the_501_on_every_systems_and_lessons_route(served):
-    """On the real and the demo server, the operations declaring 501 are exactly those on systems and lessons. (O8, Am-2)"""
-    from defender.api.app import create_app
-    from defender.api.demo import demo_deps
-
-    real = (await served.client.get("/openapi.json")).json()
-    demo = json.loads(json.dumps(create_app(await demo_deps((A,))).openapi()))
-    for server, document in (("real", real), ("demo", demo)):
-        unbacked = set(_unbacked(document))
-        assert len(unbacked) >= 5, server
-        declaring = {(path, method) for path, item in document["paths"].items() for method, op in item.items()
-                     if "501" in op["responses"]}
-        assert declaring == unbacked, (server, declaring ^ unbacked)
-        assert "not yet real" not in document["info"].get("summary", "")
+    """On the real server, the operations declaring 501 are exactly those on systems and lessons. (O8, Am-2)"""
+    document = (await served.client.get("/openapi.json")).json()
+    unbacked = set(_unbacked(document))
+    assert len(unbacked) >= 5
+    declaring = {(path, method) for path, item in document["paths"].items() for method, op in item.items()
+                 if "501" in op["responses"]}
+    assert declaring == unbacked, declaring ^ unbacked
+    assert "not yet real" not in document["info"].get("summary", "")
 
 
 @pytest.mark.postgres

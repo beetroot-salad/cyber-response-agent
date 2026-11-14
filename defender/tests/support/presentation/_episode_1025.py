@@ -860,13 +860,13 @@ class Rescue:
         self.fifo = Path(fifo)
         self.after = after
         self.fed = False
-        self._cancel = threading.Event()
+        self._stop = threading.Event()
         self._thread = threading.Thread(target=self._feed, daemon=True)
 
     def _feed(self) -> None:
         # Waited on the cancel event, not a bare `sleep`: `__exit__` sets it once the guarded
         # call has RETURNED (so it did not block), and a screened reader never pays `after`.
-        if self._cancel.wait(self.after):
+        if self._stop.wait(self.after):
             return
         try:
             fd = os.open(self.fifo, os.O_WRONLY | os.O_NONBLOCK)
@@ -881,7 +881,7 @@ class Rescue:
         return self
 
     def __exit__(self, *exc: Any) -> None:
-        self._cancel.set()
+        self._stop.set()
         self._thread.join(timeout=self.after + 5)
 
 

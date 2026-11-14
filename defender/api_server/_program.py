@@ -32,6 +32,7 @@ from defender.identity.logged_mail import LoggedMail
 from defender.identity.postgres import PostgresIdentityRepository
 from defender.jobs.store import JobStore
 from defender.migrations import DatabaseUnreachable, RevisionMismatch, check_version
+from defender.tenancy import TenantRepository
 from defender.tenancy.postgres import PostgresTenantRepository
 
 from ._settings import Settings, StartRefused
@@ -179,11 +180,13 @@ def _bind(settings: Settings) -> socket.socket:
     return sock
 
 
-def _api_deps(settings: Settings, identity: IdentityService, tenants: PostgresTenantRepository,
-          ports: JobStorePorts) -> ApiDeps:
+def api_deps(*, identity: IdentityService, tenants: TenantRepository, ports: JobStorePorts,
+             frontend_origin: str) -> ApiDeps:
+    """The app's ports as the program composes them: the job store's ports back every family the store serves, the rest
+    refuse (piece 2 of #1083, and lessons). The API test worlds compose through this too (#1496), so they cannot drift."""
     piece_2, lessons = Refusing(_PIECE_2), Refusing(_LESSONS)
     return ApiDeps(
-        identity=identity, tenants=tenants, frontend_origin=settings.frontend_origin,
+        identity=identity, tenants=tenants, frontend_origin=frontend_origin,
         alerts=ports, investigations=ports, learning_jobs=ports, alert_mapping=ports, writes=ports,
         offboarding=ports, lessons=lessons, systems=piece_2, secrets=piece_2, checker=piece_2,
         artifact_links=piece_2, audit=piece_2)
@@ -227,7 +230,8 @@ async def serving(settings: Settings, *, transport: httpx.AsyncBaseTransport | N
                 until_lifespan.push_async_callback(tenants.close)
                 identity = IdentityService(people, signin=signin, mail=LoggedMail(), clock=_wall_clock,
                                            bootstrap=settings.administrators, programs=programs)
-                app = create_app(_api_deps(settings, identity, tenants, JobStorePorts(store)))
+                app = create_app(api_deps(identity=identity, tenants=tenants, ports=JobStorePorts(store),
+                                          frontend_origin=settings.frontend_origin))
             async with steps.step("binding the listening socket"):
                 sock = _bind(settings)
                 stack.callback(sock.close)

@@ -55,6 +55,7 @@ import pytest
 
 from defender.tests.support.tenancy._mapping1345 import PLANTED_ALERT_MAPPING, seed_postgres, seed_twin
 from defender.tests.support.tenancy._systems1366 import DERIVED, seed_postgres_records, seed_twin_records
+from defender.tests.support.tenancy._twin1496 import seed_tenant
 
 if TYPE_CHECKING:
     from defender.tenancy import TenantDirectory
@@ -112,7 +113,7 @@ def active_repository(  # noqa: PLR0913 — one twin's whole seeding, each part 
     extra: dict[str, Any] = {}
     if wiring:
         extra = {"repo": repo or f"tenants/{tenant}", "origin": _origin_of(data_root, tenant, origin)}
-    added = twin.add_tenant(str(tenant), created_at=CREATED, state=state, **extra)
+    added = seed_tenant(twin, str(tenant), created_at=CREATED, state=state, **extra)
     if inspect.isawaitable(added):  # GAP-0-1: the seeder's sync/async shape is not pinned
         run_sync(_await(added))
     for fields in generations:
@@ -256,3 +257,19 @@ def provision_generation(openbao: Any, tenant: str, secrets_dir: Path, *, salt: 
     path.write_text(secret["secret_id"] + "\n", encoding="utf-8")
     path.chmod(0o600)
     return fields
+
+
+async def offboard_on_database(dsn: str, tenant_id: str) -> Any:
+    """Put `tenant_id` into `offboarding` by tenancy's own `offboard`, on a connection of its own to the database at
+    `dsn` (#1496: the repository has no offboard request; the API's is the job store's, which also ends the tenant's
+    jobs). Returns the record it left; `NotFound`/`Conflict` as `offboard` refuses. The twin's is
+    `_twin1496.offboard_twin`."""
+    from defender.database import async_engine
+    from defender.tenancy import offboard
+
+    engine = async_engine(dsn)
+    try:
+        async with engine.begin() as conn:
+            return await offboard(conn, tenant_id)
+    finally:
+        await engine.dispose()

@@ -74,30 +74,6 @@ class InMemoryTenantRepository:
                 raise KeyError(f"no tenant {tenant_id}")
             self._records[tenant_id] = records
 
-    async def add_tenant(  # noqa: PLR0913 — the pinned seeder signature
-        self, tenant_id: str, *, created_at: _dt.datetime, state: str = "active", repo: str | None = None,
-        origin: str | None = None, pending_action: str | None = None, step: str | None = None,
-        step_actor: str | None = None, failure: str | None = None,
-    ) -> TenantRecord:
-        """Seeder: a tenant row (and its forge wiring when `repo` is given) as written, not requested.
-        A state that requires a pending action gets its first step when none is named. The id is stored as given,
-        unchecked, so a case can plant one the entry points must refuse."""
-        tenant_id = cast(TenantId, tenant_id)
-        if pending_action is None and state in _SEED_JOB:
-            pending_action, step, step_actor = _SEED_JOB[state]
-        _check_pair(state, pending_action)
-        if (repo is None) != (origin is None):
-            raise ValueError("forge wiring needs both the repo and its origin")
-        row = TenantRecord(id=tenant_id, created_at=created_at, state=state, pending_action=pending_action,
-                           step=step, step_actor=step_actor, failure=failure)
-        with self._mutex:
-            if tenant_id in self._tenants:
-                raise ValueError(f"tenant {tenant_id} is already stored")
-            self._tenants[tenant_id] = row
-            if repo is not None and origin is not None:
-                self._wiring[tenant_id] = ForgeWiring(tenant_id=tenant_id, repo=repo, origin=origin)
-            return _detached(row)
-
     async def add_generation(self, tenant_id: str, **fields: Any) -> Generation:
         """Seeder: one generation row of an existing tenant, with the model's field names."""
         row = Generation(tenant_id=cast(TenantId, tenant_id), **fields)
@@ -193,13 +169,6 @@ class InMemoryTenantRepository:
             row = self._row(tenant_id)
             return self._request(
                 tenant_id, row.failure is not None, "nothing to resume", failure=None)
-
-    async def request_offboard(self, tenant_id: TenantId, *, now: _dt.datetime) -> TenantRecord:
-        with self._mutex:
-            row = self._row(tenant_id)
-            return self._request(
-                tenant_id, row.state in ("creating", "active"), "only a creating or active tenant can be offboarded",
-                state="offboarding", pending_action="offboard", step="offboard", step_actor=SERVICE, failure=None)
 
     async def request_rotate(self, tenant_id: TenantId) -> TenantRecord:
         with self._mutex:

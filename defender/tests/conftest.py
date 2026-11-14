@@ -64,6 +64,16 @@ def checkout_roster():
 
 
 @pytest.fixture(autouse=True)
+def _close_test_worlds() -> Iterator[None]:
+    """Every API test world (`support/api/_identity1306.World`) a test opened is closed when it ends: its database
+    dropped, its pools and loop thread released (#1496), whatever the test did."""
+    from defender.tests.support.shared._worlds import closing_new_worlds
+
+    with closing_new_worlds():
+        yield
+
+
+@pytest.fixture(autouse=True)
 def _held_capabilities(checkout_roster):
     """Every test starts with the `nothing-to-try` gate holding the real checkout's roster, as a
     production process does at start, and ends with it released, so a test that pointed the gate

@@ -319,13 +319,13 @@ SIGN_FIELDS = ("sign_approle", "sign_entity", "sign_role_id", "sign_secret_file"
 
 
 def _row(world, tenant: str, status: str) -> Any:
-    [row] = [r for (owner, _s), r in world.tenants._generations.items() if owner == tenant and r.status == status]  # noqa: SLF001
+    [row] = [g for g in world.generations(tenant) if g.status == status]
     return row
 
 
 def _as_recorded_before_r8(world, tenant: str):
     """Make the tenant's live generation the shape an older deployment recorded: no sign names, and no sign AppRole,
-    entity, alias, secret file or signing key anywhere (the in-memory twin's rows). Returns the generation as it was."""
+    entity, alias, secret file or signing key anywhere (its row, by SQL). Returns the generation as it was."""
     gen = world.live(tenant)
     bao = world.openbao
     bao.approles.pop(gen.sign_approle)
@@ -334,9 +334,7 @@ def _as_recorded_before_r8(world, tenant: str):
     bao.entities.pop(gen.sign_entity)
     bao.transit_keys.pop(_key(tenant))
     gen.sign_secret_file.unlink()
-    row = _row(world, tenant, "live")
-    for name in SIGN_FIELDS:
-        setattr(row, name, None)
+    world.set_generation(tenant, "live", **dict.fromkeys(SIGN_FIELDS))
     assert world.live(tenant).sign_approle is None, "control: the record reads as an older one"
     return gen
 
@@ -409,8 +407,7 @@ def _seed_pending_before_r8(world, kind: str, past: tuple[str, ...] = ()) -> tup
         bao.entities.pop(pending.sign_entity, None)
     bao.aliases[:] = [a for a in bao.aliases if a["name"] != pending.sign_role_id or pending.sign_role_id is None]
     bao.transit_keys.pop(_key(tenant), None)
-    for name in SIGN_FIELDS:
-        setattr(pending, name, None)
+    world.set_generation(tenant, "pending", **dict.fromkeys(SIGN_FIELDS))
     item = world.item(tenant)
     assert (item["step"], item["step_actor"], item["failure"]) == (_NEXT_AFTER[kind][past[-1] if past else "names"], "service", None), item
     return tenant, _only_pending(world, tenant)
@@ -505,7 +502,7 @@ def test_a_job_that_wrapped_or_installed_before_r8_goes_back_to_wrap_and_complet
         tenant = world.active_tenant()
         assert world.ops.post(f"/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
     world.drive(stop=lambda: world.item(tenant)["step"] == parked)
-    seeded, row, bao = _only_pending(world, tenant), _row(world, tenant, "pending"), world.openbao
+    seeded, bao = _only_pending(world, tenant), world.openbao
     bao.approles.pop(seeded.sign_approle)
     bao.approle_policies.pop(seeded.sign_approle, None)
     bao.aliases[:] = [a for a in bao.aliases if a["name"] != seeded.sign_role_id]
@@ -514,8 +511,7 @@ def test_a_job_that_wrapped_or_installed_before_r8_goes_back_to_wrap_and_complet
         bao.transit_keys.pop(_key(tenant))
     if parked == "sweep":
         seeded.sign_secret_file.unlink()
-    for name in SIGN_FIELDS:
-        setattr(row, name, None)
+    world.set_generation(tenant, "pending", **dict.fromkeys(SIGN_FIELDS))
     item, pending = world.item(tenant), _only_pending(world, tenant)
     assert (item["step"], item["failure"]) == (parked, None)
     assert (pending.wrapped_secret, pending.secret_accessor) == (seeded.wrapped_secret, seeded.secret_accessor), \
