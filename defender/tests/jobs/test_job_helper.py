@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import inspect
 import json
+import logging
 import os
 import signal
-import subprocess
 import sys
 import threading
 import time
@@ -39,6 +39,10 @@ from defender.tests.support.jobs._job_helper import (
     until,
 )
 from defender.tests.support.jobs import _job_helper as J
+from defender.box import BoxSpec as _BoxSpec
+
+#: Every box runtime the deployment may set (#1469: each has a job runtime).
+BOX_RUNTIMES = _BoxSpec.RUNTIMES
 
 # The shared fixtures (`_job_helper`'s docs): `process_state` is autouse, `scene` the default helper scene.
 process_state = J.process_state
@@ -159,6 +163,10 @@ _FLAG_COUNTS = {"-i": 1, "--rm": 1, "--init": 1, "--name": 1, "--user": 1, "--la
                 "--workdir": 1}
 
 
+#: The job container's runtime by box runtime (#1469): gVisor's job registration, or runc as the boxes are.
+_JOB_RUNTIME = {"runsc": "runsc-job", "runc": "runc"}
+
+
 def _run_flags(argv: list[str], image: str) -> list[tuple[str, str | None]]:
     """`docker run`'s `(flag, value)` pairs up to `image`, which must be the first word that is neither a flag nor a
     flag's value."""
@@ -176,10 +184,10 @@ def _run_flags(argv: list[str], image: str) -> list[tuple[str, str | None]]:
     return pairs
 
 
-def test_o1_the_job_containers_start_carries_exactly_the_allowed_flags_with_the_box_runtime_and_its_hardening(
+def test_o1_the_job_containers_start_carries_exactly_the_allowed_flags_with_the_job_runtime_and_its_hardening(
         scene, monkeypatch):
     """Before the image, the job container's `docker run` carries exactly `-i --rm --init --name --user`, three
-    `--label`s, `--pull=never`, `--runtime` the box runtime the deployment sets, `--read-only`, one `--tmpfs`,
+    `--label`s, `--pull=never`, `--runtime` the job runtime derived from the box runtime the deployment sets (#1469), `--read-only`, one `--tmpfs`,
     `--security-opt no-new-privileges`, `--cap-drop ALL`, at most one `--network` (the job network, N5), three
     `--mount`s, `--workdir` and `--env`s: nothing else (`--pid host`, `--privileged`, `--cap-add`, `-v`, a second
     runtime). (O1, A7, H9, N5)"""
@@ -200,10 +208,27 @@ def test_o1_the_job_containers_start_carries_exactly_the_allowed_flags_with_the_
     assert envs >= 1, "the job container carries no setting"
     assert networks <= 1, "the job container joins more than one network"
     values = dict(p for p in pairs if p[0] not in ("--label", "--mount", "--env"))
-    assert values["--runtime"] == runtime, (values["--runtime"], runtime)
+    assert values["--runtime"] == _JOB_RUNTIME[runtime], (values["--runtime"], runtime)
     assert values["--security-opt"] == "no-new-privileges"
     assert values["--cap-drop"] == "ALL"
     assert values["--name"] == docker.box.name
+
+
+@pytest.mark.parametrize("box_runtime", BOX_RUNTIMES)
+def test_s2_the_job_container_runs_under_the_job_runtime_derived_from_the_box_runtime_and_never_a_box_runtime(
+        scene, monkeypatch, box_runtime):
+    """`runsc` boxes: the job container starts under `runsc-job`; `runc` boxes: under `runc`. A derived runtime other
+    than the box runtime is no box runtime, and no box can be levered onto it. (#1469 S2, invariant)"""
+    from defender.box import BoxSpec
+
+    monkeypatch.setenv(BoxSpec.ENV_VAR, box_runtime)
+    _inv, docker, _ran, _s = _go(scene, lambda c: 0)
+
+    (runtime,) = flag_values(docker.box.argv, "--runtime")
+    assert runtime == _JOB_RUNTIME[box_runtime], (box_runtime, runtime)
+    assert runtime == box_runtime or runtime not in BoxSpec.RUNTIMES, runtime
+    with pytest.raises(ValueError, match="not a known box runtime"):
+        BoxSpec.from_env({BoxSpec.ENV_VAR: "runsc-job"})
 
 
 def test_a7_the_code_mounted_is_read_only_at_the_same_path_and_holds_no_env_file(scene):
@@ -253,9 +278,10 @@ def test_h9_the_job_socket_lives_in_a_0700_folder_under_the_data_root_outside_ev
     assert (got["folder_mode"], got["mode"]) == (0o700, 0o600)
 
 
-def test_h9_a_peer_that_is_not_one_of_the_containers_processes_is_refused(scene, tmp_path):
-    """A process the container's init started gets `launch` answered; a process of the same uid started outside the
-    container gets nothing. (H9; peer check against the container's processes)"""
+def test_s4_a_host_process_outside_the_container_that_reaches_the_socket_is_answered(scene, tmp_path):
+    """Who may use the socket is the filesystem's to decide: a process inside the container and one of the same uid
+    outside it both get `launch` answered, and the helper asks the daemon for no process list. (#1469 S4; retires
+    H9's peer check)"""
     got: dict = {}
 
     def job(c) -> int:
@@ -264,38 +290,12 @@ def test_h9_a_peer_that_is_not_one_of_the_containers_processes_is_refused(scene,
         got["outside"] = json.loads(c.foreign(ASK_LAUNCH, sock))
         return 0
 
-    _go(scene, docker=ContainerStandIn(job, init=True, queue=tmp_path / "init"))
+    _inv, docker, _ran, _s = _go(scene, docker=ContainerStandIn(job, init=True, queue=tmp_path / "init"))
 
+    asked = [c for c in docker.calls if c[1:2] == ["top"] or (c[1:2] == ["inspect"] and any("State.Pid" in a for a in c))]
+    assert not asked, f"the helper asked the daemon for the container's processes: {asked}"
     assert got["inside"]["ok"]["export_commit"] == scene.t.commit, got["inside"]
-    assert "ok" not in got["outside"], f"a process outside the container was answered: {got['outside']}"
-
-
-class _NoProcessList(ContainerStandIn):
-    """A daemon that cannot list the job container's processes (its init's pid and `top` both fail)."""
-
-    def _process_question(self, argv, sub):  # noqa: ANN001
-        if any(b.name in argv for b in self.boxes) and (sub == "top" or (
-                sub == "inspect" and any("State.Pid" in a for a in argv))):
-            self.calls.append(argv)
-            return subprocess.CompletedProcess(argv, 1, "", "Error response from daemon: cannot list processes\n")
-        return super()._process_question(argv, sub)
-
-
-def test_h9_with_no_process_list_from_the_daemon_a_foreign_peer_is_still_refused(scene):
-    """The peer check fails closed: when the daemon answers no list of the container's processes, a process of the same
-    uid outside the container gets no answer. (H9; the answered case is `test_h9_a_peer_that_is_not_one_of...`)"""
-    got: dict = {}
-
-    def job(c) -> int:
-        got["outside"] = json.loads(c.foreign(ASK_LAUNCH, str(c.socket())))
-        return 0
-
-    docker = _NoProcessList(job)
-    _go(scene, docker=docker)
-
-    assert any(c[1:2] in (["top"], ["inspect"]) and docker.box.name in c for c in docker.calls), \
-        "control: the helper asked the daemon for the container's processes"
-    assert "ok" not in got["outside"], f"a process outside the container was answered: {got['outside']}"
+    assert got["outside"].get("ok", {}).get("export_commit") == scene.t.commit, got["outside"]
 
 
 def test_h9_a_message_announcing_a_body_past_any_limit_is_refused_without_waiting_for_the_body(scene):
@@ -1267,11 +1267,14 @@ def test_a3_o11_a_container_that_cannot_start_ends_the_row_as_a_box_start_failur
 
 
 def test_a_worker_host_without_runsc_ends_the_row_as_a_box_start_failure_naming_the_remedy_and_starts_nothing(
-        scene, capsys):
+        scene, capsys, monkeypatch):
     """#1484: the helper asks its daemon for the job's runtime before the container's start: none is started, the end
-    record says `box: start_failed`, and the helper says the remedy rather than docker's refusal."""
+    record says `box: start_failed`, and the helper says the remedy rather than docker's refusal. (#1469: the job's
+    runtime under `runsc` boxes is `runsc-job`)"""
+    from defender.box import BoxSpec
     from defender.records.job_facts import BOX_START_FAILED
 
+    monkeypatch.setenv(BoxSpec.ENV_VAR, "runsc")
     inv, argv = _investigation(scene)
     docker = ContainerStandIn(lambda c: 0, runtimes=("runc",))
     ran = drive_helper(scene, argv, docker=docker, signer=make_signer())
@@ -1282,8 +1285,99 @@ def test_a_worker_host_without_runsc_ends_the_row_as_a_box_start_failure_naming_
     assert end is not None
     assert end.box == BOX_START_FAILED, end
     err = capsys.readouterr().err
-    assert "no runtime 'runsc' registered" in err, err
+    assert "no runtime 'runsc-job' registered" in err, err
     assert "runsc install" in err, err
+
+
+@pytest.mark.parametrize("job_args", [["--oci-seccomp", "--host-uds=open"], ["--oci-seccomp"], []],
+                         ids=["as-registered", "no-host-uds", "no-args"])
+def test_d0_the_job_container_starts_under_runsc_job_whatever_args_it_is_registered_with(scene, monkeypatch, job_args):
+    """The code never checks the job registration's instruction: a registered `runsc-job` starts the job container, and a
+    job runtime without host-socket access fails the job's own connect (D4), not a pre-create check. (#1469 D0)"""
+    from defender.box import BoxSpec
+
+    monkeypatch.setenv(BoxSpec.ENV_VAR, "runsc")
+    entry: dict = {"path": "/usr/bin/runsc", **({"runtimeArgs": job_args} if job_args else {})}
+    docker = ContainerStandIn(lambda c: 0, runtimes={"runc": {"path": "runc"}, "runsc": {"path": "/usr/bin/runsc"},
+                                                     "runsc-job": entry})
+    _inv, docker, _ran, _s = _go(scene, docker=docker)
+
+    assert flag_values(docker.box.argv, "--runtime") == ["runsc-job"], docker.box.argv
+
+
+_D4_CAUSE = "never reached its socket"
+
+#: Every job kind the helper runs (D4 holds "in one place for every job kind").
+JOB_KINDS = ["investigation", "learning", "post-step"]
+
+
+def _d4(scene, job, capsys, *, docker=None, kind="investigation", **seams):
+    """One `kind` helper run: `(job id, docker, ran, stderr)`; a post-step names no job."""
+    job_id = str(uuid.uuid4())
+    if kind == "investigation":
+        scene.plant(job_id)
+    source = str(uuid.uuid4()) if kind == "learning" else None
+    argv = scene.argv(kind, None if kind == "post-step" else job_id, source=source)
+    docker = docker or ContainerStandIn(job)
+    seams = {**(scene.forge_seams() if kind == "post-step" else {"forge": J.ForgeCredentialRecorder()}), **seams}
+    ran = drive_helper(scene, argv, docker=docker, signer=make_signer(), **seams)
+    assert ran.raised is None, ran.raised
+    return job_id, docker, ran, capsys.readouterr().err
+
+
+@pytest.mark.parametrize("kind", JOB_KINDS)
+def test_d4_a_job_container_that_exits_nonzero_without_the_server_ever_accepting_logs_the_runtime_remedy_and_keeps_its_ending(
+        scene, capsys, caplog, kind):
+    """Nonzero, no accept, not signalled, for every job kind: the helper's stderr AND its log name the likely cause
+    (`runsc-job`, the #1469 note); the job's own ending and exit status stand. (#1469 D4)"""
+    from defender.records.job_lane import JobLane
+    from defender.tests.support.tenancy._host1214 import counting_calls
+
+    # Every record a job's ending can be lives in the job lane, written only through its `write_*` methods; counting
+    # them all (by code, whatever route reaches them) proves "writes no ending" for every kind without naming where
+    # each kind's ending lives.
+    writers = {name: fn for name, fn in vars(JobLane).items() if name.startswith("write_") and callable(fn)}
+    assert writers, "the job lane names no writers: the count below would prove nothing"
+    with caplog.at_level(logging.DEBUG), counting_calls(**writers) as calls:
+        _job_id, _docker, ran, err = _d4(scene, lambda c: 7, capsys, kind=kind)
+    for where, text in (("stderr", err), ("log", caplog.text)):
+        assert _D4_CAUSE in text, (where, text)
+        assert "runsc-job" in text, (where, text)
+        assert "#1469" in text, (where, text)
+    assert ran.rc == 7, "the helper changed the job's own exit status"
+    written = {name: n for name, n in calls.counts.items() if n}
+    assert not written, f"the helper wrote a job-lane record of its own: {written}"
+
+
+def test_d4_nothing_is_logged_when_the_job_connected_even_if_it_then_failed(scene, capsys):
+    """The server accepted a connection: the socket was reachable, so no runtime remedy. (#1469 D4)"""
+    def job(c) -> int:
+        c.request("launch")
+        return 3
+
+    _inv, _docker, ran, err = _d4(scene, job, capsys)
+    assert ran.rc == 3, ran.rc
+    assert _D4_CAUSE not in err, err
+
+
+def test_d4_nothing_is_logged_for_a_container_docker_never_ran(scene, capsys):
+    """Exit statuses 125-127 are docker's own did-not-run: the runtime is not the cause. (#1469 D4)"""
+    for rc in (125, 126, 127):
+        docker = ContainerStandIn(run_fault=(rc, "docker: could not run\n"))
+        _inv, _docker, _ran, err = _d4(scene, None, capsys, docker=docker)
+        assert _D4_CAUSE not in err, (rc, err)
+
+
+def test_d4_nothing_is_logged_when_the_helper_was_told_to_stop(scene, capsys):
+    """A signalled helper stops its container: the container's nonzero ending is the stop's, not the runtime's. (#1469 D4)"""
+    def job(c) -> int:
+        os.kill(os.getpid(), signal.SIGTERM)
+        assert c.stopping.wait(15), "the helper never stopped the container"
+        return 143
+
+    _inv, docker, _ran, err = _d4(scene, job, capsys)
+    assert docker.job_error is None, docker.job_error
+    assert _D4_CAUSE not in err, err
 
 
 def test_a3_an_investigations_helper_waits_for_a_busy_tenant_lock_and_then_runs(scene):

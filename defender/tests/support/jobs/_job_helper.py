@@ -22,6 +22,8 @@ peer check; `Container.client` runs code in the container, `Container.foreign` o
 real process over a `docker` executable on PATH (a real SIGKILL, a real EOF on stdin)."""
 from __future__ import annotations
 
+from defender.tests.support.sandbox import _box_check1469 as _check1469
+
 import contextlib
 import ctypes
 import hashlib
@@ -362,7 +364,7 @@ class ContainerStandIn(RecordingDocker):
     def __init__(self, job: Callable[[Container], int] | None = None, *,
                  run_fault: tuple[int, str] | None = None, exec_writer: list[str] | None = None,
                  init: bool = False, queue: Path | None = None, stubborn: bool = False,
-                 runtimes: tuple[str, ...] | None = None) -> None:
+                 runtimes: tuple[str, ...] | Mapping[str, Mapping[str, Any]] | None = None) -> None:
         super().__init__(runtimes=runtimes)
         self.job = job
         self.stubborn = stubborn
@@ -429,6 +431,8 @@ class ContainerStandIn(RecordingDocker):
         argv = list(argv)
         self.log.append(argv)
         sub = argv[1] if len(argv) > 1 else ""
+        if sub == "run" and _check1469.is_check_run(argv):  # #1469: a check container is no box and no job container
+            return super().__call__(argv, **kw)  # the base records it
         pids = self._process_question(argv, sub)
         if pids is not None:
             return pids

@@ -799,6 +799,17 @@ def test_every_oracle_box_entry_requires_its_tenant(entry):
     assert param.default is inspect.Parameter.empty, f"{entry} defaults its tenant to {param.default!r}"
 
 
+@pytest.mark.parametrize("entry", ["oracle_box_request", "start_oracle_box", "start_process_oracle_box",
+                                   "estate start_box", "start_process_box", "oracle_serving"])
+def test_every_oracle_box_entry_requires_its_data_root(entry):
+    """No oracle box function defaults its data root, as none defaults its tenant: a caller that forgets it fails at once,
+    and the check always has a folder to run in (#1469 D1)."""
+    import inspect
+
+    param = inspect.signature(_oracle_box_entries()[entry]).parameters["data_root"]
+    assert param.default is inspect.Parameter.empty, f"{entry} defaults its data root to {param.default!r}"
+
+
 def test_the_oracle_serving_requires_its_tenant():
     """The launcher's oracle serving takes no default tenant, so a call that names none is a `TypeError` (r10 B1,
     `learning/branch/preflight.py:120`)."""

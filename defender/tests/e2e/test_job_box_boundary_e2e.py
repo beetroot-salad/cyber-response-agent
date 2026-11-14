@@ -87,10 +87,28 @@ finally:
 '''
 
 
+class _Recorded:
+    """The real docker, recording each argv it is asked (the attached `docker run` of the job container included)."""
+
+    def __init__(self) -> None:
+        self.calls: list[list[str]] = []
+
+    def __call__(self, argv, **kw):  # noqa: ANN001 — DockerFn
+        from defender.box import run_docker
+
+        self.calls.append(list(argv))
+        return run_docker(argv, **kw)
+
+    def popen(self, argv, **kw):  # noqa: ANN001, ANN201 — the seam's own
+        from defender.box import run_docker
+
+        self.calls.append(list(argv))
+        return run_docker.popen(argv, **kw)
+
+
 @pytest.fixture
 def probed(tmp_path, monkeypatch, migrated_database):  # noqa: F811
     """One real job container of the scene's tenant, run with the probe; what it saw."""
-    from defender.box import run_docker
     from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 
     with helper_scene(tmp_path, monkeypatch, migrated_database) as scene:
@@ -108,10 +126,13 @@ def probed(tmp_path, monkeypatch, migrated_database):  # noqa: F811
         monkeypatch.setenv("DEFENDER_DEPLOYMENT", "dev")
         command = ["python3", "-c", PROBE, str(out),
                    str(scene.root / OTHER_TENANT / "canary"), str(own), str(viz), inv, *map(str, scene.secrets)]
-        ran = drive_helper(scene, scene.argv("investigation", inv), docker=run_docker, signer=A.MarkedSigner(),
+        docker = _Recorded()
+        ran = drive_helper(scene, scene.argv("investigation", inv), docker=docker, signer=A.MarkedSigner(),
                            command=command)
         assert ran.raised is None, ran.raised
         seen = json.loads(out.read_text(encoding="utf-8"))
+        # What the helper asked docker (#1469 S2: the job container's runtime), beside what the probe saw.
+        seen["host_docker_calls"] = docker.calls
         assert "error" not in seen, f"the probe crashed inside the container: {seen['error']}"
         yield scene, seen, viz
 
@@ -130,6 +151,17 @@ def test_o2_from_inside_docker_is_unreachable_and_a_shell_box_still_runs(probed)
     assert seen["docker_sock"] is False
     assert seen["docker_ps"] != 0
     assert seen["shell"] == ["ok", "box-ok\n"], f"control: a shell box command through the socket ran: {seen['shell']}"
+
+
+def test_s2_under_runsc_boxes_the_job_container_runs_on_runsc_job_and_reaches_its_socket(probed):
+    """The job container starts under `runsc-job` when boxes run under `runsc`, and its shell box through the socket
+    runs (o2's control). (#1469 S2)"""
+    _scene, seen, _viz = probed
+    if _RUNTIME != "runsc":
+        pytest.skip("boxes here run under runc: the job runs under runc too (the hermetic S2 test)")
+    (run,) = [c for c in seen["host_docker_calls"] if c[:2] == ["docker", "run"] and "--init" in c]
+    assert run[run.index("--runtime") + 1] == "runsc-job", run
+    assert seen["shell"] == ["ok", "box-ok\n"], seen["shell"]
 
 
 def test_o3_from_inside_no_database_login_is_held_and_a_connect_fails(probed):

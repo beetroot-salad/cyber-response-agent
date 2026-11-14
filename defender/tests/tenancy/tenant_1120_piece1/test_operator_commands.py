@@ -8,6 +8,7 @@ from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.runtime.state._1255_view import MODEL_AGENT
 
 import functools
+import json
 import re
 import shutil
 from pathlib import Path
@@ -18,6 +19,8 @@ import pytest
 from defender.tests.support.shared.contracts._frontend_outputs import frontend_outputs_lock  # noqa: F401 — shared pytest fixture
 from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — shared pytest fixture
 from defender.tests.support.tenancy._active1214 import database_env, insert_active_tenant
+from defender.tests.e2e._box665 import RecordingDocker
+from defender.tests.support.sandbox import _box_check1469 as K
 
 from defender import run as run_py
 from defender.cli.learning import branch as branch_entry
@@ -430,3 +433,58 @@ def test_1484_an_operator_run_whose_box_start_is_refused_exits_1_in_one_line_and
     assert "Traceback" not in err, err
     [line] = [ln for ln in err.splitlines() if "no runtime 'runsc' registered: install gVisor" in ln]
     assert "the run's box did not start" in line, line
+
+
+@pytest.mark.parametrize("plan", [K.CheckPlan(box=K.LEAKS), K.CheckPlan(box=K.NO_MARKER)], ids=["failed", "inconclusive"])
+def test_1469_an_operator_run_whose_box_check_does_not_pass_leaves_the_did_not_run_marker_and_exits_1(
+        data_root: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+        plan: K.CheckPlan) -> None:
+    """#1469: the REAL box start of `run.py <alert>` over a daemon whose check fails or cannot run: no box is created, the
+    run's scrub verdict says it did not run, the fault leaves the lifecycle as `BoxStartFault` with the check's refusal as
+    its cause, the run exits 1 in one ERROR line with no CRITICAL record, and nothing is investigated. (S3, D1, D3)"""
+    monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
+    monkeypatch.delenv(box_mod.BoxSpec.ENV_VAR, raising=False)
+    H.cloned_tenant(tmp_path, data_root)
+    docker = RecordingDocker(runtimes={"runc": {"path": "runc"}, "runsc": {"path": "/usr/bin/runsc"}},
+                             daemon_id="daemon-1", check=plan)
+    investigated: list[dict] = []
+    seen: list[box_mod.BoxStartFault] = []
+
+    def investigate(**kw: Any) -> dict[str, Any]:
+        investigated.append(kw)
+        return {"output": "", "requests": 0, "truncated_by": None}
+
+    drive = functools.partial(
+        run_py._run_investigation_lifecycle,
+        investigate=investigate,
+        start_box=functools.partial(box_mod.start_box, docker=docker),
+        stop_box=lambda *a, **k: None, scrub=lambda tree, **kw: None)
+
+    def lifecycle(**kw: Any) -> dict[str, Any]:
+        try:
+            return drive(**kw)
+        except box_mod.BoxStartFault as fault:
+            seen.append(fault)
+            raise
+
+    rec = H.RunRecorder(tmp_path / "run")
+    from defender.tests.support.tenancy._launch_publish_p4 import with_publish
+
+    argv = [str(H.plant_alert(tmp_path / "in")), "--tenant", H.TID, "--no-learn"]
+    capsys.readouterr()
+    assert run_py.main(argv, **with_publish({**rec.seams(), "lifecycle": lifecycle}, argv)) == 1
+    assert docker.checks.runs, "premise: the refusal is the check's, which ran"
+    for check in docker.checks.runs:
+        assert check.folder.resolve().is_relative_to((data_root / ".box-checks").resolve()), (check.folder, data_root)
+    assert docker.create_argv is None, "a box was created after a check that did not pass"
+    assert not investigated
+    (fault,) = seen
+    assert isinstance(fault.__cause__, box_mod.BoxFault), fault.__cause__
+    assert isinstance(fault.__cause__, box_mod.BoxCheckFailed) == (plan.box == K.LEAKS), fault.__cause__
+    marker = json.loads(box_mod.verdict_path(rec.run_dir_at).read_text(encoding="utf-8"))
+    assert marker["ran"] is False, marker
+    err = capsys.readouterr().err
+    assert " CRITICAL " not in err, err
+    assert "Traceback" not in err, err
+    [line] = [ln for ln in err.splitlines() if "the run's box did not start" in ln]
+    assert " ERROR " in line, line
