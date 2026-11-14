@@ -162,8 +162,8 @@ async def test_o3_o4_a_system_is_created_201_replaced_200_and_read_back_as_store
 
 
 async def test_o3_the_systems_list_serves_each_systems_enabled_flag_and_whether_it_holds_credentials(scripted):
-    """Two systems, `ticket` enabled with a credential set and `elastic` disabled with none: the list answers each row's
-    `enabled` and `has_credentials` as that system's own. (O3)"""
+    """Each listed row answers its own `enabled` and `has_credentials`: ticket enabled with a set, elastic disabled
+    without; after ticket's base moves, ticket is enabled with no set at the new generation. (O3, P3)"""
     assert (await scripted.put_system(TICKET, 0)).status_code == 201
     assert (await scripted.put_credentials(TICKET, 1, {"api_key": TOKEN})).status_code == 204
     other = await scripted.put_system(ELASTIC, 0, settings=ELASTIC_SETTINGS, access=ELASTIC_ACCESS, enabled=False)
@@ -173,6 +173,13 @@ async def test_o3_the_systems_list_serves_each_systems_enabled_flag_and_whether_
 
     assert {i["system_id"]: (i["enabled"], i["has_credentials"]) for i in listed} == {
         TICKET: (True, True), ELASTIC: (False, False)}
+
+    moved = await scripted.put_system(TICKET, 1, access=TICKET_ACCESS.replace(*BASE_MOVED))
+    assert moved.status_code == 200, moved.text
+    listed = (await scripted.list_systems()).json()["items"]
+
+    assert {i["system_id"]: (i["enabled"], i["has_credentials"]) for i in listed} == {
+        TICKET: (True, False), ELASTIC: (False, False)}, "a new base raises the generation: no set at it yet"
 
 
 async def test_o3_a_current_record_whose_adapter_the_catalog_lacks_reads_with_no_display_name_and_can_be_deleted(scripted):
