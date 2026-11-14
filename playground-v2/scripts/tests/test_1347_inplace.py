@@ -17,7 +17,7 @@ import pytest
 from _lab_fakes import (ALERTS, AUTH, DATA_DROP, DEDUP, DEDUP_IN_SPAN, DEDUP_OLD, FLEET_FINAL, NGINX, REPO, SCHEMA_DRIFT,
                         SNAP, SNAP_UUID, STREAMS, SYSLOG, SYSLOG_IN_SPAN, WORLD_SETTINGS, FakeCluster, FakeGap, Journal,
                         LabRig, expected_copy, run_processors, world_content)
-from _lab_fakes import ALERTS_PATTERN
+from _lab_fakes import ALERTS_PATTERN, WRITE_BLOCK
 from test_1347_make_case import _drift_profiles, _overlay
 
 RENAME = {"rename": {"field": "source.port", "target_field": "source.port_no", "ignore_missing": True}}
@@ -253,10 +253,14 @@ def test_a_data_drop_deletes_exactly_the_in_span_events_the_processor_drops_and_
 @pytest.mark.parametrize("entry, kind", [(e, k) for e in ("launch", "make-a-case") for k in ("drop", "drift")])
 def test_each_indexs_pipeline_settings_are_exactly_what_the_snapshot_had_after_the_overlays(tmp_path, entry, kind):
     """A set value is back as it was (a default pipeline that was set is set again, a `_none` stays `_none`), an
-    unset one is unset (an index with neither set is not left with `_none`)."""
+    unset one is unset (an index with neither set is not left with `_none`). The one setting added is the
+    write block, on exactly the touched indices (what the content digest covers, read once per copy)."""
     rig, held = _ready(entry, kind, tmp_path)
     try:
+        touched = set(rig.marker()["touched"])
         settings = {n: ix["settings"] for n, ix in rig.cluster.indices.items()}
+        assert {n for n, held_ in settings.items() if held_.get(WRITE_BLOCK) is True} == touched, settings
+        settings = {n: {k: v for k, v in held_.items() if k != WRITE_BLOCK} for n, held_ in settings.items()}
         assert settings == {n: WORLD_SETTINGS.get(n, {}) for n in world_content()}, settings
     finally:
         if held is not None:

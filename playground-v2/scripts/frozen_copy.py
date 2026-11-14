@@ -4,7 +4,7 @@ A variant is a freeze plus the overlay's Elasticsearch part. Readying it means: 
 marker already says the copy is this variant, discard the node and its data and start a fresh one
 (D25), register the snapshot repository read-only and check the snapshot's UUID, restore the whole
 snapshot and apply the base overlay (delete everything stamped after T) and then each fault
-overlay; record a clean marker. The marker (`{variant, dirty, tallies, touched}`, on the engine's state
+overlay; record a clean marker. The marker (`{variant, dirty, tallies, touched[, verified]}`, on the engine's state
 volume, outside the node's data) is written dirty before the node is discarded and clean after the
 last change, so a crash leaves a copy nobody trusts; a dirty or unknown marker means a fresh node.
 
@@ -523,6 +523,8 @@ class Copy:
     tallies: dict[str, int]
     touched: list[str]          # the indices the overlays changed: what the content digest covers
     restored: bool              # False: a clean marker for this variant was trusted
+    #: `{content, stubs}` a full read recorded on this copy (reused copies only): see `content_of`
+    verified: dict | None = None
 
 
 def _is_clean(marker: Any, vid: str) -> bool:
@@ -619,6 +621,7 @@ def ready(es: Any, *, ops: Any, clock: Any, freeze: dict, freeze_id: str, overla
         tallies = {n: int(t) for n, t in marker["tallies"].items()}   # type: ignore[index]
         touched = [str(n) for n in marker["touched"]]                  # type: ignore[index]
         restored = False
+        verified = marker.get("verified") if isinstance(marker.get("verified"), dict) else None  # type: ignore[union-attr]
     else:
         if up:
             # A2 under D25: the snapshot must be the freeze's before the copy there is discarded.
@@ -629,6 +632,59 @@ def ready(es: Any, *, ops: Any, clock: Any, freeze: dict, freeze_id: str, overla
         register_repository(es, freeze, location)
         tallies, touched = _build(es, clock, freeze, overlay)
         ops.write_marker({"variant": vid, "dirty": False, "tallies": tallies, "touched": touched})
-        restored = True
+        restored, verified = True, None
     counts = {n: int(c) - tallies.get(n, 0) for n, c in freeze["elastic"]["indices"].items()}
-    return Copy(counts=counts, tallies=tallies, touched=touched, restored=restored)
+    return Copy(counts=counts, tallies=tallies, touched=touched, restored=restored, verified=verified)
+
+
+# -- the content digest, read once per copy --------------------------------------------------------
+#
+# Reading the content digest walks every document of the touched indices: for a live freeze, tens of
+# millions, about half an hour. A copy is only ever read after it is built (the agent's user holds
+# `read` only), so the digest is read in full once per copy and recorded on the marker with the
+# stubs' half of it; the touched indices are write-blocked first (under a dirty marker: a change, A4), so what was
+# read is what stays.
+# A later launch trusts the record only while every touched index still carries the block and the
+# stubs, reloaded each launch, still fingerprint the same. An edit to a touched index has to lift
+# the block first, so it sends the next launch back to a full read. A rebuild or a dirty marker
+# writes a marker without the record.
+
+WRITE_BLOCK = "index.blocks.write"
+_NAMES_PER_REQUEST = 40      # index names in one settings request path
+
+
+def _chunks(names: list[str]) -> Iterator[list[str]]:
+    for start in range(0, len(names), _NAMES_PER_REQUEST):
+        yield names[start:start + _NAMES_PER_REQUEST]
+
+
+def block_writes(es: Any, names: list[str]) -> None:
+    """Refuse every document write to the named indices (settings stay changeable)."""
+    for chunk in _chunks(sorted(set(names))):
+        es.es_request("PUT", f"/{','.join(chunk)}/_settings?expand_wildcards=all", {WRITE_BLOCK: True})
+
+
+def writes_blocked(es: Any, names: list[str]) -> bool:
+    """Every named index carries the write block."""
+    for chunk in _chunks(sorted(set(names))):
+        held = es.es_request("GET", f"/{','.join(chunk)}/_settings/{WRITE_BLOCK}"
+                                    "?flat_settings=true&expand_wildcards=all") or {}
+        if any(str((held.get(n) or {}).get("settings", {}).get(WRITE_BLOCK)).lower() != "true" for n in chunk):
+            return False
+    return True
+
+
+def content_of(es: Any, ops: Any, copy: Copy, *, freeze_id: str, overlay: dict | None) -> tuple[str, bool]:
+    """The copy's content digest (the value `ops.content_digest` reads) and whether it was read in full
+    (False: the copy's record was trusted). The stubs must be loaded."""
+    stubs = ops.stub_fingerprint()
+    record = copy.verified or {}
+    if isinstance(record.get("content"), str) and record.get("stubs") == stubs and writes_blocked(es, copy.touched):
+        return record["content"], False
+    if not writes_blocked(es, copy.touched):
+        mark_dirty(ops, freeze_id, overlay)   # a change to the copy, made under a marker nobody trusts (A4)
+        block_writes(es, copy.touched)
+    content = ops.content_digest(copy.touched)
+    ops.write_marker({"variant": variant_id(freeze_id, overlay), "dirty": False, "tallies": copy.tallies,
+                      "touched": copy.touched, "verified": {"content": content, "stubs": stubs}})
+    return content, True

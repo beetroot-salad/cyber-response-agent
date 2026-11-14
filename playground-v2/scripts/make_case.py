@@ -125,7 +125,8 @@ def _record(*, freeze: dict, freeze_id: str, overlay: dict | None, alert: dict, 
     T = frozen_copy.utc(freeze["T"])
     return {"freeze": freeze_id, "alert": held_out.digest(alert),
             "age": int((T - frozen_copy.utc(frozen_copy.dug(alert, "@timestamp"))).total_seconds()),
-            "overlay": overlay, "counts": copy.counts, "content": ops.content_digest(copy.touched),
+            "overlay": overlay, "counts": copy.counts,
+            "content": frozen_copy.content_of(es, ops, copy, freeze_id=freeze_id, overlay=overlay)[0],
             "confirmed": None}
 
 

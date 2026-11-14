@@ -790,10 +790,19 @@ class LabOps:
         for name in names:
             docs = sorted(self._document_digests(es, name))
             digest.update(json.dumps([name, docs], separators=(",", ":")).encode())
-        digest.update(self._stubs_loaded.encode())
-        for stub, path in STUB_STATE.items():
-            digest.update(self._stub_text(stub, path).encode())
+        digest.update(self._stub_part())
         return digest.hexdigest()
+
+    def stub_fingerprint(self) -> str:
+        """sha256 of the stub half of `content_digest` alone: what the stubs were loaded with and what
+        each now holds. Cheap; a launch that trusts a recorded digest of the cluster checks this live."""
+        return hashlib.sha256(self._stub_part()).hexdigest()
+
+    def _stub_part(self) -> bytes:
+        if self._stubs_loaded is None:
+            raise LabOpsError("the stubs' state was asked before the stubs were loaded")
+        return self._stubs_loaded.encode() + b"".join(self._stub_text(stub, path).encode()
+                                                      for stub, path in STUB_STATE.items())
 
     @staticmethod
     def _document_digests(es: Any, name: str) -> list[str]:

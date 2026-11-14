@@ -195,7 +195,10 @@ def _serve_copy(es: Any, ops: Any, clock: Any, *, case: dict, freeze: dict, free
     uuid = alert_uuid_of(alert_file)
     alert = frozen_copy.find_alert(es, patterns, uuid)
     file_digest = held_out.digest(json.loads(alert_file.read_text()))
-    reasons = _stale(case, observed, ops.content_digest(copy.touched), alert, file_digest)
+    content, read = frozen_copy.content_of(es, ops, copy, freeze_id=freeze_id, overlay=overlay)
+    print(f"copy {'restored' if copy.restored else 'reused'}; content "
+          f"{'read in full' if read else 'trusted from its record (writes blocked)'}", file=sys.stderr)
+    reasons = _stale(case, observed, content, alert, file_digest)
     if reasons:
         frozen_copy.mark_dirty(ops, freeze_id, overlay)
     return reasons
