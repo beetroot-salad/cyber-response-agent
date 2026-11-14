@@ -256,14 +256,16 @@ class _RecordsDown:
 
 
 class _NotActive(_RecordsDown):
-    """The tenant's directory, its records read as a tenant that moved to `offboarding` after admission: the read's own
-    refusal (#1470 O8, `refuse_unless_active`)."""
+    """The tenant's directory, its records read as a tenant that moved to `offboarding` after admission: the read's
+    refusal, `TenantRefused` (#1470 O8)."""
+
+    REFUSAL = "the tenant is offboarding, not active: its system records are not known"
 
     def current_records(self, tenant_id):
-        from defender.tenancy.repository import refuse_unless_active
+        from defender.records.formats import TenantRefused
 
         self.reads += 1
-        refuse_unless_active(tenant_id, "offboarding")
+        raise TenantRefused(self.REFUSAL)
 
 
 @pytest.mark.postgres
@@ -293,7 +295,7 @@ def test_lead_author_drain_refuses_a_tick_for_a_tenant_that_is_not_active_and_ch
 
     assert _lead_tick(w, directory=moved) == 2
     assert moved.reads == 1, "premise: the tick read the tenant's records"
-    assert "not active" in critical_text(caplog)
+    assert _NotActive.REFUSAL in critical_text(caplog)
 
     item = _items(w)[("curation_request", run_dir.name)]
     assert (item.status, item.attempts) == ("waiting", 0), (item.status, item.attempts)

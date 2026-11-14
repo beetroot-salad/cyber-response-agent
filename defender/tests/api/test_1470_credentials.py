@@ -437,13 +437,18 @@ async def test_o7_o9_every_outcome_of_the_secret_stores_write_is_answered_and_an
     systems = _scheme_systems()
     for system, settings, access, _ in systems.values():
         assert (await scripted.put_system(system, 0, settings=settings, access=access)).status_code == 201
+    import random
+
     statuses = {"stored": 204, "not stored": 503, "possibly stored": 503, "refused login": 500}
     wrong: list[tuple[object, ...]] = []
-    cases = [(row, announcing) for row in _write_outcomes() for announcing in ("works", "fails")]
+    rng = random.Random(1470)
+    # Success and each httpx class meet every scheme; each status row meets a scheme drawn at random (seeded).
+    cases = [(row, announcing, scheme) for row in _write_outcomes() for announcing in ("works", "fails")
+             for scheme in (sorted(systems) if not isinstance(row[1], tuple) else [rng.choice(sorted(systems))])]
     assert len(cases) > 800, "premise: the table is walked"  # noqa: PLR2004
+    inspected: set[tuple[str, str, str]] = set()
     async with scripted.lenient() as client:
-        for n, ((label, answer, outcome), announcing) in enumerate(cases):
-            scheme = sorted(systems)[n % len(systems)]
+        for n, ((label, answer, outcome), announcing, scheme) in enumerate(cases):
             system, _, _, fields = systems[scheme]
             sent, kept, case = _a_set(fields, n), scripted.stored_set(system, 1), (label, announcing, scheme)
             failing = _AnnouncementFails("system.credentials") if announcing == "fails" else None
@@ -458,6 +463,8 @@ async def test_o7_o9_every_outcome_of_the_secret_stores_write_is_answered_and_an
                 found.append(f"said {said[:160]}")
             if status == 503 and (outcome == "not stored") != ("not stored" in said):  # noqa: PLR2004
                 found.append(f"said {said[:160]}")
+            if announced:
+                inspected.add((scheme, outcome, announcing))
             if failing is not None:
                 found += [] if failing.refused == int(announced) else [f"{failing.refused} announcements"]
             elif announced:
@@ -468,6 +475,8 @@ async def test_o7_o9_every_outcome_of_the_secret_stores_write_is_answered_and_an
             if scripted.stored_set(system, 1) != ({"kind": _kind(scheme), "fields": sent} if outcome == "stored" else kept):
                 found.append("stored set")
             wrong += [(case, f) for f in found]
+    assert {(s, o, a) for s in systems for o in ("stored", "possibly stored") for a in ("works", "fails")} <= inspected, \
+        "premise: every scheme's stored and possibly-stored events were inspected and failed to be announced"
     assert wrong == [], wrong[:8]
 
 
@@ -572,7 +581,7 @@ async def test_o7_o9_any_refusal_of_the_re_read_is_409_stored_for_an_unused_gene
     from defender.tests.support.shared._postgres1339 import execute
 
     caplog.set_level(logging.DEBUG)
-    scheme = sorted(_scheme_systems())[_REREAD_CASES.index((change, announcing)) % len(_scheme_systems())]
+    scheme = sorted(_scheme_systems())[list(_REREADS).index(change) % len(_scheme_systems())]
     system, settings, access, fields = _scheme_systems()[scheme]
     assert (await scripted.put_system(system, 0, settings=settings, access=access)).status_code == 201
     sent, seen = _a_set(fields, 1), []

@@ -1,7 +1,7 @@
 """#1366 x #1170: a job's host helper reads the tenant's records once and hands them to its job container.
 
 The container reads no database (#1170 O3), so the helper does every step that reads records: it refuses a tenant that
-is not active (#1470 O8, which retired R8's "not imported") before the container exists, writes the run's record of versions (O6) beside the run folder, and
+is not active (R8's "not imported" is retired by #1470 D-F) before the container exists, writes the run's record of versions (O6) beside the run folder, and
 hands the records it read in the launch facts. The container builds its tenant from those records and judges its
 systems itself, since that judgement runs adapter code (#1170 O5, N7)."""
 from __future__ import annotations
@@ -105,8 +105,9 @@ def test_1366_the_helper_hands_its_container_the_records_it_read_and_writes_the_
 @pytest.mark.postgres
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="the helper is Linux only")
 def test_1366_a_tenant_that_is_not_active_is_refused_by_the_helper_and_no_container_starts(scene, capfd):
-    """#1470 O8 at the helper (R8's "not imported" is retired): a tenant moved to offboarding after its job was queued is
-    `setup: refused` with the records read's refusal, and no container is started."""
+    """At the helper (R8's "not imported" is retired, #1470 D-F): a tenant moved to offboarding after its job was queued
+    is `setup: refused` as not active, and no container is started. The helper's tenant check refuses it before the
+    records are read, so this does not reach O8's records-read refusal."""
     from defender.records.job_facts import BOX_NOT_STARTED, SETUP_REFUSED
     from defender.records.job_lane import JobEnd
     from defender.tests.support.jobs._jobs1342 import move_tenant
