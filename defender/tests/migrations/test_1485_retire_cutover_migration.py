@@ -76,11 +76,12 @@ def test_o5_the_upgrade_stops_naming_the_count_while_a_tenant_carries_learning_c
 
     with pytest.raises(RuntimeError) as stopped:
         upgrade(empty_database)
-    assert re.search(rf"\b{carriers}\b", str(stopped.value)), str(stopped.value)
-    assert re.search(r"(?i)earlier revision", str(stopped.value)), str(stopped.value)
     assert _version(empty_database) == [(before_retire,)]
     assert _constraints(empty_database) == constraints
     assert _rows(empty_database) == rows
+    assert re.search(rf"\b{carriers}\b", str(stopped.value)), str(stopped.value)
+    assert re.search(r"(?i)(earlier|before|older|previous)\s+(revision|release|version)", str(stopped.value)) or re.search(
+        r"(?i)\b(finish|resume)", str(stopped.value)), str(stopped.value)
 
 
 def test_o5_with_no_such_row_the_upgrade_restores_the_0013_constraints_and_refuses_the_value(empty_database):
@@ -131,12 +132,16 @@ def test_o1_at_head_both_partial_indexes_exist_with_the_designed_shapes(migrated
     assert any(columns != ["tenant_id", "created_at", "id"] for columns, _, _ in _partials(migrated_database, "batches"))
 
 
-def _declared_partials(table: str) -> list[tuple[list[str], str]]:
+def _declared_index_objects(table: str) -> list:
     from defender.migrations.models import target_metadata
 
     [declared] = [t for t in target_metadata.tables.values() if t.schema == "learning" and t.name == table]
+    return [index for index in declared.indexes if index.dialect_options["postgresql"]["where"] is not None]
+
+
+def _declared_partials(table: str) -> list[tuple[list[str], str]]:
     return [([str(e) for e in index.expressions], str(index.dialect_options["postgresql"]["where"]))
-            for index in declared.indexes if index.dialect_options["postgresql"]["where"] is not None]
+            for index in _declared_index_objects(table)]
 
 
 def test_o1_the_table_models_declare_both_indexes_and_autogenerate_exempts_none():
@@ -144,6 +149,10 @@ def test_o1_the_table_models_declare_both_indexes_and_autogenerate_exempts_none(
     from defender.migrations import include_object
 
     assert include_object(object(), "any_index", "index", False, None) is True
+    new = [i for table in ("work_items", "batches") for i in _declared_index_objects(table)
+           if [str(e).split(".")[-1].split()[0] for e in i.expressions] in (["tenant_id", "updated_at"], ["tenant_id", "created_at", "id"])]
+    assert len(new) == 2, "premise: both new partial indexes are declared"
+    assert [include_object(i, i.name, "index", False, None) for i in new] == [True, True]
     items = [w for cols, w in _declared_partials("work_items") if [c.split(".")[-1].split()[0] for c in cols] == ["tenant_id", "updated_at"]]
     assert [sorted(re.findall(r"'(\w+)'", w)) for w in items] == [["dead", "held"]]
     batches = [w for cols, w in _declared_partials("batches") if [c.split(".")[-1].split()[0] for c in cols] == ["tenant_id", "created_at", "id"]]

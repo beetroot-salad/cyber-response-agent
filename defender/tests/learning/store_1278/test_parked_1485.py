@@ -7,7 +7,7 @@ import dataclasses
 
 import pytest
 
-from defender.jobs.learning_models import AUTHORING_KINDS
+from defender.jobs.learning_models import AUTHORING_KINDS, STATUSES
 from defender.tests.support.jobs._jobs1342 import register_tenant
 from defender.tests.support.learning.core._set_aside1485 import held_by_close, page_parked, parked_set
 from defender.tests.support.learning.core._store1278 import ONE, claim, learning_store, publish, store_mod
@@ -158,12 +158,12 @@ async def test_o2_every_page_size_returns_the_same_batches_in_the_same_order(dsn
         whole = await store.parked(BLUE, limit=50)
         assert len(await store.parked(BLUE, limit=2)) == 2
         got = await page_parked(store, BLUE, limit=limit)
-        newer_than_all = await store.parked(BLUE, after=(whole[0].created_at.replace(year=9000), whole[0].id), limit=50)
-        last = await store.parked(BLUE, after=(whole[-1].created_at, whole[-1].id), limit=50)
+        resumed = [await store.parked(BLUE, after=(b.created_at, b.id), limit=50) for b in whole]
     assert got == whole
     assert len(whole) == 4
-    assert newer_than_all == whole
-    assert last == []
+    assert [(b.created_at, str(b.id)) for b in whole] == sorted(((b.created_at, str(b.id)) for b in whole), reverse=True)
+    assert resumed == [whole[n + 1:] for n in range(len(whole))], "`after` each real position returns what sorts after it"
+    assert resumed[-1] == []
 
 
 async def test_o2_a_tenant_reads_only_its_own_parked_batches(dsn):
@@ -177,3 +177,42 @@ async def test_o2_a_tenant_reads_only_its_own_parked_batches(dsn):
     assert {b.id for b in green} == set(theirs["ids"].values())
     assert not {key for b in blue for _k, key in b.items} & {"f1-g", "f2-g", "q1-g", "p-g"}
     assert {key for b in green for _k, key in b.items} == {"f1-g", "f2-g", "q1-g", "p-g"}
+
+
+#: In the batch: `z` and `a` cross their kinds' order (a questioner finding `a` sorts before a finding `z`).
+_IN_BATCH = [("finding", "z"), ("finding", "é"), ("finding", "A"), ("questioner_finding", "a"), ("questioner_finding", "B")]
+_SET_ASIDE = {"held": ("finding", "h"), "dead": ("finding", "d"), "published": ("finding", "p"), "skipped": ("finding", "s"),
+              "waiting": ("questioner_finding", "w")}
+
+
+async def _batch_of_every_status(store, tenant):
+    """One author batch parked while its items stand at every status that can keep its id (in_batch, held, dead,
+    published, skipped) and one given back to waiting (which clears the id), by one review's outcomes, the rest still in the batch. Returns the batch id."""
+    S = store_mod()
+    for kind in ("finding", "questioner_finding"):
+        await publish(store, tenant, *(k for kd, k in [*_IN_BATCH, *_SET_ASIDE.values()] if kd == kind), kind=kind)
+    batch = await claim(store, tenant)
+    taken = sorted((kind, key) for kind, key, _p in batch.items)
+    assert taken == sorted([*_IN_BATCH, *_SET_ASIDE.values()]), "premise: the claim took every item"
+    await store.in_review(batch, 7, {
+        _SET_ASIDE["held"]: S.Outcome.held("a person must look"), _SET_ASIDE["dead"]: S.Outcome.dead("retired"),
+        _SET_ASIDE["published"]: S.Outcome.published(), _SET_ASIDE["skipped"]: S.Outcome.skipped("not a lesson"),
+        _SET_ASIDE["waiting"]: S.Outcome.waiting()})
+    await store.needs_person(tenant, batch.batch_id, "by hand")
+    return batch.batch_id
+
+
+async def test_o2_a_parked_batch_lists_only_its_in_batch_items_whatever_other_statuses_carry_its_id_and_whoever_else_has_the_keys(dsn):
+    """Items of the batch at every status that carries its id and another tenant's items under the same keys: only this tenant's `in_batch`
+    items are listed, kind then key in Python's codepoint order. (O2, P3)"""
+    async with learning_store(dsn) as store:
+        mine = await _batch_of_every_status(store, BLUE)
+        theirs = await _batch_of_every_status(store, GREEN)
+        work = await store.work(BLUE)
+        [got] = await store.parked(BLUE, limit=50)
+        [other] = await store.parked(GREEN, limit=50)
+    carried = {i.status for i in work if i.batch_id == mine}
+    assert carried == set(STATUSES) - {"waiting"}, f"premise: the id stays on items at every status but waiting, not {sorted(carried)}"
+    assert {i.status for i in work if (i.kind, i.key) == _SET_ASIDE["waiting"]} == {"waiting"}, "control: the given-back item waits"
+    assert (got.id, other.id) == (mine, theirs)
+    assert got.items == tuple(sorted(_IN_BATCH)) == other.items

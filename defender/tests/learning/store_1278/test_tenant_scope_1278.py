@@ -204,7 +204,9 @@ async def _parked(c):
     assert c.seen(await c.store.parked(BLUE, limit=50)) == [], "control: BLUE has nothing parked yet"
     await c.control(c.store.needs_person(BLUE, str(own.batch_id), "by hand"))
     [mine] = c.seen(await c.store.parked(BLUE, limit=50))
-    assert (str(mine.id), mine.items) == (str(own.batch_id), (("finding", "a2"),)), "BLUE's own, with only BLUE's items"
+    claimed = tuple(sorted((kind, key) for kind, key, _pending in own.items))  # the claim's threshold may take BLUE's other waiting items
+    assert ("finding", "a2") in claimed, "premise: the claim took a2"
+    assert (str(mine.id), mine.items) == (str(own.batch_id), claimed), "BLUE's own, with only BLUE's items"
     assert [(b.reason) for b in c.seen(await c.store.parked(BLUE, limit=50))] == ["by hand"]
 
 

@@ -9,8 +9,8 @@ import re
 from collections.abc import Iterator
 from pathlib import Path
 
-
 from defender.jobs import learning_models
+from defender.tests.support.learning.core._store1278 import store_mod
 from defender.tests.tooling.layout_contracts import _spec1080 as S
 
 MODELS = "defender.jobs.learning_models"
@@ -136,3 +136,28 @@ def test_p1_the_import_census_finds_each_spelling_of_the_old_store(tmp_path):
     found = sorted(line.split(":")[0] for line in _imports_of_old_store(root))
     assert found == ["defender/x/a.py", "defender/x/b.py", "defender/x/c.py", "defender/x/d.py"]
 
+
+
+def test_p1_the_stores_public_names_are_exported_and_the_lanes_table_is_not_the_stores():
+    """`ParkedBatchView`, `pitfall_key`, the lease and grace defaults and `MAX_ITEM_KEY_BYTES` come from
+    `defender.learning_store`; `CommitRecord` has no `lanes` field and `lanes_of_branch` is not the store's. (P1, Names)"""
+    import dataclasses
+
+    S = store_mod()
+    exported = ["ParkedBatchView", "pitfall_key", "DEFAULT_LEASE_SECONDS", "DEFAULT_GRACE_SECONDS", "MAX_ITEM_KEY_BYTES"]
+    assert [n for n in exported if not hasattr(S, n)] == []
+    assert S.MAX_ITEM_KEY_BYTES == 200
+    assert "lanes" not in {f.name for f in dataclasses.fields(S.CommitRecord)}
+    assert not hasattr(S, "lanes_of_branch")
+
+
+def test_p1_the_queue_merge_and_the_pitfalls_curator_use_the_stores_one_mistake_key():
+    """`persist.pitfall_key` is the store's own object, and the curator reaches it through the `persist` module it
+    already imports, so the queue's merge and the store's distinct-mistake count keep one definition. (P1)"""
+    from defender.learning.core import persist
+    from defender.learning.leads import pitfalls_curator
+
+    pitfall_key = store_mod().pitfall_key
+    assert persist.pitfall_key is pitfall_key
+    assert pitfalls_curator._loop_persist is persist
+    assert pitfalls_curator._loop_persist.pitfall_key is pitfall_key

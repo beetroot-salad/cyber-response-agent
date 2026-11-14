@@ -150,20 +150,39 @@ async def test_o1_keys_ab_and_a_dash_c_page_in_codepoint_order_without_a_skip_or
 
 
 async def test_o1_after_is_strictly_after_the_whole_position_not_its_time(dsn):
-    """`after` skips the position it names and everything newer or tied-and-greater, and nothing else: a smaller key
-    of the same instant stays, an older item stays. (O1)"""
+    """`after` an item's own position skips it and everything newer or tied-and-greater, and nothing else: a smaller
+    key of the same instant stays, an older item stays. (O1)"""
     async with learning_store(dsn) as store:
         await _world(store, BLUE)
         got = await store.set_aside(BLUE, limit=50)
-        tied = got[0].updated_at
-        everything_after_the_ties = await store.set_aside(BLUE, after=(tied, "finding", ""), limit=50)
-        middle = await store.set_aside(BLUE, after=(tied, "finding", "h2"), limit=50)
+        assert len({i.updated_at for i in got[:3]}) == 1, "control: the first three are tied"
+        after_the_ties = await store.set_aside(BLUE, after=(got[2].updated_at, got[2].kind, got[2].key), limit=50)
+        middle = await store.set_aside(BLUE, after=(got[1].updated_at, got[1].kind, got[1].key), limit=50)
         the_last = await store.set_aside(BLUE, after=(got[-1].updated_at, got[-1].kind, got[-1].key), limit=50)
-        newer_than_all = await store.set_aside(BLUE, after=(got[0].updated_at.replace(year=9000), "", ""), limit=50)
-    assert [(i.kind, i.key) for i in everything_after_the_ties] == WORLD_ORDER[3:]
-    assert [(i.kind, i.key) for i in middle] == [("finding", "h1"), *WORLD_ORDER[3:]]
+    assert [(i.kind, i.key) for i in after_the_ties] == WORLD_ORDER[3:]
+    assert [(i.kind, i.key) for i in middle] == WORLD_ORDER[2:]
     assert the_last == []
-    assert [(i.kind, i.key) for i in newer_than_all] == WORLD_ORDER
+
+
+async def test_o1_items_of_several_kinds_in_one_transaction_order_by_kind_then_key_and_resume_from_every_position(dsn):
+    """Findings and questioner findings held by one close share one `updated_at`, with keys whose codepoint order
+    crosses their kind order; the list is Python's descending sort of (updated_at, kind, key), and `after` each real
+    item's position returns exactly the items sorted after it. (O1, Paging)"""
+    async with learning_store(dsn) as store:
+        await dead_without_pr(store, BLUE, "old")
+        await held_by_close(store, BLUE, [("finding", "z"), ("finding", "a"), ("finding", "é"), ("finding", "A-1"),
+                                          ("questioner_finding", "a"), ("questioner_finding", "z"), ("questioner_finding", "B")])
+        real = await store.set_aside(BLUE, limit=50)
+        positions = [(i.updated_at, i.kind, i.key) for i in real]
+        expected = sorted(positions, reverse=True)
+        assert len({p[0] for p in positions}) == 2, "control: the close's items tie, the dead one is older"
+        assert {p[1] for p in positions} == {"finding", "questioner_finding"}, "control: tied across kinds"
+        assert [p[2] for p in expected[:2]] == ["z", "a"], "control: keys cross kinds, questioner_finding z then a"
+        resumed = [[(i.updated_at, i.kind, i.key) for i in await store.set_aside(BLUE, after=p, limit=50)] for p in positions]
+        paged = [(i.updated_at, i.kind, i.key) for i in await page_through(store, BLUE, limit=2)]
+    assert positions == expected
+    assert paged == expected
+    assert resumed == [expected[n + 1:] for n in range(len(expected))]
 
 
 async def test_o1_a_tenant_reads_only_its_own_set_aside_items(dsn):
