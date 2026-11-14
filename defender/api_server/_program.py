@@ -252,7 +252,7 @@ async def serving(settings: Settings, *, transport: httpx.AsyncBaseTransport | N
                   steps: _Steps | None = None) -> AsyncIterator[Running]:
     """Start every step in order and yield the running app; leaving closes what was opened, in reverse. A start
     step that fails raises `StartRefused` with its message, after closing what the earlier steps opened. `steps`
-    lets the caller stop the start (`run` passes its own); without it nothing can. `transport` reaches Keycloak and
+    lets the caller stop the start (`run` passes its own); without it nothing can. `transport` reaches the sign-in provider and
     `openbao_transport` the secret store (None: the network; a test passes fakes)."""
     steps = steps if steps is not None else _Steps()  # lint-default: ok — a fresh _Steps per call: a shared default would carry one start's stop into the next
     async with AsyncExitStack() as stack:
