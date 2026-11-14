@@ -61,7 +61,7 @@ A scenario can declare its own mode (`cr_mode:` in `catalog.yaml`); an explicit 
 
 ## Legitimate-activity scenarios (#1497)
 
-The catalog's last ten scenarios are not attacks: legitimate work that trips a rule. Each is built around where the evidence that settles its alert lives: a record the lab tenant can read, a record nowhere the tenant can read, or no record at all because the rule's own logic made it fire. Ids name the activity, never a case class; a person labels every case.
+The catalog's last eleven scenarios are not attacks: legitimate work that trips a rule. Each is built around where the evidence that settles its alert lives: a record the lab tenant can read, a record nowhere the tenant can read, or no record at all because the rule's logic or the data it read is what made it fire. Ids name the activity, never a case class; a person labels every case.
 
 Posting happens via `docker exec change-mgmt python -c …` so the runner doesn't need an SSH tunnel and adds no new Python dependencies — it reuses the docker context it already uses for `exec`-based dispatch.
 

@@ -60,7 +60,8 @@ per-generation path `<tenant>/<system>/g<N>`. Once:
    copies no credential. Until then the tenant's runs are refused and `tenant check` reports it,
    each naming the import.
 3. Per system, at generation 1: `tenant.py set-credentials <tenant-id> <system> <file> --for-version 1
-   --token-file <operator token file>` (the file is JSON `{"kind": ..., "fields": {...}}`). The set
+   --token-file <operator token file>` (the file is JSON `{"kind": ..., "fields": {...}}`; pass
+   `--kv-mount <mount>` when the proxy's mount is not the default `kv`). The set
    at the old path `<tenant>/<system>` is never read again; until this is done the proxy refuses the
    system and `tenant check` reports it.
 4. Delete `settings/systems/` and `settings/case-record.yaml` from the tenant's repository:

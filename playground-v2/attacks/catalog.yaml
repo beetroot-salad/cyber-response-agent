@@ -544,3 +544,27 @@ scenarios:
             'sudo -n apt-get -s upgrade >/dev/null 2>&1; sudo -n systemctl reload postgresql >/dev/null 2>&1; sudo -n journalctl -u postgresql -n 20 >/dev/null 2>&1; true'
         repeat: 1
         allow_fail: true
+
+  # The data is what fires: an sshd attempt by an unknown user also writes a PAM
+  # "check pass; user unknown" line, which ingest records as event.outcome=success. Two
+  # mistyped usernames are enough for v2-sshd-success-after-failures, though nobody logged in.
+  - id: dev-username-typo-bastion
+    category: auth-metadata
+    description: >
+      A developer mistypes their username twice logging into the bastion, then gives up.
+      No login succeeds, but each unknown-user attempt is also recorded as a success, so
+      v2-sshd-success-after-failures fires on jump-box-1.
+    source_host: dev-ws-1
+    source_user: dev.hira
+    target_host: jump-box-1
+    default_intensity: 1
+    steps:
+      - cmd: |
+          for u in dev.hria hira; do
+            sshpass -p changeme ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+              -o PreferredAuthentications=password -o NumberOfPasswordPrompts=1 \
+              -o ConnectTimeout=5 "$u@${target}" true 2>/dev/null || true
+            sleep 3
+          done
+        repeat: 1
+        allow_fail: true
