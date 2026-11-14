@@ -11,7 +11,7 @@ from defender.tenancy import TenantRecord, TenantRepository
 from defender.identity import IdentityService
 # The store's refusals are the API's: one class each, so the store's raise is the API's answer
 # with no mapping between them (#1342).
-from defender.jobs.errors import Conflict, NotFound, UnknownReference  # noqa: F401 — re-exported: the API's refusals
+from defender.jobs.errors import Conflict, NotFound, OffboardNotSettled, UnknownReference  # noqa: F401 — re-exported: the API's refusals
 from defender.records.formats import AlertId, CredentialId, InvestigationId, LearningJobId, ProgramId, TenantId, UserId
 
 from .models import (
@@ -244,8 +244,9 @@ class ArtifactLinks(Protocol):
 class Offboarding(Protocol):
     """The one operation behind the administrator's offboard request (#1360 D6): the tenant moves to `offboarding` and
     every queued or running job of it ends, as one change. `NotFound` for an absent tenant, `Conflict` for one that
-    is not `creating` or `active` (tenancy's refusals; the routes answer both); a failure leaves tenant and jobs as
-    they were. Not `Writes`: that is a per-tenant transaction acting as a user."""
+    is not `creating` or `active` (tenancy's refusals; the routes answer both); `OffboardNotSettled` when jobs kept
+    appearing behind it (rolled back, the request can be repeated; the route answers 503); a failure leaves tenant
+    and jobs as they were. Not `Writes`: that is a per-tenant transaction acting as a user."""
 
     async def offboard_tenant(self, tenant_id: TenantId, *, actor: UserId) -> TenantRecord:
         ...

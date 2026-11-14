@@ -385,6 +385,32 @@ def test_1360_d6_the_route_reaches_the_tenant_and_its_jobs_only_through_the_offb
     assert [e[0] for e in _events(audit, mark)] == [OFFBOARD]
 
 
+def test_an_offboard_that_cannot_settle_answers_503_and_changes_nothing(caplog: Any) -> None:
+    """The job store's `OffboardNotSettled` (jobs kept appearing; rolled back) answers 503 with its message, not an
+    unexplained 500, and is logged as an error; the same request later goes through. (#1360 D8, #1498 review)"""
+    import logging
+
+    from defender.jobs import OffboardNotSettled
+
+    world, ops = _admin_world()
+    world.register(T1)
+    inner = world.offboarding._inner
+
+    class NeverSettles:
+        async def offboard_tenant(self, tenant_id: Any, *, actor: Any) -> Any:
+            raise OffboardNotSettled(f"tenant {tenant_id} still had live jobs; the offboard was rolled back")
+
+    world.offboarding._inner = NeverSettles()
+    with caplog.at_level(logging.ERROR, logger="defender.api.app"):
+        refused = ops.post(f"/admin/tenants/{T1}/offboard")
+    _problem(refused, 503)
+    assert "rolled back" in refused.json()["detail"]
+    assert any(r.levelno == logging.ERROR and "rolled back" in r.getMessage() for r in caplog.records)
+    assert _item(ops, T1)["state"] == "active"
+    world.offboarding._inner = inner
+    assert ops.post(f"/admin/tenants/{T1}/offboard").status_code == 202  # control: repeated, it goes through
+
+
 def test_1360_d6_a_malformed_tenant_id_never_reaches_the_offboarding_port() -> None:
     """422 before the port is called; a real tenant's request calls it once. (#1360 D6)"""
     world, ops = _admin_world()

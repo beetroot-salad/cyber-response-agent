@@ -66,6 +66,7 @@ from .ports import (
     ApiDeps,
     Conflict,
     NotFound,
+    OffboardNotSettled,
     Principal,
     StoreBrokePromise,
     TimePosition,
@@ -173,6 +174,14 @@ async def _server_error(request: Request, exc: Exception) -> Response:
     response = await HANDLERS[Exception](request, exc)
     _stamp_expiry(request.scope, response.headers)
     return response
+
+
+async def _offboard_not_settled(request: Request, exc: Exception) -> Response:
+    """The 503 for an offboard that rolled back because the tenant's jobs kept appearing (#1360 D8): nothing changed
+    and the request can be repeated, so the administrator reads that, not a bare 500. It still logs as an error: on a
+    tenant being offboarded, jobs that keep appearing point at a runaway retry or a bug."""
+    _logger.error("offboard not settled: %s", exc)
+    return problem(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc))
 
 
 async def _not_authenticated(request: Request, exc: Exception) -> Response:
@@ -861,7 +870,7 @@ async def resume_tenant(deps: Deps, caller: Admin, tenant_id: AdminTenant) -> Te
     return _tenant_item(record)
 
 
-@admin.post("/tenants/{tenant_id}/offboard", status_code=status.HTTP_202_ACCEPTED, responses=responses(409))
+@admin.post("/tenants/{tenant_id}/offboard", status_code=status.HTTP_202_ACCEPTED, responses=responses(409, 503))
 async def offboard_tenant(deps: Deps, caller: Admin, tenant_id: AdminTenant) -> TenantItem:
     """End access at once, end the tenant's queued and running jobs, and queue the teardown, replacing any pending
     action: one change through the offboarding port."""
@@ -970,6 +979,7 @@ def create_app(deps: ApiDeps) -> FastAPI:
     install_problems(app)
     app.add_exception_handler(NotFound, refusal(status.HTTP_404_NOT_FOUND))
     app.add_exception_handler(Conflict, refusal(status.HTTP_409_CONFLICT))
+    app.add_exception_handler(OffboardNotSettled, _offboard_not_settled)
     # The literal, not starlette's constant: it was renamed across starlette releases.
     app.add_exception_handler(UnknownReference, refusal(422))
     app.add_exception_handler(NotImplementedYet, refusal(status.HTTP_501_NOT_IMPLEMENTED))
