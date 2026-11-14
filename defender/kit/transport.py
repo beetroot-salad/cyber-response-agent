@@ -175,7 +175,7 @@ def record_config(
         faults.append(str(absent))
         entry = {}
     else:
-        faults += _settings_faults(entry, locator_of(tenant).part(system, "settings"), system, prefix,
+        faults += _settings_rule_faults(entry, locator_of(tenant).part(system, "settings"), system, prefix,
                                    required, path_keys)
     if len(faults) == 1:
         raise ConfigFault(faults[0])
@@ -184,7 +184,7 @@ def record_config(
     return {key: entry[f"{prefix}_{key}"] for key in required}
 
 
-def _settings_faults(entry: Mapping[str, str], shown: str, system: str, prefix: str, required: tuple[str, ...],
+def _settings_rule_faults(entry: Mapping[str, str], shown: str, system: str, prefix: str, required: tuple[str, ...],
                      path_keys: tuple[str, ...]) -> list[str]:
     """`record_config`'s rules 3 to 7 over a present settings entry: every fault, in rule order."""
     faults: list[str] = []
