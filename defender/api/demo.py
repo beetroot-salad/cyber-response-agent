@@ -18,6 +18,7 @@ from functools import partial
 
 from defender.records import RUN_LAYOUT
 from defender.tenancy import InMemoryTenantRepository
+from defender.identity.logged_mail import LoggedMail
 from defender.records.formats import AlertId, InvestigationId, LearningJobId, TenantId, TenantRefused
 
 from defender.identity import (
@@ -92,16 +93,6 @@ class _NoSignIn:
         """Nothing is open."""
 
 
-class _LoggedMail:
-    async def notify_invitation(self, to: str, tenant_id: str, invitation_id: str) -> None:
-        _logger.info("invitation %s to %s for tenant %s (not sent: demo)", invitation_id, to, tenant_id)
-
-    async def notify_credential_expiry(self, to: str, tenant_id: str, program_id: str, credential_id: str,
-                                       expires_at: _dt.datetime) -> None:
-        _logger.info("credential %s of program %s expires %s; warning to %s for tenant %s (not sent: demo)",
-                     credential_id, program_id, expires_at.isoformat(), to, tenant_id)
-
-
 class _DemoProgramsRealm:
     """The demo's stand-in for the programs realm: it makes a client and a secret per OAuth credential and
     keeps the clients in memory, but issues no tokens, so no OAuth credential can sign in (keys can)."""
@@ -161,7 +152,7 @@ async def demo_deps(tenants: Sequence[str], clock: Callable[[], _dt.datetime] = 
                                   created_at=now, accepted_at=now)
             await people.add_session(demo_sessions([tenant])[f"{tenant}-{role}"], user.id, now=now,
                                expires_at=now + _SESSION_LIFETIME)
-    identity = IdentityService(people, signin=_NoSignIn(), mail=_LoggedMail(), clock=clock, programs=_DemoProgramsRealm(),
+    identity = IdentityService(people, signin=_NoSignIn(), mail=LoggedMail(), clock=clock, programs=_DemoProgramsRealm(),
                                bootstrap=Bootstrap(administrators=()),
                                session_idle_limit=_SESSION_LIFETIME)
     return ApiDeps(
