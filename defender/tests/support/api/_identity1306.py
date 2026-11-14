@@ -627,6 +627,17 @@ class AuditRecorder(logging.Handler):
         return detach
 
 
+class _TwinOffboarding:
+    """A world without a job store: the offboard is the tenant repository's transition alone (it holds no jobs)."""
+
+    def __init__(self, tenants: Any, clock: Callable[[], _dt.datetime]) -> None:
+        self._tenants = tenants
+        self._clock = clock
+
+    async def offboard_tenant(self, tenant_id: str, *, actor: Any) -> Any:
+        return await self._tenants.request_offboard(tenant_id, now=self._clock())
+
+
 #: What the refusing ports name: the families the real server leaves unbacked, and a world with no database.
 NO_STORE = "no store in this test world (#1496)"
 
@@ -668,8 +679,10 @@ class World:
         self.repo: Any = FailingRepository(self.raw_repo) if failing_writes else self.raw_repo
         #: The backed families' ports, composed as the real server composes them (#1496).
         self.store: Any = self._backed_ports()
-        #: #1360 D6: the one port the admin offboard route reaches the tenant transition and the jobs through.
-        self.offboarding = OffboardingSpy(self.store)
+        #: #1360 D6: the one port the admin offboard route reaches the tenant transition and the jobs through: the real
+        #: store's on the test database; without one, the tenant twin's own transition (a world with no job store holds
+        #: no jobs to end; `tenancy/repository.py` keeps `request_offboard` for this).
+        self.offboarding = OffboardingSpy(self.store if self.jobs is not None else _TwinOffboarding(self.tenants, self.clock))
         self.signin = FakeSignIn()
         self.signin.fail_sends = failing_sends
         self.mail = FakeMail()
