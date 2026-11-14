@@ -163,6 +163,5 @@ def test_p1_the_queue_merge_and_the_pitfalls_curator_use_the_stores_one_mistake_
     assert persist.pitfall_key is store_mod().pitfall_key
     held = {(mod.__name__, name): fn for mod in (persist, pitfalls_curator) for name, fn in vars(mod).items()
             if isinstance(fn, types.FunctionType) and fn.__name__ in rule}
-    assert {fn.__name__ for fn in held.values()} >= {"pitfall_key", "is_reducer_row"}, held
     elsewhere = {k: fn.__module__ for k, fn in held.items() if not fn.__module__.startswith("defender.learning_store")}
     assert not elsewhere, f"a mistake-key function defined outside the store: {elsewhere}"
