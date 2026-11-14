@@ -16,8 +16,10 @@ TABLES = {
     "system_versions": {"tenant_id", "system_id", "version", "adapter_id", "enabled", "settings", "access",
                         "credential_generation", "deleted", "author", "written_at"},
     "case_versions": {"tenant_id", "version", "system_id", "comment_body", "deleted", "author", "written_at"},
-    "records_mark": {"tenant_id"},
 }
+#: #1470 O8/O12: the head before the migration that drops the mark (the revision's id is not named by the design).
+BEFORE_DROP = "0016_list_indexes"
+ACTIVE, OFFBOARDED = "a1470000-0000-4000-8000-000000000001", "a1470000-0000-4000-8000-000000000002"
 
 
 def _columns(dsn: str, table: str) -> set[str]:
@@ -61,17 +63,55 @@ def test_at_head_the_records_tables_have_the_designed_columns_a_tenant_key_and_a
 
 
 @pytest.mark.postgres
-def test_at_head_the_proxy_role_cannot_log_in_and_may_only_select_the_system_versions_and_the_mark(migrated_database):
-    """`defender_proxy_reader` is NOLOGIN, may SELECT `system_versions` and `records_mark` and nothing else there: no
-    write to either, no read of the case table or the tenants. (#1366 R14, amended: the proxy reads whether a token's
-    tenant is imported from the mark)"""
+def test_at_head_the_proxy_role_cannot_log_in_and_may_only_select_system_versions_and_the_tenant_rows_id_and_state(
+        migrated_database):
+    """`defender_proxy_reader` is NOLOGIN, may SELECT `system_versions` and exactly the `id` and `state` columns of the
+    tenant row, checked column by column; the mark table is gone. (#1366 R14, amended by #1470 O8)"""
     assert execute(migrated_database, "SELECT rolcanlogin FROM pg_roles WHERE rolname = %s", (ROLE,)) == [(False,)]
     assert _can(migrated_database, "system_versions", "SELECT"), "control"
-    assert _can(migrated_database, "records_mark", "SELECT"), "control"
+    assert execute(migrated_database, "SELECT to_regclass('tenancy.records_mark')") == [(None,)]
+    columns = {c for (c,) in execute(migrated_database, "SELECT column_name FROM information_schema.columns "
+                                                        "WHERE table_schema = 'tenancy' AND table_name = 'tenants'")}
+    assert {"id", "state"} < columns, "premise"
+    readable = {c for c in columns if execute(migrated_database, "SELECT has_column_privilege(%s, 'tenancy.tenants', %s, "
+                                                                 "'SELECT')", (ROLE, c))[0][0]}
+    assert readable == {"id", "state"}
     wrong = [(t, p) for t, p in [("system_versions", "INSERT"), ("system_versions", "UPDATE"), ("system_versions", "DELETE"),
-                                 ("system_versions", "TRUNCATE"), ("case_versions", "SELECT"), ("records_mark", "INSERT"),
-                                 ("records_mark", "DELETE"), ("tenants", "SELECT")] if _can(migrated_database, t, p)]
+                                 ("system_versions", "TRUNCATE"), ("case_versions", "SELECT"), ("tenants", "SELECT"),
+                                 ("tenants", "UPDATE")] if _can(migrated_database, t, p)]
     assert wrong == []
+
+
+def _tenant_without_mark(dsn: str, tenant: str, state: str) -> None:
+    execute(dsn, "INSERT INTO tenancy.tenants (id, created_at, state) VALUES (%s, now(), %s)", (tenant, state))
+
+
+@pytest.mark.postgres
+def test_1470_o12_the_mark_drop_stops_changing_nothing_while_a_tenant_not_offboarded_lacks_the_mark(empty_database):
+    """An active tenant from before #1366 (no mark): the upgrade refuses, the mark table and the revision stay. (O12)"""
+    from defender.migrations import upgrade
+
+    _upgrade_to(empty_database, BEFORE_DROP)
+    _tenant_without_mark(empty_database, ACTIVE, "active")
+
+    with pytest.raises(Exception):  # noqa: PT011, B017 — the design names how it stops only as "stops"
+        upgrade(empty_database)
+
+    assert execute(empty_database, "SELECT to_regclass('tenancy.records_mark')::text") == [("tenancy.records_mark",)]
+    assert execute(empty_database, "SELECT version_num FROM alembic_version") == [(BEFORE_DROP,)]
+
+
+@pytest.mark.postgres
+def test_1470_o12_an_offboarded_tenant_without_the_mark_does_not_stop_the_drop(empty_database):
+    """Only an offboarded tenant lacks the mark: the upgrade reaches head and the mark table is gone. (O12)"""
+    from defender.migrations import upgrade
+
+    _upgrade_to(empty_database, BEFORE_DROP)
+    _tenant_without_mark(empty_database, OFFBOARDED, "offboarded")
+
+    upgrade(empty_database)
+
+    assert execute(empty_database, "SELECT to_regclass('tenancy.records_mark')") == [(None,)]
 
 
 @pytest.mark.postgres

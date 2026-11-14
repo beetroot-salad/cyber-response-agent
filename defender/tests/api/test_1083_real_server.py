@@ -270,14 +270,13 @@ async def test_o6_a_learning_job_of_an_investigation_that_did_not_complete_confl
 # --- alert mapping ----------------------------------------------------------------------------------
 
 @pytest.mark.postgres
-async def test_the_alert_mapping_reads_through_its_own_port_while_systems_refuse(served):
-    """The alert mapping answers the tenant's saved mapping although the systems port refuses whole. (G2, O6)"""
+async def test_the_alert_mapping_reads_through_its_own_port(served):
+    """The alert mapping answers the tenant's saved mapping from its own port. (G2, O6; #1470: systems no longer refuse)"""
     from defender.api.models import AlertMapping
 
     got = await served.client.get(f"/tenants/{A}/alert-mapping", headers=served.ann(write=False))
     assert got.status_code == 200
     assert got.json() == {entry: FIXTURE_ALERT_MAPPING.get(entry) for entry in AlertMapping.model_fields}
-    assert (await served.client.get(f"/tenants/{A}/systems", headers=served.ann(write=False))).status_code == 501
 
 
 @pytest.mark.postgres
@@ -423,13 +422,10 @@ def _unbacked(document: dict[str, Any]) -> list[tuple[str, str]]:
 
 
 @pytest.mark.postgres
-async def test_o8_systems_and_lessons_refuse_501_naming_their_issue_after_membership(served):
-    """A member gets 501 naming the backing issue on every systems and lessons route; a non-member gets 404. (O8, P1)"""
-    body = {"kind": "ticket", "display_name": "Tickets", "enabled": True, "settings": {}}
-    credentials = {"kind": "static", "credentials": {"api_token": "a-secret-of-sixteen-or-more"}}
-    cases = [("get", "/systems", None, "#1470"), ("put", "/systems/tix", body, "#1470"),
-             ("put", "/systems/tix/credentials", credentials, "#1470"), ("post", "/systems/tix/check", None, "#1470"),
-             ("get", "/lessons", None, "#1082")]
+async def test_o8_lessons_refuse_501_naming_their_issue_after_membership(served):
+    """A member gets 501 naming the backing issue on the lessons route; a non-member gets 404. (O8, P1; #1470 O15:
+    systems and credentials are real, the check's 501 is `test_1470_config_routes`')"""
+    cases = [("get", "/lessons", None, "#1082")]
     assert (await served.client.get(f"/tenants/{A}/alerts", headers=served.ann(write=False))).status_code == 200  # control
     for method, path, payload, issue in cases:
         refused = await served.client.request(method, f"/tenants/{A}{path}", headers=served.ann(), json=payload)

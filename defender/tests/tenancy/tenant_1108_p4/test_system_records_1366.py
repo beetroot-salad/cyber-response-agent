@@ -1569,3 +1569,35 @@ def test_1366_g4_the_cover_judgement_accepts_a_declared_write_exactly_when_the_p
 
     _at_the_door(op, run_through_the_door)
     assert not wrong, wrong
+
+
+# --- #1470: the store without the import ----------------------------------------------------------------------------
+
+@pytest.mark.postgres
+def test_1470_o8_a_tenant_with_no_records_takes_a_first_write_and_a_tenant_not_active_is_refused(migrated_database):  # noqa: F811
+    """An active tenant registered with no records takes `put_system(replaces=0)` as version 1; an offboarding one is
+    refused, nothing stored, not naming the import. (#1470 O8: tenant not active, the store's lock)"""
+    import uuid
+
+    from defender.system_records import RecordStore
+
+    active, leaving = str(uuid.uuid4()), str(uuid.uuid4())
+    register_tenant(migrated_database, active, records=None)
+    register_tenant(migrated_database, leaving, state="offboarding", records=None)
+    settings, access = R.FIXTURE_FOLDERS["ticket"]
+
+    async def write(tenant: str) -> Any:
+        store = RecordStore(migrated_database, clock=fixed_clock, judge=lambda after, before: [])
+        try:
+            return await store.put_system(tenant, "ticket", replaces=0, adapter="ticket", enabled=True,
+                                          settings=dict(settings), access=access, author="test-member")
+        finally:
+            await store.close()
+
+    asyncio.run(write(active))
+    assert [(v.version, v.deleted, v.author) for v in R.system_versions(migrated_database, active, "ticket")] == [
+        (1, False, "test-member")]
+    with pytest.raises(Exception) as refused:  # noqa: PT011 — the typed "tenant not active" class is unnamed
+        asyncio.run(write(leaving))
+    assert "import" not in str(refused.value), str(refused.value)
+    assert R.system_versions(migrated_database, leaving, "ticket") == []

@@ -389,21 +389,24 @@ def test_1366_o7_the_records_port_reuses_its_connection_and_still_reads_the_newe
 
 
 @pytest.mark.postgres
-def test_1366_r8_an_imported_tenant_with_no_system_rows_is_a_missing_record_not_an_unknown_tenant(migrated_database):  # noqa: F811
-    """A tenant with the records mark and no system version (created since #1366, or imported with none) has no record
-    for the system, which the proxy refuses as that system's setup; only a tenant without the mark is an unknown
-    tenant (an unlabelled `ConfigFault`, the proxy's access). (#1366 R8, #1363)"""
+def test_1470_o8_the_tenant_row_tells_an_unknown_tenant_from_a_tenant_with_no_such_system(migrated_database):  # noqa: F811
+    """An active tenant with no records (no mark: #1470 removed it) has no record for the system; a tenant whose row is
+    missing, offboarding or offboarded is an unknown tenant (an unlabelled `ConfigFault`, the proxy's access).
+    (#1470 O8, #1363; replaces #1366 R8's mark rule)"""
     from defender.credential_proxy._records import PostgresSystemRecords
     from defender.kit.faults import ConfigFault
 
-    marked, unmarked = str(uuid.uuid4()), str(uuid.uuid4())
-    register_tenant(migrated_database, marked, records=R.without(R.fixture_records(), *R.fixture_records().systems))
-    register_tenant(migrated_database, unmarked, records=None)
+    active, offboarding, offboarded, missing = (str(uuid.uuid4()) for _ in range(4))
+    register_tenant(migrated_database, active, records=None)
+    register_tenant(migrated_database, offboarding, state="offboarding", records=None)
+    register_tenant(migrated_database, offboarded, state="offboarded", records=None)
     with R.proxy_login(migrated_database) as login, contextlib.closing(PostgresSystemRecords(login)) as port:
-        assert port.current_system(marked, "cmdb") is None
-        with pytest.raises(ConfigFault) as unknown:
-            port.current_system(unmarked, "cmdb")
-    assert getattr(unknown.value, "origin", None) is None, "the unknown tenant's fault is left for the proxy to label"
+        assert port.current_system(active, "cmdb") is None
+        for unknown in (offboarding, offboarded, missing):
+            with pytest.raises(ConfigFault) as refused:
+                port.current_system(unknown, "cmdb")
+            assert getattr(refused.value, "origin", None) is None, "the unknown tenant's fault is left for the proxy to label"
+            assert "import" not in str(refused.value), str(refused.value)
 
 
 @pytest.mark.postgres

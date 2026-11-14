@@ -526,3 +526,64 @@ def test_1345_o6_the_verb_records_who_replaced_the_mapping_on_the_job_stores_aud
     about = [r for r in audit if "alert_mapping" in str(getattr(r, "action", "")) + r.getMessage()]
     assert [(r.name, r.action, r.actor, r.tenant_id, r.target) for r in about] == [
         ("defender.jobs.audit", "alert_mapping.update", "tenant.py set-alert-mapping", verb.tid, verb.tid)]
+
+
+# --- #1470 O10 / O11: the operator's record commands are removed, and nothing shipped names them ---------------------
+
+#: O10's list, spelled here as the oracle for the constant `tenant.py` drops them by.
+REMOVED_1470 = {"set-alert-mapping", "set-system", "delete-system", "set-case", "delete-case", "systems",
+                "set-credentials", "catalog", "import"}
+
+
+def _removed() -> tuple[str, ...]:
+    # FORCED CHOICE (sketch): the design says the census takes the set "from the same place tenant.py drops them
+    # from" without naming it; `REMOVED_COMMANDS` on the command module is the sketch's guess.
+    return tuple(_cli().REMOVED_COMMANDS)
+
+
+def test_1470_o10_each_removed_record_command_is_refused_and_absent_from_help(capsys):
+    """Each of O10's nine subcommands is refused by the parser and not offered in `--help`; `check` still is. (O10)"""
+    with pytest.raises(SystemExit) as helped:
+        _cli().main(["--help"])
+    assert helped.value.code == 0
+    offered = set(re.search(r"\{([\w,-]+)\}", capsys.readouterr().out).group(1).split(","))  # argparse's choices
+    assert "check" in offered, "control: a kept command is offered"
+    assert not offered & REMOVED_1470, offered & REMOVED_1470
+    for command in sorted(REMOVED_1470):
+        with pytest.raises(SystemExit) as refused:
+            _cli().main([command, str(uuid.uuid4())])
+        assert refused.value.code not in (0, None), command
+    assert set(_removed()) == REMOVED_1470  # the constant O11's census reads
+
+
+_DEFENDER = __import__("pathlib").Path(__file__).resolve().parents[3]
+_SHIPPED_SUFFIXES = {".py", ".md", ".yaml", ".yml", ".txt", ".sh", ".toml", ".json"}
+
+
+def _shipped_lines() -> list[tuple[str, int, str]]:
+    """Every line of shipped text under `defender/` (not tests, not the archive), less `CLAUDE.md`'s upgrade notes."""
+    found = []
+    for path in sorted(_DEFENDER.rglob("*")):
+        rel = path.relative_to(_DEFENDER).as_posix()
+        if (not path.is_file() or path.is_symlink() or path.suffix not in _SHIPPED_SUFFIXES or rel.startswith(("tests/", "docs/archive/"))
+                or any(part in {".venv", "__pycache__", "node_modules"} for part in path.parts)):
+            continue
+        in_upgrade_notes = False
+        for number, line in enumerate(path.read_text("utf-8", errors="replace").splitlines(), 1):
+            if rel == "CLAUDE.md" and line.startswith("## "):
+                in_upgrade_notes = line.startswith("## Upgrade from before")
+            if not in_upgrade_notes:
+                found.append((rel, number, line))
+    return found
+
+
+def test_1470_o11_no_shipped_text_outside_the_upgrade_notes_names_a_removed_command():
+    """No refusal, skill, doc or help line names `tenant.py <removed>` or a backticked removed hyphenated command. (O11)"""
+    removed = _removed()
+    hyphenated = [c for c in removed if "-" in c]
+    pattern = re.compile(rf"tenant\.py[`'\"]?\s+({'|'.join(map(re.escape, removed))})(?![\w-])"
+                         rf"|`({'|'.join(map(re.escape, hyphenated))})(?![\w-])")
+    lines = _shipped_lines()
+    assert len({rel for rel, _, _ in lines}) > 200, "premise: the scan reads the shipped tree"
+    naming = [f"{rel}:{n}: {line.strip()[:120]}" for rel, n, line in lines if pattern.search(line)]
+    assert naming == []

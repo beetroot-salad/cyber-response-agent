@@ -107,3 +107,15 @@ def test_the_demo_probe_sees_a_load():
     """Positive control: importing the demo reports both demo-only modules. (Am-1)"""
     modules = _loaded("defender.api.demo")
     assert all(_found(modules, name) for name in _DEMO_ONLY)
+
+
+#: #1470 D-B: what the API composes for the record judgement. FORCED CHOICE (sketch): the rules package's name is the
+#: design's "e.g." (`defender.system_rules`); the case-record rules' new `tenancy` module is unnamed and not listed.
+RECORD_MODULES = ("defender.system_records", "defender.system_rules")
+
+
+@pytest.mark.parametrize("module", RECORD_MODULES)
+def test_1470_the_record_store_and_the_judgement_load_no_runtime_or_learning(module):
+    """The record store and the moved judgement import cleanly and load nothing in `API_FORBIDDEN`. (#1470 D-B, D-E)"""
+    found = api_forbidden(_loaded(module))
+    assert not found, f"{module} loads {found}"
