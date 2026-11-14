@@ -72,3 +72,17 @@ def test_the_not_loaded_probe_sees_a_load():
     """Positive control: the identity database repository and the lifecycle node are reported when imported."""
     assert _found(_loaded("defender.identity.postgres"), "defender.identity.postgres")
     assert _found(_loaded("defender.lifecycle"), "defender.lifecycle")
+
+
+def test_p1_the_lifted_store_loads_no_learning_and_no_driver():
+    """Importing `defender.learning_store` loads no `defender.learning` module and no `psycopg`, so the API can hold it
+    (named, since the glob above cannot see a module that does not exist yet). (P1, #1485)"""
+    modules = _loaded("defender.learning_store")
+    assert "defender.learning_store" in modules, "premise: the store imported"
+    assert [m for name in ("defender.learning", "psycopg") for m in _found(modules, name)] == []
+
+
+def test_p1_the_learning_and_driver_probe_sees_a_load():
+    """Positive control for the case above: a `defender.learning` module and `psycopg` are reported when imported. (P1)"""
+    assert _found(_loaded("defender.learning.roles"), "defender.learning")
+    assert _found(_loaded("psycopg"), "psycopg")

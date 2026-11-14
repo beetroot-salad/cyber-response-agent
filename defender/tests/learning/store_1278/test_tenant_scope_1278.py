@@ -186,6 +186,28 @@ async def _item_keys(c):
     assert set(c.seen(await c.store.item_keys(BLUE, "finding"))) == {"h1", "a1"}
 
 
+async def _set_aside(c):
+    """BLUE's held and dead items, and only those: GREEN's `h1` (held), `g-held` and `g-dead` are not BLUE's. (#1485 O1)"""
+    c.freeze()
+    held = c.seen(await c.store.set_aside(BLUE, limit=50))
+    assert [(i.kind, i.key, str(i.batch_id)) for i in held] == [("finding", "h1", str(c.spent.batch_id))], (
+        "BLUE's one held item, in BLUE's batch")
+    assert c.seen(await c.store.set_aside(BLUE, status="dead", limit=50)) == [], "GREEN's dead item is not BLUE's"
+    assert [i.key for i in c.seen(await c.store.set_aside(BLUE, status="held", limit=50))] == ["h1"]
+
+
+async def _parked(c):
+    """GREEN's parked batch, with its items, is not BLUE's; BLUE's own parked batch is listed with its own items. (#1485 O2)"""
+    await c.store.needs_person(GREEN, str(c.g.review.batch_id), "a person must look at GREEN's batch")
+    own = await c.own_in_review("a2")
+    c.freeze()
+    assert c.seen(await c.store.parked(BLUE, limit=50)) == [], "control: BLUE has nothing parked yet"
+    await c.control(c.store.needs_person(BLUE, str(own.batch_id), "by hand"))
+    [mine] = c.seen(await c.store.parked(BLUE, limit=50))
+    assert (str(mine.id), mine.items) == (str(own.batch_id), (("finding", "a2"),)), "BLUE's own, with only BLUE's items"
+    assert [(b.reason) for b in c.seen(await c.store.parked(BLUE, limit=50))] == ["by hand"]
+
+
 async def _lane_work(c):
     """BLUE's lanes answered from BLUE's rows: GREEN's lead batch closed with items due names no replacement of BLUE's."""
     c.freeze()
@@ -337,7 +359,7 @@ async def _purge(c):
 #: Every public verb of the store and how BLUE calls it. `close` takes no tenant.
 ENTRIES = {
     "publish_findings": _publish_findings, "add_pitfall": _add_pitfall, "enqueue_request": _enqueue_request,
-    "work": _work, "item_keys": _item_keys, "lane_work": _lane_work, "batches": _batches,
+    "work": _work, "set_aside": _set_aside, "parked": _parked, "item_keys": _item_keys, "lane_work": _lane_work, "batches": _batches,
     "commit_record": _commit_record,
     "claim": _claim, "claim_revert": _claim_revert, "take_over": _take_over,
     **{name: _holder(name) for name in ("renew", "record_commit", "in_review", "end_no_commits", "abandon_clean",
