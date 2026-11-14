@@ -182,7 +182,8 @@ async def test_1470_each_version_row_a_config_write_inserts_names_the_acting_mem
     ann = scripted.user_id(ANN)
     assert ann != A, "premise: the acting member's id is not the tenant's"
     routes = _version_row_writes(scripted.app)
-    assert {m for m, _ in routes} == {"PUT", "DELETE"} and len(routes) >= 4, routes  # noqa: PLR2004 — premise: found
+    assert {m for m, _ in routes} == {"PUT", "DELETE"}, routes
+    assert len(routes) >= 4, routes  # noqa: PLR2004 — premise: the systems and case-record writes are found
     scripted.plant_version(TICKET, 1)  # the case record's system, for its cover
     authors: dict[tuple[str, str], tuple[int, str]] = {}
     for method, template in routes:

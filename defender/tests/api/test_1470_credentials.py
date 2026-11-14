@@ -6,6 +6,7 @@ writer policy. Postgres-gated; the `openbao`-marked tests need the test OpenBao.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import anyio
 import httpx
@@ -349,7 +350,8 @@ def _http_error_classes() -> list[type[Exception]]:
         return [cls] if not subs else [leaf for sub in subs for leaf in leaves(sub)]
 
     found = leaves(httpx.HTTPError)
-    assert httpx.ConnectError in found and httpx.HTTPStatusError in found, "premise: the tree is walked"
+    assert httpx.ConnectError in found, "premise: the tree is walked"
+    assert httpx.HTTPStatusError in found, "premise: the tree is walked"
     return found
 
 
@@ -383,6 +385,46 @@ def _write_outcomes() -> list[tuple[str, object, str]]:
     return rows
 
 
+def _kind(scheme: str) -> str:
+    return "oauth-client-credentials" if scheme == "oauth-client-credentials" else "static"
+
+
+async def _write_answered(client: httpx.AsyncClient, served: Configured, system: str, sent: dict[str, str],
+                          answer: object, failing: logging.Handler | None) -> httpx.Response:
+    """The credential write of `sent`, the secret store answering its write with `answer` (None: as it would)."""
+    bao = served.scripted
+    assert bao is not None
+    bao._rules.clear()
+    if isinstance(answer, type):
+        bao.answer("POST", "/data/", _raised(answer), times=1)
+    elif isinstance(answer, tuple):
+        bao.answer("POST", "/data/", httpx.Response(answer[0], json=answer[1]), times=1)
+    if failing is not None:
+        logging.getLogger().addHandler(failing)
+    try:
+        return await client.put(f"/tenants/{A}/systems/{system}/credentials", headers=served.ann(),
+                                json={"for_version": 1, "credentials": sent})
+    finally:
+        if failing is not None:
+            logging.getLogger().removeHandler(failing)
+
+
+def _event_faults(events: list[Any], *, system: str, marker: str | None, fields: tuple[str, ...],
+                  sent: dict[str, str]) -> list[str]:
+    """What is wrong with one announced write's events: not exactly one, another target or marker, a field name left
+    out, or any value of the set (public or secret) named."""
+    if len(events) != 1:
+        return [f"{len(events)} events"]
+    words = told(events[0])
+    wrong = [] if events[0].target == system else [f"target {events[0].target}"]
+    for other in (MARKER_POSSIBLY, MARKER_UNUSED):
+        if (other in words) != (other == marker):
+            wrong.append(f"marker {other!r}: {words}")
+    wrong += [f"field {f} not named" for f in fields if f not in words]
+    wrong += [f"value of {f} named" for f, v in sent.items() if v in words]
+    return wrong
+
+
 @anyio_mark
 @postgres
 async def test_o7_o9_every_outcome_of_the_secret_stores_write_is_answered_and_announced_as_the_design_says(scripted, caplog):
@@ -395,62 +437,37 @@ async def test_o7_o9_every_outcome_of_the_secret_stores_write_is_answered_and_an
     systems = _scheme_systems()
     for system, settings, access, _ in systems.values():
         assert (await scripted.put_system(system, 0, settings=settings, access=access)).status_code == 201
-    bao, wrong, n = scripted.scripted, [], 0
+    statuses = {"stored": 204, "not stored": 503, "possibly stored": 503, "refused login": 500}
+    wrong: list[tuple[object, ...]] = []
+    cases = [(row, announcing) for row in _write_outcomes() for announcing in ("works", "fails")]
+    assert len(cases) > 800, "premise: the table is walked"  # noqa: PLR2004
     async with scripted.lenient() as client:
-        for label, answer, outcome in _write_outcomes():
-            for announcing in ("works", "fails"):
-                n += 1
-                scheme = sorted(systems)[n % len(systems)]
-                system, _, _, fields = systems[scheme]
-                sent = _a_set(fields, n)
-                kept = scripted.stored_set(system, 1)
-                bao._rules.clear()
-                if isinstance(answer, type):
-                    bao.answer("POST", "/data/", _raised(answer), times=1)
-                elif answer is not None:
-                    bao.answer("POST", "/data/", httpx.Response(answer[0], json=answer[1]), times=1)
-                failing = _AnnouncementFails("system.credentials") if announcing == "fails" else None
-                if failing:
-                    logging.getLogger().addHandler(failing)
-                caplog.clear()
-                try:
-                    got = await client.put(f"/tenants/{A}/systems/{system}/credentials", headers=scripted.ann(),
-                                           json={"for_version": 1, "credentials": sent})
-                finally:
-                    if failing:
-                        logging.getLogger().removeHandler(failing)
-                case = (label, announcing, scheme)
-                assert answer is None or [r.fired for r in bao._rules] == [1], ("premise: the fault was answered", case)
-                announced = outcome in ("stored", "possibly stored")
-                status = {"stored": 204, "not stored": 503, "possibly stored": 503, "refused login": 500}[outcome]
-                if announced and failing:
-                    status = 500
-                if got.status_code != status:
-                    wrong.append((case, "status", got.status_code, got.text[:200]))
-                    continue
-                if status in (409, 503):  # noqa: PLR2004
-                    said = problem_text(got).lower()
-                    if (outcome == "not stored") != ("not stored" in said and "possibly" not in said) or (
-                            outcome == "possibly stored") != (MARKER_POSSIBLY in said):
-                        wrong.append((case, "said", said[:200]))
-                events = audit_events(caplog, "system.credentials")
-                if failing:
-                    if failing.refused != int(announced):
-                        wrong.append((case, "announcement attempts", failing.refused))
-                elif len(events) != int(announced):
-                    wrong.append((case, "events", [told(e) for e in events]))
-                else:
-                    for event in events:
-                        words = told(event)
-                        marked = MARKER_POSSIBLY in words
-                        if (event.target != system or marked != (outcome == "possibly stored") or MARKER_UNUSED in words
-                                or not all(f in words for f in fields) or any(v in words for v in sent.values())):
-                            wrong.append((case, "event", words))
-                after = scripted.stored_set(system, 1)
-                if after != ({"kind": "oauth-client-credentials" if scheme == "oauth-client-credentials" else "static",
-                              "fields": sent} if outcome == "stored" else kept):
-                    wrong.append((case, "stored", after))
-    assert n > 800, "premise: the table was walked"  # noqa: PLR2004
+        for n, ((label, answer, outcome), announcing) in enumerate(cases):
+            scheme = sorted(systems)[n % len(systems)]
+            system, _, _, fields = systems[scheme]
+            sent, kept, case = _a_set(fields, n), scripted.stored_set(system, 1), (label, announcing, scheme)
+            failing = _AnnouncementFails("system.credentials") if announcing == "fails" else None
+            caplog.clear()
+            got = await _write_answered(client, scripted, system, sent, answer, failing)
+            assert answer is None or [r.fired for r in scripted.scripted._rules] == [1], ("premise: answered", case)
+            announced = outcome in ("stored", "possibly stored")
+            status = 500 if announced and failing else statuses[outcome]
+            said = problem_text(got).lower() if got.status_code == 503 else ""  # noqa: PLR2004
+            found = [] if got.status_code == status else [f"status {got.status_code}: {got.text[:160]}"]
+            if status == 503 and (outcome == "possibly stored") != (MARKER_POSSIBLY in said):  # noqa: PLR2004
+                found.append(f"said {said[:160]}")
+            if status == 503 and (outcome == "not stored") != ("not stored" in said):  # noqa: PLR2004
+                found.append(f"said {said[:160]}")
+            if failing is not None:
+                found += [] if failing.refused == int(announced) else [f"{failing.refused} announcements"]
+            elif announced:
+                found += _event_faults(audit_events(caplog, "system.credentials"), system=system, fields=fields,
+                                       sent=sent, marker=MARKER_POSSIBLY if outcome == "possibly stored" else None)
+            else:
+                found += [f"announced: {told(e)}" for e in audit_events(caplog, "system.credentials")]
+            if scripted.stored_set(system, 1) != ({"kind": _kind(scheme), "fields": sent} if outcome == "stored" else kept):
+                found.append("stored set")
+            wrong += [(case, f) for f in found]
     assert wrong == [], wrong[:8]
 
 
@@ -493,6 +510,53 @@ def test_o7_the_re_read_table_covers_every_refusal_the_slot_can_raise():
     assert {kind for kind in _REREADS.values() if kind not in (None, "exception")} == _slot_refusals()
 
 
+async def _change(served: Configured, change: str, system: str, settings: dict[str, str], access: str) -> None:
+    """`change` made to the record (the tenant's or the system's), as another writer or a fault would."""
+    from defender.tests.support.jobs._jobs1342 import move_tenant
+    from defender.tests.support.shared._postgres1339 import execute
+
+    if change == "generation raised":
+        moved = await served.put_system(system, 1, settings=settings, access=access.replace(".test", ".moved.test"))
+        assert moved.status_code == 200, moved.text
+    elif change == "deleted":
+        assert (await served.delete_system(system, 1)).status_code == 204
+    elif change == "tenant not active":
+        await anyio.to_thread.run_sync(lambda: move_tenant(served.dsn, A, state="offboarding"))
+    elif change == "tenant row gone":
+        await _gone(served.dsn, A)
+    elif change == "access unparseable":
+        served.plant_version(system, 2, settings=settings, access="not: [a declaration")
+    elif change == "the re-read fails":
+        await anyio.to_thread.run_sync(execute, served.dsn, "SET lock_timeout = '5s'; "
+                                       "ALTER TABLE tenancy.system_versions RENAME TO sv_away")
+
+
+def _changing(served: Configured, change: str, system: str, settings: dict[str, str], access: str,
+              seen: list[str | None]) -> Any:
+    """An `on_write` hook that makes `change` once, then notes in `seen` what the slot now answers (its refusal type's
+    name, None, or "exception")."""
+    from defender.system_records import RecordRefused, RecordStore
+    from defender.tests.support.jobs._jobs1342 import fixed_clock
+
+    async def meanwhile(path: str) -> None:
+        assert served.scripted is not None
+        served.scripted.on_write = None
+        with anyio.fail_after(30):
+            await _change(served, change, system, settings, access)
+        store = RecordStore(served.dsn, clock=fixed_clock, judge=lambda after, before: [])
+        try:
+            await store.credential_slot(A, system, 1)
+            seen.append(None)
+        except RecordRefused as refusal:
+            seen.append(type(refusal).__name__)
+        except Exception:  # noqa: BLE001 — the re-read that fails
+            seen.append("exception")
+        finally:
+            await store.close()
+
+    return meanwhile
+
+
 _REREAD_CASES = [(change, announcing) for change in _REREADS for announcing in ("works", "fails")]
 
 
@@ -505,8 +569,6 @@ async def test_o7_o9_any_refusal_of_the_re_read_is_409_stored_for_an_unused_gene
     announced `stored for an unused generation` (`current_version` the new version, or 0 when deleted); a re-read that
     fails is 503 possibly stored; unchanged is 204. With the announcement failing each is 500 and the set stands. The
     one event names the fields and no value. (O7: any refusal from the second call is the post-write 409; O9)"""
-    from defender.system_records import RecordRefused, RecordStore
-    from defender.tests.support.jobs._jobs1342 import fixed_clock, move_tenant
     from defender.tests.support.shared._postgres1339 import execute
 
     caplog.set_level(logging.DEBUG)
@@ -514,36 +576,7 @@ async def test_o7_o9_any_refusal_of_the_re_read_is_409_stored_for_an_unused_gene
     system, settings, access, fields = _scheme_systems()[scheme]
     assert (await scripted.put_system(system, 0, settings=settings, access=access)).status_code == 201
     sent, seen = _a_set(fields, 1), []
-
-    async def meanwhile(path: str) -> None:
-        scripted.scripted.on_write = None
-        with anyio.fail_after(30):
-            if change == "generation raised":
-                assert (await scripted.put_system(system, 1, settings=settings,
-                                                  access=access.replace(".test", ".moved.test"))).status_code == 200
-            elif change == "deleted":
-                assert (await scripted.delete_system(system, 1)).status_code == 204
-            elif change == "tenant not active":
-                await anyio.to_thread.run_sync(lambda: move_tenant(scripted.dsn, A, state="offboarding"))
-            elif change == "tenant row gone":
-                await _gone(scripted.dsn, A)
-            elif change == "access unparseable":
-                scripted.plant_version(system, 2, settings=settings, access="not: [a declaration")
-            elif change == "the re-read fails":
-                await anyio.to_thread.run_sync(execute, scripted.dsn, "SET lock_timeout = '5s'; "
-                                               "ALTER TABLE tenancy.system_versions RENAME TO sv_away")
-            store = RecordStore(scripted.dsn, clock=fixed_clock, judge=lambda after, before: [])
-            try:
-                await store.credential_slot(A, system, 1)
-                seen.append(None)
-            except RecordRefused as refusal:
-                seen.append(type(refusal).__name__)
-            except Exception:  # noqa: BLE001 — the re-read that fails
-                seen.append("exception")
-            finally:
-                await store.close()
-
-    scripted.scripted.on_write = meanwhile
+    scripted.scripted.on_write = _changing(scripted, change, system, settings, access, seen)
     failing = _AnnouncementFails("system.credentials") if announcing == "fails" else None
     if failing:
         logging.getLogger().addHandler(failing)
@@ -569,13 +602,9 @@ async def test_o7_o9_any_refusal_of_the_re_read_is_409_stored_for_an_unused_gene
     if failing:
         assert failing.refused == 1, "premise: the event was announced, and that failed"
     else:
-        [event] = audit_events(caplog, "system.credentials")
-        words = told(event)
-        assert (marker is None and MARKER_UNUSED not in words and MARKER_POSSIBLY not in words) or (marker and marker in words), words
-        assert all(f in words for f in fields), words
-        assert not any(v in words for v in sent.values()), words
-    assert scripted.scripted.stored(f"{A}/{system}/g1") == {
-        "kind": "oauth-client-credentials" if scheme == "oauth-client-credentials" else "static", "fields": sent}, "it stands"
+        events = audit_events(caplog, "system.credentials")
+        assert _event_faults(events, system=system, marker=marker, fields=fields, sent=sent) == [], [told(e) for e in events]
+    assert scripted.scripted.stored(f"{A}/{system}/g1") == {"kind": _kind(scheme), "fields": sent}, "the write stands"
 
 
 @anyio_mark

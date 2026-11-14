@@ -424,7 +424,8 @@ def test_1470_b6_a_slot_asked_for_any_version_number_outside_the_current_generat
     _plant_system(dsn, tenant, 2, generation=2)
     _plant_system(dsn, tenant, 3, generation=2)
     asked = _versions_to_ask()
-    assert min(asked) <= 0 and max(asked) >= 2 ** 63, "premise: the sweep passes both column bounds"
+    assert min(asked) <= 0, "premise: the sweep holds zero and negatives"
+    assert max(asked) >= 2 ** 63, "premise: the sweep passes the 32- and 64-bit column bounds"
 
     async def ask_each(store):
         from defender.system_records import RecordRefused
