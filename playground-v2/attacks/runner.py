@@ -213,7 +213,7 @@ def run_scenario(
     seed: int,
     overrides: dict[str, Any],
     dry_run: bool,
-    cr_mode: str = "none",
+    cr_mode: str | None = None,
     runs_dir: Path | None = None,
     chaos: str = "none",
     keep_chaos: bool = False,
@@ -238,6 +238,13 @@ def run_scenario(
             raise SystemExit(f"not firing {scenario['id']} {before}: {exc}") from exc
 
     require_lock("(nothing fired)")
+
+    # A scenario may declare the change request it fires with (`cr_mode:` in the catalog), so a
+    # capture, which passes none, fires it the same way the CLI does. An explicit mode wins.
+    if cr_mode is None:
+        cr_mode = scenario.get("cr_mode", "none")
+    if cr_mode not in CR_MODES:
+        raise SystemExit(f"{scenario['id']}: unsupported cr_mode {cr_mode!r}")
 
     intensity = int(overrides.get("intensity") or scenario.get("default_intensity", 1))
     source_user = overrides.get("user") or scenario.get("source_user", "root")
@@ -282,7 +289,7 @@ def run_scenario(
             pre_run["cr_post_response"] = resp
             if rc != 0:
                 raise SystemExit(
-                    f"--cr-mode={cr_mode}: POST /changes failed rc={rc} "
+                    f"cr_mode={cr_mode}: POST /changes failed rc={rc} "
                     f"resp={resp}; not firing scenario"
                 )
             print(f"posted synthetic CR id={body['id']} hosts={body['hosts']} mode={cr_mode}")
@@ -459,7 +466,7 @@ def cmd_run(
         "target": args.target,
         "intensity": args.intensity,
     }
-    print(f"running {scenario['id']} (seed={args.seed}, cr_mode={args.cr_mode}, chaos={args.chaos}) ...")
+    print(f"running {scenario['id']} (seed={args.seed}, cr_mode={args.cr_mode or 'as declared'}, chaos={args.chaos}) ...")
     run_id, run_dir, step_log = run_scenario_fn(
         scenario, args.seed, overrides, args.dry_run, args.cr_mode,
         chaos=args.chaos, keep_chaos=args.keep_chaos,
@@ -488,10 +495,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     prun.add_argument(
         "--cr-mode",
         choices=CR_MODES,
-        default="none",
+        default=None,
         help=(
             "POST a synthetic CR to change-mgmt before firing. "
-            "none (default): no CR. "
+            "Default: the scenario's own cr_mode, else none. "
+            "none: no CR. "
             "valid: CR covers target host + current window — authorized-window cover. "
             "stale: CR covers target host but window already closed — tests temporal check. "
             "scope-mismatch: CR covers a sibling host instead — tests host-scope check."

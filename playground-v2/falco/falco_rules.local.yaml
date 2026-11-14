@@ -100,8 +100,8 @@
     proc.exepath = /usr/bin/sudo and
     container.id != host
   output: >
-    Sudo invoked (user=%user.name container=%container.name
-    cmd=%proc.cmdline parent=%proc.pname)
+    Sudo invoked (user=%user.name loginuser=%user.loginname container=%container.name
+    container_id=%container.id cmd=%proc.cmdline parent=%proc.pname)
   priority: NOTICE
   tags: [process, sudo, mitre_privilege_escalation]
   source: syscall
