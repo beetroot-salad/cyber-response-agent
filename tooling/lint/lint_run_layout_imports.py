@@ -110,7 +110,7 @@ CATEGORIES: Mapping[str, Sequence[str]] = {
         # F-09 (#1105 PR 2): learning/judge/render.py left this row (J3 took its last name).
         "learning/judge/__init__.py",
         "learning/core/config.py",
-        "investigation/workspace_map.py", "api/demo.py",
+        "investigation/workspace_map.py",
     ),
     "run-lifecycle": ("run.py", "run_common.py", "investigation/ticket_writer.py"),
     "path-taking-readers": (

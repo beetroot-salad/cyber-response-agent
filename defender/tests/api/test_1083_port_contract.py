@@ -1,4 +1,4 @@
-"""#1083 O10: the API's ports, served by the adapter over the real job store (PostgreSQL-gated); the list cases also run over the fake.
+"""#1083 O10: the API's ports, served by the adapter over the real job store (PostgreSQL-gated); the list cases run over the real store only (#1496: the fake is gone).
 
 FORCED CHOICE FC-10: the adapter is `defender.api.job_store.JobStorePorts(store)`, one object serving the alerts, investigations,
 learning jobs, alert-mapping and write ports over a `JobStore` it does not own. FC-12 (r5 Am-6): a write takes `(principal, ...)`
@@ -17,7 +17,6 @@ import pytest
 
 from defender.api.models import InvestigationStatus
 from defender.tests.support.jobs._jobs1342 import ALERT_BYTES, DESCRIPTION, TITLE, JobsAudit, register_tenant
-from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.tenancy._mapping1345 import FIXTURE_ALERT_MAPPING
 
 pytestmark = pytest.mark.anyio
@@ -96,7 +95,7 @@ async def _ended(store: Any, adapter: Any, alert_id: str, *, stage: str = "compl
     return str(investigation.investigation_id)
 
 
-# --- the list reads: real store and fake, one set of cases ---------------------------------------------------------
+# --- the list reads: the real store, one set of cases --------------------------------------------------------------------
 
 class RealBackend:
     """Rows through the store's own writes, over the adapter."""
@@ -136,52 +135,8 @@ class RealBackend:
         return ids
 
 
-class FakeBackend:
-    def __init__(self) -> None:
-        from defender.api.fakes import InMemoryStore
-
-        self.reads = InMemoryStore(lambda: AT)
-        self._n = 0
-
-    def _id(self, kind: str) -> str:
-        self._n += 1
-        return fixture_uuid(f"1083:{kind}:{self._n}")
-
-    async def alerts(self, tenant: str, times: list[dt.datetime]) -> list[str]:
-        from defender.api.models import Alert
-
-        ids = [self._id("alert") for _ in times]
-        for i, t in zip(ids, times, strict=True):
-            self.reads.add_alert(tenant, Alert(alert_id=i, vendor="elastic", vendor_ticket_id=f"F-{i}", title="t",
-                                               description="d", fired_at=t, changed_at=t, received_at=t, raw="{}"))
-        return ids
-
-    async def investigations(self, tenant: str, times: list[dt.datetime]) -> list[str]:
-        from defender.api.models import Investigation
-
-        ids = [self._id("investigation") for _ in times]
-        for i, t in zip(ids, times, strict=True):
-            self.reads.add_investigation(tenant, Investigation(
-                investigation_id=i, alert_id=self._id("alert"), status="queued", request_key="k1", attempt=1,
-                cost_usd=0.0, cost_is_lower_limit=False, created_at=t))
-        return ids
-
-    async def learning_jobs(self, tenant: str, times: list[dt.datetime]) -> list[str]:
-        from defender.api.models import LearningJob
-
-        ids = [self._id("job") for _ in times]
-        for i, t in zip(ids, times, strict=True):
-            self.reads.add_learning_job(tenant, LearningJob(
-                learning_job_id=i, investigation_id=self._id("investigation"), alert_id=self._id("alert"),
-                status="queued", trigger="explicit", created_at=t))
-        return ids
-
-
-@pytest.fixture(params=[pytest.param("real", marks=POSTGRES), "fake"])
+@pytest.fixture(params=[pytest.param("real", marks=POSTGRES)])
 async def backend(request: pytest.FixtureRequest) -> AsyncIterator[Any]:
-    if request.param == "fake":
-        yield FakeBackend()
-        return
     from defender.api.job_store import JobStorePorts
     from defender.jobs import JobStore
 
@@ -266,6 +221,8 @@ async def test_o10_the_alert_window_is_closed_below_open_above_and_adjacent_wind
     assert set(lower).isdisjoint(upper)
 
 
+# --- reads by id, the wire mapping, tenant keying ------------------------------------------------------------------
+
 # --- #1485: the learning work port, real adapter and fake, one set of cases ---------------------------------------
 # A sibling of `backend` (so no existing case needs the learning store): its store stamps rows with the database's clock
 # (no clock seam), so the real side seeds ties by one transaction (one close) or one `UPDATE`, and every seeder returns the
@@ -300,50 +257,8 @@ class RealLearning:
         return [(b.created_at, str(b.id)) for b in await self.store.batches(tenant) if b.phase == "needs_person"]
 
 
-class FakeLearning:
-    """The demo's `InMemoryStore`, seeded with wire rows at given times and minted ids, in an order that is neither
-    ascending nor descending."""
-
-    def __init__(self) -> None:
-        from defender.api.fakes import InMemoryStore
-
-        self.reads = InMemoryStore(lambda: AT)
-        self._n = 0
-
-    def _id(self, kind: str) -> str:
-        self._n += 1
-        return fixture_uuid(f"1485:{kind}:{self._n}")
-
-    async def items(self, tenant: str, groups: list[tuple[str, list[str]]]) -> list[tuple[str, dt.datetime, str]]:
-        from defender.api.models import SetAsideItem
-
-        made = []
-        for n, (status, keys) in enumerate(groups):
-            at = AT + n * MINUTE  # one instant per group: ties within it
-            for key in keys:
-                made.append((status, at, self._id("item"), key))
-        for status, at, ident, key in sorted(made, key=lambda m: m[3].swapcase()):
-            self.reads.add_set_aside_item(tenant, SetAsideItem(
-                item_id=ident, kind="finding", key=key, status=status, reason="closed with no feedback",
-                source_run="run-1", batch_id=fixture_uuid("1485:batch"), pr_number=7, updated_at=at))
-        return [(status, at, ident) for status, at, ident, _ in made]
-
-    async def parked(self, tenant: str, groups: list[tuple[int, int]]) -> list[tuple[dt.datetime, str]]:
-        from defender.api.models import ParkedBatch
-
-        made = [(AT + dt.timedelta(hours=hours), self._id("batch")) for hours, count in groups for _ in range(count)]
-        for at, ident in sorted(made, key=lambda m: m[1].swapcase()):
-            self.reads.add_parked_batch(tenant, ParkedBatch(
-                batch_id=ident, batch_kind="revert", lane="author", blocks_lane=False, branch="learning/r",
-                pr_number=None, reason="a foreign tip on its branch", created_at=at, items=[]))
-        return made
-
-
-@pytest.fixture(params=[pytest.param("real", marks=POSTGRES), "fake"])
+@pytest.fixture(params=[pytest.param("real", marks=POSTGRES)])
 async def learning_backend(request: pytest.FixtureRequest) -> AsyncIterator[Any]:
-    if request.param == "fake":
-        yield FakeLearning()
-        return
     from defender.api.learning_work import StoreLearningWork
     from defender.learning_store import LearningStore
 
@@ -361,7 +276,7 @@ SET_ASIDE_GROUPS = [("held", ["a", "B", "c", "d"]), ("dead", ["z"]), ("held", ["
 
 async def test_1485_set_aside_items_page_by_time_then_id_descending_over_ties_and_are_tenant_scoped(learning_backend):
     """Eight items over three instants, two of them ties, paged three at a time by the last item's (time, id): (time, id)
-    descending, each once, every page full but the last; another tenant's item never appears. Real adapter and fake alike. (O1)"""
+    descending, each once, every page full but the last; another tenant's item never appears. Real adapter (the demo's fake is gone, #1496). (O1)"""
     made = await learning_backend.items(A, SET_ASIDE_GROUPS)
     await learning_backend.items(B, [("held", ["b-only"])])
     assert len(made) == 8
@@ -395,7 +310,7 @@ PARKED_GROUPS = [(0, 3), (1, 3), (-1, 1)]
 
 async def test_1485_parked_batches_page_by_creation_then_id_descending_over_ties_and_are_tenant_scoped(learning_backend):
     """Seven parked batches over three creation instants, two of them ties, paged three at a time: (created_at, id)
-    descending, each once; another tenant's batch never appears. Real adapter and fake alike. (O2)"""
+    descending, each once; another tenant's batch never appears. Real adapter (the demo's fake is gone, #1496). (O2)"""
     made = await learning_backend.parked(A, PARKED_GROUPS)
     await learning_backend.parked(B, [(0, 1)])
     assert len(made) == 7

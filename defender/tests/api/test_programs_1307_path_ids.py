@@ -4,6 +4,8 @@ nothing to ask about. This sweep takes its inputs from the `{name}` placeholders
 allow-list for the placeholders that are not minted ids; a placeholder neither listed nor typed as an id is a failure of its own."""
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import re
 from typing import Any
 
@@ -22,9 +24,12 @@ NOT_IDS = {"key", "system_id"}
 
 
 @pytest.fixture(scope="module")
-def world() -> tuple[ProgramsWorld, Any, Any]:
+def world() -> Iterator[tuple[ProgramsWorld, Any, Any]]:
     world = ProgramsWorld(administrators=[OPS], tenants={T1: [ANN]})
-    return world, world.sign_in(ANN), world.sign_in_admin()
+    try:
+        yield world, world.sign_in(ANN), world.sign_in_admin()
+    finally:
+        world.close()  # a module's world: the per-test closer leaves it alone
 
 
 def _placeholder_routes(app: Any) -> list[tuple[Any, str, list[str]]]:

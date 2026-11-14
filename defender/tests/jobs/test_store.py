@@ -2846,7 +2846,7 @@ async def test_b1_b11_every_store_write_dates_its_lease_by_the_database_clock_an
 # --- #1360: offboarding ends the tenant's jobs (O3, O4, O5) ---------------------------------------------------------
 
 OFFBOARDED = "tenant_offboarded"
-#: What the tenant row reads after the transition (the same four-and-failure `request_offboard` leaves).
+#: What the tenant row reads after the transition (the same four-and-failure tenancy's `offboard` leaves).
 OFFBOARDING = ("offboarding", "offboard", "offboard", "service", None)
 STALL_KEY = 1360
 

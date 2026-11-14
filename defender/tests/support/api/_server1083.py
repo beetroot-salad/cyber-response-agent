@@ -42,6 +42,7 @@ from typing import Any
 
 import anyio
 import httpx
+from defender.tests.support.identity._seed1496 import seed_membership, seed_user
 
 DEFENDER = Path(__file__).resolve().parents[3]
 REPO = DEFENDER.parent
@@ -558,12 +559,12 @@ async def seed_identity(dsn: str) -> Seeded:
     try:
         users = {}
         for email, tenant in ((ANN, A), (BOB, B)):
-            user = await repo.add_user(email, created_at=now, status="active", display_name=email)
-            await repo.add_membership(user.id, TenantId(tenant), status="active", invited_by=None, created_at=now,
+            user = await seed_user(repo, email, created_at=now, status="active", display_name=email)
+            await seed_membership(repo, user.id, TenantId(tenant), status="active", invited_by=None, created_at=now,
                                       accepted_at=now)
             await repo.add_session(sessions[email], user.id, now=now, expires_at=now + dt.timedelta(days=1))
             users[email] = user
-        ops = await repo.add_user(OPS, created_at=now, status="active", display_name="Ops", is_platform_admin=True)
+        ops = await seed_user(repo, OPS, created_at=now, status="active", display_name="Ops", is_platform_admin=True)
         await repo.add_session(sessions[OPS], ops.id, now=now, expires_at=now + dt.timedelta(days=1), used_otp=True)
         program = await repo.add_program(TenantId(A), display_name="ci", created_by=users[ANN].id, now=now)
         credential_id = CredentialId.mint()

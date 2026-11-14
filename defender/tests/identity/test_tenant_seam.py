@@ -13,6 +13,10 @@ import pytest
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.shared._postgres1339 import database, execute
+from defender.tests.support.tenancy._active1214 import offboard_on_database
+from defender.tests.support.tenancy._twin1496 import offboard_twin
+from defender.tests.support.identity._seed1496 import seed_user
+from defender.tests.support.tenancy._twin1496 import seed_tenant
 
 pytestmark = pytest.mark.anyio
 
@@ -41,10 +45,14 @@ class World:
         action, step, actor = ROWS[state]
         if self.dsn is None:
             extra = {} if action is None else dict(pending_action=action, step=step, step_actor=actor)
-            await self.tenants.add_tenant(tenant, created_at=NOW, state=state, **extra)
+            await seed_tenant(self.tenants, tenant, created_at=NOW, state=state, **extra)
         else:
             execute(self.dsn, """INSERT INTO tenancy.tenants (id, created_at, state, pending_action, step, step_actor)
                                  VALUES (%s, %s, %s, %s, %s, %s)""", (tenant, NOW, state, action, step, actor))
+
+    async def offboard(self, tenant: str) -> None:
+        """Move `tenant` to `offboarding` as tenancy's `offboard` does (#1496: the twin's seeder, or `offboard` itself)."""
+        await (offboard_twin(self.tenants, tenant) if self.dsn is None else offboard_on_database(self.dsn, tenant))
 
 
 @pytest.fixture(params=["memory", pytest.param("postgres", marks=pytest.mark.postgres)])
@@ -97,7 +105,7 @@ def test_me_reads_the_tenant_states_once_however_many_memberships():
 
     world = World(tenants={T1: [ANN], T2: [ANN], LAB: [ANN, BOB]})
     try:
-        world.call(world.tenants.request_offboard, LAB, now=world.clock())
+        world.move_tenant(LAB, "offboarding")
         reads: list[str] = []
         for name in ("tenant_exists", "active_tenants"):
             real = getattr(world.raw_repo, name, None)
@@ -120,7 +128,7 @@ async def test_offboarding_ends_existence_for_identity_at_once(world):
     """The request that moves an active tenant to offboarding is what identity sees next: no cache, no second step (O4, DC-6)."""
     await world.seed(T1)
     assert await world.identity.tenant_exists(T1) is True
-    await world.tenants.request_offboard(T1, now=NOW)
+    await world.offboard(T1)
     assert await world.identity.tenant_exists(T1) is False
 
 
@@ -135,10 +143,10 @@ async def test_an_invitation_of_a_tenant_that_went_offboarding_does_not_accept(w
     other = fixture_uuid("tenant:1214-seam-2")
     for tenant in (T1, other):
         await world.seed(tenant)
-    user = await world.identity.add_user("ann@x.org", created_at=NOW)
+    user = await seed_user(world.identity, "ann@x.org", created_at=NOW)
     kept = await world.identity.ensure_invitation(user.id, T1, invited_by=None, now=NOW)
     live = await world.identity.ensure_invitation(user.id, other, invited_by=None, now=NOW)
-    await world.tenants.request_offboard(T1, now=NOW)
+    await world.offboard(T1)
     assert await world.identity.accept_invitation(kept.id, now=NOW) is False
     assert (await world.identity.membership(kept.id)).status == "invited"
     assert await world.identity.accept_invitation(live.id, now=NOW) is True  # control: same user, active tenant
@@ -151,7 +159,7 @@ async def test_an_identity_twin_built_without_a_tenant_store_has_a_store_of_its_
     from defender.tenancy import InMemoryTenantRepository
 
     elsewhere: Any = InMemoryTenantRepository()
-    await elsewhere.add_tenant(T1, created_at=NOW, state="active")
+    await seed_tenant(elsewhere, T1, created_at=NOW, state="active")
     alone = InMemoryIdentityRepository()
     assert await alone.tenant_exists(T1) is False
     sharing = InMemoryIdentityRepository(tenants=elsewhere)  # control: given the store it sees the tenant
@@ -166,7 +174,7 @@ async def test_a_tenant_added_after_the_identity_twin_was_built_is_seen():
     tenants: Any = InMemoryTenantRepository()
     identity = InMemoryIdentityRepository(tenants=tenants)
     assert await identity.tenant_exists(T1) is False
-    await tenants.add_tenant(T1, created_at=NOW, state="active")
+    await seed_tenant(tenants, T1, created_at=NOW, state="active")
     assert await identity.tenant_exists(T1) is True
 
 

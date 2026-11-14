@@ -224,8 +224,8 @@ class Writes(Protocol):
 
 
 class AuditPort(Protocol):
-    """Actions with no store write of their own (`artifact.read`). Demo only: on the real server
-    every caller of it is unreachable, so it refuses."""
+    """Actions with no store write of their own (`artifact.read`). Unbacked: on the real server every
+    caller of it is unreachable (no blob store holds an artifact), so it refuses (#1496)."""
 
     async def announce(self, principal: Principal, action: AuditAction, target: str, detail: str = "") -> None:
         """Record an audit event for the principal's tenant and caller, stamped by the store's

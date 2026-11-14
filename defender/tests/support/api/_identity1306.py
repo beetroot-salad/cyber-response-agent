@@ -22,9 +22,17 @@ needs an open invitation in a tenant that is not active seeds it while the tenan
 `world.move_tenant(T, state)`.
 
 Interface: `World(administrators=, tenants=, start=, failing_sends=, send_interval=, send_deadline=,
-failing_writes=, tenant_repo=None, alert_mapping=PLANTED_ALERT_MAPPING)`; `world.tenants` (the twin), `world.repo` (identity repository,
+failing_writes=, tenant_repo=None, alert_mapping=PLANTED_ALERT_MAPPING, database=False)`; `world.tenants` (the twin), `world.repo` (identity repository,
 failure-wrapped if `failing_writes`), `world.raw_repo` (never wrapped); `world.register(T, *, state="active")`;
-`world.seed_first_members(T, emails)`; `world.restart(administrators=, tenants=)`."""
+`world.seed_first_members(T, emails)`; `world.restart(administrators=, tenants=)`.
+
+#1496: the store ports are composed by the real server's own wiring (`api_server.api_deps`), never by a second
+implementation. `database=True` puts the whole world on a fresh migrated test database (skipped without
+`DEFENDER_TEST_POSTGRES_DSN`): people in `PostgresIdentityRepository`, tenants in `PostgresTenantRepository`, and the
+alerts, investigations, learning jobs, alert mapping, writes and offboarding in one `JobStorePorts` over a `JobStore`;
+`world.add_alert(T)` stores an alert through the store and answers its id. Without a database, and for the families
+the real server leaves unbacked (systems, credentials, the check, artifact links, the audit-only port, lessons) in
+either world, every store port is `Refusing`: a route reaching one answers 501 after sign-in and membership passed."""
 from __future__ import annotations
 
 import base64
@@ -47,7 +55,7 @@ import anyio.from_thread
 from fastapi.testclient import TestClient
 
 from defender.api.app import create_app
-from defender.api.fakes import InMemorySecrets, InMemoryStore, StubArtifactLinks, StubSystemChecker
+from defender.api.refusing import Refusing
 from defender.api.models import Alert, AlertSummary
 from defender.api.ports import ApiDeps
 
@@ -63,7 +71,11 @@ from defender.identity import (  # noqa: F401  (re-exported for the cases)
 )
 from defender.tenancy import InMemoryTenantRepository
 from defender.tests.support.tenancy._mapping1345 import PLANTED_ALERT_MAPPING, add_to_twin, mapping_value
+from defender.tests.support.shared import _worlds
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
+from defender.tests.support.tenancy._active1214 import offboard_on_database
+from defender.tests.support.tenancy._twin1496 import offboard_twin
+from defender.tests.support.tenancy._twin1496 import seed_tenant
 
 T0 = _dt.datetime(2026, 10, 26, 9, 0, tzinfo=_dt.UTC)
 HOUR = _dt.timedelta(hours=1)
@@ -515,7 +527,8 @@ class _AppLoop:
                 ready.set()
                 await portal.sleep_until_stopped()
 
-        threading.Thread(target=anyio.run, args=(main,), daemon=True, name="world-loop").start()
+        self.thread = threading.Thread(target=anyio.run, args=(main,), daemon=True, name="world-loop")
+        self.thread.start()
         assert ready.wait(10), "the world's event loop did not start"
         self.portal = box[0]
 
@@ -559,14 +572,18 @@ class _LifespanClient(_WorldClient):
 
 
 class OffboardingSpy:
-    """#1360 D6: a recorder around the dev composition's production port (`defender.api.fakes.InMemoryOffboarding`).
-    Records each call as `(tenant, actor)` in `calls`; with `failing` set it raises before delegating. It holds NO
-    policy: the tenant transition and the ending of jobs are the wrapped class's."""
+    """#1360 D6: the world's store ports (the real `JobStorePorts`, or `Refusing`) as handed to the server's own wiring
+    (`api_server.api_deps`), with the offboard recorded: each call as `(tenant, actor)` in `calls`; with `failing` set it
+    raises before delegating. Every other port method is the wrapped object's. It holds NO policy: the tenant
+    transition and the ending of jobs are the store's."""
 
     def __init__(self, inner: Any) -> None:
         self._inner = inner
         self.calls: list[tuple[str, str]] = []
         self.failing = False
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
 
     async def offboard_tenant(self, tenant_id: str, *, actor: Any) -> Any:
         self.calls.append((str(tenant_id), str(actor)))
@@ -575,14 +592,80 @@ class OffboardingSpy:
         return await self._inner.offboard_tenant(tenant_id, actor=actor)
 
 
-def _offboarding_spy(tenants: Any, store: Any, clock: Any) -> Any:
-    from defender.api.fakes import InMemoryOffboarding
+@dataclasses.dataclass(frozen=True)
+class Announced:
+    """One audit event the job store announced (its `defender.jobs.audit` log line), by the fields the cases read."""
 
-    return OffboardingSpy(InMemoryOffboarding(tenants, store, clock))
+    action: str
+    tenant_id: str
+    user_id: str
+    target: str
+    detail: str | None
+    credential_id: str | None
+
+
+class AuditRecorder:
+    """One world's audit events: every event its job store announced, oldest first, in `events` (#1496)."""
+
+    def __init__(self) -> None:
+        self.events: list[Announced] = []
+        #: While set, announcements are seeding's (the world saving a tenant's mapping), not a case's: not recorded.
+        self.paused = False
+
+    def record(self, record: logging.LogRecord) -> None:
+        if not self.paused:
+            self.events.append(Announced(*(None if (v := getattr(record, f, None)) is None else str(v) for f in (
+                "action", "tenant_id", "actor", "target", "detail", "credential_id"))))
+
+
+class _AuditTap(logging.Handler):
+    """The one listener on the job store's audit log (`defender.jobs.audit`) for every world alive in the process. The
+    store announces on the loop thread of the world it serves, so each event goes to the recorder of the world whose
+    loop emitted it: worlds alive together never see each other's. The tap owns the logger's level while any world is
+    attached (raised to INFO when the first attaches, restored when the last detaches), so no world's close can stop
+    another's capture."""
+
+    LOGGER = "defender.jobs.audit"
+
+    def __init__(self) -> None:
+        super().__init__(logging.INFO)
+        self._by_thread: dict[int, AuditRecorder] = {}
+        self._level: int | None = None
+        self._guard = threading.Lock()
+
+    def emit(self, record: logging.LogRecord) -> None:
+        recorder = self._by_thread.get(record.thread or 0)
+        if recorder is not None:
+            recorder.record(record)
+
+    def attach(self, thread: int, recorder: AuditRecorder) -> None:
+        with self._guard:
+            logger = logging.getLogger(self.LOGGER)
+            if not self._by_thread:
+                self._level = logger.level
+                logger.addHandler(self)
+                if not logger.isEnabledFor(logging.INFO):
+                    logger.setLevel(logging.INFO)
+            self._by_thread[thread] = recorder
+
+    def detach(self, thread: int) -> None:
+        with self._guard:
+            if self._by_thread.pop(thread, None) is not None and not self._by_thread:
+                logger = logging.getLogger(self.LOGGER)
+                logger.removeHandler(self)
+                logger.setLevel(self._level if self._level is not None else logging.NOTSET)
+
+
+_TAP = _AuditTap()
+
+
+#: What a world with no database refuses its store ports with.
+NO_STORE = "no store in this test world (#1496)"
 
 
 class World:
-    """App + identity service over an in-memory repository, fakes, one clock and a bootstrap file.
+    """App + identity service over an in-memory repository (or the test database, `database=True`), one clock and a
+    bootstrap file.
     `restart` builds a fresh service and app over the same repository and fakes; browsers follow it.
 
     Rule for the cases: no browser is reused after more than 12 hours idle or 7 days since its
@@ -593,19 +676,41 @@ class World:
                  failing_sends: int = 0, send_interval: _dt.timedelta | None = None,
                  send_deadline: _dt.timedelta | None = None, failing_writes: bool = False,
                  tenant_repo: Any = None,
-                 alert_mapping: Mapping[str, str | None] | None = PLANTED_ALERT_MAPPING) -> None:
+                 alert_mapping: Mapping[str, str | None] | None = PLANTED_ALERT_MAPPING,
+                 database: bool = False) -> None:
         #: #1345: the mapping each seeded tenant holds in the twin (`None`: none), see `_mapping1345`.
         self.alert_mapping = alert_mapping
         self.clock = Clock()
-        self.store = InMemoryStore(self.clock)
-        #: The one tenant twin, shared with the identity repository and the API (r9 DC-7).
-        self.tenants: Any = tenant_repo if tenant_repo is not None else InMemoryTenantRepository()
-        self.raw_repo: Any = InMemoryIdentityRepository(tenants=self.tenants)
-        self.repo: Any = FailingRepository(self.raw_repo) if failing_writes else self.raw_repo
-        #: #1360 D6: the one port the admin offboard route reaches the tenant transition and the jobs through.
-        self.offboarding = _offboarding_spy(self.tenants, self.store, self.clock)
+        #: #1496: the test database's DSN, or None for a world without one; opened before the loop starts, so a
+        #: database `pytest.skip`s leaves no thread behind.
+        self.dsn: str | None = None
+        self.jobs: Any = None
+        self.audit: AuditRecorder | None = None
+        self._resources = contextlib.ExitStack()
+        if database:
+            self._open_database()
         self._loop = _AppLoop()
-        weakref.finalize(self, self._loop.stop)
+        if self.audit is not None:  # the store announces on this loop's thread: its events are this world's
+            ident = self._loop.thread.ident
+            assert ident is not None
+            _TAP.attach(ident, self.audit)
+            self._resources.callback(_TAP.detach, ident)
+        #: Stops the loop, then drops the database: run once, by `close()` or when the world is collected unclosed.
+        self._finalizer = weakref.finalize(self, _release, self._loop, self._resources)
+        _worlds.opened(self)
+        if database:
+            self.tenants: Any = tenant_repo if tenant_repo is not None else self._pg_tenants
+            self.raw_repo: Any = self._pg_people
+        else:
+            #: The one tenant twin, shared with the identity repository and the API (r9 DC-7).
+            self.tenants = tenant_repo if tenant_repo is not None else InMemoryTenantRepository()
+            self.raw_repo = InMemoryIdentityRepository(tenants=self.tenants)
+        self.repo: Any = FailingRepository(self.raw_repo) if failing_writes else self.raw_repo
+        #: The backed families' ports, composed as the real server composes them (#1496).
+        self.store: Any = self._backed_ports()
+        #: #1360 D6: the one port the admin offboard route reaches the tenant transition and the jobs through: the real
+        #: store's on the test database, refusing without one.
+        self.offboarding = OffboardingSpy(self.store)
         self.signin = FakeSignIn()
         self.signin.fail_sends = failing_sends
         self.mail = FakeMail()
@@ -615,10 +720,84 @@ class World:
         self.send_interval = send_interval
         self.send_deadline = send_deadline
         self.build(administrators=administrators, tenants=tenants or {})
-        self.call(self._seed, tenants or {})
+        self._seed(tenants or {})
         if start:
             self.call(self.service.start)
             self.send_pending()
+
+    def _open_database(self) -> None:
+        """A migrated database of this world's own, with the real repositories and job store over it; dropped when the
+        world closes, after its pools and loop."""
+        from defender.identity.postgres import PostgresIdentityRepository
+        from defender.jobs.store import JobStore
+        from defender.tenancy.postgres import PostgresTenantRepository
+        from defender.tests.support.shared._postgres1339 import database
+
+        self.dsn = self._resources.enter_context(database(migrated=True))
+        self.audit = AuditRecorder()
+        self._pg_tenants = PostgresTenantRepository(self.dsn)
+        self._pg_people = PostgresIdentityRepository(self.dsn)
+        self.jobs = JobStore(self.dsn, clock=self.clock)
+
+    def _backed_ports(self) -> Any:
+        if self.jobs is None:
+            return Refusing(NO_STORE)
+        from defender.api.job_store import JobStorePorts
+
+        return JobStorePorts(self.jobs)
+
+    @property
+    def audit_events(self) -> list[Announced]:
+        """Every audit event the job store announced since the world was built (database worlds only)."""
+        if self.audit is None:
+            raise TypeError("audit_events needs a world on the test database (database=True)")
+        return self.audit.events
+
+    def add_alert(self, tenant: str, alert: Alert = ALERT) -> str:
+        """Plant `alert` for `tenant` as a row of the test database, under its own id, title and
+        description (test support, as `tests/jobs/test_store.py` plants rows); its id. The store serves it from there."""
+        if self.dsn is None:
+            raise TypeError("add_alert needs a world on the test database (database=True)")
+        from defender.tests.support.shared._postgres1339 import execute
+
+        execute(self.dsn, "INSERT INTO jobs.alerts (id, tenant_id, vendor, vendor_ticket_id, fired_at, changed_at, "
+                          "received_at, title, description, raw) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (alert.alert_id, tenant, alert.vendor, alert.vendor_ticket_id, alert.fired_at, alert.changed_at,
+                 alert.received_at, alert.title, alert.description, alert.raw.encode()))
+        return str(alert.alert_id)
+
+    def _sql(self, statement: str, params: tuple[Any, ...]) -> None:
+        if self.dsn is None:
+            raise TypeError("planting rows needs a world on the test database (database=True)")
+        from defender.tests.support.shared._postgres1339 import execute
+
+        execute(self.dsn, statement, params)
+
+    def plant_investigation(self, tenant: str, investigation: Any) -> Any:
+        """Plant `investigation` (the wire model) as its row, its status as the row's stage, with a bare alert of its
+        `alert_id` when the tenant has none (test support, as `tests/jobs/test_store.py` plants rows); returns it."""
+        inv = investigation
+        self._sql("INSERT INTO jobs.alerts (id, tenant_id, vendor, vendor_ticket_id, fired_at, changed_at, received_at, "
+                  "raw) VALUES (%s, %s, 'tickets', %s, %s, %s, %s, '{}') ON CONFLICT DO NOTHING",
+                  (inv.alert_id, tenant, f"T-{inv.alert_id}", inv.created_at, inv.created_at, inv.created_at))
+        lease = inv.created_at + DAY if inv.status == "running" else None
+        self._sql("INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, stage, created_at, "
+                  "started_at, finished_at, disposition, cost_usd, cost_is_lower_limit, failure_reason, "
+                  "lease_expires_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                  (inv.investigation_id, tenant, inv.alert_id, inv.request_key, inv.attempt, inv.status, inv.created_at,
+                   inv.started_at, inv.finished_at, inv.disposition, inv.cost_usd, inv.cost_is_lower_limit,
+                   inv.failure_reason, lease))
+        return inv
+
+    def plant_learning_job(self, tenant: str, job: Any) -> Any:
+        """Plant `job` (the wire model) as its row; its investigation must be planted. Returns it."""
+        lease = job.created_at + DAY if job.status == "running" else None
+        self._sql("INSERT INTO jobs.learning_jobs (id, tenant_id, alert_id, investigation_id, request_key, attempt, "
+                  "trigger, status, created_at, finished_at, reason, lease_expires_at, sibling_cost_usd, findings_count, "
+                  "publish_state) VALUES (%s, %s, %s, %s, %s, 1, %s, %s, %s, %s, %s, %s, 0, 0, 'none')",
+                  (job.learning_job_id, tenant, job.alert_id, job.investigation_id, f"k-{job.learning_job_id}",
+                   job.trigger, job.status, job.created_at, job.finished_at, job.reason, lease))
+        return job
 
     def call(self, fn: Any, *args: Any, **kwargs: Any) -> Any:
         """Run `fn(*args, **kwargs)` on the app's loop and return what it awaited:
@@ -634,9 +813,23 @@ class World:
         return self._loop.portal.call(run)
 
     def close(self) -> None:
-        """Close the service (repository and sign-in port) on the loop, then stop the loop."""
-        self.call(self.service.close)
-        self._loop.stop()
+        """Close the service (repository and sign-in port), the job store and the tenant repository on the loop, then
+        stop the loop and drop the database. Idempotent; `tests/conftest.py` closes every world a test left open."""
+        if not self._finalizer.alive:
+            return
+        try:
+            async def pools() -> None:
+                try:
+                    service = getattr(self, "service", None)  # None when the world failed while being built
+                    if service is not None:
+                        await service.close()  # the identity repository's pool with it
+                finally:
+                    for opened in (getattr(self, "jobs", None), getattr(self, "_pg_tenants", None)):
+                        if opened is not None:
+                            await opened.close()
+            self._loop.portal.call(pools)
+        finally:
+            self._finalizer()
 
     def build(self, *, administrators: Sequence[str], tenants: Mapping[str, Sequence[str]]) -> None:
         """A fresh service and app over the same repositories. `tenants` is not read here (the bootstrap
@@ -652,37 +845,54 @@ class World:
             programs=NoProgramsRealm(),
             **extra,
         )
-        self.app = create_app(ApiDeps(
-            alerts=self.store, investigations=self.store, learning_jobs=self.store,
-            lessons=self.store, learning_work=self.store, systems=self.store, writes=self.store,
-            secrets=InMemorySecrets(self.store), checker=StubSystemChecker(),
-            artifact_links=StubArtifactLinks(),
-            identity=self.service, frontend_origin=FRONTEND_ORIGIN, tenants=self.tenants,
-            offboarding=self.offboarding,
-            alert_mapping=self.store, audit=self.store,  # FC-14: the in-memory store serves both new ports (Am-5)
-        ))
+        self.app = create_app(self.deps())
+
+    def deps(self) -> ApiDeps:
+        """The app's ports for the current service, composed by the server's own wiring (#1496): the store's ports (with
+        the offboard recorded) back what the server backs, the rest refuse as the server's do."""
+        from defender.api_server import api_deps
+
+        return api_deps(identity=self.service, tenants=self.tenants, ports=self.offboarding,
+                        frontend_origin=FRONTEND_ORIGIN)
 
     def restart(self, *, administrators: Sequence[str] = (),
                 tenants: Mapping[str, Sequence[str]] | None = None) -> None:
         """A process start: bootstrap (may raise `BootstrapRefused`), then the sender's first pass."""
         self.build(administrators=administrators, tenants=tenants or {})
-        self.call(self._seed, tenants or {})
+        self._seed(tenants or {})
         self.call(self.service.start)
         self.send_pending()
 
-    async def _seed(self, tenants: Mapping[str, Sequence[str]]) -> None:
+    def _seed(self, tenants: Mapping[str, Sequence[str]]) -> None:
         for tenant, emails in tenants.items():
-            await self._add_tenant(str(tenant), "active")
-            await self._seed_first_members(str(tenant), tuple(emails))
+            self._add_tenant(str(tenant), "active")
+            self.call(self._seed_first_members, str(tenant), tuple(emails))
 
-    async def _add_tenant(self, tenant: str, state: str) -> None:
-        if tenant in {r.id for r in await self.tenants.tenants()}:
+    def _add_tenant(self, tenant: str, state: str) -> None:
+        """Seed one tenant (and its mapping), from the calling thread: the database's rows by blocking SQL here, never on
+        the world's loop (a sender sharing the loop would stall), the async writes through `call`."""
+        if tenant in {r.id for r in self.call(self.tenants.tenants)}:
             return
-        added = self.tenants.add_tenant(tenant, created_at=self.clock(), state=state)
-        if inspect.isawaitable(added):  # GAP-0-1: the seeder's sync/async shape is not pinned
-            await added
+        if self.dsn is not None and not isinstance(self.tenants, InMemoryTenantRepository):
+            from defender.tests.support.tenancy._active1214 import insert_active_tenant
+
+            insert_active_tenant(self.dsn, tenant, state=state, wiring=False)
+            if self.alert_mapping is not None:
+                self.call(self._save_mapping, tenant)
+            return
+        self.call(seed_tenant, self.tenants, tenant, created_at=self.clock(), state=state)
         if self.alert_mapping is not None:  # design-implied twin seeder (r5), see `_mapping1345.seed_twin`
-            await add_to_twin(self.tenants, tenant, mapping_value(self.alert_mapping))
+            self.call(add_to_twin, self.tenants, tenant, mapping_value(self.alert_mapping))
+
+    async def _save_mapping(self, tenant: str) -> None:
+        """The seeded tenant's mapping, through the store, its announcement not a case's (paused)."""
+        assert self.audit is not None
+        assert self.alert_mapping is not None
+        self.audit.paused = True
+        try:
+            await self.jobs.put_alert_mapping(tenant, mapping_value(self.alert_mapping), actor="u-1")
+        finally:
+            self.audit.paused = False
 
     async def _seed_first_members(self, tenant: str, emails: Sequence[str]) -> None:
         repo, now = self.raw_repo, self.clock()
@@ -708,11 +918,14 @@ class World:
 
     def register(self, tenant: str, *, state: str = "active") -> None:
         """Seed `tenant` through the tenant twin's seeder (r9 DC-6: no port method registers a tenant)."""
-        self.call(self._add_tenant, str(tenant), state)
+        self._add_tenant(str(tenant), state)
 
     async def amove_tenant(self, tenant: str, state: str) -> None:
         """`move_tenant` for a hook already running on the world's loop (a hook must not block on `call`)."""
-        await self.tenants.request_offboard(tenant, now=self.clock())
+        if self.dsn is not None:
+            await offboard_on_database(self.dsn, tenant)
+        else:
+            await offboard_twin(self.tenants, tenant)
         if state == "offboarded":  # the worker's last step, through the twin's own hold
             async with self.tenants.lock(tenant) as held:
                 assert held is not None, "the tenant is held by nobody else"
@@ -802,6 +1015,12 @@ class World:
         return self.sign_in(email)
 
 
+def _release(loop: Any, resources: contextlib.ExitStack) -> None:
+    """Stop the world's loop, then drop its database, if it has one (FORCE: a pool left open is cut)."""
+    loop.stop()
+    resources.close()
+
+
 def wait_until(condition: Callable[[], bool], *, seconds: float = 5.0) -> bool:
     """Poll `condition` in real time for at most `seconds` (the lifespan's sender runs on the app's loop thread)."""
     deadline = time.monotonic() + seconds
@@ -813,12 +1032,14 @@ def wait_until(condition: Callable[[], bool], *, seconds: float = 5.0) -> bool:
 
 
 def two_tenants() -> tuple[World, TestClient, TestClient]:
-    """T1 with member ann (and one alert), T2 with member bob, both signed in at T0."""
-    world = World(tenants={T1: [ANN], T2: [BOB]})
-    world.store.add_alert(T1, ALERT)
+    """T1 with member ann (and one alert, `ALERT`), T2 with member bob, both signed in at T0; on the
+    test database (#1496)."""
+    world = World(tenants={T1: [ANN], T2: [BOB]}, database=True)
+    world.add_alert(T1)
     return world, world.sign_in(ANN), world.sign_in(BOB)
 
 
-def lab() -> World:
-    """The lab scenario: `ops` listed as administrator, `me` as the lab's first member."""
-    return World(administrators=[OPS], tenants={LAB: [ME]})
+def lab(*, database: bool = False) -> World:
+    """The lab scenario: `ops` listed as administrator, `me` as the lab's first member; `database=True` puts it on the test
+    database (a case that offboards, #1496)."""
+    return World(administrators=[OPS], tenants={LAB: [ME]}, database=database)

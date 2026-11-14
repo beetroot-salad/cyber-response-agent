@@ -6,12 +6,10 @@ import inspect
 import re
 import typing
 
-import anyio
 import pytest
 from pydantic import ValidationError
 
 from defender.api import models, ports
-from defender.api.fakes import InMemoryStore
 from defender.api.ports import AlertsRepository
 
 NOW = dt.datetime(2026, 10, 29, 12, 0, tzinfo=dt.UTC)
@@ -87,17 +85,6 @@ def test_s2_cost_is_lower_limit_is_required_on_the_wire_model_and_in_its_schema(
         models.Investigation(investigation_id="b1000000-0000-4000-8000-000000000001", alert_id="a1000000-0000-4000-8000-000000000001", status="queued", created_at=NOW, **fields)
 
 
-def test_s2_the_fake_creates_an_investigation_whose_cost_is_not_a_lower_limit():
-    """The development fake carries the field: a new investigation's cost is 0 and exact. (S2, S4)"""
-    async def run():
-        store = InMemoryStore(lambda: NOW)
-        store.add_alert(TENANT, models.Alert(**_alert(raw="{}")))
-        return await store.create_investigation(PRINCIPAL, "a1000000-0000-4000-8000-000000000001", "req-9")
-
-    inv, _ = anyio.run(run)
-    assert (inv.cost_usd, inv.cost_is_lower_limit) == (0.0, False)
-
-
 def test_b12_failure_reason_names_the_two_take_over_reasons_beside_the_old_ones():
     """The `failure_reason` text lists `lease_lapsed` and `retry_cap` and still `cancelled` and `worker_error`. (B12)"""
     description = models.Investigation.model_fields["failure_reason"].description
@@ -133,66 +120,18 @@ def test_o14_the_summary_has_a_description_and_neither_severity_nor_rule():
         models.AlertSummary(**{k: v for k, v in _alert().items() if k != "description"})
 
 
-def test_o14_list_alerts_has_no_severity_filter_in_ports_fakes_and_the_route():
-    """`list_alerts` loses `severity` in the port, the development fake and the published route. (O14)"""
+def test_o14_list_alerts_has_no_severity_filter_in_ports_the_real_ports_and_the_route():
+    """`list_alerts` has no `severity` in the port, the real ports and the published route. (O14)"""
+    from defender.api.job_store import JobStorePorts
+
     assert "severity" not in inspect.signature(AlertsRepository.list_alerts).parameters
-    assert "severity" not in inspect.signature(InMemoryStore.list_alerts).parameters
+    assert "severity" not in inspect.signature(JobStorePorts.list_alerts).parameters
     from defender.tests.api.test_api_stub import Api
 
     doc = Api().client.get("/openapi.json").json()
     names = {p["name"] for p in doc["paths"]["/tenants/{tenant_id}/alerts"]["get"]["parameters"]}
     assert "fired_after" in names  # control: the parameters are the ones we read
     assert "severity" not in names
-
-
-def test_o14_the_fake_stamps_a_created_investigation_with_its_request_key_and_attempt_one():
-    """The development fake follows the field change: a create carries the key it was given, attempt 1. (O14)"""
-    async def run():
-        store = InMemoryStore(lambda: NOW)
-        store.add_alert(TENANT, models.Alert(**_alert(raw="{}")))
-        return await store.create_investigation(PRINCIPAL, "a1000000-0000-4000-8000-000000000001", "req-9")
-
-    inv, created = anyio.run(run)
-    assert created is True
-    assert (inv.request_key, inv.attempt) == ("req-9", 1)
-
-
-def _cancel(status):
-    """Cancel an investigation of this stage in a fresh fake; returns the store and the outcome or the error."""
-    async def run():
-        store = InMemoryStore(lambda: NOW)
-        store.add_investigation(TENANT, models.Investigation(
-            investigation_id="b1000000-0000-4000-8000-000000000001", alert_id="a1000000-0000-4000-8000-000000000001", status=status, created_at=NOW,
-            cost_usd=0.0, cost_is_lower_limit=False, request_key="k1", attempt=1))
-        try:
-            return store, await store.cancel_investigation(PRINCIPAL, "b1000000-0000-4000-8000-000000000001")
-        except ports.Conflict as conflict:
-            return store, conflict
-
-    return anyio.run(run)
-
-
-def test_o9_the_fake_cancels_a_queued_investigation_as_aborted_with_reason_cancelled():
-    """Queued becomes `aborted` with `failure_reason` `cancelled` and a finish time, as the job store's cancel does. (O9, O14)"""
-    _, got = _cancel("queued")
-    assert (got.status, got.failure_reason, got.finished_at) == ("aborted", "cancelled", NOW)
-
-
-def test_o9_the_fake_cancels_a_running_investigation_as_aborted_with_reason_cancelled():
-    """Running becomes `aborted`/`cancelled` with a finish time, as the job store's cancel does; no "not yet". (O9, O14, B9: conflict updated; the fake follows the port, which the design amends)"""
-    store, got = _cancel("running")
-    assert not isinstance(got, BaseException), got
-    assert (got.status, got.failure_reason, got.finished_at) == ("aborted", "cancelled", NOW)
-    assert anyio.run(store.get_investigation, TENANT, "b1000000-0000-4000-8000-000000000001").status == "aborted"
-
-
-@pytest.mark.parametrize("status", ["completed", "unparseable", "failed", "aborted"])
-def test_o9_the_fake_refuses_to_cancel_an_ended_investigation_and_leaves_it_as_it_was(status):
-    """A terminal stage is a `Conflict` ("already ended"); the stored row keeps its stage. (O9, O14)"""
-    store, got = _cancel(status)
-    assert isinstance(got, ports.Conflict), got
-    assert "already ended" in str(got)
-    assert anyio.run(store.get_investigation, TENANT, "b1000000-0000-4000-8000-000000000001").status == status
 
 
 def test_m11_the_client_request_id_describes_the_latest_attempt():
@@ -249,23 +188,6 @@ def test_b12_every_audit_vocabulary_gains_takeover_and_retry():
     assert new <= jobs
     assert jobs <= set(typing.get_args(ports.AuditAction)), "the job store emits an action the API's vocabulary lacks"
 
-
-
-def test_s2_the_demo_investigations_carry_an_exact_mark_beside_a_number():
-    """Both seeded demo investigations are built with `cost_is_lower_limit` (false), each beside a number. (S2, S4)"""
-    from defender.api.demo import demo_deps, demo_id
-    from defender.records.formats import InvestigationId, TenantId
-    from defender.tests.support.shared._fixture_uuid import fixture_uuid
-
-    tenant = fixture_uuid("tenant:t-one")
-
-    async def run():
-        deps = await demo_deps((tenant,), lambda: NOW)
-        return [await deps.investigations.get_investigation(TenantId(tenant), demo_id(InvestigationId, tenant, name))
-                for name in ("inv-completed", "inv-running")]
-
-    seeded = anyio.run(run)
-    assert [(i.cost_is_lower_limit, i.cost_usd is not None) for i in seeded] == [(False, True)] * 2
 
 
 #: r5's outcome table, reasons only (#1344 O12).
@@ -405,13 +327,12 @@ def test_1485_a_reason_is_carried_as_the_plain_text_it_is():
 
 def test_1485_the_learning_work_port_and_its_fake_take_the_tenant_then_status_after_and_limit_by_keyword():
     """`list_set_aside(tenant_id, *, status, after, limit)` and `list_parked_batches(tenant_id, *, after, limit)` on the
-    port, the same on the demo's store; `ApiDeps.learning_work` is required. (Names, Port)"""
+    port; `ApiDeps.learning_work` is required. (Names, Port)"""
     import dataclasses
 
     for owner, name, keywords in ((ports.LearningWorkRepository, "list_set_aside", ["status", "after", "limit"]),
-                                  (InMemoryStore, "list_set_aside", ["status", "after", "limit"]),
                                   (ports.LearningWorkRepository, "list_parked_batches", ["after", "limit"]),
-                                  (InMemoryStore, "list_parked_batches", ["after", "limit"])):
+                                  ):
         params = [p for p in inspect.signature(getattr(owner, name)).parameters.values() if p.name != "self"]
         assert [p.name for p in params] == ["tenant_id", *keywords], (owner, name)
         assert all(p.kind is inspect.Parameter.KEYWORD_ONLY for p in params[1:]), (owner, name)

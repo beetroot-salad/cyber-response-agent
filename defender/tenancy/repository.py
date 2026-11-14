@@ -6,9 +6,9 @@ code, so the refusals below can be caught by code that never builds a repository
 Writers (P2, DC-4):
 - The API: `request_create(now=)`, `request_resume(T)`, `request_rotate(T)`. Each is one conditional update on an ordinary connection that never takes
   the tenant lock; it returns the record it left, or raises `NotFound` (no such tenant) or
-  `Conflict` (the tenant's state refuses the request). `request_offboard(T, now=)` is no longer
-  the API's (#1360): the job store runs tenancy's `offboard` together with the ending of the
-  tenant's jobs, in one transaction; `request_offboard` stays for the lifecycle and tests.
+  `Conflict` (the tenant's state refuses the request). The offboard request is not the
+  repository's (#1360, #1496): the job store runs tenancy's `offboard` together with the ending of
+  the tenant's jobs, in one transaction (`JobStore.offboard_tenant`), its one path.
 - Host processes: `record_publish_status(T, line, by=)`, a launch-time publish report line.
 - The worker holding a tenant's lock (management service or host actor), through `HeldTenant`.
 
@@ -158,10 +158,6 @@ class TenantRepository(Protocol):
         ...
     async def request_resume(self, tenant_id: TenantId) -> TenantRecord:
         """Clear the failure, and nothing else; `Conflict` with no failure."""
-        ...
-    async def request_offboard(self, tenant_id: TenantId, *, now: _dt.datetime) -> TenantRecord:
-        """From `creating` or `active`: `offboarding`, `offboard` pending at step `offboard`
-        (service), replacing any pending action and clearing the failure."""
         ...
     async def request_rotate(self, tenant_id: TenantId) -> TenantRecord:
         """Only `active` with nothing pending: `rotate` pending at step `names` (service)."""

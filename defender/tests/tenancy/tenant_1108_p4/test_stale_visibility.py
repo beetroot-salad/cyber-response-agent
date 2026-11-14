@@ -28,7 +28,6 @@ from defender.tests.support.runtime.engine._spec767 import (
     record,
     use_case_record,
 )
-from defender.tests.support.api._programs1307 import NoProgramsRealm  # #1307 D7: the programs port is required
 
 # ---------------------------------------------------------------------------------------------
 # The run record's `knowledge_source`, spelled in one place.
@@ -523,11 +522,9 @@ def test_run_main_comment_follows_the_host_outcome_when_the_box_rewrites_the_rec
 
 _NOW = "2026-10-22T12:00:00+00:00"
 _TENANT = "6f1c3b9e-4a5d-4e8f-9a0b-1c2d3e4f5a6b"
-#: #1306 O7: routes live under `/tenants/{T}`; the caller is a seeded session (cookie + Origin).
+#: #1306 O7: routes live under `/tenants/{T}`; the caller is a member signed in to the API test world.
 _ROUTE = f"/tenants/{_TENANT}"
-_SESSION = "stale-visibility-session"
-_ORIGIN = "https://app.defender.test"
-_AUTH = {"Cookie": f"__Host-defender_session={_SESSION}", "Origin": _ORIGIN}
+_ALERT_ID = "a1000000-0000-4000-8000-000000000001"
 
 
 def _knowledge(status: str, stale_kind: str | None = None) -> dict[str, Any]:
@@ -542,7 +539,7 @@ def _investigation(investigation_id: str, knowledge: dict[str, Any] | None) -> A
     doc: dict[str, Any] = {
         # #1382: ids are UUIDs; the label names the case's own one.
         "investigation_id": fixture_uuid(f"investigation:{investigation_id}"),
-        "alert_id": "a1000000-0000-4000-8000-000000000001", "status": "completed",
+        "alert_id": _ALERT_ID, "status": "completed",
         "disposition": "benign", "cost_usd": 1.0, "created_at": _NOW, "started_at": _NOW,
         "finished_at": _NOW,
         "request_key": f"rk-{investigation_id}", "attempt": 1,  # required on the wire model (#1342 D-d)
@@ -553,55 +550,36 @@ def _investigation(investigation_id: str, knowledge: dict[str, Any] | None) -> A
     return Investigation.model_validate(doc)
 
 
-class _NoPort:
-    """A sign-in or mail port these route tests never exercise: any call is a failure."""
-
-    def __getattr__(self, name: str) -> Any:
-        raise AssertionError(f"a route test reached the unused port: {name}")
-
-
-def _client(*investigations: Any) -> Any:
-    """The real app over the stub's own store (`InMemoryStore`, the store port's fake), seeded
-    through its `add_investigation`."""
-    import datetime as _dt
-
+def _served(*investigations: Any) -> tuple[Any, Any]:
+    """The API test world on its own test database (#1496: the real ports), `ann` a member of the tenant and signed in,
+    the tenant's alert stored and each investigation planted as its row, its knowledge as the worker writes it: (the
+    world, ann's browser)."""
     pytest.importorskip("fastapi")
-    import anyio
-    from fastapi.testclient import TestClient
+    from defender.tests.support.api._identity1306 import ANN, World
+    from defender.tests.support.shared._postgres1339 import execute
 
-    from defender.api.app import create_app
-    from defender.api.fakes import (InMemoryOffboarding, InMemorySecrets, InMemoryStore, StubArtifactLinks,
-                                    StubSystemChecker)
-    from defender.api.ports import ApiDeps
-    from defender.identity import Bootstrap, IdentityService, InMemoryIdentityRepository
-    from defender.records._tenant_id import TenantId
-    from defender.tenancy import InMemoryTenantRepository
-
-    store = InMemoryStore(lambda: _dt.datetime(2026, 10, 22, 12, tzinfo=_dt.UTC))
+    world = World(tenants={_TENANT: [ANN]}, database=True)
+    assert world.add_alert(_TENANT) == _ALERT_ID
+    assert world.dsn is not None
     for inv in investigations:
-        store.add_investigation(_TENANT, inv)
-    now = lambda: _dt.datetime(2026, 10, 22, 12, tzinfo=_dt.UTC)  # noqa: E731
-    tenants = InMemoryTenantRepository()
-    repo = InMemoryIdentityRepository(tenants=tenants)
+        world.plant_investigation(_TENANT, inv)
+        if inv.knowledge is not None:
+            execute(world.dsn, "UPDATE jobs.investigations SET knowledge = %s WHERE id = %s",
+                    (json.dumps(inv.knowledge.model_dump(mode="json")), inv.investigation_id))
+    return world, world.sign_in(ANN)
 
-    async def seed() -> None:
-        # The in-memory repositories hold no loop state, so a throwaway loop seeds them.
-        await tenants.add_tenant(TenantId(_TENANT), created_at=now())
-        ann = await repo.add_user("ann@example.invalid", created_at=now(), status="active", display_name="Ann")
-        await repo.add_membership(ann.id, TenantId(_TENANT), status="active", invited_by=None,
-                                  created_at=now(), accepted_at=now())
-        await repo.add_session(_SESSION, ann.id, now=now(), expires_at=now() + _dt.timedelta(days=7))
 
-    anyio.run(seed)
-    identity = IdentityService(repo, signin=_NoPort(), mail=_NoPort(), clock=now,
-                               bootstrap=Bootstrap(administrators=()), programs=NoProgramsRealm())
-    deps = ApiDeps(
-        identity=identity, tenants=tenants, frontend_origin=_ORIGIN,
-        alerts=store, investigations=store, learning_jobs=store, lessons=store, learning_work=store, systems=store,
-        writes=store, secrets=InMemorySecrets(store), checker=StubSystemChecker(),
-        artifact_links=StubArtifactLinks(), offboarding=InMemoryOffboarding(tenants, store, now),
-        alert_mapping=store, audit=store)  # FC-14 (Am-5)
-    return TestClient(create_app(deps), base_url="https://testserver")
+def _store_run_knowledge(dsn: str, investigation_id: str, record_text: str | None, *,
+                         stamp_knowledge_source: Any = None) -> None:
+    """Write the investigation's knowledge as the worker does at a run's end: the host record's text (`None`: none) and
+    whether the run stamp names a source, by the one mapping records owns (`api_knowledge(knowledge_status(...))`, as
+    `records.job_lane` calls it)."""
+    from defender.records._knowledge_status import api_knowledge, knowledge_status
+    from defender.tests.support.shared._postgres1339 import execute
+
+    mapped = api_knowledge(knowledge_status(record_text, stamp_names_source=stamp_knowledge_source is not None))
+    execute(dsn, "UPDATE jobs.investigations SET knowledge = %s WHERE id = %s",
+            (None if mapped is None else json.dumps(mapped), investigation_id))
 
 
 CASES = [("stale", "transient"), ("stale", "operator"), ("current", None), ("pinned", None)]
@@ -612,11 +590,11 @@ def test_o_warn_api_serves_investigation_knowledge_through_the_store_port(status
     """An investigation's `knowledge` reaches `GET /investigations/{id}` and the list as the
     store holds it."""
     inv = _investigation(f"inv-{status}-{stale_kind}", _knowledge(status, stale_kind))
-    client = _client(inv)
-    one = client.get(f"{_ROUTE}/investigations/{inv.investigation_id}", headers=_AUTH)
+    world, client = _served(inv)
+    one = client.get(f"{_ROUTE}/investigations/{inv.investigation_id}")
     assert one.status_code == 200, one.text
     assert one.json().get("knowledge") == _knowledge(status, stale_kind), one.json()
-    listed = client.get(f"{_ROUTE}/investigations", headers=_AUTH).json()
+    listed = client.get(f"{_ROUTE}/investigations").json()
     assert [i.get("knowledge") for i in listed["items"]] == [_knowledge(status, stale_kind)], listed
 
 
@@ -648,18 +626,17 @@ RECORD_TO_WIRE = [
 def test_o_warn_api_maps_the_run_records_knowledge_source_to_the_wire_through_the_store(
         tmp_path, record, wire):
     """The store maps the host record's text (raw reason included) to the API's `knowledge`,
-    carrying the commit and stale kind and dropping the reason, and the route serves it. Seeded
-    through the stub's `InMemoryStore.add_run_knowledge`, which applies the port's rule."""
+    carrying the commit and stale kind and dropping the reason, and the route serves it. Written
+    as the worker writes it (`_store_run_knowledge`), served through the real ports."""
     # A placeholder the mapping must replace.
     inv = _investigation("inv-mapped", {"status": "pinned", "commit": "0" * 40, "stale_kind": None})
-    client = _client(inv)
-    store = client.app.state.deps.investigations
+    world, client = _served(inv)
     run_dir = tmp_path / "runs" / "run-1"
     run_dir.mkdir(parents=True)
     text = write_host_record(run_dir, record).read_text(encoding="utf-8")
-    store.add_run_knowledge(_TENANT, inv.investigation_id, text)
+    _store_run_knowledge(world.dsn, inv.investigation_id, text)
 
-    served = client.get(f"{_ROUTE}/investigations/{inv.investigation_id}", headers=_AUTH).json()
+    served = client.get(f"{_ROUTE}/investigations/{inv.investigation_id}").json()
     assert served.get("knowledge") == wire, (
         f"the record {record} is served as {served.get('knowledge')}, not {wire}")
     assert "reason" not in (served.get("knowledge") or {}), served
@@ -668,7 +645,10 @@ def test_o_warn_api_maps_the_run_records_knowledge_source_to_the_wire_through_th
 def test_o_warn_api_published_contract_declares_the_knowledge_field():
     """`/openapi.json` declares `Investigation.knowledge` with exactly the statuses
     current/stale/pinned and stale kinds transient/operator (or null)."""
-    doc = _client().get("/openapi.json").json()
+    pytest.importorskip("fastapi")
+    from defender.tests.support.api._identity1306 import World
+
+    doc = World().client().get("/openapi.json").json()  # no store is reached: no database
     schemas = doc["components"]["schemas"]
     inv = schemas.get("Investigation") or schemas["Investigation-Output"]
     assert "knowledge" in inv["properties"], sorted(inv["properties"])
@@ -697,29 +677,6 @@ def test_o_warn_api_published_contract_declares_the_knowledge_field():
 
     assert enum_of(props["status"]) == {"current", "stale", "pinned"}, props["status"]
     assert enum_of(props["stale_kind"]) == {"transient", "operator", None}, props["stale_kind"]
-
-
-def test_o_warn_the_stub_seed_exercises_stale_and_current_knowledge():
-    """The demo store serves at least one stale investigation with its kind and one current
-    one."""
-    import anyio
-    from fastapi.testclient import TestClient
-
-    from defender.api.app import create_app
-    from defender.api.demo import demo_deps, demo_sessions
-
-    deps = anyio.run(demo_deps, (_TENANT,))
-    client = TestClient(create_app(deps), base_url="https://testserver")
-    session = demo_sessions((_TENANT,))[f"{_TENANT}-analyst"]
-    auth = {"Cookie": f"__Host-defender_session={session}", "Origin": deps.frontend_origin}
-    items = client.get(f"{_ROUTE}/investigations", headers=auth).json()["items"]
-    knowledge = [i.get("knowledge") for i in items]
-    stale = [k for k in knowledge if isinstance(k, dict) and k.get("status") == "stale"]
-    assert stale, f"the stub seeds no stale investigation: {knowledge}"
-    for k in stale:
-        assert k.get("stale_kind") in STALE_KINDS, f"a stale seed names no kind: {k}"
-        assert k.get("commit"), f"a stale seed names no commit: {k}"
-    assert any(isinstance(k, dict) and k.get("status") == "current" for k in knowledge), knowledge
 
 
 # ---------------------------------------------------------------------------------------------
@@ -802,23 +759,22 @@ def test_od22_a_pre_p4_run_posts_todays_comment(tmp_path, monkeypatch):
 
 
 def test_od22_an_investigation_with_no_run_serves_null_knowledge():
-    """Case (1): seeded without knowledge, or through `add_run_knowledge(..., None)`, it serves
+    """Case (1): seeded without knowledge, or written from no record, it serves
     null. Control: a fresh record's text is served `current`."""
     inv = _investigation("inv-no-run", None)
-    client = _client(inv)
-    served = client.get(f"{_ROUTE}/investigations/{inv.investigation_id}", headers=_AUTH).json()
+    world, client = _served(inv)
+    served = client.get(f"{_ROUTE}/investigations/{inv.investigation_id}").json()
     assert "knowledge" in served, served
     assert served["knowledge"] is None, served
 
-    store = client.app.state.deps.investigations
-    store.add_run_knowledge(_TENANT, inv.investigation_id, None)
-    served = client.get(f"{_ROUTE}/investigations/{inv.investigation_id}", headers=_AUTH).json()
+    _store_run_knowledge(world.dsn, inv.investigation_id, None)
+    served = client.get(f"{_ROUTE}/investigations/{inv.investigation_id}").json()
     assert served.get("knowledge", "absent") is None, (
         f"an investigation with no run is served {served.get('knowledge', 'absent')!r}")
 
-    store.add_run_knowledge(_TENANT, inv.investigation_id,
+    _store_run_knowledge(world.dsn, inv.investigation_id,
                             json.dumps(knowledge_source("fresh")))
-    served = client.get(f"{_ROUTE}/investigations/{inv.investigation_id}", headers=_AUTH).json()
+    served = client.get(f"{_ROUTE}/investigations/{inv.investigation_id}").json()
     assert served.get("knowledge") == _knowledge("current"), served
 
 
@@ -839,16 +795,15 @@ def test_od22_the_api_fails_closed_only_where_a_record_should_exist(case):
     `current`."""
     text, stamp_source, expected = API_RUN_CASES[case]
     inv = _investigation(f"inv-od22-{case}", None)
-    client = _client(inv)
-    store = client.app.state.deps.investigations
+    world, client = _served(inv)
 
-    store.add_run_knowledge(_TENANT, inv.investigation_id, json.dumps(knowledge_source("fresh")),
+    _store_run_knowledge(world.dsn, inv.investigation_id, json.dumps(knowledge_source("fresh")),
                             stamp_knowledge_source=stamp_view(knowledge_source("fresh")))
-    served = client.get(f"{_ROUTE}/investigations/{inv.investigation_id}", headers=_AUTH).json()
+    served = client.get(f"{_ROUTE}/investigations/{inv.investigation_id}").json()
     assert served.get("knowledge") == _knowledge("current"), served
 
-    store.add_run_knowledge(_TENANT, inv.investigation_id, text,
+    _store_run_knowledge(world.dsn, inv.investigation_id, text,
                             stamp_knowledge_source=stamp_source)
-    served = client.get(f"{_ROUTE}/investigations/{inv.investigation_id}", headers=_AUTH).json()
+    served = client.get(f"{_ROUTE}/investigations/{inv.investigation_id}").json()
     assert served.get("knowledge", "absent") == expected, (
         f"the {case} run is served {served.get('knowledge', 'absent')!r}, not {expected!r}")

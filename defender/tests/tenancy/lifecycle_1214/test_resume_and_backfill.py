@@ -33,6 +33,7 @@ from defender.tests.tenancy.lifecycle_1214._job_cases import (  # noqa: E402
 )
 from defender.tests.tenancy.lifecycle_1214._support import REPO_WINDOW, LifecycleWorld  # noqa: E402
 from defender.tests.support.tenancy._active1214 import CREATED  # noqa: E402
+from defender.tests.support.shared._postgres1339 import execute  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._fakes import FORGE_URL  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._job_cases import as_bot  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._job_cases import jwts, protection_reads  # noqa: E402
@@ -370,9 +371,10 @@ class Lab:
         _git("remote", "add", "origin", f"{FORGE_URL}/{self.repo}.git", cwd=self.clone)
         _git("push", "-q", str(world.forge.bare(self.repo)), "main", cwd=self.clone)
         (self.clone / "keep.txt").write_text("the lab's own clone\n", encoding="utf-8")
-        world.call(world.tenants.add_tenant, LAB, created_at=CREATED, state="creating", pending_action="create",
-                   step="names", step_actor="service", failure=BACKFILL_FAILURE, repo=self.repo,
-                   origin=f"{FORGE_URL}/{self.repo}.git")
+        execute(world.dsn, "INSERT INTO tenancy.tenants (id, created_at, state, pending_action, step, step_actor, failure) "
+                           "VALUES (%s, %s, 'creating', 'create', 'names', 'service', %s)", (LAB, CREATED, BACKFILL_FAILURE))
+        execute(world.dsn, "INSERT INTO tenancy.forge_wiring (tenant_id, repo, origin) VALUES (%s, %s, %s)",
+                (LAB, self.repo, f"{FORGE_URL}/{self.repo}.git"))
         if rule is not None:
             world.forge.put_rule(self.repo, **rule)
         self.forge_calls = len(world.forge.calls)

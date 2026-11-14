@@ -170,7 +170,7 @@ Spelled as the tests call them. One line each; the test file named holds the ful
 - `_replay_harness.drive(..., agent=)` / `_default_tenant`: the run gets `<T>/exports/<commit>/{agent,settings}`.
 
 **Store and API**
-- `InMemoryStore.add_run_knowledge(tenant_id, investigation_id, record_text: str | None, *, stamp_knowledge_source: Mapping | None = None)`: `(None, None)` → `knowledge` null; `(None, present)` → stale/operator, commit null; unparseable → stale/operator, commit null; a record → the record→wire mapping.
+- `test_stale_visibility._store_run_knowledge(dsn, investigation_id, record_text: str | None, *, stamp_knowledge_source: Mapping | None = None)` writes the row's knowledge as the worker does, on the test database (#1496): `(None, None)` → `knowledge` null; `(None, present)` → stale/operator, commit null; unparseable → stale/operator, commit null; a record → the record→wire mapping.
 - `Investigation.knowledge: {status: current|stale|pinned, commit, stale_kind}` (fresh→current).
 
 ### Open items in the seams
@@ -375,7 +375,7 @@ Collateral still naming deleted files: `tests/_shard_weights.json`, `learning/st
   claim is refused for a box-planted entry should be archived before the reset.
 - (minor, TRI-3) The author-drain half of the deleted `test_1179 ... non_member_raises_before_any_batch_work`; the label is an enum.
 - (accepted, test-only) `_tenants1106.run_tenant` defaults to the clone working tree for unit-level callers (section 1).
-- The API reading the host record is enforced only through the stub seam `InMemoryStore.add_run_knowledge` until a real store exists; the design text should say so.
+- The API cases write the row's knowledge as the worker does (`_store_run_knowledge`) and read it through the real ports; the worker's own read of the host record is `records.job_lane`'s, tested in `tests/jobs/test_worker.py`.
 - Census residuals: tuple-unpack/loop targets, computed names, `importlib`/`getattr`/aliases, call-time joins, extension-less shims; mitigated by the O1 layout test and behavioural clone-unreadable checks. Also: no `ls /agent` control on the listing check, and the reason needle is an exact match.
 - Budget tests use real subprocesses and wall-clock bounds, so they may flake under load.
 - `declared_systems` split-root gap: 4 `@sys` folder-gate cases in `test_lead_author_holes.py`.

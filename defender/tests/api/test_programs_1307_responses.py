@@ -28,6 +28,7 @@ from defender.tests.support.api._programs1307 import (  # noqa: E402
     issue_oauth,
     revoke,
     parse_time,
+    second_alert,
     soar,
     start_investigation,
 )
@@ -36,6 +37,13 @@ from defender.tests.support.api._routes1307a import PATH_ID, app_routes, normal,
 KINDS = ("key", "oauth_client")
 #: Every tenant route the automation role is granted (the permission table of the roles tests, written out there once).
 AUTOMATION_ROUTES = [r for r in TENANT_ROUTES if PERMISSION_OF[r] in AUTOMATION]
+#: #1496: the sweeps run on the real ports, which do not back lessons (refused, #1082): a lessons call answers 501 before
+#: any store.
+STORE_ROUTES = [r for r in AUTOMATION_ROUTES if not r[1].endswith("/lessons")]
+#: The routes that announce: every write the automation role is granted. The one read that audits, the artifact read,
+#: finds nothing on the real store (no blob store holds an artifact, #1083 N4), so it is left out; its program and
+#: credential are checked over scripted ports below (`test_the_artifact_read_audits_the_program_and_the_credential_it_used`).
+AUDITED_ROUTES = [r for r in STORE_ROUTES if r[0] != "GET"]
 
 
 def _credential_of(s: Soar, kind: str) -> tuple[str, str]:
@@ -70,11 +78,10 @@ class _Ids:
 
 
 def _seeded(s: Soar) -> _Ids:
-    """An investigation of the tenant's alert, queued, with one artifact: every id an automation route names exists."""
-    investigation_id = start_investigation(s.ann, T1, "seed").json()["investigation_id"]
-    store = s.world.store
-    found = s.world.call(store.get_investigation, T1, investigation_id)
-    store.add_investigation(T1, found.model_copy(update={"artifacts": ["report.md"]}))
+    """An investigation, queued, of another alert than `ALERT`: every id an automation route names exists, and a start on
+    `ALERT` is a new investigation (the real store answers a second start on an alert with its live one, announcing
+    nothing). Its artifact list is empty, as the real store's always is until a blob store exists (#1083 N4)."""
+    investigation_id = start_investigation(s.ann, T1, "seed", alert_id=second_alert(s.world)).json()["investigation_id"]
     return _Ids(investigation_id)
 
 
@@ -84,11 +91,11 @@ def _route(s: Soar, ids: _Ids, route: tuple[str, str]) -> tuple[str, str]:
 
 
 def _new_events(s: Soar, mark: int) -> list[Any]:
-    return s.world.store.audit_events[mark:]
+    return s.world.audit_events[mark:]
 
 
 @pytest.mark.parametrize("kind", KINDS)
-@pytest.mark.parametrize("route", AUTOMATION_ROUTES, ids=route_id)
+@pytest.mark.parametrize("route", AUDITED_ROUTES, ids=route_id)
 def test_every_audit_event_a_program_causes_names_the_program_and_the_credential_it_used(
         route: tuple[str, str], kind: str) -> None:
     """Called as a program, every route the automation role is granted emits the same audited actions a person's call does
@@ -98,22 +105,70 @@ def test_every_audit_event_a_program_causes_names_the_program_and_the_credential
     ids = _seeded(s)
     method, path = _route(s, ids, route)
     program, credential = _as_program(s, kind)
-    mark = len(s.world.store.audit_events)
+    mark = len(s.world.audit_events)
     response = program.request(method, path, json=_body(route, ids))
     assert response.status_code < 400 or PATH_ID in path, (route, response.status_code, response.text)  # a learning job has no fixture
     events = _new_events(s, mark)
+    assert events, (route, "the call announced nothing: the sweep would check no event")
     for event in events:
         assert (event.user_id, event.credential_id) == (s.program_id, credential), (route, event)
     # parity: the same call by a person is audited the same number of times (a program is not audited less, or more)
     person = soar()
     person_ids = _seeded(person)
     person_method, person_path = _route(person, person_ids, route)
-    person_mark = len(person.world.store.audit_events)
+    person_mark = len(person.world.audit_events)
     person_response = person.ann.request(person_method, person_path, json=_body(route, person_ids))
     assert person_response.status_code == response.status_code, route
     person_events = _new_events(person, person_mark)
     assert [e.action for e in events] == [e.action for e in person_events], route
     assert all(e.credential_id is None and e.user_id == user_id(person.ann) for e in person_events)
+
+
+class _ArtifactRead:
+    """Scripted ports for the one read that audits (#1496): the real server backs no artifact (#1083 N4) and no audit
+    port, so the artifact read is unreachable there. The investigation is the real store's with one artifact listed;
+    the link is scripted; the audit port records the principal each announce names."""
+
+    def __init__(self, store: Any) -> None:
+        self._store = store
+        self.announced: list[tuple[Any, str, str, str]] = []
+
+    async def get_investigation(self, tenant_id: Any, investigation_id: Any) -> Any:
+        found = await self._store.get_investigation(tenant_id, investigation_id)
+        return None if found is None else found.model_copy(update={"artifacts": ["report.md"]})
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._store, name)
+
+    async def signed_url(self, tenant_id: Any, investigation_id: Any, key: str) -> str:
+        return f"https://blobs.example.invalid/{investigation_id}/{key}"
+
+    async def announce(self, principal: Any, action: str, target: str, detail: str = "") -> None:
+        self.announced.append((principal, action, target, detail))
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_artifact_read_audits_the_program_and_the_credential_it_used(kind: str) -> None:
+    """The one audited read (F9, O8, D6): read as a program, its audit names the program and the credential used, never
+    none and never the program's other credential; read as a person, no credential. Over scripted artifact and audit
+    ports, since the real server backs neither; the caller is verified through the real program path."""
+    import dataclasses
+
+    from defender.api.app import create_app
+
+    s = soar()
+    ids = _seeded(s)
+    scripted = _ArtifactRead(s.world.store)
+    s.world.app = create_app(dataclasses.replace(s.world.deps(), investigations=scripted, artifact_links=scripted,
+                                                 audit=scripted))
+    path = ids.fill("/tenants/{tenant_id}/investigations/{investigation_id}/artifacts/{key}")
+    program, credential = _as_program(s, kind)
+    assert program.get(path).status_code == 307
+    assert s.ann.get(path).status_code == 307
+    [(by_program, action, target, key), (by_person, *_)] = scripted.announced
+    assert (action, target, key) == ("artifact.read", ids.values["investigation_id"], "report.md")
+    assert (str(by_program.actor_id), by_program.credential_id) == (s.program_id, credential)
+    assert (str(by_person.actor_id), by_person.credential_id) == (user_id(s.ann), None)
 
 
 def _body(route: tuple[str, str], ids: _Ids) -> Any:
@@ -122,11 +177,11 @@ def _body(route: tuple[str, str], ids: _Ids) -> Any:
     return None if body is None else {**body, **({"client_request_id": "from-program"} if "client_request_id" in body else {})}
 
 
-def test_the_audited_routes_of_the_class_are_the_ones_that_matter() -> None:
-    """Control on the sweep above: the class holds more than reads, so a route that drops the credential has something to drop."""
-    audited = [r for r in AUTOMATION_ROUTES if r[0] != "GET"]
-    assert len(audited) >= 2, audited
-    assert any(r[1].endswith("/artifacts/{}") for r in AUTOMATION_ROUTES)  # the artifact read audits though it is a GET
+def test_the_audited_sweep_holds_every_write_the_automation_role_is_granted() -> None:
+    """Control on the sweep above, which asserts each of its routes announces: it holds every automation write (a write
+    granted later falls in and must announce), and at least two."""
+    assert {r for r in AUTOMATION_ROUTES if r[0] != "GET"} == set(AUDITED_ROUTES)
+    assert len(AUDITED_ROUTES) >= 2, AUDITED_ROUTES
 
 
 # --- F10: the expiry header on every response after verification, errors included (D9, A6) --------------------------------
@@ -146,7 +201,7 @@ def _break_the_store(s: Soar) -> None:
 
 
 @pytest.mark.parametrize("kind", KINDS)
-@pytest.mark.parametrize("route", AUTOMATION_ROUTES, ids=route_id)
+@pytest.mark.parametrize("route", STORE_ROUTES, ids=route_id)
 def test_a_500_to_a_verified_program_carries_the_expiry_header(route: tuple[str, str], kind: str) -> None:
     """A handler that raises something unforeseen: the server error is a response to a program whose credential verified, so
     it carries the credential's expiry like every other (D9, A6)."""
