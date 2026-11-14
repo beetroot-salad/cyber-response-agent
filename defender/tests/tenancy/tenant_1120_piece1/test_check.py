@@ -125,7 +125,7 @@ def test_1120_check_exits_zero_over_a_clean_tenant_and_a_clean_folder(tmp_path: 
 
 
 def _missing_required_setting(knowledge: Path) -> str:
-    target = knowledge / "settings" / "lead-zero.yaml"  # #1359: the case mapping is no longer required
+    target = knowledge / "settings" / "verb-grants.yaml"  # #1359, #1503: the case mapping and lead-zero config are optional
     target.unlink()
     return str(target)
 
@@ -224,8 +224,9 @@ def _no_agent_half(folder: Path) -> str:
 
 
 def _no_required_setting(folder: Path) -> str:
-    (folder / "settings" / "lead-zero.yaml").unlink()
-    return str(folder / "settings" / "lead-zero.yaml")
+    # `verb-grants.yaml`: the one required file since #1503 made `lead-zero.yaml` optional.
+    (folder / "settings" / "verb-grants.yaml").unlink()
+    return str(folder / "settings" / "verb-grants.yaml")
 
 
 def _link_in_settings(folder: Path) -> str:

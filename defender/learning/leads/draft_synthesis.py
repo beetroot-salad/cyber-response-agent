@@ -16,7 +16,6 @@ from defender._io import ENTRY_DIR, ENTRY_FILE, Held
 from defender._tree_listing import entry_kind
 from defender.learning.leads import lead_neighbors
 from defender.learning.leads.path_validation import CATALOG_FOLDER
-from defender.systems.verbs import body_param_for, engine_for
 
 if TYPE_CHECKING:
     from defender.learning.leads.lead_extraction import ExecutedLead
@@ -48,9 +47,8 @@ def _structured_call(verb_name: str, params: dict) -> str:
 
 
 def _executed_query(lead: ExecutedLead) -> str:
-    engine = engine_for(lead.system, lead.verb)
-    if engine != "none":
-        body_param = body_param_for(lead.system, lead.verb)
+    if lead.engine != "none":
+        body_param = lead.body_param
         body = (lead.params or {}).get(body_param) if body_param else None
         if isinstance(body, str) and body.strip():
             return body
@@ -82,7 +80,7 @@ def _draft_params(lead: ExecutedLead) -> list[str]:
     draft. The engine body param is excluded, since its value became the `## Executed query`
     recording rather than a `${placeholder}`.
     """
-    body_param = body_param_for(lead.system, lead.verb)
+    body_param = lead.body_param
     return sorted(n for n in (lead.params or {}) if n != body_param)
 
 
@@ -253,7 +251,7 @@ def synthesize_drafts(
         if draft in created:
             continue
         record = _executed_query(lead) or "# (no command captured for this query)"
-        engine = engine_for(lead.system, lead.verb)
+        engine = lead.engine
         try:
             # A plain file or folder at the name is the draft already there. Anything else falls
             # through to the write, which refuses what is not plain: a link at the name, or a

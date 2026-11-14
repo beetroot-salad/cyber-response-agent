@@ -249,10 +249,11 @@ def test_1214_a_placed_folder_that_fails_acceptance_is_refused_and_grant_gaps_ar
         tmp_path: Path) -> None:
     missing = tmp_path / "missing"
     H.place_knowledge(missing)
-    lead_zero = H.settings_dir(missing) / "lead-zero.yaml"
-    lead_zero.unlink()
+    # `verb-grants.yaml`: the one required file since #1503 made `lead-zero.yaml` optional.
+    required = H.settings_dir(missing) / "verb-grants.yaml"
+    required.unlink()
     before = H.tree_census(missing)
-    assert str(lead_zero) in H.accept_refusal(_tenant, missing)
+    assert str(required) in H.accept_refusal(_tenant, missing)
     assert H.census_diff(before, H.tree_census(missing)) == [], "the refused acceptance wrote something"
 
     torn = tmp_path / "torn"

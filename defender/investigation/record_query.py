@@ -153,7 +153,40 @@ QUERY_ROW_COLUMNS: tuple[str, ...] = (
     "payload_sha256",
     "system_key",
     "received_at",
+    "engine",
+    "body_param",
 )
+
+#: The shape a recorded `engine` may take: a name a `@verb(engine=...)` declaration gives (`esql`,
+#: `lucene`, a tenant adapter's own). The reader holds a box-writable row to it, since the value
+#: lands in a draft's code fence and front matter.
+ENGINE_NAME_RE = re.compile(r"\A[a-z][a-z0-9_-]{0,31}\Z")
+
+
+def declared_language(fn: Any) -> tuple[str, str | None]:
+    """The `(engine, body_param)` the adapter function `fn` declares, read when its call is
+    recorded (#1503), so the row says which param carried a query language's text. `("none",
+    None)` for no function (a call refused before it resolved) and for a declaration outside
+    `ENGINE_NAME_RE` or without its body param."""
+    if fn is None:
+        return "none", None
+    from defender.kit.verbs import body_param_of, engine_of
+
+    engine, body_param = engine_of(fn), body_param_of(fn)
+    if engine == "none" or not ENGINE_NAME_RE.match(engine) or not isinstance(body_param, str):
+        return "none", None
+    return engine, body_param
+
+
+def recorded_language(rec: dict) -> tuple[str, str | None]:
+    """A read row's `(engine, body_param)`: kept only in the shape `declared_language` writes,
+    with a body param the row's own `params` bound. Anything else, an older table's absent
+    columns included, reads as a plain call."""
+    engine, body_param, params = rec.get("engine"), rec.get("body_param"), rec.get("params")
+    if (isinstance(engine, str) and engine != "none" and ENGINE_NAME_RE.match(engine)
+            and isinstance(body_param, str) and isinstance(params, dict) and body_param in params):
+        return engine, body_param
+    return "none", None
 
 #: The call join's columns (`RunPaths.call_join`, #1255 G4/G6), in writer order: the row's
 #: `(lead_id, seq)` and the call's host-written id. The id's run part is the call run
@@ -189,6 +222,7 @@ def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the call
     state: RunState, *, run: Run, lead_id: str, system: str, verb: str, query_id: str, params: dict,
     raw_command: str, payload_text: str, exit_code: int, payload_status: str,
     payload_digest: str, system_key: str, call_id: str | None = None,
+    language: tuple[str, str | None] = ("none", None),
 ) -> dict:
     """@owns QUERY_ROW_COLUMNS @owns CALL_JOIN_COLUMNS — the single append to the queries
     table: allocate the lead's next seq, persist the payload sidecar, record the row in the
@@ -222,6 +256,10 @@ def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the call
             # stamp, kept out of the payload's bytes. The model's stamp line is rendered from
             # this value, so the two cannot disagree. Older tables have no such column.
             "received_at": state.now_iso(),
+            # The adapter's declared query language and the param carrying its text
+            # (`declared_language`, #1503): what the learning loop reads to record the query.
+            "engine": language[0],
+            "body_param": language[1],
         }
         # Compared as a tuple: the on-disk key order is part of the contract.
         if tuple(row) != QUERY_ROW_COLUMNS:

@@ -69,17 +69,14 @@ def test_the_template_table_is_total_over_the_real_adapters():
     assert not gaps, gaps
 
 
-def test_the_templates_lead_zero_names_an_established_template_in_the_catalog():
-    """The template's `lead-zero.yaml` names a template that exists in its own `agent/`
-    catalog (the one a run resolves the id against, never the checkout's), so an operator who
-    grants the lead its pair later has nothing else to fix."""
-    from defender.knowledge._corpus import is_established, iter_query_templates
+def test_the_template_names_no_correlation_query_and_its_catalog_is_empty():
+    """The template ships an empty catalog (U15, #1108) and so names no correlation query
+    (#1503): an operator who grants the lead its pair writes the query and names it."""
+    from defender.knowledge._corpus import iter_query_templates
 
     lz = T.mod("systems.lead_zero_config")
-    template_id = lz.load_correlation_template(lz.lead_zero_config_path(T.TEMPLATE_SETTINGS))
-    catalog = T.TEMPLATE_AGENT / "skills" / "gather" / "queries"
-    assert [t.id for t in iter_query_templates(catalog)
-            if t.id == template_id and is_established(t)] == [template_id]
+    assert lz.configured_template(lz.lead_zero_config_path(T.TEMPLATE_SETTINGS)) is None
+    assert list(iter_query_templates(T.TEMPLATE_AGENT / "skills" / "gather" / "queries")) == []
 
 
 def test_a_tenant_copied_from_the_template_resolves_and_grants_gather_nothing(tmp_path):
@@ -93,15 +90,19 @@ def test_a_tenant_copied_from_the_template_resolves_and_grants_gather_nothing(tm
 
 
 def test_every_committed_tenant_and_the_template_loads_its_table_and_lead_zero():
+    """Each table loads, and each lead-zero config present loads; the template has none
+    (#1503), the fixture one."""
     vd = T.mod("systems.verb_dispositions")
     lz = T.mod("systems.lead_zero_config")
     folders = [*(d / "settings" for d in _committed_tenant_dirs()), T.TEMPLATE_SETTINGS]
     assert T.FIXTURE_SETTINGS in folders
+    assert lz.configured_template(lz.lead_zero_config_path(T.FIXTURE_SETTINGS))
     for settings in folders:
         with warnings.catch_warnings():
             warnings.simplefilter("error", vd.DispositionWarning)
             assert vd.load_dispositions(vd.dispositions_path(settings)), settings
-        assert lz.load_correlation_template(lz.lead_zero_config_path(settings)), settings
+        if settings != T.TEMPLATE_SETTINGS:
+            assert lz.load_correlation_template(lz.lead_zero_config_path(settings)), settings
 
 
 def _reader_policies(run_dir: Path):

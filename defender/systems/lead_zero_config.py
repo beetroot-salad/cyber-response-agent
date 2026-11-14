@@ -1,6 +1,8 @@
 """The turn-zero correlation lead's per-tenant config: one key, the template it binds.
 
-A tenant's `settings/lead-zero.yaml` carries only `correlation_template: <id>`. The template's
+A tenant's `settings/lead-zero.yaml` carries only `correlation_template: <id>`. The file is
+optional: a tenant with no saved correlation query has none, and its lead is skipped when its
+grants withhold the lead, refused when they grant it (#1503). The template's
 front matter declares its system and verb, so the verb-disposition table only grants or
 withholds, checked for agreement with the template at run start (`lead_zero._agreement`).
 
@@ -12,6 +14,7 @@ Every refusal is a `LeadZeroConfigError` naming the path, for the operator who j
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from defender import _yaml
@@ -32,6 +35,16 @@ class LeadZeroConfigError(Exception):
 def lead_zero_config_path(settings_dir: Path) -> Path:
     """The config's path inside the run's tenant `settings/` folder."""
     return Path(settings_dir) / LEAD_ZERO_CONFIG_FILENAME
+
+
+def configured_template(path: Path) -> str | None:
+    """The `correlation_template` id at `path`, or `None` when no entry is there at all. A
+    link at the name counts as present (the settings checks refuse it as a link); a present
+    file is held to every rule `load_correlation_template` holds it to."""
+    path = Path(path)
+    if not os.path.lexists(path):
+        return None
+    return load_correlation_template(path)
 
 
 def load_correlation_template(path: Path) -> str:

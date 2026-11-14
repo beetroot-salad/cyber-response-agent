@@ -31,6 +31,7 @@ from defender.records import (
 from defender._text import as_str
 from defender.systems.circuit_breaker import error_class_for_exit
 from defender.knowledge import is_reserved_query_id
+from defender.investigation.record_query import recorded_language
 
 if TYPE_CHECKING:
     from defender.skills.invlang.schema import CompanionBody
@@ -94,6 +95,11 @@ class QueryRow:
     #: The run clock's reading when the reply arrived (#1385 O7), as the writer spelled it; `""`
     #: on a table written before the column existed.
     received_at: str = ""
+    #: The query language the adapter declared for this call and the param carrying its text
+    #: (#1503), held to `record_query.recorded_language`; `"none"` / `None` for a plain call and
+    #: for a table written before the columns existed.
+    engine: str = "none"
+    body_param: str | None = None
     #: The parsed JSON record this row was read from, by identity — see `record()`. Excluded
     #: from equality and repr; `SkipValidation` because validation would copy it.
     _record: Annotated[dict | None, SkipValidation] = field(
@@ -215,6 +221,7 @@ def load_queries_report(run_dir: Path) -> tuple[list[QueryRow], int]:
             error_class = str(raw_ec) if raw_ec is not None else None
         else:
             error_class = error_class_for_exit(exit_code)
+        engine, body_param = recorded_language(rec)
         rows.append(
             QueryRow(
                 lead_id=str(lead_id),
@@ -233,6 +240,8 @@ def load_queries_report(run_dir: Path) -> tuple[list[QueryRow], int]:
                 payload_sha256=as_str(rec.get("payload_sha256")),
                 system_key=as_str(rec.get("system_key")),
                 received_at=as_str(rec.get("received_at")),
+                engine=engine,
+                body_param=body_param,
                 _record=rec,
             )
         )

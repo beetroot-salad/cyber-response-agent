@@ -11,6 +11,8 @@ def _lead(
     query_id: str, params: dict | None = None, raw_command: str = "",
     system: str | None = None, verb: str = "get",
 ) -> lead_author.ExecutedLead:
+    """A record as the writer leaves it: an `esql` call carries the language its adapter
+    declares (`@verb(engine="esql", body_param="query")`, recorded at run time, #1503)."""
     if system is None:
         system = query_id.split(".", 1)[0] if "." in query_id else ""
     return lead_author.ExecutedLead(
@@ -19,6 +21,7 @@ def _lead(
         raw_command=raw_command, goal_text="probe the thing",
         what_to_summarize=(), raw_ref=Path("gather_raw/l-001/0.json"),
         payload_status="ok", payload_digest="2 bytes, 1 line(s)", error_class=None,
+        **({"engine": "esql", "body_param": "query"} if verb == "esql" else {}),
     )
 
 

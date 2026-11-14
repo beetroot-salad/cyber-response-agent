@@ -39,6 +39,7 @@ from defender.investigation.record_query import (
     RejectionBudgetTrip,
     RepeatTrip,
     append_query_row,
+    declared_language,
     bind_call_ids,  # noqa: F401 — driver binds the call identity through the query-tool seam
     next_call_id,
     dead_end_reason,
@@ -255,7 +256,7 @@ class QueryCapture(AbstractCapability[Any]):
         it, else `""`.
 
         Nothing downstream re-checks these rows, and the pitfalls channel uses an
-        `agent-fixable` row's `system` verbatim as `defender/skills/<system>/execution.md`, so an
+        `agent-fixable` row's `system` verbatim as the tenant's `skills/<system>/execution.md`, so an
         undeclared name must not reach it. `""` rows are already skipped by
         `collect_general_failures`.
 
@@ -562,6 +563,7 @@ class QueryCapture(AbstractCapability[Any]):
                 query_id=resolve_query_id(system, verb, None),
                 params=params, payload=None,
                 exit_code=USAGE_EXIT_CODE, detail=reason, system_key="",
+                fn=decision.fn,
             )
             raise ModelRetry(reason)
 
@@ -631,7 +633,7 @@ class QueryCapture(AbstractCapability[Any]):
             await self._record(
                 deps, system=system, verb=verb, query_id=REPEAT_TRIP_QUERY_ID, params=params,
                 payload=None, exit_code=USAGE_EXIT_CODE, detail=repeat_trip_detail(trip),
-                system_key="",
+                system_key="", fn=decision.fn,
             )
             executed = sum(1 for r in rows if r.get("exit_code") == 0)
             raise GatherDeadEnd(
@@ -673,7 +675,7 @@ class QueryCapture(AbstractCapability[Any]):
             await self._record(
                 deps, system=system, verb=verb, query_id=query_id, params=params,
                 payload=payload, exit_code=exit_code, detail=detail, system_key="",
-                charged=False,
+                charged=False, fn=decision.fn,
             )
             refused = _down_refusal(deps, system)
             assert refused is not None, "a system just marked down is down"
@@ -681,15 +683,18 @@ class QueryCapture(AbstractCapability[Any]):
         row, text = await self._record(
             deps, system=system, verb=verb, query_id=query_id, params=params,
             payload=payload, exit_code=exit_code, detail=detail, system_key="",
-            charged=charged,
+            charged=charged, fn=decision.fn,
         )
         return self._model_view(deps, row, text, exit_code, detail)
 
     async def _record(  # noqa: PLR0913 — one per row column the CALLER decides, plus `deps`
         self, deps, *, system: str, verb: str, query_id: str, params: dict,
         payload: Any, exit_code: int, detail: str, system_key: str, charged: bool = True,
+        fn: Any = None,
     ) -> tuple[dict, str]:
-        """Append the row and charge the circuit breaker to its `system`."""
+        """Append the row and charge the circuit breaker to its `system`. `fn` is the adapter
+        function the call resolved to, whose declared query language the row records; `None`
+        for a call refused before it resolved."""
         lead_id = _dispatched_lead(deps)
         state = run_state_of(deps)
 
@@ -719,6 +724,7 @@ class QueryCapture(AbstractCapability[Any]):
                 ),
                 system_key=system_key,
                 call_id=CALL_ID.get(),
+                language=declared_language(fn),
             )
             held = _ARRIVED.get()
             if held is not None and not held:

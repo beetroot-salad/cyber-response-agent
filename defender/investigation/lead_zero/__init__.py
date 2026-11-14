@@ -293,6 +293,9 @@ async def run_correlation(  # noqa: C901, PLR0911, PLR0912, PLR0913 — one earl
         return CorrelationOutcome(ending=ENDING_DOWN_AT_START, system=system, down=down)
     run_dir = run_state.run_dir
     pointer = RunPaths(run_dir).alert.relative_to(run_dir).as_posix()
+    # A dispatched lead always names its template: `resolve_correlation_dispatch` refuses a
+    # granted lead with none (#1503).
+    assert dispatch.template_id is not None, "a dispatched correlation lead names no template"
     goal, what_to_summarize = correlation_contract(pointer, dispatch.template_id)
     claimed = claim_lead({
         "run_dir": str(run_dir), "lead_id": L3, "goal": goal,
