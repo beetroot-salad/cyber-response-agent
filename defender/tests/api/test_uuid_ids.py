@@ -60,7 +60,7 @@ def _id_inputs(app: Any) -> list[tuple[APIRoute, str, str, set[str]]]:
 
 @pytest.fixture(scope="module")
 def world() -> tuple[World, Any, Any]:
-    world = World(administrators=[OPS], tenants={T1: [ANN]})
+    world = World(administrators=[OPS], tenants={T1: [ANN]}, database=True)  # the alert routes are the real store's (#1496)
     return world, world.sign_in(ANN), world.sign_in_admin()
 
 

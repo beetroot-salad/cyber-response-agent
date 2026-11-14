@@ -78,7 +78,7 @@ class LifecycleWorld(World):
         self.forge, self.integration, self.openbao = self.fakes.forge, self.fakes.integration, self.fakes.openbao
         self.git, self.publish = self.fakes.git, self.fakes.publish
         self.config = lifecycle_config(tmp_path, data_root)
-        super().__init__(administrators=[OPS], start=False)
+        super().__init__(administrators=[OPS], start=False, database=True)  # #1496: offboarding is the real store's
         self.call(self.service.start)
         self.send_pending()
         self.ops = self.sign_in_admin()

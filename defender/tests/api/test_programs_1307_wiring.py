@@ -1,36 +1,26 @@
-"""#1307 D7 wiring: the lifecycle's identity service holds a loud null programs port, and the demo app serves programs over its
-own fake. Not observable at this base: "a real API without programs-realm settings refuses to start" (no production
-composition root of the real API exists; `api/serve.py` is the demo server) — reported as a design gap.
+"""#1307 D7 wiring: the lifecycle's identity service holds a loud null programs port. The real API's programs wiring is
+tested over the real server (`test_1083_real_server.py`, `test_1083_program.py`); the demo app that served programs over
+a fake is gone (#1496).
 """
 from __future__ import annotations
 
 import asyncio
-import datetime as _dt
 import os
 import signal
 import sys
 from typing import Any
 
-import anyio
 import pytest
 
 pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
 
-from fastapi.testclient import TestClient  # noqa: E402
 
-from defender.api.app import create_app  # noqa: E402
-from defender.api.demo import demo_deps, demo_sessions  # noqa: E402
-from defender.tests.support.shared._fixture_uuid import fixture_uuid  # noqa: E402
 from defender.tests.support.shared._postgres1339 import empty_database  # noqa: E402,F401 — fixture
 from defender.tests.support.tenancy._active1214 import DSN_ENV  # noqa: E402
 from defender.tests.support.tenancy._host1214 import LIFECYCLE_MARK  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._support import lifecycle_config  # noqa: E402
 
-NOW = _dt.datetime(2026, 9, 28, 12, 0, tzinfo=_dt.UTC)
-TENANT = fixture_uuid("tenant:t-programs")
-BASE = "https://testserver"
-SESSION_COOKIE = "__Host-defender_session"
 
 
 @pytest.fixture(autouse=True)
@@ -109,22 +99,3 @@ def test_the_lifecycle_builds_its_identity_service_with_a_programs_port_that_ref
         return refused
 
     assert asyncio.run(use()) == ["create_client", "delete_client", "client_ids", "verify_token"]
-
-
-def test_the_demo_app_offers_programs_over_a_fake_realm():
-    """A demo session creates a program, a key and an OAuth credential; the key then calls the API as the program (D7)."""
-    deps = anyio.run(demo_deps, (TENANT,), lambda: NOW)
-    client = TestClient(create_app(deps), base_url=BASE)
-    session = {"Cookie": f"{SESSION_COOKIE}={demo_sessions((TENANT,))[f'{TENANT}-analyst']}", "Origin": deps.frontend_origin}
-    program = client.post(f"/tenants/{TENANT}/programs", headers=session, json={"display_name": "SOAR demo"})
-    assert program.status_code == 201, program.text
-    base = f"/tenants/{TENANT}/programs/{program.json()['id']}/credentials"
-    key = client.post(base, headers=session, json={"kind": "key", "name": "k"})
-    assert key.status_code == 201, key.text
-    oauth = client.post(base, headers=session, json={"kind": "oauth_client", "name": "o"})
-    assert oauth.status_code == 201, oauth.text
-    assert oauth.json()["secret"]
-    assert oauth.json()["secret"] != key.json()["secret"]
-    as_program = {"Authorization": f"Bearer {key.json()['secret']}"}
-    assert client.get(f"/tenants/{TENANT}/alerts", headers=as_program).status_code == 200
-    assert client.get(f"/tenants/{TENANT}/alerts", headers={"Authorization": "Bearer dfk_nonsense"}).status_code == 401  # control

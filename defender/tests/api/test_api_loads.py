@@ -78,8 +78,6 @@ def test_the_not_loaded_probe_sees_a_load():
 API_SERVER_MODULES = sorted(
     "defender.api_server" + ("" if p.stem == "__init__" else f".{p.stem}")
     for p in (DEFENDER / "api_server").rglob("*.py"))
-#: The demo's data and the in-memory twins are the demo server's only (Am-1, P1).
-_DEMO_ONLY = ("defender.api.demo", "defender.api.fakes")
 
 
 def test_the_program_glob_finds_the_entry_module():
@@ -93,17 +91,3 @@ def test_a_program_module_loads_no_runtime_or_learning(module):
     """Every module of the real server program loads nothing in `API_FORBIDDEN`. (Am-1)"""
     found = api_forbidden(_loaded(module))
     assert not found, f"{module} loads {found}"
-
-
-@pytest.mark.parametrize("module", API_SERVER_MODULES)
-def test_a_program_module_loads_neither_the_demo_nor_the_fakes(module):
-    """The real program never loads `defender.api.demo` or `defender.api.fakes`. (Am-1, P1)"""
-    modules = _loaded(module)
-    found = [m for name in _DEMO_ONLY for m in _found(modules, name)]
-    assert not found, f"{module} loads {found}"
-
-
-def test_the_demo_probe_sees_a_load():
-    """Positive control: importing the demo reports both demo-only modules. (Am-1)"""
-    modules = _loaded("defender.api.demo")
-    assert all(_found(modules, name) for name in _DEMO_ONLY)

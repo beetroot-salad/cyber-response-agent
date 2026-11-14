@@ -550,7 +550,7 @@ def test_a_member_of_two_tenants_reads_and_writes_only_in_the_paths_tenant() -> 
     """The path's tenant, not one of the caller's others, is the tenant every data route acts in (P-D, O7)."""
     world, ann, bob = two_tenants()
     other = ALERT.model_copy(update={"alert_id": "a1000000-0000-4000-8000-000000000002", "title": "T2's own"})
-    world.store.add_alert(T2, other)
+    world.add_alert(T2, other)
     world.invite(bob, T2, ANN)
     world.send_pending()
     [invitation] = me(ann)["invitations"]
@@ -563,7 +563,7 @@ def test_a_member_of_two_tenants_reads_and_writes_only_in_the_paths_tenant() -> 
         assert ann.get(f"/tenants/{tenant}/alerts/{foreign.alert_id}").status_code == 404, tenant
     created = ann.post(f"/tenants/{T2}/investigations", json={"alert_id": "a1000000-0000-4000-8000-000000000002", "client_request_id": "r1"})
     assert created.status_code == 201, created.text
-    [event] = world.store.audit_events
+    [event] = world.audit_events
     assert (event.tenant_id, event.user_id) == (T2, user_id(ann))
     assert items(ann.get(f"/tenants/{T1}/investigations")) == []
     assert [i["investigation_id"] for i in items(bob.get(f"/tenants/{T2}/investigations"))] == [

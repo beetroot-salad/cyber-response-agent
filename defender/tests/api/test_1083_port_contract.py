@@ -1,4 +1,4 @@
-"""#1083 O10: the API's ports, served by the adapter over the real job store (PostgreSQL-gated); the list cases also run over the fake.
+"""#1083 O10: the API's ports, served by the adapter over the real job store (PostgreSQL-gated); the list cases run over the real store only (#1496: the fake is gone).
 
 FORCED CHOICE FC-10: the adapter is `defender.api.job_store.JobStorePorts(store)`, one object serving the alerts, investigations,
 learning jobs, alert-mapping and write ports over a `JobStore` it does not own. FC-12 (r5 Am-6): a write takes `(principal, ...)`
@@ -17,7 +17,6 @@ import pytest
 
 from defender.api.models import InvestigationStatus
 from defender.tests.support.jobs._jobs1342 import ALERT_BYTES, DESCRIPTION, TITLE, JobsAudit, register_tenant
-from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.tenancy._mapping1345 import FIXTURE_ALERT_MAPPING
 
 pytestmark = pytest.mark.anyio
@@ -96,7 +95,7 @@ async def _ended(store: Any, adapter: Any, alert_id: str, *, stage: str = "compl
     return str(investigation.investigation_id)
 
 
-# --- the list reads: real store and fake, one set of cases ---------------------------------------------------------
+# --- the list reads: the real store, one set of cases --------------------------------------------------------------------
 
 class RealBackend:
     """Rows through the store's own writes, over the adapter."""
@@ -136,52 +135,8 @@ class RealBackend:
         return ids
 
 
-class FakeBackend:
-    def __init__(self) -> None:
-        from defender.api.fakes import InMemoryStore
-
-        self.reads = InMemoryStore(lambda: AT)
-        self._n = 0
-
-    def _id(self, kind: str) -> str:
-        self._n += 1
-        return fixture_uuid(f"1083:{kind}:{self._n}")
-
-    async def alerts(self, tenant: str, times: list[dt.datetime]) -> list[str]:
-        from defender.api.models import Alert
-
-        ids = [self._id("alert") for _ in times]
-        for i, t in zip(ids, times, strict=True):
-            self.reads.add_alert(tenant, Alert(alert_id=i, vendor="elastic", vendor_ticket_id=f"F-{i}", title="t",
-                                               description="d", fired_at=t, changed_at=t, received_at=t, raw="{}"))
-        return ids
-
-    async def investigations(self, tenant: str, times: list[dt.datetime]) -> list[str]:
-        from defender.api.models import Investigation
-
-        ids = [self._id("investigation") for _ in times]
-        for i, t in zip(ids, times, strict=True):
-            self.reads.add_investigation(tenant, Investigation(
-                investigation_id=i, alert_id=self._id("alert"), status="queued", request_key="k1", attempt=1,
-                cost_usd=0.0, cost_is_lower_limit=False, created_at=t))
-        return ids
-
-    async def learning_jobs(self, tenant: str, times: list[dt.datetime]) -> list[str]:
-        from defender.api.models import LearningJob
-
-        ids = [self._id("job") for _ in times]
-        for i, t in zip(ids, times, strict=True):
-            self.reads.add_learning_job(tenant, LearningJob(
-                learning_job_id=i, investigation_id=self._id("investigation"), alert_id=self._id("alert"),
-                status="queued", trigger="explicit", created_at=t))
-        return ids
-
-
-@pytest.fixture(params=[pytest.param("real", marks=POSTGRES), "fake"])
+@pytest.fixture(params=[pytest.param("real", marks=POSTGRES)])
 async def backend(request: pytest.FixtureRequest) -> AsyncIterator[Any]:
-    if request.param == "fake":
-        yield FakeBackend()
-        return
     from defender.api.job_store import JobStorePorts
     from defender.jobs import JobStore
 

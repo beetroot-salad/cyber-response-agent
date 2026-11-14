@@ -389,7 +389,7 @@ def test_platform_routes_refuse_a_program_and_a_person_without_the_flag() -> Non
 
 def test_platform_rescue_still_works_when_only_a_program_remains() -> None:
     """The last person leaves; a program is no member in the people sense, so the rescue invitation goes (P-I)."""
-    world = ProgramsWorld(administrators=[OPS], tenants={LAB: [ME]})
+    world = ProgramsWorld(administrators=[OPS], tenants={LAB: [ME]}, database=True)  # the program then reads alerts (#1496)
     me = world.sign_in(ME)
     program_id = str(create_program(me, LAB)["id"])
     _, key = issue_key(me, LAB, program_id)

@@ -27,7 +27,7 @@ Every test-facing interface the design leaves open is fixed HERE, once (forced c
   lists clients FIRST, then reads credentials (D4): `world.journal` shows `("realm", "client_ids")` before
   the repository's credential reads.
 - FC-7 repository: `credentials_of_program(program_id)` rows carry `.id`, `.state`, `.kind`, `.key_hash`.
-- FC-8 tenant audit events (`api/fakes.AuditEvent`) carry `credential_id` (None for a person); identity audit
+- FC-8 tenant audit events (the store's announcements, #1496) carry `credential_id` (None for a person); identity audit
   records are unchanged in shape (no credential_id). Actions: `PROGRAM_CREATE`, `PROGRAM_REMOVE`,
   `CREDENTIAL_CREATE`, `CREDENTIAL_REVOKE`, `CLIENT_DELETE` (D6).
 - FC-11 `Membership.role` (people roles only, #1454); key hash = hex SHA-256 (as sessions); expiry outside
@@ -46,8 +46,6 @@ from defender.api.app import create_app
 
 if TYPE_CHECKING:
     from defender.identity import VerifiedProgramToken
-from defender.api.fakes import InMemoryOffboarding, InMemorySecrets, InMemoryStore, StubArtifactLinks, StubSystemChecker  # noqa: F401
-from defender.api.ports import ApiDeps
 
 # Production names #1307 must supply. Kept in this one block so a missing name is one ImportError.
 from defender.identity import (  # noqa: F401  (re-exported for the cases)
@@ -60,7 +58,6 @@ from defender.tests.support.api._identity1306 import (
     ALERT,
     ANN,
     BOB,
-    FRONTEND_ORIGIN,
     T1,
     T2,
     FakeMail,
@@ -397,15 +394,7 @@ class ProgramsWorld(World):
             JournalRepository(repo, self.journal), signin=self.signin, mail=self.mail,
             clock=self.clock, bootstrap=Bootstrap(administrators=tuple(administrators)),
             programs=programs, **extra)
-        self.app = create_app(ApiDeps(
-            alerts=self.store, investigations=self.store, learning_jobs=self.store,
-            lessons=self.store, systems=self.store, writes=self.store,
-            secrets=InMemorySecrets(self.store), checker=StubSystemChecker(),
-            artifact_links=StubArtifactLinks(),
-            offboarding=InMemoryOffboarding(self.tenants, self.store, self.clock),
-            identity=self.service, frontend_origin=FRONTEND_ORIGIN, tenants=self.tenants,
-            alert_mapping=self.store, audit=self.store,  # FC-14 (Am-5)
-        ))
+        self.app = create_app(self.deps())
 
     def bearer(self, value: str, *, origin: str | None = None, scheme: str = "Bearer",
                raise_errors: bool = True) -> Any:
@@ -473,9 +462,16 @@ def revoke(admin: Any, tenant: str, program_id: str, credential_id: str) -> Any:
     return admin.delete(f"/tenants/{tenant}/programs/{program_id}/credentials/{credential_id}")
 
 
-def start_investigation(client: Any, tenant: str, request_id: str = "r1") -> Any:
+def start_investigation(client: Any, tenant: str, request_id: str = "r1", *, alert_id: str = ALERT.alert_id) -> Any:
     return client.post(f"/tenants/{tenant}/investigations",
-                       json={"alert_id": ALERT.alert_id, "client_request_id": request_id})
+                       json={"alert_id": alert_id, "client_request_id": request_id})
+
+
+def second_alert(world: Any, tenant: str = T1) -> str:
+    """Another alert of `tenant`, stored on the world's test database: a start on it is a new investigation, where a
+    second start on `ALERT` answers the live one (one live investigation per alert, #1496: the real store's rule)."""
+    other = ALERT.model_copy(update={"alert_id": "a1000000-0000-4000-8000-000000000002", "vendor_ticket_id": "T-2"})
+    return str(world.add_alert(tenant, other))
 
 
 def parse_time(value: str) -> _dt.datetime:
@@ -497,9 +493,10 @@ class Soar:
 
 
 def soar(**world_options: Any) -> Soar:
-    """`world_options` are passed to `ProgramsWorld` (for example `failing_writes=True`)."""
-    built = ProgramsWorld(tenants={T1: [ANN], T2: [BOB]}, **world_options)
-    built.store.add_alert(T1, ALERT)
+    """`world_options` are passed to `ProgramsWorld` (for example `failing_writes=True`). On the test database (#1496),
+    with one alert in T1 (`world.alert_id`)."""
+    built = ProgramsWorld(tenants={T1: [ANN], T2: [BOB]}, **{"database": True, **world_options})
+    built.alert_id = built.add_alert(T1)
     ann, bob = built.sign_in(ANN), built.sign_in(BOB)
     program_id = str(create_program(ann, T1)["id"])
     key_id, key = issue_key(ann, T1, program_id)
