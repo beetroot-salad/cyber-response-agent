@@ -50,21 +50,45 @@ def test_the_row_carries_the_language_and_its_query_param():
     assert QUERY_ROW_COLUMNS[-2:] == ("engine", "body_param")
 
 
-@pytest.mark.parametrize(("engine", "body_param", "expected"), [
-    ("spl", "search", ("spl", "search")),
-    ("none", None, ("none", None)),
-    # A declaration outside the shape the reader keeps is recorded as a plain call.
-    ("ES|QL", "query", ("none", None)),
-    ("spl", None, ("none", None)),
-], ids=["declared", "plain", "off-shape-engine", "no-body-param"])
-def test_the_writer_records_what_the_adapter_declares(engine, body_param, expected):
+def test_the_writer_records_what_the_adapter_declares():
     from defender.investigation.record_query import declared_language
 
-    @verb(engine=engine, body_param=body_param)
-    def fn(ctx: VerbContext) -> None: ...
+    @verb(engine="spl", body_param="search")
+    def language(ctx: VerbContext, *, search: str) -> None: ...
 
-    assert declared_language(fn) == expected
+    @verb()
+    def plain(ctx: VerbContext, *, user: str) -> None: ...
+
+    assert declared_language(language) == ("spl", "search")
+    assert declared_language(plain) == ("none", None)
     assert declared_language(None) == ("none", None)
+
+
+@pytest.mark.parametrize(("engine", "body_param"), [
+    # Not a name the reader keeps: it would be recorded as a plain call.
+    ("ES|QL", "query"),
+    # A language with nowhere for its text.
+    ("spl", None),
+    # A body param the signature does not declare.
+    ("spl", "query"),
+], ids=["off-shape-engine", "no-body-param", "undeclared-body-param"])
+def test_a_language_declaration_the_row_could_not_record_is_refused(engine, body_param):
+    """Refused where the adapter is written, so a declared language is never recorded as
+    nothing and its query learned as a plain call (#1503)."""
+    with pytest.raises(ValueError, match="engine"):
+        @verb(engine=engine, body_param=body_param)
+        def fn(ctx: VerbContext, *, search: str) -> None: ...
+
+
+def test_the_writer_drops_a_mark_set_around_the_decorator():
+    """Defence in depth: a function carrying an off-shape mark by hand records a plain call."""
+    from defender.investigation.record_query import declared_language
+
+    def fn(ctx: VerbContext, *, query: str) -> None: ...
+
+    fn.__verb_engine__ = "ES|QL"  # type: ignore[attr-defined]
+    fn.__verb_body_param__ = "query"  # type: ignore[attr-defined]
+    assert declared_language(fn) == ("none", None)
 
 
 def test_the_executed_record_carries_the_rows_language(tmp_path):

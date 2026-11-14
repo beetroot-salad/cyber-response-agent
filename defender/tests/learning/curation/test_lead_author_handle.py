@@ -110,12 +110,13 @@ def resolver(s: Scene) -> _scaffold_rules.VerbResolver:
 
 
 def _lead(query_id: str, *, system: str, verb: str, params: dict | None = None,
-          error_class: str | None = None) -> ExecutedLead:
+          error_class: str | None = None, **language: str) -> ExecutedLead:
+    """`language`: the `engine` / `body_param` the writer records for the call (#1503)."""
     return ExecutedLead(
         lead_id="l-001", query_index=0, is_multi_query=False, entry_index=0,
         query_id=query_id, system=system, verb=verb, params=params or {},
         raw_command="cli", goal_text="probe the thing", what_to_summarize=(), raw_ref=None,
-        payload_status="ok", payload_digest="2 bytes", error_class=error_class,
+        payload_status="ok", payload_digest="2 bytes", error_class=error_class, **language,
     )
 
 
@@ -515,8 +516,10 @@ def test_a_minted_draft_departs_only_when_nothing_stands_at_its_name(scene, stat
 
 SYSTEMS = frozenset({"elastic", "wazuh"})
 WAZUH_LEAD = _lead("wazuh.hunt-creds", system="wazuh", verb="esql", params={"query": "FROM logs"})
+#: The product's `elastic.esql` declares ES|QL in `query`, so its row records that; `wazuh` has no
+#: product adapter, so its row is a plain call.
 ELASTIC_LEAD = _lead("elastic.hunt-creds", system="elastic", verb="esql",
-                     params={"query": "FROM logs"})
+                     params={"query": "FROM logs"}, engine="esql", body_param="query")
 
 
 def draft_of(lead: ExecutedLead) -> tuple[str, str]:

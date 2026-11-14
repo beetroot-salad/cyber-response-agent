@@ -26,6 +26,9 @@ from defender.knowledge import (
 )
 from defender.records import Run, LEAD_ID_RE, RunPaths  # noqa: F401 — re-export: `tools_gather` imports the pre-dispatch gate from here
 from defender._text import as_int, as_str, is_content_less
+# The engine-name shape `@verb` enforces; the reader holds a box-writable row to it too, since the
+# value lands in a draft's code fence and front matter.
+from defender.kit.verbs import ENGINE_NAME_RE, body_param_of, engine_of
 from defender.systems.circuit_breaker import AGENT_FIXABLE_ERROR_CLASS, error_class_for_exit
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
@@ -157,10 +160,6 @@ QUERY_ROW_COLUMNS: tuple[str, ...] = (
     "body_param",
 )
 
-#: The shape a recorded `engine` may take: a name a `@verb(engine=...)` declaration gives (`esql`,
-#: `lucene`, a tenant adapter's own). The reader holds a box-writable row to it, since the value
-#: lands in a draft's code fence and front matter.
-ENGINE_NAME_RE = re.compile(r"\A[a-z][a-z0-9_-]{0,31}\Z")
 
 
 def declared_language(fn: Any) -> tuple[str, str | None]:
@@ -170,8 +169,6 @@ def declared_language(fn: Any) -> tuple[str, str | None]:
     `ENGINE_NAME_RE` or without its body param."""
     if fn is None:
         return "none", None
-    from defender.kit.verbs import body_param_of, engine_of
-
     engine, body_param = engine_of(fn), body_param_of(fn)
     if engine == "none" or not ENGINE_NAME_RE.match(engine) or not isinstance(body_param, str):
         return "none", None

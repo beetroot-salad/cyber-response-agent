@@ -129,6 +129,11 @@ Verb = Callable[..., Any]
 
 
 
+#: The shape a query language's name takes (`esql`, `lucene`, a tenant adapter's own). The
+#: query tool records it on the call's row, and the learning loop puts it in a draft's code fence
+#: and front matter, so `@verb` refuses any other (#1503).
+ENGINE_NAME_RE = re.compile(r"\A[a-z][a-z0-9_-]{0,31}\Z")
+
 _ENGINE_ATTR = "__verb_engine__"
 _BODY_PARAM_ATTR = "__verb_body_param__"
 _VERB_CLASS_ATTR = "__verb_class__"
@@ -178,6 +183,7 @@ def verb(
                 f"can ever supply it and every one of them would fault inside the verb body. "
                 f"Give it the default the wrapper overrides"
             )
+        _check_language(fn, engine, body_param, declared)
         setattr(fn, _ENGINE_ATTR, engine)
         setattr(fn, _BODY_PARAM_ATTR, body_param)
         setattr(fn, _VERB_CLASS_ATTR, verb_class)
@@ -185,6 +191,23 @@ def verb(
         return fn
 
     return decorate
+
+
+def _check_language(fn: Verb, engine: str, body_param: str | None, declared: Any) -> None:
+    """A query-language verb names its language in `ENGINE_NAME_RE`'s shape and the keyword-only
+    param carrying its text. Checked at decoration: the call's row records the pair, and one it
+    could not record would have its queries learned as plain calls (#1503)."""
+    if engine == "none":
+        return
+    name = getattr(fn, "__name__", fn)
+    if not isinstance(engine, str) or not ENGINE_NAME_RE.match(engine):
+        raise ValueError(
+            f"@verb(engine={engine!r}) on {name!r}: an engine is a lowercase name "
+            "(letters, digits, '-' or '_', at most 32), e.g. `esql`")
+    if not isinstance(body_param, str) or body_param not in declared:
+        raise ValueError(
+            f"@verb(engine={engine!r}, body_param={body_param!r}) on {name!r}: a query-language "
+            "engine needs `body_param` naming the keyword-only param that carries the query text")
 
 
 def engine_of(fn: Verb) -> str:

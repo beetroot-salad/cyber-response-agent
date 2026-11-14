@@ -64,6 +64,8 @@ SEVEN = [
 
 
 def _seven_registry(rec: VerbRecorder) -> FakeVerbs:
+    # Each fake carries the language its product adapter declares, which the row records (#1503).
+    @verb(engine="esql", body_param="query")
     def esql(ctx, *, query: str):
         rec.record("esql", ctx, {"query": query})
         return _PAYLOAD
@@ -104,16 +106,20 @@ def _seven_registry(rec: VerbRecorder) -> FakeVerbs:
 
 
 def _elastic_registry(rec: VerbRecorder) -> FakeVerbs:
-    """elastic with all three declared-engine verbs — esql (esql), query/alerts (lucene)."""
+    """elastic with all three declared-engine verbs — esql (esql), query/alerts (lucene) — each
+    declaring what the product adapter's does, which the row records (#1503); `foo` declares none."""
 
+    @verb(engine="esql", body_param="query")
     def esql(ctx, *, query: str):
         rec.record("esql", ctx, {"query": query})
         return _PAYLOAD
 
+    @verb(engine="lucene", body_param="native_query")
     def query(ctx, *, native_query: str, limit: int = 10):
         rec.record("query", ctx, {"native_query": native_query, "limit": limit})
         return _PAYLOAD
 
+    @verb(engine="lucene", body_param="native_query")
     def alerts(ctx, *, native_query: str, limit: int = 10):
         rec.record("alerts", ctx, {"native_query": native_query, "limit": limit})
         return _PAYLOAD
