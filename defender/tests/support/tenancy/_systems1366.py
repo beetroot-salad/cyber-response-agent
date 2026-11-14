@@ -644,7 +644,9 @@ def real_judge() -> Any:
     exists (a base-only shim: delete the fallback with it) the judgement is the one in `defender.systems`."""
     try:
         from defender.system_rules import Catalog, judge_records
-    except ImportError:
+    except ModuleNotFoundError as missing:
+        if missing.name != "defender.system_rules":
+            raise
         from defender.systems.record_judgement import judge_records as base_judge
 
         return lambda after, before: list(base_judge(after, before))
@@ -681,11 +683,11 @@ class Admin:
         return asyncio.run(go())
 
     def set_system(self, system: str, *, replaces: int, config: Mapping[str, str] | None,
-                   access: str | None, disabled: bool | None = None) -> tuple[int, str]:
-        """`disabled` True stores it disabled, False enabled, None keeps the current state."""
+                   access: str | None, disabled: bool = False) -> tuple[int, str]:
+        """`disabled` True stores it disabled, False (the default) enabled."""
         async def work(store: Any) -> None:
             await store.put_system(self.tid, system, replaces=replaces, adapter=system,
-                                   enabled=None if disabled is None else not disabled,
+                                   enabled=not disabled,
                                    settings=dict(config or {}), access=access or "", author=ADMIN_AUTHOR)
         return self._run(work)
 

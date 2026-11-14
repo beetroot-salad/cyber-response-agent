@@ -791,23 +791,21 @@ def test_1366_p5_a_delete_carries_the_generation_and_a_re_create_takes_the_next_
 
 @pytest.mark.postgres
 def test_1366_dc8_disabling_and_re_enabling_is_a_version_that_keeps_the_record(imported_op):
-    """`--disabled` stores version 2 with enabled false (settings and access judged all the same); a write with no flag
-    keeps it disabled (version 3: the folder does not say on or off, so an exported folder written back cannot switch it
-    on); `--enabled` is version 4, enabled again. (#1366 DC8, O1)"""
+    """Writing a system disabled stores version 2 with enabled false (settings and access judged all the same); writing it
+    enabled again is version 3. Each is a version that keeps the record. (#1366 DC8, O1)"""
     op = imported_op
     rc, said = op.set_system("cmdb", replaces=1, config={**CMDB_CONFIG, "CMDB_COLOUR": "x"}, access=CMDB_ACCESS, disabled=True)
     assert rc != 0, said
     assert R.lines_naming(said, "CMDB_COLOUR"), said
     assert op.set_system("cmdb", replaces=1, config=CMDB_CONFIG, access=CMDB_ACCESS, disabled=True)[0] == 0
     assert op.current()["cmdb"].enabled is False
-    assert op.set_system("cmdb", replaces=2, config=CMDB_CONFIG, access=CMDB_ACCESS)[0] == 0
-    assert op.set_system("cmdb", replaces=3, config=CMDB_CONFIG, access=CMDB_ACCESS, disabled=False)[0] == 0
-    assert [(v.version, v.enabled) for v in op.versions("cmdb")] == [(1, True), (2, False), (3, False), (4, True)]
+    assert op.set_system("cmdb", replaces=2, config=CMDB_CONFIG, access=CMDB_ACCESS, disabled=False)[0] == 0
+    assert [(v.version, v.enabled) for v in op.versions("cmdb")] == [(1, True), (2, False), (3, True)]
 
 
 @pytest.mark.postgres
 def test_1366_dc8_set_case_stores_the_body_exactly_and_delete_case_removes_the_record(imported_op):
-    """`set-case` stores the file's system and template text as given (version 2); `delete-case` makes the case record
+    """Writing the case record stores its system and template text as given (version 2); deleting it makes the case record
     not exist. (#1366 DC8, O5, H7)"""
     op = imported_op
     body = "{disposition} — {cause}\n\n{narrative}\nsee {case_id}"

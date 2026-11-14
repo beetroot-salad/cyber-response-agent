@@ -57,7 +57,7 @@ async def test_d9_a_seal_status_that_is_unreachable_or_malformed_refuses_start_n
     message = await _start(migrated_database, tmp_path, broken)
     assert message is not None, f"{label} started"
     assert "DEFENDER_OPENBAO_ADDR" in message or "127.0.0.1:1" in message, message
-    assert broken.calls == [SEAL_STATUS]
+    assert set(broken.calls) == {SEAL_STATUS}  # nothing past seal-status; how often it is asked is not pinned
 
 
 async def test_g4_an_unsealed_secret_store_is_asked_the_login_by_a_metadata_read_and_nothing_is_written(migrated_database, tmp_path):

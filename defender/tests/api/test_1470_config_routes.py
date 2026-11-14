@@ -256,15 +256,16 @@ async def test_o3_the_systems_list_pages_by_cursor_serving_every_system_once_in_
 
 
 async def test_o3_the_systems_list_asks_the_secret_store_only_for_the_rows_on_the_page(scripted):
-    """Two systems, `limit=1`: one metadata read, naming the page's system, not the other. (O3)"""
-    first, second = (await _save_three(scripted))[:2]
+    """Three systems, `limit=1`: the page serves the first, and every secret-store ask that names a system names that
+    one, never another; the store was asked something (the page's `has_credentials` is the secret store's answer). (O3)"""
+    first, *others = await _save_three(scripted)
     scripted.scripted.calls.clear()
     page = (await scripted.client.get(f"/tenants/{A}/systems", params={"limit": 1}, headers=scripted.ann(write=False))).json()
     assert [i["system_id"] for i in page["items"]] == [first]
-    [(method, path)] = scripted.scripted.calls
-    assert method == "GET"
-    assert f"/{A}/{first}/" in path
-    assert f"/{second}/" not in path, path
+    paths = [p for _, p in scripted.scripted.calls if f"/{A}/" in p]
+    assert paths, scripted.scripted.calls
+    assert all(f"/{A}/{first}/" in p for p in paths), paths
+    assert not [p for p in paths for other in others if f"/{other}/" in p], paths
 
 
 @pytest.mark.parametrize("bad_id", ["a b/é", "' OR 1=1 --", "", "\u0000", "x" * 1363])

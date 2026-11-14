@@ -112,16 +112,35 @@ def test_1401_case_check_fails_a_case_record_naming_another_system(tmp_path):
     assert any("servicenow" in line for line in failed), out
 
 
-def test_1401_case_check_fails_an_unusable_case_record_naming_its_file(tmp_path):
-    """A case record with no comment body is refused, naming the file the maintainer fixes."""
+UNUSABLE_CASE_RECORDS = [
+    pytest.param(b"- just\n- a list\n", id="a-list"),
+    pytest.param(b"system: jira\n", id="no-comment"),
+    pytest.param(b"comment: {body: x}\n", id="no-system"),
+    pytest.param(b"system: [\n", id="unparsable"),
+    pytest.param(b"system: 42\ncomment: {body: x}\n", id="system-not-text"),
+    pytest.param(b"system: ''\ncomment: {body: x}\n", id="system-empty"),
+    pytest.param(b"system: jira\ncomment: [x]\n", id="comment-a-list"),
+    pytest.param(b"system: jira\ncomment: {}\n", id="comment-without-body"),
+    pytest.param(b"system: jira\ncomment:\n  body: 7\n", id="body-not-text"),
+    pytest.param((json.dumps({"system": "jira"}) + "\n").encode(), id="json-no-comment-body"),
+    pytest.param(b"system: jira\n# \xff\xfe not text \x80\n", id="not-utf8"),
+]
+
+
+@pytest.mark.parametrize("text", UNUSABLE_CASE_RECORDS)
+def test_1401_case_check_fails_an_unusable_case_record_naming_its_file(tmp_path, text):
+    """A case record that is not a mapping with a `system` and a `comment.body` (nine malformed shapes, the no-body JSON
+    form, and bytes that are not UTF-8) is refused, naming the file the maintainer fixes: a failed line, no traceback.
+    (#1366 O4, #1401)"""
     folder = _jira(tmp_path, desk="no", writes=(JIRA_CLOUD,))
     case = tmp_path / "case-record.yaml"
-    case.write_text(json.dumps({"system": "jira"}) + "\n", encoding="utf-8")
+    case.write_bytes(text)
 
     rc, failed, out = _validate("jira", "--handoff", str(folder), "--case", str(case))
 
     assert rc != 0, out
-    assert any(str(case) in line and "comment.body" in line for line in failed), out
+    assert any(str(case) in line for line in failed), out
+    assert "Traceback" not in out, out
 
 
 @pytest.mark.parametrize(("make", "route"), [

@@ -214,10 +214,10 @@ async def test_o7_no_route_returns_a_value_and_no_answer_or_log_line_holds_one(c
             await configured.list_systems(), await configured.put_credentials(TICKET, 1, {"api_key": TOKEN + "!"}),
             await configured.put_credentials(TICKET, 1, {"api_key": "short"}),
             await configured.put_credentials(TICKET, 9, {"api_key": TOKEN})]
-    for method in ("get", "delete"):
+    for method in ("get", "post", "delete", "patch"):
         seen.append(await configured.client.request(method.upper(), f"/tenants/{A}/systems/{TICKET}/credentials",
                                                     headers=configured.ann()))
-    assert [r.status_code for r in seen[-2:]] == [405, 405]
+    assert [r.status_code for r in seen[-4:]] == [405] * 4
     everything = " ".join([r.text for r in seen] + [r.getMessage() + str(getattr(r, "detail", "")) for r in caplog.records])
     assert TOKEN not in everything
     assert PASSWORD not in everything
