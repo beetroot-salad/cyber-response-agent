@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        n: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        n: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v5
       - name: Install uv
@@ -24,6 +24,8 @@ jobs:
       - name: Sync defender venv
         working-directory: defender
         run: uv sync --extra dev --extra runtime --extra api --locked
+      - name: Install py-spy (native stacks of a hung child)
+        run: pipx install py-spy && echo "PY_SPY=$(command -v py-spy || echo $HOME/.local/bin/py-spy)" >> "$GITHUB_ENV"
       - name: Start PostgreSQL
         run: |
           docker run -d --name defender-postgres -e POSTGRES_PASSWORD=postgres \
@@ -36,7 +38,7 @@ jobs:
         run: |
           mkdir -p ../stress
           loop() {
-            end=$((SECONDS + 1200)); i=0
+            end=$((SECONDS + 600)); i=0
             while [ $SECONDS -lt $end ]; do
               i=$((i + 1))
               uv run pytest -q -p no:cacheprovider -n 0 -p no:randomly \

@@ -217,6 +217,9 @@ class TickChild:
     def __init__(self, body: Callable[[], Any], result: Path) -> None:
         self.result = result
         self.stacks = result.with_suffix(".stacks.txt")
+        self.parent = result.with_suffix(".parent.txt")
+        with open(self.parent, "w") as at_fork:  # THROWAWAY: the parent's threads at the moment of the fork
+            faulthandler.dump_traceback(file=at_fork, all_threads=True)
         self.pid = os.fork()
         if self.pid == 0:  # pragma: no cover — runs in the forked child
             code = 1
@@ -245,13 +248,17 @@ class TickChild:
             if done:
                 return json.loads(self.result.read_text(encoding="utf-8")) if self.result.is_file() else {"raised": "no-result"}
             time.sleep(0.05)
+        native = subprocess.run(["sudo", "-n", os.environ.get("PY_SPY", "py-spy"), "dump", "--native", "--pid", str(self.pid)],
+                                capture_output=True, text=True, timeout=60, check=False)
         os.kill(self.pid, signal.SIGUSR1)
         time.sleep(1.0)
         os.kill(self.pid, signal.SIGKILL)
         os.waitpid(self.pid, 0)
         stacks = self.stacks.read_text(encoding="utf-8", errors="replace") if self.stacks.is_file() else "(no dump)"
         raise AssertionError(f"the child tick did not end within {seconds} s of its stop\n"
-                             f"=== CHILD STACKS ===\n{stacks}\n=== END CHILD STACKS ===")
+                             f"=== CHILD STACKS ===\n{stacks}\n=== END CHILD STACKS ===\n"
+                             f"=== CHILD NATIVE ===\n{native.stdout}{native.stderr}\n=== END CHILD NATIVE ===\n"
+                             f"=== PARENT AT FORK ===\n{self.parent.read_text(encoding='utf-8')}\n=== END PARENT AT FORK ===")
 
 
 def kill_if_alive(*pids: int) -> None:
