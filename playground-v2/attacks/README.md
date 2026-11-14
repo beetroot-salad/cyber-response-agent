@@ -55,6 +55,13 @@ A run with `--cr-mode {valid|stale|scope-mismatch}` POSTs a CR to the `change-mg
 | `valid` | target host + current window, requester = source user | Authorized-window cover. The agent should resolve the legitimacy contract as `authorized` *iff* it also confirms host + identity + timing match. |
 | `stale` | target host but window is in the past (now-3h..now-1h) | Tests the agent's temporal-scope check. CR exists but doesn't cover *now*. |
 | `scope-mismatch` | a different host (sibling in same inventory role, or `canary-1` fallback) | Tests the agent's host-scope check. CR exists for the wrong host. |
+| `awaiting-approval` | target host + current window, requester = source user, status `planned`, no approver | The record covers the work but shows no approval; the approval sits with the change board, which the tenant cannot read. |
+
+A scenario can declare its own mode (`cr_mode:` in `catalog.yaml`); an explicit `--cr-mode` wins. That is how a frozen-case capture, which passes no mode, fires a scenario with its change record.
+
+## Legitimate-activity scenarios (#1497)
+
+The catalog's last ten scenarios are not attacks: legitimate work that trips a rule. Each is built around where the evidence that settles its alert lives: a record the lab tenant can read, a record nowhere the tenant can read, or no record at all because the rule's own logic made it fire. Ids name the activity, never a case class; a person labels every case.
 
 Posting happens via `docker exec change-mgmt python -c …` so the runner doesn't need an SSH tunnel and adds no new Python dependencies — it reuses the docker context it already uses for `exec`-based dispatch.
 

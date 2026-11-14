@@ -82,7 +82,7 @@ def runner():
     return module
 
 
-@pytest.mark.parametrize("cr_mode", ["valid", "stale", "scope-mismatch"])
+@pytest.mark.parametrize("cr_mode", ["valid", "stale", "scope-mismatch", "awaiting-approval"])
 def test_a_posted_change_request_reads_like_an_ordinary_one(runner, cr_mode):
     inventory = yaml.safe_load((PLAYGROUND / "hosts" / "inventory.yaml").read_text())
     body = runner._build_cr_body(

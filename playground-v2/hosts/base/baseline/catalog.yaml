@@ -264,11 +264,13 @@ actions:
     schedule: {mean_s: 7200, shape: flat}
 
   - id: dba-tunnel
-    host_roles: [dev-ws]
+    host_roles: [jump-box]
     identities: [dba.ivy]
-    # DBA opens a local port-forward to db-1 from her workstation. The SSH
-    # accept on db-1 satisfies event-2 of cross-tier-ssh-pivot (dev-ws source
-    # tier → db prod tier); event-1 is satisfied by config-mgmt-fleet-push
+    # The DBA opens a local port-forward to db-1 from the bastion. (It was bound
+    # to dev-ws, where dba.ivy has no account, so it never ran: the scheduler
+    # binds only identities with an account on the host.) The SSH accept on
+    # db-1 satisfies event-2 of cross-tier-ssh-pivot (any prod-tier login); the
+    # rule has no join key, so event-1 is satisfied by config-mgmt-fleet-push
     # SSH'ing INTO dev-ws-1 within the 15min window. The -L tunnel + 5s sleep
     # keeps the session open long enough to be unambiguous in conn logs.
     cmd: |
