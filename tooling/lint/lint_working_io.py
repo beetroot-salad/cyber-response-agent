@@ -236,6 +236,11 @@ RESIDUE = {
     ("box._image", "_read", ".read_bytes"): (1, "nonrecord", ('tree / name',)),
     # #1108 P3 (D7): a read-only mount is verified by reading an existing host file back
     # (a code mount's `MOUNT_CHECK` or a data mount's first regular file) — never a run record.
+    # #1469: the box check's own folder under the data root, made, listened in and removed per check; never a run record.
+    ("box._check", "_Listener.__init__", "os.open"): (1, "probe", ('folder',)),
+    ("box._check", "_Listener.close", "os.unlink"): (1, "probe", ('SOCKET_NAME',)),
+    ("box._check", "_make_folder", ".mkdir"): (2, "probe", ('parent', 'folder')),
+    ("box._check", "require_box_check", "shutil.rmtree"): (1, "probe", ('folder',)),
     ("box._lifecycle", "_check_mount_sentinel", "read_text_utf8"): (1, "probe", ('source / relative',)),
     ("box._lifecycle", "_plant", "write_guarded"): (1, "probe", ('sentinel',)),
     ("box._lifecycle", "_probe_sentinel", ".unlink"): (2, "probe", ('sentinel',)),
