@@ -35,10 +35,12 @@ _SPEC = "box/_spec.py"
 _CHECK_CONSTANT = "CODE_CHECK_FILE"
 
 #: Prose a model may be handed: every text file of these kinds under `defender/` except the
-#: operator docs, the top-level `docs/` and the tests, plus the two shipped tenant knowledge trees' agent halves.
+#: operator docs, the top-level `docs/` and the tests, plus the agent halves of the starter tenant
+#: (`knowledge/tenant-template/`) and the tests' fixture tenant (`tests/fixtures/tenant-fixture/`).
 _PROSE_SUFFIXES = (".md", ".txt", ".yaml", ".yml", ".j2", ".jinja", ".tmpl")
 _OPERATOR_DOCS = frozenset({"README.md", "CLAUDE.md", "AGENTS.md"})
-_KNOWLEDGE_TREES = ("tenant-template", "tenant-fixture")
+#: Each as a path under the repo root.
+_KNOWLEDGE_TREES = (("knowledge", "tenant-template"), ("defender", "tests", "fixtures", "tenant-fixture"))
 
 
 def _folded(node: ast.AST) -> str | None:
@@ -132,7 +134,7 @@ def _agent_facing_text(root: Path) -> list[Path]:
                  prune=lambda d: d.parent == root and d.name == "docs")
              if rel.rsplit("/", 1)[-1] not in _OPERATOR_DOCS]
     for tree in _KNOWLEDGE_TREES:
-        agent = root.parent / "knowledge" / tree / "agent"
+        agent = root.parent.joinpath(*tree) / "agent"
         if agent.is_dir():
             found.extend(agent / rel for rel in
                          _astlib.source_files(agent, ("__pycache__",), suffixes=("",)))

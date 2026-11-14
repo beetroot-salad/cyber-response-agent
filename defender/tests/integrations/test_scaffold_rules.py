@@ -171,12 +171,14 @@ def test_a_covers_entry_must_be_an_identity_of_the_system_it_is_filed_under(tmp_
 
 
 def _catalogs() -> list[Path]:
-    """The committed catalogs: each tenant folder's (`knowledge/<name>/agent/...`) plus the pre-P4
-    product catalog fixture, the corpus that carries a `_draft/` template."""
+    """The committed catalogs: each committed tenant folder's (the starter's under `knowledge/`,
+    the fixture's under the tests) plus the pre-P4 product catalog fixture, the corpus that
+    carries a `_draft/` template."""
     from defender.tests.support.shared._pre_p4_shipped import CATALOG as SHIPPED_CATALOG
+    from defender.tests.support.tenancy._tenants1106 import COMMITTED_FOLDERS, committed_folder
 
-    tenants = sorted(p for p in (_DEFENDER.parent / "knowledge").glob(
-        "*/agent/skills/gather/queries") if p.is_dir())
+    tenants = sorted(p for p in (committed_folder(_DEFENDER.parent, n) / "agent" / "skills" / "gather" / "queries"
+                                 for n in COMMITTED_FOLDERS) if p.is_dir())
     assert tenants, "no committed tenant folder carries a catalog"
     return [SHIPPED_CATALOG, *tenants]
 

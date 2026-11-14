@@ -124,7 +124,7 @@ def _replace(entry, plant):
 _REFUSED_OUTPUT = {
     "file-link-absolute": lambda lane, agent, outside, clone: (lane / "link.md").symlink_to(outside / "secret.md"),
     "file-link-into-clone": lambda lane, agent, outside, clone: (lane / "link.md").symlink_to(
-        os.path.relpath(clone / "settings/lead-zero.yaml", lane)),
+        os.path.relpath(clone / "settings/verb-grants.yaml", lane)),
     "dir-link": lambda lane, agent, outside, clone: (lane / "linked").symlink_to(outside, target_is_directory=True),
     "fifo": lambda lane, agent, outside, clone: os.mkfifo(lane / "pipe.md"),
     "socket": None,

@@ -21,6 +21,7 @@ from defender import box as box_mod
 from defender.box import BoxFault, BoxSpec
 from defender.tests.support.runtime.state import _1255_view as V
 from defender.tests.support.tenancy import _tenants1106
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
 ALERT = (Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "e2e" / "golden-sshpivot-ab3"
          / "alert.json").read_bytes()
@@ -33,7 +34,7 @@ def _start(run_dir: Path, layout: V.Layout, docker: V.FakeDocker) -> None:
     agent, token = layout.staged()
     with pytest.raises(BoxFault, match="refused by the #1255 static check"):
         box_mod.start_box(run_dir, layout.checkout, spec=SPEC, docker=docker,
-                          tenant_agent=agent, tenant_id=layout.tenant.id, staged_token=token)
+                          tenant_agent=agent, tenant_id=layout.tenant.id, staged_token=token, data_root=current_data_root())
 
 
 def _created(run_dir: Path, layout: V.Layout) -> V.Create:
@@ -136,7 +137,7 @@ def _lifecycle_create(run, layout: V.Layout) -> V.Create:
                                        stage_token=layout.staged()[1]),
             systems=_tenants1106.fixture_run_systems(), investigate=investigate,
             start_box=functools.partial(box_mod.start_box, spec=SPEC, docker=docker),
-            stop_box=lambda *a, **k: None, scrub=lambda *a, **k: None)
+            stop_box=lambda *a, **k: None, scrub=lambda *a, **k: None, data_root=current_data_root())
     return V.parse_create(docker.create)
 
 
@@ -195,7 +196,7 @@ def test_b5_the_unboxed_fallback_never_hands_its_shims_the_real_runs_folder(tmp_
     run_dir = V.natural_run(layout, ALERT, "20261015t120000z-view-unboxed")
     agent, token = layout.staged()
     box = box_mod.start_box(run_dir, layout.checkout, spec=SPEC, docker=V.FakeDocker(),
-                            tenant_agent=agent, tenant_id=layout.tenant.id, staged_token=token)
+                            tenant_agent=agent, tenant_id=layout.tenant.id, staged_token=token, data_root=current_data_root())
     assert not box.sandboxed, "control: the fallback is the host executor"
     env = _env_of(box)
 

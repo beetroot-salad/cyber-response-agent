@@ -240,7 +240,8 @@ def _catalog_template(catalog_dir: Path, system: str, tid: str, fence_lang: str,
     return p
 
 
-def test_canonical_record_engine_verb_is_verbatim_body(tmp_path):
+def test_canonical_record_engine_verb_is_the_call(tmp_path):
+    """#1503: an engine verb's record is the call as made, the query text one param value."""
     rec = VerbRecorder()
     pipe = "FROM logs-system.auth-* | STATS failed = COUNT(*) BY source.ip | SORT failed DESC"
     r = run_gather(tmp_path, verbs=_elastic_registry(rec), turns=[
@@ -252,7 +253,7 @@ def test_canonical_record_engine_verb_is_verbatim_body(tmp_path):
 
     lead = _own_executed_leads(r.run_dir)[0]
     record = draft_synthesis._executed_query(lead)
-    assert record == pipe, "the canonical record is not the verbatim esql body"
+    assert yaml.safe_load(record) == {"verb": "esql", "params": {"query": pipe}}, record
     assert row["raw_command"] not in record, "the record leaked the shlex audit string"
 
     drafts = draft_synthesis.synthesize_drafts(
@@ -260,9 +261,9 @@ def test_canonical_record_engine_verb_is_verbatim_body(tmp_path):
         where=tmp_path / "catalog", catalog=[],
         systems=frozenset({"elastic"}))
     text = drafts[0].read_text(encoding="utf-8")
-    assert "```esql\n" in text, "the engine body was not fenced in its declared engine language"
-    assert pipe in text
-    assert "engine: esql" in text
+    assert "```query\n" in text, "the call was not fenced as a structured call"
+    assert "SORT failed DESC" in text
+    assert "engine:" not in text
 
 
 def test_canonical_record_param_only_is_structured_call(tmp_path):
@@ -492,9 +493,10 @@ def test_render_query_binds_the_elastic_body(tmp_path):
         r.run_dir, executed, joined, repo_root=tmp_path,
         skills=skills_view(catalog_dir.parents[1]), where=catalog_dir.parents[1],
         catalog=catalog)[0]["invocations"][0]
-    assert "${host}" not in inv["rendered_query"], \
-        "rendered_query returned the static skeleton with an unbound ${host}"
-    assert pipe in inv["rendered_query"], "rendered_query does not reflect the executed body"
+    # The call's params do not fill the template's `${host}`: it did not run the template as
+    # written, so no rendering is offered, and the executed call carries the pipe (#1503).
+    assert inv["rendered_query"] == "", inv["rendered_query"]
+    assert yaml.safe_load(inv["executed_query"]) == {"verb": "esql", "params": {"query": pipe}}
 
     rec2 = VerbRecorder()
     r2 = run_gather(tmp_path / "run2", verbs=_seven_registry(rec2), system="cmdb", turns=[

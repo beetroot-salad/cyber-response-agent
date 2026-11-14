@@ -249,10 +249,10 @@ def test_1214_a_placed_folder_that_fails_acceptance_is_refused_and_grant_gaps_ar
         tmp_path: Path) -> None:
     missing = tmp_path / "missing"
     H.place_knowledge(missing)
-    lead_zero = H.settings_dir(missing) / "lead-zero.yaml"
-    lead_zero.unlink()
+    grants = H.settings_dir(missing) / "verb-grants.yaml"
+    grants.unlink()
     before = H.tree_census(missing)
-    assert str(lead_zero) in H.accept_refusal(_tenant, missing)
+    assert str(grants) in H.accept_refusal(_tenant, missing)
     assert H.census_diff(before, H.tree_census(missing)) == [], "the refused acceptance wrote something"
 
     torn = tmp_path / "torn"
@@ -318,10 +318,10 @@ def _first_fifo_in_settings(root: Path, tmp: Path) -> Path:
     return fifo
 
 
-def _first_unparseable_lead_zero(root: Path, tmp: Path) -> Path:
+def _first_unparseable_grants(root: Path, tmp: Path) -> Path:
     H.place_knowledge(root)
-    path = H.settings_dir(root) / "lead-zero.yaml"
-    path.write_text("correlation_template: [unclosed\n", encoding="utf-8")
+    path = H.settings_dir(root) / "verb-grants.yaml"
+    path.write_text("dispositions: [unclosed\n", encoding="utf-8")
     return path
 
 
@@ -331,7 +331,7 @@ FIRST_RUN_FAULTS = [
     pytest.param(_first_symlink_in_settings, id="settings_half:symlink-inside"),
     pytest.param(_first_hardlink_in_agent, id="agent_half:hardlink-inside"),
     pytest.param(_first_fifo_in_settings, id="settings_half:non-regular-entry:fifo"),
-    pytest.param(_first_unparseable_lead_zero, id="tables-load:lead-zero.yaml"),
+    pytest.param(_first_unparseable_grants, id="tables-load:verb-grants.yaml"),
 ]
 
 

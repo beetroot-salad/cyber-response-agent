@@ -49,3 +49,9 @@ def render_query(source: Bound, name: str | PurePath, params: dict[str, Any]) ->
         return m.group(0)
 
     return _PLACEHOLDER_RE.sub(_sub, body)
+
+
+def is_fully_bound(rendered: str) -> bool:
+    """Did `render_query` fill every `${name}`? A template whose slots the call's params do not
+    name (an ES|QL body the model wrote itself, say) was not run as that template (#1503)."""
+    return _PLACEHOLDER_RE.search(rendered) is None

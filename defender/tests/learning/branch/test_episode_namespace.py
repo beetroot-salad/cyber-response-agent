@@ -12,6 +12,7 @@ from defender.tests.support.learning.branch import _world_1007 as W
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.shared.contracts._spec1077 import fixture_run
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
 OPERATOR_NAMED = "opnamed.token"
 
@@ -148,7 +149,7 @@ def test_preflight_checks_the_same_roster_capacity_before_oracle_or_writes(tmp_p
             with pytest.raises(_family.FamilyError, match="roster"):
                 cli.preflight_replay(episode, source=T.open_source(src), roster=est.roster(),
                                      tenant=est.run_tenant(), oracle=oracle.model,
-                                     verifier=S.passing_verifier().model)
+                                     verifier=S.passing_verifier().model, data_root=current_data_root())
             assert oracle.requests == 0
             assert est.calls() == calls_before, "over-capacity preflight reached a tenant adapter"
             assert sorted(ep.rglob("*")) == paths_before, "over-capacity preflight created a path"
@@ -157,6 +158,6 @@ def test_preflight_checks_the_same_roster_capacity_before_oracle_or_writes(tmp_p
         else:
             cli.preflight_replay(episode, source=T.open_source(src), roster=est.roster(),
                                  tenant=est.run_tenant(), oracle=oracle.model,
-                                 verifier=S.passing_verifier().model)
+                                 verifier=S.passing_verifier().model, data_root=current_data_root())
             assert oracle.requests > 0
             assert (ep / "outcome.yaml").is_file()

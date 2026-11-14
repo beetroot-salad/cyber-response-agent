@@ -380,7 +380,7 @@ def accept_tenant(
     with the tenant check's own reason (#1222 A5), snapshot or none; only a clone whose working
     tree is gone altogether (both halves absent, its git objects kept: R-I5) is not asked.
 
-    `parse_tables=False` leaves the two reviewed tables (`SETTINGS_TABLES`) unparsed: for the one
+    `parse_tables=False` leaves the reviewed tables (`SETTINGS_TABLES`) unparsed: for the one
     consumer that only locates the settings folder and never loads a table (`validate_scaffold`,
     #1120); every consumer that loads or admits the tenant keeps the default."""
     tenant_id = TenantId(raw_id)

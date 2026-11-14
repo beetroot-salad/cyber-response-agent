@@ -511,16 +511,12 @@ comment:
 
 
 #: Tables (verb-grants.yaml), written from data here, never copied (the `_tenants1106` rule).
-#: Elastic correlation: the lead holds `elastic.alerts`, the shipped template's pair.
+#: Elastic correlation: the lead holds `elastic.alerts`.
 TABLE_ELASTIC = T6.TABLE_A
-LEAD_ZERO_ELASTIC = T6.lead_zero_text(T6.SHIPPED_CORRELATION_TEMPLATE)
 #: Correlation withheld: no row names `lead-zero-correlation` (legal; skips the lead).
 TABLE_WITHHELD = T6.TABLE_B
-#: Correlation on a non-Elastic system: the template `cmdb.list-all-hosts` (`verb: list-hosts`),
-#: since `_agreement` needs an established template on the dispatched system binding the holder's
-#: one query pair; `plant_tenant` writes it into the tenant's own catalog (`TENANT_CATALOG`). No
-#: Elastic row at all, and no `systems/elastic/` config (see `plant_tenant(configs=...)`).
-NON_ELASTIC_TEMPLATE = "cmdb.list-all-hosts"
+#: Correlation on a non-Elastic system: the lead holds `cmdb.list-hosts`. No Elastic row at all,
+#: and no `systems/elastic/` config (see `plant_tenant(configs=...)`).
 TABLE_NON_ELASTIC = """\
 dispositions:
   cmdb:
@@ -531,10 +527,9 @@ dispositions:
     get-user: {roles: [gather]}
     health-check: {roles: [gather]}
 """
-LEAD_ZERO_NON_ELASTIC = T6.lead_zero_text(NON_ELASTIC_TEMPLATE)
 
-#: The made-up catalog templates a planted tenant's lead-zero config names, written into its own
-#: `agent/skills/gather/queries/` (defined beside `T6.plant_tenant`).
+#: The made-up saved queries a planted tenant's own `agent/skills/gather/queries/` carries
+#: (defined beside `T6.plant_tenant`).
 TENANT_CATALOG: dict[str, str] = T6.TENANT_CATALOG
 
 
@@ -595,7 +590,6 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
     alert_mapping: Mapping[str, Any] | str | None = DEFAULT_MAPPING_GENERIC,
     case_body: str = T6.COMMENT_BODY,
     table: str = TABLE_ELASTIC,
-    lead_zero: str | None = None,
     configs: Mapping[str, str] | None = None,
     omit_systems: Iterable[str] = (),
     lessons: Mapping[str, str] | None = None,
@@ -605,15 +599,12 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
     `planted.directory` seeds; entries left out are unmapped), raw text (a leftover FILE, written verbatim and
     inert: the tenant then holds no mapping), or None (no mapping saved: a run is refused, O4).
     `case_body` is the comment template of the tenant's `settings/case-record.yaml` (`SIGNED_COMMENT_BODY`
-    also renders the signature). The tenant's ticket system accepts keys of `TICKET_KEY_PATTERN`. `lead_zero`
-    defaults to the template the table's correlation holder needs. `omit_systems` drops those
+    also renders the signature). The tenant's ticket system accepts keys of `TICKET_KEY_PATTERN`. `omit_systems` drops those
     systems' `config.env` and `access.yaml`: each is planted as configured-but-broken (#1366: a record with empty settings
     and access, judged down at start, as the folder world judged an unconfigured system; NOT left unrecorded, which
     would drop it from the roster and ignore its grant). `lessons` plants files (name -> text) in the
     tenant's own `agent/lessons/` (the checkout holds no corpus)."""
     root = Path(root) if root is not None else D.current_data_root()
-    if lead_zero is None:
-        lead_zero = LEAD_ZERO_NON_ELASTIC if table is TABLE_NON_ELASTIC else LEAD_ZERO_ELASTIC
     texts = dict(configs) if configs is not None else T6.config_texts(tenant_id)
     if configs is None:  # the ticket system's key grammar: the suite's `TICKET_KEY` fits it
         texts["ticket"] = re.sub(r'(?m)^TICKET_KEY_PATTERN=.*$',
@@ -621,7 +612,7 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
     omitted = tuple(omit_systems)
     for system in omitted:
         texts.pop(system, None)
-    knowledge = T6.place_tenant(root, tenant_id, table=table, lead_zero=lead_zero,
+    knowledge = T6.place_tenant(root, tenant_id, table=table,
                                 configs=texts, case_body=case_body, unconfigured=omitted)
     planted = Planted(root=root, tenant_id=tenant_id, knowledge=knowledge)
     (root / tenant_id / "learning").mkdir(exist_ok=True)  # setup provisions mutable state

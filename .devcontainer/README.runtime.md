@@ -23,8 +23,9 @@ Context is the repo root; a `.dockerignore` keeps it lean.
 # build (from the dev container via the socket, or from the host)
 docker build -f .devcontainer/Dockerfile.runtime -t defender-runtime .
 
-# hermetic replay smoke test — no key, no egress; replays run as the committed test
-# fixture tenant (knowledge/tenant-fixture), so the repo's knowledge/ is mounted
+# hermetic replay smoke test — no key, no egress; replays run as the test fixture tenant
+# (baked in under defender/tests/fixtures/), and some tests read the starter tenant
+# (knowledge/tenant-template), so the repo's knowledge/ is mounted
 docker run --rm -v "<HOST_REPO_PATH>/knowledge":/workspace/knowledge:ro \
     defender-runtime defender/.venv/bin/python -m pytest defender -m e2e
 ```

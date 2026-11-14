@@ -1,6 +1,8 @@
 """lead_author.synthesize_drafts: executed queries with no catalog template are minted as safe `_draft` skeletons."""
 from __future__ import annotations
 
+import yaml
+
 from pathlib import Path
 
 from defender.learning.leads import lead_author
@@ -89,24 +91,27 @@ _ESQL_PIPE = (
 )
 
 
-def test_esql_draft_carries_literal_query_not_placeholder(tmp_path):
+def test_esql_draft_carries_the_call_with_its_query_text(tmp_path):
+    """#1503: a query-language call is recorded as the call — its verb and params, the query
+    text one param value — and the learning model lifts the text out on promote."""
     cat = _catalog(tmp_path)
     lead_author.synthesize_drafts([
         _lead("elastic.sshd-failed-by-srcip", {"query": _ESQL_PIPE}, verb="esql",
               system="elastic"),
     ], **drafts_under(cat), systems=frozenset({"elastic"}))
     text = _draft_path(cat, "elastic", "elastic.sshd-failed-by-srcip").read_text()
-    assert "engine: esql" in text
-    assert "```esql" in text
+    assert "engine:" not in text
+    assert "verb: esql" in text
     assert "STATS failed = COUNT(*) BY source.ip" in text
     assert "Fill in the real" not in text
     assert "## What to summarize" not in text
     assert "## Pitfalls" in text
 
 
-def test_executed_query_is_the_declared_body_or_structured_call(tmp_path):
+def test_executed_query_is_the_structured_call(tmp_path):
     lead = _lead("elastic.x", {"query": _ESQL_PIPE}, verb="esql", system="elastic")
-    assert lead_author._executed_query(lead) == _ESQL_PIPE
+    assert yaml.safe_load(lead_author._executed_query(lead)) == {
+        "verb": "esql", "params": {"query": _ESQL_PIPE}}
     param_lead = _lead("cmdb.host-lookup", {"host": "db-1"}, verb="get-host", system="cmdb",
                        raw_command="cmdb get-host host=db-1")
     record = lead_author._executed_query(param_lead)
@@ -115,10 +120,11 @@ def test_executed_query_is_the_declared_body_or_structured_call(tmp_path):
     assert record != param_lead.raw_command
 
 
-def test_executed_query_keys_on_recorded_verb_not_id_prefix(tmp_path):
+def test_executed_query_reads_the_recorded_call_not_the_id_prefix(tmp_path):
     pipe = "FROM logs-system.auth-* | STATS c = COUNT(*)"
     el = _lead("custom.tagged", {"query": pipe}, verb="esql", system="elastic")
-    assert lead_author._executed_query(el) == pipe
+    assert yaml.safe_load(lead_author._executed_query(el)) == {
+        "verb": "esql", "params": {"query": pipe}}
     non = _lead("elastic.weird", {"host": "10.0.0.5"}, verb="get-host", system="cmdb")
     record = lead_author._executed_query(non)
     assert "get-host" in record

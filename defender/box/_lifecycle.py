@@ -40,6 +40,7 @@ from defender.box._scrub import (  # noqa: F401 — re-exported: run.py/drains.p
 from ._spec import ALIAS_PROFILE_PATH, CODE_CHECK_FILE, BoxExecutor, BoxRequest, BoxSpec, Mount
 from defender._model_view import MODEL_AGENT, MODEL_DEFENDER, MODEL_RUN
 from ._alias import _probe_alias_ban
+from ._check import BoxCheckFailed, require_box_check
 from ._docker import BoxStartConflict, Create, claim_label, DockerFn, START_TOKEN_LABEL, TENANT_LABEL, SharedMountsFn, _ALLOW_UNSANDBOXED, _LOCALE_ENV, _call, _container_status, _covered, _inspect_field, _daemon_source, run_docker, _reap_on_fault, _refuse_an_existing_container, _remove_container, _render_env, _shared_mounts, _uncovered_fault, container_name, infra_env, require_startable, resolve_rootfs
 from ._clock import CLOCK_ENV, CLOCK_TARGET, clock_dir, prepare_clock, remove_clock
 from ._host_env import provider_scrubbed_environ
@@ -642,7 +643,7 @@ def _start_boxed(  # noqa: PLR0913 — the run's geography plus its staged token
     shared_mounts: SharedMountsFn = _shared_mounts, tenant_agent: Path | None = None,
     write_verdict: Callable[[dict], None] | None = None,
     staged_token: Path | None = None, tenant_id: str | None = None,
-    start_token: str | None = None, running_wait: float = 30.0,
+    start_token: str | None = None, running_wait: float = 30.0, *, data_root: Path,
 ) -> BoxExecutor:
     name = container_name(run_dir.name)
     try:
@@ -657,14 +658,18 @@ def _start_boxed(  # noqa: PLR0913 — the run's geography plus its staged token
     # The caller's token when it handed one (a job's worker minted it, #1342 r5 C1, and reaps by
     # it), else one minted for this start: per start, never per run id.
     start_token = start_token or uuid.uuid4().hex
+    mounts = shared_mounts(docker)
     create = _create_argv(
-        name, run_dir, defender_dir, spec, shared_mounts(docker), start_token,
+        name, run_dir, defender_dir, spec, mounts, start_token,
         lane=lane, tenant_id=tenant_id,
     )
     try:
         # Confirm the image and the runtime before the create, so each missing is its own
-        # refusal (with its remedy) rather than a create fault told apart by its text.
-        require_startable(docker, create.rootfs, spec.runtime)
+        # refusal (with its remedy) rather than a create fault told apart by its text; then
+        # prove the runtime refuses a host socket (#1469), still before the clock and the create.
+        answer = require_startable(docker, create.rootfs, spec.runtime)
+        require_box_check(docker, spec.runtime, create.rootfs, answer=answer, flags=_box_flags(spec),
+                          labels=[*_tenant_label(tenant_id), *claim_label()], data_root=data_root, mounts=mounts)
     except BoxFault as e:
         write_did_not_run(run_dir, f"box start refused before create: {e}", write_verdict=write_verdict)
         raise
@@ -770,9 +775,14 @@ def _start_boxed_request(
         _did_not_run_for_request(request, f"box start refused before create: {e}")
         raise
     start_token = uuid.uuid4().hex
-    create = _render_argv(request, shared_mounts(docker), start_token)
+    mounts = shared_mounts(docker)
+    create = _render_argv(request, mounts, start_token)
     try:
-        require_startable(docker, create.rootfs, request.spec.runtime)
+        answer = require_startable(docker, create.rootfs, request.spec.runtime)
+        require_box_check(docker, request.spec.runtime, create.rootfs, answer=answer, flags=_box_flags(request.spec),
+                          labels=[*_tenant_label(request.tenant_id), *claim_label()],
+                          data_root=request.data_root,
+                          mounts=mounts)
     except BoxFault as e:
         _did_not_run_for_request(request, f"box start refused before create: {e}")
         raise
@@ -829,9 +839,10 @@ def _opt_out_or_raise(fault: BoxFault, *, require_sandbox: bool = False) -> None
     """Without `DEFENDER_ALLOW_UNSANDBOXED=1` a startup fault aborts; with it, the caller
     degrades to `unboxed_executor` after a warning carrying the fault verbatim (so remedies
     such as the image build command still reach the operator). A `BoxStartConflict` is never
-    degraded (#1279 A2): the opt-out is for "no sandbox here", not for a leak or a collision.
+    degraded (#1279 A2), nor a `BoxCheckFailed` (#1469 D3, a runtime that lets a box reach a host socket): the opt-out is
+    for "no sandbox here", not for a leak or a collision.
     Nor is a start that requires its sandbox (#1342 R2, the job lane): the opt-out is not read."""
-    if require_sandbox or isinstance(fault, BoxStartConflict):
+    if require_sandbox or isinstance(fault, (BoxStartConflict, BoxCheckFailed)):
         raise fault
     if os.environ.get(_ALLOW_UNSANDBOXED) != "1":
         raise fault
@@ -875,7 +886,7 @@ def start_box(  # noqa: PLR0913 — the run's geography, plus the job lane's san
     write_verdict: Callable[[dict], None] | None = None,
     tenant_id: TenantId | None = None, staged_token: Path | None = None,
     require_sandbox: bool = False, start_token: str | None = None,
-    running_wait: float = 30.0, relay: RelayRequest | None = None,
+    running_wait: float = 30.0, relay: RelayRequest | None = None, data_root: Path | None = None,
 ) -> BoxExecutor:
     """Start the run's box. `relay` is a job container's socket client (#1170 A4): the run box is then started by the
     per-job host helper (`box.start` of the `shell` kind at the run's id), which derives every mount, name and label
@@ -892,6 +903,9 @@ def start_box(  # noqa: PLR0913 — the run's geography, plus the job lane's san
     `running_wait` bounds, in seconds, the run box's wait for its attached start to report the
     box running (#1343 B10); a request's box is started plainly and does not wait (its windows,
     `BoxRuns.run`, attach, #1344 amendment 2).
+    `data_root` is the data root its entry point resolved (`tenancy.resolve_data_root`), where the box check (#1469)
+    makes its folder: required on the run lane (even for a `runc` box, so a caller that forgets it fails at once), and
+    carried, required, by the `BoxRequest` on the request lane.
     The tenant arguments are illegal with a `BoxRequest`, which carries its own mounts (and its
     own `tenant_id`)."""
     if relay is not None:
@@ -908,10 +922,10 @@ def start_box(  # noqa: PLR0913 — the run's geography, plus the job lane's san
                 "start_box(request, spec=…) is ambiguous — a BoxRequest carries its own spec; "
                 "set it on the request (BoxRequest(..., spec=…)) instead of the call"
             )
-        if tenant_agent is not None or tenant_id is not None or staged_token is not None:
+        if tenant_agent is not None or tenant_id is not None or staged_token is not None or data_root is not None:
             raise TypeError(
-                "start_box(request, tenant_agent=…) is ambiguous — a BoxRequest carries its "
-                "own mounts; put the tenant's agent half in them instead of the call"
+                "start_box(request, tenant_agent=…, tenant_id=…, staged_token=…, data_root=…) is ambiguous — a "
+                "BoxRequest carries its own mounts, tenant and data root; put them in the request instead of the call"
             )
         if start_token is not None:
             raise TypeError("start_box(request, start_token=…) is not served: a request's box "
@@ -933,7 +947,7 @@ def start_box(  # noqa: PLR0913 — the run's geography, plus the job lane's san
 
     return _start_run_box(run_dir_or_request, defender_dir, spec, docker, tenant_agent,
                           staged_token, write_verdict, tenant_id, require_sandbox=require_sandbox,
-                          start_token=start_token, running_wait=running_wait)
+                          start_token=start_token, running_wait=running_wait, data_root=data_root)
 
 
 def _start_run_box(  # noqa: PLR0913 — the run's geography plus its staged token
@@ -941,12 +955,17 @@ def _start_run_box(  # noqa: PLR0913 — the run's geography plus its staged tok
     tenant_agent: Path | None, staged_token: Path | None,
     write_verdict: Callable[[dict], None] | None, tenant_id: str | None = None, *,
     require_sandbox: bool = False, start_token: str | None = None, running_wait: float = 30.0,
+    data_root: Path | None = None,
 ) -> BoxExecutor:
     if defender_dir is None:
         raise TypeError("start_box(run_dir, defender_dir, ...) needs defender_dir")
     if tenant_id is None or not str(tenant_id):
         # r10 B1, r10.1 C8: every box carries its tenant's label, so its teardown can find it.
         raise TypeError("start_box(run_dir, defender_dir, ...) needs tenant_id: every box carries its tenant")
+    if data_root is None:
+        # #1469 D1: the box check's folder lives under the data root the entry point resolved; required whatever the
+        # runtime, so a caller that forgets it fails at once rather than only on a gVisor host.
+        raise TypeError("start_box(run_dir, defender_dir, ...) needs data_root: the box check runs in a folder under it")
     # Default runtime is runsc; runc (weaker isolation) only when the operator sets
     # DEFENDER_BOX_RUNTIME=runc, never by fallback.
     if spec is None:
@@ -965,7 +984,7 @@ def _start_run_box(  # noqa: PLR0913 — the run's geography plus its staged tok
         return _start_boxed(run_dir, defender_dir, spec, docker,
                             tenant_agent=tenant_agent, staged_token=staged_token,
                             write_verdict=write_verdict, tenant_id=tenant_id,
-                            start_token=start_token, running_wait=running_wait)
+                            start_token=start_token, running_wait=running_wait, data_root=data_root)
     except BoxFault as e:
         _opt_out_or_raise(e, require_sandbox=require_sandbox)
     # The host runs the bash lane in the model view too (#1255 "Every mode"): over a per-run

@@ -28,7 +28,7 @@ from defender.tests.support.learning.judge import _judge_921 as J
 
 from ._support import current_commit, export_dir, git, published_tenant
 
-#: The fixture tenant's own lesson (committed under `knowledge/tenant-fixture/agent/lessons/`).
+#: The fixture tenant's own lesson (committed under `defender/tests/fixtures/tenant-fixture/agent/lessons/`).
 NAME = "fixture-owner-before-close"
 TENANT_PATH = f"agent/lessons/{NAME}.md"
 PRODUCT_PATH = f"defender/lessons/{NAME}.md"

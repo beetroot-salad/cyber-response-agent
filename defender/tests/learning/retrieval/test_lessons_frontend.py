@@ -19,7 +19,7 @@ DEFENDER = Path(__file__).resolve().parents[3]
 #: The groups the posture page shows: the defender's corpus and the questioner's.
 LIVE_GROUPS = {"defender", "questioner"}
 
-#: The committed fixture tenant's lessons (`knowledge/tenant-fixture/agent/`), by group.
+#: The committed fixture tenant's lessons (`defender/tests/fixtures/tenant-fixture/agent/`), by group.
 FIXTURE_TITLES = {
     "defender": {"fixture-change-window-is-not-approval", "fixture-owner-before-close"},
     "questioner": {"fixture-questioner-seed"},

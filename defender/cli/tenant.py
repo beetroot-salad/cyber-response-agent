@@ -24,8 +24,8 @@ PostgreSQL, and this command reads it from `DEFENDER_DATABASE_DSN`: `check <id>`
 `new-id` and `migrate` are retired with the on-disk row.
 
 `check` reports what acceptance does not refuse: the grant census against the RUNNING code (a verb
-the adapters declare that the table leaves undecided, a row for a verb nobody declares), the
-lead-zero agreement, and — for a git clone — that `agent/.tenant-id` is what the tenant's repo
+the adapters declare that the table leaves undecided, a row for a verb nobody declares), retired
+settings files left in the repo, and — for a git clone — that `agent/.tenant-id` is what the tenant's repo
 commits (failing closed when git cannot answer). `check <id>` judges the tenant under
 `$DEFENDER_DATA_ROOT` through acceptance; `check --folder <path>` judges a tenant repo's working
 folder with no data root and no tenant record at all (tenant CI).
@@ -387,8 +387,7 @@ def check_folder(folder: Path) -> int:
 
 def _findings(knowledge: Path, *, systems: Any = None) -> list[str]:
     """Everything `check` reports about a folder acceptance (or the folder rules) passed: the
-    settings files load, the grant table loads, the lead-zero agreement against the running
-    catalog, the grant census both ways against the running checkout, and the committed
+    settings files load, the grant table loads, the grant census both ways against the running checkout, and the committed
     `.tenant-id`. A census that cannot be taken costs only the census: its finding says the
     table went unchecked and why, and every other rule still runs."""
     settings = knowledge / SETTINGS_HALF
@@ -412,9 +411,10 @@ def _findings(knowledge: Path, *, systems: Any = None) -> list[str]:
                      if is_platform_served(name)]
     findings += _tenant_findings(knowledge)
     try:
-        findings += (census_findings(_tenant_census.table_findings(settings, census), systems).lines(table)
-                     if census is not None
-                     else _tenant_census.folder_findings(settings).lines())
+        if census is not None:
+            findings += census_findings(_tenant_census.table_findings(settings, census), systems).lines(table)
+        else:
+            _tenant_census.folder_findings(settings)  # the table still loads, or its refusal is the finding
     except DispositionError as unloadable:
         findings.append(str(unloadable))
     return findings

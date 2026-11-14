@@ -102,14 +102,14 @@ def preflight_episode(  # noqa: PLR0913 — every refusal knowable before a mode
     preflight: Callable[..., int], model: str | None,
     allow_dirty: bool,
     live_tree: Callable[[], formats.RunProvenance],
-    oracle: Any = None, verifier: Any = None,
+    oracle: Any = None, verifier: Any = None, data_root: Path,
 ) -> LaunchChecked:
     """Everything that can refuse before the questioner is paid for, in one block, so an
     operator with several problems hears about them all before spending anything. Returns the
     source's stamp (the family's anchor) and the fault kinds `--allow-dirty` waived for the live
     tree, which the family stamp records with its siblings' own."""
     source_run_dir = source.run_dir
-    _check_oracle_side(oracle=oracle, verifier=verifier, tenant_id=str(source.tenant_id))
+    _check_oracle_side(oracle=oracle, verifier=verifier, tenant_id=str(source.tenant_id), data_root=data_root)
     _check_branch_point(source, branch_message_id)
     # The live tree is judged as a one-member family by `verify_family`'s own rules, before the
     # paid role preflight: on its own stamp (#1344 r5), never against the source's commit or
@@ -137,7 +137,7 @@ def preflight_episode(  # noqa: PLR0913 — every refusal knowable before a mode
 
 
 
-def _check_oracle_side(*, oracle: Any, verifier: Any, tenant_id: str) -> None:
+def _check_oracle_side(*, oracle: Any, verifier: Any, tenant_id: str, data_root: Path) -> None:
     """Refuse a launch whose oracle `preflight_replay` could not configure: a bad oracle knob
     (`FatalConfigError`) or a role with no pricing row (`OraclePricingError`). The same
     functions pre-flight's `oracle_settings_with` and each world's `Oracle` call, so the rule
@@ -148,7 +148,8 @@ def _check_oracle_side(*, oracle: Any, verifier: Any, tenant_id: str) -> None:
     from defender.learning.core.config import oracle_settings_with
 
     try:
-        serving = oracle_serving(oracle_settings_with(), oracle=oracle, verifier=verifier, tenant_id=tenant_id)
+        serving = oracle_serving(oracle_settings_with(), oracle=oracle, verifier=verifier, tenant_id=tenant_id,
+                                 data_root=data_root)
         price_row("oracle", serving.oracle)
         price_row("verifier", serving.verifier)
     except (FatalConfigError, OraclePricingError) as bad:
@@ -373,7 +374,7 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one pass: adm
     episode: Episode, *, source: Run, roster: Any, tenant: RunTenant, oracle: Any = None,
     verifier: Any = None, signer: Any = None, proxy_url: str | None = None,
     issuer_transport: Any = None, directory: Any = None, container: Any = None, job_id: str | None = None,
-    **knobs: Any,
+    data_root: Path, **knobs: Any,
 ) -> dict[str, Any]:
     """`Step.PREFLIGHT`: replay every original call through each fact world's oracle and
     verifier, and write the episode's write-once outcome record (`outcome.write_outcome`)."""
@@ -554,7 +555,8 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one pass: adm
         # event loop, so the production models — each with its provider and HTTP client — are
         # never shared across loops. Only the limiter is the pass's one (S18).
         serving = oracle_serving(settings, oracle=oracle, verifier=verifier, box=box,
-                                 tenant_id=str(tenant.tenant_id), restart_after=restart_after)
+                                 tenant_id=str(tenant.tenant_id), data_root=data_root,
+                                 restart_after=restart_after)
         registry = WorldRegistry(
             roster, tenant.grants.gather, world=world, ledger=ledger,
             serving=serving, oracle_dir=default_oracle_dir(world, ledger), limiter=limiter,

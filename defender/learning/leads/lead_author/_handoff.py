@@ -20,7 +20,6 @@ from defender.learning.core import config as _loop_config
 from defender.learning._prompt import stage_user_message, structured_json_body
 from defender.learning.leads import lead_neighbors
 from defender.learning.leads import lead_render
-from defender.systems.verbs import engine_for
 
 from defender.learning.leads.path_validation import (  # noqa: F401  (re-exported)
     CATALOG_PREFIX,
@@ -133,16 +132,17 @@ def build_handoff(
         )
         invocations: list[dict] = []
         for lead in invocations_raw:
-            if engine_for(lead.system, lead.verb) != "none":
-                rendered_query = _executed_query(lead)
-            else:
-                try:
-                    rendered_query = lead_render.render_query(
-                        skills, tpl.path.relative_to(where).as_posix(), lead.params,
-                    )
-                except (OSError, ValueError) as e:
-                    _logger.warning(f"render_query failed for {tpl.path}: {e}")
-                    rendered_query = ""
+            try:
+                rendered_query = lead_render.render_query(
+                    skills, tpl.path.relative_to(where).as_posix(), lead.params,
+                )
+            except (OSError, ValueError) as e:
+                _logger.warning(f"render_query failed for {tpl.path}: {e}")
+                rendered_query = ""
+            # Left empty rather than handed over with unfilled slots: the call did not run the
+            # template as written, and `executed_query` carries what it did run (#1503).
+            if not lead_render.is_fully_bound(rendered_query):
+                rendered_query = ""
             invocations.append(
                 {
                     "lead_id": lead.lead_id,

@@ -21,6 +21,7 @@ from defender.records import RunPaths
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.tenancy._launch_publish_p4 import RunWithPublish
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S1224
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
 TOKEN_B = T.fixture_world_id("b")
 
@@ -282,6 +283,7 @@ def test_947_each_sibling_runs_the_runtime_box_lifecycle(tmp_path):
     run_dir = base / fixture_uuid("947-sibling-lifecycle-b")  # a run id is a uuid4
     (run_dir / "gather_raw").mkdir(parents=True)
     _run()._run_investigation_lifecycle(
+        data_root=current_data_root(),
         run=_run_handle_lifecycle_1165(run_dir), model="m", model_override=None, defender_dir=T.DEFENDER,
         world=_run().resume_world(
         Episode.open(ep), "b", tenant=T1106.fixture_run_tenant),

@@ -25,9 +25,8 @@ from typing import Any
 from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.tenancy.tenant_1108_p4._support import published_tenant
 
-#: The lead-zero template the fixture's `settings/lead-zero.yaml` names; its `agent/` carries it.
+#: A saved correlation query the fixture's `agent/` carries: a cache for the lead, not a binding (#1503).
 CORRELATE_PATH = "agent/skills/gather/queries/elastic/correlate-alerts-by-entity.md"
-CORRELATE_ID = "elastic.correlate-alerts-by-entity"
 
 #: A lesson whose bytes change between the seeded commit and a later merge, so "which revision
 #: did the run read" is answerable from content alone.
@@ -79,7 +78,7 @@ def run_tenant(tmp_path: Path, data_root: Path, *,
 def settings_read(seen: Any) -> str | None:
     """The revision mark in the settings half the run holds (its copy's), after asserting that the
     grants the run resolved were read from that very half: the settings a run still resolves from
-    a folder are its grants and lead-zero config (a system's settings are its records, DC7)."""
+    a folder are its grants (a system's settings are its records, DC7)."""
     grants = Path(seen.kw["tenant"].grants.path).resolve()
     assert grants.is_relative_to(Path(seen.settings).resolve()), (
         f"the run resolved its grants from {grants}, not from the settings half it holds "

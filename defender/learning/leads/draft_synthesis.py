@@ -16,7 +16,6 @@ from defender._io import ENTRY_DIR, ENTRY_FILE, Held
 from defender._tree_listing import entry_kind
 from defender.learning.leads import lead_neighbors
 from defender.learning.leads.path_validation import CATALOG_FOLDER
-from defender.systems.verbs import body_param_for, engine_for
 
 if TYPE_CHECKING:
     from defender.learning.leads.lead_extraction import ExecutedLead
@@ -42,18 +41,16 @@ _DIGEST_LEN = 12
 
 def _structured_call(verb_name: str, params: dict) -> str:
     doc = {"verb": verb_name, "params": dict(params or {})}
+    # No line wrapping: a query language's text is a param value here, and a wrap would split
+    # it where the learning model lifts it into a `## Query` (#1503).
     return _yaml.safe_dump(
-        doc, sort_keys=False, allow_unicode=True, default_flow_style=False
+        doc, sort_keys=False, allow_unicode=True, default_flow_style=False, width=2**31 - 1,
     ).strip()
 
 
 def _executed_query(lead: ExecutedLead) -> str:
-    engine = engine_for(lead.system, lead.verb)
-    if engine != "none":
-        body_param = body_param_for(lead.system, lead.verb)
-        body = (lead.params or {}).get(body_param) if body_param else None
-        if isinstance(body, str) and body.strip():
-            return body
+    """The call as it was made: its verb and every param. A query language's text is one param
+    value among them; the learning model lifts it into a template's `## Query` (#1503)."""
     return _structured_call(lead.verb, lead.params or {})
 
 
@@ -79,15 +76,13 @@ def _draft_params(lead: ExecutedLead) -> list[str]:
 
     Read off the row, not an adapter: the call reached a system, so `validate_params` already
     accepted these names, and an adapter that won't import in the worktree shouldn't lose a
-    draft. The engine body param is excluded, since its value became the `## Executed query`
-    recording rather than a `${placeholder}`.
+    draft.
     """
-    body_param = body_param_for(lead.system, lead.verb)
-    return sorted(n for n in (lead.params or {}) if n != body_param)
+    return sorted(lead.params or {})
 
 
 def _draft_frontmatter(
-    draft_id: str, verb_name: str, params: list[str], engine: str, covers: list[str],
+    draft_id: str, verb_name: str, params: list[str], covers: list[str],
 ) -> str:
     """Rendered through `yaml.safe_dump`, not an f-string: the values are model-coined, and
     `covers:` keeps the coined `query_id` verbatim, so quoting can't be left to upstream guards.
@@ -96,8 +91,6 @@ def _draft_frontmatter(
     would turn one execution's data into an interface claim.
     """
     doc: dict[str, object] = {"id": draft_id, "status": "draft", "verb": verb_name}
-    if engine != "none":
-        doc["engine"] = engine
     doc["params"] = params
     doc["covers"] = covers
     return _yaml.safe_dump(
@@ -107,9 +100,8 @@ def _draft_frontmatter(
 
 def _draft_skeleton(
     query_id: str, draft_id: str, verb_name: str, params: list[str], goal: str, record: str,
-    engine: str,
 ) -> str:
-    query_block = _render_query_body(record, engine if engine != "none" else "query")
+    query_block = _render_query_body(record, "query")
     # `split()`, not `replace("\n", " ")`: `_corpus.section_bodies` uses `splitlines()`, which
     # also splits on `\r`, `\v`, `\f`, `\x1c`-`\x1e`, `\x85`, `\u2028`/`\u2029`. Any of them in
     # a model-authored goal could smuggle a `## ` heading or fence onto its own line; all are
@@ -120,7 +112,7 @@ def _draft_skeleton(
         # Gather may bind a draft's derived id as `query_id`, and on promote the `id:` is
         # replaced, so without this a row under it would mint a draft of the digest. Copying
         # `covers:` onto the promoted file transfers both.
-        f"---\n{_draft_frontmatter(draft_id, verb_name, params, engine, [draft_id, query_id])}"
+        f"---\n{_draft_frontmatter(draft_id, verb_name, params, [draft_id, query_id])}"
         "\n---\n\n"
         "## Goal\n\n"
         f"`{query_id}` — auto-drafted from a coined gather query with no matching\n"
@@ -253,7 +245,6 @@ def synthesize_drafts(
         if draft in created:
             continue
         record = _executed_query(lead) or "# (no command captured for this query)"
-        engine = engine_for(lead.system, lead.verb)
         try:
             # A plain file or folder at the name is the draft already there. Anything else falls
             # through to the write, which refuses what is not plain: a link at the name, or a
@@ -268,7 +259,7 @@ def synthesize_drafts(
                 name,
                 _draft_skeleton(
                     qid, f"{system}.{suffix}", lead.verb, _draft_params(lead),
-                    lead.goal_text, record, engine,
+                    lead.goal_text, record,
                 ),
                 mode="replace",
             )

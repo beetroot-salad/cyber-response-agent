@@ -32,7 +32,6 @@ from defender.learning.leads.lead_extraction import (
     collect_general_failures,
 )
 from defender.learning.leads.path_validation import SKILLS_PREFIX as SKILLS_REL
-from defender.systems.verbs import engine_for
 from defender.tests.support.runtime.engine._declared869 import LeadAuthorSpawn, seed_executed_query, seed_tree
 from defender.tests.support.learning.curation._lead_author_1134 import (
     OUT_ID,
@@ -527,7 +526,7 @@ def draft_of(lead: ExecutedLead) -> tuple[str, str]:
     record = _executed_query(lead) or "# (no command captured for this query)"
     text = _draft_skeleton(
         lead.query_id, f"{lead.system}.{suffix}", lead.verb, _draft_params(lead),
-        lead.goal_text, record, engine_for(lead.system, lead.verb),
+        lead.goal_text, record,
     )
     return f"gather/queries/{lead.system}/_draft/{suffix}.md", text
 

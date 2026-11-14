@@ -95,7 +95,7 @@ def parse_config_env(text: str) -> dict[str, str]:
     return found
 
 
-#: The retired fixture tenant's `settings/` (slice A deleted it from `knowledge/tenant-fixture/`; the files moved here
+#: The retired fixture tenant's `settings/` (slice A deleted it from `defender/tests/fixtures/tenant-fixture/`; the files moved here
 #: byte for byte, so the diff is a rename and the import tests read real files).
 FIXTURE_DATA = Path(__file__).resolve().parents[2] / "fixtures" / "retired-tenant-fixture" / "settings"
 

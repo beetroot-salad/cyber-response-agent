@@ -262,6 +262,10 @@ CONVERSION_PERMISSIONS: dict[tuple[str, str], frozenset[str]] = {
     # #1278 Migration: the cutover job accepts the tenant and reads its old learning folder, in one function each.
     ("learning_root", "lifecycle/_host.py"): frozenset({"HostActor._read_learning", "HostActor._cut_over"}),
     ("data_root", "lifecycle/_process.py"): frozenset({"learning_delivery.open_for"}),
+    # #1469: the data root an entry point resolved is handed to a box start, where the box check makes its folder
+    # (`<data root>/.box-checks/`): the request carries it, and a drain's request is made from its tenant's.
+    ("data_root", "box/_lifecycle.py"): frozenset({"_start_boxed_request"}),
+    ("data_root", "learning/author/version_control/batch.py"): frozenset({"Batch.box_request"}),
     # #1163 A26: the credential proxy's one setting, converted once when its pipeline is built.
     ("data_root", "credential_proxy/_app.py"): frozenset({"_Proxy.__init__"}),
 }

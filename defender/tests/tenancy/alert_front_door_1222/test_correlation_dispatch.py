@@ -472,7 +472,7 @@ def test_p134_tenants_siem_config_faulted_at_run_start(tmp_path):
         for tenant_id in (faulted_id, good_id):
             planted = S.plant_tenant(
                 tenant_id, alert_mapping=S.DEFAULT_MAPPING,
-                table=TABLE_ELASTIC_GATHER_CMDB_CORRELATION, lead_zero=S.LEAD_ZERO_NON_ELASTIC,
+                table=TABLE_ELASTIC_GATHER_CMDB_CORRELATION,
                 configs=_tenant_elastic_configs(tenant_id, events=patterns[0], alerts=patterns[1]))
             if tenant_id == faulted_id:  # the cause that survives the Docker keys: no declaration
                 S7.drop_access(planted.knowledge, "elastic")

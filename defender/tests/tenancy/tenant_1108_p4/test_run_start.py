@@ -305,20 +305,16 @@ def test_o_pin_a_pin_to_a_commit_with_no_export_refuses_before_message_zero(tena
     _no_copy_left(tenant)
 
 
-# --- O2: lead-zero templates from the copy's catalog ------------------------------------------
+# --- O2, as #1503 left it: the step-zero lead needs no saved query --------------------------
 
-def test_o2_lead_zero_templates_come_from_the_run_copys_catalog_not_the_product_tree(
-        tmp_path, data_root):
-    """An export without the lead-zero template its settings name refuses the run at start,
-    naming the template: there is no fallback catalog. Control: every other test here."""
+def test_o2_an_export_without_a_saved_correlation_query_still_starts(tmp_path, data_root):
+    """The step-zero lead binds no saved query (#1503), so an export whose catalog lacks the
+    correlation query starts as any other does."""
     with published_tenant(tmp_path / "forge", root=data_root,
                           files={**B.SEED_FILES, B.CORRELATE_PATH: None}) as t:
         out = B.launch(t, tmp_path, publish=lambda *a, **k: B.fresh(t.commit))
-    assert not out.reached, (
-        "the run started although its own export has no lead-zero template")
-    assert out.refusal is not None, out.text()
-    assert B.CORRELATE_ID in out.refusal, out.text()
-    _no_copy_left(t)
+    assert out.reached, out.text()
+    assert out.refusal is None, out.text()
 
 
 # --- O8 parent half ---------------------------------------------------------------------------

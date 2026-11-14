@@ -20,7 +20,7 @@ DATA_ROOT_ENV = "DEFENDER_DATA_ROOT"
 D9_TENANT_ID = fixture_uuid("tenant:playground")
 
 #: The committed fixture tenant — the knowledge every test tenant is set up from.
-FIXTURE = Path(__file__).resolve().parents[5] / "knowledge" / "tenant-fixture"
+FIXTURE = Path(__file__).resolve().parents[5] / "defender" / "tests" / "fixtures" / "tenant-fixture"
 DEFENDER = Path(__file__).resolve().parents[4]
 
 

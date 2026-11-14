@@ -21,6 +21,7 @@ import pytest
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.tenancy._host1214 import TEST_TENANT
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
 #: The tenant every oracle box here serves (r10.1 C8: a box cannot be made without one; one shared test tenant).
 ORACLE_TENANT = TEST_TENANT
@@ -444,7 +445,7 @@ def _start_oracle_box_recorded(where: Path, run_dir: Path,
                 name="defender-oracle-rec-1224",
                 mounts=(box_mod.Mount(source=probe, target=probe, writable=True),),
                 workdir=probe, env={}, tenant_id=ORACLE_TENANT,
-                spec=box_mod.BoxSpec(runtime="runc", rootfs="defender-box:t1224")))
+                spec=box_mod.BoxSpec(runtime="runc", rootfs="defender-box:t1224"), data_root=current_data_root()))
         runtime_creates = _creates(_docker_argvs(argv_log))
         assert runtime_creates, "the recorder never saw the runtime's own create"
         assert (probe, False) in _binds(runtime_creates[-1]), runtime_creates[-1]
@@ -457,7 +458,7 @@ def _start_oracle_box_recorded(where: Path, run_dir: Path,
         mp.chdir(run_dir)
         start_box = S.sym(S.ORACLE, "start_box")
         with pytest.raises((S.sandbox_error_cls(), box_fault)):
-            start_box(env=env, tenant_id=ORACLE_TENANT)
+            start_box(env=env, tenant_id=ORACLE_TENANT, data_root=current_data_root())
     return start_box, _docker_argvs(argv_log)
 
 
@@ -910,7 +911,8 @@ def test_1224_oracle_python_tool_cannot_be_built_over_an_unsandboxed_executor(tm
     monkeypatch.setenv("PATH", str(nobin))
     start_box = S.sym(S.ORACLE, "start_box")
     with pytest.raises(S.sandbox_error_cls()):
-        start_box(env={S.UNSANDBOXED_ENV: "1", "PATH": str(nobin)}, tenant_id=ORACLE_TENANT)
+        start_box(env={S.UNSANDBOXED_ENV: "1", "PATH": str(nobin)}, tenant_id=ORACLE_TENANT,
+                  data_root=current_data_root())
 
 
 def test_python_box_cannot_be_started(tmp_path, monkeypatch):
@@ -1027,7 +1029,9 @@ def test_oracle_python_scratch_files_and_the_investigators_box(tmp_path, monkeyp
         "the oracle box start wrote into the sibling's run dir")
     params = list(inspect.signature(start_box).parameters)
     # r10 B1: the tenant id is neither a path nor a container of the investigator's, so the pin keeps its purpose.
-    assert params == ["env", "tenant_id"], f"the oracle box factory takes more than its env and tenant: {params}"
+    # #1469: nor is the data root, the folder the box check makes its own subfolder under: no run dir, no agent half.
+    assert params == ["env", "tenant_id", "data_root"], (
+        f"the oracle box factory takes more than its env, tenant and data root: {params}")
     for create in _creates(sent):
         labels = [create[i + 1] for i, arg in enumerate(create) if arg == "--label"]
         assert f"defender.tenant={ORACLE_TENANT}" in labels, f"the oracle box is not labelled with its tenant: {create}"

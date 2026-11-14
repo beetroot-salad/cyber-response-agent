@@ -37,7 +37,7 @@ _SOURCE_SIGNATURE_LINE = re.compile(r"^source_signature:\s*\[(.*)\]\s*$", re.M)
 
 def _background_corpus() -> Path:
     """Background lessons a lookup must NOT match: the committed fixture tenant's made-up corpus
-    (`knowledge/tenant-fixture/agent/lessons/`), never the lab's or the product tree's (which
+    (`defender/tests/fixtures/tenant-fixture/agent/lessons/`), never the lab's or the product tree's (which
     holds none)."""
     corpus = Path(S.mod("tests.tenancy.tenant_1108_p4._support").FIXTURE_AGENT) / "lessons"
     assert corpus.is_dir(), f"the fixture corpus {corpus} is missing"

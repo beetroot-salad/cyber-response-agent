@@ -196,11 +196,12 @@ def test_a_tenant_with_no_case_record_is_not_refused_and_reaches_the_box(world):
     assert len(start.calls) == 1, start.calls
 
 
-@pytest.mark.parametrize("missing", ["verb-grants.yaml", "lead-zero.yaml"])
-def test_a_tenant_missing_another_required_file_refuses_before_the_box(world, capsys, missing):
-    _published_without(world, fixture_uuid("tenant:acme"), missing)
+def test_a_tenant_missing_its_grant_table_refuses_before_the_box(world, capsys):
+    """The table is the settings half's only file (#1503), so an export without it has no
+    `settings/` at all (git keeps no empty folder): the refusal names the missing half."""
+    _published_without(world, fixture_uuid("tenant:acme"), "verb-grants.yaml")
     text, _ = _refusal(world, capsys)
-    assert _settings_named(text, missing), text
+    assert "no settings/ half" in text, text
 
 
 def test_a_tenant_copied_from_the_template_refuses_at_start_naming_its_table(world, capsys):
@@ -231,40 +232,6 @@ def test_a_tenant_whose_gather_grant_is_health_checks_alone_refuses_at_start(wor
     text, _ = _refusal(world, capsys)
     assert _settings_named(text, "verb-grants.yaml"), text
     assert "query" in text, text
-
-
-def test_a_lead_zero_template_the_catalog_lacks_refuses_before_the_box(world, capsys):
-    world["publish_tenant"](fixture_uuid("tenant:drift"),
-                            {"settings/lead-zero.yaml": T.lead_zero_text("elastic.no-such-template")})
-    text, _ = _refusal(world, capsys)
-    assert "elastic.no-such-template" in text, text
-
-
-TABLE_LEAD_ON_QUERY = """\
-dispositions:
-  cmdb:
-    get-host: {roles: [gather]}
-    health-check: {roles: [gather]}
-  elastic:
-    alerts: {roles: [gather]}
-    health-check: {roles: [gather, lead-zero-correlation]}
-    query: {roles: [gather, lead-zero-correlation]}
-"""
-
-
-def test_a_lead_zero_template_on_another_pair_than_the_table_grants_refuses_before_the_box(
-        world, capsys):
-    """The template exists but binds a pair the table does not grant the lead (it grants `query`)."""
-    from defender.tests.tenancy.tenant_1108_p4._support import export_dir
-
-    t = world["publish_tenant"](fixture_uuid("tenant:drift"),
-                                {"settings/verb-grants.yaml": TABLE_LEAD_ON_QUERY})
-    grants = T.run_grants(export_dir(t.tenant, t.commit) / "settings")
-    assert {(s, v) for s, v, _ in grants.correlation.entries} == {
-        ("elastic", "health-check"), ("elastic", "query")}, "the fixture's lead pair moved"
-    text, _ = _refusal(world, capsys)
-    assert T.SHIPPED_CORRELATION_TEMPLATE in text, text
-    assert "elastic.query" in text, text
 
 
 class _RegistryRecorder:
@@ -327,11 +294,18 @@ def test_one_process_runs_tenant_a_then_b_and_each_run_carries_only_its_own_tena
 
             # The box: this run copy's stage/agent; no settings, no clone, nothing of the other tenant.
             assert len(start.calls) == 1, start.calls
-            assert T.reaches(start.calls, copy_root / "stage" / "agent"), start.calls
-            assert not T.exposes(start.calls, own_settings), start.calls
-            assert not T.exposes(start.calls, B.clone_dir(own)), start.calls
+            # `data_root` is the folder the box check is made under (#1469), beside the job sockets; it
+            # is not bound into the box. So it is judged on its own (it must be the tenants' data root,
+            # not a tenant's folder or a copy), and `exposes` (which reads an ancestor as exposure)
+            # judges only what the call hands the box to mount.
+            (_, start_kwargs), = start.calls
+            assert Path(location_path(start_kwargs["data_root"])).resolve() == root.resolve(), start.calls
+            handed = [(a, {k: v for k, v in kw.items() if k != "data_root"}) for a, kw in start.calls]
+            assert T.reaches(handed, copy_root / "stage" / "agent"), start.calls
+            assert not T.exposes(handed, own_settings), start.calls
+            assert not T.exposes(handed, B.clone_dir(own)), start.calls
             assert not T.reaches(start.calls, root / other)
-            assert not T.exposes(start.calls, root / other), start.calls
+            assert not T.exposes(handed, root / other), start.calls
 
             # The registry: exactly this tenant's gather pairs.
             assert len(_RegistryRecorder.built) == 1, _RegistryRecorder.built

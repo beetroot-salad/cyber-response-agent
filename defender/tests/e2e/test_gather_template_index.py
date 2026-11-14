@@ -38,9 +38,7 @@ class _KeyRecordingReplay(ReplayFn):
 _CATALOG_REL = Path("skills") / "gather" / "queries"
 
 #: The template the scripted gather binds, an off-target sibling comes from the fixture
-#: (`cmdb.host-owner`), a draft that must never be indexed, and the lead-zero template the
-#: fixture's `lead-zero.yaml` names (so the correlation lead the harness dispatches resolves
-#: against the tenant's catalog, as run start resolves it).
+#: (`cmdb.host-owner`), and a draft that must never be indexed.
 _TEMPLATES = {
     "elastic/sshd-auth-history.md": (
         "---\nid: elastic.sshd-auth-history\nstatus: established\nverb: esql\n---\n\n"
@@ -50,11 +48,6 @@ _TEMPLATES = {
         "---\nid: elastic.fixture-draft-probe\nstatus: draft\nverb: esql\n---\n\n"
         "## Goal\n\nFixture draft (#1108 P4) that must never reach the index.\n\n"
         "## Query\n\n```esql\nFROM logs | LIMIT 1\n```\n"),
-    "elastic/correlate-alerts-by-entity.md": (
-        "---\nid: elastic.correlate-alerts-by-entity\nstatus: established\nverb: alerts\n"
-        "params: [end, start]\nbody_substitutions: [entity_filter]\n---\n\n"
-        "## Goal\n\nFixture lead-zero template (#1108 P4): alerts naming one entity.\n\n"
-        "## Query\n\n```\n${entity_filter}\n```\n"),
 }
 
 

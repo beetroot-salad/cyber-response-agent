@@ -90,6 +90,9 @@ REMOVED_PY_IMPORT = re.compile(
 # ordinary use of the word in the tree.
 GENERIC_NAMES = {
     "main", "handle", "author", "format_output",
+    # The step-zero lead's name, which outlives `settings/lead-zero.yaml` (#1503 retired the file,
+    # not the lead): its role `lead-zero-correlation` and its modules all keep the name.
+    "lead-zero",
     "successful", "interrupted", "baselines", "deviations",
     "Callable", "Iterable", "Iterator", "Optional", "Union", "Any",
     "typing", "dataclass", "field", "Path", "List", "Dict",

@@ -8,8 +8,8 @@ kind, starts and relays the job's boxes, and removes what it made when the conta
 Split into:
   * `_main`          — the flow, the signals, the end (step 8).
   * `_session`       — the job's state, the registry of requests and kinds, the pass mint.
-  * `_container`     — the container's socket, environment, `docker run`, and who its processes are.
-  * `_server`        — the job socket's server and its peer check.
+  * `_container`     — the container's socket, environment, runtime and `docker run`.
+  * `_server`        — the job socket's server (the filesystem alone decides who may use it, #1469 S4).
   * `_common`        — `launch` and the box requests every kind shares.
   * `_investigation` — the investigation kind: the host half of run setup, its pass and its run box.
   * `_learning`      — the learning kinds (the learning slice's).

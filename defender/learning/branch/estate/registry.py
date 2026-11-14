@@ -334,19 +334,20 @@ class OracleServing:
     restart_after: int
 
 
-def oracle_serving(settings: OracleSettings, *, tenant_id: str, oracle: Any = None, verifier: Any = None,  # noqa: PLR0913 — the settings, the three seams, the tenant and the restart bound
+def oracle_serving(settings: OracleSettings, *, tenant_id: str, data_root: Path, oracle: Any = None, verifier: Any = None,  # noqa: PLR0913 — the settings, the three seams, the tenant and the restart bound
                    box: Callable[[], Any] | None = None,
                    restart_after: int = DEFAULT_RESTART_AFTER) -> OracleServing:
     """The world's oracle-side inputs with every seam left `None` filled by its production
     default: the role models built lazily from `settings` (a world that never takes a turn
     needs no provider key) and the production box, labelled with `tenant_id` (the tenant the
-    world is served for, #1214 O4: its teardown removes the box). The one place those defaults
+    world is served for, #1214 O4: its teardown removes the box), whose box check runs under `data_root` (#1469).
+    The one place those defaults
     live."""
     return OracleServing(
         oracle=oracle if oracle is not None else _LazyModel(settings.model, settings.effort),
         verifier=verifier if verifier is not None else _LazyModel(
             settings.check_model, settings.check_effort),
-        box=box if box is not None else functools.partial(start_process_box, tenant_id),
+        box=box if box is not None else functools.partial(start_process_box, tenant_id, data_root),
         settings=settings, restart_after=restart_after)
 
 

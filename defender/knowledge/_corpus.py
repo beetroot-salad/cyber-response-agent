@@ -256,8 +256,7 @@ class QueryTemplate:
 def is_established(t: QueryTemplate) -> bool:
     """Is `t` in the catalog's established tier — `status: established` and not under `_draft/`?
 
-    A file where location and status disagree is in neither tier. Shared by the gather
-    template index and lead zero's run-start check so they cannot disagree.
+    A file where location and status disagree is in neither tier.
     """
     return t.status == "established" and "_draft" not in t.path.parts
 

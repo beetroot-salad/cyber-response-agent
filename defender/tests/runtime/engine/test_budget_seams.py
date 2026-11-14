@@ -47,6 +47,7 @@ from defender.systems.verb_grant import VerbGrant  # noqa: E402
 from defender.systems.verbs import VerbRegistry  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.support.tenancy._host1214 import TEST_TENANT
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 DEFENDER = REPO_ROOT / "defender"
@@ -124,7 +125,7 @@ def drive_agent(  # noqa: PLR0913 — one more seam: the model
     from defender.tests.e2e._replay_harness import _no_docker_daemon, _unsandboxed_allowed
 
     with _unsandboxed_allowed():
-        box = box_mod.start_box(run_dir, DEFENDER, docker=_no_docker_daemon, tenant_id=TEST_TENANT)
+        box = box_mod.start_box(run_dir, DEFENDER, docker=_no_docker_daemon, tenant_id=TEST_TENANT, data_root=current_data_root())
     bindable = _replace(defn, tools=effective_tools_for(defn))
     deps = _replace(bind(bindable, run_dir, defender_dir=DEFENDER, box=box), run_state=state)
     import asyncio
@@ -357,7 +358,7 @@ def test_f1_r7_2_a_request_s_ending_reaches_the_agent_unchanged_whatever_the_led
                                     make_model=lambda name, effort: BuiltModel(FunctionModel(model), None), limits=DEFAULT_LIMITS,
                                     verbs=T1106.registry_for())
     with _unsandboxed_allowed():
-        box = box_mod.start_box(run_dir, DEFENDER, docker=_no_docker_daemon, tenant_id=TEST_TENANT)
+        box = box_mod.start_box(run_dir, DEFENDER, docker=_no_docker_daemon, tenant_id=TEST_TENANT, data_root=current_data_root())
     bindable = replace(MAIN_DEF, tools=effective_tools_for(MAIN_DEF))
     deps = replace(bind(bindable, run_dir, defender_dir=DEFENDER, box=box), run_state=_state(run_dir))
     changed: list[str] = []

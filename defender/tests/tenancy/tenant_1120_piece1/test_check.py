@@ -125,7 +125,7 @@ def test_1120_check_exits_zero_over_a_clean_tenant_and_a_clean_folder(tmp_path: 
 
 
 def _missing_required_setting(knowledge: Path) -> str:
-    target = knowledge / "settings" / "lead-zero.yaml"  # #1359: the case mapping is no longer required
+    target = knowledge / "settings" / "verb-grants.yaml"  # #1359, #1503: the one required setting
     target.unlink()
     return str(target)
 
@@ -224,8 +224,8 @@ def _no_agent_half(folder: Path) -> str:
 
 
 def _no_required_setting(folder: Path) -> str:
-    (folder / "settings" / "lead-zero.yaml").unlink()
-    return str(folder / "settings" / "lead-zero.yaml")
+    (folder / "settings" / "verb-grants.yaml").unlink()
+    return str(folder / "settings" / "verb-grants.yaml")
 
 
 def _link_in_settings(folder: Path) -> str:
@@ -234,7 +234,7 @@ def _link_in_settings(folder: Path) -> str:
 
 
 def _link_in_agent(folder: Path) -> str:
-    (folder / "agent" / "planted-agent-link").symlink_to(folder / "settings" / "lead-zero.yaml")
+    (folder / "agent" / "planted-agent-link").symlink_to(folder / "settings" / "verb-grants.yaml")
     return "planted-agent-link"
 
 
@@ -250,20 +250,6 @@ def _grant_gap(folder: Path) -> str:
     return "host-state.passwd"
 
 
-def _write_lead_zero(settings: Path, template: str) -> None:
-    (settings / "lead-zero.yaml").write_text(f"correlation_template: {template}\n",
-                                             encoding="utf-8")
-
-
-#: A lead-zero template the running checkout's catalog lacks.
-ABSENT_TEMPLATE = "elastic.no-such-template"
-
-
-def _lead_zero_disagreement(folder: Path) -> tuple[str, str]:
-    _write_lead_zero(folder / "settings", ABSENT_TEMPLATE)
-    return ("lead-zero.yaml", ABSENT_TEMPLATE)
-
-
 FOLDER_FAULTS = [
     pytest.param(_no_agent_half, id="agent_half-absent"),
     pytest.param(_no_required_setting, id="REQUIRED_SETTINGS-missing"),
@@ -271,7 +257,6 @@ FOLDER_FAULTS = [
     pytest.param(_link_in_agent, id="agent_half-symlink-inside"),
     pytest.param(_off_grammar_tenant_id, id="tenant_id_file-off-grammar"),
     pytest.param(_grant_gap, id="grant_census-undecided"),
-    pytest.param(_lead_zero_disagreement, id="grant_census-lead-zero-disagreement"),
 ]
 
 
@@ -299,35 +284,9 @@ def test_1120_s6_check_folder_reached_through_symlink_or_bind_mount(tmp_path: Pa
     into_root.symlink_to(H.knowledge_dir(root), target_is_directory=True)
     H.assert_clean(_check_folder(into_root))
 
-    (inside / "settings" / "lead-zero.yaml").unlink()
+    (inside / "settings" / "verb-grants.yaml").unlink()
     H.assert_refused(
-        H.run_script(script, "check", "--folder", str(via_link), root=None), "lead-zero.yaml")
-
-
-LEAD_ZERO_DISAGREEMENTS = [
-    pytest.param(ABSENT_TEMPLATE, id="template-absent-from-catalog"),
-    # `elastic.detection-alerts` binds `esql`; the table grants the lead `elastic.alerts`.
-    pytest.param("elastic.detection-alerts", id="template-pair-disagrees"),
-]
-
-
-@pytest.mark.parametrize("template", LEAD_ZERO_DISAGREEMENTS)
-def test_1120_check_refuses_a_lead_zero_table_that_disagrees_with_the_running_catalog(
-        tmp_path: Path, template: str) -> None:
-    first = tmp_path / "first"
-    knowledge = H.place_knowledge(first)
-    _write_lead_zero(knowledge / "settings", template)
-    before = H.tree_census(first)
-    H.assert_refused(_check_id(first), "lead-zero.yaml", template)
-    assert H.census_diff(before, H.tree_census(first)) == [], "the refused check wrote something"
-
-    rerun = tmp_path / "rerun"
-    H.place_knowledge(rerun)
-    H.assert_clean(_check_id(rerun))
-    _write_lead_zero(H.settings_dir(rerun), template)
-    before = H.tree_census(rerun)
-    H.assert_refused(_check_id(rerun), "lead-zero.yaml", template)
-    assert H.census_diff(before, H.tree_census(rerun)) == [], "the refused re-check wrote something"
+        H.run_script(script, "check", "--folder", str(via_link), root=None), "verb-grants.yaml")
 
 
 def test_1120_s9_check_over_a_grant_table_repeats_a_top_level_key(tmp_path: Path) -> None:

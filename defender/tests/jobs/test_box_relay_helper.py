@@ -24,6 +24,7 @@ from defender.tests.support.jobs._job_helper import (  # noqa: F401 — process_
     until,
 )
 from defender.tests.support.jobs._jobs1342 import WORKTREE
+from defender.tests.support.sandbox import _box_check1469 as K
 from defender.tests.support.sandbox._box1343 import input_open
 
 # The shared fixtures (`_job_helper`'s docs): `process_state` is autouse, `scene` the default helper scene.
@@ -411,3 +412,48 @@ def test_o10_a_box_past_the_limit_ends_only_its_own_job_and_another_helpers_rela
         for stream in (proc.stdout, proc.stderr):
             if stream is not None:
                 stream.close()
+
+
+# --- #1469 D1, D3: a job's box start proves its runtime under the data root ---------------------------------------------
+
+def test_d1_a_job_s_box_start_runs_its_check_in_a_folder_under_the_data_root_outside_every_bind_of_the_job_container(scene):
+    """The helper hands its data root to the box start: the check folder is `<data root>/.box-checks/<random>/`, which no
+    bind of the job container reaches, and the box is created after it. (#1469 D1)"""
+    from pathlib import Path
+
+    docker = R.RelayDocker()
+    got = _run(scene, docker, lambda c, h, got: None)
+    assert got["handle"], "control: the box started"
+    runs = docker.checks.runs
+    assert runs, "no box check ran before the job's box"
+    assert {r.folder.parent for r in runs} == {scene.root / ".box-checks"}, [r.folder for r in runs]
+    for m in docker.box.mounts:
+        if m["source"]:
+            source = Path(m["source"])
+            assert not any(source == r.folder or source.is_relative_to(r.folder) or r.folder.is_relative_to(source)
+                           for r in runs), m
+
+
+@pytest.mark.parametrize("opt_out", [False, True], ids=["no-opt-out", "opt-out"])
+@pytest.mark.parametrize("plan_box", [K.LEAKS, K.NO_MARKER], ids=["leaks", "no-marker"])
+def test_d3_on_the_job_lane_a_failed_or_inconclusive_check_refuses_the_box_start_whatever_the_opt_out_says(
+        scene, monkeypatch, opt_out, plan_box):
+    """`box.start` is answered `box-start` and no box is created. (#1469 D3, job lane)"""
+    if opt_out:
+        monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")
+    inv = str(uuid.uuid4())
+    scene.plant(inv)
+    docker = R.RelayDocker()
+    docker.checks.plan = K.CheckPlan(box=plan_box)
+    got: dict = {}
+
+    def job(c) -> int:
+        got["refusal"] = c.refused("box.start", kind="shell", id=inv)
+        return 0
+
+    docker.job = job
+    ran = drive_helper(scene, scene.argv("investigation", inv), docker=docker, signer=make_signer())
+    assert ran.raised is None, ran.raised
+    assert docker.job_error is None, docker.job_error
+    assert got["refusal"].code == "box-start", got["refusal"]
+    assert docker.create_argv is None, "a box was created after a check that did not pass"

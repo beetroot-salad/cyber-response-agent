@@ -23,7 +23,12 @@ from defender.systems import (  # noqa: E402
 )
 from defender.kit.settings import PART_FILES, Part  # noqa: E402
 from defender.systems.catalog import Catalog  # noqa: E402
-from defender.systems.record_judgement import judge_system  # noqa: E402
+from defender.systems.record_judgement import judge_records, judge_system  # noqa: E402
+from defender.tenancy.case_ticket import CaseTicketError, parse_case_record  # noqa: E402
+from defender.tenancy.tenant_settings import read_regular_bytes  # noqa: E402
+from defender.systems.verb_dispositions import HEALTH_CHECK  # noqa: E402
+from defender.tenancy.record_values import CaseRecord, SystemRecord, TenantRecords  # noqa: E402
+from defender.kit.faults import ConfigFault  # noqa: E402
 from defender.systems.system_folder import read_folder  # noqa: E402
 from defender.systems.system_status import (  # noqa: E402
     ReasonScope,
@@ -41,6 +46,8 @@ from defender.systems.verbs import (  # noqa: E402
 from defender.kit.verbs import COMMENT_ACTION, VerbContext as AdapterContext, engine_of  # noqa: E402
 
 PASS, WARN, FAIL = "PASS", "WARN", "FAIL"
+#: The one verb an adapter may declare and still offer the investigator nothing to query (#1401).
+_NOT_INVESTIGATOR_TOOLS = frozenset({HEALTH_CHECK})
 _GLYPH = {PASS: "✓", WARN: "!", FAIL: "✗"}
 
 # The parameter kinds that bind POSITIONALLY. Legal for the leading ctx (`query_tool`
@@ -112,6 +119,13 @@ def _exports_comment_action(defender: Path, system: str) -> bool:
     except Exception:  # noqa: BLE001 — the resolver above already reported an adapter that will not import
         return False
     return callable(getattr(module, COMMENT_ACTION, None))
+
+
+def needs_tenant_half(verbs) -> bool:
+    """Does the system need a staged tenant half (its skill, its seed queries)? Only when its adapter offers the
+    investigator a tool beyond `health-check` (#1401); an adapter that could not be resolved (`verbs` None) is judged as
+    one that does, so its missing half is still reported."""
+    return verbs is None or not set(verbs) <= _NOT_INVESTIGATOR_TOOLS
 
 
 def check_settings_declared(report: Report, defender: Path, system: str) -> None:
@@ -190,8 +204,9 @@ class HandoffLocator:
     """How a fault names a part of connect's handoff folder (#1366 DC6): the file itself, so the operator fixes it
     before handing it to `tenant.py set-system`. The sentence is the store's; only the locator differs."""
 
-    def __init__(self, folder: Path) -> None:
+    def __init__(self, folder: Path, case: Path | None = None) -> None:
         self._folder = Path(folder)
+        self._case = case
 
     def system(self, system: str) -> str:
         return f"{self._folder}/"
@@ -200,27 +215,70 @@ class HandoffLocator:
         return str(self._folder / PART_FILES[part])
 
     def case(self) -> str:
-        return str(self._folder / "case-record.yaml")
+        return str(self._case if self._case is not None else self._folder / "case-record.yaml")
 
 
-def check_handoff(report: Report, defender: Path, system: str, folder: Path) -> None:
+def check_handoff(report: Report, defender: Path, system: str, folder: Path, case: Path | None = None) -> None:
     """Connect's handoff (#1366 O11): the folder holding `system`'s `config.env` and `access.yaml`, the input of
     `tenant.py set-system`, judged by the record store's own judgement (K1: the adapter's settings check over a record
     built from it, its access declaration parsed) with no tenant and no database. Each fault is the store's sentence,
-    naming the file. A catalog adapter connect produces is merged and deployed before the operator applies it."""
-    locator = HandoffLocator(folder)
+    naming the file. A catalog adapter connect produces is merged and deployed before the operator applies it.
+
+    With `case` (the case-record file, the input of `tenant.py set-case`), the folder's system and that record are judged
+    together as the store judges a tenant holding just them (#1401): the template, the system it names, and the cover of
+    the adapter's comment route. The report also prints that route for the folder's settings."""
+    locator = HandoffLocator(folder, case)
     read = read_folder(folder, system, locator=locator)
     try:
         catalog = Catalog.of_checkout(defender)
     except Exception as e:  # noqa: BLE001 — an unreadable adapters tree is this row's failure, reported
         report.add(FAIL, f"handoff not judged: the adapters could not be listed ({type(e).__name__})")
         return
-    faults = [*read.faults, *judge_system(system, settings=read.settings, access=read.access, locator=locator,
-                                          catalog=catalog)]
+    if case is None:
+        faults = [*read.faults, *judge_system(system, settings=read.settings, access=read.access, locator=locator,
+                                              catalog=catalog)]
+    else:
+        faults = [*read.faults, *_judge_with_case(system, read.settings, read.access, case, catalog, locator)]
     for fault in faults:
         report.add(FAIL, fault)
     if not faults:
-        report.add(PASS, f"the handoff's config.env and access.yaml are a record the store accepts for {system}")
+        report.add(PASS, f"the handoff's config.env and access.yaml are a record the store accepts for {system}"
+                   if case is None else
+                   f"the handoff's config.env, access.yaml and {case.name} are records the store accepts for {system}")
+    _report_comment_route(report, catalog, system, read.settings)
+
+
+def _judge_with_case(system: str, settings, access: str, case: Path, catalog: Catalog,
+                     locator: HandoffLocator) -> list[str]:
+    """The store's judgement of a tenant whose records are the handoff's system and the case record `case`: the parse
+    `set-case` makes, then `judge_records` with nothing before (everything judged). The file is read as `set-case`
+    reads it: a regular file with one link, never followed, within the settings bound."""
+    try:
+        text = read_regular_bytes(case).decode("utf-8")
+    except (OSError, UnicodeDecodeError) as unreadable:
+        return [f"{case} cannot be read as UTF-8 text: {type(unreadable).__name__}"]
+    try:
+        parsed = parse_case_record(text, named=str(case))
+    except CaseTicketError as bad:
+        return [str(bad)]
+    records = TenantRecords(
+        systems={system: SystemRecord(system_id=system, version=1, adapter_id=system, settings=dict(settings),
+                                      access=access)},
+        case=CaseRecord(version=1, system_id=parsed.system, comment_body=parsed.body))
+    return judge_records(records, catalog=catalog, locator=locator)
+
+
+def _report_comment_route(report: Report, catalog: Catalog, system: str, settings) -> None:
+    """The comment route the adapter sends for the handoff's settings, relative to the base, when it offers one and the
+    settings can build it (a fault building it is the settings' own, reported above)."""
+    try:
+        route = catalog.comment_route(system, settings)
+    except (ConfigFault, KeyError):
+        return
+    except Exception:  # noqa: BLE001 — an adapter that will not load is reported by the registry check
+        return
+    if route is not None:
+        report.add(PASS, f"the comment the host sends: {route[0]} {route[1]} (relative to the base)")
 
 
 def check_skill(report: Report, staged: Path, system: str) -> None:
@@ -292,6 +350,11 @@ def main() -> None:
         help="the folder connect hands the operator: the system's config.env and access.yaml, which "
              "`tenant.py set-system` stores as the system's record; judged as the store judges it")
     ap.add_argument(
+        "--case", type=Path, default=None,
+        help="with --handoff: the case-record file `tenant.py set-case` stores, judged with the handoff's system as "
+             "the store judges a tenant holding just them (the template, the system it names, the comment route's "
+             "cover); set-case judges it against the tenant's stored system, so apply this handoff's set-system first")
+    ap.add_argument(
         "--staged", type=Path, default=None,
         help="the staged tenant half, laid out as the tenant's agent/ "
              "(skills/<system>/, skills/gather/queries/<system>/); without it the skill and "
@@ -308,10 +371,17 @@ def main() -> None:
     if args.handoff is None:
         report.add(WARN, "the handoff (config.env, access.yaml) not checked — give the folder with --handoff <dir>")
     else:
-        check_handoff(report, defender, system, args.handoff.resolve())
+        check_handoff(report, defender, system, args.handoff.resolve(),
+                      None if args.case is None else Path(os.path.abspath(args.case)))
     # The tenant half (system skill, seed queries) is judged where connect staged it, for
     # `tenant.py propose`; the adapter checks above read the code tree (#1108 P4 flow 6).
-    if args.staged is None:
+    if args.case is not None and args.handoff is None:
+        report.add(FAIL, "--case is judged with the handoff's system: give the folder with --handoff <dir>")
+    if args.staged is None and not needs_tenant_half(verbs):
+        # No tool for gather to call, so no system skill to route by and no query to seed (#1401).
+        report.add(PASS, f"the adapter offers the investigator no tools beyond health-check: no skills/{system}/ "
+                         "or seed templates to stage")
+    elif args.staged is None:
         report.add(FAIL, f"skills/{system}/ and its seed templates not checked — give the "
                          "staged tenant half with --staged <dir>")
     else:

@@ -25,6 +25,7 @@ pytest.importorskip('pydantic_ai')
 
 from defender import box as box_mod  # noqa: E402
 from defender.tests.support.tenancy._host1214 import TEST_TENANT
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
 
 pytestmark = pytest.mark.e2e
@@ -154,12 +155,12 @@ def test_mount_source_directory_absent_at_box_creation(tmp_path):
         cite="po1",
     ))
     with pytest.raises(box_mod.BoxFault):
-        box_mod.start_box(run_dir, DEFENDER, docker=absent, tenant_id=TEST_TENANT)
+        box_mod.start_box(run_dir, DEFENDER, docker=absent, tenant_id=TEST_TENANT, data_root=current_data_root())
     assert not any(len(c) > 1 and c[1] == "exec" for c in absent.calls), \
         "a sentinel read-back ran despite the create-time refusal (silent-empty path)"
 
     ok = RecordingDocker()
-    box_mod.start_box(run_dir, DEFENDER, docker=ok, tenant_id=TEST_TENANT)  # present sources → clean create
+    box_mod.start_box(run_dir, DEFENDER, docker=ok, tenant_id=TEST_TENANT, data_root=current_data_root())  # present sources → clean create
 
 
 def test_partial_multi_mount_sentinel_validation_leaves_box_in_ambiguous_state(tmp_path):
@@ -185,7 +186,7 @@ def test_create_fault_that_leaves_a_created_container_is_reaped_investigation_la
     run_dir = make_run_dir(tmp_path)
     rec = RecordingDocker(create=DockerFault(**_SHIM_FAULT), existing_token="self")
     with pytest.raises(box_mod.BoxFault):
-        box_mod.start_box(run_dir, DEFENDER, docker=rec, tenant_id=TEST_TENANT)
+        box_mod.start_box(run_dir, DEFENDER, docker=rec, tenant_id=TEST_TENANT, data_root=current_data_root())
     assert reaped_after_create(rec.calls), \
         "a container that may exist in `created` was left behind by the create-fault arm"
 
@@ -225,7 +226,7 @@ def test_a_create_that_lost_a_name_race_does_not_reap_the_winner(tmp_path, lane)
         existing_token="another-lane-holds-this-name",
     )
     start = (
-        (lambda: box_mod.start_box(run_dir, DEFENDER, docker=rec, tenant_id=TEST_TENANT))
+        (lambda: box_mod.start_box(run_dir, DEFENDER, docker=rec, tenant_id=TEST_TENANT, data_root=current_data_root()))
         if lane == "investigation"
         else (lambda: start_box_request(_request(run_dir), docker=rec))
     )
@@ -247,7 +248,7 @@ def test_the_pre_create_check_refuses_a_finished_container_too_and_removes_nothi
     _populate_mount_sources(run_cycle_mounts(run_dir), tmp_path)
     rec = RecordingDocker(status=state)
     start = (
-        (lambda: box_mod.start_box(run_dir, DEFENDER, docker=rec, tenant_id=TEST_TENANT))
+        (lambda: box_mod.start_box(run_dir, DEFENDER, docker=rec, tenant_id=TEST_TENANT, data_root=current_data_root()))
         if lane == "investigation"
         else (lambda: start_box_request(_request(run_dir), docker=rec))
     )
@@ -263,7 +264,7 @@ def test_the_pre_create_refusal_still_leaves_the_did_not_run_marker(tmp_path):
     _populate_mount_sources(run_cycle_mounts(run_dir), tmp_path)
     rec = RecordingDocker(status="running")
     with pytest.raises(box_mod.BoxStartConflict):
-        box_mod.start_box(run_dir, DEFENDER, docker=rec, tenant_id=TEST_TENANT)
+        box_mod.start_box(run_dir, DEFENDER, docker=rec, tenant_id=TEST_TENANT, data_root=current_data_root())
     assert box_mod.verdict_path(run_dir).is_file(), \
         "the pre-create refusal left no scan verdict"
     verdict = json.loads(box_mod.verdict_path(run_dir).read_text(encoding="utf-8"))
@@ -280,18 +281,18 @@ def test_a_daemon_answer_the_start_cannot_read_is_still_a_container_holding_the_
     _populate_mount_sources(run_cycle_mounts(run_dir), tmp_path)
     rec = RecordingDocker(status="")
     with pytest.raises(box_mod.BoxStartConflict):
-        box_mod.start_box(run_dir, DEFENDER, docker=rec, tenant_id=TEST_TENANT)
+        box_mod.start_box(run_dir, DEFENDER, docker=rec, tenant_id=TEST_TENANT, data_root=current_data_root())
     assert not any(c[:3] == ["docker", "rm", "-f"] for c in rec.calls)
 
 
 def test_the_box_is_stamped_with_the_token_its_own_fault_arm_checks(tmp_path):
     run_dir = make_run_dir(tmp_path)
     rec = RecordingDocker()
-    box_mod.start_box(run_dir, DEFENDER, docker=rec, tenant_id=TEST_TENANT)
+    box_mod.start_box(run_dir, DEFENDER, docker=rec, tenant_id=TEST_TENANT, data_root=current_data_root())
     token = rec.create_label(box_mod.START_TOKEN_LABEL)
     assert token, f"no {box_mod.START_TOKEN_LABEL} label on the create argv"
     other = RecordingDocker()
-    box_mod.start_box(make_run_dir(tmp_path / "second"), DEFENDER, docker=other, tenant_id=TEST_TENANT)
+    box_mod.start_box(make_run_dir(tmp_path / "second"), DEFENDER, docker=other, tenant_id=TEST_TENANT, data_root=current_data_root())
     assert other.create_label(box_mod.START_TOKEN_LABEL) != token, \
         "the token is not per-START — two starts stamped the same value"
 
@@ -300,10 +301,10 @@ def test_a_start_given_a_token_stamps_that_token_and_an_operator_start_mints_its
     """`start_box(..., start_token=T)` stamps exactly T on the create argv (#1342 r5 C1); without one the box mints a fresh token. (#1342 r5 C1)"""
     given = "ab" * 16
     rec = RecordingDocker()
-    box_mod.start_box(make_run_dir(tmp_path), DEFENDER, docker=rec, tenant_id=TEST_TENANT, start_token=given)
+    box_mod.start_box(make_run_dir(tmp_path), DEFENDER, docker=rec, tenant_id=TEST_TENANT, start_token=given, data_root=current_data_root())
     assert rec.create_label(box_mod.START_TOKEN_LABEL) == given
     minted = RecordingDocker()
-    box_mod.start_box(make_run_dir(tmp_path / "second"), DEFENDER, docker=minted, tenant_id=TEST_TENANT)
+    box_mod.start_box(make_run_dir(tmp_path / "second"), DEFENDER, docker=minted, tenant_id=TEST_TENANT, data_root=current_data_root())
     assert minted.create_label(box_mod.START_TOKEN_LABEL) not in (None, "", given)
 
 
@@ -337,7 +338,7 @@ def test_a_create_fault_reaps_only_a_container_carrying_the_token_the_start_was_
     """The create-fault arm owns the token the caller handed in: a leftover with exactly it is reaped; one with another, a near-miss or no token survives. (#1342 r5 C1)"""
     rec = RecordingDocker(create=DockerFault(**_SHIM_FAULT), existing_token=_HOLDERS[holder])
     with pytest.raises(box_mod.BoxFault):
-        box_mod.start_box(make_run_dir(tmp_path), DEFENDER, docker=rec, tenant_id=TEST_TENANT, start_token=_GIVEN)
+        box_mod.start_box(make_run_dir(tmp_path), DEFENDER, docker=rec, tenant_id=TEST_TENANT, start_token=_GIVEN, data_root=current_data_root())
     assert reaped_after_create(rec.calls) is (holder == "the given token")
 
 
@@ -348,7 +349,7 @@ def test_a_create_fault_leaves_a_container_whose_token_differs_in_any_one_charac
         near = _GIVEN[:at] + digits[(digits.index(_GIVEN[at]) + 1) % 16] + _GIVEN[at + 1:]
         rec = RecordingDocker(create=DockerFault(**_SHIM_FAULT), existing_token=near)
         with pytest.raises(box_mod.BoxFault):
-            box_mod.start_box(make_run_dir(tmp_path / f"at{at}"), DEFENDER, docker=rec, tenant_id=TEST_TENANT, start_token=_GIVEN)
+            box_mod.start_box(make_run_dir(tmp_path / f"at{at}"), DEFENDER, docker=rec, tenant_id=TEST_TENANT, start_token=_GIVEN, data_root=current_data_root())
         assert not reaped_after_create(rec.calls), f"a container differing at position {at} was removed"
 
 
@@ -369,7 +370,7 @@ def test_a_create_fault_leaves_a_container_whose_token_is_the_given_one_with_som
     """The given token with a hyphen, underscore, mark or space added before, inside or after it is another token: the leftover survives. (#1342 r5 C1)"""
     rec = RecordingDocker(create=DockerFault(**_SHIM_FAULT), existing_token=_DECORATED[holder])
     with pytest.raises(box_mod.BoxFault):
-        box_mod.start_box(make_run_dir(tmp_path), DEFENDER, docker=rec, tenant_id=TEST_TENANT, start_token=_GIVEN)
+        box_mod.start_box(make_run_dir(tmp_path), DEFENDER, docker=rec, tenant_id=TEST_TENANT, start_token=_GIVEN, data_root=current_data_root())
     assert not reaped_after_create(rec.calls)
 
 
@@ -377,7 +378,7 @@ def test_a_create_fault_whose_leftover_label_cannot_be_read_does_not_reap_it(tmp
     """A container holds the name but the daemon fails the label read: ownership is unproven, so the create-fault arm leaves it (the start still fails with the create fault). (#1342 r5 C1, #1279 O6)"""
     rec = RecordingDocker(create=DockerFault(**_SHIM_FAULT), existing_token="self", label_unreadable=True)
     with pytest.raises(box_mod.BoxFault) as excinfo:
-        box_mod.start_box(make_run_dir(tmp_path), DEFENDER, docker=rec, tenant_id=TEST_TENANT, start_token=_GIVEN)
+        box_mod.start_box(make_run_dir(tmp_path), DEFENDER, docker=rec, tenant_id=TEST_TENANT, start_token=_GIVEN, data_root=current_data_root())
     assert _SHIM_FAULT["stderr"] in str(excinfo.value)
     assert not reaped_after_create(rec.calls), "a container whose owner could not be read was removed"
 
@@ -387,7 +388,7 @@ def test_a_reap_that_cannot_reach_the_daemon_does_not_replace_the_create_fault(t
     run_dir = make_run_dir(tmp_path)
     rec = RecordingDocker(create=DockerFault(**_SHIM_FAULT), existing_token="self")
     with pytest.raises(box_mod.BoxFault) as excinfo:
-        box_mod.start_box(run_dir, DEFENDER, docker=_dies_after_create(rec, "inspect", "rm"), tenant_id=TEST_TENANT)
+        box_mod.start_box(run_dir, DEFENDER, docker=_dies_after_create(rec, "inspect", "rm"), tenant_id=TEST_TENANT, data_root=current_data_root())
     assert _SHIM_FAULT["stderr"] in str(excinfo.value), \
         f"the reap replaced the create fault with {str(excinfo.value)[:90]!r}"
 
@@ -396,7 +397,7 @@ def test_a_reap_that_cannot_reach_the_daemon_still_leaves_the_did_not_run_marker
     run_dir = make_run_dir(tmp_path)
     rec = RecordingDocker(sentinel=DockerFault(rc=1, stderr="read-back failed", cite="po48"))
     with pytest.raises(box_mod.BoxFault):
-        box_mod.start_box(run_dir, DEFENDER, docker=_dies_after_create(rec, "rm"), tenant_id=TEST_TENANT)
+        box_mod.start_box(run_dir, DEFENDER, docker=_dies_after_create(rec, "rm"), tenant_id=TEST_TENANT, data_root=current_data_root())
     assert box_mod.verdict_path(run_dir).is_file(), \
         "a reap that could not reach the daemon left no scan verdict"
 
@@ -405,7 +406,7 @@ def test_container_exits_between_create_and_sentinel(tmp_path):
     run_dir = make_run_dir(tmp_path)
     rec = RecordingDocker(sentinel=DockerFault(rc=137, stderr="container is not running", cite="po48"))
     with pytest.raises(box_mod.BoxFault, match="sentinel"):
-        box_mod.start_box(run_dir, DEFENDER, docker=rec, tenant_id=TEST_TENANT)
+        box_mod.start_box(run_dir, DEFENDER, docker=rec, tenant_id=TEST_TENANT, data_root=current_data_root())
     assert any(len(c) > 1 and c[1] == "create" for c in rec.calls), \
         "the sentinel fault fired without a container create having been attempted"
 
@@ -419,7 +420,7 @@ def test_docker_binary_unavailable_at_box_startup(tmp_path):
         raise FileNotFoundError(2, "No such file or directory: 'docker'")
 
     with pytest.raises(box_mod.BoxFault):  # the raw FileNotFoundError must be wrapped, not leaked
-        box_mod.start_box(run_dir, DEFENDER, docker=no_docker, tenant_id=TEST_TENANT)
+        box_mod.start_box(run_dir, DEFENDER, docker=no_docker, tenant_id=TEST_TENANT, data_root=current_data_root())
     assert calls, "box creation made no docker call at all"
     assert not any(len(c) > 1 and c[1] in ("run", "create", "start") for c in calls), \
         "a container create was attempted despite the docker binary being unavailable at the first call"
@@ -430,17 +431,17 @@ def test_box_startup_failure_aborts_batch_loudly(tmp_path, monkeypatch):
     faulty = RecordingDocker(create=DockerFault(rc=125, stderr="bind source path does not exist", cite="po1"))
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
     with pytest.raises(box_mod.BoxFault):
-        box_mod.start_box(run_dir, DEFENDER, docker=faulty, tenant_id=TEST_TENANT)  # no automatic host fallback
+        box_mod.start_box(run_dir, DEFENDER, docker=faulty, tenant_id=TEST_TENANT, data_root=current_data_root())  # no automatic host fallback
 
     monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")  # the one sanctioned host lane
-    assert box_mod.start_box(run_dir, DEFENDER, docker=faulty, tenant_id=TEST_TENANT).sandboxed is False, \
+    assert box_mod.start_box(run_dir, DEFENDER, docker=faulty, tenant_id=TEST_TENANT, data_root=current_data_root()).sandboxed is False, \
         "the loud opt-out did not degrade to the unboxed host executor"
 
 
 def test_tmp_is_noexec_size_capped_tmpfs(tmp_path):
     run_dir = make_run_dir(tmp_path)
     rec = RecordingDocker()
-    box_mod.start_box(run_dir, DEFENDER, docker=rec, tenant_id=TEST_TENANT)
+    box_mod.start_box(run_dir, DEFENDER, docker=rec, tenant_id=TEST_TENANT, data_root=current_data_root())
     tmpfs = rec.tmpfs()
     assert tmpfs, "no --tmpfs flag was rendered for /tmp"
     assert "noexec" in tmpfs, f"/tmp is not noexec: {tmpfs!r}"

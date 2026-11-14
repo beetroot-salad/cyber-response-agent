@@ -10,19 +10,17 @@ from pathlib import Path
 #: granted system is left usable, which the run's start check refuses — never the tenant check).
 REQUIRED_SETTINGS: tuple[str, ...] = (
     "verb-grants.yaml",
-    "lead-zero.yaml",
 )
 
 SETTINGS_HALF = "settings"
 AGENT_HALF = "agent"
 
-#: The two reviewed tables among `REQUIRED_SETTINGS`, relative to `settings/`: what a refusal
-#: calls each and the top-level keys it may carry. Acceptance parses both at that level
-#: (#1214: a torn table refuses the tenant, naming the file); what the keys hold (the grant rows,
-#: the template the lead binds) is run start's readiness to judge, and grant gaps `check`'s.
+#: The reviewed tables among `REQUIRED_SETTINGS`, relative to `settings/`: what a refusal calls
+#: each and the top-level keys it may carry. Acceptance parses each at that level (#1214: a torn
+#: table refuses the tenant, naming the file); what the keys hold (the grant rows) is run start's
+#: readiness to judge, and grant gaps `check`'s.
 SETTINGS_TABLES: dict[str, tuple[str, tuple[str, ...]]] = {
     "verb-grants.yaml": ("verb-disposition table", ("dispositions",)),
-    "lead-zero.yaml": ("lead-zero config", ("correlation_template",)),
 }
 
 #: Every name a knowledge folder may hold at its top level: the two halves, the tenant repo's

@@ -17,7 +17,10 @@ _ROOT = _DEFENDER.parent
 #: fixture since catalogs moved into each tenant's `agent/skills/gather/queries/` (the fullest,
 #: over adapters that stay in the product tree), and every committed tenant catalog.
 _QUERIES = _DEFENDER / "tests" / "fixtures" / "pre-p4-shipped" / "agent" / "skills" / "gather" / "queries"
-_CATALOGS = (_QUERIES, *sorted(_ROOT.glob("knowledge/*/agent/skills/gather/queries")))
+_CATALOGS = (_QUERIES, *sorted(p for p in (
+    _ROOT / "knowledge" / "tenant-template" / "agent" / "skills" / "gather" / "queries",
+    _DEFENDER / "tests" / "fixtures" / "tenant-fixture" / "agent" / "skills" / "gather" / "queries",
+) if p.is_dir()))
 _EXAMPLES = _DEFENDER / "skills" / "connect" / "examples"
 
 

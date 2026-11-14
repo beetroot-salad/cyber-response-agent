@@ -1,6 +1,6 @@
 """The verb contract an adapter is written against (#1080): the `@verb` decorator, the marks it
 sets and their readers, and the call context as an adapter sees it. The registry that loads and
-serves adapters stays in `systems.verbs`; so does the engine table (`engine_for`).
+serves adapters stays in `systems.verbs`.
 
 `VerbContext` here is a protocol naming only what an adapter reads. The runtime's concrete
 `systems.verbs.VerbContext` satisfies it, so adapters annotate their leading parameter with this

@@ -1,11 +1,9 @@
 # `connect` — the generated-adapter path
 
-Read this when the interview routes to a generated adapter — the system
-has no maintained MCP server, or the maintainer wants the capture path,
-output control, or consistency with other adapters. The other path is
-`mcp.md`. `SKILL.md` is the entrypoint and owns the common steps
-(per-system knowledge, test, commit); this file is only how you build the
-adapter.
+Read this when the product carries no adapter for the system (`tenant.py catalog` does not list
+it); if it does, configure that one instead (`configure.md`). `SKILL.md` is the entrypoint and
+owns the common steps (the check, per-system knowledge, validation, the handoff); this file is
+only how you build the adapter.
 
 ## What an adapter is (and is not)
 
@@ -199,7 +197,9 @@ record carries one: without it the store refuses the record. It holds
 never a `config.env` key), `auth` (its `scheme` — `bearer`, `header`, `basic` or
 `oauth-client-credentials` — and the credential *field name* the scheme reads, never
 a value), and the `reads` / `writes` routes the adapter calls (`{method, path}`).
-The proxy refuses any request outside them. Ask the operator for a
+The proxy admits every `GET` and `HEAD` under the base as a read; any other request must match a
+declared route — a read route for a read sent with another method, a write route (and a
+read-write pass) for a write — or it is refused. Ask the operator for a
 sibling's (`tenant.py systems <tenant> --export <dir>` writes each system's folder;
 ticket's is a worked one) and change the base, scheme and routes.
 
@@ -312,7 +312,8 @@ prompt-injection vector. Say which URL and why, in one line.
 
 ## Run the scaffold validator
 
-Run it on the system you just built (`<staged>` is the staging folder of `SKILL.md` step 4):
+Run it on the system you just built, as `SKILL.md` step 6 gives it (`<staged>` is the staging
+folder of step 5):
 
 ```bash
 python3 defender/skills/connect/validate_scaffold.py {system} --handoff <handoff>/{system} --staged <staged>
@@ -322,23 +323,20 @@ Fix any FAIL before going further.
 
 ## Human review checkpoint
 
-Stop here and put a human in the loop **before the adapter runs against the
-live system or anything is committed** — not only at the final diff. This is
-generated code that resolves real credentials and will query the maintainer's
-systems, so it gets read before it executes.
+Stop here and put a human in the loop **before anything is handed off or committed** — not only
+at the final diff. This is generated code that will run with real credentials against the
+maintainer's systems, so it gets read before it can execute anywhere.
 
 Present the generated `{system}_adapter.py` to the maintainer and ask them to
 review it. Call out anything you're unsure about by name — an auth scheme you
 improvised, a transport quirk, a field or enum you guessed at, any departure
-from the example's shape. Do **not** run the live health-check / sample query
-(`SKILL.md` Phase 5) until they approve. If they want changes, make them,
+from the example's shape. Show them, too, **which tool and inputs answer the check** agreed in
+`SKILL.md` step 3: the check was written as a question before the code existed, and this pick is
+theirs to confirm. Write the confirmed tool into `check.md`. If they want changes, make them,
 then re-run the validator and the alignment probe before asking again.
 
 In an **unattended run** with no human to ask, this checkpoint is a hard
-stop, not a skip: do not run the live test or commit. Leave the generated
-`{system}_adapter.py` in place and report that it awaits review. ("You test
-integrations directly" in `SKILL.md` means *you*, in a normal session, run
-the tests after approval — not that an unattended run may self-approve.)
+stop, not a skip: do not hand off or commit. Leave the generated
+`{system}_adapter.py` in place and report that it awaits review.
 
-Only after explicit approval do you return to `SKILL.md` for the test and
-commit phases.
+Only after explicit approval do you return to `SKILL.md` for validation and the handoff.

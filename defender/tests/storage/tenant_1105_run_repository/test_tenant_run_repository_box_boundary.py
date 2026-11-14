@@ -20,6 +20,7 @@ from defender.box import BoxSpec, start_box, stop_box
 from defender.tests.support.sandbox._docker import daemon_reachable, is_dood
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
 from defender.tests.support.sandbox._docker import docker_runtimes as _docker_runtimes
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
 pytestmark = pytest.mark.box
 
@@ -144,7 +145,7 @@ def _session(root: Path, runtime: str) -> dict[str, Any]:
 
     agent, token = staged_agent(Path(t.agent), run_dir.parent.parent / "run-copies")
     box = start_box(run_dir, H.DEFENDER, spec=BoxSpec(runtime=runtime),
-                    tenant_agent=agent, tenant_id=t.id, staged_token=token)
+                    tenant_agent=agent, tenant_id=t.id, staged_token=token, data_root=current_data_root())
     sandboxed, name = box.sandboxed, box.name
     try:
         result = box.run_parsed(parse(command), command=command, cwd=Path("/runs/current"),
