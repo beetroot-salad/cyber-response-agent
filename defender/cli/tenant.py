@@ -274,7 +274,8 @@ def set_alert_mapping(admitted: run_tenant.Admitted, mapping: Any) -> int:
     async def put() -> bool:
         store = JobStore(dsn, clock=lambda: _dt.datetime.now(_dt.UTC))
         try:
-            return await store.put_alert_mapping(tenant_id, mapping, actor="tenant.py set-alert-mapping")
+            _, created = await store.put_alert_mapping(tenant_id, mapping, actor="tenant.py set-alert-mapping")
+            return created
         finally:
             await store.close()
 

@@ -91,7 +91,7 @@ OWNER_MODULES: frozenset[str] = frozenset({
 
 #: The sweep set. Never shrinks below this.
 SWEEP_DIRS: tuple[str, ...] = ("investigation", "learning", "integrations", "presentation", "cli", "hooks", "box", "execution", "_filesystem",
-                               "api", "tenancy", "identity", "jobs", "knowledge", "configuration", "records", "kit", "providers",
+                               "api", "api_server", "tenancy", "identity", "jobs", "knowledge", "configuration", "records", "kit", "providers",
                                "systems", "system_records", "database", "migrations", "credential_proxy", "worker", "lifecycle",
                                "job_host", "job_socket")
 SWEEP_TOP_LEVEL = True

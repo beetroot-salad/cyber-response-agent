@@ -16,10 +16,10 @@ import re
 import subprocess
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from defender._io import read_bytes_capped
-from defender.job_socket import IMAGE_ENV, JOB_LABEL, SOCKET_ENV
+from defender.job_socket import HELPER_LABEL, IMAGE_ENV, JOB_LABEL, NETWORK_ENV, SOCKET_ENV
 
 from ._session import Session, StartFailed
 
@@ -32,8 +32,6 @@ SOCKET_NAME = "job.sock"
 _SUN_PATH = 108
 #: The image when the setting names none (A7).
 DEFAULT_IMAGE = "defender-job:latest"
-#: The setting naming the docker network job containers join (N5); unset, docker's default.
-NETWORK_ENV = "DEFENDER_JOB_NETWORK"
 #: Seconds the container is given to unwind on a graceful stop (A2: learning siblings' 20 < this < the worker's 30,
 #: leaving the rest of the worker's grace for the removal).
 STOP_GRACE = 22
@@ -103,9 +101,9 @@ def _denied_values(environ: Mapping[str, str]) -> tuple[str, ...]:
     return tuple(v for v in named if v)
 
 
-def _provider_keys(environ: Mapping[str, str]) -> dict[str, str]:
+def provider_keys(environ: Mapping[str, str]) -> dict[str, str]:
     """Each provider's key as a run resolves it (N2): the `.env` file's (`DEFENDER_ENV_FILE` first), else the
-    ambient one. The job never reads `.env` itself."""
+    ambient one. The job never reads `.env` itself. Read once per launch (`container_launch`)."""
     from defender import providers
     from defender._first_party_key import resolve_first_party_key
 
@@ -119,9 +117,10 @@ def _provider_keys(environ: Mapping[str, str]) -> dict[str, str]:
     return keys
 
 
-def job_environment(session: Session, socket: Path, environ: Mapping[str, str] = os.environ) -> dict[str, str]:
+def job_environment(session: Session, socket: Path, keys: Mapping[str, str],
+                    environ: Mapping[str, str] = os.environ) -> dict[str, str]:
     """The job's environment (A8): the `DEFENDER_*` settings minus secrets and cross-tenant addresses, the provider
-    keys, the code on the path, a writable home, and the socket."""
+    keys `keys`, the code on the path, a writable home, and the socket."""
     from defender.box import CLAIM_ENV
 
     denied = _denied_values(environ)
@@ -129,7 +128,7 @@ def job_environment(session: Session, socket: Path, environ: Mapping[str, str] =
     for k in ("TZ", "LANG", "LC_ALL"):
         if environ.get(k):
             env[k] = environ[k]
-    env.update(_provider_keys(environ))
+    env.update(keys)
     env.update({
         "DEFENDER_DATA_ROOT": str(session.root_folder),
         CLAIM_ENV: session.claim,
@@ -144,9 +143,27 @@ def job_container_name(session: Session) -> str:
     return f"defender-job-{session.claim}"
 
 
-def container_run_argv(session: Session, socket: Path, command: list[str], environ: Mapping[str, str] = os.environ
-                       ) -> list[str]:
-    """The job container's attached `docker run` (module doc). The runtime it names is asked of the daemon here
+def job_network(environ: Mapping[str, str] = os.environ) -> str:
+    """The network the job container joins (N5), as `NETWORK_ENV` names it: the worker judged it at its start
+    (`worker._start.check_job_network`), so the helper only refuses an unset name, which no worker it serves leaves."""
+    name = (environ.get(NETWORK_ENV) or "").strip()
+    if not name:
+        raise StartFailed(f"{NETWORK_ENV} is not set; the worker refuses to start without it")
+    return name
+
+
+class Launch(NamedTuple):
+    """The job container's attached `docker run`: its command line, and the docker command's own environment, which
+    alone carries the provider keys the command line names without their values."""
+
+    argv: list[str]
+    env: dict[str, str]
+
+
+def container_launch(session: Session, socket: Path, command: list[str], environ: Mapping[str, str] = os.environ
+                     ) -> Launch:
+    """The job container's attached `docker run` (module doc), built in one step so its command line and its
+    environment name the same provider keys, read once. The runtime it names is asked of the daemon here
     (#1484, `box.require_runtime`), while a stop still unwinds the helper's setup, so a host without it refuses naming
     the remedy rather than in docker's words."""
     from defender.box import CLAIM_LABEL, TENANT_LABEL, BoxFault, BoxSpec, require_runtime
@@ -161,6 +178,13 @@ def container_run_argv(session: Session, socket: Path, command: list[str], envir
         raise StartFailed(str(missing)) from None
     if session.tenant_folder is None:
         raise StartFailed("the job's tenant was not accepted: there is no tenant folder to bind")
+    from defender.tenancy import process_mark
+
+    network = job_network(environ)
+    try:
+        helper = process_mark()
+    except OSError as unreadable:
+        raise StartFailed(f"the helper cannot name itself on its container: {unreadable}") from None
     uid, gid = owner(session)
     tenant = str(session.tenant_folder)
     code = str(session.defender_dir)
@@ -169,13 +193,12 @@ def container_run_argv(session: Session, socket: Path, command: list[str], envir
         "docker", "run", "-i", "--rm", "--init", "--name", session.container,
         "--user", f"{uid}:{gid}",
         "--label", f"{TENANT_LABEL}={session.tenant_id}", "--label", f"{CLAIM_LABEL}={session.claim}",
-        "--label", f"{JOB_LABEL}={session.kind}",
+        "--label", f"{JOB_LABEL}={session.kind}", "--label", f"{HELPER_LABEL}={helper}",
         "--pull=never", "--runtime", runtime, "--read-only", "--tmpfs", "/tmp:rw,nosuid,size=256m",
         "--security-opt", "no-new-privileges", "--cap-drop", "ALL",
     ]
-    if environ.get(NETWORK_ENV):
-        argv += ["--network", environ[NETWORK_ENV]]
     argv += [
+        "--network", network,
         "--mount", f"type=bind,source={tenant},target={tenant}",
         "--mount", f"type=bind,source={code},target={code},readonly",
         # Read-write (a connect needs no write on the folder, but the code bind is the one read-only bind, A7);
@@ -183,19 +206,20 @@ def container_run_argv(session: Session, socket: Path, command: list[str], envir
         "--mount", f"type=bind,source={sockets},target={sockets}",
         "--workdir", str(session.defender_dir.parent),
     ]
-    for key, value in sorted(job_environment(session, socket, environ).items()):
-        argv += ["--env", f"{key}={value}"]
+    keys = provider_keys(environ)
+    for key, value in sorted(job_environment(session, socket, keys, environ).items()):
+        argv += ["--env", key if key in keys else f"{key}={value}"]
     argv += [environ.get(IMAGE_ENV) or DEFAULT_IMAGE, *command]
-    return argv
+    return Launch(argv, {**environ, **keys})
 
 
-def start(session: Session, argv: list[str]) -> Any:
+def start(session: Session, launch: Launch) -> Any:
     """The container, attached: its input a pipe this helper holds and never writes (A5); its output the helper's."""
     popen = getattr(session.docker, "popen", None)
     if popen is None:
         raise StartFailed("the docker seam has no attached start (`popen`)")
     try:
-        return popen(argv, stdin=subprocess.PIPE)
+        return popen(launch.argv, stdin=subprocess.PIPE, env=launch.env)
     except (OSError, subprocess.SubprocessError) as cannot:
         raise StartFailed(f"docker could not be run to start the job container: {cannot}") from None
 

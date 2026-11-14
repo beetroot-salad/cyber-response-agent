@@ -1025,7 +1025,7 @@ def test_o8_a_box_lost_at_the_bash_tool_reaches_the_exit_code_and_the_job_record
     assert got.rc == 5
     record = scene.job_end(run_id)
     assert record == {**SETTLED, "report_committed": False, "cut_short": "box-lost"}
-    ending = _ending_from(job_lane.JobEnd.parse(json.dumps(record)), got.rc, lambda: None)
+    ending = _ending_from(job_lane.JobEnd.parse(json.dumps(record)), lambda: None)
     assert ending.failure_reason == "no_report"
     assert "box-lost" in ending.failure_message
     assert "committed no report" in ending.failure_message

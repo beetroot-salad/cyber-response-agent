@@ -50,7 +50,7 @@ ORDER = (
     "lazy_door", "kit", "configuration", "execution", "_filesystem", "_flat", "job_socket", "providers", "records",
     "database", "tenancy", "identity", "jobs", "migrations", "knowledge", "credential_proxy", "box", "integrations",
     "systems", "system_records", "hooks", "skills", "investigation", "learning", "presentation", "run_common", "agents",
-    "job_host", "worker", "run", "lifecycle", "cli", "api",
+    "job_host", "worker", "run", "lifecycle", "cli", "api", "api_server",
 )
 _RANK = {node: rank for rank, node in enumerate(ORDER)}
 

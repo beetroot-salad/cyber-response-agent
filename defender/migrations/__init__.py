@@ -76,10 +76,17 @@ def upgrade(dsn: str) -> None:
     command.upgrade(config, "head")
 
 
+#: How long the version check waits for a connection, its handshake included: a database that accepts and never
+#: completes the handshake is then `DatabaseUnreachable` naming the address. A query that stalls after it is the
+#: caller's to bound (the API's start gives every step a deadline).
+VERSION_CHECK_CONNECT_SECONDS = 10
+
+
 def check_version(dsn: str) -> None:
     """Pass only when the database's recorded revision is exactly head, else raise
     `RevisionMismatch` naming both; `DatabaseUnreachable` when no connection can be made. Reads only."""
-    engine = create_engine(url(dsn), connect_args=CONNECT_ARGS, poolclass=pool.NullPool)
+    engine = create_engine(url(dsn), connect_args={**CONNECT_ARGS, "connect_timeout": VERSION_CHECK_CONNECT_SECONDS},
+                           poolclass=pool.NullPool)
     try:
         with engine.connect() as conn:
             context = MigrationContext.configure(conn, opts={"version_table_schema": VERSION_TABLE_SCHEMA})

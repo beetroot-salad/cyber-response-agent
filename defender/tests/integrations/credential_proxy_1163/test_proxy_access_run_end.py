@@ -319,7 +319,7 @@ def test_1363_b6_a_job_whose_run_was_cut_short_by_proxy_access_ends_failed_no_re
         parsed = job_lane.JobEnd.parse(end.text())
         assert parsed is not None, f"the job-end record refuses {word!r}"
         assert parsed.cut_short == word, f"the job-end record refuses {word!r}"
-        return _ending_from(parsed, PROXY_ACCESS_EXIT, lambda: None)
+        return _ending_from(parsed, lambda: None)
 
     got = ending(PROXY_ACCESS)
     assert got.failure_reason == "no_report"

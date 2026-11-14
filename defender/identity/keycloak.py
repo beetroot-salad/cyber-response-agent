@@ -13,12 +13,13 @@ import hmac
 import json
 import logging
 import urllib.parse
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
 import jwt
 
+from defender._url import split_http_url
 from defender.identity import SignInRefused, SignInUnavailable, VerifiedProgramToken, VerifiedSignIn
 from defender.records.formats import CredentialId, IdRefused
 
@@ -36,25 +37,12 @@ def _utc_now() -> _dt.datetime:
     return _dt.datetime.now(_dt.UTC)
 
 
-def _split_url(setting: str, value: str) -> urllib.parse.SplitResult:
-    """An absolute http(s) URL with a host, a valid port if any, and no credentials, query, fragment
-    or whitespace; else a ValueError naming the setting."""
-    def refuse(why: str) -> ValueError:
-        return ValueError(f"keycloak {setting} {value!r} {why}")
-
-    if any(c.isspace() or not c.isprintable() for c in value):
-        raise refuse("contains whitespace or a control character")
+def _split_url(setting: str, value: str, *, query: bool = False) -> urllib.parse.SplitResult:
+    """`value` as the shared http(s) URL rule (`defender._url`) takes it, else a ValueError naming the setting."""
     try:
-        parts = urllib.parse.urlsplit(value)
-        parts.port  # noqa: B018 — reading it is the check: a non-numeric or out-of-range port raises
-    except ValueError as e:
-        raise refuse(f"is not a URL: {e}") from None
-    if parts.scheme not in ("http", "https") or not parts.hostname or parts.query or parts.fragment \
-            or value.endswith(("?", "#")):
-        raise refuse("is not an absolute http(s) URL without query or fragment")
-    if parts.username is not None:
-        raise refuse("carries credentials")
-    return parts
+        return split_http_url(value, query=query)
+    except ValueError as why:
+        raise ValueError(f"keycloak {setting} {value!r} {why}") from None
 
 
 def _realm_url(issuer: str) -> tuple[str, str, str]:
@@ -73,6 +61,26 @@ def _server_base(server_url: str) -> str:
     if "realms" in _split_url("server_url", server_url).path.split("/"):
         raise ValueError(f"keycloak server_url {server_url!r} names a realm path; give the server's base, not the issuer")
     return server_url.rstrip("/")
+
+
+def check_issuer(issuer: str) -> str:
+    """The issuer unchanged if it is `<server>/realms/<realm>` as the adapters read it, else `ValueError`: the one
+    owner of the rule, so the program's settings and the adapters cannot disagree."""
+    _realm_url(issuer)
+    return issuer
+
+
+def check_redirect_uri(redirect_uri: str) -> str:
+    """The redirect URI unchanged if sign-in can send it, else `ValueError`: an absolute http(s) URL, a query allowed
+    and no fragment (OAuth 2.0 forbids one). The one owner of the rule, as for the issuer."""
+    _split_url("redirect_uri", redirect_uri, query=True)
+    return redirect_uri
+
+
+def check_server_url(server_url: str) -> str:
+    """The server URL unchanged if the adapters accept it as their back-channel base, else `ValueError`."""
+    _server_base(server_url)
+    return server_url
 
 
 def _rsa_keys(published: Any) -> dict[str, Any]:
@@ -136,9 +144,8 @@ class _KeySet:
             if held is not None and self._fresh(now):
                 return held  # a fetch that finished while this request waited
             if self._tried_at is None or now - self._tried_at >= self._window:
-                self._tried_at, self._fetches = now, self._fetches + 1
                 try:
-                    self._keys, self._fetched_at = await self._fetch(), now
+                    await self._refresh(now)
                 except SignInUnavailable:
                     if held is None:
                         raise
@@ -153,6 +160,19 @@ class _KeySet:
         if self._fetches > arrived and self._fetched_at == self._tried_at:  # a fetch since it arrived, and it worked
             raise SignInRefused(f"{self._token} names an unknown signing key")
         raise SignInUnavailable(f"keycloak's signing keys cannot be checked for this {self._token} yet")
+
+    async def probe(self) -> None:
+        """Fetch the set now, into the keys the token checks read; unavailable unless it holds a key a token would
+        verify with."""
+        async with self._lock:
+            await self._refresh(self._clock())
+        if not self._keys:
+            raise SignInUnavailable("the realm publishes no RS256 signing key to verify tokens with")
+
+    async def _refresh(self, now: _dt.datetime) -> None:
+        """One counted fetch; only a successful one replaces the keys (call it holding the lock)."""
+        self._tried_at, self._fetches = now, self._fetches + 1
+        self._keys, self._fetched_at = await self._fetch(), now
 
     async def _fetch(self) -> dict[str, Any]:
         try:
@@ -178,6 +198,41 @@ class _RealmAdmin:
     _admin_client: tuple[str, str]
     _clock: Callable[[], _dt.datetime]
     _admin_token_held: tuple[str, _dt.datetime] | None
+    _issuer: str
+    _realm: str
+    _server: str  # the base every request this adapter sends itself goes to
+    _keys: _KeySet
+    _probe_read: tuple[str, dict[str, int]]  # the one cheap admin read the role covers, and its query
+
+    async def probe(self) -> None:
+        """Check, without writing, what sign-in will need: the realm's discovery document names the configured issuer,
+        its signing keys are fetched, the admin client gets a token, and a cheap admin read is allowed. Any failure is
+        `SignInUnavailable` naming the realm and the step, and the address when Keycloak could not be reached."""
+        await self._probe_step("discovery", self._probe_discovery())
+        await self._probe_step("keys", self._keys.probe())
+        await self._probe_step("token", self._admin_token())
+        url, params = self._probe_read
+        await self._probe_step("admin read", self._admin("GET", url, params=params))
+
+    async def _probe_step(self, step: str, running: Awaitable[object]) -> None:
+        try:
+            await running
+        except SignInUnavailable as error:
+            unreached = f" (cannot reach {self._server})" if isinstance(error.__cause__, httpx.TransportError) else ""
+            raise SignInUnavailable(f"keycloak realm {self._realm}, {step} step: {error}{unreached}") from error
+
+    async def _probe_discovery(self) -> None:
+        """The realm's discovery document, fetched on the back channel, names exactly the configured issuer."""
+        try:
+            response = await self._http.get(f"{self._server}/realms/{self._realm}/.well-known/openid-configuration")
+            response.raise_for_status()
+            named = response.json()["issuer"]
+        except httpx.HTTPError as error:
+            raise SignInUnavailable("the discovery document cannot be fetched") from error
+        except (ValueError, KeyError, TypeError) as error:
+            raise SignInUnavailable("the discovery document is unreadable") from error
+        if named != self._issuer:
+            raise SignInUnavailable(f"the discovery document names issuer {named!r}, not the configured {self._issuer!r}")
 
     async def _admin_token(self) -> str:
         """A client-credentials token, reused until shortly before Keycloak says it expires."""
@@ -231,10 +286,11 @@ class KeycloakSignIn(_RealmAdmin):
         transport: httpx.AsyncBaseTransport | None = None,
         clock: Callable[[], _dt.datetime] = _utc_now,
     ) -> None:
-        self._issuer, base, realm = _realm_url(issuer)
+        self._issuer, base, self._realm = _realm_url(issuer)
+        realm = self._realm
         self._client_id = client_id
         self._client_secret = client_secret
-        self._redirect_uri = redirect_uri
+        self._redirect_uri = check_redirect_uri(redirect_uri)
         self._admin_client = (admin_client_id, admin_client_secret)
         self._clock = clock
         self._http = httpx.AsyncClient(transport=transport, timeout=_TIMEOUT_SECONDS)
@@ -243,10 +299,11 @@ class KeycloakSignIn(_RealmAdmin):
         # `server_url`, when the API reaches Keycloak at another address than the browser does
         # (#1349), replaces that base for every request the API sends itself; the browser's
         # sign-in URL and the token's `iss` stay the issuer.
-        server = base if server_url is None else _server_base(server_url)
+        server = self._server = base if server_url is None else _server_base(server_url)
         self._signin_url = f"{self._issuer}/protocol/openid-connect/auth"
         self._oidc = f"{server}/realms/{realm}/protocol/openid-connect"
         self._admin_users_url = f"{server}/admin/realms/{realm}/users"
+        self._probe_read = (self._admin_users_url, {"max": 1})
         # No refetch window: an ID token comes from Keycloak's own token endpoint, never from an outsider, so an
         # unknown key id there is a rotation to follow at once, not traffic to hold back.
         self._keys = _KeySet(self._http, f"{self._oidc}/certs", clock, token="the ID token", realm="sign-in",
@@ -421,14 +478,16 @@ class KeycloakPrograms(_RealmAdmin):
         transport: httpx.AsyncBaseTransport | None = None,
         clock: Callable[[], _dt.datetime] = _utc_now,
     ) -> None:
-        self._issuer, base, realm = _realm_url(issuer)
+        self._issuer, base, self._realm = _realm_url(issuer)
+        realm = self._realm
         self._audience = audience
         self._admin_client = (admin_client_id, admin_client_secret)
         self._clock = clock
         self._http = httpx.AsyncClient(transport=transport, timeout=_TIMEOUT_SECONDS)
-        server = base if server_url is None else _server_base(server_url)
+        server = self._server = base if server_url is None else _server_base(server_url)
         self._oidc = f"{server}/realms/{realm}/protocol/openid-connect"
         self._clients_url = f"{server}/admin/realms/{realm}/clients"
+        self._probe_read = (self._clients_url, {"first": 0, "max": 1})
         self._keys = _KeySet(self._http, f"{self._oidc}/certs", clock, token="the token", realm="programs",
                              refetch_window=KEY_REFETCH_WINDOW)
         self._admin_token_held = None

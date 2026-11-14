@@ -39,6 +39,7 @@ class AlertRow(Base, kw_only=True):
         # The target of investigations' composite key: an investigation cannot name another tenant's alert.
         UniqueConstraint("tenant_id", "id"),
         UniqueConstraint("tenant_id", "vendor", "vendor_ticket_id"),
+        Index("alerts_newest_first", "tenant_id", text("fired_at DESC"), text("id DESC")),
         {"schema": SCHEMA},
     )
 
@@ -66,6 +67,7 @@ class InvestigationRow(Base, kw_only=True):
         CheckConstraint("NOT cost_is_lower_limit OR cost_usd IS NOT NULL", name="lower_limit_has_a_cost"),
         Index("investigations_one_live_per_alert", "tenant_id", "alert_id", unique=True,
               postgresql_where=text(f"stage IN ({_quoted(LIVE)})")),
+        Index("investigations_newest_first", "tenant_id", text("created_at DESC"), text("id DESC")),
         {"schema": SCHEMA},
     )
 
@@ -120,6 +122,7 @@ class LearningJobRow(Base, kw_only=True):
         Index("learning_jobs_queued_by_age", "created_at", "id", postgresql_where=text("status = 'queued'")),
         Index("learning_jobs_running_by_lease", "lease_expires_at", "id", postgresql_where=text("status = 'running'")),
         Index("learning_jobs_by_investigation", "investigation_id"),
+        Index("learning_jobs_newest_first", "tenant_id", text("created_at DESC"), text("id DESC")),
         {"schema": SCHEMA},
     )
 

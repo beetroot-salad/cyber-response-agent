@@ -394,14 +394,18 @@ async def test_the_exit_code_never_decides_the_row(world, record, exit_code, sta
     assert job_row(world["dsn"], job)["status"] == status
 
 
-@pytest.mark.parametrize("ends", [
-    pytest.param({"exit": 0}, id="exit-0"), pytest.param({"exit": 7}, id="exit-7"),
-    pytest.param({"die_by": int(signal.SIGKILL)}, id="dies-by-SIGKILL"),
-    pytest.param({"die_by": int(signal.SIGSEGV)}, id="dies-by-SIGSEGV"),
+@pytest.mark.parametrize(("ends", "reason"), [
+    pytest.param({"exit": 0}, "exited_without_result", id="exit-0"),
+    # The child is the job's helper (#1170): any other status is the helper failing, so the worker's error.
+    pytest.param({"exit": 7}, "worker_error", id="exit-7"),
+    pytest.param({"die_by": int(signal.SIGKILL)}, "worker_error", id="dies-by-SIGKILL"),
+    pytest.param({"die_by": int(signal.SIGSEGV)}, "worker_error", id="dies-by-SIGSEGV"),
 ])
-async def test_no_record_from_a_child_nobody_signalled_is_exited_without_result(world, ends):
-    """No end record and no signal from the worker, whether the child exited (0 or not) or died by a signal of its own:
-    `failed`/`exited_without_result` with our own message, never run text, and no retry. (End record, O12)"""
+async def test_no_record_from_a_child_nobody_signalled_is_exited_without_result_or_the_helpers_failure(
+        world, ends, reason):
+    """No end record and no signal from the worker: a child (the job's helper, #1170) that exited 0 served the job,
+    which left no result: `failed`/`exited_without_result`; any other exit is the helper failing: `failed`/
+    `worker_error`. Either way our own message, never run text, and no retry. (End record, O12)"""
     job_proc = job_child(world, printed=RUN_TEXT, **ends)
     post = post_child(world)
     async with job_store(world["dsn"]) as store:
@@ -409,7 +413,7 @@ async def test_no_record_from_a_child_nobody_signalled_is_exited_without_result(
         await learning_worker(world, store, job=job_proc, post=post).drain()
 
     stored = job_row(world["dsn"], job)
-    assert (stored["status"], stored["reason"], stored["publish_state"]) == ("failed", "exited_without_result", "none")
+    assert (stored["status"], stored["reason"], stored["publish_state"]) == ("failed", reason, "none")
     assert stored["message"]
     assert RUN_TEXT not in json.dumps(stored, default=str)
     assert [h[0] for h in post.handed] == [job], "the job started a family step, so a post-step follows"

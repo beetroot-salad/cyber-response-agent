@@ -430,15 +430,17 @@ def test_1345_o6_a_second_run_replaces_whole_like_a_put_and_touches_no_other_ten
     register_tenant(verb.dsn, OTHER, alert_mapping={"title": "a"})
     verb.alert("T-1", OTHER)
 
-    rc, _, err = verb.run("signature: rule.id\ntitle: rule.description\ndescription: rule.id\n")
+    rc, out, err = verb.run("signature: rule.id\ntitle: rule.description\ndescription: rule.id\n")
     assert (rc, err) == (0, "")
+    assert out.startswith("saved the alert mapping of tenant "), out
     verb.alert("T-1")
     assert verb.display() == [("sketch", "r-1342")]
 
-    rc, _, err = verb.run("title: a\n")
+    rc, out, err = verb.run("title: a\n")
     verb.alert("T-2")
 
     assert (rc, err) == (0, "")
+    assert out.startswith("replaced the alert mapping of tenant "), out  # Am-8: created is False on a second run
     assert verb.stored() == {"title": "a"}, "a replace is whole: the earlier entries are gone"
     assert verb.display() == [("sketch", "r-1342"), ("\u00e9", None)]
     assert (verb.stored(OTHER), verb.display(OTHER)) == ({"title": "a"}, [("\u00e9", None)])

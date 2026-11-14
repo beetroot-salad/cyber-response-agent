@@ -127,7 +127,9 @@ def _names_code(stored: dict, inv: str, code: int) -> bool:
     return re.search(rf"\b{code}\b", stored["failure_message"].replace(inv, "")) is not None
 
 
-EXIT = 77  # no digit of a UUID, timestamp or stage word can stand for it
+#: A helper's non-zero exit (#1170: the helper exits 0 once it served the job, whatever its container's status, so a
+#: stand-in child that models a job which ran exits 0). No digit of a UUID, timestamp or stage word can stand for it.
+EXIT = 77
 
 
 # --- O8: the worker's rule, one case per branch ----------------------------------------------------
@@ -160,93 +162,93 @@ HEADER = "---\ndisposition: benign\n---\n"
 
 CASES = {
     # rule 1: no job-end record; the run folder, the exit and the report decide nothing
-    "1-no-job-end": _spec(files={"{id}/report.md": MARKED_REPORT}, exit=EXIT,
-                          expect=("failed", "no_report", None), code=EXIT),
-    "1-no-job-end-exit-zero": _spec(files={"{id}/report.md": MARKED_REPORT}, exit=0,
-                                    expect=("failed", "no_report", None)),
+    "1-no-job-end": _spec(files={"{id}/report.md": MARKED_REPORT}, exit=0,
+                          expect=("failed", "no_report", None)),
+    "1-no-job-end-helper-failed": _spec(files={"{id}/report.md": MARKED_REPORT}, exit=EXIT,
+                                        expect=("failed", "worker_error", None), says=("helper",), code=EXIT),
     "1-job-end-unreadable": _spec(files={"{id}.job-end.json": "{not json", "{id}/report.md": GOOD},
-                                  exit=EXIT, expect=("failed", "no_report", None), code=EXIT),
-    "1-job-end-empty-object": _spec(files=_committed(**{"{id}.job-end.json": "{}"}), exit=EXIT,
-                                    expect=("failed", "no_report", None), code=EXIT),
-    "1-job-end-an-array": _spec(files=_committed(**{"{id}.job-end.json": "[]"}), exit=EXIT,
-                                expect=("failed", "no_report", None), code=EXIT),
-    "1-job-end-a-string": _spec(files=_committed(**{"{id}.job-end.json": '"done"'}), exit=EXIT,
-                                expect=("failed", "no_report", None), code=EXIT),
+                                  exit=0, expect=("failed", "no_report", None)),
+    "1-job-end-empty-object": _spec(files=_committed(**{"{id}.job-end.json": "{}"}), exit=0,
+                                    expect=("failed", "no_report", None)),
+    "1-job-end-an-array": _spec(files=_committed(**{"{id}.job-end.json": "[]"}), exit=0,
+                                expect=("failed", "no_report", None)),
+    "1-job-end-a-string": _spec(files=_committed(**{"{id}.job-end.json": '"done"'}), exit=0,
+                                expect=("failed", "no_report", None)),
     "1-job-end-committed-as-a-string": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(report_committed="false")}), exit=EXIT,
-        expect=("failed", "no_report", None), code=EXIT),
+        files=_committed(**{"{id}.job-end.json": _job_end_with(report_committed="false")}), exit=0,
+        expect=("failed", "no_report", None)),
     "1-job-end-verified-as-a-number": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(scrub_verified=0)}), exit=EXIT,
-        expect=("failed", "no_report", None), code=EXIT),
+        files=_committed(**{"{id}.job-end.json": _job_end_with(scrub_verified=0)}), exit=0,
+        expect=("failed", "no_report", None)),
     "1-job-end-unknown-setup-word": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(setup="skipped")}), exit=EXIT,
-        expect=("failed", "no_report", None), code=EXIT),
+        files=_committed(**{"{id}.job-end.json": _job_end_with(setup="skipped")}), exit=0,
+        expect=("failed", "no_report", None)),
     "1-job-end-unknown-box-word": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(box="paused")}), exit=EXIT,
-        expect=("failed", "no_report", None), code=EXIT),
+        files=_committed(**{"{id}.job-end.json": _job_end_with(box="paused")}), exit=0,
+        expect=("failed", "no_report", None)),
     "1-job-end-committed-as-json-null": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(report_committed=JSON_NULL)}), exit=EXIT,
-        expect=("failed", "no_report", None), code=EXIT),
+        files=_committed(**{"{id}.job-end.json": _job_end_with(report_committed=JSON_NULL)}), exit=0,
+        expect=("failed", "no_report", None)),
     "1-job-end-verified-as-json-null": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(scrub_verified=JSON_NULL)}), exit=EXIT,
-        expect=("failed", "no_report", None), code=EXIT),
+        files=_committed(**{"{id}.job-end.json": _job_end_with(scrub_verified=JSON_NULL)}), exit=0,
+        expect=("failed", "no_report", None)),
     "1-job-end-committed-as-the-number-one": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(report_committed=1)}), exit=EXIT,
-        expect=("failed", "no_report", None), code=EXIT),
+        files=_committed(**{"{id}.job-end.json": _job_end_with(report_committed=1)}), exit=0,
+        expect=("failed", "no_report", None)),
     "1-job-end-committed-as-the-number-zero": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(report_committed=0)}), exit=EXIT,
-        expect=("failed", "no_report", None), code=EXIT),
+        files=_committed(**{"{id}.job-end.json": _job_end_with(report_committed=0)}), exit=0,
+        expect=("failed", "no_report", None)),
     "1-job-end-verified-as-the-number-one": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(scrub_verified=1)}), exit=EXIT,
-        expect=("failed", "no_report", None), code=EXIT),
+        files=_committed(**{"{id}.job-end.json": _job_end_with(scrub_verified=1)}), exit=0,
+        expect=("failed", "no_report", None)),
     "1-job-end-setup-word-capitalised": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(setup="Done")}), exit=EXIT,
-        expect=("failed", "no_report", None), code=EXIT),
+        files=_committed(**{"{id}.job-end.json": _job_end_with(setup="Done")}), exit=0,
+        expect=("failed", "no_report", None)),
     "1-job-end-setup-word-spaced": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(setup=" done")}), exit=EXIT,
-        expect=("failed", "no_report", None), code=EXIT),
+        files=_committed(**{"{id}.job-end.json": _job_end_with(setup=" done")}), exit=0,
+        expect=("failed", "no_report", None)),
     "1-job-end-setup-word-upper-case": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(setup="DONE")}), exit=EXIT,
-        expect=("failed", "no_report", None), code=EXIT),
+        files=_committed(**{"{id}.job-end.json": _job_end_with(setup="DONE")}), exit=0,
+        expect=("failed", "no_report", None)),
     "1-job-end-box-word-upper-case": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(box="STARTED")}), exit=EXIT,
-        expect=("failed", "no_report", None), code=EXIT),
+        files=_committed(**{"{id}.job-end.json": _job_end_with(box="STARTED")}), exit=0,
+        expect=("failed", "no_report", None)),
     "1-job-end-box-word-capitalised": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(box="Started")}), exit=EXIT,
-        expect=("failed", "no_report", None), code=EXIT),
+        files=_committed(**{"{id}.job-end.json": _job_end_with(box="Started")}), exit=0,
+        expect=("failed", "no_report", None)),
     "1-job-end-box-word-spaced": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(box=" started")}), exit=EXIT,
-        expect=("failed", "no_report", None), code=EXIT),
+        files=_committed(**{"{id}.job-end.json": _job_end_with(box=" started")}), exit=0,
+        expect=("failed", "no_report", None)),
     "1-job-end-box-word-shouted": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(box="BOX")}), exit=EXIT,
-        expect=("failed", "no_report", None), code=EXIT),
+        files=_committed(**{"{id}.job-end.json": _job_end_with(box="BOX")}), exit=0,
+        expect=("failed", "no_report", None)),
     "1-job-end-an-extra-key": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(extra="x")}), exit=EXIT,
-        expect=("failed", "no_report", None), code=EXIT),
+        files=_committed(**{"{id}.job-end.json": _job_end_with(extra="x")}), exit=0,
+        expect=("failed", "no_report", None)),
     "1-job-end-a-missing-key": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(scrub_verified=None)}), exit=EXIT,
-        expect=("failed", "no_report", None), code=EXIT),
+        files=_committed(**{"{id}.job-end.json": _job_end_with(scrub_verified=None)}), exit=0,
+        expect=("failed", "no_report", None)),
     "1-job-end-without-the-cut-short-fact": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(cut_short=None)}), exit=EXIT,
-        expect=("failed", "no_report", None), code=EXIT),
+        files=_committed(**{"{id}.job-end.json": _job_end_with(cut_short=None)}), exit=0,
+        expect=("failed", "no_report", None)),
     "1-job-end-cut-short-as-a-number": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(cut_short=5)}), exit=EXIT,
-        expect=("failed", "no_report", None), code=EXIT),
+        files=_committed(**{"{id}.job-end.json": _job_end_with(cut_short=5)}), exit=0,
+        expect=("failed", "no_report", None)),
     "1-job-end-cut-short-as-a-list": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(cut_short=["box-lost"])}), exit=EXIT,
-        expect=("failed", "no_report", None), code=EXIT),
+        files=_committed(**{"{id}.job-end.json": _job_end_with(cut_short=["box-lost"])}), exit=0,
+        expect=("failed", "no_report", None)),
     "1-job-end-cut-short-the-empty-word": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(cut_short="")}), exit=EXIT,
-        expect=("failed", "no_report", None), code=EXIT),
+        files=_committed(**{"{id}.job-end.json": _job_end_with(cut_short="")}), exit=0,
+        expect=("failed", "no_report", None)),
     "1-job-end-setup-as-a-list": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(setup=["done"])}), exit=EXIT,
-        expect=("failed", "no_report", None), code=EXIT),
+        files=_committed(**{"{id}.job-end.json": _job_end_with(setup=["done"])}), exit=0,
+        expect=("failed", "no_report", None)),
     "1-job-end-box-as-an-object": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(box={})}), exit=EXIT,
-        expect=("failed", "no_report", None), code=EXIT),
+        files=_committed(**{"{id}.job-end.json": _job_end_with(box={})}), exit=0,
+        expect=("failed", "no_report", None)),
     "1-job-end-setup-a-list-and-box-an-object": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(setup=["done"], box={})}), exit=EXIT,
-        expect=("failed", "no_report", None), code=EXIT),
+        files=_committed(**{"{id}.job-end.json": _job_end_with(setup=["done"], box={})}), exit=0,
+        expect=("failed", "no_report", None)),
     # rule 2
     "2-setup-refused": _spec(files=_refused(), exit=1, expect=("failed", "setup_refused", None)),
     "2-refused-before-a-planted-report": _spec(

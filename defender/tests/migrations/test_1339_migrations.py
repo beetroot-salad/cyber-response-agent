@@ -451,11 +451,14 @@ def test_the_jobs_constraints_are_exactly_the_designed_ones(migrated_database):
 
 
 @pytest.mark.postgres
-def test_the_jobs_indexes_are_the_constraints_plus_one_partial_unique_and_nothing_else(migrated_database):
-    """Three indexes per table: key-backed ones, and on investigations one partial unique over the live stages only (#1342 M10)."""
-    assert len(_jobs_indexes(migrated_database, "alerts")) == 3
+def test_the_jobs_indexes_are_the_constraints_plus_one_partial_unique_and_the_list_index_and_nothing_else(migrated_database):
+    """Four indexes on alerts and on investigations: key-backed ones, #1083's newest-first list index, and on investigations one partial unique over the live stages only (#1342 M10; #1083 Am-5, CONFLICT: the list indexes join the set)."""
+    alerts = _jobs_indexes(migrated_database, "alerts")
+    assert len(alerts) == 4
+    assert len([i for i in alerts if "(tenant_id, fired_at DESC, id DESC)" in i]) == 1
     investigations = _jobs_indexes(migrated_database, "investigations")
-    assert len(investigations) == 3
+    assert len(investigations) == 4
+    assert len([i for i in investigations if "(tenant_id, created_at DESC, id DESC)" in i]) == 1
     [partial] = [i for i in investigations if "WHERE" in i]
     assert "UNIQUE" in partial
     assert "(tenant_id, alert_id)" in partial
@@ -464,4 +467,4 @@ def test_the_jobs_indexes_are_the_constraints_plus_one_partial_unique_and_nothin
     assert not any(f"'{stage}'" in partial for stage in ("completed", "unparseable", "failed", "aborted"))
 
     execute(migrated_database, "CREATE INDEX extra_1342 ON jobs.investigations (stage)")  # control: the census sees one
-    assert len(_jobs_indexes(migrated_database, "investigations")) == 4
+    assert len(_jobs_indexes(migrated_database, "investigations")) == 5

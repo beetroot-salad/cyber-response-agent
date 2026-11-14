@@ -35,13 +35,40 @@ def build_source(root: Path) -> Path:
     return root
 
 
+#: The job network the worker's start judges (#1170 N5): `network_docker` answers it as a bridge made for the jobs.
+JOB_NETWORK = "defender-test-jobs"
+_NETWORK_SHIM = """#!/bin/sh
+if [ "$1" = network ] && [ "$2" = inspect ]; then
+  printf '%s\\n' '{"Name": "NAME", "Driver": "bridge", "Options": {}, "Labels": {}}'
+  exit 0
+fi
+REAL
+"""
+
+
+def network_docker(folder: Path) -> Path:
+    """A folder holding a `docker` that answers the job network's inspect as a bridge made for the jobs and hands every
+    other command to the real docker (or fails as a missing one does): the worker's start judges the network before
+    serving, and these tests are about what comes after."""
+    real = shutil.which("docker")
+    folder.mkdir(parents=True, exist_ok=True)
+    shim = folder / "docker"
+    shim.write_text(_NETWORK_SHIM.replace("NAME", JOB_NETWORK).replace(
+        "REAL", f'exec "{real}" "$@"' if real else 'echo "docker: not found" >&2; exit 127'), encoding="utf-8")
+    shim.chmod(0o755)
+    return folder
+
+
 def worker_env(data_root: Path, *, dsn: str = CLOSED_DSN, stamp: str | None = STAMP, slots: str | None = None,
                learning: str | None = None, extra: dict[str, str] | None = None) -> dict[str, str]:
     """The environment of an image: no PYTHONPATH, no inherited `DEFENDER_*`, the settings as named (`None` leaves one
-    unset). `PYTHONDONTWRITEBYTECODE` is removed, whatever the host has: the worker owes the children that setting itself."""
+    unset), the job network named and answered (`network_docker`). `PYTHONDONTWRITEBYTECODE` is removed, whatever the
+    host has: the worker owes the children that setting itself."""
     env = {k: v for k, v in os.environ.items()
            if k not in ("PYTHONPATH", "PYTHONDONTWRITEBYTECODE") and not k.startswith("DEFENDER_")}
-    env.update({"DEFENDER_DATABASE_DSN": dsn, "DEFENDER_DATA_ROOT": str(data_root)})
+    shims = network_docker(data_root.parent / f"{data_root.name}-docker-1170")
+    env.update({"DEFENDER_DATABASE_DSN": dsn, "DEFENDER_DATA_ROOT": str(data_root), "DEFENDER_JOB_NETWORK": JOB_NETWORK,
+                "PATH": f"{shims}{os.pathsep}{env.get('PATH', '')}"})
     for name, value in (("DEFENDER_BUILD_COMMIT", stamp), ("DEFENDER_WORKER_SLOTS", slots),
                         ("DEFENDER_WORKER_LEARNING_SLOTS", learning)):
         if value is not None:

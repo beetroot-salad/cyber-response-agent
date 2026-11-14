@@ -345,16 +345,37 @@ def remove_labelled_containers(label: str, value: str | None = None, *, docker: 
     """Remove every container carrying the label `label` (with the value `value`, or any value when `value` is
     None), each through `_remove_container`, paused or not: `None` once none is left, else why not, naming
     `whose` containers. A host with no docker binary has no box to remove."""
-    selector = label if value is None else f"{label}={value}"
     try:
-        listed = docker(["docker", "ps", "-aq", "--filter", f"label={selector}"])
+        listed = labelled_containers(label, value, docker=docker)
+    except BoxFault as e:
+        return str(e)
+    return remove_containers([name for name, _ in listed], docker=docker, whose=whose)
+
+
+def labelled_containers(label: str, value: str | None = None, *, read: str | None = None,
+                        docker: DockerFn = run_docker) -> list[tuple[str, str]]:
+    """Every container carrying the label `label` (with the value `value`, or any value when `value` is None), as
+    `(id, the value of its label `read`)`, that value empty when it lacks the label or `read` is None; `BoxFault` when
+    docker cannot list them. A host with no docker binary has none."""
+    selector = label if value is None else f"{label}={value}"
+    argv = ["docker", "ps", "-aq", "--filter", f"label={selector}"] if read is None else [
+        "docker", "ps", "-a", "--filter", f"label={selector}", "--format", '{{.ID}} {{.Label "' + read + '"}}']
+    try:
+        listed = docker(argv)
     except FileNotFoundError:
-        return None
+        return []
     except (OSError, subprocess.SubprocessError) as e:
-        return f"could not invoke docker: {e}"
+        raise BoxFault(f"could not invoke docker: {e}") from None
     if listed.returncode != 0:
-        return f"docker could not list {whose} containers: {(listed.stderr or '').strip()}"
-    faults = [f"{name}: {why}" for name in listed.stdout.split() if (why := _remove_container(docker, name)) is not None]
+        raise BoxFault(f"docker could not list the containers labelled {selector}: {(listed.stderr or '').strip()}")
+    rows = [line.split(None, 1) for line in (listed.stdout or "").splitlines() if line.strip()]
+    return [(row[0], row[1].strip() if len(row) > 1 else "") for row in rows]
+
+
+def remove_containers(names: list[str], *, docker: DockerFn = run_docker, whose: str = "the") -> str | None:
+    """Remove each named container through `_remove_container`, paused or not: `None` once all are gone, else why not,
+    naming `whose` containers."""
+    faults = [f"{name}: {why}" for name in names if (why := _remove_container(docker, name)) is not None]
     return f"docker could not remove {whose} containers: {'; '.join(faults)}" if faults else None
 
 

@@ -18,6 +18,7 @@ from functools import partial
 
 from defender.records import RUN_LAYOUT
 from defender.tenancy import InMemoryTenantRepository
+from defender.identity.logged_mail import LoggedMail
 from defender.records.formats import AlertId, InvestigationId, LearningJobId, TenantId, TenantRefused
 
 from defender.identity import (
@@ -92,16 +93,6 @@ class _NoSignIn:
         """Nothing is open."""
 
 
-class _LoggedMail:
-    async def notify_invitation(self, to: str, tenant_id: str, invitation_id: str) -> None:
-        _logger.info("invitation %s to %s for tenant %s (not sent: demo)", invitation_id, to, tenant_id)
-
-    async def notify_credential_expiry(self, to: str, tenant_id: str, program_id: str, credential_id: str,
-                                       expires_at: _dt.datetime) -> None:
-        _logger.info("credential %s of program %s expires %s; warning to %s for tenant %s (not sent: demo)",
-                     credential_id, program_id, expires_at.isoformat(), to, tenant_id)
-
-
 class _DemoProgramsRealm:
     """The demo's stand-in for the programs realm: it makes a client and a secret per OAuth credential and
     keeps the clients in memory, but issues no tokens, so no OAuth credential can sign in (keys can)."""
@@ -140,10 +131,10 @@ async def demo_deps(tenants: Sequence[str], clock: Callable[[], _dt.datetime] = 
         tenant_ids = [TenantId(raw) for raw in tenants]
     except TenantRefused as refused:
         raise ValueError(f"not a tenant id: {refused}") from None
-    secrets = InMemorySecrets()
     store = InMemoryStore(clock)
+    secrets = InMemorySecrets(store)
     now = clock()
-    await _seed(store, secrets, tenant_ids[0], now)
+    _seed(store, secrets, tenant_ids[0], now)
     for n, tenant in enumerate(tenant_ids[1:], start=9):
         store.add_alert(tenant, _alert(
             tenant, n, fired=now - _dt.timedelta(hours=2), title=f"An alert of {tenant}'s",
@@ -161,7 +152,7 @@ async def demo_deps(tenants: Sequence[str], clock: Callable[[], _dt.datetime] = 
                                   created_at=now, accepted_at=now)
             await people.add_session(demo_sessions([tenant])[f"{tenant}-{role}"], user.id, now=now,
                                expires_at=now + _SESSION_LIFETIME)
-    identity = IdentityService(people, signin=_NoSignIn(), mail=_LoggedMail(), clock=clock, programs=_DemoProgramsRealm(),
+    identity = IdentityService(people, signin=_NoSignIn(), mail=LoggedMail(), clock=clock, programs=_DemoProgramsRealm(),
                                bootstrap=Bootstrap(administrators=()),
                                session_idle_limit=_SESSION_LIFETIME)
     return ApiDeps(
@@ -173,10 +164,12 @@ async def demo_deps(tenants: Sequence[str], clock: Callable[[], _dt.datetime] = 
         learning_jobs=store,
         lessons=store,
         systems=store,
+        alert_mapping=store,
         writes=store,
         secrets=secrets,
         checker=StubSystemChecker(),
         artifact_links=StubArtifactLinks(),
+        audit=store,
         offboarding=InMemoryOffboarding(tenant_rows, store, clock),
     )
 
@@ -201,7 +194,7 @@ def _alert(tenant: TenantId, n: int, *, fired: _dt.datetime, title: str, rule: s
     )
 
 
-async def _seed(store: InMemoryStore, secrets: InMemorySecrets, tenant: TenantId, now: _dt.datetime) -> None:
+def _seed(store: InMemoryStore, secrets: InMemorySecrets, tenant: TenantId, now: _dt.datetime) -> None:
     hour = _dt.timedelta(hours=1)
     brute = store.add_alert(tenant, _alert(
         tenant, 1, fired=now - 30 * hour, title="Repeated failed logins followed by success",
@@ -259,5 +252,4 @@ async def _seed(store: InMemoryStore, secrets: InMemorySecrets, tenant: TenantId
         system_id="siem", kind="siem", display_name="Event search", enabled=True,
         settings={"base_url": f"https://siem.{tenant}.example"},
     ))
-    await secrets.put_credentials(
-        tenant, "tickets", "static", {"api_token": "demo-secret-token-1163"})
+    secrets.add_credentials(tenant, "tickets", {"api_token": "demo-secret-token-1163"})
