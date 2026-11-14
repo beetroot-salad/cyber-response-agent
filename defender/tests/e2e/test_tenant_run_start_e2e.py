@@ -327,11 +327,18 @@ def test_one_process_runs_tenant_a_then_b_and_each_run_carries_only_its_own_tena
 
             # The box: this run copy's stage/agent; no settings, no clone, nothing of the other tenant.
             assert len(start.calls) == 1, start.calls
-            assert T.reaches(start.calls, copy_root / "stage" / "agent"), start.calls
-            assert not T.exposes(start.calls, own_settings), start.calls
-            assert not T.exposes(start.calls, B.clone_dir(own)), start.calls
+            # `data_root` is the folder the box check is made under (#1469), beside the job sockets; it
+            # is not bound into the box. So it is judged on its own (it must be the tenants' data root,
+            # not a tenant's folder or a copy), and `exposes` (which reads an ancestor as exposure)
+            # judges only what the call hands the box to mount.
+            (_, start_kwargs), = start.calls
+            assert Path(location_path(start_kwargs["data_root"])).resolve() == root.resolve(), start.calls
+            handed = [(a, {k: v for k, v in kw.items() if k != "data_root"}) for a, kw in start.calls]
+            assert T.reaches(handed, copy_root / "stage" / "agent"), start.calls
+            assert not T.exposes(handed, own_settings), start.calls
+            assert not T.exposes(handed, B.clone_dir(own)), start.calls
             assert not T.reaches(start.calls, root / other)
-            assert not T.exposes(start.calls, root / other), start.calls
+            assert not T.exposes(handed, root / other), start.calls
 
             # The registry: exactly this tenant's gather pairs.
             assert len(_RegistryRecorder.built) == 1, _RegistryRecorder.built
