@@ -64,7 +64,7 @@ def test_a_part_that_is_not_utf8_text_is_that_parts_fault_naming_the_file(tmp_pa
 @pytest.mark.parametrize("part", ["config.env", "access.yaml"])
 def test_a_part_larger_than_any_settings_file_is_that_parts_fault_not_a_crash(tmp_path, part):
     """A sparse part far larger than any settings file is a fault naming the file: no `MemoryError` out of the reader, no
-    traceback, the sibling part still read. (#1366 O9, P2; moved from the oversized arms of `set-system` and the
+    traceback. (#1366 O9, P2; moved from the oversized arms of `set-system` and the
     import.)"""
     folder = R.system_folder(tmp_path, "cmdb", config=CMDB_CONFIG, access=CMDB_ACCESS)
     with open(folder / part, "wb") as fh:
@@ -157,6 +157,35 @@ def test_keys_are_case_sensitive_so_a_lower_case_spelling_is_not_the_setting(tmp
     assert dict(read.settings) == {"change_mgmt_timeout_sec": "10"}, dict(read.settings)
 
 
+#: (id, extra config.env text, the key the reader's fault names, the secret value it carries, whether the reader also
+#: leaves the value out of its settings): lines a config parser may ignore or override. The reader keeps the FIRST value of
+#: a repeated key beside the fault (`folder_of_bytes`: the folder is refused whole by whoever judges it), so only the
+#: `export` line is also absent from the settings. Whether the reader should withhold the first value too is open (#1470
+#: report: r7 does not decide it); the fault naming the key is asserted on every row.
+IGNORED_LINE_SECRETS = [
+    ("export-line", 'export CMDB_API_TOKEN="sk-live-9f8e7d6c5b4a3f2e1d0c"\n', "CMDB_API_TOKEN", "sk-live-9f8e7d6c5b4a3f2e1d0c", True),
+    ("overridden-duplicate", 'CMDB_PASSWORD="hunter2-live"\nCMDB_PASSWORD=""\n', "CMDB_PASSWORD", "hunter2-live", False),
+    ("overridden-reference", 'CMDB_TOKEN_SECRET_REF="ghp-AbC!d3f@xyz"\nCMDB_TOKEN_SECRET_REF=""\n', "CMDB_TOKEN_SECRET_REF",
+     "ghp-AbC!d3f@xyz", False),
+]
+
+
+@pytest.mark.parametrize("row", IGNORED_LINE_SECRETS, ids=[r[0] for r in IGNORED_LINE_SECRETS])
+def test_1366_h2_a_secret_on_a_line_a_parser_ignores_never_enters_the_settings_the_reader_gives(tmp_path, row):
+    """Guard: a secret on an ignored `export`/duplicate line is faulted or left out, never in the settings the reader
+    gives (successor of the retired `test_validator_finds_secrets_on_lines_the_run_ignores`; the store half is gone with
+    the operator's `set-system`). (#1366 H2, P2)"""
+    _, extra, key, secret, withheld = row
+    base = 'CMDB_TIMEOUT_SEC="20"\n'
+
+    _, read = _read(tmp_path, "cmdb", base + extra, CMDB_ACCESS)
+
+    assert any(key in f for f in read.faults), read.faults
+    if withheld:
+        assert secret not in repr(dict(read.settings)), f"a secret value was read:\n{dict(read.settings)}"
+        assert set(read.settings) <= {"CMDB_TIMEOUT_SEC"}, dict(read.settings)
+
+
 # --- R17: a line the old parser tolerated is refused ------------------------------------------------------------------------
 
 REPO = Path(__file__).resolve().parents[4]
@@ -194,3 +223,20 @@ def test_1366_r17_connects_handoff_validator_refuses_a_duplicate_key_and_an_expo
     assert "the handoff's config.env and access.yaml are a record the store accepts" not in report, report
     assert R.lines_naming(report, key, "config.env"), report
     assert "Traceback" not in report, report
+
+
+@pytest.mark.parametrize("row", R17_LINES, ids=[r[0] for r in R17_LINES])
+def test_1366_r17_the_reader_refuses_a_duplicate_key_and_an_export_line_naming_the_file_and_the_key(tmp_path, row):
+    """A `config.env` repeating a key, or spelling a setting as `export KEY=value`, is a fault naming the file and the key
+    (the old parser took the last value and skipped the `export` line), and the refused line's value is not among the
+    settings. Control: the declared key once reads with no fault. (#1366 R17, H2)"""
+    name, text, key, value = row
+
+    folder, read = _read(tmp_path / "bad", "cmdb", text, CMDB_ACCESS)
+
+    if name != "duplicate-key-first-wins-looking":  # the reader keeps a repeated key's first value beside the fault
+        assert value not in dict(read.settings).values(), dict(read.settings)
+    assert _names(read.faults, folder, "config.env"), read.faults
+    assert any(key in f for f in read.faults), read.faults
+    _, control = _read(tmp_path / "once", "cmdb", 'CMDB_TIMEOUT_SEC="10"\n', CMDB_ACCESS)
+    assert control.faults == (), control.faults  # control: the key once is read

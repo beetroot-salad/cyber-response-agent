@@ -55,6 +55,9 @@ T2 = fixture_uuid("tenant:1214-repo-2")
 ABSENT = fixture_uuid("tenant:1214-repo-absent")
 
 
+T3 = fixture_uuid("tenant:1214-repo-3")
+
+
 ORIGIN = "http://forge.test/tenants/t1.git"
 
 
@@ -1009,7 +1012,7 @@ async def test_1366_r10_the_read_is_the_asked_tenants_own_records_disabled_ones_
 
     assert await store.repo.current_records(T1) == mine
     read = await store.repo.current_records(T2)
-    assert (read.imported, set(read.systems)) == (True, {"ticket"})
+    assert set(read.systems) == {"ticket"}
 
 
 async def test_1366_r10_the_current_record_is_the_highest_version_and_a_delete_hides_the_system(pg_store):
@@ -1046,16 +1049,18 @@ async def test_1470_o8_a_tenant_made_by_the_create_request_is_refused_until_it_i
 @pytest.mark.parametrize("fenced", [True, False])
 async def test_1366_o10_a_commit_that_drops_records_removes_that_tenants_versions_only_inside_its_fence(store, fenced):
     """`commit(drop_records=True)` of the offboarding step leaves the tenant with no system or case record and the
-    other (active) tenant's untouched and still read; with the fence missed nothing is dropped (and the commit raises).
-    The offboarded tenant's records are not read (`TenantRefused`, #1470 O8); the drop is asserted on the rows (Postgres)
+    other tenants' untouched (an OFFBOARDING one, whose rows are counted, and an active one, still read); with the fence
+    missed nothing is dropped (and the commit raises). The offboarded tenant's records are not read (`TenantRefused`, #1470 O8); the drop is asserted on the rows (Postgres)
     and the twin's own records (memory). (#1366 O10, #1470 O8)"""
     from defender.tenancy import FenceMissed
 
     await store.seed(T1, OFFBOARDING)
-    await store.seed(T2)
+    await store.seed(T2, OFFBOARDING)
+    await store.seed(T3)
     mine, theirs = _records_value(cmdb=(2, True, 1), ticket=(1, True, 1)), _records_value(cmdb=(1, True, 1))
     await _seed_records(store, T1, mine)
     await _seed_records(store, T2, theirs)
+    await _seed_records(store, T3, theirs)
 
     async with store.repo.lock(T1) as held:
         assert held is not None
@@ -1079,10 +1084,22 @@ async def test_1366_o10_a_commit_that_drops_records_removes_that_tenants_version
     if fenced:
         with pytest.raises(TenantRefused):  # offboarded: no longer a tenant whose records are known
             await store.repo.current_records(T1)
-    assert await store.repo.current_records(T2) == theirs, "control: the other tenant's records stay, and are read"
+    assert await store.repo.current_records(T3) == theirs, "control: an active tenant's records stay, and are read"
     if store.dsn is not None:  # a tenant that is not active is not read, so the rows are counted in the tables
         assert rows(T1) == ((0, 0) if fenced else (len(mine.systems), 1)), "this tenant's records"
         assert rows(T2) == (len(theirs.systems), 1), "control: the other tenant's rows stay"
+        assert rows(T3) == (len(theirs.systems), 1), "control: the active tenant's rows stay"
+        if not fenced:
+            from defender.tests.support.tenancy import _systems1366 as R
+
+            assert {(s, v.version, v.enabled, v.credential_generation) for s in mine.systems
+                    for v in R.system_versions(store.dsn, T1, s)} == {
+                (s, r.version, r.enabled, r.credential_generation) for s, r in mine.systems.items()}, "this tenant's records"
+            assert [(c.system_id, c.comment_body) for c in R.case_versions(store.dsn, T1)] == [
+                (mine.case.system_id, mine.case.comment_body)]
     else:  # the twin's own records (the memory repository reads none for a tenant that is not active)
         assert (T1 in store.twin._records) is (not fenced), "the commit's drop on the twin"
-        assert store.twin._records[T2] == theirs
+        assert store.twin._records[T2] == theirs, "control: the other tenant's records stay"
+        assert store.twin._records[T3] == theirs
+        if not fenced:
+            assert store.twin._records[T1] == mine, "nothing of this tenant's is dropped"

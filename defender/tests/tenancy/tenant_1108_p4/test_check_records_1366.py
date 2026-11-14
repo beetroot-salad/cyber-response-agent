@@ -332,6 +332,21 @@ def test_1470_o8_a_tenant_with_no_records_is_not_told_to_import(tenants):
     assert not R.lines_naming("\n".join(tacit), "orphan"), tacit
 
 
+def test_1366_r8_a_not_imported_tenant_still_gets_the_findings_that_need_no_records(
+        tmp_path, data_root, migrated_database, capsys, monkeypatch):  # noqa: F811 — the imported fixture
+    """A tenant with no records (no import step to run) still gets the findings that need none: a feedback setting that
+    cannot stand is reported on its check, and `check` names no import. (#1366 R8, #1470 O8)"""
+    monkeypatch.setenv("DEFENDER_DATABASE_DSN", migrated_database)
+    files = R.import_files(**{"settings/feedback.yaml": "outcomes: [not-an-outcome]\n"})
+    with published_tenant(tmp_path / "forge", root=data_root, files=files) as t:
+        register_tenant(migrated_database, t.tenant_id, data_root=t.data_root, records=None)
+        rc, out = R.Admin(t.tenant_id, migrated_database, tmp_path / "op", capsys).check()
+
+    assert rc != 0, out
+    assert R.lines_naming(out, "feedback"), out
+    assert not R.lines_naming(out, "tenant.py import"), out
+
+
 def test_1366_r13_a_tenant_without_credentials_fails_check_for_want_of_credentials_until_each_system_has_them(op):
     """Records touch no secret, so every system has no credentials at the current generation: `check`
     reports each and exits nonzero; once every system has its credentials at that generation the line is gone. (This

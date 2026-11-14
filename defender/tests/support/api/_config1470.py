@@ -100,6 +100,11 @@ class Configured:
         [(found,)] = execute(self.dsn, "SELECT id FROM identity.users WHERE email = %s", (email,))
         return str(found)
 
+    def lenient(self) -> httpx.AsyncClient:
+        """A client over the same app that answers an unhandled server error as its 500 instead of raising it into the
+        test (the way a server would), for a fault the app has no answer of its own for."""
+        return httpx.AsyncClient(transport=httpx.ASGITransport(app=self.app, raise_app_exceptions=False), base_url=ORIGIN)
+
     # --- routes (as Ann, admin of A, unless said) -------------------------------------------------
 
     async def put_system(self, system: str, replaces: int, *, settings: Mapping[str, str] | None = None,
@@ -231,6 +236,21 @@ def audit_events(caplog: pytest.LogCaptureFixture, *actions: str) -> list[Any]:
     return [r for r in caplog.records if getattr(r, "action", None) in actions]
 
 
+def holds_no_value(response: httpx.Response, sent: Mapping[str, Any]) -> bool:
+    """True when no value of the credential map `sent` (nor its JSON-escaped spelling, nor its first line) is in the
+    response's text. An empty value is the defect itself and is in every text, so it is not looked for. (N1)"""
+    import json as _json
+
+    text = response.text
+    for value in sent.values():
+        if not isinstance(value, str) or not value:
+            continue
+        needles = {value, _json.dumps(value)[1:-1], *value.splitlines()[:1]}
+        if any(needle and needle in text for needle in needles):
+            return False
+    return True
+
+
 def told(record: Any) -> str:
     """An audit event's words: its message and its detail."""
     return f"{record.getMessage()} {getattr(record, 'detail', None) or ''}"
@@ -255,3 +275,18 @@ async def config_call(served: Configured, route: tuple[str, str], headers: Mappi
     if route[0] == "DELETE":
         kw.setdefault("params", {"replaces": 1})
     return await served.client.request(route[0], path, headers=headers, **kw)
+
+
+def stable(route: tuple[str, str]) -> dict[str, Any]:
+    """Arguments for `config_call` that make Ann's answer to `route` the same each time it is repeated over a `primed`
+    tenant: a delete names a version that is never current (409, whatever happened before). The write bodies need none:
+    over a primed tenant a system or case write naming version 0 is always stale, and a credential write replaces."""
+    return {"params": {"replaces": 99}} if route[0] == "DELETE" else {}
+
+
+async def primed(served: Configured) -> None:
+    """Version 1 of system `ticket`, version 1 of the case record, and a credential set for it: the state in which a
+    request of each config route has one answer however often it is made."""
+    assert (await served.put_system(TICKET, 0)).status_code == 201
+    assert (await served.put_case(0)).status_code == 201
+    assert (await served.put_credentials(TICKET, 1, {"api_key": TOKEN})).status_code == 204

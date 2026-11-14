@@ -12,6 +12,7 @@ import httpx
 import pytest
 from defender.tests.support.api._config1470 import (
     BASE_MOVED,
+    BODY,
     ELASTIC,
     ELASTIC_ACCESS,
     ELASTIC_SETTINGS,
@@ -22,6 +23,7 @@ from defender.tests.support.api._config1470 import (
     TOKEN,
     Configured,
     audit_events,
+    holds_no_value,
     problem_text,
     told,
 )
@@ -66,6 +68,7 @@ async def test_o7_p3_credentials_follow_the_generation_not_the_version(configure
     assert (await configured.put_system(TICKET, 0)).status_code == 201
     first = await configured.put_credentials(TICKET, 1, {"api_key": TOKEN})
     assert first.status_code == 204, first.text
+    assert (first.status_code, first.content) == (204, b"")  # nothing echoed
     assert configured.stored_set(TICKET, 1) == {"kind": "static", "fields": {"api_key": TOKEN}}
 
     timeout = TICKET_SETTINGS | {"TICKET_TIMEOUT_SEC": "20"}
@@ -127,16 +130,22 @@ async def test_o7_the_version_check_comes_before_the_schema_check(configured):
 
 # --- O7: the credential schema ---------------------------------------------------------------------------------------
 
+#: Values one character short of the minimum that are told apart from any word an answer could hold (N1: the refusal must
+#: not print a value, and a value like "short" would be in a sentence by chance).
+SHORT_KEY = "shrt-key-1470-x"
+SHORT_PASS = "shrt-pass-1470x"
+assert len(SHORT_KEY) == len(SHORT_PASS) == 15  # noqa: PLR2004 — one below the minimum
+
 _BAD_SETS = [
     (TICKET, "a missing field", {}, ("api_key",)),
     (TICKET, "a field the scheme does not have", {"api_key": TOKEN, "password": TOKEN}, ("password",)),
     (TICKET, "the wrong field", {"api_token": TOKEN}, ("api_key", "api_token")),
-    (TICKET, "a secret shorter than the minimum", {"api_key": "short"}, ("api_key",)),
+    (TICKET, "a secret shorter than the minimum", {"api_key": SHORT_KEY}, ("api_key",)),
     (TICKET, "an empty value", {"api_key": ""}, ("api_key",)),
     (TICKET, "a non-ASCII character in a bearer token", {"api_key": "tøken-of-sixteen-or-more"}, ("api_key",)),
     (TICKET, "a line break in a token", {"api_key": TOKEN + "\nX-Evil: 1"}, ("api_key",)),
     (ELASTIC, "a username holding a colon", {**ELASTIC_SET, "username": "defender:reader"}, ("username",)),
-    (ELASTIC, "a short password", {**ELASTIC_SET, "password": "short"}, ("password",)),
+    (ELASTIC, "a short password", {**ELASTIC_SET, "password": SHORT_PASS}, ("password",)),
     (ELASTIC, "a missing username", {"password": PASSWORD}, ("username",)),
     (ELASTIC, "an empty username", {**ELASTIC_SET, "username": ""}, ("username",)),
 ]
@@ -155,9 +164,11 @@ async def test_o7_a_set_that_breaks_the_schemes_credential_schema_is_422_naming_
         assert (await configured.put_system(ELASTIC, 0, settings=ELASTIC_SETTINGS, access=ELASTIC_ACCESS)).status_code == 201
         good = ELASTIC_SET
     assert (await configured.put_credentials(system, 1, good)).status_code == 204
-    faults = _faults(await configured.put_credentials(system, 1, bad))
+    refused = await configured.put_credentials(system, 1, bad)
+    faults = _faults(refused)
     for name in names:
         assert any(name in f for f in faults), (name, faults)
+    assert holds_no_value(refused, bad), (label, "a credential value was printed", refused.text)  # N1; "" is the defect
     assert configured.stored_set(system, 1) == {"kind": "static", "fields": good}
 
 
@@ -166,9 +177,12 @@ async def test_o7_a_set_that_breaks_the_schemes_credential_schema_is_422_naming_
 async def test_o7_every_fault_of_one_set_is_listed_in_one_answer(configured):
     """A basic set with a colon username and a short password: both named in one 422. (O7)"""
     assert (await configured.put_system(ELASTIC, 0, settings=ELASTIC_SETTINGS, access=ELASTIC_ACCESS)).status_code == 201
-    faults = _faults(await configured.put_credentials(ELASTIC, 1, {"username": "a:b", "password": "short"}))
+    sent = {"username": "svc:1470-n1", "password": SHORT_PASS}
+    refused = await configured.put_credentials(ELASTIC, 1, sent)
+    faults = _faults(refused)
     assert any("username" in f for f in faults)
     assert any("password" in f for f in faults), faults
+    assert holds_no_value(refused, sent), ("a credential value was printed", refused.text)  # N1
     assert configured.stored_generations(ELASTIC) == []
 
 
@@ -177,28 +191,61 @@ async def test_o7_every_fault_of_one_set_is_listed_in_one_answer(configured):
 async def test_o7_a_stored_access_that_no_longer_parses_is_422_naming_its_fault_and_stores_nothing(scripted):
     """A current record whose access an earlier release stored and today's parser refuses: 422, nothing stored. (O7)"""
     scripted.plant_version(TICKET, 1, access="base: [unclosed")
-    faults = _faults(await scripted.put_credentials(TICKET, 1, {"api_key": TOKEN}))
+    refused = await scripted.put_credentials(TICKET, 1, {"api_key": TOKEN})
+    faults = _faults(refused)
     assert faults
+    assert holds_no_value(refused, {"api_key": TOKEN}), ("a credential value was printed", refused.text)  # N1
     assert scripted.stored_generations(TICKET) == []
     assert scripted.scripted.calls == []
 
 
+#: (body, the credential values it sends that no answer may print). A number is not a credential value; `for_version` is not.
+_MALFORMED_BODIES = [
+    ({"credentials": {"api_key": TOKEN}}, {"api_key": TOKEN}),
+    ({"for_version": 1}, {}),
+    ({"for_version": 1, "credentials": {"api_key": 12345678901234567890}}, {}),
+    ({"for_version": 1, "credentials": {"api_key": TOKEN}, "kind": "static"}, {"api_key": TOKEN}),
+    ({"for_version": 1, "credentials": {"api_key": TOKEN}, "kind": ""}, {"api_key": TOKEN}),
+    ({"for_version": 1, "credentials": {"api_key": TOKEN}, "kind": "oauth"}, {"api_key": TOKEN}),
+    ({"for_version": 1, "credentials": {"api_key": TOKEN}, "kind": "other"}, {"api_key": TOKEN}),
+    ({"for_version": "one", "credentials": {"api_key": TOKEN}}, {"api_key": TOKEN}),
+]
+
+
 @anyio_mark
 @postgres
-@pytest.mark.parametrize("body", [
-    {"credentials": {"api_key": TOKEN}},
-    {"for_version": 1},
-    {"for_version": 1, "credentials": {"api_key": 12345678901234567890}},
-    {"for_version": 1, "credentials": {"api_key": TOKEN}, "kind": "static"},
-    {"for_version": "one", "credentials": {"api_key": TOKEN}},
-], ids=["no for_version", "no credentials", "a number for a value", "a kind (P4)", "version not a number"])
-async def test_o7_a_malformed_credential_body_is_a_validation_422_with_errors(configured, body):
-    """Wire shape: `for_version` and `credentials` (field → text), nothing else. (O7, P4)"""
+@pytest.mark.parametrize(("body", "sent"), _MALFORMED_BODIES, ids=[
+    "no for_version", "no credentials", "a number for a value", "a kind (P4)", "a kind of ''", "a kind of 'oauth'",
+    "a kind of 'other'", "version not a number"])
+async def test_o7_a_malformed_credential_body_is_a_validation_422_with_errors(configured, body, sent):
+    """Wire shape: `for_version` and `credentials` (field → text), nothing else; a body that carries a `kind` of any value
+    is refused (the kind is the scheme's, never a write field). No credential value it carries is printed back. (O7, P4, N1)"""
     await _ticket(configured)
     refused = await configured.put_raw(f"/tenants/{A}/systems/{TICKET}/credentials", body)
     assert refused.status_code == 422, refused.text
     assert refused.json()["errors"]
     assert "faults" not in refused.json()
+    assert holds_no_value(refused, sent), ("a credential value was printed", refused.text)
+    assert configured.stored_generations(TICKET) == []
+
+
+#: Each as it is spelled inside a JSON string, so the body is valid JSON that decodes to it (base: a name the audit store
+#: would refuse never gets in, and the route must answer 422, not fail serialising it).
+_NAMES_OUTSIDE_THE_GRAMMAR = [r"a\u0000b", r"\ud800", "", "has space", "x" * 65, "9lead"]
+
+
+@anyio_mark
+@postgres
+@pytest.mark.parametrize("key", _NAMES_OUTSIDE_THE_GRAMMAR, ids=["nul", "lone-surrogate", "empty", "space", "65-chars", "digit-first"])
+async def test_a_credential_field_name_outside_the_grammar_is_refused_and_nothing_is_stored(configured, key):
+    """A field name no scheme has, however unprintable, is a 422 (never a 500) at the write and nothing is stored; the
+    value it carries is not printed back. (F5, G2; base `test_a_credential_field_name_outside_the_grammar_is_refused`)"""
+    await _ticket(configured)
+    refused = await configured.client.put(
+        f"/tenants/{A}/systems/{TICKET}/credentials", headers={**configured.ann(), "Content-Type": "application/json"},
+        content=('{"for_version": 1, "credentials": {"' + key + '": "' + TOKEN + '"}}').encode())
+    assert refused.status_code == 422, refused.text
+    assert holds_no_value(refused, {"v": TOKEN}), ("a credential value was printed", refused.text)
     assert configured.stored_generations(TICKET) == []
 
 
@@ -313,6 +360,7 @@ async def test_o7_the_kind_stored_is_the_schemes_not_a_constant(scripted):
     assert scripted.stored_set(TICKET, 1) == {"kind": "oauth-client-credentials", "fields": pair}
     refused = await scripted.put_credentials(TICKET, 1, {"api_key": TOKEN})  # the bearer shape no longer fits
     assert refused.status_code == 422, refused.text
+    assert holds_no_value(refused, {"api_key": TOKEN}), ("a credential value was printed", refused.text)  # N1
 
 
 # --- O7 / O9: the post-write re-read ---------------------------------------------------------------------------------
@@ -435,6 +483,154 @@ async def test_o9_each_stored_write_announces_one_event_naming_the_member_and_th
     assert MARKER_UNUSED not in told(credentials)
     assert MARKER_POSSIBLY not in told(credentials)
     assert TOKEN not in " ".join(told(e) for e in events)
+
+
+@anyio_mark
+@postgres
+async def test_o7_a_credential_write_asks_the_secret_store_for_no_existence_check_and_no_value(scripted):
+    """The write goes straight to the secret store: no metadata (existence) read, no value read, the slot decided by the
+    record store alone. Base: "an existence check, not a read". (O7, Flows: set credentials)"""
+    await _ticket(scripted)
+    scripted.scripted.calls.clear()
+    assert (await scripted.put_credentials(TICKET, 1, {"api_key": TOKEN})).status_code == 204
+    calls = scripted.scripted.calls
+    assert calls, "premise: the write reached the secret store"
+    assert [c for c in calls if c[1].split("/")[1:2] == ["metadata"]] == [], "an existence check, not a read"
+    assert scripted.scripted.value_reads == []
+
+
+class _Probe(logging.Handler):
+    """A handler on the root logger that, as each audited event arrives, asks the `expect[action]` callable whether the
+    write the event announces is already visible to another connection; `seen` is (action, visible) in arrival order."""
+
+    def __init__(self) -> None:
+        super().__init__(logging.DEBUG)
+        self.expect: dict[str, object] = {}
+        self.seen: list[tuple[str, bool]] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        action = getattr(record, "action", None)
+        if action in AUDITED and action in self.expect:
+            self.seen.append((action, bool(self.expect.pop(action)())))  # type: ignore[operator]
+
+
+@anyio_mark
+@postgres
+async def test_o9_each_config_write_is_announced_only_after_it_is_visible(configured, caplog):
+    """When each config write's event arrives, its version row, set or mapping is already visible to another connection
+    (the event follows the commit). Base: `log.visible_on_arrival == [True]`. (O9: "after it commits")"""
+    from defender.tests.support.shared._postgres1339 import execute
+    from defender.tests.support.tenancy import _systems1366 as R
+
+    caplog.set_level(logging.DEBUG)
+    probe = _Probe()
+    logging.getLogger().addHandler(probe)
+    try:
+        mapping = {e: f"vendor.c12.{e}" for e in MAPPING_ENTRIES}
+        steps = [
+            ("system.update", lambda: any(v.version == 1 for v in configured.versions(TICKET)),
+             lambda: configured.put_system(TICKET, 0)),
+            ("case_record.update", lambda: [v.deleted for v in R.case_versions(configured.dsn, A)] == [False],
+             lambda: configured.put_case(0)),
+            ("case_record.delete", lambda: [v.deleted for v in R.case_versions(configured.dsn, A)] == [False, True],
+             lambda: configured.delete_case(1)),
+            ("system.credentials", lambda: configured.stored_set(TICKET, 1) == {"kind": "static", "fields": {"api_key": TOKEN}},
+             lambda: configured.put_credentials(TICKET, 1, {"api_key": TOKEN})),
+            ("alert_mapping.update",
+             lambda: execute(configured.dsn, "SELECT title FROM tenancy.alert_mappings WHERE tenant_id = %s", (A,)) == [("vendor.c12.title",)],
+             lambda: configured.put_raw(f"/tenants/{A}/alert-mapping", mapping)),
+            ("system.delete", lambda: [v.deleted for v in configured.versions(TICKET)] == [False, True],
+             lambda: configured.delete_system(TICKET, 1)),
+        ]
+        for action, visible, write in steps:
+            probe.expect[action] = visible
+            answered = await write()
+            assert answered.status_code < 300, (action, answered.text)
+    finally:
+        logging.getLogger().removeHandler(probe)
+    assert probe.seen == [(action, True) for action, _, _ in steps], probe.seen
+
+
+class _AnnouncementFails(logging.Handler):
+    """A handler on the root logger whose `handle` raises for one audited action: the announcement itself fails, as an
+    audit sink that refuses it would, with no patching of the app."""
+
+    def __init__(self, action: str) -> None:
+        super().__init__(logging.DEBUG)
+        self.action, self.refused = action, 0
+
+    def handle(self, record: logging.LogRecord) -> bool:
+        if getattr(record, "action", None) == self.action:
+            self.refused += 1
+            raise RuntimeError("the audit sink refuses the announcement")
+        return False
+
+
+async def _set_up(served: Configured, *, system: bool = False, case: bool = False) -> None:
+    if system:
+        assert (await served.put_system(TICKET, 0)).status_code == 201
+    if case:
+        assert (await served.put_case(0)).status_code == 201
+
+
+async def _write(client: httpx.AsyncClient, served: Configured, method: str, path: str, **kw: object) -> httpx.Response:
+    return await client.request(method, f"/tenants/{A}{path}", headers=served.ann(), **kw)  # type: ignore[arg-type]
+
+
+#: (action, what the case needs first, the write, a check of the stored state after it). O9: an announcement that fails
+#: after the commit answers 500 and the write stands (#1083 Am-2/P2); base asserted it over the demo ports.
+_ANNOUNCED = [
+    ("system.update", {}, lambda c, s: _write(c, s, "PUT", f"/systems/{TICKET}", json={
+        "replaces": 0, "enabled": True, "settings": TICKET_SETTINGS, "access": TICKET_ACCESS}),
+     lambda s: [v.version for v in s.versions(TICKET)] == [1]),
+    ("system.delete", {"system": True}, lambda c, s: _write(c, s, "DELETE", f"/systems/{TICKET}", params={"replaces": 1}),
+     lambda s: [v.deleted for v in s.versions(TICKET)] == [False, True]),
+    ("case_record.update", {"system": True}, lambda c, s: _write(c, s, "PUT", "/case-record", json={
+        "replaces": 0, "system_id": TICKET, "comment_body": BODY}),
+     lambda s: [v.deleted for v in _case_versions(s)] == [False]),
+    ("case_record.delete", {"system": True, "case": True}, lambda c, s: _write(c, s, "DELETE", "/case-record", params={"replaces": 1}),
+     lambda s: [v.deleted for v in _case_versions(s)] == [False, True]),
+    ("system.credentials", {"system": True}, lambda c, s: _write(c, s, "PUT", f"/systems/{TICKET}/credentials", json={
+        "for_version": 1, "credentials": {"api_key": TOKEN}}),
+     lambda s: s.stored_set(TICKET, 1) == {"kind": "static", "fields": {"api_key": TOKEN}}),
+    ("alert_mapping.update", {}, lambda c, s: _write(c, s, "PUT", "/alert-mapping", json={
+        e: f"vendor.q3.{e}" for e in MAPPING_ENTRIES}),
+     lambda s: _mapping_title(s) == [("vendor.q3.title",)]),
+]
+
+
+def _case_versions(served: Configured) -> list[object]:
+    from defender.tests.support.tenancy import _systems1366 as R
+
+    return R.case_versions(served.dsn, A)
+
+
+def _mapping_title(served: Configured) -> list[tuple[object, ...]]:
+    from defender.tests.support.shared._postgres1339 import execute
+
+    return execute(served.dsn, "SELECT title FROM tenancy.alert_mappings WHERE tenant_id = %s", (A,))
+
+
+@anyio_mark
+@postgres
+@pytest.mark.parametrize(("action", "needs", "write", "stands"), _ANNOUNCED, ids=[a[0] for a in _ANNOUNCED])
+async def test_o9_an_announcement_that_fails_after_the_commit_answers_500_and_the_write_stands(
+        scripted, caplog, action, needs, write, stands):
+    """The event for each config write fails to be announced: the answer is 500 and what was written stays written (no
+    rollback, no second attempt at the write). The same write with the sink healthy is the control for each. (O9, #1083
+    Am-2/P2; base `test_a_demo_announcement_that_fails_after_the_write_answers_500_and_the_write_stands`)"""
+    caplog.set_level(logging.DEBUG)
+    await _set_up(scripted, system=needs.get("system", False), case=needs.get("case", False))
+    failing = _AnnouncementFails(action)
+    logging.getLogger().addHandler(failing)
+    try:
+        async with scripted.lenient() as client:
+            served = await write(client, scripted)
+    finally:
+        logging.getLogger().removeHandler(failing)
+    assert failing.refused == 1, "premise: the write was announced, and the announcement was the thing that failed"
+    assert served.status_code == 500, served.text
+    assert stands(scripted), "the write stands"
 
 
 # --- C10: the writer policy ------------------------------------------------------------------------------------------

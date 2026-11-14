@@ -100,6 +100,32 @@ def test_1470_p2_a_replace_of_a_live_record_names_the_current_version_and_any_ot
     assert stored(dsn, tenant)[-1] == (3, False)
 
 
+def _moved(dsn: str, tenant: str, move: str) -> None:
+    """Another writer's move of v1 to v2: a new base (the credential generation rises), a settings edit or a disable (it
+    does not)."""
+    moves = {"base": put(tenant, replaces=1, access=BASE_B), "settings": put(tenant, replaces=1, settings=INDEXED),
+             "disable": put(tenant, replaces=1, enabled=False)}
+    K.run(dsn, moves[move])
+
+
+@pytest.mark.parametrize("move", ["base", "settings", "disable"])
+@pytest.mark.parametrize("act", ["put", "delete"])
+def test_1470_p2_a_write_prepared_for_a_version_another_writers_move_replaced_is_stale_naming_the_current_one(
+        migrated_database, act, move):  # noqa: F811
+    """Whichever way another writer moved v1 to v2 (a new base, a settings edit, a disable), a put or a delete still
+    naming v1 is `Stale` naming 2, and nothing is stored. (#1366 O5 over the store, P2)"""
+    dsn, tenant = migrated_database, _tenant(migrated_database)
+    K.run(dsn, put(tenant, replaces=0))
+    _moved(dsn, tenant, move)
+    before = stored(dsn, tenant)
+    assert before == [(1, False), (2, False)], "premise: the other writer's move is version 2"
+
+    stale = K.refused(dsn, put(tenant, replaces=1, settings=INDEXED) if act == "put" else delete(tenant, replaces=1))
+
+    assert (K.kind_of(stale), stale.current_version) == ("Stale", 2)
+    assert stored(dsn, tenant) == before, "a refused write stores nothing"
+
+
 def test_1470_p2_the_case_record_shows_a_tombstone_as_none_and_re_creates_with_the_next_number(migrated_database):  # noqa: F811
     """The case record, as the system: v1, delete (v2); `replaces=2` is stale naming 0; `replaces=0` creates v3; again is
     stale naming 3; a live record's wrong `replaces` is stale naming it. (P2, O6)"""

@@ -158,6 +158,17 @@ REFUSALS = [
     *(Refusal(f"elastic-path-key-{n}", "elastic", {**_ELASTIC_CONFIG, "ELASTIC_EVENTS_INDEX": v}, _ELASTIC_ACCESS,
               (("elastic", "ELASTIC_EVENTS_INDEX"),), good=({**_ELASTIC_CONFIG, "ELASTIC_EVENTS_INDEX": "logs-2"}, _ELASTIC_ACCESS))
       for n, v in (("slash", "a/b"), ("dotdot", "../x"), ("backslash", "a\\b"))),
+    # The base import-failure members whose adapter or text differs from the rows above (each with its own needles).
+    Refusal("change-me-on-identity", "identity", {"IDENTITY_TIMEOUT_SEC": "CHANGE-ME"}, R.FIXTURE_FOLDERS["identity"][1],
+            (("identity", "IDENTITY_TIMEOUT_SEC"),), good=(IDENTITY, R.FIXTURE_FOLDERS["identity"][1])),
+    Refusal("missing-required-on-threat-intel", "threat-intel", {}, R.FIXTURE_FOLDERS["threat-intel"][1],
+            (("threat-intel", "THREAT_INTEL_TIMEOUT_SEC"),), good=R.FIXTURE_FOLDERS["threat-intel"]),
+    Refusal("zero-timeout-on-change-mgmt", "change-mgmt", {"CHANGE_MGMT_TIMEOUT_SEC": "0"}, R.FIXTURE_FOLDERS["change-mgmt"][1],
+            (("change-mgmt", "CHANGE_MGMT_TIMEOUT_SEC"),), good=R.FIXTURE_FOLDERS["change-mgmt"]),
+    Refusal("access-unparseable-on-change-mgmt", "change-mgmt", R.FIXTURE_FOLDERS["change-mgmt"][0], "access: [\n",
+            (("change-mgmt", "access"),), good=R.FIXTURE_FOLDERS["change-mgmt"]),
+    Refusal("access-empty-on-host-state", "host-state", R.FIXTURE_FOLDERS["host-state"][0], "",
+            (("host-state", "access"),), good=R.FIXTURE_FOLDERS["host-state"]),
     Refusal("access-missing", "cmdb", CMDB_CONFIG, None, (("cmdb", "access"),), good=_GOOD_CMDB, file_ok=True),
     *(Refusal(name, "cmdb", CMDB_CONFIG, text, (("cmdb", "access"),), good=_GOOD_CMDB) for name, text in _BAD_ACCESS.items()),
 ]
@@ -178,6 +189,59 @@ def test_1366_o4_an_unusable_system_record_is_refused_naming_system_and_key_not_
         rc, said = imported_op.set_system(control, replaces=row.replaces, config=row.good[0], access=row.good[1])
         assert rc == 0, said
         assert imported_op.current()[control].version == row.replaces + 1
+
+
+@pytest.mark.postgres
+def test_keys_are_case_sensitive_so_a_lower_case_spelling_is_not_the_setting(imported_op):
+    """A key in lower case is not the upper-case key the adapter reads: the record is refused naming the system and the
+    spelling (it cannot satisfy the required key and is not a declared one), and stores nothing. (The reader half, that
+    it reads the key as written, is pinned in `test_folder_reader_w_1366`; P2: what cannot be used cannot be stored.)"""
+    op = imported_op
+    before = _state(op)
+
+    rc, said = op.set_system("change-mgmt", replaces=1, config={"change_mgmt_timeout_sec": "10"},
+                             access=R.FIXTURE_FOLDERS["change-mgmt"][1])
+
+    assert rc != 0, said
+    assert "change-mgmt" in said, said
+    assert "CHANGE_MGMT_TIMEOUT_SEC" in said or "change_mgmt_timeout_sec" in said, said
+    assert "Traceback" not in said, said
+    assert _state(op) == before
+
+
+def _undeclared_keys() -> list[str]:
+    """Keys a `config.env` line can spell that cmdb does not declare (it declares `CMDB_TIMEOUT_SEC`): spellings of the
+    declared key, lower case, hyphen, dot, non-ASCII and mixed, and seeded random text over those alphabets."""
+    rng = random.Random(13662)
+    fixed = ["cmdb_timeout_sec", "Cmdb_Timeout_Sec", "CMDB-TIMEOUT-SEC", "CMDB.TIMEOUT.SEC", "cmdb_api_token", "cmdb-key",
+             "token", "timeout_sec", "CMDB_TIMEOUT_SÉC", "ключ", "日本語", "k.e.y", "a-b", "_leading", "9digit"]
+    alphabets = ["abcdefghijklmnopqrstuvwxyz_", "abcdefghijklmnopqrstuvwxyz-.", "abcdefgABCDEFG0123456789_-.", "éßжя日本_a-z"]
+    generated = ["".join(rng.choice(rng.choice(alphabets)) for _ in range(rng.randint(2, 12))) for _ in range(12)]
+    return [key for key in dict.fromkeys([*fixed, *generated]) if key != "CMDB_TIMEOUT_SEC" and "=" not in key]
+
+
+UNDECLARED_KEYS = _undeclared_keys()
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("key", UNDECLARED_KEYS, ids=[f"key-{i}" for i in range(len(UNDECLARED_KEYS))])
+def test_1366_o4_a_settings_key_the_adapter_does_not_declare_is_refused_whatever_its_spelling_and_never_stored(imported_op, key):
+    """cmdb's declared key beside one more `KEY="..."` setting is refused when the key is not one cmdb declares, whatever
+    it is spelt like (a case variant of the declared key, lower case, hyphens, dots, non-ASCII): the refusal names the
+    system and the key, no traceback, and no version is stored nor a secret value left in a record. Control: the declared
+    key alone is stored. (#1366 O4, P1, P2, H2)"""
+    op = imported_op
+    before = _state(op)
+
+    rc, said = op.set_system("cmdb", replaces=1, config={"CMDB_TIMEOUT_SEC": "10", key: "s3cr3t-1366"}, access=CMDB_ACCESS)
+
+    assert rc != 0, said
+    assert R.lines_naming(said, "cmdb", key), (key, said)
+    assert "Traceback" not in said, said
+    assert _state(op) == before, "a refused key changed the records"
+    assert "s3cr3t-1366" not in repr([op.versions(s) for s in R.FIXTURE_SYSTEMS]), "a value of the refused line was stored"
+    rc, said = op.set_system("cmdb", replaces=1, config=CMDB_NEW, access=CMDB_ACCESS)
+    assert rc == 0, said  # control: the declared key alone is stored as the next version
 
 
 async def _door(op: R.Admin, call: Any) -> Any:
@@ -779,6 +843,7 @@ def test_1366_p5_a_delete_carries_the_generation_and_a_re_create_takes_the_next_
     assert op.numbers("identity") == [(1, 1, False), (2, 2, False), (3, 3, False), (4, 3, True), (5, 4, False),
                                       (6, 4, True), (7, 5, False)]
     assert op.kv.written() == [f"{op.tid}/identity/g1"]
+    assert R.lines_naming(op.check()[1], "identity", "no credentials")
 
 
 # --- DC8: disable and set-case via the store ---------------------------------------------------------------------------

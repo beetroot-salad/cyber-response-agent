@@ -641,7 +641,9 @@ def test_1345_get_alert_mapping_answers_all_six_entries_or_404_when_none_was_sav
     ({**MAPPING_BODY, "summary": "rule..id"}, "summary"),  # an empty segment
     ({**MAPPING_BODY, "severity": "rule.level"}, "severity"),  # not one of the six
     ({k: v for k, v in MAPPING_BODY.items() if k != "event_time"}, "event_time"),  # D4: all six must be named
-], ids=["invalid-path", "empty-segment", "unknown-entry", "missing-entry"])
+    ({**MAPPING_BODY, "description": 42}, "description"),  # not a path
+    ({**MAPPING_BODY, "summary": ""}, "summary"),  # an empty path
+], ids=["invalid-path", "empty-segment", "unknown-entry", "missing-entry", "not-a-path", "empty-path"])
 def test_1345_an_invalid_or_incomplete_mapping_is_a_422_naming_the_entry_before_any_port_call(body: dict[str, str], entry: str) -> None:
     """The wire model refuses it (r5: validated through `records`' `check_mapping`; D4: all six named): 422 naming the
     entry, no port call, no audit. (#1345 O1, M2)"""

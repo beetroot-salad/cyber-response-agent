@@ -23,7 +23,7 @@ from defender.tests.support.api._config1470 import (
     edited_cursor,
     problem_text,
 )
-from defender.tests.support.api._server1083 import ANN, ORIGIN, A, B
+from defender.tests.support.api._server1083 import ANN, ORIGIN, REPO, A, B
 from defender.tests.support.tenancy import _systems1366 as R
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
@@ -78,6 +78,51 @@ async def test_o2_the_catalog_lists_every_adapter_with_what_a_record_of_it_store
         assert all(isinstance(v, str) and v and "CHANGE-ME" not in v and "playground" not in v
                    for v in item["sample_settings"].values()), (adapter, item["sample_settings"])
     assert scripted.scripted.calls == []  # the catalog read asks no secret store
+
+
+#: adapter id -> its settings keys as stored: the checkout's nine adapters (base `CATALOG_KEYS`, #1366 O2).
+CATALOG_KEYS = {
+    "elastic": ("ELASTIC_EVENTS_INDEX", "ELASTIC_ALERTS_INDEX"),
+    "jira": ("JIRA_TIMEOUT_SEC", "JIRA_SERVICE_DESK"),
+    "servicenow": ("SERVICENOW_TIMEOUT_SEC", "SERVICENOW_TABLE"),
+    "change-mgmt": ("CHANGE_MGMT_TIMEOUT_SEC",),
+    "cmdb": ("CMDB_TIMEOUT_SEC",),
+    "host-state": (),
+    "identity": ("IDENTITY_TIMEOUT_SEC",),
+    "threat-intel": ("THREAT_INTEL_TIMEOUT_SEC",),
+    "ticket": ("TICKET_TIMEOUT_SEC", "TICKET_KEY_PATTERN"),
+}
+
+
+def _declared(adapter: str):
+    """The adapter's module: its `PREFIX`, `REQUIRED_CONFIG_KEYS`, `DISPLAY_NAME` and `EXAMPLE` are the cold-readable
+    constants the catalog is read from, so the served entry is judged against them, not a second copy."""
+    import importlib
+
+    return importlib.import_module(f"defender.integrations.{adapter.replace('-', '_')}_adapter")
+
+
+async def test_o2_the_served_catalog_is_exactly_the_checkouts_adapters(scripted):
+    """Premise of the per-adapter rows: the nine adapters on disk are the table's, and the catalog serves each. (O2)"""
+    on_disk = {p.stem.removesuffix("_adapter").replace("_", "-")
+               for p in (REPO / "defender/integrations").glob("*_adapter.py")}
+    assert on_disk == set(CATALOG_KEYS) == LAB | REAL
+    assert {i["adapter_id"] for i in (await scripted.get("/adapters")).json()["items"]} == set(CATALOG_KEYS)
+
+
+@pytest.mark.parametrize("adapter", sorted(CATALOG_KEYS))
+async def test_o2_each_adapters_served_entry_is_what_its_module_declares(scripted, adapter):
+    """Per adapter: `display_name` is its module's `DISPLAY_NAME`, `settings_keys` exactly the keys its module requires
+    (`<PREFIX>_<key>`, none missing, none extra), `lab_example` its `EXAMPLE` flag. (O2; base
+    `test_1366_o2_the_catalog_lists_every_adapter_with_its_display_name_exact_required_keys_and_example_mark`)"""
+    module = _declared(adapter)
+    declared = {f"{module.PREFIX}_{k}" for k in module.REQUIRED_CONFIG_KEYS}
+    assert declared == set(CATALOG_KEYS[adapter]), f"premise: {adapter}'s declared constants are the design's keys"
+    [item] = [i for i in (await scripted.get("/adapters")).json()["items"] if i["adapter_id"] == adapter]
+    assert item["display_name"] == module.DISPLAY_NAME, (adapter, item)
+    assert set(item["settings_keys"]) == declared, (adapter, item)
+    assert len(item["settings_keys"]) == len(declared), (adapter, item)
+    assert item["lab_example"] is bool(module.EXAMPLE), (adapter, item)
 
 
 @pytest.mark.parametrize("adapter", sorted(R.FIXTURE_FOLDERS))
@@ -297,7 +342,9 @@ async def test_o3_a_systems_cursor_is_bound_to_its_tenant_even_for_a_member_of_b
     headers = scripted.ann(write=False)
     cursor = (await scripted.client.get(f"/tenants/{A}/systems", params={"limit": 1}, headers=headers)).json()["next_cursor"]
     assert (await scripted.client.get(f"/tenants/{A}/systems", params={"limit": 1, "cursor": cursor}, headers=headers)).status_code == 200
+    calls = len(scripted.scripted.calls)
     assert (await scripted.client.get(f"/tenants/{B}/systems", params={"cursor": cursor}, headers=headers)).status_code == 422
+    assert len(scripted.scripted.calls) == calls
 
 
 # --- P2 / O5: delete and re-create -----------------------------------------------------------------------------------
@@ -411,6 +458,73 @@ async def test_g2_the_problem_document_declares_faults_and_current_version(scrip
     assert "integer" in str(properties["current_version"])
     put = document["paths"]["/tenants/{tenant_id}/systems/{system_id}"]["put"]["responses"]
     assert {"201", "200", "409", "422"} <= set(put), set(put)
+
+
+# --- D13: the served system models hold the id to the grammar -------------------------------------------------------
+
+SYSTEM_ROUTE = "/tenants/{tenant_id}/systems/{system_id}"
+
+
+def _response_model(app, method: str, template: str):
+    """The model the app declares for the answer of `method template`, from the app's own route table (the design names
+    no class, so none is imported)."""
+    from defender.tests.support.api._routes1307a import _served
+
+    [route] = [r for r in _served(app.routes) if r.path == template and method in r.methods]
+    model = getattr(route, "response_model", None)
+    assert model is not None, f"{method} {template} declares no response model"
+    return model
+
+
+@pytest.mark.parametrize("bad", ["a/b", "a b", "a?b#c", "é", ""])
+async def test_d13_an_id_outside_the_grammar_cannot_be_served_as_a_system(scripted, bad):
+    """The served system models (a single read's and a list's item) refuse to be built from an id outside the grammar
+    (a hand-edited row): base `test_an_id_outside_the_grammar_cannot_be_served`'s own `bad` ids, with its own
+    `pytest.raises(ValueError, match="pattern")`. The unedited answer builds (control). (D13)"""
+    assert (await scripted.put_system(TICKET, 0)).status_code == 201
+    served = (await scripted.get_system(TICKET)).json()
+    listed = (await scripted.list_systems()).json()
+    one, many = _response_model(scripted.app, "GET", SYSTEM_ROUTE), _response_model(scripted.app, "GET", "/tenants/{tenant_id}/systems")
+    one.model_validate(served)
+    many.model_validate(listed)
+    with pytest.raises(ValueError, match="pattern"):
+        one.model_validate({**served, "system_id": bad})
+    with pytest.raises(ValueError, match="pattern"):
+        many.model_validate({**listed, "items": [{**listed["items"][0], "system_id": bad}]})
+
+
+async def test_d13_the_published_schema_of_a_served_system_carries_the_id_pattern(scripted):
+    """The OpenAPI document's system answer holds `system_id` to a pattern. (D13)"""
+    document = (await scripted.client.get("/openapi.json")).json()
+    ref = document["paths"][SYSTEM_ROUTE]["get"]["responses"]["200"]["content"]["application/json"]["schema"]["$ref"]
+    schema = document["components"]["schemas"][ref.rsplit("/", 1)[1]]
+    assert "pattern" in schema["properties"]["system_id"], schema["properties"]["system_id"]
+
+
+# --- a record-store fault on a system write --------------------------------------------------------------------------
+
+async def test_o4_a_database_fault_on_a_system_write_is_500_and_announces_nothing(scripted, caplog):
+    """The version table gone while a replacing save runs (a fault the store cannot answer): 500, no event announced; once
+    it is back the same save is 200 at version 2 (control). Base: a failing write port is a 500 that announces nothing.
+    (Am-2, P2; the generic 500 handler)"""
+    import logging
+
+    from defender.tests.support.shared._postgres1339 import execute
+
+    caplog.set_level(logging.DEBUG)
+    assert (await scripted.put_system(TICKET, 0)).status_code == 201
+    caplog.clear()
+    body = {"replaces": 1, "enabled": True, "settings": TICKET_SETTINGS, "access": TICKET_ACCESS}
+    execute(scripted.dsn, "ALTER TABLE tenancy.system_versions RENAME TO sv_away")
+    try:
+        async with scripted.lenient() as client:
+            refused = await client.put(f"/tenants/{A}/systems/{TICKET}", headers=scripted.ann(), json=body)
+    finally:
+        execute(scripted.dsn, "ALTER TABLE tenancy.sv_away RENAME TO system_versions")
+    assert refused.status_code == 500, refused.text
+    assert [r for r in caplog.records if getattr(r, "action", None) == "system.update"] == []
+    assert [v.version for v in scripted.versions(TICKET)] == [1]
+    assert (await scripted.put_raw(f"/tenants/{A}/systems/{TICKET}", body)).status_code == 200
 
 
 # --- reads and writes with the secret store sealed or failing --------------------------------------------------------

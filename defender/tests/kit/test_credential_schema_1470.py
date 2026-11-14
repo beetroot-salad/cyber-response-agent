@@ -63,6 +63,52 @@ def test_1470_o7_a_missing_or_extra_field_is_a_fault_naming_it(name):
     assert all(any(field in f for f in nothing) for field in secret), nothing
 
 
+#: Base's names outside the field grammar (a field name reaches the audit detail, so one the audit store would refuse never
+#: gets in): NUL inside, a lone surrogate, empty, a space, 65 characters, a leading digit.
+_BASE_NAMES = ["a\x00b", "\ud800", "", "has space", "x" * 65, "9lead"]
+_ALL_FIELDS = {f for _, secret, _ in SCHEMES.values() for f in secret}
+
+
+def _generated_names() -> list[str]:
+    """A seeded sample of names no scheme has: any length 0-80 over controls, ASCII punctuation, Latin and wide characters
+    and surrogate halves, so the class is walked, not the hand-picked six."""
+    import random
+
+    rng = random.Random(1470)
+    alphabet = [chr(c) for c in (*range(0x00, 0x80), *range(0xA0, 0x250), 0x2028, 0x3042, 0x1F600, 0xD800, 0xDFFF)]
+    names = ["".join(rng.choice(alphabet) for _ in range(rng.randint(0, 80))) for _ in range(300)]
+    return [n for n in names if n not in _ALL_FIELDS]
+
+
+@pytest.mark.parametrize("name", _AUTH_IDS)
+def test_1470_o7_a_field_name_no_scheme_has_is_a_fault_whatever_it_holds(name):
+    """Added to a fitting set of any scheme, each of base's six names outside the grammar and a seeded sample of others is
+    an extra field: a non-empty fault list, never an exception. The wording for an unprintable name is not pinned. (O7, F5, G2)"""
+    auth, _, fitting = SCHEMES[name]
+    missed = [n for n in [*_BASE_NAMES, *_generated_names()] if not faults(auth, {**fitting, n: LONG})]
+    assert missed == [], [repr(n) for n in missed[:10]]
+
+
+@pytest.mark.parametrize(("field", "extra"), [("client_id", "c"), ("key_id", "k"), ("user", "u"), ("account", "a")])
+def test_1470_o7_a_bearer_set_with_a_field_of_another_scheme_is_a_fault_naming_it(field, extra):
+    """Base's rows: `{api_key: LONG, <field>: <short>}` is refused for each of `client_id`, `key_id`, `user`, `account`
+    (another scheme's fields, or none's), the fault naming the field; the bearer set alone fits (control). (O7)"""
+    auth, _, fitting = SCHEMES["bearer"]
+    assert faults(auth, fitting) == []
+    found = faults(auth, {**fitting, field: extra})
+    assert found, field
+    assert any(field in f for f in found), (field, found)
+
+
+def test_1470_o7_an_oauth_set_with_a_field_it_does_not_read_is_a_fault_naming_it():
+    """Base's row: `{client_id, client_secret: LONG, audience: "x"}` is refused, the fault naming `audience` (a field of no
+    scheme is extra even when its value is short). (O7)"""
+    auth, _, fitting = SCHEMES["oauth"]
+    found = faults(auth, {**fitting, "audience": "x"})
+    assert found
+    assert any("audience" in f for f in found), found
+
+
 @pytest.mark.parametrize("name", _AUTH_IDS)
 def test_1470_o7_exactly_the_secret_fields_need_the_minimum_length_and_the_public_ones_do_not(name):
     """Per field: one character is a fault when the field is secret and fine when public; the minimum length is accepted

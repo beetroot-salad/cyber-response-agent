@@ -312,6 +312,29 @@ async def test_o6_every_subset_of_the_entries_mapped_is_replaced_and_read_back_a
         assert (got.status_code, got.json()) == (200, body), mapped
 
 
+@pytest.mark.postgres
+@pytest.mark.parametrize("state", ["creating", "offboarding", "offboarded"])
+async def test_o6_a_mapping_put_for_a_tenant_that_is_not_active_is_refused_and_stores_nothing(served, state):
+    """A tenant in `creating`, `offboarding` or `offboarded` is not one its admin is a member of at the routes (O8: "at the
+    routes a non-active tenant is already 404 by membership"): the PUT is 404 and the tenant's mapping stays as it was; the
+    same PUT once the tenant is active is 200 and replaces it (control). (O6, O8; base
+    `test_1345_o6_a_tenant_that_is_not_active_is_refused_by_host_acceptance_and_writes_nothing`)"""
+    from defender.tests.support.jobs._jobs1342 import restate_tenant
+
+    held = {entry: FIXTURE_ALERT_MAPPING.get(entry) for entry in MAPPING_ENTRIES}
+    mapping = {entry: f"vendor.{entry}" for entry in MAPPING_ENTRIES}
+    url = f"/tenants/{A}/alert-mapping"
+    restate_tenant(served.dsn, A, state=state)
+    refused = await served.client.put(url, headers=served.ann(), json=mapping)
+    assert refused.status_code == 404, refused.text
+    assert await _held_async(served.dsn, A) == held
+
+    restate_tenant(served.dsn, A, state="active")
+    taken = await served.client.put(url, headers=served.ann(), json=mapping)
+    assert taken.status_code == 200, taken.text
+    assert await _held_async(served.dsn, A) == mapping
+
+
 async def _held_async(dsn: str, tenant: str) -> dict[str, str | None]:
     async with job_store(dsn) as store:
         stored = await store.get_alert_mapping(tenant)

@@ -199,10 +199,15 @@ async def test_every_config_route_holds_its_permission_and_membership_comes_firs
     get 404 before permission. (O14, O3, D4)"""
     assert PERMISSION_OF[(route[0], route[1])] == CONFIG_PERMISSION[route]
     assert (await config_call(scripted, route, scripted.program())).status_code == 403
-    assert (await config_call(scripted, route, scripted.ann())).status_code not in (401, 403, 500)
-    assert (await config_call(scripted, route, scripted.bob())).status_code == 404
+    outsider = await config_call(scripted, route, scripted.bob())
+    assert outsider.status_code == 404
+    assert outsider.headers["Content-Type"] == "application/problem+json"
     assert (await config_call(scripted, route, scripted.program(), tenant=B)).status_code == 404
     assert scripted.versions("ticket", tenant=B) == []
+    assert scripted.versions("ticket") == []
+    assert scripted.scripted.calls == [], "no secret-store call for a caller the tenant does not know"
+    # control: the same route for the tenant's own admin is served
+    assert (await config_call(scripted, route, scripted.ann())).status_code not in (401, 403, 500)
 
 
 # --- O2: the order under /tenants/{T}/ (D1) ---------------------------------------------------------
