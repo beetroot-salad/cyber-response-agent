@@ -151,8 +151,7 @@ class _OpenBao:
                                             headers=self._headers())
             return deadline.run(what, lambda: self._acall(method, rest, what, json))
         except httpx.HTTPError as e:
-            raise TransportFault(f"OpenBao at {self.addr} is unreachable for {what} "
-                                 f"({type(e).__name__})") from None
+            raise self._unreachable(e, what) from None
 
     async def _acall(self, method: str, rest: str, what: str, json: Any = None) -> httpx.Response:
         try:
@@ -161,12 +160,33 @@ class _OpenBao:
                 return await client.request(method, self._url(rest), json=json,
                                             headers=self._headers())
         except httpx.HTTPError as e:
-            raise TransportFault(f"OpenBao at {self.addr} is unreachable for {what} "
-                                 f"({type(e).__name__})") from None
+            raise self._unreachable(e, what) from None
+
+    def _unreachable(self, error: httpx.HTTPError, what: str) -> TransportFault:
+        """A call that got no answer. One that never connected (refused, or the connect timed out) cannot have reached
+        OpenBao (`maybe_delivered=False`); any other (a read timeout, a dropped reply) may have."""
+        never_sent = isinstance(error, httpx.ConnectError | httpx.ConnectTimeout)
+        return TransportFault(f"OpenBao at {self.addr} is unreachable for {what} ({type(error).__name__})",
+                              maybe_delivered=not never_sent)
 
     def _refused(self, reply: httpx.Response, what: str) -> AdapterFault:
+        """The fault for an answer that is not the one asked for (`openbao_fault`). A sealed OpenBao answers every call
+        `503 {"errors": ["Vault is sealed"]}` and does nothing while sealed: that is `TransportFault` naming the seal,
+        with nothing delivered."""
+        if reply.status_code == 503 and _sealed(reply):
+            return TransportFault(f"OpenBao at {self.addr} is sealed ({what})", maybe_delivered=False)
         return openbao_fault(reply.status_code,
                              f"OpenBao at {self.addr} refused {what} ({reply.status_code})")
+
+
+def _sealed(reply: httpx.Response) -> bool:
+    """Is `reply` OpenBao's sealed answer (`errors` naming "Vault is sealed")?"""
+    try:
+        doc = reply.json()
+    except ValueError:
+        return False
+    errors = doc.get("errors") if isinstance(doc, dict) else None
+    return isinstance(errors, list) and any(isinstance(e, str) and "Vault is sealed" in e for e in errors)
 
 
 def _data_of(reply: httpx.Response) -> Mapping[str, Any]:
