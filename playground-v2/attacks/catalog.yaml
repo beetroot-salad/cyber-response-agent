@@ -394,12 +394,15 @@ scenarios:
 
   # The rule's logic is what fires: v2-sshd-success-after-failures joins on host only, so one
   # account's failures and another account's unrelated login read as "success after failures".
+  # The failing account must exist on db-1: an unknown user's attempt also writes a PAM
+  # "check pass; user unknown" line that ingest records as event.outcome=success, which fires the
+  # rule on failures alone (bad data, not this flaw; seen in freeze live-20261114).
   - id: report-job-retries-then-sre-login-db
     category: auth-metadata
     description: >
-      The reporting job on web-1 retries an SSH export to db-1 with a password that no longer
-      works (svc.reports has no account there), then an SRE logs into db-1 from the bastion
-      for unrelated work. Different users, different sources, but the rule groups by host:
+      The reporting job on web-1 retries an SSH export to db-1 as svc.backups with a password
+      that was rotated, then an SRE logs into db-1 from the bastion for unrelated work.
+      Different users, different sources, but the rule groups by host:
       v2-sshd-success-after-failures fires on db-1.
     source_host: web-1
     source_user: svc.reports
@@ -407,10 +410,10 @@ scenarios:
     default_intensity: 4
     steps:
       - cmd: |
-          sshpass -p "reports-2026Q3" ssh -o StrictHostKeyChecking=no \
+          sshpass -p "backups-2026Q3" ssh -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=password \
             -o NumberOfPasswordPrompts=1 -o ConnectTimeout=5 \
-            svc.reports@${target} 'ls /var/backups/reports' 2>/dev/null || true
+            svc.backups@${target} 'ls /var/backups' 2>/dev/null || true
         repeat: "${intensity}"
         delay_s_between: 15
         allow_fail: true
