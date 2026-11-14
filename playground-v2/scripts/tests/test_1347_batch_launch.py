@@ -203,3 +203,29 @@ def test_a_reference_batch_joins_the_held_lock_and_leaves_it_held(tmp_path):
 
     assert len(ids) == 3 and rig.rows() == []
     assert rig.store.records == held
+
+
+def test_a_copy_its_agents_cannot_reach_starts_no_agent(tmp_path):
+    from _lab_fakes import FROZEN_ENDPOINT
+    rig = LabRig(tmp_path)
+    dirs = _cases(rig, "none", UUIDS)
+    rig.closed_ports.add((FROZEN_ENDPOINT.rsplit(":", 1)[0], 8007))
+    agents = Agents(rig)
+    with pytest.raises(Exception, match="8007"):
+        _launch(rig, dirs, agents)
+    assert not any(k == "start" for k, _c in agents.log)
+    assert rig.rows() == [] and rig.nothing_serving() == []
+    assert "frozen-engine" not in rig.store.records
+
+
+def test_a_forward_that_drops_between_waves_keeps_the_rows_written_and_starts_no_more(tmp_path):
+    from _lab_fakes import FROZEN_ENDPOINT
+    rig = LabRig(tmp_path)
+    dirs = _cases(rig, "none", UUIDS)
+    address = FROZEN_ENDPOINT.rsplit(":", 1)[0]
+    agents = Agents(rig, hook=lambda _c: rig.closed_ports.add((address, 9200)))
+    with pytest.raises(Exception, match="9200"):
+        _launch(rig, dirs, agents)
+    assert [r["slug"] for r in rig.rows()] == [dirs[0].name]
+    assert [c for k, c in agents.log if k == "start"] == [dirs[0].name]
+    assert rig.nothing_serving() == []

@@ -283,6 +283,7 @@ def launch_batch(case_dirs: list[Path], *, freezes_dir: Path, tenant_settings: P
                 # The last lab step before a wave: the node's clock is rewritten from the VPS's clock at
                 # instant W, and each agent's run clock is anchored at the same W (r6.4.6), so all read
                 # T + (now - W).
+                ops.check_reachable()        # no wave starts on a copy its agents cannot reach
                 anchor = ops.set_clock(freeze["T"])
                 jobs = []
                 for i in wave:

@@ -1585,12 +1585,14 @@ class LabRig:
         self._tickets: set[str] | None = {"ticketed"}
         self._password = "pw-0"
         self.lab_module = load_script("lab_ops_1347", LAB_OPS)
+        self.closed_ports: set[tuple[str, int]] = set()   # (address, port) the forwards do not answer on
         self.ops = self.lab_module.LabOps(run=self.docker, **self._ops_kw())
         self._sync_env()
 
     def _ops_kw(self) -> dict:
         return {"tenant_dir": self.tenant_dir, "tenant_hosts": TENANT_HOSTS, "frozen_endpoint": FROZEN_ENDPOINT,
-                "audit_path": FROZEN_AUDIT, "live_audit_path": LIVE_AUDIT, "lab_env_file": self.lab_env}
+                "audit_path": FROZEN_AUDIT, "live_audit_path": LIVE_AUDIT, "lab_env_file": self.lab_env,
+                "connect": lambda address, port: (address, int(port)) not in self.closed_ports}
 
     @staticmethod
     def _deployed(docker) -> None:
