@@ -328,23 +328,11 @@ def reject_unread_keys(
         )
 
 
-def load_reviewed_mapping(
-    path: Path, *, what: str, known: tuple[str, ...], error: type[Exception],
-) -> Mapping[object, object]:
-    """Read a hand-authored, reviewed per-deployment file (`verb-grants.yaml`) as one top-level mapping carrying only `known` keys, or raise `error`.
-
-    Refuses absent, unreadable, repeated keys (checked before the load, which would hide them),
-    unparseable, non-mapping, and unread keys, naming `what` and `path`. Values are the
-    caller's to interpret.
-    """
-    return parse_reviewed_mapping(
-        read_reviewed_text(path, what=what, error=error), path,
-        what=what, known=known, error=error)
-
-
 def read_reviewed_text(path: Path, *, what: str, error: type[Exception]) -> str:
-    """`load_reviewed_mapping`'s read half: the file's text, or `error` for an absent or
-    unreadable one. Split out so a caller can key a cache on the exact text it then parses."""
+    """The read half of loading a hand-authored, reviewed per-deployment file
+    (`verb-grants.yaml`): the file's text, or `error` for an absent or unreadable one, naming
+    `what` and `path`. Separate from the parse so a caller can key a cache on the exact text it
+    then parses."""
     if not path.is_file():
         raise error(f"{what} not found at {path}")
     try:
@@ -356,8 +344,10 @@ def read_reviewed_text(path: Path, *, what: str, error: type[Exception]) -> str:
 def parse_reviewed_mapping(
     text: str, path: Path, *, what: str, known: tuple[str, ...], error: type[Exception],
 ) -> Mapping[object, object]:
-    """`load_reviewed_mapping`'s parse half, over `text` already read from `path` (named in
-    every refusal)."""
+    """The parse half, over `text` already read from `path` (named in every refusal): one
+    top-level mapping carrying only `known` keys, or `error` for repeated keys (checked before
+    the load, which would hide them), an unparseable or non-mapping file, or an unread key.
+    Values are the caller's to interpret."""
     where = f"{what} at {path}"
     duplicates = duplicate_key_paths(text)
     if duplicates:
