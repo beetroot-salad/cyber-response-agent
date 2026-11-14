@@ -175,6 +175,16 @@ def adapter(kc: ProgramsKeycloak, clock: Callable[[], dt.datetime] = lambda: NOW
     return port
 
 
+async def test_the_probes_key_fetch_is_the_one_the_first_token_check_uses(kc):
+    """The start's key-set probe fills the keys the token check reads: the first token after it fetches nothing
+    again. (O3; #1498 review)"""
+    port = adapter(kc)
+    await port._keys.probe()  # the key step of the realm's probe
+    assert kc.certs_fetches() == 1
+    assert (await port.verify_token(kc.signer.sign(token_claims()))).client_id == CREDENTIAL
+    assert kc.certs_fetches() == 1
+
+
 # --- verification: the accepted shapes ------------------------------------------------------------
 
 async def test_a_programs_realm_access_token_verifies_to_its_client_and_subject(kc):

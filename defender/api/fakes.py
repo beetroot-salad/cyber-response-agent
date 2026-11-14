@@ -319,10 +319,10 @@ class InMemoryOffboarding:
 
 
 class InMemorySecrets:
-    """The secret store's fake. Given a `store`, a write announces `system.credentials` into that store's
-    `audit_events` as it stands then; without one, it keeps the credentials and announces nothing."""
+    """The secret store's fake: a write keeps the credentials and announces `system.credentials` into `store`'s
+    `audit_events`, as the port promises (P2)."""
 
-    def __init__(self, store: InMemoryStore | None = None) -> None:
+    def __init__(self, store: InMemoryStore) -> None:
         self._store = store
         self._credentials: dict[tuple[str, str], dict[str, str]] = {}
 
@@ -334,9 +334,7 @@ class InMemorySecrets:
         self, principal: Principal, system_id: str, kind: str, credentials: dict[str, str],
     ) -> None:
         self.add_credentials(principal.tenant_id, system_id, credentials)
-        if self._store is not None:
-            await self._store.announce(principal, "system.credentials", system_id,
-                                       "fields: " + ", ".join(sorted(credentials)))
+        await self._store.announce(principal, "system.credentials", system_id, "fields: " + ", ".join(sorted(credentials)))
 
     async def has_credentials(self, tenant_id: TenantId, system_id: str) -> bool:
         return (tenant_id, system_id) in self._credentials

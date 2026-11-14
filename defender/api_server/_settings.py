@@ -18,7 +18,7 @@ from sqlalchemy.exc import ArgumentError
 from defender._io import read_text_utf8
 from defender._yaml import safe_load
 from defender.identity import Bootstrap, DataRuleViolation
-from defender.identity.keycloak import check_issuer, check_server_url  # lint-shippable: ok — the program wires the one sign-in vendor the platform supports (#1083).
+from defender.identity.keycloak import check_issuer, check_redirect_uri, check_server_url  # lint-shippable: ok — the program wires the one sign-in vendor the platform supports (#1083).
 
 T = TypeVar("T")
 
@@ -75,7 +75,7 @@ class Settings:
             signin_issuer=parsed("DEFENDER_KEYCLOAK_ISSUER", check_issuer),
             signin_client_id=text("DEFENDER_KEYCLOAK_CLIENT_ID"),
             signin_client_secret=secret("DEFENDER_KEYCLOAK_CLIENT_SECRET_FILE"),
-            signin_redirect_uri=parsed("DEFENDER_KEYCLOAK_REDIRECT_URI", _absolute_url),
+            signin_redirect_uri=parsed("DEFENDER_KEYCLOAK_REDIRECT_URI", check_redirect_uri),
             signin_admin_client_id=text("DEFENDER_KEYCLOAK_ADMIN_CLIENT_ID"),
             signin_admin_client_secret=secret("DEFENDER_KEYCLOAK_ADMIN_CLIENT_SECRET_FILE"),
             programs_issuer=parsed("DEFENDER_KEYCLOAK_PROGRAMS_ISSUER", check_issuer),
@@ -124,11 +124,6 @@ def _http_url(value: str) -> urllib.parse.SplitResult:
     if parts.username is not None or parts.password is not None or "@" in parts.netloc:
         raise ValueError("must not carry credentials")
     return parts
-
-
-def _absolute_url(value: str) -> str:
-    _http_url(value)
-    return value
 
 
 _DEFAULT_PORTS = {"http": 80, "https": 443}

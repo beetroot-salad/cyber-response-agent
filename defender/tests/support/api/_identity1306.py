@@ -655,7 +655,7 @@ class World:
         self.app = create_app(ApiDeps(
             alerts=self.store, investigations=self.store, learning_jobs=self.store,
             lessons=self.store, systems=self.store, writes=self.store,
-            secrets=InMemorySecrets(), checker=StubSystemChecker(),
+            secrets=InMemorySecrets(self.store), checker=StubSystemChecker(),
             artifact_links=StubArtifactLinks(),
             identity=self.service, frontend_origin=FRONTEND_ORIGIN, tenants=self.tenants,
             offboarding=self.offboarding,

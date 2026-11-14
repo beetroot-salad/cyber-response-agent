@@ -401,9 +401,9 @@ _UNBACKED = {**_EVERY_ROUTE, **responses(501)}
 
 
 #: Each list's total order, as its port states it (`ports.py`).
-_ALERT_ORDER: Order[AlertSummary, TimePosition] = newest_first(lambda a: a.fired_at, lambda a: a.alert_id)
-_INVESTIGATION_ORDER: Order[Investigation, TimePosition] = newest_first(lambda i: i.created_at, lambda i: i.investigation_id)
-_LEARNING_JOB_ORDER: Order[LearningJob, TimePosition] = newest_first(lambda j: j.created_at, lambda j: j.learning_job_id)
+_ALERT_ORDER: Order[AlertSummary, TimePosition] = newest_first(lambda a: a.fired_at, lambda a: a.alert_id, AlertId)
+_INVESTIGATION_ORDER: Order[Investigation, TimePosition] = newest_first(lambda i: i.created_at, lambda i: i.investigation_id, InvestigationId)
+_LEARNING_JOB_ORDER: Order[LearningJob, TimePosition] = newest_first(lambda j: j.created_at, lambda j: j.learning_job_id, LearningJobId)
 _LESSON_ORDER: Order[Lesson, str] = ordered_by_id(lambda le: le.lesson_id)
 _SYSTEM_ORDER: Order[SystemSettings, str] = ordered_by_id(lambda s: s.system_id)
 

@@ -4,6 +4,7 @@ The settings and the probe are covered as classes in-process (`Settings.from_env
 (`Child`) is kept for one case per step kind and for the stop, where the child's own `run` reports its return."""
 from __future__ import annotations
 
+import asyncio
 import socket
 import time
 import urllib.parse
@@ -82,7 +83,9 @@ def _shape_violations(name: str, tmp_path: Path) -> list[tuple[str, str]]:
                   ("origin with a non-ASCII host", "http://bücher.example:8000")]
     if name == "DEFENDER_KEYCLOAK_REDIRECT_URI":
         cases += [("redirect uri relative", "/auth/callback"), ("redirect uri not http", "ftp://localhost:8000/cb"),
-                  ("redirect uri no scheme", "localhost:8000/auth/callback")]
+                  ("redirect uri no scheme", "localhost:8000/auth/callback"),
+                  # OAuth forbids a fragment; the adapter's own rule refuses it, so sign-in cannot fail on it later.
+                  ("redirect uri with a fragment", "http://localhost:8000/auth/callback#x")]
     if name.endswith("_ISSUER"):
         cases += [("issuer without a realm", f"{FRONT}/elsewhere"), ("issuer with no realm name", f"{FRONT}/realms/")]
     if name == "DEFENDER_KEYCLOAK_SERVER_URL":
@@ -311,6 +314,43 @@ async def test_a_bootstrap_refusal_refuses_start_with_its_message(tmp_path, migr
     environ = environment(tmp_path, dsn=migrated_database, administrators=(ANN,))
     ended = _refused(Child.faked(environ), mentions=(ANN, "membership"))
     assert ended.returncode > 0
+
+
+@pytest.mark.postgres
+def test_a_failure_no_step_names_itself_still_refuses_in_one_line_naming_the_step(tmp_path, migrated_database, capsys):
+    """A start step failing in a way it has no refusal for (here the version table answers a query error) ends the
+    program with one stderr line naming that step, exit 1, no traceback. (O1, Am-3 promise 1; #1498 review)"""
+    from defender.api_server import run
+
+    execute(migrated_database, "ALTER TABLE public.alembic_version RENAME TO alembic_version_kept")
+    execute(migrated_database, "CREATE VIEW public.alembic_version AS SELECT (1 / 0)::varchar(32) AS version_num")
+    assert run(environment(tmp_path, dsn=migrated_database), transport=FakeKeycloak()) == 1
+    stderr = capsys.readouterr().err
+    assert stderr.count("\n") == 1, stderr
+    assert "the database version check failed" in stderr, stderr
+    assert "Traceback" not in stderr
+
+
+@pytest.mark.postgres
+def test_a_stop_while_a_refusal_closes_keeps_the_refusal_and_every_close(tmp_path, migrated_database, capsys):
+    """A stop signal that lands while a refused start is closing what it opened cancels nothing: the program still
+    exits 1 with the refusal, and both sign-in adapters are closed. (Am-3; #1498 review)"""
+    import os
+    import signal as _signal
+
+    from defender.api_server import run
+
+    class SignalsOnClose(FakeKeycloak):
+        async def aclose(self) -> None:
+            if self.closes == 0:  # the first close of the refusal's unwinding
+                os.kill(os.getpid(), _signal.SIGINT)
+                await asyncio.sleep(0.2)  # the handler runs on the loop while this close is in flight
+            await super().aclose()
+
+    keycloak = SignalsOnClose([Fail(SIGNIN_REALM, "keys", "empty")])
+    assert run(environment(tmp_path, dsn=migrated_database), transport=keycloak) == 1
+    assert realms_named(capsys.readouterr().err) == {SIGNIN_REALM}
+    assert keycloak.closes == 2, "one close per Keycloak adapter built"
 
 
 # --- stop ---------------------------------------------------------------------------------------------

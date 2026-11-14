@@ -707,7 +707,7 @@ def _over_the_fake() -> tuple[TestClient, InMemoryStore]:
     return TestClient(create_app(ApiDeps(
         identity=identity, tenants=tenants, frontend_origin=ORIGIN,
         alerts=store, investigations=store, learning_jobs=store, lessons=store, systems=store,
-        writes=store, secrets=InMemorySecrets(), checker=StubSystemChecker(),
+        writes=store, secrets=InMemorySecrets(store), checker=StubSystemChecker(),
         artifact_links=StubArtifactLinks(), offboarding=InMemoryOffboarding(tenants, store, lambda: NOW),
         alert_mapping=store, audit=store,  # FORCED CHOICE FC-14: the in-memory store serves the mapping read and the audit-only port
     )), base_url=BASE), store
@@ -1335,6 +1335,22 @@ def test_an_edited_cursor_cannot_hand_a_port_an_id_outside_the_grammar(
     assert len(api.ports.calls) == calls, "the edited cursor reached a port"
 
 
+@pytest.mark.parametrize("bad_id", ["abc", "A1000000-0000-4000-8000-000000000002", "not-a-uuid-but-a-record-id"])
+@pytest.mark.parametrize(("path", "port", "rows"), [x[:3] for x in LISTS[:3]], ids=[x[0] for x in LISTS[:3]])
+def test_an_edited_cursor_with_an_id_not_of_the_lists_family_is_refused_before_the_store(
+    path: str, port: str, rows: list[Any], bad_id: str,
+) -> None:
+    """A newest-first list's cursor id is read as the items' own id (canonical lowercase UUID): anything else, even a
+    valid record id or the same UUID in upper case, is not a position in the list (422), never a store error. (#1498)"""
+    api = Api(**{port: _rows_after(rows), "has_credentials": False})
+    cursor = _edited(_cursor(api, path), id=bad_id)
+    calls = len(api.ports.calls)
+    response = api.client.get(path, headers=AUTH, params={"limit": 1, "cursor": cursor})
+    assert response.status_code == 422
+    assert "not a position in this list" in response.text
+    assert len(api.ports.calls) == calls, "the edited cursor reached a port"
+
+
 @pytest.mark.parametrize(("path", "port", "rows", "at"), [
     (f"{T}/investigations", "list_investigations", [INV_2, INV], None),
     (f"{T}/lessons", "list_lessons", [LESSON, LESSON_2], NOW.isoformat()),
@@ -1458,7 +1474,7 @@ def test_paging_the_demo_store_serves_every_row_once_across_tied_timestamps() ->
     client = TestClient(create_app(ApiDeps(
         identity=identity, tenants=tenants, frontend_origin=ORIGIN,
         alerts=store, investigations=store, learning_jobs=store, lessons=store, systems=store,
-        writes=store, secrets=InMemorySecrets(), checker=StubSystemChecker(),
+        writes=store, secrets=InMemorySecrets(store), checker=StubSystemChecker(),
         artifact_links=StubArtifactLinks(), offboarding=InMemoryOffboarding(tenants, store, lambda: NOW),
         alert_mapping=store, audit=store,
     )), base_url=BASE)

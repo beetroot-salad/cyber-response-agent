@@ -36,9 +36,9 @@ def _utc_now() -> _dt.datetime:
     return _dt.datetime.now(_dt.UTC)
 
 
-def _split_url(setting: str, value: str) -> urllib.parse.SplitResult:
-    """An absolute http(s) URL with a host, a valid port if any, and no credentials, query, fragment
-    or whitespace; else a ValueError naming the setting."""
+def _split_url(setting: str, value: str, *, query: bool = False) -> urllib.parse.SplitResult:
+    """An absolute http(s) URL with a host, a valid port if any, and no credentials, fragment or whitespace, and no
+    query unless `query`; else a ValueError naming the setting."""
     def refuse(why: str) -> ValueError:
         return ValueError(f"keycloak {setting} {value!r} {why}")
 
@@ -49,9 +49,9 @@ def _split_url(setting: str, value: str) -> urllib.parse.SplitResult:
         parts.port  # noqa: B018 — reading it is the check: a non-numeric or out-of-range port raises
     except ValueError as e:
         raise refuse(f"is not a URL: {e}") from None
-    if parts.scheme not in ("http", "https") or not parts.hostname or parts.query or parts.fragment \
-            or value.endswith(("?", "#")):
-        raise refuse("is not an absolute http(s) URL without query or fragment")
+    if parts.scheme not in ("http", "https") or not parts.hostname or parts.fragment or value.endswith("#") \
+            or (not query and (parts.query or value.endswith("?"))):
+        raise refuse("is not an absolute http(s) URL without " + ("a fragment" if query else "query or fragment"))
     if parts.username is not None:
         raise refuse("carries credentials")
     return parts
@@ -80,6 +80,13 @@ def check_issuer(issuer: str) -> str:
     owner of the rule, so the program's settings and the adapters cannot disagree."""
     _realm_url(issuer)
     return issuer
+
+
+def check_redirect_uri(redirect_uri: str) -> str:
+    """The redirect URI unchanged if sign-in can send it, else `ValueError`: an absolute http(s) URL, a query allowed
+    and no fragment (OAuth 2.0 forbids one). The one owner of the rule, as for the issuer."""
+    _split_url("redirect_uri", redirect_uri, query=True)
+    return redirect_uri
 
 
 def check_server_url(server_url: str) -> str:
@@ -149,9 +156,8 @@ class _KeySet:
             if held is not None and self._fresh(now):
                 return held  # a fetch that finished while this request waited
             if self._tried_at is None or now - self._tried_at >= self._window:
-                self._tried_at, self._fetches = now, self._fetches + 1
                 try:
-                    self._keys, self._fetched_at = await self._fetch(), now
+                    await self._refresh(now)
                 except SignInUnavailable:
                     if held is None:
                         raise
@@ -168,9 +174,17 @@ class _KeySet:
         raise SignInUnavailable(f"keycloak's signing keys cannot be checked for this {self._token} yet")
 
     async def probe(self) -> None:
-        """Fetch the set now; unavailable unless it holds a key a token would verify with."""
-        if not await self._fetch():
+        """Fetch the set now, into the keys the token checks read; unavailable unless it holds a key a token would
+        verify with."""
+        async with self._lock:
+            await self._refresh(self._clock())
+        if not self._keys:
             raise SignInUnavailable("the realm publishes no RS256 signing key to verify tokens with")
+
+    async def _refresh(self, now: _dt.datetime) -> None:
+        """One counted fetch; only a successful one replaces the keys (call it holding the lock)."""
+        self._tried_at, self._fetches = now, self._fetches + 1
+        self._keys, self._fetched_at = await self._fetch(), now
 
     async def _fetch(self) -> dict[str, Any]:
         try:
@@ -288,7 +302,7 @@ class KeycloakSignIn(_RealmAdmin):
         realm = self._realm
         self._client_id = client_id
         self._client_secret = client_secret
-        self._redirect_uri = redirect_uri
+        self._redirect_uri = check_redirect_uri(redirect_uri)
         self._admin_client = (admin_client_id, admin_client_secret)
         self._clock = clock
         self._http = httpx.AsyncClient(transport=transport, timeout=_TIMEOUT_SECONDS)

@@ -9,11 +9,12 @@ import asyncio
 import contextlib
 import dataclasses
 import datetime as _dt
+import logging
 import socket
 import sys
 import threading
-from collections.abc import AsyncIterator, Callable, Mapping
-from contextlib import AsyncExitStack, asynccontextmanager
+from collections.abc import AsyncIterator, Callable, Iterator, Mapping
+from contextlib import AsyncExitStack, asynccontextmanager, contextmanager
 
 import httpx
 import uvicorn
@@ -51,11 +52,53 @@ def _wall_clock() -> _dt.datetime:
     return _dt.datetime.now(_dt.UTC)
 
 
-async def _probe(adapter: KeycloakSignIn | KeycloakPrograms) -> None:
-    try:
-        await adapter.probe()
-    except SignInUnavailable as why:
-        raise StartRefused(str(why)) from why
+_log = logging.getLogger(__name__)
+
+#: The refusals whose own message already names the step and the cause: they are the operator's line as they are.
+_OWN_MESSAGE = (RevisionMismatch, DatabaseUnreachable, SignInUnavailable, BootstrapRefused)
+
+
+class _Stopped(Exception):
+    """A stop signal arrived during start: the start ends, closing what it opened, and the program exits 0."""
+
+
+class _Steps:
+    """The start's steps, one at a time. Every failure inside a step is that step's refusal (`StartRefused`, one line
+    naming it); a stop cancels only the step in flight, so the closes after a refusal or a stop always run whole."""
+
+    def __init__(self) -> None:
+        self.stop = asyncio.Event()
+        self._running: asyncio.Task[object] | None = None
+
+    def request_stop(self) -> None:
+        self.stop.set()
+        if self._running is not None:
+            self._running.cancel()
+
+    @contextmanager
+    def step(self, name: str) -> Iterator[None]:
+        if self.stop.is_set():
+            raise _Stopped
+        self._running = asyncio.current_task()
+        try:
+            yield
+        except asyncio.CancelledError:
+            if not self.stop.is_set():
+                raise
+            task = asyncio.current_task()
+            if task is not None:
+                task.uncancel()
+            raise _Stopped from None
+        except StartRefused:
+            raise
+        except _OWN_MESSAGE as why:
+            raise StartRefused(str(why)) from why
+        except Exception as why:
+            _log.debug("start step %s failed", name, exc_info=True)  # the whole error, for whoever turns on debug
+            first = next(iter(str(why).splitlines()), "")  # a driver's error carries its SQL and a link after
+            raise StartRefused(f"{name} failed: {type(why).__name__}: {first}".rstrip(": ")) from why
+        finally:
+            self._running = None
 
 
 async def _abandonable(call: Callable[[], None]) -> None:
@@ -109,55 +152,57 @@ def _api_deps(settings: Settings, identity: IdentityService, tenants: PostgresTe
 
 
 @asynccontextmanager
-async def serving(settings: Settings, *, transport: httpx.AsyncBaseTransport | None) -> AsyncIterator[Running]:
+async def serving(settings: Settings, *, transport: httpx.AsyncBaseTransport | None,
+                  steps: _Steps | None = None) -> AsyncIterator[Running]:
     """Start every step in order and yield the running app; leaving closes what was opened, in reverse. A start
-    step that refuses raises `StartRefused` with its message, after closing what the earlier steps opened."""
+    step that fails raises `StartRefused` with its message, after closing what the earlier steps opened. `steps`
+    lets the caller stop the start (`run` passes its own); without it nothing can."""
+    steps = steps if steps is not None else _Steps()
     async with AsyncExitStack() as stack:
-        try:
+        with steps.step("the database version check"):
             await _abandonable(lambda: check_version(settings.database_dsn))
-        except (RevisionMismatch, DatabaseUnreachable) as why:
-            raise StartRefused(str(why)) from why
         async with AsyncExitStack() as until_lifespan:  # closes what the lifespan will own, if start ends before it
-            signin = KeycloakSignIn(
-                issuer=settings.signin_issuer, client_id=settings.signin_client_id,
-                client_secret=settings.signin_client_secret.get_secret_value(),
-                redirect_uri=settings.signin_redirect_uri, admin_client_id=settings.signin_admin_client_id,
-                admin_client_secret=settings.signin_admin_client_secret.get_secret_value(),
-                server_url=settings.keycloak_server_url, transport=transport)
-            until_lifespan.push_async_callback(signin.close)
-            programs = KeycloakPrograms(
-                issuer=settings.programs_issuer, audience=settings.programs_audience,
-                admin_client_id=settings.programs_admin_client_id,
-                admin_client_secret=settings.programs_admin_client_secret.get_secret_value(),
-                server_url=settings.keycloak_server_url, transport=transport)
-            until_lifespan.push_async_callback(programs.close)
-            await _probe(signin)
-            await _probe(programs)
-            store = JobStore(settings.database_dsn, clock=_wall_clock)
-            stack.push_async_callback(store.close)  # the lifespan does not close it: it outlives the lifespan
-            people = PostgresIdentityRepository(settings.database_dsn)
-            until_lifespan.push_async_callback(people.close)
-            tenants = PostgresTenantRepository(settings.database_dsn)
-            until_lifespan.push_async_callback(tenants.close)
-            identity = IdentityService(people, signin=signin, mail=LoggedMail(), clock=_wall_clock,
-                                       bootstrap=settings.administrators, programs=programs)
-            app = create_app(_api_deps(settings, identity, tenants, JobStorePorts(store)))
-            sock = _bind(settings)
-            stack.callback(sock.close)
+            with steps.step("building the sign-in adapters"):
+                signin = KeycloakSignIn(
+                    issuer=settings.signin_issuer, client_id=settings.signin_client_id,
+                    client_secret=settings.signin_client_secret.get_secret_value(),
+                    redirect_uri=settings.signin_redirect_uri, admin_client_id=settings.signin_admin_client_id,
+                    admin_client_secret=settings.signin_admin_client_secret.get_secret_value(),
+                    server_url=settings.keycloak_server_url, transport=transport)
+                until_lifespan.push_async_callback(signin.close)
+                programs = KeycloakPrograms(
+                    issuer=settings.programs_issuer, audience=settings.programs_audience,
+                    admin_client_id=settings.programs_admin_client_id,
+                    admin_client_secret=settings.programs_admin_client_secret.get_secret_value(),
+                    server_url=settings.keycloak_server_url, transport=transport)
+                until_lifespan.push_async_callback(programs.close)
+            with steps.step("the sign-in realm probe"):
+                await signin.probe()
+            with steps.step("the programs realm probe"):
+                await programs.probe()
+            with steps.step("building the stores and the app"):
+                store = JobStore(settings.database_dsn, clock=_wall_clock)
+                stack.push_async_callback(store.close)  # the lifespan does not close it: it outlives the lifespan
+                people = PostgresIdentityRepository(settings.database_dsn)
+                until_lifespan.push_async_callback(people.close)
+                tenants = PostgresTenantRepository(settings.database_dsn)
+                until_lifespan.push_async_callback(tenants.close)
+                identity = IdentityService(people, signin=signin, mail=LoggedMail(), clock=_wall_clock,
+                                           bootstrap=settings.administrators, programs=programs)
+                app = create_app(_api_deps(settings, identity, tenants, JobStorePorts(store)))
+            with steps.step("binding the listening socket"):
+                sock = _bind(settings)
+                stack.callback(sock.close)
             # Handed over: from here the lifespan closes the service and the tenant rows, its start's failure too.
             until_lifespan.pop_all()
-        try:
+        with steps.step("the bootstrap"):
             await stack.enter_async_context(app.router.lifespan_context(app))
-        except BootstrapRefused as why:
-            raise StartRefused(str(why)) from why
         yield Running(app=app, sockets=[sock])
 
 
-async def _serve_on_sockets(settings: Settings, transport: httpx.AsyncBaseTransport | None, stop: asyncio.Event,
-                 started: list[bool]) -> None:
-    async with serving(settings, transport=transport) as running:
-        started.append(True)
-        if stop.is_set():
+async def _serve_on_sockets(settings: Settings, transport: httpx.AsyncBaseTransport | None, steps: _Steps) -> None:
+    async with serving(settings, transport=transport, steps=steps) as running:
+        if steps.stop.is_set():
             return
         config = uvicorn.Config(running.app, lifespan="off", log_config=None)
         await uvicorn.Server(config).serve(sockets=running.sockets)
@@ -165,22 +210,13 @@ async def _serve_on_sockets(settings: Settings, transport: httpx.AsyncBaseTransp
 
 async def _run(settings: Settings, transport: httpx.AsyncBaseTransport | None) -> int:
     loop = asyncio.get_running_loop()
-    stop = asyncio.Event()
-    started: list[bool] = []
-    task = asyncio.ensure_future(_serve_on_sockets(settings, transport, stop, started))
-
-    def request_stop() -> None:
-        stop.set()
-        if not started:
-            task.cancel()
-
+    steps = _Steps()
     for sig in uvicorn.server.HANDLED_SIGNALS:
-        loop.add_signal_handler(sig, request_stop)
+        loop.add_signal_handler(sig, steps.request_stop)
     try:
-        await task
-    except asyncio.CancelledError:
-        if not stop.is_set():
-            raise
+        await _serve_on_sockets(settings, transport, steps)
+    except _Stopped:
+        return 0
     except StartRefused as refused:
         print(refused, file=sys.stderr)
         return 1

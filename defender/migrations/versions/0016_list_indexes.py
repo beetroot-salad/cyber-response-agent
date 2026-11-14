@@ -6,6 +6,9 @@ bitmap scan below the index and sorts).
 Revision ID: 0016_list_indexes
 Revises: 0015_system_records
 
+Each build blocks writes to its table until it finishes: stop the API and the workers first (`defender/CLAUDE.md`,
+"Upgrade from before #1083").
+
 There is no downgrade.
 """
 import sqlalchemy as sa

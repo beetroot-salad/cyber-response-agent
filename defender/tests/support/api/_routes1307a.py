@@ -51,7 +51,7 @@ def route_table_deps() -> ApiDeps:
     store = InMemoryStore(lambda: None)  # type: ignore[arg-type]
     return ApiDeps(
         alerts=store, investigations=store, learning_jobs=store, lessons=store, systems=store, writes=store,
-        secrets=InMemorySecrets(), checker=StubSystemChecker(), artifact_links=StubArtifactLinks(),
+        secrets=InMemorySecrets(store), checker=StubSystemChecker(), artifact_links=StubArtifactLinks(),
         offboarding=InMemoryOffboarding(None, store, lambda: None),  # type: ignore[arg-type]
         alert_mapping=store, audit=store,  # FC-14 (Am-5)
         identity=None, frontend_origin=FRONTEND_ORIGIN, tenants=None)  # type: ignore[arg-type]
