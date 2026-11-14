@@ -18,7 +18,6 @@ import uuid
 from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Any
-from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
 DEFENDER = Path(__file__).resolve().parents[2]
 REPO_ROOT = DEFENDER.parent
@@ -415,7 +414,7 @@ def lifecycle(recording: Recording, *, main_turns: list[Any], clock: SteppingClo
     return functools.partial(
         run_mod._run_investigation_lifecycle,
         investigate=functools.partial(run_mod._drive_investigation, **drive_kw),
-        start_box=functools.partial(box_mod.start_box, docker=_no_docker_daemon, data_root=current_data_root()),
+        start_box=functools.partial(box_mod.start_box, docker=_no_docker_daemon),
         stop_box=lambda *_a, **_k: None,
         scrub=scrub,
     )

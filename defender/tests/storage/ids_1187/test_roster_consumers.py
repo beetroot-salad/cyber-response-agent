@@ -175,7 +175,7 @@ def test_r5_pre_flight_refuses_a_manifest_naming_another_episode(tmp_path, monke
         with runs.episode(episode_id) as view:
             return R.raised(cli.preflight_replay, view.episode, source=source,
                             roster=est.roster(), tenant=est.run_tenant(), oracle=oracle.model,
-                            verifier=S.passing_verifier().model)
+                            verifier=S.passing_verifier().model, data_root=data_root)
 
     unasked = S.oracle(then=S.submit(P.BASE_ANSWER, S.EMPTY_CLAIM))
     err = preflight(unasked)
@@ -879,6 +879,7 @@ class RegistryProbe:
         seen: dict[str, Any] = {}
         inner = dict(kw)
         inner["model_name"] = inner.pop("model")
+        inner.pop("data_root", None)  # #1469: the lifecycle's own (it hands it to its box start); the drive takes none
         run_py._drive_investigation(
             alert_path=RunPaths(kw["run"].run_dir).alert, box=None,
             investigate=lambda **got: seen.update(got) or {}, **inner)

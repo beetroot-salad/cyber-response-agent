@@ -32,7 +32,6 @@ from defender.tests.support.storage._alert_plant import plant_alert as plant_ale
 from defender.tests.support.learning.branch import _triplet_947 as T947
 from defender.tests.tenancy.tenant_1078_pass_a import _spec1078 as H78
 from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
-from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
 #: The census lint, a repo script outside `defender/` (driven by path).
 CENSUS_LINT = H.REPO_ROOT / "tooling" / "lint" / "lint_verb_disposition_census.py"
@@ -458,7 +457,7 @@ def test_1469_an_operator_run_whose_box_check_does_not_pass_leaves_the_did_not_r
     drive = functools.partial(
         run_py._run_investigation_lifecycle,
         investigate=investigate,
-        start_box=functools.partial(box_mod.start_box, docker=docker, data_root=current_data_root()),
+        start_box=functools.partial(box_mod.start_box, docker=docker),
         stop_box=lambda *a, **k: None, scrub=lambda tree, **kw: None)
 
     def lifecycle(**kw: Any) -> dict[str, Any]:

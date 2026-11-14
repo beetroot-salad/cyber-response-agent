@@ -136,8 +136,8 @@ def _lifecycle_create(run, layout: V.Layout) -> V.Create:
                                        agent_root=layout.staged()[0],
                                        stage_token=layout.staged()[1]),
             systems=_tenants1106.fixture_run_systems(), investigate=investigate,
-            start_box=functools.partial(box_mod.start_box, spec=SPEC, docker=docker, data_root=current_data_root()),
-            stop_box=lambda *a, **k: None, scrub=lambda *a, **k: None)
+            start_box=functools.partial(box_mod.start_box, spec=SPEC, docker=docker),
+            stop_box=lambda *a, **k: None, scrub=lambda *a, **k: None, data_root=current_data_root())
     return V.parse_create(docker.create)
 
 

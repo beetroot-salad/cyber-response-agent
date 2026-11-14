@@ -116,7 +116,7 @@ class RunLane:
     def start(self, docker: Any, **kw: Any) -> Any:
         return box_mod.start_box(self.run_dir, self.defender_dir, tenant_agent=self.agent,
                                  staged_token=self.token, tenant_id=self.tenant_id,
-                                 docker=docker, **kw, data_root=current_data_root())
+                                 docker=docker, **{"data_root": current_data_root(), **kw})
 
 
 def run_lane(base: Path) -> RunLane:
@@ -182,7 +182,7 @@ def bound_sources(calls: list[list[str]]) -> list[Path]:
 
 
 def created(calls: list[list[str]]) -> bool:
-    return bool(_box_creates(calls))
+    return any(len(c) > 1 and c[1] in ("run", "create") for c in calls)
 
 
 def removed(calls: list[list[str]]) -> bool:

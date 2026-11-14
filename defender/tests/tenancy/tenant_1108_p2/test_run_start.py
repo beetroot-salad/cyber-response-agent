@@ -59,7 +59,7 @@ def test_explicit_unsandboxed_lane_hands_its_programs_the_run_copy_not_an_inheri
         (B.clone_dir(t) / B.LESSON).write_text(B.lesson_text(B.CLONE_ONLY_MARK), encoding='utf-8')
         lifecycle = functools.partial(
             run_py._run_investigation_lifecycle, investigate=investigate,
-            start_box=functools.partial(box_mod.start_box, docker=no_daemon, data_root=current_data_root()))
+            start_box=functools.partial(box_mod.start_box, docker=no_daemon))
         out = B.launch(t, tmp_path, publish=lambda *a, **k: B.fresh(t.commit),
                        lifecycle=lifecycle)
         clone_agent = B.clone_dir(t) / 'agent'

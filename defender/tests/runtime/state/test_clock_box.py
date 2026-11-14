@@ -120,7 +120,7 @@ def _start(argv: list[str]) -> Captured:
     cap = Captured()
     out = C.run_main(argv, clock=C.FakeClock(START), main=None, investigate=cap.investigate,
                      start_box=functools.partial(box_mod.start_box, docker=cap.docker,
-                                                 spec=box_mod.BoxSpec(rootfs=STOCK_ROOTFS), data_root=current_data_root()))
+                                                 spec=box_mod.BoxSpec(rootfs=STOCK_ROOTFS)))
     assert out.exit == 0, f"run.main did not complete: exit={out.exit} refusal={out.refusal}"
     assert cap.docker.create_argv is not None, "no box was created"
     assert cap.kwargs, "the investigation was never reached"
@@ -250,7 +250,7 @@ def _clock_file_after_a_command(argv: list[str], clock: C.FakeClock, *,
     """Run scripted box commands, then collect the clock mount and its file readings."""
     docker = RecordingDocker()
     seen: dict[str, Any] = {}
-    start = functools.partial(box_mod.start_box, docker=docker, spec=box_mod.BoxSpec(rootfs=STOCK_ROOTFS), data_root=current_data_root())
+    start = functools.partial(box_mod.start_box, docker=docker, spec=box_mod.BoxSpec(rootfs=STOCK_ROOTFS))
 
     def start_answering(*args: Any, **kw: Any) -> box_mod.BoxExecutor:
         """Its commands answer with a frame, as the in-box helper does; the clock file is written before each.

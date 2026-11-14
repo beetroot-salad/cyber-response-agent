@@ -43,7 +43,6 @@ from defender.tests.support.tenancy._mapping1345 import (
     assert_missing_wording_names_verb_and_route,
 )
 from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
-from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
 ENTRY = DEFENDER / "tests" / "support" / "jobs" / "_job_entry1342.py"  # the replay children of the S2 cases
 OTHER_TENANT = str(uuid.UUID(int=0x1342))
@@ -1462,7 +1461,7 @@ def test_r2_control_the_operator_path_with_the_same_environment_and_seams_does_r
     from defender.tests.e2e import _replay_harness as RH
 
     monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")
-    start = functools.partial(box_mod.start_box, docker=RH._no_docker_daemon, data_root=current_data_root())
+    start = functools.partial(box_mod.start_box, docker=RH._no_docker_daemon)
     operator = Ran()
 
     launched = B.launch(scene.t, tmp_path, publish=lambda *a, **k: B.fresh(scene.t.commit),

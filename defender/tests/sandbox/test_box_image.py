@@ -39,7 +39,7 @@ from defender.tests.support.sandbox._spec1092 import (
     make_run_dir,
     plant_tree,
     recipe_version,
-    box_subcommands,
+    subcommands,
 )
 from defender.tests.support.tenancy._host1214 import TEST_TENANT
 from defender.tests.support.shared.contracts._import_blocker import run_blocked
@@ -272,7 +272,7 @@ def test_a_mounted_tree_without_the_three_inputs_raises_boxfault_naming_the_tree
     verb, other = ("cannot use", "cannot read") if malformed else ("cannot read", "cannot use")
     assert verb in message, (verb, message)
     assert other not in message, (other, message)
-    assert "run" not in box_subcommands(rec.calls), rec.calls
+    assert "run" not in subcommands(rec.calls), rec.calls
     assert rec.create_argv is None
 
 
@@ -288,7 +288,7 @@ def test_the_c46_uncovered_mount_refusal_fires_before_the_resolver_on_both_lanes
         box_mod._start_boxed(run_dir, defender_dir, BoxSpec(), rec, lambda _d: MOUNTS)
     assert "C46" in str(e.value)
     assert "box.Dockerfile" not in str(e.value)
-    assert not {"image", "run"} & set(box_subcommands(rec.calls)), rec.calls   # the stale-name check only
+    assert not {"image", "run"} & set(subcommands(rec.calls)), rec.calls   # the stale-name check only
     assert rec.create_argv is None
 
     rec = RecordingDocker()
@@ -296,7 +296,7 @@ def test_the_c46_uncovered_mount_refusal_fires_before_the_resolver_on_both_lanes
         box_mod._start_boxed_request(_request(root, run_dir), rec, lambda _d: MOUNTS)
     assert "C46" in str(e.value)
     assert "box.Dockerfile" not in str(e.value)
-    assert not {"image", "run"} & set(box_subcommands(rec.calls)), rec.calls
+    assert not {"image", "run"} & set(subcommands(rec.calls)), rec.calls
     assert rec.create_argv is None
 
     with pytest.raises(BoxFault) as e:
