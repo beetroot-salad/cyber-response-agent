@@ -982,7 +982,7 @@ def test_a_secret_field_below_the_minimum_length_is_refused_at_write_time(
                               json={"kind": kind, "credentials": credentials})
     assert response.status_code == (204 if accepted else 422), response.text
     assert api.ports.called("put_credentials") == (
-        [((A, "tix", kind, credentials), {})] if accepted else [])
+        [((Principal(tenant_id=A, actor_id=api.user), "tix", kind, credentials), {})] if accepted else [])
 
 
 @pytest.mark.parametrize("kind", [None, "", "oauth", "other"])
@@ -1780,24 +1780,18 @@ _PORT_REACHED = {"create_investigation", "cancel_investigation", "delete_investi
 
 
 def _demo_with_audit_log(
-    name: str, monkeypatch: pytest.MonkeyPatch, *, fail: bool = False,
+    name: str, *, fail: bool = False,
 ) -> tuple[_DemoWrite, ApiDeps, _AuditLog, TestClient, dict[str, str], str, str, Callable[[tuple[str, str, dict[str, Any]]], Any]]:
-    """A demo whose store was built with an `_AuditLog` (so every holder of `audit_events` shares it), probe bound after."""
-    logs: list[_AuditLog] = []
-    original = InMemoryStore.__init__
-
-    def init(self: InMemoryStore, *args: Any, **kwargs: Any) -> None:
-        original(self, *args, **kwargs)
-        self.audit_events = log = _AuditLog(fail=fail)
-        logs.append(log)
-
-    # No seam: `demo_deps` builds its own store, so the log can only be installed at construction by wrapping this.
-    monkeypatch.setattr(InMemoryStore, "__init__", init)
+    """A demo whose store's `audit_events` is an `_AuditLog`, installed before any request (every announcer appends to
+    the attribute as it stands when it announces, FC-14), probe bound after."""
     case = DEMO_WRITES[name]
     secret = secrets.token_hex(24)
     deps = anyio.run(demo_deps, (DEMO_ONE,), lambda: NOW)
-    [log] = logs
-    assert deps.writes.audit_events is log
+    store = deps.writes
+    assert isinstance(store, InMemoryStore)
+    assert store.audit_events == [], "the seed announces nothing"
+    assert all(port is store for port in (deps.systems, deps.audit, deps.alert_mapping, deps.secrets._store))  # type: ignore[attr-defined]
+    store.audit_events = log = _AuditLog(fail=fail)
     log.probe = lambda: case.visible(deps, secret)
     client = TestClient(create_app(deps), base_url=BASE, raise_server_exceptions=False)
     auth = _session(demo_sessions((DEMO_ONE,))[f"{DEMO_ONE}-analyst"], deps.frontend_origin)
@@ -1814,12 +1808,12 @@ def _demo_with_audit_log(
 
 @pytest.mark.parametrize("name", sorted(WRITES))
 def test_the_demo_announces_each_successful_write_once_after_it_is_visible(
-    name: str, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch,
+    name: str, caplog: pytest.LogCaptureFixture,
 ) -> None:
     """One audit event per successful write (action, actor, target, detail), after the write is visible, with
     no generated secret in any record or log line; where the failing request reaches the port, it announces nothing. (Am-2, P2, FC-14)"""
     caplog.set_level(logging.DEBUG)
-    case, deps, log, _client, _auth, user_id, secret, send = _demo_with_audit_log(name, monkeypatch)
+    case, deps, log, _client, _auth, user_id, secret, send = _demo_with_audit_log(name)
 
     refused = send(case.failing)
     assert 400 <= refused.status_code < 500, refused.text
@@ -1841,10 +1835,10 @@ def test_the_demo_announces_each_successful_write_once_after_it_is_visible(
 
 @pytest.mark.parametrize("name", sorted(WRITES))
 def test_a_demo_announcement_that_fails_after_the_write_answers_500_and_the_write_stands(
-    name: str, monkeypatch: pytest.MonkeyPatch,
+    name: str,
 ) -> None:
     """A write whose audit announcement raises answers 500, and the write is visible afterwards. (Am-2)"""
-    case, deps, log, _client, _auth, _user_id, secret, send = _demo_with_audit_log(name, monkeypatch, fail=True)
+    case, deps, log, _client, _auth, _user_id, secret, send = _demo_with_audit_log(name, fail=True)
     assert not anyio.run(case.visible, deps, secret), "control: the write is not yet visible"
     served = send(case.request)
     assert served.status_code == 500, served.text

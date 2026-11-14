@@ -11,8 +11,7 @@ import datetime as dt
 import json
 import logging
 import re
-import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any
 
@@ -294,6 +293,25 @@ async def test_o6_a_mapping_replace_answers_what_the_store_holds(served):
     assert await _held_async(served.dsn, B) == {e: FIXTURE_ALERT_MAPPING.get(e) for e in MAPPING_ENTRIES}  # B untouched
 
 
+@pytest.mark.postgres
+async def test_o6_every_subset_of_the_entries_mapped_is_replaced_and_read_back_as_exactly_that_mapping(served):
+    """For each subset of the six entries (none included), a replace and a read both answer 200 with exactly it. (O6, #1345 M2)"""
+    import itertools
+
+    from defender.records.formats import MAPPING_KEYS
+
+    assert set(MAPPING_KEYS) == set(MAPPING_ENTRIES)
+    subsets = [s for r in range(len(MAPPING_KEYS) + 1) for s in itertools.combinations(MAPPING_KEYS, r)]
+    assert len(subsets) == 2 ** len(MAPPING_KEYS)
+    url = f"/tenants/{A}/alert-mapping"
+    for mapped in [(), *subsets]:  # the empty one first: straight after the fixture's full mapping
+        body = {entry: f"vendor.{entry}" if entry in mapped else None for entry in MAPPING_KEYS}
+        put = await served.client.put(url, headers=served.ann(), json=body)
+        assert (put.status_code, put.json()) == (200, body), mapped
+        got = await served.client.get(url, headers=served.ann(write=False))
+        assert (got.status_code, got.json()) == (200, body), mapped
+
+
 async def _held_async(dsn: str, tenant: str) -> dict[str, str | None]:
     async with job_store(dsn) as store:
         stored = await store.get_alert_mapping(tenant)
@@ -356,9 +374,9 @@ async def test_o7_an_administrator_invites_an_existing_user_into_an_empty_tenant
     invited = await served.client.post(f"/admin/tenants/{C}/invitations", headers=served.ops(), json={"email": BOB})
     assert invited.status_code == 202
     invitation_id = invited.json()["id"]
-    assert execute(served.dsn, "SELECT m.status, u.email, m.invited_by FROM identity.memberships m "
-                   "JOIN identity.users u ON u.id = m.user_id WHERE m.tenant_id = %s", (C,)) == [
-        ("invited", BOB, uuid.UUID(served.user_id(OPS)))]
+    held = execute(served.dsn, "SELECT m.status, u.email, m.invited_by FROM identity.memberships m "
+                   "JOIN identity.users u ON u.id = m.user_id WHERE m.tenant_id = %s", (C,))
+    assert [(status, email, str(by)) for status, email, by in held] == [("invited", BOB, served.user_id(OPS))]
     # The sender is the identity loop's, on its own interval: the notice reaches the log, naming who, where and which.
     with anyio.fail_after(60):
         while not any(invitation_id in r.getMessage() and BOB in r.getMessage() and C in r.getMessage()
@@ -426,16 +444,19 @@ async def test_o8_systems_and_lessons_refuse_501_naming_their_issue_after_member
 
 @pytest.mark.postgres
 async def test_o8_the_real_servers_openapi_declares_the_501_on_every_systems_and_lessons_route(served):
-    """Every documented operation on systems and lessons declares 501; the work routes do not. (O8, Am-2)"""
-    document = (await served.client.get("/openapi.json")).json()
-    unbacked = _unbacked(document)
-    assert len(unbacked) >= 5
-    for path, method in unbacked:
-        assert "501" in document["paths"][path][method]["responses"], (path, method)
-    for path, item in document["paths"].items():
-        if "/alerts" in path or "/investigations" in path:
-            assert all("501" not in op["responses"] for op in item.values()), path
-    assert "not yet real" not in document["info"].get("summary", "")
+    """On the real and the demo server, the operations declaring 501 are exactly those on systems and lessons. (O8, Am-2)"""
+    from defender.api.app import create_app
+    from defender.api.demo import demo_deps
+
+    real = (await served.client.get("/openapi.json")).json()
+    demo = json.loads(json.dumps(create_app(await demo_deps((A,))).openapi()))
+    for server, document in (("real", real), ("demo", demo)):
+        unbacked = set(_unbacked(document))
+        assert len(unbacked) >= 5, server
+        declaring = {(path, method) for path, item in document["paths"].items() for method, op in item.items()
+                     if "501" in op["responses"]}
+        assert declaring == unbacked, (server, declaring ^ unbacked)
+        assert "not yet real" not in document["info"].get("summary", "")
 
 
 @pytest.mark.postgres
@@ -683,10 +704,92 @@ async def test_o5_every_route_answers_every_caller_as_the_permission_table_says(
                 assert got not in (401, 403), who
                 unbacked = "/systems" in path or "/lessons" in path
                 assert (got == 501) == unbacked, who
-    anonymous = {(m, p): (await served.client.request(m, _concrete(p, A), **_body(m, p))).status_code
-                 for m, p, d in table if d not in {"public"} and p != "/auth/logout"}
+    # Anonymous, from the frontend's origin (so the origin layer lets a state change through to sign-in): 401 everywhere.
+    rows = [(m, p) for m, p, d in table if d not in {"public"} and p != "/auth/logout"]
+    anonymous = {(m, p): (await served.client.request(m, _concrete(p, A), headers={"Origin": ORIGIN},
+                                                      **_body(m, p))).status_code for m, p in rows}
     assert set(anonymous.values()) == {401}, {k: v for k, v in anonymous.items() if v != 401}
+    # Without the origin, the origin layer answers a state change 403 before sign-in is looked at (#1307 O9).
+    foreign = {(m, p): (await served.client.request(m, _concrete(p, A), **_body(m, p))).status_code for m, p in rows}
+    assert foreign == {(m, p): 401 if m in {"GET", "HEAD", "OPTIONS"} else 403 for m, p in rows}, foreign
     # Every caller has been both let in and refused somewhere, so none of the table was vacuous.
     assert all(seen[name, outcome] for name in callers for outcome in ("passed", "refused")), seen
     # A program is refused for want of permission (403) as well as for being an outsider (404): the automation row is not everything.
     assert all(seen[name, "403"] for name in ("key", "token")), seen
+
+
+# --- paging every list, filtered, over more than a page ---------------------------------------------------------------
+
+def _clone(dsn: str, table: str, template: str, count: int, **overrides: str) -> None:
+    """`count` copies of row `template` of `jobs.<table>` in one statement: each column as the template's, unless
+    `overrides` gives it as an SQL expression of `n` (1..count)."""
+    columns = [c for (c,) in execute(dsn, "SELECT column_name FROM information_schema.columns WHERE table_schema = 'jobs' "
+                                          "AND table_name = %s ORDER BY ordinal_position", (table,))]
+    chosen = ", ".join(overrides.get(c, c) for c in columns)
+    execute(dsn, f"INSERT INTO jobs.{table} ({', '.join(columns)}) SELECT {chosen} FROM jobs.{table}, "
+                 f"generate_series(1, %s) AS n WHERE id = %s", (count, template))
+
+
+def _tied(at: dt.datetime, *, step: int = 1) -> str:
+    """Times from `at`, three rows to each second (ties), moving by `step` seconds."""
+    return f"timestamptz '{at.isoformat()}' + (n / 3) * {step} * interval '1 second'"
+
+
+async def _walk(served: Served, path: str, params: dict[str, str], limit: int) -> list[dict[str, Any]]:
+    """Every page of a list, following each `next_cursor` with the same query, until a page has none."""
+    pages: list[dict[str, Any]] = []
+    cursor = None
+    while len(pages) < 1000:
+        query = {**params, "limit": str(limit)} | ({"cursor": cursor} if cursor else {})
+        answer = await served.client.get(path, params=query, headers=served.ann(write=False))
+        assert answer.status_code == 200, answer.text
+        pages.append(answer.json())
+        cursor = pages[-1]["next_cursor"]
+        if cursor is None:
+            return pages
+    raise AssertionError(f"{path} {params}: the cursor never ended")
+
+
+@pytest.mark.postgres
+async def test_o6_o10_each_list_walked_by_its_cursors_is_the_filtered_rows_newest_first_each_once(served):
+    """Each list, under each filter, at limit 1 and MAX_PAGE, over more than a page with tied times and rows the filter
+    leaves out: walking the cursors gives the filtered rows newest first, each once, short only at the end. (O6, O10)"""
+    from defender.api.app import MAX_PAGE
+
+    dsn, extra = served.dsn, MAX_PAGE + 4  # more than a page and one beyond it, with ties at every page edge
+    [template] = await _alerts(dsn, A, NOON)
+    _clone(dsn, "alerts", template, extra, id="gen_random_uuid()", vendor_ticket_id="'bulk-' || n", fired_at=_tied(NOON))
+    _clone(dsn, "alerts", template, 6, id="gen_random_uuid()", vendor_ticket_id="'before-' || n",
+           fired_at=_tied(NOON - dt.timedelta(hours=1)))
+    [kept_alert, other_alert] = await _alerts(dsn, A, NOON - dt.timedelta(days=1), NOON - dt.timedelta(days=2))
+    kept, other = await _completed(dsn, A, kept_alert), await _completed(dsn, A, other_alert)
+    for investigation, count in ((kept, extra), (other, 5)):
+        _clone(dsn, "investigations", investigation, count, id="gen_random_uuid()", request_key="'bulk-' || n",
+               created_at=_tied(NOON))
+        [(auto_job,)] = execute(dsn, "SELECT id FROM jobs.learning_jobs WHERE investigation_id = %s", (investigation,))
+        _clone(dsn, "learning_jobs", auto_job, count, id="gen_random_uuid()", request_key="'bulk-' || n",
+               created_at=_tied(NOON))
+
+    def newest_first(rows: list[tuple[Any, ...]], keep: Callable[[tuple[Any, ...]], bool]) -> list[str]:
+        return [str(i) for i, at, *_ in sorted((r for r in rows if keep(r)), key=lambda r: (r[1], str(r[0])), reverse=True)]
+
+    alerts = execute(dsn, "SELECT id, fired_at FROM jobs.alerts WHERE tenant_id = %s", (A,))
+    investigations = execute(dsn, "SELECT id, created_at, alert_id FROM jobs.investigations WHERE tenant_id = %s", (A,))
+    learning = execute(dsn, "SELECT id, created_at, investigation_id FROM jobs.learning_jobs WHERE tenant_id = %s", (A,))
+    lists = [  # (path, id field, query, the rows it must answer, the limits walked)
+        ("alerts", "alert_id", {"fired_after": NOON.isoformat()}, newest_first(alerts, lambda r: r[1] >= NOON), (1, MAX_PAGE)),
+        ("investigations", "investigation_id", {"alert_id": kept_alert},
+         newest_first(investigations, lambda r: str(r[2]) == kept_alert), (1, MAX_PAGE)),
+        ("learning-jobs", "learning_job_id", {"investigation_id": kept},
+         newest_first(learning, lambda r: str(r[2]) == kept), (1, MAX_PAGE))]
+    lists += [(path, field, {}, newest_first(rows, lambda r: True), (MAX_PAGE,))  # unfiltered: one page edge suffices
+              for path, field, rows in (("alerts", "alert_id", alerts), ("investigations", "investigation_id", investigations),
+                                        ("learning-jobs", "learning_job_id", learning))]
+    for path, field, query, expected, limits in lists:
+        assert len(expected) > MAX_PAGE + 1, (path, query)  # premise: more than a page and its probe row
+        for limit in limits:
+            pages = await _walk(served, f"/tenants/{A}/{path}", query, limit)
+            case = (path, query, limit)
+            assert [item[field] for page in pages for item in page["items"]] == expected, case
+            assert [len(p["items"]) for p in pages[:-1]] == [limit] * (len(pages) - 1), case
+            assert 0 < len(pages[-1]["items"]) <= limit, case

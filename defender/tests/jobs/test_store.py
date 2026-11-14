@@ -1802,9 +1802,12 @@ async def test_1345_m3_two_first_saves_for_one_tenant_both_return_and_exactly_on
             two = asyncio.ensure_future(second.put_alert_mapping(T1, mapping_value(TITLE_ON_A), actor="u-1"))
             await until_blocked(dsn, 2)  # both wait on the held row
         results = await asyncio.wait_for(asyncio.gather(one, two, return_exceptions=True), 10)
-        assert sorted(results, key=repr) == [False, True], results
-        last = TITLE_ON_A if results == [True, False] else TITLE_ON_RULE
+        assert not [r for r in results if isinstance(r, BaseException)], results
+        created = [flag for _mapping, flag in results]  # Am-8: each answers (mapping, created)
+        assert sorted(created) == [False, True], results
+        last = TITLE_ON_A if created == [True, False] else TITLE_ON_RULE
         assert (await first.get_alert_mapping(T1)).paths == last
+        assert results[created.index(False)][0].paths == last  # the last writer answers what it stored
     assert _display(dsn, alert.alert_id) == (None, None)
 
 

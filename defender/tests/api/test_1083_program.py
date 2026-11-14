@@ -5,8 +5,11 @@ The settings and the probe are covered as classes in-process (`Settings.from_env
 from __future__ import annotations
 
 import socket
+import time
+import urllib.parse
 from pathlib import Path
 
+import httpx
 import pytest
 
 from defender.tests.support.api._server1083 import (
@@ -28,6 +31,7 @@ from defender.tests.support.api._server1083 import (
     closed_port,
     environment,
     free_port,
+    person,
     realms_named,
     seed_identity,
 )
@@ -295,29 +299,106 @@ def _handled_signals() -> tuple[int, ...]:
     return tuple(int(s) for s in uvicorn.server.HANDLED_SIGNALS)
 
 
+#: Where a signal may land: serving, a Keycloak probe stalled at discovery, the version check parked on a database
+#: that accepts the connection and never answers.
+_PHASES = ("ready", "during start", "during the version check")
+
+
 @pytest.mark.postgres
-@pytest.mark.parametrize("phase", ["ready", "during start"])
+@pytest.mark.parametrize("phase", _PHASES)
 @pytest.mark.parametrize("sig", _handled_signals())
 def test_each_handled_signal_unwinds_a_ready_or_starting_program_to_exit_zero_with_nothing_attached(
         tmp_path, migrated_database, sig, phase):
-    """Each signal uvicorn handles, ready or mid-start, makes `run` return 0 with no backend left. (Am-3)"""
+    """Each signal uvicorn handles, ready or at each start step, makes `run` return 0 promptly with no backend left. (Am-3)"""
+    environ = environment(tmp_path, dsn=migrated_database)
     stalling = [Fail(SIGNIN_REALM, "discovery", "stall")] if phase == "during start" else []
-    child = Child.faked(environment(tmp_path, dsn=migrated_database), stalling)
-    try:
-        if stalling:
-            assert child.stalled(), "the start should be waiting on discovery"
-        else:
-            assert child.ready()
-            assert _backends(migrated_database) > 0  # control: a serving program holds connections
-        child.send_signal(sig)
-        reported = child.reported()
-        left = _backends(migrated_database)  # the child is held alive after reporting, so this is its own doing
-        ended = child.ended()
-    finally:
-        child.kill()
+    held: list[socket.socket] = []
+    with socket.socket() as mute:  # a database that accepts and never answers
+        mute.bind(("127.0.0.1", 0))
+        mute.listen()
+        mute.settimeout(60)
+        if phase == "during the version check":
+            environ["DEFENDER_DATABASE_DSN"] = UNREACHABLE_DSN.format(port=mute.getsockname()[1])
+        child = Child.faked(environ, stalling)
+        try:
+            if phase == "ready":
+                assert child.ready()
+                assert _backends(migrated_database) > 0  # control: a serving program holds connections
+            elif stalling:
+                assert child.stalled(), "the start should be waiting on discovery"
+            else:
+                held.append(mute.accept()[0])  # the version check connected and waits for an answer that never comes
+            signalled = time.monotonic()
+            child.send_signal(sig)
+            reported = child.reported()
+            elapsed = time.monotonic() - signalled
+            unmodelled = child.unmodelled(timeout=5)
+            left = _backends(migrated_database)  # the child is held alive after reporting, so this is its own doing
+            ended = child.ended()
+        finally:
+            child.kill()
+            for conn in held:
+                conn.close()
     assert reported == 0, ended.stderr
+    assert elapsed < (30 if phase == "ready" else 15), elapsed
     assert left == 0
+    assert unmodelled == [], unmodelled
     assert (ended.returncode, "Traceback" in ended.stderr) == (0, False), ended.stderr
+
+
+# --- every exit of `serving` closes what it opened ---------------------------------------------------
+
+#: Each way `serving` can end once its first resource (the Keycloak adapters) is open: serving, then each start step.
+_EXITS = ("served", *(f"probe {realm}" for realm in REALMS), "bind", "bootstrap")
+
+
+async def _one_request_per_store(app, seeded) -> None:
+    """A request served by each store-backed family: the job store, the identity store, the tenant rows."""
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=ORIGIN) as client:
+        answered = [(await client.get(f"/tenants/{TENANT}/alerts", headers=person(seeded.ann_session))).status_code,
+                    (await client.get("/me", headers=person(seeded.ann_session))).status_code,
+                    (await client.get(f"/admin/tenants/{TENANT}", headers=person(seeded.ops_session))).status_code]
+    assert answered == [200, 200, 200]
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("ending", _EXITS)
+async def test_every_exit_of_serving_leaves_no_backend_socket_or_keycloak_client_open(tmp_path, migrated_database, ending):
+    """Served then left, or refused at a probe, the bind or the bootstrap: nothing `serving` opened stays open. (O1, Am-3, FC-1)"""
+    from defender.api_server import Settings, StartRefused, serving
+
+    dsn = migrated_database
+    register_tenant(dsn, TENANT)
+    register_tenant(dsn, TENANT_B)
+    seeded = await seed_identity(dsn)
+    keycloak = FakeKeycloak([Fail(ending.split()[1], "keys", "empty")] if ending.startswith("probe") else [])
+    with socket.socket() as holder:
+        holder.bind(("127.0.0.1", 0))
+        holder.listen()
+        port = holder.getsockname()[1] if ending == "bind" else free_port()
+        settings = Settings.from_environ(environment(
+            tmp_path, dsn=dsn, port=port, administrators=(ANN,) if ending == "bootstrap" else (OPS,)))
+        host = "127.0.0.1"
+        if ending == "served":
+            async with serving(settings, transport=keycloak) as running:
+                await _one_request_per_store(running.app, seeded)
+                assert _backends(dsn) > 0  # control: every store has connected
+                [listening] = running.sockets
+                assert listening.getsockname() == (host, port)
+                listening.listen()
+                socket.create_connection((host, port), timeout=5).close()  # control: the bound address answers
+                with pytest.raises(ConnectionRefusedError):
+                    socket.create_connection(("127.0.0.2", port), timeout=5)
+            assert [s.fileno() for s in running.sockets] == [-1]
+        else:
+            with pytest.raises(StartRefused):
+                async with serving(settings, transport=keycloak):
+                    pytest.fail(f"{ending} should have refused")
+    assert _backends(dsn) == 0
+    assert keycloak.closes == 2, "one close per Keycloak adapter built"
+    if ending == "bootstrap":  # the socket was bound before the bootstrap refused: it is free again
+        with socket.socket() as again:
+            again.bind((host, port))
 
 
 @pytest.mark.postgres
@@ -362,3 +443,135 @@ async def test_both_realms_are_probed_at_start(tmp_path, migrated_database):
         assert ("POST", f"{host}/realms/{realm}/protocol/openid-connect/token") in probed
         assert ("GET", f"{host}/admin/realms/{realm}/{ADMIN_READ[realm]}") in probed
     assert keycloak.unmodelled == []
+
+
+# --- every setting over a generated space of its own type ---------------------------------------------------------
+
+#: A URL setting's stated shape (design, clarifications): `origin` scheme, host and optional port only; `issuer`
+#: `<scheme>://<host>[:port]/realms/<realm>`; `absolute` an absolute http(s) URL. The server URL's path and the DSN's
+#: scheme are not stated (a pending owner decision; an observation), so the oracle accepts either answer there.
+_URL_SHAPES = {"DEFENDER_API_FRONTEND_ORIGIN": "origin", "DEFENDER_KEYCLOAK_ISSUER": "issuer",
+               "DEFENDER_KEYCLOAK_PROGRAMS_ISSUER": "issuer", "DEFENDER_KEYCLOAK_REDIRECT_URI": "absolute",
+               "DEFENDER_KEYCLOAK_SERVER_URL": "server", "DEFENDER_DATABASE_DSN": "dsn"}
+REFUSE, ACCEPT, EITHER = "refuse", "accept", "either"
+
+
+def _url_variants(healthy: str, shape: str) -> list[tuple[str, str, str]]:
+    """(label, value, expected): the healthy URL with one component changed in turn."""
+    parts = urllib.parse.urlsplit(healthy)
+    host = parts.hostname
+    port = f":{parts.port}" if parts.port else ""
+
+    def url(scheme: str = parts.scheme, userinfo: str = "", port: str = port, path: str = parts.path,
+            query: str = "", fragment: str = "") -> str:
+        return f"{scheme}://{userinfo}{host}{port}{path}{query}{fragment}"
+
+    def by(origin: str, issuer: str, absolute: str, server: str = EITHER) -> str:
+        return {"origin": origin, "issuer": issuer, "absolute": absolute, "server": server}.get(shape, EITHER)
+
+    healthy_path = parts.path
+    cases = [("https", url(scheme="https"), by(ACCEPT, ACCEPT, ACCEPT, ACCEPT)),
+             ("ftp", url(scheme="ftp"), by(REFUSE, REFUSE, REFUSE)),
+             ("no scheme", url()[len(parts.scheme) + 3:], by(REFUSE, REFUSE, REFUSE)),
+             ("port 8443", url(port=":8443"), by(ACCEPT, ACCEPT, ACCEPT, ACCEPT)),
+             # A port that is not a TCP port makes no URL at all, whatever the setting.
+             ("port not a number", url(port=":abc"), by(REFUSE, REFUSE, REFUSE, REFUSE)),
+             ("port above 65535", url(port=":65536"), by(REFUSE, REFUSE, REFUSE, REFUSE)),
+             ("port far above 65535", url(port=":99999"), by(REFUSE, REFUSE, REFUSE, REFUSE)),
+             ("a path", url(path=healthy_path + "/more"), by(REFUSE, REFUSE, ACCEPT)),
+             ("another realm", url(path="/realms/elsewhere"), by(REFUSE, ACCEPT, ACCEPT)),
+             ("a path not of a realm", url(path="/elsewhere"), by(REFUSE, REFUSE, ACCEPT)),
+             ("no path", url(path=""), by(ACCEPT, REFUSE, ACCEPT)),
+             ("a trailing slash", url(path=healthy_path + "/"), by(REFUSE, REFUSE, ACCEPT)),
+             ("a query", url(query="?a=1"), by(REFUSE, REFUSE, ACCEPT)),
+             ("a fragment", url(fragment="#f"), by(REFUSE, REFUSE, EITHER))]
+    cases += [(f"userinfo {info!r}", url(userinfo=info), by(REFUSE, REFUSE, EITHER))
+              for info in ("user@", "user:pw@", "@", ":@")]
+    if shape == "dsn":
+        return [(label, value, EITHER) for label, value, _ in cases]
+    return cases
+
+
+#: Every YAML node type, as it is spelled in a flow sequence or after `key:`.
+_YAML_NODES = {"email": "ops@platform.example", "string": "'not an email'", "empty string": "''", "int": "7",
+               "float": "1.5", "bool": "true", "null": "null", "timestamp": "2026-11-14", "binary": "!!binary aGVsbG8=",
+               "mapping": "{ops@platform.example: 1}", "sequence": "[ops@platform.example]",
+               "set": "!!set {ops@platform.example: null}", "omap": "!!omap [{a: 1}]", "pairs": "!!pairs [{a: 1}]"}
+
+
+def _administrators_variants() -> list[tuple[str, bytes, str]]:
+    """(label, file bytes, expected): each YAML node type for the list and for an element, then bytes that are not YAML."""
+    cases = [(f"list is a {kind}", f"administrators: {node}\n".encode(), ACCEPT if kind == "sequence" else REFUSE)
+             for kind, node in _YAML_NODES.items()]
+    cases += [(f"element is a {kind}", f"administrators: [ops@platform.example, {node}]\n".encode(),
+               ACCEPT if kind == "email" else REFUSE) for kind, node in _YAML_NODES.items()]
+    cases += [(f"document is a {kind}", f"{node}\n".encode(), REFUSE) for kind, node in _YAML_NODES.items()]
+    cases += [("another key beside", b"administrators: [ops@platform.example]\nextra: 1\n", REFUSE),
+              ("empty list", b"administrators: []\n", EITHER),
+              ("not UTF-8", b"administrators: [ops\xff@platform.example]\n", REFUSE),
+              ("UTF-16", "administrators: [ops@platform.example]\n".encode("utf-16"), REFUSE),
+              ("a NUL", b"administrators: [ops\x00@platform.example]\n", REFUSE),
+              ("unclosed flow sequence", b"administrators: [ops@platform.example\n", REFUSE),
+              ("unclosed quote", b"administrators: ['ops@platform.example]\n", REFUSE),
+              ("bad indentation", b"administrators:\n  - a@b.example\n - c@d.example\n", REFUSE),
+              ("a tab indent", b"administrators:\n\t- ops@platform.example\n", REFUSE),
+              ("two documents", b"administrators: [a@b.example]\n---\nadministrators: [c@d.example]\n", REFUSE),
+              ("an unknown tag", b"administrators: !!python/object:os.system [x]\n", REFUSE)]
+    return cases
+
+
+def _secret_variants() -> list[tuple[str, bytes, str]]:
+    """(label, file bytes, expected) for a secret file: one non-empty line, one trailing newline allowed."""
+    return [("one line", b"s3cret\n", ACCEPT), ("no newline", b"s3cret", ACCEPT), ("empty", b"", REFUSE),
+            ("a newline", b"\n", REFUSE), ("two lines", b"one\ntwo\n", REFUSE), ("a blank second line", b"s\n\n", REFUSE),
+            ("a leading blank line", b"\ns\n", REFUSE), ("not UTF-8", b"s3\xffcret\n", REFUSE),
+            ("UTF-16", "s3cret\n".encode("utf-16"), EITHER), ("a NUL", b"s3\x00cret\n", EITHER),
+            ("CRLF", b"s3cret\r\n", EITHER), ("all bytes", bytes(range(256)), REFUSE)]
+
+
+def _generated(name: str, healthy: str, tmp_path: Path) -> list[tuple[str, str, str]]:
+    """(label, environment value, expected) for one setting, from its type's generated space."""
+    if name in _URL_SHAPES:
+        return _url_variants(healthy, _URL_SHAPES[name])
+    if name.endswith("_FILE"):
+        variants = _administrators_variants() if name == "DEFENDER_API_ADMINISTRATORS_FILE" else _secret_variants()
+        cases = []
+        for n, (label, raw, expected) in enumerate(variants):
+            path = tmp_path / f"{name.lower()}-{n}"
+            path.write_bytes(raw)
+            cases.append((label, str(path), expected))
+        return cases
+    return []
+
+
+@pytest.mark.postgres
+async def test_every_url_and_file_setting_takes_each_generated_value_as_its_stated_shape_says(tmp_path, migrated_database):
+    """A generated value of each URL or file setting parses, or refuses naming that setting alone, as its shape says;
+    nothing else escapes, at parse or, for an accepted Keycloak URL, at start. (O1, Am-7, promise (1))"""
+    from defender.api_server import Settings, StartRefused
+
+    healthy = environment(tmp_path, dsn=migrated_database)
+    Settings.from_environ(healthy)  # positive control: the healthy environment parses
+    covered = {name for name in SETTING_NAMES if _generated(name, healthy[name], tmp_path)}
+    assert covered == set(_URL_SHAPES) | {n for n in SETTING_NAMES if n.endswith("_FILE")}, covered
+    wrong, started = [], []
+    for name in sorted(covered):
+        for label, value, expected in _generated(name, healthy[name], tmp_path):
+            case = f"{name} {label}: {value!r}"
+            try:
+                Settings.from_environ({**healthy, name: value})
+            except StartRefused as refused:
+                named = [n for n in SETTING_NAMES if n in str(refused)]
+                if named != [name] or expected == ACCEPT:
+                    wrong.append(f"{case} refused naming {named}: {refused}")
+            except Exception as unexpected:  # noqa: BLE001 - the promise is that nothing else escapes
+                wrong.append(f"{case} raised {type(unexpected).__name__}: {unexpected}")
+            else:
+                if expected == REFUSE:
+                    wrong.append(f"{case} was accepted")
+                elif name.startswith("DEFENDER_KEYCLOAK_") and name in _URL_SHAPES:
+                    started.append((case, {**healthy, name: value}))
+    assert wrong == [], "\n".join(wrong)
+    assert started, "premise: some Keycloak URL values are accepted"
+    for case, environ in started:  # the adapters take what Settings took: start serves or refuses, nothing escapes
+        await _attempt(case, {**environ, "DEFENDER_API_PORT": str(free_port())}, migrated_database)

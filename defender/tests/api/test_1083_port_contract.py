@@ -668,3 +668,118 @@ async def test_o9_an_event_is_announced_after_its_row_is_visible_to_another_conn
         logging.getLogger(JOBS_AUDIT_LOGGER).removeHandler(seen)
     assert seen.seen == [("investigation.start", "queued")]
 
+
+
+# --- every audited write the port exposes: one event per change, after it is visible, naming the caller -------------
+
+ADMIN = "7a0c0c0c-1083-4000-8000-0000000ad111"  # the administrator who offboards
+
+#: Where another connection reads the change an event names, by the event's action family: (table, column, key).
+_VISIBLE_IN = {"investigation": ("jobs.investigations", "stage", "id"),
+               "learning_job": ("jobs.learning_jobs", "status", "id"),
+               "alert_mapping": ("tenancy.alert_mappings", "title", "tenant_id")}
+
+
+class _SeenAtEmit(logging.Handler):
+    """While `on`, records each job-store audit event with what another connection sees of its target then."""
+
+    def __init__(self, dsn: str) -> None:
+        super().__init__(logging.DEBUG)
+        self.dsn, self.on, self.seen = dsn, False, []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        from defender.tests.support.shared._postgres1339 import execute
+
+        if not self.on:
+            return
+        table, column, key = _VISIBLE_IN[record.action.split(".")[0]]
+        found = execute(self.dsn, f"SELECT {column} FROM {table} WHERE {key} = %s", (record.target,))
+        self.seen.append((record.action, str(record.target), record.actor, getattr(record, "credential_id", None),
+                          found[0][0] if found else None))
+
+
+async def _w_create_investigation(dsn: str, store: Any, adapter: Any, act: Any) -> list[tuple[str, str, Any]]:
+    alert_id = await _alert(store, A, "W-1")
+    started, _ = await act(lambda: adapter.create_investigation(_principal(program=True), alert_id, "k1"))
+    return [("investigation.start", str(started.investigation_id), "queued")]
+
+
+async def _w_cancel_investigation(dsn: str, store: Any, adapter: Any, act: Any) -> list[tuple[str, str, Any]]:
+    started, _ = await adapter.create_investigation(_principal(program=True), await _alert(store, A, "W-1"), "k1")
+    await act(lambda: adapter.cancel_investigation(_principal(program=True), started.investigation_id))
+    return [("investigation.cancel", str(started.investigation_id), "aborted")]
+
+
+async def _w_delete_investigation(dsn: str, store: Any, adapter: Any, act: Any) -> list[tuple[str, str, Any]]:
+    done = await _ended(store, adapter, await _alert(store, A, "W-1"), stage="failed", failure_reason="worker_error")
+    await act(lambda: adapter.delete_investigation(_principal(program=True), done))
+    return [("investigation.delete", done, None)]
+
+
+async def _w_create_learning_job(dsn: str, store: Any, adapter: Any, act: Any) -> list[tuple[str, str, Any]]:
+    done = await _ended(store, adapter, await _alert(store, A, "W-1"), disposition="benign", cost_usd=1.0)
+    job, _ = await act(lambda: adapter.create_learning_job(_principal(program=True), done, "c-1"))
+    return [("learning_job.start", str(job.learning_job_id), "queued")]
+
+
+async def _w_put_alert_mapping(dsn: str, store: Any, adapter: Any, act: Any) -> list[tuple[str, str, Any]]:
+    assert FIXTURE_ALERT_MAPPING.get("title") != "vendor.new_title"  # premise: the replace changes what is seen
+    await act(lambda: adapter.put_alert_mapping(_principal(program=True), _wire_mapping({"title": "vendor.new_title"})))
+    return [("alert_mapping.update", A, "vendor.new_title")]
+
+
+async def _w_offboard_tenant(dsn: str, store: Any, adapter: Any, act: Any) -> list[tuple[str, str, Any]]:
+    from defender.tests.support.shared._postgres1339 import execute
+
+    done = await _ended(store, adapter, await _alert(store, A, "W-1"), disposition="benign", cost_usd=1.0)
+    await adapter.create_learning_job(_principal(), done, "c-1")
+    queued, _ = await adapter.create_investigation(_principal(), await _alert(store, A, "W-2"), "k2")
+    live_jobs = execute(dsn, "SELECT id FROM jobs.learning_jobs WHERE tenant_id = %s AND status = 'queued'", (A,))
+    assert len(live_jobs) == 2, "premise: the auto and the explicit learning job are live"
+    await act(lambda: adapter.offboard_tenant(A, actor=ADMIN))
+    return [("investigation.cancel", str(queued.investigation_id), "aborted"),
+            *(("learning_job.finish", str(job), "skipped") for (job,) in live_jobs)]
+
+
+WRITE_CASES = {"create_investigation": _w_create_investigation, "cancel_investigation": _w_cancel_investigation,
+               "delete_investigation": _w_delete_investigation, "create_learning_job": _w_create_learning_job,
+               "put_alert_mapping": _w_put_alert_mapping, "offboard_tenant": _w_offboard_tenant}
+
+
+@POSTGRES
+@pytest.mark.parametrize("name", sorted(WRITE_CASES))
+async def test_o9_each_audited_write_of_the_port_announces_each_change_once_after_another_connection_sees_it(
+        dsn, store, adapter, caplog, name):
+    """Every audited write the adapter exposes logs one event per change, emitted once another connection sees the
+    change, naming the caller's actor and credential (offboarding: the administrator). (O9, P2, #1360 O5)"""
+    from defender.api.job_store import JobStorePorts
+    from defender.api.ports import (
+        AlertMappingRepository, AlertsRepository, InvestigationsRepository, LearningJobsRepository, Offboarding, Writes,
+    )
+    from defender.jobs.audit import AuditAction
+    from defender.tests.support.jobs._jobs1342 import JOBS_AUDIT_LOGGER
+
+    def members(*protocols: type) -> set[str]:
+        return {n for p in protocols for n in vars(p) if not n.startswith("_")}
+
+    reads = members(AlertsRepository, InvestigationsRepository, LearningJobsRepository, AlertMappingRepository)
+    served = {n for n in vars(JobStorePorts) if not n.startswith("_")}
+    assert served - reads == members(Writes, Offboarding) == set(WRITE_CASES), "census: every write the port serves"
+    caplog.set_level(logging.DEBUG, logger=JOBS_AUDIT_LOGGER)
+    seen = _SeenAtEmit(dsn)
+
+    async def act(call: Callable[[], Any]) -> Any:
+        seen.on = True
+        try:
+            return await call()
+        finally:
+            seen.on = False
+
+    logging.getLogger(JOBS_AUDIT_LOGGER).addHandler(seen)
+    try:
+        expected = await WRITE_CASES[name](dsn, store, adapter, act)
+    finally:
+        logging.getLogger(JOBS_AUDIT_LOGGER).removeHandler(seen)
+    actor, credential = (ADMIN, None) if name == "offboard_tenant" else (PROGRAM, CREDENTIAL)
+    assert {action for action, _, _ in expected} <= set(typing.get_args(AuditAction))
+    assert sorted(seen.seen) == sorted((action, target, actor, credential, visible) for action, target, visible in expected)

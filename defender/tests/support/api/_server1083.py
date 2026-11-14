@@ -6,6 +6,8 @@
   to answer (code map, 2026-11-13, rule R11), with failures at a given (realm, step, kind) (`Fail`, `FAULTS`).
   Anything it does not model, any other host included, is answered 404 and kept in `unmodelled`. It keeps each
   realm's private signing key in `signing_keys[realm]`; `program_token(...)` mints a programs-realm access token with it.
+  `answers` replaces a (realm, step)'s answer with any response or transport error (a generated failure space);
+  `closes` counts the clients closed over it (one per adapter).
 - `Child`: the program in a child process. `Child.real(environ)` runs the shipped command
   (`python -m defender.api_server`, real network); `Child.faked(environ, fails=...)` runs this module's entry, which
   calls `defender.api_server.run(os.environ, transport=FakeKeycloak(...))`, reports `run returned <n>` on stdout,
@@ -216,13 +218,26 @@ class FakeKeycloak(httpx.AsyncBaseTransport):
     host (`back`): a request to any other host is answered 404 and kept in `unmodelled`, as is anything else the
     fake does not model. Records every request in `seen` as `(method, "host:port/path")`.
 
-    `fails` are failures at (realm, step); at most one per (realm, step). `on_stall(realm)` runs when a stalled
-    discovery begins. Each realm's private signing key is `signing_keys[realm]` (published as kid `SIGNING_KID`)."""
+    `fails` are failures at (realm, step); at most one per (realm, step). `answers[(realm, step)]` answers that step
+    in place of the fake (a response, or raising a transport error). `on_stall(realm)` runs when a stalled discovery
+    begins. Each realm's private signing key is `signing_keys[realm]` (published as kid `SIGNING_KID`). `closes`
+    counts `aclose()` calls: an `httpx.AsyncClient` closes its transport once, so one per adapter closed.
+
+    The sign-in realm's account administration, as the identity service's mail sender uses it
+    (`KeycloakSignIn.create_account`, `send_set_password_email`), is modelled from Keycloak's admin REST API
+    documentation, UNOBSERVED on the dev Keycloak (a probe would write; rule R11, owed a live check):
+    `POST /admin/realms/<realm>/users` answers 201 with `Location: <server>/admin/realms/<realm>/users/<new id>`, or
+    409 `{"errorMessage": "User exists with same username"}` (or `... email`) for a taken username or email;
+    `GET .../users?username=<u>&exact=true` lists that account; `PUT .../users/<id>/execute-actions-email` answers
+    204 (404 for an unknown id), and the mail is kept in `mails` as `(realm, id, actions)`. Only the realm whose
+    admin role covers users (`ADMIN_READ`) may; the other answers 403, as for its reads."""
 
     def __init__(self, fails: Iterable[Fail] = (), *, front: str = FRONT, back: str = BACK,
                  admin_clients: Mapping[str, tuple[str, str]] = ADMIN_CLIENTS,
-                 on_stall: Callable[[str], None] | None = None) -> None:
+                 on_stall: Callable[[str], None] | None = None,
+                 answers: Mapping[tuple[str, str], Callable[[httpx.Request], httpx.Response]] | None = None) -> None:
         self.fails = {(f.realm, f.step): f.kind for f in fails}
+        self.answers = dict(answers or {})
         self.admin_clients = dict(admin_clients)
         self.front = front
         parsed = urllib.parse.urlsplit(back)
@@ -235,6 +250,12 @@ class FakeKeycloak(httpx.AsyncBaseTransport):
                      for realm in REALMS}
         self.seen: list[tuple[str, str]] = []
         self.unmodelled: list[tuple[str, str]] = []
+        self.accounts: dict[str, dict[str, Any]] = {}  # id -> account, the sign-in realm's created accounts
+        self.mails: list[tuple[str, str, list[str]]] = []
+        self.closes = 0
+
+    async def aclose(self) -> None:
+        self.closes += 1
 
     def issuer(self, realm: str) -> str:
         return f"{self.front}/realms/{realm}"
@@ -266,7 +287,9 @@ class FakeKeycloak(httpx.AsyncBaseTransport):
         if self.fails.get((realm, "discovery")) == "not_found":  # the realm does not exist: every path of it
             return httpx.Response(404, json={"error": "Realm does not exist"})
         if step is None:
-            return None
+            return self._accounts(realm, request)
+        if (realm, step) in self.answers:
+            return self.answers[(realm, step)](request)
         kind = self.fails.get((realm, step))
         if kind == STALL:
             if self.on_stall is not None:
@@ -309,8 +332,37 @@ class FakeKeycloak(httpx.AsyncBaseTransport):
             return httpx.Response(401, json={"error": "HTTP 401 Unauthorized"})
         # As observed: each admin client's role covers only its own resource; the other answers 403.
         if request.url.path.endswith(f"/{ADMIN_READ[realm]}") and kind != "no_role":
-            return httpx.Response(200, json=[])
+            if ADMIN_READ[realm] != "users" or "username" not in request.url.params:
+                return httpx.Response(200, json=[])
+            wanted = request.url.params["username"]  # the adapter searches `exact=true` (UNOBSERVED, see the class)
+            return httpx.Response(200, json=[a for a in self.accounts.values() if a["username"] == wanted])
         return httpx.Response(403, json={"error": "HTTP 403 Forbidden"})
+
+    def _accounts(self, realm: str, request: httpx.Request) -> httpx.Response | None:
+        """Account create and the set-password mail (UNOBSERVED, see the class); None for anything else."""
+        users = f"/admin/realms/{realm}/users"
+        path = request.url.path
+        create = (request.method, path) == ("POST", users)
+        mail = request.method == "PUT" and path.startswith(f"{users}/") and path.endswith("/execute-actions-email")
+        if not (create or mail):
+            return None
+        if request.headers.get("authorization") != f"Bearer admin-{realm}":
+            return httpx.Response(401, json={"error": "HTTP 401 Unauthorized"})
+        if ADMIN_READ[realm] != "users":
+            return httpx.Response(403, json={"error": "HTTP 403 Forbidden"})
+        if create:
+            body = json.loads(request.content)
+            for field in ("username", "email"):
+                if any(a[field] == body[field] for a in self.accounts.values()):
+                    return httpx.Response(409, json={"errorMessage": f"User exists with same {field}"})
+            account_id = str(uuid.uuid4())
+            self.accounts[account_id] = {"id": account_id, **body}
+            return httpx.Response(201, headers={"Location": f"{request.url.scheme}://{request.url.netloc.decode()}{users}/{account_id}"})
+        account_id = path.removeprefix(f"{users}/").removesuffix("/execute-actions-email")
+        if account_id not in self.accounts:
+            return httpx.Response(404, json={"error": "User not found"})
+        self.mails.append((realm, account_id, json.loads(request.content)))
+        return httpx.Response(204)
 
     @staticmethod
     def _basic_client(request: httpx.Request) -> tuple[str, str] | None:
@@ -427,6 +479,11 @@ class Child:
         """The value the entry says `run` returned; None if it never said (killed, or `run` never returned)."""
         line = self._out.line_starting("run returned ", timeout)
         return None if line is None else int(line.rsplit(" ", 1)[1])
+
+    def unmodelled(self, timeout: float = 60) -> list[list[str]] | None:
+        """What the child's fake answered as unmodelled (printed once `run` returned); None if it never said."""
+        line = self._out.line_starting("unmodelled ", timeout)
+        return None if line is None else json.loads(line.removeprefix("unmodelled "))
 
     def release(self) -> None:
         """Let a held entry exit (idempotent)."""
@@ -579,7 +636,9 @@ def _main() -> int:
     from defender.api_server import run
 
     fails = fails_from_json(os.environ[FAULTS_ENV]) if FAULTS_ENV in os.environ else ()
-    returned = run(os.environ, transport=FakeKeycloak(fails, on_stall=lambda realm: print(f"stalled {realm}", flush=True)))
+    keycloak = FakeKeycloak(fails, on_stall=lambda realm: print(f"stalled {realm}", flush=True))
+    returned = run(os.environ, transport=keycloak)
+    print(f"unmodelled {json.dumps(keycloak.unmodelled)}", flush=True)
     print(f"run returned {returned}", flush=True)
     sys.stdin.readline()  # hold: the parent observes the database, then closes stdin
     return returned
