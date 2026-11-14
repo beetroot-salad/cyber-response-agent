@@ -15,6 +15,8 @@ AuditAction = Literal[
     "investigation.finish", "investigation.takeover", "investigation.retry", "alert_mapping.update",
     "learning_job.start", "learning_job.claim", "learning_job.finish", "learning_job.takeover", "learning_job.retry",
     "learning_post_step",
+    # #1470: the API's config writes, announced by its record ports after the record store commits.
+    "system.update", "system.delete", "system.credentials", "case_record.update", "case_record.delete",
 ]
 
 __all__ = ["SYSTEM", "AuditAction", "announce"]

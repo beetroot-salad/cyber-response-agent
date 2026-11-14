@@ -24,10 +24,7 @@ from .models import (
     InvestigationKnowledge,
     LearningJob,
     Lesson,
-    System,
     SystemCheck,
-    SystemPut,
-    SystemSettings,
 )
 from .ports import (
     AuditAction,
@@ -96,7 +93,6 @@ class InMemoryStore:
         self._investigations: _Table[Investigation] = _Table()
         self._learning_jobs: _Table[LearningJob] = _Table()
         self._lessons: _Table[Lesson] = _Table()
-        self._systems: _Table[SystemSettings] = _Table()
 
     def _mint(self, family: type[_Id]) -> _Id:
         """The next id of `family`: canonical UUID text from a counter, so ids still sort in the order
@@ -142,10 +138,6 @@ class InMemoryStore:
     def add_lesson(self, tenant_id: TenantId, lesson: Lesson) -> Lesson:
         self._lessons[(tenant_id, lesson.lesson_id)] = lesson
         return lesson
-
-    def add_system(self, tenant_id: TenantId, settings: SystemSettings) -> SystemSettings:
-        self._systems[(tenant_id, settings.system_id)] = settings
-        return settings
 
     # --- AlertsRepository ---------------------------------------------------------------
 
@@ -271,24 +263,6 @@ class InMemoryStore:
     async def list_lessons(self, tenant_id: TenantId, *, after: str | None, limit: int) -> list[Lesson]:
         return _ids_after(self._lessons.of(tenant_id), lambda le: le.lesson_id, after, limit)
 
-    # --- SystemsRepository --------------------------------------------------------------
-
-    async def list_systems(
-        self, tenant_id: TenantId, *, after: str | None, limit: int
-    ) -> list[SystemSettings]:
-        return _ids_after(self._systems.of(tenant_id), lambda s: s.system_id, after, limit)
-
-    async def get_system(self, tenant_id: TenantId, system_id: str) -> SystemSettings | None:
-        return self._systems.get((tenant_id, system_id))
-
-    async def put_system(
-        self, principal: Principal, system_id: str, body: SystemPut
-    ) -> tuple[SystemSettings, bool]:
-        created = (principal.tenant_id, system_id) not in self._systems
-        settings = self.add_system(principal.tenant_id, SystemSettings(system_id=system_id, **body.model_dump()))
-        await self.announce(principal, "system.update", system_id)
-        return settings, created
-
     # --- AlertMappingRepository and its write -------------------------------------------
 
     async def get_alert_mapping(self, tenant_id: TenantId) -> AlertMapping | None:
@@ -341,15 +315,10 @@ class InMemorySecrets:
 
 
 class StubSystemChecker:
-    """Answers from configuration alone; the real check calls the system through the
-    credential proxy."""
+    """Answers without calling anything; the real check calls the system through the credential proxy (#1460)."""
 
-    async def check(self, tenant_id: TenantId, system: System) -> SystemCheck:
-        if not system.enabled:
-            return SystemCheck(ok=False, detail="the system is disabled")
-        if not system.has_credentials:
-            return SystemCheck(ok=False, detail="no credentials set")
-        return SystemCheck(ok=True, detail="stub: configuration present; no call was made")
+    async def check(self, tenant_id: TenantId, system_id: str) -> SystemCheck:
+        return SystemCheck(ok=False, detail="stub: no call was made")
 
 
 class StubArtifactLinks:

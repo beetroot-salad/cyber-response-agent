@@ -34,13 +34,13 @@ from defender.identity import (
 from .fakes import (
     InMemoryOffboarding,
     _Id,
-    InMemorySecrets,
     InMemoryStore,
     StubArtifactLinks,
     StubSystemChecker,
 )
-from .models import Alert, Investigation, LearningJob, Lesson, SystemSettings
+from .models import Alert, Investigation, LearningJob, Lesson
 from .ports import ApiDeps
+from .refusing import Refusing
 
 
 #: The users each tenant gets, each signed in as `<tenant>-<role>` (see `demo_sessions`).
@@ -57,6 +57,9 @@ UTC_NOW: Callable[[], _dt.datetime] = partial(_dt.datetime.now, _dt.UTC)
 #: the frontend's dev server forwards API calls, so the browser only ever sees this origin.
 DEMO_FRONTEND_ORIGIN = "http://localhost:3000"
 _SESSION_LIFETIME = _dt.timedelta(days=365)
+#: The demo holds no tenant records: they live only in the record store, which the real server serves (#1470); the
+#: demo's config routes are #1496's to remove.
+_NO_RECORDS = "the real server (the demo holds no tenant records; #1496)"
 _logger = logging.getLogger(__name__)
 
 
@@ -132,9 +135,9 @@ async def demo_deps(tenants: Sequence[str], clock: Callable[[], _dt.datetime] = 
     except TenantRefused as refused:
         raise ValueError(f"not a tenant id: {refused}") from None
     store = InMemoryStore(clock)
-    secrets = InMemorySecrets(store)
+    records = Refusing(_NO_RECORDS)
     now = clock()
-    _seed(store, secrets, tenant_ids[0], now)
+    _seed(store, tenant_ids[0], now)
     for n, tenant in enumerate(tenant_ids[1:], start=9):
         store.add_alert(tenant, _alert(
             tenant, n, fired=now - _dt.timedelta(hours=2), title=f"An alert of {tenant}'s",
@@ -163,10 +166,11 @@ async def demo_deps(tenants: Sequence[str], clock: Callable[[], _dt.datetime] = 
         investigations=store,
         learning_jobs=store,
         lessons=store,
-        systems=store,
+        # The tenant's records live in the record store only (#1470: no in-memory twin); the demo serves none (#1496).
+        systems=records,
         alert_mapping=store,
         writes=store,
-        secrets=secrets,
+        secrets=records,
         checker=StubSystemChecker(),
         artifact_links=StubArtifactLinks(),
         audit=store,
@@ -194,7 +198,7 @@ def _alert(tenant: TenantId, n: int, *, fired: _dt.datetime, title: str, rule: s
     )
 
 
-def _seed(store: InMemoryStore, secrets: InMemorySecrets, tenant: TenantId, now: _dt.datetime) -> None:
+def _seed(store: InMemoryStore, tenant: TenantId, now: _dt.datetime) -> None:
     hour = _dt.timedelta(hours=1)
     brute = store.add_alert(tenant, _alert(
         tenant, 1, fired=now - 30 * hour, title="Repeated failed logins followed by success",
@@ -243,13 +247,3 @@ def _seed(store: InMemoryStore, secrets: InMemorySecrets, tenant: TenantId, now:
         description="A success after failures is benign only if the source has logged in before.",
         status="live",
     ))
-
-    store.add_system(tenant, SystemSettings(
-        system_id="tickets", kind="ticketing", display_name="Security ticket queue", enabled=True,
-        settings={"base_url": f"https://tickets.{tenant}.example", "ready_status": "triage"},
-    ))
-    store.add_system(tenant, SystemSettings(
-        system_id="siem", kind="siem", display_name="Event search", enabled=True,
-        settings={"base_url": f"https://siem.{tenant}.example"},
-    ))
-    secrets.add_credentials(tenant, "tickets", {"api_token": "demo-secret-token-1163"})
