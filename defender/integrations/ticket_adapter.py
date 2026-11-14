@@ -37,6 +37,9 @@ EXAMPLE = True
 #: an environment fact, so it lives in the tenant config and is required: absent means the
 #: system is down (`ConfigFault`), never a built-in default.
 REQUIRED_CONFIG_KEYS = (*transport.REQUIRED_CONFIG_KEYS_TEMPLATE, "KEY_PATTERN")
+#: An example value for each key a record of this adapter stores, read cold by the catalog and served to an
+#: admin as a starting point (#1470 D11); this adapter's own settings check accepts it.
+SAMPLE_SETTINGS = {"TICKET_TIMEOUT_SEC": "10", "TICKET_KEY_PATTERN": "[A-Za-z0-9][A-Za-z0-9._-]*"}
 #: No setting goes in a request path.
 PATH_KEYS: tuple[str, ...] = ()
 #: The route `add_case_comment` sends (#1366 C1): a comment on the ticket, whatever the settings.

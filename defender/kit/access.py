@@ -6,7 +6,7 @@ from __future__ import annotations
 import contextlib
 import threading
 import time
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 
 from defender.kit.faults import ORIGIN_ACCESS, ORIGIN_SETUP, AdapterFault, TransportFault
@@ -44,15 +44,6 @@ CREDENTIAL_KINDS = (STATIC, OAUTH_CLIENT_CREDENTIALS)
 #: The fixed field names a scheme reads from its set (r7 A19): a declaration does not rename them.
 USERNAME, PASSWORD = "username", "password"
 CLIENT_ID, CLIENT_SECRET = "client_id", "client_secret"
-#: The one field of each kind that is not secret; every other field of a set is.
-PUBLIC_FIELD = {STATIC: USERNAME, OAUTH_CLIENT_CREDENTIALS: CLIENT_ID}
-
-
-def secret_fields(kind: str, names: Iterable[str]) -> tuple[str, ...]:
-    """Which of a `kind` set's field `names` are secret (r7 A19): all but the kind's public
-    field. The write API's minimum length asks this."""
-    return tuple(n for n in names if n != PUBLIC_FIELD.get(kind))
-
 
 @dataclass(frozen=True)
 class Auth:
@@ -70,6 +61,87 @@ class Auth:
     def kind(self) -> str:
         """The credential-set kind this scheme needs."""
         return OAUTH_CLIENT_CREDENTIALS if self.scheme == OAUTH_CLIENT_CREDENTIALS else STATIC
+
+
+# --- the credential schema (#1470 O7, P6): what a scheme's set holds and every value rule the proxy refuses at use ----
+
+#: The least length of a secret field's value (#1163 A4).
+SECRET_MIN_LENGTH = 16
+
+#: The schemes whose set has fixed field names (r7 A19): each field and whether it is secret.
+_FIXED_FIELDS: Mapping[str, Mapping[str, bool]] = {
+    BASIC: {USERNAME: False, PASSWORD: True},
+    OAUTH_CLIENT_CREDENTIALS: {CLIENT_ID: False, CLIENT_SECRET: True},
+}
+
+#: The field names the schema holds public: a scheme that names its own secret field (bearer, header) may not name one
+#: of these (the access parser's rule, r7 A19).
+PUBLIC_FIELD_NAMES = frozenset(name for fields in _FIXED_FIELDS.values() for name, secret in fields.items() if not secret)
+
+
+def credential_fields(auth: Auth) -> Mapping[str, bool]:
+    """Exactly the fields `auth`'s credential set holds, each mapped to whether it is secret: bearer and header the one
+    field they name (secret); basic `username` (public) and `password`; OAuth `client_id` (public) and
+    `client_secret`."""
+    if auth.scheme in (BEARER, HEADER):
+        return {str(auth.field): True}
+    return dict(_FIXED_FIELDS[auth.scheme])
+
+
+def _sent_in_a_header(auth: Auth) -> bool:
+    """Is the set's value sent as a header as it is (bearer, header), so it must be ASCII?"""
+    return auth.scheme in (BEARER, HEADER)
+
+
+def _value_faults(auth: Auth, name: str, value: object, secret: bool) -> list[str]:
+    """Why `value` cannot stand in field `name` of `auth`'s set: the rules the proxy refuses at use, and the secret
+    length. Never shows the value."""
+    shown = f"the credential field {name!r}"
+    if not isinstance(value, str):
+        return [f"{shown} must be text"]
+    if not value:
+        return [f"{shown} is empty"]
+    faults: list[str] = []
+    if not value.isprintable():
+        faults.append(f"{shown} holds a control character")
+    if _sent_in_a_header(auth) and not value.isascii():
+        faults.append(f"{shown} is not ASCII, so it cannot be sent in a header")
+    if auth.scheme == BASIC and name == USERNAME and ":" in value:
+        faults.append(f"{shown} holds a `:`, which a basic-auth username may not")
+    if secret and len(value) < SECRET_MIN_LENGTH:
+        faults.append(f"{shown} is secret and shorter than {SECRET_MIN_LENGTH} characters")
+    return faults
+
+
+def credential_faults(auth: Auth, fields: Mapping[str, str]) -> list[str]:
+    """Every reason `fields` is not a credential set `auth`'s scheme can use, each a sentence naming the field (never a
+    value); `[]` when it fits. Exactly the scheme's fields (`credential_fields`), each holding a value the proxy would
+    send: non-empty and printable, ASCII where it is sent in a header, no `:` in a basic username, and a secret one at
+    least `SECRET_MIN_LENGTH` long."""
+    expected = credential_fields(auth)
+    faults = [f"the {auth.scheme} credential set lacks the field {name!r}" for name in sorted(expected)
+              if name not in fields]
+    for name in sorted(fields, key=repr):
+        if name not in expected:
+            faults.append(f"the field {name!r} is not one the {auth.scheme} scheme reads")
+        else:
+            faults += _value_faults(auth, name, fields[name], expected[name])
+    return faults
+
+
+class CredentialRefused(Exception):
+    """A credential set the schema refuses for its scheme: `faults` is every reason (`credential_faults`)."""
+
+    def __init__(self, faults: list[str]) -> None:
+        self.faults = list(faults)
+        super().__init__("; ".join(self.faults))
+
+
+def check_credentials(auth: Auth, fields: Mapping[str, str]) -> None:
+    """`CredentialRefused` with every fault unless `fields` is a set `auth`'s scheme can use."""
+    faults = credential_faults(auth, fields)
+    if faults:
+        raise CredentialRefused(faults)
 
 
 #: Seconds a request token lives from when it is signed (r7 A20), and the life a held read token
@@ -238,6 +310,7 @@ class AccessDeclaration:
 
 __all__ = [
     "TOKEN_REUSE_MARGIN_SEC", "TOKEN_SEC", "BASIC", "BEARER", "CALLER_GRACE_SEC", "caller_wait_sec", "CLIENT_ID", "CLIENT_SECRET", "CREDENTIAL_KINDS", "HEADER", "HTTP_PROXY",
-    "OAUTH_CLIENT_CREDENTIALS", "PASSWORD", "PROXY_OVERHEAD_SEC", "PROXY_URL_ENV", "PUBLIC_FIELD", "SCHEMES", "STATIC",
-    "USERNAME", "AccessDeclaration", "Auth", "RequestAccess", "Route", "secret_fields",
+    "OAUTH_CLIENT_CREDENTIALS", "PASSWORD", "PROXY_OVERHEAD_SEC", "PROXY_URL_ENV", "PUBLIC_FIELD_NAMES", "SCHEMES",
+    "SECRET_MIN_LENGTH", "STATIC", "USERNAME", "AccessDeclaration", "Auth", "CredentialRefused", "RequestAccess", "Route",
+    "check_credentials", "credential_faults", "credential_fields",
 ]

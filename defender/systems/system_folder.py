@@ -6,7 +6,7 @@ folder says: every `KEY=value` line of `config.env` is a setting, and a line a p
 `export` line, a key set twice) is refused rather than dropped, so a value on such a line never becomes, or hides
 behind, a stored setting. Each part is held to the one settings-file size (`SETTINGS_MAX_BYTES`) at every door, so the
 import cannot store what `set-system` refuses. A missing `config.env` is no settings and a missing `access.yaml` is no declaration: what
-that leaves unusable is the record judgement's to say (`record_judgement`), not the reader's. Faults name the folder's
+that leaves unusable is the record judgement's to say (`system_rules`), not the reader's. Faults name the folder's
 parts through the caller's locator (DC6): the record's words for `set-system`, the file for the import and connect."""
 from __future__ import annotations
 

@@ -6,7 +6,7 @@ record store already makes, asked again over the tenant's current records:
 
 - not imported (R8): the one finding naming `tenant.py import`, and nothing judged from the retired folders, which
   stand for a full set of systems and a case record;
-- each record judged as the store judges a write (`record_judgement.system_faults`: an adapter an upgrade removed,
+- each record judged as the store judges a write (`system_rules.system_faults`: an adapter an upgrade removed,
   settings an upgrade invalidated, a declaration that does not parse);
 - the grants table against the records (R12): a catalog system granted with no record is an orphaned grant, one whose
   record is disabled is granted but disabled; an ungranted unrecorded system is silent; a grant on a system the catalog
@@ -30,12 +30,12 @@ from defender.kit.access import AccessDeclaration
 from defender.kit.faults import ConfigFault
 from defender.systems import case_system
 from defender.systems.catalog import Catalog, TenantSystems
-from defender.systems.record_judgement import system_faults
+from defender.system_rules import system_faults
 from defender.systems.run_tenant import not_imported_text, record_settings
 from defender.systems.verb_dispositions import DispositionError, dispositions_path, load_dispositions
 from defender.systems.verbs import RegistryError, is_platform_served
 from defender.tenancy import AGENT_HALF, SETTINGS_HALF
-from defender.tenancy.case_ticket import CASE_RECORD_REL
+from defender.tenancy.case_record import CASE_RECORD_REL
 from defender.tenancy.models import TenantRecords
 
 if TYPE_CHECKING:
