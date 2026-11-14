@@ -1,5 +1,7 @@
 """The program's start and stop (#1083 Am-3). One exit stack owns every step: each step that opens something
-registers its close, so a refusal or a stop at any point closes, in reverse, exactly what was opened."""
+registers its close, so a refusal or a stop at any point closes, in reverse, exactly what was opened. What the app's
+lifespan closes (the identity service with its sign-in adapters and people repository, the tenant rows) is held on
+a start-only stack and handed to the lifespan as it is entered: one owner for each close."""
 
 from __future__ import annotations
 
@@ -74,9 +76,11 @@ async def _abandonable(call: Callable[[], None]) -> None:
         try:
             call()
         except BaseException as failed:  # noqa: BLE001 — handed to the awaiting coroutine whole
-            loop.call_soon_threadsafe(settle, failed)
+            outcome: BaseException | None = failed
         else:
-            loop.call_soon_threadsafe(settle, None)
+            outcome = None
+        with contextlib.suppress(RuntimeError):  # a stop abandoned this thread and the loop has since closed
+            loop.call_soon_threadsafe(settle, outcome)
 
     threading.Thread(target=work, name="version-check", daemon=True).start()
     await done
@@ -113,31 +117,35 @@ async def serving(settings: Settings, *, transport: httpx.AsyncBaseTransport | N
             await _abandonable(lambda: check_version(settings.database_dsn))
         except (RevisionMismatch, DatabaseUnreachable) as why:
             raise StartRefused(str(why)) from why
-        signin = KeycloakSignIn(
-            issuer=settings.signin_issuer, client_id=settings.signin_client_id,
-            client_secret=settings.signin_client_secret, redirect_uri=settings.signin_redirect_uri,
-            admin_client_id=settings.signin_admin_client_id, admin_client_secret=settings.signin_admin_client_secret,
-            server_url=settings.keycloak_server_url, transport=transport)
-        stack.push_async_callback(signin.close)
-        programs = KeycloakPrograms(
-            issuer=settings.programs_issuer, audience=settings.programs_audience,
-            admin_client_id=settings.programs_admin_client_id,
-            admin_client_secret=settings.programs_admin_client_secret,
-            server_url=settings.keycloak_server_url, transport=transport)
-        stack.push_async_callback(programs.close)
-        await _probe(signin)
-        await _probe(programs)
-        store = JobStore(settings.database_dsn, clock=_wall_clock)
-        stack.push_async_callback(store.close)
-        people = PostgresIdentityRepository(settings.database_dsn)
-        stack.push_async_callback(people.close)
-        tenants = PostgresTenantRepository(settings.database_dsn)
-        stack.push_async_callback(tenants.close)
-        identity = IdentityService(people, signin=signin, mail=LoggedMail(), clock=_wall_clock,
-                                   bootstrap=settings.administrators, programs=programs)
-        app = create_app(_api_deps(settings, identity, tenants, JobStorePorts(store)))
-        sock = _bind(settings)
-        stack.callback(sock.close)
+        async with AsyncExitStack() as until_lifespan:  # closes what the lifespan will own, if start ends before it
+            signin = KeycloakSignIn(
+                issuer=settings.signin_issuer, client_id=settings.signin_client_id,
+                client_secret=settings.signin_client_secret.get_secret_value(),
+                redirect_uri=settings.signin_redirect_uri, admin_client_id=settings.signin_admin_client_id,
+                admin_client_secret=settings.signin_admin_client_secret.get_secret_value(),
+                server_url=settings.keycloak_server_url, transport=transport)
+            until_lifespan.push_async_callback(signin.close)
+            programs = KeycloakPrograms(
+                issuer=settings.programs_issuer, audience=settings.programs_audience,
+                admin_client_id=settings.programs_admin_client_id,
+                admin_client_secret=settings.programs_admin_client_secret.get_secret_value(),
+                server_url=settings.keycloak_server_url, transport=transport)
+            until_lifespan.push_async_callback(programs.close)
+            await _probe(signin)
+            await _probe(programs)
+            store = JobStore(settings.database_dsn, clock=_wall_clock)
+            stack.push_async_callback(store.close)  # the lifespan does not close it: it outlives the lifespan
+            people = PostgresIdentityRepository(settings.database_dsn)
+            until_lifespan.push_async_callback(people.close)
+            tenants = PostgresTenantRepository(settings.database_dsn)
+            until_lifespan.push_async_callback(tenants.close)
+            identity = IdentityService(people, signin=signin, mail=LoggedMail(), clock=_wall_clock,
+                                       bootstrap=settings.administrators, programs=programs)
+            app = create_app(_api_deps(settings, identity, tenants, JobStorePorts(store)))
+            sock = _bind(settings)
+            stack.callback(sock.close)
+            # Handed over: from here the lifespan closes the service and the tenant rows, its start's failure too.
+            until_lifespan.pop_all()
         try:
             await stack.enter_async_context(app.router.lifespan_context(app))
         except BootstrapRefused as why:

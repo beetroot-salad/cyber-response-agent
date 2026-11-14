@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 import yaml
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
 
@@ -29,6 +29,9 @@ class StartRefused(Exception):
 
 @dataclasses.dataclass(frozen=True)
 class Settings:
+    """The client secrets are `SecretStr`: printing the settings shows `**********`, and the one place that hands a
+    secret to an adapter reads it out by name."""
+
     database_dsn: str
     host: str
     port: int
@@ -37,14 +40,14 @@ class Settings:
     keycloak_server_url: str
     signin_issuer: str
     signin_client_id: str
-    signin_client_secret: str
+    signin_client_secret: SecretStr
     signin_redirect_uri: str
     signin_admin_client_id: str
-    signin_admin_client_secret: str
+    signin_admin_client_secret: SecretStr
     programs_issuer: str
     programs_audience: str
     programs_admin_client_id: str
-    programs_admin_client_secret: str
+    programs_admin_client_secret: SecretStr
 
     @classmethod
     def from_environ(cls, environ: Mapping[str, str]) -> Settings:
@@ -59,8 +62,8 @@ class Settings:
             except ValueError as why:
                 raise StartRefused(f"{name}: {why}") from None
 
-        def secret(name: str) -> str:
-            return _secret_from_file(name, text(name))
+        def secret(name: str) -> SecretStr:
+            return SecretStr(_secret_from_file(name, text(name)))
 
         return cls(
             database_dsn=parsed("DEFENDER_DATABASE_DSN", _database_dsn),
@@ -128,11 +131,25 @@ def _absolute_url(value: str) -> str:
     return value
 
 
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
 def _origin(value: str) -> str:
-    """Scheme, host and optional port: no path (a trailing slash too), query or fragment."""
+    """Scheme, host and optional port: no path (a trailing slash too), query or fragment. Written exactly as a
+    browser sends it in `Origin` (lower case, no default port, an ASCII host), since requests are compared to it
+    character for character; any other spelling refuses, naming the one to write."""
     parts = _http_url(value)
     if parts.path or parts.query or parts.fragment:
         raise ValueError("must be a scheme, host and optional port only (no path, even a trailing slash)")
+    host = parts.hostname or ""
+    if not host.isascii():
+        raise ValueError("must name its host in ASCII (an internationalized name in its xn-- form), as a browser sends it")
+    netloc = f"[{host}]" if ":" in host else host
+    if parts.port is not None and parts.port != _DEFAULT_PORTS[parts.scheme]:
+        netloc += f":{parts.port}"
+    canonical = f"{parts.scheme}://{netloc}"
+    if value != canonical:
+        raise ValueError(f"must be written as a browser sends it: {canonical}")
     return value
 
 

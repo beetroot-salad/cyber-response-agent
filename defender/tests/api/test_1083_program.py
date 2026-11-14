@@ -74,7 +74,12 @@ def _shape_violations(name: str, tmp_path: Path) -> list[tuple[str, str]]:
     if name == "DEFENDER_DATABASE_DSN":
         cases.append(("unparsable dsn", "not a dsn"))
     if name == "DEFENDER_API_FRONTEND_ORIGIN":
-        cases += [("origin with a path", f"{ORIGIN}/app"), ("origin with no scheme", "localhost:8000")]
+        cases += [("origin with a path", f"{ORIGIN}/app"), ("origin with no scheme", "localhost:8000"),
+                  # Not as a browser writes `Origin`, so no request would ever match it (#1498 review).
+                  ("origin with an upper-case host", ORIGIN.replace("localhost", "LocalHost")),
+                  ("origin with an upper-case scheme", ORIGIN.replace("http", "HTTP", 1)),
+                  ("origin with its default port", "http://localhost:80"),
+                  ("origin with a non-ASCII host", "http://bücher.example:8000")]
     if name == "DEFENDER_KEYCLOAK_REDIRECT_URI":
         cases += [("redirect uri relative", "/auth/callback"), ("redirect uri not http", "ftp://localhost:8000/cb"),
                   ("redirect uri no scheme", "localhost:8000/auth/callback")]
@@ -166,6 +171,23 @@ async def test_a_setting_missing_empty_or_misshapen_refuses_naming_only_it(tmp_p
         assert [n for n in SETTING_NAMES if n in message] == [name], (case, message)
         if "PROGRAMS" not in name:
             assert PROGRAMS_REALM not in stripped, (case, message)
+
+
+def test_printing_the_settings_shows_no_client_secret(tmp_path):
+    """The parsed settings, printed or shown in a failure diff, hold no secret file's value; the adapters still get
+    each one, read out by name. (#1498 review)"""
+    from defender.api_server import Settings
+
+    healthy = environment(tmp_path, dsn="postgresql://defender:pw@localhost:5432/defender")
+    settings = Settings.from_environ(healthy)
+    secrets = {name: Path(healthy[name]).read_text().removesuffix("\n")
+               for name in SETTING_NAMES if name.endswith("_SECRET_FILE")}
+    assert len(secrets) == 3  # control: the three client secrets
+    shown = f"{settings!r} {settings!s}"
+    assert [name for name, value in secrets.items() if value in shown] == []
+    held = {settings.signin_client_secret.get_secret_value(), settings.signin_admin_client_secret.get_secret_value(),
+            settings.programs_admin_client_secret.get_secret_value()}
+    assert held == set(secrets.values())
 
 
 def test_every_setting_with_junk_derived_from_its_healthy_value_refuses_naming_only_it(tmp_path):

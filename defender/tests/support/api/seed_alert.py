@@ -27,7 +27,7 @@ async def _seed(dsn: str, tenant: str, ticket: str, raw: bytes, now: dt.datetime
                                           changed_at=now, received_at=now, raw=raw)
     finally:
         await store.close()
-    print(f"alert {stored.id}")
+    print(f"alert {stored.alert_id}")
 
 
 def main() -> int:

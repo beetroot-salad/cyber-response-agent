@@ -11,6 +11,8 @@ from __future__ import annotations
 import datetime as _dt
 from typing import Any
 
+from pydantic import BaseModel
+
 from defender.jobs import InvestigationRecord, JobStore, LearningJobRecord, StoredAlert
 from defender.records.formats import MAPPING_KEYS, AlertId, InvestigationId, LearningJobId, TenantId, check_mapping
 from defender.records.formats import AlertMapping as StoredAlertMapping
@@ -26,21 +28,25 @@ from .models import (
 )
 from .ports import Principal, TimePosition
 
-_NOT_FROM_THE_STORE = {"status", "artifacts", "knowledge"}
+_NOT_FROM_THE_STORE = frozenset({"status", "artifacts", "knowledge"})
+
+
+def _by_name(model: type[BaseModel], record: object, *, but: frozenset[str] = frozenset()) -> dict[str, Any]:
+    """The record's values for the model's fields of the same name, less `but` (the fields the caller sets itself)."""
+    return {name: getattr(record, name) for name in model.model_fields if name not in but}
 
 
 def _alert_summary(alert: StoredAlert) -> AlertSummary:
-    return AlertSummary(**{name: getattr(alert, name) for name in AlertSummary.model_fields})
+    return AlertSummary(**_by_name(AlertSummary, alert))
 
 
 def _wire_alert(alert: StoredAlert) -> Alert:
-    return Alert(raw=alert.raw.decode("utf-8"), **_alert_summary(alert).model_dump())
+    return Alert(raw=alert.raw.decode("utf-8"), **_by_name(Alert, alert, but=frozenset({"raw"})))
 
 
 def _investigation(record: InvestigationRecord) -> Investigation:
     """The artifacts stay empty: no blob store holds any (#1083 N4)."""
-    fields: dict[str, Any] = {
-        name: getattr(record, name) for name in Investigation.model_fields if name not in _NOT_FROM_THE_STORE}
+    fields = _by_name(Investigation, record, but=_NOT_FROM_THE_STORE)
     fields["status"] = record.stage
     if record.knowledge is not None:
         fields["knowledge"] = InvestigationKnowledge.model_validate(record.knowledge)
@@ -48,7 +54,7 @@ def _investigation(record: InvestigationRecord) -> Investigation:
 
 
 def _learning_job(record: LearningJobRecord) -> LearningJob:
-    return LearningJob(**{name: getattr(record, name) for name in LearningJob.model_fields})
+    return LearningJob(**_by_name(LearningJob, record))
 
 
 def _wire_mapping(stored: StoredAlertMapping) -> AlertMapping:
