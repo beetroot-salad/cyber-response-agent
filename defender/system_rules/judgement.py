@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from defender.kit.access import AccessDeclaration, Route
-from defender.kit.faults import ConfigFault
+from defender.kit.faults import ConfigFault, ConfigFaults
 from defender.kit.settings import RECORDS, Locator, Part, SystemConfig
 from defender.system_rules.catalog import Catalog, route_of
 from defender.system_rules.registry import is_platform_served
@@ -141,7 +141,7 @@ def _the_catalog(catalog: Catalog | None) -> Catalog:
 def system_faults(record: SystemRecord, *, catalog: Catalog, locator: Locator = RECORDS) -> list[str]:
     """Why one system record is unusable (O3, O4, K1), each fault opening with the record's locator: a platform-served
     name, a custom reference, an adapter the catalog lacks or that differs from the system id, then its adapter's own
-    settings check over a tenant record holding it (its access first, then its settings)."""
+    settings check over a tenant record holding it (its access first, then its settings; every fault it finds, O4)."""
     system = record.system_id
     where = locator.system(system)
     if is_platform_served(system):
@@ -157,27 +157,29 @@ def system_faults(record: SystemRecord, *, catalog: Catalog, locator: Locator = 
                 "only a delete of this record is accepted"]
     if adapter != system:
         return [f"{where}: a catalog record's system id is its adapter id, but it names the adapter `{adapter}`"]
-    fault = _settings_fault(record, catalog=catalog, locator=locator)
-    return [] if fault is None else [fault]
+    return _settings_faults(record, catalog=catalog, locator=locator)
 
 
-def _settings_fault(record: SystemRecord, *, catalog: Catalog, locator: Locator) -> str | None:
-    """The adapter's own `check_settings` over a tenant record holding `record` (K1), as one located sentence."""
+def _settings_faults(record: SystemRecord, *, catalog: Catalog, locator: Locator) -> list[str]:
+    """The adapter's own `check_settings` over a tenant record holding `record` (K1), each fault it raises (one, or
+    every one a `ConfigFaults` carries: O4) as a located sentence."""
     system = record.system_id
     try:
         module = catalog.module(record.adapter_id)
     except Exception as e:  # noqa: BLE001 — an adapter that will not import is not usable, not fatal
-        return f"{locator.system(system)}: its adapter could not be loaded ({type(e).__name__})"
+        return [f"{locator.system(system)}: its adapter could not be loaded ({type(e).__name__})"]
     check = getattr(module, "check_settings", None)
     if not callable(check):
-        return f"{locator.system(system)}: its adapter declares no `check_settings`"
+        return [f"{locator.system(system)}: its adapter declares no `check_settings`"]
     try:
         check(RecordTenant.of({system: record}, locator=locator))
+    except ConfigFaults as faults:
+        return [_located(text, system, locator) for text in faults.faults]
     except ConfigFault as fault:
-        return _located(str(fault), system, locator)
+        return [_located(str(fault), system, locator)]
     except Exception as e:  # noqa: BLE001 — a check that crashes is the adapter's defect
-        return f"{locator.system(system)}: its adapter's `check_settings` raised {type(e).__name__}"
-    return None
+        return [f"{locator.system(system)}: its adapter's `check_settings` raised {type(e).__name__}"]
+    return []
 
 
 #: The parts of a record a fault may name (DC6).
