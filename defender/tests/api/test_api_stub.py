@@ -165,6 +165,9 @@ EXISTING_ROUTES = {
     # #1345 O1: the tenant's alert mapping, read and replaced whole (sketch: invented path)
     ("GET", ALERT_MAPPING_ROUTE),
     ("PUT", ALERT_MAPPING_ROUTE),
+    # #1485 O1, O2: the tenant's set-aside items and parked batches (Names, Routes)
+    ("GET", "/tenants/{tenant_id}/learning/items"),
+    ("GET", "/tenants/{tenant_id}/learning/parked-batches"),
 }
 #: What #1306 adds (design "Endpoints"; param names pinned by this suite).
 IDENTITY_ROUTES = {
@@ -235,6 +238,10 @@ HAPPY: list[tuple[tuple[str, str], str, dict[str, Any] | None, dict[str, Any]]] 
      {"get_alert_mapping": _Answer("saved mapping", lambda _tenant: _alert_mapping_wire(MAPPING_BODY))}),
     (("PUT", ALERT_MAPPING_ROUTE), alert_mapping_url(A), MAPPING_BODY,
      {"put_alert_mapping": _Answer("created from the body", lambda _principal, body: (body, True))}),
+    # #1485: an empty page is a served list; the wire models are built inside the cases, never at collection.
+    (("GET", "/tenants/{tenant_id}/learning/items"), f"{T}/learning/items", None, {"list_set_aside": []}),
+    (("GET", "/tenants/{tenant_id}/learning/parked-batches"), f"{T}/learning/parked-batches", None,
+     {"list_parked_batches": []}),
 ]
 
 
@@ -1134,6 +1141,9 @@ _UNKNOWN_QUERY_ROUTES = [
     ("GET", f"{T}/lessons?bogus=x"),
     ("GET", f"{T}/systems?bogus=x"),
     ("GET", f"{T}/members?bogus=x"),
+    ("GET", f"{T}/learning/items?bogus=x"),          # #1485
+    ("GET", f"{T}/learning/items?limit=5&fired_after=2026-09-28T08:00:00Z"),
+    ("GET", f"{T}/learning/parked-batches?status=held"),
 ]
 
 
@@ -1177,6 +1187,8 @@ def test_r7_2_every_unknown_query_parameter_gets_its_own_entry() -> None:
     (f"{T}/investigations?alert_id=a1000000-0000-4000-8000-000000000001&limit=5", {"list_investigations": [INV]}),
     (f"{T}/learning-jobs?investigation_id=b1000000-0000-4000-8000-000000000001&limit=5", {"list_learning_jobs": []}),
     (f"{T}/lessons?limit=5", {"list_lessons": [LESSON]}),
+    (f"{T}/learning/items?status=held&limit=5", {"list_set_aside": []}),          # #1485
+    (f"{T}/learning/parked-batches?limit=5", {"list_parked_batches": []}),
 ])
 def test_r7_2_control_declared_query_parameters_are_served_as_before(path: str, answers: dict[str, Any]) -> None:
     """Control: the declared parameters of the same routes answer 200. (R7-2)"""
@@ -1217,7 +1229,8 @@ def test_an_id_outside_the_grammar_is_refused_at_the_boundary(
 
 
 @pytest.mark.parametrize("limit", [0, MAX_PAGE + 1])
-@pytest.mark.parametrize("path", [f"{T}/alerts", f"{T}/investigations", f"{T}/learning-jobs"])
+@pytest.mark.parametrize("path", [f"{T}/alerts", f"{T}/investigations", f"{T}/learning-jobs",
+                                  f"{T}/learning/items", f"{T}/learning/parked-batches"])
 def test_a_page_size_out_of_range_is_refused(path: str, limit: int) -> None:
     api = Api()
     assert api.client.get(path, headers=AUTH, params={"limit": limit}).status_code == 422
@@ -1365,6 +1378,247 @@ def test_a_cursor_of_the_wrong_shape_for_its_list_is_refused(
     assert response.status_code == 422
     assert "not a position in this list" in response.text
     assert len(api.ports.calls) == calls
+
+
+# --- #1485: the learning lists (items, parked batches): paging, filters, wire, demo ---------------------------------
+
+ITEM_ID = "e1000000-0000-4000-8000-000000000001"
+ITEM_ID_2 = "e1000000-0000-4000-8000-000000000002"
+BATCH = "d1000000-0000-4000-8000-000000000001"
+BATCH_2 = "d1000000-0000-4000-8000-000000000002"
+LEARNING_ITEMS = f"{T}/learning/items"
+LEARNING_PARKED = f"{T}/learning/parked-batches"
+SCRIPT_REASON = '<script>alert("x")</script> & "q" \\n </td>'
+ITEM_WIRE_FIELDS = {"item_id", "kind", "key", "status", "reason", "source_run", "batch_id", "pr_number", "updated_at"}
+PARKED_WIRE_FIELDS = {"batch_id", "batch_kind", "lane", "blocks_lane", "branch", "pr_number", "reason", "created_at", "items"}
+
+
+def _learning_api(**answers: Any) -> Api:
+    """`Api` whose `learning_work` port is its scripted port too: `_deps`'s wiring with that one field replaced."""
+    api = Api(**answers)
+    api.client = TestClient(create_app(dataclasses.replace(api.client.app.state.deps, learning_work=api.ports)),
+                            base_url=BASE)
+    return api
+
+
+def _set_aside_rows() -> list[Any]:
+    """Two held items tied on `updated_at`, in the list's order (id descending). Built in the case, not at import."""
+    from defender.api.models import SetAsideItem
+
+    first = SetAsideItem(item_id=ITEM_ID_2, kind="finding", key="run 1/f 02", status="held", reason=SCRIPT_REASON,
+                         source_run="run-1", batch_id=BATCH, pr_number=7, updated_at=LATER)
+    return [first, first.model_copy(update={"item_id": ITEM_ID, "key": "run 1/f 01", "status": "dead", "reason": None,
+                                            "source_run": None, "batch_id": None, "pr_number": None})]
+
+
+def _parked_rows() -> list[Any]:
+    """Two parked batches, newest first."""
+    from defender.api.models import ParkedBatch, ParkedItemRef
+
+    first = ParkedBatch(batch_id=BATCH_2, batch_kind="author", lane="author", blocks_lane=True, branch="learning/b2",
+                        pr_number=9, reason="the forge refused 3 times", created_at=LATER,
+                        items=[ParkedItemRef(kind="finding", key="f1")])
+    return [first, first.model_copy(update={"batch_id": BATCH, "created_at": NOW, "items": [], "blocks_lane": False,
+                                            "batch_kind": "revert", "pr_number": None, "reason": None})]
+
+
+#: (list name, path, port, rows, the position the second page must start after)
+_LEARNING_LISTS = [
+    ("learning-items", LEARNING_ITEMS, "list_set_aside", _set_aside_rows, (LATER, ITEM_ID_2)),
+    ("parked-batches", LEARNING_PARKED, "list_parked_batches", _parked_rows, (LATER, BATCH_2)),
+]
+
+
+@pytest.mark.parametrize(("name", "path", "port", "rows", "first_after"), _LEARNING_LISTS, ids=[x[0] for x in _LEARNING_LISTS])
+def test_1485_each_learning_list_pages_by_cursor_from_the_last_row_served(
+    name: str, path: str, port: str, rows: Callable[[], list[Any]], first_after: Any,
+) -> None:
+    """Both lists page like every list: the port is asked `limit + 1` after nothing, then after (time, id) of the last
+    row served; the default page is `DEFAULT_PAGE`. (Paging)"""
+    from defender.api.app import DEFAULT_PAGE
+
+    api = _learning_api(**{port: _rows_after(rows())})
+    first = api.client.get(path, headers=AUTH, params={"limit": 1}).json()
+    second = api.client.get(path, headers=AUTH, params={"limit": 1, "cursor": first["next_cursor"]}).json()
+    assert (len(first["items"]), len(second["items"]), second["next_cursor"]) == (1, 1, None)
+    (_, a), (_, b) = api.ports.called(port)
+    assert (a["after"], a["limit"], b["after"], b["limit"]) == (None, 2, first_after, 2)
+    plain = _learning_api(**{port: _rows_after(rows())})
+    plain.client.get(path, headers=AUTH)
+    assert plain.ports.called(port)[0][1]["limit"] == DEFAULT_PAGE + 1
+
+
+@pytest.mark.parametrize(("name", "path", "port", "rows", "_after"), _LEARNING_LISTS, ids=[x[0] for x in _LEARNING_LISTS])
+def test_1485_a_learning_list_serves_exactly_its_wire_fields_and_a_reason_as_plain_text(
+    name: str, path: str, port: str, rows: Callable[[], list[Any]], _after: Any,
+) -> None:
+    """Each served row carries exactly the wire's fields (`item_id` and `batch_id` included, no payload or counters) and
+    a `<script>` reason comes back byte for byte, unescaped. (Wire models, P2)"""
+    api = _learning_api(**{port: _rows_after(rows())})
+    response = api.client.get(path, headers=AUTH)
+    assert response.status_code == 200, response.text
+    served = response.json()["items"]
+    assert [set(row) for row in served] == [ITEM_WIRE_FIELDS if name == "learning-items" else PARKED_WIRE_FIELDS] * 2
+    if name == "learning-items":
+        assert served[0]['reason'] == SCRIPT_REASON
+        assert served[0]['item_id'] == ITEM_ID_2
+        assert '<script>' in response.text
+        assert '&lt;' not in response.text
+        assert '\\u003c' not in response.text
+        assert (served[1]["status"], served[1]["reason"], served[1]["batch_id"], served[1]["pr_number"]) == ("dead", None, None, None)
+    else:
+        assert [set(i) for i in served[0]["items"]] == [{"kind", "key"}]
+        assert (served[0]["blocks_lane"], served[1]["blocks_lane"], served[1]["items"]) == (True, False, [])
+
+
+@pytest.mark.parametrize("path", [LEARNING_ITEMS, LEARNING_PARKED])
+def test_1485_a_learning_list_whose_tied_rows_are_not_in_id_descending_order_is_a_500_not_a_page(path: str) -> None:
+    """Ties list by id descending: a port that answers the tied rows ascending broke its promise (500); control: the
+    descending answer is served. (Paging)"""
+    port, rows = ("list_set_aside", _set_aside_rows) if path == LEARNING_ITEMS else ("list_parked_batches", _parked_rows)
+    ordered = rows()
+    if path == LEARNING_PARKED:  # the two batches must tie for the case to bite
+        ordered = [ordered[0], ordered[1].model_copy(update={"created_at": ordered[0].created_at})]
+    else:
+        ordered = [ordered[0], ordered[1].model_copy(update={"updated_at": ordered[0].updated_at})]
+    ok = _learning_api(**{port: ordered})
+    assert ok.client.get(path, headers=AUTH).status_code == 200
+    broke = _learning_api(**{port: ordered[::-1]})
+    assert broke.lenient().get(path, headers=AUTH).status_code == 500
+
+
+@pytest.mark.parametrize("bad_id", ["abc", "A1000000-0000-4000-8000-000000000002", "not-a-uuid-but-a-record-id", "a b/é",
+                                    "' OR 1=1 --", "", "\u0000", "x" * 1363])
+@pytest.mark.parametrize(("name", "path", "port", "rows", "_after"), _LEARNING_LISTS, ids=[x[0] for x in _LEARNING_LISTS])
+def test_1485_an_edited_learning_cursor_whose_id_is_not_a_uuid_is_refused_before_the_port(
+    name: str, path: str, port: str, rows: Callable[[], list[Any]], _after: Any, bad_id: str,
+) -> None:
+    """A cursor edited to carry an id that is not a canonical UUID is a 422, whatever the text, and no port is asked. (Paging)"""
+    api = _learning_api(**{port: _rows_after(rows())})
+    cursor = _edited(_cursor(api, path), id=bad_id)
+    calls = len(api.ports.calls)
+    response = api.client.get(path, headers=AUTH, params={"limit": 1, "cursor": cursor})
+    assert response.status_code == 422
+    assert len(api.ports.calls) == calls, "the edited cursor reached a port"
+
+
+@pytest.mark.parametrize(("name", "path", "port", "rows", "_after"), _LEARNING_LISTS, ids=[x[0] for x in _LEARNING_LISTS])
+def test_1485_a_learning_cursor_of_the_wrong_shape_is_refused(
+    name: str, path: str, port: str, rows: Callable[[], list[Any]], _after: Any,
+) -> None:
+    """A cursor with no time (an id-ordered list's) is not a position in a (time, id) list: 422, no port. (Paging)"""
+    api = _learning_api(**{port: _rows_after(rows())})
+    cursor = _edited(_cursor(api, path), at=None)
+    calls = len(api.ports.calls)
+    response = api.client.get(path, headers=AUTH, params={"limit": 1, "cursor": cursor})
+    assert response.status_code == 422
+    assert "not a position in this list" in response.text
+    assert len(api.ports.calls) == calls
+
+
+#: (list, its port, its rows) for the cursor sources: the two learning lists and one list of piece 1.
+_CURSOR_SOURCES = {
+    "learning-items": (LEARNING_ITEMS, "list_set_aside", _set_aside_rows),
+    "parked-batches": (LEARNING_PARKED, "list_parked_batches", _parked_rows),
+    "alerts": (f"{T}/alerts", "list_alerts", lambda: [SUMMARY_2, SUMMARY]),
+}
+
+
+@pytest.mark.parametrize(("source", "target"), [
+    ("learning-items", "parked-batches"), ("learning-items", "alerts"),
+    ("parked-batches", "learning-items"), ("alerts", "learning-items"),
+])
+def test_1485_a_cursor_of_one_list_given_to_another_is_a_422_and_the_target_port_is_never_asked(
+    source: str, target: str,
+) -> None:
+    """An items cursor on another list, and another list's cursor on `learning/items`, is a 422 before the port is
+    asked; control: each cursor first pages its own list. (Paging, Names)"""
+    path, port, rows = _CURSOR_SOURCES[source]
+    minted = _learning_api(**{port: _rows_after(rows())})
+    cursor = _cursor(minted, path)
+    own = minted.client.get(path, headers=AUTH, params={"limit": 1, "cursor": cursor})
+    assert own.status_code == 200, own.text
+
+    target_path, target_port, target_rows = _CURSOR_SOURCES[target]
+    api = _learning_api(**{target_port: _rows_after(target_rows())})
+    response = api.client.get(target_path, headers=AUTH, params={"limit": 1, "cursor": cursor})
+    assert response.status_code == 422, response.text
+    assert api.ports.calls == [], "the cursor reached a port"
+
+
+@pytest.mark.parametrize(("status", "asked"), [("held", "held"), ("dead", "dead"), (None, None)])
+def test_1485_the_items_status_filter_reaches_the_port_as_given(status: str | None, asked: str | None) -> None:
+    """`status=held|dead` is passed to the port as that status, no `status` as `None`. (Names, Routes)"""
+    api = _learning_api(list_set_aside=_rows_after(_set_aside_rows()))
+    response = api.client.get(LEARNING_ITEMS, headers=AUTH, params={} if status is None else {"status": status})
+    assert response.status_code == 200, response.text
+    assert api.ports.called("list_set_aside")[0][1]["status"] == asked
+
+
+@pytest.mark.parametrize("bad", ["waiting", "in_batch", "published", "skipped", "Held", "HELD", "held,dead", "", "all"])
+def test_1485_a_status_outside_held_and_dead_is_a_422_before_any_port(bad: str) -> None:
+    """Any other status, a stored one included, is a 422 with the port never asked; control: `dead` reaches it. (Names)"""
+    api = _learning_api(list_set_aside=_rows_after(_set_aside_rows()))
+    assert api.client.get(LEARNING_ITEMS, headers=AUTH, params={"status": bad}).status_code == 422
+    assert api.ports.calls == []
+    assert api.client.get(LEARNING_ITEMS, headers=AUTH, params={"status": "dead"}).status_code == 200
+
+
+def test_1485_an_items_cursor_is_bound_to_its_status_filter() -> None:
+    """A cursor minted under `status=held` is refused under `status=dead` and under no status; control: under `held` it
+    pages on. (Routes: filters)"""
+    api = _learning_api(list_set_aside=_rows_after(_set_aside_rows()))
+    cursor = _cursor(api, LEARNING_ITEMS, {"status": "held"})
+    calls = len(api.ports.calls)
+    assert api.client.get(LEARNING_ITEMS, headers=AUTH, params={"limit": 1, "status": "held", "cursor": cursor}).status_code == 200
+    calls = len(api.ports.calls)
+    for params in ({"status": "dead"}, {}):
+        assert api.client.get(LEARNING_ITEMS, headers=AUTH, params={"cursor": cursor, **params}).status_code == 422, params
+    assert len(api.ports.calls) == calls
+
+
+def test_1485_the_parked_list_declares_no_status_and_no_filter_name() -> None:
+    """`status` (or any filter name) on `parked-batches` is an undeclared query name: a 422 `extra_forbidden`, no port;
+    control: its own `limit` is served. (Routes, R7-2)"""
+    api = _learning_api(list_parked_batches=_rows_after(_parked_rows()))
+    for name in ("status", "kind", "fired_after"):
+        r = api.client.get(LEARNING_PARKED, headers=AUTH, params={name: "held"})
+        assert r.status_code == 422, name
+        assert [(e["type"], e["loc"]) for e in r.json()["errors"]] == [("extra_forbidden", ["query", name])]
+    assert api.ports.calls == []
+    assert api.client.get(LEARNING_PARKED, headers=AUTH, params={"limit": 5}).status_code == 200
+
+
+def test_1485_the_published_schemas_name_exactly_the_wire_fields() -> None:
+    """The published document's `SetAsideItem`, `ParkedBatch` and `ParkedItemRef` carry exactly the wire's fields. (Wire models)"""
+    schemas = Api().client.get("/openapi.json").json()["components"]["schemas"]
+    assert set(schemas["SetAsideItem"]["properties"]) == ITEM_WIRE_FIELDS
+    assert set(schemas["ParkedBatch"]["properties"]) == PARKED_WIRE_FIELDS
+    assert set(schemas["ParkedItemRef"]["properties"]) == {"kind", "key"}
+
+
+def test_1485_the_demo_serves_both_learning_lists_to_a_member_and_404s_the_other_tenants_member() -> None:
+    """The demo's store serves both ports: 200 and a page on each route for a member, what `add_set_aside_item` and
+    `add_parked_batch` seeded and only to its own tenant, 404 for the other tenant's member. (Composition, O4)"""
+    deps = anyio.run(demo_deps, (DEMO_ONE, DEMO_TWO), lambda: NOW)
+    client = TestClient(create_app(deps), base_url=BASE)
+    sessions = demo_sessions((DEMO_ONE, DEMO_TWO))
+    one = _session(sessions[f"{DEMO_ONE}-analyst"], deps.frontend_origin)
+    two = _session(sessions[f"{DEMO_TWO}-analyst"], deps.frontend_origin)
+    for route in ("items", "parked-batches"):
+        page = client.get(f"/tenants/{DEMO_ONE}/learning/{route}", headers=one)
+        assert page.status_code == 200, page.text
+        assert set(page.json()) == {'items', 'next_cursor'}
+        assert isinstance(page.json()['items'], list)
+        assert client.get(f"/tenants/{DEMO_ONE}/learning/{route}", headers=two).status_code == 404
+    item, = _set_aside_rows()[:1]
+    batch, = _parked_rows()[:1]
+    deps.learning_work.add_set_aside_item(DEMO_ONE, item)
+    deps.learning_work.add_parked_batch(DEMO_ONE, batch)
+    seeded = client.get(f"/tenants/{DEMO_ONE}/learning/items", headers=one).json()["items"]
+    assert [i["item_id"] for i in seeded if i["item_id"] == ITEM_ID_2] == [ITEM_ID_2]
+    assert BATCH_2 in [b["batch_id"] for b in client.get(f"/tenants/{DEMO_ONE}/learning/parked-batches", headers=one).json()["items"]]
+    assert ITEM_ID_2 not in [i["item_id"] for i in client.get(f"/tenants/{DEMO_TWO}/learning/items", headers=two).json()["items"]]
 
 
 @pytest.mark.parametrize("answer", [
@@ -1558,6 +1812,7 @@ def test_every_fake_port_method_is_a_coroutine_function_and_the_write_port_has_n
     assert ("InMemoryStore", "AlertsRepository") in implemented
     assert ("InMemoryStore", "Writes") in implemented
     assert ("InMemoryStore", "AlertMappingRepository") in implemented
+    assert ("InMemoryStore", "LearningWorkRepository") in implemented  # #1485
     assert not hasattr(ports_module, "WriteTransaction")
     assert not hasattr(InMemoryStore, "transaction")
 

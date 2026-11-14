@@ -121,10 +121,10 @@ def _partials(dsn: str, table: str) -> list[tuple[list[str], list[bool], str]]:
 
 
 def test_o1_at_head_both_partial_indexes_exist_with_the_designed_shapes(migrated_database):
-    """At head: `work_items (tenant_id, updated_at DESC) WHERE status IN (held, dead)` and `batches (tenant_id, created_at DESC, id DESC) WHERE phase = needs_person`. (O1, O2)"""
-    items = [p for p in _partials(migrated_database, "work_items") if p[0] == ["tenant_id", "updated_at"]]
+    """At head: `work_items (tenant_id, updated_at DESC, id DESC) WHERE status IN (held, dead)` and `batches (tenant_id, created_at DESC, id DESC) WHERE phase = needs_person`. (O1, O2)"""
+    items = [p for p in _partials(migrated_database, "work_items") if p[0] == ["tenant_id", "updated_at", "id"]]
     assert [(flags, sorted(re.findall(r"'(\w+)'", predicate)), "status" in predicate) for _, flags, predicate in items] == [
-        ([False, True], ["dead", "held"], True)]
+        ([False, True, True], ["dead", "held"], True)]
     batches = [p for p in _partials(migrated_database, "batches") if p[0] == ["tenant_id", "created_at", "id"]]
     assert [(flags, re.findall(r"'(\w+)'", predicate), "phase" in predicate) for _, flags, predicate in batches] == [
         ([False, True, True], ["needs_person"], True)]
@@ -150,11 +150,66 @@ def test_o1_the_table_models_declare_both_indexes_and_autogenerate_exempts_none(
 
     assert include_object(object(), "any_index", "index", False, None) is True
     new = [i for table in ("work_items", "batches") for i in _declared_index_objects(table)
-           if [str(e).split(".")[-1].split()[0] for e in i.expressions] in (["tenant_id", "updated_at"], ["tenant_id", "created_at", "id"])]
+           if [str(e).split(".")[-1].split()[0] for e in i.expressions] in (["tenant_id", "updated_at", "id"], ["tenant_id", "created_at", "id"])]
     assert len(new) == 2, "premise: both new partial indexes are declared"
     assert [include_object(i, i.name, "index", False, None) for i in new] == [True, True]
-    items = [w for cols, w in _declared_partials("work_items") if [c.split(".")[-1].split()[0] for c in cols] == ["tenant_id", "updated_at"]]
+    items = [w for cols, w in _declared_partials("work_items") if [c.split(".")[-1].split()[0] for c in cols] == ["tenant_id", "updated_at", "id"]]
     assert [sorted(re.findall(r"'(\w+)'", w)) for w in items] == [["dead", "held"]]
     batches = [w for cols, w in _declared_partials("batches") if [c.split(".")[-1].split()[0] for c in cols] == ["tenant_id", "created_at", "id"]]
     assert [re.findall(r"'(\w+)'", w) for w in batches] == [["needs_person"]]
-    assert any(c.endswith("DESC") for cols, _ in _declared_partials("work_items") for c in cols), "updated_at is declared descending"
+    declared = [cols for cols, _ in _declared_partials("work_items") if [c.split(".")[-1].split()[0] for c in cols] == ["tenant_id", "updated_at", "id"]]
+    assert [[c.endswith("DESC") for c in cols] for cols in declared] == [[False, True, True]], "updated_at and id are declared descending"
+
+
+def _id_column(dsn: str) -> tuple[str, bool, str | None]:
+    """`learning.work_items.id`: its type, whether it is NOT NULL, and its default expression."""
+    return execute(dsn, """SELECT format_type(a.atttypid, a.atttypmod), a.attnotnull, pg_get_expr(d.adbin, d.adrelid)
+        FROM pg_attribute a LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+        WHERE a.attrelid = 'learning.work_items'::regclass AND a.attname = 'id' AND NOT a.attisdropped""")[0]
+
+
+def _unique_on(dsn: str, table: str, column: str) -> list[str]:
+    """Names of the unique, non-partial indexes of `learning.<table>` whose only key column is `column`."""
+    return [name for (name,) in execute(dsn, """SELECT c.relname FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
+        WHERE i.indrelid = %s::regclass AND i.indisunique AND i.indpred IS NULL AND i.indnkeyatts = 1
+          AND (SELECT attname FROM pg_attribute WHERE attrelid = i.indrelid AND attnum = i.indkey[0]) = %s""",
+                                       (f"learning.{table}", column))]
+
+
+def test_d12_at_head_work_items_id_is_a_required_unique_uuid_with_no_default(migrated_database):
+    """At head `work_items.id` is uuid, NOT NULL, covered by a one-column unique index, and has no default. (D12)"""
+    assert _id_column(migrated_database) == ("uuid", True, None)
+    assert len(_unique_on(migrated_database, "work_items", "id")) == 1
+    # Control on the probe: the same read finds the batches' id column unique and required, and the item's non-key
+    # `source_run` neither.
+    assert len(_unique_on(migrated_database, "batches", "id")) >= 1
+    assert _unique_on(migrated_database, "work_items", "source_run") == []
+
+
+def test_d12_rows_seeded_before_the_index_revision_get_distinct_non_null_ids_on_upgrade(empty_database):
+    """Items inserted at the revision before the index revision (several tenants, kinds and statuses) each get a
+    distinct id on upgrade, and none keeps a default behind. (D12)"""
+    from defender.migrations import head, upgrade
+
+    before = revisions.down_of(revisions.by_suffix(revisions.INDEXES_SUFFIX))
+    _upgrade_to(empty_database, before)
+    assert execute(empty_database, """SELECT count(*) FROM information_schema.columns
+        WHERE table_schema = 'learning' AND table_name = 'work_items' AND column_name = 'id'""") == [(0,)], "premise: no id yet"
+    _tenant(empty_database, TENANTS[0], None)
+    _tenant(empty_database, TENANTS[1], None)
+    seeded = [(t, kind, f"k{n}", status) for t in TENANTS[:2] for n, (kind, status) in enumerate(
+        [("finding", "held"), ("finding", "dead"), ("pitfall", "waiting"), ("questioner_finding", "held"), ("curation_request", "waiting")])]
+    for tenant, kind, key, status in seeded:
+        execute(empty_database, """INSERT INTO learning.work_items (tenant_id, kind, item_key, payload, status, attempts, deferrals,
+            offers_declined, enqueued_at, updated_at) VALUES (%s, %s, %s, '{}', %s, 0, 0, 0, %s, %s)""",
+                (tenant, kind, key, status, CREATED, CREATED))
+
+    upgrade(empty_database)
+    assert _version(empty_database) == [(head(),)]
+    rows = execute(empty_database, "SELECT tenant_id, kind, item_key, id FROM learning.work_items")
+    assert sorted(r[:3] for r in rows) == sorted(s[:3] for s in seeded), "premise: every seeded row survived"
+    ids = [r[3] for r in rows]
+    assert None not in ids
+    assert len(set(ids)) == len(seeded) == 10
+    assert all(re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", i) for i in ids)
+    assert _id_column(empty_database) == ("uuid", True, None)

@@ -57,8 +57,25 @@ async def open_work(store: Any, tenant: str) -> None:
     await publish(store, tenant, "w1")
 
 
+def newest_first(items: Sequence[Any]) -> list[Any]:
+    """The store's own records (read via `work()`) in the order O1 promises: (updated_at, id) descending. The ids are
+    the ones the store minted, so ties are ordered by what it returned, never by a spelled key order."""
+    return sorted(items, key=lambda i: (i.updated_at, str(i.id)), reverse=True)
+
+
+def incompressible_key(length: int) -> str:
+    """A deterministic hex key of `length` characters that PostgreSQL's index compression cannot shrink."""
+    import hashlib
+
+    out, n = "", 0
+    while len(out) < length:
+        out += hashlib.sha256(f"key-{n}".encode()).hexdigest()
+        n += 1
+    return out[:length]
+
+
 async def page_through(store: Any, tenant: str, *, limit: int, status: str | None = None) -> list[Any]:
-    """Every page of `set_aside`, each asked `after` the last item of the one before; no page exceeds `limit`."""
+    """Every page of `set_aside`, each asked `after` the (updated_at, id) of the last item of the one before; no page exceeds `limit`."""
     seen: list[Any] = []
     after = None
     while True:
@@ -67,7 +84,7 @@ async def page_through(store: Any, tenant: str, *, limit: int, status: str | Non
         seen.extend(page)
         if len(page) < limit:
             return seen
-        after = (page[-1].updated_at, page[-1].kind, page[-1].key)
+        after = (page[-1].updated_at, page[-1].id)
 
 
 async def page_parked(store: Any, tenant: str, *, limit: int) -> list[Any]:
@@ -116,5 +133,5 @@ async def parked_set(store: Any, tenant: str, *, tag: str = "") -> dict[str, Any
     return {"ids": ids, "reasons": reasons}
 
 
-__all__ = ["HOSTILE_REASON", "SILENT_CLOSE", "dead_without_pr", "finding", "open_work", "settled_in_one_review", "held_by_close", "page_parked",
+__all__ = ["HOSTILE_REASON", "SILENT_CLOSE", "dead_without_pr", "finding", "open_work", "settled_in_one_review", "held_by_close", "incompressible_key", "newest_first", "page_parked",
            "page_through", "parked_set", "pitfall"]

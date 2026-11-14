@@ -306,6 +306,24 @@ async def test_p8_a_decision_and_its_instruction_row_are_one_transaction(dsn):
         assert [i.key for i in await store.work(BLUE) if i.kind == "feedback_instruction"] == ["1"]
 
 
+async def test_p8_a_feedback_instruction_item_gets_an_id_of_its_own_and_a_second_recording_keeps_it(dsn):
+    """The `feedback_instruction` item `record_decision` files has a `WorkItemId`, distinct from a finding's under the
+    same key, and recording again leaves it unchanged. (D12, F2 step 3)"""
+    from defender.records.formats import WorkItemId
+
+    async with learning_store(dsn) as store:
+        held, run = await with_issue(store)
+        await store.judge_comments(held, run, taken=[comment(1)], judged=[1])
+        await store.publish_findings(BLUE, "run-1", [finding("1")], kind="finding")
+        await store.record_decision(held, 1, decision(instruction="do x"), instruction=instruction_row(1, "do x"))
+        first = {(i.kind, i.key): i for i in await store.work(BLUE)}
+        await store.record_decision(held, 1, decision(instruction="do x"), instruction=instruction_row(1, "do x"))
+        again = {(i.kind, i.key): i for i in await store.work(BLUE)}
+    assert type(first["feedback_instruction", "1"].id) is WorkItemId
+    assert first["feedback_instruction", "1"].id != first["finding", "1"].id, "control: two items, two ids"
+    assert again["feedback_instruction", "1"].id == first["feedback_instruction", "1"].id
+
+
 async def test_p8_an_instruction_item_is_claimed_into_an_author_batch_at_one_item_and_no_other_tenant_sees_it(dsn):
     """A waiting `feedback_instruction` item is claimed by the author lane at threshold 1, and only for its tenant. (D11, D8)"""
     async with learning_store(dsn) as store:

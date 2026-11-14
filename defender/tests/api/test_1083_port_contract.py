@@ -266,6 +266,148 @@ async def test_o10_the_alert_window_is_closed_below_open_above_and_adjacent_wind
     assert set(lower).isdisjoint(upper)
 
 
+# --- #1485: the learning work port, real adapter and fake, one set of cases ---------------------------------------
+# A sibling of `backend` (so no existing case needs the learning store): its store stamps rows with the database's clock
+# (no clock seam), so the real side seeds ties by one transaction (one close) or one `UPDATE`, and every seeder returns the
+# positions it made read back from the store; the fake seeds given times and minted ids and returns the same.
+
+class RealLearning:
+    """Items held and batches parked through the learning store's own verbs, read through `StoreLearningWork`."""
+
+    def __init__(self, store: Any, adapter: Any, dsn: str) -> None:
+        self.store, self.reads, self.dsn = store, adapter, dsn
+
+    async def items(self, tenant: str, groups: list[tuple[str, list[str]]]) -> list[tuple[str, dt.datetime, str]]:
+        """Each group `(status, keys)` is one transaction: `held` keys one close (tied), `dead` keys one dead each."""
+        from defender.tests.support.api._learning1485 import dead_alone, held_together
+
+        for status, keys in groups:
+            if status == "held":
+                await held_together(self.store, tenant, [("finding", k) for k in keys])
+            else:
+                for key in keys:
+                    await dead_alone(self.store, tenant, key)
+        found = await self.store.work(tenant, statuses=["held", "dead"])
+        return [(i.status, i.updated_at, str(i.id)) for i in found]
+
+    async def parked(self, tenant: str, groups: list[tuple[int, int]]) -> list[tuple[dt.datetime, str]]:
+        """Each group `(hours, count)`: `count` parked revert batches created at `AT` plus `hours`, tied by one `UPDATE`."""
+        from defender.tests.support.api._learning1485 import parked_revert, tie_batches
+
+        for hours, count in groups:
+            made = [await parked_revert(self.store, tenant, f"reason {hours}/{n}") for n in range(count)]
+            tie_batches(self.dsn, made, AT + dt.timedelta(hours=hours))
+        return [(b.created_at, str(b.id)) for b in await self.store.batches(tenant) if b.phase == "needs_person"]
+
+
+class FakeLearning:
+    """The demo's `InMemoryStore`, seeded with wire rows at given times and minted ids, in an order that is neither
+    ascending nor descending."""
+
+    def __init__(self) -> None:
+        from defender.api.fakes import InMemoryStore
+
+        self.reads = InMemoryStore(lambda: AT)
+        self._n = 0
+
+    def _id(self, kind: str) -> str:
+        self._n += 1
+        return fixture_uuid(f"1485:{kind}:{self._n}")
+
+    async def items(self, tenant: str, groups: list[tuple[str, list[str]]]) -> list[tuple[str, dt.datetime, str]]:
+        from defender.api.models import SetAsideItem
+
+        made = []
+        for n, (status, keys) in enumerate(groups):
+            at = AT + n * MINUTE  # one instant per group: ties within it
+            for key in keys:
+                made.append((status, at, self._id("item"), key))
+        for status, at, ident, key in sorted(made, key=lambda m: m[3].swapcase()):
+            self.reads.add_set_aside_item(tenant, SetAsideItem(
+                item_id=ident, kind="finding", key=key, status=status, reason="closed with no feedback",
+                source_run="run-1", batch_id=fixture_uuid("1485:batch"), pr_number=7, updated_at=at))
+        return [(status, at, ident) for status, at, ident, _ in made]
+
+    async def parked(self, tenant: str, groups: list[tuple[int, int]]) -> list[tuple[dt.datetime, str]]:
+        from defender.api.models import ParkedBatch
+
+        made = [(AT + dt.timedelta(hours=hours), self._id("batch")) for hours, count in groups for _ in range(count)]
+        for at, ident in sorted(made, key=lambda m: m[1].swapcase()):
+            self.reads.add_parked_batch(tenant, ParkedBatch(
+                batch_id=ident, batch_kind="revert", lane="author", blocks_lane=False, branch="learning/r",
+                pr_number=None, reason="a foreign tip on its branch", created_at=at, items=[]))
+        return made
+
+
+@pytest.fixture(params=[pytest.param("real", marks=POSTGRES), "fake"])
+async def learning_backend(request: pytest.FixtureRequest) -> AsyncIterator[Any]:
+    if request.param == "fake":
+        yield FakeLearning()
+        return
+    from defender.api.learning_work import StoreLearningWork
+    from defender.learning_store import LearningStore
+
+    dsn_ = request.getfixturevalue("dsn")
+    opened = LearningStore(dsn_)
+    try:
+        yield RealLearning(opened, StoreLearningWork(opened), dsn_)
+    finally:
+        await opened.close()
+
+
+#: Two held groups (4 and 3 tied) around one dead item: three instants, seven rows, a page of 3 crossing every boundary.
+SET_ASIDE_GROUPS = [("held", ["a", "B", "c", "d"]), ("dead", ["z"]), ("held", ["e", "F", "g"])]
+
+
+async def test_1485_set_aside_items_page_by_time_then_id_descending_over_ties_and_are_tenant_scoped(learning_backend):
+    """Eight items over three instants, two of them ties, paged three at a time by the last item's (time, id): (time, id)
+    descending, each once, every page full but the last; another tenant's item never appears. Real adapter and fake alike. (O1)"""
+    made = await learning_backend.items(A, SET_ASIDE_GROUPS)
+    await learning_backend.items(B, [("held", ["b-only"])])
+    assert len(made) == 8
+    assert len({at for _, at, _ in made}) == 3, 'premise: three instants'
+    expected = [i for _, i in sorted(((at, i) for _, at, i in made), reverse=True)]
+
+    pages = await _pages(lambda **kw: learning_backend.reads.list_set_aside(A, status=None, **kw),
+                         lambda i: (i.updated_at, i.item_id), 3)
+
+    assert [len(p) for p in pages] == [3, 3, 2]
+    assert [str(i.item_id) for p in pages for i in p] == expected
+
+
+@pytest.mark.parametrize("status", ["held", "dead"])
+async def test_1485_a_set_aside_status_narrows_the_page_and_the_other_status_is_absent(learning_backend, status):
+    """`status` lists only that status, in the same order, paged; control: the other status's items exist. (O1)"""
+    made = await learning_backend.items(A, SET_ASIDE_GROUPS)
+    mine = sorted(((at, i) for s, at, i in made if s == status), reverse=True)
+    assert mine
+    assert len(mine) < len(made), 'premise: both statuses exist'
+
+    pages = await _pages(lambda **kw: learning_backend.reads.list_set_aside(A, status=status, **kw),
+                         lambda i: (i.updated_at, i.item_id), 3)
+
+    assert [str(i.item_id) for p in pages for i in p] == [i for _, i in mine]
+    assert {i.status for p in pages for i in p} == {status}
+
+
+PARKED_GROUPS = [(0, 3), (1, 3), (-1, 1)]
+
+
+async def test_1485_parked_batches_page_by_creation_then_id_descending_over_ties_and_are_tenant_scoped(learning_backend):
+    """Seven parked batches over three creation instants, two of them ties, paged three at a time: (created_at, id)
+    descending, each once; another tenant's batch never appears. Real adapter and fake alike. (O2)"""
+    made = await learning_backend.parked(A, PARKED_GROUPS)
+    await learning_backend.parked(B, [(0, 1)])
+    assert len(made) == 7
+    assert len({at for at, _ in made}) == 3, 'premise: three instants'
+
+    pages = await _pages(lambda **kw: learning_backend.reads.list_parked_batches(A, **kw),
+                         lambda b: (b.created_at, b.batch_id), 3)
+
+    assert [len(p) for p in pages] == [3, 3, 1]
+    assert [str(b.batch_id) for p in pages for b in p] == [i for _, i in sorted(made, reverse=True)]
+
+
 # --- reads by id, the wire mapping, tenant keying ------------------------------------------------------------------
 
 @POSTGRES

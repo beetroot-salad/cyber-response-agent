@@ -139,14 +139,14 @@ def test_p1_the_import_census_finds_each_spelling_of_the_old_store(tmp_path):
 
 
 def test_p1_the_stores_public_names_are_exported_and_the_lanes_table_is_not_the_stores():
-    """`ParkedBatchView`, `pitfall_key`, the lease and grace defaults and `MAX_ITEM_KEY_BYTES` come from
+    """`ParkedBatchView`, `pitfall_key`, the lease and grace defaults come from
     `defender.learning_store`; `CommitRecord` has no `lanes` field and `lanes_of_branch` is not the store's. (P1, Names)"""
     import dataclasses
 
     S = store_mod()
-    exported = ["ParkedBatchView", "pitfall_key", "DEFAULT_LEASE_SECONDS", "DEFAULT_GRACE_SECONDS", "MAX_ITEM_KEY_BYTES"]
+    exported = ["ParkedBatchView", "pitfall_key", "DEFAULT_LEASE_SECONDS", "DEFAULT_GRACE_SECONDS"]
     assert [n for n in exported if not hasattr(S, n)] == []
-    assert S.MAX_ITEM_KEY_BYTES == 200
+    assert not hasattr(S, "MAX_ITEM_KEY_BYTES"), "the key bound is gone (D12)"
     assert "lanes" not in {f.name for f in dataclasses.fields(S.CommitRecord)}
     assert not hasattr(S, "lanes_of_branch")
 

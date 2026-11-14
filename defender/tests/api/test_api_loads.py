@@ -121,3 +121,22 @@ def test_the_demo_probe_sees_a_load():
     """Positive control: importing the demo reports both demo-only modules. (Am-1)"""
     modules = _loaded("defender.api.demo")
     assert all(_found(modules, name) for name in _DEMO_ONLY)
+
+
+#: #1485 r13/r14: the paging code is generic over its id families, so it loads neither the learning store nor its tables.
+_NOT_BY_PAGING = ("defender.learning_store", "defender.jobs.learning_models")
+
+
+def test_1485_importing_the_paging_code_loads_neither_the_learning_store_nor_its_tables():
+    """`defender.api.pages` (which both learning lists page with) pulls in no `defender.learning_store` and no
+    `defender.jobs.learning_models`. (Paging, P1)"""
+    modules = _loaded("defender.api.pages")
+    assert "defender.api.pages" in modules, "premise: it imported"
+    assert [m for name in _NOT_BY_PAGING for m in _found(modules, name)] == []
+
+
+def test_1485_the_paging_probe_sees_a_load():
+    """Positive control: importing the learning store reports both names, importing the tables alone the second. (Paging)"""
+    store = _loaded("defender.learning_store")
+    assert all(_found(store, name) for name in _NOT_BY_PAGING)
+    assert _found(_loaded("defender.jobs.learning_models"), "defender.jobs.learning_models")
