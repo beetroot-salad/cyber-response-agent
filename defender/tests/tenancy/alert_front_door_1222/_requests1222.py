@@ -26,7 +26,7 @@ FILED = RequestStore()
 @pytest.fixture(autouse=True)
 def a_store_that_records_requests(monkeypatch: pytest.MonkeyPatch) -> RequestStore:
     from defender import tenancy
-    from defender.learning import store
+    from defender import learning_store as store
 
     FILED.requests.clear()
 

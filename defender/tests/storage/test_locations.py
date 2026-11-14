@@ -112,7 +112,7 @@ def test_tenant_and_hidden_carriers_preserve_location_roles(tmp_path):
     expected = {
         "data_root": L.DataRoot, "tenant_root": L.TenantRoot,
         "runs": L.RunsBase, "sessions": L.SessionsRoot, "episodes": L.EpisodesRoot,
-        "learning": L.ScratchRoot, "worktrees": L.WorktreesRoot, "scratch": L.ScratchRoot, "exports": L.ExportsRoot,
+        "worktrees": L.WorktreesRoot, "scratch": L.ScratchRoot, "exports": L.ExportsRoot,
         "drafts": L.DraftsRoot, "knowledge_lock": L.KnowledgeLock,
         "runs_legacy": L.LegacyRunsRoot,
         "episodes_legacy": L.LegacyEpisodesRoot,
@@ -136,7 +136,7 @@ def test_tenant_and_hidden_carriers_preserve_location_roles(tmp_path):
 
 # retired: test_tenant_and_scratch_state_cannot_exchange_location_kinds pinned `LoopPaths`' two spellings of the learning
 # state root (a tenant's `ScratchRoot`, a scratch `Path`). The handle and the root are gone (#1278 A1/O10, design D10): a
-# `LoopPaths` names no state root; the tenant's `learning` stays a `ScratchRoot` (asserted above) for the cutover import only.
+# `LoopPaths` names no state root; the tenant has no `learning` location (#1485).
 
 
 def test_mypy_reports_the_actual_forbidden_operations(tmp_path):
