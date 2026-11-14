@@ -4,7 +4,9 @@ This is the go/no-go spike for the deployment design's k3s choice (`defender/doc
 work item 1). It is throwaway tooling: nothing in the product imports it.
 
 `run-all.sh` builds a one-node k3d cluster with two gVisor runtime classes, runs every probe, writes
-`out/run-all-<date>.txt`, and deletes the cluster. Set `KEEP=1` to keep the cluster.
+`out/run-all-<date>.txt`, deletes the cluster, and judges the output with `verdict.py`, which exits non-zero naming
+every probe that disagrees with the design. Set `KEEP=1` to keep the cluster. CI runs it as the `k3s spike` workflow
+(`.github/workflows/k3s-spike.yml`) whenever this folder changes, or by hand.
 
 ## Run it
 

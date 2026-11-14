@@ -5,7 +5,7 @@
 set -u
 S=$(cd "$(dirname "$0")" && pwd); export S; export DOCKER_HOST=${DOCKER_HOST:-unix:///var/run/docker-jobs.sock}
 N=k3d-spike1509-server-0; K="docker exec -i $N kubectl"; export K
-mkdir -p "$S/out"
+mkdir -p "$S/out"; OUT=${OUT:-$S/out/run-all-$(date +%F).txt}
 sec(){ echo; echo "## $1"; }
 {
 sec "versions"; "${K3D:-k3d}" version; runsc --version | head -1; docker version --format 'docker {{.Server.Version}}'
@@ -56,5 +56,6 @@ sec "probe 4: admin relabels a job pod"; $K -n jobs label pod t-job extra=1 2>&1
 sec "probe 4b: launcher rights"; sh "$S/probe-rbac.sh"
 sec "probe 5: box timing"; sh "$S/probe-timing.sh"
 sec "probe 6: volume lifetime"; sh "$S/probe-volume-life.sh"
-} 2>&1 | tee "$S/out/run-all-$(date +%F).txt"
+} 2>&1 | tee "$OUT"
 [ "${KEEP:-0}" = 1 ] || "${K3D:-k3d}" cluster delete spike1509 >/dev/null 2>&1
+echo; python3 "$S/verdict.py" "$OUT"

@@ -1,0 +1,55 @@
+name: k3s spike
+
+# The CI leg of the deployment spike (#1509, tooling/spikes/k3s-1509/): a one-node k3d cluster on the runner's own
+# Docker, with two gVisor runtime classes, and every probe judged by verdict.py, which fails the job on any probe
+# that disagrees with the design. It runs only when the spike or this file changes, or by hand: it is evidence for a
+# design claim (B-G7), not a gate on product code.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tooling/spikes/k3s-1509/**"
+      - ".github/workflows/k3s-spike.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  spike:
+    runs-on: ubuntu-latest
+    # A run takes about five minutes on a desktop; the gVisor install is bounded at 5 of these.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      # The same install the box suite uses: runsc, its shim and its gvisor-bin folder under /usr/bin, which the
+      # k3d node mounts. It also registers runsc with the runner's Docker, which the spike does not need.
+      - name: Install gVisor (runsc)
+        timeout-minutes: 5
+        uses: ./.github/actions/install-gvisor
+
+      - name: Install k3d v5.8.3 (pinned by checksum)
+        timeout-minutes: 2
+        run: |
+          set -euo pipefail
+          curl -fsSL --max-time 60 --retry 3 --retry-max-time 90 -o /tmp/k3d \
+            https://github.com/k3d-io/k3d/releases/download/v5.8.3/k3d-linux-amd64
+          echo "dbaa79a76ace7f4ca230a1ff41dc7d8a5036a8ad0309e9c54f9bf3836dbe853e  /tmp/k3d" | sha256sum -c -
+          sudo install -m 0755 /tmp/k3d /usr/local/bin/k3d
+
+      - name: Run the spike
+        timeout-minutes: 15
+        env:
+          DOCKER_HOST: unix:///var/run/docker.sock
+          OUT: ${{ runner.temp }}/run-all-ci.txt
+        run: sh tooling/spikes/k3s-1509/run-all.sh
+
+      - name: Keep the raw output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: k3s-spike-output
+          path: ${{ runner.temp }}/run-all-ci.txt
+          if-no-files-found: warn
