@@ -144,7 +144,8 @@ def test_p1_the_stores_public_names_are_exported_and_the_lanes_table_is_not_the_
     import dataclasses
 
     S = store_mod()
-    exported = ["ParkedBatchView", "pitfall_key", "DEFAULT_LEASE_SECONDS", "DEFAULT_GRACE_SECONDS"]
+    exported = ["ParkedBatchView", "pitfall_key", "DEFAULT_LEASE_SECONDS", "DEFAULT_GRACE_SECONDS", "LearningStore", "blocking",
+                "BlockingStore", "is_reducer_row"]
     assert [n for n in exported if not hasattr(S, n)] == []
     assert not hasattr(S, "MAX_ITEM_KEY_BYTES"), "the key bound is gone (D12)"
     assert "lanes" not in {f.name for f in dataclasses.fields(S.CommitRecord)}

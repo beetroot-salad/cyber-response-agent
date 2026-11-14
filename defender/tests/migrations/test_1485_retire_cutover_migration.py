@@ -10,6 +10,7 @@ import pytest
 from defender.tests.migrations.test_1214_migrations import _upgrade_to
 from defender.tests.support.shared import _revisions1485 as revisions
 from defender.tests.support.shared._postgres1339 import execute
+from defender.tests.support.shared._retired1485 import RETIRED_ACTION as ACTION
 
 LEARNING_STORE = "0013_learning_store"
 CREATED = _dt.datetime(2026, 11, 1, 8, 0, tzinfo=_dt.UTC)
@@ -43,7 +44,7 @@ def test_o5_the_retirement_and_the_index_revision_follow_the_history_as_it_stand
     retire = revisions.by_suffix(revisions.RETIRE_SUFFIX)
     indexes = revisions.by_suffix(revisions.INDEXES_SUFFIX)
     assert revisions.down_of(indexes) == retire
-    assert {"0015_system_records", "0014_learning_cutover_action", LEARNING_STORE} <= revisions.ancestors(retire)
+    assert {"0015_system_records", f"0014_{ACTION}_action", LEARNING_STORE} <= revisions.ancestors(retire)
     assert retire not in revisions.ancestors(revisions.down_of(retire))
 
 
@@ -68,11 +69,11 @@ def test_o5_the_upgrade_stops_naming_the_count_while_a_tenant_carries_learning_c
     _upgrade_to(empty_database, before_retire)
     step, actor, failure = _STATES[state]
     for tenant in TENANTS[:carriers]:
-        _tenant(empty_database, tenant, "learning_cutover", step, actor, failure)
+        _tenant(empty_database, tenant, ACTION, step, actor, failure)
     _tenant(empty_database, TENANTS[3], "rotate", "names", "service")  # not a carrier: must not be counted
     _tenant(empty_database, TENANTS[2], None)
     constraints, rows = _constraints(empty_database), _rows(empty_database)
-    assert all("learning_cutover" in text for text in constraints.values() if "'rotate'" in text)
+    assert all(ACTION in text for text in constraints.values() if "'rotate'" in text)
 
     with pytest.raises(RuntimeError) as stopped:
         upgrade(empty_database)
@@ -91,9 +92,9 @@ def test_o5_with_no_such_row_the_upgrade_restores_the_0013_constraints_and_refus
     _upgrade_to(empty_database, LEARNING_STORE)
     at_0013 = _constraints(empty_database)
     assert set(at_0013) == set(CONSTRAINTS)
-    assert all("learning_cutover" not in text for text in at_0013.values())
+    assert all(ACTION not in text for text in at_0013.values())
     _upgrade_to(empty_database, revisions.down_of(revisions.by_suffix(revisions.RETIRE_SUFFIX)))
-    assert all("learning_cutover" in text for text in _constraints(empty_database).values() if "'rotate'" in text)
+    assert all(ACTION in text for text in _constraints(empty_database).values() if "'rotate'" in text)
     _tenant(empty_database, TENANTS[0], "rotate", "names", "service")
     _tenant(empty_database, TENANTS[1], None)
 
@@ -103,7 +104,7 @@ def test_o5_with_no_such_row_the_upgrade_restores_the_0013_constraints_and_refus
     execute(empty_database, "UPDATE tenancy.tenants SET pending_action = 'rotate', step = 'names', step_actor = 'service' WHERE id = %s",
             (TENANTS[1],))
     assert [r[2] for r in _rows(empty_database)] == ["rotate", "rotate"]
-    for refused in ("learning_cutover", "not_an_action"):  # the second is the control that a bad value is refused this way
+    for refused in (ACTION, "not_an_action"):  # the second is the control that a bad value is refused this way
         with pytest.raises(Exception, match=r"ck_tenants_pending_action"):  # noqa: PT011 — a CHECK violation, whichever driver class carries it
             _tenant(empty_database, TENANTS[2], refused, "import", "host")
     assert [r[0] for r in _rows(empty_database)] == TENANTS[:2]

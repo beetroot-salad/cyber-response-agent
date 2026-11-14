@@ -111,8 +111,9 @@ def test_o10_the_census_finds_each_old_reach_and_skips_prose_and_exempted_lines(
     """Control: every form of reach the census claims is found as code; a docstring, a comment, a string and an exempted line are not. (O10)"""
     code = [
         "with LearningState.open(paths) as s:\n    pass", "root = state.stage_dir(lane)", "root = paths.state_root",
-        "ok = tenant.learning_state_exists()", "log = layout.commit_record", "log = tenant.commit_record", "from x import LearningRoot",
+        "ok = tenant.learning_state_exists()", "log = layout.commit_record", "log = tenant.commit_record",
         "where = self.tenant.learning", "class LearningState:\n    pass", "def stage_dir(self, lane):\n    pass",
+        *(f"from x import {name}" for name in sorted(REACH_NAMES - _RECORDS_NAMES)),
     ]
     for line in code:
         assert reaches(line), line

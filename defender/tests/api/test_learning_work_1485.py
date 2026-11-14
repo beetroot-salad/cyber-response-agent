@@ -5,6 +5,7 @@ is read back from the store's own views (`work()`, `batches()`, `parked()`) and 
 from __future__ import annotations
 
 import base64
+from collections.abc import Callable
 from typing import Any
 
 import pytest
@@ -43,8 +44,11 @@ PARKED = "learning/parked-batches"
 #: The wire's fields (Names, wire models): `item_id` included; no payload, fault, counters or lease.
 ITEM_FIELDS = {"item_id", "kind", "key", "status", "reason", "source_run", "batch_id", "pr_number", "updated_at"}
 BATCH_FIELDS = {"batch_id", "batch_kind", "lane", "blocks_lane", "branch", "pr_number", "reason", "created_at", "items"}
-#: A cursor holds a position and the names that bind it, never an item's key.
-SHORT_CURSOR = 400
+
+
+def _cursors_after(got: list[dict], cursors: list[str], limit: int, tied: Callable[[dict], bool]) -> list[str]:
+    """The cursors issued after a row of `got` for which `tied` holds: cursor `n` follows row `(n + 1) * limit - 1`."""
+    return [c for n, c in enumerate(cursors) if tied(got[(n + 1) * limit - 1])]
 
 
 @pytest.fixture
@@ -165,9 +169,14 @@ def test_o1_twelve_items_held_by_one_close_page_each_once_in_id_order_with_a_kil
     assert [i["key"] for i in got if len(i["key"]) > 900] == [LONG_KEY]
     assert sizes[:-1] == [limit] * (len(sizes) - 1)
     assert 0 < sizes[-1] <= limit
-    assert all(len(c) < SHORT_CURSOR for c in cursors), "a cursor grew with an item key"
+    # A cursor holds a position and the names that bind it, never an item's key: after a row tied with the ~1 KB key it is
+    # as long as after any other tied row (same instant, same id family).
+    after_tied = _cursors_after(got, cursors, limit, lambda i: i["key"] not in ("early-dead", "late"))
+    assert len(after_tied) >= 2, "premise: more than one cursor follows a tied item"
+    assert len({len(c) for c in after_tied}) == 1, "a cursor grew with an item key"
     if limit == 1:
         after_long = cursors[[i["key"] for i in got].index(LONG_KEY)]
+        assert after_long in after_tied, "premise: the cursor after the long key is one of those compared"
         assert LONG_KEY[:40].encode() not in base64.urlsafe_b64decode(after_long + "=" * (-len(after_long) % 4))
 
 
@@ -268,7 +277,9 @@ def test_o2_parked_batches_tied_on_creation_page_in_id_order_each_once(dsn, worl
     assert [b["batch_id"] for b in got] == [str(v.id) for v in expected]
     assert sizes[:-1] == [limit] * (len(sizes) - 1)
     assert 0 < sizes[-1] <= limit
-    assert all(len(c) < SHORT_CURSOR for c in cursors)
+    after_tied = _cursors_after(got, cursors, limit, lambda b: b["created_at"] == got[1]["created_at"])
+    assert len(after_tied) >= 2, "premise: more than one cursor follows a batch of the tied instant"
+    assert len({len(c) for c in after_tied}) == 1, "a cursor grew with a batch's text"
 
 
 # --- O3 ------------------------------------------------------------------------------------------------------------

@@ -1,21 +1,24 @@
-"""#1485 O5 goal: product code names none of the retired #1278 import and cutover surfaces, and the old `defender/CLAUDE.md`
-upgrade note is one line. A name census over each product file's syntax (extends `test_1278_census`, which exempts these)."""
+"""#1485 O5 goal: neither product code nor tests name the retired #1278 import and cutover surfaces (outside the named ban
+lists), and the old `defender/CLAUDE.md` upgrade note is one line. A name census over each file's syntax (extends
+`test_1278_census`, which exempts these). The ban lists are module-level constants named in `BAN_LIST_CONSTANTS`:
+the retirement tests' one list (`support/shared/_retired1485`) and `test_1278_census.REACH_NAMES`; the census skips an
+assignment to such a constant wherever it stands, and nothing else."""
 from __future__ import annotations
 
 import ast
 import re
+import subprocess
 
 from defender.tests.learning.state_contracts.test_1278_census import _PRODUCT_FLOOR, REPO, _product_files
 from defender.tests.support.shared import _revisions1485 as revisions
+from defender.tests.support.shared._retired1485 import BAN_LIST_CONSTANTS, RETIRED_ACTION, RETIRED_COMMAND, RETIRED_NAMES
 
-RETIRED = frozenset({
-    "cut_over_learning_state", "import_learning_state", "read_learning_state", "write_learning_state", "LearningImport",
-    "ImportRefused", "delivery_for_cutover", "LearningRoot", "unwrap_learning_root", "request_learning_cutover",
-})
+RETIRED = RETIRED_NAMES
 #: A spelling inside any string (a Literal member, a dict key, an audit action, `__all__`) also names it.
-ACTION = "learning_cutover"
+ACTION = RETIRED_ACTION
 MARKER = "lint-learning-state: ok"
 _ACCESSOR_OWNERS = frozenset({"tenant", "layout", "_layout", "paths", "_paths", "self"})
+_TESTS_FLOOR = 150
 
 
 def _docstrings(tree: ast.AST) -> set[int]:
@@ -23,12 +26,26 @@ def _docstrings(tree: ast.AST) -> set[int]:
             and n.body and isinstance(n.body[0], ast.Expr) and isinstance(n.body[0].value, ast.Constant)}
 
 
+def _ban_lists(tree: ast.AST) -> set[int]:
+    """The nodes under a module-level assignment to a named ban-list constant."""
+    skipped: set[int] = set()
+    for stmt in getattr(tree, "body", []):
+        targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target] if isinstance(stmt, ast.AnnAssign) else []
+        if any(isinstance(t, ast.Name) and t.id in BAN_LIST_CONSTANTS for t in targets):
+            skipped |= {id(n) for n in ast.walk(stmt)}
+    return skipped
+
+
 def names_in(source: str, *, allow_action: bool = False) -> list[str]:
-    """Each retired name `source` uses as code: a name, attribute, import, definition or string, not a docstring or comment."""
+    """Each retired name `source` uses as code: a name, attribute, import, definition or string, not a docstring, a comment
+    or a named ban list."""
     tree = ast.parse(source)
     prose = _docstrings(tree)
+    banned = _ban_lists(tree)
     found: list[str] = []
     for node in ast.walk(tree):
+        if id(node) in banned:
+            continue
         if isinstance(node, ast.Name) and node.id in RETIRED:
             found.append(node.id)
         elif isinstance(node, ast.Attribute) and (node.attr in RETIRED or (
@@ -54,26 +71,56 @@ def _in_tenant_layout(tree: ast.AST, fn: ast.AST) -> bool:
 
 def test_o5_the_name_census_finds_each_retired_spelling_and_skips_prose():
     """Control: every form of use is found as code; a docstring, a comment and a near name are not. (O5)"""
+    a, b, c = sorted(RETIRED)[:3]
     code = [
-        "from x import cut_over_learning_state", "import_learning_state(a)", "x = tenant.learning", "x = layout.learning",
-        "from y import LearningRoot as R", "def delivery_for_cutover(): ...", "class ImportRefused(Exception): ...",
-        "PendingAction = Literal['create', 'learning_cutover']", "ACTIONS = {'learning_cutover': 1}", "__all__ = ['LearningImport']",
-        "await t.request_learning_cutover(x)", "def f(read_learning_state): ...", "x = unwrap_learning_root(t)",
-        "class Tenant:\n    @property\n    def learning(self): ...", "x = 'defender.learning.store.write_learning_state'",
+        f"from x import {a}", f"{a}({b})", "x = tenant.learning", "x = layout.learning", f"from y import {b} as R",
+        f"def {c}(): ...", f"class {a}(Exception): ...", f"PendingAction = Literal['create', '{ACTION}']", f"ACTIONS = {{'{ACTION}': 1}}",
+        f"__all__ = ['{a}']", f"await t.{b}(x)", f"def f({c}): ...", f"x = {a}(t)",
+        "class Tenant:\n    @property\n    def learning(self): ...", f"x = 'defender.learning.store.{c}'",
+        *(f"x = {name}" for name in sorted(RETIRED)),
     ]
     for line in code:
         assert names_in(line), line
-    prose = ['"""The import_learning_state and the learning_cutover job."""', "# LearningRoot was deleted", "def f():\n    '''read_learning_state'''",
+    prose = [f'"""The {a} and the {ACTION} job."""', f"# {b} was deleted", f"def f():\n    '''{c}'''",
              "x = tenant.learning_paths(1)", "learning = load()", "x = batch.learning", "class Other:\n    def learning(self): ...",
-             "import_learning = 1", "x = 'learning cutover'"]
+             "import_learning = 1", "x = 'learning cutover'", f"x = '{RETIRED_COMMAND}'"]
     for line in prose:
         assert names_in(line) == [], line
-    assert names_in("x = 'learning_cutover'", allow_action=True) == []
+    assert names_in(f"x = '{ACTION}'", allow_action=True) == []
+
+
+def test_o5_the_census_skips_a_named_ban_list_and_nothing_else():
+    """Control: a module-level assignment to a named ban-list constant is skipped, any other assignment of the same names
+    is found, and a planted name in a test-like file is found. (O5, D13)"""
+    a, b = sorted(RETIRED)[:2]
+    for constant in sorted(BAN_LIST_CONSTANTS):
+        assert names_in(f"{constant} = frozenset({{'{a}', '{b}', '{ACTION}'}})") == [], constant
+    assert names_in(f"OTHER_LIST = frozenset({{'{a}'}})") == [a]
+    assert names_in(f"def test_x():\n    RETIRED_NAMES = {{'{a}'}}") == [a], "only a module-level constant is a ban list"
+    planted = {"defender/tests/learning/test_planted.py": f"from defender.learning.store import {a}\n\ndef test_x():\n    assert {a}\n"}
+    assert census(planted, allow=set()) == {"defender/tests/learning/test_planted.py": [a]}
+    assert census({"defender/tests/support/shared/_ban.py": f"RETIRED_NAMES = frozenset({{'{a}'}})\n"}, allow=set()) == {}
 
 
 def _revision_files() -> dict[str, str]:
     """Each migration's id and its repo-relative path."""
     return {r.revision: f"defender/migrations/versions/{r.path.rsplit('/', 1)[-1]}" for r in revisions.scripts().walk_revisions()}
+
+
+def census(sources: dict[str, str], *, allow: set[str]) -> dict[str, list[str]]:
+    """Each file of `sources` (repo-relative path to text) that names a retired surface, with the names; `allow` may name `learning_cutover`."""
+    return {rel: sorted(set(hits)) for rel, text in sources.items() if (hits := names_in(text, allow_action=rel in allow))}
+
+
+def _test_files() -> list[str]:
+    """Every Python file under `defender/tests`, tracked or new (a new file is not yet tracked)."""
+    listed = subprocess.run(["git", "ls-files", "--cached", "--others", "--exclude-standard", "defender/tests"], cwd=REPO, check=True,
+                            capture_output=True, text=True).stdout.split()
+    return [rel for rel in listed if rel.endswith(".py")]
+
+
+def _read(rels: list[str]) -> dict[str, str]:
+    return {rel: (REPO / rel).read_text(encoding="utf-8") for rel in rels if (REPO / rel).is_file()}
 
 
 def test_o5_no_product_code_names_a_retired_import_or_cutover_surface():
@@ -83,14 +130,17 @@ def test_o5_no_product_code_names_a_retired_import_or_cutover_surface():
     by_rev = _revision_files()
     old = {p for p in by_rev.values()} - revisions.new_files(by_rev)
     retire_path = by_rev.get(next((r for r in by_rev if r.endswith(revisions.RETIRE_SUFFIX)), ""), "")
-    found = {}
-    for rel in files:
-        if rel in old:
-            continue
-        hits = names_in((REPO / rel).read_text(encoding="utf-8"), allow_action=rel == retire_path)
-        if hits:
-            found[rel] = sorted(set(hits))
+    found = census(_read([rel for rel in files if rel not in old]), allow={retire_path})
     assert found == {}, f"{len(found)} product file(s) still name a retired surface: {found}"
+
+
+def test_o5_no_test_names_a_retired_import_or_cutover_surface_outside_a_named_ban_list():
+    """Under `defender/tests`, no file names a retired surface as code except through a named ban-list constant (the
+    retirement tests' one list, `REACH_NAMES`): a stale test, helper or fixture that still does is listed. (O5, D13)"""
+    files = _test_files()
+    assert len(files) >= _TESTS_FLOOR, f"the walk found only {len(files)} test files"
+    found = census(_read(files), allow=set())
+    assert found == {}, f"{len(found)} test file(s) still name a retired surface: {found}"
 
 
 def test_o5_no_product_line_keeps_the_old_folder_exemption_marker():
@@ -101,12 +151,36 @@ def test_o5_no_product_line_keeps_the_old_folder_exemption_marker():
     assert marked == {}, marked
 
 
-def test_o5_the_upgrade_note_before_1278_is_replaced_by_one_line_naming_an_earlier_revision():
-    """`defender/CLAUDE.md` has no `Upgrade from before #1278` section and no cutover command; one line says to cut over on an earlier revision first. (O5, D10)"""
+def _section(lines: list[str], title: str) -> list[str]:
+    """The body of the `## <title>` section (up to the next `## `), or [] with none."""
+    starts = [n for n, line in enumerate(lines) if line.startswith(f"## {title}")]
+    assert len(starts) <= 1, starts
+    if not starts:
+        return []
+    rest = lines[starts[0] + 1:]
+    return rest[:next((n for n, line in enumerate(rest) if line.startswith("## ")), len(rest))]
+
+
+def test_o5_the_upgrade_notes_say_to_cut_over_on_an_earlier_revision_and_to_stop_the_drains_before_migrating():
+    """`defender/CLAUDE.md` has no `Upgrade from before #1278` section and no cutover command; one line names an earlier
+    revision to cut over on and says a deployment that never did loses its old learning folder (D10); an `Upgrade from
+    before #1485` section says to stop the learning drains and the API before migrating (D12). Loose words. (O5)"""
     lines = (REPO / "defender" / "CLAUDE.md").read_text(encoding="utf-8").splitlines()
     assert any(line.startswith("## Upgrade from before #1454") for line in lines), "control: the neighbouring notes are read"
     assert not any("Upgrade from before #1278" in line for line in lines)
-    assert not any("request-learning-cutover" in line for line in lines)
+    assert not any(RETIRED_COMMAND in line for line in lines)
     notes = [line for line in lines if re.search(r"(?i)cut[ -]?over", line) and "#1485" in line]
     assert len(notes) == 1, notes
-    assert re.search(r"(?i)(earlier|before|older|previous)\s+(revision|release|version)", notes[0]) or re.search(r"(?i)\bfirst\b", notes[0]), notes[0]
+    note = notes[0]
+    assert re.search(r"(?i)(earlier|older|previous|prior)\s+(revision|release|version)|(revision|release|version)\s+(from\s+)?(before|prior to|older than)|before\s+#1485", note), note
+    assert re.search(r"(?i)\blearning\b", note), note
+    assert re.search(r"(?i)\bfolder\b", note), note
+    assert re.search(r"(?i)\blos[et]\b|\bdiscard|\bgone\b", note), note
+    body = " ".join(_section(lines, "Upgrade from before #1485"))
+    assert body, "an `Upgrade from before #1485` section exists"
+    stop, migrate = re.search(r"(?i)\bstop", body), re.search(r"(?i)\bmigrat", body)
+    assert stop, body
+    assert migrate, body
+    assert stop.start() < migrate.start(), body
+    assert re.search(r"(?i)\bdrains?\b", body), body
+    assert re.search(r"\bAPI\b", body), body

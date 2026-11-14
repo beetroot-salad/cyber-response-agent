@@ -160,8 +160,8 @@ def tie_batches(dsn: str, ids: Iterable[Any], at: _dt.datetime = INSTANT) -> Non
 # --- read-back oracles ---------------------------------------------------------------------------------------------
 
 def stored_items(dsn: str, tenant: str, *statuses: str) -> list[Any]:
-    """The tenant's items in `statuses` as `work()` holds them (`id` included), in no promised order."""
-    return list(call(dsn, "work", tenant, statuses=list(statuses)))
+    """The tenant's items in `statuses` (none given: every status) as `work()` holds them (`id` included), in no promised order."""
+    return list(call(dsn, "work", tenant, statuses=list(statuses) or None))
 
 
 def stored_batches(dsn: str, tenant: str, *phases: str) -> list[Any]:

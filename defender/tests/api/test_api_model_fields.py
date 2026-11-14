@@ -374,7 +374,7 @@ def test_1485_the_wire_statuses_and_batch_kinds_are_the_stores():
 
 
 def test_1485_the_wire_models_have_exactly_their_fields_all_required_and_ids_of_their_own_family():
-    """No payload, fault or counters, no defaults; `item_id` is a `WorkItemId` and `batch_id` a `BatchId`; ids outside the
+    """No payload, fault or counters, and no field has a default (D13: an adapter that forgets a field fails validation instead of serving null); `item_id` is a `WorkItemId` and `batch_id` a `BatchId`; ids outside the
     canonical UUID text are refused (control: the canonical ones validate). (Wire models)"""
     from defender.records.formats import BatchId, WorkItemId
 

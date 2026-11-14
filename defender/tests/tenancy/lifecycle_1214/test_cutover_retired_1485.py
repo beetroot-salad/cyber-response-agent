@@ -9,9 +9,11 @@ import pytest
 
 from defender.tests.support.jobs._jobs1342 import register_tenant
 from defender.tests.support.shared._postgres1339 import execute, migrated_database  # noqa: F401 — fixture
+from defender.tests.support.shared._retired1485 import RETIRED_ACTION as RETIRED
+from defender.tests.support.shared._retired1485 import RETIRED_COMMAND as COMMAND
+from defender.tests.support.shared._retired1485 import RETIRED_REQUEST
 from defender.tests.tenancy.lifecycle_1214.test_lifecycle_command import TENANT, _lifecycle
 
-RETIRED = "learning_cutover"
 SURVIVING_ACTIONS = {"create", "rotate", "offboard", "delete_repo"}
 
 
@@ -20,7 +22,7 @@ def test_o5_the_lifecycle_parser_lists_serve_and_no_longer_the_cutover_command()
     done = _lifecycle("--help")
     assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
     assert "serve" in done.stdout, done.stdout
-    assert "request-learning-cutover" not in done.stdout, done.stdout
+    assert COMMAND not in done.stdout, done.stdout
 
 
 @pytest.mark.postgres
@@ -30,11 +32,11 @@ def test_o5_request_learning_cutover_is_an_unknown_command_and_queues_nothing(mi
     register_tenant(migrated_database, TENANT)
     before = execute(migrated_database, "SELECT state, pending_action, step, step_actor, failure FROM tenancy.tenants WHERE id = %s", (TENANT,))
     assert before == [("active", None, None, None, None)], before
-    done = _lifecycle("request-learning-cutover", *argv, dsn=migrated_database)
+    done = _lifecycle(COMMAND, *argv, dsn=migrated_database)
     assert "queued" not in done.stdout, done.stdout
     assert execute(migrated_database, "SELECT state, pending_action, step, step_actor, failure FROM tenancy.tenants WHERE id = %s", (TENANT,)) == before
     assert done.returncode == 2, (done.returncode, done.stdout, done.stderr)
-    assert "invalid choice: 'request-learning-cutover'" in done.stderr, done.stderr
+    assert f"invalid choice: '{COMMAND}'" in done.stderr, done.stderr
     assert "serve" in done.stderr, done.stderr  # the choices it lists: the parser still has its other command
 
 
@@ -73,7 +75,7 @@ def test_o5_no_tenant_repository_can_request_the_cutover(owner):
     module, name = owner.split(":")
     cls = getattr(importlib.import_module(f"defender.{module}"), name)
     assert hasattr(cls, "request_rotate")
-    assert not hasattr(cls, "request_learning_cutover")
+    assert not hasattr(cls, RETIRED_REQUEST)
 
 
 def test_o5_the_audit_actions_no_longer_include_the_cutover():
@@ -82,7 +84,7 @@ def test_o5_the_audit_actions_no_longer_include_the_cutover():
 
     actions = set(typing.get_args(AuditAction))
     assert "tenant.rotate" in actions
-    assert "tenant.learning_cutover" not in actions
+    assert f"tenant.{RETIRED}" not in actions
 
 
 def test_o5_the_job_step_table_and_the_host_actor_have_no_cutover_steps():

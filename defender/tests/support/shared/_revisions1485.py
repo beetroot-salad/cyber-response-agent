@@ -2,7 +2,9 @@
 suffix and never by a number or a hard-coded predecessor (#1083 piece 1 lands `0016_list_indexes` first)."""
 from __future__ import annotations
 
-RETIRE_SUFFIX = "_retire_learning_cutover"
+from defender.tests.support.shared._retired1485 import RETIRED_ACTION
+
+RETIRE_SUFFIX = f"_retire_{RETIRED_ACTION}"
 INDEXES_SUFFIX = "_learning_set_aside_indexes"
 
 
