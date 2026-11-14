@@ -14,7 +14,9 @@ stand-in only for those answers: it holds sets by path and version, nothing more
   after `/v1/`), `value_reads` (every read of a value: the writer's token must never make one), `stored(...)`.
 - Script: `answer(method, contains, response_or_error, *, after=0, times=None)` makes a matching call answer so (an
   exception instance is raised, like a refused connection); `on_write` is awaited inside a write's handler after the set
-  is saved and before it answers (a version saved by someone else in between).
+  is saved and before it answers (a version saved by someone else in between); `on_metadata_read` is awaited inside a
+  metadata read's handler before it answers (a record changed by someone else between that read and the write it
+  precedes).
 - `listening()`: the same answers on a real loopback socket, for a child process."""
 from __future__ import annotations
 
@@ -52,6 +54,7 @@ class ScriptedOpenBao(httpx.BaseTransport, httpx.AsyncBaseTransport):
         self.calls: list[tuple[str, str]] = []
         self.value_reads: list[str] = []
         self.on_write: Callable[[str], Awaitable[None]] | None = None
+        self.on_metadata_read: Callable[[str], Awaitable[None]] | None = None
         self._sets: dict[str, list[dict[str, Any]]] = {}
         self._rules: list[_Rule] = []
 
@@ -126,6 +129,9 @@ class ScriptedOpenBao(httpx.BaseTransport, httpx.AsyncBaseTransport):
         return answer
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        path = request.url.path.removeprefix("/v1/")
+        if self.on_metadata_read is not None and request.method == "GET" and path.startswith(f"{self.mount}/metadata/"):
+            await self.on_metadata_read(path.removeprefix(f"{self.mount}/metadata/"))
         answer, saved = self._handle(request)
         if isinstance(answer, Exception):
             raise answer

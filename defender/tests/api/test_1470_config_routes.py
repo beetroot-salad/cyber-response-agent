@@ -715,6 +715,34 @@ async def test_o4_has_credentials_is_true_exactly_while_a_set_exists_at_the_curr
     assert [v.credential_generation for v in configured.versions(TICKET)] == [1, 1, 2]
 
 
+async def test_o4_a_saves_answer_is_what_the_store_decided_under_the_lock_not_what_the_read_before_it_saw(scripted):
+    """v1 holds a set; while the save's `has_credentials` read is answered, another admin deletes the system; the save
+    names 0 (the caller's view had none): 201 with `Location`, `has_credentials` false and version 3, as the store's
+    created flag says, not 200 and true as the read before the lock saw. A plain replace after is 200 with no `Location`.
+    (O4: created decided by the store under the lock; D12)"""
+    assert (await scripted.put_system(TICKET, 0)).status_code == 201
+    assert (await scripted.put_credentials(TICKET, 1, {"api_key": TOKEN})).status_code == 204
+    fired = []
+
+    async def another_admin_deletes(path: str) -> None:
+        scripted.scripted.on_metadata_read = None
+        fired.append(path)
+        deleted = await scripted.delete_system(TICKET, 1)
+        assert deleted.status_code == 204, deleted.text
+
+    scripted.scripted.on_metadata_read = another_admin_deletes
+    saved = await scripted.put_system(TICKET, 0)
+    assert fired, "premise: the save read whether the current version has credentials"
+    assert [(v.version, v.deleted) for v in scripted.versions(TICKET)] == [(1, False), (2, True), (3, False)]
+    assert saved.status_code == 201, saved.text
+    assert saved.headers.get("location", "").endswith(f"/tenants/{A}/systems/{TICKET}"), saved.headers
+    assert (saved.json()["version"], saved.json()["has_credentials"]) == (3, False)
+    assert (await scripted.get_system(TICKET)).json()["has_credentials"] is False
+
+    replaced = await scripted.put_system(TICKET, 3, settings=TICKET_SETTINGS | {"TICKET_TIMEOUT_SEC": "20"})
+    assert (replaced.status_code, "location" in replaced.headers) == (200, False), replaced.text
+
+
 # --- membership ------------------------------------------------------------------------------------------------------
 
 async def test_o4_another_tenants_admin_writes_nothing_of_this_tenant_and_asks_no_secret_store(scripted):
