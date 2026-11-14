@@ -155,14 +155,14 @@ async def stack(pg_dsn) -> AsyncIterator[Stack]:
 
 async def _signed_in(stack: Stack, email: str, value: str):
     """An active user with a live session, as the service sees them."""
-    user = await seed_user(stack.repo, email, created_at=NOW, status="active")
+    user = await seed_user(stack.repo.repo, email, created_at=NOW, status="active")
     await stack.repo.add_session(value, user.id, now=NOW, expires_at=NOW + WEEK)
     return user, await stack.service.authenticate(value)
 
 
 async def _invitee(stack: Stack, email: str, account: str):
     """An `invited` user who already has a sign-in account, ready to sign in with the code `account`."""
-    user = await seed_user(stack.repo, email, created_at=NOW)
+    user = await seed_user(stack.repo.repo, email, created_at=NOW)
     assert await stack.repo.record_signin_account(user.id, account) is True
     return user
 
