@@ -207,7 +207,8 @@ class CatalogAdapter(BaseModel):
     adapter_id: str
     display_name: str | None = Field(description="Null when the adapter declares none.")
     settings_keys: list[str] = Field(description="The keys a record of this adapter stores, prefixed, as stored.")
-    sample_settings: dict[str, str] = Field(description="An example value for each stored key.")
+    sample_settings: dict[str, str] | None = Field(description="An example value for each stored key; null when the "
+                                                               "adapter declares none.")
     lab_example: bool = Field(description="A lab example adapter, not a product integration (D6).")
 
 

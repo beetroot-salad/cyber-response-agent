@@ -17,7 +17,7 @@ from typing import Protocol
 
 from defender.jobs.audit import AuditAction, announce
 from defender.credential_proxy import SecretStoreFault
-from defender.kit.access import CredentialRefused, credential_faults
+from defender.kit.access import check_credentials
 from defender.records.formats import TenantId
 from defender.system_records import RecordRefused, RecordStore, Stale
 from defender.system_rules import Catalog
@@ -81,7 +81,7 @@ class ConfigRecords:
 
     async def list_adapters(self) -> list[CatalogAdapter]:
         return [CatalogAdapter(adapter_id=e.adapter_id, display_name=e.display_name, settings_keys=list(e.stored_keys),
-                               sample_settings=dict(e.sample_settings), lab_example=e.example)
+                               sample_settings=None if e.sample_settings is None else dict(e.sample_settings), lab_example=e.example)
                 for e in self._catalog.entries()]
 
     async def list_systems(self, tenant_id: TenantId, *, after: str | None, limit: int) -> list[SystemRecord]:
@@ -148,9 +148,7 @@ class ConfigCredentials:
                               credentials: dict[str, str]) -> None:
         tenant = principal.tenant_id
         slot = await self._store.credential_slot(tenant, system_id, for_version)
-        faults = credential_faults(slot.auth, credentials)
-        if faults:
-            raise CredentialRefused(faults)
+        check_credentials(slot.auth, credentials)
         fields = "fields: " + ", ".join(sorted(credentials))
         try:
             await self._secrets.put_credentials(tenant, system_id, slot.auth.kind, credentials,

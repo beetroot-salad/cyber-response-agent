@@ -242,13 +242,8 @@ async def _login_check(settings: Settings, secrets: OpenBaoSecrets) -> None:
 def _whole_catalog() -> Catalog:
     """The catalog built whole (every entry and every adapter module), once, so the judgement inside the record store's
     row lock reads no files. An unreadable adapters directory refuses start; an adapter that fails to load is kept as
-    data (D8): the catalog raises its failure again on each ask, and the judgement names it as a fault."""
-    catalog = Catalog.of_checkout()
-    catalog.entries()
-    for adapter in catalog.adapter_ids:
-        with contextlib.suppress(Exception):  # D8: kept in the catalog, not a start refusal
-            catalog.module(adapter)
-    return catalog
+    data (D8): the judgement names it as a fault on each ask."""
+    return Catalog.of_checkout().load_all()
 
 
 @asynccontextmanager
@@ -314,9 +309,9 @@ async def serving(settings: Settings, *, transport: httpx.AsyncBaseTransport | N
         yield Running(app=app, sockets=[sock])
 
 
-def _judge(catalog: Catalog) -> Callable[[TenantRecords, TenantRecords | None], list[str]]:
+def _judge(catalog: Catalog) -> Callable[[TenantRecords, TenantRecords], list[str]]:
     """The record judgement over the catalog built at start, as the record store takes it."""
-    def judge(after: TenantRecords, before: TenantRecords | None) -> list[str]:
+    def judge(after: TenantRecords, before: TenantRecords) -> list[str]:
         return list(judge_records(after, before, catalog=catalog))
     return judge
 
