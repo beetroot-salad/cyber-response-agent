@@ -53,16 +53,19 @@ def where(tmp_path):
 class _PresentingRunscJobAsRunsc:
     """The real docker with `runsc-job` presented as the box runtime: the check's own `docker info` answer lists the
     `runsc-job` entry under `runsc`, and each run or create naming `runsc` names `runsc-job` (the control, `runc`, is
-    untouched). The closed runtime set cannot stop it: the rename is in the seam."""
+    untouched). The closed runtime set cannot stop it: the rename is in the seam. `asked` records each argv as the code
+    gave it, `calls` each argv as the daemon was handed it (after the rename)."""
 
     def __init__(self) -> None:
+        self.asked: list[list[str]] = []
         self.calls: list[list[str]] = []
 
     def __call__(self, argv, **kw):  # noqa: ANN001 — DockerFn
         argv = list(argv)
-        self.calls.append(list(argv))
+        self.asked.append(list(argv))
         if argv[1:2] in (["run"], ["create"]) and "--runtime" in argv and argv[argv.index("--runtime") + 1] == "runsc":
             argv[argv.index("--runtime") + 1] = "runsc-job"
+        self.calls.append(list(argv))
         done = box_mod.run_docker(argv, **kw)
         if argv[1:2] == ["info"] and "Runtimes" in " ".join(argv):
             listed = json.loads(done.stdout)
@@ -120,4 +123,8 @@ def test_s3_the_box_check_fails_when_runsc_job_is_presented_as_the_box_runtime_a
         box_mod.start_box(run_dir, DEFENDER, spec=BoxSpec(runtime="runsc"), docker=seam, tenant_id=TEST_TENANT,
                           data_root=data_root)
     assert not [c for c in seam.calls if c[1:2] == ["create"]], "a box was created under the leaking runtime"
+    # The seam renames, not the code: kills a code that itself asks for `runsc-job` (this test would then prove nothing).
+    assert _check_runtimes(seam.asked)[:1] == ["runsc"], "premise: the code asked for the box runtime `runsc`"
+    # Control: the daemon was handed `runsc-job` for the check. Kills a check that skips the box run (no check run at all)
+    # and one run under another runtime (the failure would then not be the leaking runtime's).
     assert _check_runtimes(seam.calls)[:1] == ["runsc-job"], "control: the check ran under the presented runtime"
