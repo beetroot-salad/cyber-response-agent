@@ -147,7 +147,7 @@ class _OpenBao:
         self.addr = addr.rstrip("/")
         self.mount = _check_name(mount, "the mount")
         self._token = token
-        self._transport = transport
+        self._transport: httpx.AsyncBaseTransport | None = transport
         #: One pooled connection for this login's calls made outside a proxied request.
         self._client = internal_client(trust=tls_trust(DEPLOYMENT_ISSUER.ca_cert),
                                        transport=transport, timeout=OPENBAO_TIMEOUT_SEC)
@@ -242,7 +242,15 @@ class OpenBaoStore(_OpenBao):
 class OpenBaoSecrets(_OpenBao):
     """The write-only secret port (the API's, #1470 D-E; `tenant check`'s existence read): set a whole credential set
     with its kind at a credential generation, and ask whether one exists there. It cannot read a value back. A call
-    that does not get its answer raises `SecretStoreFault` (`SecretStoreUnavailable` or `SecretStoreRefused`)."""
+    that does not get its answer raises `SecretStoreFault` (`SecretStoreUnavailable` or `SecretStoreRefused`).
+
+    Every call it makes is asynchronous, so `transport` is any asynchronous transport (a test's scripted one, or none:
+    the network), not only the `httpx.MockTransport` the synchronous logins take."""
+
+    def __init__(self, *, addr: str, token: str, mount: str,
+                 transport: httpx.AsyncBaseTransport | None = None) -> None:
+        super().__init__(addr=addr, token=token, mount=mount)
+        self._transport = transport
 
     async def _secret_call(self, method: str, rest: str, what: str, json: Any = None) -> httpx.Response:
         try:
