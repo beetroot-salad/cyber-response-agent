@@ -307,8 +307,10 @@ class RecordStore:
                                              .order_by(_SV.c.version.desc()).limit(1))).first()
                 if newest is None or newest.deleted:
                     raise NoCurrentRecord(f"system {system}")
-                named = (await conn.execute(select(_SV.c.credential_generation, _SV.c.deleted).where(
-                    _SV.c.tenant_id == tenant, _SV.c.system_id == system, _SV.c.version == for_version))).first()
+                # A version outside 1..newest names no row; the column is a 32-bit integer, so a larger number is not asked.
+                named = None if not 1 <= for_version <= newest.version else (await conn.execute(
+                    select(_SV.c.credential_generation, _SV.c.deleted).where(
+                        _SV.c.tenant_id == tenant, _SV.c.system_id == system, _SV.c.version == for_version))).first()
         if named is None or named.credential_generation != newest.credential_generation:
             raise Stale(f"system {system}", current_version=newest.version, named=for_version)
         try:
