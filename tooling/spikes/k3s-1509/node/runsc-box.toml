@@ -1,0 +1,4 @@
+log_level = "info"
+[runsc_config]
+  network = "none"
+  debug-log = "/var/log/runsc/box/"

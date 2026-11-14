@@ -166,7 +166,7 @@ places long-lived services across machines, and who holds the power to start per
 
 k3s is the only option where B4 and cross-host B6 are enforced by something other than our own code. It starts on one
 node and grows by joining. Costs: the launch layer is rewritten against the Kubernetes API; dev and CI need k3d with
-gVisor inside it (the spike's hard part); the cluster itself is operated (upgrades, datastore backup and restore, the
+gVisor inside it (works in the dev container; every node needs runsc's `gvisor-bin` folder beside it); the cluster itself is operated (upgrades, datastore backup and restore, the
 cluster CA, Secret encryption at rest with `--secrets-encryption`, the network plugin).
 
 **Fallback if the spike fails:** Compose per host, a containerised worker holding the Docker socket, the helper and job
@@ -354,7 +354,8 @@ before the job; the sweep covers a helper that died between the two.
 
 Each box kind (the run's shell box, the oracle box, the batch box) has its own template, because their mounts differ.
 A box pod uses the gVisor runtime class whose handler sets `--network=none`, a deny-all network policy as the second
-layer, `dnsPolicy: None` with no nameservers, and no service-account token. It mounts the job's volume: a generic
+layer, `dnsPolicy: None` with the one nameserver `127.0.0.1`, where nothing listens (the API refuses `None` with
+no nameserver), and no service-account token. It mounts the job's volume: a generic
 ephemeral volume of the k3s local-path storage class, declared on the job pod and created and deleted with it;
 single-node access places the box on the job's node. Read-only stages that the job could rewrite on its own volume are
 re-checked by digest when a box starts on them.
@@ -603,10 +604,8 @@ claim-scoped keys with confined readers.
 
 **Then the boundaries work**, each a later issue:
 
-1. **Spike, go or no-go:** k3d with a gVisor runtime class in the dev container and on the CI runner; `--network=none`
-   per runtime handler; network-policy enforcement, including traffic to the pod's own node; two gVisor pods sharing a
-   local-path volume coherently; an admission policy pinning B4's fields after the orchestrator's own defaulting; pod
-   create-to-running time per box window.
+1. **Spike, go or no-go (#1509):** dev leg run on 2026-11-14, every probe passes (`tooling/spikes/k3s-1509/`). Still to
+   run: the CI runner, several nodes, a k3s server restart.
 2. The claim on the row; passes name their claim; the proxy's claim check and audit in PostgreSQL.
 3. #1491: model and forge calls through the proxy, the raw forge token retired, proxy replicas, per-route egress
    (#1501).
@@ -643,7 +642,7 @@ claim-scoped keys with confined readers.
 ## Remaining decisions
 
 - VPS providers and sizes, and actual resource budgets.
-- The spike's verdict (work item 1); the fallback applies if it fails.
+- The spike's CI leg, several nodes and a k3s restart (work item 1, #1509); the dev leg passed. The fallback applies if they fail.
 - Membership and enrollment owner, token lifetime and refresh configuration, and identity-provider setup.
 - Issuer bootstrap and live Forgejo integration; when to adopt automatic unsealing.
 - Exact artifact CSP values and the complete inventory of HTML-producing paths.
@@ -661,7 +660,8 @@ ordered checklist. #1502 (containerisation) is rewritten as work item 7; #1491 i
 
 Revision 2026-11-14, at source base `a8143a4bc`. The boundaries design went through four independent reviews (general,
 trust boundaries, and two on the helper channel), each sorted by a fresh reader before revision. Kubernetes and gVisor
-behaviour is unprobed: this host has no k3s or kind, only Docker 29.5.3, and the spike owns those claims (B-G7, B-G11).
+behaviour was then probed by the spike in the dev container's own Docker daemon (B-G7: the dev leg holds; the CI runner,
+several nodes and a k3s restart stay unprobed).
 Earlier revisions: 2026-10-22 and 2026-10-22b (Compose per host, backend-held sessions, one tenant per user, the
 artifact domain, the OpenBao unseal posture); their claims are kept below.
 
@@ -715,10 +715,17 @@ claims:
     verdict: holds
   - id: B-G7
     kind: behavior
-    claim: "k3s enforces NetworkPolicy with its bundled controller, including traffic to the pod's own node; a gVisor runtime class with --network=none gives a pod no usable network; two gVisor pods share a local-path volume coherently; an admission policy can pin every B4 field; k3d with gVisor runs in the dev container and CI."
-    probe: "spike, work item 1"
+    claim: "In k3s, deny-by-default NetworkPolicy leaves a job pod only the proxy pods, its own node included; a gVisor runtime class whose handler sets network=none gives a pod loopback only; two gVisor pods share a local-path volume coherently; a ValidatingAdmissionPolicy refuses every change to B4's fields; the launcher's role allows only what section 1 lists; all of it in the dev container."
+    probe: "tooling/spikes/k3s-1509/run-all.sh: k3d v5.8.3, k3s v1.33.9 (containerd 2.1.5), runsc release-20261109.0, the dev container's jobs daemon (Docker 29.9.3), one node"
     probe_kind: executed
-    observed: "not run; no k3s or kind on this host"
+    observed: "All pass, each against a control (out/run-all-2026-11-14.txt). Job pod under policy: proxy pod and Service open; worker, other job, the node's kubelet, API server port and NodePort, API server Service, DNS, outside closed (all open with no policy). Box: loopback only, with or without policy. Volume: 11 of 11 coherence checks in both directions; the claim goes with the job pod. Admission: 2 templates admitted, 40 changes refused by the policy alone with Pod Security off; ephemeral containers and pod updates refused for every caller. dnsPolicy None needs a nameserver: 127.0.0.1 pinned, nothing resolves. Each node needs runsc's gvisor-bin folder. Box create-to-ready median 0.97 to 1.95 s."
+    verdict: holds
+  - id: B-G7b
+    kind: behavior
+    claim: "The same holds on the CI runner, across several nodes, and through a k3s server restart (exec streams in flight)."
+    probe: "the spike's CI leg and a two-node run"
+    probe_kind: executed
+    observed: "not run"
     verdict: unprobed
   - id: B-G8
     kind: referential

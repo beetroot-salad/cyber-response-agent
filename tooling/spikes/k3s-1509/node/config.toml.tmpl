@@ -1,0 +1,13 @@
+{{ template "base" . }}
+
+[plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.runsc-job]
+  runtime_type = "io.containerd.runsc.v1"
+[plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.runsc-job.options]
+  TypeUrl = "io.containerd.runsc.v1.options"
+  ConfigPath = "/etc/spike/runsc-job.toml"
+
+[plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.runsc-box]
+  runtime_type = "io.containerd.runsc.v1"
+[plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.runsc-box.options]
+  TypeUrl = "io.containerd.runsc.v1.options"
+  ConfigPath = "/etc/spike/runsc-box.toml"

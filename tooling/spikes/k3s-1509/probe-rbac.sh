@@ -1,0 +1,20 @@
+#!/bin/sh
+# What the launcher's own token may do. Needs: $L = kubectl with the launcher's token; pods t-job and t-box admitted.
+r(){ out=$(eval "$2" 2>&1); if echo "$out" | grep -q -i -E "forbidden|cannot"; then v=DENIED; else v=ALLOWED; fi; printf '%-8s %-32s %s\n' $v "$1" "$(echo "$out" | head -1 | cut -c1-100)"; }
+r "get secret pass-c9"            "$L -n jobs get secret pass-c9"
+r "list secrets"                  "$L -n jobs get secrets"
+r "create secret"                 "$L -n jobs create secret generic pass-c10 --from-literal=p=x"
+r "delete secret"                 "$L -n jobs delete secret pass-c10"
+r "create PersistentVolume"       "echo '{\"apiVersion\":\"v1\",\"kind\":\"PersistentVolume\",\"metadata\":{\"name\":\"evil\"},\"spec\":{\"capacity\":{\"storage\":\"1Gi\"},\"accessModes\":[\"ReadWriteOnce\"],\"hostPath\":{\"path\":\"/\"}}}' | $L create -f -"
+r "create PVC"                    "echo '{\"apiVersion\":\"v1\",\"kind\":\"PersistentVolumeClaim\",\"metadata\":{\"name\":\"x\",\"namespace\":\"jobs\"},\"spec\":{\"accessModes\":[\"ReadWriteOnce\"],\"resources\":{\"requests\":{\"storage\":\"1Gi\"}}}}' | $L create -f -"
+r "patch pod labels"              "$L -n jobs label pod t-job claim=c10 --overwrite"
+r "add ephemeral container"       "$L -n jobs debug t-job --image=busybox:1.36.1 --profile=general -- true"
+r "create NetworkPolicy"          "echo '{\"apiVersion\":\"networking.k8s.io/v1\",\"kind\":\"NetworkPolicy\",\"metadata\":{\"name\":\"open\",\"namespace\":\"jobs\"},\"spec\":{\"podSelector\":{}}}' | $L create -f -"
+r "delete NetworkPolicy deny-all" "$L -n jobs delete networkpolicy deny-all"
+r "create pod in control ns"      "$L -n control run x --image=busybox:1.36.1 --dry-run=server"
+r "list pods in control ns"       "$L -n control get pods"
+r "list nodes"                    "$L get nodes"
+r "delete admission policy"       "$L delete validatingadmissionpolicy job-templates"
+r "exec into box t-box"           "$L -n jobs exec t-box -- echo exec-ok"
+r "exec into job t-job"           "$L -n jobs exec t-job -- echo exec-ok"
+r "list pods in jobs"             "$L -n jobs get pods -o name"
