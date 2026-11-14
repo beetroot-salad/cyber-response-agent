@@ -237,7 +237,7 @@ def test_flow6_connect_never_tells_the_model_to_write_tenant_knowledge_into_the_
 def test_flow6_connect_routes_the_tenant_half_through_propose_and_keeps_the_adapter_in_product():
     """Connect's main page and its tacit route both hand the tenant half to `tenant.py
     propose` (a staged directory, never a branch of the product repo), every scaffold-validator
-    call passes the staged directory, and the adapter is still written into the product repo's
+    call for a system with a tenant half passes the staged directory, and the adapter is still written into the product repo's
     `defender/integrations/`."""
     docs = _connect_docs()
     for name in ("SKILL.md", "tacit.md"):
@@ -246,4 +246,9 @@ def test_flow6_connect_routes_the_tenant_half_through_propose_and_keeps_the_adap
     calls = [line for text in docs.values() for line in text.splitlines()
              if "validate_scaffold.py" in line and "{system}" in line]
     assert calls, "control: connect runs the scaffold validator"
-    assert all("--staged" in line for line in calls), calls
+    staged = [line for line in calls if "--staged" in line]
+    assert staged, "control: connect validates a staged tenant half for a system with investigator tools"
+    unstaged = [line for line in calls if "--staged" not in line]
+    # #1401: an adapter offering no tool beyond health-check has no tenant half; its only
+    # validator form is the handoff-and-case-record pre-check, never a product-tree read.
+    assert all("--handoff" in line and "--case" in line for line in unstaged), unstaged
