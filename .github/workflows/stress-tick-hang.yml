@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        n: [1, 2, 3, 4]
+        n: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     steps:
       - uses: actions/checkout@v5
       - name: Install uv
@@ -35,13 +35,14 @@ jobs:
         working-directory: defender
         env:
           DEFENDER_TEST_POSTGRES_DSN: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+          SETTLE_BEFORE_FORK: "1"
         run: |
           mkdir -p ../stress
           loop() {
-            end=$((SECONDS + 600)); i=0
+            end=$((SECONDS + 1200)); i=0
             while [ $SECONDS -lt $end ]; do
               i=$((i + 1))
-              uv run pytest -q -p no:cacheprovider -n 0 -p no:randomly \
+              FORK_LOG="$PWD/../stress/forks-$1.txt" uv run pytest -q -p no:cacheprovider -n 0 -p no:randomly \
                 tests/tenancy/tenant_1108_p4/test_1278_tick_faults.py \
                 tests/tenancy/tenant_1108_p4/test_1278_tick.py \
                 > "../stress/loop$1-run$i.log" 2>&1 || echo "loop $1 run $i FAILED"
@@ -49,6 +50,7 @@ jobs:
             done
           }
           loop 1 & loop 2 & loop 3 & loop 4 & wait
+          echo "=== forks ==="; cat ../stress/forks-*.txt | awk -F'[ =]' '{print ($2==$4 ? "matched" : "mismatched")}' | sort | uniq -c
           echo "=== failures ==="
           failed=0
           for f in ../stress/*.log; do

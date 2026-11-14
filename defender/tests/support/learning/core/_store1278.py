@@ -218,6 +218,16 @@ class TickChild:
         self.result = result
         self.stacks = result.with_suffix(".stacks.txt")
         self.parent = result.with_suffix(".parent.txt")
+        # THROWAWAY: a thread Python has joined can still be tearing down natively; wait until the OS agrees, and log it.
+        import threading
+        native, known, started = len(os.listdir("/proc/self/task")), threading.active_count(), time.monotonic()
+        while os.environ.get("SETTLE_BEFORE_FORK") and len(os.listdir("/proc/self/task")) > threading.active_count() \
+                and time.monotonic() - started < 2.0:
+            time.sleep(0.001)
+        if os.environ.get("FORK_LOG"):
+            with open(os.environ["FORK_LOG"], "a") as log:
+                log.write(f"native={native} python={known} waited_ms={1000 * (time.monotonic() - started):.1f} "
+                          f"native_after={len(os.listdir('/proc/self/task'))}\n")
         with open(self.parent, "w") as at_fork:  # THROWAWAY: the parent's threads at the moment of the fork
             faulthandler.dump_traceback(file=at_fork, all_threads=True)
         self.pid = os.fork()
