@@ -25,11 +25,11 @@ import socket
 import subprocess
 import threading
 import weakref
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from ._docker import BoxFault, DockerFn, Rootfs, _covered, _daemon_source, _uncovered_fault
+from ._docker import BoxFault, DaemonRuntimes, DockerFn, Rootfs, _covered, _daemon_source, _uncovered_fault
 
 #: Where the check folder sits in the check container, and the socket's name in it. Short, so the in-box connect path
 #: can never exceed a socket name's limit whatever the data root is.
@@ -70,29 +70,17 @@ _PASSED: weakref.WeakKeyDictionary[Any, set[tuple[str, str]]] = weakref.WeakKeyD
 _PASSED_LOCK = threading.Lock()
 
 
-def _info(docker: DockerFn, fmt: str) -> str | None:
-    """One `docker info` field, or None when the daemon cannot answer it."""
-    try:
-        done = docker(["docker", "info", "--format", fmt])
-    except (OSError, subprocess.SubprocessError):
+def _registration_key(answer: DaemonRuntimes | None, runtime: str) -> tuple[str, str] | None:
+    """The daemon's `ID` and a hash of `runtime`'s `docker info` Runtimes entry (canonical JSON), from the one answer
+    the presence check read (`require_runtime`): a re-registration changes the entry. None when that answer cannot name
+    both."""
+    if answer is None or not answer.daemon_id or answer.runtimes is None:
         return None
-    return (done.stdout or "").strip() if done.returncode == 0 else None
-
-
-def _registration_key(docker: DockerFn, runtime: str) -> tuple[str, str] | None:
-    """The daemon's `ID` and a hash of `runtime`'s `docker info` Runtimes entry (canonical JSON): a re-registration
-    changes the entry. None when `docker info` cannot name both."""
-    daemon, listed = _info(docker, "{{.ID}}"), _info(docker, "{{json .Runtimes}}")
-    if not daemon or not listed:
-        return None
-    try:
-        entry = json.loads(listed).get(runtime)
-    except (ValueError, AttributeError):
-        return None
+    entry = answer.runtimes.get(runtime)
     if entry is None:
         return None
     canonical = json.dumps(entry, sort_keys=True, separators=(",", ":"))
-    return daemon, hashlib.sha256(canonical.encode()).hexdigest()
+    return answer.daemon_id, hashlib.sha256(canonical.encode()).hexdigest()
 
 
 def _held(docker: DockerFn, key: tuple[str, str]) -> bool:
@@ -106,6 +94,18 @@ def _held(docker: DockerFn, key: tuple[str, str]) -> bool:
 def _keep(docker: DockerFn, key: tuple[str, str]) -> None:
     with contextlib.suppress(TypeError), _PASSED_LOCK:
         _PASSED.setdefault(docker, set()).add(key)
+
+
+#: One lock per registration key, so box starts that arrive together on one registration (a preflight's worlds, each
+#: starting its first box) run one check and the rest wait for its verdict, instead of each running its own.
+_KEY_LOCKS: dict[tuple[str, str], threading.Lock] = {}
+
+
+def _one_at_a_time(key: tuple[str, str] | None) -> contextlib.AbstractContextManager[object]:
+    if key is None:  # an unkeyed check is never kept, so a waiter would gain nothing by waiting
+        return contextlib.nullcontext()
+    with _PASSED_LOCK:
+        return _KEY_LOCKS.setdefault(key, threading.Lock())
 
 
 # --- the host listener ---------------------------------------------------------------------------------------------------
@@ -223,9 +223,12 @@ def _dir(path: Path, what: str) -> None:
         raise BoxFault(f"the box check could not make its folder: {path} is not a folder this process made ({what})")
 
 
-def _make_folder(data_root: Path) -> Path:
-    """`<data root>/.box-checks/<random>/`: traverse-only parent (0711, so the random names cannot be listed), a fresh
-    folder open to every uid (0777, by explicit chmod: the umask would narrow a create mode)."""
+@contextlib.contextmanager
+def _check_scope(data_root: Path) -> Iterator[tuple[Path, _Listener]]:
+    """Everything the check holds on the host, owned in one place: `<data root>/.box-checks/<random>/` (a traverse-only
+    parent, 0711, so the random names cannot be listed; a fresh folder open to every uid, 0777 by explicit chmod: the
+    umask would narrow a create mode) and the listener in it. Once the folder exists it is removed however the scope
+    ends."""
     parent = data_root / CHECK_FOLDERS
     try:
         parent.mkdir(mode=0o711, exist_ok=True)  # lint-unguarded-tree-write: ok — beside .job-sockets, in no box's or job's bind
@@ -233,10 +236,23 @@ def _make_folder(data_root: Path) -> Path:
         os.chmod(parent, 0o711)
         folder = parent / secrets.token_hex(16)
         folder.mkdir(mode=0o700)  # lint-unguarded-tree-write: ok — exclusive, fresh, in no bind but its own check's
-        os.chmod(folder, 0o777)
     except OSError as e:
         raise BoxFault(f"the box check could not make its folder under {data_root}: {e}") from e
-    return folder
+    try:
+        try:
+            os.chmod(folder, 0o777)
+        except OSError as e:
+            raise BoxFault(f"the box check could not make its folder under {data_root}: {e}") from e
+        try:
+            listener = _Listener(folder)
+        except OSError as e:
+            raise BoxFault(f"the box check could not open its socket in {folder}: {e}") from e
+        try:
+            yield folder, listener
+        finally:
+            listener.close()
+    finally:
+        _clear_check_folder(folder)
 
 
 # --- the verdict -----------------------------------------------------------------------------------------------------------
@@ -280,36 +296,39 @@ def _clear_check_folder(folder: Path) -> None:
         shutil.rmtree(folder, ignore_errors=True)
 
 
-def require_box_check(docker: DockerFn, runtime: str, rootfs: Rootfs, *, flags: Sequence[str], labels: Sequence[str],
-                      data_root: Path | None, mounts: Sequence[tuple[Path, Path]]) -> None:
+def require_box_check(docker: DockerFn, runtime: str, rootfs: Rootfs, *, answer: DaemonRuntimes | None,
+                      flags: Sequence[str], labels: Sequence[str], data_root: Path,
+                      mounts: Sequence[tuple[Path, Path]]) -> None:
     """Prove, by running a box, that `runtime` refuses a host-socket connect, once per process per registration.
     Returns on a pass (or for a runtime that is no sandbox); raises `BoxCheckFailed` when the runtime lets the connect
-    through, `BoxFault` when the check could not say. `flags` are the box's confinement (`_box_flags`), `labels` its
-    claim and tenant labels, `mounts` the shared-mount table binds are translated through."""
+    through, `BoxFault` when the check could not say. `answer` is the daemon's runtimes as the presence check read them
+    for this start (`require_startable`), `flags` the box's confinement (`_box_flags`), `labels` its claim and tenant
+    labels, `mounts` the shared-mount table binds are translated through."""
     if runtime == _UNCHECKED:
         return
-    key = _registration_key(docker, runtime)
-    if key is not None and _held(docker, key):
-        return
-    if data_root is None:
-        raise _inconclusive(runtime, "no data root was handed to this box start, so there is no folder to run the "
-                                     "check in")
+    key = _registration_key(answer, runtime)
+    with _one_at_a_time(key):
+        if key is not None and _held(docker, key):
+            return
+        _check(docker, runtime, rootfs, flags=flags, labels=labels, data_root=data_root, mounts=mounts)
+        if key is not None:
+            _keep(docker, key)
+
+
+def _check(docker: DockerFn, runtime: str, rootfs: Rootfs, *, flags: Sequence[str], labels: Sequence[str],
+           data_root: Path, mounts: Sequence[tuple[Path, Path]]) -> None:
+    """One check. Its edge has one rule (D1): a leak is `BoxCheckFailed`, and anything else that stops it from saying
+    `pass` is a check that could not say, a `BoxFault`, whatever raised it."""
     data_root = Path(data_root)
     if mounts and not _covered(data_root / CHECK_FOLDERS, mounts):
         raise _uncovered_fault("data root", data_root, mounts, "Set DEFENDER_DATA_ROOT to a path")
-    folder = _make_folder(data_root)
     try:
-        listener = _Listener(folder)
-        try:
+        with _check_scope(data_root) as (folder, listener):
             _run_check(docker, runtime, rootfs, flags, labels, folder, _daemon_source(folder, mounts), listener)
-        finally:
-            listener.close()
-    except OSError as e:
-        raise BoxFault(f"the box check could not open its socket in {folder}: {e}") from e
-    finally:
-        _clear_check_folder(folder)
-    if key is not None:
-        _keep(docker, key)
+    except BoxFault:
+        raise
+    except Exception as e:  # noqa: BLE001 — the check's one edge: whatever stopped it, it could not say
+        raise _inconclusive(runtime, f"the check itself failed: {type(e).__name__}: {e}") from e
 
 
 def _run_check(docker: DockerFn, runtime: str, rootfs: Rootfs, flags: Sequence[str], labels: Sequence[str], folder: Path,

@@ -167,11 +167,12 @@ def job_network(environ: Mapping[str, str] = os.environ) -> str:
 
 
 class Launch(NamedTuple):
-    """The job container's attached `docker run`: its command line, and the docker command's own environment, which
-    alone carries the provider keys the command line names without their values."""
+    """The job container's attached `docker run`: its command line, the docker command's own environment, which
+    alone carries the provider keys the command line names without their values, and the job runtime it names."""
 
     argv: list[str]
     env: dict[str, str]
+    runtime: str
 
 
 def container_launch(session: Session, socket: Path, command: list[str], environ: Mapping[str, str] = os.environ
@@ -224,7 +225,7 @@ def container_launch(session: Session, socket: Path, command: list[str], environ
     for key, value in sorted(job_environment(session, socket, keys, environ).items()):
         argv += ["--env", key if key in keys else f"{key}={value}"]
     argv += [environ.get(IMAGE_ENV) or DEFAULT_IMAGE, *command]
-    return Launch(argv, {**environ, **keys})
+    return Launch(argv, {**environ, **keys}, runtime)
 
 
 def start(session: Session, launch: Launch) -> Any:

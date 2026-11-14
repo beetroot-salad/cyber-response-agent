@@ -522,7 +522,7 @@ def test_launch_binds_the_run_verdict_writer_before_startup_can_fail(tmp_path):
     reached = []
     tenant = SimpleNamespace(agent=Path("tenant-agent"), tenant_id=tenants.fixture_tenant().id)
 
-    def start(tree, _defender, *, tenant_agent, tenant_id, write_verdict):
+    def start(tree, _defender, *, tenant_agent, tenant_id, write_verdict, data_root):
         assert tree == run.run_dir
         assert tenant_agent == tenant.agent
         assert tenant_id == tenant.tenant_id
@@ -531,6 +531,7 @@ def test_launch_binds_the_run_verdict_writer_before_startup_can_fail(tmp_path):
 
     with pytest.raises(box.BoxFault, match="startup refused"):
         launch._run_investigation_lifecycle(
+            data_root=current_data_root(),
             run=run, model="test", model_override=None, defender_dir=Path("defender"),
             tenant=tenant, systems=tenants.fixture_run_systems(),
             start_box=start, investigate=lambda **kw: reached.append(kw))
@@ -575,7 +576,7 @@ def test_launch_forwards_the_same_run_and_binds_both_teardown_callbacks(tmp_path
     seen = []
     tenant = SimpleNamespace(agent=Path("tenant-agent"), tenant_id=tenants.fixture_tenant().id)
 
-    def start(tree, _defender, *, tenant_agent, tenant_id, write_verdict):
+    def start(tree, _defender, *, tenant_agent, tenant_id, write_verdict, data_root):
         assert tree == run.run_dir
         assert tenant_agent == tenant.agent
         assert tenant_id == tenant.tenant_id
@@ -587,6 +588,7 @@ def test_launch_forwards_the_same_run_and_binds_both_teardown_callbacks(tmp_path
         return {"output": "done"}
 
     result = launch._run_investigation_lifecycle(
+        data_root=current_data_root(),
         run=run, model="test", model_override=None, defender_dir=Path("defender"),
         tenant=tenant, systems=tenants.fixture_run_systems(), start_box=start,
         investigate=investigate, stop_box=lambda _: None)

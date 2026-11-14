@@ -643,7 +643,7 @@ def _start_boxed(  # noqa: PLR0913 — the run's geography plus its staged token
     shared_mounts: SharedMountsFn = _shared_mounts, tenant_agent: Path | None = None,
     write_verdict: Callable[[dict], None] | None = None,
     staged_token: Path | None = None, tenant_id: str | None = None,
-    start_token: str | None = None, running_wait: float = 30.0, data_root: Path | None = None,
+    start_token: str | None = None, running_wait: float = 30.0, *, data_root: Path,
 ) -> BoxExecutor:
     name = container_name(run_dir.name)
     try:
@@ -667,8 +667,8 @@ def _start_boxed(  # noqa: PLR0913 — the run's geography plus its staged token
         # Confirm the image and the runtime before the create, so each missing is its own
         # refusal (with its remedy) rather than a create fault told apart by its text; then
         # prove the runtime refuses a host socket (#1469), still before the clock and the create.
-        require_startable(docker, create.rootfs, spec.runtime)
-        require_box_check(docker, spec.runtime, create.rootfs, flags=_box_flags(spec),
+        answer = require_startable(docker, create.rootfs, spec.runtime)
+        require_box_check(docker, spec.runtime, create.rootfs, answer=answer, flags=_box_flags(spec),
                           labels=[*_tenant_label(tenant_id), *claim_label()], data_root=data_root, mounts=mounts)
     except BoxFault as e:
         write_did_not_run(run_dir, f"box start refused before create: {e}", write_verdict=write_verdict)
@@ -778,8 +778,8 @@ def _start_boxed_request(
     mounts = shared_mounts(docker)
     create = _render_argv(request, mounts, start_token)
     try:
-        require_startable(docker, create.rootfs, request.spec.runtime)
-        require_box_check(docker, request.spec.runtime, create.rootfs, flags=_box_flags(request.spec),
+        answer = require_startable(docker, create.rootfs, request.spec.runtime)
+        require_box_check(docker, request.spec.runtime, create.rootfs, answer=answer, flags=_box_flags(request.spec),
                           labels=[*_tenant_label(request.tenant_id), *claim_label()],
                           data_root=request.data_root,
                           mounts=mounts)
@@ -904,8 +904,8 @@ def start_box(  # noqa: PLR0913 — the run's geography, plus the job lane's san
     box running (#1343 B10); a request's box is started plainly and does not wait (its windows,
     `BoxRuns.run`, attach, #1344 amendment 2).
     `data_root` is the data root its entry point resolved (`tenancy.resolve_data_root`), where the box check (#1469)
-    makes its folder: required on the run lane (even for a `runc` box, so a caller that forgets it fails at once), carried
-    by the `BoxRequest` on the request lane, where it is optional and an absent one refuses a sandboxed start.
+    makes its folder: required on the run lane (even for a `runc` box, so a caller that forgets it fails at once), and
+    carried, required, by the `BoxRequest` on the request lane.
     The tenant arguments are illegal with a `BoxRequest`, which carries its own mounts (and its
     own `tenant_id`)."""
     if relay is not None:

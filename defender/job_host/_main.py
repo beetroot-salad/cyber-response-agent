@@ -43,7 +43,7 @@ from ._container import (
     start,
 )
 from ._server import Server
-from ._session import KINDS, HandBack, KindSpec, Registry, Session, SetupRefused, StartFailed
+from ._session import DOCKER_DID_NOT_RUN, KINDS, HandBack, KindSpec, Registry, Session, SetupRefused, StartFailed
 
 _logger = logging.getLogger(__name__)
 
@@ -201,6 +201,7 @@ def _start(session: Session, spec: KindSpec, signals: _Signals, hold: contextlib
             except OSError as e:
                 raise StartFailed(f"the job socket {path} could not be opened: {e}") from None
             launch = container_launch(session, path, session.prepared.command)
+            session.launched_runtime = launch.runtime
             signals.raising = False  # from here a signal stops the container gracefully
             if session.signalled.is_set():
                 raise StartFailed("the helper was told to stop before its container started; none was started")
@@ -221,26 +222,17 @@ def _start(session: Session, spec: KindSpec, signals: _Signals, hold: contextlib
     return proc, server, ending
 
 
-#: The statuses docker itself gives a container it could not start or run: the runtime is not their cause.
-_DID_NOT_RUN = (125, 126, 127)
-
-
 def _say_unreached(session: Session, rc: int, server: Server | None) -> None:
     """D4 (#1469): a container that ended nonzero without the server ever accepting a connection, and that the helper
     was not told to stop, most likely ran under a job runtime that does not allow host-socket connections. The job's own
-    refusal ended its row; this only names the likely cause, once, for every job kind. It writes no ending."""
-    if rc == 0 or rc in _DID_NOT_RUN or session.signalled.is_set() or server is None or server.accepted.is_set():
+    refusal ended its row; this only names the likely cause, once, for every job kind. It writes no ending. The runtime
+    named is the one the container was launched under, never re-derived; under `runc`, which never refuses a host
+    socket, it cannot be the cause and nothing is logged (amendment 2026-11-14)."""
+    if (rc == 0 or rc in DOCKER_DID_NOT_RUN or session.signalled.is_set() or server is None
+            or server.accepted.is_set() or session.launched_runtime in (None, "runc")):
         return
-    from defender.box import BoxSpec
-
-    from ._container import job_runtime
-
-    try:
-        runtime = job_runtime(BoxSpec.from_env(os.environ).runtime)
-    except ValueError:
-        runtime = "(unknown)"
-    why = (f"the job never reached its socket; likely cause: the job runtime {runtime} does not allow host-socket "
-           "connections (register `runsc-job` per the #1469 upgrade note, defender/CLAUDE.md)")
+    why = (f"the job never reached its socket; likely cause: the job runtime {session.launched_runtime} does not allow "
+           "host-socket connections (register `runsc-job` per the #1469 upgrade note, defender/CLAUDE.md)")
     _logger.warning("%s", why)
     _tell(session, why)
 

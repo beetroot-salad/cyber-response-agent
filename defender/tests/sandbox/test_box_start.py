@@ -736,15 +736,15 @@ def test_the_production_oracle_box_carries_its_tenant_label(tmp_path, monkeypatc
 def test_a_box_request_without_a_tenant_is_a_construction_error(tmp_path, given):
     """Every box carries its tenant: a `BoxRequest` with no tenant (omitted, None, empty) is refused at construction; one
     naming a tenant is made (r10 B1, O-B1; r10.1 C8)."""
-    made = box_mod.BoxRequest(name="defender-box-b1", workdir=tmp_path, tenant_id=TEST_TENANT)
+    made = box_mod.BoxRequest(name="defender-box-b1", workdir=tmp_path, tenant_id=TEST_TENANT, data_root=tmp_path)
     assert made.tenant_id == TEST_TENANT, "control: a request naming its tenant is made"
     with pytest.raises((TypeError, ValueError)):
-        box_mod.BoxRequest(name="defender-box-b1", workdir=tmp_path, **given)
+        box_mod.BoxRequest(name="defender-box-b1", workdir=tmp_path, data_root=tmp_path, **given)
 
 
 def test_a_box_request_names_its_tenant_without_judging_the_grammar(tmp_path):
     """A `BoxRequest` naming any non-empty tenant id is made; the id's grammar is judged at acceptance only (r10.1 C8)."""
-    made = box_mod.BoxRequest(name="defender-box-b1", workdir=tmp_path, tenant_id="not-a-uuid")
+    made = box_mod.BoxRequest(name="defender-box-b1", workdir=tmp_path, tenant_id="not-a-uuid", data_root=tmp_path)
     assert made.tenant_id == "not-a-uuid"
 
 

@@ -371,7 +371,7 @@ def test_an_uncovered_run_dir_is_refused_before_any_container_is_created():
     with pytest.raises(BoxFault, match="C46"):
         box_mod._start_boxed(
             Path("/tmp/defender-runs/r1"), Path("/workspace/defender"),
-            BoxSpec(), rec, lambda _docker: MOUNTS,
+            BoxSpec(), rec, lambda _docker: MOUNTS, data_root=current_data_root(),
         )
     assert rec.create_argv is None, "a container was created despite the refusal"
 

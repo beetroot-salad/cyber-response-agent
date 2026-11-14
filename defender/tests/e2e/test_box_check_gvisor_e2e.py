@@ -68,9 +68,11 @@ class _PresentingRunscJobAsRunsc:
         self.calls.append(list(argv))
         done = box_mod.run_docker(argv, **kw)
         if argv[1:2] == ["info"] and "Runtimes" in " ".join(argv):
-            listed = json.loads(done.stdout)
+            daemon_id, _, answer = done.stdout.rstrip("\n").rpartition("\n")  # the ID line, when asked with it
+            listed = json.loads(answer)
             listed["runsc"] = listed["runsc-job"]
-            return subprocess.CompletedProcess(argv, done.returncode, json.dumps(listed) + "\n", done.stderr)
+            head = f"{daemon_id}\n" if "{{.ID}}" in " ".join(argv) else ""
+            return subprocess.CompletedProcess(argv, done.returncode, f"{head}{json.dumps(listed)}\n", done.stderr)
         return done
 
     @staticmethod

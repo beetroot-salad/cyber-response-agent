@@ -15,6 +15,7 @@ import resource
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -462,35 +463,12 @@ def test_d1_the_run_lane_requires_its_data_root_at_once_even_for_a_runc_box(tmp_
                               tenant_id=TEST_TENANT)
 
 
-def test_d1_a_box_request_with_no_data_root_is_refused_as_inconclusive_under_runsc_and_starts_under_runc(tmp_path):
-    """On `BoxRequest` the data root is optional; absent, a check cannot run, so a sandboxed start fails closed. (D1)"""
-    docker = _daemon()
-    with pytest.raises(BoxFault) as e:
-        _start("request", tmp_path, docker, data_root=None)
-    assert not isinstance(e.value, _failed())
-    assert docker.create_argv is None
-    assert docker.checks.runs == []
-    assert "data root" in str(e.value).lower(), e.value
-    runc = _daemon()
-    assert _start("request", tmp_path / "runc", runc, data_root=None, spec=RUNC).name
-
-
-@pytest.mark.parametrize("job", [False, True], ids=["run-dir-lane", "job-lane"])
-def test_d1_with_the_opt_out_a_box_request_with_no_data_root_degrades_off_the_job_lane_and_still_refuses_on_it(
-        tmp_path, monkeypatch, job):
-    """No data root is inconclusive, so it follows D3's table: under `DEFENDER_ALLOW_UNSANDBOXED=1` the run-dir lane
-    degrades to the host (no check, no create under `runsc`), the job lane (`require_sandbox`) refuses. (D1, D3)"""
-    monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")
-    docker = _daemon()
-    if job:
-        with pytest.raises(BoxFault) as e:
-            _start("request", tmp_path, docker, data_root=None, require_sandbox=True)
-        assert not isinstance(e.value, _failed()), e.value
-        assert docker.create_argv is None
-    else:
-        box = _start("request", tmp_path, docker, data_root=None)
-        assert box.sandboxed is False, "the opt-out did not degrade an inconclusive check"
-    assert docker.checks.runs == []
+@pytest.mark.parametrize("spec", [PINNED, RUNC], ids=["runsc", "runc"])
+def test_d1_a_box_request_with_no_data_root_is_refused_at_construction_whatever_the_runtime(tmp_path, spec):
+    """The data root is required on `BoxRequest` as on the run lane: a caller that forgets it fails at once, under any
+    runtime, before any daemon is asked, never as a refusal seen only on a gVisor host. (D1, amendment 2026-11-14)"""
+    with pytest.raises(TypeError, match="data_root"):
+        _request(tmp_path, data_root=None, spec=spec)
 
 
 @pytest.mark.parametrize("lane", ["run-dir", "request", "oracle", "drain"])
@@ -570,7 +548,7 @@ def test_d2_when_docker_info_cannot_answer_the_check_runs_and_its_pass_is_not_ke
 
 
 def test_d2_no_check_runs_under_runc(tmp_path):
-    """`runc` is the declared no-sandbox mode: no check container, no data root needed. (D2, non-obligation)"""
+    """`runc` is the declared no-sandbox mode: no check container. (D2, non-obligation)"""
     docker = _daemon()
     assert _start("request", tmp_path, docker, spec=RUNC).name
     assert docker.checks.runs == []
@@ -911,3 +889,71 @@ def test_d1_every_runtime_but_runc_runs_the_check_and_one_that_leaks_is_refused_
     runc = _daemon(K.CheckPlan(box=K.LEAKS))
     assert _start(lane, tmp_path / "runc", runc, spec=RUNC).name
     assert runc.checks.runs == []
+
+
+# --- #1505 review: one daemon answer per start, one owner for the check's host resources, one check per registration ---
+
+class _CheckSeamBreaks(RecordingDocker):
+    """A daemon whose docker seam raises something no check step expects when the check container is run."""
+
+    def __call__(self, argv, **kw):  # noqa: ANN001
+        if K.is_check_run(list(argv)):
+            raise RuntimeError("the docker seam broke")
+        return super().__call__(argv, **kw)
+
+
+class _SlowCheck(RecordingDocker):
+    """A healthy daemon whose check containers take a moment, so box starts that arrive together overlap."""
+
+    def __call__(self, argv, **kw):  # noqa: ANN001
+        if K.is_check_run(list(argv)):
+            time.sleep(0.2)
+        return super().__call__(argv, **kw)
+
+
+def test_d2_a_sandboxed_box_start_asks_docker_info_once_for_the_presence_check_and_the_key(tmp_path):
+    """The presence check and the registration key read one `docker info` answer. (D2)"""
+    docker = _daemon()
+    _start("request", tmp_path, docker)
+    assert subcommands(docker.calls).count("info") == 1, docker.calls
+
+
+def test_d1_a_check_stopped_by_an_error_no_step_expects_could_not_say_and_leaves_no_folder(tmp_path):
+    """Anything other than a leak that stops the check is a check that could not say (a `BoxFault`, not a failed check),
+    and the folder it made is removed however it ended. (D1, D3)"""
+    root = _data_root(tmp_path)
+    docker = _CheckSeamBreaks(runtimes=LISTED, daemon_id="daemon-1")
+    _BUILT.append(docker)
+    with pytest.raises(BoxFault) as caught:
+        _start("request", tmp_path, docker, data_root=root)
+    assert not isinstance(caught.value, _failed()), f"a broken seam is not a leaking runtime: {caught.value}"
+    assert "RuntimeError" in str(caught.value), str(caught.value)
+    assert list((root / ".box-checks").iterdir()) == [], list((root / ".box-checks").iterdir())
+    assert docker.create_argv is None, "a box was created after a check that could not run"
+
+
+def test_d2_box_starts_that_arrive_together_on_one_registration_run_one_check(tmp_path):
+    """Starts on one registration that overlap (a preflight's worlds) wait for the first check's verdict. (D2)"""
+    docker = _SlowCheck(runtimes=LISTED, daemon_id="daemon-1")
+    _BUILT.append(docker)
+    root = _data_root(tmp_path)
+    rootfs = _lifecycle.resolve_rootfs(ROOTFS, tmp_path)
+    together = threading.Barrier(4)
+    errors: list[BaseException] = []
+
+    def start() -> None:
+        try:
+            together.wait()
+            box_mod.require_box_check(docker, "runsc", rootfs, answer=box_mod.require_runtime(docker, "runsc"),
+                                      flags=_lifecycle._box_flags(PINNED), labels=_lifecycle._tenant_label(TEST_TENANT),
+                                      data_root=root, mounts=())
+        except BaseException as e:  # noqa: BLE001 — asserted below
+            errors.append(e)
+
+    threads = [threading.Thread(target=start) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    assert (len(docker.checks.box_runs()), len(docker.checks.control_runs())) == (1, 1), docker.checks.runs

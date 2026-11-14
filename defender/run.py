@@ -519,8 +519,8 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     #: The box's start token, when the caller minted it (#1342 r5 C1: a job's launch record
     #: carries its worker's); `None`, the box mints its own.
     start_token: str | None = None,
-    #: The data root the entry point resolved (#1469): where the box check runs; required to start a run box.
-    data_root: Path | None = None,
+    #: The data root the entry point resolved (#1469): where the box check runs; required (amendment 2026-11-14).
+    data_root: Path,
     #: A job's facts holder (#1342 r5 C2), handed to the investigation; its `box` set here once
     #: the box started (r7 D-ad) and its `scrub_verified` once the teardown and scrub returned.
     #: `None` off the job lane.
@@ -554,7 +554,7 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
         box = start_box(run_dir, defender_dir, tenant_agent=tenant.agent,
                         tenant_id=tenant.tenant_id, write_verdict=write_verdict,
                         **({"require_sandbox": True} if job_lane else {}),
-                        **({} if data_root is None else {"data_root": data_root}), **staged)
+                        data_root=data_root, **staged)
     except box_mod.BoxFault as fault:
         raise box_mod.BoxStartFault(f"the run's box did not start: {fault}") from fault
     if job_facts is not None:
@@ -1031,7 +1031,7 @@ class _Started:
     #: on an ordinary run.
     as_of: ClockOrigin | None = None
     #: The data root this entry point resolved, handed to the run's box start (#1469: the box check's folder).
-    check_root: Path | None = None
+    check_root: Path = dataclasses.field(kw_only=True)
 
     def record_case(self) -> case_system.CaseTarget | case_system.CaseSettingsFault:
         """The verdict the record step comments on: set at setup whenever the run records its case,
@@ -1044,11 +1044,10 @@ class _Started:
     def lifecycle_kwargs(self, ns: argparse.Namespace) -> dict[str, Any]:
         # The origin only when set, so a lifecycle seam that predates it is called as before.
         origin_kw: dict[str, Any] = {} if self.as_of is None else {"clock_origin": self.as_of}
-        root_kw: dict[str, Any] = {} if self.check_root is None else {"data_root": self.check_root}
         return {"run": self.run, "model": self.model, "model_override": ns.model,
                 "defender_dir": DEFENDER_DIR, "tenant": self.tenant, "world": self.world,
                 "episode": self.episode, "systems": self.systems,
-                **self.minting.access_kwargs(), **self.seams, **origin_kw, **root_kw}
+                **self.minting.access_kwargs(), **self.seams, **origin_kw, "data_root": self.check_root}
 
 
 def _acceptance_args(ns: argparse.Namespace, data_root: DataRoot) -> dict[str, Any]:

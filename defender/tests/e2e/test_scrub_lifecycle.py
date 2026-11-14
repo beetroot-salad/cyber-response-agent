@@ -285,6 +285,7 @@ def _drive_lifecycle(tmp_path, rec, *, fault=None, run_dir=None, **kw):
     seams = {"start_box": rec.start_box, "stop_box": rec.stop_box, "scrub": rec.scrub}
     seams.update(kw)   # a test may swap one seam for a faulting or real one
     return _run_investigation_lifecycle(
+        data_root=current_data_root(),
         run=fixture_run(run), model="m-741", model_override=None, defender_dir=DEFENDER,
         tenant=_tenants1106.fixture_run_tenant(), systems=_tenants1106.fixture_run_systems(),
         investigate=_recording_investigate(rec.events, fault=fault), **seams,
@@ -520,6 +521,7 @@ def test_o8_the_summary_gains_a_key_only_when_the_teardown_of_a_box_ending_fault
 
     try:
         summary = _run_investigation_lifecycle(
+            data_root=current_data_root(),
             run=fixture_run(_clean_run_dir(tmp_path / "lifecycle")), model="m-741", model_override=None,
             defender_dir=DEFENDER, tenant=_tenants1106.fixture_run_tenant(), systems=_tenants1106.fixture_run_systems(),
             investigate=lambda **_kw: ended, start_box=rec.start_box, stop_box=stop, scrub=rec.scrub)
@@ -546,6 +548,7 @@ def test_o8_every_run_end_word_reaches_the_job_fact_and_only_the_two_box_words_s
 
     def drive():
         return run_py._run_investigation_lifecycle(
+            data_root=current_data_root(),
             run=fixture_run(_clean_run_dir(tmp_path / "lifecycle")), model="m-741", model_override=None,
             defender_dir=DEFENDER, tenant=_tenants1106.fixture_run_tenant(), systems=_tenants1106.fixture_run_systems(), job_facts=held,
             investigate=lambda **_kw: {"output": "done", "requests": 1, "truncated_by": word},

@@ -285,7 +285,7 @@ def test_the_c46_uncovered_mount_refusal_fires_before_the_resolver_on_both_lanes
 
     rec = RecordingDocker()
     with pytest.raises(BoxFault) as e:
-        box_mod._start_boxed(run_dir, defender_dir, BoxSpec(), rec, lambda _d: MOUNTS)
+        box_mod._start_boxed(run_dir, defender_dir, BoxSpec(), rec, lambda _d: MOUNTS, data_root=current_data_root())
     assert "C46" in str(e.value)
     assert "box.Dockerfile" not in str(e.value)
     assert not {"image", "run"} & set(subcommands(rec.calls)), rec.calls   # the stale-name check only
@@ -300,7 +300,7 @@ def test_the_c46_uncovered_mount_refusal_fires_before_the_resolver_on_both_lanes
     assert rec.create_argv is None
 
     with pytest.raises(BoxFault) as e:
-        box_mod._start_boxed(run_dir, defender_dir, BoxSpec(), RecordingDocker(), lambda _d: ())
+        box_mod._start_boxed(run_dir, defender_dir, BoxSpec(), RecordingDocker(), lambda _d: (), data_root=current_data_root())
     assert "C46" not in str(e.value)
     assert "box.Dockerfile" in str(e.value)
     with pytest.raises(BoxFault) as e:

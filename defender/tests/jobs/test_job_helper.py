@@ -1384,6 +1384,18 @@ def test_d4_nothing_is_logged_when_the_helper_was_told_to_stop(scene, capsys):
     assert _D4_CAUSE not in err, err
 
 
+def test_d4_nothing_is_logged_under_runc_which_never_refuses_a_host_socket(scene, capsys, monkeypatch):
+    """A job container launched under `runc` can always reach its socket, so a failure before it connected is the job's
+    own (a crash at startup, say), and naming the job runtime would send the operator to a registration the host does
+    not have. The cause is read from the runtime the container was launched under. (#1469 D4, amendment 2026-11-14)"""
+    monkeypatch.setenv(_BoxSpec.ENV_VAR, "runc")
+    _inv, docker, ran, err = _d4(scene, lambda c: 7, capsys)
+    assert flag_values(docker.box.argv, "--runtime") == ["runc"], docker.box.argv
+    assert ran.rc == 0, ran.rc
+    assert "its container exited with status 7" in err, err
+    assert _D4_CAUSE not in err, err
+
+
 @pytest.mark.parametrize("signalled", [False, True], ids=["not-signalled", "signalled"])
 @pytest.mark.parametrize("accepted", [False, True], ids=["never-accepted", "accepted"])
 @pytest.mark.parametrize("rc", [0, 1, 7, 124, 125, 126, 127, 137])

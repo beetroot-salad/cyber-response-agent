@@ -179,7 +179,8 @@ def _box_argv(tmp_path, **kw) -> list[str]:
     from defender.box._lifecycle import _render_argv
     from defender.box._spec import BoxSpec
 
-    request = BoxRequest(name="o4-box", workdir=tmp_path, defender_dir=tmp_path, spec=BoxSpec(rootfs="defender-box:o4"), **kw)
+    request = BoxRequest(name="o4-box", workdir=tmp_path, defender_dir=tmp_path, spec=BoxSpec(rootfs="defender-box:o4"),
+                         data_root=tmp_path, **kw)
     return _render_argv(request).argv
 
 

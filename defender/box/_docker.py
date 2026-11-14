@@ -122,37 +122,63 @@ _RUNTIME_REMEDY = {
 _FOUND_RUNTIMES: weakref.WeakKeyDictionary[Any, set[str]] = weakref.WeakKeyDictionary()
 
 
-def require_runtime(docker: DockerFn, runtime: str) -> None:
+class DaemonRuntimes(NamedTuple):
+    """One `docker info` answer, read once per box start: the daemon's `ID` (empty when it names none) and its
+    registered runtimes (None when it cannot list them). The presence check reads it and the box check keys its pass
+    by it (#1469 D2), so a start asks the daemon once."""
+
+    daemon_id: str
+    runtimes: dict[str, Any] | None
+
+
+#: The daemon's ID and its runtimes, one per line: an ID is never JSON and never holds a newline.
+_RUNTIMES_QUERY = "{{.ID}}\n{{json .Runtimes}}"
+
+
+def _ask_runtimes(docker: DockerFn) -> DaemonRuntimes | None:
+    """The daemon's answer, or None when it cannot give one."""
+    try:
+        proc = _call(docker, ["docker", "info", "--format", _RUNTIMES_QUERY])
+    except BoxFault:
+        return None
+    if proc.returncode != 0:
+        return None
+    daemon_id, _, listed = (proc.stdout or "").rstrip("\n").partition("\n")
+    try:
+        runtimes = json.loads(listed)
+    except ValueError:
+        runtimes = None
+    return DaemonRuntimes(daemon_id.strip(), runtimes if isinstance(runtimes, dict) else None)
+
+
+def require_runtime(docker: DockerFn, runtime: str) -> DaemonRuntimes | None:
     """Confirm the daemon has `runtime` registered before any create names it (#1484); raise `BoxFault` with its
     remedy if not. Like `require_image`, decided by asking the daemon, never by a create's error text. A daemon that
     cannot say (no answer, or an answer naming no runtime: a daemon always has its default) is not refused here: a
-    create then faults in docker's own words."""
+    create then faults in docker's own words. Returns the answer it read, None when it asked nothing or got none."""
     try:
         if runtime in _FOUND_RUNTIMES.get(docker, ()):
-            return
+            return None
     except TypeError:  # a seam that cannot be weakly referenced is asked every time
         pass
-    try:
-        proc = _call(docker, ["docker", "info", "--format", "{{json .Runtimes}}"])
-        runtimes = json.loads(proc.stdout or "") if proc.returncode == 0 else None
-    except (BoxFault, ValueError):
-        return
-    if not isinstance(runtimes, dict) or not runtimes:
-        return
-    if runtime in runtimes:
+    answer = _ask_runtimes(docker)
+    if answer is None or not answer.runtimes:
+        return answer
+    if runtime in answer.runtimes:
         if runtime == "runc":
             with contextlib.suppress(TypeError):
                 _FOUND_RUNTIMES.setdefault(docker, set()).add(runtime)
-        return
+        return answer
     remedy = _RUNTIME_REMEDY.get(runtime, "register it with Docker, or set DEFENDER_BOX_RUNTIME to another box runtime")
     raise BoxFault(f"Docker on this host has no runtime {runtime!r} registered: {remedy}")
 
 
-def require_startable(docker: DockerFn, rootfs: Rootfs, runtime: str) -> None:
+def require_startable(docker: DockerFn, rootfs: Rootfs, runtime: str) -> DaemonRuntimes | None:
     """What a box needs of its host before its create: its image (`require_image`) and its runtime
-    (`require_runtime`), each a refusal of its own with its remedy."""
+    (`require_runtime`), each a refusal of its own with its remedy. Returns the daemon's runtimes answer, for the box
+    check."""
     require_image(docker, rootfs)
-    require_runtime(docker, runtime)
+    return require_runtime(docker, runtime)
 
 
 # The full container id as docker writes it into every container's own mount table.
