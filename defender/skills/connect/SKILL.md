@@ -1,16 +1,15 @@
 ---
 name: connect
-description: Onboard one system of record (SIEM, EDR, identity, CMDB, asset DB, threat intel, custom API) to this defender deployment. Interviews the maintainer, routes to an MCP or a generated-adapter integration, scaffolds the per-system knowledge the gather subagent needs, tests it, and opens a review branch. Assumes nothing is connected yet; one system per invocation. Also records a tacit-knowledge sanction — "we have signed off on this actor doing this on these hosts" — into the human-authored registry, via tacit.md.
+description: Connect one system of record (SIEM, EDR, identity, CMDB, asset DB, threat intel, ticketing, custom API) to one tenant of this defender deployment. Configures an adapter the product already carries or generates a new one. Agrees the check that proves the system works before anything is built, scaffolds the per-system knowledge the gather subagent needs, and hands the operator the records, credential steps and that check. One system per invocation. Also records a tacit-knowledge sanction — "we have signed off on this actor doing this on these hosts" — into the human-authored registry, via tacit.md.
 ---
 
 # Connect a system of record
 
-You connect **one** system of record to this defender deployment — the
-first one on a fresh install, or another later. Assume nothing is
-connected yet: you don't rely on any existing adapter, and you bring your
-own example to copy. The end state is a system the gather subagent can
-query, the per-system knowledge it needs to route and read results, and a
-clean review branch.
+You connect **one** system of record to one tenant: the first one on a fresh install, or another
+later. The end state is a system the tenant's runs can reach through the credential proxy, the
+per-system knowledge the gather subagent needs to route and read results (when the system has
+tools for it), an ordered handoff the operator applies, and a check, agreed before anything was
+built, that says whether it works.
 
 > **Recording a tacit-knowledge sanction? Go to `tacit.md` instead.**
 > "We've signed off on this actor doing this on these hosts" is not an
@@ -18,43 +17,43 @@ clean review branch.
 > version-controlled file a human commits. `tacit.md` is that route: it
 > interviews for the entry, writes it, validates it and leaves a branch.
 > The workflow below is for connecting a system that is not here yet, and
-> none of its six steps apply to adding one sanction.
+> none of its steps apply to adding one sanction.
 
-There are two ways to reach a system, and they are **peers**, not a
-hierarchy:
+There are two paths, chosen by one fact: does the product already carry an adapter for this
+system?
 
-- **MCP** — a maintained server the maintainer has (or will) configure.
-  Light: no code to write. See `mcp.md`.
-- **Generated adapter** — a small Python module you write: a `VERBS`
-  registry the runtime imports in-process (no CLI, no shim). Heavier, but
-  it gives output control, the query-capture path, and consistency across
-  adapters. See `adapter.md`.
+- **Configure** — the product carries it (`tenant.py catalog` lists it). Nothing is generated:
+  you write the tenant's records, and its per-system knowledge if the adapter has tools the
+  investigator calls. See `configure.md`.
+- **Generate** — it does not. You write a small Python adapter module the runtime imports
+  in-process, reached only over HTTP through the credential proxy. See `adapter.md`.
 
-The interview decides which. Writing an adapter is more work than pointing
-at an MCP server, but neither is the "real" way to connect — surface the
-trade-off honestly and let the maintainer choose (`decisions.md` has the
-one defender-specific tilt).
+Both paths start from the same agreed check and end at the same final step.
+
+**There is no MCP path.** Investigations cannot reach a system through an MCP server today: a run
+builds only the product's own tools (#1494). If the maintainer asks to connect a system through
+MCP, say so and stop.
 
 ## Your lane
 
-You write the adapter (or record the MCP reach), the per-system skill,
-its config, and a couple of seed query templates. You do **not** author
-lessons (the learning loop owns the tenant's `agent/lessons/`), pre-build the query catalog
-(the offline lead-author grows it from real runs), run investigations
-(that's `run.py`), or touch another system's files, `hooks/`, or
-`learning/`. If the maintainer asks for something outside connecting one
+You write the adapter (generate path only), the per-system skill and a couple of seed query
+templates (only for a system with investigator tools), and the handoff the operator applies. You
+do **not** author lessons (the learning loop owns the tenant's `agent/lessons/`), pre-build the
+query catalog (the offline lead-author grows it from real runs), run investigations (that's
+`run.py`), write the tenant's records or credential (the operator's), or touch another system's
+files, `hooks/`, or `learning/`. If the maintainer asks for something outside connecting one
 system, stop and point them at the right surface.
 
-You run as a maintainer skill in a normal session, not inside the
-`run.py` hook regime — so you test integrations directly, and the runtime
-gates (`investigation/permission/`, the `query` tool's capture capability)
-are properties you verify the *shape* of, not constraints on you.
+You run as a maintainer skill in a normal session, not inside the `run.py` hook regime. You
+**cannot** call an adapter against the live system from here: every adapter call goes through
+the credential proxy with a signed pass, and this session holds neither the pass nor the proxy's
+address. Do not try to work around that — the final check is the operator's (step 7).
 
 ## Source of truth
 
 Read the doc you need; don't duplicate it into what you scaffold.
 
-- `adapter.md` / `mcp.md` — the two build paths.
+- `configure.md` / `adapter.md` — the two paths.
 - `tacit.md` — the separate route for recording one tacit-knowledge
   sanction into the tenant's `agent/skills/tacit-knowledge/registry.yaml`.
 - `decisions.md` — why the skill is shaped this way (for grounding a call).
@@ -67,88 +66,122 @@ Read the doc you need; don't duplicate it into what you scaffold.
 
 ## Workflow
 
-Six steps: **Orient → Interview → Route → Scaffold → Test → Commit.**
+**Orient → Interview → Agree the check → Build → Scaffold the knowledge → Validate → Hand off.**
 Sequential; if a step blocks, diagnose and fix before moving on.
 
 ### 1. Orient
 
 ```bash
-ls defender/integrations/ $DEFENDER_DATA_ROOT/{tenant}/exports/current/agent/skills/
+python3 defender/cli/tenant.py catalog
+ls $DEFENDER_DATA_ROOT/{tenant}/exports/current/agent/skills/
 ```
 
-If the system already has a `{system}_adapter.py` adapter and a
-`skills/{system}/` dir in the tenant's published knowledge, stop and ask: replace it, or did they mean a
-different system? A re-run
-on an existing system is a deliberate update — branch
-`connect/{system}-update` first so the diff stays clean. If this is a
-fresh deployment, expect these to be empty; that's normal.
+`catalog` lists every adapter the product carries, with the settings each reads and its tools
+(`tools: none` is an adapter the investigator never calls, such as a ticket system that only
+takes the run-end comment). If the system is listed, you are on the **configure** path; never
+generate a second adapter for it.
 
-Also note whether *other* systems are already connected. If they are,
-you're extending a populated deployment: there's an established shared
-adapter module and house conventions (config keys, transport, auth
-posture, output shape) to **conform to**, not duplicate. Before the
-interview, read the deployment's adapter-conventions note if it has one
-(`integrations/README.md`) and the closest sibling adapter — between them
-they settle the recurring answers (which shared module, transport, auth
-posture, config scheme), so you **confirm** those instead of asking cold
-(see `adapter.md` → "The shape to copy"). If `integrations/` is empty,
-you're greenfield and the bundled example is your seed.
+Ask the operator for the tenant's current records:
+
+```bash
+python3 defender/cli/tenant.py systems {tenant} --export <dir>
+```
+
+It writes each stored system as a `config.env` / `access.yaml` folder and says each one's version.
+You need it for the handoff (`--replaces`, step 7), to see whether the system is already
+configured, and to copy a sibling's access declaration. If the system already has a record, this
+is a deliberate update: ask what is changing, and branch `connect/{system}-update` on the
+generate path so the diff stays clean.
+
+On the generate path, note whether *other* adapters exist. If they do, you're extending a
+populated deployment: there's an established shared adapter module and house conventions
+(config keys, transport, auth posture, output shape) to **conform to**, not duplicate. Before
+the interview, read the deployment's adapter-conventions note if it has one
+(`integrations/README.md`) and the closest sibling adapter, so you **confirm** the recurring
+answers instead of asking cold (`adapter.md` → "The shape to copy").
 
 ### 2. Interview
 
-Ask one question at a time, conversationally. You need enough to build a
-working integration and no more.
-
-On a populated tree, the conventions note and sibling adapters you read in
-Orient have likely already settled the recurring answers — transport (2)
-and auth posture (4). Don't re-ask those cold: state what the house
-convention is and ask the maintainer to confirm or flag an exception.
-Spend the interview on what's genuinely system-specific (1 and 3). On a
-greenfield tree there's nothing cached yet, so ask all four.
+Ask one question at a time, conversationally. You need enough to configure or build the system
+and no more. On the configure path the adapter already settles transport and output shape;
+spend the interview on the settings `catalog` lists and the access declaration (`configure.md`).
 
 1. **What system are you connecting?** A well-known name gives you the API
    shape from training; verify it against the real docs during the build.
    For something obscure, ask for a docs pointer.
-2. **How do you reach it from this environment?** A configured MCP server
-   routes to MCP. Everything else routes to an adapter, and an adapter
-   reaches its system only over HTTP, through the credential proxy, at
-   the base its `access.yaml` declares (see `adapter.md` → "Access
-   declaration"). A system reachable only through a CLI or script, or by
-   SSHing to a bastion and running tools there, has no HTTP API the proxy
-   can call → **stop** and say so: it cannot be connected as an adapter.
-3. **What questions does this system answer for an investigation?**
-   Freeform — "host inventory and trust edges", "who is authorized on a
-   host", "auth events", "IoC reputation". You need this for the
-   Visibility surface; refine it after the sample query.
+2. **How do you reach it from this environment?** An adapter reaches its system only over HTTP,
+   through the credential proxy, at the base its `access.yaml` declares (`adapter.md` → "Access
+   declaration"). A system reachable only through a CLI or script, by SSHing to a bastion, or only
+   through an MCP server, has no HTTP API the proxy can call → **stop** and say so: it cannot be
+   connected.
+3. **What is it for here?** Freeform — "host inventory and trust edges", "who is authorized on a
+   host", "auth events", "IoC reputation", "the ticket each alert belongs to; findings go there
+   as a comment". You need this for the Visibility surface and for the check (step 3).
 4. **What credentials does it need, if any?** Names, not values. Some
    read sources are auth-less. You never ask for a secret value, token, or
    auth-bearing cURL — if one is offered, refuse it: it never goes in a file you
    write or in this conversation. This is the credential boundary; it is
    non-negotiable. A credential is stored by the operator in the secret
    store (`tenant.py set-credentials`, write-only); you need only its
-   scheme and the field name the access declaration names (`adapter.md` →
+   scheme and the field names the scheme reads (`adapter.md` →
    "Credentials").
 
-### 3. Route and build
+### 3. Agree the check — before anything is built
 
-Pick the path with the maintainer and follow its doc end-to-end:
+Before you configure or write anything, agree with the maintainer the one check that will say
+whether the system works. Writing it first keeps it honest: a check written after the build is
+shaped by what was built.
 
-- **MCP** → `mcp.md`.
-- **Generated adapter** → `adapter.md` (it writes
-  `integrations/{system}_adapter.py` — a `VERBS` mapping of
-  `VerbContext`-taking functions that raise `faults` — on the shared
-  transport module, runs the Haiku alignment loop, and **pauses at a human
-  review checkpoint** before the live test — generated code is read by a
-  human before it runs). Dropping the module under `integrations/` is
-  the whole registration; there is no shim.
+- **The question.** For a system the investigator reads, one real lookup or query
+  ("is web-01 in the inventory, and who owns it?"). For a system the product writes to, such as
+  a case system that takes the run-end comment, the write itself: one comment on a ticket the
+  maintainer names as **disposable**. Never a write to a real case: later investigations read a
+  ticket's comments as its history.
+- **The expected answer, falsifiable.** A concrete value a wrong credential, base URL or alert
+  mapping would not produce: "web-01, owned by team payments", not "results came back". For a
+  write: "the comment appears on ticket TEST-1".
+- **A negative control.** The same call with an input that must **not** give the answer: an
+  unknown host, a time range with no data, or for a write, reading a ticket that does not carry
+  the comment. The control's failure is the red that shows the check can tell working from
+  broken.
+- **Which tool answers it.** On the configure path, name the adapter tool (`catalog` lists them)
+  and its inputs. On the generate path the tools don't exist yet: write the check as the
+  question and its answer, then pick the tool once the code exists, and show that pick to the
+  maintainer at the review checkpoint (`adapter.md`).
 
-Come back here for the common steps below once the integration exists.
+Write the check into the handoff as `<handoff>/check.md`: the question, the tool and inputs, the
+expected answer, the control, and the disposable target for a write. If the maintainer cannot
+give a falsifiable answer, say the check is weak and why; do not invent one.
 
-### 4. Scaffold the per-system knowledge
+### 4. Build
 
-Both paths produce the same per-system skill. Read
-`defender/docs/system-skill-shape.md` for the exact shape; if a sibling
-system already exists in the tenant's knowledge, mirror the closest one. The bar is **lean** —
+- **Configure** → `configure.md`: the records for the operator, nothing generated.
+- **Generate** → `adapter.md`: it writes `integrations/{system}_adapter.py` — a `VERBS` mapping
+  of `VerbContext`-taking functions that raise `faults` — on the shared transport module, runs
+  the Haiku alignment loop, and **pauses at a human review checkpoint** (generated code is read
+  by a human before it runs anywhere). Dropping the module under `integrations/` is the whole
+  registration; there is no shim. It then writes the handoff's `config.env` and `access.yaml` as
+  below.
+
+The handoff is a folder outside both repos that you give the operator, never a file in the
+tenant's repo or in this one:
+
+- `<handoff>/{system}/config.env` — exactly the keys the adapter reads (`catalog`'s settings, or
+  the new adapter's `REQUIRED_CONFIG_KEYS`, prefixed; any other key is refused by name). No
+  secret.
+- `<handoff>/{system}/access.yaml` — the system's base, auth scheme and routes (`adapter.md` →
+  "Access declaration"). No secret.
+- `<handoff>/check.md` — step 3's check.
+- For a case system, `<handoff>/case-record.yaml` and the alert-mapping line (`configure.md`).
+
+### 5. Scaffold the per-system knowledge — only for a system with investigator tools
+
+A system whose adapter offers the investigator no tool beyond `health-check` (`catalog` says
+`tools: none`, or only `health-check`) has nothing for gather to route to or query: skip this
+step.
+
+Otherwise, read `defender/docs/system-skill-shape.md` for the exact shape; if a sibling system
+already exists in the tenant's knowledge, mirror the closest one. The bar is **lean** —
 everything here grows post-merge.
 
 The per-system skill and its seed templates are the tenant's knowledge, not this repo's: they
@@ -169,23 +202,13 @@ Step 6 validates it and proposes it to the tenant's repo.
   rather than an error). A declared gap separates "we didn't ask" from
   "we can't ask."
 - **`execution.md`** — the **Execution surface**, read only by gather at
-  dispatch. For a generated adapter: query syntax, exit codes (including 64
-  for a param mistake), and the VALUE constraints a signature cannot state
-  (an enum a param accepts, a clamp, a required timestamp format). Do
-  **not** hand-author the verb roster or each verb's params here — gather
-  gets those from the `list_verbs` tool, read off the live signatures, and
-  a prose copy only drifts from them (#900); point at `list_verbs` instead.
-  For MCP: the server and tool names (see `mcp.md`). Credential and
-  connectivity detail live here, never in `SKILL.md` — the split exists so
-  the orchestrator physically can't ingest it.
-
-`<handoff>/{system}/config.env` and `<handoff>/{system}/access.yaml` — the **handoff**: a
-folder outside both repos that you give the operator, never a file in the tenant's repo or in
-this one: the operator stores it as the system's record (`tenant.py set-system`).
-`config.env` holds exactly the keys the adapter reads (its
-`REQUIRED_CONFIG_KEYS`, prefixed; any other key is refused by name), and `access.yaml` the
-system's base, auth scheme and routes (`adapter.md` → "Access declaration"). A secret is never
-in either file.
+  dispatch: query syntax, exit codes (including 64 for a param mistake), and the
+  VALUE constraints a signature cannot state (an enum a param accepts, a clamp,
+  a required timestamp format). Do **not** hand-author the verb roster or each
+  verb's params here — gather gets those from the `list_verbs` tool, read off the
+  live signatures, and a prose copy only drifts from them (#900); point at
+  `list_verbs` instead. Credential and connectivity detail live here, never in
+  `SKILL.md` — the split exists so the orchestrator physically can't ingest it.
 
 `<staged>/skills/gather/queries/{system}/` — write only the **couple of
 seed templates you're certain of** (an entry-point measurement, a by-key
@@ -200,27 +223,16 @@ the verb does not declare as a model-bindable param is a FAIL, and so is a
 verb from the query body. Do **not** build a catalog from API docs — the
 offline lead-author mints the rest from real runs.
 
-`knowledge/tenant-template/settings/verb-grants.yaml` and
-`knowledge/tenant-fixture/settings/verb-grants.yaml` in this repo, and the connected
-tenant's own `settings/verb-grants.yaml` — **adapter path only: one row per verb the
-adapter declares, `health-check` included, in every one of those tables.** The adapter is
-shared code, so every table must decide it: grant it in the tenant you are connecting,
-withhold it (`roles: []` with a reason) in the template; the fixture is the test suite's
-tenant, so grant it there as the tests need. Every other tenant's repo must decide it too
-— `tenant.py check <tenant>` reports a verb its table leaves undecided.
-This is the one shared edit a new adapter-backed system requires, and skipping it
-is why step 5 below would otherwise fail in a way that looks like a bug in
-your adapter: an ungranted system's verbs are refused, and the refusal says
-the system is not reachable at all. **On the MCP path, write nothing here**
-— an MCP-reached system declares no verbs to the registry, and a row naming
-one is residue the same CI gate fails on (`phantom`).
-
-Grant to `gather` the verbs an investigation should be able to call. A verb
-you are deliberately leaving unreachable gets `roles: []` **and a written
-reason** — that is a real decision and the file is where it is recorded.
-Nothing may be left out: CI (`lint_verb_disposition_census.py`) fails on a
-declared verb with no row in the template or the fixture, and `tenant.py check` reports one
-in a tenant's table.
+**Grant rows — one row per verb the adapter declares, `health-check` included.** The tenant's
+own `settings/verb-grants.yaml` must decide every verb: grant to `gather` the verbs an
+investigation should be able to call; a verb you are deliberately leaving unreachable gets
+`roles: []` **and a written reason**. The template withholds every verb, so until the tenant's
+table grants them, no run can call the system. On the **generate** path the adapter is new
+shared code, so also add its rows to `knowledge/tenant-template/settings/verb-grants.yaml`
+(withheld, `roles: []` with a reason) and `knowledge/tenant-fixture/settings/verb-grants.yaml`
+(granted as the tests need) in this repo: CI (`lint_verb_disposition_census.py`) fails on a
+declared verb with no row there, and `tenant.py check <tenant>` reports one a tenant's table
+leaves undecided. A catalog adapter's template and fixture rows already exist.
 
 The allowlist is deliberate, not bookkeeping. It is authored so that
 dropping an adapter into the tree grants it nothing — a system is not
@@ -228,39 +240,30 @@ reachable until a human says which of its verbs may be called. Do not
 "simplify" it by deriving it from the adapters on disk; that is the one
 change the design exists to prevent.
 
-### 5. Test
+### 6. Validate
 
-For the generated-adapter path, the human review checkpoint in
-`adapter.md` must be cleared first — running the adapter here executes
-generated code against the live system.
+Run the scaffold validator and fix every FAIL. It judges the handoff exactly as the record store
+will when the operator writes it — each FAIL there is the sentence the operator would be refused
+with, naming the file — and prints the comment route a case adapter sends.
 
-- **Health check.** Confirm the system is reachable and authed (adapter:
-  invoke the `health-check` verb; MCP: call the status tool). A red health
-  check stops you here — diagnose (refused/DNS → network; 401 →
-  credentials; timeout → endpoint; cert → SSL) and fix.
-- **Sample query.** Run the simplest real query/lookup and show the
-  maintainer the output: **do these results look right?** Iterate if the
-  fields are garbled or missing. Zero results may just mean the window is
-  too narrow — *widen* it (1h → 24h → 7d), never drop the time bound, then
-  confirm whether the source holds data in the wider range.
-
-### 6. Validate and commit
-
-For a **generated-adapter** integration, run the scaffold validator and fix
-every FAIL:
+For a system with investigator tools (either path):
 
 ```bash
 python3 defender/skills/connect/validate_scaffold.py {system} --handoff <handoff>/{system} --staged <staged>
 ```
 
-`--handoff` judges the folder exactly as the record store will when the operator writes it:
-each FAIL there is the sentence the operator would be refused with, naming the file to fix.
-Skip the validator on the **MCP** path — it checks the adapter module an MCP system
-doesn't have, so it would FAIL on things that aren't yours to fix.
-Either way, walk `${CLAUDE_SKILL_DIR}/checklist.md` for the judgment items
-the script can't check. Then, in a git repo (the normal
-case), branch and stage — if the tree isn't under version control, skip
-the branch and just leave the files in place for review:
+For a case system with no investigator tools (e.g. Jira, ServiceNow):
+
+```bash
+python3 defender/skills/connect/validate_scaffold.py {system} --handoff <handoff>/{system} --case <handoff>/case-record.yaml
+```
+
+Then walk `${CLAUDE_SKILL_DIR}/checklist.md` for the judgment items the script can't check.
+
+### 7. Hand off
+
+**Generate path — the product half.** In a git repo (the normal case), branch and stage; if the
+tree isn't under version control, leave the files in place for review:
 
 ```bash
 git checkout -b connect/{system}
@@ -270,8 +273,8 @@ git add defender/integrations/{system}_adapter.py \
 # add pyproject.toml / uv.lock only if a dependency was added
 ```
 
-The staged tenant half — the system skill and its seed templates — goes to the tenant's own
-repo as one pull request, never into this one:
+**The tenant half** (a system with investigator tools) — the system skill and its seed templates
+go to the tenant's own repo as one pull request, never into this one:
 
 ```bash
 python3 defender/cli/tenant.py propose {tenant} <staged>
@@ -279,28 +282,39 @@ python3 defender/cli/tenant.py propose {tenant} <staged>
 
 `propose` adds or replaces the staged files under the tenant's `agent/` and opens the pull
 request on the tenant's forge; a human merges it there. It refuses (`[tenant.py] ...`) a
-staged file outside a folder of `agent/`; fix what it names and propose again.
+staged file outside a folder of `agent/`; fix what it names and propose again. The grant table
+lives under the tenant repo's `settings/`, which `propose` does not touch: branch and stage it
+there, and run `python3 defender/cli/tenant.py check --folder <that repo>` to see the census
+over it.
 
-The connected tenant's grant table lives in ITS repo, not this one: branch and stage it there
-the same way, and run `python3 defender/cli/tenant.py check --folder <that repo>` to see the
-census over it.
+**The operator's steps**, in this order — give them as one list with the handoff folder. You run
+none of them: they write the tenant's records and its secret, which are the operator's.
 
-The handoff folder goes to the operator, with the order to apply it in: the adapter is merged
-and deployed first (the store refuses a record naming an adapter the running product does not
-carry), then the operator stores the record and its credential:
+1. Generate path only: merge and deploy the adapter. The store refuses a record naming an adapter
+   the running product does not carry.
+2. `python3 defender/cli/tenant.py set-system {tenant} {system} <handoff>/{system} --replaces <its current version from the export, 0 if none>`
+3. `python3 defender/cli/tenant.py set-credentials {tenant} {system} <credential file> --for-version <the version stored> --token-file <operator token>`
+4. Case system only: `python3 defender/cli/tenant.py set-case {tenant} <handoff>/case-record.yaml --replaces <current, 0 if none>`,
+   then the alert mapping's `case_key` line **only if** the stored mapping lacks it or names another field
+   (`configure.md` → "The ticket key").
+5. A system with investigator tools: merge the tenant's PR(s) (skill and seeds, grant table) and
+   publish them (`tenant.py update {tenant}`).
+6. `python3 defender/cli/tenant.py check {tenant}` — it judges the stored records, the grants and
+   the case system together.
+7. **The final check:** run `check.md`'s check and its control through the credential proxy.
+   Done means the check gives the agreed answer and the control does not.
 
-```bash
-python3 defender/cli/tenant.py set-system {tenant} {system} <handoff>/{system} --replaces <current version, 0 if none>
-python3 defender/cli/tenant.py set-credentials {tenant} {system} <credential file> --for-version <the version stored> --token-file <operator token>
-```
+**The final check cannot be run from a connect conversation yet** (#1493 adds the pass and the
+runner). Say so plainly. Until then, the first signal is the operator's first real run on the
+tenant — for a case system, the first run started with `--update-ticket` on a real alert, whose
+run page shows the ticket receipt. Leave `check.md` in the handoff so it is run once the runner
+exists.
 
-You run neither: they write the tenant's records and its secret, which are the operator's.
-
-**You do not merge or push.** Present a summary: files touched,
-health-check result, one line of sample output, open items, and what to expect next (the first runs will hit
-query-composition friction; the catalog fills in post-merge via the
-offline lead-author). Tell them: "Review the diff and merge when ready."
-Then stop. `/ship` can open the PR.
+**You do not merge or push.** Present a summary: files touched, the agreed check, the
+validator's result, the operator's ordered steps, open items, and what to expect next (the first
+runs will hit query-composition friction; the catalog fills in post-merge via the offline
+lead-author). Tell them: "Review the diff and merge when ready." Then stop. `/ship` can open the
+PR.
 
 ## Ground rules
 
@@ -311,15 +325,15 @@ Then stop. `/ship` can open the PR.
   `config.env` and `access.yaml` hold no secret and no reference to one: the operator
   stores the value in the secret store (`tenant.py set-credentials`), and the skill never
   sees it.
-- **Stay in your lane.** Write only the `{system}_adapter.py` adapter,
-  the staged `skills/{system}/`, the handoff's `config.env` and `access.yaml`, its staged
-  seed templates, and
-  its rows in every tenant's and the template's `settings/verb-grants.yaml`
-  (plus `pyproject.toml` / `uv.lock` if a dep was added). Never `hooks/`,
-  `learning/`, `agent/lessons/`, the runtime `defender/SKILL.md`, the invlang
-  skill, or another system's files. On the `tacit.md` route the lane is
-  narrower still: the staged `skills/tacit-knowledge/registry.yaml`, plus the
-  template's `SKILL.md` beside it for a tenant that has none, and nothing else.
+- **Never write a check against a real case.** A state-changing check targets only an object the
+  maintainer names as disposable.
+- **Stay in your lane.** Write only the `{system}_adapter.py` adapter (generate path), the
+  staged `skills/{system}/` and seed templates (a system with investigator tools), the handoff
+  folder, and the system's rows in the grant tables (plus `pyproject.toml` / `uv.lock` if a dep
+  was added). Never `hooks/`, `learning/`, `agent/lessons/`, the runtime `defender/SKILL.md`,
+  the invlang skill, or another system's files. On the `tacit.md` route the lane is narrower
+  still: the staged `skills/tacit-knowledge/registry.yaml`, plus the template's `SKILL.md`
+  beside it for a tenant that has none, and nothing else.
 - **Never author a sanction.** On the `tacit.md` route you transcribe what
   a human states and record them as its author. An entry written under
   your name, or with a scope you inferred, is the system vouching for

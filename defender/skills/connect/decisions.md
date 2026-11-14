@@ -2,7 +2,7 @@
 
 The irreversible calls behind this skill, for whoever edits it next. Each
 is load-bearing — change one only on purpose. The *how* is in `SKILL.md`,
-`adapter.md`, and `mcp.md`; this is just the *why*, kept short.
+`configure.md` and `adapter.md`; this is just the *why*, kept short.
 
 - **The skill never handles secret values.** `config.env` and `access.yaml`
   hold non-secret settings only; the operator stores a credential with the
@@ -55,13 +55,25 @@ is load-bearing — change one only on purpose. The *how* is in `SKILL.md`,
   from API docs at connect time — it's exactly what the offline
   lead-author extracts from real runs. Speculative templates rot.
 
-- **MCP and a generated adapter are peer paths, not a hierarchy.** Writing
-  an adapter is heavier than pointing at a maintained MCP server, but neither
-  is the "real" way to connect. The interview routes; the maintainer decides.
-  The one defender-specific tilt: only the adapter path's output flows
-  through the capture path into the queries table, so an MCP system is
-  thinner in the offline learning loop. That's a cost to weigh, not a
-  disqualifier.
+- **An adapter the product carries is configured, never regenerated.** The catalog's adapters
+  are reviewed product code; a second, generated copy of one is drift with no reviewer. Connect
+  generates only for a system the catalog lacks (#1401).
+
+- **No MCP path until runs can reach MCP systems.** A run builds only the product's own tools, so
+  knowledge for an MCP-reached system routes the orchestrator to a system gather cannot call.
+  The path returns with #1494.
+
+- **The check is agreed before anything is built, and run through the credential proxy.** A check
+  written after the build is shaped by what was built. Its answer must be falsifiable (a value a
+  wrong credential, base or mapping would not give), and it carries a negative control whose
+  failure is the red: before the build every check fails for "nothing is there", which proves
+  nothing. It runs through the proxy because that is how production reaches the system; a call
+  from the maintainer's session would prove a path no run takes (#1401, #1493).
+
+- **A system that writes is checked by writing, on something disposable.** A read-only health
+  check proves the address and the credential, not that the write the product makes is allowed.
+  Later investigations read a ticket's comments as its history, so the write goes only to a
+  ticket the maintainer names as disposable (#1401).
 
 - **Human review gate.** connect branches the product half and proposes the tenant
   half (`tenant.py propose`, a review PR on the tenant forge); it does not merge

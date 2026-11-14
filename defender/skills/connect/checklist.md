@@ -1,9 +1,11 @@
 # `connect` — pre-merge checklist
 
-The mechanical bar is automated. Run:
+The mechanical bar is automated. Run the validator as `SKILL.md` step 6 gives it — with
+`--staged` for a system with investigator tools, with `--case` for a case system that has none:
 
 ```bash
 python3 defender/skills/connect/validate_scaffold.py {system} --handoff {handoff}/{system} --staged {staged}
+python3 defender/skills/connect/validate_scaffold.py {system} --handoff {handoff}/{system} --case {handoff}/case-record.yaml
 ```
 
 and fix every FAIL before going further. What it checks, and at which
@@ -12,8 +14,9 @@ severity — a WARN is a judgment call left to you, not a cleared bar:
 **FAIL** (exit 1 — the merge bar):
 
 - adapter module at `integrations/{system}_adapter.py`, importable and
-  exposing a non-empty `VERBS` mapping;
-- `VERBS` includes `health-check`;
+  exposing a `VERBS` mapping;
+- `VERBS` includes `health-check`, unless it is empty and the adapter exports the host's comment
+  action (a case adapter that offers the investigator nothing);
 - every verb is dispatchable as `fn(ctx, **params)`: a leading param
   annotated `VerbContext`, no other positional param, no `**kwargs`, and
   every model-supplied param keyword-only AND annotated (`*, host: str`) — a
@@ -24,7 +27,11 @@ severity — a WARN is a judgment call left to you, not a cleared bar:
   store's own judgement (every key the adapter declares and no other, no blank or
   `CHANGE-ME` value, the adapter's settings check, an access declaration that parses),
   each failure the sentence the operator would be refused with, naming the file;
-- `skills/{system}/SKILL.md` frontmatter says `name: defender-{system}`;
+- with `--case`: the case record is one the store accepts beside the handoff's system — its body
+  template renders, it names that system, and the system's `access.yaml` declares a write route
+  covering the adapter's comment route (printed as `the comment the host sends: ...`);
+- `skills/{system}/SKILL.md` frontmatter says `name: defender-{system}` — asked only for an
+  adapter with a tool beyond `health-check`, and judged whenever `--staged` is given;
 - every seed template with readable frontmatter names a declared verb; and
   for a **param-only** verb (one with no `@verb(engine=…)`), every
   `${placeholder}` in its body is a declared param of that verb or listed in
@@ -51,16 +58,13 @@ Two silent gaps to know about, neither of them a FAIL:
   in `test_d24_every_template_id_matches_its_system_dir_and_filename`.
   An id-less template is dropped with the stderr warning described above.
 
-(For the MCP path there is no adapter module to check —
-`validate_scaffold.py` is adapter-specific. Run the judgment list below
-either way.)
-
 This file covers the rest — the calls a script can't make.
 
 ## Judgment checks
 
-- [ ] **Sample results look right.** The maintainer eyeballed real output
-      and confirmed the fields match what they expect.
+- [ ] **The check was agreed first, and is falsifiable.** `check.md` names the question, the
+      tool and inputs, an answer a wrong credential, base or mapping would not give, and a
+      negative control. A write targets an object the maintainer named as disposable.
 - [ ] **`gaps` are honest.** `SKILL.md` declares what the system *cannot*
       answer here, including silent-failure shapes — enough that a reader
       who'd never touched this system wouldn't fall in blind.
@@ -84,7 +88,7 @@ This file covers the rest — the calls a script can't make.
       declared ones; CI refuses a declared key named like a secret).
 - [ ] **Declared for the proxy.** `access.yaml` names the base, the auth
       scheme and field name (never a value), and every route the adapter
-      calls; `config.env` holds exactly the adapter's `REQUIRED_CONFIG_KEYS`. A
+      calls with a method other than `GET`/`HEAD` (the proxy admits those as reads); `config.env` holds exactly the adapter's `REQUIRED_CONFIG_KEYS`. A
       credential is the operator's to store with the proxy (noted in the
       summary).
 - [ ] **One system.** If others came up in the interview, they were noted
@@ -93,9 +97,11 @@ This file covers the rest — the calls a script can't make.
       flow (odd upstream, unusual access topology, a vendor auth scheme the
       shared transport doesn't cover) is called out in the summary for human
       review — not silently patched, not blocked.
-- [ ] **Human review checkpoint cleared (adapter path).** The maintainer read
-      the generated adapter and approved it *before* it ran against the
-      live system — not only at the final diff (`adapter.md`).
+- [ ] **Human review checkpoint cleared (generate path).** The maintainer read
+      the generated adapter and approved it, and the tool that answers the check, *before*
+      the handoff — not only at the final diff (`adapter.md`).
+- [ ] **The operator's steps are in order** (`SKILL.md` step 7), and the summary says the final
+      check cannot run from the conversation yet.
 - [ ] **Nothing merged or pushed** without explicit direction. The human
       review gate is non-negotiable. (`/ship` opens the PR.)
 
