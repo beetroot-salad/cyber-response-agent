@@ -56,7 +56,7 @@ def _activate(profile_id, profiles_dir, rules_dir, ledger_dir, execer, seed=42):
 @pytest.mark.parametrize(
     ("profile_id", "params", "kind"),
     [
-        ("drift-rename", {"rename": {"from": "user.name", "to": "user.id"}}, "rename"),
+        ("drift-rename", {"rename": {"from": "source.port", "to": "source.client_port"}}, "rename"),
         ("drift-remove", {"remove": "source.port"}, "remove"),
     ],
 )
@@ -77,14 +77,14 @@ def test_schema_drift_processor_is_always_ignore_missing_and_ignore_failure(
 
 def test_schema_drift_rename_carries_the_profiles_from_and_to(profiles_dir, rules_dir, ledger_dir):
     write_profile(
-        profiles_dir, "drift-rename2", "schema-drift", {"rename": {"from": "user.name", "to": "user.id"}}
+        profiles_dir, "drift-rename2", "schema-drift", {"rename": {"from": "source.port", "to": "source.client_port"}}
     )
     execer = FakeExecSeam()
     _activate("drift-rename2", profiles_dir, rules_dir, ledger_dir, execer)
 
     processor = _sole_processor(_pipeline_put(execer, AUTH_PIPELINE), "rename")
-    assert processor["field"] == "user.name"
-    assert processor["target_field"] == "user.id"
+    assert processor["field"] == "source.port"
+    assert processor["target_field"] == "source.client_port"
 
 
 def test_schema_drift_remove_carries_the_profiles_field(profiles_dir, rules_dir, ledger_dir):
@@ -129,7 +129,7 @@ def test_data_drop_never_touches_the_auth_pipeline(profiles_dir, rules_dir, ledg
 @pytest.mark.parametrize(
     ("profile_id", "mode", "params"),
     [
-        ("drift-rename3", "schema-drift", {"rename": {"from": "user.name", "to": "user.id"}}),
+        ("drift-rename3", "schema-drift", {"rename": {"from": "source.port", "to": "source.client_port"}}),
         ("drop-marker-sweep", "data-drop", {"dataset": "system.syslog", "rate": 25}),
     ],
 )

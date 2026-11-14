@@ -5,8 +5,9 @@ two sets:
 
   * rule-key fields — from the `threshold.field` JSON array *and* from the
     parsed query/EQL string. Reading only the query string is the design's own
-    stated near-miss: `source.ip` is keyed on by v2-bulk-ssh-success and appears
-    **nowhere** in any rule's query text.
+    stated near-miss: `source.address` is keyed on by v2-nginx-path-enumeration and
+    `user.name` by the postgres and squid thresholds, and neither appears
+    **anywhere** in any rule's query text.
   * rule-read datasets — the dataset behind each rule's `index` pattern.
 
 Both sides speak the stack's vocabulary — a dataset names exactly one
@@ -28,11 +29,11 @@ from chaos.mutations import UnresolvableProfile, resolve_mutations
 from chaos.profiles import list_profiles, load_profile
 
 # Keyed on only via `threshold.field` — a query-string-only parser misses these.
-THRESHOLD_ONLY_FIELDS = ["source.ip", "falco.output_fields.container.name"]
+THRESHOLD_ONLY_FIELDS = ["source.address", "user.name", "falco.output_fields.container.name"]
 # Keyed on only via the query/EQL text.
 QUERY_ONLY_FIELDS = ["process.name", "event.outcome", "falco.rule"]
 # Investigation-read fields no rule keys on — the legal schema-drift targets.
-SAFE_DRIFT_FIELDS = ["user.name", "source.port", "system.auth.ssh.method"]
+SAFE_DRIFT_FIELDS = ["source.port", "source.client_port", "system.auth.ssh.method"]
 
 
 def test_threshold_only_fields_really_are_absent_from_every_query(rules_dir):
@@ -53,7 +54,10 @@ def test_rule_key_fields_covers_threshold_array_and_query_text(rules_dir):
 
 
 def test_rule_read_datasets_is_every_rule_index_dataset(rules_dir):
-    assert rule_read_datasets(rules_dir) == {"system.auth", "falco.alerts"}
+    assert rule_read_datasets(rules_dir) == {
+        "system.auth", "falco.alerts", "nginx.access", "postgresql.log", "squid.access",
+        "keycloak.events",  # the ES|QL rule's FROM: it has no `index`
+    }
 
 
 def _esql_rules(tmp_path, *queries):
@@ -177,7 +181,7 @@ def test_schema_drift_remove_variant_is_guarded_too(profiles_dir, rules_dir):
     [
         {"remove": "event"},  # takes event.outcome with it: both EQL sequence rules + both sshd thresholds
         {"rename": {"from": "process", "to": "proc"}},  # takes process.name
-        {"remove": "source"},  # takes source.ip (v2-bulk-ssh-success, threshold-only)
+        {"remove": "source"},  # takes source.ip and source.address (thresholds, the ES|QL rule)
         {"rename": {"from": "falco", "to": "falco_legacy"}},  # takes falco.rule
     ],
 )
