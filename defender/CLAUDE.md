@@ -54,7 +54,7 @@ name. Credentials live at a per-generation path `<tenant>/<system>/g<N>`. Once:
    create the NOLOGIN role `defender_proxy_reader`, which reads `tenancy.system_versions` and the
    `id` and `state` columns of `tenancy.tenants`, nothing else: create a login that is a member of
    it and set the proxy config's `records_dsn` to that login's DSN in place of `data_root` (an old
-   config refuses to start). `0017_drop_records_mark` stops, changing nothing, while any tenant
+   config refuses to start). The second of those migrations stops, changing nothing, while any tenant
    that is not offboarded predates #1366's records (its systems never moved onto them): without
    them it would read as a tenant with no systems. Recreate such a development database.
 2. Rebuild the job image on every execution host (`docker build -f .devcontainer/Dockerfile.job -t
