@@ -256,7 +256,7 @@ class OpenBaoSecrets(_OpenBao):
 
     def _secret_refused(self, reply: httpx.Response, what: str) -> SecretStoreFault:
         status = reply.status_code
-        if status == 503 and _sealed(reply):
+        if status == 503 and _answers_sealed(reply):
             return SecretStoreUnavailable(f"OpenBao at {self.addr} is sealed ({what})", status=status, sealed=True,
                                           sent=True)
         detail = f"OpenBao at {self.addr} refused {what} ({status})"
@@ -295,7 +295,7 @@ class OpenBaoSecrets(_OpenBao):
                 and not version.get("deletion_time") and not version.get("destroyed"))
 
 
-def _sealed(reply: httpx.Response) -> bool:
+def _answers_sealed(reply: httpx.Response) -> bool:
     """Is `reply` a sealed OpenBao's answer (`errors` naming "Vault is sealed")?"""
     try:
         doc = reply.json()

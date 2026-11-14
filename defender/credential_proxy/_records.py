@@ -1,7 +1,7 @@
 """The proxy's read of a tenant system's current record (#1366 O7, R14).
 
 `PostgresSystemRecords(dsn)` is the port over the read-only login (a member of `defender_proxy_reader`, which
-may select `tenancy.system_versions` and nothing else). Each call reads the highest version of one
+may select `tenancy.system_versions` and the `id` and `state` columns of `tenancy.tenants`, nothing else). Each call reads the highest version of one
 (tenant, system) through a blocking connection bounded by the request's deadline (connect and statement
 timeouts), like `OpenBaoStore`. Connections are kept for reuse, at most `IDLE_CONNECTIONS` idle at once, so a request
 does not pay a connection's setup; one that failed is closed, never reused, and a reused one that fails is
@@ -29,10 +29,11 @@ READ_TIMEOUT_SEC = 10.0
 #: How many idle connections the port keeps for reuse; one returned beyond them is closed.
 IDLE_CONNECTIONS = 4
 
-#: One row always: whether the tenant is imported (its records mark, R8), then the system's newest version (nulls when it
-#: has none), so an unknown tenant and an unknown system are told apart in one read.
+#: One row always: whether the tenant's records are known (its row exists and is `active`, #1470 O8: read from the row's
+#: `id` and `state` only), then the system's newest version (nulls when it has none), so an unknown tenant and an
+#: unknown system are told apart in one read.
 _QUERY = ("SELECT k.known, v.version, v.adapter_id, v.enabled, v.settings, v.access, v.credential_generation, v.deleted "
-          "FROM (SELECT EXISTS (SELECT 1 FROM tenancy.records_mark WHERE tenant_id = %(t)s) AS known) AS k "
+          "FROM (SELECT EXISTS (SELECT 1 FROM tenancy.tenants WHERE id = %(t)s AND state = 'active') AS known) AS k "
           "LEFT JOIN LATERAL (SELECT version, adapter_id, enabled, settings, access, credential_generation, deleted "
           "FROM tenancy.system_versions WHERE tenant_id = %(t)s AND system_id = %(s)s "
           "ORDER BY version DESC LIMIT 1) AS v ON true")
@@ -40,7 +41,7 @@ _QUERY = ("SELECT k.known, v.version, v.adapter_id, v.enabled, v.settings, v.acc
 
 class SystemRecordsPort(Protocol):
     """The proxy's read of a system's current record; None when there is none or it is deleted. A disabled
-    record comes back with `enabled=False`. A tenant without the records mark (never imported, or not one of ours)
+    record comes back with `enabled=False`. A tenant whose records are not known (no row, or not `active`: #1470 O8)
     raises an unlabelled `ConfigFault`: a validly signed token naming such a tenant is the proxy's access, not one
     system's setup (#1363)."""
 
@@ -82,7 +83,7 @@ class PostgresSystemRecords:
             row = self._read(self._connect(left()), left(), tenant_id, system_id, reused=False)
         known, version, adapter_id, enabled, settings, access, generation, deleted = row
         if not known:
-            raise ConfigFault("the request token's tenant has no system records (it is not imported)")
+            raise ConfigFault("the request token's tenant is not an active tenant, so it has no system records")
         if version is None or deleted:
             return None
         return SystemRecord(system_id=system_id, version=version, adapter_id=adapter_id, enabled=enabled,

@@ -66,6 +66,21 @@ KEEP: Any = type("Keep", (), {"__repr__": lambda _self: "KEEP"})()
 ALL: Literal["all"] = "all"
 
 
+#: The one state in which a tenant's records are known (#1470 O8).
+RECORDS_STATE = "active"
+
+
+def refuse_unless_active(tenant_id: object, state: str | None) -> None:
+    """#1470 O8: a tenant's records are known exactly while it is `active`. `TenantRefused` for a tenant with no row
+    (`state` None) or in any other state; every reader is past admission, so this is a refusal, not a transient."""
+    from defender.records.formats import TenantRefused
+
+    if state is None:
+        raise TenantRefused(f"tenant {tenant_id} does not exist, so it has no system records")
+    if state != RECORDS_STATE:
+        raise TenantRefused(f"tenant {tenant_id} is {state}, not active: its system records are not known")
+
+
 class NotFound(Exception):
     """No tenant with this id (the endpoints answer 404)."""
 
@@ -147,8 +162,9 @@ class TenantRepository(Protocol):
         ...
 
     async def current_records(self, tenant_id: TenantId) -> TenantRecords:
-        """The tenant's system and case records as they stand (#1366 R10): whether its systems come from records (the mark),
-        its current non-deleted systems, its current case record. Not marked: `imported=False` and nothing else.
+        """The tenant's system and case records as they stand (#1366 R10): its current non-deleted systems and its
+        current case record, both empty for a tenant nothing was written for. Known exactly while the tenant is
+        `active` (#1470 O8): a tenant with no row, or in any other state, is `TenantRefused` (`refuse_unless_active`).
         Written only by `system_records`' store."""
         ...
 

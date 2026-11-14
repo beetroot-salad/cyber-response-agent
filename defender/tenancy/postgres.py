@@ -35,7 +35,7 @@ from sqlalchemy.pool import NullPool
 from defender.database import async_engine, url
 from defender.records.formats import AlertMapping, TenantId
 from defender.tenancy.models import (SCHEMA, AlertMappingRow, CaseRecord, CaseVersionRow, ForgeWiring, Generation,
-                                     MergeEligibility, MergeEligibilityRow, PublishStatus, RecordsMark, SystemVersionRow,
+                                     MergeEligibility, MergeEligibilityRow, PublishStatus, SystemVersionRow,
                                      TenantRecord, TenantRecords, offboard)
 from defender.tenancy.repository import (
     ALL,
@@ -47,6 +47,7 @@ from defender.tenancy.repository import (
     FenceMissed,
     NotFound,
     publish_outcome,
+    refuse_unless_active,
 )
 
 _logger = logging.getLogger(__name__)
@@ -58,7 +59,6 @@ _P: Table = PublishStatus.__table__  # type: ignore[assignment]
 _M: Table = AlertMappingRow.__table__  # type: ignore[assignment]
 _SV: Table = SystemVersionRow.__table__  # type: ignore[assignment]
 _CV: Table = CaseVersionRow.__table__  # type: ignore[assignment]
-_RM: Table = RecordsMark.__table__  # type: ignore[assignment]
 _E: Table = MergeEligibilityRow.__table__  # type: ignore[assignment]
 
 #: The lock connection's keepalive bound, in seconds, when the caller states none.
@@ -135,16 +135,16 @@ class PostgresTenantRepository:
         return AlertMappingRow(**rows[0]._mapping).as_mapping() if rows else None
 
     async def current_records(self, tenant_id: TenantId) -> TenantRecords:
-        """The mark, the current systems and the current case record, read in one REPEATABLE READ transaction: one
-        snapshot, so a reader never sees one write of a pair (a system, then the case record naming it) without the
-        other."""
+        """The current systems and the current case record of an `active` tenant, read with its state in one REPEATABLE
+        READ transaction: one snapshot, so a reader never sees one write of a pair (a system, then the case record
+        naming it) without the other. Any other tenant is `TenantRefused` (#1470 O8: known iff active)."""
         latest = (select(_SV.c.system_id, func.max(_SV.c.version).label("v")).where(_SV.c.tenant_id == tenant_id)
                   .group_by(_SV.c.system_id).subquery())
         async with self._engine.connect() as conn:
             conn = await conn.execution_options(isolation_level="REPEATABLE READ")
             async with conn.begin():
-                if (await conn.execute(select(_RM.c.tenant_id).where(_RM.c.tenant_id == tenant_id))).first() is None:
-                    return TenantRecords()
+                found = (await conn.execute(select(_T.c.state).where(_T.c.id == tenant_id))).first()
+                refuse_unless_active(tenant_id, None if found is None else found.state)
                 rows = (await conn.execute(
                     select(_SV).join(latest, and_(_SV.c.system_id == latest.c.system_id, _SV.c.version == latest.c.v))
                     .where(_SV.c.tenant_id == tenant_id, _SV.c.deleted.is_(False)).order_by(_SV.c.system_id))).all()
@@ -155,7 +155,7 @@ class PostgresTenantRepository:
         if case_rows and not case_rows[0].deleted:
             c = case_rows[0]
             case = CaseRecord(version=c.version, system_id=c.system_id, comment_body=c.comment_body)
-        return TenantRecords(imported=True, systems=systems, case=case)
+        return TenantRecords(systems=systems, case=case)
 
     async def merge_eligibility(self, tenant_id: TenantId) -> MergeEligibility | None:
         rows = await self._rows(select(_E).where(_E.c.tenant_id == tenant_id))
@@ -166,9 +166,7 @@ class PostgresTenantRepository:
         values = dict(id=TenantId.mint(), created_at=now, state="creating", pending_action="create",
                       step="names", step_actor=SERVICE)
         async with self._engine.begin() as conn:
-            row = _record((await conn.execute(insert(_T).values(**values).returning(*_T.c))).one())
-            await conn.execute(insert(_RM).values(tenant_id=row.id))
-            return row
+            return _record((await conn.execute(insert(_T).values(**values).returning(*_T.c))).one())
 
     async def _request(self, tenant_id: TenantId, precondition: ColumnElement[bool], refusal: str,
                        **values: Any) -> TenantRecord:
@@ -339,7 +337,6 @@ class _Held:
         if drop_records:
             statement.cte("drop_sv", f"DELETE FROM {SCHEMA}.system_versions WHERE tenant_id IN (SELECT id FROM fence) RETURNING tenant_id")
             statement.cte("drop_cv", f"DELETE FROM {SCHEMA}.case_versions WHERE tenant_id IN (SELECT id FROM fence) RETURNING tenant_id")
-            statement.cte("drop_rm", f"DELETE FROM {SCHEMA}.records_mark WHERE tenant_id IN (SELECT id FROM fence) RETURNING tenant_id")
         return await self._land(statement)
 
     async def fail(self, failure: str, *, step: str, actor: str) -> TenantRecord:

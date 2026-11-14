@@ -770,8 +770,8 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
     with admitted:
         # The tenant's readiness over its own folder; siblings dispatch no turn-0 lead. Its
         # systems are its CURRENT records (#1366 H9, O6): the episode's served systems and every
-        # replay read the present, whatever the source run read; a tenant not imported is
-        # refused (R8). Narrowed over the catalog the launch reads (R12): a grant on a system
+        # replay read the present, whatever the source run read; a tenant that is not active is
+        # refused (#1470 O8). Narrowed over the catalog the launch reads (R12): a grant on a system
         # the tenant has no enabled record of is ignored, once, here.
         if roster is None:
             from defender._paths import adapters_under
@@ -783,7 +783,6 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
             # the job's start come in the launch facts (#1170 A6).
             records = (admitted.directory.current_records(admitted.tenant.id) if container is None
                        else _handed_records(container))
-            run_tenant_mod.require_imported(records, admitted.tenant.id)
             verdict = run_tenant_mod.tenant_systems(
                 run_tenant_mod.run_tenant_for(admitted.tenant, dispatches_lead_zero=False, records=records),
                 Catalog(roster))

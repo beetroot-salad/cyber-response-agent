@@ -287,15 +287,6 @@ class CaseVersionRow(Base, kw_only=True):
     written_at: Mapped[_dt.datetime] = mapped_column(_TIME)
 
 
-class RecordsMark(Base, kw_only=True):
-    """Present for a tenant whose systems come from records (R8, R11). Also the row a writer locks to serialize a tenant."""
-
-    __tablename__ = "records_mark"
-    __table_args__ = {"schema": SCHEMA}
-
-    tenant_id: Mapped[TenantId] = mapped_column(IdColumn(TenantId), ForeignKey(f"{SCHEMA}.tenants.id"), primary_key=True)
-
-
 @dataclasses.dataclass(frozen=True)
 class MergeEligibility:
     """Who may merge into the tenant's `main`, as of the management service's latest read (#1414 D13): the logins of the

@@ -129,7 +129,7 @@ def _next(row: Any) -> int:
     return 1 if row is None else row.version + 1
 
 
-def _check_tenant(found: Any, tenant: TenantId) -> None:
+def _refuse_unless_writable(found: Any, tenant: TenantId) -> None:
     if found is None:
         raise NoSuchTenant(tenant)
     if found.state != ACTIVE:
@@ -151,7 +151,7 @@ class RecordStore:
         async with self._engine.begin() as conn:
             found = (await conn.execute(text(f"SELECT state FROM {_TENANTS} WHERE id = :t FOR UPDATE"),
                                         {"t": tenant})).first()
-            _check_tenant(found, tenant)
+            _refuse_unless_writable(found, tenant)
             yield conn
 
     # --- reads under the lock -------------------------------------------------------------------------------------
@@ -302,7 +302,7 @@ class RecordStore:
             conn = await conn.execution_options(isolation_level="REPEATABLE READ")
             async with conn.begin():
                 found = (await conn.execute(text(f"SELECT state FROM {_TENANTS} WHERE id = :t"), {"t": tenant})).first()
-                _check_tenant(found, tenant)
+                _refuse_unless_writable(found, tenant)
                 newest = (await conn.execute(select(_SV).where(_SV.c.tenant_id == tenant, _SV.c.system_id == system)
                                              .order_by(_SV.c.version.desc()).limit(1))).first()
                 if newest is None or newest.deleted:

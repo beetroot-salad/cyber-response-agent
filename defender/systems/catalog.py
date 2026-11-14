@@ -37,12 +37,9 @@ class TenantSystems:
 
     @classmethod
     def of(cls, records: TenantRecords, catalog: Catalog, *, tenant_id: object) -> TenantSystems:
-        """Tenant `tenant_id`'s systems over `catalog` from its current `records`. A tenant not imported has no
-        systems to tell: `TenantRefused` naming the import (R8), here, so no caller can take its absent records for a
-        tenant with none."""
-        from defender.systems.run_tenant import require_imported
-
-        require_imported(records, tenant_id)
+        """Tenant `tenant_id`'s systems over `catalog` from its current `records` (an active tenant's: #1470 O8, the
+        read refuses any other). `tenant_id` names the tenant to its caller and is not read."""
+        del tenant_id
         whole = catalog.roster
         enabled: dict[str, SystemRecord] = {}
         disabled: dict[str, SystemRecord] = {}
@@ -72,11 +69,6 @@ class TenantSystems:
         return cls(catalog=catalog, records=records, roster=roster,
                    enabled=types.MappingProxyType(enabled), disabled=types.MappingProxyType(disabled),
                    adapter_missing=types.MappingProxyType(missing))
-
-    @property
-    def imported(self) -> bool:
-        """Whether the tenant's systems come from records at all (R8, R11)."""
-        return self.records.imported
 
     @property
     def systems(self) -> tuple[str, ...]:

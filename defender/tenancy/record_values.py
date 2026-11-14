@@ -35,10 +35,9 @@ class CaseRecord:
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class TenantRecords:
-    """What the tenant's records say now: whether its systems come from records at all (the mark), its current systems
-    (a deleted one is absent, a disabled one present) and its current case record."""
+    """What the tenant's records say now: its current systems (a deleted one is absent, a disabled one present) and its
+    current case record. A tenant nothing was written for has none (#1470 O8)."""
 
-    imported: bool = False
     systems: Mapping[str, SystemRecord] = dataclasses.field(default_factory=dict)
     case: CaseRecord | None = None
 
@@ -46,7 +45,6 @@ class TenantRecords:
         """These records as plain JSON data: how a job's host helper, which read them, hands them to its job container,
         which reads no database (#1170 A6, #1366 O6). `from_wire` reads it back."""
         return {
-            "imported": self.imported,
             "systems": {sid: {"version": r.version, "adapter_id": r.adapter_id, "enabled": r.enabled,
                               "settings": dict(r.settings), "access": r.access,
                               "credential_generation": r.credential_generation,
@@ -97,7 +95,7 @@ class TenantRecords:
             version=field(case_wire, "version", int, "records: case"),
             system_id=field(case_wire, "system_id", str, "records: case"),
             comment_body=field(case_wire, "comment_body", str, "records: case"))
-        return cls(imported=field(wire, "imported", bool, "records"), systems=systems, case=case)
+        return cls(systems=systems, case=case)
 
 
 __all__ = ["CaseRecord", "SystemRecord", "TenantRecords"]
