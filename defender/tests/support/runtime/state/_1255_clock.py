@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
 import asyncio
 import contextlib
@@ -316,7 +317,7 @@ def run_main(  # noqa: PLR0913 — the composition's seams, one keyword each
             run_mod._drive_investigation, investigate=inner,
             registry_cls=registry_cls if registry_cls is not None else quiet_registry()),
         start_box=start_box if start_box is not None
-        else functools.partial(box_mod.start_box, docker=_no_daemon),
+        else functools.partial(box_mod.start_box, docker=_no_daemon, data_root=current_data_root()),
         stop_box=lambda *_a, **_k: None,
         scrub=lambda *_a, **_k: None)
     from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv, in_process_publish

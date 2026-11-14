@@ -109,6 +109,7 @@ class _Recorded:
 @pytest.fixture
 def probed(tmp_path, monkeypatch, migrated_database):  # noqa: F811
     """One real job container of the scene's tenant, run with the probe; what it saw."""
+    from defender.box import run_docker
     from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 
     with helper_scene(tmp_path, monkeypatch, migrated_database) as scene:

@@ -39,7 +39,7 @@ from defender.tests.support.sandbox._spec1092 import (
     make_run_dir,
     plant_tree,
     recipe_version,
-    subcommands,
+    box_subcommands,
 )
 from defender.tests.support.tenancy._host1214 import TEST_TENANT
 from defender.tests.support.shared.contracts._import_blocker import run_blocked
@@ -63,6 +63,7 @@ from defender.tests.support.sandbox._spec1092 import (
     requires_live_box,
     requires_real_box,
 )
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
 
 #: The devcontainer-shaped mount table `test_box_dood_c46.py` uses: `/workspace` is shared
@@ -79,7 +80,7 @@ def _request(defender_root: Path, run_dir: Path, *, spec: BoxSpec | None = None,
     the defender dir is `workdir / "defender"`, one rw mount for the markers."""
     kw = {} if spec is None else {"spec": spec}
     return BoxRequest(
-        name=name, workdir=defender_root, env={}, tenant_id=TEST_TENANT,
+        name=name, workdir=defender_root, env={}, tenant_id=TEST_TENANT, data_root=current_data_root(),
         mounts=(Mount(source=run_dir, target=run_dir, writable=True),),
         **kw,
     )
@@ -112,7 +113,7 @@ def test_an_unset_rootfs_resolves_to_the_image_named_by_the_mounted_trees_three_
     assert shape.group("version") == recipe_version()
 
     rec = RecordingDocker()
-    box_mod._start_boxed(run_dir, defender_dir, spec, rec, lambda _d: ())
+    box_mod._start_boxed(run_dir, defender_dir, spec, rec, lambda _d: (), data_root=current_data_root())
     assert image_token(rec.create_argv or []) == expected
     assert not any("{" in t or "}" in t for t in rec.create_argv or []), rec.create_argv
 
@@ -141,7 +142,7 @@ def test_an_explicit_rootfs_is_appended_verbatim_and_reads_no_file(tmp_path):
     spec = BoxSpec(rootfs=STOCK_ROOTFS)
 
     rec = RecordingDocker()
-    box_mod._start_boxed(run_dir, defender_dir, spec, rec, lambda _d: ())
+    box_mod._start_boxed(run_dir, defender_dir, spec, rec, lambda _d: (), data_root=current_data_root())
     assert image_token(rec.create_argv or []) == STOCK_ROOTFS
 
     rec2 = RecordingDocker()
@@ -256,7 +257,7 @@ def test_a_mounted_tree_without_the_three_inputs_raises_boxfault_naming_the_tree
     run_dir = make_run_dir(tmp_path)
     rec = RecordingDocker()
     start = (
-        (lambda: box_mod.start_box(run_dir, defender_dir, docker=rec, tenant_id=TEST_TENANT)) if lane == "run-dir"
+        (lambda: box_mod.start_box(run_dir, defender_dir, docker=rec, tenant_id=TEST_TENANT, data_root=current_data_root())) if lane == "run-dir"
         else (lambda: box_mod.start_box(_request(root, run_dir), docker=rec))
     )
     with pytest.raises(BoxFault) as e:
@@ -271,7 +272,7 @@ def test_a_mounted_tree_without_the_three_inputs_raises_boxfault_naming_the_tree
     verb, other = ("cannot use", "cannot read") if malformed else ("cannot read", "cannot use")
     assert verb in message, (verb, message)
     assert other not in message, (other, message)
-    assert "run" not in subcommands(rec.calls), rec.calls
+    assert "run" not in box_subcommands(rec.calls), rec.calls
     assert rec.create_argv is None
 
 
@@ -287,7 +288,7 @@ def test_the_c46_uncovered_mount_refusal_fires_before_the_resolver_on_both_lanes
         box_mod._start_boxed(run_dir, defender_dir, BoxSpec(), rec, lambda _d: MOUNTS)
     assert "C46" in str(e.value)
     assert "box.Dockerfile" not in str(e.value)
-    assert not {"image", "run"} & set(subcommands(rec.calls)), rec.calls   # the stale-name check only
+    assert not {"image", "run"} & set(box_subcommands(rec.calls)), rec.calls   # the stale-name check only
     assert rec.create_argv is None
 
     rec = RecordingDocker()
@@ -295,7 +296,7 @@ def test_the_c46_uncovered_mount_refusal_fires_before_the_resolver_on_both_lanes
         box_mod._start_boxed_request(_request(root, run_dir), rec, lambda _d: MOUNTS)
     assert "C46" in str(e.value)
     assert "box.Dockerfile" not in str(e.value)
-    assert not {"image", "run"} & set(subcommands(rec.calls)), rec.calls
+    assert not {"image", "run"} & set(box_subcommands(rec.calls)), rec.calls
     assert rec.create_argv is None
 
     with pytest.raises(BoxFault) as e:
@@ -330,7 +331,7 @@ def test_the_image_name_carries_the_running_packages_recipe_version_and_never_th
 
     run_dir = make_run_dir(tmp_path)
     rec = RecordingDocker()
-    box_mod._start_boxed(run_dir, defender_dir, BoxSpec(), rec, lambda _d: ())
+    box_mod._start_boxed(run_dir, defender_dir, BoxSpec(), rec, lambda _d: (), data_root=current_data_root())
     assert image_token(rec.create_argv or []) == expected
     rec2 = RecordingDocker()
     box_mod._start_boxed_request(_request(root, run_dir), rec2, lambda _d: ())
@@ -658,7 +659,7 @@ def test_a_command_inside_the_box_sees_defender_box_1_and_the_env_is_still_exact
 @requires_live_box
 def test_the_live_suites_duckdb_startup_probe_exits_zero_in_a_box_from_the_owned_image(tmp_path):
     run_dir = make_run_dir(tmp_path)
-    box = box_mod.start_box(run_dir, DEFENDER, docker=box_mod.run_docker, tenant_id=TEST_TENANT)
+    box = box_mod.start_box(run_dir, DEFENDER, docker=box_mod.run_docker, tenant_id=TEST_TENANT, data_root=current_data_root())
     try:
         res = box_run(box, "python3 -c 'import duckdb'", cwd=Path("/"))
     finally:

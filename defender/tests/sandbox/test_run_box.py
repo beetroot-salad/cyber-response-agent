@@ -32,6 +32,7 @@ from defender.tests.tenancy.tenant_1108_delivery._support import (
     fixture_identity,
 )
 from defender.tests.tenancy.tenant_1108_delivery._support import target as p3_target
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
 
 NAME = "defender-drain-u1195"
@@ -556,7 +557,7 @@ def test_start_box_stamps_the_docker_it_created_the_box_with(tmp_path: Path, mon
     plant_alert(run_dir)
     (tmp_path / "defender").mkdir()
     by_run_dir = box_mod.start_box(run_dir, tmp_path / "defender", docker=daemon,
-                                   spec=BoxSpec(runtime="runc", rootfs="defender-box:t1195"), tenant_id=TEST_TENANT)
+                                   spec=BoxSpec(runtime="runc", rootfs="defender-box:t1195"), tenant_id=TEST_TENANT, data_root=current_data_root())
     assert by_run_dir.sandboxed, by_run_dir
     assert by_run_dir.docker is daemon, "the run-dir path did not stamp its docker"
     assert len(daemon.created()) == 2

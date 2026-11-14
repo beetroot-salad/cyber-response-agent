@@ -386,8 +386,9 @@ class ContainerStandIn(RecordingDocker):
         return self.boxes[0]
 
     def creates(self) -> list[list[str]]:
-        """Every box start the helper made (`docker create`/`run` through the call seam)."""
-        return [c for c in self.calls if len(c) > 1 and c[1] in ("create", "run")]
+        """Every box start the helper made (`docker create`/`run` through the call seam). A box check's container is a
+        `docker run` too, and is no box start (#1469): it is left out."""
+        return [c for c in self.calls if len(c) > 1 and c[1] in ("create", "run") and not _check1469.is_check_run(c)]
 
     def popen(self, argv, **kw):  # noqa: ANN001 — Popen's own signature
         argv = list(argv)

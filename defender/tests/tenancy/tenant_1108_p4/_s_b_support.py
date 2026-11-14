@@ -24,6 +24,7 @@ from typing import Any
 
 from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.tenancy.tenant_1108_p4._support import published_tenant
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
 #: The lead-zero template the fixture's `settings/lead-zero.yaml` names; its `agent/` carries it.
 CORRELATE_PATH = "agent/skills/gather/queries/elastic/correlate-alerts-by-entity.md"
@@ -409,7 +410,7 @@ def drive_main(t: Any, tmp_path: Path, monkeypatch: Any, *, main: Any, gather: A
     investigate = functools.partial(run_py._drive_investigation, investigate=final)
     lifecycle = functools.partial(
         run_py._run_investigation_lifecycle, investigate=investigate,
-        start_box=functools.partial(box_mod.start_box, docker=RH._no_docker_daemon))
+        start_box=functools.partial(box_mod.start_box, docker=RH._no_docker_daemon, data_root=current_data_root()))
     alert_dir = tmp_path / "alert"
     alert_dir.mkdir(parents=True, exist_ok=True)
     (alert_dir / "alert.json").write_text(json.dumps({

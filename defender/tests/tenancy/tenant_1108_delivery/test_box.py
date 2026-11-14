@@ -22,6 +22,7 @@ from defender.box import _lifecycle
 
 from ._support import DEFENDER, LANES, TOKEN, ForgeHTTP, delivery, files_under, git
 from defender.tests.support.tenancy._host1214 import TEST_TENANT
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
 #: A pinned image, so these requests never resolve one from a made-up tree.
 _PINNED = box.BoxSpec(runtime="runc", rootfs="defender-box:test1108")
@@ -116,7 +117,7 @@ def _copy(root: Path) -> Path:
 
 def _request(name: str, workdir: Path, *mounts, **extra) -> box.BoxRequest:
     return box.BoxRequest(name=name, workdir=workdir, env={}, mounts=tuple(mounts),
-                          spec=_PINNED, tenant_id=TEST_TENANT, **extra)
+                          spec=_PINNED, tenant_id=TEST_TENANT, data_root=current_data_root(), **extra)
 
 
 #: The request lane's two entries: the public `start_box`, and the request
@@ -242,7 +243,7 @@ def test_1279_o6_the_tenant_draft_box_refuses_a_finished_container_of_its_name(
 def test_explicit_defender_dir_also_owns_host_fallback_environment(tmp_path):
     code = tmp_path / "code/defender"
     request = box.BoxRequest(name="defender-test", defender_dir=code,
-                             workdir=tmp_path / "tenant/agent", tenant_id=TEST_TENANT)
+                             workdir=tmp_path / "tenant/agent", tenant_id=TEST_TENANT, data_root=current_data_root())
     env = _lifecycle._host_fallback_env(request)
     assert env["DEFENDER_DIR"] == str(code)
     assert env["PATH"].split(":")[0] == str(code / "bin")
@@ -346,7 +347,8 @@ def test_the_oracle_start_requires_a_sandbox_and_leaves_no_stray_marker(tmp_path
     wrong.install(monkeypatch)
     wrong.refuse_sentinel()
     with pytest.raises(_oracle.BoxStartRefused):
-        _oracle.start_oracle_box(env={"PATH": os.environ["PATH"], "DEFENDER_BOX_RUNTIME": "runc"}, tenant_id=TEST_TENANT)
+        _oracle.start_oracle_box(env={"PATH": os.environ["PATH"], "DEFENDER_BOX_RUNTIME": "runc"}, tenant_id=TEST_TENANT,
+                                   data_root=tmp_path)
     assert wrong.names() == []
     creates = [argv for argv in wrong.docker_calls() if argv[1:2] == ["create"]]  # #1344 amendment 2
     assert creates, "the refused start never reached the daemon"
@@ -666,7 +668,7 @@ def test_oracle_production_start_reads_the_runner_check_and_refuses_a_wrong_mapp
     good = FakeDaemon(tmp_path / "good")
     good.install(monkeypatch)
     env = {"PATH": os.environ["PATH"], "DEFENDER_BOX_RUNTIME": "runc"}
-    oracle = _oracle.start_oracle_box(env=env, tenant_id=TEST_TENANT)
+    oracle = _oracle.start_oracle_box(env=env, tenant_id=TEST_TENANT, data_root=tmp_path)
     try:
         assert oracle.sandboxed
         reads = [argv[-1] for argv in good.docker_calls() if argv[1:2] == ["exec"] and "cat" in argv]
@@ -679,7 +681,8 @@ def test_oracle_production_start_reads_the_runner_check_and_refuses_a_wrong_mapp
     wrong.install(monkeypatch)
     wrong.refuse_sentinel()
     with pytest.raises(_oracle.BoxStartRefused):
-        _oracle.start_oracle_box(env={**env, "PATH": os.environ["PATH"]}, tenant_id=TEST_TENANT)
+        _oracle.start_oracle_box(env={**env, "PATH": os.environ["PATH"]}, tenant_id=TEST_TENANT,
+                                   data_root=tmp_path)
     assert wrong.names() == []
     creates = [argv for argv in wrong.docker_calls() if argv[1:2] == ["create"]]  # #1344 amendment 2
     assert creates, "the refused start never reached the daemon"
@@ -706,7 +709,7 @@ def test_oracle_runner_is_a_code_mount_holding_only_runner_files_and_starts_sand
         assert before[check] == (_oracle.CHECKOUT / check).read_bytes()
         scratch = tmp_path / "scratch"
         scratch.mkdir()
-        request = replace(_oracle.oracle_box_request(scratch, runner, env={}, tenant_id=TEST_TENANT),
+        request = replace(_oracle.oracle_box_request(scratch, runner, env={}, tenant_id=TEST_TENANT, data_root=tmp_path),
                           spec=box.BoxSpec(rootfs=STOCK_ROOTFS))
         assert [(m.source, m.target, m.kind) for m in request.mounts if not m.writable] == [
             (runner, _oracle.CHECKOUT, "code")]

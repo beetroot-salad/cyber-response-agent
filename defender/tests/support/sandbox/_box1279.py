@@ -13,6 +13,8 @@ from defender.box._clock import clock_dir
 from defender.tests.e2e import _box665 as B
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.tenancy._host1214 import TEST_TENANT
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
+from defender.tests.support.sandbox import _box_check1469 as _check
 
 TENANT = fixture_uuid("tenant:blue")
 REQUEST_NAME = "defender-runcycle-1279"
@@ -114,7 +116,7 @@ class RunLane:
     def start(self, docker: Any, **kw: Any) -> Any:
         return box_mod.start_box(self.run_dir, self.defender_dir, tenant_agent=self.agent,
                                  staged_token=self.token, tenant_id=self.tenant_id,
-                                 docker=docker, **kw)
+                                 docker=docker, **kw, data_root=current_data_root())
 
 
 def run_lane(base: Path) -> RunLane:
@@ -149,7 +151,7 @@ class RequestLane:
             box_mod.Mount(source=self.lane, target=self.lane, writable=True),
         )
         return box_mod.BoxRequest(name=name, mounts=mounts, workdir=B.REPO_ROOT, env={},
-                                  require_sandbox=require_sandbox, tenant_id=TEST_TENANT)
+                                  require_sandbox=require_sandbox, tenant_id=TEST_TENANT, data_root=current_data_root())
 
 
 def request_lane(base: Path) -> RequestLane:
@@ -163,9 +165,14 @@ def request_lane(base: Path) -> RequestLane:
 # -- what a started box mounted --------------------------------------------------------------
 
 
+def _box_creates(calls: list[list[str]]) -> list[list[str]]:
+    """The calls that create a BOX: `docker run`/`create`, a box check's own container (#1469) left out."""
+    return [c for c in calls if len(c) > 1 and c[1] in ("run", "create") and not _check.is_check_run(c)]
+
+
 def bound_sources(calls: list[list[str]]) -> list[Path]:
-    """The bind sources on the (first) `docker run` among `calls`; none when nothing was created."""
-    run = next((c for c in calls if len(c) > 1 and c[1] in ("run", "create")), None)
+    """The bind sources on the (first) box create among `calls`; none when nothing was created."""
+    run = next(iter(_box_creates(calls)), None)
     out: list[Path] = []
     for i, token in enumerate(run or []):
         if token == "--mount":
@@ -175,7 +182,7 @@ def bound_sources(calls: list[list[str]]) -> list[Path]:
 
 
 def created(calls: list[list[str]]) -> bool:
-    return any(len(c) > 1 and c[1] in ("run", "create") for c in calls)
+    return bool(_box_creates(calls))
 
 
 def removed(calls: list[list[str]]) -> bool:

@@ -13,6 +13,7 @@ from defender.records import RUN_LAYOUT, RunPaths  # noqa: E402
 from defender.execution import bash_exec  # noqa: E402
 from defender import box as box_mod  # noqa: E402
 from defender.tests.support.runtime.state import _1255_view as V
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
 pytestmark = [pytest.mark.e2e, pytest.mark.live, requires_live_box]
 
@@ -35,7 +36,7 @@ def _real_box(tmp_path: Path, run_id: str):
         (golden / "investigation.md").read_text(encoding="utf-8"), encoding="utf-8")
     agent, token = layout.staged()
     box = box_mod.start_box(run_dir, layout.checkout, docker=box_mod.run_docker,
-                            tenant_agent=agent, tenant_id=layout.tenant.id, staged_token=token)
+                            tenant_agent=agent, tenant_id=layout.tenant.id, staged_token=token, data_root=current_data_root())
     return layout, run_dir, box
 
 

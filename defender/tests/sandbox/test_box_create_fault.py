@@ -25,7 +25,7 @@ from defender.tests.support.sandbox._spec1092 import (
     no_such_image_stderr,
     plant_tree,
     remedy_command,
-    subcommands,
+    box_subcommands,
 )
 from defender.tests.tenancy.tenant_1108_delivery._support import (
     LANES,
@@ -36,13 +36,14 @@ from defender.tests.tenancy.tenant_1108_delivery._support import (
 )
 from defender.tests.tenancy.tenant_1108_delivery._support import target as p3_target
 from defender.tests.support.tenancy._host1214 import TEST_TENANT
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
 
 def _request(root: Path, run_dir: Path) -> BoxRequest:
     return BoxRequest(
         name="defender-drain-1092", workdir=root, env={},
         mounts=(Mount(source=run_dir, target=run_dir, writable=True),),
-        tenant_id=TEST_TENANT,
+        tenant_id=TEST_TENANT, data_root=current_data_root(),
     )
 
 
@@ -70,10 +71,10 @@ def test_a_no_such_image_create_fault_names_the_build_command_with_the_mounted_t
 
     rec = NoSuchImageDocker()
     with pytest.raises(BoxFault) as e:
-        box_mod.start_box(run_dir, defender_dir, docker=rec, tenant_id=TEST_TENANT)
+        box_mod.start_box(run_dir, defender_dir, docker=rec, tenant_id=TEST_TENANT, data_root=current_data_root())
     message = str(e.value)
     assert inspected_image(rec.calls) == expected, rec.calls
-    assert not {"run", "create", "start"} & set(subcommands(rec.calls)), rec.calls   # refused before any create (#1343 B10: the run box is `create`d, then started)
+    assert not {"run", "create", "start"} & set(box_subcommands(rec.calls)), rec.calls   # refused before any create (#1343 B10: the run box is `create`d, then started)
     assert f"No such image: {expected}" in message
     assert remedy_command(message) == [
         "python3", f"{defender_dir.parent.resolve()}/{BUILD_COMMAND_TAIL.split(' ')[0]}", "build",
@@ -84,7 +85,7 @@ def test_a_no_such_image_create_fault_names_the_build_command_with_the_mounted_t
         box_mod.start_box(_request(root, run_dir), docker=rec)
     message = str(e.value)
     assert inspected_image(rec.calls) == expected, rec.calls
-    assert "run" not in subcommands(rec.calls), rec.calls
+    assert "run" not in box_subcommands(rec.calls), rec.calls
     assert f"No such image: {expected}" in message
     assert remedy_command(message) == [
         "python3", f"{root.resolve()}/{BUILD_COMMAND_TAIL.split(' ')[0]}", "build",
@@ -110,7 +111,7 @@ def test_a_create_fault_of_any_other_shape_never_names_the_build_command(tmp_pat
         cite = "N1 (27.x spelling, #1095)"
     rec = RecordingDocker(create=DockerFault(rc=125, stderr=stderr, cite=cite))
     start = (
-        (lambda d: box_mod.start_box(run_dir, defender_dir, docker=d, tenant_id=TEST_TENANT)) if lane == "run-dir"
+        (lambda d: box_mod.start_box(run_dir, defender_dir, docker=d, tenant_id=TEST_TENANT, data_root=current_data_root())) if lane == "run-dir"
         else (lambda d: box_mod.start_box(_request(root, run_dir), docker=d))
     )
     with pytest.raises(BoxFault) as e:
@@ -134,14 +135,14 @@ def test_a_daemon_that_stopped_answering_is_reported_as_that_and_never_told_to_b
     defender_dir = plant_tree(root, copy_code=False)
     run_dir = make_run_dir(tmp_path)
     start = (
-        (lambda d: box_mod.start_box(run_dir, defender_dir, docker=d, tenant_id=TEST_TENANT)) if lane == "run-dir"
+        (lambda d: box_mod.start_box(run_dir, defender_dir, docker=d, tenant_id=TEST_TENANT, data_root=current_data_root())) if lane == "run-dir"
         else (lambda d: box_mod.start_box(_request(root, run_dir), docker=d))
     )
     rec = NoSuchImageDocker(daemon_down=True)
     with pytest.raises(BoxFault) as e:
         start(rec)
     message = str(e.value)
-    assert not {"run", "create", "start"} & set(subcommands(rec.calls)), rec.calls   # refused before any create (#1343 B10: the run box is `create`d, then started)
+    assert not {"run", "create", "start"} & set(box_subcommands(rec.calls)), rec.calls   # refused before any create (#1343 B10: the run box is `create`d, then started)
     assert "daemon" in message, message
     assert "failed to connect" in message, message
     assert remedy_command(message) is None, message
@@ -162,8 +163,8 @@ def test_a_missing_image_raises_and_no_docker_build_is_ever_attempted(tmp_path, 
     run_dir = make_run_dir(tmp_path)
     rec = NoSuchImageDocker()
     with pytest.raises(BoxFault):
-        box_mod.start_box(run_dir, defender_dir, docker=rec, tenant_id=TEST_TENANT)
-    subs = subcommands(rec.calls)
+        box_mod.start_box(run_dir, defender_dir, docker=rec, tenant_id=TEST_TENANT, data_root=current_data_root())
+    subs = box_subcommands(rec.calls)
     assert "build" not in subs, subs
     assert "pull" not in subs, subs
     assert "run" not in subs, subs
@@ -171,8 +172,8 @@ def test_a_missing_image_raises_and_no_docker_build_is_ever_attempted(tmp_path, 
     assert "start" not in subs, subs
 
     held = RecordingDocker()
-    box_mod.start_box(run_dir, defender_dir, docker=held, tenant_id=TEST_TENANT)
-    subs = subcommands(held.calls)
+    box_mod.start_box(run_dir, defender_dir, docker=held, tenant_id=TEST_TENANT, data_root=current_data_root())
+    subs = box_subcommands(held.calls)
     assert "build" not in subs, subs
     assert "pull" not in subs, subs
     assert subs.count("create") == 1, subs   # #1343 B10 (r5 item 8a): `docker create`, then an attached start
@@ -271,7 +272,7 @@ def test_the_tenant_drains_missing_image_fault_names_the_build_command_and_no_cu
         rec = NoSuchImageDocker()
         message = fault(rec)
         assert inspected_image(rec.calls) == expected, rec.calls
-        assert "run" not in subcommands(rec.calls), rec.calls
+        assert "run" not in box_subcommands(rec.calls), rec.calls
         assert f"No such image: {expected}" in message
         assert remedy_command(message) == [
             "python3", f"{defender_dir.parent.resolve()}/{BUILD_COMMAND_TAIL.split(' ')[0]}", "build",

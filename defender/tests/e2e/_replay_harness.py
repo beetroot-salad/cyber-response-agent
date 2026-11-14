@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_runs_base
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
 import asyncio
 import contextlib
@@ -599,7 +600,7 @@ def production_unboxed_box(run_dir: Path, defender_dir: Path, run_tenant: Any) -
     with _unsandboxed_allowed():
         return box_mod.start_box(run_dir, defender_dir, docker=_no_docker_daemon,
                                  tenant_agent=agent, tenant_id=run_tenant.tenant_id,
-                                 staged_token=token)
+                                 staged_token=token, data_root=current_data_root())
 
 
 def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJECTION SEAM

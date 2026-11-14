@@ -299,7 +299,7 @@ def _request_without_a_code_mount(req: X.RequestLane) -> box_mod.BoxRequest:
         box_mod.Mount(source=req.lane, target=req.lane, writable=True),
     )
     return box_mod.BoxRequest(name=X.REQUEST_NAME, mounts=mounts, workdir=DEFENDER.parent, env={},
-                              require_sandbox=False, tenant_id=TEST_TENANT)
+                              require_sandbox=False, tenant_id=TEST_TENANT, data_root=current_data_root())
 
 
 def test_a8_a_request_with_no_code_mount_is_still_judged(tmp_path, monkeypatch):
@@ -592,7 +592,7 @@ def test_o3_the_oracle_box_refuses_a_mount_overlapping_the_publish_root(
     from defender.box import _oracle
 
     runner, scratch = oracle_tree
-    request = _oracle.oracle_box_request(scratch, runner, env={"DEFENDER_BOX_RUNTIME": "runc"}, tenant_id=TEST_TENANT)
+    request = _oracle.oracle_box_request(scratch, runner, env={"DEFENDER_BOX_RUNTIME": "runc"}, tenant_id=TEST_TENANT, data_root=tmp_path)
     X.dev_root(monkeypatch, tmp_path / "elsewhere" / "pub")
     clear = FakeDaemon(tmp_path / "clear")
     box_mod.start_box(request, docker=clear)
@@ -616,7 +616,7 @@ def test_o3_the_oracle_start_carries_the_refusal_as_the_cause_of_its_own(tmp_pat
     daemon = FakeDaemon(tmp_path)
     daemon.install(monkeypatch)
     with pytest.raises(_oracle.BoxStartRefused) as refused:
-        _oracle.start_oracle_box(env={"PATH": os.environ["PATH"], "DEFENDER_BOX_RUNTIME": "runc"}, tenant_id=TEST_TENANT)
+        _oracle.start_oracle_box(env={"PATH": os.environ["PATH"], "DEFENDER_BOX_RUNTIME": "runc"}, tenant_id=TEST_TENANT, data_root=tmp_path)
     assert any(isinstance(e, X.conflict_type()) for e in _chain(refused.value)), (
         f"the refusal's text did not survive as the cause: {_chain(refused.value)}")
     assert daemon.created() == []
@@ -633,7 +633,7 @@ def test_o3_the_estate_oracle_start_turns_the_refusal_into_its_own_failure_keepi
     daemon = FakeDaemon(tmp_path)
     daemon.install(monkeypatch)
     with pytest.raises(estate_oracle.OracleSandboxError) as refused:
-        estate_oracle.start_box(env={"PATH": os.environ["PATH"], "DEFENDER_BOX_RUNTIME": "runc"}, tenant_id=TEST_TENANT)
+        estate_oracle.start_box(env={"PATH": os.environ["PATH"], "DEFENDER_BOX_RUNTIME": "runc"}, tenant_id=TEST_TENANT, data_root=tmp_path)
     conflicts = [e for e in _chain(refused.value) if isinstance(e, X.conflict_type())]
     assert conflicts, f"the refusal did not survive the oracle's re-wrapping: {_chain(refused.value)}"
     assert str(conflicts[0]) in str(refused.value), (
@@ -646,7 +646,7 @@ def test_o6_the_oracle_request_name_refuses_a_finished_container(tmp_path, oracl
     from defender.box import _oracle
 
     runner, scratch = oracle_tree
-    request = _oracle.oracle_box_request(scratch, runner, env={"DEFENDER_BOX_RUNTIME": "runc"}, tenant_id=TEST_TENANT)
+    request = _oracle.oracle_box_request(scratch, runner, env={"DEFENDER_BOX_RUNTIME": "runc"}, tenant_id=TEST_TENANT, data_root=tmp_path)
     daemon = FakeDaemon(tmp_path)
     daemon.hold(request.name, "exited")
     with pytest.raises(X.conflict_type()) as refused:
@@ -666,7 +666,7 @@ def test_o6_the_oracle_entry_refuses_a_held_same_name_container_and_leaves_it(
     env = {"PATH": os.environ["PATH"], "DEFENDER_BOX_RUNTIME": "runc"}
     free = FakeDaemon(tmp_path / "free")
     free.install(monkeypatch)
-    started = _oracle.start_oracle_box(env=env, tenant_id=TEST_TENANT)
+    started = _oracle.start_oracle_box(env=env, tenant_id=TEST_TENANT, data_root=tmp_path)
     try:
         assert started.sandboxed, "control: the oracle did not start on a free name"
         assert len(free.created()) == 1
@@ -676,7 +676,7 @@ def test_o6_the_oracle_entry_refuses_a_held_same_name_container_and_leaves_it(
     X.dev_root(monkeypatch, tmp_path / "elsewhere" / "pub")
     log = X.hold_every_name(tmp_path / "holding", monkeypatch)
     with pytest.raises(_oracle.BoxStartRefused) as refused:
-        _oracle.start_oracle_box(env={"PATH": os.environ["PATH"], "DEFENDER_BOX_RUNTIME": "runc"}, tenant_id=TEST_TENANT)
+        _oracle.start_oracle_box(env={"PATH": os.environ["PATH"], "DEFENDER_BOX_RUNTIME": "runc"}, tenant_id=TEST_TENANT, data_root=tmp_path)
     conflicts = [e for e in _chain(refused.value) if isinstance(e, X.conflict_type())]
     assert conflicts, f"the refusal did not survive as the cause: {_chain(refused.value)}"
     calls = X.logged_calls(log)
@@ -693,7 +693,7 @@ def test_o6_every_oracle_box_name_is_fresh(tmp_path, oracle_tree):
 
     runner, scratch = oracle_tree
     env = {"DEFENDER_BOX_RUNTIME": "runc"}
-    names = [_oracle.oracle_box_request(scratch, runner, env=env, tenant_id=TEST_TENANT).name for _ in range(3)]
+    names = [_oracle.oracle_box_request(scratch, runner, env=env, tenant_id=TEST_TENANT, data_root=tmp_path).name for _ in range(3)]
     assert len(set(names)) == 3, f"an oracle name repeated: {names}"
 
 
@@ -701,14 +701,15 @@ def _sibling_serving(tenant: str):
     """A sibling's oracle side, as `run.py` settles it for its world."""
     from defender import run as run_mod
 
-    return run_mod._world_seams(object(), oracle=None, verifier=None, source=None, tenant_id=tenant)["serving"]
+    return run_mod._world_seams(object(), oracle=None, verifier=None, source=None, tenant_id=tenant,
+                                  data_root=current_data_root())["serving"]
 
 
 def _launcher_serving(tenant: str):
     from defender.learning.branch.estate.registry import oracle_serving
     from defender.learning.core.config import oracle_settings_with
 
-    return oracle_serving(oracle_settings_with(), tenant_id=tenant)
+    return oracle_serving(oracle_settings_with(), tenant_id=tenant, data_root=current_data_root())
 
 
 @pytest.mark.parametrize("serving", [_launcher_serving, _sibling_serving], ids=["registry", "sibling"])
@@ -816,9 +817,10 @@ def test_the_oracle_serving_requires_its_tenant():
     from defender.learning.branch.estate.registry import oracle_serving
     from defender.learning.core.config import oracle_settings_with
 
-    assert oracle_serving(oracle_settings_with(), tenant_id=TEST_TENANT).box is not None, "control: named, it is built"
+    assert oracle_serving(oracle_settings_with(), tenant_id=TEST_TENANT,
+                          data_root=current_data_root()).box is not None, "control: named, it is built"
     with pytest.raises(TypeError):
-        oracle_serving(oracle_settings_with())
+        oracle_serving(oracle_settings_with(), data_root=current_data_root())
 
 
 @pytest.mark.parametrize("entry", ["oracle_box_request", "start_oracle_box", "estate start_box",
@@ -838,16 +840,16 @@ def test_every_oracle_box_entry_labels_a_non_empty_tenant_id_without_judging_its
     daemon.install(monkeypatch)
     if entry == "oracle_box_request":  # builds the request only: the label is read off the box that request starts
         runner, scratch = oracle_tree
-        box_mod.start_box(_oracle.oracle_box_request(scratch, runner, env=env, tenant_id=bad), docker=daemon)
+        box_mod.start_box(_oracle.oracle_box_request(scratch, runner, env=env, tenant_id=bad, data_root=tmp_path), docker=daemon)
         [create] = [c for c in daemon.docker_calls() if c[:2] == ["docker", "create"]]  # #1344 amendment 2
         labels = [create[i + 1] for i, arg in enumerate(create) if arg == "--label"]
         assert f"defender.tenant={bad}" in labels, labels
         return
     starts = {
-        "start_oracle_box": lambda: _oracle.start_oracle_box(env=env, tenant_id=bad),
-        "estate start_box": lambda: estate_oracle.start_box(env=env, tenant_id=bad),
-        "start_process_oracle_box": lambda: _oracle.start_process_oracle_box(tenant_id=bad),
-        "start_process_box": lambda: estate_oracle.start_process_box(tenant_id=bad),
+        "start_oracle_box": lambda: _oracle.start_oracle_box(env=env, tenant_id=bad, data_root=tmp_path),
+        "estate start_box": lambda: estate_oracle.start_box(env=env, tenant_id=bad, data_root=tmp_path),
+        "start_process_oracle_box": lambda: _oracle.start_process_oracle_box(tenant_id=bad, data_root=tmp_path),
+        "start_process_box": lambda: estate_oracle.start_process_box(tenant_id=bad, data_root=tmp_path),
         "oracle_serving": lambda: _launcher_serving(bad).box(),
     }
     started = starts[entry]()

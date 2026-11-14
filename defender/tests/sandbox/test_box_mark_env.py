@@ -21,6 +21,7 @@ from defender.tests.support.sandbox._spec1092 import (
     shim_world,
 )
 from defender.tests.support.tenancy._host1214 import TEST_TENANT
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
 SHIMS = ("defender-sql", "defender-invlang", "defender-lessons")
 
@@ -30,7 +31,7 @@ def _request(root: Path, run_dir: Path, env: dict[str, str] | None = None) -> Bo
         name="defender-drain-1092", workdir=root, env=dict(env or {}),
         mounts=(Mount(source=run_dir, target=run_dir, writable=True),),
         spec=BoxSpec(rootfs=STOCK_ROOTFS),
-        tenant_id=TEST_TENANT,
+        tenant_id=TEST_TENANT, data_root=current_data_root(),
     )
 
 

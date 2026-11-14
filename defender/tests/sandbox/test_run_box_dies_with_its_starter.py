@@ -29,6 +29,7 @@ from defender.tests.support.sandbox._box1343 import input_open
 from defender.tests.support.sandbox._docker import dood_anchor, is_dood
 from defender.tests.support.sandbox._spec1092 import make_run_dir
 from defender.tests.support.tenancy._host1214 import TEST_TENANT
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
 WORKTREE = Path(__file__).resolve().parents[3]
 BoxFault = box_mod.BoxFault
@@ -43,7 +44,7 @@ def _start(rec: RecordingDocker, run_dir: Path, within: float = 20.0, **knobs: A
     def go() -> None:
         try:
             out["box"] = box_mod.start_box(run_dir, DEFENDER, docker=rec,
-                                           tenant_id=TEST_TENANT, require_sandbox=True, **knobs)
+                                           tenant_id=TEST_TENANT, require_sandbox=True, **knobs, data_root=current_data_root())
         except BaseException as e:  # noqa: BLE001 — handed back to the test thread
             out["raised"] = e
 

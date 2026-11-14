@@ -32,6 +32,7 @@ from defender.tests.support.sandbox._docker import daemon_reachable, docker_runt
 from defender.tests.tenancy.alert_front_door_1222._requests1222 import a_store_that_records_requests  # noqa: F401 — autouse fixture
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
 from defender.tests.e2e import _replay_harness as H
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
 # Markers and spellings
 
@@ -523,7 +524,7 @@ def test_a1_box_cannot_change_the_alert_or_its_record(tmp_path, monkeypatch):
         if "runc" not in docker_runtimes():
             pytest.skip("the 'runc' runtime is not registered with this daemon")
         start_box = functools.partial(S.sym("box", "start_box"),
-                                      spec=_runtime_spec("runc"))
+                                      spec=_runtime_spec("runc"), data_root=current_data_root())
         seen, alert = _box_write_run(tmp_path, start_box=start_box)
         _assert_box_held(seen, alert)
 
@@ -533,7 +534,7 @@ def test_a1_runsc_box_cannot_change_the_alert_or_its_record(tmp_path, monkeypatc
         assert "runsc" in docker_runtimes(), (
             "the 'runsc' runtime is not registered with this daemon (CI's `test` job registers it)")
         start_box = functools.partial(S.sym("box", "start_box"),
-                                      spec=_runtime_spec("runsc"))
+                                      spec=_runtime_spec("runsc"), data_root=current_data_root())
         seen, alert = _box_write_run(tmp_path, start_box=start_box)
         _assert_box_held(seen, alert)
 
@@ -662,7 +663,7 @@ def _noop_investigate(**_kw: Any) -> dict:
 
 
 def _start_with(daemon: Any) -> Callable[..., Any]:
-    return functools.partial(S.sym("box", "start_box"), docker=daemon)
+    return functools.partial(S.sym("box", "start_box"), docker=daemon, data_root=current_data_root())
 
 
 def _populated(run_dir: Path) -> None:
@@ -983,7 +984,7 @@ def test_p152_host_replaces_a_file_inside_the_directory_mid_ru(tmp_path, monkeyp
 
         _main_boxed(tmp_path, S.plant_tenant(), S.alert_bytes(S.generic_alert(message=MARK)),
                     start_box=functools.partial(S.sym("box", "start_box"),
-                                                spec=_runtime_spec("runc")),
+                                                spec=_runtime_spec("runc"), data_root=current_data_root()),
                     investigate=investigate)
     assert seen.get("box_sees") == replaced.decode("utf-8"), (
         "the box does not see the host's replacement of the alert")

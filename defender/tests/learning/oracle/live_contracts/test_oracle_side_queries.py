@@ -31,6 +31,7 @@ from defender.tests.learning.oracle.live_contracts.test_preflight_and_outcome im
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.support.runtime.state import _1255_clock as C
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
 
 #: A rate no scenario outside the rate demands comes near, so their timing is not the limiter's.
@@ -719,13 +720,14 @@ def test_1224_preflight_reader_cannot_be_built_without_a_gather_grant(tmp_path):
     with J.walked_view(ep) as view, pytest.raises(grant_error):
         preflight_replay(view.episode, source=T.open_source(src), roster=est.roster(),
                          tenant=grantless, oracle=S.oracle(then=S.submit(BASE)).model,
-                         verifier=S.passing_verifier().model)
+                         verifier=S.passing_verifier().model, data_root=current_data_root())
     assert est.calls() == [], "a reader with no gather grant sent a call"
 
     granted = S.oracle(then=S.submit(BASE))
     with J.walked_view(ep) as view:
         preflight_replay(view.episode, source=T.open_source(src), roster=est.roster(), tenant=rt,
-                         oracle=granted.model, verifier=S.passing_verifier().model)
+                         oracle=granted.model, verifier=S.passing_verifier().model,
+                         data_root=current_data_root())
     assert "user:alice" in granted.all_seen(), "positive control: the granted call was calibrated"
     assert len(_failed_reads(est)) == 1, (
         "positive control: with the grant the captured failure was actually read live")
@@ -1263,7 +1265,7 @@ def test_1390_preflight_never_calibrates_a_platform_served_call(tmp_path):
     with J.walked_view(ep) as view:
         S.sym(S.CLI, S.COINED["fn.preflight"])(
             view.episode, source=T.open_source(src), roster=est.roster(), tenant=est.run_tenant(),
-            oracle=oracle.model, verifier=S.passing_verifier().model)
+            oracle=oracle.model, verifier=S.passing_verifier().model, data_root=current_data_root())
 
     seen = oracle.all_seen()
     assert "user:alice" in seen, "positive control: the ordinary call was calibrated"

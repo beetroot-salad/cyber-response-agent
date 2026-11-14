@@ -26,6 +26,7 @@ from defender.box import (
 from defender.tests.support.sandbox._box1343 import AttachedStartSeam
 from defender.tests.support.shared.contracts import _daemon1195 as daemon_mod
 from defender.tests.support.tenancy._host1214 import TEST_TENANT
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
 DEFENDER = Path(__file__).resolve().parents[3]
 
@@ -130,7 +131,7 @@ def request(name: str = "defender-drain-t1195", *, writable: Path | None = None,
         mounts = (Mount(source=writable, target=writable, writable=True),)
         workdir = writable
     return BoxRequest(name=name, mounts=mounts, workdir=workdir, env={},
-                      spec=BoxSpec(runtime="runc", rootfs=rootfs), tenant_id=TEST_TENANT)
+                      spec=BoxSpec(runtime="runc", rootfs=rootfs), tenant_id=TEST_TENANT, data_root=current_data_root())
 
 
 def sandboxed(name: str, docker: Any = None) -> BoxExecutor:
