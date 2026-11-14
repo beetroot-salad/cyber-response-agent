@@ -1584,6 +1584,7 @@ class LabRig:
                       "ca/ca.crt": b"ca"})
         deploy_lab_services(docker, cluster=docker.live_cluster, env={"ELASTIC_PASSWORD": "live-elastic"})
         docker.existing(DEPLOY, "response-credential-proxy", "credential-proxy",
+                        env={"SSL_CERT_DIR": "/etc/ssl/certs:/etc/ssl/dev-issuer-ca"},
                         mounts=[("/proxy", "store", ("vol", DEPLOY, "proxy-config", 0), True)])
         docker.stores[("vol", DEPLOY, "proxy-config", 0)] = {"config.json": b"{}"}
 

@@ -113,6 +113,8 @@ PS_SHIM = PLAYGROUND / "hosts" / "base" / "ps-shim"
 QUERY_DIR = "/lab/endpoint-query"         # in the engine: the service's host lists
 #: Bumped when `_replica_image` builds differently: every replica image is then rebuilt.
 REPLICA_RECIPE = "replica-v3"
+#: The live proxy's settings the frozen proxy is given too: where to find the CAs it trusts.
+PROXY_TRUST_ENV = ("SSL_CERT_DIR", "SSL_CERT_FILE")
 BASE_LABEL = "soc-playground.frozen-base"   # on a replica image: the host image it was built from
 REPLICA_TREE_DIR = "/lab/tree"            # in a replica: its captured process tree
 READONLY_PASSWORD_ENV = "V2_DEFENDER_READONLY_PASSWORD"
@@ -578,6 +580,7 @@ class LabOps:
         script = (f"{python} -c {shlex.quote(rewrite)} && "
                   f"exec {python} -m defender.credential_proxy")
         audit_dir = str(Path(self.audit_path).parent)
+        trust = [a for setting in self._live_proxy_trust() for a in ("-e", setting)]
         argv = ["docker", *(["--context", self.proxy_context] if self.proxy_context else []),
                 "rm", "-f", FROZEN_PROXY]
         self._exec(argv, check=False)
@@ -588,10 +591,23 @@ class LabOps:
                 "-e", "DEFENDER_CREDENTIAL_PROXY_CONFIG=/tmp/frozen-proxy.json",
                 "-e", "DEFENDER_CREDENTIAL_PROXY_HOST=0.0.0.0",
                 "-e", f"DEFENDER_CREDENTIAL_PROXY_PORT={PROXY_PORT}",
-                "-e", f"V2_FROZEN_PROXY_AUDIT={self.audit_path}",
+                "-e", f"V2_FROZEN_PROXY_AUDIT={self.audit_path}", *trust,
                 self.proxy_image, "sh", "-c", script]
         self._exec(argv)
         return f"http://{FROZEN_PROXY}:{PROXY_PORT}"
+
+    def _live_proxy_trust(self) -> list[str]:
+        """The live proxy's TLS trust settings (`SSL_CERT_DIR=...`), for the frozen proxy to verify
+        OpenBao the same way. `--volumes-from` brings the dev issuer's CA file but not the setting
+        that names it; without it OpenBao's certificate fails to verify, which the proxy reports as
+        OpenBao unreachable (live, the first reference run)."""
+        proc = self._exec(["docker", *(["--context", self.proxy_context] if self.proxy_context else []),
+                           "inspect", "-f", "{{json .Config.Env}}", self.live_proxy_container], check=False)
+        try:
+            env = json.loads(proc.stdout or "null") or []
+        except ValueError:
+            env = []
+        return [e for e in env if isinstance(e, str) and e.split("=", 1)[0] in PROXY_TRUST_ENV]
 
     def _frontends(self) -> None:
         """The lab's edge program as the frozen copy's one frontend, every port of SURFACE, key

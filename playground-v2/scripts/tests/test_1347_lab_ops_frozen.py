@@ -137,7 +137,7 @@ def test_the_frozen_proxy_runs_the_products_proxy_program_unmodified_with_its_ow
 def test_the_frozen_proxys_setup_names_every_lab_variable_with_the_V2_prefix(tmp_path):
     """r6.4.4 (finding 6, playground-v2/CLAUDE.md): no variable the frozen proxy's container is given is an unprefixed
     lab name: each is the product's own (`DEFENDER_...`), a standard runtime variable (TZ, PATH, PYTHON*, LANG, LC_*)
-    or a lab variable named `V2_...`; the audit path rides as `V2_FROZEN_PROXY_AUDIT`
+    or a lab variable named `V2_...` (TLS trust: `SSL_CERT_DIR`/`FILE`); the audit path rides as `V2_FROZEN_PROXY_AUDIT`
     and the setup script reads that name, never the unprefixed `FROZEN_PROXY_AUDIT`."""
     lab = _ops(tmp_path)
     lab.ops.start_proxy()
@@ -147,12 +147,52 @@ def test_the_frozen_proxys_setup_names_every_lab_variable_with_the_V2_prefix(tmp
     given = [argv[i + 1] for i, a in enumerate(argv[:-1]) if a in ("-e", "--env")]
     given += [a.split("=", 1)[1] for a in argv if a.startswith("--env=")]
     names = [g.split("=", 1)[0] for g in given]
-    runtime = re.compile(r"(TZ|PATH|PYTHON\w*|LANG|LC_\w+)$")
+    runtime = re.compile(r"(TZ|PATH|PYTHON\w*|LANG|LC_\w+|SSL_CERT_(DIR|FILE))$")
     assert names and all(n.startswith(("V2_", "DEFENDER_")) or runtime.match(n) for n in names), names
     assert f"V2_FROZEN_PROXY_AUDIT={AUDIT}" in given, given
     script = " ".join(argv[argv.index("-c") + 1:]) if "-c" in argv else ""
     assert "V2_FROZEN_PROXY_AUDIT" in script, script
     assert not re.search(r"(?<!V2_)FROZEN_PROXY_AUDIT", script), script
+
+
+class LiveProxyRecorder(Recorder):
+    """The live proxy container answers `inspect` with its environment."""
+
+    def __init__(self, env):
+        super().__init__()
+        self.env = env
+
+    def __call__(self, argv, **kw):
+        if "inspect" in argv and "{{json .Config.Env}}" in argv:
+            self.calls.append((list(argv), kw))
+            return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(self.env), stderr="")
+        return super().__call__(argv, **kw)
+
+
+def _proxy_env(rec):
+    runs = [argv for argv, _ in rec.calls if "run" in argv and "defender.credential_proxy" in " ".join(argv)]
+    assert len(runs) == 1, rec.calls
+    return [runs[0][i + 1] for i, a in enumerate(runs[0][:-1]) if a == "-e"]
+
+
+def test_the_frozen_proxy_trusts_the_cas_the_live_proxy_trusts(tmp_path):
+    """Live, 2026-11-14: the frozen proxy got the live proxy's CA file (`--volumes-from`) but not the
+    `SSL_CERT_DIR` naming it, so OpenBao's certificate failed to verify and every run stopped with
+    OpenBao "unreachable". The live proxy's trust settings ride along; nothing else of its env does."""
+    rec = LiveProxyRecorder(["SSL_CERT_DIR=/etc/ssl/certs:/etc/ssl/dev-issuer-ca", "GPG_KEY=abc",
+                             "DEFENDER_CREDENTIAL_PROXY_PORT=8443", "PATH=/usr/bin"])
+    lab = _ops(tmp_path, run=rec)
+    lab.ops.start_proxy()
+    given = _proxy_env(rec)
+    assert "SSL_CERT_DIR=/etc/ssl/certs:/etc/ssl/dev-issuer-ca" in given, given
+    assert not any(g.startswith(("GPG_KEY=", "PATH=", "DEFENDER_CREDENTIAL_PROXY_PORT=8443")) for g in given), given
+
+
+def test_a_live_proxy_without_trust_settings_gives_the_frozen_proxy_none(tmp_path):
+    rec = LiveProxyRecorder(["PATH=/usr/bin"])
+    lab = _ops(tmp_path, run=rec)
+    lab.ops.start_proxy()
+    assert not any(g.startswith("SSL_CERT_") for g in _proxy_env(rec))
 
 
 def test_the_frozen_proxy_resolves_every_declared_host_name_to_the_frozen_endpoint(tmp_path):
