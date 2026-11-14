@@ -444,3 +444,54 @@ def test_1470_b6_a_slot_asked_for_any_version_number_outside_the_current_generat
     wrong = [(v, type(seen[v]).__name__, getattr(seen[v], "current_version", None)) for v in asked if v not in (2, 3)
              and not (K.kind_of(seen[v]) == "Stale" and seen[v].current_version == 3)]
     assert wrong == [], wrong[:10]
+
+
+# --- G2: a tenant's records are known exactly while it is active, whatever records it holds --------------------------
+
+def _not_active_states() -> list[str]:
+    """Every tenant state but `active`, read from the state type."""
+    import typing
+
+    from defender.tenancy.models import TenantState
+
+    return sorted(set(typing.get_args(TenantState)) - {"active"})
+
+
+#: (state, records): each state that is not active, with no records or with records written while active and kept when
+#: it moved; and a tenant with no row (its records cannot outlive the row: the version table's key refers to it).
+_O8_CELLS = [(state, held) for state in _not_active_states() for held in (False, True)] + [(None, False)]
+
+
+def test_1470_o8_versions_cannot_outlive_their_tenants_row_so_a_missing_row_holds_no_records(migrated_database):  # noqa: F811
+    """Premise of the missing-row cell: a tenant row whose versions remain cannot be deleted (the reference refuses).
+    (O8)"""
+    import psycopg
+
+    dsn, tenant = migrated_database, _tenant(migrated_database)
+    K.run(dsn, put(tenant, replaces=0))
+    with pytest.raises(psycopg.errors.ForeignKeyViolation):
+        execute(dsn, "DELETE FROM tenancy.tenants WHERE id = %s", (tenant,))
+
+
+@pytest.mark.parametrize(("state", "held"), _O8_CELLS, ids=[f"{s or 'no-row'}-{'records' if h else 'none'}" for s, h in _O8_CELLS])
+def test_1470_o8_a_tenant_not_active_is_refused_by_the_write_lock_and_the_slot_whatever_records_it_holds(
+        migrated_database, state, held):  # noqa: F811
+    """A tenant in each state but `active` (with no records, or with records written while active and kept when it
+    moved) or with no row: `put_system` (the write lock) and `credential_slot` are refused as `TenantNotActive` (no row:
+    `NoSuchTenant`) and nothing is stored; the same tenant while active took the write and answered the slot (control).
+    (O8: one rule, known iff active)"""
+    from defender.tests.support.jobs._jobs1342 import move_tenant
+
+    dsn = migrated_database
+    tenant = _tenant(dsn) if state is not None else str(uuid.uuid4())
+    if held:
+        K.run(dsn, put(tenant, replaces=0))
+        assert K.slot_parts(K.run(dsn, slot(tenant, 1)))[0] == 1, "control: while active the slot answers"
+    if state is not None:
+        move_tenant(dsn, tenant, state=state)
+    before = stored(dsn, tenant)
+
+    for work in (put(tenant, replaces=1 if held else 0, settings=INDEXED), slot(tenant, 1)):
+        refusal = K.refused(dsn, work)
+        assert K.kind_of(refusal) == ("TenantNotActive" if state else "NoSuchTenant"), (state, held, refusal)
+    assert stored(dsn, tenant) == before, "a refused write stores nothing"

@@ -1001,6 +1001,47 @@ async def test_1470_o8_a_tenant_that_is_not_active_and_a_tenant_with_no_row_are_
         assert not isinstance(refused.value, RecordsUnreachable), tenant
 
 
+async def _move(store: Store, tenant: str, row: tuple) -> None:
+    """`tenant`'s row moved in place to `row` (state, pending action, step, actor, failure), its records kept: as a
+    lifecycle step leaves them until its last step."""
+    state, action, step, actor, failure = row
+    if store.dsn is None:
+        with store.twin._mutex:
+            held = store.twin._tenants[tenant]
+            held.state, held.pending_action, held.step, held.step_actor, held.failure = row
+        return
+    execute(store.dsn, "UPDATE tenancy.tenants SET state = %s, pending_action = %s, step = %s, step_actor = %s, "
+                       "failure = %s WHERE id = %s", (state, action, step, actor, failure, tenant))
+
+
+def _rows_not_active() -> list[str]:
+    """Every seeded row whose state is not `active`; together they hold every state of the state type but `active`."""
+    import typing
+
+    from defender.tenancy.models import TenantState
+
+    names = [n for n, row in ALL_ROWS.items() if row[0] != "active"]
+    assert {ALL_ROWS[n][0] for n in names} == set(typing.get_args(TenantState)) - {"active"}, "premise: every state"
+    return names
+
+
+@pytest.mark.parametrize("name", _rows_not_active())
+async def test_1470_o8_a_tenant_moved_out_of_active_is_refused_though_its_records_remain(store, name):
+    """T1's records are written while it is active and read (control); its row then moves to each row that is not
+    active, the records kept: `current_records` raises `TenantRefused` (not `RecordsUnreachable`), on both repositories.
+    (#1470 O8: known exactly while active, whatever records the tenant holds)"""
+    from defender.records.formats import TenantRefused
+    from defender.tenancy import RecordsUnreachable
+
+    await store.seed(T1)
+    await _seed_records(store, T1, _records_value(cmdb=(1, True, 1)))
+    assert set((await store.repo.current_records(T1)).systems) == {"cmdb"}, "control: while active the records read"
+    await _move(store, T1, ALL_ROWS[name])
+    with pytest.raises(TenantRefused) as refused:
+        await store.repo.current_records(T1)
+    assert not isinstance(refused.value, RecordsUnreachable), name
+
+
 async def test_1366_r10_the_read_is_the_asked_tenants_own_records_disabled_ones_included_and_the_case(store):
     """T1 holds an enabled and a disabled system and a case record, T2 one other system: each reads exactly its own,
     the disabled one with `enabled` false at its version and generation. (#1366 R10, O1, R7)"""
