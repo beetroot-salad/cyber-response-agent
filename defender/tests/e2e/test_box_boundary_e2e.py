@@ -9,6 +9,7 @@ import os
 import shutil
 import socket
 import subprocess
+import tempfile
 import threading
 import uuid
 from pathlib import Path
@@ -102,8 +103,8 @@ def sibling_run(run_dir: Path) -> Path:
 
 @contextlib.contextmanager
 def _box(run_dir: Path, *, spec: BoxSpec | None = None):
-    box = start_box(run_dir, DEFENDER, tenant_id=TEST_TENANT) if spec is None else start_box(
-        run_dir, DEFENDER, spec=spec, tenant_id=TEST_TENANT)
+    box = start_box(run_dir, DEFENDER, tenant_id=TEST_TENANT, data_root=run_dir.parent) if spec is None else start_box(
+        run_dir, DEFENDER, spec=spec, tenant_id=TEST_TENANT, data_root=run_dir.parent)
     try:
         yield box
     finally:
@@ -556,6 +557,105 @@ def test_no_unix_socket_is_mounted_into_the_box(box, run_dir):
     res = _probe(box, run_dir, "socksweep", _SOCKET_SWEEP)
 
     assert res["sockets"] == [], f"a unix socket is reachable inside the box: {res}"
+
+
+_UNIX_CONNECT = '''
+import json, socket, sys
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.settimeout(5)
+try:
+    s.connect(sys.argv[1])
+    echo = s.recv(16).decode()
+    print(json.dumps({"connected": True, "echo": echo, "exc": None, "errno": None}))
+except OSError as e:
+    print(json.dumps({"connected": False, "echo": None, "exc": type(e).__name__, "errno": e.errno}))
+'''
+
+#: Where the S1 test binds the host socket's folder inside the box.
+_SOCKET_TARGET = "/run/s1469"
+
+
+class _BindingASocket:
+    """The real docker, with the box's create argv as rendered plus one bind of `folder` (a host unix socket's) and, for
+    the positive control, `runtime` in place of the box's (#1469 S1). Every other call and the attached start pass
+    through unchanged."""
+
+    def __init__(self, folder: Path, runtime: str | None = None) -> None:
+        self.folder, self.runtime = folder, runtime
+        self.creates: list[list[str]] = []
+
+    def __call__(self, argv, **kw):  # noqa: ANN001 — DockerFn
+        if argv[1:2] == ["create"]:
+            argv = list(argv)
+            at = argv.index("--runtime")
+            if self.runtime is not None:
+                argv[at + 1] = self.runtime
+            argv[at + 2:at + 2] = ["--mount", f"type=bind,source={self.folder},target={_SOCKET_TARGET}"]
+            self.creates.append(argv)
+        return box_mod.run_docker(argv, **kw)
+
+    @staticmethod
+    def popen(argv, **kw):  # noqa: ANN001, ANN205 — the seam's own
+        return box_mod.run_docker.popen(argv, **kw)
+
+
+@contextlib.contextmanager
+def _host_unix_socket(runs_base: Path):
+    """A host unix socket that greets each connection, in a folder any uid may traverse (so a refusal is the runtime's,
+    not a permission's)."""
+    folder = Path(tempfile.mkdtemp(prefix="s1469-", dir=runs_base.parent if _DOOD_ANCHOR else "/tmp"))
+    folder.chmod(0o755)
+    srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    srv.bind(str(folder / "s.sock"))
+    (folder / "s.sock").chmod(0o777)
+    srv.listen(4)
+    srv.settimeout(0.2)
+    stop = threading.Event()
+
+    def serve():
+        while not stop.is_set():
+            try:
+                conn, _ = srv.accept()
+            except OSError:
+                continue
+            with conn:
+                conn.sendall(b"hello")
+
+    t = threading.Thread(target=serve, daemon=True)
+    t.start()
+    try:
+        yield folder
+    finally:
+        stop.set()
+        t.join(timeout=5)
+        srv.close()
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+@requires_box
+@pytest.mark.skipif(_DOOD, reason="the injected bind's source is not translated for the daemon; box-native runs it")
+def test_s1_a_box_under_runsc_cannot_connect_to_a_host_socket_bound_into_it_and_runsc_job_can(run_dir, runs_base):
+    """A box started with its full create argv plus one bind of a host unix socket fails to connect to it under the box
+    runtime `runsc`; the same socket from the same argv under `runsc-job` answers (control). Only that the connect did not
+    succeed is asserted, not which error gVisor gives it. (#1469 S1)"""
+    if "runsc" not in docker_runtimes():
+        pytest.skip("gVisor is not registered with this daemon")
+    assert "runsc-job" in docker_runtimes(), "gVisor is registered without the job runtime `runsc-job` (#1469 setup)"
+    seen = {}
+    with _host_unix_socket(runs_base) as folder:
+        for runtime in (None, "runsc-job"):
+            seam = _BindingASocket(folder, runtime)
+            box = start_box(run_dir, DEFENDER, spec=BoxSpec(runtime="runsc"), docker=seam, tenant_id=TEST_TENANT,
+                            data_root=run_dir.parent)
+            try:
+                seen[runtime] = _probe(box, run_dir, f"unix-{runtime or 'runsc'}", _UNIX_CONNECT,
+                                       f"{_SOCKET_TARGET}/s.sock")
+            finally:
+                stop_box(box)
+            assert seam.creates, "premise: the create went through the socket-binding seam"
+
+    assert seen["runsc-job"]["echo"] == "hello", f"control: runsc-job could not reach the socket: {seen}"
+    assert seen[None]["connected"] is False, f"a box under runsc reached a host socket: {seen}"
 
 
 @requires_box

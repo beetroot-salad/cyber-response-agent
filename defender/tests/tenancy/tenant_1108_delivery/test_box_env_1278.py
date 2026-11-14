@@ -55,7 +55,7 @@ def test_the_oracle_box_environment_is_the_allowlist_whatever_the_host_holds(tmp
     runner.mkdir()
     scratch.mkdir()
     request = _oracle.oracle_box_request(scratch, runner, env={"DEFENDER_DATABASE_DSN": PLANTED, "PATH": "/usr/bin"},
-                                         tenant_id="t")
+                                         tenant_id="t", data_root=tmp_path)
     assert set(request.env) == LAUNCHERS["box/_oracle.py"]
     assert not {e for e in _rendered(request) if "DATABASE" in e or "PLANTED" in e}
     assert "PLANTED-PASSWORD" not in repr(request)

@@ -137,6 +137,7 @@ from ._docker import (
     require_runtime,
     resolve_rootfs,
 )
+from ._check import BoxCheckFailed, require_box_check
 from ._host_env import provider_scrubbed_environ, run_env
 from ._relay import RELAY_LOST, relay_exec, relay_halt, relay_stop, relay_window
 from ._clock import clock_dir
@@ -259,6 +260,7 @@ __all__ = [
     "_probe_sentinel",
     "_reap_on_fault",
     "_refuse_an_existing_container",
+    "BoxCheckFailed",
     "BoxStartConflict",
     "BoxStartFault",
     "_render_argv",
@@ -295,6 +297,7 @@ __all__ = [
     "relay_start",
     "relay_stop",
     "relay_window",
+    "require_box_check",
     "require_image",
     "require_runtime",
     "resolve_rootfs",

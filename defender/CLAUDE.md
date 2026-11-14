@@ -111,6 +111,28 @@ Programs (#1307) now have their own table, `identity.programs`; users and member
 remove any left in a development database first. Stop the API and the
 lifecycle service before migrating; an older process fails on every program read once the columns are gone.
 
+## Upgrade from before #1469
+
+A box can no longer reach a host unix socket, and the code proves it. #1170 gave every gVisor container host-socket
+access through one daemon-wide `--host-uds=open`, boxes included; the box runtime and the job runtime are now two
+registrations of the same gVisor binary, and the helper's caller check (`SO_PEERCRED`, the container's process list and
+the `peer` refusal) is gone: the job socket is 0600 in a 0700 folder, and the filesystem alone decides who may use it.
+On every execution host, once:
+
+1. Re-register `runsc`, the box runtime, without host-socket access: `runsc install -- --oci-seccomp`.
+2. Register the job runtime next to it: `runsc install --runtime runsc-job -- --oci-seccomp --host-uds=open`.
+3. Restart Docker. `DEFENDER_BOX_RUNTIME` stays the only setting: `runsc` boxes get `runsc-job` job containers, `runc`
+   boxes get `runc` job containers (no sandbox, as before). `runsc-job` cannot be named as a box runtime.
+4. Before a process's first box under `runsc`, the code runs a box that tries to connect to a host socket in its own bind
+   and refuses the start (naming this section) unless the runtime refuses it. A host not migrated refuses boxes and the
+   operator's `run.py <alert>` at that check, and a job container is refused for the missing `runsc-job` (`box:
+   start_failed`, with the remedy). A pass is kept in memory per docker daemon and registration, so a registration
+   changed under a running worker is checked again at its next box; a runtime binary upgraded without a re-registration,
+   or a shim edited without the registration changing, is seen at the next process start.
+5. A job whose container cannot reach its socket (`runsc-job` registered without `--host-uds=open`) fails its row through
+   its own refusal; the helper logs "the job never reached its socket" with this cause. The check's folder is
+   `<data root>/.box-checks/`; a crash can leave an inert socket there, and nothing sweeps it.
+
 ## Upgrade from before #1170
 
 The worker no longer runs a job as its own child process. For each claim it starts a per-job host helper
@@ -121,14 +143,13 @@ upgrading a worker:
    from the repository root, or set `DEFENDER_JOB_IMAGE` to an image you built from it. The helper never pulls. Without
    the image every job fails its row (an investigation `worker_error`, a learning job `failed: entry_error`), and no
    job runs outside a container.
-2. Register gVisor with `--host-uds=open` on every execution host: `runsc install -- --oci-seccomp --host-uds=open`, then
-   restart Docker. The job's socket is a host unix socket mounted into the job's gVisor guest, and gVisor refuses the
-   guest's connection to it without this. The flag is daemon-wide, so every box gets the capability; a follow-up issue
-   weighs a job-only runtime. Run the worker natively on the execution host, with `ps` installed: the helper must share
-   the docker daemon's mount paths and pid namespace, and `docker top` needs `ps`
+2. Register gVisor with `--host-uds=open` on every execution host, as the job runtime `runsc-job` (see "Upgrade from
+   before #1469": the box runtime `runsc` is registered without it). The job's socket is a host unix socket mounted
+   into the job's gVisor guest, and gVisor refuses the guest's connection to it without this. Run the worker natively
+   on the execution host: the helper must share the docker daemon's mount paths
    (`docs/decisions/vps-compose-deployment.md`, brain confinement). A worker in a container beside the daemon fails
    every job.
-3. Job containers start under the box runtime (`DEFENDER_BOX_RUNTIME`). Set `DEFENDER_JOB_NETWORK` to the Docker network
+3. Job containers start under the job runtime derived from the box runtime (`DEFENDER_BOX_RUNTIME`; #1469). Set `DEFENDER_JOB_NETWORK` to the Docker network
    from which the job reaches the credential proxy and the model provider. Leave OpenBao and the database off that network.
    It is required on every deployment, and must be a bridge network created for the jobs (`docker network create
    <name>`), not one docker compose made: unset, docker's default network, `host`, `container:<name>` or a compose

@@ -24,6 +24,7 @@ from defender.tests.e2e._box665 import (
     RecordingDocker, ScriptedTransport, framed, reaped_after_create, requires_live_box,
 )
 from defender.tests.support.tenancy._host1214 import TEST_TENANT
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
 pytestmark = pytest.mark.e2e
 
@@ -593,7 +594,7 @@ def test_a_clock_mount_must_round_trip_before_the_box_is_returned(tmp_path, monk
     plant_alert(run_dir)
     healthy = RecordingDocker()
     box = box_mod.start_box(run_dir, C.DEFENDER, docker=healthy,
-                            spec=box_mod.BoxSpec(rootfs=STOCK_ROOTFS), tenant_id=TEST_TENANT)
+                            spec=box_mod.BoxSpec(rootfs=STOCK_ROOTFS), tenant_id=TEST_TENANT, data_root=current_data_root())
     assert box is not None, "positive control: the run fixture cannot start a healthy box"
     box_mod.stop_box(box, docker=healthy)
     docker = RecordingDocker(existing_token="self")
@@ -616,7 +617,7 @@ def test_a_clock_mount_must_round_trip_before_the_box_is_returned(tmp_path, monk
     faulty_clock_mount.popen = docker.popen   # the run box's attached start (#1343 r5 item 15)
     with pytest.raises(box_mod.BoxFault):
         box_mod.start_box(run_dir, C.DEFENDER, docker=faulty_clock_mount,
-                          spec=box_mod.BoxSpec(rootfs=STOCK_ROOTFS), tenant_id=TEST_TENANT)
+                          spec=box_mod.BoxSpec(rootfs=STOCK_ROOTFS), tenant_id=TEST_TENANT, data_root=current_data_root())
     assert clock_reads, "startup never verified the clock bind independently of the run bind"
     assert reaped_after_create(docker.calls), "a box with an unverified clock survived startup"
     clock_mount, = [m for m in docker.mounts() if m["target"] == "/clock"]

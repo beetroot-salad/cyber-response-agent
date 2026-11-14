@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -13,7 +14,9 @@ from defender import box as box_mod
 from defender.tests.support.storage._alert_plant import plant_alert
 from defender.tests.support.sandbox._docker import daemon_reachable, is_dood
 from defender.tests.e2e._local_box_command import run_box_python_command
+from defender.tests.support.sandbox import _box_check1469 as _check
 from defender.tests.support.sandbox._box1343 import AttachedStartSeam
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
 DEFENDER = Path(__file__).resolve().parents[2]
 REPO_ROOT = DEFENDER.parent
@@ -84,14 +87,25 @@ class RecordingDocker(AttachedStartSeam):
     captured bind mounts; the fake neither parses marker bytes nor supplies an identity.
     Alias probes retain their scripted verdicts. No live container is created."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 — one keyword per modelled daemon behaviour
         self, *, create: DockerFault | None = None,
         sentinel: DockerFault | None = None, reap: DockerFault | None = None,
         exec_replies: list | None = None, existing_token: str | None = None,
         status: str | None = None, label_unreadable: bool = False,
-        runtimes: tuple[str, ...] | None = None,
+        runtimes: tuple[str, ...] | Mapping[str, Mapping[str, Any]] | None = None,
+        daemon_id: str | None = None, info_fails: bool = False, check: _check.CheckPlan | None = None,
     ):
-        # The runtimes `docker info` lists (#1484); None answers nothing usable, a daemon that cannot say.
+        # #1469 D1/D2: the daemon's `ID` (None: `docker info` does not carry one), `docker info` failing outright, and
+        # what the box check's containers do. A check run (`docker run --rm` binding `/run/box-check`) is NEVER the
+        # box's create: it is answered by `_box_check1469` through the real host listener (default: a healthy sandbox)
+        # and recorded in `checks`, so `create_argv` and every `run`-keyed test keep reading the box's own create.
+        self.daemon_id = daemon_id
+        self.info_fails = info_fails
+        self.checks = _check.CheckLedger(check or _check.CheckPlan())
+        # The runtimes `docker info` lists (#1484); None answers nothing usable, a daemon that cannot say. Names alone
+        # are listed path-only (no registered args); a mapping is each runtime's whole `docker info` entry as given
+        # (#1469: `runtimeArgs`, a shim's `runtimeType`/`options`). Read at each `info`, so a test may swap it between
+        # creates (a host re-registered under a running process).
         self.runtimes = runtimes
         # What `docker inspect -f {{.State.Status}}` answers: docker's own word, or None for a
         # free name (rc 1, as a real daemon answers). A word, not a bool, so it can say `created`.
@@ -119,6 +133,13 @@ class RecordingDocker(AttachedStartSeam):
         self.lands = True                   # False: the start never lands, the box never reports running
         self.running_seen_at: int | None = None              # len(calls) when status first answered running
         self._attached_state()
+
+    def forget_box(self) -> None:
+        """The daemon no longer has the box a start made (it ended and was removed), so the next start's name is free again.
+        A fake that answers `created` for every name once a create happened cannot take a SECOND box start on one daemon
+        (it would meet its own name); a test that starts boxes in turn on one fake calls this between them. The captured
+        create argv stays readable until the next create replaces it."""
+        self.phase = None
 
     def _record(self, argv: list[str]) -> None:
         self.calls.append(argv)
@@ -174,7 +195,7 @@ class RecordingDocker(AttachedStartSeam):
         ]
         assert covering, f"no captured bind mount covers the marker read at {marker}"
         mount = max(covering, key=lambda item: len(Path(item["target"]).parts))
-        source = Path(mount["source"]) / marker.relative_to(Path(mount["target"]))
+        source = self._host_path(mount["source"]) / marker.relative_to(Path(mount["target"]))
         command = [*argv[-4:-1], str(source)]
         return run_box_python_command(command)
 
@@ -189,7 +210,13 @@ class RecordingDocker(AttachedStartSeam):
         if not covering:
             return inside
         mount = max(covering, key=lambda item: len(Path(item["target"]).parts))
-        return Path(mount["source"]) / inside.relative_to(Path(mount["target"]))
+        return self._host_path(mount["source"]) / inside.relative_to(Path(mount["target"]))
+
+    def _host_path(self, source: str) -> Path:
+        """A bind's source as the DAEMON was told it, back to the folder this process sees: through the daemon view a
+        test gave the check plan (`CheckPlan.daemon_view`, the mount table a docker-outside-of-Docker start translated
+        its binds through). With no view, the source is already this process's path."""
+        return _check.local_path(source, self.checks.plan.daemon_view)
 
     def _exec(self, argv: list[str]) -> subprocess.CompletedProcess:
         if argv[-4:-2] == ["python3", "-c"] and argv[-1].endswith("/.tenant-id"):
@@ -210,7 +237,7 @@ class RecordingDocker(AttachedStartSeam):
         except OSError:
             return _cp(1, "", "cat: no such file or directory\n")
 
-    def __call__(self, argv, **_kw) -> subprocess.CompletedProcess:
+    def __call__(self, argv, **_kw) -> subprocess.CompletedProcess:  # noqa: C901 — one branch per docker verb
         argv = list(argv)
         self.calls.append(argv)
         sub = argv[1] if len(argv) > 1 else ""
@@ -221,6 +248,8 @@ class RecordingDocker(AttachedStartSeam):
             if f is None:
                 self.phase = None
             return _cp(f.rc, f.stdout, f.stderr) if f else _cp(0)
+        if sub == "run" and _check.is_check_run(argv):
+            return _check.answer(argv, self.checks.plan, _kw, self.checks.runs)
         if sub in ("run", "create"):
             self.create_argv = argv
             f = self.create
@@ -229,8 +258,16 @@ class RecordingDocker(AttachedStartSeam):
             return _cp(f.rc, f.stdout, f.stderr) if f else _cp(0, "container-id\n")
         if sub == "exec":
             return self._exec(argv)
-        if sub == "info" and self.runtimes is not None:
-            return _cp(0, json.dumps({name: {"path": name} for name in self.runtimes}) + "\n")
+        if sub == "info" and self.info_fails:
+            return _cp(1, "", "Cannot connect to the Docker daemon\n")
+        if sub == "info" and (self.runtimes is not None or self.daemon_id is not None):
+            listed = (dict(self.runtimes) if isinstance(self.runtimes, Mapping)
+                      else {name: {"path": name} for name in (self.runtimes or ())})
+            fmt = argv[argv.index("--format") + 1] if "--format" in argv else "{{json .Runtimes}}"
+            if "{{json .Runtimes}}" not in fmt and "{{.ID}}" not in fmt:
+                fmt = "{{json .Runtimes}}"
+            out = fmt.replace("{{json .Runtimes}}", json.dumps(listed) if self.runtimes is not None else "")
+            return _cp(0, out.replace("{{.ID}}", self.daemon_id or "") + "\n")
         return _cp(0)
 
     # argv readers (parse the captured create argv)
@@ -291,9 +328,11 @@ class RecordingDocker(AttachedStartSeam):
 
 
 def reaped_after_create(calls) -> bool:
-    """Whether the container the create asked for was reaped after the create."""
+    """Whether the container the create asked for was reaped after the create. A box check's container (#1469) is no
+    create: it is a `docker run --rm` of its own, removed by the daemon."""
     create = next(
-        (i for i, c in enumerate(calls) if len(c) > 1 and c[1] in ("run", "create")), None
+        (i for i, c in enumerate(calls)
+         if len(c) > 1 and c[1] in ("run", "create") and not _check.is_check_run(c)), None
     )
     assert create is not None, "no `docker create` was issued — the fault fired before create"
     argv = calls[create]
@@ -325,7 +364,9 @@ def run_cycle_mounts(run_dir: Path) -> tuple:
 def BoxRequest(*, name: str, mounts, workdir: Path, env, tenant_id, spec=None, defender_dir=None):
     """`box.BoxRequest`, the caller-owned geography box.py renders. `tenant_id` is required: every box carries its tenant
     (r10 B1/C8), so a call names it. `spec` and `defender_dir` (the explicit code root) are passed only when given."""
-    kw: dict[str, Any] = dict(name=name, mounts=tuple(mounts), workdir=workdir, env=dict(env), tenant_id=tenant_id)
+    # #1469: the data root the request's box check runs under, as every production caller of a request hands it.
+    kw: dict[str, Any] = dict(name=name, mounts=tuple(mounts), workdir=workdir, env=dict(env), tenant_id=tenant_id,
+                              data_root=current_data_root())
     if spec is not None:
         kw["spec"] = spec
     if defender_dir is not None:

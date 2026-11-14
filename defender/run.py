@@ -519,6 +519,8 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     #: The box's start token, when the caller minted it (#1342 r5 C1: a job's launch record
     #: carries its worker's); `None`, the box mints its own.
     start_token: str | None = None,
+    #: The data root the entry point resolved (#1469): where the box check runs; required (amendment 2026-11-14).
+    data_root: Path,
     #: A job's facts holder (#1342 r5 C2), handed to the investigation; its `box` set here once
     #: the box started (r7 D-ad) and its `scrub_verified` once the teardown and scrub returned.
     #: `None` off the job lane.
@@ -551,7 +553,8 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     try:
         box = start_box(run_dir, defender_dir, tenant_agent=tenant.agent,
                         tenant_id=tenant.tenant_id, write_verdict=write_verdict,
-                        **({"require_sandbox": True} if job_lane else {}), **staged)
+                        **({"require_sandbox": True} if job_lane else {}),
+                        data_root=data_root, **staged)
     except box_mod.BoxFault as fault:
         raise box_mod.BoxStartFault(f"the run's box did not start: {fault}") from fault
     if job_facts is not None:
@@ -967,7 +970,8 @@ def _case_input(ns: argparse.Namespace, world: Any, episode_runs: Any) -> Path:
     return ns.alert.resolve()
 
 
-def _world_seams(world: Any, *, oracle: Any, verifier: Any, source: Run | None, tenant_id: str) -> dict[str, Any]:
+def _world_seams(world: Any, *, oracle: Any, verifier: Any, source: Run | None, tenant_id: str,
+                 data_root: Path) -> dict[str, Any]:
     """The lifecycle's world-only keywords: none for an ordinary run; for a sibling its oracle
     side, settled once here from its knobs (the launcher hands it its rate slice through the
     environment), its box labelled with the run's tenant, and threaded inward whole, and the
@@ -978,7 +982,7 @@ def _world_seams(world: Any, *, oracle: Any, verifier: Any, source: Run | None, 
     from defender.learning.core.config import process_oracle_settings
 
     return {"serving": oracle_serving(process_oracle_settings(), oracle=oracle,
-                                      verifier=verifier, tenant_id=tenant_id),
+                                      verifier=verifier, tenant_id=tenant_id, data_root=data_root),
             "source": source}
 
 
@@ -1026,6 +1030,8 @@ class _Started:
     #: The run clock's start (`--as-of`, with `--as-of-anchor` its wall instant, #1347); `None`
     #: on an ordinary run.
     as_of: ClockOrigin | None = None
+    #: The data root this entry point resolved, handed to the run's box start (#1469: the box check's folder).
+    check_root: Path = dataclasses.field(kw_only=True)
 
     def record_case(self) -> case_system.CaseTarget | case_system.CaseSettingsFault:
         """The verdict the record step comments on: set at setup whenever the run records its case,
@@ -1041,7 +1047,7 @@ class _Started:
         return {"run": self.run, "model": self.model, "model_override": ns.model,
                 "defender_dir": DEFENDER_DIR, "tenant": self.tenant, "world": self.world,
                 "episode": self.episode, "systems": self.systems,
-                **self.minting.access_kwargs(), **self.seams, **origin_kw}
+                **self.minting.access_kwargs(), **self.seams, **origin_kw, "data_root": self.check_root}
 
 
 def _acceptance_args(ns: argparse.Namespace, data_root: DataRoot) -> dict[str, Any]:
@@ -1166,7 +1172,7 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
             if rc:
                 raise _PreflightRefused(rc)
             seams = _world_seams(world, oracle=oracle, verifier=verifier, source=source,
-                                 tenant_id=str(tenant.tenant_id))
+                                 tenant_id=str(tenant.tenant_id), data_root=tenancy.data_root_for_child(data_root))
 
             # The input is read after the tenant check and the role preflight: a tenant the check
             # refuses is told so before anything about its input is — save that an ordinary
@@ -1199,7 +1205,8 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
             _write_record_versions(run_dir, current)
             yield _Started(accepted=accepted, tenant=tenant, run=run, model=model, world=world,
                            episode=episode, systems=systems, seams=seams, alert=alert,
-                           minting=minting, case=case, as_of=origin)
+                           minting=minting, case=case, as_of=origin,
+                           check_root=tenancy.data_root_for_child(data_root))
         finally:
             copy.remove()
 
@@ -1591,7 +1598,8 @@ def _set_up_in_container(  # noqa: PLR0913 — the request, its launch facts, th
     # The run's id, announced as the first line of stdout (#1279 O5), before the box exists.
     print(f"run_id={run.run_dir.name}", flush=True)
     return _Started(accepted=accepted, tenant=tenant, run=run, model=model, world=None, episode=None,
-                    systems=systems, seams={}, alert=RunPaths(run.run_dir).alert, minting=passes)
+                    systems=systems, seams={}, alert=RunPaths(run.run_dir).alert, minting=passes,
+                    check_root=tenancy.data_root_for_child(data_root))
 
 
 def job_main(  # noqa: PLR0913 — the job entry's inputs plus its injection seams
@@ -1750,11 +1758,12 @@ def _sibling_set_up(  # noqa: PLR0913 — the request, the socket and the siblin
         if rc:
             raise _PreflightRefused(rc)
         seams = _world_seams(world, oracle=oracle, verifier=verifier, source=source,
-                             tenant_id=str(tenant.tenant_id))
+                             tenant_id=str(tenant.tenant_id), data_root=tenancy.data_root_for_child(data_root))
         alert = _screened_source_alert(episode)
         print(f"run_id={run.run_dir.name}", flush=True)
         yield _Started(accepted=accepted, tenant=tenant, run=run, model=model, world=world, episode=episode,
-                       systems=systems, seams=seams, alert=alert, minting=passes)
+                       systems=systems, seams=seams, alert=alert, minting=passes,
+                       check_root=tenancy.data_root_for_child(data_root))
 
 
 #: A sibling whose world went unservable exits with this (its world record says why).

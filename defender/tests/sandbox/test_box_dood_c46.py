@@ -18,6 +18,8 @@ from defender.box import (
 )
 from defender.execution.box_codec import BoxFault
 from defender.tests.support.tenancy._host1214 import TEST_TENANT
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
+from defender.tests.support.sandbox import _box_check1469 as _check
 
 
 @pytest.fixture(autouse=True)
@@ -121,7 +123,7 @@ def test_render_argv_translates_request_mounts_too():
         ),
         workdir=Path("/workspace"),
         spec=PINNED,
-        tenant_id=TEST_TENANT,
+        tenant_id=TEST_TENANT, data_root=current_data_root(),
     )
     joined = " ".join(_render_argv(request, MOUNTS).argv)
     assert (
@@ -141,7 +143,7 @@ def test_render_argv_refuses_an_uncovered_request_mount():
         name="defender-runcycle-r1",
         mounts=(Mount(source=Path("/srv/elsewhere"), target=Path("/srv/elsewhere"), kind="data"),),
         workdir=Path("/workspace"),
-        tenant_id=TEST_TENANT,
+        tenant_id=TEST_TENANT, data_root=current_data_root(),
     )
     with pytest.raises(BoxFault) as e:
         _render_argv(request, MOUNTS)
@@ -170,7 +172,7 @@ def test_render_argv_refuses_a_traversal_mount_source():
         name="defender-runcycle-r1",
         mounts=(Mount(source=Path("/workspace/../etc"), target=Path("/etc"), kind="data"),),
         workdir=Path("/workspace"),
-        tenant_id=TEST_TENANT,
+        tenant_id=TEST_TENANT, data_root=current_data_root(),
     )
     with pytest.raises(BoxFault) as e:
         _render_argv(request, MOUNTS)
@@ -252,10 +254,15 @@ def test_absent_id_sources_off_a_container_are_not_an_error(tmp_path):
 class _CapturingDocker:
     """Minimal `docker=` seam: inspect finds nothing, create fails, so `start_box` raises after capturing the argv."""
 
-    def __init__(self):
+    def __init__(self, view=()):
         self.create_argv: list[str] | None = None
+        #: The `(this process's path, the daemon's path)` table the start translated its binds through (#1469: the box
+        #: check's own bind among them), reversed by the fake to find the folder the check was told to bind.
+        self.view = view
 
     def __call__(self, argv, **_kw) -> subprocess.CompletedProcess:
+        if _check.is_check_run(argv):  # #1469: a box check's container is no create: a healthy host passes it
+            return _check.answer(list(argv), _check.CheckPlan(daemon_view=self.view), _kw, [])
         if argv[:2] in (["docker", "run"], ["docker", "create"]):   # run box: create (#1343 B10); request lane: run
             self.create_argv = argv
             return subprocess.CompletedProcess(argv, 1, "", "create refused by the fake")
@@ -275,7 +282,7 @@ def _runtime_of(monkeypatch, value: str | None) -> str:
         monkeypatch.setenv(BoxSpec.ENV_VAR, value)
     rec = _CapturingDocker()
     with pytest.raises(BoxFault):
-        start_box(Path("/tmp/defender-runs/r1"), REPO_ROOT / "defender", docker=rec, tenant_id=TEST_TENANT)
+        start_box(Path("/tmp/defender-runs/r1"), REPO_ROOT / "defender", docker=rec, tenant_id=TEST_TENANT, data_root=current_data_root())
     assert rec.create_argv is not None
     return rec.create_argv[rec.create_argv.index("--runtime") + 1]
 
@@ -294,7 +301,7 @@ def test_runtime_lever_rejects_an_unknown_runtime(monkeypatch):
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
     monkeypatch.setenv(BoxSpec.ENV_VAR, "gvisor")
     with pytest.raises(ValueError, match="not a known box runtime"):
-        start_box(Path("/tmp/defender-runs/r1"), Path("/srv/defender"), docker=_CapturingDocker(), tenant_id=TEST_TENANT)
+        start_box(Path("/tmp/defender-runs/r1"), Path("/srv/defender"), docker=_CapturingDocker(), tenant_id=TEST_TENANT, data_root=current_data_root())
 
 
 def test_a_typoed_lever_does_not_break_the_request_path_that_ignores_it(monkeypatch):
@@ -303,7 +310,7 @@ def test_a_typoed_lever_does_not_break_the_request_path_that_ignores_it(monkeypa
 
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
     # The request's own spec factory is under test; its rootfs resolves from `workdir / "defender"`.
-    request = BoxRequest(name="defender-runcycle-r1", workdir=REPO_ROOT, tenant_id=TEST_TENANT)
+    request = BoxRequest(name="defender-runcycle-r1", workdir=REPO_ROOT, tenant_id=TEST_TENANT, data_root=current_data_root())
     monkeypatch.setenv(BoxSpec.ENV_VAR, "gvisor")  # AFTER the request is built
     with pytest.raises(BoxFault):  # the create fault, not a ValueError
         start_box(request, docker=_CapturingDocker())
@@ -316,10 +323,12 @@ def test_the_discovered_table_reaches_the_run_dir_create_argv(tmp_path):
     defender_dir = workspace / "defender"
     defender_dir.mkdir()
     mounts = ((workspace, Path("/home/dev/projects/repo")),)
-    rec = _CapturingDocker()
+    data_root = workspace / "data"  # the box check's folder is made under it, so it is on a shared mount too (#1469)
+    data_root.mkdir()
+    rec = _CapturingDocker(mounts)
     with pytest.raises(BoxFault):  # the fake refuses create; the argv is already captured
         box_mod._start_boxed(
-            run_dir, defender_dir, PINNED, rec, lambda _docker: mounts,
+            run_dir, defender_dir, PINNED, rec, lambda _docker: mounts, data_root=data_root,
         )
     joined = " ".join(rec.create_argv or [])
     # Targets are the model view's fixed paths; the sources carry the translation.
@@ -333,20 +342,23 @@ def test_the_discovered_table_reaches_the_run_dir_create_argv(tmp_path):
     )
 
 
-def test_the_discovered_table_reaches_the_request_render_argv():
+def test_the_discovered_table_reaches_the_request_render_argv(tmp_path):
     from defender.box import BoxRequest, Mount
 
-    rec = _CapturingDocker()
+    data_root = tmp_path / "data"  # the box check's folder is made under it, so it is on a shared mount too (#1469)
+    data_root.mkdir()
+    mounts = (*MOUNTS, (data_root, Path("/home/dev/projects/data")))
+    rec = _CapturingDocker(mounts)
     request = BoxRequest(
         name="defender-runcycle-r1",
         mounts=(Mount(source=Path("/workspace/defender/lessons"),
                       target=Path("/workspace/defender/lessons"), kind="data"),),
         workdir=Path("/workspace"),
         spec=PINNED,
-        tenant_id=TEST_TENANT,
+        tenant_id=TEST_TENANT, data_root=data_root,
     )
     with pytest.raises(BoxFault):
-        box_mod._start_boxed_request(request, rec, lambda _docker: MOUNTS)
+        box_mod._start_boxed_request(request, rec, lambda _docker: mounts)
     assert (
         "type=bind,source=/home/dev/projects/repo/defender/lessons,"
         "target=/workspace/defender/lessons,readonly" in " ".join(rec.create_argv or [])
@@ -359,7 +371,7 @@ def test_an_uncovered_run_dir_is_refused_before_any_container_is_created():
     with pytest.raises(BoxFault, match="C46"):
         box_mod._start_boxed(
             Path("/tmp/defender-runs/r1"), Path("/workspace/defender"),
-            BoxSpec(), rec, lambda _docker: MOUNTS,
+            BoxSpec(), rec, lambda _docker: MOUNTS, data_root=current_data_root(),
         )
     assert rec.create_argv is None, "a container was created despite the refusal"
 

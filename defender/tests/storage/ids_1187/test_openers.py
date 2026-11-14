@@ -40,7 +40,7 @@ def test_preflight_never_reads_an_episode_through_a_link(tmp_path, monkeypatch, 
 
     err = R.raised(cli.preflight_replay, episodes / linked_id, source=source,
                    roster=est.roster(), tenant=est.run_tenant(), oracle=oracle.model,
-                   verifier=S.passing_verifier().model)
+                   verifier=S.passing_verifier().model, data_root=data_root)
     assert not (real / "outcome.yaml").exists(), (
         f"pre-flight calibrated the episode behind a link ({err!r})")
     assert oracle.requests == 0, f"pre-flight asked its oracle through a link ({err!r})"
@@ -53,6 +53,6 @@ def test_preflight_never_reads_an_episode_through_a_link(tmp_path, monkeypatch, 
     with runs.episode(walked_id) as view:
         cli.preflight_replay(view.episode, source=source, roster=est.roster(),
                              tenant=est.run_tenant(), oracle=control.model,
-                             verifier=S.passing_verifier().model)
+                             verifier=S.passing_verifier().model, data_root=data_root)
     assert control.requests > 0, "control: pre-flight through the walk never asked its oracle"
     assert (walked / "outcome.yaml").is_file(), "control: pre-flight through the walk wrote nothing"

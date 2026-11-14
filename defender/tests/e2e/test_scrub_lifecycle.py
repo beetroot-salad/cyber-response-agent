@@ -47,6 +47,7 @@ from defender.investigation import workspace_map as workspace_map_mod  # noqa: E
 from defender.tests.support.tenancy import _tenants1106
 from defender.tests.support.storage._alert_plant import plant_alert  # noqa: E402
 from defender.tests.support.shared._fixture_uuid import fixture_uuid  # noqa: E402
+from defender.tests.support.sandbox import _box_check1469 as _check1469
 from defender.tests.e2e._box665 import (  # noqa: E402
     BoxLifecycleRecorder,
     RecordingDocker,
@@ -56,6 +57,7 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
 )
 from defender.tests.support.tenancy._host1214 import TEST_TENANT
 from defender.tests.support.sandbox._box1343 import AttachedStartSeam
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
 pytestmark = pytest.mark.e2e
 
@@ -103,6 +105,8 @@ class FakeDocker(AttachedStartSeam):
         self.existing = existing
 
     def __call__(self, argv, **kwargs) -> subprocess.CompletedProcess:
+        if _check1469.is_check_run(argv):  # #1469: a box check's container is no box: answered as a healthy host does
+            return _check1469.answer(list(argv), _check1469.CheckPlan(), kwargs, [])
         call = _DockerCall(list(argv))
         self.calls.append(call)
         if call.verb == "inspect":
@@ -281,6 +285,7 @@ def _drive_lifecycle(tmp_path, rec, *, fault=None, run_dir=None, **kw):
     seams = {"start_box": rec.start_box, "stop_box": rec.stop_box, "scrub": rec.scrub}
     seams.update(kw)   # a test may swap one seam for a faulting or real one
     return _run_investigation_lifecycle(
+        data_root=current_data_root(),
         run=fixture_run(run), model="m-741", model_override=None, defender_dir=DEFENDER,
         tenant=_tenants1106.fixture_run_tenant(), systems=_tenants1106.fixture_run_systems(),
         investigate=_recording_investigate(rec.events, fault=fault), **seams,
@@ -516,6 +521,7 @@ def test_o8_the_summary_gains_a_key_only_when_the_teardown_of_a_box_ending_fault
 
     try:
         summary = _run_investigation_lifecycle(
+            data_root=current_data_root(),
             run=fixture_run(_clean_run_dir(tmp_path / "lifecycle")), model="m-741", model_override=None,
             defender_dir=DEFENDER, tenant=_tenants1106.fixture_run_tenant(), systems=_tenants1106.fixture_run_systems(),
             investigate=lambda **_kw: ended, start_box=rec.start_box, stop_box=stop, scrub=rec.scrub)
@@ -542,6 +548,7 @@ def test_o8_every_run_end_word_reaches_the_job_fact_and_only_the_two_box_words_s
 
     def drive():
         return run_py._run_investigation_lifecycle(
+            data_root=current_data_root(),
             run=fixture_run(_clean_run_dir(tmp_path / "lifecycle")), model="m-741", model_override=None,
             defender_dir=DEFENDER, tenant=_tenants1106.fixture_run_tenant(), systems=_tenants1106.fixture_run_systems(), job_facts=held,
             investigate=lambda **_kw: {"output": "done", "requests": 1, "truncated_by": word},
@@ -670,7 +677,7 @@ def test_box_construction_failure_refuses_the_run(tmp_path):
     docker = FakeDocker(lambda verb: C43B_NAME_COLLISION if verb in ("run", "create") else (0, "", ""))
 
     with pytest.raises(BoxFault):
-        start_box(run, DEFENDER, docker=docker, tenant_id=TEST_TENANT)
+        start_box(run, DEFENDER, docker=docker, tenant_id=TEST_TENANT, data_root=current_data_root())
 
     log: list[str] = []
     rec = BoxLifecycleRecorder(events=log)
@@ -695,11 +702,11 @@ def test_startup_attempts_a_box_rather_than_detecting_a_binary(tmp_path):
     probe_fails = FakeDocker(lambda verb: (126, "", "OCI runtime exec failed\n")
                              if verb == "exec" else (0, "", ""))
     with pytest.raises(BoxFault):
-        start_box(run, DEFENDER, docker=probe_fails, tenant_id=TEST_TENANT)
+        start_box(run, DEFENDER, docker=probe_fails, tenant_id=TEST_TENANT, data_root=current_data_root())
     assert "exec" in probe_fails.verbs, "startup never attempted anything inside the box"
 
     ok = FakeDocker()
-    box = start_box(run, DEFENDER, docker=ok, tenant_id=TEST_TENANT)
+    box = start_box(run, DEFENDER, docker=ok, tenant_id=TEST_TENANT, data_root=current_data_root())
     assert box is not None
     # #1343 B10 (r5 item 8a): the run box is created (`docker create -i --rm`), then started by an
     # attached `docker start`, and only then probed from inside; never a detached `docker run`.
@@ -716,18 +723,18 @@ def test_path_identity_sentinel_fails_closed(tmp_path):
 
     empty_readback = FakeDocker(lambda verb: (0, "", "") if verb == "exec" else (0, "", ""))
     with pytest.raises(BoxFault):
-        start_box(run, DEFENDER, docker=empty_readback, tenant_id=TEST_TENANT)
+        start_box(run, DEFENDER, docker=empty_readback, tenant_id=TEST_TENANT, data_root=current_data_root())
     assert {p.name for p in run.iterdir()} - before, \
         "no sentinel was written into the tree, so the read-back proved nothing"
 
     wrong = FakeDocker(lambda verb: (0, "not-the-sentinel", "") if verb == "exec" else (0, "", ""))
     with pytest.raises(BoxFault):
-        start_box(run, DEFENDER, docker=wrong, tenant_id=TEST_TENANT)
+        start_box(run, DEFENDER, docker=wrong, tenant_id=TEST_TENANT, data_root=current_data_root())
 
     # Read each actual sentinel through the captured bind table, including the clock bind.
     # A reply keyed only on the run tree cannot model a healthy independent clock mount.
     docker = RecordingDocker()
-    box = start_box(run, DEFENDER, docker=docker, tenant_id=TEST_TENANT)
+    box = start_box(run, DEFENDER, docker=docker, tenant_id=TEST_TENANT, data_root=current_data_root())
     assert box is not None
     stop_box(box, docker=docker)
 
@@ -764,7 +771,7 @@ def test_reaper_does_not_treat_stderr_as_failure(tmp_path):
     assert "Error response from daemon" in err
 
     quiet_success = FakeDocker(lambda verb: C43A_RM_MISSING)
-    box = start_box(_clean_run_dir(tmp_path), DEFENDER, docker=FakeDocker(), tenant_id=TEST_TENANT)
+    box = start_box(_clean_run_dir(tmp_path), DEFENDER, docker=FakeDocker(), tenant_id=TEST_TENANT, data_root=current_data_root())
     assert stop_box(box, docker=quiet_success) is None
 
     loud_failure = FakeDocker(lambda verb: (1, "", ""))
@@ -801,11 +808,11 @@ def test_allow_unsandboxed_is_the_sole_loud_opt_out(tmp_path, monkeypatch, capsy
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
     refused = FakeDocker(broken)
     with pytest.raises(BoxFault):
-        start_box(run, DEFENDER, docker=refused, tenant_id=TEST_TENANT)
+        start_box(run, DEFENDER, docker=refused, tenant_id=TEST_TENANT, data_root=current_data_root())
     _refused_at_create(refused)
 
     monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")
-    box = start_box(run, DEFENDER, docker=FakeDocker(broken), tenant_id=TEST_TENANT)
+    box = start_box(run, DEFENDER, docker=FakeDocker(broken), tenant_id=TEST_TENANT, data_root=current_data_root())
     assert box.sandboxed is False
     assert "UNSANDBOXED" in capsys.readouterr().err.upper(), "the opt-out is silent"
 
@@ -813,7 +820,7 @@ def test_allow_unsandboxed_is_the_sole_loud_opt_out(tmp_path, monkeypatch, capsy
         monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", spelling)
         refused = FakeDocker(broken)
         with pytest.raises(BoxFault):
-            start_box(run, DEFENDER, docker=refused, tenant_id=TEST_TENANT)
+            start_box(run, DEFENDER, docker=refused, tenant_id=TEST_TENANT, data_root=current_data_root())
         _refused_at_create(refused)
 
 
@@ -827,7 +834,7 @@ def test_a_colliding_run_id_refuses_rather_than_reaping_a_live_sibling(tmp_path)
         existing="running",
     )
     with pytest.raises(BoxFault) as e:
-        start_box(run, DEFENDER, docker=docker, tenant_id=TEST_TENANT)
+        start_box(run, DEFENDER, docker=docker, tenant_id=TEST_TENANT, data_root=current_data_root())
     assert name in str(e.value) or run.name in str(e.value)
     assert "start" not in docker.verbs, f"a box was started over a held name: {docker.verbs}"
     for call in docker.calls:
@@ -928,7 +935,7 @@ def test_hostile_run_id_fails_rather_than_splitting_the_bind_spec(tmp_path, monk
         "an entry under the runs folder is named by the alert's stem")
 
     docker = FakeDocker()
-    start_box(run.run_dir, DEFENDER, docker=docker, tenant_id=TEST_TENANT)
+    start_box(run.run_dir, DEFENDER, docker=docker, tenant_id=TEST_TENANT, data_root=current_data_root())
     named = docker.argv_containing("--name")
     assert named, "the create passed no --name"
     assert named[0][named[0].index("--name") + 1] == f"defender-run-{run_id}"
@@ -953,7 +960,7 @@ def test_hostile_run_id_fails_rather_than_splitting_the_bind_spec(tmp_path, monk
 
     docker = FakeDocker()
     with pytest.raises((BoxFault, ValueError)):
-        start_box(planted, DEFENDER, docker=docker, tenant_id=TEST_TENANT)
+        start_box(planted, DEFENDER, docker=docker, tenant_id=TEST_TENANT, data_root=current_data_root())
     assert docker.calls == [], "a hostile id reached the daemon as argv before being refused"
 
 

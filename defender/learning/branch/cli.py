@@ -838,7 +838,8 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
             source=source, branch_message_id=ns.branch_message_id,
             preflight=preflight, model=ns.model,
             allow_dirty=ns.allow_dirty,
-            live_tree=live_capture, oracle=oracle, verifier=verifier)
+            live_tree=live_capture, oracle=oracle, verifier=verifier,
+            data_root=tenancy.data_root_for_child(data_root))
         view = prepare_episode(runs, source, knowledge_commit=pinned.commit,
                                episode_id=None if lane is None else lane.job_id)
         episode = view.episode
@@ -859,7 +860,7 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
                     knowledge_commit=pinned.commit, render_page=render_page,
                     signer=signer, proxy_url=proxy_url, issuer_transport=issuer_transport,
                     directory=admitted.directory, lane=lane, container=container,
-                    token_clock=clock)
+                    token_clock=clock, data_root=tenancy.data_root_for_child(data_root))
             except SystemExit:
                 raise
             except BaseException as failed:  # noqa: BLE001 — one abort rule, see `main`'s docstring
@@ -881,7 +882,7 @@ def _run_episode(  # noqa: PLR0913, PLR0912, PLR0915, C901 — the episode's who
     knowledge_commit: str | None = None, signer: Any = None, proxy_url: str | None = None,
     issuer_transport: Any = None, directory: Any = None, lane: JobLaneHooks | None = None,
     container: JobContainer | None = None,
-    token_clock: Callable[[], float] = time.time,
+    token_clock: Callable[[], float] = time.time, data_root: Path,
 ) -> int:
     """Every `Step`, `QUESTIONER` through `JUDGE`.
 
@@ -926,7 +927,7 @@ def _run_episode(  # noqa: PLR0913, PLR0912, PLR0915, C901 — the episode's who
                                   proxy_url=proxy_url, issuer_transport=issuer_transport,
                                   directory=directory, container=container,
                                   job_id=None if lane is None else lane.job_id,
-                                  clock=token_clock)
+                                  clock=token_clock, data_root=data_root)
     if record["outcome"] != ACCEPTED:
         _logger.info(f"episode {episode_id}: {record['outcome']} before any sibling started "
                      f"({record['reason']})")

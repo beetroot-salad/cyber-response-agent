@@ -61,7 +61,7 @@ _EXEC_MARGIN = 60.0
 class Refused(Exception):  # noqa: N818 — named for what it reports
     """The helper's typed refusal of a request: `code` names the kind of refusal (`unknown-request`, `not-for-kind`,
     `bad-fields`, `unknown-id`, `unknown-handle`, `signalled`, `no-grant`, `sign-fault`, `box-start`, `confinement`,
-    `peer`, `internal`, ...), `str()` the helper's reason."""
+    `internal`, ...), `str()` the helper's reason."""
 
     def __init__(self, reason: str, code: str = "refused") -> None:
         super().__init__(reason)

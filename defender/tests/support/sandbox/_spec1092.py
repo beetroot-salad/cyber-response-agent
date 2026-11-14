@@ -26,6 +26,7 @@ from defender.tests.e2e._box665 import (  # noqa: F401 — re-exported for the t
 from defender.tests.support.storage._alert_plant import plant_alert
 from defender.tests.e2e._spec771 import requires_daemon, requires_real_box  # noqa: F401
 from defender.tests.support.tenancy._host1214 import TEST_TENANT
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
 #: The three files the image name is a function of, IN THE ORDER the resolver reads them —
 #: the order decides which file a "cannot read" fault names first.
@@ -382,6 +383,14 @@ def subcommands(calls: list[list[str]]) -> list[str]:
     return [c[1] for c in calls if len(c) > 1]
 
 
+def box_subcommands(calls: list[list[str]]) -> list[str]:
+    """`subcommands`, a box check's container (#1469, a `docker run` binding `/run/box-check`) left out: for a test about
+    what the BOX's own start asked of the daemon (no `run`, one `create`), which a check beside it must not change."""
+    from defender.tests.support.sandbox import _box_check1469 as check
+
+    return [c[1] for c in calls if len(c) > 1 and not check.is_check_run(c)]
+
+
 def env_pairs(argv: list[str]) -> list[tuple[str, str]]:
     """Every `--env K=V` pair on a create argv, in argv order (duplicates kept — d48 asserts
     each key lands once)."""
@@ -438,7 +447,7 @@ def box_probe(box, run_dir: Path, name: str, source: str, *args: str) -> dict:
 def real_box(run_dir: Path):
     """A box over THIS checkout's defender dir through the real `start_box`; the daemon must
     hold `image_tag(DEFENDER)` (a missing image faults, never skips)."""
-    box = box_mod.start_box(run_dir, DEFENDER, tenant_id=TEST_TENANT)
+    box = box_mod.start_box(run_dir, DEFENDER, tenant_id=TEST_TENANT, data_root=current_data_root())
     try:
         yield box
     finally:

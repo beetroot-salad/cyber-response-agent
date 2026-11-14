@@ -15,6 +15,7 @@ from defender.tests.support.sandbox._docker import daemon_reachable, docker_runt
 from defender.tests.storage.ids_1187 import _spec1187 as S
 from defender._model_view import MODEL_RUN
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
 pytestmark = pytest.mark.box
 
@@ -165,7 +166,7 @@ def _session(root: Path, runtime: str) -> dict[str, Any]:
 
     agent, token = staged_agent(Path(t.agent), arm.parent.parent / "run-copies")
     box = start_box(arm, H.DEFENDER, spec=BoxSpec(runtime=runtime),
-                    tenant_agent=agent, tenant_id=t.id, staged_token=token)
+                    tenant_agent=agent, tenant_id=t.id, staged_token=token, data_root=current_data_root())
     sandboxed, name = box.sandboxed, box.name
     # The host prepares the run clock at box startup; compare model effects after setup.
     before = _outside_arm(S.tree(episodes), arm_id)

@@ -254,7 +254,7 @@ def test_a_stage_fault_is_refused_even_with_the_unsandboxed_opt_out(tmp_path, mo
     verdicts: list[dict] = []
     with pytest.raises(BoxFault):
         _lifecycle._start_run_box(run_dir, tmp_path, BoxSpec(), _no_docker, agent, token,
-                                  verdicts.append, tenant_id=TEST_TENANT)
+                                  verdicts.append, tenant_id=TEST_TENANT, data_root=tmp_path)
     assert verdicts, "the refusal wrote no did-not-run marker"
 
 
@@ -395,7 +395,7 @@ def test_a_run_box_over_a_bare_agent_folder_is_refused(tmp_path):
     agent.mkdir()
     with pytest.raises(TypeError, match="run copy"):
         _lifecycle._start_run_box(tmp_path / "run", tmp_path, BoxSpec(), _no_docker, agent,
-                                  None, None, tenant_id=TEST_TENANT)
+                                  None, None, tenant_id=TEST_TENANT, data_root=tmp_path)
 
 
 # --- knowledge commits from host-held records --------------------------------------------------
