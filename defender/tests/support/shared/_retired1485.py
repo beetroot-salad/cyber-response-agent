@@ -17,3 +17,9 @@ RETIRED_REQUEST = f"request_{RETIRED_ACTION}"
 
 #: Module-level constants that are named ban lists: the census skips an assignment to any of these.
 BAN_LIST_CONSTANTS = frozenset({"RETIRED_NAMES", "RETIRED_ACTION", "RETIRED_COMMAND", "RETIRED_REQUEST", "REACH_NAMES"})
+#: Where each ban list lives (D13: one named list, plus #1278's `REACH_NAMES`): the census skips these constants only in
+#: these files, so a copy of a ban list anywhere else is found.
+BAN_LIST_HOMES = {
+    "defender/tests/support/shared/_retired1485.py": BAN_LIST_CONSTANTS - {"REACH_NAMES"},
+    "defender/tests/learning/state_contracts/test_1278_census.py": frozenset({"REACH_NAMES"}),
+}

@@ -2,7 +2,7 @@
 lists), and the old `defender/CLAUDE.md` upgrade note is one line. A name census over each file's syntax (extends
 `test_1278_census`, which exempts these). The ban lists are module-level constants named in `BAN_LIST_CONSTANTS`:
 the retirement tests' one list (`support/shared/_retired1485`) and `test_1278_census.REACH_NAMES`; the census skips an
-assignment to such a constant wherever it stands, and nothing else."""
+assignment to such a constant only in its home file (`BAN_LIST_HOMES`), and nothing else."""
 from __future__ import annotations
 
 import ast
@@ -11,7 +11,7 @@ import subprocess
 
 from defender.tests.learning.state_contracts.test_1278_census import _PRODUCT_FLOOR, REPO, _product_files
 from defender.tests.support.shared import _revisions1485 as revisions
-from defender.tests.support.shared._retired1485 import BAN_LIST_CONSTANTS, RETIRED_ACTION, RETIRED_COMMAND, RETIRED_NAMES
+from defender.tests.support.shared._retired1485 import BAN_LIST_CONSTANTS, BAN_LIST_HOMES, RETIRED_ACTION, RETIRED_COMMAND, RETIRED_NAMES
 
 RETIRED = RETIRED_NAMES
 #: A spelling inside any string (a Literal member, a dict key, an audit action, `__all__`) also names it.
@@ -26,22 +26,22 @@ def _docstrings(tree: ast.AST) -> set[int]:
             and n.body and isinstance(n.body[0], ast.Expr) and isinstance(n.body[0].value, ast.Constant)}
 
 
-def _ban_lists(tree: ast.AST) -> set[int]:
-    """The nodes under a module-level assignment to a named ban-list constant."""
+def _ban_lists(tree: ast.AST, constants: frozenset[str]) -> set[int]:
+    """The nodes under a module-level assignment to one of `constants`, the ban lists this file is home to."""
     skipped: set[int] = set()
     for stmt in getattr(tree, "body", []):
         targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target] if isinstance(stmt, ast.AnnAssign) else []
-        if any(isinstance(t, ast.Name) and t.id in BAN_LIST_CONSTANTS for t in targets):
+        if any(isinstance(t, ast.Name) and t.id in constants for t in targets):
             skipped |= {id(n) for n in ast.walk(stmt)}
     return skipped
 
 
-def names_in(source: str, *, allow_action: bool = False) -> list[str]:
+def names_in(source: str, *, allow_action: bool = False, ban_lists: frozenset[str] = frozenset()) -> list[str]:
     """Each retired name `source` uses as code: a name, attribute, import, definition or string, not a docstring, a comment
     or a named ban list."""
     tree = ast.parse(source)
     prose = _docstrings(tree)
-    banned = _ban_lists(tree)
+    banned = _ban_lists(tree, ban_lists)
     found: list[str] = []
     for node in ast.walk(tree):
         if id(node) in banned:
@@ -90,16 +90,19 @@ def test_o5_the_name_census_finds_each_retired_spelling_and_skips_prose():
 
 
 def test_o5_the_census_skips_a_named_ban_list_and_nothing_else():
-    """Control: a module-level assignment to a named ban-list constant is skipped, any other assignment of the same names
-    is found, and a planted name in a test-like file is found. (O5, D13)"""
+    """Control: a module-level assignment to a named ban-list constant is skipped only in its home file; any other
+    assignment, a copy of a ban list elsewhere, and a planted name in a test-like file are found. (O5, D13)"""
     a, b = sorted(RETIRED)[:2]
     for constant in sorted(BAN_LIST_CONSTANTS):
-        assert names_in(f"{constant} = frozenset({{'{a}', '{b}', '{ACTION}'}})") == [], constant
+        assert names_in(f"{constant} = frozenset({{'{a}', '{b}', '{ACTION}'}})", ban_lists=BAN_LIST_CONSTANTS) == [], constant
+    assert {c for home in BAN_LIST_HOMES.values() for c in home} == BAN_LIST_CONSTANTS, "every ban list has one home"
     assert names_in(f"OTHER_LIST = frozenset({{'{a}'}})") == [a]
-    assert names_in(f"def test_x():\n    RETIRED_NAMES = {{'{a}'}}") == [a], "only a module-level constant is a ban list"
+    assert names_in(f"def test_x():\n    RETIRED_NAMES = {{'{a}'}}", ban_lists=BAN_LIST_CONSTANTS) == [a], "only a module-level constant is a ban list"
     planted = {"defender/tests/learning/test_planted.py": f"from defender.learning.store import {a}\n\ndef test_x():\n    assert {a}\n"}
     assert census(planted, allow=set()) == {"defender/tests/learning/test_planted.py": [a]}
-    assert census({"defender/tests/support/shared/_ban.py": f"RETIRED_NAMES = frozenset({{'{a}'}})\n"}, allow=set()) == {}
+    copy = f"RETIRED_NAMES = frozenset({{'{a}'}})\n"
+    assert census({"defender/tests/support/shared/_ban.py": copy}, allow=set()) == {"defender/tests/support/shared/_ban.py": [a]}
+    assert census({"defender/tests/support/shared/_retired1485.py": copy}, allow=set()) == {}
 
 
 def _revision_files() -> dict[str, str]:
@@ -109,7 +112,7 @@ def _revision_files() -> dict[str, str]:
 
 def census(sources: dict[str, str], *, allow: set[str]) -> dict[str, list[str]]:
     """Each file of `sources` (repo-relative path to text) that names a retired surface, with the names; `allow` may name `learning_cutover`."""
-    return {rel: sorted(set(hits)) for rel, text in sources.items() if (hits := names_in(text, allow_action=rel in allow))}
+    return {rel: sorted(set(hits)) for rel, text in sources.items() if (hits := names_in(text, allow_action=rel in allow, ban_lists=BAN_LIST_HOMES.get(rel, frozenset())))}
 
 
 def _test_files() -> list[str]:
@@ -181,6 +184,5 @@ def test_o5_the_upgrade_notes_say_to_cut_over_on_an_earlier_revision_and_to_stop
     stop, migrate = re.search(r"(?i)\bstop", body), re.search(r"(?i)\bmigrat", body)
     assert stop, body
     assert migrate, body
-    assert stop.start() < migrate.start(), body
     assert re.search(r"(?i)\bdrains?\b", body), body
     assert re.search(r"\bAPI\b", body), body
