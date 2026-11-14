@@ -152,12 +152,17 @@ def test_p1_the_stores_public_names_are_exported_and_the_lanes_table_is_not_the_
 
 
 def test_p1_the_queue_merge_and_the_pitfalls_curator_use_the_stores_one_mistake_key():
-    """`persist.pitfall_key` is the store's own object, and the curator reaches it through the `persist` module it
-    already imports, so the queue's merge and the store's distinct-mistake count keep one definition. (P1)"""
+    """The mistake-key rule (`pitfall_key`, `is_reducer_row`, `_digest_diagnosis`) is defined once, in the store: every
+    copy the queue's merge or the pitfalls curator holds, under any name, is the store's own function. (P1)"""
+    import types
+
     from defender.learning.core import persist
     from defender.learning.leads import pitfalls_curator
 
-    pitfall_key = store_mod().pitfall_key
-    assert persist.pitfall_key is pitfall_key
-    assert pitfalls_curator._loop_persist is persist
-    assert pitfalls_curator._loop_persist.pitfall_key is pitfall_key
+    rule = ("pitfall_key", "is_reducer_row", "_digest_diagnosis")
+    assert persist.pitfall_key is store_mod().pitfall_key
+    held = {(mod.__name__, name): fn for mod in (persist, pitfalls_curator) for name, fn in vars(mod).items()
+            if isinstance(fn, types.FunctionType) and fn.__name__ in rule}
+    assert {fn.__name__ for fn in held.values()} >= {"pitfall_key", "is_reducer_row"}, held
+    elsewhere = {k: fn.__module__ for k, fn in held.items() if not fn.__module__.startswith("defender.learning_store")}
+    assert not elsewhere, f"a mistake-key function defined outside the store: {elsewhere}"
