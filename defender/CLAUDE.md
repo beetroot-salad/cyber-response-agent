@@ -34,6 +34,12 @@ Alert-triage product: an in-process PydanticAI investigation runtime plus an off
 
 Load only the references relevant to the task. Historical explanations live in `docs/archive/`.
 
+## Upgrade from before #1083
+
+Stop the API, the workers and the lifecycle service, then run migrations (revision `0016_list_indexes`). It builds one
+index each on `jobs.alerts`, `jobs.investigations` and `jobs.learning_jobs`, and each build blocks writes to its table
+until it finishes: on a large alerts table, a running intake or worker would stall or time out meanwhile.
+
 ## Upgrade from before #1366
 
 A tenant's systems and its case record are versioned records in the database, written only by

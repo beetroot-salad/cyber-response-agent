@@ -4,13 +4,17 @@ from __future__ import annotations
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import base64
+import dataclasses
 import datetime as _dt
 import inspect
 import json
+import logging
+import secrets
+import threading
 from http import HTTPStatus
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -61,7 +65,7 @@ from defender.identity import (  # noqa: E402
 from defender.tenancy import InMemoryTenantRepository  # noqa: E402
 from defender.records._tenant_id import TenantId  # noqa: E402
 from pydantic import ValidationError  # noqa: E402
-from defender.records.formats import AlertId  # noqa: E402
+from defender.records.formats import AlertId, InvestigationId  # noqa: E402
 from defender.tests.support.tenancy._mapping1345 import ALERT_MAPPING_ROUTE, alert_mapping_url  # noqa: E402
 from defender.tests.support.api._programs1307 import NoProgramsRealm  # noqa: E402
 
@@ -230,28 +234,38 @@ HAPPY: list[tuple[tuple[str, str], str, dict[str, Any] | None, dict[str, Any]]] 
     (("GET", ALERT_MAPPING_ROUTE), alert_mapping_url(A), None,
      {"get_alert_mapping": _Answer("saved mapping", lambda _tenant: _alert_mapping_wire(MAPPING_BODY))}),
     (("PUT", ALERT_MAPPING_ROUTE), alert_mapping_url(A), MAPPING_BODY,
-     {"put_alert_mapping": _Answer("created from the body", lambda body: (body, True))}),
+     {"put_alert_mapping": _Answer("created from the body", lambda _principal, body: (body, True))}),
 ]
 
 
-#: The writes a route makes through a transaction; they carry no tenant — the transaction does.
-TX_WRITES = {"create_investigation", "cancel_investigation", "delete_investigation",
-             "create_learning_job", "put_system", "put_alert_mapping"}
+#: The announcing writes: each one port call that commits then announces, taking the principal first (#1083 Ports,
+#: Am-2, Am-6). `put_system` is the systems port's and `put_credentials` the secret port's (they announce too).
+WRITES = {"create_investigation", "cancel_investigation", "delete_investigation",
+          "create_learning_job", "put_alert_mapping", "put_system", "put_credentials"}
+#: Every call whose first argument is the principal: the writes and the audit-only port's `announce`.
+PRINCIPAL_CALLS = WRITES | {"announce"}
 
 
 class Scripted:
     """Every port the routes call: `answers` maps a method name to its return value, an exception
-    to raise, or a callable that answers the call; an unscripted call fails the test."""
+    to raise, or a callable that answers the call; an unscripted call fails the test.
+
+    A write that does not raise is recorded in `written`; the audit-only port's `announce` records into `audits`.
+    This port announces nothing for a write: announcing is the real ports' job (the demo ports, tested over the demo)."""
 
     def __init__(self, answers: dict[str, Any]) -> None:
         self.answers = answers
         self.calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
-        self.transactions: list[tuple[str, str]] = []
+        self.written: list[tuple[str, Principal]] = []
         self.audits: list[tuple[str, str, str, str, str]] = []
 
-    def transaction(self, tenant_id: str, principal: Any) -> _ScriptedTransaction:
-        # Conflict updated (#1307 D6): the transaction takes the principal in place of the bare actor id.
-        return _ScriptedTransaction(self, tenant_id, principal.actor_id)
+    async def announce(self, principal: Principal, action: str, target: str, detail: str = "") -> None:
+        """The audit-only port (#1083 Ports): scripted like any call, recorded as an event when it answers."""
+        self.calls.append(("announce", (principal, action, target, detail), {}))
+        failure = self.answers.get("announce")
+        if isinstance(failure, BaseException):
+            raise failure
+        self.audits.append((principal.tenant_id, principal.actor_id, action, target, detail))
 
     def __getattr__(self, name: str) -> Callable[..., Any]:
         if name.startswith("_"):
@@ -264,39 +278,15 @@ class Scripted:
             answer = self.answers[name]
             if isinstance(answer, BaseException):
                 raise answer
-            return answer(*args, **kwargs) if callable(answer) else answer
+            result = answer(*args, **kwargs) if callable(answer) else answer
+            if name in WRITES:
+                self.written.append((name, args[0]))
+            return result
 
         return call
 
     def called(self, name: str) -> list[tuple[tuple[Any, ...], dict[str, Any]]]:
         return [(args, kwargs) for n, args, kwargs in self.calls if n == name]
-
-
-class _ScriptedTransaction:
-    def __init__(self, ports: Scripted, tenant_id: str, actor: str) -> None:
-        self.ports = ports
-        self.tenant_id = tenant_id
-        self.actor = actor
-        self.pending: list[tuple[str, str, str, str, str]] = []
-
-    async def __aenter__(self) -> _ScriptedTransaction:
-        self.ports.transactions.append((self.tenant_id, self.actor))
-        return self
-
-    async def __aexit__(self, exc_type: type[BaseException] | None, *_: object) -> None:
-        if exc_type is None:
-            self.ports.audits.extend(self.pending)
-
-    def __getattr__(self, name: str) -> Callable[..., Any]:
-        if name.startswith("_"):
-            raise AttributeError(name)
-        return getattr(self.ports, name)
-
-    async def audit(self, action: str, target: str, detail: str = "") -> None:
-        failure = self.ports.answers.get("audit")
-        if isinstance(failure, BaseException):
-            raise failure
-        self.pending.append((self.tenant_id, self.actor, action, target, detail))
 
 
 class _Unused:
@@ -344,6 +334,7 @@ def _deps(ports: Any) -> tuple[ApiDeps, dict[str, str]]:
         identity=identity, tenants=tenants, frontend_origin=ORIGIN,
         alerts=ports, investigations=ports, learning_jobs=ports, lessons=ports,
         systems=ports, writes=ports, secrets=ports, checker=ports, artifact_links=ports, offboarding=ports,
+        alert_mapping=ports, audit=ports,  # FC-11 and the audit-only port (Am-5: every construction site)
     ), users
 
 
@@ -448,11 +439,13 @@ def test_every_route_asks_the_ports_as_the_sessions_user_in_the_paths_tenant(
     response = api.client.request(route[0], path, headers=AUTH, json=body, follow_redirects=False)
     assert response.status_code < 400, response.text
     assert api.ports.calls, "the route asked no port"
-    assert {args[0] for name, args, _ in api.ports.calls if name not in TX_WRITES} <= {A}
-    assert set(api.ports.transactions) <= {(A, api.user)}
+    assert {args[0] for name, args, _ in api.ports.calls if name not in PRINCIPAL_CALLS} <= {A}
+    principals = [args[0] for name, args, _ in api.ports.calls if name in PRINCIPAL_CALLS]
+    assert {(p.tenant_id, p.actor_id, p.credential_id) for p in principals} <= {(A, api.user, None)}
     assert {(tenant, user) for tenant, user, *_ in api.ports.audits} <= {(A, api.user)}
-    if any(name in TX_WRITES for name, _, _ in api.ports.calls):
-        assert api.ports.transactions == [(A, api.user)], "a write runs in one transaction"
+    writes = [name for name, _, _ in api.ports.calls if name in WRITES]
+    assert [name for name, _ in api.ports.written] == writes, "each write is one call, naming the principal first"
+    assert len(writes) <= 1, "a route makes one write"
 
 
 @pytest.mark.parametrize(("route", "path", "body", "answers"), HAPPY, ids=lambda v: str(v))
@@ -465,7 +458,7 @@ def test_a_member_of_one_tenant_gets_404_and_no_port_call_for_another_tenants_pa
     assert response.status_code == 404
     assert response.headers["Content-Type"] == "application/problem+json"
     assert api.ports.calls == []
-    assert api.ports.transactions == []
+    assert api.ports.written == []
     # control: the same session on A's own path is served
     assert api.client.request(route[0], path, headers=AUTH, json=body,
                               follow_redirects=False).status_code < 400
@@ -490,7 +483,7 @@ def test_every_route_refuses_a_caller_without_a_known_session_cookie(
     if "Authorization" not in headers:
         assert "WWW-Authenticate" not in response.headers
     assert api.ports.calls == []
-    assert api.ports.transactions == []
+    assert api.ports.written == []
 
 
 @pytest.mark.parametrize(("route", "path", "body", "answers"),
@@ -510,7 +503,7 @@ def test_every_state_changing_route_refuses_a_valid_session_without_the_frontend
     response = api.client.request(route[0], path, headers=headers, json=body, follow_redirects=False)
     assert response.status_code == 403, response.text
     assert api.ports.calls == []
-    assert api.ports.transactions == []
+    assert api.ports.written == []
     # control: the same session with the configured Origin is served
     assert api.client.request(route[0], path, headers=AUTH, json=body,
                               follow_redirects=False).status_code < 400
@@ -557,32 +550,33 @@ def test_1379_a_client_request_id_postgresql_cannot_hold_is_a_422_naming_it(
 # --- creates: 201 or replay ----------------------------------------------------------------
 
 
-@pytest.mark.parametrize(("path", "body", "port", "record", "location", "audit"), [
+@pytest.mark.parametrize(("path", "body", "port", "record", "location"), [
     (f"{T}/investigations", {"alert_id": "a1000000-0000-4000-8000-000000000001", "client_request_id": "r1"}, "create_investigation",
-     INV, f"{T}/investigations/b1000000-0000-4000-8000-000000000001", ("investigation.start", "b1000000-0000-4000-8000-000000000001", "alert a1000000-0000-4000-8000-000000000001")),
+     INV, f"{T}/investigations/b1000000-0000-4000-8000-000000000001"),
     (f"{T}/learning-jobs", {"investigation_id": "b1000000-0000-4000-8000-000000000001", "client_request_id": "r1"},
-     "create_learning_job", JOB, f"{T}/learning-jobs/c1000000-0000-4000-8000-000000000001", ("learning_job.start", "c1000000-0000-4000-8000-000000000001", "investigation b1000000-0000-4000-8000-000000000001")),
+     "create_learning_job", JOB, f"{T}/learning-jobs/c1000000-0000-4000-8000-000000000001"),
 ])
 def test_a_create_is_a_201_with_location_only_when_the_store_created(
     path: str, body: dict[str, str], port: str, record: Any, location: str,
-    audit: tuple[str, str, str],
 ) -> None:
+    """A create is one write call, principal first; 201 with Location when created, 200 without on a replay; the route announces nothing. (Ports, P2)"""
     created = Api(**{port: (record, True)})
     response = created.client.post(path, headers=AUTH, json=body)
     assert response.status_code == 201
     assert response.headers["Location"] == BASE + location
     assert response.json() == record.model_dump(mode="json")
-    assert created.ports.called(port) == [((*body.values(),), {})]
-    assert created.ports.transactions == [(A, created.user)]
-    assert created.audited() == [audit]
+    [((principal, *rest), kwargs)] = created.ports.called(port)
+    assert (principal, rest, kwargs) == (Principal(tenant_id=A, actor_id=created.user), [*body.values()], {})
+    assert [name for name, _ in created.ports.written] == [port]
+    assert created.ports.audits == [], "the route announces nothing"
 
     replayed = Api(**{port: (record, False)})
     response = replayed.client.post(path, headers=AUTH, json=body)
     assert response.status_code == 200
     assert "Location" not in response.headers
     assert response.json() == record.model_dump(mode="json")
-    assert replayed.ports.transactions == [(A, replayed.user)]
-    assert replayed.audited() == [], "a replay is not a second start"
+    assert [name for name, _ in replayed.ports.written] == [port]
+    assert replayed.ports.audits == []
 
 
 @pytest.mark.parametrize(("path", "body", "port", "record"), [
@@ -591,22 +585,32 @@ def test_a_create_is_a_201_with_location_only_when_the_store_created(
      "create_learning_job", JOB),
 ])
 @pytest.mark.parametrize("created", [True, False])
-def test_a_create_answered_for_another_target_is_a_500_and_commits_nothing(
+def test_a_create_answered_for_another_target_is_a_500_over_the_committed_write(
     path: str, body: dict[str, str], port: str, record: Any, created: bool,
 ) -> None:
+    """The answer check runs after commit: a 500, the write stands, the route announces nothing. (Ports)"""
     api = Api(**{port: (record, created)})
     response = api.lenient().post(path, headers=AUTH, json=body)
     assert response.status_code == 500
     assert "Location" not in response.headers
-    assert api.audited() == []
+    assert [name for name, _ in api.ports.written] == [port]
+    assert api.ports.audits == []
 
 
-def test_a_create_whose_audit_write_fails_commits_nothing() -> None:
-    api = Api(create_investigation=(INV, True), audit=RuntimeError("audit down"))
-    response = api.lenient().post(f"{T}/investigations", headers=AUTH,
-                                  json={"alert_id": "a1000000-0000-4000-8000-000000000001", "client_request_id": "r1"})
+@pytest.mark.parametrize(("route", "path", "body", "answers"), [row for row in HAPPY if any(n in WRITES for n in row[3])],
+                         ids=lambda v: str(v))
+def test_a_write_port_that_raises_answers_500_with_the_write_called_and_the_route_announces_nothing(
+    route: tuple[str, str], path: str, body: dict[str, Any] | None, answers: dict[str, Any],
+) -> None:
+    """Every announcing write: a port exception is a 500 after the write call was made; the route announces nothing. (Am-2, P2)"""
+    served = Api(**answers)
+    assert served.client.request(route[0], path, headers=AUTH, json=body).status_code < 400  # control
+    [name] = WRITES & answers.keys()
+    failing = Api(**{**answers, name: RuntimeError("port down")})
+    response = failing.lenient().request(route[0], path, headers=AUTH, json=body)
     assert response.status_code == 500
-    assert api.audited() == []
+    assert failing.ports.called(name) != []
+    assert failing.ports.audits == []
 
 
 def test_put_system_is_a_201_at_its_own_url_when_created_and_200_when_replaced() -> None:
@@ -614,13 +618,15 @@ def test_put_system_is_a_201_at_its_own_url_when_created_and_200_when_replaced()
     created = Api(put_system=(SETTINGS, True), has_credentials=False)
     response = created.client.put(f"{T}/systems/tix", headers=AUTH, json=body)  # R7-2: a stray `x=1` here is now refused, see below
     assert (response.status_code, response.headers["Location"]) == (201, BASE + f"{T}/systems/tix")
-    ((system_id, sent), kwargs), = created.ports.called("put_system")
-    assert (system_id, sent.model_dump(), kwargs) == ("tix", body, {})
+    # FORCED CHOICE FC-12: the systems port's `put_system(principal, system_id, body)`: the principal replaces the tenant.
+    ((principal, system_id, sent), kwargs), = created.ports.called("put_system")
+    assert (principal.tenant_id, principal.actor_id, system_id, sent.model_dump(), kwargs) == (
+        A, created.user, "tix", body, {})
     replaced = Api(put_system=(SETTINGS, False), has_credentials=False)
     response = replaced.client.put(f"{T}/systems/tix", headers=AUTH, json=body)
     assert response.status_code == 200
     assert "Location" not in response.headers
-    assert created.audited() == replaced.audited() == [("system.update", "tix", "")]
+    assert created.ports.audits == replaced.ports.audits == [], "the systems port announces `system.update`, not the route"
 
 
 @pytest.mark.parametrize("model", [SystemPut, CredentialsPut])
@@ -641,22 +647,21 @@ def test_put_system_without_a_field_is_refused(missing: str) -> None:
 # --- #1345 O1: the alert mapping's routes (shape over the scripted ports; the rules are the store's) -------
 
 
-def test_1345_put_alert_mapping_is_201_at_its_own_url_then_200_and_each_is_audited_after_commit() -> None:
+def test_1345_put_alert_mapping_is_201_at_its_own_url_then_200_and_the_route_announces_nothing() -> None:
     """The first save creates (201, Location), a later one replaces (200); the port gets the body as sent; the
     answer has all six entries, unmapped ones null; one `alert_mapping.update` event each. (#1345 O1)"""
-    created = Api(put_alert_mapping=lambda body: (body, True))
+    created = Api(put_alert_mapping=lambda _principal, body: (body, True))
     response = created.client.put(alert_mapping_url(A), headers=AUTH, json=MAPPING_BODY)
     assert (response.status_code, response.headers["Location"]) == (201, BASE + alert_mapping_url(A))
     assert response.json() == {entry: MAPPING_BODY.get(entry) for entry in MAPPING_ENTRIES}
-    ((sent,), kwargs), = created.ports.called("put_alert_mapping")
-    assert (sent.model_dump(), kwargs) == (MAPPING_BODY, {})  # r5: the port gets the validated wire model's `model_dump()`
+    ((principal, sent), kwargs), = created.ports.called("put_alert_mapping")
+    assert (principal, sent.model_dump(), kwargs) == (Principal(tenant_id=A, actor_id=created.user), MAPPING_BODY, {})  # r5: the port gets the validated wire model's `model_dump()`
 
-    replaced = Api(put_alert_mapping=lambda body: (body, False))
+    replaced = Api(put_alert_mapping=lambda _principal, body: (body, False))
     response = replaced.client.put(alert_mapping_url(A), headers=AUTH, json=MAPPING_BODY)
     assert response.status_code == 200
     assert "Location" not in response.headers
-    # r5 O1: the action `alert_mapping.update`, target the tenant id.
-    assert created.audited() == replaced.audited() == [("alert_mapping.update", A, "")]
+    assert created.ports.audits == replaced.ports.audits == [], "the write port announces `alert_mapping.update`"
 
 
 def test_1345_the_audit_vocabulary_has_the_mapping_update() -> None:
@@ -702,8 +707,9 @@ def _over_the_fake() -> tuple[TestClient, InMemoryStore]:
     return TestClient(create_app(ApiDeps(
         identity=identity, tenants=tenants, frontend_origin=ORIGIN,
         alerts=store, investigations=store, learning_jobs=store, lessons=store, systems=store,
-        writes=store, secrets=InMemorySecrets(), checker=StubSystemChecker(),
+        writes=store, secrets=InMemorySecrets(store), checker=StubSystemChecker(),
         artifact_links=StubArtifactLinks(), offboarding=InMemoryOffboarding(tenants, store, lambda: NOW),
+        alert_mapping=store, audit=store,  # FORCED CHOICE FC-14: the in-memory store serves the mapping read and the audit-only port
     )), base_url=BASE), store
 
 
@@ -787,14 +793,15 @@ def test_1345_the_mapping_body_names_exactly_the_records_entries_all_required() 
     ("POST", f"{T}/investigations/b1000000-0000-4000-8000-000000000001/cancel", "cancel_investigation", INV, "investigation.cancel"),
     ("DELETE", f"{T}/investigations/b1000000-0000-4000-8000-000000000001", "delete_investigation", None, "investigation.delete"),
 ])
-def test_a_write_is_audited_in_its_own_transaction(
+def test_a_cancel_or_delete_is_one_write_call_naming_the_principal_and_the_route_announces_nothing(
     method: str, path: str, port: str, answer: Any, action: str,
 ) -> None:
+    """`action` is announced by the write port (store contract), never by the route. (Ports, P2)"""
     api = Api(**{port: answer})
     assert api.client.request(method, path, headers=AUTH).status_code < 400
-    assert api.ports.called(port) == [(("b1000000-0000-4000-8000-000000000001",), {})]
-    assert api.ports.transactions == [(A, api.user)]
-    assert api.audited() == [(action, "b1000000-0000-4000-8000-000000000001", "")]
+    assert api.ports.called(port) == [((Principal(tenant_id=A, actor_id=api.user), "b1000000-0000-4000-8000-000000000001"), {})]
+    assert [name for name, _ in api.ports.written] == [port]
+    assert api.ports.audits == []
 
 
 # --- refusals ------------------------------------------------------------------------------
@@ -831,7 +838,7 @@ def test_a_read_the_store_answers_none_is_a_404(path: str, port: str) -> None:
     ("POST", f"{T}/investigations", {"alert_id": "a1000000-0000-4000-8000-000000000001", "client_request_id": "r"},
      "create_investigation", store_errors.UnknownReference("x"), 422),
 ])
-def test_a_store_refusal_maps_to_its_status_and_audits_nothing(
+def test_a_store_refusal_maps_to_its_status_and_writes_and_announces_nothing(
     method: str, path: str, body: dict[str, str] | None, port: str, error: Exception, code: int,
 ) -> None:
     api = Api(**{port: error})
@@ -840,7 +847,7 @@ def test_a_store_refusal_maps_to_its_status_and_audits_nothing(
     assert response.headers["Content-Type"] == "application/problem+json"
     assert response.json() == {"type": "about:blank", "title": HTTPStatus(code).phrase,
                                "status": code, "detail": "x"}
-    assert api.ports.audits == [], "the refused write's transaction committed nothing"
+    assert (api.ports.written, api.ports.audits) == ([], []), "a refused write is not recorded and the route announces nothing"
 
 
 # --- artifacts -----------------------------------------------------------------------------
@@ -863,12 +870,12 @@ def test_an_artifact_read_whose_link_fails_is_not_audited() -> None:
     response = api.lenient().get(f"{T}/investigations/b1000000-0000-4000-8000-000000000001/artifacts/report.md", headers=AUTH,
                                  follow_redirects=False)
     assert response.status_code == 500
-    assert api.ports.transactions == []
+    assert api.ports.written == []
     assert api.ports.audits == []
 
 
 def test_an_artifact_link_is_not_handed_out_unless_its_read_is_audited() -> None:
-    api = Api(get_investigation=INV, signed_url=SIGNED, audit=RuntimeError("audit down"))
+    api = Api(get_investigation=INV, signed_url=SIGNED, announce=RuntimeError("audit down"))
     response = api.lenient().get(f"{T}/investigations/b1000000-0000-4000-8000-000000000001/artifacts/report.md", headers=AUTH,
                                  follow_redirects=False)
     assert response.status_code == 500
@@ -903,32 +910,26 @@ def test_has_credentials_is_the_secret_stores_answer(has: bool) -> None:
     assert api.ports.called("has_credentials")[0] == ((A, "tix"), {})
 
 
-def test_credentials_are_written_through_and_never_echoed_or_audited() -> None:
+def test_credentials_are_written_through_and_never_echoed_or_announced_by_the_route() -> None:
     secret = "s3cr3t-value-never-echoed-" + LONG  # conflict updated: #1163 A4 (kind, minimum length)
     api = Api(get_system=SETTINGS, has_credentials=False, put_credentials=None)
     response = api.client.put(f"{T}/systems/tix/credentials", headers=AUTH,
                               json={"kind": "static", "credentials": {"api_token": secret}})
     assert (response.status_code, response.content) == (204, b"")
-    assert api.ports.called("put_credentials") == [((A, "tix", "static", {"api_token": secret}), {})]
+    # FORCED CHOICE FC-12: the secret port's `put_credentials(principal, system_id, kind, fields)`: the principal replaces the tenant.
+    assert api.ports.called("put_credentials") == [
+        ((Principal(tenant_id=A, actor_id=api.user), "tix", "static", {"api_token": secret}), {})]
     assert api.ports.called("has_credentials") == [], "an existence check, not a read"
-    assert api.audited() == [("system.credentials", "tix", "fields: api_token")]
-    assert secret not in repr(api.ports.audits)
+    assert api.ports.audits == [], "the secret port announces `system.credentials` after its write (Am-2)"
 
 
-def test_credentials_are_not_written_when_their_audit_write_fails() -> None:
-    api = Api(get_system=SETTINGS, put_credentials=None, audit=RuntimeError("audit down"))
-    response = api.lenient().put(f"{T}/systems/tix/credentials", headers=AUTH,
-                                 json={"kind": "static", "credentials": {"api_token": LONG}})
-    assert response.status_code == 500
-    assert api.ports.called("put_credentials") == []
-
-
-def test_a_failed_credentials_write_commits_no_audit() -> None:
+def test_a_failed_credentials_write_announces_nothing() -> None:
+    """A failed credentials write answers 500 and the route announces nothing. (Am-2)"""
     api = Api(get_system=SETTINGS, put_credentials=RuntimeError("vault down"))
     response = api.lenient().put(f"{T}/systems/tix/credentials", headers=AUTH,
                                  json={"kind": "static", "credentials": {"api_token": LONG}})
     assert response.status_code == 500
-    assert api.ports.audits == []
+    assert (api.ports.written, api.ports.audits) == ([], [])
 
 
 #: Each as it is spelled inside a JSON string, so the body is valid JSON that decodes to it.
@@ -981,7 +982,7 @@ def test_a_secret_field_below_the_minimum_length_is_refused_at_write_time(
                               json={"kind": kind, "credentials": credentials})
     assert response.status_code == (204 if accepted else 422), response.text
     assert api.ports.called("put_credentials") == (
-        [((A, "tix", kind, credentials), {})] if accepted else [])
+        [((Principal(tenant_id=A, actor_id=api.user), "tix", kind, credentials), {})] if accepted else [])
 
 
 @pytest.mark.parametrize("kind", [None, "", "oauth", "other"])
@@ -1071,6 +1072,9 @@ def test_the_published_contract_declares_each_routes_problems() -> None:
     assert declared[("POST", "/tenants/{tenant_id}/investigations/{investigation_id}/cancel")] >= {404, 409}
     assert declared[("DELETE", "/tenants/{tenant_id}/investigations/{investigation_id}")] >= {404, 409}
     assert declared[("POST", "/tenants/{tenant_id}/investigations")] >= {409}
+    refusable = {route for route in EXISTING_ROUTES if "/systems" in route[1] or "/lessons" in route[1]}
+    assert len(refusable) == 5
+    assert all(501 in declared[route] for route in refusable), "the 501 is documented on every route of the unbacked families (O8)"
     assert declared[("POST", "/tenants/{tenant_id}/learning-jobs")] >= {409}
     assert declared[("GET", "/tenants/{tenant_id}/investigations/{investigation_id}/artifacts/{key}")] >= {404}
     # Every tenant route answers 404 to a non-member, so every one declares it.
@@ -1209,7 +1213,7 @@ def test_an_id_outside_the_grammar_is_refused_at_the_boundary(
     api = Api()
     assert api.client.request(method, path, headers=AUTH, json=body).status_code == 422
     assert api.ports.calls == []
-    assert api.ports.transactions == []
+    assert api.ports.written == []
 
 
 @pytest.mark.parametrize("limit", [0, MAX_PAGE + 1])
@@ -1328,6 +1332,22 @@ def test_an_edited_cursor_cannot_hand_a_port_an_id_outside_the_grammar(
     calls = len(api.ports.calls)
     response = api.client.get(path, headers=AUTH, params={"limit": 1, "cursor": cursor})
     assert response.status_code == 422
+    assert len(api.ports.calls) == calls, "the edited cursor reached a port"
+
+
+@pytest.mark.parametrize("bad_id", ["abc", "A1000000-0000-4000-8000-000000000002", "not-a-uuid-but-a-record-id"])
+@pytest.mark.parametrize(("path", "port", "rows"), [x[:3] for x in LISTS[:3]], ids=[x[0] for x in LISTS[:3]])
+def test_an_edited_cursor_with_an_id_not_of_the_lists_family_is_refused_before_the_store(
+    path: str, port: str, rows: list[Any], bad_id: str,
+) -> None:
+    """A newest-first list's cursor id is read as the items' own id (canonical lowercase UUID): anything else, even a
+    valid record id or the same UUID in upper case, is not a position in the list (422), never a store error. (#1498)"""
+    api = Api(**{port: _rows_after(rows), "has_credentials": False})
+    cursor = _edited(_cursor(api, path), id=bad_id)
+    calls = len(api.ports.calls)
+    response = api.client.get(path, headers=AUTH, params={"limit": 1, "cursor": cursor})
+    assert response.status_code == 422
+    assert "not a position in this list" in response.text
     assert len(api.ports.calls) == calls, "the edited cursor reached a port"
 
 
@@ -1454,8 +1474,9 @@ def test_paging_the_demo_store_serves_every_row_once_across_tied_timestamps() ->
     client = TestClient(create_app(ApiDeps(
         identity=identity, tenants=tenants, frontend_origin=ORIGIN,
         alerts=store, investigations=store, learning_jobs=store, lessons=store, systems=store,
-        writes=store, secrets=InMemorySecrets(), checker=StubSystemChecker(),
+        writes=store, secrets=InMemorySecrets(store), checker=StubSystemChecker(),
         artifact_links=StubArtifactLinks(), offboarding=InMemoryOffboarding(tenants, store, lambda: NOW),
+        alert_mapping=store, audit=store,
     )), base_url=BASE)
     seen: list[str] = []
     params: dict[str, Any] = {"limit": 2}
@@ -1476,14 +1497,16 @@ def test_the_demo_store_refuses_to_delete_a_live_investigation_as_the_port_promi
     store = InMemoryStore(lambda: NOW)
     store.add_alert(A, ALERT)
 
+    principal = Principal(tenant_id=A, actor_id=USER)
+
     async def scenario() -> tuple[bool, bool]:
-        inv, _ = await store.create_investigation(A, ALERT.alert_id, "k1")
+        inv, _ = await store.create_investigation(principal, ALERT.alert_id, "k1")
         store.add_investigation(A, inv.model_copy(update={"status": status}))
         with pytest.raises(Conflict):
-            await store.delete_investigation(A, inv.investigation_id)
+            await store.delete_investigation(principal, inv.investigation_id)
         kept = await store.get_investigation(A, inv.investigation_id) is not None
         store.add_investigation(A, inv.model_copy(update={"status": "completed"}))
-        await store.delete_investigation(A, inv.investigation_id)
+        await store.delete_investigation(principal, inv.investigation_id)
         return kept, await store.get_investigation(A, inv.investigation_id) is None
 
     assert anyio.run(scenario) == (True, True)
@@ -1517,7 +1540,7 @@ def test_every_route_and_every_dependency_is_a_coroutine_function() -> None:
     assert [f"{c.__module__}.{c.__qualname__}" for c in calls if not inspect.iscoroutinefunction(c)] == []
 
 
-def test_every_fake_port_method_is_a_coroutine_function_and_a_transaction_an_async_context() -> None:
+def test_every_fake_port_method_is_a_coroutine_function_and_the_write_port_has_no_transaction() -> None:
     """D11/B: each fake implementing a `defender.api.ports` Protocol answers by `await`."""
     protocols = [p for p in vars(ports_module).values()
                  if isinstance(p, type) and getattr(p, "_is_protocol", False) and p.__module__ == ports_module.__name__]
@@ -1528,15 +1551,15 @@ def test_every_fake_port_method_is_a_coroutine_function_and_a_transaction_an_asy
         for fake in fakes:
             if names and all(hasattr(fake, n) for n in names):
                 implemented.append((fake.__name__, protocol.__name__))
-                sync = [n for n in names if n != "transaction" and not inspect.iscoroutinefunction(getattr(fake, n))]
+                sync = [n for n in names if not inspect.iscoroutinefunction(getattr(fake, n))]
                 assert sync == [], (fake.__name__, protocol.__name__)
     assert len(protocols) >= 9
     assert len(implemented) >= 9
     assert ("InMemoryStore", "AlertsRepository") in implemented
-    assert ("_InMemoryTransaction", "WriteTransaction") in implemented
-    transaction = InMemoryStore(lambda: NOW).transaction(A, Principal(tenant_id=A, actor_id=USER))  # the principal, not the bare id (#1307 D6)
-    assert hasattr(transaction, "__aenter__")
-    assert hasattr(transaction, "__aexit__")
+    assert ("InMemoryStore", "Writes") in implemented
+    assert ("InMemoryStore", "AlertMappingRepository") in implemented
+    assert not hasattr(ports_module, "WriteTransaction")
+    assert not hasattr(InMemoryStore, "transaction")
 
 
 # --- the demo server -----------------------------------------------------------------------
@@ -1607,7 +1630,7 @@ def test_the_demo_sign_in_port_refuses_with_a_503_problem() -> None:
     assert "Location" not in response.headers
 
 
-def test_the_demo_store_keeps_the_audit_events_a_transaction_commits() -> None:
+def test_the_demo_store_keeps_the_audit_events_its_writes_announce() -> None:
     """The actor is the demo session's user id (read from `/me`)."""
     deps = anyio.run(demo_deps, (DEMO_ONE,), lambda: NOW)
     client = TestClient(create_app(deps), base_url=BASE)
@@ -1619,6 +1642,224 @@ def test_the_demo_store_keeps_the_audit_events_a_transaction_commits() -> None:
     events = deps.writes.audit_events  # type: ignore[attr-defined]
     assert [(e.tenant_id, e.user_id, e.action, e.target) for e in events] == [
         (DEMO_ONE, user_id, "investigation.start", created.json()["investigation_id"])]
+
+
+class _AuditLog(list[Any]):
+    """The demo store's `audit_events`, noting for each event whether the write it announces was visible on arrival.
+
+    Every list mutator goes through `_arrive`; `fail` makes the announcement itself raise."""
+
+    def __init__(self, *, fail: bool = False) -> None:
+        super().__init__()
+        self.fail = fail
+        self.probe: Callable[[], Awaitable[bool]] | None = None  # bound after `demo_deps` returns
+        self.visible_on_arrival: list[bool] = []
+        self.probe_errors: list[BaseException] = []
+
+    def _write_is_visible(self) -> bool:
+        probe = self.probe
+        assert probe is not None, "the probe is bound before any request"
+        seen: list[bool] = []
+
+        def run() -> None:
+            try:
+                seen.append(anyio.run(probe))  # a loop of its own, through the ports
+            except BaseException as error:  # noqa: BLE001 - carried to the test thread
+                self.probe_errors.append(error)
+
+        thread = threading.Thread(target=run)
+        thread.start()
+        thread.join(10)
+        if thread.is_alive():
+            self.probe_errors.append(TimeoutError("the visibility probe did not end in 10 s"))
+        return seen == [True]
+
+    def _arrive(self, events: Any) -> None:
+        if self.fail:
+            raise RuntimeError("the audit log refuses the announcement")
+        for _ in events:
+            self.visible_on_arrival.append(self._write_is_visible())
+
+    def append(self, event: Any) -> None:
+        self._arrive([event])
+        super().append(event)
+
+    def extend(self, events: Any) -> None:
+        events = list(events)
+        self._arrive(events)
+        super().extend(events)
+
+    def insert(self, index: Any, event: Any) -> None:
+        self._arrive([event])
+        super().insert(index, event)
+
+    def __iadd__(self, events: Any) -> _AuditLog:  # type: ignore[misc]
+        events = list(events)
+        self._arrive(events)
+        super().extend(events)
+        return self
+
+    def __setitem__(self, index: Any, value: Any) -> None:
+        self._arrive(list(value) if isinstance(index, slice) else [value])
+        super().__setitem__(index, value)
+
+
+@dataclasses.dataclass(frozen=True)
+class _DemoWrite:
+    """One announcing write as the demo serves it: a request that succeeds, one that fails, and what each announces."""
+
+    request: tuple[str, str, dict[str, Any]]
+    failing: tuple[str, str, dict[str, Any]]
+    action: str
+    target: Callable[[Any], str]
+    detail: str
+    visible: Callable[[ApiDeps, str], Awaitable[bool]]
+
+
+_DONE = demo_id(InvestigationId, DEMO_ONE, "inv-completed")
+_RUNNING = demo_id(InvestigationId, DEMO_ONE, "inv-running")
+_DEMO_T = f"/tenants/{DEMO_ONE}"
+_UNKNOWN = "f0000000-0000-4000-8000-000000000000"
+_NEW_NAME = "Renamed by the test"
+
+
+async def _a_new_investigation(deps: ApiDeps, _secret: str) -> bool:
+    return bool(await deps.investigations.list_investigations(
+        DEMO_ONE, alert_id=demo_id(AlertId, DEMO_ONE, "alert-0003"), after=None, limit=5))
+
+
+async def _a_cancelled_investigation(deps: ApiDeps, _secret: str) -> bool:
+    found = await deps.investigations.get_investigation(DEMO_ONE, _RUNNING)
+    return found is not None and found.status == "aborted"
+
+
+async def _a_deleted_investigation(deps: ApiDeps, _secret: str) -> bool:
+    return await deps.investigations.get_investigation(DEMO_ONE, _DONE) is None
+
+
+async def _a_new_learning_job(deps: ApiDeps, _secret: str) -> bool:
+    jobs = await deps.learning_jobs.list_learning_jobs(DEMO_ONE, investigation_id=_DONE, after=None, limit=10)
+    return any(job.trigger == "explicit" for job in jobs)
+
+
+async def _a_saved_mapping(deps: ApiDeps, _secret: str) -> bool:
+    return await deps.alert_mapping.get_alert_mapping(DEMO_ONE) is not None
+
+
+async def _a_replaced_system(deps: ApiDeps, _secret: str) -> bool:
+    found = await deps.systems.get_system(DEMO_ONE, "siem")
+    return found is not None and found.display_name == _NEW_NAME
+
+
+async def _stored_credentials(deps: ApiDeps, _secret: str) -> bool:
+    return await deps.secrets.has_credentials(DEMO_ONE, "siem")
+
+
+DEMO_WRITES = {
+    "create_investigation": _DemoWrite(
+        ("POST", f"{_DEMO_T}/investigations", {"alert_id": demo_id(AlertId, DEMO_ONE, "alert-0003"), "client_request_id": "r1"}),
+        ("POST", f"{_DEMO_T}/investigations", {"alert_id": _UNKNOWN, "client_request_id": "r1"}),
+        "investigation.start", lambda response: response.json()["investigation_id"],
+        f"alert {demo_id(AlertId, DEMO_ONE, 'alert-0003')}", _a_new_investigation),
+    "cancel_investigation": _DemoWrite(
+        ("POST", f"{_DEMO_T}/investigations/{_RUNNING}/cancel", {}), ("POST", f"{_DEMO_T}/investigations/{_DONE}/cancel", {}),
+        "investigation.cancel", lambda _response: _RUNNING, "", _a_cancelled_investigation),
+    "delete_investigation": _DemoWrite(
+        ("DELETE", f"{_DEMO_T}/investigations/{_DONE}", {}), ("DELETE", f"{_DEMO_T}/investigations/{_RUNNING}", {}),
+        "investigation.delete", lambda _response: _DONE, "", _a_deleted_investigation),
+    "create_learning_job": _DemoWrite(
+        ("POST", f"{_DEMO_T}/learning-jobs", {"investigation_id": _DONE, "client_request_id": "r1"}),
+        ("POST", f"{_DEMO_T}/learning-jobs", {"investigation_id": _UNKNOWN, "client_request_id": "r1"}),
+        "learning_job.start", lambda response: response.json()["learning_job_id"],
+        f"investigation {_DONE}; trigger=explicit", _a_new_learning_job),
+    "put_alert_mapping": _DemoWrite(
+        ("PUT", alert_mapping_url(DEMO_ONE), MAPPING_BODY), ("PUT", alert_mapping_url(DEMO_ONE), {**MAPPING_BODY, "summary": 7}),
+        "alert_mapping.update", lambda _response: DEMO_ONE, "", _a_saved_mapping),
+    "put_system": _DemoWrite(
+        ("PUT", f"{_DEMO_T}/systems/siem", {"kind": "siem", "display_name": _NEW_NAME, "enabled": True, "settings": {}}),
+        ("PUT", f"{_DEMO_T}/systems/siem", {"display_name": _NEW_NAME}),
+        "system.update", lambda _response: "siem", "", _a_replaced_system),
+    "put_credentials": _DemoWrite(
+        ("PUT", f"{_DEMO_T}/systems/siem/credentials", {}), ("PUT", f"{_DEMO_T}/systems/nope/credentials", {}),
+        "system.credentials", lambda _response: "siem", "fields: api_token", _stored_credentials),
+}
+
+
+def test_every_announcing_write_the_demo_serves_is_in_the_table() -> None:
+    """The demo cases cover exactly the stub's announcing writes. (Am-2, Am-6)"""
+    assert set(DEMO_WRITES) == WRITES
+
+
+#: The writes whose failing request reaches the write port (the job store's four): only there is "announces nothing"
+#: a claim about a refused write. The other three stop at a 422 or 404 before the port (accepted trade-off).
+_PORT_REACHED = {"create_investigation", "cancel_investigation", "delete_investigation", "create_learning_job"}
+
+
+def _demo_with_audit_log(
+    name: str, *, fail: bool = False,
+) -> tuple[_DemoWrite, ApiDeps, _AuditLog, TestClient, dict[str, str], str, str, Callable[[tuple[str, str, dict[str, Any]]], Any]]:
+    """A demo whose store's `audit_events` is an `_AuditLog`, installed before any request (every announcer appends to
+    the attribute as it stands when it announces, FC-14), probe bound after."""
+    case = DEMO_WRITES[name]
+    secret = secrets.token_hex(24)
+    deps = anyio.run(demo_deps, (DEMO_ONE,), lambda: NOW)
+    store = deps.writes
+    assert isinstance(store, InMemoryStore)
+    assert store.audit_events == [], "the seed announces nothing"
+    assert all(port is store for port in (deps.systems, deps.audit, deps.alert_mapping, deps.secrets._store))  # type: ignore[attr-defined]
+    store.audit_events = log = _AuditLog(fail=fail)
+    log.probe = lambda: case.visible(deps, secret)
+    client = TestClient(create_app(deps), base_url=BASE, raise_server_exceptions=False)
+    auth = _session(demo_sessions((DEMO_ONE,))[f"{DEMO_ONE}-analyst"], deps.frontend_origin)
+    user_id = client.get("/me", headers=auth).json()["user"]["id"]
+
+    def send(request: tuple[str, str, dict[str, Any]]) -> Any:
+        method, path, body = request
+        if name == "put_credentials":
+            body = {"kind": "static", "credentials": {"api_token": secret}}
+        return client.request(method, path, headers=auth, json=body or None)
+
+    return case, deps, log, client, auth, user_id, secret, send
+
+
+@pytest.mark.parametrize("name", sorted(WRITES))
+def test_the_demo_announces_each_successful_write_once_after_it_is_visible(
+    name: str, caplog: pytest.LogCaptureFixture,
+) -> None:
+    """One audit event per successful write (action, actor, target, detail), after the write is visible, with
+    no generated secret in any record or log line; where the failing request reaches the port, it announces nothing. (Am-2, P2, FC-14)"""
+    caplog.set_level(logging.DEBUG)
+    case, deps, log, _client, _auth, user_id, secret, send = _demo_with_audit_log(name)
+
+    refused = send(case.failing)
+    assert 400 <= refused.status_code < 500, refused.text
+    if name in _PORT_REACHED:
+        assert log == [], "a failed write announces nothing"
+
+    assert not anyio.run(case.visible, deps, secret), "control: the write is not yet visible"
+    served = send(case.request)
+    assert served.status_code < 300, served.text
+    if log.probe_errors:
+        raise log.probe_errors[0]
+    [event] = log
+    assert (event.tenant_id, event.user_id, event.credential_id, event.action, event.target, event.detail) == (
+        DEMO_ONE, user_id, None, case.action, case.target(served), case.detail)
+    assert log.visible_on_arrival == [True], "the event arrives after the write is visible"
+    assert secret not in "\n".join(repr(e) for e in log) + caplog.text
+    assert anyio.run(case.visible, deps, secret), "control: the write stands"
+
+
+@pytest.mark.parametrize("name", sorted(WRITES))
+def test_a_demo_announcement_that_fails_after_the_write_answers_500_and_the_write_stands(
+    name: str,
+) -> None:
+    """A write whose audit announcement raises answers 500, and the write is visible afterwards. (Am-2)"""
+    case, deps, log, _client, _auth, _user_id, secret, send = _demo_with_audit_log(name, fail=True)
+    assert not anyio.run(case.visible, deps, secret), "control: the write is not yet visible"
+    served = send(case.request)
+    assert served.status_code == 500, served.text
+    assert log == []
+    assert anyio.run(case.visible, deps, secret), "the write stands"
 
 
 def test_the_demo_store_keys_records_by_tenant() -> None:
@@ -1639,3 +1880,98 @@ def test_the_demo_store_keys_records_by_tenant() -> None:
 def test_the_demo_seed_refuses_a_bad_tenant_list(tenants: tuple[str, ...], reason: str) -> None:
     with pytest.raises(ValueError, match=reason):
         anyio.run(demo_deps, tenants)
+
+
+# --- #1083: writes are single calls; the alert mapping has its own read port; unbacked families refuse -------
+
+
+@pytest.mark.parametrize(("route", "path", "body", "answers"), HAPPY, ids=lambda v: str(v))
+def test_1083_only_the_artifact_read_announces_through_the_audit_port(
+    route: tuple[str, str], path: str, body: dict[str, Any] | None, answers: dict[str, Any],
+) -> None:
+    """Every other route (reads, work writes, systems, mapping) calls `announce` never: the write port announces. (P2, Am-4)"""
+    api = Api(**answers)
+    assert api.client.request(route[0], path, headers=AUTH, json=body, follow_redirects=False).status_code < 400
+    announced_by_route = [name for name, _, _ in api.ports.calls if name == "announce"]
+    assert announced_by_route == (["announce"] if path.endswith("/artifacts/report.md") else [])
+    assert [(a, t) for _, _, a, t, _ in api.ports.audits] == (
+        [("artifact.read", "b1000000-0000-4000-8000-000000000001")] if announced_by_route else [])
+
+
+def test_1083_a_mapping_replace_answers_what_the_write_port_returned_not_the_body() -> None:
+    """The port returns the mapping it holds and whether it created it; the route answers exactly that, 201 or 200. (Am-8)"""
+    held = {**MAPPING_BODY, "signature": "stored.signature"}
+    for created, status in ((True, 201), (False, 200)):
+        api = Api(put_alert_mapping=lambda _principal, _body, held=held, created=created: (_alert_mapping_wire(held), created))
+        response = api.client.put(alert_mapping_url(A), headers=AUTH, json=MAPPING_BODY)
+        assert (response.status_code, response.json()) == (status, held)
+        assert ("Location" in response.headers) is created
+
+
+def test_1083_the_alert_mapping_reads_from_its_own_port_while_the_systems_port_refuses_whole() -> None:
+    """`GET /alert-mapping` asks the alert-mapping port, never the systems port (G2, FC-11)."""
+    deps, _ = _deps(Scripted({}))
+    mapping = Scripted({"get_alert_mapping": lambda _tenant: _alert_mapping_wire(MAPPING_BODY)})
+    deps = dataclasses.replace(deps, systems=_Unused(), alert_mapping=mapping)
+    response = TestClient(create_app(deps), base_url=BASE).get(alert_mapping_url(A), headers=AUTH)
+    assert (response.status_code, response.json()) == (200, MAPPING_BODY)
+    assert mapping.called("get_alert_mapping") == [((A,), {})]
+
+
+def _refusing(issue: str) -> Any:
+    """FORCED CHOICE FC-15: the whole-refusing port is `defender.api.refusing.Refusing(issue)`: any method called on it
+    refuses with the 501 the app maps, naming `issue`. Imported at call time; it does not exist before #1083."""
+    from defender.api.refusing import Refusing
+
+    return Refusing(issue)
+
+
+def _refusing_client(others: dict[str, Any]) -> TestClient:
+    """The app over refusing ports for lessons, systems, secrets and checker; the rest scripted by `others`."""
+    deps, _ = _deps(Scripted(others))
+    deps = dataclasses.replace(deps, lessons=_refusing("#1082"), systems=_refusing("#1470"),
+                               secrets=_refusing("#1470"), checker=_refusing("#1470"))
+    return TestClient(create_app(deps), base_url=BASE)
+
+
+#: Every route of the two unbacked families, by membership of the path (not a hand-picked list).
+REFUSED = [(route, path, body, "#1082" if "/lessons" in path else "#1470")
+           for route, path, body, _ in HAPPY if "/systems" in path or "/lessons" in path]
+
+
+def test_1083_the_refused_family_is_the_systems_and_lessons_routes() -> None:
+    """Control on the sweep: five routes, both issues. (O8)"""
+    assert len(REFUSED) == 5
+    assert {issue for *_, issue in REFUSED} == {"#1082", "#1470"}
+
+
+@pytest.mark.parametrize(("route", "path", "body", "issue"), REFUSED, ids=lambda v: str(v))
+def test_1083_a_member_gets_501_naming_the_issue_a_non_member_404_and_a_stranger_401(
+    route: tuple[str, str], path: str, body: dict[str, Any] | None, issue: str,
+) -> None:
+    """Given refusing ports: sign-in, membership and permission run first; a member's call is a 501 problem. (O8, P1, FC-8)"""
+    client = _refusing_client({})
+    refused = client.request(route[0], path, headers=AUTH, json=body)
+    assert refused.status_code == 501, refused.text
+    assert refused.headers["Content-Type"] == "application/problem+json"
+    problem = refused.json()
+    assert (problem["title"], problem["status"]) == ("Not Implemented", 501)
+    assert issue in problem["detail"]
+    assert client.request(route[0], path, headers=AUTH_B, json=body).status_code == 404
+    assert client.request(route[0], path, headers={"Origin": ORIGIN}, json=body).status_code == 401
+
+
+def test_1083_control_the_same_deps_serve_the_backed_families() -> None:
+    """With the families refused, alerts and the mapping still answer: the 501 is the families', not the app's. (O8)"""
+    client = _refusing_client({"list_alerts": [SUMMARY], "get_alert_mapping": lambda _t: _alert_mapping_wire(MAPPING_BODY)})
+    assert client.get(f"{T}/alerts", headers=AUTH).status_code == 200
+    assert client.get(alert_mapping_url(A), headers=AUTH).json() == MAPPING_BODY
+
+
+def test_1083_the_published_document_is_the_same_whichever_ports_are_passed_and_is_not_marked_stub() -> None:
+    """The demo's, a scripted and a refusing-ports document are one document; its summary does not say "not yet real". (O8, Am-2)"""
+    demo = TestClient(create_app(anyio.run(demo_deps, (DEMO_ONE,), lambda: NOW)), base_url=BASE).get("/openapi.json").json()
+    refusing = _refusing_client({}).get("/openapi.json").json()
+    assert demo["paths"]
+    assert demo == refusing == Api().client.get("/openapi.json").json()
+    assert "not yet real" not in json.dumps(demo["info"]).lower()

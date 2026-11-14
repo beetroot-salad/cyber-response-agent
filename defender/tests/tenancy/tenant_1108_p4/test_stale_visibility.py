@@ -598,8 +598,9 @@ def _client(*investigations: Any) -> Any:
     deps = ApiDeps(
         identity=identity, tenants=tenants, frontend_origin=_ORIGIN,
         alerts=store, investigations=store, learning_jobs=store, lessons=store, systems=store,
-        writes=store, secrets=InMemorySecrets(), checker=StubSystemChecker(),
-        artifact_links=StubArtifactLinks(), offboarding=InMemoryOffboarding(tenants, store, now))
+        writes=store, secrets=InMemorySecrets(store), checker=StubSystemChecker(),
+        artifact_links=StubArtifactLinks(), offboarding=InMemoryOffboarding(tenants, store, now),
+        alert_mapping=store, audit=store)  # FC-14 (Am-5)
     return TestClient(create_app(deps), base_url="https://testserver")
 
 

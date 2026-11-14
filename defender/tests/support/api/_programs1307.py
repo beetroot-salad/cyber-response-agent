@@ -400,10 +400,11 @@ class ProgramsWorld(World):
         self.app = create_app(ApiDeps(
             alerts=self.store, investigations=self.store, learning_jobs=self.store,
             lessons=self.store, systems=self.store, writes=self.store,
-            secrets=InMemorySecrets(), checker=StubSystemChecker(),
+            secrets=InMemorySecrets(self.store), checker=StubSystemChecker(),
             artifact_links=StubArtifactLinks(),
             offboarding=InMemoryOffboarding(self.tenants, self.store, self.clock),
             identity=self.service, frontend_origin=FRONTEND_ORIGIN, tenants=self.tenants,
+            alert_mapping=self.store, audit=self.store,  # FC-14 (Am-5)
         ))
 
     def bearer(self, value: str, *, origin: str | None = None, scheme: str = "Bearer",

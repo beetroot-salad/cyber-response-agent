@@ -12,6 +12,7 @@ import hmac
 import json
 import urllib.parse
 from collections.abc import AsyncIterator, Callable
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -20,7 +21,24 @@ from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 # Production names (Pinned interface): a missing module is the expected red.
 from defender.identity import SignInRefused, SignInUnavailable, VerifiedSignIn
-from defender.identity.keycloak import KeycloakSignIn
+from defender.tests.support.api._server1083 import (
+    ADMIN_CLIENTS,
+    ADMIN_READ,
+    BACK,
+    ELSEWHERE_ISSUER,
+    FAULTS,
+    FRONT,
+    PROGRAMS_REALM,
+    REALMS,
+    SIGNIN_REALM,
+    STEP_KINDS,
+    STEPS,
+    Fail,
+    FakeKeycloak,
+    closed_port,
+    realms_named,
+)
+from defender.identity.keycloak import KeycloakPrograms, KeycloakSignIn
 
 pytestmark = pytest.mark.anyio
 
@@ -662,3 +680,323 @@ async def test_a_sign_in_right_after_keycloak_rotates_its_key_verifies(kc):
     await port.begin_signin(state="s2", nonce="n1", code_challenge="chal")
     assert (await port.finish_signin(code="code-1", code_verifier="verifier-1", nonce="n1")).account_id
     assert sum(1 for s in kc.seen if s.path.endswith("/certs")) == 2
+
+
+
+# --- the start-up probe of both adapters (#1083 O3, Am-9) ------------------------------------------
+# Both realms over the shared fake that answers as the dev Keycloak was observed to (code map, "Live Keycloak admin").
+# FC-6 pins only the first step's name ("discovery"); the other steps are told apart by realm and by outcome.
+
+def probed(realm: str, *, transport: httpx.AsyncBaseTransport | None, server_url: str = BACK):
+    """The realm's adapter as the composition builds it: the issuer on the front channel, reached at `server_url`."""
+    issuer = f"{FRONT}/realms/{realm}"
+    if realm == SIGNIN_REALM:
+        admin_id, admin_secret = ADMIN_CLIENTS[SIGNIN_REALM]
+        return KeycloakSignIn(issuer=issuer, client_id=CLIENT_ID, client_secret=CLIENT_SECRET,
+                              redirect_uri=REDIRECT_URI, admin_client_id=admin_id,
+                              admin_client_secret=admin_secret, server_url=server_url,
+                              transport=transport, clock=lambda: NOW)
+    admin_id, admin_secret = ADMIN_CLIENTS[PROGRAMS_REALM]
+    return KeycloakPrograms(issuer=issuer, audience="defender-api-programs",
+                            admin_client_id=admin_id, admin_client_secret=admin_secret,
+                            server_url=server_url, transport=transport, clock=lambda: NOW)
+
+
+async def probe_of(realm: str, fake: FakeKeycloak) -> object:
+    """What the realm's probe returns (FC-7: None)."""
+    port = probed(realm, transport=fake)
+    try:
+        return await cast(Any, port).probe()
+    finally:
+        await port.close()
+
+
+async def refusal_of(realm: str, fake: FakeKeycloak) -> str:
+    with pytest.raises(SignInUnavailable) as refused:
+        await probe_of(realm, fake)
+    return str(refused.value)
+
+
+def paths(fake: FakeKeycloak) -> list[tuple[str, str]]:
+    return [(method, path.split("/", 1)[1]) for method, path in fake.seen]
+
+
+def admin_reads(fake: FakeKeycloak) -> list[str]:
+    return [path for method, path in paths(fake) if method == "GET" and path.startswith("admin/")]
+
+
+def _sibling(realm: str) -> str:
+    return next(r for r in REALMS if r != realm)
+
+
+@pytest.mark.parametrize("realm", REALMS)
+async def test_1083_o3_a_healthy_realm_passes_the_probe_with_reads_only(realm):
+    """A healthy realm's probe returns None having made only reads (the token request apart). (O3)"""
+    fake = FakeKeycloak()
+    assert await probe_of(realm, fake) is None
+    assert sorted(paths(fake)) == sorted([
+        ("GET", f"realms/{realm}/.well-known/openid-configuration"),
+        ("GET", f"realms/{realm}/protocol/openid-connect/certs"),
+        ("POST", f"realms/{realm}/protocol/openid-connect/token"),
+        ("GET", f"admin/realms/{realm}/{ADMIN_READ[realm]}")])
+    assert fake.unmodelled == []
+
+
+async def test_1083_am9_each_realm_probe_reads_the_resource_its_role_covers():
+    """The sign-in probe reads users, the programs probe reads clients; the other would be refused 403. (Am-9)"""
+    reads = {}
+    for realm in REALMS:
+        fake = FakeKeycloak()
+        await probe_of(realm, fake)
+        reads[realm] = admin_reads(fake)
+    assert reads == {SIGNIN_REALM: [f"admin/realms/{SIGNIN_REALM}/users"],
+                     PROGRAMS_REALM: [f"admin/realms/{PROGRAMS_REALM}/clients"]}
+
+
+@pytest.mark.parametrize("realm", REALMS)
+async def test_1083_am9_the_other_resource_is_refused_to_the_realms_admin_client(realm):
+    """The fake refuses the resource a realm's role does not cover, so a probe reading it would fail. (Am-9)"""
+    wrong = "clients" if ADMIN_READ[realm] == "users" else "users"
+    async with httpx.AsyncClient(transport=FakeKeycloak(), base_url=BACK) as client:
+        granted = await client.post(f"/realms/{realm}/protocol/openid-connect/token", auth=ADMIN_CLIENTS[realm],
+                                    data={"grant_type": "client_credentials"})
+        bearer = {"Authorization": f"Bearer {granted.json()['access_token']}"}
+        right = await client.get(f"/admin/realms/{realm}/{ADMIN_READ[realm]}", headers=bearer)
+        refused = await client.get(f"/admin/realms/{realm}/{wrong}", headers=bearer)
+    assert (right.status_code, refused.status_code) == (200, 403)
+
+
+@pytest.mark.parametrize("realm", REALMS)
+async def test_1083_o3_a_missing_realm_refuses_at_discovery_naming_the_realm(realm):
+    """A realm Keycloak does not have refuses at discovery naming the realm; its sibling still passes. (O3)"""
+    fake = FakeKeycloak([Fail(realm, "discovery", "not_found")])
+    message = await refusal_of(realm, fake)
+    assert realms_named(message) == {realm}
+    assert "discovery" in message
+    assert admin_reads(fake) == []
+    assert not any(method == "POST" for method, _ in paths(fake))
+    assert await probe_of(_sibling(realm), fake) is None
+
+
+@pytest.mark.parametrize("realm", REALMS)
+async def test_1083_o3_discovery_naming_another_issuer_refuses_naming_both(realm):
+    """Discovery naming an issuer other than the configured one refuses, naming both and the step. (O3)"""
+    fake = FakeKeycloak([Fail(realm, "discovery", "wrong_issuer")])
+    message = await refusal_of(realm, fake)
+    assert all(part in message for part in (realm, "discovery", f"{FRONT}/realms/{realm}", ELSEWHERE_ISSUER)), message
+    assert admin_reads(fake) == []
+    assert await probe_of(_sibling(realm), fake) is None
+
+
+@pytest.mark.parametrize("realm", REALMS)
+async def test_1083_o3_a_wrong_admin_secret_refuses_at_the_token_step_naming_the_realm(realm):
+    """A refused admin client secret refuses naming the realm, with no admin read made; its sibling passes. (O3)"""
+    fake = FakeKeycloak([Fail(realm, "token", "bad_secret")])
+    message = await refusal_of(realm, fake)
+    assert realm in message
+    assert ("POST", f"realms/{realm}/protocol/openid-connect/token") in paths(fake)
+    assert admin_reads(fake) == []
+    assert await probe_of(_sibling(realm), fake) is None
+
+
+@pytest.mark.parametrize("realm", REALMS)
+async def test_1083_o3_an_admin_read_refused_for_want_of_the_role_refuses_naming_the_realm(realm):
+    """A service account without the role covering the read refuses naming the realm; its sibling passes. (O3)"""
+    fake = FakeKeycloak([Fail(realm, "admin", "no_role")])
+    message = await refusal_of(realm, fake)
+    assert realm in message
+    assert admin_reads(fake) == [f"admin/realms/{realm}/{ADMIN_READ[realm]}"]
+    assert await probe_of(_sibling(realm), fake) is None
+
+
+@pytest.mark.parametrize(("realm", "step", "kind"),
+                         [(realm, step, kind) for (realm, step), kinds in FAULTS.items() for kind in kinds])
+async def test_1083_o3_every_failure_of_every_step_refuses_naming_the_realm_alone(realm, step, kind):
+    """Each failure kind of each probe step refuses, naming its realm and not the other; the sibling passes. (O3, FC-6)"""
+    fake = FakeKeycloak([Fail(realm, step, kind)])
+    message = await refusal_of(realm, fake)
+    assert realms_named(message) == {realm}, message
+    if step == "discovery":
+        assert "discovery" in message
+    assert await probe_of(_sibling(realm), fake) is None
+
+
+@pytest.mark.parametrize("realm", REALMS)
+async def test_1083_o3_a_key_set_with_no_usable_key_refuses_apart_from_the_other_steps(realm):
+    """A keys answer that fails or holds no signing key refuses with a message no other step's failure gives. (O3, FC-6)"""
+    other_steps = {await refusal_of(realm, FakeKeycloak([Fail(realm, step, kind)]))
+                   for step in STEP_KINDS if step != "keys" for kind in STEP_KINDS[step]}
+    assert await probe_of(realm, FakeKeycloak()) is None  # positive control: the intact set passes
+    for kind in STEP_KINDS["keys"]:
+        message = await refusal_of(realm, FakeKeycloak([Fail(realm, "keys", kind)]))
+        assert message not in other_steps, (kind, message)
+
+
+@pytest.mark.parametrize("realm", REALMS)
+async def test_1083_o3_the_four_representative_failures_get_four_messages(realm):
+    """The four steps' failures of one realm are told apart by their messages, each naming the realm. (O3, FC-6)"""
+    representative = {"discovery": "not_found", "keys": "empty", "token": "bad_secret", "admin": "no_role"}
+    messages = {step: await refusal_of(realm, FakeKeycloak([Fail(realm, step, kind)]))
+                for step, kind in representative.items()}
+    assert all(realm in message for message in messages.values())
+    assert len(set(messages.values())) == len(messages)
+
+
+async def test_1083_f13_the_fake_answers_only_the_back_channel_host_and_refuses_an_unknown_bearer():
+    """The fake 404s another host (unmodelled) and 401s an unknown bearer, as the host it models would. (FC-17)"""
+    realm = SIGNIN_REALM
+    fake = FakeKeycloak()
+    async with httpx.AsyncClient(transport=fake) as client:
+        discovery = f"/realms/{realm}/.well-known/openid-configuration"
+        assert (await client.get(f"{BACK}{discovery}")).status_code == 200  # control: the back-channel host
+        other = await client.get(f"{FRONT}{discovery}")
+        assert other.status_code == 404
+        users = f"{BACK}/admin/realms/{realm}/users"
+        assert (await client.get(users, headers={"Authorization": f"Bearer admin-{realm}"})).status_code == 200
+        assert (await client.get(users, headers={"Authorization": "Bearer not-a-token"})).status_code == 401
+        assert (await client.get(users)).status_code == 401
+    assert fake.unmodelled == [("GET", f"{FRONT}{discovery}")]
+
+
+def test_1083_f13_the_fake_keeps_each_realms_signing_key_for_minting():
+    """The fake publishes each realm's signing key from the private key it keeps; the realms' keys differ. (FC-17)"""
+    fake = FakeKeycloak()
+    for realm in REALMS:
+        [signing] = [k for k in fake.keys[realm] if k["use"] == "sig"]
+        assert signing["n"] == _int_b64(fake.signing_keys[realm].public_key().public_numbers().n)
+    assert fake.signing_keys[SIGNIN_REALM] is not fake.signing_keys[PROGRAMS_REALM]
+
+
+@pytest.mark.parametrize("realm", REALMS)
+async def test_1083_o3_an_unreachable_keycloak_refuses_naming_the_realm_and_the_address(realm):
+    """A Keycloak nobody listens for refuses at discovery naming the realm and the address tried. (O3)"""
+    port_number = closed_port()
+    port = probed(realm, transport=None, server_url=f"http://127.0.0.1:{port_number}")
+    try:
+        with pytest.raises(SignInUnavailable) as refused:
+            await port.probe()
+    finally:
+        await port.close()
+    message = str(refused.value)
+    assert all(part in message for part in (realm, "discovery", f"127.0.0.1:{port_number}")), message
+    assert await probe_of(realm, FakeKeycloak()) is None
+
+
+# --- the probe over a generated failure space (#1083 O3, FC-6/7) ----------------------------------------------------
+
+def _transport_errors() -> list[type[httpx.TransportError]]:
+    """`httpx.TransportError` and every subclass, timeouts included."""
+    found, todo = [], [httpx.TransportError]
+    while todo:
+        cls = todo.pop()
+        found.append(cls)
+        todo += cls.__subclasses__()
+    return found
+
+
+def _issuers_one_component_off(issuer: str) -> list[str]:
+    """The configured issuer with exactly one of scheme, host, port, path or trailing slash changed."""
+    parts = urllib.parse.urlsplit(issuer)
+    host, port, path = parts.hostname, parts.port, parts.path
+
+    def at(scheme: str = parts.scheme, netloc: str = parts.netloc, path: str = path) -> str:
+        return urllib.parse.urlunsplit((scheme, netloc, path, "", ""))
+
+    return [at(scheme="https"), at(netloc=f"127.0.0.1:{port}"), at(netloc=f"keycloak:{port}"),
+            at(netloc=f"{host}:{port + 1}"), at(netloc=f"{host}"), at(netloc=f"{host}:80"),
+            at(path="/realms/elsewhere"), at(path=f"{path}/more"), at(path=f"{path}x"), at(path=f"/prefix{path}"),
+            at(path=f"{path}/")]
+
+
+def _jwk_material(kty: str, rsa_key: Any) -> dict[str, str]:
+    """Real public key material of the type `kty`, so a key is refused for its labels, never for being malformed."""
+    from cryptography.hazmat.primitives.asymmetric import ec, ed25519
+
+    if kty == "RSA":
+        numbers = rsa_key.public_key().public_numbers()
+        return {"n": _int_b64(numbers.n), "e": _int_b64(numbers.e)}
+    if kty == "EC":
+        point = ec.generate_private_key(ec.SECP256R1()).public_key().public_numbers()
+        return {"crv": "P-256", "x": _b64(point.x.to_bytes(32, "big")), "y": _b64(point.y.to_bytes(32, "big"))}
+    if kty == "OKP":
+        raw = ed25519.Ed25519PrivateKey.generate().public_key().public_bytes(
+            serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+        return {"crv": "Ed25519", "x": _b64(raw)}
+    return {"k": _b64(b"a shared secret of thirty-two by")}
+
+
+def _key_sets_without_an_rs256_signing_key(fake: FakeKeycloak, realm: str) -> list[list[dict[str, Any]]]:
+    """Each realistic key set beside the realm's encryption key whose one other key is not an RS256 signing key by its
+    labels (kty, alg, use; an absent `alg` or `use` reads as RS256 / sig, so those are left out as ambiguous)."""
+    sets = []
+    for kty in ("RSA", "EC", "oct", "OKP"):
+        for alg in (None, "RS256", "RS384", "RS512", "PS256", "ES256", "HS256", "EdDSA", "RSA-OAEP"):
+            for use in (None, "sig", "enc"):
+                if kty == "RSA" and alg in (None, "RS256") and use in (None, "sig"):
+                    continue
+                key = {"kid": "candidate", "kty": kty, **_jwk_material(kty, fake.signing_keys[realm])}
+                key |= ({"alg": alg} if alg else {}) | ({"use": use} if use else {})
+                sets.append([key, fake.keys[realm][1]])
+    return sets
+
+
+def _failure_space(fake: FakeKeycloak, realm: str, step: str) -> list[tuple[str, Callable[[httpx.Request], httpx.Response]]]:
+    """(label, answer) for every member of the step's failure space."""
+    import http
+
+    def status(code: int) -> Callable[[httpx.Request], httpx.Response]:
+        return lambda request: httpx.Response(code, json={"error": "generated"})
+
+    def raising(cls: type[httpx.TransportError]) -> Callable[[httpx.Request], httpx.Response]:
+        def answer(request: httpx.Request) -> httpx.Response:
+            raise cls("generated", request=request)
+        return answer
+
+    def body(document: dict[str, Any]) -> Callable[[httpx.Request], httpx.Response]:
+        return lambda request: httpx.Response(200, json=document)
+
+    space = [(f"status {s.value}", status(s.value)) for s in http.HTTPStatus if 300 <= s.value < 600]
+    space += [(f"raises {cls.__name__}", raising(cls)) for cls in _transport_errors()]
+    if step == "discovery":
+        issuer = fake.issuer(realm)
+        space += [(f"issuer {other}", body({"issuer": other, "jwks_uri": f"{issuer}/protocol/openid-connect/certs"}))
+                  for other in _issuers_one_component_off(issuer)]
+    if step == "keys":
+        space += [(f"keys {json.dumps([{k: v for k, v in key.items() if k in ('kty', 'alg', 'use')} for key in keys])}",
+                   body({"keys": keys})) for keys in _key_sets_without_an_rs256_signing_key(fake, realm)]
+    return space
+
+
+@pytest.mark.parametrize("realm", REALMS)
+async def test_1083_o3_every_member_of_each_steps_failure_space_refuses_naming_the_realm_and_the_step(realm):
+    """Every non-2xx status, transport error, issuer one component off and key set with no RS256 signing key refuses,
+    naming the realm and the step (and the address for a transport error). (O3, FC-6, FC-7)"""
+    assert await probe_of(realm, FakeKeycloak()) is None  # positive control: the healthy realm passes
+    messages: dict[str, set[str]] = {}
+    wrong = []
+    for step in STEPS:
+        fake = FakeKeycloak()
+        port = probed(realm, transport=fake)  # one adapter per step, as start builds it; earlier steps answer healthily
+        try:
+            for label, answer in _failure_space(fake, realm, step):
+                fake.answers[(realm, step)] = answer
+                try:
+                    await cast(Any, port).probe()
+                except SignInUnavailable as refused:
+                    message = str(refused)
+                else:
+                    wrong.append(f"{step} {label}: passed")
+                    continue
+                messages.setdefault(step, set()).add(message)
+                if realms_named(message) != {realm}:
+                    wrong.append(f"{step} {label}: names realms {realms_named(message)}: {message}")
+                if step == "discovery" and "discovery" not in message:
+                    wrong.append(f"{step} {label}: does not name the discovery step: {message}")
+                if label.startswith("raises") and urllib.parse.urlsplit(BACK).netloc not in message:
+                    wrong.append(f"{step} {label}: does not name the address: {message}")
+        finally:
+            await port.close()
+    assert wrong == [], "\n".join(wrong)
+    # FC-6 names only the first step; the others are told apart: no message is given by two steps.
+    shared = {(a, b): messages[a] & messages[b] for a in STEPS for b in STEPS if a < b}
+    assert all(not both for both in shared.values()), shared
