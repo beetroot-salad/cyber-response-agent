@@ -1,7 +1,7 @@
 """#1366 x #1170: a job's host helper reads the tenant's records once and hands them to its job container.
 
 The container reads no database (#1170 O3), so the helper does every step that reads records: it refuses a tenant that
-is not imported (R8) before the container exists, writes the run's record of versions (O6) beside the run folder, and
+is not active (#1470 O8, which retired R8's "not imported") before the container exists, writes the run's record of versions (O6) beside the run folder, and
 hands the records it read in the launch facts. The container builds its tenant from those records and judges its
 systems itself, since that judgement runs adapter code (#1170 O5, N7)."""
 from __future__ import annotations
@@ -22,7 +22,7 @@ scene = J.scene
 def _records():
     from defender.tenancy.models import CaseRecord, SystemRecord, TenantRecords
 
-    return TenantRecords(imported=True, systems={
+    return TenantRecords(systems={
         "elastic": SystemRecord(system_id="elastic", version=3, adapter_id="elastic", settings={"ELASTIC_URL": "u"},
                                 access="kind: http-proxy\n", credential_generation=2),
         "crm": SystemRecord(system_id="crm", version=1, enabled=False, custom_ref=("adapters/crm.py", "abc123")),
@@ -36,7 +36,7 @@ def test_1366_records_handed_over_the_job_socket_read_back_as_they_were():
 
     records = _records()
     assert TenantRecords.from_wire(json.loads(json.dumps(records.as_wire()))) == records
-    bare = TenantRecords(imported=False)
+    bare = TenantRecords()
     assert TenantRecords.from_wire(json.loads(json.dumps(bare.as_wire()))) == bare
 
 
@@ -95,7 +95,7 @@ def test_1366_the_helper_hands_its_container_the_records_it_read_and_writes_the_
     assert ran.raised is None, ran.raised
     assert docker.job_error is None, docker.job_error
     held = entry_directory(None).current_records(requested_tenant_id(scene.tenant))
-    assert held.imported, "premise: the scene's tenant is imported"
+    assert held.systems, "premise: the scene's tenant has records"
     assert TenantRecords.from_wire(got["launch"]["records"]) == held
     versions = json.loads(RunPaths(Path(got["launch"]["run_dir"])).record_versions.read_text(encoding="utf-8"))
     assert versions == {"systems": {s: r.version for s, r in held.systems.items()},
@@ -104,23 +104,20 @@ def test_1366_the_helper_hands_its_container_the_records_it_read_and_writes_the_
 
 @pytest.mark.postgres
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="the helper is Linux only")
-def test_1366_a_tenant_not_imported_is_refused_by_the_helper_and_no_container_starts(scene, capfd):
-    """R8 at the helper: a tenant with no imported records is `setup: refused` naming the import, no container started,
-    and its alert mapping never consulted (the refusal names the import though the mapping is gone too)."""
+def test_1366_a_tenant_that_is_not_active_is_refused_by_the_helper_and_no_container_starts(scene, capfd):
+    """#1470 O8 at the helper (R8's "not imported" is retired): a tenant moved to offboarding after its job was queued is
+    `setup: refused` with the records read's refusal, and no container is started."""
     from defender.records.job_facts import BOX_NOT_STARTED, SETUP_REFUSED
     from defender.records.job_lane import JobEnd
-    from defender.tests.support.tenancy._systems1366 import drop_records
+    from defender.tests.support.jobs._jobs1342 import move_tenant
 
     inv, argv = _investigation(scene)
-    drop_records(scene.dsn, scene.tenant)
-    scene.unmap()  # were the mapping read first, the refusal would name the mapping
+    move_tenant(scene.dsn, scene.tenant, state="offboarding")
     docker = ContainerStandIn(lambda c: 0)
     ran = drive_helper(scene, argv, docker=docker, signer=make_signer())
 
     assert ran.raised is None, ran.raised
-    assert docker.boxes == [], "a container was started for a tenant that is not imported"
+    assert docker.boxes == [], "a container was started for a tenant that is not active"
     assert scene.end(inv) == JobEnd(SETUP_REFUSED, BOX_NOT_STARTED, False, False, None)
-    from defender.systems.run_tenant import not_imported_text
-
     err = capfd.readouterr().err
-    assert not_imported_text(scene.tenant) in err, err
+    assert "not active" in err, err

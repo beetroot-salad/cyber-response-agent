@@ -255,14 +255,15 @@ class _RecordsDown:
         raise RecordsUnreachable("the tenant records' database could not be reached")
 
 
-class _NotImported(_RecordsDown):
-    """The tenant's directory, its records read as a tenant whose import has not run (R8)."""
+class _NotActive(_RecordsDown):
+    """The tenant's directory, its records read as a tenant that moved to `offboarding` after admission: the read's own
+    refusal (#1470 O8, `refuse_unless_active`)."""
 
     def current_records(self, tenant_id):
-        from defender.tenancy.record_values import TenantRecords
+        from defender.tenancy.repository import refuse_unless_active
 
         self.reads += 1
-        return TenantRecords(imported=False, systems={}, case=None)
+        refuse_unless_active(tenant_id, "offboarding")
 
 
 @pytest.mark.postgres
@@ -283,18 +284,20 @@ def test_lead_author_drain_skips_the_tick_when_the_tenants_systems_cannot_be_rea
 
 
 @pytest.mark.postgres
-def test_lead_author_drain_refuses_a_tick_for_a_tenant_not_imported_and_charges_no_claim(world, caplog):  # noqa: F811 — the imported fixture
-    """Right after the upgrade every tenant is not imported: its tick is refused naming the import (exit 2), before any claim,
-    so its queued work waits for the import rather than being charged and held. (#1366 R8, R16)"""
+def test_lead_author_drain_refuses_a_tick_for_a_tenant_that_is_not_active_and_charges_no_claim(world, caplog):  # noqa: F811 — the imported fixture
+    """A tenant moved to offboarding after admission: its records read is refused (#1470 O8, a fatal configuration error,
+    exit 2), before any claim, so its queued work is not charged and held. (#1366 R16, #1470 O8)"""
     w = world
-    run_dir = _request(w, "case-not-imported")
+    run_dir = _request(w, "case-not-active")
+    moved = _NotActive(w.t.directory)
 
-    assert _lead_tick(w, directory=_NotImported(w.t.directory)) == 2
-    assert "not imported" in critical_text(caplog)
+    assert _lead_tick(w, directory=moved) == 2
+    assert moved.reads == 1, "premise: the tick read the tenant's records"
+    assert "not active" in critical_text(caplog)
 
     item = _items(w)[("curation_request", run_dir.name)]
     assert (item.status, item.attempts) == ("waiting", 0), (item.status, item.attempts)
-    assert call(w.dsn, "batches", w.t.tenant_id) == [], "a batch was started for a tenant not imported"
+    assert call(w.dsn, "batches", w.t.tenant_id) == [], "a batch was started for a tenant that is not active"
 
 
 @pytest.mark.postgres
