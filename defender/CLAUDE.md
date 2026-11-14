@@ -81,7 +81,7 @@ Stop the learning drains and the API before running migrations (revisions `0017_
 code fails on every item insert once it is there. `0017` stops, changing nothing, while any tenant still has a learning
 cutover pending (finish or resume it on an earlier revision first).
 
-The #1278 learning-state cutover is retired: cut over on a revision before #1485 first; a deployment that never did loses its old learning folder.
+The #1278 learning-state cutover is retired: cut over on a revision before #1485 first; a deployment that never did will lose its old learning folder.
 
 ## Upgrade from before #1454
 
