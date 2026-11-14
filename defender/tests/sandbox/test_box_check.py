@@ -99,6 +99,7 @@ def _start(lane: str, tmp_path: Path, docker, *, data_root: Any = ..., spec: Box
            require_sandbox: bool = False):
     """One box start on `lane`; `data_root` defaults to the tmp folder's `data`."""
     root = _data_root(tmp_path) if data_root is ... else data_root
+    docker.forget_box()  # a test that starts boxes in turn on one fake daemon: each start finds its name free
     if lane == "run-dir":
         defender_dir = plant_tree(tmp_path / "tree", copy_code=False)
         kw = {} if root is None else {"data_root": root}
@@ -154,7 +155,8 @@ def _plain(message: object, docker: RecordingDocker, root: Path) -> str:
     """A refusal's words with every name and folder this run's check recorded (and the box's own name) replaced by a
     placeholder, so two refusals compare by what they say."""
     text = str(message)
-    names = {r.name for r in docker.checks.runs} | {docker.flag_value("--name")}
+    # The box's own name is only on a create, and a refusal has none: a name is replaced where there is one.
+    names = {r.name for r in docker.checks.runs} | {docker.flag_value("--name") if docker.create_argv is not None else None}
     for run in docker.checks.runs:
         for folder in (str(run.folder), run.source):
             text = text.replace(folder, "<folder>")

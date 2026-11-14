@@ -245,9 +245,58 @@ def attach(here: Path, argv: list[str]) -> tuple[int, str] | None:
 
 
 def handle(here: Path, argv: list[str]) -> tuple[int, str, str]:
-    """Answer one docker argv (`["docker", verb, ...]`): `(rc, stdout, stderr)`."""
+    """Answer one docker argv (`["docker", verb, ...]`): `(rc, stdout, stderr)`. A box check's container (#1469) is
+    answered and left out of the log, as no scene counts it a box; the daemon's lock is not held while it connects."""
+    folder = _check_folder(argv) if argv[1:2] == ["run"] else None
+    if folder is not None:
+        with locked(here):
+            down = load(here)["faults"]["down"]
+        if down:
+            return 1, "", "Cannot connect to the Docker daemon (the fake is down)\n"
+        return _check_run(argv, folder)
     with locked(here):
         return _handle(here, argv)
+
+
+#: Where a box check's container sees its folder (#1469 D1), and the socket's name in it.
+CHECK_TARGET = "/run/box-check"
+CHECK_SOCKET = "s"
+
+
+def _check_folder(argv: list[str]) -> Path | None:
+    """The host folder a `docker run` binds at the box check's `/run/box-check`, or None when it is no check container."""
+    for i, tok in enumerate(argv[:-1]):
+        if tok == "--mount":
+            fields = dict(f.split("=", 1) for f in argv[i + 1].split(",") if "=" in f)
+            if fields.get("target") == CHECK_TARGET and fields.get("source"):
+                return Path(fields["source"])
+    return None
+
+
+def _check_run(argv: list[str], folder: Path) -> tuple[int, str, str]:
+    """A box check's container (#1469), answered as a healthy host answers it: the sandboxing runtime refuses the connect
+    (`refused 111`, nothing touches the socket), the control under `--runtime runc` really connects to the production
+    listener's socket in the bound folder, so its own accept is what the check reads. A scene that is not about the
+    sandbox gets its check passed; the contract's own scenes (`_box_check1469`) are where outcomes are varied. No
+    container is registered: a check is `--rm`, and no test names it."""
+    runtime = argv[argv.index("--runtime") + 1] if "--runtime" in argv else ""
+    if runtime != "runc":
+        return 0, "refused 111\n", ""
+    import socket
+
+    fd = os.open(folder, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as peer:
+            peer.settimeout(5)
+            peer.connect(f"/proc/self/fd/{fd}/{CHECK_SOCKET}")
+            peer.settimeout(1.0)
+            with contextlib.suppress(OSError):
+                peer.recv(1)
+    except OSError as e:
+        return 0, f"refused {e.errno}\n", ""
+    finally:
+        os.close(fd)
+    return 0, "connected\n", ""
 
 
 def _handle(here: Path, argv: list[str]) -> tuple[int, str, str]:  # noqa: PLR0911 — one daemon, one arm per verb

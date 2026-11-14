@@ -31,6 +31,7 @@ from defender.systems.verbs import CALL_DELIVERY, CallDelivery
 from defender.box._oracle import OracleBox, stop_oracle_box
 from defender.box._spec import BoxSpec, _DockerTransport
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
 ALICE = S.query_params("user:alice")
 ALICE_ROWS = S.default_calls()[0].payload
@@ -1061,7 +1062,7 @@ def test_the_oracle_box_binds_nothing_of_the_repository_and_no_env_file(tmp_path
            "DEFENDER_BOX_RUNTIME": "runc"}
     monkeypatch.setenv("PATH", env["PATH"])
     with pytest.raises(box_oracle.BoxStartRefused):
-        box_oracle.start_oracle_box(env=env, tenant_id=TEST_TENANT)  # B1/C8: one shared test tenant
+        box_oracle.start_oracle_box(env=env, tenant_id=TEST_TENANT, data_root=tmp_path)  # B1/C8: one shared test tenant
     creates = B._creates(B._docker_argvs(argv_log))
     assert creates, "the oracle box start never reached a container create"
     checkout = box_oracle.CHECKOUT
@@ -1077,7 +1078,8 @@ def test_the_oracle_box_binds_nothing_of_the_repository_and_no_env_file(tmp_path
     # What the runner bind exposes, file for file: the transport's modules and nothing else.
     runner = box_oracle._make_runner()
     try:
-        request = box_oracle.oracle_box_request(tmp_path / "scratch", runner, env=env, tenant_id=TEST_TENANT)
+        request = box_oracle.oracle_box_request(tmp_path / "scratch", runner, env=env, tenant_id=TEST_TENANT,
+                                                  data_root=tmp_path)
         assert [(m.source, m.target, m.writable) for m in request.mounts] == [
             (runner, checkout, False), (tmp_path / "scratch", tmp_path / "scratch", True)]
         shipped = sorted(str(p.relative_to(runner)) for p in runner.rglob("*") if p.is_file())
@@ -1237,7 +1239,7 @@ def test_an_unexpected_error_in_one_preflight_world_stops_the_others(tmp_path):
             pytest.raises(OSError, match=re.escape(str(ep / "oracle" / T.world_id(ep, "b")))):
         cli.preflight_replay(view.episode, source=S.T.open_source(src), roster=est.roster(),
                              tenant=est.run_tenant(), oracle=o.model,
-                             verifier=S.passing_verifier().model, rate=1e6)
+                             verifier=S.passing_verifier().model, rate=1e6, data_root=current_data_root())
 
     # 0 when b failed before c's first turn began, 1 when that turn was already under way.
     assert o.requests <= 1, f"world c paid {o.requests} oracle turns after b's thread failed"

@@ -27,6 +27,7 @@ from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.tenancy import _systems1366 as R
 from defender.tests.support.tenancy import _tenants1106 as T6
 from defender.tests.support.tenancy._host1214 import TEST_TENANT
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
 DEFENDER = Path(__file__).resolve().parents[4]
 
@@ -1290,7 +1291,7 @@ def serving(*, oracle: Any = None, verifier: Any = None, box: Callable[[], Any] 
     extra = {} if restart_after is None else {"restart_after": restart_after}
     # B1/C8: the oracle's serving requires its tenant; every test names the one shared TEST_TENANT.
     return reg.oracle_serving(config.oracle_settings_with(**knobs), oracle=oracle,
-                              verifier=verifier, box=box, tenant_id=TEST_TENANT, **extra)
+                              verifier=verifier, box=box, tenant_id=TEST_TENANT, data_root=current_data_root(), **extra)
 
 
 def registry_seams(world: Any, ledger: Any, *, oracle_dir: Path | None = None,

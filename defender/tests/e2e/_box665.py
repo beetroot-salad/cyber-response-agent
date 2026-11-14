@@ -16,6 +16,7 @@ from defender.tests.support.sandbox._docker import daemon_reachable, is_dood
 from defender.tests.e2e._local_box_command import run_box_python_command
 from defender.tests.support.sandbox import _box_check1469 as _check
 from defender.tests.support.sandbox._box1343 import AttachedStartSeam
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
 DEFENDER = Path(__file__).resolve().parents[2]
 REPO_ROOT = DEFENDER.parent
@@ -133,6 +134,13 @@ class RecordingDocker(AttachedStartSeam):
         self.running_seen_at: int | None = None              # len(calls) when status first answered running
         self._attached_state()
 
+    def forget_box(self) -> None:
+        """The daemon no longer has the box a start made (it ended and was removed), so the next start's name is free again.
+        A fake that answers `created` for every name once a create happened cannot take a SECOND box start on one daemon
+        (it would meet its own name); a test that starts boxes in turn on one fake calls this between them. The captured
+        create argv stays readable until the next create replaces it."""
+        self.phase = None
+
     def _record(self, argv: list[str]) -> None:
         self.calls.append(argv)
 
@@ -187,7 +195,7 @@ class RecordingDocker(AttachedStartSeam):
         ]
         assert covering, f"no captured bind mount covers the marker read at {marker}"
         mount = max(covering, key=lambda item: len(Path(item["target"]).parts))
-        source = Path(mount["source"]) / marker.relative_to(Path(mount["target"]))
+        source = self._host_path(mount["source"]) / marker.relative_to(Path(mount["target"]))
         command = [*argv[-4:-1], str(source)]
         return run_box_python_command(command)
 
@@ -202,7 +210,13 @@ class RecordingDocker(AttachedStartSeam):
         if not covering:
             return inside
         mount = max(covering, key=lambda item: len(Path(item["target"]).parts))
-        return Path(mount["source"]) / inside.relative_to(Path(mount["target"]))
+        return self._host_path(mount["source"]) / inside.relative_to(Path(mount["target"]))
+
+    def _host_path(self, source: str) -> Path:
+        """A bind's source as the DAEMON was told it, back to the folder this process sees: through the daemon view a
+        test gave the check plan (`CheckPlan.daemon_view`, the mount table a docker-outside-of-Docker start translated
+        its binds through). With no view, the source is already this process's path."""
+        return _check.local_path(source, self.checks.plan.daemon_view)
 
     def _exec(self, argv: list[str]) -> subprocess.CompletedProcess:
         if argv[-4:-2] == ["python3", "-c"] and argv[-1].endswith("/.tenant-id"):
@@ -314,9 +328,11 @@ class RecordingDocker(AttachedStartSeam):
 
 
 def reaped_after_create(calls) -> bool:
-    """Whether the container the create asked for was reaped after the create."""
+    """Whether the container the create asked for was reaped after the create. A box check's container (#1469) is no
+    create: it is a `docker run --rm` of its own, removed by the daemon."""
     create = next(
-        (i for i, c in enumerate(calls) if len(c) > 1 and c[1] in ("run", "create")), None
+        (i for i, c in enumerate(calls)
+         if len(c) > 1 and c[1] in ("run", "create") and not _check.is_check_run(c)), None
     )
     assert create is not None, "no `docker create` was issued — the fault fired before create"
     argv = calls[create]
@@ -348,7 +364,9 @@ def run_cycle_mounts(run_dir: Path) -> tuple:
 def BoxRequest(*, name: str, mounts, workdir: Path, env, tenant_id, spec=None, defender_dir=None):
     """`box.BoxRequest`, the caller-owned geography box.py renders. `tenant_id` is required: every box carries its tenant
     (r10 B1/C8), so a call names it. `spec` and `defender_dir` (the explicit code root) are passed only when given."""
-    kw: dict[str, Any] = dict(name=name, mounts=tuple(mounts), workdir=workdir, env=dict(env), tenant_id=tenant_id)
+    # #1469: the data root the request's box check runs under, as every production caller of a request hands it.
+    kw: dict[str, Any] = dict(name=name, mounts=tuple(mounts), workdir=workdir, env=dict(env), tenant_id=tenant_id,
+                              data_root=current_data_root())
     if spec is not None:
         kw["spec"] = spec
     if defender_dir is not None:

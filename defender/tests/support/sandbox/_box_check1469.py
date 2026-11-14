@@ -126,6 +126,9 @@ def _local(source: str, view: Sequence[tuple[Path, Path]]) -> Path:
     return path
 
 
+local_path = _local  # public: a fake daemon reads a bind's source back through its own view
+
+
 def _connect(folder: Path) -> tuple[bool, int | None]:
     """One stream connect to `<folder>/s` by a short descriptor path (a long folder cannot be named in a socket address),
     as the container's own connect would: `(connected, errno)`. A connected stream is then read until the listener closes
