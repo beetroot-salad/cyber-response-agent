@@ -65,6 +65,7 @@ import sys
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
+from defender.tests.support.tenancy._twin1496 import seed_tenant
 
 MODULE = "defender.tests.support.tenancy._launcher1214"
 #: kind -> (module, function) of the entry it calls.
@@ -137,7 +138,7 @@ def _seed(twin: Any, root: Path, tenant: str, state: str, origin: str | None) ->
 
     from defender.tests.support.tenancy import _active1214
 
-    added = twin.add_tenant(tenant, created_at=_active1214.CREATED, state=state, repo=f"tenants/{tenant}",
+    added = seed_tenant(twin, tenant, created_at=_active1214.CREATED, state=state, repo=f"tenants/{tenant}",
                             origin=_active1214._origin_of(root, tenant, origin))
     if inspect.isawaitable(added):
         asyncio.run(_active1214._await(added))

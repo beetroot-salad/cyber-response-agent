@@ -37,7 +37,8 @@ from typing import Any
 
 import httpx
 import pytest
-from defender.tests.support.tenancy._active1214 import offboard_tenant_row
+from defender.tests.support.tenancy._twin1496 import offboard_twin
+from defender.tests.support.tenancy._twin1496 import seed_tenant
 
 pytestmark = pytest.mark.live
 
@@ -174,7 +175,7 @@ def test_two_tenants_on_real_services_cannot_reach_each_other(tmp_path):
         finally:
             for tenant in (a, b):
                 with contextlib.suppress(Exception):
-                    await offboard_tenant_row(stack.tenants, tenant)
+                    await offboard_twin(stack.tenants, tenant)
             with contextlib.suppress(Exception):
                 await stack.drive()
     asyncio.run(scenario())
@@ -191,7 +192,7 @@ def test_the_backfilled_lab_resumed_with_its_wiring_is_made_active_on_its_own_re
     stack = _stack(tmp_path, live, data_root)
 
     async def scenario() -> None:
-        await stack.tenants.add_tenant(
+        await seed_tenant(stack.tenants, 
             lab, created_at=NOW, state="creating", pending_action="create", step="names", step_actor="service",
             failure="registered before #1214: record its forge wiring if it has a repository, then resume",
             repo="tenants/playground", origin=f"{live.forge_url}/tenants/playground.git")

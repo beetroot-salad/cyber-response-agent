@@ -182,7 +182,8 @@ def test_the_run_end_curation_request_uses_the_runs_tenant_with_no_second_read(t
     """Run end hands the curation request the run's accepted tenant and reads no tenant record again: a tenant
     offboarded mid-run still gets the request, written under the run's held lock (r10 O-A5, Flows: run end)."""
     from defender.tenancy import TenantDirectory
-    from defender.tests.support.tenancy._active1214 import active_repository, offboard_tenant_row, run_sync
+    from defender.tests.support.tenancy._active1214 import active_repository, run_sync
+    from defender.tests.support.tenancy._twin1496 import offboard_twin
     from defender.tests.support.tenancy._host1214 import ENQUEUE_TENANT
     from defender.tests.support.tenancy._proxied1391 import sign_generation
 
@@ -203,7 +204,7 @@ def test_the_run_end_curation_request_uses_the_runs_tenant_with_no_second_read(t
     def offboard() -> None:
         twin, tenant_id = twins[-1]
         at_flip.append(len(opened))
-        run_sync(offboard_tenant_row(twin, tenant_id))
+        run_sync(offboard_twin(twin, tenant_id))
 
     tails: list[Any] = []
     # The case system is proxied (#1391), so the record step mints a write-back token at run end; a

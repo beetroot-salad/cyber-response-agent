@@ -56,6 +56,8 @@ from defender.records._tenant_id import TenantId  # noqa: E402
 from pydantic import ValidationError  # noqa: E402
 from defender.tests.support.tenancy._mapping1345 import ALERT_MAPPING_ROUTE, alert_mapping_url  # noqa: E402
 from defender.tests.support.api._programs1307 import NoProgramsRealm  # noqa: E402
+from defender.tests.support.tenancy._twin1496 import seed_tenant  # noqa: E402
+from defender.tests.support.identity._seed1496 import seed_membership, seed_user  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 NOW = _dt.datetime(2026, 9, 28, 12, 0, tzinfo=_dt.UTC)
@@ -286,19 +288,19 @@ async def _seed_identity() -> tuple[IdentityService, dict[str, str], InMemoryTen
     """Ann is a member of A, Bob of B and Cy of both, each with a seeded session. Returns the
     service, the seeded user ids by session value and the tenant twin the service shares."""
     tenants = InMemoryTenantRepository()
-    await tenants.add_tenant(TenantId(A), created_at=NOW)
-    await tenants.add_tenant(TenantId(B), created_at=NOW)
+    await seed_tenant(tenants, TenantId(A), created_at=NOW)
+    await seed_tenant(tenants, TenantId(B), created_at=NOW)
     repo = InMemoryIdentityRepository(tenants=tenants)
     users: dict[str, str] = {}
     for email, tenant, session in (("ann@a.example", A, SESSION_A), ("bob@b.example", B, SESSION_B)):
-        user = await repo.add_user(email, created_at=NOW, status="active", display_name=email)
-        await repo.add_membership(user.id, TenantId(tenant), status="active", invited_by=None,
+        user = await seed_user(repo, email, created_at=NOW, status="active", display_name=email)
+        await seed_membership(repo, user.id, TenantId(tenant), status="active", invited_by=None,
                             created_at=NOW, accepted_at=NOW)
         await repo.add_session(session, user.id, now=NOW, expires_at=NOW + _dt.timedelta(days=7))
         users[session] = user.id
-    cy = await repo.add_user("cy@c.example", created_at=NOW, status="active", display_name="cy")
+    cy = await seed_user(repo, "cy@c.example", created_at=NOW, status="active", display_name="cy")
     for tenant in (A, B):
-        await repo.add_membership(cy.id, TenantId(tenant), status="active", invited_by=None,
+        await seed_membership(repo, cy.id, TenantId(tenant), status="active", invited_by=None,
                             created_at=NOW, accepted_at=NOW)
     await repo.add_session(SESSION_AB, cy.id, now=NOW, expires_at=NOW + _dt.timedelta(days=7))
     users[SESSION_AB] = cy.id
@@ -1420,19 +1422,22 @@ def test_every_route_and_every_dependency_is_a_coroutine_function() -> None:
     assert [f"{c.__module__}.{c.__qualname__}" for c in calls if not inspect.iscoroutinefunction(c)] == []
 
 
-def test_every_real_port_method_is_a_coroutine_function_and_the_write_port_has_no_transaction() -> None:
-    """D11/B: the real ports (`JobStorePorts`, the one object the server hands every backed family) answer by `await`;
-    there is no second implementation to check (#1496)."""
+def test_every_port_method_is_a_coroutine_function_and_the_write_port_has_no_transaction() -> None:
+    """D11/B: every method each `defender.api.ports` Protocol declares answers by `await`, whether or not anything
+    implements it yet (a backing added later inherits the shape), and the real ports (`JobStorePorts`, the one object
+    the server hands every backed family) keep it for each Protocol they implement (#1496: no fakes to check)."""
     protocols = [p for p in vars(ports_module).values()
                  if isinstance(p, type) and getattr(p, "_is_protocol", False) and p.__module__ == ports_module.__name__]
+    declared = {p.__name__: [n for n in vars(p) if not n.startswith("_") and callable(vars(p)[n])] for p in protocols}
+    sync = {p.__name__: [n for n in declared[p.__name__] if not inspect.iscoroutinefunction(vars(p)[n])] for p in protocols}
+    assert sync == dict.fromkeys(declared, []), sync
+    assert len(protocols) >= 9, declared
+    assert all(declared.values()), declared  # every Protocol declares a method: none is checked vacuously
     real = job_store_module.JobStorePorts
-    implemented = []
+    implemented = [p.__name__ for p in protocols if declared[p.__name__] and all(hasattr(real, n) for n in declared[p.__name__])]
     for protocol in protocols:
-        names = [n for n in vars(protocol) if not n.startswith("_") and callable(vars(protocol)[n])]
-        if names and all(hasattr(real, n) for n in names):
-            implemented.append(protocol.__name__)
-            assert [n for n in names if not inspect.iscoroutinefunction(getattr(real, n))] == [], protocol.__name__
-    assert len(protocols) >= 9
+        if protocol.__name__ in implemented:
+            assert [n for n in declared[protocol.__name__] if not inspect.iscoroutinefunction(getattr(real, n))] == [], protocol
     assert {"AlertsRepository", "Writes", "AlertMappingRepository", "Offboarding"} <= set(implemented), implemented
     assert not hasattr(ports_module, "WriteTransaction")
     assert not hasattr(real, "transaction")

@@ -41,8 +41,8 @@ AUTOMATION_ROUTES = [r for r in TENANT_ROUTES if PERMISSION_OF[r] in AUTOMATION]
 #: any store.
 STORE_ROUTES = [r for r in AUTOMATION_ROUTES if not r[1].endswith("/lessons")]
 #: The routes that announce: every write the automation role is granted. The one read that audits, the artifact read,
-#: finds nothing on the real store (no blob store holds an artifact, #1083 N4), so it is left out by name; its audit
-#: stays covered over scripted ports (`test_api_stub.py`).
+#: finds nothing on the real store (no blob store holds an artifact, #1083 N4), so it is left out; its program and
+#: credential are checked over scripted ports below (`test_the_artifact_read_audits_the_program_and_the_credential_it_used`).
 AUDITED_ROUTES = [r for r in STORE_ROUTES if r[0] != "GET"]
 
 
@@ -122,6 +122,53 @@ def test_every_audit_event_a_program_causes_names_the_program_and_the_credential
     person_events = _new_events(person, person_mark)
     assert [e.action for e in events] == [e.action for e in person_events], route
     assert all(e.credential_id is None and e.user_id == user_id(person.ann) for e in person_events)
+
+
+class _ArtifactRead:
+    """Scripted ports for the one read that audits (#1496): the real server backs no artifact (#1083 N4) and no audit
+    port, so the artifact read is unreachable there. The investigation is the real store's with one artifact listed;
+    the link is scripted; the audit port records the principal each announce names."""
+
+    def __init__(self, store: Any) -> None:
+        self._store = store
+        self.announced: list[tuple[Any, str, str, str]] = []
+
+    async def get_investigation(self, tenant_id: Any, investigation_id: Any) -> Any:
+        found = await self._store.get_investigation(tenant_id, investigation_id)
+        return None if found is None else found.model_copy(update={"artifacts": ["report.md"]})
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._store, name)
+
+    async def signed_url(self, tenant_id: Any, investigation_id: Any, key: str) -> str:
+        return f"https://blobs.example.invalid/{investigation_id}/{key}"
+
+    async def announce(self, principal: Any, action: str, target: str, detail: str = "") -> None:
+        self.announced.append((principal, action, target, detail))
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_artifact_read_audits_the_program_and_the_credential_it_used(kind: str) -> None:
+    """The one audited read (F9, O8, D6): read as a program, its audit names the program and the credential used, never
+    none and never the program's other credential; read as a person, no credential. Over scripted artifact and audit
+    ports, since the real server backs neither; the caller is verified through the real program path."""
+    import dataclasses
+
+    from defender.api.app import create_app
+
+    s = soar()
+    ids = _seeded(s)
+    scripted = _ArtifactRead(s.world.store)
+    s.world.app = create_app(dataclasses.replace(s.world.deps(), investigations=scripted, artifact_links=scripted,
+                                                 audit=scripted))
+    path = ids.fill("/tenants/{tenant_id}/investigations/{investigation_id}/artifacts/{key}")
+    program, credential = _as_program(s, kind)
+    assert program.get(path).status_code == 307
+    assert s.ann.get(path).status_code == 307
+    [(by_program, action, target, key), (by_person, *_)] = scripted.announced
+    assert (action, target, key) == ("artifact.read", ids.values["investigation_id"], "report.md")
+    assert (str(by_program.actor_id), by_program.credential_id) == (s.program_id, credential)
+    assert (str(by_person.actor_id), by_person.credential_id) == (user_id(s.ann), None)
 
 
 def _body(route: tuple[str, str], ids: _Ids) -> Any:

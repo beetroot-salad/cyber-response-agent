@@ -16,7 +16,7 @@ from defender.records.formats import CredentialId, MembershipId, ProgramId, Tena
 
 from .errors import CredentialCapReached, DataRuleViolation, TenantNotActive
 from .models import (
-    CredentialKind, Membership, MembershipStatus, PersonRole, Program, ProgramCredential, Session, User, UserStatus,
+    CredentialKind, Membership, MembershipStatus, Program, ProgramCredential, Session, User, UserStatus,
     normalize_email,
 )
 from .ports import ExpiryWarning
@@ -101,16 +101,6 @@ def tightest_due(row: ProgramCredential, now: _dt.datetime) -> _dt.timedelta:
             or (t.days < row.warn_threshold_days and row.expires_at - t <= now)][-1]
 
 
-def check_membership_fields(
-    status: MembershipStatus, *, accepted_at: _dt.datetime | None, ended_at: _dt.datetime | None,
-) -> None:
-    """The rule that ties a status to its timestamps (the SQL schema carries it as a CHECK)."""
-    if status == "active" and accepted_at is None:
-        raise DataRuleViolation("an active membership needs accepted_at")
-    if status == "ended" and ended_at is None:
-        raise DataRuleViolation("an ended membership needs ended_at")
-
-
 def _with(row: ProgramCredential, **fields: Any) -> ProgramCredential:
     """The row with `fields` changed."""
     return dataclasses.replace(row, **fields)
@@ -166,17 +156,6 @@ class InMemoryIdentityRepository:
         if signin_account_id is not None:
             self._by_account[signin_account_id] = user.id
         return user
-
-    async def add_user(
-        self, email: str | None, *, created_at: _dt.datetime, status: UserStatus = "invited",
-        display_name: str = "", signin_account_id: str | None = None, is_platform_admin: bool = False,
-    ) -> User:
-        """Seeder."""
-        if email is None:
-            raise DataRuleViolation("a person needs an email address")
-        return _copy(self._new_user(
-            email, created_at=created_at, status=status, display_name=display_name,
-            signin_account_id=signin_account_id, is_platform_admin=is_platform_admin))
 
     async def ensure_user(self, email: str, *, now: _dt.datetime) -> User:
         existing = self._by_email.get(normalize_email(email))
@@ -244,23 +223,6 @@ class InMemoryIdentityRepository:
         row = Membership(**fields)  # type: ignore[arg-type]
         self._memberships[row.id] = row
         return row
-
-    async def add_membership(  # noqa: PLR0913 — the pinned seeder signature
-        self, user_id: UserId, tenant_id: TenantId, *, status: MembershipStatus, invited_by: UserId | None,
-        created_at: _dt.datetime, expires_at: _dt.datetime | None = None,
-        accepted_at: _dt.datetime | None = None, ended_at: _dt.datetime | None = None,
-        ended_by: UserId | None = None, role: PersonRole = "admin",
-    ) -> Membership:
-        """Seeder."""
-        self._refuse_dangling(user_id, tenant_id)
-        self._refuse_unknown_actor(invited_by, ended_by)
-        check_membership_fields(status, accepted_at=accepted_at, ended_at=ended_at)
-        if status in _LIVE and self._live_row(user_id, tenant_id) is not None:
-            raise DataRuleViolation("the user already has a live membership in this tenant")
-        return _copy(self._insert_membership(
-            user_id=user_id, tenant_id=tenant_id, status=status, invited_by=invited_by,
-            created_at=created_at, expires_at=expires_at, accepted_at=accepted_at,
-            ended_at=ended_at, ended_by=ended_by, role=role))
 
     async def ensure_invitation(
         self, user_id: UserId, tenant_id: TenantId, *, invited_by: UserId | None, now: _dt.datetime,

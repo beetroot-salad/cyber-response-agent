@@ -19,7 +19,7 @@ import json
 
 import pytest
 
-from defender.tests.support.tenancy._active1214 import offboard_tenant_row
+from defender.tests.support.tenancy._active1214 import offboard_on_database
 import httpx
 
 pytest.importorskip('httpx')
@@ -639,7 +639,7 @@ def test_after_a_fence_miss_another_copy_can_take_the_tenants_lock_while_the_fir
         try:
             t = (await a.request_create(now=NOW)).id
             async with a.lock(t) as held:
-                await offboard_tenant_row(b, t)  # the job moves under the worker
+                await offboard_on_database(migrated_database, t)  # the job moves under the worker
                 with pytest.raises(FenceMissed):
                     await held.commit(step="provider", actor="service")
             async with b.lock(t) as other:

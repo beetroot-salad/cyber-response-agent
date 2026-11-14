@@ -73,7 +73,9 @@ from defender.tenancy import InMemoryTenantRepository
 from defender.tests.support.tenancy._mapping1345 import PLANTED_ALERT_MAPPING, add_to_twin, mapping_value
 from defender.tests.support.shared import _worlds
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
-from defender.tests.support.tenancy._active1214 import offboard_tenant_row
+from defender.tests.support.tenancy._active1214 import offboard_on_database
+from defender.tests.support.tenancy._twin1496 import offboard_twin
+from defender.tests.support.tenancy._twin1496 import seed_tenant
 
 T0 = _dt.datetime(2026, 10, 26, 9, 0, tzinfo=_dt.UTC)
 HOUR = _dt.timedelta(hours=1)
@@ -718,7 +720,7 @@ class World:
         self.send_interval = send_interval
         self.send_deadline = send_deadline
         self.build(administrators=administrators, tenants=tenants or {})
-        self.call(self._seed, tenants or {})
+        self._seed(tenants or {})
         if start:
             self.call(self.service.start)
             self.send_pending()
@@ -818,9 +820,11 @@ class World:
         try:
             async def pools() -> None:
                 try:
-                    await self.service.close()  # the identity repository's pool with it
+                    service = getattr(self, "service", None)  # None when the world failed while being built
+                    if service is not None:
+                        await service.close()  # the identity repository's pool with it
                 finally:
-                    for opened in (self.jobs, getattr(self, "_pg_tenants", None)):
+                    for opened in (getattr(self, "jobs", None), getattr(self, "_pg_tenants", None)):
                         if opened is not None:
                             await opened.close()
             self._loop.portal.call(pools)
@@ -855,35 +859,40 @@ class World:
                 tenants: Mapping[str, Sequence[str]] | None = None) -> None:
         """A process start: bootstrap (may raise `BootstrapRefused`), then the sender's first pass."""
         self.build(administrators=administrators, tenants=tenants or {})
-        self.call(self._seed, tenants or {})
+        self._seed(tenants or {})
         self.call(self.service.start)
         self.send_pending()
 
-    async def _seed(self, tenants: Mapping[str, Sequence[str]]) -> None:
+    def _seed(self, tenants: Mapping[str, Sequence[str]]) -> None:
         for tenant, emails in tenants.items():
-            await self._add_tenant(str(tenant), "active")
-            await self._seed_first_members(str(tenant), tuple(emails))
+            self._add_tenant(str(tenant), "active")
+            self.call(self._seed_first_members, str(tenant), tuple(emails))
 
-    async def _add_tenant(self, tenant: str, state: str) -> None:
-        if tenant in {r.id for r in await self.tenants.tenants()}:
+    def _add_tenant(self, tenant: str, state: str) -> None:
+        """Seed one tenant (and its mapping), from the calling thread: the database's rows by blocking SQL here, never on
+        the world's loop (a sender sharing the loop would stall), the async writes through `call`."""
+        if tenant in {r.id for r in self.call(self.tenants.tenants)}:
             return
-        if self.dsn is not None and not hasattr(self.tenants, "add_tenant"):
+        if self.dsn is not None and not isinstance(self.tenants, InMemoryTenantRepository):
             from defender.tests.support.tenancy._active1214 import insert_active_tenant
 
-            insert_active_tenant(self.dsn, tenant, state=state, wiring=False)  # a short sync seed, before any request
+            insert_active_tenant(self.dsn, tenant, state=state, wiring=False)
             if self.alert_mapping is not None:
-                assert self.audit is not None
-                self.audit.paused = True
-                try:
-                    await self.jobs.put_alert_mapping(tenant, mapping_value(self.alert_mapping), actor="u-1")
-                finally:
-                    self.audit.paused = False
+                self.call(self._save_mapping, tenant)
             return
-        added = self.tenants.add_tenant(tenant, created_at=self.clock(), state=state)
-        if inspect.isawaitable(added):  # GAP-0-1: the seeder's sync/async shape is not pinned
-            await added
+        self.call(seed_tenant, self.tenants, tenant, created_at=self.clock(), state=state)
         if self.alert_mapping is not None:  # design-implied twin seeder (r5), see `_mapping1345.seed_twin`
-            await add_to_twin(self.tenants, tenant, mapping_value(self.alert_mapping))
+            self.call(add_to_twin, self.tenants, tenant, mapping_value(self.alert_mapping))
+
+    async def _save_mapping(self, tenant: str) -> None:
+        """The seeded tenant's mapping, through the store, its announcement not a case's (paused)."""
+        assert self.audit is not None
+        assert self.alert_mapping is not None
+        self.audit.paused = True
+        try:
+            await self.jobs.put_alert_mapping(tenant, mapping_value(self.alert_mapping), actor="u-1")
+        finally:
+            self.audit.paused = False
 
     async def _seed_first_members(self, tenant: str, emails: Sequence[str]) -> None:
         repo, now = self.raw_repo, self.clock()
@@ -909,11 +918,14 @@ class World:
 
     def register(self, tenant: str, *, state: str = "active") -> None:
         """Seed `tenant` through the tenant twin's seeder (r9 DC-6: no port method registers a tenant)."""
-        self.call(self._add_tenant, str(tenant), state)
+        self._add_tenant(str(tenant), state)
 
     async def amove_tenant(self, tenant: str, state: str) -> None:
         """`move_tenant` for a hook already running on the world's loop (a hook must not block on `call`)."""
-        await offboard_tenant_row(self.tenants, tenant)
+        if self.dsn is not None:
+            await offboard_on_database(self.dsn, tenant)
+        else:
+            await offboard_twin(self.tenants, tenant)
         if state == "offboarded":  # the worker's last step, through the twin's own hold
             async with self.tenants.lock(tenant) as held:
                 assert held is not None, "the tenant is held by nobody else"

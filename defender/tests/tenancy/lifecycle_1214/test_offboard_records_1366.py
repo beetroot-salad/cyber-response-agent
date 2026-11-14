@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from defender.tests.support.tenancy._active1214 import offboard_tenant_row
+from defender.tests.support.tenancy._active1214 import offboard_on_database
 
 from defender.tests.support.jobs._jobs1342 import register_tenant
 from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — the fixture
@@ -31,7 +31,7 @@ def _offboard(world: LifecycleWorld, dsn: str, tenant_id: str) -> Any:
     service = world.new_service(repo, identity=world.service)
     host = world.new_host(repo)
     try:
-        world.call(offboard_tenant_row, repo, tenant_id)
+        world.call(offboard_on_database, dsn, tenant_id)
         for _ in range(20):
             if world.call(service.work) + world.call(host.work) == 0:
                 break

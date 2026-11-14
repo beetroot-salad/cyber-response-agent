@@ -28,6 +28,7 @@ from defender.tests.support.shared._pglocks1339 import (
 )
 from defender.tests.support.shared._postgres1339 import database, execute
 from defender.tests.support.api._programs1307 import NoProgramsRealm  # #1307 D7: the programs port is required
+from defender.tests.support.identity._seed1496 import seed_user
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
 
@@ -154,14 +155,14 @@ async def stack(pg_dsn) -> AsyncIterator[Stack]:
 
 async def _signed_in(stack: Stack, email: str, value: str):
     """An active user with a live session, as the service sees them."""
-    user = await stack.repo.add_user(email, created_at=NOW, status="active")
+    user = await seed_user(stack.repo, email, created_at=NOW, status="active")
     await stack.repo.add_session(value, user.id, now=NOW, expires_at=NOW + WEEK)
     return user, await stack.service.authenticate(value)
 
 
 async def _invitee(stack: Stack, email: str, account: str):
     """An `invited` user who already has a sign-in account, ready to sign in with the code `account`."""
-    user = await stack.repo.add_user(email, created_at=NOW)
+    user = await seed_user(stack.repo, email, created_at=NOW)
     assert await stack.repo.record_signin_account(user.id, account) is True
     return user
 

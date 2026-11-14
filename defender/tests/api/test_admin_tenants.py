@@ -380,12 +380,13 @@ def test_1360_d6_a_refused_offboard_request_ends_no_job(tenant_state: str | None
     world.register(T2)
     if tenant_state is not None:
         world.register(T1, state=tenant_state)
-    # An unknown tenant has no jobs: the store holds none for a tenant with no row (#1496).
-    refused = _seed_jobs(world, T1, 1) if tenant_state is not None else {}
     control = _seed_jobs(world, T2, 2)
+    refused = None if tenant_state is None else _seed_jobs(world, T1, 1)  # an unknown tenant holds no jobs (#1496)
 
     assert ops.post(f"/admin/tenants/{T1}/offboard").status_code == code
-    assert _stored(world, T1, refused) == refused, "a refused request ended a job"
+    if refused is not None:
+        assert _stored(world, T1, refused) == refused, "a refused request ended a job of its tenant"
+    assert _stored(world, T2, control) == control, "a refused request ended another tenant's job"
     assert ops.post(f"/admin/tenants/{T2}/offboard").status_code == 202
     assert _stored(world, T2, control)["inv-queued"].status == "aborted", "control: an accepted request ends them"
 

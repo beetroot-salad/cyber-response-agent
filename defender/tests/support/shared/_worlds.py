@@ -24,5 +24,11 @@ def closing_new_worlds() -> Iterator[None]:
     try:
         yield
     finally:
+        failed: list[BaseException] = []
         for world in [w for w in _OPEN if w not in before]:
-            world.close()
+            try:
+                world.close()
+            except Exception as e:  # noqa: BLE001 — close every world first, then report the first failure
+                failed.append(e)
+        if failed:
+            raise failed[0]
