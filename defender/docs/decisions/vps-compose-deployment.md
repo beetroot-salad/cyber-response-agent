@@ -68,7 +68,7 @@ visible. Budget constraints do not weaken tenant authorization or isolation.
 - **V1 — Complete deployment:** start the frontend, identity, API, storage,
   knowledge service, and workers through reproducible host configurations.
 - **V2 — Tenant authorization:** derive request tenant authority from verified,
-  issuer-controlled claims held by the backend session. Scope resource operations to that tenant. Machine
+  the tenant in the request path, checked against the caller's active membership (#1306). Scope resource operations to that tenant. Machine
   authority is independently limited by tenant, job, and purpose.
 - **V3 — Executor isolation:** confine model-written code to approved filesystems
   and resources without credentials, administration sockets, or network access.
@@ -172,21 +172,21 @@ technical one: enrollment refuses a second membership, and a person who needs tw
 tenants uses two accounts. Lifting it later requires choosing the active tenant
 at token issuance, with the issuer checking membership, never through a client-supplied selector.
 
-The backend stores access and refresh tokens in its session store (PostgreSQL) and
-gives the browser an opaque, HttpOnly, Secure, host-only session cookie. The
-browser never holds OAuth tokens, so reload and refresh need no hidden IdP frame
-and are unaffected by third-party cookie blocking. On each request the backend
-looks up the session and validates the token it holds: allowed algorithm,
-signature/JWKS, issuer, API audience, and validity times. It derives principal
-and tenant from verified claims, never from an untrusted tenant selector.
-Resource queries and writes enforce that tenant.
+The backend keeps the session in PostgreSQL (it holds no tokens) and gives the
+browser an opaque, HttpOnly, Secure, host-only session cookie. The browser never
+holds OAuth tokens, so reload and refresh need no hidden IdP frame and are
+unaffected by third-party cookie blocking. On each request the backend looks up
+the session and takes the person from it. The tenant is the request path's
+(`/tenants/{T}/...`), accepted only for an active membership of that person,
+else 404; no tenant is in any token. A program presents a bearer credential (an
+API key, or a client-credentials token the backend verifies: algorithm,
+signature/JWKS, issuer, audience, validity times). Resource queries and writes
+enforce the path's tenant.
 
 Each request costs one session lookup; at this scale that is negligible. Deleting
 a session stops that browser immediately, so logout and forced sign-out take
-effect at once. Membership changes still take effect at the next token refresh: a
-proposed five-minute access-token lifetime bounds that staleness, and refresh
-must reevaluate current membership. Sensitive operations needing fresher
-authority require a future fresh-authorization or step-up policy.
+effect at once. A membership change takes effect on the next request, because membership is
+read per request, not carried in a token.
 
 Cookie authentication requires request-forgery protection. Use `SameSite` session
 cookies and reject state-changing requests whose `Origin` header is not the
@@ -314,7 +314,7 @@ bound. No job needs several slots, so there is no wait limit for one. Budget
 aggregate brains, parsers, adapters, provider requests, memory, disk, and spend
 as well as slots; learning has no spending cap until #1431.
 
-The API commits an investigation or learning-job record and its audit atomically.
+The API commits an investigation or learning-job record, then announces its audit event (a log event after the commit; #1342 O13).
 Job status/claim fields belong to those domain records; no separate dispatch row
 is required. Workers poll/claim through PostgreSQL with short transactions and
 fenced ownership. The API observes status through the same database, not a
@@ -517,7 +517,7 @@ a requirement of this architecture.
 
 | Boundary | Authority and limit |
 | --- | --- |
-| Browser to API | HttpOnly session cookie, with `Origin` checks on writes. The backend-held tenant JWT scopes resource access. Session deletion is immediate; membership changes take effect at refresh. |
+| Browser to API | HttpOnly session cookie, with `Origin` checks on writes. The path's tenant, checked against membership, scopes resource access. Session deletion is immediate; membership changes take effect on the next request. |
 | CI/CD to hosts | Deploy credentials only, reaching hosts over Tailscale as an ephemeral tagged node; no unseal keys or tenant secrets. |
 | Cloudflare to origin | Explicit web routes and trusted proxy configuration; administration remains private. |
 | Execution host to application host | Scoped service access; no application-host runtime administration. |
