@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime as _dt
 import itertools
 from collections.abc import Callable, Mapping
-from typing import Any, TypeVar
+from typing import Any, Literal, TypeVar
 
 from pydantic import AwareDatetime
 
@@ -24,6 +24,8 @@ from .models import (
     InvestigationKnowledge,
     LearningJob,
     Lesson,
+    ParkedBatch,
+    SetAsideItem,
     System,
     SystemCheck,
     SystemPut,
@@ -97,6 +99,8 @@ class InMemoryStore:
         self._learning_jobs: _Table[LearningJob] = _Table()
         self._lessons: _Table[Lesson] = _Table()
         self._systems: _Table[SystemSettings] = _Table()
+        self._set_aside: _Table[SetAsideItem] = _Table()
+        self._parked: _Table[ParkedBatch] = _Table()
 
     def _mint(self, family: type[_Id]) -> _Id:
         """The next id of `family`: canonical UUID text from a counter, so ids still sort in the order
@@ -146,6 +150,14 @@ class InMemoryStore:
     def add_system(self, tenant_id: TenantId, settings: SystemSettings) -> SystemSettings:
         self._systems[(tenant_id, settings.system_id)] = settings
         return settings
+
+    def add_set_aside_item(self, tenant_id: TenantId, item: SetAsideItem) -> SetAsideItem:
+        self._set_aside[(tenant_id, item.item_id)] = item
+        return item
+
+    def add_parked_batch(self, tenant_id: TenantId, batch: ParkedBatch) -> ParkedBatch:
+        self._parked[(tenant_id, batch.batch_id)] = batch
+        return batch
 
     # --- AlertsRepository ---------------------------------------------------------------
 
@@ -265,6 +277,17 @@ class InMemoryStore:
 
     async def get_learning_job(self, tenant_id: TenantId, learning_job_id: LearningJobId) -> LearningJob | None:
         return self._learning_jobs.get((tenant_id, learning_job_id))
+
+    # --- LearningWorkRepository ---------------------------------------------------------
+
+    async def list_set_aside(self, tenant_id: TenantId, *, status: Literal["held", "dead"] | None,
+                             after: TimePosition | None, limit: int) -> list[SetAsideItem]:
+        found = [i for i in self._set_aside.of(tenant_id) if status is None or i.status == status]
+        return _newest_after(found, lambda i: (i.updated_at, i.item_id), after, limit)
+
+    async def list_parked_batches(self, tenant_id: TenantId, *, after: TimePosition | None,
+                                  limit: int) -> list[ParkedBatch]:
+        return _newest_after(self._parked.of(tenant_id), lambda b: (b.created_at, b.batch_id), after, limit)
 
     # --- LessonsRepository --------------------------------------------------------------
 

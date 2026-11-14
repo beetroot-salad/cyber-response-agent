@@ -270,7 +270,7 @@ def _start_and_land(ctx: Any, delivery: Any, lane: Any, text: str, drafts: list,
     """Claim an item-less registry batch under the tick's lease (its row exists before any commit, P2'), append the
     entries in its draft, commit them (recorded in the store before the branch moves) with the PR body as the
     message, and deliver it as the lane delivers any claim: pushed, its PR opened, in review."""
-    from defender.learning.store import LaneBusy
+    from defender.learning_store import LaneBusy
 
     entries = [e for _, _, e in drafts]
     grown = append_entries(text, entries)  # refuse a registry shape before any batch exists

@@ -5,12 +5,12 @@ it. `LearningStore` is the async store, `blocking(dsn)` its synchronous face."""
 
 from ._blocking import BlockingStore, blocking
 from ._feedback import FeedbackComment, FeedbackHeld, FeedbackIssue
-from ._import import LearningImport, cut_over_learning_state, import_learning_state, read_learning_state, write_learning_state
 from ._store import (
+    DEFAULT_GRACE_SECONDS,
+    DEFAULT_LEASE_SECONDS,
     BatchView,
     CommitRecord,
     Held,
-    ImportRefused,
     ItemRefused,
     LaneBusy,
     LaneWork,
@@ -18,13 +18,17 @@ from ._store import (
     LeaseLost,
     NotLapsed,
     Outcome,
+    ParkedBatchView,
     Stop,
     TenantInactive,
     WorkItem,
+    is_reducer_row,
+    pitfall_key,
 )
 
 __all__ = [
-    "BatchView", "BlockingStore", "CommitRecord", "FeedbackComment", "FeedbackHeld", "FeedbackIssue", "Held", "ImportRefused", "ItemRefused", "LaneBusy", "LaneWork", "LearningStore",
-    "LeaseLost", "NotLapsed", "Outcome", "Stop", "TenantInactive", "WorkItem", "blocking", "cut_over_learning_state",
-    "import_learning_state", "LearningImport", "read_learning_state", "write_learning_state",
+    "BatchView", "BlockingStore", "CommitRecord", "DEFAULT_GRACE_SECONDS", "DEFAULT_LEASE_SECONDS", "FeedbackComment",
+    "FeedbackHeld", "FeedbackIssue", "Held", "ItemRefused", "LaneBusy", "LaneWork", "LearningStore",
+    "LeaseLost", "NotLapsed", "Outcome", "ParkedBatchView", "Stop", "TenantInactive", "WorkItem", "blocking",
+    "is_reducer_row", "pitfall_key",
 ]

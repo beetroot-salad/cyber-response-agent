@@ -498,7 +498,7 @@ def _claimed_rows(
 ) -> tuple[list[dict], dict[str, tuple[str, str]]]:
     """The claim's pitfall rows that carry a `pitfall_id`, and each id's item; a row with none is dead
     at once (unkeyable, D1), named by the key the store gave it."""
-    from defender.learning.store import Outcome
+    from defender.learning_store import Outcome
 
     rows: list[dict] = []
     item_of: dict[str, tuple[str, str]] = {}
@@ -518,7 +518,7 @@ def _skip_dropped(
 ) -> None:
     """The rows no surface can teach (no system, a malformed one, one the adapters do not declare):
     skipped, the reason naming the system (D9). Terminal: no retry makes one teachable."""
-    from defender.learning.store import Outcome
+    from defender.learning_store import Outcome
 
     dropped = set(dropped_ids)
     for r in rows:

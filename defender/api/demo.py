@@ -163,6 +163,7 @@ async def demo_deps(tenants: Sequence[str], clock: Callable[[], _dt.datetime] = 
         investigations=store,
         learning_jobs=store,
         lessons=store,
+        learning_work=store,
         systems=store,
         alert_mapping=store,
         writes=store,

@@ -234,7 +234,7 @@ _EXPORT_OWNER = "learning/author/version_control/exports.py"
 #: The run-safe reader of published knowledge (#1108 P4: a run never imports the delivery package).
 _EXPORT_READER = "tenancy/_exports.py"
 RECORD_LOCATION_NAMES = frozenset({
-    "tenant_root", "row_path", "runs", "sessions", "episodes", "learning", "worktrees",
+    "tenant_root", "row_path", "runs", "sessions", "episodes", "worktrees",
     "data_root", "runs_base", "trust_root", "sessions_dir", "runs_legacy", "episodes_legacy",
     "exports", "drafts", "knowledge_lock", "commit_record", "scratch",
 })
@@ -246,8 +246,6 @@ CONVERSION_PERMISSIONS: dict[tuple[str, str], frozenset[str]] = {
     ("knowledge_lock", _EXPORT_OWNER): frozenset({"tenant_lock"}),
     ("exports_root", _EXPORT_READER): frozenset({"current_export"}),
     ("knowledge_lock", _EXPORT_READER): frozenset({"knowledge_lock_holder"}),
-    # #1278 cutover: the batch worktrees leave the learning folder for the tenant's worktrees location (A2 D10).
-    ("worktrees_root", "learning/store/_import.py"): frozenset({"cut_over_learning_state"}),
     # #1278 A1: the curators' call folders, made in the tenant's scratch location by their one owner.
     ("scratch_root", "learning/call_folders.py"): frozenset({"call_folder"}),
     # #1170: the per-job helper makes the oracle's folder in the tenant's scratch location.
@@ -259,9 +257,6 @@ CONVERSION_PERMISSIONS: dict[tuple[str, str], frozenset[str]] = {
     # #1214: the lifecycle's own setting, read once each where it makes or removes a tenant's folder.
     ("data_root", "lifecycle/config.py"): frozenset({"LifecycleConfig.__post_init__"}),
     ("data_root", "lifecycle/_host.py"): frozenset({"HostActor.__init__"}),
-    # #1278 Migration: the cutover job accepts the tenant and reads its old learning folder, in one function each.
-    ("learning_root", "lifecycle/_host.py"): frozenset({"HostActor._read_learning", "HostActor._cut_over"}),
-    ("data_root", "lifecycle/_process.py"): frozenset({"learning_delivery.open_for"}),
     # #1469: the data root an entry point resolved is handed to a box start, where the box check makes its folder
     # (`<data root>/.box-checks/`): the request carries it, and a drain's request is made from its tenant's.
     ("data_root", "box/_lifecycle.py"): frozenset({"_start_boxed_request"}),
@@ -272,7 +267,7 @@ CONVERSION_PERMISSIONS: dict[tuple[str, str], frozenset[str]] = {
 _ATTRIBUTE_ROLES = {
     "exports": "exports_root", "drafts": "drafts_root", "knowledge_lock": "knowledge_lock",
     "commit_record": "commit_record", "data_root": "data_root", "worktrees": "worktrees_root",
-    "scratch": "scratch_root", "learning": "learning_root",
+    "scratch": "scratch_root"
 }
 _ROOT_OVERRIDE_METHODS = frozenset({
     "run_end_sidecar", "scrub_verdict", "ticket_write", "call_join", "ticket_comments",

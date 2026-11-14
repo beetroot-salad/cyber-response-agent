@@ -108,6 +108,13 @@ class CommitId(UuidId):
     domain = "learning commit"
 
 
+class WorkItemId(UuidId):
+    """A learning work item's id (#1485 D12): minted when the item is first inserted, stable for its life."""
+
+    __slots__ = ()
+    domain = "learning work item"
+
+
 class BatchId(UuidId):
     """A learning batch's id (#1278 D5): the batch row's key, minted first; its branch is a column of its own."""
 
