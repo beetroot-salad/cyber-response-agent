@@ -1,29 +1,27 @@
 """The job socket's server (#1170 H9): one thread accepting, one per connection, each request answered from the
-registry by the job's kind, and only for a peer that is one of the job container's processes.
+registry by the job's kind.
 
-The peer is judged by `SO_PEERCRED`: the pid that connected must be among the container's processes as docker reports
-them (its init and `docker top`, with their descendants). The answer for any other peer is a `peer` refusal and the
-request is not looked at. The socket is 0600 in a 0700 folder (H9)."""
+The filesystem alone decides who may use it (#1469 S4): any connection that reaches the socket, 0600 in its 0700
+folder, is answered. There is no caller check: under gVisor every host process looked like a container process to it,
+and the daemon's process list needs the daemon's pid namespace and `ps`. The server records whether it ever accepted a
+connection (`accepted`), which is how the helper tells a job that never reached its socket (D4)."""
 from __future__ import annotations
 
 import contextlib
 import logging
 import os
 import socket
-import struct
 import threading
 from pathlib import Path
 from typing import Any
 
-from defender import tenancy
 from defender.job_socket import Refused, read_message, write_message
 
-from ._container import container_processes, owner
+from ._container import owner
 from ._session import Registry, Session
 
 _logger = logging.getLogger(__name__)
 
-_PEERCRED = struct.Struct("3i")
 #: Seconds a connection may take to send its request.
 _REQUEST_WAIT = 30.0
 
@@ -46,8 +44,8 @@ class Server:
             raise
         self._listener.settimeout(0.2)
         self._closing = threading.Event()
-        self._peers: dict[int, str | None] = {}
-        self._peers_lock = threading.Lock()
+        #: Set once any connection was accepted: the socket was reachable from where the job runs.
+        self.accepted = threading.Event()
         self._thread = threading.Thread(target=self._accept, name="job-socket", daemon=True)
         self._thread.start()
 
@@ -68,35 +66,13 @@ class Server:
                 if self._closing.is_set():
                     return
                 continue
+            self.accepted.set()
             threading.Thread(target=self._serve, args=(conn,), name="job-socket-request", daemon=True).start()
-
-    def _peer_ok(self, pid: int) -> bool:
-        if pid <= 0:
-            return False
-        start = tenancy.process_start(pid)
-        if start is None:
-            # No such live process (gone, or a zombie): nothing to recognise it by.
-            return False
-        with self._peers_lock:
-            if pid in self._peers and self._peers[pid] == start:
-                return True
-        if pid not in container_processes(self._session):
-            return False
-        with self._peers_lock:
-            self._peers[pid] = start
-        return True
 
     def _serve(self, conn: socket.socket) -> None:
         with conn:
             conn.settimeout(_REQUEST_WAIT)
             try:
-                pid, _uid, _gid = _PEERCRED.unpack(conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED,
-                                                                   _PEERCRED.size))
-                if not self._peer_ok(pid):
-                    _logger.warning("job socket: refused a peer (pid %s) that is not the job container's", pid)
-                    write_message(conn, {"refused": {"code": "peer", "reason": "only the job container's processes "
-                                                                               "are answered"}})
-                    return
                 request = read_message(conn)
                 answer = self._answer(request)
                 conn.settimeout(None)

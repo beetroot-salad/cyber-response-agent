@@ -5,6 +5,7 @@ unsandboxed executor, whatever `DEFENDER_ALLOW_UNSANDBOXED` says: a start that i
 raises `BoxStartRefused`."""
 from __future__ import annotations
 
+import functools
 import os
 import secrets
 import shutil
@@ -66,10 +67,11 @@ def _make_runner(folder: Path | None = None) -> Path:
 
 
 def oracle_box_request(scratch: Path, runner: Path, *, env: Mapping[str, str],
-                       tenant_id: str) -> BoxRequest:
+                       tenant_id: str, data_root: Path) -> BoxRequest:
     """The oracle box's request: the runner read-only at the checkout's path as the box's
     `code` mount, the scratch folder writable, no env of the caller's, labelled with the tenant
-    it serves (`tenant_id`, #1214 O4: the tenant's teardown removes it). It requires a sandbox
+    it serves (`tenant_id`, #1214 O4: the tenant's teardown removes it), and carrying the data root its box check runs
+    under (`data_root`, #1469). It requires a sandbox
     (#1108 amendment 3, C3): a start fault raises, never an unsandboxed fallback, and leaves
     no did-not-run marker beside the scratch folder."""
     return BoxRequest(
@@ -77,13 +79,27 @@ def oracle_box_request(scratch: Path, runner: Path, *, env: Mapping[str, str],
         mounts=(Mount(source=runner, target=CHECKOUT, writable=False, kind="code"),
                 Mount(source=scratch, target=scratch, writable=True)),
         workdir=CHECKOUT, env={}, spec=BoxSpec.from_env(env), require_sandbox=True,
-        tenant_id=tenant_id,
+        tenant_id=tenant_id, data_root=data_root,
     )
 
 
-def start_oracle_box(*, env: Mapping[str, str], tenant_id: str, folder: Path | None = None,
+@functools.lru_cache(maxsize=8)
+def _on_path(path: str | None) -> DockerFn:
+    """The real docker seam with `path` as its `PATH`: one per `PATH`, so a process's oracle boxes share a seam and the
+    box check's pass (kept per seam, #1469 D2) is paid once, not at every box."""
+    def on_path(argv: Any, **kw: Any) -> Any:
+        merged = dict(kw.pop("env", None) or os.environ)
+        if path:
+            merged["PATH"] = path
+        return _lifecycle.run_docker(argv, env=merged, **kw)
+
+    return on_path
+
+
+def start_oracle_box(*, env: Mapping[str, str], tenant_id: str, data_root: Path, folder: Path | None = None,
                      docker: DockerFn | None = None) -> Any:
-    """Start the oracle's sandboxed box for `tenant_id`; `env` is the process environment handed
+    """Start the oracle's sandboxed box for `tenant_id`; `data_root` is the data root its entry point resolved, where the
+    box check runs (#1469); `env` is the process environment handed
     in (its `PATH` finds the `docker` binary, its box knobs size the container). `folder` is
     where its runner and scratch folders are made (#1170 C21: a per-claim folder under the data
     root, for a job's helper), else the host's temporary folder. `docker` is the docker seam the
@@ -100,17 +116,9 @@ def start_oracle_box(*, env: Mapping[str, str], tenant_id: str, folder: Path | N
         shutil.rmtree(scratch, ignore_errors=True)
         shutil.rmtree(runner, ignore_errors=True)
 
-    request = oracle_box_request(scratch, runner, env=env, tenant_id=tenant_id)
-    path = env.get("PATH")
-
-    def on_path(argv: Any, **kw: Any) -> Any:
-        merged = dict(kw.pop("env", None) or os.environ)
-        if path:
-            merged["PATH"] = path
-        return _lifecycle.run_docker(argv, env=merged, **kw)
-
+    request = oracle_box_request(scratch, runner, env=env, tenant_id=tenant_id, data_root=data_root)
     if docker is None:
-        docker = on_path
+        docker = _on_path(env.get("PATH"))
     try:
         # The one entry for a `BoxRequest`; the request requires a sandbox, so a start fault
         # raises whatever the operator's opt-out says.
@@ -136,6 +144,6 @@ def stop_oracle_box(box: Any) -> None:
                 shutil.rmtree(folder, ignore_errors=True)
 
 
-def start_process_oracle_box(tenant_id: str) -> Any:
+def start_process_oracle_box(tenant_id: str, data_root: Path) -> Any:
     """`start_oracle_box` over this process's environment."""
-    return start_oracle_box(env=os.environ, tenant_id=tenant_id)
+    return start_oracle_box(env=os.environ, tenant_id=tenant_id, data_root=data_root)

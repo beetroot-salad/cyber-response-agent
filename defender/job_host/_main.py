@@ -221,6 +221,30 @@ def _start(session: Session, spec: KindSpec, signals: _Signals, hold: contextlib
     return proc, server, ending
 
 
+#: The statuses docker itself gives a container it could not start or run: the runtime is not their cause.
+_DID_NOT_RUN = (125, 126, 127)
+
+
+def _say_unreached(session: Session, rc: int, server: Server | None) -> None:
+    """D4 (#1469): a container that ended nonzero without the server ever accepting a connection, and that the helper
+    was not told to stop, most likely ran under a job runtime that does not allow host-socket connections. The job's own
+    refusal ended its row; this only names the likely cause, once, for every job kind. It writes no ending."""
+    if rc == 0 or rc in _DID_NOT_RUN or session.signalled.is_set() or server is None or server.accepted.is_set():
+        return
+    from defender.box import BoxSpec
+
+    from ._container import job_runtime
+
+    try:
+        runtime = job_runtime(BoxSpec.from_env(os.environ).runtime)
+    except ValueError:
+        runtime = "(unknown)"
+    why = (f"the job never reached its socket; likely cause: the job runtime {runtime} does not allow host-socket "
+           "connections (register `runsc-job` per the #1469 upgrade note, defender/CLAUDE.md)")
+    _logger.warning("%s", why)
+    _tell(session, why)
+
+
 def _run(session: Session, spec: KindSpec, signals: _Signals) -> int:
     hold = contextlib.ExitStack()
     proc, server = None, None
@@ -233,6 +257,7 @@ def _run(session: Session, spec: KindSpec, signals: _Signals) -> int:
             return 0
         rc = _await_container(session, proc)
         _tell(session, f"its container exited with status {rc}")
+        _say_unreached(session, rc, server)
         if session.prepared is not None and session.prepared.exited is not None:
             session.prepared.exited(session, rc)
         return 0

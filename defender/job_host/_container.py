@@ -1,5 +1,5 @@
-"""The job container (#1170 H3, O1-O4, A5, A7, A8, H9): its socket, its environment, its `docker run`, and who counts
-as one of its processes.
+"""The job container (#1170 H3, O1-O4, A5, A7, A8, H9; #1469 D0): its socket, its environment, its runtime and its
+`docker run`.
 
 One container per job, the helper's child: started attached (`docker run -i`), its input a pipe the helper holds, so it
 ends when the helper does (A5); labelled with its tenant, its claim and the job-container label; running as the uid
@@ -18,7 +18,6 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from defender._io import read_bytes_capped
 from defender.job_socket import HELPER_LABEL, IMAGE_ENV, JOB_LABEL, NETWORK_ENV, SOCKET_ENV
 
 from ._session import Session, StartFailed
@@ -139,6 +138,21 @@ def job_environment(session: Session, socket: Path, keys: Mapping[str, str],
     return env
 
 
+#: The job container's runtime by the box runtime the deployment sets (#1469 D0): gVisor's job registration (the same
+#: binary as `runsc`, registered with host-socket access, which the job's socket needs), or `runc` as the boxes are. The
+#: job runtime is derived, never set, so a sandboxed box can never run beside an unsandboxed job container; it is no
+#: box runtime, so no box can be started under it. The code never reads how it is registered.
+JOB_RUNTIMES = {"runsc": "runsc-job", "runc": "runc"}
+
+
+def job_runtime(box_runtime: str) -> str:
+    """The runtime the job container starts under, derived from the box runtime `box_runtime`."""
+    try:
+        return JOB_RUNTIMES[box_runtime]
+    except KeyError:
+        raise ValueError(f"{box_runtime!r} is not a known box runtime: no job runtime derives from it") from None
+
+
 def job_container_name(session: Session) -> str:
     return f"defender-job-{session.claim}"
 
@@ -169,7 +183,7 @@ def container_launch(session: Session, socket: Path, command: list[str], environ
     from defender.box import CLAIM_LABEL, TENANT_LABEL, BoxFault, BoxSpec, require_runtime
 
     try:
-        runtime = BoxSpec.from_env(environ).runtime
+        runtime = job_runtime(BoxSpec.from_env(environ).runtime)
     except ValueError as unknown:
         raise StartFailed(str(unknown)) from None
     try:
@@ -222,53 +236,3 @@ def start(session: Session, launch: Launch) -> Any:
         return popen(launch.argv, stdin=subprocess.PIPE, env=launch.env)
     except (OSError, subprocess.SubprocessError) as cannot:
         raise StartFailed(f"docker could not be run to start the job container: {cannot}") from None
-
-
-#: A `/proc/<pid>/stat` line is well under this.
-STAT_LIMIT = 64 * 1024
-
-
-# --- who is one of the container's processes (H9) --------------------------------------------------------------------
-
-def _docker_stdout(docker: Any, argv: list[str]) -> str:
-    try:
-        done = docker(argv)
-    except (OSError, subprocess.SubprocessError) as e:
-        _logger.warning("could not ask docker %s: %s", argv[1:3], e)
-        return ""
-    return (done.stdout or "") if done.returncode == 0 else ""
-
-
-def _process_children() -> dict[int, list[int]]:
-    """Every process's children, from /proc."""
-    tree: dict[int, list[int]] = {}
-    for entry in os.scandir("/proc"):
-        if not entry.name.isdigit():
-            continue
-        try:
-            stat = read_bytes_capped(Path(entry.path, "stat"), limit=STAT_LIMIT).decode("utf-8", "replace")
-        except OSError:
-            continue
-        fields = stat[stat.rindex(")") + 2:].split()
-        if len(fields) > 1 and fields[1].isdigit():
-            tree.setdefault(int(fields[1]), []).append(int(entry.name))
-    return tree
-
-
-def container_processes(session: Session) -> set[int]:
-    """The container's processes as this host sees them: its init (`docker inspect -f {{.State.Pid}}`) and what
-    `docker top` lists, with every descendant of each."""
-    name = session.container
-    roots = {int(w) for w in _docker_stdout(session.docker, ["docker", "inspect", "-f", "{{.State.Pid}}", name]).split()
-             if w.isdigit() and int(w) > 0}
-    roots |= {int(w) for w in _docker_stdout(session.docker, ["docker", "top", name, "-o", "pid"]).split() if w.isdigit()}
-    if not roots:
-        return set()
-    tree, found, todo = _process_children(), set(), list(roots)
-    while todo:
-        pid = todo.pop()
-        if pid in found:
-            continue
-        found.add(pid)
-        todo += tree.get(pid, [])
-    return found

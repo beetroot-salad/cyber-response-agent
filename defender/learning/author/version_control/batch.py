@@ -8,7 +8,7 @@ from pathlib import Path
 
 from defender.tenancy import regular_files as _regular_files
 from defender.tenancy import remove_entry as _remove_entry
-from defender.tenancy import Tenant
+from defender.tenancy import Tenant, data_root_for_child
 from defender import box
 from defender._model_view import ModelView
 from defender.investigation.permission.grant import path_operands
@@ -74,6 +74,7 @@ class Batch:
             view=view,
             path_operands=path_operands,
             tenant_id=str(self.tenant.id),
+            data_root=data_root_for_child(self.tenant.data_root),
         )
 
     def change_set(self) -> ChangeSet:

@@ -261,14 +261,14 @@ runtime) fails its row and never runs unconfined. The job image is named by
 `DEFENDER_JOB_IMAGE` (default `defender-job:latest`, built from
 `.devcontainer/Dockerfile.job`).
 
-**The helper shares the docker daemon's mount paths and pid namespace.** It hands docker
-its own paths for the job container's three binds, and it recognises the job's processes
-by comparing a caller's pid with the pids docker reports for the container (its init and
-`docker top`, which runs `ps` where the daemon runs). Nothing translates either. A worker
+**The helper shares the docker daemon's mount paths.** It hands docker its own paths for
+the job container's three binds, and nothing translates them. The helper no longer asks who
+a caller is (#1469): the job socket is 0600 in a 0700 folder, and the filesystem alone
+decides who may use it, so the daemon's pid namespace and `ps` are not needed. A worker
 that runs natively on the execution host meets this rule, and that is the deployment. A
-worker in a container would need the host's pid namespace and every bind at the same
-path on both sides; that setup is unsupported. A helper that breaks the rule fails every
-job: docker reports a missing bind source, or every request is refused as `peer`. The dev
+worker in a container would need every bind at the same path on both sides; that setup is
+unsupported. A helper that breaks the rule fails every job: docker reports a missing bind
+source. The dev
 container meets the rule by running its own jobs daemon inside itself
 (`.devcontainer/Dockerfile.dev`, `start-jobs-docker`).
 

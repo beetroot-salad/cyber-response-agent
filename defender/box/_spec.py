@@ -175,6 +175,9 @@ class BoxRequest:
     #: The tenant the box works for: its container is labelled `defender.tenant=<T>`, so the
     #: tenant's teardown stops it (#1214 O4).
     tenant_id: str = field(kw_only=True)
+    #: The data root the caller resolved, where the box check (#1469) makes its folder. Optional here: absent, a start
+    #: under the sandboxing runtime cannot be proven, so it is refused (never started unproven).
+    data_root: Path | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
         if not isinstance(self.tenant_id, str) or not self.tenant_id:

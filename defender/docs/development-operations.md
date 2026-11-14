@@ -85,7 +85,7 @@ are fixed when a container is created, and the running one has neither. And set
 
 ## Running jobs live from the dev container (#1170, #1475)
 
-A job's helper must share the docker daemon's mount paths and pid namespace
+A job's helper must share the docker daemon's mount paths
 (`decisions/vps-compose-deployment.md`, brain confinement). The host daemon behind
 `/var/run/docker.sock` shares neither with the dev container, so a job started through it
 fails. The dev container therefore carries a second daemon of its own, with gVisor registered

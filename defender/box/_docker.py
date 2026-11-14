@@ -104,15 +104,21 @@ def require_image(docker: DockerFn, rootfs: Rootfs) -> None:
 
 #: What to do when the daemon has no runtime a box asks for, by runtime (#1484).
 _RUNTIME_REMEDY = {
-    "runsc": ("install gVisor and register it with Docker (`runsc install -- --oci-seccomp --host-uds=open`, then "
-              "restart Docker; defender/CLAUDE.md, \"Upgrade from before #1170\", step 2), or set "
+    "runsc": ("install gVisor and register it with Docker (`runsc install -- --oci-seccomp`, with no host-socket "
+              "access, and the same binary again as `runsc-job` for job containers, then restart Docker; "
+              "defender/CLAUDE.md, \"Upgrade from before #1469\"), or set "
               "DEFENDER_BOX_RUNTIME=runc to run boxes under Docker's default runtime, with weaker isolation"),
+    "runsc-job": ("register the same gVisor binary a second time, as `runsc-job`, for job containers (`runsc install` "
+                  "registers `runsc`; defender/CLAUDE.md, \"Upgrade from before #1469\"), then restart Docker, or set "
+                  "DEFENDER_BOX_RUNTIME=runc to run jobs and boxes under Docker's default runtime, with weaker "
+                  "isolation"),
 }
 
 
 #: The runtimes each daemon was seen to have registered, by its `docker` seam (#1484): a daemon's runtimes change only
-#: when it restarts, so a process asks once per runtime. Only a runtime found is kept: a missing one is asked again,
-#: so a host fixed while a worker runs is seen at its next start.
+#: when it restarts, so a process asks once per runtime. Only `runc` is kept (#1469 D2): a gVisor registration can be
+#: changed under a running process, and the box check keys its pass by the registration, so those are asked at every
+#: call. A missing runtime is asked again too, so a host fixed while a worker runs is seen at its next start.
 _FOUND_RUNTIMES: weakref.WeakKeyDictionary[Any, set[str]] = weakref.WeakKeyDictionary()
 
 
@@ -134,8 +140,9 @@ def require_runtime(docker: DockerFn, runtime: str) -> None:
     if not isinstance(runtimes, dict) or not runtimes:
         return
     if runtime in runtimes:
-        with contextlib.suppress(TypeError):
-            _FOUND_RUNTIMES.setdefault(docker, set()).add(runtime)
+        if runtime == "runc":
+            with contextlib.suppress(TypeError):
+                _FOUND_RUNTIMES.setdefault(docker, set()).add(runtime)
         return
     remedy = _RUNTIME_REMEDY.get(runtime, "register it with Docker, or set DEFENDER_BOX_RUNTIME to another box runtime")
     raise BoxFault(f"Docker on this host has no runtime {runtime!r} registered: {remedy}")
@@ -213,9 +220,9 @@ class _RealDocker:
     Every attached start asks for it of the docker object it was handed (r5 item 15),
     so a docker double carries its own and the real daemon is never reached around it."""
 
-    def __call__(self, argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess:
+    def __call__(self, argv: list[str], *, timeout: float = 120, **_kwargs: object) -> subprocess.CompletedProcess:
         return subprocess.run(
-            argv, capture_output=True, text=True, check=False, timeout=120,
+            argv, capture_output=True, text=True, check=False, timeout=timeout,
             encoding="utf-8",
             errors="replace",
         )
