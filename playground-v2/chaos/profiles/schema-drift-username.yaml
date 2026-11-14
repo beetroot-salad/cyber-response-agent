@@ -1,8 +1,10 @@
 id: schema-drift-username
 description: >
   The auth pipeline's user.name field is renamed to user.id, as if a parser
-  or schema change quietly relabeled it — an investigation-read field, never
-  one a detection rule keys on.
+  or schema change quietly relabeled it. Detection rules read user.name (squid's
+  threshold groups by it, postgres's counts its distinct values), so the guard refuses this profile: it is
+  kept as the guard's refused control. schema-drift-source-port is the usable
+  schema drift.
 mode: schema-drift
 seed: 42
 params:
