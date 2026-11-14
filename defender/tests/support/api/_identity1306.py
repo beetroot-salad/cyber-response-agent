@@ -26,7 +26,7 @@ failing_writes=, tenant_repo=None, alert_mapping=PLANTED_ALERT_MAPPING, database
 failure-wrapped if `failing_writes`), `world.raw_repo` (never wrapped); `world.register(T, *, state="active")`;
 `world.seed_first_members(T, emails)`; `world.restart(administrators=, tenants=)`.
 
-#1496: the store ports are composed as the real server composes them (`api_server._program._api_deps`), never by a second
+#1496: the store ports are composed by the real server's own wiring (`api_server.api_deps`), never by a second
 implementation. `database=True` puts the whole world on a fresh migrated test database (skipped without
 `DEFENDER_TEST_POSTGRES_DSN`): people in `PostgresIdentityRepository`, tenants in `PostgresTenantRepository`, and the
 alerts, investigations, learning jobs, alert mapping, writes and offboarding in one `JobStorePorts` over a `JobStore`;
@@ -570,14 +570,18 @@ class _LifespanClient(_WorldClient):
 
 
 class OffboardingSpy:
-    """#1360 D6: a recorder around the offboarding port the world composes (the real `JobStorePorts`, or `Refusing`).
-    Records each call as `(tenant, actor)` in `calls`; with `failing` set it raises before delegating. It holds NO
-    policy: the tenant transition and the ending of jobs are the wrapped class's."""
+    """#1360 D6: the world's store ports (the real `JobStorePorts`, or `Refusing`) as handed to the server's own wiring
+    (`api_server.api_deps`), with the offboard recorded: each call as `(tenant, actor)` in `calls`; with `failing` set it
+    raises before delegating. Every other port method is the wrapped object's. It holds NO policy: the tenant
+    transition and the ending of jobs are the store's."""
 
     def __init__(self, inner: Any) -> None:
         self._inner = inner
         self.calls: list[tuple[str, str]] = []
         self.failing = False
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
 
     async def offboard_tenant(self, tenant_id: str, *, actor: Any) -> Any:
         self.calls.append((str(tenant_id), str(actor)))
@@ -653,7 +657,7 @@ class _AuditTap(logging.Handler):
 _TAP = _AuditTap()
 
 
-#: What the refusing ports name: the families the real server leaves unbacked, and a world with no database.
+#: What a world with no database refuses its store ports with.
 NO_STORE = "no store in this test world (#1496)"
 
 
@@ -840,13 +844,12 @@ class World:
         self.app = create_app(self.deps())
 
     def deps(self) -> ApiDeps:
-        """The app's ports for the current service: the backed families are `store`, the rest refuse (#1496)."""
-        unbacked = Refusing(NO_STORE)
-        return ApiDeps(
-            alerts=self.store, investigations=self.store, learning_jobs=self.store, writes=self.store,
-            alert_mapping=self.store, offboarding=self.offboarding,
-            lessons=unbacked, systems=unbacked, secrets=unbacked, checker=unbacked, artifact_links=unbacked,
-            audit=unbacked, identity=self.service, frontend_origin=FRONTEND_ORIGIN, tenants=self.tenants)
+        """The app's ports for the current service, composed by the server's own wiring (#1496): the store's ports (with
+        the offboard recorded) back what the server backs, the rest refuse as the server's do."""
+        from defender.api_server import api_deps
+
+        return api_deps(identity=self.service, tenants=self.tenants, ports=self.offboarding,
+                        frontend_origin=FRONTEND_ORIGIN)
 
     def restart(self, *, administrators: Sequence[str] = (),
                 tenants: Mapping[str, Sequence[str]] | None = None) -> None:

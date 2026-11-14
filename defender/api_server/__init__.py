@@ -5,7 +5,7 @@ close); uvicorn only serves the socket it is handed. Piece 2 (#1470) is separate
 
 from __future__ import annotations
 
-from ._program import Running, run, serving
+from ._program import Running, api_deps, run, serving
 from ._settings import Settings, StartRefused
 
-__all__ = ["Running", "Settings", "StartRefused", "run", "serving"]
+__all__ = ["Running", "Settings", "StartRefused", "api_deps", "run", "serving"]
