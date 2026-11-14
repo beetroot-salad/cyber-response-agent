@@ -7,13 +7,12 @@ on:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/install-gvisor
-      - name: Probe C - docker info JSON for runtimes (as main registers runsc)
+      - name: Probe D - box-check container cost and outcome per runtime
         run: |
-          docker info --format '{{json .Runtimes}}' | python3 -c "import json,sys; d=json.load(sys.stdin); print(json.dumps({k: {kk: vv for kk, vv in v.items() if kk != 'status'} for k, v in d.items()}, indent=1)); print('KEYS', {k: sorted(v) for k, v in d.items()})"
-          sudo runsc install --runtime runsc-job -- --oci-seccomp --host-uds=open
+          sudo runsc install --runtime runsc-plain -- --oci-seccomp
           sudo systemctl restart docker
-          docker info --format '{{json .Runtimes}}' | python3 -c "import json,sys; d=json.load(sys.stdin); print(json.dumps({k: {kk: vv for kk, vv in v.items() if kk != 'status'} for k, v in d.items()}, indent=1))"
+          python3 .github/probe_1469_d.py
