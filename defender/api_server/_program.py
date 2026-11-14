@@ -261,7 +261,7 @@ async def serving(settings: Settings, *, transport: httpx.AsyncBaseTransport | N
         async with steps.step("the secret store's seal status"):
             sealed = await _seal_status(settings, openbao_transport)
         secrets = OpenBaoSecrets(addr=settings.openbao_addr, token=settings.openbao_token.get_secret_value(),
-                                 mount=settings.openbao_kv_mount, transport=openbao_transport)  # type: ignore[arg-type]  # any httpx transport serves it
+                                 mount=settings.openbao_kv_mount, transport=openbao_transport)
         if not sealed:  # sealed: the API starts, and each request needing the store answers 503 until it is unsealed
             async with steps.step("the secret store's login check"):
                 await _login_check(settings, secrets)
