@@ -19,13 +19,15 @@ is a `stale` row, and the marker is marked dirty so the next launch restores who
 index patterns are the freeze's; a freeze whose patterns are not the lab tenant's current ones
 (`patterns`) is refused before anything runs (D24).
 
-A run that dies before printing `run_id=` gets no row. `--reference` serves the
+Several case dirs of one variant are one batch: one lock, one copy, one teardown, the agents in waves
+of `--parallel` (the clock rewritten before each wave). A run that dies before printing `run_id=` gets
+no row; the batch's other runs keep theirs. `--reference` serves the
 copy the same way but appends no row and prints the run id, for labelling (O8); it works before
 `confirmed` is filled. `lock_token` joins a lock make-a-case holds and leaves it held.
 
     defender/.venv/bin/python playground-v2/scripts/launch_frozen.py \\
-        evaluations/fixtures/held_out/<slug> --tenant "$TENANT_ID" --index F \\
-        --parts-dir <lab disk path> [--knowledge-commit K] [--reference] [--lock-token T]
+        evaluations/fixtures/held_out/<slug> [<slug> ...] --tenant "$TENANT_ID" --index F \\
+        --parts-dir <lab disk path> [--knowledge-commit K] [--reference] [--lock-token T] [--parallel N]
 """
 from __future__ import annotations
 
@@ -179,11 +181,11 @@ def _agent_python() -> str:
     return str(venv) if venv.exists() else sys.executable
 
 
-def _serve_copy(es: Any, ops: Any, clock: Any, *, case: dict, freeze: dict, freeze_id: str,
-                parts_dir: Path, alert_file: Path, location: str) -> list[str]:
-    """Ready the copy, bring its services up and compare it with the case; returns the stale
-    reasons. A stale copy is marked dirty so the next launch restores it whole."""
-    overlay, patterns = case.get("overlay"), list(freeze["patterns"])
+def _serve_copy(es: Any, ops: Any, clock: Any, *, cases: list[dict], alert_files: list[Path], freeze: dict,
+                freeze_id: str, parts_dir: Path, location: str) -> list[list[str]]:
+    """Ready the copy, bring its services up and compare it with each case (one variant); returns each
+    case's stale reasons. A stale copy is marked dirty so the next launch restores it whole."""
+    overlay, patterns = cases[0].get("overlay"), list(freeze["patterns"])
     T = frozen_copy.stamp(freeze["T"])
     copy = frozen_copy.ready(es, ops=ops, clock=clock, freeze=freeze, freeze_id=freeze_id,
                       overlay=overlay, location=location)
@@ -192,14 +194,13 @@ def _serve_copy(es: Any, ops: Any, clock: Any, *, case: dict, freeze: dict, free
     frozen_copy.wait_for_cluster(es, clock, "the copy")
     ops.create_readonly_user(ops.current_password())
     observed = frozen_copy.observed_counts(es, list(freeze["elastic"]["indices"]))
-    uuid = alert_uuid_of(alert_file)
-    alert = frozen_copy.find_alert(es, patterns, uuid)
-    file_digest = held_out.digest(json.loads(alert_file.read_text()))
+    alerts = [(frozen_copy.find_alert(es, patterns, alert_uuid_of(f)), held_out.digest(json.loads(f.read_text())))
+              for f in alert_files]
     content, read = frozen_copy.content_of(es, ops, copy, freeze_id=freeze_id, overlay=overlay)
     print(f"copy {'restored' if copy.restored else 'reused'}; content "
           f"{'read in full' if read else 'trusted from its record (writes blocked)'}", file=sys.stderr)
-    reasons = _stale(case, observed, content, alert, file_digest)
-    if reasons:
+    reasons = [_stale(case, observed, content, alert, digest) for case, (alert, digest) in zip(cases, alerts)]
+    if any(reasons):
         frozen_copy.mark_dirty(ops, freeze_id, overlay)
     return reasons
 
@@ -211,22 +212,53 @@ def _quiet_teardown(ops: Any, why: str) -> None:
         print(f"teardown after {why} also failed: {exc}", file=sys.stderr)
 
 
-def launch(case_dir: Path, *, freezes_dir: Path, tenant_settings: Path, index: Path, parts_dir: Path,
-           lock_store: Any, es: Any, ops: Any, run_fn: Any = _default_run_fn, clock: Any = None,
-           env: dict | None = None, tenant: str, knowledge: str | None = None,
-           reference: bool = False, lock_token: str | None = None,
-           location: str = frozen_copy.REPO_LOCATION) -> str:
-    """Serve one frozen run of `case_dir`; returns its run id. `tenant_settings` is the lab tenant's
-    `settings/` directory: the copy is made with the freeze's patterns, which must be the tenant's
-    current ones (D24)."""
-    case_dir, parts_dir, index = Path(case_dir), Path(parts_dir), Path(index)
+def _run_wave(run_fn: Any, jobs: list[tuple[list[str], dict]]) -> list[tuple[int, str]]:
+    """Each job's `(rc, stdout)`, in order. One job runs here; several run at once, and all of them have
+    ended before this returns (a failure of one is raised once every other has ended)."""
+    if len(jobs) == 1:
+        rc, stdout, _ = run_fn(*jobs[0])
+        return [(rc, stdout)]
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
+        futures = [pool.submit(run_fn, argv, env) for argv, env in jobs]
+    return [(f.result()[0], f.result()[1]) for f in futures]
+
+
+def launch(case_dir: Path, **kw: Any) -> str:
+    """Serve one frozen run of `case_dir`; returns its run id. See `launch_batch`."""
+    return launch_batch([case_dir], **kw)[0]
+
+
+def launch_batch(case_dirs: list[Path], *, freezes_dir: Path, tenant_settings: Path, index: Path, parts_dir: Path,
+                 lock_store: Any, es: Any, ops: Any, run_fn: Any = _default_run_fn, clock: Any = None,
+                 env: dict | None = None, tenant: str, knowledge: str | None = None,
+                 reference: bool = False, lock_token: str | None = None, parallel: int = 1,
+                 location: str = frozen_copy.REPO_LOCATION) -> list[str]:
+    """Serve one frozen run of each case in `case_dirs`, all of one variant, on one copy; returns their
+    run ids in order. The agents run in waves of up to `parallel`: the node's clock is rewritten before
+    each wave, and every agent of a wave starts from that one rewrite. A case whose agent dies gets no
+    row; the others keep theirs, and `RunDied` names every one that died once the copy is torn down.
+    `tenant_settings` is the lab tenant's `settings/` directory: the copy is made with the freeze's
+    patterns, which must be the tenant's current ones (D24)."""
+    dirs, parts_dir, index = [Path(d) for d in case_dirs], Path(parts_dir), Path(index)
+    if not dirs:
+        raise LaunchRefused("no case to launch")
+    if parallel < 1:
+        raise LaunchRefused("--parallel must be at least 1")
+    if len({d.name for d in dirs}) != len(dirs):
+        raise LaunchRefused("a batch names one case twice")
     clock = clock if clock is not None else frozen_copy.WallClock()
-    case, freeze, bound, _uuid = verify(case_dir, Path(freezes_dir), parts_dir, reference)
+    checked = [verify(d, Path(freezes_dir), parts_dir, reference) for d in dirs]
+    cases, freeze = [c[0] for c in checked], checked[0][1]
+    variants = {frozen_copy.variant_id(c["freeze"], c.get("overlay")) for c in cases}
+    if len(variants) != 1:
+        raise LaunchRefused("a batch is one variant (one freeze, one overlay); these cases name "
+                            f"{len(variants)}: launch each variant on its own")
     try:
         frozen_copy.check_patterns(freeze, tenant_settings)
     except frozen_copy.CopyRefused as exc:
         raise LaunchRefused(str(exc)) from exc
-    slug, alert_file = case_dir.name, case_dir / "alert.json"
+    alert_files = [d / "alert.json" for d in dirs]
     token = lock_token
     if token is None:
         token = lock.take(lock_store, lock.FROZEN_ENGINE)
@@ -238,57 +270,73 @@ def launch(case_dir: Path, *, freezes_dir: Path, tenant_settings: Path, index: P
             lock.require(lock_store, lock.FROZEN_ENGINE, token)
         except (lock.Held, lock.WrongToken) as exc:
             raise LaunchRefused(f"lock_token does not name the holder of the frozen-engine lock: {exc}") from exc
+    run_ids: list[str] = []
+    died: list[str] = []
     try:
         try:
-            reasons = _serve_copy(es, ops, clock, case=case, freeze=freeze, freeze_id=case["freeze"],
-                                  parts_dir=parts_dir, alert_file=alert_file, location=location)
+            reasons = _serve_copy(es, ops, clock, cases=cases, alert_files=alert_files, freeze=freeze,
+                                  freeze_id=cases[0]["freeze"], parts_dir=parts_dir, location=location)
             proxy_url = ops.start_proxy()
-            # The last lab step: the node's clock is rewritten from the VPS's clock at instant W,
-            # and the agent's run clock is anchored at the same W (r6.4.6), so both read T + (now - W).
-            anchor = ops.set_clock(freeze["T"])
-            argv = [_agent_python(), str(REPO / "defender" / "run.py"), str(alert_file),
-                    "--tenant", tenant, "--no-learn", "--as-of", frozen_copy.stamp(freeze["T"]),
-                    "--as-of-anchor", frozen_copy.stamp(anchor)]
-            if knowledge:
-                argv += ["--knowledge-commit", knowledge]
-            rc, stdout, _ = run_fn(argv, {**(os.environ if env is None else env),
-                                          "DEFENDER_CREDENTIAL_PROXY_URL": proxy_url})
-            run_id = _run_id(stdout)
-            if run_id is None:
-                raise RunDied(f"{slug}: the agent exited rc={rc} without announcing a run id; "
-                              "no row written, re-launch")
-            verified_at = frozen_copy.stamp(clock.now())
+            agent_env = {**(os.environ if env is None else env), "DEFENDER_CREDENTIAL_PROXY_URL": proxy_url}
+            for start in range(0, len(dirs), parallel):
+                wave = list(range(start, min(start + parallel, len(dirs))))
+                # The last lab step before a wave: the node's clock is rewritten from the VPS's clock at
+                # instant W, and each agent's run clock is anchored at the same W (r6.4.6), so all read
+                # T + (now - W).
+                anchor = ops.set_clock(freeze["T"])
+                jobs = []
+                for i in wave:
+                    argv = [_agent_python(), str(REPO / "defender" / "run.py"), str(alert_files[i]),
+                            "--tenant", tenant, "--no-learn", "--as-of", frozen_copy.stamp(freeze["T"]),
+                            "--as-of-anchor", frozen_copy.stamp(anchor)]
+                    if knowledge:
+                        argv += ["--knowledge-commit", knowledge]
+                    jobs.append((argv, agent_env))
+                for i, (rc, stdout) in zip(wave, _run_wave(run_fn, jobs)):
+                    slug, run_id = dirs[i].name, _run_id(stdout)
+                    if run_id is None:
+                        died.append(f"{slug}: the agent exited rc={rc} without announcing a run id; "
+                                    "no row written, re-launch")
+                        continue
+                    _report(slug, run_id, reasons[i], reference=reference, index=index,
+                            binding=checked[i][2]["binding"], verified_at=frozen_copy.stamp(clock.now()),
+                            knowledge=knowledge)
+                    run_ids.append(run_id)
         except BaseException:
             _quiet_teardown(ops, "a failed launch")
             raise
-        verdict, reason = ("stale", "; ".join(reasons)) if reasons else ("valid", "")
-        try:
-            if reference:
-                print(f"run_id={run_id}")
-                print(f"reference run of {slug}: verdict {verdict}" + (f" ({reason})" if reason else ""))
-            else:
-                _append_row(index, {"slug": slug, "run_id": run_id, "binding": bound["binding"],
-                                    "verdict": verdict, "reason": reason, "verified_at": verified_at,
-                                    "knowledge": knowledge})
-                print(f"{slug}: run {run_id} verdict {verdict}" + (f" ({reason})" if reason else ""))
-        except BaseException:
-            _quiet_teardown(ops, "a failed row write")
-            raise
+        if died:
+            _quiet_teardown(ops, "a run that died")
+            raise RunDied("; ".join(died))
         try:
             ops.teardown()
         except Exception as exc:
             done = "finished (reference, no row)" if reference else "recorded in the index"
-            raise TeardownFailed(f"{slug}: run {run_id} {done}; tearing the copy down then failed "
-                                 f"({exc}): stop the frozen services before the next launch") from exc
-        return run_id
+            raise TeardownFailed(f"{', '.join(d.name for d in dirs)}: run {', '.join(run_ids)} {done}; tearing "
+                                 f"the copy down then failed ({exc}): stop the frozen services before the next "
+                                 "launch") from exc
+        return run_ids
     finally:
         if lock_token is None:
             lock.release(lock_store, lock.FROZEN_ENGINE, token)
 
 
+def _report(slug: str, run_id: str, reasons: list[str], *, reference: bool, index: Path, binding: str,
+            verified_at: str, knowledge: str | None) -> None:
+    verdict, reason = ("stale", "; ".join(reasons)) if reasons else ("valid", "")
+    if reference:
+        print(f"run_id={run_id}")
+        print(f"reference run of {slug}: verdict {verdict}" + (f" ({reason})" if reason else ""))
+    else:
+        _append_row(index, {"slug": slug, "run_id": run_id, "binding": binding, "verdict": verdict,
+                            "reason": reason, "verified_at": verified_at, "knowledge": knowledge})
+        print(f"{slug}: run {run_id} verdict {verdict}" + (f" ({reason})" if reason else ""))
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Launch a held-out case on its frozen copy")
-    parser.add_argument("case_dir", type=Path, help="the held-out case dir (alert.json, case.yaml)")
+    parser.add_argument("case_dir", type=Path, nargs="+",
+                        help="the held-out case dir(s) (alert.json, case.yaml); several: one variant, one copy")
     parser.add_argument("--tenant", required=True)
     parser.add_argument("--index", type=Path, help="the held-out index (JSON Lines) to append to")
     parser.add_argument("--freezes-dir", type=Path, default=None,
@@ -298,6 +346,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--knowledge-commit", default=None, metavar="SHA")
     parser.add_argument("--reference", action="store_true",
                         help="a labelling run: serve the copy, write no row, print the run id")
+    parser.add_argument("--parallel", type=int, default=1, metavar="N",
+                        help="agents run at once, in waves (default 1)")
     parser.add_argument("--lock-token", default=None,
                         help="the token of the frozen-engine lock make-a-case holds")
     args = parser.parse_args(argv)
@@ -306,11 +356,11 @@ def main(argv: list[str] | None = None) -> int:
     from lab_ops import LabOps
     ops = LabOps.from_environment()
     try:
-        launch(args.case_dir, freezes_dir=args.freezes_dir or args.case_dir.resolve().parent / "freezes",
+        launch_batch(args.case_dir, freezes_dir=args.freezes_dir or args.case_dir[0].resolve().parent / "freezes",
                tenant_settings=frozen_copy.tenant_settings_dir(), index=args.index or Path(os.devnull),
                parts_dir=args.parts_dir, lock_store=lock.DockerLockStore(), es=ops.frozen_es(), ops=ops,
                tenant=args.tenant, knowledge=args.knowledge_commit, reference=args.reference,
-               lock_token=args.lock_token)
+               lock_token=args.lock_token, parallel=args.parallel)
     except (lock.LockError, LaunchRefused, frozen_copy.CopyRefused, RunDied) as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 4
