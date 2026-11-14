@@ -267,6 +267,19 @@ def _control_fault(runtime: str, seen: _Seen) -> BoxFault:
                                   f"cannot be put down to the runtime. Likely host-layout causes: {_LAYOUT}")
 
 
+def _clear_check_folder(folder: Path) -> None:
+    """Remove the check's folder. The folder holds only the socket, so unlink and rmdir need no new descriptor, as a
+    walk would: a process out of descriptors still leaves nothing behind. Anything else in it is swept the slow way."""
+    with contextlib.suppress(OSError):
+        os.unlink(folder / SOCKET_NAME)
+    try:
+        os.rmdir(folder)
+    except FileNotFoundError:
+        pass
+    except OSError:
+        shutil.rmtree(folder, ignore_errors=True)
+
+
 def require_box_check(docker: DockerFn, runtime: str, rootfs: Rootfs, *, flags: Sequence[str], labels: Sequence[str],
                       data_root: Path | None, mounts: Sequence[tuple[Path, Path]]) -> None:
     """Prove, by running a box, that `runtime` refuses a host-socket connect, once per process per registration.
@@ -294,7 +307,7 @@ def require_box_check(docker: DockerFn, runtime: str, rootfs: Rootfs, *, flags: 
     except OSError as e:
         raise BoxFault(f"the box check could not open its socket in {folder}: {e}") from e
     finally:
-        shutil.rmtree(folder, ignore_errors=True)
+        _clear_check_folder(folder)
     if key is not None:
         _keep(docker, key)
 
