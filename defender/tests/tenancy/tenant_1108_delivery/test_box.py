@@ -856,7 +856,7 @@ def test_drain_start_reads_the_code_check_and_the_drafts_token_before_returning_
     request = replace(batch.box_request(), spec=_PINNED)
     if wrong == "settings-at-root":
         (root / "settings").mkdir()
-        (root / "settings" / "lead-zero.yaml").write_text("not in a draft\n", encoding="utf-8")
+        (root / "settings" / "verb-grants.yaml").write_text("not in a draft\n", encoding="utf-8")
     daemon = FakeDaemon(tmp_path)
     reads = []
     agent_before = files_under(root / "agent")

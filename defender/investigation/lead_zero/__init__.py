@@ -42,7 +42,6 @@ from ._spec import (
 )
 from defender.systems.correlation import (
     CorrelationDispatch,
-    CorrelationDispatchError,
     correlation_grant,
     correlation_system,
     resolve_correlation_dispatch,
@@ -293,7 +292,7 @@ async def run_correlation(  # noqa: C901, PLR0911, PLR0912, PLR0913 — one earl
         return CorrelationOutcome(ending=ENDING_DOWN_AT_START, system=system, down=down)
     run_dir = run_state.run_dir
     pointer = RunPaths(run_dir).alert.relative_to(run_dir).as_posix()
-    goal, what_to_summarize = correlation_contract(pointer, dispatch.template_id)
+    goal, what_to_summarize = correlation_contract(pointer)
     claimed = claim_lead({
         "run_dir": str(run_dir), "lead_id": L3, "goal": goal,
         "what_to_summarize": what_to_summarize, PROVENANCE_KEY: HARNESS_PROVENANCE,
@@ -375,7 +374,6 @@ __all__ = [
     "CORRELATION_REQUEST_LIMIT",
     "CorrelationDeadlineError",
     "CorrelationDispatch",
-    "CorrelationDispatchError",
     "CorrelationOutcome",
     "DEADLINE_CEILING_S",
     "DEADLINE_KEY",

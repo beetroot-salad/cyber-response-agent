@@ -25,8 +25,13 @@ KNOWLEDGE_ROOT = REPO_ROOT / "knowledge"
 
 #: The fixture tenant (the retired lab's frozen copy) and the template, both committed in the
 #: product repo.
-FIXTURE = KNOWLEDGE_ROOT / "tenant-fixture"
+FIXTURE = DEFENDER / "tests" / "fixtures" / "tenant-fixture"
 TEMPLATE = KNOWLEDGE_ROOT / "tenant-template"
+
+
+def fixture_in(checkout: Path) -> Path:
+    """The fixture tenant's place in a checkout copy (`defender/tests/fixtures/tenant-fixture`)."""
+    return Path(checkout) / "defender" / "tests" / "fixtures" / "tenant-fixture"
 
 DATA_ROOT_ENV = "DEFENDER_DATA_ROOT"
 LEARNING_STATE_ENV = "DEFENDER_LEARNING_STATE_DIR"  # lint-stale-ref: ok — the retired variable is named here to set or clear it as an ambient decoy
@@ -45,14 +50,10 @@ ROW_PATH_PROPERTY = "row_path"
 #: production constant.
 REQUIRED_SETTINGS = (
     "verb-grants.yaml",
-    "lead-zero.yaml",
 )
 
 #: The per-tenant id file, relative to `knowledge/`.
 TENANT_ID_FILE = Path("agent") / ".tenant-id"
-
-#: The fixture's lead-zero template.
-FIXTURE_CORRELATION_TEMPLATE = "elastic.correlate-alerts-by-entity"
 
 #: What `check` says, beside git's reason, when its committed-`.tenant-id` git read cannot
 #: answer (git absent, dubious ownership, any git error).
@@ -621,6 +622,7 @@ def tmp_checkout(dest: Path) -> Path:
     checkout root."""
     shutil.copytree(DEFENDER, dest / "defender", ignore=_CHECKOUT_IGNORE, symlinks=True)
     shutil.copytree(KNOWLEDGE_ROOT, dest / "knowledge", symlinks=True)
+    shutil.copytree(FIXTURE, fixture_in(dest), symlinks=True)  # under `tests`, which the copy skips
     git(dest, "init", "-q", "-b", "main")
     # No background maintenance: auto-maintenance after the commit repacks loose objects in a
     # detached process, racing every before/after census of this tree.

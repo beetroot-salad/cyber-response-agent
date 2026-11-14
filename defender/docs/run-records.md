@@ -138,7 +138,7 @@ Marked here so a reader does not mistake these for a kind this page owns.
   (`learning/store/`, #1278), not files.
 - **Quarantine** of a tainted worktree: tar + manifest (`learning/core/quarantine.py`).
 - **Checked-in corpora a run consumes**: lessons, knowledge, skills, the gather query catalog,
-  `lead-zero.yaml`, `bash_policy.json`, prompts and templates. `lessons_loaded.jsonl` is the
+  `bash_policy.json`, prompts and templates. `lessons_loaded.jsonl` is the
   in-run receipt of consumption and is a run record; the corpora themselves are not.
 - **Eval case inputs and result trees** (`evals/`).
 - **Rendered pages outside a run or episode** (`queues.html`, `lessons.html`) and the untracked

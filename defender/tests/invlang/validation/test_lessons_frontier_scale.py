@@ -19,8 +19,10 @@ from defender.tests.support.learning.retrieval._lessons_corpus import _write_les
 
 from defender.tests.support.shared._pre_p4_shipped import LESSONS as SHIPPED_LESSONS  # noqa: E402
 
-#: The lessons this repo shipped before #1108 moved them to each tenant, byte for byte: the
-#: motivating lesson and the run reproductions below are pinned against that real corpus.
+#: Nine made-up lessons whose selectors are kept from the lab corpus this repo shipped before
+#: #1108 (#1503 dropped the lab text and the seven lessons no ranking here reaches): the
+#: motivating lesson and the run reproductions below rank exactly as they did over the lab's
+#: sixteen, with more matches than the block holds at seven of the replays' ten steps.
 CORPUS = SHIPPED_LESSONS
 
 TWO_VERTEX_DOC = """```invlang
@@ -31,7 +33,7 @@ v-002|identity|user/known-corp|jsmith|uid=1000;loginuid=-1
 """
 
 #: The lesson the whole lane exists to reach, and the one every defect cut.
-LOGINUID_LESSON = "falco-loginuid-tty-non-interactive-not-docker-exec"
+LOGINUID_LESSON = "fixture-e-loginuid-non-interactive"
 
 REPLAYED_RUNS = (
     ("golden-sshpivot-ab3", DEFENDER / "tests" / "fixtures" / "e2e" / "golden-sshpivot-ab3" / "investigation.md"),
@@ -142,7 +144,7 @@ def test_the_filed_reproduction_reaches_the_loginuid_lesson_at_the_real_cut():
     )
 
     by_name = {h.name: h.score for h in _match(TWO_VERTEX_DOC, top_k=99)}
-    cut_it = ["container-id-anchor-before-uid-lookup", "container-identity-gap-not-terminal"]
+    cut_it = ["fixture-c-container-anchor-before-uid", "fixture-d-container-identity-gap"]
     for loser in cut_it:
         assert by_name[loser] < by_name[LOGINUID_LESSON], (
             f"{loser} keys on a bare `slot: ident` and still scores at or above the lesson "
@@ -251,7 +253,7 @@ def test_two_lessons_about_one_open_thing_do_not_take_the_whole_block(tmp_path):
     ]
 
 
-# the whole thing, against the real corpus and the real runs
+# the whole thing, against the fixture corpus and the real runs
 
 @pytest.mark.parametrize(("label", "path"), REPLAYED_RUNS)
 def test_no_replayed_block_leaves_an_open_thing_unrepresented(label, path):

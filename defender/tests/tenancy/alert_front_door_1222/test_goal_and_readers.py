@@ -57,8 +57,8 @@ ANCESTOR_DOC = {"_id": "AZ5fuw9rEmDJyXFcPn5t", "@timestamp": "2026-05-25T15:20:0
 MISSING_INDEX = "s07-missing-*"
 #: The window l-00c's scripted queries bind.
 WINDOW = {"start": "2026-05-25T13:00:00Z", "end": "2026-05-25T17:00:00Z"}
-#: The shipped, established correlation template (`_tenants1106.SHIPPED_CORRELATION_TEMPLATE`):
-#: a catalog hit, so the lead-author lane builds a handoff for the l-00c invocation.
+#: An established saved correlation query in the planted catalog
+#: (`_tenants1106.SHIPPED_CORRELATION_TEMPLATE`): a catalog hit, so the lead-author lane builds a handoff for the l-00c invocation.
 CATALOG_ID = "elastic.correlate-alerts-by-entity"
 #: A coined, uncatalogued id: the lane mints a catalog draft from l-00c's row.
 COINED_ID = "elastic.s07-frontdoor-coined"

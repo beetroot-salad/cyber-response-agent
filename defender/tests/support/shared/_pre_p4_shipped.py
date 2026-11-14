@@ -1,7 +1,9 @@
 """#1108 P4: the agent knowledge this repo shipped in its product tree before P4 moved it to
-each tenant — the exact bytes of base `0f62791e`'s `defender/lessons/`,
-`defender/skills/gather/queries/` and `defender/skills/tacit-knowledge/`, laid out as an agent
-half (`lessons/`, `skills/...`) under `tests/fixtures/pre-p4-shipped/agent/`.
+each tenant, laid out as an agent half (`lessons/`, `skills/...`) under
+`tests/fixtures/pre-p4-shipped/agent/`. The query catalog and the tacit registry are the exact
+bytes of base `0f62791e`'s `defender/skills/gather/queries/` and
+`defender/skills/tacit-knowledge/`. The lessons are not: #1503 replaced the sixteen lab lessons
+with nine made-up ones that keep their selectors, so recall ranks exactly as before.
 
 Tests whose subject is an engine (frontier recall and scoring, the scaffold rule, the tacit
 registry's gate) exercised over that real content read it here; no run, tenant or drain reads

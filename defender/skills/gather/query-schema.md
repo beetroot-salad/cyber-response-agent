@@ -180,7 +180,10 @@ recording; it is freely discardable, and the checker accepts both.)
   matches. Naming a template for *what it measures* is a decision that needs the recording, the
   neighbor scores and the catalog in hand — none of which the gather subagent had when it
   coined the id mid-investigation. **Naming it is the promoter's job.**
-- Its query sits under **`## Executed query`**, not `## Query`. A `## Query` is an interface:
+- Its query sits under **`## Executed query`**, not `## Query`, as the call that was made: a
+  ```` ```query ```` block with its `verb:` and every `params:` value. For an engine verb the
+  query text is one of those values (an ES|QL pipe under `query`, say); promoting the draft
+  lifts it into the template's `## Query`, fenced in its language. A `## Query` is an interface:
   its `${name}`s are holes a dispatch fills, which is why they are checked against the verb's
   params. A recording has no holes — every `${…}` in it is text that was literally sent. So a
   draft declares no `body_substitutions:`, and the placeholder rule does not apply to it.

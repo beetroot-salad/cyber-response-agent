@@ -85,7 +85,7 @@ def test_1120_the_census_lint_refuses_a_fixture_with_a_link_without_a_traceback(
     lint = _census_lint(repo)
     H.assert_ran(lint)
     assert lint.returncode == 0, f"the census lint refuses the clean checkout:\n{H.output(lint)}"
-    agent_link = repo / "knowledge" / "tenant-fixture" / "agent" / "spec1120-link.md"
+    agent_link = H.fixture_in(repo) / "agent" / "spec1120-link.md"
     outside = tmp_path / "outside" / "not-the-fixtures.md"
     outside.parent.mkdir()
     outside.write_text("not the fixture's bytes\n", encoding="utf-8")

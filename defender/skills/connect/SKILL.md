@@ -229,7 +229,7 @@ investigation should be able to call; a verb you are deliberately leaving unreac
 `roles: []` **and a written reason**. The template withholds every verb, so until the tenant's
 table grants them, no run can call the system. On the **generate** path the adapter is new
 shared code, so also add its rows to `knowledge/tenant-template/settings/verb-grants.yaml`
-(withheld, `roles: []` with a reason) and `knowledge/tenant-fixture/settings/verb-grants.yaml`
+(withheld, `roles: []` with a reason) and `defender/tests/fixtures/tenant-fixture/settings/verb-grants.yaml`
 (granted as the tests need) in this repo: CI (`lint_verb_disposition_census.py`) fails on a
 declared verb with no row there, and `tenant.py check <tenant>` reports one a tenant's table
 leaves undecided. A catalog adapter's template and fixture rows already exist.
@@ -269,7 +269,7 @@ tree isn't under version control, leave the files in place for review:
 git checkout -b connect/{system}
 git add defender/integrations/{system}_adapter.py \
         knowledge/tenant-template/settings/verb-grants.yaml \
-        knowledge/tenant-fixture/settings/verb-grants.yaml
+        defender/tests/fixtures/tenant-fixture/settings/verb-grants.yaml
 # add pyproject.toml / uv.lock only if a dependency was added
 ```
 

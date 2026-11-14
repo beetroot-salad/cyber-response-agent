@@ -65,7 +65,7 @@ KNOWLEDGE_JOINS = ("settings", "knowledge", "agent")
 
 #: Settings-half loaders that must carry no run-records finding.
 SETTINGS_LOADER_MODULES = (
-    "systems/verb_dispositions.py", "systems/lead_zero_config.py", "systems/run_tenant.py",
+    "systems/verb_dispositions.py", "systems/run_tenant.py",
     "tenancy/case_ticket.py", "integrations/elastic_adapter.py",
     "kit/transport.py", "learning/branch/estate/stagers/elastic.py",
     "learning/branch/staging.py", "skills/connect/validate_scaffold.py",
@@ -193,21 +193,16 @@ def _table(rows: dict[tuple[str, str], dict]) -> str:
 def _planted_repo(tmp_path: Path, *, fixture_rows: dict = H.CENSUS_ROWS,
                   broken_lab: bool = False) -> Path:
     """A committed synthetic repo (`_dispositions995.planted_tree`) declaring alpha and beta, with
-    the lead-zero catalog template, a template folder and a fixture folder — plus, on request, a
-    broken lab under knowledge/tenants/ (`broken_lab`)."""
+    a template folder and a fixture folder — plus, on request, a broken lab under
+    knowledge/tenants/ (`broken_lab`)."""
     repo = D995.planted_tree(tmp_path, {"alpha": "lookup", "beta": "lookup"})
-    lead_zero = T1106.lead_zero_text(T1106.CENSUS_LEAD_ZERO_ID)
-    # Each folder carries the lead-zero template in its own catalog.
-    folders = [
-        T1106.plant_tenant(repo / "knowledge", "tenant-template", table=_table(H.CENSUS_TEMPLATE_ROWS),
-                           configs={}, lead_zero=lead_zero),
-        T1106.plant_tenant(repo / "knowledge", "tenant-fixture", table=_table(fixture_rows),
-                           configs={}, lead_zero=lead_zero)]
+    T1106.plant_tenant(repo / "knowledge", "tenant-template", table=_table(H.CENSUS_TEMPLATE_ROWS),
+                       configs={})
+    fixture = T1106.plant_tenant(tmp_path / "fixture-src", "tenant-fixture", table=_table(fixture_rows),
+                                 configs={})
+    shutil.copytree(fixture, T1106.committed_folder(repo, "tenant-fixture"), symlinks=True)
     if broken_lab:
-        folders.append(T1106.plant_tenant(repo / "knowledge" / "tenants", "x", configs={},
-                                          lead_zero=lead_zero, omit=("verb-grants.yaml",)))
-    for folder in folders:
-        T1106.plant_census_catalog(folder)
+        T1106.plant_tenant(repo / "knowledge" / "tenants", "x", configs={}, omit=("verb-grants.yaml",))
     seed_repo(repo, add="-A", message="tenants")
     return repo
 
@@ -254,16 +249,6 @@ def _phantom_verb(folder: Path) -> str:
     return "cmdb.no-such-verb"
 
 
-#: A lead-zero template the running catalog lacks.
-ABSENT_TEMPLATE = "elastic.no-such-template"
-
-
-def _lead_zero_disagreement(folder: Path) -> str:
-    (folder / "settings" / "lead-zero.yaml").write_text(
-        f"correlation_template: {ABSENT_TEMPLATE}\n", encoding="utf-8")
-    return ABSENT_TEMPLATE
-
-
 def _extra_top_level_entry(folder: Path) -> str:
     """An operator's .env at the tenant repo's top level — outside the allow-list."""
     (folder / ".env").write_text("API_TOKEN=an-operator-secret\n", encoding="utf-8")
@@ -275,7 +260,6 @@ VIOLATIONS = [
     pytest.param(_symlink_in_agent, id="symlink-in-agent"),
     pytest.param(_undecided_verb, id="undecided"),
     pytest.param(_phantom_verb, id="phantom-verb"),
-    pytest.param(_lead_zero_disagreement, id="lead-zero-disagreement"),
     pytest.param(_extra_top_level_entry, id="extra-top-level-entry"),
 ]
 
@@ -284,7 +268,7 @@ VIOLATIONS = [
 def test_1120_the_census_lint_and_check_folder_agree_on_a_violating_folder(
         tmp_path: Path) -> None:
     checkout = H.tmp_checkout(tmp_path / "co")
-    fixture_slot = checkout / "knowledge" / "tenant-fixture"
+    fixture_slot = T1106.committed_folder(checkout, "tenant-fixture")
     rc, out = _census(checkout)
     assert rc == 0, f"the census lint refused a checkout whose template and fixture are clean:\n{out}"
     assert "tenant-fixture" in _clean_names(out), f"the lint did not walk the fixture:\n{out}"
@@ -328,9 +312,9 @@ def test_1159_the_census_lint_keeps_exit_2_and_its_own_framing_when_the_census_i
 @pytest.mark.parametrize("folder", [H.FIXTURE, H.TEMPLATE], ids=["fixture", "template"])
 def test_1366_o9_the_shipped_tenant_folders_carry_no_system_folders_or_case_record(folder: Path) -> None:
     """The committed template and fixture drop `settings/systems/` and `settings/case-record.yaml` (a system's settings
-    are a database record now); the two tables a tenant still owns remain. (#1366 O9)"""
+    are a database record now); the grant table a tenant still owns remains (#1503 retired `lead-zero.yaml`). (#1366 O9)"""
     settings = folder / "settings"
-    assert sorted(p.name for p in settings.iterdir()) == ["lead-zero.yaml", "verb-grants.yaml"], list(settings.iterdir())
+    assert sorted(p.name for p in settings.iterdir()) == ["verb-grants.yaml"], list(settings.iterdir())
     H.assert_clean(H.check(tenant_py, None, "--folder", str(folder)))
 
 

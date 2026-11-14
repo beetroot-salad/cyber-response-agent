@@ -22,7 +22,18 @@ TEMPLATE_DIR = REPO_ROOT / "knowledge" / "tenant-template"
 PLAYGROUND_ID = fixture_uuid("tenant:playground")
 TEMPLATE_SETTINGS = TEMPLATE_DIR / "settings"
 #: The frozen test fixture tenant (#1120 H2): what a test runs as when it names no tenant.
-FIXTURE = REPO_ROOT / "knowledge" / "tenant-fixture"
+FIXTURE = REPO_ROOT / "defender" / "tests" / "fixtures" / "tenant-fixture"
+#: Where each committed knowledge folder sits under a repo root: the starter tenant in
+#: `knowledge/`, the tests' fixture tenant under the tests (#1503).
+COMMITTED_FOLDERS: dict[str, tuple[str, ...]] = {
+    "tenant-template": ("knowledge", "tenant-template"),
+    "tenant-fixture": ("defender", "tests", "fixtures", "tenant-fixture"),
+}
+
+
+def committed_folder(repo: Path, name: str) -> Path:
+    """The committed knowledge folder `name` (`tenant-template`/`tenant-fixture`) under `repo`."""
+    return Path(repo).joinpath(*COMMITTED_FOLDERS[name])
 FIXTURE_SETTINGS = FIXTURE / "settings"
 FIXTURE_AGENT = FIXTURE / "agent"
 TEMPLATE_AGENT = TEMPLATE_DIR / "agent"
@@ -33,7 +44,6 @@ TEMPLATE_AGENT = TEMPLATE_DIR / "agent"
 #: (#1359 r3 "Tenant case-record settings": a tenant with no case system loads and runs).
 REQUIRED_FILES: tuple[str, ...] = (
     "verb-grants.yaml",
-    "lead-zero.yaml",
 )
 
 #: The tenant's optional case-record file under `settings/` (#1359 r4 Data): `system:` names the
@@ -43,9 +53,8 @@ NO_CASE_REL = ".no-case-record"  # == _systems1366.NO_CASE
 #: The folder a tenant repo from before #1359 still holds (`tenant check` finds it).
 RETIRED_CASE_FOLDER = "systems/case-history"
 
-#: The lead-zero template the fixture tenant names (it binds `elastic.alerts`). The catalog is
-#: the tenant's own (`agent/skills/gather/queries/`), never the checkout's, so the run-start
-#: agreement check (#1003) passes only when the fixture's `agent/` carries this template.
+#: A saved correlation query a planted tenant's catalog carries (`TENANT_CATALOG`). It is a cache
+#: the lead may use, not a binding: no tenant names a query for the lead (#1503).
 SHIPPED_CORRELATION_TEMPLATE = "elastic.correlate-alerts-by-entity"
 
 
@@ -179,7 +188,7 @@ def verb_context(defender_dir: Path, run_dir: Path, env: Any, *,
 # ---------------------------------------------------------------------------------------------
 
 #: Tenant A's table: gather reaches cmdb and elastic; the correlation lead holds elastic.alerts
-#: (so the lead-zero agreement check has a pair to agree on); identity is withheld.
+#: (the one system it searches); identity is withheld.
 TABLE_A = """\
 dispositions:
   cmdb:
@@ -236,10 +245,6 @@ dispositions:
     alerts: {roles: [], reason: "copied from the template; no operator has granted it yet"}
     health-check: {roles: [], reason: "copied from the template; no operator has granted it yet"}
 """
-
-
-def lead_zero_text(template_id: str = SHIPPED_CORRELATION_TEMPLATE) -> str:
-    return f"correlation_template: {template_id}\n"
 
 
 #: The tenant's alert mapping in the retired file format (#1222; `case_key` #1359). #1345 O5: no planted tenant
@@ -325,10 +330,10 @@ def config_texts(marker: str, *, events_index: str | None = None,
     }
 
 
-#: Made-up templates a planted tenant's lead-zero config names, written into the tenant's own
-#: catalog (`agent/skills/gather/queries/<system>/<name>.md`): run start resolves
-#: `lead-zero.yaml` against the run copy's catalog, never the checkout's. Front matter follows
-#: the template schema; bodies are made up (no copy of lab content).
+#: Made-up saved queries a planted tenant's own catalog carries
+#: (`agent/skills/gather/queries/<system>/<name>.md`): a run reads the run copy's catalog, never
+#: the checkout's. Front matter follows the template schema; bodies are made up (no copy of lab
+#: content).
 TENANT_CATALOG: dict[str, str] = {
     "elastic/correlate-alerts-by-entity.md": """\
 ---
@@ -375,7 +380,6 @@ verb: list-hosts
 def plant_tenant(  # noqa: PLR0913, C901 — one tenant folder's whole content, each part overridable
     root: Path, tenant_id: str, *,
     table: str = TABLE_A,
-    lead_zero: str | None = None,
     case_system: str | None = "ticket",
     case_body: str = COMMENT_BODY,
     marker: str | None = None,
@@ -400,7 +404,6 @@ def plant_tenant(  # noqa: PLR0913, C901 — one tenant folder's whole content, 
     agent = tenant / "agent"
     files: dict[str, str] = {
         "verb-grants.yaml": table,
-        "lead-zero.yaml": lead_zero if lead_zero is not None else lead_zero_text(),
     }
     if case_system is not None:
         files[CASE_RECORD_REL] = case_record_text(case_system, body=case_body)
@@ -428,10 +431,9 @@ def plant_tenant(  # noqa: PLR0913, C901 — one tenant folder's whole content, 
     for name, text in (agent_files if agent_files is not None
                        else {"AGENT.md": f"agent half of {tenant_id}\n"}).items():
         (agent / name).write_text(text, encoding="utf-8")
-    # Run start resolves `lead-zero.yaml` against the tenant's own catalog, and system skills
-    # are tenant knowledge, so a planted tenant carries the templates its tables name and a
-    # made-up `SKILL.md` per configured system. `catalog=False` plants neither (the "names a
-    # template its catalog lacks" shape).
+    # Saved queries and system skills are tenant knowledge, so a planted tenant carries a few
+    # saved queries and a made-up `SKILL.md` per configured system. `catalog=False` plants
+    # neither.
     if catalog:
         for rel, text in TENANT_CATALOG.items():
             template = agent / "skills" / "gather" / "queries" / rel
@@ -472,43 +474,11 @@ def place_tenant(root: Path, tenant_id: str, *, alert_mapping: Any = PLANTED_ALE
     return placed
 
 
-#: The lead-zero id a planted census repo's folders name, and the template carrying it: the CI
-#: census checks that each folder's `lead-zero.yaml` names a template its own catalog holds.
-CENSUS_LEAD_ZERO_ID = "alpha.by-entity"
-CENSUS_QUERY_TEMPLATE = """\
----
-id: alpha.by-entity
-status: established
-verb: lookup
----
-
-## Goal
-
-Everything alpha knows about one entity.
-
-## Query
-
-```
-entity
-```
-"""
-
-
-def plant_census_catalog(folder: Path) -> Path:
-    """Write the query template a planted census folder's lead-zero names into that folder's
-    own catalog (`<folder>/agent/skills/gather/queries/`)."""
-    q = Path(folder) / "agent" / "skills" / "gather" / "queries" / "alpha" / "by-entity.md"
-    q.parent.mkdir(parents=True, exist_ok=True)
-    q.write_text(CENSUS_QUERY_TEMPLATE, encoding="utf-8")
-    return q
-
-
 def plant_census_settings(repo: Path, rows: dict, *, template_rows: dict | None = None,
                           ) -> list[Path]:
     """Give a planted repo (`_dispositions995.planted_tree`) the two knowledge folders the
-    census gate walks, `knowledge/tenant-fixture/` and `knowledge/tenant-template/`: each holds
-    the table `rows` (the template `template_rows` when given), a `lead-zero.yaml` naming
-    `CENSUS_LEAD_ZERO_ID`, the mappings, and that template in its own catalog. Plain folders as
+    census gate walks, `defender/tests/fixtures/tenant-fixture/` and `knowledge/tenant-template/`: each holds
+    the table `rows` (the template `template_rows` when given) and the case mapping. Plain folders as
     committed (no `.tenant-id`, no row). Returns the table paths, fixture first."""
     from defender.tests.support.invlang.validation._dispositions995 import write_table
 
@@ -517,15 +487,13 @@ def plant_census_settings(repo: Path, rows: dict, *, template_rows: dict | None 
     for name, table_rows in (("tenant-fixture", rows),
                              ("tenant-template", template_rows if template_rows is not None
                               else rows)):
-        folder = repo / "knowledge" / name
-        files = {"lead-zero.yaml": lead_zero_text(CENSUS_LEAD_ZERO_ID),
-                 CASE_RECORD_REL: case_record_text()}
+        folder = committed_folder(repo, name)
+        files = {CASE_RECORD_REL: case_record_text()}
         for rel, text in files.items():
             (folder / "settings" / rel).parent.mkdir(parents=True, exist_ok=True)
             (folder / "settings" / rel).write_text(text, encoding="utf-8")
         (folder / "agent").mkdir(parents=True, exist_ok=True)
         (folder / "agent" / ".gitkeep").write_text("", encoding="utf-8")
-        plant_census_catalog(folder)
         written.append(write_table(folder / "settings" / "verb-grants.yaml", table_rows))
     return written
 
@@ -597,8 +565,6 @@ def exposes(value: Any, target: Path) -> bool:
 
 
 __all__ = [
-    "CENSUS_LEAD_ZERO_ID",
-    "CENSUS_QUERY_TEMPLATE",
     "CORRELATION_PAIRS_A",
     "DEFENDER",
     "FIXTURE",
@@ -609,6 +575,8 @@ __all__ = [
     "PLAYGROUND_ID",
     "REPO_ROOT",
     "REQUIRED_FILES",
+    "COMMITTED_FOLDERS",
+    "committed_folder",
     "SHIPPED_CORRELATION_TEMPLATE",
     "TABLE_A",
     "TABLE_B",
@@ -620,7 +588,6 @@ __all__ = [
     "access_text",
     "default_base",
     "elastic_access_text",
-    "lead_zero_text",
     "case_record_text",
     "CASE_RECORD_REL",
     "RETIRED_CASE_FOLDER",
@@ -634,7 +601,6 @@ __all__ = [
     "fixture_grants",
     "fixture_run_tenant",
     "fixture_tenant",
-    "plant_census_catalog",
     "plant_census_settings",
     "exposes",
     "reaches",

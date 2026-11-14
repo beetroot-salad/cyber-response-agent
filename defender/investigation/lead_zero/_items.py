@@ -52,12 +52,12 @@ class _NarrowedRegistry(VerbRegistry):
 
 # the correlation lead's harness-authored contract
 
-def correlation_contract(alert_pointer: str, template_id: str) -> tuple[str, list[str]]:
+def correlation_contract(alert_pointer: str) -> tuple[str, list[str]]:
     """The correlation lead's goal and summary asks. The goal is the harness contract plus a
     pointer, relative to the run folder, to this run's alert: the lead reads the alert itself
     and picks the discriminating entities and the time anchor from it (A3, D3). No alert byte
-    is ever placed in the goal, so nothing in it needs neutralising. `template_id` is the
-    template the lead is told to bind."""
+    is ever placed in the goal, so nothing in it needs neutralising. No saved query is named:
+    the lead writes its own (#1503)."""
     goal = (
         "Correlate ANY signature of alert already on the SOC's radar for THIS alert's key "
         "entities over a bounded window you choose.\n\n"
@@ -77,13 +77,14 @@ def correlation_contract(alert_pointer: str, template_id: str) -> tuple[str, lis
         "alert's own rule. The alert may itself name that rule, and it is still not an axis to "
         "bind: a different rule firing on the same entity is exactly the related behaviour "
         "this lead exists to surface, and narrowing to the signature that already fired is the "
-        f"one result guaranteed to teach nothing. Bind `{template_id}` — read it first: it is "
-        "named by your grant-filtered template index, and it carries the window params and the "
-        "substitutable entity filter this contract needs. The template says where its count is "
-        "read; each count below is that number, not the size of the returned sample."
+        "one result guaranteed to teach nothing.\n\n"
+        "Write the query yourself with your granted verb. A saved query in your template index "
+        "may already fit and save you the discovery, but none is required: find where this "
+        "system keeps its alerts and how it counts them. State where each count below is read "
+        "from; it is the total the system reports, not the size of the returned sample."
     )
     # The goal is vendor-neutral: field names, index choice and where the count is read are the
-    # template's to say, and the lead is told to read it first.
+    # lead's to find in the granted system (#1503: no saved query is bound).
     #
     # Two counts, each answerable by one call of the granted verb. "Already benign-explained" is
     # omitted: workflow_status is always "open" here and ticket/change-mgmt are outside the
@@ -94,7 +95,7 @@ def correlation_contract(alert_pointer: str, template_id: str) -> tuple[str, lis
     # the lead, not the harness, chose the anchor.
     what = [
         "the count of alerts in the window scoped to the entities you judged central — one "
-        "call, across any rule (the count the template says to read, not the sample size)",
+        "call, across any rule (the total the system reports, not the sample size)",
         "the count for those same entities UNSCOPED — the same window with the narrowing "
         "predicate dropped, across any rule (the same count, read the same way)",
         "which entities you correlated on, the field each came from, and why you judged them "

@@ -18,7 +18,7 @@ DEFENDER = WORKTREE / "defender"
 #: The package this spec pins, by path.
 PACKAGE = DEFENDER / "records"
 #: The committed fixture tenant: the knowledge every test tenant is set up from.
-FIXTURE = WORKTREE / "knowledge" / "tenant-fixture"
+FIXTURE = WORKTREE / "defender" / "tests" / "fixtures" / "tenant-fixture"
 
 #: The two tenants a test may need (any number may share a data root: O6, O7).
 T_ID = fixture_uuid("tenant:acme")

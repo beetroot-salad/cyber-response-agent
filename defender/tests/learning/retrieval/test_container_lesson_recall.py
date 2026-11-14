@@ -1,4 +1,4 @@
-"""The shipped container-identity lesson reaches records carrying a container id (frontier lane)."""
+"""The container-identity lesson reaches records carrying a container id (frontier lane)."""
 from __future__ import annotations
 
 from functools import lru_cache
@@ -11,10 +11,10 @@ from defender.skills.invlang.frontier import frontier_from_text
 from defender.skills.invlang.validate import diagnose
 from defender.tests.support.shared._pre_p4_shipped import LESSONS as SHIPPED_LESSONS  # noqa: E402
 
-#: The corpus shipped before P4, kept byte for byte as a fixture (the product tree ships no
-#: lessons), and the lesson in it this file is about.
+#: The fixture lesson corpus (made-up lessons with the lab corpus's selectors, #1503), and the
+#: lesson in it this file is about.
 CORPUS = SHIPPED_LESSONS
-LESSON = "container-identity-gap-not-terminal"
+LESSON = "fixture-d-container-identity-gap"
 
 ALL_HITS = 99
 
@@ -24,7 +24,7 @@ ALL_HITS = 99
 
 @lru_cache(maxsize=1)
 def _lessons() -> tuple:
-    """The real shipped corpus, parsed once for this module."""
+    """The fixture corpus, parsed once for this module."""
     return tuple(iter_lessons(CORPUS))
 
 
