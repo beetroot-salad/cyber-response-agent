@@ -295,7 +295,9 @@ def _capture_row(src: Path, *, system: str, verb: str, params: Mapping[str, Any]
            "error_class": breaker.error_class_for_exit(exit_code),
            "payload_status": rq.payload_status(exit_code, body), "payload_digest": "",
            "payload_sha256": rq.payload_sha256(text), "system_key": "",
-           "received_at": "2026-07-28T14:00:00+00:00"}
+           "received_at": "2026-07-28T14:00:00+00:00",
+           # These systems' tools declare no query language (#1503).
+           "engine": "none", "body_param": None}
     assert tuple(row) == W.ROW_COLUMNS
     with (Path(src) / "executed_queries.jsonl").open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(row) + "\n")

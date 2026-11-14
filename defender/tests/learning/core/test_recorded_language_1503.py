@@ -66,7 +66,7 @@ def test_the_writer_records_what_the_adapter_declares():
 
 @pytest.mark.parametrize(("engine", "body_param"), [
     # Not a name the reader keeps: it would be recorded as a plain call.
-    ("ES|QL", "query"),
+    ("ES|QL", "search"),
     # A language with nowhere for its text.
     ("spl", None),
     # A body param the signature does not declare.
