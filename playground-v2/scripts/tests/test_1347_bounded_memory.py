@@ -117,3 +117,54 @@ def test_an_image_reaches_the_engine_through_a_file_not_this_process():
     assert loads and "input" not in loads[0][1], "the image went through memory"
     handle = loads[0][1]["stdin"]
     assert handle.closed and not Path(handle.name).exists(), "the scratch archive outlived the load"
+
+
+class CurlRig:
+    """The frozen node's curl through `docker exec`: answers each call with the next (code, body)."""
+
+    def __init__(self, answers):
+        self.answers = list(answers)
+
+    def __call__(self, argv, **kw):
+        code, body = self.answers.pop(0) if self.answers else (200, {"status": "green"})
+        out = f"{__import__('json').dumps(body)}\n{code}"
+        return type("P", (), {"returncode": 0, "stdout": out, "stderr": ""})()
+
+
+class Clock:
+    def __init__(self):
+        self.t = 0.0
+
+    def now(self):
+        from datetime import datetime, timezone
+        return datetime.fromtimestamp(self.t, tz=timezone.utc)
+
+    def sleep(self, seconds):
+        self.t += seconds
+
+
+UNAUTHENTICATED = {"error": {"type": "security_exception",
+                             "reason": "unable to authenticate user [elastic] for REST request [/_cluster/health]"},
+                   "status": 401}
+
+
+def test_a_node_refusing_logins_while_it_starts_is_waited_out():
+    # Live, 2026-11-14: a fresh frozen node answered 401 for ~16 s after its port opened.
+    rig = CurlRig([(401, UNAUTHENTICATED), (401, UNAUTHENTICATED), (200, {"status": "green"})])
+    es = lab_ops.FrozenEs(lab_ops.LabOps(run=rig))
+    frozen_copy.wait_for_cluster(es, Clock(), "the node start")
+    assert rig.answers == []
+
+
+def test_a_login_never_accepted_fails_the_wait_naming_it():
+    rig = CurlRig([(401, UNAUTHENTICATED)] * 10_000)
+    es = lab_ops.FrozenEs(lab_ops.LabOps(run=rig))
+    with pytest.raises(frozen_copy.CopyFault, match="HTTP 401"):
+        frozen_copy.wait_for_cluster(es, Clock(), "the node start", timeout_s=30)
+
+
+def test_any_other_refusal_still_ends_the_wait_at_once():
+    rig = CurlRig([(403, {"error": {"type": "security_exception", "reason": "action is unauthorized"}})])
+    es = lab_ops.FrozenEs(lab_ops.LabOps(run=rig))
+    with pytest.raises(lab_ops.LabOpsError, match="HTTP 403"):
+        frozen_copy.wait_for_cluster(es, Clock(), "the node start")

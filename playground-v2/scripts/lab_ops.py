@@ -175,6 +175,14 @@ class FrozenEs:
             raise LabOpsError(f"frozen elasticsearch {method} {path}: curl exit {proc.returncode} "
                               f"{_text(proc.stderr).strip()[:300]}")
         payload = json.loads(text) if text.strip() else {}
+        if code == 401 and "unable to authenticate" in str(payload):
+            # A node that has just started refuses every login for some seconds, until its license
+            # is applied and the security realms are on (live: ~16 s after the port opened). A
+            # wrong password reads the same, so a health poll waits it out to its deadline and
+            # then fails naming it; every other caller fails on it at once.
+            raise frozen_copy.NodeNotReady(f"frozen elasticsearch {method} {path}: HTTP 401 (the node's "
+                                           f"security realms not on yet, or a wrong password): "
+                                           f"{str(payload)[:300]}")
         if not 200 <= code < 300:
             raise LabOpsError(f"frozen elasticsearch {method} {path}: HTTP {code}: {str(payload)[:500]}")
         return payload

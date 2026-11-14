@@ -66,8 +66,9 @@ class CopyFault(RuntimeError):
 
 
 class NodeNotReady(RuntimeError):
-    """The node is running but not answering yet (connection refused, 502/503/504): the one failure
-    a health poll waits out. The cluster seam raises it; any other failure ends the poll."""
+    """The node is running but not answering yet (connection refused, 502/503/504, or a 401 before
+    its security realms are on): the one failure a health poll waits out. The cluster seam raises
+    it; any other failure ends the poll."""
 
 
 def utc(value: Any) -> datetime:
