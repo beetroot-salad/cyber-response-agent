@@ -111,6 +111,12 @@ def _absolute(value: str) -> urllib.parse.SplitResult:
     parts = urllib.parse.urlsplit(value)
     if parts.scheme not in ("http", "https") or not parts.hostname:
         raise ValueError("is not an http or https URL")
+    try:
+        parts.port  # noqa: B018 — reading it is the check: a port outside 0-65535 or not a number raises
+    except ValueError:
+        raise ValueError("has a port that is not a number from 0 to 65535") from None
+    if parts.username is not None or parts.password is not None or "@" in parts.netloc:
+        raise ValueError("must not carry credentials")
     return parts
 
 
@@ -122,7 +128,7 @@ def _absolute_url(value: str) -> str:
 def _origin(value: str) -> str:
     """Scheme, host and optional port: no path (a trailing slash too), query or fragment."""
     parts = _absolute(value)
-    if parts.path or parts.query or parts.fragment or parts.username or parts.password:
+    if parts.path or parts.query or parts.fragment:
         raise ValueError("must be a scheme, host and optional port only (no path, even a trailing slash)")
     return value
 
