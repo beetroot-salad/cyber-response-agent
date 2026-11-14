@@ -10,11 +10,12 @@ import contextlib
 import dataclasses
 import datetime as _dt
 import logging
+import signal
 import socket
 import sys
 import threading
 from collections.abc import AsyncIterator, Callable, Iterator, Mapping
-from contextlib import AsyncExitStack, asynccontextmanager, contextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 
 import httpx
 import uvicorn
@@ -58,30 +59,53 @@ _log = logging.getLogger(__name__)
 _OWN_MESSAGE = (RevisionMismatch, DatabaseUnreachable, SignInUnavailable, BootstrapRefused)
 
 
+#: How long any start step may take before it refuses naming itself: well past a healthy step (a probe's four
+#: requests time out at 10 s each), so a dependency that accepts and then never answers ends the start in words.
+STEP_SECONDS = 60.0
+
+
 class _Stopped(Exception):
     """A stop signal arrived during start: the start ends, closing what it opened, and the program exits 0."""
 
 
+class _Server(uvicorn.Server):
+    """uvicorn serving the bound socket. Its own signal capture is off: the program's stop is the one signal owner,
+    start and serve alike, so no signal can land between two mechanisms and be lost."""
+
+    @contextlib.contextmanager
+    def capture_signals(self) -> Iterator[None]:
+        yield
+
+
 class _Steps:
-    """The start's steps, one at a time. Every failure inside a step is that step's refusal (`StartRefused`, one line
-    naming it); a stop cancels only the step in flight, so the closes after a refusal or a stop always run whole."""
+    """The program's life, one step at a time, and the one owner of its stop. Every failure inside a start step is
+    that step's refusal (`StartRefused`, one line naming it), and so is a step that outlives `STEP_SECONDS`; a stop
+    cancels only the step in flight, so the closes after a refusal or a stop always run whole. Serving is the last
+    step: a stop there tells uvicorn to exit, and a second stop forces it."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, within: float = STEP_SECONDS) -> None:
         self.stop = asyncio.Event()
+        self._within = within
         self._running: asyncio.Task[object] | None = None
+        self._server: uvicorn.Server | None = None
 
-    def request_stop(self) -> None:
+    def request_stop(self, sig: int = signal.SIGTERM) -> None:
+        if self._server is not None:
+            self._server.handle_exit(sig, None)  # uvicorn's own answer to a signal: exit, and a second SIGINT forces it
         self.stop.set()
         if self._running is not None:
             self._running.cancel()
 
-    @contextmanager
-    def step(self, name: str) -> Iterator[None]:
+    @asynccontextmanager
+    async def step(self, name: str) -> AsyncIterator[None]:
         if self.stop.is_set():
             raise _Stopped
         self._running = asyncio.current_task()
+        within = self._within
+        deadline = asyncio.timeout(within)
         try:
-            yield
+            async with deadline:
+                yield
         except asyncio.CancelledError:
             if not self.stop.is_set():
                 raise
@@ -93,12 +117,27 @@ class _Steps:
             raise
         except _OWN_MESSAGE as why:
             raise StartRefused(str(why)) from why
+        except TimeoutError as why:
+            if deadline.expired():
+                raise StartRefused(f"{name} did not finish within {within:g} s") from None
+            raise _unforeseen(name, why) from why
         except Exception as why:
-            _log.debug("start step %s failed", name, exc_info=True)  # the whole error, for whoever turns on debug
-            first = next(iter(str(why).splitlines()), "")  # a driver's error carries its SQL and a link after
-            raise StartRefused(f"{name} failed: {type(why).__name__}: {first}".rstrip(": ")) from why
+            raise _unforeseen(name, why) from why
         finally:
             self._running = None
+
+    async def serve(self, server: uvicorn.Server, sockets: list[socket.socket]) -> None:
+        self._server = server
+        if self.stop.is_set():  # a stop that landed as the start finished
+            return
+        await server.serve(sockets=sockets)
+
+
+def _unforeseen(name: str, why: Exception) -> StartRefused:
+    """The refusal for a failure the step has no refusal of its own for: one line naming the step and the error."""
+    _log.debug("start step %s failed", name, exc_info=why)  # the whole error, for whoever turns on debug
+    first = next(iter(str(why).splitlines()), "")  # a driver's error carries its SQL and a link after
+    return StartRefused(f"{name} failed: {type(why).__name__}: {first}".rstrip(": "))
 
 
 async def _abandonable(call: Callable[[], None]) -> None:
@@ -137,7 +176,6 @@ def _bind(settings: Settings) -> socket.socket:
     except OSError as why:
         sock.close()
         raise StartRefused(f"DEFENDER_API_HOST / DEFENDER_API_PORT: cannot listen on {settings.host}:{settings.port}: {why.strerror or why}") from why
-    sock.set_inheritable(True)
     return sock
 
 
@@ -157,12 +195,12 @@ async def serving(settings: Settings, *, transport: httpx.AsyncBaseTransport | N
     """Start every step in order and yield the running app; leaving closes what was opened, in reverse. A start
     step that fails raises `StartRefused` with its message, after closing what the earlier steps opened. `steps`
     lets the caller stop the start (`run` passes its own); without it nothing can."""
-    steps = steps if steps is not None else _Steps()
+    steps = steps if steps is not None else _Steps()  # lint-default: ok — a fresh _Steps per call: a shared default would carry one start's stop into the next
     async with AsyncExitStack() as stack:
-        with steps.step("the database version check"):
+        async with steps.step("the database version check"):
             await _abandonable(lambda: check_version(settings.database_dsn))
         async with AsyncExitStack() as until_lifespan:  # closes what the lifespan will own, if start ends before it
-            with steps.step("building the sign-in adapters"):
+            async with steps.step("building the sign-in adapters"):
                 signin = KeycloakSignIn(
                     issuer=settings.signin_issuer, client_id=settings.signin_client_id,
                     client_secret=settings.signin_client_secret.get_secret_value(),
@@ -176,11 +214,11 @@ async def serving(settings: Settings, *, transport: httpx.AsyncBaseTransport | N
                     admin_client_secret=settings.programs_admin_client_secret.get_secret_value(),
                     server_url=settings.keycloak_server_url, transport=transport)
                 until_lifespan.push_async_callback(programs.close)
-            with steps.step("the sign-in realm probe"):
+            async with steps.step("the sign-in realm probe"):
                 await signin.probe()
-            with steps.step("the programs realm probe"):
+            async with steps.step("the programs realm probe"):
                 await programs.probe()
-            with steps.step("building the stores and the app"):
+            async with steps.step("building the stores and the app"):
                 store = JobStore(settings.database_dsn, clock=_wall_clock)
                 stack.push_async_callback(store.close)  # the lifespan does not close it: it outlives the lifespan
                 people = PostgresIdentityRepository(settings.database_dsn)
@@ -190,29 +228,27 @@ async def serving(settings: Settings, *, transport: httpx.AsyncBaseTransport | N
                 identity = IdentityService(people, signin=signin, mail=LoggedMail(), clock=_wall_clock,
                                            bootstrap=settings.administrators, programs=programs)
                 app = create_app(_api_deps(settings, identity, tenants, JobStorePorts(store)))
-            with steps.step("binding the listening socket"):
+            async with steps.step("binding the listening socket"):
                 sock = _bind(settings)
                 stack.callback(sock.close)
-            # Handed over: from here the lifespan closes the service and the tenant rows, its start's failure too.
-            until_lifespan.pop_all()
-        with steps.step("the bootstrap"):
-            await stack.enter_async_context(app.router.lifespan_context(app))
+            async with steps.step("the bootstrap"):
+                # Handed over as the lifespan is entered, nothing awaited between: from here it closes the service and
+                # the tenant rows, its start's failure too. A stop before this step leaves them on `until_lifespan`.
+                until_lifespan.pop_all()
+                await stack.enter_async_context(app.router.lifespan_context(app))
         yield Running(app=app, sockets=[sock])
 
 
 async def _serve_on_sockets(settings: Settings, transport: httpx.AsyncBaseTransport | None, steps: _Steps) -> None:
     async with serving(settings, transport=transport, steps=steps) as running:
-        if steps.stop.is_set():
-            return
-        config = uvicorn.Config(running.app, lifespan="off", log_config=None)
-        await uvicorn.Server(config).serve(sockets=running.sockets)
+        await steps.serve(_Server(uvicorn.Config(running.app, lifespan="off", log_config=None)), running.sockets)
 
 
 async def _run(settings: Settings, transport: httpx.AsyncBaseTransport | None) -> int:
     loop = asyncio.get_running_loop()
     steps = _Steps()
     for sig in uvicorn.server.HANDLED_SIGNALS:
-        loop.add_signal_handler(sig, steps.request_stop)
+        loop.add_signal_handler(sig, steps.request_stop, sig)
     try:
         await _serve_on_sockets(settings, transport, steps)
     except _Stopped:

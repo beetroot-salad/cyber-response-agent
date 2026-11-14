@@ -19,6 +19,7 @@ from typing import Any
 import httpx
 import jwt
 
+from defender._url import split_http_url
 from defender.identity import SignInRefused, SignInUnavailable, VerifiedProgramToken, VerifiedSignIn
 from defender.records.formats import CredentialId, IdRefused
 
@@ -37,24 +38,11 @@ def _utc_now() -> _dt.datetime:
 
 
 def _split_url(setting: str, value: str, *, query: bool = False) -> urllib.parse.SplitResult:
-    """An absolute http(s) URL with a host, a valid port if any, and no credentials, fragment or whitespace, and no
-    query unless `query`; else a ValueError naming the setting."""
-    def refuse(why: str) -> ValueError:
-        return ValueError(f"keycloak {setting} {value!r} {why}")
-
-    if any(c.isspace() or not c.isprintable() for c in value):
-        raise refuse("contains whitespace or a control character")
+    """`value` as the shared http(s) URL rule (`defender._url`) takes it, else a ValueError naming the setting."""
     try:
-        parts = urllib.parse.urlsplit(value)
-        parts.port  # noqa: B018 — reading it is the check: a non-numeric or out-of-range port raises
-    except ValueError as e:
-        raise refuse(f"is not a URL: {e}") from None
-    if parts.scheme not in ("http", "https") or not parts.hostname or parts.fragment or value.endswith("#") \
-            or (not query and (parts.query or value.endswith("?"))):
-        raise refuse("is not an absolute http(s) URL without " + ("a fragment" if query else "query or fragment"))
-    if parts.username is not None:
-        raise refuse("carries credentials")
-    return parts
+        return split_http_url(value, query=query)
+    except ValueError as why:
+        raise ValueError(f"keycloak {setting} {value!r} {why}") from None
 
 
 def _realm_url(issuer: str) -> tuple[str, str, str]:

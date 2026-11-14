@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import os
 
-import httpx
-
 from . import run
 
 if __name__ == "__main__":
     from defender._log import configure_from_env
 
     configure_from_env()
-    raise SystemExit(run(os.environ, transport=httpx.AsyncHTTPTransport()))
+    # No transport: each sign-in adapter builds its own connection, honouring the proxy environment (tests pass a fake).
+    raise SystemExit(run(os.environ, transport=None))

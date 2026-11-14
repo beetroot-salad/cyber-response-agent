@@ -77,7 +77,8 @@ def upgrade(dsn: str) -> None:
 
 
 #: How long the version check waits for a connection, its handshake included: a database that accepts and never
-#: answers is then `DatabaseUnreachable` naming the address, not a start that hangs without a word.
+#: completes the handshake is then `DatabaseUnreachable` naming the address. A query that stalls after it is the
+#: caller's to bound (the API's start gives every step a deadline).
 VERSION_CHECK_CONNECT_SECONDS = 10
 
 

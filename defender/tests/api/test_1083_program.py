@@ -55,6 +55,15 @@ def _backends(dsn: str) -> int:
     return int(count)
 
 
+def _backends_left(dsn: str, *, within: float = 5.0) -> int:
+    """`_backends` once it reaches 0, or what it still is after `within` seconds: a backend whose client has closed
+    leaves `pg_stat_activity` a moment later, so a count read at once can see one that is already going."""
+    deadline = time.monotonic() + within
+    while (count := _backends(dsn)) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    return count
+
+
 def _refused(child: Child, *, mentions: tuple[str, ...]):
     """The program ended with a refusal: exit above 0 (not a signal death), `mentions` on stderr, no traceback."""
     ended = child.ended()
@@ -141,7 +150,7 @@ async def _attempt(case: str, environ: dict[str, str], dsn: str, fails: tuple[Fa
         message = str(refused)
     except Exception as unexpected:  # noqa: BLE001 - the promise is that nothing else escapes
         pytest.fail(f"{case}: {type(unexpected).__name__}: {unexpected}")
-    assert _backends(dsn) == 0, case
+    assert _backends_left(dsn) == 0, case
     return message
 
 
@@ -353,6 +362,90 @@ def test_a_stop_while_a_refusal_closes_keeps_the_refusal_and_every_close(tmp_pat
     assert keycloak.closes == 2, "one close per Keycloak adapter built"
 
 
+@pytest.mark.parametrize("text", ["the-secret \n", "the-secret\t\n", " the-secret\n"])
+def test_a_secret_file_with_edge_whitespace_refuses_naming_the_setting(tmp_path, text):
+    """An editor's trailing space or tab in a secret file refuses start naming the setting, as edge whitespace in any
+    setting does; sent as part of the secret, the first sign-in would fail far from the cause. (#1498 review)"""
+    from defender.api_server import Settings, StartRefused
+
+    healthy = environment(tmp_path, dsn="postgresql://defender:pw@localhost:5432/defender")
+    padded = tmp_path / "padded-secret"
+    padded.write_text(text)
+    with pytest.raises(StartRefused, match="DEFENDER_KEYCLOAK_CLIENT_SECRET_FILE: .*edge whitespace"):
+        Settings.from_environ({**healthy, "DEFENDER_KEYCLOAK_CLIENT_SECRET_FILE": str(padded)})
+
+
+def test_an_old_administrators_file_with_a_tenants_section_is_told_what_replaced_it(tmp_path):
+    """The bootstrap type reads the file, so its explanation for a `tenants` section reaches the operator. (#1214)"""
+    from defender.api_server import Settings, StartRefused
+
+    healthy = environment(tmp_path, dsn="postgresql://defender:pw@localhost:5432/defender")
+    old = tmp_path / "old-administrators.yaml"
+    old.write_text("tenants: {}\nadministrators: [ops@platform.example]\n")
+    with pytest.raises(StartRefused, match="no tenants section since #1214"):
+        Settings.from_environ({**healthy, "DEFENDER_API_ADMINISTRATORS_FILE": str(old)})
+
+
+@pytest.mark.postgres
+async def test_a_step_that_never_answers_refuses_naming_itself_and_closes_what_was_opened(tmp_path, migrated_database):
+    """A probe whose discovery is accepted and never answered refuses once the step's deadline passes, naming the
+    step, and both sign-in adapters are closed. (Am-3 promise 1; #1498 review)"""
+    from defender.api_server import Settings, StartRefused, serving
+    from defender.api_server._program import _Steps
+
+    keycloak = FakeKeycloak([Fail(SIGNIN_REALM, "discovery", "stall")])
+    settings = Settings.from_environ(environment(tmp_path, dsn=migrated_database))
+    with pytest.raises(StartRefused, match="the sign-in realm probe did not finish within 0.5 s"):
+        async with serving(settings, transport=keycloak, steps=_Steps(within=0.5)):
+            pytest.fail("the stalled probe should have refused")
+    assert keycloak.closes == 2
+    assert _backends_left(migrated_database) == 0
+
+
+async def test_the_programs_stop_is_the_one_that_reaches_the_server_before_and_while_it_serves():
+    """One owner of the stop: a stop that lands as the start finishes means the server never serves; one while it
+    serves tells it to exit, and a second forces it. uvicorn's own signal capture is off. (Am-3; #1498 review)"""
+    import signal as _signal
+
+    from defender.api_server._program import _Server, _Steps
+
+    import uvicorn
+
+    class Server:
+        """uvicorn's own answer to a signal (`handle_exit`) over a serve that waits for it."""
+
+        handle_exit = uvicorn.Server.handle_exit
+
+        def __init__(self) -> None:
+            self.should_exit = self.force_exit = self.served = False
+            self._captured_signals: list[int] = []
+
+        async def serve(self, sockets: list[socket.socket]) -> None:
+            self.served = True
+            while not self.should_exit:
+                await asyncio.sleep(0.01)
+
+    early, late = _Steps(), _Steps()
+    first = Server()
+    early.request_stop()  # before the server is handed over
+    await early.serve(first, [])  # type: ignore[arg-type]
+    assert not first.served
+
+    second = Server()
+    serving_task = asyncio.create_task(late.serve(second, []))  # type: ignore[arg-type]
+    await asyncio.sleep(0.05)
+    assert (second.served, second.should_exit) == (True, False)  # control: serving until stopped
+    late.request_stop(_signal.SIGINT)
+    await asyncio.wait_for(serving_task, 5)
+    assert (second.should_exit, second.force_exit) == (True, False)
+    late.request_stop(_signal.SIGINT)  # a second interrupt forces the exit, as under uvicorn's own capture
+    assert second.force_exit
+
+    before = _signal.getsignal(_signal.SIGTERM)
+    with _Server(uvicorn.Config(app=None)).capture_signals():  # type: ignore[arg-type]
+        assert _signal.getsignal(_signal.SIGTERM) is before
+
+
 # --- stop ---------------------------------------------------------------------------------------------
 
 def _handled_signals() -> tuple[int, ...]:
@@ -395,7 +488,7 @@ def test_each_handled_signal_unwinds_a_ready_or_starting_program_to_exit_zero_wi
             reported = child.reported()
             elapsed = time.monotonic() - signalled
             unmodelled = child.unmodelled(timeout=5)
-            left = _backends(migrated_database)  # the child is held alive after reporting, so this is its own doing
+            left = _backends_left(migrated_database)  # the child is held alive after reporting, so this is its own doing
             ended = child.ended()
         finally:
             child.kill()
@@ -447,6 +540,7 @@ async def test_every_exit_of_serving_leaves_no_backend_socket_or_keycloak_client
                 assert _backends(dsn) > 0  # control: every store has connected
                 [listening] = running.sockets
                 assert listening.getsockname() == (host, port)
+                assert not listening.get_inheritable()  # no child process may keep the port after the API exits
                 listening.listen()
                 socket.create_connection((host, port), timeout=5).close()  # control: the bound address answers
                 with pytest.raises(ConnectionRefusedError):
@@ -456,7 +550,7 @@ async def test_every_exit_of_serving_leaves_no_backend_socket_or_keycloak_client
             with pytest.raises(StartRefused):
                 async with serving(settings, transport=keycloak):
                     pytest.fail(f"{ending} should have refused")
-    assert _backends(dsn) == 0
+    assert _backends_left(dsn) == 0
     assert keycloak.closes == 2, "one close per Keycloak adapter built"
     if ending == "bootstrap":  # the socket was bound before the bootstrap refused: it is free again
         with socket.socket() as again:
@@ -469,10 +563,10 @@ async def test_serving_holds_the_database_while_inside_and_closes_it_on_exit(tmp
     from defender.api_server import Settings, serving
 
     settings = Settings.from_environ(environment(tmp_path, dsn=migrated_database))
-    assert _backends(migrated_database) == 0
+    assert _backends_left(migrated_database) == 0
     async with serving(settings, transport=FakeKeycloak()):
         assert _backends(migrated_database) > 0
-    assert _backends(migrated_database) == 0
+    assert _backends_left(migrated_database) == 0
 
 
 @pytest.mark.postgres
@@ -487,7 +581,7 @@ async def test_a_refusal_after_the_job_store_opened_closes_what_was_opened(tmp_p
     with pytest.raises(StartRefused, match=ANN):
         async with serving(settings, transport=FakeKeycloak()):
             pytest.fail("the bootstrap should have refused")
-    assert _backends(migrated_database) == 0
+    assert _backends_left(migrated_database) == 0
 
 
 @pytest.mark.postgres
@@ -569,7 +663,8 @@ def _administrators_variants() -> list[tuple[str, bytes, str]]:
                ACCEPT if kind == "email" else REFUSE) for kind, node in _YAML_NODES.items()]
     cases += [(f"document is a {kind}", f"{node}\n".encode(), REFUSE) for kind, node in _YAML_NODES.items()]
     cases += [("another key beside", b"administrators: [ops@platform.example]\nextra: 1\n", REFUSE),
-              ("empty list", b"administrators: []\n", EITHER),
+              # Applying an empty list would unflag every administrator there is (#1498 review).
+              ("empty list", b"administrators: []\n", REFUSE),
               ("not UTF-8", b"administrators: [ops\xff@platform.example]\n", REFUSE),
               ("UTF-16", "administrators: [ops@platform.example]\n".encode("utf-16"), REFUSE),
               ("a NUL", b"administrators: [ops\x00@platform.example]\n", REFUSE),

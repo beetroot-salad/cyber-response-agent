@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import dataclasses
 import re
-import urllib.parse
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, TypeVar
@@ -16,6 +15,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
 
 from defender._io import read_text_utf8
+from defender._url import split_http_url
 from defender._yaml import safe_load
 from defender.identity import Bootstrap, DataRuleViolation
 from defender.identity.keycloak import check_issuer, check_redirect_uri, check_server_url  # lint-shippable: ok — the program wires the one sign-in vendor the platform supports (#1083).
@@ -113,19 +113,6 @@ def _port(value: str) -> int:
     return int(value)
 
 
-def _http_url(value: str) -> urllib.parse.SplitResult:
-    parts = urllib.parse.urlsplit(value)
-    if parts.scheme not in ("http", "https") or not parts.hostname:
-        raise ValueError("is not an http or https URL")
-    try:
-        parts.port  # noqa: B018 — reading it is the check: a port outside 0-65535 or not a number raises
-    except ValueError:
-        raise ValueError("has a port that is not a number from 0 to 65535") from None
-    if parts.username is not None or parts.password is not None or "@" in parts.netloc:
-        raise ValueError("must not carry credentials")
-    return parts
-
-
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 
 
@@ -133,8 +120,8 @@ def _origin(value: str) -> str:
     """Scheme, host and optional port: no path (a trailing slash too), query or fragment. Written exactly as a
     browser sends it in `Origin` (lower case, no default port, an ASCII host), since requests are compared to it
     character for character; any other spelling refuses, naming the one to write."""
-    parts = _http_url(value)
-    if parts.path or parts.query or parts.fragment:
+    parts = split_http_url(value)
+    if parts.path:
         raise ValueError("must be a scheme, host and optional port only (no path, even a trailing slash)")
     host = parts.hostname or ""
     if not host.isascii():
@@ -148,9 +135,9 @@ def _origin(value: str) -> str:
     return value
 
 
-_EMAIL = re.compile(r"[^@\s]+@[^@\s]+")
 def _secret_from_file(name: str, path: str) -> str:
-    """A secret file holds one value and one trailing newline at most."""
+    """A secret file holds one value and one trailing newline at most, with no edge whitespace: a trailing space or
+    tab an editor left is refused here, by name, rather than sent to the sign-in server as part of the secret."""
     try:
         raw = read_text_utf8(Path(path))
     except (OSError, UnicodeDecodeError) as why:
@@ -158,22 +145,38 @@ def _secret_from_file(name: str, path: str) -> str:
     value = raw.removesuffix("\n")
     if not value or "\n" in value:
         raise StartRefused(f"{name}: the secret file must hold exactly one non-empty line")
+    if value != value.strip():
+        raise StartRefused(f"{name}: the secret file's line has edge whitespace (a space or tab is not part of a secret)")
     return value
 
 
+#: An address's shape. The shared email type normalizes and refuses only blank or unstorable text, so this file's
+#: rule is the one place a bootstrap address must look like one.
+_EMAIL = re.compile(r"[^@\s]+@[^@\s]+")
+
+
 def _administrators(name: str, path: str) -> Bootstrap:
-    """`administrators: [<email>, ...]`, nothing else (the tenants section went with #1214)."""
+    """The bootstrap file, read by the bootstrap type (its keys, each address's normal form, an old `tenants`
+    section). The file's own rules are here: a YAML mapping whose list is a YAML sequence of addresses, naming at
+    least one, since applying an empty list would remove every platform administrator there is."""
     try:
         document: Any = safe_load(read_text_utf8(Path(path)))
     except (OSError, UnicodeDecodeError, yaml.YAMLError) as why:
         raise StartRefused(f"{name}: cannot read the administrators file: {type(why).__name__}") from None
-    if not isinstance(document, dict) or set(document) != {"administrators"} \
-            or not isinstance(document["administrators"], list):
-        raise StartRefused(f"{name}: the file must be a mapping with one key, `administrators: [<email>, ...]`")
-    listed = document["administrators"]
-    if not all(isinstance(e, str) and _EMAIL.fullmatch(e) for e in listed):
-        raise StartRefused(f"{name}: every administrator must be an email address (name@host)")
+    if not isinstance(document, dict):
+        raise StartRefused(f"{name}: the file must be a mapping, `administrators: [<email>, ...]`")
+    listed = document.get("administrators")
+    if isinstance(listed, list):
+        if not listed:
+            raise StartRefused(f"{name}: the file names no administrator; applying it would remove every platform "
+                               "administrator")
+        if not all(isinstance(e, str) and _EMAIL.fullmatch(e.strip()) for e in listed):
+            raise StartRefused(f"{name}: every administrator must be an email address (name@host)")
+        document = {**document, "administrators": tuple(listed)}
     try:
-        return Bootstrap(administrators=tuple(listed))
-    except (ValidationError, TypeError, DataRuleViolation) as why:
-        raise StartRefused(f"{name}: the administrators are not all email addresses: {why}") from None
+        return Bootstrap(**document)
+    except ValidationError as why:
+        shown = "; ".join(f"{'.'.join(map(str, e['loc'])) or 'file'}: {e['msg']}" for e in why.errors(include_url=False))
+        raise StartRefused(f"{name}: {shown}") from None
+    except (TypeError, DataRuleViolation) as why:
+        raise StartRefused(f"{name}: {why}") from None
