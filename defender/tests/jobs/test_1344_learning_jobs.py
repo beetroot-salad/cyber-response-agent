@@ -36,6 +36,7 @@ from defender.tests.support.jobs._jobs1342 import (
 )
 from defender.tests.support.shared._postgres1339 import execute
 from defender.tests.support.shared.filesystem._handoff import write_whole
+from defender.tests.migrations._marked1470 import upgrade_marking_tenants
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
 
@@ -1522,7 +1523,7 @@ def test_o1_the_migration_queues_no_job_for_investigations_completed_before_it(e
     """A database holding a completed investigation, taken to head: no learning job row appears, the investigation stays. (O1, no backfill)"""
     from alembic import command
 
-    from defender.migrations import _config, _scripts, upgrade
+    from defender.migrations import _config, _scripts
     from defender.tests.migrations.test_1343_migrations import TENANT, _inv, _plant
 
     config = _config()
@@ -1534,7 +1535,7 @@ def test_o1_the_migration_queues_no_job_for_investigations_completed_before_it(e
     _plant(empty_database, _inv("done"), "completed", "t0", cost=2.5)
     _plant(empty_database, _inv("still-queued"), "queued", "t1")
 
-    upgrade(empty_database)
+    upgrade_marking_tenants(empty_database)  # #1470 O12: the tenant has its mark, so the drop does not stop
 
     assert execute(empty_database, "SELECT count(*) FROM jobs.learning_jobs") == [(0,)]
     assert execute(empty_database, "SELECT count(*) FROM jobs.investigations WHERE stage = 'completed'") == [(1,)]

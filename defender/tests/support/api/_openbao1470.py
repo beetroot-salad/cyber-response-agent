@@ -3,8 +3,7 @@ without a server — NO test functions.
 
 It answers as OpenBao 2.4.1 was observed to (2026-11-14, a dev server with the writer policy `store_policies` gives):
 `GET /v1/sys/seal-status` unauthenticated `{"initialized", "sealed", ...}`; a sealed server answers every other path 503
-`{"errors": ["Vault is sealed"]}` (ASSUMED: not observed, the shared test server is not sealed; the 503 status is the
-documented one and the not-stored/possibly-stored split rests on it); a token it does not know 403 `permission denied`; the writer's token cannot read a
+`{"errors": ["Vault is sealed"]}` whatever the token (observed, design C20, openbao 2.4.1 -dev); a token it does not know 403 `permission denied`; the writer's token cannot read a
 value (`GET <mount>/data/...` is 403) but reads metadata (404 `{"errors": []}` for a path never written, else 200 with
 `current_version` and `versions`); a write (`POST <mount>/data/<path>`) is 200 with the new version. It is a policy
 stand-in only for those answers: it holds sets by path and version, nothing more.

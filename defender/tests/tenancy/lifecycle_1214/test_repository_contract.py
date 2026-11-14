@@ -1046,12 +1046,13 @@ async def test_1470_o8_a_tenant_made_by_the_create_request_is_refused_until_it_i
 @pytest.mark.parametrize("fenced", [True, False])
 async def test_1366_o10_a_commit_that_drops_records_removes_that_tenants_versions_only_inside_its_fence(store, fenced):
     """`commit(drop_records=True)` of the offboarding step leaves the tenant with no system or case record and the
-    other tenant's untouched; with the fence missed nothing is dropped (and the commit raises). The offboarded tenant's
-    records are not read (`TenantRefused`, #1470 O8); its rows are counted in the tables. (#1366 O10, #1470 O8)"""
+    other (active) tenant's untouched and still read; with the fence missed nothing is dropped (and the commit raises).
+    The offboarded tenant's records are not read (`TenantRefused`, #1470 O8); the drop is asserted on the rows (Postgres)
+    and the twin's own records (memory). (#1366 O10, #1470 O8)"""
     from defender.tenancy import FenceMissed
 
     await store.seed(T1, OFFBOARDING)
-    await store.seed(T2, OFFBOARDING)
+    await store.seed(T2)
     mine, theirs = _records_value(cmdb=(2, True, 1), ticket=(1, True, 1)), _records_value(cmdb=(1, True, 1))
     await _seed_records(store, T1, mine)
     await _seed_records(store, T2, theirs)
@@ -1078,6 +1079,10 @@ async def test_1366_o10_a_commit_that_drops_records_removes_that_tenants_version
     if fenced:
         with pytest.raises(TenantRefused):  # offboarded: no longer a tenant whose records are known
             await store.repo.current_records(T1)
+    assert await store.repo.current_records(T2) == theirs, "control: the other tenant's records stay, and are read"
     if store.dsn is not None:  # a tenant that is not active is not read, so the rows are counted in the tables
         assert rows(T1) == ((0, 0) if fenced else (len(mine.systems), 1)), "this tenant's records"
-        assert rows(T2) == (len(theirs.systems), 1), "control: the other tenant's records stay"
+        assert rows(T2) == (len(theirs.systems), 1), "control: the other tenant's rows stay"
+    else:  # the twin's own records (the memory repository reads none for a tenant that is not active)
+        assert (T1 in store.twin._records) is (not fenced), "the commit's drop on the twin"
+        assert store.twin._records[T2] == theirs

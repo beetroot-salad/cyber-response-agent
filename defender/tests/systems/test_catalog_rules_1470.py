@@ -38,6 +38,18 @@ def test_1470_d_e_the_registry_names_the_rules_own_are_the_ones_systems_re_expor
         assert getattr(old_catalog, name) is rules(name), name
 
 
+def test_1470_d_e_the_platform_served_names_have_one_owner_the_rules_package_and_systems_serves_exactly_them():
+    """`system_rules.PLATFORM_SERVED_NAMES` is the one constant; the systems side's platform-served table is keyed by exactly
+    those names (built from it, no second copy). (D-E)"""
+    import defender.systems.tacit_registry as tacit
+    import defender.systems.verbs as old_verbs
+
+    names = rules("PLATFORM_SERVED_NAMES")
+    assert set(names), names
+    assert tacit.SYSTEM in names, names
+    assert set(old_verbs.PLATFORM_SERVED) == set(names)
+
+
 def test_1470_d11_each_adapter_declares_sample_settings_cold_with_one_value_per_stored_key():
     """Every catalog adapter has a module-level `SAMPLE_SETTINGS` literal (key -> text) holding exactly the keys a record of
     it stores, read from the source without running the module. (O2, D11)"""

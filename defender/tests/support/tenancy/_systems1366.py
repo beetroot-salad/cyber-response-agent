@@ -2,7 +2,7 @@
 The names, their meaning and the seeding rules are in `.contract-first/shared-interface.md`; read that first.
 
 Nothing here judges a record. Seeders put records into the read side (the memory twin, or Postgres through the store's
-own import door with an accept-all judge); the operator command is `cli.tenant.main`; credentials sit in a KV stand-in
+own import door with an accept-all judge); the write door is the store, as the API's; credentials sit in a KV stand-in
 that only stores what it is sent. The production modules named here do not exist at the base: every import is lazy, so
 a missing one is a red at the first call, never a collection error.
 """
@@ -21,16 +21,10 @@ from typing import Any, NamedTuple
 import httpx
 import yaml
 
-# --- operator command surface (DC8) ---------------------------------------------------------------------------------
-CATALOG, IMPORT, SYSTEMS = "catalog", "import", "systems"
-SET_SYSTEM, DELETE_SYSTEM, SET_CASE, DELETE_CASE, SET_CREDENTIALS = (
-    "set-system", "delete-system", "set-case", "delete-case", "set-credentials")
-DRY_RUN, REPLACES, FOR_VERSION, DISABLED, ENABLED, EXPORT = (
-    "--dry-run", "--replaces", "--for-version", "--disabled", "--enabled", "--export")
-#: A version's author is the writing command's name (R9).
-AUTHOR = {cmd: f"tenant.py {cmd}" for cmd in (IMPORT, SET_SYSTEM, DELETE_SYSTEM, SET_CASE, DELETE_CASE)}
 #: Rows the seeders write (not an operator command).
 SEED_AUTHOR = "test seed"
+#: The acting member the `Admin` writes as.
+ADMIN_AUTHOR = "test admin"
 #: The adapters the product carries today (O2): real, then lab examples.
 REAL = ("elastic", "jira", "servicenow")
 EXAMPLES = ("change-mgmt", "cmdb", "host-state", "identity", "threat-intel", "ticket")
@@ -463,10 +457,6 @@ def current_records(dsn: str, tenant_id: str) -> Any:
     return asyncio.run(go())
 
 
-def imported(dsn: str, tenant_id: str) -> bool:
-    return bool(current_records(dsn, tenant_id).imported)
-
-
 def system_versions(dsn: str, tenant_id: str, system: str) -> list[Version]:
     from defender.tests.support.shared._postgres1339 import execute
 
@@ -647,64 +637,88 @@ def proxy_login(dsn: str, *, granted: bool = True) -> Iterator[str]:
             execute(dsn, f'DROP ROLE IF EXISTS "{name}"')
 
 
-# --- the operator -----------------------------------------------------------------------------------------------------
+# --- the test member ----------------------------------------------------------------------------------------------------
 
-class Operator:
-    """The operator command for one tenant registered on a migrated database (`DEFENDER_DATABASE_DSN` set by the caller's
-    fixture): `.run(*argv)` is `cli.tenant.main` with the KV stand-in as the operator's OpenBao (`secrets=`). It is also
-    handed to `import` so that a copy (R13 says there is none) would show in `kv.requests`."""
+def real_judge() -> Any:
+    """The record judgement over the checkout's catalog, as the API injects it (`defender.system_rules`). Until the move
+    exists (a base-only shim: delete the fallback with it) the judgement is the one in `defender.systems`."""
+    try:
+        from defender.system_rules import Catalog, judge_records
+    except ImportError:
+        from defender.systems.record_judgement import judge_records as base_judge
+
+        return lambda after, before: list(base_judge(after, before))
+    catalog = Catalog.of_checkout()
+    return lambda after, before: list(judge_records(after, before, catalog=catalog))
+
+
+class Admin:
+    """A test member of one tenant on a migrated database (`DEFENDER_DATABASE_DSN` set by the caller's fixture), writing its
+    records through the store with the real judgement and its credentials through the write-only secret port over `kv`, as
+    the API does (#1470: the operator's write commands are removed). Each write returns `(0, "")` or `(1, the refusal)`.
+    `check()` runs `tenant check` in-process. Decides nothing: the store, judgement and credential slot do."""
 
     def __init__(self, tenant_id: str, dsn: str, tmp: Path, capsys: Any, kv: KvStandIn | None = None) -> None:
         self.tid, self.dsn, self.tmp, self.capsys = tenant_id, dsn, tmp, capsys
         self.kv = kv if kv is not None else KvStandIn()
 
-    def run(self, *argv: str) -> tuple[int, str]:
-        from defender.cli import tenant
+    def _run(self, work: Any) -> tuple[int, str]:
+        from defender.system_records import RecordRefused
+        from defender.tests.support.jobs._jobs1342 import fixed_clock
 
-        self.capsys.readouterr()
-        seams = {"secrets": operator_secrets(self.kv)} if argv[0] in (IMPORT, SET_CREDENTIALS, "check", SYSTEMS) else {}
-        rc = tenant.main(list(argv), **seams)
-        said = self.capsys.readouterr()
-        return rc, said.out + said.err
+        async def go() -> tuple[int, str]:
+            from defender.system_records import RecordStore
 
-    def import_(self, *, dry_run: bool = False) -> tuple[int, str]:
-        return self.run(IMPORT, self.tid, *((DRY_RUN,) if dry_run else ()))
+            store = RecordStore(self.dsn, clock=fixed_clock, judge=real_judge())
+            try:
+                await work(store)
+            except RecordRefused as refused:
+                return 1, "\n".join(getattr(refused, "faults", None) or [str(refused)])
+            finally:
+                await store.close()
+            return 0, ""
 
-    def _folder(self, system: str, config: Mapping[str, str] | None, access: str | None) -> Path:
-        n = len(list(self.tmp.glob("folder-*")))
-        return system_folder(self.tmp / f"folder-{n}", system, config=config, access=access)
+        return asyncio.run(go())
 
     def set_system(self, system: str, *, replaces: int, config: Mapping[str, str] | None,
                    access: str | None, disabled: bool | None = None) -> tuple[int, str]:
-        """`disabled` True passes `--disabled`, False `--enabled`, None neither (the write keeps the current state)."""
-        folder = self._folder(system, config, access)
-        return self.run(SET_SYSTEM, self.tid, system, str(folder), REPLACES, str(replaces),
-                        *({True: (DISABLED,), False: (ENABLED,), None: ()}[disabled]))
+        """`disabled` True stores it disabled, False enabled, None keeps the current state."""
+        async def work(store: Any) -> None:
+            await store.put_system(self.tid, system, replaces=replaces, adapter=system,
+                                   enabled=None if disabled is None else not disabled,
+                                   settings=dict(config or {}), access=access or "", author=ADMIN_AUTHOR)
+        return self._run(work)
 
     def delete_system(self, system: str, *, replaces: int) -> tuple[int, str]:
-        return self.run(DELETE_SYSTEM, self.tid, system, REPLACES, str(replaces))
+        async def work(store: Any) -> None:
+            await store.delete_system(self.tid, system, replaces=replaces, author=ADMIN_AUTHOR)
+        return self._run(work)
 
     def set_case(self, *, replaces: int, system: str = FIXTURE_CASE_SYSTEM, body: str = FIXTURE_CASE_BODY) -> tuple[int, str]:
-        self.tmp.mkdir(parents=True, exist_ok=True)
-        file = self.tmp / f"case-{len(list(self.tmp.glob('case-*')))}.yaml"
-        file.write_text(case_record_text(system, body), encoding="utf-8")
-        return self.run(SET_CASE, self.tid, str(file), REPLACES, str(replaces))
+        async def work(store: Any) -> None:
+            await store.put_case(self.tid, replaces=replaces, system_id=system, comment_body=body, author=ADMIN_AUTHOR)
+        return self._run(work)
 
     def delete_case(self, *, replaces: int) -> tuple[int, str]:
-        return self.run(DELETE_CASE, self.tid, REPLACES, str(replaces))
+        async def work(store: Any) -> None:
+            await store.delete_case(self.tid, replaces=replaces, author=ADMIN_AUTHOR)
+        return self._run(work)
 
-    def set_credentials(self, system: str, fields: Mapping[str, str], *, for_version: int,
-                        kind: str = "static") -> tuple[int, str]:
-        self.tmp.mkdir(parents=True, exist_ok=True)
-        file = self.tmp / f"creds-{system}-{for_version}.json"
-        file.write_text(json.dumps(credential_set(fields, kind)), encoding="utf-8")
-        return self.run(SET_CREDENTIALS, self.tid, system, str(file), FOR_VERSION, str(for_version))
-
-    def systems(self, *export: str) -> tuple[int, str]:
-        return self.run(SYSTEMS, self.tid, *export)
+    def set_credentials(self, system: str, fields: Mapping[str, str], *, for_version: int) -> tuple[int, str]:
+        """The set at the slot's generation, as the API's credential route sequences it (slot, then the write-only put)."""
+        async def work(store: Any) -> None:
+            slot = await store.credential_slot(self.tid, system, for_version)
+            await operator_secrets(self.kv).put_credentials(self.tid, system, slot.auth.kind, fields,
+                                                            generation=slot.generation)
+        return self._run(work)
 
     def check(self) -> tuple[int, str]:
-        return self.run("check", self.tid)
+        from defender.cli import tenant
+
+        self.capsys.readouterr()
+        rc = tenant.main(["check", self.tid], secrets=operator_secrets(self.kv))
+        said = self.capsys.readouterr()
+        return rc, said.out + said.err
 
     def current(self) -> dict[str, Any]:
         return dict(current_records(self.dsn, self.tid).systems)

@@ -184,7 +184,7 @@ def test_1366_r12_filtering_that_empties_gather_refuses_the_run_naming_the_grant
 
     assert refused.raised is None, refused.raised
     assert all(system in (refused.refusal or "") for system in ("cmdb", "elastic")), refused.refusal
-    assert R.AUTHOR[R.IMPORT] not in (refused.refusal or ""), refused.refusal
+    assert "tenant.py import" not in (refused.refusal or ""), refused.refusal
     assert (refused.run_dir, refused.main.requests) == (None, 0)
 
 

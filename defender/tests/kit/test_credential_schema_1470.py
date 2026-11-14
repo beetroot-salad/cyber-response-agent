@@ -146,3 +146,13 @@ def test_1470_d_e_the_separate_secrecy_tables_are_gone():
 
     assert callable(getattr(access, "credential_faults", None)), "premise: the schema's check stands where they were"
     assert [n for n in ("secret_fields", "PUBLIC_FIELD") if hasattr(access, n)] == []
+
+
+def test_1470_g6_the_schemas_refusal_is_its_own_typed_exception_carrying_the_faults_apart_from_the_stores():
+    """`kit.access.CredentialRefused` is an exception type of the credential schema, not one of the store's `RecordRefused`
+    family, so the route maps the two by type. (P6, G6)"""
+    from defender.kit.access import CredentialRefused
+    from defender.system_records import RecordRefused
+
+    assert issubclass(CredentialRefused, Exception)
+    assert not issubclass(CredentialRefused, RecordRefused)

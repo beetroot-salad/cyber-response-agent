@@ -9,6 +9,7 @@ server's answers) and `scripted` (the stand-in alone, for faults a real server c
 `Configured` is the caller's view: Ann (admin of A), Bob (admin of B), the seeded program's key, and one method per route."""
 from __future__ import annotations
 
+import base64
 import contextlib
 import datetime as dt
 import json
@@ -211,6 +212,12 @@ async def configured(request: pytest.FixtureRequest, migrated_database: str, tmp
     else:
         async with served_config(migrated_database, tmp_path, real=request.getfixturevalue("openbao")) as configured:
             yield configured
+
+
+def edited_cursor(cursor: str, **changes: Any) -> str:
+    """`cursor` with fields of its JSON changed, re-encoded as the API encodes one (an edited cursor is the caller's)."""
+    body = json.loads(base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)))
+    return base64.urlsafe_b64encode(json.dumps({**body, **changes}).encode()).decode().rstrip("=")
 
 
 def problem_text(problem: httpx.Response) -> str:

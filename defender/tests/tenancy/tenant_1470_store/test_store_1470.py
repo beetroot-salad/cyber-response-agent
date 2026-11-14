@@ -225,7 +225,7 @@ def test_1470_p3_the_slot_is_the_current_versions_generation_and_parsed_scheme_f
         migrated_database):  # noqa: F811
     """v1, v2 (index key) at generation 1, v3 (base) at 2, v4 disabled at 2: `for_version` 4 and 3 (a disabled current
     version counts; an older version of the same generation) answer generation 2 and the declaration's scheme; 1 and 2
-    (an older generation), 0, 5 and 100 (unknown, future) are refused naming current version 4, none as a missing record.
+    (an older generation), 0, 5 and 100 (unknown, future) are refused as `Stale` naming current version 4.
     (P3, O7)"""
     dsn, tenant = migrated_database, _tenant(migrated_database)
     K.run(dsn, put(tenant, replaces=0))
@@ -238,7 +238,7 @@ def test_1470_p3_the_slot_is_the_current_versions_generation_and_parsed_scheme_f
         assert (generation, auth.scheme) == (2, "bearer"), accepted
     for moved in (1, 2, 0, 5, 100):
         refusal = K.refused(dsn, slot(tenant, moved))
-        assert K.kind_of(refusal) is None, (moved, refusal)
+        assert K.kind_of(refusal) == "Stale", (moved, refusal)
         assert refusal.current_version == 4, (moved, refusal)
 
     other = K.run(dsn, lambda store: store.put_system(tenant, "ticket", replaces=4, adapter="ticket", enabled=True,
@@ -261,20 +261,20 @@ def test_1470_p3_the_slot_refuses_a_deleted_or_never_written_system_and_a_re_cre
     K.run(dsn, put(tenant, replaces=0))
     for old in (1, 2):
         refusal = K.refused(dsn, slot(tenant, old))
-        assert K.kind_of(refusal) is None, old
+        assert K.kind_of(refusal) == "Stale", old
         assert refusal.current_version == 3, old
     assert K.slot_parts(K.run(dsn, slot(tenant, 3)))[0] == 2
 
 
 def test_1470_p3_a_stored_access_that_no_longer_parses_is_a_refusal_naming_the_system_not_a_scheme(migrated_database):  # noqa: F811
     """A current version whose access text cannot be parsed (planted by SQL: the store would not have written it) makes the
-    slot refuse with the parse fault naming the system; it is none of the other typed refusals. (O7, G1)"""
+    slot refuse with the parse fault naming the system; it is the store's `Judged`. (O7, G1)"""
     dsn, tenant = migrated_database, _tenant(migrated_database)
     execute(dsn, "INSERT INTO tenancy.system_versions (tenant_id, system_id, version, adapter_id, enabled, settings, access, "
                  "credential_generation, deleted, author, written_at) VALUES (%s, 'ticket', 1, 'ticket', true, '{}'::jsonb, "
                  "'not: [a declaration', 1, false, 'seed', now())", (tenant,))
     refusal = K.refused(dsn, slot(tenant, 1))
-    assert K.kind_of(refusal) is None, refusal
+    assert K.kind_of(refusal) == "Judged", refusal
     assert list(refusal.faults), refusal
     assert any("ticket" in fault for fault in refusal.faults), refusal.faults
 

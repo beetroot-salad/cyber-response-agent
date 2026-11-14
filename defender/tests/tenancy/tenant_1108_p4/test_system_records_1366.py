@@ -1,30 +1,17 @@
-"""#1366 slice W (write side): the operator command writes a tenant's system and case records (O2, O4, O5, O8, O9,
-P5, C2-C4, O11, DC8; R13 import copies no secret).
-
-Entry: `cli.tenant.main(argv)` with no `directory=`, as a production process: host acceptance and the record store
-both come from `DEFENDER_DATABASE_DSN` over a migrated database (Postgres-gated). The tenant is the published fixture
-(its retired `settings/` folders planted by `R.import_files()`), registered `active` and NOT imported
-(`register_tenant(records=None)`). State is read back through the R10 read (`R.current_records`) and, for history,
-`R.system_versions` / `R.case_versions`; credentials through the KV stand-in's recorded paths. Refusals the CLI cannot
-express (adapter mismatch, custom reference, serialization) go to `open_store` / `RecordStore`. Every invented name is
-in `support/tenancy/_systems1366.py` and `.contract-first/shared-interface.md`.
-"""
+"""#1366 slice W (write side), kept after #1470 over the store: the judgement and the store's rules for a tenant's system and
+case records (O3-O5, P5, C2-C4, DC8, R7, G4), driven through `R.Admin` (the store with the real judgement, as the API
+writes). Retired with #1470: the import (D-F), the operator's folder, file and printing surface (O10), and the credential
+command (the credentials route's tests). Postgres-gated; the tenant is the published fixture, registered active with the
+fixture's records."""
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import dataclasses
-import importlib
-import inspect
 import json
-import os
 import random
 import re
-import shutil
-import subprocess
-import sys
 import threading
-from collections.abc import Iterator, Mapping
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -32,9 +19,8 @@ import pytest
 
 from defender.tests.support.jobs._jobs1342 import fixed_clock, register_tenant
 from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — the fixture
-from defender.tests.support.tenancy import _handoff1366 as H
 from defender.tests.support.tenancy import _systems1366 as R
-from defender.tests.tenancy.tenant_1108_p4._support import FIXTURE_SETTINGS, published_tenant, second_tenant
+from defender.tests.tenancy.tenant_1108_p4._support import published_tenant, second_tenant
 
 REPO = Path(__file__).resolve().parents[4]
 CMDB_CONFIG, CMDB_ACCESS = R.FIXTURE_FOLDERS["cmdb"]  # the imported version 1: rewrites differ in one thing only
@@ -54,10 +40,10 @@ RETIRED, RETIRED_CASE = "legacy-widget", "legacy-ticket"  # records naming an ad
 ALL_SYSTEMS = tuple(sorted({*R.FIXTURE_SYSTEMS, *R.REAL, "frobnicator", "tacit-knowledge", RETIRED, RETIRED_CASE}))
 
 
-def _operator(tenant: Any, dsn: str, tmp_path: Path, capsys: Any, monkeypatch: Any, **kw: Any) -> R.Operator:
+def _operator(tenant: Any, dsn: str, tmp_path: Path, capsys: Any, monkeypatch: Any, **kw: Any) -> R.Admin:
     monkeypatch.setenv("DEFENDER_DATABASE_DSN", dsn)
-    register_tenant(dsn, tenant.tenant_id, data_root=tenant.data_root, records=None)  # R8: not imported
-    return R.Operator(tenant.tenant_id, dsn, tmp_path / "op", capsys, **kw)
+    register_tenant(dsn, tenant.tenant_id, data_root=tenant.data_root)  # the fixture's records
+    return R.Admin(tenant.tenant_id, dsn, tmp_path / "op", capsys, **kw)
 
 
 @pytest.fixture
@@ -69,40 +55,29 @@ def fixture_tenant(tmp_path, data_root):
 
 @pytest.fixture
 def op(fixture_tenant, migrated_database, tmp_path, capsys, monkeypatch):  # noqa: F811 — the imported fixture
-    """The fixture tenant, registered, not yet imported."""
+    """The fixture tenant, registered with its records."""
     return _operator(fixture_tenant, migrated_database, tmp_path, capsys, monkeypatch)
 
 
 @pytest.fixture
 def imported_op(op):
-    rc, said = op.import_()
-    assert rc == 0, said
     return op
-
-
-@contextlib.contextmanager
-def _planted(tmp_path: Path, data_root: Path, dsn: str, capsys: Any, monkeypatch: Any,
-             files: Mapping[str, str | None] | None = None, **overrides: str | None) -> Iterator[R.Operator]:
-    """A registered, not-imported tenant publishing `R.import_files(**overrides)` (or exactly `files`)."""
-    with published_tenant(tmp_path / "forge", root=data_root,
-                          files=R.import_files(**overrides) if files is None else dict(files)) as t:
-        yield _operator(t, dsn, tmp_path, capsys, monkeypatch)
 
 
 def _jira_access(*writes: tuple[str, str], reads: tuple = ()) -> str:
     return R.declaration(JIRA_BASE, writes=writes, reads=reads)
 
 
-def _case_versions(op: R.Operator) -> list[tuple[int, str, bool]]:
+def _case_versions(op: R.Admin) -> list[tuple[int, str, bool]]:
     return [(c.version, c.system_id, c.deleted) for c in R.case_versions(op.dsn, op.tid)]
 
 
-def _state(op: R.Operator) -> tuple[dict[str, list[tuple[int, int, bool]]], list[tuple[int, str, bool]]]:
+def _state(op: R.Admin) -> tuple[dict[str, list[tuple[int, int, bool]]], list[tuple[int, str, bool]]]:
     """Everything the records tables hold for the tenant, as (numbers per system, case versions)."""
     return {s: op.numbers(s) for s in ALL_SYSTEMS}, _case_versions(op)
 
 
-def _refused(op: R.Operator, before: Any, rc: int, said: str, needles: tuple[tuple[str, ...], ...], *,
+def _refused(op: R.Admin, before: Any, rc: int, said: str, needles: tuple[tuple[str, ...], ...], *,
              file_ok: bool = False) -> None:
     """A refusal: non-zero, each needle (words sharing one line) present, no file named unless `file_ok`, no
     traceback, and the tables exactly as `before`."""
@@ -115,6 +90,10 @@ def _refused(op: R.Operator, before: Any, rc: int, said: str, needles: tuple[tup
     assert _state(op) == before
 
 
+
+
+
+
 def _numbered(text: str, system: str, number: int) -> bool:
     """Some line names `system` and carries `number` as a number of its own (bare, or as `v<N>` / `g<N>`), not as a
     digit inside a path, an id or a timestamp."""
@@ -122,292 +101,7 @@ def _numbered(text: str, system: str, number: int) -> bool:
     return any(system in line and pattern.search(line) for line in text.splitlines())
 
 
-def _block(out: str, adapter: str, others: tuple[str, ...]) -> str:
-    """The listing lines from the first naming `adapter` up to the next line naming another adapter."""
-    lines, taken = out.splitlines(), []
-    for line in lines:
-        if taken and any(o in line for o in others):
-            break
-        if taken or adapter in line:
-            taken.append(line)
-    return "\n".join(taken)
-
-
-# --- O2 -------------------------------------------------------------------------------------------------------------
-
-#: adapter id -> (declared settings keys as stored, a tool it offers or None); the checkout's nine adapters (O2).
-CATALOG_KEYS: Mapping[str, tuple[tuple[str, ...], str | None]] = {
-    "elastic": (("ELASTIC_EVENTS_INDEX", "ELASTIC_ALERTS_INDEX"), None),
-    "jira": (("JIRA_TIMEOUT_SEC", "JIRA_SERVICE_DESK"), None),
-    "servicenow": (("SERVICENOW_TIMEOUT_SEC", "SERVICENOW_TABLE"), None),
-    "change-mgmt": (("CHANGE_MGMT_TIMEOUT_SEC",), None),
-    "cmdb": (("CMDB_TIMEOUT_SEC",), "list-hosts"),
-    "host-state": ((), None),
-    "identity": (("IDENTITY_TIMEOUT_SEC",), "get-user"),
-    "threat-intel": (("THREAT_INTEL_TIMEOUT_SEC",), None),
-    "ticket": (("TICKET_TIMEOUT_SEC", "TICKET_KEY_PATTERN"), None),
-}
-
-
-_UPPER_KEY = re.compile(r"\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b")  # a settings key as stored: PREFIX_NAME
-
-
-def _declared(adapter: str) -> Any:
-    """The adapter's module: its `PREFIX`, `REQUIRED_CONFIG_KEYS`, `DISPLAY_NAME` and `EXAMPLE` are the cold-readable
-    constants the K2 lint guarantees (O2), so the listing is judged against them, not against a second copy."""
-    return importlib.import_module(f"defender.integrations.{adapter.replace('-', '_')}_adapter")
-
-
-def test_1366_o2_the_catalog_lists_every_adapter_with_its_display_name_exact_required_keys_and_example_mark(capsys):
-    """`catalog` lists each adapter with its display name, exact required keys and example mark (all from its K2
-    constants); tacit-knowledge is no entry. (#1366 O2, K2)"""
-    from defender.cli import tenant
-
-    on_disk = {p.stem.removesuffix("_adapter").replace("_", "-") for p in (REPO / "defender/integrations").glob("*_adapter.py")}
-    assert on_disk == set(CATALOG_KEYS) == {*R.REAL, *R.EXAMPLES}, "premise: the table is the checkout's adapter set"
-    capsys.readouterr()
-    rc = tenant.main([R.CATALOG])
-    out = capsys.readouterr().out
-    assert rc == 0, out
-    for adapter, (keys, tool) in CATALOG_KEYS.items():
-        module = _declared(adapter)
-        declared = tuple(f"{module.PREFIX}_{k}" for k in module.REQUIRED_CONFIG_KEYS)
-        assert set(declared) == set(keys), f"premise: {adapter}'s declared constants are the design's keys"
-        assert bool(module.EXAMPLE) == (adapter in R.EXAMPLES), f"premise: {adapter}'s EXAMPLE flag"
-        block = _block(out, adapter, tuple(a for a in CATALOG_KEYS if a != adapter))
-        assert block, (adapter, out)
-        assert module.DISPLAY_NAME in block, (adapter, module.DISPLAY_NAME, block)
-        assert tool is None or tool in block, (adapter, tool, block)
-        assert ("example" in block) == bool(module.EXAMPLE), (adapter, block)
-        # exactly the declared keys: none missing, none extra (any KEY_LIKE token in the block is declared)
-        assert set(_UPPER_KEY.findall(block)) == set(declared), (adapter, declared, block)
-        for key in declared:  # each is marked required, on the line that names it
-            assert [ln for ln in block.splitlines() if key in ln and "required" in ln.lower()], (adapter, key, block)
-    assert "tacit-knowledge" not in out
-
-
-# --- O9 / R13 -------------------------------------------------------------------------------------------------------
-
-@pytest.mark.postgres
-def test_1366_o9_the_import_turns_each_folder_into_a_first_version_at_generation_one_and_marks_the_tenant(
-        fixture_tenant, migrated_database, tmp_path, capsys, monkeypatch):  # noqa: F811
-    """Every `settings/systems/<s>/` becomes version 1 at generation 1, settings and access as the folder held them,
-    and the case record its version 1, all by `tenant.py import`; the tenant is marked. (#1366 O9, R8, R9, K4)"""
-    tid = fixture_tenant.tenant_id
-    op = _operator(fixture_tenant, migrated_database, tmp_path, capsys, monkeypatch)
-    assert not R.imported(migrated_database, tid), "premise: not imported"
-
-    rc, said = op.import_()
-
-    assert rc == 0, said
-    current = op.current()
-    assert set(current) == R.FIXTURE_SYSTEMS
-    for system, (config, access) in R.FIXTURE_FOLDERS.items():
-        got = current[system]
-        assert (got.version, got.credential_generation, got.enabled, got.adapter_id) == (1, 1, True, system), system
-        assert (dict(got.settings), got.access) == (dict(config), access), system
-    assert {(s, op.versions(s)[-1].author, op.versions(s)[-1].deleted) for s in R.FIXTURE_SYSTEMS} == {
-        (s, R.AUTHOR[R.IMPORT], False) for s in R.FIXTURE_SYSTEMS}
-    assert all(op.versions(s)[-1].written_at is not None for s in R.FIXTURE_SYSTEMS)
-    case = R.current_records(migrated_database, tid).case
-    assert (case.version, case.system_id, case.comment_body) == (1, "ticket", R.FIXTURE_CASE_BODY)
-    assert [(c.version, c.author) for c in R.case_versions(migrated_database, tid)] == [(1, R.AUTHOR[R.IMPORT])]
-    assert R.imported(migrated_database, tid)
-
-
-@pytest.mark.postgres
-def test_1366_r13_the_import_copies_no_secret_and_reads_none(
-        fixture_tenant, migrated_database, tmp_path, capsys, monkeypatch):  # noqa: F811
-    """A credential set stored at the pre-generation path stays where it is and is neither read nor copied to `g1`: the
-    import's OpenBao (handed to it as `secrets=`) sees no request. After it `systems` lists elastic without credentials
-    at its current generation until `set-credentials` writes `g1`. (#1366 R13, O8)"""
-    tid = fixture_tenant.tenant_id
-    kv = R.KvStandIn({f"{tid}/elastic": R.credential_set({"username": "svc", "password": "pw"})})
-    op = _operator(fixture_tenant, migrated_database, tmp_path, capsys, monkeypatch, kv=kv)
-
-    rc, said = op.import_()
-
-    assert rc == 0, said
-    assert kv.requests == [], kv.requests
-    assert list(kv.held) == [f"{tid}/elastic"]
-    rc, listing = op.systems()
-    assert rc == 0, listing
-    assert R.lines_naming(listing, "elastic", "no credentials"), listing
-
-    assert op.set_credentials("elastic", {"username": "svc", "password": "pw"}, for_version=1)[0] == 0
-    assert kv.written() == [f"{tid}/elastic/g1"]
-    assert not R.lines_naming(op.systems()[1], "elastic", "no credentials")
-
-
-#: (id, planted overrides, files the dry run must name (any of), folder the import refusal must name (any of), key).
-_CASE_FILE, _TICKET_ACCESS_FILE = "settings/case-record.yaml", "settings/systems/ticket/access.yaml"
-_CFG = "settings/systems/{}/config.env".format
-_ACC = "settings/systems/{}/access.yaml".format
-IMPORT_FAILURES = [
-    ("undeclared-key", {_CFG("cmdb"): 'CMDB_TIMEOUT_SEC="10"\nCMDB_COLOUR="red"\n'}, (_CFG("cmdb"),), ("settings/systems/cmdb",), "CMDB_COLOUR"),
-    ("change-me", {_CFG("identity"): 'IDENTITY_TIMEOUT_SEC="CHANGE-ME"\n'}, (_CFG("identity"),), ("settings/systems/identity",), "IDENTITY_TIMEOUT_SEC"),
-    ("missing-required", {_CFG("threat-intel"): "# nothing\n"}, (_CFG("threat-intel"),), ("settings/systems/threat-intel",), "THREAT_INTEL_TIMEOUT_SEC"),
-    ("zero-timeout", {_CFG("change-mgmt"): 'CHANGE_MGMT_TIMEOUT_SEC="0"\n'}, (_CFG("change-mgmt"),), ("settings/systems/change-mgmt",), "CHANGE_MGMT_TIMEOUT_SEC"),
-    ("path-key", {_CFG("elastic"): 'ELASTIC_EVENTS_INDEX="a/b"\nELASTIC_ALERTS_INDEX="alerts-*"\n'}, (_CFG("elastic"),), ("settings/systems/elastic",), "ELASTIC_EVENTS_INDEX"),
-    ("access-unparseable", {_ACC("change-mgmt"): "access: [\n"}, (_ACC("change-mgmt"),), ("settings/systems/change-mgmt",), None),
-    ("access-empty", {_ACC("host-state"): ""}, (_ACC("host-state"),), ("settings/systems/host-state",), None),
-    ("platform-served", {_ACC("tacit-knowledge"): R.declaration("http://soc-playground:8009")}, ("settings/systems/tacit-knowledge",), ("settings/systems/tacit-knowledge",), None),
-    ("unknown-adapter", {_ACC("frobnicator"): R.declaration("http://soc-playground:8009")}, ("settings/systems/frobnicator",), ("settings/systems/frobnicator",), None),
-    ("case-system-without-folder", {_CASE_FILE: R.case_record_text("jira")}, (_CASE_FILE,), (_CASE_FILE,), "jira"),
-    ("case-system-cannot-comment", {_CASE_FILE: R.case_record_text("cmdb")}, (_CASE_FILE,), (_CASE_FILE,), "cmdb"),
-    ("case-template", {_CASE_FILE: R.case_record_text(body="{nosuch}")}, (_CASE_FILE,), (_CASE_FILE,), None),
-    ("cover-broken", {_ACC("ticket"): R.bearer_access(TICKET_BASE, writes=(("POST", "/tickets/*/transitions"),))},
-     (_TICKET_ACCESS_FILE, _CASE_FILE), ("settings/systems/ticket", _CASE_FILE), None),
-    # r5: a READ route that matches the comment route is refused even beside a covering write (C2's read-route rule).
-    ("cover-read-route-matches", {_ACC("ticket"): R.declaration(TICKET_BASE, reads=(("POST", "/tickets/*/comments"),),
-                                                                   writes=(("POST", "/tickets/*/comments"),))},
-     (_TICKET_ACCESS_FILE, _CASE_FILE), ("settings/systems/ticket", _CASE_FILE), None),
-    ("cover-read-route-literal-matches", {_ACC("ticket"): R.declaration(TICKET_BASE, reads=(("POST", "/tickets/ABC-1/comments"),),
-                                                                           writes=(("POST", "/tickets/*/comments"),))},
-     (_TICKET_ACCESS_FILE, _CASE_FILE), ("settings/systems/ticket", _CASE_FILE), None),
-]
-
-
-@pytest.mark.postgres
-@pytest.mark.parametrize("row", IMPORT_FAILURES, ids=[r[0] for r in IMPORT_FAILURES])
-def test_1366_o9_one_failing_folder_refuses_the_whole_import_naming_it_and_the_dry_run_names_the_file(
-        row, tmp_path, data_root, migrated_database, capsys, monkeypatch):  # noqa: F811
-    """Any one folder or case record failing the store's judgement refuses the whole import naming it, writing no
-    version, no mark and touching no secret; the dry run names the file to fix. (#1366 O9, C6)"""
-    _, overrides, dry_files, folders, key = row
-    with _planted(tmp_path, data_root, migrated_database, capsys, monkeypatch, **overrides) as op:
-        dry_rc, listed = op.import_(dry_run=True)
-        rc, said = op.import_()
-
-        assert dry_rc != 0, listed
-        assert any(R.lines_naming(listed, f) for f in dry_files), listed
-        assert key is None or R.lines_naming(listed, key), listed
-        assert rc != 0, said
-        assert any(R.lines_naming(said, f) for f in folders), said
-        assert "Traceback" not in said + listed
-        assert op.current() == {}
-        assert R.current_records(migrated_database, op.tid).case is None
-        assert not R.imported(migrated_database, op.tid)
-        assert op.kv.requests == []
-
-
-@pytest.mark.postgres
-def test_1366_o9_the_dry_run_lists_every_failure_across_folders_and_the_case_record(
-        tmp_path, data_root, migrated_database, capsys, monkeypatch):  # noqa: F811
-    """Five failures of different kinds in five places: the dry run names all five files, the import writes none.
-    (#1366 O9)"""
-    bad = {_CFG("cmdb"): 'CMDB_TIMEOUT_SEC="10"\nCMDB_COLOUR="red"\n', _ACC("identity"): "access: [\n",
-           _CFG("elastic"): 'ELASTIC_EVENTS_INDEX="a/b"\nELASTIC_ALERTS_INDEX="x"\n',
-           _ACC("tacit-knowledge"): R.declaration("http://soc-playground:8009"),
-           _CASE_FILE: R.case_record_text(body="{nosuch}")}
-    with _planted(tmp_path, data_root, migrated_database, capsys, monkeypatch, **bad) as op:
-        rc, listed = op.import_(dry_run=True)
-
-        assert rc != 0
-        for file in bad:
-            assert R.lines_naming(listed, file.removesuffix("/access.yaml") if "tacit" in file else file), (file, listed)
-        assert op.import_()[0] != 0
-        assert op.current() == {}
-        assert not R.imported(migrated_database, op.tid)
-
-
-@pytest.mark.postgres
-def test_1366_o9_a_clean_dry_run_writes_nothing_and_leaves_the_import_to_run(
-        op, migrated_database):  # noqa: F811
-    """A dry run over a good tenant is clean, leaves no row and no mark and touches no secret; the import after it
-    still runs. (#1366 O9)"""
-    rc, listed = op.import_(dry_run=True)
-
-    assert rc == 0, listed
-    assert op.current() == {}
-    assert R.case_versions(migrated_database, op.tid) == []
-    assert not R.imported(migrated_database, op.tid)
-    assert op.kv.requests == []
-    assert op.import_()[0] == 0
-    assert set(op.current()) == R.FIXTURE_SYSTEMS
-
-
-@pytest.mark.postgres
-def test_1366_o9_the_import_reads_the_published_export_not_the_clone(fixture_tenant, op):
-    """After publishing, the clone's working tree is edited (a changed cmdb timeout, a removed elastic folder, a bad
-    new folder): the import stores the published values. (#1366 O9, DC8)"""
-    settings = fixture_tenant.clone / "settings"
-    assert (settings / "systems/elastic").is_dir(), "premise: the clone holds the planted folders"
-    (settings / "systems/cmdb").mkdir(parents=True, exist_ok=True)
-    (settings / "systems/cmdb/config.env").write_text('CMDB_TIMEOUT_SEC="77"\nCMDB_COLOUR="red"\n', encoding="utf-8")
-    shutil.rmtree(settings / "systems/elastic")
-    (settings / "systems/frobnicator").mkdir(parents=True, exist_ok=True)
-    (settings / "systems/frobnicator/access.yaml").write_text("access: [\n", encoding="utf-8")
-
-    published = R.settings_of(fixture_tenant.data_root, fixture_tenant.tenant_id)
-    assert (published / "systems/elastic").is_dir(), "premise: the published export still holds the original folders"
-    assert "77" not in (published / "systems/cmdb/config.env").read_text("utf-8"), "premise: published cmdb is unedited"
-
-    rc, said = op.import_()
-
-    assert rc == 0, said
-    assert set(op.current()) == R.FIXTURE_SYSTEMS
-    assert dict(op.current()["cmdb"].settings) == CMDB_CONFIG
-
-
-@pytest.mark.postgres
-def test_1366_o9_a_tenant_with_no_systems_is_still_marked_imported_and_then_takes_writes(
-        tmp_path, data_root, migrated_database, capsys, monkeypatch):  # noqa: F811
-    """Importing a tenant whose export holds no system folder and no case record writes no version, sets the mark, and
-    a first `set-system` then lands as version 1. (#1366 O9, R8)"""
-    retired = {f"settings/{p.relative_to(FIXTURE_SETTINGS)}": None for p in FIXTURE_SETTINGS.rglob("*")
-               if p.is_file() and (p.relative_to(FIXTURE_SETTINGS).parts[0] == "systems"
-                                   or p.name == "case-record.yaml")}
-    with _planted(tmp_path, data_root, migrated_database, capsys, monkeypatch, files=retired) as op:
-        assert not R.imported(migrated_database, op.tid)
-
-        rc, said = op.import_()
-
-        assert rc == 0, said
-        assert R.imported(migrated_database, op.tid)
-        assert op.current() == {}
-        assert R.current_records(migrated_database, op.tid).case is None
-        assert op.set_system("cmdb", replaces=0, config=CMDB_CONFIG, access=CMDB_ACCESS)[0] == 0
-        assert op.numbers("cmdb") == [(1, 1, False)]
-
-
-@pytest.mark.postgres
-def test_1366_o9_an_already_imported_tenant_is_refused_naming_the_import_and_nothing_changes(imported_op):
-    """A second import (also after an edit) is refused naming the import and rewrites no version. (#1366 O9, R8)"""
-    assert imported_op.set_system("cmdb", replaces=1, config=CMDB_NEW, access=CMDB_ACCESS)[0] == 0
-    before = _state(imported_op)
-
-    rc, said = imported_op.import_()
-
-    assert rc != 0, said
-    assert R.lines_naming(said, R.AUTHOR[R.IMPORT]), said
-    assert _state(imported_op) == before
-    assert dict(imported_op.current()["cmdb"].settings) == CMDB_NEW
-
-
-@pytest.mark.postgres
-@pytest.mark.parametrize("command", ["set_system", "delete_system", "set_case", "delete_case"])
-def test_1366_r8_a_write_to_a_tenant_not_imported_is_refused_naming_the_import(op, command):
-    """All four write commands on a not-imported tenant are refused naming the import before any staleness; after the
-    import the same call lands. (#1366 R8, DC8)"""
-    call = {"set_system": lambda: op.set_system("cmdb", replaces=1, config=CMDB_NEW, access=CMDB_ACCESS),
-            "delete_system": lambda: op.delete_system("cmdb", replaces=1),
-            "set_case": lambda: op.set_case(replaces=1, body="{disposition}"),
-            "delete_case": lambda: op.delete_case(replaces=1)}[command]
-
-    rc, said = call()
-
-    assert rc != 0, said
-    assert R.lines_naming(said, R.AUTHOR[R.IMPORT]), said
-    assert not R.imported(op.dsn, op.tid)
-    assert op.numbers("cmdb") == []
-    assert _case_versions(op) == []
-    assert op.import_()[0] == 0
-    rc, said = call()
-    assert rc == 0, said
-
-
-# --- O3 / O4: the operator command refuses an unusable system record -------------------------------------------------
+# --- O3 / O4: the judgement refuses an unusable system record -------------------------------------------------
 
 class Refusal(NamedTuple):
     id: str
@@ -486,19 +180,16 @@ def test_1366_o4_an_unusable_system_record_is_refused_naming_system_and_key_not_
         assert imported_op.current()[control].version == row.replaces + 1
 
 
-async def _door(op: R.Operator, call: Any) -> Any:
-    from defender.system_records import open_store
-
-    store = open_store(op.dsn, clock=fixed_clock)
-    if inspect.isawaitable(store):
-        store = await store
+async def _door(op: R.Admin, call: Any) -> Any:
+    from defender.system_records import RecordStore
+    store = RecordStore(op.dsn, clock=fixed_clock, judge=R.real_judge())
     try:
         return await call(store)
     finally:
         await store.close()
 
 
-def _at_the_door(op: R.Operator, call: Any) -> Any:
+def _at_the_door(op: R.Admin, call: Any) -> Any:
     return asyncio.run(_door(op, call))
 
 
@@ -581,34 +272,8 @@ def test_1366_o4_a_case_template_failing_the_case_record_rules_is_refused(import
     assert _case_versions(imported_op) == [(1, "ticket", False), (2, "ticket", False)]
 
 
-@pytest.mark.postgres
-def test_1366_o4_a_case_record_naming_a_file_that_is_not_a_record_is_refused(imported_op, tmp_path):
-    """A case-record file that is not a mapping with a `system` and a `comment.body` is refused and stored nowhere.
-    (#1366 O4, DC8)"""
-    before = _state(imported_op)
-    shapes = ["- just\n- a list\n", "system: ticket\n", "comment: {body: x}\n", "system: [\n",
-              "system: 42\ncomment: {body: x}\n", "system: ''\ncomment: {body: x}\n",
-              "system: ticket\ncomment: [x]\n", "system: ticket\ncomment: {}\n", "system: ticket\ncomment:\n  body: 7\n"]
-    for n, text in enumerate(shapes):
-        file = tmp_path / f"bad-case-{n}.yaml"
-        file.write_text(text, encoding="utf-8")
-        rc, said = imported_op.run(R.SET_CASE, imported_op.tid, str(file), R.REPLACES, "1")
-        assert rc != 0, (text, said)
-        assert "Traceback" not in said, (text, said)
-        assert _state(imported_op) == before, text
 
 
-@pytest.mark.postgres
-def test_1366_p2_a_handoff_folder_whose_files_are_not_text_is_refused_and_stored_nowhere(imported_op, tmp_path):
-    """A `config.env` or `access.yaml` that is not UTF-8 text never becomes a record: `set-system` refuses naming the
-    system, with no traceback, and stores nothing. Moved from the startup tests that planted a non-UTF-8 `config.env`
-    (a file that cannot reach a run any more). (#1366 P2, O9, DC8)"""
-    before = _state(imported_op)
-    for n, name in enumerate(("config.env", "access.yaml")):
-        folder = R.system_folder(tmp_path / f"bytes-{n}", "cmdb", config=CMDB_CONFIG, access=CMDB_ACCESS)
-        (folder / name).write_bytes(b"\xff\xfe not text \x80\n")
-        rc, said = imported_op.run(R.SET_SYSTEM, imported_op.tid, "cmdb", str(folder), R.REPLACES, "1")
-        _refused(imported_op, before, rc, said, (("cmdb",),), file_ok=True)
 
 
 @pytest.mark.postgres
@@ -647,7 +312,7 @@ def retired_op(fixture_tenant, migrated_database, tmp_path, capsys, monkeypatch)
                                                  adapter=RETIRED_CASE)},
         case=R.CaseSpec(system_id=RETIRED_CASE))
     register_tenant(migrated_database, fixture_tenant.tenant_id, data_root=fixture_tenant.data_root, records=spec)
-    return R.Operator(fixture_tenant.tenant_id, migrated_database, tmp_path / "op", capsys)
+    return R.Admin(fixture_tenant.tenant_id, migrated_database, tmp_path / "op", capsys)
 
 
 @pytest.mark.postgres
@@ -840,7 +505,7 @@ def test_1366_c4_a_write_to_a_system_that_is_not_the_case_system_needs_no_cover(
 @pytest.mark.postgres
 def test_1366_o5_versions_rise_by_one_per_system_and_a_delete_counts_as_the_version_to_replace(imported_op):
     """cmdb: edit (2), delete (3); then naming 2, 0 or 9 is refused and naming the delete (3) stores version 4; identity
-    stays at 1. Each version carries its command's name as author and a time. (#1366 O5, R9)"""
+    stays at 1. Each version carries its writer as author. (#1366 O5, R9)"""
     op = imported_op
     assert op.set_system("cmdb", replaces=1, config=CMDB_NEW, access=CMDB_ACCESS)[0] == 0
     assert op.delete_system("cmdb", replaces=2)[0] == 0
@@ -853,8 +518,7 @@ def test_1366_o5_versions_rise_by_one_per_system_and_a_delete_counts_as_the_vers
 
     assert op.set_system("cmdb", replaces=3, config=CMDB_NEW, access=CMDB_ACCESS)[0] == 0
     assert [(n, d) for n, _, d in op.numbers("cmdb")] == [(1, False), (2, False), (3, True), (4, False)]
-    assert [v.author for v in op.versions("cmdb")] == [R.AUTHOR[R.IMPORT], R.AUTHOR[R.SET_SYSTEM],
-                                                      R.AUTHOR[R.DELETE_SYSTEM], R.AUTHOR[R.SET_SYSTEM]]
+    assert [v.author for v in op.versions("cmdb")] == [R.SEED_AUTHOR, *[R.ADMIN_AUTHOR] * 3]  # each version's author is the acting member
     times = [v.written_at for v in op.versions("cmdb")]
     assert None not in times
     assert times == sorted(times)
@@ -908,7 +572,7 @@ def test_1366_o5_a_delete_is_a_version_and_check_then_reports_the_grants_on_it_a
 
     assert rc == 0, said
     assert [(v.version, v.deleted, v.author) for v in imported_op.versions("cmdb")] == [
-        (1, False, R.AUTHOR[R.IMPORT]), (2, True, R.AUTHOR[R.DELETE_SYSTEM])]
+        (1, False, R.SEED_AUTHOR), (2, True, R.ADMIN_AUTHOR)]
     assert "cmdb" not in imported_op.current()
     _, after = imported_op.check()
     assert R.lines_naming(after, "cmdb", "orphan"), after
@@ -929,7 +593,7 @@ def test_1366_o5_case_versions_number_per_tenant_and_follow_the_same_rules(impor
     assert op.set_case(replaces=3, body="{cause}")[0] == 0
     assert _case_versions(op) == [(1, "ticket", False), (2, "ticket", False), (3, "ticket", True), (4, "ticket", False)]
     assert [c.author for c in R.case_versions(op.dsn, op.tid)] == [
-        R.AUTHOR[R.IMPORT], R.AUTHOR[R.SET_CASE], R.AUTHOR[R.DELETE_CASE], R.AUTHOR[R.SET_CASE]]
+        R.SEED_AUTHOR, *[R.ADMIN_AUTHOR] * 3]
     assert R.current_records(op.dsn, op.tid).case.comment_body == "{cause}"
 
 
@@ -1115,242 +779,14 @@ def test_1366_p5_a_delete_carries_the_generation_and_a_re_create_takes_the_next_
     assert op.numbers("identity") == [(1, 1, False), (2, 2, False), (3, 3, False), (4, 3, True), (5, 4, False),
                                       (6, 4, True), (7, 5, False)]
     assert op.kv.written() == [f"{op.tid}/identity/g1"]
-    assert R.lines_naming(op.systems()[1], "identity", "no credentials")
 
 
-# --- O8: set-credentials -----------------------------------------------------------------------------------------------
+# --- DC8: disable and set-case via the store ---------------------------------------------------------------------------
 
 
-class _BaoDown(R.KvStandIn):
-    """OpenBao unreachable: every request fails to connect."""
-
-    def _handle(self, request):
-        import httpx
-
-        raise httpx.ConnectError("connection refused", request=request)
 
 
-class _WrittenMeanwhile(R.KvStandIn):
-    """OpenBao that, as the credential set arrives, lets another writer store the system's next version first: the
-    same record with its credential generation raised by `raise_by` (0: a change that keeps the generation, such as a
-    reads route)."""
 
-    def __init__(self, dsn: str, tenant_id: str, system: str, raise_by: int) -> None:
-        super().__init__()
-        self._meanwhile = (dsn, tenant_id, system, raise_by)
-
-    def _handle(self, request):
-        from defender.tests.support.shared._postgres1339 import execute
-
-        if request.method in ("POST", "PUT") and self._meanwhile is not None:
-            dsn, tenant_id, system, raise_by = self._meanwhile
-            self._meanwhile = None
-            execute(dsn, "INSERT INTO tenancy.system_versions (tenant_id, system_id, version, adapter_id, enabled, settings, "
-                         "access, credential_generation, deleted, author, written_at) "
-                         "SELECT tenant_id, system_id, version + 1, adapter_id, enabled, settings, access, "
-                         "credential_generation + %s, deleted, author, written_at FROM tenancy.system_versions "
-                         "WHERE tenant_id = %s AND system_id = %s ORDER BY version DESC LIMIT 1",
-                    (raise_by, tenant_id, system))
-        return super()._handle(request)
-
-
-@pytest.mark.parametrize(("raise_by", "says"), [(0, "serves that version too"), (1, "does not serve it")],
-                         ids=["same-generation", "new-generation"])
-@pytest.mark.postgres
-def test_1366_o8_a_version_written_meanwhile_is_refused_saying_truly_whether_the_stored_set_serves_it(
-        imported_op, raise_by, says):
-    """identity moves to version 2 while its version-1 credentials are being stored: refused, as every write naming a
-    version no longer current is (O5). The refusal says what the set at `g1` serves as it is: version 2 too when that
-    version kept generation 1, not when it took generation 2. (#1366 O5, O8, P5)"""
-    op = imported_op
-    op.kv = _WrittenMeanwhile(op.dsn, op.tid, "identity", raise_by)
-
-    rc, said = op.set_credentials("identity", {"api_key": "k-1366"}, for_version=1)
-
-    assert op.versions("identity")[-1].version == 2, "premise: a version was written meanwhile"
-    assert rc == 1, said
-    assert R.lines_naming(said, "identity", "version 2 is now current", says), said
-    assert "serves only that version" not in said
-
-
-@pytest.mark.postgres
-def test_1366_o8_an_unreachable_secret_store_is_a_printed_refusal_not_a_traceback(imported_op):
-    """set-credentials while OpenBao is down: exit 1 and one `[tenant.py]` line naming the system, nothing written."""
-    op = imported_op
-    op.kv = _BaoDown()
-    rc, said = op.set_credentials("identity", {"api_key": "k-1366"}, for_version=1)
-    assert rc == 1, said
-    assert R.lines_naming(said, "[tenant.py]", "identity", "not written"), said
-    assert "Traceback" not in said
-
-
-@pytest.mark.postgres
-def test_1366_o8_a_bad_kv_mount_is_a_printed_refusal_not_a_traceback(imported_op):
-    """`--kv-mount` that is not a mount name: exit 1 and one `[tenant.py]` line naming the mount."""
-    op = imported_op
-    op.tmp.mkdir(parents=True, exist_ok=True)
-    token = op.tmp / "token"
-    token.write_text("operator-token\n", encoding="utf-8")
-    from defender.cli import tenant
-
-    op.capsys.readouterr()
-    rc = tenant.main(["systems", op.tid, "--token-file", str(token), "--kv-mount", "bad mount"])
-    said = op.capsys.readouterr()
-    assert rc == 1, said
-    assert R.lines_naming(said.err, "[tenant.py]", "mount"), said
-
-@pytest.mark.postgres
-def test_1366_o8_credentials_prepared_for_a_stale_version_are_refused_and_current_ones_land_at_its_generation(imported_op):
-    """identity moves (version 2, generation 2): credentials naming version 1 are refused naming identity and the
-    version and nothing is written; naming 2 they are written, exactly as given, at `<tenant>/identity/g2` only.
-    (#1366 O8, P5)"""
-    op = imported_op
-    assert op.set_system("identity", replaces=1, config=IDENTITY, access=R.bearer_access("http://identity.internal:8005"))[0] == 0
-    rc, said = op.set_credentials("identity", {"api_key": "k-1366"}, for_version=1)
-    assert rc != 0, said
-    assert _numbered(said, "identity", 1), said
-    assert op.kv.written() == []
-    assert op.kv.held == {}
-
-    rc, said = op.set_credentials("identity", {"api_key": "k-1366"}, for_version=2)
-    assert rc == 0, said
-    assert op.kv.written() == [f"{op.tid}/identity/g2"]
-    assert op.kv.held == {f"{op.tid}/identity/g2": [R.credential_set({"api_key": "k-1366"})]}
-
-
-@pytest.mark.postgres
-def test_1366_o8_credentials_are_only_for_an_existing_current_system(imported_op):
-    """A system with no record or a deleted one is refused and nothing is written; a disabled one takes credentials at
-    its generation path. (#1366 O8)"""
-    op = imported_op
-    assert op.delete_system("cmdb", replaces=1)[0] == 0
-    for system, version in (("jira", 1), ("cmdb", 2), ("cmdb", 1)):
-        rc, said = op.set_credentials(system, {"api_key": "k"}, for_version=version)
-        assert rc != 0, said
-        assert R.lines_naming(said, system), said
-    assert op.kv.written() == []
-
-    assert op.set_system("identity", replaces=1, config=IDENTITY, access=R.FIXTURE_FOLDERS["identity"][1], disabled=True)[0] == 0
-    assert op.set_credentials("identity", {"api_key": "k"}, for_version=2)[0] == 0
-    assert op.kv.written() == [f"{op.tid}/identity/g1"]
-
-
-class _MovingKv(R.KvStandIn):
-    """A KV stand-in that runs `move` once, during the first write it is sent (another operator moving the system)."""
-
-    def __init__(self, move: Any) -> None:
-        super().__init__()
-        self._move, self._moved = move, False
-
-    def _handle(self, request: Any) -> Any:
-        if request.method in ("POST", "PUT") and not self._moved:
-            self._moved = True
-            self._move()
-        return super()._handle(request)
-
-
-@pytest.mark.postgres
-def test_1366_o8_credentials_typed_while_another_operator_moves_the_system_are_reported_refused(
-        fixture_tenant, migrated_database, tmp_path, capsys, monkeypatch):  # noqa: F811
-    """identity is moved to a new base during the credential write: the command re-reads, finds the version no longer
-    current and reports a refusal; the set it wrote sits at the version's own generation path. (#1366 O8)"""
-    def move() -> None:
-        async def put(store: Any) -> None:
-            await store.put_system(fixture_tenant.tenant_id, "identity", replaces=2, adapter="identity", enabled=True,
-                                   settings=IDENTITY, access=R.bearer_access("http://identity.moved:8005"), author="other operator")
-        thread = threading.Thread(target=lambda: asyncio.run(_door(op, put)))
-        thread.start()
-        thread.join(60)
-
-    kv = _MovingKv(move)
-    op = _operator(fixture_tenant, migrated_database, tmp_path, capsys, monkeypatch, kv=kv)
-    assert op.import_()[0] == 0
-    assert op.set_system("identity", replaces=1, config=IDENTITY, access=R.bearer_access("http://identity.internal:8005"))[0] == 0
-
-    rc, said = op.set_credentials("identity", {"api_key": "k"}, for_version=2)
-
-    assert op.numbers("identity") == [(1, 1, False), (2, 2, False), (3, 3, False)], "premise: the move landed"
-    assert rc != 0, said
-    assert R.lines_naming(said, "identity"), said
-    assert kv.written() == [f"{op.tid}/identity/g2"]
-
-
-# --- DC8: systems, export, disable, set-case ---------------------------------------------------------------------------
-
-@pytest.mark.postgres
-def test_1366_dc8_systems_lists_each_current_system_with_version_generation_enabled_and_credentials(imported_op):
-    """With identity at version 3, generation 2, cmdb disabled and threat-intel deleted: one line per current system
-    naming version and generation, disabled ones say so, the deleted one is gone, `no credentials` follows the current
-    generation. (#1366 DC8, O8)"""
-    op = imported_op
-    assert op.set_system("identity", replaces=1, config=IDENTITY, access=R.bearer_access("http://soc-playground:9005"))[0] == 0
-    assert op.set_system("identity", replaces=2, config={"IDENTITY_TIMEOUT_SEC": "20"}, access=R.bearer_access("http://soc-playground:9005"))[0] == 0
-    assert op.set_system("cmdb", replaces=1, config=CMDB_CONFIG, access=CMDB_ACCESS, disabled=True)[0] == 0
-    assert op.delete_system("threat-intel", replaces=1)[0] == 0
-    assert op.set_credentials("identity", {"api_key": "k"}, for_version=3)[0] == 0
-
-    rc, listing = op.systems()
-
-    assert rc == 0, listing
-    (identity,) = R.lines_naming(listing, "identity")
-    assert _numbered(identity, "identity", 3), identity
-    assert _numbered(identity, "identity", 2), identity
-    assert "no credentials" not in identity
-    assert "disabled" not in identity
-    (cmdb,) = R.lines_naming(listing, "cmdb")
-    assert "disabled" in cmdb, cmdb
-    assert "no credentials" in cmdb, cmdb
-    assert not R.lines_naming(listing, "threat-intel"), listing
-    for system in R.FIXTURE_SYSTEMS - {"identity", "cmdb", "threat-intel"}:
-        (line,) = R.lines_naming(listing, system)
-        assert "no credentials" in line, line
-        assert "disabled" not in line, line
-    assert op.set_system("identity", replaces=3, config={"IDENTITY_TIMEOUT_SEC": "20"},
-                         access=R.bearer_access("http://soc-playground:9999"))[0] == 0
-    assert "no credentials" in R.lines_naming(op.systems()[1], "identity")[0]
-
-
-@pytest.mark.postgres
-def test_1366_dc8_a_system_exported_by_systems_is_taken_back_by_set_system_unchanged(imported_op, tmp_path):
-    """`systems --export <dir>` writes each current system as the folder `set-system` takes; writing cmdb back from it
-    is a new version with the same settings, access and generation. (#1366 DC8, O11)"""
-    op = imported_op
-    assert op.set_system("cmdb", replaces=1, config=CMDB_NEW, access=CMDB_ACCESS)[0] == 0
-    out = tmp_path / "exported"
-
-    rc, said = op.systems(R.EXPORT, str(out))
-
-    assert rc == 0, said
-    for system, (config, _access_text) in R.FIXTURE_FOLDERS.items():
-        folder = out / system
-        assert (folder / "access.yaml").is_file(), (system, sorted(p.name for p in out.rglob("*")))
-        config_file = folder / "config.env"
-        assert (R.parse_config_env(config_file.read_text("utf-8")) if config_file.is_file() else {}) == (
-            CMDB_NEW if system == "cmdb" else dict(config)), system
-    rc, said = op.run(R.SET_SYSTEM, op.tid, "cmdb", str(out / "cmdb"), R.REPLACES, "2")
-    assert rc == 0, said
-    before, again = op.versions("cmdb")[1:]
-    assert (again.version, again.settings, again.access, again.credential_generation) == (
-        3, before.settings, before.access, before.credential_generation)
-    assert op.run(R.SET_SYSTEM, op.tid, "host-state", str(out / "host-state"), R.REPLACES, "1")[0] == 0
-
-
-@pytest.mark.postgres
-def test_1366_dc8_an_export_refuses_a_directory_already_holding_a_system_folder(imported_op, tmp_path):
-    """host-state has no settings, so its export writes no config.env: a stale one an earlier folder left would be read
-    back by set-system. `--export` into a directory holding any system's folder is refused, naming it, and writes
-    nothing. (#1366 DC8)"""
-    op = imported_op
-    out = tmp_path / "exported"
-    stale = out / "host-state" / "config.env"
-    stale.parent.mkdir(parents=True)
-    stale.write_text("HOST_STATE_LEFTOVER=1\n", encoding="utf-8")
-
-    rc, said = op.systems(R.EXPORT, str(out))
-
-    assert rc == 1, said
-    assert R.lines_naming(said, "[tenant.py]", "host-state"), said
-    assert sorted(p.relative_to(out).as_posix() for p in out.rglob("*")) == ["host-state", "host-state/config.env"]
 
 
 @pytest.mark.postgres
@@ -1382,67 +818,6 @@ def test_1366_dc8_set_case_stores_the_body_exactly_and_delete_case_removes_the_r
     assert R.current_records(op.dsn, op.tid).case is None
 
 
-# --- O11 ------------------------------------------------------------------------------------------------------------
-
-@pytest.mark.postgres
-@pytest.mark.parametrize("part", ["settings", "access"])
-def test_1366_o11_connects_handoff_is_judged_with_the_stores_own_sentence_located_by_the_file(imported_op, tmp_path, part):
-    """The store and connect's validator give the same fault sentence, located by record and by file. (#1366 O11, DC6)"""
-    key = "CMDB_COLOUR" if part == "settings" else "colour"
-    config = {**CMDB_CONFIG, "CMDB_COLOUR": "red"} if part == "settings" else CMDB_CONFIG
-    access = CMDB_ACCESS if part == "settings" else CMDB_ACCESS.rstrip("\n") + "\ncolour: red\n"  # an unknown top-level key
-    rc, said = imported_op.set_system("cmdb", replaces=1, config=config, access=access)
-    assert rc != 0, said
-    (fault,) = [line.removeprefix("[tenant.py] ").strip() for line in R.lines_naming(said, key)]
-    sentence = H.store_sentence(fault, "cmdb", part)
-
-    def validated(config: dict[str, str], access: str, label: str) -> str:
-        folder = R.system_folder(tmp_path / f"handoff-{label}", "cmdb", config=config, access=access)
-        env = {**os.environ, "PYTHONPATH": str(REPO)}
-        done = subprocess.run([sys.executable, "-m", "defender.skills.connect.validate_scaffold", "cmdb",
-                               "--handoff", str(folder)], cwd=REPO, env=env, capture_output=True, text=True,
-                              timeout=120, check=False)
-        return done.stdout + done.stderr
-
-    report = validated(config, access, "bad")
-    assert any(sentence in line for line in H.handoff_lines(report, key, "cmdb", part)), (sentence, report)
-    clean = validated(CMDB_CONFIG, CMDB_ACCESS, "clean")  # control: same channel, a folder the store accepts
-    assert "validate_scaffold: cmdb" in clean, clean  # printed only once the arguments were accepted
-    assert key not in clean
-
-
-#: (id, extra config.env text, the secret value it carries): lines a config parser may ignore or override.
-IGNORED_LINE_SECRETS = [
-    ("export-line", 'export CMDB_API_TOKEN="sk-live-9f8e7d6c5b4a3f2e1d0c"\n', "sk-live-9f8e7d6c5b4a3f2e1d0c"),
-    ("overridden-duplicate", 'CMDB_PASSWORD="hunter2-live"\nCMDB_PASSWORD=""\n', "hunter2-live"),
-    ("overridden-reference", 'CMDB_TOKEN_SECRET_REF="ghp-AbC!d3f@xyz"\nCMDB_TOKEN_SECRET_REF=""\n', "ghp-AbC!d3f@xyz"),
-]
-
-
-@pytest.mark.postgres
-@pytest.mark.parametrize("row", IGNORED_LINE_SECRETS, ids=[r[0] for r in IGNORED_LINE_SECRETS])
-def test_1366_h2_a_secret_on_a_line_a_parser_ignores_never_enters_a_stored_record(imported_op, tmp_path, row):
-    """Guard: a secret on an ignored `export`/duplicate line is refused or left out, never stored (successor of the
-    retired `test_validator_finds_secrets_on_lines_the_run_ignores`). (#1366 H2, P2)"""
-    _, extra, secret = row
-    folder = tmp_path / "raw" / "cmdb"
-    folder.mkdir(parents=True)
-    (folder / "access.yaml").write_text(CMDB_ACCESS, encoding="utf-8")
-    base = 'CMDB_TIMEOUT_SEC="20"\n'
-    (folder / "config.env").write_text(base, encoding="utf-8")
-    rc, said = imported_op.run(R.SET_SYSTEM, imported_op.tid, "cmdb", str(folder), R.REPLACES, "1")
-    assert rc == 0, said  # control: the declared key alone is stored as version 2
-    (folder / "config.env").write_text(base + extra, encoding="utf-8")
-
-    rc, said = imported_op.run(R.SET_SYSTEM, imported_op.tid, "cmdb", str(folder), R.REPLACES, "2")
-
-    stored = [v for v in imported_op.versions("cmdb")]
-    assert secret not in repr(stored), f"a secret value was stored:\n{stored}"
-    current = imported_op.current()["cmdb"]
-    assert set(current.settings) <= {"CMDB_TIMEOUT_SEC"}, dict(current.settings)
-    assert current.version == (2 if rc != 0 else 3), (rc, said)
-
-
 @pytest.mark.postgres
 def test_1366_r7_two_tenants_may_point_at_one_base_each_keeping_its_own_record_and_credentials(
         fixture_tenant, migrated_database, tmp_path, capsys, monkeypatch):  # noqa: F811
@@ -1453,9 +828,6 @@ def test_1366_r7_two_tenants_may_point_at_one_base_each_keeping_its_own_record_a
         a = _operator(fixture_tenant, migrated_database, tmp_path / "a", capsys, monkeypatch, kv=kv)
         b = _operator(other, migrated_database, tmp_path / "b", capsys, monkeypatch, kv=kv)
         assert a.tid != b.tid
-        for op in (a, b):
-            rc, said = op.import_()
-            assert rc == 0, said
         for op in (a, b):
             rc, said = op.set_system("cmdb", replaces=1, config=CMDB_CONFIG, access=shared)
             assert rc == 0, said
@@ -1569,35 +941,3 @@ def test_1366_g4_the_cover_judgement_accepts_a_declared_write_exactly_when_the_p
 
     _at_the_door(op, run_through_the_door)
     assert not wrong, wrong
-
-
-# --- #1470: the store without the import ----------------------------------------------------------------------------
-
-@pytest.mark.postgres
-def test_1470_o8_a_tenant_with_no_records_takes_a_first_write_and_a_tenant_not_active_is_refused(migrated_database):  # noqa: F811
-    """An active tenant registered with no records takes `put_system(replaces=0)` as version 1; an offboarding one is
-    refused, nothing stored, not naming the import. (#1470 O8: tenant not active, the store's lock)"""
-    import uuid
-
-    from defender.system_records import RecordStore
-
-    active, leaving = str(uuid.uuid4()), str(uuid.uuid4())
-    register_tenant(migrated_database, active, records=None)
-    register_tenant(migrated_database, leaving, state="offboarding", records=None)
-    settings, access = R.FIXTURE_FOLDERS["ticket"]
-
-    async def write(tenant: str) -> Any:
-        store = RecordStore(migrated_database, clock=fixed_clock, judge=lambda after, before: [])
-        try:
-            return await store.put_system(tenant, "ticket", replaces=0, adapter="ticket", enabled=True,
-                                          settings=dict(settings), access=access, author="test-member")
-        finally:
-            await store.close()
-
-    asyncio.run(write(active))
-    assert [(v.version, v.deleted, v.author) for v in R.system_versions(migrated_database, active, "ticket")] == [
-        (1, False, "test-member")]
-    with pytest.raises(Exception) as refused:  # noqa: PT011 — the typed "tenant not active" class is unnamed
-        asyncio.run(write(leaving))
-    assert "import" not in str(refused.value), str(refused.value)
-    assert R.system_versions(migrated_database, leaving, "ticket") == []

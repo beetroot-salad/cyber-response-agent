@@ -42,9 +42,6 @@ from defender.api.models import (  # noqa: E402
     Investigation,
     LearningJob,
     Lesson,
-    System,
-    SystemCheck,
-    SystemSettings,
 )
 from defender.tests.tooling.layout_contracts._spec1080 import api_forbidden  # noqa: E402
 from defender.api.ports import (  # noqa: E402
@@ -108,8 +105,6 @@ JOB = LearningJob(
     trigger="explicit", created_at=NOW,
 )
 LESSON = Lesson(lesson_id="le-1", title="t", description="d", status="live")
-SETTINGS = SystemSettings(system_id="tix", kind="ticketing", display_name="T", enabled=True,
-                          settings={"queue": "sec"})
 SIGNED = "https://blobs.invalid/signed?sig=1"
 #: A credential value long enough for any kind's secret-field minimum (#1163 A4).
 LONG = "v" * 40
@@ -388,19 +383,6 @@ def test_the_api_never_loads_the_runtime_or_the_learning_loop() -> None:
         encoding="utf-8", check=True,
     )
     assert api_forbidden(json.loads(out.stdout)) == []
-
-
-def test_1366_h3_the_api_loads_no_record_store_so_no_route_writes_system_records() -> None:
-    """Guard: the API, demo wiring and server load nothing of the record writer, so no route writes records. (#1366 H3/R1)"""
-    probe = (
-        "import json, sys; import defender.api.app, defender.api.demo, defender.api.serve; "
-        "print(json.dumps(sorted(m for m in sys.modules if m.startswith('defender.system_records'))))"
-    )
-    out = subprocess.run(
-        [sys.executable, "-c", probe], cwd=REPO_ROOT, capture_output=True, text=True,
-        encoding="utf-8", check=True,
-    )
-    assert json.loads(out.stdout) == []
 
 
 def test_the_identity_package_loads_no_api_runtime_or_learning_module() -> None:
@@ -905,7 +887,7 @@ def test_a_validation_problem_lists_what_failed_and_never_echoes_the_value() -> 
     secret = 87654321987654321
     api = Api()
     response = api.client.put(f"{T}/systems/tix/credentials", headers=AUTH,
-                              json={"kind": "static", "credentials": {"api_token": secret}})
+                              json={"for_version": 1, "credentials": {"api_token": secret}})
     assert response.status_code == 422
     problem = response.json()
     assert problem["errors"] == [{"loc": ["body", "credentials", "api_token"],
@@ -1045,8 +1027,8 @@ def test_a_record_time_is_served_in_utc() -> None:
     ("GET", f"{T}/alerts/%E2%9C%93", None),
     ("GET", f"{T}/investigations/a%20b", None),
     ("GET", f"{T}/learning-jobs/-leading-dash", None),
-    ("PUT", f"{T}/systems/%E2%9C%93", {"kind": "k", "display_name": "d", "enabled": True, "settings": {}}),
-    ("PUT", f"{T}/systems/a%20b/credentials", {"credentials": {"k": "v"}}),
+    ("PUT", f"{T}/systems/%E2%9C%93", {"replaces": 0, "enabled": True, "settings": {}, "access": ""}),
+    ("PUT", f"{T}/systems/a%20b/credentials", {"for_version": 1, "credentials": {"k": "v"}}),
     ("POST", f"{T}/systems/a%20b/check", None),
     ("POST", f"{T}/investigations/a%20b/cancel", None),
     ("DELETE", f"{T}/investigations/a%20b", None),
@@ -1090,8 +1072,6 @@ def test_a_disposition_outside_the_vocabulary_cannot_be_served() -> None:
 def test_an_id_outside_the_grammar_cannot_be_served(bad: str) -> None:
     with pytest.raises(ValueError, match="pattern"):
         INV.model_validate({**INV.model_dump(), "investigation_id": bad})
-    with pytest.raises(ValueError, match="pattern"):
-        SETTINGS.model_validate({**SETTINGS.model_dump(), "system_id": bad})
 
 
 @pytest.mark.parametrize("legacy", ["Not_A_Tenant", "acme", "playground", "tenant-a", "blue"])
@@ -1114,7 +1094,6 @@ INV_2 = INV.model_copy(update={"investigation_id": "b1000000-0000-4000-8000-0000
 JOB_2 = JOB.model_copy(update={"learning_job_id": "c1000000-0000-4000-8000-000000000002", "created_at": LATER})
 SUMMARY_2 = SUMMARY.model_copy(update={"alert_id": "a1000000-0000-4000-8000-000000000002", "fired_at": LATER})
 LESSON_2 = LESSON.model_copy(update={"lesson_id": "le-2"})
-SETTINGS_2 = SETTINGS.model_copy(update={"system_id": "tiy"})
 
 #: (path, port, the store's first two rows in the list's order, the position the second page
 #: must start after — the first row's, as the port's order names it).
@@ -1123,7 +1102,6 @@ LISTS = [
     (f"{T}/investigations", "list_investigations", [INV_2, INV], (LATER, "b1000000-0000-4000-8000-000000000002")),
     (f"{T}/learning-jobs", "list_learning_jobs", [JOB_2, JOB], (LATER, "c1000000-0000-4000-8000-000000000002")),
     (f"{T}/lessons", "list_lessons", [LESSON, LESSON_2], "le-1"),
-    (f"{T}/systems", "list_systems", [SETTINGS, SETTINGS_2], "tix"),
 ]
 
 
@@ -1136,7 +1114,7 @@ def _rows_after(rows: list[Any]) -> Callable[..., list[Any]]:
 def test_every_list_pages_by_cursor_from_the_last_row_served(
     path: str, port: str, rows: list[Any], first_after: Any,
 ) -> None:
-    api = Api(**{port: _rows_after(rows), "has_credentials": False})
+    api = Api(**{port: _rows_after(rows)})
     first = api.client.get(path, headers=AUTH, params={"limit": 1}).json()
     assert len(first["items"]) == 1
     assert first["next_cursor"]
@@ -1176,7 +1154,7 @@ def _edited(cursor: str, **changes: Any) -> str:
 def test_an_edited_cursor_cannot_hand_a_port_an_id_outside_the_grammar(
     path: str, port: str, rows: list[Any], bad_id: str,
 ) -> None:
-    api = Api(**{port: _rows_after(rows), "has_credentials": False})
+    api = Api(**{port: _rows_after(rows)})
     cursor = _edited(_cursor(api, path), id=bad_id)
     calls = len(api.ports.calls)
     response = api.client.get(path, headers=AUTH, params={"limit": 1, "cursor": cursor})
@@ -1191,7 +1169,7 @@ def test_an_edited_cursor_with_an_id_not_of_the_lists_family_is_refused_before_t
 ) -> None:
     """A newest-first list's cursor id is read as the items' own id (canonical lowercase UUID): anything else, even a
     valid record id or the same UUID in upper case, is not a position in the list (422), never a store error. (#1498)"""
-    api = Api(**{port: _rows_after(rows), "has_credentials": False})
+    api = Api(**{port: _rows_after(rows)})
     cursor = _edited(_cursor(api, path), id=bad_id)
     calls = len(api.ports.calls)
     response = api.client.get(path, headers=AUTH, params={"limit": 1, "cursor": cursor})
@@ -1242,21 +1220,6 @@ def test_one_filter_instant_written_with_another_offset_keeps_its_cursor() -> No
     assert page.status_code == 200, page.text
 
 
-def test_a_store_answering_full_system_records_is_still_served_from_its_settings() -> None:
-    stored = System(**SETTINGS.model_dump(), has_credentials=False)
-    api = Api(list_systems=[stored], get_system=stored, has_credentials=True,
-              check=lambda tenant, system: SystemCheck(ok=True, detail=str(system.has_credentials)))
-    assert api.client.get(f"{T}/systems", headers=AUTH).json()["items"][0]["has_credentials"] is True
-    assert api.client.post(f"{T}/systems/tix/check", headers=AUTH).json()["detail"] == "True"
-
-
-def test_systems_are_served_only_for_the_rows_on_the_page() -> None:
-    api = Api(list_systems=[SETTINGS, SETTINGS_2], has_credentials=False)
-    page = api.client.get(f"{T}/systems", headers=AUTH, params={"limit": 1}).json()
-    assert [s["system_id"] for s in page["items"]] == ["tix"]
-    assert api.ports.called("has_credentials") == [((A, "tix"), {})]
-
-
 def test_a_short_page_is_the_last_page() -> None:
     api = Api(list_investigations=[INV_2, INV])
     page = api.client.get(f"{T}/investigations", headers=AUTH, params={"limit": 2}).json()
@@ -1303,7 +1266,7 @@ def test_a_cursor_is_bound_to_its_list_its_tenant_and_its_filters() -> None:
 def test_a_cursor_from_one_tenant_is_refused_in_another_by_the_same_person(
         path: str, port: str, rows: list[Any], _after: Any) -> None:
     """A cursor is bound to the path's tenant, not to the caller: a member of both tenants cannot carry it across."""
-    api = Api(**{port: _rows_after(rows), "has_credentials": False})
+    api = Api(**{port: _rows_after(rows)})
     page = api.client.get(path, headers=AUTH_AB, params={"limit": 1}).json()
     cursor = page["next_cursor"]
     assert cursor
@@ -1569,7 +1532,6 @@ _DONE = demo_id(InvestigationId, DEMO_ONE, "inv-completed")
 _RUNNING = demo_id(InvestigationId, DEMO_ONE, "inv-running")
 _DEMO_T = f"/tenants/{DEMO_ONE}"
 _UNKNOWN = "f0000000-0000-4000-8000-000000000000"
-_NEW_NAME = "Renamed by the test"
 
 
 async def _a_new_investigation(deps: ApiDeps, _secret: str) -> bool:
@@ -1593,15 +1555,6 @@ async def _a_new_learning_job(deps: ApiDeps, _secret: str) -> bool:
 
 async def _a_saved_mapping(deps: ApiDeps, _secret: str) -> bool:
     return await deps.alert_mapping.get_alert_mapping(DEMO_ONE) is not None
-
-
-async def _a_replaced_system(deps: ApiDeps, _secret: str) -> bool:
-    found = await deps.systems.get_system(DEMO_ONE, "siem")
-    return found is not None and found.display_name == _NEW_NAME
-
-
-async def _stored_credentials(deps: ApiDeps, _secret: str) -> bool:
-    return await deps.secrets.has_credentials(DEMO_ONE, "siem")
 
 
 DEMO_WRITES = {

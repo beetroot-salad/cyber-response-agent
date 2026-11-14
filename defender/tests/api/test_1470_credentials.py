@@ -327,7 +327,8 @@ async def test_o7_o9_a_set_stored_for_a_generation_that_moved_meanwhile_is_409_a
     caplog.clear()
 
     async def other_admin_moves_the_base(path: str) -> None:
-        saved = await scripted.put_system(TICKET, 1, access=TICKET_ACCESS.replace(*BASE_MOVED))
+        with anyio.fail_after(30):  # a stuck second request fails the test rather than hanging it
+            saved = await scripted.put_system(TICKET, 1, access=TICKET_ACCESS.replace(*BASE_MOVED))
         assert saved.status_code == 200, saved.text
 
     scripted.scripted.on_write = other_admin_moves_the_base
@@ -354,7 +355,8 @@ async def test_o7_o9_a_save_that_keeps_the_generation_meanwhile_leaves_the_write
     caplog.clear()
 
     async def other_admin_changes_a_setting(path: str) -> None:
-        saved = await scripted.put_system(TICKET, 1, settings=TICKET_SETTINGS | {"TICKET_TIMEOUT_SEC": "20"})
+        with anyio.fail_after(30):
+            saved = await scripted.put_system(TICKET, 1, settings=TICKET_SETTINGS | {"TICKET_TIMEOUT_SEC": "20"})
         assert saved.status_code == 200, saved.text
 
     scripted.scripted.on_write = other_admin_changes_a_setting
@@ -375,7 +377,9 @@ async def test_o7_o9_a_system_deleted_during_the_write_is_409_naming_0_and_annou
     caplog.clear()
 
     async def other_admin_deletes(path: str) -> None:
-        assert (await scripted.delete_system(TICKET, 1)).status_code == 204
+        with anyio.fail_after(30):
+            deleted = await scripted.delete_system(TICKET, 1)
+        assert deleted.status_code == 204
 
     scripted.scripted.on_write = other_admin_deletes
     refused = await scripted.put_credentials(TICKET, 1, {"api_key": TOKEN})

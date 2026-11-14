@@ -20,9 +20,10 @@ from defender.tests.support.api._config1470 import (
     TICKET_NAME,
     TICKET_SETTINGS,
     TOKEN,
+    edited_cursor,
     problem_text,
 )
-from defender.tests.support.api._server1083 import ANN, A, B
+from defender.tests.support.api._server1083 import ANN, ORIGIN, A, B
 from defender.tests.support.tenancy import _systems1366 as R
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
@@ -97,12 +98,14 @@ async def test_o3_o4_a_system_is_created_201_replaced_200_and_read_back_as_store
     assert (await configured.list_systems()).json()["items"] == []
     created = await configured.put_system(TICKET, 0)
     assert created.status_code == 201, created.text
+    assert created.headers["Location"] == f"{ORIGIN}/tenants/{A}/systems/{TICKET}"  # as every create names its resource
     assert created.json() == _served(1)
     assert (await configured.get_system(TICKET)).json() == _served(1)
 
     edited = TICKET_SETTINGS | {"TICKET_TIMEOUT_SEC": "20"}
     replaced = await configured.put_system(TICKET, 1, settings=edited, enabled=False)
     assert replaced.status_code == 200, replaced.text
+    assert "Location" not in replaced.headers
     assert replaced.json() == _served(2, settings=edited, enabled=False)
     other = await configured.put_system(ELASTIC, 0, settings=ELASTIC_SETTINGS, access=ELASTIC_ACCESS)
     assert other.status_code == 201, other.text
@@ -220,6 +223,82 @@ async def test_o4_every_field_of_a_system_write_is_required_and_a_missing_one_is
     assert configured.versions(TICKET) == []
 
 
+# --- the systems list: a `Page` over the real store (re-homed from the stub's sweep of lists) ---------------------------
+
+def _three_systems() -> list[str]:
+    return sorted(R.FIXTURE_FOLDERS)[:3]
+
+
+async def _save_three(served) -> list[str]:
+    ids = _three_systems()
+    for adapter in ids:
+        settings, access = R.FIXTURE_FOLDERS[adapter]
+        assert (await served.put_system(adapter, 0, settings=dict(settings), access=access)).status_code == 201
+    return ids
+
+
+async def test_o3_the_systems_list_pages_by_cursor_serving_every_system_once_in_id_order(configured):
+    """`limit=1` walks three saved systems in id order, each once, the last page's cursor null; the page is the `Page`
+    envelope (`items`, `next_cursor`). (O3, lists keep the Page envelope)"""
+    ids = await _save_three(configured)
+    seen: list[str] = []
+    params: dict[str, object] = {"limit": 1}
+    for _ in range(len(ids) + 1):
+        page = (await configured.client.get(f"/tenants/{A}/systems", params=params,
+                                            headers=configured.ann(write=False))).json()
+        assert set(page) == {"items", "next_cursor"}, page
+        assert len(page["items"]) == 1
+        seen += [i["system_id"] for i in page["items"]]
+        if page["next_cursor"] is None:
+            break
+        params = {"limit": 1, "cursor": page["next_cursor"]}
+    assert seen == ids
+
+
+async def test_o3_the_systems_list_asks_the_secret_store_only_for_the_rows_on_the_page(scripted):
+    """Two systems, `limit=1`: one metadata read, naming the page's system, not the other. (O3)"""
+    first, second = (await _save_three(scripted))[:2]
+    scripted.scripted.calls.clear()
+    page = (await scripted.client.get(f"/tenants/{A}/systems", params={"limit": 1}, headers=scripted.ann(write=False))).json()
+    assert [i["system_id"] for i in page["items"]] == [first]
+    [(method, path)] = scripted.scripted.calls
+    assert method == "GET"
+    assert f"/{A}/{first}/" in path
+    assert f"/{second}/" not in path, path
+
+
+@pytest.mark.parametrize("bad_id", ["a b/é", "' OR 1=1 --", "", "\u0000", "x" * 1363])
+async def test_o3_an_edited_cursor_naming_an_id_outside_the_grammar_is_refused_before_the_secret_store(scripted, bad_id):
+    """A cursor whose id was edited to something no system id can be is 422, and the secret store is asked nothing. (O3)"""
+    await _save_three(scripted)
+    first = (await scripted.client.get(f"/tenants/{A}/systems", params={"limit": 1}, headers=scripted.ann(write=False))).json()
+    scripted.scripted.calls.clear()
+    refused = await scripted.client.get(f"/tenants/{A}/systems", headers=scripted.ann(write=False),
+                                        params={"limit": 1, "cursor": edited_cursor(first["next_cursor"], id=bad_id)})
+    assert refused.status_code == 422, refused.text
+    assert scripted.scripted.calls == []
+
+
+async def test_o3_a_systems_cursor_is_bound_to_its_tenant_even_for_a_member_of_both(scripted):
+    """Ann, made a member of B too, cannot carry A's cursor to B's list (422); the same cursor works in A (control). (O3)"""
+    import datetime as dt
+
+    from defender.identity.postgres import PostgresIdentityRepository
+    from defender.records.formats import TenantId, UserId
+
+    await _save_three(scripted)
+    now = dt.datetime.now(dt.UTC)
+    repo = PostgresIdentityRepository(scripted.dsn)
+    try:
+        await repo.add_membership(UserId(scripted.user_id(ANN)), TenantId(B), status="active", invited_by=None, created_at=now, accepted_at=now)
+    finally:
+        await repo.close()
+    headers = scripted.ann(write=False)
+    cursor = (await scripted.client.get(f"/tenants/{A}/systems", params={"limit": 1}, headers=headers)).json()["next_cursor"]
+    assert (await scripted.client.get(f"/tenants/{A}/systems", params={"limit": 1, "cursor": cursor}, headers=headers)).status_code == 200
+    assert (await scripted.client.get(f"/tenants/{B}/systems", params={"cursor": cursor}, headers=headers)).status_code == 422
+
+
 # --- P2 / O5: delete and re-create -----------------------------------------------------------------------------------
 
 async def test_p2_o5_a_deleted_system_reads_absent_and_is_re_created_with_replaces_0_as_201(configured):
@@ -231,6 +310,7 @@ async def test_p2_o5_a_deleted_system_reads_absent_and_is_re_created_with_replac
     assert (await configured.list_systems()).json()["items"] == []
     recreated = await configured.put_system(TICKET, 0)
     assert recreated.status_code == 201, recreated.text
+    assert recreated.headers["Location"] == f"{ORIGIN}/tenants/{A}/systems/{TICKET}"
     assert recreated.json() == _served(3)
     _stale(await configured.put_system(TICKET, 0), 3)
 
@@ -276,11 +356,13 @@ async def test_o6_the_case_record_is_created_replaced_read_stale_refused_deleted
     assert (await configured.put_system(TICKET, 0)).status_code == 201
     created = await configured.put_case(0)
     assert created.status_code == 201, created.text
+    assert created.headers["Location"] == f"{ORIGIN}{path}"
     record = {"version": 1, "system_id": TICKET, "comment_body": BODY}
     assert created.json() == record
     assert (await configured.get("/case-record")).json() == record
     edited = await configured.put_case(1, comment_body="{disposition}")
     assert edited.status_code == 200, edited.text
+    assert "Location" not in edited.headers
     assert edited.json() == record | {"version": 2, "comment_body": "{disposition}"}
     _stale(await configured.put_case(1), 2)
     _stale(await configured.delete_case(1), 2)
@@ -288,6 +370,7 @@ async def test_o6_the_case_record_is_created_replaced_read_stale_refused_deleted
     assert (await configured.get("/case-record")).status_code == 404
     again = await configured.put_case(0)
     assert again.status_code == 201
+    assert again.headers["Location"] == f"{ORIGIN}{path}"
     assert again.json()["version"] == 4, again.text
     assert {v.author for v in R.case_versions(configured.dsn, A)} == {configured.user_id(ANN)}
     assert (await configured.client.get(path, headers=configured.ann(write=False))).json()["version"] == 4
@@ -332,26 +415,59 @@ async def test_g2_the_problem_document_declares_faults_and_current_version(scrip
 # --- reads and writes with the secret store sealed or failing --------------------------------------------------------
 
 async def test_o3_o4_while_the_secret_store_is_sealed_system_reads_and_replacing_writes_are_503_and_each_request_asks_again(scripted):
-    """Sealed: reading a system, listing, and replacing one are 503 naming the sealed secret store, writing nothing; a
-    create needs no secret-store read (201, no call); unsealed, the same app answers. (O3, O4)"""
+    """Sealed: reading a system and replacing one are 503 naming the sealed secret store, writing nothing and reading no
+    value; a request that needs no answer from it (create, catalog, case record) makes no call; unsealed, the same app
+    answers (no seal state is kept). (O3, O4, C20)"""
     bao = scripted.scripted
     assert (await scripted.put_system(TICKET, 0)).status_code == 201
     bao.sealed = True
-    bao.calls.clear()
     for refused in (await scripted.get_system(TICKET), await scripted.list_systems(),
                     await scripted.put_system(TICKET, 1, settings=TICKET_SETTINGS | {"TICKET_TIMEOUT_SEC": "20"})):
         assert refused.status_code == 503, refused.text
         assert "sealed" in problem_text(refused).lower(), refused.text
     assert [v.version for v in scripted.versions(TICKET)] == [1]
+    bao.calls.clear()
     created = await scripted.put_system(ELASTIC, 0, settings=ELASTIC_SETTINGS, access=ELASTIC_ACCESS)
     assert created.status_code == 201, created.text  # no read: no set can exist at a new generation
     assert (await scripted.get("/adapters")).status_code == 200
     assert (await scripted.get("/case-record")).status_code == 404  # records, not the secret store
-    assert all(m == "GET" and "/metadata/" in p for m, p in bao.calls), bao.calls  # the three 503s asked; the create and catalog did not
-    assert len(bao.calls) == 3
+    assert bao.calls == []
+    assert bao.paths() == []  # nothing written
+    assert bao.value_reads == []  # no value read
     bao.sealed = False
     assert (await scripted.get_system(TICKET)).status_code == 200
     assert (await scripted.put_system(TICKET, 1, settings=TICKET_SETTINGS | {"TICKET_TIMEOUT_SEC": "20"})).status_code == 200
+    assert bao.value_reads == []
+
+
+async def test_o3_o4_o6_while_the_secret_store_is_sealed_an_empty_list_is_200_and_deletes_and_case_writes_succeed(scripted):
+    """Sealed, the requests that need no secret-store answer succeed: listing a tenant with no systems (200, empty), a
+    create, a case-record create and delete, a system delete. (O3, O4, O5, O6, C20)"""
+    bao = scripted.scripted
+    bao.sealed = True
+    listed = await scripted.list_systems()
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["items"] == []
+    assert (await scripted.put_system(TICKET, 0)).status_code == 201
+    assert (await scripted.put_case(0)).status_code == 201
+    assert (await scripted.delete_case(1)).status_code == 204
+    assert (await scripted.delete_system(TICKET, 1)).status_code == 204
+    assert [(v.version, v.deleted) for v in scripted.versions(TICKET)] == [(1, False), (2, True)]
+    assert bao.paths() == []
+    assert bao.value_reads == []
+
+
+async def test_o3_o4_a_secret_store_that_refuses_the_apis_login_after_start_is_500_on_reads_and_the_replace_pre_read(scripted):
+    """A 403 once the API is running: a read, a list and a replacing save (its pre-read) are 500 naming the secret
+    store's refusal, not 503; the save stores nothing; a create, needing no answer, still succeeds. (O3, O4, O7)"""
+    assert (await scripted.put_system(TICKET, 0)).status_code == 201
+    scripted.scripted.token = "no-longer-the-apis"  # the stand-in now refuses the token the API sends
+    for refused in (await scripted.get_system(TICKET), await scripted.list_systems(),
+                    await scripted.put_system(TICKET, 1, settings=TICKET_SETTINGS | {"TICKET_TIMEOUT_SEC": "20"})):
+        assert refused.status_code == 500, refused.text
+        assert "secret store" in problem_text(refused).lower(), refused.text
+    assert [v.version for v in scripted.versions(TICKET)] == [1]
+    assert (await scripted.put_system(ELASTIC, 0, settings=ELASTIC_SETTINGS, access=ELASTIC_ACCESS)).status_code == 201
 
 
 async def test_o4_a_create_or_re_create_asks_the_secret_store_nothing(scripted):

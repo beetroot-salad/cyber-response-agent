@@ -70,10 +70,8 @@ def test_o11_the_handoffs_access_fault_is_the_stores_sentence_located_by_the_fil
     """The store's access fault sentence appears in the validator's report, located by the file. (#1366 O11, DC6)"""
     monkeypatch.setenv("DEFENDER_DATABASE_DSN", migrated_database)
     with published_tenant(tmp_path / "forge", root=data_root, files=R.import_files()) as t:
-        register_tenant(migrated_database, t.tenant_id, data_root=t.data_root, records=None)
-        op = R.Operator(t.tenant_id, migrated_database, tmp_path / "op", capsys)
-        rc, said = op.import_()
-        assert rc == 0, said
+        register_tenant(migrated_database, t.tenant_id, data_root=t.data_root)
+        op = R.Admin(t.tenant_id, migrated_database, tmp_path / "op", capsys)
         rc, said = op.set_system("cmdb", replaces=1, config=CMDB_CONFIG, access=BAD_ACCESS)
     assert rc != 0, said
     (fault,) = [line.removeprefix("[tenant.py] ").strip() for line in R.lines_naming(said, "colour")]

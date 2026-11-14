@@ -5,8 +5,10 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from defender.tests.support.tenancy import _records1470 as K
+
 NOTES = Path(__file__).resolve().parents[3] / "CLAUDE.md"
-REMOVED = ("set-alert-mapping", "set-system", "delete-system", "set-case", "delete-case", "set-credentials")
+REMOVED = tuple(sorted(K.REMOVED_COMMANDS - {"systems", "catalog", "import"}))  # plain words are checked as `tenant.py <word>`
 
 
 def _section(issue: str) -> str:
@@ -53,3 +55,9 @@ def test_1470_o12_the_drop_upgrade_says_to_stop_the_processes_that_read_the_mark
     note = _section("1366")
     for word in ("stop", "API", "credential proxy", "worker", "job image"):
         assert re.search(re.escape(word), note, re.I if word == "stop" else 0), f"the note never says {word!r}"
+
+
+def test_1470_o12_the_notes_drop_the_kv_mount_credential_step_another_change_added():
+    """No upgrade note's credential step passes `--kv-mount` (the operator credential command it belonged to is removed).
+    (O12)"""
+    assert "--kv-mount" not in NOTES.read_text("utf-8")

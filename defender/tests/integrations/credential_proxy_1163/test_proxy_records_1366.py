@@ -289,7 +289,7 @@ def test_1366_o7_a_database_that_cannot_be_reached_is_a_transport_fault_and_noth
 @dataclass
 class _Pg:
     t: Any
-    op: R.Operator
+    op: R.Admin
     kv: R.KvStandIn
     up: H.Upstream
     dsn: str
@@ -324,7 +324,7 @@ def _pg(tmp_path, data_root, dsn, capsys, monkeypatch, held: dict[str, Any] | No
           published_tenant(tmp_path / "forge", root=data_root, files=R.import_files()) as t):
         register_tenant(dsn, t.tenant_id, data_root=t.data_root)
         kv = R.KvStandIn({k.replace("<t>", t.tenant_id): v for k, v in (held or {}).items()})
-        yield _Pg(t, R.Operator(t.tenant_id, dsn, tmp_path / "op", capsys, kv=kv), kv, up, dsn, stack)
+        yield _Pg(t, R.Admin(t.tenant_id, dsn, tmp_path / "op", capsys, kv=kv), kv, up, dsn, stack)
 
 
 @pytest.mark.postgres

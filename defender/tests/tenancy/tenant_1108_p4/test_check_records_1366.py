@@ -38,13 +38,13 @@ TABLE_TACIT_ONLY = "dispositions:\n  tacit-knowledge:\n    health-check: {roles:
 def op(tmp_path, data_root, migrated_database, capsys, monkeypatch):  # noqa: F811 — the imported fixture
     monkeypatch.setenv("DEFENDER_DATABASE_DSN", migrated_database)
     with published_tenant(tmp_path / "forge", root=data_root, files=R.import_files()) as t:
-        register_tenant(migrated_database, t.tenant_id, data_root=t.data_root, records=None)
-        yield R.Operator(t.tenant_id, migrated_database, tmp_path / "op", capsys)
+        register_tenant(migrated_database, t.tenant_id, data_root=t.data_root)
+        yield R.Admin(t.tenant_id, migrated_database, tmp_path / "op", capsys)
 
 
 @pytest.fixture
 def tenants(tmp_path, data_root, migrated_database, capsys, monkeypatch):  # noqa: F811 — the imported fixture
-    """`make(records, files=None)` -> an `Operator` for a new registered tenant (at most two per test), seeded with
+    """`make(records, files=None)` -> an `Admin` for a new registered tenant (at most two per test), seeded with
     `records` (a `RecordsSpec`, default the fixture's); the tenant's repo is the committed fixture plus `files`."""
     monkeypatch.setenv("DEFENDER_DATABASE_DSN", migrated_database)
     stack, made = contextlib.ExitStack(), []
@@ -55,7 +55,7 @@ def tenants(tmp_path, data_root, migrated_database, capsys, monkeypatch):  # noq
              else stack.enter_context(second_tenant(made[0], files=files if files is not None else {})))
         register_tenant(migrated_database, t.tenant_id, data_root=t.data_root, records=records)
         made.append(t)
-        return R.Operator(t.tenant_id, migrated_database, tmp_path / f"op{n}", capsys)
+        return R.Admin(t.tenant_id, migrated_database, tmp_path / f"op{n}", capsys)
 
     with stack:
         yield make
@@ -116,40 +116,10 @@ def _only_in(found: list[str], control: list[str], *words: str) -> list[str]:
     return [line for line in found if line not in control and all(w in line for w in words)]
 
 
-def test_1366_r8_check_refuses_a_tenant_not_yet_imported_naming_the_import(op):
-    """`check` before the import names `tenant.py import`; after it, that finding is gone. (#1366 R8)"""
-    _, before = op.check()
-    assert R.lines_naming(before, R.AUTHOR[R.IMPORT]), before
-
-    assert op.import_()[0] == 0
-    _, after = op.check()
-    assert not R.lines_naming(after, R.AUTHOR[R.IMPORT]), after
 
 
-def test_1366_r8_a_not_imported_tenant_has_that_one_finding_and_no_findings_from_its_folders(op):
-    """The not-imported tenant's report is the import finding alone: nothing is judged from the retired folders
-    (they stand for a full set of systems and a case). (#1366 R8, R12 row 'tenant not imported')"""
-    rc, out = op.check()
-
-    assert rc != 0, out
-    assert R.lines_naming(out, R.AUTHOR[R.IMPORT]), out
-    assert not R.lines_naming(out, "orphan") + R.lines_naming(out, "no credentials"), out
 
 
-def test_1366_r8_a_not_imported_tenant_still_gets_the_findings_that_need_no_records(
-        tmp_path, data_root, migrated_database, capsys, monkeypatch):  # noqa: F811 — the imported fixture
-    """The import finding stands in for the findings about the tenant's systems only: a feedback setting that cannot
-    stand is reported on the same first check, beside the import, not after it. (#1366 R8)"""
-    monkeypatch.setenv("DEFENDER_DATABASE_DSN", migrated_database)
-    files = R.import_files(**{"settings/feedback.yaml": "outcomes: [not-an-outcome]\n"})
-    with published_tenant(tmp_path / "forge", root=data_root, files=files) as t:
-        register_tenant(migrated_database, t.tenant_id, data_root=t.data_root, records=None)
-        rc, out = R.Operator(t.tenant_id, migrated_database, tmp_path / "op", capsys).check()
-
-    assert rc != 0, out
-    assert R.lines_naming(out, R.AUTHOR[R.IMPORT]), out
-    assert R.lines_naming(out, "feedback"), out
-    assert not R.lines_naming(out, "retired"), out
 
 
 def test_1366_r12_a_grant_on_a_system_that_was_never_recorded_is_reported_as_orphaned(tenants):
@@ -348,26 +318,25 @@ def test_1366_r12_check_reports_a_record_naming_an_adapter_an_upgrade_removed(te
     _exits_for_its_own_finding(found)
 
 
-def test_1366_r8_a_tenant_imported_with_no_records_is_not_told_to_import(tenants):
-    """Imported with zero records is not `not imported`: `check` never names the import for it. Granting the catalog
+def test_1470_o8_a_tenant_with_no_records_is_not_told_to_import(tenants):
+    """A tenant with zero records has no systems and no import to run: `check` never names an import for it. Granting the catalog
     systems it has no record for, it reports each orphaned grant (proof the records were read, not skipped); granting the
-    platform-served registry alone it reports no orphan at all. (#1366 R8 second half, R11, R12)"""
+    platform-served registry alone it reports no orphan at all. (#1470 O8, #1366 R11, R12)"""
     granted = _findings(tenants(R.RecordsSpec()))
     tacit = _findings(tenants(R.RecordsSpec(), files={"settings/verb-grants.yaml": TABLE_TACIT_ONLY}))
 
     for report in (granted, tacit):
-        assert not R.lines_naming("\n".join(report), R.AUTHOR[R.IMPORT]), report
+        assert not R.lines_naming("\n".join(report), "tenant.py import"), report
     assert {s for s in ("cmdb", "elastic") if R.lines_naming("\n".join(granted), s, "orphan")} == {"cmdb", "elastic"}, granted
     _exits_for_its_own_finding(granted)
     assert not R.lines_naming("\n".join(tacit), "orphan"), tacit
 
 
-def test_1366_r13_a_fresh_import_fails_check_for_want_of_credentials_until_each_system_has_them(op):
-    """After `import` (which touches no secret) every system has no credentials at the current generation: `check`
+def test_1366_r13_a_tenant_without_credentials_fails_check_for_want_of_credentials_until_each_system_has_them(op):
+    """Records touch no secret, so every system has no credentials at the current generation: `check`
     reports each and exits nonzero; once every system has its credentials at that generation the line is gone. (This
     tenant's repo still holds the retired folders, so its exit stays nonzero for that reason; the zero exit is the next
     test's.) (#1366 R13, R12, B6)"""
-    assert op.import_()[0] == 0
     rc, out = op.check()
 
     assert rc != 0, out
@@ -487,7 +456,7 @@ def _grants_with_casesys() -> str:
 
 #: Runs `defender.cli.tenant.main(argv, secrets=)` of a tmp checkout: the checkout's own packages first on the path, the
 #: worktree's test support after it (namespace packages: `defender.tests` resolves there), the operator's OpenBao a KV
-#: stand-in holding argv[1]'s credential sets -- as `R.Operator` drives `check` in-process.
+#: stand-in holding argv[1]'s credential sets -- as `R.Admin` drives `check` in-process.
 _CHECK_DRIVER = """
 import json, sys
 from defender.cli import tenant

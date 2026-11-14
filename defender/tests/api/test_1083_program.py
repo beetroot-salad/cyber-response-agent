@@ -252,7 +252,8 @@ def test_an_unmigrated_database_refuses_with_the_version_checks_message(tmp_path
     """An unmigrated database refuses start with #1339's message naming the code's head. (O2)"""
     from defender.migrations import head
 
-    ended = _refused(Child.real(environment(tmp_path, dsn=empty_database)), mentions=())
+    with ScriptedOpenBao().listening() as openbao:  # a reachable secret store, so the start order is not pinned
+        ended = _refused(Child.real(environment(tmp_path, dsn=empty_database, openbao=openbao)), mentions=())
     assert f"the database is at no recorded revision (unmigrated), but this code expects revision {head()}" \
         in ended.stderr
 
@@ -263,15 +264,18 @@ def test_a_database_at_another_revision_refuses_naming_both_revisions(tmp_path, 
     from defender.migrations import head
 
     execute(migrated_database, "UPDATE public.alembic_version SET version_num = %s", ("0001_elsewhere",))
-    ended = _refused(Child.real(environment(tmp_path, dsn=migrated_database)), mentions=("0001_elsewhere", head()))
+    with ScriptedOpenBao().listening() as openbao:  # a reachable secret store, so the start order is not pinned
+        ended = _refused(Child.real(environment(tmp_path, dsn=migrated_database, openbao=openbao)),
+                         mentions=("0001_elsewhere", head()))
     assert "expects revision" in ended.stderr
 
 
 def test_an_unreachable_database_refuses_with_the_version_checks_message(tmp_path):
     """A database nobody answers refuses start, naming its address. (O2)"""
     port = closed_port()
-    ended = _refused(Child.real(environment(tmp_path, dsn=UNREACHABLE_DSN.format(port=port))),
-                     mentions=("the database could not be reached",))
+    with ScriptedOpenBao().listening() as openbao:  # a reachable secret store, so the start order is not pinned
+        ended = _refused(Child.real(environment(tmp_path, dsn=UNREACHABLE_DSN.format(port=port), openbao=openbao)),
+                         mentions=("the database could not be reached",))
     assert f"127.0.0.1:{port}" in ended.stderr or str(port) in ended.stderr
 
 

@@ -15,6 +15,10 @@ REFUSAL_NAMES = ("Stale", "Judged", "NoSuchTenant", "TenantNotActive", "NoCurren
 
 SEED = "test member"
 
+#: O10's list, the one literal the O10 and O11 tests share: the operator subcommands removed in #1470.
+REMOVED_COMMANDS = frozenset({"set-alert-mapping", "set-system", "delete-system", "set-case", "delete-case", "systems",
+                              "set-credentials", "catalog", "import"})
+
 
 def refusals() -> Mapping[str, type[Exception]]:
     import defender.system_records as store
