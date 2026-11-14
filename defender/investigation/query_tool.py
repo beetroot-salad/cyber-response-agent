@@ -255,7 +255,7 @@ class QueryCapture(AbstractCapability[Any]):
         it, else `""`.
 
         Nothing downstream re-checks these rows, and the pitfalls channel uses an
-        `agent-fixable` row's `system` verbatim as `defender/skills/<system>/execution.md`, so an
+        `agent-fixable` row's `system` verbatim as the tenant's `skills/<system>/execution.md`, so an
         undeclared name must not reach it. `""` rows are already skipped by
         `collect_general_failures`.
 
