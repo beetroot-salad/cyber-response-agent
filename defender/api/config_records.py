@@ -16,7 +16,7 @@ from collections.abc import Mapping
 from typing import Protocol
 
 from defender.jobs.audit import AuditAction, announce
-from defender.kit.faults import AdapterFault
+from defender.credential_proxy import SecretStoreFault
 from defender.kit.access import CredentialRefused, credential_faults
 from defender.records.formats import TenantId
 from defender.system_records import RecordRefused, RecordStore, Stale
@@ -33,18 +33,14 @@ STORED_UNUSED = "stored for an unused generation"
 POSSIBLY_STORED = "possibly stored"
 
 
-#: What the secret writer raises when OpenBao gives no usable answer.
-SECRET_STORE_FAULTS = (AdapterFault,)
+def refused_login(fault: SecretStoreFault) -> bool:
+    """OpenBao refused the API's own token (403): our setup, not the caller's."""
+    return fault.status == 403  # noqa: PLR2004 — HTTP Forbidden
 
 
-def refused_login(fault: AdapterFault) -> bool:
-    """OpenBao refused the API's own token (403): our setup."""
-    return getattr(fault, "status", None) == 403  # PENDING(A): the writer's fault data
-
-
-def not_stored(fault: AdapterFault) -> bool:
+def not_stored(fault: SecretStoreFault) -> bool:
     """The write certainly stored nothing: OpenBao is sealed, or the request never reached it."""
-    return bool(getattr(fault, "sealed", False)) or not getattr(fault, "sent", True)  # PENDING(A): the writer's fault data
+    return fault.sealed or not fault.sent
 
 
 class SecretWriter(Protocol):
@@ -66,7 +62,7 @@ async def has_credentials(secrets: SecretWriter, tenant_id: TenantId, record: Sy
     """Whether a set exists at `record`'s generation: the secret store's answer, or its failure as the API answers it."""
     try:
         return await secrets.has_credentials(tenant_id, record.system_id, generation=record.credential_generation)
-    except SECRET_STORE_FAULTS as fault:
+    except SecretStoreFault as fault:
         if refused_login(fault):
             raise SecretStoreRefused(f"the secret store refused the API's login when asked whether {record.system_id} "
                                      f"has credentials: {fault}") from None
@@ -159,7 +155,7 @@ class ConfigCredentials:
         try:
             await self._secrets.put_credentials(tenant, system_id, slot.auth.kind, credentials,
                                                 generation=slot.generation)
-        except SECRET_STORE_FAULTS as fault:
+        except SecretStoreFault as fault:
             if refused_login(fault):
                 raise SecretStoreRefused(f"the secret store refused the API's login; the credentials of {system_id} "
                                          f"were not stored: {fault}") from None
@@ -169,22 +165,16 @@ class ConfigCredentials:
             _announce(principal, "system.credentials", system_id, f"{fields}; {POSSIBLY_STORED}")
             raise SecretStoreUnavailable(f"the secret store failed during the write of {system_id}'s credentials; they "
                                          f"are {POSSIBLY_STORED}: {fault}") from None
-        moved = await self._unused(tenant, system_id, for_version)
-        if moved is not None:
-            _announce(principal, "system.credentials", system_id, f"{fields}; {STORED_UNUSED}")
-            raise moved
-        _announce(principal, "system.credentials", system_id, fields)
-
-    async def _unused(self, tenant: TenantId, system_id: str, for_version: int) -> CredentialsUnused | None:
-        """The record read again after the write: None when the set's generation is still the current version's, the
-        post-write 409 when it moved or the system went. A re-read that fails leaves the outcome unknown."""
+        # The record read again: the set's generation must still be the current version's (P3, the store's slot).
         try:
             await self._store.credential_slot(tenant, system_id, for_version)
         except RecordRefused as refusal:
+            _announce(principal, "system.credentials", system_id, f"{fields}; {STORED_UNUSED}")
             shown = refusal.current_version if isinstance(refusal, Stale) else 0
-            return CredentialsUnused(f"the credentials of {system_id} are {STORED_UNUSED}: the record changed during "
-                                     f"the write ({refusal})", current_version=shown)
+            raise CredentialsUnused(f"the credentials of {system_id} are {STORED_UNUSED}: the record changed during "
+                                    f"the write ({refusal})", current_version=shown) from None
         except Exception as failed:  # noqa: BLE001 — any failure of the re-read leaves the outcome unknown (O7)
+            _announce(principal, "system.credentials", system_id, f"{fields}; {POSSIBLY_STORED}")
             raise SecretStoreUnavailable(f"the credentials of {system_id} are {POSSIBLY_STORED}: the record could not "
                                          f"be read again after the write ({type(failed).__name__})") from failed
-        return None
+        _announce(principal, "system.credentials", system_id, fields)
