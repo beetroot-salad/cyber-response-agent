@@ -1,7 +1,8 @@
-"""The platform API as a program on PostgreSQL and the sign-in server (#1083): `python -m defender.api_server`.
+"""The platform API as a program on PostgreSQL, the sign-in server and the secret store (#1083): `python -m defender.api_server`.
 
-The program owns every start and stop step (settings, version check, sign-in server probes, bind, bootstrap, serve,
-close); uvicorn only serves the socket it is handed. Piece 2 and the demo server (`defender.api.serve`) are separate."""
+The program owns every start and stop step (settings, version check, the secret store's seal status and login, sign-in
+server probes, the adapter catalog, bind, bootstrap, serve, close); uvicorn only serves the socket it is handed. The
+demo server (`defender.api.serve`) is separate."""
 
 from __future__ import annotations
 

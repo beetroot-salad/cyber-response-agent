@@ -14,17 +14,21 @@ from defender.identity import IdentityService
 from defender.jobs.errors import Conflict, NotFound, OffboardNotSettled, UnknownReference  # noqa: F401 — re-exported: the API's refusals
 from defender.records.formats import AlertId, CredentialId, InvestigationId, LearningJobId, ProgramId, TenantId, UserId
 
+from defender.tenancy.record_values import SystemRecord
+
 from .models import (
     Alert,
     AlertMapping,
     AlertSummary,
+    CaseRecord,
+    CaseRecordPut,
+    CatalogAdapter,
     Investigation,
     LearningJob,
     Lesson,
     System,
     SystemCheck,
     SystemPut,
-    SystemSettings,
 )
 
 
@@ -109,22 +113,69 @@ class LessonsRepository(Protocol):
         ...
 
 
-class SystemsRepository(Protocol):
-    """Settings only. Whether a system has credentials is the secret store's answer."""
+class SecretStoreUnavailable(Exception):
+    """The secret store gave no answer, or a sealed one, where a request needed one (#1470 G4): a 503 naming it. Nothing
+    is cached about it: the next request asks again."""
 
-    async def list_systems(
-        self, tenant_id: TenantId, *, after: str | None, limit: int
-    ) -> list[SystemSettings]:
-        """Up to `limit` systems with a `system_id` greater than `after`, by `system_id`."""
+
+class SecretStoreRefused(Exception):
+    """The secret store refused the API's own login after start (403): our setup, not the caller's, so a 500 naming the
+    refusal (#1470 G4, O7)."""
+
+
+class CredentialsUnused(Exception):
+    """A credential set was stored, and the record read again afterwards no longer uses its generation (the system's
+    address moved, or it was deleted, meanwhile): a 409 naming the version a read now shows (#1470 O7)."""
+
+    def __init__(self, detail: str, *, current_version: int | None) -> None:
+        super().__init__(detail)
+        self.current_version = current_version
+
+
+class SystemsRepository(Protocol):
+    """The tenant's configuration records (#1470): the catalog a record names an adapter from, the systems and the case
+    record. Every write goes through the record store and its judgement (P1); every refusal is its owner's typed one
+    (`system_records`' `Stale`, `Judged`, `NoSuchTenant`, `TenantNotActive`, `NoCurrentRecord`), raised as it is, so the
+    app maps each to its status in one place (P6). Each write commits, then announces its audit event (P2)."""
+
+    async def list_adapters(self) -> list[CatalogAdapter]:
+        """Every adapter a record may name, by `adapter_id` (O2). Asks no secret store."""
         ...
 
-    async def get_system(self, tenant_id: TenantId, system_id: str) -> SystemSettings | None: ...
+    async def list_systems(self, tenant_id: TenantId, *, after: str | None, limit: int) -> list[SystemRecord]:
+        """Up to `limit` of the tenant's current systems with a `system_id` greater than `after`, by `system_id` (O3).
+        A deleted system is absent. Asks no secret store: `served` does, for the rows a page sends."""
+        ...
 
-    async def put_system(
-        self, principal: Principal, system_id: str, body: SystemPut
-    ) -> tuple[SystemSettings, bool]:
-        """Create or replace a system's settings. Returns `(settings, created)`. The port commits, then
-        announces `system.update` (P2: one announcer per audited action, after its commit)."""
+    async def get_system(self, tenant_id: TenantId, system_id: str) -> SystemRecord | None:
+        """The system's current version, or None when it was never written or is deleted."""
+        ...
+
+    async def served(self, tenant_id: TenantId, record: SystemRecord) -> System:
+        """`record` as served: its catalog display name and whether a credential set exists at its generation, the
+        secret store's answer (`SecretStoreUnavailable` when it gives none, `SecretStoreRefused` for a refused login)."""
+        ...
+
+    async def put_system(self, principal: Principal, system_id: str, body: SystemPut) -> tuple[System, bool]:
+        """Write the system's next version (O4); `(served, created)`, `created` when a read showed none before.
+        `has_credentials` is false on a create or when the write raised the generation, else as read just before the
+        write (a secret store that cannot answer that read refuses the write before anything commits)."""
+        ...
+
+    async def delete_system(self, principal: Principal, system_id: str, *, replaces: int) -> None:
+        """Write the system's tombstone (O5)."""
+        ...
+
+    async def get_case_record(self, tenant_id: TenantId) -> CaseRecord | None:
+        """The current case record, or None when there is none or it is deleted (O6)."""
+        ...
+
+    async def put_case_record(self, principal: Principal, body: CaseRecordPut) -> tuple[CaseRecord, bool]:
+        """Write the case record's next version; `(record, created)` (O6)."""
+        ...
+
+    async def delete_case_record(self, principal: Principal, *, replaces: int) -> None:
+        """Write the case record's tombstone (O6)."""
         ...
 
 
@@ -150,7 +201,10 @@ AuditAction = Literal[
     "learning_job.retry",
     "learning_post_step",
     "system.update",
+    "system.delete",
     "system.credentials",
+    "case_record.update",
+    "case_record.delete",
     "alert_mapping.update",
 ]
 
@@ -219,18 +273,19 @@ class SecretStore(Protocol):
     proxy, which adds credentials to outgoing calls, reads them through its own port."""
 
     async def put_credentials(
-        self, principal: Principal, system_id: str, kind: str, credentials: dict[str, str],
+        self, principal: Principal, system_id: str, *, for_version: int, credentials: dict[str, str],
     ) -> None:
-        """Replace the whole set, stored with its `kind` (`static` or `oauth-client-credentials`). The
-        port announces `system.credentials` after its write (P2)."""
+        """Replace the system's whole set at the credential generation of `for_version` (O7, P3), stored with the kind
+        its auth scheme needs. Refusals are their owners': the record store's slot (`NoCurrentRecord`, `Stale`,
+        `Judged`), the credential schema's `CredentialRefused`; then `SecretStoreUnavailable` (not stored, or possibly
+        stored), `SecretStoreRefused`, and `CredentialsUnused` when the record no longer uses the generation once the
+        set is stored. The port announces `system.credentials` once the set is stored or may be, naming fields only."""
         ...
-
-    async def has_credentials(self, tenant_id: TenantId, system_id: str) -> bool: ...
 
 
 class SystemChecker(Protocol):
-    async def check(self, tenant_id: TenantId, system: System) -> SystemCheck:
-        """Test the connection and a first query."""
+    async def check(self, tenant_id: TenantId, system_id: str) -> SystemCheck:
+        """Test the connection and a first query (#1460)."""
         ...
 
 
@@ -268,8 +323,9 @@ class ApiDeps:
     investigations: InvestigationsRepository
     learning_jobs: LearningJobsRepository
     lessons: LessonsRepository
+    #: The tenant's configuration records: the catalog, the systems and the case record (#1470).
     systems: SystemsRepository
-    #: The alert mapping's read, its own port so the systems port can refuse whole (#1083 G2).
+    #: The alert mapping's read, its own port apart from the records' (#1083 G2).
     alert_mapping: AlertMappingRepository
     writes: Writes
     secrets: SecretStore
