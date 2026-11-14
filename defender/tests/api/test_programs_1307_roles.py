@@ -23,6 +23,8 @@ from defender.tests.support.api._config1470 import (  # noqa: E402
     CONFIG_PERMISSION,
     CONFIG_ROUTES,
     config_call,
+    primed,
+    stable,
 )
 from defender.tests.support.api._identity1306 import (  # noqa: E402
     ALERT,
@@ -198,16 +200,20 @@ async def test_every_config_route_holds_its_permission_and_membership_comes_firs
     table's); the tenant's admin passes; another tenant's admin and a program of this tenant naming another tenant
     get 404 before permission. (O14, O3, D4)"""
     assert PERMISSION_OF[(route[0], route[1])] == CONFIG_PERMISSION[route]
-    assert (await config_call(scripted, route, scripted.program())).status_code == 403
-    outsider = await config_call(scripted, route, scripted.bob())
+    await primed(scripted)  # A holds a system, its case record and credentials: a skipped membership check would not be a 404
+    scripted.scripted.calls.clear()
+    held = scripted.stored_generations("ticket")
+    assert (await config_call(scripted, route, scripted.program(), **stable(route))).status_code == 403
+    outsider = await config_call(scripted, route, scripted.bob(), **stable(route))
     assert outsider.status_code == 404
     assert outsider.headers["Content-Type"] == "application/problem+json"
-    assert (await config_call(scripted, route, scripted.program(), tenant=B)).status_code == 404
+    assert (await config_call(scripted, route, scripted.program(), tenant=B, **stable(route))).status_code == 404
     assert scripted.versions("ticket", tenant=B) == []
-    assert scripted.versions("ticket") == []
+    assert [v.version for v in scripted.versions("ticket")] == [1]
+    assert scripted.stored_generations("ticket") == held
     assert scripted.scripted.calls == [], "no secret-store call for a caller the tenant does not know"
     # control: the same route for the tenant's own admin is served
-    assert (await config_call(scripted, route, scripted.ann())).status_code not in (401, 403, 500)
+    assert (await config_call(scripted, route, scripted.ann(), **stable(route))).status_code not in (401, 403, 500)
 
 
 # --- O2: the order under /tenants/{T}/ (D1) ---------------------------------------------------------

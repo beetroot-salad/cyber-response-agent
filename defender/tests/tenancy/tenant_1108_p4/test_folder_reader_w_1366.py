@@ -157,11 +157,11 @@ def test_keys_are_case_sensitive_so_a_lower_case_spelling_is_not_the_setting(tmp
     assert dict(read.settings) == {"change_mgmt_timeout_sec": "10"}, dict(read.settings)
 
 
-#: (id, extra config.env text, the key the reader's fault names, the secret value it carries, whether the reader also
-#: leaves the value out of its settings): lines a config parser may ignore or override. The reader keeps the FIRST value of
-#: a repeated key beside the fault (`folder_of_bytes`: the folder is refused whole by whoever judges it), so only the
-#: `export` line is also absent from the settings. Whether the reader should withhold the first value too is open (#1470
-#: report: r7 does not decide it); the fault naming the key is asserted on every row.
+#: (id, extra config.env text, the key the reader's fault names, the secret value it carries, whether the value is also
+#: absent from the reader's settings): lines a config parser may ignore or override. The fault names the key on every
+#: row; the value is absent from the settings only on the rows where asserted (the `export` line). On a repeated key the
+#: reader keeps the FIRST value beside the fault (`folder_of_bytes`: the folder is refused whole by whoever judges it),
+#: so those rows assert the fault alone; whether the reader should withhold that value too is not decided by #1470 r7.
 IGNORED_LINE_SECRETS = [
     ("export-line", 'export CMDB_API_TOKEN="sk-live-9f8e7d6c5b4a3f2e1d0c"\n', "CMDB_API_TOKEN", "sk-live-9f8e7d6c5b4a3f2e1d0c", True),
     ("overridden-duplicate", 'CMDB_PASSWORD="hunter2-live"\nCMDB_PASSWORD=""\n', "CMDB_PASSWORD", "hunter2-live", False),
@@ -172,8 +172,9 @@ IGNORED_LINE_SECRETS = [
 
 @pytest.mark.parametrize("row", IGNORED_LINE_SECRETS, ids=[r[0] for r in IGNORED_LINE_SECRETS])
 def test_1366_h2_a_secret_on_a_line_a_parser_ignores_never_enters_the_settings_the_reader_gives(tmp_path, row):
-    """Guard: a secret on an ignored `export`/duplicate line is faulted or left out, never in the settings the reader
-    gives (successor of the retired `test_validator_finds_secrets_on_lines_the_run_ignores`; the store half is gone with
+    """Guard: a secret on an ignored `export`/duplicate line is faulted on every row (the fault names the key); the value
+    is absent from the settings only on the rows where asserted (the `export` line), the overridden rows assert the fault
+    alone (successor of the retired `test_validator_finds_secrets_on_lines_the_run_ignores`; the store half is gone with
     the operator's `set-system`). (#1366 H2, P2)"""
     _, extra, key, secret, withheld = row
     base = 'CMDB_TIMEOUT_SEC="20"\n'

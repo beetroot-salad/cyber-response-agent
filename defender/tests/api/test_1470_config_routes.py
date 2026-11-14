@@ -161,6 +161,20 @@ async def test_o3_o4_a_system_is_created_201_replaced_200_and_read_back_as_store
     assert {v.author for v in configured.versions(TICKET)} == {configured.user_id(ANN)}
 
 
+async def test_o3_the_systems_list_serves_each_systems_enabled_flag_and_whether_it_holds_credentials(scripted):
+    """Two systems, `ticket` enabled with a credential set and `elastic` disabled with none: the list answers each row's
+    `enabled` and `has_credentials` as that system's own. (O3)"""
+    assert (await scripted.put_system(TICKET, 0)).status_code == 201
+    assert (await scripted.put_credentials(TICKET, 1, {"api_key": TOKEN})).status_code == 204
+    other = await scripted.put_system(ELASTIC, 0, settings=ELASTIC_SETTINGS, access=ELASTIC_ACCESS, enabled=False)
+    assert other.status_code == 201, other.text
+
+    listed = (await scripted.list_systems()).json()["items"]
+
+    assert {i["system_id"]: (i["enabled"], i["has_credentials"]) for i in listed} == {
+        TICKET: (True, True), ELASTIC: (False, False)}
+
+
 async def test_o3_a_current_record_whose_adapter_the_catalog_lacks_reads_with_no_display_name_and_can_be_deleted(scripted):
     """A record an upgrade left naming a removed adapter: display name null on read; its delete is 204. (O3, O5)"""
     scripted.plant_version("retired", 1, adapter="retired")
@@ -624,12 +638,33 @@ async def test_o4_has_credentials_is_true_exactly_while_a_set_exists_at_the_curr
 # --- membership ------------------------------------------------------------------------------------------------------
 
 async def test_o4_another_tenants_admin_writes_nothing_of_this_tenant_and_asks_no_secret_store(scripted):
-    """Ann, admin of A only, naming tenant B: 404 on each config route, nothing written, no secret-store call. (O4, O7)"""
+    """Ann, admin of A only, naming tenant B, which holds a system, its credentials and a case record (put there by
+    Bob, B's admin): 404 on each config route, nothing written, no secret-store call. B holds records so that a skipped
+    membership check would answer 200/204/409, not 404. (O4, O7)"""
+    body = {"replaces": 0, "enabled": True, "settings": TICKET_SETTINGS, "access": TICKET_ACCESS}
+    assert (await scripted.put_raw(f"/tenants/{B}/systems/{TICKET}", body, headers=scripted.bob())).status_code == 201
+    case = {"replaces": 0, "system_id": TICKET, "comment_body": BODY}
+    assert (await scripted.put_raw(f"/tenants/{B}/case-record", case, headers=scripted.bob())).status_code == 201
+    creds = {"for_version": 1, "credentials": {"api_key": TOKEN}}
+    assert (await scripted.put_raw(f"/tenants/{B}/systems/{TICKET}/credentials", creds,
+                                   headers=scripted.bob())).status_code == 204
+    held = scripted.stored_generations(TICKET, tenant=B)
+    assert held, "B's credentials are held"
+    scripted.scripted.calls.clear()
+
     assert (await scripted.get("/systems", tenant=B)).status_code == 404
+    assert (await scripted.get(f"/systems/{TICKET}", tenant=B)).status_code == 404
     assert (await scripted.put_system(TICKET, 0, tenant=B)).status_code == 404
+    assert (await scripted.put_system(TICKET, 1, tenant=B)).status_code == 404
     assert (await scripted.delete_system(TICKET, 1, tenant=B)).status_code == 404
     assert (await scripted.put_credentials(TICKET, 1, {"api_key": TOKEN}, tenant=B)).status_code == 404
-    assert scripted.versions(TICKET, tenant=B) == []
+    assert (await scripted.get("/case-record", tenant=B)).status_code == 404
+    assert (await scripted.put_raw(f"/tenants/{B}/case-record", case)).status_code == 404
+    assert (await scripted.client.delete(f"/tenants/{B}/case-record", params={"replaces": 1},
+                                         headers=scripted.ann())).status_code == 404
+    assert [v.version for v in scripted.versions(TICKET, tenant=B)] == [1]
+    assert [v.version for v in R.case_versions(scripted.dsn, B)] == [1]
+    assert scripted.stored_generations(TICKET, tenant=B) == held
     assert scripted.scripted.calls == []
     assert (await scripted.put_system(TICKET, 0)).status_code == 201  # control: her own tenant
 

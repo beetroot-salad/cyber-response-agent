@@ -306,6 +306,20 @@ def test_1366_check_with_no_database_is_a_fault_naming_the_variable_and_never_a_
     assert not R.lines_naming(said.out + said.err, "orphan")
 
 
+def test_1366_o8_a_bad_kv_mount_is_a_printed_refusal_not_a_traceback(op):
+    """`check --kv-mount` that is not a mount name: exit 1 and one `[tenant.py]` line naming the mount."""
+    op.tmp.mkdir(parents=True, exist_ok=True)
+    token = op.tmp / "token"
+    token.write_text("operator-token\n", encoding="utf-8")
+    from defender.cli import tenant
+
+    op.capsys.readouterr()
+    rc = tenant.main(["check", op.tid, "--token-file", str(token), "--kv-mount", "bad mount"])
+    said = op.capsys.readouterr()
+    assert rc == 1, said
+    assert R.lines_naming(said.err, "[tenant.py]", "mount"), said
+
+
 def test_1366_r12_check_reports_a_record_naming_an_adapter_an_upgrade_removed(tenants):
     """The tenant holds a record for `legacy-widget`, a catalog-backed record (system id == adapter id) for an adapter the
     catalog no longer has (stored as it was): `check` reports it naming `legacy-widget`, exits nonzero, and the sound

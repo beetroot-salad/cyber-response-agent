@@ -270,7 +270,7 @@ class _Derived:
 
 
 #: `records=` default of every planting helper: seed what the tenant's own planted/published `settings/` stands for,
-#: else the fixture's. `records=None`: NOT imported (nothing seeded). A `RecordsSpec`: exactly that.
+#: else the fixture's. `records=None`: a tenant with no records (nothing seeded; #1470 O8: no "not imported" state). A `RecordsSpec`: exactly that.
 DERIVED: Any = _Derived()
 
 
@@ -344,7 +344,7 @@ def to_value(spec: RecordsSpec) -> Any:
     return records_value(systems, case)
 
 
-# --- seeders: the planting helpers call these (R8: the memory twin defaults to NOT imported) -------------------------
+# --- seeders: the planting helpers call these (R8: the memory twin starts with no records (#1470 O8)) -------------------------
 
 def seed_twin_records(twin: Any, data_root: Path | str | None, tenant: str, records: Any = DERIVED) -> None:
     """Give `tenant` in the memory twin `records` (`twin.add_records`, a public seeder beside `add_generation`; the tenant
