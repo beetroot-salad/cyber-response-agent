@@ -23,8 +23,8 @@ from defender.systems import (  # noqa: E402
 )
 from defender.kit.settings import PART_FILES, Part  # noqa: E402
 from defender.systems.catalog import Catalog  # noqa: E402
-from defender.systems.record_judgement import judge_records, judge_system  # noqa: E402
-from defender.tenancy.case_ticket import CaseTicketError, parse_case_record  # noqa: E402
+from defender.system_rules import judge_records, judge_system  # noqa: E402
+from defender.tenancy.case_record import CaseTicketError, parse_case_record  # noqa: E402
 from defender.tenancy.tenant_settings import read_regular_bytes  # noqa: E402
 from defender.systems.verb_dispositions import HEALTH_CHECK  # noqa: E402
 from defender.tenancy.record_values import CaseRecord, SystemRecord, TenantRecords  # noqa: E402

@@ -19,6 +19,7 @@ from defender.systems import case_system
 from defender.systems.run_tenant import RunTenant
 from defender.systems.verbs import VerbContext, redact_settings_path
 from defender.tenancy import case_ticket
+from defender.tenancy.case_record import CaseRecordSettings, CaseTicketError
 
 _logger = logging.getLogger(__name__)
 
@@ -56,7 +57,7 @@ REASON_NO_TOKEN = (
 
 
 def _comment_body(
-    run: Run, truncated_by: str | None, settings: case_ticket.CaseRecordSettings,
+    run: Run, truncated_by: str | None, settings: CaseRecordSettings,
 ) -> tuple[str, str]:
     """The comment text and its receipt word.
 
@@ -149,7 +150,7 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
                 body, word = case_ticket.escalation_comment_body(str(truncated_by)), RECEIPT_ESCALATED
             else:
                 body, word = _comment_body(run, truncated_by, target.template)
-        except case_ticket.CaseTicketError as e:
+        except CaseTicketError as e:
             # The template refused: no call, but the receipt still says so.
             _leg_refused(run, key, redact_settings_path(f"{case_system.CASE_RECORD_POINTER}: {e}",
                                                    tenant.settings))

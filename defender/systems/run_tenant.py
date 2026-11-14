@@ -28,8 +28,7 @@ from defender.tenancy import RecordsUnreachable
 from defender.systems.verb_dispositions import DispositionError, RunGrants, require_gather_query, run_grants
 from defender.systems.verb_grant import GrantError, VerbGrant
 from defender import tenancy
-from defender.tenancy.case_ticket import (
-    CaseRecordSettings, CaseTicketError, case_record_text, parse_case_record)
+from defender.tenancy.case_record import CaseRecordSettings, CaseTicketError, case_record_text, parse_case_record
 from defender.tenancy.record_values import CaseRecord, TenantRecords
 from defender.kit.access import AccessDeclaration
 from defender.kit.settings import SystemConfig
@@ -214,7 +213,7 @@ def record_settings(records: TenantRecords) -> dict[str, Any]:
     parsed (`access`, K4; a declaration that does not parse is kept as its fault, located at the
     record, DC6), and the case record (`case_record`). Nothing raises for a record's content
     (O5): a part that cannot stand is carried as the fault that says why."""
-    from defender.systems.record_judgement import located_access
+    from defender.system_rules import located_access
 
     enabled = {s: r for s, r in sorted(records.systems.items()) if r.enabled}
     access: dict[str, AccessDeclaration | ConfigFault] = {}
