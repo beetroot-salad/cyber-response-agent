@@ -362,6 +362,9 @@ class RigDocker(FakeDocker):
             return (0, "", "") if rest and rest[0] in ("inspect", "rm", "ls", "prune", "tag") else self._unmodelled(argv)
         if verb == "save":
             names = [a for a in rest if not a.startswith("-")]
+            if "-o" in rest and len(rest) == 3 and rest[0] == "-o":
+                Path(rest[1]).write_bytes(self.images.get((scope, rest[2]), b""))   # client-side file
+                return 0, b"", ""
             if any(a in ("-o", "--output") or a.startswith("--output=") for a in rest) or len(names) != 1:
                 return self._unmodelled(argv)
             return 0, self.images.get((scope, names[0]), b""), ""

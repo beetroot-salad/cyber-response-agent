@@ -292,7 +292,12 @@ class LabOps:
         marker = f"{repo}:{tag}-lab-{stamp}"
         if self._inner("image", "inspect", marker, check=False).returncode == 0:
             return
-        self._inner("load", input=self._outer("save", image).stdout)
+        # Through a file, not memory: an image is gigabytes (the Elasticsearch one ~1.4 GB).
+        with tempfile.TemporaryDirectory(prefix="lab-image-") as scratch:
+            archive = Path(scratch) / "image.tar"
+            self._outer("save", "-o", str(archive), image)
+            with open(archive, "rb") as fh:
+                self._inner("load", stdin=fh)
         self._inner("tag", image, marker)
         listed = self._inner("image", "ls", "--format", "{{.Tag}}", repo, check=False)
         old = [f"{repo}:{t}" for t in _text(listed.stdout).split()
@@ -760,10 +765,12 @@ class LabOps:
 
     @staticmethod
     def _document_digests(es: Any, name: str) -> list[str]:
-        """sha256 of each document of the index `name`, read through one fixed view (r6.4.6)."""
+        """sha256 of each document of the index `name`, read through one fixed view (r6.4.6) a page at
+        a time: a touched index can hold millions of documents, and holding their sources at once
+        exhausted the operator machine's memory (#1347 first live case write)."""
         return [hashlib.sha256(json.dumps([h["_index"], h["_id"], h.get("_version"), h["_source"]], sort_keys=True,
                                           separators=(",", ":")).encode()).hexdigest()
-                for h in frozen_copy.walk(es, name, {"match_all": {}}, source=True, version=True)]
+                for h in frozen_copy.each(es, name, {"match_all": {}}, source=True, version=True)]
 
     def teardown(self) -> None:
         """Stop the proxy, the frontend, the stubs, the replicas and the endpoint-query service; the

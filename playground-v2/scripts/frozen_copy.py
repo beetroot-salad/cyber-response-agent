@@ -376,9 +376,15 @@ class _View:
         self.es, self.pit = es, pit
 
     def walk(self, query: dict, *, source: Any = False, version: bool = False) -> list[dict]:
-        """Every hit of `query` in the view, paged by `_shard_doc`; refuses when the documents read
-        are not as many as the first page counted."""
-        found: list[dict] = []
+        """Every hit of `query` in the view, as one list (see `each`)."""
+        return list(self.each(query, source=source, version=version))
+
+    def each(self, query: dict, *, source: Any = False, version: bool = False) -> Iterator[dict]:
+        """Every hit of `query` in the view, paged by `_shard_doc` and yielded a page at a time, so a
+        reader that keeps less than the hit (a digest) holds one page of documents, not the index;
+        refuses, after the last page, when the documents read are not as many as the first page
+        counted."""
+        read = 0
         after: list | None = None
         total: int | None = None
         while True:
@@ -392,15 +398,15 @@ class _View:
             if total is None:
                 total = int(page["hits"]["total"]["value"])
             hits = page["hits"]["hits"]
-            found += hits
+            read += len(hits)
+            yield from hits
             if len(hits) < PAGE:
                 break
             after = hits[-1].get("sort")
             if not after:
                 raise CopyFault("a full page came back without a sort value to continue from")
-        if len(found) != total:
-            raise CopyFault(f"a walk read {len(found)} documents of the {total} its view holds")
-        return found
+        if read != total:
+            raise CopyFault(f"a walk read {read} documents of the {total} its view holds")
 
 
 @contextmanager
@@ -419,6 +425,12 @@ def walk(es: Any, expr: str, query: dict, *, source: Any = False, version: bool 
     """`query`'s hits in the indices `expr` names, through one fixed view."""
     with fixed_view(es, expr) as view:
         return view.walk(query, source=source, version=version)
+
+
+def each(es: Any, expr: str, query: dict, *, source: Any = False, version: bool = False) -> Iterator[dict]:
+    """`walk`, a page at a time: the view stays open until the last hit is read."""
+    with fixed_view(es, expr) as view:
+        yield from view.each(query, source=source, version=version)
 
 
 def _names(ancestor_index: str, target: str, stream: str | None) -> bool:
