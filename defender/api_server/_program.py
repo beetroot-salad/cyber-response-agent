@@ -17,7 +17,8 @@ import uvicorn
 from fastapi import FastAPI
 import uvicorn.server
 
-from defender.api import ApiDeps, create_app
+from defender.api.app import create_app
+from defender.api.ports import ApiDeps
 from defender.api.job_store import JobStorePorts
 from defender.api.refusing import Refusing
 from defender.identity import BootstrapRefused, IdentityService, SignInUnavailable

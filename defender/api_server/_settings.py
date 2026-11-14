@@ -15,7 +15,7 @@ from pydantic import ValidationError
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
 
-from defender.identity import Bootstrap
+from defender.identity import Bootstrap, DataRuleViolation
 
 T = TypeVar("T")
 
@@ -127,6 +127,7 @@ def _origin(value: str) -> str:
     return value
 
 
+_EMAIL = re.compile(r"[^@\s]+@[^@\s]+")
 _REALM = re.compile(r"/realms/[^/]+")
 
 
@@ -158,7 +159,10 @@ def _administrators(name: str, path: str) -> Bootstrap:
     if not isinstance(document, dict) or set(document) != {"administrators"} \
             or not isinstance(document["administrators"], list):
         raise StartRefused(f"{name}: the file must be a mapping with one key, `administrators: [<email>, ...]`")
+    listed = document["administrators"]
+    if not all(isinstance(e, str) and _EMAIL.fullmatch(e) for e in listed):
+        raise StartRefused(f"{name}: every administrator must be an email address (name@host)")
     try:
-        return Bootstrap(administrators=tuple(document["administrators"]))
-    except (ValidationError, TypeError) as why:
+        return Bootstrap(administrators=tuple(listed))
+    except (ValidationError, TypeError, DataRuleViolation) as why:
         raise StartRefused(f"{name}: the administrators are not all email addresses: {why}") from None
