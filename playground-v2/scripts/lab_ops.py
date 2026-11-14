@@ -112,7 +112,7 @@ QUERY_IMAGE = "soc-playground/endpoint-query:local"
 PS_SHIM = PLAYGROUND / "hosts" / "base" / "ps-shim"
 QUERY_DIR = "/lab/endpoint-query"         # in the engine: the service's host lists
 #: Bumped when `_replica_image` builds differently: every replica image is then rebuilt.
-REPLICA_RECIPE = "replica-v2"
+REPLICA_RECIPE = "replica-v3"
 BASE_LABEL = "soc-playground.frozen-base"   # on a replica image: the host image it was built from
 REPLICA_TREE_DIR = "/lab/tree"            # in a replica: its captured process tree
 READONLY_PASSWORD_ENV = "V2_DEFENDER_READONLY_PASSWORD"
@@ -220,6 +220,7 @@ class LabOps:
         self._shim_ready = False
         self._stubs_loaded: str | None = None   # digest of what load_stubs was given, until teardown
         self._replicas: list[str] = []
+        self._builds: list[str] = []     # replica build containers, until each is removed
 
     @classmethod
     def from_environment(cls) -> LabOps:
@@ -692,16 +693,23 @@ class LabOps:
         build = f"frozen-build-{host}"
         self._inner("rm", "-f", build, check=False)
         clear = " ".join(HOST_VOLUMES)
-        self._inner("run", "--name", build, "--network", "none", "--entrypoint", "sh", base, "-c",
-                    f"rm -rf {clear} && mkdir -p {clear} {REPLICA_TREE_DIR}")
-        for mount in HOST_VOLUMES:      # each copy as captured, unpacked by the daemon into its mount
+        self._builds.append(build)       # the teardown removes it if this build is cut short
+        self._inner("run", "-d", "--name", build, "--network", "none", "--entrypoint", "sleep", base, "infinity")
+        self._inner("exec", build, "sh", "-c", f"rm -rf {clear} && mkdir -p {clear} {REPLICA_TREE_DIR}")
+        for mount in HOST_VOLUMES:
+            # Each copy as captured, unpacked by tar inside the build container, owners and modes
+            # kept. Not `docker cp`: the daemon refuses a symlink that leaves the destination
+            # directory, and a host's /var/log holds one (README -> ../../usr/share/doc/...; live,
+            # the first reference launch).
             with open(parts / named[mount], "rb") as fh:
-                self._inner("cp", "-a", "-", f"{build}:{mount}", stdin=fh)
+                self._inner("exec", "-i", build, "tar", "-x", "-p", "--same-owner", "-C", mount, "-f", "-",
+                            stdin=fh)
         self._inner("cp", "-a", "-", f"{build}:/", input=self._tree_and_shim(parts / named["tree"]))
         self._inner("commit", '--change=ENTRYPOINT ["sleep"]', '--change=CMD ["infinity"]',
                     f"--change=ENV V2_PS_SHIM_TREE={REPLICA_TREE_DIR}/tree.txt", "--change=HEALTHCHECK NONE",
                     f"--change=LABEL {BASE_LABEL}={base}", build, tag)
         self._inner("rm", "-f", build, check=False)
+        self._builds.remove(build)
         return tag
 
     @staticmethod
@@ -781,13 +789,13 @@ class LabOps:
                 for h in frozen_copy.each(es, name, {"match_all": {}}, source=True, version=True)]
 
     def teardown(self) -> None:
-        """Stop the proxy, the frontend, the stubs, the replicas and the endpoint-query service; the
-        frozen cluster and its data stay, and so do the cached host images."""
+        """Stop the proxy, the frontend, the stubs, the replicas (and any replica build cut short) and the
+        endpoint-query service; the frozen cluster and its data stay, and so do the cached host images."""
         self._exec(["docker", *(["--context", self.proxy_context] if self.proxy_context else []),
                     "rm", "-f", FROZEN_PROXY], check=False)
         names = [FRONTEND, *(f"frontend-{p}" for p in FRONTEND_PORTS), *STUBS, HOST_STATE_SERVICE,
-                 *self._replicas]
-        self._replicas = []
+                 *self._replicas, *self._builds]
+        self._replicas, self._builds = [], []
         self._inner("rm", "-f", *names, check=False)
         self._inner("stop", ES_CONTAINER, check=False)
         self._stubs_loaded = None

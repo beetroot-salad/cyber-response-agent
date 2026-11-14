@@ -166,14 +166,20 @@ def test_a_replica_image_holds_its_volume_copies_as_captured_its_tree_and_todays
     docker = Docker()
     lab_ops.LabOps(run=docker).serve_hosts(parts, freeze())
     copies = docker.inner("cp")
-    assert len(copies) == 3 * len(HOSTS)
+    assert len(copies) == len(HOSTS)
     shim = (lab_ops.PLAYGROUND / "hosts" / "base" / "ps-shim").read_bytes()
+    # The volume copies are unpacked by tar inside the build container (a host's /var/log holds a
+    # symlink out of the directory, which `docker cp` refuses), fed the part's bytes unrewritten.
+    unpacks = [(argv, data) for argv, data in docker.inner("exec") if "tar" in argv]
+    assert len(unpacks) == len(lab_ops.HOST_VOLUMES) * len(HOSTS)
     for host in HOSTS:
         mine = {argv[3]: data for argv, data in copies if argv[3].startswith(f"frozen-build-{host}:")}
         assert all(argv[:3] == ["cp", "-a", "-"] for argv, _ in copies)
         for mount in lab_ops.HOST_VOLUMES:
             part = parts / lab_ops.LabOps.host_parts(host)[mount]
-            assert mine[f"frozen-build-{host}:{mount}"] == part.read_bytes(), "the copy as captured, unrewritten"
+            into = [data for argv, data in unpacks
+                    if argv[:3] == ["exec", "-i", f"frozen-build-{host}"] and argv[argv.index("-C") + 1] == mount]
+            assert into == [part.read_bytes()], "the copy as captured, unrewritten"
         members = _members(mine[f"frozen-build-{host}:/"])
         assert set(members) == {"usr/local/bin/ps", "lab/tree/tree.txt"}
         assert members["usr/local/bin/ps"][1] == shim and members["usr/local/bin/ps"][0].mode == 0o755
@@ -193,10 +199,12 @@ def test_a_replica_image_is_committed_idle_labelled_and_only_after_its_content_i
     order = [(a[a.index("docker", 3) + 1], a) for a, _ in docker.calls if "docker" in a[3:]]
     for host in HOSTS:
         build = f"frozen-build-{host}"
-        steps = [verb for verb, a in order if build in " ".join(a) and verb in ("run", "cp", "commit")]
-        assert steps == ["run", "cp", "cp", "cp", "commit"], (host, steps)
-        clear = next(a for verb, a in order if verb == "run" and build in a)
-        assert all(m in clear[-1] for m in lab_ops.HOST_VOLUMES) and "--network" in clear
+        steps = [verb for verb, a in order if build in " ".join(a) and verb in ("run", "exec", "cp", "commit")]
+        assert steps == ["run", "exec", "exec", "exec", "cp", "commit"], (host, steps)
+        started = next(a for verb, a in order if verb == "run" and build in a)
+        assert "--network" in started
+        clear = next(a for verb, a in order if verb == "exec" and build in a)
+        assert all(m in clear[-1] for m in lab_ops.HOST_VOLUMES)
 
 
 def test_the_host_image_is_loaded_streamed_and_kept_under_its_parts_digest(parts):
