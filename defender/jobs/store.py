@@ -20,7 +20,7 @@ from collections.abc import AsyncIterator, Callable, Collection, Mapping, Sequen
 from contextlib import asynccontextmanager
 from typing import Any
 
-from sqlalchemy import case, delete, func, select, update
+from sqlalchemy import case, delete, func, literal, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import DataError, DBAPIError, IntegrityError, InterfaceError, InternalError, OperationalError
 from sqlalchemy.exc import TimeoutError as PoolTimeout
@@ -214,6 +214,22 @@ class JobStore:
                 AlertRow.tenant_id == tenant_id, AlertRow.id == alert_id))).scalars().first()
         return None if row is None else stored_alert(row)
 
+    async def list_alerts(
+        self, tenant_id: TenantId, *, fired_after: _dt.datetime | None, fired_before: _dt.datetime | None,
+        after: tuple[_dt.datetime, str] | None, limit: int,
+    ) -> list[StoredAlert]:
+        """Up to `limit` of the tenant's alerts with `fired_after <= fired_at < fired_before` (a bound left `None`
+        is open), newest first by `(fired_at, id)` descending, strictly after the position `after` when given."""
+        query = select(AlertRow).where(AlertRow.tenant_id == tenant_id)
+        if fired_after is not None:
+            query = query.where(AlertRow.fired_at >= fired_after)
+        if fired_before is not None:
+            query = query.where(AlertRow.fired_at < fired_before)
+        query = _newest_first(query, AlertRow.fired_at, AlertRow.id, after, limit)
+        async with self._tx() as s:
+            rows: Sequence[Any] = (await s.execute(query)).scalars().all()
+        return [stored_alert(row) for row in rows]
+
     # --- the alert mapping (#1345) ------------------------------------------------------
 
     @staticmethod
@@ -226,12 +242,15 @@ class JobStore:
         async with self._tx() as s:
             return await self._mapping_in(s, tenant_id)
 
-    async def put_alert_mapping(self, tenant_id: TenantId, mapping: AlertMapping, *, actor: str) -> bool:
+    async def put_alert_mapping(
+        self, tenant_id: TenantId, mapping: AlertMapping, *, actor: str, credential_id: str | None = None,
+    ) -> tuple[AlertMapping, bool]:
         """Replace the tenant's alert mapping whole: the one writer (M1). It applies to alerts stored from now on;
-        alerts already stored keep their title and description (#1420). `created` when this is the tenant's first save.
-        `AlertMappingFault` naming the entry for an invalid mapping (a re-check for callers that are not the API),
-        `UnknownReference` for a tenant with no row. A database error fails the whole replace. No lock: the insert of the
-        row decides `created`, so of two first saves racing, exactly one creates and the other updates (#1420)."""
+        alerts already stored keep their title and description (#1420). Returns the mapping as stored and whether it was
+        created, its tenant's first save. `AlertMappingFault` naming the entry for an invalid mapping (a re-check for
+        callers that are not the API), `UnknownReference` for a tenant with no row. A database error fails the whole
+        replace. No lock: the insert of the row decides `created`, so of two first saves racing, exactly one creates and
+        the other updates (#1420)."""
         check_mapping(dict(mapping.paths))
         paths = {key: mapping.path_of(key) for key in MAPPING_KEYS}
         try:
@@ -242,12 +261,14 @@ class JobStore:
                     .returning(AlertMappingRow.tenant_id))).first() is not None
                 if not created:
                     await s.execute(update(AlertMappingRow).where(AlertMappingRow.tenant_id == tenant_id).values(**paths))
+                stored = await self._mapping_in(s, tenant_id)
         except _Refused as refused:
             if refused.sqlstate == _FOREIGN_KEY_VIOLATION:
                 raise UnknownReference(f"no tenant {tenant_id!r}") from None
             raise
-        announce("alert_mapping.update", actor=actor, tenant_id=tenant_id, target=tenant_id)
-        return created
+        assert stored is not None
+        announce("alert_mapping.update", actor=actor, tenant_id=tenant_id, target=tenant_id, credential_id=credential_id)
+        return stored, created
 
     # --- reads --------------------------------------------------------------------------
 
@@ -255,6 +276,19 @@ class JobStore:
         async with self._tx() as s:
             row = await self._row(s, tenant_id, investigation_id)
         return None if row is None else investigation_record(row)
+
+    async def list_investigations(
+        self, tenant_id: TenantId, *, alert_id: AlertId | None, after: tuple[_dt.datetime, str] | None, limit: int,
+    ) -> list[InvestigationRecord]:
+        """Up to `limit` of the tenant's investigations (of one alert when `alert_id` is given), newest first by
+        `(created_at, id)` descending, strictly after the position `after` when given."""
+        query = select(InvestigationRow).where(InvestigationRow.tenant_id == tenant_id)
+        if alert_id is not None:
+            query = query.where(InvestigationRow.alert_id == alert_id)
+        query = _newest_first(query, InvestigationRow.created_at, InvestigationRow.id, after, limit)
+        async with self._tx() as s:
+            rows: Sequence[Any] = (await s.execute(query)).scalars().all()
+        return [investigation_record(row) for row in rows]
 
     @staticmethod
     async def _row(s: AsyncSession, tenant_id: TenantId, investigation_id: InvestigationId) -> InvestigationRow | None:
@@ -266,6 +300,7 @@ class JobStore:
 
     async def create_investigation(
         self, tenant_id: TenantId, alert_id: AlertId, request_key: str, *, actor: str,
+        credential_id: str | None = None,
     ) -> tuple[InvestigationRecord, bool]:
         """Start an investigation of the alert, or answer the one this request already has (#1081
         §4.1): the latest attempt under the key; else the alert's live investigation, without
@@ -299,7 +334,8 @@ class JobStore:
                 attempt=1, stage="queued", created_at=self._clock(), cost_usd=0.0)
             s.add(row)
             record = investigation_record(row)
-        announce("investigation.start", actor=actor, tenant_id=tenant_id, target=record.investigation_id)
+        announce("investigation.start", actor=actor, tenant_id=tenant_id, target=record.investigation_id,
+                 detail=f"alert {alert_id}", credential_id=credential_id)
         return record, True
 
     # --- claim --------------------------------------------------------------------------
@@ -333,7 +369,7 @@ class JobStore:
     # --- cancel -------------------------------------------------------------------------
 
     async def cancel_investigation(
-        self, tenant_id: TenantId, investigation_id: InvestigationId, *, actor: str,
+        self, tenant_id: TenantId, investigation_id: InvestigationId, *, actor: str, credential_id: str | None = None,
     ) -> InvestigationRecord:
         """Abort a queued or running investigation (`aborted`, reason `cancelled`); a running one's
         worker ends its child at its next renewal (B3, B9). `NotFound`; `Conflict` for an ended one,
@@ -358,7 +394,8 @@ class JobStore:
                     raise Conflict(f"the investigation already ended and was retried as {retry}; cancel that one")
                 raise Conflict("the investigation already ended")
             record = investigation_record(row)
-        announce("investigation.cancel", actor=actor, tenant_id=tenant_id, target=investigation_id)
+        announce("investigation.cancel", actor=actor, tenant_id=tenant_id, target=investigation_id,
+                 credential_id=credential_id)
         return record
 
     # --- offboard (#1360) ---------------------------------------------------------------
@@ -415,7 +452,9 @@ class JobStore:
 
     # --- delete -------------------------------------------------------------------------
 
-    async def delete_investigation(self, tenant_id: TenantId, investigation_id: InvestigationId, *, actor: str) -> None:
+    async def delete_investigation(
+        self, tenant_id: TenantId, investigation_id: InvestigationId, *, actor: str, credential_id: str | None = None,
+    ) -> None:
         """Remove every attempt under the named investigation's request key, with their learning
         jobs, queued or ended (#1344 O10, D6). `NotFound`; `Conflict` while any attempt is queued or
         running, or any of their jobs is running. Takes the alert lock, so it serializes with create,
@@ -445,7 +484,8 @@ class JobStore:
             await s.execute(delete(InvestigationRow).where(
                 InvestigationRow.tenant_id == tenant_id, InvestigationRow.alert_id == named.alert_id,
                 InvestigationRow.request_key == named.request_key))
-        announce("investigation.delete", actor=actor, tenant_id=tenant_id, target=investigation_id)
+        announce("investigation.delete", actor=actor, tenant_id=tenant_id, target=investigation_id,
+                 credential_id=credential_id)
 
     # --- the worker's write -------------------------------------------------------------
 
@@ -675,6 +715,7 @@ class JobStore:
 
     async def create_learning_job(
         self, tenant_id: TenantId, investigation_id: InvestigationId, client_request_id: str, *, actor: str,
+        credential_id: str | None = None,
     ) -> tuple[LearningJobRecord, bool]:
         """Queue an explicit re-learn of a `completed` investigation, or answer the job this
         request already has: the latest attempt under `(investigation, client request id)` (O11).
@@ -713,8 +754,29 @@ class JobStore:
             await self._arm_check(s, tenant_id)
             record = learning_job_record(row)
         announce("learning_job.start", actor=actor, tenant_id=tenant_id, target=record.learning_job_id,
-                 detail="trigger=explicit")
+                 detail=f"investigation {investigation_id}; trigger=explicit", credential_id=credential_id)
         return record, True
+
+    async def get_learning_job(self, tenant_id: TenantId, learning_job_id: LearningJobId) -> LearningJobRecord | None:
+        """The tenant's learning job, `None` for one it does not have."""
+        async with self._tx() as s:
+            row = (await s.execute(select(LearningJobRow).where(
+                LearningJobRow.tenant_id == tenant_id, LearningJobRow.id == learning_job_id))).scalars().first()
+        return None if row is None else learning_job_record(row)
+
+    async def list_learning_jobs(
+        self, tenant_id: TenantId, *, investigation_id: InvestigationId | None, after: tuple[_dt.datetime, str] | None,
+        limit: int,
+    ) -> list[LearningJobRecord]:
+        """Up to `limit` of the tenant's learning jobs (of one investigation when `investigation_id` is given), newest
+        first by `(created_at, id)` descending, strictly after the position `after` when given."""
+        query = select(LearningJobRow).where(LearningJobRow.tenant_id == tenant_id)
+        if investigation_id is not None:
+            query = query.where(LearningJobRow.investigation_id == investigation_id)
+        query = _newest_first(query, LearningJobRow.created_at, LearningJobRow.id, after, limit)
+        async with self._tx() as s:
+            rows: Sequence[Any] = (await s.execute(query)).scalars().all()
+        return [learning_job_record(row) for row in rows]
 
     async def claim_learning_job(self) -> LearningClaim | None:
         """Move the oldest queued learning job (by `created_at`, ties by id) to `running`, with
@@ -903,6 +965,14 @@ class JobStore:
                     .execution_options(synchronize_session=False))).scalars().all()
                 counts.append(len(moved))
         return counts[0], counts[1]
+
+
+def _newest_first(query: Any, time: Any, ident: Any, after: tuple[_dt.datetime, str] | None, limit: int) -> Any:
+    """`query` ordered `(time, id)` descending, limited, and when `after` is given only the rows strictly after that
+    position in that order."""
+    if after is not None:
+        query = query.where(tuple_(time, ident) < tuple_(literal(after[0], time.type), literal(after[1], ident.type)))
+    return query.order_by(time.desc(), ident.desc()).limit(limit)
 
 
 def _locked_in_id_order(column: Any, *where: Any) -> Any:
