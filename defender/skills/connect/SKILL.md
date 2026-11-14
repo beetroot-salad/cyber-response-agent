@@ -73,7 +73,7 @@ Sequential; if a step blocks, diagnose and fix before moving on.
 
 ```bash
 python3 defender/cli/tenant.py catalog
-ls $DEFENDER_DATA_ROOT/{tenant}/exports/current/agent/skills/
+ls $DEFENDER_DATA_ROOT/{tenant}/exports/$(cat $DEFENDER_DATA_ROOT/{tenant}/exports/current)/agent/skills/
 ```
 
 `catalog` lists every adapter the product carries, with the settings each reads and its tools

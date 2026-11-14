@@ -77,7 +77,8 @@ across an edited `pattern` silently re-points every existing citation.
 1. **Stage the current file and check it first.** Make an empty staging folder of your own
    outside this repo (`<staged>` below), shaped like the tenant's `agent/` root, and copy the
    tenant's published registry into it: from
-   `$DEFENDER_DATA_ROOT/{tenant}/exports/current/agent/skills/tacit-knowledge/registry.yaml`
+   `$DEFENDER_DATA_ROOT/{tenant}/exports/<commit>/agent/skills/tacit-knowledge/registry.yaml`, where
+   `<commit>` is what the file `exports/current` holds,
    to `<staged>/skills/tacit-knowledge/registry.yaml` (run
    `python3 defender/cli/tenant.py update {tenant}` first so `current` is the merged `main`). A
    tenant copied from the template has one, with no entries in it. A tenant from before then may

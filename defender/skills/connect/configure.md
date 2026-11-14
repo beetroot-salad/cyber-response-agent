@@ -17,12 +17,15 @@ module docstring (`defender/integrations/{system}_adapter.py`) — do not guess 
 
 The same declaration as a generated adapter's (`adapter.md` → "Access declaration"): `access:
 http-proxy`, the system's `base` URL, its `auth` (scheme and the field the scheme reads, never a
-value), and its routes. If the export has a sibling, copy its shape and change the base, scheme
-and routes.
+value), its routes, and `ca` when the system's certificate comes from a private CA (PEM
+certificates, inline; then the only trust for this system). If the export has a sibling, copy
+its shape and change the base, scheme and routes.
 
 - **Reads.** The proxy admits every `GET` and `HEAD` under the base, so a read that uses either
   needs no route. List a read route only for a read sent with another method (a search sent as
-  `POST`, for example).
+  `POST`, for example). Nothing prints a catalog adapter's reads yet: find them in its module
+  (`defender/integrations/{system}_adapter.py`, the method and path of each `transport.request`
+  call), or copy them from another tenant's record of the same system.
 - **Writes.** Only the routes the adapter writes to. For a case system that is its comment
   route, which depends on the settings: run the validator with `--case` (`SKILL.md` step 6) and
   copy the route it prints — `the comment the host sends: <METHOD> <path>` — into `writes`.
@@ -30,6 +33,8 @@ and routes.
 
 ## Credential
 
+The adapter's module docstring and its health check say what access the credential needs (for
+example, a read-only user plus the privilege its health check calls). Say it to the maintainer.
 The operator writes the credential file; you tell them its shape. It is one JSON object,
 `{"kind": ..., "fields": {...}}`: `kind` is `static`, or `oauth-client-credentials` for an OAuth
 client. A `basic` scheme reads the fields `username` and `password`; a `bearer` or `header`
