@@ -33,7 +33,7 @@ def _alert_summary(alert: StoredAlert) -> AlertSummary:
     return AlertSummary(**{name: getattr(alert, name) for name in AlertSummary.model_fields})
 
 
-def _alert(alert: StoredAlert) -> Alert:
+def _wire_alert(alert: StoredAlert) -> Alert:
     return Alert(raw=alert.raw.decode("utf-8"), **_alert_summary(alert).model_dump())
 
 
@@ -71,7 +71,7 @@ class JobStorePorts:
 
     async def get_alert(self, tenant_id: TenantId, alert_id: AlertId) -> Alert | None:
         found = await self._store.get_alert(tenant_id, alert_id)
-        return None if found is None else _alert(found)
+        return None if found is None else _wire_alert(found)
 
     # --- InvestigationsRepository -------------------------------------------------------
 

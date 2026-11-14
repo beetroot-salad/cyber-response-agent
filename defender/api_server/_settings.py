@@ -48,7 +48,7 @@ class Settings:
     def from_environ(cls, environ: Mapping[str, str]) -> Settings:
         """Parse every setting, refusing the first that is missing, empty, padded, unprintable or misshapen."""
         def text(name: str) -> str:
-            return _text(environ, name)
+            return _setting_text(environ, name)
 
         def parsed(name: str, parse: Callable[[str], T]) -> T:
             value = text(name)
@@ -58,10 +58,10 @@ class Settings:
                 raise StartRefused(f"{name}: {why}") from None
 
         def secret(name: str) -> str:
-            return _secret(name, text(name))
+            return _secret_from_file(name, text(name))
 
         return cls(
-            database_dsn=parsed("DEFENDER_DATABASE_DSN", _dsn),
+            database_dsn=parsed("DEFENDER_DATABASE_DSN", _database_dsn),
             host=text("DEFENDER_API_HOST"),
             port=parsed("DEFENDER_API_PORT", _port),
             frontend_origin=parsed("DEFENDER_API_FRONTEND_ORIGIN", _origin),
@@ -80,7 +80,7 @@ class Settings:
         )
 
 
-def _text(environ: Mapping[str, str], name: str) -> str:
+def _setting_text(environ: Mapping[str, str], name: str) -> str:
     """The setting's value: present, non-empty, no edge whitespace, every character printable."""
     if name not in environ:
         raise StartRefused(f"{name} is not set")
@@ -92,7 +92,7 @@ def _text(environ: Mapping[str, str], name: str) -> str:
     return value
 
 
-def _dsn(value: str) -> str:
+def _database_dsn(value: str) -> str:
     try:
         url = make_url(value)
     except ArgumentError:
@@ -108,7 +108,7 @@ def _port(value: str) -> int:
     return int(value)
 
 
-def _absolute(value: str) -> urllib.parse.SplitResult:
+def _http_url(value: str) -> urllib.parse.SplitResult:
     parts = urllib.parse.urlsplit(value)
     if parts.scheme not in ("http", "https") or not parts.hostname:
         raise ValueError("is not an http or https URL")
@@ -122,20 +122,20 @@ def _absolute(value: str) -> urllib.parse.SplitResult:
 
 
 def _absolute_url(value: str) -> str:
-    _absolute(value)
+    _http_url(value)
     return value
 
 
 def _origin(value: str) -> str:
     """Scheme, host and optional port: no path (a trailing slash too), query or fragment."""
-    parts = _absolute(value)
+    parts = _http_url(value)
     if parts.path or parts.query or parts.fragment:
         raise ValueError("must be a scheme, host and optional port only (no path, even a trailing slash)")
     return value
 
 
 _EMAIL = re.compile(r"[^@\s]+@[^@\s]+")
-def _secret(name: str, path: str) -> str:
+def _secret_from_file(name: str, path: str) -> str:
     """A secret file holds one value and one trailing newline at most."""
     try:
         raw = Path(path).read_text()

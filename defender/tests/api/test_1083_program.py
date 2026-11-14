@@ -482,7 +482,7 @@ def _url_variants(healthy: str, shape: str) -> list[tuple[str, str, str]]:
              ("another realm", url(path="/realms/elsewhere"), by(REFUSE, ACCEPT, ACCEPT)),
              ("a path not of a realm", url(path="/elsewhere"), by(REFUSE, REFUSE, ACCEPT)),
              ("no path", url(path=""), by(ACCEPT, REFUSE, ACCEPT)),
-             ("a trailing slash", url(path=healthy_path + "/"), by(REFUSE, REFUSE, ACCEPT)),
+             ("a trailing slash", url(path=healthy_path + "/"), by(REFUSE, EITHER, ACCEPT)),  # the adapter strips an issuer's (G8: one owner)
              ("a query", url(query="?a=1"), by(REFUSE, REFUSE, ACCEPT)),
              ("a fragment", url(fragment="#f"), by(REFUSE, REFUSE, EITHER))]
     cases += [(f"userinfo {info!r}", url(userinfo=info), by(REFUSE, REFUSE, EITHER))

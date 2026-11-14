@@ -45,7 +45,7 @@ class Running:
     sockets: list[socket.socket]
 
 
-def _now() -> _dt.datetime:
+def _wall_clock() -> _dt.datetime:
     return _dt.datetime.now(_dt.UTC)
 
 
@@ -94,7 +94,7 @@ def _bind(settings: Settings) -> socket.socket:
     return sock
 
 
-def _deps(settings: Settings, identity: IdentityService, tenants: PostgresTenantRepository,
+def _api_deps(settings: Settings, identity: IdentityService, tenants: PostgresTenantRepository,
           ports: JobStorePorts) -> ApiDeps:
     piece_2, lessons = Refusing(_PIECE_2), Refusing(_LESSONS)
     return ApiDeps(
@@ -127,15 +127,15 @@ async def serving(settings: Settings, *, transport: httpx.AsyncBaseTransport | N
         stack.push_async_callback(programs.close)
         await _probe(signin)
         await _probe(programs)
-        store = JobStore(settings.database_dsn, clock=_now)
+        store = JobStore(settings.database_dsn, clock=_wall_clock)
         stack.push_async_callback(store.close)
         people = PostgresIdentityRepository(settings.database_dsn)
         stack.push_async_callback(people.close)
         tenants = PostgresTenantRepository(settings.database_dsn)
         stack.push_async_callback(tenants.close)
-        identity = IdentityService(people, signin=signin, mail=LoggedMail(), clock=_now,
+        identity = IdentityService(people, signin=signin, mail=LoggedMail(), clock=_wall_clock,
                                    bootstrap=settings.administrators, programs=programs)
-        app = create_app(_deps(settings, identity, tenants, JobStorePorts(store)))
+        app = create_app(_api_deps(settings, identity, tenants, JobStorePorts(store)))
         sock = _bind(settings)
         stack.callback(sock.close)
         try:
@@ -145,7 +145,7 @@ async def serving(settings: Settings, *, transport: httpx.AsyncBaseTransport | N
         yield Running(app=app, sockets=[sock])
 
 
-async def _serve(settings: Settings, transport: httpx.AsyncBaseTransport | None, stop: asyncio.Event,
+async def _serve_on_sockets(settings: Settings, transport: httpx.AsyncBaseTransport | None, stop: asyncio.Event,
                  started: list[bool]) -> None:
     async with serving(settings, transport=transport) as running:
         started.append(True)
@@ -159,7 +159,7 @@ async def _run(settings: Settings, transport: httpx.AsyncBaseTransport | None) -
     loop = asyncio.get_running_loop()
     stop = asyncio.Event()
     started: list[bool] = []
-    task = asyncio.ensure_future(_serve(settings, transport, stop, started))
+    task = asyncio.ensure_future(_serve_on_sockets(settings, transport, stop, started))
 
     def request_stop() -> None:
         stop.set()
