@@ -1,4 +1,4 @@
-"""`python -m defender.api_server`: the platform API on PostgreSQL and Keycloak, settings from the environment."""
+"""`python -m defender.api_server`: the platform API on PostgreSQL and the real sign-in server, settings from the environment."""
 
 from __future__ import annotations
 

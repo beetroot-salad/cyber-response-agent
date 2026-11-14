@@ -23,7 +23,7 @@ from defender.api.ports import ApiDeps
 from defender.api.job_store import JobStorePorts
 from defender.api.refusing import Refusing
 from defender.identity import BootstrapRefused, IdentityService, SignInUnavailable
-from defender.identity.keycloak import KeycloakPrograms, KeycloakSignIn
+from defender.identity.keycloak import KeycloakPrograms, KeycloakSignIn  # lint-shippable: ok — the program wires the one sign-in vendor the platform supports (#1083).
 from defender.identity.logged_mail import LoggedMail
 from defender.identity.postgres import PostgresIdentityRepository
 from defender.jobs.store import JobStore

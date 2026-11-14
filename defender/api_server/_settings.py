@@ -18,7 +18,7 @@ from sqlalchemy.exc import ArgumentError
 from defender._io import read_text_utf8
 from defender._yaml import safe_load
 from defender.identity import Bootstrap, DataRuleViolation
-from defender.identity.keycloak import check_issuer, check_server_url
+from defender.identity.keycloak import check_issuer, check_server_url  # lint-shippable: ok — the program wires the one sign-in vendor the platform supports (#1083).
 
 T = TypeVar("T")
 
