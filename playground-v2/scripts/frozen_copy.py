@@ -685,6 +685,7 @@ def content_of(es: Any, ops: Any, copy: Copy, *, freeze_id: str, overlay: dict |
         mark_dirty(ops, freeze_id, overlay)   # a change to the copy, made under a marker nobody trusts (A4)
         block_writes(es, copy.touched)
     content = ops.content_digest(copy.touched)
+    copy.verified = {"content": content, "stubs": stubs}     # what this copy now holds, for its later readers
     ops.write_marker({"variant": variant_id(freeze_id, overlay), "dirty": False, "tallies": copy.tallies,
-                      "touched": copy.touched, "verified": {"content": content, "stubs": stubs}})
+                      "touched": copy.touched, "verified": copy.verified})
     return content, True
