@@ -59,9 +59,9 @@ is load-bearing — change one only on purpose. The *how* is in `SKILL.md`,
   are reviewed product code; a second, generated copy of one is drift with no reviewer. Connect
   generates only for a system the catalog lacks (#1401).
 
-- **No MCP path until runs can reach MCP systems.** A run builds only the product's own tools, so
-  knowledge for an MCP-reached system routes the orchestrator to a system gather cannot call.
-  The path returns with #1494.
+- **MCP-reached systems come with #1494.** Connect offers an MCP path once a run can call an MCP
+  server's tools; until then, knowledge for such a system would route the orchestrator to a
+  system gather cannot call.
 
 - **The check is agreed before anything is built, and run through the credential proxy.** A check
   written after the build is shaped by what was built. Its answer must be falsifiable (a value a

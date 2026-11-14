@@ -30,9 +30,9 @@ system?
 
 Both paths start from the same agreed check and end at the same final step.
 
-**There is no MCP path.** Investigations cannot reach a system through an MCP server today: a run
-builds only the product's own tools (#1494). If the maintainer asks to connect a system through
-MCP, say so and stop.
+**Reaching a system through an MCP server is coming (#1494), not available yet.** If the
+maintainer wants to connect a system that way, say it is planned and stop; if the system also has
+an HTTP API, offer the paths above.
 
 ## Your lane
 
@@ -111,9 +111,9 @@ spend the interview on the settings `catalog` lists and the access declaration (
    For something obscure, ask for a docs pointer.
 2. **How do you reach it from this environment?** An adapter reaches its system only over HTTP,
    through the credential proxy, at the base its `access.yaml` declares (`adapter.md` → "Access
-   declaration"). A system reachable only through a CLI or script, by SSHing to a bastion, or only
-   through an MCP server, has no HTTP API the proxy can call → **stop** and say so: it cannot be
-   connected.
+   declaration"). A system reachable only through a CLI or script, or by SSHing to a bastion, has
+   no HTTP API the proxy can call → **stop** and say so: it cannot be connected. One reachable
+   only through an MCP server waits for #1494.
 3. **What is it for here?** Freeform — "host inventory and trust edges", "who is authorized on a
    host", "auth events", "IoC reputation", "the ticket each alert belongs to; findings go there
    as a comment". You need this for the Visibility surface and for the check (step 3).
