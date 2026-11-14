@@ -2,7 +2,7 @@
 
 - Store: KV v2, one secret per (tenant, system, credential generation) at `<kv mount>/data/<tenant>/<system>/g<N>`, holding
   `{"kind": ..., "fields": {...}}`; a write replaces the whole set and moves the version on.
-  The writer (`OpenBaoSecrets`, the operator command's) may create, update and read metadata only; the
+  The writer (`OpenBaoSecrets`, the API's) may create, update and read metadata only; the
   proxy (`OpenBaoStore`) may read data only (`store_policies`).
 - Tokens: transit on the deployment's fixed mount (`configuration.issuer.TRANSIT_MOUNT`), one key
   per tenant (`transit_key_for`). The proxy may verify with any tenant's key and sign with none
@@ -88,6 +88,32 @@ def openbao_fault(status: int, detail: str) -> AdapterFault:
     fix, `ConfigFault`."""
     fault = TransportFault if status >= 500 else ConfigFault
     return fault(detail)
+
+
+class SecretStoreFault(AdapterFault):
+    """A write-only secret port call (`OpenBaoSecrets`) that did not get the answer it asked for, with what happened as
+    data (#1470): `status` is the HTTP status OpenBao answered (None: no answer), `sealed` whether that answer was a
+    sealed OpenBao's (`503 {"errors": ["Vault is sealed"]}`: nothing was done), `sent` whether the request may have
+    reached OpenBao (False only when it never connected). Raised as one of its two kinds, so a caller keyed on the
+    fault class reads it as before."""
+
+    def __init__(self, detail: str, *, status: int | None, sealed: bool, sent: bool) -> None:
+        super().__init__(detail)
+        self.status = status
+        self.sealed = sealed
+        self.sent = sent
+
+
+class SecretStoreUnavailable(SecretStoreFault, TransportFault):
+    """No answer, or a 5xx one (sealed, standby, failing): it may pass."""
+
+    def __init__(self, detail: str, *, status: int | None, sealed: bool, sent: bool) -> None:
+        SecretStoreFault.__init__(self, detail, status=status, sealed=sealed, sent=sent)
+        self.maybe_delivered = sent and not sealed
+
+
+class SecretStoreRefused(SecretStoreFault, ConfigFault):
+    """A 4xx answer (a policy refusal, a bad request): the operator's to fix."""
 
 
 _R = TypeVar("_R")
@@ -214,9 +240,29 @@ class OpenBaoStore(_OpenBao):
 
 
 class OpenBaoSecrets(_OpenBao):
-    """The operator command's write-only secret port (`tenant.py set-credentials`, `systems`, `check`): set a whole
-    credential set with its kind at a credential generation, and ask whether one exists there. It cannot read a value
-    back. Not the API's `SecretPort`, which names no generation yet (#1470)."""
+    """The write-only secret port (the API's, #1470 D-E; `tenant check`'s existence read): set a whole credential set
+    with its kind at a credential generation, and ask whether one exists there. It cannot read a value back. A call
+    that does not get its answer raises `SecretStoreFault` (`SecretStoreUnavailable` or `SecretStoreRefused`)."""
+
+    async def _secret_call(self, method: str, rest: str, what: str, json: Any = None) -> httpx.Response:
+        try:
+            async with internal_async_client(trust=self._loop_trust, transport=self._transport,
+                                             timeout=OPENBAO_TIMEOUT_SEC) as client:
+                return await client.request(method, self._url(rest), json=json, headers=self._headers())
+        except httpx.HTTPError as e:
+            sent = not isinstance(e, httpx.ConnectError | httpx.ConnectTimeout)
+            raise SecretStoreUnavailable(f"OpenBao at {self.addr} is unreachable for {what} ({type(e).__name__})",
+                                         status=None, sealed=False, sent=sent) from None
+
+    def _secret_refused(self, reply: httpx.Response, what: str) -> SecretStoreFault:
+        status = reply.status_code
+        if status == 503 and _sealed(reply):
+            return SecretStoreUnavailable(f"OpenBao at {self.addr} is sealed ({what})", status=status, sealed=True,
+                                          sent=True)
+        detail = f"OpenBao at {self.addr} refused {what} ({status})"
+        if status >= 500:  # noqa: PLR2004 — 5xx may pass (`openbao_fault`)
+            return SecretStoreUnavailable(detail, status=status, sealed=False, sent=True)
+        return SecretStoreRefused(detail, status=status, sealed=False, sent=True)
 
     async def put_credentials(self, tenant_id: str, system_id: str, kind: str,
                               credentials: Mapping[str, str], *, generation: int) -> None:
@@ -228,25 +274,35 @@ class OpenBaoSecrets(_OpenBao):
                                       for k, v in credentials.items()):
             raise ConfigFault("a credential set must map one or more names to non-empty text")
         what = f"the credential write of {system_id}"
-        reply = await self._acall("POST", f"data/{path}", what,
-                                  json={"data": {"kind": kind, "fields": dict(credentials)}})
+        reply = await self._secret_call("POST", f"data/{path}", what,
+                                        json={"data": {"kind": kind, "fields": dict(credentials)}})
         if reply.status_code not in (200, 204):
-            raise self._refused(reply, what)
+            raise self._secret_refused(reply, what)
 
     async def has_credentials(self, tenant_id: str, system_id: str, *, generation: int) -> bool:
         """Does `(tenant_id, system_id)` have a current set at `generation`? Asked of the metadata only."""
         path = _secret_path(tenant_id, system_id, generation)
         what = f"the credential existence check of {system_id}"
-        reply = await self._acall("GET", f"metadata/{path}", what)
+        reply = await self._secret_call("GET", f"metadata/{path}", what)
         if reply.status_code == 404:
             return False
         if reply.status_code != 200:
-            raise self._refused(reply, what)
+            raise self._secret_refused(reply, what)
         data = _data_of(reply)
         current = data.get("current_version")
         version = (data.get("versions") or {}).get(str(current))
         return (isinstance(current, int) and current > 0 and isinstance(version, dict)
                 and not version.get("deletion_time") and not version.get("destroyed"))
+
+
+def _sealed(reply: httpx.Response) -> bool:
+    """Is `reply` a sealed OpenBao's answer (`errors` naming "Vault is sealed")?"""
+    try:
+        doc = reply.json()
+    except ValueError:
+        return False
+    errors = doc.get("errors") if isinstance(doc, dict) else None
+    return isinstance(errors, list) and any(isinstance(e, str) and "Vault is sealed" in e for e in errors)
 
 
 class TransitVerifier(_OpenBao):
@@ -272,5 +328,5 @@ class TransitVerifier(_OpenBao):
         return valid
 
 
-__all__ = ["OpenBaoSecrets", "openbao_fault", "OpenBaoStore", "TransitVerifier",
-           "store_policies", "transit_key_for"]
+__all__ = ["OpenBaoSecrets", "openbao_fault", "OpenBaoStore", "SecretStoreFault", "SecretStoreRefused",
+           "SecretStoreUnavailable", "TransitVerifier", "store_policies", "transit_key_for"]
