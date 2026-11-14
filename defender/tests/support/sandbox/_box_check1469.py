@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import contextlib
 import os
+import resource
 import socket
 import stat
 import subprocess
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -37,9 +39,17 @@ class Cell:
 
     marker: str
     accept: bool
+    #: Whether an accepted connect then waits for the listener to serve it (default, as the cells above) or returns the
+    #: moment `connect()` does, before any accept: the stream is then only in the listener's backlog when docker returns.
+    wait: bool = True
+    #: Whether this process has no file descriptor left to give while the connect lands, so the listener's own accept
+    #: fails and stays failed for the rest of the run (the stream waits in the backlog); the descriptors are back before
+    #: the run ends. Only meaningful with `accept=True, wait=False`.
+    starved: bool = False
 
     def __str__(self) -> str:
-        return f"{self.marker}-{'accept' if self.accept else 'no-accept'}"
+        return (f"{self.marker}-{'accept' if self.accept else 'no-accept'}" + ("" if self.wait else "-nowait")
+                + ("-starved" if self.starved else ""))
 
 
 #: Named cells the other contracts use.
@@ -129,10 +139,31 @@ def _local(source: str, view: Sequence[tuple[Path, Path]]) -> Path:
 local_path = _local  # public: a fake daemon reads a bind's source back through its own view
 
 
-def _connect(folder: Path) -> tuple[bool, int | None]:
+@contextlib.contextmanager
+def _out_of_descriptors():  # noqa: ANN202
+    """This process has no file descriptor to give: the soft limit is lowered to the highest one in use and every free
+    number below it is taken. Everything is given back on exit."""
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    held: list[int] = []
+    try:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (max(int(n) for n in os.listdir("/proc/self/fd")) + 1, hard))
+        while True:
+            try:
+                held.append(os.dup(0))
+            except OSError:
+                break
+        yield
+    finally:
+        for fd in held:
+            os.close(fd)
+        resource.setrlimit(resource.RLIMIT_NOFILE, (soft, hard))
+
+
+def _connect(folder: Path, wait: bool = True, starved: bool = False) -> tuple[bool, int | None]:
     """One stream connect to `<folder>/s` by a short descriptor path (a long folder cannot be named in a socket address),
-    as the container's own connect would: `(connected, errno)`. A connected stream is then read until the listener closes
-    it or a second passes, so the listener has had its accept when this returns."""
+    as the container's own connect would: `(connected, errno)`. With `wait`, a connected stream is then read until the
+    listener closes it or a second passes, so the listener has had its accept when this returns; without it the connect
+    returns at once (the connection is complete in the kernel's backlog, accepted or not)."""
     try:
         fd = os.open(folder, os.O_RDONLY | os.O_DIRECTORY)
     except OSError as e:
@@ -141,12 +172,18 @@ def _connect(folder: Path) -> tuple[bool, int | None]:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
             s.settimeout(5)
             try:
-                s.connect(f"/proc/self/fd/{fd}/{SOCKET_NAME}")
+                if starved:
+                    with _out_of_descriptors():
+                        s.connect(f"/proc/self/fd/{fd}/{SOCKET_NAME}")
+                        time.sleep(0.4)  # long past the listener's accept loop having tried and failed
+                else:
+                    s.connect(f"/proc/self/fd/{fd}/{SOCKET_NAME}")
             except OSError as e:
                 return False, e.errno
-            s.settimeout(1.0)
-            with contextlib.suppress(OSError):
-                s.recv(1)
+            if wait:
+                s.settimeout(1.0)
+                with contextlib.suppress(OSError):
+                    s.recv(1)
             return True, None
     finally:
         os.close(fd)
@@ -177,7 +214,7 @@ def answer(argv: list[str], plan: CheckPlan, kwargs: dict[str, Any], runs: list[
         return subprocess.CompletedProcess(argv, rc, out, err)
 
     if what.accept:  # a real connect to the production listener's socket, so its own accept is what the verdict reads
-        run.connected, _code = _connect(folder)
+        run.connected, _code = _connect(folder, what.wait, what.starved)
     else:
         run.connected = False
     if what.marker == DOES_NOT_START:

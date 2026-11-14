@@ -253,11 +253,15 @@ def handle(here: Path, argv: list[str]) -> tuple[int, str, str]:
             down = load(here)["faults"]["down"]
         if down:
             return 1, "", "Cannot connect to the Docker daemon (the fake is down)\n"
+        with open(here / CHECK_RUNS, "a", encoding="utf-8") as f:  # one short append: whole lines, whoever else writes
+            f.write(json.dumps({"folder": str(folder), "runtime": argv[argv.index("--runtime") + 1] if "--runtime" in argv else ""}) + "\n")
         return _check_run(argv, folder)
     with locked(here):
         return _handle(here, argv)
 
 
+#: Where the daemon records the host folder each box check container (#1469) was bound to, one JSON line each.
+CHECK_RUNS = "check-runs.jsonl"
 #: Where a box check's container sees its folder (#1469 D1), and the socket's name in it.
 CHECK_TARGET = "/run/box-check"
 CHECK_SOCKET = "s"
