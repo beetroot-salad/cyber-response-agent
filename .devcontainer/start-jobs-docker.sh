@@ -7,9 +7,11 @@
 set -eu
 SOCK=/var/run/docker-jobs.sock
 NETWORK=${DEFENDER_JOB_NETWORK:-defender-jobs}
+# Made if missing; a run that loses the race to make it finds it made.
 ready() {
   docker -H "unix://$SOCK" network inspect "$NETWORK" >/dev/null 2>&1 \
-    || docker -H "unix://$SOCK" network create --driver bridge "$NETWORK" >/dev/null
+    || docker -H "unix://$SOCK" network create --driver bridge "$NETWORK" >/dev/null 2>&1 \
+    || docker -H "unix://$SOCK" network inspect "$NETWORK" >/dev/null
 }
 if docker -H "unix://$SOCK" version >/dev/null 2>&1; then ready; exit 0; fi
 if pgrep -f 'dockerd --host=unix:///var/run/docker-jobs.sock' >/dev/null; then

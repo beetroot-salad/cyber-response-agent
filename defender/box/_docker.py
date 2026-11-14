@@ -345,22 +345,21 @@ def remove_labelled_containers(label: str, value: str | None = None, *, docker: 
     """Remove every container carrying the label `label` (with the value `value`, or any value when `value` is
     None), each through `_remove_container`, paused or not: `None` once none is left, else why not, naming
     `whose` containers. A host with no docker binary has no box to remove."""
-    selector = label if value is None else f"{label}={value}"
     try:
-        listed = docker(["docker", "ps", "-aq", "--filter", f"label={selector}"])
-    except FileNotFoundError:
-        return None
-    except (OSError, subprocess.SubprocessError) as e:
-        return f"could not invoke docker: {e}"
-    if listed.returncode != 0:
-        return f"docker could not list {whose} containers: {(listed.stderr or '').strip()}"
-    return remove_containers(listed.stdout.split(), docker=docker, whose=whose)
+        listed = labelled_containers(label, value, docker=docker)
+    except BoxFault as e:
+        return str(e)
+    return remove_containers([name for name, _ in listed], docker=docker, whose=whose)
 
 
-def labelled_containers(label: str, *, read: str, docker: DockerFn = run_docker) -> list[tuple[str, str]]:
-    """Every container carrying the label `label`, as `(id, the value of its label `read`)`, the value empty when it
-    lacks that label; `BoxFault` when docker cannot list them. A host with no docker binary has none."""
-    argv = ["docker", "ps", "-a", "--filter", f"label={label}", "--format", '{{.ID}} {{.Label "' + read + '"}}']
+def labelled_containers(label: str, value: str | None = None, *, read: str | None = None,
+                        docker: DockerFn = run_docker) -> list[tuple[str, str]]:
+    """Every container carrying the label `label` (with the value `value`, or any value when `value` is None), as
+    `(id, the value of its label `read`)`, that value empty when it lacks the label or `read` is None; `BoxFault` when
+    docker cannot list them. A host with no docker binary has none."""
+    selector = label if value is None else f"{label}={value}"
+    argv = ["docker", "ps", "-aq", "--filter", f"label={selector}"] if read is None else [
+        "docker", "ps", "-a", "--filter", f"label={selector}", "--format", '{{.ID}} {{.Label "' + read + '"}}']
     try:
         listed = docker(argv)
     except FileNotFoundError:
@@ -368,8 +367,8 @@ def labelled_containers(label: str, *, read: str, docker: DockerFn = run_docker)
     except (OSError, subprocess.SubprocessError) as e:
         raise BoxFault(f"could not invoke docker: {e}") from None
     if listed.returncode != 0:
-        raise BoxFault(f"docker could not list the containers labelled {label}: {(listed.stderr or '').strip()}")
-    rows = [line.split(None, 1) for line in listed.stdout.splitlines() if line.strip()]
+        raise BoxFault(f"docker could not list the containers labelled {selector}: {(listed.stderr or '').strip()}")
+    rows = [line.split(None, 1) for line in (listed.stdout or "").splitlines() if line.strip()]
     return [(row[0], row[1].strip() if len(row) > 1 else "") for row in rows]
 
 

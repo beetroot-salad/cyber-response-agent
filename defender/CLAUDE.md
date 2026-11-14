@@ -125,7 +125,8 @@ upgrading a worker:
 3. Job containers start under the box runtime (`DEFENDER_BOX_RUNTIME`). Set `DEFENDER_JOB_NETWORK` to the Docker network
    from which the job reaches the credential proxy and the model provider. Leave OpenBao and the database off that network.
    It is required on every deployment, and must be a bridge network created for the jobs (`docker network create
-   <name>`): unset, docker's default network, `host` or `container:<name>`, every job fails as a start failure.
+   <name>`), not one docker compose made: unset, docker's default network, `host`, `container:<name>` or a compose
+   project's network, the worker refuses to start (exit 2) naming it. It also refuses while docker cannot answer.
 4. The job container runs as the uid that owns the data root, and its socket lives under
    `<data root>/.job-sockets/<claim>/`. A data root whose socket path would exceed 107 bytes fails every job as a start
    failure: keep the data root's path short.

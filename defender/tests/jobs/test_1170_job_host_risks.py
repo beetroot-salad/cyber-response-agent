@@ -4,6 +4,7 @@ provider key is never on `docker run`'s command line (N2), the worker's start sw
 worker's error, never the run's missing report."""
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -23,7 +24,8 @@ world = _shared.world
 _no_database_address_in_the_workers_environment = _shared._no_database_address_in_the_workers_environment
 
 _LINUX = pytest.mark.skipif(not sys.platform.startswith("linux"), reason="reads /proc, Linux only")
-_DEFAULT_BRIDGE = {"Name": "bridge", "Driver": "bridge", "Options": {"com.docker.network.bridge.default_bridge": "true"}}
+_DEFAULT_BRIDGE = {"Name": "bridge", "Driver": "bridge", "Options": {"com.docker.network.bridge.default_bridge": "true"},
+                   "Labels": {}}
 
 
 def _helper_run(scene, docker):
@@ -34,31 +36,70 @@ def _helper_run(scene, docker):
     return inv, ran
 
 
-# --- N5: the job network ----------------------------------------------------------------------------------------------
+# --- N5: the job network, judged once at the worker's start -----------------------------------------------------------
+
+class _NetworkDocker:
+    """`docker network inspect <name>`: `answer` (a dict docker would print, None for no such network), or `fault`
+    raised, as a daemon that does not answer."""
+
+    def __init__(self, answer: dict | None = None, fault: BaseException | None = None, rc: int | None = None) -> None:
+        self.answer, self.fault, self.rc, self.asked = answer, fault, rc, []
+
+    def __call__(self, argv, **_kw):
+        argv = list(argv)
+        self.asked.append(argv)
+        assert argv[1:3] == ["network", "inspect"], argv
+        if self.fault is not None:
+            raise self.fault
+        if self.rc is not None:
+            return subprocess.CompletedProcess(argv, self.rc, "", "Cannot connect to the Docker daemon\n")
+        if self.answer is None:
+            return subprocess.CompletedProcess(argv, 1, "", f"Error response from daemon: network {argv[-1]} not found\n")
+        return subprocess.CompletedProcess(argv, 0, json.dumps(self.answer) + "\n", "")
+
+
+def _bridge(name: str, **extra) -> dict:
+    return {"Name": name, "Driver": "bridge", "Options": {}, "Labels": {}, **extra}
+
+
+@pytest.mark.parametrize(("name", "docker"), [
+    pytest.param(None, _NetworkDocker(), id="unset"),
+    pytest.param("bridge", _NetworkDocker(_DEFAULT_BRIDGE), id="dockers-default-bridge"),
+    pytest.param("host", _NetworkDocker({"Name": "host", "Driver": "host", "Options": {}}), id="host"),
+    pytest.param("container:openbao", _NetworkDocker(None), id="another-containers"),
+    pytest.param("none", _NetworkDocker({"Name": "none", "Driver": "null", "Options": {}}), id="none"),
+    pytest.param("app_default", _NetworkDocker(_bridge("app_default", Labels={
+        "com.docker.compose.network": "default", "com.docker.compose.project": "app"})), id="a-compose-projects"),
+    pytest.param("jobs", _NetworkDocker(rc=1), id="docker-not-answering"),
+    pytest.param("jobs", _NetworkDocker(fault=subprocess.TimeoutExpired(["docker"], 120)), id="docker-timing-out"),
+    pytest.param("jobs", _NetworkDocker(fault=FileNotFoundError("docker")), id="no-docker"),
+])
+def test_n5_the_worker_refuses_to_start_unless_the_job_network_is_a_bridge_made_for_the_jobs(name, docker):
+    from defender.worker._start import WorkerStartRefused, check_job_network
+
+    environ = {} if name is None else {"DEFENDER_JOB_NETWORK": name}
+    with pytest.raises(WorkerStartRefused, match="DEFENDER_JOB_NETWORK"):
+        check_job_network(environ, docker)
+
+
+def test_n5_control_the_worker_accepts_a_bridge_network_made_for_the_jobs():
+    from defender.worker._start import check_job_network
+
+    docker = _NetworkDocker(_bridge("jobs-1170"))
+    assert check_job_network({"DEFENDER_JOB_NETWORK": "jobs-1170"}, docker) == "jobs-1170"
+    assert [a[-1] for a in docker.asked] == ["jobs-1170"]
+
 
 @_LINUX
 @pytest.mark.postgres
-@pytest.mark.parametrize(("name", "answer"), [
-    pytest.param(None, None, id="unset"),
-    pytest.param("bridge", _DEFAULT_BRIDGE, id="dockers-default-bridge"),
-    pytest.param("host", {"Name": "host", "Driver": "host", "Options": {}}, id="host"),
-    pytest.param("container:openbao", None, id="another-containers"),
-    pytest.param("none", {"Name": "none", "Driver": "null", "Options": {}}, id="none"),
-])
-@pytest.mark.parametrize("deployment", ["dev", "production"])
-def test_n5_a_network_that_is_not_a_bridge_made_for_the_jobs_starts_no_container_on_any_deployment(
-        scene, monkeypatch, name, answer, deployment):
+def test_n5_a_helper_with_no_job_network_named_starts_no_container(scene, monkeypatch):
     from defender.records.job_facts import BOX_START_FAILED
 
-    monkeypatch.setenv("DEFENDER_DEPLOYMENT", deployment)
-    if name is None:
-        monkeypatch.delenv("DEFENDER_JOB_NETWORK", raising=False)
-    else:
-        monkeypatch.setenv("DEFENDER_JOB_NETWORK", name)
-    docker = ContainerStandIn(lambda c: 0, networks={name: answer} if name else None)
+    monkeypatch.delenv("DEFENDER_JOB_NETWORK", raising=False)
+    docker = ContainerStandIn(lambda c: 0)
     inv, _ran = _helper_run(scene, docker)
 
-    assert docker.boxes == [], f"a job container started on {name!r}"
+    assert docker.boxes == [], "a job container started with no job network"
     end = scene.end(inv)
     assert end is not None
     assert end.box == BOX_START_FAILED, end
@@ -66,10 +107,9 @@ def test_n5_a_network_that_is_not_a_bridge_made_for_the_jobs_starts_no_container
 
 @_LINUX
 @pytest.mark.postgres
-def test_n5_control_a_bridge_network_made_for_the_jobs_is_joined(scene, monkeypatch):
+def test_n5_the_helper_joins_the_job_network_it_is_given(scene, monkeypatch):
     monkeypatch.setenv("DEFENDER_JOB_NETWORK", "jobs-1170")
-    docker = ContainerStandIn(lambda c: 0, networks={"jobs-1170": {"Name": "jobs-1170", "Driver": "bridge",
-                                                                   "Options": {}}})
+    docker = ContainerStandIn(lambda c: 0)
     _helper_run(scene, docker)
     assert J.flag_values(docker.box.argv, "--network") == ["jobs-1170"]
 
@@ -132,12 +172,15 @@ def test_a5_the_start_sweep_removes_only_job_containers_whose_helper_is_gone():
 
 @_LINUX
 @pytest.mark.postgres
-def test_a5_every_job_container_names_its_helper_by_its_process_mark(scene):
-    from defender.tenancy import process_mark
+def test_a5_every_job_container_names_its_helper_by_its_pid_and_start_time(scene):
+    """The helper runs on this thread: its label is this process's pid and kernel start time (field 22 of
+    `/proc/<pid>/stat`, counted past the command name, which may hold spaces)."""
+    from pathlib import Path
 
+    after_name = Path(f"/proc/{os.getpid()}/stat").read_text(encoding="utf-8").rsplit(")", 1)[1].split()
     docker = ContainerStandIn(lambda c: 0)
     _helper_run(scene, docker)
-    assert J.parse_labels(docker.box.argv)[HELPER_LABEL] == process_mark()
+    assert J.parse_labels(docker.box.argv)[HELPER_LABEL] == f"{os.getpid()}-{after_name[19]}"
 
 
 # --- the helper's exit status -----------------------------------------------------------------------------------------
@@ -168,6 +211,36 @@ async def test_a_helper_that_exits_non_zero_with_no_end_record_ends_the_row_as_t
 async def test_control_a_helper_that_served_its_job_with_no_end_record_is_no_report(world):
     _inv, stored = await _run_one(world, _child(world, exit=0))
     assert (stored["stage"], stored["failure_reason"]) == ("failed", "no_report"), stored
+
+
+class _RunsGoneAtTheRuntimeCheck(ContainerStandIn):
+    """A daemon without the box runtime (the helper's own start failure, before any container), whose answer comes
+    after the tenant's runs folder was swapped for a file: the start failure's end record cannot be written."""
+
+    def __init__(self, runs) -> None:
+        super().__init__(lambda c: 0, runtimes=("no-such-runtime",))
+        self._runs = runs
+
+    def __call__(self, argv, **kw):
+        if list(argv)[1:2] == ["info"] and self._runs.is_dir():
+            self._runs.rename(self._runs.with_name("runs-gone-1170"))
+            self._runs.write_text("not a folder\n", encoding="utf-8")
+        return super().__call__(argv, **kw)
+
+
+@_LINUX
+@pytest.mark.postgres
+def test_a_helper_that_cannot_write_the_ending_it_decided_does_not_exit_0(scene):
+    """An ending the helper decided before the container, whose record cannot be written, is the helper's failure:
+    not exit 0, which the worker would read as a served job that left no report."""
+    inv = str(uuid.uuid4())
+    scene.plant(inv)
+    docker = _RunsGoneAtTheRuntimeCheck(scene.runs)
+    ran = drive_helper(scene, scene.argv("investigation", inv), docker=docker, signer=make_signer())
+
+    assert docker.boxes == [], "control: no container started"
+    assert not (scene.runs.with_name("runs-gone-1170") / f"{inv}.job-end.json").exists(), "control: no record"
+    assert ran.rc != 0, (ran.rc, ran.raised)
 
 
 def test_the_helper_entry_exits_non_zero_when_it_cannot_serve_the_job():

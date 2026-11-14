@@ -113,7 +113,7 @@ DEFENDER_TEST_POSTGRES_DSN=postgresql://defender:dev-only-change-me@postgres:543
 ```
 
 `start-jobs-docker` also makes the jobs' network, `defender-jobs`, which the dev container names in
-`DEFENDER_JOB_NETWORK`: a helper starts a job container only on a bridge network made for the jobs.
+`DEFENDER_JOB_NETWORK`: the worker starts only when that names a bridge network made for the jobs.
 The live tests make and use their own, `defender-test-jobs`.
 
 Set `DOCKER_HOST` only for these commands. Everything else (the playground, the runtime

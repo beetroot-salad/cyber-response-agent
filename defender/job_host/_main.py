@@ -248,7 +248,7 @@ def main(argv: list[str], *, docker: Any = None, signer: Any = None, publish: An
     `forge` the forge credential's builder (the learning kinds'), `command` a container command line in place of the
     kind's entry, `client` the forge client the drain's delivery uses (a new one by default). Returns 0 once the helper served the job to its end (its container ran and exited, whatever its status, or the
     helper wrote the ending it decided before the container), else non-zero: the worker reads any other status, with
-    no end record, as the helper's own failure (`worker._helper_failed`)."""
+    no end record, as the helper's own failure (`worker._helper_failure`)."""
     from defender import tenancy
     from defender._parent_tie import require_parent, tie_to_parent
     from defender._paths import process_defender_dir

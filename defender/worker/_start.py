@@ -1,8 +1,8 @@
 """The worker's real start (#1344 O15, D8): its settings, the one-worker-per-machine lock on the
 data root, and the code copy its children and their boxes run from.
 
-Order: the settings are read and judged first (a build stamp that is not a commit, bad slots), so a refused start
-touches nothing; then an exclusive kernel lock on the data root, so a refused second worker never
+Order: the settings are read and judged first (a build stamp that is not a commit, bad slots, a job network that is
+not a bridge network made for the jobs: `check_job_network`), so a refused start touches nothing; then an exclusive kernel lock on the data root, so a refused second worker never
 touches the first one's live copy; then the copy is replaced. The lock lives as long as the process
 (the kernel drops it with the descriptor), across containers that share the mount.
 
@@ -25,11 +25,14 @@ import os
 import re
 import shutil
 import stat
+import subprocess
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from defender import _io
+from defender.job_socket import NETWORK_ENV
 from defender.records.formats import BUILD_COMMIT_ENV, CODE_COPY_MARKER, is_build_commit
 
 #: The variables the deployed worker reads (`BUILD_COMMIT_ENV` is the stamp's own, from `records`).
@@ -123,6 +126,46 @@ def read_settings(environ: Mapping[str, str]) -> Settings:
         raise WorkerStartRefused(f"{DATA_ROOT_ENV}={raw_root!r} is not a folder")
     return Settings(dsn=dsn, root=root, build_commit=commit, slots=slots, learning_slots=learning,
                     learning_check_seconds=check)
+
+
+#: The option docker sets on its own default bridge network, which reaches whatever the host reaches.
+_DEFAULT_BRIDGE = "com.docker.network.bridge.default_bridge"
+#: The label prefix docker compose puts on the networks it makes: such a network is shared with every service of the
+#: project, OpenBao's and the database's included.
+_COMPOSE_LABEL = "com.docker.compose."
+
+
+def check_job_network(environ: Mapping[str, str], docker: Any) -> str:
+    """The network job containers join (#1170 N5), judged once before any work: the one `NETWORK_ENV` names, and only
+    when docker shows it as a bridge network the operator created for the jobs (not docker's default bridge, not one
+    docker compose made for a project's services). That one property refuses the host's network, another
+    container's (`container:<name>`), `none` and an unset name alike. A docker that cannot show it refuses the start
+    too: the worker is restarted, and no job is failed for a daemon's blip. `docker` is the box package's call shape."""
+    name = (environ.get(NETWORK_ENV) or "").strip()
+    if not name:
+        raise WorkerStartRefused(
+            f"{NETWORK_ENV} is not set: name the docker network, created for the jobs with `docker network create`, "
+            "from which a job reaches the credential proxy and the model provider, with OpenBao and the database off it")
+    try:
+        done = docker(["docker", "network", "inspect", "--format", "{{json .}}", name])
+    except (OSError, subprocess.SubprocessError) as e:
+        raise WorkerStartRefused(f"docker could not be asked about {NETWORK_ENV}={name!r}: {e}") from None
+    if done.returncode != 0:
+        raise WorkerStartRefused(f"docker could not show {NETWORK_ENV}={name!r}: {(done.stderr or '').strip()}")
+    try:
+        found = json.loads(done.stdout or "")
+    except ValueError:
+        found = None
+    if not isinstance(found, dict):
+        raise WorkerStartRefused(f"docker's answer about {NETWORK_ENV}={name!r} is not a network")
+    options, labels = found.get("Options") or {}, found.get("Labels") or {}
+    if (found.get("Driver") != "bridge" or str(options.get(_DEFAULT_BRIDGE, "")).lower() == "true"
+            or any(str(k).startswith(_COMPOSE_LABEL) for k in labels)):
+        raise WorkerStartRefused(
+            f"{NETWORK_ENV}={name!r} is not a bridge network created for the jobs (docker's default network, the "
+            "host's, another container's or a compose project's reach too much); create one with "
+            "`docker network create` and name it")
+    return name
 
 
 def hold_start_lock(data_root: Path) -> int:

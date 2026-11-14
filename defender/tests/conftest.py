@@ -111,8 +111,8 @@ def deployment_unset(monkeypatch) -> None:
 @pytest.fixture(autouse=True)
 def job_network_named(monkeypatch) -> None:
     """Every test's job container joins a network made for the jobs, as a deployment names one in
-    `DEFENDER_JOB_NETWORK`: unset, a helper refuses every job (#1170 N5). Docker stand-ins answer it
-    as a bridge network made for the jobs; a test on a real daemon makes it (`_job_helper.job_network`)."""
+    `DEFENDER_JOB_NETWORK`: unset, a helper refuses every job (#1170 N5; the worker judges the network
+    at its start). A test on a real daemon makes it (`_job_helper.ensure_job_network`)."""
     monkeypatch.setenv("DEFENDER_JOB_NETWORK", "defender-test-jobs")
 
 

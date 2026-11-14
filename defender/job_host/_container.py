@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 from defender._io import read_bytes_capped
-from defender.job_socket import HELPER_LABEL, IMAGE_ENV, JOB_LABEL, SOCKET_ENV
+from defender.job_socket import HELPER_LABEL, IMAGE_ENV, JOB_LABEL, NETWORK_ENV, SOCKET_ENV
 
 from ._session import Session, StartFailed
 
@@ -32,11 +32,6 @@ SOCKET_NAME = "job.sock"
 _SUN_PATH = 108
 #: The image when the setting names none (A7).
 DEFAULT_IMAGE = "defender-job:latest"
-#: The setting naming the docker network job containers join (N5): a bridge network the operator created
-#: (`job_network`), on every deployment.
-NETWORK_ENV = "DEFENDER_JOB_NETWORK"
-#: The option docker sets on its own default bridge network, which reaches whatever the host reaches.
-_DEFAULT_BRIDGE = "com.docker.network.bridge.default_bridge"
 #: Seconds the container is given to unwind on a graceful stop (A2: learning siblings' 20 < this < the worker's 30,
 #: leaving the rest of the worker's grace for the removal).
 STOP_GRACE = 22
@@ -148,26 +143,12 @@ def job_container_name(session: Session) -> str:
     return f"defender-job-{session.claim}"
 
 
-def job_network(session: Session, environ: Mapping[str, str] = os.environ) -> str:
-    """The network the job container joins (N5), or `StartFailed`: the one `NETWORK_ENV` names, and only when docker
-    reports it as a bridge network the operator created. That one property refuses docker's default network, the
-    host's, another container's (`container:<name>`) and an unset name alike, without listing them."""
-    import json
-
+def job_network(environ: Mapping[str, str] = os.environ) -> str:
+    """The network the job container joins (N5), as `NETWORK_ENV` names it: the worker judged it at its start
+    (`worker._start.check_job_network`), so the helper only refuses an unset name, which no worker it serves leaves."""
     name = (environ.get(NETWORK_ENV) or "").strip()
     if not name:
-        raise StartFailed(f"{NETWORK_ENV} is not set: name the docker network, created for the jobs, from which a job "
-                          "reaches the credential proxy and the model provider, with OpenBao and the database off it")
-    try:
-        done = session.docker(["docker", "network", "inspect", "--format", "{{json .}}", name])
-        found = json.loads(done.stdout) if done.returncode == 0 else None
-    except (OSError, subprocess.SubprocessError, ValueError):
-        found = None
-    if not isinstance(found, dict) or found.get("Driver") != "bridge" or str(
-            (found.get("Options") or {}).get(_DEFAULT_BRIDGE, "")).lower() == "true":
-        raise StartFailed(f"{NETWORK_ENV}={name!r} is not a bridge network created for the jobs (docker's default "
-                          "network, the host's or another container's reach too much); create one with "
-                          "`docker network create` and name it")
+        raise StartFailed(f"{NETWORK_ENV} is not set; the worker refuses to start without it")
     return name
 
 
@@ -199,7 +180,7 @@ def container_launch(session: Session, socket: Path, command: list[str], environ
         raise StartFailed("the job's tenant was not accepted: there is no tenant folder to bind")
     from defender.tenancy import process_mark
 
-    network = job_network(session, environ)
+    network = job_network(environ)
     try:
         helper = process_mark()
     except OSError as unreadable:
