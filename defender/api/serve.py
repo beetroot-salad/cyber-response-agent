@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Serve the stub API over the demo fakes, for local use.
+"""Serve the API over the demo fakes, for local use.
 
     python3 defender/api/serve.py --tenant <id> [--tenant <id> ...] [--host 127.0.0.1] [--port 8000]
 
@@ -50,7 +50,7 @@ def main(argv: list[str] | None = None) -> int:
         deps = asyncio.run(demo_deps(args.tenants, frontend_origin=args.frontend_origin))
     except ValueError as e:
         parser.error(str(e))
-    _logger.info("stub API on http://%s:%d; demo sessions (cookie __Host-defender_session): %s",
+    _logger.info("demo API (made-up data, not for real use) on http://%s:%d; demo sessions (cookie __Host-defender_session): %s",
                  args.host, args.port,
                  ", ".join(f"{name}={value}" for name, value in sorted(demo_sessions(args.tenants).items())))
     # `log_config=None` keeps uvicorn on the handlers `configure_from_env` installed.

@@ -120,6 +120,46 @@ Set `DOCKER_HOST` only for these commands. Everything else (the playground, the 
 image, the other compose services) uses the host daemon. The daemon's log is
 `/var/log/docker-jobs.log`; it stops with the container, and `start-jobs-docker` starts it again.
 
+## Running the API on the dev database and real sign-in (#1083)
+
+`python -m defender.api_server` serves the platform API over PostgreSQL and Keycloak (the demo server,
+`defender.api.serve`, stays the in-memory one). Every setting is required and read from the environment; a
+missing or invalid one refuses start naming it. Secret files hold one value, a trailing newline allowed.
+
+| Setting | Meaning |
+|---|---|
+| `DEFENDER_DATABASE_DSN` | the database (must be at the code's migration head) |
+| `DEFENDER_API_HOST`, `DEFENDER_API_PORT` | listen address |
+| `DEFENDER_API_FRONTEND_ORIGIN` | the one origin a cookie-authenticated write may carry (no path) |
+| `DEFENDER_API_ADMINISTRATORS_FILE` | YAML `administrators: [<email>, ...]` |
+| `DEFENDER_KEYCLOAK_SERVER_URL` | Keycloak as the API reaches it (dev: `http://keycloak:8080`) |
+| `DEFENDER_KEYCLOAK_ISSUER`, `DEFENDER_KEYCLOAK_PROGRAMS_ISSUER` | `<front-channel>/realms/<realm>` (dev: `http://localhost:8080/realms/defender`, `.../defender-programs`) |
+| `DEFENDER_KEYCLOAK_CLIENT_ID`, `..._CLIENT_SECRET_FILE`, `DEFENDER_KEYCLOAK_REDIRECT_URI` | the sign-in client; the redirect must equal the realm's registered one (dev: `http://localhost:8000/auth/callback`) |
+| `DEFENDER_KEYCLOAK_ADMIN_CLIENT_ID`, `..._ADMIN_CLIENT_SECRET_FILE` | sign-in realm's admin client (`manage-users`) |
+| `DEFENDER_KEYCLOAK_PROGRAMS_AUDIENCE`, `..._PROGRAMS_ADMIN_CLIENT_ID`, `..._PROGRAMS_ADMIN_CLIENT_SECRET_FILE` | programs realm (admin client holds `manage-clients`) |
+
+At start it checks the database version, probes each realm (discovery names the configured issuer, signing keys
+fetch, the admin client reads users or clients) and binds the port before the bootstrap writes anything; a failure
+ends the program with that step's message on stderr. Not checked at start: the sign-in client's own secret, the
+redirect URI's equality with the realm's, and whether an admin role is write-capable (a read-only role passes);
+each surfaces at first use. Lessons, systems, credentials and the connection check answer 501 naming their issue
+(#1082, piece 2 #1470). A stop signal leaves the app and closes every connection.
+
+Walk-through (needs the dev PostgreSQL, Keycloak with both realms imported, Mailpit, the lifecycle's Forgejo and
+OpenBao from `provision-dev-issuer.sh` with `playground-issuer/lifecycle.env`, the database migrated to head, and
+`python -m defender.lifecycle serve` beside the API; no jobs daemon needed: a started investigation stays queued,
+enough to list, read and cancel):
+
+1. Start the API with the frontend origin set to its own, `http://localhost:8000` (not `127.0.0.1`: it must match
+   the realm's redirect exactly), and forward port 8000; the built-in docs page is then the client.
+2. Administrator: set the password from Mailpit and sign in (a one-time code is needed: expect to enrol an
+   authenticator app on a refused first sign-in, then sign in again). Create a tenant, check
+   `GET /admin/tenants/<id>` until `active` (on a failed step read the lifecycle log, fix, `resume`), invite its first member.
+3. Member: set password, sign in, see exactly that tenant, replace the alert mapping, seed an alert
+   (`python -m defender.tests.support.api.seed_alert <tenant> <ticket>`), start an investigation, list and read it, cancel it.
+4. Program: create a program and an API key and start an investigation with the key; repeat with a
+   client-credentials token.
+
 ## Tenant version control credentials (PR #1253)
 
 Since #1108 P4 every corpus write goes through `defender.learning.author.version_control.TenantDelivery`:
