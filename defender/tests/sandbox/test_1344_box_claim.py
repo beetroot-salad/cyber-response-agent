@@ -11,6 +11,7 @@ from defender import box as box_mod
 from defender.box import BoxRequest, BoxSpec, Mount
 from defender.tests.support.sandbox._spec1092 import STOCK_ROOTFS, make_run_dir
 from defender.tests.support.tenancy._host1214 import TEST_TENANT
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
 CLAIM = "0123456789abcdef0123456789abcdef"
 
@@ -30,7 +31,7 @@ def _request_box_argv(tmp_path: Path) -> list[str]:
     run_dir = make_run_dir(tmp_path)
     request = BoxRequest(name="defender-oracle-claim", workdir=tmp_path / "wt", env={},
                          mounts=(Mount(source=run_dir, target=run_dir, writable=True),),
-                         spec=BoxSpec(rootfs=STOCK_ROOTFS), tenant_id=TEST_TENANT)
+                         spec=BoxSpec(rootfs=STOCK_ROOTFS), tenant_id=TEST_TENANT, data_root=current_data_root())
     return box_mod._render_argv(request, ()).argv
 
 

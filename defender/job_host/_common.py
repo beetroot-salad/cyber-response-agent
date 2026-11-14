@@ -149,7 +149,7 @@ def start_run_box(session: Session, run_dir: Path, copy: Any, *, start_token: st
                         must_exist=False)
     return box.start_box(run_dir, session.defender_dir, docker=session.docker, tenant_agent=copy.agent,
                          staged_token=copy.token, tenant_id=session.tenant_id, require_sandbox=True,
-                         start_token=start_token)
+                         start_token=start_token, data_root=session.root_folder)
 
 
 def stop_boxes(session: Session) -> None:

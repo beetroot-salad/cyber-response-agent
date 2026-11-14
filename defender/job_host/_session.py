@@ -140,6 +140,8 @@ class Session:
     #: name only these (A6).
     minted: set[str] = field(default_factory=set)
     prepared: Prepared | None = None
+    #: The runtime the job container was launched under (`Launch.runtime`), once it was launched.
+    launched_runtime: str | None = None
     boxes: dict[str, Box] = field(default_factory=dict)
     #: The (box kind, id) pairs whose start is under way: reserved under `lock` before the start, so two concurrent
     #: starts of one run's box cannot both pass the one-box-per-id check.

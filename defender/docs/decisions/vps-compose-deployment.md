@@ -297,8 +297,8 @@ a **per-job host helper** (`python -m defender.job_host`, the worker's child). T
 holds what reaches more than one tenant: Docker, the shared database login, OpenBao's sign and forge logins. It
 prepares the run folder, copies and exports, signs every pass (tenant, investigation or learning job id, grant,
 600 s), mints the post-step's forge tokens, writes the post-step's records, and starts, relays and stops every box.
-The job reaches it over a unix socket (the job socket), answered only to that container's processes, which the helper
-recognises by host process ids; so the helper must share the Docker daemon's mount paths and process namespace, and
+The job reaches it over a unix socket (the job socket), 0600 in a 0700 folder, so the filesystem alone decides who may
+use it (#1469: the helper no longer asks who a caller is); the helper must share the Docker daemon's mount paths, and
 the worker runs natively on the execution host. The job container joins the network `DEFENDER_JOB_NETWORK` names (a
 bridge network created for the jobs, judged once at the worker's start), holds the provider key, and mounts its
 tenant's folder, the worker's code copy and its socket's folder. One worker runs per machine (a data-root lock), and one
