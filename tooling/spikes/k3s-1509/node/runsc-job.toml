@@ -1,3 +1,0 @@
-log_level = "info"
-[runsc_config]
-  debug-log = "/var/log/runsc/job/"

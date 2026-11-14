@@ -604,8 +604,8 @@ claim-scoped keys with confined readers.
 
 **Then the boundaries work**, each a later issue:
 
-1. **Spike, go or no-go (#1509):** dev leg run on 2026-11-14, every probe passes (`tooling/spikes/k3s-1509/`). Still to
-   run: several nodes and a k3s server restart. It is a one-time check, kept for reruns by hand; the lasting checks of
+1. **Spike, go or no-go (#1509):** dev leg run on 2026-11-14, every probe passes (results on #1509). Still to
+   run: several nodes and a k3s server restart. It is a one-time check, not kept; the lasting checks of
    O4, O5 and O7, in CI as well, are the launcher's own tests in work item 7.
 2. The claim on the row; passes name their claim; the proxy's claim check and audit in PostgreSQL.
 3. #1491: model and forge calls through the proxy, the raw forge token retired, proxy replicas, per-route egress
@@ -717,9 +717,9 @@ claims:
   - id: B-G7
     kind: behavior
     claim: "In k3s, deny-by-default NetworkPolicy leaves a job pod only the proxy pods, its own node included; a gVisor runtime class whose handler sets network=none gives a pod loopback only; two gVisor pods share a local-path volume coherently; a ValidatingAdmissionPolicy refuses every change to B4's fields; the launcher's role allows only what section 1 lists; all of it in the dev container."
-    probe: "tooling/spikes/k3s-1509/run-all.sh: k3d v5.8.3, k3s v1.33.9 (containerd 2.1.5), runsc release-20261109.0, the dev container's jobs daemon (Docker 29.9.3), one node"
+    probe: "the #1509 spike run (scripts not kept; results on the issue): k3d v5.8.3, k3s v1.33.9 (containerd 2.1.5), runsc release-20261109.0, the dev container's jobs daemon (Docker 29.9.3), one node"
     probe_kind: executed
-    observed: "All pass, each against a control (out/run-all-2026-11-14.txt). Job pod under policy: proxy pod and Service open; worker, other job, the node's kubelet, API server port and NodePort, API server Service, DNS, outside closed (all open with no policy). Box: loopback only, with or without policy. Volume: 11 of 11 coherence checks in both directions; the claim goes with the job pod. Admission: 2 templates admitted, 40 changes refused by the policy alone with Pod Security off; ephemeral containers and pod updates refused for every caller. dnsPolicy None needs a nameserver: 127.0.0.1 pinned, nothing resolves. Each node needs runsc's gvisor-bin folder. Box create-to-ready median 0.97 to 1.95 s."
+    observed: "All pass, each against a control. Job pod under policy: proxy pod and Service open; worker, other job, the node's kubelet, API server port and NodePort, API server Service, DNS, outside closed (all open with no policy). Box: loopback only, with or without policy. Volume: 11 of 11 coherence checks in both directions; the claim goes with the job pod. Admission: 2 templates admitted, 40 changes refused by the policy alone with Pod Security off; ephemeral containers and pod updates refused for every caller. dnsPolicy None needs a nameserver: 127.0.0.1 pinned, nothing resolves. Each node needs runsc's gvisor-bin folder. Box create-to-ready median 0.97 to 1.95 s."
     verdict: holds
   - id: B-G7b
     kind: behavior
