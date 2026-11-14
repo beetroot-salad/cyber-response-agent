@@ -300,9 +300,11 @@ scenarios:
   # host and merge with it. `cr_mode:` is the change request the runner posts before the steps
   # (an explicit --cr-mode wins); the capture passes none, so this is how a captured scenario
   # gets its change record.
-  # Scenarios whose case rests on there being NO record target hosts with no standing change
-  # window (change-mgmt/seed/standing.yaml covers db-1 daily and web-1/web-2 on Tuesdays), so
-  # firing time cannot put an approved change over them.
+  # Scenarios whose case rests on there being NO record target hosts with no change window at
+  # all: none in the inventory and CMDB (`change_window: null`) and no standing change request
+  # (change-mgmt/seed/standing.yaml covers db-1 daily and web-1/web-2 on Tuesdays), so firing
+  # time cannot put an approved change over them. That leaves dev-ws-1, the office
+  # workstations and canary-1.
 
   # The record that settles it is reachable: a change request covering this host, user and
   # window, posted just before the work.
@@ -358,35 +360,6 @@ scenarios:
         repeat: 1
         allow_fail: true
 
-  # The rule's logic is what fires: v2-cross-tier-ssh-pivot sequences two logins with no join
-  # key, so the config server's routine login to a workstation and a DBA's own login to db-1
-  # read as a pivot.
-  - id: fleet-check-then-dba-session
-    category: data-access
-    description: >
-      The config-management server logs into dev-ws-1 for a routine check, and a few minutes
-      later the DBA logs into db-1 from the bastion. Nothing connects the two sessions, but
-      the pivot rule has no join key: a workstation login followed by a prod login within
-      15 minutes fires v2-cross-tier-ssh-pivot.
-    source_host: config-mgmt-1
-    source_user: svc.config-mgmt
-    target_host: dev-ws-1
-    default_intensity: 1
-    steps:
-      - cmd: |
-          sshpass -p changeme ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            -o ConnectTimeout=5 ${user}@${target} 'uptime >/dev/null; dpkg -l | wc -l >/dev/null'
-        repeat: 1
-        allow_fail: true
-      - cmd: |
-          sleep 120
-          sshpass -p changeme ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            -o ConnectTimeout=5 dba.ivy@db-1 'psql --version >/dev/null; df -h /var/lib/postgresql >/dev/null'
-        source_host: jump-box-1
-        source_user: dba.ivy
-        repeat: 1
-        allow_fail: true
-
   # The rule's logic is what fires: v2-nginx-path-enumeration counts distinct 4xx paths from
   # one source, and cannot tell a post-deploy link checker hitting retired assets from a scan.
   - id: post-deploy-asset-check-web
@@ -437,15 +410,15 @@ scenarios:
 
   # Legitimate, but the only record that would show it sits nowhere the tenant can read: it was
   # agreed by phone. No change request, no ticket.
-  - id: sre-new-laptop-key-bastion
+  - id: sre-new-laptop-key-workstation
     category: execution
     description: >
-      An SRE adds their new laptop's key to their own account on the bastion, from dev-ws-1.
-      It was agreed by phone; nothing in change-mgmt or the tickets records it.
-      v2-falco-authorized-keys-modification fires on jump-box-1.
-    source_host: dev-ws-1
+      An SRE adds their new laptop's key to their own account on dev-ws-1, hopping from the
+      bastion. It was agreed by phone; nothing in change-mgmt or the tickets records it.
+      v2-falco-authorized-keys-modification fires on dev-ws-1.
+    source_host: jump-box-1
     source_user: sre.chen
-    target_host: jump-box-1
+    target_host: dev-ws-1
     default_intensity: 1
     steps:
       - cmd: |

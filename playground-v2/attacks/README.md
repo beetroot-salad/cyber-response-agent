@@ -51,7 +51,7 @@ A run with a change-request mode other than `none` POSTs a CR to the `change-mgm
 
 | mode | CR scope | Intended agent verdict |
 |---|---|---|
-| `none` | — (no CR posted) | Unauthorized — classic escalate. |
+| `none` | — (no CR posted) | For an attack: unauthorized, classic escalate. For a legitimate-activity scenario (below), no record: what settles it is elsewhere, or the rule's logic or data fired it. |
 | `valid` | target host + current window, requester = source user | Authorized-window cover. The agent should resolve the legitimacy contract as `authorized` *iff* it also confirms host + identity + timing match. |
 | `stale` | target host but window is in the past (now-3h..now-1h) | Tests the agent's temporal-scope check. CR exists but doesn't cover *now*. |
 | `scope-mismatch` | a different host (sibling in same inventory role, or `canary-1` fallback) | Tests the agent's host-scope check. CR exists for the wrong host. |

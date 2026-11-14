@@ -51,7 +51,7 @@ def _store() -> FakeLockStore:
 
 def _runner_module():
     """The runner, loaded for collection-time parameters (its CR modes)."""
-    spec = importlib.util.spec_from_file_location("runner_1347_modes", RUNNER)
+    spec = importlib.util.spec_from_file_location("runner_1347", RUNNER)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -65,11 +65,7 @@ def lock():
 
 @pytest.fixture
 def runner():
-    spec = importlib.util.spec_from_file_location("runner_1347", RUNNER)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return _runner_module()
 
 
 # -- the lock itself --------------------------------------------------------------------------

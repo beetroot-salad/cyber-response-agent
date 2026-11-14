@@ -75,7 +75,7 @@ def test_a_step_command_carries_no_shell_comment(cmd):
 
 
 def _runner_module():
-    spec = importlib.util.spec_from_file_location("attacks_runner_modes", RUNNER)
+    spec = importlib.util.spec_from_file_location("attacks_runner_tells", RUNNER)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -83,10 +83,7 @@ def _runner_module():
 
 @pytest.fixture(scope="module")
 def runner():
-    spec = importlib.util.spec_from_file_location("attacks_runner_tells", RUNNER)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return _runner_module()
 
 
 @pytest.mark.parametrize("cr_mode", [m for m in _runner_module().CR_MODES if m != "none"])

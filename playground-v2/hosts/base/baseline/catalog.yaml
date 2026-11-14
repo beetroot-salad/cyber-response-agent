@@ -271,8 +271,8 @@ actions:
     # binds only identities with an account on the host.) The SSH accept on
     # db-1 satisfies event-2 of cross-tier-ssh-pivot (any prod-tier login); the
     # rule has no join key, so event-1 is satisfied by config-mgmt-fleet-push
-    # SSH'ing INTO dev-ws-1 within the 15min window. The -L tunnel + 5s sleep
-    # keeps the session open long enough to be unambiguous in conn logs.
+    # SSH'ing INTO dev-ws-1 within the 15min window. The -L tunnel + 1s sleep
+    # keeps the session open past the handshake, so the forward shows in conn logs.
     cmd: |
       sshpass -p changeme ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
         -o ConnectTimeout=3 -L 15432:localhost:5432 dba.ivy@db-1 \

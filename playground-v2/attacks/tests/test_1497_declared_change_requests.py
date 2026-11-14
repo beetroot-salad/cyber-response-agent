@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import importlib.util
 import re
-from fnmatch import fnmatch
 from pathlib import Path
 
 import pytest
@@ -124,22 +123,49 @@ def test_every_step_runs_as_an_account_its_host_has(scenario, step, host, user):
     assert user in _accounts(host), f"{user} has no account on {host}"
 
 
+def _missing_logins(cmd: str) -> set[tuple[str, str]]:
+    """Each literal `user@host` login in a rendered command whose host lacks that account.
+
+    A login through a shell variable (`$u@host`, a loop over mistyped names) is not read: it is
+    meant to try names that may not exist."""
+    logins = {(u, h) for u, h in re.findall(r"(?<![\w$.-])([A-Za-z][\w.-]*)@([\w-]+)", cmd) if h in HOSTS}
+    return {(u, h) for u, h in logins if u not in _accounts(h)}
+
+
 @pytest.mark.parametrize("scenario,step,host,user", _steps())
 def test_every_login_a_step_makes_is_as_an_account_its_target_has(scenario, step, host, user):
     # An unknown user's sshd attempt is also ingested as a success (#1497), so a login meant to
     # fail as a real account but made as a missing one fires success-after-failures on bad data.
     target = scenario["target_host"]
     cmd = step["cmd"].replace("${user}", user).replace("${target}", target).replace("${host}", target)
-    logins = {(u, h) for u, h in re.findall(r"(?<![\w$.-])([A-Za-z][\w.-]*)@([\w-]+)", cmd) if h in HOSTS}
-    missing = {(u, h) for u, h in logins if u not in _accounts(h)}
+    missing = _missing_logins(cmd)
     assert missing <= {(u, h) for s, u, h in UNKNOWN_ON_PURPOSE if s == scenario["id"]}, missing
+
+
+def _bindings(action):
+    """(host, user) pairs the scheduler binds `action` to, by its own rule."""
+    for host in INVENTORY["hosts"]:
+        if host["role"] not in action.get("host_roles", []):
+            continue
+        for user in _scheduler.match_identities(action["identities"], _scheduler.users_on_host(host["name"])):
+            yield host, user
 
 
 @pytest.mark.parametrize("action", BASELINE["actions"], ids=lambda a: a["id"])
 def test_every_background_action_binds_to_some_account(action):
     # The scheduler binds an action only to identities with an account on the host, and skips
     # the rest without a word: dba-tunnel sat on dev-ws, where dba.ivy has none, and never ran.
-    hosts = [h["name"] for h in INVENTORY["hosts"] if h["role"] in action["host_roles"]]
-    bound = {(h, u) for h in hosts for u in _accounts(h) - {"root"}
-             if any(fnmatch(u, pattern) for pattern in action["identities"])}
-    assert bound, f"{action['id']} binds to no account on {hosts}"
+    assert list(_bindings(action)), f"{action['id']} binds to no account"
+
+
+@pytest.mark.parametrize("action", BASELINE["actions"], ids=lambda a: a["id"])
+def test_every_login_a_background_action_makes_is_as_an_account_its_target_has(action):
+    # `${wrong}` is the typo action's deliberately missing host, so it is not a login to check.
+    missing = set()
+    for host, user in _bindings(action):
+        targets = _scheduler._resolve_targets(action, host) or [None]
+        for target in targets:
+            cmd = _scheduler.substitute(action["cmd"], host=host["name"], user=user,
+                                        target=target or "")
+            missing |= _missing_logins(cmd)
+    assert not missing, f"{action['id']} logs in as accounts its targets lack: {sorted(missing)}"
