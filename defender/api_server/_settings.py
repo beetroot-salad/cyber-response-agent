@@ -15,6 +15,7 @@ from pydantic import ValidationError
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
 
+from defender._io import read_text_utf8
 from defender.identity import Bootstrap, DataRuleViolation
 from defender.identity.keycloak import check_issuer, check_server_url
 
@@ -138,7 +139,7 @@ _EMAIL = re.compile(r"[^@\s]+@[^@\s]+")
 def _secret_from_file(name: str, path: str) -> str:
     """A secret file holds one value and one trailing newline at most."""
     try:
-        raw = Path(path).read_text()
+        raw = read_text_utf8(Path(path))
     except (OSError, UnicodeDecodeError) as why:
         raise StartRefused(f"{name}: cannot read the secret file: {type(why).__name__}") from None
     value = raw.removesuffix("\n")
@@ -150,7 +151,7 @@ def _secret_from_file(name: str, path: str) -> str:
 def _administrators(name: str, path: str) -> Bootstrap:
     """`administrators: [<email>, ...]`, nothing else (the tenants section went with #1214)."""
     try:
-        document: Any = yaml.safe_load(Path(path).read_text())
+        document: Any = yaml.safe_load(read_text_utf8(Path(path)))
     except (OSError, UnicodeDecodeError, yaml.YAMLError) as why:
         raise StartRefused(f"{name}: cannot read the administrators file: {type(why).__name__}") from None
     if not isinstance(document, dict) or set(document) != {"administrators"} \
