@@ -158,9 +158,9 @@ _VALUED = frozenset({"--name", "--user", "--label", "--runtime", "--tmpfs", "--s
                      "--mount", "--workdir", "--env"})
 #: Each flag the job container may carry before its image, with how many times: exactly these and no other (O1, A7, H9;
 #: `--network` only when the deployment names one, `--env` once per setting).
-_FLAG_COUNTS = {"-i": 1, "--rm": 1, "--init": 1, "--name": 1, "--user": 1, "--label": 3, "--pull=never": 1,
+_FLAG_COUNTS = {"-i": 1, "--rm": 1, "--init": 1, "--name": 1, "--user": 1, "--label": 4, "--pull=never": 1,
                 "--runtime": 1, "--read-only": 1, "--tmpfs": 1, "--security-opt": 1, "--cap-drop": 1, "--mount": 3,
-                "--workdir": 1}
+                "--workdir": 1, "--network": 1}
 
 
 #: The job container's runtime by box runtime (#1469): gVisor's job registration, or runc as the boxes are.
@@ -186,9 +186,9 @@ def _run_flags(argv: list[str], image: str) -> list[tuple[str, str | None]]:
 
 def test_o1_the_job_containers_start_carries_exactly_the_allowed_flags_with_the_job_runtime_and_its_hardening(
         scene, monkeypatch):
-    """Before the image, the job container's `docker run` carries exactly `-i --rm --init --name --user`, three
-    `--label`s, `--pull=never`, `--runtime` the job runtime derived from the box runtime the deployment sets (#1469), `--read-only`, one `--tmpfs`,
-    `--security-opt no-new-privileges`, `--cap-drop ALL`, at most one `--network` (the job network, N5), three
+    """Before the image, the job container's `docker run` carries exactly `-i --rm --init --name --user`, four
+    `--label`s (tenant, claim, job kind, helper), `--pull=never`, `--runtime` the job runtime derived from the box runtime the deployment sets (#1469), `--read-only`, one `--tmpfs`,
+    `--security-opt no-new-privileges`, `--cap-drop ALL`, exactly one `--network` (the job network, N5), three
     `--mount`s, `--workdir` and `--env`s: nothing else (`--pid host`, `--privileged`, `--cap-add`, `-v`, a second
     runtime). (O1, A7, H9, N5)"""
     from defender import job_host
@@ -202,11 +202,10 @@ def test_o1_the_job_containers_start_carries_exactly_the_allowed_flags_with_the_
     counts: dict[str, int] = {}
     for flag, _value in pairs:
         counts[flag] = counts.get(flag, 0) + 1
-    envs, networks = counts.pop("--env", 0), counts.pop("--network", 0)
+    envs = counts.pop("--env", 0)
     assert counts == _FLAG_COUNTS, {k: (counts.get(k), _FLAG_COUNTS.get(k)) for k in set(counts) | set(_FLAG_COUNTS)
                                     if counts.get(k) != _FLAG_COUNTS.get(k)}
     assert envs >= 1, "the job container carries no setting"
-    assert networks <= 1, "the job container joins more than one network"
     values = dict(p for p in pairs if p[0] not in ("--label", "--mount", "--env"))
     assert values["--runtime"] == _JOB_RUNTIME[runtime], (values["--runtime"], runtime)
     assert values["--security-opt"] == "no-new-privileges"
@@ -1214,11 +1213,12 @@ def test_o7_a_helper_whose_parent_is_not_the_pid_it_was_handed_does_nothing_and_
 def test_o7_a_container_that_ran_and_exited_without_an_end_record_gets_none_from_the_helper(scene, rc):
     """The job container ran the job and exited with `rc` writing no end record: the helper writes none either (the
     worker then ends the row as the job left no report); only a `docker run` that never ran the job is the helper's to
-    record as a start failure (`test_a3_o11_a_container_that_cannot_start...`). (O7, A3)"""
+    record as a start failure (`test_a3_o11_a_container_that_cannot_start...`). The helper served the job, so it exits
+    0 whatever the container's status (#1170). (O7, A3)"""
     inv, docker, ran, _s = _go(scene, lambda c: rc)
 
     assert docker.job_ran, "control: the job ran in its container"
-    assert ran.rc == rc, ran.rc
+    assert ran.rc == 0, ran.rc
     assert scene.end(inv) is None, f"the helper wrote an end record for a job that ran: {scene.end(inv)}"
 
 

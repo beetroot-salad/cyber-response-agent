@@ -112,6 +112,10 @@ DEFENDER_TEST_POSTGRES_DSN=postgresql://defender:dev-only-change-me@postgres:543
   defender-pytest .venv/bin/python -m pytest tests/e2e/test_job_box_boundary_e2e.py -n 0
 ```
 
+`start-jobs-docker` also makes the jobs' network, `defender-jobs`, which the dev container names in
+`DEFENDER_JOB_NETWORK`: the worker starts only when that names a bridge network made for the jobs.
+The live tests make and use their own, `defender-test-jobs`.
+
 Set `DOCKER_HOST` only for these commands. Everything else (the playground, the runtime
 image, the other compose services) uses the host daemon. The daemon's log is
 `/var/log/docker-jobs.log`; it stops with the container, and `start-jobs-docker` starts it again.

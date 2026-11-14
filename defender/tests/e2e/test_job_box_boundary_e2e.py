@@ -15,7 +15,7 @@ import pytest
 
 from defender import job_host
 from defender.box import BoxSpec
-from defender.tests.support.jobs._job_helper import CANARY, OTHER_TENANT, drive_helper, helper_scene
+from defender.tests.support.jobs._job_helper import CANARY, OTHER_TENANT, drive_helper, ensure_job_network, helper_scene
 from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — fixture
 from defender.tests.support.sandbox._docker import daemon_reachable, docker_runtimes, dood_anchor, is_dood
 
@@ -124,6 +124,7 @@ def probed(tmp_path, monkeypatch, migrated_database):  # noqa: F811
         (viz / "canary").write_text(CANARY, encoding="utf-8")
         monkeypatch.setenv("DEFENDER_RUN_VISUALIZATIONS_DIR", str(viz))
         monkeypatch.setenv("DEFENDER_DEPLOYMENT", "dev")
+        ensure_job_network(run_docker)
         command = ["python3", "-c", PROBE, str(out),
                    str(scene.root / OTHER_TENANT / "canary"), str(own), str(viz), inv, *map(str, scene.secrets)]
         docker = _Recorded()

@@ -131,7 +131,8 @@ def prepare(session: Session, hold: contextlib.ExitStack) -> Prepared:  # noqa: 
 
 
 def end(session: Session, cause: str) -> None:
-    """The job-end record for an ending decided before the container (A3), in the job lane's vocabulary."""
+    """The job-end record for an ending decided before the container (A3), in the job lane's vocabulary. A record that
+    cannot be written raises: the helper then exits non-zero, which the worker reads as the helper's own failure."""
     from defender.records import job_facts, job_lane
 
     setup, box = {
@@ -145,8 +146,6 @@ def end(session: Session, cause: str) -> None:
     except FileExistsError:
         _logger.error("job %s: a job-end record is already there; it is kept, and this one (%s) is not written",
                       session.job_id, record.text())
-    except (OSError, job_lane.JobLaneRefused) as e:
-        _logger.error("job %s: the job-end record could not be written: %s", session.job_id, e)
 
 
 def _exited(session: Session, rc: int) -> None:

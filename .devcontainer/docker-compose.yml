@@ -33,6 +33,9 @@ services:
       # Where dev publishes (#1279 A11): named here, never worked out from a checkout.
       # No box mounts the workspace root, so a folder at its top level is safe.
       DEFENDER_RUN_VISUALIZATIONS_DIR: /workspace/run-visualizations
+      # The jobs daemon's network for job containers (#1170 N5): a job joins only a bridge network made for
+      # it; `start-jobs-docker` makes this one.
+      DEFENDER_JOB_NETWORK: defender-jobs
       # The dev issuer (the `openbao` service) serves a certificate from the private dev CA. Host
       # processes mint tokens from it (#1214), so this container trusts that CA, as `forgejo` does.
       SSL_CERT_DIR: /etc/ssl/certs:/etc/ssl/dev-issuer-ca
