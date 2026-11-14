@@ -39,8 +39,9 @@ SOCKET_NAME = "s"
 CHECK_FOLDERS = ".box-checks"
 #: Host wall seconds each check container is given, as `running_wait` is.
 CHECK_TIMEOUT = 30
-#: The runtimes that sandbox a box, and so are proven. `runc` is the declared no-sandbox mode.
-_PROVEN = frozenset({"runsc"})
+#: The one runtime that is the declared no-sandbox mode, and so is not checked. Every other name is proven, so a
+#: runtime nobody meant to name (`runsc-job` among them) is refused rather than started unchecked.
+_UNCHECKED = "runc"
 _SOCKET_ENTRY = f"{CHECK_TARGET}/{SOCKET_NAME}"
 #: The container's whole job: one stream connect, one marker.
 _CONNECT = (
@@ -268,7 +269,7 @@ def require_box_check(docker: DockerFn, runtime: str, rootfs: Rootfs, *, flags: 
     Returns on a pass (or for a runtime that is no sandbox); raises `BoxCheckFailed` when the runtime lets the connect
     through, `BoxFault` when the check could not say. `flags` are the box's confinement (`_box_flags`), `labels` its
     claim and tenant labels, `mounts` the shared-mount table binds are translated through."""
-    if runtime not in _PROVEN:
+    if runtime == _UNCHECKED:
         return
     key = _registration_key(docker, runtime)
     if key is not None and _held(docker, key):
