@@ -8,6 +8,7 @@ helper, so a missing module is a per-test red, never a collection error.
 """
 from __future__ import annotations
 
+import faulthandler
 import importlib
 import json
 import os
@@ -215,10 +216,13 @@ class TickChild:
 
     def __init__(self, body: Callable[[], Any], result: Path) -> None:
         self.result = result
+        self.stacks = result.with_suffix(".stacks.txt")
         self.pid = os.fork()
         if self.pid == 0:  # pragma: no cover — runs in the forked child
             code = 1
             try:
+                # THROWAWAY (tick-hang stress): SIGUSR1 dumps every thread's stack, so a child that never ends says where.
+                faulthandler.register(signal.SIGUSR1, file=open(self.stacks, "w"), all_threads=True)  # noqa: SIM115
                 try:
                     out: dict[str, Any] = {"rc": body()}
                 except BaseException as stopped:  # noqa: BLE001 — the child reports how it ended
@@ -241,9 +245,13 @@ class TickChild:
             if done:
                 return json.loads(self.result.read_text(encoding="utf-8")) if self.result.is_file() else {"raised": "no-result"}
             time.sleep(0.05)
+        os.kill(self.pid, signal.SIGUSR1)
+        time.sleep(1.0)
         os.kill(self.pid, signal.SIGKILL)
         os.waitpid(self.pid, 0)
-        raise AssertionError(f"the child tick did not end within {seconds} s of its stop")
+        stacks = self.stacks.read_text(encoding="utf-8", errors="replace") if self.stacks.is_file() else "(no dump)"
+        raise AssertionError(f"the child tick did not end within {seconds} s of its stop\n"
+                             f"=== CHILD STACKS ===\n{stacks}\n=== END CHILD STACKS ===")
 
 
 def kill_if_alive(*pids: int) -> None:

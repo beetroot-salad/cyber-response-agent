@@ -1,0 +1,63 @@
+# THROWAWAY: hammer the forked-tick tests until one hangs, so the child's stack dump says where.
+# Never merge. Each runner runs four loops at once (CI's shards run four xdist workers) for ~20 minutes.
+name: stress-tick-hang
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  stress:
+    name: stress (${{ matrix.n }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        n: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - name: Set up Python
+        run: uv python install 3.11
+      - name: Sync defender venv
+        working-directory: defender
+        run: uv sync --extra dev --extra runtime --extra api --locked
+      - name: Start PostgreSQL
+        run: |
+          docker run -d --name defender-postgres -e POSTGRES_PASSWORD=postgres \
+            -p 127.0.0.1:5432:5432 postgres:17.11 -c max_connections=400
+          timeout 60 sh -c 'until docker exec defender-postgres pg_isready -h 127.0.0.1 -q; do sleep 1; done'
+      - name: Loop the forked-tick tests
+        working-directory: defender
+        env:
+          DEFENDER_TEST_POSTGRES_DSN: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+        run: |
+          mkdir -p ../stress
+          loop() {
+            end=$((SECONDS + 1200)); i=0
+            while [ $SECONDS -lt $end ]; do
+              i=$((i + 1))
+              uv run pytest -q -p no:cacheprovider -n 0 -p no:randomly \
+                tests/tenancy/tenant_1108_p4/test_1278_tick_faults.py \
+                tests/tenancy/tenant_1108_p4/test_1278_tick.py \
+                > "../stress/loop$1-run$i.log" 2>&1 || echo "loop $1 run $i FAILED"
+              tail -1 "../stress/loop$1-run$i.log" | sed "s/^/loop $1 run $i: /"
+            done
+          }
+          loop 1 & loop 2 & loop 3 & loop 4 & wait
+          echo "=== failures ==="
+          failed=0
+          for f in ../stress/*.log; do
+            if grep -qE '^(FAILED|ERROR) ' "$f"; then
+              failed=1; echo "##### $f"; sed -n '/= FAILURES =/,/short test summary/p;/= ERRORS =/,/short test summary/p' "$f"
+            fi
+          done
+          exit $failed
+      - name: Keep the logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stress-${{ matrix.n }}
+          path: stress/
