@@ -75,6 +75,19 @@ def _server_base(server_url: str) -> str:
     return server_url.rstrip("/")
 
 
+def check_issuer(issuer: str) -> str:
+    """The issuer unchanged if it is `<server>/realms/<realm>` as the adapters read it, else `ValueError`: the one
+    owner of the rule, so the program's settings and the adapters cannot disagree."""
+    _realm_url(issuer)
+    return issuer
+
+
+def check_server_url(server_url: str) -> str:
+    """The server URL unchanged if the adapters accept it as their back-channel base, else `ValueError`."""
+    _server_base(server_url)
+    return server_url
+
+
 def _rsa_keys(published: Any) -> dict[str, Any]:
     """The usable RS256 signing keys of a published key set, by key id; others are skipped."""
     if not isinstance(published, list):

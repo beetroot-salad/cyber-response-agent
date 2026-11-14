@@ -62,13 +62,21 @@ async def _abandonable(call: Callable[[], None]) -> None:
     loop = asyncio.get_running_loop()
     done: asyncio.Future[None] = loop.create_future()
 
+    def settle(error: BaseException | None) -> None:
+        if done.cancelled():
+            return
+        if error is None:
+            done.set_result(None)
+        else:
+            done.set_exception(error)
+
     def work() -> None:
         try:
             call()
         except BaseException as failed:  # noqa: BLE001 — handed to the awaiting coroutine whole
-            loop.call_soon_threadsafe(lambda err=failed: done.cancelled() or done.set_exception(err))
+            loop.call_soon_threadsafe(settle, failed)
         else:
-            loop.call_soon_threadsafe(lambda: done.cancelled() or done.set_result(None))
+            loop.call_soon_threadsafe(settle, None)
 
     threading.Thread(target=work, name="version-check", daemon=True).start()
     await done

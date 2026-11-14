@@ -16,6 +16,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
 
 from defender.identity import Bootstrap, DataRuleViolation
+from defender.identity.keycloak import check_issuer, check_server_url
 
 T = TypeVar("T")
 
@@ -65,14 +66,14 @@ class Settings:
             port=parsed("DEFENDER_API_PORT", _port),
             frontend_origin=parsed("DEFENDER_API_FRONTEND_ORIGIN", _origin),
             administrators=_administrators("DEFENDER_API_ADMINISTRATORS_FILE", text("DEFENDER_API_ADMINISTRATORS_FILE")),
-            keycloak_server_url=parsed("DEFENDER_KEYCLOAK_SERVER_URL", _origin),
-            signin_issuer=parsed("DEFENDER_KEYCLOAK_ISSUER", _issuer),
+            keycloak_server_url=parsed("DEFENDER_KEYCLOAK_SERVER_URL", check_server_url),
+            signin_issuer=parsed("DEFENDER_KEYCLOAK_ISSUER", check_issuer),
             signin_client_id=text("DEFENDER_KEYCLOAK_CLIENT_ID"),
             signin_client_secret=secret("DEFENDER_KEYCLOAK_CLIENT_SECRET_FILE"),
             signin_redirect_uri=parsed("DEFENDER_KEYCLOAK_REDIRECT_URI", _absolute_url),
             signin_admin_client_id=text("DEFENDER_KEYCLOAK_ADMIN_CLIENT_ID"),
             signin_admin_client_secret=secret("DEFENDER_KEYCLOAK_ADMIN_CLIENT_SECRET_FILE"),
-            programs_issuer=parsed("DEFENDER_KEYCLOAK_PROGRAMS_ISSUER", _issuer),
+            programs_issuer=parsed("DEFENDER_KEYCLOAK_PROGRAMS_ISSUER", check_issuer),
             programs_audience=text("DEFENDER_KEYCLOAK_PROGRAMS_AUDIENCE"),
             programs_admin_client_id=text("DEFENDER_KEYCLOAK_PROGRAMS_ADMIN_CLIENT_ID"),
             programs_admin_client_secret=secret("DEFENDER_KEYCLOAK_PROGRAMS_ADMIN_CLIENT_SECRET_FILE"),
@@ -134,16 +135,6 @@ def _origin(value: str) -> str:
 
 
 _EMAIL = re.compile(r"[^@\s]+@[^@\s]+")
-_REALM = re.compile(r"/realms/[^/]+")
-
-
-def _issuer(value: str) -> str:
-    parts = _absolute(value)
-    if not _REALM.fullmatch(parts.path) or parts.query or parts.fragment:
-        raise ValueError("must be <scheme>://<host>/realms/<realm>")
-    return value
-
-
 def _secret(name: str, path: str) -> str:
     """A secret file holds one value and one trailing newline at most."""
     try:
