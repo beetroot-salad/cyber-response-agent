@@ -28,7 +28,7 @@ DEFENDER = REPO_ROOT / "defender"
 ADAPTERS = DEFENDER / "integrations"
 #: The registry is tenant knowledge: the committed fixture tenant's agent half carries the one
 #: this repo ships (the product tree carries none).
-FIXTURE_AGENT = REPO_ROOT / "knowledge" / "tenant-fixture" / "agent"
+FIXTURE_AGENT = REPO_ROOT / "defender" / "tests" / "fixtures" / "tenant-fixture" / "agent"
 
 SYSTEM = scene.REGISTRY_SYSTEM
 LOOKUP = "lookup"

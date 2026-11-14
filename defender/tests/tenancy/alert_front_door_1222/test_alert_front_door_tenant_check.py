@@ -501,4 +501,5 @@ def test_1345_a_knowledge_folder_without_an_alert_mapping_file_is_accepted(tmp_p
 @pytest.mark.parametrize("template", ["tenant-fixture", "tenant-template"])
 def test_1345_the_committed_tenants_carry_no_alert_mapping_file(template: str) -> None:
     """The shipped template and fixture drop the file (#1345 O5); the mapping lives in the database."""
-    assert not (S.REPO_ROOT / "knowledge" / template / "settings" / ALERT_MAPPING).exists()
+    from defender.tests.support.tenancy._tenants1106 import committed_folder
+    assert not (committed_folder(S.REPO_ROOT, template) / "settings" / ALERT_MAPPING).exists()

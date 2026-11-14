@@ -35,7 +35,7 @@ def _without(rows: dict[tuple[str, str], dict], pair: tuple[str, str]) -> dict:
 
 def _repo(tmp_path: Path, *, fixture: dict = ROWS_ONE, template: dict = ROWS_TEMPLATE) -> Path:
     """A committed repo declaring alpha and beta, whose two walked knowledge folders
-    (`knowledge/tenant-fixture/`, `knowledge/tenant-template/`) hold `fixture` and
+    (`defender/tests/fixtures/tenant-fixture/`, `knowledge/tenant-template/`) hold `fixture` and
     `template`."""
     repo = planted_tree(tmp_path, {"alpha": "lookup", "beta": "lookup"})
     T.plant_census_settings(repo, fixture, template_rows=template)
@@ -68,12 +68,12 @@ def test_a_row_missing_from_one_tenant_turns_the_gate_red_naming_that_tenant(tmp
 @pytest.mark.parametrize("fault", ["no agent half", "linked settings half"])
 def test_a_tenant_the_run_would_refuse_at_start_turns_the_gate_red(tmp_path, fault):
     repo = _repo(tmp_path)
-    one = repo / "knowledge" / "tenant-fixture"
+    one = T.committed_folder(repo, "tenant-fixture")
     if fault == "no agent half":
         shutil.rmtree(one / "agent")
     else:
         shutil.rmtree(one / "settings")
-        (one / "settings").symlink_to(repo / "knowledge" / "tenant-template" / "settings")
+        (one / "settings").symlink_to(T.committed_folder(repo, "tenant-template") / "settings")
     rc, out = _gate(repo)
     assert rc != 0, out
     assert "tenant-fixture" in out, out
@@ -83,7 +83,7 @@ def test_a_tenant_the_run_would_refuse_at_start_turns_the_gate_red(tmp_path, fau
 def test_a_fixture_with_no_case_file_keeps_the_gate_green(tmp_path):
     """#1359 O2: neither a case-record file nor a case-history folder is required of a tenant."""
     repo = _repo(tmp_path)
-    one = repo / "knowledge" / "tenant-fixture" / "settings"
+    one = T.committed_folder(repo, "tenant-fixture") / "settings"
     shutil.rmtree(one / "systems" / "case-history", ignore_errors=True)
     (one / "case-record.yaml").unlink(missing_ok=True)
     rc, out = _gate(repo)
@@ -95,7 +95,7 @@ def test_1345_a_leftover_malformed_alert_mapping_file_keeps_the_gate_green(tmp_p
     """The folders hold no `settings/alert-mapping.yaml` and the gate is green; a malformed one left in either is not
     read, so it stays green. (#1345 O5; the template used to be refused without it)"""
     repo = _repo(tmp_path)
-    leftover = repo / "knowledge" / folder / "settings" / "alert-mapping.yaml"
+    leftover = T.committed_folder(repo, folder) / "settings" / "alert-mapping.yaml"
     assert not leftover.exists()  # premise: the planted folders carry none
     rc, out = _gate(repo)
     assert rc == 0, out

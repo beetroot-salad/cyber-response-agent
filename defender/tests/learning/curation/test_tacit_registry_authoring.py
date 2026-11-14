@@ -21,7 +21,7 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 #: #1108 P4 (authoring header and worked example) is kept byte for byte as a fixture; the
 #: committed fixture tenant carries the tenant-side one.
 SHIPPED_REGISTRY = _pre_p4_shipped.TACIT_REGISTRY
-FIXTURE_AGENT = REPO_ROOT / "knowledge" / "tenant-fixture" / "agent"
+FIXTURE_AGENT = REPO_ROOT / "defender" / "tests" / "fixtures" / "tenant-fixture" / "agent"
 
 
 def _tree(tmp_path: Path, *entries: dict) -> Path:

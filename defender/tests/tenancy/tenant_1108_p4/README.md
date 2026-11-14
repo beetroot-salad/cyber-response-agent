@@ -9,7 +9,7 @@ the whole record a code session needs; the working notes it was built from are n
 - Design: issue #1108 comment "#1108 P4 — the switch: current intent + design (r3, 2026-10-22)",
   sha256 `04283016b7fe7cbbe8ee53267b658af111fae0b79dfe3258df5fc3eb8b21efba`, plus **amendment A**
   (human, 2026-10-23, below). P3's amendments 2 and 3 stand except where r3 names otherwise.
-- Shared machinery: `_support.py` (fixture tenant `knowledge/tenant-fixture/`, git-init plus a
+- Shared machinery: `_support.py` (fixture tenant `defender/tests/fixtures/tenant-fixture/`, git-init plus a
   **real** P3 publish: `published_tenant`, `second_tenant`, `place_fixture`, `publish_placed`,
   `publish_once`, `bind_forge`/`unbind_forge`, pytest fixture `p4_tenant`), `_s_b_support.py`
   (run start, publish child, report-line vocabulary), `_drain_support.py` (drains, lanes, AppRole
@@ -306,7 +306,7 @@ Repair round r4 (this round), all additive or stricter:
   `integrations/test_scaffold_rules.py`'s template sweep covers every committed `knowledge/*/agent` catalog plus that fixture's (which carries
   the `_draft`); `learning/curation/test_tacit_registry_authoring.py` gates the fixture tenant's and the pre-P4 registry and reads its worked
   example from the pre-P4 copy; `tooling/layout_contracts/test_1080_lints_and_pointers.py::test_staying_commands_import_modules_that_have_moved`
-  runs `tacit_cli check --defender-dir knowledge/tenant-fixture/agent` (an agent root under the existing flag; not yet named in §2).
+  runs `tacit_cli check --defender-dir defender/tests/fixtures/tenant-fixture/agent` (an agent root under the existing flag; not yet named in §2).
 - Deleted with production code the cleanup removed (OD12 class i):
   - `shared/process/test_git.py`: the `git_rev_list_count` half of the head-sha case, `test_git_commit_pathspec_scoped_and_trailers`,
     `test_git_commit_no_op_returns_none`, `test_git_worktree_add_remove`, `test_git_worktree_add_branch`, `test_git_push_sets_upstream`,
@@ -339,7 +339,7 @@ Repair round r5:
   `e2e/test_box_boundary_e2e.py::test_write_under_defender_dir_fails_erofs_by_errno` (the poisoned write goes under `skills/gather/`, a folder
   the product still ships, so the probe meets the ro bind rather than ENOENT; box-only, not run locally).
 - `tooling/layout_contracts/test_1080_lints_and_pointers.py::test_ci_step_and_docs_invoke_a_command_by_a_path_or_module_that_must_keep_working`
-  (class ii): the expected CI `tacit_cli check` step carries `--defender-dir knowledge/tenant-fixture/agent`, the spelling the r4 respell of
+  (class ii): the expected CI `tacit_cli check` step carries `--defender-dir defender/tests/fixtures/tenant-fixture/agent`, the spelling the r4 respell of
   `::test_staying_commands_import_modules_that_have_moved` runs (the golden stays the pre-move recording; the move is applied in the test).
 - `e2e/test_training_spine.py` (class ii, repair-list class D): `TriggerRecorder` takes the batch the drain hands it and runs the REAL findings curator
   over that batch's draft lanes with `batch=` (as `_drain_support.CuratorTrigger`), not over checkout trees. It records `completed`, and every

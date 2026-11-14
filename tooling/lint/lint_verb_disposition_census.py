@@ -43,16 +43,17 @@ from defender.systems.verb_dispositions import (  # noqa: E402
 from defender.records._tenant_id import TenantRefused
 
 #: The product repo's own knowledge folders this gate walks: the template the lifecycle service
-#: copies into a new tenant's repo, and the frozen fixture the tests run as. A real tenant's folder lives in its own
-#: repo, checked there by `tenant.py check --folder`; no tenants root is walked.
+#: copies into a new tenant's repo, and the frozen fixture the tests run as (under the tests, #1503). A real tenant's
+#: folder lives in its own repo, checked there by `tenant.py check --folder`; no tenants root is walked.
 FIXTURE_DIRNAME = "tenant-fixture"
+FIXTURE_REL = ("defender", "tests", "fixtures", FIXTURE_DIRNAME)
 
 
 def _folders(root: Path) -> list[tuple[str, Path]]:
     """Every knowledge folder the gate checks, as `(name, folder)`: the template, then the
     fixture."""
     template = template_dir(root)
-    return [(template.name, template), (FIXTURE_DIRNAME, template.parent / FIXTURE_DIRNAME)]
+    return [(template.name, template), (FIXTURE_DIRNAME, Path(root).joinpath(*FIXTURE_REL))]
 
 
 def main(argv: list[str]) -> int:

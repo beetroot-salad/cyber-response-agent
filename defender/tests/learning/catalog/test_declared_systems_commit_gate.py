@@ -28,7 +28,7 @@ DECLARED = frozenset({"elastic", "cmdb"})
 
 #: The repo-relative spelling of the catalog.
 CATALOG_REL = "agent/skills/gather/queries/"
-#: The fixture tenant's committed catalog (made-up content, `knowledge/tenant-fixture/agent/`).
+#: The fixture tenant's committed catalog (made-up content, `defender/tests/fixtures/tenant-fixture/agent/`).
 FIXTURE_CATALOG = FIXTURE_AGENT / "skills" / "gather" / "queries"
 #: The fixture tenant's declared systems: `cmdb` (its system skill, marker and catalog folder)
 #: and `elastic` (the product adapter behind its catalog's `elastic/` template, which only a

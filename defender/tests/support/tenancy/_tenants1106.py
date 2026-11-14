@@ -22,7 +22,18 @@ TEMPLATE_DIR = REPO_ROOT / "knowledge" / "tenant-template"
 PLAYGROUND_ID = fixture_uuid("tenant:playground")
 TEMPLATE_SETTINGS = TEMPLATE_DIR / "settings"
 #: The frozen test fixture tenant (#1120 H2): what a test runs as when it names no tenant.
-FIXTURE = REPO_ROOT / "knowledge" / "tenant-fixture"
+FIXTURE = REPO_ROOT / "defender" / "tests" / "fixtures" / "tenant-fixture"
+#: Where each committed knowledge folder sits under a repo root: the starter tenant in
+#: `knowledge/`, the tests' fixture tenant under the tests (#1503).
+COMMITTED_FOLDERS: dict[str, tuple[str, ...]] = {
+    "tenant-template": ("knowledge", "tenant-template"),
+    "tenant-fixture": ("defender", "tests", "fixtures", "tenant-fixture"),
+}
+
+
+def committed_folder(repo: Path, name: str) -> Path:
+    """The committed knowledge folder `name` (`tenant-template`/`tenant-fixture`) under `repo`."""
+    return Path(repo).joinpath(*COMMITTED_FOLDERS[name])
 FIXTURE_SETTINGS = FIXTURE / "settings"
 FIXTURE_AGENT = FIXTURE / "agent"
 TEMPLATE_AGENT = TEMPLATE_DIR / "agent"
@@ -466,7 +477,7 @@ def place_tenant(root: Path, tenant_id: str, *, alert_mapping: Any = PLANTED_ALE
 def plant_census_settings(repo: Path, rows: dict, *, template_rows: dict | None = None,
                           ) -> list[Path]:
     """Give a planted repo (`_dispositions995.planted_tree`) the two knowledge folders the
-    census gate walks, `knowledge/tenant-fixture/` and `knowledge/tenant-template/`: each holds
+    census gate walks, `defender/tests/fixtures/tenant-fixture/` and `knowledge/tenant-template/`: each holds
     the table `rows` (the template `template_rows` when given) and the case mapping. Plain folders as
     committed (no `.tenant-id`, no row). Returns the table paths, fixture first."""
     from defender.tests.support.invlang.validation._dispositions995 import write_table
@@ -476,7 +487,7 @@ def plant_census_settings(repo: Path, rows: dict, *, template_rows: dict | None 
     for name, table_rows in (("tenant-fixture", rows),
                              ("tenant-template", template_rows if template_rows is not None
                               else rows)):
-        folder = repo / "knowledge" / name
+        folder = committed_folder(repo, name)
         files = {CASE_RECORD_REL: case_record_text()}
         for rel, text in files.items():
             (folder / "settings" / rel).parent.mkdir(parents=True, exist_ok=True)
@@ -564,6 +575,8 @@ __all__ = [
     "PLAYGROUND_ID",
     "REPO_ROOT",
     "REQUIRED_FILES",
+    "COMMITTED_FOLDERS",
+    "committed_folder",
     "SHIPPED_CORRELATION_TEMPLATE",
     "TABLE_A",
     "TABLE_B",

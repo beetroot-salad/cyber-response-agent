@@ -22,7 +22,7 @@ pytestmark = pytest.mark.e2e
 
 #: A run reads its TENANT's catalog (`agent/skills/gather/queries/` in its export), never the
 #: checkout's, so an editable catalog is a copy of the fixture tenant's `agent/`.
-FIXTURE_AGENT = DEFENDER.parent / "knowledge" / "tenant-fixture" / "agent"
+FIXTURE_AGENT = DEFENDER / "tests" / "fixtures" / "tenant-fixture" / "agent"
 CATALOG_REL = Path("skills") / "gather" / "queries"
 
 ANCESTORS = [

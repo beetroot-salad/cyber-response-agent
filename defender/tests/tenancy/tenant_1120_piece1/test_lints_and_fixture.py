@@ -198,7 +198,9 @@ def _planted_repo(tmp_path: Path, *, fixture_rows: dict = H.CENSUS_ROWS,
     repo = D995.planted_tree(tmp_path, {"alpha": "lookup", "beta": "lookup"})
     T1106.plant_tenant(repo / "knowledge", "tenant-template", table=_table(H.CENSUS_TEMPLATE_ROWS),
                        configs={})
-    T1106.plant_tenant(repo / "knowledge", "tenant-fixture", table=_table(fixture_rows), configs={})
+    fixture = T1106.plant_tenant(tmp_path / "fixture-src", "tenant-fixture", table=_table(fixture_rows),
+                                 configs={})
+    shutil.copytree(fixture, T1106.committed_folder(repo, "tenant-fixture"), symlinks=True)
     if broken_lab:
         T1106.plant_tenant(repo / "knowledge" / "tenants", "x", configs={}, omit=("verb-grants.yaml",))
     seed_repo(repo, add="-A", message="tenants")
@@ -266,7 +268,7 @@ VIOLATIONS = [
 def test_1120_the_census_lint_and_check_folder_agree_on_a_violating_folder(
         tmp_path: Path) -> None:
     checkout = H.tmp_checkout(tmp_path / "co")
-    fixture_slot = checkout / "knowledge" / "tenant-fixture"
+    fixture_slot = T1106.committed_folder(checkout, "tenant-fixture")
     rc, out = _census(checkout)
     assert rc == 0, f"the census lint refused a checkout whose template and fixture are clean:\n{out}"
     assert "tenant-fixture" in _clean_names(out), f"the lint did not walk the fixture:\n{out}"

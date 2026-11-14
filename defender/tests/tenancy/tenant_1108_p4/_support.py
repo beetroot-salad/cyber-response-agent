@@ -39,7 +39,7 @@ from defender.tests.tenancy.tenant_1108_delivery._support import (
     target,
 )
 
-#: The committed fixture tenant (`knowledge/tenant-fixture/`). It carries no `agent/.tenant-id`:
+#: The committed fixture tenant (`defender/tests/fixtures/tenant-fixture/`). It carries no `agent/.tenant-id`:
 #: the same tree is placed under several ids, so the id is written at placement.
 FIXTURE = tenants.FIXTURE
 FIXTURE_AGENT = tenants.FIXTURE_AGENT
