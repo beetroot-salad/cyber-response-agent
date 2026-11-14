@@ -301,7 +301,7 @@ Repair round r4 (this round), all additive or stricter:
   `agent/skills/tacit-knowledge/SKILL.md`, re-asserted by `tenancy/test_tacit_knowledge_registry.py` (R-5).
 - Older suites reading the product content P4 deleted (item 13), re-spelled, nothing deleted: `invlang/validation/test_lessons_frontier_scale.py` (4)
   and `learning/retrieval/test_container_lesson_recall.py` (7) rank against the pre-P4 shipped lessons, now the committed test fixture
-  `tests/fixtures/pre-p4-shipped/agent/` (byte-identical to base `0f62791e`; helper `support/shared/_pre_p4_shipped.py`);
+  `tests/fixtures/pre-p4-shipped/agent/` (byte-identical to base `0f62791e` except its lessons, which #1503 replaced with nine made-up ones keeping their selectors; helper `support/shared/_pre_p4_shipped.py`);
   `invlang/validation/test_frontier_shared_walk.py`'s straddle case recalls from the run copy's `agent/lessons`;
   `integrations/test_scaffold_rules.py`'s template sweep covers every committed `knowledge/*/agent` catalog plus that fixture's (which carries
   the `_draft`); `learning/curation/test_tacit_registry_authoring.py` gates the fixture tenant's and the pre-P4 registry and reads its worked
