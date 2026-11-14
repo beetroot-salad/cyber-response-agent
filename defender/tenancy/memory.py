@@ -194,7 +194,10 @@ class InMemoryTenantRepository:
             return self._request(
                 tenant_id, row.failure is not None, "nothing to resume", failure=None)
 
-    async def request_offboard(self, tenant_id: TenantId, *, now: _dt.datetime) -> TenantRecord:
+    async def seed_offboarding(self, tenant_id: TenantId) -> TenantRecord:
+        """The twin's seeder for an offboarding tenant: what tenancy's `offboard` leaves (from `creating` or `active`:
+        `offboarding`, `offboard` pending at step `offboard`, any failure cleared; `NotFound`, `Conflict` otherwise). Not
+        a port method: the offboard request is the job store's (#1496)."""
         with self._mutex:
             row = self._row(tenant_id)
             return self._request(

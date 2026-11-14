@@ -5,7 +5,7 @@ design accepts. Beside `identity.audit`; the API's list of actions is amended to
 from __future__ import annotations
 
 import logging
-from typing import Literal
+from typing import Literal, Protocol
 
 from defender import _log
 from defender.identity.audit import SYSTEM
@@ -17,9 +17,19 @@ AuditAction = Literal[
     "learning_post_step",
 ]
 
-__all__ = ["SYSTEM", "AuditAction", "announce"]
+__all__ = ["SYSTEM", "Announcer", "AuditAction", "announce"]
 
 _audit = logging.getLogger("defender.jobs.audit")
+
+
+class Announcer(Protocol):
+    """Where a job store sends its audit events: `announce` (the log) unless its owner passes another (#1496: a
+    test world records its own store's events without the process-wide logger)."""
+
+    def __call__(
+        self, action: AuditAction, *, actor: str, tenant_id: str, target: str, detail: str | None = None,
+        credential_id: str | None = None,
+    ) -> None: ...
 
 
 def announce(

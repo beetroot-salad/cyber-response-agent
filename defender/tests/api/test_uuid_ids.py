@@ -4,6 +4,8 @@ app's own route table, so a new route that takes an id is covered without being 
 administrator check still answer first; a well-formed id that names nothing keeps its 404."""
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import typing
 from typing import Any
 
@@ -59,9 +61,12 @@ def _id_inputs(app: Any) -> list[tuple[APIRoute, str, str, set[str]]]:
 
 
 @pytest.fixture(scope="module")
-def world() -> tuple[World, Any, Any]:
+def world() -> Iterator[tuple[World, Any, Any]]:
     world = World(administrators=[OPS], tenants={T1: [ANN]}, database=True)  # the alert routes are the real store's (#1496)
-    return world, world.sign_in(ANN), world.sign_in_admin()
+    try:
+        yield world, world.sign_in(ANN), world.sign_in_admin()
+    finally:
+        world.close()  # a module's world: the per-test closer leaves it alone
 
 
 def _request(world: tuple[World, Any, Any], route: APIRoute, where: str, name: str, path_names: set[str],

@@ -37,6 +37,7 @@ from typing import Any
 
 import httpx
 import pytest
+from defender.tests.support.tenancy._active1214 import offboard_tenant_row
 
 pytestmark = pytest.mark.live
 
@@ -173,7 +174,7 @@ def test_two_tenants_on_real_services_cannot_reach_each_other(tmp_path):
         finally:
             for tenant in (a, b):
                 with contextlib.suppress(Exception):
-                    await stack.tenants.request_offboard(tenant, now=NOW)
+                    await offboard_tenant_row(stack.tenants, tenant)
             with contextlib.suppress(Exception):
                 await stack.drive()
     asyncio.run(scenario())

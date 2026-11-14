@@ -43,7 +43,7 @@ from defender.records.formats import (
 
 from defender.records.job_facts import EXPIRED, LEASE_LAPSED, OFFBOARD_MESSAGE, RETRY_CAP, TENANT_OFFBOARDED
 
-from .audit import SYSTEM, announce
+from .audit import SYSTEM, Announcer, announce
 from .errors import Conflict, NotFound, OffboardNotSettled, UnknownReference, UnstorableText
 from defender.tenancy.models import AlertMappingRow, TenantRecord
 from defender.tenancy.models import offboard as _tenancy_offboard
@@ -147,8 +147,10 @@ def _unheld() -> Any:
 class JobStore:
     def __init__(
         self, dsn: str, *, clock: Callable[[], _dt.datetime], lease: float = LEASE_SECONDS, max_connections: int = 10,
-        learning_max_age: float = LEARNING_MAX_AGE_SECONDS,
+        learning_max_age: float = LEARNING_MAX_AGE_SECONDS, announce: Announcer = announce,
     ) -> None:
+        """`announce` receives every audit event the store writes after its change commits (default: the audit log)."""
+        self._announce = announce
         self._engine = async_engine(dsn, max_connections=max_connections)
         self._sessions = sessions(self._engine)
         self._clock = clock
@@ -267,7 +269,7 @@ class JobStore:
                 raise UnknownReference(f"no tenant {tenant_id!r}") from None
             raise
         assert stored is not None
-        announce("alert_mapping.update", actor=actor, tenant_id=tenant_id, target=tenant_id, credential_id=credential_id)
+        self._announce("alert_mapping.update", actor=actor, tenant_id=tenant_id, target=tenant_id, credential_id=credential_id)
         return stored, created
 
     # --- reads --------------------------------------------------------------------------
@@ -334,7 +336,7 @@ class JobStore:
                 attempt=1, stage="queued", created_at=self._clock(), cost_usd=0.0)
             s.add(row)
             record = investigation_record(row)
-        announce("investigation.start", actor=actor, tenant_id=tenant_id, target=record.investigation_id,
+        self._announce("investigation.start", actor=actor, tenant_id=tenant_id, target=record.investigation_id,
                  detail=f"alert {alert_id}", credential_id=credential_id)
         return record, True
 
@@ -363,7 +365,7 @@ class JobStore:
             record = investigation_record(row)
             # The investigation's tenant is a `tenancy.tenants` row (its foreign key), never deleted.
             state = (await s.execute(select(TenantRecord.state).where(TenantRecord.id == record.tenant_id))).scalar_one()
-        announce("investigation.claim", actor=SYSTEM, tenant_id=record.tenant_id, target=record.investigation_id)
+        self._announce("investigation.claim", actor=SYSTEM, tenant_id=record.tenant_id, target=record.investigation_id)
         return Claim(record=record, tenant_state=state)
 
     # --- cancel -------------------------------------------------------------------------
@@ -394,7 +396,7 @@ class JobStore:
                     raise Conflict(f"the investigation already ended and was retried as {retry}; cancel that one")
                 raise Conflict("the investigation already ended")
             record = investigation_record(row)
-        announce("investigation.cancel", actor=actor, tenant_id=tenant_id, target=investigation_id,
+        self._announce("investigation.cancel", actor=actor, tenant_id=tenant_id, target=investigation_id,
                  credential_id=credential_id)
         return record
 
@@ -431,10 +433,10 @@ class JobStore:
                     if not (await s.execute(select(row.id).where(row.tenant_id == tenant_id, live).limit(1))).first():
                         break
         for job_id in sorted(investigations):
-            announce("investigation.cancel", actor=actor, tenant_id=tenant_id, target=job_id,
+            self._announce("investigation.cancel", actor=actor, tenant_id=tenant_id, target=job_id,
                      detail=f"reason={TENANT_OFFBOARDED}")
         for job_id in sorted(learning):
-            announce("learning_job.finish", actor=actor, tenant_id=tenant_id, target=job_id,
+            self._announce("learning_job.finish", actor=actor, tenant_id=tenant_id, target=job_id,
                      detail=f"status=skipped reason={TENANT_OFFBOARDED}")
         return record
 
@@ -484,7 +486,7 @@ class JobStore:
             await s.execute(delete(InvestigationRow).where(
                 InvestigationRow.tenant_id == tenant_id, InvestigationRow.alert_id == named.alert_id,
                 InvestigationRow.request_key == named.request_key))
-        announce("investigation.delete", actor=actor, tenant_id=tenant_id, target=investigation_id,
+        self._announce("investigation.delete", actor=actor, tenant_id=tenant_id, target=investigation_id,
                  credential_id=credential_id)
 
     # --- the worker's write -------------------------------------------------------------
@@ -524,7 +526,7 @@ class JobStore:
                     status="queued", created_at=self._clock()))
                 await self._arm_check(s, record.tenant_id)
         detail = f"stage={stage}" + (f" reason={failure_reason}" if failure_reason else "")
-        announce("investigation.finish", actor=SYSTEM, tenant_id=tenant_id, target=investigation_id, detail=detail)
+        self._announce("investigation.finish", actor=SYSTEM, tenant_id=tenant_id, target=investigation_id, detail=detail)
         return record
 
     # --- the holder's lease and end writes (#1343) ---------------------------------------------
@@ -632,10 +634,10 @@ class JobStore:
                     continue
                 taken.append(outcome.old_id)
                 kind = "learning_job" if outcome.of_learning else "investigation"
-                announce(f"{kind}.takeover", actor=SYSTEM, tenant_id=outcome.tenant_id,  # type: ignore[arg-type]
+                self._announce(f"{kind}.takeover", actor=SYSTEM, tenant_id=outcome.tenant_id,  # type: ignore[arg-type]
                          target=outcome.old_id, detail=f"reason={outcome.reason}")
                 if outcome.retry_id is not None:
-                    announce(f"{kind}.retry", actor=SYSTEM, tenant_id=outcome.tenant_id,  # type: ignore[arg-type]
+                    self._announce(f"{kind}.retry", actor=SYSTEM, tenant_id=outcome.tenant_id,  # type: ignore[arg-type]
                              target=outcome.retry_id)
         return taken
 
@@ -753,7 +755,7 @@ class JobStore:
             s.add(row)
             await self._arm_check(s, tenant_id)
             record = learning_job_record(row)
-        announce("learning_job.start", actor=actor, tenant_id=tenant_id, target=record.learning_job_id,
+        self._announce("learning_job.start", actor=actor, tenant_id=tenant_id, target=record.learning_job_id,
                  detail=f"investigation {investigation_id}; trigger=explicit", credential_id=credential_id)
         return record, True
 
@@ -814,10 +816,10 @@ class JobStore:
                     select(TenantRecord.state).where(TenantRecord.id == record.tenant_id))).scalar_one()
                 claim = LearningClaim(record=record, tenant_state=state)
         for job_id, tenant_id in sorted(expired, key=lambda row: str(row.id)):
-            announce("learning_job.finish", actor=SYSTEM, tenant_id=str(tenant_id), target=str(job_id),
+            self._announce("learning_job.finish", actor=SYSTEM, tenant_id=str(tenant_id), target=str(job_id),
                      detail=f"status=skipped reason={EXPIRED}")
         if claim is not None:
-            announce("learning_job.claim", actor=SYSTEM, tenant_id=claim.record.tenant_id,
+            self._announce("learning_job.claim", actor=SYSTEM, tenant_id=claim.record.tenant_id,
                      target=claim.record.learning_job_id)
         return claim
 
@@ -850,7 +852,7 @@ class JobStore:
             if status == "completed":
                 await self._arm_check(s, tenant_id)
             record = learning_job_record(row)
-        announce("learning_job.finish", actor=SYSTEM, tenant_id=tenant_id, target=learning_job_id,
+        self._announce("learning_job.finish", actor=SYSTEM, tenant_id=tenant_id, target=learning_job_id,
                  detail=f"status={status}" + (f" reason={reason}" if reason else ""))
         return record
 

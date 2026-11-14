@@ -28,7 +28,6 @@ from defender.tests.support.runtime.engine._spec767 import (
     record,
     use_case_record,
 )
-from defender.tests.support.api._programs1307 import NoProgramsRealm  # #1307 D7: the programs port is required
 
 # ---------------------------------------------------------------------------------------------
 # The run record's `knowledge_source`, spelled in one place.
@@ -523,12 +522,9 @@ def test_run_main_comment_follows_the_host_outcome_when_the_box_rewrites_the_rec
 
 _NOW = "2026-10-22T12:00:00+00:00"
 _TENANT = "6f1c3b9e-4a5d-4e8f-9a0b-1c2d3e4f5a6b"
-#: #1306 O7: routes live under `/tenants/{T}`; the caller is a seeded session (cookie + Origin).
+#: #1306 O7: routes live under `/tenants/{T}`; the caller is a member signed in to the API test world.
 _ROUTE = f"/tenants/{_TENANT}"
-_SESSION = "stale-visibility-session"
 _ALERT_ID = "a1000000-0000-4000-8000-000000000001"
-_ORIGIN = "https://app.defender.test"
-_AUTH = {"Cookie": f"__Host-defender_session={_SESSION}", "Origin": _ORIGIN}
 
 
 def _knowledge(status: str, stale_kind: str | None = None) -> dict[str, Any]:
@@ -554,73 +550,23 @@ def _investigation(investigation_id: str, knowledge: dict[str, Any] | None) -> A
     return Investigation.model_validate(doc)
 
 
-class _NoPort:
-    """A sign-in or mail port these route tests never exercise: any call is a failure."""
-
-    def __getattr__(self, name: str) -> Any:
-        raise AssertionError(f"a route test reached the unused port: {name}")
-
-
-@pytest.fixture
-def api_db() -> Any:
-    """A fresh migrated test database for the API cases (#1496: they run on the real ports); skipped without one."""
-    from defender.tests.support.shared._postgres1339 import database
-
-    with database(migrated=True) as dsn:
-        yield dsn
-
-
-def _client(dsn: str, *investigations: Any) -> Any:
-    """The real app over the real ports (`JobStorePorts`, #1496) on the test database `dsn`, with each investigation
-    planted as its row (its knowledge as the worker writes it) beside a planted alert."""
-    import datetime as _dt
-
+def _served(*investigations: Any) -> tuple[Any, Any]:
+    """The API test world on its own test database (#1496: the real ports), `ann` a member of the tenant and signed in,
+    the tenant's alert stored and each investigation planted as its row, its knowledge as the worker writes it: (the
+    world, ann's browser)."""
     pytest.importorskip("fastapi")
-    import anyio
-    from fastapi.testclient import TestClient
-
-    from defender.api.app import create_app
-    from defender.api.job_store import JobStorePorts
-    from defender.api.ports import ApiDeps
-    from defender.api.refusing import Refusing
-    from defender.identity import Bootstrap, IdentityService, InMemoryIdentityRepository
-    from defender.jobs.store import JobStore
-    from defender.records._tenant_id import TenantId
-    from defender.tenancy import InMemoryTenantRepository
+    from defender.tests.support.api._identity1306 import ANN, World
     from defender.tests.support.shared._postgres1339 import execute
-    from defender.tests.support.tenancy._active1214 import insert_active_tenant
 
-    now = lambda: _dt.datetime(2026, 10, 22, 12, tzinfo=_dt.UTC)  # noqa: E731
-    insert_active_tenant(dsn, _TENANT, wiring=False)
-    execute(dsn, "INSERT INTO jobs.alerts (id, tenant_id, vendor, vendor_ticket_id, fired_at, changed_at, received_at, "
-                 "raw) VALUES (%s, %s, 'tickets', 'T-1', %s, %s, %s, %s)", (_ALERT_ID, _TENANT, _NOW, _NOW, _NOW, b"{}"))
+    world = World(tenants={_TENANT: [ANN]}, database=True)
+    assert world.add_alert(_TENANT) == _ALERT_ID
+    assert world.dsn is not None
     for inv in investigations:
-        execute(dsn, "INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, stage, created_at, "
-                     "started_at, finished_at, disposition, cost_usd, cost_is_lower_limit, knowledge, accounting_written_at) "
-                     "VALUES (%s, %s, %s, %s, %s, 'completed', %s, %s, %s, %s, %s, false, %s, %s)",
-                (inv.investigation_id, _TENANT, inv.alert_id, inv.request_key, inv.attempt, inv.created_at,
-                 inv.started_at, inv.finished_at, inv.disposition, inv.cost_usd,
-                 None if inv.knowledge is None else json.dumps(inv.knowledge.model_dump(mode="json")), _NOW))
-    tenants = InMemoryTenantRepository()
-    repo = InMemoryIdentityRepository(tenants=tenants)
-
-    async def seed() -> None:
-        # The in-memory repositories hold no loop state, so a throwaway loop seeds them.
-        await tenants.add_tenant(TenantId(_TENANT), created_at=now())
-        ann = await repo.add_user("ann@example.invalid", created_at=now(), status="active", display_name="Ann")
-        await repo.add_membership(ann.id, TenantId(_TENANT), status="active", invited_by=None,
-                                  created_at=now(), accepted_at=now())
-        await repo.add_session(_SESSION, ann.id, now=now(), expires_at=now() + _dt.timedelta(days=7))
-
-    anyio.run(seed)
-    identity = IdentityService(repo, signin=_NoPort(), mail=_NoPort(), clock=now,
-                               bootstrap=Bootstrap(administrators=()), programs=NoProgramsRealm())
-    ports, unbacked = JobStorePorts(JobStore(dsn, clock=now)), Refusing("no store in this test (#1496)")
-    deps = ApiDeps(
-        identity=identity, tenants=tenants, frontend_origin=_ORIGIN,
-        alerts=ports, investigations=ports, learning_jobs=ports, writes=ports, alert_mapping=ports, offboarding=ports,
-        lessons=unbacked, systems=unbacked, secrets=unbacked, checker=unbacked, artifact_links=unbacked, audit=unbacked)
-    return TestClient(create_app(deps), base_url="https://testserver")
+        world.plant_investigation(_TENANT, inv)
+        if inv.knowledge is not None:
+            execute(world.dsn, "UPDATE jobs.investigations SET knowledge = %s WHERE id = %s",
+                    (json.dumps(inv.knowledge.model_dump(mode="json")), inv.investigation_id))
+    return world, world.sign_in(ANN)
 
 
 def _store_run_knowledge(dsn: str, investigation_id: str, record_text: str | None, *,
@@ -640,15 +586,15 @@ CASES = [("stale", "transient"), ("stale", "operator"), ("current", None), ("pin
 
 
 @pytest.mark.parametrize(("status", "stale_kind"), CASES)
-def test_o_warn_api_serves_investigation_knowledge_through_the_store_port(status, stale_kind, api_db):
+def test_o_warn_api_serves_investigation_knowledge_through_the_store_port(status, stale_kind):
     """An investigation's `knowledge` reaches `GET /investigations/{id}` and the list as the
     store holds it."""
     inv = _investigation(f"inv-{status}-{stale_kind}", _knowledge(status, stale_kind))
-    client = _client(api_db, inv)
-    one = client.get(f"{_ROUTE}/investigations/{inv.investigation_id}", headers=_AUTH)
+    world, client = _served(inv)
+    one = client.get(f"{_ROUTE}/investigations/{inv.investigation_id}")
     assert one.status_code == 200, one.text
     assert one.json().get("knowledge") == _knowledge(status, stale_kind), one.json()
-    listed = client.get(f"{_ROUTE}/investigations", headers=_AUTH).json()
+    listed = client.get(f"{_ROUTE}/investigations").json()
     assert [i.get("knowledge") for i in listed["items"]] == [_knowledge(status, stale_kind)], listed
 
 
@@ -678,28 +624,31 @@ RECORD_TO_WIRE = [
 @pytest.mark.parametrize(("record", "wire"), RECORD_TO_WIRE,
                          ids=["fresh", "stale-transient", "stale-operator", "pinned"])
 def test_o_warn_api_maps_the_run_records_knowledge_source_to_the_wire_through_the_store(
-        tmp_path, record, wire, api_db):
+        tmp_path, record, wire):
     """The store maps the host record's text (raw reason included) to the API's `knowledge`,
     carrying the commit and stale kind and dropping the reason, and the route serves it. Written
     as the worker writes it (`_store_run_knowledge`), served through the real ports."""
     # A placeholder the mapping must replace.
     inv = _investigation("inv-mapped", {"status": "pinned", "commit": "0" * 40, "stale_kind": None})
-    client = _client(api_db, inv)
+    world, client = _served(inv)
     run_dir = tmp_path / "runs" / "run-1"
     run_dir.mkdir(parents=True)
     text = write_host_record(run_dir, record).read_text(encoding="utf-8")
-    _store_run_knowledge(api_db, inv.investigation_id, text)
+    _store_run_knowledge(world.dsn, inv.investigation_id, text)
 
-    served = client.get(f"{_ROUTE}/investigations/{inv.investigation_id}", headers=_AUTH).json()
+    served = client.get(f"{_ROUTE}/investigations/{inv.investigation_id}").json()
     assert served.get("knowledge") == wire, (
         f"the record {record} is served as {served.get('knowledge')}, not {wire}")
     assert "reason" not in (served.get("knowledge") or {}), served
 
 
-def test_o_warn_api_published_contract_declares_the_knowledge_field(api_db):
+def test_o_warn_api_published_contract_declares_the_knowledge_field():
     """`/openapi.json` declares `Investigation.knowledge` with exactly the statuses
     current/stale/pinned and stale kinds transient/operator (or null)."""
-    doc = _client(api_db).get("/openapi.json").json()
+    pytest.importorskip("fastapi")
+    from defender.tests.support.api._identity1306 import World
+
+    doc = World().client().get("/openapi.json").json()  # no store is reached: no database
     schemas = doc["components"]["schemas"]
     inv = schemas.get("Investigation") or schemas["Investigation-Output"]
     assert "knowledge" in inv["properties"], sorted(inv["properties"])
@@ -809,23 +758,23 @@ def test_od22_a_pre_p4_run_posts_todays_comment(tmp_path, monkeypatch):
         "positive control: a missing record where one should exist adds the operator sentence")
 
 
-def test_od22_an_investigation_with_no_run_serves_null_knowledge(api_db):
+def test_od22_an_investigation_with_no_run_serves_null_knowledge():
     """Case (1): seeded without knowledge, or written from no record, it serves
     null. Control: a fresh record's text is served `current`."""
     inv = _investigation("inv-no-run", None)
-    client = _client(api_db, inv)
-    served = client.get(f"{_ROUTE}/investigations/{inv.investigation_id}", headers=_AUTH).json()
+    world, client = _served(inv)
+    served = client.get(f"{_ROUTE}/investigations/{inv.investigation_id}").json()
     assert "knowledge" in served, served
     assert served["knowledge"] is None, served
 
-    _store_run_knowledge(api_db, inv.investigation_id, None)
-    served = client.get(f"{_ROUTE}/investigations/{inv.investigation_id}", headers=_AUTH).json()
+    _store_run_knowledge(world.dsn, inv.investigation_id, None)
+    served = client.get(f"{_ROUTE}/investigations/{inv.investigation_id}").json()
     assert served.get("knowledge", "absent") is None, (
         f"an investigation with no run is served {served.get('knowledge', 'absent')!r}")
 
-    _store_run_knowledge(api_db, inv.investigation_id,
+    _store_run_knowledge(world.dsn, inv.investigation_id,
                             json.dumps(knowledge_source("fresh")))
-    served = client.get(f"{_ROUTE}/investigations/{inv.investigation_id}", headers=_AUTH).json()
+    served = client.get(f"{_ROUTE}/investigations/{inv.investigation_id}").json()
     assert served.get("knowledge") == _knowledge("current"), served
 
 
@@ -840,21 +789,21 @@ API_RUN_CASES = {
 
 
 @pytest.mark.parametrize("case", list(API_RUN_CASES))
-def test_od22_the_api_fails_closed_only_where_a_record_should_exist(case, api_db):
+def test_od22_the_api_fails_closed_only_where_a_record_should_exist(case):
     """Through the store: a pre-P4 run serves null; a missing record whose stamp names a source,
     or a corrupt record, serves stale/operator with no commit. Control: a fresh record's text is
     `current`."""
     text, stamp_source, expected = API_RUN_CASES[case]
     inv = _investigation(f"inv-od22-{case}", None)
-    client = _client(api_db, inv)
+    world, client = _served(inv)
 
-    _store_run_knowledge(api_db, inv.investigation_id, json.dumps(knowledge_source("fresh")),
+    _store_run_knowledge(world.dsn, inv.investigation_id, json.dumps(knowledge_source("fresh")),
                             stamp_knowledge_source=stamp_view(knowledge_source("fresh")))
-    served = client.get(f"{_ROUTE}/investigations/{inv.investigation_id}", headers=_AUTH).json()
+    served = client.get(f"{_ROUTE}/investigations/{inv.investigation_id}").json()
     assert served.get("knowledge") == _knowledge("current"), served
 
-    _store_run_knowledge(api_db, inv.investigation_id, text,
+    _store_run_knowledge(world.dsn, inv.investigation_id, text,
                             stamp_knowledge_source=stamp_source)
-    served = client.get(f"{_ROUTE}/investigations/{inv.investigation_id}", headers=_AUTH).json()
+    served = client.get(f"{_ROUTE}/investigations/{inv.investigation_id}").json()
     assert served.get("knowledge", "absent") == expected, (
         f"the {case} run is served {served.get('knowledge', 'absent')!r}, not {expected!r}")

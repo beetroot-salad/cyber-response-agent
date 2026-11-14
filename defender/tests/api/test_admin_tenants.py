@@ -244,11 +244,6 @@ class FailingTenants(InMemoryTenantRepository):
             raise InjectedFailure("request_create failed")
         return await super().request_create(*args, **kwargs)
 
-    async def request_offboard(self, *args: Any, **kwargs: Any) -> Any:
-        if "request_offboard" in self.failing:
-            raise InjectedFailure("request_offboard failed")
-        return await super().request_offboard(*args, **kwargs)
-
     async def request_rotate(self, *args: Any, **kwargs: Any) -> Any:
         if "request_rotate" in self.failing:
             raise InjectedFailure("request_rotate failed")
@@ -257,30 +252,58 @@ class FailingTenants(InMemoryTenantRepository):
 
 @pytest.mark.parametrize(("write", "path", "action"), [
     ("request_create", "/admin/tenants", CREATE),
-    ("request_offboard", "/admin/tenants/{T}/offboard", OFFBOARD),
     ("request_rotate", "/admin/tenants/{T}/rotate-forge-credential", ROTATE),
 ])
 def test_a_request_whose_write_fails_logs_nothing_and_the_retry_logs_one(
         write: str, path: str, action: str, audit: AuditLog) -> None:
-    """The event follows the commit (K11, O10): a failed write leaves no row change and no event; the same request then logs.
-    The offboard request's write is the offboarding port (#1360 D6), the real store's on the test database (#1496)."""
+    """The event follows the commit (K11, O10): a failed write leaves no row change and no event; the same request then logs."""
     tenants = FailingTenants()
-    offboard = write == "request_offboard"
-    world = World(administrators=[OPS], database=True) if offboard else World(administrators=[OPS], tenant_repo=tenants)
+    world = World(administrators=[OPS], tenant_repo=tenants)
     world.register(LAB)
     ops = world.sign_in_admin()
     failing_browser = world.client_with_cookie(ops.cookies[SESSION_COOKIE], raise_errors=False)
     before = items(ops.get("/admin/tenants"))
-    world.offboarding.failing = offboard
     tenants.failing.add(write)
     mark = audit.mark()
     assert failing_browser.post(path.replace("{T}", LAB)).status_code >= 500
     assert items(ops.get("/admin/tenants")) == before
     assert _events(audit, mark) == []
-    world.offboarding.failing = False
     tenants.failing.clear()  # control: the same request, written, is logged
     assert failing_browser.post(path.replace("{T}", LAB)).status_code == 202
     assert [e[0] for e in _events(audit, mark)] == [action]
+
+
+#: A job write the database refuses (#1496): the offboard's ending of the jobs fails after the tenant row moved, in the
+#: same transaction.
+_REFUSE_JOB_WRITES = (
+    "CREATE FUNCTION jobs.refuse_1496() RETURNS trigger LANGUAGE plpgsql AS "
+    "$$ BEGIN RAISE EXCEPTION 'injected: the job write fails'; END $$",
+    "CREATE TRIGGER refuse_1496 BEFORE UPDATE ON jobs.investigations FOR EACH ROW EXECUTE FUNCTION jobs.refuse_1496()",
+)
+
+
+def test_an_offboard_whose_job_write_fails_after_the_tenant_moved_changes_nothing_and_logs_nothing(audit: AuditLog) -> None:
+    """The offboard moves the tenant, then ends its jobs, in one transaction (#1360 O3): a job write that fails after the
+    tenant row is written leaves the tenant and its jobs as they were and logs nothing; the same request then logs (K11,
+    O10). The failure is the database's, inside the real store (#1496), not a refusal before the store is reached."""
+    from defender.tests.support.shared._postgres1339 import execute
+
+    world, ops = _admin_world()
+    world.register(LAB)
+    seeded = _seed_jobs(world, LAB, 9)
+    failing_browser = world.client_with_cookie(ops.cookies[SESSION_COOKIE], raise_errors=False)
+    before, jobs_before = items(ops.get("/admin/tenants")), _stored(world, LAB, seeded)
+    assert world.dsn is not None
+    for statement in _REFUSE_JOB_WRITES:
+        execute(world.dsn, statement)
+    mark = audit.mark()
+    assert failing_browser.post(f"/admin/tenants/{LAB}/offboard").status_code >= 500
+    assert items(ops.get("/admin/tenants")) == before
+    assert _stored(world, LAB, seeded) == jobs_before
+    assert _events(audit, mark) == []
+    execute(world.dsn, "DROP TRIGGER refuse_1496 ON jobs.investigations")  # control: the same request, written, is logged
+    assert failing_browser.post(f"/admin/tenants/{LAB}/offboard").status_code == 202
+    assert [e[0] for e in _events(audit, mark)] == [OFFBOARD]
 
 
 # --- #1360: the offboard request ends the tenant's jobs through the offboarding port (D6, O3) ----------------

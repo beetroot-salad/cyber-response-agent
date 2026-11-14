@@ -106,8 +106,8 @@ async def offboard(executor: AsyncConnection | AsyncSession, tenant_id: TenantId
     """Move a `creating` or `active` tenant to `offboarding` (the teardown pending at its first step, any failure
     cleared) in the caller's transaction, on either a Core connection or the ORM session, and return the tenant as
     it now stands. `NotFound` for an absent tenant, `Conflict` for any other state: tenancy's own refusals, and the
-    one place the transition's rules live (#1360 D1): the repository's `request_offboard` and the job store's
-    combined offboard both run it. Takes the tenant row's lock, held until the caller's transaction ends."""
+    one place the transition's rules live (#1360 D1): the job store's combined offboard runs it (#1496: its one
+    caller in production). Takes the tenant row's lock, held until the caller's transaction ends."""
     from defender.tenancy.repository import Conflict, NotFound  # here: the repository imports these models
 
     table: Table = TenantRecord.__table__  # type: ignore[assignment]

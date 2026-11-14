@@ -214,11 +214,8 @@ def _chain(error: BaseException) -> list[BaseException]:
 
 
 def _set_live(world: LifecycleWorld, tenant: str, **fields: Any) -> None:
-    """Change the live generation's record in place, as a damaged row would read (the in-memory twin's rows)."""
-    for (owner, _salt), row in world.tenants._generations.items():  # noqa: SLF001
-        if owner == tenant and row.status == "live":
-            for name, value in fields.items():
-                setattr(row, name, value)
+    """Change the live generation's record in place, as a damaged row would read."""
+    world.set_generation(tenant, "live", **fields)
 
 
 def _login_fault(scene: _Scene, answer: Any) -> Any:

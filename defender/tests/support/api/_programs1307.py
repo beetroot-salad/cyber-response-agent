@@ -54,6 +54,7 @@ from defender.identity import (  # noqa: F401  (re-exported for the cases)
     SignInRefused,
     SignInUnavailable,
 )
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.api._identity1306 import (
     ALERT,
     ANN,
@@ -467,10 +468,15 @@ def start_investigation(client: Any, tenant: str, request_id: str = "r1", *, ale
                        json={"alert_id": alert_id, "client_request_id": request_id})
 
 
+_ANOTHER = itertools.count(1)
+
+
 def second_alert(world: Any, tenant: str = T1) -> str:
-    """Another alert of `tenant`, stored on the world's test database: a start on it is a new investigation, where a
-    second start on `ALERT` answers the live one (one live investigation per alert, #1496: the real store's rule)."""
-    other = ALERT.model_copy(update={"alert_id": "a1000000-0000-4000-8000-000000000002", "vendor_ticket_id": "T-2"})
+    """Another alert of `tenant`, new on each call, stored on the world's test database: a start on it is a new
+    investigation, where a second start on `ALERT` answers the live one (one live investigation per alert, #1496: the
+    real store's rule)."""
+    n = next(_ANOTHER)
+    other = ALERT.model_copy(update={"alert_id": fixture_uuid(f"1496:another-alert:{n}"), "vendor_ticket_id": f"T-other-{n}"})
     return str(world.add_alert(tenant, other))
 
 
@@ -494,9 +500,9 @@ class Soar:
 
 def soar(**world_options: Any) -> Soar:
     """`world_options` are passed to `ProgramsWorld` (for example `failing_writes=True`). On the test database (#1496),
-    with one alert in T1 (`world.alert_id`)."""
+    with one alert in T1 (`ALERT`)."""
     built = ProgramsWorld(tenants={T1: [ANN], T2: [BOB]}, **{"database": True, **world_options})
-    built.alert_id = built.add_alert(T1)
+    built.add_alert(T1)
     ann, bob = built.sign_in(ANN), built.sign_in(BOB)
     program_id = str(create_program(ann, T1)["id"])
     key_id, key = issue_key(ann, T1, program_id)

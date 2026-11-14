@@ -13,6 +13,7 @@ import pytest
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.shared._postgres1339 import database, execute
+from defender.tests.support.tenancy._active1214 import offboard_tenant_row
 
 pytestmark = pytest.mark.anyio
 
@@ -97,7 +98,7 @@ def test_me_reads_the_tenant_states_once_however_many_memberships():
 
     world = World(tenants={T1: [ANN], T2: [ANN], LAB: [ANN, BOB]})
     try:
-        world.call(world.tenants.request_offboard, LAB, now=world.clock())
+        world.move_tenant(LAB, "offboarding")
         reads: list[str] = []
         for name in ("tenant_exists", "active_tenants"):
             real = getattr(world.raw_repo, name, None)
@@ -120,7 +121,7 @@ async def test_offboarding_ends_existence_for_identity_at_once(world):
     """The request that moves an active tenant to offboarding is what identity sees next: no cache, no second step (O4, DC-6)."""
     await world.seed(T1)
     assert await world.identity.tenant_exists(T1) is True
-    await world.tenants.request_offboard(T1, now=NOW)
+    await offboard_tenant_row(world.tenants, T1)
     assert await world.identity.tenant_exists(T1) is False
 
 
@@ -138,7 +139,7 @@ async def test_an_invitation_of_a_tenant_that_went_offboarding_does_not_accept(w
     user = await world.identity.add_user("ann@x.org", created_at=NOW)
     kept = await world.identity.ensure_invitation(user.id, T1, invited_by=None, now=NOW)
     live = await world.identity.ensure_invitation(user.id, other, invited_by=None, now=NOW)
-    await world.tenants.request_offboard(T1, now=NOW)
+    await offboard_tenant_row(world.tenants, T1)
     assert await world.identity.accept_invitation(kept.id, now=NOW) is False
     assert (await world.identity.membership(kept.id)).status == "invited"
     assert await world.identity.accept_invitation(live.id, now=NOW) is True  # control: same user, active tenant

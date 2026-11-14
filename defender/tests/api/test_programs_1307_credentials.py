@@ -689,7 +689,7 @@ def test_no_one_is_warned_about_a_credential_of_a_tenant_being_offboarded() -> N
     """A tenant that left `active` lets no credential in (401), so none is warned about, though offboarding has not
     yet ended its memberships or revoked its credentials (#1450 review)."""
     s, control = soar(), soar()
-    s.world.call(s.world.tenants.request_offboard, T1, now=s.world.clock())
+    s.world.move_tenant(T1, "offboarding")
     for world in (s.world, control.world):
         _until_remaining(world, world.clock() + DEFAULT_LIFETIME, 14 * DAY - HOUR)
         world.send_pending()

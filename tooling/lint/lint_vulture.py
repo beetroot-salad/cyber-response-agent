@@ -45,8 +45,11 @@ VULTURE_ARGS = [
     # #1366 K2/O2: `DISPLAY_NAME` and `EXAMPLE` are catalog declarations read cold (AST, `systems.catalog` and
     # lint_catalog_declarations), never by attribute. `written_at` is a version row's audit column (P3, R9): written by
     # the store's inserts, read by no code. `add_records` is the memory twin's public seeder beside `add_generation`
-    # (R10: planting helpers seed records with it).
-    "--ignore-names", "key_field,key_value,event_time,DISPLAY_NAME,EXAMPLE,written_at,add_records",
+    # (R10: planting helpers seed records with it). #1496: `add_user`, `add_membership` (the identity repositories), and
+    # `add_tenant`, `seed_offboarding` (the tenant twin) are the repositories' seeders, likewise: the test worlds plant
+    # people and tenants through them, and no production code seeds (the demo server that did is gone).
+    "--ignore-names", "key_field,key_value,event_time,DISPLAY_NAME,EXAMPLE,written_at,add_records,add_user,add_membership,"
+                      "add_tenant,seed_offboarding",
     # pydantic calls its validators, and SQLAlchemy a hybrid property's SQL side, by decorator registration, never by name.
     "--ignore-decorators", "@field_validator,@model_validator,@*.inplace.expression",
 ]

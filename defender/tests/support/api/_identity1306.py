@@ -71,7 +71,9 @@ from defender.identity import (  # noqa: F401  (re-exported for the cases)
 )
 from defender.tenancy import InMemoryTenantRepository
 from defender.tests.support.tenancy._mapping1345 import PLANTED_ALERT_MAPPING, add_to_twin, mapping_value
+from defender.tests.support.shared import _worlds
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
+from defender.tests.support.tenancy._active1214 import offboard_tenant_row
 
 T0 = _dt.datetime(2026, 10, 26, 9, 0, tzinfo=_dt.UTC)
 HOUR = _dt.timedelta(hours=1)
@@ -595,47 +597,19 @@ class Announced:
     credential_id: str | None
 
 
-class AuditRecorder(logging.Handler):
-    """Every event the job store announces while it is attached, oldest first, in `events` (#1496: the store's own
-    announcements, read where they are written, replace the fake's list)."""
-
-    LOGGER = "defender.jobs.audit"
+class AuditRecorder:
+    """The world's job store's audit sink (#1496: `JobStore(announce=)`): every event that store announces, oldest
+    first, in `events`. Its own store's only: no process-wide logger, so worlds alive together never see each other's."""
 
     def __init__(self) -> None:
-        super().__init__(logging.INFO)
         self.events: list[Announced] = []
         #: While set, announcements are seeding's (the world saving a tenant's mapping), not a case's: not recorded.
         self.paused = False
 
-    def emit(self, record: logging.LogRecord) -> None:
-        if self.paused:
-            return
-        self.events.append(Announced(*(str(getattr(record, f)) if getattr(record, f) is not None else None
-                                       for f in ("action", "tenant_id", "actor", "target", "detail", "credential_id"))))
-
-    def attach(self) -> Callable[[], None]:
-        """Attach to the store's audit logger (raised to INFO for the while); the undo."""
-        logger = logging.getLogger(self.LOGGER)
-        level = logger.level
-        logger.addHandler(self)
-        if not logger.isEnabledFor(logging.INFO):
-            logger.setLevel(logging.INFO)
-
-        def detach() -> None:
-            logger.removeHandler(self)
-            logger.setLevel(level)
-        return detach
-
-
-class _TwinOffboarding:
-    """A world without a job store: the offboard is the tenant repository's transition alone (it holds no jobs)."""
-
-    def __init__(self, tenants: Any, clock: Callable[[], _dt.datetime]) -> None:
-        self._tenants = tenants
-        self._clock = clock
-
-    async def offboard_tenant(self, tenant_id: str, *, actor: Any) -> Any:
-        return await self._tenants.request_offboard(tenant_id, now=self._clock())
+    def __call__(self, action: str, *, actor: str, tenant_id: str, target: str, detail: str | None = None,
+                 credential_id: str | None = None) -> None:
+        if not self.paused:
+            self.events.append(Announced(action, str(tenant_id), str(actor), str(target), detail, credential_id))
 
 
 #: What the refusing ports name: the families the real server leaves unbacked, and a world with no database.
@@ -660,19 +634,22 @@ class World:
         #: #1345: the mapping each seeded tenant holds in the twin (`None`: none), see `_mapping1345`.
         self.alert_mapping = alert_mapping
         self.clock = Clock()
-        self._loop = _AppLoop()
-        #: #1496: the test database's DSN, or None for a world without one.
+        #: #1496: the test database's DSN, or None for a world without one; opened before the loop starts, so a
+        #: database `pytest.skip`s leaves no thread behind.
         self.dsn: str | None = None
         self.jobs: Any = None
         self.audit: AuditRecorder | None = None
-        #: The id of the alert a builder stored (`two_tenants`, `soar`), when one did.
-        self.alert_id: str | None = None
+        self._resources = contextlib.ExitStack()
         if database:
             self._open_database()
+        self._loop = _AppLoop()
+        #: Stops the loop, then drops the database: run once, by `close()` or when the world is collected unclosed.
+        self._finalizer = weakref.finalize(self, _release, self._loop, self._resources)
+        _worlds.opened(self)
+        if database:
             self.tenants: Any = tenant_repo if tenant_repo is not None else self._pg_tenants
             self.raw_repo: Any = self._pg_people
         else:
-            weakref.finalize(self, self._loop.stop)
             #: The one tenant twin, shared with the identity repository and the API (r9 DC-7).
             self.tenants = tenant_repo if tenant_repo is not None else InMemoryTenantRepository()
             self.raw_repo = InMemoryIdentityRepository(tenants=self.tenants)
@@ -680,9 +657,8 @@ class World:
         #: The backed families' ports, composed as the real server composes them (#1496).
         self.store: Any = self._backed_ports()
         #: #1360 D6: the one port the admin offboard route reaches the tenant transition and the jobs through: the real
-        #: store's on the test database; without one, the tenant twin's own transition (a world with no job store holds
-        #: no jobs to end; `tenancy/repository.py` keeps `request_offboard` for this).
-        self.offboarding = OffboardingSpy(self.store if self.jobs is not None else _TwinOffboarding(self.tenants, self.clock))
+        #: store's on the test database, refusing without one.
+        self.offboarding = OffboardingSpy(self.store)
         self.signin = FakeSignIn()
         self.signin.fail_sends = failing_sends
         self.mail = FakeMail()
@@ -699,20 +675,17 @@ class World:
 
     def _open_database(self) -> None:
         """A migrated database of this world's own, with the real repositories and job store over it; dropped when the
-        world is collected, after the loop stopped."""
+        world closes, after its pools and loop."""
         from defender.identity.postgres import PostgresIdentityRepository
         from defender.jobs.store import JobStore
         from defender.tenancy.postgres import PostgresTenantRepository
         from defender.tests.support.shared._postgres1339 import database
 
-        stack = contextlib.ExitStack()
-        self.dsn = stack.enter_context(database(migrated=True))
+        self.dsn = self._resources.enter_context(database(migrated=True))
         self.audit = AuditRecorder()
-        stack.callback(self.audit.attach())
-        weakref.finalize(self, _close_database, self._loop, stack)
         self._pg_tenants = PostgresTenantRepository(self.dsn)
         self._pg_people = PostgresIdentityRepository(self.dsn)
-        self.jobs = JobStore(self.dsn, clock=self.clock)
+        self.jobs = JobStore(self.dsn, clock=self.clock, announce=self.audit)
 
     def _backed_ports(self) -> Any:
         if self.jobs is None:
@@ -788,9 +761,21 @@ class World:
         return self._loop.portal.call(run)
 
     def close(self) -> None:
-        """Close the service (repository and sign-in port) on the loop, then stop the loop."""
-        self.call(self.service.close)
-        self._loop.stop()
+        """Close the service (repository and sign-in port), the job store and the tenant repository on the loop, then
+        stop the loop and drop the database. Idempotent; `tests/conftest.py` closes every world a test left open."""
+        if not self._finalizer.alive:
+            return
+        try:
+            async def pools() -> None:
+                try:
+                    await self.service.close()  # the identity repository's pool with it
+                finally:
+                    for opened in (self.jobs, getattr(self, "_pg_tenants", None)):
+                        if opened is not None:
+                            await opened.close()
+            self._loop.portal.call(pools)
+        finally:
+            self._finalizer()
 
     def build(self, *, administrators: Sequence[str], tenants: Mapping[str, Sequence[str]]) -> None:
         """A fresh service and app over the same repositories. `tenants` is not read here (the bootstrap
@@ -879,7 +864,7 @@ class World:
 
     async def amove_tenant(self, tenant: str, state: str) -> None:
         """`move_tenant` for a hook already running on the world's loop (a hook must not block on `call`)."""
-        await self.tenants.request_offboard(tenant, now=self.clock())
+        await offboard_tenant_row(self.tenants, tenant)
         if state == "offboarded":  # the worker's last step, through the twin's own hold
             async with self.tenants.lock(tenant) as held:
                 assert held is not None, "the tenant is held by nobody else"
@@ -969,10 +954,10 @@ class World:
         return self.sign_in(email)
 
 
-def _close_database(loop: Any, stack: contextlib.ExitStack) -> None:
-    """Stop the world's loop, then drop its database (FORCE: a pool the stopped loop still holds is cut)."""
+def _release(loop: Any, resources: contextlib.ExitStack) -> None:
+    """Stop the world's loop, then drop its database, if it has one (FORCE: a pool left open is cut)."""
     loop.stop()
-    stack.close()
+    resources.close()
 
 
 def wait_until(condition: Callable[[], bool], *, seconds: float = 5.0) -> bool:
@@ -986,10 +971,10 @@ def wait_until(condition: Callable[[], bool], *, seconds: float = 5.0) -> bool:
 
 
 def two_tenants() -> tuple[World, TestClient, TestClient]:
-    """T1 with member ann (and one alert, its id `world.alert_id`), T2 with member bob, both signed in at T0; on the
+    """T1 with member ann (and one alert, `ALERT`), T2 with member bob, both signed in at T0; on the
     test database (#1496)."""
     world = World(tenants={T1: [ANN], T2: [BOB]}, database=True)
-    world.alert_id = world.add_alert(T1)
+    world.add_alert(T1)
     return world, world.sign_in(ANN), world.sign_in(BOB)
 
 

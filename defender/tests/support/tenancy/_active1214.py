@@ -256,3 +256,16 @@ def provision_generation(openbao: Any, tenant: str, secrets_dir: Path, *, salt: 
     path.write_text(secret["secret_id"] + "\n", encoding="utf-8")
     path.chmod(0o600)
     return fields
+
+
+async def offboard_tenant_row(tenants: Any, tenant_id: str) -> Any:
+    """Put `tenant_id` into `offboarding` as tenancy's `offboard` does (#1496: the repository has no offboard request;
+    the API's is the job store's, which also ends the tenant's jobs). On the in-memory twin, its seeder; on a
+    PostgreSQL tenant repository, tenancy's own `offboard` in a transaction of its own. Returns the record it left;
+    `NotFound`/`Conflict` as `offboard` refuses."""
+    from defender.tenancy import offboard
+
+    if hasattr(tenants, "seed_offboarding"):
+        return await tenants.seed_offboarding(tenant_id)
+    async with tenants._engine.begin() as conn:  # noqa: SLF001 — test support: tenancy's transition on the repository's pool
+        return await offboard(conn, tenant_id)
