@@ -37,7 +37,7 @@ CATALOG_PATH = HERE / "catalog.yaml"
 INVENTORY_PATH = HERE.parent / "hosts" / "inventory.yaml"
 RUNS_DIR = HERE / "runs"
 DOCKER_CONTEXT = "soc-playground"
-CR_MODES = ("none", "valid", "stale", "scope-mismatch", "awaiting-approval")
+CR_MODES = ("none", "valid", "stale", "scope-mismatch")
 CHANGE_MGMT_CONTAINER = "change-mgmt"
 
 
@@ -113,15 +113,9 @@ def _build_cr_body(
         hosts = [_sibling_host(target_host, inv)]
         window_start = now - timedelta(minutes=5)
         window_end = now + timedelta(minutes=30)
-    elif cr_mode == "awaiting-approval":
-        # Covers the work, but the approval it waits on is held by the change board, a system
-        # the tenant is not granted: the record exists and still cannot settle the alert.
-        hosts = [target_host]
-        window_start = now - timedelta(minutes=5)
-        window_end = now + timedelta(minutes=60)
     else:
         raise ValueError(f"unsupported cr_mode {cr_mode!r}")
-    body = {
+    return {
         "id": cr_id,
         "summary": f"Package updates and service restart on {', '.join(hosts)}",
         "description": (
@@ -136,11 +130,6 @@ def _build_cr_body(
         "window_end": window_end.isoformat(),
         "ticket_ref": f"OPS-{600 + n % 400}",
     }
-    if cr_mode == "awaiting-approval":
-        body["status"] = "planned"
-        body["approver"] = None
-        body["description"] += " Approval is recorded by the change advisory board."
-    return body
 
 
 def _post_cr(body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
@@ -300,7 +289,7 @@ def run_scenario(
             pre_run["cr_post_response"] = resp
             if rc != 0:
                 raise SystemExit(
-                    f"--cr-mode={cr_mode}: POST /changes failed rc={rc} "
+                    f"cr_mode={cr_mode}: POST /changes failed rc={rc} "
                     f"resp={resp}; not firing scenario"
                 )
             print(f"posted synthetic CR id={body['id']} hosts={body['hosts']} mode={cr_mode}")
@@ -477,7 +466,7 @@ def cmd_run(
         "target": args.target,
         "intensity": args.intensity,
     }
-    print(f"running {scenario['id']} (seed={args.seed}, cr_mode={args.cr_mode or scenario.get('cr_mode', 'none')}, chaos={args.chaos}) ...")
+    print(f"running {scenario['id']} (seed={args.seed}, cr_mode={args.cr_mode or 'as declared'}, chaos={args.chaos}) ...")
     run_id, run_dir, step_log = run_scenario_fn(
         scenario, args.seed, overrides, args.dry_run, args.cr_mode,
         chaos=args.chaos, keep_chaos=args.keep_chaos,
@@ -513,9 +502,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
             "none: no CR. "
             "valid: CR covers target host + current window — authorized-window cover. "
             "stale: CR covers target host but window already closed — tests temporal check. "
-            "scope-mismatch: CR covers a sibling host instead — tests host-scope check. "
-            "awaiting-approval: CR covers the work but is not yet approved; the approval "
-            "lives with the change board, which the tenant cannot read."
+            "scope-mismatch: CR covers a sibling host instead — tests host-scope check."
         ),
     )
     prun.add_argument("--dry-run", action="store_true", help="print dispatches without running")

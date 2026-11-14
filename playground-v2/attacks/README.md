@@ -47,23 +47,20 @@ unless it carries that capture's `--lock-token`; the check reads the lab-server 
 
 ## `--cr-mode` — synthetic change-request context
 
-A run with `--cr-mode {valid|stale|scope-mismatch}` POSTs a CR to the `change-mgmt` stub immediately before the attack fires. The CR is captured in `meta.json.pre_run` and lives in change-mgmt's STORE until the next container restart. The CR reads like any seed CR (`CHG-<n>`, `OPS-<n>`, ordinary maintenance text) because the agent can read it; `meta.json.pre_run.cr_request.id` is what ties it to the run.
+A run with a change-request mode other than `none` POSTs a CR to the `change-mgmt` stub immediately before the scenario fires. The mode is `--cr-mode` when given, else the scenario's own `cr_mode:` in `catalog.yaml`, else `none`; a frozen-case capture passes no mode, so a scenario declares the one it needs. The CR is captured in `meta.json.pre_run` and lives in change-mgmt's STORE until the next container restart (a capture's stub dump keeps it in the freeze). The CR reads like any seed CR (`CHG-<n>`, `OPS-<n>`, ordinary maintenance text) because the agent can read it; `meta.json.pre_run.cr_request.id` is what ties it to the run.
 
-| `--cr-mode` | CR scope | Intended agent verdict |
+| mode | CR scope | Intended agent verdict |
 |---|---|---|
-| `none` (default) | — (no CR posted) | Unauthorized — classic escalate. |
+| `none` | — (no CR posted) | Unauthorized — classic escalate. |
 | `valid` | target host + current window, requester = source user | Authorized-window cover. The agent should resolve the legitimacy contract as `authorized` *iff* it also confirms host + identity + timing match. |
 | `stale` | target host but window is in the past (now-3h..now-1h) | Tests the agent's temporal-scope check. CR exists but doesn't cover *now*. |
 | `scope-mismatch` | a different host (sibling in same inventory role, or `canary-1` fallback) | Tests the agent's host-scope check. CR exists for the wrong host. |
-| `awaiting-approval` | target host + current window, requester = source user, status `planned`, no approver | The record covers the work but shows no approval; the approval sits with the change board, which the tenant cannot read. |
 
-A scenario can declare its own mode (`cr_mode:` in `catalog.yaml`); an explicit `--cr-mode` wins. That is how a frozen-case capture, which passes no mode, fires a scenario with its change record.
+Posting happens via `docker exec change-mgmt python -c …` so the runner doesn't need an SSH tunnel and adds no new Python dependencies — it reuses the docker context it already uses for `exec`-based dispatch.
 
 ## Legitimate-activity scenarios (#1497)
 
-The catalog's last eleven scenarios are not attacks: legitimate work that trips a rule. Each is built around where the evidence that settles its alert lives: a record the lab tenant can read, a record nowhere the tenant can read, or no record at all because the rule's logic or the data it read is what made it fire. Ids name the activity, never a case class; a person labels every case.
-
-Posting happens via `docker exec change-mgmt python -c …` so the runner doesn't need an SSH tunnel and adds no new Python dependencies — it reuses the docker context it already uses for `exec`-based dispatch.
+The catalog's section headed "Legitimate activity that trips a rule" holds scenarios that are not attacks. Each is built around where the evidence that settles its alert lives: a record the lab tenant can read, a record nowhere the tenant can read, or no record at all because the rule's logic or the data it read is what made it fire. Ids name the activity, never a case class; a person labels every case. Legitimate activity the baseline already produces is left to the baseline, and scenarios whose case rests on there being no record target hosts with no standing change window.
 
 ## Scenario catalog
 

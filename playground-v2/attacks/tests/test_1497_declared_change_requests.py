@@ -1,13 +1,17 @@
-"""A scenario can carry its own change request, and every dispatch runs as an account that exists.
+"""A scenario can carry its own change request, and every account a step uses exists.
 
 The capture fires scenarios without a `--cr-mode` (#1347), so a scenario that needs a change
-record to mean what it means (an approved window, one still awaiting approval) declares it in
-the catalog (#1497). The runner posts it before the steps; an explicit mode still wins.
+record to mean what it means (an approved window) declares it in the catalog (#1497). The
+runner posts it before the steps; an explicit mode still wins.
+
+Accounts come from the baseline scheduler's own `users_on_host`, the copy of seed-users.py's
+rule the lab already runs, rather than a third copy here.
 """
 from __future__ import annotations
 
 import importlib.util
-from datetime import datetime, timezone
+import re
+from fnmatch import fnmatch
 from pathlib import Path
 
 import pytest
@@ -16,16 +20,35 @@ import yaml
 PLAYGROUND = Path(__file__).resolve().parents[2]
 CATALOG = PLAYGROUND / "attacks" / "catalog.yaml"
 RUNNER = PLAYGROUND / "attacks" / "runner.py"
+SCHEDULER = PLAYGROUND / "hosts" / "base" / "baseline" / "scheduler.py"
 INVENTORY = yaml.safe_load((PLAYGROUND / "hosts" / "inventory.yaml").read_text())
-REALM = yaml.safe_load((PLAYGROUND / "keycloak" / "realm.yaml").read_text())
+SCENARIOS = yaml.safe_load(CATALOG.read_text())["scenarios"]
+BASELINE = yaml.safe_load((PLAYGROUND / "hosts" / "base" / "baseline" / "catalog.yaml").read_text())
+HOSTS = {h["name"] for h in INVENTORY["hosts"]}
+
+# Logins meant to fail as an account the target does not have.
+UNKNOWN_ON_PURPOSE = {("cross-tier-ssh-probe", "dev.dana", "db-1")}
+
+
+def _load(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_scheduler = _load("baseline_scheduler_1497", SCHEDULER)
+_scheduler.INVENTORY = PLAYGROUND / "hosts" / "inventory.yaml"
+_scheduler.REALM = PLAYGROUND / "keycloak" / "realm.yaml"
+
+
+def _accounts(host: str) -> set[str]:
+    return set(_scheduler.users_on_host(host)) | {"root"}
 
 
 @pytest.fixture(scope="module")
 def runner():
-    spec = importlib.util.spec_from_file_location("attacks_runner_1497", RUNNER)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return _load("attacks_runner_1497", RUNNER)
 
 
 def _scenario(**extra):
@@ -81,53 +104,41 @@ def test_an_unknown_declared_mode_is_refused_before_anything_fires(runner, tmp_p
     assert fired == []
 
 
-def test_a_change_awaiting_approval_covers_the_work_but_shows_no_approval(runner):
-    now = datetime(2026, 11, 14, 12, 0, tzinfo=timezone.utc)
-    body = runner._build_cr_body("awaiting-approval", "db-maintenance-pending-approval-42-0000abcd",
-                                 "db-1", "sre.alice", INVENTORY, now=now)
-    assert body["hosts"] == ["db-1"] and body["requester"] == "sre.alice"
-    assert body["status"] == "planned" and body["approver"] is None
-    assert datetime.fromisoformat(body["window_start"]) <= now <= datetime.fromisoformat(body["window_end"])
-
-
 def test_every_declared_mode_is_one_the_runner_knows(runner):
-    declared = {s["id"]: s["cr_mode"] for s in yaml.safe_load(CATALOG.read_text())["scenarios"]
-                if "cr_mode" in s}
+    declared = {s["id"]: s["cr_mode"] for s in SCENARIOS if "cr_mode" in s}
     assert declared, "no scenario declares a change request"
     assert {i: m for i, m in declared.items() if m not in runner.CR_MODES} == {}
 
 
-def _accounts(host: str) -> set[str]:
-    """The accounts seed-users.py creates on `host`: role-wide, then the host's own."""
-    role_of = {u["username"]: (u.get("realmRoles") or [None])[0] for u in REALM["users"]}
-    names = {u for role, cfg in INVENTORY["roles"].items() if host in cfg.get("hosts", [])
-             for u, r in role_of.items() if r == role}
-    entry = next(h for h in INVENTORY["hosts"] if h["name"] == host)
-    return names | {u["username"] for u in entry.get("users") or []} | {"root"}
-
-
-def _dispatches():
-    for scenario in yaml.safe_load(CATALOG.read_text())["scenarios"]:
+def _steps():
+    for scenario in SCENARIOS:
         for index, step in enumerate(scenario["steps"]):
             host = step.get("source_host", scenario["source_host"])
             user = step.get("source_user", scenario.get("source_user", "root"))
-            yield pytest.param(host, user, id=f"{scenario['id']}[{index}]")
+            yield pytest.param(scenario, step, host, user, id=f"{scenario['id']}[{index}]")
 
 
-@pytest.mark.parametrize("host,user", _dispatches())
-def test_every_step_runs_as_an_account_its_host_has(host, user):
+@pytest.mark.parametrize("scenario,step,host,user", _steps())
+def test_every_step_runs_as_an_account_its_host_has(scenario, step, host, user):
     # A missing account fails `docker exec -u` and the step never happens; allow_fail hides it.
     assert user in _accounts(host), f"{user} has no account on {host}"
 
 
-BASELINE = yaml.safe_load((PLAYGROUND / "hosts" / "base" / "baseline" / "catalog.yaml").read_text())
+@pytest.mark.parametrize("scenario,step,host,user", _steps())
+def test_every_login_a_step_makes_is_as_an_account_its_target_has(scenario, step, host, user):
+    # An unknown user's sshd attempt is also ingested as a success (#1497), so a login meant to
+    # fail as a real account but made as a missing one fires success-after-failures on bad data.
+    target = scenario["target_host"]
+    cmd = step["cmd"].replace("${user}", user).replace("${target}", target).replace("${host}", target)
+    logins = {(u, h) for u, h in re.findall(r"(?<![\w$.-])([A-Za-z][\w.-]*)@([\w-]+)", cmd) if h in HOSTS}
+    missing = {(u, h) for u, h in logins if u not in _accounts(h)}
+    assert missing <= {(u, h) for s, u, h in UNKNOWN_ON_PURPOSE if s == scenario["id"]}, missing
 
 
 @pytest.mark.parametrize("action", BASELINE["actions"], ids=lambda a: a["id"])
 def test_every_background_action_binds_to_some_account(action):
     # The scheduler binds an action only to identities with an account on the host, and skips
     # the rest without a word: dba-tunnel sat on dev-ws, where dba.ivy has none, and never ran.
-    from fnmatch import fnmatch
     hosts = [h["name"] for h in INVENTORY["hosts"] if h["role"] in action["host_roles"]]
     bound = {(h, u) for h in hosts for u in _accounts(h) - {"root"}
              if any(fnmatch(u, pattern) for pattern in action["identities"])}

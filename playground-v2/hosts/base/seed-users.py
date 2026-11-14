@@ -18,6 +18,11 @@ import yaml
 DEFAULT_PASSWORD = "changeme"  # Playground-only — matches keycloak/realm.yaml seed passwords.
 
 INVENTORY = Path("/opt/soc-playground/inventory.yaml")
+# The inventory's `sudo: true` accounts are automation and on-call SREs that run `sudo -n`
+# (every baseline action and scenario does): without NOPASSWD each call is refused with
+# "a password is required", and the host's logs tell a story of failed escalation (#1497).
+SUDOERS_DROPIN = Path("/etc/sudoers.d/90-soc-playground")
+SUDOERS_LINE = "%sudo ALL=(ALL:ALL) NOPASSWD: ALL\n"
 
 
 def run(cmd: list[str], *, check: bool = True) -> subprocess.CompletedProcess:
@@ -116,6 +121,8 @@ def main() -> None:
     users = resolve_users(inv, host_name)
     for u in users:
         ensure_user(u["username"], u["shell"], u["sudo"])
+    SUDOERS_DROPIN.write_text(SUDOERS_LINE)
+    SUDOERS_DROPIN.chmod(0o440)
 
     print(f"[seed-users] host={host_name} seeded {len(users)} account(s): "
           f"{', '.join(sorted(u['username'] for u in users))}")

@@ -17,7 +17,7 @@
 #   target_host: host the attack aims at (shows up as hostname in telemetry).
 #   default_intensity: default for the ${intensity} placeholder + repeat count.
 #   cr_mode: optional change request the runner posts before the steps (none | valid | stale |
-#            scope-mismatch | awaiting-approval; default none). An explicit --cr-mode wins.
+#            scope-mismatch; default none). An explicit --cr-mode wins.
 #   steps: list of command steps. Each step:
 #     cmd: shell command. Template placeholders substituted before exec:
 #            ${host}      → target_host (same as scenario.target_host)
@@ -293,18 +293,24 @@ scenarios:
   # ── Legitimate activity that trips a rule (#1497) ─────────────────────────
   # Everything below is NOT an attack, though the capture fires it the same way. Each scenario
   # is built around where the evidence that settles its alert lives: in a system the lab tenant
-  # can read, nowhere the tenant can read, or nowhere at all because the rule's own logic is what
-  # made it fire. Ids name the activity, never the case class: a person labels every case.
-  # `cr_mode:` is the change request the runner posts before the steps (an explicit --cr-mode
-  # wins); the capture passes none, so this is how a captured scenario gets its change record.
+  # can read, nowhere the tenant can read, or nowhere at all because the rule's logic or the data
+  # it read is what fired. Ids name the activity, never the case class: a person labels every case.
+  # Legitimate activity the baseline already produces (fleet scans, key rotation, a mistyped
+  # password, deploys) is left to the baseline: a copy here would fire the same rule on the same
+  # host and merge with it. `cr_mode:` is the change request the runner posts before the steps
+  # (an explicit --cr-mode wins); the capture passes none, so this is how a captured scenario
+  # gets its change record.
+  # Scenarios whose case rests on there being NO record target hosts with no standing change
+  # window (change-mgmt/seed/standing.yaml covers db-1 daily and web-1/web-2 on Tuesdays), so
+  # firing time cannot put an approved change over them.
 
   # The record that settles it is reachable: a change request covering this host, user and
   # window, posted just before the work.
   - id: change-backed-web-maintenance
     category: execution
     description: >
-      An SRE hops from the bastion to web-1 inside an approved change window and runs
-      package and service maintenance under sudo. Three or more sudo executions trip
+      An SRE hops from the bastion to web-1 inside an approved change window and checks
+      packages, validates and reloads nginx under sudo. Three or more sudo executions trip
       v2-off-hours-sudo; the change request names the same host, requester and window.
     source_host: jump-box-1
     source_user: sre.alice
@@ -315,80 +321,7 @@ scenarios:
       - cmd: |
           sshpass -p changeme ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             -o ConnectTimeout=5 ${user}@${target} \
-            'sudo -n apt-get -s upgrade >/dev/null 2>&1; sudo -n systemctl reload nginx >/dev/null 2>&1; sudo -n systemctl status nginx --no-pager >/dev/null 2>&1; sudo -n journalctl -u nginx -n 20 >/dev/null 2>&1; true'
-        repeat: 1
-        allow_fail: true
-
-  # The config-management service account rotating its own key on a managed host. The CMDB
-  # and identity records say what svc.config-mgmt is and which hosts it manages.
-  - id: config-mgmt-key-rotation-db
-    category: execution
-    description: >
-      The config-management server rotates its service account's key on db-1: a fresh
-      ed25519 key appended to svc.config-mgmt's authorized_keys over its usual SSH path.
-      Falco's "Adding ssh keys to authorized_keys" fires and so does
-      v2-falco-authorized-keys-modification.
-    source_host: config-mgmt-1
-    source_user: svc.config-mgmt
-    target_host: db-1
-    default_intensity: 1
-    steps:
-      - cmd: |
-          k=/tmp/cm_rotate_$$
-          ssh-keygen -q -t ed25519 -N "" -C "svc.config-mgmt@config-mgmt-1" -f "$k"
-          sshpass -p changeme ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            -o ConnectTimeout=5 ${user}@${target} \
-            'mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys' \
-            < "$k.pub"
-          rm -f "$k" "$k.pub"
-        repeat: 1
-        allow_fail: true
-
-  # The security team's scanner sweeping the fleet. CMDB and identity say scanner-1 is the
-  # authorised scanner and svc.security is its account.
-  - id: scheduled-fleet-port-sweep
-    category: data-access
-    description: >
-      scanner-1's service account sweeps five ports on every managed host with nc: 40 nc
-      launches in a minute, each a Falco "Launch Suspicious Network Tool in Container", which
-      clears v2-internal-port-scan's 20-per-container threshold.
-    source_host: scanner-1
-    source_user: svc.security
-    target_host: scanner-1
-    default_intensity: 1
-    steps:
-      - cmd: |
-          for t in web-1 web-2 db-1 jump-box-1 dev-ws-1 office-ws-1 office-ws-2 canary-1; do
-            for p in 22 80 443 5432 8080; do
-              nc -z -w1 $t $p 2>/dev/null
-            done
-          done
-          true
-        repeat: 1
-        allow_fail: true
-
-  # One user mistyping their own password, then getting it right. The failures and the
-  # success are the same account from the same workstation.
-  - id: dev-password-retry-bastion
-    category: auth-metadata
-    description: >
-      A developer mistypes their password three times logging into the bastion, then gets
-      it right. Same user, same source, seconds apart: v2-sshd-success-after-failures fires
-      on jump-box-1.
-    source_host: dev-ws-1
-    source_user: dev.fatima
-    target_host: jump-box-1
-    default_intensity: 1
-    steps:
-      - cmd: |
-          for pw in changme chnageme changeme1; do
-            sshpass -p "$pw" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-              -o PreferredAuthentications=password -o NumberOfPasswordPrompts=1 \
-              -o ConnectTimeout=5 ${user}@${target} true 2>/dev/null || true
-            sleep 2
-          done
-          sshpass -p changeme ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            -o ConnectTimeout=5 ${user}@${target} 'ls ~ >/dev/null'
+            'sudo -n apt-get -s upgrade >/dev/null; sudo -n nginx -t 2>/dev/null; sudo -n nginx -s reload; sudo -n tail -n 20 /var/log/nginx/error.log >/dev/null'
         repeat: 1
         allow_fail: true
 
@@ -396,7 +329,7 @@ scenarios:
   # account's failures and another account's unrelated login read as "success after failures".
   # The failing account must exist on db-1: an unknown user's attempt also writes a PAM
   # "check pass; user unknown" line that ingest records as event.outcome=success, which fires the
-  # rule on failures alone (bad data, not this flaw; seen in freeze live-20261114).
+  # rule on failures alone (that is dev-username-typo-bastion, below).
   - id: report-job-retries-then-sre-login-db
     category: auth-metadata
     description: >
@@ -478,73 +411,6 @@ scenarios:
         repeat: "${intensity}"
         allow_fail: true
 
-  # Legitimate, but the only record that would show it sits nowhere the tenant can read: the
-  # SRE was told to by phone. No change request, no ticket.
-  - id: sre-new-laptop-key-db
-    category: execution
-    description: >
-      An SRE adds their new laptop's key to their own account on db-1, hopping from the
-      bastion. It was agreed by phone; nothing in change-mgmt or the tickets records it.
-      v2-falco-authorized-keys-modification fires on db-1.
-    source_host: jump-box-1
-    source_user: sre.chen
-    target_host: db-1
-    default_intensity: 1
-    cr_mode: none
-    steps:
-      - cmd: |
-          k=/tmp/lt_key_$$
-          ssh-keygen -q -t ed25519 -N "" -C "chen@lt-0412" -f "$k"
-          sshpass -p changeme ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            -o ConnectTimeout=5 ${user}@${target} \
-            'mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys' \
-            < "$k.pub"
-          rm -f "$k" "$k.pub"
-        repeat: 1
-        allow_fail: true
-
-  # Legitimate on-call work, but the on-call roster and the page that prompted it live off-lab.
-  - id: oncall-web-triage
-    category: execution
-    description: >
-      The on-call SRE is paged and triages web-2 from the bastion: reads nginx's error log,
-      lists listeners and reloads nginx under sudo. No change request; the roster and the
-      page are in systems the tenant does not have. v2-off-hours-sudo fires.
-    source_host: jump-box-1
-    source_user: sre.ben
-    target_host: web-2
-    default_intensity: 1
-    cr_mode: none
-    steps:
-      - cmd: |
-          sshpass -p changeme ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            -o ConnectTimeout=5 ${user}@${target} \
-            'sudo -n tail -n 50 /var/log/nginx/error.log >/dev/null 2>&1; sudo -n ss -tnlp >/dev/null 2>&1; sudo -n systemctl reload nginx >/dev/null 2>&1; sudo -n df -h >/dev/null 2>&1; true'
-        repeat: 1
-        allow_fail: true
-
-  # A change request covers the work but shows no approval: the approval is recorded by the
-  # change board, a system the tenant is not granted.
-  - id: db-maintenance-pending-approval
-    category: execution
-    description: >
-      An SRE runs package checks and a postgres reload under sudo on db-1. A change request
-      names the host, the SRE and the window but is still marked planned with no approver;
-      the approval itself sits with the change board, which the tenant cannot read.
-      v2-off-hours-sudo fires.
-    source_host: jump-box-1
-    source_user: sre.alice
-    target_host: db-1
-    default_intensity: 1
-    cr_mode: awaiting-approval
-    steps:
-      - cmd: |
-          sshpass -p changeme ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            -o ConnectTimeout=5 ${user}@${target} \
-            'sudo -n apt-get -s upgrade >/dev/null 2>&1; sudo -n systemctl reload postgresql >/dev/null 2>&1; sudo -n journalctl -u postgresql -n 20 >/dev/null 2>&1; true'
-        repeat: 1
-        allow_fail: true
-
   # The data is what fires: an sshd attempt by an unknown user also writes a PAM
   # "check pass; user unknown" line, which ingest records as event.outcome=success. Two
   # mistyped usernames are enough for v2-sshd-success-after-failures, though nobody logged in.
@@ -566,5 +432,68 @@ scenarios:
               -o ConnectTimeout=5 "$u@${target}" true 2>/dev/null || true
             sleep 3
           done
+        repeat: 1
+        allow_fail: true
+
+  # Legitimate, but the only record that would show it sits nowhere the tenant can read: it was
+  # agreed by phone. No change request, no ticket.
+  - id: sre-new-laptop-key-bastion
+    category: execution
+    description: >
+      An SRE adds their new laptop's key to their own account on the bastion, from dev-ws-1.
+      It was agreed by phone; nothing in change-mgmt or the tickets records it.
+      v2-falco-authorized-keys-modification fires on jump-box-1.
+    source_host: dev-ws-1
+    source_user: sre.chen
+    target_host: jump-box-1
+    default_intensity: 1
+    steps:
+      - cmd: |
+          k=/tmp/lt_key_$$
+          ssh-keygen -q -t ed25519 -N "" -C "chen@lt-0412" -f "$k"
+          sshpass -p changeme ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=5 ${user}@${target} \
+            'mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys' \
+            < "$k.pub"
+          rm -f "$k" "$k.pub"
+        repeat: 1
+        allow_fail: true
+
+  # Legitimate on-call work, but the on-call roster and the page that prompted it live off-lab.
+  - id: oncall-canary-triage
+    category: execution
+    description: >
+      The on-call SRE is paged about disk space on canary-1 and triages it from the bastion:
+      disk usage, listeners and the auth log under sudo. No change request; the roster and
+      the page are in systems the tenant does not have. v2-off-hours-sudo fires.
+    source_host: jump-box-1
+    source_user: sre.ben
+    target_host: canary-1
+    default_intensity: 1
+    steps:
+      - cmd: |
+          sshpass -p changeme ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=5 ${user}@${target} \
+            'sudo -n du -sh /var/log /tmp 2>/dev/null; sudo -n ss -tnlp >/dev/null; sudo -n tail -n 50 /var/log/auth.log >/dev/null; sudo -n df -h >/dev/null'
+        repeat: 1
+        allow_fail: true
+
+  # Legitimate, asked for in chat by the developer whose workstation it is; that chat is the
+  # only record, and it is off-lab.
+  - id: sre-workstation-fix-on-request
+    category: execution
+    description: >
+      An SRE fixes a broken package install on dev-ws-1 under sudo, asked to in chat by the
+      team that owns it. No change request (dev-ws-1 has no change window; changes there are
+      ad hoc) and no ticket. v2-off-hours-sudo fires.
+    source_host: jump-box-1
+    source_user: sre.alice
+    target_host: dev-ws-1
+    default_intensity: 1
+    steps:
+      - cmd: |
+          sshpass -p changeme ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=5 ${user}@${target} \
+            'sudo -n dpkg --audit; sudo -n apt-get -s -f install >/dev/null; sudo -n tail -n 30 /var/log/dpkg.log >/dev/null; sudo -n ls -la /var/cache/apt/archives/partial >/dev/null'
         repeat: 1
         allow_fail: true

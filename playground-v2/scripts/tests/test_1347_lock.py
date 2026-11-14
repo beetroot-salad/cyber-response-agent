@@ -49,6 +49,14 @@ def _store() -> FakeLockStore:
     return FakeLockStore(Journal())
 
 
+def _runner_module():
+    """The runner, loaded for collection-time parameters (its CR modes)."""
+    spec = importlib.util.spec_from_file_location("runner_1347_modes", RUNNER)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 @pytest.fixture
 def lock():
     from chaos import lock as module
@@ -304,7 +312,7 @@ def test_the_runner_refuses_while_the_capture_lock_is_held(runner, lock, tmp_pat
     assert lock.CAPTURE in store.records
 
 
-@pytest.mark.parametrize("cr_mode", ["valid", "stale", "scope-mismatch"])
+@pytest.mark.parametrize("cr_mode", [m for m in _runner_module().CR_MODES if m != "none"])
 def test_the_runner_refuses_while_the_capture_lock_is_held_for_every_cr_mode(
         runner, lock, tmp_path, cr_mode):
     """O10: a held capture lock stops a run with a synthetic change request too; nothing fires."""
