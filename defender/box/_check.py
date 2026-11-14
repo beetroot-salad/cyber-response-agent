@@ -29,6 +29,7 @@ from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Any, NamedTuple
 
+from ._data_folder import make_data_folder
 from ._docker import BoxFault, DaemonRuntimes, DockerFn, Rootfs, _covered, _daemon_source, _uncovered_fault
 
 #: Where the check folder sits in the check container, and the socket's name in it. Short, so the in-box connect path
@@ -52,9 +53,11 @@ _CONNECT = (
     f"    s.connect({_SOCKET_ENTRY!r})\n"
     "    print('connected')\n"
     "except OSError as e:\n"
-    "    print('refused', e.errno)\n"
+    "    print('refused', e.errno if e.errno is not None else type(e).__name__)\n"
 )
-_MARKER = re.compile(r"(connected|refused(?: (\d+))?)")
+#: The marker is its first word; what follows `refused` (an errno, or the error's name for a timeout) is carried into
+#: the message as it stands, never parsed: the verdict rests on the host listener's accept.
+_MARKER = re.compile(r"(connected|refused)(?: (\S.*))?")
 
 
 class BoxCheckFailed(BoxFault):  # noqa: N818 — named for what it reports
@@ -96,16 +99,19 @@ def _keep(docker: DockerFn, key: tuple[str, str]) -> None:
         _PASSED.setdefault(docker, set()).add(key)
 
 
-#: One lock per registration key, so box starts that arrive together on one registration (a preflight's worlds, each
-#: starting its first box) run one check and the rest wait for its verdict, instead of each running its own.
-_KEY_LOCKS: dict[tuple[str, str], threading.Lock] = {}
+#: One lock per docker seam, held as weakly as its passes, so box starts that arrive together on one seam (a preflight's
+#: worlds, each starting its first box) run one check and the rest wait for its verdict, instead of each running its own.
+_CHECKING: weakref.WeakKeyDictionary[Any, threading.Lock] = weakref.WeakKeyDictionary()
 
 
-def _one_at_a_time(key: tuple[str, str] | None) -> contextlib.AbstractContextManager[object]:
+def _one_at_a_time(docker: DockerFn, key: tuple[str, str] | None) -> contextlib.AbstractContextManager[object]:
     if key is None:  # an unkeyed check is never kept, so a waiter would gain nothing by waiting
         return contextlib.nullcontext()
-    with _PASSED_LOCK:
-        return _KEY_LOCKS.setdefault(key, threading.Lock())
+    try:
+        with _PASSED_LOCK:
+            return _CHECKING.setdefault(docker, threading.Lock())
+    except TypeError:  # a seam that cannot be weakly referenced keeps no pass either
+        return contextlib.nullcontext()
 
 
 # --- the host listener ---------------------------------------------------------------------------------------------------
@@ -180,8 +186,9 @@ class _Listener:
 # --- one check container -------------------------------------------------------------------------------------------------
 
 class _Seen(NamedTuple):
-    """What one check container did: its `marker` (`connected`, `refused`, or None), the errno a refusal printed, why it
-    did not run (`failure`, None when it ran), and the connections the listener accepted during it."""
+    """What one check container did: its `marker` (`connected`, `refused`, or None), what a refusal printed after it
+    (`errno`: an errno, or the error's name), why it did not run (`failure`, None when it ran), and the connections
+    the listener accepted during it."""
 
     marker: str | None
     errno: str | None
@@ -204,7 +211,7 @@ def _run(docker: DockerFn, argv: list[str], name: str, listener: _Listener) -> _
             if done.returncode != 0:
                 failure = f"docker could not run it (exit {done.returncode}): {(done.stderr or '').strip()[:200]}"
             elif found := _MARKER.fullmatch((done.stdout or "").strip()):
-                marker, errno = found.group(1).split()[0], found.group(2)
+                marker, errno = found.group(1), found.group(2)
             else:
                 failure = "it printed no marker"
     return _Seen(marker, errno, failure, count.accepted)
@@ -218,31 +225,16 @@ def _argv(flags: Sequence[str], runtime: str, name: str, labels: Sequence[str], 
             rootfs.image, "python3", "-c", _CONNECT]
 
 
-def _dir(path: Path, what: str) -> None:
-    if path.is_symlink() or not path.is_dir():
-        raise BoxFault(f"the box check could not make its folder: {path} is not a folder this process made ({what})")
-
-
 @contextlib.contextmanager
 def _check_scope(data_root: Path) -> Iterator[tuple[Path, _Listener]]:
-    """Everything the check holds on the host, owned in one place: `<data root>/.box-checks/<random>/` (a traverse-only
-    parent, 0711, so the random names cannot be listed; a fresh folder open to every uid, 0777 by explicit chmod: the
-    umask would narrow a create mode) and the listener in it. Once the folder exists it is removed however the scope
-    ends."""
-    parent = data_root / CHECK_FOLDERS
+    """Everything the check holds on the host, owned in one place: a fresh folder under `<data root>/.box-checks/`, open
+    to every uid (`make_data_folder`, the one rule for the product's folders under the data root), and the listener in
+    it, which owns its socket. Once the folder exists it is removed however the scope ends."""
     try:
-        parent.mkdir(mode=0o711, exist_ok=True)  # lint-unguarded-tree-write: ok — beside .job-sockets, in no box's or job's bind
-        _dir(parent, CHECK_FOLDERS)
-        os.chmod(parent, 0o711)
-        folder = parent / secrets.token_hex(16)
-        folder.mkdir(mode=0o700)  # lint-unguarded-tree-write: ok — exclusive, fresh, in no bind but its own check's
+        folder = make_data_folder(data_root, CHECK_FOLDERS, secrets.token_hex(16), mode=0o777)
     except OSError as e:
         raise BoxFault(f"the box check could not make its folder under {data_root}: {e}") from e
     try:
-        try:
-            os.chmod(folder, 0o777)
-        except OSError as e:
-            raise BoxFault(f"the box check could not make its folder under {data_root}: {e}") from e
         try:
             listener = _Listener(folder)
         except OSError as e:
@@ -276,7 +268,7 @@ def _control_fault(runtime: str, seen: _Seen) -> BoxFault:
     if seen.failure is not None:
         what = f"its control container under runc did not run to a marker: {seen.failure}"
     elif seen.marker == "refused":
-        what = f"its control container under runc could not connect either (errno {seen.errno}) or its connection was not accepted"
+        what = f"its control container under runc could not connect either (it printed `refused {seen.errno}`) or its connection was not accepted"
     else:
         what = "its control container under runc printed `connected` but the host listener saw no connection"
     return _inconclusive(runtime, f"{what}; the control proves the socket, the bind and the image work, so a refusal "
@@ -284,10 +276,8 @@ def _control_fault(runtime: str, seen: _Seen) -> BoxFault:
 
 
 def _clear_check_folder(folder: Path) -> None:
-    """Remove the check's folder. The folder holds only the socket, so unlink and rmdir need no new descriptor, as a
-    walk would: a process out of descriptors still leaves nothing behind. Anything else in it is swept the slow way."""
-    with contextlib.suppress(OSError):
-        os.unlink(folder / SOCKET_NAME)
+    """Remove the check's folder. The listener removed its own socket, so an rmdir needs no new descriptor, as a walk
+    would: a process out of descriptors still leaves nothing behind. Anything else in it is swept the slow way."""
     try:
         os.rmdir(folder)
     except FileNotFoundError:
@@ -307,7 +297,7 @@ def require_box_check(docker: DockerFn, runtime: str, rootfs: Rootfs, *, answer:
     if runtime == _UNCHECKED:
         return
     key = _registration_key(answer, runtime)
-    with _one_at_a_time(key):
+    with _one_at_a_time(docker, key):
         if key is not None and _held(docker, key):
             return
         _check(docker, runtime, rootfs, flags=flags, labels=labels, data_root=data_root, mounts=mounts)

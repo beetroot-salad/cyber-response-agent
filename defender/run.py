@@ -1171,8 +1171,10 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
             rc = preflight(ns.model, branching=True) if world is not None else preflight(ns.model)
             if rc:
                 raise _PreflightRefused(rc)
+            # One data root for every box check this run starts, the oracle's and the run box's (#1469).
+            check_root = tenancy.data_root_for_child(data_root)
             seams = _world_seams(world, oracle=oracle, verifier=verifier, source=source,
-                                 tenant_id=str(tenant.tenant_id), data_root=tenancy.data_root_for_child(data_root))
+                                 tenant_id=str(tenant.tenant_id), data_root=check_root)
 
             # The input is read after the tenant check and the role preflight: a tenant the check
             # refuses is told so before anything about its input is — save that an ordinary
@@ -1205,8 +1207,7 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
             _write_record_versions(run_dir, current)
             yield _Started(accepted=accepted, tenant=tenant, run=run, model=model, world=world,
                            episode=episode, systems=systems, seams=seams, alert=alert,
-                           minting=minting, case=case, as_of=origin,
-                           check_root=tenancy.data_root_for_child(data_root))
+                           minting=minting, case=case, as_of=origin, check_root=check_root)
         finally:
             copy.remove()
 
@@ -1757,13 +1758,13 @@ def _sibling_set_up(  # noqa: PLR0913 — the request, the socket and the siblin
         rc = preflight(ns.model, branching=True)
         if rc:
             raise _PreflightRefused(rc)
+        check_root = tenancy.data_root_for_child(data_root)  # the oracle's and the run box's checks, one root
         seams = _world_seams(world, oracle=oracle, verifier=verifier, source=source,
-                             tenant_id=str(tenant.tenant_id), data_root=tenancy.data_root_for_child(data_root))
+                             tenant_id=str(tenant.tenant_id), data_root=check_root)
         alert = _screened_source_alert(episode)
         print(f"run_id={run.run_dir.name}", flush=True)
         yield _Started(accepted=accepted, tenant=tenant, run=run, model=model, world=world, episode=episode,
-                       systems=systems, seams=seams, alert=alert, minting=passes,
-                       check_root=tenancy.data_root_for_child(data_root))
+                       systems=systems, seams=seams, alert=alert, minting=passes, check_root=check_root)
 
 
 #: A sibling whose world went unservable exits with this (its world record says why).

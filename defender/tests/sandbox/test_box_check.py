@@ -957,3 +957,42 @@ def test_d2_box_starts_that_arrive_together_on_one_registration_run_one_check(tm
         t.join()
     assert errors == []
     assert (len(docker.checks.box_runs()), len(docker.checks.control_runs())) == (1, 1), docker.checks.runs
+
+
+# --- second #1505 review: one rule for the product's folders under the data root, the marker read as a word -----------
+
+class _BoxRefusesByTimeout(RecordingDocker):
+    """A healthy sandbox whose box-runtime check container's connect timed out: a `TimeoutError` has no errno, so the
+    container prints the error's name after `refused`. The control is answered as usual."""
+
+    def __call__(self, argv, **kw):  # noqa: ANN001
+        argv = list(argv)
+        if K.is_check_run(argv) and K.flag_value(argv, "--runtime") != "runc":
+            self.calls.append(argv)
+            return _cp(0, "refused TimeoutError\n")
+        return super().__call__(argv, **kw)
+
+
+def test_d1_a_refusal_whatever_it_prints_after_the_word_is_read_as_a_refusal(tmp_path):
+    """The marker is its first word: `refused TimeoutError` (a connect that timed out) is a refusal like `refused 111`,
+    never "printed no marker", so a healthy sandbox starts its box. (D1)"""
+    docker = _BoxRefusesByTimeout(runtimes=LISTED, daemon_id="daemon-1")
+    _BUILT.append(docker)
+    assert _start("request", tmp_path, docker).name
+    assert docker.create_argv is not None, "a refusal was misread and the box refused"
+
+
+@pytest.mark.skipif(os.geteuid() != 0, reason="giving a folder to the data root's owner needs root")
+def test_d1_the_check_folders_parent_belongs_to_the_data_roots_owner_whoever_made_it(tmp_path):
+    """Made, or found, by a process running as root, the shared parent (and each folder in it) is the data root's
+    owner's, 0711, so the owner's own processes (the operator's run) can make their folders in it and set its mode
+    again. (D1, the shared rule)"""
+    for existing in (False, True):
+        root = _data_root(tmp_path, f"data-{existing}")
+        os.chown(root, 65534, 65534)
+        if existing:  # a parent root made and kept, as before this rule, at a narrow mode
+            (root / ".box-checks").mkdir(mode=0o700)
+        folder = box_mod.make_data_folder(root, ".box-checks", "a", mode=0o777)
+        parent = folder.parent
+        assert (parent.stat().st_uid, parent.stat().st_gid, parent.stat().st_mode & 0o777) == (65534, 65534, 0o711), existing
+        assert (folder.stat().st_uid, folder.stat().st_mode & 0o777) == (65534, 0o777), existing

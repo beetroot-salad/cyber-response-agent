@@ -10,7 +10,6 @@ environment is every setting the job reads minus secrets and cross-tenant addres
 helper resolved (N2)."""
 from __future__ import annotations
 
-import logging
 import os
 import re
 import subprocess
@@ -21,8 +20,6 @@ from typing import Any, NamedTuple
 from defender.job_socket import HELPER_LABEL, IMAGE_ENV, JOB_LABEL, NETWORK_ENV, SOCKET_ENV
 
 from ._session import Session, StartFailed
-
-_logger = logging.getLogger(__name__)
 
 #: Where under the data root each claim's socket folder lives: outside every tenant's folder and outside `/tmp` (H9).
 SOCKETS = ".job-sockets"
@@ -66,21 +63,13 @@ def owner(session: Session) -> tuple[int, int]:
 
 
 def make_socket_folder(session: Session) -> Path:
-    """`<root>/.job-sockets/<claim>/`, mode 0700, owned by the data root's owner (the container's uid)."""
-    folder = socket_folder(session)
-    parent = folder.parent
-    # Both folders are under the data root, outside every tenant's folder, and made before the job's container
-    # exists: no box mounts the parent, and the claim's folder (the container's socket bind) is made here, exclusively,
-    # in the parent judged no-follow first; the helper writes nothing else there while the container runs.
-    parent.mkdir(mode=0o711, exist_ok=True)  # lint-unguarded-tree-write: ok — no box or job mounts it (H9)
-    if parent.is_symlink() or not parent.is_dir():
-        raise StartFailed(f"{parent} is not a folder the helper made")
-    folder.mkdir(mode=0o700)  # lint-unguarded-tree-write: ok — exclusive, made before its container exists
-    os.chmod(folder, 0o700)
-    uid, gid = owner(session)
-    if os.geteuid() == 0 and (uid, gid) != (0, 0):
-        os.chown(folder, uid, gid)
-    return folder
+    """`<root>/.job-sockets/<claim>/`, mode 0700, owned by the data root's owner (the container's uid). Both folders are
+    under the data root, outside every tenant's folder, and made before the job's container exists: no box mounts the
+    parent, and the claim's folder (the container's socket bind) is made exclusively; the helper writes nothing else
+    there while the container runs (`box.make_data_folder`, the one rule for such folders)."""
+    from defender.box import make_data_folder
+
+    return make_data_folder(session.root_folder, SOCKETS, session.claim, mode=0o700)
 
 
 def _setting(name: str, value: str, denied_values: tuple[str, ...]) -> bool:
