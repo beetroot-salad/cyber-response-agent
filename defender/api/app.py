@@ -6,7 +6,7 @@ import asyncio
 import datetime as _dt
 import logging
 from collections.abc import AsyncIterator, Callable, Coroutine
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from contextlib import asynccontextmanager
 from typing import Annotated, Any, Generic, Literal, NamedTuple, TypeVar
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Path, Query, Request, Response, status
@@ -70,8 +70,8 @@ from .ports import (
     StoreBrokePromise,
     TimePosition,
     UnknownReference,
-    WriteTransaction,
 )
+from .refusing import NotImplementedYet
 
 API_VERSION = "0.1.0-stub"
 
@@ -386,6 +386,9 @@ SystemPath = Annotated[str, Path(pattern=RECORD_ID_PATTERN)]
 #: The problems any route can answer: no login, a request that fails validation (every route
 #: takes an id, a body, a cursor or a page size), an unexpected failure.
 _EVERY_ROUTE = responses(401, 422, 500)
+#: The families nothing real backs yet answer 501 when their ports refuse (`refusing.py`); the document says so on
+#: every server, whichever ports are passed.
+_UNBACKED = {**_EVERY_ROUTE, **responses(501)}
 
 
 #: Each list's total order, as its port states it (`ports.py`).
@@ -400,10 +403,6 @@ def _filter_moment(moment: _dt.datetime | None) -> str | None:
     """A filter moment's cursor spelling. It is an `Instant`, already UTC, so one instant has
     one spelling whatever offset the caller wrote it with."""
     return None if moment is None else moment.isoformat()
-
-
-def _transaction(deps: ApiDeps, caller: Principal) -> AbstractAsyncContextManager[WriteTransaction]:
-    return deps.writes.transaction(caller.tenant_id, caller)
 
 
 def _answered_for(what: str, named: str, answered: str) -> None:
@@ -468,12 +467,8 @@ async def start_investigation(
     started (200). A request answered with an investigation that was already live started
     nothing, so repeating it later is a new request. A new investigation for a tenant with no
     saved alert mapping is refused (409), naming how to save one."""
-    async with _transaction(deps, caller) as tx:
-        investigation, created = await tx.create_investigation(body.alert_id, body.client_request_id)
-        _answered_for("alert", body.alert_id, investigation.alert_id)
-        if created:
-            await tx.audit("investigation.start", investigation.investigation_id,
-                     detail=f"alert {body.alert_id}")
+    investigation, created = await deps.writes.create_investigation(caller, body.alert_id, body.client_request_id)
+    _answered_for("alert", body.alert_id, investigation.alert_id)
     if created:
         _created_at(request, response, "get_investigation", caller.tenant_id,
                     investigation_id=investigation.investigation_id)
@@ -504,10 +499,7 @@ async def get_investigation(deps: Deps, caller: WorkReader, investigation_id: In
 
 @investigations.post("/{investigation_id}/cancel", responses=responses(404, 409))
 async def cancel_investigation(deps: Deps, caller: InvestigationRunner, investigation_id: InvestigationId) -> Investigation:
-    async with _transaction(deps, caller) as tx:
-        investigation = await tx.cancel_investigation(investigation_id)
-        await tx.audit("investigation.cancel", investigation_id)
-    return investigation
+    return await deps.writes.cancel_investigation(caller, investigation_id)
 
 
 @investigations.delete("/{investigation_id}", status_code=status.HTTP_204_NO_CONTENT,
@@ -515,9 +507,7 @@ async def cancel_investigation(deps: Deps, caller: InvestigationRunner, investig
 async def delete_investigation(deps: Deps, caller: InvestigationDeleter, investigation_id: InvestigationId) -> None:
     """Delete an investigation and every attempt of the request it belongs to. Its run folders
     stay: lessons cite runs. Refused while any attempt is queued or running."""
-    async with _transaction(deps, caller) as tx:
-        await tx.delete_investigation(investigation_id)
-        await tx.audit("investigation.delete", investigation_id)
+    await deps.writes.delete_investigation(caller, investigation_id)
 
 
 @investigations.get(
@@ -536,9 +526,8 @@ async def read_artifact(deps: Deps, caller: WorkReader, investigation_id: Invest
     if key not in investigation.artifacts:
         raise _not_found("artifact", key)
     url = await deps.artifact_links.signed_url(caller.tenant_id, investigation_id, key)
-    # Audited once the link exists, and committed before it is handed out.
-    async with _transaction(deps, caller) as tx:
-        await tx.audit("artifact.read", investigation_id, detail=key)
+    # Audited once the link exists, before it is handed out.
+    await deps.audit.announce(caller, "artifact.read", investigation_id, key)
     return RedirectResponse(url, headers={"Cache-Control": "no-store"})
 
 
@@ -552,12 +541,8 @@ async def start_learning_job(
     """Learn again from an investigation: queue an explicit re-learn. A completed
     investigation is learned from automatically; this adds another, and re-learns are unlimited.
     Repeating a request with its `client_request_id` returns the job that request queued (200)."""
-    async with _transaction(deps, caller) as tx:
-        job, created = await tx.create_learning_job(body.investigation_id, body.client_request_id)
-        _answered_for("investigation", body.investigation_id, job.investigation_id)
-        if created:
-            await tx.audit("learning_job.start", job.learning_job_id,
-                     detail=f"investigation {body.investigation_id}")
+    job, created = await deps.writes.create_learning_job(caller, body.investigation_id, body.client_request_id)
+    _answered_for("investigation", body.investigation_id, job.investigation_id)
     if created:
         _created_at(request, response, "get_learning_job", caller.tenant_id, learning_job_id=job.learning_job_id)
     return job
@@ -586,7 +571,7 @@ async def get_learning_job(deps: Deps, caller: WorkReader, learning_job_id: Lear
     return job
 
 
-lessons = _router(prefix="/lessons", tags=["learning"], responses=_EVERY_ROUTE)
+lessons = _router(prefix="/lessons", tags=["learning"], responses=_UNBACKED)
 
 
 @lessons.get("")
@@ -600,7 +585,7 @@ async def list_lessons(
     )
 
 
-systems = _router(prefix="/systems", tags=["systems"], responses=_EVERY_ROUTE)
+systems = _router(prefix="/systems", tags=["systems"], responses=_UNBACKED)
 
 
 async def _served(deps: ApiDeps, caller: Principal, settings: SystemSettings) -> System:
@@ -636,10 +621,8 @@ async def put_system(
     deps: Deps, caller: ConfigWriter, system_id: SystemPath, body: SystemPut, request: Request, response: Response
 ) -> System:
     """Create or replace a connected system's settings. Credentials are set separately."""
-    async with _transaction(deps, caller) as tx:
-        settings, created = await tx.put_system(system_id, body)
-        _answered_for("system", system_id, settings.system_id)
-        await tx.audit("system.update", system_id)
+    settings, created = await deps.systems.put_system(caller, system_id, body)
+    _answered_for("system", system_id, settings.system_id)
     if created:
         # A PUT creates the resource at its own URL; built by the router, so no query rides along.
         _created_at(request, response, "put_system", caller.tenant_id, system_id=system_id)
@@ -651,14 +634,7 @@ async def put_system(
 async def put_credentials(deps: Deps, caller: ConfigWriter, system_id: SystemPath, body: CredentialsPut) -> None:
     """Replace the system's credentials. Write-only: no endpoint returns them."""
     await _settings(deps, caller, system_id)
-    # The secret store is outside the transaction, so the audit event is written first and the
-    # secret inside the block: a failed audit write stops the secret write, and only a commit
-    # failing after the secret is stored can leave it unaudited.
-    async with _transaction(deps, caller) as tx:
-        await tx.audit("system.credentials", system_id,
-                 detail="fields: " + ", ".join(sorted(body.credentials)))
-        await deps.secrets.put_credentials(
-            caller.tenant_id, system_id, body.kind, body.credentials)
+    await deps.secrets.put_credentials(caller, system_id, body.kind, body.credentials)
 
 
 @systems.post("/{system_id}/check", responses=responses(404))
@@ -956,7 +932,7 @@ alert_mapping = _router(prefix="/alert-mapping", tags=["alert mapping"], respons
 @alert_mapping.get("")
 async def get_alert_mapping(deps: Deps, caller: ConfigReader) -> AlertMapping:
     """The tenant's alert mapping: all six entries, unmapped ones null. Not found until one is saved."""
-    mapping = await deps.systems.get_alert_mapping(caller.tenant_id)
+    mapping = await deps.alert_mapping.get_alert_mapping(caller.tenant_id)
     if mapping is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "this tenant has no alert mapping yet")
     return mapping
@@ -969,9 +945,7 @@ async def put_alert_mapping(
     """Replace the tenant's alert mapping whole: all six entries, each a dotted path or null. A path reads nested keys, keys
     holding dots, or a mix; where both hold a value, the nested key wins (#1481). It applies to alerts
     stored from now on; alerts already stored keep their title and description."""
-    async with _transaction(deps, caller) as tx:
-        mapping, created = await tx.put_alert_mapping(body)
-        await tx.audit("alert_mapping.update", caller.tenant_id)
+    mapping, created = await deps.writes.put_alert_mapping(caller, body)
     if created:
         _created_at(request, response, "put_alert_mapping", caller.tenant_id)
     return mapping
@@ -981,7 +955,7 @@ def create_app(deps: ApiDeps) -> FastAPI:
     app = FastAPI(
         title="Defender platform API",
         version=API_VERSION,
-        summary="Stub: the routes and shapes are the contract; the records behind them are not yet real.",
+        summary="The routes and shapes of the platform API; a route whose records are not yet served answers 501.",
         lifespan=_lifespan,
         dependencies=[Depends(_no_unknown_query)],
     )
@@ -998,6 +972,7 @@ def create_app(deps: ApiDeps) -> FastAPI:
     app.add_exception_handler(Conflict, refusal(status.HTTP_409_CONFLICT))
     # The literal, not starlette's constant: it was renamed across starlette releases.
     app.add_exception_handler(UnknownReference, refusal(422))
+    app.add_exception_handler(NotImplementedYet, refusal(status.HTTP_501_NOT_IMPLEMENTED))
     app.add_exception_handler(_identity.NotAuthenticated, _not_authenticated)
     app.add_exception_handler(_identity.Forbidden, refusal(status.HTTP_403_FORBIDDEN))
     app.add_exception_handler(_identity.NotFound, refusal(status.HTTP_404_NOT_FOUND))

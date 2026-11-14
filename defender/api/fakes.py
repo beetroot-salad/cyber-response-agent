@@ -1,4 +1,4 @@
-"""Rule-free stand-ins for the ports, for the demo server (`demo.py`)."""
+"""Rule-free stand-ins for the ports, for the demo server (`demo.py`) and the tests."""
 
 from __future__ import annotations
 
@@ -82,9 +82,10 @@ class AuditEvent:
 
 
 class InMemoryStore:
-    """The alerts, investigations, learning jobs, lessons and systems repositories, and the
-    transactions writes go through, seeded by `demo.py` through the `add_*` methods (which are
-    not part of any port). `audit_events` is every committed audit event, oldest first."""
+    """The alerts, investigations, learning jobs, lessons, systems and alert-mapping ports, the writes (each
+    announcing its audit event after the write is visible) and the audit-only port, seeded by `demo.py` through
+    the `add_*` methods (which are not part of any port). `audit_events` is every announced audit event, oldest
+    first; every announcer appends to the attribute as it stands when it announces."""
 
     def __init__(self, clock: Callable[[], _dt.datetime]) -> None:
         self._clock = clock
@@ -102,8 +103,13 @@ class InMemoryStore:
         they were minted, as the `prefix-000001` ids before #1382 did."""
         return family(f"00000000-0000-4000-8000-{next(self._ids):012x}")
 
-    def transaction(self, tenant_id: TenantId, principal: Principal) -> _InMemoryTransaction:
-        return _InMemoryTransaction(self, tenant_id, principal, self._clock)
+    # --- AuditPort ----------------------------------------------------------------------
+
+    async def announce(self, principal: Principal, action: AuditAction, target: str, detail: str = "") -> None:
+        self.audit_events.append(AuditEvent(
+            tenant_id=principal.tenant_id, user_id=principal.actor_id, action=action, target=target,
+            at=self._clock(), detail=detail, credential_id=principal.credential_id,
+        ))
 
     # --- seeding ------------------------------------------------------------------------
 
@@ -166,16 +172,19 @@ class InMemoryStore:
     # --- InvestigationsRepository -------------------------------------------------------
 
     async def create_investigation(
-        self, tenant_id: TenantId, alert_id: AlertId, client_request_id: str
+        self, principal: Principal, alert_id: AlertId, client_request_id: str
     ) -> tuple[Investigation, bool]:
         """Always a new attempt 1 stamped with the request key: the replay rules are the store's."""
+        tenant_id = principal.tenant_id
         if await self.get_alert(tenant_id, alert_id) is None:
             raise UnknownReference(f"no alert {alert_id!r}")
         investigation = Investigation(
             investigation_id=self._mint(InvestigationId), alert_id=alert_id, status="queued",
             request_key=client_request_id, attempt=1, cost_usd=0.0, cost_is_lower_limit=False, created_at=self._clock(),
         )
-        return self.add_investigation(tenant_id, investigation), True
+        self.add_investigation(tenant_id, investigation)
+        await self.announce(principal, "investigation.start", investigation.investigation_id, f"alert {alert_id}")
+        return investigation, True
 
     async def list_investigations(
         self, tenant_id: TenantId, *, alert_id: AlertId | None, after: TimePosition | None, limit: int
@@ -195,13 +204,14 @@ class InMemoryStore:
             raise NotFound(f"no investigation {investigation_id!r}")
         return investigation
 
-    async def cancel_investigation(self, tenant_id: TenantId, investigation_id: InvestigationId) -> Investigation:
-        existing = await self._existing(tenant_id, investigation_id)
+    async def cancel_investigation(self, principal: Principal, investigation_id: InvestigationId) -> Investigation:
+        existing = await self._existing(principal.tenant_id, investigation_id)
         if existing.status not in ("queued", "running"):
             raise Conflict("already ended")
-        aborted = existing.model_copy(update={"status": "aborted", "failure_reason": "cancelled",
-                                              "finished_at": self._clock()})
-        return self.add_investigation(tenant_id, aborted)
+        aborted = self.add_investigation(principal.tenant_id, existing.model_copy(
+            update={"status": "aborted", "failure_reason": "cancelled", "finished_at": self._clock()}))
+        await self.announce(principal, "investigation.cancel", investigation_id)
+        return aborted
 
     def end_live_jobs(self, tenant_id: TenantId, *, actor: str) -> None:
         """Offboarding's ending of the tenant's queued and running jobs (#1360): investigations `aborted`, learning
@@ -219,26 +229,29 @@ class InMemoryStore:
                     "status": "skipped", "reason": TENANT_OFFBOARDED, "finished_at": now,
                     "message": OFFBOARD_MESSAGE})
 
-    async def delete_investigation(self, tenant_id: TenantId, investigation_id: InvestigationId) -> None:
-        existing = await self._existing(tenant_id, investigation_id)
+    async def delete_investigation(self, principal: Principal, investigation_id: InvestigationId) -> None:
+        existing = await self._existing(principal.tenant_id, investigation_id)
         if existing.status in ("queued", "running"):
             raise Conflict("cannot delete an investigation that is queued or running")
-        del self._investigations[(tenant_id, investigation_id)]
+        del self._investigations[(principal.tenant_id, investigation_id)]
+        await self.announce(principal, "investigation.delete", investigation_id)
 
     # --- LearningJobsRepository ---------------------------------------------------------
 
     async def create_learning_job(
-        self, tenant_id: TenantId, investigation_id: InvestigationId, client_request_id: str
+        self, principal: Principal, investigation_id: InvestigationId, client_request_id: str
     ) -> tuple[LearningJob, bool]:
-        investigation = await self.get_investigation(tenant_id, investigation_id)
+        investigation = await self.get_investigation(principal.tenant_id, investigation_id)
         if investigation is None:
             raise UnknownReference(f"no investigation {investigation_id!r}")
-        job = LearningJob(
+        job = self.add_learning_job(principal.tenant_id, LearningJob(
             learning_job_id=self._mint(LearningJobId), investigation_id=investigation_id,
             alert_id=investigation.alert_id, status="queued", trigger="explicit",
             created_at=self._clock(),
-        )
-        return self.add_learning_job(tenant_id, job), True
+        ))
+        await self.announce(principal, "learning_job.start", job.learning_job_id,
+                            f"investigation {investigation_id}; trigger=explicit")
+        return job, True
 
     async def list_learning_jobs(
         self, tenant_id: TenantId, *, investigation_id: InvestigationId | None, after: TimePosition | None,
@@ -268,67 +281,26 @@ class InMemoryStore:
     async def get_system(self, tenant_id: TenantId, system_id: str) -> SystemSettings | None:
         return self._systems.get((tenant_id, system_id))
 
+    async def put_system(
+        self, principal: Principal, system_id: str, body: SystemPut
+    ) -> tuple[SystemSettings, bool]:
+        created = (principal.tenant_id, system_id) not in self._systems
+        settings = self.add_system(principal.tenant_id, SystemSettings(system_id=system_id, **body.model_dump()))
+        await self.announce(principal, "system.update", system_id)
+        return settings, created
+
+    # --- AlertMappingRepository and its write -------------------------------------------
+
     async def get_alert_mapping(self, tenant_id: TenantId) -> AlertMapping | None:
         return self._alert_mappings.get(tenant_id)
 
-    async def put_alert_mapping(self, tenant_id: TenantId, body: AlertMapping) -> tuple[AlertMapping, bool]:
+    async def put_alert_mapping(self, principal: Principal, body: AlertMapping) -> tuple[AlertMapping, bool]:
         """Rule-free like the rest of the fake: the wire model has applied the path rules, and nothing here derives
         alert titles (the real store derives them when it stores an alert)."""
-        created = tenant_id not in self._alert_mappings
-        self._alert_mappings[tenant_id] = body
+        created = principal.tenant_id not in self._alert_mappings
+        self._alert_mappings[principal.tenant_id] = body
+        await self.announce(principal, "alert_mapping.update", principal.tenant_id)
         return body, created
-
-    async def put_system(
-        self, tenant_id: TenantId, system_id: str, body: SystemPut
-    ) -> tuple[SystemSettings, bool]:
-        created = (tenant_id, system_id) not in self._systems
-        settings = self.add_system(tenant_id, SystemSettings(system_id=system_id, **body.model_dump()))
-        return settings, created
-
-
-class _InMemoryTransaction:
-    """A write transaction on `InMemoryStore` for one tenant and actor: writes apply at once,
-    audit events are kept only if the block exits normally."""
-
-    def __init__(self, store: InMemoryStore, tenant_id: TenantId, principal: Principal,
-                 clock: Callable[[], _dt.datetime]) -> None:
-        self._store = store
-        self._clock = clock
-        self._tenant_id = tenant_id
-        self._actor = principal.actor_id
-        self._credential_id = principal.credential_id
-        self._pending: list[AuditEvent] = []  # lint-stale-ref: ok — unrelated local attribute named _pending, not the retired learning queue
-
-    async def __aenter__(self) -> _InMemoryTransaction:
-        return self
-
-    async def __aexit__(self, exc_type: type[BaseException] | None, *_: object) -> None:
-        if exc_type is None:
-            self._store.audit_events.extend(self._pending)  # lint-stale-ref: ok — unrelated local attribute named _pending, not the retired learning queue
-
-    async def create_investigation(self, alert_id: AlertId, client_request_id: str) -> tuple[Investigation, bool]:
-        return await self._store.create_investigation(self._tenant_id, alert_id, client_request_id)
-
-    async def cancel_investigation(self, investigation_id: InvestigationId) -> Investigation:
-        return await self._store.cancel_investigation(self._tenant_id, investigation_id)
-
-    async def delete_investigation(self, investigation_id: InvestigationId) -> None:
-        await self._store.delete_investigation(self._tenant_id, investigation_id)
-
-    async def create_learning_job(self, investigation_id: InvestigationId, client_request_id: str) -> tuple[LearningJob, bool]:
-        return await self._store.create_learning_job(self._tenant_id, investigation_id, client_request_id)
-
-    async def put_system(self, system_id: str, body: SystemPut) -> tuple[SystemSettings, bool]:
-        return await self._store.put_system(self._tenant_id, system_id, body)
-
-    async def put_alert_mapping(self, body: AlertMapping) -> tuple[AlertMapping, bool]:
-        return await self._store.put_alert_mapping(self._tenant_id, body)
-
-    async def audit(self, action: AuditAction, target: str, detail: str = "") -> None:
-        self._pending.append(AuditEvent(  # lint-stale-ref: ok — unrelated local attribute named _pending, not the retired learning queue
-            tenant_id=self._tenant_id, user_id=self._actor, action=action, target=target,
-            at=self._clock(), detail=detail, credential_id=self._credential_id,
-        ))
 
 
 class InMemoryOffboarding:
@@ -347,13 +319,24 @@ class InMemoryOffboarding:
 
 
 class InMemorySecrets:
-    def __init__(self) -> None:
+    """The secret store's fake. Given a `store`, a write announces `system.credentials` into that store's
+    `audit_events` as it stands then; without one, it keeps the credentials and announces nothing."""
+
+    def __init__(self, store: InMemoryStore | None = None) -> None:
+        self._store = store
         self._credentials: dict[tuple[str, str], dict[str, str]] = {}
 
-    async def put_credentials(
-        self, tenant_id: TenantId, system_id: str, kind: str, credentials: dict[str, str],
-    ) -> None:
+    def add_credentials(self, tenant_id: TenantId, system_id: str, credentials: dict[str, str]) -> None:
+        """Seeding: set a system's credentials without announcing (not part of any port)."""
         self._credentials[(tenant_id, system_id)] = dict(credentials)
+
+    async def put_credentials(
+        self, principal: Principal, system_id: str, kind: str, credentials: dict[str, str],
+    ) -> None:
+        self.add_credentials(principal.tenant_id, system_id, credentials)
+        if self._store is not None:
+            await self._store.announce(principal, "system.credentials", system_id,
+                                       "fields: " + ", ".join(sorted(credentials)))
 
     async def has_credentials(self, tenant_id: TenantId, system_id: str) -> bool:
         return (tenant_id, system_id) in self._credentials

@@ -131,10 +131,10 @@ async def demo_deps(tenants: Sequence[str], clock: Callable[[], _dt.datetime] = 
         tenant_ids = [TenantId(raw) for raw in tenants]
     except TenantRefused as refused:
         raise ValueError(f"not a tenant id: {refused}") from None
-    secrets = InMemorySecrets()
     store = InMemoryStore(clock)
+    secrets = InMemorySecrets(store)
     now = clock()
-    await _seed(store, secrets, tenant_ids[0], now)
+    _seed(store, secrets, tenant_ids[0], now)
     for n, tenant in enumerate(tenant_ids[1:], start=9):
         store.add_alert(tenant, _alert(
             tenant, n, fired=now - _dt.timedelta(hours=2), title=f"An alert of {tenant}'s",
@@ -164,10 +164,12 @@ async def demo_deps(tenants: Sequence[str], clock: Callable[[], _dt.datetime] = 
         learning_jobs=store,
         lessons=store,
         systems=store,
+        alert_mapping=store,
         writes=store,
         secrets=secrets,
         checker=StubSystemChecker(),
         artifact_links=StubArtifactLinks(),
+        audit=store,
         offboarding=InMemoryOffboarding(tenant_rows, store, clock),
     )
 
@@ -192,7 +194,7 @@ def _alert(tenant: TenantId, n: int, *, fired: _dt.datetime, title: str, rule: s
     )
 
 
-async def _seed(store: InMemoryStore, secrets: InMemorySecrets, tenant: TenantId, now: _dt.datetime) -> None:
+def _seed(store: InMemoryStore, secrets: InMemorySecrets, tenant: TenantId, now: _dt.datetime) -> None:
     hour = _dt.timedelta(hours=1)
     brute = store.add_alert(tenant, _alert(
         tenant, 1, fired=now - 30 * hour, title="Repeated failed logins followed by success",
@@ -250,5 +252,4 @@ async def _seed(store: InMemoryStore, secrets: InMemorySecrets, tenant: TenantId
         system_id="siem", kind="siem", display_name="Event search", enabled=True,
         settings={"base_url": f"https://siem.{tenant}.example"},
     ))
-    await secrets.put_credentials(
-        tenant, "tickets", "static", {"api_token": "demo-secret-token-1163"})
+    secrets.add_credentials(tenant, "tickets", {"api_token": "demo-secret-token-1163"})
