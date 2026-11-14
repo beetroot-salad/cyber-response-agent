@@ -21,7 +21,6 @@ from defender.tenancy.models import (ALLOWED_ACTIONS, AlertMappingRow, ForgeWiri
                                      TenantRecord, TenantRecords)
 from defender.tenancy.repository import (
     KEEP,
-    HOST,
     SERVICE,
     Conflict,
     FenceMissed,

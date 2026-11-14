@@ -74,9 +74,14 @@ change of its base, CA or auth block raises its credential generation, and its c
 set again. Connect hands its result to the operator as such a folder: its validator takes
 `--handoff <folder>` and no longer `--tenant`.
 
-## Upgrade from before #1278
+## Upgrade from before #1485
 
-Upgrade through the #1278 revision with its learning cutover first (revisions `0013`/`0014`, `request-learning-cutover`); the cutover is retired and revision `0016_retire_learning_cutover` stops, changing nothing, while any tenant still has one pending.
+Stop the learning drains and the API before running migrations (revisions `0017_retire_learning_cutover` and
+`0018_learning_set_aside_indexes`): `work_items` gains a required `id` column with no default, so a process of the old
+code fails on every item insert once it is there. `0017` stops, changing nothing, while any tenant still has a learning
+cutover pending (finish or resume it on an earlier revision first).
+
+The #1278 learning-state cutover is retired: cut over on a revision before #1485 first; a deployment that never did loses its old learning folder.
 
 ## Upgrade from before #1454
 

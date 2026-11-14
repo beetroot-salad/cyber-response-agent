@@ -513,7 +513,7 @@ class Lane:
 
     def __call__(self, _paths: Any, _state: Any, run: Any, *, box: Any = None,
                  on_done: Any = None, items: Any = (), outcomes: Any = None, **_kw: Any) -> None:
-        from defender.learning.store import Outcome
+        from defender.learning_store import Outcome
 
         self.handed.append(run)
         for kind, key, _payload in items:  # served: the real step decides a fate for each item it was handed

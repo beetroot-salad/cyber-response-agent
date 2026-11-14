@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from defender.learning.store import Outcome
+from defender.learning_store import Outcome
 from defender.tests.support.learning.core._declared870 import Claim, tick
 from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.runtime.engine._declared869 import (

@@ -68,7 +68,7 @@ def test_o12_a_tick_that_finds_the_lease_held_by_a_live_holder_logs_it_and_chang
 
 def test_o12_a_tick_takes_over_a_lapsed_lease_and_the_dead_holders_token_is_stale(fb):
     """A tick whose predecessor crashed (lease lapsed past lease + grace) serves the tenant with the next fencing token; the predecessor's late write raises `LeaseLost` and changes nothing. (O12)"""
-    from defender.learning.store import LeaseLost
+    from defender.learning_store import LeaseLost
 
     fb.request("case-takeover")
     dead = call(fb.dsn, "begin_feedback_tick", fb.tid, owner="crashed-host")
@@ -241,8 +241,8 @@ def test_o11_no_feedback_module_reaches_the_learning_state_handle_or_root(rel):
 
 
 def test_o11_the_feedback_tick_reaches_the_store_through_blocking_only(fb, monkeypatch):
-    """The tick opens its store at `DEFENDER_DATABASE_DSN` through `defender.learning.store.blocking`: with that door replaced by one that refuses, the tick makes no forge write and no row. (O11, A4 flows)"""
-    import defender.learning.store as store_mod
+    """The tick opens its store at `DEFENDER_DATABASE_DSN` through `defender.learning_store.blocking`: with that door replaced by one that refuses, the tick makes no forge write and no row. (O11, A4 flows)"""
+    import defender.learning_store as store_mod
 
     opened: list[str] = []
 

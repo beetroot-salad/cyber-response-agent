@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import pytest
 
 from defender.learning.core.store_tick import Holding, TickStopped
-from defender.learning.store import LeaseLost
+from defender.learning_store import LeaseLost
 
 RENEW_EVERY = 0.05
 

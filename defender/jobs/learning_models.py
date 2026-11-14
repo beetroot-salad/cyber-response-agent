@@ -11,7 +11,6 @@ import datetime as _dt
 from typing import Any
 
 from sqlalchemy import (
-    collate,
     BigInteger,
     Boolean,
     CheckConstraint,

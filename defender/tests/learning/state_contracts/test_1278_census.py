@@ -129,7 +129,7 @@ def test_o10_the_census_finds_each_old_reach_and_skips_prose_and_exempted_lines(
                  "import defender.records\nx = defender.records.CommitRecord(p)"):
         assert reaches(line), line
     assert reaches("class CommitRecord(_Location):\n    pass", "defender/records/_locations.py")
-    for line in ("from defender.learning.store import CommitRecord\nrows: list[CommitRecord] = []",
+    for line in ("from defender.learning_store import CommitRecord\nrows: list[CommitRecord] = []",
                  "from ._store import CommitRecord", "class CommitRecord:\n    commit: str"):
         assert reaches(line, "defender/learning/store/_store.py") == [], line
     assert _definitions("class LearningState:\n    pass\n") == ["ClassDef LearningState"]

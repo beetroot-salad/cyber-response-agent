@@ -6,7 +6,7 @@ that has the cutover (`0015_system_records`), then run this again. The two CHECK
 name the actions are replaced by the texts `0002_tenancy` wrote; no row changes.
 
 Revision ID: 0017_retire_learning_cutover
-Revises: 0015_system_records
+Revises: 0016_list_indexes
 """
 import sqlalchemy as sa
 from alembic import op

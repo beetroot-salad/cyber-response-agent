@@ -1882,22 +1882,6 @@ class RealBuilt:
         return f"{self.ep.name}/{label}/{draw}/{index}"
 
 
-@contextlib.contextmanager
-def _launcher_judge_suppressed(tmp_path: Path) -> Iterator[None]:
-    """Keep this tenant's real learning root absent during the launch; grade afterwards."""
-    root = location_path(T.current_tenant().learning)
-    saved = Path(tmp_path) / "saved-tenant-learning"
-    had_root = root.exists()
-    if had_root:
-        root.rename(saved)
-    try:
-        yield
-    finally:
-        assert not root.exists(), "the launcher created its missing learning root"
-        if had_root:
-            saved.rename(root)
-
-
 def real_family(tmp_path: Path, worlds: Mapping[str, RealWorld] | None = None, *,  # noqa: PLR0913 — one switch per real-path input
                 calls: Iterable[Any] | None = None,
                 withheld: Iterable[tuple[str, str]] = (("edr", "lookup"),),
@@ -1931,14 +1915,13 @@ def real_family(tmp_path: Path, worlds: Mapping[str, RealWorld] | None = None, *
     root = episodes_root(tmp_path)
     before = {p.name for p in root.iterdir()} if root.is_dir() else set()
     message = ""
-    with _launcher_judge_suppressed(tmp_path):
-        try:
-            rc = mod("cli.learning.branch").main(["--tenant", src.parent.parent.name, src.name,
-                                str(T.BRANCH_MESSAGE_ID)],
-                               spawn=spawn, directory=est.launch_directory(src.parent.parent.name),
-                               **seams)
-        except SystemExit as stop:
-            rc, message = (stop.code, "") if isinstance(stop.code, int) else (2, str(stop.code))
+    try:
+        rc = mod("cli.learning.branch").main(["--tenant", src.parent.parent.name, src.name,
+                            str(T.BRANCH_MESSAGE_ID)],
+                           spawn=spawn, directory=est.launch_directory(src.parent.parent.name),
+                           **seams)
+    except SystemExit as stop:
+        rc, message = (stop.code, "") if isinstance(stop.code, int) else (2, str(stop.code))
     # The launch itself makes the tenant's `episodes/`; a launch refused before that leaves
     # none, reported below with its own refusal rather than as a listing error.
     fresh = sorted(p for p in root.iterdir() if p.is_dir() and p.name not in before) \

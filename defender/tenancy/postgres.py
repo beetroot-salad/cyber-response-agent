@@ -41,7 +41,6 @@ from defender.tenancy.repository import (
     ALL,
     KEEP,
     LOCK_NAMESPACE,
-    HOST,
     SERVICE,
     Conflict,
     FenceMissed,

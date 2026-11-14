@@ -303,7 +303,7 @@ def curation_requests(paths) -> dict[str, dict]:
     """The curation requests still waiting in the learning store for `paths`' tenant, by case id (#1278: the queue is
     rows, not an `author-queue` folder). A test that asks needs a store: without one this refuses to answer, so an
     "is empty" assertion can never pass for want of a database."""
-    from defender.learning.store import blocking
+    from defender.learning_store import blocking
 
     dsn = store_dsn()
     assert dsn, "curation_requests reads the learning store: the test must name one (DEFENDER_DATABASE_DSN)"

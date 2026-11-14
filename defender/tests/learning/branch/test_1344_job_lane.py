@@ -645,13 +645,13 @@ def test_o13_the_entry_carries_the_siblings_cost_and_its_stage_to_the_progress_a
 
 def blocking(dsn: str):
     """The store's sync facade (interface `blocking`), imported where used so a missing store is a per-test red."""
-    from defender.learning.store import blocking as open_blocking
+    from defender.learning_store import blocking as open_blocking
 
     return open_blocking(dsn)
 
 
 def _skipped(reason: str):
-    from defender.learning.store import Outcome
+    from defender.learning_store import Outcome
 
     return Outcome.skipped(reason)
 
