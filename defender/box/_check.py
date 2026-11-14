@@ -121,7 +121,11 @@ class _Listener:
 
     def __init__(self, folder: Path) -> None:
         self._fd = os.open(folder, os.O_RDONLY | os.O_DIRECTORY)
-        self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        except BaseException:
+            os.close(self._fd)  # no socket to close, only the folder's descriptor
+            raise
         try:
             self._sock.bind(f"/proc/self/fd/{self._fd}/{SOCKET_NAME}")
             os.chmod(SOCKET_NAME, 0o777, dir_fd=self._fd)  # the umask would narrow a create mode
