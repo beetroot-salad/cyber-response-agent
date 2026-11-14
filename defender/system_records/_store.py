@@ -1,40 +1,114 @@
 """The record store: one transaction per write, taken under the tenant's row lock so one tenant's writes are serialized
-across the system and case tables (O5). The judgement (all of O4 but version, staleness, lock and generation) is injected
-and sees the tenant's whole after-state, read under the lock."""
+across the system and case tables (#1366 O5). The judgement (all of #1366 O4 but version, staleness, lock and generation)
+is injected and sees the tenant's whole after-state, read under the lock.
+
+A record write names the version it replaces (#1470 P2): the version a read shows, 0 when a read shows none (never
+written, or its newest version is a tombstone). Version numbers keep rising across a delete, so the store keeps two
+facts apart: the shown version and the next version (the newest + 1). A delete of what has no current record is
+`NoCurrentRecord` before any version comparison. Only an `active` tenant is written (#1470 O8: a tenant's records are
+known exactly while it is active). Every refusal is a `RecordRefused` of one of five types, which the API maps to a
+status by type alone."""
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as _dt
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from typing import Any, NamedTuple
 
-from sqlalchemy import Table, func, insert, select
+from sqlalchemy import Table, func, insert, select, text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from defender.database import async_engine
+from defender.kit.access import Auth
 from defender.kit.faults import ConfigFault
 from defender.records.formats import TenantId
-from defender.systems.run_tenant import not_imported_text
+from defender.system_rules import located_access
 from defender.tenancy import parse_access
-from defender.tenancy.models import (CaseRecord, CaseVersionRow, RecordsMark, SystemRecord, SystemVersionRow, TenantRecords,
-                                     adapter_column)
+from defender.tenancy.models import CaseRecord, CaseVersionRow, SystemRecord, SystemVersionRow, TenantRecords, adapter_column
 
-#: The injected judgement: every reason the after-state is unusable, given the state a write replaces (None for the import).
-Judge = Callable[[TenantRecords, TenantRecords | None], Sequence[str]]
+#: The injected judgement: every reason the after-state is unusable, given the state the write replaces.
+Judge = Callable[[TenantRecords, TenantRecords], Sequence[str]]
+
+ACTIVE = "active"
 
 
 class RecordRefused(Exception):
-    """A write the store refuses. `faults` is every reason, each a sentence naming the system and key (never a file)."""
+    """A write (or a credential slot) the store refuses. `faults` is every reason, each a sentence naming the system and
+    the key or part (never a file). Raised only as one of its five subclasses."""
 
     def __init__(self, faults: Sequence[str]) -> None:
         self.faults = list(faults)
         super().__init__("; ".join(self.faults))
 
 
+class Stale(RecordRefused):
+    """The write names a version other than the one a read now shows (`current_version`, 0 when a read shows none); or a
+    credential slot asked for a version whose generation is not the current version's."""
+
+    def __init__(self, what: str, *, current_version: int, named: int) -> None:
+        self.current_version = current_version
+        shown = f"version {current_version}" if current_version else "no current version"
+        super().__init__([f"{what}: the write names version {named}, but a read now shows {shown}"])
+
+
+class Judged(RecordRefused):
+    """The judgement found the after-state unusable: `faults` are all its reasons, as it worded them."""
+
+
+class NoSuchTenant(RecordRefused):
+    """No tenant row has this id."""
+
+    def __init__(self, tenant: object) -> None:
+        super().__init__([f"tenant {tenant} does not exist"])
+
+
+class TenantNotActive(RecordRefused):
+    """The tenant exists but is not `active` (creating, offboarding, offboarded): its records take no write."""
+
+    def __init__(self, tenant: object, state: str) -> None:
+        self.state = state
+        super().__init__([f"tenant {tenant} is {state}, not active: its records take no write"])
+
+
+class NoCurrentRecord(RecordRefused):
+    """The write needs a current record (a delete, a credential slot) and there is none: never written, or deleted."""
+
+    def __init__(self, what: str) -> None:
+        super().__init__([f"{what} has no current record"])
+
+
+@dataclasses.dataclass(frozen=True)
+class SystemWrite:
+    """What `put_system` stored: the new version, whether a read showed no record before it (`created`: a create or a
+    re-create after a delete), and whether it raised the credential generation (`generation_raised`: a changed base,
+    CA or auth block; never on a create, whose generation no earlier set can have)."""
+
+    record: SystemRecord
+    created: bool
+    generation_raised: bool
+
+
+@dataclasses.dataclass(frozen=True)
+class CaseWrite:
+    """What `put_case` stored: the new version and whether a read showed no case record before it."""
+
+    record: CaseRecord
+    created: bool
+
+
+@dataclasses.dataclass(frozen=True)
+class CredentialSlot:
+    """Where a credential set for a system goes (#1470 P3): the current version's credential generation and the auth
+    scheme its access declaration states (`Auth.kind` is the set's kind)."""
+
+    generation: int
+    auth: Auth
+
+
 _SV: Table = SystemVersionRow.__table__  # type: ignore[assignment]
 _CV: Table = CaseVersionRow.__table__  # type: ignore[assignment]
-_RM: Table = RecordsMark.__table__  # type: ignore[assignment]
 _TENANTS = "tenancy.tenants"
 
 
@@ -45,9 +119,21 @@ class _Latest(NamedTuple):
     top_generation: int
 
 
-def _version_of(last: _Latest | None) -> int:
-    """The system's current version number; 0 before its first."""
-    return 0 if last is None else last.row.version
+def _shown(row: Any) -> int:
+    """The version a read shows for a newest row: its number, 0 for a tombstone or none."""
+    return 0 if row is None or row.deleted else row.version
+
+
+def _next(row: Any) -> int:
+    """The next version number: the newest row's + 1, whether it is a tombstone or not; 1 before the first."""
+    return 1 if row is None else row.version + 1
+
+
+def _check_tenant(found: Any, tenant: TenantId) -> None:
+    if found is None:
+        raise NoSuchTenant(tenant)
+    if found.state != ACTIVE:
+        raise TenantNotActive(tenant, found.state)
 
 
 class RecordStore:
@@ -61,12 +147,11 @@ class RecordStore:
 
     @asynccontextmanager
     async def _locked(self, tenant: TenantId) -> AsyncIterator[AsyncConnection]:
-        """A transaction holding the tenant's row: another writer for the same tenant waits for it."""
-        from sqlalchemy import text
+        """A transaction holding the tenant's row, which must be `active`: another writer for the same tenant waits."""
         async with self._engine.begin() as conn:
-            found = (await conn.execute(text(f"SELECT id FROM {_TENANTS} WHERE id = :t FOR UPDATE"), {"t": tenant})).first()
-            if found is None:
-                raise RecordRefused([f"tenant {tenant} does not exist"])
+            found = (await conn.execute(text(f"SELECT state FROM {_TENANTS} WHERE id = :t FOR UPDATE"),
+                                        {"t": tenant})).first()
+            _check_tenant(found, tenant)
             yield conn
 
     # --- reads under the lock -------------------------------------------------------------------------------------
@@ -84,14 +169,6 @@ class RecordStore:
         return (await conn.execute(select(_CV).where(_CV.c.tenant_id == tenant).order_by(_CV.c.version.desc())
                                    .limit(1))).first()
 
-    async def _marked(self, conn: AsyncConnection, tenant: TenantId) -> bool:
-        return (await conn.execute(select(_RM.c.tenant_id).where(_RM.c.tenant_id == tenant))).first() is not None
-
-    async def _require_marked(self, conn: AsyncConnection, tenant: TenantId) -> None:
-        """R8: a write to a tenant whose import has not run is refused, naming the import."""
-        if not await self._marked(conn, tenant):
-            raise RecordRefused([not_imported_text(tenant)])
-
     @staticmethod
     def _current(latest: Mapping[str, _Latest]) -> dict[str, SystemRecord]:
         return {s: SystemVersionRow(**{c.name: getattr(last.row, c.name) for c in _SV.c}).as_record()
@@ -103,21 +180,21 @@ class RecordStore:
             return None
         return CaseRecord(version=row.version, system_id=row.system_id, comment_body=row.comment_body)
 
-    def _refuse_if_faulty(self, after: TenantRecords, before: TenantRecords | None = None) -> None:
-        """The judge sees the after-state and, for a write (not the import), the state it replaces: it judges what the
-        write changes and names the part whose change broke cover (C4)."""
-        faults = self._judge(after, before)
+    def _refuse_if_faulty(self, after: TenantRecords, before: TenantRecords) -> None:
+        """The judge sees the after-state and the state it replaces: it judges what the write changes and names the part
+        whose change broke cover (#1366 C4)."""
+        faults = list(self._judge(after, before))
         if faults:
-            raise RecordRefused(faults)
+            raise Judged(faults)
 
     # --- generation -------------------------------------------------------------------------------------------------
 
     @staticmethod
     def _generation(system: str, last: _Latest | None, access: str) -> int:
-        """P5, R4, K4: the first version is 1; a re-create after a delete is the highest ever + 1; otherwise the current
-        generation, one higher when the base, the CA or the auth block differs, compared as parsed values. Unchanged
-        access text keeps the generation without a parse; an access, old or new, that does not parse cannot be shown to
-        name the same upstream, so it takes a new generation (a new access that does not parse is the judge's
+        """#1366 P5, R4, K4: the first version is 1; a re-create after a delete is the highest ever + 1; otherwise the
+        current generation, one higher when the base, the CA or the auth block differs, compared as parsed values.
+        Unchanged access text keeps the generation without a parse; an access, old or new, that does not parse cannot be
+        shown to name the same upstream, so it takes a new generation (a new access that does not parse is the judge's
         refusal besides)."""
         if last is None:
             return 1
@@ -135,108 +212,111 @@ class RecordStore:
     # --- writes -----------------------------------------------------------------------------------------------------
 
     async def put_system(self, tenant: TenantId, system: str, *, replaces: int, adapter: str | tuple[str, str],
-                         enabled: bool | None, settings: Mapping[str, str], access: str, author: str) -> SystemRecord:
-        """`system`'s next version. `enabled` None keeps the current version's on/off state (on for a system with no
-        current version)."""
+                         enabled: bool, settings: Mapping[str, str], access: str, author: str) -> SystemWrite:
+        """`system`'s next version, replacing the version a read shows (`replaces`, 0 for none). `author` is the acting
+        member's id."""
         async with self._locked(tenant) as conn:
-            await self._require_marked(conn, tenant)
             latest = await self._latest(conn, tenant)
             last = latest.get(system)
-            self._check_replaces(system, last, replaces)
+            row = None if last is None else last.row
+            shown = _shown(row)
+            if replaces != shown:
+                raise Stale(f"system {system}", current_version=shown, named=replaces)
             custom = adapter if isinstance(adapter, tuple) else None
             generation = self._generation(system, last, access)
-            if enabled is None:
-                enabled = last.row.enabled if last is not None and not last.row.deleted else True
-            candidate = SystemRecord(system_id=system, version=_version_of(last) + 1, adapter_id="" if custom else str(adapter),
+            candidate = SystemRecord(system_id=system, version=_next(row), adapter_id="" if custom else str(adapter),
                                      enabled=enabled, settings=dict(settings), access=access, custom_ref=custom,
                                      credential_generation=generation)
-            after = self._current(latest) | {system: candidate}
+            before = self._current(latest)
             case = self._current_case(await self._latest_case(conn, tenant))
-            self._refuse_if_faulty(TenantRecords(imported=True, systems=after, case=case),
-                                   TenantRecords(imported=True, systems=self._current(latest), case=case))
+            self._refuse_if_faulty(TenantRecords(systems=before | {system: candidate}, case=case),
+                                   TenantRecords(systems=before, case=case))
             await conn.execute(insert(_SV).values(
                 tenant_id=tenant, system_id=system, version=candidate.version, adapter_id=adapter_column(candidate),
                 enabled=enabled, settings=dict(settings), access=access, credential_generation=generation, deleted=False,
                 author=author, written_at=self._clock()))
-            return candidate
-
-    @staticmethod
-    def _check_replaces(system: str, last: _Latest | None, replaces: int) -> None:
-        current = _version_of(last)
-        if replaces != current:
-            raise RecordRefused([f"system {system}: the write replaces version {replaces}, but the current version is "
-                                 f"{current}"])
+            created = row is None or row.deleted
+            return SystemWrite(record=candidate, created=created,
+                               generation_raised=row is not None and not created and generation != row.credential_generation)
 
     async def delete_system(self, tenant: TenantId, system: str, *, replaces: int, author: str) -> None:
+        """A tombstone over `system`'s current record (`replaces` its version)."""
         async with self._locked(tenant) as conn:
-            await self._require_marked(conn, tenant)
             latest = await self._latest(conn, tenant)
             found = latest.get(system)
-            self._check_replaces(system, found, replaces)
-            if found is None or found.row.deleted:
-                raise RecordRefused([f"system {system} has no current record to delete"])
-            last = found.row
-            after = {k: v for k, v in self._current(latest).items() if k != system}
+            row = None if found is None else found.row
+            if row is None or row.deleted:
+                raise NoCurrentRecord(f"system {system}")
+            if replaces != row.version:
+                raise Stale(f"system {system}", current_version=row.version, named=replaces)
+            before = self._current(latest)
             case = self._current_case(await self._latest_case(conn, tenant))
-            self._refuse_if_faulty(TenantRecords(imported=True, systems=after, case=case),
-                                   TenantRecords(imported=True, systems=self._current(latest), case=case))
+            self._refuse_if_faulty(TenantRecords(systems={k: v for k, v in before.items() if k != system}, case=case),
+                                   TenantRecords(systems=before, case=case))
             await conn.execute(insert(_SV).values(
-                tenant_id=tenant, system_id=system, version=last.version + 1, adapter_id=last.adapter_id,
-                enabled=last.enabled, settings=last.settings, access=last.access,
-                credential_generation=last.credential_generation, deleted=True, author=author, written_at=self._clock()))
+                tenant_id=tenant, system_id=system, version=_next(row), adapter_id=row.adapter_id,
+                enabled=row.enabled, settings=row.settings, access=row.access,
+                credential_generation=row.credential_generation, deleted=True, author=author, written_at=self._clock()))
 
-    async def put_case(self, tenant: TenantId, *, replaces: int, system_id: str, comment_body: str, author: str) -> CaseRecord:
+    async def put_case(self, tenant: TenantId, *, replaces: int, system_id: str, comment_body: str,
+                       author: str) -> CaseWrite:
+        """The case record's next version, replacing the version a read shows (`replaces`, 0 for none)."""
         async with self._locked(tenant) as conn:
-            await self._require_marked(conn, tenant)
             last = await self._latest_case(conn, tenant)
-            current = last.version if last is not None else 0
-            if replaces != current:
-                raise RecordRefused([f"case record: the write replaces version {replaces}, but the current version is {current}"])
-            case = CaseRecord(version=current + 1, system_id=system_id, comment_body=comment_body)
+            shown = _shown(last)
+            if replaces != shown:
+                raise Stale("the case record", current_version=shown, named=replaces)
+            case = CaseRecord(version=_next(last), system_id=system_id, comment_body=comment_body)
             systems = self._current(await self._latest(conn, tenant))
-            self._refuse_if_faulty(TenantRecords(imported=True, systems=systems, case=case),
-                                   TenantRecords(imported=True, systems=systems, case=self._current_case(last)))
+            self._refuse_if_faulty(TenantRecords(systems=systems, case=case),
+                                   TenantRecords(systems=systems, case=self._current_case(last)))
             await conn.execute(insert(_CV).values(tenant_id=tenant, version=case.version, system_id=system_id,
                                                   comment_body=comment_body, deleted=False, author=author,
                                                   written_at=self._clock()))
-            return case
+            return CaseWrite(record=case, created=shown == 0)
 
     async def delete_case(self, tenant: TenantId, *, replaces: int, author: str) -> None:
+        """A tombstone over the current case record (`replaces` its version)."""
         async with self._locked(tenant) as conn:
-            await self._require_marked(conn, tenant)
             last = await self._latest_case(conn, tenant)
-            current = last.version if last is not None else 0
-            if replaces != current:
-                raise RecordRefused([f"case record: the write replaces version {replaces}, but the current version is {current}"])
             if last is None or last.deleted:
-                raise RecordRefused(["the tenant has no case record to delete"])
-            await conn.execute(insert(_CV).values(tenant_id=tenant, version=current + 1, system_id=last.system_id,
+                raise NoCurrentRecord("the case record")
+            if replaces != last.version:
+                raise Stale("the case record", current_version=last.version, named=replaces)
+            systems = self._current(await self._latest(conn, tenant))
+            self._refuse_if_faulty(TenantRecords(systems=systems, case=None),
+                                   TenantRecords(systems=systems, case=self._current_case(last)))
+            await conn.execute(insert(_CV).values(tenant_id=tenant, version=_next(last), system_id=last.system_id,
                                                   comment_body=last.comment_body, deleted=True, author=author,
                                                   written_at=self._clock()))
 
-    async def import_tenant(self, tenant: TenantId, records: TenantRecords, *, author: str) -> None:
-        """O9: every system as version 1 at generation 1, the case record, and the mark: one transaction, judged whole."""
-        async with self._locked(tenant) as conn:
-            if await self._marked(conn, tenant):
-                raise RecordRefused([f"tenant {tenant} is already imported; nothing was written"])
-            stored = {s: SystemRecord(**{**r.__dict__, "version": 1, "credential_generation": 1})
-                      for s, r in records.systems.items()}
-            case = None if records.case is None else CaseRecord(**{**records.case.__dict__, "version": 1})
-            self._refuse_if_faulty(TenantRecords(imported=True, systems=stored, case=case))
-            now = self._clock()
-            for s, r in stored.items():
-                await conn.execute(insert(_SV).values(
-                    tenant_id=tenant, system_id=s, version=1, adapter_id=adapter_column(r), enabled=r.enabled,
-                    settings=dict(r.settings), access=r.access, credential_generation=1, deleted=False, author=author,
-                    written_at=now))
-            if case is not None:
-                await conn.execute(insert(_CV).values(tenant_id=tenant, version=1, system_id=case.system_id,
-                                                      comment_body=case.comment_body, deleted=False, author=author,
-                                                      written_at=now))
-            await conn.execute(insert(_RM).values(tenant_id=tenant))
+    # --- the credential slot (#1470 P3) -----------------------------------------------------------------------------
+
+    async def credential_slot(self, tenant: TenantId, system: str, for_version: int) -> CredentialSlot:
+        """Where a credential set prepared for `system`'s version `for_version` goes: the current version's generation
+        and parsed auth scheme, accepted exactly when `for_version` is a version of this system whose generation is the
+        current version's (a disabled current version counts). Version numbers are never compared. Refused as
+        `NoSuchTenant`, `TenantNotActive`, `NoCurrentRecord` (never written, or deleted), `Stale` naming the current
+        version (another generation, or no such version), or `Judged` when the stored access no longer parses."""
+        async with self._engine.connect() as conn:
+            conn = await conn.execution_options(isolation_level="REPEATABLE READ")
+            async with conn.begin():
+                found = (await conn.execute(text(f"SELECT state FROM {_TENANTS} WHERE id = :t"), {"t": tenant})).first()
+                _check_tenant(found, tenant)
+                newest = (await conn.execute(select(_SV).where(_SV.c.tenant_id == tenant, _SV.c.system_id == system)
+                                             .order_by(_SV.c.version.desc()).limit(1))).first()
+                if newest is None or newest.deleted:
+                    raise NoCurrentRecord(f"system {system}")
+                named = (await conn.execute(select(_SV.c.credential_generation, _SV.c.deleted).where(
+                    _SV.c.tenant_id == tenant, _SV.c.system_id == system, _SV.c.version == for_version))).first()
+        if named is None or named.credential_generation != newest.credential_generation:
+            raise Stale(f"system {system}", current_version=newest.version, named=for_version)
+        try:
+            declaration = located_access(newest.access, system=system)
+        except ConfigFault as fault:
+            raise Judged([str(fault)]) from None
+        return CredentialSlot(generation=newest.credential_generation, auth=declaration.auth)
 
 
-def open_store(dsn: str, *, clock: Callable[[], _dt.datetime]) -> RecordStore:  # lint-dup: ok — the system-records store with its judgement (#1366 W); session_store.open_store opens one case's session store, an unrelated record
-    """The store with the real judgement injected (the operator command's)."""
-    from defender.systems.record_judgement import judge_records
-    return RecordStore(dsn, clock=clock, judge=judge_records)
+__all__ = ["CaseWrite", "CredentialSlot", "Judge", "Judged", "NoCurrentRecord", "NoSuchTenant", "RecordRefused",
+           "RecordStore", "Stale", "SystemWrite", "TenantNotActive"]
