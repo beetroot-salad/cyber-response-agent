@@ -525,7 +525,8 @@ class _AppLoop:
                 ready.set()
                 await portal.sleep_until_stopped()
 
-        threading.Thread(target=anyio.run, args=(main,), daemon=True, name="world-loop").start()
+        self.thread = threading.Thread(target=anyio.run, args=(main,), daemon=True, name="world-loop")
+        self.thread.start()
         assert ready.wait(10), "the world's event loop did not start"
         self.portal = box[0]
 
@@ -598,18 +599,58 @@ class Announced:
 
 
 class AuditRecorder:
-    """The world's job store's audit sink (#1496: `JobStore(announce=)`): every event that store announces, oldest
-    first, in `events`. Its own store's only: no process-wide logger, so worlds alive together never see each other's."""
+    """One world's audit events: every event its job store announced, oldest first, in `events` (#1496)."""
 
     def __init__(self) -> None:
         self.events: list[Announced] = []
         #: While set, announcements are seeding's (the world saving a tenant's mapping), not a case's: not recorded.
         self.paused = False
 
-    def __call__(self, action: str, *, actor: str, tenant_id: str, target: str, detail: str | None = None,
-                 credential_id: str | None = None) -> None:
+    def record(self, record: logging.LogRecord) -> None:
         if not self.paused:
-            self.events.append(Announced(action, str(tenant_id), str(actor), str(target), detail, credential_id))
+            self.events.append(Announced(*(None if (v := getattr(record, f, None)) is None else str(v) for f in (
+                "action", "tenant_id", "actor", "target", "detail", "credential_id"))))
+
+
+class _AuditTap(logging.Handler):
+    """The one listener on the job store's audit log (`defender.jobs.audit`) for every world alive in the process. The
+    store announces on the loop thread of the world it serves, so each event goes to the recorder of the world whose
+    loop emitted it: worlds alive together never see each other's. The tap owns the logger's level while any world is
+    attached (raised to INFO when the first attaches, restored when the last detaches), so no world's close can stop
+    another's capture."""
+
+    LOGGER = "defender.jobs.audit"
+
+    def __init__(self) -> None:
+        super().__init__(logging.INFO)
+        self._by_thread: dict[int, AuditRecorder] = {}
+        self._level: int | None = None
+        self._guard = threading.Lock()
+
+    def emit(self, record: logging.LogRecord) -> None:
+        recorder = self._by_thread.get(record.thread or 0)
+        if recorder is not None:
+            recorder.record(record)
+
+    def attach(self, thread: int, recorder: AuditRecorder) -> None:
+        with self._guard:
+            logger = logging.getLogger(self.LOGGER)
+            if not self._by_thread:
+                self._level = logger.level
+                logger.addHandler(self)
+                if not logger.isEnabledFor(logging.INFO):
+                    logger.setLevel(logging.INFO)
+            self._by_thread[thread] = recorder
+
+    def detach(self, thread: int) -> None:
+        with self._guard:
+            if self._by_thread.pop(thread, None) is not None and not self._by_thread:
+                logger = logging.getLogger(self.LOGGER)
+                logger.removeHandler(self)
+                logger.setLevel(self._level if self._level is not None else logging.NOTSET)
+
+
+_TAP = _AuditTap()
 
 
 #: What the refusing ports name: the families the real server leaves unbacked, and a world with no database.
@@ -643,6 +684,11 @@ class World:
         if database:
             self._open_database()
         self._loop = _AppLoop()
+        if self.audit is not None:  # the store announces on this loop's thread: its events are this world's
+            ident = self._loop.thread.ident
+            assert ident is not None
+            _TAP.attach(ident, self.audit)
+            self._resources.callback(_TAP.detach, ident)
         #: Stops the loop, then drops the database: run once, by `close()` or when the world is collected unclosed.
         self._finalizer = weakref.finalize(self, _release, self._loop, self._resources)
         _worlds.opened(self)
@@ -685,7 +731,7 @@ class World:
         self.audit = AuditRecorder()
         self._pg_tenants = PostgresTenantRepository(self.dsn)
         self._pg_people = PostgresIdentityRepository(self.dsn)
-        self.jobs = JobStore(self.dsn, clock=self.clock, announce=self.audit)
+        self.jobs = JobStore(self.dsn, clock=self.clock)
 
     def _backed_ports(self) -> Any:
         if self.jobs is None:

@@ -246,3 +246,17 @@ def test_1454_offboarding_removes_the_tenants_active_programs_and_ends_its_peopl
     mark = audit.mark()
     s.world.call(s.world.lifecycle_service().end_tenant, T1, now=s.world.clock())
     assert audit.since(mark) == []  # idempotent: nothing left to end
+
+
+def test_two_worlds_alive_together_each_record_only_their_own_store_events_and_closing_one_spares_the_other() -> None:
+    """#1496 (review of #1519): every world reads the job store's audit log, so two alive at once must each see only
+    the events its own store announced, and closing the first must leave the second still recording."""
+    first, second = soar(), soar()
+    for world in (first, second):
+        assert start_investigation(world.ann, T1, "own").status_code == 201
+    [one] = [e.action for e in first.world.audit_events]
+    [two] = [e.action for e in second.world.audit_events]
+    assert one == two == "investigation.start"
+    first.world.close()
+    assert start_investigation(second.ann, T1, "after", alert_id=second_alert(second.world)).status_code == 201
+    assert [e.action for e in second.world.audit_events] == ["investigation.start", "investigation.start"]
