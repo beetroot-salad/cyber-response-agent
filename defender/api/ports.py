@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import dataclasses
 import datetime as _dt
-from contextlib import AbstractAsyncContextManager
 from typing import Literal, Protocol
 
 from defender._model import model
@@ -121,6 +120,15 @@ class SystemsRepository(Protocol):
 
     async def get_system(self, tenant_id: TenantId, system_id: str) -> SystemSettings | None: ...
 
+    async def put_system(
+        self, principal: Principal, system_id: str, body: SystemPut
+    ) -> tuple[SystemSettings, bool]:
+        """Create or replace a system's settings. Returns `(settings, created)`. The port commits, then
+        announces `system.update` (P2: one announcer per audited action, after its commit)."""
+        ...
+
+
+class AlertMappingRepository(Protocol):
     async def get_alert_mapping(self, tenant_id: TenantId) -> AlertMapping | None:
         """The tenant's alert mapping (#1345), `None` until one is saved."""
         ...
@@ -147,14 +155,15 @@ AuditAction = Literal[
 ]
 
 
-class WriteTransaction(Protocol):
-    """One store transaction, opened for one tenant and one acting user. Everything written
-    through it — the records — commits together when the `async with` block exits normally, and
-    none of it when the block raises. Audit events are emitted after commit, so a rolled-back
-    block emits none and an event can be lost in a crash between the commit and its emission."""
+class Writes(Protocol):
+    """The store-backed writes, each one call that names the acting `principal` (its tenant is
+    `principal.tenant_id`, already checked against membership), commits before it returns and
+    then announces its audit event: one announcer per audited action (P2). Audit events are
+    emitted after commit, so a failed write announces nothing and an event can be lost in a crash
+    between the commit and its emission."""
 
     async def create_investigation(
-        self, alert_id: AlertId, client_request_id: str
+        self, principal: Principal, alert_id: AlertId, client_request_id: str
     ) -> tuple[Investigation, bool]:
         """Start an investigation of `alert_id`, or answer the one this request already has —
         the rules are §4.1's (the latest attempt of a repeated request, one live investigation
@@ -164,7 +173,7 @@ class WriteTransaction(Protocol):
         (#1345 O4)."""
         ...
 
-    async def cancel_investigation(self, investigation_id: InvestigationId) -> Investigation:
+    async def cancel_investigation(self, principal: Principal, investigation_id: InvestigationId) -> Investigation:
         """Abort an investigation that is queued or running (`aborted`, reason `cancelled`); a
         running one's worker tells its run to stop within about a second, and the run has ended within
         the worker's stop grace (30 s) of that. `NotFound`; `Conflict` if it
@@ -172,7 +181,7 @@ class WriteTransaction(Protocol):
         the message names that retry's id."""
         ...
 
-    async def delete_investigation(self, investigation_id: InvestigationId) -> None:
+    async def delete_investigation(self, principal: Principal, investigation_id: InvestigationId) -> None:
         """Remove every attempt of the request the investigation belongs to, and every learning
         job of those attempts, queued or ended (their run and episode folders stay). `NotFound`, or
         `Conflict` while any attempt is live or any of their learning jobs is running (#1344 O10). A
@@ -180,7 +189,7 @@ class WriteTransaction(Protocol):
         ...
 
     async def create_learning_job(
-        self, investigation_id: InvestigationId, client_request_id: str
+        self, principal: Principal, investigation_id: InvestigationId, client_request_id: str
     ) -> tuple[LearningJob, bool]:
         """Queue an explicit re-learn of an investigation, or answer the job this request
         already queued: a replay by `(investigation, client request id)` answers the latest
@@ -188,27 +197,20 @@ class WriteTransaction(Protocol):
         this tenant does not have; `Conflict` for one that did not end `completed`."""
         ...
 
-    async def put_system(self, system_id: str, body: SystemPut) -> tuple[SystemSettings, bool]:
-        """Create or replace a system's settings. Returns `(settings, created)`."""
-        ...
-
-    async def put_alert_mapping(self, body: AlertMapping) -> tuple[AlertMapping, bool]:
+    async def put_alert_mapping(self, principal: Principal, body: AlertMapping) -> tuple[AlertMapping, bool]:
         """Replace the tenant's alert mapping whole (#1345); it applies to alerts stored from now on, and stored
-        alerts keep their title and description (#1420). Returns `(mapping, created)`, `created` only for the tenant's first save."""
+        alerts keep their title and description (#1420). Returns what the store holds and whether it was created:
+        `(mapping, created)`, `created` only for the tenant's first save."""
         ...
 
-    async def audit(self, action: AuditAction, target: str, detail: str = "") -> None:
-        """Record an audit event for the transaction's tenant and user, stamped by the store's
+
+class AuditPort(Protocol):
+    """Actions with no store write of their own (`artifact.read`). Demo only: on the real server
+    every caller of it is unreachable, so it refuses."""
+
+    async def announce(self, principal: Principal, action: AuditAction, target: str, detail: str = "") -> None:
+        """Record an audit event for the principal's tenant and caller, stamped by the store's
         clock. `detail` never carries a credential value."""
-        ...
-
-
-class Writes(Protocol):
-    def transaction(
-        self, tenant_id: TenantId, principal: Principal
-    ) -> AbstractAsyncContextManager[WriteTransaction]:
-        """A transaction for `tenant_id`, acting as `principal`: the audit names its user and, for a
-        program, the credential it used."""
         ...
 
 
@@ -217,9 +219,10 @@ class SecretStore(Protocol):
     proxy, which adds credentials to outgoing calls, reads them through its own port."""
 
     async def put_credentials(
-        self, tenant_id: TenantId, system_id: str, kind: str, credentials: dict[str, str],
+        self, principal: Principal, system_id: str, kind: str, credentials: dict[str, str],
     ) -> None:
-        """Replace the whole set, stored with its `kind` (`static` or `oauth-client-credentials`)."""
+        """Replace the whole set, stored with its `kind` (`static` or `oauth-client-credentials`). The
+        port announces `system.credentials` after its write (P2)."""
         ...
 
     async def has_credentials(self, tenant_id: TenantId, system_id: str) -> bool: ...
@@ -265,9 +268,13 @@ class ApiDeps:
     learning_jobs: LearningJobsRepository
     lessons: LessonsRepository
     systems: SystemsRepository
+    #: The alert mapping's read, its own port so the systems port can refuse whole (#1083 G2).
+    alert_mapping: AlertMappingRepository
     writes: Writes
     secrets: SecretStore
     checker: SystemChecker
     artifact_links: ArtifactLinks
+    #: Actions with no store write of their own: the artifact read (#1083 P2).
+    audit: AuditPort
     #: The offboard request's one write: the tenant transition and the ending of its jobs (#1360 D6).
     offboarding: Offboarding
