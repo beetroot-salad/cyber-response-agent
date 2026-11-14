@@ -688,8 +688,7 @@ def driver_summary(  # noqa: PLR0913, C901 — `drive`'s seams, one parameter ea
     # the box as `run.py` resolves it; a replay naming no tenant runs as the committed fixture
     # tenant, accepted through the real `accept_tenant`. Lead-zero dispatch identity is checked
     # here for exactly the runs that dispatch it (an injected registry, no resume), so a
-    # disagreeing lead-zero config raises `CorrelationDispatchError` out of `drive()` before
-    # anything is spent.
+    # malformed correlation grant raises `GrantError` out of `drive()` before anything is spent.
     roots: dict[str, Path] = {}
     if tenant is None:
         tenant, export = _default_tenant(agent)

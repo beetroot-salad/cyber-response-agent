@@ -232,7 +232,6 @@ MISSING_HALF_OR_SETTING = [
     pytest.param(_settings_symlink, id="settings_half:symlink"),
     *(pytest.param(_remove(f"settings/{rel}"), id=f"REQUIRED_SETTINGS:missing:{rel}")
       for rel in H.REQUIRED_SETTINGS),
-    pytest.param(_required_is_directory("lead-zero.yaml"), id="REQUIRED_SETTINGS:directory"),
     # Present-by-name is not present: a directory squatting the table is no table.
     pytest.param(_required_is_directory("verb-grants.yaml"),
                  id="REQUIRED_SETTINGS:directory:verb-grants.yaml"),

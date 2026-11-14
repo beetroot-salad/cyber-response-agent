@@ -52,7 +52,7 @@ logs in to OpenBao itself with AppRole). Human decisions U1–U8 are in r3; U9�
   host-side. Test: `e2e/test_branch_resume.py::test_od21_a_resumed_box_sees_neither_the_source_run_page_nor_its_raw_knowledge_reason`.
 - **U15 (tenant template catalog):** the tenant template ships an empty catalog; the implementer
   adds it. `tests/tenancy/test_tenant_settings_location.py::test_the_templates_lead_zero_names_an_established_template_in_the_catalog`
-  stays as written. Scope: the tenant template's `agent/` content.
+  stayed as written until #1503 retired it (the lead binds no saved query, and the template ships none). Scope: the tenant template's `agent/` content.
 
 ### Agent decisions (binding for this contract; for the owner to confirm or change)
 
@@ -295,7 +295,7 @@ Repair round r4 (this round), all additive or stricter:
   refused-whole reset asserts every draft file single-linked (L3, owner ruling 2).
 - `test_refused_claims.py`: lead claim refused for an out-of-lane path; pitfalls claim refused → rc 0, one attempt, dead-lettered at the
   ceiling naming `DeliveryRefused` (with its unrefused control) (L4).
-- Support: `_tenants1106.plant_census_catalog(folder)` plants the lead-zero template into each tenant folder's `agent/skills/gather/queries/` (R-2);
+- Support: `_tenants1106.plant_census_catalog(folder)` planted the lead-zero template into each tenant folder's catalog (R-2; retired by #1503, which binds the lead no saved query);
   `_spec1107.plant` re-plants in place keeping `.git`, and the publish stand-in `_launch_publish_p4` fails a lost `.git` (`pytest.fail`) instead of
   starting the remote anew, and reads `LockBusy` as `stale:transient` (R-3); the fixture tenant ships
   `agent/skills/tacit-knowledge/SKILL.md`, re-asserted by `tenancy/test_tacit_knowledge_registry.py` (R-5).
@@ -358,7 +358,7 @@ Collateral still naming deleted files: `tests/_shard_weights.json`, `learning/st
   - about 10 run-page and 26 ticket cases, behind `resolve_run_tenant(agent_root=)`.
 - **Never run against a stand-in:** the run-page cases, the host-record cases, and the box-tamper cases (stamp forged during the box window). Check that they reach their own assertions.
 - Controls that pass today only because the seam fault is dead-lettered (the U10 `gate-rejection`/`unrelated` lead controls) become meaningful after P4.
-- `test_tenant_settings_location::test_the_templates_lead_zero_names_an_established_template_in_the_catalog` is red by **owner ruling U15**: the tenant template ships an empty catalog; the implementer adds it. Not a seam; the test stays as written.
+- `test_tenant_settings_location::test_the_templates_lead_zero_names_an_established_template_in_the_catalog` was red by **owner ruling U15** until #1503 retired it: the lead binds no saved query, and the tenant template ships none.
 
 ## 6. Known gaps (not covered)
 

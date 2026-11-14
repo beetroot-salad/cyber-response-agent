@@ -283,7 +283,7 @@ def test_revert_refuses_a_commit_laid_on_its_branch_by_a_clone_hook(repo, tmp_pa
         assert len(http.creates) == 1
 
 
-@pytest.mark.parametrize("path", ["agent/.tenant-id", "settings/lead-zero.yaml",
+@pytest.mark.parametrize("path", ["agent/.tenant-id", "settings/verb-grants.yaml",
                                   "agent/lessons/absent.md", "agent/lessons/../.tenant-id",
                                   "agent/lessons/\ud800.md"],
                          ids=["tenant-id", "settings", "absent", "traversal", "lone-surrogate"])

@@ -45,14 +45,10 @@ ROW_PATH_PROPERTY = "row_path"
 #: production constant.
 REQUIRED_SETTINGS = (
     "verb-grants.yaml",
-    "lead-zero.yaml",
 )
 
 #: The per-tenant id file, relative to `knowledge/`.
 TENANT_ID_FILE = Path("agent") / ".tenant-id"
-
-#: The fixture's lead-zero template.
-FIXTURE_CORRELATION_TEMPLATE = "elastic.correlate-alerts-by-entity"
 
 #: What `check` says, beside git's reason, when its committed-`.tenant-id` git read cannot
 #: answer (git absent, dubious ownership, any git error).

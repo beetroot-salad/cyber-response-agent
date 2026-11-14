@@ -101,8 +101,7 @@ def main(argv: list[str]) -> int:
         gaps = findings.gaps
         print(
             f"lint_verb_disposition_census: {name}: {len(gaps.undecided)} undecided, "
-            f"{len(gaps.phantom)} phantom, {len(gaps.unreasoned)} unreasoned"
-            + (", and its lead-zero config disagrees." if findings.lead_zero_fault is not None else ".")
+            f"{len(gaps.phantom)} phantom, {len(gaps.unreasoned)} unreasoned."
         )
     return worst
 

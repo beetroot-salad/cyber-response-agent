@@ -33,17 +33,12 @@ def _without(rows: dict[tuple[str, str], dict], pair: tuple[str, str]) -> dict:
     return {k: v for k, v in rows.items() if k != pair}
 
 
-def _repo(tmp_path: Path, *, fixture: dict = ROWS_ONE, template: dict = ROWS_TEMPLATE,
-          fixture_lead_zero: str = T.CENSUS_LEAD_ZERO_ID) -> Path:
+def _repo(tmp_path: Path, *, fixture: dict = ROWS_ONE, template: dict = ROWS_TEMPLATE) -> Path:
     """A committed repo declaring alpha and beta, whose two walked knowledge folders
     (`knowledge/tenant-fixture/`, `knowledge/tenant-template/`) hold `fixture` and
-    `template`, each with a `lead-zero.yaml` (the fixture's naming `fixture_lead_zero`)."""
+    `template`."""
     repo = planted_tree(tmp_path, {"alpha": "lookup", "beta": "lookup"})
     T.plant_census_settings(repo, fixture, template_rows=template)
-    for name, lead_zero in (("tenant-fixture", fixture_lead_zero),
-                            ("tenant-template", T.CENSUS_LEAD_ZERO_ID)):
-        (repo / "knowledge" / name / "settings" / "lead-zero.yaml").write_text(
-            T.lead_zero_text(lead_zero), encoding="utf-8")
     seed_repo(repo, add="-A", message="knowledge folders")
     return repo
 
@@ -118,38 +113,3 @@ def test_a_row_missing_from_the_template_turns_the_gate_red_naming_the_template(
     assert rc != 0, out
     assert "tenant-template" in out, out
     assert "alpha.health-check" in out, out
-
-
-def test_a_withheld_leads_config_naming_no_catalog_template_still_turns_the_gate_red(tmp_path):
-    rc, out = _gate(_repo(tmp_path, fixture=ROWS_TWO, fixture_lead_zero="alpha.no-such-template"))
-    assert rc != 0, out
-    assert "tenant-fixture" in out, out
-    assert "alpha.no-such-template" in out, out
-
-
-def test_a_lead_zero_naming_no_catalog_template_turns_the_gate_red_naming_the_tenant(tmp_path):
-    """The run-start agreement check, run in CI per folder. The fixture grants the lead
-    alpha.lookup and names a template the catalog does not hold."""
-    rc, out = _gate(_repo(tmp_path, fixture_lead_zero="alpha.no-such-template"))
-    assert rc != 0, out
-    assert "tenant-fixture" in out, out
-    assert "alpha.no-such-template" in out, out
-
-
-#: A second established catalog template, binding `beta.lookup` — a template that EXISTS but
-#: is filed on another pair than the one the fixture grants its lead (`alpha.lookup`).
-_BETA_TEMPLATE = T.CENSUS_QUERY_TEMPLATE.replace("alpha.by-entity", "beta.by-entity").replace(
-    "Everything alpha knows", "Everything beta knows")
-
-
-def test_a_lead_zero_naming_an_existing_template_on_another_pair_turns_the_gate_red(tmp_path):
-    repo = _repo(tmp_path, fixture_lead_zero="beta.by-entity")
-    beta = repo / "defender" / "skills" / "gather" / "queries" / "beta" / "by-entity.md"
-    beta.parent.mkdir(parents=True, exist_ok=True)
-    beta.write_text(_BETA_TEMPLATE, encoding="utf-8")
-    seed_repo(repo, add="-A", message="beta template")
-    rc, out = _gate(repo)
-    assert rc != 0, out
-    assert "tenant-fixture" in out, out
-    assert "beta.by-entity" in out, out
-    assert "alpha.lookup" in out, out

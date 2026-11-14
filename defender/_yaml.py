@@ -331,8 +331,7 @@ def reject_unread_keys(
 def load_reviewed_mapping(
     path: Path, *, what: str, known: tuple[str, ...], error: type[Exception],
 ) -> Mapping[object, object]:
-    """Read a hand-authored, reviewed per-deployment file (`verb-grants.yaml`,
-    `lead-zero.yaml`) as one top-level mapping carrying only `known` keys, or raise `error`.
+    """Read a hand-authored, reviewed per-deployment file (`verb-grants.yaml`) as one top-level mapping carrying only `known` keys, or raise `error`.
 
     Refuses absent, unreadable, repeated keys (checked before the load, which would hide them),
     unparseable, non-mapping, and unread keys, naming `what` and `path`. Values are the

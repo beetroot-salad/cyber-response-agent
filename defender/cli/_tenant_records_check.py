@@ -15,7 +15,8 @@ record store already makes, asked again over the tenant's current records:
 - each record's credentials at its current generation, asked of the operator's secret store when the caller holds a
   login for it (R13);
 - the grant census over the tenant's own systems (`census_findings`, O1);
-- the retired `settings/systems/` folder and `settings/case-record.yaml` left in the repo (`leftover_findings`, O9):
+- the retired `settings/systems/` folder, `settings/case-record.yaml` and `settings/lead-zero.yaml` left in the repo
+  (`leftover_findings`, O9):
   reported, never opened."""
 from __future__ import annotations
 
@@ -46,6 +47,8 @@ if TYPE_CHECKING:
 #: The retired parts of a tenant repo's `settings/` (O9): read by nothing since the import.
 RETIRED_SYSTEMS = "systems"
 RETIRED_CASE_RECORD = CASE_RECORD_REL
+#: Retired by #1503: the step-zero lead binds no saved query, so nothing names one.
+RETIRED_LEAD_ZERO = "lead-zero.yaml"
 
 #: THE words of R13's finding (a fresh import copies no credential).
 NO_CREDENTIALS = "no credentials at the current generation"
@@ -175,7 +178,8 @@ def census_findings(table: TableFindings, systems: Collection[str] | None) -> Ta
 
 
 def leftover_findings(knowledge: Path) -> list[str]:
-    """O9: the retired `settings/systems/` folder and `settings/case-record.yaml` a tenant repo still holds. Each is
+    """O9: the retired `settings/systems/` folder, `settings/case-record.yaml` and (#1503) `settings/lead-zero.yaml`
+    a tenant repo still holds. Each is
     reported as retired and ignored; neither is opened, so an unreadable one is reported the same."""
     settings = Path(knowledge) / SETTINGS_HALF
     lines: list[str] = []
@@ -185,6 +189,9 @@ def leftover_findings(knowledge: Path) -> list[str]:
     if (settings / RETIRED_CASE_RECORD).is_symlink() or (settings / RETIRED_CASE_RECORD).exists():
         lines.append(f"settings/{RETIRED_CASE_RECORD} is retired and ignored: the case record is a record since the "
                      "import (`tenant.py set-case` replaces it); remove the file from the repo")
+    if (settings / RETIRED_LEAD_ZERO).is_symlink() or (settings / RETIRED_LEAD_ZERO).exists():
+        lines.append(f"settings/{RETIRED_LEAD_ZERO} is retired and ignored: the step-zero lead writes its own "
+                     "correlation query; remove the file from the repo")
     return lines
 
 

@@ -273,8 +273,8 @@ def _refuse_incoherent_narrowing(path: Path, rows: tuple[Disposition, ...]) -> N
         named = sorted(f"{d.system}.{d.verb}" for d in queries)
         raise DispositionError(
             f"{path}: {CORRELATION_GRANT_HOLDER!r} holds {len(queries)} query verbs "
-            f"({named}). The correlation lead is dispatched by the harness, binds ONE "
-            "template and makes one kind of call, and its index confinement is a property of "
+            f"({named}). The correlation lead is dispatched by the harness and makes "
+            "one kind of call, and its index confinement is a property of "
             "which verb that is — a second one widens a lead no model chose to spend past "
             "the pair its contract was written for. Grant it one query verb plus "
             f"{HEALTH_CHECK!r}, or withhold it from every row and let the lead be skipped."
