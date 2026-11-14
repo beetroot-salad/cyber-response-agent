@@ -316,7 +316,7 @@ def test_1366_o4_a_case_system_that_is_not_a_current_enabled_record_is_refused(i
     rc, said = op.set_case(replaces=1, system="jira")
 
     _refused(op, before, rc, said, (("jira", "case"),), file_ok=True)
-    version = {"absent": 0, "disabled": 1, "deleted": 2}[how]
+    version = {"absent": 0, "disabled": 1, "deleted": 0}[how]  # #1470 P2: a tombstone shows as none
     assert op.set_system("jira", replaces=version, config=JIRA_CONFIG, access=_jira_access(JIRA_API), disabled=False)[0] == 0
     assert op.set_case(replaces=1, system="jira")[0] == 0
     assert op.current()["jira"].enabled
@@ -492,11 +492,11 @@ def test_1366_c4_a_case_record_write_that_finds_no_cover_is_refused_naming_the_c
                          access=R.bearer_access(TICKET_BASE, writes=(("POST", "/tickets/*/transitions"),)))[0] == 0
     before = _state(op)
 
-    rc, said = op.set_case(replaces=2)
+    rc, said = op.set_case(replaces=0)  # #1470 P2: the deleted case record shows as none
 
     _refused(op, before, rc, said, (("case record",),), file_ok=True)
     assert op.set_system("ticket", replaces=2, config=TICKET_CONFIG, access=TICKET_ACCESS)[0] == 0
-    assert op.set_case(replaces=2)[0] == 0
+    assert op.set_case(replaces=0)[0] == 0
 
 
 @pytest.fixture
@@ -568,19 +568,19 @@ def test_1366_c4_a_write_to_a_system_that_is_not_the_case_system_needs_no_cover(
 
 @pytest.mark.postgres
 def test_1366_o5_versions_rise_by_one_per_system_and_a_delete_counts_as_the_version_to_replace(imported_op):
-    """cmdb: edit (2), delete (3); then naming 2, 0 or 9 is refused and naming the delete (3) stores version 4; identity
-    stays at 1. Each version carries its writer as author. (#1366 O5, R9)"""
+    """cmdb: edit (2), delete (3); then naming 2, the delete (3) or 9 is refused and naming 0 (#1470 P2: a tombstone shows
+    as none) stores version 4; identity stays at 1. Each version carries its writer as author. (#1366 O5, R9)"""
     op = imported_op
     assert op.set_system("cmdb", replaces=1, config=CMDB_NEW, access=CMDB_ACCESS)[0] == 0
     assert op.delete_system("cmdb", replaces=2)[0] == 0
     before = _state(op)
 
-    for stale in (2, 0, 9):
+    for stale in (2, 3, 9):
         rc, said = op.set_system("cmdb", replaces=stale, config=CMDB_NEW, access=CMDB_ACCESS)
         _refused(op, before, rc, said, (("cmdb",),), file_ok=True)
         assert not stale or _numbered(said, "cmdb", stale), said
 
-    assert op.set_system("cmdb", replaces=3, config=CMDB_NEW, access=CMDB_ACCESS)[0] == 0
+    assert op.set_system("cmdb", replaces=0, config=CMDB_NEW, access=CMDB_ACCESS)[0] == 0
     assert [(n, d) for n, _, d in op.numbers("cmdb")] == [(1, False), (2, False), (3, True), (4, False)]
     assert [v.author for v in op.versions("cmdb")] == [R.SEED_AUTHOR, *[R.ADMIN_AUTHOR] * 3]  # each version's author is the acting member
     times = [v.written_at for v in op.versions("cmdb")]
@@ -644,17 +644,17 @@ def test_1366_o5_a_delete_is_a_version_and_check_then_reports_the_grants_on_it_a
 
 @pytest.mark.postgres
 def test_1366_o5_case_versions_number_per_tenant_and_follow_the_same_rules(imported_op):
-    """Case: set (2), delete (3); then deleting again, naming 2 or 0 is refused; naming the delete stores 4. Authors
-    are `set-case` and `delete-case`. (#1366 O5, R9)"""
+    """Case: set (2), delete (3); then deleting again, naming 2 or the delete (3) is refused; naming 0 (#1470 P2: a
+    tombstone shows as none) stores 4. Authors are `set-case` and `delete-case`. (#1366 O5, R9)"""
     op = imported_op
     assert op.set_case(replaces=1, body="{disposition}")[0] == 0
     assert op.delete_case(replaces=2)[0] == 0
     before = _state(op)
 
-    for rc, said in (op.delete_case(replaces=3), op.set_case(replaces=2), op.set_case(replaces=0)):
+    for rc, said in (op.delete_case(replaces=3), op.set_case(replaces=2), op.set_case(replaces=3)):
         _refused(op, before, rc, said, (), file_ok=True)
 
-    assert op.set_case(replaces=3, body="{cause}")[0] == 0
+    assert op.set_case(replaces=0, body="{cause}")[0] == 0
     assert _case_versions(op) == [(1, "ticket", False), (2, "ticket", False), (3, "ticket", True), (4, "ticket", False)]
     assert [c.author for c in R.case_versions(op.dsn, op.tid)] == [
         R.SEED_AUTHOR, *[R.ADMIN_AUTHOR] * 3]
@@ -836,9 +836,9 @@ def test_1366_p5_a_delete_carries_the_generation_and_a_re_create_takes_the_next_
     for replaces, base in ((1, "http://soc-playground:9005"), (2, "http://soc-playground:9105")):
         assert op.set_system("identity", replaces=replaces, config=IDENTITY, access=R.bearer_access(base))[0] == 0
     assert op.delete_system("identity", replaces=3)[0] == 0
-    assert op.set_system("identity", replaces=4, config=IDENTITY, access=first)[0] == 0
+    assert op.set_system("identity", replaces=0, config=IDENTITY, access=first)[0] == 0  # #1470 P2: deleted shows as 0
     assert op.delete_system("identity", replaces=5)[0] == 0
-    assert op.set_system("identity", replaces=6, config=IDENTITY, access=first)[0] == 0
+    assert op.set_system("identity", replaces=0, config=IDENTITY, access=first)[0] == 0
 
     assert op.numbers("identity") == [(1, 1, False), (2, 2, False), (3, 3, False), (4, 3, True), (5, 4, False),
                                       (6, 4, True), (7, 5, False)]
