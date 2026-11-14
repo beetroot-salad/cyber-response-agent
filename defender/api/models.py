@@ -8,6 +8,7 @@ from pydantic import (
     AfterValidator, AwareDatetime, BaseModel, BeforeValidator, ConfigDict, Field, field_validator,
     model_validator,
 )
+from pydantic.json_schema import SkipJsonSchema
 
 from defender._clock import as_utc
 from defender._text import postgres_can_hold
@@ -308,11 +309,12 @@ class Problem(BaseModel):
     detail: str | None = Field(default=None, description="What happened to this request.")
     errors: list[FieldError] | None = Field(
         default=None, description="On a 422 from validation: each failing part of the request.")
-    faults: list[str] | None = Field(
+    # Absent, never null, on the wire (the body is dumped without None), so the schema names only the present shape.
+    faults: list[str] | SkipJsonSchema[None] = Field(
         default=None, description=("On a 422 from the record judgement or the credential schema: every fault, each a "
                                    "sentence naming the system and the key or part. A 422 carries `errors` or `faults`, "
                                    "never both."))
-    current_version: int | None = Field(
+    current_version: int | SkipJsonSchema[None] = Field(
         default=None, description=("On a 409 for a stale write or a moved credential generation: the version a read "
                                    "now shows (0 when none)."))
 

@@ -204,7 +204,7 @@ def _api_deps(settings: Settings, identity: IdentityService, tenants: PostgresTe
         checker=Refusing(_CHECK), artifact_links=Refusing(_BLOB_STORE), audit=Refusing(_BLOB_STORE))
 
 
-async def _sealed(settings: Settings, transport: httpx.AsyncBaseTransport | None) -> bool:
+async def _seal_status(settings: Settings, transport: httpx.AsyncBaseTransport | None) -> bool:
     """OpenBao's unauthenticated seal status (D9): whether it is sealed, or `StartRefused` naming its address when it
     cannot be read or is not `{"sealed": <bool>}`. Only this is asked at start of a sealed store."""
     where = f"DEFENDER_OPENBAO_ADDR: the secret store at {settings.openbao_addr}"
@@ -259,7 +259,7 @@ async def serving(settings: Settings, *, transport: httpx.AsyncBaseTransport | N
         async with steps.step("the database version check"):
             await _abandonable(lambda: check_version(settings.database_dsn))
         async with steps.step("the secret store's seal status"):
-            sealed = await _sealed(settings, openbao_transport)
+            sealed = await _seal_status(settings, openbao_transport)
         secrets = OpenBaoSecrets(addr=settings.openbao_addr, token=settings.openbao_token.get_secret_value(),
                                  mount=settings.openbao_kv_mount, transport=openbao_transport)  # type: ignore[arg-type]  # any httpx transport serves it
         if not sealed:  # sealed: the API starts, and each request needing the store answers 503 until it is unsealed
@@ -293,7 +293,7 @@ async def serving(settings: Settings, *, transport: httpx.AsyncBaseTransport | N
                 until_lifespan.push_async_callback(people.close)
                 tenants = PostgresTenantRepository(settings.database_dsn)
                 until_lifespan.push_async_callback(tenants.close)
-                records = RecordStore(settings.database_dsn, clock=_wall_clock, judge=_judge(catalog))
+                records = RecordStore(settings.database_dsn, clock=_wall_clock, judge=_catalog_judge(catalog))
                 stack.push_async_callback(records.close)  # like the job store, it outlives the lifespan
                 identity = IdentityService(people, signin=signin, mail=LoggedMail(), clock=_wall_clock,
                                            bootstrap=settings.administrators, programs=programs)
@@ -309,7 +309,7 @@ async def serving(settings: Settings, *, transport: httpx.AsyncBaseTransport | N
         yield Running(app=app, sockets=[sock])
 
 
-def _judge(catalog: Catalog) -> Callable[[TenantRecords, TenantRecords], list[str]]:
+def _catalog_judge(catalog: Catalog) -> Callable[[TenantRecords, TenantRecords], list[str]]:
     """The record judgement over the catalog built at start, as the record store takes it."""
     def judge(after: TenantRecords, before: TenantRecords) -> list[str]:
         return list(judge_records(after, before, catalog=catalog))

@@ -205,7 +205,7 @@ _RECORD_STATUS: tuple[tuple[type[Exception], int], ...] = (
 )
 
 
-async def _record_refusal(request: Request, exc: Exception) -> Response:
+async def _refused_by_record_rule(request: Request, exc: Exception) -> Response:
     """A record refusal as its problem: a judgement's or the credential schema's 422 lists every fault (`faults`, the
     detail a one-line summary, so no fault is cut to a line); a stale or moved write's 409 names the version a read now
     shows (`current_version`). A refusal of no listed type is a bug of ours: the 500."""
@@ -1087,7 +1087,7 @@ def create_app(deps: ApiDeps) -> FastAPI:
     app.add_exception_handler(UnknownReference, refusal(422))
     app.add_exception_handler(NotImplementedYet, refusal(status.HTTP_501_NOT_IMPLEMENTED))
     for typed in (_records.RecordRefused, CredentialRefused, CredentialsUnused):
-        app.add_exception_handler(typed, _record_refusal)
+        app.add_exception_handler(typed, _refused_by_record_rule)
     app.add_exception_handler(SecretStoreUnavailable, refusal(status.HTTP_503_SERVICE_UNAVAILABLE))
     app.add_exception_handler(SecretStoreRefused, _secret_store_refused)
     app.add_exception_handler(_identity.NotAuthenticated, _not_authenticated)
