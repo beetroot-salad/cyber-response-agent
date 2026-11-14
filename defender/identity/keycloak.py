@@ -13,7 +13,7 @@ import hmac
 import json
 import logging
 import urllib.parse
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
@@ -154,6 +154,11 @@ class _KeySet:
             raise SignInRefused(f"{self._token} names an unknown signing key")
         raise SignInUnavailable(f"keycloak's signing keys cannot be checked for this {self._token} yet")
 
+    async def probe(self) -> None:
+        """Fetch the set now; unavailable unless it holds a key a token would verify with."""
+        if not await self._fetch():
+            raise SignInUnavailable("the realm publishes no RS256 signing key to verify tokens with")
+
     async def _fetch(self) -> dict[str, Any]:
         try:
             response = await self._http.get(self._url)
@@ -178,6 +183,41 @@ class _RealmAdmin:
     _admin_client: tuple[str, str]
     _clock: Callable[[], _dt.datetime]
     _admin_token_held: tuple[str, _dt.datetime] | None
+    _issuer: str
+    _realm: str
+    _server: str  # the base every request this adapter sends itself goes to
+    _keys: _KeySet
+    _probe_read: tuple[str, dict[str, int]]  # the one cheap admin read the role covers, and its query
+
+    async def probe(self) -> None:
+        """Check, without writing, what sign-in will need: the realm's discovery document names the configured issuer,
+        its signing keys are fetched, the admin client gets a token, and a cheap admin read is allowed. Any failure is
+        `SignInUnavailable` naming the realm and the step, and the address when Keycloak could not be reached."""
+        await self._probe_step("discovery", self._probe_discovery())
+        await self._probe_step("keys", self._keys.probe())
+        await self._probe_step("token", self._admin_token())
+        url, params = self._probe_read
+        await self._probe_step("admin read", self._admin("GET", url, params=params))
+
+    async def _probe_step(self, step: str, running: Awaitable[object]) -> None:
+        try:
+            await running
+        except SignInUnavailable as error:
+            unreached = f" (cannot reach {self._server})" if isinstance(error.__cause__, httpx.TransportError) else ""
+            raise SignInUnavailable(f"keycloak realm {self._realm}, {step} step: {error}{unreached}") from error
+
+    async def _probe_discovery(self) -> None:
+        """The realm's discovery document, fetched on the back channel, names exactly the configured issuer."""
+        try:
+            response = await self._http.get(f"{self._server}/realms/{self._realm}/.well-known/openid-configuration")
+            response.raise_for_status()
+            named = response.json()["issuer"]
+        except httpx.HTTPError as error:
+            raise SignInUnavailable("the discovery document cannot be fetched") from error
+        except (ValueError, KeyError, TypeError) as error:
+            raise SignInUnavailable("the discovery document is unreadable") from error
+        if named != self._issuer:
+            raise SignInUnavailable(f"the discovery document names issuer {named!r}, not the configured {self._issuer!r}")
 
     async def _admin_token(self) -> str:
         """A client-credentials token, reused until shortly before Keycloak says it expires."""
@@ -231,7 +271,8 @@ class KeycloakSignIn(_RealmAdmin):
         transport: httpx.AsyncBaseTransport | None = None,
         clock: Callable[[], _dt.datetime] = _utc_now,
     ) -> None:
-        self._issuer, base, realm = _realm_url(issuer)
+        self._issuer, base, self._realm = _realm_url(issuer)
+        realm = self._realm
         self._client_id = client_id
         self._client_secret = client_secret
         self._redirect_uri = redirect_uri
@@ -243,10 +284,11 @@ class KeycloakSignIn(_RealmAdmin):
         # `server_url`, when the API reaches Keycloak at another address than the browser does
         # (#1349), replaces that base for every request the API sends itself; the browser's
         # sign-in URL and the token's `iss` stay the issuer.
-        server = base if server_url is None else _server_base(server_url)
+        server = self._server = base if server_url is None else _server_base(server_url)
         self._signin_url = f"{self._issuer}/protocol/openid-connect/auth"
         self._oidc = f"{server}/realms/{realm}/protocol/openid-connect"
         self._admin_users_url = f"{server}/admin/realms/{realm}/users"
+        self._probe_read = (self._admin_users_url, {"max": 1})
         # No refetch window: an ID token comes from Keycloak's own token endpoint, never from an outsider, so an
         # unknown key id there is a rotation to follow at once, not traffic to hold back.
         self._keys = _KeySet(self._http, f"{self._oidc}/certs", clock, token="the ID token", realm="sign-in",
@@ -421,14 +463,16 @@ class KeycloakPrograms(_RealmAdmin):
         transport: httpx.AsyncBaseTransport | None = None,
         clock: Callable[[], _dt.datetime] = _utc_now,
     ) -> None:
-        self._issuer, base, realm = _realm_url(issuer)
+        self._issuer, base, self._realm = _realm_url(issuer)
+        realm = self._realm
         self._audience = audience
         self._admin_client = (admin_client_id, admin_client_secret)
         self._clock = clock
         self._http = httpx.AsyncClient(transport=transport, timeout=_TIMEOUT_SECONDS)
-        server = base if server_url is None else _server_base(server_url)
+        server = self._server = base if server_url is None else _server_base(server_url)
         self._oidc = f"{server}/realms/{realm}/protocol/openid-connect"
         self._clients_url = f"{server}/admin/realms/{realm}/clients"
+        self._probe_read = (self._clients_url, {"first": 0, "max": 1})
         self._keys = _KeySet(self._http, f"{self._oidc}/certs", clock, token="the token", realm="programs",
                              refetch_window=KEY_REFETCH_WINDOW)
         self._admin_token_held = None
