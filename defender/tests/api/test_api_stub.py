@@ -339,7 +339,7 @@ def _deps(ports: Any) -> tuple[ApiDeps, dict[str, str]]:
     identity, users, tenants = _identity()
     return ApiDeps(
         identity=identity, tenants=tenants, frontend_origin=ORIGIN,
-        alerts=ports, investigations=ports, learning_jobs=ports, lessons=ports,
+        alerts=ports, investigations=ports, learning_jobs=ports, lessons=ports, learning_work=ports,
         systems=ports, writes=ports, secrets=ports, checker=ports, artifact_links=ports, offboarding=ports,
         alert_mapping=ports, audit=ports,  # FC-11 and the audit-only port (Am-5: every construction site)
     ), users
@@ -713,7 +713,7 @@ def _over_the_fake() -> tuple[TestClient, InMemoryStore]:
     identity, _, tenants = _identity()
     return TestClient(create_app(ApiDeps(
         identity=identity, tenants=tenants, frontend_origin=ORIGIN,
-        alerts=store, investigations=store, learning_jobs=store, lessons=store, systems=store,
+        alerts=store, investigations=store, learning_jobs=store, lessons=store, learning_work=store, systems=store,
         writes=store, secrets=InMemorySecrets(store), checker=StubSystemChecker(),
         artifact_links=StubArtifactLinks(), offboarding=InMemoryOffboarding(tenants, store, lambda: NOW),
         alert_mapping=store, audit=store,  # FORCED CHOICE FC-14: the in-memory store serves the mapping read and the audit-only port
@@ -1727,7 +1727,7 @@ def test_paging_the_demo_store_serves_every_row_once_across_tied_timestamps() ->
     identity, _, tenants = _identity()
     client = TestClient(create_app(ApiDeps(
         identity=identity, tenants=tenants, frontend_origin=ORIGIN,
-        alerts=store, investigations=store, learning_jobs=store, lessons=store, systems=store,
+        alerts=store, investigations=store, learning_jobs=store, lessons=store, learning_work=store, systems=store,
         writes=store, secrets=InMemorySecrets(store), checker=StubSystemChecker(),
         artifact_links=StubArtifactLinks(), offboarding=InMemoryOffboarding(tenants, store, lambda: NOW),
         alert_mapping=store, audit=store,

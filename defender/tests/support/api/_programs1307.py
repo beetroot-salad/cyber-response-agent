@@ -399,7 +399,7 @@ class ProgramsWorld(World):
             programs=programs, **extra)
         self.app = create_app(ApiDeps(
             alerts=self.store, investigations=self.store, learning_jobs=self.store,
-            lessons=self.store, systems=self.store, writes=self.store,
+            lessons=self.store, learning_work=self.store, systems=self.store, writes=self.store,
             secrets=InMemorySecrets(self.store), checker=StubSystemChecker(),
             artifact_links=StubArtifactLinks(),
             offboarding=InMemoryOffboarding(self.tenants, self.store, self.clock),

@@ -50,7 +50,7 @@ def route_table_deps() -> ApiDeps:
     """Dependencies enough to build the app and read its route table: no identity service is needed to list routes."""
     store = InMemoryStore(lambda: None)  # type: ignore[arg-type]
     return ApiDeps(
-        alerts=store, investigations=store, learning_jobs=store, lessons=store, systems=store, writes=store,
+        alerts=store, investigations=store, learning_jobs=store, lessons=store, learning_work=store, systems=store, writes=store,
         secrets=InMemorySecrets(store), checker=StubSystemChecker(), artifact_links=StubArtifactLinks(),
         offboarding=InMemoryOffboarding(None, store, lambda: None),  # type: ignore[arg-type]
         alert_mapping=store, audit=store,  # FC-14 (Am-5)

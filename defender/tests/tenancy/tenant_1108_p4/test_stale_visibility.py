@@ -597,7 +597,7 @@ def _client(*investigations: Any) -> Any:
                                bootstrap=Bootstrap(administrators=()), programs=NoProgramsRealm())
     deps = ApiDeps(
         identity=identity, tenants=tenants, frontend_origin=_ORIGIN,
-        alerts=store, investigations=store, learning_jobs=store, lessons=store, systems=store,
+        alerts=store, investigations=store, learning_jobs=store, lessons=store, learning_work=store, systems=store,
         writes=store, secrets=InMemorySecrets(store), checker=StubSystemChecker(),
         artifact_links=StubArtifactLinks(), offboarding=InMemoryOffboarding(tenants, store, now),
         alert_mapping=store, audit=store)  # FC-14 (Am-5)
