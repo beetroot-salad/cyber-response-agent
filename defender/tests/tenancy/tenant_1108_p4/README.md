@@ -159,7 +159,7 @@ Spelled as the tests call them. One line each; the test file named holds the ful
 - `validate_scaffold.py <system> --tenant <T> --staged <dir>`: the skill and template checks read the staged (agent-root-shaped) directory, the adapter checks the code tree (`DEFENDER_DIR`). `--tenant` exists today; `--staged` is the missing flag (U13).
 
 **Readers and run tenant**
-- `systems.run_tenant.resolve_run_tenant(settings_root, *, agent_root, dispatches_lead_zero)`; `RunTenant(..., agent_root=, settings_root=)` whose `.agent`/`.settings` are those roots.
+- `systems.run_tenant.resolve_run_tenant(settings_root, *, dispatches_lead_zero)` (#1503 dropped `agent_root`: no catalog is read at run start); `RunTenant(..., agent_root=, settings_root=)` whose `.agent`/`.settings` are those roots.
 - `KnowledgePaths(agent_root)` without `agent_rel`; `deps.knowledge.agent_root` is the run's agent root.
 - `serialize.build_view(agent_root=)` (posture page; groups `{defender, questioner}`).
 - `record_lesson_load.lesson_name(path, agent_root=)` (recognised by the served run copy).

@@ -61,3 +61,15 @@ def test_a_leftover_file_is_reported_retired_and_ignored(tmp_path):
         "correlation_template: elastic.correlate-alerts-by-entity\n", encoding="utf-8")
     [line] = [f for f in leftover_findings(folder) if "lead-zero.yaml" in f]
     assert "retired and ignored" in line
+
+
+def test_a_tenant_still_holding_the_file_is_accepted_and_starts(tmp_path):
+    """Every deployed tenant repo has the file: the upgrade must not refuse it, only report it."""
+    folder = _copy(FIXTURE, tmp_path / "t")
+    (folder / "settings" / "lead-zero.yaml").write_text(
+        "correlation_template: elastic.no-such-template\n", encoding="utf-8")
+    check_knowledge_folder(folder, tenant_id=None)
+    check_run_settings(folder / "settings")
+    readiness = resolve_run_tenant(folder / "settings", dispatches_lead_zero=True)
+    assert readiness.correlation is not None
+    assert readiness.correlation.system == "elastic"

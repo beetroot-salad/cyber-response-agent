@@ -171,7 +171,7 @@ def test_a_withheld_lead_is_neither_claimed_nor_declared(tmp_path):
     from defender.investigation.lead_zero import ENDING_WITHHELD, CorrelationDispatch, run_correlation
 
     lead_file = run_dir / "gather_raw" / "l-00c.lead.json"
-    withheld = CorrelationDispatch("alpha.correlate", None, VerbGrant(role=HOLDER, entries=()))
+    withheld = CorrelationDispatch(system=None, grant=VerbGrant(role=HOLDER, entries=()))
 
     from defender.investigation.run_state import RunState
     outcome = asyncio.run(run_correlation(
