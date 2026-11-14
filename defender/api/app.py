@@ -73,7 +73,7 @@ from .ports import (
 )
 from .refusing import NotImplementedYet
 
-API_VERSION = "0.1.0-stub"
+API_VERSION = "0.1.0"
 
 #: The largest page any list returns; `limit` defaults to `DEFAULT_PAGE`.
 MAX_PAGE = 200
