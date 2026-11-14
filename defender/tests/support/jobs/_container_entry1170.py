@@ -31,6 +31,7 @@ class Entered:
     helper: HelperRan
     docker: ContainerStandIn
     rc: int | None = None
+    job_rc: int | None = None  # the job container's own status, when it ran
     exit: BaseException | None = None  # a SystemExit the entry raised
     raised: BaseException | None = None  # anything else it raised
     out: str = ""
@@ -51,6 +52,10 @@ def enter(scene: HelperScene, inv: str, *, signer: Any = None, entry: Callable[.
 
     def job(container: Any) -> int:
         done.ran = True
+        done.job_rc = run(container)
+        return done.job_rc
+
+    def run(container: Any) -> int:
         if entry is not None:
             return entry(container, done)
         try:
@@ -69,7 +74,8 @@ def enter(scene: HelperScene, inv: str, *, signer: Any = None, entry: Callable[.
         done.helper = drive_helper(scene, scene.argv(kind, inv), docker=done.docker,
                                    signer=signer if signer is not None else A.MarkedSigner())
     done.out, done.err = out.getvalue(), err.getvalue()
-    done.rc = done.helper.rc
+    # The job's own status when its container ran (the helper exits 0 once it served it, #1170), else the helper's.
+    done.rc = done.job_rc if done.job_rc is not None else done.helper.rc
     return done
 
 

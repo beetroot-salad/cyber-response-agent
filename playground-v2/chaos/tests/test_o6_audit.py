@@ -42,11 +42,11 @@ CLEAN_CMDB_PAYLOAD = {
     "change_window": "tue 02:00-04:00 UTC",
 }
 RENAME_PROCESSOR = {
-    "rename": {"field": "user.name", "target_field": "user.id", "ignore_missing": True, "ignore_failure": True}
+    "rename": {"field": "source.port", "target_field": "source.client_port", "ignore_missing": True, "ignore_failure": True}
 }
 DRIFT_RECORD = {
     "ledger_ref": "chaos-drift01",
-    "profile_id": "schema-drift-username",
+    "profile_id": "schema-drift-source-port",
     "mode": "schema-drift",
     "resolved_mutations": [
         {
@@ -55,7 +55,7 @@ DRIFT_RECORD = {
             "stream": "logs-system.auth-*",
             "pipeline": "logs-system.auth@custom",
             "processor": RENAME_PROCESSOR,
-            "fields": ["user.name", "user.id"],
+            "fields": ["source.port", "source.client_port"],
         }
     ],
 }
@@ -71,22 +71,22 @@ def test_ordinary_telemetry_is_not_flagged():
 def test_a_pipeline_error_naming_a_controller_field_is_flagged():
     doc = dict(CLEAN_AUTH_DOC)
     doc["event"] = {"kind": "pipeline_error"}
-    doc["error"] = {"message": "field [user.name] doesn't exist"}
+    doc["error"] = {"message": "field [source.port] doesn't exist"}
 
     findings = audit_payloads([doc], records=[DRIFT_RECORD])
     assert findings, "a pipeline_error our processor caused, in an agent-read index, is the leak"
-    assert "user.name" in " ".join(findings)
+    assert "source.port" in " ".join(findings)
 
 
 def test_a_bare_error_field_naming_a_controller_field_is_flagged():
     doc = dict(CLEAN_AUTH_DOC)
-    doc["error"] = {"message": "field [user.id] already exists"}
+    doc["error"] = {"message": "field [source.client_port] already exists"}
     assert audit_payloads([doc], records=[DRIFT_RECORD])
 
 
 def test_a_flattened_error_document_is_read_the_same_way():
     doc = {"@timestamp": "2026-09-20T09:00:00.000Z", "event.kind": "pipeline_error",
-           "error.message": "field [user.name] doesn't exist"}
+           "error.message": "field [source.port] doesn't exist"}
     assert audit_payloads([doc], records=[DRIFT_RECORD])
 
 
@@ -110,7 +110,7 @@ def test_a_controller_processor_body_in_a_payload_is_flagged():
 
 
 def test_with_no_records_nothing_is_attributable():
-    doc = dict(CLEAN_AUTH_DOC, error={"message": "field [user.name] doesn't exist"})
+    doc = dict(CLEAN_AUTH_DOC, error={"message": "field [source.port] doesn't exist"})
     assert audit_payloads([doc], records=[]) == []
 
 
@@ -251,11 +251,11 @@ def test_audit_is_clean_decision_table():
 
 
 def test_ctl_audit_reports_a_finding_from_a_sampled_document(profiles_dir, rules_dir, ledger_dir):
-    write_profile(profiles_dir, "drift", "schema-drift", {"rename": {"from": "user.name", "to": "user.id"}})
+    write_profile(profiles_dir, "drift", "schema-drift", {"rename": {"from": "source.port", "to": "source.client_port"}})
     ctl.activate(
         "drift", seed=1, execer=FakeExecSeam(), profiles_dir=profiles_dir, rules_dir=rules_dir, ledger_dir=ledger_dir
     )
-    leaked = dict(CLEAN_AUTH_DOC, event={"kind": "pipeline_error"}, error={"message": "field [user.name] doesn't exist"})
+    leaked = dict(CLEAN_AUTH_DOC, event={"kind": "pipeline_error"}, error={"message": "field [source.port] doesn't exist"})
     execer = FakeExecSeam(
         cmdb={"GET /health": (0, {"status": "ok"}), "GET /hosts": (0, {"total": 0, "hosts": []})},
         es={"POST /logs-system.auth-*/_search": (0, {"hits": {"hits": [{"_source": leaked}]}})},

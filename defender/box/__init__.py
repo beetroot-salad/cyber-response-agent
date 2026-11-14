@@ -110,6 +110,8 @@ from ._docker import (
     _daemon_source,
     _derived_infra_env,
     run_docker,
+    labelled_containers,
+    remove_containers,
     remove_labelled_containers,
     remove_tenant_containers,
     container_present,
@@ -132,6 +134,7 @@ from ._docker import (
     container_name,
     infra_env,
     require_image,
+    require_runtime,
     resolve_rootfs,
 )
 from ._host_env import provider_scrubbed_environ, run_env
@@ -238,6 +241,8 @@ __all__ = [
     "_derived_infra_env",
     "_did_not_run_for_request",
     "run_docker",
+    "labelled_containers",
+    "remove_containers",
     "remove_labelled_containers",
     "remove_tenant_containers",
     "container_present",
@@ -291,6 +296,7 @@ __all__ = [
     "relay_stop",
     "relay_window",
     "require_image",
+    "require_runtime",
     "resolve_rootfs",
     "run_lane_sources",
     "scrub",

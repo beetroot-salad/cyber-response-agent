@@ -20,7 +20,7 @@ from typing import Any
 
 import httpx
 
-from defender import _io
+from defender import _git, _io
 from defender.configuration.issuer import TRANSIT_MOUNT
 from defender.credential_proxy import transit_key_for
 from defender.identity import audit
@@ -352,10 +352,8 @@ class ManagementService(Actor):
             shutil.copytree(self._config.template_dir, work, symlinks=True)
             _io.guarded_mkdir(work / "agent", base=work)
             _io.write_guarded(work / "agent" / ".tenant-id", tenant_id_file_text(TenantId(tenant)))
-            author = ["-c", "user.name=defender", "-c", "user.email=defender@bots.invalid"]
-            for args in (["init", "-q", "-b", "main"], ["add", "-A", "-f"],
-                         [*author, "commit", "-q", "-m", "tenant template"]):
-                self._git_ok(args, cwd=work)
+            for args in (["init", "-q", "-b", "main"], ["add", "-A", "-f"], ["commit", "-q", "-m", "tenant template"]):
+                self._git_ok(args, cwd=work, env=_git.PRODUCT_IDENTITY)
             self._git_ok(["push", "-q", origin, "HEAD:refs/heads/main"], cwd=work, origin=origin,
                          identity=credential)
 

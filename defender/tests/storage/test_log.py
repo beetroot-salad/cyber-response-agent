@@ -321,3 +321,29 @@ def test_a_run_s_crash_is_logged_while_the_run_is_still_bound(tmp_path, monkeypa
     assert "the run failed" in crash
     assert f"tenant_id={tenant}" in crash
     assert "run_id=" in crash
+
+
+def test_an_operator_run_whose_box_did_not_start_ends_in_one_logged_line_naming_why(tmp_path, monkeypatch, capsys):
+    """#1484: the box start refused (a runtime or an image the host lacks): the run exits 1 with one ERROR record, bound
+    to the run, carrying the start's own refusal and remedy, and no CRITICAL record or traceback. Control: the crash
+    test above."""
+    from defender import box as box_mod
+
+    monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
+    base, src = location_path(T.runs_base)(tmp_path)
+
+    def lifecycle(**kw):
+        raise box_mod.BoxStartFault("the run's box did not start: Docker on this host has no runtime 'runsc' "
+                                    "registered: install gVisor")
+
+    capsys.readouterr()
+    rc = RunWithPublish(T.mod("run")).main([str(RunPaths(src).alert), "--tenant", base.parent.name, "--no-learn"],
+                                           lifecycle=lifecycle, visualize=lambda p, **kw: None,
+                                           preflight=T.no_preflight)
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert " CRITICAL " not in err, err
+    assert "Traceback" not in err, err
+    [line] = [ln for ln in err.splitlines() if "no runtime 'runsc'" in ln]
+    assert " ERROR " in line, line
+    assert "run_id=" in line, line

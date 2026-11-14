@@ -108,6 +108,14 @@ def deployment_unset(monkeypatch) -> None:
     monkeypatch.delenv(DEPLOYMENT_ENV, raising=False)
 
 
+@pytest.fixture(autouse=True)
+def job_network_named(monkeypatch) -> None:
+    """Every test's job container joins a network made for the jobs, as a deployment names one in
+    `DEFENDER_JOB_NETWORK`: unset, a helper refuses every job (#1170 N5; the worker judges the network
+    at its start). A test on a real daemon makes it (`_job_helper.ensure_job_network`)."""
+    monkeypatch.setenv("DEFENDER_JOB_NETWORK", "defender-test-jobs")
+
+
 @pytest.fixture(autouse=True, scope="session")
 def session_data_root(tmp_path_factory) -> Iterator[Path]:
     """The data root for module- and class-scoped fixtures, which are set up before a test's own

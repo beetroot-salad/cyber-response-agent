@@ -178,13 +178,41 @@ def _exit_words(returncode: int) -> str:
             else f"exited with code {returncode}")
 
 
-def _ending_from(end: job_lane.JobEnd | None, returncode: int,
-                 disposition: Callable[[], str | None]) -> Ending:
+def _helper_failure(returncode: int, held: Held) -> int | None:
+    """The helper's exit status when the job's helper itself failed (#1170), else None: any status but 0, which the
+    helper gives exactly when it served the job to its end, whatever its container's status (the helper logs that).
+    A stop or fence of this worker's is not the helper's failure."""
+    return None if returncode == 0 or held.fenced or held.signalled else returncode
+
+
+def _helper_failed_words(helper_exit: int) -> str:
+    return f"the job's helper {_exit_words(helper_exit)} before the job recorded its end"
+
+
+def _learning_without_end(held: Held, returncode: int, progress: LearningProgress | None) -> LearningOutcome:
+    """A learning job whose child left no readable end record: handed back after a stop (a stop never permanently
+    fails or skips a job), the worker's error when its helper failed on its own, else exited without a result."""
+    if held.signalled:
+        return LearningOutcome(None, progress=progress)
+    if (helper_exit := _helper_failure(returncode, held)) is not None:
+        return LearningOutcome(job_lane.LEARNING_FAILED, job_lane.WORKER_ERROR, _helper_failed_words(helper_exit),
+                               progress)
+    return LearningOutcome(job_lane.LEARNING_FAILED, job_lane.EXITED_WITHOUT_RESULT,
+                           "the job left no readable end record; its container's status is in the helper's log",
+                           progress)
+
+
+def _ending_from(end: job_lane.JobEnd | None, disposition: Callable[[], str | None], *,
+                 helper_exit: int | None = None) -> Ending:
     """Rules 1-5 (O8, M9): the stage from the job-end record alone, and, once the host committed
-    a report and the scrub walked the tree, the report's disposition (read only then)."""
+    a report and the scrub walked the tree, the report's disposition (read only then). With no
+    record, a helper that failed on its own (`helper_exit`, its status: `_helper_failure`) is the worker's error, not
+    the run's."""
+    if end is None and helper_exit is not None:
+        return Ending(_FAILED, failure_reason=_WORKER_ERROR, failure_message=_helper_failed_words(helper_exit))
     if end is None:
         return Ending(_FAILED, failure_reason=_NO_REPORT,
-                       failure_message=f"the run left no job-end record; the child {_exit_words(returncode)}")
+                       failure_message="the run left no job-end record; its container's status is in the helper's log")
     if end.setup == job_facts.SETUP_REFUSED:
         return Ending(_FAILED, failure_reason=_SETUP_REFUSED,
                        failure_message="run setup refused the job", decided_by_run=True)
@@ -341,8 +369,9 @@ class Worker:
 
     async def _remove_leftover_job_containers(self) -> None:
         """At start, before anything is claimed: every container carrying the job-container label
-        (`job_socket.JOB_LABEL`) is a dead helper's, since this worker is the only one on its machine and
-        its previous run's helpers died with it, claim tokens included (#1170 A5). Never an error: what
+        (`job_socket.JOB_LABEL`) whose helper no longer runs is removed; its helper died with a previous
+        worker, claim tokens included (#1170 A5). A live helper's container, another worker's on a
+        shared daemon, is spared (`tenancy.mark_alive`). Never an error: what
         cannot be removed is logged, and the tenant's teardown removes it by the tenant's label."""
         try:
             await asyncio.to_thread(self._containers.remove_job_containers)
@@ -688,7 +717,8 @@ class Worker:
         returncode = await proc.wait()
         _logger.info("investigation %s: child %d %s after %s", inv, proc.pid,
                      _exit_words(returncode), self._clock() - started)
-        ending, cost, exact, knowledge = await asyncio.to_thread(self._read_ending, record, returncode)
+        ending, cost, exact, knowledge = await asyncio.to_thread(
+            self._read_ending, record, _helper_failure(returncode, held))
         held.read_exact = exact
         if held.signalled and not ending.decided_by_run:  # R1: an ending the run itself decided wins over the stop
             return End(None, cost, knowledge)
@@ -828,7 +858,8 @@ class Worker:
             _logger.warning("investigation %s: a container named %s is not this job's (the sweep of what its "
                             "child started left it); left in place", inv, name)
 
-    def _read_ending(self, record: Any, returncode: int) -> tuple[Ending, float | None, bool, dict | None]:  # ending, cost, cost is exact, knowledge
+    def _read_ending(self, record: Any, helper_exit: int | None = None
+                     ) -> tuple[Ending, float | None, bool, dict | None]:  # ending, cost, cost is exact, knowledge
         """The stage, cost and knowledge from the host records, through the job lane (in a thread).
         A cost that cannot be read is None, the final figure's own meaning (R2). The cost is
         exact exactly when the ledger read is complete (#1377 r7.3 T2: sealed at its last row, no
@@ -844,7 +875,7 @@ class Worker:
                     None, True, None)
         try:
             job_end = lane.read_job_end(inv)
-            ending = _ending_from(job_end, returncode, lambda: _report_disposition_or_none(lane, inv))
+            ending = _ending_from(job_end, lambda: _report_disposition_or_none(lane, inv), helper_exit=helper_exit)
             # #1396: the ending is decided; from here no fault turns it into `worker_error`
             cost: float | None
             exact = True
@@ -942,11 +973,7 @@ class Worker:
         if end is None:
             progress = await asyncio.to_thread(
                 self._read_learning, tenant, lambda lane: lane.read_learning_progress(job)) or held.progress
-            if held.signalled:  # a stop can never permanently fail or skip a job: handed back
-                return LearningOutcome(None, progress=progress), True
-            return LearningOutcome(
-                job_lane.LEARNING_FAILED, job_lane.EXITED_WITHOUT_RESULT,
-                f"the job's child left no readable end record; it {_exit_words(returncode)}", progress), True
+            return _learning_without_end(held, returncode, progress), True
         if end.status == job_lane.LEARNING_STOPPED:  # ends nothing: the job is handed back (#1344 r5)
             return LearningOutcome(None, progress=end), True
         # The record decided the ending, so a stop that landed after it does not override it.

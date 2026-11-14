@@ -33,6 +33,7 @@ from pydantic_ai.exceptions import ModelRetry  # noqa: E402
 
 from defender.box import (  # noqa: E402
     BoxFault,
+    BoxStartFault,
     BoxResult,
     Finding,
     RunTainted,
@@ -554,7 +555,7 @@ def test_o8_every_run_end_word_reaches_the_job_fact_and_only_the_two_box_words_s
     assert held.cut_short == word
     end = job_lane.JobEnd(setup=job_facts.SETUP_DONE, box=job_facts.BOX_STARTED, report_committed=False,
                           scrub_verified=False, cut_short=word)
-    ending = _ending_from(end, 5, lambda: None)
+    ending = _ending_from(end, lambda: None)
     assert word is None or word in ending.failure_message
     assert ending.decided_by_run is False
 
@@ -679,9 +680,9 @@ def test_box_construction_failure_refuses_the_run(tmp_path):
         log.append("start-refused")
         raise fault
 
-    with pytest.raises(BoxFault) as e:
+    with pytest.raises(BoxStartFault) as e:
         _drive_lifecycle(tmp_path, rec, start_box=refusing_start)
-    assert e.value is fault
+    assert e.value.__cause__ is fault, "the start's own refusal is not carried as the cause"
     assert "investigate" not in log, \
         "the investigation ran despite the box refusing to build — untrusted input was " \
         "processed outside a box"

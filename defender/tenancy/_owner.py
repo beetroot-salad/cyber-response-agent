@@ -17,8 +17,10 @@ from pathlib import Path
 from defender import _io
 
 OWNER_FILE = "owner"
-#: An `owned_temporary` name's tail: the owner's pid and start time, then a random tag.
+#: An `owned_temporary` name's tail: the owner's pid and start time (a `process_mark`), then a random tag.
 _NAMED_OWNER = re.compile(r"\.owner-(\d+)-(\d+)-[0-9a-f]{8}$")
+#: A `process_mark`: a pid and its start time.
+_MARK = re.compile(r"(\d+)-(\d+)")
 
 
 def process_start(pid: int) -> str | None:
@@ -44,15 +46,27 @@ def write_owner(folder: Path, pid: int | None = None) -> None:
     _io.write_guarded(Path(folder) / OWNER_FILE, json.dumps({"pid": pid, "start": start}) + "\n")
 
 
-def owned_temporary(prefix: str) -> str:
-    """A name for a folder this process is about to make, `prefix` then its owner (this
-    process's pid and start time) and a random tag. `owner_alive` reads the owner from the name
-    while the folder has no `owner` file of its own."""
+def process_mark() -> str:
+    """This process as `<pid>-<start time>`, which names it and no later process given the same
+    pid; `OSError` when its start time cannot be read."""
     pid = os.getpid()
     start = process_start(pid)
     if start is None:
-        raise OSError(f"no process {pid} to own a {prefix} folder")
-    return f"{prefix}.owner-{pid}-{start}-{secrets.token_hex(4)}"
+        raise OSError(f"the start time of process {pid} cannot be read")
+    return f"{pid}-{start}"
+
+
+def mark_alive(mark: str) -> bool:
+    """Whether the process a `process_mark` names still runs. Anything else is a process gone."""
+    matched = _MARK.fullmatch(mark)
+    return matched is not None and process_start(int(matched.group(1))) == matched.group(2)
+
+
+def owned_temporary(prefix: str) -> str:
+    """A name for a folder this process is about to make, `prefix` then its owner (this
+    process's `process_mark`) and a random tag. `owner_alive` reads the owner from the name
+    while the folder has no `owner` file of its own."""
+    return f"{prefix}.owner-{process_mark()}-{secrets.token_hex(4)}"
 
 
 def owner_alive(folder: Path) -> bool:
@@ -65,9 +79,7 @@ def owner_alive(folder: Path) -> bool:
         pid, start = record["pid"], record["start"]
     except FileNotFoundError:
         named = _NAMED_OWNER.search(Path(folder).name)
-        if named is None:
-            return False
-        pid, start = int(named.group(1)), named.group(2)
+        return named is not None and mark_alive(f"{named.group(1)}-{named.group(2)}")
     except (OSError, ValueError, KeyError, TypeError):
         return False
     if not isinstance(pid, int) or isinstance(pid, bool):

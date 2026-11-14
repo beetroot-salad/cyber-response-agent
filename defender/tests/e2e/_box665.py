@@ -1,6 +1,7 @@
 """Shared docker fakes and box-geography helpers for the box tests (#665 and later)."""
 from __future__ import annotations
 
+import json
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -88,7 +89,10 @@ class RecordingDocker(AttachedStartSeam):
         sentinel: DockerFault | None = None, reap: DockerFault | None = None,
         exec_replies: list | None = None, existing_token: str | None = None,
         status: str | None = None, label_unreadable: bool = False,
+        runtimes: tuple[str, ...] | None = None,
     ):
+        # The runtimes `docker info` lists (#1484); None answers nothing usable, a daemon that cannot say.
+        self.runtimes = runtimes
         # What `docker inspect -f {{.State.Status}}` answers: docker's own word, or None for a
         # free name (rc 1, as a real daemon answers). A word, not a bool, so it can say `created`.
         self.status = status
@@ -225,6 +229,8 @@ class RecordingDocker(AttachedStartSeam):
             return _cp(f.rc, f.stdout, f.stderr) if f else _cp(0, "container-id\n")
         if sub == "exec":
             return self._exec(argv)
+        if sub == "info" and self.runtimes is not None:
+            return _cp(0, json.dumps({name: {"path": name} for name in self.runtimes}) + "\n")
         return _cp(0)
 
     # argv readers (parse the captured create argv)

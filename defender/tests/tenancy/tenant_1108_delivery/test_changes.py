@@ -416,3 +416,38 @@ def test_the_commit_maker_takes_no_lock_and_leaves_main_the_index_and_the_checko
     assert git(clone, "rev-parse", f"{tip}^^") == batch.export.commit
     assert agent_blobs(clone, tip)["lessons/seed.md"] == b"seed, claim 2\n"
     assert files_under(batch.draft_root / "agent") == agent_blobs(clone, tip)
+
+
+@pytest.mark.parametrize("shell", ["no identity", "an exported identity"])
+def test_every_tenant_commit_is_the_commit_maker_s_whatever_identity_the_shell_has(repo, tmp_path, monkeypatch, shell):
+    """#1484: a shell whose git has no identity (an operator's `tenant.py propose`, a job container's bare uid) still
+    commits, and an exported identity never reaches the tenant's history: author and committer are the product's."""
+    from defender._git import PRODUCT_IDENTITY as COMMIT_IDENTITY
+
+    http = ForgeHTTP()
+    d = delivery(repo, http)
+    batch = d.start_batch("identity", lanes=LANES)
+    _write(batch.draft_root / "agent/lessons/new.md", "a claim\n")
+    change_set = batch.change_set()
+    empty_home = tmp_path / "home"
+    empty_home.mkdir()
+    monkeypatch.setenv("HOME", str(empty_home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(empty_home))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    for name in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "EMAIL"):
+        monkeypatch.delenv(name, raising=False)
+    if shell == "no identity":
+        # git would otherwise guess one from the passwd entry and host name; this makes it refuse, as it does for
+        # a user with no configured identity on a host it cannot guess from.
+        monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+        monkeypatch.setenv("GIT_CONFIG_KEY_0", "user.useConfigOnly")
+        monkeypatch.setenv("GIT_CONFIG_VALUE_0", "true")
+    else:
+        monkeypatch.setenv("GIT_AUTHOR_NAME", "operator")
+        monkeypatch.setenv("GIT_AUTHOR_EMAIL", "operator@example.invalid")
+        monkeypatch.setenv("GIT_COMMITTER_NAME", "operator")
+        monkeypatch.setenv("GIT_COMMITTER_EMAIL", "operator@example.invalid")
+    commit = batch.commit(change_set, "a claim")
+    who = git(repo[0].knowledge, "log", "-1", "--format=%an%x00%ae%x00%cn%x00%ce", commit).split("\x00")
+    assert who == [COMMIT_IDENTITY["GIT_AUTHOR_NAME"], COMMIT_IDENTITY["GIT_AUTHOR_EMAIL"],
+                   COMMIT_IDENTITY["GIT_COMMITTER_NAME"], COMMIT_IDENTITY["GIT_COMMITTER_EMAIL"]], who

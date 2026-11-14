@@ -361,8 +361,9 @@ class ContainerStandIn(RecordingDocker):
 
     def __init__(self, job: Callable[[Container], int] | None = None, *,
                  run_fault: tuple[int, str] | None = None, exec_writer: list[str] | None = None,
-                 init: bool = False, queue: Path | None = None, stubborn: bool = False) -> None:
-        super().__init__()
+                 init: bool = False, queue: Path | None = None, stubborn: bool = False,
+                 runtimes: tuple[str, ...] | None = None) -> None:
+        super().__init__(runtimes=runtimes)
         self.job = job
         self.stubborn = stubborn
         self.init = init
@@ -390,15 +391,17 @@ class ContainerStandIn(RecordingDocker):
         argv = list(argv)
         self.log.append(argv)
         if len(argv) > 1 and argv[1] == "run":
-            return self._run(argv)
+            return self._run(argv, kw.get("env"))
         if len(argv) > 1 and argv[1] == "exec" and self.exec_writer is not None:
             self.calls.append(argv)
             return subprocess.Popen(self.exec_writer, **kw)
         return super().popen(argv, **kw)
 
-    def _run(self, argv: list[str]) -> _ContainerProc:
+    def _run(self, argv: list[str], cli_env: dict[str, str] | None = None) -> _ContainerProc:
         name = (flag_values(argv, "--name") or [f"job-{len(self.boxes)}"])[0]
-        box = Container(argv, name, parse_env(argv), parse_mounts(argv), parse_labels(argv))
+        # A bare `--env NAME` takes its value from the docker command's own environment, as docker does.
+        env = {k: (v if v is not None else (cli_env or {}).get(k)) for k, v in parse_env(argv).items()}
+        box = Container(argv, name, env, parse_mounts(argv), parse_labels(argv))
         self.boxes.append(box)
         if self.run_fault is not None:
             return _ContainerProc(None, box, rc=self.run_fault[0], stderr=self.run_fault[1].encode())
@@ -928,3 +931,13 @@ def pid_alive(pid: int) -> bool:
     except OSError:
         return False
     return stat[stat.rindex(")") + 2] != "Z"
+
+
+def ensure_job_network(docker: Callable[..., subprocess.CompletedProcess]) -> str:
+    """The tests' job network (`DEFENDER_JOB_NETWORK`, set by the suite's conftest) on a real daemon: made as a bridge
+    network when it is missing, as `start-jobs-docker` makes the dev one. Its name."""
+    name = os.environ["DEFENDER_JOB_NETWORK"]
+    if docker(["docker", "network", "inspect", name]).returncode != 0:
+        made = docker(["docker", "network", "create", "--driver", "bridge", name])
+        assert made.returncode == 0 or "already exists" in (made.stderr or ""), made.stderr
+    return name
