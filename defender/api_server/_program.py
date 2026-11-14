@@ -9,7 +9,8 @@ import dataclasses
 import datetime as _dt
 import socket
 import sys
-from collections.abc import AsyncIterator, Mapping
+import threading
+from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import AsyncExitStack, asynccontextmanager
 
 import httpx
@@ -55,6 +56,24 @@ async def _probe(adapter: KeycloakSignIn | KeycloakPrograms) -> None:
         raise StartRefused(str(why)) from why
 
 
+async def _abandonable(call: Callable[[], None]) -> None:
+    """Run a blocking call off the loop in a daemon thread that a stop may abandon: `asyncio.to_thread` cannot be
+    cancelled, so a database that accepts and never answers would hold a stop signal (and exit) forever."""
+    loop = asyncio.get_running_loop()
+    done: asyncio.Future[None] = loop.create_future()
+
+    def work() -> None:
+        try:
+            call()
+        except BaseException as failed:  # noqa: BLE001 — handed to the awaiting coroutine whole
+            loop.call_soon_threadsafe(lambda err=failed: done.cancelled() or done.set_exception(err))
+        else:
+            loop.call_soon_threadsafe(lambda: done.cancelled() or done.set_result(None))
+
+    threading.Thread(target=work, name="version-check", daemon=True).start()
+    await done
+
+
 def _bind(settings: Settings) -> socket.socket:
     sock = socket.socket(socket.AF_INET6 if ":" in settings.host else socket.AF_INET)
     try:
@@ -62,7 +81,7 @@ def _bind(settings: Settings) -> socket.socket:
         sock.bind((settings.host, settings.port))
     except OSError as why:
         sock.close()
-        raise StartRefused(f"cannot listen on {settings.host}:{settings.port}: {why.strerror or why}") from why
+        raise StartRefused(f"DEFENDER_API_HOST / DEFENDER_API_PORT: cannot listen on {settings.host}:{settings.port}: {why.strerror or why}") from why
     sock.set_inheritable(True)
     return sock
 
@@ -83,7 +102,7 @@ async def serving(settings: Settings, *, transport: httpx.AsyncBaseTransport | N
     step that refuses raises `StartRefused` with its message, after closing what the earlier steps opened."""
     async with AsyncExitStack() as stack:
         try:
-            await asyncio.to_thread(check_version, settings.database_dsn)
+            await _abandonable(lambda: check_version(settings.database_dsn))
         except (RevisionMismatch, DatabaseUnreachable) as why:
             raise StartRefused(str(why)) from why
         signin = KeycloakSignIn(
