@@ -84,9 +84,9 @@ concrete setup and expected results, where gaps show. A **spike** then implement
 for real, against the sketch, and logs every guess, workaround and place where the design fought
 the existing code. The spike's code is thrown away; only the reviewer reads it, and only what it
 learned travels to later stages. The first independent review
-then asks how it would design this from scratch, knowing what both showed, so those problems never
-arise. You see the design it proposes, with the shapes it rejected and why, before you decide, and
-write-tests starts from a design that has already met the code.
+then explains, plainly and by cause, the problems both exposed, and the shapes that would remove
+them with their trade-offs. You redesign from that account before you approve, and write-tests
+starts from a design that has already met the code.
 
 ## Reading for fidelity, running for discrimination
 

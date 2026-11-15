@@ -16,7 +16,7 @@ The deliverable is a **friction log**, for a review that asks how the design sho
 
 ## From-scratch review
 
-You are the first independent review of a draft design, with evidence most reviewers lack: a thin sketch and a throwaway spike. The checks in SKILL.md §3 still apply. Your question is not where the draft has holes but whether it has the right shape: knowing what the sketch and spike showed, how would you design this from scratch so those problems never arise?
+You are the first independent review of a draft design, with evidence most reviewers lack: a thin sketch and a throwaway spike. The checks in SKILL.md §3 still apply. Your job is to explain the problems they expose so plainly that the human can redesign from your account. The human designs; you don't need to find the right design, but you do need to find each problem's cause. Asking how you would design this from scratch so the problems never arise is how you find it.
 
 **1. Collect the tensions.** They come in two kinds:
 
@@ -25,16 +25,17 @@ You are the first independent review of a draft design, with evidence most revie
 
 Ignore sketch harness defects and existing tests that will need changing: the spike lists them for the test author. Raise one only when it hides a design tension, and then as part of that tension.
 
-**2. Redesign from scratch.** Take the tensions as one set, not a list to patch. Work from the problem and the promises, not the draft's mechanism, and ask what design would not have produced them: which owner, model, flow or rule makes them impossible rather than handled. Try more than one shape. Fit each to the existing code as the spike found it; where one needs that code to change, say what and what it costs. Keep the promises; a redesign that needs one changed names it as a scope choice for the human.
+**2. Find the causes.** Take the tensions as one set, not a list to patch. Several symptoms usually share one cause: an owner, model, flow or rule in the draft. To find it, work from the problem and the promises rather than the draft's mechanism, and try more than one shape that would make the tensions impossible rather than handled. Fit each to the existing code as the spike found it. Weigh each against the project's principles and threat model, not only against the tensions it removes: a shape that removes three tensions and weakens a trust boundary is a trade-off to show, not a fix.
 
-**3. Compare.** Set your best design against the draft. Either the draft's shape holds and the tensions are local, or a different shape removes a group of them.
+**Return the problems first, written for the human, then the evidence.** Being clear matters more here than being right about the fix:
 
-**Return what the human will read first, then the evidence.** The first three parts fit on one screen:
+1. **The problems.** One per cause, not per symptom, most consequential first. For each: what goes wrong, as a concrete scenario; which part of the design causes it; and why patching each symptom would leave the cause in place. The reader knows the design but not the code, so name a file or symbol only alongside what it does. Say how sure you are.
+2. **Shapes that would remove them.** For each cause a different shape would remove: the shapes you tried, what each changes, which problems it removes, and what it costs or weakens. These are options with trade-offs, not a verdict; if you lean toward one, say so and why, marked as your lean. If the draft's shape holds and the problems are local, say that plainly.
+3. **Decisions for the human.** The choices left, including any choice between shapes.
+4. **Readiness.** What has to be settled before the design is ready for the executable contract.
+5. **Evidence.** Per tension: the cited code, sketch case or spike entry, labelled confirmed (read in code or run) or inferred; and the local fix for each tension no change of shape addresses.
 
-1. **The proposed design.** Whether the draft's shape holds, and each change you would make: what changes, which tensions it removes, what it costs. Then the shapes you tried and rejected, each with the reason.
-2. **Decisions for the human.** The choices no redesign settles, each with your recommendation.
-3. **Readiness.** Whether the design is ready for the executable contract once those are settled, and what blocks it otherwise.
-4. **Evidence.** Per tension: the cited code, sketch case or spike entry, labelled confirmed (read in code or run) or inferred; and the local fix for each tension the redesign leaves.
+Keep parts 1 to 4 short enough to read in one sitting; the detail belongs in the evidence.
 
 ## Cache
 
