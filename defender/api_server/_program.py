@@ -297,7 +297,7 @@ async def serving(settings: Settings, *, transport: httpx.AsyncBaseTransport | N
                 until_lifespan.push_async_callback(people.close)
                 tenants = PostgresTenantRepository(settings.database_dsn)
                 until_lifespan.push_async_callback(tenants.close)
-                records = RecordStore(settings.database_dsn, clock=_wall_clock, judge=_catalog_judge(catalog))
+                records = record_store(settings.database_dsn, catalog, clock=_wall_clock)
                 stack.push_async_callback(records.close)  # like the job store, it outlives the lifespan
                 identity = IdentityService(people, signin=signin, mail=LoggedMail(), clock=_wall_clock,
                                            bootstrap=settings.administrators, programs=programs)
@@ -313,6 +313,12 @@ async def serving(settings: Settings, *, transport: httpx.AsyncBaseTransport | N
                 until_lifespan.pop_all()
                 await stack.enter_async_context(app.router.lifespan_context(app))
         yield Running(app=app, sockets=[sock])
+
+
+def record_store(dsn: str, catalog: Catalog, *, clock: Callable[[], _dt.datetime]) -> RecordStore:
+    """The record store as the API serves it: each write judged over `catalog` (the one built whole at start, so the
+    judgement inside the row lock reads no files), only what the write changes (#1366 C4)."""
+    return RecordStore(dsn, clock=clock, judge=_catalog_judge(catalog))
 
 
 def _catalog_judge(catalog: Catalog) -> Callable[[TenantRecords, TenantRecords], list[str]]:
