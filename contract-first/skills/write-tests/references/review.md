@@ -4,11 +4,20 @@ You review tests you did not write, to find where the contract would let the wro
 
 ## Design check
 
-Here you read the design with a thin sketch, not a finished suite, and answer one question: made concrete by these cases, does the design say enough, consistently enough, to write a thorough contract against? Look for promises that contradict each other, choices the sketch was forced to make, promises no case could observe at a real boundary, and flows the design implies but never states. Ignore coverage depth and test mechanics; the sketch is thin on purpose.
+You read the design with a thin sketch and, when one ran, a throwaway spike. Your question is not where the design has holes but whether it has the right shape: knowing what the sketch and spike showed, how would you design this from scratch so those problems never arise?
 
-When a spike ran, read its diff and friction log for where the design doesn't fit the code it lands in. An implementer doesn't stop at friction the way a person does; it writes the workaround. So read the code, not only the log, for workarounds the design forced. Keep a finding only if you can name the design choice it conflicts with; mess from the spike's own shortcuts is noise.
+**1. Collect the tensions.** They come in two kinds:
 
-Return design-level findings grouped by the underlying decision, each with a proposed dissolution and its trade-offs. A clean check means the design is ready for thorough authoring, not that the contract is.
+- **Inside the design:** promises that contradict each other, choices the sketch was forced to make, promises no case could observe at a real boundary, flows the design implies but never states.
+- **Between the design and the code it lands in:** read the spike's diff, not only its log. An implementer doesn't stop at friction the way a person does; it writes the workaround, so the workarounds the design forced are in the code. A friction counts when the design caused it; mess from the spike's own shortcuts is noise.
+
+Sketch harness defects and existing tests that will need changing are not tensions: the author fixes the harness, and the code stage returns stale tests (SKILL.md §5). List them at the end for the author, never among the findings.
+
+**2. Redesign from scratch.** Take the tensions as one set, not a list to patch. Work from the problem and the promises, not the design's mechanism, and ask what design would not have produced them: which owner, model, flow or rule makes them impossible rather than handled. Fit it to the existing code as the spike found it; where it needs that code to change, say what and what it costs. Keep the promises; a redesign that needs one changed names it as a scope choice for the human.
+
+**3. Compare.** Set your design against the current one. Either the current shape holds and the tensions are local, or a different shape removes a group of them. For each difference, say which tensions it removes, what it costs, and what decisions it opens. A tension no redesign removes gets its local fix.
+
+Return, in this order: the verdict on the shape, with the redesign if there is one; the tensions it leaves, each with a fix and its trade-offs; then the list for the author. A clean check means the design is ready for thorough authoring, not that the contract is.
 
 ## Whole-contract fidelity
 
@@ -51,5 +60,6 @@ One entry per line: `<skill>[/<file>] §<section> <rule> | ctx: <tags> | <applic
 
 - write-tests/review §opening outline-first | ctx: harness=claude-code | the `LSP` tool's document symbols; a grep for definitions where no language server is installed.
 - write-tests/review §design-check spike-workarounds | ctx: past-runs | two places owning one fact, a special case keyed to a fixture, a value threaded through layers that shouldn't know it, a bypassed guard or census, a signature change that ripples to many callers, swallowed errors, a mechanism other than the design's.
+- write-tests/review §design-check gap-list | ctx: past-runs | on #1161 the spike log opened with sketch harness defects, and the check returned ten gaps (G1–G10), each a hole in the current design, with no verdict on its shape.
 - write-tests/review §fidelity cheap-non-discrimination | ctx: past-runs | vacuous negatives, missing positive controls, canned responses, self-computed expectations, fakes that implement the policy, fixtures that can't reach the stated fault, tests that only exercise injected state.
 - write-tests/review §execution-evidence suite-checks | ctx: python | `spec-graph calls <suite-dir> [--target <module>]` (reach) and `spec-graph nullstub <suite-dir> --python <interpreter>` (do-nothing target); use equivalents elsewhere.

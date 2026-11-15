@@ -82,9 +82,10 @@ write-tests arranges for that moment to come early and cheap. A thin **sketch** 
 important promise, which forces each design choice into concrete setup and expected results, where
 gaps show. A **spike** then implements the core flows for real, against the sketch, and logs every
 guess, workaround and place where the design fought the existing code. The spike's code is thrown
-away and never shown to later workers; only what it learned travels. A fresh reader checks the
-design against both, and the design is corrected before the thorough tests are written, while
-changing course costs a few files instead of a suite.
+away and never shown to later workers; only what it learned travels. A fresh reader then asks how
+it would design this from scratch, knowing what both showed, so those problems never arise. The
+design is reshaped or corrected before the thorough tests are written, while changing course
+costs a few files instead of a suite.
 
 ## Reading for fidelity, running for discrimination
 
@@ -171,7 +172,7 @@ inspectable by a person, and runnable headless as one command per stage.
 
 ## Rules state goals; applications are a cache
 
-For now this applies to write-tests, write-code-from-tests, proven-fix, their reference files and
+For now this applies to write-tests, write-code-from-tests, tested-fix, their reference files and
 the shared `references/sort.md`. Each rule
 states its goal and the principle behind it, never the list of cases it covers. How a rule applies to
 one context (the harness, the model generation, the project's toolchain, or what past runs found) is
@@ -221,7 +222,7 @@ project, at `.claude/contract-first-attacks.md`; the plugin defines only its for
 
 The full pipeline is for new or changed promises. Most changes don't need it, and you pick the lane;
 skills don't route themselves. A small behavior change, one whose intent fits in a sentence and
-stays inside one owner and one surface with no lifecycle, goes through proven-fix. On such changes
+stays inside one owner and one surface with no lifecycle, goes through tested-fix. On such changes
 the full pipeline spent hours and many agents for almost no code bugs, while what did escape, a
 sibling site or a mirror case, needed a sweep and a cold review rather than attacks.
 
@@ -231,13 +232,13 @@ flowchart TD
     Q1 -->|"yes, small: intent in a sentence,<br/>one owner, one surface, no lifecycle"| PF
     Q1 -->|yes| P[discuss-issue → write-tests →<br/>write-code-from-tests → review]
     Q1 -->|no| Q2{Does code disagree with<br/>intent that's already settled?}
-    Q2 -->|"yes, and you can state it in a sentence"| PF[proven-fix: intent recorded, sweep,<br/>red test first, smallest fix,<br/>mutants, cold review]
+    Q2 -->|"yes, and you can state it in a sentence"| PF[tested-fix: intent recorded, sweep,<br/>red test first, smallest fix,<br/>mutants, cold review]
     Q2 -->|no| Q3{Does only structure change?}
     Q3 -->|yes| RF[refactor:<br/>existing suite unchanged, lint against regressions]
     Q3 -->|"unsure, or two readings of intent"| P
 ```
 
-The lighter lanes hand back rather than decide. proven-fix records one decision, the human's
+The lighter lanes hand back rather than decide. tested-fix records one decision, the human's
 one-sentence intent, in the issue or PR body; anything more, and anything in refactor, needs a
 design and goes to discuss-issue.
 

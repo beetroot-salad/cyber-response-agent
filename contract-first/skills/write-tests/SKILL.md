@@ -39,7 +39,7 @@ Settle the design before the tests that enforce it are written in depth.
 
 **Spike** — one implementer writes a throwaway implementation of the core flows in a detached worktree, runs the sketch against it, and logs every guess, workaround and departure from the design's mechanism. Its code is never committed or shown to any later worker; only its findings travel. It catches where the design doesn't fit the code it lands in, which otherwise surfaces only at code review.
 
-**Design check** — one fresh reader reads the design, sketch, spike diff and log, without the author's or implementer's reasoning, and asks: is this the right behavior, and where is the design unsettled, contradictory, or a poor fit for the code it lands in? A spike finding counts only when it names the design choice it conflicts with.
+**Design check** — one fresh reader reads the design, sketch, spike diff and log, without the author's or implementer's reasoning. It collects the tensions inside the design and between the design and the code it lands in, asks how it would design this from scratch so they never arise, and compares that with the current design. Its first answer is whether the design's shape holds; holes in the current design come second, and test upkeep isn't a finding.
 
 Sort and resolve what it finds (§5) before thorough authoring. Mechanism changes it accepts are written into the design so the implementer does not rediscover them. Sketch cases carry forward where their design survived.
 

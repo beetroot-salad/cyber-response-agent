@@ -1,12 +1,12 @@
 ---
-name: proven-fix
+name: tested-fix
 description: "Fix a bug where the code disagrees with settled intent, or make a small behavior change whose intent the human states in one sentence, and prove the guarding test can fail: record the intent, sweep for every place that decides the same rule, write the test red first, make the smallest fix, mutate the lines it touched, then have a fresh agent review the diff cold. Use when the human routes a fix or small change here; a design question hands back to discuss-issue."
 argument-hint: "[issue # or bug description]"
 model: sonnet
 effort: medium
 ---
 
-# Proven fix
+# Tested fix
 
 Either the code disagrees with intent that is already settled, or the human wants a small behavior change and states the intended behavior in one sentence. The change is usually the easy part. The point is a guarding test that actually discriminates: one that fails without the change and catches its likely regressions.
 
@@ -52,9 +52,9 @@ Where the intent is recorded; the sweep's sites and how each is covered; the ste
 
 One entry per line: `<skill>[/<file>] §<section> <rule> | ctx: <tags> | <application>`. Each applies a rule above to the context its tags name. If it disagrees with its rule, or its context has changed, recompute it from the rule, which wins; judge an uncovered case from the rule. Project-specific entries use the same format in the project's `.claude/contract-first-cache.md`: grep it for this skill's name.
 
-- proven-fix §opening hand-back | ctx: past-runs | the change crosses a process or service boundary; involves shutdown, signals, threads or lifecycle; touches a rule with more than one owner that it can't cover; has two reasonable readings; or adds a new verdict, refusal or model-visible surface.
-- proven-fix §2 copied-expectation | ctx: past-runs | a test that copied its field list from the code it checked.
-- proven-fix §4 mutants | ctx: past-runs | up to five: flip a comparison, negate a condition, delete a guard, move a boundary, return the other branch.
-- proven-fix §4 cant-fail-shapes | ctx: python | each has shipped green here: `parametrize` over an empty collection (reported as skipped, reads as coverage); an assertion whose search surface excludes its own subject; a disjunction the common case satisfies (`result is None or …`); one sentinel meaning two things; a structural claim checked by substring search, which a comment can satisfy.
-- proven-fix §5 fresh-review | ctx: harness=claude-code | a fresh agent running `/code-review high` on the diff.
-- proven-fix §5 what-mutants-miss | ctx: past-runs | the same rule decided at a sibling site (#1378 → #1396 → a third); the mirror case across a boundary (#1398 → #1404 → proxy side); a case nobody handled (stopping after the budget).
+- tested-fix §opening hand-back | ctx: past-runs | the change crosses a process or service boundary; involves shutdown, signals, threads or lifecycle; touches a rule with more than one owner that it can't cover; has two reasonable readings; or adds a new verdict, refusal or model-visible surface.
+- tested-fix §2 copied-expectation | ctx: past-runs | a test that copied its field list from the code it checked.
+- tested-fix §4 mutants | ctx: past-runs | up to five: flip a comparison, negate a condition, delete a guard, move a boundary, return the other branch.
+- tested-fix §4 cant-fail-shapes | ctx: python | each has shipped green here: `parametrize` over an empty collection (reported as skipped, reads as coverage); an assertion whose search surface excludes its own subject; a disjunction the common case satisfies (`result is None or …`); one sentinel meaning two things; a structural claim checked by substring search, which a comment can satisfy.
+- tested-fix §5 fresh-review | ctx: harness=claude-code | a fresh agent running `/code-review high` on the diff.
+- tested-fix §5 what-mutants-miss | ctx: past-runs | the same rule decided at a sibling site (#1378 → #1396 → a third); the mirror case across a boundary (#1398 → #1404 → proxy side); a case nobody handled (stopping after the budget).
