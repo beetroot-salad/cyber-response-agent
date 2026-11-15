@@ -327,7 +327,8 @@ def test_a_sign_in_start_the_provider_cannot_serve_is_a_303_unavailable_without_
     answer = world.client(raise_errors=False).get(LOGIN, params={"return": RET})
     assert failed(answer)[0] == "unavailable"
     assert not answer.headers.get_list("set-cookie")
-    assert world.signin.every_call[-1] == "begin_signin" and not world.signin.started  # control: the scripted failure was reached
+    assert world.signin.every_call[-1] == "begin_signin"  # control: the scripted failure was reached
+    assert not world.signin.started
     again = world.client().get(LOGIN, params={"return": RET})
     assert again.status_code == 302, again.text  # control: the same request starts when the provider is back
 

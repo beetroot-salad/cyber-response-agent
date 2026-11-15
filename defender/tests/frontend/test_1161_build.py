@@ -92,7 +92,8 @@ def test_1161_s2_the_build_fails_on_a_type_error_in_any_source_file(built_fronte
         done = _build(root)
         built = (root / "defender" / "frontend" / "dist" / "index.html").exists()
         if source is None:
-            assert done.returncode == 0 and built, (done.stdout[-1500:], done.stderr[-1500:])
+            assert done.returncode == 0, (done.stdout[-1500:], done.stderr[-1500:])
+            assert built
         elif done.returncode == 0 or built:
             problems.append(f"{source}: exit {done.returncode}, index.html {'made' if built else 'absent'}")
     assert not problems, problems

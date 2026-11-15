@@ -60,7 +60,8 @@ def test_no_route_answers_at_its_old_address() -> None:
     old = sorted({(method, re.sub(r"\{[^}]*\}", "x", r.path).removeprefix("/api"))
                   for r in _routes(world.app.routes) for method in (getattr(r, "methods", None) or {"GET"})
                   if method not in ("HEAD", "OPTIONS")})
-    assert len(old) > 20 and all(path.startswith("/") for _, path in old), old
+    assert len(old) > 20, old
+    assert all(path.startswith("/") for _, path in old), old
     still_served = [(method, path, browser.request(method, path).status_code) for method, path in old]
     assert [row for row in still_served if row[2] != 404] == []
     assert browser.get("/api/me").status_code == 401  # control: the moved route is there
@@ -181,7 +182,8 @@ def test_the_launcher_hands_caddy_the_repos_own_caddyfile_from_any_directory(tmp
              for i, a in enumerate(argv) if a == "--config" or a.startswith("--config=")]
     assert len(given) == 1, argv
     repos = (REPO / "defender" / "frontend" / "Caddyfile").resolve()
-    assert os.path.isabs(given[0]) and Path(given[0]).resolve() == repos, (given[0], argv)
+    assert os.path.isabs(given[0]), (given[0], argv)
+    assert Path(given[0]).resolve() == repos, (given[0], argv)
     caddy = shutil.which("caddy")
     assert caddy is not None, "the Caddyfile check needs caddy on PATH (B11: a failure, never a skip)"
     adapted = subprocess.run([caddy, "adapt", "--config", given[0], "--adapter", "caddyfile"], env=env | {"PATH": os.environ["PATH"]},
