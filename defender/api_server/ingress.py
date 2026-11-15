@@ -14,6 +14,8 @@ import sys
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
+from defender._log import configure_from_env
+
 from ._settings import StartRefused, _port, artifact_domain, origin
 
 CADDYFILE = Path(__file__).resolve().parent.parent / "frontend" / "Caddyfile"
@@ -69,4 +71,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    configure_from_env()
     main()

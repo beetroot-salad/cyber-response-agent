@@ -7,6 +7,9 @@ from __future__ import annotations
 import json
 import re
 from importlib import resources
+from pathlib import Path
+
+from defender._io import read_text_utf8
 
 _SEGMENT = re.compile(r"\{([a-z]+)\}")
 
@@ -24,7 +27,7 @@ def _compile(document: dict[str, object]) -> tuple[tuple[str, re.Pattern[str]], 
     return tuple(compiled)
 
 
-_DOCUMENT = json.loads(resources.files("defender.api").joinpath("addresses.json").read_text(encoding="utf-8"))
+_DOCUMENT = json.loads(read_text_utf8(Path(str(resources.files("defender.api").joinpath("addresses.json")))))
 _SHAPES = _compile(_DOCUMENT)
 
 #: The shapes a person may be sent back to after sign-in.
