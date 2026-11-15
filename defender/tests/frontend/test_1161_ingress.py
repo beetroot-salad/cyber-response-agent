@@ -64,6 +64,12 @@ def test_1161_b9_the_built_files_carry_the_headers_too(world):
         _assert_guarded(r, asset)
 
 
+def _header_set(r: httpx.Response) -> list[tuple[str, str]]:
+    """Every response header, name and value, but `Date` (a clock) and `Via` (the reverse proxy's own hop marker,
+    `1.1 Caddy`, which carries no policy): the set a client of the API sees."""
+    return sorted((name.lower(), value) for name, value in r.headers.multi_items() if name.lower() not in ("date", "via"))
+
+
 @pytest.mark.parametrize("path", ["/api/me", "/api/openapi.json", "/api/nope", "/API/me", "/Api/openapi.json", "/api"])
 def test_1161_b9_b3_api_responses_carry_none_of_the_three_headers_and_are_the_apis_answer(world, path):
     """`/api` in any letter case goes to the API, unchanged; the ingress adds no header. (B9, B3)"""
@@ -73,6 +79,29 @@ def test_1161_b9_b3_api_responses_carry_none_of_the_three_headers_and_are_the_ap
         assert name not in r.headers, (path, name, r.headers)
     direct = httpx.get(f"{world.api.base_url}{path}")
     assert (r.status_code, r.headers["content-type"]) == (direct.status_code, direct.headers["content-type"]), path
+    assert _header_set(r) == _header_set(direct), path  # B3: nothing added, nothing removed, no CORS grant
+    assert not [name for name in r.headers if name.lower().startswith("access-control-")], (path, r.headers)
+
+
+FOREIGN = "https://evil.example"
+
+
+@pytest.mark.parametrize("origin", [FOREIGN, None], ids=["foreign-origin", "no-origin"])
+def test_1161_b3_a_state_changing_request_through_the_ingress_reaches_the_api_as_it_was_sent(world, origin):
+    """A non-GET without the frontend's `Origin` is refused by the API (its 403), and a preflight is not granted:
+    the ingress rewrites no request header and grants no CORS. Control: the frontend's own origin passes. (B3, B5)"""
+    headers = {} if origin is None else {"origin": origin}
+    for url in (f"{world.origin}/api/nope", f"{world.api.base_url}/api/nope"):
+        r = httpx.post(url, headers=headers)
+        assert (r.status_code, r.headers["content-type"]) == (403, "application/problem+json"), (url, r.status_code, r.text)
+    through, direct = (httpx.post(f"{base}/api/nope", headers=headers) for base in (world.origin, world.api.base_url))
+    assert through.json() == direct.json() and _header_set(through) == _header_set(direct)
+    preflight = {"origin": FOREIGN, "access-control-request-method": "POST"}
+    options = httpx.options(f"{world.origin}/api/nope", headers=preflight)
+    assert not [n for n in options.headers if n.lower().startswith("access-control-")], options.headers
+    assert _header_set(options) == _header_set(httpx.options(f"{world.api.base_url}/api/nope", headers=preflight))
+    own = httpx.post(f"{world.origin}/api/nope", headers={"origin": world.origin})  # control
+    assert "does not come from the frontend" not in own.text, (own.status_code, own.text)
 
 
 def test_1161_b9_the_sign_in_start_through_the_ingress_is_the_apis_redirect_without_the_headers(world):
