@@ -207,7 +207,7 @@ async def serving(settings: Settings, *, transport: httpx.AsyncBaseTransport | N
                 signin = KeycloakSignIn(
                     issuer=settings.signin_issuer, client_id=settings.signin_client_id,
                     client_secret=settings.signin_client_secret.get_secret_value(),
-                    redirect_uri=settings.signin_redirect_uri, admin_client_id=settings.signin_admin_client_id,
+                    redirect_uri=f"{settings.frontend_origin}/api/auth/callback", admin_client_id=settings.signin_admin_client_id,
                     admin_client_secret=settings.signin_admin_client_secret.get_secret_value(),
                     server_url=settings.keycloak_server_url, transport=transport)
                 until_lifespan.push_async_callback(signin.close)
@@ -231,7 +231,8 @@ async def serving(settings: Settings, *, transport: httpx.AsyncBaseTransport | N
                 identity = IdentityService(people, signin=signin, mail=LoggedMail(), clock=_wall_clock,
                                            bootstrap=settings.administrators, programs=programs)
                 app = create_app(api_deps(identity=identity, tenants=tenants, ports=JobStorePorts(store),
-                                          frontend_origin=settings.frontend_origin))
+                                          frontend_origin=settings.frontend_origin),
+                                 docs=settings.api_docs)
             async with steps.step("binding the listening socket"):
                 sock = _bind(settings)
                 stack.callback(sock.close)

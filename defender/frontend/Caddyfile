@@ -1,0 +1,22 @@
+# The ingress (#1161 B9): the built frontend for every path outside /api, and the API for /api and /api/* in any
+# letter case. Started only by `python -m defender.api_server.ingress`, which checks the four inputs read here.
+{
+	admin off
+}
+
+{$DEFENDER_API_FRONTEND_ORIGIN} {
+	@api path /api /api/*
+	handle @api {
+		reverse_proxy {$DEFENDER_INGRESS_API_UPSTREAM}
+	}
+	handle {
+		header {
+			Content-Security-Policy "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self' https://*.{$DEFENDER_ARTIFACT_DOMAIN}"
+			Referrer-Policy "strict-origin-when-cross-origin"
+			X-Content-Type-Options "nosniff"
+		}
+		root * {$DEFENDER_INGRESS_FRONTEND_DIR}
+		try_files {path} /index.html
+		file_server
+	}
+}
