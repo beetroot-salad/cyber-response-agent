@@ -51,18 +51,23 @@ def _build(root: Path) -> subprocess.CompletedProcess[str]:
                           check=False, timeout=600)
 
 
+def _copy(root: Path, document: Any) -> Path:
+    """A copy of the frontend (sharing `node_modules`) over the shape list `document`; the copy's root."""
+    shutil.copytree(FRONTEND, root / "defender" / "frontend", ignore=shutil.ignore_patterns("node_modules", "dist"))
+    (root / "defender" / "api").mkdir()
+    (root / "defender" / "frontend" / "node_modules").symlink_to(FRONTEND / "node_modules")
+    (root / "defender" / "api" / "addresses.json").write_text(json.dumps(document), encoding="utf-8")
+    return root
+
+
 @pytest.mark.parametrize("edit", [None, _add_one, _drop_one], ids=["unmodified", "shape-added", "shape-removed"])
 def test_1161_s2_the_build_follows_the_shape_list_and_fails_on_a_type_error(built_frontend, tmp_path, edit):
     """A copy builds as is; with one shape added to or removed from the list the build fails, so every shape has a
     route and every route a shape, and the type check is part of the build. (S2, Am-4)"""
-    root = tmp_path / "copy"
-    shutil.copytree(FRONTEND, root / "defender" / "frontend", ignore=shutil.ignore_patterns("node_modules", "dist"))
-    (root / "defender" / "api").mkdir()
-    (root / "defender" / "frontend" / "node_modules").symlink_to(FRONTEND / "node_modules")
     document = json.loads(LIST.read_text(encoding="utf-8"))
     if edit is not None:
         edit(document)
-    (root / "defender" / "api" / "addresses.json").write_text(json.dumps(document), encoding="utf-8")
+    root = _copy(tmp_path / "copy", document)
     done = _build(root)
     if edit is None:
         assert done.returncode == 0, (done.stdout[-1500:], done.stderr[-1500:])
@@ -70,3 +75,24 @@ def test_1161_s2_the_build_follows_the_shape_list_and_fails_on_a_type_error(buil
     else:
         assert done.returncode != 0, "the build accepted a shape list its router does not match"
         assert not (root / "defender" / "frontend" / "dist" / "index.html").exists()
+
+
+def test_1161_s2_the_build_fails_on_a_type_error_in_any_source_file(built_frontend, tmp_path):
+    """One unrelated type error, put in each source file in turn (the shell, the router, a screen, the rest), fails the
+    build and leaves no `index.html`; the unmodified copy builds (control). The type check is the whole project's. (S2, B8)"""
+    document = json.loads(LIST.read_text(encoding="utf-8"))
+    sources = sorted(p.relative_to(FRONTEND) for p in (FRONTEND / "src").rglob("*.ts") if "generated" not in p.parts)
+    assert {p.name for p in sources} >= {"main.ts", "router.ts", "root.ts", "signInFailed.ts"}, sources
+    problems = []
+    for index, source in enumerate([None, *sources]):
+        root = _copy(tmp_path / f"copy-{index}", document)
+        if source is not None:
+            with (root / "defender" / "frontend" / source).open("a", encoding="utf-8") as handle:
+                handle.write("\nexport const unrelatedTypeError: number = 'not a number';\n")
+        done = _build(root)
+        built = (root / "defender" / "frontend" / "dist" / "index.html").exists()
+        if source is None:
+            assert done.returncode == 0 and built, (done.stdout[-1500:], done.stderr[-1500:])
+        elif done.returncode == 0 or built:
+            problems.append(f"{source}: exit {done.returncode}, index.html {'made' if built else 'absent'}")
+    assert not problems, problems
