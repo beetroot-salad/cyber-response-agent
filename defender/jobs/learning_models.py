@@ -131,8 +131,10 @@ class WorkItemRow(Base, kw_only=True):
 
     tenant_id: Mapped[TenantId] = mapped_column(IdColumn(TenantId), primary_key=True)
     kind: Mapped[str] = mapped_column(Text, primary_key=True)
-    #: The item's id of its own (#1485 D12), minted in Python at insert (no server default), stable for its life.
-    id: Mapped[WorkItemId] = mapped_column(IdColumn(WorkItemId), unique=True, insert_default=WorkItemId.mint)
+    #: The item's id of its own (#1485 D12), minted in Python at insert, stable for its life. The schema's one server
+    #: default (D14) fills it only for older code that inserts none, so that code keeps running across the upgrade.
+    id: Mapped[WorkItemId] = mapped_column(IdColumn(WorkItemId), unique=True, insert_default=WorkItemId.mint,
+                                           server_default=text("gen_random_uuid()"))
     item_key: Mapped[str] = mapped_column(Text, primary_key=True)
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
     #: The run the row came from, as text with no foreign key (a deleted investigation leaves it).

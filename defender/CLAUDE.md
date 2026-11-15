@@ -76,11 +76,10 @@ set again. Connect hands its result to the operator as such a folder: its valida
 
 ## Upgrade from before #1485
 
-Stop the workers, the learning drains and the API before running migrations (revisions `0017_retire_learning_cutover`
-and `0018_learning_set_aside_indexes`): `work_items` gains a required `id` column with no default, so a process of the
-old code fails on every item insert once it is there, and a worker's curation request or findings are dropped with
-only a log line. `0017` stops, changing nothing, while any tenant still has a learning cutover pending: finish or
-resume it with the code at revision `0016_list_indexes` first.
+Run migrations (revisions `0017_retire_learning_cutover` and `0018_learning_set_aside_indexes`); nothing needs
+stopping: `work_items` gains a required `id` column whose database default fills it for a process of the old code.
+`0017` stops, changing nothing, while any tenant still has a learning cutover pending: finish or resume it with the
+code at revision `0016_list_indexes` first.
 
 The #1278 learning-state cutover is retired: cut over on a revision before #1485 first; a deployment that never did will lose its old learning folder.
 

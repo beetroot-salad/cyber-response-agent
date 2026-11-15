@@ -31,7 +31,8 @@ NAMING_CONVENTION = {
 
 class Base(MappedAsDataclass, DeclarativeBase):
     """Models are dataclasses with every field settable at construction and Python-side values only:
-    no server defaults, so the repositories agree on every value they return."""
+    no server defaults, so the repositories agree on every value they return. One exception:
+    the learning work item's id (#1485 D14) is still set in Python, and its default serves only older code."""
 
     metadata = MetaData(naming_convention=NAMING_CONVENTION)
 
