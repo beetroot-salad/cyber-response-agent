@@ -38,9 +38,17 @@ Draft the design using **references/design-doc.md**. Settle purpose, scope, mode
 
 Cut along obligations and ownership so each piece leaves the system working and its promises observable on their own; a cut by layer (models, then API, then UI) delivers nothing checkable until the last piece lands. Settle in this pass only what the pieces share: the data model, the owners and the decisions that cross the cut, plus the order and dependencies between pieces. Each piece then gets its own discuss-issue pass before any tests, where the parent's decisions count as settled, not as proposals. The split is a §4 choice for the human.
 
+**Try the draft against the code.** For a design that introduces or changes behavior, a data model, a flow or architecture, write a thin sketch and a throwaway spike before the first independent review, once the human has answered the opening, so a spike isn't spent on a direction they would turn down. The sketch writes one representative case per important promise and main flow, which forces each load-bearing choice into concrete setup and expected results. The spike implements the core flows against the sketch and logs where the draft didn't fit the code. Reading the design cannot find either kind of hole as cheaply. Charges: **references/sketch-and-spike.md**; set the model on each dispatch.
+
+Work in a worktree on the recorded grounding base; the spike gets its own detached one. Extend the code map with the test entry points and fixtures the sketch used. Save the sketch as a patch and the spike's diff and log under `.contract-first/`, outside any commit, and name them and their base in the handoff: write-tests carries the sketch forward, and the spike's code goes to the reviewer only, never to a later stage. This skill commits no tests and no production code. Grep the project cache (`.claude/contract-first-cache.md`) for `discuss-issue` and pass the relevant entries to each worker.
+
+Skip both for a design that leaves nothing consequential open; skip only the spike when the change touches no existing owner, flow or shared mechanism. Amendments and narrow discussions skip them unless the change alters how the design lands in existing code. Record why.
+
 ## 3. Review, then patch or dissolve
 
 For a design introducing or changing behavior, a data model, a flow, or architecture, obtain an **independent subagent review before presenting the proposed design for decision**. Give the reviewer the problem statement, current candidate design, grounding evidence, relevant constraints and repo access, but not the discussion transcript or the author's defence. The reviewer may read the design's rationale, but must check its premises and consider alternatives independently. It must not edit artifacts or post externally. A narrow explanation, already-resolved issue, or mechanical correction with no design choice can skip this; record the reason in the handoff.
+
+When a sketch and spike ran, the first review is the **from-scratch review** in **references/sketch-and-spike.md**: the reviewer also gets the sketch, the spike's diff and its log, and asks how it would design this from scratch so the tensions they expose never arise. Its proposed design is one revision, not a batch of findings: don't sort it into pieces. Adopt it as you would a dissolve, so the next independent review reads it whole with the decisions it opens; only the tensions it leaves go to the sorter.
 
 Start with one reviewer. Add a targeted lens only when an identified uncertainty or coupling warrants it: data lifecycle/recovery, trust boundaries, compatibility, performance, or another relevant concern. Split independent regions when useful. Do not require a fixed panel, invent concerns to fill lenses, or dispatch trivial mechanical checks solely to create more agents.
 
@@ -63,7 +71,7 @@ Apply corrections already determined by the agreed design. Bring unresolved cons
 
 ## 4. Put design choices to the human
 
-Present the revised candidate design in plain language, followed by the few choices that remain. Human judgment belongs on product behavior, scope, data models, flows, architecture, and consequential trade-offs. Agents own local technical details that follow from these choices.
+Present the revised candidate design in plain language, followed by the few choices that remain. After a from-scratch review, lead with the design as it now stands: whether the draft's shape held, each change with the tensions it removes and its cost, and the shapes rejected with their reasons. Then the decisions, then whether the design is ready for the contract. Human judgment belongs on product behavior, scope, data models, flows, architecture, and consequential trade-offs. Agents own local technical details that follow from these choices.
 
 Lead with a recommendation and consequences, grouped by root cause. For a demonstrated defect, say **"This is a bug; here are the trade-offs of fixing it"** rather than ask whether correct behavior is wanted. Do not reopen settled intent. An architectural change that removes several failures deserves a consolidated explanation, not a question per symptom.
 

@@ -64,8 +64,8 @@ with diagrams, see [docs/design.md](docs/design.md).
 
 | Skill | What it does |
 |---|---|
-| `/contract-first:discuss-issue` | Opens with only the problem and open questions, then grounds and reviews a design covering behavior, scope, data models, flows and architecture. Hands off an intent+design doc with probed claims, or splits an issue that bundles separate problems into several. Also handles design amendments that tests or code expose. |
-| `/contract-first:write-tests` | Sketches the contract, spikes a throwaway implementation to settle the design, authors tests with Sonnet and reviews their fidelity with Opus. Commits the tests before any implementation, with a compact coverage and review record. |
+| `/contract-first:discuss-issue` | Opens with only the problem and open questions, then grounds a design covering behavior, scope, data models, flows and architecture, tries it against the code with a thin sketch and a throwaway spike, and has it reviewed from scratch. Hands off an intent+design doc with probed claims, or splits an issue that bundles separate problems into several. Also handles design amendments that tests or code expose. |
+| `/contract-first:write-tests` | Carries the design's sketch forward, authors tests with Sonnet and reviews their fidelity with Opus. Commits the tests before any implementation, with a compact coverage and review record. |
 | `/contract-first:write-code-from-tests` | Implements against the committed contract, then has two or three Sonnet attackers try to keep it green with wrong variants of that code. Reconciles findings, ships, and repairs CI. |
 | `/contract-first:finalize` | Reviews the shipped PR **cold**, fixes or files each finding, traces escaped bugs back to the stage that should have caught them, and re-greens the PR. |
 | `/contract-first:tested-fix` | Fixes a bug against settled intent, or makes a small behavior change stated in a sentence: records the intent, covers every site that decides the same rule, writes the test red first, makes the smallest fix, mutates its deciding lines, and has a fresh agent review the diff cold. |
@@ -102,7 +102,7 @@ repo already keeps for any agent:
   (for Python's Pyright, `extraPaths` under `[tool.pyright]`), so `symbol-refs` gets real answers.
 - **The project cache** (`.claude/contract-first-cache.md`) — how the skills' rules apply to this
   project in particular (ownership markers, threat-model examples, lint conventions), one grep-able
-  line per entry. write-tests, write-code-from-tests, tested-fix, their reference files and the shared `references/sort.md` end with
+  line per entry. write-tests, write-code-from-tests, tested-fix, their reference files, discuss-issue's `sketch-and-spike.md` and the shared `references/sort.md` end with
   their own cache of applications that hold for any project; the project file holds the rest. Skills grep it for their own name. One skill, `maintain-cache`, is
   its only writer, run in a fresh agent: write-tests, write-code-from-tests and finalize dispatch it at the end of their
   review steps, and it adds what the run had to work out, removes what it contradicted, and
