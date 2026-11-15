@@ -1,0 +1,838 @@
+diff --git a/defender/tests/api/test_1083_real_server.py b/defender/tests/api/test_1083_real_server.py
+index 59dae32fd..705c09183 100644
+--- a/defender/tests/api/test_1083_real_server.py
++++ b/defender/tests/api/test_1083_real_server.py
+@@ -11,6 +11,7 @@ import datetime as dt
+ import json
+ import logging
+ import re
++import urllib.parse
+ from collections.abc import AsyncIterator, Callable
+ from pathlib import Path
+ from typing import Any
+@@ -27,6 +28,7 @@ from defender.tests.support.api._server1083 import (
+     BOB,
+     OPS,
+     PROGRAMS_REALM,
++    SESSION_COOKIE,
+     SIGNIN_REALM,
+     Child,
+     FakeKeycloak,
+@@ -40,6 +42,7 @@ from defender.tests.support.api._server1083 import (
+     seed_identity,
+     seed_token_credential,
+ )
++from defender.tests.support.api._signin1161 import authorize, deleted, exchanging, link_account, set_cookies
+ from defender.tests.support.jobs._jobs1342 import (
+     ALERT_BYTES,
+     DESCRIPTION,
+@@ -788,3 +791,194 @@ async def test_o6_o10_each_list_walked_by_its_cursors_is_the_filtered_rows_newes
+             assert [item[field] for page in pages for item in page["items"]] == expected, case
+             assert [len(p["items"]) for p in pages[:-1]] == [limit] * (len(pages) - 1), case
+             assert 0 < len(pages[-1]["items"]) <= limit, case
++
++
++# --- #1161 piece 1: sign-in carries a return path; the API under /api --------------------------------
++# The in-process client addresses the app's routes under `/api` (B3). That the app itself answers there, rather than an
++# ingress stripping the prefix, is a choice the design does not make (sketch FC-1); `_api` is its one place here.
++
++def _api(path: str) -> str:
++    return f"/api{path}"
++
++
++#: Where the callback lives, against which a relative `Location` resolves.
++_CALLBACK = f"{ORIGIN}{_api('/auth/callback')}"
++INV = "0b6f1c1e-3c55-4a4e-9a51-116100000001"
++TICKET_PATH = f"/t/{A}/investigations/{INV}?from=ticket"
++
++
++async def _login(served: Served, back: str | None) -> tuple[str, dict[str, Any]]:
++    """Sign-in start with `back` as its return path (None: no parameter): the authorize URL and the cookies it sets."""
++    r = await served.client.get(_api("/auth/login"), params={} if back is None else {"return": back})
++    assert r.status_code == 302, (r.status_code, r.text)
++    return r.headers["location"], set_cookies(r)
++
++
++def _prelogin(cookies: dict[str, Any]) -> tuple[str, Any]:
++    """The one pre-login cookie a sign-in start set (every cookie but the session's)."""
++    [(name, morsel)] = [(n, m) for n, m in cookies.items() if n != SESSION_COOKIE]
++    return name, morsel
++
++
++async def _callback(served: Served, url: str, sent: dict[str, str]) -> httpx.Response:
++    """The browser arriving at the callback URL `url` (the front channel's answer) with the cookies `sent`."""
++    split = urllib.parse.urlsplit(url)
++    assert f"{split.scheme}://{split.netloc}{split.path}" == _CALLBACK, url
++    headers = {"Cookie": "; ".join(f"{k}={v}" for k, v in sent.items())} if sent else {}
++    return await served.client.get(f"{split.path}?{split.query}", headers=headers)
++
++
++def _landing(r: httpx.Response) -> str:
++    """A 303's target as path and query, after checking it is on the frontend origin and outside the API."""
++    assert r.status_code == 303, (r.status_code, r.text)
++    target = urllib.parse.urlsplit(urllib.parse.urljoin(_CALLBACK, r.headers["location"]))
++    assert f"{target.scheme}://{target.netloc}" == ORIGIN, r.headers["location"]
++    assert target.path != "/api", r.headers["location"]
++    assert not target.path.startswith("/api/"), r.headers["location"]
++    return (target.path or "/") + (f"?{target.query}" if target.query else "")  # an origin alone is the root
++
++
++async def _signed_in(served: Served, back: str | None) -> httpx.Response:
++    """Ann signs in from start to callback with return path `back`; the callback's answer."""
++    account = await link_account(served.dsn, ANN)
++    exchanging(served.keycloak)
++    url, cookies = await _login(served, back)
++    name, morsel = _prelogin(cookies)
++    return await _callback(served, authorize(url, account), {name: morsel.value})
++
++
++@pytest.mark.postgres
++@pytest.mark.parametrize("back", [
++    TICKET_PATH,
++    f"/t/{A}/investigations/{INV}/pages/runtime.html?a=1.2;b,c=d%20e",  # the pre-login cookie's `.` and cookie syntax
++    "/" + "a" * 1023,  # exactly 1024 bytes
++    "/",
++], ids=["ticket-link", "separators", "1024-bytes", "root"])
++async def test_1161_p2_sign_in_lands_on_its_return_path_with_the_query_kept(served, back):
++    """The callback 303s to exactly the return path sign-in started with, and opens a working session. (P2, B1)"""
++    r = await _signed_in(served, back)
++    assert _landing(r) == back
++    session = set_cookies(r)[SESSION_COOKIE]
++    me = await served.client.get(_api("/me"), headers=person(session.value))
++    assert me.status_code == 200, me.text
++    assert me.json()["user"]["email"] == ANN, me.text
++
++
++@pytest.mark.postgres
++@pytest.mark.parametrize("back", [
++    None, "", "t/a", "//evil.example/x", "/\\evil.example/x", "https://evil.example/x", "/t/\x01x", "/t/\nx",
++    "/t/\x7fx", "/api", "/api/me", "/api/auth/login?return=/x", "/" + "a" * 1024,
++], ids=["absent", "empty", "relative", "scheme-relative", "backslash", "absolute", "control", "newline", "delete",
++        "api", "api-route", "api-login", "1025-bytes"])
++async def test_1161_b2_a_refused_return_path_still_signs_in_and_lands_on_the_root(served, back):
++    """A return path P2 refuses is not an error: sign-in proceeds and lands on the frontend root. (B2, P2)"""
++    r = await _signed_in(served, back)
++    assert _landing(r) == "/"
++    assert SESSION_COOKIE in set_cookies(r)
++
++
++@pytest.mark.postgres
++async def test_1161_d6_two_sign_ins_in_flight_each_complete_to_their_own_return_path(served):
++    """Each attempt sets its own pre-login cookie on the callback's path; each callback reads and clears only its own.
++    (D6, B1)"""
++    account = await link_account(served.dsn, ANN)
++    exchanging(served.keycloak)
++    first, second = f"/t/{A}/investigations/{INV}?tab=1", f"/t/{A}/investigations/{INV}?tab=2"
++    (url1, c1), (url2, c2) = await _login(served, first), await _login(served, second)
++    (name1, m1), (name2, m2) = _prelogin(c1), _prelogin(c2)
++    assert name1 != name2, "one pre-login cookie name for both attempts: the second overwrites the first"
++    for name, m in ((name1, m1), (name2, m2)):
++        assert m["path"] == _api("/auth/callback"), m.OutputString()
++        assert m["httponly"], m.OutputString()
++        assert m["secure"], m.OutputString()
++        assert m["samesite"].lower() == "lax", m.OutputString()
++        assert 0 < int(m["max-age"]) <= 600, m.OutputString()
++        # Observed in Chromium (sketch probe): a `__Host-` cookie whose Path is not `/` is dropped.
++        assert not name.startswith("__Host-"), m.OutputString()
++    jar = {name1: m1.value, name2: m2.value}
++    done2 = await _callback(served, authorize(url2, account), jar)
++    assert _landing(done2) == second
++    cleared = set_cookies(done2)
++    assert deleted(cleared[name2]), done2.headers.get_list("set-cookie")
++    assert name1 not in cleared, done2.headers.get_list("set-cookie")
++    done1 = await _callback(served, authorize(url1, account), {name1: m1.value})
++    assert _landing(done1) == first
++
++
++def _failed(r: httpx.Response) -> tuple[str, dict[str, str]]:
++    """The sign-in-failed screen a callback 303'd to: its path and its query, after checking no session was opened."""
++    landed = urllib.parse.urlsplit(_landing(r))
++    assert SESSION_COOKIE not in set_cookies(r), r.headers.get_list("set-cookie")
++    return landed.path, dict(urllib.parse.parse_qsl(landed.query))
++
++
++@pytest.mark.postgres
++async def test_1161_d6_b4_a_callback_without_its_own_pre_login_cookie_never_uses_another_attempts_return_path(served):
++    """Missing or mismatched: sign-in-failed, never a cookie's return path, the retry from the root. (D6, B4)"""
++    account = await link_account(served.dsn, ANN)
++    exchanging(served.keycloak)
++    first, second = f"/t/{A}/investigations/{INV}?tab=1", f"/t/{A}/investigations/{INV}?tab=2"
++    (url1, _c1), (_url2, c2) = await _login(served, first), await _login(served, second)
++    name2, m2 = _prelogin(c2)
++    for sent in ({name2: m2.value}, {}):
++        path, query = _failed(await _callback(served, authorize(url1, account), sent))
++        assert path not in {urllib.parse.urlsplit(p).path for p in (first, second)}, path
++        assert path != "/", path
++        assert query.get("reason") == "prelogin-missing", query
++        assert first not in query.values(), query
++        assert second not in query.values(), query
++        assert query.get("return", "/") == "/", query
++
++
++def _token_answer(status: int, body: dict[str, Any]) -> Callable[[httpx.Request], httpx.Response]:
++    return lambda _request: httpx.Response(status, json=body)
++
++
++@pytest.mark.postgres
++@pytest.mark.parametrize(("reason", "linked", "token"), [
++    ("login-attempt-invalid", True, (400, {"error": "invalid_grant", "error_description": "Code not valid"})),
++    ("unknown-account", False, None),
++    ("unavailable", True, (503, {})),
++])
++async def test_1161_b4_every_failed_callback_is_a_303_to_the_sign_in_failed_screen_naming_its_reason(
++        served, reason, linked, token):
++    """A refused or unavailable callback answers a top-level navigation with a 303 to a frontend address carrying the
++    reason and the kept return path, and clears the attempt's pre-login cookie. (B4, S1)"""
++    account = await link_account(served.dsn, ANN) if linked else "kc-nobody"
++    exchanging(served.keycloak)
++    if token is not None:
++        served.keycloak.answers[(SIGNIN_REALM, "token")] = _token_answer(*token)
++    url, cookies = await _login(served, TICKET_PATH)
++    name, morsel = _prelogin(cookies)
++    r = await _callback(served, authorize(url, account), {name: morsel.value})
++    path, query = _failed(r)
++    assert path != urllib.parse.urlsplit(TICKET_PATH).path, path
++    assert query.get("reason") == reason, query
++    assert query.get("return") == TICKET_PATH, query
++    assert deleted(set_cookies(r)[name]), r.headers.get_list("set-cookie")
++
++
++@pytest.mark.postgres
++async def test_1161_b3_the_location_create_tenant_builds_carries_the_api_prefix_and_reads_back(served):
++    """`POST /api/admin/tenants` answers a `Location` under `/api` that reads the new tenant. (B3, C17)"""
++    created = await served.client.post(_api("/admin/tenants"), headers=served.ops())
++    assert created.status_code == 202, created.text
++    tenant_id = created.json()["tenant_id"]
++    location = created.headers["location"]
++    assert urllib.parse.urlsplit(location).path == _api(f"/admin/tenants/{tenant_id}"), location
++    read = await served.client.get(location, headers=served.ops())
++    assert read.status_code == 200, read.text
++    assert read.json()["tenant_id"] == tenant_id, read.text
++
++
++@pytest.mark.postgres
++async def test_1161_b5_a_cookie_alone_reads_the_api_and_no_origin_is_granted_cors(served):
++    """The session cookie alone is enough; no response grants another origin access, preflight included. (B5)"""
++    elsewhere = "https://evil.example"
++    me = await served.client.get(_api("/me"), headers={**served.ann(write=False), "Origin": elsewhere})
++    assert me.status_code == 200, me.text
++    assert me.json()["user"]["email"] == ANN, me.text
++    preflight = await served.client.options(_api("/me"), headers={
++        "Origin": elsewhere, "Access-Control-Request-Method": "GET", "Access-Control-Request-Headers": "authorization"})
++    for r in (me, preflight):
++        assert not [h for h in r.headers if h.lower().startswith("access-control-")], (r.status_code, dict(r.headers))
+diff --git a/defender/tests/support/api/_server1083.py b/defender/tests/support/api/_server1083.py
+index efed5f5f1..eab5f493a 100644
+--- a/defender/tests/support/api/_server1083.py
++++ b/defender/tests/support/api/_server1083.py
+@@ -122,7 +122,7 @@ def environment(tmp_path: Path, *, dsn: str, keycloak: str = BACK, port: int | N
+         "DEFENDER_KEYCLOAK_ISSUER": f"{FRONT}/realms/{SIGNIN_REALM}",
+         "DEFENDER_KEYCLOAK_CLIENT_ID": "defender-api",
+         "DEFENDER_KEYCLOAK_CLIENT_SECRET_FILE": secret("signin-client-secret"),
+-        "DEFENDER_KEYCLOAK_REDIRECT_URI": f"{ORIGIN}/auth/callback",
++        "DEFENDER_KEYCLOAK_REDIRECT_URI": f"{ORIGIN}/api/auth/callback",  # #1161 B3: moved under the API prefix
+         "DEFENDER_KEYCLOAK_ADMIN_CLIENT_ID": "defender-api-admin",
+         "DEFENDER_KEYCLOAK_ADMIN_CLIENT_SECRET_FILE": secret("signin-admin-secret"),
+         "DEFENDER_KEYCLOAK_PROGRAMS_ISSUER": f"{FRONT}/realms/{PROGRAMS_REALM}",
+diff --git a/defender/tests/frontend/conftest.py b/defender/tests/frontend/conftest.py
+new file mode 100644
+index 000000000..9a516961e
+--- /dev/null
++++ b/defender/tests/frontend/conftest.py
+@@ -0,0 +1,6 @@
++"""#1161 the frontend's browser and ingress checks: a database of each test's own."""
++from __future__ import annotations
++
++from defender.tests.support.shared._postgres1339 import (  # noqa: F401 — fixtures for this directory
++    migrated_database,
++)
+diff --git a/defender/tests/frontend/test_1161_browser.py b/defender/tests/frontend/test_1161_browser.py
+new file mode 100644
+index 000000000..88c073e7d
+--- /dev/null
++++ b/defender/tests/frontend/test_1161_browser.py
+@@ -0,0 +1,284 @@
++"""#1161 piece 1: signing in from a link, in a headless browser, through the repo's ingress in front of the built
++frontend and the API's real program (B1, B3, B5, B7, B8, B9; D6).
++
++The identity provider's front channel is a loopback server answering the authorize URL with the redirect Keycloak
++would send (`_signin1161.FrontChannel`); its back channel is `FakeKeycloak` with the code grant, in the API's process. Needs
++Playwright with Chromium, Caddy (`caddy` on PATH or `CF1161_CADDY`), npm, and PostgreSQL; the frontend and its
++Caddyfile are the product's (missing before #1161 is implemented: a failure naming the path, not a skip)."""
++from __future__ import annotations
++
++import contextlib
++import dataclasses
++import datetime as dt
++import time
++import urllib.parse
++from collections.abc import Iterator
++from pathlib import Path
++from typing import Any
++
++import anyio
++import httpx
++import pytest
++
++from defender.tests.support.api._server1083 import (
++    A,
++    ANN,
++    B,
++    BOB,
++    SESSION_COOKIE,
++    Seeded,
++    environment,
++    free_port,
++    seed_identity,
++)
++from defender.tests.support.api._signin1161 import FrontChannel, child, link_account
++from defender.tests.support.frontend import _ingress1161 as I
++from defender.tests.support.jobs._jobs1342 import ALERT_BYTES, job_store, register_tenant
++from defender.tests.support.shared._postgres1339 import execute
++
++pytestmark = pytest.mark.postgres
++
++#: The screens' hooks a test finds them by (sketch FC-9: the design names no markup).
++FAILED, RETRY = "[data-testid=sign-in-failed]", "[data-testid=sign-in-retry]"
++WAIT_MS = 30_000
++_NOW = dt.datetime(2026, 11, 1, 12, tzinfo=dt.UTC)
++
++
++@dataclasses.dataclass
++class Stack:
++    origin: str
++    dsn: str
++    seeded: Seeded
++    accounts: dict[str, str]
++    investigation: str
++    api: Any
++    front: FrontChannel
++
++    def screen(self, investigation: str | None = None, query: str = "") -> str:
++        """An investigation screen's address (S2), as a path with its query."""
++        return f"/t/{A}/investigations/{investigation or self.investigation}{query}"
++
++
++@pytest.fixture(scope="session")
++def built() -> Path:
++    if I.caddy() is None:
++        pytest.skip("no caddy (CF1161_CADDY or PATH)")
++    if not (I.FRONTEND / "package.json").is_file():
++        pytest.fail(f"no frontend at {I.FRONTEND} (#1161 B8)")
++    if not I.CADDYFILE.is_file():
++        pytest.fail(f"no ingress config at {I.CADDYFILE} (#1161 Am-1)")
++    return I.build()
++
++
++async def _completed(dsn: str, tenant: str) -> str:
++    """A `completed` investigation with disposition `malicious`, through the store's own claim and finish."""
++    async with job_store(dsn) as store:
++        alert = await store.insert_alert(tenant, vendor="elastic", vendor_ticket_id="T-1161", fired_at=_NOW,
++                                         changed_at=_NOW, received_at=_NOW, raw=ALERT_BYTES)
++        inv, _ = await store.create_investigation(tenant, str(alert.alert_id), "seed", actor="seed")
++        await store.claim()
++        await store.finish(tenant, inv.investigation_id, stage="completed", disposition="malicious", cost_usd=0.0)
++    return str(inv.investigation_id)
++
++
++@pytest.fixture
++def stack(built: Path, migrated_database: str, tmp_path: Path) -> Iterator[Stack]:
++    """Tenants A and B, Ann (A) and Bob (B) with sign-in accounts, a completed investigation of A; the API's program
++    and the ingress in front of it and the build. The frontend origin is the ingress's (sketch FC-4)."""
++    dsn = migrated_database
++    register_tenant(dsn, A)
++    register_tenant(dsn, B)
++    seeded = anyio.run(seed_identity, dsn)
++    accounts = {email: anyio.run(link_account, dsn, email) for email in (ANN, BOB)}
++    investigation = anyio.run(_completed, dsn, A)
++    port, api_port = free_port(), free_port()
++    origin = f"http://localhost:{port}"
++    env = environment(tmp_path, dsn=dsn, port=api_port)
++    env |= {"DEFENDER_API_FRONTEND_ORIGIN": origin, "DEFENDER_KEYCLOAK_REDIRECT_URI": f"{origin}/api/auth/callback"}
++    front = FrontChannel()
++    api = child(env, front.origin)
++    try:
++        with I.ingress(I.CADDYFILE, built, port=port, api=f"127.0.0.1:{api_port}", work=tmp_path) as served:
++            _until_api(served, api)
++            yield Stack(served, dsn, seeded, accounts, investigation, api, front)
++    finally:
++        api.kill()
++        front.close()
++
++
++def _until_api(origin: str, api: Any) -> None:
++    """Until the API answers through the ingress: a signed-out `/api/me` is the API's 401 problem."""
++    deadline = time.monotonic() + 60
++    while time.monotonic() < deadline:
++        assert api.process.poll() is None, api.ended().stderr
++        with contextlib.suppress(httpx.TransportError):
++            if httpx.get(f"{origin}/api/me", timeout=2).status_code == 401:
++                return
++        time.sleep(0.3)
++    raise AssertionError("the API never answered through the ingress")
++
++
++@pytest.fixture(scope="session")
++def chromium() -> Iterator[Any]:
++    sync_api = pytest.importorskip("playwright.sync_api")
++    with sync_api.sync_playwright() as pw:
++        browser = pw.chromium.launch()
++        yield browser
++        browser.close()
++
++
++class Browsing:
++    """A fresh browser profile on the stack, the front channel signing in `account`; every request kept."""
++
++    def __init__(self, chromium: Any, stack: Stack, account: str) -> None:
++        self.stack = stack
++        stack.front.account = account
++        self.context = chromium.new_context()
++        self.context.set_default_timeout(WAIT_MS)
++        self.requests: list[Any] = []
++        self.context.on("request", self.requests.append)
++
++    def logins(self) -> list[str | None]:
++        """The `return` of each sign-in start the browser made, in order."""
++        found = []
++        for r in self.requests:
++            split = urllib.parse.urlsplit(r.url)
++            if f"{split.scheme}://{split.netloc}" == self.stack.origin and split.path == "/api/auth/login":
++                found.append(dict(urllib.parse.parse_qsl(split.query)).get("return"))
++        return found
++
++    def api_calls(self) -> list[Any]:
++        return [r for r in self.requests if urllib.parse.urlsplit(r.url).path.startswith("/api/")
++                and not urllib.parse.urlsplit(r.url).path.startswith("/api/auth/")]
++
++
++@pytest.fixture
++def browsing(chromium: Any, stack: Stack) -> Iterator[Browsing]:
++    b = Browsing(chromium, stack, stack.accounts[ANN])
++    yield b
++    b.context.close()
++
++
++def _wait_held(page: Any, browsing: Browsing, count: int) -> None:
++    deadline = time.monotonic() + WAIT_MS / 1000
++    while len(browsing.stack.front.parked) < count:
++        assert time.monotonic() < deadline, f"no sign-in reached the identity provider: {browsing.logins()}"
++        page.wait_for_timeout(100)
++
++
++# --- B8 / B1 / B7: the ticket link --------------------------------------------------------------------
++
++@pytest.mark.parametrize("query", ["", "?from=ticket&x=a.b"], ids=["path", "path-and-query"])
++def test_1161_b8_a_ticket_link_opened_signed_out_lands_signed_in_on_its_investigation_screen(stack, browsing, query):
++    """Signed out → one sign-in → back at exactly the address followed, showing the investigation's status and
++    outcome; the page calls the API with the cookie only. (B8, B1, B7, B5, S3)"""
++    from playwright.sync_api import expect
++
++    target = stack.screen(query=query)
++    page = browsing.context.new_page()
++    page.goto(f"{stack.origin}{target}")
++
++    body = page.locator("body")
++    expect(body).to_contain_text("malicious")  # the screen after sign-in: the address before it already matched
++    expect(body).to_contain_text("completed")
++    assert page.url == f"{stack.origin}{target}"  # nothing added to the shareable address
++    assert browsing.logins() == [target]
++    assert SESSION_COOKIE in {c["name"] for c in browsing.context.cookies()}
++    calls = browsing.api_calls()
++    assert calls, "positive control: the screen called the API"
++    for call in calls:
++        assert urllib.parse.urlsplit(call.url).netloc == urllib.parse.urlsplit(stack.origin).netloc, call.url
++        assert "authorization" not in {h.lower() for h in call.all_headers()}, call.url
++
++
++def test_1161_b1_a_401_after_sign_in_shows_sign_in_failed_and_retries_only_on_request(stack, browsing):
++    """The session is gone by the first API call after sign-in: the screen shows sign-in-failed instead of a second
++    automatic sign-in; its retry starts sign-in for the kept address. (B1, B8)"""
++    target = stack.screen(query="?from=ticket")
++    signed_in: list[bool] = []
++
++    def revoke(route: Any) -> None:
++        if signed_in:  # after the callback: the session dies before the API can read it (a real revocation)
++            execute(stack.dsn, "DELETE FROM identity.sessions")
++        route.continue_()
++
++    browsing.context.on("response", lambda r: signed_in.append(True) if "/api/auth/callback" in r.url else None)
++    browsing.context.route(
++        lambda url: urllib.parse.urlsplit(url).path.startswith("/api/")
++        and not urllib.parse.urlsplit(url).path.startswith("/api/auth/"), revoke)
++    page = browsing.context.new_page()
++    page.goto(f"{stack.origin}{target}")
++
++    page.locator(FAILED).wait_for()
++    page.wait_for_timeout(1500)  # long enough for a second automatic attempt to show
++    assert browsing.logins() == [target]
++    page.locator(RETRY).click()
++    page.wait_for_url(lambda url: len(browsing.logins()) == 2)
++    assert browsing.logins() == [target, target]
++
++
++def test_1161_b8_d6_two_tabs_opened_signed_out_each_land_on_their_own_address(stack, browsing):
++    """Two new tabs start sign-in before either completes; completed in the other order, each lands on its own
++    address (one pre-login cookie per attempt). (B8, D6, S3)"""
++    first, second = stack.screen(query="?tab=1"), stack.screen(query="?tab=2")
++    stack.front.hold = True
++    one = browsing.context.new_page()
++    one.goto(f"{stack.origin}{first}", wait_until="commit")
++    _wait_held(one, browsing, 1)
++    two = browsing.context.new_page()
++    two.goto(f"{stack.origin}{second}", wait_until="commit")
++    _wait_held(two, browsing, 2)
++
++    stack.front.release(1)
++    two.locator("body").filter(has_text="malicious").wait_for()  # tab two done before tab one resumes
++    assert two.url == f"{stack.origin}{second}"
++    stack.front.release(0)
++    one.locator("body").filter(has_text="malicious").wait_for()
++    assert one.url == f"{stack.origin}{first}"
++    assert sorted(browsing.logins()) == sorted([first, second])
++
++
++def test_1161_b7_a_signed_in_non_member_is_not_shown_the_investigation_and_not_sent_to_sign_in_again(chromium, stack):
++    """Bob (tenant B) follows A's link: he signs in once, then sees no status of A's investigation. (B7; FC-8)"""
++    b = Browsing(chromium, stack, stack.accounts[BOB])
++    try:
++        target = stack.screen()
++        page = b.context.new_page()
++        read = f"/api/tenants/{A}/investigations/{stack.investigation}"
++        with page.expect_response(lambda r: urllib.parse.urlsplit(r.url).path == read):
++            page.goto(f"{stack.origin}{target}")
++        page.wait_for_timeout(1000)  # the screen renders its answer to the read
++        assert b.logins() == [target]
++        assert [c.response().status for c in b.api_calls() if c.response() is not None and
++                f"/investigations/{stack.investigation}" in c.url] == [404]
++        assert "malicious" not in page.locator("body").inner_text()
++    finally:
++        b.context.close()
++
++
++# --- B9 / B3 through the ingress ------------------------------------------------------------------------
++
++@pytest.mark.parametrize("path", ["/", "/t/x/investigations/y?z=1", "/me", "/auth/login", "/apix", "/no/such/screen"])
++def test_1161_b9_the_ingress_serves_the_app_with_its_headers_for_every_path_outside_api(stack, path):
++    """Every non-`/api` path is the app's document, with the CSP form-action and the Referrer-Policy B9 names. (B9)"""
++    r = httpx.get(f"{stack.origin}{path}")
++    assert r.status_code == 200, (r.status_code, r.headers)
++    assert r.headers["content-type"].startswith("text/html"), (r.status_code, r.headers)
++    assert r.text == httpx.get(f"{stack.origin}/").text, "not the app's one document"
++    assert r.headers.get("referrer-policy") == "strict-origin-when-cross-origin", r.headers
++    [form_action] = [d.split()[1:] for d in r.headers["content-security-policy"].split(";")
++                     if d.split() and d.split()[0] == "form-action"]
++    assert sorted(form_action) == sorted(["'self'", f"https://*.{I.ARTIFACT_DOMAIN}"]), form_action
++
++
++def test_1161_b3_b9_through_the_ingress_api_paths_reach_the_api_and_its_locations_read_back(stack):
++    """`/api` goes to the API (a problem, not the app); create_tenant's `Location` reads back through it. (B3, B9)"""
++    signed_out = httpx.get(f"{stack.origin}/api/me")
++    assert (signed_out.status_code, signed_out.headers["content-type"]) == (401, "application/problem+json")
++    ops = {"Cookie": f"{SESSION_COOKIE}={stack.seeded.ops_session}", "Origin": stack.origin}
++    created = httpx.post(f"{stack.origin}/api/admin/tenants", headers=ops)
++    assert created.status_code == 202, created.text
++    read = httpx.get(urllib.parse.urljoin(f"{stack.origin}/api/admin/tenants", created.headers["location"]),
++                     headers=ops)
++    assert read.status_code == 200, read.text
++    assert read.json()["tenant_id"] == created.json()["tenant_id"], read.text
+diff --git a/defender/tests/support/api/_signin1161.py b/defender/tests/support/api/_signin1161.py
+new file mode 100644
+index 000000000..650549eba
+--- /dev/null
++++ b/defender/tests/support/api/_signin1161.py
+@@ -0,0 +1,212 @@
++"""#1161 piece 1, test-only: the identity provider's front channel and its authorization-code exchange, over
++`FakeKeycloak` (whose back channel models only discovery, keys, client credentials and the admin API).
++
++The authorize step and the code grant are modelled from Keycloak's OIDC documentation, UNOBSERVED on the dev
++Keycloak: the front channel redirects to `redirect_uri` with `code`, `state`, `session_state` and `iss`; the token
++endpoint takes `grant_type=authorization_code` with HTTP basic client authentication, the code, the PKCE verifier and
++the same `redirect_uri`, and answers an ID token. Codes here are self-describing (a JSON document, base64url), so the
++front channel (in the test process) and the exchange (in the API's process) share no state. Unlike Keycloak, a code
++is not refused on reuse."""
++from __future__ import annotations
++
++import base64
++import datetime as dt
++import hashlib
++import json
++import os
++import sys
++import urllib.parse
++from collections.abc import Iterable
++from http.cookies import SimpleCookie
++from typing import Any
++
++import httpx
++import jwt
++
++from defender.tests.support.api._server1083 import (
++    FAULTS_ENV,
++    PROGRAMS_REALM,
++    SIGNIN_REALM,
++    SIGNING_KID,
++    Child,
++    Fail,
++    FakeKeycloak,
++    fails_to_json,
++)
++
++#: `environment()`'s sign-in client and the secret its file holds (the file's text, stripped).
++CLIENT_ID, CLIENT_SECRET = "defender-api", "signin-client-secret-value"
++
++
++def _b64(raw: bytes) -> str:
++    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
++
++
++def _unb64(text: str) -> bytes:
++    return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
++
++
++def authorize(url: str, account_id: str, *, amr: Iterable[str] = ("pwd",), name: str = "") -> str:
++    """Where the front channel sends the browser after the password prompt, for the authorize `url` the API built:
++    its `redirect_uri` with a code for `account_id` and its `state`."""
++    split = urllib.parse.urlsplit(url)
++    query = dict(urllib.parse.parse_qsl(split.query))
++    assert query.get("response_type") == "code", query
++    assert query.get("code_challenge_method") == "S256", query
++    code = _b64(json.dumps({"sub": account_id, "nonce": query["nonce"], "challenge": query["code_challenge"],
++                            "redirect_uri": query["redirect_uri"], "amr": list(amr), "name": name}).encode())
++    issuer = f"{split.scheme}://{split.netloc}{split.path.split('/protocol/')[0]}"
++    back = {"state": query["state"], "session_state": "s-1161", "iss": issuer, "code": code}
++    return f"{query['redirect_uri']}?{urllib.parse.urlencode(back)}"
++
++
++def _refused(error: str) -> httpx.Response:
++    return httpx.Response(400, json={"error": error, "error_description": "Code not valid"})
++
++
++def exchange(keycloak: FakeKeycloak, request: httpx.Request) -> httpx.Response:
++    """The sign-in realm's token step: the code grant as above; anything else as the fake answers it."""
++    form = urllib.parse.parse_qs(request.content.decode())
++    if form.get("grant_type") != ["authorization_code"]:
++        return keycloak._token(SIGNIN_REALM, request, keycloak.fails.get((SIGNIN_REALM, "token")))  # type: ignore[return-value]
++    if keycloak._basic_client(request) != (CLIENT_ID, CLIENT_SECRET):
++        return httpx.Response(401, json={"error": "unauthorized_client"})
++    try:
++        code = json.loads(_unb64(form["code"][0]))
++    except (KeyError, ValueError):
++        return _refused("invalid_grant")
++    verifier = form.get("code_verifier", [""])[0]
++    if _b64(hashlib.sha256(verifier.encode()).digest()) != code["challenge"]:
++        return _refused("invalid_grant")
++    if form.get("redirect_uri") != [code["redirect_uri"]]:
++        return _refused("invalid_grant")
++    now = dt.datetime.now(dt.UTC)
++    claims = {"iss": keycloak.issuer(SIGNIN_REALM), "aud": CLIENT_ID, "azp": CLIENT_ID, "sub": code["sub"],
++              "nonce": code["nonce"], "name": code["name"], "amr": code["amr"], "typ": "ID",
++              "iat": int(now.timestamp()), "exp": int((now + dt.timedelta(minutes=5)).timestamp())}
++    token = jwt.encode(claims, keycloak.signing_keys[SIGNIN_REALM], algorithm="RS256", headers={"kid": SIGNING_KID})
++    return httpx.Response(200, json={"access_token": "at-1161", "id_token": token, "token_type": "Bearer",
++                                     "expires_in": 300})
++
++
++def exchanging(keycloak: FakeKeycloak) -> FakeKeycloak:
++    """`keycloak` with the code grant installed on the sign-in realm's token step."""
++    keycloak.answers[(SIGNIN_REALM, "token")] = lambda request: exchange(keycloak, request)
++    return keycloak
++
++
++async def link_account(dsn: str, email: str) -> str:
++    """Record a sign-in account for the user `email` (the seed makes users without one); returns its id."""
++    from defender.identity.postgres import PostgresIdentityRepository
++
++    account_id = f"kc-{hashlib.sha256(email.encode()).hexdigest()[:16]}"
++    repo = PostgresIdentityRepository(dsn)
++    try:
++        user = await repo.user_by_email(email)
++        assert user is not None, email
++        assert await repo.record_signin_account(user.id, account_id)
++        return account_id
++    finally:
++        await repo.close()
++
++
++def set_cookies(response: httpx.Response) -> dict[str, Any]:
++    """Each `Set-Cookie` of `response` as a morsel, by name (a later one of a name wins)."""
++    found: dict[str, Any] = {}
++    for header in response.headers.get_list("set-cookie"):
++        jar: SimpleCookie = SimpleCookie()
++        jar.load(header)
++        found.update(jar)
++    return found
++
++
++def deleted(morsel: Any) -> bool:
++    """Whether a `Set-Cookie` removes its cookie (a zero max-age or an expiry in the past)."""
++    if morsel["max-age"] not in ("", None):
++        return int(morsel["max-age"]) <= 0
++    if morsel["expires"]:
++        from email.utils import parsedate_to_datetime
++
++        return parsedate_to_datetime(morsel["expires"]) <= dt.datetime.now(dt.UTC)
++    return False
++
++
++#: The child's front-channel origin travels in this variable; it is not a setting of the program.
++FRONT_ENV = "CF1161_FRONT"
++
++
++def child(environ: dict[str, str], front: str, fails: Iterable[Fail] = ()) -> Child:
++    """The API program over an exchanging `FakeKeycloak` whose issuers are on `front`, through this module's entry
++    (as `Child.faked`). `environ`'s issuers are moved to `front`."""
++    issuers = {"DEFENDER_KEYCLOAK_ISSUER": f"{front}/realms/{SIGNIN_REALM}",
++               "DEFENDER_KEYCLOAK_PROGRAMS_ISSUER": f"{front}/realms/{PROGRAMS_REALM}"}
++    return Child([sys.executable, "-m", "defender.tests.support.api._signin1161"],
++                 {**environ, **issuers, FRONT_ENV: front, FAULTS_ENV: fails_to_json(fails)}, holds=True)
++
++
++class FrontChannel:
++    """The identity provider's front channel on a loopback port (`origin`): every authorize request is answered with
++    the redirect `authorize()` builds for `account`. While `hold` is set each one is parked until `release(i)`, in
++    any order. `seen` keeps each authorize URL. A browser's route cannot stand in: Playwright does not route a
++    request reached by a server redirect (probed: the browser connects for real)."""
++
++    def __init__(self) -> None:
++        import http.server
++        import threading
++
++        self.account: str | None = None
++        self.hold = False
++        self.seen: list[str] = []
++        self.parked: list[threading.Event] = []
++        outer = self
++
++        class Handler(http.server.BaseHTTPRequestHandler):
++            def log_message(self, *_a: Any) -> None:
++                pass
++
++            def do_GET(self) -> None:  # noqa: N802 — http.server's dispatch name
++                url = f"{outer.origin}{self.path}"
++                if not self.path.startswith(f"/realms/{SIGNIN_REALM}/protocol/openid-connect/auth?"):
++                    self.send_response(404)
++                    self.end_headers()
++                    return
++                outer.seen.append(url)
++                if outer.hold:
++                    event = threading.Event()
++                    outer.parked.append(event)
++                    event.wait(60)
++                assert outer.account is not None
++                self.send_response(302)
++                self.send_header("Location", authorize(url, outer.account))
++                self.send_header("Content-Length", "0")
++                self.end_headers()
++
++        self._server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
++        self.origin = f"http://localhost:{self._server.server_address[1]}"
++        threading.Thread(target=self._server.serve_forever, daemon=True).start()
++
++    def release(self, index: int) -> None:
++        self.parked[index].set()
++
++    def close(self) -> None:
++        for event in self.parked:
++            event.set()
++        self._server.shutdown()
++        self._server.server_close()
++
++
++def _main() -> int:
++    from defender.api_server import run
++    from defender.tests.support.api._server1083 import fails_from_json
++
++    fails = fails_from_json(os.environ[FAULTS_ENV]) if FAULTS_ENV in os.environ else ()
++    front = os.environ.get(FRONT_ENV)
++    keycloak = FakeKeycloak(fails) if front is None else FakeKeycloak(fails, front=front)
++    returned = run(os.environ, transport=exchanging(keycloak))
++    print(f"run returned {returned}", flush=True)
++    sys.stdin.readline()
++    return returned
++
++
++if __name__ == "__main__":
++    raise SystemExit(_main())
+diff --git a/defender/tests/support/frontend/_ingress1161.py b/defender/tests/support/frontend/_ingress1161.py
+new file mode 100644
+index 000000000..594177f2f
+--- /dev/null
++++ b/defender/tests/support/frontend/_ingress1161.py
+@@ -0,0 +1,76 @@
++"""#1161 piece 1, test-only: the built frontend behind the repo's ingress (Caddy) in front of the API's real program.
++
++Where the frontend and its Caddyfile live, how the frontend is built, and which settings the Caddyfile reads are not
++settled by the design (sketch FC-2, FC-3): the paths and variable names below are the sketch's choice. The Caddyfile is
++expected to read every deployment-specific value from the environment:
++
++- `DEFENDER_INGRESS_ADDRESS`: its site address (here `http://localhost:<port>`: plain http, no automatic TLS);
++- `DEFENDER_INGRESS_API`: the API's upstream (`host:port`), which every `/api` request goes to;
++- `DEFENDER_INGRESS_ROOT`: the built frontend's folder;
++- `DEFENDER_ARTIFACT_DOMAIN`: the artifact domain named in the frontend's CSP (B9);
++- `DEFENDER_INGRESS_ADMIN`: Caddy's admin endpoint (`off` here: parallel tests would collide on :2019)."""
++from __future__ import annotations
++
++import contextlib
++import os
++import shutil
++import subprocess
++import time
++from collections.abc import Iterator
++from pathlib import Path
++
++import httpx
++
++DEFENDER = Path(__file__).resolve().parents[3]
++FRONTEND = DEFENDER / "frontend"
++CADDYFILE = FRONTEND / "Caddyfile"
++ARTIFACT_DOMAIN = "artifacts.defender.test"
++#: Where to find the tools when they are not on PATH (this machine keeps Caddy in a scratch folder).
++CADDY_ENV, NPM = "CF1161_CADDY", "npm"
++
++
++def caddy() -> str | None:
++    return os.environ.get(CADDY_ENV) or shutil.which("caddy")
++
++
++def build(frontend: Path = FRONTEND) -> Path:
++    """The frontend built to static files (`npm ci` once, then `npm run build`); its output folder `dist/`."""
++    run = {"cwd": str(frontend), "check": True, "capture_output": True, "text": True}
++    if not (frontend / "node_modules").is_dir():
++        subprocess.run([NPM, "ci", "--no-audit", "--no-fund"], **run)  # type: ignore[call-overload]
++    subprocess.run([NPM, "run", "build"], **run)  # type: ignore[call-overload]
++    dist = frontend / "dist"
++    assert (dist / "index.html").is_file(), f"the build made no {dist / 'index.html'}"
++    return dist
++
++
++@contextlib.contextmanager
++def ingress(caddyfile: Path, root: Path, *, port: int, api: str, work: Path) -> Iterator[str]:
++    """Caddy running `caddyfile` on `http://localhost:<port>`, serving `root` and sending `/api` to `api`; its origin."""
++    binary = caddy()
++    assert binary is not None, "no caddy"
++    origin = f"http://localhost:{port}"
++    env = {**os.environ, "DEFENDER_INGRESS_ADDRESS": origin, "DEFENDER_INGRESS_API": api,
++           "DEFENDER_INGRESS_ROOT": str(root), "DEFENDER_ARTIFACT_DOMAIN": ARTIFACT_DOMAIN,
++           "DEFENDER_INGRESS_ADMIN": "off", "XDG_DATA_HOME": str(work / "data"), "XDG_CONFIG_HOME": str(work / "config")}
++    log = (work / "caddy.log").open("w")
++    process = subprocess.Popen([binary, "run", "--config", str(caddyfile), "--adapter", "caddyfile"], env=env,
++                               stdout=log, stderr=subprocess.STDOUT)
++    try:
++        deadline = time.monotonic() + 30
++        while True:
++            assert process.poll() is None, (work / "caddy.log").read_text()
++            with contextlib.suppress(httpx.TransportError):
++                httpx.get(f"{origin}/", timeout=2)
++                break
++            assert time.monotonic() < deadline, "caddy never answered"
++            time.sleep(0.2)
++        yield origin
++    finally:
++        process.terminate()
++        try:
++            process.wait(10)
++        except subprocess.TimeoutExpired:
++            process.kill()
++            process.wait()
++        log.close()
