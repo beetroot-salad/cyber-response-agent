@@ -50,6 +50,9 @@ def test_1161_b1_a_signed_out_link_signs_in_once_and_lands_on_it(world, context,
     assert signed_in(context)
     assert page.evaluate("sessionStorage.length") == 0
     assert api_calls(requests, world.origin)[0] == ("GET", "/api/me")
+    sent = [r for r in requests if path_is(r.url, "/api") and r.url.startswith(world.origin)]
+    assert sent, "positive control: the page made API requests"
+    assert [r.url for r in sent if "authorization" in r.headers] == [], "no token in the page (B5): the cookie alone"
 
 
 @KINDS
@@ -243,6 +246,22 @@ def test_1161_b8_a_simulated_cache_restore_signed_out_is_session_lost_with_retur
     assert reason(page) == "session-lost"
     assert where(page) == ("/sign-in-failed", {"reason": "session-lost", "return": target})
     assert aborted and len(aborted) == 1
+
+
+def test_1161_b1_the_failed_screen_consumes_the_record_and_keeps_an_address_that_already_has_a_return(
+        world, context, requests):
+    """A record for target X and the same tab opened at `/sign-in-failed?...&return=Y`: the record is gone, the address keeps Y. (B1.1, B1)"""
+    x, y = world.screen(), "/"
+    aborted = abort_login_navigation(context)
+    page = context.new_page()
+    page.goto(f"{world.origin}{x}")
+    await_aborted(page, aborted)
+    assert page.evaluate("sessionStorage.length") > 0, "positive control: the shell wrote its attempt record for X"
+    page.goto(f"{world.origin}/sign-in-failed?reason=unavailable&return={urllib.parse.quote(y, safe='')}")
+    screen(page, FAILED)
+    settle(page)
+    assert page.evaluate("sessionStorage.length") == 0, "the failed screen deletes the record on every load"
+    assert where(page) == ("/sign-in-failed", {"reason": "unavailable", "return": y}), "settled only when no `return`"
 
 
 def test_1161_b1_a_restore_from_the_cache_counts_as_a_load_when_signed_in(world, context, requests):

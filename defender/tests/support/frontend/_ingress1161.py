@@ -89,6 +89,11 @@ def launcher_env(origin: str, upstream: str, frontend_dir: Path, *, artifact_dom
 def run_launcher(env: Mapping[str, str], timeout: float = 20.0) -> subprocess.CompletedProcess[str]:
     """The launcher once, to its end or `timeout` (then killed, returncode -9). For refusals: it must exit non-zero,
     naming the setting, before Caddy starts."""
+    return run_launcher_pid(env, timeout)[0]
+
+
+def run_launcher_pid(env: Mapping[str, str], timeout: float = 20.0) -> tuple[subprocess.CompletedProcess[str], int]:
+    """`run_launcher`, and the launcher's process id (what a Caddy it `exec`s keeps)."""
     process = subprocess.Popen(LAUNCHER, env=dict(env), cwd=REPO, text=True, stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, start_new_session=True)
     try:
@@ -96,8 +101,8 @@ def run_launcher(env: Mapping[str, str], timeout: float = 20.0) -> subprocess.Co
     except subprocess.TimeoutExpired:
         os.killpg(process.pid, signal.SIGKILL)
         out, err = process.communicate()
-        return subprocess.CompletedProcess(LAUNCHER, -9, out, err + "\n[killed: still running]")
-    return subprocess.CompletedProcess(LAUNCHER, process.returncode, out, err)
+        return subprocess.CompletedProcess(LAUNCHER, -9, out, err + "\n[killed: still running]"), process.pid
+    return subprocess.CompletedProcess(LAUNCHER, process.returncode, out, err), process.pid
 
 
 @contextlib.contextmanager

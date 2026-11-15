@@ -81,15 +81,15 @@ def test_r7_2_a_path_parameters_name_is_not_a_query_name(name: str) -> None:
 @pytest.mark.parametrize(("path", "name", "value"), [
     ("/systems", "alert_id", "a1000000-0000-4000-8000-000000000001"),                # `/systems` declares `cursor` and `limit` only
     ("/systems", "fired_after", "2026-09-28T08:00:00Z"),
-    (f"/api/alerts/{ALERT.alert_id}", "limit", "5"),     # one alert: the list's names are not its own
+    (f"/alerts/{ALERT.alert_id}", "limit", "5"),     # one alert: the list's names are not its own
     ("/lessons", "alert_id", "a1000000-0000-4000-8000-000000000001"),                # another route's filter
-    ("/api/alerts", "alert_id", "a1000000-0000-4000-8000-000000000001"),
-    ("/api/alerts", "investigation_id", "b1000000-0000-4000-8000-000000000001"),
+    ("/alerts", "alert_id", "a1000000-0000-4000-8000-000000000001"),
+    ("/alerts", "investigation_id", "b1000000-0000-4000-8000-000000000001"),
     ("/investigations", "fired_after", "2026-09-28T08:00:00Z"),
     ("/learning-jobs", "fired_before", "2026-09-28T08:00:00Z"),
     ("/members", "cursor", "x"),
     ("/members", "limit", "5"),
-    ("/api/invitations", "limit", "5"),
+    ("/invitations", "limit", "5"),
 ])
 def test_r7_2_a_name_another_route_declares_is_refused_here(path: str, name: str, value: str) -> None:
     """The declared names are the matched route's own: a name some other route reads is unknown to this one. (R7-2)"""

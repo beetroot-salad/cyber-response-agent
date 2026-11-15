@@ -250,7 +250,8 @@ class FrontChannel:
 # --- accounts and cookies -------------------------------------------------------------------------
 
 async def link_account(dsn: str, email: str) -> str:
-    """Record a sign-in account for the user `email` (the seed makes users without one); returns its id."""
+    """Record a sign-in account for the user `email` (the seed makes users without one); returns its id.
+    Idempotent: the id derives from the email, so a second call finds the one already recorded."""
     from defender.identity.postgres import PostgresIdentityRepository
 
     account_id = f"kc-{hashlib.sha256(email.encode()).hexdigest()[:16]}"
@@ -258,6 +259,9 @@ async def link_account(dsn: str, email: str) -> str:
     try:
         user = await repo.user_by_email(email)
         assert user is not None, email
+        if user.signin_account_id is not None:
+            assert user.signin_account_id == account_id, (email, user.signin_account_id)
+            return account_id
         assert await repo.record_signin_account(user.id, account_id)
         return account_id
     finally:

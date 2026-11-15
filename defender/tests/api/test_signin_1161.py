@@ -225,13 +225,16 @@ def test_every_callback_outcome_is_a_303_and_a_refusal_carries_its_reason_and_th
     "missing", "empty", "unknown", "overlong", "space", "non-ascii"])
 def test_a_callback_with_no_usable_state_is_prelogin_missing_with_no_return_and_keeps_the_other_cookies(
         state: str | None) -> None:
-    """A state that names none of the browser's attempts: `prelogin-missing`, no `return`, nothing cleared; the open attempt then completes. (B4, D6)"""
+    """A state that names none of the browser's attempts: `prelogin-missing`, no `return`, only its own cookie name cleared; the open attempt then completes. (B4, D6)"""
     world = lab()
     browser = world.client()
     real = world.begin_signin(browser, RET)
     answer = _arrive(world, browser, state)
     assert failed(answer) == ("prelogin-missing", {})
-    assert not [n for n in cookies_set(answer) if n != SESSION_COOKIE], cookies_set(answer)
+    own = None if state is None else attempt_cookie(state)  # the callback clears its own, on every answer (data model)
+    assert [n for n in cookies_set(answer) if n != SESSION_COOKIE] == ([] if own is None else [own]), cookies_set(answer)
+    if own is not None:
+        assert is_cleared(set_cookie(answer, own) or ""), set_cookie(answer, own)
     assert browser.cookies.get(attempt_cookie(real))
     assert location(_arrive(world, browser, real)) == RET  # control: it was kept and still works
 

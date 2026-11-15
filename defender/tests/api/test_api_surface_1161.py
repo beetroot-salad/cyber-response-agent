@@ -12,7 +12,7 @@ import pytest
 pytest.importorskip("fastapi")
 
 from defender.tests.support.api._identity1306 import ANN, T1, World  # noqa: E402
-from defender.tests.support.frontend._ingress1161 import ARTIFACT_DOMAIN, launcher_env, run_launcher  # noqa: E402
+from defender.tests.support.frontend._ingress1161 import ARTIFACT_DOMAIN, launcher_env, run_launcher, run_launcher_pid  # noqa: E402
 
 ORIGIN = "http://localhost:8000"
 
@@ -97,12 +97,13 @@ def test_artifact_domain_refuses_anything_but_a_bare_lowercase_hostname(text: st
 
 @pytest.fixture
 def fake_caddy(tmp_path: Path) -> Path:
-    """A `caddy` on PATH that only records that it ran (a test-only stand-in: the launcher's refusals must come first)."""
+    """A `caddy` on PATH that only records that it ran and its own process id (a test-only stand-in: the launcher's
+    refusals must come first)."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     marker = tmp_path / "caddy-ran"
     script = bin_dir / "caddy"
-    script.write_text(f"#!/bin/sh\necho \"$@\" > {marker}\nexit 0\n")
+    script.write_text(f"#!/bin/sh\necho \"$@\" > {marker}\necho $$ > {marker}.pid\nexit 0\n")
     script.chmod(script.stat().st_mode | stat.S_IXUSR)
     return bin_dir
 
@@ -136,10 +137,19 @@ def test_the_launcher_starts_caddy_when_every_input_is_right(tmp_path: Path, fak
     assert (tmp_path / "caddy-ran").exists(), (done.stdout, done.stderr)
 
 
+def test_the_launcher_execs_caddy_so_signals_reach_it(tmp_path: Path, fake_caddy: Path) -> None:
+    """Caddy runs as the launcher's own process (`exec`): its `$$` is the launcher's pid. (S5, B9)"""
+    done, pid = run_launcher_pid(_env(tmp_path, fake_caddy))
+    assert done.returncode == 0, (done.stdout, done.stderr)
+    assert (tmp_path / "caddy-ran.pid").read_text().strip() == str(pid)
+
+
+@pytest.mark.parametrize("given", [None, ""], ids=["absent", "empty"])
 @pytest.mark.parametrize("name", sorted(INPUTS))
-def test_the_launcher_refuses_an_unset_input_naming_it_before_caddy(name: str, tmp_path: Path, fake_caddy: Path) -> None:
-    """Unset: non-zero exit, a message naming the setting, Caddy never started. (S5)"""
-    done = run_launcher(_env(tmp_path, fake_caddy, **{name: None}))
+def test_the_launcher_refuses_an_unset_input_naming_it_before_caddy(
+        name: str, given: str | None, tmp_path: Path, fake_caddy: Path) -> None:
+    """Not given, absent or empty (Caddy's `{env.X}` of an unset name): non-zero exit, a message naming the setting, Caddy never started. (S5)"""
+    done = run_launcher(_env(tmp_path, fake_caddy, **{name: given}))
     assert done.returncode > 0, (done.returncode, done.stderr)
     assert name in done.stdout + done.stderr
     assert not (tmp_path / "caddy-ran").exists()

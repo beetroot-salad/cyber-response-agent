@@ -105,7 +105,14 @@ def check_keycloak_mail_goes_to_mailpit(realm: dict) -> None:
     assert realm["smtpServer"]["host"] == "mailpit"
 
 
+def check_login_client_redirects_to_the_api_callback(realm: dict) -> None:
+    """B3: the registered redirect is the client's own origin plus `/api/auth/callback`, and nothing else."""
+    client = _clients(realm)[LOGIN_CLIENT]
+    assert client["redirectUris"] == [client["rootUrl"] + "/api/auth/callback"]
+
+
 CHECKS = [
+    check_login_client_redirects_to_the_api_callback,
     check_realm_switches,
     check_email_not_editable_by_the_user,
     check_amr_mapper_on_the_login_client,
@@ -149,6 +156,22 @@ def test_amr_still_lists_the_code_step_when_the_code_is_exchanged_late():
     check_amr_outlives_the_authorization_code(_committed_realm())
 
 
+def test_the_login_client_registers_the_apis_callback_under_api_and_no_other():
+    """The defender client's `redirectUris` is its `rootUrl` plus `/api/auth/callback`; the old `/auth/callback` is gone (B3)."""
+    realm = _committed_realm()
+    check_login_client_redirects_to_the_api_callback(realm)
+    assert "/auth/callback" not in "".join(_clients(realm)[LOGIN_CLIENT]["redirectUris"]).replace("/api/auth/callback", "")
+
+
+def test_the_operator_docs_no_longer_name_the_redirect_uri_setting():
+    """`DEFENDER_KEYCLOAK_REDIRECT_URI` is derived, not set, so the settings table no longer lists it (B3)."""
+    docs = REPO_ROOT / "defender" / "docs" / "development-operations.md"
+    assert docs.is_file(), docs
+    text = docs.read_text(encoding="utf-8")
+    assert "DEFENDER_KEYCLOAK_CLIENT_ID" in text, "control: the settings table is the document read"
+    assert "DEFENDER_KEYCLOAK_REDIRECT_URI" not in text
+
+
 def test_the_api_service_account_may_only_manage_users():
     """Its roles are exactly realm-management: manage-users, as C13 showed sufficient (A1)."""
     check_service_account_is_limited_to_manage_users(_committed_realm())
@@ -170,7 +193,8 @@ def _good_realm() -> dict:
         "components": {"org.keycloak.userprofile.UserProfileProvider": [
             {"providerId": "declarative-user-profile", "config": {USER_PROFILE: [json.dumps(profile)]}}]},
         "clients": [
-            {"clientId": LOGIN_CLIENT, "protocolMappers": [
+            {"clientId": LOGIN_CLIENT, "rootUrl": "http://localhost:8000",
+             "redirectUris": ["http://localhost:8000/api/auth/callback"], "protocolMappers": [
                 {"name": "amr", "protocolMapper": AMR_MAPPER, "config": {"id.token.claim": "true"}}]},
             {"clientId": ADMIN_CLIENT, "serviceAccountsEnabled": True}],
         "users": [{"username": f"service-account-{ADMIN_CLIENT}", "serviceAccountClientId": ADMIN_CLIENT,
@@ -212,6 +236,11 @@ def test_every_check_accepts_a_good_realm():
         ["components", "org.keycloak.userprofile.UserProfileProvider", 0, "config", USER_PROFILE],
         [json.dumps({"attributes": [{"name": "email", "permissions": {"edit": ["admin", "user"]}}]})]),
         id="email-user-editable"),
+    pytest.param(check_login_client_redirects_to_the_api_callback, _mutate(
+        ["clients", 0, "redirectUris"], ["http://localhost:8000/auth/callback"]), id="callback-not-under-api"),
+    pytest.param(check_login_client_redirects_to_the_api_callback, _mutate(
+        ["clients", 0, "redirectUris"], ["http://localhost:8000/api/auth/callback", "http://localhost:8000/auth/callback"]),
+        id="old-callback-kept"),
     pytest.param(check_amr_mapper_on_the_login_client, _mutate(["clients", 0, "protocolMappers"], []), id="no-amr-mapper"),
     pytest.param(check_amr_mapper_on_the_login_client, _mutate(
         ["clients", 0, "protocolMappers"],

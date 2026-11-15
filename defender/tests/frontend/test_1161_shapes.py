@@ -90,3 +90,14 @@ def test_the_generated_set_holds_members_misses_and_their_classifier_answers():
 def test_the_uuid_grammar_is_written_as_the_dialect_allows():
     """ASCII classes and counted repetition only: no `\\d`, `\\w`, `.`, anchor or flag (S2)."""
     assert not re.search(r"\\[dws]|\.|\^|\$|\(\?", S.UUID)
+
+
+def test_the_browser_sample_takes_one_near_miss_for_each_special_character():
+    """The seeded sample picks one fitting near miss per special, `/` by a doubled one, and is repeatable (B3)."""
+    cases = [c for c in S.generated_set() if c.value.startswith("/")]
+    picked = S.sample(cases, 1161, 30)
+    picks = S.special_picks(cases, 1161, picked)
+    assert len(picks) == len(S.SPECIALS) == 8
+    assert all(S.has_special(c, special) for c, special in zip(picks, S.SPECIALS, strict=True))
+    assert len({c.value for c in picks}) == 8 and not set(picks) & set(picked)
+    assert S.special_picks(cases, 1161, picked) == picks

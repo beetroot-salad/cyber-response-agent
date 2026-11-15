@@ -284,8 +284,8 @@ class FakeKeycloak(httpx.AsyncBaseTransport):
 
     The account's side, UNOBSERVED shapes (owed the `live` check): every account the sign-in realm has been asked
     about exists at the provider. `GET .../users/<id>/credentials` lists `credentials[id]` (a code's list is recorded
-    at its exchange; default a password) as `{id, type, createdDate}`; `GET .../users/<id>` is its record and
-    `PUT` merges the body into it (204); read `records[id]["requiredActions"]` after a `PUT`."""
+    at its exchange; default a password) as `{id, type, createdDate}`; `GET .../users/<id>` is its record (404 `User not found` for an id neither created here nor
+    signed in at the front channel, as observed) and `PUT` merges the body into it (204); read `records[id]["requiredActions"]` after a `PUT`."""
 
     def __init__(self, fails: Iterable[Fail] = (), *, front: str = FRONT, back: str = BACK,
                  admin_clients: Mapping[str, tuple[str, str]] = ADMIN_CLIENTS,
@@ -417,6 +417,8 @@ class FakeKeycloak(httpx.AsyncBaseTransport):
             self.spent.discard(code)  # UNOBSERVED whether it burns
             return self._invalid_grant("Incorrect redirect_uri")
         self.credentials[fields["sub"]] = list(fields["credentials"])
+        self.records.setdefault(fields["sub"], {"id": fields["sub"], "username": fields["sub"], "enabled": True,
+                                                "emailVerified": True, "requiredActions": []})
         now = dt.datetime.now(dt.UTC)
         stamp = int(now.timestamp())
         session_state = code.split(".")[1] if code.count(".") == 2 else str(uuid.uuid4())
@@ -492,9 +494,9 @@ class FakeKeycloak(httpx.AsyncBaseTransport):
             return httpx.Response(401, json={"error": "HTTP 401 Unauthorized"})
         if ADMIN_READ[realm] != "users":
             return httpx.Response(403, json={"error": "HTTP 403 Forbidden"})
-        record = self.accounts.get(account_id) or self.records.setdefault(
-            account_id, {"id": account_id, "username": account_id, "enabled": True, "emailVerified": True,
-                         "requiredActions": []})
+        record = self.accounts.get(account_id) or self.records.get(account_id)
+        if record is None:  # observed: Keycloak 26.4.0 answers an unknown user id so
+            return httpx.Response(404, json={"error": "User not found"})
         if credentials:
             return httpx.Response(200, json=[
                 {"id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"{account_id}/{kind}")), "type": kind,

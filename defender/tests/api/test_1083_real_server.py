@@ -331,7 +331,7 @@ async def test_another_tenants_member_reads_every_work_record_of_a_tenant_as_abs
     done = await _completed(served.dsn, A, (await _alerts(served.dsn, A, NOON + dt.timedelta(hours=1)))[0])
     job = (await served.client.post(f"/api/tenants/{A}/learning-jobs", headers=served.ann(),
                                     json={"investigation_id": done, "client_request_id": "r"})).json()["learning_job_id"]
-    reads = ["/api/alerts", f"/api/alerts/{alert_id}", "/investigations", f"/investigations/{inv}", "/learning-jobs",
+    reads = ["/alerts", f"/alerts/{alert_id}", "/investigations", f"/investigations/{inv}", "/learning-jobs",
              f"/learning-jobs/{job}", "/alert-mapping"]
     for path in reads:
         assert (await served.client.get(f"/api/tenants/{A}{path}", headers=served.ann(write=False))).status_code == 200, path
@@ -385,7 +385,7 @@ async def test_o7_an_administrator_invites_an_existing_user_into_an_empty_tenant
         while not any(invitation_id in r.getMessage() and BOB in r.getMessage() and C in r.getMessage()
                       for r in caplog.records):
             await anyio.sleep(0.5)
-    assert [m for m in served.keycloak.seen if m[0] != "GET" and "/api/admin/realms/" in m[1]] == []
+    assert [m for m in served.keycloak.seen if m[0] != "GET" and "/admin/realms/" in m[1]] == []
     # Control: the same route refuses a tenant that has members.
     assert (await served.client.post(f"/api/admin/tenants/{A}/invitations", headers=served.ops(),
                                      json={"email": BOB})).status_code == 409
@@ -882,11 +882,16 @@ async def test_1161_b2_a_refused_return_path_is_a_bad_request_and_starts_nothing
 
 @pytest.mark.postgres
 async def test_1161_b3_the_redirect_uri_is_derived_from_the_origin_and_the_setting_is_gone(served, tmp_path):
-    """The authorize URL names `<origin>/api/auth/callback`, and a stale `DEFENDER_KEYCLOAK_REDIRECT_URI` changes nothing. (B3)"""
+    """The authorize URL names `<origin>/api/auth/callback` whatever the request's `Host`, and a stale `DEFENDER_KEYCLOAK_REDIRECT_URI` changes nothing. (B3)"""
     from defender.api_server import Settings
 
     url, _ = await _login(served, None)
     assert urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)["redirect_uri"] == [_CALLBACK]
+    # Not the request's: a start that arrives under another `Host` (or a forwarded one) still names the configured origin.
+    foreign = await served.client.get("/api/auth/login", headers={
+        "Host": "attacker.example", "X-Forwarded-Host": "attacker.example", "X-Forwarded-Proto": "https"})
+    assert foreign.status_code == 302, (foreign.status_code, foreign.text)
+    assert urllib.parse.parse_qs(urllib.parse.urlsplit(foreign.headers["location"]).query)["redirect_uri"] == [_CALLBACK]
     environ = environment(tmp_path, dsn=served.dsn)
     assert "DEFENDER_KEYCLOAK_REDIRECT_URI" not in environ
     Settings.from_environ({**environ, "DEFENDER_KEYCLOAK_REDIRECT_URI": "not a url"})  # unread: no refusal
@@ -921,7 +926,7 @@ async def test_1161_d6_two_sign_ins_in_flight_each_complete_to_their_own_return_
 
 @pytest.mark.postgres
 async def test_1161_d6_b4_a_callback_without_its_own_cookie_never_uses_another_attempts_return_path(served):
-    """Missing, another attempt's or an unprefixed twin: `prelogin-missing`, no `return`, the other cookie untouched. (D6, B4)"""
+    """Missing, another attempt's or an unprefixed twin: `prelogin-missing`, no `return`, only its own cookie cleared. (D6, B4)"""
     account = await link_account(served.dsn, ANN)
     (url1, c1), (_url2, c2) = await _login(served, TICKET_PATH), await _login(served, OTHER_PATH)
     name1, m1 = _prelogin(c1)
@@ -930,7 +935,10 @@ async def test_1161_d6_b4_a_callback_without_its_own_cookie_never_uses_another_a
     for sent in ({name2: m2.value}, {}, unprefixed):
         r = await _callback(served, authorize(url1, account), sent)
         assert _failed(r) == ("prelogin-missing", {})
-        assert not set_cookies(r), r.headers.get_list("set-cookie")
+        # The callback clears its own attempt's cookie on every answer, held or not; nothing else is touched.
+        cleared = set_cookies(r)
+        assert list(cleared) == [name1], r.headers.get_list("set-cookie")
+        assert deleted(cleared[name1]), r.headers.get_list("set-cookie")
     assert _landing(await _callback(served, authorize(url1, account), {name1: m1.value})) == TICKET_PATH  # control
 
 
@@ -970,7 +978,11 @@ async def test_1161_b4_an_internal_fault_on_the_callback_is_logged_as_an_error_a
     r = await _callback(served, authorize(url, account), {name: morsel.value})
     assert _failed(r) == ("error", {})
     assert deleted(set_cookies(r)[name]), r.headers.get_list("set-cookie")
-    assert [x for x in caplog.records if x.levelno >= logging.ERROR]
+    # The callback's own record (logger `defender.api.app`, its exception the store's fault), not the identity loop's
+    # `a sender pass failed`, which also logs ERROR while the table is gone.
+    own = [x for x in caplog.records if x.name == "defender.api.app" and x.levelno >= logging.ERROR
+           and x.exc_info is not None and "users" in str(x.exc_info[1])]
+    assert own, [(x.name, x.getMessage()) for x in caplog.records if x.levelno >= logging.ERROR]
 
 
 @pytest.mark.postgres
@@ -1010,6 +1022,21 @@ async def test_1161_b3_a_learning_job_create_answers_a_location_path(served):
                                  json={"investigation_id": inv, "client_request_id": "loc-2"})
     assert r.status_code == 201, r.text
     assert r.headers["location"] == f"/api/tenants/{A}/learning-jobs/{r.json()['learning_job_id']}"
+
+
+@pytest.mark.postgres
+async def test_1161_b3_an_alert_mapping_create_answers_a_location_path_and_a_replace_answers_none(served):
+    """The first save of a tenant's mapping is a 201 whose `Location` is the mapping's path; a replace is a 200 with none. (B3, C36)"""
+    execute(served.dsn, "DELETE FROM tenancy.alert_mappings WHERE tenant_id = %s", (A,))  # a tenant that has none yet
+    mapping = {entry: f"vendor.{entry}" for entry in MAPPING_ENTRIES}
+    assert (await served.client.get(f"/api/tenants/{A}/alert-mapping", headers=served.ann(write=False))).status_code == 404
+    created = await served.client.put(f"/api/tenants/{A}/alert-mapping", headers=served.ann(), json=mapping)
+    assert created.status_code == 201, created.text
+    assert created.headers["location"] == f"/api/tenants/{A}/alert-mapping"
+    assert (await served.client.get(created.headers["location"], headers=served.ann(write=False))).json() == mapping
+    replaced = await served.client.put(f"/api/tenants/{A}/alert-mapping", headers=served.ann(), json=mapping)
+    assert replaced.status_code == 200  # control: a replace creates nothing
+    assert "location" not in replaced.headers
 
 
 @pytest.mark.postgres

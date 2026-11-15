@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import re
 import urllib.parse
+from pathlib import Path
 
 import httpx
 import pytest
 
 from defender.tests.support.api._server1083 import A
-from defender.tests.support.frontend._ingress1161 import ARTIFACT_DOMAIN
+from defender.tests.support.frontend._ingress1161 import ARTIFACT_DOMAIN, ingress
 
 UUID = "3400a0c8-beda-4fe6-86fb-3c6da1ea4a11"
 CSP = {"default-src": ["'self'"], "base-uri": ["'none'"], "frame-ancestors": ["'none'"],
@@ -79,3 +80,15 @@ def test_1161_b9_the_sign_in_start_through_the_ingress_is_the_apis_redirect_with
     assert urllib.parse.urlsplit(r.headers["location"]).netloc == urllib.parse.urlsplit(world.front.origin).netloc
     for name in GUARDED:
         assert name not in r.headers
+
+
+def test_1161_b9_two_ingress_instances_serve_at_once(browser_tools, tmp_path: Path):
+    """Caddy's admin endpoint is off, so a second ingress on the same host starts and serves beside the first. (B9)"""
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("<html><body>app</body></html>")
+    with ingress("127.0.0.1:1", dist, tmp_path / "one") as first, ingress("127.0.0.1:1", dist, tmp_path / "two") as second:
+        assert first != second
+        for origin in (first, second):
+            r = httpx.get(f"{origin}/")
+            assert r.status_code == 200 and "app" in r.text, (origin, r.status_code)

@@ -121,3 +121,26 @@ def sample(cases: list[GeneratedCase], seed: int, count: int) -> list[GeneratedC
     picked.append(rng.choice([c for c in cases if c.shape is None]))
     rest = [c for c in cases if c not in picked]
     return picked + rng.sample(rest, count - len(picked))
+
+
+#: Characters the URL parser treats specially (B3's browser sample takes one near miss for each).
+SPECIALS = "?#%\\\t\n./"
+
+
+def has_special(case: GeneratedCase, special: str) -> bool:
+    """`case` carries `special` where its origin does not. Every origin holds `/`, so for `/` the edit is a doubled one:
+    more `//` than the origin has."""
+    assert case.origin is not None
+    if special == "/":
+        return case.value.count("//") > case.origin.count("//")
+    return special in case.value and special not in case.origin
+
+
+def special_picks(cases: list[GeneratedCase], seed: int, taken: list[GeneratedCase]) -> list[GeneratedCase]:
+    """One near miss per `SPECIALS` character, seeded, none already in `taken`."""
+    rng = random.Random(seed)
+    picks: list[GeneratedCase] = []
+    for special in SPECIALS:
+        pool = [c for c in cases if c.origin and has_special(c, special) and c not in taken and c not in picks]
+        picks.append(rng.choice(pool))
+    return picks

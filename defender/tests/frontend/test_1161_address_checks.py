@@ -4,7 +4,6 @@ seeded sample of it through the repo's ingress (the four outcomes, stated on the
 from __future__ import annotations
 
 import json
-import random
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -22,11 +21,7 @@ NODE = ("import {pathToFileURL} from 'node:url'; const m = await import(pathToFi
 
 def _sample() -> list[S.GeneratedCase]:
     picked = S.sample(CASES, 1161, 30)
-    rng = random.Random(1161)
-    for special in "?#%\\\t\n./":  # characters the URL parser treats specially, one near miss each
-        pool = [c for c in CASES if c.origin and special in c.value and special not in c.origin and c not in picked]
-        picked.append(rng.choice(pool))
-    return picked
+    return picked + S.special_picks(CASES, 1161, picked)
 
 
 @pytest.fixture(scope="module")
