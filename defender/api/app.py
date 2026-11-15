@@ -1010,6 +1010,7 @@ def create_app(deps: ApiDeps, *, docs: bool = False) -> FastAPI:
         openapi_url=f"{API_PREFIX}/openapi.json",
         docs_url=f"{API_PREFIX}/docs" if docs else None,
         redoc_url=f"{API_PREFIX}/redoc" if docs else None,
+        swagger_ui_oauth2_redirect_url=f"{API_PREFIX}/docs/oauth2-redirect" if docs else None,
         title="Defender platform API",
         version=API_VERSION,
         summary="The routes and shapes of the platform API; a route whose records are not yet served answers 501.",
