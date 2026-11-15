@@ -86,15 +86,16 @@ def launcher_env(origin: str, upstream: str, frontend_dir: Path, *, artifact_dom
     return env
 
 
-def run_launcher(env: Mapping[str, str], timeout: float = 20.0) -> subprocess.CompletedProcess[str]:
-    """The launcher once, to its end or `timeout` (then killed, returncode -9). For refusals: it must exit non-zero,
-    naming the setting, before Caddy starts."""
-    return run_launcher_pid(env, timeout)[0]
+def run_launcher(env: Mapping[str, str], timeout: float = 20.0, *, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+    """The launcher once, to its end or `timeout` (then killed, returncode -9), from `cwd` (the repo root by default).
+    For refusals: it must exit non-zero, naming the setting, before Caddy starts."""
+    return run_launcher_pid(env, timeout, cwd=cwd)[0]
 
 
-def run_launcher_pid(env: Mapping[str, str], timeout: float = 20.0) -> tuple[subprocess.CompletedProcess[str], int]:
+def run_launcher_pid(env: Mapping[str, str], timeout: float = 20.0, *,
+                     cwd: Path | None = None) -> tuple[subprocess.CompletedProcess[str], int]:
     """`run_launcher`, and the launcher's process id (what a Caddy it `exec`s keeps)."""
-    process = subprocess.Popen(LAUNCHER, env=dict(env), cwd=REPO, text=True, stdout=subprocess.PIPE,
+    process = subprocess.Popen(LAUNCHER, env=dict(env), cwd=cwd or REPO, text=True, stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, start_new_session=True)
     try:
         out, err = process.communicate(timeout=timeout)

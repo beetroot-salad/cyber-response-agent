@@ -1,8 +1,11 @@
 """#1161 piece 1: the API's address space (B3) and the shared setting parsers and ingress launcher (S5)."""
 from __future__ import annotations
 
+import json
 import os
+import shutil
 import stat
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -12,7 +15,13 @@ import pytest
 pytest.importorskip("fastapi")
 
 from defender.tests.support.api._identity1306 import ANN, T1, World  # noqa: E402
-from defender.tests.support.frontend._ingress1161 import ARTIFACT_DOMAIN, launcher_env, run_launcher, run_launcher_pid  # noqa: E402
+from defender.tests.support.frontend._ingress1161 import (  # noqa: E402
+    ARTIFACT_DOMAIN,
+    REPO,
+    launcher_env,
+    run_launcher,
+    run_launcher_pid,
+)
 
 ORIGIN = "http://localhost:8000"
 
@@ -97,13 +106,13 @@ def test_artifact_domain_refuses_anything_but_a_bare_lowercase_hostname(text: st
 
 @pytest.fixture
 def fake_caddy(tmp_path: Path) -> Path:
-    """A `caddy` on PATH that only records that it ran and its own process id (a test-only stand-in: the launcher's
-    refusals must come first)."""
+    """A `caddy` on PATH that only records that it ran, its own process id and its arguments, one per line (a test-only
+    stand-in: the launcher's refusals must come first)."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     marker = tmp_path / "caddy-ran"
     script = bin_dir / "caddy"
-    script.write_text(f"#!/bin/sh\necho \"$@\" > {marker}\necho $$ > {marker}.pid\nexit 0\n")
+    script.write_text(f"#!/bin/sh\necho \"$@\" > {marker}\necho $$ > {marker}.pid\nprintf '%s\\n' \"$@\" > {marker}.argv\nexit 0\n")
     script.chmod(script.stat().st_mode | stat.S_IXUSR)
     return bin_dir
 
@@ -142,6 +151,28 @@ def test_the_launcher_execs_caddy_so_signals_reach_it(tmp_path: Path, fake_caddy
     done, pid = run_launcher_pid(_env(tmp_path, fake_caddy))
     assert done.returncode == 0, (done.stdout, done.stderr)
     assert (tmp_path / "caddy-ran.pid").read_text().strip() == str(pid)
+
+
+def test_the_launcher_hands_caddy_the_repos_own_caddyfile_from_any_directory(tmp_path: Path, fake_caddy: Path) -> None:
+    """From a directory that is not the repo root, Caddy is given the absolute path of `defender/frontend/Caddyfile`,
+    and Caddy adapts that very file with its admin endpoint off (the file the Caddyfile tests read). (S5, B9)"""
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    env = _env(tmp_path, fake_caddy)
+    done = run_launcher(env, cwd=elsewhere)
+    assert done.returncode == 0, (done.stdout, done.stderr)
+    argv = (tmp_path / "caddy-ran.argv").read_text().splitlines()
+    given = [a.removeprefix("--config=") if a.startswith("--config=") else argv[i + 1]
+             for i, a in enumerate(argv) if a == "--config" or a.startswith("--config=")]
+    assert len(given) == 1, argv
+    repos = (REPO / "defender" / "frontend" / "Caddyfile").resolve()
+    assert os.path.isabs(given[0]) and Path(given[0]).resolve() == repos, (given[0], argv)
+    caddy = shutil.which("caddy")
+    assert caddy is not None, "the Caddyfile check needs caddy on PATH (B11: a failure, never a skip)"
+    adapted = subprocess.run([caddy, "adapt", "--config", given[0], "--adapter", "caddyfile"], env=env | {"PATH": os.environ["PATH"]},
+                             cwd=elsewhere, capture_output=True, text=True, check=False, timeout=60)
+    assert adapted.returncode == 0, adapted.stderr[-1500:]
+    assert json.loads(adapted.stdout)["admin"]["disabled"] is True
 
 
 @pytest.mark.parametrize("given", [None, ""], ids=["absent", "empty"])
