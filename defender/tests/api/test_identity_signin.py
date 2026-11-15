@@ -220,7 +220,7 @@ def test_a_token_that_fails_verification_is_a_303_that_opens_no_session_and_clea
     browser = world.client(raise_errors=False)
     world.signin.refuse_signins = 1
     refused = world.sign_in_response(browser, ANN)
-    assert failed(refused) == ("login-attempt-invalid", {})
+    assert failed(refused) == ("login-attempt-invalid", {"return": "/"})  # the attempt's cookie carries the root (B2, B4)
     assert set_cookie(refused, SESSION_COOKIE) is None
     assert SESSION_COOKIE not in browser.cookies
     assert is_cleared(set_cookie(refused, attempt_cookie(world.signin.started[-1].state) or "") or "")
@@ -248,7 +248,7 @@ def test_a_callback_the_provider_cannot_serve_opens_no_session_and_still_clears_
         world.signin.raise_on_has_otp = SignInUnavailable("keycloak is down")
         failed_response = world.sign_in_response(browser, OPS, amr=("pwd",))
     assert world.signin.every_call[-1] == where  # control: the failure was the one scripted
-    assert failed(failed_response) == ("unavailable", {})
+    assert failed(failed_response) == ("unavailable", {"return": "/"})  # the attempt's cookie carries the root (B2, B4)
     assert set_cookie(failed_response, SESSION_COOKIE) is None
     assert SESSION_COOKIE not in browser.cookies
     cleared = set_cookie(failed_response, attempt_cookie(world.signin.started[-1].state) or "")

@@ -13,6 +13,7 @@ import pytest
 
 pytest.importorskip('fastapi')
 
+from defender.tests.support.api._flow1161 import failed  # noqa: E402
 from defender.tests.support.api._mount1161 import API  # noqa: E402
 from defender.tests.support.api._identity1306 import (  # noqa: E402
     DAY,
@@ -55,13 +56,13 @@ pytestmark = [
 
 @pytest.mark.parametrize("has_code", [True, False])
 def test_an_administrator_without_a_code_is_refused_and_setup_is_required_when_there_is_none(has_code: bool) -> None:
-    """Password-only administrator sign-in -> 403, no session; an account with no code is made to set one up (O5)."""
+    """Password-only administrator sign-in -> 303 `otp-required`, no session; an account with no code is made to set one up (O5; B4)."""
     world = lab()
     account = world.signin.account_for(OPS)
     world.signin.has_otp_answers[account] = has_code
     browser = world.client()
     refused = world.sign_in_response(browser, OPS, amr=("pwd",))
-    assert refused.status_code == 403
+    assert failed(refused) == ("otp-required", {"return": "/"})
     assert SESSION_COOKIE not in browser.cookies
     assert world.signin.otp_required == ([] if has_code else [account])
     world.signin.has_otp_answers[account] = True
@@ -72,7 +73,7 @@ def test_a_refused_administrator_sign_in_does_not_activate_the_account() -> None
     """Refused means refused: only the code-backed sign-in makes the administrator `active` (flow 2, O5)."""
     world = lab()
     world.signin.has_otp_answers[world.signin.account_for(OPS)] = True
-    assert world.sign_in_response(world.client(), OPS, amr=("pwd",), name="Refused").status_code == 403
+    assert failed(world.sign_in_response(world.client(), OPS, amr=("pwd",), name="Refused"))[0] == "otp-required"
     refused = world.call(world.repo.user_by_email, OPS)
     assert (refused.status, refused.activated_at) == ("invited", None)
     assert refused.display_name != "Refused"
@@ -308,7 +309,7 @@ def test_the_lab_people_sign_in_and_the_administrator_signs_in_twice() -> None:
     world = lab()
     assert tenants_of(world.sign_in(ME)) == {LAB}
     world.signin.has_otp_answers[world.signin.account_for(OPS)] = True
-    assert world.sign_in_response(world.client(), OPS, amr=("pwd",)).status_code == 403
+    assert failed(world.sign_in_response(world.client(), OPS, amr=("pwd",)))[0] == "otp-required"
     ops = world.sign_in(OPS, amr=("pwd", "otp"))
     body = me(ops)
     assert (body["administrator"], body["tenants"]) == (True, [])
