@@ -1062,3 +1062,40 @@ def test_capture_reads_a_T_given_without_an_offset_as_UTC_whatever_the_local_zon
 
     assert "T" in seen, "capture was not called"
     assert _aware(seen["T"]) == instant(meant), seen["T"]
+
+
+# -- #1528: a mixed batch never fires two scenarios closer than a rule looks back ---------------
+
+def test_the_longest_lookback_is_read_from_the_committed_rules():
+    """The cross-tier pivot rule looks back 20 minutes, the longest of the committed rules."""
+    assert _module().longest_lookback() == timedelta(minutes=20)
+
+
+@pytest.mark.parametrize("count, accepted", [(18, True), (19, False)])
+def test_a_batch_whose_firings_would_sit_closer_than_the_longest_lookback_is_refused_before_the_lock(
+        tmp_path, count, accepted):
+    """Firings spread evenly over max age less the lead: 18 sit about 20.3 minutes apart, 19 about
+    19.2, under the 20-minute lookback, so an attack and the legitimate scenario it mirrors could
+    count together into one alert. One id may be fired more than once."""
+    scenarios = [SCENARIOS[i % len(SCENARIOS)] for i in range(count)]
+    rig = Rig(tmp_path, scenarios=scenarios)
+    if accepted:
+        rig.capture()
+        assert sorted(s for s, *_ in rig.fired) == sorted(scenarios)
+        times = sorted(at for _s, at, *_x in rig.fired)
+        assert min(b - a for a, b in zip(times, times[1:])) >= timedelta(minutes=20)
+        return
+    with pytest.raises(_FAILED, match="lookback") as caught:
+        rig.capture()
+    assert not isinstance(caught.value, _NOT_A_REFUSAL), repr(caught.value)
+    assert not [c for c in rig.calls if c["step"] == "lock.create"]
+    assert not rig.fired and not rig.es.requests and rig.watcher_running()
+
+
+def test_a_rule_whose_lookback_cannot_be_read_refuses_the_capture(tmp_path):
+    rules = tmp_path / "rules"
+    rules.mkdir()
+    (rules / "odd.json").write_text('{"from": "2026-11-15T00:00:00Z"}')
+    module = _module()
+    with pytest.raises(module.CaptureRefused, match="odd.json"):
+        module.longest_lookback(rules)
