@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import ast
 from typing import Any
-import textwrap
 from pathlib import Path
 
 import pytest
 
 from defender.tests.support.tenancy import _systems1366 as R
-from defender.tests.systems._rules1470 import rules
+from defender.tests.systems._rules1470 import rules, write_broken_adapter
 
 #: The catalog's adapters today (design C14: nine); the premise that the sweeps below read them all.
 ADAPTERS = 9
@@ -82,18 +81,7 @@ def test_1470_d11_each_adapters_own_settings_check_accepts_its_sample_settings()
 
 def _broken_checkout(root: Path, counter: Path) -> Path:
     """A checkout whose `integrations/` holds one adapter that fails when imported, and notes each import in `counter`."""
-    folder = root / "integrations"
-    folder.mkdir(parents=True)
-    (folder / "broken_adapter.py").write_text(textwrap.dedent(f'''\
-        """An adapter whose import fails."""
-        PREFIX = "BROKEN"
-        REQUIRED_CONFIG_KEYS = ("TIMEOUT_SEC",)
-        DISPLAY_NAME = "Broken"
-        EXAMPLE = False
-        with open({str(counter)!r}, "a") as noted:
-            noted.write("x")
-        raise RuntimeError("the adapter failed on import 1470")
-        '''))
+    write_broken_adapter(root / "integrations", counter)
     return root
 
 

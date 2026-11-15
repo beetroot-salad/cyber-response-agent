@@ -639,19 +639,14 @@ def proxy_login(dsn: str, *, granted: bool = True) -> Iterator[str]:
 
 # --- the test member ----------------------------------------------------------------------------------------------------
 
-def real_judge() -> Any:
-    """The record judgement over the checkout's catalog, as the API injects it (`defender.system_rules`). Until the move
-    exists (a base-only shim: delete the fallback with it) the judgement is the one in `defender.systems`."""
-    try:
-        from defender.system_rules import Catalog, judge_records
-    except ModuleNotFoundError as missing:
-        if missing.name != "defender.system_rules":
-            raise
-        from defender.systems.record_judgement import judge_records as base_judge
+def api_record_store(dsn: str) -> Any:
+    """The record store over `dsn` as the API composes it (`defender.api_server.record_store`), over the checkout's
+    catalog, on the fixed test clock."""
+    from defender.api_server import record_store
+    from defender.system_rules import Catalog
+    from defender.tests.support.jobs._jobs1342 import fixed_clock
 
-        return lambda after, before: list(base_judge(after, before))
-    catalog = Catalog.of_checkout()
-    return lambda after, before: list(judge_records(after, before, catalog=catalog))
+    return record_store(dsn, Catalog.of_checkout(), clock=fixed_clock)
 
 
 class Admin:
@@ -666,12 +661,9 @@ class Admin:
 
     def _run(self, work: Any) -> tuple[int, str]:
         from defender.system_records import RecordRefused
-        from defender.tests.support.jobs._jobs1342 import fixed_clock
 
         async def go() -> tuple[int, str]:
-            from defender.system_records import RecordStore
-
-            store = RecordStore(self.dsn, clock=fixed_clock, judge=real_judge())
+            store = api_record_store(self.dsn)
             try:
                 await work(store)
             except RecordRefused as refused:

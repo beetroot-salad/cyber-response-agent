@@ -4,6 +4,8 @@ there; the names below are those the code stage must supply or correct in this o
 from __future__ import annotations
 
 import importlib
+import textwrap
+from pathlib import Path
 from typing import Any
 
 PACKAGE = "defender.system_rules"
@@ -12,3 +14,19 @@ PACKAGE = "defender.system_rules"
 def rules(name: str) -> Any:
     """`name` from the rules package (an ImportError until the move is made)."""
     return getattr(importlib.import_module(PACKAGE), name)
+
+
+def write_broken_adapter(folder: Path, counter: Path) -> None:
+    """`broken_adapter.py` in `folder` (an `integrations/`): it declares itself cold and fails when imported, noting each
+    import as one `x` in `counter` (#1470 D8)."""
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "broken_adapter.py").write_text(textwrap.dedent(f'''\
+        """An adapter whose import fails."""
+        PREFIX = "BROKEN"
+        REQUIRED_CONFIG_KEYS = ("TIMEOUT_SEC",)
+        DISPLAY_NAME = "Broken"
+        EXAMPLE = False
+        with open({str(counter)!r}, "a") as noted:
+            noted.write("x")
+        raise RuntimeError("the adapter failed on import 1470")
+        '''))

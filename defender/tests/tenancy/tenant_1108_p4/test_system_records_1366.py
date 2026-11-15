@@ -245,8 +245,7 @@ def test_1366_o4_a_settings_key_the_adapter_does_not_declare_is_refused_whatever
 
 
 async def _door(op: R.Admin, call: Any) -> Any:
-    from defender.system_records import RecordStore
-    store = RecordStore(op.dsn, clock=fixed_clock, judge=R.real_judge())
+    store = R.api_record_store(op.dsn)
     try:
         return await call(store)
     finally:

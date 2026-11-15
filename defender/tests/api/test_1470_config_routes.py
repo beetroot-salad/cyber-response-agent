@@ -5,6 +5,8 @@ store is the real `OpenBaoSecrets` over a scripted transport (and over a real Op
 Credentials and audit are `test_1470_credentials`; start rules `test_1470_start`. Postgres-gated."""
 from __future__ import annotations
 
+import shutil
+import sys
 from pathlib import Path
 
 import httpx
@@ -22,9 +24,12 @@ from defender.tests.support.api._config1470 import (
     TOKEN,
     edited_cursor,
     problem_text,
+    served_config,
 )
+from defender.tests.support.api._openbao1470 import ScriptedOpenBao
 from defender.tests.support.api._server1083 import ANN, ORIGIN, REPO, A, B
 from defender.tests.support.tenancy import _systems1366 as R
+from defender.tests.systems._rules1470 import write_broken_adapter
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
 
@@ -264,6 +269,60 @@ async def test_o3_a_current_record_whose_adapter_the_catalog_lacks_reads_with_no
     assert read.json()["display_name"] is None
     assert (await scripted.delete_system("retired", 1)).status_code == 204
     assert (await scripted.get_system("retired")).status_code == 404
+
+
+#: Each write beside a record an upgrade left naming a removed adapter: what it plants first, the write, its status.
+_BESIDE_RETIRED = {
+    "a-put-of-another-system": ((), lambda served: served.put_system(TICKET, 0), 201),
+    "a-case-record-put": ((TICKET,), lambda served: served.put_case(0), 201),
+    "a-delete-of-another-system": ((ELASTIC,), lambda served: served.delete_system(ELASTIC, 1), 204),
+}
+
+
+@pytest.mark.parametrize("write", list(_BESIDE_RETIRED))
+async def test_o4_o5_a_current_record_whose_adapter_the_catalog_lacks_blocks_no_write_of_another_record(scripted, write):
+    """A record naming a removed adapter is not judged by a write that leaves it unchanged: the write stands and the
+    record stays current; replacing that record itself is still 422 naming it (control). (O4, O5, #1366 C4)"""
+    planted, call, status = _BESIDE_RETIRED[write]
+    scripted.plant_version("retired", 1, adapter="retired")
+    for system in planted:
+        scripted.plant_version(system, 1, settings=ELASTIC_SETTINGS if system == ELASTIC else None,
+                               access=ELASTIC_ACCESS if system == ELASTIC else None)
+    answer = await call(scripted)
+    assert answer.status_code == status, answer.text
+    assert [(v.version, v.deleted) for v in scripted.versions("retired")] == [(1, False)]
+    faults = _judged(await scripted.put_system("retired", 1, settings={"RETIRED_TIMEOUT_SEC": "10"}))
+    assert any("retired" in f for f in faults), faults
+
+
+async def test_d8_a_write_is_judged_over_the_catalog_built_at_start_reading_no_adapter_file(migrated_database, tmp_path,
+                                                                                            monkeypatch):
+    """The checkout's adapters are read once, at start: an adapter whose import fails was imported once and each write
+    naming it is 422 with its load fault, and once the adapters directory is gone writes are still judged. (D8, #1470)"""
+    checkout, counter = tmp_path / "checkout", tmp_path / "imports"
+    folder = checkout / "integrations"
+    write_broken_adapter(folder, counter)
+    shutil.copy(REPO / "defender/integrations/ticket_adapter.py", folder / "ticket_adapter.py")
+    monkeypatch.setenv("DEFENDER_DIR", str(checkout))
+    saved_path = list(sys.path)  # the copied adapter puts its checkout's parent on sys.path when imported
+    try:
+        async with served_config(migrated_database, tmp_path, scripted=ScriptedOpenBao()) as served:
+            listed = (await served.get("/adapters")).json()["items"]
+            assert {i["adapter_id"] for i in listed} == {"broken", TICKET}, "premise: the catalog is the tmp checkout's"
+            assert counter.read_text() == "x", "premise: start imported the broken adapter"
+            for _ in range(3):
+                faults = _judged(await served.put_system("broken", 0, settings={"BROKEN_TIMEOUT_SEC": "10"}))
+                assert any("broken" in f and "could not be loaded" in f for f in faults), faults
+            assert counter.read_text() == "x", "a write imported the broken adapter again"
+            shutil.rmtree(folder)
+            assert (await served.put_system(TICKET, 0)).status_code == 201
+            faults = _judged(await served.put_system(TICKET, 1, settings=TICKET_SETTINGS | {"TICKET_BOGUS": "1"}))
+            assert any("TICKET_BOGUS" in f for f in faults), faults
+            faults = _judged(await served.put_system("broken", 0, settings={"BROKEN_TIMEOUT_SEC": "10"}))
+            assert any("broken" in f and "could not be loaded" in f for f in faults), faults
+            assert [v.version for v in served.versions(TICKET)] == [1]
+    finally:
+        sys.path[:] = saved_path
 
 
 @pytest.mark.parametrize("replaces", [0, 3, 99])
