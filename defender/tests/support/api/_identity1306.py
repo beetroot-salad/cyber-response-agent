@@ -211,6 +211,8 @@ class FakeSignIn:
         self.refuse_signins = 0
         #: The next N `finish_signin` calls record the call, then raise `SignInUnavailable`.
         self.unavailable_signins = 0
+        #: The next N `begin_signin` calls record the call, then raise `SignInUnavailable` (the provider is unreachable).
+        self.unavailable_begins = 0
         #: When set, every `has_otp` call records the call, then raises this exception.
         self.raise_on_has_otp: Exception | None = None
         #: The name of every port method called, in order (all of them, round trips included).
@@ -286,6 +288,9 @@ class FakeSignIn:
     async def begin_signin(self, state: str, nonce: str, code_challenge: str) -> str:
         with self._lock:
             self.every_call.append("begin_signin")
+        if self.unavailable_begins:
+            self.unavailable_begins -= 1
+            raise SignInUnavailable("the sign-in provider is unavailable")
         self.started.append(SignInStart(state, nonce, code_challenge))
         return f"{SIGNIN_URL}?state={state}"
 

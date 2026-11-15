@@ -319,6 +319,19 @@ def test_an_internal_fault_on_sign_in_start_is_logged_as_an_error_and_answers_er
     assert _errors(caplog)
 
 
+def test_a_sign_in_start_the_provider_cannot_serve_is_a_303_unavailable_without_a_cookie() -> None:
+    """The provider unreachable when sign-in starts: 303 to the failed screen with `reason=unavailable`, no cookie set; the
+    next start, once it is back, is the 302. (S1, B4)"""
+    world = World(tenants={T1: [ANN]})
+    world.signin.unavailable_begins = 1
+    answer = world.client(raise_errors=False).get(LOGIN, params={"return": RET})
+    assert failed(answer)[0] == "unavailable"
+    assert not answer.headers.get_list("set-cookie")
+    assert world.signin.every_call[-1] == "begin_signin" and not world.signin.started  # control: the scripted failure was reached
+    again = world.client().get(LOGIN, params={"return": RET})
+    assert again.status_code == 302, again.text  # control: the same request starts when the provider is back
+
+
 def test_an_internal_fault_on_the_callback_is_logged_answers_error_without_return_and_clears_its_cookie(caplog: Any) -> None:
     """A fault after the attempt's cookie was read: `reason=error`, no `return`, the attempt's cookie cleared, an error logged. (B4, S1, D6)"""
     world = World(tenants={T1: [ANN]})
