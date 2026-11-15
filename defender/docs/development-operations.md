@@ -19,7 +19,6 @@ python3 defender/cli/tenant.py check "$TENANT_ID"    # admitted and its folder a
 python3 defender/run.py <alert.json> --tenant "$TENANT_ID"   # one investigation → run dir under $DEFENDER_DATA_ROOT/$TENANT_ID/runs/; --no-learn skips curation enqueue
 python3 defender/cli/learning/branch.py --tenant "$TENANT_ID" <run_id> <branch_message_id>   # fork a finished run (by id, under the tenant's runs) into a family of worlds and grade it
 python3 defender/learning/loop.py --tenant "$TENANT_ID" --author-drain     # fold the findings queue into lessons; --lead-author-drain is the sibling stage
-python3 defender/api/serve.py --tenant <id>           # the stub platform API on 127.0.0.1:8000, seeded for the named tenant(s) (needs the `api` extra: `uv sync --extra dev --extra runtime --extra api`, as CI does — a bare `uv sync --extra api` uninstalls the others); tokens `<id>-analyst`
 ```
 
 ### Creating a tenant (#1214)
@@ -84,7 +83,7 @@ are fixed when a container is created, and the running one has neither. And set
 
 ## Running jobs live from the dev container (#1170, #1475)
 
-A job's helper must share the docker daemon's mount paths and pid namespace
+A job's helper must share the docker daemon's mount paths
 (`decisions/vps-compose-deployment.md`, brain confinement). The host daemon behind
 `/var/run/docker.sock` shares neither with the dev container, so a job started through it
 fails. The dev container therefore carries a second daemon of its own, with gVisor registered
@@ -121,8 +120,8 @@ image, the other compose services) uses the host daemon. The daemon's log is
 
 ## Running the API on the dev database and real sign-in (#1083)
 
-`python -m defender.api_server` serves the platform API over PostgreSQL and Keycloak (the demo server,
-`defender.api.serve`, stays the in-memory one). Every setting is required and read from the environment; a
+`python -m defender.api_server` serves the platform API over PostgreSQL and Keycloak; it is the only way to run the
+API (the in-memory demo server was removed in #1496). Every setting is required and read from the environment; a
 missing or invalid one refuses start naming it. Secret files hold one value, a trailing newline allowed.
 
 | Setting | Meaning |

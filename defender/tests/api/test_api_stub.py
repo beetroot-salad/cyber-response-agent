@@ -8,13 +8,10 @@ import dataclasses
 import datetime as _dt
 import inspect
 import json
-import logging
-import secrets
-import threading
 from http import HTTPStatus
 import subprocess
 import sys
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -26,16 +23,8 @@ pytest.importorskip("fastapi")
 from fastapi.routing import APIRoute  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from defender.api import fakes as fakes_module, ports as ports_module  # noqa: E402
+from defender.api import job_store as job_store_module, ports as ports_module  # noqa: E402
 from defender.api.app import MAX_PAGE, create_app  # noqa: E402
-from defender.api.demo import DEMO_ROLES, demo_deps, demo_id, demo_sessions  # noqa: E402
-from defender.api.fakes import (  # noqa: E402
-    InMemoryOffboarding,
-    InMemorySecrets,
-    InMemoryStore,
-    StubArtifactLinks,
-    StubSystemChecker,
-)
 from defender.api.models import (  # noqa: E402
     Alert,
     AlertSummary,
@@ -60,16 +49,15 @@ from defender.identity import (  # noqa: E402
 from defender.tenancy import InMemoryTenantRepository  # noqa: E402
 from defender.records._tenant_id import TenantId  # noqa: E402
 from pydantic import ValidationError  # noqa: E402
-from defender.records.formats import AlertId, InvestigationId  # noqa: E402
 from defender.tests.support.tenancy._mapping1345 import ALERT_MAPPING_ROUTE, alert_mapping_url  # noqa: E402
 from defender.tests.support.api._programs1307 import NoProgramsRealm  # noqa: E402
+from defender.tests.support.tenancy._twin1496 import seed_tenant  # noqa: E402
+from defender.tests.support.identity._seed1496 import seed_membership, seed_user  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 NOW = _dt.datetime(2026, 9, 28, 12, 0, tzinfo=_dt.UTC)
 
 A = fixture_uuid("tenant:tenant-a")
-DEMO_ONE = fixture_uuid("tenant:t-one")
-DEMO_TWO = fixture_uuid("tenant:t-two")
 B = fixture_uuid("tenant:tenant-b")
 USER = fixture_uuid("user:ann")
 #: The tenant is the path's `T`; the caller is a session seeded through the identity repository,
@@ -240,7 +228,7 @@ class Scripted:
     to raise, or a callable that answers the call; an unscripted call fails the test.
 
     A write that does not raise is recorded in `written`; the audit-only port's `announce` records into `audits`.
-    This port announces nothing for a write: announcing is the real ports' job (the demo ports, tested over the demo)."""
+    This port announces nothing for a write: announcing is the real store's job, tested over it (#1496)."""
 
     def __init__(self, answers: dict[str, Any]) -> None:
         self.answers = answers
@@ -289,19 +277,19 @@ async def _seed_identity() -> tuple[IdentityService, dict[str, str], InMemoryTen
     """Ann is a member of A, Bob of B and Cy of both, each with a seeded session. Returns the
     service, the seeded user ids by session value and the tenant twin the service shares."""
     tenants = InMemoryTenantRepository()
-    await tenants.add_tenant(TenantId(A), created_at=NOW)
-    await tenants.add_tenant(TenantId(B), created_at=NOW)
+    await seed_tenant(tenants, TenantId(A), created_at=NOW)
+    await seed_tenant(tenants, TenantId(B), created_at=NOW)
     repo = InMemoryIdentityRepository(tenants=tenants)
     users: dict[str, str] = {}
     for email, tenant, session in (("ann@a.example", A, SESSION_A), ("bob@b.example", B, SESSION_B)):
-        user = await repo.add_user(email, created_at=NOW, status="active", display_name=email)
-        await repo.add_membership(user.id, TenantId(tenant), status="active", invited_by=None,
+        user = await seed_user(repo, email, created_at=NOW, status="active", display_name=email)
+        await seed_membership(repo, user.id, TenantId(tenant), status="active", invited_by=None,
                             created_at=NOW, accepted_at=NOW)
         await repo.add_session(session, user.id, now=NOW, expires_at=NOW + _dt.timedelta(days=7))
         users[session] = user.id
-    cy = await repo.add_user("cy@c.example", created_at=NOW, status="active", display_name="cy")
+    cy = await seed_user(repo, "cy@c.example", created_at=NOW, status="active", display_name="cy")
     for tenant in (A, B):
-        await repo.add_membership(cy.id, TenantId(tenant), status="active", invited_by=None,
+        await seed_membership(repo, cy.id, TenantId(tenant), status="active", invited_by=None,
                             created_at=NOW, accepted_at=NOW)
     await repo.add_session(SESSION_AB, cy.id, now=NOW, expires_at=NOW + _dt.timedelta(days=7))
     users[SESSION_AB] = cy.id
@@ -374,7 +362,7 @@ def test_the_happy_path_table_covers_every_existing_route() -> None:
 def test_the_api_never_loads_the_runtime_or_the_learning_loop() -> None:
     """The API modules, with `defender.identity`, load no runtime or learning-loop module."""
     probe = (
-        "import json, sys; import defender.api.app, defender.api.demo, defender.api.serve; "
+        "import json, sys; import defender.api.app, defender.api_server; "
         "import defender.identity; "
         "print(json.dumps(sorted(sys.modules)))"
     )
@@ -652,66 +640,6 @@ def test_1345_an_invalid_or_incomplete_mapping_is_a_422_naming_the_entry_before_
     assert response.status_code == 422, response.text
     assert entry in response.text
     assert (api.ports.calls, api.ports.audits) == ([], [])
-
-
-def _over_the_fake() -> tuple[TestClient, InMemoryStore]:
-    """The real app over the stub's own `InMemoryStore` (rule-free: it keeps what the wire model let through)."""
-    store = InMemoryStore(lambda: NOW)
-    identity, _, tenants = _identity()
-    return TestClient(create_app(ApiDeps(
-        identity=identity, tenants=tenants, frontend_origin=ORIGIN,
-        alerts=store, investigations=store, learning_jobs=store, lessons=store, systems=store,
-        writes=store, secrets=InMemorySecrets(store), checker=StubSystemChecker(),
-        artifact_links=StubArtifactLinks(), offboarding=InMemoryOffboarding(tenants, store, lambda: NOW),
-        alert_mapping=store, audit=store,  # FORCED CHOICE FC-14: the in-memory store serves the mapping read and the audit-only port
-    )), base_url=BASE), store
-
-
-def test_1345_over_the_fake_a_mapping_is_404_then_201_then_200_and_reads_back_as_put() -> None:
-    """GET is 404 until the first PUT (201, Location); a later PUT replaces whole (200); GET answers exactly the six
-    entries the PUT named; each save is audited `alert_mapping.update` for the tenant. (#1345 O1)"""
-    client, store = _over_the_fake()
-    assert client.get(alert_mapping_url(A), headers=AUTH).status_code == 404
-
-    first = client.put(alert_mapping_url(A), headers=AUTH, json=MAPPING_BODY)
-    assert (first.status_code, first.headers["Location"]) == (201, BASE + alert_mapping_url(A))
-    assert client.get(alert_mapping_url(A), headers=AUTH).json() == MAPPING_BODY
-
-    other = {**dict.fromkeys(MAPPING_ENTRIES), "case_key": "ticket.key"}
-    second = client.put(alert_mapping_url(A), headers=AUTH, json=other)
-    assert (second.status_code, "Location" in second.headers) == (200, False)
-    assert client.get(alert_mapping_url(A), headers=AUTH).json() == other, "a replace is whole: the earlier entries are gone"
-    assert [(e.action, e.tenant_id, e.target) for e in store.audit_events] == [("alert_mapping.update", A, A)] * 2
-
-
-@pytest.mark.parametrize(("body", "entry"), [
-    ({**MAPPING_BODY, "case_key": " rule.id"}, "case_key"),
-    ({**MAPPING_BODY, "summary": "rule..id"}, "summary"),
-    ({**MAPPING_BODY, "summary": ""}, "summary"),
-    ({**MAPPING_BODY, "summary": 7}, "summary"),
-    ({**MAPPING_BODY, "severity": "rule.level"}, "severity"),
-    ({k: v for k, v in MAPPING_BODY.items() if k != "description"}, "description"),
-    ({}, "signature"),
-], ids=["whitespace", "empty-segment", "empty-path", "not-a-string", "unknown-entry", "missing-entry", "empty-body"])
-def test_1345_over_the_fake_an_invalid_or_incomplete_mapping_is_refused_alike_and_writes_nothing(
-        body: dict[str, Any], entry: str) -> None:
-    """The fake refuses exactly as the scripted ports do (the wire model applies the rules before any port): 422 naming
-    the entry, no audit, the saved mapping untouched; a valid PUT right after is 201 (control). (#1345 O1, M2)"""
-    client, store = _over_the_fake()
-    scripted = Api()
-    refused = client.put(alert_mapping_url(A), headers=AUTH, json=body)
-    assert refused.status_code == 422, refused.text
-    assert entry in refused.text, refused.text
-    assert (scripted.client.put(alert_mapping_url(A), headers=AUTH, json=body).json()
-            == refused.json()), "the fake and the scripted ports must give one 422"
-    assert client.get(alert_mapping_url(A), headers=AUTH).status_code == 404
-    assert store.audit_events == []
-
-    assert client.put(alert_mapping_url(A), headers=AUTH, json=MAPPING_BODY).status_code == 201
-    saved = {**MAPPING_BODY, "title": "data.title"}
-    assert client.put(alert_mapping_url(A), headers=AUTH, json=saved).status_code == 200
-    assert client.put(alert_mapping_url(A), headers=AUTH, json={**saved, "title": "a..b"}).status_code == 422
-    assert client.get(alert_mapping_url(A), headers=AUTH).json() == saved, "a refused replace left the saved mapping"
 
 
 def test_1345_an_alert_with_no_title_or_description_is_served_with_nulls() -> None:
@@ -1279,52 +1207,6 @@ def test_a_cursor_from_one_tenant_is_refused_in_another_by_the_same_person(
     assert len(api.ports.calls) == calls
 
 
-def test_paging_the_demo_store_serves_every_row_once_across_tied_timestamps() -> None:
-    store = InMemoryStore(lambda: NOW)
-    fired = [NOW, NOW, NOW, LATER, NOW - _dt.timedelta(hours=1)]
-    for n, at in enumerate(fired):
-        store.add_alert(A, ALERT.model_copy(update={"alert_id": f"a1000000-0000-4000-8000-{n:012d}", "fired_at": at}))
-    identity, _, tenants = _identity()
-    client = TestClient(create_app(ApiDeps(
-        identity=identity, tenants=tenants, frontend_origin=ORIGIN,
-        alerts=store, investigations=store, learning_jobs=store, lessons=store, systems=store,
-        writes=store, secrets=InMemorySecrets(store), checker=StubSystemChecker(),
-        artifact_links=StubArtifactLinks(), offboarding=InMemoryOffboarding(tenants, store, lambda: NOW),
-        alert_mapping=store, audit=store,
-    )), base_url=BASE)
-    seen: list[str] = []
-    params: dict[str, Any] = {"limit": 2}
-    while True:
-        page = client.get(f"{T}/alerts", headers=AUTH, params=params).json()
-        seen += [a["alert_id"] for a in page["items"]]
-        if page["next_cursor"] is None:
-            break
-        params = {"limit": 2, "cursor": page["next_cursor"]}
-    assert seen == ["a1000000-0000-4000-8000-000000000003", "a1000000-0000-4000-8000-000000000002", "a1000000-0000-4000-8000-000000000001", "a1000000-0000-4000-8000-000000000000", "a1000000-0000-4000-8000-000000000004"]
-
-
-
-@pytest.mark.parametrize("status", ["queued", "running"])
-def test_the_demo_store_refuses_to_delete_a_live_investigation_as_the_port_promises(status: str) -> None:
-    """`delete_investigation` is a `Conflict` while the investigation is live (the port's
-    contract, which the job store keeps); an ended one is deleted. (finalize #1354)"""
-    store = InMemoryStore(lambda: NOW)
-    store.add_alert(A, ALERT)
-
-    principal = Principal(tenant_id=A, actor_id=USER)
-
-    async def scenario() -> tuple[bool, bool]:
-        inv, _ = await store.create_investigation(principal, ALERT.alert_id, "k1")
-        store.add_investigation(A, inv.model_copy(update={"status": status}))
-        with pytest.raises(Conflict):
-            await store.delete_investigation(principal, inv.investigation_id)
-        kept = await store.get_investigation(A, inv.investigation_id) is not None
-        store.add_investigation(A, inv.model_copy(update={"status": "completed"}))
-        await store.delete_investigation(principal, inv.investigation_id)
-        return kept, await store.get_investigation(A, inv.investigation_id) is None
-
-    assert anyio.run(scenario) == (True, True)
-
 def _api_routes(routes: Any) -> Any:
     """Every route under `routes` as it is served: an included router (FastAPI includes them lazily)
     yields its effective routes, which carry include-level `dependencies=` as well."""
@@ -1354,327 +1236,25 @@ def test_every_route_and_every_dependency_is_a_coroutine_function() -> None:
     assert [f"{c.__module__}.{c.__qualname__}" for c in calls if not inspect.iscoroutinefunction(c)] == []
 
 
-def test_every_fake_port_method_is_a_coroutine_function_and_the_write_port_has_no_transaction() -> None:
-    """D11/B: each fake implementing a `defender.api.ports` Protocol answers by `await`."""
+def test_every_port_method_is_a_coroutine_function_and_the_write_port_has_no_transaction() -> None:
+    """D11/B: every method each `defender.api.ports` Protocol declares answers by `await`, whether or not anything
+    implements it yet (a backing added later inherits the shape), and the real ports (`JobStorePorts`, the one object
+    the server hands every backed family) keep it for each Protocol they implement (#1496: no fakes to check)."""
     protocols = [p for p in vars(ports_module).values()
                  if isinstance(p, type) and getattr(p, "_is_protocol", False) and p.__module__ == ports_module.__name__]
-    fakes = [f for f in vars(fakes_module).values() if isinstance(f, type) and f.__module__ == fakes_module.__name__]
-    implemented = []
+    declared = {p.__name__: [n for n in vars(p) if not n.startswith("_") and callable(vars(p)[n])] for p in protocols}
+    sync = {p.__name__: [n for n in declared[p.__name__] if not inspect.iscoroutinefunction(vars(p)[n])] for p in protocols}
+    assert sync == dict.fromkeys(declared, []), sync
+    assert len(protocols) >= 9, declared
+    assert all(declared.values()), declared  # every Protocol declares a method: none is checked vacuously
+    real = job_store_module.JobStorePorts
+    implemented = [p.__name__ for p in protocols if declared[p.__name__] and all(hasattr(real, n) for n in declared[p.__name__])]
     for protocol in protocols:
-        names = [n for n in vars(protocol) if not n.startswith("_") and callable(vars(protocol)[n])]
-        for fake in fakes:
-            if names and all(hasattr(fake, n) for n in names):
-                implemented.append((fake.__name__, protocol.__name__))
-                sync = [n for n in names if not inspect.iscoroutinefunction(getattr(fake, n))]
-                assert sync == [], (fake.__name__, protocol.__name__)
-    assert len(protocols) >= 9
-    assert len(implemented) >= 9
-    assert ("InMemoryStore", "AlertsRepository") in implemented
-    assert ("InMemoryStore", "Writes") in implemented
-    assert ("InMemoryStore", "AlertMappingRepository") in implemented
+        if protocol.__name__ in implemented:
+            assert [n for n in declared[protocol.__name__] if not inspect.iscoroutinefunction(getattr(real, n))] == [], protocol
+    assert {"AlertsRepository", "Writes", "AlertMappingRepository", "Offboarding"} <= set(implemented), implemented
     assert not hasattr(ports_module, "WriteTransaction")
-    assert not hasattr(InMemoryStore, "transaction")
-
-
-# --- the demo server -----------------------------------------------------------------------
-
-
-def _session(value: str, origin: str) -> dict[str, str]:
-    return {"Cookie": f"{SESSION_COOKIE}={value}", "Origin": origin}
-
-
-def test_the_demo_seed_serves_each_named_tenant_only_its_own_records() -> None:
-    """The demo's seeded sessions reach only their own tenant."""
-    tenants = (DEMO_ONE, DEMO_TWO)
-    deps = anyio.run(demo_deps, tenants, lambda: NOW)
-    client = TestClient(create_app(deps), base_url=BASE)
-    sessions = demo_sessions(tenants)
-    seen: dict[str, set[str]] = {}
-    for tenant in tenants:
-        for role in DEMO_ROLES:
-            auth = _session(sessions[f"{tenant}-{role}"], deps.frontend_origin)
-            alerts = client.get(f"/tenants/{tenant}/alerts", headers=auth).json()["items"]
-            assert alerts, (tenant, role)
-            for alert in alerts:
-                assert client.get(f"/tenants/{tenant}/alerts/{alert['alert_id']}",
-                                  headers=auth).status_code == 200
-            other = DEMO_TWO if tenant == DEMO_ONE else DEMO_ONE
-            assert client.get(f"/tenants/{other}/alerts", headers=auth).status_code == 404
-            body = client.get("/me", headers=auth).json()
-            assert [t["tenant_id"] for t in body["tenants"]] == [tenant]
-            # A member is never an administrator; the demo seeds members only.
-            assert body["administrator"] is False
-            assert client.get("/admin/tenants", headers=auth).status_code == 403
-            seen.setdefault(tenant, set()).update(a["alert_id"] for a in alerts)
-    assert set(seen) == set(tenants)
-    assert not seen[DEMO_ONE] & seen[DEMO_TWO]
-    auth = _session(sessions[f"{DEMO_ONE}-analyst"], deps.frontend_origin)
-    systems = client.get(f"/tenants/{DEMO_ONE}/systems", headers=auth).json()["items"]
-    assert {s["system_id"]: s["has_credentials"] for s in systems} == {"siem": False, "tickets": True}
-
-
-def test_the_demo_seed_serves_every_investigation_with_an_exact_cost_beside_a_number() -> None:
-    """The demo's investigations carry `cost_is_lower_limit` over the wire: false, each beside a number. (#1377 S2, S4)"""
-    deps = anyio.run(demo_deps, (DEMO_ONE,), lambda: NOW)
-    client = TestClient(create_app(deps), base_url=BASE)
-    auth = _session(demo_sessions((DEMO_ONE,))[f"{DEMO_ONE}-analyst"], deps.frontend_origin)
-    items = client.get(f"/tenants/{DEMO_ONE}/investigations", headers=auth).json()["items"]
-    assert items
-    assert all((i["cost_is_lower_limit"], i["cost_usd"] is not None) == (False, True) for i in items), items
-
-
-def test_a_demo_session_outlasts_the_production_idle_limit() -> None:
-    """The printed demo sessions keep working through a night unused; only their own lifetime ends them."""
-    clock = {"now": NOW}
-    deps = anyio.run(demo_deps, (DEMO_ONE,), lambda: clock["now"])
-    client = TestClient(create_app(deps), base_url=BASE)
-    auth = _session(demo_sessions((DEMO_ONE,))[f"{DEMO_ONE}-analyst"], deps.frontend_origin)
-    clock["now"] = NOW + _dt.timedelta(days=3)
-    assert client.get("/me", headers=auth).status_code == 200
-    clock["now"] = NOW + _dt.timedelta(days=366)
-    assert client.get("/me", headers=auth).status_code == 401
-
-
-def test_the_demo_sign_in_port_refuses_with_a_503_problem() -> None:
-    """The demo has no Keycloak; `/auth/login` answers a 503 problem, never a redirect."""
-    client = TestClient(create_app(anyio.run(demo_deps, (DEMO_ONE,), lambda: NOW)), base_url=BASE)
-    response = client.get("/auth/login", follow_redirects=False)
-    assert response.status_code == 503
-    assert response.headers["Content-Type"] == "application/problem+json"
-    assert "Location" not in response.headers
-
-
-def test_the_demo_store_keeps_the_audit_events_its_writes_announce() -> None:
-    """The actor is the demo session's user id (read from `/me`)."""
-    deps = anyio.run(demo_deps, (DEMO_ONE,), lambda: NOW)
-    client = TestClient(create_app(deps), base_url=BASE)
-    auth = _session(demo_sessions((DEMO_ONE,))[f"{DEMO_ONE}-analyst"], deps.frontend_origin)
-    user_id = client.get("/me", headers=auth).json()["user"]["id"]
-    created = client.post(f"/tenants/{DEMO_ONE}/investigations", headers=auth,
-                          json={"alert_id": demo_id(AlertId, DEMO_ONE, "alert-0003"), "client_request_id": "r1"})
-    assert created.status_code == 201, created.text
-    events = deps.writes.audit_events  # type: ignore[attr-defined]
-    assert [(e.tenant_id, e.user_id, e.action, e.target) for e in events] == [
-        (DEMO_ONE, user_id, "investigation.start", created.json()["investigation_id"])]
-
-
-class _AuditLog(list[Any]):
-    """The demo store's `audit_events`, noting for each event whether the write it announces was visible on arrival.
-
-    Every list mutator goes through `_arrive`; `fail` makes the announcement itself raise."""
-
-    def __init__(self, *, fail: bool = False) -> None:
-        super().__init__()
-        self.fail = fail
-        self.probe: Callable[[], Awaitable[bool]] | None = None  # bound after `demo_deps` returns
-        self.visible_on_arrival: list[bool] = []
-        self.probe_errors: list[BaseException] = []
-
-    def _write_is_visible(self) -> bool:
-        probe = self.probe
-        assert probe is not None, "the probe is bound before any request"
-        seen: list[bool] = []
-
-        def run() -> None:
-            try:
-                seen.append(anyio.run(probe))  # a loop of its own, through the ports
-            except BaseException as error:  # noqa: BLE001 - carried to the test thread
-                self.probe_errors.append(error)
-
-        thread = threading.Thread(target=run)
-        thread.start()
-        thread.join(10)
-        if thread.is_alive():
-            self.probe_errors.append(TimeoutError("the visibility probe did not end in 10 s"))
-        return seen == [True]
-
-    def _arrive(self, events: Any) -> None:
-        if self.fail:
-            raise RuntimeError("the audit log refuses the announcement")
-        for _ in events:
-            self.visible_on_arrival.append(self._write_is_visible())
-
-    def append(self, event: Any) -> None:
-        self._arrive([event])
-        super().append(event)
-
-    def extend(self, events: Any) -> None:
-        events = list(events)
-        self._arrive(events)
-        super().extend(events)
-
-    def insert(self, index: Any, event: Any) -> None:
-        self._arrive([event])
-        super().insert(index, event)
-
-    def __iadd__(self, events: Any) -> _AuditLog:  # type: ignore[misc]
-        events = list(events)
-        self._arrive(events)
-        super().extend(events)
-        return self
-
-    def __setitem__(self, index: Any, value: Any) -> None:
-        self._arrive(list(value) if isinstance(index, slice) else [value])
-        super().__setitem__(index, value)
-
-
-@dataclasses.dataclass(frozen=True)
-class _DemoWrite:
-    """One announcing write as the demo serves it: a request that succeeds, one that fails, and what each announces."""
-
-    request: tuple[str, str, dict[str, Any]]
-    failing: tuple[str, str, dict[str, Any]]
-    action: str
-    target: Callable[[Any], str]
-    detail: str
-    visible: Callable[[ApiDeps, str], Awaitable[bool]]
-
-
-_DONE = demo_id(InvestigationId, DEMO_ONE, "inv-completed")
-_RUNNING = demo_id(InvestigationId, DEMO_ONE, "inv-running")
-_DEMO_T = f"/tenants/{DEMO_ONE}"
-_UNKNOWN = "f0000000-0000-4000-8000-000000000000"
-
-
-async def _a_new_investigation(deps: ApiDeps, _secret: str) -> bool:
-    return bool(await deps.investigations.list_investigations(
-        DEMO_ONE, alert_id=demo_id(AlertId, DEMO_ONE, "alert-0003"), after=None, limit=5))
-
-
-async def _a_cancelled_investigation(deps: ApiDeps, _secret: str) -> bool:
-    found = await deps.investigations.get_investigation(DEMO_ONE, _RUNNING)
-    return found is not None and found.status == "aborted"
-
-
-async def _a_deleted_investigation(deps: ApiDeps, _secret: str) -> bool:
-    return await deps.investigations.get_investigation(DEMO_ONE, _DONE) is None
-
-
-async def _a_new_learning_job(deps: ApiDeps, _secret: str) -> bool:
-    jobs = await deps.learning_jobs.list_learning_jobs(DEMO_ONE, investigation_id=_DONE, after=None, limit=10)
-    return any(job.trigger == "explicit" for job in jobs)
-
-
-async def _a_saved_mapping(deps: ApiDeps, _secret: str) -> bool:
-    return await deps.alert_mapping.get_alert_mapping(DEMO_ONE) is not None
-
-
-DEMO_WRITES = {
-    "create_investigation": _DemoWrite(
-        ("POST", f"{_DEMO_T}/investigations", {"alert_id": demo_id(AlertId, DEMO_ONE, "alert-0003"), "client_request_id": "r1"}),
-        ("POST", f"{_DEMO_T}/investigations", {"alert_id": _UNKNOWN, "client_request_id": "r1"}),
-        "investigation.start", lambda response: response.json()["investigation_id"],
-        f"alert {demo_id(AlertId, DEMO_ONE, 'alert-0003')}", _a_new_investigation),
-    "cancel_investigation": _DemoWrite(
-        ("POST", f"{_DEMO_T}/investigations/{_RUNNING}/cancel", {}), ("POST", f"{_DEMO_T}/investigations/{_DONE}/cancel", {}),
-        "investigation.cancel", lambda _response: _RUNNING, "", _a_cancelled_investigation),
-    "delete_investigation": _DemoWrite(
-        ("DELETE", f"{_DEMO_T}/investigations/{_DONE}", {}), ("DELETE", f"{_DEMO_T}/investigations/{_RUNNING}", {}),
-        "investigation.delete", lambda _response: _DONE, "", _a_deleted_investigation),
-    "create_learning_job": _DemoWrite(
-        ("POST", f"{_DEMO_T}/learning-jobs", {"investigation_id": _DONE, "client_request_id": "r1"}),
-        ("POST", f"{_DEMO_T}/learning-jobs", {"investigation_id": _UNKNOWN, "client_request_id": "r1"}),
-        "learning_job.start", lambda response: response.json()["learning_job_id"],
-        f"investigation {_DONE}; trigger=explicit", _a_new_learning_job),
-    "put_alert_mapping": _DemoWrite(
-        ("PUT", alert_mapping_url(DEMO_ONE), MAPPING_BODY), ("PUT", alert_mapping_url(DEMO_ONE), {**MAPPING_BODY, "summary": 7}),
-        "alert_mapping.update", lambda _response: DEMO_ONE, "", _a_saved_mapping),
-}
-
-
-def test_every_announcing_write_the_demo_serves_is_in_the_table() -> None:
-    """The demo cases cover exactly the stub's announcing writes. (Am-2, Am-6)"""
-    assert set(DEMO_WRITES) == WRITES
-
-
-#: The writes whose failing request reaches the write port (the job store's four): only there is "announces nothing"
-#: a claim about a refused write. The other three stop at a 422 or 404 before the port (accepted trade-off).
-_PORT_REACHED = {"create_investigation", "cancel_investigation", "delete_investigation", "create_learning_job"}
-
-
-def _demo_with_audit_log(
-    name: str, *, fail: bool = False,
-) -> tuple[_DemoWrite, ApiDeps, _AuditLog, TestClient, dict[str, str], str, str, Callable[[tuple[str, str, dict[str, Any]]], Any]]:
-    """A demo whose store's `audit_events` is an `_AuditLog`, installed before any request (every announcer appends to
-    the attribute as it stands when it announces, FC-14), probe bound after."""
-    case = DEMO_WRITES[name]
-    secret = secrets.token_hex(24)
-    deps = anyio.run(demo_deps, (DEMO_ONE,), lambda: NOW)
-    store = deps.writes
-    assert isinstance(store, InMemoryStore)
-    assert store.audit_events == [], "the seed announces nothing"
-    assert all(port is store for port in (deps.systems, deps.audit, deps.alert_mapping, deps.secrets._store))  # type: ignore[attr-defined]
-    store.audit_events = log = _AuditLog(fail=fail)
-    log.probe = lambda: case.visible(deps, secret)
-    client = TestClient(create_app(deps), base_url=BASE, raise_server_exceptions=False)
-    auth = _session(demo_sessions((DEMO_ONE,))[f"{DEMO_ONE}-analyst"], deps.frontend_origin)
-    user_id = client.get("/me", headers=auth).json()["user"]["id"]
-
-    def send(request: tuple[str, str, dict[str, Any]]) -> Any:
-        method, path, body = request
-        return client.request(method, path, headers=auth, json=body or None)
-
-    return case, deps, log, client, auth, user_id, secret, send
-
-
-@pytest.mark.parametrize("name", sorted(WRITES))
-def test_the_demo_announces_each_successful_write_once_after_it_is_visible(
-    name: str, caplog: pytest.LogCaptureFixture,
-) -> None:
-    """One audit event per successful write (action, actor, target, detail), after the write is visible, with
-    no generated secret in any record or log line; where the failing request reaches the port, it announces nothing. (Am-2, P2, FC-14)"""
-    caplog.set_level(logging.DEBUG)
-    case, deps, log, _client, _auth, user_id, secret, send = _demo_with_audit_log(name)
-
-    refused = send(case.failing)
-    assert 400 <= refused.status_code < 500, refused.text
-    if name in _PORT_REACHED:
-        assert log == [], "a failed write announces nothing"
-
-    assert not anyio.run(case.visible, deps, secret), "control: the write is not yet visible"
-    served = send(case.request)
-    assert served.status_code < 300, served.text
-    if log.probe_errors:
-        raise log.probe_errors[0]
-    [event] = log
-    assert (event.tenant_id, event.user_id, event.credential_id, event.action, event.target, event.detail) == (
-        DEMO_ONE, user_id, None, case.action, case.target(served), case.detail)
-    assert log.visible_on_arrival == [True], "the event arrives after the write is visible"
-    assert secret not in "\n".join(repr(e) for e in log) + caplog.text
-    assert anyio.run(case.visible, deps, secret), "control: the write stands"
-
-
-@pytest.mark.parametrize("name", sorted(WRITES))
-def test_a_demo_announcement_that_fails_after_the_write_answers_500_and_the_write_stands(
-    name: str,
-) -> None:
-    """A write whose audit announcement raises answers 500, and the write is visible afterwards. (Am-2)"""
-    case, deps, log, _client, _auth, _user_id, secret, send = _demo_with_audit_log(name, fail=True)
-    assert not anyio.run(case.visible, deps, secret), "control: the write is not yet visible"
-    served = send(case.request)
-    assert served.status_code == 500, served.text
-    assert log == []
-    assert anyio.run(case.visible, deps, secret), "the write stands"
-
-
-def test_the_demo_store_keys_records_by_tenant() -> None:
-    store = InMemoryStore(lambda: NOW)
-    store.add_alert(DEMO_ONE, ALERT)
-    store.add_alert(DEMO_TWO, ALERT.model_copy(update={"title": "two's"}))
-    one, two = anyio.run(store.get_alert, DEMO_ONE, "a1000000-0000-4000-8000-000000000001"), anyio.run(store.get_alert, DEMO_TWO, "a1000000-0000-4000-8000-000000000001")
-    assert one is not None
-    assert two is not None
-    assert (one.title, two.title) == ("t", "two's")
-
-
-@pytest.mark.parametrize(("tenants", "reason"), [
-    ((), "at least one tenant"),
-    ((DEMO_ONE, DEMO_ONE), "tenants repeat"),
-    (("Not_A_Tenant",), "not a tenant id"),
-])
-def test_the_demo_seed_refuses_a_bad_tenant_list(tenants: tuple[str, ...], reason: str) -> None:
-    with pytest.raises(ValueError, match=reason):
-        anyio.run(demo_deps, tenants)
+    assert not hasattr(real, "transaction")
 
 
 # --- #1083: writes are single calls; the alert mapping has its own read port; unbacked families refuse -------
@@ -1764,9 +1344,8 @@ def test_1083_control_the_same_deps_serve_the_backed_families() -> None:
 
 
 def test_1083_the_published_document_is_the_same_whichever_ports_are_passed_and_is_not_marked_stub() -> None:
-    """The demo's, a scripted and a refusing-ports document are one document; its summary does not say "not yet real". (O8, Am-2)"""
-    demo = TestClient(create_app(anyio.run(demo_deps, (DEMO_ONE,), lambda: NOW)), base_url=BASE).get("/openapi.json").json()
+    """A scripted and a refusing-ports document are one document; its summary does not say "not yet real". (O8, Am-2)"""
     refusing = _refusing_client({}).get("/openapi.json").json()
-    assert demo["paths"]
-    assert demo == refusing == Api().client.get("/openapi.json").json()
-    assert "not yet real" not in json.dumps(demo["info"]).lower()
+    assert refusing["paths"]
+    assert refusing == Api().client.get("/openapi.json").json()
+    assert "not yet real" not in json.dumps(refusing["info"]).lower()

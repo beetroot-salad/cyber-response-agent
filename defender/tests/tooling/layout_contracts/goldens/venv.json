@@ -2,7 +2,8 @@
  "_meta": {
   "base": "80888efb",
   "how": "capture_venv.py imported test_1080_venv and ran each observe_* (copies of the base tree's defender/ code with recording, dangling, directory, linked and real-directory venv interpreters planted; the real sql wrapper over a shadow duckdb) under SPEC1080_AT_BASE=1, normalised by the module's norm()",
-  "revised": "2026-10-04, post-review (human): the shims run their engines as modules and the lessons wrapper is gone, so its rows are dropped and the shim's are added (its --tags answer is the base's bytes); bin/ exec lines read `-P -m <engine module>` where they named the wrapper's path; and reexec_into_venv compares environments (sys.prefix), so a respelled path to the same venv settles at once. Every other value is the base capture, unchanged. Re-observed by running this module's observe_* functions over the implementation."
+  "revised": "2026-10-04, post-review (human): the shims run their engines as modules and the lessons wrapper is gone, so its rows are dropped and the shim's are added (its --tags answer is the base's bytes); bin/ exec lines read `-P -m <engine module>` where they named the wrapper's path; and reexec_into_venv compares environments (sys.prefix), so a respelled path to the same venv settles at once. Every other value is the base capture, unchanged. Re-observed by running this module's observe_* functions over the implementation.",
+  "revised_1496": "2026-11-14 (#1496): the demo API server `defender/api/serve.py` is deleted, so its rows are dropped; the real server (`python -m defender.api_server`) does not re-exec into the venv and is not a user here. s124's temporary tree labels are renumbered (tree-<shape>-<user index>) for the shorter user list."
  },
  "targets": {
   "unmarked": {
@@ -70,11 +71,6 @@
   }
  },
  "s056": {
-  "api server": {
-   "rc": 0,
-   "out": "EXEC\tdefender-venv\t<TMP>/tree/defender/.venv/bin/python3\t<TMP>/tree/defender/api/serve.py\t--alpha\ttwo words\n",
-   "err": ""
-  },
   "frontend build": {
    "rc": 0,
    "out": "EXEC\tdefender-venv\t<TMP>/tree/defender/.venv/bin/python3\t<TMP>/tree/defender/cli/learning/lessons_page.py\t--alpha\ttwo words\n",
@@ -109,7 +105,7 @@
   }
  },
  "s124": {
-  "api server, linked venv, base interpreter": {
+  "frontend build, linked venv, base interpreter": {
    "starts": [
     "<BASE-PY>",
     "<TMP>/tree-0-0/defender/.venv/bin/python3"
@@ -118,19 +114,10 @@
    "rc": null,
    "out": null
   },
-  "frontend build, linked venv, base interpreter": {
-   "starts": [
-    "<BASE-PY>",
-    "<TMP>/tree-0-1/defender/.venv/bin/python3"
-   ],
-   "exec lines": [],
-   "rc": null,
-   "out": null
-  },
   "frontend serializer, linked venv, base interpreter": {
    "starts": [
     "<BASE-PY>",
-    "<TMP>/tree-0-2/defender/.venv/bin/python3"
+    "<TMP>/tree-0-1/defender/.venv/bin/python3"
    ],
    "exec lines": [],
    "rc": null,
@@ -144,7 +131,7 @@
    "rc": 0,
    "out": "source_signature:\n  sig-one                          1\ntelemetry_source:\n  sensor-one                       1\nattack_phase:\n  phase-one                        1\n"
   },
-  "api server, real-directory venv, base interpreter": {
+  "frontend build, real-directory venv, base interpreter": {
    "starts": [
     "<BASE-PY>",
     "<TMP>/tree-1-0/defender/.venv/bin/python3"
@@ -153,19 +140,10 @@
    "rc": null,
    "out": null
   },
-  "frontend build, real-directory venv, base interpreter": {
-   "starts": [
-    "<BASE-PY>",
-    "<TMP>/tree-1-1/defender/.venv/bin/python3"
-   ],
-   "exec lines": [],
-   "rc": null,
-   "out": null
-  },
   "frontend serializer, real-directory venv, base interpreter": {
    "starts": [
     "<BASE-PY>",
-    "<TMP>/tree-1-2/defender/.venv/bin/python3"
+    "<TMP>/tree-1-1/defender/.venv/bin/python3"
    ],
    "exec lines": [],
    "rc": null,
@@ -218,9 +196,6 @@
    "out": "EXEC\tdefender-venv\t<TMP>/tree-0/defender/.venv/bin/python3\tthe-script.py\t--tags\ttwo words\n",
    "err": ""
   },
-  "api server, unset": [
-   "EXEC\tdefender-venv\t<TMP>/tree-0/defender/.venv/bin/python3\t<TMP>/tree-0/defender/api/serve.py\t--alpha\ttwo words"
-  ],
   "frontend build, unset": [
    "EXEC\tdefender-venv\t<TMP>/tree-0/defender/.venv/bin/python3\t<TMP>/tree-0/defender/cli/learning/lessons_page.py\t--alpha\ttwo words"
   ],
@@ -238,9 +213,6 @@
    "out": "EXEC\tdefender-venv\t<TMP>/tree-1/defender/.venv/bin/python3\tthe-script.py\t--tags\ttwo words\n",
    "err": ""
   },
-  "api server, empty": [
-   "EXEC\tdefender-venv\t<TMP>/tree-1/defender/.venv/bin/python3\t<TMP>/tree-1/defender/api/serve.py\t--alpha\ttwo words"
-  ],
   "frontend build, empty": [
    "EXEC\tdefender-venv\t<TMP>/tree-1/defender/.venv/bin/python3\t<TMP>/tree-1/defender/cli/learning/lessons_page.py\t--alpha\ttwo words"
   ],
@@ -258,7 +230,6 @@
    "out": "NO-EXEC under <PY>\n",
    "err": ""
   },
-  "api server, 0": [],
   "frontend build, 0": [],
   "frontend serializer, 0": [],
   "bin/defender-lessons, 0": [
@@ -272,7 +243,6 @@
    "out": "NO-EXEC under <PY>\n",
    "err": ""
   },
-  "api server, false": [],
   "frontend build, false": [],
   "frontend serializer, false": [],
   "bin/defender-lessons, false": [
@@ -286,7 +256,6 @@
    "out": "NO-EXEC under <PY>\n",
    "err": ""
   },
-  "api server, 1": [],
   "frontend build, 1": [],
   "frontend serializer, 1": [],
   "bin/defender-lessons, 1": [

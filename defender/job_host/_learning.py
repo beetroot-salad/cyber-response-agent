@@ -491,7 +491,7 @@ def _oracle_box(session: Session, _ident: str) -> Any:
     _io.guarded_mkdir(folder, base=state.scratch)
     try:
         return box.start_oracle_box(env=os.environ, tenant_id=session.tenant_id, folder=folder,
-                                    docker=session.docker)
+                                    docker=session.docker, data_root=session.root_folder)
     except box.BoxStartRefused as refused:
         raise box.BoxFault(str(refused)) from None
 

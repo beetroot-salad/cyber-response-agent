@@ -78,7 +78,7 @@ class LifecycleWorld(World):
         self.forge, self.integration, self.openbao = self.fakes.forge, self.fakes.integration, self.fakes.openbao
         self.git, self.publish = self.fakes.git, self.fakes.publish
         self.config = lifecycle_config(tmp_path, data_root)
-        super().__init__(administrators=[OPS], start=False)
+        super().__init__(administrators=[OPS], start=False, database=True)  # #1496: offboarding is the real store's
         self.call(self.service.start)
         self.send_pending()
         self.ops = self.sign_in_admin()
@@ -145,6 +145,18 @@ class LifecycleWorld(World):
 
     def generations(self, tenant: str) -> list[Any]:
         return self.call(self.tenants.generations, tenant)
+
+    def set_generation(self, tenant: str, status: str, **fields: Any) -> None:
+        """Overwrite columns of the tenant's `status` generation row in place, as a damaged or older row would read
+        (test support, by SQL: no repository writes a generation's fields after the fact)."""
+        from defender.tests.support.shared._postgres1339 import execute
+
+        assert self.dsn is not None
+        assert fields
+        names = ", ".join(f"{name} = %s" for name in fields)
+        values = tuple(str(v) if isinstance(v, Path) else v for v in fields.values())
+        execute(self.dsn, f"UPDATE tenancy.generations SET {names} WHERE tenant_id = %s AND status = %s",  # noqa: S608 — test-owned names
+                (*values, tenant, status))
 
     def live(self, tenant: str) -> Any:
         [live] = [g for g in self.generations(tenant) if g.status == "live"]

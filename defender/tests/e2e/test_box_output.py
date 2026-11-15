@@ -33,6 +33,7 @@ from defender.tests.support.sandbox._spec1092 import make_run_dir
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
 from defender.tests.runtime.providers import _spec1243 as P
 from defender.tests.support.tenancy._host1214 import TEST_TENANT
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
 pytestmark = pytest.mark.e2e
 
@@ -763,7 +764,7 @@ def test_live_box_output_past_the_budget_is_a_result_and_past_the_helper_is_a_fe
     try:
         run_dir = make_run_dir(root, name="run-1205")
         executor = box.start_box(run_dir, Path(__file__).resolve().parents[2],
-                                 spec=box.BoxSpec(runtime=runtime), tenant_id=TEST_TENANT)
+                                 spec=box.BoxSpec(runtime=runtime), tenant_id=TEST_TENANT, data_root=current_data_root())
         assert executor.sandboxed
         cwd = Path("/runs/current")
         control = executor.run_parsed(bash_exec.parse("echo answer"), command="echo answer", cwd=cwd, timeout=30)

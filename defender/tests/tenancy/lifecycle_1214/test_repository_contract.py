@@ -31,10 +31,14 @@ from typing import Any
 
 import pytest
 
+from defender.tests.support.tenancy._active1214 import offboard_on_database
+from defender.tests.support.tenancy._twin1496 import offboard_twin
+
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.shared._pglocks1339 import TIMEOUT, connections, until, until_blocked
 from defender.tests.support.shared._postgres1339 import database, execute
 from defender.tests.support.shared._postgres1339 import execute
+from defender.tests.support.tenancy._twin1496 import seed_tenant
 
 
 pytestmark = pytest.mark.anyio
@@ -117,13 +121,19 @@ class Store:
         if self.dsn is None:
             extra = {k: v for k, v in dict(pending_action=action, step=step, step_actor=actor, failure=failure,
                                            repo=repo, origin=origin).items() if v is not None}
-            await self.twin.add_tenant(tenant, created_at=SEEDED_AT, state=state, **extra)
+            await seed_tenant(self.twin, tenant, created_at=SEEDED_AT, state=state, **extra)
             return
         execute(self.dsn, """INSERT INTO tenancy.tenants (id, created_at, state, pending_action, step, step_actor, failure)
                              VALUES (%s, %s, %s, %s, %s, %s, %s)""", (tenant, SEEDED_AT, state, action, step, actor, failure))
         if repo is not None:
             execute(self.dsn, "INSERT INTO tenancy.forge_wiring (tenant_id, repo, origin) VALUES (%s, %s, %s)",
                     (tenant, repo, origin or ORIGIN))
+
+    async def offboard(self, tenant: str) -> Any:
+        """Move `tenant` to `offboarding` (#1496: the twin's seeder, or tenancy's own `offboard` on the database)."""
+        if self.dsn is None:
+            return await offboard_twin(self.twin, tenant)
+        return await offboard_on_database(self.dsn, tenant)
 
 
 async def _build(dsn: str | None) -> tuple[Any, Any]:
@@ -309,31 +319,6 @@ async def test_a_second_resume_is_a_conflict(store):
     await _refused(store.repo.request_resume(T1), "Conflict")
 
 
-# --- request_offboard -------------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("name", ["creating", "creating-failed", "backfilled", "active", "rotating", "rotating-failed"])
-async def test_offboard_from_creating_or_active_replaces_any_pending_action_and_clears_the_failure(store, name):
-    """request_offboard from `creating`|`active` sets `offboarding`, `offboard` pending, first step `offboard` (service), no failure (RC-3, DC-3)."""
-    await store.seed(T1, ALL_ROWS[name])
-    await store.seed(T2, ALL_ROWS[name])
-    before = _values(await store.repo.tenant(T1))
-    record = await store.repo.request_offboard(T1, now=NOW)
-    assert _job(record) == ("offboarding", "offboard", "offboard", "service", None)
-    assert (record.id, record.created_at) == (T1, before["created_at"])
-    assert _values(await store.repo.tenant(T1)) == _values(record)
-    assert _job(await store.repo.tenant(T2)) == ALL_ROWS[name]  # only the addressed tenant
-
-
-@pytest.mark.parametrize("name", ["offboarding", "offboarding-failed", "offboarded", "deleting"])
-async def test_offboard_from_any_other_state_is_a_conflict_and_changes_nothing(store, name):
-    """request_offboard is refused (409) unless the tenant is `creating` or `active`; the row stays (RC-3)."""
-    await store.seed(T1, ALL_ROWS[name])
-    before = _values(await store.repo.tenant(T1))
-    await _refused(store.repo.request_offboard(T1, now=NOW), "Conflict")
-    assert _values(await store.repo.tenant(T1)) == before
-
-
 # --- #1360: the tenancy `offboard` operation ---------------------------------------------------------------------
 
 REPO = Path(__file__).resolve().parents[4]
@@ -398,10 +383,11 @@ class _Abandon(Exception):
 
 @pytest.mark.postgres
 @pytest.mark.parametrize("kind", ["connection", "session"])
-@pytest.mark.parametrize("name", ["creating", "creating-failed", "active", "rotating-failed"])
-async def test_1360_offboard_moves_the_tenant_on_a_connection_or_a_session_like_request_offboard(pg_store, engine, kind, name):
-    """`offboard(executor, tenant)` leaves what `request_offboard` leaves, returns a record that outlives the executor,
-    and touches no other tenant. (#1360 D1, D6a)"""
+@pytest.mark.parametrize("name", ["creating", "creating-failed", "backfilled", "active", "rotating", "rotating-failed"])
+async def test_1360_offboard_moves_the_tenant_on_a_connection_or_a_session(pg_store, engine, kind, name):
+    """`offboard(executor, tenant)` from `creating`|`active` sets `offboarding`, `offboard` pending, first step `offboard`
+    (service), no failure, replacing any pending action; returns a record that outlives the executor and touches no
+    other tenant. (#1360 D1, D6a, RC-3, DC-3; #1496: the one offboard transition, so its cases are all here)"""
     from defender.tenancy import offboard
 
     await pg_store.seed(T1, ALL_ROWS[name])
@@ -437,7 +423,7 @@ async def test_1360_offboard_is_part_of_the_callers_transaction_and_a_rollback_t
 @pytest.mark.postgres
 @pytest.mark.parametrize("kind", ["connection", "session"])
 @pytest.mark.parametrize("name", ["offboarding", "offboarding-failed", "offboarded", "deleting", "absent"])
-async def test_1360_offboard_refuses_what_request_offboard_refuses_with_tenancys_own_errors(pg_store, engine, kind, name):
+async def test_1360_offboard_refuses_with_tenancys_own_errors(pg_store, engine, kind, name):
     """An absent tenant is `NotFound`, any state but `creating`/`active` a `Conflict`; the row stays. (#1360 D1, D6a)"""
     from defender.tenancy import Conflict, NotFound, offboard
 
@@ -486,11 +472,11 @@ async def test_a_rotate_request_after_a_rotate_request_is_a_conflict(store):
 # --- unknown tenant, and requests after requests ----------------------------------------------------
 
 
-@pytest.mark.parametrize("ask", ["request_resume", "request_rotate", "request_offboard"])
+@pytest.mark.parametrize("ask", ["request_resume", "request_rotate", "offboard"])
 async def test_a_request_for_an_unknown_tenant_is_not_found_and_stores_nothing(store, ask):
     """Every request names its tenant; an absent one is NotFound (404), and the repository gains no row (RC-3)."""
     await store.seed(T1, ACTIVE)
-    call = store.repo.request_offboard(ABSENT, now=NOW) if ask == "request_offboard" else getattr(store.repo, ask)(ABSENT)
+    call = store.offboard(ABSENT) if ask == "offboard" else getattr(store.repo, ask)(ABSENT)
     await _refused(call, "NotFound")
     assert [t.id for t in await store.repo.tenants()] == [T1]
 
@@ -499,9 +485,9 @@ async def test_requests_chain_through_the_lifecycle(store):
     """create -> (seeded active) rotate -> offboard -> rotate/offboard refused: each request sees the previous one's row (RC-3)."""
     await store.seed(T1, ACTIVE)
     await store.repo.request_rotate(T1)
-    assert _job(await store.repo.request_offboard(T1, now=NOW))[:2] == ("offboarding", "offboard")
+    assert _job(await store.offboard(T1))[:2] == ("offboarding", "offboard")
     await _refused(store.repo.request_rotate(T1), "Conflict")
-    await _refused(store.repo.request_offboard(T1, now=NOW), "Conflict")
+    await _refused(store.offboard(T1), "Conflict")
     await _refused(store.repo.request_resume(T1), "Conflict")
 
 
@@ -548,7 +534,6 @@ READS = {
     "tenants": lambda r: r.tenants(),
     "request_create": lambda r: r.request_create(now=NOW),
     "request_rotate": lambda r: r.request_rotate(T1),
-    "request_offboard": lambda r: r.request_offboard(T1, now=NOW),
     "forge_wiring": lambda r: r.forge_wiring(T1),
 }
 
@@ -679,8 +664,9 @@ async def _holding_tenant(dsn: str, tenant: str) -> AsyncIterator[None]:
             await conn.commit()
 
 
-def _ask(repo: Any, request: str, tenant: str) -> Any:
-    return repo.request_offboard(tenant, now=NOW) if request == "offboard" else getattr(repo, f"request_{request}")(tenant)
+def _ask(repo: Any, request: str, tenant: str, dsn: str) -> Any:
+    """`request` on `repo`; the offboard, tenancy's own `offboard` on a connection of its own (#1496)."""
+    return offboard_on_database(dsn, tenant) if request == "offboard" else getattr(repo, f"request_{request}")(tenant)
 
 
 RACES = {"rotate": ACTIVE, "resume": CREATING_FAILED, "offboard": ACTIVE}
@@ -698,7 +684,7 @@ async def test_two_identical_requests_racing_for_one_precondition_apply_exactly_
         async with _holding_tenant(pg_store.dsn, T1):
             tasks = []
             for count, repo in enumerate((pg_store.repo, other), start=1):
-                tasks.append(asyncio.ensure_future(_ask(repo, request_kind, T1)))
+                tasks.append(asyncio.ensure_future(_ask(repo, request_kind, T1, pg_store.dsn)))
                 await until_blocked(pg_store.dsn, count)
             assert not any(t.done() for t in tasks)
         results = await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), TIMEOUT)
@@ -722,7 +708,7 @@ async def test_a_rotate_cannot_overwrite_an_offboard_that_got_there_first(pg_sto
         async with _holding_tenant(pg_store.dsn, T1):
             tasks = {}
             for count, (kind, repo) in enumerate(zip(order, (pg_store.repo, other), strict=True), start=1):
-                tasks[kind] = asyncio.ensure_future(_ask(repo, kind, T1))
+                tasks[kind] = asyncio.ensure_future(_ask(repo, kind, T1, pg_store.dsn))
                 await until_blocked(pg_store.dsn, count)
         results = dict(zip(tasks, await asyncio.wait_for(
             asyncio.gather(*tasks.values(), return_exceptions=True), TIMEOUT), strict=True))
@@ -914,7 +900,7 @@ async def test_a_malformed_tenant_id_is_refused_by_every_read_and_request(pg_sto
     await store.seed(T1)
     assert (await store.repo.tenant(T1)).id == T1, "control: a real id is found"
     for call in (store.repo.tenant(bad), store.repo.request_resume(bad), store.repo.request_rotate(bad),
-                 store.repo.request_offboard(bad, now=NOW)):
+                 store.offboard(bad)):
         with pytest.raises(Exception):  # noqa: B017, PT011 — whatever the driver raises, so long as it is loud
             await call
     assert [t.id for t in await store.repo.tenants()] == [T1]

@@ -36,6 +36,7 @@ from defender.tests.integrations.credential_proxy_1163 import _tenant as T
 from defender.tests.integrations.credential_proxy_1163._target import ACCESS_FILE
 from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER, PublishedTenant, published_tenant
 from defender.tests.support.tenancy._mapping1345 import PLANTED_ALERT_MAPPING, seed_twin
+from defender.tests.support.tenancy._twin1496 import seed_tenant
 
 #: A signature no honest token can lose: a census looks for it in every channel.
 SIGNATURE_CANARY = "CANARY-REQUEST-SIGNATURE-1163"
@@ -308,7 +309,7 @@ class Records:
         self.twin: Any = InMemoryTenantRepository()
         self._active = active
         for tenant, generations in tenants.items():
-            active.run_sync(self.twin.add_tenant(
+            active.run_sync(seed_tenant(self.twin, 
                 tenant, created_at=active.CREATED, state="active", repo=f"tenants/{tenant}",
                 origin=active._origin_of(Path(data_root), tenant, None)))  # noqa: SLF001
             for fields in generations:

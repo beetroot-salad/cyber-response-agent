@@ -24,7 +24,7 @@ import uvicorn.server
 
 from defender.api.app import create_app
 from defender.api.config_records import ConfigCredentials, ConfigRecords
-from defender.api.ports import ApiDeps
+from defender.api.ports import ApiDeps, SecretStore, SystemsRepository
 from defender.api.job_store import JobStorePorts
 from defender.api.refusing import Refusing
 from defender.configuration.issuer import DEPLOYMENT_ISSUER
@@ -39,6 +39,7 @@ from defender.kit.internal_http import internal_async_client, tls_trust
 from defender.migrations import DatabaseUnreachable, RevisionMismatch, check_version
 from defender.system_records import RecordStore
 from defender.system_rules import Catalog, judge_records
+from defender.tenancy import TenantRepository
 from defender.tenancy.models import TenantRecords
 from defender.tenancy.postgres import PostgresTenantRepository
 
@@ -194,13 +195,16 @@ def _bind(settings: Settings) -> socket.socket:
     return sock
 
 
-def _api_deps(settings: Settings, identity: IdentityService, tenants: PostgresTenantRepository,  # noqa: PLR0913 — the wiring
-              ports: JobStorePorts, records: RecordStore, catalog: Catalog, secrets: OpenBaoSecrets) -> ApiDeps:
+def api_deps(*, identity: IdentityService, tenants: TenantRepository, ports: JobStorePorts, frontend_origin: str,
+             systems: SystemsRepository, secrets: SecretStore) -> ApiDeps:
+    """The app's ports as the program composes them: the job store's ports back every family the store serves, the
+    tenant's records and their credentials are `systems` and `secrets` (the program's are over the record store and
+    OpenBao, #1470), the rest refuse (the connection check, the blob store, lessons). The API test worlds compose
+    through this too (#1496), so they cannot drift."""
     return ApiDeps(
-        identity=identity, tenants=tenants, frontend_origin=settings.frontend_origin,
+        identity=identity, tenants=tenants, frontend_origin=frontend_origin,
         alerts=ports, investigations=ports, learning_jobs=ports, alert_mapping=ports, writes=ports,
-        offboarding=ports, lessons=Refusing(_LESSONS),
-        systems=ConfigRecords(records, tenants, catalog, secrets), secrets=ConfigCredentials(records, secrets),
+        offboarding=ports, lessons=Refusing(_LESSONS), systems=systems, secrets=secrets,
         checker=Refusing(_CHECK), artifact_links=Refusing(_BLOB_STORE), audit=Refusing(_BLOB_STORE))
 
 
@@ -297,7 +301,9 @@ async def serving(settings: Settings, *, transport: httpx.AsyncBaseTransport | N
                 stack.push_async_callback(records.close)  # like the job store, it outlives the lifespan
                 identity = IdentityService(people, signin=signin, mail=LoggedMail(), clock=_wall_clock,
                                            bootstrap=settings.administrators, programs=programs)
-                app = create_app(_api_deps(settings, identity, tenants, JobStorePorts(store), records, catalog, secrets))
+                app = create_app(api_deps(
+                    identity=identity, tenants=tenants, ports=JobStorePorts(store), frontend_origin=settings.frontend_origin,
+                    systems=ConfigRecords(records, tenants, catalog, secrets), secrets=ConfigCredentials(records, secrets)))
             async with steps.step("binding the listening socket"):
                 sock = _bind(settings)
                 stack.callback(sock.close)

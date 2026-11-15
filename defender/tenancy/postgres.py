@@ -36,7 +36,7 @@ from defender.database import async_engine, url
 from defender.records.formats import AlertMapping, TenantId
 from defender.tenancy.models import (SCHEMA, AlertMappingRow, CaseRecord, CaseVersionRow, ForgeWiring, Generation,
                                      MergeEligibility, MergeEligibilityRow, PublishStatus, SystemVersionRow,
-                                     TenantRecord, TenantRecords, offboard)
+                                     TenantRecord, TenantRecords)
 from defender.tenancy.repository import (
     ALL,
     KEEP,
@@ -184,10 +184,6 @@ class PostgresTenantRepository:
     async def request_resume(self, tenant_id: TenantId) -> TenantRecord:
         return await self._request(
             tenant_id, _T.c.failure.is_not(None), "nothing to resume", failure=None)
-
-    async def request_offboard(self, tenant_id: TenantId, *, now: _dt.datetime) -> TenantRecord:
-        async with self._engine.begin() as conn:
-            return await offboard(conn, tenant_id)
 
     async def request_rotate(self, tenant_id: TenantId) -> TenantRecord:
         return await self._request(

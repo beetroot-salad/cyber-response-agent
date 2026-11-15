@@ -23,7 +23,7 @@ from defender.tests.support.tenancy._active1214 import (
     insert_active_tenant,
 )
 from defender.tests.support.tenancy import _host1214 as H
-from defender.tests.support.tenancy._mapping1345 import FIXTURE_ALERT_MAPPING, seed_twin
+from defender.tests.support.tenancy._mapping1345 import FIXTURE_ALERT_MAPPING, seed_postgres
 from defender.tests.tenancy.tenant_1108_p4.conftest import p4_tenant  # noqa: F401 — fixture
 from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — fixture
 
@@ -296,7 +296,7 @@ def test_run_start_refuses_a_tenant_being_offboarded_through_the_api(tmp_path, d
         from defender.records.formats import ALERT_MAPPING_MISSING
         unmapped = _run_start(tenant, tmp_path, world.directory())
         assert ALERT_MAPPING_MISSING in " ".join(unmapped.split()), unmapped
-        seed_twin(world.tenants, tenant, FIXTURE_ALERT_MAPPING)
+        seed_postgres(world.dsn, tenant, FIXTURE_ALERT_MAPPING)
         assert _admits(_run_start(tenant, tmp_path, world.directory()))
         assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
         refused = _run_start(tenant, tmp_path, world.directory())

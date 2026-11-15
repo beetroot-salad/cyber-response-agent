@@ -25,6 +25,7 @@ from defender.tests.support.runtime.state._1255_view import MODEL_RUN
 from defender.tests.support.sandbox._docker import daemon_reachable, docker_runtimes, dood_anchor, is_dood
 from defender.tests.support.storage._alert_plant import plant_alert
 from defender.tests.support.tenancy._host1214 import TEST_TENANT
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
 pytestmark = pytest.mark.e2e
 
@@ -86,7 +87,7 @@ def _flag(argv: list[str], name: str) -> str:
 
 def _investigation_argv(tmp_path: Path) -> list[str]:
     rec = AliasProbeDocker()
-    box_mod.start_box(_run_dir(tmp_path), DEFENDER, docker=rec, tenant_id=TEST_TENANT)
+    box_mod.start_box(_run_dir(tmp_path), DEFENDER, docker=rec, tenant_id=TEST_TENANT, data_root=current_data_root())
     assert rec.create_argv is not None, "start_box never issued `docker run`"
     return rec.create_argv
 
@@ -101,7 +102,7 @@ def _lane_argv(tmp_path: Path) -> list[str]:
             mounts=(box_mod.Mount(source=src, target=src, writable=True),),
             workdir=src,
             spec=dataclasses.replace(box_mod.BoxSpec.from_env(os.environ), rootfs="python:3.11-slim"),
-            tenant_id=TEST_TENANT,
+            tenant_id=TEST_TENANT, data_root=current_data_root(),
         ),
         docker=rec,
     )
@@ -136,7 +137,7 @@ def test_both_builders_hand_the_box_its_cap_in_the_environment(builder, memory, 
         monkeypatch.setenv(var, value)
     if builder in ("host-run", "host-fallback"):
         request = box_mod.BoxRequest(name="defender-lane-cap", workdir=tmp_path, defender_dir=DEFENDER, spec=spec,
-                                     tenant_id=TEST_TENANT, env=named)
+                                     tenant_id=TEST_TENANT, env=named, data_root=current_data_root())
         env = (_host_env.run_env(DEFENDER, _run_dir(tmp_path)) if builder == "host-run"
                else _host_fallback_env(request))
         assert "DEFENDER_DIR" in env, "control: the builder ran"
@@ -148,7 +149,7 @@ def test_both_builders_hand_the_box_its_cap_in_the_environment(builder, memory, 
                             lane=_run_lane_mounts(run_dir, DEFENDER, None)).argv
     else:
         request = box_mod.BoxRequest(name="defender-lane-cap", workdir=tmp_path, defender_dir=DEFENDER,
-                                     spec=spec, tenant_id=TEST_TENANT, env=named)
+                                     spec=spec, tenant_id=TEST_TENANT, env=named, data_root=current_data_root())
         argv = _render_argv(request).argv
     assert _flag(argv, "--memory") == memory, "control: the cap itself reaches docker"
     given = [argv[i + 1] for i, word in enumerate(argv) if word == "--env" and argv[i + 1].startswith("DEFENDER_BOX_MEMORY=")]
@@ -341,7 +342,7 @@ def boxed(base: Path, runtime: str) -> Iterator:
     def start(**limits: object) -> box_mod.BoxExecutor:
         box = box_mod.start_box(
             _run_dir(base), DEFENDER, spec=box_mod.BoxSpec(runtime=runtime, **limits),
-            docker=box_mod.run_docker, tenant_id=TEST_TENANT,
+            docker=box_mod.run_docker, tenant_id=TEST_TENANT, data_root=current_data_root(),
         )
         assert box.sandboxed, "start_box returned the unsandboxed host fallback, not a box"
         started.append(box)

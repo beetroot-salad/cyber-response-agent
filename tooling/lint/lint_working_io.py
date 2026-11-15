@@ -235,6 +235,14 @@ RESIDUE = {
     # The finalizer holds this cleanup callable; the census records that reference.
     ("box._stage", "staged_executor", "shutil.rmtree"): (1, "model_view", ('<reference>',)),
     ("box._image", "_read", ".read_bytes"): (1, "nonrecord", ('tree / name',)),
+    # #1469: the box check's own folder under the data root, made, listened in and removed per check; never a run record.
+    # The one rule for the product's folders under the data root (the box check's and the job sockets'); never a run record.
+    ("box._data_folder", "make_data_folder", ".mkdir"): (2, "probe", ('above', 'folder')),
+    ("box._data_folder", "make_data_folder", "os.rmdir"): (1, "probe", ('folder',)),
+    ("box._check", "_Listener.__init__", "os.open"): (1, "probe", ('folder',)),
+    ("box._check", "_Listener.close", "os.unlink"): (1, "probe", ('SOCKET_NAME',)),
+    ("box._check", "_clear_check_folder", "os.rmdir"): (1, "probe", ('folder',)),
+    ("box._check", "_clear_check_folder", "shutil.rmtree"): (1, "probe", ('folder',)),
     # #1108 P3 (D7): a read-only mount is verified by reading an existing host file back
     # (a code mount's `MOUNT_CHECK` or a data mount's first regular file) — never a run record.
     ("box._lifecycle", "_check_mount_sentinel", "read_text_utf8"): (1, "probe", ('source / relative',)),

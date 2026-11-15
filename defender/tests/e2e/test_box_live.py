@@ -24,6 +24,7 @@ pytest.importorskip("pydantic_ai")
 from defender.execution import bash_exec  # noqa: E402
 from defender import box as box_mod  # noqa: E402
 from defender.tests.support.tenancy._host1214 import TEST_TENANT
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
 pytestmark = [pytest.mark.e2e, pytest.mark.live, requires_live_box]
 
@@ -49,7 +50,7 @@ def _run_cycle_box(tmp_path):
 # Read-only mounts and traversal containment
 def test_single_non_overlapping_readonly_mount_refuses_a_direct_in_box_write(tmp_path):
     run_dir = make_run_dir(tmp_path)
-    box = box_mod.start_box(run_dir, DEFENDER, docker=box_mod.run_docker, tenant_id=TEST_TENANT)
+    box = box_mod.start_box(run_dir, DEFENDER, docker=box_mod.run_docker, tenant_id=TEST_TENANT, data_root=current_data_root())
     try:
         res = _run(box, "printf x > /defender/spec-probe", cwd=Path("/runs/current"))
         assert res.rc != 0, "a write to the ro defender mount was NOT refused"
@@ -96,7 +97,7 @@ def test_two_mounts_with_nested_or_overlapping_sources_and_targets(tmp_path):
 
 def test_tmpfs_contents_persist_across_execs_within_one_box_lifetime(tmp_path):
     run_dir = make_run_dir(tmp_path)
-    box = box_mod.start_box(run_dir, DEFENDER, docker=box_mod.run_docker, tenant_id=TEST_TENANT)
+    box = box_mod.start_box(run_dir, DEFENDER, docker=box_mod.run_docker, tenant_id=TEST_TENANT, data_root=current_data_root())
     try:
         _run(box, "printf shared > /tmp/spec-shared", cwd=Path("/runs/current"))
         res = _run(box, "cat /tmp/spec-shared", cwd=Path("/runs/current"))
@@ -126,7 +127,7 @@ def test_box_start_probes_the_granted_repertoire_by_running_it(
     tmp_path, case, cmd, rc_why, contains, contains_why
 ):
     run_dir = make_run_dir(tmp_path)
-    box = box_mod.start_box(run_dir, DEFENDER, docker=box_mod.run_docker, tenant_id=TEST_TENANT)
+    box = box_mod.start_box(run_dir, DEFENDER, docker=box_mod.run_docker, tenant_id=TEST_TENANT, data_root=current_data_root())
     try:
         res = _run(box, cmd, cwd=Path("/runs/current"))
         assert res.rc == 0, rc_why
@@ -138,7 +139,7 @@ def test_box_start_probes_the_granted_repertoire_by_running_it(
 
 def test_pinned_lesson_scripts_reject_arbitrary_argv_read(tmp_path):
     run_dir = make_run_dir(tmp_path)
-    box = box_mod.start_box(run_dir, DEFENDER, docker=box_mod.run_docker, tenant_id=TEST_TENANT)
+    box = box_mod.start_box(run_dir, DEFENDER, docker=box_mod.run_docker, tenant_id=TEST_TENANT, data_root=current_data_root())
     try:
         allowed = _run(box, "/defender/bin/defender-lessons .", cwd=Path("/runs/current"))
         assert allowed.rc == 0, "the pinned lesson script did not run on its intended operand (positive control)"

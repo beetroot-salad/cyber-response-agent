@@ -44,6 +44,7 @@ from defender.tests.support.api._identity1306 import (  # noqa: E402
     two_tenants,
     user_id,
 )
+from defender.tests.support.identity._seed1496 import seed_membership
 
 
 @pytest.fixture
@@ -107,7 +108,7 @@ def test_first_sign_in_logs_an_accept_only_for_the_invitations_it_accepted(audit
     open_row = world.invite(ann, T1, NEW).json()["id"]
     world.send_pending()
     new_user = world.call(world.repo.user_by_email, NEW)
-    world.call(world.repo.add_membership, new_user.id, T2, status="invited", invited_by=None,
+    world.call(seed_membership, world.raw_repo, new_user.id, T2, status="invited", invited_by=None,
                               created_at=world.clock.now - SEVEN_DAYS - DAY, expires_at=world.clock.now - SECOND)
     mark = audit.mark()
     new = world.sign_in(NEW)

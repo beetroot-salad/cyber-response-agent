@@ -8,7 +8,6 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-import pytest
 
 from defender.tests.tooling.layout_contracts import _spec1080 as S
 from defender.tests.sandbox import test_entrypoint_closure as T1096
@@ -16,7 +15,6 @@ from defender.tests.sandbox import test_entrypoint_closure as T1096
 GOLDEN = "venv"
 
 USERS_FIXED = {
-    "api server": "defender/api/serve.py",
     "frontend build": "defender/cli/learning/lessons_page.py",
     "frontend serializer": "defender/learning/frontend/serialize.py",
 }
@@ -266,7 +264,7 @@ _SITECUSTOMIZE = (
 
 #: What each user is started with once it settles: something short and side-effect free where
 #: the program offers it (the frontend build is started with no arguments, so it refuses for want of `--tenant` before it publishes anything; #1279).
-SETTLE_ARGS = {"api server": ("--help",), "frontend build": (),
+SETTLE_ARGS = {"frontend build": (),
                "frontend serializer": ("--stdout",), "lessons shim": ("--tags",)}
 
 
@@ -526,11 +524,3 @@ def test_guard_keyed_on_a_module_name_prefix_meets_code_whose_prefix_changed(tmp
         assert top in allowed, (symbol, top, allowed)
         assert top in S.box_import_allowlist(), (symbol, top)
 
-    pytest.importorskip("fastapi")
-    serve = S.DEFENDER / "api" / "serve.py"
-    seen = _child_modules(tmp_path, (
-        "import runpy, sys\n"
-        f"sys.argv = [{str(serve)!r}, '--help']\n"
-        f"runpy.run_path({str(serve)!r}, run_name='spec1080')\n"))["modules"]
-    assert {"defender.api.app", helper} <= set(seen), seen
-    assert S.api_forbidden(seen) == [], seen

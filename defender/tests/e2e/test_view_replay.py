@@ -31,6 +31,7 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
     Turn,
     drive,
 )
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
 pytestmark = pytest.mark.e2e
 
@@ -48,7 +49,7 @@ def _unboxed(layout: V.Layout, run_dir: Path, monkeypatch) -> object:
     monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")
     agent, token = layout.staged()
     return box_mod.start_box(run_dir, layout.checkout, spec=SPEC, docker=V.FakeDocker(),
-                             tenant_agent=agent, tenant_id=layout.tenant.id, staged_token=token)
+                             tenant_agent=agent, tenant_id=layout.tenant.id, staged_token=token, data_root=current_data_root())
 
 
 def _drive(layout: V.Layout, run_dir: Path, main, monkeypatch, **kw) -> dict:

@@ -23,6 +23,7 @@ from defender.tests.support.shared.contracts._data_root_1078 import tenant_direc
 from defender.tests.support.tenancy import _systems1366 as R
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107
+from defender.tests.support.tenancy._twin1496 import seed_tenant
 
 #: A catalog adapter an upgrade removed: a record can still name it (the accept-all seeder stores what it is given).
 RETIRED = "legacy-widget"
@@ -209,7 +210,7 @@ def test_1470_o8_the_directory_reads_an_active_tenants_records_and_refuses_one_t
     twin = InMemoryTenantRepository()
     making = asyncio.run(twin.request_create(now=datetime.datetime(2026, 11, 10, tzinfo=datetime.UTC)))
     active = fixture_uuid("tenant:active-1470")
-    asyncio.run(twin.add_tenant(active, created_at=datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC), state="active"))
+    asyncio.run(seed_tenant(twin, active, created_at=datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC), state="active"))
     directory = TenantDirectory(lambda: twin)
 
     read = directory.current_records(active)

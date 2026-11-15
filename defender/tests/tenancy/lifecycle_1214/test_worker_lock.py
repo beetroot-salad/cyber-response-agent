@@ -18,6 +18,8 @@ from typing import Any
 import json
 
 import pytest
+
+from defender.tests.support.tenancy._active1214 import offboard_on_database
 import httpx
 
 pytest.importorskip('httpx')
@@ -112,7 +114,7 @@ def _pass(dsn: str, kind: str, fakes: Fakes, config: Any, *, identity: Any = Non
 
 
 def _api(dsn: str, request: str, *args: Any, **kwargs: Any) -> Any:
-    """One API request on its own ordinary connection (`request_create(now=)`, `request_offboard(t, now=)` ...)."""
+    """One API request on its own ordinary connection (`request_create(now=)`, `request_rotate(t)` ...; the offboard is `_offboard`)."""
     from defender.tenancy.postgres import PostgresTenantRepository
 
     async def run() -> Any:
@@ -121,6 +123,20 @@ def _api(dsn: str, request: str, *args: Any, **kwargs: Any) -> Any:
             return await getattr(repo, request)(*args, **kwargs)
         finally:
             await repo.close()
+    return asyncio.run(run())
+
+
+def _offboard(dsn: str, tenant: str) -> Any:
+    """The API's offboard request on its own ordinary connection: the job store's (#1360 D6, #1496), which moves the
+    tenant and ends its jobs in one transaction."""
+    from defender.jobs.store import JobStore
+
+    async def run() -> Any:
+        store = JobStore(dsn, clock=lambda: NOW)
+        try:
+            return await store.offboard_tenant(tenant, actor="ops")
+        finally:
+            await store.close()
     return asyncio.run(run())
 
 
@@ -246,7 +262,7 @@ def test_requests_are_not_blocked_by_a_running_step_and_take_no_lock(migrated_da
         assert inside.wait(WAIT), f"worker A never reached the bot step: {a_out}"
         [holder] = _advisory_holders(dsn)
         made, made_out = _in_thread(_request_create, dsn)
-        asked, asked_out = _in_thread(_api, dsn, "request_offboard", t, now=NOW)
+        asked, asked_out = _in_thread(_offboard, dsn, t)
         made.join(WAIT)
         asked.join(WAIT)
         assert not made.is_alive() and not asked.is_alive(), "a request waited for the running step"
@@ -422,7 +438,7 @@ def test_a_worker_whose_lock_connection_is_terminated_writes_nothing_and_the_nex
         assert fakes.forge.integrations[bot][-1] == audience, "the recorded audience is not the committed integration's"
         assert fakes.openbao.oidc_roles[role]["client_id"] == audience
 
-    _api(dsn, "request_offboard", t, now=NOW)
+    _offboard(dsn, t)
     _pass(dsn, "service", fakes, config, identity=identity)
     assert (fakes.forge.users, fakes.forge.integrations) == (set(), {}), "a duplicate integration outlived its bot"
     assert not (fakes.openbao.oidc_roles or fakes.openbao.approles or fakes.openbao.entities)
@@ -485,7 +501,7 @@ def test_a_failure_is_fenced_too_and_an_offboard_mid_step_makes_the_commit_miss_
     a, a_out = _in_thread(_pass, dsn, "service", fakes, config)
     try:
         assert inside.wait(WAIT), f"worker A never reached the bot step: {a_out}"
-        _api(dsn, "request_offboard", t, now=NOW)
+        _offboard(dsn, t)
         f0 = len(fakes.forge.calls)
         assert _pass(dsn, "service", fakes, config, identity=identity) == 0, "B took up a locked tenant"
         assert len(fakes.forge.calls) == f0
@@ -511,7 +527,7 @@ def test_an_offboard_mid_step_leaves_a_created_bot_to_be_destroyed_by_its_record
     a, a_out = _in_thread(_pass, dsn, "service", fakes, config)
     try:
         assert inside.wait(WAIT), f"worker A never reached the bot step: {a_out}"
-        _api(dsn, "request_offboard", t, now=NOW)
+        _offboard(dsn, t)
     finally:
         release.set()
         a.join(WAIT)
@@ -536,7 +552,7 @@ def test_the_host_actor_holds_the_same_lock_and_an_offboard_mid_prepare_makes_it
     try:
         assert inside.wait(WAIT), f"the host never reached the first publish: {host_out}"
         assert len(_advisory_holders(dsn)) == 1, "the host actor holds no lock for its step"
-        _api(dsn, "request_offboard", t, now=NOW)
+        _offboard(dsn, t)
         assert _pass(dsn, "service", fakes, config, identity=identity) == 0
     finally:
         release.set()
@@ -623,7 +639,7 @@ def test_after_a_fence_miss_another_copy_can_take_the_tenants_lock_while_the_fir
         try:
             t = (await a.request_create(now=NOW)).id
             async with a.lock(t) as held:
-                await b.request_offboard(t, now=NOW)  # the job moves under the worker
+                await offboard_on_database(migrated_database, t)  # the job moves under the worker
                 with pytest.raises(FenceMissed):
                     await held.commit(step="provider", actor="service")
             async with b.lock(t) as other:

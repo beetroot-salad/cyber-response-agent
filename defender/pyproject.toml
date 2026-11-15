@@ -85,11 +85,11 @@ box = [
     # duckdb's undeclared import for zoned timestamps — see `runtime` (#1126).
     "pytz",
 ]
-# The platform HTTP API (`defender/api/`, #1131): the stub endpoints over in-memory fakes. Its
+# The platform HTTP API (`defender/api/`, #1131; served by `python -m defender.api_server`, #1083). Its
 # own extra because the API is its own program — it never loads the investigation or learning
 # modules, and neither the runtime nor the box image needs a web framework.
 api = [
-    # fastapi, and uvicorn, the ASGI server behind `api/serve.py` (the local dev entry point).
+    # fastapi, and uvicorn, the ASGI server behind `python -m defender.api_server`.
     "defender[web]",
     # Verifies the sign-in provider's ID tokens (`identity/keycloak.py`); `[crypto]` brings the RSA
     # support RS256 needs.

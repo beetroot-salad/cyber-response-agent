@@ -6,7 +6,7 @@ import datetime as _dt
 
 import pytest
 
-from defender.api.fakes import AuditEvent
+from defender.tests.support.api._identity1306 import Announced as AuditEvent
 
 pytest.importorskip("fastapi")
 
@@ -29,6 +29,7 @@ from defender.tests.support.api._programs1307 import (  # noqa: E402
     create_program,
     issue,
     issue_key,
+    second_alert,
     issue_oauth,
     revoke,
     soar,
@@ -40,7 +41,7 @@ ORPHAN = "6d3c1f0e-0000-4000-8000-0000000000aa"
 
 
 def _store_events(s: Soar, user: str) -> list[AuditEvent]:
-    return [e for e in s.world.store.audit_events if e.user_id == user]
+    return [e for e in s.world.audit_events if e.user_id == user]
 
 
 # --- tenant writes ------------------------------------------------------------------------------------
@@ -56,7 +57,7 @@ def test_a_programs_tenant_write_names_the_program_and_the_credential_used(kind:
         client = s.world.bearer(s.world.realm.issue(credential))
     started = start_investigation(client, T1)
     assert started.status_code == 201, started.text
-    by_ann = start_investigation(s.ann, T1, "r-ann")  # the in-memory store always creates: a second, separate event
+    by_ann = start_investigation(s.ann, T1, "r-ann", alert_id=second_alert(s.world))  # its own alert: a separate event
     assert by_ann.status_code in (200, 201)
     [by_program] = [e for e in _store_events(s, s.program_id) if e.action == "investigation.start"]
     assert (by_program.credential_id, by_program.target) == (credential, started.json()["investigation_id"])
@@ -69,7 +70,7 @@ def test_each_write_names_the_credential_it_came_in_on_not_the_programs_other_on
     s = soar()
     second_id, second = issue_key(s.ann, T1, s.program_id, name="second")
     first_run = start_investigation(s.program(), T1, "r1")
-    second_run = start_investigation(s.world.bearer(second), T1, "r2")
+    second_run = start_investigation(s.world.bearer(second), T1, "r2", alert_id=second_alert(s.world))
     cancelled = s.world.bearer(second).post(f"/tenants/{T1}/investigations/{first_run.json()['investigation_id']}/cancel")
     assert cancelled.status_code in (200, 202, 204), cancelled.text
     seen = [(e.action, e.target, e.credential_id) for e in _store_events(s, s.program_id)]
@@ -245,3 +246,17 @@ def test_1454_offboarding_removes_the_tenants_active_programs_and_ends_its_peopl
     mark = audit.mark()
     s.world.call(s.world.lifecycle_service().end_tenant, T1, now=s.world.clock())
     assert audit.since(mark) == []  # idempotent: nothing left to end
+
+
+def test_two_worlds_alive_together_each_record_only_their_own_store_events_and_closing_one_spares_the_other() -> None:
+    """#1496 (review of #1519): every world reads the job store's audit log, so two alive at once must each see only
+    the events its own store announced, and closing the first must leave the second still recording."""
+    first, second = soar(), soar()
+    for world in (first, second):
+        assert start_investigation(world.ann, T1, "own").status_code == 201
+    [one] = [e.action for e in first.world.audit_events]
+    [two] = [e.action for e in second.world.audit_events]
+    assert one == two == "investigation.start"
+    first.world.close()
+    assert start_investigation(second.ann, T1, "after", alert_id=second_alert(second.world)).status_code == 201
+    assert [e.action for e in second.world.audit_events] == ["investigation.start", "investigation.start"]

@@ -27,12 +27,12 @@ from defender.tenancy.models import TenantRecord, share_tenant
 
 from .errors import CredentialCapReached, DataRuleViolation, TenantNotActive
 from .memory import (
-    CREDENTIAL_CAP, PENDING_DEADLINE, TOUCH_AFTER, check_credential_fields, check_membership_fields, first_warning,
+    CREDENTIAL_CAP, PENDING_DEADLINE, TOUCH_AFTER, check_credential_fields, first_warning,
     is_warning_threshold, secret_hash, tightest_due, warning_after,
 )
 from .models import (
-    CredentialKind, CredentialWarningDelivery, Membership, MembershipStatus, PersonRole, Program, ProgramCredential,
-    Session, User, UserStatus, normalize_email,
+    CredentialKind, CredentialWarningDelivery, Membership, MembershipStatus, Program, ProgramCredential,
+    Session, User, normalize_email,
 )
 from .ports import ExpiryWarning
 
@@ -112,20 +112,6 @@ class PostgresIdentityRepository:
             Membership.tenant_id == tenant_id, Membership.status == "active"))) is True
 
     # --- users -------------------------------------------------------------------------------
-    async def add_user(
-        self, email: str | None, *, created_at: _dt.datetime, status: UserStatus = "invited",
-        display_name: str = "", signin_account_id: str | None = None, is_platform_admin: bool = False,
-    ) -> User:
-        """Seeder."""
-        if email is None:
-            raise DataRuleViolation("a person needs an email address")
-        user = User.new(
-            email, created_at=created_at, status=status, display_name=display_name,
-            signin_account_id=signin_account_id, is_platform_admin=is_platform_admin)
-        async with self._tx() as s:
-            s.add(user)
-        return user
-
     async def ensure_user(self, email: str, *, now: _dt.datetime) -> User:
         email = normalize_email(email)
         new = User.new(email, created_at=now)
@@ -176,21 +162,6 @@ class PostgresIdentityRepository:
             await s.execute(update(User).where(User.id == user_id).values(is_platform_admin=flag))
 
     # --- memberships -------------------------------------------------------------------------
-    async def add_membership(  # noqa: PLR0913 — the pinned seeder signature
-        self, user_id: UserId, tenant_id: TenantId, *, status: MembershipStatus, invited_by: UserId | None,
-        created_at: _dt.datetime, expires_at: _dt.datetime | None = None,
-        accepted_at: _dt.datetime | None = None, ended_at: _dt.datetime | None = None,
-        ended_by: UserId | None = None, role: PersonRole = "admin",
-    ) -> Membership:
-        """Seeder."""
-        check_membership_fields(status, accepted_at=accepted_at, ended_at=ended_at)
-        row = Membership(
-            user_id=user_id, tenant_id=tenant_id, status=status, invited_by=invited_by, created_at=created_at,
-            expires_at=expires_at, accepted_at=accepted_at, ended_at=ended_at, ended_by=ended_by, role=role)
-        async with self._tx() as s:
-            s.add(row)
-        return row
-
     async def ensure_invitation(
         self, user_id: UserId, tenant_id: TenantId, *, invited_by: UserId | None, now: _dt.datetime,
         expires_at: _dt.datetime | None = None,
