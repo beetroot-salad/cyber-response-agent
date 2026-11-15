@@ -12,6 +12,7 @@
   (`python -m defender.api_server`, real network); `Child.faked(environ, fails=...)` runs this module's entry, which
   calls `defender.api_server.run(os.environ, transport=FakeKeycloak(...))`, reports `run returned <n>` on stdout,
   holds until `release()` (or `ended()`), then exits with `n`.
+  With `LOADED_ENV` set it first reports `loaded <json>`: every module the process loaded while serving (#1495).
 - `seed_token_credential(dsn, seeded)`: a live `oauth_client` credential for the seeded program, for `program_token`.
 - `seed_identity(dsn)`: Ann (tenant A admin), Bob (tenant B admin), Ops (a listed administrator, one-time-code
   session) and a program of A with a live API key.
@@ -67,6 +68,8 @@ ADMIN_CLIENTS = {SIGNIN_REALM: ("defender-api-admin", "signin-admin-secret-value
                  PROGRAMS_REALM: ("defender-api-programs-admin", "programs-admin-secret-value")}
 #: The child's failures travel in this variable (JSON list of `Fail`); it is not a setting of the program.
 FAULTS_ENV = "CF1083_KEYCLOAK_FAULTS"
+#: Set, the entry also reports every module the process loaded, once `run` returned: `loaded <json list>` (#1495).
+LOADED_ENV = "CF1495_REPORT_LOADED"
 
 SETTING_NAMES = (
     "DEFENDER_DATABASE_DSN",
@@ -639,6 +642,8 @@ def _main() -> int:
     fails = fails_from_json(os.environ[FAULTS_ENV]) if FAULTS_ENV in os.environ else ()
     keycloak = FakeKeycloak(fails, on_stall=lambda realm: print(f"stalled {realm}", flush=True))
     returned = run(os.environ, transport=keycloak)
+    if LOADED_ENV in os.environ:
+        print(f"loaded {json.dumps(sorted(sys.modules))}", flush=True)
     print(f"unmodelled {json.dumps(keycloak.unmodelled)}", flush=True)
     print(f"run returned {returned}", flush=True)
     sys.stdin.readline()  # hold: the parent observes the database, then closes stdin
