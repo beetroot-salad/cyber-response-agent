@@ -19,6 +19,7 @@ from defender.knowledge import AGENT_REL, REDUCER_PITFALLS
 from defender._frontmatter import FrontmatterError, split_frontmatter
 from defender._io import ENTRY_FILE
 from defender._untrusted import wrap
+from defender.learning_store import is_reducer_row
 from defender.learning.core import config as _loop_config
 from defender.learning.core import persist as _loop_persist
 from defender.learning.core import pitfalls_disposition as _disposition
@@ -73,10 +74,10 @@ PITFALLS_SECTION = "## Common pitfalls"
 _SETEXT_UNDERLINE_RE = re.compile(r"^(?:=+|-+)[ \t]*$")
 
 
-#: Whether a queued row is the reducer's mistake rather than a system's. Owned by `persist`
+#: Whether a queued row is the reducer's mistake rather than a system's. Owned by the store
 #: because the merge key and the arrival gate ask it too; restating it here would let the
 #: three disagree on how one row is routed.
-_is_reducer_row = _loop_persist.is_reducer_row
+_is_reducer_row = is_reducer_row
 
 
 def _failures_of(records: list[dict], *, keep_goal: bool = True) -> list[dict]:

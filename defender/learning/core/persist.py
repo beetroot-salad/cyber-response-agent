@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 
-from defender.learning_store import is_reducer_row, pitfall_key  # noqa: F401 — is_reducer_row re-exported for the curator
+from defender.learning_store import pitfall_key
 
 
 

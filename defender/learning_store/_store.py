@@ -19,14 +19,14 @@ import uuid
 from collections.abc import Mapping, Sequence
 from typing import Any, cast
 
-from sqlalchemy import Table, Text, and_, case, collate, delete, exists, false, func, literal, or_, select, true, tuple_, update
+from sqlalchemy import Table, Text, and_, case, collate, delete, exists, false, func, literal, or_, select, true, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from defender._text import is_content_less, postgres_cannot_hold
 from defender.knowledge import BASH_SHIM_QUERY_ID
-from defender.database import async_engine, sessions
+from defender.database import async_engine, newest_first_query, sessions
 from defender.records.formats import BatchId, CommitId, TenantId, WorkItemId
 from defender.tenancy.models import TenantRecord
 
@@ -300,6 +300,22 @@ def _refuse_unkeyed(row: Mapping[str, Any]) -> None:
         raise ItemRefused(f"a finding row carries no string finding_id (got {key!r})")
 
 
+def _items_with_pr() -> Any:
+    """Every item column and its batch's PR (none when it has no batch)."""
+    return select(_I, _B.c.pr_number).select_from(_I.outerjoin(_B, _I.c.batch_id == _B.c.id))
+
+
+def _work_item(r: Any) -> WorkItem:
+    """An item row (with its batch's PR) as the store reports it. A waiting item is in no batch: the batch it last left
+    (kept on its row) and that batch's PR are not reported as its own."""
+    in_batch = r.status != "waiting"
+    return WorkItem(id=r.id, kind=r.kind, key=r.item_key, status=r.status, reason=r.reason, fault=r.fault,
+                    batch_id=r.batch_id if in_batch else None, pr_number=r.pr_number if in_batch else None,
+                    attempts=r.attempts, deferrals=r.deferrals, offers_declined=r.offers_declined,
+                    coalesce_key=r.coalesce_key, mistake_key=r.mistake_key, payload=r.payload, source_run=r.source_run,
+                    enqueued_at=r.enqueued_at, updated_at=r.updated_at)
+
+
 async def _settle_requests(s: AsyncSession, tenant: str) -> None:
     """Take, for the rest of `s`'s transaction, the tenant's lock on which curation request waits for each case. Every
     transaction that can make a request wait takes it before applying `_superseded`, so it sees the requests another
@@ -452,15 +468,8 @@ class LearningStore(FeedbackVerbs):
         if kind is not None:
             where.append(_I.c.kind == kind)
         async with self._sessions() as s:
-            rows = (await s.execute(
-                select(_I, _B.c.pr_number).select_from(_I.outerjoin(_B, _I.c.batch_id == _B.c.id))
-                .where(*where).order_by(_I.c.kind, _I.c.item_key))).all()
-        return [WorkItem(id=r.id, kind=r.kind, key=r.item_key, status=r.status, reason=r.reason, fault=r.fault,
-                         batch_id=None if r.status == "waiting" else r.batch_id,
-                         pr_number=None if r.status == "waiting" else r.pr_number, attempts=r.attempts, deferrals=r.deferrals,
-                         offers_declined=r.offers_declined, coalesce_key=r.coalesce_key, mistake_key=r.mistake_key,
-                         payload=r.payload, source_run=r.source_run, enqueued_at=r.enqueued_at,
-                         updated_at=r.updated_at) for r in rows]
+            rows = (await s.execute(_items_with_pr().where(*where).order_by(_I.c.kind, _I.c.item_key))).all()
+        return [_work_item(r) for r in rows]
 
     async def set_aside(self, tenant: str, *, status: str | None = None,
                         after: tuple[_dt.datetime, WorkItemId] | None = None, limit: int) -> list[WorkItem]:
@@ -468,39 +477,34 @@ class LearningStore(FeedbackVerbs):
         after `after` (the (updated_at, id) of the last item seen). The item's PR is its batch's."""
         if status not in (None, "held", "dead"):
             raise ValueError(f"not a set-aside status: {status}")
-        where = [_I.c.tenant_id == TenantId(tenant), _I.c.status.in_(["held", "dead"] if status is None else [status])]
-        if after is not None:
-            where.append(tuple_(_I.c.updated_at, _I.c.id) < tuple_(after[0], WorkItemId(after[1])))
+        query = _items_with_pr().where(
+            _I.c.tenant_id == TenantId(tenant), _I.c.status.in_(["held", "dead"] if status is None else [status]))
         async with self._sessions() as s:
-            rows = (await s.execute(
-                select(_I, _B.c.pr_number).select_from(_I.outerjoin(_B, _I.c.batch_id == _B.c.id)).where(*where)
-                .order_by(_I.c.updated_at.desc(), _I.c.id.desc()).limit(limit))).all()
-        return [WorkItem(id=r.id, kind=r.kind, key=r.item_key, status=r.status, reason=r.reason, fault=r.fault,
-                         batch_id=r.batch_id, pr_number=r.pr_number, attempts=r.attempts, deferrals=r.deferrals,
-                         offers_declined=r.offers_declined, coalesce_key=r.coalesce_key, mistake_key=r.mistake_key,
-                         payload=r.payload, source_run=r.source_run, enqueued_at=r.enqueued_at,
-                         updated_at=r.updated_at) for r in rows]
+            rows = (await s.execute(newest_first_query(query, _I.c.updated_at, _I.c.id, after, limit))).all()
+        return [_work_item(r) for r in rows]
 
     async def parked(self, tenant: str, *, after: tuple[_dt.datetime, BatchId] | None = None,
                      limit: int) -> list[ParkedBatchView]:
-        """The tenant's batches in phase `needs_person`, newest first (ties by id), with the items each still holds."""
-        where = [_B.c.tenant_id == TenantId(tenant), _B.c.phase == "needs_person"]
-        if after is not None:
-            where.append(tuple_(_B.c.created_at, _B.c.id) < tuple_(after[0], after[1]))
+        """The tenant's batches in phase `needs_person`, newest first (ties by id), with the items each still holds.
+        One statement, so the page and its items are one snapshot."""
+        page = newest_first_query(select(_B).where(_B.c.tenant_id == TenantId(tenant), _B.c.phase == "needs_person"),
+                                  _B.c.created_at, _B.c.id, after, limit).subquery()
+        held = and_(_I.c.tenant_id == page.c.tenant_id, _I.c.batch_id == page.c.id, _I.c.status == "in_batch")
         async with self._sessions() as s:
-            batches = (await s.execute(select(_B).where(*where).order_by(_B.c.created_at.desc(), _B.c.id.desc())
-                                       .limit(limit))).all()
-            held = (await s.execute(
-                select(_I.c.batch_id, _I.c.kind, _I.c.item_key)
-                .where(_I.c.tenant_id == TenantId(tenant), _I.c.status == "in_batch",
-                       _I.c.batch_id.in_([b.id for b in batches]))
-                .order_by(collate(_I.c.kind, "C"), collate(_I.c.item_key, "C")))).all()
-        by_batch: dict[str, list[tuple[str, str]]] = {}
-        for r in held:
-            by_batch.setdefault(r.batch_id, []).append((r.kind, r.item_key))
+            rows = (await s.execute(
+                select(page, _I.c.kind.label("item_kind"), _I.c.item_key.label("item_key"))
+                .select_from(page.outerjoin(_I, held))
+                .order_by(page.c.created_at.desc(), page.c.id.desc(), collate(_I.c.kind, "C"),
+                          collate(_I.c.item_key, "C")))).all()
+        batches: dict[str, Any] = {}
+        items: dict[str, list[tuple[str, str]]] = {}
+        for r in rows:
+            batches.setdefault(r.id, r)
+            if r.item_kind is not None:
+                items.setdefault(r.id, []).append((r.item_kind, r.item_key))
         return [ParkedBatchView(id=b.id, kind=b.kind, lane=b.lane, blocks_lane=b.kind in AUTHORING_KINDS, branch=b.branch,
-                            pr_number=b.pr_number, reason=b.reason, created_at=b.created_at,
-                            items=tuple(by_batch.get(b.id, ()))) for b in batches]
+                                pr_number=b.pr_number, reason=b.reason, created_at=b.created_at,
+                                items=tuple(items.get(b.id, ()))) for b in batches.values()]
 
     async def item_keys(self, tenant: str, kind: str) -> list[str]:
         """Every key of `kind` the tenant holds, whatever its status (a key is the store's for good): keys only, for a

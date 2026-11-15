@@ -123,6 +123,9 @@ class WorkItemRow(Base, kw_only=True):
               postgresql_where=text("status = 'waiting' AND coalesce_key IS NOT NULL")),
         Index("work_items_by_status", "tenant_id", "status"),
         Index("work_items_by_batch", "batch_id"),
+        # The API's read of held and dead items (#1485 O1), in (updated_at, id) order.
+        Index("work_items_set_aside", "tenant_id", text("updated_at DESC"), text("id DESC"),
+              postgresql_where=text("status IN ('held', 'dead')")),
         {"schema": SCHEMA},
     )
 
@@ -257,9 +260,3 @@ class FeedbackTickRow(Base, kw_only=True):
     lease_expiry: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
     fencing_token: Mapped[int] = mapped_column(Integer)
     cancel_requested: Mapped[bool] = mapped_column(Boolean)
-
-
-#: The API's read of held and dead items (#1485 O1), in (updated_at, id) order.
-_items = WorkItemRow.__table__
-Index("work_items_set_aside", _items.c.tenant_id, _items.c.updated_at.desc(), _items.c.id.desc(),
-      postgresql_where=text("status IN ('held', 'dead')"))

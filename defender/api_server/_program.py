@@ -45,8 +45,6 @@ _LESSONS = "#1082"
 #: The learning store's pool: the two learning reads only, so small beside the job store's.
 _LEARNING_POOL = 3
 _LEARNING_WORK = "a learning store (#1485)"
-#: The learning store's pool: the two learning reads only, so small beside the job store's.
-_LEARNING_POOL = 3
 
 
 @dataclasses.dataclass(frozen=True)
