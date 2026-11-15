@@ -61,7 +61,7 @@ def main(argv: list[str]) -> int:
     repo = _gh("repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner").strip()
     table: dict[str, float] = {}
     for job in shards:
-        table.update(file_costs(_gh("api", f"repos/{repo}/actions/jobs/{job}/logs").splitlines()))
+        table.update(file_costs(_gh("api", "--allow-escape-sequences", f"repos/{repo}/actions/jobs/{job}/logs").splitlines()))
     rounded = {name: round(cost, 1) for name, cost in sorted(table.items())}
     Path(WEIGHTS).write_text(json.dumps(rounded, indent=1) + "\n", encoding="utf-8")
     print(f"{WEIGHTS}: {len(rounded)} files, {sum(rounded.values()):.0f} worker seconds")
