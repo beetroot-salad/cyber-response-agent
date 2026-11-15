@@ -176,6 +176,7 @@ def _prelogin_missing(world: Any, context: Any, requests: list[Any], target: str
     for name in attempt:
         context.clear_cookies(name=name)
     world.front.release(0)
+    world.front.hold = False
     screen(page, FAILED)
     return page
 
