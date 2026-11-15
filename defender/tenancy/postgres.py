@@ -37,6 +37,7 @@ from defender.records.formats import AlertMapping, TenantId
 from defender.tenancy.models import (SCHEMA, AlertMappingRow, CaseRecord, CaseVersionRow, ForgeWiring, Generation,
                                      MergeEligibility, MergeEligibilityRow, PublishStatus, SystemVersionRow,
                                      TenantRecord, TenantRecords)
+from defender.tenancy.record_refusals import refuse_unless_active
 from defender.tenancy.repository import (
     ALL,
     KEEP,
@@ -47,7 +48,6 @@ from defender.tenancy.repository import (
     FenceMissed,
     NotFound,
     publish_outcome,
-    refuse_unless_active,
 )
 
 _logger = logging.getLogger(__name__)

@@ -135,3 +135,32 @@ def test_d9_the_command_refuses_an_unreachable_secret_store_in_one_line_without_
     assert stderr.count("\n") == 1
     assert "Traceback" not in stderr, stderr
     assert "DEFENDER_OPENBAO_ADDR" in stderr or "127.0.0.1:1" in stderr, stderr
+
+
+class _CountsCloses(ScriptedOpenBao):
+    """The scripted store, counting how often a client over it is closed: an `httpx.AsyncClient` closes its transport
+    once, as it closes."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.closes = 0
+
+    async def aclose(self) -> None:
+        self.closes += 1
+
+
+async def test_g4_the_api_asks_the_secret_store_over_one_pooled_client_its_start_opens_and_its_stop_closes(
+        migrated_database, tmp_path):
+    """The login check and every request after it share one pooled client, opened by the start sequence and closed when
+    the program stops: none is opened and closed per call, which would make a page of rows open a connection each.
+    (G4, O3; r8 Am-1, r9)"""
+    bao = _CountsCloses()
+    async with served_config(migrated_database, tmp_path, scripted=bao) as served:
+        started = bao.closes  # the seal-status read's own client, closed before the login check
+        assert (await served.put_system(TICKET, 0)).status_code == 201
+        for _ in range(3):
+            assert (await served.list_systems()).status_code == 200
+        assert (await served.put_credentials(TICKET, 1, {"api_key": TOKEN})).status_code == 204
+        assert bao.calls, "premise: the store was asked"
+        assert bao.closes == started, "a client was closed while the program served"
+    assert bao.closes == started + 1, "the pooled client was not closed once at stop"

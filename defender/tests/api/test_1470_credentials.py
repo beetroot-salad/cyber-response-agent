@@ -5,6 +5,7 @@ server cannot be made to give, the post-write race) and, in the `real` runs of `
 writer policy. Postgres-gated; the `openbao`-marked tests need the test OpenBao."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -371,8 +372,9 @@ def _raised(cls: type[Exception]) -> Exception:
         return cls("the transport failed")
 
 
-#: Faults that come before the request is sent: the connection was never made (design: "a connection error").
-_NEVER_SENT = (httpx.ConnectError, httpx.ConnectTimeout)
+#: Faults that come before the request is sent: the connection was never made (design: "a connection error"), or no
+#: pooled connection came free in time (httpx raises it before sending; #1526 review, retiring r8's accepted case).
+_NEVER_SENT = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
 
 
 def _write_outcomes() -> list[tuple[str, object, str]]:
@@ -649,6 +651,85 @@ async def test_o7_o9_a_re_read_that_cannot_answer_is_503_possibly_stored_and_ann
     [event] = audit_events(caplog, "system.credentials")
     assert MARKER_POSSIBLY in told(event)
     assert scripted.stored_set(TICKET, 1) == {"kind": "static", "fields": {"api_key": TOKEN}}
+
+
+#: An actor id for a port asked directly (a user id: UUID text).
+_ACTOR = "7a0c0c0c-1470-4000-8000-00000000c0de"
+
+
+class _ReReadHangs:
+    """The record store as the credential port sees it, but its second slot read (the re-read) never answers."""
+
+    def __init__(self, store: Any) -> None:
+        self._store, self._reads = store, 0
+
+    async def credential_slot(self, *args: Any) -> Any:
+        self._reads += 1
+        if self._reads > 1:
+            await anyio.sleep_forever()
+        return await self._store.credential_slot(*args)
+
+
+@anyio_mark
+@postgres
+@pytest.mark.parametrize("announcing", ["works", "fails"])
+@pytest.mark.parametrize("cancelled", ["during the write", "during the re-read"])
+async def test_o7_o9_a_write_cancelled_once_its_set_may_be_stored_is_announced_possibly_stored_once(
+        scripted, caplog, cancelled, announcing):
+    """The request is cancelled after the set reached the store: while the write waits for its answer (stored, not yet
+    answered) or during the re-read. One event marked `possibly stored`, naming the fields; the cancellation goes on.
+    An announcement that fails then is logged as an error and does not replace the cancellation: no one is left to
+    answer a 500. Asked of the credential port the program builds. (O7, O9; #1526 review)"""
+    from defender.api.config_records import ConfigCredentials
+    from defender.api.ports import Principal
+    from defender.api_server import record_store
+    from defender.credential_proxy import OpenBaoSecrets
+    from defender.records.formats import TenantId
+    from defender.system_rules import Catalog
+    from defender.tests.support.jobs._jobs1342 import fixed_clock
+
+    caplog.set_level(logging.DEBUG)
+    await _ticket(scripted)
+    store = record_store(scripted.dsn, Catalog.of_checkout(), clock=fixed_clock)
+    secrets = OpenBaoSecrets(addr="http://openbao.test:8200", token=WRITER_TOKEN, mount=KV_MOUNT,
+                             transport=scripted.scripted)
+    port = ConfigCredentials(_ReReadHangs(store) if cancelled == "during the re-read" else store, secrets)
+    reached = anyio.Event()
+
+    async def stored_then_hang(path: str) -> None:
+        reached.set()
+        if cancelled == "during the write":
+            await anyio.sleep_forever()
+
+    scripted.scripted.on_write = stored_then_hang
+    failing = _AnnouncementFails("system.credentials") if announcing == "fails" else None
+    caplog.clear()
+    if failing is not None:
+        logging.getLogger().addHandler(failing)
+    try:
+        with anyio.fail_after(30):
+            task = asyncio.ensure_future(port.put_credentials(Principal(tenant_id=TenantId(A), actor_id=_ACTOR),
+                                                              TICKET, for_version=1, credentials={"api_key": TOKEN}))
+            await reached.wait()
+            await anyio.sleep(0.2)  # into the hang: the write's answer, or the re-read
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+    finally:
+        if failing is not None:
+            logging.getLogger().removeHandler(failing)
+        await store.close()
+    assert task.cancelled(), "the cancellation did not go on"
+    assert scripted.stored_set(TICKET, 1) == {"kind": "static", "fields": {"api_key": TOKEN}}, "premise: it was stored"
+    if failing is not None:
+        assert failing.refused == 1, failing.refused
+        assert any(r.levelno == logging.ERROR and "could not be written" in r.getMessage() for r in caplog.records)
+        return
+    [event] = audit_events(caplog, "system.credentials")
+    words = told(event)
+    assert MARKER_POSSIBLY in words, words
+    assert "api_key" in words, words
+    assert TOKEN not in words, words
 
 
 @anyio_mark

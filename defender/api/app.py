@@ -321,6 +321,7 @@ AnyCaller = Annotated[Authenticated, Depends(_any_caller)]
 
 #: The caller a tenant route holds: either kind, or a person once a people route has narrowed it.
 _Caller = TypeVar("_Caller", bound=Authenticated)
+_T = TypeVar("_T")
 
 
 class _Membered(NamedTuple, Generic[_Caller]):
@@ -676,8 +677,21 @@ async def list_systems(
     )
     # Served after the page is cut, so the secret store is asked only about rows that are sent: all at once, over the
     # writer's pooled client (a bounded set of connections, kept between requests), not one after another (O3).
-    served = await asyncio.gather(*(deps.systems.served(caller.tenant_id, r) for r in page.items))
-    return Page(items=list(served), next_cursor=page.next_cursor)
+    served = await _all_or_first_failure([deps.systems.served(caller.tenant_id, r) for r in page.items])
+    return Page(items=served, next_cursor=page.next_cursor)
+
+
+async def _all_or_first_failure(calls: list[Coroutine[Any, Any, _T]]) -> list[_T]:
+    """Every call's answer, in order; or, once one fails, that failure itself (so its own handler answers it), the
+    others cancelled first: a page that will answer its first row's failure holds no connection for the rest."""
+    tasks = [asyncio.ensure_future(c) for c in calls]
+    try:
+        return await asyncio.gather(*tasks)
+    except BaseException:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
 
 
 @systems.get("/{system_id}", responses={**responses(404), **_SECRET_READ})

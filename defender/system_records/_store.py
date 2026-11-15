@@ -7,7 +7,8 @@ written, or its newest version is a tombstone). Version numbers keep rising acro
 facts apart: the shown version and the next version (the newest + 1). A delete of what has no current record is
 `NoCurrentRecord` before any version comparison. Only an `active` tenant is written (#1470 O8: a tenant's records are
 known exactly while it is active). Every refusal is a `RecordRefused` of one of five types, which the API maps to a
-status by type alone."""
+status by type alone: this store's three, and the two of the tenant rule it shares with the tenant rows' read
+(`tenancy.record_refusals`: `NoSuchTenant`, `TenantNotActive`; #1470 r9)."""
 
 from __future__ import annotations
 
@@ -27,21 +28,10 @@ from defender.records.formats import TenantId
 from defender.system_rules import located_access
 from defender.tenancy import parse_access
 from defender.tenancy.models import CaseRecord, CaseVersionRow, SystemRecord, SystemVersionRow, TenantRecords, adapter_column
+from defender.tenancy.record_refusals import NoSuchTenant, RecordRefused, TenantNotActive, refuse_unless_active
 
 #: The injected judgement: every reason the after-state is unusable, given the state the write replaces.
 Judge = Callable[[TenantRecords, TenantRecords], Sequence[str]]
-
-ACTIVE = "active"
-
-
-class RecordRefused(Exception):
-    """A write (or a credential slot) the store refuses. `faults` is every reason, each a sentence naming the system and
-    the key or part (never a file). Raised only as one of its five subclasses."""
-
-    def __init__(self, faults: Sequence[str]) -> None:
-        self.faults = list(faults)
-        super().__init__("; ".join(self.faults))
-
 
 class Stale(RecordRefused):
     """The write names a version other than the one a read now shows (`current_version`, 0 when a read shows none); or a
@@ -55,21 +45,6 @@ class Stale(RecordRefused):
 
 class Judged(RecordRefused):
     """The judgement found the after-state unusable: `faults` are all its reasons, as it worded them."""
-
-
-class NoSuchTenant(RecordRefused):
-    """No tenant row has this id."""
-
-    def __init__(self, tenant: object) -> None:
-        super().__init__([f"tenant {tenant} does not exist"])
-
-
-class TenantNotActive(RecordRefused):
-    """The tenant exists but is not `active` (creating, offboarding, offboarded): its records take no write."""
-
-    def __init__(self, tenant: object, state: str) -> None:
-        self.state = state
-        super().__init__([f"tenant {tenant} is {state}, not active: its records take no write"])
 
 
 class NoCurrentRecord(RecordRefused):
@@ -127,17 +102,9 @@ def _next(row: Any) -> int:
     return 1 if row is None else row.version + 1
 
 
-def _refuse_unless_active(found: Any, tenant: TenantId) -> None:
-    if found is None:
-        raise NoSuchTenant(tenant)
-    if found.state != ACTIVE:
-        raise TenantNotActive(tenant, found.state)
-
-
 class RecordStore:
     def __init__(self, dsn: str, *, clock: Callable[[], _dt.datetime], judge: Judge) -> None:
-        self._engine = async_engine(dsn)  # the default pool: config reads come here too (r8 Am-3), as they came to the
-        # tenant rows' repository before
+        self._engine = async_engine(dsn, max_connections=4)
         self._clock = clock
         self._judge = judge
 
@@ -150,23 +117,8 @@ class RecordStore:
         async with self._engine.begin() as conn:
             found = (await conn.execute(text(f"SELECT state FROM {_TENANTS} WHERE id = :t FOR UPDATE"),
                                         {"t": tenant})).first()
-            _refuse_unless_active(found, tenant)
+            refuse_unless_active(tenant, None if found is None else found.state)
             yield conn
-
-    # --- the read -----------------------------------------------------------------------------------------------------
-
-    async def current(self, tenant: TenantId) -> TenantRecords:
-        """The tenant's current systems and case record, read with its state in one REPEATABLE READ snapshot (no row
-        lock: a read waits for no writer). Refused as a write is (#1470 O8, r8 Am-3): `NoSuchTenant`, `TenantNotActive`,
-        so a read and a write of the API answer the same tenant state alike."""
-        async with self._engine.connect() as conn:
-            conn = await conn.execution_options(isolation_level="REPEATABLE READ")
-            async with conn.begin():
-                found = (await conn.execute(text(f"SELECT state FROM {_TENANTS} WHERE id = :t"), {"t": tenant})).first()
-                _refuse_unless_active(found, tenant)
-                latest = await self._latest(conn, tenant)
-                case = await self._latest_case(conn, tenant)
-        return TenantRecords(systems=self._current(latest), case=self._current_case(case))
 
     # --- reads under the lock -------------------------------------------------------------------------------------
 
@@ -314,7 +266,7 @@ class RecordStore:
             conn = await conn.execution_options(isolation_level="REPEATABLE READ")
             async with conn.begin():
                 found = (await conn.execute(text(f"SELECT state FROM {_TENANTS} WHERE id = :t"), {"t": tenant})).first()
-                _refuse_unless_active(found, tenant)
+                refuse_unless_active(tenant, None if found is None else found.state)
                 newest = (await conn.execute(select(_SV).where(_SV.c.tenant_id == tenant, _SV.c.system_id == system)
                                              .order_by(_SV.c.version.desc()).limit(1))).first()
                 if newest is None or newest.deleted:

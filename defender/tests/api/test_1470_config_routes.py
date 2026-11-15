@@ -445,6 +445,35 @@ async def _save_three(served) -> list[str]:
     return ids
 
 
+async def test_o3_a_page_whose_row_fails_answers_that_failure_at_once_and_asks_no_more_for_the_rest():
+    """The list asks about its rows at once; when one fails, the page answers that failure itself (its own type, so its
+    handler answers it; not a group of failures), without waiting for the rows still asking, which are cancelled and
+    hold no pooled connection. (O3; #1526 review)"""
+    from defender.api.app import _all_or_first_failure
+    from defender.api.ports import SecretStoreUnavailable
+
+    still_asking: list[str] = []
+
+    async def fails() -> bool:
+        await anyio.sleep(0.05)
+        raise SecretStoreUnavailable("the secret store cannot say")
+
+    async def hangs() -> bool:
+        try:
+            await anyio.sleep_forever()
+        finally:
+            still_asking.append("cancelled")
+        return True
+
+    async def answers() -> bool:
+        return True
+
+    assert await _all_or_first_failure([answers(), answers()]) == [True, True]  # control: every answer, in order
+    with anyio.fail_after(5), pytest.raises(SecretStoreUnavailable):
+        await _all_or_first_failure([hangs(), fails(), hangs()])
+    assert still_asking == ["cancelled", "cancelled"]
+
+
 async def test_o3_the_systems_list_pages_by_cursor_serving_every_system_once_in_id_order(configured):
     """`limit=1` walks three saved systems in id order, each once, the last page's cursor null; the page is the `Page`
     envelope (`items`, `next_cursor`). (O3, lists keep the Page envelope)"""
@@ -849,24 +878,26 @@ _INACTIVE = ["offboarding", "offboarded", "gone"]
 
 
 @pytest.mark.parametrize("state", _INACTIVE)
-async def test_o8_a_config_read_of_a_tenant_that_left_active_is_the_record_stores_own_refusal(scripted, state):
+async def test_o8_a_config_read_of_a_tenant_that_left_active_is_the_refusal_a_write_gets(scripted, state):
     """Admission refuses a tenant that is not active (404), so a config read meets one only when the tenant leaves
-    `active` after admission. The read is then the record store's own typed refusal, the one a write gets
+    `active` after admission. The read is then refused by the one tenant rule with the type a write gets
     (`TenantNotActive`, `NoSuchTenant`), which the app answers 409 / 404 by type; never an unmapped one, a 500.
-    Asked of the systems port the program builds, after the state change. (O8; r8 Am-3)"""
+    Asked of the systems port the program builds, after the state change. (O8; r9)"""
     from defender.api.config_records import ConfigRecords
     from defender.credential_proxy import OpenBaoSecrets
     from defender.system_records import NoSuchTenant, TenantNotActive
     from defender.system_rules import Catalog
     from defender.tests.support.jobs._jobs1342 import fixed_clock, move_tenant
     from defender.api_server import record_store
+    from defender.tenancy.postgres import PostgresTenantRepository
 
     assert (await scripted.put_system(TICKET, 0)).status_code == 201
     assert (await scripted.put_case(0)).status_code == 201
     catalog = Catalog.of_checkout()
     store = record_store(scripted.dsn, catalog, clock=fixed_clock)
-    port = ConfigRecords(store, catalog, OpenBaoSecrets(addr="http://openbao.test:8200", token="t", mount="secret",
-                                                        transport=scripted.scripted))
+    tenants = PostgresTenantRepository(scripted.dsn)
+    port = ConfigRecords(store, tenants, catalog, OpenBaoSecrets(addr="http://openbao.test:8200", token="t",
+                                                                 mount="secret", transport=scripted.scripted))
     try:
         assert [r.system_id for r in await port.list_systems(A, after=None, limit=10)] == [TICKET]  # control
         if state == "gone":
@@ -880,6 +911,7 @@ async def test_o8_a_config_read_of_a_tenant_that_left_active_is_the_record_store
                 await read()
     finally:
         await store.close()
+        await tenants.close()
 
 
 # --- membership ------------------------------------------------------------------------------------------------------

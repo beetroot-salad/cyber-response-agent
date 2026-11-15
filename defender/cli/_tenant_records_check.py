@@ -144,9 +144,9 @@ def credential_findings(tenant_id: object, records: TenantRecords, secrets: Any)
         return []
 
     async def asked() -> list[str]:
-        # One event loop for every ask: the writer's pooled client is bound to it, and closed on it.
+        # One event loop for every ask, and one pooled client opened and closed on it.
         lines: list[str] = []
-        try:
+        async with secrets.pooled():
             for system, record in systems:
                 try:
                     held = await secrets.has_credentials(str(tenant_id), system, generation=record.credential_generation)
@@ -156,8 +156,6 @@ def credential_findings(tenant_id: object, records: TenantRecords, secrets: Any)
                 if not held:
                     lines.append(f"system {system}: {NO_CREDENTIALS} ({record.credential_generation}): set them with "
                                  f"`PUT /systems/{system}/credentials` for version {record.version}")
-        finally:
-            await secrets.aclose()
         return lines
 
     return asyncio.run(asked())

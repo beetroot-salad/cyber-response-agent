@@ -19,6 +19,7 @@ from typing import Any, Literal, TypeVar, cast, overload
 from defender.records.formats import AlertMapping, TenantId
 from defender.tenancy.models import (ALLOWED_ACTIONS, AlertMappingRow, ForgeWiring, Generation, MergeEligibility, PublishStatus,
                                      TenantRecord, TenantRecords)
+from defender.tenancy.record_refusals import refuse_unless_active
 from defender.tenancy.repository import (
     KEEP,
     HOST,
@@ -28,7 +29,6 @@ from defender.tenancy.repository import (
     NotFound,
     claimable_now,
     publish_outcome,
-    refuse_unless_active,
 )
 
 #: The job a seeded row in a state that requires one gets when the seeder names none.

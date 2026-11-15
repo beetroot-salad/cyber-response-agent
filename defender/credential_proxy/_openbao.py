@@ -15,11 +15,11 @@ A server that cannot be reached or answers 5xx is `TransportFault`; any other re
 audit device records each credential write (A4)."""
 from __future__ import annotations
 
-import asyncio
 import base64
 import functools
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
+from contextlib import asynccontextmanager
 from typing import Any, TypeVar
 
 import httpx
@@ -145,13 +145,12 @@ def _our_access(call: Callable[..., _R]) -> Callable[..., _R]:
     return labelled_call
 
 
-class _OpenBao:
-    """One login's calls to one OpenBao server. The token is never shown. `transport` is a test's
-    `httpx.MockTransport` (none: the network): it serves the synchronous calls and the
-    asynchronous ones (the secret port's, and any made inside a proxied request)."""
+class _Login:
+    """One login to one OpenBao server: its address, mount and token (never shown), and the trust of the calls made on
+    the event loop, built once here since building it blocks the loop (#1375 O1). It opens no connection: each kind of
+    caller below opens its own."""
 
-    def __init__(self, *, addr: str, token: str, mount: str,
-                 transport: httpx.MockTransport | None = None) -> None:
+    def __init__(self, *, addr: str, token: str, mount: str) -> None:
         if not isinstance(addr, str) or not addr.startswith(("http://", "https://")):
             raise ConfigFault("the OpenBao address must be an http(s) URL")
         if not isinstance(token, str) or not token or not token.isprintable():
@@ -159,18 +158,7 @@ class _OpenBao:
         self.addr = addr.rstrip("/")
         self.mount = _check_name(mount, "the mount")
         self._token = token
-        self._transport: httpx.AsyncBaseTransport | None = transport
-        #: The trust of the calls made on the event loop, each on its own short-lived client:
-        #: built once, here, since building it blocks the loop (#1375 O1), and apart from the
-        #: pooled client's, which other threads use.
         self._loop_trust = tls_trust(DEPLOYMENT_ISSUER.ca_cert)
-
-    @functools.cached_property
-    def _client(self) -> httpx.Client:
-        """One pooled connection for this login's synchronous calls made outside a proxied request, built on the first
-        such call: a login that makes none (the API's asynchronous writer) never opens one."""
-        return internal_client(trust=tls_trust(DEPLOYMENT_ISSUER.ca_cert), transport=self._transport,  # type: ignore[arg-type]
-                               timeout=OPENBAO_TIMEOUT_SEC)
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}(addr={self.addr!r}, mount={self.mount!r})"
@@ -182,6 +170,20 @@ class _OpenBao:
 
     def _headers(self) -> dict[str, str]:
         return {"X-Vault-Token": self._token}
+
+
+class _OpenBao(_Login):
+    """The proxy's calls to OpenBao: synchronous ones over one pooled connection, and those made inside a proxied
+    request on the event loop, each on its own short-lived client. `transport` is a test's `httpx.MockTransport` (none:
+    the network): it serves both."""
+
+    def __init__(self, *, addr: str, token: str, mount: str,
+                 transport: httpx.MockTransport | None = None) -> None:
+        super().__init__(addr=addr, token=token, mount=mount)
+        self._transport = transport
+        #: One pooled connection for this login's calls made outside a proxied request.
+        self._client = internal_client(trust=tls_trust(DEPLOYMENT_ISSUER.ca_cert),
+                                       transport=transport, timeout=OPENBAO_TIMEOUT_SEC)
 
     def _call(self, method: str, rest: str, what: str, json: Any = None) -> httpx.Response:
         """One synchronous call; inside a proxied request, it runs under that request's deadline
@@ -255,40 +257,49 @@ class OpenBaoStore(_OpenBao):
                              version=meta["version"])
 
 
-class OpenBaoSecrets(_OpenBao):
+class OpenBaoSecrets(_Login):
     """The write-only secret port (the API's, #1470 D-E; `tenant check`'s existence read): set a whole credential set
     with its kind at a credential generation, and ask whether one exists there. It cannot read a value back. A call
     that does not get its answer raises `SecretStoreFault` (`SecretStoreUnavailable` or `SecretStoreRefused`), stating
     whether anything was stored.
 
-    Its calls are asynchronous and share one pooled client per event loop, opened on a loop's first call: a holder that
-    keeps to one loop (the API, `tenant check`) reuses its connections and `aclose`s it there; a call on another loop
-    opens a fresh one, since a client cannot outlive its loop. `transport` is any asynchronous transport (a test's
-    scripted one, or none: the network)."""
+    Its calls are asynchronous. Inside `async with pooled():`, opened by the holder that owns the event loop (the API's
+    `serving`, `tenant check`'s one run), they share that block's pooled client, which closes when the block ends; any
+    other call opens a client of its own for that call. `transport` is any asynchronous transport (a test's scripted
+    one, or none: the network)."""
 
     def __init__(self, *, addr: str, token: str, mount: str,
                  transport: httpx.AsyncBaseTransport | None = None) -> None:
         super().__init__(addr=addr, token=token, mount=mount)
         self._transport = transport
         self._pool: httpx.AsyncClient | None = None
-        self._pool_loop: asyncio.AbstractEventLoop | None = None
 
-    async def aclose(self) -> None:
-        """Close the pooled client, if a call opened one."""
-        pool, self._pool = self._pool, None
-        if pool is not None:
-            await pool.aclose()
+    def _opened(self, **limits: Any) -> httpx.AsyncClient:
+        return internal_async_client(trust=self._loop_trust, transport=self._transport, timeout=OPENBAO_TIMEOUT_SEC,
+                                     **limits)
+
+    @asynccontextmanager
+    async def pooled(self) -> AsyncIterator[None]:
+        """Share one pooled client between this block's calls, all on the block's event loop; it closes as the block
+        ends. Not reentrant: one holder opens it."""
+        if self._pool is not None:
+            raise RuntimeError("the secret writer's pooled client is already open")
+        async with self._opened(limits=_POOL_LIMITS) as pool:
+            self._pool = pool
+            try:
+                yield
+            finally:
+                self._pool = None
 
     async def _secret_call(self, method: str, rest: str, what: str, json: Any = None) -> httpx.Response:
-        loop = asyncio.get_running_loop()
-        if self._pool is None or self._pool_loop is not loop:  # none yet, or one bound to a loop that has ended
-            self._pool = internal_async_client(trust=self._loop_trust, transport=self._transport,
-                                               timeout=OPENBAO_TIMEOUT_SEC, limits=_POOL_LIMITS)
-            self._pool_loop = loop
         try:
-            return await self._pool.request(method, self._url(rest), json=json, headers=self._headers())
+            if self._pool is not None:
+                return await self._pool.request(method, self._url(rest), json=json, headers=self._headers())
+            async with self._opened() as client:
+                return await client.request(method, self._url(rest), json=json, headers=self._headers())
         except httpx.HTTPError as e:
-            never_sent = isinstance(e, httpx.ConnectError | httpx.ConnectTimeout)
+            # Never sent: no connection was made, or none came free in time (a pool timeout fires before sending).
+            never_sent = isinstance(e, httpx.ConnectError | httpx.ConnectTimeout | httpx.PoolTimeout)
             raise SecretStoreUnavailable(f"OpenBao at {self.addr} is unreachable for {what} ({type(e).__name__})",
                                          status=None, stored=False if never_sent else None) from None
 

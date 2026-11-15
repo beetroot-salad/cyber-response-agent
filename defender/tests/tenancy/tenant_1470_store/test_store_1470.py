@@ -4,6 +4,7 @@ tenant that is not active takes nothing. Entry: `RecordStore` over a migrated Po
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 import pytest
 
@@ -380,14 +381,13 @@ def _every_subset() -> list[tuple[str, frozenset[str]]]:
 
 
 def test_1470_g1_every_door_of_the_store_is_in_the_precedence_table():
-    """The table's doors are exactly `RecordStore`'s public coroutines (but `close`, and the read `current`, which meets
-    none of the table's faults: its tenant refusals are the O8 test's): a door added later is held too. (G1)"""
+    """The table's doors are exactly `RecordStore`'s public coroutines (but `close`): a door added later is held too. (G1)"""
     import inspect
 
     from defender.system_records import RecordStore
 
     doors = {n for n, f in inspect.getmembers(RecordStore, inspect.iscoroutinefunction) if not n.startswith("_")}
-    assert doors - {"close", "current"} == set(DOOR_FAULTS)
+    assert doors - {"close"} == set(DOOR_FAULTS)
 
 
 @pytest.mark.parametrize(("door", "faults"), _every_subset(),
@@ -476,13 +476,25 @@ def test_1470_o8_versions_cannot_outlive_their_tenants_row_so_a_missing_row_hold
         execute(dsn, "DELETE FROM tenancy.tenants WHERE id = %s", (tenant,))
 
 
+async def _tenant_read(dsn: str, tenant: str) -> Any:
+    """The tenant rows' current-records read (run start's, the API's config reads'), on its own repository."""
+    from defender.tenancy.postgres import PostgresTenantRepository
+
+    tenants = PostgresTenantRepository(dsn)
+    try:
+        return await tenants.current_records(tenant)
+    finally:
+        await tenants.close()
+
+
 @pytest.mark.parametrize(("state", "held"), _O8_CELLS, ids=[f"{s or 'no-row'}-{'records' if h else 'none'}" for s, h in _O8_CELLS])
 def test_1470_o8_a_tenant_not_active_is_refused_by_the_write_lock_the_slot_and_the_read_whatever_records_it_holds(
         migrated_database, state, held):  # noqa: F811
     """A tenant in each state but `active` (with no records, or with records written while active and kept when it
-    moved) or with no row: `put_system` (the write lock), `credential_slot` and the read `current` are refused as
-    `TenantNotActive` (no row: `NoSuchTenant`) and nothing is stored; the same tenant while active took the write and
-    answered the slot and the read (control). (O8: one rule, known iff active; r8 Am-3: the read refuses as a write)"""
+    moved) or with no row: `put_system` (the write lock), `credential_slot` and the tenant rows' current-records read
+    are refused as `TenantNotActive` (no row: `NoSuchTenant`) and nothing is stored; the same tenant while active took
+    the write and answered the slot and the read (control). (O8: one rule, known iff active; r9: the read and the
+    write refuse with the same two types)"""
     from defender.tests.support.jobs._jobs1342 import move_tenant
 
     dsn = migrated_database
@@ -490,13 +502,13 @@ def test_1470_o8_a_tenant_not_active_is_refused_by_the_write_lock_the_slot_and_t
     if held:
         K.run(dsn, put(tenant, replaces=0))
         assert K.slot_parts(K.run(dsn, slot(tenant, 1)))[0] == 1, "control: while active the slot answers"
-        assert set(K.run(dsn, lambda store: store.current(tenant)).systems) == {"ticket"}, "control: the read answers"
+        assert set(K.run(dsn, lambda _store: _tenant_read(dsn, tenant)).systems) == {"ticket"}, "control: the read answers"
     if state is not None:
         move_tenant(dsn, tenant, state=state)
     before = stored(dsn, tenant)
 
     for work in (put(tenant, replaces=1 if held else 0, settings=INDEXED), slot(tenant, 1),
-                 lambda store: store.current(tenant)):
+                 lambda _store: _tenant_read(dsn, tenant)):
         refusal = K.refused(dsn, work)
         assert K.kind_of(refusal) == ("TenantNotActive" if state else "NoSuchTenant"), (state, held, refusal)
     assert stored(dsn, tenant) == before, "a refused write stores nothing"

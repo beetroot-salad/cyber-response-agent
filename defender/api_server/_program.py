@@ -270,7 +270,7 @@ async def serving(settings: Settings, *, transport: httpx.AsyncBaseTransport | N
             sealed = await _seal_status(settings, openbao_transport)
         secrets = OpenBaoSecrets(addr=settings.openbao_addr, token=settings.openbao_token.get_secret_value(),
                                  mount=settings.openbao_kv_mount, transport=openbao_transport)
-        stack.push_async_callback(secrets.aclose)  # its pooled client, opened by the login check or the first request
+        await stack.enter_async_context(secrets.pooled())  # one pooled client for the login check and every request
         if not sealed:  # sealed: the API starts, and each request needing the store answers 503 until it is unsealed
             async with steps.step("the secret store's login check"):
                 await _login_check(settings, secrets)
@@ -308,7 +308,7 @@ async def serving(settings: Settings, *, transport: httpx.AsyncBaseTransport | N
                                            bootstrap=settings.administrators, programs=programs)
                 app = create_app(api_deps(
                     identity=identity, tenants=tenants, ports=JobStorePorts(store), frontend_origin=settings.frontend_origin,
-                    systems=ConfigRecords(records, catalog, secrets), secrets=ConfigCredentials(records, secrets)))
+                    systems=ConfigRecords(records, tenants, catalog, secrets), secrets=ConfigCredentials(records, secrets)))
             async with steps.step("binding the listening socket"):
                 sock = _bind(settings)
                 stack.callback(sock.close)
