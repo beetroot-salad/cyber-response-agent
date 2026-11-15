@@ -315,7 +315,7 @@ def test_p1_preflight_reads_idp_through_the_proxy_with_the_runs_read_grant(
 
 def test_p1b_preflight_signs_with_the_sign_login_whatever_the_environment_holds(
         tmp_path, monkeypatch, data_root):
-    """Operator OpenBao/Vault tokens and addresses in the environment: pre-flight still signs its read
+    """The operator's OpenBao/Vault tokens and addresses in the environment: pre-flight still signs its read
     token with the live generation's sign login through its issuer transport; the environment's
     address sees nothing. A1/A24 (the signing login is never taken from the environment)."""
     with H.upstream() as canary:

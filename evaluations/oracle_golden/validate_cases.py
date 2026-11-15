@@ -305,7 +305,7 @@ def _control_problems(where: str, entry: object, *, was_added: bool) -> list[str
                 f"{CONTROLS.esql_operators(query) or 'absent'} — that names no window, so "
                 f"this measured something other than the window it records"]
 
-    # Operator-aware, so crossed bounds (`< start AND >= end`) are caught; compared as
+    # Operator-aware, so crossed bounds (`< start AND >= end`) are caught; compared as  # lint-stale-ref: ok — the English word, not the removed test helper class
     # instants so a literal with different precision is not reported as crossed.
     try:
         want = {">": CONTROLS.parse_iso(window[0]), "<": CONTROLS.parse_iso(window[1])}
