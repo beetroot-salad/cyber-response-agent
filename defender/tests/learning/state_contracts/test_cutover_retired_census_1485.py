@@ -164,11 +164,10 @@ def _section(lines: list[str], title: str) -> list[str]:
     return rest[:next((n for n, line in enumerate(rest) if line.startswith("## ")), len(rest))]
 
 
-def test_o5_the_upgrade_notes_say_to_cut_over_on_an_earlier_revision_and_what_to_migrate():
+def test_o5_the_upgrade_notes_say_to_cut_over_on_an_earlier_revision_and_to_stop_the_drains_before_migrating():
     """`defender/CLAUDE.md` has no `Upgrade from before #1278` section and no cutover command; one line names an earlier
     revision to cut over on and says a deployment that never did loses its old learning folder (D10); an `Upgrade from
-    before #1485` section says to migrate, and nothing needs stopping (D14: the item id's default serves the old code).
-    Loose words. (O5)"""
+    before #1485` section says to stop the learning drains and the API before migrating (D12). Loose words. (O5)"""
     lines = (REPO / "defender" / "CLAUDE.md").read_text(encoding="utf-8").splitlines()
     assert any(line.startswith("## Upgrade from before #1454") for line in lines), "control: the neighbouring notes are read"
     assert not any("Upgrade from before #1278" in line for line in lines)
@@ -182,6 +181,8 @@ def test_o5_the_upgrade_notes_say_to_cut_over_on_an_earlier_revision_and_what_to
     assert re.search(r"(?i)\blos[et]\b|\bdiscard|\bgone\b", note), note
     body = " ".join(_section(lines, "Upgrade from before #1485"))
     assert body, "an `Upgrade from before #1485` section exists"
-    assert re.search(r"(?i)\bmigrat", body), body
-    assert re.search(r"(?i)nothing (needs|has to be) stopp", body), body
-    assert not re.search(r"(?i)\bdrains?\b", body), body
+    stop, migrate = re.search(r"(?i)\bstop", body), re.search(r"(?i)\bmigrat", body)
+    assert stop, body
+    assert migrate, body
+    assert re.search(r"(?i)\bdrains?\b", body), body
+    assert re.search(r"\bAPI\b", body), body

@@ -182,9 +182,7 @@ def test_a_database_upgraded_with_rows_has_the_catalog_of_one_upgraded_empty(emp
     upgrade(empty_database)
     assert check_version(empty_database) is None
     assert catalog(empty_database) == catalog(migrated_database)
-    # No server default but the one #1485 D14 allows (the work item's id, for older code inserting none).
-    assert [c[:3] + c[5:] for c in catalog(empty_database)["columns"] if c[5] is not None] == [
-        ("learning", "work_items", "id", "gen_random_uuid()")]
+    assert [c for c in catalog(empty_database)["columns"] if c[5] is not None] == []
 
 
 @pytest.mark.postgres

@@ -177,10 +177,9 @@ def _unique_on(dsn: str, table: str, column: str) -> list[str]:
                                        (f"learning.{table}", column))]
 
 
-def test_d12_at_head_work_items_id_is_a_required_unique_uuid_defaulting_to_a_random_one(migrated_database):
-    """At head `work_items.id` is uuid, NOT NULL, covered by a one-column unique index, and defaults to
-    `gen_random_uuid()` for older code that inserts none. (D12, D14)"""
-    assert _id_column(migrated_database) == ("uuid", True, "gen_random_uuid()")
+def test_d12_at_head_work_items_id_is_a_required_unique_uuid_with_no_default(migrated_database):
+    """At head `work_items.id` is uuid, NOT NULL, covered by a one-column unique index, and has no default. (D12)"""
+    assert _id_column(migrated_database) == ("uuid", True, None)
     assert len(_unique_on(migrated_database, "work_items", "id")) == 1
     # Control on the probe: the same read finds the batches' id column unique and required, and the item's non-key
     # `source_run` neither.
@@ -190,7 +189,7 @@ def test_d12_at_head_work_items_id_is_a_required_unique_uuid_defaulting_to_a_ran
 
 def test_d12_rows_seeded_before_the_index_revision_get_distinct_non_null_ids_on_upgrade(empty_database):
     """Items inserted at the revision before the index revision (several tenants, kinds and statuses) each get a
-    distinct id on upgrade, and an insert in the old code's shape (no id) still succeeds after it. (D12, D14)"""
+    distinct id on upgrade, and none keeps a default behind. (D12)"""
     from defender.migrations import head, upgrade
 
     before = revisions.down_of(revisions.by_suffix(revisions.INDEXES_SUFFIX))
@@ -214,10 +213,4 @@ def test_d12_rows_seeded_before_the_index_revision_get_distinct_non_null_ids_on_
     assert None not in ids
     assert len(set(ids)) == len(seeded) == 10
     assert all(re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", i) for i in ids)
-    # The old code's insert names no id: after the upgrade it still lands, with an id of its own.
-    execute(empty_database, """INSERT INTO learning.work_items (tenant_id, kind, item_key, payload, status, attempts, deferrals,
-        offers_declined, enqueued_at, updated_at) VALUES (%s, 'finding', 'old-code', '{}', 'waiting', 0, 0, 0, %s, %s)""",
-            (TENANTS[0], CREATED, CREATED))
-    (late,) = execute(empty_database, "SELECT id FROM learning.work_items WHERE item_key = 'old-code'")[0]
-    assert late is not None
-    assert late not in ids
+    assert _id_column(empty_database) == ("uuid", True, None)

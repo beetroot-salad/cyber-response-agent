@@ -166,15 +166,13 @@ def test_the_migrated_schema_is_the_schema_the_models_declare(migrated_database)
             engine.dispose()
         assert catalog(from_models) == catalog(migrated_database)
 
-    # The comparison sees what O3 is about: CHECKs, the partial unique index, and no server defaults (P4) but the one
-    # #1485 D14 allows: the work item's id, for older code inserting none across the upgrade.
+    # The comparison sees what O3 is about: CHECKs, the partial unique index, and no server defaults (P4).
     migrated = catalog(migrated_database)
     assert [s for (s,) in migrated["schemas"] if s != "public"] == ["identity", "jobs", "learning", "tenancy"]  # #1342 adds `jobs`, #1278 `learning`
     assert any(c[:2] == ("identity", "users") and c[3] == "c" for c in migrated["constraints"])
     assert any(i[:2] == ("identity", "memberships") and "WHERE" in i[3] and "invited" in i[3]
                for i in migrated["indexes"])
-    assert [c[:3] + c[5:] for c in migrated["columns"] if c[5] is not None] == [
-        ("learning", "work_items", "id", "gen_random_uuid()")]
+    assert [c for c in migrated["columns"] if c[5] is not None] == []
 
 
 #: Single-statement drifts of a migrated database, each of a kind autogenerate alone does not see (O3, C7) or P4 forbids.
