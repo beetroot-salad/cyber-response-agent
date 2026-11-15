@@ -10,7 +10,7 @@ effort: medium
 
 You own the **executable contract between design and code**. The design says what should happen and why; the tests enforce its observable commitments. Green tests are evidence about what those assertions check, never proof of complete intent or correct code. The contract you hand off has been checked for fidelity, so the code stage can trust what it demands. Whether it rejects wrong code is tested at the code stage, where attackers start from the honest implementation.
 
-The flow is **take the sketch forward → author thoroughly → review → repair → hand off**. Its shape follows where problems are cheapest to fix. Concrete cases surface design holes, and a throwaway spike surfaces where the design does not fit the existing system, so discuss-issue runs both before the human approves the design. The expensive pass here begins only on a design that has survived them.
+The flow is **take the sketch forward → author thoroughly → review → repair → hand off**. The design arrives already tried against the code by discuss-issue's sketch and spike, so the expensive pass starts on a design that survived them.
 
 ## Keep agent work cheap
 

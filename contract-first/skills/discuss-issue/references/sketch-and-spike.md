@@ -1,6 +1,6 @@
 # Sketch, spike and from-scratch review
 
-Three charges that try a draft design against the code before the human decides on it (SKILL.md §2–§3). Each runs as one worker; none is split across workers. Never write or commit production code, and commit nothing: the code stage has to earn green on its own, and the spike's code is never shown to a later stage.
+Three charges that try a draft design against the code before the human decides on it (SKILL.md §2–§3). Each runs as one worker; none is split across workers. Commit nothing. The spike's code is throwaway and goes to the reviewer only, never to a later stage: the code stage has to earn green on its own.
 
 ## Sketch
 
@@ -12,11 +12,11 @@ Your most valuable output is every point where writing a setup or an expected va
 
 The spike is a throwaway implementation of the core flows, written to find where the design meets friction in the real code. Work in your own detached worktree, against the design and the sketch, and take the path a competent implementer would naturally take. Don't polish, and don't invent clever workarounds that make the design look easier than it is. Run the sketch against it without editing the tests.
 
-The deliverable is a **friction log**, for a review that asks how the design should have been shaped so these problems never arose. One entry per place where the design didn't say enough or didn't fit the code, and you had to guess, work around something, or depart from its mechanism: cite the code (`path:line`), the design element involved, and what you did instead. Where the existing code pulled toward a different shape, such as another owner, model or flow, say what it was. Sketch harness defects and existing tests that would need changing go in a separate list at the end, for the test author rather than the review. Return the log and the diff.
+The deliverable is a **friction log**, for a review that traces the problems to their causes. One entry per place where the design didn't say enough or didn't fit the code, and you had to guess, work around something, or depart from its mechanism: cite the code (`path:line`), the design element involved, and what you did instead. Where the existing code pulled toward a different shape, such as another owner, model or flow, say what it was. Sketch harness defects and existing tests that would need changing go in a separate list at the end, for the test author rather than the review. Return the log and the diff.
 
 ## From-scratch review
 
-You are the first independent review of a draft design, with evidence most reviewers lack: a thin sketch and a throwaway spike. The checks in SKILL.md §3 still apply. Your job is to explain the problems they expose so plainly that the human can redesign from your account. The human designs; you don't need to find the right design, but you do need to find each problem's cause. Asking how you would design this from scratch so the problems never arise is how you find it.
+You are the first independent review of a draft design, with evidence most reviewers lack: a thin sketch and a throwaway spike. The checks in SKILL.md §3 still apply. Explain the problems the sketch and spike expose so plainly that the human can redesign from your account. Ask how you would design this from scratch so they never arise: that is how you find each problem's cause.
 
 **1. Collect the tensions.** They come in two kinds:
 
@@ -27,7 +27,7 @@ Ignore sketch harness defects and existing tests that will need changing: the sp
 
 **2. Find the causes.** Take the tensions as one set, not a list to patch. Several symptoms usually share one cause: an owner, model, flow or rule in the draft. To find it, work from the problem and the promises rather than the draft's mechanism, and try more than one shape that would make the tensions impossible rather than handled. Fit each to the existing code as the spike found it. Weigh each against the project's principles and threat model, not only against the tensions it removes: a shape that removes three tensions and weakens a trust boundary is a trade-off to show, not a fix.
 
-**Return the problems first, written for the human, then the evidence.** Being clear matters more here than being right about the fix:
+**3. Return the problems first, written for the human, then the evidence:**
 
 1. **The problems.** One per cause, not per symptom, most consequential first. For each: what goes wrong, as a concrete scenario; which part of the design causes it; and why patching each symptom would leave the cause in place. The reader knows the design but not the code, so name a file or symbol only alongside what it does. Say how sure you are.
 2. **Shapes that would remove them.** For each cause a different shape would remove: the shapes you tried, what each changes, which problems it removes, and what it costs or weakens. These are options with trade-offs, not a verdict; if you lean toward one, say so and why, marked as your lean. If the draft's shape holds and the problems are local, say that plainly.
@@ -43,7 +43,5 @@ One entry per line: `<skill>[/<file>] §<section> <rule> | ctx: <tags> | <applic
 
 - discuss-issue/sketch-and-spike §sketch author | ctx: models=claude-5 | Opus at medium effort.
 - discuss-issue/sketch-and-spike §spike implementer | ctx: models=claude-5 | Sonnet at medium effort.
-- discuss-issue/sketch-and-spike §spike what-it-catches | ctx: past-runs | two owners of one fact, mechanisms that collide with existing constraints, shortcuts the design invites.
-- discuss-issue/sketch-and-spike §spike friction-kinds | ctx: past-runs | two places that would own the same fact; a collision with a widely used signature, a guard, a lint or census, an import boundary; a mechanism other than the design's; a value threaded through layers that shouldn't know it; something special-cased to make a test pass.
+- discuss-issue/sketch-and-spike §spike,review friction-kinds | ctx: past-runs | two owners of one fact; a collision with a widely used signature, guard, lint, census or import boundary; a mechanism other than the design's; a value threaded through layers that shouldn't know it; a special case keyed to a fixture; swallowed errors.
 - discuss-issue/sketch-and-spike §review reviewer | ctx: models=claude-5 | Opus at high effort.
-- discuss-issue/sketch-and-spike §review spike-workarounds | ctx: past-runs | two places owning one fact, a special case keyed to a fixture, a value threaded through layers that shouldn't know it, a bypassed guard or census, a signature change that ripples to many callers, swallowed errors, a mechanism other than the design's.
