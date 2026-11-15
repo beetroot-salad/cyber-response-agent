@@ -170,7 +170,7 @@ def test_the_shape_files_uuid_grammar_is_the_records_one() -> None:
     """The uuid placeholder's grammar is `_run_id._UUID_TEXT.pattern`, in the test's shape text and in the repo's address file. (S2, R14)"""
     assert _UUID_TEXT.pattern == UUID
     text = resources.files("defender.api").joinpath("addresses.json").read_text(encoding="utf-8")
-    assert json.dumps(_UUID_TEXT.pattern)[1:-1] in text
+    assert json.loads(text)["placeholders"]["uuid"] == _UUID_TEXT.pattern
     assert classify(f"/t/{INV}/investigations/{INV}") == "investigation"  # control: the pattern is what the classifier uses
 
 

@@ -2,7 +2,9 @@
 """#1161 B9, B3: the repo's ingress in front of the built frontend and the real API child. Plain HTTP, no browser."""
 from __future__ import annotations
 
+import json
 import re
+import subprocess
 import urllib.parse
 from pathlib import Path
 
@@ -10,7 +12,7 @@ import httpx
 import pytest
 
 from defender.tests.support.api._server1083 import A
-from defender.tests.support.frontend._ingress1161 import ARTIFACT_DOMAIN, ingress
+from defender.tests.support.frontend._ingress1161 import ARTIFACT_DOMAIN, REPO, ingress, launcher_env
 
 UUID = "3400a0c8-beda-4fe6-86fb-3c6da1ea4a11"
 CSP = {"default-src": ["'self'"], "base-uri": ["'none'"], "frame-ancestors": ["'none'"],
@@ -92,3 +94,12 @@ def test_1161_b9_two_ingress_instances_serve_at_once(browser_tools, tmp_path: Pa
         for origin in (first, second):
             r = httpx.get(f"{origin}/")
             assert r.status_code == 200 and "app" in r.text, (origin, r.status_code)
+
+
+def test_1161_b9_the_caddyfile_turns_off_the_admin_endpoint(browser_tools, tmp_path: Path):
+    """`caddy adapt` of the repo's Caddyfile gives `admin.disabled == true`. (B9)"""
+    env = launcher_env("http://localhost:8080", "127.0.0.1:1", tmp_path, work=tmp_path)
+    done = subprocess.run(["caddy", "adapt", "--config", "defender/frontend/Caddyfile", "--adapter", "caddyfile"],
+                          cwd=REPO, env=env, capture_output=True, text=True, check=False, timeout=60)
+    assert done.returncode == 0, done.stderr[-1500:]
+    assert json.loads(done.stdout)["admin"]["disabled"] is True

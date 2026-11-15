@@ -15,33 +15,35 @@ from defender.tests.support.frontend._ingress1161 import FRONTEND
 LIST = FRONTEND.parent / "api" / "addresses.json"
 
 
-def _entries(document: Any) -> Any:
-    """The container of the shapes in the file (its format is agent-local): the list or mapping of them."""
-    if isinstance(document, list):
-        return document
-    holders = [v for v in document.values() if isinstance(v, list | dict) and v]
-    assert len(holders) == 1, f"cannot find the shape list in {list(document)}"
-    return holders[0]
-
-
 def _add_one(document: Any) -> None:
-    entries = _entries(document)
-    if isinstance(entries, list):
-        extra = copy.deepcopy(entries[0])
-        for key, value in extra.items():
-            if isinstance(value, str) and not value.startswith("/"):
-                extra[key] = "zz-added"
-        entries.append(extra)
-    else:
-        entries["zz-added"] = copy.deepcopy(next(iter(entries.values())))
+    """Append a shape with a fresh name and a fresh literal template (the bound format, record "Chosen names")."""
+    document["shapes"].append({"name": "zz-added", "template": "/zz-added", "returnable": False})
 
 
 def _drop_one(document: Any) -> None:
-    entries = _entries(document)
-    if isinstance(entries, list):
-        entries.pop()
-    else:
-        entries.pop(next(reversed(entries)))
+    """Remove the `sign-in-failed` shape; exactly one entry goes."""
+    before = len(document["shapes"])
+    document["shapes"] = [s for s in document["shapes"] if s["name"] != "sign-in-failed"]
+    assert before - len(document["shapes"]) == 1
+
+
+EXAMPLE = {"placeholders": {"uuid": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"},
+           "shapes": [{"name": "root", "template": "/", "returnable": True},
+                      {"name": "investigation", "template": "/t/{uuid}/investigations/{uuid}", "returnable": True},
+                      {"name": "sign-in-failed", "template": "/sign-in-failed", "returnable": False}]}
+
+
+def test_the_list_edits_act_on_the_bound_format() -> None:
+    """Machinery self-test, green without a frontend: each helper edits the bound example as intended."""
+    added = copy.deepcopy(EXAMPLE)
+    _add_one(added)
+    assert {s["name"] for s in added["shapes"]} == {"root", "investigation", "sign-in-failed", "zz-added"}
+    assert added["shapes"][-1]["template"] == "/zz-added"
+    assert added["placeholders"] == EXAMPLE["placeholders"]
+    dropped = copy.deepcopy(EXAMPLE)
+    _drop_one(dropped)
+    assert {s["name"] for s in dropped["shapes"]} == {"root", "investigation"}
+    assert dropped["placeholders"] == EXAMPLE["placeholders"]
 
 
 def _build(root: Path) -> subprocess.CompletedProcess[str]:

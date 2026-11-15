@@ -282,10 +282,10 @@ class FakeKeycloak(httpx.AsyncBaseTransport):
     key and carries `iss`, `aud`, `sub`, `nonce`, `amr` and the observed companions. A step's `fails` and `answers`
     still apply first, to the code grant as to any other token request.
 
-    The account's side, UNOBSERVED shapes (owed the `live` check): every account the sign-in realm has been asked
-    about exists at the provider. `GET .../users/<id>/credentials` lists `credentials[id]` (a code's list is recorded
-    at its exchange; default a password) as `{id, type, createdDate}`; `GET .../users/<id>` is its record (404 `User not found` for an id neither created here nor
-    signed in at the front channel, as observed) and `PUT` merges the body into it (204); read `records[id]["requiredActions"]` after a `PUT`."""
+    The account's side, UNOBSERVED shapes (owed the `live` check): `GET .../users/<id>/credentials` lists `credentials[id]` (a code's list is recorded
+    at its exchange; default a password) as `{id, type, createdDate}`; `GET .../users/<id>` is its record (an id neither created here nor signed in at the front
+    channel answers 404 on the record `GET`, `PUT` and `GET .../credentials`; only the `GET .../credentials` status is observed (the live
+    check's last line); the record `GET` and `PUT` statuses and the body `{"error": "User not found"}` are UNOBSERVED and reached by no contract path) and `PUT` merges the body into it (204); read `records[id]["requiredActions"]` after a `PUT`."""
 
     def __init__(self, fails: Iterable[Fail] = (), *, front: str = FRONT, back: str = BACK,
                  admin_clients: Mapping[str, tuple[str, str]] = ADMIN_CLIENTS,
@@ -495,7 +495,7 @@ class FakeKeycloak(httpx.AsyncBaseTransport):
         if ADMIN_READ[realm] != "users":
             return httpx.Response(403, json={"error": "HTTP 403 Forbidden"})
         record = self.accounts.get(account_id) or self.records.get(account_id)
-        if record is None:  # observed: Keycloak 26.4.0 answers an unknown user id so
+        if record is None:  # status observed for GET .../credentials only (live check); record GET/PUT status and body UNOBSERVED
             return httpx.Response(404, json={"error": "User not found"})
         if credentials:
             return httpx.Response(200, json=[
