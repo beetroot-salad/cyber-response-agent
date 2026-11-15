@@ -4,6 +4,7 @@ seeded sample of it through the repo's ingress (the four outcomes, stated on the
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -79,20 +80,26 @@ def _not_app(page: Any, seen: list[Any], produced: str | None) -> bool:
 
 
 @pytest.mark.parametrize("phase", ["signed-out", "signed-in"])
-def test_1161_b3_a_seeded_sample_of_the_generated_set_in_the_pinned_chromium(world, context, browser, phase):  # noqa: C901 — one table of the four outcomes
+def test_1161_b3_a_seeded_sample_of_the_generated_set_in_the_pinned_chromium(world, context, browser, phase):
     """Each value's outcome by the pathname the browser produced: returnable member, the failed screen's, no member,
     or never served by the ingress (only: no sign-in starts). A shell-started sign-in never yields `bad-request`. (B3)"""
+    problems = _outcomes(world, context, browser, phase, [case.value for case in _sample()])
+    assert not problems, "\n".join(problems)
+
+
+def _outcomes(world: Any, context: Any, browser: Any, phase: str, values: list[str]) -> list[str]:  # noqa: C901 — one table of the four outcomes
+    """What each of `values` did that the design does not allow, in the pinned Chromium (`phase`: signed out or in)."""
     if phase == "signed-in":
         sign_in(world, context)
     problems: list[str] = []
-    for case in _sample():
+    for value in values:
         cookies = context.cookies() if phase == "signed-in" else None
-        ctx, page, seen, produced = _produce(world, browser, case.value, cookies=cookies)
+        ctx, page, seen, produced = _produce(world, browser, value, cookies=cookies)
         try:
             starts = logins(seen, world.origin)
             if _not_app(page, seen, produced):
                 if starts:
-                    problems.append(f"{case.value!r}: not served as the app, but sign-in started {starts}")
+                    problems.append(f"{value!r}: not served as the app, but sign-in started {starts}")
                 continue
             assert produced is not None
             shape = S.classify(produced)
@@ -103,13 +110,13 @@ def test_1161_b3_a_seeded_sample_of_the_generated_set_in_the_pinned_chromium(wor
                 starts = logins(seen, world.origin)  # after the shell's fetch and any redirect, not at the load event
                 got = page.evaluate("location.pathname")
                 if got != produced or starts:
-                    problems.append(f"{case.value!r}: pathname {got!r} (browser produced {produced!r}), logins {starts}")
+                    problems.append(f"{value!r}: pathname {got!r} (browser produced {produced!r}), logins {starts}")
             elif shape == "sign-in-failed":
                 screen(page, "sign-in-failed")
                 settle(page, 300)
                 starts = logins(seen, world.origin)
                 if starts:
-                    problems.append(f"{case.value!r}: the failed screen started a sign-in {starts}")
+                    problems.append(f"{value!r}: the failed screen started a sign-in {starts}")
             else:
                 landing = shape if shape in S.RETURNABLE else "root"
                 screen(page, landing)
@@ -118,9 +125,43 @@ def test_1161_b3_a_seeded_sample_of_the_generated_set_in_the_pinned_chromium(wor
                 want_login = produced if shape in S.RETURNABLE else None
                 got = page.evaluate("location.pathname")
                 if starts != [want_login] or got != (produced if shape in S.RETURNABLE else "/"):
-                    problems.append(f"{case.value!r}: produced {produced!r}: logins {starts}, landed {got!r}")
+                    problems.append(f"{value!r}: produced {produced!r}: logins {starts}, landed {got!r}")
                 if shown(page) == "sign-in-failed":
-                    problems.append(f"{case.value!r}: sign-in-failed shown")
+                    problems.append(f"{value!r}: sign-in-failed shown")
         finally:
             ctx.close()
+    return problems
+
+
+def _respellings(member: str) -> list[str]:
+    """Deterministic spellings of one member that are not members (S2: whole string, case-sensitive, no decoding, no
+    trailing `/`): a trailing slash, letter case flipped (all of it, its words only, its uuids only) and each kind of
+    character written as an escape (a letter, a digit, a hex digit inside a uuid, a hyphen, a slash)."""
+    uuids = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+    words = member.replace("/t/", "/T/").replace("investigations", "Investigations").replace("sign-in-failed", "Sign-in-failed")
+    out = [member + "/", member.upper(), words, uuids.sub(lambda m: m.group(0).upper(), member)]
+    for pattern in (r"[a-z]", r"[0-9]"):
+        found = re.search(pattern, member)
+        if found:
+            out.append(member[:found.start()] + f"%{ord(found.group(0)):02X}" + member[found.end():])
+    inside = uuids.search(member)
+    if inside:
+        out.append(member[:inside.start() + 3] + f"%{ord(member[inside.start() + 3]):02X}" + member[inside.start() + 4:])
+    if "-" in member:
+        out.append(member.replace("-", "%2D", 1))
+    if "/investigations/" in member:
+        out += [member.replace("investigations", "%69nvestigations"), member.replace("/investigations/", "%2Finvestigations/")]
+    return [v for v in dict.fromkeys(out) if v != member]
+
+
+@pytest.mark.parametrize("phase", ["signed-out", "signed-in"])
+def test_1161_s2_a_member_respelled_by_slash_case_or_escape_is_no_member_in_the_pinned_chromium(
+        world, context, browser, phase):
+    """Each shape's member, plus its trailing-slash, case-flipped and escaped spellings: the member (control) is a member,
+    every respelling gets the not-found screen when signed in and a sign-in with no `return` when signed out. The router
+    reads the raw pathname. (S2, B3)"""
+    members = [m for shape in S.SHAPES for m in S.members(shape, 1161, 1)]
+    values = [v for m in members for v in [m, *_respellings(m)]]
+    assert len(values) > 15 and not [v for v in values if v not in members and S.classify(v) is not None], values
+    problems = _outcomes(world, context, browser, phase, values)
     assert not problems, "\n".join(problems)
