@@ -14,7 +14,7 @@ Read the project's CLAUDE.md files for how tests run here and the traps that mak
 
 ## Tests stay as they are
 
-Edit tests only mechanically: imports, names and paths that follow the moved code. Keep the same cases with the same assertions. If an assertion needs to change, behavior is changing, and this is no longer a refactor: stop and say what the test pins and why the change disagrees. The human decides whether it becomes a bug fix (`proven-fix`) or a design change (`discuss-issue`).
+Edit tests only mechanically: imports, names and paths that follow the moved code. Keep the same cases with the same assertions. If an assertion needs to change, behavior is changing, and this is no longer a refactor: stop and say what the test pins and why the change disagrees. The human decides whether it becomes a bug fix (`tested-fix`) or a design change (`discuss-issue`).
 
 A test that only reached its subject through the old structure may need a new seam. Move the test with the code, keep its assertions, and say so in the report.
 

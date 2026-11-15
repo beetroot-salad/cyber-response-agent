@@ -207,6 +207,26 @@ def alive(pid: int) -> bool:
     return Path(f"/proc/{pid}/stat").read_text(encoding="utf-8").rsplit(")", 1)[1].split()[0] != "Z"
 
 
+#: How long a fork waits for threads Python has already joined to finish exiting.
+SETTLE_SECONDS = 2.0
+
+
+def _settle_threads_before_fork() -> None:
+    """Wait until every native thread of this process is one Python still knows about, so a fork never copies a
+    thread that is mid-exit. A helper's store call runs in a short-lived thread; Python's join returns before that
+    thread's native teardown ends, and the teardown can hold the libcrypto lock bundled with psycopg. A child forked
+    then inherits the lock held, and its first connection waits on it forever (the 30 s "the child tick did not
+    end", about one run in twenty of these files on CI). Off Linux there is no task list, and nothing is waited."""
+    import threading
+
+    tasks = Path("/proc/self/task")
+    if not tasks.is_dir():
+        return
+    deadline = time.monotonic() + SETTLE_SECONDS
+    while sum(1 for _ in tasks.iterdir()) > threading.active_count() and time.monotonic() < deadline:
+        time.sleep(0.001)
+
+
 class TickChild:
     """`body()` run in a forked child of the test process, so the world's in-process fakes (the forge, the issuer)
     are the child's too and a signal sent to `pid` reaches the child, never the pytest worker. The child writes
@@ -215,6 +235,7 @@ class TickChild:
 
     def __init__(self, body: Callable[[], Any], result: Path) -> None:
         self.result = result
+        _settle_threads_before_fork()
         self.pid = os.fork()
         if self.pid == 0:  # pragma: no cover — runs in the forked child
             code = 1

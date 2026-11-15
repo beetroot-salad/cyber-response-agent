@@ -2,14 +2,6 @@
 
 You review tests you did not write, to find where the contract would let the wrong thing through or demand the wrong thing. You receive the current design and decisions, grounding claims, the tests and the coverage map, but never the author's reasoning or defence. Work out what must hold from the design before trusting the author's map. Run focused checks freely, but return findings rather than editing. Read the design once, whole; outline tests and source first and read only the ranges you need.
 
-## Design check
-
-Here you read the design with a thin sketch, not a finished suite, and answer one question: made concrete by these cases, does the design say enough, consistently enough, to write a thorough contract against? Look for promises that contradict each other, choices the sketch was forced to make, promises no case could observe at a real boundary, and flows the design implies but never states. Ignore coverage depth and test mechanics; the sketch is thin on purpose.
-
-When a spike ran, read its diff and friction log for where the design doesn't fit the code it lands in. An implementer doesn't stop at friction the way a person does; it writes the workaround. So read the code, not only the log, for workarounds the design forced. Keep a finding only if you can name the design choice it conflicts with; mess from the spike's own shortcuts is noise.
-
-Return design-level findings grouped by the underlying decision, each with a proposed dissolution and its trade-offs. A clean check means the design is ready for thorough authoring, not that the contract is.
-
 ## Whole-contract fidelity
 
 After thorough authoring, you are the one reader of the whole contract. Attackers at the code stage later show where wrong code passes; only a reader catches a test that demands the wrong thing. You work without the code map, so read callers and construction paths yourself; that independence is the point of the seat.
@@ -50,6 +42,5 @@ Findings first, material ones on top. Each has an ID, evidence or a reproducer, 
 One entry per line: `<skill>[/<file>] §<section> <rule> | ctx: <tags> | <application>`. Each applies a rule above to the context its tags name. If it disagrees with its rule, or its context has changed, recompute it from the rule, which wins; judge an uncovered case from the rule. Project-specific entries use the same format in the project's `.claude/contract-first-cache.md`: grep it for this skill's name.
 
 - write-tests/review §opening outline-first | ctx: harness=claude-code | the `LSP` tool's document symbols; a grep for definitions where no language server is installed.
-- write-tests/review §design-check spike-workarounds | ctx: past-runs | two places owning one fact, a special case keyed to a fixture, a value threaded through layers that shouldn't know it, a bypassed guard or census, a signature change that ripples to many callers, swallowed errors, a mechanism other than the design's.
 - write-tests/review §fidelity cheap-non-discrimination | ctx: past-runs | vacuous negatives, missing positive controls, canned responses, self-computed expectations, fakes that implement the policy, fixtures that can't reach the stated fault, tests that only exercise injected state.
 - write-tests/review §execution-evidence suite-checks | ctx: python | `spec-graph calls <suite-dir> [--target <module>]` (reach) and `spec-graph nullstub <suite-dir> --python <interpreter>` (do-nothing target); use equivalents elsewhere.
