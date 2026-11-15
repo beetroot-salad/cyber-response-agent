@@ -27,8 +27,9 @@ GREEN = fixture_uuid("tenant:1485-green")
 
 #: The first test's world by change group, newest first: one batch closed with three items held (same transaction, so
 #: they tie and the id orders them), then `hh`, then `dd` (settled by an earlier batch), then the oldest.
-WORLD_GROUPS = [{("finding", "h1"), ("finding", "h2"), ("questioner_finding", "q1")}, {("finding", "hh")},
-                {("finding", "dd")}, {("finding", "d1")}]
+#: `set_aside`'s order in `_world`, as groups changed at one instant (the order inside a group is by id, minted at random).
+WORLD_GROUPS = [{("finding", "h1"), ("finding", "h2"), ("questioner_finding", "q1")}, {("finding", "hh"), ("finding", "dd")},
+                {("finding", "d1")}]
 TWELVE = ["run 1/f 01", "run 1/f 02", "run 1/f 10", "run 2/f 01", "a b", "a/b", "a-b", "a_b", "A b", "z", "Z/z", "é/1"]
 
 
@@ -60,12 +61,14 @@ async def test_o1_set_aside_lists_held_and_dead_items_as_the_stores_own_records_
         got = await store.set_aside(BLUE, limit=50)
 
     assert got == newest_first([i for i in work.values() if i.status in {"held", "dead"}])
-    assert [{(i.kind, i.key) for i in got[a:b]} for a, b in [(0, 3), (3, 4), (4, 5), (5, 6)]] == WORLD_GROUPS
+    assert [{(i.kind, i.key) for i in got[a:b]} for a, b in [(0, 3), (3, 5), (5, 6)]] == WORLD_GROUPS
     assert all(isinstance(i, store_mod().WorkItem) for i in got)
-    assert [(i.status, i.batch_id, i.pr_number) for i in got] == [
-        ("held", batches["closed"], 7), ("held", batches["closed"], 7), ("held", batches["closed"], 7),
-        ("held", batches["mixed"], 5), ("dead", batches["mixed"], 5), ("dead", batches["d1"], None)]
+    assert [(i.status, i.batch_id, i.pr_number) for i in got[:3]] == [("held", batches["closed"], 7)] * 3
+    assert {i.key: (i.status, i.batch_id, i.pr_number) for i in got[3:5]} == {
+        "hh": ("held", batches["mixed"], 5), "dd": ("dead", batches["mixed"], 5)}
+    assert (got[5].status, got[5].batch_id, got[5].pr_number) == ("dead", batches["d1"], None)
     assert len({(i.updated_at) for i in got[:3]}) == 1, "control: the three tied items changed in one transaction"
+    assert got[3].updated_at == got[4].updated_at, "control: one review settled `hh` and `dd` together"
     assert got[0].updated_at > got[3].updated_at > got[5].updated_at
 
 

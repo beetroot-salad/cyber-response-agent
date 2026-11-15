@@ -127,13 +127,17 @@ def _read(rels: list[str]) -> dict[str, str]:
 
 
 def test_o5_no_product_code_names_a_retired_import_or_cutover_surface():
-    """Outside tests and the revisions before the retirement, no product file names any retired surface (the retirement migration may name `learning_cutover`). (O5)"""
+    """Outside tests and the revisions before the retirement, no product file names any retired surface (the retirement
+    migration may name `learning_cutover`, and a later revision may name the retirement revision's id, its parent). (O5)"""
     files = _product_files()
     assert len(files) >= _PRODUCT_FLOOR, f"the walk found only {len(files)} product files"
     by_rev = _revision_files()
     old = {p for p in by_rev.values()} - revisions.new_files(by_rev)
-    retire_path = by_rev.get(next((r for r in by_rev if r.endswith(revisions.RETIRE_SUFFIX)), ""), "")
-    found = census(_read([rel for rel in files if rel not in old]), allow={retire_path})
+    retire = next((r for r in by_rev if r.endswith(revisions.RETIRE_SUFFIX)), "")
+    sources = _read([rel for rel in files if rel not in old])
+    if retire:
+        sources = {rel: text.replace(retire, "") for rel, text in sources.items()}
+    found = census(sources, allow={by_rev.get(retire, "")})
     assert found == {}, f"{len(found)} product file(s) still name a retired surface: {found}"
 
 
