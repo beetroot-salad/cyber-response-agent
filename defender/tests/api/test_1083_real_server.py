@@ -11,6 +11,7 @@ import datetime as dt
 import json
 import logging
 import re
+import urllib.parse
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,7 @@ from defender.tests.support.api._server1083 import (
     BOB,
     OPS,
     PROGRAMS_REALM,
+    SESSION_COOKIE,
     SIGNIN_REALM,
     Child,
     FakeKeycloak,
@@ -40,6 +42,7 @@ from defender.tests.support.api._server1083 import (
     seed_identity,
     seed_token_credential,
 )
+from defender.tests.support.api._signin1161 import authorize, deleted, link_account, set_cookies
 from defender.tests.support.jobs._jobs1342 import (
     ALERT_BYTES,
     DESCRIPTION,
@@ -788,3 +791,190 @@ async def test_o6_o10_each_list_walked_by_its_cursors_is_the_filtered_rows_newes
             assert [item[field] for page in pages for item in page["items"]] == expected, case
             assert [len(p["items"]) for p in pages[:-1]] == [limit] * (len(pages) - 1), case
             assert 0 < len(pages[-1]["items"]) <= limit, case
+
+
+# --- #1161 piece 1: sign-in carries a return path; the API under /api --------------------------------
+# The in-process client addresses the app's routes under `/api` (B3). That the app itself answers there, rather than an
+# ingress stripping the prefix, is a choice the design does not make (sketch FC-1); `_api` is its one place here.
+
+def _api(path: str) -> str:
+    return f"/api{path}"
+
+
+#: Where the callback lives, against which a relative `Location` resolves.
+_CALLBACK = f"{ORIGIN}{_api('/auth/callback')}"
+INV = "0b6f1c1e-3c55-4a4e-9a51-116100000001"
+TICKET_PATH = f"/t/{A}/investigations/{INV}?from=ticket"
+
+
+async def _login(served: Served, back: str | None) -> tuple[str, dict[str, Any]]:
+    """Sign-in start with `back` as its return path (None: no parameter): the authorize URL and the cookies it sets."""
+    r = await served.client.get(_api("/auth/login"), params={} if back is None else {"return": back})
+    assert r.status_code == 302, (r.status_code, r.text)
+    return r.headers["location"], set_cookies(r)
+
+
+def _prelogin(cookies: dict[str, Any]) -> tuple[str, Any]:
+    """The one pre-login cookie a sign-in start set (every cookie but the session's)."""
+    [(name, morsel)] = [(n, m) for n, m in cookies.items() if n != SESSION_COOKIE]
+    return name, morsel
+
+
+async def _callback(served: Served, url: str, sent: dict[str, str]) -> httpx.Response:
+    """The browser arriving at the callback URL `url` (the front channel's answer) with the cookies `sent`."""
+    split = urllib.parse.urlsplit(url)
+    assert f"{split.scheme}://{split.netloc}{split.path}" == _CALLBACK, url
+    headers = {"Cookie": "; ".join(f"{k}={v}" for k, v in sent.items())} if sent else {}
+    return await served.client.get(f"{split.path}?{split.query}", headers=headers)
+
+
+def _landing(r: httpx.Response) -> str:
+    """A 303's target as path and query, after checking it is on the frontend origin and outside the API."""
+    assert r.status_code == 303, (r.status_code, r.text)
+    target = urllib.parse.urlsplit(urllib.parse.urljoin(_CALLBACK, r.headers["location"]))
+    assert f"{target.scheme}://{target.netloc}" == ORIGIN, r.headers["location"]
+    assert target.path != "/api", r.headers["location"]
+    assert not target.path.startswith("/api/"), r.headers["location"]
+    return (target.path or "/") + (f"?{target.query}" if target.query else "")  # an origin alone is the root
+
+
+async def _signed_in(served: Served, back: str | None) -> httpx.Response:
+    """Ann signs in from start to callback with return path `back`; the callback's answer."""
+    account = await link_account(served.dsn, ANN)
+    url, cookies = await _login(served, back)
+    name, morsel = _prelogin(cookies)
+    return await _callback(served, authorize(url, account), {name: morsel.value})
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("back", [
+    TICKET_PATH,
+    f"/t/{A}/investigations/{INV}/pages/runtime.html?a=1.2;b,c=d%20e",  # the pre-login cookie's `.` and cookie syntax
+    "/" + "a" * 1023,  # exactly 1024 bytes
+    "/",
+], ids=["ticket-link", "separators", "1024-bytes", "root"])
+async def test_1161_p2_sign_in_lands_on_its_return_path_with_the_query_kept(served, back):
+    """The callback 303s to exactly the return path sign-in started with, and opens a working session. (P2, B1)"""
+    r = await _signed_in(served, back)
+    assert _landing(r) == back
+    session = set_cookies(r)[SESSION_COOKIE]
+    me = await served.client.get(_api("/me"), headers=person(session.value))
+    assert me.status_code == 200, me.text
+    assert me.json()["user"]["email"] == ANN, me.text
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("back", [
+    None, "", "t/a", "//evil.example/x", "/\\evil.example/x", "https://evil.example/x", "/t/\x01x", "/t/\nx",
+    "/t/\x7fx", "/api", "/api/me", "/api/auth/login?return=/x", "/" + "a" * 1024,
+], ids=["absent", "empty", "relative", "scheme-relative", "backslash", "absolute", "control", "newline", "delete",
+        "api", "api-route", "api-login", "1025-bytes"])
+async def test_1161_b2_a_refused_return_path_still_signs_in_and_lands_on_the_root(served, back):
+    """A return path P2 refuses is not an error: sign-in proceeds and lands on the frontend root. (B2, P2)"""
+    r = await _signed_in(served, back)
+    assert _landing(r) == "/"
+    assert SESSION_COOKIE in set_cookies(r)
+
+
+@pytest.mark.postgres
+async def test_1161_d6_two_sign_ins_in_flight_each_complete_to_their_own_return_path(served):
+    """Each attempt sets its own pre-login cookie on the callback's path; each callback reads and clears only its own.
+    (D6, B1)"""
+    account = await link_account(served.dsn, ANN)
+    first, second = f"/t/{A}/investigations/{INV}?tab=1", f"/t/{A}/investigations/{INV}?tab=2"
+    (url1, c1), (url2, c2) = await _login(served, first), await _login(served, second)
+    (name1, m1), (name2, m2) = _prelogin(c1), _prelogin(c2)
+    assert name1 != name2, "one pre-login cookie name for both attempts: the second overwrites the first"
+    for name, m in ((name1, m1), (name2, m2)):
+        assert m["path"] == _api("/auth/callback"), m.OutputString()
+        assert m["httponly"], m.OutputString()
+        assert m["secure"], m.OutputString()
+        assert m["samesite"].lower() == "lax", m.OutputString()
+        assert 0 < int(m["max-age"]) <= 600, m.OutputString()
+        # Observed in Chromium (sketch probe): a `__Host-` cookie whose Path is not `/` is dropped.
+        assert not name.startswith("__Host-"), m.OutputString()
+    jar = {name1: m1.value, name2: m2.value}
+    done2 = await _callback(served, authorize(url2, account), jar)
+    assert _landing(done2) == second
+    cleared = set_cookies(done2)
+    assert deleted(cleared[name2]), done2.headers.get_list("set-cookie")
+    assert name1 not in cleared, done2.headers.get_list("set-cookie")
+    done1 = await _callback(served, authorize(url1, account), {name1: m1.value})
+    assert _landing(done1) == first
+
+
+def _failed(r: httpx.Response) -> tuple[str, dict[str, str]]:
+    """The sign-in-failed screen a callback 303'd to: its path and its query, after checking no session was opened."""
+    landed = urllib.parse.urlsplit(_landing(r))
+    assert SESSION_COOKIE not in set_cookies(r), r.headers.get_list("set-cookie")
+    return landed.path, dict(urllib.parse.parse_qsl(landed.query))
+
+
+@pytest.mark.postgres
+async def test_1161_d6_b4_a_callback_without_its_own_pre_login_cookie_never_uses_another_attempts_return_path(served):
+    """Missing or mismatched: sign-in-failed, never a cookie's return path, the retry from the root. (D6, B4)"""
+    account = await link_account(served.dsn, ANN)
+    first, second = f"/t/{A}/investigations/{INV}?tab=1", f"/t/{A}/investigations/{INV}?tab=2"
+    (url1, _c1), (_url2, c2) = await _login(served, first), await _login(served, second)
+    name2, m2 = _prelogin(c2)
+    for sent in ({name2: m2.value}, {}):
+        path, query = _failed(await _callback(served, authorize(url1, account), sent))
+        assert path not in {urllib.parse.urlsplit(p).path for p in (first, second)}, path
+        assert path != "/", path
+        assert query.get("reason") == "prelogin-missing", query
+        assert first not in query.values(), query
+        assert second not in query.values(), query
+        assert query.get("return", "/") == "/", query
+
+
+def _token_answer(status: int, body: dict[str, Any]) -> Callable[[httpx.Request], httpx.Response]:
+    return lambda _request: httpx.Response(status, json=body)
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize(("reason", "linked", "token"), [
+    ("login-attempt-invalid", True, (400, {"error": "invalid_grant", "error_description": "Code not valid"})),
+    ("unknown-account", False, None),
+    ("unavailable", True, (503, {})),
+])
+async def test_1161_b4_every_failed_callback_is_a_303_to_the_sign_in_failed_screen_naming_its_reason(
+        served, reason, linked, token):
+    """A refused or unavailable callback answers a top-level navigation with a 303 to a frontend address carrying the
+    reason and the kept return path, and clears the attempt's pre-login cookie. (B4, S1)"""
+    account = await link_account(served.dsn, ANN) if linked else "kc-nobody"
+    if token is not None:
+        served.keycloak.answers[(SIGNIN_REALM, "token")] = _token_answer(*token)
+    url, cookies = await _login(served, TICKET_PATH)
+    name, morsel = _prelogin(cookies)
+    r = await _callback(served, authorize(url, account), {name: morsel.value})
+    path, query = _failed(r)
+    assert path != urllib.parse.urlsplit(TICKET_PATH).path, path
+    assert query.get("reason") == reason, query
+    assert query.get("return") == TICKET_PATH, query
+    assert deleted(set_cookies(r)[name]), r.headers.get_list("set-cookie")
+
+
+@pytest.mark.postgres
+async def test_1161_b3_the_location_create_tenant_builds_carries_the_api_prefix_and_reads_back(served):
+    """`POST /api/admin/tenants` answers a `Location` under `/api` that reads the new tenant. (B3, C17)"""
+    created = await served.client.post(_api("/admin/tenants"), headers=served.ops())
+    assert created.status_code == 202, created.text
+    tenant_id = created.json()["tenant_id"]
+    location = created.headers["location"]
+    assert urllib.parse.urlsplit(location).path == _api(f"/admin/tenants/{tenant_id}"), location
+    read = await served.client.get(location, headers=served.ops())
+    assert read.status_code == 200, read.text
+    assert read.json()["tenant_id"] == tenant_id, read.text
+
+
+@pytest.mark.postgres
+async def test_1161_b5_a_cookie_alone_reads_the_api_and_no_origin_is_granted_cors(served):
+    """The session cookie alone is enough; no response grants another origin access, preflight included. (B5)"""
+    elsewhere = "https://evil.example"
+    me = await served.client.get(_api("/me"), headers={**served.ann(write=False), "Origin": elsewhere})
+    assert me.status_code == 200, me.text
+    assert me.json()["user"]["email"] == ANN, me.text
+    preflight = await served.client.options(_api("/me"), headers={
+        "Origin": elsewhere, "Access-Control-Request-Method": "GET", "Access-Control-Request-Headers": "authorization"})
+    for r in (me, preflight):
+        assert not [h for h in r.headers if h.lower().startswith("access-control-")], (r.status_code, dict(r.headers))
