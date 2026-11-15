@@ -1,6 +1,6 @@
 """#1278 sketch: the learning store as tests drive and observe it, and the tick's test seams.
 
-The store under test is `defender.learning.store.LearningStore(dsn, **knobs)`: SQLAlchemy async over
+The store under test is `defender.learning_store.LearningStore(dsn, **knobs)` (#1485 lifted it): SQLAlchemy async over
 PostgreSQL schema `learning`, tenant id the first positional argument of every verb (as `JobStore`).
 Nothing here implements store policy: helpers open the store, call one verb, read one view, lapse a
 lease by the database's clock, and record what a curator step saw. The target is imported inside each
@@ -44,7 +44,7 @@ ONE = {"finding": 1, "questioner_finding": 1, "pitfall": 1, "curation_request": 
 
 
 def store_mod() -> Any:
-    return importlib.import_module("defender.learning.store")
+    return importlib.import_module("defender.learning_store")
 
 
 @asynccontextmanager

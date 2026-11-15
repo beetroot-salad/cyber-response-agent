@@ -369,7 +369,7 @@ def test_the_stop_points_cover_each_curator_before_and_after_its_commit_and_the_
 def test_a_stop_anywhere_in_a_claim_runs_no_further_curator_commit_or_pr_and_leaves_the_batch_expired_or_abandoned(
         world, caplog, lane, stop, how):  # noqa: F811 — the imported fixture
     """A stop inside any curator, after a commit, or in the push (also a failing one): nothing more is authored, committed or opened; with commits the lease is expired and the next tick delivers once, without any commits the batch is abandoned and the lane free. (Stop path)"""
-    from defender.learning.store import Stop
+    from defender.learning_store import Stop
     from defender.tests.support.learning.core._feedback1278 import ONE_ITEM
 
     w = world

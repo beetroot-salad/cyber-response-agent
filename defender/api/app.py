@@ -23,7 +23,7 @@ from defender.identity.service import SESSION_LIFETIME
 from defender.identity.roles import Permission
 from defender.identity.models import Role
 from defender.records.formats import (
-    AlertId, CredentialId, InvestigationId, LearningJobId, MembershipId, ProgramId, TenantId, UserId,
+    AlertId, BatchId, CredentialId, InvestigationId, LearningJobId, MembershipId, ProgramId, TenantId, UserId, WorkItemId,
 )
 
 from .models import (
@@ -47,11 +47,13 @@ from .models import (
     Lesson,
     Me,
     Member,
+    ParkedBatch,
     MeUser,
     Program,
     ProgramCreate,
     ProgramMe,
     ProgramRef,
+    SetAsideItem,
     System,
     SystemCheck,
     SystemPut,
@@ -404,6 +406,8 @@ _UNBACKED = {**_EVERY_ROUTE, **responses(501)}
 _ALERT_ORDER: Order[AlertSummary, TimePosition] = newest_first(lambda a: a.fired_at, lambda a: a.alert_id, AlertId)
 _INVESTIGATION_ORDER: Order[Investigation, TimePosition] = newest_first(lambda i: i.created_at, lambda i: i.investigation_id, InvestigationId)
 _LEARNING_JOB_ORDER: Order[LearningJob, TimePosition] = newest_first(lambda j: j.created_at, lambda j: j.learning_job_id, LearningJobId)
+_SET_ASIDE_ORDER: Order[SetAsideItem, TimePosition] = newest_first(lambda i: i.updated_at, lambda i: i.item_id, WorkItemId)
+_PARKED_ORDER: Order[ParkedBatch, TimePosition] = newest_first(lambda b: b.created_at, lambda b: b.batch_id, BatchId)
 _LESSON_ORDER: Order[Lesson, str] = ordered_by_id(lambda le: le.lesson_id)
 _SYSTEM_ORDER: Order[SystemSettings, str] = ordered_by_id(lambda s: s.system_id)
 
@@ -578,6 +582,38 @@ async def get_learning_job(deps: Deps, caller: WorkReader, learning_job_id: Lear
     if job is None:
         raise _not_found("learning job", learning_job_id)
     return job
+
+
+learning_work = _router(prefix="/learning", tags=["learning"], responses=_EVERY_ROUTE)
+
+
+@learning_work.get("/items")
+async def list_learning_items(
+    deps: Deps, caller: WorkReader,
+    status_filter: Annotated[Literal["held", "dead"] | None, Query(alias="status")] = None,
+    cursor: Cursor = None,
+    limit: Limit = DEFAULT_PAGE,
+) -> Page[SetAsideItem]:
+    """The items the learning loop set aside for a person: held (waiting for a decision) and dead (retired for good),
+    each with why. The reason is plain text, some of it model-written: render it as text."""
+    return await paginate(
+        lambda after, n: deps.learning_work.list_set_aside(caller.tenant_id, status=status_filter, after=after, limit=n),
+        _SET_ASIDE_ORDER, list_name="learning-items", tenant_id=caller.tenant_id,
+        cursor=cursor, limit=limit, filters={"status": status_filter},
+    )
+
+
+@learning_work.get("/parked-batches")
+async def list_parked_batches(
+    deps: Deps, caller: WorkReader, cursor: Cursor = None, limit: Limit = DEFAULT_PAGE
+) -> Page[ParkedBatch]:
+    """The batches the loop will not touch again, newest first, each with why and the items it still holds. An author
+    or registry batch holds its lane: that tenant's work on the lane stops until a person acts."""
+    return await paginate(
+        lambda after, n: deps.learning_work.list_parked_batches(caller.tenant_id, after=after, limit=n),
+        _PARKED_ORDER, list_name="parked-batches", tenant_id=caller.tenant_id, cursor=cursor,
+        limit=limit, filters={},
+    )
 
 
 lessons = _router(prefix="/lessons", tags=["learning"], responses=_UNBACKED)
@@ -972,7 +1008,7 @@ def create_app(deps: ApiDeps) -> FastAPI:
     app.add_middleware(_ExpiryHeader)
     app.add_middleware(_FrontendOriginOnly, origin=deps.frontend_origin)
     in_tenant = _router(prefix="/tenants/{tenant_id}", responses=responses(404))
-    for router in (alerts, investigations, learning_jobs, lessons, systems, alert_mapping, people, programs):
+    for router in (alerts, investigations, learning_jobs, learning_work, lessons, systems, alert_mapping, people, programs):
         in_tenant.include_router(router)
     for router in (auth, in_tenant, admin):
         app.include_router(router)

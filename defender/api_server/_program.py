@@ -23,14 +23,16 @@ from fastapi import FastAPI
 import uvicorn.server
 
 from defender.api.app import create_app
-from defender.api.ports import ApiDeps
+from defender.api.ports import ApiDeps, LearningWorkRepository
 from defender.api.job_store import JobStorePorts
+from defender.api.learning_work import StoreLearningWork
 from defender.api.refusing import Refusing
 from defender.identity import BootstrapRefused, IdentityService, SignInUnavailable
 from defender.identity.keycloak import KeycloakPrograms, KeycloakSignIn  # lint-shippable: ok — the program wires the one sign-in vendor the platform supports (#1083).
 from defender.identity.logged_mail import LoggedMail
 from defender.identity.postgres import PostgresIdentityRepository
 from defender.jobs.store import JobStore
+from defender.learning_store import LearningStore
 from defender.migrations import DatabaseUnreachable, RevisionMismatch, check_version
 from defender.tenancy import TenantRepository
 from defender.tenancy.postgres import PostgresTenantRepository
@@ -40,6 +42,9 @@ from ._settings import Settings, StartRefused
 #: What each unbacked family's refusal names (P1; piece 2 is #1470).
 _PIECE_2 = "piece 2 of #1083 (#1470)"
 _LESSONS = "#1082"
+#: The learning store's pool: the two learning reads only, so small beside the job store's.
+_LEARNING_POOL = 3
+_LEARNING_WORK = "a learning store (#1485)"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -181,13 +186,15 @@ def _bind(settings: Settings) -> socket.socket:
 
 
 def api_deps(*, identity: IdentityService, tenants: TenantRepository, ports: JobStorePorts,
-             frontend_origin: str) -> ApiDeps:
+             frontend_origin: str, learning_work: LearningWorkRepository | None = None) -> ApiDeps:
     """The app's ports as the program composes them: the job store's ports back every family the store serves, the rest
-    refuse (piece 2 of #1083, and lessons). The API test worlds compose through this too (#1496), so they cannot drift."""
+    refuse (piece 2 of #1083, and lessons). The learning loop's set-aside reads (#1485) are the real adapter's over
+    the learning store the program opened; a world that passes none gets a refusal, as for any family it does not back. The API test worlds compose through this too (#1496), so they cannot drift."""
     piece_2, lessons = Refusing(_PIECE_2), Refusing(_LESSONS)
     return ApiDeps(
         identity=identity, tenants=tenants, frontend_origin=frontend_origin,
         alerts=ports, investigations=ports, learning_jobs=ports, alert_mapping=ports, writes=ports,
+        learning_work=learning_work if learning_work is not None else Refusing(_LEARNING_WORK),
         offboarding=ports, lessons=lessons, systems=piece_2, secrets=piece_2, checker=piece_2,
         artifact_links=piece_2, audit=piece_2)
 
@@ -224,6 +231,8 @@ async def serving(settings: Settings, *, transport: httpx.AsyncBaseTransport | N
             async with steps.step("building the stores and the app"):
                 store = JobStore(settings.database_dsn, clock=_wall_clock)
                 stack.push_async_callback(store.close)  # the lifespan does not close it: it outlives the lifespan
+                learning = LearningStore(settings.database_dsn, max_connections=_LEARNING_POOL)
+                stack.push_async_callback(learning.close)  # outlives the lifespan, as the job store does
                 people = PostgresIdentityRepository(settings.database_dsn)
                 until_lifespan.push_async_callback(people.close)
                 tenants = PostgresTenantRepository(settings.database_dsn)
@@ -231,7 +240,8 @@ async def serving(settings: Settings, *, transport: httpx.AsyncBaseTransport | N
                 identity = IdentityService(people, signin=signin, mail=LoggedMail(), clock=_wall_clock,
                                            bootstrap=settings.administrators, programs=programs)
                 app = create_app(api_deps(identity=identity, tenants=tenants, ports=JobStorePorts(store),
-                                          frontend_origin=settings.frontend_origin))
+                                          frontend_origin=settings.frontend_origin,
+                                          learning_work=StoreLearningWork(learning)))
             async with steps.step("binding the listening socket"):
                 sock = _bind(settings)
                 stack.callback(sock.close)

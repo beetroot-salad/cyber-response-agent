@@ -66,6 +66,8 @@ PERMISSION_OF = {
     ("POST", f"{TENANT}/systems/{{}}/check"): "config.write",
     ("GET", f"{TENANT}/alert-mapping"): "config.read",
     ("PUT", f"{TENANT}/alert-mapping"): "config.write",
+    ("GET", f"{TENANT}/learning/items"): "work.read",  # #1485 O3
+    ("GET", f"{TENANT}/learning/parked-batches"): "work.read",  # #1485 O3
     ("GET", f"{TENANT}/members"): "people.manage",
     ("DELETE", f"{TENANT}/members/{{}}"): "people.manage",
     ("GET", f"{TENANT}/invitations"): "people.manage",
@@ -146,6 +148,8 @@ def test_automation_reads_work_and_runs_investigations() -> None:
     assert program.get(f"/tenants/{T1}/investigations/{investigation_id}").status_code == 200
     assert program.post(f"/tenants/{T1}/investigations/{investigation_id}/cancel").status_code == 200
     assert program.get(f"/tenants/{T1}/learning-jobs").status_code == 200
+    for route in ("items", "parked-batches"):  # #1485 O3: `work.read` serves the learning work lists
+        assert program.get(f"/tenants/{T1}/learning/{route}").status_code == 200, route
 
 
 def test_a_program_cannot_start_a_learning_job_and_an_admin_can() -> None:

@@ -202,7 +202,7 @@ def learning_database(monkeypatch: Any) -> Iterator[None]:
             monkeypatch.setenv("DEFENDER_DATABASE_DSN", dsn)
             yield
         return
-    import defender.learning.store as store
+    import defender.learning_store as store
 
     monkeypatch.setattr(store, "LearningStore", _NoStore)  # lint-monkeypatch: ok — the host actor imports the store inside its offboarding step; no seam carries one in
     monkeypatch.setenv("DEFENDER_DATABASE_DSN", "postgresql://stand-in/none")

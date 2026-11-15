@@ -40,7 +40,7 @@ def channel_logger(cfg: CorpusAuthorConfig) -> logging.Logger:
     return logging.getLogger(f"{__name__}.{cfg.log_prefix}")
 
 
-#: One item of a store claim: `(kind, key, payload)` (`learning.store.Held.items`).
+#: One item of a store claim: `(kind, key, payload)` (`learning_store.Held.items`).
 Item = tuple[str, str, dict[str, Any]]
 
 
@@ -92,7 +92,7 @@ def _require_clean_draft(cfg: CorpusAuthorConfig) -> None:
 def _gate_outcome(rec: dict) -> Any:
     """The fate of a row the gate decided before the spawn: held with its reason, published when
     the corpus already cites it, else skipped naming the gate's category."""
-    from defender.learning.store import Outcome
+    from defender.learning_store import Outcome
 
     if "held_reason" in rec:
         return Outcome.held(str(rec["held_reason"]))
@@ -109,7 +109,7 @@ def _keyed(
 ) -> tuple[list[dict], dict[str, tuple[str, str]]]:
     """The claim's rows that carry an id under `key`, and each id's item; a row with none (or a
     second row under one id) is dead at once, named by its own item."""
-    from defender.learning.store import Outcome
+    from defender.learning_store import Outcome
 
     keyed: list[dict] = []
     item_of: dict[str, tuple[str, str]] = {}
@@ -200,7 +200,7 @@ def _record_fates(
 ) -> None:
     """The authored claim's fates (D1): an id reported committed that no lesson cites is deferred,
     the curator's skips are skipped with its reason; a cited id is not named (it stays in the batch)."""
-    from defender.learning.store import Outcome
+    from defender.learning_store import Outcome
 
     for fid in sorted(outcome.deferred_ids):
         outcomes[item_of[fid]] = Outcome.deferred()

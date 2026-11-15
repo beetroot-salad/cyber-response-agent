@@ -194,10 +194,10 @@ def _break_the_store(s: Soar) -> None:
     def down(*args: Any, **kwargs: Any) -> Any:
         raise StoreDown("the store is down")
 
-    store = s.world.store
-    for name in dir(store):
-        if not name.startswith(("_", "add_")) and name != "audit_events" and callable(getattr(store, name)):
-            setattr(store, name, down)
+    for store in (s.world.store, s.world._learning_store):  # the learning reads are the learning store's (#1485)
+        for name in dir(store):
+            if not name.startswith(("_", "add_")) and name not in ("audit_events", "close") and callable(getattr(store, name)):
+                setattr(store, name, down)
 
 
 @pytest.mark.parametrize("kind", KINDS)

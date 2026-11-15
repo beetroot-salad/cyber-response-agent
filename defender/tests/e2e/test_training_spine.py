@@ -97,7 +97,7 @@ def _finding_items(t, *statuses: str) -> list:
 
 def graded_episode(tmp_path: Path, t):
     """One accepted episode graded by the REAL family judge, its rows in the REAL learning store."""
-    from defender.learning.store import blocking
+    from defender.learning_store import blocking
 
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})

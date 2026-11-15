@@ -123,9 +123,9 @@ class FaultStore:
 
 @contextlib.contextmanager
 def store_fault_at(monkeypatch: Any, n: int):
-    """Every `defender.learning.store.blocking(dsn)` the code under test opens yields a `FaultStore` sharing one
+    """Every `defender.learning_store.blocking(dsn)` the code under test opens yields a `FaultStore` sharing one
     counter, until the context ends. Yields the counter dict (`writes`, `fired`)."""
-    import defender.learning.store as store_mod
+    import defender.learning_store as store_mod
 
     real_blocking = store_mod.blocking
     shared: dict = {}

@@ -16,7 +16,6 @@ from defender.records.formats import (
     RunsBase,
     SessionsRoot,
     EpisodesRoot,
-    LearningRoot,  # lint-learning-state: ok — the cutover import reads the old folder (#1278 A2 D10)
     WorktreesRoot,
     ScratchRoot,
     ExportsRoot,
@@ -100,10 +99,6 @@ class _TenantLayout:
         """Where the one-time command moves the old shared episodes root's entries. Nothing
         reads it."""
         return self.tenant_root / "episodes-legacy"
-
-    @property
-    def learning(self) -> Path:
-        return self.tenant_root / "learning"
 
     @property
     def scratch(self) -> Path:
@@ -258,12 +253,6 @@ class Tenant(RecordTenant):
     @property
     def episodes_legacy(self) -> LegacyEpisodesRoot:
         return LegacyEpisodesRoot(self._layout.episodes_legacy)
-
-    @property
-    def learning(self) -> LearningRoot:  # lint-learning-state: ok — the cutover import reads the old folder (#1278 A2 D10)
-        """The tenant's old learning folder, which the cutover import reads and removes: no
-        product code writes under it (#1278 O10)."""
-        return LearningRoot(self._layout.learning)  # lint-learning-state: ok — the cutover import reads the old folder (#1278 A2 D10)
 
     @property
     def scratch(self) -> ScratchRoot:

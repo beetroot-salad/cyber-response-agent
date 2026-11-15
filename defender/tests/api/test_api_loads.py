@@ -76,6 +76,20 @@ def test_the_not_loaded_probe_sees_a_load():
     assert _found(_loaded("defender.lifecycle"), "defender.lifecycle")
 
 
+def test_p1_the_lifted_store_loads_no_learning_and_no_driver():
+    """Importing `defender.learning_store` loads no `defender.learning` module and no `psycopg`, so the API can hold it
+    (named, since the glob above cannot see a module that does not exist yet). (P1, #1485)"""
+    modules = _loaded("defender.learning_store")
+    assert "defender.learning_store" in modules, "premise: the store imported"
+    assert [m for name in ("defender.learning", "psycopg") for m in _found(modules, name)] == []
+
+
+def test_p1_the_learning_and_driver_probe_sees_a_load():
+    """Positive control for the case above: a `defender.learning` module and `psycopg` are reported when imported. (P1)"""
+    assert _found(_loaded("defender.learning.roles"), "defender.learning")
+    assert _found(_loaded("psycopg"), "psycopg")
+
+
 #: #1083 Am-1: the real server program is a package of its own, `defender/api_server/`, under the same #1080 guard.
 API_SERVER_MODULES = sorted(
     "defender.api_server" + ("" if p.stem == "__init__" else f".{p.stem}")
@@ -93,6 +107,26 @@ def test_a_program_module_loads_no_runtime_or_learning(module):
     """Every module of the real server program loads nothing in `API_FORBIDDEN`. (Am-1)"""
     found = api_forbidden(_loaded(module))
     assert not found, f"{module} loads {found}"
+
+
+#: #1485 r13/r14: the paging code is generic over its id families, so it loads neither the learning store nor its tables.
+_NOT_BY_PAGING = ("defender.learning_store", "defender.jobs.learning_models")
+
+
+def test_1485_importing_the_paging_code_loads_neither_the_learning_store_nor_its_tables():
+    """`defender.api.pages` (which both learning lists page with) pulls in no `defender.learning_store` and no
+    `defender.jobs.learning_models`. (Paging, P1)"""
+    modules = _loaded("defender.api.pages")
+    assert "defender.api.pages" in modules, "premise: it imported"
+    assert [m for name in _NOT_BY_PAGING for m in _found(modules, name)] == []
+
+
+def test_1485_the_paging_probe_sees_a_load():
+    """Positive control: importing the learning store reports both names, importing the tables alone the second. The
+    store's door is lazy, so the control imports the store's own module. (Paging)"""
+    store = _loaded("defender.learning_store._store")
+    assert all(_found(store, name) for name in _NOT_BY_PAGING)
+    assert _found(_loaded("defender.jobs.learning_models"), "defender.jobs.learning_models")
 
 
 # --- #1495: what a serving process loads -----------------------------------------------------------

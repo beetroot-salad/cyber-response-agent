@@ -260,3 +260,82 @@ def test_1083_the_moved_pinned_texts_and_the_mapping_read_port():
     assert "put_system" in vars(ports.SystemsRepository)
     assert "get_alert_mapping" in vars(ports.AlertMappingRepository)
     assert "get_alert_mapping" not in vars(ports.SystemsRepository)
+
+
+# --- #1485: the learning work port and its wire models ---------------------------------------------------------------
+
+_ITEM = dict(item_id="e1000000-0000-4000-8000-000000000001", kind="finding", key="k", status="held", reason="r",
+             source_run=None, batch_id="d1000000-0000-4000-8000-000000000001", pr_number=7, updated_at=NOW)
+_BATCH = dict(batch_id="d1000000-0000-4000-8000-000000000001", batch_kind="author", lane="author", blocks_lane=True,
+              branch="learning/b", pr_number=None, reason=None, created_at=NOW, items=[{"kind": "finding", "key": "k"}])
+
+
+def test_1485_the_wire_item_kinds_are_the_stores_kinds():
+    """`ItemKind`'s arguments equal `learning_models.KINDS` (no extra, none missing), and every kind validates on a row;
+    control: a kind outside them does not. (Wire models)"""
+    from defender.jobs.learning_models import KINDS
+
+    args = typing.get_args(models.ItemKind)
+    assert len(args) == len(set(args))
+    assert set(args) == set(KINDS)
+    for kind in KINDS:
+        assert models.SetAsideItem(**{**_ITEM, "kind": kind}).kind == kind
+    with pytest.raises(ValidationError):
+        models.SetAsideItem(**{**_ITEM, "kind": "lesson"})
+
+
+def test_1485_the_wire_statuses_and_batch_kinds_are_the_stores():
+    """An item is `held` or `dead` only; a batch kind is one of the store's `BATCH_KINDS`. (Wire models)"""
+    from defender.jobs.learning_models import BATCH_KINDS
+
+    assert set(typing.get_args(models.SetAsideItem.model_fields["status"].annotation)) == {"held", "dead"}
+    assert set(typing.get_args(models.ParkedBatch.model_fields["batch_kind"].annotation)) == set(BATCH_KINDS)
+    for status in ("waiting", "in_batch", "published", "skipped"):
+        with pytest.raises(ValidationError):
+            models.SetAsideItem(**{**_ITEM, "status": status})
+
+
+def test_1485_the_wire_models_have_exactly_their_fields_all_required_and_ids_of_their_own_family():
+    """No payload, fault or counters, and no field has a default (D13: an adapter that forgets a field fails validation instead of serving null); `item_id` is a `WorkItemId` and `batch_id` a `BatchId`; ids outside the
+    canonical UUID text are refused (control: the canonical ones validate). (Wire models)"""
+    from defender.records.formats import BatchId, WorkItemId
+
+    assert set(models.SetAsideItem.model_fields) == set(_ITEM)
+    assert set(models.ParkedBatch.model_fields) == set(_BATCH)
+    assert set(models.ParkedItemRef.model_fields) == {"kind", "key"}
+    for model in (models.SetAsideItem, models.ParkedBatch):
+        assert all(f.is_required() for f in model.model_fields.values()), model
+    assert models.SetAsideItem.model_fields["item_id"].annotation is WorkItemId
+    assert models.ParkedBatch.model_fields["batch_id"].annotation is BatchId
+    models.SetAsideItem(**_ITEM)
+    models.ParkedBatch(**_BATCH)
+    for bad in ("a/b", "a b", "", "E1000000-0000-4000-8000-000000000001", "not-a-uuid-but-a-record-id"):
+        with pytest.raises(ValueError, match="pattern"):
+            models.SetAsideItem(**{**_ITEM, "item_id": bad})
+        with pytest.raises(ValueError, match="pattern"):
+            models.SetAsideItem(**{**_ITEM, "batch_id": bad})
+        with pytest.raises(ValueError, match="pattern"):
+            models.ParkedBatch(**{**_BATCH, "batch_id": bad})
+
+
+def test_1485_a_reason_is_carried_as_the_plain_text_it_is():
+    """A reason with markup and quotes round-trips through the wire models unchanged. (P2)"""
+    reason = '<script>alert("x")</script> & "q" </td>'
+    assert models.SetAsideItem(**{**_ITEM, "reason": reason}).model_dump(mode="json")["reason"] == reason
+    assert models.ParkedBatch(**{**_BATCH, "reason": reason}).model_dump(mode="json")["reason"] == reason
+
+
+def test_1485_the_learning_work_port_and_its_fake_take_the_tenant_then_status_after_and_limit_by_keyword():
+    """`list_set_aside(tenant_id, *, status, after, limit)` and `list_parked_batches(tenant_id, *, after, limit)` on the
+    port; `ApiDeps.learning_work` is required. (Names, Port)"""
+    import dataclasses
+
+    for owner, name, keywords in ((ports.LearningWorkRepository, "list_set_aside", ["status", "after", "limit"]),
+                                  (ports.LearningWorkRepository, "list_parked_batches", ["after", "limit"]),
+                                  ):
+        params = [p for p in inspect.signature(getattr(owner, name)).parameters.values() if p.name != "self"]
+        assert [p.name for p in params] == ["tenant_id", *keywords], (owner, name)
+        assert all(p.kind is inspect.Parameter.KEYWORD_ONLY for p in params[1:]), (owner, name)
+    field = {f.name: f for f in dataclasses.fields(ports.ApiDeps)}["learning_work"]
+    assert field.default is dataclasses.MISSING
+    assert field.default_factory is dataclasses.MISSING

@@ -532,7 +532,6 @@ def test_p141_record_for_a_value_the_signature_rule_refuses(tmp_path):
 
 def test_a8_every_identity_check_reads_the_recorded_digest(tmp_path):
     planted = S.plant_tenant()
-    location_path(planted.accept().learning).mkdir(exist_ok=True)
     held_out, ordinary = S.alert_bytes(_alert(id="H-1")), S.alert_bytes(_alert())
     enqueue = _learning_enqueue(_held_out_fixtures(tmp_path, held_out))
     entry = S.operator_input(tmp_path)
@@ -588,7 +587,6 @@ def test_a8_every_identity_check_reads_the_recorded_digest(tmp_path):
 
 def test_p145_input_file_changes_during_the_run_and_post_run_s(tmp_path):
     planted = S.plant_tenant()
-    location_path(planted.accept().learning).mkdir(exist_ok=True)
     held_out, ordinary = S.alert_bytes(_alert(id="H-2")), S.alert_bytes(_alert())
     enqueue = _learning_enqueue(_held_out_fixtures(tmp_path, held_out))
     entry = S.operator_input(tmp_path)
@@ -624,7 +622,6 @@ def test_p145_input_file_changes_during_the_run_and_post_run_s(tmp_path):
 
 def test_p128_held_out_copies_of_the_alert_exist_under_the_run(tmp_path):
     planted = S.plant_tenant()
-    location_path(planted.accept().learning).mkdir(exist_ok=True)
     held_out, ordinary = S.alert_bytes(_alert(id="H-3")), S.alert_bytes(_alert())
     enqueue = _learning_enqueue(_held_out_fixtures(tmp_path, held_out))
     entry = S.operator_input(tmp_path)

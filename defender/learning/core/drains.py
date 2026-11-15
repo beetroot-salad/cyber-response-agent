@@ -38,7 +38,7 @@ from defender.learning.core.store_tick import (
     lane_waiting,
     opened_store,
 )
-from defender.learning.store import Stop
+from defender.learning_store import Stop
 
 if TYPE_CHECKING:
     import datetime
@@ -383,7 +383,7 @@ def _store_lead_work(  # noqa: PLR0913, C901 — the lane's two steps, its claim
     curation committed); an item that is not named waits again when the batch enters review (P3); a request whose
     run is gone is dead."""
     from defender.learning.author.version_control import DeliveryRefused
-    from defender.learning.store import Outcome
+    from defender.learning_store import Outcome
     from defender.records import RunAbsent
 
     for kind, key, payload in [item for item in held.items if item[0] == "curation_request"]:  # lint-half-table: ok — this lane serves the curation request's own run rule, not a lane decision

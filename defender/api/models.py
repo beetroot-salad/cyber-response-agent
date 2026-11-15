@@ -15,7 +15,7 @@ from defender.kit.access import secret_fields
 from defender._vocab import DISPOSITION_VALUES, normalized_disposition
 from defender.identity.models import Email
 from defender.records.formats import (
-    AlertId, AlertMappingFault, CredentialId, InvestigationId, LearningJobId, MembershipId, ProgramId, TenantId, UserId,
+    AlertId, AlertMappingFault, BatchId, CredentialId, InvestigationId, LearningJobId, MembershipId, ProgramId, TenantId, UserId, WorkItemId,
     check_mapping,
 )
 
@@ -184,6 +184,44 @@ class LearningJob(BaseModel):
     finished_at: Instant | None = None
 
 
+#: The kinds of learning work item; equal to `learning_models.KINDS` (a test ties the two).
+ItemKind = Literal["finding", "questioner_finding", "pitfall", "curation_request", "feedback_instruction"]
+
+
+class SetAsideItem(BaseModel):
+    """A learning item the loop stopped working on (#1485): held for a person, or dead. `reason` can be model-written
+    or forge text: plain text, rendered as text."""
+
+    item_id: WorkItemId
+    kind: ItemKind
+    key: str
+    status: Literal["held", "dead"]
+    reason: str | None
+    source_run: str | None
+    batch_id: BatchId | None
+    pr_number: int | None
+    updated_at: Instant
+
+
+class ParkedItemRef(BaseModel):
+    kind: ItemKind
+    key: str
+
+
+class ParkedBatch(BaseModel):
+    """A batch the loop will not touch again (#1485). `blocks_lane`: it holds its lane, so that lane's work stops."""
+
+    batch_id: BatchId
+    batch_kind: Literal["author", "revert", "registry"]
+    lane: str
+    blocks_lane: bool
+    branch: str
+    pr_number: int | None
+    reason: str | None
+    created_at: Instant
+    items: list[ParkedItemRef]
+
+
 class LearningJobCreate(_Request):
     investigation_id: InvestigationId
     client_request_id: ClientRequestId
@@ -346,7 +384,7 @@ class TenantItem(BaseModel):
 
     tenant_id: TenantId
     state: Literal["creating", "active", "offboarding", "offboarded"]
-    pending_action: Literal["create", "rotate", "offboard", "delete_repo", "learning_cutover"] | None
+    pending_action: Literal["create", "rotate", "offboard", "delete_repo"] | None
     step: str | None
     step_actor: Literal["service", "host"] | None
     failure: str | None

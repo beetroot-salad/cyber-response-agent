@@ -486,7 +486,7 @@ def _lead_tick(t: Any, tmp_path: Path, steps: _Steps, **seams: Any) -> int:
 @pytest.mark.parametrize("answer", AFTER)
 def test_a_tenant_that_stops_being_active_is_never_claimed_for_and_its_item_keeps_waiting_uncounted(p4_tenant, in_the_store, migrated_database, tmp_path, monkeypatch, answer):  # noqa: F811
     """Once the tenant is no longer active (whatever it became, even between the tick's read and its claim) no tick claims, serves or charges its waiting item. (Flow 4, O6)"""
-    from defender.learning.store import LearningStore
+    from defender.learning_store import LearningStore
     from defender.tests.support.jobs._jobs1342 import move_tenant
 
     t, dsn = p4_tenant, migrated_database
