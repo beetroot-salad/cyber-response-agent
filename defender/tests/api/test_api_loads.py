@@ -1,7 +1,8 @@
 """The API program loads no runtime or `learning` module (#1080; the set is `_spec1080.API_FORBIDDEN`).
 
 Asked of Python rather than the source: each `api` module is imported in a fresh interpreter and
-the modules left loaded are read back, so a lazy or conditional import counts as it executes."""
+the modules left loaded are read back, so a conditional import counts as it executes at import time. An import
+inside a function runs only when it is called: the last test serves every route in a child process (#1495)."""
 from __future__ import annotations
 
 import json
@@ -9,6 +10,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -91,3 +93,84 @@ def test_a_program_module_loads_no_runtime_or_learning(module):
     """Every module of the real server program loads nothing in `API_FORBIDDEN`. (Am-1)"""
     found = api_forbidden(_loaded(module))
     assert not found, f"{module} loads {found}"
+
+
+# --- #1495: what a serving process loads -----------------------------------------------------------
+# The guards above import each module; a function-level import (inside a route's handler, a port's method, or
+# `serving`) runs only while the program serves, so they never see it. This one runs the real program in a child
+# process, sends every route of the app one request that gets past sign-in and validation to its handler, and reads
+# what the process loaded. Only `API_FORBIDDEN` applies: the program composes the database repositories and the
+# driver by design, so `_NOT_BY_THE_API` (the `defender.api.app` import's rule) does not, beyond `defender.lifecycle`,
+# which `API_FORBIDDEN` names too.
+
+def _stopped_before_the_handler(response: Any) -> bool:
+    """Refused at sign-in, method, validation (a 422 naming field errors) or permission (a 403 of no reason). A store's
+    refusal (an unknown reference's 422, the sign-in service's 403 naming its reason) came from the handler."""
+    if response.status_code in (401, 405):
+        return True
+    if response.status_code == 422:
+        return bool(response.json().get("errors"))
+    if response.status_code == 403:
+        return response.json().get("type", "about:blank") == "about:blank"
+    return False
+
+
+#: The calls that end what later calls stand on (Ann's session, tenant A's service) go last, in this order.
+_LAST = (("POST", "/admin/tenants/{tenant_id}/offboard"), ("POST", "/auth/logout"))
+
+
+def _serving_requests(seeded: Any) -> list[tuple[tuple[str, str], str, dict[str, Any]]]:
+    """One request per served route, (route, path, httpx keyword arguments): an administrator's route as Ops, every
+    other as Ann (tenant A's admin, the write origin sent), on tenant A, with the route's body where it takes one."""
+    from defender.tests.api.test_programs_1307_roles import BODIES
+    from defender.tests.support.api._routes1307a import _PARAM, PATH_ID, app_routes, normal
+    from defender.tests.support.api._server1083 import A, person
+
+    fill = {"tenant_id": A, "key": "report.md", "system_id": "tix"}
+    bodies = {**BODIES, ("POST", "/admin/tenants/{}/invitations"): {"email": "new@a.example"}}
+    query = {("GET", "/auth/callback"): {"code": "c", "state": "s"}}
+    routes = sorted(app_routes(), key=lambda r: (_LAST.index(r) if r in _LAST else -1, r))
+    requests = []
+    for route in routes:
+        method, template = route
+        session = seeded.ops_session if template.startswith("/admin/") else seeded.ann_session
+        kwargs: dict[str, Any] = {"headers": person(session, write=True)}
+        if (method, normal(template)) in bodies:
+            kwargs["json"] = bodies[method, normal(template)]
+        if route in query:
+            kwargs["params"] = query[route]
+        requests.append((route, _PARAM.sub(lambda m: fill.get(m.group(1), PATH_ID), template), kwargs))
+    return requests
+
+
+@pytest.mark.postgres
+def test_a_serving_program_that_answered_every_route_loads_no_runtime_or_learning(tmp_path, migrated_database):
+    """The real program, serving over the real ports, loads nothing in `API_FORBIDDEN` while it answers one request
+    per route; each request reached its handler. (#1495)"""
+    import asyncio
+
+    import httpx
+
+    from defender.tests.support.api._server1083 import B, LOADED_ENV, A, Child, environment, seed_identity
+    from defender.tests.support.jobs._jobs1342 import register_tenant
+
+    register_tenant(migrated_database, A)
+    register_tenant(migrated_database, B)
+    seeded = asyncio.run(seed_identity(migrated_database))
+    child = Child.faked({**environment(tmp_path, dsn=migrated_database), LOADED_ENV: "1"})
+    try:
+        assert child.ready(), "the program did not come up"
+        with httpx.Client(base_url=child.base_url, timeout=30, follow_redirects=False) as client:
+            answered = {f"{route[0]} {route[1]}": client.request(route[0], path, **kwargs)
+                        for route, path, kwargs in _serving_requests(seeded)}
+    finally:
+        ended = child.stop()
+    assert ended.returncode == 0, ended.stderr
+    unreached = {route: (r.status_code, r.text) for route, r in answered.items() if _stopped_before_the_handler(r)}
+    assert not unreached, f"these requests never reached their handler: {unreached}"
+    # controls: Ann passed tenant A's member gate (its 404 would read as reached), and the offboard met an active tenant
+    assert answered["GET /tenants/{tenant_id}/alert-mapping"].status_code == 200
+    assert answered["POST /admin/tenants/{tenant_id}/offboard"].status_code == 202
+    [line] = [line for line in ended.stdout.splitlines() if line.startswith("loaded ")]
+    found = api_forbidden(json.loads(line.removeprefix("loaded ")))
+    assert not found, f"the serving program loads {found}"
