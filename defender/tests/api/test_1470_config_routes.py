@@ -426,12 +426,13 @@ async def test_o3_a_systems_cursor_is_bound_to_its_tenant_even_for_a_member_of_b
 
     from defender.identity.postgres import PostgresIdentityRepository
     from defender.records.formats import TenantId, UserId
+    from defender.tests.support.identity._seed1496 import seed_membership
 
     await _save_three(scripted)
     now = dt.datetime.now(dt.UTC)
     repo = PostgresIdentityRepository(scripted.dsn)
     try:
-        await repo.add_membership(UserId(scripted.user_id(ANN)), TenantId(B), status="active", invited_by=None, created_at=now, accepted_at=now)
+        await seed_membership(repo, UserId(scripted.user_id(ANN)), TenantId(B), status="active", invited_by=None, created_at=now, accepted_at=now)
     finally:
         await repo.close()
     headers = scripted.ann(write=False)
