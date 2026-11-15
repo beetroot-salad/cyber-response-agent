@@ -12,6 +12,7 @@ from defender.tests.frontend._flow1161 import (
     FAILED,
     NO_STORAGE,
     RETRY,
+    WAIT_MS,
     api_calls,
     await_aborted,
     logins,
@@ -127,7 +128,7 @@ def test_1161_b1_a_later_401_records_a_fresh_attempt_and_redirects(world, contex
     assert navigations_to(requests, world.origin, "/sign-in-failed") == []
 
 
-@pytest.mark.parametrize("failure", ["500", "403", "network"])
+@pytest.mark.parametrize("failure", ["500", "403", "404", "429", "204", "network"])
 def test_1161_b1_a_me_that_is_not_200_or_401_shows_the_error_state_and_the_screen_makes_no_call(
         world, context, requests, failure):
     """Any other answer or a network failure: `data-screen=error`, no screen call, no sign-in. (B1.2, B8)"""
@@ -135,7 +136,10 @@ def test_1161_b1_a_me_that_is_not_200_or_401_shows_the_error_state_and_the_scree
     mark = len(requests)
 
     def handle(route: Any) -> None:
-        route.abort() if failure == "network" else route.fulfill(status=int(failure), body="x")
+        if failure == "network":
+            route.abort()
+        else:
+            route.fulfill(status=int(failure), body=None if failure == "204" else "x")
 
     context.route(lambda u: path_is(u, "/api/me"), handle)
     page = context.new_page()
@@ -265,18 +269,63 @@ def test_1161_b1_the_failed_screen_consumes_the_record_and_keeps_an_address_that
     assert where(page) == ("/sign-in-failed", {"reason": "unavailable", "return": y}), "settled only when no `return`"
 
 
+@pytest.mark.parametrize("given", ["prelogin-missing", "login-attempt-invalid", "unknown-account", "otp-required", "unavailable",
+                                   "error", "session-lost", "storage-unavailable", "no-such-reason", None, "bad-request"])
+def test_1161_b1_the_failed_screen_settles_the_records_target_for_every_reason_but_bad_request(
+        world, context, requests, given):
+    """A record for X and the screen opened at `/sign-in-failed` with any reason (unknown or none: `error`) and no
+    `return`: the address gets `return=X` and the record is gone; for `bad-request` it gets none. (B1)"""
+    x = world.screen()
+    aborted = abort_login_navigation(context)
+    page = context.new_page()
+    page.goto(f"{world.origin}{x}")
+    await_aborted(page, aborted)
+    assert page.evaluate("sessionStorage.length") > 0, "positive control: the shell wrote its attempt record for X"
+    page.goto(f"{world.origin}/sign-in-failed" + ("" if given is None else f"?reason={given}"))
+    screen(page, FAILED)
+    settle(page)
+    assert page.evaluate("sessionStorage.length") == 0
+    query = {} if given is None else {"reason": given}
+    assert where(page) == ("/sign-in-failed", query if given == "bad-request" else {**query, "return": x})
+
+
+def test_1161_b1_a_session_that_never_arrives_stays_session_lost_after_a_retry_and_no_sign_in_loops(
+        world, context, requests):
+    """`/api/me` always 401: sign in, `session-lost`; the retry records its own attempt, so it lands on `session-lost`
+    again after exactly one more sign-in, not on a third automatic one. (B1.3, B1)"""
+    target = world.screen()
+    context.route(lambda u: path_is(u, "/api/me"), lambda route: route.fulfill(status=401, body="{}"))
+    page = context.new_page()
+    page.goto(f"{world.origin}{target}")
+    screen(page, FAILED)
+    assert reason(page) == "session-lost"
+    settle(page)
+    assert logins(requests, world.origin) == [target]
+    page.locator(RETRY).click()
+    for _ in range(WAIT_MS // 100):  # until the retry's round trip has come back to the failed screen
+        if len(navigations_to(requests, world.origin, "/sign-in-failed")) == 2:
+            break
+        page.wait_for_timeout(100)
+    screen(page, FAILED)
+    settle(page, 1500)
+    assert reason(page) == "session-lost"
+    assert where(page) == ("/sign-in-failed", {"reason": "session-lost", "return": target})
+    assert logins(requests, world.origin) == [target, target]
+
+
 def test_1161_b1_a_restore_from_the_cache_counts_as_a_load_when_signed_in(world, context, requests):
-    """A `persisted` pageshow asks `/api/me` again. (B1)"""
+    """Each `persisted` pageshow, the second and third too, asks `/api/me` again. (B1)"""
     sign_in(world, context)
     page = context.new_page()
     page.goto(f"{world.origin}{world.screen()}")
     screen(page, "investigation")
     settle(page)
     before = [c for c in api_calls(requests, world.origin) if c == ("GET", "/api/me")]
-    restore_from_cache(page)
-    page.wait_for_timeout(1000)
-    after = [c for c in api_calls(requests, world.origin) if c == ("GET", "/api/me")]
-    assert len(after) == len(before) + 1
+    for restores in (1, 2, 3):  # every persisted pageshow is a load, not only the first
+        restore_from_cache(page)
+        page.wait_for_timeout(1000)
+        after = [c for c in api_calls(requests, world.origin) if c == ("GET", "/api/me")]
+        assert len(after) == len(before) + restores
 
 
 @pytest.mark.parametrize("path", ["/no/such/screen", "/t/x/investigations/y", "/sign-in-failedx"])
