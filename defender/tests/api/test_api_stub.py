@@ -155,8 +155,8 @@ EXISTING_ROUTES = {
     ("GET", ALERT_MAPPING_ROUTE),
     ("PUT", ALERT_MAPPING_ROUTE),
     # #1485 O1, O2: the tenant's set-aside items and parked batches (Names, Routes)
-    ("GET", "/tenants/{tenant_id}/learning/items"),
-    ("GET", "/tenants/{tenant_id}/learning/parked-batches"),
+    ("GET", API + "/tenants/{tenant_id}/learning/items"),
+    ("GET", API + "/tenants/{tenant_id}/learning/parked-batches"),
 }
 #: What #1306 adds (design "Endpoints"; param names pinned by this suite).
 IDENTITY_ROUTES = {
@@ -228,8 +228,8 @@ HAPPY: list[tuple[tuple[str, str], str, dict[str, Any] | None, dict[str, Any]]] 
     (("PUT", ALERT_MAPPING_ROUTE), alert_mapping_url(A), MAPPING_BODY,
      {"put_alert_mapping": _Answer("created from the body", lambda _principal, body: (body, True))}),
     # #1485: an empty page is a served list; the wire models are built inside the cases, never at collection.
-    (("GET", "/tenants/{tenant_id}/learning/items"), f"{T}/learning/items", None, {"list_set_aside": []}),
-    (("GET", "/tenants/{tenant_id}/learning/parked-batches"), f"{T}/learning/parked-batches", None,
+    (("GET", API + "/tenants/{tenant_id}/learning/items"), f"{T}/learning/items", None, {"list_set_aside": []}),
+    (("GET", API + "/tenants/{tenant_id}/learning/parked-batches"), f"{T}/learning/parked-batches", None,
      {"list_parked_batches": []}),
 ]
 
@@ -1520,7 +1520,7 @@ def test_1485_the_parked_list_declares_no_status_and_no_filter_name() -> None:
 
 def test_1485_the_published_schemas_name_exactly_the_wire_fields() -> None:
     """The published document's `SetAsideItem`, `ParkedBatch` and `ParkedItemRef` carry exactly the wire's fields. (Wire models)"""
-    schemas = Api().client.get("/openapi.json").json()["components"]["schemas"]
+    schemas = Api().client.get(API + "/openapi.json").json()["components"]["schemas"]
     assert set(schemas["SetAsideItem"]["properties"]) == ITEM_WIRE_FIELDS
     assert set(schemas["ParkedBatch"]["properties"]) == PARKED_WIRE_FIELDS
     assert set(schemas["ParkedItemRef"]["properties"]) == {"kind", "key"}

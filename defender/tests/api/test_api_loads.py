@@ -150,24 +150,27 @@ def _stopped_before_the_handler(response: Any) -> bool:
 
 
 #: The calls that end what later calls stand on (Ann's session, tenant A's service) go last, in this order.
-_LAST = (("POST", "/admin/tenants/{tenant_id}/offboard"), ("POST", "/auth/logout"))
+from defender.tests.support.api._mount1161 import API  # noqa: E402
+
+_LAST = (("POST", API + "/admin/tenants/{tenant_id}/offboard"), ("POST", API + "/auth/logout"))
 
 
 def _serving_requests(seeded: Any) -> list[tuple[tuple[str, str], str, dict[str, Any]]]:
     """One request per served route, (route, path, httpx keyword arguments): an administrator's route as Ops, every
     other as Ann (tenant A's admin, the write origin sent), on tenant A, with the route's body where it takes one."""
     from defender.tests.api.test_programs_1307_roles import BODIES
+    from defender.tests.support.api._mount1161 import API
     from defender.tests.support.api._routes1307a import _PARAM, PATH_ID, app_routes, normal
     from defender.tests.support.api._server1083 import A, person
 
     fill = {"tenant_id": A, "key": "report.md", "system_id": "tix"}
-    bodies = {**BODIES, ("POST", "/admin/tenants/{}/invitations"): {"email": "new@a.example"}}
-    query = {("GET", "/auth/callback"): {"code": "c", "state": "s"}}
+    bodies = {**BODIES, ("POST", API + "/admin/tenants/{}/invitations"): {"email": "new@a.example"}}
+    query = {("GET", API + "/auth/callback"): {"code": "c", "state": "s"}}
     routes = sorted(app_routes(), key=lambda r: (_LAST.index(r) if r in _LAST else -1, r))
     requests = []
     for route in routes:
         method, template = route
-        session = seeded.ops_session if template.startswith("/admin/") else seeded.ann_session
+        session = seeded.ops_session if template.startswith(API + "/admin/") else seeded.ann_session
         kwargs: dict[str, Any] = {"headers": person(session, write=True)}
         if (method, normal(template)) in bodies:
             kwargs["json"] = bodies[method, normal(template)]
@@ -203,8 +206,8 @@ def test_a_serving_program_that_answered_every_route_loads_no_runtime_or_learnin
     unreached = {route: (r.status_code, r.text) for route, r in answered.items() if _stopped_before_the_handler(r)}
     assert not unreached, f"these requests never reached their handler: {unreached}"
     # controls: Ann passed tenant A's member gate (its 404 would read as reached), and the offboard met an active tenant
-    assert answered["GET /tenants/{tenant_id}/alert-mapping"].status_code == 200
-    assert answered["POST /admin/tenants/{tenant_id}/offboard"].status_code == 202
+    assert answered["GET " + API + "/tenants/{tenant_id}/alert-mapping"].status_code == 200
+    assert answered["POST " + API + "/admin/tenants/{tenant_id}/offboard"].status_code == 202
     [line] = [line for line in ended.stdout.splitlines() if line.startswith("loaded ")]
     found = api_forbidden(json.loads(line.removeprefix("loaded ")))
     assert not found, f"the serving program loads {found}"

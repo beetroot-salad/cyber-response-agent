@@ -43,7 +43,7 @@ from defender.tests.support.api._server1083 import (
     seed_token_credential,
 )
 from defender.tests.support.api._signin1161 import authorize, deleted, link_account, set_cookies
-from defender.tests.support.api._mount1161 import route_paths
+from defender.tests.support.api._mount1161 import API, route_paths
 from defender.tests.support.jobs._jobs1342 import (
     ALERT_BYTES,
     DESCRIPTION,
@@ -367,15 +367,15 @@ async def test_1485_o4_held_dead_items_and_parked_batches_are_served_from_the_le
         stored = {i.key: i for i in await store.work(A, statuses=["held", "dead"])}
     ann = served.ann(write=False)
 
-    items = await served.client.get(f"/tenants/{A}/learning/items", headers=ann)
+    items = await served.client.get(f"{API}/tenants/{A}/learning/items", headers=ann)
     assert items.status_code == 200, items.text
     assert [(i["item_id"], i["key"], i["status"], i["reason"], i["batch_id"], i["pr_number"]) for i in items.json()["items"]] == [
         (str(i.id), i.key, i.status, i.reason, str(i.batch_id), i.pr_number)
         for i in sorted(stored.values(), key=lambda i: (i.updated_at, str(i.id)), reverse=True)]
     assert {stored["h1"].batch_id, stored["d1"].batch_id} == {batch, dead}
-    narrowed = await served.client.get(f"/tenants/{A}/learning/items", params={"status": "dead"}, headers=ann)
+    narrowed = await served.client.get(f"{API}/tenants/{A}/learning/items", params={"status": "dead"}, headers=ann)
     assert [i["key"] for i in narrowed.json()["items"]] == ["d1"]
-    listed = await served.client.get(f"/tenants/{A}/learning/parked-batches", headers=ann)
+    listed = await served.client.get(f"{API}/tenants/{A}/learning/parked-batches", headers=ann)
     assert listed.status_code == 200, listed.text
     assert [(b["batch_id"], b["batch_kind"], b["blocks_lane"]) for b in listed.json()["items"]] == [
         (str(parked), "revert", False)]
