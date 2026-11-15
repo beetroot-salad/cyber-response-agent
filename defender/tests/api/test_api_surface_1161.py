@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -40,7 +41,7 @@ def test_every_route_and_the_openapi_document_live_under_api() -> None:
     world = World(tenants={T1: [ANN]})
     paths = [r.path for r in _routes(world.app.routes)]
     assert len(paths) > 20, paths
-    outside = [p for p in paths if not p.startswith("/api/") and p not in ("/openapi.json", "/docs", "/redoc", "/docs/oauth2-redirect")]
+    outside = [p for p in paths if not p.startswith("/api/")]
     assert outside == []
     browser = world.client()
     document = browser.get("/api/openapi.json")
@@ -48,6 +49,20 @@ def test_every_route_and_the_openapi_document_live_under_api() -> None:
     assert all(p.startswith("/api/") for p in document.json()["paths"])
     for old in ("/openapi.json", "/me", "/auth/login", "/docs", "/redoc"):
         assert browser.get(old).status_code == 404, old
+    assert browser.get("/api/me").status_code == 401  # control: the moved route is there
+
+
+def test_no_route_answers_at_its_old_address() -> None:
+    """Every real route's un-prefixed path, with each of its methods, answers 404: nothing keeps serving where it used to,
+    whatever the route. Derived from the route table, not a list. (B3)"""
+    world = World(tenants={T1: [ANN]})
+    browser = world.client()
+    old = sorted({(method, re.sub(r"\{[^}]*\}", "x", r.path).removeprefix("/api"))
+                  for r in _routes(world.app.routes) for method in (getattr(r, "methods", None) or {"GET"})
+                  if method not in ("HEAD", "OPTIONS")})
+    assert len(old) > 20 and all(path.startswith("/") for _, path in old), old
+    still_served = [(method, path, browser.request(method, path).status_code) for method, path in old]
+    assert [row for row in still_served if row[2] != 404] == []
     assert browser.get("/api/me").status_code == 401  # control: the moved route is there
 
 

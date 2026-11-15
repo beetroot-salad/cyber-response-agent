@@ -43,6 +43,7 @@ from defender.tests.support.api._server1083 import (
     seed_token_credential,
 )
 from defender.tests.support.api._signin1161 import authorize, deleted, link_account, set_cookies
+from defender.tests.support.api._mount1161 import route_paths
 from defender.tests.support.jobs._jobs1342 import (
     ALERT_BYTES,
     DESCRIPTION,
@@ -1054,7 +1055,9 @@ async def test_1161_b3_a_cookie_alone_reads_the_api_and_no_origin_is_granted_cor
 
 @pytest.mark.postgres
 @pytest.mark.parametrize(("value", "served_docs"), [("true", True), (None, False), ("false", False), ("1", False),
-                                                    ("TRUE", False), ("", False)])
+                                                    ("TRUE", False), ("", False), ("True", False), ("yes", False),
+                                                    ("on", False), ("y", False), (" true", False), ("true ", False),
+                                                    ("true\n", False), ("enabled", False)])
 async def test_1161_b10_the_docs_pages_are_served_only_when_the_dev_setting_is_true(
         tenants, tmp_path, value, served_docs):
     """`DEFENDER_API_DOCS=true` serves `/api/docs` and `/api/redoc`; anything else, or unset, serves neither; the document always ships. (B10)"""
@@ -1067,3 +1070,7 @@ async def test_1161_b10_the_docs_pages_are_served_only_when_the_dev_setting_is_t
         got = [(await client.get(p)).status_code for p in ("/api/docs", "/api/redoc")]
         assert got == ([200, 200] if served_docs else [404, 404]), got
         assert (await client.get("/api/openapi.json")).status_code == 200
+        # B3: with the docs on, every route (their redirect page included) is still under `/api`, and none answers at the root.
+        assert [p for p in route_paths(running.app.routes) if not p.startswith("/api/")] == []
+        assert (await client.get("/api/docs/oauth2-redirect")).status_code == (200 if served_docs else 404)
+        assert [(await client.get(p)).status_code for p in ("/docs", "/redoc", "/docs/oauth2-redirect", "/openapi.json")] == [404] * 4
