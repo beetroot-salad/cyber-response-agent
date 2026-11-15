@@ -1,8 +1,8 @@
 """#1470 test machinery: the record store's typed refusals and the shape of what its writes and `credential_slot` return.
 NO test functions. FORCED CHOICES, each in this one place for the code stage to correct: the design lists the refusal
 types (stale, judged, no such tenant, tenant not active, no current record) and `RecordRefused` as their base without
-naming the subclasses; the names below are the spike's. `created` and `generation_raised` are the design's names for what
-a write returns; the slot's parts are read as attributes `generation` and `auth`, and a stale or moved refusal's shown
+naming the subclasses; the names below are the spike's. `created` is the design's name for what a write returns beside
+the record; the slot's parts are read as attributes `generation` and `auth`, and a stale or moved refusal's shown
 version as `current_version` (the design's name for it on the wire)."""
 from __future__ import annotations
 

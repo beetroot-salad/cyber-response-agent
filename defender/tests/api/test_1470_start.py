@@ -80,25 +80,47 @@ async def test_g4_a_login_the_secret_store_refuses_at_start_refuses_start_naming
     assert TOKEN not in message
 
 
+_UNREADABLE_LOGIN = [
+    ("not JSON", httpx.Response(200, content=b"<html>proxy error</html>")),
+    ("no data object", httpx.Response(200, json={"request_id": "x"})),
+    ("a refused request", httpx.Response(400, json={"errors": ["bad request"]})),
+]
+
+
+@pytest.mark.parametrize(("label", "answer"), _UNREADABLE_LOGIN, ids=[u[0] for u in _UNREADABLE_LOGIN])
+async def test_g4_a_login_check_answered_other_than_a_403_refuses_start_naming_the_address_not_the_token(
+        migrated_database, tmp_path, label, answer):
+    """Unsealed, and the login check's metadata read answered with a 200 that is not KV metadata, or a 4xx other than
+    403: start is refused naming DEFENDER_OPENBAO_ADDR, not the token file (the token was not what was refused). (G4;
+    r8 Am-1)"""
+    bao = ScriptedOpenBao()
+    bao.answer("GET", "metadata", answer, times=1)
+    message = await _start(migrated_database, tmp_path, bao)
+    assert message is not None, f"{label} started"
+    assert "DEFENDER_OPENBAO_ADDR" in message, message
+    assert "DEFENDER_API_OPENBAO_TOKEN_FILE" not in message, message
+
+
 async def test_g4_a_sealed_secret_store_starts_the_api_and_the_routes_that_need_it_answer_503_until_it_is_unsealed(migrated_database, tmp_path):
-    """Sealed at start: the API starts having asked only seal-status; system reads, replacing writes and credential
-    writes are 503 naming the sealed store; records, the catalog and a create still answer; unsealed, each request asks
-    again and the same app serves. (G4, D9, O3, O7)"""
+    """Sealed at start: the API starts having asked only seal-status; system reads and credential writes are 503 naming
+    the sealed store; records, the catalog and saves (a create, a replace) still answer; unsealed, each request asks
+    again and the same app serves. (G4, D9, O3, O7; r8 Am-2)"""
     bao = ScriptedOpenBao()
     bao.sealed = True
     async with served_config(migrated_database, tmp_path, scripted=bao, keep_calls=True) as served:
         assert bao.calls == [SEAL_STATUS]
         assert (await served.get("/adapters")).status_code == 200
-        assert (await served.put_system(TICKET, 0)).status_code == 201  # a create reads no secret store
-        for refused in (await served.get_system(TICKET), await served.list_systems(), await served.put_system(TICKET, 1),
-                        await served.put_credentials(TICKET, 1, {"api_key": TOKEN})):
+        assert (await served.put_system(TICKET, 0)).status_code == 201  # a save reads no secret store
+        assert (await served.put_system(TICKET, 1)).status_code == 200
+        for refused in (await served.get_system(TICKET), await served.list_systems(),
+                        await served.put_credentials(TICKET, 2, {"api_key": TOKEN})):
             assert refused.status_code == 503, refused.text
             assert "sealed" in problem_text(refused).lower()
-        assert [v.version for v in served.versions(TICKET)] == [1]
+        assert [v.version for v in served.versions(TICKET)] == [1, 2]
         assert served.stored_generations(TICKET) == []
         bao.sealed = False
         assert (await served.get_system(TICKET)).status_code == 200
-        assert (await served.put_credentials(TICKET, 1, {"api_key": TOKEN})).status_code == 204
+        assert (await served.put_credentials(TICKET, 2, {"api_key": TOKEN})).status_code == 204
         assert (await served.get_system(TICKET)).json()["has_credentials"] is True
 
 

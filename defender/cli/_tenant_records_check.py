@@ -142,18 +142,25 @@ def credential_findings(tenant_id: object, records: TenantRecords, secrets: Any)
     systems = sorted(records.systems.items())
     if not systems or secrets is None:
         return []
-    lines: list[str] = []
-    for system, record in systems:
+
+    async def asked() -> list[str]:
+        # One event loop for every ask: the writer's pooled client is bound to it, and closed on it.
+        lines: list[str] = []
         try:
-            held = asyncio.run(secrets.has_credentials(str(tenant_id), system,
-                                                       generation=record.credential_generation))
-        except Exception as e:  # noqa: BLE001 — a store that cannot answer is a finding, not a crash
-            lines.append(f"system {system}: its credentials could not be checked ({type(e).__name__}: {e})")
-            continue
-        if not held:
-            lines.append(f"system {system}: {NO_CREDENTIALS} ({record.credential_generation}): set them with "
-                         f"`PUT /systems/{system}/credentials` for version {record.version}")
-    return lines
+            for system, record in systems:
+                try:
+                    held = await secrets.has_credentials(str(tenant_id), system, generation=record.credential_generation)
+                except Exception as e:  # noqa: BLE001 — a store that cannot answer is a finding, not a crash
+                    lines.append(f"system {system}: its credentials could not be checked ({type(e).__name__}: {e})")
+                    continue
+                if not held:
+                    lines.append(f"system {system}: {NO_CREDENTIALS} ({record.credential_generation}): set them with "
+                                 f"`PUT /systems/{system}/credentials` for version {record.version}")
+        finally:
+            await secrets.aclose()
+        return lines
+
+    return asyncio.run(asked())
 
 
 def census_findings(table: TableFindings, systems: Collection[str] | None) -> TableFindings:

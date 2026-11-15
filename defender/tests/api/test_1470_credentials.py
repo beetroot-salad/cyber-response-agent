@@ -12,6 +12,7 @@ import anyio
 import httpx
 import pytest
 from defender.tests.support.api._config1470 import (
+    remove_tenant,
     BASE_MOVED,
     BODY,
     ELASTIC,
@@ -281,6 +282,10 @@ _FAILS = [
     ("a timeout", httpx.ReadTimeout("slow"), 503, MARKER_POSSIBLY, True),
     ("a 500", httpx.Response(500, json={"errors": ["internal error"]}), 503, MARKER_POSSIBLY, True),
     ("a refused login", httpx.Response(403, json={"errors": ["permission denied"]}), 500, "refus", False),
+    ("a refused request", httpx.Response(400, json={"errors": ["check-and-set parameter required"]}), 500, "not stored",
+     False),
+    ("a rate limit", httpx.Response(429, json={"errors": ["request path kv/data: rate limit quota exceeded"]}), 500,
+     "not stored", False),
 ]
 
 
@@ -289,8 +294,9 @@ _FAILS = [
 @pytest.mark.parametrize(("label", "fault", "status", "says", "announced"), _FAILS, ids=[f[0] for f in _FAILS])
 async def test_o7_o9_a_secret_store_fault_on_the_write_is_503_not_stored_or_possibly_stored_or_500_for_a_refused_login(
         scripted, caplog, label, fault, status, says, announced):
-    """Sealed or a refused connection: 503 'not stored', nothing announced. A timeout or any other fault: 503 'possibly
-    stored', announced with that marker. A login refused after start: 500 naming the refusal, nothing announced. (O7, O9)"""
+    """Sealed or a refused connection: 503 'not stored', nothing announced. A timeout or a 5xx: 503 'possibly stored',
+    announced with that marker. A login refused after start: 500 naming the refusal, nothing announced. Any other
+    refusal (a 4xx: OpenBao refuses before it writes): 500 'not stored', nothing announced. (O7, O9; r8 Am-1)"""
     caplog.set_level(logging.DEBUG)
     await _ticket(scripted)
     caplog.clear()
@@ -372,7 +378,8 @@ _NEVER_SENT = (httpx.ConnectError, httpx.ConnectTimeout)
 def _write_outcomes() -> list[tuple[str, object, str]]:
     """(label, the secret store's answer to the write or None for success, the expected outcome): success; every concrete
     `httpx.HTTPError`; every 4xx and 5xx status, with a sealed and with another body. The outcome is `stored`, `not
-    stored` (sealed: the observed 503 sealed answer, C20; or never sent), `refused login` (403) or `possibly stored`."""
+    stored` (sealed: the observed 503 sealed answer, C20; or never sent), `refused login` (403), `refused` (any other
+    4xx: OpenBao refuses before it writes, r8 Am-1) or `possibly stored` (a 5xx not sealed, or a fault once sent)."""
     sealed = {"errors": ["Vault is sealed"]}
     rows: list[tuple[str, object, str]] = [("success", None, "stored")]
     for cls in _http_error_classes():
@@ -380,6 +387,7 @@ def _write_outcomes() -> list[tuple[str, object, str]]:
     for status in range(400, 600):
         for label, body in (("sealed", sealed), ("other", {"errors": ["internal error"]})):
             outcome = ("refused login" if status == 403 else  # noqa: PLR2004
+                       "refused" if status < 500 else  # noqa: PLR2004
                        "not stored" if status == 503 and body is sealed else "possibly stored")  # noqa: PLR2004
             rows.append((f"{status}-{label}", (status, body), outcome))
     return rows
@@ -430,8 +438,8 @@ def _event_faults(events: list[Any], *, system: str, marker: str | None, fields:
 async def test_o7_o9_every_outcome_of_the_secret_stores_write_is_answered_and_announced_as_the_design_says(scripted, caplog):
     """Over every write outcome (success; every concrete httpx error; every 4xx/5xx with a sealed or another body), each
     with the announcement working and failing, on every scheme: not stored and nothing announced exactly when OpenBao
-    answered sealed or the request was never sent; a refused login is 500 with nothing announced; any other fault 503
-    possibly stored with one event so marked; success 204 with one plain event. Every event names the set's field names
+    answered sealed or the request was never sent; a refused login or any other 4xx is 500 'not stored' with nothing
+    announced; a 5xx not sealed, or a fault once sent, is 503 possibly stored with one event so marked; success 204 with one plain event. Every event names the set's field names
     and no value, public or secret; a failed announcement is 500 and the write stands. (O7, O9)"""
     caplog.set_level(logging.DEBUG)
     systems = _scheme_systems()
@@ -439,7 +447,7 @@ async def test_o7_o9_every_outcome_of_the_secret_stores_write_is_answered_and_an
         assert (await scripted.put_system(system, 0, settings=settings, access=access)).status_code == 201
     import random
 
-    statuses = {"stored": 204, "not stored": 503, "possibly stored": 503, "refused login": 500}
+    statuses = {"stored": 204, "not stored": 503, "possibly stored": 503, "refused login": 500, "refused": 500}
     wrong: list[tuple[object, ...]] = []
     rng = random.Random(1470)
     # Success and each httpx class meet every scheme; each status row meets a scheme drawn at random (seeded).
@@ -457,8 +465,10 @@ async def test_o7_o9_every_outcome_of_the_secret_stores_write_is_answered_and_an
             assert answer is None or [r.fired for r in scripted.scripted._rules] == [1], ("premise: answered", case)
             announced = outcome in ("stored", "possibly stored")
             status = 500 if announced and failing else statuses[outcome]
-            said = problem_text(got).lower() if got.status_code == 503 else ""  # noqa: PLR2004
+            said = problem_text(got).lower() if got.status_code in (500, 503) else ""  # noqa: PLR2004
             found = [] if got.status_code == status else [f"status {got.status_code}: {got.text[:160]}"]
+            if outcome in ("refused login", "refused") and ("not stored" not in said or "possibly" in said):
+                found.append(f"said {said[:160]}")
             if status == 503 and (outcome == "possibly stored") != (MARKER_POSSIBLY in said):  # noqa: PLR2004
                 found.append(f"said {said[:160]}")
             if status == 503 and (outcome == "not stored") != ("not stored" in said):  # noqa: PLR2004
@@ -491,24 +501,12 @@ def _slot_refusals() -> set[str]:
     return {cls.__name__ for cls in leaves(RecordRefused)}
 
 
-async def _gone(dsn: str, tenant: str) -> None:
-    """The tenant's row deleted, with every row that refers to it, at any depth, first (read from the catalog's keys)."""
-    from defender.tests.support.shared._postgres1339 import execute
-
-    def purge(table: str, where: str, path: tuple[str, ...] = ()) -> None:
-        refs = execute(dsn, """SELECT con.conrelid::regclass::text, ca.attname, pa.attname FROM pg_constraint con
-                               JOIN pg_attribute ca ON ca.attrelid = con.conrelid AND ca.attnum = con.conkey[1]
-                               JOIN pg_attribute pa ON pa.attrelid = con.confrelid AND pa.attnum = con.confkey[1]
-                               WHERE con.contype = 'f' AND con.confrelid = %s::regclass""", (table,))
-        for child, column, parent in refs:
-            if child not in (*path, table):  # a table's references to itself go with it in one statement
-                purge(child, f"{column} IN (SELECT {parent} FROM {table} WHERE {where})", (*path, table))
-        execute(dsn, f"DELETE FROM {table} WHERE {where}", (tenant,) * where.count("%s"))  # noqa: S608 — catalog names
-
-    await anyio.to_thread.run_sync(lambda: purge("tenancy.tenants", "id = %s"))
-
-
 #: The record changed while the set is written (re-read): its refusal type, or None (unchanged) or "exception".
+#: Only `Stale` (the generation moved) and `NoCurrentRecord` (deleted) show the set at a generation no current version
+#: uses (r8 Am-3); any other refusal is answered as itself, the set announced as stored.
+_UNUSED = {"Stale", "NoCurrentRecord"}
+#: Each other refusal's own status, as the first call's would be.
+_OWN_STATUS = {"TenantNotActive": 409, "NoSuchTenant": 404, "Judged": 422}
 _REREADS = {"unchanged": None, "generation raised": "Stale", "deleted": "NoCurrentRecord",
             "tenant not active": "TenantNotActive", "tenant row gone": "NoSuchTenant", "access unparseable": "Judged",
             "the re-read fails": "exception"}
@@ -532,7 +530,7 @@ async def _change(served: Configured, change: str, system: str, settings: dict[s
     elif change == "tenant not active":
         await anyio.to_thread.run_sync(lambda: move_tenant(served.dsn, A, state="offboarding"))
     elif change == "tenant row gone":
-        await _gone(served.dsn, A)
+        await remove_tenant(served.dsn, A)
     elif change == "access unparseable":
         served.plant_version(system, 2, settings=settings, access="not: [a declaration")
     elif change == "the re-read fails":
@@ -572,12 +570,14 @@ _REREAD_CASES = [(change, announcing) for change in _REREADS for announcing in (
 @anyio_mark
 @postgres
 @pytest.mark.parametrize(("change", "announcing"), _REREAD_CASES, ids=[f"{c}-{a}" for c, a in _REREAD_CASES])
-async def test_o7_o9_any_refusal_of_the_re_read_is_409_stored_for_an_unused_generation_and_a_failed_re_read_503(
+async def test_o7_o9_the_re_read_tells_an_unused_generation_from_a_refusal_of_the_current_one(
         scripted, caplog, change, announcing):
-    """The set is stored, then the record changes before the re-read, one change per slot refusal type: each is 409,
-    announced `stored for an unused generation` (`current_version` the new version, or 0 when deleted); a re-read that
-    fails is 503 possibly stored; unchanged is 204. With the announcement failing each is 500 and the set stands. The
-    one event names the fields and no value. (O7: any refusal from the second call is the post-write 409; O9)"""
+    """The set is stored, then the record changes before the re-read, one change per slot refusal type. The generation
+    moved or the system deleted: 409 announced `stored for an unused generation` (`current_version` the new version, or
+    0 when deleted). Any other refusal (the tenant left `active` or is gone, the access no longer parses) does not show
+    the set unused, so it is announced as stored, with no marker, and the answer is that refusal's own status, saying
+    the set was stored. A re-read that fails is 503 possibly stored; unchanged is 204. With the
+    announcement failing each is 500 and the set stands. The one event names the fields and no value. (O7, O9; r8 Am-3)"""
     from defender.tests.support.shared._postgres1339 import execute
 
     caplog.set_level(logging.DEBUG)
@@ -601,11 +601,18 @@ async def test_o7_o9_any_refusal_of_the_re_read_is_409_stored_for_an_unused_gene
             execute(scripted.dsn, "ALTER TABLE tenancy.sv_away RENAME TO system_versions")
     assert seen == [_REREADS[change]], ("premise: the change makes the slot refuse so", seen)
     expected = _REREADS[change]
-    status = 204 if expected is None else 503 if expected == "exception" else 409
+    status = (204 if expected is None else 503 if expected == "exception" else 409 if expected in _UNUSED
+              else _OWN_STATUS[expected])
     assert got.status_code == (500 if failing else status), got.text
-    marker = None if expected is None else MARKER_POSSIBLY if expected == "exception" else MARKER_UNUSED
-    if not failing and status == 409:  # noqa: PLR2004
-        assert got.json()["current_version"] == {"Stale": 2, "NoCurrentRecord": 0}.get(expected, got.json()["current_version"])
+    marker = MARKER_POSSIBLY if expected == "exception" else MARKER_UNUSED if expected in _UNUSED else None
+    if not failing and expected in _UNUSED:
+        assert got.json()["current_version"] == {"Stale": 2, "NoCurrentRecord": 0}[expected], got.text
+        assert MARKER_UNUSED in problem_text(got).lower(), got.text
+    if not failing and expected in _OWN_STATUS:
+        said = problem_text(got).lower()
+        assert "were stored" in said, got.text
+        assert MARKER_UNUSED not in said, got.text
+        assert "possibly" not in said, got.text
     if not failing and status == 503:  # noqa: PLR2004
         assert MARKER_POSSIBLY in problem_text(got).lower(), got.text
     if failing:

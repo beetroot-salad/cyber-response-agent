@@ -26,6 +26,7 @@ from .models import (
     Investigation,
     LearningJob,
     Lesson,
+    SavedSystem,
     System,
     SystemCheck,
     SystemPut,
@@ -119,8 +120,9 @@ class SecretStoreUnavailable(Exception):
 
 
 class SecretStoreRefused(Exception):
-    """The secret store refused the API's own login after start (403): our setup, not the caller's, so a 500 naming the
-    refusal (#1470 G4, O7)."""
+    """The secret store refused the API after start: its login (403) or its request (any other 4xx). OpenBao refuses
+    before it writes, so nothing was stored; our setup, not the caller's, so a 500 naming the refusal (#1470 G4, O7;
+    r8 Am-1)."""
 
 
 class CredentialsUnused(Exception):
@@ -156,10 +158,9 @@ class SystemsRepository(Protocol):
         secret store's answer (`SecretStoreUnavailable` when it gives none, `SecretStoreRefused` for a refused login)."""
         ...
 
-    async def put_system(self, principal: Principal, system_id: str, body: SystemPut) -> tuple[System, bool]:
-        """Write the system's next version (O4); `(served, created)`, `created` when a read showed none before.
-        `has_credentials` is false on a create or when the write raised the generation, else as read just before the
-        write (a secret store that cannot answer that read refuses the write before anything commits)."""
+    async def put_system(self, principal: Principal, system_id: str, body: SystemPut) -> tuple[SavedSystem, bool]:
+        """Write the system's next version (O4); `(saved, created)`, `created` when a read showed none before. Asks no
+        secret store (r8 Am-2): a read answers `has_credentials`."""
         ...
 
     async def delete_system(self, principal: Principal, system_id: str, *, replaces: int) -> None:

@@ -8,10 +8,14 @@ from __future__ import annotations
 import shutil
 import sys
 from pathlib import Path
+from typing import Any
+
+import anyio
 
 import httpx
 import pytest
 from defender.tests.support.api._config1470 import (
+    remove_tenant,
     BASE_MOVED,
     BODY,
     ELASTIC,
@@ -42,6 +46,11 @@ def _served(version: int, *, has_credentials: bool = False, settings: dict[str, 
     return {"system_id": system, "version": version, "display_name": name, "enabled": enabled,
             "settings": TICKET_SETTINGS if settings is None else settings,
             "access": TICKET_ACCESS if access is None else access, "has_credentials": has_credentials}
+
+
+def _saved(version: int, **kw: Any) -> dict:
+    """A save's answer: the record as stored, with no `has_credentials` (r8 Am-2: a save asks no secret store)."""
+    return {k: v for k, v in _served(version, **kw).items() if k != "has_credentials"}
 
 
 def _stale(response: httpx.Response, shown: int) -> None:
@@ -223,14 +232,14 @@ async def test_o3_o4_a_system_is_created_201_replaced_200_and_read_back_as_store
     created = await configured.put_system(TICKET, 0)
     assert created.status_code == 201, created.text
     assert created.headers["Location"] == f"{ORIGIN}/tenants/{A}/systems/{TICKET}"  # as every create names its resource
-    assert created.json() == _served(1)
+    assert created.json() == _saved(1)
     assert (await configured.get_system(TICKET)).json() == _served(1)
 
     edited = TICKET_SETTINGS | {"TICKET_TIMEOUT_SEC": "20"}
     replaced = await configured.put_system(TICKET, 1, settings=edited, enabled=False)
     assert replaced.status_code == 200, replaced.text
     assert "Location" not in replaced.headers
-    assert replaced.json() == _served(2, settings=edited, enabled=False)
+    assert replaced.json() == _saved(2, settings=edited, enabled=False)
     other = await configured.put_system(ELASTIC, 0, settings=ELASTIC_SETTINGS, access=ELASTIC_ACCESS)
     assert other.status_code == 201, other.text
     listed = (await configured.list_systems()).json()["items"]
@@ -514,7 +523,7 @@ async def test_p2_o5_a_deleted_system_reads_absent_and_is_re_created_with_replac
     recreated = await configured.put_system(TICKET, 0)
     assert recreated.status_code == 201, recreated.text
     assert recreated.headers["Location"] == f"{ORIGIN}/tenants/{A}/systems/{TICKET}"
-    assert recreated.json() == _served(3)
+    assert recreated.json() == _saved(3)
     _stale(await configured.put_system(TICKET, 0), 3)
 
 
@@ -684,29 +693,29 @@ async def test_o4_a_database_fault_on_a_system_write_is_500_and_announces_nothin
 
 # --- reads and writes with the secret store sealed or failing --------------------------------------------------------
 
-async def test_o3_o4_while_the_secret_store_is_sealed_system_reads_and_replacing_writes_are_503_and_each_request_asks_again(scripted):
-    """Sealed: reading a system and replacing one are 503 naming the sealed secret store, writing nothing and reading no
-    value; a request that needs no answer from it (create, catalog, case record) makes no call; unsealed, the same app
-    answers (no seal state is kept). (O3, O4, C20)"""
+async def test_o3_o4_while_the_secret_store_is_sealed_system_reads_are_503_saves_succeed_and_each_request_asks_again(scripted):
+    """Sealed: reading a system and listing are 503 naming the sealed secret store, reading no value; a save (create
+    or replace), the catalog and the case record need no answer from it and make no call; unsealed, the same app
+    answers (no seal state is kept). (O3, O4, C20; r8 Am-2: a save asks no secret store)"""
     bao = scripted.scripted
     assert (await scripted.put_system(TICKET, 0)).status_code == 201
     bao.sealed = True
-    for refused in (await scripted.get_system(TICKET), await scripted.list_systems(),
-                    await scripted.put_system(TICKET, 1, settings=TICKET_SETTINGS | {"TICKET_TIMEOUT_SEC": "20"})):
+    for refused in (await scripted.get_system(TICKET), await scripted.list_systems()):
         assert refused.status_code == 503, refused.text
         assert "sealed" in problem_text(refused).lower(), refused.text
-    assert [v.version for v in scripted.versions(TICKET)] == [1]
     bao.calls.clear()
+    replaced = await scripted.put_system(TICKET, 1, settings=TICKET_SETTINGS | {"TICKET_TIMEOUT_SEC": "20"})
+    assert replaced.status_code == 200, replaced.text
     created = await scripted.put_system(ELASTIC, 0, settings=ELASTIC_SETTINGS, access=ELASTIC_ACCESS)
-    assert created.status_code == 201, created.text  # no read: no set can exist at a new generation
+    assert created.status_code == 201, created.text
     assert (await scripted.get("/adapters")).status_code == 200
     assert (await scripted.get("/case-record")).status_code == 404  # records, not the secret store
+    assert [v.version for v in scripted.versions(TICKET)] == [1, 2]
     assert bao.calls == []
     assert bao.paths() == []  # nothing written
     assert bao.value_reads == []  # no value read
     bao.sealed = False
     assert (await scripted.get_system(TICKET)).status_code == 200
-    assert (await scripted.put_system(TICKET, 1, settings=TICKET_SETTINGS | {"TICKET_TIMEOUT_SEC": "20"})).status_code == 200
     assert bao.value_reads == []
 
 
@@ -727,81 +736,150 @@ async def test_o3_o4_o6_while_the_secret_store_is_sealed_an_empty_list_is_200_an
     assert bao.value_reads == []
 
 
-async def test_o3_o4_a_secret_store_that_refuses_the_apis_login_after_start_is_500_on_reads_and_the_replace_pre_read(scripted):
-    """A 403 once the API is running: a read, a list and a replacing save (its pre-read) are 500 naming the secret
-    store's refusal, not 503; the save stores nothing; a create, needing no answer, still succeeds. (O3, O4, O7)"""
+async def test_o3_a_secret_store_that_refuses_the_apis_login_after_start_is_500_on_reads_and_a_save_still_succeeds(scripted):
+    """A 403 once the API is running: a read and a list are 500 naming the secret store's refusal, not 503; a save
+    (create or replace), needing no answer, still succeeds. (O3, O7; r8 Am-2)"""
     assert (await scripted.put_system(TICKET, 0)).status_code == 201
     scripted.scripted.token = "no-longer-the-apis"  # the stand-in now refuses the token the API sends
-    for refused in (await scripted.get_system(TICKET), await scripted.list_systems(),
-                    await scripted.put_system(TICKET, 1, settings=TICKET_SETTINGS | {"TICKET_TIMEOUT_SEC": "20"})):
+    for refused in (await scripted.get_system(TICKET), await scripted.list_systems()):
         assert refused.status_code == 500, refused.text
         assert "secret store" in problem_text(refused).lower(), refused.text
-    assert [v.version for v in scripted.versions(TICKET)] == [1]
+    replaced = await scripted.put_system(TICKET, 1, settings=TICKET_SETTINGS | {"TICKET_TIMEOUT_SEC": "20"})
+    assert replaced.status_code == 200, replaced.text
     assert (await scripted.put_system(ELASTIC, 0, settings=ELASTIC_SETTINGS, access=ELASTIC_ACCESS)).status_code == 201
+    assert [v.version for v in scripted.versions(TICKET)] == [1, 2]
 
 
-async def test_o4_a_create_or_re_create_asks_the_secret_store_nothing(scripted):
-    """Create, delete, re-create: no call reaches the secret store, and the answers say `has_credentials` false. (O4)"""
-    assert (await scripted.put_system(TICKET, 0)).json()["has_credentials"] is False
-    assert (await scripted.delete_system(TICKET, 1)).status_code == 204
-    assert (await scripted.put_system(TICKET, 0)).json()["has_credentials"] is False
+async def test_o4_a_save_asks_the_secret_store_nothing_and_its_answer_carries_no_has_credentials(scripted):
+    """Create, replace, delete, re-create: no call reaches the secret store, and no save's answer names
+    `has_credentials` (a client reads the system for it). (O4; r8 Am-2)"""
+    answers = [await scripted.put_system(TICKET, 0),
+               await scripted.put_system(TICKET, 1, settings=TICKET_SETTINGS | {"TICKET_TIMEOUT_SEC": "20"})]
+    assert (await scripted.delete_system(TICKET, 2)).status_code == 204
+    answers.append(await scripted.put_system(TICKET, 0))
+    assert [a.status_code for a in answers] == [201, 200, 201], [a.text for a in answers]
+    assert all("has_credentials" not in a.json() for a in answers), [a.json() for a in answers]
     assert scripted.scripted.calls == []
 
 
-async def test_o3_o4_a_secret_store_that_cannot_answer_fails_the_read_and_refuses_the_write_before_it_commits(scripted):
-    """A 500 to the existence read: reads 503, the replacing write 503 with no new version; healthy again, 200. (O3, O4)"""
+async def test_o4_the_published_schema_of_a_save_answer_carries_no_has_credentials_and_a_read_does(scripted):
+    """The OpenAPI document: `PUT /systems/{id}` answers (200 and 201) a model with no `has_credentials`; `GET` answers
+    one with it. (O3, O4; r8 Am-2)"""
+    doc = (await scripted.client.get("/openapi.json")).json()
+    path = doc["paths"]["/tenants/{tenant_id}/systems/{system_id}"]
+
+    def props(answer: dict) -> set[str]:
+        ref = answer["content"]["application/json"]["schema"]["$ref"].rsplit("/", 1)[-1]
+        return set(doc["components"]["schemas"][ref]["properties"])
+
+    assert "has_credentials" in props(path["get"]["responses"]["200"])
+    for code in ("200", "201"):
+        assert "has_credentials" not in props(path["put"]["responses"][code]), code
+        assert {"system_id", "version", "enabled", "settings", "access"} <= props(path["put"]["responses"][code])
+
+
+async def test_o3_a_secret_store_that_cannot_answer_fails_the_read_and_a_save_still_commits(scripted):
+    """A 500 to the existence read: reads 503 naming the secret store; a replacing save commits (it asks nothing);
+    healthy again, 200. (O3, O4; r8 Am-2)"""
     assert (await scripted.put_system(TICKET, 0)).status_code == 201
-    scripted.scripted.answer("GET", "metadata", httpx.Response(500, json={"errors": ["boom"]}), times=3)
-    for refused in (await scripted.get_system(TICKET), await scripted.list_systems(),
-                    await scripted.put_system(TICKET, 1, settings=TICKET_SETTINGS | {"TICKET_TIMEOUT_SEC": "20"})):
+    scripted.scripted.answer("GET", "metadata", httpx.Response(500, json={"errors": ["boom"]}), times=2)
+    for refused in (await scripted.get_system(TICKET), await scripted.list_systems()):
         assert refused.status_code == 503, refused.text
         assert "secret store" in problem_text(refused).lower()
-    assert [v.version for v in scripted.versions(TICKET)] == [1]
+    saved = await scripted.put_system(TICKET, 1, settings=TICKET_SETTINGS | {"TICKET_TIMEOUT_SEC": "20"})
+    assert saved.status_code == 200, saved.text
+    assert [v.version for v in scripted.versions(TICKET)] == [1, 2]
+    assert (await scripted.get_system(TICKET)).status_code == 200
+
+
+_UNREADABLE_METADATA = [
+    ("not JSON", httpx.Response(200, content=b"<html>proxy error</html>")),
+    ("no data object", httpx.Response(200, json={"request_id": "x"})),
+    ("data not an object", httpx.Response(200, json={"data": []})),
+]
+
+
+@pytest.mark.parametrize(("label", "answer"), _UNREADABLE_METADATA, ids=[u[0] for u in _UNREADABLE_METADATA])
+async def test_o3_an_existence_answer_that_cannot_be_read_is_503_naming_the_secret_store(scripted, label, answer):
+    """A 200 to the existence read that is not KV metadata: a read and a list are 503 naming the secret store (no
+    usable answer), never 500; healthy again, 200. (O3; r8 Am-1)"""
+    assert (await scripted.put_system(TICKET, 0)).status_code == 201
+    scripted.scripted.answer("GET", "metadata", answer, times=2)
+    for refused in (await scripted.get_system(TICKET), await scripted.list_systems()):
+        assert refused.status_code == 503, (label, refused.text)
+        assert "secret store" in problem_text(refused).lower(), refused.text
     assert (await scripted.get_system(TICKET)).status_code == 200
 
 
 async def test_o4_has_credentials_is_true_exactly_while_a_set_exists_at_the_current_generation(configured):
-    """A set stored for v1: reads and a same-generation save answer true; a save that moves the base answers false and
-    a read agrees; a save that restores nothing changes the answer only by the generation it raised. (O3, O4, D-D)"""
+    """A set stored for v1: a read answers true, also after a same-generation save; after a save that moves the base
+    a read answers false. (O3, O4, D-D)"""
     assert (await configured.put_system(TICKET, 0)).status_code == 201
     assert (await configured.get_system(TICKET)).json()["has_credentials"] is False
     assert (await configured.put_credentials(TICKET, 1, {"api_key": TOKEN})).status_code == 204
     assert (await configured.get_system(TICKET)).json()["has_credentials"] is True
     same = await configured.put_system(TICKET, 1, settings=TICKET_SETTINGS | {"TICKET_TIMEOUT_SEC": "20"})
-    assert same.json()["has_credentials"] is True  # as of before the write, same generation
+    assert same.status_code == 200, same.text
+    assert (await configured.get_system(TICKET)).json()["has_credentials"] is True
     moved = await configured.put_system(TICKET, 2, access=TICKET_ACCESS.replace(*BASE_MOVED))
     assert moved.status_code == 200
-    assert moved.json()["has_credentials"] is False
     assert (await configured.get_system(TICKET)).json()["has_credentials"] is False
     assert [v.credential_generation for v in configured.versions(TICKET)] == [1, 1, 2]
 
 
-async def test_o4_a_saves_answer_is_what_the_store_decided_under_the_lock_not_what_the_read_before_it_saw(scripted):
-    """v1 holds a set; while the save's `has_credentials` read is answered, another admin deletes the system; the save
-    names 0 (the caller's view had none): 201 with `Location`, `has_credentials` false and version 3, as the store's
-    created flag says, not 200 and true as the read before the lock saw. A plain replace after is 200 with no `Location`.
-    (O4: created decided by the store under the lock; D12)"""
+async def test_o4_a_save_naming_0_after_another_admin_deleted_is_201_at_the_next_version(scripted):
+    """v1 holds a set; another admin deletes the system; a save naming 0 (the caller's view had none) is 201 with
+    `Location` at version 3, as the store's created flag says; a read then answers `has_credentials` false (a new
+    generation). A plain replace after is 200 with no `Location`. (O4: created decided by the store under the lock; D12)"""
     assert (await scripted.put_system(TICKET, 0)).status_code == 201
     assert (await scripted.put_credentials(TICKET, 1, {"api_key": TOKEN})).status_code == 204
-    fired = []
-
-    async def another_admin_deletes(path: str) -> None:
-        scripted.scripted.on_metadata_read = None
-        fired.append(path)
-        deleted = await scripted.delete_system(TICKET, 1)
-        assert deleted.status_code == 204, deleted.text
-
-    scripted.scripted.on_metadata_read = another_admin_deletes
+    assert (await scripted.delete_system(TICKET, 1)).status_code == 204
     saved = await scripted.put_system(TICKET, 0)
-    assert fired, "premise: the save read whether the current version has credentials"
     assert [(v.version, v.deleted) for v in scripted.versions(TICKET)] == [(1, False), (2, True), (3, False)]
     assert saved.status_code == 201, saved.text
     assert saved.headers.get("location", "").endswith(f"/tenants/{A}/systems/{TICKET}"), saved.headers
-    assert (saved.json()["version"], saved.json()["has_credentials"]) == (3, False)
+    assert saved.json()["version"] == 3
     assert (await scripted.get_system(TICKET)).json()["has_credentials"] is False
 
     replaced = await scripted.put_system(TICKET, 3, settings=TICKET_SETTINGS | {"TICKET_TIMEOUT_SEC": "20"})
     assert (replaced.status_code, "location" in replaced.headers) == (200, False), replaced.text
+
+
+_INACTIVE = ["offboarding", "offboarded", "gone"]
+
+
+@pytest.mark.parametrize("state", _INACTIVE)
+async def test_o8_a_config_read_of_a_tenant_that_left_active_is_the_record_stores_own_refusal(scripted, state):
+    """Admission refuses a tenant that is not active (404), so a config read meets one only when the tenant leaves
+    `active` after admission. The read is then the record store's own typed refusal, the one a write gets
+    (`TenantNotActive`, `NoSuchTenant`), which the app answers 409 / 404 by type; never an unmapped one, a 500.
+    Asked of the systems port the program builds, after the state change. (O8; r8 Am-3)"""
+    from defender.api.config_records import ConfigRecords
+    from defender.credential_proxy import OpenBaoSecrets
+    from defender.system_records import NoSuchTenant, TenantNotActive
+    from defender.system_rules import Catalog
+    from defender.tests.support.jobs._jobs1342 import fixed_clock, move_tenant
+    from defender.api_server import record_store
+
+    assert (await scripted.put_system(TICKET, 0)).status_code == 201
+    assert (await scripted.put_case(0)).status_code == 201
+    catalog = Catalog.of_checkout()
+    store = record_store(scripted.dsn, catalog, clock=fixed_clock)
+    port = ConfigRecords(store, catalog, OpenBaoSecrets(addr="http://openbao.test:8200", token="t", mount="secret",
+                                                        transport=scripted.scripted))
+    try:
+        assert [r.system_id for r in await port.list_systems(A, after=None, limit=10)] == [TICKET]  # control
+        if state == "gone":
+            await remove_tenant(scripted.dsn, A)
+        else:
+            await anyio.to_thread.run_sync(lambda: move_tenant(scripted.dsn, A, state=state))
+        refusal = NoSuchTenant if state == "gone" else TenantNotActive
+        for read in (lambda: port.list_systems(A, after=None, limit=10), lambda: port.get_system(A, TICKET),
+                     lambda: port.get_case_record(A)):
+            with pytest.raises(refusal):
+                await read()
+    finally:
+        await store.close()
 
 
 # --- membership ------------------------------------------------------------------------------------------------------

@@ -58,6 +58,7 @@ from .models import (
     ProgramCreate,
     ProgramMe,
     ProgramRef,
+    SavedSystem,
     System,
     SystemCheck,
     SystemPut,
@@ -212,18 +213,20 @@ async def _refused_by_record_rule(request: Request, exc: Exception) -> Response:
     found = next((code for typed, code in _RECORD_STATUS if isinstance(exc, typed)), None)
     if found is None:
         return await _server_error(request, exc)
+    # A note is what happened besides the refusal (a credential set stored before its re-read refused, r8 Am-3).
+    noted = "".join(f"; {n}" for n in getattr(exc, "__notes__", ()))
     if isinstance(exc, _records.Judged | CredentialRefused):
         faults = [str(f) for f in exc.faults]
         what = "the record judgement" if isinstance(exc, _records.Judged) else "the credential schema"
-        return problem(found, f"{what} refused the write ({len(faults)} fault(s)); see `faults`", faults=faults)
+        return problem(found, f"{what} refused the write ({len(faults)} fault(s)); see `faults`{noted}", faults=faults)
     if isinstance(exc, _records.Stale | CredentialsUnused):
-        return problem(found, str(exc), current_version=exc.current_version)
-    return problem(found, str(exc))
+        return problem(found, f"{exc}{noted}", current_version=exc.current_version)
+    return problem(found, f"{exc}{noted}")
 
 
 async def _secret_store_refused(request: Request, exc: Exception) -> Response:
-    """The 500 for the secret store refusing the API's own login: our setup, not the caller's, so it is logged as an
-    error and named in the answer (#1470 G4)."""
+    """The 500 for the secret store refusing the API's own login or request (any 4xx, which stores nothing): our setup,
+    not the caller's, so it is logged as an error and named in the answer (#1470 G4, r8 Am-1)."""
     _logger.error("the secret store refused the API: %s", exc)
     return problem(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc))
 
@@ -671,8 +674,10 @@ async def list_systems(
         _SYSTEM_ORDER, list_name="systems", tenant_id=caller.tenant_id, cursor=cursor,
         limit=limit, filters={},
     )
-    # Served after the page is cut, so the secret store is asked only about rows that are sent.
-    return Page(items=[await deps.systems.served(caller.tenant_id, r) for r in page.items], next_cursor=page.next_cursor)
+    # Served after the page is cut, so the secret store is asked only about rows that are sent: all at once, over the
+    # writer's pooled client (a bounded set of connections, kept between requests), not one after another (O3).
+    served = await asyncio.gather(*(deps.systems.served(caller.tenant_id, r) for r in page.items))
+    return Page(items=list(served), next_cursor=page.next_cursor)
 
 
 @systems.get("/{system_id}", responses={**responses(404), **_SECRET_READ})
@@ -684,15 +689,16 @@ async def get_system(deps: Deps, caller: ConfigReader, system_id: SystemPath) ->
     return await deps.systems.served(caller.tenant_id, record)
 
 
-@systems.put("/{system_id}", responses={201: {"model": System}, **responses(409, 503)})
+@systems.put("/{system_id}", responses={201: {"model": SavedSystem}, **responses(409)})
 async def put_system(
     deps: Deps, caller: ConfigWriter, system_id: SystemPath, body: SystemPut, request: Request, response: Response
-) -> System:
+) -> SavedSystem:
     """Write the system's next version, judged in the same response. `replaces` names the version a read showed, or 0
     when a read showed none; any other is stale (409, `current_version`). A record the judgement refuses is a 422
     listing every fault (`faults`). 201 when a read showed none before. A change of the system's base, CA or auth block
-    raises its credential generation: `has_credentials` is then false until credentials are set for the new version.
-    Credentials are set separately."""
+    raises its credential generation: a read's `has_credentials` is then false until credentials are set for the new
+    version. The answer is the version as stored, without `has_credentials` (a save asks no secret store, so it succeeds
+    while the secret store is sealed): read the system for it. Credentials are set separately."""
     served, created = await deps.systems.put_system(caller, system_id, body)
     _answered_for("system", system_id, served.system_id)
     if created:

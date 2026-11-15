@@ -103,7 +103,7 @@ _SKILLS_SHOWN = f"{MODEL_AGENT}/{SKILLS}/"
 
 
 
-#: Reached only for a name that passed `_adapter_path_under`'s checks, so interpolating it into
+#: Reached only for a name that passed `system_rules.registry.adapter_path_under`'s checks, so interpolating it into
 #: a path is safe. `execution.md` holds only value constraints and pitfalls, not verbs.
 _LIST_VERBS_UNLOADABLE = (
     "`{system}` — UNAVAILABLE: its adapter could not be loaded ({err}). No verb surface can be "

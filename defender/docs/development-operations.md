@@ -135,13 +135,17 @@ missing or invalid one refuses start naming it. Secret files hold one value, a t
 | `DEFENDER_KEYCLOAK_CLIENT_ID`, `..._CLIENT_SECRET_FILE`, `DEFENDER_KEYCLOAK_REDIRECT_URI` | the sign-in client; the redirect must equal the realm's registered one (dev: `http://localhost:8000/auth/callback`) |
 | `DEFENDER_KEYCLOAK_ADMIN_CLIENT_ID`, `..._ADMIN_CLIENT_SECRET_FILE` | sign-in realm's admin client (`manage-users`) |
 | `DEFENDER_KEYCLOAK_PROGRAMS_AUDIENCE`, `..._PROGRAMS_ADMIN_CLIENT_ID`, `..._PROGRAMS_ADMIN_CLIENT_SECRET_FILE` | programs realm (admin client holds `manage-clients`) |
+| `DEFENDER_OPENBAO_ADDR` | OpenBao as the API reaches it, the secret store of tenant credentials (#1470) |
+| `DEFENDER_OPENBAO_KV_MOUNT` | the KV v2 mount credential sets live on |
+| `DEFENDER_API_OPENBAO_TOKEN_FILE` | the API's OpenBao token, holding the write-only `writer` policy (`store_policies()`: create and update on KV data, read on KV metadata) |
 
-At start it checks the database version, probes each realm (discovery names the configured issuer, signing keys
-fetch, the admin client reads users or clients) and binds the port before the bootstrap writes anything; a failure
-ends the program with that step's message on stderr. Not checked at start: the sign-in client's own secret, the
+At start it checks the database version, reads OpenBao's seal status (unreachable or a malformed answer refuses start;
+sealed starts the API, and system reads and credential writes answer 503 until it is unsealed), checks the OpenBao
+token with a metadata read when unsealed (a 403 refuses start naming `DEFENDER_API_OPENBAO_TOKEN_FILE`), probes each
+realm (discovery names the configured issuer, signing keys fetch, the admin client reads users or clients) and binds
+the port before the bootstrap writes anything; a failure ends the program with that step's message on stderr. Not checked at start: the sign-in client's own secret, the
 redirect URI's equality with the realm's, and whether an admin role is write-capable (a read-only role passes);
-each surfaces at first use. Lessons, systems, credentials and the connection check answer 501 naming their issue
-(#1082, piece 2 #1470). A stop signal leaves the app and closes every connection.
+each surfaces at first use. Lessons and the connection check answer 501 naming their issue (#1082). A stop signal leaves the app and closes every connection.
 
 Walk-through (needs the dev PostgreSQL, Keycloak with both realms imported, Mailpit, the lifecycle's Forgejo and
 OpenBao from `provision-dev-issuer.sh` with `playground-issuer/lifecycle.env`, the database migrated to head, and

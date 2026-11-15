@@ -25,6 +25,7 @@ from defender.learning.core import drains
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
 from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender.learning.store import Outcome
+from defender.system_rules import registry
 from defender.systems import verbs
 from defender.tests.support.runtime.engine._declared869 import (
     ADAPTERS_REL,
@@ -75,7 +76,7 @@ def _adapter_half_of(repo: Path) -> set[str]:
     into the resolver."""
     d = repo / ADAPTERS_REL
     return {
-        verbs._system_of(p)
+        registry.system_of(p)
         for p in d.glob("*" + verbs.ADAPTER_SUFFIX)
     } | {PLATFORM_SERVED} if d.is_dir() else set()
 

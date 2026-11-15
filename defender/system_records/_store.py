@@ -81,13 +81,11 @@ class NoCurrentRecord(RecordRefused):
 
 @dataclasses.dataclass(frozen=True)
 class SystemWrite:
-    """What `put_system` stored: the new version, whether a read showed no record before it (`created`: a create or a
-    re-create after a delete), and whether it raised the credential generation (`generation_raised`: a changed base,
-    CA or auth block; never on a create, whose generation no earlier set can have)."""
+    """What `put_system` stored: the new version (its `credential_generation` among it) and whether a read showed no
+    record before it (`created`: a create or a re-create after a delete)."""
 
     record: SystemRecord
     created: bool
-    generation_raised: bool
 
 
 @dataclasses.dataclass(frozen=True)
@@ -129,7 +127,7 @@ def _next(row: Any) -> int:
     return 1 if row is None else row.version + 1
 
 
-def _refuse_unless_writable(found: Any, tenant: TenantId) -> None:
+def _refuse_unless_active(found: Any, tenant: TenantId) -> None:
     if found is None:
         raise NoSuchTenant(tenant)
     if found.state != ACTIVE:
@@ -138,7 +136,8 @@ def _refuse_unless_writable(found: Any, tenant: TenantId) -> None:
 
 class RecordStore:
     def __init__(self, dsn: str, *, clock: Callable[[], _dt.datetime], judge: Judge) -> None:
-        self._engine = async_engine(dsn, max_connections=4)
+        self._engine = async_engine(dsn)  # the default pool: config reads come here too (r8 Am-3), as they came to the
+        # tenant rows' repository before
         self._clock = clock
         self._judge = judge
 
@@ -151,8 +150,23 @@ class RecordStore:
         async with self._engine.begin() as conn:
             found = (await conn.execute(text(f"SELECT state FROM {_TENANTS} WHERE id = :t FOR UPDATE"),
                                         {"t": tenant})).first()
-            _refuse_unless_writable(found, tenant)
+            _refuse_unless_active(found, tenant)
             yield conn
+
+    # --- the read -----------------------------------------------------------------------------------------------------
+
+    async def current(self, tenant: TenantId) -> TenantRecords:
+        """The tenant's current systems and case record, read with its state in one REPEATABLE READ snapshot (no row
+        lock: a read waits for no writer). Refused as a write is (#1470 O8, r8 Am-3): `NoSuchTenant`, `TenantNotActive`,
+        so a read and a write of the API answer the same tenant state alike."""
+        async with self._engine.connect() as conn:
+            conn = await conn.execution_options(isolation_level="REPEATABLE READ")
+            async with conn.begin():
+                found = (await conn.execute(text(f"SELECT state FROM {_TENANTS} WHERE id = :t"), {"t": tenant})).first()
+                _refuse_unless_active(found, tenant)
+                latest = await self._latest(conn, tenant)
+                case = await self._latest_case(conn, tenant)
+        return TenantRecords(systems=self._current(latest), case=self._current_case(case))
 
     # --- reads under the lock -------------------------------------------------------------------------------------
 
@@ -235,9 +249,7 @@ class RecordStore:
                 tenant_id=tenant, system_id=system, version=candidate.version, adapter_id=adapter_column(candidate),
                 enabled=enabled, settings=dict(settings), access=access, credential_generation=generation, deleted=False,
                 author=author, written_at=self._clock()))
-            created = row is None or row.deleted
-            return SystemWrite(record=candidate, created=created,
-                               generation_raised=row is not None and not created and generation != row.credential_generation)
+            return SystemWrite(record=candidate, created=row is None or row.deleted)
 
     async def delete_system(self, tenant: TenantId, system: str, *, replaces: int, author: str) -> None:
         """A tombstone over `system`'s current record (`replaces` its version)."""
@@ -302,7 +314,7 @@ class RecordStore:
             conn = await conn.execution_options(isolation_level="REPEATABLE READ")
             async with conn.begin():
                 found = (await conn.execute(text(f"SELECT state FROM {_TENANTS} WHERE id = :t"), {"t": tenant})).first()
-                _refuse_unless_writable(found, tenant)
+                _refuse_unless_active(found, tenant)
                 newest = (await conn.execute(select(_SV).where(_SV.c.tenant_id == tenant, _SV.c.system_id == system)
                                              .order_by(_SV.c.version.desc()).limit(1))).first()
                 if newest is None or newest.deleted:

@@ -23,12 +23,10 @@ from defender.system_rules.registry import (
     RESERVED_REASON,
     RegistryError,
     RosterRead,
-    adapter_path_under as _adapter_path_under,  # noqa: F401 — the suite reads `verbs._adapter_path_under`
     exec_adapter_module,
     fresh_adapter_module,
     is_platform_served,
     read_roster,
-    system_of as _system_of,  # noqa: F401 — the suite reads `verbs._system_of`
 )
 from defender.kit.settings import SETTINGS_POINTER
 from defender.kit.verbs import (

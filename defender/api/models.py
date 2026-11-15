@@ -213,10 +213,10 @@ class CatalogAdapter(BaseModel):
     lab_example: bool = Field(description="A lab example adapter, not a product integration (D6).")
 
 
-class System(BaseModel):
-    """A tenant system as its current version stands (#1470 O3). `has_credentials` is the secret store's answer, asked at
-    read time, for the current version's credential generation: a set entered for an earlier destination does not count
-    (D-D). `system_id` is held to the system-id grammar, so a hand-edited row outside it cannot be served (D13)."""
+class SavedSystem(BaseModel):
+    """A tenant system's version as a save stored it (#1470 O4): the record, without `has_credentials`, since a save asks
+    the secret store nothing (r8 Am-2); a read (`System`) answers it. `system_id` is held to the system-id grammar, so a
+    hand-edited row outside it cannot be served (D13)."""
 
     system_id: RecordId
     version: int = Field(description="The version a write names as `replaces` to replace this one.")
@@ -225,6 +225,13 @@ class System(BaseModel):
     enabled: bool
     settings: dict[str, str] = Field(description="The prefixed settings keys and their text, as stored.")
     access: str = Field(description="The access declaration's text, as stored.")
+
+
+class System(SavedSystem):
+    """A tenant system as its current version stands (#1470 O3). `has_credentials` is the secret store's answer, asked at
+    read time, for the current version's credential generation: a set entered for an earlier destination does not count
+    (D-D)."""
+
     has_credentials: bool = Field(description="Credentials are write-only; this is all a read says.")
 
 

@@ -28,13 +28,13 @@ from defender.api.ports import ApiDeps, SecretStore, SystemsRepository
 from defender.api.job_store import JobStorePorts
 from defender.api.refusing import Refusing
 from defender.configuration.issuer import DEPLOYMENT_ISSUER
-from defender.credential_proxy import OpenBaoSecrets
+from defender.credential_proxy import OpenBaoSecrets, SecretStoreRefused
 from defender.identity import BootstrapRefused, IdentityService, SignInUnavailable
 from defender.identity.keycloak import KeycloakPrograms, KeycloakSignIn  # lint-shippable: ok — the program wires the one sign-in vendor the platform supports (#1083).
 from defender.identity.logged_mail import LoggedMail
 from defender.identity.postgres import PostgresIdentityRepository
 from defender.jobs.store import JobStore
-from defender.kit.faults import AdapterFault, ConfigFault
+from defender.kit.faults import AdapterFault
 from defender.kit.internal_http import internal_async_client, tls_trust
 from defender.migrations import DatabaseUnreachable, RevisionMismatch, check_version
 from defender.system_records import RecordStore
@@ -232,10 +232,14 @@ async def _seal_status(settings: Settings, transport: httpx.AsyncBaseTransport |
 
 async def _login_check(settings: Settings, secrets: OpenBaoSecrets) -> None:
     """The API's token works (G4): a metadata read of a path no record names, since the writer policy cannot look
-    itself up. A refused token names the token file's setting, never the token."""
+    itself up. A refused token (403) names the token file's setting, never the token; any other refusal or failure,
+    an answer that cannot be read included, names the address."""
     try:
         await secrets.has_credentials(_PROBE_TENANT, _PROBE_SYSTEM, generation=1)
-    except ConfigFault as refused:
+    except SecretStoreRefused as refused:
+        if not refused.login_refused:
+            raise StartRefused(f"DEFENDER_OPENBAO_ADDR: the secret store at {settings.openbao_addr} refused the API's "
+                               f"login check ({refused})") from None
         raise StartRefused(f"DEFENDER_API_OPENBAO_TOKEN_FILE: the secret store at {settings.openbao_addr} refused the "
                            f"token the file holds ({refused})") from None
     except AdapterFault as failed:
@@ -266,6 +270,7 @@ async def serving(settings: Settings, *, transport: httpx.AsyncBaseTransport | N
             sealed = await _seal_status(settings, openbao_transport)
         secrets = OpenBaoSecrets(addr=settings.openbao_addr, token=settings.openbao_token.get_secret_value(),
                                  mount=settings.openbao_kv_mount, transport=openbao_transport)
+        stack.push_async_callback(secrets.aclose)  # its pooled client, opened by the login check or the first request
         if not sealed:  # sealed: the API starts, and each request needing the store answers 503 until it is unsealed
             async with steps.step("the secret store's login check"):
                 await _login_check(settings, secrets)
@@ -303,7 +308,7 @@ async def serving(settings: Settings, *, transport: httpx.AsyncBaseTransport | N
                                            bootstrap=settings.administrators, programs=programs)
                 app = create_app(api_deps(
                     identity=identity, tenants=tenants, ports=JobStorePorts(store), frontend_origin=settings.frontend_origin,
-                    systems=ConfigRecords(records, tenants, catalog, secrets), secrets=ConfigCredentials(records, secrets)))
+                    systems=ConfigRecords(records, catalog, secrets), secrets=ConfigCredentials(records, secrets)))
             async with steps.step("binding the listening socket"):
                 sock = _bind(settings)
                 stack.callback(sock.close)

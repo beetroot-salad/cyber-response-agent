@@ -17,6 +17,7 @@ from collections.abc import AsyncIterator, Mapping
 from pathlib import Path
 from typing import Any
 
+import anyio
 import httpx
 import pytest
 from defender.tests.support.api._openbao1470 import (
@@ -290,3 +291,20 @@ async def primed(served: Configured) -> None:
     assert (await served.put_system(TICKET, 0)).status_code == 201
     assert (await served.put_case(0)).status_code == 201
     assert (await served.put_credentials(TICKET, 1, {"api_key": TOKEN})).status_code == 204
+
+
+async def remove_tenant(dsn: str, tenant: str) -> None:
+    """The tenant's row deleted, with every row that refers to it, at any depth, first (read from the catalog's keys)."""
+    from defender.tests.support.shared._postgres1339 import execute
+
+    def purge(table: str, where: str, path: tuple[str, ...] = ()) -> None:
+        refs = execute(dsn, """SELECT con.conrelid::regclass::text, ca.attname, pa.attname FROM pg_constraint con
+                               JOIN pg_attribute ca ON ca.attrelid = con.conrelid AND ca.attnum = con.conkey[1]
+                               JOIN pg_attribute pa ON pa.attrelid = con.confrelid AND pa.attnum = con.confkey[1]
+                               WHERE con.contype = 'f' AND con.confrelid = %s::regclass""", (table,))
+        for child, column, parent in refs:
+            if child not in (*path, table):  # a table's references to itself go with it in one statement
+                purge(child, f"{column} IN (SELECT {parent} FROM {table} WHERE {where})", (*path, table))
+        execute(dsn, f"DELETE FROM {table} WHERE {where}", (tenant,) * where.count("%s"))  # noqa: S608 — catalog names
+
+    await anyio.to_thread.run_sync(lambda: purge("tenancy.tenants", "id = %s"))
