@@ -34,6 +34,13 @@ Alert-triage product: an in-process PydanticAI investigation runtime plus an off
 
 Load only the references relevant to the task. Historical explanations live in `docs/archive/`.
 
+## Upgrading
+
+Every upgrade that runs migrations stops the old code first: each entry point (the API, the workers and every run
+they start, the learning drains, the lifecycle service) refuses a database whose revision is not exactly its own, and a
+migration may lock the tables it changes until it commits. So: stop the API, the workers, the learning drains and the
+lifecycle service; run migrations; start the new code. The notes below say only what an upgrade needs beyond that.
+
 ## Upgrade from before #1083
 
 Stop the API, the workers and the lifecycle service, then run migrations (revision `0016_list_indexes`). It builds one
@@ -76,11 +83,9 @@ set again. Connect hands its result to the operator as such a folder: its valida
 
 ## Upgrade from before #1485
 
-Stop the workers, the learning drains and the API before running migrations (revisions `0017_retire_learning_cutover`
-and `0018_learning_set_aside_indexes`): `work_items` gains a required `id` column with no default, so a process of the
-old code fails on every item insert once it is there, and a worker's curation request or findings are dropped with
-only a log line. `0017` stops, changing nothing, while any tenant still has a learning cutover pending: finish or
-resume it with the code at revision `0016_list_indexes` first.
+Migrations `0017_retire_learning_cutover` and `0018_learning_set_aside_indexes`, as in "Upgrading" above. `0017`
+stops, changing nothing, while any tenant still has a learning cutover pending: finish or resume it with the code at
+revision `0016_list_indexes` first.
 
 The #1278 learning-state cutover is retired: cut over on a revision before #1485 first; a deployment that never did will lose its old learning folder.
 

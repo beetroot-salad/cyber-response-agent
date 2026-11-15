@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal, cast
 
-from defender.records.formats import BatchId, TenantId, WorkItemId
+from defender.records.formats import TenantId
 
 from .models import ItemKind, ParkedBatch, ParkedItemRef, SetAsideItem
 from .ports import TimePosition
@@ -23,15 +23,14 @@ class StoreLearningWork:
     async def list_set_aside(self, tenant_id: TenantId, *, status: Literal["held", "dead"] | None,
                              after: TimePosition | None, limit: int) -> list[SetAsideItem]:
         rows = await self._store.set_aside(
-            tenant_id, status=status, after=None if after is None else (after[0], WorkItemId(after[1])), limit=limit)
+            tenant_id, status=status, after=after, limit=limit)
         return [SetAsideItem(item_id=r.id, kind=cast("ItemKind", r.kind), key=r.key, status=cast("Literal['held', 'dead']", r.status), reason=r.reason,
                              source_run=r.source_run, batch_id=r.batch_id, pr_number=r.pr_number,
                              updated_at=r.updated_at) for r in rows]
 
     async def list_parked_batches(self, tenant_id: TenantId, *, after: TimePosition | None,
                                   limit: int) -> list[ParkedBatch]:
-        rows = await self._store.parked(
-            tenant_id, after=None if after is None else (after[0], BatchId(after[1])), limit=limit)
+        rows = await self._store.parked(tenant_id, after=after, limit=limit)
         return [ParkedBatch(batch_id=b.id, batch_kind=cast("Literal['author', 'revert', 'registry']", b.kind),
                             lane=b.lane, blocks_lane=b.blocks_lane, branch=b.branch, pr_number=b.pr_number,
                             reason=b.reason, created_at=b.created_at,

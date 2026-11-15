@@ -12,9 +12,6 @@ from __future__ import annotations
 
 import dataclasses
 import datetime as _dt
-import hashlib
-import json
-import re
 import uuid
 from collections.abc import Mapping, Sequence
 from typing import Any, cast
@@ -24,8 +21,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from defender._text import is_content_less, postgres_cannot_hold
-from defender.knowledge import BASH_SHIM_QUERY_ID
+from defender._text import postgres_cannot_hold
 from defender.database import async_engine, newest_first_query, sessions
 from defender.records.formats import BatchId, CommitId, TenantId, WorkItemId
 from defender.tenancy.models import TenantRecord
@@ -44,6 +40,7 @@ from defender.jobs.learning_models import (
 )
 
 from ._feedback import FeedbackVerbs
+from ._keys import digest, mistake_key_of
 
 #: A lease must outlast the worker's 30 s stop grace (#1081), so a brief database blip costs no authoring run.
 DEFAULT_LEASE_SECONDS = 120.0
@@ -250,40 +247,6 @@ def _view(row: Any) -> BatchView:
         lapsed=bool(getattr(row, "lapsed", False)))
 
 
-def _digest(value: Any) -> str:
-    return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()[:32]
-
-
-#: The envelope `record_query.payload_digest` wraps every failing call in (`exit={code}; `);
-#: shared by every failure, so not itself a diagnosis.
-_EXIT_ENVELOPE = re.compile(r"^\s*exit=-?\d+\s*;\s*")
-
-
-def _digest_diagnosis(digest: str) -> str:
-    return _EXIT_ENVELOPE.sub("", digest, count=1)
-
-
-def is_reducer_row(row: dict) -> bool:
-    """Is this queued row the reducer's mistake rather than a system's? The one spelling, shared by the curator's
-    routing, the lane's arrival gate and the merge key."""
-    return str(row.get("query_id") or "") == BASH_SHIM_QUERY_ID
-
-
-def pitfall_key(row: dict) -> tuple[str, str]:
-    """The identity of a mistake, which is not the identity of a failing row."""
-    owner = BASH_SHIM_QUERY_ID if is_reducer_row(row) else str(row.get("system") or "").strip()
-    digest = str(row.get("stderr_digest") or "")
-    if is_content_less(_digest_diagnosis(digest)):
-        return (owner, "\x00" + str(row.get("pitfall_id") or ""))
-    return (owner, digest)
-
-
-def mistake_key_of(row: Mapping[str, Any], item_key: str) -> str:
-    """The identity of a pitfall's mistake (its owner and diagnosis; a diagnosis-less failure is its own mistake),
-    stored on the row so the store's claim counts distinct mistakes in SQL. The one definition the queue's merge uses."""
-    return _digest(list(pitfall_key({**row, "pitfall_id": item_key})))
-
-
 def _refuse_unholdable(value: Any) -> None:
     """Refuse, before anything is written, a value PostgreSQL could never hold (`postgres_cannot_hold`): every store
     verb screens all the text it was given."""
@@ -415,7 +378,7 @@ class LearningStore(FeedbackVerbs):
     async def add_pitfall(self, tenant: str, row: Mapping[str, Any]) -> bool:
         """Queue one pitfall occurrence; a repeated pitfall id is ignored, a keyless row is keyed by its digest."""
         _refuse_unholdable(row)
-        key = str(row["pitfall_id"]) if row.get("pitfall_id") else _digest(dict(row))
+        key = str(row["pitfall_id"]) if row.get("pitfall_id") else digest(dict(row))
         mistake = mistake_key_of(row, key)
         async with self._sessions.begin() as s:
             await self._require_active(s, tenant)
@@ -472,7 +435,7 @@ class LearningStore(FeedbackVerbs):
         return [_work_item(r) for r in rows]
 
     async def set_aside(self, tenant: str, *, status: str | None = None,
-                        after: tuple[_dt.datetime, WorkItemId] | None = None, limit: int) -> list[WorkItem]:
+                        after: tuple[_dt.datetime, str] | None = None, limit: int) -> list[WorkItem]:
         """The tenant's held and dead items (or one of them), newest change first, ties by id descending, `limit`
         after `after` (the (updated_at, id) of the last item seen). The item's PR is its batch's."""
         if status not in (None, "held", "dead"):
@@ -483,7 +446,7 @@ class LearningStore(FeedbackVerbs):
             rows = (await s.execute(newest_first_query(query, _I.c.updated_at, _I.c.id, after, limit))).all()
         return [_work_item(r) for r in rows]
 
-    async def parked(self, tenant: str, *, after: tuple[_dt.datetime, BatchId] | None = None,
+    async def parked(self, tenant: str, *, after: tuple[_dt.datetime, str] | None = None,
                      limit: int) -> list[ParkedBatchView]:
         """The tenant's batches in phase `needs_person`, newest first (ties by id), with the items each still holds.
         One statement, so the page and its items are one snapshot."""

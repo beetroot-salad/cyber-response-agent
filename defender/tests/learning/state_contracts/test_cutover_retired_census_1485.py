@@ -167,7 +167,8 @@ def _section(lines: list[str], title: str) -> list[str]:
 def test_o5_the_upgrade_notes_say_to_cut_over_on_an_earlier_revision_and_to_stop_the_drains_before_migrating():
     """`defender/CLAUDE.md` has no `Upgrade from before #1278` section and no cutover command; one line names an earlier
     revision to cut over on and says a deployment that never did loses its old learning folder (D10); an `Upgrade from
-    before #1485` section says to stop the learning drains and the API before migrating (D12). Loose words. (O5)"""
+    before #1485` section names its migrations and defers to the standing `Upgrading` section, which says to stop the
+    learning drains and the API before migrating (D12: every upgrade stops the old code). Loose words. (O5)"""
     lines = (REPO / "defender" / "CLAUDE.md").read_text(encoding="utf-8").splitlines()
     assert any(line.startswith("## Upgrade from before #1454") for line in lines), "control: the neighbouring notes are read"
     assert not any("Upgrade from before #1278" in line for line in lines)
@@ -179,8 +180,12 @@ def test_o5_the_upgrade_notes_say_to_cut_over_on_an_earlier_revision_and_to_stop
     assert re.search(r"(?i)\blearning\b", note), note
     assert re.search(r"(?i)\bfolder\b", note), note
     assert re.search(r"(?i)\blos[et]\b|\bdiscard|\bgone\b", note), note
-    body = " ".join(_section(lines, "Upgrade from before #1485"))
-    assert body, "an `Upgrade from before #1485` section exists"
+    note_1485 = " ".join(_section(lines, "Upgrade from before #1485"))
+    assert note_1485, "an `Upgrade from before #1485` section exists"
+    assert re.search(r"(?i)\bmigrat", note_1485), note_1485
+    assert "Upgrading" in note_1485, note_1485
+    body = " ".join(_section(lines, "Upgrading"))
+    assert body, "a standing `Upgrading` section exists"
     stop, migrate = re.search(r"(?i)\bstop", body), re.search(r"(?i)\bmigrat", body)
     assert stop, body
     assert migrate, body

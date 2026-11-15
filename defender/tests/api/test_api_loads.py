@@ -118,7 +118,8 @@ def test_1485_importing_the_paging_code_loads_neither_the_learning_store_nor_its
 
 
 def test_1485_the_paging_probe_sees_a_load():
-    """Positive control: importing the learning store reports both names, importing the tables alone the second. (Paging)"""
-    store = _loaded("defender.learning_store")
+    """Positive control: importing the learning store reports both names, importing the tables alone the second. The
+    store's door is lazy, so the control imports the store's own module. (Paging)"""
+    store = _loaded("defender.learning_store._store")
     assert all(_found(store, name) for name in _NOT_BY_PAGING)
     assert _found(_loaded("defender.jobs.learning_models"), "defender.jobs.learning_models")
