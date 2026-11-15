@@ -76,7 +76,7 @@ def _tree(repo: Path, rev: str, prefix: str) -> dict[str, str]:
     listing = _git.git_bytes(["ls-tree", "-r", "-z", "--full-tree", rev, "--", prefix],  # lint-oracle: ok — the cutover check reads two repos' trees by hand; it is not the oracle of a production reader
                              cwd=repo)
     records = _git.tree_records(listing, errors="strict")
-    odd = [(mode, path) for mode, kind, _oid, path in records
+    odd = [(mode, path) for mode, kind, _oid, path in records  # lint-stale-ref: ok — a local name that only shares its spelling with a symbol the retired importer defined
            if kind != "blob" or mode not in ("100644", "100755")]
     if odd:
         raise NotRegular(f"{repo}@{rev}: entries that are not regular files: {odd}")

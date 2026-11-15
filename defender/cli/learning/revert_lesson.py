@@ -52,7 +52,7 @@ def revert(  # noqa: PLR0913 — the lesson, its store and admission, and the de
     from defender.learning.author.version_control.store_delivery import revert_lesson
     from defender.learning.core.drains import revert_delivery
     from defender.learning.core.store_tick import AUTHOR_LANE, owner_name
-    from defender.learning.store import LaneBusy
+    from defender.learning_store import LaneBusy
 
     tenant_id = str(admitted.tenant.id)
     if any(b.lane == AUTHOR_LANE and b.phase == "working" for b in store.batches(tenant_id)):

@@ -2,7 +2,6 @@
 investigation entrypoint's tail."""
 from __future__ import annotations
 
-from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
 
 import inspect
 import json
@@ -265,12 +264,10 @@ def drive_tail(main, alert: Path, tail: SpecTail, *args: str) -> int:
     `main` is passed in so each scenario names the entry point it drives. The argv carries
     `--tenant` with D9's tenant, created first in this test's data root: `main` refuses a run
     whose tenant does not exist (#1078)."""
-    from defender.tests.support.shared.contracts._data_root_1078 import ensure_d9_tenant, current_data_root
-    from defender.tenancy._tenant import requested_tenant
+    from defender.tests.support.shared.contracts._data_root_1078 import ensure_d9_tenant
 
     require_tail_seam(main)
     tenant_id = ensure_d9_tenant()
-    location_path(requested_tenant(fixture_data_root(current_data_root()), tenant_id).learning).mkdir(exist_ok=True)
     from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv, in_process_publish
 
     # The in-process launch-time publish (it publishes the tenant for real), when `main` takes one.
@@ -303,7 +300,7 @@ def curation_requests(paths) -> dict[str, dict]:
     """The curation requests still waiting in the learning store for `paths`' tenant, by case id (#1278: the queue is
     rows, not an `author-queue` folder). A test that asks needs a store: without one this refuses to answer, so an
     "is empty" assertion can never pass for want of a database."""
-    from defender.learning.store import blocking
+    from defender.learning_store import blocking
 
     dsn = store_dsn()
     assert dsn, "curation_requests reads the learning store: the test must name one (DEFENDER_DATABASE_DSN)"

@@ -1,6 +1,6 @@
 ---
 name: finalize
-description: "Close out the green PR that write-code-from-tests shipped: review it cold, settle each finding by its cleaner resolution (dissolve or patch) or file it, trace what escaped back to the stage that should have held it, feed process findings back to the human, and re-green the PR before the merge gate. Does not read the design's rationale. Use after write-code-from-tests, as the last stage before a human merges."
+description: "Close out the green PR that write-code-from-tests shipped: review it cold, fix or file each finding, trace what escaped to the stage that should have caught it, and re-green the PR. Use after write-code-from-tests, as the last stage before a human merges."
 argument-hint: "[issue # or PR #]"
 effort: medium
 ---

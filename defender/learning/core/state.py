@@ -1,6 +1,6 @@
 """The learning store's channels (#1278): the names the judge's findings sinks and the corpus curators
 share. A channel is the kind of item a queue carries (`name`) and the key its rows are identified by
-(`id_key`); where its rows live is the learning store's business (`defender.learning.store`)."""
+(`id_key`); where its rows live is the learning store's business (`defender.learning_store`)."""
 
 from __future__ import annotations
 

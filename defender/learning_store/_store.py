@@ -12,30 +12,26 @@ from __future__ import annotations
 
 import dataclasses
 import datetime as _dt
-import hashlib
-import json
 import uuid
 from collections.abc import Mapping, Sequence
 from typing import Any, cast
 
-from sqlalchemy import Table, Text, and_, case, delete, exists, false, func, literal, or_, select, true, update
+from sqlalchemy import Table, Text, and_, case, collate, delete, exists, false, func, literal, or_, select, true, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from defender._text import postgres_cannot_hold
-from defender.database import async_engine, sessions
-from defender.records.formats import BatchId, CommitId, TenantId
+from defender.database import async_engine, newest_first_query, sessions
+from defender.records.formats import BatchId, CommitId, TenantId, WorkItemId
 from defender.tenancy.models import TenantRecord
 
 from defender.jobs.learning_models import (
     AUTHOR_LANE,
     AUTHORING_KINDS,
     BRANCH_PREFIX,
-    FEEDBACK_LANE,
     LANE_OF,
     LANES,
-    LEAD_LANE,
     REVERT_PREFIX,
     BatchRow,
     CommitChangeRow,
@@ -44,6 +40,7 @@ from defender.jobs.learning_models import (
 )
 
 from ._feedback import FeedbackVerbs
+from ._keys import digest, mistake_key_of
 
 #: A lease must outlast the worker's 30 s stop grace (#1081), so a brief database blip costs no authoring run.
 DEFAULT_LEASE_SECONDS = 120.0
@@ -83,10 +80,6 @@ class TenantInactive(Exception):
 
 class ItemRefused(Exception):
     """The database will never take this item (a NUL character jsonb refuses): waiting cannot cure it."""
-
-
-class ImportRefused(Exception):
-    """The one-time import of a tenant's file state refused; it wrote nothing (G-I10)."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -139,6 +132,7 @@ Outcomes = Mapping[tuple[str, str], Outcome]
 
 @dataclasses.dataclass(frozen=True)
 class WorkItem:
+    id: WorkItemId
     kind: str
     key: str
     status: str
@@ -155,6 +149,22 @@ class WorkItem:
     source_run: str | None
     enqueued_at: _dt.datetime
     updated_at: _dt.datetime
+
+
+@dataclasses.dataclass(frozen=True)
+class ParkedBatchView:
+    """A batch in phase `needs_person` (#1485): what the loop will not touch again. `blocks_lane`: it holds its lane
+    (an author or registry batch does, a revert does not). `items` are the (kind, key) of the items it still holds."""
+
+    id: BatchId
+    kind: str
+    lane: str
+    blocks_lane: bool
+    branch: str
+    pr_number: int | None
+    reason: str | None
+    created_at: _dt.datetime
+    items: tuple[tuple[str, str], ...]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -225,8 +235,6 @@ class CommitRecord:
     changes: tuple[tuple[str, str | None, str | None], ...]
     #: `(batch, path)` a revert commit undoes (the batch by id; by branch for imported history); `None` otherwise.
     reverts: tuple[tuple[str, str], ...] | None
-    #: The corpora the commit's batch writes (`DrainLabel.lanes`), by its branch's lane.
-    lanes: tuple[str, ...] = ()
 
 
 def _view(row: Any) -> BatchView:
@@ -237,18 +245,6 @@ def _view(row: Any) -> BatchView:
         pr_number=row.pr_number, replaces=row.replaces, generation=row.generation, refusals=row.refusals,
         last_checked=row.last_checked, reason=row.reason, created_at=row.created_at, ended_at=row.ended_at,
         lapsed=bool(getattr(row, "lapsed", False)))
-
-
-def _digest(value: Any) -> str:
-    return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()[:32]
-
-
-def mistake_key_of(row: Mapping[str, Any], item_key: str) -> str:
-    """The identity of a pitfall's mistake (its owner and diagnosis; a diagnosis-less failure is its own mistake),
-    stored on the row so the store's claim counts distinct mistakes in SQL. The one definition the queue's merge uses."""
-    from defender.learning.core.persist import pitfall_key
-
-    return _digest(list(pitfall_key({**row, "pitfall_id": item_key})))
 
 
 def _refuse_unholdable(value: Any) -> None:
@@ -265,6 +261,22 @@ def _refuse_unkeyed(row: Mapping[str, Any]) -> None:
     key = row.get("finding_id")
     if not isinstance(key, str) or not key.strip():
         raise ItemRefused(f"a finding row carries no string finding_id (got {key!r})")
+
+
+def _items_with_pr() -> Any:
+    """Every item column and its batch's PR (none when it has no batch)."""
+    return select(_I, _B.c.pr_number).select_from(_I.outerjoin(_B, _I.c.batch_id == _B.c.id))
+
+
+def _work_item(r: Any) -> WorkItem:
+    """An item row (with its batch's PR) as the store reports it. A waiting item is in no batch: the batch it last left
+    (kept on its row) and that batch's PR are not reported as its own."""
+    in_batch = r.status != "waiting"
+    return WorkItem(id=r.id, kind=r.kind, key=r.item_key, status=r.status, reason=r.reason, fault=r.fault,
+                    batch_id=r.batch_id if in_batch else None, pr_number=r.pr_number if in_batch else None,
+                    attempts=r.attempts, deferrals=r.deferrals, offers_declined=r.offers_declined,
+                    coalesce_key=r.coalesce_key, mistake_key=r.mistake_key, payload=r.payload, source_run=r.source_run,
+                    enqueued_at=r.enqueued_at, updated_at=r.updated_at)
 
 
 async def _settle_requests(s: AsyncSession, tenant: str) -> None:
@@ -366,7 +378,7 @@ class LearningStore(FeedbackVerbs):
     async def add_pitfall(self, tenant: str, row: Mapping[str, Any]) -> bool:
         """Queue one pitfall occurrence; a repeated pitfall id is ignored, a keyless row is keyed by its digest."""
         _refuse_unholdable(row)
-        key = str(row["pitfall_id"]) if row.get("pitfall_id") else _digest(dict(row))
+        key = str(row["pitfall_id"]) if row.get("pitfall_id") else digest(dict(row))
         mistake = mistake_key_of(row, key)
         async with self._sessions.begin() as s:
             await self._require_active(s, tenant)
@@ -419,15 +431,43 @@ class LearningStore(FeedbackVerbs):
         if kind is not None:
             where.append(_I.c.kind == kind)
         async with self._sessions() as s:
+            rows = (await s.execute(_items_with_pr().where(*where).order_by(_I.c.kind, _I.c.item_key))).all()
+        return [_work_item(r) for r in rows]
+
+    async def set_aside(self, tenant: str, *, status: str | None = None,
+                        after: tuple[_dt.datetime, str] | None = None, limit: int) -> list[WorkItem]:
+        """The tenant's held and dead items (or one of them), newest change first, ties by id descending, `limit`
+        after `after` (the (updated_at, id) of the last item seen). The item's PR is its batch's."""
+        if status not in (None, "held", "dead"):
+            raise ValueError(f"not a set-aside status: {status}")
+        query = _items_with_pr().where(
+            _I.c.tenant_id == TenantId(tenant), _I.c.status.in_(["held", "dead"] if status is None else [status]))
+        async with self._sessions() as s:
+            rows = (await s.execute(newest_first_query(query, _I.c.updated_at, _I.c.id, after, limit))).all()
+        return [_work_item(r) for r in rows]
+
+    async def parked(self, tenant: str, *, after: tuple[_dt.datetime, str] | None = None,
+                     limit: int) -> list[ParkedBatchView]:
+        """The tenant's batches in phase `needs_person`, newest first (ties by id), with the items each still holds.
+        One statement, so the page and its items are one snapshot."""
+        page = newest_first_query(select(_B).where(_B.c.tenant_id == TenantId(tenant), _B.c.phase == "needs_person"),
+                                  _B.c.created_at, _B.c.id, after, limit).subquery()
+        held = and_(_I.c.tenant_id == page.c.tenant_id, _I.c.batch_id == page.c.id, _I.c.status == "in_batch")
+        async with self._sessions() as s:
             rows = (await s.execute(
-                select(_I, _B.c.pr_number).select_from(_I.outerjoin(_B, _I.c.batch_id == _B.c.id))
-                .where(*where).order_by(_I.c.kind, _I.c.item_key))).all()
-        return [WorkItem(kind=r.kind, key=r.item_key, status=r.status, reason=r.reason, fault=r.fault,
-                         batch_id=None if r.status == "waiting" else r.batch_id,
-                         pr_number=None if r.status == "waiting" else r.pr_number, attempts=r.attempts, deferrals=r.deferrals,
-                         offers_declined=r.offers_declined, coalesce_key=r.coalesce_key, mistake_key=r.mistake_key,
-                         payload=r.payload, source_run=r.source_run, enqueued_at=r.enqueued_at,
-                         updated_at=r.updated_at) for r in rows]
+                select(page, _I.c.kind.label("item_kind"), _I.c.item_key.label("item_key"))
+                .select_from(page.outerjoin(_I, held))
+                .order_by(page.c.created_at.desc(), page.c.id.desc(), collate(_I.c.kind, "C"),
+                          collate(_I.c.item_key, "C")))).all()
+        batches: dict[str, Any] = {}
+        items: dict[str, list[tuple[str, str]]] = {}
+        for r in rows:
+            batches.setdefault(r.id, r)
+            if r.item_kind is not None:
+                items.setdefault(r.id, []).append((r.item_kind, r.item_key))
+        return [ParkedBatchView(id=b.id, kind=b.kind, lane=b.lane, blocks_lane=b.kind in AUTHORING_KINDS, branch=b.branch,
+                                pr_number=b.pr_number, reason=b.reason, created_at=b.created_at,
+                                items=tuple(items.get(b.id, ()))) for b in batches.values()]
 
     async def item_keys(self, tenant: str, kind: str) -> list[str]:
         """Every key of `kind` the tenant holds, whatever its status (a key is the store's for good): keys only, for a
@@ -452,7 +492,7 @@ class LearningStore(FeedbackVerbs):
         for c in changes:
             by_commit.setdefault(c.commit_row, []).append((c.path, c.blob_base, c.blob_left))
         return [CommitRecord(commit=c.commit, branch=c.branch, base=c.base, start=c.start, batch_id=c.batch_id,
-                             changes=tuple(by_commit.get(c.id, ())), lanes=lanes_of_branch(c.branch),
+                             changes=tuple(by_commit.get(c.id, ())),
                              reverts=None if c.reverts is None else tuple((str(a), str(b)) for a, b in c.reverts))
                 for c in commits]
 
@@ -912,16 +952,6 @@ class LearningStore(FeedbackVerbs):
             await s.execute(delete(_C).where(_C.c.tenant_id == t))
             await s.execute(delete(_I).where(_I.c.tenant_id == t))
             await s.execute(delete(_B).where(_B.c.tenant_id == t))
-
-
-def lanes_of_branch(branch: str) -> tuple[str, ...]:
-    """The corpora a batch on `branch` writes (`DrainLabel.lanes`): the lead lane's or the feedback lane's for its
-    prefix, else the author lane's (a revert's included: it undoes an author-lane change)."""
-    from defender.learning.core.config import AUTHOR_DRAIN_LABEL, FEEDBACK_DRAIN_LABEL, LEAD_AUTHOR_DRAIN_LABEL
-
-    if branch.startswith(BRANCH_PREFIX[FEEDBACK_LANE]):
-        return FEEDBACK_DRAIN_LABEL.lanes
-    return (LEAD_AUTHOR_DRAIN_LABEL if branch.startswith(BRANCH_PREFIX[LEAD_LANE]) else AUTHOR_DRAIN_LABEL).lanes
 
 
 def _str_or_none(value: Any) -> str | None:

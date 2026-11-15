@@ -311,7 +311,7 @@ def grade_episode(  # noqa: PLR0913 — the orchestration's whole configuration 
     pass: a bad id, an unusable episodes root, a missing episode, a file at its name, or a
     container whose record names another tenant (or none) is `JudgeRefused`, and nothing is
     created. An operator's pass inserts its findings into the learning store `store` (its
-    synchronous face, `learning.store.blocking`) for `runs`'s tenant (#1278, "Findings arrive":
+    synchronous face, `learning_store.blocking`) for `runs`'s tenant (#1278, "Findings arrive":
     the judge inserts directly; `enqueue.StoreFindings`).
 
     `job_lane` (#1344, "Judge modes"): a learning job's pass reaches no store. Its findings go

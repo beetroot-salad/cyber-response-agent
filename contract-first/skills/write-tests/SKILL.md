@@ -10,7 +10,7 @@ effort: medium
 
 You own the **executable contract between design and code**. The design says what should happen and why; the tests enforce its observable commitments. Green tests are evidence about what those assertions check, never proof of complete intent or correct code. The contract you hand off has been checked for fidelity, so the code stage can trust what it demands. Whether it rejects wrong code is tested at the code stage, where attackers start from the honest implementation.
 
-The flow is **sketch and spike → design check → author thoroughly → review → repair → hand off**. Its shape follows where problems are cheapest to fix. Writing concrete cases is how design holes surface, so start early and thin. Writing code surfaces a different kind of hole, where the design does not fit the existing system, so a throwaway spike runs before any thorough tests exist. Only once the design has survived both does the expensive pass begin.
+The flow is **take the sketch forward → author thoroughly → review → repair → hand off**. The design arrives already tried against the code by discuss-issue's sketch and spike, so the expensive pass starts on a design that survived them.
 
 ## Keep agent work cheap
 
@@ -31,21 +31,11 @@ Extend the code map with what tests need and grounding did not cover: harness en
 
 Work in a dedicated worktree on a recorded base, with imports resolving into it. The contract is tests and test machinery only, plus the project cache and rules files: **never write or commit production code, skeletons, or a helper that implements the policy under test**, because the code stage must earn green on its own. If implementation already exists, this is contract repair; record it as such. Keep working state under `.contract-first/`, outside the diff, following **references/contract.md**.
 
-## 2. Sketch, spike and check the design
+## 2. Take the sketch forward
 
-Settle the design before the tests that enforce it are written in depth.
+The design arrives with discuss-issue's sketch patch and the spike's findings, already reviewed, or with a recorded reason they were skipped. Apply the sketch in your worktree; its cases become rows in the case table (§3) where their design survived. The spike's code never comes here; its findings have already shaped the design.
 
-**Sketch** — one author writes one representative case per important promise and main flow through real entry points. Its job is to force every load-bearing choice into concrete setup and expected results, where gaps show; variants and edge cases wait.
-
-**Spike** — one implementer writes a throwaway implementation of the core flows in a detached worktree, runs the sketch against it, and logs every guess, workaround and departure from the design's mechanism. Its code is never committed or shown to any later worker; only its findings travel. It catches where the design doesn't fit the code it lands in, which otherwise surfaces only at code review.
-
-**Design check** — one fresh reader reads the design, sketch, spike diff and log, without the author's or implementer's reasoning, and asks: is this the right behavior, and where is the design unsettled, contradictory, or a poor fit for the code it lands in? A spike finding counts only when it names the design choice it conflicts with.
-
-Sort and resolve what it finds (§5) before thorough authoring. Mechanism changes it accepts are written into the design so the implementer does not rediscover them. Sketch cases carry forward where their design survived.
-
-Skip sketch and spike for a small change whose design leaves nothing consequential open; skip only the spike when the change touches no existing owner, flow or shared mechanism. Record why. A skip never shrinks §4.
-
-Detailed charges: **references/authoring.md** (Sketch, Spike) and **references/review.md** (Design check). These three are never split across workers.
+A design with neither and no recorded skip goes back to discuss-issue for that step, unless this is contract repair or the design was approved before discuss-issue ran sketches; then record which and go on. A skip never shrinks §4.
 
 ## 3. Author the contract thoroughly
 
@@ -63,7 +53,7 @@ Commit the candidate suite as a **candidate ref**. One fresh whole-contract revi
 
 ## 5. Reconcile, repair or dissolve
 
-Before acting on any batch of findings, whatever produced it (the design check, a review, or authors' design gaps), dispatch a fresh sorter on **../../references/sort.md** with its findings, the design and decisions, the principles and project rules, but not the author's reasoning; the orchestrator integrated the work, so it doesn't sort. Then route each group by its verdict and kind:
+Before acting on any batch of findings, whatever produced it (a review or authors' design gaps), dispatch a fresh sorter on **../../references/sort.md** with its findings, the design and decisions, the principles and project rules, but not the author's reasoning; the orchestrator integrated the work, so it doesn't sort. Then route each group by its verdict and kind:
 
 - **A factual question:** probe it. The human does not choose what the code does.
 - **A contract defect** (tests omit, misstate or fail to enforce settled behavior, or pin a detail nobody decided): a fresh author repairs it, preserving intent. Recheck with fresh workers: the fidelity reviewer reads changed assertions. On a repair from the code stage, one author takes the stage's whole remaining brief (write-code-from-tests §4). It names each family and its triage verdict: write the one test that covers each family, not one per exploit. It must fail against every exploit in the family. The code stage rechecks it (write-code-from-tests §3): the kept exploit patches always, an attacker only when they can't speak for the change. These repairs follow the code stage's stopping rule, not §6's round limit.
@@ -84,7 +74,7 @@ Test mechanics and local technical choices stay with agents when settled intent 
 
 ## 6. Readiness
 
-**Repair rounds after §4 have a hard budget.** When it runs out with blockers remaining, stop and report them as blocked with the next action; only the human extends the budget. Within the limit, spend in proportion to the named risks. A design amendment found after thorough authoring means the design check missed something: record what, so the earlier steps improve. The same class of finding recurring means the test approach, not the tests, needs revisiting.
+**Repair rounds after §4 have a hard budget.** When it runs out with blockers remaining, stop and report them as blocked with the next action; only the human extends the budget. Within the limit, spend in proportion to the named risks. A design amendment found after thorough authoring means discuss-issue's sketch, spike or review missed something: record what, so the earlier steps improve. The same class of finding recurring means the test approach, not the tests, needs revisiting.
 
 The contract is ready when:
 
@@ -107,10 +97,6 @@ One entry per line: `<skill>[/<file>] §<section> <rule> | ctx: <tags> | <applic
 - write-tests §keep-agent-work-cheap outline-first | ctx: harness=claude-code | the `LSP` tool's document symbols; a grep for definitions where no language server is installed.
 - write-tests §keep-agent-work-cheap hand-back-when-large | ctx: past-runs | roughly a hundred tool calls.
 - write-tests §keep-agent-work-cheap suite-checks | ctx: python | `spec-graph calls` and `spec-graph nullstub`.
-- write-tests §2 sketch-author | ctx: models=claude-5 | Opus at medium effort.
-- write-tests §2 spike-implementer | ctx: models=claude-5 | Sonnet at medium effort.
-- write-tests §2 what-the-spike-catches | ctx: past-runs | two owners of one fact, mechanisms that collide with existing constraints, shortcuts the design invites.
-- write-tests §2 design-check | ctx: models=claude-5 | Opus at high effort.
 - write-tests §3,5 authors | ctx: models=claude-5 | Sonnet at medium effort.
 - write-tests §4 fidelity-reviewer | ctx: models=claude-5 | Opus at high effort.
 - write-tests §5 stale-test-author | ctx: models=claude-5 | Sonnet at medium effort.

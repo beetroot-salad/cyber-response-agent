@@ -20,14 +20,14 @@ from collections.abc import AsyncIterator, Callable, Collection, Mapping, Sequen
 from contextlib import asynccontextmanager
 from typing import Any
 
-from sqlalchemy import case, delete, func, literal, select, tuple_, update
+from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import DataError, DBAPIError, IntegrityError, InterfaceError, InternalError, OperationalError
 from sqlalchemy.exc import TimeoutError as PoolTimeout
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from defender._text import postgres_can_hold
-from defender.database import async_engine, sessions
+from defender.database import async_engine, newest_first_query, sessions
 from defender.records.formats import (
     ALERT_MAPPING_MISSING,
     MAPPING_KEYS,
@@ -225,7 +225,7 @@ class JobStore:
             query = query.where(AlertRow.fired_at >= fired_after)
         if fired_before is not None:
             query = query.where(AlertRow.fired_at < fired_before)
-        query = _newest_first(query, AlertRow.fired_at, AlertRow.id, after, limit)
+        query = newest_first_query(query, AlertRow.fired_at, AlertRow.id, after, limit)
         async with self._tx() as s:
             rows: Sequence[Any] = (await s.execute(query)).scalars().all()
         return [stored_alert(row) for row in rows]
@@ -285,7 +285,7 @@ class JobStore:
         query = select(InvestigationRow).where(InvestigationRow.tenant_id == tenant_id)
         if alert_id is not None:
             query = query.where(InvestigationRow.alert_id == alert_id)
-        query = _newest_first(query, InvestigationRow.created_at, InvestigationRow.id, after, limit)
+        query = newest_first_query(query, InvestigationRow.created_at, InvestigationRow.id, after, limit)
         async with self._tx() as s:
             rows: Sequence[Any] = (await s.execute(query)).scalars().all()
         return [investigation_record(row) for row in rows]
@@ -773,7 +773,7 @@ class JobStore:
         query = select(LearningJobRow).where(LearningJobRow.tenant_id == tenant_id)
         if investigation_id is not None:
             query = query.where(LearningJobRow.investigation_id == investigation_id)
-        query = _newest_first(query, LearningJobRow.created_at, LearningJobRow.id, after, limit)
+        query = newest_first_query(query, LearningJobRow.created_at, LearningJobRow.id, after, limit)
         async with self._tx() as s:
             rows: Sequence[Any] = (await s.execute(query)).scalars().all()
         return [learning_job_record(row) for row in rows]
@@ -965,14 +965,6 @@ class JobStore:
                     .execution_options(synchronize_session=False))).scalars().all()
                 counts.append(len(moved))
         return counts[0], counts[1]
-
-
-def _newest_first(query: Any, time: Any, ident: Any, after: tuple[_dt.datetime, str] | None, limit: int) -> Any:
-    """`query` ordered `(time, id)` descending, limited, and when `after` is given only the rows strictly after that
-    position in that order."""
-    if after is not None:
-        query = query.where(tuple_(time, ident) < tuple_(literal(after[0], time.type), literal(after[1], ident.type)))
-    return query.order_by(time.desc(), ident.desc()).limit(limit)
 
 
 def _locked_in_id_order(column: Any, *where: Any) -> Any:

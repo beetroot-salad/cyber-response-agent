@@ -25,7 +25,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from defender.database import Base, IdColumn
-from defender.records.formats import BatchId, CommitId, TenantId
+from defender.records.formats import BatchId, CommitId, TenantId, WorkItemId
 from defender.tenancy.models import SCHEMA as TENANCY_SCHEMA
 
 SCHEMA = "learning"
@@ -77,6 +77,9 @@ class BatchRow(Base, kw_only=True):
         # One working batch per lane, of any kind: the commit record and the lane's clone are one writer's.
         Index("batches_one_working_per_lane", "tenant_id", "lane", unique=True,
               postgresql_where=text("phase = 'working'")),
+        # The API's read of parked batches (#1485 O2), newest first.
+        Index("batches_needs_person", "tenant_id", text("created_at DESC"), text("id DESC"),
+              postgresql_where=text("phase = 'needs_person'")),
         {"schema": SCHEMA},
     )
 
@@ -120,11 +123,16 @@ class WorkItemRow(Base, kw_only=True):
               postgresql_where=text("status = 'waiting' AND coalesce_key IS NOT NULL")),
         Index("work_items_by_status", "tenant_id", "status"),
         Index("work_items_by_batch", "batch_id"),
+        # The API's read of held and dead items (#1485 O1), in (updated_at, id) order.
+        Index("work_items_set_aside", "tenant_id", text("updated_at DESC"), text("id DESC"),
+              postgresql_where=text("status IN ('held', 'dead')")),
         {"schema": SCHEMA},
     )
 
     tenant_id: Mapped[TenantId] = mapped_column(IdColumn(TenantId), primary_key=True)
     kind: Mapped[str] = mapped_column(Text, primary_key=True)
+    #: The item's id of its own (#1485 D12), minted in Python at insert (no server default), stable for its life.
+    id: Mapped[WorkItemId] = mapped_column(IdColumn(WorkItemId), unique=True, insert_default=WorkItemId.mint)
     item_key: Mapped[str] = mapped_column(Text, primary_key=True)
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
     #: The run the row came from, as text with no foreign key (a deleted investigation leaves it).

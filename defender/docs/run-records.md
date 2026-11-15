@@ -135,7 +135,7 @@ is the read-only handle over this projection; it is not a `Run`.
 Marked here so a reader does not mistake these for a kind this page owns.
 
 - **Learning work tracking**: queued items, batches and commits are rows of the learning store
-  (`learning/store/`, #1278), not files.
+  (`learning_store/`, #1278), not files.
 - **Quarantine** of a tainted worktree: tar + manifest (`learning/core/quarantine.py`).
 - **Checked-in corpora a run consumes**: lessons, knowledge, skills, the gather query catalog,
   `bash_policy.json`, prompts and templates. `lessons_loaded.jsonl` is the

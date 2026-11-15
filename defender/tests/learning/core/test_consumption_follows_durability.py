@@ -34,7 +34,7 @@ from defender import _git
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
 from defender.learning.leads import lead_author, pitfalls_curator
 from defender.learning.leads.lead_extraction import ExecutedLead
-from defender.learning.store import Outcome
+from defender.learning_store import Outcome
 from defender.tests.support.learning.core import _state1135
 from defender.tests.support.learning.core._declared870 import (
     REDUCER_REL,

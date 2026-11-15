@@ -24,7 +24,7 @@ from defender.learning.author.version_control import DeliveryRefused
 from defender.learning.core import drains
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
 from defender.learning.leads.lead_extraction import LeadAuthorError
-from defender.learning.store import Outcome
+from defender.learning_store import Outcome
 from defender.systems import verbs
 from defender.tests.support.runtime.engine._declared869 import (
     ADAPTERS_REL,

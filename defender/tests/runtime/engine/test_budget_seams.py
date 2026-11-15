@@ -707,8 +707,8 @@ def test_enforce_flag_unrecognized_token(monkeypatch):
 def test_retired_learning_state_override_cannot_redirect_tenant_state(
     tmp_path, monkeypatch, d9_tenant, data_root,
 ):
-    """The retired learning-state variable cannot redirect a tenant's runs or its learning folder (#1278 O10: the
-    folder is only what the cutover import reads; learning's work lives in the store, which the variable never named)."""
+    """The retired learning-state variable cannot redirect a tenant's runs or its scratch folder (#1278 O10: learning's
+    work lives in the store, which the variable never named)."""
     from defender.tenancy import _tenant
 
     tenant = T1106.accept(data_root, d9_tenant)
@@ -720,8 +720,8 @@ def test_retired_learning_state_override_cannot_redirect_tenant_state(
         monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(ambient))  # lint-stale-ref: ok — the retired variable is set on purpose to prove it is ignored
         accepted = T1106.accept(_tenant.resolve_data_root(), d9_tenant)
         assert location_path(accepted.runs) == data_root.resolve() / d9_tenant / "runs"
-        assert location_path(accepted.learning) == data_root.resolve() / d9_tenant / "learning"
-        assert location_path(accepted.learning) == location_path(tenant.learning)
+        assert location_path(accepted.scratch) == data_root.resolve() / d9_tenant / "scratch"
+        assert location_path(accepted.scratch) == location_path(tenant.scratch)
     assert list(decoy.iterdir()) == [], "the retired override reached a folder"
 
 

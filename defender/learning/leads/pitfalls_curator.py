@@ -19,6 +19,7 @@ from defender.knowledge import AGENT_REL, REDUCER_PITFALLS
 from defender._frontmatter import FrontmatterError, split_frontmatter
 from defender._io import ENTRY_FILE
 from defender._untrusted import wrap
+from defender.learning_store import is_reducer_row
 from defender.learning.core import config as _loop_config
 from defender.learning.core import persist as _loop_persist
 from defender.learning.core import pitfalls_disposition as _disposition
@@ -73,12 +74,6 @@ PITFALLS_SECTION = "## Common pitfalls"
 _SETEXT_UNDERLINE_RE = re.compile(r"^(?:=+|-+)[ \t]*$")
 
 
-#: Whether a queued row is the reducer's mistake rather than a system's. Owned by `persist`
-#: because the merge key and the arrival gate ask it too; restating it here would let the
-#: three disagree on how one row is routed.
-_is_reducer_row = _loop_persist.is_reducer_row
-
-
 def _failures_of(records: list[dict], *, keep_goal: bool = True) -> list[dict]:
     # `merge_pitfalls` stamps `occurrences` on every record. Most-repeated first, so the
     # curator's context budget is spent severity-first.
@@ -106,7 +101,7 @@ def _build_pitfalls_handoffs(rows: list[dict], *, systems: frozenset[str]) -> li
     by_system: dict[str, list[dict]] = {}
     reducer: list[dict] = []
     for r in _loop_persist.merge_pitfalls(rows):
-        if _is_reducer_row(r):
+        if is_reducer_row(r):
             reducer.append(r)
             continue
         system = str(r.get("system") or "").strip()
@@ -463,7 +458,7 @@ def _split_batch_by_membership(
         pid = r.get("pitfall_id")
         if not pid:
             continue
-        if _is_reducer_row(r):
+        if is_reducer_row(r):
             if reducer_taught:
                 committed_ids.append(str(pid))
             else:
@@ -498,7 +493,7 @@ def _claimed_rows(
 ) -> tuple[list[dict], dict[str, tuple[str, str]]]:
     """The claim's pitfall rows that carry a `pitfall_id`, and each id's item; a row with none is dead
     at once (unkeyable, D1), named by the key the store gave it."""
-    from defender.learning.store import Outcome
+    from defender.learning_store import Outcome
 
     rows: list[dict] = []
     item_of: dict[str, tuple[str, str]] = {}
@@ -518,7 +513,7 @@ def _skip_dropped(
 ) -> None:
     """The rows no surface can teach (no system, a malformed one, one the adapters do not declare):
     skipped, the reason naming the system (D9). Terminal: no retry makes one teachable."""
-    from defender.learning.store import Outcome
+    from defender.learning_store import Outcome
 
     dropped = set(dropped_ids)
     for r in rows:
@@ -585,7 +580,7 @@ def run_pitfalls(  # noqa: PLR0913 — one claim's whole injection surface
     # never asked a membership question and must not be reported as undeclared.
     dropped = sorted({
         s for r in records
-        if not _is_reducer_row(r)
+        if not is_reducer_row(r)
         and (s := str(r.get("system") or "").strip()) and s not in kept
     })
     if dropped:

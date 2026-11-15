@@ -4,7 +4,7 @@ issues, comments, the feedback tick's lease and cursor).
 Revision ID: 0013_learning_store
 Revises: 0012_programs_table
 
-No backfill here: a tenant's file state is imported once, at its cutover (`import_learning_state`). Every
+No backfill here: a tenant's file state is imported once, at its cutover (the importer, retired by #1485). Every
 value is set by the store in Python (no server defaults). The rules the data holds on its own (one item per
 key, one waiting request per case, one open authoring batch and one working batch per lane, one run per feedback
 issue) are constraints and partial unique indexes.

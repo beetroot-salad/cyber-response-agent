@@ -148,7 +148,7 @@ def test_4_a_dead_curation_request_shows_its_address(published, tmp_path, monkey
     P.file_request(migrated_database, t.tenant_id, "gone", {"case_id": "gone", "tenant_id": t.tenant_id, "run_id": gone_run})
     assert R1._tick(t, paths, lane=P.Lane(), pitfalls=[], box=R1._Box()) == 0
 
-    from defender.learning.store import blocking
+    from defender.learning_store import blocking
 
     with blocking(migrated_database) as store:
         view = serialize_queues.build_view(paths, store)

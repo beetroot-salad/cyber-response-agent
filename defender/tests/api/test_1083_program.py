@@ -503,12 +503,14 @@ _EXITS = ("served", *(f"probe {realm}" for realm in REALMS), "bind", "bootstrap"
 
 
 async def _one_request_per_store(app, seeded) -> None:
-    """A request served by each store-backed family: the job store, the identity store, the tenant rows."""
+    """A request served by each store-backed family: the job store, the identity store, the tenant rows, the learning
+    store (#1485 O4: its pool too must be closed by every exit)."""
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=ORIGIN) as client:
         answered = [(await client.get(f"/api/tenants/{TENANT}/alerts", headers=person(seeded.ann_session))).status_code,
                     (await client.get("/api/me", headers=person(seeded.ann_session))).status_code,
-                    (await client.get(f"/api/admin/tenants/{TENANT}", headers=person(seeded.ops_session))).status_code]
-    assert answered == [200, 200, 200]
+                    (await client.get(f"/api/admin/tenants/{TENANT}", headers=person(seeded.ops_session))).status_code,
+                    (await client.get(f"/api/tenants/{TENANT}/learning/items", headers=person(seeded.ann_session))).status_code]
+    assert answered == [200, 200, 200, 200]
 
 
 @pytest.mark.postgres

@@ -431,7 +431,7 @@ __all__ = [
 class StoreFindings:
     """The operator lane's sink (#1278, "Findings arrive"): the judge inserts its rows into the
     learning store directly, as `run_id`'s, for `tenant_id`. `store` is the store's synchronous
-    face (`learning.store.blocking`). A finding id is unique for good, so a row the store already
+    face (`learning_store.blocking`). A finding id is unique for good, so a row the store already
     holds, whatever became of it, is not inserted again. The insert is conditional on the tenant
     being active (`TenantInactive`); a row the store can never hold (`ItemRefused`) is a
     `JudgeRefused`, though the screen refuses a NUL before any insert."""
@@ -464,7 +464,7 @@ class StoreFindings:
 def _insert(store: Any, tenant_id: str, run_id: str, rows: list[dict[str, Any]], *, kind: str) -> int:
     """`store.publish_findings`, its refusal of an item it can never hold made a `FindingsRefused`;
     how many rows were new."""
-    from defender.learning.store import ItemRefused
+    from defender.learning_store import ItemRefused
 
     try:
         added, _duplicates = store.publish_findings(tenant_id, run_id, rows, kind=kind)

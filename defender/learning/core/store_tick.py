@@ -112,7 +112,7 @@ def store_knobs() -> dict[str, Any]:
 @contextlib.contextmanager
 def opened_store() -> Iterator[Any]:
     """The learning store at `DEFENDER_DATABASE_DSN`, as plain calls (the sync facade)."""
-    from defender.learning.store import blocking
+    from defender.learning_store import blocking
 
     dsn = os.environ.get(DSN_ENV)
     if not dsn:
@@ -243,7 +243,7 @@ class Holding:
         return self._parent._seen() if self._parent is not None else None
 
     def _renew_loop(self) -> None:
-        from defender.learning.store import LeaseLost, Stop
+        from defender.learning_store import LeaseLost, Stop
 
         while not self._done.wait(float(self.store.renew_every)):
             try:
@@ -606,7 +606,7 @@ class Tick:
     def _recover(  # noqa: C901 — the takeover's lookups in the order D6 settles them, kept whole
             self, delivery: TenantDelivery, b: Any, record: Any) -> None:
         from defender.learning.author.version_control.store_delivery import remote_tip, tip_commits_recorded
-        from defender.learning.store import LeaseLost, NotLapsed
+        from defender.learning_store import LeaseLost, NotLapsed
 
         repository = delivery.repository
         forge = repository.forge
@@ -668,7 +668,7 @@ class Tick:
         of the author lane's wait again; the lead lane's stay (it has no citation to read, and the store keeps no
         record of what its curators took)."""
         from defender.learning.author.version_control.store_delivery import cited_in_paths
-        from defender.learning.store import Outcome
+        from defender.learning_store import Outcome
 
         if held.lane == LEAD_LANE:
             return {}
@@ -697,7 +697,7 @@ class Tick:
         a tick that ran the curators takes a positive set: an item stays only when its curator named it `kept`,
         and every other item goes back to waiting (P3), whatever it lacks an outcome for. `outcomes` is `None` for
         a takeover, which ran no curator and has none in memory: the citation rule alone."""
-        from defender.learning.store import Outcome
+        from defender.learning_store import Outcome
 
         if outcomes is None:
             return self._citation_rule(delivery, held, record)
@@ -788,7 +788,7 @@ class Tick:
 
     def _take(self) -> Any:
         """The store claim, after `before_claim`; None (logged) when there is none to take."""
-        from defender.learning.store import LaneBusy, TenantInactive
+        from defender.learning_store import LaneBusy, TenantInactive
 
         if self.before_claim is not None:
             self.before_claim()
@@ -815,7 +815,7 @@ class Tick:
     def _author(  # noqa: C901, PLR0912, PLR0915 — the claim's whole life (author, push, open, review) and each stop path, kept in one place so no path skips its store verb
             self, delivery: TenantDelivery, held: Any, feedback: str | None) -> int:
         from defender.learning.author.version_control import DeliveryRefused
-        from defender.learning.store import LeaseLost, Stop
+        from defender.learning_store import LeaseLost, Stop
 
         repository = delivery.repository
         outcomes: dict[tuple[str, str], Any] = {}
@@ -903,7 +903,7 @@ class Tick:
         stopped: renewing a lease this path expires would signal a second stop into its push."""
         from dataclasses import replace
 
-        from defender.learning.store import LeaseLost
+        from defender.learning_store import LeaseLost
 
         hold.halt()
         if why == "lease":

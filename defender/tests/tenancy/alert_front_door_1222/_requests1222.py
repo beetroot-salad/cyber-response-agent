@@ -1,6 +1,6 @@
 """The learning store a run start files its curation request in, as a recording stand-in (#1278).
 
-`run_common.enqueue_curation` files a request through `learning.store.blocking(dsn)` (rows, no `author-queue` folder). The
+`run_common.enqueue_curation` files a request through `learning_store.blocking(dsn)` (rows, no `author-queue` folder). The
 front door's cases judge WHICH runs production files a request for and under what key; the store's own rows and rules
 are `tests/learning/store_1278`'s. So the store verb a run start calls (`enqueue_request`) records into `FILED`, reached
 through the database address the entrypoint reads."""
@@ -26,7 +26,7 @@ FILED = RequestStore()
 @pytest.fixture(autouse=True)
 def a_store_that_records_requests(monkeypatch: pytest.MonkeyPatch) -> RequestStore:
     from defender import tenancy
-    from defender.learning import store
+    from defender import learning_store as store
 
     FILED.requests.clear()
 

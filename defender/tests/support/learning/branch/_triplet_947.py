@@ -454,7 +454,6 @@ def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
                           if (p / "knowledge").is_dir()) if root.is_dir() else []
         tenant_id = existing[0] if existing else SOURCE_TENANT
     tenant = set_up_tenant(root, tenant_id, published=published)
-    location_path(tenant.learning).mkdir(exist_ok=True)  # setup provisions the real launcher queue root
     base = location_path(tenant.runs)
     base.mkdir(parents=True, exist_ok=True)
     src = base / source_run_id
@@ -692,7 +691,7 @@ LEARNING_STATE_ENV = "DEFENDER_LEARNING_STATE_DIR"  # lint-stale-ref: ok — the
 def isolate_learning_state(tmp_path: Path, monkeypatch: Any) -> Path:
     """Create and name explicit test scratch state for helpers that inject a state handle.
 
-    Production launchers select tenant.learning and ignore this retired environment setting.
+    Production launchers ignore this retired environment setting.
     """
     root = tmp_path / "learning-state"
     root.mkdir(exist_ok=True)

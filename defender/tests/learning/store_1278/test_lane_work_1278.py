@@ -21,7 +21,7 @@ ONE = {"finding": 1, "questioner_finding": 1, "pitfall": 1, "curation_request": 
 
 @pytest.fixture
 def store(migrated_database):
-    from defender.learning.store import blocking
+    from defender.learning_store import blocking
 
     register_tenant(migrated_database, BLUE)
     with blocking(migrated_database) as s:
