@@ -10,7 +10,7 @@ The sketch makes the design concrete as cheaply as possible: one representative 
 
 The spike is a throwaway implementation of the core flows, written to find where the design meets friction in the real code. Work in your own detached worktree, against the design and the sketch, and take the path a competent implementer would naturally take. Don't polish, and don't invent clever workarounds that make the design look easier than it is. Run the sketch against it without editing the tests.
 
-The deliverable is a **friction log**: one entry per place where the design didn't say enough or didn't fit the code, and you had to guess, work around something, or depart from its mechanism. Cite the code (`path:line`), the design element involved, and what you did instead. Return the log and the diff; commit nothing.
+The deliverable is a **friction log**, for a design check that asks how the design should have been shaped so these problems never arose (references/review.md). One entry per place where the design didn't say enough or didn't fit the code, and you had to guess, work around something, or depart from its mechanism: cite the code (`path:line`), the design element involved, and what you did instead. Where the existing code pulled toward a different shape, such as another owner, model or flow, say what it was. Sketch harness defects and existing tests that would need changing go in a separate list at the end, for the author rather than the design check. Return the log and the diff; commit nothing.
 
 ## Writing the thorough contract
 
