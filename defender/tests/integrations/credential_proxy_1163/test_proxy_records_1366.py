@@ -412,6 +412,34 @@ def test_1470_o8_the_tenant_row_tells_an_unknown_tenant_from_a_tenant_with_no_su
 
 
 @pytest.mark.postgres
+def test_1470_o8_a_tenant_moved_out_of_active_is_an_unknown_tenant_to_the_proxy_though_its_records_remain(
+        migrated_database):  # noqa: F811
+    """A tenant whose cmdb record was written while it was active is served it (control, on the kept session); moved in
+    place to each state but `active`, the records kept, the same session's read is an unknown tenant (an unlabelled
+    `ConfigFault`), and back in `active` it is served again. (#1470 O8, #1363: known iff active)"""
+    import typing
+
+    from defender.credential_proxy._records import PostgresSystemRecords
+    from defender.kit.faults import ConfigFault
+    from defender.tenancy.models import TenantState
+    from defender.tests.support.jobs._jobs1342 import move_tenant
+
+    tenant = str(uuid.uuid4())
+    register_tenant(migrated_database, tenant)  # the fixture's records, cmdb among them, written while active
+    states = sorted(set(typing.get_args(TenantState)) - {"active"})
+    with R.proxy_login(migrated_database) as login, contextlib.closing(PostgresSystemRecords(login)) as port:
+        assert port.current_system(tenant, "cmdb").version == 1, "control: an active tenant's record is served"
+        for state in states:
+            move_tenant(migrated_database, tenant, state=state)
+            with pytest.raises(ConfigFault) as refused:
+                port.current_system(tenant, "cmdb")
+            assert getattr(refused.value, "origin", None) is None, state
+            move_tenant(migrated_database, tenant, state="active")
+            assert port.current_system(tenant, "cmdb").version == 1, ("served again once active", state)
+    assert [v.version for v in R.system_versions(migrated_database, tenant, "cmdb")] == [1], "premise: the records stayed"
+
+
+@pytest.mark.postgres
 def test_1366_o7_a_kept_connection_whose_read_times_out_is_not_read_again_past_the_deadline(
         tmp_path, data_root, migrated_database, capsys, monkeypatch):  # noqa: F811
     """The records table is held locked, so a read on the kept session runs into its own statement timeout: that is a

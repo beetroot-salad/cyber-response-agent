@@ -319,3 +319,180 @@ def test_1470_o8_tenant_records_carry_no_imported_flag_and_their_wire_form_has_n
     assert set(wire) == {"systems", "case"}, sorted(wire)
     assert TenantRecords.from_wire(wire) == records
     assert TenantRecords.from_wire(TenantRecords().as_wire()) == TenantRecords()
+
+
+# --- G1: refusal precedence over every door and every set of faults it can meet ---------------------------------------
+
+#: The faults a write or the slot can meet, in the order the design states its refusals (O5, O7: 404, stale, judgement).
+ORDER = ("no current record", "stale", "judged")
+FIRST = {"no current record": "NoCurrentRecord", "stale": "Stale", "judged": "Judged"}
+#: Each door's faults: a put creates, so it meets no "no current record".
+DOOR_FAULTS = {"put_system": ORDER[1:], "delete_system": ORDER, "put_case": ORDER[1:], "delete_case": ORDER,
+               "credential_slot": ORDER}
+BROKEN_ACCESS = "not: [a declaration"
+
+
+def _plant_system(dsn: str, tenant: str, version: int, *, generation: int = 1, deleted: bool = False,
+                  access: str = BASE_A) -> None:
+    import json
+
+    execute(dsn, "INSERT INTO tenancy.system_versions (tenant_id, system_id, version, adapter_id, enabled, settings, access, "
+                 "credential_generation, deleted, author, written_at) VALUES (%s, 'ticket', %s, 'ticket', true, %s::jsonb, %s, "
+                 "%s, %s, 'planted', now())", (tenant, version, json.dumps(SETTINGS), access, generation, deleted))
+
+
+def _plant_case(dsn: str, tenant: str, version: int, *, deleted: bool = False) -> None:
+    execute(dsn, "INSERT INTO tenancy.case_versions (tenant_id, version, system_id, comment_body, deleted, author, "
+                 "written_at) VALUES (%s, %s, 'ticket', 'Hello', %s, 'planted', now())", (tenant, version, deleted))
+
+
+def _meeting(dsn: str, tenant: str, door: str, faults: frozenset[str]):
+    """Plant `tenant`'s history so that `door` meets exactly `faults`; the work that calls it."""
+    none, stale = "no current record" in faults, "stale" in faults
+    if door == "credential_slot":  # v1 at g1; v2 at g2 (its access broken when judged); v3 a tombstone over it when none
+        access = BROKEN_ACCESS if "judged" in faults else BASE_A
+        _plant_system(dsn, tenant, 1)
+        _plant_system(dsn, tenant, 2, generation=2, access=access)
+        if none:
+            _plant_system(dsn, tenant, 3, generation=2, deleted=True, access=access)
+        return slot(tenant, 1 if stale else 2)
+    _plant_system(dsn, tenant, 1)
+    if door in ("put_case", "delete_case"):
+        _plant_case(dsn, tenant, 1)
+        if none:
+            _plant_case(dsn, tenant, 2, deleted=True)
+        if door == "put_case":
+            return put_case(tenant, replaces=5 if stale else 1)
+        return delete_case(tenant, replaces=7 if stale else (0 if none else 1))
+    if none:
+        _plant_system(dsn, tenant, 2, deleted=True)
+    if door == "put_system":
+        return put(tenant, replaces=5 if stale else 1, settings=INDEXED)
+    return delete(tenant, replaces=7 if stale else (0 if none else 1))
+
+
+def _every_subset() -> list[tuple[str, frozenset[str]]]:
+    import itertools
+
+    return [(door, frozenset(chosen)) for door, faults in DOOR_FAULTS.items()
+            for n in range(1, len(faults) + 1) for chosen in itertools.combinations(faults, n)]
+
+
+def test_1470_g1_every_door_of_the_store_is_in_the_precedence_table():
+    """The table's doors are exactly `RecordStore`'s public coroutines (but `close`): a door added later is held too. (G1)"""
+    import inspect
+
+    from defender.system_records import RecordStore
+
+    doors = {n for n, f in inspect.getmembers(RecordStore, inspect.iscoroutinefunction) if not n.startswith("_")}
+    assert doors - {"close"} == set(DOOR_FAULTS)
+
+
+@pytest.mark.parametrize(("door", "faults"), _every_subset(),
+                         ids=[f"{d}-{'+'.join(sorted(f))}" for d, f in _every_subset()])
+def test_1470_g1_a_refusal_is_the_first_fault_in_the_stated_order_and_nothing_is_written(migrated_database, door, faults):  # noqa: F811
+    """Over each store door and every non-empty set of the faults it can meet (no current record, stale or another
+    generation, judged or unparseable access), the refusal is the first in the stated order (404, stale, judgement) and no
+    row is written. (G1, P2, O5, O7)"""
+    dsn, tenant = migrated_database, _tenant(migrated_database)
+    work = _meeting(dsn, tenant, door, faults)
+    before = (stored(dsn, tenant), stored_case(dsn, tenant))
+    judge = K.refuse_with("system ticket: the judge refuses") if "judged" in faults and door != "credential_slot" else K.accept_all
+
+    refusal = K.refused(dsn, work, judge=judge)
+
+    assert K.kind_of(refusal) == FIRST[next(f for f in ORDER if f in faults)], (door, sorted(faults), refusal)
+    assert (stored(dsn, tenant), stored_case(dsn, tenant)) == before, "a refused write stores nothing"
+
+
+def _versions_to_ask() -> list[int]:
+    """Version numbers of every magnitude, either sign: each power of two to 2**80 and its neighbours, and a seeded
+    sample between (the 32- and 64-bit column bounds fall among them)."""
+    import random
+
+    rng = random.Random(1470)
+    edges = {s * (2 ** k + d) for k in range(81) for d in (-1, 0, 1) for s in (1, -1)}
+    return sorted(edges | {rng.randint(-2 ** 80, 2 ** 80) for _ in range(200)} | {0})
+
+
+def test_1470_b6_a_slot_asked_for_any_version_number_outside_the_current_generation_is_stale_naming_the_current_one(
+        migrated_database):  # noqa: F811
+    """v1 at g1, v2 and v3 at g2: any `for_version` but 2 and 3 (zero, negatives, past the newest, past a 32- or 64-bit
+    integer) is `Stale` naming 3, never another error; 2 and 3 answer (control). (O7: unknown or future is 409)"""
+    dsn, tenant = migrated_database, _tenant(migrated_database)
+    _plant_system(dsn, tenant, 1)
+    _plant_system(dsn, tenant, 2, generation=2)
+    _plant_system(dsn, tenant, 3, generation=2)
+    asked = _versions_to_ask()
+    assert min(asked) <= 0, "premise: the sweep holds zero and negatives"
+    assert max(asked) >= 2 ** 63, "premise: the sweep passes the 32- and 64-bit column bounds"
+
+    async def ask_each(store):
+        from defender.system_records import RecordRefused
+
+        seen = {}
+        for version in [*asked, 2, 3]:
+            try:
+                seen[version] = await store.credential_slot(tenant, "ticket", version)
+            except RecordRefused as refusal:
+                seen[version] = refusal
+            except Exception as failed:  # noqa: BLE001 — the defect this test is for: reported, not raised
+                seen[version] = failed
+        return seen
+
+    seen = K.run(dsn, ask_each)
+    assert [K.slot_parts(seen[v])[0] for v in (2, 3)] == [2, 2], "control: the current generation's versions answer"
+    wrong = [(v, type(seen[v]).__name__, getattr(seen[v], "current_version", None)) for v in asked if v not in (2, 3)
+             and not (K.kind_of(seen[v]) == "Stale" and seen[v].current_version == 3)]
+    assert wrong == [], wrong[:10]
+
+
+# --- G2: a tenant's records are known exactly while it is active, whatever records it holds --------------------------
+
+def _not_active_states() -> list[str]:
+    """Every tenant state but `active`, read from the state type."""
+    import typing
+
+    from defender.tenancy.models import TenantState
+
+    return sorted(set(typing.get_args(TenantState)) - {"active"})
+
+
+#: (state, records): each state that is not active, with no records or with records written while active and kept when
+#: it moved; and a tenant with no row (its records cannot outlive the row: the version table's key refers to it).
+_O8_CELLS = [(state, held) for state in _not_active_states() for held in (False, True)] + [(None, False)]
+
+
+def test_1470_o8_versions_cannot_outlive_their_tenants_row_so_a_missing_row_holds_no_records(migrated_database):  # noqa: F811
+    """Premise of the missing-row cell: a tenant row whose versions remain cannot be deleted (the reference refuses).
+    (O8)"""
+    import psycopg
+
+    dsn, tenant = migrated_database, _tenant(migrated_database)
+    K.run(dsn, put(tenant, replaces=0))
+    with pytest.raises(psycopg.errors.ForeignKeyViolation):
+        execute(dsn, "DELETE FROM tenancy.tenants WHERE id = %s", (tenant,))
+
+
+@pytest.mark.parametrize(("state", "held"), _O8_CELLS, ids=[f"{s or 'no-row'}-{'records' if h else 'none'}" for s, h in _O8_CELLS])
+def test_1470_o8_a_tenant_not_active_is_refused_by_the_write_lock_and_the_slot_whatever_records_it_holds(
+        migrated_database, state, held):  # noqa: F811
+    """A tenant in each state but `active` (with no records, or with records written while active and kept when it
+    moved) or with no row: `put_system` (the write lock) and `credential_slot` are refused as `TenantNotActive` (no row:
+    `NoSuchTenant`) and nothing is stored; the same tenant while active took the write and answered the slot (control).
+    (O8: one rule, known iff active)"""
+    from defender.tests.support.jobs._jobs1342 import move_tenant
+
+    dsn = migrated_database
+    tenant = _tenant(dsn) if state is not None else str(uuid.uuid4())
+    if held:
+        K.run(dsn, put(tenant, replaces=0))
+        assert K.slot_parts(K.run(dsn, slot(tenant, 1)))[0] == 1, "control: while active the slot answers"
+    if state is not None:
+        move_tenant(dsn, tenant, state=state)
+    before = stored(dsn, tenant)
+
+    for work in (put(tenant, replaces=1 if held else 0, settings=INDEXED), slot(tenant, 1)):
+        refusal = K.refused(dsn, work)
+        assert K.kind_of(refusal) == ("TenantNotActive" if state else "NoSuchTenant"), (state, held, refusal)
+    assert stored(dsn, tenant) == before, "a refused write stores nothing"

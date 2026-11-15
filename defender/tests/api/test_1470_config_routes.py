@@ -125,14 +125,88 @@ async def test_o2_each_adapters_served_entry_is_what_its_module_declares(scripte
     assert item["lab_example"] is bool(module.EXAMPLE), (adapter, item)
 
 
-@pytest.mark.parametrize("adapter", sorted(R.FIXTURE_FOLDERS))
+#: Every adapter module the checkout carries (the catalog's members, by what is on disk).
+_ON_DISK = sorted(p.stem.removesuffix("_adapter").replace("_", "-") for p in (REPO / "defender/integrations").glob("*_adapter.py"))
+
+
+def _sample_read_cold(adapter: str) -> object:
+    """The module's `SAMPLE_SETTINGS` as written in its source (a literal, read without importing the module)."""
+    import ast
+
+    source = (REPO / "defender/integrations" / f"{adapter.replace('-', '_')}_adapter.py").read_text("utf-8")
+    found = [node.value for node in ast.parse(source).body
+             if isinstance(node, ast.Assign | ast.AnnAssign) and node.value is not None
+             and any(isinstance(t, ast.Name) and t.id == "SAMPLE_SETTINGS"
+                     for t in (node.targets if isinstance(node, ast.Assign) else [node.target]))]
+    assert len(found) == 1, f"{adapter} declares SAMPLE_SETTINGS once"
+    return ast.literal_eval(found[0])
+
+
+def _access_for(adapter: str, sample: dict[str, str]) -> str:
+    """The fixture's access folder where it has one; jira and servicenow, which it lacks, get one built here, covering
+    the comment route their sample settings name."""
+    if adapter in R.FIXTURE_FOLDERS:
+        return R.FIXTURE_FOLDERS[adapter][1]
+    routes = {"jira": ("POST", "/rest/api/3/issue/*/comment"),
+              "servicenow": ("PATCH", f"/api/now/table/{sample.get('SERVICENOW_TABLE')}/*")}
+    return R.declaration(f"https://{adapter}.example", writes=(routes[adapter],))
+
+
+@pytest.mark.parametrize("adapter", _ON_DISK)
 async def test_o2_each_adapters_own_check_accepts_the_sample_settings_the_catalog_serves(scripted, adapter):
-    """A record of each adapter that has an access folder in the fixture (seven of the nine; jira and servicenow need an
-    access declaration the fixture lacks) carrying exactly its served sample settings is stored (201). (O2)"""
+    """For every adapter in the catalog: the served `sample_settings` is its module's `SAMPLE_SETTINGS` read cold, and a
+    record of it carrying exactly those settings is stored (201): its own check accepts them. (O2, D11)"""
     sample = {i["adapter_id"]: i["sample_settings"] for i in (await scripted.get("/adapters")).json()["items"]}[adapter]
-    saved = await scripted.put_system(adapter, 0, settings=sample, access=R.FIXTURE_FOLDERS[adapter][1])
+    assert sample == _sample_read_cold(adapter), adapter
+    saved = await scripted.put_system(adapter, 0, settings=sample, access=_access_for(adapter, sample))
     assert saved.status_code == 201, saved.text
     assert saved.json()["settings"] == sample
+
+
+# --- each version row's author ----------------------------------------------------------------------------------------
+
+def _version_row_writes(app) -> list[tuple[str, str]]:
+    """Every config write route the app serves that writes a record version: its systems and case-record PUT and DELETE
+    (the credentials route writes the secret store, not a version row)."""
+    from defender.tests.support.api._config1470 import served_config_routes
+
+    return sorted(r for r in served_config_routes(app) if r[0] in ("PUT", "DELETE") and not r[1].endswith("/credentials"))
+
+
+async def test_1470_each_version_row_a_config_write_inserts_names_the_acting_member_as_its_author(scripted):
+    """Over every config write route that inserts a version row (read from the app's own table), with the version it
+    replaces planted by another author: the route adds one row, and its author is the acting member's id (Ann), neither
+    the tenant's id nor the replaced row's author. (Design: each version row's author is the acting member's id; O4-O6)"""
+    from defender.tests.support.shared._postgres1339 import execute
+
+    ann = scripted.user_id(ANN)
+    assert ann != A, "premise: the acting member's id is not the tenant's"
+    routes = _version_row_writes(scripted.app)
+    assert {m for m, _ in routes} == {"PUT", "DELETE"}, routes
+    assert len(routes) >= 4, routes  # noqa: PLR2004 — premise: the systems and case-record writes are found
+    scripted.plant_version(TICKET, 1)  # the case record's system, for its cover
+    authors: dict[tuple[str, str], tuple[int, str]] = {}
+    for method, template in routes:
+        case = template.endswith("/case-record")
+        rows = (lambda: [(c.version, c.author) for c in R.case_versions(scripted.dsn, A)]) if case else (
+            lambda: [(v.version, v.author) for v in scripted.versions(ELASTIC)])
+        version = (rows()[-1][0] if rows() else 0) + 1
+        if case:
+            execute(scripted.dsn, "INSERT INTO tenancy.case_versions (tenant_id, version, system_id, comment_body, deleted, "
+                                  "author, written_at) VALUES (%s, %s, %s, %s, false, 'planted', now())",
+                    (A, version, TICKET, BODY))
+            body = {"replaces": version, "system_id": TICKET, "comment_body": BODY}
+        else:
+            scripted.plant_version(ELASTIC, version, settings=ELASTIC_SETTINGS, access=ELASTIC_ACCESS)
+            body = {"replaces": version, "enabled": True, "settings": ELASTIC_SETTINGS, "access": ELASTIC_ACCESS}
+        path = template.replace("{}", A, 1).replace("{}", ELASTIC, 1)
+        kw = {"json": body} if method == "PUT" else {"params": {"replaces": version}}
+        answered = await scripted.client.request(method, path, headers=scripted.ann(), **kw)
+        assert answered.status_code < 300, (method, template, answered.text)  # noqa: PLR2004
+        after = rows()
+        assert [n for n, _ in after][-2:] == [version, version + 1], ((method, template), "one row added", after)
+        authors[(method, template)] = after[-1]
+    assert {route: author for route, (_, author) in authors.items()} == dict.fromkeys(routes, ann), authors
 
 
 # --- O3 / O4: save and read a system ---------------------------------------------------------------------------------
@@ -640,6 +714,34 @@ async def test_o4_has_credentials_is_true_exactly_while_a_set_exists_at_the_curr
     assert moved.json()["has_credentials"] is False
     assert (await configured.get_system(TICKET)).json()["has_credentials"] is False
     assert [v.credential_generation for v in configured.versions(TICKET)] == [1, 1, 2]
+
+
+async def test_o4_a_saves_answer_is_what_the_store_decided_under_the_lock_not_what_the_read_before_it_saw(scripted):
+    """v1 holds a set; while the save's `has_credentials` read is answered, another admin deletes the system; the save
+    names 0 (the caller's view had none): 201 with `Location`, `has_credentials` false and version 3, as the store's
+    created flag says, not 200 and true as the read before the lock saw. A plain replace after is 200 with no `Location`.
+    (O4: created decided by the store under the lock; D12)"""
+    assert (await scripted.put_system(TICKET, 0)).status_code == 201
+    assert (await scripted.put_credentials(TICKET, 1, {"api_key": TOKEN})).status_code == 204
+    fired = []
+
+    async def another_admin_deletes(path: str) -> None:
+        scripted.scripted.on_metadata_read = None
+        fired.append(path)
+        deleted = await scripted.delete_system(TICKET, 1)
+        assert deleted.status_code == 204, deleted.text
+
+    scripted.scripted.on_metadata_read = another_admin_deletes
+    saved = await scripted.put_system(TICKET, 0)
+    assert fired, "premise: the save read whether the current version has credentials"
+    assert [(v.version, v.deleted) for v in scripted.versions(TICKET)] == [(1, False), (2, True), (3, False)]
+    assert saved.status_code == 201, saved.text
+    assert saved.headers.get("location", "").endswith(f"/tenants/{A}/systems/{TICKET}"), saved.headers
+    assert (saved.json()["version"], saved.json()["has_credentials"]) == (3, False)
+    assert (await scripted.get_system(TICKET)).json()["has_credentials"] is False
+
+    replaced = await scripted.put_system(TICKET, 3, settings=TICKET_SETTINGS | {"TICKET_TIMEOUT_SEC": "20"})
+    assert (replaced.status_code, "location" in replaced.headers) == (200, False), replaced.text
 
 
 # --- membership ------------------------------------------------------------------------------------------------------

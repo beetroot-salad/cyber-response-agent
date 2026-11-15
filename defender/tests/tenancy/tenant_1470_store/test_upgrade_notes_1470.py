@@ -61,3 +61,20 @@ def test_1470_o12_the_notes_drop_the_kv_mount_credential_step_another_change_add
     """No upgrade note's credential step passes `--kv-mount` (the operator credential command it belonged to is removed).
     (O12)"""
     assert "--kv-mount" not in NOTES.read_text("utf-8")
+
+
+def _first(pattern: str, text: str, what: str) -> int:
+    found = re.search(pattern, text, re.I | re.S)
+    assert found, f"the #1366 note never says to {what}"
+    return found.start()
+
+
+def test_1470_o12_the_1366_note_stops_the_processes_before_the_migrations_and_rebuilds_the_job_image_after():
+    """In the #1366 note the first instruction to stop the API, the credential proxy and the workers comes before the
+    first to run migrations, and the job image rebuild after it (an old process reads the dropped table). (O12)"""
+    note = _section("1366")
+    stop = _first(r"\bstop\b[^.]{0,80}?\bAPI\b[^.]{0,80}?credential proxy[^.]{0,80}?\bworkers\b", note,
+                  "stop the API, the credential proxy and the workers")
+    migrate = _first(r"\brun\s+(?:the\s+)?migrations\b", note, "run migrations")
+    rebuild = _first(r"\brebuild\b[^.]{0,40}?\bjob image\b", note, "rebuild the job image")
+    assert stop < migrate < rebuild, (stop, migrate, rebuild)

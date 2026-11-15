@@ -319,17 +319,17 @@ async def test_o6_a_mapping_put_for_a_tenant_that_is_not_active_is_refused_and_s
     routes a non-active tenant is already 404 by membership"): the PUT is 404 and the tenant's mapping stays as it was; the
     same PUT once the tenant is active is 200 and replaces it (control). (O6, O8; base
     `test_1345_o6_a_tenant_that_is_not_active_is_refused_by_host_acceptance_and_writes_nothing`)"""
-    from defender.tests.support.jobs._jobs1342 import restate_tenant
+    from defender.tests.support.jobs._jobs1342 import move_tenant
 
     held = {entry: FIXTURE_ALERT_MAPPING.get(entry) for entry in MAPPING_ENTRIES}
     mapping = {entry: f"vendor.{entry}" for entry in MAPPING_ENTRIES}
     url = f"/tenants/{A}/alert-mapping"
-    restate_tenant(served.dsn, A, state=state)
+    move_tenant(served.dsn, A, state=state)  # in place: the memberships that refer to the row stay
     refused = await served.client.put(url, headers=served.ann(), json=mapping)
     assert refused.status_code == 404, refused.text
     assert await _held_async(served.dsn, A) == held
 
-    restate_tenant(served.dsn, A, state="active")
+    move_tenant(served.dsn, A, state="active")
     taken = await served.client.put(url, headers=served.ann(), json=mapping)
     assert taken.status_code == 200, taken.text
     assert await _held_async(served.dsn, A) == mapping
