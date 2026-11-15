@@ -70,7 +70,8 @@ def _header_set(r: httpx.Response) -> list[tuple[str, str]]:
     return sorted((name.lower(), value) for name, value in r.headers.multi_items() if name.lower() not in ("date", "via"))
 
 
-@pytest.mark.parametrize("path", ["/api/me", "/api/openapi.json", "/api/nope", "/API/me", "/Api/openapi.json", "/api"])
+@pytest.mark.parametrize("path", ["/api/me", "/api/openapi.json", "/api/nope", "/API/me", "/Api/openapi.json", "/api",
+                                  "/aPI/me", "/apI", "/aPi/", "/APi/auth/login", "/ApI/nope"])
 def test_1161_b9_b3_api_responses_carry_none_of_the_three_headers_and_are_the_apis_answer(world, path):
     """`/api` in any letter case goes to the API, unchanged; the ingress adds no header. (B9, B3)"""
     r = world.get(path)
