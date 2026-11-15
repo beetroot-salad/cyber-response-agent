@@ -13,6 +13,7 @@ import pytest
 pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
 
+from defender.tests.support.api._mount1161 import API  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._fakes import ORG, SIGN_POLICY, TOKEN_POLICY  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._job_cases import as_bot, jwts, openbao_failing  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._support import LifecycleWorld, lifecycle_config  # noqa: E402
@@ -85,7 +86,7 @@ def test_the_names_step_alone_records_the_sign_names_on_the_pending_generation(w
         tenant = world.create()
     else:
         tenant = world.active_tenant()
-        assert world.ops.post(f"/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
+        assert world.ops.post(f"{API}/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
 
     async def names_only() -> None:
         async with world.tenants.lock(tenant) as held:
@@ -180,7 +181,7 @@ def test_a_provider_that_died_before_committing_is_run_again_reusing_its_entitie
     entity = pending.entity if chain == "delivery" else pending.sign_entity
     assert entity in bao.entities and bao.entities[entity]["id"] in {a["canonical_id"] for a in bao.aliases}, \
         f"control: the {chain} chain's alias existed before its commit was lost"
-    assert world.ops.post(f"/admin/tenants/{tenant}/resume").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/resume").status_code == 202
     world.drive()
     assert world.item(tenant)["state"] == "active", world.item(tenant)
     gen = world.live(tenant)
@@ -220,7 +221,7 @@ def test_a_sign_proof_that_fails_fails_install_and_restarts_at_wrap_with_no_file
     assert not [p for p in world.config.secrets_dir.rglob("*") if p.is_file()], "a failed install left a secret file"
     assert world.openbao.signs == []
     world.openbao.transit_keys[_key(tenant)] = lost
-    assert world.ops.post(f"/admin/tenants/{tenant}/resume").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/resume").status_code == 202
     world.drive()
     assert world.item(tenant)["state"] == "active"
     assert [role for _key_, role, _input in world.openbao.signs] == [world.live(tenant).sign_approle]
@@ -243,7 +244,7 @@ def test_a_sign_that_answers_200_without_a_signature_is_not_a_proof(world, answe
     assert (item["step"], item["step_actor"]) == ("wrap", "service") and "install" in (item["failure"] or ""), item
     assert not [p for p in world.config.secrets_dir.rglob("*") if p.is_file()], "a failed install left a secret file"
     world.host_actor = real_host  # control: the same job with a sign that returns a signature
-    assert world.ops.post(f"/admin/tenants/{tenant}/resume").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/resume").status_code == 202
     world.drive()
     assert world.item(tenant)["state"] == "active"
 
@@ -255,7 +256,7 @@ def test_the_key_is_the_tenants_and_survives_rotations_while_each_generation_pro
     every generation's install signed with it as its own sign login (A25, r8.4)."""
     tenant, other = world.active_tenant(), world.active_tenant()
     for _ in range(2):
-        assert world.ops.post(f"/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
+        assert world.ops.post(f"{API}/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
         world.drive()
         assert world.item(tenant)["state"] == "active"
     bao = world.openbao
@@ -270,7 +271,7 @@ def test_a_rotation_makes_the_key_of_a_tenant_that_has_none(world):
     """A tenant created before the key existed gets it from its next rotation, whose install proof needs it (A25 ensure, upgrade)."""
     tenant = world.active_tenant()
     world.openbao.transit_keys.pop(_key(tenant))
-    assert world.ops.post(f"/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
     world.drive()
     assert world.item(tenant)["state"] == "active" and world.item(tenant)["failure"] is None
     assert world.openbao.transit_keys[_key(tenant)]["type"] == "ed25519"
@@ -282,7 +283,7 @@ def test_a_rotation_makes_the_key_of_a_tenant_that_has_none(world):
 def test_offboarding_makes_the_key_deletable_then_deletes_it(world):
     """The key is read, made deletable (`/config`) and only then deleted, once; the tenant's other keys stay (A25 destroy, r8.1)."""
     tenant, other = world.active_tenant(), world.active_tenant()
-    assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
     world.drive()
     assert set(world.openbao.transit_keys) == {_key(other)}
     calls = [(c.method, c.path, c.body) for c in world.openbao.calls if c.path.startswith(_key_path(tenant))]
@@ -295,7 +296,7 @@ def test_a_key_that_is_already_gone_is_done_without_a_delete(world):
     """An absent key is already done: offboarding sends no delete for it and finishes (A25, RC-4)."""
     tenant = world.active_tenant()
     world.openbao.transit_keys.pop(_key(tenant))
-    assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
     world.drive()
     assert world.record(tenant).state == "offboarded" and world.record(tenant).failure is None
     assert world.openbao.made("DELETE", _key_path(tenant)) == []
@@ -304,7 +305,7 @@ def test_a_key_that_is_already_gone_is_done_without_a_delete(world):
 def test_the_final_sweep_of_offboarding_destroys_a_key_a_late_effect_left(world):
     """A key that reappears after `offboard` (a timed-out call's late effect) is destroyed by `finish` (A25, r8.4)."""
     tenant = world.active_tenant()
-    assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
     world.drive(stop=lambda: world.item(tenant)["step"] == "finish")
     assert _key(tenant) not in world.openbao.transit_keys, "control: offboard destroyed the key"
     world.openbao.transit_keys[_key(tenant)] = {"type": "ed25519", "deletion_allowed": False}
@@ -348,7 +349,7 @@ def test_a_rotation_gives_a_tenant_recorded_before_r8_its_sign_login_key_and_rul
     world.forge.put_rule(full, rule_name="main", branch_name="main", enable_push=True, enable_push_whitelist=False,
                          enable_merge_whitelist=False)
     mark = len(world.openbao.calls)
-    assert world.ops.post(f"/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
     world.drive()
     item = world.item(tenant)
     assert (item["state"], item["pending_action"], item["failure"]) == ("active", None, None), item
@@ -368,7 +369,7 @@ def test_offboarding_a_tenant_recorded_before_r8_sends_nothing_for_a_missing_sig
     tenant, other = world.active_tenant(), world.active_tenant()
     _as_recorded_before_r8(world, tenant)
     mark = len(world.openbao.calls)
-    assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
     world.drive()
     record = world.record(tenant)
     assert (record.state, record.failure) == ("offboarded", None)
@@ -388,7 +389,7 @@ def _seed_pending_before_r8(world, kind: str, past: tuple[str, ...] = ()) -> tup
         tenant = world.create()
     else:
         tenant = world.active_tenant()
-        assert world.ops.post(f"/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
+        assert world.ops.post(f"{API}/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
 
     async def run(steps: tuple[str, ...]) -> None:
         async with world.tenants.lock(tenant) as held:
@@ -500,7 +501,7 @@ def test_a_job_that_wrapped_or_installed_before_r8_goes_back_to_wrap_and_complet
         tenant = world.create()
     else:
         tenant = world.active_tenant()
-        assert world.ops.post(f"/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
+        assert world.ops.post(f"{API}/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
     world.drive(stop=lambda: world.item(tenant)["step"] == parked)
     seeded, bao = _only_pending(world, tenant), world.openbao
     bao.approles.pop(seeded.sign_approle)

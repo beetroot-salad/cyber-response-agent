@@ -20,6 +20,7 @@ import pytest
 pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
 
+from defender.tests.support.api._mount1161 import API  # noqa: E402
 from defender.tenancy import host_lock  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._atk1 import DockerShim  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._support import LifecycleWorld, lifecycle_config  # noqa: E402
@@ -52,7 +53,7 @@ def test_teardown_fails_loudly_and_removes_nothing_when_a_holder_it_cannot_stop_
     secret_file = world.live(tenant).host_secret_file
     fd = _hold(world, tenant, exclusive=False)
     try:
-        assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+        assert world.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
         world.drive()
         item = world.item(tenant)
         assert (item["state"], item["step"], item["step_actor"]) == ("offboarding", "teardown", "host")
@@ -61,7 +62,7 @@ def test_teardown_fails_loudly_and_removes_nothing_when_a_holder_it_cannot_stop_
         assert (world.config.secrets_dir / tenant).is_dir()
     finally:
         host_lock.release_lock(fd)
-    assert world.ops.post(f"/admin/tenants/{tenant}/resume").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/resume").status_code == 202
     world.drive()
     assert world.item(tenant)["state"] == "offboarded"
     assert not (world.data_root / tenant).exists()
@@ -78,7 +79,7 @@ def test_a_teardown_whose_container_removal_fails_gives_the_host_lock_back(tmp_p
         w.host_actor = w.new_host(w.tenants, config=lifecycle_config(tmp_path, data_root, teardown_wait=WAIT),
                                   containers=broken)
         tenant = w.active_tenant()
-        assert w.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+        assert w.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
         w.drive()
         item = w.item(tenant)
         assert item["step"] == "teardown" and "docker could not remove" in (item["failure"] or ""), item
@@ -109,7 +110,7 @@ def test_install_does_not_unwrap_while_prepare_or_teardown_holds_the_lock_exclus
         assert not [p for p in world.config.secrets_dir.rglob("*") if p.is_file()]
     finally:
         host_lock.release_lock(fd)
-    assert world.ops.post(f"/admin/tenants/{tenant}/resume").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/resume").status_code == 202
     world.drive()
     assert world.item(tenant)["state"] == "active"
 
@@ -139,7 +140,7 @@ def test_removing_the_old_secret_file_waits_for_the_exclusive_lock_too(world):
     then resume removes it (RC-5)."""
     tenant = world.active_tenant()
     old = world.live(tenant).host_secret_file
-    assert world.ops.post(f"/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
     world.drive(stop=lambda: world.item(tenant)["step"] == "remove_old_file")
     fd = _hold(world, tenant, exclusive=True)
     try:
@@ -148,7 +149,7 @@ def test_removing_the_old_secret_file_waits_for_the_exclusive_lock_too(world):
         assert world.item(tenant)["failure"]
     finally:
         host_lock.release_lock(fd)
-    assert world.ops.post(f"/admin/tenants/{tenant}/resume").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/resume").status_code == 202
     world.drive()
     assert not old.exists() and world.item(tenant)["pending_action"] is None
 
@@ -219,7 +220,7 @@ def test_teardown_removes_what_a_late_writer_adds_to_the_folder_while_it_is_bein
     assert folders["secrets"].is_dir(), "premise: the tenant has a secrets folder"
     runs = _plant_runs(folders[target])
     writer = _late_writer(runs)
-    assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
     world.drive()
     assert writer.wait(timeout=35) == 0, "the late write never happened, so this run did not race the removal"
     item = world.item(tenant)
@@ -281,7 +282,7 @@ def test_teardown_keeps_removing_for_its_wait_however_many_passes_a_writer_that_
         while not (folder / "late-0").exists():
             assert time.monotonic() < deadline and writer.poll() is None, "the writer never placed its first entry"
             time.sleep(0.01)
-        assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+        assert world.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
         world.drive()
         item = world.item(tenant)
         assert (item["state"], item["failure"]) == ("offboarded", None), item
@@ -344,7 +345,7 @@ def test_teardown_removes_a_folder_whose_entries_a_late_job_removes_while_it_is_
     assert folders["secrets"].is_dir(), "premise: the tenant has a secrets folder"
     remover = _late_remover(_plant_runs(folders[target]))
     try:
-        assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+        assert world.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
         world.drive()
         item = world.item(tenant)
         assert (item["state"], item["failure"]) == ("offboarded", None), item
@@ -366,7 +367,7 @@ def test_teardown_that_keeps_finding_new_files_fails_naming_the_folder_and_resum
     for n in range(4000):  # a first pass long enough for the writer to land mid-way, whichever entry it removes first
         (folder / f"entry-{n}").write_text("x")
     writer = _late_writer(folder, keep_adding_for=3.0)
-    assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
     world.drive()
     item = world.item(tenant)
     assert (item["state"], item["step"]) == ("offboarding", "teardown"), item
@@ -374,7 +375,7 @@ def test_teardown_that_keeps_finding_new_files_fails_naming_the_folder_and_resum
     assert str(folder) in failure, failure
     assert re.search(r"late-dir-\d+", failure), f"the failure does not name an entry left in the folder: {failure}"
     assert writer.wait(timeout=35) == 0, "the late writes never happened, so this run did not race the removal"
-    assert world.ops.post(f"/admin/tenants/{tenant}/resume").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/resume").status_code == 202
     world.drive()
     assert world.item(tenant)["state"] == "offboarded"
     assert not (world.data_root / tenant).exists()
@@ -396,7 +397,7 @@ def test_a_removal_that_fails_for_any_other_reason_fails_the_step_at_once(tmp_pa
         (locked / "entry").write_text("x")
         locked.chmod(0o500)
         try:
-            assert w.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+            assert w.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
             started = time.monotonic()
             w.drive()
             elapsed = time.monotonic() - started
@@ -408,7 +409,7 @@ def test_a_removal_that_fails_for_any_other_reason_fails_the_step_at_once(tmp_pa
             assert (locked / "entry").is_file()
         finally:
             locked.chmod(0o700)
-        assert w.ops.post(f"/admin/tenants/{tenant}/resume").status_code == 202
+        assert w.ops.post(f"{API}/admin/tenants/{tenant}/resume").status_code == 202
         w.drive()
         assert w.item(tenant)["state"] == "offboarded"
         assert not (w.data_root / tenant).exists()
@@ -428,7 +429,7 @@ def test_teardown_removes_the_containers_labelled_with_the_tenant_and_no_others(
         shim = DockerShim(tmp_path / "bin", {"box-mine-1": {"defender.tenant": mine}, "box-mine-2": {"defender.tenant": mine},
                                              "box-other": {"defender.tenant": other}, "box-plain": {"unrelated": "x"}})
         monkeypatch.setenv("PATH", f"{shim.root}{os.pathsep}{os.environ['PATH']}")
-        assert w.ops.post(f"/admin/tenants/{mine}/offboard").status_code == 202
+        assert w.ops.post(f"{API}/admin/tenants/{mine}/offboard").status_code == 202
         w.drive()
         assert w.item(mine)["state"] == "offboarded"
         listings = [c for c in shim.calls() if c[:1] == ["ps"]]
@@ -448,7 +449,7 @@ def test_teardown_removes_a_paused_box_that_refuses_the_first_removal(tmp_path, 
         tenant = w.active_tenant()
         shim = DockerShim(tmp_path / "bin", {"box-paused": {"defender.tenant": tenant, "paused": "1"}})
         monkeypatch.setenv("PATH", f"{shim.root}{os.pathsep}{os.environ['PATH']}")
-        assert w.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+        assert w.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
         w.drive()
         assert w.item(tenant)["state"] == "offboarded", w.item(tenant)
         assert shim.remaining() == set()

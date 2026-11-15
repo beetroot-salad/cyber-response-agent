@@ -9,6 +9,7 @@ import typing
 import pytest
 from pydantic import ValidationError
 
+from defender.tests.support.api._mount1161 import API
 from defender.api import models, ports
 from defender.api.ports import AlertsRepository
 
@@ -128,8 +129,8 @@ def test_o14_list_alerts_has_no_severity_filter_in_ports_the_real_ports_and_the_
     assert "severity" not in inspect.signature(JobStorePorts.list_alerts).parameters
     from defender.tests.api.test_api_stub import Api
 
-    doc = Api().client.get("/openapi.json").json()
-    names = {p["name"] for p in doc["paths"]["/tenants/{tenant_id}/alerts"]["get"]["parameters"]}
+    doc = Api().client.get(API + "/openapi.json").json()
+    names = {p["name"] for p in doc["paths"][API + "/tenants/{tenant_id}/alerts"]["get"]["parameters"]}
     assert "fired_after" in names  # control: the parameters are the ones we read
     assert "severity" not in names
 

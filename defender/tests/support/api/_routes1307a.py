@@ -12,11 +12,12 @@ from defender.api.app import create_app
 from defender.api.refusing import Refusing
 from defender.api.ports import ApiDeps
 from defender.tests.support.api._identity1306 import FRONTEND_ORIGIN, T1
+from defender.tests.support.api._mount1161 import API
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 PATH_ID = fixture_uuid("1307:a:path-id")
 #: The two sign-in routes: they never authenticate (O1, O2).
-PUBLIC = {("GET", "/auth/login"), ("GET", "/auth/callback")}
+PUBLIC = {("GET", API + "/auth/login"), ("GET", API + "/auth/callback")}
 _PARAM = re.compile(r"\{(\w+)(?::\w+)?\}")
 _FILL = {"tenant_id": T1, "key": "report.md", "system_id": "tix"}
 

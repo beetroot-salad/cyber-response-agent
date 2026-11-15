@@ -13,6 +13,7 @@ pytestmark = [
     pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning"),
 ]
 
+from defender.tests.support.api._mount1161 import API  # noqa: E402
 from defender.tests.api.test_programs_1307_roles import (  # noqa: E402
     AUTOMATION,
     PERMISSION_OF,
@@ -161,7 +162,7 @@ def test_the_artifact_read_audits_the_program_and_the_credential_it_used(kind: s
     scripted = _ArtifactRead(s.world.store)
     s.world.app = create_app(dataclasses.replace(s.world.deps(), investigations=scripted, artifact_links=scripted,
                                                  audit=scripted))
-    path = ids.fill("/tenants/{tenant_id}/investigations/{investigation_id}/artifacts/{key}")
+    path = ids.fill(API + "/tenants/{tenant_id}/investigations/{investigation_id}/artifacts/{key}")
     program, credential = _as_program(s, kind)
     assert program.get(path).status_code == 307
     assert s.ann.get(path).status_code == 307
@@ -214,7 +215,7 @@ def test_a_500_to_a_verified_program_carries_the_expiry_header(route: tuple[str,
     response = program.request(method, path, json=_body(route, ids))
     assert response.status_code == 500, (route, response.status_code, response.text)
     assert parse_time(response.headers[EXPIRY_HEADER]) == expires
-    assert EXPIRY_HEADER not in s.world.bearer("not-a-key", raise_errors=False).get(f"/tenants/{T1}/alerts").headers  # control
+    assert EXPIRY_HEADER not in s.world.bearer("not-a-key", raise_errors=False).get(f"{API}/tenants/{T1}/alerts").headers  # control
 
 
 def test_a_500_to_a_person_has_no_expiry_header() -> None:
@@ -222,7 +223,7 @@ def test_a_500_to_a_person_has_no_expiry_header() -> None:
     s = soar()
     person = s.world.sign_in(ANN, browser=s.world.client(raise_errors=False))
     _break_the_store(s)
-    response = person.get(f"/tenants/{T1}/alerts")
+    response = person.get(f"{API}/tenants/{T1}/alerts")
     assert response.status_code == 500
     assert EXPIRY_HEADER not in response.headers
 
@@ -236,13 +237,13 @@ def test_the_expiry_header_is_on_a_409_and_absent_once_the_tenant_left_active(ki
     program, credential = _as_program(s, kind)
     expires = {r.id: r for r in s.world.credentials(s.program_id)}[credential].expires_at
     investigation = start_investigation(program, T1).json()["investigation_id"]
-    assert program.post(f"/tenants/{T1}/investigations/{investigation}/cancel").status_code == 200
-    again = program.post(f"/tenants/{T1}/investigations/{investigation}/cancel")
+    assert program.post(f"{API}/tenants/{T1}/investigations/{investigation}/cancel").status_code == 200
+    again = program.post(f"{API}/tenants/{T1}/investigations/{investigation}/cancel")
     assert again.status_code == 409, again.text
     assert parse_time(again.headers[EXPIRY_HEADER]) == expires
-    assert parse_time(program.get("/me").headers[EXPIRY_HEADER]) == expires  # control: the 200
+    assert parse_time(program.get(API + "/me").headers[EXPIRY_HEADER]) == expires  # control: the 200
     s.world.move_tenant(T1, "offboarding")  # the tenant left `active` (#1214) and the program row is still `active`
-    refused = program.get("/me")
+    refused = program.get(API + "/me")
     assert refused.status_code == 401, refused.text
     assert EXPIRY_HEADER not in refused.headers
     assert T1 not in refused.text, refused.text
@@ -258,8 +259,8 @@ def test_a_tenant_that_is_not_active_is_404_on_every_tenant_route_for_a_person_a
     credential = issue_oauth(s.ann, T1, s.program_id)
     callers = {"person": s.ann, "key": s.program(), "token": s.world.bearer(s.world.realm.issue(credential))}
     for name, caller in callers.items():  # control: before the flip each caller reaches the tenant
-        assert caller.get(f"/tenants/{T1}/alerts").status_code == 200, name
-        assert T1 in caller.get("/me").text, name
+        assert caller.get(f"{API}/tenants/{T1}/alerts").status_code == 200, name
+        assert T1 in caller.get(API + "/me").text, name
     s.world.move_tenant(T1, "offboarding")
     failures = []
     for name, caller in callers.items():
@@ -267,7 +268,7 @@ def test_a_tenant_that_is_not_active_is_404_on_every_tenant_route_for_a_person_a
             got = _call(caller, route).status_code
             if got != (404 if name == "person" else 401):
                 failures.append(f"{name} {route_id(route)}: {got}")
-        me = caller.get("/me")
+        me = caller.get(API + "/me")
         if T1 in me.text:
             failures.append(f"{name} /me lists the tenant: {me.status_code} {me.text}")
     assert failures == []

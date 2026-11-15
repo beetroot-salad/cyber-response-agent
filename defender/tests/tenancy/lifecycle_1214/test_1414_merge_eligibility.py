@@ -15,6 +15,7 @@ import pytest
 pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
 
+from defender.tests.support.api._mount1161 import API  # noqa: E402
 from defender.tests.support.shared._postgres1339 import database, empty_database, execute  # noqa: E402,F401
 from defender.tests.tenancy.lifecycle_1214._fakes import ORG  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._job_cases import as_bot, jwts  # noqa: E402
@@ -79,7 +80,7 @@ def test_a_pass_records_named_users_and_team_members_with_the_time_read_and_neve
 def test_no_generations_bot_is_recorded_after_a_rotation(world):
     """D13: the destroyed generation's login, still on the stored rule and a team, and the live one are both left out."""
     tenant = world.active_tenant()
-    assert world.ops.post(f"/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
     world.drive()
     [old] = [g for g in world.generations(tenant) if g.status == "destroyed"]
     live = world.live(tenant)
@@ -264,7 +265,7 @@ def _creating_failed(world) -> str:
 
 def _offboarding(world) -> str:
     tenant = world.active_tenant()
-    assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
     assert world.item(tenant)["state"] == "offboarding"
     return tenant
 
@@ -318,7 +319,7 @@ def test_rotation_gives_an_existing_tenants_new_integration_write_issue(world):
     [rule] = [r for r in world.forge.integration_rules.values() if r["user"] == old.bot_login]
     rule["scopes"] = ["write:repository"]
     assert as_bot(world, jwts(world, old)[-1], f"repos/{ORG}/{tenant}/issues").status_code == 403, "control: no write:issue"
-    assert world.ops.post(f"/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
     world.drive()
     new = world.live(tenant)
     assert new.salt != old.salt

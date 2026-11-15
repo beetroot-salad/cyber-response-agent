@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 
+from defender.tests.support.api._mount1161 import API
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.shared._postgres1339 import database, execute
 from defender.tests.support.tenancy._active1214 import offboard_on_database
@@ -116,7 +117,7 @@ def test_me_reads_the_tenant_states_once_however_many_memberships():
                 setattr(world.raw_repo, name, counted)
         browser = world.sign_in(ANN)
         reads.clear()
-        me = browser.get("/me")
+        me = browser.get(API + "/me")
         assert me.status_code == 200, me.text
         assert {t["tenant_id"] for t in me.json()["tenants"]} == {T1, T2}
         assert len(reads) == 1, reads

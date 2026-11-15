@@ -23,6 +23,7 @@ pytestmark = [
     pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning"),
 ]
 
+from defender.tests.support.api._mount1161 import API  # noqa: E402
 from defender.tests.support.api._identity1306 import ANN, T1, AuditLog  # noqa: E402
 from defender.tests.support.api._programs1307 import (  # noqa: E402
     CLIENT_DELETE,
@@ -104,7 +105,7 @@ def _revoke_an_oauth_credential(s: Soar) -> Callable[[], Any]:
 
 def _remove_the_program(s: Soar) -> Callable[[], Any]:
     issue_oauth(s.ann, T1, s.program_id)
-    return lambda: s.ann.delete(f"/tenants/{T1}/programs/{s.program_id}")
+    return lambda: s.ann.delete(f"{API}/tenants/{T1}/programs/{s.program_id}")
 
 
 def _reconcile(s: Soar) -> Callable[[], Any]:
@@ -124,7 +125,7 @@ def _removal_racing_a_creation(s: Soar) -> Callable[[], Any]:
     realm, create = s.world.realm, s.world.realm.create_client
 
     async def racing(credential_id: str) -> tuple[str, str]:
-        await asyncio.wait_for(asyncio.to_thread(remover.delete, f"/tenants/{T1}/programs/{s.program_id}"), 10)
+        await asyncio.wait_for(asyncio.to_thread(remover.delete, f"{API}/tenants/{T1}/programs/{s.program_id}"), 10)
         return await create(credential_id)
 
     realm.create_client = racing  # type: ignore[method-assign]

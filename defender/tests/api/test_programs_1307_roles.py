@@ -14,6 +14,7 @@ from typing import Any  # noqa: E402
 
 from fastapi import FastAPI  # noqa: E402
 
+from defender.tests.support.api._mount1161 import API  # noqa: E402
 from defender.api.app import Authed, create_app, unauthenticated_routes, undeclared_routes  # noqa: E402  (forced choice FC-A1: see the contract map)
 from defender.identity import DataRuleViolation  # noqa: E402
 from defender.tests.support.api._identity1306 import (  # noqa: E402
@@ -46,7 +47,7 @@ from defender.tests.support.api._routes1307a import (  # noqa: E402
 from defender.tests.support.tenancy._mapping1345 import PLANTED_ALERT_MAPPING  # noqa: E402
 
 #: The design's permission table (O3), written out: route -> permission, permission -> roles.
-TENANT = "/tenants/{}"
+TENANT = API + "/tenants/{}"
 PERMISSION_OF = {
     ("GET", f"{TENANT}/alerts"): "work.read",
     ("GET", f"{TENANT}/alerts/{{}}"): "work.read",
@@ -81,12 +82,12 @@ PERMISSION_OF = {
 AUTOMATION = {"work.read", "investigations.run"}  # admin holds every permission above
 #: Routes outside /tenants/ and how each is classified (O2): public, person only, any caller, platform.
 OUTSIDE = {
-    ("GET", "/auth/login"), ("GET", "/auth/callback"),
-    ("POST", "/auth/logout"), ("POST", "/invitations/{}/accept"),
-    ("GET", "/me"),
-    ("GET", "/admin/tenants"), ("POST", "/admin/tenants"), ("GET", "/admin/tenants/{}"),
-    ("POST", "/admin/tenants/{}/resume"), ("POST", "/admin/tenants/{}/offboard"),
-    ("POST", "/admin/tenants/{}/rotate-forge-credential"), ("POST", "/admin/tenants/{}/invitations"),
+    ("GET", API + "/auth/login"), ("GET", API + "/auth/callback"),
+    ("POST", API + "/auth/logout"), ("POST", API + "/invitations/{}/accept"),
+    ("GET", API + "/me"),
+    ("GET", API + "/admin/tenants"), ("POST", API + "/admin/tenants"), ("GET", API + "/admin/tenants/{}"),
+    ("POST", API + "/admin/tenants/{}/resume"), ("POST", API + "/admin/tenants/{}/offboard"),
+    ("POST", API + "/admin/tenants/{}/rotate-forge-credential"), ("POST", API + "/admin/tenants/{}/invitations"),
 }
 BODIES: dict[tuple[str, str], dict[str, object]] = {
     ("POST", f"{TENANT}/investigations"): {"alert_id": ALERT.alert_id, "client_request_id": "rq"},
@@ -139,13 +140,13 @@ def test_automation_reads_work_and_runs_investigations() -> None:
     """automation: `work.read` and `investigations.run` end to end (O3)."""
     s = soar()
     program = s.program()
-    assert [a["alert_id"] for a in items(program.get(f"/tenants/{T1}/alerts"))] == [ALERT.alert_id]
+    assert [a["alert_id"] for a in items(program.get(f"{API}/tenants/{T1}/alerts"))] == [ALERT.alert_id]
     started = start_investigation(program, T1)
     assert started.status_code == 201, started.text
     investigation_id = started.json()["investigation_id"]
-    assert program.get(f"/tenants/{T1}/investigations/{investigation_id}").status_code == 200
-    assert program.post(f"/tenants/{T1}/investigations/{investigation_id}/cancel").status_code == 200
-    assert program.get(f"/tenants/{T1}/learning-jobs").status_code == 200
+    assert program.get(f"{API}/tenants/{T1}/investigations/{investigation_id}").status_code == 200
+    assert program.post(f"{API}/tenants/{T1}/investigations/{investigation_id}/cancel").status_code == 200
+    assert program.get(f"{API}/tenants/{T1}/learning-jobs").status_code == 200
 
 
 def test_a_program_cannot_start_a_learning_job_and_an_admin_can() -> None:
@@ -153,18 +154,18 @@ def test_a_program_cannot_start_a_learning_job_and_an_admin_can() -> None:
     s = soar()
     investigation_id = start_investigation(s.ann, T1).json()["investigation_id"]
     body = {"investigation_id": investigation_id, "client_request_id": "j1"}
-    before = items(s.ann.get(f"/tenants/{T1}/learning-jobs"))
-    assert s.program().post(f"/tenants/{T1}/learning-jobs", json=body).status_code == 403
-    assert items(s.ann.get(f"/tenants/{T1}/learning-jobs")) == before
-    assert s.ann.post(f"/tenants/{T1}/learning-jobs", json=body).status_code != 403
+    before = items(s.ann.get(f"{API}/tenants/{T1}/learning-jobs"))
+    assert s.program().post(f"{API}/tenants/{T1}/learning-jobs", json=body).status_code == 403
+    assert items(s.ann.get(f"{API}/tenants/{T1}/learning-jobs")) == before
+    assert s.ann.post(f"{API}/tenants/{T1}/learning-jobs", json=body).status_code != 403
 
 
 def test_a_program_is_refused_the_system_check_as_config_write() -> None:
     """The system check is `config.write` (O3): refused to automation with its settings read also refused."""
     s = soar()
-    assert s.program().post(f"/tenants/{T1}/systems/tix/check").status_code == 403
-    assert s.program().get(f"/tenants/{T1}/systems").status_code == 403
-    assert s.ann.post(f"/tenants/{T1}/systems/tix/check").status_code not in (401, 403)
+    assert s.program().post(f"{API}/tenants/{T1}/systems/tix/check").status_code == 403
+    assert s.program().get(f"{API}/tenants/{T1}/systems").status_code == 403
+    assert s.ann.post(f"{API}/tenants/{T1}/systems/tix/check").status_code not in (401, 403)
 
 
 # --- O2: the order under /tenants/{T}/ (D1) ---------------------------------------------------------
@@ -174,18 +175,18 @@ def test_membership_is_checked_before_permission() -> None:
     s = soar()
     program = s.program()
     path = "/invitations"
-    unknown = program.post(f"/tenants/{UNKNOWN}{path}", json={"email": NEW})
-    foreign = program.post(f"/tenants/{T2}{path}", json={"email": NEW})
+    unknown = program.post(f"{API}/tenants/{UNKNOWN}{path}", json={"email": NEW})
+    foreign = program.post(f"{API}/tenants/{T2}{path}", json={"email": NEW})
     assert foreign.status_code == unknown.status_code == 404
     assert masked(foreign, T2) == masked(unknown, UNKNOWN)
-    assert program.post(f"/tenants/{T1}{path}", json={"email": NEW}).status_code == 403  # control: a member
-    assert s.ann.post(f"/tenants/{T1}{path}", json={"email": NEW}).status_code == 202  # control: permitted
+    assert program.post(f"{API}/tenants/{T1}{path}", json={"email": NEW}).status_code == 403  # control: a member
+    assert s.ann.post(f"{API}/tenants/{T1}{path}", json={"email": NEW}).status_code == 202  # control: permitted
 
 
 def test_permission_is_checked_before_the_ids_in_the_path() -> None:
     """A member without the permission is 403 even for an id that names nothing; an admin gets 404 for it (O2, D1)."""
     s = soar()
-    ghost = f"/tenants/{T1}/investigations/{PATH_ID}"
+    ghost = f"{API}/tenants/{T1}/investigations/{PATH_ID}"
     assert s.program().delete(ghost).status_code == 403
     assert s.ann.delete(ghost).status_code == 404
     assert s.program().get(ghost).status_code == 404  # permitted read: then the id is looked up
@@ -196,15 +197,15 @@ def test_a_program_or_credential_id_of_another_tenant_is_404_under_the_path_tena
     s = soar()
     theirs = str(create_program(s.bob, T2, "B's SOAR")["id"])
     their_key, _ = issue_key(s.bob, T2, theirs)
-    assert s.ann.post(f"/tenants/{T1}/programs/{theirs}/credentials",
+    assert s.ann.post(f"{API}/tenants/{T1}/programs/{theirs}/credentials",
                       json={"kind": "key", "name": "x"}).status_code == 404
-    assert s.ann.get(f"/tenants/{T1}/programs/{theirs}/credentials").status_code == 404
-    assert s.ann.delete(f"/tenants/{T1}/programs/{theirs}").status_code == 404
+    assert s.ann.get(f"{API}/tenants/{T1}/programs/{theirs}/credentials").status_code == 404
+    assert s.ann.delete(f"{API}/tenants/{T1}/programs/{theirs}").status_code == 404
     second = str(create_program(s.ann, T1, "second")["id"])
-    assert s.ann.delete(f"/tenants/{T1}/programs/{second}/credentials/{s.key_id}").status_code == 404
-    assert s.ann.delete(f"/tenants/{T1}/programs/{theirs}/credentials/{their_key}").status_code == 404
-    assert s.world.bearer(s.key).get(f"/tenants/{T1}/alerts").status_code == 200
-    mine = s.ann.get(f"/tenants/{T1}/programs/{s.program_id}/credentials")
+    assert s.ann.delete(f"{API}/tenants/{T1}/programs/{second}/credentials/{s.key_id}").status_code == 404
+    assert s.ann.delete(f"{API}/tenants/{T1}/programs/{theirs}/credentials/{their_key}").status_code == 404
+    assert s.world.bearer(s.key).get(f"{API}/tenants/{T1}/alerts").status_code == 200
+    mine = s.ann.get(f"{API}/tenants/{T1}/programs/{s.program_id}/credentials")
     assert [r["id"] for r in items(mine)] == [s.key_id]  # control: its own listing works
 
 
@@ -213,12 +214,12 @@ def test_a_persons_id_is_not_a_program_id() -> None:
     s = soar()
     carl = s.world.member(s.ann, T1, "carl@a.example")
     carl_id = user_id(carl)
-    assert s.ann.post(f"/tenants/{T1}/programs/{carl_id}/credentials", json={"kind": "key", "name": "k"}).status_code == 404
-    assert s.ann.get(f"/tenants/{T1}/programs/{carl_id}/credentials").status_code == 404
-    assert s.ann.delete(f"/tenants/{T1}/programs/{carl_id}").status_code == 404
-    assert carl.get(f"/tenants/{T1}/alerts").status_code == 200
-    assert carl_id not in [p["id"] for p in items(s.ann.get(f"/tenants/{T1}/programs"))]
-    assert s.ann.get(f"/tenants/{T1}/programs/{s.program_id}/credentials").status_code == 200  # control
+    assert s.ann.post(f"{API}/tenants/{T1}/programs/{carl_id}/credentials", json={"kind": "key", "name": "k"}).status_code == 404
+    assert s.ann.get(f"{API}/tenants/{T1}/programs/{carl_id}/credentials").status_code == 404
+    assert s.ann.delete(f"{API}/tenants/{T1}/programs/{carl_id}").status_code == 404
+    assert carl.get(f"{API}/tenants/{T1}/alerts").status_code == 200
+    assert carl_id not in [p["id"] for p in items(s.ann.get(f"{API}/tenants/{T1}/programs"))]
+    assert s.ann.get(f"{API}/tenants/{T1}/programs/{s.program_id}/credentials").status_code == 200  # control
 
 
 # --- P-H, D10: an undeclared route is found by the checker -----------------------------------------
@@ -242,11 +243,11 @@ def test_the_real_app_has_no_undeclared_route() -> None:
 def test_the_checker_reports_a_route_that_declares_nothing_inside_or_outside_tenants() -> None:
     """A plain route is reported by method and path; built-in docs routes and the real app's are not (P-H, D10)."""
     assert undeclared_routes(FastAPI()) == []  # control: openapi/docs routes are not routes of ours
-    assert undeclared_routes(_plain("/tenants/{tenant_id}/widgets", "GET")) == [("GET", "/tenants/{tenant_id}/widgets")]
+    assert undeclared_routes(_plain(API + "/tenants/{tenant_id}/widgets", "GET")) == [("GET", API + "/tenants/{tenant_id}/widgets")]
     assert undeclared_routes(_plain("/elsewhere", "POST", "DELETE")) == [("DELETE", "/elsewhere"), ("POST", "/elsewhere")]
     real = soar().world.app
-    real.add_api_route("/tenants/{tenant_id}/widgets", lambda: {}, methods=["GET"])
-    assert undeclared_routes(real) == [("GET", "/tenants/{tenant_id}/widgets")]
+    real.add_api_route(API + "/tenants/{tenant_id}/widgets", lambda: {}, methods=["GET"])
+    assert undeclared_routes(real) == [("GET", API + "/tenants/{tenant_id}/widgets")]
 
 
 def test_a_route_that_asks_for_its_caller_outside_the_authenticating_routers_is_reported() -> None:
@@ -261,9 +262,9 @@ def test_a_route_that_asks_for_its_caller_outside_the_authenticating_routers_is_
     async def public() -> dict[str, str]:
         return {}
 
-    real.add_api_route("/tenants/{tenant_id}/widgets", asks, methods=["GET"])
+    real.add_api_route(API + "/tenants/{tenant_id}/widgets", asks, methods=["GET"])
     real.add_api_route("/open", public, methods=["GET"])  # control: a route not asking for the caller is fine anywhere
-    assert unauthenticated_routes(real) == [("GET", "/tenants/{tenant_id}/widgets")]
+    assert unauthenticated_routes(real) == [("GET", API + "/tenants/{tenant_id}/widgets")]
 
 
 def test_the_app_does_not_start_when_one_of_its_routers_holds_a_route_that_declares_nothing() -> None:
@@ -296,15 +297,15 @@ def test_an_admin_creates_a_program_of_the_tenant_that_is_active_and_is_no_user_
     created = create_program(s.ann, T1, "Ticket sync")
     program_id = str(created["id"])
     assert created["display_name"] == "Ticket sync"
-    listed = {p["id"]: p for p in items(s.ann.get(f"/tenants/{T1}/programs"))}
+    listed = {p["id"]: p for p in items(s.ann.get(f"{API}/tenants/{T1}/programs"))}
     assert set(listed) == {s.program_id, program_id}
-    assert listed[program_id]["created_by"] == s.ann.get("/me").json()["user"]["id"]
+    assert listed[program_id]["created_by"] == s.ann.get(API + "/me").json()["user"]["id"]
     program = s.world.call(s.world.raw_repo.program, program_id)
     assert (str(program.tenant_id), program.display_name, program.removed_at, str(program.created_by)) == (
         T1, "Ticket sync", None, user_id(s.ann))
     assert s.world.call(s.world.raw_repo.user, program_id) is None
     assert s.world.call(s.world.raw_repo.memberships_of_user, program_id) == []
-    assert [m["email"] for m in items(s.ann.get(f"/tenants/{T1}/members"))] == [ANN]  # control: the person is listed, the program is not
+    assert [m["email"] for m in items(s.ann.get(f"{API}/tenants/{T1}/members"))] == [ANN]  # control: the person is listed, the program is not
     assert [(e.action, e.target) for e in audit.since(mark)] == [("program.create", program_id)]
 
 

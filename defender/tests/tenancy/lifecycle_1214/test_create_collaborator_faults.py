@@ -8,6 +8,7 @@ import pytest
 pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
 
+from defender.tests.support.api._mount1161 import API  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._atk1 import page_collaborators, seconds  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._fakes import ORG  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._job_cases import USERS  # noqa: E402
@@ -47,7 +48,7 @@ def test_rotation_removes_every_foreign_collaborator_and_keeps_the_live_bot_unti
     repo = f"{ORG}/{tenant}"
     old = world.live(tenant).bot_login
     _crowd(world, repo)
-    assert world.ops.post(f"/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
     world.drive(stop=lambda: world.item(tenant)["step"] == "install")
     [new] = [g.bot_login for g in world.generations(tenant) if g.status == "pending"]
     assert world.forge.collaborators(repo) == {old: "write", new: "write"}
@@ -70,7 +71,7 @@ def test_offboarding_removes_the_tenants_secrets_directory_itself(world):
     """After offboarding neither `<data root>/<T>` nor `<secrets dir>/<T>` exists, not even empty (DC-2, O4)."""
     tenant = world.active_tenant()
     assert (world.config.secrets_dir / tenant).is_dir(), "control: the directory existed"
-    assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
     world.drive()
     assert world.item(tenant)["state"] == "offboarded"
     assert not (world.config.secrets_dir / tenant).exists()

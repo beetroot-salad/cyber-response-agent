@@ -24,13 +24,15 @@ from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Any
 
+from defender.tests.support.api._mount1161 import API
+
 #: The six entries (r5 `MAPPING_KEYS`), `None` = unmapped.
 PLANTED_ALERT_MAPPING: Mapping[str, str | None] = MappingProxyType({
     "signature": "rule.id", "event_time": "timestamp", "summary": "rule.description", "case_key": "alert_id",
     "title": "rule.description", "description": "rule.id"})
 FIXTURE_ALERT_MAPPING: Mapping[str, str | None] = MappingProxyType({**PLANTED_ALERT_MAPPING, "event_time": "alert_timestamp"})
 #: The API route (r5.1: "tests spell it in one place"): the template as the routes table lists it, and its `{tenant_id}` filled.
-ALERT_MAPPING_ROUTE = "/tenants/{tenant_id}/alert-mapping"
+ALERT_MAPPING_ROUTE = API + "/tenants/{tenant_id}/alert-mapping"
 
 
 def alert_mapping_url(tenant_id: str) -> str:

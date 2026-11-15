@@ -16,6 +16,7 @@ pytest.importorskip("fastapi")
 from fastapi.routing import APIRoute  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 
+from defender.tests.support.api._mount1161 import API  # noqa: E402
 from defender.records.formats import TenantId, UuidId  # noqa: E402
 from defender.tests.api.test_api_stub import _api_routes  # noqa: E402
 from defender.tests.support.api._identity1306 import ANN, OPS, T1, UNKNOWN, World  # noqa: E402
@@ -76,7 +77,7 @@ def _request(world: tuple[World, Any, Any], route: APIRoute, where: str, name: s
     if where == "path":
         values[name] = bad
     path = route.path_format.format(**values)
-    browser = admin if route.path.startswith("/admin") else member
+    browser = admin if route.path.startswith(API + "/admin") else member
     method = sorted(route.methods)[0]
     return browser.request(method, path, params={name: bad} if where == "query" else None,
                            json={name: bad} if where == "body" else ({} if method in ("POST", "PUT") else None))
@@ -110,13 +111,13 @@ def test_sign_in_and_the_administrator_check_answer_before_the_id_grammar(world)
     """No session: 401 whatever the tenant looks like; a member on an admin route: 403 (O3)."""
     w, member, _ = world
     stranger = w.client()
-    assert stranger.get(f"/tenants/{MALFORMED['api-style']}/alerts").status_code == 401
-    assert member.get(f"/admin/tenants/{MALFORMED['api-style']}").status_code == 403
+    assert stranger.get(f"{API}/tenants/{MALFORMED['api-style']}/alerts").status_code == 401
+    assert member.get(f"{API}/admin/tenants/{MALFORMED['api-style']}").status_code == 403
 
 
 def test_a_well_formed_id_that_names_nothing_keeps_its_404(world):
     """The existence answers are unchanged: an unknown tenant and an unknown alert are 404, not 422."""
     _, member, admin = world
-    assert member.get(f"/tenants/{UNKNOWN}/alerts").status_code == 404
-    assert member.get(f"/tenants/{T1}/alerts/{GOOD}").status_code == 404
-    assert admin.get(f"/admin/tenants/{TenantId(UNKNOWN)}").status_code == 404
+    assert member.get(f"{API}/tenants/{UNKNOWN}/alerts").status_code == 404
+    assert member.get(f"{API}/tenants/{T1}/alerts/{GOOD}").status_code == 404
+    assert admin.get(f"{API}/admin/tenants/{TenantId(UNKNOWN)}").status_code == 404

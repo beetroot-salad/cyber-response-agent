@@ -1,6 +1,7 @@
 """The platform API HTTP layer over a scripted fake: routes, login seam, port-answer to response mapping."""
 from __future__ import annotations
 
+from defender.tests.support.api._mount1161 import API
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import base64
@@ -67,8 +68,8 @@ B = fixture_uuid("tenant:tenant-b")
 USER = fixture_uuid("user:ann")
 #: The tenant is the path's `T`; the caller is a session seeded through the identity repository,
 #: sent as the `__Host-defender_session` cookie plus the configured `Origin`.
-T = f"/tenants/{A}"
-TB = f"/tenants/{B}"
+T = f"{API}/tenants/{A}"
+TB = f"{API}/tenants/{B}"
 SESSION_COOKIE = "__Host-defender_session"
 SESSION_A = "session-value-of-ann"
 SESSION_B = "session-value-of-bob"
@@ -134,89 +135,89 @@ class _Answer:
 
 #: #1131's "API" section as (method, path), under `/tenants/{tenant_id}`.
 EXISTING_ROUTES = {
-    ("GET", "/tenants/{tenant_id}/alerts"),
-    ("GET", "/tenants/{tenant_id}/alerts/{alert_id}"),
-    ("POST", "/tenants/{tenant_id}/investigations"),
-    ("GET", "/tenants/{tenant_id}/investigations"),
-    ("GET", "/tenants/{tenant_id}/investigations/{investigation_id}"),
-    ("POST", "/tenants/{tenant_id}/investigations/{investigation_id}/cancel"),
-    ("DELETE", "/tenants/{tenant_id}/investigations/{investigation_id}"),
-    ("GET", "/tenants/{tenant_id}/investigations/{investigation_id}/artifacts/{key}"),
-    ("POST", "/tenants/{tenant_id}/learning-jobs"),
-    ("GET", "/tenants/{tenant_id}/learning-jobs"),
-    ("GET", "/tenants/{tenant_id}/learning-jobs/{learning_job_id}"),
-    ("GET", "/tenants/{tenant_id}/lessons"),
-    ("GET", "/tenants/{tenant_id}/systems"),
-    ("PUT", "/tenants/{tenant_id}/systems/{system_id}"),
-    ("PUT", "/tenants/{tenant_id}/systems/{system_id}/credentials"),
-    ("POST", "/tenants/{tenant_id}/systems/{system_id}/check"),
+    ("GET", API + "/tenants/{tenant_id}/alerts"),
+    ("GET", API + "/tenants/{tenant_id}/alerts/{alert_id}"),
+    ("POST", API + "/tenants/{tenant_id}/investigations"),
+    ("GET", API + "/tenants/{tenant_id}/investigations"),
+    ("GET", API + "/tenants/{tenant_id}/investigations/{investigation_id}"),
+    ("POST", API + "/tenants/{tenant_id}/investigations/{investigation_id}/cancel"),
+    ("DELETE", API + "/tenants/{tenant_id}/investigations/{investigation_id}"),
+    ("GET", API + "/tenants/{tenant_id}/investigations/{investigation_id}/artifacts/{key}"),
+    ("POST", API + "/tenants/{tenant_id}/learning-jobs"),
+    ("GET", API + "/tenants/{tenant_id}/learning-jobs"),
+    ("GET", API + "/tenants/{tenant_id}/learning-jobs/{learning_job_id}"),
+    ("GET", API + "/tenants/{tenant_id}/lessons"),
+    ("GET", API + "/tenants/{tenant_id}/systems"),
+    ("PUT", API + "/tenants/{tenant_id}/systems/{system_id}"),
+    ("PUT", API + "/tenants/{tenant_id}/systems/{system_id}/credentials"),
+    ("POST", API + "/tenants/{tenant_id}/systems/{system_id}/check"),
     # #1345 O1: the tenant's alert mapping, read and replaced whole (sketch: invented path)
     ("GET", ALERT_MAPPING_ROUTE),
     ("PUT", ALERT_MAPPING_ROUTE),
 }
 #: What #1306 adds (design "Endpoints"; param names pinned by this suite).
 IDENTITY_ROUTES = {
-    ("GET", "/auth/login"),
-    ("GET", "/auth/callback"),
-    ("POST", "/auth/logout"),
-    ("GET", "/me"),
-    ("GET", "/tenants/{tenant_id}/members"),
-    ("DELETE", "/tenants/{tenant_id}/members/{user_id}"),
-    ("GET", "/tenants/{tenant_id}/invitations"),
-    ("POST", "/tenants/{tenant_id}/invitations"),
-    ("DELETE", "/tenants/{tenant_id}/invitations/{invitation_id}"),
-    ("POST", "/invitations/{invitation_id}/accept"),
-    ("GET", "/admin/tenants"),
-    ("POST", "/admin/tenants/{tenant_id}/invitations"),
-    ("POST", "/admin/tenants"),
-    ("GET", "/admin/tenants/{tenant_id}"),
-    ("POST", "/admin/tenants/{tenant_id}/resume"),
-    ("POST", "/admin/tenants/{tenant_id}/offboard"),
-    ("POST", "/admin/tenants/{tenant_id}/rotate-forge-credential"),
+    ("GET", API + "/auth/login"),
+    ("GET", API + "/auth/callback"),
+    ("POST", API + "/auth/logout"),
+    ("GET", API + "/me"),
+    ("GET", API + "/tenants/{tenant_id}/members"),
+    ("DELETE", API + "/tenants/{tenant_id}/members/{user_id}"),
+    ("GET", API + "/tenants/{tenant_id}/invitations"),
+    ("POST", API + "/tenants/{tenant_id}/invitations"),
+    ("DELETE", API + "/tenants/{tenant_id}/invitations/{invitation_id}"),
+    ("POST", API + "/invitations/{invitation_id}/accept"),
+    ("GET", API + "/admin/tenants"),
+    ("POST", API + "/admin/tenants/{tenant_id}/invitations"),
+    ("POST", API + "/admin/tenants"),
+    ("GET", API + "/admin/tenants/{tenant_id}"),
+    ("POST", API + "/admin/tenants/{tenant_id}/resume"),
+    ("POST", API + "/admin/tenants/{tenant_id}/offboard"),
+    ("POST", API + "/admin/tenants/{tenant_id}/rotate-forge-credential"),
 }
 #: What #1307 adds (design "Program and credential routes"; param names pinned by this suite). Conflict updated: r3.
 PROGRAM_ROUTES = {
-    ("POST", "/tenants/{tenant_id}/programs"),
-    ("GET", "/tenants/{tenant_id}/programs"),
-    ("DELETE", "/tenants/{tenant_id}/programs/{program_id}"),
-    ("POST", "/tenants/{tenant_id}/programs/{program_id}/credentials"),
-    ("GET", "/tenants/{tenant_id}/programs/{program_id}/credentials"),
-    ("DELETE", "/tenants/{tenant_id}/programs/{program_id}/credentials/{credential_id}"),
+    ("POST", API + "/tenants/{tenant_id}/programs"),
+    ("GET", API + "/tenants/{tenant_id}/programs"),
+    ("DELETE", API + "/tenants/{tenant_id}/programs/{program_id}"),
+    ("POST", API + "/tenants/{tenant_id}/programs/{program_id}/credentials"),
+    ("GET", API + "/tenants/{tenant_id}/programs/{program_id}/credentials"),
+    ("DELETE", API + "/tenants/{tenant_id}/programs/{program_id}/credentials/{credential_id}"),
 }
 IDENTITY_ROUTES = IDENTITY_ROUTES | PROGRAM_ROUTES  # same refusal contract as the members/invitations routes
 PUBLIC_ROUTES = EXISTING_ROUTES | IDENTITY_ROUTES
 
 #: One successful call per route: (route, concrete path, body, the port answers it needs).
 HAPPY: list[tuple[tuple[str, str], str, dict[str, Any] | None, dict[str, Any]]] = [
-    (("GET", "/tenants/{tenant_id}/alerts"), f"{T}/alerts", None, {"list_alerts": [SUMMARY]}),
-    (("GET", "/tenants/{tenant_id}/alerts/{alert_id}"), f"{T}/alerts/a1000000-0000-4000-8000-000000000001", None, {"get_alert": ALERT}),
-    (("POST", "/tenants/{tenant_id}/investigations"), f"{T}/investigations",
+    (("GET", API + "/tenants/{tenant_id}/alerts"), f"{T}/alerts", None, {"list_alerts": [SUMMARY]}),
+    (("GET", API + "/tenants/{tenant_id}/alerts/{alert_id}"), f"{T}/alerts/a1000000-0000-4000-8000-000000000001", None, {"get_alert": ALERT}),
+    (("POST", API + "/tenants/{tenant_id}/investigations"), f"{T}/investigations",
      {"alert_id": "a1000000-0000-4000-8000-000000000001", "client_request_id": "r1"}, {"create_investigation": (INV, True)}),
-    (("GET", "/tenants/{tenant_id}/investigations"), f"{T}/investigations", None, {"list_investigations": [INV]}),
-    (("GET", "/tenants/{tenant_id}/investigations/{investigation_id}"), f"{T}/investigations/b1000000-0000-4000-8000-000000000001", None,
+    (("GET", API + "/tenants/{tenant_id}/investigations"), f"{T}/investigations", None, {"list_investigations": [INV]}),
+    (("GET", API + "/tenants/{tenant_id}/investigations/{investigation_id}"), f"{T}/investigations/b1000000-0000-4000-8000-000000000001", None,
      {"get_investigation": INV}),
-    (("POST", "/tenants/{tenant_id}/investigations/{investigation_id}/cancel"), f"{T}/investigations/b1000000-0000-4000-8000-000000000001/cancel", None,
+    (("POST", API + "/tenants/{tenant_id}/investigations/{investigation_id}/cancel"), f"{T}/investigations/b1000000-0000-4000-8000-000000000001/cancel", None,
      {"cancel_investigation": INV}),
-    (("DELETE", "/tenants/{tenant_id}/investigations/{investigation_id}"), f"{T}/investigations/b1000000-0000-4000-8000-000000000001", None,
+    (("DELETE", API + "/tenants/{tenant_id}/investigations/{investigation_id}"), f"{T}/investigations/b1000000-0000-4000-8000-000000000001", None,
      {"delete_investigation": None}),
-    (("GET", "/tenants/{tenant_id}/investigations/{investigation_id}/artifacts/{key}"),
+    (("GET", API + "/tenants/{tenant_id}/investigations/{investigation_id}/artifacts/{key}"),
      f"{T}/investigations/b1000000-0000-4000-8000-000000000001/artifacts/report.md", None,
      {"get_investigation": INV, "signed_url": SIGNED}),
-    (("POST", "/tenants/{tenant_id}/learning-jobs"), f"{T}/learning-jobs",
+    (("POST", API + "/tenants/{tenant_id}/learning-jobs"), f"{T}/learning-jobs",
      {"investigation_id": "b1000000-0000-4000-8000-000000000001", "client_request_id": "r1"}, {"create_learning_job": (JOB, True)}),
-    (("GET", "/tenants/{tenant_id}/learning-jobs"), f"{T}/learning-jobs", None, {"list_learning_jobs": [JOB]}),
-    (("GET", "/tenants/{tenant_id}/learning-jobs/{learning_job_id}"), f"{T}/learning-jobs/c1000000-0000-4000-8000-000000000001", None,
+    (("GET", API + "/tenants/{tenant_id}/learning-jobs"), f"{T}/learning-jobs", None, {"list_learning_jobs": [JOB]}),
+    (("GET", API + "/tenants/{tenant_id}/learning-jobs/{learning_job_id}"), f"{T}/learning-jobs/c1000000-0000-4000-8000-000000000001", None,
      {"get_learning_job": JOB}),
-    (("GET", "/tenants/{tenant_id}/lessons"), f"{T}/lessons", None, {"list_lessons": [LESSON]}),
-    (("GET", "/tenants/{tenant_id}/systems"), f"{T}/systems", None,
+    (("GET", API + "/tenants/{tenant_id}/lessons"), f"{T}/lessons", None, {"list_lessons": [LESSON]}),
+    (("GET", API + "/tenants/{tenant_id}/systems"), f"{T}/systems", None,
      {"list_systems": [SETTINGS], "has_credentials": False}),
-    (("PUT", "/tenants/{tenant_id}/systems/{system_id}"), f"{T}/systems/tix",
+    (("PUT", API + "/tenants/{tenant_id}/systems/{system_id}"), f"{T}/systems/tix",
      {"kind": "ticketing", "display_name": "T", "enabled": True, "settings": {}},
      {"put_system": (SETTINGS, True), "has_credentials": False}),
-    (("PUT", "/tenants/{tenant_id}/systems/{system_id}/credentials"), f"{T}/systems/tix/credentials",
+    (("PUT", API + "/tenants/{tenant_id}/systems/{system_id}/credentials"), f"{T}/systems/tix/credentials",
      {"kind": "static", "credentials": {"api_token": LONG}},
      {"get_system": SETTINGS, "has_credentials": False, "put_credentials": None}),
-    (("POST", "/tenants/{tenant_id}/systems/{system_id}/check"), f"{T}/systems/tix/check", None,
+    (("POST", API + "/tenants/{tenant_id}/systems/{system_id}/check"), f"{T}/systems/tix/check", None,
      {"get_system": SETTINGS, "has_credentials": True,
       "check": SystemCheck(ok=True, detail="fine")}),
     (("GET", ALERT_MAPPING_ROUTE), alert_mapping_url(A), None,
@@ -351,7 +352,7 @@ class Api:
 
 def test_the_published_routes_are_exactly_1131s_list_under_tenants_plus_1306s() -> None:
     """#1131's routes live under `/tenants/{tenant_id}`, #1306 adds its own, and no Bearer scheme is published."""
-    doc = Api().client.get("/openapi.json").json()
+    doc = Api().client.get(API + "/openapi.json").json()
     documented = {(method.upper(), path) for path, ops in doc["paths"].items() for method in ops}
     assert documented == PUBLIC_ROUTES
     schemes = doc.get("components", {}).get("securitySchemes", {})
@@ -501,7 +502,7 @@ def test_every_state_changing_route_refuses_a_valid_session_without_the_frontend
 def test_a_path_tenant_that_fails_the_grammar_is_refused_not_a_500(claim: str, code: int) -> None:
     """A malformed T in the path is a 422 (#1382); an empty one matches no route (404)."""
     api = Api()
-    response = api.lenient().get(f"/tenants/{claim}/alerts", headers=AUTH)
+    response = api.lenient().get(f"{API}/tenants/{claim}/alerts", headers=AUTH)
     assert response.status_code == code
     assert api.ports.calls == []
 
@@ -551,7 +552,7 @@ def test_a_create_is_a_201_with_location_only_when_the_store_created(
     created = Api(**{port: (record, True)})
     response = created.client.post(path, headers=AUTH, json=body)
     assert response.status_code == 201
-    assert response.headers["Location"] == BASE + location
+    assert response.headers["Location"] == location
     assert response.json() == record.model_dump(mode="json")
     [((principal, *rest), kwargs)] = created.ports.called(port)
     assert (principal, rest, kwargs) == (Principal(tenant_id=A, actor_id=created.user), [*body.values()], {})
@@ -605,7 +606,7 @@ def test_put_system_is_a_201_at_its_own_url_when_created_and_200_when_replaced()
     body = {"kind": "ticketing", "display_name": "T", "enabled": False, "settings": {"q": "s"}}
     created = Api(put_system=(SETTINGS, True), has_credentials=False)
     response = created.client.put(f"{T}/systems/tix", headers=AUTH, json=body)  # R7-2: a stray `x=1` here is now refused, see below
-    assert (response.status_code, response.headers["Location"]) == (201, BASE + f"{T}/systems/tix")
+    assert (response.status_code, response.headers["Location"]) == (201, f"{T}/systems/tix")
     # FORCED CHOICE FC-12: the systems port's `put_system(principal, system_id, body)`: the principal replaces the tenant.
     ((principal, system_id, sent), kwargs), = created.ports.called("put_system")
     assert (principal.tenant_id, principal.actor_id, system_id, sent.model_dump(), kwargs) == (
@@ -640,7 +641,7 @@ def test_1345_put_alert_mapping_is_201_at_its_own_url_then_200_and_the_route_ann
     answer has all six entries, unmapped ones null; one `alert_mapping.update` event each. (#1345 O1)"""
     created = Api(put_alert_mapping=lambda _principal, body: (body, True))
     response = created.client.put(alert_mapping_url(A), headers=AUTH, json=MAPPING_BODY)
-    assert (response.status_code, response.headers["Location"]) == (201, BASE + alert_mapping_url(A))
+    assert (response.status_code, response.headers["Location"]) == (201, alert_mapping_url(A))
     assert response.json() == {entry: MAPPING_BODY.get(entry) for entry in MAPPING_ENTRIES}
     ((principal, sent), kwargs), = created.ports.called("put_alert_mapping")
     assert (principal, sent.model_dump(), kwargs) == (Principal(tenant_id=A, actor_id=created.user), MAPPING_BODY, {})  # r5: the port gets the validated wire model's `model_dump()`
@@ -983,7 +984,7 @@ def test_a_validation_problem_lists_what_failed_and_never_echoes_the_value() -> 
 
 
 def test_the_published_contract_declares_each_routes_problems() -> None:
-    doc = Api().client.get("/openapi.json").json()
+    doc = Api().client.get(API + "/openapi.json").json()
     assert "HTTPValidationError" not in json.dumps(doc)
     declared: dict[tuple[str, str], set[int]] = {}
     for path, operations in doc["paths"].items():
@@ -997,19 +998,19 @@ def test_the_published_contract_declares_each_routes_problems() -> None:
                     "application/problem+json": {"schema": {"$ref": "#/components/schemas/Problem"}}}
     assert all({401, 422, 500} <= errors for route, errors in declared.items()
                if route in EXISTING_ROUTES)
-    assert declared[("POST", "/tenants/{tenant_id}/investigations/{investigation_id}/cancel")] >= {404, 409}
-    assert declared[("DELETE", "/tenants/{tenant_id}/investigations/{investigation_id}")] >= {404, 409}
-    assert declared[("POST", "/tenants/{tenant_id}/investigations")] >= {409}
+    assert declared[("POST", API + "/tenants/{tenant_id}/investigations/{investigation_id}/cancel")] >= {404, 409}
+    assert declared[("DELETE", API + "/tenants/{tenant_id}/investigations/{investigation_id}")] >= {404, 409}
+    assert declared[("POST", API + "/tenants/{tenant_id}/investigations")] >= {409}
     refusable = {route for route in EXISTING_ROUTES if "/systems" in route[1] or "/lessons" in route[1]}
     assert len(refusable) == 5
     assert all(501 in declared[route] for route in refusable), "the 501 is documented on every route of the unbacked families (O8)"
-    assert declared[("POST", "/tenants/{tenant_id}/learning-jobs")] >= {409}
-    assert declared[("GET", "/tenants/{tenant_id}/investigations/{investigation_id}/artifacts/{key}")] >= {404}
+    assert declared[("POST", API + "/tenants/{tenant_id}/learning-jobs")] >= {409}
+    assert declared[("GET", API + "/tenants/{tenant_id}/investigations/{investigation_id}/artifacts/{key}")] >= {404}
     # Every tenant route answers 404 to a non-member, so every one declares it.
     assert all(404 in errors for (_, path), errors in declared.items()
-               if path.startswith("/tenants/{tenant_id}"))
+               if path.startswith(API + "/tenants/{tenant_id}"))
     # Every identity route but the two redirecting ones declares its 401 as a problem.
-    signed_out = {("GET", "/auth/login"), ("GET", "/auth/callback")}
+    signed_out = {("GET", API + "/auth/login"), ("GET", API + "/auth/callback")}
     for route in IDENTITY_ROUTES - signed_out:
         assert 401 in declared[route], route
         for status in declared[route]:
@@ -1531,7 +1532,7 @@ def test_1083_control_the_same_deps_serve_the_backed_families() -> None:
 
 def test_1083_the_published_document_is_the_same_whichever_ports_are_passed_and_is_not_marked_stub() -> None:
     """A scripted and a refusing-ports document are one document; its summary does not say "not yet real". (O8, Am-2)"""
-    refusing = _refusing_client({}).get("/openapi.json").json()
+    refusing = _refusing_client({}).get(API + "/openapi.json").json()
     assert refusing["paths"]
-    assert refusing == Api().client.get("/openapi.json").json()
+    assert refusing == Api().client.get(API + "/openapi.json").json()
     assert "not yet real" not in json.dumps(refusing["info"]).lower()

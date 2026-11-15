@@ -18,6 +18,7 @@ pytestmark = [
 
 import datetime as _dt  # noqa: E402
 
+from defender.tests.support.api._mount1161 import API  # noqa: E402
 from defender.tests.support.api._identity1306 import (  # noqa: E402
     ALERT,
     ANN,
@@ -66,7 +67,7 @@ def _present(s: Soar, kind: str, reason: str, programs: tuple[str, str]) -> str:
         subject = realm.clients[credential].service_account_id
         secret = realm.forge(credential, subject)  # fresh now, for the control use only
     if reason != "unused":
-        assert s.world.bearer(secret).get(f"/tenants/{T1}/alerts").status_code == 200  # control: it works, and is recorded
+        assert s.world.bearer(secret).get(f"{API}/tenants/{T1}/alerts").status_code == 200  # control: it works, and is recorded
     s.world.clock.advance(_dt.timedelta(minutes=10))  # long enough that a use would be written again (every 5 minutes)
     if reason == "revoked":
         assert revoke(s.ann, T1, programs[0], credential).status_code == 204
@@ -117,7 +118,7 @@ def test_a_refused_bearer_is_401_and_changes_no_credential_row(kind: str, reason
     programs = (s.program_id, other)
     value = _present(s, kind, reason, programs)
     before = _all_rows(s, *programs)
-    response = s.world.bearer(value).get(f"/tenants/{T1}/alerts")
+    response = s.world.bearer(value).get(f"{API}/tenants/{T1}/alerts")
     after = _all_rows(s, *programs)
     if reason == "usable":
         assert response.status_code == 200, response.text
@@ -181,7 +182,7 @@ def test_a_bearer_header_is_the_bearer_path_in_both_layers_and_any_other_value_l
     empty, another scheme) is not ours to read: the cookie decides, a write without the frontend Origin being the
     origin layer's 403 (O1, O9, A4; P-F as amended in the #1450 reviews: a proxy's Basic login locks no person out)."""
     s = soar()
-    read, write = f"/tenants/{T1}/alerts", f"/tenants/{T1}/investigations"
+    read, write = f"{API}/tenants/{T1}/alerts", f"{API}/tenants/{T1}/investigations"
     count = itertools.count()
 
     def post(authorization: str | None, cookie: str | None, origin: str | None) -> int:
@@ -273,5 +274,5 @@ def test_an_invalid_or_missing_credential_is_401_whatever_the_body_holds(route: 
 def test_a_valid_credential_with_a_malformed_body_is_a_422() -> None:
     """Control for the body sweep: authentication first does not mean the body is never read (O1)."""
     s = soar()
-    response = s.program().post(f"/tenants/{T1}/investigations", headers=_JSON, content=_MALFORMED)
+    response = s.program().post(f"{API}/tenants/{T1}/investigations", headers=_JSON, content=_MALFORMED)
     assert response.status_code == 422, response.text
