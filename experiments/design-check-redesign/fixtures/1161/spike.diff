@@ -1,0 +1,420 @@
+diff --git a/defender/api/app.py b/defender/api/app.py
+index 62d62df76..fb8fba07f 100644
+--- a/defender/api/app.py
++++ b/defender/api/app.py
+@@ -3,8 +3,13 @@
+ from __future__ import annotations
+ 
+ import asyncio
++import base64
+ import datetime as _dt
+ import logging
++import posixpath
++import re
++import secrets
++import urllib.parse
+ from collections.abc import AsyncIterator, Callable, Coroutine
+ from contextlib import asynccontextmanager
+ from typing import Annotated, Any, Generic, Literal, NamedTuple, TypeVar
+@@ -82,8 +87,13 @@ DEFAULT_PAGE = 50
+ 
+ #: DC-6: `__Host-` cookies are Secure, Path=/ and carry no Domain.
+ SESSION_COOKIE = "__Host-defender_session"
+-PRELOGIN_COOKIE = "__Host-defender_prelogin"
++#: D6: one pre-login cookie per attempt, named by a prefix of its state. `__Host-` cannot carry a sub-path.
++PRELOGIN_COOKIE = "__Secure-defender_prelogin_"
+ _PRELOGIN_MAX_AGE = 600
++#: B3: the API's prefix on the shared origin.
++API_PREFIX = "/api"
++_MAX_RETURN_BYTES = 1024
++_STATE_NAME = re.compile(r"[A-Za-z0-9_-]{8,}")
+ _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+ 
+ _logger = logging.getLogger(__name__)
+@@ -658,8 +668,47 @@ async def check_system(deps: Deps, caller: ConfigWriter, system_id: SystemPath)
+ _IDENTITY = responses(401, 403, 422, 500)
+ 
+ 
+-def _cookie_options() -> dict[str, object]:
+-    return {"path": "/", "secure": True, "httponly": True, "samesite": "lax"}
++def _cookie_options(path: str = "/") -> dict[str, object]:
++    return {"path": path, "secure": True, "httponly": True, "samesite": "lax"}
++
++
++#: Where the pre-login cookies live: only the callback reads them.
++_CALLBACK_PATH = f"{API_PREFIX}/auth/callback"
++
++
++def _return_path(value: str | None) -> str | None:
++    """P2: `value` if it is a relative frontend path sign-in may return to, else None."""
++    if not value or not value.startswith("/") or value.startswith(("//", "/\\")):
++        return None
++    if len(value.encode()) > _MAX_RETURN_BYTES or any(ord(c) < 0x20 or ord(c) == 0x7F for c in value):
++        return None
++    # What the ingress and the browser will make of it: percent-decoded and with dot segments resolved.
++    resolved = posixpath.normpath(urllib.parse.unquote(urllib.parse.urlsplit(value).path))
++    if resolved == API_PREFIX or resolved.startswith(f"{API_PREFIX}/") or resolved.startswith("//"):
++        return None
++    return value
++
++
++def _encode_return(path: str) -> str:
++    return base64.urlsafe_b64encode(path.encode()).decode().rstrip("=")
++
++
++def _decode_return(text: str) -> str | None:
++    try:
++        return _return_path(base64.urlsafe_b64decode(text + "=" * (-len(text) % 4)).decode())
++    except ValueError:
++        return None
++
++
++def _prelogin_name(state: str) -> str | None:
++    """The cookie name of the attempt `state` belongs to; None for a state that is not ours to name a cookie after."""
++    return f"{PRELOGIN_COOKIE}{state[:8]}" if _STATE_NAME.fullmatch(state[:8]) and len(state[:8]) == 8 else None
++
++
++def _failed_screen(deps: ApiDeps, reason: str, back: str | None) -> RedirectResponse:
++    query = {"reason": reason, **({"return": back} if back and back != "/" else {})}
++    return RedirectResponse(f"{deps.frontend_origin}/sign-in-failed?{urllib.parse.urlencode(query)}",
++                            status_code=status.HTTP_303_SEE_OTHER)
+ 
+ 
+ auth = _router(tags=["auth"])
+@@ -667,33 +716,45 @@ auth = _router(tags=["auth"])
+ 
+ @auth.get("/auth/login", status_code=status.HTTP_302_FOUND, response_class=RedirectResponse,
+           responses=responses(503, 500), dependencies=[Depends(_public)])
+-async def login(deps: Deps) -> RedirectResponse:
+-    """Send the person to the sign-in page. The state, nonce and PKCE verifier travel back in a
+-    short-lived cookie."""
+-    start = await deps.identity.begin_signin()
++async def login(deps: Deps, back: Annotated[str | None, Query(alias="return")] = None) -> RedirectResponse:
++    """Send the person to the sign-in page. The state, nonce, PKCE verifier and return path travel back in a
++    short-lived cookie of this attempt's own."""
++    path = _return_path(back) or "/"
++    try:
++        start = await deps.identity.begin_signin()
++    except _identity.SignInUnavailable:
++        return _failed_screen(deps, "unavailable", path)
+     response = RedirectResponse(start.url, status_code=status.HTTP_302_FOUND)
+-    response.set_cookie(PRELOGIN_COOKIE, start.prelogin, max_age=_PRELOGIN_MAX_AGE, **_cookie_options())  # type: ignore[arg-type]
++    state = start.prelogin.split(".")[0]
++    response.set_cookie(f"{PRELOGIN_COOKIE}{state[:8]}", f"{start.prelogin}.{_encode_return(path)}",
++                        max_age=_PRELOGIN_MAX_AGE, **_cookie_options(_CALLBACK_PATH))  # type: ignore[arg-type]
+     return response
+ 
+ 
+ @auth.get("/auth/callback", status_code=status.HTTP_303_SEE_OTHER, response_class=RedirectResponse,
+-          responses=responses(403, 503, 422, 500), dependencies=[Depends(_public)])
++          responses=responses(422, 500), dependencies=[Depends(_public)])
+ @_any_query
+ async def callback(request: Request, deps: Deps, code: str = "", state: str = "") -> Response:
+-    """Finish a sign-in: a session cookie and a redirect to the frontend, or a 403 problem of one
+-    of four types. The pre-login cookie is cleared whatever the outcome."""
++    """Finish a sign-in: a 303 to the return path with a session cookie, or to the sign-in-failed screen naming the
++    reason. This attempt's pre-login cookie is cleared whatever the outcome."""
++    name = _prelogin_name(state)
++    raw = request.cookies.get(name) if name else None
++    prelogin, _, encoded = (raw or "").rpartition(".")
++    # The return path is the cookie's only if the cookie is this attempt's (B4): its state is the callback's.
++    own = bool(prelogin) and secrets.compare_digest(prelogin.split(".")[0].encode(), state.encode())
++    back = _decode_return(encoded) if own else None
+     try:
+-        value = await deps.identity.complete_signin(
+-            code=code, state=state, prelogin=request.cookies.get(PRELOGIN_COOKIE))
++        value = await deps.identity.complete_signin(code=code, state=state, prelogin=prelogin if own else None)
+     except _identity.CallbackRefused as e:
+-        response: Response = problem(403, str(e), type_=f"urn:defender:problem:{e.reason}")
++        response: Response = _failed_screen(deps, e.reason, back)
+     except _identity.SignInUnavailable:
+-        response = problem(503, "sign-in is unavailable")
++        response = _failed_screen(deps, "unavailable", back)
+     else:
+-        response = RedirectResponse(deps.frontend_origin, status_code=status.HTTP_303_SEE_OTHER)
++        response = RedirectResponse(f"{deps.frontend_origin}{back or '/'}", status_code=status.HTTP_303_SEE_OTHER)
+         response.set_cookie(SESSION_COOKIE, value, max_age=int(SESSION_LIFETIME.total_seconds()),
+                             **_cookie_options())  # type: ignore[arg-type]
+-    response.delete_cookie(PRELOGIN_COOKIE, **_cookie_options())  # type: ignore[arg-type]
++    if name:
++        response.delete_cookie(name, **_cookie_options(_CALLBACK_PATH))  # type: ignore[arg-type]
+     return response
+ 
+ 
+@@ -967,6 +1028,7 @@ def create_app(deps: ApiDeps) -> FastAPI:
+         summary="The routes and shapes of the platform API; a route whose records are not yet served answers 501.",
+         lifespan=_lifespan,
+         dependencies=[Depends(_no_unknown_query)],
++        openapi_url=f"{API_PREFIX}/openapi.json", docs_url=f"{API_PREFIX}/docs", redoc_url=f"{API_PREFIX}/redoc",
+     )
+     app.state.deps = deps
+     app.add_middleware(_ExpiryHeader)
+@@ -975,7 +1037,7 @@ def create_app(deps: ApiDeps) -> FastAPI:
+     for router in (alerts, investigations, learning_jobs, lessons, systems, alert_mapping, people, programs):
+         in_tenant.include_router(router)
+     for router in (auth, in_tenant, admin):
+-        app.include_router(router)
++        app.include_router(router, prefix=API_PREFIX)
+     install_problems(app)
+     app.add_exception_handler(NotFound, refusal(status.HTTP_404_NOT_FOUND))
+     app.add_exception_handler(Conflict, refusal(status.HTTP_409_CONFLICT))
+diff --git a/defender/frontend/.gitignore b/defender/frontend/.gitignore
+new file mode 100644
+index 000000000..b94707787
+--- /dev/null
++++ b/defender/frontend/.gitignore
+@@ -0,0 +1,2 @@
++node_modules/
++dist/
+diff --git a/defender/frontend/Caddyfile b/defender/frontend/Caddyfile
+new file mode 100644
+index 000000000..04445836b
+--- /dev/null
++++ b/defender/frontend/Caddyfile
+@@ -0,0 +1,27 @@
++# The ingress: the built frontend for every path outside /api, the API for /api (#1161 B9, Am-1).
++# Deployment-specific values come from the environment:
++#   DEFENDER_INGRESS_ADDRESS  the site address (http://localhost:PORT in tests, a TLS hostname in deployment)
++#   DEFENDER_INGRESS_API      the API's upstream, host:port
++#   DEFENDER_INGRESS_ROOT     the built frontend folder (dist/)
++#   DEFENDER_ARTIFACT_DOMAIN  the artifact domain the CSP's form-action names
++#   DEFENDER_INGRESS_ADMIN    Caddy's admin endpoint ("off" to disable)
++{
++	admin {$DEFENDER_INGRESS_ADMIN:localhost:2019}
++}
++
++{$DEFENDER_INGRESS_ADDRESS} {
++	@api path /api /api/*
++	handle @api {
++		reverse_proxy {$DEFENDER_INGRESS_API}
++	}
++	handle {
++		header {
++			Content-Security-Policy "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self' https://*.{$DEFENDER_ARTIFACT_DOMAIN}"
++			Referrer-Policy "strict-origin-when-cross-origin"
++			X-Content-Type-Options "nosniff"
++		}
++		root * {$DEFENDER_INGRESS_ROOT}
++		try_files {path} /index.html
++		file_server
++	}
++}
+diff --git a/defender/frontend/index.html b/defender/frontend/index.html
+new file mode 100644
+index 000000000..d566b6e91
+--- /dev/null
++++ b/defender/frontend/index.html
+@@ -0,0 +1,12 @@
++<!doctype html>
++<html lang="en">
++<head>
++<meta charset="utf-8">
++<meta name="viewport" content="width=device-width, initial-scale=1">
++<title>Defender</title>
++</head>
++<body>
++<div id="app"></div>
++<script type="module" src="/main.js"></script>
++</body>
++</html>
+diff --git a/defender/frontend/package-lock.json b/defender/frontend/package-lock.json
+new file mode 100644
+index 000000000..ba9c78808
+--- /dev/null
++++ b/defender/frontend/package-lock.json
+@@ -0,0 +1,27 @@
++{
++  "name": "defender-frontend",
++  "lockfileVersion": 3,
++  "requires": true,
++  "packages": {
++    "": {
++      "name": "defender-frontend",
++      "devDependencies": {
++        "typescript": "5.6.3"
++      }
++    },
++    "node_modules/typescript": {
++      "version": "5.6.3",
++      "resolved": "https://registry.npmjs.org/typescript/-/typescript-5.6.3.tgz",
++      "integrity": "sha512-hjcS1mhfuyi4WW8IWtjP7brDrG2cuDZukyrYrSauoXGNgx0S7zceP07adYkJycEr56BOUTNPzbInooiN3fn1qw==",
++      "dev": true,
++      "license": "Apache-2.0",
++      "bin": {
++        "tsc": "bin/tsc",
++        "tsserver": "bin/tsserver"
++      },
++      "engines": {
++        "node": ">=14.17"
++      }
++    }
++  }
++}
+diff --git a/defender/frontend/package.json b/defender/frontend/package.json
+new file mode 100644
+index 000000000..c14f53e6c
+--- /dev/null
++++ b/defender/frontend/package.json
+@@ -0,0 +1,11 @@
++{
++  "name": "defender-frontend",
++  "private": true,
++  "type": "module",
++  "scripts": {
++    "build": "rm -rf dist && tsc && cp index.html dist/index.html"
++  },
++  "devDependencies": {
++    "typescript": "5.6.3"
++  }
++}
+diff --git a/defender/frontend/src/main.ts b/defender/frontend/src/main.ts
+new file mode 100644
+index 000000000..3fef3a5ca
+--- /dev/null
++++ b/defender/frontend/src/main.ts
+@@ -0,0 +1,127 @@
++// The frontend: client-side rendered, built to static files. Three screens (#1161 B8): the investigation, the
++// sign-in-failed screen, and a root placeholder. The API is called with the session cookie only (B5).
++
++const ATTEMPT_KEY = "defender.signin-attempt";
++
++type Storage_ = { ok: true; had: boolean } | { ok: false };
++
++// B1: read the attempt record once at load and delete it.
++function takeAttempt(): Storage_ {
++  try {
++    const had = window.sessionStorage.getItem(ATTEMPT_KEY) !== null;
++    window.sessionStorage.removeItem(ATTEMPT_KEY);
++    return { ok: true, had };
++  } catch {
++    return { ok: false };
++  }
++}
++
++function recordAttempt(): boolean {
++  try {
++    window.sessionStorage.setItem(ATTEMPT_KEY, "1");
++    return window.sessionStorage.getItem(ATTEMPT_KEY) === "1";
++  } catch {
++    return false;
++  }
++}
++
++function signInUrl(back: string | null): string {
++  return back ? `/api/auth/login?return=${encodeURIComponent(back)}` : "/api/auth/login";
++}
++
++function el(tag: string, attrs: Record<string, string> = {}, text = ""): HTMLElement {
++  const node = document.createElement(tag);
++  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
++  node.textContent = text;
++  return node;
++}
++
++function show(...nodes: HTMLElement[]): void {
++  const app = document.getElementById("app")!;
++  app.replaceChildren(...nodes);
++}
++
++// A path the frontend may send the browser back to: one leading "/", not "//" or "/\".
++function localPath(value: string | null): string | null {
++  if (!value || !value.startsWith("/") || value.startsWith("//") || value.startsWith("/\\")) return null;
++  return value;
++}
++
++function failedScreen(reason: string, back: string | null): void {
++  const message: Record<string, string> = {
++    "unknown-account": "This account is not known here.",
++    "otp-required": "Administrators sign in with a one-time code; sign in again.",
++    "unavailable": "Sign-in is unavailable right now.",
++    "prelogin-missing": "There is no sign-in in progress.",
++    "login-attempt-invalid": "The sign-in could not be completed.",
++    "session-lost": "You were signed in but the session was not accepted.",
++    "storage-unavailable": "This browser does not let the page remember a sign-in attempt.",
++  };
++  const retry = el("button", { "data-testid": "sign-in-retry" }, "Sign in again");
++  retry.addEventListener("click", () => {
++    recordAttempt();
++    window.location.assign(signInUrl(back));
++  });
++  show(el("h1", {}, "Sign-in failed"),
++    el("p", { "data-testid": "sign-in-failed", "data-reason": reason }, message[reason] ?? `Sign-in failed (${reason}).`),
++    retry);
++}
++
++// Send the person to the sign-in-failed screen keeping where they were going (never this screen's own address).
++function goToFailed(reason: string, back: string): void {
++  const query = new URLSearchParams({ reason, return: back });
++  window.location.replace(`/sign-in-failed?${query}`);
++}
++
++interface InvestigationView {
++  investigation_id: string;
++  status: string;
++  disposition: string | null;
++}
++
++async function investigationScreen(tenant: string, investigation: string): Promise<void> {
++  const attempt = takeAttempt();
++  const here = window.location.pathname + window.location.search;
++  show(el("p", {}, "Loading..."));
++  // The load's first API answer is /api/me's (the design's flow); the investigation is read only once signed in.
++  const me = await fetch("/api/me", { credentials: "same-origin" });
++  if (me.status === 401) {
++    if (!attempt.ok) return goToFailed("storage-unavailable", here);
++    if (attempt.had) return goToFailed("session-lost", here);
++    if (!recordAttempt()) return goToFailed("storage-unavailable", here);
++    window.location.replace(signInUrl(here));
++    return;
++  }
++  const response = await fetch(`/api/tenants/${encodeURIComponent(tenant)}/investigations/${encodeURIComponent(investigation)}`,
++    { credentials: "same-origin" });
++  if (!response.ok) {
++    show(el("h1", {}, "Investigation"), el("p", { "data-testid": "not-available" }, "This investigation is not available."));
++    return;
++  }
++  const view = (await response.json()) as InvestigationView;
++  show(el("h1", {}, "Investigation"),
++    el("p", { "data-testid": "investigation-id" }, view.investigation_id),
++    el("p", { "data-testid": "status" }, `Status: ${view.status}`),
++    el("p", { "data-testid": "outcome" }, `Outcome: ${view.disposition ?? "none yet"}`));
++}
++
++function failedRoute(): void {
++  takeAttempt();
++  const params = new URLSearchParams(window.location.search);
++  failedScreen(params.get("reason") ?? "unknown", localPath(params.get("return")));
++}
++
++function route(): void {
++  const path = window.location.pathname;
++  const investigation = /^\/t\/([^/]+)\/investigations\/([^/]+)\/?$/.exec(path);
++  if (investigation) {
++    void investigationScreen(decodeURIComponent(investigation[1]), decodeURIComponent(investigation[2]));
++  } else if (path === "/sign-in-failed") {
++    failedRoute();
++  } else {
++    takeAttempt();
++    show(el("h1", {}, "Defender"));
++  }
++}
++
++route();
+diff --git a/defender/frontend/tsconfig.json b/defender/frontend/tsconfig.json
+new file mode 100644
+index 000000000..b5dd0a843
+--- /dev/null
++++ b/defender/frontend/tsconfig.json
+@@ -0,0 +1,12 @@
++{
++  "compilerOptions": {
++    "target": "ES2022",
++    "module": "ES2022",
++    "moduleResolution": "bundler",
++    "lib": ["ES2022", "DOM"],
++    "strict": true,
++    "rootDir": "src",
++    "outDir": "dist"
++  },
++  "include": ["src"]
++}
