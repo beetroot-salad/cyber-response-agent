@@ -90,11 +90,6 @@ def _shape_violations(name: str, tmp_path: Path) -> list[tuple[str, str]]:
                   ("origin with an upper-case scheme", ORIGIN.replace("http", "HTTP", 1)),
                   ("origin with its default port", "http://localhost:80"),
                   ("origin with a non-ASCII host", "http://bücher.example:8000")]
-    if name == "DEFENDER_KEYCLOAK_REDIRECT_URI":
-        cases += [("redirect uri relative", "/auth/callback"), ("redirect uri not http", "ftp://localhost:8000/cb"),
-                  ("redirect uri no scheme", "localhost:8000/auth/callback"),
-                  # OAuth forbids a fragment; the adapter's own rule refuses it, so sign-in cannot fail on it later.
-                  ("redirect uri with a fragment", "http://localhost:8000/auth/callback#x")]
     if name.endswith("_ISSUER"):
         cases += [("issuer without a realm", f"{FRONT}/elsewhere"), ("issuer with no realm name", f"{FRONT}/realms/")]
     if name == "DEFENDER_KEYCLOAK_SERVER_URL":
@@ -510,9 +505,9 @@ _EXITS = ("served", *(f"probe {realm}" for realm in REALMS), "bind", "bootstrap"
 async def _one_request_per_store(app, seeded) -> None:
     """A request served by each store-backed family: the job store, the identity store, the tenant rows."""
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=ORIGIN) as client:
-        answered = [(await client.get(f"/tenants/{TENANT}/alerts", headers=person(seeded.ann_session))).status_code,
-                    (await client.get("/me", headers=person(seeded.ann_session))).status_code,
-                    (await client.get(f"/admin/tenants/{TENANT}", headers=person(seeded.ops_session))).status_code]
+        answered = [(await client.get(f"/api/tenants/{TENANT}/alerts", headers=person(seeded.ann_session))).status_code,
+                    (await client.get("/api/me", headers=person(seeded.ann_session))).status_code,
+                    (await client.get(f"/api/admin/tenants/{TENANT}", headers=person(seeded.ops_session))).status_code]
     assert answered == [200, 200, 200]
 
 
@@ -607,7 +602,7 @@ async def test_both_realms_are_probed_at_start(tmp_path, migrated_database):
 #: `<scheme>://<host>[:port]/realms/<realm>`; `absolute` an absolute http(s) URL. The server URL's path and the DSN's
 #: scheme are not stated (a pending owner decision; an observation), so the oracle accepts either answer there.
 _URL_SHAPES = {"DEFENDER_API_FRONTEND_ORIGIN": "origin", "DEFENDER_KEYCLOAK_ISSUER": "issuer",
-               "DEFENDER_KEYCLOAK_PROGRAMS_ISSUER": "issuer", "DEFENDER_KEYCLOAK_REDIRECT_URI": "absolute",
+               "DEFENDER_KEYCLOAK_PROGRAMS_ISSUER": "issuer",
                "DEFENDER_KEYCLOAK_SERVER_URL": "server", "DEFENDER_DATABASE_DSN": "dsn"}
 REFUSE, ACCEPT, EITHER = "refuse", "accept", "either"
 

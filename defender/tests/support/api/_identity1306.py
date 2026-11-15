@@ -86,7 +86,6 @@ SECOND = _dt.timedelta(seconds=1)
 FRONTEND_ORIGIN = "https://app.defender.test"
 #: DC-6. Both are HttpOnly, Secure, SameSite=Lax, Path=/, no Domain.
 SESSION_COOKIE = "__Host-defender_session"
-PRELOGIN_COOKIE = "__Host-defender_prelogin"
 #: Secure cookies only round-trip over https; TestClient defaults to http.
 BASE_URL = "https://testserver"
 SIGNIN_URL = "https://signin.test/realms/defender/auth"
@@ -372,7 +371,7 @@ def pkce_challenge(verifier: str) -> str:
 # --- response helpers ----------------------------------------------------------------------
 
 def me(browser: Any) -> dict[str, Any]:
-    response = browser.get("/me")
+    response = browser.get("/api/me")
     assert response.status_code == 200, response.text
     body: dict[str, Any] = response.json()
     return body
@@ -399,7 +398,7 @@ def problem_type(response: Any) -> str:
 
 
 def invitation_rows(browser: Any, tenant: str) -> list[dict[str, Any]]:
-    return items(browser.get(f"/tenants/{tenant}/invitations"))
+    return items(browser.get(f"/api/tenants/{tenant}/invitations"))
 
 
 def invitation_id(browser: Any, tenant: str, email: str) -> str:
@@ -961,9 +960,9 @@ class World:
         return _LifespanClient(self._loop, self.app, base_url=BASE_URL, follow_redirects=False,
                                headers={"Origin": FRONTEND_ORIGIN})
 
-    def begin_signin(self, browser: TestClient) -> str:
-        """GET /auth/login; the state the person is sent to Keycloak with."""
-        login = browser.get("/auth/login")
+    def begin_signin(self, browser: TestClient, return_path: str | None = None) -> str:
+        """GET /api/auth/login (with `return` when given); the state the person is sent to Keycloak with."""
+        login = browser.get("/api/auth/login", params={} if return_path is None else {"return": return_path})
         assert login.status_code == 302, login.text
         return parse_qs(urlsplit(login.headers["location"]).query)["state"][0]
 
@@ -979,17 +978,19 @@ class World:
             del params["state"]
         return params
 
-    def sign_in_response(self, browser: TestClient, email: str, *, amr: Sequence[str] = ("pwd",),
+    def sign_in_response(  # noqa: PLR0913 — one keyword per thing a case varies
+            self, browser: TestClient, email: str, *, amr: Sequence[str] = ("pwd",),
                          name: str | None = None, account_id: str | None = None,
                          state: str | None = None, begin: bool = True,
-                         extra: Mapping[str, str] | None = None) -> Any:
+                         extra: Mapping[str, str] | None = None, return_path: str | None = None) -> Any:
         """login -> (the person at Keycloak) -> callback; the callback's response. `state`
         overrides the state the callback carries (`""` sends it empty, `NO_STATE` leaves it
-        out); `begin=False` skips the login step; `extra` adds query parameters to the callback."""
-        sent_state = self.begin_signin(browser) if begin else (state or "no-login")
+        out); `begin=False` skips the login step; `extra` adds query parameters to the callback; `return_path` is the
+        sign-in start's `return` parameter (#1161 P2)."""
+        sent_state = self.begin_signin(browser, return_path) if begin else (state or "no-login")
         params = self._callback_params(email, sent_state, amr=amr, name=name, account_id=account_id,
                                        state=state, extra=extra)
-        return browser.get("/auth/callback", params=params)
+        return browser.get("/api/auth/callback", params=params)
 
     def sign_in(self, email: str, *, amr: Sequence[str] = ("pwd",), name: str | None = None,
                 browser: TestClient | None = None) -> TestClient:
@@ -1006,7 +1007,7 @@ class World:
         return self.sign_in(email, amr=("pwd", "otp"))
 
     def invite(self, browser: TestClient, tenant: str, email: str) -> Any:
-        return browser.post(f"/tenants/{tenant}/invitations", json={"email": email})
+        return browser.post(f"/api/tenants/{tenant}/invitations", json={"email": email})
 
     def member(self, inviter: TestClient, tenant: str, email: str) -> TestClient:
         """Invite `email` (new to the platform) into `tenant`, send, and sign them in."""

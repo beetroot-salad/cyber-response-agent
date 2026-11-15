@@ -642,7 +642,7 @@ class Child:
                          + self._err.text())
         return Ended(self.process.returncode, self._out.text(), self._err.text())
 
-    def ready(self, timeout: float = 60, path: str = "/openapi.json") -> bool:
+    def ready(self, timeout: float = 60, path: str = "/api/openapi.json") -> bool:
         """True once `GET <path>` (the OpenAPI document; `/api/openapi.json` under #1161 B3) answers 200; False if the child exits or the time runs out first."""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
