@@ -99,18 +99,22 @@ def test_1161_b3_a_seeded_sample_of_the_generated_set_in_the_pinned_chromium(wor
             if phase == "signed-in":
                 want = "not-found" if shape is None else shape
                 screen(page, want)
-                settle(page, 200)
+                settle(page, 300)
+                starts = logins(seen, world.origin)  # after the shell's fetch and any redirect, not at the load event
                 got = page.evaluate("location.pathname")
                 if got != produced or starts:
                     problems.append(f"{case.value!r}: pathname {got!r} (browser produced {produced!r}), logins {starts}")
             elif shape == "sign-in-failed":
                 screen(page, "sign-in-failed")
-                settle(page, 200)
+                settle(page, 300)
+                starts = logins(seen, world.origin)
                 if starts:
                     problems.append(f"{case.value!r}: the failed screen started a sign-in {starts}")
             else:
                 landing = shape if shape in S.RETURNABLE else "root"
                 screen(page, landing)
+                settle(page, 300)
+                starts = logins(seen, world.origin)  # read after the landing wait: the redirect happens after the load event
                 want_login = produced if shape in S.RETURNABLE else None
                 got = page.evaluate("location.pathname")
                 if starts != [want_login] or got != (produced if shape in S.RETURNABLE else "/"):
