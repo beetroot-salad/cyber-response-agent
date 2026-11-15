@@ -30,6 +30,7 @@ from .errors import (
     NotAuthenticated,
     NotFound,
     SignInRefused,
+    SignInUnavailable,
     TenantNotActive,
 )
 from . import roles
