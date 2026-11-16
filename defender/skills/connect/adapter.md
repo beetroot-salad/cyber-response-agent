@@ -1,6 +1,6 @@
 # `connect` — the generated-adapter path
 
-Read this when the product carries no adapter for the system (`tenant.py catalog` does not list
+Read this when the product carries no adapter for the system (`GET /adapters` does not list
 it); if it does, configure that one instead (`configure.md`). `SKILL.md` is the entrypoint and
 owns the common steps (the check, per-system knowledge, validation, the handoff); this file is
 only how you build the adapter.
@@ -191,7 +191,7 @@ gather redesign removed — never the recommended shape.
 ## Access declaration
 
 `access.yaml`, beside `config.env` in the handoff folder (stored with the system's record
-by `tenant.py set-system`), is how the credential proxy reaches the system — and every
+by `PUT /systems/{system}`), is how the credential proxy reaches the system — and every
 record carries one: without it the store refuses the record. It holds
 `access: http-proxy`, the system's `base` URL (the only place the address lives —
 never a `config.env` key), `auth` (its `scheme` — `bearer`, `header`, `basic` or
@@ -199,15 +199,15 @@ never a `config.env` key), `auth` (its `scheme` — `bearer`, `header`, `basic` 
 a value), and the `reads` / `writes` routes the adapter calls (`{method, path}`).
 The proxy admits every `GET` and `HEAD` under the base as a read; any other request must match a
 declared route — a read route for a read sent with another method, a write route (and a
-read-write pass) for a write — or it is refused. Ask the operator for a
-sibling's (`tenant.py systems <tenant> --export <dir>` writes each system's folder;
+read-write pass) for a write — or it is refused. Ask the tenant admin for a
+sibling's (`GET /systems` answers each system's `access` text;
 ticket's is a worked one) and change the base, scheme and routes.
 
 ## Credentials
 
-The operator stores a system's credential in the secret store
-(`tenant.py set-credentials`, for the record version it was prepared for; nothing returns
-it); the proxy applies it by the declaration's scheme. A system's `config.env` and
+The tenant admin stores a system's credential in the secret store
+(`PUT /systems/{system}/credentials`, for the record version it was prepared for; nothing
+returns it); the proxy applies it by the declaration's scheme. A system's `config.env` and
 `access.yaml` hold non-secret settings only: the store keeps exactly the keys the adapter
 declares (`REQUIRED_CONFIG_KEYS`), refuses an `export` line or a repeated key, and CI
 (`lint_catalog_declarations.py`) refuses a declared key named like a secret

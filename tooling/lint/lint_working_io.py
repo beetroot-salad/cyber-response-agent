@@ -36,11 +36,12 @@ DEFENDER = Path(__file__).resolve().parents[2] / "defender"
 # Runtime includes the former gather_tools; only ticket_writer belonged to case_history.
 # Box I/O moved out of runtime and retains the same counted coverage.
 # #1308 moved runtime modules into other packages; each keeps its counted coverage here, by file
-# where the destination package holds other code.
+# where the destination package holds other code. #1470 D-E moved the roster and catalog reads from `systems` to
+# `system_rules` and the case-record rules from `tenancy/case_ticket.py` to `tenancy/case_record.py`; both keep theirs.
 ROOTS = (
-    "investigation", "hooks", "box", "systems", "providers", "records/session_store",
+    "investigation", "hooks", "box", "systems", "system_rules", "providers", "records/session_store",
     "records/run_end.py", "records/selection.py", "records/_wire.py", "records/_seeded.py",
-    "tenancy/tenant_settings.py", "tenancy/case_ticket.py", "tenancy/run_knowledge.py",
+    "tenancy/tenant_settings.py", "tenancy/case_ticket.py", "tenancy/case_record.py", "tenancy/run_knowledge.py",
     "records/_family.py", "_exception_groups.py",
 )
 READERS = frozenset({
@@ -298,8 +299,8 @@ RESIDUE = {
     ("tenancy.tenant_settings", "read_regular_bytes", "os.open"): (1, "nonrecord", ('path',)),
     ("investigation.tools._files", "_write_operand", "hold"): (1, "model_tools", ('root',)),
     ("systems.verb_roster", "audit_read_surfaces", "read_text_utf8"): (1, "nonrecord", ('path',)),
-    ("systems.verbs", "read_roster", "read_bytes_capped"): (1, "nonrecord", ('path',)),
-    ("systems.catalog", "_cold_declarations", "read_bytes_capped"): (1, "nonrecord", ('path',)),
+    ("system_rules.registry", "read_roster", "read_bytes_capped"): (1, "nonrecord", ('path',)),
+    ("system_rules.catalog", "_cold_declarations", "read_bytes_capped"): (1, "nonrecord", ('path',)),
 }
 
 

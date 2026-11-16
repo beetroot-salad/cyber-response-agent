@@ -147,8 +147,9 @@ class TenantRepository(Protocol):
         ...
 
     async def current_records(self, tenant_id: TenantId) -> TenantRecords:
-        """The tenant's system and case records as they stand (#1366 R10): whether its systems come from records (the mark),
-        its current non-deleted systems, its current case record. Not marked: `imported=False` and nothing else.
+        """The tenant's system and case records as they stand (#1366 R10): its current non-deleted systems and its
+        current case record, both empty for a tenant nothing was written for. Known exactly while the tenant is
+        `active` (#1470 O8): a tenant with no row, or in any other state, is `NoSuchTenant` or `TenantNotActive` (`record_refusals.refuse_unless_active`).
         Written only by `system_records`' store."""
         ...
 

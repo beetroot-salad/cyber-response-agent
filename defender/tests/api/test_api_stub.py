@@ -32,11 +32,6 @@ from defender.api.models import (  # noqa: E402
     Investigation,
     LearningJob,
     Lesson,
-    System,
-    CredentialsPut,
-    SystemCheck,
-    SystemPut,
-    SystemSettings,
 )
 from defender.tests.tooling.layout_contracts._spec1080 import api_forbidden  # noqa: E402
 from defender.api.ports import (  # noqa: E402
@@ -99,8 +94,6 @@ JOB = LearningJob(
     trigger="explicit", created_at=NOW,
 )
 LESSON = Lesson(lesson_id="le-1", title="t", description="d", status="live")
-SETTINGS = SystemSettings(system_id="tix", kind="ticketing", display_name="T", enabled=True,
-                          settings={"queue": "sec"})
 SIGNED = "https://blobs.invalid/signed?sig=1"
 #: A credential value long enough for any kind's secret-field minimum (#1163 A4).
 LONG = "v" * 40
@@ -147,10 +140,17 @@ EXISTING_ROUTES = {
     ("GET", API + "/tenants/{tenant_id}/learning-jobs"),
     ("GET", API + "/tenants/{tenant_id}/learning-jobs/{learning_job_id}"),
     ("GET", API + "/tenants/{tenant_id}/lessons"),
+    # #1470: the config routes in the record's shape (their behaviour is `test_1470_config_routes`, over the real store)
+    ("GET", API + "/tenants/{tenant_id}/adapters"),
     ("GET", API + "/tenants/{tenant_id}/systems"),
+    ("GET", API + "/tenants/{tenant_id}/systems/{system_id}"),
     ("PUT", API + "/tenants/{tenant_id}/systems/{system_id}"),
+    ("DELETE", API + "/tenants/{tenant_id}/systems/{system_id}"),
     ("PUT", API + "/tenants/{tenant_id}/systems/{system_id}/credentials"),
     ("POST", API + "/tenants/{tenant_id}/systems/{system_id}/check"),
+    ("GET", API + "/tenants/{tenant_id}/case-record"),
+    ("PUT", API + "/tenants/{tenant_id}/case-record"),
+    ("DELETE", API + "/tenants/{tenant_id}/case-record"),
     # #1345 O1: the tenant's alert mapping, read and replaced whole (sketch: invented path)
     ("GET", ALERT_MAPPING_ROUTE),
     ("PUT", ALERT_MAPPING_ROUTE),
@@ -212,17 +212,6 @@ HAPPY: list[tuple[tuple[str, str], str, dict[str, Any] | None, dict[str, Any]]] 
     (("GET", API + "/tenants/{tenant_id}/learning-jobs/{learning_job_id}"), f"{T}/learning-jobs/c1000000-0000-4000-8000-000000000001", None,
      {"get_learning_job": JOB}),
     (("GET", API + "/tenants/{tenant_id}/lessons"), f"{T}/lessons", None, {"list_lessons": [LESSON]}),
-    (("GET", API + "/tenants/{tenant_id}/systems"), f"{T}/systems", None,
-     {"list_systems": [SETTINGS], "has_credentials": False}),
-    (("PUT", API + "/tenants/{tenant_id}/systems/{system_id}"), f"{T}/systems/tix",
-     {"kind": "ticketing", "display_name": "T", "enabled": True, "settings": {}},
-     {"put_system": (SETTINGS, True), "has_credentials": False}),
-    (("PUT", API + "/tenants/{tenant_id}/systems/{system_id}/credentials"), f"{T}/systems/tix/credentials",
-     {"kind": "static", "credentials": {"api_token": LONG}},
-     {"get_system": SETTINGS, "has_credentials": False, "put_credentials": None}),
-    (("POST", API + "/tenants/{tenant_id}/systems/{system_id}/check"), f"{T}/systems/tix/check", None,
-     {"get_system": SETTINGS, "has_credentials": True,
-      "check": SystemCheck(ok=True, detail="fine")}),
     (("GET", ALERT_MAPPING_ROUTE), alert_mapping_url(A), None,
      {"get_alert_mapping": _Answer("saved mapping", lambda _tenant: _alert_mapping_wire(MAPPING_BODY))}),
     (("PUT", ALERT_MAPPING_ROUTE), alert_mapping_url(A), MAPPING_BODY,
@@ -235,9 +224,9 @@ HAPPY: list[tuple[tuple[str, str], str, dict[str, Any] | None, dict[str, Any]]] 
 
 
 #: The announcing writes: each one port call that commits then announces, taking the principal first (#1083 Ports,
-#: Am-2, Am-6). `put_system` is the systems port's and `put_credentials` the secret port's (they announce too).
+#: Am-2, Am-6). The systems and credentials writes announce through the real ports (#1470: `test_1470_*`).
 WRITES = {"create_investigation", "cancel_investigation", "delete_investigation",
-          "create_learning_job", "put_alert_mapping", "put_system", "put_credentials"}
+          "create_learning_job", "put_alert_mapping"}
 #: Every call whose first argument is the principal: the writes and the audit-only port's `announce`.
 PRINCIPAL_CALLS = WRITES | {"announce"}
 
@@ -367,8 +356,15 @@ def test_the_published_routes_are_exactly_1131s_list_under_tenants_plus_1306s() 
     assert not [s for s in schemes.values() if str(s.get("scheme", "")).lower() == "bearer"]
 
 
+#: The routes this suite does not script: #1470's config routes answer from the real record store (`test_1470_*`), and the
+#: check still refuses (the `REFUSED` sweep below).
+CONFIG = {route for route in EXISTING_ROUTES if any(w in route[1] for w in ("/systems", "/adapters", "/case-record"))}
+
+
 def test_the_happy_path_table_covers_every_existing_route() -> None:
-    assert {route for route, *_ in HAPPY} == EXISTING_ROUTES
+    """Every route is scripted here, answered by the real store (`CONFIG`), or refused with its owner's number."""
+    assert {route for route, *_ in HAPPY} == EXISTING_ROUTES - CONFIG
+    assert len(CONFIG) == 10
 
 
 def test_the_api_never_loads_the_runtime_or_the_learning_loop() -> None:
@@ -383,19 +379,6 @@ def test_the_api_never_loads_the_runtime_or_the_learning_loop() -> None:
         encoding="utf-8", check=True,
     )
     assert api_forbidden(json.loads(out.stdout)) == []
-
-
-def test_1366_h3_the_api_loads_no_record_store_so_no_route_writes_system_records() -> None:
-    """Guard: the API and the real server load nothing of the record writer, so no route writes records. (#1366 H3/R1)"""
-    probe = (
-        "import json, sys; import defender.api.app, defender.api_server; "
-        "print(json.dumps(sorted(m for m in sys.modules if m.startswith('defender.system_records'))))"
-    )
-    out = subprocess.run(
-        [sys.executable, "-c", probe], cwd=REPO_ROOT, capture_output=True, text=True,
-        encoding="utf-8", check=True,
-    )
-    assert json.loads(out.stdout) == []
 
 
 def test_the_identity_package_loads_no_api_runtime_or_learning_module() -> None:
@@ -609,37 +592,6 @@ def test_a_write_port_that_raises_answers_500_with_the_write_called_and_the_rout
     assert failing.ports.audits == []
 
 
-def test_put_system_is_a_201_at_its_own_url_when_created_and_200_when_replaced() -> None:
-    body = {"kind": "ticketing", "display_name": "T", "enabled": False, "settings": {"q": "s"}}
-    created = Api(put_system=(SETTINGS, True), has_credentials=False)
-    response = created.client.put(f"{T}/systems/tix", headers=AUTH, json=body)  # R7-2: a stray `x=1` here is now refused, see below
-    assert (response.status_code, response.headers["Location"]) == (201, f"{T}/systems/tix")
-    # FORCED CHOICE FC-12: the systems port's `put_system(principal, system_id, body)`: the principal replaces the tenant.
-    ((principal, system_id, sent), kwargs), = created.ports.called("put_system")
-    assert (principal.tenant_id, principal.actor_id, system_id, sent.model_dump(), kwargs) == (
-        A, created.user, "tix", body, {})
-    replaced = Api(put_system=(SETTINGS, False), has_credentials=False)
-    response = replaced.client.put(f"{T}/systems/tix", headers=AUTH, json=body)
-    assert response.status_code == 200
-    assert "Location" not in response.headers
-    assert created.ports.audits == replaced.ports.audits == [], "the systems port announces `system.update`, not the route"
-
-
-@pytest.mark.parametrize("model", [SystemPut, CredentialsPut])
-def test_a_whole_record_put_body_has_no_defaults(model: type[Any]) -> None:
-    """A PUT replaces the record, so a default would silently reset whatever a caller left out."""
-    assert [name for name, field in model.model_fields.items() if not field.is_required()] == []
-
-
-@pytest.mark.parametrize("missing", ["enabled", "settings"])
-def test_put_system_without_a_field_is_refused(missing: str) -> None:
-    api = Api()
-    body = {"kind": "ticketing", "display_name": "T", "enabled": True, "settings": {}}
-    del body[missing]
-    assert api.client.put(f"{T}/systems/tix", headers=AUTH, json=body).status_code == 422
-    assert api.ports.calls == []
-
-
 # --- #1345 O1: the alert mapping's routes (shape over the scripted ports; the rules are the store's) -------
 
 
@@ -685,7 +637,9 @@ def test_1345_get_alert_mapping_answers_all_six_entries_or_404_when_none_was_sav
     ({**MAPPING_BODY, "summary": "rule..id"}, "summary"),  # an empty segment
     ({**MAPPING_BODY, "severity": "rule.level"}, "severity"),  # not one of the six
     ({k: v for k, v in MAPPING_BODY.items() if k != "event_time"}, "event_time"),  # D4: all six must be named
-], ids=["invalid-path", "empty-segment", "unknown-entry", "missing-entry"])
+    ({**MAPPING_BODY, "description": 42}, "description"),  # not a path
+    ({**MAPPING_BODY, "summary": ""}, "summary"),  # an empty path
+], ids=["invalid-path", "empty-segment", "unknown-entry", "missing-entry", "not-a-path", "empty-path"])
 def test_1345_an_invalid_or_incomplete_mapping_is_a_422_naming_the_entry_before_any_port_call(body: dict[str, str], entry: str) -> None:
     """The wire model refuses it (r5: validated through `records`' `check_mapping`; D4: all six named): 422 naming the
     entry, no port call, no audit. (#1345 O1, M2)"""
@@ -831,117 +785,6 @@ def test_only_keys_the_investigation_lists_are_answered(key: str) -> None:
     assert api.ports.audits == []
 
 
-# --- systems and credentials ---------------------------------------------------------------
-
-
-@pytest.mark.parametrize("has", [True, False])
-def test_has_credentials_is_the_secret_stores_answer(has: bool) -> None:
-    api = Api(list_systems=[SETTINGS], has_credentials=has,
-              get_system=SETTINGS, check=lambda tenant, system: SystemCheck(ok=True, detail="x"))
-    listed = api.client.get(f"{T}/systems", headers=AUTH).json()["items"]
-    assert listed == [System(**SETTINGS.model_dump(), has_credentials=has).model_dump(mode="json")]
-    api.client.post(f"{T}/systems/tix/check", headers=AUTH)
-    ((_, checked), _), = api.ports.called("check")
-    assert checked.has_credentials is has
-    assert api.ports.called("has_credentials")[0] == ((A, "tix"), {})
-
-
-def test_credentials_are_written_through_and_never_echoed_or_announced_by_the_route() -> None:
-    secret = "s3cr3t-value-never-echoed-" + LONG  # conflict updated: #1163 A4 (kind, minimum length)
-    api = Api(get_system=SETTINGS, has_credentials=False, put_credentials=None)
-    response = api.client.put(f"{T}/systems/tix/credentials", headers=AUTH,
-                              json={"kind": "static", "credentials": {"api_token": secret}})
-    assert (response.status_code, response.content) == (204, b"")
-    # FORCED CHOICE FC-12: the secret port's `put_credentials(principal, system_id, kind, fields)`: the principal replaces the tenant.
-    assert api.ports.called("put_credentials") == [
-        ((Principal(tenant_id=A, actor_id=api.user), "tix", "static", {"api_token": secret}), {})]
-    assert api.ports.called("has_credentials") == [], "an existence check, not a read"
-    assert api.ports.audits == [], "the secret port announces `system.credentials` after its write (Am-2)"
-
-
-def test_a_failed_credentials_write_announces_nothing() -> None:
-    """A failed credentials write answers 500 and the route announces nothing. (Am-2)"""
-    api = Api(get_system=SETTINGS, put_credentials=RuntimeError("vault down"))
-    response = api.lenient().put(f"{T}/systems/tix/credentials", headers=AUTH,
-                                 json={"kind": "static", "credentials": {"api_token": LONG}})
-    assert response.status_code == 500
-    assert (api.ports.written, api.ports.audits) == ([], [])
-
-
-#: Each as it is spelled inside a JSON string, so the body is valid JSON that decodes to it.
-@pytest.mark.parametrize("key", [r"a\u0000b", r"\ud800", "", "has space", "x" * 65, "9lead"])
-def test_a_credential_field_name_outside_the_grammar_is_refused(key: str) -> None:
-    """A field name reaches the audit detail, so one the audit store would refuse never gets in."""
-    api = Api()
-    response = api.client.put(f"{T}/systems/tix/credentials", headers={**AUTH, "Content-Type": "application/json"},
-                              content=('{"kind": "static", "credentials": {"' + key + '": "' + LONG + '"}}').encode())
-    assert response.status_code == 422
-    assert api.ports.calls == []
-
-
-def test_credentials_for_an_unknown_system_are_refused_before_the_secret_store() -> None:
-    api = Api(get_system=None)
-    response = api.client.put(f"{T}/systems/nope/credentials", headers=AUTH, json={"kind": "static", "credentials": {"k": LONG}})
-    assert response.status_code == 404
-    assert api.ports.called("put_credentials") == []
-    assert Api().client.put(f"{T}/systems/tix/credentials", headers=AUTH,
-                            json={"kind": "static", "credentials": {}}).status_code == 422
-
-
-#: (kind, credentials, accepted): secret fields per kind, #1163 r7 A19. Static: every field
-#: except `username`; oauth: every field except `client_id`.
-CREDENTIAL_SHAPES = [
-    ("static", {"api_key": LONG}, True),
-    ("static", {"api_key": "x"}, False),
-    ("static", {"username": "u", "password": LONG}, True),
-    ("static", {"username": "u", "password": "x"}, False),
-    ("static", {"username": "u", "api_key": LONG, "other": "x"}, False),
-    ("static", {"api_key": LONG, "client_id": "c"}, False),
-    ("static", {"api_key": LONG, "key_id": "k"}, False),
-    ("static", {"api_key": LONG, "user": "u"}, False),
-    ("static", {"api_key": LONG, "account": "a"}, False),
-    ("static", {"api_key": LONG, "client_id": LONG}, True),
-    ("oauth-client-credentials", {"client_id": "c", "client_secret": LONG}, True),
-    ("oauth-client-credentials", {"client_id": "c", "client_secret": "x"}, False),
-    ("oauth-client-credentials", {"client_id": "c", "client_secret": LONG, "audience": "x"}, False),
-    ("oauth-client-credentials", {"client_id": "c", "client_secret": LONG, "audience": LONG}, True),
-]
-
-
-@pytest.mark.parametrize(("kind", "credentials", "accepted"), CREDENTIAL_SHAPES)
-def test_a_secret_field_below_the_minimum_length_is_refused_at_write_time(
-        kind: str, credentials: dict[str, str], accepted: bool) -> None:
-    """A set is written whole with its kind; a too-short secret field of that kind is a 422 and
-    reaches no store, a short non-secret field passes. #1163 O5, A4."""
-    api = Api(get_system=SETTINGS, put_credentials=None)
-    response = api.client.put(f"{T}/systems/tix/credentials", headers=AUTH,
-                              json={"kind": kind, "credentials": credentials})
-    assert response.status_code == (204 if accepted else 422), response.text
-    assert api.ports.called("put_credentials") == (
-        [((Principal(tenant_id=A, actor_id=api.user), "tix", kind, credentials), {})] if accepted else [])
-
-
-@pytest.mark.parametrize("kind", [None, "", "oauth", "other"])
-def test_a_credential_write_without_a_known_kind_is_refused(kind: str | None) -> None:
-    """The write API takes the kind; none, or one that is not static or
-    oauth-client-credentials, is a 422 reaching no store. #1163 A4."""
-    api = Api(get_system=SETTINGS, put_credentials=None)
-    body = {"credentials": {"api_key": LONG}} | ({} if kind is None else {"kind": kind})
-    assert api.client.put(f"{T}/systems/tix/credentials", headers=AUTH,
-                          json=body).status_code == 422
-    assert api.ports.called("put_credentials") == []
-
-
-@pytest.mark.parametrize("method", ["GET", "POST", "DELETE", "PATCH"])
-def test_no_route_reads_a_credential_back(method: str) -> None:
-    """Only PUT exists on a system's credentials path; every other method is refused
-    unrouted. #1163 O5."""
-    api = Api(get_system=SETTINGS, has_credentials=True)
-    response = api.client.request(method, f"{T}/systems/tix/credentials", headers=AUTH)
-    assert response.status_code == 405
-    assert api.ports.called("put_credentials") == []
-
-
 # --- errors: one shape, RFC 9457 ----------------------------------------------------------
 
 PROBLEM_KEYS = {"type", "title", "status", "detail"}
@@ -982,7 +825,7 @@ def test_a_validation_problem_lists_what_failed_and_never_echoes_the_value() -> 
     secret = 87654321987654321
     api = Api()
     response = api.client.put(f"{T}/systems/tix/credentials", headers=AUTH,
-                              json={"kind": "static", "credentials": {"api_token": secret}})
+                              json={"for_version": 1, "credentials": {"api_token": secret}})
     assert response.status_code == 422
     problem = response.json()
     assert problem["errors"] == [{"loc": ["body", "credentials", "api_token"],
@@ -1008,8 +851,8 @@ def test_the_published_contract_declares_each_routes_problems() -> None:
     assert declared[("POST", API + "/tenants/{tenant_id}/investigations/{investigation_id}/cancel")] >= {404, 409}
     assert declared[("DELETE", API + "/tenants/{tenant_id}/investigations/{investigation_id}")] >= {404, 409}
     assert declared[("POST", API + "/tenants/{tenant_id}/investigations")] >= {409}
-    refusable = {route for route in EXISTING_ROUTES if "/systems" in route[1] or "/lessons" in route[1]}
-    assert len(refusable) == 5
+    refusable = {route for route in EXISTING_ROUTES if "/lessons" in route[1] or route[1].endswith("/check")}
+    assert len(refusable) == 2
     assert all(501 in declared[route] for route in refusable), "the 501 is documented on every route of the unbacked families (O8)"
     assert declared[("POST", API + "/tenants/{tenant_id}/learning-jobs")] >= {409}
     assert declared[("GET", API + "/tenants/{tenant_id}/investigations/{investigation_id}/artifacts/{key}")] >= {404}
@@ -1092,16 +935,6 @@ def test_r7_2_a_query_parameter_the_route_does_not_declare_is_a_422_problem_befo
     assert api.ports.calls == [], "the handler ran for a request with an unknown query parameter"
 
 
-def test_r7_2_a_put_with_an_undeclared_query_parameter_is_refused_and_changes_nothing() -> None:
-    """`PUT /systems/tix?x=1` (once let through, its Location built without the query) is a 422 `extra_forbidden` at `["query", "x"]`; no system is written. (R7-2)"""
-    api = Api(put_system=(SETTINGS, True), has_credentials=False)
-    body = {"kind": "ticketing", "display_name": "T", "enabled": False, "settings": {"q": "s"}}
-    response = api.client.put(f"{T}/systems/tix", headers=AUTH, params={"x": "1"}, json=body)
-    assert response.status_code == 422
-    assert [(e["type"], e["loc"]) for e in response.json()["errors"]] == [("extra_forbidden", ["query", "x"])]
-    assert api.ports.called("put_system") == []
-
-
 def test_r7_2_every_unknown_query_parameter_gets_its_own_entry() -> None:
     """Two undeclared parameters give two `extra_forbidden` entries, one per name. (R7-2)"""
     api = Api()
@@ -1137,8 +970,8 @@ def test_a_record_time_is_served_in_utc() -> None:
     ("GET", f"{T}/alerts/%E2%9C%93", None),
     ("GET", f"{T}/investigations/a%20b", None),
     ("GET", f"{T}/learning-jobs/-leading-dash", None),
-    ("PUT", f"{T}/systems/%E2%9C%93", {"kind": "k", "display_name": "d", "enabled": True, "settings": {}}),
-    ("PUT", f"{T}/systems/a%20b/credentials", {"credentials": {"k": "v"}}),
+    ("PUT", f"{T}/systems/%E2%9C%93", {"replaces": 0, "enabled": True, "settings": {}, "access": ""}),
+    ("PUT", f"{T}/systems/a%20b/credentials", {"for_version": 1, "credentials": {"k": "v"}}),
     ("POST", f"{T}/systems/a%20b/check", None),
     ("POST", f"{T}/investigations/a%20b/cancel", None),
     ("DELETE", f"{T}/investigations/a%20b", None),
@@ -1183,8 +1016,6 @@ def test_a_disposition_outside_the_vocabulary_cannot_be_served() -> None:
 def test_an_id_outside_the_grammar_cannot_be_served(bad: str) -> None:
     with pytest.raises(ValueError, match="pattern"):
         INV.model_validate({**INV.model_dump(), "investigation_id": bad})
-    with pytest.raises(ValueError, match="pattern"):
-        SETTINGS.model_validate({**SETTINGS.model_dump(), "system_id": bad})
 
 
 @pytest.mark.parametrize("legacy", ["Not_A_Tenant", "acme", "playground", "tenant-a", "blue"])
@@ -1207,7 +1038,6 @@ INV_2 = INV.model_copy(update={"investigation_id": "b1000000-0000-4000-8000-0000
 JOB_2 = JOB.model_copy(update={"learning_job_id": "c1000000-0000-4000-8000-000000000002", "created_at": LATER})
 SUMMARY_2 = SUMMARY.model_copy(update={"alert_id": "a1000000-0000-4000-8000-000000000002", "fired_at": LATER})
 LESSON_2 = LESSON.model_copy(update={"lesson_id": "le-2"})
-SETTINGS_2 = SETTINGS.model_copy(update={"system_id": "tiy"})
 
 #: (path, port, the store's first two rows in the list's order, the position the second page
 #: must start after — the first row's, as the port's order names it).
@@ -1216,7 +1046,6 @@ LISTS = [
     (f"{T}/investigations", "list_investigations", [INV_2, INV], (LATER, "b1000000-0000-4000-8000-000000000002")),
     (f"{T}/learning-jobs", "list_learning_jobs", [JOB_2, JOB], (LATER, "c1000000-0000-4000-8000-000000000002")),
     (f"{T}/lessons", "list_lessons", [LESSON, LESSON_2], "le-1"),
-    (f"{T}/systems", "list_systems", [SETTINGS, SETTINGS_2], "tix"),
 ]
 
 
@@ -1229,7 +1058,7 @@ def _rows_after(rows: list[Any]) -> Callable[..., list[Any]]:
 def test_every_list_pages_by_cursor_from_the_last_row_served(
     path: str, port: str, rows: list[Any], first_after: Any,
 ) -> None:
-    api = Api(**{port: _rows_after(rows), "has_credentials": False})
+    api = Api(**{port: _rows_after(rows)})
     first = api.client.get(path, headers=AUTH, params={"limit": 1}).json()
     assert len(first["items"]) == 1
     assert first["next_cursor"]
@@ -1269,7 +1098,7 @@ def _edited(cursor: str, **changes: Any) -> str:
 def test_an_edited_cursor_cannot_hand_a_port_an_id_outside_the_grammar(
     path: str, port: str, rows: list[Any], bad_id: str,
 ) -> None:
-    api = Api(**{port: _rows_after(rows), "has_credentials": False})
+    api = Api(**{port: _rows_after(rows)})
     cursor = _edited(_cursor(api, path), id=bad_id)
     calls = len(api.ports.calls)
     response = api.client.get(path, headers=AUTH, params={"limit": 1, "cursor": cursor})
@@ -1284,7 +1113,7 @@ def test_an_edited_cursor_with_an_id_not_of_the_lists_family_is_refused_before_t
 ) -> None:
     """A newest-first list's cursor id is read as the items' own id (canonical lowercase UUID): anything else, even a
     valid record id or the same UUID in upper case, is not a position in the list (422), never a store error. (#1498)"""
-    api = Api(**{port: _rows_after(rows), "has_credentials": False})
+    api = Api(**{port: _rows_after(rows)})
     cursor = _edited(_cursor(api, path), id=bad_id)
     calls = len(api.ports.calls)
     response = api.client.get(path, headers=AUTH, params={"limit": 1, "cursor": cursor})
@@ -1552,21 +1381,6 @@ def test_one_filter_instant_written_with_another_offset_keeps_its_cursor() -> No
     assert page.status_code == 200, page.text
 
 
-def test_a_store_answering_full_system_records_is_still_served_from_its_settings() -> None:
-    stored = System(**SETTINGS.model_dump(), has_credentials=False)
-    api = Api(list_systems=[stored], get_system=stored, has_credentials=True,
-              check=lambda tenant, system: SystemCheck(ok=True, detail=str(system.has_credentials)))
-    assert api.client.get(f"{T}/systems", headers=AUTH).json()["items"][0]["has_credentials"] is True
-    assert api.client.post(f"{T}/systems/tix/check", headers=AUTH).json()["detail"] == "True"
-
-
-def test_systems_are_served_only_for_the_rows_on_the_page() -> None:
-    api = Api(list_systems=[SETTINGS, SETTINGS_2], has_credentials=False)
-    page = api.client.get(f"{T}/systems", headers=AUTH, params={"limit": 1}).json()
-    assert [s["system_id"] for s in page["items"]] == ["tix"]
-    assert api.ports.called("has_credentials") == [((A, "tix"), {})]
-
-
 def test_a_short_page_is_the_last_page() -> None:
     api = Api(list_investigations=[INV_2, INV])
     page = api.client.get(f"{T}/investigations", headers=AUTH, params={"limit": 2}).json()
@@ -1613,7 +1427,7 @@ def test_a_cursor_is_bound_to_its_list_its_tenant_and_its_filters() -> None:
 def test_a_cursor_from_one_tenant_is_refused_in_another_by_the_same_person(
         path: str, port: str, rows: list[Any], _after: Any) -> None:
     """A cursor is bound to the path's tenant, not to the caller: a member of both tenants cannot carry it across."""
-    api = Api(**{port: _rows_after(rows), "has_credentials": False})
+    api = Api(**{port: _rows_after(rows)})
     page = api.client.get(path, headers=AUTH_AB, params={"limit": 1}).json()
     cursor = page["next_cursor"]
     assert cursor
@@ -1719,22 +1533,22 @@ def _refusing(issue: str) -> Any:
 
 
 def _refusing_client(others: dict[str, Any]) -> TestClient:
-    """The app over refusing ports for lessons, systems, secrets and checker; the rest scripted by `others`."""
+    """The app over refusing ports for lessons and the checker; the rest scripted by `others`."""
     deps, _ = _deps(Scripted(others))
-    deps = dataclasses.replace(deps, lessons=_refusing("#1082"), systems=_refusing("#1470"),
-                               secrets=_refusing("#1470"), checker=_refusing("#1470"))
+    deps = dataclasses.replace(deps, lessons=_refusing("#1082"), checker=_refusing("#1460"))
     return TestClient(create_app(deps), base_url=BASE)
 
 
-#: Every route of the two unbacked families, by membership of the path (not a hand-picked list).
-REFUSED = [(route, path, body, "#1082" if "/lessons" in path else "#1470")
-           for route, path, body, _ in HAPPY if "/systems" in path or "/lessons" in path]
+#: Every route still refusing, with the issue that owns it: the lessons (#1082, in the happy table) and the connection
+#: check (#1460; #1470 O15, D-C), whose route is not scripted because it has no answer.
+REFUSED = [(route, path, body, "#1082") for route, path, body, _ in HAPPY if "/lessons" in path] + [
+    (("POST", API + "/tenants/{tenant_id}/systems/{system_id}/check"), f"{T}/systems/tix/check", None, "#1460")]
 
 
-def test_1083_the_refused_family_is_the_systems_and_lessons_routes() -> None:
-    """Control on the sweep: five routes, both issues. (O8)"""
-    assert len(REFUSED) == 5
-    assert {issue for *_, issue in REFUSED} == {"#1082", "#1470"}
+def test_1083_the_refused_family_is_the_lessons_and_the_check() -> None:
+    """Control on the sweep: two routes, their two owners, and neither is this piece. (O8, #1470 O15)"""
+    assert len(REFUSED) == 2
+    assert {issue for *_, issue in REFUSED} == {"#1082", "#1460"}
 
 
 @pytest.mark.parametrize(("route", "path", "body", "issue"), REFUSED, ids=lambda v: str(v))

@@ -173,7 +173,7 @@ def test_o_a_the_run_box_mounts_its_copys_agent_and_token_only_and_reads_the_tok
         f"startup did not read back the token staged in the copy's stage/: {cats}")
     assert not [c for c in docker.calls if any(".tenant-id" in part for part in c)], (
         "the retired in-box `.tenant-id` check still runs")
-    # Operator issuer variables never reach the box (control: the env is read above).
+    # Operator issuer variables never reach the box (control: the env is read above).  # lint-stale-ref: ok — the English word, not the removed test helper class
     assert B.leaks(("s-b-operator-bao-token-77e1", "s-b-operator-vault-token-91a4"),
                    create_argv=docker.create_argv) == []
 

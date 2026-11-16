@@ -10,6 +10,7 @@ if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
 
 import pytest
 
+from defender.system_rules import registry
 from defender.systems import verbs
 from defender.systems.verbs import SYSTEM_MAX_LEN, is_system_name
 
@@ -36,11 +37,11 @@ def test_the_resolver_and_the_dispatch_seam_cannot_disagree(tmp_path):
     root = adapters.resolve()
     for name in ADMITTED:
         (adapters / (name.replace("-", "_") + verbs.ADAPTER_SUFFIX)).write_text("VERBS = {}\n")
-        assert verbs._adapter_path_under(root, name) is not None, name
+        assert registry.adapter_path_under(root, name) is not None, name
 
     for name in REFUSED:
         planted = adapters / (name.replace("-", "_") + verbs.ADAPTER_SUFFIX)
         with contextlib.suppress(OSError, ValueError):
             planted.parent.mkdir(parents=True, exist_ok=True)
             planted.write_text("VERBS = {}\n")
-        assert verbs._adapter_path_under(root, name) is None, name
+        assert registry.adapter_path_under(root, name) is None, name

@@ -201,12 +201,13 @@ flowchart LR
     Proxy --> Models[AI providers]
     Proxy --> Systems[Customer systems]
     Proxy --> Forge
+    API -->|write-only credential role| Bao
 ```
 
 | Zone | Holds | Reaches |
 |---|---|---|
 | Edge | TLS keys | API, artifact serving |
-| Application | API database role (row-level security), session store, identity-provider client secret, blob signing key, page-grant signing key | PostgreSQL, blob, identity provider |
+| Application | API database role (row-level security), session store, identity-provider client secret, blob signing key, page-grant signing key, OpenBao write-only role for system credentials (create and update a set, read metadata, never read a value; #1470) | PostgreSQL, blob, identity provider, OpenBao |
 | Artifact server | page-grant verifier, its own page-cookie key, blob read | blob |
 | Credential proxy | per-tenant pass verification, system secrets, provider keys, forge logins (from OpenBao) | OpenBao, PostgreSQL, forge, providers, customer systems, worker pods (job route only) |
 | Launcher (workers) | worker database role; OpenBao role reading every tenant's sign login; the orchestrator role below | PostgreSQL, OpenBao, blob, proxy, API server; accepts connections from proxy pods only |
@@ -503,7 +504,7 @@ before deployment.
 ### 7. Machine identity and trust
 
 OpenBao is the proposed issuer in development and production. It stores customer system credentials (KV v2, written
-whole through a write-only role, read only by the credential proxy), tenant login secrets (KV, written once by the
+whole by the API through a write-only role, read only by the credential proxy), tenant login secrets (KV, written once by the
 lifecycle at install), and signs passes (transit, one key per tenant; the launcher may only sign and the proxy may only
 verify) (#1163). Its address is a setting, not a fixed service name.
 

@@ -671,13 +671,10 @@ def write_knowledge_record(run_dir: Path, source: KnowledgeSource) -> None:
 def read_records(records: Any, tenant_id: Any) -> TenantRecords:
     """The tenant's current system and case records (#1366 O6, R10), read ONCE at setup on the
     host (the operator command, or a job's host helper), or a `[run.py]` refusal: the records
-    could not be reached, or the tenant is not imported (R8, named before anything else of the
-    tenant's settings is looked at, the alert mapping included)."""
-    from defender.systems import run_tenant as run_tenant_mod
-
+    could not be reached, or the tenant's records are not known (it is not active, #1470 O8; named
+    before anything else of the tenant's settings is looked at, the alert mapping included)."""
     try:
         current = records.current_records(tenant_id)
-        run_tenant_mod.require_imported(current, tenant_id)
     except TenantRefused as refused:
         sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
     return current

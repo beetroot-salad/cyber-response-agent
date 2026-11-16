@@ -20,6 +20,7 @@ import anyio
 import httpx
 import pytest
 
+from defender.tests.support.api._openbao1470 import ScriptedOpenBao
 from defender.tests.support.api._server1083 import (
     A,
     ANN,
@@ -107,7 +108,7 @@ async def served(tenants: str, tmp_path: Path) -> AsyncIterator[Served]:
 
     seeded = await seed_identity(tenants)
     keycloak = FakeKeycloak()
-    async with serving(Settings.from_environ(environment(tmp_path, dsn=tenants)), transport=keycloak) as running, \
+    async with serving(Settings.from_environ(environment(tmp_path, dsn=tenants)), transport=keycloak, openbao_transport=ScriptedOpenBao()) as running, \
             httpx.AsyncClient(transport=httpx.ASGITransport(app=running.app), base_url=ORIGIN) as client:
         yield Served(client, running.app, tenants, tmp_path, keycloak, seeded)
     assert keycloak.unmodelled == []
@@ -274,14 +275,13 @@ async def test_o6_a_learning_job_of_an_investigation_that_did_not_complete_confl
 # --- alert mapping ----------------------------------------------------------------------------------
 
 @pytest.mark.postgres
-async def test_the_alert_mapping_reads_through_its_own_port_while_systems_refuse(served):
-    """The alert mapping answers the tenant's saved mapping although the systems port refuses whole. (G2, O6)"""
+async def test_the_alert_mapping_reads_through_its_own_port(served):
+    """The alert mapping answers the tenant's saved mapping from its own port. (G2, O6; #1470: systems no longer refuse)"""
     from defender.api.models import AlertMapping
 
     got = await served.client.get(f"/api/tenants/{A}/alert-mapping", headers=served.ann(write=False))
     assert got.status_code == 200
     assert got.json() == {entry: FIXTURE_ALERT_MAPPING.get(entry) for entry in AlertMapping.model_fields}
-    assert (await served.client.get(f"/api/tenants/{A}/systems", headers=served.ann(write=False))).status_code == 501
 
 
 @pytest.mark.postgres
@@ -314,6 +314,29 @@ async def test_o6_every_subset_of_the_entries_mapped_is_replaced_and_read_back_a
         assert (put.status_code, put.json()) == (200, body), mapped
         got = await served.client.get(url, headers=served.ann(write=False))
         assert (got.status_code, got.json()) == (200, body), mapped
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("state", ["creating", "offboarding", "offboarded"])
+async def test_o6_a_mapping_put_for_a_tenant_that_is_not_active_is_refused_and_stores_nothing(served, state):
+    """A tenant in `creating`, `offboarding` or `offboarded` is not one its admin is a member of at the routes (O8: "at the
+    routes a non-active tenant is already 404 by membership"): the PUT is 404 and the tenant's mapping stays as it was; the
+    same PUT once the tenant is active is 200 and replaces it (control). (O6, O8; base
+    `test_1345_o6_a_tenant_that_is_not_active_is_refused_by_host_acceptance_and_writes_nothing`)"""
+    from defender.tests.support.jobs._jobs1342 import move_tenant
+
+    held = {entry: FIXTURE_ALERT_MAPPING.get(entry) for entry in MAPPING_ENTRIES}
+    mapping = {entry: f"vendor.{entry}" for entry in MAPPING_ENTRIES}
+    url = f"/api/tenants/{A}/alert-mapping"
+    move_tenant(served.dsn, A, state=state)  # in place: the memberships that refer to the row stay
+    refused = await served.client.put(url, headers=served.ann(), json=mapping)
+    assert refused.status_code == 404, refused.text
+    assert await _held_async(served.dsn, A) == held
+
+    move_tenant(served.dsn, A, state="active")
+    taken = await served.client.put(url, headers=served.ann(), json=mapping)
+    assert taken.status_code == 200, taken.text
+    assert await _held_async(served.dsn, A) == mapping
 
 
 async def _held_async(dsn: str, tenant: str) -> dict[str, str | None]:
@@ -380,7 +403,7 @@ async def test_1485_o4_held_dead_items_and_parked_batches_are_served_from_the_le
     assert [(b["batch_id"], b["batch_kind"], b["blocks_lane"]) for b in listed.json()["items"]] == [
         (str(parked), "revert", False)]
     for route in ("learning/items", "learning/parked-batches"):
-        assert (await served.client.get(f"/tenants/{A}/{route}", headers=served.bob(write=False))).status_code == 404
+        assert (await served.client.get(f"{API}/tenants/{A}/{route}", headers=served.bob(write=False))).status_code == 404
 
 
 # --- tenant administration --------------------------------------------------------------------------
@@ -456,19 +479,16 @@ async def test_o7_an_administrator_offboards_a_tenant_and_its_queued_investigati
 # --- unbacked families ------------------------------------------------------------------------------
 
 def _unbacked(document: dict[str, Any]) -> list[tuple[str, str]]:
-    """Every operation of the documented routes on systems and lessons: (path, method)."""
+    """Every operation of the documented routes still refusing 501: the lessons and the connection check (#1470 O15)."""
     return [(path, method) for path, item in document["paths"].items() for method in item
-            if ("/systems" in path or "/lessons" in path) and method in ("get", "put", "post", "delete")]
+            if ("/lessons" in path or path.endswith("/check")) and method in ("get", "put", "post", "delete")]
 
 
 @pytest.mark.postgres
-async def test_o8_systems_and_lessons_refuse_501_naming_their_issue_after_membership(served):
-    """A member gets 501 naming the backing issue on every systems and lessons route; a non-member gets 404. (O8, P1)"""
-    body = {"kind": "ticket", "display_name": "Tickets", "enabled": True, "settings": {}}
-    credentials = {"kind": "static", "credentials": {"api_token": "a-secret-of-sixteen-or-more"}}
-    cases = [("get", "/systems", None, "#1470"), ("put", "/systems/tix", body, "#1470"),
-             ("put", "/systems/tix/credentials", credentials, "#1470"), ("post", "/systems/tix/check", None, "#1470"),
-             ("get", "/lessons", None, "#1082")]
+async def test_o8_lessons_refuse_501_naming_their_issue_after_membership(served):
+    """A member gets 501 naming the backing issue on the lessons route; a non-member gets 404. (O8, P1; #1470 O15:
+    systems and credentials are real, the check's 501 is `test_1470_config_routes`')"""
+    cases = [("get", "/lessons", None, "#1082")]
     assert (await served.client.get(f"/api/tenants/{A}/alerts", headers=served.ann(write=False))).status_code == 200  # control
     for method, path, payload, issue in cases:
         refused = await served.client.request(method, f"/api/tenants/{A}{path}", headers=served.ann(), json=payload)
@@ -482,11 +502,12 @@ async def test_o8_systems_and_lessons_refuse_501_naming_their_issue_after_member
 
 
 @pytest.mark.postgres
-async def test_o8_the_real_servers_openapi_declares_the_501_on_every_systems_and_lessons_route(served):
-    """On the real server, the operations declaring 501 are exactly those on systems and lessons. (O8, Am-2)"""
+async def test_o8_the_real_servers_openapi_declares_the_501_on_exactly_the_lessons_and_the_check(served):
+    """The operations declaring 501 are exactly the lessons route and the connection check; the config routes declare
+    their real answers. (O8, Am-2; #1470 O15, G2)"""
     document = (await served.client.get("/api/openapi.json")).json()
     unbacked = set(_unbacked(document))
-    assert len(unbacked) >= 5
+    assert len(unbacked) == 2, unbacked
     declaring = {(path, method) for path, item in document["paths"].items() for method, op in item.items()
                  if "501" in op["responses"]}
     assert declaring == unbacked, declaring ^ unbacked
@@ -639,8 +660,9 @@ def _concrete(path: str, tenant: str) -> str:
     return re.sub(r"\{(\w+)(?::\w+)?\}", fill, path)
 
 
-SYSTEM = {"kind": "ticket", "display_name": "Tickets", "enabled": True, "settings": {}}
-CREDENTIALS = {"kind": "static", "credentials": {"api_token": "a-secret-of-sixteen-or-more"}}
+SYSTEM = {"replaces": 0, "enabled": True, "settings": {}, "access": ""}
+CREDENTIALS = {"for_version": 1, "credentials": {"api_key": "a-secret-of-sixteen-or-more"}}
+CASE = {"replaces": 0, "system_id": "ticket", "comment_body": "{disposition}"}
 
 
 def _body(method: str, path: str) -> dict[str, Any]:
@@ -648,7 +670,7 @@ def _body(method: str, path: str) -> dict[str, Any]:
     if method not in {"POST", "PUT", "PATCH"}:
         return {}
     return {"json": CREDENTIALS if path.endswith("/credentials") and "/systems" in path
-            else SYSTEM if "/systems/" in path else {}}
+            else SYSTEM if "/systems/" in path else CASE if path.endswith("/case-record") else {}}
 
 
 # Copied literally from tests/api/test_programs_1307_roles.py (PERMISSION_OF, AUTOMATION): the oracle for a program
@@ -667,8 +689,14 @@ PERMISSION_OF = {
     ("GET", f"{TENANT}/learning-jobs"): "work.read",
     ("GET", f"{TENANT}/learning-jobs/{{}}"): "work.read",
     ("GET", f"{TENANT}/lessons"): "work.read",
+    ("GET", f"{TENANT}/adapters"): "config.read",
     ("GET", f"{TENANT}/systems"): "config.read",
+    ("GET", f"{TENANT}/systems/{{}}"): "config.read",
     ("PUT", f"{TENANT}/systems/{{}}"): "config.write",
+    ("DELETE", f"{TENANT}/systems/{{}}"): "config.write",
+    ("GET", f"{TENANT}/case-record"): "config.read",
+    ("PUT", f"{TENANT}/case-record"): "config.write",
+    ("DELETE", f"{TENANT}/case-record"): "config.write",
     ("PUT", f"{TENANT}/systems/{{}}/credentials"): "config.write",
     ("POST", f"{TENANT}/systems/{{}}/check"): "config.write",
     ("GET", f"{TENANT}/alert-mapping"): "config.read",
@@ -709,7 +737,7 @@ def _refusal(method: str, path: str, declared: str, outsider: bool, is_person: b
 
 @pytest.mark.postgres
 async def test_o5_every_route_answers_every_caller_as_the_permission_table_says(served, token_credential):
-    """Each route, by each caller: refusals are the table's exact status, nothing is 500, only systems and lessons are 501. (O5, O8, O3)"""
+    """Each route, by each caller: refusals are the table's exact status, nothing is 500, only the lessons and the check are 501. (O5, O8, O3)"""
     table = _route_table(served.app)
     kinds = {declared for _, _, declared in table}
     assert set(PERMISSION_OF.values()) | {"platform"} <= kinds, kinds  # the table covers every permission and the administrator
@@ -738,7 +766,7 @@ async def test_o5_every_route_answers_every_caller_as_the_permission_table_says(
                     continue
                 seen[name, "passed"] += 1
                 assert got not in (401, 403), who
-                unbacked = "/systems" in path or "/lessons" in path
+                unbacked = "/lessons" in path or path.endswith("/check")  # #1470: the rest of config is real
                 assert (got == 501) == unbacked, who
     # Anonymous, from the frontend's origin (so the origin layer lets a state change through to sign-in): 401 everywhere.
     rows = [(m, p) for m, p, d in table if d not in {"public"} and p != "/api/auth/logout"]
@@ -1101,7 +1129,7 @@ async def test_1161_b10_the_docs_pages_are_served_only_when_the_dev_setting_is_t
 
     extra = {} if value is None else {"DEFENDER_API_DOCS": value}
     settings = Settings.from_environ({**environment(tmp_path, dsn=tenants), **extra})
-    async with serving(settings, transport=FakeKeycloak()) as running, \
+    async with serving(settings, transport=FakeKeycloak(), openbao_transport=ScriptedOpenBao()) as running, \
             httpx.AsyncClient(transport=httpx.ASGITransport(app=running.app), base_url=ORIGIN) as client:
         got = [(await client.get(p)).status_code for p in ("/api/docs", "/api/redoc")]
         assert got == ([200, 200] if served_docs else [404, 404]), got

@@ -32,7 +32,7 @@ case; a person closes it.
   (`VERBS = {}`); the playground's `ticket` adapter has the action beside its read verbs.
 
 - **The ticket is the one the alert names (#1359 P3).** The tenant's alert mapping (stored in the database
-  since #1345; set by `tenant.py set-alert-mapping` or the API) maps a
+  since #1345; written through `PUT /alert-mapping`) maps a
   fourth optional fact, `case_key`, onto a field the alerting system sets (the alert's own id, or
   a key its automation writes), never one copied from the logged activity. It is read once at run
   start and recorded; at most 128 printable ASCII characters, no `/`, `\`, `;` or whitespace, not
@@ -40,7 +40,7 @@ case; a person closes it.
   ticket. The key is sent as one percent-encoded path segment.
 
 - **Which system records cases is the tenant's setting.** Its case record (#1366: a database
-  record the operator writes with `tenant.py set-case` from a `case-record.yaml` file) names the
+  record the tenant admin writes with `PUT /case-record`) names the
   `system:` and the `comment.body:` template. A tenant without one has no case system and
   needs none. `tenant check` and the record step share one judgement (`systems/case_system.py`):
   the system on the roster, its adapter accepted and exporting the action, its `check_settings`

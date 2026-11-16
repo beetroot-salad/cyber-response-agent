@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 
 from defender.tests.support.shared._postgres1339 import VERSION_TABLE, database, execute
+from defender.tests.migrations._marked1470 import upgrade_marking_tenants
 
 #: The schemas PostgreSQL itself owns; everything else in a database is ours to compare.
 _SYSTEM = "nspname !~ '^pg_' AND nspname <> 'information_schema'"
@@ -361,7 +362,7 @@ def test_upgrading_a_database_at_the_baseline_adds_jobs_and_keeps_the_tenant_in_
     """From `0001_baseline` with a tenant row, `upgrade` moves it to `tenancy`, adds the jobs tables and records head (#1342 O1, r6)."""
     from alembic import command
 
-    from defender.migrations import _config, head, upgrade
+    from defender.migrations import _config, head
 
     config = _config()
     config.attributes["dsn"] = empty_database
@@ -369,7 +370,7 @@ def test_upgrading_a_database_at_the_baseline_adds_jobs_and_keeps_the_tenant_in_
     assert _tables(empty_database, "jobs") == set()
     execute(empty_database, "INSERT INTO identity.tenants (id, created_at) VALUES ('f1000000-0000-4000-8000-000000000001', now())")
 
-    upgrade(empty_database)
+    upgrade_marking_tenants(empty_database)  # #1470 O12: the tenant has its mark, so the drop does not stop
     assert _recorded_revision(empty_database) == [head()]
     assert _tables(empty_database, "jobs") == JOBS_TABLES
     assert execute(empty_database, "SELECT id FROM tenancy.tenants") == [("f1000000-0000-4000-8000-000000000001",)]

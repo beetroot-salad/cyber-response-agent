@@ -17,6 +17,7 @@ from defender.learning.core import drains
 from defender.learning.core.config import LoopPaths
 from defender.learning.leads import declared_systems, pitfalls_curator
 from defender.learning.leads.lead_extraction import LeadAuthorError
+from defender.system_rules import registry
 from defender.systems import verbs
 from defender.systems.catalog import Catalog
 from defender.systems.verb_grant import DENY_ALL
@@ -55,7 +56,7 @@ QUERY_ADAPTER = (
     "VERBS = {'query': query}\n"
 )
 
-#: The names `verbs._system_of` derives from the anomaly fixture; the dispatch seam refuses them.
+#: The names `registry.system_of` derives from the anomaly fixture; the dispatch seam refuses them.
 ANOMALY_NAMES = frozenset({"dir", ".hidden", "", "..", "change-mgmt"})
 
 
@@ -67,7 +68,7 @@ def _anomaly_adapters(adapters: Path) -> Path:
     write(adapters / "_adapter.py", ADAPTER_BODY)
     write(adapters / ".._adapter.py", ADAPTER_BODY)
     write(adapters / "change-mgmt_adapter.py", ADAPTER_BODY)
-    derived = {verbs._system_of(p) for p in adapters.glob("*" + verbs.ADAPTER_SUFFIX)}
+    derived = {registry.system_of(p) for p in adapters.glob("*" + verbs.ADAPTER_SUFFIX)}
     assert derived == ANOMALY_NAMES | {"cmdb"}, f"the fixture is not what it claims: {derived}"
     return adapters
 

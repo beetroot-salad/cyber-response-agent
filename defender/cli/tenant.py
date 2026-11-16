@@ -2,18 +2,9 @@
 """defender/cli/tenant.py — the connect skill's tenant command (#1214: what is left of the tenant
 lifecycle's operator command once the lifecycle became a service).
 
-    python3 defender/cli/tenant.py check <tenant-id> | --folder <path>
+    python3 defender/cli/tenant.py check <tenant-id> [--token-file <path> [--kv-mount <mount>]] | --folder <path>
     python3 defender/cli/tenant.py update <tenant-id>
     python3 defender/cli/tenant.py propose <tenant-id> <staged dir>
-    python3 defender/cli/tenant.py set-alert-mapping <tenant-id> <mapping file>
-    python3 defender/cli/tenant.py catalog
-    python3 defender/cli/tenant.py import <tenant-id> [--dry-run]
-    python3 defender/cli/tenant.py set-system <tenant-id> <system> <folder> --replaces N [--disabled | --enabled]
-    python3 defender/cli/tenant.py delete-system <tenant-id> <system> --replaces N
-    python3 defender/cli/tenant.py set-case <tenant-id> <case-record file> --replaces N
-    python3 defender/cli/tenant.py delete-case <tenant-id> --replaces N
-    python3 defender/cli/tenant.py systems <tenant-id> [--export <dir>] [--token-file <path>]
-    python3 defender/cli/tenant.py set-credentials <tenant-id> <system> <file> --for-version N --token-file <path>
 
 Tenants are created, rotated and offboarded by platform administrators through the API; the
 tenant management service and the execution host's actor do the work (the repo from the template,
@@ -39,37 +30,11 @@ tenant's `agent/` root (connect's tenant half: a system skill, seed queries, tac
 commit-maker as one PR on the tenant forge; files are added or replaced, nothing is deleted, and
 only `agent/` is touched.
 
-`set-alert-mapping` (#1345) replaces the tenant's alert mapping, which lives in the database: the file is
-YAML naming each of the six entries (signature, event_time, summary, case_key, title, description) with a dotted path
-into the raw alert; an entry left out, or `null`, is unmapped. A path finds its value whether the alert nests one key per
-segment or holds keys with dots in them (`alert.rule.id` as one key), or a mix; where both hold a value, the nested key
-wins. A run warns naming each mapped fact (signature, event_time, summary, case_key) it reads no value for. It is validated by the rules the API's `PUT` applies and
-stored by the same operation. It applies to alerts stored from then on; stored alerts keep their title and description. It is the production writer
-until the API is wired to the real store, and the upgrade path from `settings/alert-mapping.yaml`. The entries:
-
-    signature    the rule key lessons and the corpus are matched on: ASCII letters, digits and . _ : / @ + = - (no leading
-                 dash, at most 128 characters), a JSON string or an integer. Anything else records no signature.
-    event_time   when the activity happened; carried as it is, never parsed.
-    summary      one line of what fired.
-    case_key     the ticket a run started with --update-ticket comments on: a field the alerting system sets, never one
-                 copied from the logged activity. At most 128 printable ASCII characters, no / \\ ; or whitespace, not
-                 only dots; anything else records no key and the run leaves an error receipt.
-    title        the alert's name in the alert list and on its runs, cut to 256 characters.
-    description  the alert's longer text in the alert list, cut to 4096 characters.
-
-The first four are read once, when a run starts, and recorded beside its alert. Title and description are text or an
-integer's decimal text, and otherwise null.
-
-A tenant's systems and its case record (#1366) are records in the database, versioned, and written only by this command
-(`_tenant_records` describes each subcommand). `catalog` lists the adapters the product carries: what a system record
-may name, with the settings keys each reads. `import` turns a tenant's retired `settings/systems/<s>/` folders and
-`settings/case-record.yaml`, as its published export holds them, into first versions, once per tenant (a tenant created
-after #1366 is imported at creation); `--dry-run` lists every fault, each naming the file to fix. `set-system` takes a
-folder holding the system's `config.env` and `access.yaml` (what connect hands off and `systems --export` writes) and
-stores it as the system's next version; `--replaces` names the version it replaces (0: none ever), and a write naming
-a version that is no longer current is refused. `set-credentials` stores a system's credential set (a JSON file
-`{"kind": ..., "fields": {...}}`) for the version it names, at that version's credential generation, which rises when
-the system's address, CA or auth block changes: credentials are then set again. The import copies no credential.
+A tenant's alert mapping (#1345), its systems and its case record (#1366) live in the database and are written by the
+tenant's admin through the platform API (#1470): `PUT /alert-mapping`, `PUT /systems/{id}` (and its credentials),
+`PUT /case-record`, each named in the API's reference. `check <id>` judges the stored records as the store judges a
+write and, given `--token-file` (the operator's OpenBao token; `--kv-mount` the KV mount, default `kv`), also reports
+each system with no credentials at its current version's generation.
 
 Exit status: 0 clean, 1 a finding or a refusal, 2 a usage error. A check that could not judge (the
 grant census not taken, `.tenant-id` unverifiable) is one more finding, not a separate code, and
@@ -125,7 +90,7 @@ from defender.systems.verb_dispositions import (  # noqa: E402
     run_grants,
 )
 from defender.records.formats import TenantRefused  # noqa: E402
-from defender.cli import _tenant_records  # noqa: E402
+from defender.cli import _tenant_secrets  # noqa: E402
 from defender.kit.faults import AdapterFault  # noqa: E402
 
 #: How long one git call of `check`'s committed read may take: each is a local lookup of one
@@ -136,7 +101,7 @@ _COMMITTED_READ_TIMEOUT = 15
 _CANNOT_VERIFY = "cannot verify .tenant-id is committed"
 
 
-_say = _tenant_records.say
+_say = _tenant_secrets.say
 
 
 # ==========================================================================================
@@ -151,10 +116,7 @@ def check_tenant(admitted: run_tenant.Admitted, *, secrets: Any = None) -> int:
     tenant, records = admitted.tenant, admitted.directory
     mine = records_check.records_check(tenant.id, records, knowledge=tenant.knowledge, secrets=secrets,
                                        defender_dir=_DEFENDER_DIR)
-    # Not imported (R8): the import finding in place of every finding about its systems (nothing is judged from the
-    # retired folders, which the import still reads); every other finding is reported all the same.
-    findings = (_findings(tenant.knowledge, systems=mine.systems) if mine.records is not None
-                else _tenant_findings(tenant.knowledge))
+    findings = _findings(tenant.knowledge, systems=mine.systems)
     return _report([*mine.lines, *findings, *_mapping_findings(tenant, records), *_publish_findings(tenant, records)])
 
 
@@ -242,70 +204,6 @@ def _publish(tenant: tenancy.Tenant, records: tenancy.TenantDirectory, *, by: st
         return 1
     print(f"published {export.commit} as tenant {tenant.id}'s current knowledge")
     return 0
-
-
-def _stored_text(tenant_id: str, mapping: Any, created: bool) -> str:
-    """What `set-alert-mapping` prints: the stored mapping, one line per entry."""
-    from defender.records.formats import MAPPING_KEYS
-
-    lines = [f"{'saved' if created else 'replaced'} the alert mapping of tenant {tenant_id}:"]
-    lines += [f"  {entry}: {mapping.path_of(entry) or '(unmapped)'}" for entry in MAPPING_KEYS]
-    return "\n".join(lines)
-
-
-def set_alert_mapping(admitted: run_tenant.Admitted, mapping: Any) -> int:
-    """`set-alert-mapping <id> <file>` for the admitted tenant: the validated `mapping` replaces the tenant's
-    through the job store's replace, the one writer (same lock, outcome and job-store audit event as the
-    API's `PUT`; no API audit event), over `DEFENDER_DATABASE_DSN`. Refusals print `[tenant.py] ...`, exit 1."""
-    import asyncio
-    import datetime as _dt
-
-    from sqlalchemy.exc import SQLAlchemyError
-
-    from defender.jobs import JobStore, UnknownReference
-    from defender.records.formats import AlertMappingFault
-
-    dsn = os.environ.get(tenancy.database_address_variable(), "")
-    if not dsn:
-        _say(f"{tenancy.database_address_variable()} is not set: the alert mapping is stored in the database")
-        return 1
-    tenant_id = admitted.tenant.id
-
-    async def put() -> bool:
-        store = JobStore(dsn, clock=lambda: _dt.datetime.now(_dt.UTC))
-        try:
-            _, created = await store.put_alert_mapping(tenant_id, mapping, actor="tenant.py set-alert-mapping")
-            return created
-        finally:
-            await store.close()
-
-    try:
-        created = asyncio.run(put())
-    except (AlertMappingFault, UnknownReference) as refused:
-        _say(refused)
-        return 1
-    except (OSError, SQLAlchemyError) as fault:
-        _say(f"the alert mapping could not be stored: {type(fault).__name__}")
-        return 1
-    print(_stored_text(str(tenant_id), mapping, created))
-    return 0
-
-
-def _mapping_of_file(file: Path) -> Any:
-    """The mapping in `file`, or a printed refusal and `None`."""
-    from defender.records.formats import AlertMappingFault, parse_mapping
-
-    try:
-        raw = read_plain_bytes(file)
-        text = raw.decode("utf-8")
-    except (OSError, UnicodeDecodeError, ValueError) as fault:
-        _say(f"{file} cannot be read as UTF-8 text: {type(fault).__name__}")
-        return None
-    try:
-        return parse_mapping(text)
-    except AlertMappingFault as fault:
-        _say(f"{file}: {fault}")
-        return None
 
 
 def update(admitted: run_tenant.Admitted, *, client=None, identity=None, credential_config=None) -> int:
@@ -422,7 +320,7 @@ def _findings(knowledge: Path, *, systems: Any = None) -> list[str]:
 
 def _tenant_findings(knowledge: Path) -> list[str]:
     """The findings that need nothing of the tenant's systems: the registry, the feedback setting, the registry's
-    grants and the committed `.tenant-id`. A tenant not yet imported gets these too (R8)."""
+    grants and the committed `.tenant-id`."""
     findings = [*_registry_findings(knowledge), *_feedback_findings(knowledge), *_registry_grant_findings(knowledge)]
     committed = _tenant_id_committed(knowledge)
     if committed is not None:
@@ -545,8 +443,7 @@ def main(  # noqa: PLR0913 — the command line plus its in-process stand-ins
     production process passes none and reads them from `DEFENDER_DATABASE_DSN`. `client`,
     `identity` and `credential_config` are in-process stand-ins for the forge client, the
     tenant's credential and the host's issuer configuration (`update`, `propose`); `secrets` is
-    the operator's OpenBao login (`OpenBaoSecrets`) that `set-credentials`, `systems` and `check`
-    use, else built from `--token-file`.
+    the operator's OpenBao login (`OpenBaoSecrets`) that `check` uses, else built from `--token-file`.
 
     `check <id>`, `update` and `propose` work for the tenant through the one host acceptance
     (r10 A1), held for the whole command: this process recorded under the tenant's host lock,
@@ -567,19 +464,7 @@ def main(  # noqa: PLR0913 — the command line plus its in-process stand-ins
         "propose", help="propose a staged agent/-shaped directory as one PR on the tenant forge")
     propose_p.add_argument("tenant_id")
     propose_p.add_argument("staged", type=Path)
-    mapping_p = sub.add_parser(
-        "set-alert-mapping", help="replace the tenant's alert mapping (stored in the database) from a YAML file")
-    mapping_p.add_argument("tenant_id")
-    mapping_p.add_argument("file", type=Path)
-    _record_parsers(sub)
     ns = p.parse_args(argv)
-    if ns.command == "catalog":
-        return _tenant_records.catalog(_DEFENDER_DIR)
-    mapping = None
-    if ns.command == "set-alert-mapping":
-        mapping = _mapping_of_file(ns.file)
-        if mapping is None:
-            return 1
     if ns.command == "check":
         if (ns.tenant_id is None) == (ns.folder is None):
             check_p.error("give exactly one of <tenant-id> and --folder")
@@ -593,22 +478,11 @@ def main(  # noqa: PLR0913 — the command line plus its in-process stand-ins
         return 1
     with admitted:
         try:
-            return _admitted_dispatch(admitted, ns, mapping, client=client, identity=identity,
-                                      credential_config=credential_config, secrets=secrets)
+            return _admitted_command(admitted, ns, client=client, identity=identity,
+                                     credential_config=credential_config, secrets=secrets)
         except AdapterFault as fault:  # the secret store's every refusal (a bad mount, OpenBao down or refusing): one line
             _say(f"{type(fault).__name__}: {fault}")
             return 1
-
-
-def _admitted_dispatch(  # noqa: PLR0913 — main's seams, passed through
-        admitted: run_tenant.Admitted, ns: argparse.Namespace, mapping: Any, *, client: Any, identity: Any,
-        credential_config: Any, secrets: Any) -> int:
-    if ns.command in _RECORD_COMMANDS:
-        return _record_command(admitted, ns, secrets=secrets)
-    if ns.command == "set-alert-mapping":
-        return set_alert_mapping(admitted, mapping)
-    return _admitted_command(admitted, ns, client=client, identity=identity,
-                             credential_config=credential_config, secrets=secrets)
 
 
 def _admitted_command(admitted: run_tenant.Admitted, ns: argparse.Namespace, *, client: Any, identity: Any,
@@ -620,78 +494,10 @@ def _admitted_command(admitted: run_tenant.Admitted, ns: argparse.Namespace, *, 
         return propose(admitted, ns.staged, client=client, identity=identity,
                        credential_config=credential_config)
     if secrets is None and ns.token_file is not None:
-        secrets = _tenant_records.operator_secrets(ns.token_file, mount=ns.kv_mount)
+        secrets = _tenant_secrets.operator_secrets(ns.token_file, mount=ns.kv_mount)
         if secrets is None:
             return 1
     return check_tenant(admitted, secrets=secrets)
-
-
-#: The record subcommands (#1366 DC8) that work for an admitted tenant (`catalog` needs none).
-_RECORD_COMMANDS = frozenset({"import", "set-system", "delete-system", "set-case", "delete-case", "systems",
-                              "set-credentials"})
-
-
-def _record_parsers(sub: Any) -> None:
-    """The record subcommands' arguments (#1366 DC8)."""
-    sub.add_parser("catalog", help="list the adapters the product carries and the settings keys each reads")
-    import_p = sub.add_parser("import", help="turn the tenant's retired settings folders into its first records, once")
-    import_p.add_argument("tenant_id")
-    import_p.add_argument("--dry-run", action="store_true", help="list every fault and write nothing")
-    set_p = sub.add_parser("set-system", help="store a folder (config.env, access.yaml) as a system's next version")
-    set_p.add_argument("tenant_id")
-    set_p.add_argument("system")
-    set_p.add_argument("folder", type=Path)
-    set_p.add_argument("--replaces", type=int, required=True, help="the version it replaces (0: none ever)")
-    on_off = set_p.add_mutually_exclusive_group()
-    on_off.add_argument("--disabled", dest="enabled", action="store_false", default=None,
-                        help="store the system disabled (without either flag a write keeps its current state)")
-    on_off.add_argument("--enabled", dest="enabled", action="store_true", default=None,
-                        help="store the system enabled (a new system is enabled unless --disabled)")
-    del_p = sub.add_parser("delete-system", help="delete a system's record (a new version)")
-    del_p.add_argument("tenant_id")
-    del_p.add_argument("system")
-    del_p.add_argument("--replaces", type=int, required=True)
-    case_p = sub.add_parser("set-case", help="store a case-record file as the tenant's next case record")
-    case_p.add_argument("tenant_id")
-    case_p.add_argument("file", type=Path)
-    case_p.add_argument("--replaces", type=int, required=True)
-    del_case_p = sub.add_parser("delete-case", help="delete the tenant's case record (a new version)")
-    del_case_p.add_argument("tenant_id")
-    del_case_p.add_argument("--replaces", type=int, required=True)
-    systems_p = sub.add_parser("systems", help="list the tenant's current systems, or export each as a folder")
-    systems_p.add_argument("tenant_id")
-    systems_p.add_argument("--export", type=Path, default=None, metavar="DIR")
-    cred_p = sub.add_parser("set-credentials", help="store a system's credentials for its current version")
-    cred_p.add_argument("tenant_id")
-    cred_p.add_argument("system")
-    cred_p.add_argument("file", type=Path)
-    cred_p.add_argument("--for-version", type=int, required=True)
-    for parser in (systems_p, cred_p):
-        parser.add_argument("--token-file", type=Path, default=None, help="a file holding the operator's OpenBao token")
-        parser.add_argument("--kv-mount", default="kv", help="the KV mount credential sets are stored on (default kv)")
-
-
-def _record_command(admitted: run_tenant.Admitted, ns: argparse.Namespace, *, secrets: Any) -> int:
-    """One record subcommand for the admitted tenant."""
-    if ns.command == "import":
-        return _tenant_records.run_import(admitted, dry_run=ns.dry_run)
-    if ns.command == "set-system":
-        return _tenant_records.run_set_system(admitted, ns.system, ns.folder, replaces=ns.replaces,
-                                              enabled=ns.enabled)
-    if ns.command == "delete-system":
-        return _tenant_records.run_delete_system(admitted, ns.system, replaces=ns.replaces)
-    if ns.command == "set-case":
-        return _tenant_records.run_set_case(admitted, ns.file, replaces=ns.replaces)
-    if ns.command == "delete-case":
-        return _tenant_records.run_delete_case(admitted, replaces=ns.replaces)
-    if secrets is None and (ns.command == "set-credentials" or ns.token_file is not None):
-        secrets = _tenant_records.operator_secrets(ns.token_file, mount=ns.kv_mount)
-        if secrets is None:
-            return 1
-    if ns.command == "systems":
-        return _tenant_records.run_systems(admitted, export=ns.export, secrets=secrets)
-    return _tenant_records.run_set_credentials(admitted, ns.system, ns.file, for_version=ns.for_version,
-                                               secrets=secrets)
 
 
 if __name__ == "__main__":

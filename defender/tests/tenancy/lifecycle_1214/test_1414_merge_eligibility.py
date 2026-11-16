@@ -422,14 +422,14 @@ def test_the_directory_reads_what_the_repository_recorded(backend):
 @pytest.mark.postgres
 def test_the_upgrade_keeps_existing_tenants_without_a_record_and_the_record_can_then_be_written(empty_database):  # noqa: F811
     """D13 migration: from the revision before it, a tenant row survives with no record; at head it can be recorded."""
-    from defender.migrations import upgrade
+    from defender.tests.migrations._marked1470 import upgrade_marking_tenants
     from defender.tenancy.postgres import PostgresTenantRepository
     from defender.tests.migrations.test_1214_migrations import _upgrade_to
 
     tenant = "a4140000-0000-4000-8000-000000000001"
     _upgrade_to(empty_database, PRE_1414_HEAD)
     execute(empty_database, "INSERT INTO tenancy.tenants (id, created_at, state) VALUES (%s, %s, 'active')", (tenant, NOW))
-    upgrade(empty_database)
+    upgrade_marking_tenants(empty_database)  # #1470 O12: the tenant has its mark, so the drop does not stop
 
     async def go() -> Any:
         opened = PostgresTenantRepository(empty_database)

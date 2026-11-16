@@ -9,10 +9,10 @@ tenant into something that runs is held to it. The entries:
   (the launcher serves the episode's worlds and pre-flight reads captured calls through the tenant's narrowed grants);
 - `defender-policy`: `policy_cli.main show gather`, which builds gather's definition from the tenant's grants.
 
-Fixture, the same shape at each: the tenant is IMPORTED, its records are a strict subset of the catalog the entry reads,
-and its grants name a system that has no enabled record (never recorded, or recorded and disabled). For each relation:
+Fixture, the same shape at each: the tenant is active, its records are a strict subset of the catalog the entry reads,
+and its grants name a system that has no enabled record (never recorded, or recorded and disabled). For each relation
+(#1470 D-F retired R8's "not imported" relation; a tenant that is not active is refused at admission, before records):
 
-(a) a tenant not imported is refused naming the import (`tenant.py import`), before anything runs or is spent;
 (b) what the entry serves is exactly the enabled records' systems (the roster of a run, the `served_systems` of an
     episode; `defender-policy` prints no system, so there (b) is its accept/refuse alone), and when every granted system
     lost its record the entry is refused under the empty-gather rule naming those grants, not the import;
@@ -23,7 +23,7 @@ and its grants name a system that has no enabled record (never recorded, or reco
     CLI run nothing of their own: the launch's siblings are `--episode` runs, which this row holds.
 
 A read rule that is kept at one entry and forgotten at another is the failure this test is for: each entry has to
-resolve the tenant through the same verdict (`tenant_systems`, `require_imported`, `warn_ignored`).
+resolve the tenant through the same verdict (`tenant_systems`, `warn_ignored`).
 (#1366 R8, R12, O6, H9, O1)
 """
 from __future__ import annotations
@@ -50,11 +50,10 @@ from defender.tests.tenancy.tenant_1078_pass_a import _spec1078 as H
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107
 
 #: The relations between a granted system and the tenant's records the entries are held to.
-NOT_IMPORTED = "not-imported"
 UNRECORDED = "unrecorded"
 DISABLED = "disabled"
 EMPTIED = "no-granted-system-recorded"
-RELATIONS = (NOT_IMPORTED, UNRECORDED, DISABLED, EMPTIED)
+RELATIONS = (UNRECORDED, DISABLED, EMPTIED)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -77,10 +76,8 @@ class Seen:
 
 
 def _records_for(base: R.RecordsSpec, relation: str, *, granted: tuple[str, ...], lost: str) -> R.RecordsSpec | None:
-    """`base` (every system the tenant records) as the relation says: `lost` has no record or a disabled one, every system
-    the tenant's grants name has none, or the tenant is not imported (None)."""
-    if relation == NOT_IMPORTED:
-        return None
+    """`base` (every system the tenant records) as the relation says: `lost` has no record or a disabled one, or every
+    system the tenant's grants name has none."""
     if relation == UNRECORDED:
         return R.without(base, lost)
     if relation == DISABLED:
@@ -89,7 +86,7 @@ def _records_for(base: R.RecordsSpec, relation: str, *, granted: tuple[str, ...]
 
 
 def _ignored(relation: str, granted: tuple[str, ...], lost: str) -> tuple[str, ...]:
-    return {NOT_IMPORTED: (), UNRECORDED: (lost,), DISABLED: (lost,), EMPTIED: ()}[relation]
+    return {UNRECORDED: (lost,), DISABLED: (lost,), EMPTIED: ()}[relation]
 
 
 def _enabled(records: R.RecordsSpec | None) -> frozenset[str]:
@@ -218,18 +215,12 @@ def _warned(caplog: pytest.LogCaptureFixture, system: str) -> list[str]:
 def test_1366_every_entry_that_resolves_a_tenant_applies_the_one_grants_by_records_verdict(
         tmp_path, data_root, monkeypatch, caplog, entry, relation):
     """Each entry, over a tenant whose records are a strict subset of the catalog and whose grants name a system with no
-    enabled record: not imported is refused naming the import; the entry serves exactly the enabled records' systems; one
-    warning line per ignored grant; and an entry that is a run records the versions it read. (#1366 R8, R12, O6, H9)"""
+    enabled record: the entry serves exactly the enabled records' systems; one warning line per ignored grant; and an
+    entry that is a run records the versions it read. (#1366 R12, O6, H9)"""
     with caplog.at_level(logging.WARNING):
         seen = ENTRIES[entry](Env(tmp_path, data_root, monkeypatch), relation)
     text = seen.refusal or ""
 
-    if relation == NOT_IMPORTED:  # (a)
-        assert R.AUTHOR[R.IMPORT] in text, (entry, seen)
-        assert not seen.served, (entry, "served systems of a tenant that is not imported", seen.served)
-        assert seen.versions is None, (entry, "wrote versions for a tenant that is not imported")
-        return
-    assert R.AUTHOR[R.IMPORT] not in text, (entry, "named the import for a tenant that IS imported", text)
 
     if relation == EMPTIED:  # (b), the limit: nothing granted is left
         assert seen.refusal is not None, (entry, "ran with no granted system recorded")

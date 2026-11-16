@@ -146,10 +146,10 @@ def admit(raw: bytes) -> Admitted:
 # =============================================================================================
 
 #: What a run or an investigation is refused with while its tenant has saved no mapping (#1345 O4): the one
-#: wording, used by the store and by run start alike. It names the missing mapping, the command-line verb and the API route.
+#: wording, used by the store and by run start alike. It names the missing mapping and the API route, its only writer
+#: since #1470 O1.
 ALERT_MAPPING_MISSING = (
-    "the tenant has no alert mapping: save one with `tenant.py set-alert-mapping <tenant-id> <file>` "
-    "or `PUT /api/tenants/<tenant-id>/alert-mapping`")
+    "the tenant has no alert mapping: a tenant admin saves one with `PUT /api/tenants/<tenant-id>/alert-mapping`")
 
 
 def _reasons(kind: str) -> str:

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import pytest
 
+from defender.tests.migrations._marked1470 import BEFORE_DROP
 from defender.tests.migrations.test_1214_migrations import _upgrade_to
 from defender.tests.support.shared._postgres1339 import execute
 
@@ -15,7 +16,6 @@ TABLES = {
     "system_versions": {"tenant_id", "system_id", "version", "adapter_id", "enabled", "settings", "access",
                         "credential_generation", "deleted", "author", "written_at"},
     "case_versions": {"tenant_id", "version", "system_id", "comment_body", "deleted", "author", "written_at"},
-    "records_mark": {"tenant_id"},
 }
 
 
@@ -67,17 +67,91 @@ def test_at_head_the_records_tables_have_the_designed_columns_a_tenant_key_and_a
 
 
 @pytest.mark.postgres
-def test_at_head_the_proxy_role_cannot_log_in_and_may_only_select_the_system_versions_and_the_mark(migrated_database):
-    """`defender_proxy_reader` is NOLOGIN, may SELECT `system_versions` and `records_mark` and nothing else there: no
-    write to either, no read of the case table or the tenants. (#1366 R14, amended: the proxy reads whether a token's
-    tenant is imported from the mark)"""
+def test_at_head_the_proxy_role_cannot_log_in_and_may_only_select_system_versions_and_the_tenant_rows_id_and_state(
+        migrated_database):
+    """`defender_proxy_reader` is NOLOGIN, may SELECT `system_versions` and exactly the `id` and `state` columns of the
+    tenant row, checked column by column; the mark table is gone. (#1366 R14, amended by #1470 O8)"""
     assert execute(migrated_database, "SELECT rolcanlogin FROM pg_roles WHERE rolname = %s", (ROLE,)) == [(False,)]
     assert _can(migrated_database, "system_versions", "SELECT"), "control"
-    assert _can(migrated_database, "records_mark", "SELECT"), "control"
+    assert execute(migrated_database, "SELECT to_regclass('tenancy.records_mark')") == [(None,)]
+    columns = {c for (c,) in execute(migrated_database, "SELECT column_name FROM information_schema.columns "
+                                                        "WHERE table_schema = 'tenancy' AND table_name = 'tenants'")}
+    assert {"id", "state"} < columns, "premise"
+    readable = {c for c in columns if execute(migrated_database, "SELECT has_column_privilege(%s, 'tenancy.tenants', %s, "
+                                                                 "'SELECT')", (ROLE, c))[0][0]}
+    assert readable == {"id", "state"}
     wrong = [(t, p) for t, p in [("system_versions", "INSERT"), ("system_versions", "UPDATE"), ("system_versions", "DELETE"),
-                                 ("system_versions", "TRUNCATE"), ("case_versions", "SELECT"), ("records_mark", "INSERT"),
-                                 ("records_mark", "DELETE"), ("tenants", "SELECT")] if _can(migrated_database, t, p)]
+                                 ("system_versions", "TRUNCATE"), ("case_versions", "SELECT"), ("tenants", "SELECT"),
+                                 ("tenants", "UPDATE")] if _can(migrated_database, t, p)]
     assert wrong == []
+
+
+#: Tenants by id: a stated state's tenant without a mark, an active one with its mark (control), an offboarded one without.
+UNMARKED, MARKED, GONE = (f"a1470000-0000-4000-8000-00000000000{n}" for n in (1, 2, 3))
+_PENDING = {"creating": ("create", "names", "service"), "offboarding": ("offboard", "offboard", "service")}
+
+
+def _tenant(dsn: str, tenant: str, state: str, *, mark: bool) -> None:
+    action, step, actor = _PENDING.get(state, (None, None, None))
+    execute(dsn, "INSERT INTO tenancy.tenants (id, created_at, state, pending_action, step, step_actor) "
+                 "VALUES (%s, now(), %s, %s, %s, %s)", (tenant, state, action, step, actor))
+    if mark:
+        execute(dsn, "INSERT INTO tenancy.records_mark (tenant_id) VALUES (%s)", (tenant,))
+
+
+def test_the_revision_that_drops_the_mark_sits_directly_on_the_previous_head():
+    """The revision that drops the mark sits directly on `BEFORE_DROP`, the head it was written on; a later revision
+    (#1161's `0020_signin_attempts`) may follow it. (#1470 O8)"""
+    from defender.migrations import _scripts
+
+    scripts = _scripts()
+    assert scripts.get_current_head() != BEFORE_DROP
+    assert scripts.get_revision("0019_drop_records_mark").down_revision == BEFORE_DROP
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("state", ["creating", "active", "offboarding"])
+def test_1470_o12_the_mark_drop_stops_naming_the_tenants_without_a_mark_and_changes_nothing(empty_database, state):
+    """A tenant that is not offboarded and has no mark (from before #1366, never imported) stops the upgrade, the message
+    lists it and neither the marked tenant nor the offboarded one; the mark table, its rows and the revision stay.
+    (O12, guard in the 0005/0012 pattern)"""
+    from defender.migrations import upgrade
+
+    _upgrade_to(empty_database, BEFORE_DROP)
+    _tenant(empty_database, UNMARKED, state, mark=False)
+    _tenant(empty_database, MARKED, "active", mark=True)
+    _tenant(empty_database, GONE, "offboarded", mark=False)
+
+    with pytest.raises(RuntimeError) as stopped:
+        upgrade(empty_database)
+
+    message = str(stopped.value)
+    assert UNMARKED in message, message
+    assert MARKED not in message, message
+    assert GONE not in message, message
+    assert execute(empty_database, "SELECT tenant_id FROM tenancy.records_mark") == [(MARKED,)]
+    assert execute(empty_database, "SELECT version_num FROM alembic_version") == [(BEFORE_DROP,)]
+
+
+@pytest.mark.postgres
+def test_1470_o12_the_mark_drop_runs_when_every_tenant_not_offboarded_has_its_mark_and_keeps_the_records(empty_database):
+    """Marked tenants (any state but offboarded) and an offboarded one without: the upgrade reaches head, the mark table
+    is gone and the tenants' version rows are as they were. (O12, O8)"""
+    from defender.migrations import upgrade
+
+    _upgrade_to(empty_database, BEFORE_DROP)
+    _tenant(empty_database, MARKED, "active", mark=True)
+    _tenant(empty_database, GONE, "offboarded", mark=False)
+    execute(empty_database, "INSERT INTO tenancy.system_versions (tenant_id, system_id, version, adapter_id, enabled, settings, "
+                            "access, credential_generation, deleted, author, written_at) VALUES "
+                            "(%s, 'ticket', 1, 'ticket', true, '{}'::jsonb, 'x', 1, false, 'seed', now())", (MARKED,))
+
+    upgrade(empty_database)
+
+    assert execute(empty_database, "SELECT to_regclass('tenancy.records_mark')") == [(None,)]
+    assert execute(empty_database, "SELECT system_id, version FROM tenancy.system_versions WHERE tenant_id = %s",
+                   (MARKED,)) == [("ticket", 1)]
+    assert execute(empty_database, "SELECT id FROM tenancy.tenants ORDER BY id") == [(MARKED,), (GONE,)]
 
 
 @pytest.mark.postgres

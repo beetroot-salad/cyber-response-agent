@@ -50,6 +50,16 @@ class ConfigFault(AdapterFault):
     exit_code = 2
 
 
+class ConfigFaults(ConfigFault):
+    """Several independent faults of one system's settings, raised together (#1470 O4: a judged record lists every
+    fault). Its text is the first fault's, so a reader that shows one fault shows what it always showed; `faults` holds
+    every one, in the order they were found."""
+
+    def __init__(self, faults: tuple[str, ...]) -> None:
+        super().__init__(faults[0])
+        self.faults = faults
+
+
 class ConfinementFault(AdapterFault):
     """A target-fidelity refusal: never an infra fault (not in circuit_breaker's
     INFRA_EXIT_CODES), and refused before any transport is attempted."""
@@ -91,6 +101,7 @@ __all__ = [
     "is_proxy_label",
     "AdapterFault",
     "ConfigFault",
+    "ConfigFaults",
     "ConfinementFault",
     "TransportFault",
     "UpstreamFault",

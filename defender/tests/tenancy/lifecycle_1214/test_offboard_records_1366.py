@@ -40,21 +40,24 @@ def _offboard(world: LifecycleWorld, dsn: str, tenant_id: str) -> Any:
         asyncio.run(repo.close())
 
 
-def test_1366_o10_offboarding_removes_every_record_version_and_the_imported_mark(
-        tmp_path, data_root, migrated_database, capsys, monkeypatch):  # noqa: F811 — the imported fixture
-    """A and B imported (seeded), A's cmdb edited then deleted (three versions): after A is offboarded A has no system version, no case version and no
-    mark; B's records are untouched. (#1366 O10, R8)"""
-    monkeypatch.setenv("DEFENDER_DATABASE_DSN", migrated_database)
+def test_1366_o10_offboarding_removes_every_record_version(
+        tmp_path, data_root, migrated_database):  # noqa: F811 — the imported fixture
+    """A and B hold records (seeded through the store), A's cmdb edited then deleted (three versions): after A is
+    offboarded A has no system version and no case version; B's records are untouched. (#1366 O10; #1470 O8: no mark)"""
+    from defender.tests.support.tenancy import _records1470 as K
+
     with published_tenant(tmp_path / "forge", root=data_root, files=TENANT_FILES) as a, second_tenant(a, files=TENANT_FILES) as b:
-        ops = {}
         for t in (a, b):
             register_tenant(migrated_database, t.tenant_id, data_root=t.data_root)
-            ops[t.tenant_id] = R.Operator(t.tenant_id, migrated_database, tmp_path / f"op-{t.tenant_id}", capsys)
-            assert R.imported(migrated_database, t.tenant_id), "premise: registered tenants are seeded imported"
         config, access = R.FIXTURE_FOLDERS["cmdb"]
-        assert ops[a.tenant_id].set_system("cmdb", replaces=1, config=config, access=access)[0] == 0
-        assert ops[a.tenant_id].delete_system("cmdb", replaces=2)[0] == 0
-        assert len(ops[a.tenant_id].versions("cmdb")) == 3, "premise: three stored versions of cmdb"
+
+        async def edit_then_delete(store):
+            await store.put_system(a.tenant_id, "cmdb", replaces=1, adapter="cmdb", enabled=True,
+                                   settings=dict(config), access=access, author=K.SEED)
+            await store.delete_system(a.tenant_id, "cmdb", replaces=2, author=K.SEED)
+
+        K.run(migrated_database, edit_then_delete)
+        assert [v.version for v in R.system_versions(migrated_database, a.tenant_id, "cmdb")] == [1, 2, 3], "premise"
         world = LifecycleWorld(tmp_path / "world", data_root)
         try:
             record = _offboard(world, migrated_database, a.tenant_id)
@@ -62,10 +65,8 @@ def test_1366_o10_offboarding_removes_every_record_version_and_the_imported_mark
             world.close()
 
     assert record.state == "offboarded", record
-    assert ops[a.tenant_id].current() == {}
-    assert all(ops[a.tenant_id].versions(s) == [] for s in R.FIXTURE_SYSTEMS)
-    assert R.current_records(migrated_database, a.tenant_id).case is None
+    assert all(R.system_versions(migrated_database, a.tenant_id, s) == [] for s in R.FIXTURE_SYSTEMS)
     assert R.case_versions(migrated_database, a.tenant_id) == []
-    assert not R.imported(migrated_database, a.tenant_id)
-    assert set(ops[b.tenant_id].current()) == R.FIXTURE_SYSTEMS  # control: the other tenant's records stay
-    assert R.imported(migrated_database, b.tenant_id)
+    assert {s for s in R.FIXTURE_SYSTEMS if R.system_versions(migrated_database, b.tenant_id, s)} == R.FIXTURE_SYSTEMS, \
+        "control: the other tenant's records stay"
+    assert R.case_versions(migrated_database, b.tenant_id), "control: and its case record"

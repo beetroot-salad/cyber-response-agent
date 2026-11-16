@@ -1,14 +1,14 @@
 """Sign-in attempts in flight (#1161 D6): the browser keeps only a random token under the attempt's cookie, and the
 nonce, PKCE verifier and return path stay here until the callback reads them once.
 
-Revision ID: 0019_signin_attempts
-Revises: 0018_learning_set_aside_indexes
+Revision ID: 0020_signin_attempts
+Revises: 0019_drop_records_mark
 """
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0019_signin_attempts"
-down_revision = "0018_learning_set_aside_indexes"
+revision = "0020_signin_attempts"
+down_revision = "0019_drop_records_mark"
 
 SCHEMA = "identity"
 

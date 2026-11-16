@@ -104,10 +104,9 @@ def _definition(role: AgentRole, admitted: Admitted | None) -> AgentDefinition:
     from defender.systems.verbs import RegistryError
 
     # Its systems are the tenant's current records over the checkout's catalog (#1366 R10, R12):
-    # gather's grant narrowed to them, as run start narrows it; a tenant not imported is refused.
+    # gather's grant narrowed to them, as run start narrows it.
     try:
         records = admitted.directory.current_records(admitted.tenant.id)
-        run_tenant_mod.require_imported(records, admitted.tenant.id)
         run = run_tenant_mod.run_tenant_for(admitted.tenant, dispatches_lead_zero=False, records=records)
         verdict = run_tenant_mod.tenant_systems(run, Catalog.of_checkout(PATHS.defender_dir))
     except (run_tenant_mod.TenantRefused, RegistryError) as refusal:

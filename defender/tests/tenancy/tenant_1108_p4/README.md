@@ -395,7 +395,7 @@ Collateral still naming deleted files: `tests/_shard_weights.json`, `learning/st
 - **Recheck at `dc89318b` (all four reviewers):** all round-1 findings resolved except REPLAY-WT (recorded as the test-only exclusion) and TRI-3 (minor). No new blocking findings. Raised OD18–OD22 and the fast-forward-only pin.
 - **After the recheck:** OD18–OD23 cases added in `9b2b4243d`/`72f9f2e7d`, with OD22' and the OD20 follow-ups in this commit. A final targeted recheck confirmed the OD18/19/20/22/23 cases are not vacuous. Its two gaps are now closed: a misconfigured child with a snapshot still refuses, and the later lines of a multi-line forge error survive in the one-line reason. Its pre-P4 "unreadable" consequence led to OD22'. Nothing pending.
 
-## 8. Operator items before merge
+## 8. Operator items before merge <!-- lint-stale-ref: ok — the English word, not the removed test helper class -->
 
 - **F-CUT:** lab origin `main` (`75b5e6a`) has `agent/.tenant-id = playground`. The lab clone is 2 undelivered commits ahead (`c6cdf9f` UUID tenant-id migration; `1784b0f` integration transports, which may touch `settings/`). Push or PR them with an operator credential before cutover; `test_cutover.py::test_o14_lab_main_is_publishable_for_the_lab_tenant_before_merge` is the gate.
 - **F-FJ:** the running Forgejo is 15.0.9 and the compose default is 17.0.0, so U2's volume→bind move coincides with a 15→17 upgrade that is not automatic.

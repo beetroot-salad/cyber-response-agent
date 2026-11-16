@@ -7,6 +7,7 @@ import re
 
 import pytest
 
+from defender.tests.migrations._marked1470 import upgrade_marking_tenants
 from defender.tests.migrations.test_1214_migrations import _upgrade_to
 from defender.tests.support.shared import _revisions1485 as revisions
 from defender.tests.support.shared._postgres1339 import execute
@@ -87,7 +88,7 @@ def test_o5_the_upgrade_stops_naming_the_count_while_a_tenant_carries_learning_c
 
 def test_o5_with_no_such_row_the_upgrade_restores_the_0013_constraints_and_refuses_the_value(empty_database):
     """With no `learning_cutover` row (a rotating one beside), `upgrade` leaves both constraints as read at 0013; the database refuses the value, takes `rotate`. (O5)"""
-    from defender.migrations import head, upgrade
+    from defender.migrations import head
 
     _upgrade_to(empty_database, LEARNING_STORE)
     at_0013 = _constraints(empty_database)
@@ -98,7 +99,7 @@ def test_o5_with_no_such_row_the_upgrade_restores_the_0013_constraints_and_refus
     _tenant(empty_database, TENANTS[0], "rotate", "names", "service")
     _tenant(empty_database, TENANTS[1], None)
 
-    upgrade(empty_database)
+    upgrade_marking_tenants(empty_database)  # #1470's mark drop sits above: the planted tenants get their marks
     assert _version(empty_database) == [(head(),)]
     assert _constraints(empty_database) == at_0013
     execute(empty_database, "UPDATE tenancy.tenants SET pending_action = 'rotate', step = 'names', step_actor = 'service' WHERE id = %s",
@@ -190,7 +191,7 @@ def test_d12_at_head_work_items_id_is_a_required_unique_uuid_with_no_default(mig
 def test_d12_rows_seeded_before_the_index_revision_get_distinct_non_null_ids_on_upgrade(empty_database):
     """Items inserted at the revision before the index revision (several tenants, kinds and statuses) each get a
     distinct id on upgrade, and none keeps a default behind. (D12)"""
-    from defender.migrations import head, upgrade
+    from defender.migrations import head
 
     before = revisions.down_of(revisions.by_suffix(revisions.INDEXES_SUFFIX))
     _upgrade_to(empty_database, before)
@@ -205,7 +206,7 @@ def test_d12_rows_seeded_before_the_index_revision_get_distinct_non_null_ids_on_
             offers_declined, enqueued_at, updated_at) VALUES (%s, %s, %s, '{}', %s, 0, 0, 0, %s, %s)""",
                 (tenant, kind, key, status, CREATED, CREATED))
 
-    upgrade(empty_database)
+    upgrade_marking_tenants(empty_database)  # #1470's mark drop sits above: the planted tenants get their marks
     assert _version(empty_database) == [(head(),)]
     rows = execute(empty_database, "SELECT tenant_id, kind, item_key, id FROM learning.work_items")
     assert sorted(r[:3] for r in rows) == sorted(s[:3] for s in seeded), "premise: every seeded row survived"

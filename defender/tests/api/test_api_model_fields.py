@@ -258,9 +258,10 @@ def test_1083_the_moved_pinned_texts_and_the_mapping_read_port():
     assert "after commit" in doc
     assert "lost" in doc
     assert "§4.1" in (inspect.getdoc(ports.Writes.create_investigation) or "")
-    assert "put_system" in vars(ports.SystemsRepository)
     assert "get_alert_mapping" in vars(ports.AlertMappingRepository)
-    assert "get_alert_mapping" not in vars(ports.SystemsRepository)
+    others = [c for n, c in vars(ports).items() if n.endswith("Repository") and c is not ports.AlertMappingRepository]
+    assert others
+    assert [c.__name__ for c in others if "get_alert_mapping" in vars(c)] == []
 
 
 # --- #1485: the learning work port and its wire models ---------------------------------------------------------------

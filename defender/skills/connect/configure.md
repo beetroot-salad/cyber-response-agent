@@ -1,14 +1,14 @@
 # `connect` — the configure path
 
-Read this when `tenant.py catalog` lists the system: the product already carries its adapter.
+Read this when `GET /adapters` lists the system: the product already carries its adapter.
 Nothing is generated. `SKILL.md` is the entrypoint and owns the common steps (the check, the
 knowledge, validation, the handoff); this file is only how you configure the adapter for one
 tenant.
 
 ## Settings — `config.env`
 
-`catalog` lists every key the adapter reads, prefixed (`JIRA_SERVICE_DESK`, `SERVICENOW_TABLE`,
-...). Write exactly those, one `KEY="value"` per line, each value the
+`GET /adapters` lists every key the adapter reads, prefixed (`JIRA_SERVICE_DESK`, `SERVICENOW_TABLE`,
+...), with a sample value for each. Write exactly those, one `KEY="value"` per line, each value the
 maintainer confirmed. The store refuses a missing key, an extra one, a blank or `CHANGE-ME`
 value, and an `export` line. If a key's meaning isn't clear from its name, read the adapter's
 module docstring (`defender/integrations/{system}_adapter.py`) — do not guess a value.
@@ -18,8 +18,8 @@ module docstring (`defender/integrations/{system}_adapter.py`) — do not guess 
 The same declaration as a generated adapter's (`adapter.md` → "Access declaration"): `access:
 http-proxy`, the system's `base` URL, its `auth` (scheme and the field the scheme reads, never a
 value), its routes, and `ca` when the system's certificate comes from a private CA (PEM
-certificates, inline; then the only trust for this system). If the export has a sibling, copy
-its shape and change the base, scheme and routes.
+certificates, inline; then the only trust for this system). If `GET /systems` has a sibling, copy
+its `access` and change the base, scheme and routes.
 
 - **Reads.** The proxy admits every `GET` and `HEAD` under the base, so a read that uses either
   needs no route. List a read route only for a read sent with another method (a search sent as
@@ -35,10 +35,11 @@ its shape and change the base, scheme and routes.
 
 The adapter's module docstring and its health check say what access the credential needs (for
 example, a read-only user plus the privilege its health check calls). Say it to the maintainer.
-The operator writes the credential file; you tell them its shape. It is one JSON object,
-`{"kind": ..., "fields": {...}}`: `kind` is `static`, or `oauth-client-credentials` for an OAuth
-client. A `basic` scheme reads the fields `username` and `password`; a `bearer` or `header`
-scheme reads the one field `access.yaml` names (`adapter.md` → "Credentials"). For Jira Cloud,
+The tenant admin stores the credential (`PUT /systems/{system}/credentials`); you tell them its
+fields. It holds exactly the fields the record's auth scheme reads: a `basic` scheme reads
+`username` and `password`; a `bearer` or `header` scheme reads the one field `access.yaml` names;
+`oauth-client-credentials` reads `client_id` and `client_secret` (`adapter.md` → "Credentials").
+A secret field holds at least 16 characters. For Jira Cloud,
 `basic` is the account's email as `username` and an API token as `password`. Say which fields;
 never ask for, or accept, a value.
 
@@ -69,8 +70,8 @@ naming the run, so the body need not.
 **The ticket key.** The alert must carry the key of the ticket the run comments on, and the
 tenant's alert mapping must point `case_key` at that field (a dotted path into the alert). Ask the
 maintainer which field. If the stored mapping already maps `case_key` to it, there is nothing to
-change. Otherwise give the operator the one line to change: `set-alert-mapping` replaces the
-whole mapping, so they edit their last stored copy, never write a mapping from scratch.
+change. Otherwise give the tenant admin the one line to change: `PUT /alert-mapping` replaces the
+whole mapping, so they edit the mapping `GET /alert-mapping` answers, never write one from scratch.
 
 - **ServiceNow addresses a record only by its `sys_id`** (a 32-character hex id), never by its
   number (`INC0012345`): the adapter does not look a number up. The alert automation must put
