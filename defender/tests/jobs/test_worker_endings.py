@@ -284,21 +284,50 @@ async def test_1471_p5_each_helper_is_started_with_its_own_flag_digest_and_link(
         assert _values(argv, "--job") == [inv]
 
 
-@pytest.mark.parametrize("flagged", [True, False], ids=["flagged", "unflagged"])
-async def test_1471_p5_the_launch_record_and_the_tenant_folder_carry_neither_flag_nor_link(world, flagged):
-    """The launch record keeps its six base fields and no file in the tenant folder holds the handed link value: the job
-    container binds that folder read-write. (P-5)"""
-    ids, _ = await _drain_spawned(world, [(T1, flagged, "k1")], _child(world, exit=0, files=_committed()))
-    inv = ids[0]
+async def test_1471_p5_the_worker_writes_the_same_files_for_a_flagged_row_as_for_an_unflagged_one_and_hand_the_link_only_by_argv(world):
+    """A flagged row's writes differ from an unflagged row's in nothing but its own values, the launch record keeps its
+    six fields, and no file holds the origin or a flag word. (P-5)"""
+    tenant_dir = world["root"] / T1
 
-    launch = json.loads((world["runs"] / f"{inv}.launch.json").read_text(encoding="utf-8"))
-    assert set(launch) == LAUNCH_FIELDS, launch
-    assert launch["digest"] == DIGEST_1471, "premise: the record is this row's"
-    written = [p for p in (world["root"] / T1).rglob("*") if p.is_file()]
-    assert len(written) >= 2, "premise: the worker wrote files here"
-    link = f"{ORIGIN_1471}/t/{T1}/investigations/{inv}"
-    holding = [p.name for p in written if link.encode() in p.read_bytes()]
-    assert holding == [], f"the handed link value is on the run folder: {holding}"
+    def snapshot() -> dict:
+        return {p: p.read_bytes() for p in tenant_dir.rglob("*") if p.is_file()}
+
+    before = snapshot()
+    rows = [(T1, True, "k1"), (T1, False, "k2")]
+    (flagged_id, plain_id), door = await _drain_spawned(world, rows, _child(world, exit=0, files=_committed()))
+    after = snapshot()
+    written = {p: data for p, data in after.items() if before.get(p) != data}
+
+    assert _values(door.argvs[flagged_id], "--ticket-link") == [f"{ORIGIN_1471}/t/{T1}/investigations/{flagged_id}"], \
+        "premise: the flag reached the worker"
+    assert "--post-ticket" not in door.argvs[plain_id], "premise: the unflagged row carries no flag"
+
+    def launch_of(inv):
+        return json.loads((world["runs"] / f"{inv}.launch.json").read_text(encoding="utf-8"))
+
+    def normalised(inv, key):
+        launch = launch_of(inv)
+        values = [inv, launch["alert_id"], launch["box_token"], f"V-{key}", key]
+        out = {}
+        for path, data in written.items():
+            if inv not in str(path.relative_to(tenant_dir)) and inv.encode() not in data:
+                continue
+            name, text = str(path.relative_to(tenant_dir)), data.decode("utf-8", "replace")
+            for n, value in enumerate(values):
+                name, text = name.replace(value, f"<v{n}>"), text.replace(value, f"<v{n}>")
+            out[name] = text
+        return out
+
+    flagged, plain = normalised(flagged_id, "k1"), normalised(plain_id, "k2")
+    assert len(plain) >= 2, "premise: the worker wrote files for the row"
+    assert set(flagged) == set(plain), (sorted(flagged), sorted(plain))
+    assert {n: t for n, t in flagged.items() if t != plain[n]} == {}, "a flagged row's write differs from the unflagged row's"
+    for inv in (flagged_id, plain_id):
+        assert set(launch_of(inv)) == LAUNCH_FIELDS, launch_of(inv)
+        assert launch_of(inv)["digest"] == DIGEST_1471, "premise: the record is this row's"
+    for path, data in written.items():
+        text = data.decode("utf-8", "replace")
+        assert not any(word in text for word in (ORIGIN_1471, "app.defender.test", "update_ticket", "ticket_link", "post_ticket")), path
 
 
 def _receipt(status) -> str:

@@ -644,24 +644,39 @@ def _mint_for(tmp_path, data_root, signer, *, world: Any = None, **seams: Any) -
     return mint
 
 
-def _world_access(tmp_path, monkeypatch, signer) -> Any:
-    """The read access a sibling world's run start hands its lifecycle, through `run.main --episode`
-    over a tenant whose `cmdb` is declared on the credential proxy."""
+#: The systems the sibling tenant declares on the proxy: `ticket` is declared yet granted to no role by `TABLE`.
+SIBLING_PROXIED = ("cmdb", "identity", "ticket")
+
+
+def _plant_sibling(tmp_path, monkeypatch) -> tuple[Path, Path, Any]:
+    """The sibling episode's tenant with exactly `SIBLING_PROXIED` declared on the proxy (every other `access.yaml`
+    removed), `TABLE` as its verb grants, and a live sign login; returns the episode, the data root and the records."""
     import os
 
-    from defender import run as run_mod
     from defender.tests.runtime.providers import _spec1243 as P
-    from defender.tests.support.tenancy._launch_publish_p4 import in_process_publish
 
     ep = P.sibling_episode(tmp_path, monkeypatch)
     root = Path(os.environ["DEFENDER_DATA_ROOT"])
     folder = root / P.SIBLING_TENANT / "knowledge"
-    for system in ("cmdb", "ticket"):
+    for undeclared in (folder / "settings" / "systems").glob("*/access.yaml"):
+        undeclared.unlink()
+    (folder / "settings" / "verb-grants.yaml").write_text(TABLE, encoding="utf-8")
+    for system in SIBLING_PROXIED:
         decl = H.declaration("http://x.invalid/api", writes=CASE_WRITES.get(system, ()))
         for rel, text in H.access_files(system, decl, env=A.env_text(system, extra=EXTRA.get(system, ""))).items():
+            (folder / rel).parent.mkdir(parents=True, exist_ok=True)
             (folder / rel).write_text(text, encoding="utf-8")
     records = A.Records(root, {P.SIBLING_TENANT: [A.generation(
         P.SIBLING_TENANT, tmp_path / "secrets", sign_role_id="sign-role", sign_secret="sign-secret")]})
+    return ep, root, records
+
+
+def _world_access(ep: Path, records: Any, signer) -> Any:
+    """The read access a sibling world's run start hands its lifecycle, through `run.main --episode`."""
+    from defender import run as run_mod
+    from defender.tests.runtime.providers import _spec1243 as P
+    from defender.tests.support.tenancy._launch_publish_p4 import in_process_publish
+
     held: list[Any] = []
 
     def lifecycle(**kw: Any) -> dict:
@@ -677,21 +692,32 @@ def _world_access(tmp_path, monkeypatch, signer) -> Any:
     return access
 
 
-def test_1449_a_world_reads_on_a_runs_terms_and_no_operator_run_start_signs_a_write_pass(tmp_path, data_root, monkeypatch):
-    """A branched run is a run (#1449 W1, W3): a sibling world's run start and a regular run's each grant `cmdb` a read, and
-    neither signs a write pass (`rw`) on any system though `ticket` is proxied: the operator command never comments (W7, C-9).
-    Weakened: the two run on different tenants, so the world's grant is not compared to the run's."""
-    _plant(data_root, proxy=("cmdb", "ticket"))
-    run_signer, world_signer = A.MarkedSigner(), A.MarkedSigner()
-    rec, _tickets, rc, refused, _started = _drive(tmp_path / "run", data_root, signer=run_signer)
-    assert (rc, refused) == (0, None), (rc, refused)
-    run_access = read_access(rec)
-    world_access = _world_access(tmp_path / "world", monkeypatch, world_signer)
+def _run_access_on_sibling(tmp_path, root: Path, records: Any, signer) -> Any:
+    """The read access a regular run's start hands its lifecycle, through `run.main` on the sibling tenant."""
+    from defender.tests.runtime.providers import _spec1243 as P
 
-    for access, signer in ((run_access, run_signer), (world_access, world_signer)):
-        grant = A.grant_of(_claims_of_token(signer, access.token()))
-        assert ("cmdb", "r") in grant, "the declared, granted system is not read"
-        assert {mode for _system, mode in grant} == {"r"}, "a read token grants only reads"
+    rec = RunAtHandedRecorder(tmp_path / "run")
+    alert = S.plant_alert(tmp_path / "in")
+    rc, refused = S.drive_run([str(alert), "--tenant", P.SIBLING_TENANT], rec, directory=records.directory,
+                              signer=signer, proxy_url="http://proxy.invalid")
+    assert (rc, refused) == (0, None), (rc, refused)
+    return read_access(rec)
+
+
+def test_1449_a_world_reads_on_a_runs_terms_and_no_operator_run_start_signs_a_write_pass(tmp_path, data_root, monkeypatch):
+    """A branched run is a run (#1449 W1, W3): a world's run start and a regular run's, on one tenant, grant the same reads,
+    and neither signs a write pass (`rw`) though `ticket` is proxied: the operator command never comments (W7, C-9)."""
+    ep, root, records = _plant_sibling(tmp_path, monkeypatch)
+    run_signer, world_signer = A.MarkedSigner(), A.MarkedSigner()
+    run_access = _run_access_on_sibling(tmp_path / "r", root, records, run_signer)
+    world_access = _world_access(ep, records, world_signer)
+
+    def read_grant(access: Any, signer: A.MarkedSigner) -> list[tuple[str, str]]:
+        return A.grant_of(_claims_of_token(signer, access.token()))
+
+    assert read_grant(world_access, world_signer) == read_grant(run_access, run_signer) == [
+        ("cmdb", "r"), ("identity", "r")], "a world's read grant is not a regular run's, or not what the table grants"
+    for signer in (run_signer, world_signer):
         assert {m for p in signer.payloads for _s, m, *_ in A.claims_of_payload(p)["grant"]} == {"r"}, (
             "a run start signed something other than its read grant")
 
