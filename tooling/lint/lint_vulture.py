@@ -14,10 +14,12 @@ Exit 0 = clean (no new dead code), 1 = new dead code, 2 = vulture not runnable.
 """
 from __future__ import annotations
 
+import ast
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from _baseline import Finding, gate
@@ -50,8 +52,29 @@ VULTURE_ARGS = [
     "--ignore-names", "key_field,key_value,event_time,DISPLAY_NAME,EXAMPLE,SAMPLE_SETTINGS,written_at,add_records,"
                       "settings_keys,lab_example",
     # pydantic calls its validators, and SQLAlchemy a hybrid property's SQL side, by decorator registration, never by name.
-    "--ignore-decorators", "@field_validator,@model_validator,@*.inplace.expression",
+    # FastAPI calls a route by its router decorator (`@<router>.get(...)`, ...), never by name.
+    "--ignore-decorators",
+    "@field_validator,@model_validator,@*.inplace.expression,@*.get,@*.post,@*.put,@*.patch,@*.delete",
 ]
+
+#: The API's wire models: pydantic reads every field (validation, serialisation), so none is read by attribute.
+WIRE_MODELS = REPO_ROOT / "defender" / "api" / "models.py"
+
+
+def wire_fields(source: str) -> list[str]:
+    """The field names (and `model_config`) of every class in `source` that is a pydantic model: one whose base is
+    `BaseModel`, or a class of `source` that is one."""
+    tree = ast.parse(source)
+    models: set[str] = {"BaseModel"}
+    fields: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and any(isinstance(b, ast.Name) and b.id in models for b in node.bases):
+            models.add(node.name)
+            fields |= {stmt.target.id for stmt in node.body
+                       if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name)}
+            fields |= {t.id for stmt in node.body if isinstance(stmt, ast.Assign)
+                       for t in stmt.targets if isinstance(t, ast.Name) and t.id == "model_config"}
+    return sorted(fields)
 
 # `path:lineno: message` — strip the lineno for a line-stable fingerprint.
 LINE_RE = re.compile(r"^(?P<path>[^:]+):(?P<lineno>\d+): (?P<msg>.*)$")
@@ -65,12 +88,18 @@ def _vulture_bin() -> str | None:
 
 
 def _scan(vulture: str) -> list[Finding]:
-    proc = subprocess.run(
-        [vulture, *VULTURE_ARGS],
-        cwd=REPO_ROOT,
-        text=True,
-        capture_output=True,
-    )
+    # A vulture whitelist: each wire field, used once by attribute, so vulture counts it read.
+    with tempfile.NamedTemporaryFile("w", suffix="_wire_whitelist.py", delete=False) as whitelist:
+        whitelist.write("".join(f"_.{name}\n" for name in wire_fields(WIRE_MODELS.read_text(encoding="utf-8"))))
+    try:
+        proc = subprocess.run(
+            [vulture, whitelist.name, *VULTURE_ARGS],
+            cwd=REPO_ROOT,
+            text=True,
+            capture_output=True,
+        )
+    finally:
+        Path(whitelist.name).unlink()
     # vulture's ExitCode enum (vulture.utils): 0=NoDeadCode, 1=InvalidInput,
     # 2=InvalidCmdlineArguments, 3=DeadCode — findings come on 0 or 3; 1/2 are real errors.
     if proc.returncode not in (0, 3):

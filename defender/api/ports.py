@@ -26,7 +26,9 @@ from .models import (
     Investigation,
     LearningJob,
     Lesson,
+    ParkedBatch,
     SavedSystem,
+    SetAsideItem,
     System,
     SystemCheck,
     SystemPut,
@@ -106,6 +108,23 @@ class LearningJobsRepository(Protocol):
         ...
 
     async def get_learning_job(self, tenant_id: TenantId, learning_job_id: LearningJobId) -> LearningJob | None: ...
+
+
+class LearningWorkRepository(Protocol):
+    """The learning loop's set-aside work (#1485): held and dead items, and parked batches. Read only."""
+
+    async def list_set_aside(
+        self, tenant_id: TenantId, *, status: Literal["held", "dead"] | None, after: TimePosition | None, limit: int
+    ) -> list[SetAsideItem]:
+        """Up to `limit` held or dead items (or the one `status`) strictly after `after`, by `(updated_at, id)`
+        descending."""
+        ...
+
+    async def list_parked_batches(
+        self, tenant_id: TenantId, *, after: TimePosition | None, limit: int
+    ) -> list[ParkedBatch]:
+        """Up to `limit` batches in phase `needs_person` strictly after `after`, newest first by `(created_at, id)`."""
+        ...
 
 
 class LessonsRepository(Protocol):
@@ -324,6 +343,7 @@ class ApiDeps:
     investigations: InvestigationsRepository
     learning_jobs: LearningJobsRepository
     lessons: LessonsRepository
+    learning_work: LearningWorkRepository
     #: The tenant's configuration records: the catalog, the systems and the case record (#1470).
     systems: SystemsRepository
     #: The alert mapping's read, its own port apart from the records' (#1083 G2).

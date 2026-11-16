@@ -690,6 +690,7 @@ class World:
         #: database `pytest.skip`s leaves no thread behind.
         self.dsn: str | None = None
         self.jobs: Any = None
+        self._learning_store: Any = None
         self.audit: AuditRecorder | None = None
         self._resources = contextlib.ExitStack()
         if database:
@@ -829,7 +830,8 @@ class World:
                     if service is not None:
                         await service.close()  # the identity repository's pool with it
                 finally:
-                    for opened in (getattr(self, "jobs", None), getattr(self, "_pg_tenants", None)):
+                    for opened in (getattr(self, "jobs", None), getattr(self, "_pg_tenants", None),
+                                   getattr(self, "_learning_store", None)):
                         if opened is not None:
                             await opened.close()
             self._loop.portal.call(pools)
@@ -855,11 +857,18 @@ class World:
     def deps(self) -> ApiDeps:
         """The app's ports for the current service, composed by the server's own wiring (#1496): the store's ports (with
         the offboard recorded) back what the server backs, the rest refuse as the server's do."""
+        from defender.api.learning_work import StoreLearningWork
         from defender.api_server import api_deps
+        from defender.learning_store import LearningStore
 
         no_records = Refusing(NO_RECORDS)
+        learning = None
+        if self.dsn is not None:  # #1485: the learning reads are the real adapter's over the world's database
+            if self._learning_store is None:
+                self._learning_store = LearningStore(self.dsn)
+            learning = StoreLearningWork(self._learning_store)
         return api_deps(identity=self.service, tenants=self.tenants, ports=self.offboarding,
-                        frontend_origin=FRONTEND_ORIGIN, systems=no_records, secrets=no_records)
+                        frontend_origin=FRONTEND_ORIGIN, systems=no_records, secrets=no_records, learning_work=learning)
 
     def restart(self, *, administrators: Sequence[str] = (),
                 tenants: Mapping[str, Sequence[str]] | None = None) -> None:

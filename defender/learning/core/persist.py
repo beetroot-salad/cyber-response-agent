@@ -1,12 +1,8 @@
 from __future__ import annotations
 
-import re
 import threading
 
-from defender._text import is_content_less
-# The reducer lane's routing key, imported from its owner so every seam asking "is this the
-# reducer's row" compares the same literal.
-from defender.knowledge import BASH_SHIM_QUERY_ID
+from defender.learning_store import pitfall_key
 
 
 
@@ -60,41 +56,6 @@ _SHARED_INPUTS_LOCK = threading.Lock()
 
 
 
-
-
-#: The envelope `record_query.payload_digest` wraps every failing call in (`exit={code}; `);
-#: shared by every failure, so not itself a diagnosis.
-_EXIT_ENVELOPE = re.compile(r"^\s*exit=-?\d+\s*;\s*")
-
-
-def _digest_diagnosis(digest: str) -> str:
-    return _EXIT_ENVELOPE.sub("", digest, count=1)
-
-
-def is_reducer_row(row: dict) -> bool:
-    """Is this queued row the reducer's mistake rather than a system's?
-
-    The one spelling, shared by the curator's routing, the lane's arrival gate and the merge
-    key, so a row can't be routed one way and counted another.
-
-    Equality with the reserved sentinel — the `query_id` half of what
-    `lead_extraction.collect_general_failures` routes on (`is_sentinel` isn't a queue field).
-    Ignores the row's `system`: a `defender-sql` mistake belongs to `defender-sql` however the
-    reduce was attributed, and older rows still carry an attributed system.
-    """
-    return str(row.get("query_id") or "") == BASH_SHIM_QUERY_ID
-
-
-def pitfall_key(row: dict) -> tuple[str, str]:
-    """The identity of a mistake, which is not the identity of a failing row."""
-    owner = (
-        BASH_SHIM_QUERY_ID if is_reducer_row(row)
-        else str(row.get("system") or "").strip()
-    )
-    digest = str(row.get("stderr_digest") or "")
-    if is_content_less(_digest_diagnosis(digest)):
-        return (owner, "\x00" + str(row.get("pitfall_id") or ""))
-    return (owner, digest)
 
 
 def _occurrences(row: dict) -> int:

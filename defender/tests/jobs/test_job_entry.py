@@ -1695,7 +1695,7 @@ def test_m4_the_store_check_sees_the_operator_default_enqueue(scene, tmp_path):
     """Control for the M4 store check: `run.main`'s own default enqueue files a waiting curation request for the tenant in the
     learning store (#1278: the queue is rows, not `learning/author-queue/case-*.json`), and writes nothing under the tenant's folder. (M4)"""
     from defender import run as run_py
-    from defender.learning.store import blocking
+    from defender.learning_store import blocking
 
     class Writer:
         def clear_receipt(self, *_a: Any, **_k: Any) -> None: ...

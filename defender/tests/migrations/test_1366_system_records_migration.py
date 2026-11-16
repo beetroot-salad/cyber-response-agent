@@ -12,7 +12,6 @@ from defender.tests.migrations.test_1214_migrations import _upgrade_to
 from defender.tests.support.shared._postgres1339 import execute
 
 ROLE = "defender_proxy_reader"
-PREVIOUS = "0014_learning_cutover_action"  # the head before #1366 (main's learning-store cutover revision, #1278)
 TABLES = {
     "system_versions": {"tenant_id", "system_id", "version", "adapter_id", "enabled", "settings", "access",
                         "credential_generation", "deleted", "author", "written_at"},
@@ -34,10 +33,17 @@ def _ensure_role(dsn: str) -> None:
                  f"THEN CREATE ROLE {ROLE} NOLOGIN; END IF; END $$")
 
 
-def test_the_revision_sits_directly_on_the_previous_head():
+def _previous() -> str:
+    """The revision `0015_system_records` sits directly on (the head before #1366), found by chain."""
     from defender.migrations import _scripts
 
-    assert _scripts().get_revision("0015_system_records").down_revision == PREVIOUS
+    parent = _scripts().get_revision("0015_system_records").down_revision
+    assert isinstance(parent, str), parent
+    return parent
+
+
+def test_the_revision_sits_directly_on_one_previous_revision():
+    assert _previous().startswith("0014_")
 
 
 @pytest.mark.postgres
@@ -153,7 +159,7 @@ def test_an_upgrade_over_a_role_that_already_exists_succeeds_and_grants_it(empty
     its SELECT. (#1366 R14: idempotent)"""
     from defender.migrations import upgrade
 
-    _upgrade_to(empty_database, PREVIOUS)
+    _upgrade_to(empty_database, _previous())
     _ensure_role(empty_database)
 
     upgrade(empty_database)

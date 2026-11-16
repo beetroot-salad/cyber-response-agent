@@ -153,7 +153,7 @@ def test_lead_author_drain_runs_pitfalls_after_the_requests(world, monkeypatch):
 def test_the_lead_lane_wakes_at_the_pitfalls_threshold(world, monkeypatch):  # noqa: F811 — the imported fixture
     """The lead lane has work for pitfalls only at `LEARNING_PITFALLS_THRESHOLD` (digest-less rows stay distinct mistakes)."""
     from defender.learning.core.store_tick import LEAD_LANE, lane_waiting
-    from defender.learning.store import blocking
+    from defender.learning_store import blocking
 
     w = world
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")

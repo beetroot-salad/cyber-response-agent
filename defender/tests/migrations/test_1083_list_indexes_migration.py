@@ -23,8 +23,7 @@ def _list_indexes(dsn: str, table: str) -> list[str]:
 
 
 def test_the_list_indexes_revision_sits_directly_on_the_previous_head():
-    """The list-indexes revision's parent is `0015_system_records` (a later revision may follow it; the single head is
-    test_1339's). (#1083 Data)"""
+    """The list-indexes revision's parent is `0015_system_records`. Later revisions may sit on top of it. (#1083 Data)"""
     from defender.migrations import _scripts
 
     assert _scripts().get_revision("0016_list_indexes").down_revision == PREVIOUS

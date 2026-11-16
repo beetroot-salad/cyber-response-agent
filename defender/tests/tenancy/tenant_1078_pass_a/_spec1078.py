@@ -225,11 +225,9 @@ def tenant_source(root: Path, tenant_id: str = VALID_ID, *, row: bool = True,
     if row and published:
         from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 
-        location_path(set_up_tenant(root, tenant_id, published=True).learning).mkdir(
-            exist_ok=True)
+        set_up_tenant(root, tenant_id, published=True)
     elif row:
         make_tenant(root, tenant_id)
-        location_path(accept(root, tenant_id).learning).mkdir(exist_ok=True)
     base = runs_dir(root, tenant_id)
     base.mkdir(parents=True, exist_ok=True)
     return base, source_run(base, run_id)

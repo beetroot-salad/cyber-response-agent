@@ -24,13 +24,13 @@ SCRIPT = "<script>alert(1)</script>"
 
 
 def blocking(dsn: str):
-    from defender.learning.store import blocking as open_blocking
+    from defender.learning_store import blocking as open_blocking
 
     return open_blocking(dsn)
 
 
 def _outcome(name: str, *reason: str):
-    from defender.learning.store import Outcome
+    from defender.learning_store import Outcome
 
     return getattr(Outcome, name)(*reason)
 

@@ -22,7 +22,6 @@ from defender.tenancy.models import (ALLOWED_ACTIONS, AlertMappingRow, ForgeWiri
 from defender.tenancy.record_refusals import refuse_unless_active
 from defender.tenancy.repository import (
     KEEP,
-    HOST,
     SERVICE,
     Conflict,
     FenceMissed,
@@ -179,14 +178,6 @@ class InMemoryTenantRepository:
                 tenant_id, row.state == "active" and row.pending_action is None,
                 "only an active tenant with nothing pending can rotate",
                 pending_action="rotate", step="names", step_actor=SERVICE)
-
-    async def request_learning_cutover(self, tenant_id: TenantId) -> TenantRecord:
-        with self._mutex:
-            row = self._row(tenant_id)
-            return self._request(
-                tenant_id, row.state == "active" and row.pending_action is None,
-                "only an active tenant with nothing pending can have its learning state cut over",
-                pending_action="learning_cutover", step="import", step_actor=HOST)
 
     # --- host processes --------------------------------------------------------------------------
     async def record_merge_eligibility(self, tenant_id: TenantId, *, logins: frozenset[str], read_at: _dt.datetime) -> None:

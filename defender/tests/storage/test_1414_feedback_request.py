@@ -628,7 +628,7 @@ def test_1414_the_request_is_filed_through_the_stores_blocking_door_as_one_row(t
     """Run end opens `blocking(dsn)` at `DEFENDER_DATABASE_DSN` and calls `enqueue_feedback_issue` with the run's tenant, run and case ids; one `feedback_issues` row with no issue number results. A4 F1."""
     import contextlib
 
-    import defender.learning.store as store_mod
+    import defender.learning_store as store_mod
 
     seen: list[tuple] = []
     real = store_mod.blocking

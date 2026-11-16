@@ -24,5 +24,5 @@ def stand_in_store(monkeypatch: Any) -> MemoryStore:
         yield store
 
     monkeypatch.setenv(DSN_ENV, "postgresql://stand-in.invalid/none")
-    monkeypatch.setattr("defender.learning.store.blocking", blocking)  # lint-monkeypatch: ok — the judge frame opens its store itself (`branch.cli._grade`); this test is not about the sink
+    monkeypatch.setattr("defender.learning_store.blocking", blocking)  # lint-monkeypatch: ok — the judge frame opens its store itself (`branch.cli._grade`); this test is not about the sink
     return store

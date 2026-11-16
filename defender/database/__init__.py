@@ -6,9 +6,10 @@ table; the one migration history that creates them is `defender.migrations`."""
 
 from __future__ import annotations
 
+import datetime as _dt
 from typing import Any
 
-from sqlalchemy import MetaData, Uuid
+from sqlalchemy import MetaData, Uuid, literal, tuple_
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, MappedAsDataclass
@@ -74,3 +75,11 @@ def async_engine(dsn: str, *, max_connections: int = 10) -> AsyncEngine:
 def sessions(engine: AsyncEngine) -> async_sessionmaker:
     """Sessions whose objects stay readable after the transaction ends."""
     return async_sessionmaker(engine, expire_on_commit=False)
+
+
+def newest_first_query(query: Any, time: Any, ident: Any, after: tuple[_dt.datetime, str] | None, limit: int) -> Any:
+    """`query` ordered `(time, id)` descending, limited, and when `after` is given only the rows strictly after that
+    position in that order. The position's values are bound with the columns' own types."""
+    if after is not None:
+        query = query.where(tuple_(time, ident) < tuple_(literal(after[0], time.type), literal(after[1], ident.type)))
+    return query.order_by(time.desc(), ident.desc()).limit(limit)

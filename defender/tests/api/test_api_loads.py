@@ -1,7 +1,8 @@
 """The API program loads no runtime or `learning` module (#1080; the set is `_spec1080.API_FORBIDDEN`).
 
 Asked of Python rather than the source: each `api` module is imported in a fresh interpreter and
-the modules left loaded are read back, so a lazy or conditional import counts as it executes."""
+the modules left loaded are read back, so a conditional import counts as it executes at import time. An import
+inside a function runs only when it is called: the last test serves every route in a child process (#1495)."""
 from __future__ import annotations
 
 import json
@@ -9,6 +10,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -72,6 +74,20 @@ def test_the_not_loaded_probe_sees_a_load():
     """Positive control: the identity database repository and the lifecycle node are reported when imported."""
     assert _found(_loaded("defender.identity.postgres"), "defender.identity.postgres")
     assert _found(_loaded("defender.lifecycle"), "defender.lifecycle")
+
+
+def test_p1_the_lifted_store_loads_no_learning_and_no_driver():
+    """Importing `defender.learning_store` loads no `defender.learning` module and no `psycopg`, so the API can hold it
+    (named, since the glob above cannot see a module that does not exist yet). (P1, #1485)"""
+    modules = _loaded("defender.learning_store")
+    assert "defender.learning_store" in modules, "premise: the store imported"
+    assert [m for name in ("defender.learning", "psycopg") for m in _found(modules, name)] == []
+
+
+def test_p1_the_learning_and_driver_probe_sees_a_load():
+    """Positive control for the case above: a `defender.learning` module and `psycopg` are reported when imported. (P1)"""
+    assert _found(_loaded("defender.learning.roles"), "defender.learning")
+    assert _found(_loaded("psycopg"), "psycopg")
 
 
 #: #1083 Am-1: the real server program is a package of its own, `defender/api_server/`, under the same #1080 guard.
@@ -153,3 +169,107 @@ def test_1470_running_the_judgement_over_the_real_catalog_loads_no_runtime_or_le
     modules = _loaded_by(_JUDGE_PROBE)
     found = api_forbidden(modules)
     assert not found, f"the judgement loads {found}"
+
+
+#: #1485 r13/r14: the paging code is generic over its id families, so it loads neither the learning store nor its tables.
+_NOT_BY_PAGING = ("defender.learning_store", "defender.jobs.learning_models")
+
+
+def test_1485_importing_the_paging_code_loads_neither_the_learning_store_nor_its_tables():
+    """`defender.api.pages` (which both learning lists page with) pulls in no `defender.learning_store` and no
+    `defender.jobs.learning_models`. (Paging, P1)"""
+    modules = _loaded("defender.api.pages")
+    assert "defender.api.pages" in modules, "premise: it imported"
+    assert [m for name in _NOT_BY_PAGING for m in _found(modules, name)] == []
+
+
+def test_1485_the_paging_probe_sees_a_load():
+    """Positive control: importing the learning store reports both names, importing the tables alone the second. The
+    store's door is lazy, so the control imports the store's own module. (Paging)"""
+    store = _loaded("defender.learning_store._store")
+    assert all(_found(store, name) for name in _NOT_BY_PAGING)
+    assert _found(_loaded("defender.jobs.learning_models"), "defender.jobs.learning_models")
+
+
+# --- #1495: what a serving process loads -----------------------------------------------------------
+# The guards above import each module; a function-level import (inside a route's handler, a port's method, or
+# `serving`) runs only while the program serves, so they never see it. This one runs the real program in a child
+# process, sends every route of the app one request that gets past sign-in and validation to its handler, and reads
+# what the process loaded. Only `API_FORBIDDEN` applies: the program composes the database repositories and the
+# driver by design, so `_NOT_BY_THE_API` (the `defender.api.app` import's rule) does not, beyond `defender.lifecycle`,
+# which `API_FORBIDDEN` names too.
+
+def _stopped_before_the_handler(response: Any) -> bool:
+    """Refused at sign-in, method, validation (a 422 naming field errors) or permission (a 403 of no reason). A store's
+    refusal (an unknown reference's 422, the sign-in service's 403 naming its reason) came from the handler."""
+    if response.status_code in (401, 405):
+        return True
+    if response.status_code == 422:
+        return bool(response.json().get("errors"))
+    if response.status_code == 403:
+        return response.json().get("type", "about:blank") == "about:blank"
+    return False
+
+
+#: The calls that end what later calls stand on (Ann's session, tenant A's service) go last, in this order.
+_LAST = (("POST", "/admin/tenants/{tenant_id}/offboard"), ("POST", "/auth/logout"))
+
+
+def _serving_requests(seeded: Any) -> list[tuple[tuple[str, str], str, dict[str, Any]]]:
+    """One request per served route, (route, path, httpx keyword arguments): an administrator's route as Ops, every
+    other as Ann (tenant A's admin, the write origin sent), on tenant A, with the route's body where it takes one."""
+    from defender.tests.api.test_programs_1307_roles import BODIES
+    from defender.tests.support.api._routes1307a import _PARAM, PATH_ID, app_routes, normal
+    from defender.tests.support.api._server1083 import A, person
+
+    fill = {"tenant_id": A, "key": "report.md", "system_id": "tix"}
+    bodies = {**BODIES, ("POST", "/admin/tenants/{}/invitations"): {"email": "new@a.example"}}
+    query = {("GET", "/auth/callback"): {"code": "c", "state": "s"},
+             # #1470: a record delete names the version it replaces
+             ("DELETE", "/tenants/{tenant_id}/case-record"): {"replaces": 1},
+             ("DELETE", "/tenants/{tenant_id}/systems/{system_id}"): {"replaces": 1}}
+    routes = sorted(app_routes(), key=lambda r: (_LAST.index(r) if r in _LAST else -1, r))
+    requests = []
+    for route in routes:
+        method, template = route
+        session = seeded.ops_session if template.startswith("/admin/") else seeded.ann_session
+        kwargs: dict[str, Any] = {"headers": person(session, write=True)}
+        if (method, normal(template)) in bodies:
+            kwargs["json"] = bodies[method, normal(template)]
+        if route in query:
+            kwargs["params"] = query[route]
+        requests.append((route, _PARAM.sub(lambda m: fill.get(m.group(1), PATH_ID), template), kwargs))
+    return requests
+
+
+@pytest.mark.postgres
+def test_a_serving_program_that_answered_every_route_loads_no_runtime_or_learning(tmp_path, migrated_database):
+    """The real program, serving over the real ports, loads nothing in `API_FORBIDDEN` while it answers one request
+    per route; each request reached its handler. (#1495)"""
+    import asyncio
+
+    import httpx
+
+    from defender.tests.support.api._server1083 import B, LOADED_ENV, A, Child, environment, seed_identity
+    from defender.tests.support.jobs._jobs1342 import register_tenant
+
+    register_tenant(migrated_database, A)
+    register_tenant(migrated_database, B)
+    seeded = asyncio.run(seed_identity(migrated_database))
+    child = Child.faked({**environment(tmp_path, dsn=migrated_database), LOADED_ENV: "1"})
+    try:
+        assert child.ready(), "the program did not come up"
+        with httpx.Client(base_url=child.base_url, timeout=30, follow_redirects=False) as client:
+            answered = {f"{route[0]} {route[1]}": client.request(route[0], path, **kwargs)
+                        for route, path, kwargs in _serving_requests(seeded)}
+    finally:
+        ended = child.stop()
+    assert ended.returncode == 0, ended.stderr
+    unreached = {route: (r.status_code, r.text) for route, r in answered.items() if _stopped_before_the_handler(r)}
+    assert not unreached, f"these requests never reached their handler: {unreached}"
+    # controls: Ann passed tenant A's member gate (its 404 would read as reached), and the offboard met an active tenant
+    assert answered["GET /tenants/{tenant_id}/alert-mapping"].status_code == 200
+    assert answered["POST /admin/tenants/{tenant_id}/offboard"].status_code == 202
+    [line] = [line for line in ended.stdout.splitlines() if line.startswith("loaded ")]
+    found = api_forbidden(json.loads(line.removeprefix("loaded ")))
+    assert not found, f"the serving program loads {found}"

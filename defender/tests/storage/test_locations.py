@@ -53,14 +53,14 @@ def test_every_record_location_is_rejected_without_receiver_tracking():
 @pytest.mark.parametrize("source", [
     "from defender.tenancy._tenant import unwrap_data_root as raw\ndef f(value):\n    return raw(value)\n",
     "import defender.records._layout as layout\ndef f(path):\n    return layout.RunsBase(path)\n",
-    "from defender.records._locations import unwrap_learning_root as raw\ndef f(value):\n    return raw(value)\n",
-    "from defender.records import _locations as loc\ndef f(value):\n    convert = loc.unwrap_learning_root\n    return convert(value)\n",
+    "from defender.records._locations import unwrap_scratch_root as raw\ndef f(value):\n    return raw(value)\n",
+    "from defender.records import _locations as loc\ndef f(value):\n    convert = loc.unwrap_scratch_root\n    return convert(value)\n",
     "def f(value):\n    return value._record_location_path\n",
     "def f(value):\n    return value.__reduce__()[1][0]\n",
     "def f(value):\n    return value.__getstate__()\n",
-    "from defender.records._locations import LearningRoot\ndef f(value, path):\n    if isinstance(value, (alias := LearningRoot)):\n        return alias(path)\n",
-    "from typing import Annotated\nfrom defender.records._locations import unwrap_learning_root as raw\ndef f(value: Annotated[object, raw(outside)]):\n    return value\n",
-    "from defender.records._locations import LearningRoot as Root\nconstructor = Root\n",
+    "from defender.records._locations import ScratchRoot\ndef f(value, path):\n    if isinstance(value, (alias := ScratchRoot)):\n        return alias(path)\n",
+    "from typing import Annotated\nfrom defender.records._locations import unwrap_scratch_root as raw\ndef f(value: Annotated[object, raw(outside)]):\n    return value\n",
+    "from defender.records._locations import ScratchRoot as Root\nconstructor = Root\n",
     "def f(runs_base):\n    return runs_base\n",
     "def f(value):\n    return value.run_end_sidecar(value.parent)\n",
 ])
@@ -69,7 +69,7 @@ def test_unsafe_references_are_rejected_even_without_types(source):
 
 
 def test_type_annotations_and_safe_forwarding_remain_legal():
-    assert findings("investigation/probe.py", "from defender.records._locations import LearningRoot as R\ndef f(value: R) -> R:\n    return value\n") == []
+    assert findings("investigation/probe.py", "from defender.records._locations import ScratchRoot as R\ndef f(value: R) -> R:\n    return value\n") == []
 
 
 def test_conversion_permissions_are_function_and_role_specific():
@@ -112,7 +112,7 @@ def test_tenant_and_hidden_carriers_preserve_location_roles(tmp_path):
     expected = {
         "data_root": L.DataRoot, "tenant_root": L.TenantRoot,
         "runs": L.RunsBase, "sessions": L.SessionsRoot, "episodes": L.EpisodesRoot,
-        "learning": L.LearningRoot, "worktrees": L.WorktreesRoot, "scratch": L.ScratchRoot, "exports": L.ExportsRoot,
+        "worktrees": L.WorktreesRoot, "scratch": L.ScratchRoot, "exports": L.ExportsRoot,
         "drafts": L.DraftsRoot, "knowledge_lock": L.KnowledgeLock,
         "runs_legacy": L.LegacyRunsRoot,
         "episodes_legacy": L.LegacyEpisodesRoot,
@@ -135,25 +135,25 @@ def test_tenant_and_hidden_carriers_preserve_location_roles(tmp_path):
 
 
 # retired: test_tenant_and_scratch_state_cannot_exchange_location_kinds pinned `LoopPaths`' two spellings of the learning
-# state root (a tenant's `LearningRoot`, a scratch `Path`). The handle and the root are gone (#1278 A1/O10, design D10): a
-# `LoopPaths` names no state root; the tenant's `learning` stays a `LearningRoot` (asserted above) for the cutover import only.
+# state root (a tenant's `ScratchRoot`, a scratch `Path`). The handle and the root are gone (#1278 A1/O10, design D10): a
+# `LoopPaths` names no state root; the tenant has no `learning` location (#1485).
 
 
 def test_mypy_reports_the_actual_forbidden_operations(tmp_path):
     source = '''from pathlib import Path
 from os import fspath
-from defender.records._locations import LearningRoot, RunsBase
+from defender.records._locations import ScratchRoot, RunsBase
 
-def forward(value: LearningRoot) -> LearningRoot:
+def forward(value: ScratchRoot) -> ScratchRoot:
     return value
 
-async def async_forward(value: LearningRoot) -> LearningRoot:
+async def async_forward(value: ScratchRoot) -> ScratchRoot:
     return forward(value)
 
 def needs_runs(value: RunsBase) -> None:
     pass
 
-def invalid(value: LearningRoot) -> None:
+def invalid(value: ScratchRoot) -> None:
     alias = forward(value)
     values = [alias]
     values[0] / 'child'  # bad-join
@@ -161,7 +161,7 @@ def invalid(value: LearningRoot) -> None:
     fspath(alias)  # bad-fspath
     needs_runs(alias)  # bad-role
 
-async def invalid_async(value: LearningRoot) -> None:
+async def invalid_async(value: ScratchRoot) -> None:
     alias = await async_forward(value)
     alias / 'child'  # bad-async
 '''

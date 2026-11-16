@@ -14,7 +14,7 @@ Scratch state lives under `.contract-first/`, outside the committed diff. It hol
 
 ## Resume and invalidation
 
-Mark the boundaries a resume needs: sketch and spike checked (or skipped, and why; their findings, never the spike's code), candidate authored, reviewed, repaired, ready or blocked. A worker that hands back mid-slice writes its progress here so a fresh worker can continue without its history.
+Mark the boundaries a resume needs: sketch taken forward (or skipped, and why), candidate authored, reviewed, repaired, ready or blocked. A worker that hands back mid-slice writes its progress here so a fresh worker can continue without its history.
 
 Before reusing anything, compare its recorded identities with the current inputs. A changed design, shared fixture, base or environment invalidates the work that depended on it, and nothing else. Missing or stale review evidence means not reviewed; timestamps and "complete" labels prove nothing. Migrate an old-format run by carrying over its validated evidence and decisions, not its scaffolding.
 

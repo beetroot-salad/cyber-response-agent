@@ -21,7 +21,7 @@ OWNER = "revert-test"
 
 @contextlib.contextmanager
 def _opened_store(tenant, dsn):
-    from defender.learning.store._blocking import blocking
+    from defender.learning_store._blocking import blocking
     from defender.tests.support.jobs._jobs1342 import register_tenant
 
     register_tenant(dsn, str(tenant.id))

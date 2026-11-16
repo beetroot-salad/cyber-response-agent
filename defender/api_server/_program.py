@@ -24,8 +24,9 @@ import uvicorn.server
 
 from defender.api.app import create_app
 from defender.api.config_records import ConfigCredentials, ConfigRecords
-from defender.api.ports import ApiDeps, SecretStore, SystemsRepository
+from defender.api.ports import ApiDeps, LearningWorkRepository, SecretStore, SystemsRepository
 from defender.api.job_store import JobStorePorts
+from defender.api.learning_work import StoreLearningWork
 from defender.api.refusing import Refusing
 from defender.configuration.issuer import DEPLOYMENT_ISSUER
 from defender.credential_proxy import OpenBaoSecrets, SecretStoreRefused
@@ -36,6 +37,7 @@ from defender.identity.postgres import PostgresIdentityRepository
 from defender.jobs.store import JobStore
 from defender.kit.faults import AdapterFault
 from defender.kit.internal_http import internal_async_client, tls_trust
+from defender.learning_store import LearningStore
 from defender.migrations import DatabaseUnreachable, RevisionMismatch, check_version
 from defender.system_records import RecordStore
 from defender.system_rules import Catalog, judge_records
@@ -49,6 +51,9 @@ from ._settings import Settings, StartRefused
 _CHECK = "#1460 (the connection check)"
 _BLOB_STORE = "#1082 (the blob store)"
 _LESSONS = "#1082"
+#: The learning store's pool: the two learning reads only, so small beside the job store's.
+_LEARNING_POOL = 3
+_LEARNING_WORK = "a learning store (#1485)"
 
 #: How long the secret store's start checks may take, each (the writer's own calls use the writer's timeout).
 _OPENBAO_START_SECONDS = 10.0
@@ -196,14 +201,18 @@ def _bind(settings: Settings) -> socket.socket:
 
 
 def api_deps(*, identity: IdentityService, tenants: TenantRepository, ports: JobStorePorts, frontend_origin: str,
-             systems: SystemsRepository, secrets: SecretStore) -> ApiDeps:
+             systems: SystemsRepository, secrets: SecretStore,
+             learning_work: LearningWorkRepository | None = None) -> ApiDeps:
     """The app's ports as the program composes them: the job store's ports back every family the store serves, the
     tenant's records and their credentials are `systems` and `secrets` (the program's are over the record store and
-    OpenBao, #1470), the rest refuse (the connection check, the blob store, lessons). The API test worlds compose
-    through this too (#1496), so they cannot drift."""
+    OpenBao, #1470), the learning loop's set-aside reads (#1485) are the real adapter's over the learning store the
+    program opened (a world that passes none gets a refusal, as for any family it does not back), and the rest refuse
+    (the connection check, the blob store, lessons). The API test worlds compose through this too (#1496), so they
+    cannot drift."""
     return ApiDeps(
         identity=identity, tenants=tenants, frontend_origin=frontend_origin,
         alerts=ports, investigations=ports, learning_jobs=ports, alert_mapping=ports, writes=ports,
+        learning_work=learning_work if learning_work is not None else Refusing(_LEARNING_WORK),
         offboarding=ports, lessons=Refusing(_LESSONS), systems=systems, secrets=secrets,
         checker=Refusing(_CHECK), artifact_links=Refusing(_BLOB_STORE), audit=Refusing(_BLOB_STORE))
 
@@ -298,6 +307,8 @@ async def serving(settings: Settings, *, transport: httpx.AsyncBaseTransport | N
             async with steps.step("building the stores and the app"):
                 store = JobStore(settings.database_dsn, clock=_wall_clock)
                 stack.push_async_callback(store.close)  # the lifespan does not close it: it outlives the lifespan
+                learning = LearningStore(settings.database_dsn, max_connections=_LEARNING_POOL)
+                stack.push_async_callback(learning.close)  # outlives the lifespan, as the job store does
                 people = PostgresIdentityRepository(settings.database_dsn)
                 until_lifespan.push_async_callback(people.close)
                 tenants = PostgresTenantRepository(settings.database_dsn)
@@ -308,7 +319,8 @@ async def serving(settings: Settings, *, transport: httpx.AsyncBaseTransport | N
                                            bootstrap=settings.administrators, programs=programs)
                 app = create_app(api_deps(
                     identity=identity, tenants=tenants, ports=JobStorePorts(store), frontend_origin=settings.frontend_origin,
-                    systems=ConfigRecords(records, tenants, catalog, secrets), secrets=ConfigCredentials(records, secrets)))
+                    systems=ConfigRecords(records, tenants, catalog, secrets), secrets=ConfigCredentials(records, secrets),
+                    learning_work=StoreLearningWork(learning)))
             async with steps.step("binding the listening socket"):
                 sock = _bind(settings)
                 stack.callback(sock.close)

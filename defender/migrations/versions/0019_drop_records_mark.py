@@ -1,8 +1,8 @@
 """No "not imported" state (#1470 O8, D-F): the per-tenant records mark goes, and the proxy's read-only role reads whether
 a token's tenant is known from the tenant row instead (its `id` and `state` columns, nothing else of the row).
 
-Revision ID: 0017_drop_records_mark
-Revises: 0016_list_indexes
+Revision ID: 0019_drop_records_mark
+Revises: 0018_learning_set_aside_indexes
 
 A tenant's records are known exactly while it is `active`. Every tenant created since #1366 has its mark; one without it
 (from before #1366, never moved onto records) would read as a tenant with no systems once the mark is gone, so the
@@ -15,8 +15,8 @@ There is no downgrade.
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0017_drop_records_mark"
-down_revision = "0016_list_indexes"
+revision = "0019_drop_records_mark"
+down_revision = "0018_learning_set_aside_indexes"
 
 ROLE = "defender_proxy_reader"
 

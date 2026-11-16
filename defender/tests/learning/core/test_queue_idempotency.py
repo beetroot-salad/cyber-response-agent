@@ -18,7 +18,7 @@ import pytest
 from defender.learning.judge import enqueue
 from defender.learning.judge._errors import JudgeRefused
 from defender.learning.core.state import FINDINGS, QUESTIONER_FINDINGS
-from defender.learning.store import blocking
+from defender.learning_store import blocking
 from defender.tests.learning.judge.contrast_contracts import _spec1234 as S
 from defender.tests.support.learning.branch import _world_1007 as W
 from defender.tests.support.learning.core._store1278 import migrated_database  # noqa: F401 — fixture

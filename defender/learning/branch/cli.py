@@ -1064,7 +1064,7 @@ def _grade(runs: RunsRepository[Tenant], *, episode_id: str, judge: Any) -> None
     its findings into the learning store at the host's database address (#1278)."""
     try:
         from defender.learning import judge as judge_mod
-        from defender.learning.store import blocking
+        from defender.learning_store import blocking
         from defender.tenancy import database_address_variable
 
         # The store is opened here, once, and handed to the grade (RF5). No address, or a store

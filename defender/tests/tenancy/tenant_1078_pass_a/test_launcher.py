@@ -148,7 +148,7 @@ def _a_findings_store(monkeypatch) -> None:
     episode record lands is this file's; the store's rows and rules are `tests/learning/store_1278`'s."""
     import contextlib
 
-    from defender.learning import store
+    from defender import learning_store as store
     from defender.tenancy import database_address_variable
     from defender.tests.support.learning.judge._memory_store import MemoryStore
 

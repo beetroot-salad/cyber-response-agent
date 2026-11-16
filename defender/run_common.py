@@ -371,7 +371,7 @@ def enqueue_curation(
         return False
     import os
 
-    from defender.learning.store import blocking
+    from defender.learning_store import blocking
 
     address = RunAddress(tenant_id=TenantId(run.tenant_id), run_id=run.id)
     # Reading the alert is guarded: a moved alert must not fail the run. So is the learning store
@@ -468,7 +468,7 @@ def _file_feedback_request(run: Run, outcome: str, run_state: Any) -> bool:
     import os
 
     from defender.investigation.record_query import captured_lookups
-    from defender.learning import store as learning_store
+    from defender import learning_store as learning_store
 
     try:
         record = formats.read_record(RunPaths(run.run_dir).alert_record)

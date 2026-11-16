@@ -5,7 +5,7 @@ from __future__ import annotations
 from defender.tests.support.shared._postgres1339 import execute
 
 #: The head before the migration that drops the records mark; the dropping revision sits directly on it.
-BEFORE_DROP = "0016_list_indexes"
+BEFORE_DROP = "0018_learning_set_aside_indexes"
 
 
 def upgrade_marking_tenants(dsn: str) -> None:

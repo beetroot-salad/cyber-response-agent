@@ -50,7 +50,7 @@ def route_table_deps() -> ApiDeps:
     """Dependencies enough to build the app and read its route table: no identity service is needed to list routes."""
     store = Refusing("route table only (#1496)")
     return ApiDeps(
-        alerts=store, investigations=store, learning_jobs=store, lessons=store, systems=store, writes=store,
+        alerts=store, investigations=store, learning_jobs=store, learning_work=store, lessons=store, systems=store, writes=store,
         secrets=store, checker=store, artifact_links=store, offboarding=store, alert_mapping=store, audit=store,
         identity=None, frontend_origin=FRONTEND_ORIGIN, tenants=None)  # type: ignore[arg-type]
 

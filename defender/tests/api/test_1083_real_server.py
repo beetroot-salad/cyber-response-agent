@@ -367,6 +367,41 @@ async def test_another_tenants_member_reads_every_work_record_of_a_tenant_as_abs
     assert (await served.client.get(f"/tenants/{B}/alerts", headers=served.bob(write=False))).json()["items"] == []
 
 
+# --- #1485 O4: learning work, read through the learning store the server composed --------------------------------
+
+@pytest.mark.postgres
+async def test_1485_o4_held_dead_items_and_parked_batches_are_served_from_the_learning_store_not_501(served):
+    """Rows the learning store's verbs made are what both learning routes answer on the real server (200, never 501), as
+    the store holds them (`item_id` too) and only for their tenant; `status=dead` narrows; another tenant's member is 404
+    there. (O4, O1, O2, O3)"""
+    from defender.tests.support.api._learning1485 import dead_alone, held_together, parked_revert
+    from defender.tests.support.learning.core._store1278 import learning_store
+
+    async with learning_store(served.dsn) as store:
+        batch = await held_together(store, A, [("finding", "h1")], pr=7)
+        dead = await dead_alone(store, A, "d1")
+        await held_together(store, B, [("finding", "b-only")])
+        parked = await parked_revert(store, A)
+        await parked_revert(store, B)
+        stored = {i.key: i for i in await store.work(A, statuses=["held", "dead"])}
+    ann = served.ann(write=False)
+
+    items = await served.client.get(f"/tenants/{A}/learning/items", headers=ann)
+    assert items.status_code == 200, items.text
+    assert [(i["item_id"], i["key"], i["status"], i["reason"], i["batch_id"], i["pr_number"]) for i in items.json()["items"]] == [
+        (str(i.id), i.key, i.status, i.reason, str(i.batch_id), i.pr_number)
+        for i in sorted(stored.values(), key=lambda i: (i.updated_at, str(i.id)), reverse=True)]
+    assert {stored["h1"].batch_id, stored["d1"].batch_id} == {batch, dead}
+    narrowed = await served.client.get(f"/tenants/{A}/learning/items", params={"status": "dead"}, headers=ann)
+    assert [i["key"] for i in narrowed.json()["items"]] == ["d1"]
+    listed = await served.client.get(f"/tenants/{A}/learning/parked-batches", headers=ann)
+    assert listed.status_code == 200, listed.text
+    assert [(b["batch_id"], b["batch_kind"], b["blocks_lane"]) for b in listed.json()["items"]] == [
+        (str(parked), "revert", False)]
+    for route in ("learning/items", "learning/parked-batches"):
+        assert (await served.client.get(f"/tenants/{A}/{route}", headers=served.bob(write=False))).status_code == 404
+
+
 # --- tenant administration --------------------------------------------------------------------------
 
 @pytest.mark.postgres
@@ -662,6 +697,8 @@ PERMISSION_OF = {
     ("POST", f"{TENANT}/systems/{{}}/check"): "config.write",
     ("GET", f"{TENANT}/alert-mapping"): "config.read",
     ("PUT", f"{TENANT}/alert-mapping"): "config.write",
+    ("GET", f"{TENANT}/learning/items"): "work.read",  # #1485 O3
+    ("GET", f"{TENANT}/learning/parked-batches"): "work.read",  # #1485 O3
     ("GET", f"{TENANT}/members"): "people.manage",
     ("DELETE", f"{TENANT}/members/{{}}"): "people.manage",
     ("GET", f"{TENANT}/invitations"): "people.manage",

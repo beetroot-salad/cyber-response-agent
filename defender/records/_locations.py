@@ -99,18 +99,6 @@ def unwrap_episodes_root(location: EpisodesRoot) -> Path:
     return location._record_location_path
 
 
-class LearningRoot(_Location):  # lint-learning-state: ok — the cutover import reads the old folder (#1278 A2 D10)
-    """The opaque location of the tenant's old learning folder: only the cutover import reads it
-    (#1278)."""
-    __slots__ = ()
-
-
-def unwrap_learning_root(location: LearningRoot) -> Path:  # lint-learning-state: ok — the cutover import reads the old folder (#1278 A2 D10)
-    if not isinstance(location, LearningRoot):  # lint-learning-state: ok — the cutover import reads the old folder (#1278 A2 D10)
-        raise TypeError("expected LearningRoot")
-    return location._record_location_path
-
-
 class WorktreesRoot(_Location):
     """The opaque worktrees root location."""
     __slots__ = ()
