@@ -7,6 +7,7 @@ import uuid
 import pytest
 
 from defender.tests.support.shared._postgres1339 import execute
+from defender.tests.migrations._marked1470 import upgrade_marking_tenants
 
 TERMINAL = ("completed", "unparseable", "failed", "aborted")
 PRE_STATE = "0005_uuid_ids"
@@ -74,10 +75,9 @@ def _a_era_database(dsn: str) -> None:
 @pytest.mark.postgres
 def test_b_migration_gives_a_era_running_rows_a_lapsed_lease_and_no_mark(empty_database):
     """From `0005_uuid_ids`: a running row's lease is already lapsed (retried at once) and unmarked; a queued row has neither. (B Data model, r5 item 9)"""
-    from defender.migrations import upgrade
 
     _a_era_database(empty_database)
-    upgrade(empty_database)
+    upgrade_marking_tenants(empty_database)  # #1470 O12: the tenant has its mark, so the drop does not stop
     got = {str(r[0]): r[1:] for r in execute(empty_database, "SELECT id, lease_expires_at < now(), accounting_written_at IS NULL, "
                                                           "lease_expires_at IS NULL FROM jobs.investigations WHERE stage IN ('running', 'queued')")}
     assert got == {_inv("run"): (True, True, False), _inv("queued"): (None, True, True)}
@@ -86,13 +86,12 @@ def test_b_migration_gives_a_era_running_rows_a_lapsed_lease_and_no_mark(empty_d
 @pytest.mark.postgres
 def test_b_migration_marks_a_era_terminal_rows_with_their_finish_time_and_changes_no_old_column(empty_database):
     """Each terminal row's mark equals its `finished_at` (their accounting is final); the queued row and the running row stay unmarked; every A-era column keeps its value. (B Data model, r5 item 9)"""
-    from defender.migrations import upgrade
 
     old_columns = ("id, tenant_id, alert_id, request_key, attempt, stage, created_at, started_at, finished_at, disposition, "
                    "cost_usd, knowledge, failure_reason, failure_message")
     _a_era_database(empty_database)
     before = execute(empty_database, f"SELECT {old_columns} FROM jobs.investigations ORDER BY id")  # noqa: S608
-    upgrade(empty_database)
+    upgrade_marking_tenants(empty_database)  # #1470 O12: the tenant has its mark, so the drop does not stop
 
     assert execute(empty_database, f"SELECT {old_columns} FROM jobs.investigations ORDER BY id") == before  # noqa: S608
     marks = execute(empty_database, "SELECT stage, accounting_written_at = finished_at FROM jobs.investigations "

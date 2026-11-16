@@ -9,6 +9,7 @@ import datetime as _dt
 
 import pytest
 
+from defender.tests.migrations._marked1470 import upgrade_marking_tenants
 from defender.tests.migrations.test_1214_migrations import _upgrade_to
 from defender.tests.support.shared._postgres1339 import execute
 
@@ -71,7 +72,7 @@ def test_every_record_id_column_is_uuid_at_head(migrated_database):
 def test_the_system_actor_becomes_null_and_a_user_actor_is_kept(empty_database):
     """D2: `'system'` in invited_by/ended_by is NULL after the upgrade; a user id stays, and the rows keep their ids."""
     _at_jobs(empty_database)
-    _upgrade_to(empty_database, "head")
+    upgrade_marking_tenants(empty_database)  # #1470 O12: the active tenant has its mark
     rows = execute(empty_database, "SELECT id, invited_by, ended_by FROM identity.memberships ORDER BY id")
     assert rows == [("e2000000-0000-4000-8000-000000000001", None, None),
                     ("e2000000-0000-4000-8000-000000000002", ANN, None)]

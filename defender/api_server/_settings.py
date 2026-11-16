@@ -17,6 +17,8 @@ from sqlalchemy.exc import ArgumentError
 from defender._io import read_text_utf8
 from defender._url import split_http_url
 from defender._yaml import safe_load
+from defender.credential_proxy import store_policies
+from defender.kit.faults import ConfigFault
 from defender.identity import Bootstrap, DataRuleViolation
 from defender.identity.keycloak import check_issuer, check_redirect_uri, check_server_url  # lint-shippable: ok — the program wires the one sign-in vendor the platform supports (#1083).
 
@@ -48,6 +50,10 @@ class Settings:
     programs_audience: str
     programs_admin_client_id: str
     programs_admin_client_secret: SecretStr
+    #: The secret store the API writes credential sets to with the write-only role (#1470 G4, D-E).
+    openbao_addr: str
+    openbao_kv_mount: str
+    openbao_token: SecretStr
 
     @classmethod
     def from_environ(cls, environ: Mapping[str, str]) -> Settings:
@@ -82,6 +88,9 @@ class Settings:
             programs_audience=text("DEFENDER_KEYCLOAK_PROGRAMS_AUDIENCE"),
             programs_admin_client_id=text("DEFENDER_KEYCLOAK_PROGRAMS_ADMIN_CLIENT_ID"),
             programs_admin_client_secret=secret("DEFENDER_KEYCLOAK_PROGRAMS_ADMIN_CLIENT_SECRET_FILE"),
+            openbao_addr=parsed("DEFENDER_OPENBAO_ADDR", _openbao_addr),
+            openbao_kv_mount=parsed("DEFENDER_OPENBAO_KV_MOUNT", _kv_mount),
+            openbao_token=secret("DEFENDER_API_OPENBAO_TOKEN_FILE"),
         )
 
 
@@ -132,6 +141,23 @@ def _origin(value: str) -> str:
     canonical = f"{parts.scheme}://{netloc}"
     if value != canonical:
         raise ValueError(f"must be written as a browser sends it: {canonical}")
+    return value
+
+
+def _openbao_addr(value: str) -> str:
+    """OpenBao's address: an http(s) scheme, a host and an optional port, nothing after (the API puts `/v1/...` on it)."""
+    parts = split_http_url(value)
+    if parts.path not in ("", "/"):
+        raise ValueError("must be a scheme, host and optional port only (no path)")
+    return value.rstrip("/")
+
+
+def _kv_mount(value: str) -> str:
+    """The KV mount, by the rule the secret store's policies are written with (`store_policies`)."""
+    try:
+        store_policies(kv_mount=value)
+    except ConfigFault as fault:
+        raise ValueError(str(fault)) from None
     return value
 
 

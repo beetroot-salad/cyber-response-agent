@@ -50,9 +50,17 @@ def mapping_value(entries: Mapping[str, str | None]) -> Any:
 
 
 def assert_missing_wording_names_verb_and_route(wording: str) -> None:
-    """`ALERT_MAPPING_MISSING` names the command-line verb and the API route (r5 O4; route spelled in `ALERT_MAPPING_ROUTE`)."""
-    assert "set-alert-mapping" in wording
-    assert ALERT_MAPPING_ROUTE.split("{tenant_id}")[1] in wording, wording
+    """`ALERT_MAPPING_MISSING` names the API action, `PUT` on the route (r5 O4; route spelled in `ALERT_MAPPING_ROUTE`),
+    and no removed operator command (#1470 O1, O11; plain words as `tenant.py <word>`, as the upgrade-notes test reads)."""
+    import re
+
+    from defender.tests.support.tenancy._records1470 import REMOVED_COMMANDS
+
+    head, tail = ALERT_MAPPING_ROUTE.split("{tenant_id}")
+    assert re.search(rf"PUT {re.escape(head)}\S+{re.escape(tail)}", wording), wording
+    named = [c for c in REMOVED_COMMANDS
+             if (c in wording if "-" in c else re.search(rf"tenant\.py\s+{re.escape(c)}\b", wording))]
+    assert named == [], (named, wording)
 
 
 async def add_to_twin(twin: Any, tenant_id: str, mapping: Any) -> None:

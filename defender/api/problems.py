@@ -26,9 +26,11 @@ class ProblemResponse(JSONResponse):
         return json.dumps(content, ensure_ascii=True, allow_nan=False, separators=(",", ":")).encode("ascii")
 
 
-def problem(status: int, detail: str | None, *, errors: list[FieldError] | None = None,
+def problem(status: int, detail: str | None, *, errors: list[FieldError] | None = None,  # noqa: PLR0913 — the body's fields
+            faults: list[str] | None = None, current_version: int | None = None,
             headers: Mapping[str, str] | None = None, type_: str = "about:blank") -> ProblemResponse:
-    body = Problem(type=type_, title=HTTPStatus(status).phrase, status=status, detail=detail, errors=errors)
+    body = Problem(type=type_, title=HTTPStatus(status).phrase, status=status, detail=detail, errors=errors,
+                   faults=faults, current_version=current_version)
     return ProblemResponse(body.model_dump(mode="json", exclude_none=True), status_code=status,
                            headers=headers, media_type=PROBLEM_MEDIA_TYPE)
 

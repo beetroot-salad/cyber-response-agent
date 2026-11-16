@@ -3,8 +3,8 @@
 The host half, in order, before the container (the run half is the container's `run.py --job`): the tenant's lock and
 admission (`host_tenant`: an investigation waits for a busy lock, A3), the launch check (the worker's launch record),
 the alert mapping, the launch-time publish, the run copy (owned by this helper, C20) and its settings check, the tenant
-resolved over the copy and the tenant's current records (#1366: read once, before the alert mapping; a tenant not
-imported is refused), the grant (the granted systems declared `http-proxy` in the export just copied, narrowed to the
+resolved over the copy and the tenant's current records (#1366: read once, before the alert mapping; a tenant whose
+records are not known, #1470 O8, is refused), the grant (the granted systems declared `http-proxy` in the export just copied, narrowed to the
 systems the tenant has enabled records of; systems the run later judges down are not subtracted, O5), the first pass (only for a non-empty grant: a pass that cannot be signed
 refuses the job, O11), then the run folder made (`materialize_run`: the alert admitted against the launch record's
 digest, input and stamp) and the knowledge-source and record-versions records beside it. The records read are handed
@@ -84,8 +84,8 @@ def prepare(session: Session, hold: contextlib.ExitStack) -> Prepared:  # noqa: 
             launch = lane.check_launch(inv)
     except job_lane.JobLaneRefused as refused:
         raise SetupRefused(f"the launch check refused the job: {refused}") from None
-    # The tenant's current records, read once here (#1366 O6): a tenant not imported is refused before its alert
-    # mapping is read (R8). The container reads no database; it is handed these in the launch facts.
+    # The tenant's current records, read once here (#1366 O6): a tenant whose records are not known (#1470 O8) is
+    # refused before its alert mapping is read. The container reads no database; it is handed these in the launch facts.
     current = setup_step(run_common.read_records, records, accepted.id)
     mapping = setup_step(run_common.read_alert_mapping, records, accepted.id)
     source = settle_knowledge(session, accepted, records)

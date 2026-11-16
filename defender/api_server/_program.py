@@ -23,28 +23,43 @@ from fastapi import FastAPI
 import uvicorn.server
 
 from defender.api.app import create_app
-from defender.api.ports import ApiDeps, LearningWorkRepository
+from defender.api.config_records import ConfigCredentials, ConfigRecords
+from defender.api.ports import ApiDeps, LearningWorkRepository, SecretStore, SystemsRepository
 from defender.api.job_store import JobStorePorts
 from defender.api.learning_work import StoreLearningWork
 from defender.api.refusing import Refusing
+from defender.configuration.issuer import DEPLOYMENT_ISSUER
+from defender.credential_proxy import OpenBaoSecrets, SecretStoreRefused
 from defender.identity import BootstrapRefused, IdentityService, SignInUnavailable
 from defender.identity.keycloak import KeycloakPrograms, KeycloakSignIn  # lint-shippable: ok — the program wires the one sign-in vendor the platform supports (#1083).
 from defender.identity.logged_mail import LoggedMail
 from defender.identity.postgres import PostgresIdentityRepository
 from defender.jobs.store import JobStore
+from defender.kit.faults import AdapterFault
+from defender.kit.internal_http import internal_async_client, tls_trust
 from defender.learning_store import LearningStore
 from defender.migrations import DatabaseUnreachable, RevisionMismatch, check_version
+from defender.system_records import RecordStore
+from defender.system_rules import Catalog, judge_records
 from defender.tenancy import TenantRepository
+from defender.tenancy.models import TenantRecords
 from defender.tenancy.postgres import PostgresTenantRepository
 
 from ._settings import Settings, StartRefused
 
-#: What each unbacked family's refusal names (P1; piece 2 is #1470).
-_PIECE_2 = "piece 2 of #1083 (#1470)"
+#: What each family nothing real backs yet names as its owner (P1, #1470 O15).
+_CHECK = "#1460 (the connection check)"
+_BLOB_STORE = "#1082 (the blob store)"
 _LESSONS = "#1082"
 #: The learning store's pool: the two learning reads only, so small beside the job store's.
 _LEARNING_POOL = 3
 _LEARNING_WORK = "a learning store (#1485)"
+
+#: How long the secret store's start checks may take, each (the writer's own calls use the writer's timeout).
+_OPENBAO_START_SECONDS = 10.0
+#: The secret path the start's login check reads the metadata of: a tenant and system no record can name, so the
+#: answer is "nothing there" for a token the writer policy holds (it cannot look itself up).
+_PROBE_TENANT, _PROBE_SYSTEM = "00000000-0000-4000-8000-000000000000", "api-login-probe"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -185,30 +200,91 @@ def _bind(settings: Settings) -> socket.socket:
     return sock
 
 
-def api_deps(*, identity: IdentityService, tenants: TenantRepository, ports: JobStorePorts,
-             frontend_origin: str, learning_work: LearningWorkRepository | None = None) -> ApiDeps:
-    """The app's ports as the program composes them: the job store's ports back every family the store serves, the rest
-    refuse (piece 2 of #1083, and lessons). The learning loop's set-aside reads (#1485) are the real adapter's over
-    the learning store the program opened; a world that passes none gets a refusal, as for any family it does not back. The API test worlds compose through this too (#1496), so they cannot drift."""
-    piece_2, lessons = Refusing(_PIECE_2), Refusing(_LESSONS)
+def api_deps(*, identity: IdentityService, tenants: TenantRepository, ports: JobStorePorts, frontend_origin: str,
+             systems: SystemsRepository, secrets: SecretStore,
+             learning_work: LearningWorkRepository | None = None) -> ApiDeps:
+    """The app's ports as the program composes them: the job store's ports back every family the store serves, the
+    tenant's records and their credentials are `systems` and `secrets` (the program's are over the record store and
+    OpenBao, #1470), the learning loop's set-aside reads (#1485) are the real adapter's over the learning store the
+    program opened (a world that passes none gets a refusal, as for any family it does not back), and the rest refuse
+    (the connection check, the blob store, lessons). The API test worlds compose through this too (#1496), so they
+    cannot drift."""
     return ApiDeps(
         identity=identity, tenants=tenants, frontend_origin=frontend_origin,
         alerts=ports, investigations=ports, learning_jobs=ports, alert_mapping=ports, writes=ports,
         learning_work=learning_work if learning_work is not None else Refusing(_LEARNING_WORK),
-        offboarding=ports, lessons=lessons, systems=piece_2, secrets=piece_2, checker=piece_2,
-        artifact_links=piece_2, audit=piece_2)
+        offboarding=ports, lessons=Refusing(_LESSONS), systems=systems, secrets=secrets,
+        checker=Refusing(_CHECK), artifact_links=Refusing(_BLOB_STORE), audit=Refusing(_BLOB_STORE))
+
+
+async def _seal_status(settings: Settings, transport: httpx.AsyncBaseTransport | None) -> bool:
+    """OpenBao's unauthenticated seal status (D9): whether it is sealed, or `StartRefused` naming its address when it
+    cannot be read or is not `{"sealed": <bool>}`. Only this is asked at start of a sealed store."""
+    where = f"DEFENDER_OPENBAO_ADDR: the secret store at {settings.openbao_addr}"
+    try:
+        async with internal_async_client(trust=tls_trust(DEPLOYMENT_ISSUER.ca_cert), transport=transport,
+                                         timeout=_OPENBAO_START_SECONDS) as client:
+            reply = await client.get(f"{settings.openbao_addr}/v1/sys/seal-status")
+    except httpx.HTTPError as why:
+        raise StartRefused(f"{where} cannot be reached for its seal status ({type(why).__name__})") from None
+    if reply.status_code != 200:
+        raise StartRefused(f"{where} answered its seal status with {reply.status_code}")
+    try:
+        answer = reply.json()
+    except ValueError:
+        answer = None
+    sealed = answer.get("sealed") if isinstance(answer, dict) else None
+    if not isinstance(sealed, bool):
+        raise StartRefused(f"{where} answered its seal status without a `sealed` true or false")
+    return sealed
+
+
+async def _login_check(settings: Settings, secrets: OpenBaoSecrets) -> None:
+    """The API's token works (G4): a metadata read of a path no record names, since the writer policy cannot look
+    itself up. A refused token (403) names the token file's setting, never the token; any other refusal or failure,
+    an answer that cannot be read included, names the address."""
+    try:
+        await secrets.has_credentials(_PROBE_TENANT, _PROBE_SYSTEM, generation=1)
+    except SecretStoreRefused as refused:
+        if not refused.login_refused:
+            raise StartRefused(f"DEFENDER_OPENBAO_ADDR: the secret store at {settings.openbao_addr} refused the API's "
+                               f"login check ({refused})") from None
+        raise StartRefused(f"DEFENDER_API_OPENBAO_TOKEN_FILE: the secret store at {settings.openbao_addr} refused the "
+                           f"token the file holds ({refused})") from None
+    except AdapterFault as failed:
+        raise StartRefused(f"DEFENDER_OPENBAO_ADDR: the secret store at {settings.openbao_addr} could not answer the "
+                           f"API's login check ({failed})") from None
+
+
+def _whole_catalog() -> Catalog:
+    """The catalog built whole (every entry and every adapter module), once, so the judgement inside the record store's
+    row lock reads no files. An unreadable adapters directory refuses start; an adapter that fails to load is kept as
+    data (D8): the judgement names it as a fault on each ask."""
+    return Catalog.of_checkout().load_all()
 
 
 @asynccontextmanager
 async def serving(settings: Settings, *, transport: httpx.AsyncBaseTransport | None,
+                  openbao_transport: httpx.AsyncBaseTransport | None,
                   steps: _Steps | None = None) -> AsyncIterator[Running]:
     """Start every step in order and yield the running app; leaving closes what was opened, in reverse. A start
     step that fails raises `StartRefused` with its message, after closing what the earlier steps opened. `steps`
-    lets the caller stop the start (`run` passes its own); without it nothing can."""
+    lets the caller stop the start (`run` passes its own); without it nothing can. `transport` reaches the sign-in provider and
+    `openbao_transport` the secret store (None: the network; a test passes fakes)."""
     steps = steps if steps is not None else _Steps()  # lint-default: ok — a fresh _Steps per call: a shared default would carry one start's stop into the next
     async with AsyncExitStack() as stack:
         async with steps.step("the database version check"):
             await _abandonable(lambda: check_version(settings.database_dsn))
+        async with steps.step("the secret store's seal status"):
+            sealed = await _seal_status(settings, openbao_transport)
+        secrets = OpenBaoSecrets(addr=settings.openbao_addr, token=settings.openbao_token.get_secret_value(),
+                                 mount=settings.openbao_kv_mount, transport=openbao_transport)
+        await stack.enter_async_context(secrets.pooled())  # one pooled client for the login check and every request
+        if not sealed:  # sealed: the API starts, and each request needing the store answers 503 until it is unsealed
+            async with steps.step("the secret store's login check"):
+                await _login_check(settings, secrets)
+        async with steps.step("reading the adapter catalog"):
+            catalog = await asyncio.to_thread(_whole_catalog)
         async with AsyncExitStack() as until_lifespan:  # closes what the lifespan will own, if start ends before it
             async with steps.step("building the sign-in adapters"):
                 signin = KeycloakSignIn(
@@ -237,11 +313,14 @@ async def serving(settings: Settings, *, transport: httpx.AsyncBaseTransport | N
                 until_lifespan.push_async_callback(people.close)
                 tenants = PostgresTenantRepository(settings.database_dsn)
                 until_lifespan.push_async_callback(tenants.close)
+                records = record_store(settings.database_dsn, catalog, clock=_wall_clock)
+                stack.push_async_callback(records.close)  # like the job store, it outlives the lifespan
                 identity = IdentityService(people, signin=signin, mail=LoggedMail(), clock=_wall_clock,
                                            bootstrap=settings.administrators, programs=programs)
-                app = create_app(api_deps(identity=identity, tenants=tenants, ports=JobStorePorts(store),
-                                          frontend_origin=settings.frontend_origin,
-                                          learning_work=StoreLearningWork(learning)))
+                app = create_app(api_deps(
+                    identity=identity, tenants=tenants, ports=JobStorePorts(store), frontend_origin=settings.frontend_origin,
+                    systems=ConfigRecords(records, tenants, catalog, secrets), secrets=ConfigCredentials(records, secrets),
+                    learning_work=StoreLearningWork(learning)))
             async with steps.step("binding the listening socket"):
                 sock = _bind(settings)
                 stack.callback(sock.close)
@@ -253,18 +332,33 @@ async def serving(settings: Settings, *, transport: httpx.AsyncBaseTransport | N
         yield Running(app=app, sockets=[sock])
 
 
-async def _serve_on_sockets(settings: Settings, transport: httpx.AsyncBaseTransport | None, steps: _Steps) -> None:
-    async with serving(settings, transport=transport, steps=steps) as running:
+def record_store(dsn: str, catalog: Catalog, *, clock: Callable[[], _dt.datetime]) -> RecordStore:
+    """The record store as the API serves it: each write judged over `catalog` (the one built whole at start, so the
+    judgement inside the row lock reads no files), only what the write changes (#1366 C4)."""
+    return RecordStore(dsn, clock=clock, judge=_catalog_judge(catalog))
+
+
+def _catalog_judge(catalog: Catalog) -> Callable[[TenantRecords, TenantRecords], list[str]]:
+    """The record judgement over the catalog built at start, as the record store takes it."""
+    def judge(after: TenantRecords, before: TenantRecords) -> list[str]:
+        return list(judge_records(after, before, catalog=catalog))
+    return judge
+
+
+async def _serve_on_sockets(settings: Settings, transport: httpx.AsyncBaseTransport | None,
+                            openbao_transport: httpx.AsyncBaseTransport | None, steps: _Steps) -> None:
+    async with serving(settings, transport=transport, openbao_transport=openbao_transport, steps=steps) as running:
         await steps.serve(_Server(uvicorn.Config(running.app, lifespan="off", log_config=None)), running.sockets)
 
 
-async def _run(settings: Settings, transport: httpx.AsyncBaseTransport | None) -> int:
+async def _run(settings: Settings, transport: httpx.AsyncBaseTransport | None,
+               openbao_transport: httpx.AsyncBaseTransport | None) -> int:
     loop = asyncio.get_running_loop()
     steps = _Steps()
     for sig in uvicorn.server.HANDLED_SIGNALS:
         loop.add_signal_handler(sig, steps.request_stop, sig)
     try:
-        await _serve_on_sockets(settings, transport, steps)
+        await _serve_on_sockets(settings, transport, openbao_transport, steps)
     except _Stopped:
         return 0
     except StartRefused as refused:
@@ -277,7 +371,8 @@ async def _run(settings: Settings, transport: httpx.AsyncBaseTransport | None) -
     return 0
 
 
-def run(environ: Mapping[str, str], *, transport: httpx.AsyncBaseTransport | None) -> int:
+def run(environ: Mapping[str, str], *, transport: httpx.AsyncBaseTransport | None,
+        openbao_transport: httpx.AsyncBaseTransport | None) -> int:
     """The whole program: settings, then `serving`, then uvicorn on its sockets until a handled signal. A refusal
     prints its message to stderr and returns 1; a handled signal returns 0 after everything is closed."""
     try:
@@ -285,4 +380,4 @@ def run(environ: Mapping[str, str], *, transport: httpx.AsyncBaseTransport | Non
     except StartRefused as refused:
         print(refused, file=sys.stderr)
         return 1
-    return asyncio.run(_run(settings, transport))
+    return asyncio.run(_run(settings, transport, openbao_transport))

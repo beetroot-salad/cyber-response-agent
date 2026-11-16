@@ -14,6 +14,7 @@ import pytest
 from defender.tests.migrations.test_1339_migrations import catalog
 from defender.tests.support.shared._postgres1339 import execute
 from defender.tests.tenancy.lifecycle_1214.test_repository_contract import fill_row
+from defender.tests.migrations._marked1470 import upgrade_marking_tenants
 
 BASELINE = "0001_baseline"
 TENANCY = "0002_tenancy"
@@ -119,7 +120,7 @@ def test_code_at_head_refuses_a_database_at_the_baseline_naming_both(empty_datab
 def test_the_revision_moves_tenants_and_adds_the_lifecycle_tables(migrated_database):
     """At head `tenancy` holds tenants and the new tables, `identity` no tenants, and memberships reference `tenancy.tenants` (O11)."""
     assert _tables(migrated_database, "tenancy") == {"tenants", "forge_wiring", "generations", "publish_status",
-                                                     "alert_mappings", "system_versions", "case_versions", "records_mark",  # #1345 r5: the mapping is a tenant record; #1366: the records tables
+                                                     "alert_mappings", "system_versions", "case_versions",  # #1345 r5: the mapping is a tenant record; #1366: the records tables
                                                      "merge_eligibility"}  # #1414 D13: the service's eligibility record
     assert "tenants" not in _tables(migrated_database, "identity")
     assert [target for _, target in _fk_to_tenants(migrated_database)] == ["tenancy.tenants"]
@@ -130,12 +131,11 @@ def test_set_schema_keeps_the_rows_the_memberships_and_the_foreign_keys_name(emp
     """The move carries the tenant row, the membership that references it and the FK's schema-free name; the FK still bites (O11)."""
     import psycopg.errors
 
-    from defender.migrations import upgrade
 
     _at_baseline(empty_database, tenants=(LAB, OTHER))
     [(name, target)] = _fk_to_tenants(empty_database)
     assert target == "identity.tenants"
-    upgrade(empty_database)
+    upgrade_marking_tenants(empty_database)  # #1470 O12: the tenant has its mark, so the drop does not stop
     assert _fk_to_tenants(empty_database) == [(name, "tenancy.tenants")]
     assert {r[0] for r in execute(empty_database, "SELECT id FROM tenancy.tenants")} == {LAB, OTHER}
     assert execute(empty_database, "SELECT id, tenant_id, status FROM identity.memberships") == [("e1000000-0000-4000-8000-000000000001", LAB, "invited")]
@@ -157,10 +157,9 @@ BACKFILL_FAILURE = "registered before #1214: record its forge wiring if it has a
 def test_existing_tenant_rows_are_backfilled_as_failed_creates_at_names(empty_database):
     """Every pre-#1214 row becomes `creating`/`create`/step `names`/actor `service` with the backfill failure (so no
     worker takes it until an administrator resumes it), dates kept (O11)."""
-    from defender.migrations import upgrade
 
     _at_baseline(empty_database, tenants=(LAB, OTHER, THIRD))
-    upgrade(empty_database)
+    upgrade_marking_tenants(empty_database)  # #1470 O12: the tenant has its mark, so the drop does not stop
     rows = execute(empty_database, """SELECT id, created_at, state, pending_action, step, step_actor, failure,
                                       repo_url, offboarded_at, repo_delete_after FROM tenancy.tenants ORDER BY id""")
     assert len(rows) == 3
@@ -176,10 +175,10 @@ def test_existing_tenant_rows_are_backfilled_as_failed_creates_at_names(empty_da
 @pytest.mark.postgres
 def test_a_database_upgraded_with_rows_has_the_catalog_of_one_upgraded_empty(empty_database, migrated_database):
     """Nullable -> fill -> NOT NULL leaves no trace: a populated upgrade and an empty one end with one catalog (O11, O3)."""
-    from defender.migrations import check_version, upgrade
+    from defender.migrations import check_version
 
     _at_baseline(empty_database, tenants=(LAB, OTHER))
-    upgrade(empty_database)
+    upgrade_marking_tenants(empty_database)  # #1470 O12: the tenant has its mark, so the drop does not stop
     assert check_version(empty_database) is None
     assert catalog(empty_database) == catalog(migrated_database)
     assert [c for c in catalog(empty_database)["columns"] if c[5] is not None] == []
@@ -226,12 +225,11 @@ def test_the_third_revision_adds_exactly_the_six_sign_columns_as_nullable_text_w
 def test_a_generation_recorded_at_the_tenancy_revision_reads_back_with_the_six_null_after_the_upgrade(empty_database):
     """A row seeded at `0002_tenancy` keeps its other values through the upgrade and reads the six sign columns NULL, which
     is how a pre-r8 generation reads (A24/r8.4, r8.5 upgrade)."""
-    from defender.migrations import upgrade
 
     _upgrade_to(empty_database, TENANCY)
     fill_row(empty_database, "tenants", id=OTHER, state="active")
     fill_row(empty_database, "generations", tenant_id=OTHER, salt="old", status="live", bot_login="bot-old")
-    upgrade(empty_database)
+    upgrade_marking_tenants(empty_database)  # #1470 O12: the tenant has its mark, so the drop does not stop
     cols = ", ".join(sorted(SIGN_COLUMNS))
     rows = execute(empty_database, f"SELECT bot_login, {cols} FROM tenancy.generations WHERE tenant_id = %s", (OTHER,))  # noqa: S608
     assert rows == [("bot-old", *([None] * 6))]
@@ -242,7 +240,6 @@ def test_the_upgrade_keeps_every_row_of_every_tenancy_table_and_only_adds_the_si
     """Live, pending, retiring and destroyed generations (two tenants' rows) and the neighbouring tenancy tables' rows at
     `0002_tenancy` are all there after the upgrade, every old column unchanged, the six new ones NULL (A24/r8.4: the
     migration adds columns and removes nothing; r8.5: a pending generation survives to be completed)."""
-    from defender.migrations import upgrade
 
     _upgrade_to(empty_database, TENANCY)
     for tenant in (OTHER, THIRD):
@@ -256,14 +253,14 @@ def test_the_upgrade_keeps_every_row_of_every_tenancy_table_and_only_adds_the_si
 
     def rows() -> dict[str, list[dict[str, object]]]:
         tables = sorted(_tables(empty_database, "tenancy") - {"alembic_version", "alert_mappings", "system_versions",  # #1345, #1366: tables the head adds
-                                                              "case_versions", "records_mark",
+                                                              "case_versions",
                                                               "merge_eligibility"})  # #1414 D13: so is this
         return {t: sorted((r[0] for r in execute(empty_database, f"SELECT to_jsonb(x) FROM tenancy.{t} x")),  # noqa: S608
                           key=lambda row: json.dumps(row, sort_keys=True)) for t in tables}
     before = rows()
     assert {len(before[t]) for t in ("tenants", "forge_wiring", "publish_status")} == {2}, "control: the rows were seeded"
     assert len(before["generations"]) == 6, "control: live and pending generations were seeded"
-    upgrade(empty_database)
+    upgrade_marking_tenants(empty_database)  # #1470 O12: the tenant has its mark, so the drop does not stop
     after = rows()
 
     assert after.keys() == before.keys()

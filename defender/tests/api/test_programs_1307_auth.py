@@ -13,6 +13,14 @@ pytestmark = [
 import datetime as _dt  # noqa: E402
 from typing import Any  # noqa: E402
 
+from defender.tests.support.api._config1470 import (  # noqa: E402
+    CONFIG_ROUTES,
+    config_call,
+    config_route,
+    primed,
+    served_config_routes,
+    stable,
+)
 from defender.tests.support.api._identity1306 import (  # noqa: E402
     ALERT,
     ANN,
@@ -44,8 +52,15 @@ from defender.tests.support.api._routes1307a import (  # noqa: E402
     concrete,
     route_id,
 )
+from defender.tests.support.api._server1083 import (  # noqa: E402
+    ORIGIN,
+    A,
+    program_token,
+    seed_token_credential,
+)
 
-ROUTES = authenticating_routes()
+#: The config routes run over the real record store below (#1470 O14), not over this module's in-memory world.
+ROUTES = [r for r in authenticating_routes() if not config_route(r)]
 EVIL = "https://evil.example"
 
 
@@ -441,3 +456,136 @@ def test_a_401_to_a_bearer_request_challenges_bearer_and_one_without_offers_noth
         response = browser.get("/me")
         assert response.status_code == 401
         assert "www-authenticate" not in response.headers
+
+
+# --- #1470 O14: the config routes over the real record store -----------------------------------------------------------
+
+@pytest.mark.anyio
+@pytest.mark.postgres
+async def test_every_config_route_is_the_designs_and_answers_401_without_a_credential_and_a_signed_in_admin_passes(scripted) -> None:
+    """The real app serves exactly the design's config routes; none answers anyone with no credential (a state change
+    from the frontend's origin, or any other); Ann, the tenant's admin, is let past authentication on each. (O14, O1)"""
+    assert served_config_routes(scripted.app) == CONFIG_ROUTES
+    for route in sorted(CONFIG_ROUTES):
+        anonymous = await config_call(scripted, route, {"Origin": ORIGIN})
+        assert anonymous.status_code == 401, (route, anonymous.text)
+        stale = await config_call(scripted, route, {"Origin": ORIGIN, "Cookie": f"{SESSION_COOKIE}=not-a-session"})
+        assert stale.status_code == 401, route
+        garbage = await config_call(scripted, route, {"Authorization": "Bearer garbage"})
+        assert garbage.status_code == 401, route
+        assert (await config_call(scripted, route, scripted.ann())).status_code not in (401, 403, 500), route
+
+
+@pytest.mark.anyio
+@pytest.mark.postgres
+async def test_a_cookie_beside_an_authorization_header_changes_nothing_on_every_config_route(scripted) -> None:
+    """A `Bearer` header decides alone and the cookie is never read: the program's key or an OAuth token answers as it does
+    alone, with Ann's session cookie or any other cookie beside it; a bad Bearer header is 401 even beside a good session. A
+    header of another scheme is not ours: beside a session it answers as the session alone. (O14, O1, P-F as amended in the
+    #1450 reviews: a load balancer's cookie must not lock a program out, nor a proxy's Basic login a person)"""
+    await primed(scripted)  # so Ann's answer to each route is the same each time it is asked
+    token = program_token(scripted.keycloak, await seed_token_credential(scripted.dsn, scripted.seeded))
+    ann_cookie = scripted.ann(write=False)["Cookie"]
+    for route in sorted(CONFIG_ROUTES):
+        for value in (f"Bearer {scripted.seeded.program_key}", f"Bearer {token}"):
+            alone = await config_call(scripted, route, {"Authorization": value}, **stable(route))
+            assert alone.status_code != 401, (route, value)  # control: the credential alone
+            assert alone.status_code == 403, (route, value)  # a program holds neither config permission
+            for cookie in (ann_cookie, "AWSALB=sticky; analytics=1"):
+                beside = await config_call(scripted, route, {"Origin": ORIGIN, "Cookie": cookie, "Authorization": value},
+                                           **stable(route))
+                assert beside.status_code == alone.status_code, (route, value, cookie)
+                assert EXPIRY_HEADER in beside.headers  # authenticated as the program, not the person
+        both = await config_call(scripted, route, {"Origin": ORIGIN, "Cookie": ann_cookie, "Authorization": "Bearer garbage"},
+                                 **stable(route))
+        assert both.status_code == 401, route
+        alone = await config_call(scripted, route, {"Origin": ORIGIN, "Cookie": ann_cookie}, **stable(route))
+        assert alone.status_code != 401, route  # control: the cookie alone
+        basic = await config_call(scripted, route, {"Origin": ORIGIN, "Cookie": ann_cookie, "Authorization": "Basic dXNlcjpwYXNz"},
+                                  **stable(route))
+        assert basic.status_code == alone.status_code, route
+        assert EXPIRY_HEADER not in basic.headers  # authenticated as the person
+
+
+@pytest.mark.anyio
+@pytest.mark.postgres
+async def test_no_valid_credential_is_401_on_every_config_route(scripted) -> None:
+    """No credential, an unknown key or token, a non-Bearer scheme, a bare key, Bearer with no value -> 401, nothing written
+    and no secret store asked (O1). A non-Bearer value is the cookie's way (#1450 review), so it is sent as a browser would,
+    from the frontend."""
+    key = scripted.seeded.program_key
+    for route in sorted(CONFIG_ROUTES):
+        unauthenticated = [
+            await config_call(scripted, route, {"Origin": ORIGIN}),
+            *[await config_call(scripted, route, {"Authorization": value})
+              for value in (f"Bearer {key[:-1]}x", "Bearer eyJ.not-issued.sig", "Bearer", "Bearer ")],
+            *[await config_call(scripted, route, {"Origin": ORIGIN, "Authorization": value})
+              for value in (f"Basic {key}", f"Token {key}", key)],
+        ]
+        assert [r.status_code for r in unauthenticated] == [401] * len(unauthenticated), route
+    assert scripted.versions("ticket") == []
+    assert scripted.scripted.calls == []
+    for route in sorted(CONFIG_ROUTES):
+        assert (await config_call(scripted, route, scripted.program())).status_code != 401, route  # control
+        assert (await config_call(scripted, route, scripted.ann())).status_code != 401, route  # control
+
+
+@pytest.mark.anyio
+@pytest.mark.postgres
+@pytest.mark.parametrize("headers", [
+    {"Origin": ORIGIN},
+    {"Origin": ORIGIN, "Cookie": f"{SESSION_COOKIE}=not-a-session"},
+    {"Origin": ORIGIN, "Authorization": "Bearer {session}"},
+    {"Origin": ORIGIN, "Authorization": "Basic {session}"},
+], ids=["no-cookie", "unknown-cookie", "session-value-as-bearer", "session-value-as-basic"])
+async def test_every_config_route_refuses_a_caller_without_a_known_session_cookie(scripted, headers) -> None:
+    """No, unknown, or Bearer-carried session -> 401, nothing written, no secret store asked; no Bearer challenge unless the
+    request came with an `Authorization` header (#1307: then it is the programs' way in, challenged as RFC 6750 says). (O14)"""
+    headers = {k: v.replace("{session}", scripted.seeded.ann_session) for k, v in headers.items()}
+    for route in sorted(CONFIG_ROUTES):
+        response = await config_call(scripted, route, headers)
+        assert response.status_code == 401, route
+        if "Authorization" not in headers:
+            assert "WWW-Authenticate" not in response.headers, route
+    assert scripted.versions("ticket") == []
+    assert scripted.scripted.calls == []
+
+
+_ORIGINS = [None, "https://evil.example", ORIGIN + ".evil.example", "null", ORIGIN.replace("http://", "https://"),
+            "https://evil.example/" + ORIGIN, ORIGIN + ":8443"]
+
+
+@pytest.mark.anyio
+@pytest.mark.postgres
+@pytest.mark.parametrize("origin", _ORIGINS, ids=["missing-origin", "foreign-origin", "suffixed-origin", "null-origin",
+                                                  "other-scheme-origin", "origin-ending-with-ours", "other-port-origin"])
+async def test_every_state_changing_config_route_refuses_a_valid_session_without_the_frontend_origin(scripted, origin) -> None:
+    """A valid cookie with a missing or foreign Origin is 403 before anything is written or asked, on each write route (system
+    put and delete, credentials, check, case put and delete); the same call with the configured Origin is let through. (O14, O9)"""
+    cookie = scripted.ann(write=False)
+    headers = {**cookie} | ({} if origin is None else {"Origin": origin})
+    writes = sorted(r for r in CONFIG_ROUTES if r[0] != "GET")
+    assert len(writes) == 6  # noqa: PLR2004 — put/delete system, credentials, check, put/delete case
+    for route in writes:
+        response = await config_call(scripted, route, headers)
+        assert response.status_code == 403, (route, response.text)
+    assert scripted.versions("ticket") == []
+    assert scripted.scripted.calls == []
+    for route in writes:  # control: the same session with the configured Origin
+        assert (await config_call(scripted, route, scripted.ann())).status_code not in (401, 403, 500), route
+
+
+@pytest.mark.anyio
+@pytest.mark.postgres
+async def test_every_response_to_a_program_on_a_config_route_carries_the_credentials_expiry(scripted) -> None:
+    """Whatever the status, a verified program's response has the header and it is the credential's own expiry (the
+    listing's `expires_at`); a person's has none. (D9)"""
+    programs = f"/tenants/{A}/programs/{scripted.seeded.program_id}/credentials"
+    listed = (await scripted.client.get(programs, headers=scripted.ann(write=False))).json()["items"]
+    [row] = [r for r in listed if r["id"] == scripted.seeded.credential_id]
+    expires = parse_time(row["expires_at"])
+    for route in sorted(CONFIG_ROUTES):
+        response = await config_call(scripted, route, scripted.program())
+        assert parse_time(response.headers[EXPIRY_HEADER]) == expires, (route, response.status_code)
+    for route in sorted(CONFIG_ROUTES):
+        assert EXPIRY_HEADER not in (await config_call(scripted, route, scripted.ann())).headers, route

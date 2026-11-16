@@ -49,7 +49,7 @@ def test_o2_a_tenant_with_no_case_file_passes_check(tmp_path):
 #  - test_r1_an_http_proxy_case_system_must_declare_a_write_route: ::test_1366_c5_check_reports_a_case_record_whose_system_no_longer_covers...
 #  - test_r1_a_bad_case_record_file_is_judged_naming_the_file (9 shapes): a bad case-record file cannot reach a check; the store
 #      refuses a bad case shape at write: tenant_1108_p4/test_system_records_1366.py::test_1366_o4_a_case_template_failing_
-#      the_case_record_rules_is_refused and ::test_1366_o4_a_case_record_naming_a_file_that_is_not_a_record_is_refused.
+#      the_case_record_rules_is_refused.
 #  - test_r1_a_legacy_case_history_folder_is_a_finding_naming_the_new_file: a leftover systems/ folder is a retired-and-ignored
 #      finding: test_check_records_1366.py::test_1366_o9_check_reports_a_tenant_repos_leftover_system_folders_and_case_file...
 #  - DROPPED (design gap, no equivalent): test_r1_a_case_adapter_the_cold_read_refused_is_a_finding_naming_the_file and

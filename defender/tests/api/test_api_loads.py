@@ -109,6 +109,68 @@ def test_a_program_module_loads_no_runtime_or_learning(module):
     assert not found, f"{module} loads {found}"
 
 
+#: #1470 D-B: what the API composes for the record judgement. FORCED CHOICE: the rules package's name is the design's
+#: "e.g." (`defender.system_rules`); the case-record rules' new `tenancy` module is unnamed, so it is reached through the
+#: judgement run below rather than imported by name.
+RECORD_MODULES = ("defender.system_records", "defender.system_rules")
+
+
+@pytest.mark.parametrize("module", RECORD_MODULES)
+def test_1470_the_record_store_and_the_judgement_load_no_runtime_or_learning(module):
+    """The record store and the moved judgement import cleanly and load nothing in `API_FORBIDDEN`. (#1470 D-B, D-E)"""
+    found = api_forbidden(_loaded(module))
+    assert not found, f"{module} loads {found}"
+
+
+_DOOR_PROBE = """
+import importlib, json, sys
+door = importlib.import_module("defender.credential_proxy")
+for name in sys.argv[1:]:
+    getattr(door, name)
+print(json.dumps(sorted(sys.modules)))
+"""
+
+_JUDGE_PROBE = """
+import json, sys
+from defender.system_rules import Catalog, judge_records
+from defender.tenancy.models import CaseRecord, SystemRecord, TenantRecords
+catalog = Catalog.of_checkout()
+ids = list(catalog.adapter_ids)
+assert len(ids) >= 9, ids
+for adapter in ids:
+    catalog.module(adapter)
+    record = SystemRecord(system_id=adapter, version=1, adapter_id=adapter, settings={}, access="")
+    case = CaseRecord(version=1, system_id=adapter, comment_body="a case comment")
+    judge_records(TenantRecords(systems={adapter: record}, case=case), None, catalog=catalog)
+print(json.dumps(sorted(sys.modules)))
+"""
+
+
+def _loaded_by(probe: str, *args: str) -> list[str]:
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(p for p in (str(REPO), os.environ.get("PYTHONPATH", "")) if p)}
+    proc = subprocess.run([sys.executable, "-c", probe, *args], capture_output=True, text=True, check=False,
+                          cwd=str(REPO), env=env, timeout=180)
+    assert proc.returncode == 0, f"the probe failed:\n{proc.stderr}"
+    return json.loads(proc.stdout.splitlines()[-1])
+
+
+def test_1470_the_credential_proxys_public_door_serves_the_writer_and_its_policies_loading_nothing_banned():
+    """Asking the door for `OpenBaoSecrets` and `store_policies` (it is a lazy door: importing the package alone loads
+    neither) loads no `API_FORBIDDEN` module. (#1470 D-E, O13)"""
+    modules = _loaded_by(_DOOR_PROBE, "OpenBaoSecrets", "store_policies")
+    assert any(m.startswith("defender.credential_proxy._openbao") for m in modules), "premise: the writer module loaded"
+    found = api_forbidden(modules)
+    assert not found, f"the door's writer loads {found}"
+
+
+def test_1470_running_the_judgement_over_the_real_catalog_loads_no_runtime_or_learning():
+    """Judging a record and a case record of each catalog adapter (every adapter module and the case-record rules load)
+    leaves nothing in `API_FORBIDDEN` loaded: an import made at call time counts. (#1470 D-B; design C17)"""
+    modules = _loaded_by(_JUDGE_PROBE)
+    found = api_forbidden(modules)
+    assert not found, f"the judgement loads {found}"
+
+
 #: #1485 r13/r14: the paging code is generic over its id families, so it loads neither the learning store nor its tables.
 _NOT_BY_PAGING = ("defender.learning_store", "defender.jobs.learning_models")
 
@@ -162,7 +224,10 @@ def _serving_requests(seeded: Any) -> list[tuple[tuple[str, str], str, dict[str,
 
     fill = {"tenant_id": A, "key": "report.md", "system_id": "tix"}
     bodies = {**BODIES, ("POST", "/admin/tenants/{}/invitations"): {"email": "new@a.example"}}
-    query = {("GET", "/auth/callback"): {"code": "c", "state": "s"}}
+    query = {("GET", "/auth/callback"): {"code": "c", "state": "s"},
+             # #1470: a record delete names the version it replaces
+             ("DELETE", "/tenants/{tenant_id}/case-record"): {"replaces": 1},
+             ("DELETE", "/tenants/{tenant_id}/systems/{system_id}"): {"replaces": 1}}
     routes = sorted(app_routes(), key=lambda r: (_LAST.index(r) if r in _LAST else -1, r))
     requests = []
     for route in routes:

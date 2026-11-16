@@ -44,7 +44,7 @@ def test_at_head_the_mapping_table_has_a_nullable_text_column_per_entry_and_aler
 def test_the_upgrade_creates_no_mapping_and_nulls_existing_alert_display(empty_database):
     """From `0006_job_leases` with a tenant and a development alert: head has no mapping row and the alert's
     title and description are null; its other columns are kept. (#1345 Upgrade)"""
-    from defender.migrations import upgrade
+    from defender.tests.migrations._marked1470 import upgrade_marking_tenants
 
     _upgrade_to(empty_database, JOB_LEASES)
     execute(empty_database, "INSERT INTO tenancy.tenants (id, created_at, state) VALUES (%s, %s, 'active')",
@@ -53,7 +53,7 @@ def test_the_upgrade_creates_no_mapping_and_nulls_existing_alert_display(empty_d
                             "received_at, title, description, raw) VALUES (%s, %s, 'v', 'V-1', %s, %s, %s, 'dev title', "
                             "'dev description', %s)", (ALERT, TENANT, CREATED, CREATED, CREATED, b"{}"))
 
-    upgrade(empty_database)
+    upgrade_marking_tenants(empty_database)  # #1470 O12: the tenant has its mark, so the drop does not stop
 
     assert execute(empty_database, f"SELECT count(*) FROM tenancy.{MAPPING_TABLE}") == [(0,)]  # noqa: S608
     assert execute(empty_database, "SELECT title, description, vendor_ticket_id FROM jobs.alerts WHERE id = %s",
@@ -98,7 +98,7 @@ def test_at_head_an_alert_may_be_stored_with_a_null_title_and_description(migrat
 def test_the_upgrade_nulls_every_existing_alerts_display_and_gives_no_tenant_a_mapping(empty_database):
     """Two tenants with several development alerts each: after the upgrade every alert's title and description are
     null, whichever tenant, and no tenant has a mapping. (#1345 Upgrade)"""
-    from defender.migrations import upgrade
+    from defender.tests.migrations._marked1470 import upgrade_marking_tenants
 
     _upgrade_to(empty_database, JOB_LEASES)
     other = "a3000000-0000-4000-8000-000000000002"
@@ -110,7 +110,7 @@ def test_the_upgrade_nulls_every_existing_alerts_display_and_gives_no_tenant_a_m
                                 "received_at, title, description, raw) VALUES (%s, %s, 'v', %s, %s, %s, %s, 'dev', 'dev', %s)",
                 (f"a3000000-0000-4000-8000-0000000000b{n}", tenant, f"V-{n}", CREATED, CREATED, CREATED, b"{}"))
 
-    upgrade(empty_database)
+    upgrade_marking_tenants(empty_database)  # #1470 O12: the tenant has its mark, so the drop does not stop
 
     assert execute(empty_database, "SELECT count(*) FILTER (WHERE title IS NULL AND description IS NULL), count(*) "
                                    "FROM jobs.alerts") == [(3, 3)]

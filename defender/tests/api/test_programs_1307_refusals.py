@@ -18,6 +18,14 @@ pytestmark = [
 
 import datetime as _dt  # noqa: E402
 
+from defender.tests.support.api._config1470 import (  # noqa: E402
+    CONFIG_BODIES,
+    CONFIG_ROUTES,
+    config_call,
+    config_route,
+    primed,
+    stable,
+)
 from defender.tests.support.api._identity1306 import (  # noqa: E402
     ALERT,
     ANN,
@@ -39,9 +47,11 @@ from defender.tests.support.api._routes1307a import (  # noqa: E402
     concrete,
     route_id,
 )
+from defender.tests.support.api._server1083 import ORIGIN
 
 KINDS = ("key", "oauth_client")
-ROUTES = authenticating_routes()
+#: The config routes run over the real record store below (#1470 O14), not over this module's in-memory world.
+ROUTES = [r for r in authenticating_routes() if not config_route(r)]
 
 
 # --- A refused credential leaves no trace (Keys: "hash lookup -> usable -> program active -> last_used written") -------------
@@ -275,3 +285,64 @@ def test_a_valid_credential_with_a_malformed_body_is_a_422() -> None:
     s = soar()
     response = s.program().post(f"/tenants/{T1}/investigations", headers=_JSON, content=_MALFORMED)
     assert response.status_code == 422, response.text
+
+
+# --- #1470 O14: the config writes over the real record store -----------------------------------------------------------
+
+#: Every config route that takes a body or is a POST, as base's `WRITES` (POST, PUT, PATCH): the check has none.
+_CONFIG_WRITES = sorted(r for r in CONFIG_ROUTES if r[0] in ("POST", "PUT", "PATCH"))
+
+
+@pytest.mark.anyio
+@pytest.mark.postgres
+@pytest.mark.parametrize("route", _CONFIG_WRITES, ids=route_id)
+async def test_an_invalid_or_missing_credential_is_401_whatever_the_body_of_a_config_write_holds(scripted, route) -> None:
+    """On every config write that is a POST or PUT, a malformed JSON body does not turn a refused credential into a 422:
+    the credential is checked first (O1, A7). A pre-authentication parse would be reachable by anyone, since a bearer-only
+    write skips the origin layer (O9). Past authentication a body route's same body is the body's problem (a 422 with
+    `errors`), so the sweep can tell the two apart. (O14)"""
+    key = scripted.seeded.program_key
+    refused = [
+        await config_call(scripted, route, {"Authorization": value, **_JSON}, content=_MALFORMED)
+        for value in ("Bearer garbage", f"Bearer {key[:-1]}x", "Bearer eyJ.not-issued.sig", "Bearer ")
+    ]
+    refused += [  # not the Bearer scheme: the cookie's way, from the frontend, with no cookie
+        await config_call(scripted, route, {"Origin": ORIGIN, "Authorization": value, **_JSON}, content=_MALFORMED)
+        for value in (f"Basic {key}", "")
+    ]
+    refused.append(await config_call(scripted, route, {"Origin": ORIGIN, **_JSON}, content=_MALFORMED))  # nothing at all
+    refused.append(await config_call(scripted, route, {"Origin": ORIGIN, "Cookie": f"{SESSION_COOKIE}=not-a-session", **_JSON},
+                                     content=_MALFORMED))  # a cookie that names no session
+    assert [r.status_code for r in refused] == [401] * len(refused), [(r.status_code, r.text) for r in refused]
+    assert scripted.versions("ticket") == []
+    assert scripted.scripted.calls == []
+    # control: past authentication the same body is the body's problem
+    past = await config_call(scripted, route, {**scripted.program(), **_JSON}, content=_MALFORMED)
+    assert past.status_code != 401
+    ann = await config_call(scripted, route, {**scripted.ann(), **_JSON}, content=_MALFORMED)
+    assert ann.status_code != 401
+    if route in CONFIG_BODIES:
+        assert ann.status_code == 422, ann.text
+        assert ann.json()["errors"], ann.text
+
+
+@pytest.mark.anyio
+@pytest.mark.postgres
+@pytest.mark.parametrize("route", sorted(CONFIG_ROUTES), ids=route_id)
+async def test_a_valueless_bearer_header_beside_a_session_cookie_is_401_and_another_scheme_is_the_cookies_on_every_config_route(
+        scripted, route) -> None:
+    """A Bearer header without a value beside a real session cookie is still the bearer path, so 401 on every config route,
+    the cookie not tried instead; an empty, whitespace or other-scheme header (a staging proxy's Basic login) is not ours, so
+    the cookie authenticates as if it were absent. (O1, P-F, A4; #1450 review; O14)"""
+    await primed(scripted)  # so the cookie alone answers the same each time it is asked
+    key = scripted.seeded.program_key
+
+    async def status(headers: dict[str, str]) -> int:
+        return (await config_call(scripted, route, {**scripted.ann(), **headers}, **stable(route))).status_code
+
+    for value in ("Bearer", "Bearer ", "bearer\t"):
+        assert await status({"Authorization": value}) == 401, value
+    alone = await status({})
+    assert alone != 401  # control: the cookie alone
+    for value in ("", " ", "\t", "Basic dXNlcjpwYXNz", f"Basic {key}"):
+        assert await status({"Authorization": value}) == alone, value

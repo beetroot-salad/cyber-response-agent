@@ -74,9 +74,10 @@ def register_tenant(dsn: str, tenant_id: str, *, state: str = "active", wiring: 
     """A `tenancy.tenants` row (default: active, forge wiring recorded, at `origin` when given) by main's #1214 helper
     (r6), and #1345's default alert mapping saved through the store (`alert_mapping=None`: a tenant with none, for a test
     of absence).
-    #1366 R8: also the tenant's current system and case records, imported through the store (`_systems1366`): by default
-    those of the tenant's planted or published `settings/` under `data_root` (else the fixture's); `records=None`
-    registers a tenant NOT imported (the operator's `import` then has work to do); a `RecordsSpec` seeds exactly that.
+    #1366: also the tenant's current system and case records, written through the store (`_systems1366`): by default those
+    of the tenant's planted or published `settings/` under `data_root` (else the fixture's); `records=None` registers an
+    active tenant with no records at all (#1470 O8: no "not imported" state; its first write is version 1); a
+    `RecordsSpec` seeds exactly that.
 
     An active tenant gets one live generation with a sign login (the fixture tenant's elastic is proxied,
     #1391 P1/D12: run start signs request tokens), unless `generations` says otherwise (`()` for none)."""

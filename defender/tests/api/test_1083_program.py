@@ -13,6 +13,7 @@ from pathlib import Path
 import httpx
 import pytest
 
+from defender.tests.support.api._openbao1470 import ScriptedOpenBao
 from defender.tests.support.api._server1083 import (
     ADMIN_READ,
     ANN,
@@ -97,6 +98,8 @@ def _shape_violations(name: str, tmp_path: Path) -> list[tuple[str, str]]:
                   ("redirect uri with a fragment", "http://localhost:8000/auth/callback#x")]
     if name.endswith("_ISSUER"):
         cases += [("issuer without a realm", f"{FRONT}/elsewhere"), ("issuer with no realm name", f"{FRONT}/realms/")]
+    if name == "DEFENDER_OPENBAO_ADDR":
+        cases += [("openbao address not a url", "not a url"), ("openbao address not http", "ftp://127.0.0.1:8200")]
     if name == "DEFENDER_KEYCLOAK_SERVER_URL":
         cases.append(("server url with a path", f"{BACK}/realms/{SIGNIN_REALM}"))
     return cases + _file_violations(name, tmp_path)
@@ -105,7 +108,7 @@ def _shape_violations(name: str, tmp_path: Path) -> list[tuple[str, str]]:
 def _file_violations(name: str, tmp_path: Path) -> list[tuple[str, str]]:
     """Bad files for the secret-file settings and the administrators file."""
     cases: list[tuple[str, str]] = []
-    if name.endswith("_SECRET_FILE"):
+    if name.endswith(("_SECRET_FILE", "_TOKEN_FILE")):  # #1470 G4: the API's OpenBao token file reads as a secret file does
         cases += [("secret file absent", str(tmp_path / "no-such-secret")), ("secret file a directory", str(tmp_path))]
         for label, text in (("empty", ""), ("only a newline", "\n"), ("two lines", "one\ntwo\n")):
             path = tmp_path / f"secret-{label.replace(' ', '-')}"
@@ -144,7 +147,7 @@ async def _attempt(case: str, environ: dict[str, str], dsn: str, fails: tuple[Fa
 
     message = None
     try:
-        async with serving(Settings.from_environ(environ), transport=FakeKeycloak(fails)):
+        async with serving(Settings.from_environ(environ), transport=FakeKeycloak(fails), openbao_transport=ScriptedOpenBao()):
             pass
     except StartRefused as refused:
         message = str(refused)
@@ -249,7 +252,8 @@ def test_an_unmigrated_database_refuses_with_the_version_checks_message(tmp_path
     """An unmigrated database refuses start with #1339's message naming the code's head. (O2)"""
     from defender.migrations import head
 
-    ended = _refused(Child.real(environment(tmp_path, dsn=empty_database)), mentions=())
+    with ScriptedOpenBao().listening() as openbao:  # a reachable secret store, so the start order is not pinned
+        ended = _refused(Child.real(environment(tmp_path, dsn=empty_database, openbao=openbao)), mentions=())
     assert f"the database is at no recorded revision (unmigrated), but this code expects revision {head()}" \
         in ended.stderr
 
@@ -260,15 +264,18 @@ def test_a_database_at_another_revision_refuses_naming_both_revisions(tmp_path, 
     from defender.migrations import head
 
     execute(migrated_database, "UPDATE public.alembic_version SET version_num = %s", ("0001_elsewhere",))
-    ended = _refused(Child.real(environment(tmp_path, dsn=migrated_database)), mentions=("0001_elsewhere", head()))
+    with ScriptedOpenBao().listening() as openbao:  # a reachable secret store, so the start order is not pinned
+        ended = _refused(Child.real(environment(tmp_path, dsn=migrated_database, openbao=openbao)),
+                         mentions=("0001_elsewhere", head()))
     assert "expects revision" in ended.stderr
 
 
 def test_an_unreachable_database_refuses_with_the_version_checks_message(tmp_path):
     """A database nobody answers refuses start, naming its address. (O2)"""
     port = closed_port()
-    ended = _refused(Child.real(environment(tmp_path, dsn=UNREACHABLE_DSN.format(port=port))),
-                     mentions=("the database could not be reached",))
+    with ScriptedOpenBao().listening() as openbao:  # a reachable secret store, so the start order is not pinned
+        ended = _refused(Child.real(environment(tmp_path, dsn=UNREACHABLE_DSN.format(port=port), openbao=openbao)),
+                         mentions=("the database could not be reached",))
     assert f"127.0.0.1:{port}" in ended.stderr or str(port) in ended.stderr
 
 
@@ -276,8 +283,10 @@ def test_an_unreachable_database_refuses_with_the_version_checks_message(tmp_pat
 def test_an_unreachable_keycloak_refuses_start_naming_realm_step_and_address(tmp_path, migrated_database):
     """With the database at head, a Keycloak nobody answers refuses start naming realm, step and address. (O3)"""
     port = closed_port()
-    ended = _refused(Child.real(environment(tmp_path, dsn=migrated_database, keycloak=f"http://127.0.0.1:{port}")),
-                     mentions=("discovery", f"127.0.0.1:{port}"))
+    with ScriptedOpenBao().listening() as openbao:  # answers whichever step asks first, so only Keycloak is unreachable
+        ended = _refused(Child.real(environment(tmp_path, dsn=migrated_database, keycloak=f"http://127.0.0.1:{port}",
+                                                openbao=openbao)),
+                         mentions=("discovery", f"127.0.0.1:{port}"))
     assert SIGNIN_REALM in ended.stderr.replace(f"127.0.0.1:{port}", "")
 
 
@@ -333,7 +342,7 @@ def test_a_failure_no_step_names_itself_still_refuses_in_one_line_naming_the_ste
 
     execute(migrated_database, "ALTER TABLE public.alembic_version RENAME TO alembic_version_kept")
     execute(migrated_database, "CREATE VIEW public.alembic_version AS SELECT (1 / 0)::varchar(32) AS version_num")
-    assert run(environment(tmp_path, dsn=migrated_database), transport=FakeKeycloak()) == 1
+    assert run(environment(tmp_path, dsn=migrated_database), transport=FakeKeycloak(), openbao_transport=ScriptedOpenBao()) == 1
     stderr = capsys.readouterr().err
     assert stderr.count("\n") == 1, stderr
     assert "the database version check failed" in stderr, stderr
@@ -357,7 +366,7 @@ def test_a_stop_while_a_refusal_closes_keeps_the_refusal_and_every_close(tmp_pat
             await super().aclose()
 
     keycloak = SignalsOnClose([Fail(SIGNIN_REALM, "keys", "empty")])
-    assert run(environment(tmp_path, dsn=migrated_database), transport=keycloak) == 1
+    assert run(environment(tmp_path, dsn=migrated_database), transport=keycloak, openbao_transport=ScriptedOpenBao()) == 1
     assert realms_named(capsys.readouterr().err) == {SIGNIN_REALM}
     assert keycloak.closes == 2, "one close per Keycloak adapter built"
 
@@ -396,7 +405,7 @@ async def test_a_step_that_never_answers_refuses_naming_itself_and_closes_what_w
     keycloak = FakeKeycloak([Fail(SIGNIN_REALM, "discovery", "stall")])
     settings = Settings.from_environ(environment(tmp_path, dsn=migrated_database))
     with pytest.raises(StartRefused, match="the sign-in realm probe did not finish within 0.5 s"):
-        async with serving(settings, transport=keycloak, steps=_Steps(within=0.5)):
+        async with serving(settings, transport=keycloak, openbao_transport=ScriptedOpenBao(), steps=_Steps(within=0.5)):
             pytest.fail("the stalled probe should have refused")
     assert keycloak.closes == 2
     assert _backends_left(migrated_database) == 0
@@ -537,7 +546,7 @@ async def test_every_exit_of_serving_leaves_no_backend_socket_or_keycloak_client
             tmp_path, dsn=dsn, port=port, administrators=(ANN,) if ending == "bootstrap" else (OPS,)))
         host = "127.0.0.1"
         if ending == "served":
-            async with serving(settings, transport=keycloak) as running:
+            async with serving(settings, transport=keycloak, openbao_transport=ScriptedOpenBao()) as running:
                 await _one_request_per_store(running.app, seeded)
                 assert _backends(dsn) > 0  # control: every store has connected
                 [listening] = running.sockets
@@ -550,7 +559,7 @@ async def test_every_exit_of_serving_leaves_no_backend_socket_or_keycloak_client
             assert [s.fileno() for s in running.sockets] == [-1]
         else:
             with pytest.raises(StartRefused):
-                async with serving(settings, transport=keycloak):
+                async with serving(settings, transport=keycloak, openbao_transport=ScriptedOpenBao()):
                     pytest.fail(f"{ending} should have refused")
     assert _backends_left(dsn) == 0
     assert keycloak.closes == 2, "one close per Keycloak adapter built"
@@ -566,7 +575,7 @@ async def test_serving_holds_the_database_while_inside_and_closes_it_on_exit(tmp
 
     settings = Settings.from_environ(environment(tmp_path, dsn=migrated_database))
     assert _backends_left(migrated_database) == 0
-    async with serving(settings, transport=FakeKeycloak()):
+    async with serving(settings, transport=FakeKeycloak(), openbao_transport=ScriptedOpenBao()):
         assert _backends(migrated_database) > 0
     assert _backends_left(migrated_database) == 0
 
@@ -581,7 +590,7 @@ async def test_a_refusal_after_the_job_store_opened_closes_what_was_opened(tmp_p
     await seed_identity(migrated_database)
     settings = Settings.from_environ(environment(tmp_path, dsn=migrated_database, administrators=(ANN,)))
     with pytest.raises(StartRefused, match=ANN):
-        async with serving(settings, transport=FakeKeycloak()):
+        async with serving(settings, transport=FakeKeycloak(), openbao_transport=ScriptedOpenBao()):
             pytest.fail("the bootstrap should have refused")
     assert _backends_left(migrated_database) == 0
 
@@ -592,7 +601,7 @@ async def test_both_realms_are_probed_at_start(tmp_path, migrated_database):
     from defender.api_server import Settings, serving
 
     keycloak = FakeKeycloak()
-    async with serving(Settings.from_environ(environment(tmp_path, dsn=migrated_database)), transport=keycloak):
+    async with serving(Settings.from_environ(environment(tmp_path, dsn=migrated_database)), transport=keycloak, openbao_transport=ScriptedOpenBao()):
         probed = list(keycloak.seen)
     for realm in REALMS:
         host = "keycloak:8080"

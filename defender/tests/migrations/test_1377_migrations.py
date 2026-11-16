@@ -8,6 +8,7 @@ import pytest
 from defender.tests.migrations.test_1343_migrations import TENANT, _inv, _plant
 from defender.tests.support.jobs._jobs1342 import job_store
 from defender.tests.support.shared._postgres1339 import execute
+from defender.tests.migrations._marked1470 import upgrade_marking_tenants
 
 
 @pytest.mark.postgres
@@ -15,7 +16,7 @@ def test_s2_b3_rows_whose_holder_wrote_its_figure_read_exact_and_an_ended_row_wi
     """After the migration a row ended before 0006 (accounting back-filled), an unknown cost and a never-started row read exact; a row started, ended with a cost and no accounting reads "at least"; the column is a NOT NULL boolean with no server default. (S2, B3)"""
     from alembic import command
 
-    from defender.migrations import _config, upgrade
+    from defender.migrations import _config
 
     config = _config()
     config.attributes["dsn"] = empty_database
@@ -27,7 +28,7 @@ def test_s2_b3_rows_whose_holder_wrote_its_figure_read_exact_and_an_ended_row_wi
     _plant(empty_database, _inv("lost"), "failed", "3", cost=3.5)  # started, ended, its holder never wrote a figure
     _plant(empty_database, _inv("cancelled"), "aborted", "4", cost=0)
     execute(empty_database, "UPDATE jobs.investigations SET started_at = NULL WHERE id = %s", (_inv("cancelled"),))
-    upgrade(empty_database)
+    upgrade_marking_tenants(empty_database)  # #1470 O12: the tenant has its mark, so the drop does not stop
 
     from defender.migrations import _scripts
 

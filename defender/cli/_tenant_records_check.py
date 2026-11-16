@@ -4,9 +4,7 @@ The CLI's `check_tenant` asks this module and prints what it returns beside its 
 the alert mapping, the registry). One finding per line; `[]` is clean. Every judgement here is one run start or the
 record store already makes, asked again over the tenant's current records:
 
-- not imported (R8): the one finding naming `tenant.py import`, and nothing judged from the retired folders, which
-  stand for a full set of systems and a case record;
-- each record judged as the store judges a write (`record_judgement.system_faults`: an adapter an upgrade removed,
+- each record judged as the store judges a write (`system_rules.system_faults`: an adapter an upgrade removed,
   settings an upgrade invalidated, a declaration that does not parse);
 - the grants table against the records (R12): a catalog system granted with no record is an orphaned grant, one whose
   record is disabled is granted but disabled; an ungranted unrecorded system is silent; a grant on a system the catalog
@@ -30,12 +28,12 @@ from defender.kit.access import AccessDeclaration
 from defender.kit.faults import ConfigFault
 from defender.systems import case_system
 from defender.systems.catalog import Catalog, TenantSystems
-from defender.systems.record_judgement import system_faults
-from defender.systems.run_tenant import not_imported_text, record_settings
+from defender.system_rules import system_faults
+from defender.systems.run_tenant import record_settings
 from defender.systems.verb_dispositions import DispositionError, dispositions_path, load_dispositions
 from defender.systems.verbs import RegistryError, is_platform_served
 from defender.tenancy import AGENT_HALF, SETTINGS_HALF
-from defender.tenancy.case_ticket import CASE_RECORD_REL
+from defender.tenancy.case_record import CASE_RECORD_REL
 from defender.tenancy.models import TenantRecords
 
 if TYPE_CHECKING:
@@ -44,28 +42,27 @@ if TYPE_CHECKING:
     from defender.tenancy import TenantDirectory
     from defender.records.formats import TenantId
 
-#: The retired parts of a tenant repo's `settings/` (O9): read by nothing since the import.
+#: The retired parts of a tenant repo's `settings/` (O9): read by nothing since #1366.
 RETIRED_SYSTEMS = "systems"
 RETIRED_CASE_RECORD = CASE_RECORD_REL
 #: Retired by #1503: the step-zero lead binds no saved query, so nothing names one.
 RETIRED_LEAD_ZERO = "lead-zero.yaml"
 
-#: THE words of R13's finding (a fresh import copies no credential).
+#: THE words of R13's finding (a record holds no credential; they are set for its generation through the API).
 NO_CREDENTIALS = "no credentials at the current generation"
 
 
 @dataclasses.dataclass(frozen=True)
 class RecordsCheck:
-    """The record findings of one tenant, and the records they were read from (`None`: the tenant is not imported, and
-    `lines` is the import finding alone). `systems` are the systems the census judges: every recorded one and the
-    platform-served ones."""
+    """The record findings of one tenant, and the records they were read from. `systems` are the systems the census
+    judges: every recorded one and the platform-served ones."""
 
     lines: list[str]
-    records: TenantRecords | None
+    records: TenantRecords
 
     @property
-    def systems(self) -> frozenset[str] | None:
-        return None if self.records is None else frozenset(self.records.systems)
+    def systems(self) -> frozenset[str]:
+        return frozenset(self.records.systems)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -87,8 +84,6 @@ def records_check(tenant_id: TenantId, directory: TenantDirectory, *, knowledge:
     operator's OpenBao login (`has_credentials`), or None when the command was given none; `defender_dir` the running
     checkout, whose adapters are the catalog."""
     records = directory.current_records(tenant_id)
-    if not records.imported:
-        return RecordsCheck([not_imported_text(tenant_id)], None)
     try:
         catalog = Catalog.of_checkout(defender_dir)
     except RegistryError as unreadable:
@@ -119,7 +114,7 @@ def grant_findings(records: TenantRecords, catalog: Catalog, settings: Path) -> 
         if record is None:
             lines.append(f"system {system}: orphaned grant — {table} grants its verbs but the tenant has no record "
                          f"of it (never recorded, or deleted): runs ignore the grant. Record the system "
-                         f"(`tenant.py set-system`) or withdraw the grant")
+                         f"(`PUT /systems/{system}`) or withdraw the grant")
         elif not record.enabled:
             lines.append(f"system {system}: granted but disabled — {table} grants its verbs but its record is "
                          "disabled: runs ignore the grant. Enable the record or withdraw the grant")
@@ -147,18 +142,23 @@ def credential_findings(tenant_id: object, records: TenantRecords, secrets: Any)
     systems = sorted(records.systems.items())
     if not systems or secrets is None:
         return []
-    lines: list[str] = []
-    for system, record in systems:
-        try:
-            held = asyncio.run(secrets.has_credentials(str(tenant_id), system,
-                                                       generation=record.credential_generation))
-        except Exception as e:  # noqa: BLE001 — a store that cannot answer is a finding, not a crash
-            lines.append(f"system {system}: its credentials could not be checked ({type(e).__name__}: {e})")
-            continue
-        if not held:
-            lines.append(f"system {system}: {NO_CREDENTIALS} ({record.credential_generation}): set them with "
-                         f"`tenant.py set-credentials` for version {record.version}")
-    return lines
+
+    async def asked() -> list[str]:
+        # One event loop for every ask, and one pooled client opened and closed on it.
+        lines: list[str] = []
+        async with secrets.pooled():
+            for system, record in systems:
+                try:
+                    held = await secrets.has_credentials(str(tenant_id), system, generation=record.credential_generation)
+                except Exception as e:  # noqa: BLE001 — a store that cannot answer is a finding, not a crash
+                    lines.append(f"system {system}: its credentials could not be checked ({type(e).__name__}: {e})")
+                    continue
+                if not held:
+                    lines.append(f"system {system}: {NO_CREDENTIALS} ({record.credential_generation}): set them with "
+                                 f"`PUT /systems/{system}/credentials` for version {record.version}")
+        return lines
+
+    return asyncio.run(asked())
 
 
 def census_findings(table: TableFindings, systems: Collection[str] | None) -> TableFindings:
@@ -184,11 +184,11 @@ def leftover_findings(knowledge: Path) -> list[str]:
     settings = Path(knowledge) / SETTINGS_HALF
     lines: list[str] = []
     if (settings / RETIRED_SYSTEMS).is_symlink() or (settings / RETIRED_SYSTEMS).exists():
-        lines.append(f"settings/{RETIRED_SYSTEMS}/ is retired and ignored: the tenant's systems are records since "
-                     "the import (`tenant.py systems` lists them); remove the folder from the repo")
+        lines.append(f"settings/{RETIRED_SYSTEMS}/ is retired and ignored: the tenant's systems are records "
+                     "(`GET /systems` lists them); remove the folder from the repo")
     if (settings / RETIRED_CASE_RECORD).is_symlink() or (settings / RETIRED_CASE_RECORD).exists():
-        lines.append(f"settings/{RETIRED_CASE_RECORD} is retired and ignored: the case record is a record since the "
-                     "import (`tenant.py set-case` replaces it); remove the file from the repo")
+        lines.append(f"settings/{RETIRED_CASE_RECORD} is retired and ignored: the case record is a record "
+                     "(`PUT /case-record` replaces it); remove the file from the repo")
     if (settings / RETIRED_LEAD_ZERO).is_symlink() or (settings / RETIRED_LEAD_ZERO).exists():
         lines.append(f"settings/{RETIRED_LEAD_ZERO} is retired and ignored: the step-zero lead writes its own "
                      "correlation query; remove the file from the repo")

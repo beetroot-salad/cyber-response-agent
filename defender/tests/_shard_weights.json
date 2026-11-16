@@ -726,7 +726,6 @@
  "tests/tenancy/tenant_1108_p4/test_r6_readers.py": 0.2,
  "tests/tenancy/tenant_1108_p4/test_r6_run_copy.py": 2.3,
  "tests/tenancy/tenant_1108_p4/test_r6_static.py": 0.1,
- "tests/tenancy/tenant_1108_p4/test_records_guard_1366.py": 116.4,
  "tests/tenancy/tenant_1108_p4/test_refused_claims.py": 9.0,
  "tests/tenancy/tenant_1108_p4/test_revert_cli.py": 2.7,
  "tests/tenancy/tenant_1108_p4/test_review_1288.py": 5.4,

@@ -31,8 +31,10 @@ implementation. `database=True` puts the whole world on a fresh migrated test da
 `DEFENDER_TEST_POSTGRES_DSN`): people in `PostgresIdentityRepository`, tenants in `PostgresTenantRepository`, and the
 alerts, investigations, learning jobs, alert mapping, writes and offboarding in one `JobStorePorts` over a `JobStore`;
 `world.add_alert(T)` stores an alert through the store and answers its id. Without a database, and for the families
-the real server leaves unbacked (systems, credentials, the check, artifact links, the audit-only port, lessons) in
-either world, every store port is `Refusing`: a route reaching one answers 501 after sign-in and membership passed."""
+the real server leaves unbacked (the check, artifact links, the audit-only port, lessons) in either world, every store
+port is `Refusing`: a route reaching one answers 501 after sign-in and membership passed. The tenant's records and
+credentials (systems, the case record, credentials) refuse too in either world (`NO_RECORDS`): the real server backs
+them with its record store and OpenBao, which the config tests reach through `serving` (#1470)."""
 from __future__ import annotations
 
 import base64
@@ -661,6 +663,9 @@ _TAP = _AuditTap()
 
 #: What a world with no database refuses its store ports with.
 NO_STORE = "no store in this test world (#1496)"
+#: What every world refuses the tenant's records and credentials with: the config routes are served over the real
+#: server's `serving`, on its record store and secret store (`tests/support/api/_config1470.py`; #1470).
+NO_RECORDS = "no record store or secret store in this test world (#1470)"
 
 
 class World:
@@ -856,13 +861,14 @@ class World:
         from defender.api_server import api_deps
         from defender.learning_store import LearningStore
 
+        no_records = Refusing(NO_RECORDS)
         learning = None
         if self.dsn is not None:  # #1485: the learning reads are the real adapter's over the world's database
             if self._learning_store is None:
                 self._learning_store = LearningStore(self.dsn)
             learning = StoreLearningWork(self._learning_store)
         return api_deps(identity=self.service, tenants=self.tenants, ports=self.offboarding,
-                        frontend_origin=FRONTEND_ORIGIN, learning_work=learning)
+                        frontend_origin=FRONTEND_ORIGIN, systems=no_records, secrets=no_records, learning_work=learning)
 
     def restart(self, *, administrators: Sequence[str] = (),
                 tenants: Mapping[str, Sequence[str]] | None = None) -> None:

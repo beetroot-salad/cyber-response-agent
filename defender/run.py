@@ -1114,7 +1114,8 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
         # here: before the knowledge copy and the run folder, so a tenant with none (or records that cannot be
         # reached) is refused with nothing made (#1345 O3, O4). A sibling carries its source's record.
         # The tenant's current records (#1366 O6), read once here for every lane, siblings too
-        # (H9): a tenant not imported is refused (R8) before its alert mapping is looked at.
+        # (H9): a tenant whose records are not known (not active, #1470 O8) is refused before its alert mapping is
+        # looked at.
         current = _read_records(records, accepted.id)
         mapping = None if world is not None else _read_alert_mapping(records, accepted.id)
 

@@ -37,6 +37,9 @@ EXAMPLE = False
 
 #: The transport template plus the one ServiceNow-specific key. Required, no default.
 REQUIRED_CONFIG_KEYS = (*transport.REQUIRED_CONFIG_KEYS_TEMPLATE, "TABLE")
+#: An example value for each key a record of this adapter stores, read cold by the catalog and served to an
+#: admin as a starting point (#1470 D11); this adapter's own settings check accepts it.
+SAMPLE_SETTINGS = {"SERVICENOW_TIMEOUT_SEC": "10", "SERVICENOW_TABLE": "incident"}
 #: TABLE goes in the comment's path, but as a literal of the declared route (`comment_route`
 #: judges it), not a value the transport fills.
 PATH_KEYS: tuple[str, ...] = ()

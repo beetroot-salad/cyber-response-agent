@@ -1,18 +1,19 @@
 """The one judgement of a tenant's system and case records (#1366 O4, P2, C1-C4, K1): what makes a record usable.
 
 All of O4 but version, staleness, the lock and the generation (those are the store's). Three callers ask it (C3):
-the record store's write refusal (`system_records.open_store` injects `judge_records`), `tenant check`, and run start
-(through `cover_fault`, which `case_system` asks). Every fault is one sentence naming the system and the key or part,
+the record store's write refusal (its writer, the API, injects `judge_records` over a catalog built once), `tenant
+check`, and run start (through `cover_fault`, which `case_system` asks). It loads no run code (#1470 D-B), so the API
+may load it. Every fault is one sentence naming the system and the key or part,
 located by a `kit.settings.Locator` (DC6): a stored record says `system <s> settings` / `system <s> access` / `the case
-record`; the import's candidate and connect's handoff pass a folder locator so the same sentence names the file.
+record`; connect's handoff passes a folder locator so the same sentence names the file.
 
 A system record is judged by its adapter's own `check_settings` (K1), run over a tenant record built from the candidate
 (`RecordTenant`), so the store and run start cannot disagree. The case record is judged by #1359's rules
-(`tenancy.case_ticket.parse_case_record`), its system's comment route (C1) and the cover rule (C2).
+(`tenancy.case_record.parse_case_record`), its system's comment route (C1) and the cover rule (C2).
 
 Given `before` (the tenant's current state the write replaces), only what the write changes is judged: a record an
 upgrade broke does not block a write to another one, and a refusal names the part whose change broke cover (C4). With
-no `before` (the import, `check`), everything is judged."""
+no `before` (`check`), everything is judged."""
 from __future__ import annotations
 
 import dataclasses
@@ -21,13 +22,13 @@ from pathlib import Path
 from typing import Any
 
 from defender.kit.access import AccessDeclaration, Route
-from defender.kit.faults import ConfigFault
+from defender.kit.faults import ConfigFault, ConfigFaults
 from defender.kit.settings import RECORDS, Locator, Part, SystemConfig
-from defender.systems.catalog import Catalog, route_of
-from defender.systems.verbs import is_platform_served
+from defender.system_rules.catalog import Catalog, route_of
+from defender.system_rules.registry import is_platform_served
 from defender.tenancy import access_pointer, parse_access
-from defender.tenancy.case_ticket import CaseTicketError, case_record_text, parse_case_record
-from defender.tenancy.models import CaseRecord, SystemRecord, TenantRecords
+from defender.tenancy.case_record import CaseTicketError, case_record_text, parse_case_record
+from defender.tenancy.record_values import CaseRecord, SystemRecord, TenantRecords
 
 #: Where nothing is read from: a tenant record built for a judgement has no agent knowledge.
 _NO_AGENT = Path("/nonexistent-agent-root")
@@ -140,7 +141,7 @@ def _the_catalog(catalog: Catalog | None) -> Catalog:
 def system_faults(record: SystemRecord, *, catalog: Catalog, locator: Locator = RECORDS) -> list[str]:
     """Why one system record is unusable (O3, O4, K1), each fault opening with the record's locator: a platform-served
     name, a custom reference, an adapter the catalog lacks or that differs from the system id, then its adapter's own
-    settings check over a tenant record holding it (its access first, then its settings)."""
+    settings check over a tenant record holding it (its access first, then its settings; every fault it finds, O4)."""
     system = record.system_id
     where = locator.system(system)
     if is_platform_served(system):
@@ -152,31 +153,33 @@ def system_faults(record: SystemRecord, *, catalog: Catalog, locator: Locator = 
                 "supported (#1172) — name a catalog adapter"]
     adapter = record.adapter_id
     if adapter not in catalog:
-        return [f"{where}: names the adapter `{adapter}`, which the catalog does not carry (`tenant.py catalog` lists "
-                "it); only a delete of this record is accepted"]
+        return [f"{where}: names the adapter `{adapter}`, which is not in the catalog of adapters a record may name; "
+                "only a delete of this record is accepted"]
     if adapter != system:
         return [f"{where}: a catalog record's system id is its adapter id, but it names the adapter `{adapter}`"]
-    fault = _settings_fault(record, catalog=catalog, locator=locator)
-    return [] if fault is None else [fault]
+    return _settings_faults(record, catalog=catalog, locator=locator)
 
 
-def _settings_fault(record: SystemRecord, *, catalog: Catalog, locator: Locator) -> str | None:
-    """The adapter's own `check_settings` over a tenant record holding `record` (K1), as one located sentence."""
+def _settings_faults(record: SystemRecord, *, catalog: Catalog, locator: Locator) -> list[str]:
+    """The adapter's own `check_settings` over a tenant record holding `record` (K1), each fault it raises (one, or
+    every one a `ConfigFaults` carries: O4) as a located sentence."""
     system = record.system_id
     try:
         module = catalog.module(record.adapter_id)
     except Exception as e:  # noqa: BLE001 — an adapter that will not import is not usable, not fatal
-        return f"{locator.system(system)}: its adapter could not be loaded ({type(e).__name__})"
+        return [f"{locator.system(system)}: its adapter could not be loaded ({type(e).__name__})"]
     check = getattr(module, "check_settings", None)
     if not callable(check):
-        return f"{locator.system(system)}: its adapter declares no `check_settings`"
+        return [f"{locator.system(system)}: its adapter declares no `check_settings`"]
     try:
         check(RecordTenant.of({system: record}, locator=locator))
+    except ConfigFaults as faults:
+        return [_located(text, system, locator) for text in faults.faults]
     except ConfigFault as fault:
-        return _located(str(fault), system, locator)
+        return [_located(str(fault), system, locator)]
     except Exception as e:  # noqa: BLE001 — a check that crashes is the adapter's defect
-        return f"{locator.system(system)}: its adapter's `check_settings` raised {type(e).__name__}"
-    return None
+        return [f"{locator.system(system)}: its adapter's `check_settings` raised {type(e).__name__}"]
+    return []
 
 
 #: The parts of a record a fault may name (DC6).
@@ -199,7 +202,7 @@ class _CaseWrite:
     record: SystemRecord | None
     old_record: SystemRecord | None
     case_changed: bool
-    fresh: bool  # no state before: the import, or `check`
+    fresh: bool  # no state before: `check`
 
 
 def _case_faults(after: TenantRecords, before: TenantRecords | None, *, catalog: Catalog, locator: Locator,
@@ -238,7 +241,7 @@ def _absent_case_system(w: _CaseWrite, locator: Locator) -> str:
         return (f"{locator.case()} names the case system `{system}`, which {state}: a case system is one of the "
                 "tenant's current enabled systems")
     return (f"{locator.system(system)}: is the case system {locator.case()} names, so it cannot be deleted or "
-            "disabled — delete the case record (`tenant.py delete-case`) or name another case system first")
+            "disabled — delete the case record or name another case system first")
 
 
 def _route_faults(w: _CaseWrite, record: SystemRecord, *, catalog: Catalog, locator: Locator) -> list[str]:

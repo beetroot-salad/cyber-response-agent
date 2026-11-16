@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Operator entry point for the investigation workspace map."""
+"""Operator entry point for the investigation workspace map."""  # lint-stale-ref: ok — the English word, not the removed test helper class
 from __future__ import annotations
 
 import sys

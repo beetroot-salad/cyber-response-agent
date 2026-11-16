@@ -19,6 +19,7 @@ from typing import Any, Literal, TypeVar, cast, overload
 from defender.records.formats import AlertMapping, TenantId
 from defender.tenancy.models import (ALLOWED_ACTIONS, AlertMappingRow, ForgeWiring, Generation, MergeEligibility, PublishStatus,
                                      TenantRecord, TenantRecords)
+from defender.tenancy.record_refusals import refuse_unless_active
 from defender.tenancy.repository import (
     KEEP,
     SERVICE,
@@ -66,8 +67,8 @@ class InMemoryTenantRepository:
 
     # --- seeders (test support and the demo; not part of the port) ----------------------------
     async def add_records(self, tenant_id: str, records: TenantRecords) -> None:
-        """Seeder: the tenant's records as given (unjudged), replacing any; the tenant must exist. A tenant without
-        a seeded set reads as not imported."""
+        """Seeder: the tenant's records as given (unjudged), replacing any; the tenant must exist. An active tenant
+        without a seeded set reads as having none (#1470 O8)."""
         with self._mutex:
             if tenant_id not in self._tenants:
                 raise KeyError(f"no tenant {tenant_id}")
@@ -133,6 +134,8 @@ class InMemoryTenantRepository:
 
     async def current_records(self, tenant_id: TenantId) -> TenantRecords:
         with self._mutex:
+            row = self._tenants.get(tenant_id)
+            refuse_unless_active(tenant_id, None if row is None else row.state)
             return self._records.get(tenant_id, TenantRecords())
 
     async def merge_eligibility(self, tenant_id: TenantId) -> MergeEligibility | None:
@@ -145,7 +148,6 @@ class InMemoryTenantRepository:
                            step="names", step_actor=SERVICE)
         with self._mutex:
             self._tenants[row.id] = row
-            self._records[row.id] = TenantRecords(imported=True)
             return _detached(row)
 
     def _request(self, tenant_id: TenantId, allowed: bool, refusal: str, **changes: Any) -> TenantRecord:
