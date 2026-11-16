@@ -644,8 +644,9 @@ def _mint_for(tmp_path, data_root, signer, *, world: Any = None, **seams: Any) -
     return mint
 
 
-#: The systems the sibling tenant declares on the proxy: `ticket` is declared yet granted to no role by `TABLE`.
-SIBLING_PROXIED = ("cmdb", "identity", "ticket")
+#: The systems the sibling tenant declares on the proxy, one of each kind against `TABLE`: `cmdb` granted and declared,
+#: `identity` granted yet undeclared, `ticket` declared yet granted to no role.
+SIBLING_PROXIED = ("cmdb", "ticket")
 
 
 def _plant_sibling(tmp_path, monkeypatch) -> tuple[Path, Path, Any]:
@@ -692,7 +693,7 @@ def _world_access(ep: Path, records: Any, signer) -> Any:
     return access
 
 
-def _run_access_on_sibling(tmp_path, root: Path, records: Any, signer) -> Any:
+def _run_access_on_sibling(tmp_path, records: Any, signer) -> Any:
     """The read access a regular run's start hands its lifecycle, through `run.main` on the sibling tenant."""
     from defender.tests.runtime.providers import _spec1243 as P
 
@@ -707,16 +708,16 @@ def _run_access_on_sibling(tmp_path, root: Path, records: Any, signer) -> Any:
 def test_1449_a_world_reads_on_a_runs_terms_and_no_operator_run_start_signs_a_write_pass(tmp_path, data_root, monkeypatch):
     """A branched run is a run (#1449 W1, W3): a world's run start and a regular run's, on one tenant, grant the same reads,
     and neither signs a write pass (`rw`) though `ticket` is proxied: the operator command never comments (W7, C-9)."""
-    ep, root, records = _plant_sibling(tmp_path, monkeypatch)
+    ep, _root, records = _plant_sibling(tmp_path, monkeypatch)
     run_signer, world_signer = A.MarkedSigner(), A.MarkedSigner()
-    run_access = _run_access_on_sibling(tmp_path / "r", root, records, run_signer)
+    run_access = _run_access_on_sibling(tmp_path / "r", records, run_signer)
     world_access = _world_access(ep, records, world_signer)
 
     def read_grant(access: Any, signer: A.MarkedSigner) -> list[tuple[str, str]]:
         return A.grant_of(_claims_of_token(signer, access.token()))
 
     assert read_grant(world_access, world_signer) == read_grant(run_access, run_signer) == [
-        ("cmdb", "r"), ("identity", "r")], "a world's read grant is not a regular run's, or not what the table grants"
+        ("cmdb", "r")], "a world's read grant is not a regular run's, or not what the table grants"
     for signer in (run_signer, world_signer):
         assert {m for p in signer.payloads for _s, m, *_ in A.claims_of_payload(p)["grant"]} == {"r"}, (
             "a run start signed something other than its read grant")
