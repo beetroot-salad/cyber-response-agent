@@ -8,7 +8,6 @@ import hashlib
 import json
 import logging
 import os
-import string
 import signal
 from types import SimpleNamespace
 
@@ -21,6 +20,7 @@ from defender.tests.support.jobs._jobs1342 import (
     T2,
     WORKER_LOGGER,
     an_alert,
+    is_box_token,
     job_end,
     job_store,
     row,
@@ -285,9 +285,10 @@ async def test_1471_p5_each_helper_is_started_with_its_own_flag_digest_and_link(
         assert _values(argv, "--job") == [inv]
 
 
-async def test_1471_p5_a_flagged_rows_tenant_folder_gains_exactly_what_an_unflagged_rows_does(world):
-    """Two tenant folders that differ only in their row's flag gain the same files from the worker, byte for byte once
-    each folder's own ids are masked: nothing a job can read depends on the flag. (P-5; the stand-in job writes nothing)"""
+async def test_1471_p5_a_flagged_rows_tenant_folder_changes_exactly_as_an_unflagged_rows_does(world):
+    """Two tenant folders that differ only in their row's flag change alike under the worker, entry for entry (added,
+    altered or removed; by kind, mode and bytes) once each folder's own ids are masked: nothing a job can see depends
+    on the flag. (P-5; the stand-in job writes nothing)"""
     rows = [(T1, True, "k1"), (T2, False, "k1")]
     folders = {tenant: world["root"] / tenant for tenant, _flag, _key in rows}
 
@@ -301,8 +302,10 @@ async def test_1471_p5_a_flagged_rows_tenant_folder_gains_exactly_what_an_unflag
 
     before = {tenant: snapshot(folder) for tenant, folder in folders.items()}
     (flagged_id, plain_id), door = await _drain_spawned(world, rows, _child(world, exit=0, files={}))
-    gained = {tenant: {p: d for p, d in snapshot(folder).items() if before[tenant].get(p) != d}
-              for tenant, folder in folders.items()}
+    after = {tenant: snapshot(folder) for tenant, folder in folders.items()}
+    #: Each folder's change: every path whose entry the drain added, altered or removed, as (before, after).
+    changed = {tenant: {p: (before[tenant].get(p), after[tenant].get(p)) for p in before[tenant].keys() | after[tenant].keys()
+                        if before[tenant].get(p) != after[tenant].get(p)} for tenant in folders}
 
     assert _values(door.argvs[flagged_id], "--ticket-link") == [f"{ORIGIN_1471}/t/{T1}/investigations/{flagged_id}"], \
         "premise: the flag reached the worker"
@@ -314,27 +317,27 @@ async def test_1471_p5_a_flagged_rows_tenant_folder_gains_exactly_what_an_unflag
     def masked(tenant, inv):
         launch = launch_of(tenant, inv)
         values = [inv, launch["alert_id"], launch["box_token"], tenant]
-        out = {}
-        for path, data in gained[tenant].items():
-            name, text = str(path), data.decode("utf-8", "replace")
-            for n, value in enumerate(values):
-                name, text = name.replace(value, f"<v{n}>"), text.replace(value, f"<v{n}>")
-            out[name] = text
-        return out
 
-    tokens = [launch_of(T1, flagged_id)["box_token"], launch_of(T2, plain_id)["box_token"]]
-    assert len({len(t) for t in tokens}) == 1, "the box tokens differ in shape, and a mask would hide it"
-    assert {c for t in tokens for c in t} <= set(string.ascii_letters + string.digits + "-_"), "the box tokens differ in shape"
+        def mask(text):
+            for n, value in enumerate(values):
+                text = text.replace(value, f"<v{n}>")
+            return text
+
+        return {mask(str(path)): tuple(None if e is None else mask(e.decode("utf-8", "replace")) for e in pair)
+                for path, pair in changed[tenant].items()}
+
+    assert [is_box_token(launch_of(t, inv)["box_token"]) for t, inv in ((T1, flagged_id), (T2, plain_id))] == [True, True], \
+        "a box token is not of the decided form, which the mask would hide"
     flagged, plain = masked(T1, flagged_id), masked(T2, plain_id)
-    assert len(plain) >= 2, "premise: the worker wrote into the unflagged row's folder"
-    assert sorted(flagged) == sorted(plain), "the flagged folder gained other files than the unflagged one"
-    assert {n: t for n, t in flagged.items() if t != plain[n]} == {}, "a file the flagged folder gained differs"
+    assert len(plain) >= 2, "premise: the worker changed the unflagged row's folder"
+    assert sorted(flagged) == sorted(plain), "the flagged folder changed at other paths than the unflagged one"
+    assert {n: c for n, c in flagged.items() if c != plain[n]} == {}, "an entry of the flagged folder changed otherwise"
     for tenant, inv in ((T1, flagged_id), (T2, plain_id)):
         assert set(launch_of(tenant, inv)) == LAUNCH_FIELDS, launch_of(tenant, inv)
         assert launch_of(tenant, inv)["digest"] == DIGEST_1471, "premise: the record is this row's"
     for tenant in (T1, T2):
-        for path, data in gained[tenant].items():
-            assert not any(w in data for w in (b"app.defender.test", b"update_ticket", b"ticket_link", b"post_ticket")), path
+        for path, (_old, data) in changed[tenant].items():
+            assert not any(w in (data or b"") for w in (b"app.defender.test", b"update_ticket", b"ticket_link", b"post_ticket")), path
 
 
 def _receipt(status) -> str:

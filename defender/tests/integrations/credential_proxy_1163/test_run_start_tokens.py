@@ -644,15 +644,28 @@ def _mint_for(tmp_path, data_root, signer, *, world: Any = None, **seams: Any) -
     return mint
 
 
-#: The sibling tenant's verb grants: `TABLE`, plus a third system its gather role reaches.
+#: The sibling tenant planted with a system in every combination of the three facts the read rule reads (granted to
+#: the gather role, declared on the proxy, judged up), two where all three hold, so dropping or cutting any part of
+#: the rule changes the grant:
+#:   granted  declared  up    system           read?
+#:   yes      yes       yes   cmdb, identity   yes
+#:   yes      yes       no    host-state       no   (declared, but its folder holds a key its adapter does not read)
+#:   yes      no        yes   tacit-knowledge  no   (served by the platform, never proxied)
+#:   yes      no        no    threat-intel     no
+#:   no       yes       up    ticket           no
+#:   no       no        -     the roster's others
 SIBLING_TABLE = TABLE + """\
+  host-state:
+    health-check: {roles: [gather]}
+  tacit-knowledge:
+    health-check: {roles: [gather]}
   threat-intel:
     health-check: {roles: [gather]}
     lookup: {roles: [gather]}
 """
-#: The systems the sibling tenant declares on the proxy, every kind against `SIBLING_TABLE` and two of the first:
-#: `cmdb` and `identity` granted and declared, `threat-intel` granted yet undeclared, `ticket` declared yet ungranted.
-SIBLING_PROXIED = ("cmdb", "identity", "ticket")
+SIBLING_PROXIED = ("cmdb", "host-state", "identity", "ticket")
+#: A key the declared yet down system's folder holds that its adapter does not read: the settings check judges it down.
+SIBLING_DOWN_ENV = {"host-state": 'HOST_STATE_NOT_A_KEY="1"\n'}
 
 
 def _plant_sibling(tmp_path, monkeypatch) -> tuple[Path, Path, Any]:
@@ -670,7 +683,7 @@ def _plant_sibling(tmp_path, monkeypatch) -> tuple[Path, Path, Any]:
     (folder / "settings" / "verb-grants.yaml").write_text(SIBLING_TABLE, encoding="utf-8")
     for system in SIBLING_PROXIED:
         decl = H.declaration("http://x.invalid/api", writes=CASE_WRITES.get(system, ()))
-        for rel, text in H.access_files(system, decl, env=A.env_text(system, extra=EXTRA.get(system, ""))).items():
+        for rel, text in H.access_files(system, decl, env=A.env_text(system, extra=EXTRA.get(system, "") + SIBLING_DOWN_ENV.get(system, ""))).items():
             (folder / rel).parent.mkdir(parents=True, exist_ok=True)
             (folder / rel).write_text(text, encoding="utf-8")
     records = A.Records(root, {P.SIBLING_TENANT: [A.generation(
