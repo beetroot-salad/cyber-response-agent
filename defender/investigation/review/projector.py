@@ -8,7 +8,7 @@ from defender._model import model
 from typing import Any
 
 from defender._untrusted import wrap as _wrap
-from defender._vocab import CEILING_DISPOSITION
+from defender._vocab import CEILING_DISPOSITION, PROCESS_GAP_DISPOSITION
 from defender.skills.invlang import vocab
 from defender.skills import invlang
 from defender.skills.invlang.parser import parse_dense_companion
@@ -205,8 +205,26 @@ _CEILING_HOST_QUESTION = (
 )
 
 
+#: The process-gap variant, for an `unsanctioned-benign` close. Its open authorization contract
+#: is the claim itself, so the question says so: without it a reviewer reads the missing record
+#: as a gap and bounces every such close.
+_PROCESS_GAP_HOST_QUESTION = (
+    "This investigation closed `unsanctioned-benign`: it claims the activity did no harm AND "
+    "that no record authorized it. The missing authorization is part of that claim, not a gap "
+    "in it — the record shows where the run searched for one. Judge whether the conclusion "
+    "follows from the record as written — not whether it is true: that the alerted entity was "
+    "checked on its own and came back clean, that the measured impact stayed inside its "
+    "threshold, and that nothing recorded points to the activity being hostile rather than "
+    "merely unrecorded."
+)
+
+
 def _host_question(disposition: str) -> str:
-    return _CEILING_HOST_QUESTION if disposition == CEILING_DISPOSITION else _CONFIDENT_HOST_QUESTION
+    if disposition == CEILING_DISPOSITION:
+        return _CEILING_HOST_QUESTION
+    if disposition == PROCESS_GAP_DISPOSITION:
+        return _PROCESS_GAP_HOST_QUESTION
+    return _CONFIDENT_HOST_QUESTION
 
 
 def composer_projection(

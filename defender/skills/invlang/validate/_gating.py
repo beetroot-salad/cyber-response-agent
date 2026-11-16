@@ -10,7 +10,7 @@ from typing import Any
 
 from defender._model import model
 from defender._text import strip_zero_width
-from defender._vocab import DISPOSITION_ENUM
+from defender._vocab import DISPOSITION_ENUM, PROCESS_GAP_DISPOSITION
 from .. import _walkers, vocab
 from ..parser import (
     is_conclude_empty_marker,
@@ -29,6 +29,7 @@ from ._state import (
     _check_benign_authz,
     _check_benign_open_slots,
     _declarers_by_contract_id,
+    outstanding_authz_contracts,
 )
 
 
@@ -109,6 +110,55 @@ from defender.skills.invlang.validate._ceiling import (
 
 
 
+def _entity_check_errors(
+    companion: CompanionBody, keyword: str, independent_of: str, introduced_by: str,
+) -> tuple[list[str], str | None]:
+    """The `entity_check` receipt: a `:L findings` lead that came back with a result on an
+    entity the ALERT named. Owed by every keyword whose close rests on something other than the
+    alerted entity being checked (`false-positive`: the rule; `unsanctioned-benign`: a missing
+    record).
+
+    Returns the errors and the named lead id (`None` when the row is absent), so a caller can
+    add its own rule about WHICH lead may pay.
+    """
+    lead_id = (companion.get("conclude") or {}).get("entity_check")
+    if not (isinstance(lead_id, str) and lead_id.strip()):
+        return [
+            f"disposition {keyword} blocked: no `entity_check` row — name the "
+            f"`:L findings` lead that tested the alerted entity for suspicion "
+            f"independent of {independent_of}, or conclude in another vocabulary"
+        ], None
+    lead_id = lead_id.strip()
+
+    lead = _lead_by_id(companion, lead_id)
+    if lead is None:
+        return [
+            f"disposition {keyword} blocked: `entity_check` names {lead_id!r}, "
+            f"which is not a lead in `:L findings`"
+        ], lead_id
+
+    errors: list[str] = []
+    if not _lead_returned_a_result(lead):
+        errors.append(
+            f"disposition {keyword} blocked: `entity_check` lead {lead_id} "
+            f"committed no result — a lead that was planned and never resolved, or "
+            f"whose only outcome is a `fail_reason`, did not test anything"
+        )
+
+    prologue_vertices = {
+        v.get("id") for v in (companion.get("prologue") or {}).get("vertices") or []
+    }
+    target = lead.get("target")
+    if target not in prologue_vertices:
+        errors.append(
+            f"disposition {keyword} blocked: `entity_check` lead {lead_id} "
+            f"targets {target!r}, which the prologue does not carry — the check has "
+            f"to be against an entity the ALERT named, not one {introduced_by} "
+            f"introduced"
+        )
+    return errors, lead_id
+
+
 def _check_false_positive_gating(companion: CompanionBody) -> list[str]:
     """`false-positive` closes on a claim about the rule, so it must prove it also looked at
     the entity."""
@@ -121,43 +171,10 @@ def _check_false_positive_gating(companion: CompanionBody) -> list[str]:
             "disposition false-positive blocked: no `detection_notes` row — the "
             "close rests on a claim about the rule, so the defect has to be stated"
         )
-
-    lead_id = conclude.get("entity_check")
-    if not (isinstance(lead_id, str) and lead_id.strip()):
-        return errors + [
-            "disposition false-positive blocked: no `entity_check` row — name the "
-            "`:L findings` lead that tested the alerted entity for suspicion "
-            "independent of the alert's claim, or conclude in another vocabulary"
-        ]
-    lead_id = lead_id.strip()
-
-    lead = _lead_by_id(companion, lead_id)
-    if lead is None:
-        return errors + [
-            f"disposition false-positive blocked: `entity_check` names {lead_id!r}, "
-            f"which is not a lead in `:L findings`"
-        ]
-
-    if not _lead_returned_a_result(lead):
-        errors.append(
-            f"disposition false-positive blocked: `entity_check` lead {lead_id} "
-            f"committed no result — a lead that was planned and never resolved, or "
-            f"whose only outcome is a `fail_reason`, did not test anything"
-        )
-
-    prologue_vertices = {
-        v.get("id") for v in (companion.get("prologue") or {}).get("vertices") or []
-    }
-    target = lead.get("target")
-    if target not in prologue_vertices:
-        errors.append(
-            f"disposition false-positive blocked: `entity_check` lead {lead_id} "
-            f"targets {target!r}, which the prologue does not carry — the check has "
-            f"to be against an entity the ALERT named, not one the refutation "
-            f"introduced"
-        )
-
-    return errors
+    checked, _lead = _entity_check_errors(
+        companion, "false-positive", "the alert's claim", "the refutation",
+    )
+    return errors + checked
 
 
 def _check_benign_grounding(companion: CompanionBody) -> list[str]:
@@ -496,6 +513,127 @@ def _check_authz_basis(companion: CompanionBody) -> list[str]:
     return errors
 
 
+#: The `:R authz` verdict that settles an authorization question AGAINST the activity, and the
+#: `:R impact` verdict that says a consequence stayed inside its threshold.
+AUTHZ_UNAUTHORIZED = "unauthorized"
+IMPACT_WITHIN = "within"
+assert IMPACT_WITHIN in vocab.IMPACT_VERDICT
+
+
+def _blocked_as(keyword: str, errors: list[str]) -> list[str]:
+    """Benign's own messages, charged under `keyword`: the check is shared, the refused keyword
+    is the one the model has to read back."""
+    return [e.replace("disposition benign blocked", f"disposition {keyword} blocked", 1)
+            for e in errors]
+
+
+def _process_gap_authz(companion: CompanionBody) -> tuple[list[str], set[str]]:
+    """The authorization half of `unsanctioned-benign`: every contract on a live hypothesis is
+    `authorized` or worked to a PAID `basis=exhausted`, none is `unauthorized`, and at least one
+    is exhausted — otherwise nothing was unsanctioned and the close is `benign`.
+
+    Returns the errors and the leads whose exhausted rows paid, so the entity check can refuse
+    to be paid by the same lead.
+    """
+    keyword = PROCESS_GAP_DISPOSITION
+    rows_by_contract: dict[str, list[Any]] = {}
+    for row in _walkers.iter_authz_resolutions(companion):
+        cid = _cell(row, "fulfills_contract")
+        if cid:
+            rows_by_contract.setdefault(cid, []).append(row)
+
+    errors: list[str] = []
+    paid_leads: set[str] = set()
+    exhausted_any = False
+    for hid, contract, _why in outstanding_authz_contracts(companion):
+        cid = _cell(contract, "id") or "?"
+        rows = rows_by_contract.get(cid, [])
+        if any(_cell(r, "verdict") == AUTHZ_UNAUTHORIZED for r in rows):
+            errors.append(
+                f"disposition {keyword} blocked: authz contract {cid} on live hypothesis {hid} "
+                f"resolved 'unauthorized' — a record saying the activity was NOT allowed is a "
+                f"finding against it, never a process gap. Escalate"
+            )
+            continue
+        exhausted = [
+            r for r in rows
+            if _cell(r, "verdict") == AUTHZ_INDETERMINATE
+            and _cell(r, "basis") == BASIS_EXHAUSTED
+        ]
+        if not exhausted:
+            errors.append(
+                f"disposition {keyword} blocked: authz contract {cid} on live hypothesis {hid} "
+                f"is still open — `{keyword}` says the record was looked for everywhere it could "
+                f"be and was not there, so the contract has to be `authorized`, or "
+                f"`indeterminate` with a paid `basis={BASIS_EXHAUSTED}`. Work it, or conclude in "
+                f"another vocabulary"
+            )
+            continue
+        unpaid = [p for r in exhausted if (p := _exhausted_receipt_error(companion, r))]
+        if len(unpaid) == len(exhausted):
+            errors.append(
+                f"disposition {keyword} blocked: authz contract {cid} on live hypothesis {hid} "
+                f"claims `basis={BASIS_EXHAUSTED}` without paying for it: {unpaid[0]}"
+            )
+            continue
+        exhausted_any = True
+        paid_leads.update(
+            _cell(r, "resolved_by_lead") for r in exhausted
+            if _exhausted_receipt_error(companion, r) is None
+        )
+    if not errors and not exhausted_any:
+        errors.append(
+            f"disposition {keyword} blocked: no authz contract on a live hypothesis is "
+            f"`indeterminate` with `basis={BASIS_EXHAUSTED}` — nothing on the record was left "
+            f"unsanctioned. If every contract is authorized the close is `benign`; if none was "
+            f"declared, declare the legitimacy contract the case turns on and work it"
+        )
+    return errors, paid_leads
+
+
+def _check_process_gap_impact(companion: CompanionBody) -> list[str]:
+    """`no harm detected` is a claim about a measurement: at least one `:R impact` row, every
+    one graded `within`. Read off the rows, not `conclude.impact_verdict`, whose `none` means
+    nothing was measured."""
+    keyword = PROCESS_GAP_DISPOSITION
+    rows = list(_walkers.iter_impact_resolutions(companion))
+    if not rows:
+        return [
+            f"disposition {keyword} blocked: no `:R impact` row — the close says the activity "
+            f"did no harm, so register an impact predicate (`:L l-NNN.impact_preds`) and grade "
+            f"it; an unmeasured consequence is not a measured `{IMPACT_WITHIN}`"
+        ]
+    return [
+        f"disposition {keyword} blocked: `:R impact` row {_cell(r, 'pred_ref') or '?'} "
+        f"(lead {_cell(r, 'resolved_by_lead') or '?'}) graded {_cell(r, 'verdict') or '<none>'!r}, "
+        f"not '{IMPACT_WITHIN}' — a consequence outside its threshold, or one that could not be "
+        f"graded, is an escalation"
+        for r in rows if _cell(r, "verdict") != IMPACT_WITHIN
+    ]
+
+
+def _check_unsanctioned_benign_gating(companion: CompanionBody) -> list[str]:
+    keyword = PROCESS_GAP_DISPOSITION
+    errors: list[str] = []
+    errors += _blocked_as(keyword, _check_benign_grounding(companion))
+    errors += _blocked_as(keyword, _check_benign_open_slots(companion))
+    authz_errors, paid_leads = _process_gap_authz(companion)
+    errors += authz_errors
+    errors += _check_authz_row_grounding(companion)
+    errors += _check_process_gap_impact(companion)
+    checked, lead_id = _entity_check_errors(
+        companion, keyword, "the authorization question", "the investigation",
+    )
+    errors += checked
+    if lead_id is not None and lead_id in paid_leads:
+        errors.append(
+            f"disposition {keyword} blocked: `entity_check` lead {lead_id} is the lead that "
+            f"searched for the authorization record — that search says nothing about whether "
+            f"the actor's session was clean. Name the lead that tested the entity itself"
+        )
+    return errors
+
+
 @model(frozen=True)
 class _Price:
     """What a keyword costs, and why.
@@ -549,10 +687,23 @@ _INCONCLUSIVE_PRICE = _Price(
     ),
 )
 
+_UNSANCTIONED_BENIGN_PRICE = _Price(
+    check=_check_unsanctioned_benign_gating,
+    rationale=(
+        "`unsanctioned-benign` says the activity did no harm but no record authorized it — a "
+        "process finding, not a security one — which is worth nothing unless each half was "
+        "measured: the authorization question worked to a paid `basis=exhausted` (never "
+        "`unauthorized`, never merely open), the alerted entity checked on its own by a lead "
+        "other than the record search (`entity_check`), and every `:R impact` row graded "
+        "`within`. Anything less is an escalation."
+    ),
+)
+
 _DISPOSITION_GATES: dict[str, _Price] = {
     "benign": _BENIGN_PRICE,
     "false-positive": _FALSE_POSITIVE_PRICE,
     "inconclusive": _INCONCLUSIVE_PRICE,
+    PROCESS_GAP_DISPOSITION: _UNSANCTIONED_BENIGN_PRICE,
 }
 
 

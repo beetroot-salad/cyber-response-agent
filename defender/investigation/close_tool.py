@@ -578,8 +578,9 @@ def register_close_tool(agent, *, stages: Any, bounds: challenge_gate.Bounds) ->
         `disposition` is a closed enum whose members are in this tool's own schema, never free
         text, and the value is compared EXACTLY — a near miss is refused rather than guessed
         at, so send the keyword with nothing around it. See SKILL §REPORT for what each one
-        claims, and for the `detection_notes` + `entity_check` rows `false-positive` requires
-        in `:T conclude`. This is the ONLY way to record report.md — write_file/edit_file
+        claims and what it costs: the `detection_notes` + `entity_check` rows `false-positive`
+        requires in `:T conclude`, and the exhausted contract, `within` impact rows and
+        `entity_check` `unsanctioned-benign` requires. This is the ONLY way to record report.md — write_file/edit_file
         cannot reach it. A confident disposition, or `inconclusive`, passes a live challenge
         gate before it commits — against the conclusion or against the ceiling claim
         respectively; if the gate is not satisfied yet, this call returns without committing

@@ -33,7 +33,7 @@ or after it — with these keys (the fence below is illustration, not part of th
 base_story: |
   What the capture actually shows, in a few sentences: the entity, the behaviour, and what
   the investigation had established by the branch point.
-base_disposition: malicious | benign | false-positive | inconclusive
+base_disposition: malicious | benign | unsanctioned-benign | false-positive | inconclusive
 discriminator:
   predicate: the single question whose answer separates the sibling worlds
 worlds:
@@ -78,6 +78,23 @@ of this message, and that list is the whole of what this tenant's investigator c
 that would show up only on some other kind of system is one no query in this episode can see,
 so the world measures nothing. Read the real example answers in the framed capture to see what
 each served system actually returns, and place each fact where one of them would show it.
+
+**The authorization record is an axis of its own.** Many cases turn on "was this allowed?"
+separately from "was this an attack?", and the two answers move different verdicts. When the
+case has an actor doing something their role plausibly does, the record and the actor's own
+session are worth varying one at a time:
+
+- a world where the authorizing record EXISTS (an approved change, a registry entry) where the
+  capture had none: the harmless reading becomes `benign`;
+- a world where no record exists but the actor's own session is clean and the impact stays
+  inside its baseline: the reading is `unsanctioned-benign`, harmless activity that skipped
+  its process;
+- a world where no record exists AND the session is not the actor's own (an unfamiliar source,
+  a new device, something suspicious just before it): the same action is now `malicious`.
+
+A defender that reaches the same verdict across those worlds was not reading the record, or was
+reading only the record. Place each fact where a served system would show it: the change
+system for a record, the identity or event telemetry for the session.
 
 Two ways a plan silently describes a world that never existed: a fact no served system would
 reflect, and a world with no fact at all, which is the control again under a second name. And

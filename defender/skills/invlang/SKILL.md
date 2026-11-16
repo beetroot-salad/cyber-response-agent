@@ -378,8 +378,9 @@ keyed on the contract id. Columns:
   what an absent cell means — this contract has not been worked yet) or
   `exhausted` (every anchor kind applicable to this contract's predicate
   was actually queried this run and none answered). `exhausted` stops the
-  run being pushed back to re-work the contract and changes nothing else —
-  the verdict and its forced escalation stand. It is checked against this
+  run being pushed back to re-work the contract, and it is the one shape
+  of an unsettled contract that `disposition unsanctioned-benign` accepts;
+  every other close still treats it as an escalation. It is checked against this
   run's own transcript: the lead named by `resolved_by` must have come back
   with something, and its `:L findings` `system` cell must name the system
   that answers the contract's anchor kind. Write `retry` (or nothing) when
@@ -389,9 +390,11 @@ keyed on the contract id. Columns:
 Disposition gating: `disposition: benign` requires every authz
 contract on a surviving hypothesis to have a fulfilling `:R authz`
 row with `verdict: authorized`. `unauthorized` or `indeterminate`
-forces escalation per the contract's `on_unauth` / `on_indet`. A
-declared contract with no fulfilling row is treated as
-`indeterminate`.
+forces escalation per the contract's `on_unauth` / `on_indet`, with one
+exception: `disposition: unsanctioned-benign` accepts a contract that is
+`indeterminate` with a paid `basis=exhausted` (and needs at least one),
+never one that is `unauthorized` or still `retry`. A declared contract
+with no fulfilling row is treated as `indeterminate`.
 
 **`anchor_kind: tacit-knowledge` costs two rows, not one.** The registry
 is a human-authored file, so a citation has to be backed by a lookup you
@@ -536,14 +539,14 @@ summary                "Login matched established bastion usage"
 ```
 
 - `disposition` — closed vocab (`enum disposition`), and the SAME keywords
-  `report.md`'s frontmatter carries — FIVE of them, `unresolved` the fifth.
+  `report.md`'s frontmatter carries — SIX of them, `unresolved` the sixth.
   A value outside the enum is denied on write; there is no `escalate`
   keyword — an escalation is `termination.category exhaustion-escalation`
   with `disposition inconclusive`. `unresolved` is a member of the enum
   because it must be free to name in prose, but it is the HOST's own
   verdict — recorded when a run is cut short without a settled finding —
   and `conclude.disposition unresolved` is denied on write just like a
-  garbage value; you never conclude it yourself. THREE keywords carry an
+  garbage value; you never conclude it yourself. FOUR keywords carry an
   ENTRY PRICE. `benign` needs at least one `:V prologue.vertices` row — a
   log that never recorded the alerted entity accounts for nothing — plus
   every `??` slot resolved (§Open questions) and every authz contract on a
@@ -552,8 +555,14 @@ summary                "Login matched established bastion usage"
   rule that fired on a different kind of behavior than it claims — needs
   `detection_notes` and `entity_check` below; `inconclusive` needs at
   least one `ceiling_test` RECEIPT (below) — a pointer the host verifies
-  against this run's own transcript, never a sentence it judges. Rows
-  must be distinct. All three prices are charged twice: on the write,
+  against this run's own transcript, never a sentence it judges;
+  `unsanctioned-benign` — harmless activity with no authorization record —
+  needs benign's prologue and slots, every live authz contract
+  `authorized` or `indeterminate` with a paid `basis=exhausted` (at least
+  one exhausted, none `unauthorized`), at least one `:R impact` row and
+  every one `within`, and `entity_check` below naming a lead other than
+  the one whose search came back empty. Rows
+  must be distinct. All four prices are charged twice: on the write,
   against the keyword you conclude under, and again by
   `close_investigation`, against the keyword you close under. So
   concluding under a cheaper keyword buys nothing — the log itself still
@@ -614,9 +623,12 @@ summary                "Login matched established bastion usage"
   describes the rule, and one run can find both. A rule that caught what it
   claims gets no row — a reassuring note reads the same as a defect nobody
   looked for.
-- `entity_check` — required by `disposition false-positive`, unused
-  otherwise: the `:L findings` lead that tested the ALERTED entity for
-  suspicion independent of the alert's claim.
+- `entity_check` — required by `disposition false-positive` and
+  `disposition unsanctioned-benign`, unused otherwise: the `:L findings`
+  lead that tested the ALERTED entity for suspicion independently of what
+  the close rests on — the alert's claim for `false-positive`, the
+  authorization search for `unsanctioned-benign`, so there it is the
+  actor's own session history, never the record lookup.
   `entity_check  l-004`
   The lead must have RETURNED a result — not merely be declared, and not a
   row whose only outcome is a `fail_reason` — and must target an entity the
