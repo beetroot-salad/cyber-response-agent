@@ -10,7 +10,14 @@ from defender.tests.support.frontend._browser1161 import path_is
 
 WAIT_MS = 30_000
 RETRY = '[data-action="retry"]'
+SIGN_IN = '[data-action="sign-in"]'
+SIGN_OUT = '[data-action="sign-out"]'
+EMAIL = '[data-field="email"]'
 FAILED = "sign-in-failed"
+#: The `data-screen` values of the landing page (shape `root`), the signed-in home (`home`) and the error state (F4, PR2).
+ROOT = "root"
+HOME = "home"
+ERROR = "error"
 #: The shell makes the sessionStorage accessor throw, as a browser with storage denied does.
 NO_STORAGE = ("Object.defineProperty(window, 'sessionStorage', {configurable: true,"
               " get() { throw new DOMException('denied', 'SecurityError'); }});")
@@ -35,6 +42,13 @@ def api_calls(requests: list[Any], origin: str) -> list[tuple[str, str]]:
     """(method, path) of every request to the API outside the sign-in routes, in order."""
     return [(r.method, urllib.parse.urlsplit(r.url).path) for r in requests
             if r.url.startswith(origin) and path_is(r.url, "/api") and not path_is(r.url, "/api/auth")]
+
+
+def auth_calls(requests: list[Any], origin: str, path: str) -> list[tuple[str, str]]:
+    """(method, path) of every request to `origin` + `path` (an `/api/auth/...` route, e.g. `/api/auth/logout`), in
+    order. `api_calls` leaves these routes out, so a logout POST is seen only here."""
+    return [(r.method, urllib.parse.urlsplit(r.url).path) for r in requests
+            if r.url.startswith(origin) and urllib.parse.urlsplit(r.url).path == path]
 
 
 def navigations_to(requests: list[Any], origin: str, path: str) -> list[dict[str, str]]:
@@ -73,11 +87,12 @@ def signed_in(context: Any) -> bool:
 
 
 def sign_in(world: Any, context: Any) -> None:
-    """Sign `context` in through the real flow (the front channel's default account), then close the tab used."""
+    """Sign `context` in through the real flow (the front channel's default account), then close the tab used. It
+    starts from `/home` (`/` is the public landing page and signs nobody in, F4) and waits for the home screen."""
     page = context.new_page()
     try:
-        page.goto(f"{world.origin}/")
-        screen(page, "root")
+        page.goto(f"{world.origin}/home")
+        screen(page, HOME)
     finally:
         page.close()
     assert signed_in(context), "positive control: the sign-in set the session cookie"
@@ -90,6 +105,16 @@ def await_aborted(page: Any, aborted: list[str]) -> None:
             return
         page.wait_for_timeout(100)
     raise AssertionError("the shell never tried to navigate to sign-in")
+
+
+def until(page: Any, expression: str) -> None:
+    """Poll `expression` with `page.evaluate` until it is true. Not `wait_for_function`: it evals a string in the page,
+    which the ingress's CSP forbids and the CSP guard reports as a violation."""
+    for _ in range(WAIT_MS // 100):
+        if page.evaluate(expression):
+            return
+        page.wait_for_timeout(100)
+    raise AssertionError(f"never true: {expression}")
 
 
 def settle(page: Any, ms: int = 700) -> None:

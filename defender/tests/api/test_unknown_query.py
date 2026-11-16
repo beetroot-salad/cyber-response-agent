@@ -175,7 +175,7 @@ def test_r7_2_control_the_callback_alone_accepts_any_query() -> None:
     browser = world.client()
     response = world.sign_in_response(browser, ANN, extra={"session_state": "s", "iss": "https://idp.example"})
     assert response.status_code == 303, response.text
-    assert response.headers["location"] == "/"  # control: it signed in
+    assert response.headers["location"] == "/home"  # control: it signed in
 
 
 # --- before the handler runs, on the identity routes -------------------------------------------------------

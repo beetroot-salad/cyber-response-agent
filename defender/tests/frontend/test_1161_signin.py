@@ -9,11 +9,19 @@ from typing import Any
 import pytest
 
 from defender.tests.frontend._flow1161 import (
+    until,
+    EMAIL,
+    ERROR,
     FAILED,
+    HOME,
     NO_STORAGE,
     RETRY,
+    ROOT,
+    SIGN_IN,
+    SIGN_OUT,
     WAIT_MS,
     api_calls,
+    auth_calls,
     await_aborted,
     logins,
     navigations_to,
@@ -25,14 +33,15 @@ from defender.tests.frontend._flow1161 import (
     signed_in,
     where,
 )
-from defender.tests.support.api._server1083 import SESSION_COOKIE
+from defender.tests.support.api._server1083 import ANN, SESSION_COOKIE
 from defender.tests.support.frontend._browser1161 import abort_login_navigation, path_is, restore_from_cache
 
-KINDS = pytest.mark.parametrize("kind", ["root", "investigation"])
+KINDS = pytest.mark.parametrize("kind", ["home", "investigation"])
+
 
 
 def _target(world: Any, kind: str) -> str:
-    return "/" if kind == "root" else world.screen()
+    return "/home" if kind == "home" else world.screen()
 
 
 def _read_path(world: Any) -> str:
@@ -76,7 +85,7 @@ def test_1161_b1_a_signed_in_load_asks_me_before_the_screens_own_calls(world, co
 @pytest.mark.parametrize("first", [0, 1], ids=["first-tab-first", "second-tab-first"])
 def test_1161_b8_two_tabs_signing_in_together_each_land_on_their_own_address(world, context, requests, first):
     """Two authorize requests held, released in either order: each tab lands on its own address. (B8, D6)"""
-    one_target, two_target = world.screen(), "/"
+    one_target, two_target = world.screen(), "/home"
     world.front.hold = True
     one = context.new_page()
     one.goto(f"{world.origin}{one_target}", wait_until="commit")
@@ -84,14 +93,14 @@ def test_1161_b8_two_tabs_signing_in_together_each_land_on_their_own_address(wor
     two = context.new_page()
     two.goto(f"{world.origin}{two_target}", wait_until="commit")
     world.front.wait_held(2, page=two)
-    tabs = {0: (one, "investigation", one_target), 1: (two, "root", two_target)}
+    tabs = {0: (one, "investigation", one_target), 1: (two, "home", two_target)}
     for index in (first, 1 - first):
         world.front.release(index)
         page, kind, target = tabs[index]
         screen(page, kind)
         assert where(page) == (target, {})
     assert sorted(x or "" for x in logins(requests, world.origin)) == sorted([one_target, two_target])
-    assert shown(one) == "investigation" and shown(two) == "root"
+    assert shown(one) == "investigation" and shown(two) == "home"
 
 
 @KINDS
@@ -160,7 +169,7 @@ def test_1161_b1_a_me_that_is_not_200_or_401_shows_the_error_state_and_the_scree
     context.route(lambda u: path_is(u, "/api/me"), handle)
     page = context.new_page()
     page.goto(f"{world.origin}{world.screen()}")
-    screen(page, "error")
+    screen(page, ERROR)
     settle(page)
     assert api_calls(requests[mark:], world.origin) == [("GET", "/api/me")]
     assert logins(requests[mark:], world.origin) == []
@@ -228,7 +237,7 @@ def test_1161_b1_prelogin_missing_settles_the_tabs_target_into_its_address_and_t
     page = _prelogin_missing(world, context, requests, target)
     assert reason(page) == "prelogin-missing"
     assert navigations_to(requests, world.origin, "/sign-in-failed") == [{"reason": "prelogin-missing"}]
-    page.wait_for_function("location.search.includes('return=')")
+    until(page, "location.search.includes('return=')")
     assert where(page) == ("/sign-in-failed", {"reason": "prelogin-missing", "return": target})
     page.locator(RETRY).click()
     screen(page, kind)
@@ -240,7 +249,7 @@ def test_1161_b1_a_reload_of_the_settled_failed_screen_keeps_its_target_and_the_
     """After the settle, reloading the failed screen and retrying still lands on the target. (B1, B8)"""
     target = world.screen()
     page = _prelogin_missing(world, context, requests, target)
-    page.wait_for_function("location.search.includes('return=')")
+    until(page, "location.search.includes('return=')")
     page.reload()
     screen(page, FAILED)
     assert reason(page) == "prelogin-missing"
@@ -292,7 +301,7 @@ def test_1161_b8_a_simulated_cache_restore_signed_out_is_sign_in_left_with_retur
 def test_1161_b1_the_failed_screen_consumes_the_record_and_keeps_an_address_that_already_has_a_return(
         world, context, requests):
     """A record for target X and the same tab opened at `/sign-in-failed?...&return=Y`: the record is gone, the address keeps Y. (B1.1, B1)"""
-    x, y = world.screen(), "/"
+    x, y = world.screen(), "/home"
     aborted = abort_login_navigation(context)
     page = context.new_page()
     page.goto(f"{world.origin}{x}")
@@ -365,17 +374,17 @@ def test_1161_b1_a_restore_from_the_cache_counts_as_a_load_when_signed_in(world,
 
 
 @pytest.mark.parametrize("path", ["/no/such/screen", "/t/x/investigations/y", "/sign-in-failedx"])
-def test_1161_b1_a_signed_out_load_outside_the_list_signs_in_without_return_and_lands_on_the_root(
+def test_1161_b1_a_signed_out_load_outside_the_list_signs_in_without_return_and_lands_on_the_home(
         world, context, requests, path):
-    """No target: sign-in with no `return`; the landing is the root. (B1.3, B8)"""
+    """No target: sign-in with no `return`; the landing is `/home`. (B1.3, B8; F4's one fallback constant)"""
     page = context.new_page()
     page.goto(f"{world.origin}{path}")
-    screen(page, "root")
-    assert where(page) == ("/", {})
+    screen(page, HOME)
+    assert where(page) == ("/home", {})
     assert logins(requests, world.origin) == [None]
 
 
-@pytest.mark.parametrize(("kind", "query"), [("investigation", "?from=ticket&x=a.b"), ("root", "?x=1"),
+@pytest.mark.parametrize(("kind", "query"), [("investigation", "?from=ticket&x=a.b"), ("home", "?x=1"),
                                          ("investigation", "?a=1#frag")])
 def test_1161_b8_a_returnable_address_with_a_query_lands_on_its_pathname_with_no_query(
         world, context, requests, kind, query):
@@ -387,3 +396,170 @@ def test_1161_b8_a_returnable_address_with_a_query_lands_on_its_pathname_with_no
     assert where(page) == (target, {})
     assert page.evaluate("location.hash") == ""
     assert logins(requests, world.origin) == [target]
+
+
+def _app_requests(requests: list[Any], origin: str) -> list[str]:
+    """Every request to the API (sign-in and sign-out routes included) as `METHOD path`."""
+    return [f"{r.method} {urllib.parse.urlsplit(r.url).path}" for r in requests
+            if r.url.startswith(origin) and path_is(r.url, "/api")]
+
+
+@pytest.mark.parametrize("phase", ["signed-out", "signed-in"])
+def test_1540_f4_the_landing_page_shows_the_same_signed_out_or_in_and_makes_no_api_call(
+        world, context, requests, phase):
+    """`/` shows `root` with a plain link `<a href="/home" data-action="sign-in">`, no API request at all, no sign-in,
+    `location` stays `/`. (F4)"""
+    if phase == "signed-in":
+        sign_in(world, context)
+    mark = len(requests)
+    page = context.new_page()
+    page.goto(f"{world.origin}/")
+    screen(page, ROOT)
+    settle(page, 1000)
+    assert _app_requests(requests[mark:], world.origin) == []
+    assert logins(requests[mark:], world.origin) == []
+    assert where(page) == ("/", {})
+    assert page.locator(SIGN_IN).count() == 1
+    link = page.locator(SIGN_IN)
+    assert link.evaluate("e => e.tagName") == "A"
+    assert link.get_attribute("href") == "/home"
+    assert signed_in(context) == (phase == "signed-in")
+    assert [r.url for r in requests[mark:] if not r.url.startswith(world.origin)] == [], "no third-party origin (F1)"
+
+
+def test_1540_f4_the_landing_page_still_consumes_the_attempt_record_and_asks_nothing(world, context, requests):
+    """A record planted by an aborted sign-in start is deleted by the load of `/`; no API call. (F4, B1.1)"""
+    aborted = abort_login_navigation(context)
+    page = context.new_page()
+    page.goto(f"{world.origin}/home")
+    await_aborted(page, aborted)
+    assert page.evaluate("sessionStorage.length") > 0, "positive control: the shell wrote its attempt record"
+    mark = len(requests)
+    page.goto(f"{world.origin}/")
+    screen(page, ROOT)
+    settle(page)
+    assert page.evaluate("sessionStorage.length") == 0
+    assert _app_requests(requests[mark:], world.origin) == []
+    assert len(aborted) == 1
+
+
+@pytest.mark.parametrize("phase", ["signed-out", "signed-in"])
+def test_1540_f4_the_landing_link_goes_home_through_one_sign_in_or_none_and_the_home_names_the_person(
+        world, context, requests, phase):
+    """Click `Sign in` at `/`: signed out, one sign-in with `return=/home`; signed in, none. Lands on `/home`, whose
+    email field holds the account's and whose first API call is `/api/me`. (F4)"""
+    if phase == "signed-in":
+        sign_in(world, context)
+    mark = len(requests)
+    page = context.new_page()
+    page.goto(f"{world.origin}/")
+    screen(page, ROOT)
+    page.locator(SIGN_IN).click()
+    screen(page, HOME)
+    page.locator(EMAIL).wait_for()
+    settle(page)
+    assert where(page) == ("/home", {})
+    assert logins(requests[mark:], world.origin) == (["/home"] if phase == "signed-out" else [])
+    assert signed_in(context)
+    assert ANN in page.locator(EMAIL).inner_text()
+    assert api_calls(requests[mark:], world.origin)[0] == ("GET", "/api/me")
+    assert page.evaluate("sessionStorage.length") == 0
+
+
+def _signed_in_home(world: Any, context: Any, requests: list[Any]) -> Any:
+    """Sign in, then reach `/home` by the landing link (so Back has the landing page behind it)."""
+    sign_in(world, context)
+    page = context.new_page()
+    page.goto(f"{world.origin}/")
+    screen(page, ROOT)
+    page.locator(SIGN_IN).click()
+    screen(page, HOME)
+    page.locator(EMAIL).wait_for()
+    return page
+
+
+def test_1540_pr2_signing_out_ends_the_session_and_leaves_by_replace(world, context, requests):
+    """One `POST /api/auth/logout`, the session cookie gone, the landing page at `/`; the history is replaced, so Back
+    does not return to the home. (PR2 signOut)"""
+    page = _signed_in_home(world, context, requests)
+    length = page.evaluate("history.length")
+    page.locator(SIGN_OUT).click()
+    screen(page, ROOT)
+    settle(page)
+    assert auth_calls(requests, world.origin, "/api/auth/logout") == [("POST", "/api/auth/logout")]
+    assert not signed_in(context)
+    assert where(page) == ("/", {})
+    assert page.evaluate("history.length") == length, "replace, not a new history entry"
+    page.go_back()
+    settle(page)
+    assert where(page)[0] != "/home" and shown(page) != HOME
+    assert logins(requests, world.origin) == [], "the landing page started no sign-in"
+
+
+def test_1540_pr2_signing_out_when_already_signed_out_still_leaves_for_the_landing_page(world, context, requests):
+    """The logout answers 401 (the session cookie is gone): the same exit, to `/` showing `root`. (PR2 signOut)"""
+    page = _signed_in_home(world, context, requests)
+    context.clear_cookies(name=SESSION_COOKIE)
+    assert not signed_in(context), "positive control: the session cookie is gone before the click"
+    seen: list[int] = []
+    page.on("response", lambda r: seen.append(r.status) if path_is(r.url, "/api/auth/logout") else None)
+    page.locator(SIGN_OUT).click()
+    screen(page, ROOT)
+    assert seen == [401], "the route answers 401 to a caller without a session"
+    assert where(page) == ("/", {})
+    assert auth_calls(requests, world.origin, "/api/auth/logout") == [("POST", "/api/auth/logout")]
+
+
+@pytest.mark.parametrize("failure", ["500", "network"])
+def test_1540_pr2_a_failed_sign_out_shows_the_error_state_and_does_not_leave(world, context, requests, failure):
+    """Any answer but 2xx or 401, or a network failure, is the shell's error state; no navigation to `/`. (PR2 signOut)"""
+    page = _signed_in_home(world, context, requests)
+    mark = len(requests)
+
+    def handle(route: Any) -> None:
+        if failure == "network":
+            route.abort()
+        else:
+            route.fulfill(status=500, body="x")
+
+    context.route(lambda u: path_is(u, "/api/auth/logout"), handle)
+    page.locator(SIGN_OUT).click()
+    screen(page, ERROR)
+    settle(page)
+    assert where(page)[0] != "/"
+    assert page.locator(f'[data-screen="{ROOT}"]').count() == 0
+    assert [r for r in requests[mark:] if r.is_navigation_request()] == [], "no navigation followed the failure"
+
+
+def test_1540_f3_a_me_that_is_not_the_person_shape_is_the_error_state_and_starts_no_sign_in(world, context, requests):
+    """`/api/me` answers 200 with a program's view: the shell's error state, no sign-in, no home screen. (F3)"""
+    from defender.api.models import ProgramMe
+
+    uid = "6f1c1e3c-55a4-4a4e-9a51-00000000000%d"
+    program = ProgramMe.model_validate({
+        "program": {"id": uid % 1, "display_name": "soar"}, "tenant": {"tenant_id": uid % 2},
+        "credential": {"id": uid % 3, "expires_at": "2026-12-01T00:00:00Z"}}).model_dump(mode="json")
+    sign_in(world, context)
+    mark = len(requests)
+    context.route(lambda u: path_is(u, "/api/me"), lambda route: route.fulfill(status=200, json=program))
+    page = context.new_page()
+    page.goto(f"{world.origin}/home")
+    screen(page, ERROR)
+    settle(page)
+    assert logins(requests[mark:], world.origin) == []
+    assert page.locator(f'[data-screen="{HOME}"]').count() == 0
+
+
+def test_1540_f3_a_screen_read_that_answers_null_is_the_error_state_and_starts_no_sign_in(world, context, requests):
+    """The investigation read answers 200 with `null`: the screen cannot draw it, so the shell's error state shows;
+    no sign-in. (Errors: error boundary and `unhandledrejection`)"""
+    sign_in(world, context)
+    mark = len(requests)
+    read = _read_path(world)
+    context.route(lambda u: urllib.parse.urlsplit(u).path == read, lambda route: route.fulfill(status=200, body="null", content_type="application/json"))
+    page = context.new_page()
+    page.goto(f"{world.origin}{world.screen()}")
+    screen(page, ERROR)
+    settle(page)
+    assert page.locator('[data-screen="investigation"]').count() == 0
+    assert logins(requests[mark:], world.origin) == []

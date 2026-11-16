@@ -126,3 +126,22 @@ def test_1161_b3_every_returnable_member_reaches_the_app_at_its_own_pathname_sig
         page = _open(world, context, value)
         screen(page, shape)
         assert where(page) == (value, {}), value
+
+
+@pytest.mark.parametrize("phase", ["signed-out", "signed-in"])
+@pytest.mark.parametrize("shape", sorted(s.name for s in S.SHAPES if not s.returnable))
+def test_1540_f4_a_member_of_a_non_returnable_shape_shows_its_screen_with_no_api_call_or_sign_in(
+        world, context, requests, shape, phase):
+    """Signed out or in, a member of a shape the shape list marks non-returnable shows its own screen, makes no API
+    call and starts no sign-in. (F4's rule, B1.2, B3)"""
+    if phase == "signed-in":
+        sign_in(world, context)
+    for value in [m for s in S.SHAPES if s.name == shape for m in S.members(s, 1540, 2)]:
+        mark = len(requests)
+        page = _open(world, context, value)
+        screen(page, shape)
+        settle(page)
+        assert where(page) == (value, {}), value
+        assert [r.url for r in requests[mark:] if path_is(r.url, "/api") and r.url.startswith(world.origin)] == [], value
+        assert logins(requests[mark:], world.origin) == [], value
+        page.close()

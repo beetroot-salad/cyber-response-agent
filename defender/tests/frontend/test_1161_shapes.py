@@ -9,6 +9,7 @@ import pytest
 from defender.tests.support.frontend import _shapes1161 as S
 
 HEX = set("0123456789abcdef")
+_INVESTIGATION = next(s for s in S.SHAPES if s.name == "investigation")
 
 
 def _investigation_by_hand(value: str) -> bool:
@@ -35,18 +36,19 @@ def test_every_generated_member_classifies_to_its_shape(shape):
 
 def test_the_classifier_is_exact_ascii_case_sensitive_with_no_tolerance():
     """Whole-string, case-sensitive, no trailing-slash or newline tolerance (S2)."""
-    [m] = S.members(S.SHAPES[1], 1, 1)
+    [m] = S.members(_INVESTIGATION, 1, 1)
     assert S.classify(m) == "investigation"
     for bad in (m + "/", m + "\n", m.upper(), "/" + m, m.replace("/t/", "/T/"), "", "//", "/sign-in-failed/",
                 "/Sign-in-failed", "/sign-in-failed\n", "\uff0f"):
         assert S.classify(bad) is None, bad
     assert S.classify("/sign-in-failed") == "sign-in-failed" and S.classify("/") == "root"
-    assert {"root", "investigation"} == S.RETURNABLE
+    assert S.classify("/home") == "home"
+    assert {"home", "investigation"} == S.RETURNABLE  # F4: `root` is non-returnable
 
 
 def test_the_near_misses_cover_every_edit_kind_and_leave_the_member_out():
     """Insert, replace, delete, case flip, doubled and appended `/` all occur (B3 near misses)."""
-    [m] = S.members(S.SHAPES[1], 1, 1)
+    [m] = S.members(_INVESTIGATION, 1, 1)
     misses = list(S.near_misses(m))
     assert len(misses) == len(set(misses)) and m not in misses
     have = set(misses)
@@ -83,7 +85,7 @@ def test_the_generated_set_holds_members_misses_and_their_classifier_answers():
     assert all(S.classify(c.value) == c.shape for c in cases)
     assert any(c.shape == "investigation" and c.origin for c in cases), "hex-for-hex misses are members"
     picked = S.sample(cases, 1, 40)
-    assert len(picked) == 40 and {c.shape for c in picked} >= {"root", "investigation", "sign-in-failed", None}
+    assert len(picked) == 40 and {c.shape for c in picked} >= {"root", "home", "investigation", "sign-in-failed", None}
     assert S.sample(cases, 1, 40) == picked
 
 

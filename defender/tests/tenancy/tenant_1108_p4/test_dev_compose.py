@@ -9,6 +9,8 @@ the dev CA, and the client config file's name.
 """
 from __future__ import annotations
 
+import copy
+import posixpath
 import re
 from pathlib import Path
 
@@ -18,6 +20,7 @@ import yaml  # tests may load YAML raw (tooling/lint/lint_raw_yaml.py excludes t
 
 from defender import _git
 from defender._git import REPO_ROOT
+from defender.tests.identity.test_identity_realm_export import THEME, THEME_NAME, stylesheet_references, theme_properties
 
 COMPOSE = REPO_ROOT / ".devcontainer" / "docker-compose.yml"
 COMPOSE_DIR = COMPOSE.parent
@@ -298,3 +301,113 @@ def test_the_credential_proxy_mounts_the_whole_data_root_and_no_tenant_folder_A2
     mounted = [h for h in hosts if _under(h, data_root)]
     assert data_root in mounted, "control: the data root is mounted whole"
     assert mounted == [data_root], f"mounts below the data root: {mounted}"
+
+
+# ---------------------------------------------------------------------------------------------
+# #1540 F5/PR5: Keycloak's sign-in theme, and the single files that reach it
+# ---------------------------------------------------------------------------------------------
+
+FRONTEND = REPO_ROOT / "defender" / "frontend"
+THEME_IN_KEYCLOAK = f"/opt/keycloak/themes/{THEME_NAME}"
+_BUILD_OUTPUTS = {"node_modules", "dist", "generated"}
+
+
+def _theme_stylesheet(theme: Path) -> Path:
+    """The theme's own stylesheet: the second entry of `styles` (the first is the parent's)."""
+    return theme / "login" / "resources" / theme_properties(theme)["styles"].split()[1]
+
+
+def _files_below(root: Path, skip: Path | None = None) -> list[Path]:
+    return [p for p in root.rglob("*") if p.is_file() and not (_BUILD_OUTPUTS & set(p.relative_to(root).parts))
+            and not (skip and _under(p, skip))]
+
+
+def check_theme_is_mounted_and_looks_come_from_single_file_mounts(compose: dict, compose_dir: Path, theme: Path,
+                                                                  frontend: Path) -> None:
+    """F5/PR5, read statically: compose mounts the theme folder at Keycloak's themes dir and mounts single files from
+    `frontend/` into it; every Keycloak bind source exists; each `url()`/`@import` of the theme's stylesheet resolves
+    to a theme file or a mounted file; the theme folder holds no byte-identical copy of a file outside it."""
+    keycloak = compose["services"]["keycloak"]
+    mounts = [(source, target) for kind, source, target in _mounts(keycloak) if kind == "bind"]
+    hosts = {target: (compose_dir / source).resolve() for source, target in mounts}
+    missing = [f"{s} -> {t}" for s, t in mounts if not (compose_dir / s).exists()]
+    assert not missing, f"mount sources that do not exist: {missing}"
+    assert hosts.get(THEME_IN_KEYCLOAK) == theme.resolve(), f"the theme folder is not mounted at {THEME_IN_KEYCLOAK}: {hosts}"
+    inside = {t: h for t, h in hosts.items() if t.startswith(THEME_IN_KEYCLOAK + "/")}
+    assert len(inside) >= 2, f"the illustration and the tokens are two files mounted into the theme; found {inside}"
+    for target, host in inside.items():
+        assert host.is_file(), f"{target}: mount a single file, not {host}"
+        assert _under(host, frontend.resolve()), f"{target}: its source {host} is not a file of {frontend}"
+        assert not _under(host, theme.resolve()), f"{target}: its source {host} is inside the theme"
+    stylesheet = _theme_stylesheet(theme)
+    own = THEME_IN_KEYCLOAK + "/" + stylesheet.relative_to(theme).as_posix()
+    available = {THEME_IN_KEYCLOAK + "/" + p.relative_to(theme).as_posix() for p in _files_below(theme)} | set(inside)
+    reached: set[str] = set()
+    for ref in stylesheet_references(stylesheet.read_text(encoding="utf-8")):
+        target = posixpath.normpath(posixpath.join(posixpath.dirname(own), re.split(r"[?#]", ref)[0]))
+        assert target in available, f"{ref} in {stylesheet.name} resolves to {target}: no theme file, no mount"
+        reached.add(target)
+    assert set(inside) <= reached, f"mounted into the theme but not referenced by its stylesheet: {sorted(set(inside) - reached)}"
+    outside = [p for p in _files_below(frontend, skip=theme) if p.stat().st_size]
+    for ours in _files_below(theme):
+        for other in outside:
+            same = other.stat().st_size == ours.stat().st_size and other.read_bytes() == ours.read_bytes()
+            assert not same, f"{ours} is a copy of {other} (PR5)"
+
+
+def test_1540_f5_the_dev_compose_mounts_the_theme_and_the_looks_reach_it_as_single_file_mounts():
+    """Keycloak gets the theme folder plus the frontend's illustration and tokens as single files; no copies. (F5, PR5)"""
+    check_theme_is_mounted_and_looks_come_from_single_file_mounts(_compose(), COMPOSE_DIR, THEME, FRONTEND)
+
+
+def _good_world(root: Path) -> tuple[dict, Path, Path, Path]:
+    """A synthetic repo: `.devcontainer/` (compose dir), `frontend/` with two looks, and a theme folder in it."""
+    frontend, compose_dir = root / "frontend", root / ".devcontainer"
+    theme = frontend / "keycloak-theme"
+    (theme / "login" / "resources" / "css").mkdir(parents=True)
+    compose_dir.mkdir()
+    (theme / "login" / "theme.properties").write_text("parent=keycloak.v2\nstyles=css/styles.css css/own.css\n")
+    (theme / "login" / "resources" / "css" / "own.css").write_text(
+        '/* url(gone.png) */\n@import "tokens.css";\n.a{background:url("../img/art.svg?v=1")} .b{background:url(data:x)}\n')
+    (frontend / "art.svg").write_text("<svg>art</svg>")
+    (frontend / "tokens.css").write_text(":root{--c:red}")
+    base = f"{THEME_IN_KEYCLOAK}/login/resources"
+    compose = {"services": {"keycloak": {"volumes": [
+        f"../frontend/keycloak-theme:{THEME_IN_KEYCLOAK}:ro",
+        f"../frontend/art.svg:{base}/img/art.svg:ro", f"../frontend/tokens.css:{base}/css/tokens.css:ro"]}}}
+    return compose, compose_dir, theme, frontend
+
+
+def test_1540_f5_the_mount_check_accepts_a_good_world_and_refuses_each_break(tmp_path):
+    """Positive control, then single breaks: no folder mount, a missing source, a copy in the theme, a dangling
+    reference, an unreferenced or directory mount. (F5, PR5)"""
+    compose, compose_dir, theme, frontend = _good_world(tmp_path)
+    check_theme_is_mounted_and_looks_come_from_single_file_mounts(compose, compose_dir, theme, frontend)
+    css = theme / "login" / "resources" / "css" / "own.css"
+    volumes = compose["services"]["keycloak"]["volumes"]
+
+    def broken(*, volumes_: list[str] | None = None, css_: str | None = None, extra: Path | None = None) -> None:
+        bad = copy.deepcopy(compose)
+        bad["services"]["keycloak"]["volumes"] = volumes_ if volumes_ is not None else volumes
+        original = css.read_text()
+        if css_ is not None:
+            css.write_text(css_)
+        if extra is not None:
+            extra.parent.mkdir(parents=True, exist_ok=True)
+            extra.write_bytes((frontend / "art.svg").read_bytes())
+        try:
+            with pytest.raises(AssertionError):
+                check_theme_is_mounted_and_looks_come_from_single_file_mounts(bad, compose_dir, theme, frontend)
+        finally:
+            css.write_text(original)
+            if extra is not None:
+                extra.unlink()
+
+    broken(volumes_=volumes[1:])  # the theme folder is not mounted
+    broken(volumes_=[volumes[0].replace(THEME_IN_KEYCLOAK, "/opt/keycloak/themes/other"), *volumes[1:]])
+    broken(volumes_=[*volumes[:2], volumes[2].replace("tokens.css", "gone.css")])  # a source that is not there
+    broken(volumes_=volumes[:2])  # the tokens are not mounted
+    broken(volumes_=[volumes[0], volumes[1], f"../frontend:{THEME_IN_KEYCLOAK}/login/resources/css/tokens.css"])
+    broken(css_=css.read_text().replace("tokens.css", "colours.css"))  # a reference nothing provides
+    broken(css_=css.read_text().replace('@import "tokens.css";', ""))  # a mount the stylesheet never uses
+    broken(extra=theme / "login" / "resources" / "img" / "copy.svg")  # PR5: a copy of the illustration in the theme

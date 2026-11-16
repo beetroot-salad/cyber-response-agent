@@ -920,11 +920,11 @@ def _failed(r: httpx.Response) -> tuple[str, dict[str, str]]:
 
 
 @pytest.mark.postgres
-@pytest.mark.parametrize("back", [TICKET_PATH, "/", None], ids=["investigation", "root", "absent"])
+@pytest.mark.parametrize("back", [TICKET_PATH, "/home", None], ids=["investigation", "home", "absent"])
 async def test_1161_p2_sign_in_lands_on_its_return_path_byte_for_byte_and_opens_a_session(served, back):
-    """The callback 303s to exactly the judged return path (the root when absent) and opens a working session. (P2, B4)"""
+    """The callback 303s to exactly the judged return path (`/home` when absent) and opens a working session. (P2, B4)"""
     r = await _signed_in(served, back)
-    assert _landing(r) == (back or "/")
+    assert _landing(r) == (back or "/home")
     session = set_cookies(r)[SESSION_COOKIE]
     me = await served.client.get("/api/me", headers=person(session.value))
     assert me.status_code == 200, me.text
@@ -933,9 +933,9 @@ async def test_1161_p2_sign_in_lands_on_its_return_path_byte_for_byte_and_opens_
 
 @pytest.mark.postgres
 @pytest.mark.parametrize("back", [
-    "", "t/a", "//evil.example/x", "/\\evil.example/x", "https://evil.example/x", "/t/\x01x", "/api", "/api/me",
+    "", "/", "t/a", "//evil.example/x", "/\\evil.example/x", "https://evil.example/x", "/t/\x01x", "/api", "/api/me",
     TICKET_PATH + "?from=ticket", TICKET_PATH + "/", TICKET_PATH.upper(), "/sign-in-failed",
-], ids=["empty", "relative", "scheme-relative", "backslash", "absolute", "control", "api", "api-route", "query",
+], ids=["empty", "root", "relative", "scheme-relative", "backslash", "absolute", "control", "api", "api-route", "query",
         "trailing-slash", "case", "failed-screen"])
 async def test_1161_b2_a_refused_return_path_is_a_bad_request_and_starts_nothing(served, back):
     """A present `return` P2 refuses: 303 to `/sign-in-failed?reason=bad-request`, no cookie, no provider redirect. (B2, B4)"""

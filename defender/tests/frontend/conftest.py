@@ -1,5 +1,9 @@
 """#1161 the frontend's browser and ingress checks: the pinned Chromium, the running world (API child, ingress,
-provider front channel) and the Q6 cookie-less request. Tools missing is a failure, never a skip (B11)."""
+provider front channel) and the Q6 cookie-less request. Tools missing is a failure, never a skip (B11).
+
+CSP (#1540 F8): every browser test fails on any `securitypolicyviolation` in any page of its context. `guard_csp(context)`
+installs the report and returns the live list of violations (each "<directive> <blocked> @ <document>"); the `context`
+fixture asserts it empty at teardown. A test that makes its own context calls `guard_csp` and asserts the list itself."""
 from __future__ import annotations
 
 import dataclasses
@@ -32,18 +36,31 @@ from defender.tests.support.shared._postgres1339 import (  # noqa: F401 — fixt
 
 
 WAIT_MS = 30_000
+#: Reports a violation to Python. A binding (not an in-page array) survives navigations and closed tabs.
+_CSP_BINDING = "__defenderCspViolation"
+_CSP_LISTENER = ("window.addEventListener('securitypolicyviolation', e => window." + _CSP_BINDING +
+                 "(e.violatedDirective + ' ' + e.blockedURI + ' @ ' + e.documentURI), true);")
 _NOW = dt.datetime(2026, 11, 1, 12, tzinfo=dt.UTC)
+
+
+def guard_csp(context: Any) -> list[str]:
+    """Record every CSP violation any page of `context` reports, now and later, across navigations and closed tabs.
+    Returns the list the violations are appended to."""
+    violations: list[str] = []
+    context.expose_binding(_CSP_BINDING, lambda source, message: violations.append(str(message)))
+    context.add_init_script(_CSP_LISTENER)
+    return violations
 
 
 @pytest.fixture(scope="session")
 def browser_tools() -> None:
-    """Node, npm, Caddy, Playwright and its Chromium are all present, or the test fails (B11)."""
+    """Bun, Caddy, Playwright and its Chromium are all present, or the test fails (B11)."""
     ingress_harness.require_tools()
 
 
 @pytest.fixture(scope="session")
 def built_frontend(browser_tools: None) -> Path:
-    """The frontend's `dist/`, built outside the checkout once per set of sources (`npm ci && npm run build`); fails when
+    """The frontend's `dist/`, built outside the checkout once per set of sources (`bun install --frozen-lockfile && bun run build`); fails when
     the build does. Its `node_modules/` is beside it."""
     return ingress_harness.build_frontend()
 
@@ -74,13 +91,18 @@ def browser(playwright_: Any) -> Iterator[Any]:
 
 @pytest.fixture
 def context(browser: Any) -> Iterator[Any]:
-    """A fresh browser profile (no cookies, no storage), `WAIT_MS` default timeout."""
+    """A fresh browser profile (no cookies, no storage), `WAIT_MS` default timeout; the test errors on any CSP violation."""
     ctx = browser.new_context()
     ctx.set_default_timeout(WAIT_MS)
+    violations = guard_csp(ctx)
     try:
         yield ctx
+        for page in ctx.pages:  # let a report still in flight arrive
+            page.wait_for_timeout(100)
+            break
     finally:
         ctx.close()
+    assert not violations, f"F8: the page broke the ingress's CSP: {violations}"
 
 
 @pytest.fixture

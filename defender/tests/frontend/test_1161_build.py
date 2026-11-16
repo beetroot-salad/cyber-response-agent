@@ -1,19 +1,25 @@
-"""#1161 S2, Am-4: the frontend build type-checks and reads the one shape list (no hand-kept copy in the router)."""
+"""#1161 S2, Am-4, #1540 F1/F3/PR6/F8: the frontend build type-checks, reads the one shape list and the API's document (no
+hand-kept copy), reads only its declared inputs, and the source check (`bun run check`) refuses what a screen may not do.
+Every build runs in a `copy_frontend` copy, so the unmodified copy builds (control) and is also PR6's "the frontend
+folder plus the declared inputs suffice"."""
 from __future__ import annotations
 
+import contextlib
 import copy
+import dataclasses
 import json
-import shutil
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from defender.tests.support.frontend._ingress1161 import FRONTEND
+from defender.tests.support.frontend._ingress1161 import FRONTEND, copy_frontend, node_modules_of, run_bun
 from defender.tests.support.frontend._shapes1161 import REFUSED
 
 LIST = FRONTEND.parent / "api" / "addresses.json"
+ADDRESSES, OPENAPI = "../api/addresses.json", "../api/openapi.json"  # PR6's two inputs, as `package.json` writes them
 
 
 def _add_one(document: Any) -> None:
@@ -28,7 +34,7 @@ def _drop_one(document: Any) -> None:
     assert before - len(document["shapes"]) == 1
 
 
-EXAMPLE = {"alphabets": {"hex": "0123456789abcdef"},
+EXAMPLE: dict[str, Any] = {"alphabets": {"hex": "0123456789abcdef"},
            "placeholders": {"uuid": [["hex", 8], "-", ["hex", 4], "-", ["hex", 4], "-", ["hex", 4], "-", ["hex", 12]]},
            "shapes": [{"name": "root", "template": "/", "returnable": True},
                       {"name": "investigation", "template": "/t/{uuid}/investigations/{uuid}", "returnable": True},
@@ -48,72 +54,253 @@ def test_the_list_edits_act_on_the_bound_format() -> None:
     assert dropped["placeholders"] == EXAMPLE["placeholders"]
 
 
-def _build(root: Path) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(["npm", "run", "build"], cwd=root / "defender" / "frontend", capture_output=True, text=True,
-                          check=False, timeout=600)
+def _declared() -> list[str]:
+    """`package.json`'s `defender.inputs` read at collection; the design's two names when it declares none yet (a red
+    test, not a vanished parameter)."""
+    with contextlib.suppress(OSError, ValueError, TypeError, KeyError):
+        declared = json.loads((FRONTEND / "package.json").read_text(encoding="utf-8"))["defender"]["inputs"]
+        if declared and all(isinstance(d, str) for d in declared):
+            return list(declared)
+    return [ADDRESSES, OPENAPI]
 
 
-def _copy(root: Path, document: Any, built: Path) -> Path:
-    """A copy of the frontend (sharing the `node_modules` beside the built `dist/`) over the shape list `document`; the
-    copy's root."""
-    shutil.copytree(FRONTEND, root / "defender" / "frontend", ignore=shutil.ignore_patterns("node_modules", "dist"))
-    (root / "defender" / "api").mkdir()
-    (root / "defender" / "frontend" / "node_modules").symlink_to(built.parent / "node_modules")
-    (root / "defender" / "api" / "addresses.json").write_text(json.dumps(document), encoding="utf-8")
-    return root
+def _produced() -> dict[str, Any]:
+    """What the API says about itself (grounding C3): `create_app` over a placeholder for every dependency."""
+    from defender.api.app import create_app
+    from defender.api.ports import ApiDeps
+
+    deps: dict[str, Any] = {f.name: object() for f in dataclasses.fields(ApiDeps)}
+    deps["frontend_origin"] = "http://localhost:1"
+    return create_app(ApiDeps(**deps)).openapi()
+
+
+def _bytes(document: Any) -> bytes:
+    return json.dumps(document).encode("utf-8")
+
+
+def _copy(tmp_path: Path, built: Path, **override: bytes | None) -> Path:
+    """A `copy_frontend` copy sharing the built `node_modules`; `override` maps a declared input to bytes (or None)."""
+    names = {"addresses": ADDRESSES, "openapi": OPENAPI}
+    inputs = {names[k]: v for k, v in override.items()}
+    return copy_frontend(tmp_path / "copy", inputs_override=inputs, node_modules_from=node_modules_of(built))
+
+
+def _failing_build(frontend: Path) -> subprocess.CompletedProcess[str]:
+    """`bun run build` over a copy holding a stale `dist/index.html`, which a failed build must leave gone (F1 b)."""
+    (frontend / "dist").mkdir(exist_ok=True)
+    (frontend / "dist" / "index.html").write_text("<html>stale</html>", encoding="utf-8")
+    return run_bun(frontend, "run", "build")
+
+
+def _no_index(frontend: Path) -> bool:
+    return not (frontend / "dist" / "index.html").exists()
 
 
 @pytest.mark.parametrize("edit", [None, _add_one, _drop_one], ids=["unmodified", "shape-added", "shape-removed"])
 def test_1161_s2_the_build_follows_the_shape_list_and_fails_on_a_type_error(built_frontend, tmp_path, edit):
-    """A copy builds as is; with one shape added to or removed from the list the build fails, so every shape has a
-    route and every route a shape, and the type check is part of the build. (S2, Am-4)"""
+    """A copy builds as is; with one shape added to or removed from the list the build fails and leaves no
+    `index.html`, so every shape has a route and every route a shape. (S2, F1 b)"""
     document = json.loads(LIST.read_text(encoding="utf-8"))
     if edit is not None:
         edit(document)
-    root = _copy(tmp_path / "copy", document, built_frontend)
-    done = _build(root)
+    frontend = _copy(tmp_path, built_frontend, addresses=_bytes(document))
     if edit is None:
+        done = run_bun(frontend, "run", "build")
         assert done.returncode == 0, (done.stdout[-1500:], done.stderr[-1500:])
-        assert (root / "defender" / "frontend" / "dist" / "index.html").is_file()
+        assert (frontend / "dist" / "index.html").is_file()
     else:
+        done = _failing_build(frontend)
         assert done.returncode != 0, "the build accepted a shape list its router does not match"
-        assert not (root / "defender" / "frontend" / "dist" / "index.html").exists()
+        assert _no_index(frontend)
 
 
-def test_1161_s2_the_build_fails_on_a_type_error_in_any_source_file(built_frontend, tmp_path):
-    """One unrelated type error, put in each source file in turn (the shell, the router, a screen, the rest), fails the
-    build and leaves no `index.html`; the unmodified copy builds (control). The type check is the whole project's. (S2, B8)"""
-    document = json.loads(LIST.read_text(encoding="utf-8"))
-    sources = sorted(p.relative_to(FRONTEND) for p in (FRONTEND / "src").rglob("*.ts") if "generated" not in p.parts)
-    assert {p.name for p in sources} >= {"main.ts", "router.ts", "root.ts", "signInFailed.ts"}, sources
-    problems = []
-    for index, source in enumerate([None, *sources]):
-        root = _copy(tmp_path / f"copy-{index}", document, built_frontend)
-        if source is not None:
-            with (root / "defender" / "frontend" / source).open("a", encoding="utf-8") as handle:
-                handle.write("\nexport const unrelatedTypeError: number = 'not a number';\n")
-        done = _build(root)
-        built = (root / "defender" / "frontend" / "dist" / "index.html").exists()
-        if source is None:
-            assert done.returncode == 0, (done.stdout[-1500:], done.stderr[-1500:])
-            assert built
-        elif done.returncode == 0 or built:
-            problems.append(f"{source}: exit {done.returncode}, index.html {'made' if built else 'absent'}")
-    assert not problems, problems
+#: Every TypeScript source of the app outside the generated types (F1 b: the type check is the whole project's).
+SOURCES = sorted(p.relative_to(FRONTEND) for pattern in ("*.ts", "*.tsx") for p in (FRONTEND / "src").rglob(pattern)
+                 if "generated" not in p.relative_to(FRONTEND).parts)
+
+
+def test_1540_f1_the_source_set_the_type_error_test_walks_spans_the_shell_and_the_screens():
+    """The glob finds sources both under `src/shell/` and outside it, so the per-file test below is not vacuous. (F1 b)"""
+    shell = [s for s in SOURCES if s.parts[:2] == ("src", "shell")]
+    assert shell, SOURCES
+    assert len(SOURCES) > len(shell), SOURCES
+
+
+@pytest.mark.parametrize("source", SOURCES, ids=[s.as_posix() for s in SOURCES])
+def test_1161_s2_the_build_fails_on_a_type_error_in_any_source_file(built_frontend, tmp_path, source):
+    """One unrelated type error put in this source file fails the build, and a stale `dist/index.html` is gone
+    afterwards (`dist/` is removed first). The unmodified copy builds (control, above). (F1 b, S2, B8)"""
+    frontend = _copy(tmp_path, built_frontend)
+    with (frontend / source).open("a", encoding="utf-8") as handle:
+        handle.write("\nexport const unrelatedTypeError: number = 'not a number';\n")
+    done = _failing_build(frontend)
+    assert done.returncode != 0, f"{source}: the build accepted a type error"
+    assert _no_index(frontend), f"{source}: index.html remains"
 
 
 @pytest.mark.parametrize(("document", "words"), [pytest.param(d, w, id=i) for i, d, w in REFUSED])
 def test_1161_s2_the_build_refuses_every_list_the_api_refuses(built_frontend, tmp_path, document, words):
     """Each list in the shared table fails the build, in the same words as the API's reader, and makes no
-    `index.html`: a grammar that could match outside its segment, or a template that does not compile. (S2)"""
-    root = _copy(tmp_path / "copy", document, built_frontend)
-    done = _build(root)
+    `index.html`: a grammar that could match outside its segment, or a template that does not compile. (F1 c, S2)"""
+    frontend = _copy(tmp_path, built_frontend, addresses=_bytes(document))
+    done = run_bun(frontend, "run", "build")
     assert done.returncode != 0, "the build accepted a list the API refuses"
     assert words in done.stderr + done.stdout, done.stderr[-1500:]
-    assert not (root / "defender" / "frontend" / "dist" / "index.html").exists()
+    assert _no_index(frontend)
+
+
+@pytest.mark.parametrize("omitted", _declared())
+def test_1540_pr6_a_build_missing_a_declared_input_fails(built_frontend, tmp_path, omitted):
+    """The copy lacks this one input the build declares: the build fails and makes no `index.html` (the build reads
+    its inputs from the declared list; the unmodified copy above is the sufficiency control). (PR6)"""
+    frontend = copy_frontend(tmp_path / "copy", inputs_override={omitted: None},
+                             node_modules_from=node_modules_of(built_frontend))
+    done = run_bun(frontend, "run", "build")
+    assert done.returncode != 0, f"the build ran without {omitted}"
+    assert _no_index(frontend)
+
+
+def _drop_property(document: dict[str, Any], schema: str, prop: str) -> None:
+    node = document["components"]["schemas"][schema]
+    del node["properties"][prop]
+    node["required"] = [r for r in node.get("required", []) if r != prop]
+
+
+def _person_email(document: dict[str, Any]) -> None:
+    """The home shows the person's email: `/api/me`'s person schema (`kind: person`) holds a user schema with `email`."""
+    schemas = document["components"]["schemas"]
+    [person] = [s for s in schemas.values() if s.get("properties", {}).get("kind", {}).get("const") == "person"]
+    user = schemas[person["properties"]["user"]["$ref"].rsplit("/", 1)[1]]
+    del user["properties"]["email"]
+    user["required"] = [r for r in user.get("required", []) if r != "email"]
+
+
+@pytest.mark.parametrize("edit", [None, lambda d: _drop_property(d, "Investigation", "disposition"),
+                                  lambda d: _drop_property(d, "Investigation", "status"), _person_email],
+                         ids=["produced-unedited", "no-disposition", "no-status", "no-person-email"])
+def test_1540_f3_a_document_without_a_field_a_screen_reads_fails_the_build(built_frontend, tmp_path, edit):
+    """Over the document the app produces: unedited it builds and writes `index.html` (control); without a field a
+    screen reads (disposition, status, the person's email) the build fails and writes none. (F3, F1 b)"""
+    document = _produced()
+    if edit is not None:
+        edit(document)
+    frontend = _copy(tmp_path, built_frontend, openapi=_bytes(document))
+    done = _failing_build(frontend) if edit is not None else run_bun(frontend, "run", "build")
+    if edit is None:
+        assert done.returncode == 0, (done.stdout[-1500:], done.stderr[-1500:])
+        assert (frontend / "dist" / "index.html").is_file()
+    else:
+        assert done.returncode != 0, "the build accepted a document that lacks a field a screen reads"
+        assert _no_index(frontend)
 
 
 def test_1161_the_test_build_never_writes_the_checkout(built_frontend):
     """The built `dist/` is outside the checkout's frontend folder, so a build never replaces files another run is
     serving. (B11, test machinery)"""
     assert FRONTEND not in built_frontend.parents, built_frontend
+
+
+# --- F8: the source check, observed through `bun run check` (the lint job's command, F6) -----------------------------
+
+CONTROL = "zz_control"
+#: One refused form each; each is valid TypeScript, so a failure can only come from the source check. (F8 also lists
+#: `navigation`: the pinned TypeScript's DOM library does not declare it, so no valid file can hold it; not tested.)
+REFUSED_FORMS: dict[str, str] = {
+    "fetch": 'export const x = fetch("/x");',
+    "XMLHttpRequest": "export const x = new XMLHttpRequest();",
+    "EventSource": 'export const x = new EventSource("/x");',
+    "WebSocket": 'export const x = new WebSocket("ws://x");',
+    "sendBeacon": 'export const x = navigator.sendBeacon("/x");',
+    "localStorage": 'export const x = localStorage.getItem("k");',
+    "sessionStorage": 'export const x = sessionStorage.getItem("k");',
+    "indexedDB": 'export const x = indexedDB.open("x");',
+    "caches": "export const x = caches.keys();",
+    "document.cookie": "export const x = document.cookie;",
+    "bare location": "export const x = location.href;",
+    "window.location": "export const x = window.location.href;",
+    "document.location": "export const x = document.location;",
+    "self.location": "export const x = self.location;",
+    "globalThis.location": "export const x = globalThis.location;",
+    "history": "history.back();\nexport const x = 1;",
+    "window.open": 'export const x = window.open("/x");',
+    "destructured fetch": "const { fetch: f } = window;\nexport const x = f;",
+    "auth path literal": 'export const x = "/api/auth/login";',
+    "auth path JSX attribute": 'export const x = <a href="/api/auth/logout">out</a>;',
+}
+#: What a screen may hold: a property named `location`, a path key `read` takes, an `/api/auth/` comment.
+ALLOWED_FORMS: dict[str, str] = {
+    "location property": 'const r = { location: "x" };\nexport const x = r.location;',
+    "path key": 'export const x = "/api/tenants/{tenant_id}/investigations/{investigation_id}";',
+    "auth path in a comment": "// /api/auth/login\nexport const x = 1;",
+}
+
+
+@pytest.fixture(scope="module")
+def checked(built_frontend, tmp_path_factory) -> Path:
+    """One copy of the frontend for the source-check cases, sharing the built `node_modules`."""
+    return copy_frontend(tmp_path_factory.mktemp("check"), node_modules_from=node_modules_of(built_frontend))
+
+
+def _check_with(frontend: Path, relative: str, text: str) -> subprocess.CompletedProcess[str]:
+    """`bun run check` with `relative` (under `src/`) holding `text`, which is removed again."""
+    path = frontend / "src" / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text + "\n", encoding="utf-8")
+    try:
+        return run_bun(frontend, "run", "check")
+    finally:
+        path.unlink()
+
+
+def _output(done: subprocess.CompletedProcess[str]) -> str:
+    return done.stdout + done.stderr
+
+
+def _tsc_errors_in(output: str, name: str) -> list[str]:
+    return [line for line in output.splitlines() if name in line and re.search(r"error TS\d+", line)]
+
+
+def test_1540_f8_the_check_passes_on_the_unmodified_tree(checked):
+    """`bun run check` (generate + type check + source check) exits 0 on the copy. (F8, F1)"""
+    done = run_bun(checked, "run", "check")
+    assert done.returncode == 0, _output(done)[-1500:]
+
+
+def test_1540_f1_the_check_fails_on_a_plain_type_error(checked):
+    """`bun run check` is generate + type check: an unrelated type error fails it. (F1)"""
+    done = _check_with(checked, "screens/zz_type_error.ts", "export const bad: number = 'not a number';")
+    assert done.returncode != 0, "check accepted a type error"
+
+
+@pytest.mark.parametrize("form", REFUSED_FORMS)
+def test_1540_f8_the_source_check_refuses_each_form_in_a_screen(checked, form):
+    """A screen file holding this one form fails `bun run check`, naming the file; tsc has no error in it. (F8)"""
+    extension = "tsx" if "JSX" in form else "ts"
+    done = _check_with(checked, f"screens/{CONTROL}.{extension}", REFUSED_FORMS[form])
+    out = _output(done)
+    assert done.returncode != 0, f"check accepted {form}"
+    assert f"{CONTROL}.{extension}" in out, out[-1500:]
+    assert not _tsc_errors_in(out, CONTROL), f"a type error, not the source check: {_tsc_errors_in(out, CONTROL)}"
+
+
+@pytest.mark.parametrize("form", ALLOWED_FORMS)
+def test_1540_f8_the_source_check_allows_what_a_screen_may_hold(checked, form):
+    """A property named `location`, a path key and an `/api/auth/` comment pass `bun run check` (twin of the
+    refusals: matching is by resolved symbol and by string, never by name in comments). (F8)"""
+    done = _check_with(checked, f"screens/{CONTROL}.ts", ALLOWED_FORMS[form])
+    assert done.returncode == 0, _output(done)[-1500:]
+
+
+def test_1540_f8_a_test_file_is_not_exempt_from_the_source_check(checked):
+    """The refused `fetch` in `*.test.ts` outside the shell fails `bun run check` naming that file. (F8)"""
+    done = _check_with(checked, f"screens/{CONTROL}.test.ts", REFUSED_FORMS["fetch"])
+    assert done.returncode != 0, "check exempted a test file"
+    assert f"{CONTROL}.test.ts" in _output(done), _output(done)[-1500:]
+
+
+def test_1540_f8_the_shell_may_hold_the_refused_forms(checked):
+    """The same refused file under `src/shell/` passes `bun run check`: the shell owns the network. (F8, PR2)"""
+    text = "\n".join(REFUSED_FORMS[f].replace("export const x", f"export const x{i}") for i, f in enumerate(
+        ("fetch", "localStorage", "bare location", "auth path literal")))
+    done = _check_with(checked, f"shell/{CONTROL}.ts", text)
+    assert done.returncode == 0, _output(done)[-1500:]

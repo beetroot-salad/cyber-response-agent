@@ -1,13 +1,14 @@
 # ruff: noqa: PT018 — each compound assert states one fact about one response
-"""#1161 B9, B3: the repo's ingress in front of the built frontend and the real API child. Plain HTTP, no browser."""
+"""#1161 B9, B3: the repo's ingress in front of the built frontend and the real API child. Plain HTTP, except the one
+browser page (#1540 F1: the built landing page works under the ingress's CSP); no async test lives here."""
 from __future__ import annotations
 
 import json
-from typing import Any
-import re
 import subprocess
 import urllib.parse
+from html.parser import HTMLParser
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -42,15 +43,6 @@ def _assert_guarded(r: httpx.Response, what: str) -> None:
     assert r.headers.get_list("cache-control") == ["no-cache"], (what, r.headers)  # revalidated on every load
 
 
-@pytest.mark.parametrize("path", ["/app.js", "/style.css"])
-def test_1161_b9_the_apps_fixed_name_files_are_revalidated_on_every_load(world, path):
-    """The script and the stylesheet keep their names across deploys, so each answer says `no-cache`: a browser never
-    runs a cached app against a newer API. (B9)"""
-    r = world.get(path)
-    assert r.status_code == 200, (path, r.status_code)
-    assert r.headers.get_list("cache-control") == ["no-cache"], (path, r.headers)
-
-
 @pytest.mark.parametrize("path", APP_PATHS)
 def test_1161_b9_every_path_outside_api_is_the_app_with_exactly_the_three_headers(world, path):
     """CSP (with `form-action` for the artifact domain), Referrer-Policy and nosniff; unknown paths get the app. (B9)"""
@@ -63,16 +55,57 @@ def test_1161_b9_every_path_outside_api_is_the_app_with_exactly_the_three_header
         assert r.status_code == 200
 
 
+class _Assets(HTMLParser):
+    """The same-origin paths `index.html` loads: scripts, and links (stylesheets, preloads, icons)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.scripts: list[str] = []
+        self.styles: list[str] = []
+        self.others: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        values = dict(attrs)
+        url = values.get("src") if tag == "script" else values.get("href") if tag == "link" else None
+        if not url or urllib.parse.urlsplit(url).netloc or urllib.parse.urlsplit(url).scheme:
+            return
+        path = urllib.parse.urljoin("/", url)
+        if tag == "script":
+            self.scripts.append(path)
+        elif "stylesheet" in (values.get("rel") or "").split():
+            self.styles.append(path)
+        else:
+            self.others.append(path)
+
+
 # Caddy's own error answers (a 400 to a malformed escape) are outside B9's header promise (owner ruling): untested.
-def test_1161_b9_the_built_files_carry_the_headers_too(world):
-    """The scripts and styles `index.html` references are non-/api responses. (B9)"""
-    html = world.get("/").text
-    assets = sorted(set(re.findall(r'(?:src|href)="(/[^"/][^"]*)"', html)))
-    assert assets, "positive control: the app references at least one built file"
-    for asset in assets:
+def test_1161_b9_the_built_files_carry_the_headers_and_are_revalidated_on_every_load(world):
+    """Every script, stylesheet and other file `index.html` references answers 200 with the three headers and
+    `no-cache`, whatever the build named them: a browser never runs a cached app against a newer API. (B9, F2)"""
+    parsed = _Assets()
+    parsed.feed(world.get("/").text)
+    assert parsed.scripts, "positive control: the app references a script"
+    assert parsed.styles, "positive control: the app references a stylesheet"
+    for asset in sorted({*parsed.scripts, *parsed.styles, *parsed.others}):
         r = world.get(asset)
         assert r.status_code == 200, asset
         _assert_guarded(r, asset)
+
+
+def test_1540_f1_the_built_landing_page_loads_from_the_apps_own_origin_with_nothing_inlined(world, context, requests):
+    """Signed out, `/` shows its illustration through requests all to the app's origin, no `data:` URL, and no CSP
+    violation (the fixture guards it): images and fonts come from the app's origin, asset inlining is off. (F1)"""
+    page = context.new_page()
+    page.goto(f"{world.origin}/")
+    page.locator('[data-screen="root"]').first.wait_for()
+    page.wait_for_load_state("networkidle")
+    images = page.evaluate("[...document.images].map(i => [i.currentSrc, i.naturalWidth])")
+    foreign = [r.url for r in requests if not r.url.startswith(world.origin + "/")]
+    assert foreign == [], f"requests outside the app's origin (data: URLs included): {foreign}"
+    assert [src for src, _ in images if not src.startswith(world.origin + "/")] == [], images
+    assert [src for src, width in images if width == 0] == [], f"images that did not load: {images}"
+    loaded = [r.url for r in requests if r.resource_type == "image" and urllib.parse.urlsplit(r.url).path != "/favicon.ico"]
+    assert loaded, "positive control: the illustration is an image request to the app's origin"
 
 
 def _header_set(r: httpx.Response) -> list[tuple[str, str]]:
