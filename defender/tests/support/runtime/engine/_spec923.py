@@ -28,6 +28,7 @@ BYPASS_BY_MEMBER: dict[str, bool] = {
     "false-positive": True,
     GAP_MEMBER: True,
     "malicious": True,
+    "unsanctioned-benign": True,
     MEMBER: False,
 }
 
@@ -153,9 +154,17 @@ def paid(*rows: str, disposition: str = GAP_MEMBER, category: str = "data-ceilin
 
 
 def pays_every_price(disposition: str) -> str:
-    """A companion that owes nothing under any priced keyword, so one document can drive every
+    """A companion that owes nothing under `disposition`'s price, so one helper drives every
     member past the price gate. Each price is paid, not dodged: no `??` slot (benign), a
-    detection defect plus a lead that returned a result (false-positive), a paying receipt."""
+    detection defect plus a lead that returned a result (false-positive), a paying receipt.
+    `unsanctioned-benign` gets its own case: the open process-gap contract it needs is what
+    `benign` refuses, so no single document pays both."""
+    from defender._vocab import PROCESS_GAP_DISPOSITION
+
+    if disposition == PROCESS_GAP_DISPOSITION:
+        from defender.tests.support.invlang.validation._process_gap import document
+
+        return document()
     return doc(PROLOGUE, LEADS, LEAD_RESULT, conclude(
         disposition=disposition, confidence="high",
         **{"termination.category": "data-ceiling"},
