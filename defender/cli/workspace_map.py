@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Operator entry point for the investigation workspace map."""  # lint-stale-ref: ok — the English word, not the removed test helper class
+"""Operator entry point for the investigation workspace map."""
 from __future__ import annotations
 
 import sys
@@ -50,8 +50,7 @@ def main(argv: list[str], *, directory: TenantDirectory | None = None) -> int:
         # exit 2, not a traceback.
         try:
             records = admitted.directory.current_records(admitted.tenant.id)
-            roster = TenantSystems.of(records, Catalog(read_roster(adapters_under(DEFENDER_DIR))),
-                                     tenant_id=admitted.tenant.id).roster
+            roster = TenantSystems.of(records, Catalog(read_roster(adapters_under(DEFENDER_DIR)))).roster
         except (RegistryError, TenantRefused) as e:
             sys.stderr.write(f"workspace_map: {e}\n")
             return 2

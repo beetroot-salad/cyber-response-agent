@@ -204,7 +204,7 @@ SCAN_ONLY_SHAPES = ("af_unix_bind",)
 #: attempt.
 KNOWN_SHAPES: frozenset[str] = frozenset((*BANNED_SHAPES, *SCAN_ONLY_SHAPES))
 
-#: Whole-token matching closes the suite's sharpest DISCRIMINATION hole: three banned names  # lint-stale-ref: ok — the English word, about this suite's discriminating power; unrelated to the retired AgentRole.DISCRIMINATION lens whose name it happens to spell
+#: Whole-token matching closes the suite's sharpest DISCRIMINATION hole: three banned names
 #: contain others (`symlinkat` holds `symlink`, `linkat`, `link`; `mknodat` holds `mknod`), so a
 #: substring reader reads a probe naming only `symlinkat` and `mknodat` as all six attempted.
 _TOKEN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")

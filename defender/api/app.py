@@ -227,7 +227,7 @@ async def _refused_by_record_rule(request: Request, exc: Exception) -> Response:
 
 
 async def _secret_store_refused(request: Request, exc: Exception) -> Response:
-    """The 500 for the secret store refusing the API's own login or request (any 4xx, which stores nothing): our setup,
+    """The 500 for the secret store refusing the API's own request (any 4xx, which stores nothing): our setup,
     not the caller's, so it is logged as an error and named in the answer (#1470 G4, r8 Am-1)."""
     _logger.error("the secret store refused the API: %s", exc)
     return problem(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc))

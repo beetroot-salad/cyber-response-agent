@@ -86,7 +86,7 @@ services:
 
   # Self-hosted git service for tenant knowledge repos (#1108, #1120): each tenant's
   # `settings/` + `agent/` live in their own repo here, never in this product repo or on
-  # GitHub. Operator-side infrastructure, like the data root — NOT part of the playground  # lint-stale-ref: ok — the English word, not the removed test helper class
+  # GitHub. Operator-side infrastructure, like the data root — NOT part of the playground
   # (that is the simulated client estate, and is destroyed on lever-down).
   #
   # From the dev container: http://forgejo:3000; from the host's browser:

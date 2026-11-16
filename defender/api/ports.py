@@ -139,8 +139,8 @@ class SecretStoreUnavailable(Exception):
 
 
 class SecretStoreRefused(Exception):
-    """The secret store refused the API after start: its login (403) or its request (any other 4xx). OpenBao refuses
-    before it writes, so nothing was stored; our setup, not the caller's, so a 500 naming the refusal (#1470 G4, O7;
+    """The secret store refused the API after start: a 403 (the token, its policy or the mount: any can be why, #1532
+    P1) or any other 4xx (the request). OpenBao refuses before it writes, so nothing was stored; our setup, not the caller's, so a 500 naming the refusal (#1470 G4, O7;
     r8 Am-1)."""
 
 

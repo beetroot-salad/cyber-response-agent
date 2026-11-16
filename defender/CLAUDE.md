@@ -76,6 +76,16 @@ raises its credential generation, and its credentials are set again (`PUT
 /systems/<id>/credentials`). Connect hands its result to the tenant admin as a folder: its
 validator takes `--handoff <folder>` and no longer `--tenant`.
 
+## Upgrade from before #1532
+
+The API's start check asks OpenBao who its token is (lookup-self) before its metadata read, and the writer policy
+`store_policies()` writes now grants that lookup. A token minted with OpenBao's default policy already holds it; one
+minted without it (`-no-default-policy`) refuses start, naming `DEFENDER_OPENBAO_ADDR` and
+`DEFENDER_API_OPENBAO_TOKEN_FILE`, until the writer policy is re-applied. Once, before starting the new API: render
+the policy for the API's mount, `python -c 'from defender.credential_proxy import store_policies;
+print(store_policies(kv_mount="<mount>")["writer"])' > writer.hcl` from the repository root, then
+`bao policy write <the writer policy's name> writer.hcl`.
+
 ## Upgrade from before #1485
 
 Migrations `0017_retire_learning_cutover` and `0018_learning_set_aside_indexes`, as in "Upgrading" above. `0017`

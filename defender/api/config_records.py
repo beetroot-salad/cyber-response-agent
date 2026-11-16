@@ -82,9 +82,13 @@ def _announce_leaving(principal: Principal, system_id: str, detail: str, leaving
 
 
 def _whose(fault: _Refused) -> str:
-    """What OpenBao refused: the API's token (403), or the request itself (any other 4xx: our request or the mount's
-    setup). Both are ours to fix, not the caller's."""
-    return "the API's login" if fault.login_refused else "the API's request"
+    """What OpenBao refused, and for a 403 the settings that took part (#1532 K6, P1): the token, its policy and the
+    mount can each be why, and the start check may never have run (the API started sealed). Any other 4xx is the
+    request itself (ours, or the mount's setup). Both are ours to fix, not the caller's."""
+    if fault.forbidden:
+        return ("the API's request (403: check the API's token, its policy and DEFENDER_OPENBAO_KV_MOUNT; any of them "
+                "can be why)")
+    return "the API's request"
 
 
 class ConfigRecords:

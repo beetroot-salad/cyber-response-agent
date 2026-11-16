@@ -1,15 +1,26 @@
 """#1470: a scripted OpenBao at the HTTP edge, for tests that drive the real `OpenBaoSecrets` (and the API's start check)
 without a server — NO test functions.
 
-It answers as OpenBao 2.4.1 was observed to (2026-11-14, a dev server with the writer policy `store_policies` gives):
+It answers as OpenBao 2.4.1 was observed to (2026-11-14 and #1532's probes, a dev server):
 `GET /v1/sys/seal-status` unauthenticated `{"initialized", "sealed", ...}`; a sealed server answers every other path 503
-`{"errors": ["Vault is sealed"]}` whatever the token (observed, design C20, openbao 2.4.1 -dev); a token it does not know 403 `permission denied`; the writer's token cannot read a
-value (`GET <mount>/data/...` is 403) but reads metadata (404 `{"errors": []}` for a path never written, else 200 with
-`current_version` and `versions`); a write (`POST <mount>/data/<path>`) is 200 with the new version. It is a policy
-stand-in only for those answers: it holds sets by path and version, nothing more.
+`{"errors": ["Vault is sealed"]}` whatever the token (observed, design C20, openbao 2.4.1 -dev); a token it does not know
+403 `permission denied`. A known token's answers follow from the policies it holds, the policy check first:
+- `default` (OpenBao's default policy) and the current `writer` (`store_policies`, #1532) grant `GET
+  auth/token/lookup-self` (200 `{"data": {...}}`); `writer-pre-1532` (the writer policy before #1532) and `proxy` do
+  not. A token holding a policy name with no policy behind it gets nothing from it.
+- `writer` and `writer-pre-1532` grant, under the mount the policy was written for (`policy_mount`), a metadata read (404
+  `{"errors": []}` for a path never written, else 200 with `current_version` and `versions`) and a write (`POST
+  <mount>/data/<path>`, 200 with the new version); never a value read (403), a delete or a list.
+- `proxy` grants a value read under its mount, nothing else this stand-in answers.
+- A path no held policy covers is 403, whether or not its mount exists; a covered path on a mount that does not exist
+  (`mounts`) is 404 `no handler for route` (#1532 probe).
+It is a policy stand-in only for those answers: it holds sets by path and version, nothing more.
 
-- `ScriptedOpenBao(token=, mount=)`: the transport (sync and async); hand it to `serving(..., openbao_transport=...)` or to
-  `OpenBaoSecrets(transport=...)`.
+- `ScriptedOpenBao(token=, mount=, policies=, policy_mount=, mounts=)`: the transport (sync and async); hand it to
+  `serving(..., openbao_transport=...)` or to `OpenBaoSecrets(transport=...)`. `mount` is the KV mount it serves;
+  `policies` the token's (default: the current writer alone, minted without the default policy as the API's is);
+  `policy_mount` the mount those policies were written for (default `mount`); `mounts` the KV mounts that exist
+  (default `{mount}`).
 - State: `sealed`, `seal_status` (an answer or an exception raised for the seal-status read), `calls` (method, path
   after `/v1/`), `value_reads` (every read of a value: the writer's token must never make one), `stored(...)`.
 - Script: `answer(method, contains, response_or_error, *, after=0, times=None)` makes a matching call answer so (an
@@ -22,7 +33,7 @@ import contextlib
 import dataclasses
 import http.server
 import threading
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterable, Iterator
 from typing import Any
 
 import httpx
@@ -31,6 +42,10 @@ WRITER_TOKEN = "api-writer-token-1470"
 KV_MOUNT = "secret"
 _SEALED = {"errors": ["Vault is sealed"]}
 _DENIED = {"errors": ["permission denied"]}
+LOOKUP_SELF = "auth/token/lookup-self"
+#: The policies a token may hold here (see the module docstring).
+POLICIES = frozenset({"default", "writer", "writer-pre-1532", "proxy"})
+_WRITERS = frozenset({"writer", "writer-pre-1532"})
 
 
 @dataclasses.dataclass
@@ -45,8 +60,14 @@ class _Rule:
 
 
 class ScriptedOpenBao(httpx.BaseTransport, httpx.AsyncBaseTransport):
-    def __init__(self, *, token: str = WRITER_TOKEN, mount: str = KV_MOUNT) -> None:
+    def __init__(self, *, token: str = WRITER_TOKEN, mount: str = KV_MOUNT, policies: Iterable[str] = ("writer",),
+                 policy_mount: str | None = None, mounts: Iterable[str] | None = None) -> None:
         self.token, self.mount = token, mount
+        self.policies = frozenset(policies)
+        if not self.policies <= POLICIES:
+            raise ValueError(f"unknown policies {sorted(self.policies - POLICIES)}")
+        self.policy_mount = policy_mount if policy_mount is not None else mount
+        self.mounts = frozenset(mounts) if mounts is not None else frozenset({mount})
         self.sealed = False
         self.seal_status: httpx.Response | Exception | None = None
         self.calls: list[tuple[str, str]] = []
@@ -97,11 +118,20 @@ class ScriptedOpenBao(httpx.BaseTransport, httpx.AsyncBaseTransport):
             return httpx.Response(503, json=_SEALED), None
         if request.headers.get("X-Vault-Token") != self.token:
             return httpx.Response(403, json=_DENIED), None
-        if request.method in ("DELETE", "LIST") or request.url.params.get("list"):  # the writer policy grants neither
+        if path == LOOKUP_SELF and request.method == "GET":
+            if self.policies & {"default", "writer"}:
+                return httpx.Response(200, json={"data": {"id": "s.scripted", "policies": sorted(self.policies)}}), None
             return httpx.Response(403, json=_DENIED), None
-        kind, _, rest = path.removeprefix(f"{self.mount}/").partition("/")
-        if not path.startswith(f"{self.mount}/") or not rest:
-            return httpx.Response(404, json={"errors": []}), None
+        mount, _, below = path.partition("/")
+        kind, _, rest = below.partition("/")
+        if request.method in ("DELETE", "LIST") or request.url.params.get("list"):  # no policy here grants either
+            return httpx.Response(403, json=_DENIED), None
+        writes = bool(self.policies & _WRITERS) and kind in ("metadata", "data")
+        reads = "proxy" in self.policies and kind == "data" and request.method == "GET"
+        if mount != self.policy_mount or not rest or not (writes or reads):
+            return httpx.Response(403, json=_DENIED), None  # the policy check comes before the mount's
+        if mount not in self.mounts:
+            return httpx.Response(404, json={"errors": [f"no handler for route \"{path}\". route entry not found."]}), None
         if kind == "metadata" and request.method == "GET":
             versions = self._sets.get(rest)
             if not versions:
@@ -110,9 +140,13 @@ class ScriptedOpenBao(httpx.BaseTransport, httpx.AsyncBaseTransport):
                        for n in range(1, len(versions) + 1)}
             return httpx.Response(200, json={"data": {"current_version": len(versions), "versions": listing}}), None
         if kind == "data" and request.method == "GET":
-            self.value_reads.append(rest)  # the writer policy grants no read of a value
-            return httpx.Response(403, json={"errors": ["1 error occurred:\n\t* permission denied\n\n"]}), None
-        if kind == "data" and request.method in ("POST", "PUT"):
+            if not reads:
+                self.value_reads.append(rest)  # the writer policy grants no read of a value
+                return httpx.Response(403, json={"errors": ["1 error occurred:\n\t* permission denied\n\n"]}), None
+            if not self._sets.get(rest):
+                return httpx.Response(404, json={"errors": []}), None
+            return httpx.Response(200, json={"data": {"data": self._sets[rest][-1]}}), None
+        if kind == "data" and request.method in ("POST", "PUT") and writes:
             body = httpx.Response(200, content=request.content).json()["data"]
             self._sets.setdefault(rest, []).append(body)
             return httpx.Response(200, json={"data": {"version": len(self._sets[rest]), "destroyed": False,

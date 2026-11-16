@@ -58,7 +58,7 @@ _LEARNING_WORK = "a learning store (#1485)"
 #: How long the secret store's start checks may take, each (the writer's own calls use the writer's timeout).
 _OPENBAO_START_SECONDS = 10.0
 #: The secret path the start's login check reads the metadata of: a tenant and system no record can name, so the
-#: answer is "nothing there" for a token the writer policy holds (it cannot look itself up).
+#: answer is "nothing there" for a token whose policy covers the mount (#1532 K2).
 _PROBE_TENANT, _PROBE_SYSTEM = "00000000-0000-4000-8000-000000000000", "api-login-probe"
 
 
@@ -240,19 +240,35 @@ async def _seal_status(settings: Settings, transport: httpx.AsyncBaseTransport |
 
 
 async def _login_check(settings: Settings, secrets: OpenBaoSecrets) -> None:
-    """The API's token works (G4): a metadata read of a path no record names, since the writer policy cannot look
-    itself up. A refused token (403) names the token file's setting, never the token; any other refusal or failure,
-    an answer that cannot be read included, names the address."""
+    """The API's token works at this address and may read under the mount (G4; #1532 K1-K3): its lookup-self, then a
+    metadata read of a path no record names. A refusal states what OpenBao refused and every setting that took part,
+    never which one is wrong (#1532 P1): a 403 on the lookup names the address and the token file; a 403 on the read,
+    the lookup having passed, names the mount, the token's policy and the token file. Any other answer, or none, names
+    the address. The token is never shown."""
+    addr = settings.openbao_addr
+    try:
+        await secrets.look_up_self()
+    except SecretStoreRefused as refused:
+        if not refused.forbidden:
+            raise StartRefused(f"DEFENDER_OPENBAO_ADDR: the secret store at {addr} refused the API's token lookup "
+                               f"({refused})") from None
+        raise StartRefused(f"DEFENDER_OPENBAO_ADDR, DEFENDER_API_OPENBAO_TOKEN_FILE: OpenBao at {addr} does not accept "
+                           f"the token the file holds ({refused}); the token's policy must also grant lookup-self (after "
+                           f"an upgrade from before #1532, re-apply the writer policy)") from None
+    except AdapterFault as failed:
+        raise StartRefused(f"DEFENDER_OPENBAO_ADDR: the secret store at {addr} could not answer the API's token lookup "
+                           f"({failed})") from None
     try:
         await secrets.has_credentials(_PROBE_TENANT, _PROBE_SYSTEM, generation=1)
     except SecretStoreRefused as refused:
-        if not refused.login_refused:
-            raise StartRefused(f"DEFENDER_OPENBAO_ADDR: the secret store at {settings.openbao_addr} refused the API's "
+        if not refused.forbidden:
+            raise StartRefused(f"DEFENDER_OPENBAO_ADDR: the secret store at {addr} refused the API's "
                                f"login check ({refused})") from None
-        raise StartRefused(f"DEFENDER_API_OPENBAO_TOKEN_FILE: the secret store at {settings.openbao_addr} refused the "
-                           f"token the file holds ({refused})") from None
+        raise StartRefused(f"DEFENDER_OPENBAO_KV_MOUNT, DEFENDER_API_OPENBAO_TOKEN_FILE: the token the file holds is "
+                           f"valid at {addr} but may not read under the mount {settings.openbao_kv_mount!r} ({refused}): "
+                           f"check the mount setting and the token's policy") from None
     except AdapterFault as failed:
-        raise StartRefused(f"DEFENDER_OPENBAO_ADDR: the secret store at {settings.openbao_addr} could not answer the "
+        raise StartRefused(f"DEFENDER_OPENBAO_ADDR: the secret store at {addr} could not answer the "
                            f"API's login check ({failed})") from None
 
 
