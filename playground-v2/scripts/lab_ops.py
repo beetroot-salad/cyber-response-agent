@@ -963,6 +963,9 @@ class LabOps:
         self._outer("rm", "-f", "-v", name, check=False)
         self._outer("run", "-d", "--name", name, "-e", "discovery.type=single-node",
                     "-e", "xpack.security.enabled=false", "-e", f"path.repo={REPO_DIR}",
+                    # A whole restore of the snapshot can take the shared disk past the 85% low
+                    # watermark; a scratch node that then leaves shards unassigned fails the count.
+                    "-e", "cluster.routing.allocation.disk.threshold_enabled=false",
                     "-e", "ES_JAVA_OPTS=-Xms1g -Xmx1g", "-v", f"{self.repo_dir}:{REPO_DIR}:ro", self.es_image)
         try:
             def call(method: str, path: str, body: Any = None) -> Any:
