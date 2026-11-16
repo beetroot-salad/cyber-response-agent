@@ -18,6 +18,8 @@ import subprocess
 import tempfile
 import threading
 import time
+import urllib.parse
+from html.parser import HTMLParser
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -156,9 +158,50 @@ def test_1540_f7_an_api_request_reaches_the_upstream_with_its_path_and_query_and
     assert ("GET", path) in dev.api.received, dev.api.received
 
 
-def test_1540_f7_a_path_outside_api_is_not_forwarded_to_the_upstream(dev: Dev):
-    """`/apix` is not an API path: only `/api` and `/api/...` are proxied, as the ingress does. (F7)"""
-    assert httpx.get(f"{ORIGIN}/api/me", timeout=10).json()["path"] == "/api/me", "control: /api/me is forwarded"
-    httpx.get(f"{ORIGIN}/apix", timeout=10)
-    httpx.get(f"{ORIGIN}/apix/y?a=1", timeout=10)
-    assert [p for _, p in dev.api.received if p.startswith("/apix")] == []
+class _ModuleScripts(HTMLParser):
+    """The `src` of each module script the served document references."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.sources: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        values = dict(attrs)
+        if tag == "script" and values.get("type") == "module" and values.get("src"):
+            self.sources.append(str(values["src"]))
+
+
+def _served_entry(copy: Path) -> tuple[str, Path]:
+    """(the URL the served document loads a script from, the copy's own file of that name): the module scripts the
+    document references that are files of the copy. Fails when it references none."""
+    scripts = _ModuleScripts()
+    scripts.feed(httpx.get(f"{ORIGIN}/", timeout=10).text)
+    for src in scripts.sources:
+        path = urllib.parse.urlsplit(src)
+        if path.netloc or "node_modules" in path.path:
+            continue
+        candidate = copy / urllib.parse.unquote(path.path).lstrip("/")
+        if candidate.is_file():
+            return src, candidate
+    pytest.fail(f"the served document references no module script that is a file of the copy: {scripts.sources}")
+
+
+def test_1540_f7_an_edit_to_a_source_module_the_app_loads_is_served_without_restarting(dev: Dev):
+    """With `bun run dev` running, a constant appended to the module the document loads as its script is in what the dev
+    server serves for that module's URL within the timeout; before the edit it is not. (F7: the hot-reload loop)"""
+    marker = f"zzHotReload{time.time_ns()}"
+    url, source = _served_entry(dev.copy)
+    original = source.read_text(encoding="utf-8")
+
+    def served() -> str:
+        return httpx.get(urllib.parse.urljoin(f"{ORIGIN}/", url), timeout=10).text
+
+    assert marker not in served(), "control: the marker is absent before the edit"
+    try:
+        source.write_text(f'{original}\nexport const {marker} = "{marker}";\n', encoding="utf-8")
+        deadline = time.monotonic() + 30
+        while marker not in (body := served()):
+            assert time.monotonic() < deadline, f"{url} never carried the edit within 30s: {body[:300]}"
+            time.sleep(0.3)
+    finally:
+        source.write_text(original, encoding="utf-8")

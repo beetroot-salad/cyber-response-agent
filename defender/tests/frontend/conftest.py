@@ -1,9 +1,10 @@
 """#1161 the frontend's browser and ingress checks: the pinned Chromium, the running world (API child, ingress,
 provider front channel) and the Q6 cookie-less request. Tools missing is a failure, never a skip (B11).
 
-CSP (#1540 F8): every browser test fails on any `securitypolicyviolation` in any page of its context. `guard_csp(context)`
-installs the report and returns the live list of violations (each "<directive> <blocked> @ <document>"); the `context`
-fixture asserts it empty at teardown. A test that makes its own context calls `guard_csp` and asserts the list itself."""
+CSP (#1540 F8): every browser test fails on any `securitypolicyviolation` in any page of any context the `browser` fixture
+makes. The fixture installs the one report listener in each context (so a test's own context is guarded too) and checks the
+context's list is empty when the context closes. `guard_csp(context)` looks up that installed list (each entry
+"<directive> <blocked> @ <document>"); a test that triggers a violation on purpose asserts it, then clears the list."""
 from __future__ import annotations
 
 import dataclasses
@@ -43,13 +44,55 @@ _CSP_LISTENER = ("window.addEventListener('securitypolicyviolation', e => window
 _NOW = dt.datetime(2026, 11, 1, 12, tzinfo=dt.UTC)
 
 
+class GuardedContext:
+    """A Playwright browser context with F8's guard installed: every other attribute is the real context's. `violations`
+    is the live list of CSP violations any of its pages reported; `close()` closes the context, then fails when the list
+    is not empty."""
+
+    def __init__(self, context: Any) -> None:
+        self._context = context
+        self.violations: list[str] = []
+        self.closed = False
+        context.expose_binding(_CSP_BINDING, lambda source, message: self.violations.append(str(message)))
+        context.add_init_script(_CSP_LISTENER)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._context, name)
+
+    def close(self) -> None:
+        if not self.closed:
+            for page in self._context.pages:  # let a report still in flight arrive
+                page.wait_for_timeout(100)
+                break
+            self._context.close()
+            self.closed = True
+        assert not self.violations, f"F8: the page broke the ingress's CSP: {self.violations}"
+
+
 def guard_csp(context: Any) -> list[str]:
-    """Record every CSP violation any page of `context` reports, now and later, across navigations and closed tabs.
-    Returns the list the violations are appended to."""
-    violations: list[str] = []
-    context.expose_binding(_CSP_BINDING, lambda source, message: violations.append(str(message)))
-    context.add_init_script(_CSP_LISTENER)
+    """The live list of CSP violations any page of `context` (one the `browser` fixture made) has reported, across
+    navigations and closed tabs. Not an installer: the fixture installed the guard when it made the context."""
+    # Duck-typed: pytest imports this file as `conftest` and tests import it as `defender.tests.frontend.conftest`, so
+    # there are two `GuardedContext` classes and `isinstance` would refuse the other module's.
+    violations = getattr(context, "violations", None)
+    assert isinstance(violations, list), "guard_csp: the context was not made by the `browser` fixture"
     return violations
+
+
+class GuardedBrowser:
+    """The pinned Chromium, whose every context carries F8's guard."""
+
+    def __init__(self, chromium: Any) -> None:
+        self._chromium = chromium
+        self.made: list[GuardedContext] = []
+
+    def new_context(self, **options: Any) -> GuardedContext:
+        made = GuardedContext(self._chromium.new_context(**options))
+        self.made.append(made)
+        return made
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._chromium, name)
 
 
 @pytest.fixture(scope="session")
@@ -80,7 +123,7 @@ def playwright_(browser_tools: None) -> Iterator[Any]:
 
 
 @pytest.fixture(scope="module")
-def browser(playwright_: Any) -> Iterator[Any]:
+def chromium_(playwright_: Any) -> Iterator[Any]:
     """The pinned headless Chromium."""
     chromium = playwright_.chromium.launch()
     try:
@@ -90,19 +133,32 @@ def browser(playwright_: Any) -> Iterator[Any]:
 
 
 @pytest.fixture
-def context(browser: Any) -> Iterator[Any]:
+def browser(chromium_: Any) -> Iterator[GuardedBrowser]:
+    """The browser whose every context fails its test on any CSP violation (F8), checked when the context closes; a context
+    the test leaves open is closed (and so checked) at the test's end."""
+    guarded = GuardedBrowser(chromium_)
+    try:
+        yield guarded
+    finally:
+        failures: list[AssertionError] = []
+        for made in guarded.made:
+            try:
+                made.close()
+            except AssertionError as error:
+                failures.append(error)
+        if failures:
+            raise failures[0]
+
+
+@pytest.fixture
+def context(browser: GuardedBrowser) -> Iterator[GuardedContext]:
     """A fresh browser profile (no cookies, no storage), `WAIT_MS` default timeout; the test errors on any CSP violation."""
     ctx = browser.new_context()
     ctx.set_default_timeout(WAIT_MS)
-    violations = guard_csp(ctx)
     try:
         yield ctx
-        for page in ctx.pages:  # let a report still in flight arrive
-            page.wait_for_timeout(100)
-            break
     finally:
         ctx.close()
-    assert not violations, f"F8: the page broke the ingress's CSP: {violations}"
 
 
 @pytest.fixture

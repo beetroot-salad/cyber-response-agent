@@ -14,6 +14,7 @@ import httpx
 import pytest
 
 from defender.tests.support.api._server1083 import A
+from defender.tests.tenancy.tenant_1108_p4.test_dev_compose import COMPOSE_DIR, mounted_theme_sources
 from defender.tests.support.frontend._ingress1161 import ARTIFACT_DOMAIN, REPO, ingress, launcher_env
 
 UUID = "3400a0c8-beda-4fe6-86fb-3c6da1ea4a11"
@@ -79,17 +80,19 @@ class _Assets(HTMLParser):
 
 
 # Caddy's own error answers (a 400 to a malformed escape) are outside B9's header promise (owner ruling): untested.
-def test_1161_b9_the_built_files_carry_the_headers_and_are_revalidated_on_every_load(world):
-    """Every script, stylesheet and other file `index.html` references answers 200 with the three headers and
-    `no-cache`, whatever the build named them: a browser never runs a cached app against a newer API. (B9, F2)"""
+def test_1161_b9_every_built_file_carries_the_headers_and_is_revalidated_on_every_load(world, built_frontend):
+    """Every file under the built `dist/`, fetched through the ingress, answers 200 with the three headers and
+    `no-cache`, whatever the build named it: a browser never runs a cached app against a newer API. (B9, B11, F2)"""
     parsed = _Assets()
     parsed.feed(world.get("/").text)
     assert parsed.scripts, "positive control: the app references a script"
     assert parsed.styles, "positive control: the app references a stylesheet"
-    for asset in sorted({*parsed.scripts, *parsed.styles, *parsed.others}):
-        r = world.get(asset)
-        assert r.status_code == 200, asset
-        _assert_guarded(r, asset)
+    built = sorted(p.relative_to(built_frontend).as_posix() for p in built_frontend.rglob("*") if p.is_file())
+    assert {urllib.parse.urlsplit(a).path.lstrip("/") for a in (*parsed.scripts, *parsed.styles)} <= set(built)
+    for name in built:
+        r = world.get("/" + urllib.parse.quote(name))
+        assert r.status_code == 200, name
+        _assert_guarded(r, name)
 
 
 def test_1540_f1_the_built_landing_page_loads_from_the_apps_own_origin_with_nothing_inlined(world, context, requests):
@@ -106,6 +109,23 @@ def test_1540_f1_the_built_landing_page_loads_from_the_apps_own_origin_with_noth
     assert [src for src, width in images if width == 0] == [], f"images that did not load: {images}"
     loaded = [r.url for r in requests if r.resource_type == "image" and urllib.parse.urlsplit(r.url).path != "/favicon.ico"]
     assert loaded, "positive control: the illustration is an image request to the app's origin"
+
+
+def test_1540_pr5_the_landing_pages_illustration_is_the_file_the_theme_gets_mounted(world, context, requests):
+    """The landing page's illustration, as the ingress serves it, is byte for byte one of the files the dev compose mounts
+    into the Keycloak theme: one file, the app's and the theme's. (PR5, F1: asset inlining is off)"""
+    mounted = {path: path.read_bytes() for path in mounted_theme_sources(COMPOSE_DIR)}
+    assert mounted, "positive control: the compose file mounts sources into the theme"
+    page = context.new_page()
+    page.goto(f"{world.origin}/")
+    page.locator('[data-screen="root"]').first.wait_for()
+    page.wait_for_load_state("networkidle")
+    served = [r.response().body() for r in requests
+              if r.resource_type == "image" and urllib.parse.urlsplit(r.url).path != "/favicon.ico" and r.response()]
+    assert served, "positive control: the landing page requested an image"
+    assert any(body in mounted.values() for body in served), (
+        f"no image the landing page loads equals a mounted source: {[len(b) for b in served]} bytes against "
+        f"{ {p.name: len(b) for p, b in mounted.items()} }")
 
 
 def _header_set(r: httpx.Response) -> list[tuple[str, str]]:

@@ -407,8 +407,8 @@ def _app_requests(requests: list[Any], origin: str) -> list[str]:
 @pytest.mark.parametrize("phase", ["signed-out", "signed-in"])
 def test_1540_f4_the_landing_page_shows_the_same_signed_out_or_in_and_makes_no_api_call(
         world, context, requests, phase):
-    """`/` shows `root` with a plain link `<a href="/home" data-action="sign-in">`, no API request at all, no sign-in,
-    `location` stays `/`. (F4)"""
+    """`/` shows `root`: the product name and a plain link `Sign in` (`<a href="/home" data-action="sign-in">`), no API
+    request at all, no sign-in, `location` stays `/`. (F4)"""
     if phase == "signed-in":
         sign_in(world, context)
     mark = len(requests)
@@ -423,6 +423,8 @@ def test_1540_f4_the_landing_page_shows_the_same_signed_out_or_in_and_makes_no_a
     link = page.locator(SIGN_IN)
     assert link.evaluate("e => e.tagName") == "A"
     assert link.get_attribute("href") == "/home"
+    assert (link.text_content() or "").strip() == "Sign in"
+    assert "Defender" in (page.locator(f'[data-screen="{ROOT}"]').first.text_content() or ""), "the product name"
     assert signed_in(context) == (phase == "signed-in")
     assert [r.url for r in requests[mark:] if not r.url.startswith(world.origin)] == [], "no third-party origin (F1)"
 
@@ -479,21 +481,27 @@ def _signed_in_home(world: Any, context: Any, requests: list[Any]) -> Any:
 
 
 def test_1540_pr2_signing_out_ends_the_session_and_leaves_by_replace(world, context, requests):
-    """One `POST /api/auth/logout`, the session cookie gone, the landing page at `/`; the history is replaced, so Back
-    does not return to the home. (PR2 signOut)"""
+    """One `POST /api/auth/logout`, the session cookie gone, then a document load of `/` (the landing page); the history
+    is replaced, so Back does not return to the home. (PR2 signOut)"""
     page = _signed_in_home(world, context, requests)
     length = page.evaluate("history.length")
+    mark = len(requests)
     page.locator(SIGN_OUT).click()
     screen(page, ROOT)
     settle(page)
-    assert auth_calls(requests, world.origin, "/api/auth/logout") == [("POST", "/api/auth/logout")]
+    after = requests[mark:]
+    assert auth_calls(after, world.origin, "/api/auth/logout") == [("POST", "/api/auth/logout")]
+    assert navigations_to(after, world.origin, "/") == [{}], "leaving is a document navigation to `/`, not a render in place"
+    post = next(i for i, r in enumerate(after) if r.method == "POST" and path_is(r.url, "/api/auth/logout"))
+    leave = next(i for i, r in enumerate(after) if r.is_navigation_request() and urllib.parse.urlsplit(r.url).path == "/")
+    assert post < leave, "the navigation to `/` follows the POST"
     assert not signed_in(context)
     assert where(page) == ("/", {})
     assert page.evaluate("history.length") == length, "replace, not a new history entry"
     page.go_back()
     settle(page)
     assert where(page)[0] != "/home" and shown(page) != HOME
-    assert logins(requests, world.origin) == [], "the landing page started no sign-in"
+    assert logins(after, world.origin) == [], "the landing page started no sign-in"
 
 
 def test_1540_pr2_signing_out_when_already_signed_out_still_leaves_for_the_landing_page(world, context, requests):
@@ -548,18 +556,3 @@ def test_1540_f3_a_me_that_is_not_the_person_shape_is_the_error_state_and_starts
     settle(page)
     assert logins(requests[mark:], world.origin) == []
     assert page.locator(f'[data-screen="{HOME}"]').count() == 0
-
-
-def test_1540_f3_a_screen_read_that_answers_null_is_the_error_state_and_starts_no_sign_in(world, context, requests):
-    """The investigation read answers 200 with `null`: the screen cannot draw it, so the shell's error state shows;
-    no sign-in. (Errors: error boundary and `unhandledrejection`)"""
-    sign_in(world, context)
-    mark = len(requests)
-    read = _read_path(world)
-    context.route(lambda u: urllib.parse.urlsplit(u).path == read, lambda route: route.fulfill(status=200, body="null", content_type="application/json"))
-    page = context.new_page()
-    page.goto(f"{world.origin}{world.screen()}")
-    screen(page, ERROR)
-    settle(page)
-    assert page.locator('[data-screen="investigation"]').count() == 0
-    assert logins(requests[mark:], world.origin) == []

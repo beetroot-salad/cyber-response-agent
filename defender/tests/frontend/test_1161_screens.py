@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 from defender.tests.frontend._flow1161 import api_calls, logins, screen, settle, shown, sign_in, where
+from defender.tests.frontend.conftest import guard_csp
 from defender.tests.support.api._server1083 import A, BOB
 from defender.tests.support.frontend import _shapes1161 as S
 from defender.tests.support.frontend._browser1161 import path_is, run_async
@@ -119,6 +120,7 @@ def test_1161_b3_every_returnable_member_reaches_the_app_at_its_own_pathname_sig
             screen(page, shape)
             assert where(page) == (value, {}), value
             assert logins(seen, world.origin) == [value], value
+            assert guard_csp(with_context) == [], value
         finally:
             with_context.close()
     sign_in(world, context)

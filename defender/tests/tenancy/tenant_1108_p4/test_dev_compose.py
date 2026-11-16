@@ -322,6 +322,26 @@ def _files_below(root: Path, skip: Path | None = None) -> list[Path]:
             and not (skip and _under(p, skip))]
 
 
+def mounted_theme_sources(compose_dir: Path = COMPOSE_DIR, compose: dict | None = None) -> list[Path]:
+    """The host files the compose file mounts into the Keycloak theme folder (found through the compose file's own bind
+    mounts, as the theme check does), resolved."""
+    keycloak = (compose or _compose())["services"]["keycloak"]
+    return [(compose_dir / source).resolve() for kind, source, target in _mounts(keycloak)
+            if kind == "bind" and target.startswith(THEME_IN_KEYCLOAK + "/")]
+
+
+def twins_of(sources: list[Path], frontend: Path) -> list[tuple[Path, Path]]:
+    """(source, twin) for every non-empty file below `frontend` (build outputs aside) that is byte-identical to a source
+    and is not that source itself."""
+    found = []
+    for source in sources:
+        content = source.read_bytes()
+        found += [(source, other) for other in _files_below(frontend)
+                  if other.resolve() != source.resolve() and other.stat().st_size == len(content) and content
+                  and other.read_bytes() == content]
+    return found
+
+
 def check_theme_is_mounted_and_looks_come_from_single_file_mounts(compose: dict, compose_dir: Path, theme: Path,
                                                                   frontend: Path) -> None:
     """F5/PR5, read statically: compose mounts the theme folder at Keycloak's themes dir and mounts single files from
@@ -411,3 +431,28 @@ def test_1540_f5_the_mount_check_accepts_a_good_world_and_refuses_each_break(tmp
     broken(css_=css.read_text().replace("tokens.css", "colours.css"))  # a reference nothing provides
     broken(css_=css.read_text().replace('@import "tokens.css";', ""))  # a mount the stylesheet never uses
     broken(extra=theme / "login" / "resources" / "img" / "copy.svg")  # PR5: a copy of the illustration in the theme
+
+
+def test_1540_pr5_no_file_of_the_frontend_is_a_twin_of_a_source_mounted_into_the_theme():
+    """Every file the dev compose mounts into the Keycloak theme exists once under `defender/frontend/`: no byte-identical
+    copy of it anywhere there, so the app keeps no copy of the illustration or the tokens. (PR5)"""
+    sources = mounted_theme_sources()
+    assert len(sources) >= 2, f"the illustration and the tokens are mounted into the theme: {sources}"
+    assert all(_under(source, FRONTEND.resolve()) for source in sources), sources
+    assert twins_of(sources, FRONTEND) == []
+
+
+def test_1540_pr5_the_twin_search_finds_a_copy_anywhere_under_the_frontend_and_ignores_the_source_itself(tmp_path):
+    """Self-test of the search: a copy in the app's own folders is found, build outputs and the source are not. (PR5)"""
+    frontend = tmp_path / "frontend"
+    (frontend / "src" / "assets").mkdir(parents=True)
+    (frontend / "dist").mkdir()
+    art = frontend / "art.svg"
+    art.write_text("<svg>art</svg>")
+    (frontend / "other.svg").write_text("<svg>other</svg>")
+    assert twins_of([art], frontend) == []
+    (frontend / "dist" / "built.svg").write_text("<svg>art</svg>")
+    assert twins_of([art], frontend) == [], "a build output is not a copy"
+    twin = frontend / "src" / "assets" / "again.svg"
+    twin.write_text("<svg>art</svg>")
+    assert twins_of([art], frontend) == [(art, twin)]

@@ -1,6 +1,9 @@
-"""#1540 F8, the CSP guard's own controls: a page loaded through the real ingress, a violation it triggers is recorded
-(across a navigation and a closed tab too), and a clean load records none."""
+"""#1540 F8, the CSP guard's own controls: the `browser` fixture guards every context it makes, so in a context of the
+test's own a violation the page triggers through the real ingress is recorded (across a navigation and a closed tab
+too), and a clean load records none. A test that causes a violation on purpose asserts it, then clears the list."""
 from __future__ import annotations
+
+import pytest
 
 from defender.tests.frontend._flow1161 import FAILED, screen
 from defender.tests.frontend.conftest import WAIT_MS, guard_csp
@@ -20,7 +23,7 @@ def _wait_for(page, violations, count=1):
 def _guarded_page(browser, world):
     context = browser.new_context()
     context.set_default_timeout(WAIT_MS)
-    violations = guard_csp(context)
+    violations = guard_csp(context)  # the fixture installed it: no call of ours made it
     page = context.new_page()
     page.goto(f"{world.origin}/{FAILED}")
     screen(page, FAILED)
@@ -49,7 +52,10 @@ def test_1540_f8_an_inline_script_is_recorded_as_a_csp_violation(browser, world)
         page.evaluate(INLINE_SCRIPT)
         _wait_for(page, violations)
         assert violations
-        assert "script-src" in violations[0] or "default-src" in violations[0], violations
+        directive, blocked, *_ = violations[0].split()
+        assert directive in ("script-src", "script-src-elem", "default-src"), violations
+        assert blocked == "inline", violations
+        violations.clear()  # caused on purpose and asserted above
     finally:
         context.close()
 
@@ -62,6 +68,7 @@ def test_1540_f8_a_third_party_image_is_recorded_as_a_csp_violation(browser, wor
         _wait_for(page, violations)
         assert violations
         assert "example.invalid" in violations[0], violations
+        violations.clear()  # caused on purpose and asserted above
     finally:
         context.close()
 
@@ -79,5 +86,18 @@ def test_1540_f8_violations_in_later_documents_and_closed_tabs_are_still_recorde
         page.close()
         assert len(violations) >= 2, violations
         assert any("example.invalid" in v for v in violations), violations
+        violations.clear()  # caused on purpose and asserted above
     finally:
         context.close()
+
+
+def test_1540_f8_a_violation_left_in_a_contexts_list_fails_when_the_context_closes(browser, world):
+    """The guard is the fixture's own: closing a context that still holds a violation fails, so a test cannot forget
+    it. (F8, self-test)"""
+    context, page, violations = _guarded_page(browser, world)
+    page.evaluate(INLINE_SCRIPT)
+    _wait_for(page, violations)
+    assert violations, "positive control: the guard saw the violation"
+    with pytest.raises(AssertionError, match="CSP"):
+        context.close()
+    violations.clear()  # acknowledged: the fixture's own teardown check has nothing left to report

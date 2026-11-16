@@ -59,7 +59,7 @@ def _produce(world: Any, browser: Any, value: str, *, cookies: Any = None) -> tu
     the CSP violations the context reports, live)."""
     context = browser.new_context()
     context.set_default_timeout(30_000)
-    violations = guard_csp(context)
+    violations = guard_csp(context)  # installed by the `browser` fixture
     if cookies:
         context.add_cookies(cookies)
     seen: list[Any] = []
@@ -115,6 +115,7 @@ def _outcomes(world: Any, context: Any, browser: Any, phase: str, values: list[s
             shape = S.classify(produced)
             no_session = shape is not None and shape not in S.RETURNABLE
             if no_session:
+                assert shape is not None
                 screen(page, shape)
                 settle(page, 300)
                 starts = logins(seen, world.origin)
@@ -140,9 +141,10 @@ def _outcomes(world: Any, context: Any, browser: Any, phase: str, values: list[s
                     problems.append(f"{value!r}: produced {produced!r}: logins {starts}, landed {got!r}")
                 if shown(page) == "sign-in-failed":
                     problems.append(f"{value!r}: sign-in-failed shown")
+        finally:
             if violations:
                 problems.append(f"{value!r}: CSP violations {violations}")
-        finally:
+                violations.clear()  # reported here; the context's own check at close would repeat it
             ctx.close()
     return problems
 

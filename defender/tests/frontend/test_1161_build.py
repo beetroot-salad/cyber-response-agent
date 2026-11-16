@@ -10,6 +10,7 @@ import dataclasses
 import json
 import re
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -114,9 +115,10 @@ def test_1161_s2_the_build_follows_the_shape_list_and_fails_on_a_type_error(buil
         assert _no_index(frontend)
 
 
-#: Every TypeScript source of the app outside the generated types (F1 b: the type check is the whole project's).
+#: Every TypeScript source of the app outside the generated types and declaration files (a `skipLibCheck` honestly skips
+#: those) (F1 b: the type check is the whole project's).
 SOURCES = sorted(p.relative_to(FRONTEND) for pattern in ("*.ts", "*.tsx") for p in (FRONTEND / "src").rglob(pattern)
-                 if "generated" not in p.relative_to(FRONTEND).parts)
+                 if "generated" not in p.relative_to(FRONTEND).parts and not p.name.endswith(".d.ts"))
 
 
 def test_1540_f1_the_source_set_the_type_error_test_walks_spans_the_shell_and_the_screens():
@@ -140,10 +142,10 @@ def test_1161_s2_the_build_fails_on_a_type_error_in_any_source_file(built_fronte
 
 @pytest.mark.parametrize(("document", "words"), [pytest.param(d, w, id=i) for i, d, w in REFUSED])
 def test_1161_s2_the_build_refuses_every_list_the_api_refuses(built_frontend, tmp_path, document, words):
-    """Each list in the shared table fails the build, in the same words as the API's reader, and makes no
-    `index.html`: a grammar that could match outside its segment, or a template that does not compile. (F1 c, S2)"""
+    """Each list in the shared table fails the build, in the same words as the API's reader, and leaves no
+    `index.html` (a stale one included): a grammar that could match outside its segment, or a template that does not compile. (F1 c, S2)"""
     frontend = _copy(tmp_path, built_frontend, addresses=_bytes(document))
-    done = run_bun(frontend, "run", "build")
+    done = _failing_build(frontend)
     assert done.returncode != 0, "the build accepted a list the API refuses"
     assert words in done.stderr + done.stdout, done.stderr[-1500:]
     assert _no_index(frontend)
@@ -151,11 +153,11 @@ def test_1161_s2_the_build_refuses_every_list_the_api_refuses(built_frontend, tm
 
 @pytest.mark.parametrize("omitted", _declared())
 def test_1540_pr6_a_build_missing_a_declared_input_fails(built_frontend, tmp_path, omitted):
-    """The copy lacks this one input the build declares: the build fails and makes no `index.html` (the build reads
-    its inputs from the declared list; the unmodified copy above is the sufficiency control). (PR6)"""
+    """The copy lacks this one input the build declares: the build fails and leaves no `index.html`, a stale one
+    included (the unmodified copy above is the sufficiency control). (PR6, F1 b)"""
     frontend = copy_frontend(tmp_path / "copy", inputs_override={omitted: None},
                              node_modules_from=node_modules_of(built_frontend))
-    done = run_bun(frontend, "run", "build")
+    done = _failing_build(frontend)
     assert done.returncode != 0, f"the build ran without {omitted}"
     assert _no_index(frontend)
 
@@ -200,11 +202,11 @@ def test_1161_the_test_build_never_writes_the_checkout(built_frontend):
     assert FRONTEND not in built_frontend.parents, built_frontend
 
 
-# --- F8: the source check, observed through `bun run check` (the lint job's command, F6) -----------------------------
+# --- F8: the source check, observed through the lint job's gate (F6): `bun run check`, then `bun run test` ---------------
 
 CONTROL = "zz_control"
-#: One refused form each; each is valid TypeScript, so a failure can only come from the source check. (F8 also lists
-#: `navigation`: the pinned TypeScript's DOM library does not declare it, so no valid file can hold it; not tested.)
+#: One refused form each (F8's list, `navigation` included). Each is valid TypeScript but `navigation`, which the pinned
+#: TypeScript's DOM library may not declare: then a type error also refuses it, and its shell twin below cannot pass.
 REFUSED_FORMS: dict[str, str] = {
     "fetch": 'export const x = fetch("/x");',
     "XMLHttpRequest": "export const x = new XMLHttpRequest();",
@@ -222,6 +224,7 @@ REFUSED_FORMS: dict[str, str] = {
     "self.location": "export const x = self.location;",
     "globalThis.location": "export const x = globalThis.location;",
     "history": "history.back();\nexport const x = 1;",
+    "navigation": "export const x = navigation;",
     "window.open": 'export const x = window.open("/x");',
     "destructured fetch": "const { fetch: f } = window;\nexport const x = f;",
     "auth path literal": 'export const x = "/api/auth/login";',
@@ -233,6 +236,64 @@ ALLOWED_FORMS: dict[str, str] = {
     "path key": 'export const x = "/api/tenants/{tenant_id}/investigations/{investigation_id}";',
     "auth path in a comment": "// /api/auth/login\nexport const x = 1;",
 }
+#: The form every location is tried with, and the directory a copy has none of yet.
+LOCATION_FORM = REFUSED_FORMS["fetch"]
+FRESH = "zz_fresh"
+
+
+def _locations() -> dict[str, str]:
+    """Where under `src/` the source check applies: `src/` itself, every directory outside `shell/` and `generated/`
+    (read from the tree), and one directory the tree does not have. id -> directory relative to `src/`."""
+    src = FRONTEND / "src"
+    found = {"src": ""}
+    for path in sorted(p for p in src.rglob("*") if p.is_dir()):
+        relative = path.relative_to(src)
+        if not {"shell", "generated"} & set(relative.parts):
+            found[f"src/{relative.as_posix()}"] = relative.as_posix()
+    found["src/(a fresh directory)"] = FRESH
+    return found
+
+
+LOCATIONS = _locations()
+
+
+@dataclasses.dataclass
+class Gate:
+    """The lint job's two commands run in order on a copy; it stops at the first that exits non-zero."""
+
+    returncode: int
+    output: str
+
+    @property
+    def refused(self) -> bool:
+        return self.returncode != 0
+
+
+def _output(done: subprocess.CompletedProcess[str]) -> str:
+    return done.stdout + done.stderr
+
+
+def _gate(frontend: Path) -> Gate:
+    """`bun run check` then `bun run test` in `frontend`: refused when either exits non-zero (F6, F8)."""
+    output = ""
+    for script in ("check", "test"):
+        done = run_bun(frontend, "run", script)
+        output += f"$ bun run {script} -> {done.returncode}\n{_output(done)}"
+        if done.returncode != 0:
+            return Gate(done.returncode, output)
+    return Gate(0, output)
+
+
+def _check(frontend: Path) -> Gate:
+    """`bun run check` alone, in the gate's shape."""
+    done = run_bun(frontend, "run", "check")
+    return Gate(done.returncode, _output(done))
+
+
+def _unit_tests(frontend: Path) -> Gate:
+    """`bun run test` alone, in the gate's shape."""
+    done = run_bun(frontend, "run", "test")
+    return Gate(done.returncode, _output(done))
 
 
 @pytest.fixture(scope="module")
@@ -241,66 +302,102 @@ def checked(built_frontend, tmp_path_factory) -> Path:
     return copy_frontend(tmp_path_factory.mktemp("check"), node_modules_from=node_modules_of(built_frontend))
 
 
-def _check_with(frontend: Path, relative: str, text: str) -> subprocess.CompletedProcess[str]:
-    """`bun run check` with `relative` (under `src/`) holding `text`, which is removed again."""
+def _with_source(frontend: Path, relative: str, text: str, run: Callable[[Path], Gate] = _gate) -> Gate:
+    """`run(frontend)` with `relative` (under `src/`) holding `text`; the file, and a directory made for it, go again."""
     path = frontend / "src" / relative
+    fresh = [d for d in reversed(path.parents) if d != frontend / "src" and frontend / "src" in d.parents and not d.exists()]
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text + "\n", encoding="utf-8")
     try:
-        return run_bun(frontend, "run", "check")
+        return run(frontend)
     finally:
         path.unlink()
+        for directory in reversed(fresh):
+            directory.rmdir()
 
 
-def _output(done: subprocess.CompletedProcess[str]) -> str:
-    return done.stdout + done.stderr
+def _lib_declares_navigation(frontend: Path) -> bool:
+    """Whether the copy's TypeScript DOM library declares the global `navigation` (a form no valid file can hold if not)."""
+    lib = frontend / "node_modules" / "typescript" / "lib" / "lib.dom.d.ts"
+    return re.search(r"^declare var navigation\b", lib.read_text(encoding="utf-8"), re.M) is not None
 
 
-def _tsc_errors_in(output: str, name: str) -> list[str]:
-    return [line for line in output.splitlines() if name in line and re.search(r"error TS\d+", line)]
+def _extension(form: str) -> str:
+    return "tsx" if "JSX" in form else "ts"
 
 
-def test_1540_f8_the_check_passes_on_the_unmodified_tree(checked):
-    """`bun run check` (generate + type check + source check) exits 0 on the copy. (F8, F1)"""
-    done = run_bun(checked, "run", "check")
-    assert done.returncode == 0, _output(done)[-1500:]
+def test_1540_f8_the_gate_passes_on_the_unmodified_tree(checked):
+    """`bun run check` then `bun run test` exit 0 on the copy. (F8, F6)"""
+    gate = _gate(checked)
+    assert not gate.refused, gate.output[-1500:]
 
 
 def test_1540_f1_the_check_fails_on_a_plain_type_error(checked):
     """`bun run check` is generate + type check: an unrelated type error fails it. (F1)"""
-    done = _check_with(checked, "screens/zz_type_error.ts", "export const bad: number = 'not a number';")
-    assert done.returncode != 0, "check accepted a type error"
+    gate = _with_source(checked, "screens/zz_type_error.ts", "export const bad: number = 'not a number';", _check)
+    assert gate.refused, "check accepted a type error"
+
+
+def test_1540_f6_the_unit_test_command_passes_on_the_unmodified_tree(checked):
+    """`bun run test` exits 0 on the copy: the gate's second half is something the tree passes. (F6, F1)"""
+    done = _unit_tests(checked)
+    assert not done.refused, done.output[-1500:]
+
+
+def test_1540_f6_a_unit_test_file_that_throws_at_load_fails_the_unit_test_command(checked):
+    """A `src/shell/zz_fail.test.ts` whose module throws when loaded makes `bun run test` exit non-zero, naming it, and
+    the gate refuses the tree. (F6, F8)"""
+    text = 'export {};\nthrow new Error("zz_fail: refused at load");'
+    failing = _with_source(checked, "shell/zz_fail.test.ts", text, _unit_tests)
+    assert failing.refused, "`bun run test` ran no unit-test file, or let a failing one pass"
+    assert "zz_fail.test.ts" in failing.output, failing.output[-1500:]
+    assert _with_source(checked, "shell/zz_fail.test.ts", text).refused, "the gate accepted a failing unit-test file"
 
 
 @pytest.mark.parametrize("form", REFUSED_FORMS)
-def test_1540_f8_the_source_check_refuses_each_form_in_a_screen(checked, form):
-    """A screen file holding this one form fails `bun run check`, naming the file; tsc has no error in it. (F8)"""
-    extension = "tsx" if "JSX" in form else "ts"
-    done = _check_with(checked, f"screens/{CONTROL}.{extension}", REFUSED_FORMS[form])
-    out = _output(done)
-    assert done.returncode != 0, f"check accepted {form}"
-    assert f"{CONTROL}.{extension}" in out, out[-1500:]
-    assert not _tsc_errors_in(out, CONTROL), f"a type error, not the source check: {_tsc_errors_in(out, CONTROL)}"
+def test_1540_f8_the_source_check_refuses_each_form_outside_the_shell_and_the_shell_may_hold_it(checked, form):
+    """This one form in a screen file fails the gate, naming the file; the same file under `src/shell/` passes it
+    (so it was the source check that refused, not a type error). (F8, PR2)"""
+    name = f"{CONTROL}.{_extension(form)}"
+    outside = _with_source(checked, f"screens/{name}", REFUSED_FORMS[form])
+    assert outside.refused, f"the gate accepted {form}"
+    assert name in outside.output, outside.output[-1500:]
+    if form != "navigation" or _lib_declares_navigation(checked):  # else a type error refuses it in the shell too
+        inside = _with_source(checked, f"shell/{name}", REFUSED_FORMS[form])
+        assert not inside.refused, inside.output[-1500:]
+
+
+def test_1540_f8_the_directories_the_location_cases_walk_cover_more_than_one_screen_folder():
+    """The tree has a directory outside `src/shell/` and `src/generated/` besides `src/` itself, so the per-location
+    test below is not a single case. (F8)"""
+    assert len(LOCATIONS) > 2, LOCATIONS
+
+
+@pytest.mark.parametrize("location", LOCATIONS.values(), ids=LOCATIONS.keys())
+def test_1540_f8_the_source_check_applies_at_every_location_outside_the_shell(checked, location):
+    """A refused form in a file at this location (`src/`, a directory outside the shell and the generated types, or a
+    fresh one) fails the gate, naming the file. (F8)"""
+    relative = f"{location}/{CONTROL}.ts" if location else f"{CONTROL}.ts"
+    gate = _with_source(checked, relative, LOCATION_FORM)
+    assert gate.refused, f"the gate accepted a refused form at src/{location}"
+    assert f"{CONTROL}.ts" in gate.output, gate.output[-1500:]
 
 
 @pytest.mark.parametrize("form", ALLOWED_FORMS)
 def test_1540_f8_the_source_check_allows_what_a_screen_may_hold(checked, form):
-    """A property named `location`, a path key and an `/api/auth/` comment pass `bun run check` (twin of the
-    refusals: matching is by resolved symbol and by string, never by name in comments). (F8)"""
-    done = _check_with(checked, f"screens/{CONTROL}.ts", ALLOWED_FORMS[form])
-    assert done.returncode == 0, _output(done)[-1500:]
+    """A property named `location`, a path key and an `/api/auth/` comment pass the gate (twin of the refusals: matching
+    is by resolved symbol and by string, never by name in comments). (F8)"""
+    gate = _with_source(checked, f"screens/{CONTROL}.ts", ALLOWED_FORMS[form])
+    assert not gate.refused, gate.output[-1500:]
 
 
 def test_1540_f8_a_test_file_is_not_exempt_from_the_source_check(checked):
-    """The refused `fetch` in `*.test.ts` outside the shell fails `bun run check` naming that file. (F8)"""
-    done = _check_with(checked, f"screens/{CONTROL}.test.ts", REFUSED_FORMS["fetch"])
-    assert done.returncode != 0, "check exempted a test file"
-    assert f"{CONTROL}.test.ts" in _output(done), _output(done)[-1500:]
-
-
-def test_1540_f8_the_shell_may_hold_the_refused_forms(checked):
-    """The same refused file under `src/shell/` passes `bun run check`: the shell owns the network. (F8, PR2)"""
-    text = "\n".join(REFUSED_FORMS[f].replace("export const x", f"export const x{i}") for i, f in enumerate(
-        ("fetch", "localStorage", "bare location", "auth path literal")))
-    done = _check_with(checked, f"shell/{CONTROL}.ts", text)
-    assert done.returncode == 0, _output(done)[-1500:]
+    """The refused `fetch` in `*.test.ts` outside the shell fails `bun run check` naming that file; the same file under
+    `src/shell/` passes it. Judged on `bun run check` alone: a unit-test file with no test fails `bun run test` by itself,
+    and a passing test is written in a runner's own API, which this contract does not name. (F8)"""
+    name = f"{CONTROL}.test.ts"
+    outside = _with_source(checked, f"screens/{name}", REFUSED_FORMS["fetch"], _check)
+    assert outside.refused, "check exempted a test file"
+    assert name in outside.output, outside.output[-1500:]
+    inside = _with_source(checked, f"shell/{name}", REFUSED_FORMS["fetch"], _check)
+    assert not inside.refused, inside.output[-1500:]
