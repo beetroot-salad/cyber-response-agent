@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 import re
 import subprocess
 import urllib.parse
@@ -136,10 +137,27 @@ def test_1161_b9_two_ingress_instances_serve_at_once(browser_tools, tmp_path: Pa
             assert r.status_code == 200 and "app" in r.text, (origin, r.status_code)
 
 
-def test_1161_b9_the_caddyfile_turns_off_the_admin_endpoint(browser_tools, tmp_path: Path):
-    """`caddy adapt` of the repo's Caddyfile gives `admin.disabled == true`. (B9)"""
-    env = launcher_env("http://localhost:8080", "127.0.0.1:1", tmp_path, work=tmp_path)
+def _adapted(listen: str, tmp_path: Path) -> Any:
+    from defender.api_server.ingress import caddy_environment
+
+    env = caddy_environment(launcher_env(listen, "127.0.0.1:1", tmp_path, work=tmp_path))
     done = subprocess.run(["caddy", "adapt", "--config", "defender/frontend/Caddyfile", "--adapter", "caddyfile"],
                           cwd=REPO, env=env, capture_output=True, text=True, check=False, timeout=60)
     assert done.returncode == 0, done.stderr[-1500:]
-    assert json.loads(done.stdout)["admin"]["disabled"] is True
+    return json.loads(done.stdout)
+
+
+def test_1161_b9_the_caddyfile_turns_off_the_admin_endpoint(browser_tools, tmp_path: Path):
+    """`caddy adapt` of the repo's Caddyfile gives `admin.disabled == true`. (B9)"""
+    assert _adapted("127.0.0.1:8080", tmp_path)["admin"]["disabled"] is True
+
+
+def test_1161_b9_the_ingress_serves_plain_http_on_its_listen_address_for_any_host(browser_tools, tmp_path: Path):
+    """One plain-HTTP server on the listen port, bound to its host, with automatic HTTPS off and no host matcher: what
+    a TLS terminator in front forwards (any `Host`) is served, and Caddy never binds 443 or asks for a certificate.
+    (B9, amended: TLS ends in front of the ingress)"""
+    [server] = _adapted("127.0.0.1:8080", tmp_path)["apps"]["http"]["servers"].values()
+    assert server["listen"] == ["127.0.0.1:8080"], server["listen"]
+    assert server.get("automatic_https", {}).get("disable") is True, server.get("automatic_https")
+    assert all("host" not in matcher for route in server["routes"] for matcher in route.get("match", [])), server["routes"]
+    assert "tls" not in _adapted("127.0.0.1:8080", tmp_path)["apps"]

@@ -1,7 +1,7 @@
 """#1161 piece 1, test-only: the built frontend behind the repo's ingress, started through its launcher (B9, S5, B11).
 
 The launcher is `python -m defender.api_server.ingress` (the record's chosen name), which finds `caddy` on PATH. Its
-four inputs are `DEFENDER_API_FRONTEND_ORIGIN`, `DEFENDER_ARTIFACT_DOMAIN`, `DEFENDER_INGRESS_API_UPSTREAM`
+four inputs are `DEFENDER_INGRESS_LISTEN`, `DEFENDER_ARTIFACT_DOMAIN`, `DEFENDER_INGRESS_API_UPSTREAM`
 (`host:port`) and `DEFENDER_INGRESS_FRONTEND_DIR`; nothing else is passed. Missing tools and a missing frontend or
 launcher fail loudly (B11), never skip.
 
@@ -125,13 +125,13 @@ def build_frontend(frontend: Path = FRONTEND) -> Path:
     return dist
 
 
-def launcher_env(origin: str, upstream: str, frontend_dir: Path, *, artifact_domain: str = ARTIFACT_DOMAIN,
+def launcher_env(listen: str, upstream: str, frontend_dir: Path, *, artifact_domain: str = ARTIFACT_DOMAIN,
                  work: Path | None = None) -> dict[str, str]:
     """The launcher's environment: its four inputs, the process's PATH and HOME-like basics (so Caddy runs), and
     `XDG_*` under `work` so instances keep no shared state."""
     env = {"PATH": os.environ["PATH"], "HOME": os.environ.get("HOME", "/root"),
            "PYTHONPATH": os.pathsep.join(p for p in (str(REPO), os.environ.get("PYTHONPATH", "")) if p),
-           "DEFENDER_API_FRONTEND_ORIGIN": origin, "DEFENDER_ARTIFACT_DOMAIN": artifact_domain,
+           "DEFENDER_INGRESS_LISTEN": listen, "DEFENDER_ARTIFACT_DOMAIN": artifact_domain,
            "DEFENDER_INGRESS_API_UPSTREAM": upstream, "DEFENDER_INGRESS_FRONTEND_DIR": str(frontend_dir)}
     if work is not None:
         env |= {"XDG_DATA_HOME": str(work / "xdg-data"), "XDG_CONFIG_HOME": str(work / "xdg-config")}
@@ -164,11 +164,12 @@ def ingress(upstream: str, frontend_dir: Path, work: Path, *, port: int | None =
     """The launcher running, serving `frontend_dir` and sending `/api` to `upstream` (`host:port`); yields its origin,
     `http://localhost:<port>` (Chromium treats localhost as secure, so `__Host-` cookies work over http). The
     launcher runs in its own session, so teardown kills whatever it started."""
-    origin = f"http://localhost:{port or free_port()}"
+    port = port or free_port()
+    origin = f"http://localhost:{port}"
     work.mkdir(parents=True, exist_ok=True)
     log = (work / "ingress.log").open("w+")
     process = subprocess.Popen(LAUNCHER, cwd=REPO, text=True, stdout=log, stderr=subprocess.STDOUT,
-                               env=launcher_env(origin, upstream, frontend_dir, artifact_domain=artifact_domain,
+                               env=launcher_env(f"127.0.0.1:{port}", upstream, frontend_dir, artifact_domain=artifact_domain,
                                                 work=work), start_new_session=True)
     try:
         deadline = time.monotonic() + START_TIMEOUT

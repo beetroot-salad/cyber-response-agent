@@ -100,7 +100,12 @@ async function load(cameBack: boolean): Promise<void> {
     if (me.status === 401) return unauthorized(target, consumed, cameBack);
     if (me.status !== 200) return showError();
   }
-  await screen.render(context);
+  try {
+    await screen.render(context);
+  } catch {
+    // The shell owns the error state: a screen that fails while drawing shows it, never a page stuck mid-load.
+    if (mine === generation) showError();
+  }
 }
 
 /** This document was reached by Back or Forward (a fresh load of a history entry). */

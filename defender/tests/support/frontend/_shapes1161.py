@@ -146,11 +146,17 @@ def special_picks(cases: list[GeneratedCase], seed: int, taken: list[GeneratedCa
     return picks
 
 
-def _listed(placeholders: object = None, shapes: object = None) -> dict[str, object]:
+#: The uuid placeholder in the address file's own format: pieces over the `hex` alphabet (no regex in the file).
+UUID_PIECES = [["hex", 8], "-", ["hex", 4], "-", ["hex", 4], "-", ["hex", 4], "-", ["hex", 12]]
+HEX = "0123456789abcdef"
+
+
+def _listed(placeholders: object = None, shapes: object = None, alphabets: object = None) -> dict[str, object]:
     base_shapes = [{"name": "root", "template": "/", "returnable": True},
                    {"name": "investigation", "template": "/t/{uuid}/investigations/{uuid}", "returnable": True},
                    {"name": "sign-in-failed", "template": "/sign-in-failed", "returnable": False}]
-    return {"placeholders": {"uuid": UUID} if placeholders is None else placeholders,
+    return {"alphabets": {"hex": HEX} if alphabets is None else alphabets,
+            "placeholders": {"uuid": UUID_PIECES} if placeholders is None else placeholders,
             "shapes": base_shapes if shapes is None else shapes}
 
 
@@ -162,9 +168,14 @@ def _with_shape(**shape: object) -> dict[str, object]:
 #: Shape lists both readers refuse, the API's (`addresses._compile`) and the frontend's build (S2): `(id, document,
 #: words the refusal holds)`. One table, so the two readers cannot drift apart unnoticed.
 REFUSED: tuple[tuple[str, dict[str, object], str], ...] = (
-    *((f"grammar {g!r}", _listed({"uuid": g}), "placeholder uuid") for g in (
-        "[0-9a-f]+|new", "(?:[0-9a-f]+)", ".+", "[^/]+", "a$", "", "[--z]+", "[--9]+", "[z-a]+", "[0-9]{2}|x")),
-    ("grammar not text", _listed({"uuid": 7}), "placeholder uuid"),
+    *((f"pieces {p!r}", _listed({"uuid": p}), "placeholder uuid") for p in (
+        "[0-9a-f]+",  # the retired regex form
+        [], [["hex", 0]], [["hex", 5, 2]], [["hex", -1]], [["hex", 1.5]], [["hex", True]], [["hex", "8"]], [["hex"]],
+        [["hex", 1, 2, 3]], [["nope", 8]], [[["hex"], 8]], ["a/b"], ["a.b"], [""], [7], [None])),
+    ("alphabet with a slash", _listed(alphabets={"hex": "0123456789abcdef/"}), "alphabet hex"),
+    ("alphabet with a dot", _listed(alphabets={"hex": "0123456789abcdef."}), "alphabet hex"),
+    ("empty alphabet", _listed(alphabets={"hex": ""}), "alphabet hex"),
+    ("no alphabets", {"placeholders": {}, "shapes": []}, "must hold `alphabets`"),
     ("no placeholders", {"shapes": []}, "must hold"),
     ("shape without returnable", _with_shape(name="x", template="/x"), "a shape needs"),
     ("duplicate name", _with_shape(name="root", template="/again", returnable=True), "duplicate shape name root"),

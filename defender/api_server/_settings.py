@@ -38,7 +38,6 @@ class Settings:
     host: str
     port: int
     frontend_origin: str
-    api_docs: bool
     administrators: Bootstrap
     keycloak_server_url: str
     signin_issuer: str
@@ -76,7 +75,6 @@ class Settings:
             host=text("DEFENDER_API_HOST"),
             port=parsed("DEFENDER_API_PORT", _port),
             frontend_origin=parsed("DEFENDER_API_FRONTEND_ORIGIN", origin),
-            api_docs="DEFENDER_API_DOCS" in environ and parsed("DEFENDER_API_DOCS", _switch),
             administrators=_administrators("DEFENDER_API_ADMINISTRATORS_FILE", text("DEFENDER_API_ADMINISTRATORS_FILE")),
             keycloak_server_url=parsed("DEFENDER_KEYCLOAK_SERVER_URL", check_server_url),
             signin_issuer=parsed("DEFENDER_KEYCLOAK_ISSUER", check_issuer),
@@ -104,13 +102,6 @@ def _setting_text(environ: Mapping[str, str], name: str) -> str:
     if value != value.strip() or not value.isprintable():
         raise StartRefused(f"{name} has edge whitespace or a character that cannot be printed")
     return value
-
-
-def _switch(text: str) -> bool:
-    """`true` or `false`, exactly: a misspelt switch refuses to start instead of reading as off."""
-    if text not in ("true", "false"):
-        raise ValueError("must be true or false")
-    return text == "true"
 
 
 def _database_dsn(value: str) -> str:

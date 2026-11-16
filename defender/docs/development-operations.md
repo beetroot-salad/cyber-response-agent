@@ -129,7 +129,6 @@ missing or invalid one refuses start naming it. Secret files hold one value, a t
 | `DEFENDER_DATABASE_DSN` | the database (must be at the code's migration head) |
 | `DEFENDER_API_HOST`, `DEFENDER_API_PORT` | listen address |
 | `DEFENDER_API_FRONTEND_ORIGIN` | the app's origin (no path): the one origin a cookie-authenticated write may carry, and the origin the sign-in redirect URI `<origin>/api/auth/callback` is derived from, which the operator registers in the realm; the ingress serves this origin |
-| `DEFENDER_API_DOCS` | dev only: `true` serves the interactive docs pages `/api/docs` and `/api/redoc`; `false` or unset serves neither, and any other value refuses to start; `/api/openapi.json` always ships |
 | `DEFENDER_API_ADMINISTRATORS_FILE` | YAML `administrators: [<email>, ...]` |
 | `DEFENDER_KEYCLOAK_SERVER_URL` | Keycloak as the API reaches it (dev: `http://keycloak:8080`) |
 | `DEFENDER_KEYCLOAK_ISSUER`, `DEFENDER_KEYCLOAK_PROGRAMS_ISSUER` | `<front-channel>/realms/<realm>` (dev: `http://localhost:8080/realms/defender`, `.../defender-programs`) |
@@ -155,10 +154,11 @@ enough to list, read and cancel):
 
 1. Build the frontend (`npm ci && npm run build` in `defender/frontend/`), start the API with the frontend origin set
    to `http://localhost:8000` (not `127.0.0.1`: it must match the realm's redirect exactly) on its own port, and start
-   the repo's ingress with `python -m defender.api_server.ingress` (inputs: `DEFENDER_API_FRONTEND_ORIGIN`,
-   `DEFENDER_ARTIFACT_DOMAIN`, `DEFENDER_INGRESS_API_UPSTREAM` = the API's `host:port`, `DEFENDER_INGRESS_FRONTEND_DIR` =
-   `defender/frontend/dist`; it needs Caddy on PATH). Every API route is under `/api`; set `DEFENDER_API_DOCS=true` for
-   the built-in docs page at `/api/docs`, which is then the client.
+   the repo's ingress with `python -m defender.api_server.ingress` (inputs: `DEFENDER_INGRESS_LISTEN` = `127.0.0.1:8000`,
+   where it serves plain HTTP, `DEFENDER_ARTIFACT_DOMAIN`, `DEFENDER_INGRESS_API_UPSTREAM` = the API's `host:port`,
+   `DEFENDER_INGRESS_FRONTEND_DIR` = `defender/frontend/dist`; it needs Caddy on PATH; TLS, when there is any, ends in
+   front of it). Every API route is under `/api`. No docs page is served: for routes the app has no screen for, call
+   them with the session cookie (for example with `curl`), reading `/api/openapi.json` in a viewer on another origin.
 2. Administrator: set the password from Mailpit and sign in (a one-time code is needed: expect to enrol an
    authenticator app on a refused first sign-in, then sign in again). Create a tenant, check
    `GET /api/admin/tenants/<id>` until `active` (on a failed step read the lifecycle log, fix, `resume`), invite its first member.

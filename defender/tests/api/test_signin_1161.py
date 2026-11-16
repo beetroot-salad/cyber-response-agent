@@ -169,11 +169,20 @@ def test_the_address_reader_agrees_with_the_shape_text_on_the_generated_set() ->
     assert wrong[:10] == []
 
 
-def test_the_shape_files_uuid_grammar_is_the_records_one() -> None:
-    """The uuid placeholder's grammar is `_run_id._UUID_TEXT.pattern`, in the test's shape text and in the repo's address file. (S2, R14)"""
+def test_the_shape_files_uuid_placeholder_matches_exactly_what_the_records_uuid_text_does() -> None:
+    """The address file's uuid pieces (`hex` runs of 8-4-4-4-12) and `_run_id._UUID_TEXT` accept the same strings:
+    each record id, and none of the near misses below. (S2, R14; the file holds pieces, not a regex: amended)"""
+    from defender.api import addresses
+    from defender.tests.support.frontend._shapes1161 import HEX, UUID_PIECES
+
     assert _UUID_TEXT.pattern == UUID
-    text = resources.files("defender.api").joinpath("addresses.json").read_text(encoding="utf-8")
-    assert json.loads(text)["placeholders"]["uuid"] == _UUID_TEXT.pattern
+    document = json.loads(resources.files("defender.api").joinpath("addresses.json").read_text(encoding="utf-8"))
+    assert (document["alphabets"]["hex"], document["placeholders"]["uuid"]) == (HEX, UUID_PIECES)
+    [(_, only)] = addresses._compile({**document, "shapes": [{"name": "u", "template": "/{uuid}", "returnable": True}]})
+    good = str(INV)
+    cases = [good, good.upper(), good[:-1], good + "0", good.replace("-", "", 1), "-" + good[1:],
+             *(good[:i] + chr(c) + good[i + 1:] for i in (0, 8, 35) for c in range(128))]
+    assert [c for c in cases if bool(only.fullmatch("/" + c)) != bool(_UUID_TEXT.fullmatch(c))] == []
     assert classify(f"/t/{INV}/investigations/{INV}") == "investigation"  # control: the pattern is what the classifier uses
 
 
@@ -723,4 +732,5 @@ def test_the_address_reader_compiles_the_lists_the_table_starts_from() -> None:
     from defender.tests.support.frontend._shapes1161 import _listed
 
     assert addresses._compile(_listed())[1][1].fullmatch(RET)
-    assert addresses._compile(_listed({"uuid": "[a-z0-9-]+"}))[1][1].fullmatch("/t/a-1/investigations/b")
+    assert addresses._compile(_listed({"uuid": [["word", 1, 3]]}, alphabets={"word": "ab1-"}))[1][1].fullmatch(
+        "/t/a-1/investigations/b")

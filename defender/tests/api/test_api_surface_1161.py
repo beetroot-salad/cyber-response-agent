@@ -68,7 +68,7 @@ def test_no_route_answers_at_its_old_address() -> None:
 
 
 def test_the_docs_pages_are_not_served_by_default() -> None:
-    """Without `DEFENDER_API_DOCS=true` neither interactive page exists, under `/api` or at the root; the document does. (B10)"""
+    """No interactive page exists, under `/api` or at the root; the document does. (B10)"""
     world = World(tenants={T1: [ANN]})
     browser = world.client()
     assert [browser.get(p).status_code for p in ("/api/docs", "/api/redoc", "/docs", "/redoc")] == [404] * 4
@@ -137,7 +137,7 @@ def _env(tmp_path: Path, bin_dir: Path, **over: str | None) -> dict[str, str]:
     dist = tmp_path / "dist"
     dist.mkdir(exist_ok=True)
     (dist / "index.html").write_text("<html></html>")
-    env = launcher_env(ORIGIN, "127.0.0.1:8001", dist, artifact_domain=ARTIFACT_DOMAIN, work=tmp_path / "work")
+    env = launcher_env("127.0.0.1:8000", "127.0.0.1:8001", dist, artifact_domain=ARTIFACT_DOMAIN, work=tmp_path / "work")
     env["PATH"] = f"{bin_dir}{os.pathsep}{os.path.dirname(sys.executable)}"
     for name, value in over.items():
         if value is None:
@@ -148,7 +148,7 @@ def _env(tmp_path: Path, bin_dir: Path, **over: str | None) -> dict[str, str]:
 
 
 INPUTS = {
-    "DEFENDER_API_FRONTEND_ORIGIN": ["http://localhost:8000/app", "localhost:8000", "HTTP://localhost:8000"],
+    "DEFENDER_INGRESS_LISTEN": ["localhost", "localhost:abc", "localhost:99999", ":8000", "http://localhost:8000"],
     "DEFENDER_ARTIFACT_DOMAIN": ["https://artifacts.defender.test", "*.defender.test", "Artifacts.Test", "a.test:8443"],
     "DEFENDER_INGRESS_API_UPSTREAM": ["localhost", "localhost:abc", "localhost:99999", ":8001", "http://localhost:8001"],
     "DEFENDER_INGRESS_FRONTEND_DIR": ["{tmp}/no-such-dir", "{tmp}/a-file", "{tmp}/my dist", "{tmp}/a}}b", "{tmp}/a{{b",

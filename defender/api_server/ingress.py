@@ -3,7 +3,10 @@
 One entry point for dev, CI's browser check and the deployment. It reads four inputs, all required and none defaulted,
 refuses (non-zero exit, naming the setting) before Caddy starts when one is unset or misshapen, then replaces itself
 with Caddy (exec), so signals reach Caddy and nothing of ours stands between. The Caddyfile, `defender/frontend/Caddyfile`,
-reads the same four names from the environment."""
+reads them from the environment, the listen address split into its host and port (`caddy_environment`).
+
+The ingress always serves plain HTTP on `DEFENDER_INGRESS_LISTEN`: TLS, when there is any, ends in front of it. It never
+learns the public origin, so Caddy's automatic HTTPS has nothing to act on (and is off besides)."""
 
 from __future__ import annotations
 
@@ -16,7 +19,7 @@ from pathlib import Path
 
 from defender._log import configure_from_env
 
-from ._settings import StartRefused, _port, artifact_domain, origin
+from ._settings import StartRefused, _port, artifact_domain
 
 CADDYFILE = Path(__file__).resolve().parent.parent / "frontend" / "Caddyfile"
 
@@ -46,7 +49,7 @@ def _directory(value: str) -> str:
 
 #: Every input, with its parser. A launcher-only setting is named here and nowhere else.
 INPUTS: dict[str, Callable[[str], str]] = {
-    "DEFENDER_API_FRONTEND_ORIGIN": origin,
+    "DEFENDER_INGRESS_LISTEN": _upstream,
     "DEFENDER_ARTIFACT_DOMAIN": artifact_domain,
     "DEFENDER_INGRESS_API_UPSTREAM": _upstream,
     "DEFENDER_INGRESS_FRONTEND_DIR": _directory,
@@ -66,15 +69,23 @@ def checked(environ: Mapping[str, str]) -> dict[str, str]:
     return values
 
 
+def caddy_environment(environ: Mapping[str, str]) -> dict[str, str]:
+    """What Caddy runs with: `environ` as given, plus the listen address's host and port apart (the Caddyfile binds the
+    host and listens on the port for every Host a client sends). `environ` must have passed `checked`."""
+    host, _, port = environ["DEFENDER_INGRESS_LISTEN"].rpartition(":")
+    return {**environ, "DEFENDER_INGRESS_LISTEN_HOST": host.removeprefix("[").removesuffix("]"),
+            "DEFENDER_INGRESS_LISTEN_PORT": port}
+
+
 def main() -> None:
     try:
-        checked(os.environ)  # Caddy reads the same names from the environment, unchanged
+        checked(os.environ)
     except StartRefused as why:
         sys.exit(f"ingress: {why}")
     caddy = shutil.which("caddy")
     if caddy is None:
         sys.exit("ingress: `caddy` is not on PATH")
-    os.execve(caddy, [caddy, "run", "--config", str(CADDYFILE), "--adapter", "caddyfile"], os.environ)
+    os.execve(caddy, [caddy, "run", "--config", str(CADDYFILE), "--adapter", "caddyfile"], caddy_environment(os.environ))
 
 
 if __name__ == "__main__":

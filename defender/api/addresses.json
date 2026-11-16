@@ -1,4 +1,5 @@
-{"placeholders": {"uuid": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"},
+{"alphabets": {"hex": "0123456789abcdef"},
+ "placeholders": {"uuid": [["hex", 8], "-", ["hex", 4], "-", ["hex", 4], "-", ["hex", 4], "-", ["hex", 12]]},
  "shapes": [{"name": "root", "template": "/", "returnable": true},
             {"name": "investigation", "template": "/t/{uuid}/investigations/{uuid}", "returnable": true},
             {"name": "sign-in-failed", "template": "/sign-in-failed", "returnable": false}]}

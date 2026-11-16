@@ -28,7 +28,8 @@ def _drop_one(document: Any) -> None:
     assert before - len(document["shapes"]) == 1
 
 
-EXAMPLE = {"placeholders": {"uuid": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"},
+EXAMPLE = {"alphabets": {"hex": "0123456789abcdef"},
+           "placeholders": {"uuid": [["hex", 8], "-", ["hex", 4], "-", ["hex", 4], "-", ["hex", 4], "-", ["hex", 12]]},
            "shapes": [{"name": "root", "template": "/", "returnable": True},
                       {"name": "investigation", "template": "/t/{uuid}/investigations/{uuid}", "returnable": True},
                       {"name": "sign-in-failed", "template": "/sign-in-failed", "returnable": False}]}

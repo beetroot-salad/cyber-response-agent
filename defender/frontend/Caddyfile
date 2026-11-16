@@ -2,9 +2,12 @@
 # letter case. Started only by `python -m defender.api_server.ingress`, which checks the four inputs read here.
 {
 	admin off
+	# Plain HTTP only: TLS, when there is any, ends in front of the ingress (see the launcher's docstring).
+	auto_https off
 }
 
-{$DEFENDER_API_FRONTEND_ORIGIN} {
+http://:{$DEFENDER_INGRESS_LISTEN_PORT} {
+	bind {$DEFENDER_INGRESS_LISTEN_HOST}
 	@api path /api /api/*
 	handle @api {
 		reverse_proxy {$DEFENDER_INGRESS_API_UPSTREAM}

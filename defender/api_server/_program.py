@@ -320,8 +320,7 @@ async def serving(settings: Settings, *, transport: httpx.AsyncBaseTransport | N
                 app = create_app(api_deps(
                     identity=identity, tenants=tenants, ports=JobStorePorts(store), frontend_origin=settings.frontend_origin,
                     systems=ConfigRecords(records, tenants, catalog, secrets), secrets=ConfigCredentials(records, secrets),
-                    learning_work=StoreLearningWork(learning)),
-                    docs=settings.api_docs)
+                    learning_work=StoreLearningWork(learning)))
             async with steps.step("binding the listening socket"):
                 sock = _bind(settings)
                 stack.callback(sock.close)

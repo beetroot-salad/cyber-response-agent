@@ -1121,30 +1121,18 @@ async def test_1161_b3_a_cookie_alone_reads_the_api_and_no_origin_is_granted_cor
 
 
 @pytest.mark.postgres
-@pytest.mark.parametrize(("value", "served_docs"), [("true", True), (None, False), ("false", False)])
-async def test_1161_b10_the_docs_pages_are_served_only_when_the_dev_setting_is_true(
-        tenants, tmp_path, value, served_docs):
-    """`DEFENDER_API_DOCS=true` serves `/api/docs` and `/api/redoc`; `false`, or unset, serves neither; the document always ships. (B10)"""
+@pytest.mark.parametrize("value", [None, "true", "false"])
+async def test_1161_b10_no_interactive_docs_page_is_served_whatever_the_environment_says(tenants, tmp_path, value):
+    """Neither `/api/docs`, `/api/redoc` nor their redirect page exists, with or without the retired
+    `DEFENDER_API_DOCS`; the document always ships, and nothing answers at the root. (B10, amended: no docs pages)"""
     from defender.api_server import Settings, serving
 
     extra = {} if value is None else {"DEFENDER_API_DOCS": value}
     settings = Settings.from_environ({**environment(tmp_path, dsn=tenants), **extra})
     async with serving(settings, transport=FakeKeycloak(), openbao_transport=ScriptedOpenBao()) as running, \
             httpx.AsyncClient(transport=httpx.ASGITransport(app=running.app), base_url=ORIGIN) as client:
-        got = [(await client.get(p)).status_code for p in ("/api/docs", "/api/redoc")]
-        assert got == ([200, 200] if served_docs else [404, 404]), got
+        got = [(await client.get(p)).status_code for p in ("/api/docs", "/api/redoc", "/api/docs/oauth2-redirect")]
+        assert got == [404] * 3, got
         assert (await client.get("/api/openapi.json")).status_code == 200
-        # B3: with the docs on, every route (their redirect page included) is still under `/api`, and none answers at the root.
         assert [p for p in route_paths(running.app.routes) if not p.startswith("/api/")] == []
-        assert (await client.get("/api/docs/oauth2-redirect")).status_code == (200 if served_docs else 404)
         assert [(await client.get(p)).status_code for p in ("/docs", "/redoc", "/docs/oauth2-redirect", "/openapi.json")] == [404] * 4
-
-
-@pytest.mark.parametrize("value", ["1", "TRUE", "", "True", "yes", "on", "y", " true", "true ", "true\n", "enabled", "0", "off"])
-def test_1161_b10_a_misspelt_docs_setting_refuses_to_start_naming_it(tmp_path, value):
-    """Any `DEFENDER_API_DOCS` other than `true` or `false` refuses to start, naming the setting: a misspelling never
-    reads silently as off. (B10, amended)"""
-    from defender.api_server import Settings, StartRefused
-
-    with pytest.raises(StartRefused, match="DEFENDER_API_DOCS"):
-        Settings.from_environ({**environment(tmp_path, dsn="postgresql://u@h/d"), "DEFENDER_API_DOCS": value})

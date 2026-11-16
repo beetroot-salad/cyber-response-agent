@@ -1179,14 +1179,14 @@ async def put_alert_mapping(
     return mapping
 
 
-def create_app(deps: ApiDeps, *, docs: bool = False) -> FastAPI:
-    """Every route and the OpenAPI document live under `/api` (B3). The interactive docs pages load third-party
-    scripts onto the app's origin, so they are served only when `docs` is set (B10)."""
+def create_app(deps: ApiDeps) -> FastAPI:
+    """Every route and the OpenAPI document live under `/api` (B3). No interactive docs page is served: one would load
+    third-party scripts onto the origin that holds the session cookie. `/api/openapi.json` is for a viewer elsewhere (B10)."""
     app = FastAPI(
         openapi_url=f"{API_PREFIX}/openapi.json",
-        docs_url=f"{API_PREFIX}/docs" if docs else None,
-        redoc_url=f"{API_PREFIX}/redoc" if docs else None,
-        swagger_ui_oauth2_redirect_url=f"{API_PREFIX}/docs/oauth2-redirect" if docs else None,
+        docs_url=None,
+        redoc_url=None,
+        swagger_ui_oauth2_redirect_url=None,
         title="Defender platform API",
         version=API_VERSION,
         summary="The routes and shapes of the platform API; a route whose records are not yet served answers 501.",

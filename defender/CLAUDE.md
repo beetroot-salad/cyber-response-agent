@@ -52,10 +52,12 @@ the old paths, and the notes below name the new ones. Once:
    until then every sign-in fails at the identity provider (invalid redirect URI). `DEFENDER_KEYCLOAK_REDIRECT_URI` is no longer
    read: the URI is derived from the origin. Remove it.
 3. Serve the app through the ingress (`python -m defender.api_server.ingress`, Caddy on PATH, the frontend built to
-   `defender/frontend/dist`): it serves the frontend at the origin and sends `/api` to the API. See
+   `defender/frontend/dist`): it serves the frontend and sends `/api` to the API, in plain HTTP on
+   `DEFENDER_INGRESS_LISTEN`. TLS ends in front of it: put the TLS terminator before it. See
    `docs/development-operations.md`.
 4. Point every API-key or OAuth program client at the `/api` paths.
-5. `DEFENDER_API_DOCS` (dev only) must be `true`, `false` or unset: any other value now refuses to start.
+5. The interactive docs pages (`/docs`, `/redoc`) are gone and `DEFENDER_API_DOCS` is not read: remove it. Load
+   `/api/openapi.json` in a viewer served from another origin instead.
 
 ## Upgrade from before #1083
 

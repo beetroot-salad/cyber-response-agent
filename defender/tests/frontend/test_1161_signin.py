@@ -167,6 +167,25 @@ def test_1161_b1_a_me_that_is_not_200_or_401_shows_the_error_state_and_the_scree
     assert page.locator('[data-screen="investigation"]').count() == 0
 
 
+def test_1161_b1_a_screen_that_fails_while_drawing_shows_the_shells_error_state(world, context, requests):
+    """Signed in, the screen's read answers, then drawing it throws (a DOM call made to fail): the shell's
+    `data-screen=error`, not a page left on `loading`; no sign-in. (B1.4, the shell owns the error state)"""
+    sign_in(world, context)
+    mark = len(requests)
+    context.add_init_script("""
+        const set = Element.prototype.setAttribute;
+        Element.prototype.setAttribute = function (name, value) {
+            if (name === "data-state" && value === "ready") throw new Error("drawing failed");
+            return set.call(this, name, value);
+        };
+    """)
+    page = context.new_page()
+    page.goto(f"{world.origin}{world.screen()}")
+    screen(page, "error")
+    assert page.locator('[data-screen="investigation"]').count() == 0
+    assert logins(requests[mark:], world.origin) == []
+
+
 def test_1161_b1_storage_unavailable_shows_the_reason_with_return_and_its_retry_lands_on_the_target(
         world, context, requests):
     """sessionStorage throws: no sign-in starts, `storage-unavailable` with `return`; the retry lands. (B1.3, B8)"""
