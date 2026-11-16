@@ -1608,6 +1608,33 @@ def test_1471_w5_a_flagged_job_is_refused_a_write_pass_when_there_is_nothing_to_
     assert "launch" in got, "premise: the job ran"
 
 
+@pytest.mark.parametrize("wrong", ["a-fresh-uuid", "not-an-id", "empty", "another-flagged-job"])
+def test_1471_w5_a_write_pass_asked_with_an_id_other_than_the_minted_one_is_refused_and_signs_nothing(
+        tmp_path, monkeypatch, migrated_database, wrong):
+    """`pass.write_back` with an `id` that is not the job's minted id is refused and nothing `rw` is signed; control: the
+    minted id on a like job gets its pass. (W5, C-5)"""
+    with _ticket_scene(tmp_path, monkeypatch, migrated_database) as s:
+        inv, argv, _link = _flagged_investigation(s, flagged=True)
+        other, _other_argv, _l = _flagged_investigation(s, flagged=True)
+        bad = {"a-fresh-uuid": str(uuid.uuid4()), "not-an-id": "not-an-id", "empty": "", "another-flagged-job": other}[wrong]
+        got, signer = {}, make_signer()
+
+        def job(c) -> int:
+            got["wrong"] = _refusal_code(c, "pass.write_back", id=bad, ask=ASK_1471)
+            return 0
+
+        docker = ContainerStandIn(job)
+        ran = drive_helper(s, argv, docker=docker, signer=signer)
+        assert ran.raised is None, ran.raised
+        assert docker.job_error is None, docker.job_error
+        control_inv, control_argv, _l = _flagged_investigation(s, flagged=True)
+        control, _control_signer = _ask_both(s, control_inv, control_argv)
+
+    assert not isinstance(got["wrong"], dict), f"a pass was answered for the wrong id: {got['wrong']!r}"
+    assert _signed_writes(signer) == [], _signed_grants(signer)
+    assert isinstance(control["write"], dict), f"control: the minted id is answered: {control['write']!r}"
+
+
 def test_1471_w5_the_same_ask_gets_the_same_pass_and_a_different_ask_after_a_signed_pass_is_already_signed(
         tmp_path, monkeypatch, migrated_database):
     """The latch (C-5): the same `ask` again answers the same pass with no new signature; a different `ask` after a pass
@@ -1814,6 +1841,7 @@ def test_1471_p5_an_investigation_helper_started_without_the_alert_digest_is_ref
         assert s.end(control) is None, "control: with the digest the job runs"
 
         inv, argv, _link = _flagged_investigation(s, flagged=True, send_digest=False)
+        assert not any(a.startswith("--alert-digest") for a in argv), f"premise: the argv holds no digest: {argv}"
         docker, signer = ContainerStandIn(lambda c: 0), make_signer()
         ran = drive_helper(s, argv, docker=docker, signer=signer)
 

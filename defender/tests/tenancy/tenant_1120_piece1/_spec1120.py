@@ -424,8 +424,9 @@ for name in filter(None, seeded):
             systems={s: SystemRecord(system_id=s, version=r["version"], adapter_id=r["adapter"], enabled=r["enabled"],
                                      settings=r["settings"], access=r["access"], credential_generation=r["generation"])
                      for s, r in held["systems"].items()},
-            case=None if case is None else CaseRecord(version=case["version"], system_id=case["system"],
-                                                      comment_body=case["body"])))
+            case=None if case is None else CaseRecord(
+                version=case["version"], system_id=case["system"],
+                **({"comment_body": case["body"]} if "comment_body" in CaseRecord.__dataclass_fields__ else {}))))
         if inspect.isawaitable(added):
             asyncio.run(added)
 sys.exit(tenant.main(argv, directory=TenantDirectory(lambda: twin)))

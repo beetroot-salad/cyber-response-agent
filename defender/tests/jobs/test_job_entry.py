@@ -2203,6 +2203,28 @@ def test_1471_w2_a_flagged_job_whose_report_is_unreadable_posts_the_unreadable_o
     assert (receipt["status"], receipt["ok"]) == (status, True), receipt
 
 
+@pytest.mark.parametrize("exit_class", sorted(run_end.FORCED_CLOSE_EXITS))
+def test_1471_w2_a_flagged_job_force_closed_with_a_readable_report_posts_its_disposition_and_the_link(
+        ticket_scene, tmp_path, monkeypatch, exit_class):
+    """A forced close (`request-limit`, `retry-exhausted`) that left a readable `unresolved` report is commented with
+    that disposition and the link, receipt `commented`, not the escalation sentence. (W2, P-6)"""
+    from defender.investigation import close_tool
+
+    store = _case_store(tmp_path, monkeypatch)
+
+    run_id, ran, link, comments = _job_1471(
+        ticket_scene, store, report=_report_1471("unresolved", close_tool.CAUSE_STORY_SETTLED), truncated_by=exit_class)
+
+    assert ran.raised is None, ran.message
+    assert len(comments) == 1, store.requests()
+    body = str(comments[0]["body"])
+    _assert_p6_1471(body, run_id=run_id, link=link, parts=["unresolved"])
+    assert f"exit: {exit_class}" not in body, body
+    receipt = _receipt_1471(ticket_scene, run_id)
+    assert receipt is not None, "no receipt"
+    assert (receipt["status"], receipt["ok"]) == ("commented", True), receipt
+
+
 @pytest.mark.parametrize("stale", ["transient", "operator"])
 def test_1471_p6_a_stale_runs_comment_opens_with_the_tag_then_the_stale_sentence_then_the_disposition_then_the_link(
         ticket_scene, tmp_path, monkeypatch, stale):
@@ -2234,6 +2256,8 @@ def _closed_set_1471() -> list[tuple[str, dict[str, Any]]]:
           for d in _vocab.DISPOSITION_VALUES],
         *[(f"escalated-{e}", dict(report=None, closes=False, truncated_by=e)) for e in sorted(run_end.ESCALATED_EXITS)],
         ("unreadable", dict(report=f"no front matter\n{huge}\n")),
+        *[(f"forced-close-readable-{e}", dict(report=_report_1471("unresolved", close_tool.CAUSE_STORY_SETTLED, evidence=huge),
+                                              truncated_by=e)) for e in sorted(run_end.FORCED_CLOSE_EXITS)],
         *[(f"forced-close-unreadable-{e}", dict(report=f"no front matter\n{huge}\n", truncated_by=e))
           for e in sorted(run_end.FORCED_CLOSE_EXITS)],
     ]
@@ -2289,7 +2313,8 @@ def test_1471_w4_an_unflagged_job_posts_nothing_is_never_signed_a_write_pass_and
     launch record claims a flag and a link. Control: the read pass was signed. (W4, P-5)"""
     store = _case_store(tmp_path, monkeypatch)
     signer = _H1471.make_signer()
-    record = {} if record_says == "silent" else {"update_ticket": True, "ticket_link": EVIL_LINK_1471}
+    record = {} if record_says == "silent" else {
+        "update_ticket": True, "post_ticket": True, "ticket_link": EVIL_LINK_1471}
 
     run_id, ran, _link, comments = _job_1471(
         ticket_scene, store, flagged=False, record=record, signer=signer,
@@ -2359,7 +2384,8 @@ def test_1471_p5_a_launch_record_rewritten_after_the_worker_wrote_it_steers_neit
     launch record (which the job container can write) now says unflagged, another link and the digest of other bytes. The
     ticket still gets one comment with the worker's link on the alert's ticket; the other link appears nowhere. (P-5)"""
     store = _case_store(tmp_path, monkeypatch)
-    forged = {"update_ticket": False, "ticket_link": EVIL_LINK_1471, "digest": hashlib.sha256(b"other").hexdigest()}
+    forged = {"update_ticket": False, "post_ticket": False, "ticket_link": EVIL_LINK_1471,
+              "digest": hashlib.sha256(b"other").hexdigest()}
 
     run_id, ran, link, comments = _job_1471(
         ticket_scene, store, record=forged,

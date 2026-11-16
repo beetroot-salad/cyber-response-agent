@@ -4058,6 +4058,7 @@ async def test_1471_w1_a_lapse_retry_carries_its_requests_flag_and_no_word(dsn, 
     assert retry is not None, "the take-over queued no retry"
     assert (retry.record.investigation_id != first.investigation_id, retry.record.attempt) == (True, 2)
     assert (retry.record.update_ticket, retry.record.ticket_write) == (flagged, None)
+    assert _word(dsn, retry.record.investigation_id) is None, "the stored column of the retry"
 
 
 # --- W6, store side: the words the store writes when it ends a row itself -------------------------------------------

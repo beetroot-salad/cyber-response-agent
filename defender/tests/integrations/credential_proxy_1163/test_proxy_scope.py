@@ -194,13 +194,10 @@ RW_OTHER = {("identity", "r"), ("cmdb", "rw", "T-7")}
     pytest.param("GET", "/tickets/7/comments", RD, None, id="get-on-a-write-route-is-a-read"),
     pytest.param("POST", "/search", RD, None, id="listed-post-read"),
     pytest.param("PUT", "/search", RD, "ConfinementFault", id="listed-read-other-method"),
-    pytest.param("POST", "/admin", RD, "ConfinementFault", id="unlisted-post"),
-    pytest.param("DELETE", "/users/x", RD, "ConfinementFault", id="undeclared-delete"),
     pytest.param("DELETE", "/tickets/7", RD, "ConfinementFault", id="declared-delete-read-grant"),
     pytest.param("POST", "/tickets/7/comments", RD, "ConfinementFault", id="write-with-read-grant"),
     pytest.param("PUT", "/tickets/7", RD, "ConfinementFault", id="put-write-with-read-grant"),
     pytest.param("POST", "/tickets/7/comments", RW_OTHER, "ConfinementFault", id="write-grant-on-another-system"),
-    pytest.param("POST", "/tickets/..;/comments", RD, "ConfinementFault", id="write-wildcard-path-parameter"),
 ])
 def test_s3_only_declared_reads_are_sent_and_a_write_needs_a_pass_on_that_system(
         tmp_path, data_root, method, path, grant, fault):

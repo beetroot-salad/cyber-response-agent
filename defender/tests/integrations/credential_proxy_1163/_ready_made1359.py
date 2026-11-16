@@ -170,7 +170,7 @@ def records_of(v: Vendor, base: str, *, env: str | None = None, access: bool = T
     case = None
     if leg:
         body = yaml.safe_load(C.case_record_text(v.system))["comment"]["body"]
-        case = R.CaseSpec(v.system, str(body))
+        case = R.CaseSpec(v.system, comment_body=str(body))
     return R.RecordsSpec({v.system: R.SysSpec(settings, text)}, case)
 
 

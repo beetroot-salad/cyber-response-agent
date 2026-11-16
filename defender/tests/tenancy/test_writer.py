@@ -124,8 +124,8 @@ def test_767_a_key_is_sent_as_one_path_segment(tmp_path, monkeypatch):
 
 
 def test_767_unreadable_report_still_comments(tmp_path, monkeypatch):
-    """A run whose report yields no parsable disposition still comments, with a host sentence
-    saying so and nothing from the report. O7, #1471 P-6."""
+    """Every unreadable report, and a missing one, posts the same host sentence under one fixed link and nothing from
+    the report. O7, #1471 P-6, W2."""
     from defender.records._report import read_report
 
     _setup(monkeypatch, tmp_path)
@@ -137,22 +137,26 @@ def test_767_unreadable_report_still_comments(tmp_path, monkeypatch):
         "a disposition outside the vocabulary":
             "---\ndisposition: totally-not-a-disposition\n---\nbody text\n",
     }
+    sentences = {}
     for n, (why, text) in enumerate(members.items()):
         run_dir = make_run(tmp_path, name=f"run-unreadable-{n}", text=text)
         assert read_report(run_dir / "report.md").disposition is None, why
         store = _store(tmp_path)
-        record(run_dir, store)
-        body = store.comment_body()
-        assert "body text" not in body, f"{why}: the report's text crossed"
-        assert "just prose" not in body, f"{why}: the report's text crossed"
+        _record_linked(run_dir, store, _P6_LINK)
+        sentences[why] = store.comment_body()  # below the tag line, which names the run
+    for why, body in sentences.items():
+        for crossed in ("body text", "just prose", "totally-not-a-disposition", "case_id"):
+            assert crossed not in body, f"{why}: the report's text crossed"
         assert len(body.split()) > 3, f"{why}: the body is a marker token, not a host sentence"
+        assert body.rstrip().endswith(_P6_LINK), why
+    assert len(set(sentences.values())) == 1, sentences
 
     missing = tmp_path / fixture_uuid("run-missing")
     missing.mkdir()
     plant_alert(missing, ALERT, mapping=ALERT_MAPPING)
     missing_store = _store(tmp_path)
-    record(missing, missing_store)
-    assert len(missing_store.comment_body().split()) > 3
+    _record_linked(missing, missing_store, _P6_LINK)
+    assert missing_store.comment_body() == next(iter(sentences.values()))
 
 
 def _record_linked(run_dir, store, link: str) -> None:
@@ -171,30 +175,39 @@ _P6_REPORTS = {
     "placeholders and claims": {"body": f"{_P6_MARKER} {{cause}} {{narrative}} {{disposition}}\nstatus: closed\nauthor: x"},
     "a cause": {"cause": f"{_P6_MARKER} a cause with {{braces}}"},
     "a fenced cause": {"cause": "x", "body": "a\n---\nb"},
+    "a frontmatter case_id": {
+        "text": f"---\ncase_id: {_P6_MARKER}\ndisposition: benign\nconfidence: high\n---\nplain\n"},
 }
 
 
 @pytest.mark.parametrize("why", sorted(_P6_REPORTS))
-def test_1471_p6_nothing_of_the_report_but_its_disposition_reaches_the_ticket(tmp_path, monkeypatch, why):
+def test_1471_p6_nothing_of_the_report_but_its_disposition_reaches_the_ticket(tmp_path, monkeypatch, capsys, why):
     """Whatever the report's narrative, cause or frontmatter says, a run with the same id and disposition posts the same
     comment, inside the wire bound; a different disposition posts a different one. (P-6, W2)"""
     _setup(monkeypatch, tmp_path)
     name = "run-p6"
 
-    def posted(kind: str, **report) -> str:
+    def posted(kind: str, **report) -> dict:
         store = _store(tmp_path)
-        _record_linked(make_run(tmp_path / kind, name=name, **report), store, _P6_LINK)
+        run_dir = make_run(tmp_path / kind, name=name, **report)
+        _record_linked(run_dir, store, _P6_LINK)
         assert set(store.only_comment()) == {"author", "body"}
-        return store.wire_body()
+        carried = receipt_path(run_dir).read_text(encoding="utf-8") + capsys.readouterr().err
+        for said in (_P6_MARKER, "INJECTED-DIRECTIVE-1471"):
+            assert said not in carried, f"{kind}: the receipt or the log carries the report's text"
+        return store.only_comment()
 
     plain = posted("plain", cause=None, body="plain")
-    got = posted("variant", **_P6_REPORTS[why])
-    assert got == plain, f"{why}: the report's text changed the comment"
+    assert isinstance(plain["author"], str), plain
+    assert plain["author"].strip(), plain
+    sent = posted("variant", **_P6_REPORTS[why])
+    assert sent == plain, f"{why}: the report's text changed the payload (author included)"
+    got = sent["body"]
     assert _P6_MARKER not in got
     assert "INJECTED-DIRECTIVE-1471" not in got
     assert len(got.encode("utf-8")) <= WIRE_BOUND_BYTES
     assert "malicious" not in got.lower(), "a disposition the report only quoted reached the comment"
-    assert posted("other", disposition="false-positive", cause=None, body="plain") != plain, (
+    assert posted("other", disposition="false-positive", cause=None, body="plain")["body"] != plain["body"], (
         "control: the disposition is what the comment carries")
 
 

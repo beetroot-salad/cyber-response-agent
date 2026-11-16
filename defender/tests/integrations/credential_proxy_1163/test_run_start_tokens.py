@@ -620,49 +620,80 @@ def test_r7c_an_injected_signer_does_not_excuse_a_missing_sign_login(tmp_path, d
     assert "materialize" not in rec.order, "the run folder was made before the refusal"
 
 
-def _mint_for(tmp_path, data_root, signer, *, world: Any, **seams: Any) -> Any:
-    """The run's token mint, built directly (#1449): a tenant whose `identity` and `ticket` are
-    `http-proxy` systems the gather role is granted, `ticket` its judged case system. `world` is the sibling's world (any object), or None for a run. `seams` (#1363: the holder's `clock=`) are handed to the mint as given."""
-    import argparse
-    import types
+def _mint_for(tmp_path, data_root, signer, *, world: Any = None, **seams: Any) -> Any:
+    """The run's token mint, for the holder tests that need the holder's `clock=`/`on_fault=` (#1363), which `run.main` has no seam
+    for: the run is driven through the public start over a tenant whose gather role reads `identity` and `ticket`, and `seams` ride on the one `for_run` call."""
+    from unittest import mock
 
-    from defender.kit.access import AccessDeclaration
     from defender.run import _TokenMint
-    from defender.systems import case_system
+    from defender.tests.support.tenancy._tenants1106 import FIXTURE
 
-    records, _fields = _records(data_root, tmp_path)
-    declared = AccessDeclaration(base="http://x.invalid/api", auth=None)
-    tenant = types.SimpleNamespace(
-        tenant_id=S.PLAYGROUND_ID, access={"identity": declared, "ticket": declared},
-        grants=types.SimpleNamespace(gather=types.SimpleNamespace(
-            systems=frozenset({"identity", "ticket", "cmdb"}))))
-    return _TokenMint.for_run(
-        tenant, types.SimpleNamespace(down=frozenset()),
-        ns=argparse.Namespace(update_ticket=False), world=world,  # the flag is gone after W7; unread then
-        case=case_system.CaseTarget(system="ticket", template=None, module=None),
-        run_id=fixture_uuid("1449-mint"), accepted=types.SimpleNamespace(id=S.PLAYGROUND_ID),
-        records=records.directory, signer=signer, proxy_url="http://proxy.invalid",
-        issuer_transport=None, **seams)
+    assert world is None, "a world's access is observed through `_world_access`"
+    table = data_root / S.PLAYGROUND_ID / "knowledge" / "settings" / "verb-grants.yaml"
+    table.write_text((FIXTURE / "settings" / "verb-grants.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+    real, made = _TokenMint.for_run, []
+
+    def spy(*args: Any, **kw: Any) -> Any:
+        made.append(real(*args, **kw, **seams))
+        return made[-1]
+
+    with mock.patch.object(_TokenMint, "for_run", spy):
+        _rec, _tickets, rc, refused, _started = _drive(tmp_path, data_root, signer=signer)
+    assert (rc, refused) == (0, None), (rc, refused)
+    (mint,) = made
+    return mint
 
 
-def test_1449_a_world_reads_on_a_runs_terms_and_no_operator_mint_signs_a_write_pass(tmp_path, data_root):
-    """A branched run is a run (#1449 W1, W3): the mint built for a world grants the same reads a regular run's does, and
-    neither mint signs a write pass (`rw`) on any system: the operator command never comments (W7). The mint's
-    construction keywords are the pre-r8 ones, an assumption the code stage may have to follow (`_mint_for`)."""
-    _plant(data_root, proxy=("identity", "ticket"))
+def _world_access(tmp_path, monkeypatch, signer) -> Any:
+    """The read access a sibling world's run start hands its lifecycle, through `run.main --episode`
+    over a tenant whose `cmdb` is declared on the credential proxy."""
+    import os
+
+    from defender import run as run_mod
+    from defender.tests.runtime.providers import _spec1243 as P
+    from defender.tests.support.tenancy._launch_publish_p4 import in_process_publish
+
+    ep = P.sibling_episode(tmp_path, monkeypatch)
+    root = Path(os.environ["DEFENDER_DATA_ROOT"])
+    folder = root / P.SIBLING_TENANT / "knowledge"
+    for system in ("cmdb", "ticket"):
+        decl = H.declaration("http://x.invalid/api", writes=CASE_WRITES.get(system, ()))
+        for rel, text in H.access_files(system, decl, env=A.env_text(system, extra=EXTRA.get(system, ""))).items():
+            (folder / rel).write_text(text, encoding="utf-8")
+    records = A.Records(root, {P.SIBLING_TENANT: [A.generation(
+        P.SIBLING_TENANT, tmp_path / "secrets", sign_role_id="sign-role", sign_secret="sign-secret")]})
+    held: list[Any] = []
+
+    def lifecycle(**kw: Any) -> dict:
+        held.append(kw.get("access"))
+        return {"output": "done", "requests": 1, "truncated_by": None}
+
+    rc = run_mod.main(["--episode", ep.name, "--world", P.SIBLING_WORLD, "--tenant", P.SIBLING_TENANT, "--no-learn"],
+                      directory=records.directory, lifecycle=lifecycle, visualize=lambda *_a, **_k: None,
+                      preflight=lambda *_a, **_k: 0, ticket_writer=TicketRecorder(), publish=in_process_publish(),
+                      signer=signer, proxy_url="http://proxy.invalid")
+    assert rc == 0, rc
+    (access,) = held
+    return access
+
+
+def test_1449_a_world_reads_on_a_runs_terms_and_no_operator_run_start_signs_a_write_pass(tmp_path, data_root, monkeypatch):
+    """A branched run is a run (#1449 W1, W3): a sibling world's run start and a regular run's each grant `cmdb` a read, and
+    neither signs a write pass (`rw`) on any system though `ticket` is proxied: the operator command never comments (W7, C-9).
+    Weakened: the two run on different tenants, so the world's grant is not compared to the run's."""
+    _plant(data_root, proxy=("cmdb", "ticket"))
     run_signer, world_signer = A.MarkedSigner(), A.MarkedSigner()
-    run = _mint_for(tmp_path / "run", data_root, run_signer, world=None)
-    world = _mint_for(tmp_path / "world", data_root, world_signer, world=object())
+    rec, _tickets, rc, refused, _started = _drive(tmp_path / "run", data_root, signer=run_signer)
+    assert (rc, refused) == (0, None), (rc, refused)
+    run_access = read_access(rec)
+    world_access = _world_access(tmp_path / "world", monkeypatch, world_signer)
 
-    def read_grant(mint: Any, signer: A.MarkedSigner) -> list[tuple[str, str]]:
-        token = mint.access_kwargs()["access"].token()
-        return A.grant_of(_claims_of_token(signer, token))
-
-    assert read_grant(world, world_signer) == read_grant(run, run_signer) == [
-        ("identity", "r"), ("ticket", "r")], "a world's read grant is not a regular run's"
-    for signer in (run_signer, world_signer):
-        assert [m for p in signer.payloads for _s, m, *_ in A.claims_of_payload(p)["grant"]] == ["r", "r"], (
-            "a mint signed something other than its read grant")
+    for access, signer in ((run_access, run_signer), (world_access, world_signer)):
+        grant = A.grant_of(_claims_of_token(signer, access.token()))
+        assert ("cmdb", "r") in grant, "the declared, granted system is not read"
+        assert {mode for _system, mode in grant} == {"r"}, "a read token grants only reads"
+        assert {m for p in signer.payloads for _s, m, *_ in A.claims_of_payload(p)["grant"]} == {"r"}, (
+            "a run start signed something other than its read grant")
 
 
 def test_a6_the_job_entry_never_builds_a_request_signer():

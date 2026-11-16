@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from defender.tests.migrations.test_1214_migrations import _upgrade_to
-from defender.tests.migrations.test_1343_migrations import TENANT, _inv, _plant
+from defender.tests.migrations.test_1343_migrations import TENANT, _id, _inv
 from defender.tests.support.jobs._jobs1342 import T1, an_alert, job_store, register_tenant
 from defender.tests.support.shared._postgres1339 import execute
 
@@ -21,6 +21,21 @@ def _revision_on_prior() -> str:
     found = [r.revision for r in _scripts().walk_revisions() if r.down_revision == PRIOR]
     assert len(found) == 1, f"one revision should sit directly on {PRIOR}, found {found}"
     return found[0]
+
+
+def _plant_at_prior(dsn: str, inv: str, stage: str, ticket: str) -> None:
+    """A row at revision `0019`, written with exactly the columns that schema requires (`cost_is_lower_limit` false), so
+    a later revision's required column cannot change what is planted."""
+
+    alert = _id("alert", ticket)
+    execute(dsn, "INSERT INTO jobs.alerts (id, tenant_id, vendor, vendor_ticket_id, fired_at, changed_at, received_at, "
+                 "title, description, raw) VALUES (%s, %s, 'elastic', %s, now(), now(), now(), 't', 'd', '\\x7b7d')",
+            (alert, TENANT, ticket))
+    started = "NULL" if stage == "queued" else "now() - interval '2 hours'"
+    finished = "now() - interval '1 hour'" if stage not in ("queued", "running") else "NULL"
+    execute(dsn, "INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, stage, created_at, "
+                 f"started_at, finished_at, cost_usd, cost_is_lower_limit) VALUES (%s, %s, %s, 'k', 1, %s, now(), "  # noqa: S608
+                 f"{started}, {finished}, 1.5, false)", (inv, TENANT, alert, stage))
 
 
 def _columns(dsn: str) -> list[tuple]:
@@ -49,7 +64,7 @@ def test_existing_rows_read_unflagged_with_no_word_and_nothing_else_changes(empt
     assert _columns(dsn) == [], "premise: the columns are new"
     stages = ("queued", "running", "completed", "unparseable", "failed", "aborted")
     for n, stage in enumerate(stages):
-        _plant(dsn, _inv(stage), "queued" if stage == "running" else stage, str(n), cost=1.5, at_head=True)
+        _plant_at_prior(dsn, _inv(stage), "queued" if stage == "running" else stage, str(n))
     execute(dsn, "UPDATE jobs.investigations SET stage = 'running', started_at = now(), "
                  "lease_expires_at = now() + interval '30 seconds' WHERE id = %s", (_inv("running"),))
     old = "id, tenant_id, alert_id, request_key, attempt, stage, created_at, started_at, finished_at, disposition, cost_usd"

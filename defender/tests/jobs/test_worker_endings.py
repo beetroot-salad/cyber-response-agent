@@ -8,6 +8,7 @@ import hashlib
 import json
 import logging
 import os
+import signal
 from types import SimpleNamespace
 
 import pytest
@@ -285,8 +286,8 @@ async def test_1471_p5_each_helper_is_started_with_its_own_flag_digest_and_link(
 
 @pytest.mark.parametrize("flagged", [True, False], ids=["flagged", "unflagged"])
 async def test_1471_p5_the_launch_record_and_the_tenant_folder_carry_neither_flag_nor_link(world, flagged):
-    """The launch record keeps its six fields and no file the worker wrote in the tenant folder holds the link or a
-    flag: the job container binds that folder read-write. (P-5)"""
+    """The launch record keeps its six base fields and no file in the tenant folder holds the handed link value: the job
+    container binds that folder read-write. (P-5)"""
     ids, _ = await _drain_spawned(world, [(T1, flagged, "k1")], _child(world, exit=0, files=_committed()))
     inv = ids[0]
 
@@ -295,9 +296,9 @@ async def test_1471_p5_the_launch_record_and_the_tenant_folder_carry_neither_fla
     assert launch["digest"] == DIGEST_1471, "premise: the record is this row's"
     written = [p for p in (world["root"] / T1).rglob("*") if p.is_file()]
     assert len(written) >= 2, "premise: the worker wrote files here"
-    for path in written:
-        text = path.read_bytes().decode("utf-8", "replace")
-        assert not any(word in text for word in (ORIGIN_1471, "update_ticket", "ticket_link")), path
+    link = f"{ORIGIN_1471}/t/{T1}/investigations/{inv}"
+    holding = [p.name for p in written if link.encode() in p.read_bytes()]
+    assert holding == [], f"the handed link value is on the run folder: {holding}"
 
 
 def _receipt(status) -> str:
@@ -576,3 +577,133 @@ async def test_1471_w6_a_row_cancelled_while_it_ran_ends_with_the_word_the_worke
 
     assert ends.of("write_accounting") == ["commented"], ends.calls
     assert (record.stage, record.ticket_write) == ("aborted", "commented"), record
+
+
+# --- R4 (G4): every writer of W6's word, flagged or not ---------------------------------------------------------------
+
+_FAST = {"renewal_interval": 0.2, "cost_interval": 0.3, "takeover_interval": 0.1}
+_STOPPED_RUN = job_end(setup="crashed", box="not_started", report_committed=False, scrub_verified=False)
+
+
+def _word(dsn: str, investigation_id: str):
+    """The stored `ticket_write` column (the read serves null while the row is live)."""
+    from defender.tests.support.shared._postgres1339 import execute
+
+    return execute(dsn, "SELECT ticket_write FROM jobs.investigations WHERE id = %s", (investigation_id,))[0][0]
+
+
+async def _served(store, inv):
+    return (await store.get_investigation(T1, inv)).ticket_write
+
+
+async def _end_by_finish(world, flagged):
+    child = _child(world, exit=0, files=_committed(**{_RECEIPT: _receipt("commented")}))
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued_1471(store, update_ticket=flagged)
+        await _worker_1471(world, store, child).drain()
+        end = await _served(store, inv)
+        return _word(world["dsn"], inv), end, end
+
+
+async def _end_by_barest_write(world, flagged):
+    child = _child(world, exit=0, files=_committed(**{_RECEIPT: _receipt("escalated")}))
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued_1471(store, update_ticket=flagged)
+        await _worker_1471(world, _Ends(store, refuse=2), child).drain()
+        end = await _served(store, inv)
+        assert (await store.get_investigation(T1, inv)).failure_reason == "worker_error", "premise: the barest end ran"
+        return _word(world["dsn"], inv), end, end
+
+
+async def _end_by_accounting_after_a_cancel(world, flagged):
+    release = world["tmp"] / "release"
+    child = _child(world, exit=0, files=_committed(**{_RECEIPT: _receipt("commented")}), wait_for=release)
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued_1471(store, update_ticket=flagged)
+        drained = asyncio.create_task(_worker_1471(world, store, child).drain())
+        try:
+            for _ in range(1500):
+                if child.seen() is not None:
+                    break
+                await asyncio.sleep(0.01)
+            assert child.seen() is not None, "premise: the child is running"
+            await store.cancel_investigation(T1, inv, actor="u-1")
+        finally:
+            release.touch()
+        await asyncio.wait_for(drained, timeout=60)
+        end = await _served(store, inv)
+        return _word(world["dsn"], inv), end, end
+
+
+async def _hand_back_before_the_read(world, flagged):
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued_1471(store, update_ticket=flagged)
+        await _worker_1471(world, _Ends(store, get_alert_outages=1), _child(world, exit=0, files=_committed())).drain()
+        stored, live = _word(world["dsn"], inv), await _served(store, inv)
+        assert await store.take_over(held=frozenset()) == [inv], "premise: the handed-back row was taken over"
+        return stored, live, await _served(store, inv)
+
+
+async def _hand_back_after_the_read(world, flagged):
+    term = str(world["tmp"] / "term-{id}")
+    child = _child(world, files={"{id}.job-end.json": _STOPPED_RUN, _RECEIPT: _receipt("commented")},
+                   wait_for=world["tmp"] / "never", term="finish", term_mark=term)
+    async with job_store(world["dsn"]) as store:
+        ends = _Ends(store)
+        inv = await _queued_1471(store, update_ticket=flagged)
+        serving = asyncio.create_task(_worker_1471(world, ends, child, **_FAST).serve())
+        try:
+            for _ in range(1500):
+                if child.seen() is not None:
+                    break
+                await asyncio.sleep(0.01)
+            assert child.seen() is not None, "premise: the child is running"
+            os.kill(os.getpid(), signal.SIGTERM)
+            await asyncio.wait_for(serving, timeout=60)
+        finally:
+            serving.cancel()
+            await asyncio.gather(serving, return_exceptions=True)
+        assert os.path.exists(term.replace("{id}", inv)), "premise: the stop signalled the child"
+        assert [n for n, _ in ends.calls if n in ("hand_back", "finish")] == ["hand_back"], ends.calls
+        stored, live = _word(world["dsn"], inv), await _served(store, inv)
+        assert await store.take_over(held=frozenset()) == [inv], "premise: the handed-back row was taken over"
+        return stored, live, await _served(store, inv)
+
+
+async def _taken_over_by_the_store(world, flagged):
+    from defender.tests.support.jobs._jobs1342 import lapse_lease
+
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued_1471(store, update_ticket=flagged)
+        assert (await store.claim()).record.investigation_id == inv, "premise: claimed"
+        lapse_lease(world["dsn"], inv)
+        assert await store.take_over(held=frozenset()) == [inv], "premise: taken over"
+        retry = await store.claim()
+        assert retry is not None, "premise: the lapse was retried"
+        assert retry.record.attempt == 2
+        assert _word(world["dsn"], retry.record.investigation_id) is None, "the retry row carries a word"
+        end = await _served(store, inv)
+        return _word(world["dsn"], inv), end, end
+
+
+#: writer -> (driver, flagged row's (stored word, served while live, served at the end))
+_W6_WRITERS = {
+    "hand-back-before-the-read": (_hand_back_before_the_read, ("not_read", None, "not_read")),
+    "hand-back-after-the-read": (_hand_back_after_the_read, ("commented", None, "commented")),
+    "finish": (_end_by_finish, ("commented", "commented", "commented")),
+    "write-accounting-after-a-cancel": (_end_by_accounting_after_a_cancel, ("commented", "commented", "commented")),
+    "barest-end": (_end_by_barest_write, ("escalated", "escalated", "escalated")),
+    "store-take-over": (_taken_over_by_the_store, ("not_read", "not_read", "not_read")),
+}
+
+
+@pytest.mark.parametrize("flagged", [True, False], ids=["flagged", "unflagged"])
+@pytest.mark.parametrize("writer", list(_W6_WRITERS))
+async def test_1471_w6_every_writer_of_a_rows_end_leaves_the_word_precedence_says(world, writer, flagged):
+    """Each way a row ends, flagged: the stored word and then the served word are W6's; unflagged: served null. (W6)"""
+    drive, expected = _W6_WRITERS[writer]
+    stored, live, end = await drive(world, flagged)
+    if flagged:
+        assert (stored, live, end) == expected, writer
+    else:
+        assert (live, end) == (None, None), writer
