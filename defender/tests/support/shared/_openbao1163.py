@@ -151,6 +151,7 @@ class Bao:
     def token_for(self, *policies: str, default_policy: bool = False) -> str:
         """A child token holding only `policies` (and OpenBao's default policy when `default_policy`), an hour long."""
         body = self.ok("POST", "auth/token/create", json={
+            # "default" is listed, not only allowed: a token created with no policies inherits its parent's (root's).
             "policies": list(policies) + (["default"] if default_policy else []),
             "no_default_policy": not default_policy, "ttl": "1h",
             "display_name": f"t1163-{self.tag}"})

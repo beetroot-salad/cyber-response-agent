@@ -141,9 +141,10 @@ missing or invalid one refuses start naming it. Secret files hold one value, a t
 
 At start it checks the database version, reads OpenBao's seal status (unreachable or a malformed answer refuses start;
 sealed starts the API, and system reads and credential writes answer 503 until it is unsealed), checks the OpenBao
-token when unsealed, first by its lookup-self (a 403 refuses start naming `DEFENDER_OPENBAO_ADDR` and
-`DEFENDER_API_OPENBAO_TOKEN_FILE`: the token is not accepted at that address), then by a metadata read under the mount
-(a 403 refuses start naming `DEFENDER_OPENBAO_KV_MOUNT`, the token's policy and the token file; #1532), probes each
+token when unsealed, first by its lookup-self, then by a metadata read under the mount; a refusal states what OpenBao
+answered to which call and names the settings that answer can come from (a 403: `DEFENDER_OPENBAO_ADDR`,
+`DEFENDER_API_OPENBAO_TOKEN_FILE`, `DEFENDER_OPENBAO_KV_MOUNT` for the read, and the token's policy; anything else:
+`DEFENDER_OPENBAO_ADDR`), never which one is wrong (#1532), probes each
 realm (discovery names the configured issuer, signing keys fetch, the admin client reads users or clients) and binds
 the port before the bootstrap writes anything; a failure ends the program with that step's message on stderr. Not checked at start: the sign-in client's own secret, the
 redirect URI's equality with the realm's, and whether an admin role is write-capable (a read-only role passes);

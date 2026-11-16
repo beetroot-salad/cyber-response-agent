@@ -16,6 +16,7 @@ audit device records each credential write (A4)."""
 from __future__ import annotations
 
 import base64
+import dataclasses
 import functools
 import re
 from collections.abc import AsyncIterator, Callable, Mapping
@@ -123,15 +124,20 @@ class SecretStoreUnavailable(SecretStoreFault, TransportFault):
 
 class SecretStoreRefused(SecretStoreFault, ConfigFault):
     """A 4xx answer (a policy refusal, a bad request): the operator's to fix. OpenBao refuses before it writes, so
-    nothing was stored. `forbidden` is the 403: this token, under its policy, may not make this call at this address;
-    the token, its policy, the mount and the address can each be why (#1532 P1)."""
+    nothing was stored."""
 
     def __init__(self, detail: str, *, status: int) -> None:
         super().__init__(detail, status=status, stored=False)
 
-    @property
-    def forbidden(self) -> bool:
-        return self.status == 403  # noqa: PLR2004 — HTTP Forbidden
+
+@dataclasses.dataclass(frozen=True)
+class SecretSettings:
+    """The names of the settings an `OpenBaoSecrets` was configured from, for its faults to name (#1532 P1): told by the
+    owner of those settings (the API server), since the client does not read them itself."""
+
+    address: str
+    token: str
+    mount: str
 
 
 _R = TypeVar("_R")
@@ -275,10 +281,33 @@ class OpenBaoSecrets(_Login):
     one, or none: the network)."""
 
     def __init__(self, *, addr: str, token: str, mount: str,
-                 transport: httpx.AsyncBaseTransport | None = None) -> None:
+                 transport: httpx.AsyncBaseTransport | None = None, settings: SecretSettings | None = None) -> None:
         super().__init__(addr=addr, token=token, mount=mount)
         self._transport = transport
         self._pool: httpx.AsyncClient | None = None
+        self._settings = settings
+
+    def _in_play(self, path: str, status: int | None) -> str:
+        """What a fault of the call to `path` with `status` (None: no answer) can come from, never which (#1532 P1): a
+        403 is this token, under its policy, at this address, and under the mount for a call there; any other answer, or
+        none, is the address's. Named by setting when the client was told them."""
+        names = self._settings
+        if status != 403:  # noqa: PLR2004 — HTTP Forbidden
+            return f"check {names.address if names else 'the address'}"
+        under = path.startswith(f"{self.mount}/")
+        which = ([names.address, names.token] + ([names.mount] if under else []) if names
+                 else ["the address", "the token"] + (["the mount"] if under else []))
+        return f"check {', '.join(which)} and the token's policy: any of them can be why"
+
+    def _fault(self, kind: type[SecretStoreFault], path: str, what: str, observed: str, *, status: int | None,
+               stored: bool | None = False) -> SecretStoreFault:
+        """A fault stating what OpenBao did with the call and the settings that answer can come from."""
+        where = f" under the mount {self.mount!r}" if path.startswith(f"{self.mount}/") else ""
+        detail = f"OpenBao at {self.addr} {observed} {what}{where} ({self._in_play(path, status)})"
+        if kind is SecretStoreRefused:
+            assert status is not None
+            return SecretStoreRefused(detail, status=status)
+        return SecretStoreUnavailable(detail, status=status, stored=stored)
 
     def _opened(self, **limits: Any) -> httpx.AsyncClient:
         return internal_async_client(trust=self._loop_trust, transport=self._transport, timeout=OPENBAO_TIMEOUT_SEC,
@@ -297,10 +326,9 @@ class OpenBaoSecrets(_Login):
             finally:
                 self._pool = None
 
-    async def _secret_call(self, method: str, rest: str, what: str, json: Any = None, *,
-                           url: str | None = None) -> httpx.Response:
-        """One call under the mount (`rest`), or at `url` when given."""
-        url = url or self._url(rest)
+    async def _secret_call(self, method: str, path: str, what: str, json: Any = None) -> httpx.Response:
+        """One call to `path` (below `/v1/`)."""
+        url = f"{self.addr}/v1/{path}"
         try:
             if self._pool is not None:
                 return await self._pool.request(method, url, json=json, headers=self._headers())
@@ -309,17 +337,20 @@ class OpenBaoSecrets(_Login):
         except httpx.HTTPError as e:
             # Never sent: no connection was made, or none came free in time (a pool timeout fires before sending).
             never_sent = isinstance(e, httpx.ConnectError | httpx.ConnectTimeout | httpx.PoolTimeout)
-            raise SecretStoreUnavailable(f"OpenBao at {self.addr} is unreachable for {what} ({type(e).__name__})",
-                                         status=None, stored=False if never_sent else None) from None
+            raise self._fault(SecretStoreUnavailable, path, what, f"is unreachable ({type(e).__name__}) for",
+                              status=None, stored=False if never_sent else None) from None
 
-    def _secret_refused(self, reply: httpx.Response, what: str) -> SecretStoreFault:
+    def _secret_refused(self, reply: httpx.Response, path: str, what: str) -> SecretStoreFault:
         status = reply.status_code
         if status == 503 and _answers_sealed(reply):  # noqa: PLR2004 — a sealed OpenBao did nothing
-            return SecretStoreUnavailable(f"OpenBao at {self.addr} is sealed ({what})", status=status, stored=False)
-        detail = f"OpenBao at {self.addr} refused {what} ({status})"
+            return self._fault(SecretStoreUnavailable, path, what, "is sealed, and did not answer", status=status)
         if status >= 500:  # noqa: PLR2004 — 5xx may pass (`openbao_fault`)
-            return SecretStoreUnavailable(detail, status=status, stored=None)
-        return SecretStoreRefused(detail, status=status)
+            return self._fault(SecretStoreUnavailable, path, what, f"failed ({status})", status=status, stored=None)
+        return self._fault(SecretStoreRefused, path, what, f"answered {status} to", status=status)
+
+    def _unreadable(self, reply: httpx.Response, path: str, what: str, shape: str) -> SecretStoreFault:
+        return self._fault(SecretStoreUnavailable, path, what, f"answered {reply.status_code} without {shape} to",
+                           status=reply.status_code)
 
     async def put_credentials(self, tenant_id: str, system_id: str, kind: str,
                               credentials: Mapping[str, str], *, generation: int) -> None:
@@ -331,40 +362,39 @@ class OpenBaoSecrets(_Login):
                                       for k, v in credentials.items()):
             raise ConfigFault("a credential set must map one or more names to non-empty text")
         what = f"the credential write of {system_id}"
-        reply = await self._secret_call("POST", f"data/{path}", what,
-                                        json={"data": {"kind": kind, "fields": dict(credentials)}})
+        at = f"{self.mount}/data/{path}"
+        reply = await self._secret_call("POST", at, what, json={"data": {"kind": kind, "fields": dict(credentials)}})
         if reply.status_code not in (200, 204):
-            raise self._secret_refused(reply, what)
+            raise self._secret_refused(reply, at, what)
 
     async def look_up_self(self) -> None:
         """OpenBao accepts this token at this address (lookup-self answered with its token's data). Its answer is not
         otherwise read. A 403 is `SecretStoreRefused`; no usable answer (none, a 5xx, sealed, or a 200 without a data
         object) is `SecretStoreUnavailable`. (#1532 K1, K3)"""
-        what = "the token's lookup"
-        reply = await self._secret_call("GET", "", what, url=f"{self.addr}/v1/{LOOKUP_SELF}")
+        what = "the token's lookup-self"
+        reply = await self._secret_call("GET", LOOKUP_SELF, what)
         if reply.status_code != 200:
-            raise self._secret_refused(reply, what)
+            raise self._secret_refused(reply, LOOKUP_SELF, what)
         try:
             _data_of(reply)
         except ConfigFault:
-            raise SecretStoreUnavailable(f"OpenBao at {self.addr} answered {what} without a data object",
-                                         status=reply.status_code, stored=False) from None
+            raise self._unreadable(reply, LOOKUP_SELF, what, "a data object") from None
 
     async def has_credentials(self, tenant_id: str, system_id: str, *, generation: int) -> bool:
         """Does `(tenant_id, system_id)` have a current set at `generation`? Asked of the metadata only. A 200 that is
         not KV metadata is no usable answer (`SecretStoreUnavailable`), like a 5xx."""
         path = _secret_path(tenant_id, system_id, generation)
         what = f"the credential existence check of {system_id}"
-        reply = await self._secret_call("GET", f"metadata/{path}", what)
+        at = f"{self.mount}/metadata/{path}"
+        reply = await self._secret_call("GET", at, what)
         if reply.status_code == 404:
             return False
         if reply.status_code != 200:
-            raise self._secret_refused(reply, what)
+            raise self._secret_refused(reply, at, what)
         try:
             data = _data_of(reply)
         except ConfigFault:
-            raise SecretStoreUnavailable(f"OpenBao at {self.addr} answered {what} without KV metadata",
-                                         status=reply.status_code, stored=False) from None
+            raise self._unreadable(reply, at, what, "KV metadata") from None
         current = data.get("current_version")
         version = (data.get("versions") or {}).get(str(current))
         return (isinstance(current, int) and current > 0 and isinstance(version, dict)
@@ -405,4 +435,4 @@ class TransitVerifier(_OpenBao):
 
 
 __all__ = ["OpenBaoSecrets", "openbao_fault", "OpenBaoStore", "SecretStoreFault", "SecretStoreRefused",
-           "SecretStoreUnavailable", "TransitVerifier", "store_policies", "transit_key_for"]
+           "SecretSettings", "SecretStoreUnavailable", "TransitVerifier", "store_policies", "transit_key_for"]

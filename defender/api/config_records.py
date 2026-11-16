@@ -60,8 +60,8 @@ async def has_credentials(secrets: SecretWriter, tenant_id: TenantId, record: Sy
     try:
         return await secrets.has_credentials(tenant_id, record.system_id, generation=record.credential_generation)
     except _Refused as fault:
-        raise SecretStoreRefused(f"the secret store refused {_whose(fault)} when asked whether {record.system_id} has "
-                                 f"credentials: {fault}") from None
+        raise SecretStoreRefused(f"the secret store refused the API's request when asked whether {record.system_id} "
+                                 f"has credentials: {fault}") from None
     except SecretStoreFault as fault:
         raise SecretStoreUnavailable(f"the secret store cannot say whether {record.system_id} has credentials: "
                                      f"{fault}") from None
@@ -79,16 +79,6 @@ def _announce_leaving(principal: Principal, system_id: str, detail: str, leaving
     except Exception:  # noqa: BLE001 — never replace the cancellation
         _logger.exception("the audit event of %s's cancelled credential write (%s) could not be written", system_id,
                           detail)
-
-
-def _whose(fault: _Refused) -> str:
-    """What OpenBao refused, and for a 403 the settings that took part (#1532 K6, P1): the token, its policy and the
-    mount can each be why, and the start check may never have run (the API started sealed). Any other 4xx is the
-    request itself (ours, or the mount's setup). Both are ours to fix, not the caller's."""
-    if fault.forbidden:
-        return ("the API's request (403: check the API's token, its policy and DEFENDER_OPENBAO_KV_MOUNT; any of them "
-                "can be why)")
-    return "the API's request"
 
 
 class ConfigRecords:
@@ -173,7 +163,7 @@ class ConfigCredentials:
                 await self._secrets.put_credentials(tenant, system_id, slot.auth.kind, credentials,
                                                     generation=slot.generation)
             except _Refused as fault:
-                raise SecretStoreRefused(f"the secret store refused {_whose(fault)}; the credentials of {system_id} "
+                raise SecretStoreRefused(f"the secret store refused the API's request; the credentials of {system_id} "
                                          f"were not stored: {fault}") from None
             except SecretStoreFault as fault:
                 if fault.stored is False:

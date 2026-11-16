@@ -17,12 +17,16 @@ from sqlalchemy.exc import ArgumentError
 from defender._io import read_text_utf8
 from defender._url import split_http_url
 from defender._yaml import safe_load
-from defender.credential_proxy import store_policies
+from defender.credential_proxy import SecretSettings, store_policies
 from defender.kit.faults import ConfigFault
 from defender.identity import Bootstrap, DataRuleViolation
 from defender.identity.keycloak import check_issuer, check_redirect_uri, check_server_url  # lint-shippable: ok — the program wires the one sign-in vendor the platform supports (#1083).
 
 T = TypeVar("T")
+
+#: The settings the API's secret-store client is configured from, named in its faults (#1532 P1).
+OPENBAO_SETTINGS = SecretSettings(address="DEFENDER_OPENBAO_ADDR", token="DEFENDER_API_OPENBAO_TOKEN_FILE",
+                                  mount="DEFENDER_OPENBAO_KV_MOUNT")
 
 
 class StartRefused(Exception):
@@ -88,9 +92,9 @@ class Settings:
             programs_audience=text("DEFENDER_KEYCLOAK_PROGRAMS_AUDIENCE"),
             programs_admin_client_id=text("DEFENDER_KEYCLOAK_PROGRAMS_ADMIN_CLIENT_ID"),
             programs_admin_client_secret=secret("DEFENDER_KEYCLOAK_PROGRAMS_ADMIN_CLIENT_SECRET_FILE"),
-            openbao_addr=parsed("DEFENDER_OPENBAO_ADDR", _openbao_addr),
-            openbao_kv_mount=parsed("DEFENDER_OPENBAO_KV_MOUNT", _kv_mount),
-            openbao_token=secret("DEFENDER_API_OPENBAO_TOKEN_FILE"),
+            openbao_addr=parsed(OPENBAO_SETTINGS.address, _openbao_addr),
+            openbao_kv_mount=parsed(OPENBAO_SETTINGS.mount, _kv_mount),
+            openbao_token=secret(OPENBAO_SETTINGS.token),
         )
 
 

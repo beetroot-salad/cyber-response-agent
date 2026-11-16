@@ -29,7 +29,7 @@ from defender.api.job_store import JobStorePorts
 from defender.api.learning_work import StoreLearningWork
 from defender.api.refusing import Refusing
 from defender.configuration.issuer import DEPLOYMENT_ISSUER
-from defender.credential_proxy import OpenBaoSecrets, SecretStoreRefused
+from defender.credential_proxy import OpenBaoSecrets
 from defender.identity import BootstrapRefused, IdentityService, SignInUnavailable
 from defender.identity.keycloak import KeycloakPrograms, KeycloakSignIn  # lint-shippable: ok — the program wires the one sign-in vendor the platform supports (#1083).
 from defender.identity.logged_mail import LoggedMail
@@ -45,7 +45,7 @@ from defender.tenancy import TenantRepository
 from defender.tenancy.models import TenantRecords
 from defender.tenancy.postgres import PostgresTenantRepository
 
-from ._settings import Settings, StartRefused
+from ._settings import OPENBAO_SETTINGS, Settings, StartRefused
 
 #: What each family nothing real backs yet names as its owner (P1, #1470 O15).
 _CHECK = "#1460 (the connection check)"
@@ -239,37 +239,15 @@ async def _seal_status(settings: Settings, transport: httpx.AsyncBaseTransport |
     return sealed
 
 
-async def _login_check(settings: Settings, secrets: OpenBaoSecrets) -> None:
-    """The API's token works at this address and may read under the mount (G4; #1532 K1-K3): its lookup-self, then a
-    metadata read of a path no record names. A refusal states what OpenBao refused and every setting that took part,
-    never which one is wrong (#1532 P1): a 403 on the lookup names the address and the token file; a 403 on the read,
-    the lookup having passed, names the mount, the token's policy and the token file. Any other answer, or none, names
-    the address. The token is never shown."""
-    addr = settings.openbao_addr
+async def _login_check(secrets: OpenBaoSecrets) -> None:
+    """The API's token works at this address and may read under the mount (G4; #1532): its lookup-self, then a metadata
+    read of a path no record names. A refusal is the secret store's own fault, which states what OpenBao did and the
+    settings that answer can come from, never which one is wrong (#1532 P1). The token is never shown."""
     try:
         await secrets.look_up_self()
-    except SecretStoreRefused as refused:
-        if not refused.forbidden:
-            raise StartRefused(f"DEFENDER_OPENBAO_ADDR: the secret store at {addr} refused the API's token lookup "
-                               f"({refused})") from None
-        raise StartRefused(f"DEFENDER_OPENBAO_ADDR, DEFENDER_API_OPENBAO_TOKEN_FILE: OpenBao at {addr} does not accept "
-                           f"the token the file holds ({refused}); the token's policy must also grant lookup-self (after "
-                           f"an upgrade from before #1532, re-apply the writer policy)") from None
-    except AdapterFault as failed:
-        raise StartRefused(f"DEFENDER_OPENBAO_ADDR: the secret store at {addr} could not answer the API's token lookup "
-                           f"({failed})") from None
-    try:
         await secrets.has_credentials(_PROBE_TENANT, _PROBE_SYSTEM, generation=1)
-    except SecretStoreRefused as refused:
-        if not refused.forbidden:
-            raise StartRefused(f"DEFENDER_OPENBAO_ADDR: the secret store at {addr} refused the API's "
-                               f"login check ({refused})") from None
-        raise StartRefused(f"DEFENDER_OPENBAO_KV_MOUNT, DEFENDER_API_OPENBAO_TOKEN_FILE: the token the file holds is "
-                           f"valid at {addr} but may not read under the mount {settings.openbao_kv_mount!r} ({refused}): "
-                           f"check the mount setting and the token's policy") from None
-    except AdapterFault as failed:
-        raise StartRefused(f"DEFENDER_OPENBAO_ADDR: the secret store at {addr} could not answer the "
-                           f"API's login check ({failed})") from None
+    except AdapterFault as fault:
+        raise StartRefused(f"the API's secret-store check failed: {fault}") from None
 
 
 def _whole_catalog() -> Catalog:
@@ -294,11 +272,12 @@ async def serving(settings: Settings, *, transport: httpx.AsyncBaseTransport | N
         async with steps.step("the secret store's seal status"):
             sealed = await _seal_status(settings, openbao_transport)
         secrets = OpenBaoSecrets(addr=settings.openbao_addr, token=settings.openbao_token.get_secret_value(),
-                                 mount=settings.openbao_kv_mount, transport=openbao_transport)
+                                 mount=settings.openbao_kv_mount, transport=openbao_transport,
+                                 settings=OPENBAO_SETTINGS)
         await stack.enter_async_context(secrets.pooled())  # one pooled client for the login check and every request
         if not sealed:  # sealed: the API starts, and each request needing the store answers 503 until it is unsealed
             async with steps.step("the secret store's login check"):
-                await _login_check(settings, secrets)
+                await _login_check(secrets)
         async with steps.step("reading the adapter catalog"):
             catalog = await asyncio.to_thread(_whole_catalog)
         async with AsyncExitStack() as until_lifespan:  # closes what the lifespan will own, if start ends before it
