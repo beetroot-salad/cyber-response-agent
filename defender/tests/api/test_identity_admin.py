@@ -13,6 +13,8 @@ import pytest
 
 pytest.importorskip('fastapi')
 
+from defender.tests.support.api._flow1161 import failed  # noqa: E402
+from defender.tests.support.api._mount1161 import API  # noqa: E402
 from defender.tests.support.api._identity1306 import (  # noqa: E402
     DAY,
     EMPTY,
@@ -54,13 +56,13 @@ pytestmark = [
 
 @pytest.mark.parametrize("has_code", [True, False])
 def test_an_administrator_without_a_code_is_refused_and_setup_is_required_when_there_is_none(has_code: bool) -> None:
-    """Password-only administrator sign-in -> 403, no session; an account with no code is made to set one up (O5)."""
+    """Password-only administrator sign-in -> 303 `otp-required`, no session; an account with no code is made to set one up (O5; B4)."""
     world = lab()
     account = world.signin.account_for(OPS)
     world.signin.has_otp_answers[account] = has_code
     browser = world.client()
     refused = world.sign_in_response(browser, OPS, amr=("pwd",))
-    assert refused.status_code == 403
+    assert failed(refused) == ("otp-required", {"return": "/"})
     assert SESSION_COOKIE not in browser.cookies
     assert world.signin.otp_required == ([] if has_code else [account])
     world.signin.has_otp_answers[account] = True
@@ -71,7 +73,7 @@ def test_a_refused_administrator_sign_in_does_not_activate_the_account() -> None
     """Refused means refused: only the code-backed sign-in makes the administrator `active` (flow 2, O5)."""
     world = lab()
     world.signin.has_otp_answers[world.signin.account_for(OPS)] = True
-    assert world.sign_in_response(world.client(), OPS, amr=("pwd",), name="Refused").status_code == 403
+    assert failed(world.sign_in_response(world.client(), OPS, amr=("pwd",), name="Refused"))[0] == "otp-required"
     refused = world.call(world.repo.user_by_email, OPS)
     assert (refused.status, refused.activated_at) == ("invited", None)
     assert refused.display_name != "Refused"
@@ -83,9 +85,9 @@ def test_an_administrators_invitation_records_the_administrator_as_inviter() -> 
     """`memberships.invited_by` is the user who invited: here the administrator (data model, O5)."""
     world = lab()
     me_session = world.sign_in(ME)
-    assert me_session.delete(f"/tenants/{LAB}/members/{user_id(me_session)}").status_code == 204
+    assert me_session.delete(f"{API}/tenants/{LAB}/members/{user_id(me_session)}").status_code == 204
     ops = world.sign_in_admin()
-    invited = ops.post(f"/admin/tenants/{LAB}/invitations", json={"email": NEW})
+    invited = ops.post(f"{API}/admin/tenants/{LAB}/invitations", json={"email": NEW})
     assert invited.status_code == 202
     assert world.call(world.repo.membership, invited.json()["id"]).invited_by == user_id(ops)
 
@@ -98,7 +100,7 @@ def test_an_administrator_session_reads_platform_routes_and_holds_no_tenants() -
     body = me(ops)
     assert (body["administrator"], body["tenants"], body["invitations"]) == (True, [], [])
     assert body["user"]["email"] == OPS
-    assert sorted(t["tenant_id"] for t in items(ops.get("/admin/tenants"))) == sorted([LAB, EMPTY])
+    assert sorted(t["tenant_id"] for t in items(ops.get(API + "/admin/tenants"))) == sorted([LAB, EMPTY])
 
 
 @pytest.mark.parametrize(("method", "path", "body"), [
@@ -109,10 +111,10 @@ def test_an_administrator_session_reads_platform_routes_and_holds_no_tenants() -
 def test_an_administrator_gets_404_on_every_tenant_route(method: str, path: str, body: object) -> None:
     """Administrators can never read or act inside a tenant (O5, K10, P-D)."""
     world = lab()
-    assert world.sign_in(ME).get(f"/tenants/{LAB}/members").status_code == 200  # control: a member
+    assert world.sign_in(ME).get(f"{API}/tenants/{LAB}/members").status_code == 200  # control: a member
     ops = world.sign_in_admin()
-    asked = ops.request(method, f"/tenants/{LAB}/{path}", json=body)
-    unknown = ops.request(method, f"/tenants/{UNKNOWN}/{path}", json=body)
+    asked = ops.request(method, f"{API}/tenants/{LAB}/{path}", json=body)
+    unknown = ops.request(method, f"{API}/tenants/{UNKNOWN}/{path}", json=body)
     assert asked.status_code == unknown.status_code == 404
     assert asked.text.replace(LAB, "{T}") == unknown.text.replace(UNKNOWN, "{T}")
 
@@ -122,13 +124,13 @@ def test_a_non_administrator_is_403_on_platform_routes_and_an_administrator_is_n
     world = lab()
     world.register(EMPTY)
     me_session = world.sign_in(ME)
-    assert me_session.get("/admin/tenants").status_code == 403
+    assert me_session.get(API + "/admin/tenants").status_code == 403
     # The same 403 whatever the tenant: unknown, with members, malformed (no probing, O1/P-D).
     for tenant in (EMPTY, UNKNOWN, LAB, "not-a-tenant-id"):
-        assert me_session.post(f"/admin/tenants/{tenant}/invitations", json={"email": NEW}).status_code == 403, tenant
+        assert me_session.post(f"{API}/admin/tenants/{tenant}/invitations", json={"email": NEW}).status_code == 403, tenant
     ops = world.sign_in_admin()
-    assert ops.get("/admin/tenants").status_code == 200
-    assert ops.post(f"/admin/tenants/{EMPTY}/invitations", json={"email": NEW}).status_code == 202
+    assert ops.get(API + "/admin/tenants").status_code == 200
+    assert ops.post(f"{API}/admin/tenants/{EMPTY}/invitations", json={"email": NEW}).status_code == 202
     assert [r["email"] for r in invitation_rows(world.sign_in(ME), LAB)] == []  # nothing leaked into the lab
 
 
@@ -139,11 +141,11 @@ def test_the_identity_refusals_are_rfc_9457_problems() -> None:
     me_session = world.sign_in(ME)
     ops = world.sign_in_admin()
     refusals = [
-        (401, world.client().get("/me")),
+        (401, world.client().get(API + "/me")),
         (403, world.client_with_cookie(me_session.cookies[SESSION_COOKIE], origin="https://evil.example")
-         .post(f"/tenants/{LAB}/invitations", json={"email": NEW})),
-        (403, me_session.get("/admin/tenants")),
-        (409, ops.post(f"/admin/tenants/{LAB}/invitations", json={"email": NINA})),
+         .post(f"{API}/tenants/{LAB}/invitations", json={"email": NEW})),
+        (403, me_session.get(API + "/admin/tenants")),
+        (409, ops.post(f"{API}/admin/tenants/{LAB}/invitations", json={"email": NINA})),
     ]
     for code, response in refusals:
         assert response.status_code == code, response.text
@@ -152,7 +154,7 @@ def test_the_identity_refusals_are_rfc_9457_problems() -> None:
         assert {"type", "title", "status", "detail"} <= set(problem)
         assert (problem["status"], problem["title"]) == (code, HTTPStatus(code).phrase)
     assert "www-authenticate" not in refusals[0][1].headers
-    assert ops.post(f"/admin/tenants/{EMPTY}/invitations", json={"email": NEW}).status_code == 202  # control
+    assert ops.post(f"{API}/admin/tenants/{EMPTY}/invitations", json={"email": NEW}).status_code == 202  # control
 
 
 def test_an_administrators_invitation_calls_no_port_before_the_response() -> None:
@@ -163,7 +165,7 @@ def test_an_administrators_invitation_calls_no_port_before_the_response() -> Non
     ops = world.sign_in_admin()
     before = (list(world.signin.every_call), list(world.mail.attempts))
     for email in (NEW, ME):  # a new person, and an active one with an account
-        assert ops.post(f"/admin/tenants/{EMPTY}/invitations", json={"email": email}).status_code == 202
+        assert ops.post(f"{API}/admin/tenants/{EMPTY}/invitations", json={"email": email}).status_code == 202
     assert (world.signin.every_call, world.mail.attempts) == before
     world.send_pending()  # control: both were pending
     assert world.signin.sends_to(NEW) == 1
@@ -176,10 +178,10 @@ def test_an_administrator_invites_only_into_a_tenant_with_no_active_members() ->
     world.register(EMPTY)
     world.sign_in(ME)  # the lab now has an active member
     ops = world.sign_in_admin()
-    assert ops.post(f"/admin/tenants/{EMPTY}/invitations", json={"email": NEW}).status_code == 202
-    assert ops.post(f"/admin/tenants/{LAB}/invitations", json={"email": NINA}).status_code == 409
-    assert ops.post(f"/admin/tenants/{UNKNOWN}/invitations", json={"email": NINA}).status_code == 404
-    assert ops.post("/admin/tenants/not-a-tenant-id/invitations", json={"email": NINA}).status_code == 422
+    assert ops.post(f"{API}/admin/tenants/{EMPTY}/invitations", json={"email": NEW}).status_code == 202
+    assert ops.post(f"{API}/admin/tenants/{LAB}/invitations", json={"email": NINA}).status_code == 409
+    assert ops.post(f"{API}/admin/tenants/{UNKNOWN}/invitations", json={"email": NINA}).status_code == 404
+    assert ops.post(API + "/admin/tenants/not-a-tenant-id/invitations", json={"email": NINA}).status_code == 422
     world.send_pending()
     assert world.signin.sends_to(NEW) == 1
     assert world.signin.sends_to(NINA) == 0
@@ -190,9 +192,9 @@ def test_a_tenant_left_with_no_active_members_can_be_recovered_by_an_administrat
     """The last member leaves; the administrator invites a new first member (O4, O5)."""
     world = lab()
     me_session = world.sign_in(ME)
-    assert me_session.delete(f"/tenants/{LAB}/members/{user_id(me_session)}").status_code == 204
+    assert me_session.delete(f"{API}/tenants/{LAB}/members/{user_id(me_session)}").status_code == 204
     ops = world.sign_in_admin()
-    assert ops.post(f"/admin/tenants/{LAB}/invitations", json={"email": NEW}).status_code == 202
+    assert ops.post(f"{API}/admin/tenants/{LAB}/invitations", json={"email": NEW}).status_code == 202
     world.send_pending()
     assert tenants_of(world.sign_in(NEW)) == {LAB}
 
@@ -230,13 +232,13 @@ def test_a_flagged_user_cannot_accept_even_through_a_session_without_a_code() ->
     """Acceptance refuses the flagged user, not only the code-backed session (K10, flow 3)."""
     world = lab()
     me_session = world.sign_in(ME)  # a password-only session, kept across the restart
-    assert me_session.delete(f"/tenants/{LAB}/members/{user_id(me_session)}").status_code == 204
+    assert me_session.delete(f"{API}/tenants/{LAB}/members/{user_id(me_session)}").status_code == 204
     world.restart(administrators=[OPS, ME])  # ME is now flagged
     ops = world.sign_in_admin()
-    row = ops.post(f"/admin/tenants/{LAB}/invitations", json={"email": ME})
+    row = ops.post(f"{API}/admin/tenants/{LAB}/invitations", json={"email": ME})
     assert row.status_code == 202
     assert me(me_session)["invitations"] == []
-    assert me_session.post(f"/invitations/{row.json()['id']}/accept").status_code == 404
+    assert me_session.post(f"{API}/invitations/{row.json()['id']}/accept").status_code == 404
     assert tenants_of(me_session) == set()
 
 
@@ -248,7 +250,7 @@ def test_an_administrator_cannot_accept_an_invitation() -> None:
     row = invitation_id(me_session, LAB, OPS)
     ops = world.sign_in_admin()
     assert me(ops)["invitations"] == []  # an open row addressed to the administrator is not offered (K10)
-    assert ops.post(f"/invitations/{row}/accept").status_code == 404
+    assert ops.post(f"{API}/invitations/{row}/accept").status_code == 404
     assert tenants_of(ops) == set()
     assert [r["id"] for r in invitation_rows(me_session, LAB)] == [row]
 
@@ -257,9 +259,9 @@ def test_removing_an_email_from_the_file_removes_powers_at_the_next_request_afte
     """Un-flagged at start -> the live session loses platform powers; the account can then be invited (O5, DC-5)."""
     world = lab()
     ops = world.sign_in_admin()
-    assert ops.get("/admin/tenants").status_code == 200
+    assert ops.get(API + "/admin/tenants").status_code == 200
     world.restart(administrators=[])
-    refused = ops.get("/admin/tenants")
+    refused = ops.get(API + "/admin/tenants")
     assert refused.status_code == 403
     assert me(ops)["administrator"] is False
     me_session = world.sign_in(ME)
@@ -267,7 +269,7 @@ def test_removing_an_email_from_the_file_removes_powers_at_the_next_request_afte
     world.send_pending()
     assert [n.to for n in world.mail.sent] == [OPS]  # ops is active: our notification, not a set-password
     [invitation] = me(ops)["invitations"]
-    assert ops.post(f"/invitations/{invitation['id']}/accept").status_code == 200
+    assert ops.post(f"{API}/invitations/{invitation['id']}/accept").status_code == 200
     assert tenants_of(ops) == {LAB}
 
 
@@ -275,11 +277,11 @@ def test_an_unflagging_made_by_another_process_takes_effect_at_this_processs_nex
     """P-A: the flag is read on every request; a session already used keeps no stale powers (O5, DC-5)."""
     world = lab()
     ops = world.sign_in_admin()
-    assert ops.get("/admin/tenants").status_code == 200  # the session has been used
+    assert ops.get(API + "/admin/tenants").status_code == 200  # the session has been used
     other_process = IdentityService(world.repo, signin=world.signin, mail=world.mail, clock=world.clock,
                                     bootstrap=Bootstrap(administrators=()), programs=NoProgramsRealm())
     world.call(other_process.start)  # another API process, started with OPS removed from the file
-    assert ops.get("/admin/tenants").status_code == 403
+    assert ops.get(API + "/admin/tenants").status_code == 403
     assert me(ops)["administrator"] is False
 
 
@@ -307,7 +309,7 @@ def test_the_lab_people_sign_in_and_the_administrator_signs_in_twice() -> None:
     world = lab()
     assert tenants_of(world.sign_in(ME)) == {LAB}
     world.signin.has_otp_answers[world.signin.account_for(OPS)] = True
-    assert world.sign_in_response(world.client(), OPS, amr=("pwd",)).status_code == 403
+    assert failed(world.sign_in_response(world.client(), OPS, amr=("pwd",)))[0] == "otp-required"
     ops = world.sign_in(OPS, amr=("pwd", "otp"))
     body = me(ops)
     assert (body["administrator"], body["tenants"]) == (True, [])
@@ -320,7 +322,7 @@ def test_restarts_send_nothing_to_active_people_even_after_the_member_leaves_the
     world.sign_in_admin()
     world.restart(**FILE)
     sent = world.signin.sends_to(OPS) + world.signin.sends_to(ME)
-    assert me_session.delete(f"/tenants/{LAB}/members/{user_id(me_session)}").status_code == 204
+    assert me_session.delete(f"{API}/tenants/{LAB}/members/{user_id(me_session)}").status_code == 204
     world.restart(**FILE)
     assert world.signin.sends_to(OPS) + world.signin.sends_to(ME) == sent
     assert world.mail.sent == []
@@ -371,7 +373,7 @@ def test_a_dropped_send_is_re_requested_when_the_person_is_later_listed_as_admin
     world = lab()
     me_session = world.sign_in(ME)
     assert world.invite(me_session, LAB, X).status_code == 202
-    revoked = me_session.delete(f"/tenants/{LAB}/invitations/{invitation_id(me_session, LAB, X)}")
+    revoked = me_session.delete(f"{API}/tenants/{LAB}/invitations/{invitation_id(me_session, LAB, X)}")
     assert revoked.status_code == 204
     world.send_pending()
     world.clock.advance(HOUR + SECOND)
@@ -417,15 +419,15 @@ def test_start_flags_someone_whose_membership_ended_and_keeps_an_invited_adminis
     world.invite(me_session, LAB, OPS)  # an invitation to a flagged administrator
     world.restart(**FILE)  # DC-1: not refused
     assert me(world.sign_in_admin())["administrator"] is True
-    assert me_session.delete(f"/tenants/{LAB}/members/{user_id(me_session)}").status_code == 204
+    assert me_session.delete(f"{API}/tenants/{LAB}/members/{user_id(me_session)}").status_code == 204
     world.restart(administrators=[OPS, ME])  # ended row: allowed
     # K10/O5: the flag alone is not power; ME's earlier password-only session has none
-    assert me_session.get("/admin/tenants").status_code == 403
+    assert me_session.get(API + "/admin/tenants").status_code == 403
     assert me(me_session)["administrator"] is False
     world.signin.has_otp_answers[world.signin.account_for(ME)] = True
     fresh = world.sign_in(ME, amr=("pwd", "otp"))  # control: the code-backed session has them
     assert me(fresh)["administrator"] is True
-    assert fresh.get("/admin/tenants").status_code == 200
+    assert fresh.get(API + "/admin/tenants").status_code == 200
 
 
 def test_a_session_that_used_a_code_before_its_user_was_flagged_has_powers_once_flagged() -> None:
@@ -434,10 +436,10 @@ def test_a_session_that_used_a_code_before_its_user_was_flagged_has_powers_once_
     with_code = world.sign_in(ME, amr=("pwd", "otp"))
     password_only = world.sign_in(ME)
     assert me(with_code)["administrator"] is False  # not flagged yet
-    assert with_code.delete(f"/tenants/{LAB}/members/{user_id(with_code)}").status_code == 204
+    assert with_code.delete(f"{API}/tenants/{LAB}/members/{user_id(with_code)}").status_code == 204
     world.restart(administrators=[OPS, ME])
     assert me(with_code)["administrator"] is True
-    assert with_code.get("/admin/tenants").status_code == 200
+    assert with_code.get(API + "/admin/tenants").status_code == 200
     assert me(password_only)["administrator"] is False  # control
 
 

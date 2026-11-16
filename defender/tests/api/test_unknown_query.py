@@ -43,7 +43,7 @@ from defender.tests.support.api._identity1306 import (  # noqa: E402
     user_id,
 )
 
-ALERTS = f"/tenants/{T1}/alerts"
+ALERTS = f"/api/tenants/{T1}/alerts"
 
 
 def _refused(response: Any, *names: str) -> None:
@@ -98,15 +98,15 @@ def test_r7_2_a_path_parameters_name_is_not_a_query_name(name: str) -> None:
 def test_r7_2_a_name_another_route_declares_is_refused_here(path: str, name: str, value: str) -> None:
     """The declared names are the matched route's own: a name some other route reads is unknown to this one. (R7-2)"""
     _, ann, _ = two_tenants()
-    _refused(ann.get(f"/tenants/{T1}{path}", params={name: value}), name)
+    _refused(ann.get(f"/api/tenants/{T1}{path}", params={name: value}), name)
 
 
 def test_r7_2_an_admin_list_refuses_a_name_the_tenant_lists_declare() -> None:
     """`GET /admin/tenants?cursor=x`: the admin list declares no query name at all. (R7-2)"""
     world = World(administrators=[OPS], tenants={T1: [ANN]})
     ops = world.sign_in_admin()
-    _refused(ops.get("/admin/tenants", params={"cursor": "x"}), "cursor")
-    _refused(ops.get("/admin/tenants", params={"limit": "5"}), "limit")
+    _refused(ops.get("/api/admin/tenants", params={"cursor": "x"}), "cursor")
+    _refused(ops.get("/api/admin/tenants", params={"limit": "5"}), "limit")
 
 
 def test_r7_2_a_name_given_twice_has_one_entry() -> None:
@@ -133,26 +133,29 @@ def test_r7_2_control_declared_names_beside_no_unknown_one_are_served() -> None:
 def test_r7_2_a_delete_route_refuses_an_undeclared_parameter() -> None:
     """`DELETE /tenants/{T}/investigations/{id}?x=1` is refused like any other method's request. (R7-2)"""
     _, ann, _ = two_tenants()
-    _refused(ann.delete(f"/tenants/{T1}/investigations/b1000000-0000-4000-8000-000000000001", params={"x": "1"}), "x")
+    _refused(ann.delete(f"/api/tenants/{T1}/investigations/b1000000-0000-4000-8000-000000000001", params={"x": "1"}), "x")
 
 
 def test_r7_2_sign_in_start_refuses_an_undeclared_parameter() -> None:
-    """`GET /auth/login?x=1` is refused (it is not the identity provider's redirect target; only `/auth/callback` is exempt, D-ai). (R7-2, D-ai)"""
+    """`GET /auth/login?x=1` is a 303 to `/sign-in-failed?reason=bad-request`, no 422 (a person reaches it by navigation; S1, B4 over #1342 R7-2)."""
     world = World(tenants={T1: [ANN]})
-    _refused(world.client().get("/auth/login", params={"x": "1"}), "x")
+    refused = world.client().get("/api/auth/login", params={"x": "1"})
+    assert refused.status_code == 303, refused.text
+    assert refused.headers["location"] == "/sign-in-failed?reason=bad-request"
+    assert world.client().get("/api/auth/login").status_code == 302  # control: no parameter, the provider
 
 
 def test_r7_2_sign_out_refuses_an_undeclared_parameter_and_does_not_sign_out() -> None:
     """`POST /auth/logout?x=1` is refused and the session is still good. (R7-2)"""
     _, ann, _ = two_tenants()
-    _refused(ann.post("/auth/logout", params={"x": "1"}), "x")
-    assert ann.get("/me").status_code == 200, "a refused logout signed the person out"
+    _refused(ann.post("/api/auth/logout", params={"x": "1"}), "x")
+    assert ann.get("/api/me").status_code == 200, "a refused logout signed the person out"
 
 
 def test_r7_2_me_refuses_an_undeclared_parameter() -> None:
     """`GET /me?x=1` is refused. (R7-2)"""
     _, ann, _ = two_tenants()
-    _refused(ann.get("/me", params={"x": "1"}), "x")
+    _refused(ann.get("/api/me", params={"x": "1"}), "x")
 
 
 def test_r7_2_accepting_an_invitation_with_an_undeclared_parameter_is_refused_and_accepts_nothing() -> None:
@@ -161,7 +164,7 @@ def test_r7_2_accepting_an_invitation_with_an_undeclared_parameter_is_refused_an
     world.invite(ann, T1, BOB)
     world.send_pending()
     [open_invitation] = [r for r in me(bob)["invitations"] if r["tenant_id"] == T1]
-    _refused(bob.post(f"/invitations/{open_invitation['id']}/accept", params={"x": "1"}), "x")
+    _refused(bob.post(f"/api/invitations/{open_invitation['id']}/accept", params={"x": "1"}), "x")
     assert tenants_of(bob) == {T2}
     assert [r["id"] for r in me(bob)["invitations"]] == [open_invitation["id"]]
 
@@ -172,6 +175,7 @@ def test_r7_2_control_the_callback_alone_accepts_any_query() -> None:
     browser = world.client()
     response = world.sign_in_response(browser, ANN, extra={"session_state": "s", "iss": "https://idp.example"})
     assert response.status_code == 303, response.text
+    assert response.headers["location"] == "/"  # control: it signed in
 
 
 # --- before the handler runs, on the identity routes -------------------------------------------------------
@@ -183,7 +187,7 @@ def test_r7_2_an_invitation_with_an_undeclared_parameter_is_refused_before_anyth
     mark, rows = audit.mark(), invitation_rows(ann, T1)
     mails = list(world.mail.attempts)
 
-    refused = ann.post(f"/tenants/{T1}/invitations", params={"x": "1"}, json={"email": NEW})
+    refused = ann.post(f"/api/tenants/{T1}/invitations", params={"x": "1"}, json={"email": NEW})
 
     _refused(refused, "x")
     world.send_pending()
@@ -199,10 +203,10 @@ def test_r7_2_removing_a_member_with_an_undeclared_parameter_is_refused_and_remo
     nina = world.member(ann, T1, NINA)
     mark = audit.mark()
 
-    refused = ann.delete(f"/tenants/{T1}/members/{user_id(nina)}", params={"x": "1"})
+    refused = ann.delete(f"/api/tenants/{T1}/members/{user_id(nina)}", params={"x": "1"})
 
     _refused(refused, "x")
-    assert NINA in {m["email"] for m in items(ann.get(f"/tenants/{T1}/members"))}, "the member was removed by a refused request"
+    assert NINA in {m["email"] for m in items(ann.get(f"/api/tenants/{T1}/members"))}, "the member was removed by a refused request"
     assert tenants_of(nina) == {T1}
     assert audit.since(mark) == []
 
@@ -214,7 +218,7 @@ def test_r7_2_revoking_an_invitation_with_an_undeclared_parameter_is_refused_and
     row = world.invite(ann, T1, NEW).json()["id"]
     rows, mark = invitation_rows(ann, T1), audit.mark()
 
-    refused = ann.delete(f"/tenants/{T1}/invitations/{row}", params={"x": "1"})
+    refused = ann.delete(f"/api/tenants/{T1}/invitations/{row}", params={"x": "1"})
 
     _refused(refused, "x")
     assert invitation_rows(ann, T1) == rows
@@ -228,7 +232,7 @@ def test_r7_2_an_administrators_invitation_with_an_undeclared_parameter_is_refus
     ops = world.sign_in_admin()
     mark, held = audit.mark(), world.call(world.repo.memberships_of_tenant, EMPTY)
 
-    refused = ops.post(f"/admin/tenants/{EMPTY}/invitations", params={"x": "1"}, json={"email": NEW})
+    refused = ops.post(f"/api/admin/tenants/{EMPTY}/invitations", params={"x": "1"}, json={"email": NEW})
 
     _refused(refused, "x")
     assert world.call(world.repo.memberships_of_tenant, EMPTY) == held, "a refused request recorded a membership"

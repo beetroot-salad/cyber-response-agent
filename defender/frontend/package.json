@@ -1,0 +1,14 @@
+{
+  "name": "defender-frontend",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The Defender app shell and screens (#1161): TypeScript, built to static files in dist/.",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "typescript": "5.9.3"
+  }
+}

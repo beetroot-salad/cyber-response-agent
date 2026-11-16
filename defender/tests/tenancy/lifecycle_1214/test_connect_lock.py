@@ -16,6 +16,7 @@ import pytest
 pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
 
+from defender.tests.support.api._mount1161 import API  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214.test_host_lock import REPO_ROOT, world  # noqa: E402, F401 — fixture
 
 LAUNCHER = textwrap.dedent("""
@@ -70,7 +71,7 @@ def test_teardown_terminates_a_running_update_or_propose(world, tmp_path, verb):
     tenant = world.active_tenant()
     holder = Holder(tmp_path, tenant, verb)
     try:
-        assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+        assert world.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
         world.drive()
         assert holder.proc.wait(timeout=30) == -signal.SIGTERM
         assert world.item(tenant)["state"] == "offboarded"

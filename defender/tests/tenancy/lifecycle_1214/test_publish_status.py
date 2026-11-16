@@ -28,6 +28,7 @@ import pytest
 
 pytest.importorskip('fastapi')
 
+from defender.tests.support.api._mount1161 import API  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._support import LifecycleWorld  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214.test_repository_contract import (  # noqa: E402,F401
     ABSENT,
@@ -113,7 +114,7 @@ def test_finish_deletes_the_publish_status_and_nothing_earlier_does(world):
     """The status is still there while the tenant is being torn down and gone once `finish` has run (Flow 2.4, O6)."""
     tenant = world.active_tenant()
     world.call(world.tenants.record_publish_status, tenant, "fresh 0123abcd", by=BY)
-    assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
     world.drive(stop=lambda: world.item(tenant)["step"] == "finish")
     assert world.item(tenant)["step"] == "finish"
     assert world.call(world.tenants.publish_status, tenant)["published"] == "0123abcd", "deleted before finish"

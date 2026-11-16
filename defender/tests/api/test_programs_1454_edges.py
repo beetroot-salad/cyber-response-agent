@@ -20,6 +20,7 @@ pytestmark = [
     pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning"),
 ]
 
+from defender.tests.support.api._mount1161 import API  # noqa: E402
 from defender.identity import Bootstrap, IdentityService  # noqa: E402
 from defender.tests.support.api._identity1306 import NEW, T1, T2, AuditLog, InjectedFailure, items, user_id  # noqa: E402
 from defender.tests.support.api._programs1307 import (  # noqa: E402
@@ -104,7 +105,7 @@ def test_a_program_with_no_credentials_is_removed_and_audited_by_an_admin_and_by
     by_admin = str(create_program(s.ann, T1, "Bare, removed by its admin")["id"])
     by_system = str(create_program(s.ann, T1, "Bare, removed by offboarding")["id"])
     mark = audit.mark()
-    assert s.ann.delete(f"/tenants/{T1}/programs/{by_admin}").status_code == 204
+    assert s.ann.delete(f"{API}/tenants/{T1}/programs/{by_admin}").status_code == 204
     assert [(e.action, e.actor, e.tenant_id, e.target) for e in audit.since(mark)] == [
         (PROGRAM_REMOVE, user_id(s.ann), T1, by_admin)]
     assert s.world.call(s.world.raw_repo.program, by_admin).removed_at is not None
@@ -171,12 +172,12 @@ def test_a_removed_programs_credentials_are_gone_to_the_credential_routes() -> N
     s = soar()
     other = str(create_program(s.ann, T1, "Other")["id"])
     other_key, _ = issue_key(s.ann, T1, other)
-    assert s.ann.delete(f"/tenants/{T1}/programs/{s.program_id}").status_code == 204
-    assert s.ann.get(f"/tenants/{T1}/programs/{s.program_id}/credentials").status_code == 404
+    assert s.ann.delete(f"{API}/tenants/{T1}/programs/{s.program_id}").status_code == 204
+    assert s.ann.get(f"{API}/tenants/{T1}/programs/{s.program_id}/credentials").status_code == 404
     assert revoke(s.ann, T1, s.program_id, s.key_id).status_code == 404
     assert issue(s.ann, T1, s.program_id, kind="key", name="late").status_code == 404
     assert [r.state for r in s.world.credentials(s.program_id)] == ["revoked"]  # the removal's, and nothing was added
-    assert [c["id"] for c in items(s.ann.get(f"/tenants/{T1}/programs/{other}/credentials"))] == [other_key]
+    assert [c["id"] for c in items(s.ann.get(f"{API}/tenants/{T1}/programs/{other}/credentials"))] == [other_key]
     assert issue(s.ann, T1, other, kind="key", name="second").status_code == 201
     assert revoke(s.ann, T1, other, other_key).status_code == 204
 
@@ -189,7 +190,7 @@ def test_the_program_list_is_ordered_by_display_name_then_id() -> None:
     for name in ["Zeta", "Alpha", "Mid", *["Twin"] * 6]:
         s.world.clock.advance(HOUR)
         created.append(create_program(s.ann, T1, name))
-    listed = items(s.ann.get(f"/tenants/{T1}/programs"))
+    listed = items(s.ann.get(f"{API}/tenants/{T1}/programs"))
     expected = sorted([{"display_name": "SOAR prod", "id": s.program_id}, *created], key=lambda p: (p["display_name"], p["id"]))
     assert [(p["display_name"], p["id"]) for p in listed] == [(p["display_name"], p["id"]) for p in expected]
     assert [p["display_name"] for p in listed] == ["Alpha", "Mid", "SOAR prod", "Twin", "Twin", "Twin", "Twin", "Twin", "Twin", "Zeta"]
@@ -205,7 +206,7 @@ def test_a_removal_audits_the_revokes_oldest_credential_first_then_the_program(c
     newer = issue_oauth(s.ann, T1, s.program_id)
     mark = audit.mark()
     if by == "its admin":
-        assert s.ann.delete(f"/tenants/{T1}/programs/{s.program_id}").status_code == 204
+        assert s.ann.delete(f"{API}/tenants/{T1}/programs/{s.program_id}").status_code == 204
     else:
         s.world.call(s.world.lifecycle_service().end_tenant, T1, now=s.world.clock())
     lines = [(e.action, e.target) for e in audit.since(mark) if e.action in (CREDENTIAL_REVOKE, PROGRAM_REMOVE)]

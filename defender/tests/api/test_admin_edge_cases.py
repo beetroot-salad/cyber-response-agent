@@ -10,6 +10,7 @@ import pytest
 
 pytest.importorskip('fastapi')
 
+from defender.tests.support.api._mount1161 import API  # noqa: E402
 from defender.tests.api.test_admin_tenants import _admin_world, _problem  # noqa: E402
 from defender.tests.support.api._identity1306 import EMPTY  # noqa: E402
 from defender.tests.support.api._identity1306 import LAB, ME, OPS, T1, T2, World, me  # noqa: E402
@@ -21,9 +22,9 @@ def test_a_tenant_id_off_the_grammar_is_422_on_every_tenant_route(tenant: str) -
     """Get, resume, offboard and rotate answer 422 for it; a real tenant is answered (control) (O2, RC-3, #1382)."""
     world, ops = _admin_world()
     world.register(EMPTY)
-    assert ops.get(f"/admin/tenants/{EMPTY}").status_code == 200, "control: a real tenant"
+    assert ops.get(f"{API}/admin/tenants/{EMPTY}").status_code == 200, "control: a real tenant"
     for method, path in (("GET", ""), ("POST", "/resume"), ("POST", "/offboard"), ("POST", "/rotate-forge-credential")):
-        _problem(ops.request(method, f"/admin/tenants/{tenant}{path}"), 422)
+        _problem(ops.request(method, f"{API}/admin/tenants/{tenant}{path}"), 422)
 
 
 #: Invitations are written while a tenant is `active` (P-L), so the tenant then moves: a `creating` one never holds any.

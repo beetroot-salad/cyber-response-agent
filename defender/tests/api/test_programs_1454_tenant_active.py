@@ -16,6 +16,7 @@ pytestmark = [
     pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning"),
 ]
 
+from defender.tests.support.api._mount1161 import API  # noqa: E402
 from defender.tests.support.api._identity1306 import (  # noqa: E402
     ANN,
     BOB,
@@ -58,11 +59,11 @@ def test_creating_a_program_in_a_tenant_that_left_active_during_the_request_is_4
     s = soar(failing_writes=True)
     s.world.repo.before["add_program"] = _leaves_active(s.world, T1)
     mark = audit.mark()
-    response = s.ann.post(f"/tenants/{T1}/programs", json={"display_name": "Late"})
+    response = s.ann.post(f"{API}/tenants/{T1}/programs", json={"display_name": "Late"})
     assert response.status_code == 404, response.text
     assert [str(p.id) for p in s.world.call(s.world.raw_repo.programs_of_tenant, T1)] == [s.program_id]
     assert PROGRAM_CREATE not in audit.actions(mark)
-    created = s.bob.post(f"/tenants/{T2}/programs", json={"display_name": "On time"})  # control: an active tenant
+    created = s.bob.post(f"{API}/tenants/{T2}/programs", json={"display_name": "On time"})  # control: an active tenant
     assert created.status_code == 201, created.text
     assert [(e.action, e.tenant_id, e.target) for e in audit.since(mark)] == [(PROGRAM_CREATE, T2, created.json()["id"])]
 
@@ -102,13 +103,13 @@ def test_an_administrator_inviting_into_a_tenant_that_left_active_during_the_req
     sent_before = world.signin.calls()
     world.repo.before["ensure_invitation"] = _leaves_active(world, EMPTY)
     mark = audit.mark()
-    response = ops.post(f"/admin/tenants/{EMPTY}/invitations", json={"email": NEW})
+    response = ops.post(f"{API}/admin/tenants/{EMPTY}/invitations", json={"email": NEW})
     assert response.status_code == 404, response.text
     assert audit.since(mark) == []
     assert world.call(world.raw_repo.memberships_of_tenant, EMPTY) == []
     world.send_pending()
     assert (world.signin.calls(), world.signin.sends_to(NEW)) == (sent_before, 0)
-    accepted = ops.post(f"/admin/tenants/{T2}/invitations", json={"email": NEW})  # control
+    accepted = ops.post(f"{API}/admin/tenants/{T2}/invitations", json={"email": NEW})  # control
     assert accepted.status_code == 202, accepted.text
     world.send_pending()
     assert [(e.action, e.tenant_id) for e in audit.since(mark)] == [(ADMIN_INVITE, None), (MEMBER_INVITE, T2)]
@@ -128,10 +129,10 @@ def test_accepting_an_invitation_whose_tenant_left_active_during_the_request_is_
     assert set(offered) == {T2, LAB}
     world.repo.before["accept_invitation"] = _leaves_active(world, T2)
     mark = audit.mark()
-    assert ann.post(f"/invitations/{offered[T2]}/accept").status_code == 404
+    assert ann.post(f"{API}/invitations/{offered[T2]}/accept").status_code == 404
     assert tenants_of(ann) == {T1}
     assert audit.since(mark) == []
-    assert ann.post(f"/invitations/{offered[LAB]}/accept").status_code == 200  # control: the active tenant's invitation
+    assert ann.post(f"{API}/invitations/{offered[LAB]}/accept").status_code == 200  # control: the active tenant's invitation
     assert tenants_of(ann) == {T1, LAB}
     assert [(e.action, e.tenant_id) for e in audit.since(mark)] == [(INVITATION_ACCEPT, LAB)]
 

@@ -16,6 +16,7 @@ import httpx
 pytest.importorskip('fastapi')
 pytest.importorskip('httpx')
 
+from defender.tests.support.api._mount1161 import API  # noqa: E402
 from defender.tests.support.api._identity1306 import NEW, AuditLog, user_id  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._fakes import ORG, FakeForge  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._job_cases import (  # noqa: E402
@@ -56,11 +57,11 @@ def world(tmp_path, data_root):
 
 def test_create_answers_202_with_a_minted_id_and_a_creating_row(world):
     """POST /admin/tenants mints a UUID, records it `creating` with `create` pending at `names`, answers 202 (O1, DC-3)."""
-    made = world.ops.post("/admin/tenants", json={})
+    made = world.ops.post(API + "/admin/tenants", json={})
     assert made.status_code == 202, made.text
     tenant = made.json()["tenant_id"]
     assert is_uuid4(tenant)
-    assert made.headers["location"] == f"/admin/tenants/{tenant}"
+    assert made.headers["location"] == f"{API}/admin/tenants/{tenant}"
     body = made.json()
     assert (body["state"], body["pending_action"], body["step"], body["step_actor"]) == (
         "creating", "create", "names", "service")
@@ -241,7 +242,7 @@ def test_progress_shows_the_failed_step_its_actor_and_the_failure(world):
     assert {k: item[k] for k in ("state", "pending_action", "step", "step_actor")} == {
         "state": "creating", "pending_action": "create", "step": "repo", "step_actor": "service"}
     assert "500" in item["failure"] and "repo" in item["failure"]
-    [listed] = [i for i in world.ops.get("/admin/tenants").json()["items"] if i["tenant_id"] == tenant]
+    [listed] = [i for i in world.ops.get(API + "/admin/tenants").json()["items"] if i["tenant_id"] == tenant]
     assert listed == item
 
 
@@ -255,7 +256,7 @@ def test_a_failed_step_is_not_retried_by_itself_and_resume_clears_it(world, capl
     assert world.drive() == 0
     assert len(world.forge.made("POST", REPOS)) == attempts == 1
     mark = audit.mark()
-    resumed = world.ops.post(f"/admin/tenants/{tenant}/resume")
+    resumed = world.ops.post(f"{API}/admin/tenants/{tenant}/resume")
     assert resumed.status_code == 202, resumed.text
     assert world.item(tenant)["failure"] is None
     assert [(e.action, e.actor, e.tenant_id) for e in audit.since(mark)] == [(RESUME, user_id(world.ops), tenant)]
@@ -281,7 +282,7 @@ def test_a_second_tenant_is_created_beside_the_first(world):
     world.drive()
     tenants = [first, second, third]
     assert len(set(tenants)) == 3
-    assert sorted(tenant_ids(world.ops.get("/admin/tenants"))) == sorted(tenants)
+    assert sorted(tenant_ids(world.ops.get(API + "/admin/tenants"))) == sorted(tenants)
     bots = {t: world.live(t).bot_login for t in tenants}
     assert len(set(bots.values())) == 3
     for t in tenants:
@@ -302,10 +303,10 @@ def test_create_is_audited_after_its_commit(world, caplog):
 def test_a_non_active_tenant_takes_no_invitation_and_an_active_one_does(world):
     """The identity seam: `tenant_exists` is present and `active` — a creating tenant is unknown to invite (O1, #1306)."""
     tenant = world.create()
-    refused = world.ops.post(f"/admin/tenants/{tenant}/invitations", json={"email": NEW})
+    refused = world.ops.post(f"{API}/admin/tenants/{tenant}/invitations", json={"email": NEW})
     assert refused.status_code == 404, refused.text
     world.drive()
-    assert world.ops.post(f"/admin/tenants/{tenant}/invitations", json={"email": NEW}).status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/invitations", json={"email": NEW}).status_code == 202
 
 
 def _post(path):

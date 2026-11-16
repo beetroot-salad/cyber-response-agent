@@ -797,6 +797,57 @@ async def test_purging_removes_exactly_the_sessions_sign_in_would_refuse_as_expi
     assert await seeded.purge_expired_sessions(now=NOW, idle_since=NOW - 2 * WEEK) == 0
 
 
+def _attempt(state: str, token: str, *, expires_at: dt.datetime = NOW + HOUR, return_path: str = "/") -> Any:
+    from defender.identity.models import SignInAttempt
+
+    return SignInAttempt(state=state, token_hash=hashlib.sha256(token.encode()).hexdigest(), nonce=f"n-{state}",
+                         verifier=f"v-{state}", return_path=return_path, expires_at=expires_at)
+
+
+async def test_a_sign_in_attempt_is_taken_once_and_only_with_its_own_token(repo):
+    """#1161 D6: `take_signin_attempt` returns the stored attempt and deletes it, so a second take is None; a wrong
+    token, another state or an expired attempt is None and leaves what is stored as it was."""
+    await repo.add_signin_attempt(_attempt("s1", "t1", return_path="/t/x"))
+    await repo.add_signin_attempt(_attempt("s2", "t2"))
+    await repo.add_signin_attempt(_attempt("old", "t3", expires_at=NOW))
+    assert await repo.take_signin_attempt("s1", "t2", now=NOW) is None  # another attempt's token
+    assert await repo.take_signin_attempt("nope", "t1", now=NOW) is None
+    assert await repo.take_signin_attempt("old", "t3", now=NOW) is None  # expired at `expires_at`
+    taken = await repo.take_signin_attempt("s1", "t1", now=NOW)
+    assert (taken.nonce, taken.verifier, taken.return_path) == ("n-s1", "v-s1", "/t/x")
+    assert await repo.take_signin_attempt("s1", "t1", now=NOW) is None  # read once
+    assert (await repo.take_signin_attempt("s2", "t2", now=NOW)).state == "s2"  # the wrong token above left it
+
+
+async def test_a_sign_in_attempt_state_is_stored_once(repo):
+    await repo.add_signin_attempt(_attempt("s1", "t1"))
+    with pytest.raises(DataRuleViolation):
+        await repo.add_signin_attempt(_attempt("s1", "t2"))
+
+
+async def test_the_live_attempts_of_a_browser_are_those_stored_with_its_token_and_not_expired(repo):
+    """#1161 D6 (amended): `live_signin_attempts` answers each open attempt held with its own token, with its expiry;
+    a wrong token, an unknown state or an expired attempt is left out, and nothing is deleted."""
+    later = NOW + 2 * HOUR
+    await repo.add_signin_attempt(_attempt("s1", "t1"))
+    await repo.add_signin_attempt(_attempt("s2", "t2", expires_at=later))
+    await repo.add_signin_attempt(_attempt("old", "t3", expires_at=NOW))
+    held = {"s1": "t1", "s2": "t2", "old": "t3", "nope": "t1", "s3": "t1"}
+    assert await repo.live_signin_attempts(held, now=NOW) == {"s1": NOW + HOUR, "s2": later}
+    assert await repo.live_signin_attempts({"s1": "t2"}, now=NOW) == {}
+    assert await repo.live_signin_attempts({}, now=NOW) == {}
+    assert (await repo.take_signin_attempt("s1", "t1", now=NOW)).state == "s1"  # the reads left it
+
+
+async def test_purging_removes_exactly_the_expired_sign_in_attempts(repo):
+    """#1161 D6: gone once `now >= expires_at`, kept a moment before; the count says how many; a second purge is a no-op."""
+    for state, expires in (("past", NOW - HOUR), ("at-now", NOW), ("alive", NOW + dt.timedelta(microseconds=1))):
+        await repo.add_signin_attempt(_attempt(state, state, expires_at=expires))
+    assert await repo.purge_expired_signin_attempts(now=NOW) == 2
+    assert await repo.purge_expired_signin_attempts(now=NOW) == 0
+    assert (await repo.take_signin_attempt("alive", "alive", now=NOW)).state == "alive"
+
+
 async def test_purging_also_removes_the_sessions_sign_in_would_refuse_as_idle(seeded):
     """#1349: sign-in refuses a session last seen before `now - idle limit`; the purge removes
     exactly those too, and keeps one last seen at that instant."""

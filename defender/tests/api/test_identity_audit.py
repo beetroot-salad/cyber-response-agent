@@ -18,6 +18,7 @@ pytestmark = [
     pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning"),
 ]
 
+from defender.tests.support.api._mount1161 import API  # noqa: E402
 from defender.tests.support.api._identity1306 import (  # noqa: E402
     ANN,
     BOB,
@@ -66,7 +67,7 @@ def test_accepting_logs_invitation_accept_for_the_endpoint_and_for_each_tenant_a
     row = world.invite(ann, T1, BOB).json()["id"]
     world.send_pending()
     mark = audit.mark()
-    assert bob.post(f"/invitations/{row}/accept").status_code == 200
+    assert bob.post(f"{API}/invitations/{row}/accept").status_code == 200
     assert audit.since(mark) == [Event("invitation.accept", user_id(bob), T1, row)]
     r1 = world.invite(ann, T1, NEW).json()["id"]
     r2 = world.invite(bob, T2, NEW).json()["id"]
@@ -87,18 +88,18 @@ def test_an_accept_that_does_not_apply_logs_nothing(audit: AuditLog) -> None:
     ann, bob = world.sign_in(ANN), world.sign_in(BOB)
     revoked = world.invite(bob, T2, ANN).json()["id"]
     world.send_pending()
-    assert bob.delete(f"/tenants/{T2}/invitations/{revoked}").status_code == 204
+    assert bob.delete(f"{API}/tenants/{T2}/invitations/{revoked}").status_code == 204
     for row, who in ((expired, bob), (revoked, ann)):
         mark = audit.mark()
-        assert who.post(f"/invitations/{row}/accept").status_code == 404
+        assert who.post(f"{API}/invitations/{row}/accept").status_code == 404
         assert audit.since(mark) == [], row
     world.invite(ann, T1, BOB)  # control: a re-send renews the expired row, which then logs once
     world.send_pending()
     mark = audit.mark()
-    assert bob.post(f"/invitations/{expired}/accept").status_code == 200
+    assert bob.post(f"{API}/invitations/{expired}/accept").status_code == 200
     assert audit.since(mark) == [Event("invitation.accept", user_id(bob), T1, expired)]
     mark = audit.mark()
-    assert bob.post(f"/invitations/{expired}/accept").status_code == 404  # already accepted
+    assert bob.post(f"{API}/invitations/{expired}/accept").status_code == 404  # already accepted
     assert audit.since(mark) == []
 
 
@@ -122,14 +123,14 @@ def test_removing_and_revoking_log_who_did_it_to_what(audit: AuditLog) -> None:
     nina = world.member(ann, T1, "nina@n.example")
     row = world.invite(ann, T1, NEW).json()["id"]
     mark = audit.mark()
-    assert ann.delete(f"/tenants/{T1}/invitations/{row}").status_code == 204
+    assert ann.delete(f"{API}/tenants/{T1}/invitations/{row}").status_code == 204
     assert audit.since(mark) == [Event("invitation.revoke", user_id(ann), T1, row)]
     mark = audit.mark()
-    assert ann.delete(f"/tenants/{T1}/members/{user_id(nina)}").status_code == 204
-    assert nina.get("/me").status_code == 200
+    assert ann.delete(f"{API}/tenants/{T1}/members/{user_id(nina)}").status_code == 204
+    assert nina.get(API + "/me").status_code == 200
     assert audit.since(mark) == [Event("member.remove", user_id(ann), T1, user_id(nina))]
     mark = audit.mark()
-    assert bob.delete(f"/tenants/{T2}/members/{user_id(bob)}").status_code == 204
+    assert bob.delete(f"{API}/tenants/{T2}/members/{user_id(bob)}").status_code == 204
     assert audit.since(mark) == [Event("member.remove", user_id(bob), T2, user_id(bob))]
 
 
@@ -154,11 +155,11 @@ def test_administrator_actions_log_platform_events_and_an_invite_also_logs_the_t
     ops = world.sign_in_admin()
     ops_id = user_id(ops)
     mark = audit.mark()
-    assert ops.get("/admin/tenants").status_code == 200
+    assert ops.get(API + "/admin/tenants").status_code == 200
     [listed] = audit.since(mark)
     assert (listed.action, listed.actor, listed.tenant_id) == ("admin.tenants.list", ops_id, None)
     mark = audit.mark()
-    row = ops.post(f"/admin/tenants/{EMPTY}/invitations", json={"email": NEW}).json()["id"]
+    row = ops.post(f"{API}/admin/tenants/{EMPTY}/invitations", json={"email": NEW}).json()["id"]
     assert sorted(audit.since(mark), key=lambda e: e.action) == [
         Event("admin.invite", ops_id, None, EMPTY), Event("member.invite", ops_id, EMPTY, row)]
     mark = audit.mark()
@@ -198,24 +199,24 @@ def test_a_refused_action_logs_nothing_while_the_same_action_done_properly_does(
     foreign = world.client_with_cookie(me_session.cookies[SESSION_COOKIE], origin="https://evil.example")
     refusals = {
         "invite an active member": lambda: world.invite(me_session, LAB, ME),
-        "remove nobody": lambda: me_session.delete(f"/tenants/{LAB}/members/{NO_SUCH_ID}"),
-        "revoke nobody": lambda: me_session.delete(f"/tenants/{LAB}/invitations/{NO_SUCH_ID}"),
-        "administrator accepts": lambda: ops.post(f"/invitations/{row}/accept"),
-        "foreign origin": lambda: foreign.post(f"/tenants/{LAB}/invitations", json={"email": BOB}),
-        "no session": lambda: world.client().post(f"/tenants/{LAB}/invitations", json={"email": BOB}),
+        "remove nobody": lambda: me_session.delete(f"{API}/tenants/{LAB}/members/{NO_SUCH_ID}"),
+        "revoke nobody": lambda: me_session.delete(f"{API}/tenants/{LAB}/invitations/{NO_SUCH_ID}"),
+        "administrator accepts": lambda: ops.post(f"{API}/invitations/{row}/accept"),
+        "foreign origin": lambda: foreign.post(f"{API}/tenants/{LAB}/invitations", json={"email": BOB}),
+        "no session": lambda: world.client().post(f"{API}/tenants/{LAB}/invitations", json={"email": BOB}),
         "admin invite into a tenant with members": lambda: ops.post(
-            f"/admin/tenants/{LAB}/invitations", json={"email": BOB}),
+            f"{API}/admin/tenants/{LAB}/invitations", json={"email": BOB}),
         "admin invite into an unknown tenant": lambda: ops.post(
-            f"/admin/tenants/{UNKNOWN}/invitations", json={"email": BOB}),
-        "platform route as a member": lambda: me_session.get("/admin/tenants"),
+            f"{API}/admin/tenants/{UNKNOWN}/invitations", json={"email": BOB}),
+        "platform route as a member": lambda: me_session.get(API + "/admin/tenants"),
     }
     for name, act in refusals.items():
         mark = audit.mark()
         assert act().status_code in (401, 403, 404, 409), name
         assert audit.since(mark) == [], name
-    assert me_session.delete(f"/tenants/{LAB}/invitations/{row}").status_code == 204
+    assert me_session.delete(f"{API}/tenants/{LAB}/invitations/{row}").status_code == 204
     mark = audit.mark()
-    assert me_session.delete(f"/tenants/{LAB}/invitations/{row}").status_code == 404  # repeat
+    assert me_session.delete(f"{API}/tenants/{LAB}/invitations/{row}").status_code == 404  # repeat
     assert audit.since(mark) == []
 
 
@@ -235,10 +236,10 @@ def test_an_action_whose_write_fails_logs_no_event_and_the_retry_logs_one(
     pending = world.invite(member, LAB, NEW).json()["id"]
     cookie = (world.sign_in_admin() if case == "admin-invite" else member).cookies[SESSION_COOKIE]
     acts = {
-        "invite": lambda c: c.post(f"/tenants/{LAB}/invitations", json={"email": BOB}),
-        "remove": lambda c: c.delete(f"/tenants/{LAB}/members/{user_id(nina)}"),
-        "revoke": lambda c: c.delete(f"/tenants/{LAB}/invitations/{pending}"),
-        "admin-invite": lambda c: c.post(f"/admin/tenants/{EMPTY}/invitations", json={"email": BOB}),
+        "invite": lambda c: c.post(f"{API}/tenants/{LAB}/invitations", json={"email": BOB}),
+        "remove": lambda c: c.delete(f"{API}/tenants/{LAB}/members/{user_id(nina)}"),
+        "revoke": lambda c: c.delete(f"{API}/tenants/{LAB}/invitations/{pending}"),
+        "admin-invite": lambda c: c.post(f"{API}/admin/tenants/{EMPTY}/invitations", json={"email": BOB}),
     }
     act = acts[case]
     world.repo.failing.add(write)

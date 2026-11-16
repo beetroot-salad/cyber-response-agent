@@ -17,6 +17,7 @@ pytestmark = [
     pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning"),
 ]
 
+from defender.tests.support.api._mount1161 import API  # noqa: E402
 from defender.tests.support.api._identity1306 import (  # noqa: E402
     ANN,
     BOB,
@@ -141,7 +142,7 @@ def test_a_revoked_invitation_is_dropped_by_the_sender_but_the_account_is_still_
     world, ann, _ = two_tenants()
     world.invite(ann, T1, NEW)
     world.invite(ann, T1, NINA)
-    ann.delete(f"/tenants/{T1}/invitations/{invitation_id(ann, T1, NEW)}")
+    ann.delete(f"{API}/tenants/{T1}/invitations/{invitation_id(ann, T1, NEW)}")
     world.send_pending()
     assert world.signin.sends_to(NINA) == 1  # positive control, same pass
     assert world.signin.sends_to(NEW) == 0
@@ -162,7 +163,7 @@ def test_one_live_invitation_is_enough_to_send_when_another_was_revoked() -> Non
     world, ann, bob = two_tenants()
     world.invite(ann, T1, NEW)
     world.invite(bob, T2, NEW)
-    ann.delete(f"/tenants/{T1}/invitations/{invitation_id(ann, T1, NEW)}")
+    ann.delete(f"{API}/tenants/{T1}/invitations/{invitation_id(ann, T1, NEW)}")
     world.send_pending()
     assert world.signin.sends_to(NEW) == 1
     assert tenants_of(world.sign_in(NEW)) == {T2}
@@ -173,11 +174,11 @@ def test_a_revoked_invitation_sends_no_notification_to_an_active_person() -> Non
     world, ann, bob = two_tenants()
     world.invite(ann, T1, BOB)
     world.invite(ann, T1, NEW)
-    ann.delete(f"/tenants/{T1}/invitations/{invitation_id(ann, T1, BOB)}")
+    ann.delete(f"{API}/tenants/{T1}/invitations/{invitation_id(ann, T1, BOB)}")
     world.send_pending()
     assert world.mail.sent == []
     assert world.signin.sends_to(NEW) == 1
-    assert bob.get("/me").json()["invitations"] == []
+    assert bob.get(API + "/me").json()["invitations"] == []
 
 
 @pytest.mark.parametrize("kind", ["set_password", "notice"])

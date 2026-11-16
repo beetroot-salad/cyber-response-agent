@@ -25,6 +25,7 @@ import pytest
 pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
 
+from defender.tests.support.api._mount1161 import API  # noqa: E402
 from defender.tests.support.tenancy import _host1214 as H  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._support import LifecycleWorld, lifecycle_config  # noqa: E402
 
@@ -123,7 +124,7 @@ def test_teardown_terminates_a_recorded_process_and_completes(world, holders, en
     """Teardown SIGTERMs what each host entry point recorded, then removes the folder (P3, O4; r10 O-A2, A1 table)."""
     tenant = world.active_tenant()
     holder = holders(tenant, entry)
-    assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
     world.drive()
     assert holder.proc.wait(timeout=30) == -signal.SIGTERM
     assert world.item(tenant)["state"] == "offboarded"
@@ -134,7 +135,7 @@ def test_a_process_that_ignores_sigterm_is_killed_after_the_bound(world, holders
     """No exit within `teardown_wait`: SIGKILL, and teardown still completes (P3)."""
     tenant = world.active_tenant()
     holder = holders(tenant, "run", "ignore-term")
-    assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
     started = time.monotonic()
     world.drive()
     assert holder.proc.wait(timeout=30) == -signal.SIGKILL
@@ -146,7 +147,7 @@ def test_another_tenants_process_is_left_alone(world, holders):
     """Teardown of T stops T's recorded processes only; a holder for T2 keeps running (P3, O7)."""
     first, second = world.active_tenant(), world.active_tenant()
     mine, other = holders(first), holders(second)
-    assert world.ops.post(f"/admin/tenants/{first}/offboard").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{first}/offboard").status_code == 202
     world.drive()
     assert mine.proc.wait(timeout=30) == -signal.SIGTERM
     assert other.alive()
@@ -178,7 +179,7 @@ def test_install_runs_beside_a_shared_holder_and_prepare_waits_for_it(world, hol
     ran.join(timeout=60)
     assert not ran.is_alive(), "prepare never got the lock once the holder was gone"
     if world.item(tenant)["failure"] is not None:  # waiting out the bound may fail the step; resume is the way on
-        assert world.ops.post(f"/admin/tenants/{tenant}/resume").status_code == 202
+        assert world.ops.post(f"{API}/admin/tenants/{tenant}/resume").status_code == 202
     world.drive()
     assert world.item(tenant)["state"] == "active"
     assert world.publish.calls == [(tenant, world.data_root)]

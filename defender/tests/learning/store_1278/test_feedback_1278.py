@@ -13,6 +13,7 @@ import contextlib
 
 import pytest
 
+from defender.tests.support.api._mount1161 import API
 from defender.tests.learning.store_1278.test_offboarding_1278 import (  # noqa: F401 — fixtures and helpers
     _learning_rows_of,
     _offboard,
@@ -598,7 +599,7 @@ def test_offboarding_a_feedback_tick_that_ignores_the_stop_past_the_time_limit_f
     thread = threading.Thread(target=stubborn, daemon=True)
     thread.start()
     try:
-        asked = world.ops.post(f"/admin/tenants/{tenant}/offboard")
+        asked = world.ops.post(f"{API}/admin/tenants/{tenant}/offboard")
         assert asked.status_code == 202, asked.text
         move_tenant(dsn, tenant, state="offboarding")
         with contextlib.suppress(Exception):

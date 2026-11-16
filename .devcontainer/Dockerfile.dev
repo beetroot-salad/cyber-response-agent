@@ -64,6 +64,15 @@ RUN curl -fsSL "https://github.com/openai/codex/releases/download/rust-v${CODEX_
     && install -m 0755 /tmp/codex-x86_64-unknown-linux-musl /usr/local/bin/codex \
     && rm /tmp/codex-x86_64-unknown-linux-musl
 
+# Caddy, the ingress (#1161 B9, B10): the same pinned release and checksum as CI's test job. Node comes from the
+# devcontainer feature in devcontainer.json, and Playwright's Chromium from its postCreateCommand.
+ARG CADDY_VERSION=2.11.9
+ARG CADDY_SHA256=5b8cb7faf8726a2028ad96a66e54e6e81e8f361bc6175e5d22bbd997cc5177fb
+RUN curl -fsSL -o /tmp/caddy.tgz "https://github.com/caddyserver/caddy/releases/download/v${CADDY_VERSION}/caddy_${CADDY_VERSION}_linux_amd64.tar.gz" \
+    && echo "${CADDY_SHA256}  /tmp/caddy.tgz" | sha256sum -c - \
+    && tar -xzf /tmp/caddy.tgz -C /usr/local/bin caddy \
+    && rm /tmp/caddy.tgz
+
 # Set working directory
 WORKDIR /workspace
 

@@ -226,7 +226,7 @@ async def test_o7_a_malformed_credential_body_is_a_validation_422_with_errors(co
     """Wire shape: `for_version` and `credentials` (field → text), nothing else; a body that carries a `kind` of any value
     is refused (the kind is the scheme's, never a write field). No credential value it carries is printed back. (O7, P4, N1)"""
     await _ticket(configured)
-    refused = await configured.put_raw(f"/tenants/{A}/systems/{TICKET}/credentials", body)
+    refused = await configured.put_raw(f"/api/tenants/{A}/systems/{TICKET}/credentials", body)
     assert refused.status_code == 422, refused.text
     assert refused.json()["errors"]
     assert "faults" not in refused.json()
@@ -247,7 +247,7 @@ async def test_a_credential_field_name_outside_the_grammar_is_refused_and_nothin
     value it carries is not printed back. (F5, G2; base `test_a_credential_field_name_outside_the_grammar_is_refused`)"""
     await _ticket(configured)
     refused = await configured.client.put(
-        f"/tenants/{A}/systems/{TICKET}/credentials", headers={**configured.ann(), "Content-Type": "application/json"},
+        f"/api/tenants/{A}/systems/{TICKET}/credentials", headers={**configured.ann(), "Content-Type": "application/json"},
         content=('{"for_version": 1, "credentials": {"' + key + '": "' + TOKEN + '"}}').encode())
     assert refused.status_code == 422, refused.text
     assert holds_no_value(refused, {"v": TOKEN}), ("a credential value was printed", refused.text)
@@ -267,7 +267,7 @@ async def test_o7_no_route_returns_a_value_and_no_answer_or_log_line_holds_one(c
             await configured.put_credentials(TICKET, 1, {"api_key": "short"}),
             await configured.put_credentials(TICKET, 9, {"api_key": TOKEN})]
     for method in ("get", "post", "delete", "patch"):
-        seen.append(await configured.client.request(method.upper(), f"/tenants/{A}/systems/{TICKET}/credentials",
+        seen.append(await configured.client.request(method.upper(), f"/api/tenants/{A}/systems/{TICKET}/credentials",
                                                     headers=configured.ann()))
     assert [r.status_code for r in seen[-4:]] == [405] * 4
     everything = " ".join([r.text for r in seen] + [r.getMessage() + str(getattr(r, "detail", "")) for r in caplog.records])
@@ -438,7 +438,7 @@ async def _write_answered(client: httpx.AsyncClient, served: Configured, system:
     if failing is not None:
         logging.getLogger().addHandler(failing)
     try:
-        return await client.put(f"/tenants/{A}/systems/{system}/credentials", headers=served.ann(),
+        return await client.put(f"/api/tenants/{A}/systems/{system}/credentials", headers=served.ann(),
                                 json={"for_version": 1, "credentials": sent})
     finally:
         if failing is not None:
@@ -620,7 +620,7 @@ async def test_o7_o9_the_re_read_tells_an_unused_generation_from_a_refusal_of_th
     caplog.clear()
     try:
         async with scripted.lenient() as client:
-            got = await client.put(f"/tenants/{A}/systems/{system}/credentials", headers=scripted.ann(),
+            got = await client.put(f"/api/tenants/{A}/systems/{system}/credentials", headers=scripted.ann(),
                                    json={"for_version": 1, "credentials": sent})
     finally:
         if failing:
@@ -881,7 +881,7 @@ async def test_o9_each_stored_write_announces_one_event_naming_the_member_and_th
     assert (await configured.delete_system(TICKET, 1)).status_code == 409
     assert (await configured.delete_system(TICKET, 2)).status_code == 204
     assert (await configured.delete_system(TICKET, 3)).status_code == 404
-    mapping = await configured.put_raw(f"/tenants/{A}/alert-mapping", {e: FIXTURE_ALERT_MAPPING.get(e) for e in MAPPING_ENTRIES})
+    mapping = await configured.put_raw(f"/api/tenants/{A}/alert-mapping", {e: FIXTURE_ALERT_MAPPING.get(e) for e in MAPPING_ENTRIES})
     assert mapping.status_code == 200, mapping.text
 
     events = audit_events(caplog, *AUDITED)
@@ -951,7 +951,7 @@ async def test_o9_each_config_write_is_announced_only_after_it_is_visible(config
              lambda: configured.put_credentials(TICKET, 1, {"api_key": TOKEN})),
             ("alert_mapping.update",
              lambda: execute(configured.dsn, "SELECT title FROM tenancy.alert_mappings WHERE tenant_id = %s", (A,)) == [("vendor.c12.title",)],
-             lambda: configured.put_raw(f"/tenants/{A}/alert-mapping", mapping)),
+             lambda: configured.put_raw(f"/api/tenants/{A}/alert-mapping", mapping)),
             ("system.delete", lambda: [v.deleted for v in configured.versions(TICKET)] == [False, True],
              lambda: configured.delete_system(TICKET, 1)),
         ]
@@ -987,7 +987,7 @@ async def _set_up(served: Configured, *, system: bool = False, case: bool = Fals
 
 
 async def _write(client: httpx.AsyncClient, served: Configured, method: str, path: str, **kw: object) -> httpx.Response:
-    return await client.request(method, f"/tenants/{A}{path}", headers=served.ann(), **kw)  # type: ignore[arg-type]
+    return await client.request(method, f"/api/tenants/{A}{path}", headers=served.ann(), **kw)  # type: ignore[arg-type]
 
 
 #: (action, what the case needs first, the write, a check of the stored state after it). O9: an announcement that fails

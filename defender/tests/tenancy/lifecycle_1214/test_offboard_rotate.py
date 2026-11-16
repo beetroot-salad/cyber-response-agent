@@ -16,6 +16,7 @@ import pytest
 pytest.importorskip('fastapi')
 pytest.importorskip('httpx')
 
+from defender.tests.support.api._mount1161 import API  # noqa: E402
 from defender.tests.support.api._identity1306 import NINA, AuditLog, user_id  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._fakes import ORG  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._job_cases import (  # noqa: E402
@@ -79,16 +80,16 @@ def test_offboard_ends_api_access_at_once_then_destroys_everything_but_the_archi
     invitations are revoked, every generation destroyed, repo archived, folder and secrets removed (O4, O10, DC-2)."""
     tenant = world.active_tenant()
     member = member_browser(world, tenant)
-    assert member.post(f"/tenants/{tenant}/invitations", json={"email": NINA}).status_code == 202  # SK-2
+    assert member.post(f"{API}/tenants/{tenant}/invitations", json={"email": NINA}).status_code == 202  # SK-2
     gen = world.live(tenant)
     audit = AuditLog(caplog)
     mark = audit.mark()
 
-    asked = world.ops.post(f"/admin/tenants/{tenant}/offboard")
+    asked = world.ops.post(f"{API}/admin/tenants/{tenant}/offboard")
     assert asked.status_code == 202, asked.text
     # Before any worker runs.
-    assert member.get(f"/tenants/{tenant}/members").status_code == 404
-    assert world.ops.post(f"/admin/tenants/{tenant}/invitations", json={"email": "x@example.org"}).status_code == 404
+    assert member.get(f"{API}/tenants/{tenant}/members").status_code == 404
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/invitations", json={"email": "x@example.org"}).status_code == 404
     item = world.item(tenant)
     assert (item["state"], item["pending_action"], item["step"], item["step_actor"]) == (
         "offboarding", "offboard", "offboard", "service")
@@ -119,7 +120,7 @@ def test_offboarding_with_no_database_address_fails_the_teardown_and_removes_not
     secret_file = world.live(tenant).host_secret_file
     dsn = os.environ["DEFENDER_DATABASE_DSN"]  # the folder's autouse fixture set one
     monkeypatch.delenv("DEFENDER_DATABASE_DSN")
-    assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
 
     world.drive()
 
@@ -128,7 +129,7 @@ def test_offboarding_with_no_database_address_fails_the_teardown_and_removes_not
     assert item["failure"] and "DEFENDER_DATABASE_DSN" in item["failure"]
     assert (world.data_root / tenant).is_dir() and secret_file.is_file(), "files removed though the rows were not purged"
     monkeypatch.setenv("DEFENDER_DATABASE_DSN", dsn)
-    assert world.ops.post(f"/admin/tenants/{tenant}/resume").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/resume").status_code == 202
     world.drive()
     assert world.item(tenant)["state"] == "offboarded"
     assert not (world.data_root / tenant).exists()
@@ -139,7 +140,7 @@ def test_offboard_from_creating_destroys_what_the_unfinished_job_made(world):
     tenant = world.create()
     world.drive(stop=lambda: world.item(tenant)["step"] == "install")
     [gen] = world.generations(tenant)
-    assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
     world.drive()
     assert world.record(tenant).state == "offboarded"
     assert {g.status for g in world.generations(tenant)} == {"destroyed"}
@@ -154,7 +155,7 @@ def test_offboard_replaces_a_pending_failed_create_and_clears_its_failure(world)
     tenant = world.create()
     world.drive()
     assert world.item(tenant)["failure"] is not None
-    asked = world.ops.post(f"/admin/tenants/{tenant}/offboard")
+    asked = world.ops.post(f"{API}/admin/tenants/{tenant}/offboard")
     assert asked.status_code == 202, asked.text
     item = world.item(tenant)
     assert (item["state"], item["pending_action"], item["step"], item["step_actor"], item["failure"]) == (
@@ -168,10 +169,10 @@ def test_offboard_during_rotation_destroys_both_generations(world):
     """Offboard while a rotation waits at install: the old and the new generation are both destroyed (O4, O5)."""
     tenant = world.active_tenant()
     old = world.live(tenant)
-    assert world.ops.post(f"/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
     world.drive(stop=lambda: world.item(tenant)["step"] == "install")
     assert len(world.generations(tenant)) == 2
-    assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
     world.drive()
     assert {g.status for g in world.generations(tenant)} == {"destroyed"}
     assert old.bot_login not in world.forge.users
@@ -200,7 +201,7 @@ def test_offboard_treats_a_thing_that_is_already_gone_as_done(world, gone):
     tenant = world.active_tenant()
     gen = world.live(tenant)
     GONE[gone](world, tenant, gen)
-    assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
     world.drive()
     record = world.record(tenant)
     assert (record.state, record.pending_action, record.failure) == ("offboarded", "delete_repo", None), gone
@@ -211,7 +212,7 @@ def test_the_archived_repo_is_deleted_once_the_window_ends(world, caplog):
     """`delete_repo` waits for `repo_delete_after`, then deletes the repo, clears `repo_url` and forge wiring and
     audits `tenant.repo.delete` as `system` (O4, O10, DC-3)."""
     tenant = world.active_tenant()
-    assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
     world.drive()
     audit = AuditLog(caplog)
     mark = audit.mark()
@@ -233,7 +234,7 @@ def test_a_failed_repo_deletion_is_not_audited_and_resume_finishes_it(world, cap
     """The event follows the commit: a failing deletion leaves `repo_url` and emits nothing; after resume the
     deletion happens and is audited once (O4, O10, DC-4)."""
     tenant = world.active_tenant()
-    assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
     world.drive()
     audit = AuditLog(caplog)
     mark = audit.mark()
@@ -244,7 +245,7 @@ def test_a_failed_repo_deletion_is_not_audited_and_resume_finishes_it(world, cap
     assert record.failure and "500" in record.failure and record.repo_url is not None
     assert audit.actions(mark) == []
     world.ops = world.sign_in_admin()  # the 30-day jump expired the first session
-    assert world.ops.post(f"/admin/tenants/{tenant}/resume").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/resume").status_code == 202
     mark = audit.mark()
     world.drive()
     assert world.record(tenant).repo_url is None
@@ -254,7 +255,7 @@ def test_a_failed_repo_deletion_is_not_audited_and_resume_finishes_it(world, cap
 def test_a_repo_that_is_already_gone_when_its_window_ends_is_done(world):
     """`delete_repo` treats a missing repo as deleted (RC-4, O4)."""
     tenant = world.active_tenant()
-    assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
     world.drive()
     world.forge.repos.pop(f"{ORG}/{tenant}")
     world.clock.advance(REPO_WINDOW + _dt.timedelta(seconds=1))
@@ -290,7 +291,7 @@ def test_after_a_rotation_nothing_of_the_old_generation_is_accepted_and_the_new_
     assert old_sign.status_code == 200 and _sign(world, old_sign.json()["auth"]["client_token"], tenant).status_code == 200  # control
     audit = AuditLog(caplog)
     mark = audit.mark()
-    asked = world.ops.post(f"/admin/tenants/{tenant}/rotate-forge-credential")
+    asked = world.ops.post(f"{API}/admin/tenants/{tenant}/rotate-forge-credential")
     assert asked.status_code == 202, asked.text
     item = world.item(tenant)
     assert (item["state"], item["pending_action"], item["step"], item["step_actor"]) == (
@@ -329,7 +330,7 @@ def test_rotation_leaves_the_new_bot_the_only_collaborator_and_only_the_new_secr
     old = world.live(tenant)
     full = f"{ORG}/{tenant}"
     world.forge.repos[full]["collaborators"]["intruder"] = "write"
-    assert world.ops.post(f"/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
     world.drive()
     new = world.live(tenant)
     assert world.forge.collaborators(full) == {new.bot_login: "write"}
@@ -354,7 +355,7 @@ def test_both_bots_have_write_and_the_old_jwt_works_once_install_is_done_and_rot
     def at_sweep() -> None:
         seen["collaborators"] = world.forge.collaborators(full)
         seen["old jwt"] = as_bot(world, old_jwt, f"repos/{full}").status_code
-    assert world.ops.post(f"/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
     in_order(sample(world, tenant, at={"sweep": at_sweep}), ROTATE_STEPS, hosts=["install", "remove_old_file"])
     new = world.live(tenant)
     assert seen, "control: the job stood at sweep"
@@ -365,27 +366,27 @@ def test_both_bots_have_write_and_the_old_jwt_works_once_install_is_done_and_rot
 
 def test_rotation_is_refused_unless_the_tenant_is_active_with_nothing_pending(world):
     """Rotate: `creating` and a second rotate answer 409 with the row unchanged; an unknown tenant 404 (O5, RC-3)."""
-    creating = world.ops.post("/admin/tenants", json={}).json()["tenant_id"]
+    creating = world.ops.post(API + "/admin/tenants", json={}).json()["tenant_id"]
     before = world.item(creating)
-    refused = world.ops.post(f"/admin/tenants/{creating}/rotate-forge-credential")
+    refused = world.ops.post(f"{API}/admin/tenants/{creating}/rotate-forge-credential")
     assert refused.status_code == 409, refused.text
     assert world.item(creating) == before
     world.drive()
-    assert world.ops.post(f"/admin/tenants/{creating}/rotate-forge-credential").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{creating}/rotate-forge-credential").status_code == 202
     pending = world.item(creating)
-    assert world.ops.post(f"/admin/tenants/{creating}/rotate-forge-credential").status_code == 409
+    assert world.ops.post(f"{API}/admin/tenants/{creating}/rotate-forge-credential").status_code == 409
     assert world.item(creating) == pending
-    assert world.ops.post(f"/admin/tenants/{uuid.uuid4()}/rotate-forge-credential").status_code == 404
+    assert world.ops.post(f"{API}/admin/tenants/{uuid.uuid4()}/rotate-forge-credential").status_code == 404
 
 
 def test_offboard_is_refused_for_an_offboarded_tenant_and_resume_without_a_failure(world):
     """Offboard from `offboarded` and resume with no failure answer 409 and change nothing (O4, RC-3)."""
     tenant = world.active_tenant()
-    assert world.ops.post(f"/admin/tenants/{tenant}/resume").status_code == 409
-    assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/resume").status_code == 409
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
     world.drive()
     before = world.item(tenant)
-    assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 409
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 409
     assert world.item(tenant) == before
 
 
@@ -398,7 +399,7 @@ def test_rotation_cuts_the_old_bots_repo_access_then_deletes_it_without_purge(wo
     old = world.live(tenant)
     old_jwt = jwts(world, old)[-1]
     full = f"{ORG}/{tenant}"
-    assert world.ops.post(f"/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
     world.drive()
     seen = [(c.method, c.path, "purge" in c.query) for c in world.forge.calls if old.bot_login in c.path]
     removal = ("DELETE", f"/api/v1/repos/{full}/collaborators/{old.bot_login}", False)
@@ -418,7 +419,7 @@ def test_a_refused_delete_stops_rotation_with_the_forges_reason_after_revoking_e
     old_jwt = jwts(world, old)[-1]
     world.forge.add_user_repo(old.bot_login, tenant)
     full = f"{ORG}/{tenant}"
-    assert world.ops.post(f"/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
     world.drive()
     record = world.record(tenant)
     assert record.failure and "ownership of repositories" in record.failure, record.failure
@@ -437,7 +438,7 @@ def test_a_refused_delete_at_offboarding_still_destroys_the_signing_key_and_arch
     tenant = world.active_tenant()
     gen = world.live(tenant)
     world.forge.team_members[(ORG, "Reviewers")] = {gen.bot_login}
-    assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
     world.drive()
     record = world.record(tenant)
     assert record.failure and "membership of organizations" in record.failure, record.failure
@@ -454,7 +455,7 @@ def _rules(world, tenant: str) -> str:
 
 
 def _rotate(world, tenant: str) -> None:
-    assert world.ops.post(f"/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
 
 
 def _bot_view(world, gen, tenant: str) -> dict:
@@ -493,7 +494,7 @@ def test_a_rule_the_forge_refuses_fails_the_template_step_and_resumes_once_it_ac
     assert world.forge.rule(f"{ORG}/{tenant}") is None
     assert world.openbao.wrapped == {}
     world.forge.orgs[ORG].add("Owners")  # control: the same channel with the team present
-    assert world.ops.post(f"/admin/tenants/{tenant}/resume").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/resume").status_code == 202
     world.drive()
     assert world.item(tenant)["state"] == "active"
 
@@ -583,7 +584,7 @@ def test_a_rotation_whose_rule_the_forge_refuses_fails_at_protect_and_resumes_on
     assert world.forge.made("POST", _rules(world, tenant)), "control: the forge was sent the rule and refused it"
     assert world.live(tenant).salt == old.salt
     world.forge.orgs[ORG].add("Owners")  # control: the same channel with the team present
-    assert world.ops.post(f"/admin/tenants/{tenant}/resume").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/resume").status_code == 202
     world.drive()
     assert world.item(tenant)["state"] == "active" and world.item(tenant)["pending_action"] is None
     assert world.forge.rule(full)["merge_whitelist_teams"] == ["Owners"]
@@ -650,6 +651,6 @@ def test_rotation_install_fails_when_the_new_bot_can_merge_main_and_resumes_once
     assert (item["step"], item["step_actor"]) == ("wrap", "service")
     assert world.live(tenant).salt == old.salt, "the new generation went live"
     world.forge.repos[full]["protections"]["main"] = saved  # control: the same channel, protected again
-    assert world.ops.post(f"/admin/tenants/{tenant}/resume").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/resume").status_code == 202
     world.drive()
     assert world.item(tenant)["state"] == "active" and world.live(tenant).salt == new.salt

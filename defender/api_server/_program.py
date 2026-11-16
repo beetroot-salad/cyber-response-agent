@@ -22,7 +22,7 @@ import uvicorn
 from fastapi import FastAPI
 import uvicorn.server
 
-from defender.api.app import create_app
+from defender.api.app import SIGNIN_CALLBACK, create_app
 from defender.api.config_records import ConfigCredentials, ConfigRecords
 from defender.api.ports import ApiDeps, LearningWorkRepository, SecretStore, SystemsRepository
 from defender.api.job_store import JobStorePorts
@@ -285,7 +285,7 @@ async def serving(settings: Settings, *, transport: httpx.AsyncBaseTransport | N
                 signin = KeycloakSignIn(
                     issuer=settings.signin_issuer, client_id=settings.signin_client_id,
                     client_secret=settings.signin_client_secret.get_secret_value(),
-                    redirect_uri=settings.signin_redirect_uri, admin_client_id=settings.signin_admin_client_id,
+                    redirect_uri=settings.frontend_origin + SIGNIN_CALLBACK, admin_client_id=settings.signin_admin_client_id,
                     admin_client_secret=settings.signin_admin_client_secret.get_secret_value(),
                     server_url=settings.keycloak_server_url, transport=transport)
                 until_lifespan.push_async_callback(signin.close)

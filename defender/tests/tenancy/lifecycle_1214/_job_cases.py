@@ -9,6 +9,7 @@ from typing import Any
 
 import httpx
 
+from defender.tests.support.api._mount1161 import API
 from defender.tests.support.api._identity1306 import NEW
 from defender.tests.tenancy.lifecycle_1214._fakes import FORGE_URL, OPENBAO_URL
 from defender.tests.tenancy.lifecycle_1214._support import LifecycleWorld
@@ -20,11 +21,11 @@ USERS = "/api/v1/admin/users"
 def member_browser(world: LifecycleWorld, tenant: str, email: str = NEW) -> Any:
     """`email` invited by `ops`, sent and signed in. #1306's first sign-in accepts the open invitation itself
     (SK-1: no separate accept), so the browser is an active member; checked on the members route."""
-    invited = world.ops.post(f"/admin/tenants/{tenant}/invitations", json={"email": email})
+    invited = world.ops.post(f"{API}/admin/tenants/{tenant}/invitations", json={"email": email})
     assert invited.status_code == 202, invited.text
     world.send_pending()
     browser = world.sign_in(email)
-    assert browser.get(f"/tenants/{tenant}/members").status_code == 200
+    assert browser.get(f"{API}/tenants/{tenant}/members").status_code == 200
     return browser
 
 

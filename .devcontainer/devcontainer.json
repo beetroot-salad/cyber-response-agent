@@ -63,7 +63,7 @@
     "source=${localEnv:HOME}${localEnv:USERPROFILE}/.claude,target=/root/.claude,type=bind"
   ],
 
-  "postCreateCommand": "cd /workspace/defender && uv sync --extra dev && docker context create soc-playground --docker host=ssh://soc-playground --description 'v2 playground VPS on Hetzner' 2>/dev/null || true",
+  "postCreateCommand": "cd /workspace/defender && uv sync --extra dev && uv run --locked playwright install --with-deps chromium && (docker context create soc-playground --docker host=ssh://soc-playground --description 'v2 playground VPS on Hetzner' 2>/dev/null || true)",
   "postStartCommand": "echo 'Development environment ready!'",
 
   "remoteUser": "root",

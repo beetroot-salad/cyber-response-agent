@@ -21,6 +21,7 @@ import pytest
 pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
 
+from defender.tests.support.api._mount1161 import API  # noqa: E402
 from defender.tests.support.shared._postgres1339 import empty_database  # noqa: E402,F401 — fixture
 from defender.tests.support.tenancy._active1214 import DSN_ENV, insert_active_tenant  # noqa: E402
 from defender.tests.support.tenancy._mapping1345 import FIXTURE_ALERT_MAPPING  # noqa: E402
@@ -117,7 +118,7 @@ def test_delete_repo_repeats_the_by_name_sweep_once_it_is_due(world):
     deleted, not before (RC-8, RC-4)."""
     tenant = world.active_tenant()
     gen = world.live(tenant)
-    assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
     world.drive()
     world.forge.users.add(gen.bot_login)
     world.openbao.approles[gen.approle] = {}
@@ -137,7 +138,7 @@ def test_a_failing_finish_records_its_restart_point_and_resume_completes_it(worl
     finishes: `offboarded`, the stray removed (DC-4, RC-4, Flow 2.4)."""
     tenant = world.active_tenant()
     gen = world.live(tenant)
-    assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
     world.drive(stop=lambda: world.item(tenant)["step"] == "finish")
     world.openbao.approles[gen.approle] = {}  # a late effect the final sweep has to destroy
     openbao_failing(world, lambda r: r.method == "DELETE" and r.url.path.endswith(f"/auth/approle/role/{gen.approle}"),
@@ -147,7 +148,7 @@ def test_a_failing_finish_records_its_restart_point_and_resume_completes_it(worl
     assert (item["state"], item["step"], item["step_actor"]) == ("offboarding", "finish", "service")
     assert "finish" in item["failure"] and "500" in item["failure"]
     assert world.drive() == 0
-    assert world.ops.post(f"/admin/tenants/{tenant}/resume").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/resume").status_code == 202
     world.drive()
     assert world.item(tenant)["state"] == "offboarded"
     assert gen.approle not in world.openbao.approles
@@ -165,7 +166,7 @@ def test_offboarding_removes_the_tenants_dev_output_and_keeps_another_tenants(de
     for t in (tenant, other):
         (run_visualizations_dir / t / "runs").mkdir(parents=True)
         (run_visualizations_dir / t / "runs" / "page.html").write_text("page\n", encoding="utf-8")
-    assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
     world.drive()
     assert world.item(tenant)["state"] == "offboarded"
     assert not (run_visualizations_dir / tenant).exists()

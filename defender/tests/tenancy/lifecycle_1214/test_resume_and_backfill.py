@@ -20,6 +20,7 @@ import httpx
 pytest.importorskip('fastapi')
 pytest.importorskip('httpx')
 
+from defender.tests.support.api._mount1161 import API  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._fakes import ORG  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._job_cases import (  # noqa: E402
     REPOS,
@@ -114,7 +115,7 @@ def test_a_failure_records_its_restart_point_is_not_retried_and_resume_only_clea
     before = _calls(world)
     assert world.drive() == 0 and _calls(world) == before, "a failed step was retried by itself"
 
-    resumed = world.ops.post(f"/admin/tenants/{tenant}/resume")
+    resumed = world.ops.post(f"{API}/admin/tenants/{tenant}/resume")
     assert resumed.status_code == 202, resumed.text
     after = world.item(tenant)
     assert after["failure"] is None
@@ -149,7 +150,7 @@ def test_a_spent_wrapper_found_when_install_is_taken_up_fails_loudly_and_restart
     assert "install" in item["failure"]
     assert not [p for p in world.config.secrets_dir.rglob("*") if p.is_file()], "a failed install left a secret file"
     assert world.drive() == 0
-    assert world.ops.post(f"/admin/tenants/{tenant}/resume").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/resume").status_code == 202
     world.drive()
     assert world.item(tenant)["state"] == "active"
     wraps = [c for c in world.openbao.calls if c.path.endswith("/secret-id") and "x-vault-wrap-ttl" in c.headers]
@@ -170,7 +171,7 @@ def test_prepare_fails_unless_the_first_publish_answers_fresh_and_a_commit(world
     assert (item["state"], item["step"], item["step_actor"]) == ("creating", "prepare", "host")
     assert item["failure"] and line in item["failure"]
     assert len(world.publish.calls) == 1
-    assert world.ops.post(f"/admin/tenants/{tenant}/resume").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/resume").status_code == 202
     world.drive()
     assert world.item(tenant)["state"] == "active"
     assert len(world.publish.calls) == 2
@@ -230,7 +231,7 @@ def test_prepare_refuses_a_link_at_the_tenant_folder_and_resumes_once_removed(wo
     assert world.publish.calls == []
     assert link.is_symlink() and _tree(target) == before and target.exists() == (linked != "dangling tenant")
     link.unlink()
-    assert world.ops.post(f"/admin/tenants/{tenant}/resume").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/resume").status_code == 202
     world.drive()
     assert world.item(tenant)["state"] == "active"
     assert not list((world.data_root / tenant).rglob("learning"))
@@ -249,7 +250,7 @@ def test_the_oidc_role_client_id_is_set_before_the_integration_step_commits(worl
     [gen] = world.generations(tenant)
     assert gen.audience is None
     assert len(world.integration.calls) == 1
-    assert world.ops.post(f"/admin/tenants/{tenant}/resume").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/resume").status_code == 202
     world.drive()
     assert world.item(tenant)["state"] == "active"
     first, second = world.integration.calls
@@ -268,7 +269,7 @@ def test_a_failing_bot_step_leaves_no_foreign_collaborator_after_resume(world):
     world.drive()
     full = f"{ORG}/{tenant}"
     world.forge.repos[full]["collaborators"]["intruder"] = "write"
-    assert world.ops.post(f"/admin/tenants/{tenant}/resume").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/resume").status_code == 202
     world.drive()
     assert world.forge.collaborators(full) == {world.live(tenant).bot_login: "write"}
 
@@ -301,14 +302,14 @@ def test_an_offboard_that_fails_midway_is_resumed_from_its_restart_point_and_fin
     tenant = world.active_tenant()
     gen = world.live(tenant)
     world.forge.fail_next[("PATCH", f"/api/v1/repos/{ORG}/{tenant}")] = 500
-    assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
     world.drive()
     item = world.item(tenant)
     assert (item["state"], item["step"], item["step_actor"]) == ("offboarding", "offboard", "service")
     assert "500" in item["failure"] and "offboard" in item["failure"]
     before = _calls(world)
     assert world.drive() == 0 and _calls(world) == before
-    assert world.ops.post(f"/admin/tenants/{tenant}/resume").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/resume").status_code == 202
     assert world.item(tenant)["failure"] is None
     world.drive()
     record = world.record(tenant)
@@ -381,7 +382,7 @@ class Lab:
         self.git_calls = len(world.git.calls)
 
     def resume(self) -> None:
-        assert self.world.ops.post(f"/admin/tenants/{LAB}/resume").status_code == 202
+        assert self.world.ops.post(f"{API}/admin/tenants/{LAB}/resume").status_code == 202
 
 
 @pytest.fixture
@@ -641,7 +642,7 @@ def test_install_fails_loudly_when_the_bot_could_push_or_merge_main_and_resumes_
     assert len(world.git.pushes()) == 1, "only the template commit may be pushed"
     assert not [1 for args, _e in world.git.calls if "--dry-run" in args]
     world.forge.repos[f"{ORG}/{tenant}"]["protections"]["main"] = saved  # control: the same channel, protected again
-    assert world.ops.post(f"/admin/tenants/{tenant}/resume").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/resume").status_code == 202
     world.drive()
     assert world.item(tenant)["state"] == "active"
     assert len(world.git.pushes()) == 1

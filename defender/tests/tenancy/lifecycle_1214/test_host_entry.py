@@ -16,6 +16,7 @@ from typing import Any
 
 import pytest
 
+from defender.tests.support.api._mount1161 import API
 from defender.tests.support.tenancy._active1214 import (
     DSN_ENV,
     active_directory,
@@ -298,7 +299,7 @@ def test_run_start_refuses_a_tenant_being_offboarded_through_the_api(tmp_path, d
         assert ALERT_MAPPING_MISSING in " ".join(unmapped.split()), unmapped
         seed_postgres(world.dsn, tenant, FIXTURE_ALERT_MAPPING)
         assert _admits(_run_start(tenant, tmp_path, world.directory()))
-        assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+        assert world.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
         refused = _run_start(tenant, tmp_path, world.directory())
         _has(refused, "[run.py]", tenant, "offboarding")
     finally:

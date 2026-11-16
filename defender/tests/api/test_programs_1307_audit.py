@@ -6,6 +6,7 @@ import datetime as _dt
 
 import pytest
 
+from defender.tests.support.api._mount1161 import API
 from defender.tests.support.api._identity1306 import Announced as AuditEvent
 
 pytest.importorskip("fastapi")
@@ -71,7 +72,7 @@ def test_each_write_names_the_credential_it_came_in_on_not_the_programs_other_on
     second_id, second = issue_key(s.ann, T1, s.program_id, name="second")
     first_run = start_investigation(s.program(), T1, "r1")
     second_run = start_investigation(s.world.bearer(second), T1, "r2", alert_id=second_alert(s.world))
-    cancelled = s.world.bearer(second).post(f"/tenants/{T1}/investigations/{first_run.json()['investigation_id']}/cancel")
+    cancelled = s.world.bearer(second).post(f"{API}/tenants/{T1}/investigations/{first_run.json()['investigation_id']}/cancel")
     assert cancelled.status_code in (200, 202, 204), cancelled.text
     seen = [(e.action, e.target, e.credential_id) for e in _store_events(s, s.program_id)]
     assert seen == [
@@ -94,7 +95,7 @@ def test_creating_and_removing_programs_and_credentials_is_audited_with_actor_ta
     key, _ = issue_key(s.ann, T1, program, name="rotation")
     oauth = issue_oauth(s.ann, T1, program)
     assert revoke(s.ann, T1, program, key).status_code == 204
-    assert s.ann.delete(f"/tenants/{T1}/programs/{program}").status_code == 204
+    assert s.ann.delete(f"{API}/tenants/{T1}/programs/{program}").status_code == 204
     assert [(e.action, e.actor, e.tenant_id, e.target) for e in audit.since(mark)] == [
         (PROGRAM_CREATE, ann, T1, program),
         (CREDENTIAL_CREATE, ann, T1, key),
@@ -209,7 +210,7 @@ def test_a_keys_expiry_writes_nothing_but_an_oauth_clients_cleanup_is_audited(ca
     oauth = issue_oauth(s.ann, T1, s.program_id, expires_at=s.world.clock() + DEFAULT_LIFETIME)
     mark = audit.mark()
     s.world.clock.advance(DEFAULT_LIFETIME + DAY)
-    assert s.program().get(f"/tenants/{T1}/alerts").status_code == 401  # the key has expired
+    assert s.program().get(f"{API}/tenants/{T1}/alerts").status_code == 401  # the key has expired
     s.world.send_pending()
     assert audit.since(mark) == []
     s.world.call(s.world.service.reconcile_program_clients)
@@ -229,7 +230,7 @@ def test_1454_offboarding_removes_the_tenants_active_programs_and_ends_its_peopl
     oauth = issue_oauth(s.ann, T1, s.program_id)
     earlier = str(create_program(s.ann, T1, "Earlier")["id"])
     issue_key(s.ann, T1, earlier)
-    assert s.ann.delete(f"/tenants/{T1}/programs/{earlier}").status_code == 204
+    assert s.ann.delete(f"{API}/tenants/{T1}/programs/{earlier}").status_code == 204
     mark = audit.mark()
     s.world.call(s.world.lifecycle_service().end_tenant, T1, now=s.world.clock())
     events = [(e.action, e.actor, e.tenant_id, e.target) for e in audit.since(mark)]

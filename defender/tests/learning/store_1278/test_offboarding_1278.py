@@ -13,6 +13,7 @@ import time
 
 import pytest
 
+from defender.tests.support.api._mount1161 import API
 from defender.tests.support.jobs._jobs1342 import move_tenant, register_tenant
 from defender.tests.support.learning.core._store1278 import (
     AUTHOR_LANE, DSN_ENV, LEAD_LANE, ONE, changes_of, finding, lapse_lease, learning_store, oid, store_mod, world_finding)
@@ -203,7 +204,7 @@ def _offboard(world, dsn: str, tenant: str) -> None:
     record of production would at the request."""
     from defender.tests.tenancy.lifecycle_1214._job_cases import sample
 
-    asked = world.ops.post(f"/admin/tenants/{tenant}/offboard")
+    asked = world.ops.post(f"{API}/admin/tenants/{tenant}/offboard")
     assert asked.status_code == 202, asked.text
     move_tenant(dsn, tenant, state="offboarding")
     sample(world, tenant)
@@ -311,7 +312,7 @@ def test_offboarding_a_live_holder_that_ignores_the_stop_past_the_time_limit_fai
     thread = threading.Thread(target=stubborn, daemon=True)
     thread.start()
     try:
-        asked = world.ops.post(f"/admin/tenants/{tenant}/offboard")
+        asked = world.ops.post(f"{API}/admin/tenants/{tenant}/offboard")
         assert asked.status_code == 202, asked.text
         move_tenant(dsn, tenant, state="offboarding")
         with contextlib.suppress(Exception):  # a failing step is retried: the drive may give up or raise, the state tells

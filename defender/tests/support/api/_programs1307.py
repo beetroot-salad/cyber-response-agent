@@ -42,6 +42,7 @@ import itertools
 import threading
 from typing import TYPE_CHECKING, Any
 
+from defender.tests.support.api._mount1161 import API
 from defender.api.app import create_app
 
 if TYPE_CHECKING:
@@ -431,7 +432,7 @@ class ProgramsWorld(World):
 # --- route helpers (FC-2) -----------------------------------------------------------------------
 
 def create_program(admin: Any, tenant: str, name: str = "SOAR prod") -> dict[str, Any]:
-    response = admin.post(f"/tenants/{tenant}/programs", json={"display_name": name})
+    response = admin.post(f"{API}/tenants/{tenant}/programs", json={"display_name": name})
     assert response.status_code == 201, response.text
     body: dict[str, Any] = response.json()
     return body
@@ -442,7 +443,7 @@ def issue(admin: Any, tenant: str, program_id: str, *, kind: str = "key", name: 
     body: dict[str, Any] = {"kind": kind, "name": name}
     if expires_at is not None:
         body["expires_at"] = expires_at.isoformat()
-    return admin.post(f"/tenants/{tenant}/programs/{program_id}/credentials", json=body)
+    return admin.post(f"{API}/tenants/{tenant}/programs/{program_id}/credentials", json=body)
 
 
 def issue_key(admin: Any, tenant: str, program_id: str, **kw: Any) -> tuple[str, str]:
@@ -460,11 +461,11 @@ def issue_oauth(admin: Any, tenant: str, program_id: str, **kw: Any) -> str:
 
 
 def revoke(admin: Any, tenant: str, program_id: str, credential_id: str) -> Any:
-    return admin.delete(f"/tenants/{tenant}/programs/{program_id}/credentials/{credential_id}")
+    return admin.delete(f"{API}/tenants/{tenant}/programs/{program_id}/credentials/{credential_id}")
 
 
 def start_investigation(client: Any, tenant: str, request_id: str = "r1", *, alert_id: str = ALERT.alert_id) -> Any:
-    return client.post(f"/tenants/{tenant}/investigations",
+    return client.post(f"{API}/tenants/{tenant}/investigations",
                        json={"alert_id": alert_id, "client_request_id": request_id})
 
 

@@ -20,7 +20,7 @@ from defender._yaml import safe_load
 from defender.credential_proxy import SecretSettings, store_policies
 from defender.kit.faults import ConfigFault
 from defender.identity import Bootstrap, DataRuleViolation
-from defender.identity.keycloak import check_issuer, check_redirect_uri, check_server_url  # lint-shippable: ok — the program wires the one sign-in vendor the platform supports (#1083).
+from defender.identity.keycloak import check_issuer, check_server_url  # lint-shippable: ok — the program wires the one sign-in vendor the platform supports (#1083).
 
 T = TypeVar("T")
 
@@ -47,7 +47,6 @@ class Settings:
     signin_issuer: str
     signin_client_id: str
     signin_client_secret: SecretStr
-    signin_redirect_uri: str
     signin_admin_client_id: str
     signin_admin_client_secret: SecretStr
     programs_issuer: str
@@ -79,13 +78,12 @@ class Settings:
             database_dsn=parsed("DEFENDER_DATABASE_DSN", _database_dsn),
             host=text("DEFENDER_API_HOST"),
             port=parsed("DEFENDER_API_PORT", _port),
-            frontend_origin=parsed("DEFENDER_API_FRONTEND_ORIGIN", _origin),
+            frontend_origin=parsed("DEFENDER_API_FRONTEND_ORIGIN", origin),
             administrators=_administrators("DEFENDER_API_ADMINISTRATORS_FILE", text("DEFENDER_API_ADMINISTRATORS_FILE")),
             keycloak_server_url=parsed("DEFENDER_KEYCLOAK_SERVER_URL", check_server_url),
             signin_issuer=parsed("DEFENDER_KEYCLOAK_ISSUER", check_issuer),
             signin_client_id=text("DEFENDER_KEYCLOAK_CLIENT_ID"),
             signin_client_secret=secret("DEFENDER_KEYCLOAK_CLIENT_SECRET_FILE"),
-            signin_redirect_uri=parsed("DEFENDER_KEYCLOAK_REDIRECT_URI", check_redirect_uri),
             signin_admin_client_id=text("DEFENDER_KEYCLOAK_ADMIN_CLIENT_ID"),
             signin_admin_client_secret=secret("DEFENDER_KEYCLOAK_ADMIN_CLIENT_SECRET_FILE"),
             programs_issuer=parsed("DEFENDER_KEYCLOAK_PROGRAMS_ISSUER", check_issuer),
@@ -129,7 +127,7 @@ def _port(value: str) -> int:
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 
 
-def _origin(value: str) -> str:
+def origin(value: str) -> str:
     """Scheme, host and optional port: no path (a trailing slash too), query or fragment. Written exactly as a
     browser sends it in `Origin` (lower case, no default port, an ASCII host), since requests are compared to it
     character for character; any other spelling refuses, naming the one to write."""
@@ -145,6 +143,17 @@ def _origin(value: str) -> str:
     canonical = f"{parts.scheme}://{netloc}"
     if value != canonical:
         raise ValueError(f"must be written as a browser sends it: {canonical}")
+    return value
+
+
+_LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", re.ASCII)
+
+
+def artifact_domain(value: str) -> str:
+    """A bare lowercase hostname (dot-separated labels of ASCII letters, digits and hyphens): no scheme, port, path,
+    wildcard or surrounding text. The one owner of the artifact domain's shape (S5)."""
+    if not value or not all(_LABEL.fullmatch(label) for label in value.split(".")):
+        raise ValueError("must be a bare lowercase hostname: no scheme, port, path, wildcard or empty label")
     return value
 
 

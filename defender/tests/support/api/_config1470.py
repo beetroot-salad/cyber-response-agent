@@ -57,20 +57,20 @@ BASE_MOVED = ("http://soc-playground:8004", "http://soc-elsewhere:8004")
 
 #: The routes this piece makes real or keeps refusing, as the app serves them (the tenant segment erased).
 CONFIG_ROUTES = frozenset({
-    ("GET", "/tenants/{}/adapters"),
-    ("GET", "/tenants/{}/systems"), ("GET", "/tenants/{}/systems/{}"),
-    ("PUT", "/tenants/{}/systems/{}"), ("DELETE", "/tenants/{}/systems/{}"),
-    ("PUT", "/tenants/{}/systems/{}/credentials"), ("POST", "/tenants/{}/systems/{}/check"),
-    ("GET", "/tenants/{}/case-record"), ("PUT", "/tenants/{}/case-record"), ("DELETE", "/tenants/{}/case-record"),
+    ("GET", "/api/tenants/{}/adapters"),
+    ("GET", "/api/tenants/{}/systems"), ("GET", "/api/tenants/{}/systems/{}"),
+    ("PUT", "/api/tenants/{}/systems/{}"), ("DELETE", "/api/tenants/{}/systems/{}"),
+    ("PUT", "/api/tenants/{}/systems/{}/credentials"), ("POST", "/api/tenants/{}/systems/{}/check"),
+    ("GET", "/api/tenants/{}/case-record"), ("PUT", "/api/tenants/{}/case-record"), ("DELETE", "/api/tenants/{}/case-record"),
 })
 #: The permission each declares (config.read for reads, config.write for the rest, the check included).
 CONFIG_PERMISSION = {route: "config.read" if route[0] == "GET" else "config.write" for route in CONFIG_ROUTES}
 #: A body in the new shape for each route that takes one (valid shape; its content need not be accepted).
 CONFIG_BODIES: dict[tuple[str, str], dict[str, Any]] = {
-    ("PUT", "/tenants/{}/systems/{}"): {"replaces": 0, "enabled": True, "settings": TICKET_SETTINGS,
+    ("PUT", "/api/tenants/{}/systems/{}"): {"replaces": 0, "enabled": True, "settings": TICKET_SETTINGS,
                                         "access": TICKET_ACCESS},
-    ("PUT", "/tenants/{}/systems/{}/credentials"): {"for_version": 1, "credentials": {"api_key": TOKEN}},
-    ("PUT", "/tenants/{}/case-record"): {"replaces": 0, "system_id": TICKET, "comment_body": BODY},
+    ("PUT", "/api/tenants/{}/systems/{}/credentials"): {"for_version": 1, "credentials": {"api_key": TOKEN}},
+    ("PUT", "/api/tenants/{}/case-record"): {"replaces": 0, "system_id": TICKET, "comment_body": BODY},
 }
 
 
@@ -113,13 +113,13 @@ class Configured:
         body = {"replaces": replaces, "enabled": enabled,
                 "settings": TICKET_SETTINGS if settings is None else dict(settings),
                 "access": TICKET_ACCESS if access is None else access}
-        return await self.put_raw(f"/tenants/{tenant}/systems/{system}", body)
+        return await self.put_raw(f"/api/tenants/{tenant}/systems/{system}", body)
 
     async def put_raw(self, path: str, body: Any, **kw: Any) -> httpx.Response:
         return await self.client.put(path, headers=kw.pop("headers", None) or self.ann(), json=body, **kw)
 
     async def get(self, path: str, *, tenant: str = A) -> httpx.Response:
-        return await self.client.get(f"/tenants/{tenant}{path}", headers=self.ann(write=False))
+        return await self.client.get(f"/api/tenants/{tenant}{path}", headers=self.ann(write=False))
 
     async def get_system(self, system: str) -> httpx.Response:
         return await self.get(f"/systems/{system}")
@@ -128,19 +128,19 @@ class Configured:
         return await self.get("/systems")
 
     async def delete_system(self, system: str, replaces: int, *, tenant: str = A) -> httpx.Response:
-        return await self.client.delete(f"/tenants/{tenant}/systems/{system}", params={"replaces": replaces},
+        return await self.client.delete(f"/api/tenants/{tenant}/systems/{system}", params={"replaces": replaces},
                                         headers=self.ann())
 
     async def put_case(self, replaces: int, system_id: str = TICKET, comment_body: str = BODY) -> httpx.Response:
-        return await self.put_raw(f"/tenants/{A}/case-record",
+        return await self.put_raw(f"/api/tenants/{A}/case-record",
                                   {"replaces": replaces, "system_id": system_id, "comment_body": comment_body})
 
     async def delete_case(self, replaces: int) -> httpx.Response:
-        return await self.client.delete(f"/tenants/{A}/case-record", params={"replaces": replaces}, headers=self.ann())
+        return await self.client.delete(f"/api/tenants/{A}/case-record", params={"replaces": replaces}, headers=self.ann())
 
     async def put_credentials(self, system: str, for_version: int, credentials: Mapping[str, str], *,
                               tenant: str = A) -> httpx.Response:
-        return await self.put_raw(f"/tenants/{tenant}/systems/{system}/credentials",
+        return await self.put_raw(f"/api/tenants/{tenant}/systems/{system}/credentials",
                                   {"for_version": for_version, "credentials": dict(credentials)})
 
     # --- observing what was stored ----------------------------------------------------------------

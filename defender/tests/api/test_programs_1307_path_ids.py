@@ -13,6 +13,7 @@ import pytest
 
 pytest.importorskip("fastapi")
 
+from defender.tests.support.api._mount1161 import API  # noqa: E402
 from defender.tests.api.test_uuid_ids import GOOD, MALFORMED, _id_family, _params  # noqa: E402
 from defender.tests.api.test_api_stub import _api_routes  # noqa: E402
 from defender.tests.support.api._identity1306 import ANN, OPS, T1  # noqa: E402
@@ -69,7 +70,7 @@ def test_a_malformed_id_in_any_path_placeholder_is_a_422_naming_it(world, bad) -
             values = {p: (T1 if p == "tenant_id" else GOOD) for p in names}
             values[name] = MALFORMED[bad]
             path = route.path_format.format(**values)
-            browser = admin if route.path.startswith("/admin") else member
+            browser = admin if route.path.startswith(API + "/admin") else member
             response = browser.request(method, path, json={} if method in ("POST", "PUT") else None)
             where = f"{method} {route.path} ({name})"
             assert response.status_code == 422, (where, response.status_code, response.text)
@@ -83,5 +84,5 @@ def test_well_formed_program_and_credential_ids_that_name_nothing_are_404s(world
     w, member, _ = world
     program = str(create_program(member, T1)["id"])
     issue_key(member, T1, program)
-    assert member.get(f"/tenants/{T1}/programs/{GOOD}/credentials").status_code == 404
-    assert member.delete(f"/tenants/{T1}/programs/{program}/credentials/{GOOD}").status_code == 404
+    assert member.get(f"{API}/tenants/{T1}/programs/{GOOD}/credentials").status_code == 404
+    assert member.delete(f"{API}/tenants/{T1}/programs/{program}/credentials/{GOOD}").status_code == 404

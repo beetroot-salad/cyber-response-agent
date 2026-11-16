@@ -23,7 +23,6 @@ from defender.tests.support.api._identity1306 import (  # noqa: E402
     NEW,
     NO_STATE,
     OPS,
-    PRELOGIN_COOKIE,
     SESSION_COOKIE,
     SIGNIN_URL,
     T1,
@@ -55,6 +54,8 @@ from defender.tests.support.api._identity1306 import (  # noqa: E402
     repo_holds,
 )
 from defender.api.models import AlertSummary  # noqa: E402
+from defender.identity import attempt_cookie  # noqa: E402
+from defender.tests.support.api._flow1161 import cookies_set, failed, location  # noqa: E402
 from defender.tests.support.api._identity1306 import (  # noqa: E402
     ALERT,
     NO_SUCH_ID,
@@ -76,12 +77,17 @@ PKCE_VERIFIER = re.compile(r"[A-Za-z0-9\-._~]{43,128}")
 
 
 def test_login_redirects_to_the_port_and_sets_a_host_prelogin_cookie() -> None:
-    """GET /auth/login: 302 to the port's URL, with an HttpOnly Secure Lax Path=/ 10-minute cookie (flow 2, DC-6)."""
+    """GET /api/auth/login: 302 to the port's URL, one HttpOnly Secure Lax Path=/ 10-minute `__Host-` cookie named from the attempt's state (flow 2, D6)."""
     world = World(tenants={T1: [ANN]})
-    login = world.client().get("/auth/login")
+    login = world.client().get("/api/auth/login")
+    state = world.signin.started[-1].state
     assert login.status_code == 302
-    assert login.headers["location"] == f"{SIGNIN_URL}?state={world.signin.started[-1].state}"
-    attrs = cookie_attributes(set_cookie(login, PRELOGIN_COOKIE) or "")
+    assert login.headers["location"] == f"{SIGNIN_URL}?state={state}"
+    name = attempt_cookie(state)
+    assert name is not None
+    assert list(cookies_set(login)) == [name]  # the one source of the name; nothing else is set
+    attrs = cookie_attributes(set_cookie(login, name) or "")
+    assert name.startswith("__Host-")
     assert {"httponly", "secure"} <= set(attrs)
     assert (attrs["samesite"].lower(), attrs["path"], attrs["max-age"]) == ("lax", "/", "600")
     assert "domain" not in attrs
@@ -97,7 +103,7 @@ def test_r7_2_the_sign_in_callback_accepts_the_identity_providers_own_extra_para
 
 
 def test_sign_in_ends_in_a_host_session_cookie_and_me_names_the_user() -> None:
-    """login -> callback -> 303 to exactly the frontend (whatever the query asks), HttpOnly Secure Lax cookie, /me (flow 2, O6, DC-6)."""
+    """login -> callback -> 303 to the root path (whatever the query asks), HttpOnly Secure Lax cookie, /me (flow 2, O6, DC-6)."""
     world = World(tenants={T1: [ANN]})
     browser = world.client()
     callback = world.sign_in_response(browser, ANN, name="Ann Example", extra={
@@ -106,7 +112,7 @@ def test_sign_in_ends_in_a_host_session_cookie_and_me_names_the_user() -> None:
     assert finished.nonce == started.nonce
     assert pkce_challenge(finished.code_verifier) == started.code_challenge
     assert callback.status_code == 303
-    assert callback.headers["location"] in (FRONTEND_ORIGIN, FRONTEND_ORIGIN + "/")  # no open redirect
+    assert location(callback) == "/"  # a path: no open redirect, no absolute URL (S1, B3); no `return` was judged, so the root
     attrs = cookie_attributes(set_cookie(callback, SESSION_COOKIE) or "")
     assert {"httponly", "secure"} <= set(attrs)
     assert (attrs["samesite"].lower(), attrs["path"]) == ("lax", "/")
@@ -151,8 +157,8 @@ def test_first_sign_in_accepts_every_open_invitation_at_once() -> None:
     assert world.signin.sends_to(NEW) == 1
     n = world.sign_in(NEW)
     assert tenants_of(n) == {T1, T2}
-    assert n.get(f"/tenants/{T2}/alerts").status_code == 200
-    assert {m["email"] for m in n.get(f"/tenants/{T2}/members").json()["items"]} == {BOB, NEW}
+    assert n.get(f"/api/tenants/{T2}/alerts").status_code == 200
+    assert {m["email"] for m in n.get(f"/api/tenants/{T2}/members").json()["items"]} == {BOB, NEW}
 
 
 def test_after_first_sign_in_a_new_invitation_is_a_notification_to_accept_while_signed_in() -> None:
@@ -169,8 +175,8 @@ def test_after_first_sign_in_a_new_invitation_is_a_notification_to_accept_while_
     assert me(n)["invitations"] == [{"id": row, "tenant_id": T2}]
 
 
-def test_the_four_callback_refusals_are_403_problems_of_distinct_types_and_open_no_session() -> None:
-    """Unknown account, state mismatch, no pre-login cookie, administrator without a code (flow 2, O5)."""
+def test_the_callback_refusals_are_303s_to_the_failed_screen_naming_three_reasons_and_open_no_session() -> None:
+    """Unknown account, state mismatch or no pre-login cookie, administrator without a code: 303s of three reasons (flow 2, O5; B4, Am-2)."""
     world = lab()
     world.signin.has_otp_answers[world.signin.account_for(OPS)] = True
     unknown = world.client()
@@ -181,45 +187,44 @@ def test_the_four_callback_refusals_are_403_problems_of_distinct_types_and_open_
     r_no_cookie = world.sign_in_response(no_cookie, ME, begin=False)
     no_code = world.client()
     r_no_code = world.sign_in_response(no_code, OPS, amr=("pwd",))
-    refusals = [r_unknown, r_mismatch, r_no_cookie, r_no_code]
-    assert [r.status_code for r in refusals] == [403] * 4
-    assert len({problem_type(r) for r in refusals}) == 4
+    reasons = [failed(r)[0] for r in (r_unknown, r_mismatch, r_no_cookie, r_no_code)]
+    assert reasons == ["unknown-account", "prelogin-missing", "prelogin-missing", "otp-required"]
     for browser in (unknown, mismatch, no_cookie, no_code):
         assert SESSION_COOKIE not in browser.cookies
-    for response in (r_unknown, r_mismatch, r_no_code):  # the cookie existed: cleared whatever the outcome
-        assert is_cleared(set_cookie(response, PRELOGIN_COOKIE) or "")
+    # the attempt's own cookie existed for the two that reached the provider step: cleared whatever the outcome
+    for response, state in ((r_unknown, world.signin.started[0].state), (r_no_code, world.signin.started[-1].state)):
+        assert is_cleared(set_cookie(response, attempt_cookie(state) or "") or "")
     ok = world.client()
     r_ok = world.sign_in_response(ok, ME)  # positive control
-    assert r_ok.status_code == 303
+    assert location(r_ok) == "/"
     assert ok.cookies.get(SESSION_COOKIE)
-    assert is_cleared(set_cookie(r_ok, PRELOGIN_COOKIE) or "")
+    assert is_cleared(set_cookie(r_ok, attempt_cookie(world.signin.started[-1].state) or "") or "")
 
 
 @pytest.mark.parametrize("state", ["not-the-state", "", None], ids=["other", "empty", "missing"])
 def test_a_state_mismatch_does_not_exchange_the_code(state: str | None) -> None:
-    """The state must match before the code is exchanged; an empty or missing state matches nothing (flow 2)."""
+    """The state must name this attempt's cookie before the code is exchanged; an empty or missing state names none: 303 `prelogin-missing` (flow 2; B4)."""
     world = World(tenants={T1: [ANN]})
     before = len(world.signin.finished)
     browser = world.client()
     refused = world.sign_in_response(browser, ANN, state=NO_STATE if state is None else state)
-    assert refused.status_code == 403
+    assert failed(refused) == ("prelogin-missing", {})
     assert len(world.signin.finished) == before
     assert SESSION_COOKIE not in browser.cookies
-    assert world.sign_in_response(world.client(), ANN).status_code == 303  # control
+    assert location(world.sign_in_response(world.client(), ANN)) == "/"  # control
 
 
-def test_a_token_that_fails_verification_is_a_403_that_opens_no_session_and_clears_the_prelogin_cookie() -> None:
-    """A SignInRefused from the port is a refusal, not a crash: 403 problem, no session, pre-login cleared (flow 2, DC-6)."""
+def test_a_token_that_fails_verification_is_a_303_that_opens_no_session_and_clears_the_prelogin_cookie() -> None:
+    """A SignInRefused from the port is `login-attempt-invalid`, not a crash: 303, no session, pre-login cleared (flow 2, DC-6; B4)."""
     world = World(tenants={T1: [ANN]})
     browser = world.client(raise_errors=False)
     world.signin.refuse_signins = 1
     refused = world.sign_in_response(browser, ANN)
-    assert refused.status_code == 403
-    assert refused.headers["content-type"] == "application/problem+json"
+    assert failed(refused) == ("login-attempt-invalid", {"return": "/"})  # the attempt's cookie carries the root (B2, B4)
     assert set_cookie(refused, SESSION_COOKIE) is None
     assert SESSION_COOKIE not in browser.cookies
-    assert is_cleared(set_cookie(refused, PRELOGIN_COOKIE) or "")
-    assert world.sign_in_response(world.client(), ANN).status_code == 303  # control
+    assert is_cleared(set_cookie(refused, attempt_cookie(world.signin.started[-1].state) or "") or "")
+    assert location(world.sign_in_response(world.client(), ANN)) == "/"  # control
 
 
 def test_the_pkce_verifier_is_a_verifier_rfc_7636_accepts() -> None:
@@ -233,45 +238,47 @@ def test_the_pkce_verifier_is_a_verifier_rfc_7636_accepts() -> None:
 
 @pytest.mark.parametrize("where", ["finish_signin", "has_otp"])
 def test_a_callback_the_provider_cannot_serve_opens_no_session_and_still_clears_the_prelogin_cookie(where: str) -> None:
-    """Whatever the outcome, the callback clears the pre-login cookie (DC-6); an unavailable provider opens no session."""
+    """An unavailable provider is a 303 `unavailable` with no session; the attempt's cookie is cleared (DC-6; B4)."""
     world = lab()
     browser = world.client(raise_errors=False)
     if where == "finish_signin":
         world.signin.unavailable_signins = 1
-        failed = world.sign_in_response(browser, ME)
+        failed_response = world.sign_in_response(browser, ME)
     else:
         world.signin.raise_on_has_otp = SignInUnavailable("keycloak is down")
-        failed = world.sign_in_response(browser, OPS, amr=("pwd",))
+        failed_response = world.sign_in_response(browser, OPS, amr=("pwd",))
     assert world.signin.every_call[-1] == where  # control: the failure was the one scripted
-    assert failed.status_code >= 400
-    assert set_cookie(failed, SESSION_COOKIE) is None
+    assert failed(failed_response) == ("unavailable", {"return": "/"})  # the attempt's cookie carries the root (B2, B4)
+    assert set_cookie(failed_response, SESSION_COOKIE) is None
     assert SESSION_COOKIE not in browser.cookies
-    assert is_cleared(set_cookie(failed, PRELOGIN_COOKIE) or ""), failed.headers.get_list("set-cookie")
+    cleared = set_cookie(failed_response, attempt_cookie(world.signin.started[-1].state) or "")
+    assert is_cleared(cleared or ""), failed_response.headers.get_list("set-cookie")
 
 
 def test_the_prelogin_cookie_is_gone_after_the_callback_and_a_second_callback_is_refused() -> None:
-    """The pre-login state works once (DC-6)."""
+    """The pre-login state works once (DC-6): a replay is `prelogin-missing`, as is a callback that never began."""
     world = World(tenants={T1: [ANN]})
     browser = world.client()
     state = world.begin_signin(browser)
-    assert browser.cookies.get(PRELOGIN_COOKIE)
+    name = attempt_cookie(state)
+    assert name is not None
+    assert browser.cookies.get(name)
     first = world.sign_in_response(browser, ANN, begin=False, state=state)
-    assert first.status_code == 303
-    assert PRELOGIN_COOKIE not in browser.cookies
+    assert location(first) == "/"
+    assert name not in browser.cookies
     again = world.sign_in_response(browser, ANN, begin=False, state=state)
     never_started = world.sign_in_response(world.client(), ANN, begin=False)
-    assert again.status_code == never_started.status_code == 403
-    assert problem_type(again) == problem_type(never_started)
+    assert failed(again) == failed(never_started) == ("prelogin-missing", {})
 
 
 def test_an_active_user_with_no_tenants_signs_in_and_sees_none() -> None:
     """Zero tenants is valid: /me shows none and tenant routes are 404 (flow 2, O3)."""
     world, _, bob = two_tenants()
-    assert bob.delete(f"/tenants/{T2}/members/{user_id(bob)}").status_code == 204
+    assert bob.delete(f"/api/tenants/{T2}/members/{user_id(bob)}").status_code == 204
     afresh = world.sign_in(BOB)
     body = me(afresh)
     assert (body["tenants"], body["invitations"]) == ([], [])
-    assert afresh.get(f"/tenants/{T2}/alerts").status_code == 404
+    assert afresh.get(f"/api/tenants/{T2}/alerts").status_code == 404
 
 
 def test_a_revoked_invitation_is_not_joined_at_first_sign_in() -> None:
@@ -280,10 +287,10 @@ def test_a_revoked_invitation_is_not_joined_at_first_sign_in() -> None:
     world.invite(ann, T1, NEW)
     world.invite(bob, T2, NEW)
     world.send_pending()
-    assert bob.delete(f"/tenants/{T2}/invitations/{invitation_id(bob, T2, NEW)}").status_code == 204
+    assert bob.delete(f"/api/tenants/{T2}/invitations/{invitation_id(bob, T2, NEW)}").status_code == 204
     n = world.sign_in(NEW)
     assert tenants_of(n) == {T1}
-    assert n.get(f"/tenants/{T2}/alerts").status_code == 404
+    assert n.get(f"/api/tenants/{T2}/alerts").status_code == 404
 
 
 MINUTE = _dt.timedelta(minutes=1)
@@ -294,15 +301,15 @@ def test_idle_expiry_is_twelve_hours_from_a_last_seen_written_only_when_over_fiv
     world = World(tenants={T1: [ANN]})
     a, b, c, d, e = (world.sign_in(ANN) for _ in range(5))
     world.clock.now = T0 + 5 * MINUTE
-    assert c.get("/me").status_code == 200  # exactly 5 minutes: not written
+    assert c.get("/api/me").status_code == 200  # exactly 5 minutes: not written
     world.clock.now = T0 + 5 * MINUTE + SECOND
-    assert d.get("/me").status_code == 200  # over 5 minutes: written
+    assert d.get("/api/me").status_code == 200  # over 5 minutes: written
     world.clock.now = T0 + 6 * MINUTE
-    assert b.get("/me").status_code == 200  # written
+    assert b.get("/api/me").status_code == 200  # written
     world.clock.now = T0 + 12 * HOUR
-    assert e.get("/me").status_code == 200  # exactly 12 hours idle is not over the limit
+    assert e.get("/api/me").status_code == 200  # exactly 12 hours idle is not over the limit
     world.clock.now = T0 + 12 * HOUR + SECOND
-    assert [x.get("/me").status_code for x in (a, c, b, d, e)] == [401, 401, 200, 200, 200]
+    assert [x.get("/api/me").status_code for x in (a, c, b, d, e)] == [401, 401, 200, 200, 200]
 
 
 @pytest.mark.parametrize("limit", ["idle", "absolute"])
@@ -315,12 +322,12 @@ def test_an_expired_session_stays_expired_however_often_it_is_sent(limit: str) -
     else:
         for _ in range(28):
             world.clock.advance(6 * HOUR)
-            ann.get("/me")
+            ann.get("/api/me")
         world.clock.now = T0 + SEVEN_DAYS + SECOND
-    assert ann.get("/me").status_code == 401
+    assert ann.get("/api/me").status_code == 401
     world.clock.advance(MINUTE)
-    assert ann.get("/me").status_code == 401
-    assert ann.get(f"/tenants/{T1}/alerts").status_code == 401
+    assert ann.get("/api/me").status_code == 401
+    assert ann.get(f"/api/tenants/{T1}/alerts").status_code == 401
 
 
 def test_a_session_ends_seven_days_after_sign_in_however_busy() -> None:
@@ -329,11 +336,11 @@ def test_a_session_ends_seven_days_after_sign_in_however_busy() -> None:
     ann = world.sign_in(ANN)
     for _ in range(27):
         world.clock.advance(6 * HOUR)
-        assert ann.get("/me").status_code == 200
+        assert ann.get("/api/me").status_code == 200
     world.clock.now = T0 + SEVEN_DAYS - SECOND
-    assert ann.get("/me").status_code == 200
+    assert ann.get("/api/me").status_code == 200
     world.clock.now = T0 + SEVEN_DAYS + SECOND
-    assert ann.get("/me").status_code == 401
+    assert ann.get("/api/me").status_code == 401
 
 
 def test_the_session_value_is_random_and_only_a_hash_of_it_is_stored() -> None:
@@ -356,7 +363,7 @@ def test_the_session_value_is_random_and_only_a_hash_of_it_is_stored() -> None:
     assert repo_holds(world.repo, ANN)  # control: the walk reaches what the repository holds
     assert repo_holds(world.service, ANN)  # control: and what the service holds
     assert not any(repo_holds(world.repo, v) or repo_holds(world.service, v) for v in values)
-    assert all(b.get("/me").status_code == 200 for b in browsers)
+    assert all(b.get("/api/me").status_code == 200 for b in browsers)
 
 
 def test_a_bearer_header_is_not_a_session() -> None:
@@ -365,12 +372,12 @@ def test_a_bearer_header_is_not_a_session() -> None:
     world = World(tenants={T1: [ANN]})
     value = world.sign_in(ANN).cookies[SESSION_COOKIE]
     bearer = world.client()
-    refused = bearer.get("/me", headers={"Authorization": f"Bearer {value}"})
+    refused = bearer.get("/api/me", headers={"Authorization": f"Bearer {value}"})
     assert refused.status_code == 401
-    assert "www-authenticate" not in world.client().get("/me").headers
+    assert "www-authenticate" not in world.client().get("/api/me").headers
     for name in ("defender_session", "__Secure-defender_session", "session"):  # DC-6: only the __Host- name
-        assert world.client_with_cookie(value, name=name).get("/me").status_code == 401, name
-    assert world.client_with_cookie(value).get("/me").status_code == 200
+        assert world.client_with_cookie(value, name=name).get("/api/me").status_code == 401, name
+    assert world.client_with_cookie(value).get("/api/me").status_code == 200
 
 
 def test_a_session_of_a_user_who_is_not_active_is_not_a_caller() -> None:
@@ -380,10 +387,10 @@ def test_a_session_of_a_user_who_is_not_active_is_not_a_caller() -> None:
     invited = world.call(world.repo.user_by_email, NEW)
     assert invited.status == "invited"
     world.call(world.repo.add_session, "seeded-session-of-an-invited-user-0123", invited.id, now=T0, expires_at=T0 + SEVEN_DAYS)
-    assert world.client_with_cookie("seeded-session-of-an-invited-user-0123").get("/me").status_code == 401
+    assert world.client_with_cookie("seeded-session-of-an-invited-user-0123").get("/api/me").status_code == 401
     ann = world.call(world.repo.user_by_email, ANN)  # control: the same seeding for an active user is a caller
     world.call(world.repo.add_session, "seeded-session-of-an-active-user-01234", ann.id, now=T0, expires_at=T0 + SEVEN_DAYS)
-    assert world.client_with_cookie("seeded-session-of-an-active-user-01234").get("/me").status_code == 200
+    assert world.client_with_cookie("seeded-session-of-an-active-user-01234").get("/api/me").status_code == 200
 
 
 class _Scene:
@@ -405,17 +412,17 @@ Op = tuple[str, Callable[[Any, _Scene], Any], int, Callable[[_Scene], bool]]
 
 
 REQUEST_OPS: dict[str, Op] = {
-    "invite": ("ann", lambda c, s: c.post(f"/tenants/{T1}/invitations", json={"email": "zed@z.example"}), 202,
+    "invite": ("ann", lambda c, s: c.post(f"/api/tenants/{T1}/invitations", json={"email": "zed@z.example"}), 202,
                lambda s: "zed@z.example" not in {r["email"] for r in invitation_rows(s.ann, T1)}),
-    "revoke": ("ann", lambda c, s: c.delete(f"/tenants/{T1}/invitations/{s.revoke_id}"), 204,
+    "revoke": ("ann", lambda c, s: c.delete(f"/api/tenants/{T1}/invitations/{s.revoke_id}"), 204,
                lambda s: any(r["id"] == s.revoke_id for r in invitation_rows(s.ann, T1))),
-    "remove": ("ann", lambda c, s: c.delete(f"/tenants/{T1}/members/{s.nina_id}"), 204,
-               lambda s: NINA in {m["email"] for m in items(s.ann.get(f"/tenants/{T1}/members"))}),
-    "accept": ("bob", lambda c, s: c.post(f"/invitations/{s.accept_id}/accept"), 200,
+    "remove": ("ann", lambda c, s: c.delete(f"/api/tenants/{T1}/members/{s.nina_id}"), 204,
+               lambda s: NINA in {m["email"] for m in items(s.ann.get(f"/api/tenants/{T1}/members"))}),
+    "accept": ("bob", lambda c, s: c.post(f"/api/invitations/{s.accept_id}/accept"), 200,
                lambda s: tenants_of(s.bob) == {T2}),
-    "logout": ("ann", lambda c, s: c.post("/auth/logout"), 204,
-               lambda s: s.ann.get("/me").status_code == 200),
-    "admin-invite": ("ops", lambda c, s: c.post(f"/admin/tenants/{EMPTY}/invitations", json={"email": "zed@z.example"}),
+    "logout": ("ann", lambda c, s: c.post("/api/auth/logout"), 204,
+               lambda s: s.ann.get("/api/me").status_code == 200),
+    "admin-invite": ("ops", lambda c, s: c.post(f"/api/admin/tenants/{EMPTY}/invitations", json={"email": "zed@z.example"}),
                      202, lambda s: not s.world.call(s.world.repo.memberships_of_tenant, EMPTY)),
 }
 
@@ -447,7 +454,7 @@ def test_a_state_changing_request_without_the_frontend_origin_is_refused_and_cha
 def test_a_forged_request_is_refused_before_its_body_is_read() -> None:
     """O6: a body that would not parse still gets the 403, not a 422 that says how it was read."""
     world, ann_session, _ = two_tenants()
-    path = f"/tenants/{T1}/invitations"
+    path = f"/api/tenants/{T1}/invitations"
     forged = world.client_with_cookie(ann_session.cookies[SESSION_COOKIE], origin="https://evil.example")
     for body in ("{", '{"email": 7}'):
         assert forged.post(path, content=body, headers={"content-type": "application/json"}).status_code == 403
@@ -458,14 +465,14 @@ def test_a_forged_request_is_refused_before_its_body_is_read() -> None:
 def test_the_origin_is_checked_before_the_session_and_only_for_state_changing_methods() -> None:
     """Check order Origin, session, tenant; GET needs no Origin (O6)."""
     world, _, _ = two_tenants()
-    path = f"/tenants/{T1}/invitations"
+    path = f"/api/tenants/{T1}/invitations"
     assert world.client(origin=None).post(path, json={"email": NEW}).status_code == 403
     assert world.client().post(path, json={"email": NEW}).status_code == 401
-    assert world.client(origin=None).get("/me").status_code == 401
+    assert world.client(origin=None).get("/api/me").status_code == 401
     ann = world.sign_in(ANN)
     no_origin = world.client_with_cookie(ann.cookies[SESSION_COOKIE], origin=None)
-    assert no_origin.get("/me").status_code == 200
-    assert no_origin.post(f"/tenants/{T2}/invitations", json={"email": NEW}).status_code == 403  # not 404
+    assert no_origin.get("/api/me").status_code == 200
+    assert no_origin.post(f"/api/tenants/{T2}/invitations", json={"email": NEW}).status_code == 403  # not 404
 
 
 BAD_TENANT = "not-a-tenant-id"
@@ -474,11 +481,11 @@ BAD_TENANT = "not-a-tenant-id"
 def test_a_request_without_a_valid_session_cookie_is_401_with_no_bearer_challenge() -> None:
     """No credential, or an unknown cookie value -> 401 without a Bearer challenge (O1, O6)."""
     world, ann, _ = two_tenants()
-    assert ann.get("/me").status_code == 200
+    assert ann.get("/api/me").status_code == 200
     for browser in (world.client(), world.client_with_cookie("no-such-session")):
         # Check order: the session before the tenant, so an unknown or malformed tenant is 401 too.
-        for path in (f"/tenants/{T1}/alerts", f"/tenants/{UNKNOWN}/alerts", f"/tenants/{BAD_TENANT}/alerts",
-                     f"/tenants/{BAD_TENANT}/members", "/me", "/admin/tenants"):
+        for path in (f"/api/tenants/{T1}/alerts", f"/api/tenants/{UNKNOWN}/alerts", f"/api/tenants/{BAD_TENANT}/alerts",
+                     f"/api/tenants/{BAD_TENANT}/members", "/api/me", "/api/admin/tenants"):
             response = browser.get(path)
             assert response.status_code == 401, path
             assert "bearer" not in response.headers.get("www-authenticate", "").lower()
@@ -488,9 +495,9 @@ def test_a_request_without_a_valid_session_cookie_is_401_with_no_bearer_challeng
 def test_a_non_member_and_an_unknown_tenant_get_the_same_404(other: str) -> None:
     """A member reaches their tenant; every other tenant answers alike (O1/P-D). A malformed id is a 422 (#1382)."""
     world, ann, _ = two_tenants()
-    assert ann.get(f"/tenants/{T1}/alerts").status_code == 200
-    reference = ann.get(f"/tenants/{UNKNOWN}/alerts")
-    probed = ann.get(f"/tenants/{other}/alerts")
+    assert ann.get(f"/api/tenants/{T1}/alerts").status_code == 200
+    reference = ann.get(f"/api/tenants/{UNKNOWN}/alerts")
+    probed = ann.get(f"/api/tenants/{other}/alerts")
     assert probed.status_code == reference.status_code == 404
     assert probed.headers["content-type"] == reference.headers["content-type"]
     assert masked(probed, other) == masked(reference, UNKNOWN)
@@ -505,11 +512,11 @@ def test_every_tenant_route_gives_a_non_member_the_same_404_as_an_unknown_tenant
         method: str, path: str, body: object) -> None:
     """P-D holds on the people routes as well as the data routes (O1/P-D)."""
     _, ann, _ = two_tenants()
-    asked = ann.request(method, f"/tenants/{T2}/{path}", json=body)
-    unknown = ann.request(method, f"/tenants/{UNKNOWN}/{path}", json=body)
+    asked = ann.request(method, f"/api/tenants/{T2}/{path}", json=body)
+    unknown = ann.request(method, f"/api/tenants/{UNKNOWN}/{path}", json=body)
     assert asked.status_code == unknown.status_code == 404
     assert masked(asked, T2) == masked(unknown, UNKNOWN)
-    assert items(ann.get(f"/tenants/{T1}/invitations")) == []  # nothing was written into T1
+    assert items(ann.get(f"/api/tenants/{T1}/invitations")) == []  # nothing was written into T1
 
 
 def test_another_tenants_invitation_or_member_id_is_the_same_404_as_a_missing_one() -> None:
@@ -518,17 +525,17 @@ def test_another_tenants_invitation_or_member_id_is_the_same_404_as_a_missing_on
     world.invite(bob, T2, NEW)
     foreign_invitation = invitation_id(bob, T2, NEW)
     bob_id = user_id(bob)
-    revoke_foreign = ann.delete(f"/tenants/{T1}/invitations/{foreign_invitation}")
-    revoke_missing = ann.delete(f"/tenants/{T1}/invitations/{NO_SUCH_ID}")
-    remove_foreign = ann.delete(f"/tenants/{T1}/members/{bob_id}")
-    remove_missing = ann.delete(f"/tenants/{T1}/members/{NO_SUCH_ID}")
+    revoke_foreign = ann.delete(f"/api/tenants/{T1}/invitations/{foreign_invitation}")
+    revoke_missing = ann.delete(f"/api/tenants/{T1}/invitations/{NO_SUCH_ID}")
+    remove_foreign = ann.delete(f"/api/tenants/{T1}/members/{bob_id}")
+    remove_missing = ann.delete(f"/api/tenants/{T1}/members/{NO_SUCH_ID}")
     assert revoke_foreign.status_code == revoke_missing.status_code == 404
     assert remove_foreign.status_code == remove_missing.status_code == 404
     assert masked(revoke_foreign, foreign_invitation) == masked(revoke_missing, NO_SUCH_ID)
     assert masked(remove_foreign, bob_id) == masked(remove_missing, NO_SUCH_ID)
     # positive control: nothing of T2 was touched, and the owner can still act on both
     assert tenants_of(bob) == {T2}
-    assert bob.delete(f"/tenants/{T2}/invitations/{foreign_invitation}").status_code == 204
+    assert bob.delete(f"/api/tenants/{T2}/invitations/{foreign_invitation}").status_code == 204
 
 
 def test_an_invitation_id_of_someone_else_or_nobody_is_the_same_404_at_accept() -> None:
@@ -538,12 +545,12 @@ def test_an_invitation_id_of_someone_else_or_nobody_is_the_same_404_at_accept() 
     world.send_pending()
     mine = me(bob)["invitations"][0]["id"]
     elsewhere = world.sign_in(ANN)  # ann is not the invitee
-    refused = elsewhere.post(f"/invitations/{mine}/accept")
-    missing = elsewhere.post(f"/invitations/{NO_SUCH_ID}/accept")
+    refused = elsewhere.post(f"/api/invitations/{mine}/accept")
+    missing = elsewhere.post(f"/api/invitations/{NO_SUCH_ID}/accept")
     assert refused.status_code == missing.status_code == 404
     assert masked(refused, mine) == masked(missing, NO_SUCH_ID)
     assert problem_type(refused) == problem_type(missing)
-    assert bob.post(f"/invitations/{mine}/accept").status_code == 200
+    assert bob.post(f"/api/invitations/{mine}/accept").status_code == 200
 
 
 def test_a_member_of_two_tenants_reads_and_writes_only_in_the_paths_tenant() -> None:
@@ -554,25 +561,25 @@ def test_a_member_of_two_tenants_reads_and_writes_only_in_the_paths_tenant() -> 
     world.invite(bob, T2, ANN)
     world.send_pending()
     [invitation] = me(ann)["invitations"]
-    assert ann.post(f"/invitations/{invitation['id']}/accept").status_code == 200
+    assert ann.post(f"/api/invitations/{invitation['id']}/accept").status_code == 200
     assert tenants_of(ann) == {T1, T2}
     for tenant, own, foreign in ((T1, ALERT, other), (T2, other, ALERT)):
         summary = AlertSummary.model_validate(own.model_dump(exclude={"raw"})).model_dump(mode="json")
-        assert items(ann.get(f"/tenants/{tenant}/alerts")) == [summary], tenant
-        assert ann.get(f"/tenants/{tenant}/alerts/{own.alert_id}").json() == own.model_dump(mode="json")
-        assert ann.get(f"/tenants/{tenant}/alerts/{foreign.alert_id}").status_code == 404, tenant
-    created = ann.post(f"/tenants/{T2}/investigations", json={"alert_id": "a1000000-0000-4000-8000-000000000002", "client_request_id": "r1"})
+        assert items(ann.get(f"/api/tenants/{tenant}/alerts")) == [summary], tenant
+        assert ann.get(f"/api/tenants/{tenant}/alerts/{own.alert_id}").json() == own.model_dump(mode="json")
+        assert ann.get(f"/api/tenants/{tenant}/alerts/{foreign.alert_id}").status_code == 404, tenant
+    created = ann.post(f"/api/tenants/{T2}/investigations", json={"alert_id": "a1000000-0000-4000-8000-000000000002", "client_request_id": "r1"})
     assert created.status_code == 201, created.text
     [event] = world.audit_events
     assert (event.tenant_id, event.user_id) == (T2, user_id(ann))
-    assert items(ann.get(f"/tenants/{T1}/investigations")) == []
-    assert [i["investigation_id"] for i in items(bob.get(f"/tenants/{T2}/investigations"))] == [
+    assert items(ann.get(f"/api/tenants/{T1}/investigations")) == []
+    assert [i["investigation_id"] for i in items(bob.get(f"/api/tenants/{T2}/investigations"))] == [
         created.json()["investigation_id"]]
 
 
 def test_the_alerts_routes_answer_unchanged_under_the_tenant_prefix() -> None:
     """Existing routes move under /tenants/{T}/ with unchanged behaviour (O7)."""
     _, ann, _ = two_tenants()
-    assert items(ann.get(f"/tenants/{T1}/alerts")) == [SUMMARY.model_dump(mode="json")]
-    assert ann.get(f"/tenants/{T1}/alerts/a1000000-0000-4000-8000-000000000001").json() == ALERT.model_dump(mode="json")
-    assert ann.get("/alerts").status_code == 404
+    assert items(ann.get(f"/api/tenants/{T1}/alerts")) == [SUMMARY.model_dump(mode="json")]
+    assert ann.get(f"/api/tenants/{T1}/alerts/a1000000-0000-4000-8000-000000000001").json() == ALERT.model_dump(mode="json")
+    assert ann.get("/api/alerts").status_code == 404

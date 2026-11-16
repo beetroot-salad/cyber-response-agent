@@ -16,6 +16,7 @@ import pytest
 pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
 
+from defender.tests.support.api._mount1161 import API  # noqa: E402
 from defender.tests.support.tenancy import _host1214 as H  # noqa: E402
 from defender.tests.support.tenancy._active1214 import active_directory  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._atk2_fakes import DockerStub, GitStub, host_answering_accessor  # noqa: E402
@@ -279,7 +280,7 @@ def test_teardown_unlinks_a_link_at_any_of_its_three_targets_and_leaves_its_targ
     (witness / "keep.txt").write_text("mine", encoding="utf-8")
     shutil.rmtree(link)
     link.symlink_to(witness)
-    assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
     world.drive()
     assert world.item(tenant)["state"] == "offboarded"
     kept = witness / "keep.txt"

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import datetime as _dt
 import logging
+from urllib.parse import urlencode
 from collections.abc import AsyncIterator, Callable, Coroutine
 from contextlib import asynccontextmanager
 from typing import Annotated, Any, Generic, Literal, NamedTuple, TypeVar
@@ -20,7 +21,7 @@ from defender import identity as _identity
 from defender import system_records as _records
 from defender import tenancy as _tenancy
 from defender.identity import Authenticated, IdentityService, PersonCaller, ProgramCaller, audit
-from defender.identity.service import SESSION_LIFETIME
+from defender.identity.service import SESSION_LIFETIME, SIGNIN_ATTEMPT_LIFETIME
 from defender.identity.roles import Permission
 from defender.identity.models import Role
 from defender.kit.access import CredentialRefused
@@ -67,6 +68,7 @@ from .models import (
     TenantItem,
     TenantRef,
 )
+from . import addresses
 from .pages import Order, Page, newest_first, ordered_by_id, paginate
 from .problems import install as install_problems
 from .problems import HANDLERS, problem, refusal, responses
@@ -87,14 +89,19 @@ from .refusing import NotImplementedYet
 
 API_VERSION = "0.1.0"
 
+#: The one prefix every route and the OpenAPI document are mounted under, on the origin the frontend shares (B3).
+API_PREFIX = "/api"
+_CALLBACK_ROUTE = "/auth/callback"
+#: The sign-in callback's path, which the provider's redirect URI names: `<frontend origin>` + this.
+SIGNIN_CALLBACK = API_PREFIX + _CALLBACK_ROUTE
+
 #: The largest page any list returns; `limit` defaults to `DEFAULT_PAGE`.
 MAX_PAGE = 200
 DEFAULT_PAGE = 50
 
 #: DC-6: `__Host-` cookies are Secure, Path=/ and carry no Domain.
 SESSION_COOKIE = "__Host-defender_session"
-PRELOGIN_COOKIE = "__Host-defender_prelogin"
-_PRELOGIN_MAX_AGE = 600
+_PRELOGIN_MAX_AGE = int(SIGNIN_ATTEMPT_LIFETIME.total_seconds())
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 _logger = logging.getLogger(__name__)
@@ -478,11 +485,11 @@ def _not_found(what: str, record_id: str) -> HTTPException:
 
 
 def _created_at(request: Request, response: Response, route: str, tenant_id: str, **path: str) -> None:
-    """201 and a `Location` the router builds from `route`'s path. Only a creation calls it: a
+    """201 and a `Location` path the router builds from `route`'s path (never an absolute URL, B3). Only a creation calls it: a
     replay answers the default 200 and needs no URL. Every path value is a record id or a `RecordId`,
     whose grammar is URL-safe, so the router never has to encode or refuse one."""
     response.status_code = status.HTTP_201_CREATED
-    response.headers["Location"] = str(request.url_for(route, tenant_id=tenant_id, **path))
+    response.headers["Location"] = str(request.app.url_path_for(route, tenant_id=tenant_id, **path))
 
 
 alerts = _router(prefix="/alerts", tags=["alerts"], responses=_EVERY_ROUTE)
@@ -823,35 +830,89 @@ def _cookie_options() -> dict[str, object]:
 auth = _router(tags=["auth"])
 
 
+#: Where a person is sent when sign-in fails: a frontend screen, never a problem document (S1).
+_FAILED_SCREEN = addresses.literal("sign-in-failed")
+
+
+def _redirect(description: str) -> dict[str, Any]:
+    """An OpenAPI answer that is a redirect: no body, only `Location`."""
+    return {"description": description, "content": None,
+            "headers": {"Location": {"description": "Where the browser goes next.", "schema": {"type": "string"}}}}
+
+
+#: The sign-in routes' failure answer, for their OpenAPI declaration: a redirect, never a problem document (S1).
+_TO_FAILED_SCREEN = _redirect(f"To `{_FAILED_SCREEN}?reason=<reason>`, with `return` when the attempt judged one.")
+
+
+def _to_failed_screen(reason: str, return_path: str | None = None) -> RedirectResponse:
+    query = {"reason": reason, **({} if return_path is None else {"return": return_path})}
+    return RedirectResponse(f"{_FAILED_SCREEN}?{urlencode(query)}", status_code=status.HTTP_303_SEE_OTHER)
+
+
+def _return_path(request: Request) -> str | None:
+    """The sign-in start's judged return path (P2), or None when the request is malformed (B2, B4): it reads only
+    `return`, once; an absent one is the root; any present one must be, byte for byte, a returnable address."""
+    items = request.query_params.multi_items()
+    if any(name != "return" for name, _ in items) or len(items) > 1:
+        return None
+    if not items:
+        return "/"
+    value = items[0][1]
+    return value if addresses.match(value) in addresses.RETURNABLE else None
+
+
 @auth.get("/auth/login", status_code=status.HTTP_302_FOUND, response_class=RedirectResponse,
-          responses=responses(503, 500), dependencies=[Depends(_public)])
-async def login(deps: Deps) -> RedirectResponse:
-    """Send the person to the sign-in page. The state, nonce and PKCE verifier travel back in a
-    short-lived cookie."""
-    start = await deps.identity.begin_signin()
+          responses={302: _redirect("To the provider's sign-in page, with this attempt's cookie."),
+                     303: _TO_FAILED_SCREEN}, dependencies=[Depends(_public)])
+@_any_query
+async def login(request: Request, deps: Deps) -> RedirectResponse:
+    """Send the person to the sign-in page, with this attempt's cookie. Anything but that is a 303 to the failed
+    screen: a person reaches this route by navigation, so it never answers a problem document (S1)."""
+    return_path = _return_path(request)
+    if return_path is None:
+        return _to_failed_screen("bad-request")
+    try:
+        start = await deps.identity.begin_signin(return_path, request.cookies)
+    except Exception:  # the service answers its own faults; this keeps S1 for one it did not foresee
+        _logger.error("sign-in start failed", exc_info=True)
+        return _to_failed_screen("error", return_path)
+    if isinstance(start, _identity.Refused):
+        return _to_failed_screen(start.reason, start.return_path)
     response = RedirectResponse(start.url, status_code=status.HTTP_302_FOUND)
-    response.set_cookie(PRELOGIN_COOKIE, start.prelogin, max_age=_PRELOGIN_MAX_AGE, **_cookie_options())  # type: ignore[arg-type]
+    for stale in start.clear:
+        response.delete_cookie(stale, **_cookie_options())  # type: ignore[arg-type]
+    response.set_cookie(start.cookie_name, start.cookie_value, max_age=_PRELOGIN_MAX_AGE, **_cookie_options())  # type: ignore[arg-type]
     return response
 
 
-@auth.get("/auth/callback", status_code=status.HTTP_303_SEE_OTHER, response_class=RedirectResponse,
-          responses=responses(403, 503, 422, 500), dependencies=[Depends(_public)])
+@auth.get(_CALLBACK_ROUTE, status_code=status.HTTP_303_SEE_OTHER, response_class=RedirectResponse,
+          responses={303: _redirect("To the attempt's return path with a session, or to "
+                                    f"`{_FAILED_SCREEN}?reason=<reason>` with `return` when the attempt judged one.")},
+          dependencies=[Depends(_public)])
 @_any_query
-async def callback(request: Request, deps: Deps, code: str = "", state: str = "") -> Response:
-    """Finish a sign-in: a session cookie and a redirect to the frontend, or a 403 problem of one
-    of four types. The pre-login cookie is cleared whatever the outcome."""
+async def callback(request: Request, deps: Deps) -> Response:
+    """Finish a sign-in: every answer is a 303, to the judged return path with a session, or to the failed screen with
+    a reason. The attempt's own cookie is read and cleared on every answer (D6); no other is touched. Unknown
+    parameters are ignored, a repeated `code` or `state` gives its last value."""
+    params = request.query_params
+    state, code = params.get("state", ""), params.get("code", "")
+    name = _identity.attempt_cookie(state)
+    session = None
     try:
-        value = await deps.identity.complete_signin(
-            code=code, state=state, prelogin=request.cookies.get(PRELOGIN_COOKIE))
-    except _identity.CallbackRefused as e:
-        response: Response = problem(403, str(e), type_=f"urn:defender:problem:{e.reason}")
-    except _identity.SignInUnavailable:
-        response = problem(503, "sign-in is unavailable")
-    else:
-        response = RedirectResponse(deps.frontend_origin, status_code=status.HTTP_303_SEE_OTHER)
-        response.set_cookie(SESSION_COOKIE, value, max_age=int(SESSION_LIFETIME.total_seconds()),
+        outcome = await deps.identity.complete_signin(state, code, request.cookies.get(name) if name else None)
+        if isinstance(outcome, _identity.SignedIn):
+            response: Response = RedirectResponse(outcome.return_path, status_code=status.HTTP_303_SEE_OTHER)
+            session = outcome.session
+        else:
+            response = _to_failed_screen(outcome.reason, outcome.return_path)
+    except Exception:
+        _logger.error("sign-in callback failed", exc_info=True)
+        response = _to_failed_screen("error")
+    if session is not None:
+        response.set_cookie(SESSION_COOKIE, session, max_age=int(SESSION_LIFETIME.total_seconds()),
                             **_cookie_options())  # type: ignore[arg-type]
-    response.delete_cookie(PRELOGIN_COOKIE, **_cookie_options())  # type: ignore[arg-type]
+    if name is not None:
+        response.delete_cookie(name, **_cookie_options())  # type: ignore[arg-type]
     return response
 
 
@@ -1119,7 +1180,13 @@ async def put_alert_mapping(
 
 
 def create_app(deps: ApiDeps) -> FastAPI:
+    """Every route and the OpenAPI document live under `/api` (B3). No interactive docs page is served: one would load
+    third-party scripts onto the origin that holds the session cookie. `/api/openapi.json` is for a viewer elsewhere (B10)."""
     app = FastAPI(
+        openapi_url=f"{API_PREFIX}/openapi.json",
+        docs_url=None,
+        redoc_url=None,
+        swagger_ui_oauth2_redirect_url=None,
         title="Defender platform API",
         version=API_VERSION,
         summary="The routes and shapes of the platform API; a route whose records are not yet served answers 501.",
@@ -1134,7 +1201,7 @@ def create_app(deps: ApiDeps) -> FastAPI:
                    alert_mapping, people, programs):
         in_tenant.include_router(router)
     for router in (auth, in_tenant, admin):
-        app.include_router(router)
+        app.include_router(router, prefix=API_PREFIX)
     install_problems(app)
     app.add_exception_handler(NotFound, refusal(status.HTTP_404_NOT_FOUND))
     app.add_exception_handler(Conflict, refusal(status.HTTP_409_CONFLICT))

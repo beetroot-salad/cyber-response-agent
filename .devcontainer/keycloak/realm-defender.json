@@ -56,7 +56,7 @@
       "serviceAccountsEnabled": false,
       "rootUrl": "http://localhost:8000",
       "redirectUris": [
-        "http://localhost:8000/auth/callback"
+        "http://localhost:8000/api/auth/callback"
       ],
       "webOrigins": [],
       "attributes": {

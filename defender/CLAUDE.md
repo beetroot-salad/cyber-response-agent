@@ -41,6 +41,24 @@ they start, the learning drains, the lifecycle service) refuses a database whose
 migration may lock the tables it changes until it commits. So: stop the API, the workers, the learning drains and the
 lifecycle service; run migrations; start the new code. The notes below say only what an upgrade needs beyond that.
 
+## Upgrade from before #1161
+
+Every API route is under `/api` (`/api/me`, `/api/admin/tenants/<T>/resume`, `/api/openapi.json`); nothing answers at
+the old paths, and the notes below name the new ones. Once:
+
+1. Run migrations (revision `0020_signin_attempts`): it adds `identity.signin_attempts`, where a sign-in in flight
+   keeps its record until the callback.
+2. In the sign-in realm, replace the client's redirect URI with `<DEFENDER_API_FRONTEND_ORIGIN>/api/auth/callback`;
+   until then every sign-in fails at the identity provider (invalid redirect URI). `DEFENDER_KEYCLOAK_REDIRECT_URI` is no longer
+   read: the URI is derived from the origin. Remove it.
+3. Serve the app through the ingress (`python -m defender.api_server.ingress`, Caddy on PATH, the frontend built to
+   `defender/frontend/dist`): it serves the frontend and sends `/api` to the API, in plain HTTP on
+   `DEFENDER_INGRESS_LISTEN`. TLS ends in front of it: put the TLS terminator before it. See
+   `docs/development-operations.md`.
+4. Point every API-key or OAuth program client at the `/api` paths.
+5. The interactive docs pages (`/docs`, `/redoc`) are gone and `DEFENDER_API_DOCS` is not read: remove it. Load
+   `/api/openapi.json` in a viewer served from another origin instead.
+
 ## Upgrade from before #1083
 
 Stop the API, the workers and the lifecycle service, then run migrations (revision `0016_list_indexes`). It builds one
@@ -52,7 +70,7 @@ until it finishes: on a large alerts table, a running intake or worker would sta
 A tenant's systems and its case record are versioned records in the database, and a tenant's
 systems are exactly those its records name, from its creation; nothing reads a tenant's
 `settings/systems/` or `settings/case-record.yaml` any more. A tenant admin writes them through the
-API (#1470): `PUT /systems/<id>` (settings, access declaration, enabled), `PUT
+API under `/api/tenants/<tenant-id>` (#1470): `PUT /systems/<id>` (settings, access declaration, enabled), `PUT
 /systems/<id>/credentials` and `PUT /case-record`; `GET /adapters` lists the adapters a record may
 name. Credentials live at a per-generation path `<tenant>/<system>/g<N>`. Once:
 
@@ -156,7 +174,7 @@ investigation for the worker instead, or run it by hand with `run.py <alert> --t
 
 Feedback issues on the tenant's Forgejo repository need the bot to write issues, labels and comments. Run
 migrations (revision `0011_merge_eligibility`), then rotate each existing tenant's forge credential once
-(`POST /admin/tenants/<T>/rotate-forge-credential`): only an integration created or rotated by this code is granted
+(`POST /api/admin/tenants/<T>/rotate-forge-credential`): only an integration created or rotated by this code is granted
 `write:issue`. Until a tenant rotates, its issue calls are refused (403) and logged every feedback tick; its
 open-issue requests and replies wait in the queue and are all served on the first tick after the rotation. Nothing is
 given up. The first feedback tick after the upgrade lists each existing feedback issue's comments once; after
@@ -173,7 +191,7 @@ The tenant's alert mapping lives in the database; nothing reads `settings/alert-
 
 1. Add `title` and `description` to the tenant's `settings/alert-mapping.yaml`, if its alerts should have them: the file
    does not name them, and an entry left out is unmapped, so its alerts would list with neither.
-2. A tenant admin saves the mapping with `PUT /tenants/<tenant-id>/alert-mapping` (the six entries, as `GET` on the same
+2. A tenant admin saves the mapping with `PUT /api/tenants/<tenant-id>/alert-mapping` (the six entries, as `GET` on the same
    route answers them).
 3. Delete the file from the tenant's repository.
 
@@ -295,7 +313,7 @@ as the tenant's own sign-only AppRole, and publish now also refuses a repository
    replace the proxy config's `tenant_keys`, `tenant_exports`, `transit_mount` and
    `openbao_addr` with `data_root` (an old config refuses to start).
 5. Rotate each existing tenant's forge credential
-   (`POST /admin/tenants/<T>/rotate-forge-credential`). Rotation gives it the sign
+   (`POST /api/admin/tenants/<T>/rotate-forge-credential`). Rotation gives it the sign
    login, its signing key `request-token-<T>` and the merge whitelist on `main` (the
    organisation's `Owners` team, never the bot). Until then its runs that reach an `http-proxy`
    system refuse at start, and its publish refuses. A tenant whose repository is owned by a user
@@ -341,8 +359,8 @@ records from `DEFENDER_DATABASE_DSN`, at exactly this code's revision, and works
    '<origin>')`, where `<origin>` is exactly what `git -C <data root>/<T>/knowledge remote get-url
    origin` prints (prepare keeps only the clone at `<T>/knowledge`, and refuses a clone of anything
    else) and `<repo>` is its `<org>/<name>` path. It refers to the row from step 2.
-4. With the lifecycle's settings in place and `serve` running, `POST /admin/tenants/<T>/resume`
-   and wait for `active` (`GET /admin/tenants/<T>`).
+4. With the lifecycle's settings in place and `serve` running, `POST /api/admin/tenants/<T>/resume`
+   and wait for `active` (`GET /api/admin/tenants/<T>`).
 5. Then delete by hand what the old setup left: `<data root>/<T>/tenant.json`, `client/<T>/` in
    the old issuer directory, and the unsalted OpenBao entries
    (`bao delete` each of `identity/oidc/role/tenant-<T>`, `auth/approle/role/delivery-<T>` and
