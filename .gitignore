@@ -80,6 +80,11 @@ temp/
 
 # Defender learning-loop ephemeral state — never committed.
 defender/learning/_pending_delivery/
+# Retired in-repo queues (#1278 moved learning state into the store). No code writes them now,
+# but checkouts that ran the loop before then still hold them; keep them out of `git status`.
+defender/learning/_pending/
+defender/learning/_pending_leads/
+defender/learning/_pending_pitfalls/
 defender/learning/_author.lock
 defender/learning/author-queue/
 defender/learning/learn-queue/
