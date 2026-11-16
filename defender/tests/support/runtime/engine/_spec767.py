@@ -71,6 +71,8 @@ CONFIG_RELPATH = f"systems/{CASE_SYSTEM}/config.env"
 TENANT_ID = fixture_uuid("tenant:t767")
 #: The base the planted tenant's `ticket` access declaration names.
 TICKET_BASE = T1106.default_base(TENANT_ID, CASE_SYSTEM)
+#: The frontend origin the default ticket link is built on.
+FRONTEND_ORIGIN = "https://app.defender.test"
 
 
 # --------------------------------------------------------------------------------------
@@ -302,26 +304,33 @@ class FakeStore:
         return rest
 
 
-def _handed(run_dir: Path, store: FakeStore, config: dict[str, str] | None | object) -> dict[str, Any]:
-    """What run.py hands the leg: the record, the code tree, the run's env, and the proxy's
-    address and write-back token (the store's stand-in)."""
+def ticket_link_for(run_dir: Path) -> str:
+    """The investigation-screen link the job lane hands the leg for `run_dir`'s run (C-7)."""
+    return f"{FRONTEND_ORIGIN}/t/{TENANT_ID}/investigations/{Path(run_dir).name}"
+
+
+def _handed(run_dir: Path, store: FakeStore, config: dict[str, str] | None | object,
+            link: str | None = None) -> dict[str, Any]:
+    """What run.py hands the leg: the record, the code tree, the run's env, the proxy's address and
+    write-back token (the store's stand-in), and the ticket link (C-7; default: the run's screen)."""
     from defender import box as box_mod
 
     record = current_record(config=config)
     return {"tenant": record, "defender_dir": T1106.DEFENDER,
             "env": store.env(box_mod.run_env(T1106.DEFENDER, Path(run_dir))),
             "proxy_url": store.url, "request_token": WRITE_TOKEN,
-            "case": T1106.case_for(record)}  # (#1366 R16) run start's verdict over the tenant's roster, handed in
+            "case": T1106.case_for(record),
+            "link": ticket_link_for(run_dir) if link is None else link}  # (#1366 R16) run start's verdict over the tenant's roster, handed in
 
 
 def record(run_dir: Path, store: FakeStore, *,
-           config: dict[str, str] | None | object = _CONFIG_UNSET, **kw: Any) -> Any:
+           config: dict[str, str] | None | object = _CONFIG_UNSET, link: str | None = None, **kw: Any) -> Any:
     """Drive the record leg (`record_case_ticket`) over one run dir, through the real seam and
     the real shared transport, the store being behind `store`'s proxy stand-in."""
     from defender.investigation import ticket_writer
 
     return ticket_writer.record_case_ticket(
-        _run_handle_1165(run_dir), **_handed(run_dir, store, config), **kw)
+        _run_handle_1165(run_dir), **_handed(run_dir, store, config, link), **kw)
 
 
 def posted_comment_body(run_dir: Path, scratch: Path) -> str:

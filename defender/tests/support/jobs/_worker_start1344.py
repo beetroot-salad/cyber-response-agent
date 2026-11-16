@@ -99,6 +99,19 @@ def run_to_exit(source: Path, env: dict[str, str], *, timeout: float = 60) -> su
     return subprocess.CompletedProcess(proc.args, proc.returncode, out.decode(errors="replace"), err.decode(errors="replace"))
 
 
+def run_for(source: Path, env: dict[str, str], *, within: float) -> subprocess.CompletedProcess:
+    """A start watched for `within` seconds: its exit if it ends by itself, else killed (returncode None) with what it said."""
+    proc = start(source, env)
+    try:
+        out, err = proc.communicate(timeout=within)
+        code = proc.returncode
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        out, err = proc.communicate()
+        code = None
+    return subprocess.CompletedProcess(proc.args, code, out.decode(errors="replace"), err.decode(errors="replace"))
+
+
 def wait_until(condition: Callable[[], bool], *, timeout: float, what: str, proc: subprocess.Popen | None = None) -> None:
     deadline = time.monotonic() + timeout
     while not condition():

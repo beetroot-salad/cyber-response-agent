@@ -2,8 +2,13 @@
 `ScriptedChild` leaves (setup words, cut-short facts, junk in a job-end word). Shared setup: `_worker1342`."""
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import hashlib
 import json
 import logging
+import os
+from types import SimpleNamespace
 
 import pytest
 
@@ -11,6 +16,7 @@ from defender.records import job_lane, run_end
 from defender.tests.support.jobs._jobs1342 import (
     NOW,
     T1,
+    T2,
     WORKER_LOGGER,
     an_alert,
     job_end,
@@ -205,58 +211,368 @@ async def test_o8_a_job_end_word_with_junk_anywhere_is_a_failed_run_with_no_repo
         _no_run_text(stored)
 
 
-# --- #1471 r8: the worker's half of a job's ticket write-back (W3, W6) ------------------------------------------
-# How a test hands the worker its frontend origin is a sketch pick: a `Worker(frontend_origin=)` knob, the value its
-# start reads from `DEFENDER_API_FRONTEND_ORIGIN` (W9). The store's flag keyword is `test_store.py`'s pick.
+# --- #1471 r8: the worker's half of a job's ticket write-back (P-5, W3, W6) ------------------------------------
+# The Worker's origin is C-6's required `frontend_origin=`; the helper's start carries the flag, the digest and the link
+# as C-1's `--post-ticket`, `--alert-digest <hex>`, `--ticket-link <url>`. The tests spell the origin and pass it
+# themselves, so they hold whether or not the shared `make_worker` defaults it.
 
 ORIGIN_1471 = "https://app.defender.test"
+#: `ALERT_BYTES`' fields plus the ticket the fixture mapping's `case_key` (`alert_id`) reads: a flagged create needs one (W1).
+KEYED_1471 = (b'{"rule": {"id": "r-1342",  "description": "sketch"},\n'
+              b' "alert_id": "SEC-1471", "alert_timestamp": "2026-10-29T00:00:00Z"}\n')
+DIGEST_1471 = hashlib.sha256(KEYED_1471).hexdigest()
+LAUNCH_FIELDS = {"investigation_id", "tenant_id", "alert_id", "digest", "label", "box_token"}
 
 
-async def _queued_1471(store, *, update_ticket: bool) -> str:
-    alert = await an_alert(store, T1, ticket="T-1471")
-    inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1", update_ticket=update_ticket)
+def _worker_1471(world, store, child, **kw):
+    from defender.tests.support.jobs._jobs1342 import make_worker
+
+    return make_worker(store, world["root"], child, **{"frontend_origin": ORIGIN_1471, **kw})
+
+
+async def _queued_1471(store, *, update_ticket: bool, tenant: str = T1, key: str = "k1") -> str:
+    alert = await an_alert(store, tenant, ticket=f"V-{key}", raw=KEYED_1471)
+    inv, _ = await store.create_investigation(tenant, alert.alert_id, key, actor="u-1", update_ticket=update_ticket)
     return inv.investigation_id
 
 
-@pytest.mark.parametrize("update_ticket", [True, False], ids=["flagged", "unflagged"])
-async def test_1471_w3_the_launch_record_carries_the_flag_and_the_screen_link_the_worker_built(world, update_ticket):
-    """The worker copies the row's flag into the launch record and builds the link once, from its own origin setting:
-    `<origin>/t/<tenant>/investigations/<investigation>`. (W3, P-5)"""
-    child = _child(world, exit=0, files=_committed())
+def _values(argv: list[str], flag: str) -> list[str]:
+    return [argv[i + 1] for i, word in enumerate(argv[:-1]) if word == flag]
+
+
+class _Spawned:
+    """The worker's process door: records the argv the worker built for each helper, then runs the scripted stand-in
+    child for that job in its place. Fakes only inject; nothing here decides what the argv holds."""
+
+    def __init__(self, child) -> None:
+        self.child, self.argvs = child, {}
+
+    async def __call__(self, *argv, **kw):
+        argv = list(argv)
+        job = _values(argv, "--job")[0]
+        self.argvs[job] = argv
+        stand = self.child(SimpleNamespace(investigation_id=job, tenant_id=_values(argv, "--tenant")[0],
+                                           parent_pid=int(_values(argv, "--parent-pid")[0])))
+        return await asyncio.create_subprocess_exec(*stand, **kw)
+
+
+async def _drain_spawned(world, rows, child):
+    """Queue each `(tenant, flagged, key)` row, drain a worker whose default helper argv is recorded; the ids and the door."""
+    from defender.worker import run_argv
+
+    door = _Spawned(child)
     async with job_store(world["dsn"]) as store:
-        inv = await _queued_1471(store, update_ticket=update_ticket)
-        await _worker(world, store, child, frontend_origin=ORIGIN_1471).drain()
+        ids = [await _queued_1471(store, update_ticket=flag, tenant=tenant, key=key) for tenant, flag, key in rows]
+        await _worker_1471(world, store, run_argv, spawn=door).drain()
+    return ids, door
+
+
+async def test_1471_p5_each_helper_is_started_with_its_own_flag_digest_and_link(world):
+    """The helper's argv carries `--post-ticket` and `--ticket-link <origin>/t/<tenant>/investigations/<id>` only for a
+    flagged row, `--alert-digest` always, each row its own tenant and id. (P-5 worker side, W3)"""
+    rows = [(T1, True, "k1"), (T1, False, "k2"), (T2, True, "k3")]
+    ids, door = await _drain_spawned(world, rows, _child(world, exit=0, files=_committed()))
+
+    assert sorted(door.argvs) == sorted(ids), "premise: every row's helper was started"
+    for inv, (tenant, flagged, _key) in zip(ids, rows, strict=True):
+        argv = door.argvs[inv]
+        assert ("--post-ticket" in argv) is flagged, (inv, argv)
+        assert _values(argv, "--alert-digest") == [DIGEST_1471], (inv, argv)
+        assert _values(argv, "--ticket-link") == ([f"{ORIGIN_1471}/t/{tenant}/investigations/{inv}"] if flagged else []), (inv, argv)
+        assert _values(argv, "--tenant") == [tenant]
+        assert _values(argv, "--job") == [inv]
+
+
+@pytest.mark.parametrize("flagged", [True, False], ids=["flagged", "unflagged"])
+async def test_1471_p5_the_launch_record_and_the_tenant_folder_carry_neither_flag_nor_link(world, flagged):
+    """The launch record keeps its six fields and no file the worker wrote in the tenant folder holds the link or a
+    flag: the job container binds that folder read-write. (P-5)"""
+    ids, _ = await _drain_spawned(world, [(T1, flagged, "k1")], _child(world, exit=0, files=_committed()))
+    inv = ids[0]
 
     launch = json.loads((world["runs"] / f"{inv}.launch.json").read_text(encoding="utf-8"))
-    assert launch["update_ticket"] is update_ticket, launch
-    if update_ticket:
-        assert launch["ticket_link"] == f"{ORIGIN_1471}/t/{T1}/investigations/{inv}", launch
+    assert set(launch) == LAUNCH_FIELDS, launch
+    assert launch["digest"] == DIGEST_1471, "premise: the record is this row's"
+    written = [p for p in (world["root"] / T1).rglob("*") if p.is_file()]
+    assert len(written) >= 2, "premise: the worker wrote files here"
+    for path in written:
+        text = path.read_bytes().decode("utf-8", "replace")
+        assert not any(word in text for word in (ORIGIN_1471, "update_ticket", "ticket_link")), path
 
 
-def _receipt(status: str) -> str:
+def _receipt(status) -> str:
     return json.dumps({"key": "SEC-1471", "status": status, "url": None, "ok": status in ("commented", "escalated"),
                        "reason": None if status in ("commented", "escalated") else f"{MARKER} the store said no"})
 
 
-@pytest.mark.parametrize(("update_ticket", "receipt", "word"), [
-    (True, "commented", "commented"),
-    (True, "error", "refused"),  # sketch pick: the receipt's `error` is W6's `refused`
-    (True, None, "not_sent"),  # a silent ending writes no receipt
-    (False, None, None),
-], ids=["flagged-commented", "flagged-error", "flagged-no-receipt", "unflagged"])
-async def test_1471_w6_the_row_reads_the_receipts_word_after_the_container_exits(world, update_ticket, receipt, word):
-    """After the job, the worker reads the ticket receipt beside the run folder into `ticket_write`: the word only,
-    never the receipt's reason; null for an unflagged job. (W6)"""
-    from defender.records._layout import TICKET_WRITE_SUFFIX
+_RECEIPT = "{id}.ticket-write.json"
+_BAD_RECEIPTS = {
+    "status-outside-the-set": _receipt("refused"),
+    "status-of-the-old-words": _receipt("not_sent"),
+    "status-another-word-of-ticket_write": _receipt("no_receipt"),
+    "status-the-null-word-not_read": _receipt("not_read"),
+    "status-in-capitals": _receipt("Commented"),
+    "status-with-a-trailing-newline": _receipt("commented\n"),
+    "status-empty": _receipt(""),
+    "status-a-number": _receipt(1),
+    "status-null": _receipt(None),
+    "status-a-list": _receipt(["commented"]),
+    "no-status": json.dumps({"key": "SEC-1471", "ok": True}),
+    "not-json": "commented",
+    "empty-file": "",
+    "json-list": json.dumps(["commented"]),
+    "json-string": json.dumps("commented"),
+    "truncated": _receipt("commented")[:30],
+}
 
-    files = _committed(**({} if receipt is None else {"{id}" + TICKET_WRITE_SUFFIX: _receipt(receipt)}))
-    child = _child(world, exit=0, files=files)
+
+@pytest.mark.parametrize("word", ["commented", "escalated", "error", "unknown"])
+async def test_1471_w6_the_word_is_the_receipts_own_status_verbatim(world, word):
+    """A flagged job's row reads the receipt's status when it is one of the four, and only the word. (W6)"""
+    child = _child(world, exit=0, files=_committed(**{_RECEIPT: _receipt(word)}))
     async with job_store(world["dsn"]) as store:
-        inv = await _queued_1471(store, update_ticket=update_ticket)
-        await _worker(world, store, child, frontend_origin=ORIGIN_1471).drain()
+        inv = await _queued_1471(store, update_ticket=True)
+        await _worker_1471(world, store, child).drain()
         record = await store.get_investigation(T1, inv)
 
     assert child.seen() is not None, "the stand-in child never ran"
-    assert record.stage == "completed", record
-    assert record.ticket_write == word, record
+    assert (record.stage, record.ticket_write) == ("completed", word), record
     _no_run_text(row(world["dsn"], inv))
+
+
+@pytest.mark.parametrize("name", list(_BAD_RECEIPTS))
+async def test_1471_w6_a_receipt_that_says_nothing_in_the_set_or_cannot_be_read_is_unknown(world, name):
+    """An out-of-set status, another word of the column, or a receipt that is not a readable object: `unknown`, not a
+    failure of the row and not the child's text. (W6)"""
+    child = _child(world, exit=0, files=_committed(**{_RECEIPT: _BAD_RECEIPTS[name]}))
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued_1471(store, update_ticket=True)
+        await _worker_1471(world, store, child).drain()
+        record = await store.get_investigation(T1, inv)
+
+    assert (record.stage, record.ticket_write) == ("completed", "unknown"), record
+    _no_run_text(row(world["dsn"], inv))
+
+
+@pytest.mark.parametrize("how", ["not-utf8", "a-directory"])
+async def test_1471_w6_a_receipt_of_bytes_or_a_kind_that_cannot_be_read_is_unknown(world, how):
+    """Bytes that are not text, or a directory where the receipt belongs: `unknown`. (W6)"""
+    spec = {"binary": {_RECEIPT: b'{"status": "comm\xff\xfe"}'.hex()}} if how == "not-utf8" else {"dirs": [_RECEIPT]}
+    child = _child(world, exit=0, files=_committed(), **spec)
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued_1471(store, update_ticket=True)
+        await _worker_1471(world, store, child).drain()
+        record = await store.get_investigation(T1, inv)
+
+    assert (record.stage, record.ticket_write) == ("completed", "unknown"), record
+
+
+@pytest.mark.parametrize("ending", ["silent", "no-report"])
+async def test_1471_w6_a_flagged_run_that_left_no_receipt_reads_no_receipt(world, ending):
+    """No receipt in a folder the worker read (a silent ending, a run that died before its record step): `no_receipt`. (W6)"""
+    files = _committed() if ending == "silent" else {"{id}.job-end.json": job_end(report_committed=False)}
+    child = _child(world, exit=0, files=files)
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued_1471(store, update_ticket=True)
+        await _worker_1471(world, store, child).drain()
+        record = await store.get_investigation(T1, inv)
+
+    assert child.seen() is not None, "the stand-in child never ran"
+    assert record.ticket_write == "no_receipt", record
+
+
+@pytest.mark.parametrize("receipt", [None, "commented", "escalated", "error"], ids=["none", "commented", "escalated", "error"])
+async def test_1471_w6_an_unflagged_row_reads_null_whatever_the_folder_holds(world, receipt):
+    """Control: an unflagged row's `ticket_write` stays null, with or without a receipt beside it. (W6, W4)"""
+    child = _child(world, exit=0, files=_committed(**({} if receipt is None else {_RECEIPT: _receipt(receipt)})))
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued_1471(store, update_ticket=False)
+        await _worker_1471(world, store, child).drain()
+        record = await store.get_investigation(T1, inv)
+
+    assert (record.stage, record.ticket_write) == ("completed", None), record
+
+
+def _plant_fifo(path):
+    os.mkfifo(path)
+
+
+def _plant_host_link(path):
+    host = path.parent.parent / "host-secret.json"
+    host.write_text(_receipt("commented"), encoding="utf-8")
+    path.symlink_to(host)
+
+
+def _plant_over_cap(path):
+    path.write_text(_receipt("commented").ljust(64 * 1024 + 1), encoding="utf-8")
+
+
+def _plant_unparsable(path):
+    path.write_text('{"key": "SEC-1471", "status": "comm', encoding="utf-8")
+
+
+def _plant_plain(path):
+    path.write_text(_receipt("commented").ljust(32 * 1024), encoding="utf-8")
+
+
+_ENTRIES_AT_THE_RECEIPT = {
+    "symlink-to-a-host-file": (_plant_host_link, "unknown"), "fifo": (_plant_fifo, "unknown"),
+    "file-over-64-KiB": (_plant_over_cap, "unknown"), "unparsable-json": (_plant_unparsable, "unknown"),
+    "control-plain-32-KiB-file": (_plant_plain, "commented"),
+}
+
+
+@pytest.mark.parametrize("entry", list(_ENTRIES_AT_THE_RECEIPT))
+async def test_1471_c8_a_bad_entry_at_the_receipt_path_reads_unknown_and_the_row_still_ends(world, entry):
+    """A link to a host file, a FIFO, a file over 64 KiB or unparsable JSON where the receipt belongs reads `unknown`
+    and the row ends without the worker hanging; a plain small receipt still reads. (C-8, W6)"""
+    plant, word = _ENTRIES_AT_THE_RECEIPT[entry]
+    child = _child(world, exit=0, files=_committed())
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued_1471(store, update_ticket=True)
+        path = world["runs"] / _RECEIPT.format(id=inv)
+        plant(path)
+        try:
+            await asyncio.wait_for(_worker_1471(world, store, child).drain(), timeout=30)
+        finally:
+            if entry == "fifo":  # frees a reader a hung worker left blocked in its open
+                with contextlib.suppress(OSError):
+                    os.close(os.open(path, os.O_WRONLY | os.O_NONBLOCK))
+        record = await store.get_investigation(T1, inv)
+
+    assert child.seen() is not None, "the stand-in child never ran"
+    assert (record.stage, record.ticket_write) == ("completed", word), record
+
+
+class _Ends:
+    """The real store with each end write's keywords noted, and optionally the first `refuse` finishes refused as a
+    value the database will never take (a real `DataError`)."""
+
+    def __init__(self, store, *, refuse: int = 0, get_alert_outages: int = 0) -> None:
+        self._store, self.refuse, self.outages, self.calls = store, refuse, get_alert_outages, []
+
+    def __getattr__(self, name):
+        return getattr(self._store, name)
+
+    async def get_alert(self, *args, **kw):
+        if self.outages > 0:
+            from sqlalchemy.exc import OperationalError
+
+            self.outages -= 1
+            raise OperationalError("SELECT", {}, Exception("connection refused"))
+        return await self._store.get_alert(*args, **kw)
+
+    async def finish(self, *args, **kw):
+        self.calls.append(("finish", kw))
+        if self.refuse > 0:
+            from sqlalchemy.exc import DataError
+
+            self.refuse -= 1
+            raise DataError("UPDATE jobs.investigations", {}, Exception("value too long"))
+        return await self._store.finish(*args, **kw)
+
+    async def hand_back(self, *args, **kw):
+        self.calls.append(("hand_back", kw))
+        return await self._store.hand_back(*args, **kw)
+
+    async def write_accounting(self, *args, **kw):
+        self.calls.append(("write_accounting", kw))
+        return await self._store.write_accounting(*args, **kw)
+
+    def of(self, name):
+        return [kw.get("ticket_write", "<absent>") for n, kw in self.calls if n == name]
+
+
+async def test_1471_w6_the_word_rides_every_try_of_the_end_down_to_the_barest(world):
+    """The end refused twice (with its knowledge, then with the marker) is written a third time as the barest end, and
+    each try carries the receipt's word. (W6, `_lesser_ends`)"""
+    child = _child(world, exit=0, files=_committed(**{_RECEIPT: _receipt("escalated")}))
+    async with job_store(world["dsn"]) as store:
+        ends = _Ends(store, refuse=2)
+        inv = await _queued_1471(store, update_ticket=True)
+        await _worker_1471(world, ends, child).drain()
+        record = await store.get_investigation(T1, inv)
+
+    assert ends.of("finish") == ["escalated"] * 3, ends.calls
+    assert (record.stage, record.failure_reason, record.ticket_write) == ("failed", "worker_error", "escalated"), record
+
+
+async def test_1471_w6_an_unflagged_rows_ends_carry_no_word(world):
+    """Control: every try of an unflagged row's end carries null (or no) word. (W6)"""
+    child = _child(world, exit=0, files=_committed(**{_RECEIPT: _receipt("commented")}))
+    async with job_store(world["dsn"]) as store:
+        ends = _Ends(store, refuse=2)
+        inv = await _queued_1471(store, update_ticket=False)
+        await _worker_1471(world, ends, child).drain()
+        record = await store.get_investigation(T1, inv)
+
+    assert len(ends.of("finish")) == 3, ends.calls
+    assert all(w in (None, "<absent>") for w in ends.of("finish")), ends.calls
+    assert record.ticket_write is None
+
+
+async def test_1471_w6_an_outage_before_the_folder_is_read_hands_the_row_back_carrying_not_read(world):
+    """The store unreachable when the worker reads the alert: nothing looked at the run folder, so the hand-back
+    carries `not_read` for a flagged row and nothing for an unflagged one. (W6)"""
+    child = _child(world, exit=0, files=_committed())
+    async with job_store(world["dsn"]) as store:
+        flagged_calls = _Ends(store, get_alert_outages=1)
+        await _queued_1471(store, update_ticket=True)
+        await _worker_1471(world, flagged_calls, child).drain()
+    assert flagged_calls.of("hand_back")[:1] == ["not_read"], flagged_calls.calls
+
+
+@pytest.mark.parametrize("flagged", [True, False], ids=["flagged", "unflagged"])
+@pytest.mark.parametrize("fault", ["lane-cannot-open", "child-cannot-start", "unplanned-fault"])
+async def test_1471_w6_a_row_the_worker_ends_without_reading_the_run_folder_reads_not_read(world, fault, flagged):
+    """The tenant folder is a symlink, the helper cannot be started, or the worker fails on its own: the row ends
+    `worker_error` and a flagged one reads `not_read` (the comment may or may not exist); an unflagged one reads null. (W6)"""
+    child = _child(world, exit=0, files=_committed())
+    kw = {}
+    if fault == "lane-cannot-open":
+        real = world["tmp"] / "real"
+        (world["root"] / T1).rename(real)
+        (world["root"] / T1).symlink_to(real)
+    elif fault == "child-cannot-start":
+        async def cannot(*_argv, **_kw):
+            raise FileNotFoundError("no such interpreter")
+        kw["spawn"] = cannot
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued_1471(store, update_ticket=flagged)
+        target = store
+        if fault == "unplanned-fault":
+            target = _Ends(store)
+            async def broken(*_a, **_k):
+                raise RuntimeError("a seam fell over")
+            target.get_alert = broken
+        await _worker_1471(world, target, child, **kw).drain()
+        record = await store.get_investigation(T1, inv)
+
+    assert (record.stage, record.failure_reason) == ("failed", "worker_error"), record
+    assert child.seen() is None, "premise: no child ran, so no folder was read"
+    assert record.ticket_write == ("not_read" if flagged else None), record
+
+
+async def test_1471_w6_a_row_cancelled_while_it_ran_ends_with_the_word_the_worker_read(world):
+    """A flagged run cancelled while its container runs: the worker's accounting write carries the receipt's word, and the
+    row reads it, not the `not_read` the cancel wrote. (W6, write_accounting; e2e with the store)"""
+    release = world["tmp"] / "release"
+    child = _child(world, exit=0, files=_committed(**{_RECEIPT: _receipt("commented")}), wait_for=release)
+    async with job_store(world["dsn"]) as store:
+        ends = _Ends(store)
+        inv = await _queued_1471(store, update_ticket=True)
+        drained = asyncio.create_task(_worker_1471(world, ends, child).drain())
+        try:
+            for _ in range(1500):
+                if child.seen() is not None:
+                    break
+                await asyncio.sleep(0.01)
+            assert child.seen() is not None, "premise: the child is running"
+            await store.cancel_investigation(T1, inv, actor="u-1")
+        finally:
+            release.touch()
+        await asyncio.wait_for(drained, timeout=60)
+        record = await store.get_investigation(T1, inv)
+
+    assert ends.of("write_accounting") == ["commented"], ends.calls
+    assert (record.stage, record.ticket_write) == ("aborted", "commented"), record

@@ -88,17 +88,98 @@ def test_n5_a_worker_with_no_job_network_named_refuses_before_serving_and_before
     assert list(data_root.iterdir()) == [], "the refusal touched the data root"
 
 
-def test_1471_w9_a_worker_with_no_frontend_origin_refuses_before_serving_and_before_the_copy(source, data_root):
-    """#1471 r8 W9: the worker builds each flagged job's ticket link from `DEFENDER_API_FRONTEND_ORIGIN`; unset, the
-    start is refused (exit 2) naming it, before the database or the data mount is touched."""
+@pytest.mark.parametrize("origin", [None, ""], ids=["unset", "empty"])
+def test_1471_w9_a_worker_with_no_frontend_origin_refuses_before_serving_and_before_the_copy(source, data_root, origin):
+    """#1471 r8 W9: the worker builds each flagged job's ticket link from `DEFENDER_API_FRONTEND_ORIGIN`; unset or empty,
+    the start is refused (exit 2) naming it, before the database or the data mount is touched."""
     env = W.worker_env(data_root)
     env.pop("DEFENDER_API_FRONTEND_ORIGIN")
+    if origin is not None:
+        env["DEFENDER_API_FRONTEND_ORIGIN"] = origin
     ran = W.run_to_exit(source, env, timeout=20)  # a refusal is immediate; today the worker serves on, retrying the database
 
     assert "No module named" not in ran.stderr, f"the worker cannot be started: {ran.stderr[-300:]}"
     assert ran.returncode == 2, (ran.returncode, ran.stderr[-800:])
     assert "DEFENDER_API_FRONTEND_ORIGIN" in ran.stderr, ran.stderr[-800:]
     assert list(data_root.iterdir()) == [], "the refusal touched the data root"
+
+
+def test_1471_w3_a_worker_is_not_built_without_its_frontend_origin(tmp_path):
+    """`Worker` requires `frontend_origin`, so no job can post an empty link. (W3, C-6)"""
+    import datetime
+    from types import SimpleNamespace
+
+    from defender.worker import Worker
+
+    with pytest.raises(TypeError, match="frontend_origin"):
+        Worker(SimpleNamespace(lease_seconds=30), data_root=tmp_path, clock=lambda: datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC))
+
+
+_ORIGIN_BASES = ["https://app.defender.test", "http://localhost:8080"]
+_ORIGIN_MUTATIONS = {
+    "as-is": lambda o: o, "trailing-slash": lambda o: o + "/", "path": lambda o: o + "/app", "query": lambda o: o + "?a=1",
+    "empty-query": lambda o: o + "?", "fragment": lambda o: o + "#x", "empty-fragment": lambda o: o + "#",
+    "upper-host": lambda o: o.replace("app.defender.test", "APP.Defender.test").replace("localhost", "LOCALHOST"),
+    "upper-scheme": lambda o: o.replace("http", "HTTP", 1),
+    "default-port": lambda o: o.replace("://app.defender.test", "://app.defender.test:443").replace("http://localhost:8080", "http://localhost:80"),
+    "non-ascii-host": lambda o: o.replace("app.defender.test", "app.d\u00e9fender.test").replace("localhost", "l\u00f6calhost"),
+    "leading-space": lambda o: " " + o, "trailing-space": lambda o: o + " ", "trailing-newline": lambda o: o + "\n",
+    "inner-space": lambda o: o.replace("://", "://a b."), "credentials": lambda o: o.replace("://", "://user:pw@"),
+    "no-scheme": lambda o: o.split("://", 1)[1], "ftp-scheme": lambda o: "ftp://" + o.split("://", 1)[1],
+    "bad-port": lambda o: o + ":99999" if o.count(":") < 2 else o + "9",
+}
+_ORIGIN_SPELLINGS = sorted({m(b) for b in _ORIGIN_BASES for m in _ORIGIN_MUTATIONS.values()} | {""}, key=repr)
+
+
+def test_1471_w9_c6_the_worker_start_and_constructor_accept_exactly_the_origins_the_api_settings_reader_accepts(source, data_root, tmp_path):
+    """For each spelling of an origin, the worker's start and `Worker(frontend_origin=)` refuse it exactly when the
+    API's `DEFENDER_API_FRONTEND_ORIGIN` reader does, `""` included. (W3, W9, C-6)"""
+    import datetime
+    from concurrent.futures import ThreadPoolExecutor
+    from types import SimpleNamespace
+
+    from defender.api_server._settings import _origin
+    from defender.worker import Worker
+
+    def api_accepts(value: str) -> bool:
+        try:
+            _origin(value)
+        except ValueError:
+            return False
+        return True
+
+    def constructor_accepts(value: str) -> bool:
+        folder = tmp_path / f"ctor-{spellings.index(value)}"
+        folder.mkdir()
+        try:
+            Worker(SimpleNamespace(lease_seconds=30), data_root=folder, frontend_origin=value,
+                   clock=lambda: datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC))
+        except Exception:  # noqa: BLE001 — refused, whatever class the refusal is
+            return False
+        return True
+
+    def start_runs(numbered: tuple[int, str]) -> bool:
+        n, value = numbered
+        root = data_root / f"w{n}"
+        root.mkdir()
+        ran = W.run_for(source, W.worker_env(root, extra={"DEFENDER_API_FRONTEND_ORIGIN": value}), within=8)
+        refused = ran.returncode == 2 and "DEFENDER_API_FRONTEND_ORIGIN" in ran.stderr
+        assert "No module named" not in ran.stderr, f"the worker cannot be started: {ran.stderr[-300:]}"
+        return not refused
+
+    spellings = _ORIGIN_SPELLINGS
+    oracle = {v: api_accepts(v) for v in spellings}
+    assert any(oracle.values()), "premise: some spelling is valid"
+    assert not all(oracle.values()), "premise: some spelling is invalid"
+    assert oracle["https://app.defender.test"], "premise: the plain origin is valid"
+    assert not oracle[""], "premise: the empty origin is invalid"
+    assert not oracle["https://app.defender.test/"], "premise: a trailing slash is invalid"
+    with ThreadPoolExecutor(max_workers=12) as pool:
+        started = dict(zip(spellings, pool.map(start_runs, enumerate(spellings)), strict=True))
+    built = {v: constructor_accepts(v) for v in spellings}
+
+    assert {v: a for v, a in started.items() if a != oracle[v]} == {}, "the worker's start disagrees with the API's reader"
+    assert {v: a for v, a in built.items() if a != oracle[v]} == {}, "Worker(frontend_origin=) disagrees with the API's reader"
 
 
 @pytest.mark.postgres

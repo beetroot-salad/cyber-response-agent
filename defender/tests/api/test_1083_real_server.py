@@ -48,6 +48,7 @@ from defender.tests.support.jobs._jobs1342 import (
     job_store,
     register_tenant,
     row,
+    seed_alert_mapping,
 )
 from defender.tests.support.shared._postgres1339 import execute
 from defender.tests.support.tenancy._mapping1345 import FIXTURE_ALERT_MAPPING
@@ -116,11 +117,16 @@ async def token_credential(served: Served) -> TokenCredential:
     return await seed_token_credential(served.dsn, served.seeded)
 
 
-async def _alerts(dsn: str, tenant: str, *fired: dt.datetime) -> list[str]:
+#: `ALERT_BYTES`' fields plus the ticket the fixture mapping's `case_key` (`alert_id`) reads: a flagged start needs one (#1471 W1).
+KEYED_ALERT = (b'{"rule": {"id": "r-1342",  "description": "sketch"}, "alert_id": "SEC-1471",'
+               b' "alert_timestamp": "2026-10-29T00:00:00Z"}\n')
+
+
+async def _alerts(dsn: str, tenant: str, *fired: dt.datetime, raw: bytes = ALERT_BYTES) -> list[str]:
     """One stored alert per `fired`, through the store's trusted insert (no product command creates alerts, N9)."""
     async with job_store(dsn) as store:
         stored = [await store.insert_alert(tenant, vendor="elastic", vendor_ticket_id=f"T-{tenant[-2:]}-{at.isoformat()}",
-                                           fired_at=at, changed_at=at, received_at=at, raw=ALERT_BYTES)
+                                           fired_at=at, changed_at=at, received_at=at, raw=raw)
                   for at in fired]
     return [str(s.alert_id) for s in stored]
 
@@ -135,9 +141,12 @@ async def _completed(dsn: str, tenant: str, alert_id: str) -> str:
     return str(inv.investigation_id)
 
 
-async def _start(served: Served, alert_id: str, key: str, headers: dict[str, str] | None = None) -> httpx.Response:
-    return await served.client.post(f"/tenants/{A}/investigations", headers=headers or served.ann(),
-                                    json={"alert_id": alert_id, "client_request_id": key})
+async def _start(served: Served, alert_id: str, key: str, headers: dict[str, str] | None = None, *,
+                 update_ticket: bool | None = None) -> httpx.Response:
+    body: dict[str, Any] = {"alert_id": alert_id, "client_request_id": key}
+    if update_ticket is not None:
+        body["update_ticket"] = update_ticket
+    return await served.client.post(f"/tenants/{A}/investigations", headers=headers or served.ann(), json=body)
 
 
 # --- alerts -----------------------------------------------------------------------------------------
@@ -209,8 +218,8 @@ async def test_o6_repeating_a_start_with_its_request_id_answers_the_same_investi
 @pytest.mark.postgres
 async def test_1471_w1_a_start_takes_update_ticket_and_the_read_shows_the_flag_that_applies(served):
     """`update_ticket` (default false) is stored and read back; a replay with the opposite flag, and another request
-    answered with the live investigation, answer that investigation's own flag. (#1471 r8 W1)"""
-    flagged_alert, plain_alert = await _alerts(served.dsn, A, NOON, NOON - dt.timedelta(hours=1))
+    answered with the live investigation, answer that investigation's own flag. (#1471 r8 W1, C-4)"""
+    flagged_alert, plain_alert = await _alerts(served.dsn, A, NOON, NOON - dt.timedelta(hours=1), raw=KEYED_ALERT)
     started = await served.client.post(f"/tenants/{A}/investigations", headers=served.ann(), json={
         "alert_id": flagged_alert, "client_request_id": "req-1", "update_ticket": True})
     assert started.status_code == 201, started.text
@@ -229,19 +238,64 @@ async def test_1471_w1_a_start_takes_update_ticket_and_the_read_shows_the_flag_t
 
 
 @pytest.mark.postgres
-async def test_1471_w6_an_unflagged_investigation_reads_a_null_ticket_write(served):
-    """The read serves `ticket_write`: null when the investigation is not flagged. A flagged one not yet ended reads
-    null too (sketch pick: the design lists no word for "not yet"). (#1471 r8 W6)"""
-    plain_alert, flagged_alert = await _alerts(served.dsn, A, NOON, NOON - dt.timedelta(hours=1))
-    plain = (await _start(served, plain_alert, "req-1")).json()
-    flagged = (await served.client.post(f"/tenants/{A}/investigations", headers=served.ann(), json={
-        "alert_id": flagged_alert, "client_request_id": "req-1", "update_ticket": True})).json()
+async def test_1471_w1_a_flagged_start_of_an_alert_that_names_no_ticket_is_409_and_starts_nothing(served):
+    """A flagged start is 409 whose detail names the missing ticket when the alert yields no key, and again when the
+    tenant's mapping maps no `case_key`; the same starts without the flag are 201. (#1471 r8 W1, C-4)"""
+    [keyless] = await _alerts(served.dsn, A, NOON)
+    [keyed] = await _alerts(served.dsn, A, NOON - dt.timedelta(hours=1), raw=KEYED_ALERT)
 
-    for inv in (plain, flagged):
-        read = (await served.client.get(f"/tenants/{A}/investigations/{inv['investigation_id']}",
-                                        headers=served.ann(write=False))).json()
-        assert "ticket_write" in read, read
-        assert read["ticket_write"] is None, read
+    refused = await _start(served, keyless, "req-1", update_ticket=True)
+    assert refused.status_code == 409, refused.text
+    assert "ticket" in refused.json()["detail"].lower()
+    assert execute(served.dsn, "SELECT count(*) FROM jobs.investigations") == [(0,)]
+    assert (await _start(served, keyless, "req-1")).status_code == 201  # control: only the flag is refused
+    assert (await _start(served, keyed, "req-1", update_ticket=True)).status_code == 201  # control: a keyed alert starts
+
+    seed_alert_mapping(served.dsn, A, {**FIXTURE_ALERT_MAPPING, "case_key": None})
+    [another] = await _alerts(served.dsn, A, NOON + dt.timedelta(hours=1), raw=KEYED_ALERT)
+    unmapped = await _start(served, another, "req-1", update_ticket=True)
+    assert (unmapped.status_code, "ticket" in unmapped.json()["detail"].lower()) == (409, True)
+    assert (await _start(served, another, "req-1")).status_code == 201
+
+
+@pytest.mark.postgres
+async def test_1471_w6_the_read_serves_the_ticket_write_word_only_once_the_investigation_ended(served):
+    """`ticket_write` reads null for an unflagged investigation and for a flagged one still queued or running, and the
+    word the store wrote for a flagged one it ended: `no_receipt` (queued), `not_read` (running), the worker's word
+    once finished. (#1471 r8 W6, C-4)"""
+    alerts = await _alerts(served.dsn, A, *(NOON - dt.timedelta(hours=n) for n in range(4)), raw=KEYED_ALERT)
+    plain, queued, running, finished = alerts
+
+    async def read(inv: str) -> dict[str, Any]:
+        return (await served.client.get(f"/tenants/{A}/investigations/{inv}", headers=served.ann(write=False))).json()
+
+    async def cancel(inv: str) -> None:
+        assert (await served.client.post(f"/tenants/{A}/investigations/{inv}/cancel", headers=served.ann())).status_code == 200
+
+    async def started(alert_id: str, *, flagged: bool, claim: bool) -> str:
+        """One start at a time, claimed at once, so the claim takes this row."""
+        inv = (await _start(served, alert_id, "req-1", update_ticket=flagged)).json()["investigation_id"]
+        if claim:
+            async with job_store(served.dsn) as store:
+                assert str((await store.claim()).record.investigation_id) == inv, "premise: this start was claimed"
+        return inv
+
+    plain_inv = await started(plain, flagged=False, claim=False)
+    queued_inv = await started(queued, flagged=True, claim=False)
+    assert [(await read(i))["ticket_write"] for i in (plain_inv, queued_inv)] == [None, None]
+    await cancel(plain_inv)
+    await cancel(queued_inv)
+    assert ((await read(plain_inv))["ticket_write"], (await read(queued_inv))["ticket_write"]) == (None, "no_receipt")
+
+    running_inv = await started(running, flagged=True, claim=True)
+    assert (await read(running_inv))["ticket_write"] is None
+    await cancel(running_inv)
+    assert (await read(running_inv))["ticket_write"] == "not_read"
+
+    finished_inv = await started(finished, flagged=True, claim=True)
+    async with job_store(served.dsn) as store:
+        await store.finish(A, finished_inv, stage="completed", disposition="benign", cost_usd=0.0, ticket_write="commented")
+    assert (await read(finished_inv))["ticket_write"] == "commented"
 
 
 @pytest.mark.postgres

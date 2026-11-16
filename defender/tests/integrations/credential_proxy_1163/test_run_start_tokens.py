@@ -94,8 +94,9 @@ class RunAtHandedRecorder(S.RunRecorder):
         return super().materialize(alert, **kw)
 
 
-def _drive(tmp_path, data_root, *, signer=None, ticket=True, summary=None, **seams):
-    """Drive `run.main`; with no `signer` none is injected (the production signing path)."""
+def _drive(tmp_path, data_root, *, signer=None, ticket=False, summary=None, **seams):
+    """Drive `run.main`; with no `signer` none is injected (the production signing path). The operator command has no
+    ticket flag (W7): `ticket` stays False and is kept for the callers that name it."""
     rec, tickets = RunAtHandedRecorder(tmp_path / "run", summary=summary), TicketRecorder()
     alert = S.plant_alert(tmp_path / "in")
     started = time.time()
@@ -105,7 +106,7 @@ def _drive(tmp_path, data_root, *, signer=None, ticket=True, summary=None, **sea
             seams["directory"] = _records(data_root, tmp_path)[0].directory
     try:
         rc, refused = S.drive_run(
-            S.run_argv(alert, data_root, update_ticket=ticket), rec, ticket_writer=tickets,
+            S.run_argv(alert, data_root, update_ticket=ticket), rec,
             proxy_url="http://proxy.invalid", **seams)
     except ConfigFault as fault:
         rc, refused = None, fault
@@ -123,39 +124,29 @@ def _claims_of_token(signer: H.FakeSigner, token: str) -> dict[str, Any]:
     return A.claims_of_payload(signer.payloads[n - 1])
 
 
-def test_r1_the_read_token_is_signed_when_first_asked_and_a_write_back_token_for_the_record_leg(
+def test_r1_the_read_token_is_signed_when_first_asked_and_an_operator_run_signs_no_write_pass(
         tmp_path, data_root, caplog):
-    """Run start signs no read token; the record leg's one write-back token is `rw` on the case system only.
-    The read token, asked of the run's access, is signed then, grants only http-proxy systems,
-    lives 600 s and is reused while it has life left; no token reaches disk or log.
-    O8, O10, O4, A7, r7 A20."""
+    """Run start signs no token and the operator run never signs a write pass (`rw`, W7); the read token, asked of the
+    run's access, is signed then, grants only the http-proxy systems the role reads, lives 600 s and is reused while it has life left; no
+    token reaches disk or log. O8, O10, O4, A7, r7 A20, W7."""
     caplog.set_level(logging.DEBUG)
     _plant(data_root, proxy=("identity", "ticket"))
     signer = A.MarkedSigner()
-    rec, tickets, rc, refused, started = _drive(tmp_path, data_root, signer=signer)
+    rec, _tickets, rc, refused, _started = _drive(tmp_path, data_root, signer=signer)
 
     assert refused is None, (rc, refused)
     assert rc == 0, (rc, refused)
     run_id = rec.run_dir_at.name
-    write_back = [A.claims_of_payload(p) for p in signer.payloads]
-    assert [A.grant_of(c) for c in write_back] == [[("ticket", "rw")]], (
-        "nothing but the record leg's one write-back token was signed during the run")
+    assert signer.payloads == [], "a token was signed during the run, before any call asked for one"
     access = read_access(rec)
     asked = time.time()
     first = access.token()
     assert access.token() == first, "a token with life left is reused"
-    assert len(signer.payloads) == 2
-    read = A.claims_of_payload(signer.payloads[1])
+    assert len(signer.payloads) == 1
+    read = A.claims_of_payload(signer.payloads[0])
     assert A.grant_of(read) == [("identity", "r")], "cmdb, which has no declaration, is not granted"
-    for c in [*write_back, read]:
-        assert (c["tenant"], c["investigation"]) == (S.PLAYGROUND_ID, run_id)
+    assert (read["tenant"], read["investigation"]) == (S.PLAYGROUND_ID, run_id)
     assert TOKEN_SEC - 1 <= read["exp"] - asked <= TOKEN_SEC + CLOCK_TOLERANCE, read["exp"] - asked
-    for c in write_back:
-        assert started < c["exp"] <= started + TOKEN_SEC + CLOCK_TOLERANCE
-
-    record_tok = tickets.leg("record")["request_token"]
-    assert A.grant_of(_claims_of_token(signer, record_tok)) == [("ticket", "rw")]
-    assert [n for n, _ in tickets.calls if n not in ("clear", "record")] == [], "an open leg ran"
 
     (life,) = rec.lifecycle_calls
     for held in (life["tenant"], life["run"], life["systems"]):
@@ -168,38 +159,18 @@ def test_r1_the_read_token_is_signed_when_first_asked_and_a_write_back_token_for
     assert "run_dir=" in caplog.text, "positive control: the log channel is read"
 
 
-@pytest.mark.parametrize("truncated_by", ["budget", "store", "provider-down", "proxy-access"])  # #1363 O7
-def test_r1_a_run_that_will_not_comment_signs_no_write_back_token(tmp_path, data_root, truncated_by):
-    """A run cut short before a verdict leaves the case alone: no write-back token is signed for
-    it, and the record step is handed none. The case system was judged once, at run start, and
-    that verdict reaches the record step. Control: `test_r1_the_read_token_is_signed_…` signs one
-    for a run that ends normally. #1392 review."""
-    _plant(data_root, proxy=("identity", "ticket"))
-    signer = A.MarkedSigner()
-    _rec, tickets, rc, refused, _started = _drive(
-        tmp_path, data_root, signer=signer, summary={
-            "output": "x", "requests": 0, "truncated_by": truncated_by, "closed_before_cut": False})
-
-    assert refused is None, (rc, refused)
-    assert signer.payloads == [], "a write-back token was signed for a run that will not comment"
-    leg = tickets.leg("record")
-    assert "request_token" not in leg, leg
-    assert type(leg["case"]).__name__ == "CaseTarget", leg["case"]
-
-
-def test_r2_a_ticket_system_with_no_declaration_gets_no_write_back_token(tmp_path, data_root):
-    """Only the identity system is declared: the record leg is handed no token, and the
-    one token signed is the read token, when asked. A7, r7 A20."""
+def test_r2_a_ticket_system_with_no_declaration_is_not_granted_to_the_read_token(tmp_path, data_root):
+    """Only the identity system is declared: the one token signed is the read token, when asked, and it grants
+    identity only. A7, r7 A20."""
     _plant(data_root, proxy=("identity",))
     signer = A.MarkedSigner()
-    rec, tickets, rc, refused, _ = _drive(tmp_path, data_root, signer=signer)
+    rec, _tickets, rc, refused, _ = _drive(tmp_path, data_root, signer=signer)
 
     assert refused is None, (rc, refused)
     assert rc == 0, (rc, refused)
     assert signer.payloads == []
     read_access(rec).token()
     assert [A.grant_of(A.claims_of_payload(p)) for p in signer.payloads] == [[("identity", "r")]]
-    assert tickets.leg("record").get("request_token") is None
 
 
 # R3 and R7b ("a run with no http-proxy system never contacts the signer / needs no sign login") are
@@ -626,7 +597,6 @@ def test_r7_an_http_proxy_tenant_with_no_usable_sign_login_refuses_run_start(
     assert _config_refusal(refused, "sign", "generation", "login"), refused
     assert bao.requests == []
     assert "materialize" not in rec.order, "the run folder was made before the refusal"
-    assert tickets.calls == []
 
 
 
@@ -648,13 +618,11 @@ def test_r7c_an_injected_signer_does_not_excuse_a_missing_sign_login(tmp_path, d
     assert _config_refusal(refused, "sign", "generation", "login"), refused
     assert signer.payloads == []
     assert "materialize" not in rec.order, "the run folder was made before the refusal"
-    assert tickets.calls == []
 
 
 def _mint_for(tmp_path, data_root, signer, *, world: Any, **seams: Any) -> Any:
     """The run's token mint, built directly (#1449): a tenant whose `identity` and `ticket` are
-    `http-proxy` systems the gather role is granted, `ticket` its judged case system, and
-    `--update-ticket` set. `world` is the sibling's world (any object), or None for a run. `seams` (#1363: the holder's `clock=`) are handed to the mint as given."""
+    `http-proxy` systems the gather role is granted, `ticket` its judged case system. `world` is the sibling's world (any object), or None for a run. `seams` (#1363: the holder's `clock=`) are handed to the mint as given."""
     import argparse
     import types
 
@@ -670,18 +638,17 @@ def _mint_for(tmp_path, data_root, signer, *, world: Any, **seams: Any) -> Any:
             systems=frozenset({"identity", "ticket", "cmdb"}))))
     return _TokenMint.for_run(
         tenant, types.SimpleNamespace(down=frozenset()),
-        ns=argparse.Namespace(update_ticket=True), world=world,
+        ns=argparse.Namespace(update_ticket=False), world=world,  # the flag is gone after W7; unread then
         case=case_system.CaseTarget(system="ticket", template=None, module=None),
         run_id=fixture_uuid("1449-mint"), accepted=types.SimpleNamespace(id=S.PLAYGROUND_ID),
         records=records.directory, signer=signer, proxy_url="http://proxy.invalid",
         issuer_transport=None, **seams)
 
 
-def test_1449_a_world_reads_on_a_runs_terms_and_is_never_minted_a_write_back_token(tmp_path, data_root):
-    """A branched run is a run (#1449 W1, W3): the mint built for a world grants the same reads a
-    regular run's does, and signs no write-back token even with `--update-ticket` set, which
-    the regular run's control gets (`rw` on the case system). Run start already refuses
-    `--update-ticket` with `--episode`; this pins the mint's own guard behind that refusal."""
+def test_1449_a_world_reads_on_a_runs_terms_and_no_operator_mint_signs_a_write_pass(tmp_path, data_root):
+    """A branched run is a run (#1449 W1, W3): the mint built for a world grants the same reads a regular run's does, and
+    neither mint signs a write pass (`rw`) on any system: the operator command never comments (W7). The mint's
+    construction keywords are the pre-r8 ones, an assumption the code stage may have to follow (`_mint_for`)."""
     _plant(data_root, proxy=("identity", "ticket"))
     run_signer, world_signer = A.MarkedSigner(), A.MarkedSigner()
     run = _mint_for(tmp_path / "run", data_root, run_signer, world=None)
@@ -693,8 +660,9 @@ def test_1449_a_world_reads_on_a_runs_terms_and_is_never_minted_a_write_back_tok
 
     assert read_grant(world, world_signer) == read_grant(run, run_signer) == [
         ("identity", "r"), ("ticket", "r")], "a world's read grant is not a regular run's"
-    assert run.write_back(), "control: the regular run's mint signs no write-back token"
-    assert world.write_back() == {}, "a world's mint signed a write-back token"
+    for signer in (run_signer, world_signer):
+        assert [m for p in signer.payloads for _s, m, *_ in A.claims_of_payload(p)["grant"]] == ["r", "r"], (
+            "a mint signed something other than its read grant")
 
 
 def test_a6_the_job_entry_never_builds_a_request_signer():

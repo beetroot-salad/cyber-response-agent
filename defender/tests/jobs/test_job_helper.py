@@ -1461,43 +1461,64 @@ def test_premise_the_other_tenants_canary_is_planted(scene):
     assert (scene.root / OTHER_TENANT / "canary").read_text(encoding="utf-8") == CANARY
 
 
-# --- #1471 r8 W5: the write pass, signed by the helper from the launch record's flag ------------------------------
-# Sketch picks: the request is `pass.write_back` with only `id` (the design's name), answered in `pass`'s shape
-# (`token`, `expires_at`, `proxy_url`); the launch record carries `update_ticket` as a JSON boolean beside a
-# `ticket_link` string.
+# --- #1471 r8: a flagged job's write pass, decided by the helper from its own start (W5, P-5) --------------------------
+# C-1: the worker hands the helper `--post-ticket` (flagged), `--alert-digest <sha256>` and `--ticket-link <url>` (flagged
+# only) in argv; the launch record carries none of them and the helper reads none from it. C-2: a write pass's grant entry
+# is `[system, "rw", ticket]`. C-5: `pass.write_back` takes `{id, ask}` (`ask` picked by the container per request),
+# answers in `pass`'s shape, and is refused with `not-flagged`, `no-write-system`, `no-ticket`, `already-signed` or
+# `sign-fault`. C-1: `--alert-digest` is required; the launch facts' keys are `post_ticket` and `ticket_link`.
 
-def _flagged_investigation(scene, *, update_ticket: bool) -> tuple[str, list[str]]:
-    """`_investigation`, with the launch record a #1471 worker writes: the flag and the screen link."""
+ORIGIN_1471 = "https://app.defender.test"
+ASK_1471 = "ask-1"
+TICKET_1471 = "SEC-1471"
+OTHER_TICKET_1471 = "SEC-9999"
+#: The fixture mapping's `case_key` reads `alert_id`; `ALERT_BYTES` has none, so it names no ticket.
+KEYED_ALERT_1471 = (b'{"rule": {"id": "r-1342",  "description": "sketch"},\n'
+                    b' "alert_id": "SEC-1471", "alert_timestamp": "2026-10-29T00:00:00Z"}\n')
+OTHER_KEYED_ALERT_1471 = KEYED_ALERT_1471.replace(TICKET_1471.encode(), OTHER_TICKET_1471.encode())
+
+
+def _link_1471(scene, inv: str) -> str:
+    return f"{ORIGIN_1471}/t/{scene.tenant}/investigations/{inv}"
+
+
+def _flagged_investigation(scene, *, flagged: bool, alert: bytes = KEYED_ALERT_1471, record: dict | None = None,
+                           digest: str | None = None, send_digest: bool = True) -> tuple[str, list[str], str]:
+    """The worker's two files for `alert` (the launch record as it writes it: no flag, no link; `record` overrides
+    fields) and the helper's argv as it starts it: the alert's digest (`digest` overrides it; `send_digest=False` omits it),
+    and, flagged, the flag and the screen link. Returns `(investigation, argv, link)`."""
     import hashlib
 
-    from defender.tests.support.jobs._jobs1342 import ALERT_BYTES, TITLE
-
     inv = str(uuid.uuid4())
+    link = _link_1471(scene, inv)
     doc = {"investigation_id": inv, "tenant_id": scene.tenant, "alert_id": str(uuid.uuid4()),
-           "digest": hashlib.sha256(ALERT_BYTES).hexdigest(), "label": TITLE, "box_token": uuid.uuid4().hex,
-           "update_ticket": update_ticket,
-           "ticket_link": f"https://app.defender.test/t/{scene.tenant}/investigations/{inv}"}
+           "digest": hashlib.sha256(alert).hexdigest(), "label": "r8", "box_token": uuid.uuid4().hex, **(record or {})}
     (scene.runs / f"{inv}.launch.json").write_text(json.dumps(doc), encoding="utf-8")
-    (scene.runs / f"{inv}.alert.json").write_bytes(ALERT_BYTES)
-    return inv, scene.argv("investigation", inv)
+    (scene.runs / f"{inv}.alert.json").write_bytes(alert)
+    sent = ["--alert-digest", digest or hashlib.sha256(alert).hexdigest()] if send_digest else []
+    argv = [*scene.argv("investigation", inv), *sent, *(["--post-ticket", "--ticket-link", link] if flagged else [])]
+    return inv, argv, link
 
 
-def _ask_both(scene, inv: str, argv: list[str]) -> tuple[dict, Any]:
+def _refusal_code(c, name: str, **fields) -> object:
+    """The answer to `name`, or the typed refusal's code."""
+    try:
+        return c.request(name, **fields)
+    except Exception as refused:  # noqa: BLE001 — the typed refusal, kept by its code
+        return getattr(refused, "code", repr(refused))
+
+
+def _ask_both(scene, inv: str, argv: list[str], *, signer=None) -> tuple[dict, object]:
     """Drive the helper over a job that asks `launch`, a read `pass` and a `pass.write_back`, keeping each answer or
     its refusal code."""
-    signer = make_signer()
+    signer = signer or make_signer()
     got: dict = {}
-
-    def answer_or_code(c, name: str) -> Any:
-        try:
-            return c.request(name, id=inv)
-        except Exception as refused:  # noqa: BLE001 — the typed refusal, kept by its code
-            return getattr(refused, "code", repr(refused))
 
     def job(c) -> int:
         got["launch"] = c.request("launch")
-        got["read"] = answer_or_code(c, "pass")
-        got["write"] = answer_or_code(c, "pass.write_back")
+        got["read"] = _refusal_code(c, "pass", id=inv)
+        got["asked_at"] = time.time()
+        got["write"] = _refusal_code(c, "pass.write_back", id=inv, ask=ASK_1471)
         return 0
 
     docker = ContainerStandIn(job)
@@ -1507,44 +1528,351 @@ def _ask_both(scene, inv: str, argv: list[str]) -> tuple[dict, Any]:
     return got, signer
 
 
-def test_1471_w5_an_unflagged_job_is_refused_a_write_pass(tmp_path, monkeypatch, migrated_database):
-    """The case system is proxied, the job is not flagged: `pass.write_back` is refused `not-flagged` and signs
-    nothing; the read pass is as before. (W5, P-5)"""
+def _signed_grants(signer) -> list[list[list[str]]]:
+    """Every grant the signer was asked to sign, each as its raw entries (a write entry has three elements, C-2)."""
     from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 
-    with helper_scene(tmp_path, monkeypatch, migrated_database, proxied=("identity", "ticket"),
-                      files={"settings/verb-grants.yaml": _ticket_ungranted()}) as s:
-        inv, argv = _flagged_investigation(s, update_ticket=False)
+    return [[list(e) for e in A.claims_of_payload(p)["grant"]] for p in signer.payloads]
+
+
+def _signed_writes(signer) -> list[list[str]]:
+    return [e for grant in _signed_grants(signer) for e in grant if e[1] == "rw"]
+
+
+def _ticket_scene(tmp_path, monkeypatch, dsn, *, proxied=("ticket",)):
+    """The case system (`ticket`) reached through the proxy and granted to nobody: the job has an empty read grant
+    (when it is the only proxied system), yet is a flagged job's write target."""
+    return helper_scene(tmp_path, monkeypatch, dsn, proxied=proxied,
+                        files={"settings/verb-grants.yaml": _ticket_ungranted()})
+
+
+@pytest.mark.parametrize("record_says", ["silent", "flagged-with-a-link"])
+def test_1471_w5_p5_an_unflagged_job_is_refused_a_write_pass_whatever_its_launch_record_says(
+        tmp_path, monkeypatch, migrated_database, record_says):
+    """No `--post-ticket` in argv: `pass.write_back` is refused `not-flagged` and signs nothing, though the case system is
+    proxied and the tenant-folder launch record claims a flag and a link; the read pass is as before. (W4, W5, P-5)"""
+    record = {} if record_says == "silent" else {"post_ticket": True, "update_ticket": True, "ticket_link": "https://evil.test/x"}
+    with _ticket_scene(tmp_path, monkeypatch, migrated_database, proxied=("identity", "ticket")) as s:
+        inv, argv, _link = _flagged_investigation(s, flagged=False, record=record)
         got, signer = _ask_both(s, inv, argv)
 
     assert got["write"] == "not-flagged", got["write"]
     assert isinstance(got["read"], dict), f"control: the read pass is answered: {got['read']!r}"
-    assert [A.grant_of(A.claims_of_payload(p)) for p in signer.payloads] == [[("identity", "r")]] * len(signer.payloads)
+    assert _signed_writes(signer) == [], _signed_grants(signer)
+    assert all(e == ["identity", "r"] for grant in _signed_grants(signer) for e in grant), _signed_grants(signer)
 
 
 @pytest.mark.parametrize("proxied", [("ticket",), ("identity", "ticket")], ids=["empty-read-grant", "read-grant"])
-def test_1471_w5_a_flagged_job_gets_a_write_pass_on_the_case_system_only_and_its_read_pass_grants_no_write(
+def test_1471_w5_a_flagged_job_gets_one_write_pass_naming_its_ticket_and_its_read_pass_grants_no_write(
         tmp_path, monkeypatch, migrated_database, proxied):
-    """Flagged, with the case system (`ticket`) proxied and granted to nobody: `pass.write_back` is `ticket` `rw` only,
-    for this investigation, with the normal lifetime, whether or not the job has a read grant; the read pass (or its
-    `no-grant` refusal) never carries a write. (W5)"""
+    """Flagged, case system `ticket` proxied: `pass.write_back` is exactly `[ticket, rw, <the alert's key>]` for this
+    tenant and investigation with the normal lifetime, whether or not the job has a read grant; the read pass (or its
+    `no-grant` refusal) carries no write. (W5, C-2)"""
     from defender.credential_proxy import PASS_LIFETIME_SEC
-    from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 
-    with helper_scene(tmp_path, monkeypatch, migrated_database, proxied=proxied,
-                      files={"settings/verb-grants.yaml": _ticket_ungranted()}) as s:
-        inv, argv = _flagged_investigation(s, update_ticket=True)
-        asked_at = time.time()
+    with _ticket_scene(tmp_path, monkeypatch, migrated_database, proxied=proxied) as s:
+        inv, argv, _link = _flagged_investigation(s, flagged=True)
         got, signer = _ask_both(s, inv, argv)
 
-    reads = [("identity", "r")] if "identity" in proxied else []
-    assert sorted(tuple(g) for g in got["launch"]["grant"]) == reads, got["launch"]["grant"]
+    reads = [["identity", "r"]] if "identity" in proxied else []
+    assert sorted(list(g) for g in got["launch"]["grant"]) == reads, got["launch"]["grant"]
     if reads:
-        assert A.grant_of(claims_of(signer, got["read"]["token"])) == reads, got["read"]
+        assert claims_of(signer, got["read"]["token"])["grant"] == reads, got["read"]
     else:
         assert got["read"] == "no-grant", got["read"]
     assert isinstance(got["write"], dict), f"the write pass was refused: {got['write']!r}"
     claims = claims_of(signer, got["write"]["token"])
     assert (claims["tenant"], claims["investigation"]) == (s.tenant, inv), claims
-    assert A.grant_of(claims) == [("ticket", "rw")], claims
-    assert claims["exp"] - asked_at <= PASS_LIFETIME_SEC + 30, claims["exp"] - asked_at
+    assert [list(e) for e in claims["grant"]] == [["ticket", "rw", TICKET_1471]], claims
+    assert claims["exp"] - got["asked_at"] <= PASS_LIFETIME_SEC + 30, claims["exp"] - got["asked_at"]
+    assert _signed_writes(signer) == [["ticket", "rw", TICKET_1471]], _signed_grants(signer)
+
+
+@pytest.mark.parametrize(("why", "proxied", "alert"), [
+    ("no-write-system", ("identity",), KEYED_ALERT_1471),
+    ("no-ticket", ("ticket",), None),
+], ids=["case-system-not-proxied", "alert-names-no-ticket"])
+def test_1471_w5_a_flagged_job_is_refused_a_write_pass_when_there_is_nothing_to_write_to_or_on(
+        tmp_path, monkeypatch, migrated_database, why, proxied, alert):
+    """Flagged, but the case system is not reached through the proxy (`no-write-system`), or prepare derived no ticket
+    from the alert (`no-ticket`, the case record having changed since create): refused with that code, nothing signed, the
+    job still runs. (W5, C-5)"""
+    from defender.tests.support.jobs._jobs1342 import ALERT_BYTES
+
+    with _ticket_scene(tmp_path, monkeypatch, migrated_database, proxied=proxied) as s:
+        inv, argv, _link = _flagged_investigation(s, flagged=True, alert=alert or ALERT_BYTES)
+        got, signer = _ask_both(s, inv, argv)
+
+    assert got["write"] == why, got["write"]
+    assert _signed_writes(signer) == [], _signed_grants(signer)
+    assert "launch" in got, "premise: the job ran"
+
+
+def test_1471_w5_the_same_ask_gets_the_same_pass_and_a_different_ask_after_a_signed_pass_is_already_signed(
+        tmp_path, monkeypatch, migrated_database):
+    """The latch (C-5): the same `ask` again answers the same pass with no new signature; a different `ask` after a pass
+    was signed is refused `already-signed` and signs nothing. (W5, P-7)"""
+    with _ticket_scene(tmp_path, monkeypatch, migrated_database) as s:
+        inv, argv, _link = _flagged_investigation(s, flagged=True)
+        signer, got = make_signer(), {}
+
+        def job(c) -> int:
+            got["first"] = c.request("pass.write_back", id=inv, ask="ask-1")
+            got["signed"] = len(signer.payloads)
+            got["again"] = _refusal_code(c, "pass.write_back", id=inv, ask="ask-1")
+            got["other"] = _refusal_code(c, "pass.write_back", id=inv, ask="ask-2")
+            got["same_after_other"] = _refusal_code(c, "pass.write_back", id=inv, ask="ask-1")
+            got["after"] = len(signer.payloads)
+            return 0
+
+        docker = ContainerStandIn(job)
+        ran = drive_helper(s, argv, docker=docker, signer=signer)
+
+    assert ran.raised is None, ran.raised
+    assert docker.job_error is None, docker.job_error
+    assert got["again"] == got["first"], got["again"]
+    assert got["other"] == "already-signed", got["other"]
+    assert got["same_after_other"] == got["first"], "a refused other ask took the first ask's pass away"
+    assert got["after"] == got["signed"] == 1, "a request after the first signed another pass"
+    assert _signed_writes(signer) == [["ticket", "rw", TICKET_1471]], _signed_grants(signer)
+
+
+def test_1471_w5_concurrent_requests_for_the_write_pass_sign_exactly_one(tmp_path, monkeypatch, migrated_database):
+    """Eight asks at once (four distinct values) against a slow signer sign one pass: one ask value holds it, the
+    others are `already-signed`. (W5)"""
+    from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
+
+    class SlowSigner(A.MarkedSigner):
+        def sign(self, payload: bytes) -> str:
+            time.sleep(0.4)
+            return super().sign(payload)
+
+    with _ticket_scene(tmp_path, monkeypatch, migrated_database) as s:
+        inv, argv, _link = _flagged_investigation(s, flagged=True)
+        signer, answers = SlowSigner(), []
+
+        def job(c) -> int:
+            gate = threading.Barrier(8)
+
+            def ask(n: int) -> None:
+                gate.wait(10)
+                answers.append((n, _refusal_code(c, "pass.write_back", id=inv, ask=f"ask-{n}")))
+
+            threads = [threading.Thread(target=ask, args=(i % 4,)) for i in range(8)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(30)
+            return 0
+
+        docker = ContainerStandIn(job)
+        ran = drive_helper(s, argv, docker=docker, signer=signer)
+
+    assert ran.raised is None, ran.raised
+    assert docker.job_error is None, docker.job_error
+    assert len(answers) == 8, answers
+    passes = [(n, a) for n, a in answers if isinstance(a, dict)]
+    assert passes, f"no ask was answered a pass: {answers!r}"
+    assert {a["token"] for _n, a in passes} == {passes[0][1]["token"]}, "two asks hold different passes"
+    assert len({n for n, _a in passes}) == 1, f"asks with different values hold a pass: {answers!r}"
+    assert {a for _n, a in answers if not isinstance(a, dict)} <= {"already-signed"}, answers
+    assert _signed_writes(signer) == [["ticket", "rw", TICKET_1471]], _signed_grants(signer)
+
+
+def test_1471_w5_a_sign_fault_does_not_use_up_the_write_pass_latch(tmp_path, monkeypatch, migrated_database):
+    """A first ask whose sign fails is refused `sign-fault` and signs nothing; once signing works the next ask gets the
+    pass, which is then the one it is signed once. (W5)"""
+    from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
+
+    class FlakySigner(A.MarkedSigner):
+        failing = True
+
+        def sign(self, payload: bytes) -> str:
+            if self.failing:
+                raise RuntimeError("openbao is sealed")
+            return super().sign(payload)
+
+    with _ticket_scene(tmp_path, monkeypatch, migrated_database) as s:
+        inv, argv, _link = _flagged_investigation(s, flagged=True)
+        signer, got = FlakySigner(), {}
+
+        def job(c) -> int:
+            got["faulted"] = _refusal_code(c, "pass.write_back", id=inv, ask=ASK_1471)
+            got["signed_while_failing"] = len(signer.payloads)
+            signer.failing = False
+            got["retried"] = _refusal_code(c, "pass.write_back", id=inv, ask=ASK_1471)
+            return 0
+
+        docker = ContainerStandIn(job)
+        ran = drive_helper(s, argv, docker=docker, signer=signer)
+
+    assert ran.raised is None, ran.raised
+    assert docker.job_error is None, docker.job_error
+    assert got["faulted"] == "sign-fault", got["faulted"]
+    assert got["signed_while_failing"] == 0
+    assert isinstance(got["retried"], dict), f"the latch was used up by the fault: {got['retried']!r}"
+    assert _signed_writes(signer) == [["ticket", "rw", TICKET_1471]], _signed_grants(signer)
+
+
+def test_1471_w5_the_write_pass_is_still_answered_after_the_helper_is_told_to_stop_while_the_read_pass_is_not(
+        tmp_path, monkeypatch, migrated_database):
+    """Signalled and the container stopped, a flagged job's first `pass.write_back` is answered (its record step may run
+    inside the stop grace); the read `pass` asked then is refused `signalled`. (W5, A1)"""
+    with _ticket_scene(tmp_path, monkeypatch, migrated_database, proxied=("identity", "ticket")) as s:
+        inv, argv, _link = _flagged_investigation(s, flagged=True)
+        signer, got = make_signer(), {}
+
+        def job(c) -> int:
+            os.kill(os.getpid(), signal.SIGTERM)
+            assert c.stopping.wait(15), "the helper never stopped the container"
+            got["read"] = _refusal_code(c, "pass", id=inv)
+            got["write"] = _refusal_code(c, "pass.write_back", id=inv, ask=ASK_1471)
+            return 143
+
+        docker = ContainerStandIn(job)
+        ran = drive_helper(s, argv, docker=docker, signer=signer)
+
+    assert ran.raised is None, ran.raised
+    assert docker.job_error is None, docker.job_error
+    assert got["read"] == "signalled", f"control: the read pass is refused once signalled: {got['read']!r}"
+    assert isinstance(got["write"], dict), f"the write pass was not answered after the signal: {got['write']!r}"
+    assert _signed_writes(signer) == [["ticket", "rw", TICKET_1471]], _signed_grants(signer)
+
+
+@pytest.mark.parametrize("flagged", [True, False])
+def test_1471_p5_the_launch_facts_carry_the_flag_and_the_link_the_helper_was_started_with(
+        tmp_path, monkeypatch, migrated_database, flagged):
+    """The container learns the flag and the screen link from the helper's launch facts, which take them from argv, not
+    the launch record (which here claims the opposite flag and another link). (P-5, C-1)"""
+    record = {"post_ticket": not flagged, "update_ticket": not flagged, "ticket_link": "https://evil.test/x"}
+    with _ticket_scene(tmp_path, monkeypatch, migrated_database) as s:
+        inv, argv, link = _flagged_investigation(s, flagged=flagged, record=record)
+        got, _signer = _ask_both(s, inv, argv)
+
+    assert got["launch"]["post_ticket"] is flagged, got["launch"]
+    if flagged:
+        assert got["launch"]["ticket_link"] == link, got["launch"]
+    assert "evil.test" not in json.dumps(got["launch"]), got["launch"]
+
+
+def test_1471_p5_a_flagged_job_follows_its_argv_when_the_launch_record_is_rewritten_to_say_otherwise(
+        tmp_path, monkeypatch, migrated_database):
+    """Flagged by argv, the tenant-folder launch record rewritten to unflagged with another link and a digest of other
+    bytes: the job still runs, is still answered the write pass naming the ticket of the alert argv's digest admits, and
+    its launch facts hold argv's link; the record's digest is unused. (P-5)"""
+    import hashlib
+
+    forged = {"post_ticket": False, "update_ticket": False, "ticket_link": "https://evil.test/x", "digest": hashlib.sha256(b"other").hexdigest()}
+    with _ticket_scene(tmp_path, monkeypatch, migrated_database) as s:
+        inv, argv, link = _flagged_investigation(s, flagged=True, record=forged)
+        got, signer = _ask_both(s, inv, argv)
+
+    assert got["launch"]["ticket_link"] == link, got["launch"]
+    assert isinstance(got["write"], dict), f"the rewritten record unflagged the job: {got['write']!r}"
+    assert _signed_writes(signer) == [["ticket", "rw", TICKET_1471]], _signed_grants(signer)
+    assert s.end(inv) is None, "setup refused a job whose argv digest names its alert"
+
+
+def test_1471_p5_an_alert_swapped_for_another_tickets_with_a_matching_record_digest_is_refused_not_trusted(
+        tmp_path, monkeypatch, migrated_database):
+    """The alert file replaced by another ticket's alert and the launch record's digest rewritten to match: the digest
+    argv carries is the worker's, the swapped bytes do not match it, so setup is refused and no container starts: no
+    write pass can name the other ticket. Control: the same job unswapped runs. (P-5, O6)"""
+    import hashlib
+
+    from defender.records.job_facts import BOX_NOT_STARTED, SETUP_REFUSED
+    from defender.records.job_lane import JobEnd
+
+    with _ticket_scene(tmp_path, monkeypatch, migrated_database) as s:
+        control, control_argv, _l = _flagged_investigation(s, flagged=True)
+        _ask_both(s, control, control_argv)
+        assert s.end(control) is None, "control: the unswapped job runs"
+
+        inv, argv, _link = _flagged_investigation(
+            s, flagged=True, alert=OTHER_KEYED_ALERT_1471,
+            digest=hashlib.sha256(KEYED_ALERT_1471).hexdigest())  # argv: the worker's digest of the original alert
+        docker = ContainerStandIn(lambda c: 0)
+        signer = make_signer()
+        ran = drive_helper(s, argv, docker=docker, signer=signer)
+
+        assert ran.raised is None, ran.raised
+        assert docker.boxes == [], "a container was started over an alert argv's digest does not name"
+        assert s.end(inv) == JobEnd(SETUP_REFUSED, BOX_NOT_STARTED, False, False, None)
+        assert _signed_writes(signer) == []
+
+
+def test_1471_p5_an_investigation_helper_started_without_the_alert_digest_is_refused_though_the_record_holds_one(
+        tmp_path, monkeypatch, migrated_database):
+    """No `--alert-digest` but a matching digest in the launch record: refused at set-up, no container, nothing signed;
+    control: with it, it runs. (P-5, C-1)"""
+    from defender.records.job_facts import BOX_NOT_STARTED, SETUP_REFUSED
+    from defender.records.job_lane import JobEnd
+
+    with _ticket_scene(tmp_path, monkeypatch, migrated_database) as s:
+        control, control_argv, _l = _flagged_investigation(s, flagged=True)
+        _ask_both(s, control, control_argv)
+        assert s.end(control) is None, "control: with the digest the job runs"
+
+        inv, argv, _link = _flagged_investigation(s, flagged=True, send_digest=False)
+        docker, signer = ContainerStandIn(lambda c: 0), make_signer()
+        ran = drive_helper(s, argv, docker=docker, signer=signer)
+
+        assert ran.raised is None, ran.raised
+        assert docker.boxes == [], "a container was started without the worker's digest"
+        assert s.end(inv) == JobEnd(SETUP_REFUSED, BOX_NOT_STARTED, False, False, None)
+        assert signer.payloads == [], "something was signed for a helper refused at set-up"
+
+
+def test_1471_p5_the_ticket_is_derived_from_the_bytes_the_digest_admitted_in_one_read(
+        tmp_path, monkeypatch, migrated_database):
+    """The alert file is read once; swapped right after that read for another ticket's alert, the write pass still names
+    the ticket of the bytes admitted (a second read for the ticket would see the swap). (P-5, M5)"""
+    from defender.records import formats
+
+    real, reads = formats.read_operator_alert, []
+
+    def read_then_swap(path):
+        raw = real(path)
+        reads.append(str(path))
+        Path(path).write_bytes(OTHER_KEYED_ALERT_1471)
+        return raw
+
+    with _ticket_scene(tmp_path, monkeypatch, migrated_database) as s:
+        inv, argv, _link = _flagged_investigation(s, flagged=True)
+        monkeypatch.setattr(formats, "read_operator_alert", read_then_swap)  # lint-monkeypatch: ok — a counting wrapper of the one read, no seam exists for it
+        got, signer = _ask_both(s, inv, argv)
+
+    assert len(reads) == 1, f"the alert file was read {len(reads)} times: {reads}"
+    assert isinstance(got["write"], dict), got["write"]
+    assert _signed_writes(signer) == [["ticket", "rw", TICKET_1471]], _signed_grants(signer)
+
+
+@pytest.mark.parametrize("flagged", [False, True], ids=["unflagged", "flagged"])
+@pytest.mark.parametrize("missing", ["configured", "no proxy address", "no sign login"])
+def test_1471_w5_signing_is_set_up_for_every_investigation_and_a_set_up_fault_refuses_it_with_an_empty_read_grant(
+        tmp_path, monkeypatch, migrated_database, missing, flagged):
+    """A tenant with no proxied system at all (an empty read grant): no proxy address, or no sign login for its live
+    generation, is `setup: refused` before any container, flagged or not; control: with both configured the job starts
+    and no pass is signed for it. (W5, W-D8)"""
+    from defender.kit.access import PROXY_URL_ENV
+    from defender.records.job_facts import BOX_NOT_STARTED, SETUP_REFUSED
+    from defender.records.job_lane import JobEnd
+    from defender.tests.support.shared._postgres1339 import execute
+
+    with helper_scene(tmp_path, monkeypatch, migrated_database, proxied=()) as s:
+        if missing == "no proxy address":
+            monkeypatch.delenv(PROXY_URL_ENV, raising=False)
+        elif missing == "no sign login":
+            execute(migrated_database, "DELETE FROM tenancy.generations WHERE tenant_id = %s", (s.tenant,))
+        inv, argv, _link = _flagged_investigation(s, flagged=flagged)
+        docker, signer = ContainerStandIn(lambda c: 0), make_signer()
+        ran = drive_helper(s, argv, docker=docker, signer=signer)
+
+        assert ran.raised is None, ran.raised
+        if missing == "configured":
+            assert docker.job_ran, "control: a job with signing set up and nothing to read starts"
+            assert s.end(inv) is None
+            assert signer.payloads == [], "set-up signs no trial pass"
+            return
+        assert docker.boxes == [], "a container was started for a tenant whose signing is not set up"
+        assert s.end(inv) == JobEnd(SETUP_REFUSED, BOX_NOT_STARTED, False, False, None)

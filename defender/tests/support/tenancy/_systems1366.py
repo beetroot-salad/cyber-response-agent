@@ -108,12 +108,22 @@ FIXTURE_FOLDERS: Mapping[str, tuple[Mapping[str, str], str]] = _read_fixture_fol
 FIXTURE_SYSTEMS = frozenset(FIXTURE_FOLDERS)
 _FIXTURE_CASE = yaml.safe_load((FIXTURE_DATA / "case-record.yaml").read_text("utf-8"))
 FIXTURE_CASE_SYSTEM = _FIXTURE_CASE["system"]
-FIXTURE_CASE_BODY = _FIXTURE_CASE["comment"]["body"]
 
 
-def case_record_text(system: str = FIXTURE_CASE_SYSTEM, body: str = FIXTURE_CASE_BODY) -> str:
-    """`case-record.yaml` text (what `set-case` and `import` read; #1359's format)."""
-    return f"system: {system}\ncomment:\n  body: {json.dumps(body)}\n"
+def _base_case_body() -> dict[str, str]:
+    """`comment_body` only while production's `CaseRecord` has the field (a base-only shim like `imported`; #1470 D-F)."""
+    import dataclasses
+
+    from defender.tenancy.models import CaseRecord
+
+    return {"comment_body": "base-only"} if "comment_body" in {f.name for f in dataclasses.fields(CaseRecord)} else {}
+
+
+def case_record_text(system: str = FIXTURE_CASE_SYSTEM) -> str:
+    """`case-record.yaml` text (what `set-case` and `import` read): the system only; a base-only `comment` while
+    production still requires it."""
+    body = _base_case_body().get("comment_body")
+    return f"system: {system}\n" + ("" if body is None else f"comment:\n  body: {json.dumps(body)}\n")
 
 
 def import_files(**overrides: str | None) -> dict[str, str | None]:
@@ -145,7 +155,6 @@ class SysSpec:
 @dataclass(frozen=True)
 class CaseSpec:
     system_id: str = FIXTURE_CASE_SYSTEM
-    comment_body: str = FIXTURE_CASE_BODY
     version: int = 1
 
 
@@ -230,7 +239,7 @@ def records_from_settings(settings: Path) -> RecordsSpec:
             data = yaml.safe_load(case_file.read_text("utf-8")) or {}
             if not isinstance(data, Mapping):
                 raise ValueError("not a mapping")
-            case = CaseSpec(str(data.get("system", "")), str((data.get("comment") or {}).get("body", "")))
+            case = CaseSpec(str(data.get("system", "")))
         except (UnicodeDecodeError, yaml.YAMLError, ValueError, AttributeError) as e:
             raise unparseable(case_file, e) from e
     return RecordsSpec(systems, case)
@@ -340,7 +349,7 @@ def to_value(spec: RecordsSpec) -> Any:
                                settings=dict(v.settings), access=v.access, credential_generation=v.generation)
                for s, v in spec.systems.items()}
     case = None if spec.case is None else CaseRecord(version=spec.case.version, system_id=spec.case.system_id,
-                                                     comment_body=spec.case.comment_body)
+                                                     **_base_case_body())
     return records_value(systems, case)
 
 
@@ -401,7 +410,7 @@ def seed_postgres_records(dsn: str, tenant: str, records: Any = DERIVED, data_ro
                                        settings=dict(v.settings), access=v.access, author=SEED_AUTHOR)
             if spec.case is not None:
                 await store.put_case(str(tenant), replaces=0, system_id=spec.case.system_id,
-                                     comment_body=spec.case.comment_body, author=SEED_AUTHOR)
+                                     author=SEED_AUTHOR, **_base_case_body())
         finally:
             await store.close()
 
@@ -437,7 +446,6 @@ class Version(NamedTuple):
 class CaseVersion(NamedTuple):
     version: int
     system_id: str
-    comment_body: str
     deleted: bool
     author: str
     written_at: Any
@@ -469,7 +477,7 @@ def system_versions(dsn: str, tenant_id: str, system: str) -> list[Version]:
 def case_versions(dsn: str, tenant_id: str) -> list[CaseVersion]:
     from defender.tests.support.shared._postgres1339 import execute
 
-    rows = execute(dsn, f"""SELECT version, system_id, comment_body, deleted, author, written_at
+    rows = execute(dsn, f"""SELECT version, system_id, deleted, author, written_at
                             FROM tenancy.{CASE_VERSIONS} WHERE tenant_id = %s ORDER BY version""", (tenant_id,))  # noqa: S608
     return [CaseVersion(*row) for row in rows]
 
@@ -688,9 +696,9 @@ class Admin:
             await store.delete_system(self.tid, system, replaces=replaces, author=ADMIN_AUTHOR)
         return self._run(work)
 
-    def set_case(self, *, replaces: int, system: str = FIXTURE_CASE_SYSTEM, body: str = FIXTURE_CASE_BODY) -> tuple[int, str]:
+    def set_case(self, *, replaces: int, system: str = FIXTURE_CASE_SYSTEM) -> tuple[int, str]:
         async def work(store: Any) -> None:
-            await store.put_case(self.tid, replaces=replaces, system_id=system, comment_body=body, author=ADMIN_AUTHOR)
+            await store.put_case(self.tid, replaces=replaces, system_id=system, author=ADMIN_AUTHOR, **_base_case_body())
         return self._run(work)
 
     def delete_case(self, *, replaces: int) -> tuple[int, str]:

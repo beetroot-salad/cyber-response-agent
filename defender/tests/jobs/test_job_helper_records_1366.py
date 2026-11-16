@@ -26,7 +26,7 @@ def _records():
         "elastic": SystemRecord(system_id="elastic", version=3, adapter_id="elastic", settings={"ELASTIC_URL": "u"},
                                 access="kind: http-proxy\n", credential_generation=2),
         "crm": SystemRecord(system_id="crm", version=1, enabled=False, custom_ref=("adapters/crm.py", "abc123")),
-    }, case=CaseRecord(version=4, system_id="ticket", comment_body="{summary}"))
+    }, case=CaseRecord(version=4, system_id="ticket"))  # #1471 W7: no comment template
 
 
 def test_1366_records_handed_over_the_job_socket_read_back_as_they_were():
