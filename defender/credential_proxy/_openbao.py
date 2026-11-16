@@ -2,8 +2,8 @@
 
 - Store: KV v2, one secret per (tenant, system, credential generation) at `<kv mount>/data/<tenant>/<system>/g<N>`, holding
   `{"kind": ..., "fields": {...}}`; a write replaces the whole set and moves the version on.
-  The writer (`OpenBaoSecrets`, the API's) may create, update and read metadata only; the
-  proxy (`OpenBaoStore`) may read data only (`store_policies`).
+  The writer (`OpenBaoSecrets`, the API's) may create, update and read metadata, and look its
+  own token up (#1532); the proxy (`OpenBaoStore`) may read data only (`store_policies`).
 - Tokens: transit on the deployment's fixed mount (`configuration.issuer.TRANSIT_MOUNT`), one key
   per tenant (`transit_key_for`). The proxy may verify with any tenant's key and sign with none
   (`TransitVerifier`); each tenant's sign login signs with its own key only, under the deployment's

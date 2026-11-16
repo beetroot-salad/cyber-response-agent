@@ -95,6 +95,7 @@ async def test_1532_k1_a_token_refused_its_lookup_refuses_start_naming_the_addre
     for named in ("DEFENDER_OPENBAO_ADDR", "DEFENDER_API_OPENBAO_TOKEN_FILE", "lookup-self"):
         assert named in message, message
     assert TOKEN not in message
+    assert "refused the token the file holds" not in message, message  # states what was refused, not that the token is bad (P1)
     assert ("GET", LOOKUP_SELF) in bao.calls
     assert not [c for c in bao.calls if "/metadata/" in c[1]], bao.calls
 
@@ -116,6 +117,7 @@ async def test_1532_k2_a_valid_token_refused_the_metadata_read_refuses_start_nam
     assert message is not None, f"{label} started"
     for named in ("DEFENDER_OPENBAO_KV_MOUNT", "'secret'", "polic", "DEFENDER_API_OPENBAO_TOKEN_FILE"):
         assert named in message, message
+    assert "refused the token the file holds" not in message, message  # no one cause claimed (P1)
     assert TOKEN not in message
 
 
