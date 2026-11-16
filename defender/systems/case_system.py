@@ -69,7 +69,7 @@ def legacy_folder_finding(settings: Path) -> str | None:
     file that replaces it; `None` when it holds none."""
     if (Path(settings) / "systems" / LEGACY_SYSTEM).exists():
         return (f"{pointer_to('systems/' + LEGACY_SYSTEM)} is retired: cases are recorded through "
-                f"the system {CASE_RECORD_POINTER} names — move the comment body there and "
+                f"the system {CASE_RECORD_POINTER} names — the case record names only the system; "
                 "delete the folder")
     return None
 

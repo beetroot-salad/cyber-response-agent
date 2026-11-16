@@ -1236,9 +1236,9 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
     environ: Mapping[str, str] | None = None,
     lifecycle: Callable[..., dict[str, Any]] = _run_investigation_lifecycle,
     visualize: Callable[..., None] = _run.visualize,
-    ticket_writer: Any = None,  # accepted and ignored: an operator run never comments (#1471 W7)
     enqueue: Callable[..., bool] = _run.enqueue_curation,
     enqueue_feedback: Callable[..., bool] = _run.enqueue_feedback_issue,
+    ticket_writer: Any = None,  # accepted and ignored: an operator run never comments (#1471 W7); older seams still pass it
     preflight: Callable[..., int] = preflight_role_models,
     materialize: Callable[..., Run] = _materialize_run,
     oracle: Any = None,
