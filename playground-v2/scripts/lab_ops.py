@@ -44,6 +44,7 @@ import io
 import json
 import os
 import shlex
+import socket
 import subprocess
 import sys
 import tarfile
@@ -190,6 +191,14 @@ class FrozenEs:
         return payload
 
 
+def _tcp_open(address: str, port: int, timeout_s: float = 5.0) -> bool:
+    try:
+        with socket.create_connection((address, port), timeout=timeout_s):
+            return True
+    except OSError:
+        return False
+
+
 class LabOps:
     """`run=` replaces `subprocess.run`. Every command is `docker --context <context> ...`
     (the frozen proxy alone goes to the engine the deployment runs on: `proxy_context`)."""
@@ -205,8 +214,9 @@ class LabOps:
                  es_image: str = DEFAULT_ES_IMAGE, cluster_name: str = "soc-playground",
                  certs_volume: str = "soc-playground_certs", repo_dir: str = "/srv/lab/frozen-cases",
                  readonly_user: str = "defender-readonly", poll_s: float = 5.0, ready_timeout_s: float = 300.0,
-                 lab_env_file: str | Path | None = None) -> None:
+                 lab_env_file: str | Path | None = None, connect: Any = None) -> None:
         self._run, self.context, self.proxy_context = run, context, proxy_context
+        self._connect = connect if connect is not None else _tcp_open
         self.tenant_dir = Path(tenant_dir) if tenant_dir else None
         self.tenant_hosts, self.frozen_endpoint = list(tenant_hosts or ()), frozen_endpoint
         self._es = es
@@ -596,6 +606,18 @@ class LabOps:
         self._exec(argv)
         return f"http://{FROZEN_PROXY}:{PROXY_PORT}"
 
+    def check_reachable(self) -> None:
+        """Every port the frozen proxy reaches the copy on answers at the frozen endpoint's address (the
+        operator's forwards to the lab, D8); else `LabOpsError` naming the closed ones. Live: a forward
+        that dropped mid-batch left every agent's call failing until each run's breaker ended it."""
+        if not self.frozen_endpoint:
+            raise LabOpsError("the frozen endpoint is not configured ($V2_FROZEN_ENDPOINT)")
+        address = self.frozen_endpoint.rsplit(":", 1)[0]
+        closed = [port for port in FRONTEND_PORTS if not self._connect(address, int(port))]
+        if closed:
+            raise LabOpsError(f"the frozen copy is not reachable at {address} on port(s) "
+                              f"{', '.join(map(str, closed))}: re-open the forwards to the lab before launching")
+
     def _live_proxy_trust(self) -> list[str]:
         """The live proxy's TLS trust settings (`SSL_CERT_DIR=...`), for the frozen proxy to verify
         OpenBao the same way. `--volumes-from` brings the dev issuer's CA file but not the setting
@@ -790,10 +812,19 @@ class LabOps:
         for name in names:
             docs = sorted(self._document_digests(es, name))
             digest.update(json.dumps([name, docs], separators=(",", ":")).encode())
-        digest.update(self._stubs_loaded.encode())
-        for stub, path in STUB_STATE.items():
-            digest.update(self._stub_text(stub, path).encode())
+        digest.update(self._stub_part())
         return digest.hexdigest()
+
+    def stub_fingerprint(self) -> str:
+        """sha256 of the stub half of `content_digest` alone: what the stubs were loaded with and what
+        each now holds. Cheap; a launch that trusts a recorded digest of the cluster checks this live."""
+        return hashlib.sha256(self._stub_part()).hexdigest()
+
+    def _stub_part(self) -> bytes:
+        if self._stubs_loaded is None:
+            raise LabOpsError("the stubs' state was asked before the stubs were loaded")
+        return self._stubs_loaded.encode() + b"".join(self._stub_text(stub, path).encode()
+                                                      for stub, path in STUB_STATE.items())
 
     @staticmethod
     def _document_digests(es: Any, name: str) -> list[str]:

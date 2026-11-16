@@ -69,6 +69,8 @@ import yaml
 RULES_PART = "detection-rules.tar"
 
 
+WRITE_BLOCK = "index.blocks.write"   # refused writes: `_refuse_blocked`; lifted by `put`
+
 class Journal(list):
     def ops(self) -> list[str]:
         return [op for op, _ in self]
@@ -484,7 +486,17 @@ class FakeCluster(FakeES):
                 for n, ix in self.indices.items()}
 
     def put(self, name: str, doc_id: str, source: dict, version: int = 1) -> None:
+        """A document placed or edited by hand (a test's operator). Elasticsearch takes no write into an
+        index carrying `index.blocks.write`, so an operator's edit lifts the block first."""
+        self._index(name)["settings"].pop(WRITE_BLOCK, None)
         self._index(name)["docs"][doc_id] = {"_source": copy.deepcopy(source), "_version": version}
+
+    def _refuse_blocked(self, names: Any) -> None:
+        """Elasticsearch refuses the whole request (403 cluster_block_exception) when a target index is
+        write-blocked."""
+        blocked = sorted(n for n in names if self.indices.get(n, {}).get("settings", {}).get(WRITE_BLOCK) in (True, "true"))
+        if blocked:
+            raise RuntimeError(f"cluster_block_exception: index {blocked} blocked by: [FORBIDDEN/8/index write (api)]")
 
     def _index(self, name: str) -> dict:
         if name not in self.indices:
@@ -895,6 +907,7 @@ class FakeCluster(FakeES):
         return order[doc_id]
 
     def _delete_by_query(self, expr: str, body: dict) -> Any:
+        self._refuse_blocked(self._expand(expr))
         self._note("delete_by_query", expr)
         deleted = 0
         for n in self._expand(expr):
@@ -994,6 +1007,7 @@ class FakeCluster(FakeES):
         sources = source["index"] if isinstance(source["index"], str) else ",".join(source["index"])
         pipeline = dest.get("pipeline")
         target_name = dest["index"]
+        self._refuse_blocked([target_name])
         self._must_wait()
         if fnmatch.fnmatchcase(target_name, "logs-*-*") and target_name not in self.indices:
             raise FakeGap(f"reindex creating [{target_name}], which the logs-*-* template makes a data stream")
@@ -1069,6 +1083,7 @@ class FakeCluster(FakeES):
         if extra:
             raise FakeGap(f"_update_by_query parameter {sorted(extra)}")
         pipeline = (self.query.get("pipeline") or [None])[-1]
+        self._refuse_blocked(self._expand(expr))
         self._must_wait()
         if body.get("script"):
             raise FakeGap("_update_by_query script")
@@ -1570,12 +1585,14 @@ class LabRig:
         self._tickets: set[str] | None = {"ticketed"}
         self._password = "pw-0"
         self.lab_module = load_script("lab_ops_1347", LAB_OPS)
+        self.closed_ports: set[tuple[str, int]] = set()   # (address, port) the forwards do not answer on
         self.ops = self.lab_module.LabOps(run=self.docker, **self._ops_kw())
         self._sync_env()
 
     def _ops_kw(self) -> dict:
         return {"tenant_dir": self.tenant_dir, "tenant_hosts": TENANT_HOSTS, "frozen_endpoint": FROZEN_ENDPOINT,
-                "audit_path": FROZEN_AUDIT, "live_audit_path": LIVE_AUDIT, "lab_env_file": self.lab_env}
+                "audit_path": FROZEN_AUDIT, "live_audit_path": LIVE_AUDIT, "lab_env_file": self.lab_env,
+                "connect": lambda address, port: (address, int(port)) not in self.closed_ports}
 
     @staticmethod
     def _deployed(docker) -> None:
