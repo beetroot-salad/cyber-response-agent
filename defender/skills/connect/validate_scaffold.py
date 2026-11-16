@@ -264,7 +264,7 @@ def _judge_with_case(system: str, settings, access: str, case: Path, catalog: Ca
     records = TenantRecords(
         systems={system: SystemRecord(system_id=system, version=1, adapter_id=system, settings=dict(settings),
                                       access=access)},
-        case=CaseRecord(version=1, system_id=parsed.system, comment_body=parsed.body))
+        case=CaseRecord(version=1, system_id=parsed.system))
     return judge_records(records, catalog=catalog, locator=locator)
 
 

@@ -20,7 +20,7 @@ from collections.abc import AsyncIterator, Callable, Collection, Mapping, Sequen
 from contextlib import asynccontextmanager
 from typing import Any
 
-from sqlalchemy import case, delete, func, select, update
+from sqlalchemy import and_, case, delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import DataError, DBAPIError, IntegrityError, InterfaceError, InternalError, OperationalError
 from sqlalchemy.exc import TimeoutError as PoolTimeout
@@ -39,17 +39,19 @@ from defender.records.formats import (
     admit,
     check_mapping,
     derive_display,
+    derive_facts,
 )
 
 from defender.records.job_facts import EXPIRED, LEASE_LAPSED, OFFBOARD_MESSAGE, RETRY_CAP, TENANT_OFFBOARDED
 
 from .audit import SYSTEM, announce
 from .errors import Conflict, NotFound, OffboardNotSettled, UnknownReference, UnstorableText
-from defender.tenancy.models import AlertMappingRow, TenantRecord
+from defender.tenancy.models import AlertMappingRow, CaseVersionRow, TenantRecord
 from defender.tenancy.models import offboard as _tenancy_offboard
 from defender.tenancy.models import share_tenant
 
 from .models import (
+    RECEIPT_WORDS,
     LEARNING_TERMINAL,
     LIVE,
     TERMINAL,
@@ -300,14 +302,16 @@ class JobStore:
 
     async def create_investigation(
         self, tenant_id: TenantId, alert_id: AlertId, request_key: str, *, actor: str,
-        credential_id: str | None = None,
+        credential_id: str | None = None, update_ticket: bool = False,
     ) -> tuple[InvestigationRecord, bool]:
         """Start an investigation of the alert, or answer the one this request already has (#1081
         §4.1): the latest attempt under the key; else the alert's live investigation, without
         recording this key; else a new attempt 1. `created` only when this call inserted the row.
         `UnknownReference` for an alert this tenant lacks; `Conflict` naming the tenant's state when a new attempt is
-        due and the tenant is offboarding or offboarded (#1360 O4), and naming the missing mapping when it has saved
-        no alert mapping (#1345 O4)."""
+        due and the tenant is offboarding or offboarded (#1360 O4), naming the missing mapping when it has saved
+        no alert mapping (#1345 O4), and naming the ticket when `update_ticket` is set and this alert names none
+        (#1471 W1: no case record, a mapping with no `case_key`, or a key this alert does not yield). A replay or a
+        live answer is the existing row with its own flag; the new request's flag is not compared."""
         _refuse_unstorable_text(request_key=request_key)
         async with self._tx() as s:
             state = await share_tenant(s, tenant_id)
@@ -329,14 +333,31 @@ class JobStore:
             _refuse_removed(state, tenant_id)
             if await self._mapping_in(s, tenant_id) is None:  # never deleted, so no lock (#1345 O4)
                 raise Conflict(ALERT_MAPPING_MISSING)
+            if update_ticket:
+                await self._refuse_without_ticket(s, tenant_id, alert_id)
             row = InvestigationRow(
                 id=InvestigationId.mint(), tenant_id=tenant_id, alert_id=alert_id, request_key=request_key,
-                attempt=1, stage="queued", created_at=self._clock(), cost_usd=0.0)
+                attempt=1, stage="queued", created_at=self._clock(), cost_usd=0.0, update_ticket=update_ticket)
             s.add(row)
             record = investigation_record(row)
         announce("investigation.start", actor=actor, tenant_id=tenant_id, target=record.investigation_id,
                  detail=f"alert {alert_id}", credential_id=credential_id)
         return record, True
+
+    async def _refuse_without_ticket(self, s: AsyncSession, tenant_id: TenantId, alert_id: AlertId) -> None:
+        """`Conflict` unless this alert names a ticket: the tenant has a case record, its mapping maps a `case_key`,
+        and the key is one this alert's document yields (#1471 W1)."""
+        case_row = (await s.execute(select(CaseVersionRow).where(CaseVersionRow.tenant_id == tenant_id)
+                                    .order_by(CaseVersionRow.version.desc()).limit(1))).scalars().first()
+        if case_row is None or case_row.deleted:
+            raise Conflict("the tenant has no case record, so there is no ticket to update")
+        mapping = await self._mapping_in(s, tenant_id)
+        raw = (await s.execute(select(AlertRow.raw).where(
+            AlertRow.tenant_id == tenant_id, AlertRow.id == alert_id))).scalar_one()
+        key = None if mapping is None else derive_facts(admit(raw).document, mapping).case_key
+        if key is None:
+            raise Conflict("this alert names no ticket (the tenant's alert mapping yields no case key from it), "
+                           "so there is no ticket to update")
 
     # --- claim --------------------------------------------------------------------------
 
@@ -379,7 +400,8 @@ class JobStore:
                 update(InvestigationRow).where(
                     InvestigationRow.tenant_id == tenant_id, InvestigationRow.id == investigation_id,
                     InvestigationRow.stage.in_(LIVE))
-                .values(stage="aborted", failure_reason="cancelled", finished_at=self._clock())
+                .values(stage="aborted", failure_reason="cancelled", finished_at=self._clock(),
+                        ticket_write=_word_when_the_store_ends())
                 .returning(InvestigationRow).execution_options(synchronize_session=False))).scalars().first()
             if row is None:
                 current = await self._row(s, tenant_id, investigation_id)
@@ -446,7 +468,7 @@ class JobStore:
             return []
         ended = (await s.execute(
             update(row).where(row.id.in_(locked), live)
-            .values(finished_at=self._clock(), lease_expires_at=None, **ending)
+            .values(finished_at=self._clock(), lease_expires_at=None, **ending, **_ticket_write_of(row))
             .returning(row.id).execution_options(synchronize_session=False))).scalars().all()
         return [str(i) for i in ended]
 
@@ -492,7 +514,7 @@ class JobStore:
     async def finish(  # noqa: PLR0913 — the one terminal write: stage, figures, knowledge and failure detail
         self, tenant_id: TenantId, investigation_id: InvestigationId, *, stage: str, disposition: str | None = None,
         cost_usd: float | None = None, cost_is_lower_limit: bool = False, knowledge: dict[str, Any] | None = None,
-        failure_reason: str | None = None, failure_message: str | None = None,
+        failure_reason: str | None = None, failure_message: str | None = None, ticket_write: str | None = None,
     ) -> InvestigationRecord | None:
         """Record the one terminal stage of a running investigation, with its final cost (null when
         unknown) and knowledge, and the accounting mark. Conditional on the row still being `running`
@@ -510,7 +532,7 @@ class JobStore:
                     InvestigationRow.stage == "running")
                 .values(stage=stage, finished_at=self._clock(), disposition=disposition, cost_usd=cost_usd,
                         cost_is_lower_limit=cost_is_lower_limit, knowledge=knowledge, failure_reason=failure_reason, failure_message=failure_message,
-                        accounting_written_at=self._clock())
+                        accounting_written_at=self._clock(), ticket_write=_word_after(ticket_write))
                 .returning(InvestigationRow).execution_options(synchronize_session=False))).scalars().first()
             if row is None:
                 return None
@@ -581,7 +603,7 @@ class JobStore:
 
     async def write_accounting(
         self, tenant_id: str, investigation_id: str, *, cost_usd: float | None, cost_is_lower_limit: bool = False,
-        knowledge: dict[str, Any] | None,
+        knowledge: dict[str, Any] | None, ticket_write: str | None = None,
     ) -> InvestigationRecord | None:
         """The holder's final cost and knowledge on a row someone else already ended (cancel,
         take-over): written once, changing no stage or failure detail (B-P2, B4). `None` when the
@@ -592,13 +614,13 @@ class JobStore:
                     InvestigationRow.tenant_id == tenant_id, InvestigationRow.id == investigation_id,
                     InvestigationRow.stage.in_(TERMINAL), InvestigationRow.accounting_written_at.is_(None))
                 .values(cost_usd=cost_usd, cost_is_lower_limit=cost_is_lower_limit, knowledge=knowledge,
-                        accounting_written_at=self._clock())
+                        accounting_written_at=self._clock(), ticket_write=_word_after(ticket_write))
                 .returning(InvestigationRow).execution_options(synchronize_session=False))).scalars().first()
             return None if row is None else investigation_record(row)
 
     async def hand_back(
         self, tenant_id: str, investigation_id: str, *, cost_usd: float | None, cost_is_lower_limit: bool = False,
-        knowledge: dict[str, Any] | None,
+        knowledge: dict[str, Any] | None, ticket_write: str | None = None,
     ) -> InvestigationRecord | None:
         """A stopping worker gives a running row back: its lease lapses at once, so any worker takes
         it over within seconds, and its final cost and knowledge and the mark are written (B11).
@@ -609,7 +631,8 @@ class JobStore:
                     InvestigationRow.tenant_id == tenant_id, InvestigationRow.id == investigation_id,
                     InvestigationRow.stage == "running", InvestigationRow.accounting_written_at.is_(None))
                 .values(lease_expires_at=func.now() - _dt.timedelta(seconds=1), cost_usd=cost_usd,
-                        cost_is_lower_limit=cost_is_lower_limit, knowledge=knowledge, accounting_written_at=self._clock())
+                        cost_is_lower_limit=cost_is_lower_limit, knowledge=knowledge, accounting_written_at=self._clock(),
+                        ticket_write=_word_after(ticket_write))
                 .returning(InvestigationRow).execution_options(synchronize_session=False))).scalars().first()
             return None if row is None else investigation_record(row)
 
@@ -663,6 +686,8 @@ class JobStore:
                        else "its worker stopped renewing its lease")
                 lapsed.failure_message = why + ("; the request used all its attempts" if capped else "; it is retried")
                 lapsed.finished_at = self._clock()
+                if lapsed.update_ticket and lapsed.ticket_write is None:
+                    lapsed.ticket_write = "not_read"  # nobody looked at the run folder (W6)
                 retry_id = None
                 if not capped:
                     retry_id = InvestigationId.mint()
@@ -670,7 +695,8 @@ class JobStore:
                     s.add(InvestigationRow(
                         id=retry_id, tenant_id=lapsed.tenant_id, alert_id=lapsed.alert_id,
                         request_key=lapsed.request_key, attempt=lapsed.attempt + 1, stage="queued",
-                        created_at=self._clock(), cost_usd=0.0))
+                        created_at=self._clock(), cost_usd=0.0,
+                        update_ticket=lapsed.update_ticket))
         except _Refused:
             return _TakeOver(old_id, tenant, "", None, refused=True)
         return _TakeOver(old_id, tenant, reason, retry_id)
@@ -965,6 +991,30 @@ class JobStore:
                     .execution_options(synchronize_session=False))).scalars().all()
                 counts.append(len(moved))
         return counts[0], counts[1]
+
+
+def _word_after(incoming: str | None) -> Any:
+    """The `ticket_write` an end write leaves (W6): a word from the run folder replaces null or `not_read` on a flagged
+    row; nothing replaces a word from the run folder; no incoming word leaves the column as it is."""
+    held = InvestigationRow.ticket_write
+    if incoming is None:
+        return held
+    return case((~InvestigationRow.update_ticket, held), (held.in_(RECEIPT_WORDS), held), else_=incoming)
+
+
+def _word_when_the_store_ends() -> Any:
+    """The word for a row the store ends itself (W6): a flagged queued row never ran (`no_receipt`), a flagged running
+    one may have posted and nobody looked (`not_read`, only where the word is null)."""
+    held = InvestigationRow.ticket_write
+    return case(
+        (and_(InvestigationRow.update_ticket, InvestigationRow.stage == "queued"), "no_receipt"),
+        (and_(InvestigationRow.update_ticket, InvestigationRow.stage == "running", held.is_(None)), "not_read"),
+        else_=held)
+
+
+def _ticket_write_of(row: Any) -> dict[str, Any]:
+    """`_word_when_the_store_ends` for the investigations table (learning jobs have no word)."""
+    return {"ticket_write": _word_when_the_store_ends()} if row is InvestigationRow else {}
 
 
 def _locked_in_id_order(column: Any, *where: Any) -> Any:

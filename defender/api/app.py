@@ -528,8 +528,10 @@ async def start_investigation(
     Repeating a request with its `client_request_id` returns the investigation that request
     started (200). A request answered with an investigation that was already live started
     nothing, so repeating it later is a new request. A new investigation for a tenant with no
-    saved alert mapping is refused (409), naming how to save one."""
-    investigation, created = await deps.writes.create_investigation(caller, body.alert_id, body.client_request_id)
+    saved alert mapping is refused (409), naming how to save one. With `update_ticket`, an alert that names no ticket
+    is refused too (409)."""
+    investigation, created = await deps.writes.create_investigation(
+        caller, body.alert_id, body.client_request_id, body.update_ticket)
     _answered_for("alert", body.alert_id, investigation.alert_id)
     if created:
         _created_at(request, response, "get_investigation", caller.tenant_id,

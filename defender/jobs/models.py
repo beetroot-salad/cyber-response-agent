@@ -25,6 +25,12 @@ STAGES = ("queued", "running", "completed", "unparseable", "failed", "aborted")
 LIVE = ("queued", "running")
 TERMINAL = tuple(stage for stage in STAGES if stage not in LIVE)
 
+#: What a flagged investigation reports of its ticket write-back (#1471 W6): the receipt's own status (`commented`,
+#: `escalated`, `error`, `unknown`), or `no_receipt` (none was left), or `not_read` (nobody looked at the run folder).
+TICKET_WRITE_WORDS = ("commented", "escalated", "error", "unknown", "no_receipt", "not_read")
+#: The words that come from the run folder; nothing replaces one of these.
+RECEIPT_WORDS = ("commented", "escalated", "error", "unknown", "no_receipt")
+
 _TIME = DateTime(timezone=True)
 
 
@@ -65,6 +71,7 @@ class InvestigationRow(Base, kw_only=True):
         CheckConstraint(f"stage IN ({_quoted(STAGES)})", name="stage"),
         CheckConstraint("stage <> 'running' OR lease_expires_at IS NOT NULL", name="running_has_a_lease"),
         CheckConstraint("NOT cost_is_lower_limit OR cost_usd IS NOT NULL", name="lower_limit_has_a_cost"),
+        CheckConstraint(f"ticket_write IN ({_quoted(TICKET_WRITE_WORDS)})", name="ticket_write"),
         Index("investigations_one_live_per_alert", "tenant_id", "alert_id", unique=True,
               postgresql_where=text(f"stage IN ({_quoted(LIVE)})")),
         Index("investigations_newest_first", "tenant_id", text("created_at DESC"), text("id DESC")),
@@ -94,6 +101,10 @@ class InvestigationRow(Base, kw_only=True):
     lease_expires_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
     #: When the holder wrote its final cost and knowledge: internal, written once (#1343 B-P2).
     accounting_written_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
+    #: Whether the investigation posts to its ticket (#1471 W1): set at create, copied by a retry.
+    update_ticket: Mapped[bool] = mapped_column(Boolean)
+    #: The outcome word of the ticket write-back (#1471 W6); null until a flagged row has ended.
+    ticket_write: Mapped[str | None] = mapped_column(Text, default=None)
 
 
 LEARNING_STATUSES = ("queued", "running", "completed", "failed", "skipped")
@@ -207,6 +218,8 @@ class InvestigationRecord:
     knowledge: dict[str, Any] | None
     failure_reason: str | None
     failure_message: str | None
+    update_ticket: bool
+    ticket_write: str | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -302,4 +315,7 @@ def investigation_record(row: InvestigationRow) -> InvestigationRecord:
         attempt=row.attempt, stage=row.stage, created_at=row.created_at, started_at=row.started_at,
         finished_at=row.finished_at, disposition=row.disposition, cost_usd=row.cost_usd,
         cost_is_lower_limit=reads_at_least(row),
-        knowledge=row.knowledge, failure_reason=row.failure_reason, failure_message=row.failure_message)
+        knowledge=row.knowledge, failure_reason=row.failure_reason, failure_message=row.failure_message,
+        update_ticket=row.update_ticket,
+        # Served only once the investigation has ended: a handed-back row keeps its word but is still live (W6).
+        ticket_write=row.ticket_write if row.update_ticket and row.stage in TERMINAL else None)

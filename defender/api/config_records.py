@@ -122,8 +122,7 @@ class ConfigRecords:
 
     async def get_case_record(self, tenant_id: TenantId) -> CaseRecord | None:
         case = (await self._tenants.current_records(tenant_id)).case
-        return None if case is None else CaseRecord(version=case.version, system_id=case.system_id,
-                                                    comment_body=case.comment_body)
+        return None if case is None else CaseRecord(version=case.version, system_id=case.system_id)
 
     # --- writes -------------------------------------------------------------------------------------------------
 
@@ -140,10 +139,10 @@ class ConfigRecords:
 
     async def put_case_record(self, principal: Principal, body: CaseRecordPut) -> tuple[CaseRecord, bool]:
         written = await self._store.put_case(principal.tenant_id, replaces=body.replaces, system_id=body.system_id,
-                                             comment_body=body.comment_body, author=principal.actor_id)
+                                             author=principal.actor_id)
         case = written.record
         _announce(principal, "case_record.update", principal.tenant_id, f"version {case.version}, system {case.system_id}")
-        return CaseRecord(version=case.version, system_id=case.system_id, comment_body=case.comment_body), written.created
+        return CaseRecord(version=case.version, system_id=case.system_id), written.created
 
     async def delete_case_record(self, principal: Principal, *, replaces: int) -> None:
         await self._store.delete_case(principal.tenant_id, replaces=replaces, author=principal.actor_id)
