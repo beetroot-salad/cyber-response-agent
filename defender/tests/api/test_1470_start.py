@@ -1,4 +1,4 @@
-"""#1470 G4/D9: how the API starts with its secret store (OpenBao) and what the routes say while it is sealed.
+"""#1470 G4/D9, #1532 K1-K3: how the API starts with its secret store (OpenBao) and what the routes say while it is sealed.
 
 `serving` takes an OpenBao transport as it takes Keycloak's; the real `OpenBaoSecrets` runs over `ScriptedOpenBao`, which
 scripts seal-status too. A missing or unparsable OpenBao setting refuses start like any other setting
@@ -15,7 +15,7 @@ from defender.tests.support.api._config1470 import (
     problem_text,
     served_config,
 )
-from defender.tests.support.api._openbao1470 import ScriptedOpenBao
+from defender.tests.support.api._openbao1470 import LOOKUP_SELF, ScriptedOpenBao
 from defender.tests.support.api._server1083 import FakeKeycloak, environment
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
@@ -60,24 +60,97 @@ async def test_d9_a_seal_status_that_is_unreachable_or_malformed_refuses_start_n
     assert set(broken.calls) == {SEAL_STATUS}  # nothing past seal-status; how often it is asked is not pinned
 
 
-async def test_g4_an_unsealed_secret_store_is_asked_the_login_by_a_metadata_read_and_nothing_is_written(migrated_database, tmp_path):
-    """Unsealed: seal-status first, then only metadata reads (the writer policy cannot look itself up or read a value);
-    no set is written or read. (G4)"""
+async def test_g4_an_unsealed_secret_store_is_asked_who_the_token_is_then_a_metadata_read_and_nothing_is_written(
+        migrated_database, tmp_path):
+    """Unsealed: seal-status first, then the token's lookup-self, then only metadata reads (the writer policy reads no
+    value); no set is written or read. (G4; #1532 K1, K2)"""
     bao = ScriptedOpenBao()
     assert await _start(migrated_database, tmp_path, bao) is None
-    assert bao.calls[0] == SEAL_STATUS
-    assert len(bao.calls) >= 2
-    assert {(m, p.split("/")[1]) for m, p in bao.calls[1:]} == {("GET", "metadata")}, bao.calls
+    assert bao.calls[:2] == [SEAL_STATUS, ("GET", LOOKUP_SELF)], bao.calls
+    assert len(bao.calls) >= 3
+    assert {(m, p.split("/")[1]) for m, p in bao.calls[2:]} == {("GET", "metadata")}, bao.calls
     assert bao.paths() == []
     assert bao.value_reads == []
 
 
-async def test_g4_a_login_the_secret_store_refuses_at_start_refuses_start_naming_the_token_file_setting(migrated_database, tmp_path):
-    """Unsealed, and the token the file holds is refused (403): start is refused naming DEFENDER_API_OPENBAO_TOKEN_FILE. (G4)"""
-    message = await _start(migrated_database, tmp_path, ScriptedOpenBao(token="a-token-the-server-does-not-know"))
-    assert message is not None
-    assert "DEFENDER_API_OPENBAO_TOKEN_FILE" in message, message
+#: Tokens OpenBao refuses lookup-self (#1532 K1): unknown at this address, or holding no policy that grants it. Each is
+#: minted without OpenBao's default policy, as the API's is.
+_NOT_ACCEPTED = [
+    ("a token the server does not know", {"token": "a-token-the-server-does-not-know"}),
+    ("a writer policy from before #1532", {"policies": ["writer-pre-1532"]}),
+    ("the proxy's token", {"policies": ["proxy"]}),
+    ("a token whose policy does not exist", {"policies": []}),
+]
+
+
+@pytest.mark.parametrize(("label", "made"), _NOT_ACCEPTED, ids=[n[0] for n in _NOT_ACCEPTED])
+async def test_1532_k1_a_token_refused_its_lookup_refuses_start_naming_the_address_and_the_token_file(
+        migrated_database, tmp_path, label, made):
+    """A 403 on lookup-self: start is refused naming both DEFENDER_OPENBAO_ADDR and DEFENDER_API_OPENBAO_TOKEN_FILE (the
+    token is not accepted at that address: either can be wrong), and the token's policy granting lookup-self; no metadata
+    is read. (#1532 K1, P1)"""
+    bao = ScriptedOpenBao(**made)
+    message = await _start(migrated_database, tmp_path, bao)
+    assert message is not None, f"{label} started"
+    for named in ("DEFENDER_OPENBAO_ADDR", "DEFENDER_API_OPENBAO_TOKEN_FILE", "lookup-self"):
+        assert named in message, message
     assert TOKEN not in message
+    assert "refused the token the file holds" not in message, message  # states what was refused, not that the token is bad (P1)
+    assert ("GET", LOOKUP_SELF) in bao.calls
+    assert not [c for c in bao.calls if "/metadata/" in c[1]], bao.calls
+
+
+#: Tokens OpenBao accepts but whose policy does not let them read metadata under the API's mount (#1532 K2).
+_NOT_UNDER_THE_MOUNT = [
+    ("a writer policy written for another mount", {"policy_mount": "elsewhere", "mounts": ["secret", "elsewhere"]}),
+    ("the proxy's token with the default policy", {"policies": ["default", "proxy"]}),
+    ("the default policy alone", {"policies": ["default"]}),
+]
+
+
+@pytest.mark.parametrize(("label", "made"), _NOT_UNDER_THE_MOUNT, ids=[n[0] for n in _NOT_UNDER_THE_MOUNT])
+async def test_1532_k2_a_valid_token_refused_the_metadata_read_refuses_start_naming_the_mount_the_policy_and_the_token(
+        migrated_database, tmp_path, label, made):
+    """lookup-self passes and the metadata read is 403: start is refused naming DEFENDER_OPENBAO_KV_MOUNT (and the mount
+    it is set to), the token's policy and DEFENDER_API_OPENBAO_TOKEN_FILE, any of which can be why. (#1532 K2, P1)"""
+    message = await _start(migrated_database, tmp_path, ScriptedOpenBao(**made))
+    assert message is not None, f"{label} started"
+    for named in ("DEFENDER_OPENBAO_KV_MOUNT", "'secret'", "polic", "DEFENDER_API_OPENBAO_TOKEN_FILE"):
+        assert named in message, message
+    assert "refused the token the file holds" not in message, message  # no one cause claimed (P1)
+    assert TOKEN not in message
+
+
+@pytest.mark.parametrize("policies", [["writer"], ["default", "writer"], ["default", "writer-pre-1532"]],
+                         ids=["the writer", "the writer with the default policy",
+                              "a writer from before #1532 with the default policy"])
+async def test_1532_a_token_that_may_look_itself_up_and_read_metadata_under_the_mount_starts(
+        migrated_database, tmp_path, policies):
+    """Control for K1 and K2: lookup-self and the mount's metadata granted, by whichever policy, and start proceeds."""
+    assert await _start(migrated_database, tmp_path, ScriptedOpenBao(policies=policies)) is None
+
+
+_UNUSABLE_LOOKUP = [
+    ("not JSON", httpx.Response(200, content=b"<html>proxy error</html>")),
+    ("no data object", httpx.Response(200, json={"request_id": "x"})),
+    ("a refused request", httpx.Response(400, json={"errors": ["bad request"]})),
+    ("an error status", httpx.Response(500, json={"errors": ["internal error"]})),
+    ("sealed since seal-status", httpx.Response(503, json={"errors": ["Vault is sealed"]})),
+    ("unreachable", httpx.ConnectError("refused")),
+]
+
+
+@pytest.mark.parametrize(("label", "answer"), _UNUSABLE_LOOKUP, ids=[u[0] for u in _UNUSABLE_LOOKUP])
+async def test_1532_k3_a_lookup_answered_other_than_a_usable_200_or_a_403_refuses_start_naming_the_address_only(
+        migrated_database, tmp_path, label, answer):
+    """lookup-self answered without a usable answer (not OpenBao's `{"data": {...}}`, a 4xx other than 403, a 5xx,
+    sealed, or no answer): start is refused naming DEFENDER_OPENBAO_ADDR, not the token file. (#1532 K3)"""
+    bao = ScriptedOpenBao()
+    bao.answer("GET", LOOKUP_SELF, answer, times=1)
+    message = await _start(migrated_database, tmp_path, bao)
+    assert message is not None, f"{label} started"
+    assert "DEFENDER_OPENBAO_ADDR" in message, message
+    assert "DEFENDER_API_OPENBAO_TOKEN_FILE" not in message, message
 
 
 _UNREADABLE_LOGIN = [

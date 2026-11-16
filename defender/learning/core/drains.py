@@ -488,7 +488,7 @@ def _tick_systems(paths: LoopPaths, records: TenantDirectory) -> TenantSystems:
     if tenant is None:
         raise _Refused("the drain delivers to a tenant's repository: no tenant is selected")
     try:
-        return tenant_systems_of(paths.repo_root, records.current_records(tenant.id), tenant_id=tenant.id)
+        return tenant_systems_of(paths.repo_root, records.current_records(tenant.id))
     except RecordsUnreachable as down:
         raise _Refused(f"the tenant {tenant.id}'s records could not be read: {down}", transient=True) from None
     except TenantRefused as refused:  # its records are not known (not active, #1470 O8): refused before any claim, nothing charged

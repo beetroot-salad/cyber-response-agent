@@ -36,10 +36,9 @@ class TenantSystems:
     adapter_missing: Mapping[str, SystemRecord]
 
     @classmethod
-    def of(cls, records: TenantRecords, catalog: Catalog, *, tenant_id: object) -> TenantSystems:
-        """Tenant `tenant_id`'s systems over `catalog` from its current `records` (an active tenant's: #1470 O8, the
-        read refuses any other). `tenant_id` names the tenant to its caller and is not read."""
-        del tenant_id
+    def of(cls, records: TenantRecords, catalog: Catalog) -> TenantSystems:
+        """A tenant's systems over `catalog` from its current `records` (an active tenant's: #1470 O8, the read refuses
+        any other)."""
         whole = catalog.roster
         enabled: dict[str, SystemRecord] = {}
         disabled: dict[str, SystemRecord] = {}

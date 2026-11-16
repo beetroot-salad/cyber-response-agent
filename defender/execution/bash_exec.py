@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
-#: Operator runs `feed_token` refuses outright. Narrower than `_SHLEX_PUNCTUATION`: a run  # lint-stale-ref: ok — the English word, not the removed test helper class
+#: Operator runs `feed_token` refuses outright. Narrower than `_SHLEX_PUNCTUATION`: a run
 #: containing `(`/`)` is not refused here and crosses as a literal argv word
 #: (`parse('cat <(id)')` is `['cat','<(','id',')']`). `permission/bash.py::_stage_unsafe`
 #: refuses bare paren tokens, but by exact equality, so a fused run like the `)|` in

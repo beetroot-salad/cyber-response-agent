@@ -139,9 +139,9 @@ class SecretStoreUnavailable(Exception):
 
 
 class SecretStoreRefused(Exception):
-    """The secret store refused the API after start: its login (403) or its request (any other 4xx). OpenBao refuses
-    before it writes, so nothing was stored; our setup, not the caller's, so a 500 naming the refusal (#1470 G4, O7;
-    r8 Am-1)."""
+    """The secret store refused the API after start: a 403 (the token, its policy or the mount: any can be why, #1532
+    P1) or any other 4xx (the request). OpenBao refuses before it writes, so nothing was stored; our setup, not the
+    caller's, so a 500 naming the refusal (#1470 G4, O7; r8 Am-1)."""
 
 
 class CredentialsUnused(Exception):
@@ -174,7 +174,7 @@ class SystemsRepository(Protocol):
 
     async def served(self, tenant_id: TenantId, record: SystemRecord) -> System:
         """`record` as served: its catalog display name and whether a credential set exists at its generation, the
-        secret store's answer (`SecretStoreUnavailable` when it gives none, `SecretStoreRefused` for a refused login)."""
+        secret store's answer (`SecretStoreUnavailable` when it gives none, `SecretStoreRefused` for a 403 or another 4xx)."""
         ...
 
     async def put_system(self, principal: Principal, system_id: str, body: SystemPut) -> tuple[SavedSystem, bool]:

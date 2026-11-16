@@ -32,6 +32,8 @@ from defender.tests.support.api._config1470 import (
 )
 from defender.tests.support.api._openbao1470 import (
     KV_MOUNT,
+    LOOKUP_SELF,
+    WRITER_BEFORE_1532,
     WRITER_TOKEN,
     ScriptedOpenBao,
 )
@@ -323,6 +325,30 @@ async def test_o7_o9_a_secret_store_fault_on_the_write_is_503_not_stored_or_poss
     bao.sealed = False
     control = await scripted.put_credentials(TICKET, 1, {"api_key": TOKEN})
     assert control.status_code == 204, control.text  # the same request succeeds once the fault is gone
+
+
+@anyio_mark
+@postgres
+@pytest.mark.parametrize("call", ["the credential write", "the existence check"])
+async def test_1532_k6_a_403_after_start_names_the_token_its_policy_and_the_mount_setting_not_the_login(scripted, call):
+    """A 403 from the secret store on a request after start (the API may have started sealed, so the start check never
+    ran): a 500 that names the address, the token file, the mount and the token's policy, and claims no one of them.
+    (#1532 K6, P1, r4)"""
+    await _ticket(scripted)
+    bao = scripted.scripted
+    denied = httpx.Response(403, json={"errors": ["permission denied"]})
+    if call == "the credential write":
+        bao.answer("POST", "/data/", denied, times=1)
+        refused = await scripted.put_credentials(TICKET, 1, {"api_key": TOKEN})
+    else:
+        bao.answer("GET", "/metadata/", denied, times=1)
+        refused = await scripted.get_system(TICKET)
+    assert refused.status_code == 500, refused.text
+    said = problem_text(refused)
+    for named in ("DEFENDER_OPENBAO_ADDR", "DEFENDER_API_OPENBAO_TOKEN_FILE", "DEFENDER_OPENBAO_KV_MOUNT", "polic"):
+        assert named in said, said
+    assert "login" not in said, said
+    assert TOKEN not in said
 
 
 # --- O7 / O9: the whole outcome table of a credential write ---------------------------------------------------------
@@ -1045,6 +1071,70 @@ def test_c10_the_scripted_stand_in_answers_as_the_writer_policy_was_observed_to(
     bao = ScriptedOpenBao()
     assert _writer_calls(bao, "http://openbao.test", WRITER_TOKEN, KV_MOUNT) == WRITER_STATUSES
     assert bao.value_reads == ["t/s/g1"]
+
+
+#: #1532 C10: each token's answers, as `(policies, lookup-self, metadata under the mount its policy names, metadata under
+#: another mount that exists)`. Observed on OpenBao 2.4.1 (#1532 probes): the policy check comes before the mount's, so
+#: an uncovered path is 403 whether or not its mount exists; lookup-self needs the current writer or the default policy.
+POLICY_STATUSES = [
+    (("writer",), 200, 404, 403),
+    (("default", "writer"), 200, 404, 403),
+    (("writer-pre-1532",), 403, 404, 403),
+    (("default", "writer-pre-1532"), 200, 404, 403),
+    (("proxy",), 403, 403, 403),
+    (("default", "proxy"), 200, 403, 403),
+    (("default",), 200, 403, 403),
+    (("c10-no-such-policy",), 403, 403, 403),
+]
+#: A writer policy written for a mount that does not exist: its metadata read is 404, as for an absent set (#1532 C4;
+#: out of scope, pinned so a change in it is seen).
+MISSING_MOUNT_STATUS = 404
+
+
+def _policy_calls(client: httpx.Client, covered: str, other: str) -> tuple[int, int, int]:
+    return (client.get(f"/v1/{LOOKUP_SELF}").status_code, client.get(f"/v1/{covered}/metadata/t/s/g1").status_code,
+            client.get(f"/v1/{other}/metadata/t/s/g1").status_code)
+
+
+def test_1532_c10_the_stand_in_answers_each_tokens_lookup_and_metadata_reads_as_openbao_was_observed_to():
+    """The stand-in's lookup-self and metadata answers for each set of policies, and for a mount that does not exist:
+    the table the real server gives in the next test. (#1532 C10, stand-in fidelity)"""
+    for policies, *statuses in POLICY_STATUSES:
+        bao = ScriptedOpenBao(policies=[p for p in policies], mounts=[KV_MOUNT, "other"])
+        with httpx.Client(transport=bao, base_url="http://openbao.test", headers={"X-Vault-Token": WRITER_TOKEN}) as c:
+            assert _policy_calls(c, KV_MOUNT, "other") == tuple(statuses), policies
+    missing = ScriptedOpenBao(policy_mount="nowhere")
+    with httpx.Client(transport=missing, base_url="http://openbao.test", headers={"X-Vault-Token": WRITER_TOKEN}) as c:
+        assert c.get("/v1/nowhere/metadata/t/s/g1").status_code == MISSING_MOUNT_STATUS
+
+
+@pytest.mark.openbao
+def test_1532_c10_each_tokens_lookup_and_metadata_reads_on_a_real_openbao(openbao):
+    """The same table on a real OpenBao: the policies `store_policies` writes today (writer, proxy), the writer as it was
+    before #1532, and OpenBao's default policy, each over the test's KV mount and a second mount created as root.
+    (#1532 C10, K4)"""
+    from defender.credential_proxy._openbao import store_policies
+
+    mount = openbao.kv_mount
+    other = f"{mount}-other"
+    openbao.ok("POST", f"sys/mounts/{other}", json={"type": "kv", "options": {"version": "2"}})
+    try:
+        written = store_policies(kv_mount=mount)
+        names = {"writer": openbao.apply_policy("c10-writer", written["writer"]),
+                 "proxy": openbao.apply_policy("c10-proxy", written["proxy"]),
+                 "writer-pre-1532": openbao.apply_policy("c10-writer-pre-1532", WRITER_BEFORE_1532.format(kv=mount))}
+        for policies, *statuses in POLICY_STATUSES:
+            # A name with no policy behind it stands for itself (a token created with none would inherit root's).
+            token = openbao.token_for(*[names.get(p, p) for p in policies if p != "default"],
+                                      default_policy="default" in policies)
+            with httpx.Client(base_url=openbao.addr, headers={"X-Vault-Token": token}) as client:
+                assert _policy_calls(client, mount, other) == tuple(statuses), policies
+        nowhere = f"{mount}-nowhere"
+        missing = openbao.token_for(openbao.apply_policy("c10-writer-nowhere", store_policies(kv_mount=nowhere)["writer"]))
+        with httpx.Client(base_url=openbao.addr, headers={"X-Vault-Token": missing}) as client:
+            assert client.get(f"/v1/{nowhere}/metadata/t/s/g1").status_code == MISSING_MOUNT_STATUS
+    finally:
+        openbao.call("DELETE", f"sys/mounts/{other}")
 
 
 @pytest.mark.openbao
