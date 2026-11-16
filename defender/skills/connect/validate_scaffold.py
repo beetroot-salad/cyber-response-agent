@@ -351,8 +351,8 @@ def main() -> None:
              "`PUT /systems/{id}` stores as the system's record; judged as the store judges it")
     ap.add_argument(
         "--case", type=Path, default=None,
-        help="with --handoff: the case-record file whose system and comment body `PUT /case-record` stores, judged "
-             "with the handoff's system as the store judges a tenant holding just them (the template, the system it "
+        help="with --handoff: the case-record file whose system `PUT /case-record` stores, judged "
+             "with the handoff's system as the store judges a tenant holding just them (the system it "
              "names, the comment route's cover); the store judges it against the tenant's stored system, so put "
              "this handoff's system first")
     ap.add_argument(

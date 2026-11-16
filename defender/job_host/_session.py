@@ -65,13 +65,19 @@ class PassMint:
     _signing: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
     def mint(self, investigation: str) -> dict[str, Any]:
+        return self._sign(investigation, {(s, "r") for s in self.reads})
+
+    def mint_write(self, investigation: str, system: str, ticket: str) -> dict[str, Any]:
+        """A pass of `rw` on `system` naming `ticket` and nothing else (#1471 X1)."""
+        return self._sign(investigation, {(system, "rw", ticket)})
+
+    def _sign(self, investigation: str, grant: set[tuple[str, ...]]) -> dict[str, Any]:
         from defender.credential_proxy import mint_request_token
 
         expires_at = time.time() + PASS_LIFETIME_SEC
         with self._signing:
             token = mint_request_token(self.signer, tenant_id=self.tenant_id, investigation=investigation,
-                                       grant={(s, "r") for s in self.reads},
-                                       expires_at=datetime.fromtimestamp(expires_at, UTC))
+                                       grant=grant, expires_at=datetime.fromtimestamp(expires_at, UTC))
         return {"token": token, "expires_at": expires_at, "proxy_url": self.proxy_url}
 
 
@@ -135,6 +141,11 @@ class Session:
     forge: Any = None
     client: Any = None
     command: list[str] | None = None
+    #: What the worker handed an investigation helper at its own start (#1471 P-5), never read from the tenant folder:
+    #: the alert's digest, whether the job is flagged to post to its ticket, and the screen link it posts.
+    alert_digest: str | None = None
+    post_ticket: bool = False
+    ticket_link: str | None = None
     signalled: threading.Event = field(default_factory=threading.Event)
     #: Every id this helper minted for the claim (the job's own, a sibling's run, a draft): `pass` and `box.start`
     #: name only these (A6).

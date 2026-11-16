@@ -275,7 +275,8 @@ class _Proxy:
         declaration = self._declared(record, asked.system)
         target = locate(declaration, asked.url)
         trail.path = target.path[:_AUDIT_PATH_CAP]
-        check_route(declaration, asked.system, asked.method, target.path, mode)
+        check_route(declaration, asked.system, asked.method, target.path, mode,
+                    claims.tickets.get(asked.system))
         headers = _forwarded(asked.headers, declaration.auth)
         creds = self._stored(claims.tenant, asked.system, record.credential_generation)
         if creds is None:

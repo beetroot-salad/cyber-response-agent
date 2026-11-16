@@ -9,8 +9,8 @@ this doc and the code disagree, the code wins.
 
 The benign (FP-direction) learning loop wants to ground dispositions in the org's *past closed
 cases*, and a person reviewing a case wants the defender's findings on the ticket they already
-have. Each investigated alert, run with `--update-ticket`, adds one comment of findings to its
-case; a person closes it.
+have. Each investigated alert whose start-investigation request sets `update_ticket` adds one
+comment to its case (its disposition and a link to its screen); a person closes it.
 
 ## Decisions
 
@@ -41,7 +41,7 @@ case; a person closes it.
 
 - **Which system records cases is the tenant's setting.** Its case record (#1366: a database
   record the tenant admin writes with `PUT /case-record`) names the
-  `system:` and the `comment.body:` template. A tenant without one has no case system and
+  `system:`; the comment's wording is fixed by the product. A tenant without one has no case system and
   needs none. `tenant check` and the record step share one judgement (`systems/case_system.py`):
   the system on the roster, its adapter accepted and exporting the action, its `check_settings`
   and, through the credential proxy, a declared write route. The settings are read once when the
@@ -55,8 +55,7 @@ case; a person closes it.
   had already closed when the cut landed (`closed_before_cut`) records its own verdict.
 
 - **Anti-corruption boundary.** `report.md` (+ the run's alert record) is the internal case model;
-  the ticket is the external one. `tenancy/case_ticket.py` renders the comment from the tenant's
-  template; the drivers and the report schema never bind to ticket field names.
+  the ticket is the external one. `tenancy/case_ticket.py` renders the fixed comment; the drivers and the report schema never bind to ticket field names.
 
 - **One transport.** The comment goes through the shared adapter transport's host write entry
   (`kit.transport.host_write`, through the proxy: any 2xx is success, a 4xx is an
@@ -67,7 +66,8 @@ case; a person closes it.
   The write-back token is minted at the record step; a run that cannot sign goes on and the
   receipt says the write-back token could not be minted.
 
-- **Opt-in.** `--update-ticket` (default off); `--episode` refuses it.
+- **Opt-in.** The request flag `update_ticket` on the start-investigation request (default off).
+  An operator's hand-run `run.py` never comments and mints no write-back token (#1471).
 
 ## Shape
 
@@ -79,8 +79,9 @@ case; a person closes it.
   every branch that called out), `clear_receipt`.
 - `integrations/{ticket,jira,servicenow}_adapter.py` — the adapters' `add_case_comment`, and the
   optional `read_case_comments` (never a verb; `kit.verbs.CaseComments` holds its contract).
-- `run.py` — `--update-ticket`: clear the receipt at run start; at run end judge the case
-  settings, mint the write-back token, call `record_case_ticket`.
+- The job's finishing step, when the request set `update_ticket`: judge the case settings, take
+  the write-back token from the job's host helper (`pass.write_back`), call `record_case_ticket`.
+  `run.py` does none of it.
 
 The receipt (`{key, status, url, ok, reason}`) is a sidecar beside the run dir,
 `<runs_base>/<run id>.ticket-write.json`, out of the box's reach. `key` is the ticket key (empty

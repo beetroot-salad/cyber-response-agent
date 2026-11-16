@@ -90,10 +90,9 @@ class LedgerCost:
 CopyOutcome = Literal["copied", "skipped", "failed"]
 
 
-def render_page(run: Run, *, update_ticket: bool = False) -> str:
+def render_page(run: Run) -> str:
     """This run's page, generated and returned — nothing is written, and nothing here knows
     where the page goes: the post-run step saves it as the run's record (#1110).
-    `update_ticket` is `run.py`'s own `--update-ticket` (#1107 O6), handed through to the page.
     The page's cost is the run's spend ledger, never the run file's result line, which the box can
     rewrite (#1377 r6 S5), and reads "at least" when the ledger is not complete (r7.3 T1): the page
     is handed nothing else, so a re-render reads what the run's first render read.
@@ -102,7 +101,7 @@ def render_page(run: Run, *, update_ticket: bool = False) -> str:
     complete-looking page for a run whose record cannot be found. It fails before a page exists.
     """
     cost = _ledger_cost(run)
-    return render_runtime_page(run.run_dir, update_ticket=update_ticket, cost=cost)
+    return render_runtime_page(run.run_dir, cost=cost)
 
 
 def _ledger_cost(run: Run) -> LedgerCost:
@@ -121,7 +120,7 @@ def _ledger_cost(run: Run) -> LedgerCost:
     return LedgerCost(read)
 
 
-def save_page(run: Run, *, update_ticket: bool = False) -> str:
+def save_page(run: Run) -> str:
     """Render the run's page and save it as the run's `runtime_html` record through `run`, so
     whatever backend the handle sits on receives it like every other record; the page, saved.
 
@@ -130,7 +129,7 @@ def save_page(run: Run, *, update_ticket: bool = False) -> str:
     and no further: its host helper makes the dev-only copy (`mirror_page`) after it exits
     (#1170 A10)."""
     try:
-        page = render_page(run, update_ticket=update_ticket)
+        page = render_page(run)
     except Exception as e:
         raise VisualizeFailed(f"the page for {run.run_dir} could not be rendered") from e
     record = run.observability.runtime_html
@@ -142,11 +141,11 @@ def save_page(run: Run, *, update_ticket: bool = False) -> str:
     return page
 
 
-def publish_page(run: Run, *, tenant: Tenant, update_ticket: bool = False) -> CopyOutcome:
+def publish_page(run: Run, *, tenant: Tenant) -> CopyOutcome:
     """The operator's post-run step: the page saved (`save_page`), then handed to the dev-only
     copy (`mirror_page`); what the copy did (#1110). `tenant` is the one its caller accepted; the
     copy lands in that tenant's area (#1279 O2). The copy never raises."""
-    page = save_page(run, update_ticket=update_ticket)
+    page = save_page(run)
     return mirror_page(page, run.run_dir.name, tenant)
 
 
@@ -494,11 +493,8 @@ def _headline_cost(cost: LedgerCost) -> str:
     return "unknown"
 
 
-def render_runtime_page(run_dir: Path, *, cost: LedgerCost, update_ticket: bool = False) -> str:
-    """The run's page. `update_ticket` is run.py's own `--update-ticket`, handed in as an argument
-    and read from no file in the run dir (the box can write every one of them): only a run that
-    was started with it has a ticket line, so a receipt an earlier attempt left, or one the box
-    planted, shows nothing on a run that never meant to write a ticket.
+def render_runtime_page(run_dir: Path, *, cost: LedgerCost) -> str:
+    """The run's page. The ticket line shows whenever the run has a receipt (#1471 W7).
 
     `cost` is the ledger's one read, required: every dollar on the page comes from it (#1377 r7.2 P1)."""
     case_id = run_dir.name
@@ -602,7 +598,7 @@ def render_runtime_page(run_dir: Path, *, cost: LedgerCost, update_ticket: bool 
   <article class="content content-runtime">
     {render_knowledge_banner(run_dir)}
     {render_runtime_headline(run_dir, report, health, leads)}
-    {render_ticket_line(run_dir) if update_ticket else ""}
+    {render_ticket_line(run_dir)}
     {_render_policy_denials_section(run_dir)}
     {metrics_html}
     {render_alert_block(run_dir, open_=False)}
@@ -618,7 +614,7 @@ def render_runtime_page(run_dir: Path, *, cost: LedgerCost, update_ticket: bool 
 
 
 def _parse_run_page_args(argv: list[str]) -> argparse.Namespace:
-    """`--tenant T [--episode ep] <run_id> [--update-ticket]` (#1105 declared change 7, J8):
+    """`--tenant T [--episode ep] <run_id>` (#1105 declared change 7, J8):
     the tenant is required, with no default; the run is named by its id, in the tenant's own
     runs or, with `--episode`, as an arm of that episode."""
     p = UsageParser(prog="visualize_run.py", description=__doc__)
@@ -626,7 +622,6 @@ def _parse_run_page_args(argv: list[str]) -> argparse.Namespace:
                    help="the tenant whose run is re-rendered; required, with no default")
     p.add_argument("--episode", default=None,
                    help="the episode the run is an arm of (its id); absent for a natural run")
-    p.add_argument("--update-ticket", action="store_true")
     p.add_argument("run_id", help="the run, by its id")
     return p.parse_args(argv)
 
@@ -647,7 +642,7 @@ def main(argv: list[str], *, directory: Any = None) -> int:
         ns = _parse_run_page_args(argv[1:])
     except UsageRefused as bad:
         print("usage: visualize_run.py --tenant T [--episode EPISODE_ID] <run_id> "
-              f"[--update-ticket] ({bad})", file=sys.stderr)
+              f"({bad})", file=sys.stderr)
         return 64
     from defender import tenancy
     from defender.records.formats import TenantRefused
@@ -666,7 +661,7 @@ def main(argv: list[str], *, directory: Any = None) -> int:
             return 1
         with _log.run_context(ns.run_id, str(run.tenant_id), logger=_logger):
             try:
-                copy = publish_page(run, tenant=tenant, update_ticket=ns.update_ticket)
+                copy = publish_page(run, tenant=tenant)
             except VisualizeFailed:
                 _logger.error("the re-render failed", exc_info=True)
                 return 1

@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import datetime as _dt
 import logging
 import os
@@ -57,12 +58,13 @@ import subprocess
 import sys
 import time
 import uuid
-from collections.abc import Awaitable, Callable, Coroutine
+from collections.abc import Awaitable, Callable, Coroutine, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from defender import _log
+from defender._url import check_origin
 from defender.jobs import LearningProgress, is_outage, is_refusal
 from defender.jobs.audit import SYSTEM, announce
 from defender.box import CLAIM_ENV, container_name
@@ -93,6 +95,7 @@ LEARNING_CHECK_INTERVAL = 300.0
 #: code tree's root (the worker's code copy, as `child_cwd`).
 JOB_HOST_MODULE = "defender.job_host"
 
+NOT_READ = "not_read"
 _FAILED, _COMPLETED, _UNPARSEABLE = "failed", "completed", "unparseable"
 _SETUP_REFUSED, _NO_REPORT, _WORKER_ERROR = "setup_refused", "no_report", "worker_error"
 
@@ -105,6 +108,11 @@ class Launch:
     investigation_id: str
     tenant_id: str
     parent_pid: int
+    #: What the helper is handed at its own start, never through the tenant folder (#1471 P-5): the alert's digest,
+    #: whether the job posts to its ticket, and the screen link it posts.
+    alert_digest: str | None = None
+    update_ticket: bool = False
+    ticket_link: str | None = None
 
 
 @dataclass(frozen=True)
@@ -139,18 +147,32 @@ class _PostStepOf:
     learning_job_id: str | None
 
 
-def _helper_argv(kind: str, *, job: str | None, tenant: str, parent_pid: int, source: str | None = None) -> list[str]:
-    """`python -m defender.job_host --kind <kind> [--job <id>] --tenant <T> [--source <run>] --parent-pid <pid>`."""
+def _helper_argv(kind: str, *, job: str | None, tenant: str, parent_pid: int, source: str | None = None,
+                 extra: Sequence[str] = ()) -> list[str]:
+    """`python -m defender.job_host --kind <kind> [--job <id>] --tenant <T> [--source <run>] --parent-pid <pid>`, then `extra`."""
     return [sys.executable, "-m", JOB_HOST_MODULE, "--kind", kind,
             *([] if job is None else ["--job", job]), "--tenant", tenant,
-            *([] if source is None else ["--source", source]), "--parent-pid", str(parent_pid)]
+            *([] if source is None else ["--source", source]), "--parent-pid", str(parent_pid), *extra]
 
 
 def run_argv(launch: Launch) -> list[str]:
     """The default investigation child: the per-job host helper,
     `-m defender.job_host --kind investigation --job <id> --tenant <T> --parent-pid <pid>`."""
     return _helper_argv("investigation", job=launch.investigation_id, tenant=launch.tenant_id,
-                        parent_pid=launch.parent_pid)
+                        parent_pid=launch.parent_pid, extra=_ticket_argv(launch))
+
+
+def _ticket_argv(launch: Launch) -> list[str]:
+    """`--alert-digest <hex>` always, `--post-ticket --ticket-link <url>` only for a flagged job (#1471 C-1, P-5): the
+    helper's own start carries what steers the write, so no file a job can reach does."""
+    return [*([] if launch.alert_digest is None else ["--alert-digest", launch.alert_digest]),
+            *(["--post-ticket", "--ticket-link", launch.ticket_link]
+              if launch.update_ticket and launch.ticket_link is not None else [])]
+
+
+def screen_link(origin: str, tenant: str, investigation: str) -> str:
+    """The investigation screen's address a ticket comment links to (#1471 W3): `<origin>/t/<tenant>/investigations/<id>`."""
+    return f"{origin}/t/{tenant}/investigations/{investigation}"
 
 
 def run_argv_in(root: Path) -> Callable[[Launch], list[str]]:
@@ -283,7 +305,7 @@ class Worker:
         self, store: Any, *, data_root: Path | DataRoot,
         child_argv: Callable[[Launch], list[str]] = run_argv,
         containers: Containers | None = None, slots: int = 3,
-        clock: Callable[[], _dt.datetime], stop_grace: float = 30,
+        clock: Callable[[], _dt.datetime], frontend_origin: str, stop_grace: float = 30,
         renewal_interval: float = 1.0, cost_interval: float = 15.0, takeover_interval: float = 5.0,
         open_lane: Callable[[DataRoot, object], job_lane.JobLane] = job_lane.JobLane.open,
         store_call_limit: float = 10.0,
@@ -295,6 +317,10 @@ class Worker:
         learning_check_interval: float = LEARNING_CHECK_INTERVAL,
         wait_group: Callable[[int], bool] = wait_group_gone,
     ) -> None:
+        try:
+            self._frontend_origin = check_origin(frontend_origin)
+        except ValueError as bad:
+            raise ValueError(f"the worker's frontend origin {frontend_origin!r} {bad}") from None
         if slots < 1:
             raise ValueError(f"a worker needs at least one slot, not {slots!r}")
         if not 0 <= learning_slots <= slots - 1:
@@ -662,7 +688,7 @@ class Worker:
         with _log.log_context(run_id=inv, tenant_id=tenant):
             try:
                 end = await self._decide(held, claim.tenant_state)
-                await self._write_end(held, end)
+                await self._write_end(held, _unread_word(held, end))
             except Exception:  # noqa: BLE001 — one row's fault never ends the worker
                 _logger.exception("investigation %s: the worker failed while ending it", inv)
             finally:
@@ -694,7 +720,7 @@ class Worker:
         # start-fault cleanup removes only a container that carries it.
         token = uuid.uuid4().hex
         try:
-            await self._write_launch(record, token, tenant_state)
+            digest = await self._write_launch(record, token, tenant_state)
         except _WorkerFault as fault:
             _logger.error("investigation %s: %s", inv, fault)
             return End(Ending(_FAILED, failure_reason=_WORKER_ERROR, failure_message=str(fault)), 0.0, None)
@@ -704,7 +730,9 @@ class Worker:
             _logger.info("investigation %s: it was fenced before its child started; not launched", inv)
             return End(Ending(_FAILED, failure_reason=_WORKER_ERROR, failure_message="the job was ended before it started"),
                        0.0, None)
-        launch = Launch(inv, tenant, os.getpid())
+        launch = Launch(inv, tenant, os.getpid(), alert_digest=digest, update_ticket=bool(getattr(record, "update_ticket", False)),
+                        ticket_link=screen_link(self._frontend_origin, tenant, inv)
+                        if getattr(record, "update_ticket", False) else None)
 
         async def name_left() -> None:
             await self._name_left(inv)
@@ -717,12 +745,12 @@ class Worker:
         returncode = await proc.wait()
         _logger.info("investigation %s: child %d %s after %s", inv, proc.pid,
                      _exit_words(returncode), self._clock() - started)
-        ending, cost, exact, knowledge = await asyncio.to_thread(
+        ending, cost, exact, knowledge, word = await asyncio.to_thread(
             self._read_ending, record, _helper_failure(returncode, held))
         held.read_exact = exact
         if held.signalled and not ending.decided_by_run:  # R1: an ending the run itself decided wins over the stop
-            return End(None, cost, knowledge)
-        return End(ending, cost, knowledge)
+            return End(None, cost, knowledge, word)
+        return End(ending, cost, knowledge, word)
 
     async def _run_child(
         self, held: Held, argv: Callable[[], list[str]], *,
@@ -811,7 +839,7 @@ class Worker:
             env={**os.environ, "DEFENDER_DATA_ROOT": str(data_root_for_child(self._data_root)), CLAIM_ENV: claim},
             **where)
 
-    async def _write_launch(self, record: Any, token: str, tenant_state: str) -> None:
+    async def _write_launch(self, record: Any, token: str, tenant_state: str) -> str:
         """The launch record (carrying this claim's box token) and the alert file, create-only,
         in the tenant's runs container, for a tenant whose state at the claim was `active`
         (r7 R7-1; a teardown always wins, and a job racing it fails)."""
@@ -825,6 +853,7 @@ class Worker:
             alert_id=record.alert_id, digest=digest_of(alert.raw), label=alert.title or alert.vendor_ticket_id,
             box_token=token)
         await asyncio.to_thread(self._write_launch_files, launch, alert.raw)
+        return launch.digest
 
     def _write_launch_files(self, launch: job_lane.LaunchRecord, raw: bytes) -> None:
         try:
@@ -859,7 +888,8 @@ class Worker:
                             "child started left it); left in place", inv, name)
 
     def _read_ending(self, record: Any, helper_exit: int | None = None
-                     ) -> tuple[Ending, float | None, bool, dict | None]:  # ending, cost, cost is exact, knowledge
+                     ) -> tuple[Ending, float | None, bool, dict | None, str | None]:
+        # ending, cost, cost is exact, knowledge, the ticket write's word (None: not a flagged row, or never read)
         """The stage, cost and knowledge from the host records, through the job lane (in a thread).
         A cost that cannot be read is None, the final figure's own meaning (R2). The cost is
         exact exactly when the ledger read is complete (#1377 r7.3 T2: sealed at its last row, no
@@ -872,7 +902,7 @@ class Worker:
             _logger.error("investigation %s: reading its records: %s", inv, refused)
             return (Ending(_FAILED, failure_reason=_WORKER_ERROR,
                            failure_message="the tenant's runs container could not be read after the run"),
-                    None, True, None)
+                    None, True, None, None)
         try:
             job_end = lane.read_job_end(inv)
             ending = _ending_from(job_end, lambda: _report_disposition_or_none(lane, inv), helper_exit=helper_exit)
@@ -896,12 +926,13 @@ class Worker:
                 _logger.error("investigation %s: reading its knowledge failed; its %s ending stands and "
                               "its knowledge is unreadable", inv, ending.stage, exc_info=True)
                 knowledge = job_lane.JobLane.unreadable_knowledge()
+            word = _receipt_word(lane, record)
         finally:
             try:
                 lane.close()
             except Exception:  # noqa: BLE001 — a fault before the ending still raises; one after keeps it (#1396)
                 _logger.error("investigation %s: closing its records failed", inv, exc_info=True)
-        return ending, cost, exact, knowledge
+        return ending, cost, exact, knowledge, word
 
     # -- one learning job (#1344) -----------------------------------------------------------------
 
@@ -1180,21 +1211,45 @@ class Worker:
             written = await self._store.finish(
                 tenant, inv, stage=ending.stage, disposition=ending.disposition, cost_usd=end.cost,
                 cost_is_lower_limit=held.lower_limit(end.cost), knowledge=end.knowledge, failure_reason=ending.failure_reason,
-                failure_message=ending.failure_message)
+                failure_message=ending.failure_message, **_word_of(end))
             what = ending.stage + (f" ({ending.failure_reason})" if ending.failure_reason else "")
         else:
             written = await self._store.hand_back(tenant, inv, cost_usd=end.cost, cost_is_lower_limit=held.lower_limit(end.cost),
-                                                  knowledge=end.knowledge)
+                                                  knowledge=end.knowledge, **_word_of(end))
             what = "handed back"
         if written is not None:
             _logger.info("investigation %s: %s", inv, what)
             return
         accounted = await self._store.write_accounting(tenant, inv, cost_usd=end.cost, cost_is_lower_limit=held.lower_limit(end.cost),
-                                                     knowledge=end.knowledge)
+                                                     knowledge=end.knowledge, **_word_of(end))
         if accounted is not None:
             _logger.info("investigation %s: the row had already ended; its final cost and knowledge are recorded", inv)
         else:
             _logger.info("investigation %s: the row is gone or already accounted for; nothing to write", inv)
+
+
+def _word_of(end: End) -> dict[str, str]:
+    """The end write's `ticket_write` keyword: the word when there is one (W6: every end write carries it)."""
+    return {} if end.ticket_write is None else {"ticket_write": end.ticket_write}
+
+
+def _unread_word(held: Held, end: End) -> End:
+    """A flagged row's end that never looked at the run folder (a fault, an outage, a lane it could not open, a stop
+    before launch) says `not_read`: the comment may or may not have been posted (W6)."""
+    if end.ticket_write is not None or not getattr(held.record, "update_ticket", False):
+        return end
+    return dataclasses.replace(end, ticket_write=NOT_READ)
+
+
+def _receipt_word(lane: job_lane.JobLane, record: Any) -> str | None:
+    """The word for a flagged row, read off the run folder once the container is gone; None for an unflagged row."""
+    if not getattr(record, "update_ticket", False):
+        return None
+    try:
+        return lane.ticket_write_word(record.investigation_id)
+    except Exception:  # noqa: BLE001 — a receipt that cannot be read is `unknown`, and never turns the ending into a fault
+        _logger.warning("investigation %s: its ticket receipt could not be read", record.investigation_id, exc_info=True)
+        return "unknown"
 
 
 def _lesser_ends(end: End) -> list[End]:
@@ -1205,10 +1260,10 @@ def _lesser_ends(end: End) -> list[End]:
     marker = job_lane.JobLane.unreadable_knowledge()
     ends = [end]
     if end.knowledge is not None and end.knowledge != marker:
-        ends.append(End(end.ending, end.cost, marker))
+        ends.append(End(end.ending, end.cost, marker, end.ticket_write))
     barest = End(None if end.ending is None else Ending(
         _FAILED, failure_reason=_WORKER_ERROR, failure_message="the store refused the job's ending as decided"),
-        None, None)
+        None, None, end.ticket_write)
     if barest != ends[-1]:
         ends.append(barest)
     return ends

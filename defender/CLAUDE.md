@@ -41,6 +41,18 @@ they start, the learning drains, the lifecycle service) refuses a database whose
 migration may lock the tables it changes until it commits. So: stop the API, the workers, the learning drains and the
 lifecycle service; run migrations; start the new code. The notes below say only what an upgrade needs beyond that.
 
+## Upgrade from before #1471
+
+Stop the API, the workers and the credential proxy first, then run migrations (revision `0020_ticket_write`: the ticket
+write columns on the investigations table and the store's flag and word). Rebuild the job image: the job's helper
+and its finishing step changed. The worker now requires `DEFENDER_API_FRONTEND_ORIGIN` (the origin the screen link in a
+ticket comment points at) and exits with status 2 without it.
+
+Removed: the case record's `comment:` key (a record that still has it is refused: delete the key; the comment's
+wording is fixed, a disposition and a link to the investigation's screen) and the operator's `run.py --update-ticket`
+(an operator run never comments; a ticket comment is the start-investigation request's `update_ticket` flag, written
+by the job). The run page's own `--update-ticket` flag is gone too: its ticket line shows whenever a receipt exists.
+
 ## Upgrade from before #1083
 
 Stop the API, the workers and the lifecycle service, then run migrations (revision `0016_list_indexes`). It builds one

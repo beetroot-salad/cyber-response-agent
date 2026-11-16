@@ -1,6 +1,6 @@
 """The deployed worker (#1344 O15, D8): `python -m defender.worker`.
 
-Reads `DEFENDER_DATABASE_DSN`, `DEFENDER_DATA_ROOT`, `DEFENDER_BUILD_COMMIT`, `DEFENDER_WORKER_SLOTS`
+Reads `DEFENDER_API_FRONTEND_ORIGIN` (the API's own origin setting, which a flagged job's ticket comment links to; refused without it, #1471 W9), `DEFENDER_DATABASE_DSN`, `DEFENDER_DATA_ROOT`, `DEFENDER_BUILD_COMMIT`, `DEFENDER_WORKER_SLOTS`
 (default 3), `DEFENDER_WORKER_LEARNING_SLOTS` (default min(1, slots - 1)) and
 `DEFENDER_WORKER_LEARNING_CHECK_SECONDS` (default 300: how long a tenant goes without a post-step
 before a family-less one checks it, #1344 amendment 1). Refuses a build stamp that is not a
@@ -43,7 +43,7 @@ async def _serve_until_stopped(settings, copy: Path) -> None:  # noqa: ANN001 â€
             store, data_root=data_root_from_path(settings.root), child_argv=run_argv_in(copy),
             slots=settings.slots, clock=_CLOCK, learning_slots=settings.learning_slots,
             learning_argv=job_entry_argv, post_step_argv=post_step_argv, child_cwd=copy,
-            learning_check_interval=float(settings.learning_check_seconds))
+            learning_check_interval=float(settings.learning_check_seconds), frontend_origin=settings.frontend_origin)
         _logger.info("the worker serves build %s: %d slot(s), %d for learning, children from %s",
                      settings.build_commit, settings.slots, settings.learning_slots, copy)
         await worker.serve()

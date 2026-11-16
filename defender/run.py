@@ -70,15 +70,15 @@ from defender.investigation.run_state import RunState  # noqa: E402
 from defender import providers  # noqa: E402
 from defender.records import run_end  # noqa: E402
 from defender.tenancy import run_knowledge  # noqa: E402
-from defender.systems import case_system, system_status  # noqa: E402
+from defender.systems import system_status  # noqa: E402
 from defender._agent_role import AgentRole  # noqa: E402
 from defender.systems.run_tenant import Admitted, RunTenant, host_tenant  # noqa: E402
 from defender.tenancy.record_values import TenantRecords  # noqa: E402
 from defender.systems.system_status import RunSystems  # noqa: E402
 import time  # noqa: E402
 from datetime import UTC, datetime  # noqa: E402
-from defender.credential_proxy import helper_access, request_access, run_token_mint, signing_access  # noqa: E402
-from defender.kit.access import TOKEN_SEC, AccessDeclaration, RequestAccess  # noqa: E402
+from defender.credential_proxy import helper_access, request_access, signing_access  # noqa: E402
+from defender.kit.access import RequestAccess  # noqa: E402
 from defender.kit.faults import AdapterFault, ConfigFault  # noqa: E402
 from defender.systems.verb_grant import GrantError  # noqa: E402
 from defender.systems.verbs import (  # noqa: E402
@@ -86,7 +86,6 @@ from defender.systems.verbs import (  # noqa: E402
     RosterRead,
     ServingAbort,
 )
-from defender.investigation import ticket_writer as _default_ticket_writer  # noqa: E402
 
 DEFENDER_DIR = _DEFENDER_DIR
 
@@ -120,9 +119,6 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--no-learn", action="store_true",
                    help="Skip enqueuing for learning (also skips catalog curation — the "
                         "flag now governs both lanes)")
-    p.add_argument("--update-ticket", action="store_true",
-                   help="Add one comment of findings to the ticket the alert names, through the tenant's "
-                        "case system (default off)")
     p.add_argument("--model", default=None,
                    help="model id (overrides $DEFENDER_MODEL); e.g. a claude-* id, "
                         "or 'glm-5.3' / 'fireworks:<id>' for the Fireworks-served GLM")
@@ -135,7 +131,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                         "up under this tenant's folder, and its arm roster must name --world")
     p.add_argument("--as-of", default=None, type=_aware_moment, metavar="T",
                    help="start the run clock at T (ISO-8601 with an offset or Z); not with "
-                        "--update-ticket, --episode or --world")
+                        "--episode or --world")
     p.add_argument("--as-of-anchor", default=None, type=_aware_moment, metavar="W",
                    help="with --as-of: the wall instant at which the run clock read T; the run "
                         "starts at T plus the time since W (a frozen lab node's clock, #1347)")
@@ -151,10 +147,6 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     if ns.as_of is not None and (ns.episode is not None or ns.world is not None):
         p.error("--as-of is not available with --episode/--world: a sibling's clock is its "
                 "branch point's")
-    if ns.as_of is not None and ns.update_ticket:
-        p.error("--update-ticket is not available with --as-of: a run started at another "
-                "moment is not a live investigation, and its ticket row would enter the case "
-                "history as one")
     if ns.episode is not None and ns.alert is not None:
         p.error(
             "the positional alert is illegal with --episode: the manifest already names the "
@@ -608,25 +600,15 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
 
 
 class _TokenMint:
-    """Signs this run's request tokens in the run process (#1163 A1): a read token over the
-    granted `http-proxy` systems when a call first needs one, held by the process's one access
-    holder (#1363 O1, `RequestAccess`), and a write-back token (`rw` on the case system only) at the record step (#1359 D-9).
-    Building one checks configuration only; nothing contacts OpenBao until a token is asked for,
-    and a run with no `http-proxy` system to reach never does (A7)."""
+    """Signs this run's read token in the run process (#1163 A1): a read token over the granted
+    `http-proxy` systems when a call first needs one, held by the process's one access holder
+    (#1363 O1, `RequestAccess`). An operator run never comments on a ticket, so it mints no
+    write-back token (#1471 W7). Building one checks configuration only; nothing contacts OpenBao
+    until a token is asked for, and a run with no `http-proxy` system to reach never does (A7)."""
 
     def __init__(self, signer: Any, proxy_url: str | None, *, tenant_id: str, run_id: str,  # noqa: PLR0913 — the run's identity plus the holder's two seams
-                 reads: tuple[str, ...], case_system: str | None,
-                 unsigned: str | None = None, clock: Callable[[], float] = time.time,
+                 reads: tuple[str, ...], clock: Callable[[], float] = time.time,
                  on_fault: Callable[[AdapterFault], None] | None = None) -> None:
-        self._proxy_url = proxy_url
-        self._clock = clock
-        #: Signs the write-back token the way the holder signs the read token (`run_token_mint`).
-        self._mint = (None if signer is None else
-                      run_token_mint(signer, tenant_id=tenant_id, investigation=run_id))
-        self._case_system = case_system
-        #: Why a write-back token cannot be signed (R4), when it cannot: the run goes on, and the
-        #: record step says so.
-        self._unsigned = unsigned
         #: The process's access holder: built here, signs nothing until a call first needs a
         #: token. `clock` is the holder's own; `on_fault` is its owner's callback (#1363 B1).
         self._access: RequestAccess | None = (
@@ -635,43 +617,28 @@ class _TokenMint:
 
     @classmethod
     def for_run(  # noqa: PLR0913 — the run's identity plus the operator's three seams
-            cls, tenant: RunTenant, systems: RunSystems, *, ns: argparse.Namespace,
-                world: Any, case: case_system.CaseTarget | case_system.CaseSettingsFault | None,
-                run_id: str, accepted: tenancy.Tenant,
-                records: tenancy.TenantDirectory, signer: Any, proxy_url: str | None,
-                issuer_transport: Any, clock: Callable[[], float] = time.time,
+            cls, tenant: RunTenant, systems: RunSystems, *, run_id: str,
+                accepted: tenancy.Tenant, records: tenancy.TenantDirectory, signer: Any,
+                proxy_url: str | None, issuer_transport: Any, clock: Callable[[], float] = time.time,
                 on_fault: Callable[[AdapterFault], None] | None = None) -> _TokenMint:
         """The mint for a run, or a mint that signs nothing when no `http-proxy` system is in
         reach. A configuration that cannot sign (no proxy address; a tenant whose live generation
         in `records` records no sign login, A24', whether or not a `signer` is injected, r8.6)
         refuses run start when the run needs a READ token, naming the cause, and contacts no
         OpenBao; called before the run folder is made, so the refusal leaves none behind (r7
-        A20). A run that needs only the write-back token goes on instead (R4): it mints nothing
-        and the record step says why. The signer is the tenant's own
-        (`credential_proxy.request_signer`, r8.5) unless one is injected."""
+        A20). The signer is the tenant's own (`credential_proxy.request_signer`, r8.5) unless
+        one is injected."""
         # A branched run is a run (#1449): a world reads its granted systems on a run's terms.
         reads = system_status.read_grant(tenant, systems.down)
-        # The write-back token is for a case system run start judged sound (`case`), reached
-        # through the proxy; a case system with bad settings is told so by the record step.
-        # A world never gets one: `--update-ticket` with `--episode` is refused before this
-        # (`_resume_target`); `world is None` is the mint's own guard behind that refusal (#1449).
-        named = case.system if isinstance(case, case_system.CaseTarget) else None
-        written = named if (world is None and ns.update_ticket
-                                and isinstance(tenant.access.get(named or ""), AccessDeclaration)) else None
-        if not reads and written is None:
-            return cls(None, None, tenant_id=str(tenant.tenant_id), run_id=run_id, reads=(),
-                       case_system=None)
+        if not reads:
+            return cls(None, None, tenant_id=str(tenant.tenant_id), run_id=run_id, reads=())
         try:
             signer, address = signing_access(accepted.id, directory=records, signer=signer,
                                              proxy_url=proxy_url, transport=issuer_transport)
         except ConfigFault as refused:
-            if reads:
-                sys.exit(f"run start refused: {refused.detail}")
-            _logger.warning(f"the write-back token cannot be signed: {refused.detail}")
-            return cls(None, None, tenant_id=str(tenant.tenant_id), run_id=run_id, reads=(),
-                       case_system=written, unsigned=refused.detail)
+            sys.exit(f"run start refused: {refused.detail}")
         return cls(signer, address, tenant_id=str(tenant.tenant_id), run_id=run_id,
-                   reads=reads, case_system=written, clock=clock, on_fault=on_fault)
+                   reads=reads, clock=clock, on_fault=on_fault)
 
     def access_kwargs(self) -> dict[str, RequestAccess]:
         return _access_kwargs(self._access)
@@ -680,21 +647,6 @@ class _TokenMint:
         """Why the process lost its credential-proxy access (the holder's latched detail), or None
         while it has not, or never held any (#1363 D11)."""
         return None if self._access is None else self._access.lost
-
-    def write_back(self) -> dict[str, str]:
-        """The record step's keywords: a fresh write-back token (`rw` on the case system only) and
-        the proxy's address, when the case system is an `http-proxy` system run start judged sound
-        (a system with bad settings is told so by the step, not by a token it would never use);
-        nothing otherwise. A mint that fails here is a warning: the step reports the missing token
-        itself."""
-        if self._case_system is None or self._unsigned is not None or self._mint is None:
-            return {}
-        try:
-            token = self._mint({(self._case_system, "rw")}, self._clock() + TOKEN_SEC)
-        except AdapterFault as refused:
-            _logger.warning(f"no write-back token for the record step: {refused.detail}")
-            return {}
-        return {"request_token": token, "proxy_url": self._proxy_url or ""}
 
 
 # Run setup's host half lives in `run_common` (#1170 A6): the per-job host helper runs it for a job, and the
@@ -875,11 +827,6 @@ def _resume_target(ns: argparse.Namespace, *, episode: Episode | None,
     from defender.records import RunRefused
     from defender.records.formats import FamilyError
 
-    if ns.update_ticket:
-        sys.exit(
-            "--update-ticket is not available with --episode: a sibling world is a synthetic "
-            "continuation of someone else's case, and a ticket row for it would enter the "
-            "case history as a real investigation of a real alert")
     try:
         return resume_world(episode, ns.world, tenant=tenant, arm_ids=arm_ids())
     except (FamilyError, RunRefused) as refusal:
@@ -1024,22 +971,11 @@ class _Started:
     #: Where the run's read pass comes from (#1163): the operator run's own signer (`_TokenMint`,
     #: #1342 R6-8), or in a job container its host helper (`_HelperPass`, #1170 H2).
     minting: _ReadAccess
-    #: The case system's verdict, judged once at setup when the run records its case
-    #: (`--update-ticket`); `None` otherwise.
-    case: case_system.CaseTarget | case_system.CaseSettingsFault | None = None
     #: The run clock's start (`--as-of`, with `--as-of-anchor` its wall instant, #1347); `None`
     #: on an ordinary run.
     as_of: ClockOrigin | None = None
     #: The data root this entry point resolved, handed to the run's box start (#1469: the box check's folder).
     check_root: Path = dataclasses.field(kw_only=True)
-
-    def record_case(self) -> case_system.CaseTarget | case_system.CaseSettingsFault:
-        """The verdict the record step comments on: set at setup whenever the run records its case,
-        so its absence there is a caller bug, never a reason to judge again (#1366 R16)."""
-        if self.case is None:
-            raise TypeError("the record step needs the case verdict judged at run start "
-                            "(`--update-ticket`), and setup made none")
-        return self.case
 
     def lifecycle_kwargs(self, ns: argparse.Namespace) -> dict[str, Any]:
         # The origin only when set, so a lifecycle seam that predates it is called as before.
@@ -1156,13 +1092,9 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
                 known_ids=known_ids, catalog=verdict.systems.catalog.roster)
             # The request tokens' signer, over the systems just judged (#1342
             # R6-8): a configuration that cannot sign them refuses here, before the run is made;
-            # nothing is signed until a call or a ticket leg asks (r7 A20).
-            # The case system the record step will comment through, judged once here by run
-            # start's own adapter rules over the roster just read (#1359 D-17); nothing is called.
-            case = (case_system.case_verdict(tenant, defender_dir=DEFENDER_DIR, roster=systems.roster)
-                    if ns.update_ticket else None)
+            # nothing is signed until a call asks (r7 A20).
             minting = _TokenMint.for_run(
-                tenant, systems, ns=ns, world=world, case=case, run_id=early.run_dir.name,
+                tenant, systems, run_id=early.run_dir.name,
                 accepted=accepted, records=records, signer=signer, proxy_url=proxy_url,
                 issuer_transport=issuer_transport)
 
@@ -1208,7 +1140,7 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
             _write_record_versions(run_dir, current)
             yield _Started(accepted=accepted, tenant=tenant, run=run, model=model, world=world,
                            episode=episode, systems=systems, seams=seams, alert=alert,
-                           minting=minting, case=case, as_of=origin, check_root=check_root)
+                           minting=minting, as_of=origin, check_root=check_root)
         finally:
             copy.remove()
 
@@ -1222,13 +1154,13 @@ TEARDOWN_FAULTED = "teardown_faulted"
 
 def _post_steps(  # noqa: PLR0913 — the run, its summary, and the page's inputs
     started: _Started, summary: dict[str, Any], *,
-    visualize: Callable[..., None], update_ticket: bool,
+    visualize: Callable[..., None],
     operator_steps: Callable[[], None] | None = None, mirror: bool = True,
 ) -> None:
     """The post-steps both compositions share (#1342 M4), after the lifecycle has scrubbed the
     run folder: the readers of the scrubbed tree and the run page. `operator_steps` is the
-    operator composition's own (the ticket comment and the curation enqueue), run where they
-    always ran: after the table cross-check, before the page, which shows the ticket's receipt.
+    operator composition's own (the curation enqueue and the feedback issue), run where they
+    always ran: after the table cross-check, before the page.
     `mirror=False` is a job container's page (#1170 A10): saved in the run's own folder only, the
     helper copying it to the shared publish folder after the container exits.
 
@@ -1264,7 +1196,7 @@ def _post_steps(  # noqa: PLR0913 — the run, its summary, and the page's input
         operator_steps()
 
     try:
-        visualize(run, tenant=started.accepted, update_ticket=update_ticket,
+        visualize(run, tenant=started.accepted,
                   **({} if mirror else {"mirror": False}))
     except _run.VisualizeFailed:
         _logger.warning("the run page was not saved", exc_info=True)
@@ -1299,7 +1231,7 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
     environ: Mapping[str, str] | None = None,
     lifecycle: Callable[..., dict[str, Any]] = _run_investigation_lifecycle,
     visualize: Callable[..., None] = _run.visualize,
-    ticket_writer: Any = _default_ticket_writer,
+    ticket_writer: Any = None,  # accepted and ignored: an operator run never comments (#1471 W7)
     enqueue: Callable[..., bool] = _run.enqueue_curation,
     enqueue_feedback: Callable[..., bool] = _run.enqueue_feedback_issue,
     preflight: Callable[..., int] = preflight_role_models,
@@ -1338,8 +1270,8 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
     `PROXY_URL_ENV`).
 
     The operator composition (#1342 M3, M4): setup, the lifecycle, then the shared post-steps,
-    with the case ticket and the curation enqueue this composition alone owns."""
-    # Undrivable dependencies (credentialed lifecycle, HTML render, ticket endpoint) are
+    with the curation enqueue and the feedback issue this composition alone owns."""
+    # Undrivable dependencies (credentialed lifecycle, HTML render) are
     # injection seams defaulting to production.
     ns = parse_args(argv)
     # In a job container (#1170 A6) only a learning sibling runs here: its host half is its job's
@@ -1369,11 +1301,6 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
             # Every log line from here on, the crash included, names this run and the tenant this
             # process resolved once above and hands inward as one value.
             with _log.run_context(run_dir.name, tenant.tenant_id, logger=_logger):
-                if ns.update_ticket:
-                    # Nothing is called at run start (#1359 O1): a receipt an earlier attempt
-                    # left is cleared, and the record step does the rest.
-                    ticket_writer.clear_receipt(run)
-
                 _logger.info(f"run_dir={run_dir} model={started.model}")
                 _announce_provenance(run_dir)
 
@@ -1386,25 +1313,8 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
 
                 def ticket_and_curation() -> None:
                     # No automatic feed into the learning pipeline; only catalog curation is
-                    # triggered here, and its failure does not affect the exit status. The ticket
-                    # comment (never a close — that is a person's act) is recorded before the
-                    # curation marker, which a drainer may pick up immediately.
-                    if ns.update_ticket:
-                        # Both inputs come from the driver's summary, not from a possibly stale sidecar.
-                        # The case system was judged once, at setup (`started.case`), and the token
-                        # minted on that verdict — and only for a run that will comment.
-                        truncated_by = summary.get("truncated_by")
-                        closed_before_cut = summary.get("closed_before_cut") is True
-                        minting = started.minting  # the operator's own signer: `_set_up` builds a `_TokenMint`
-                        token = (minting.write_back()
-                                 if isinstance(minting, _TokenMint)
-                                 and _default_ticket_writer.comments_on(truncated_by, closed_before_cut) else {})
-                        ticket_writer.record_case_ticket(
-                            run, tenant=tenant, defender_dir=DEFENDER_DIR,
-                            env=box_mod.run_env(DEFENDER_DIR, run_dir, tenant_agent=tenant.agent),
-                            truncated_by=truncated_by, closed_before_cut=closed_before_cut,
-                            case=started.record_case(), **token)
-
+                    # triggered here, and its failure does not affect the exit status. An operator
+                    # run never comments on a ticket (#1471 W7).
                     skipped = _not_curated(started, no_learn=ns.no_learn)
                     if skipped is not None:
                         _logger.info(skipped)
@@ -1421,7 +1331,7 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
                             closed_before_cut=summary.get("closed_before_cut") is True,
                             run_state=run_state)
 
-                _post_steps(started, summary, visualize=visualize, update_ticket=ns.update_ticket,
+                _post_steps(started, summary, visualize=visualize,
                             operator_steps=ticket_and_curation, mirror=request is None)
                 return _exit_code(summary)
     except _PreflightRefused as refused:
@@ -1441,7 +1351,7 @@ def parse_job_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--tenant", required=True, help="the tenant the investigation belongs to")
     ns = p.parse_args(argv)
     for name, default in (("alert", None), ("episode", None), ("world", None), ("no_learn", False),
-                          ("update_ticket", False), ("model", None), ("knowledge_commit", None),
+                          ("model", None), ("knowledge_commit", None),
                           ("as_of", None), ("as_of_anchor", None)):
         setattr(ns, name, default)
     return ns
@@ -1649,7 +1559,7 @@ def job_main(  # noqa: PLR0913 — the job entry's inputs plus its injection sea
                                     relay=request, **({"start_token": token} if token else {}))
                 # The page is saved in the run's own folder only: the helper copies it to the shared
                 # publish folder once this container has exited (#1170 A10).
-                _post_steps(started, summary, visualize=visualize, update_ticket=False, mirror=False)
+                _post_steps(started, summary, visualize=visualize, mirror=False)
                 return _exit_code(summary)
     except _PreflightRefused as refused:
         return refused.rc

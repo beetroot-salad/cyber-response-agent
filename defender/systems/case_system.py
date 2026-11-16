@@ -25,7 +25,7 @@ from defender.kit.verbs import COMMENT_ACTION, HOST_ACTIONS, READBACK_ACTION, Ca
 from defender.systems.run_tenant import RunTenant
 from defender.systems.system_status import AdapterBroken, NotConfigured, ReasonScope, judge_adapter
 from defender.systems.verbs import RosterRead, fresh_adapter_module
-from defender.tenancy.case_record import CASE_RECORD_REL, CaseRecordSettings, CaseTicketError
+from defender.tenancy.case_record import CASE_RECORD_REL, CaseTicketError
 
 #: The retired system folder a tenant may still hold; `tenant check` names the new file for it.
 LEGACY_SYSTEM = "case-history"  # lint-shippable: ok — the retired system's folder name, named only to tell the operator to migrate
@@ -48,11 +48,9 @@ class CaseSettingsFault(Exception):  # noqa: N818 — named for what it reports
 
 @dataclasses.dataclass(frozen=True)
 class CaseTarget:
-    """A judged case system: its name, the tenant's comment template and the adapter module whose
-    `add_case_comment` takes the comment."""
+    """A judged case system: its name and the adapter module whose `add_case_comment` takes the comment."""
 
     system: str
-    template: CaseRecordSettings
     module: Any
 
     @property
@@ -120,8 +118,7 @@ def judge_case_system(
     carries `case_record`, `systems` and `access`, read once when the run began. `roster` is the
     tenant's systems (`TenantSystems.roster`, built once and handed, #1366 R16: never computed
     here), or the whole catalog's from a caller with no tenant. A tenant with no case record has no
-    case system: that too is a fault, said so, for the callers that asked (`--update-ticket` was
-    given). Order (C3): the case record, its system among the tenant's, its settings (the
+    case system: that too is a fault, said so, for the callers that asked (a flagged job's launch). Order (C3): the case record, its system among the tenant's, its settings (the
     adapter's own check), then the cover of its comment route by its stored access."""
     case = record.case_record
     if case is None:
@@ -147,7 +144,7 @@ def judge_case_system(
                                 f"names the system `{system}`, whose adapter cannot be used: "
                                 f"{cause.reason}", adapter_refused=True)
     _judge_cover(system, module, record)
-    return CaseTarget(system=system, template=case, module=module)
+    return CaseTarget(system=system, module=module)
 
 
 def case_verdict(

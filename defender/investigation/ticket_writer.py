@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""The host's one write to a case (#1359): at the end of a run started with `--update-ticket`, add
-one comment to the ticket the alert names, through the case system's adapter. The product decides
+"""The job's one write to a case (#1359, #1471): at the end of a flagged investigation, add one
+comment to the ticket the alert names, through the case system's adapter. The product decides
 what and when (exit class, body, agent tag, stale sentence, bound, receipt); the adapter decides
 how (request shape, text format, what a status means, the ticket's web link). Nothing is created
 or transitioned here, and nothing is called at run start."""
@@ -19,7 +19,6 @@ from defender.systems import case_system
 from defender.systems.run_tenant import RunTenant
 from defender.systems.verbs import VerbContext, redact_settings_path
 from defender.tenancy import case_ticket
-from defender.tenancy.case_record import CaseRecordSettings, CaseTicketError
 
 _logger = logging.getLogger(__name__)
 
@@ -56,22 +55,20 @@ REASON_NO_TOKEN = (
     "the write-back token could not be minted, so the comment was not sent (see the run log)")
 
 
-def _comment_body(
-    run: Run, truncated_by: str | None, settings: CaseRecordSettings,
-) -> tuple[str, str]:
-    """The comment text and its receipt word.
+def _comment_body(run: Run, truncated_by: str | None, link: str) -> tuple[str, str]:
+    """The comment text (P-6: the disposition word or the escalation or unreadable sentence, then the screen link) and
+    its receipt word. Every part is a constant, a closed-set word or an id: nothing the report says is carried.
 
     An unreadable report (`ReportNotParsable`) gets the fixed unreadable-branch sentence — or,
     on a forced-close exit, the escalation note, since the host's own forced close failed and
-    there is no verdict. Any other `CaseTicketError` (a template that does not render)
-    propagates to the caller's refusal branch (no call, a warning, an `error` receipt)."""
+    there is no verdict."""
     try:
         rec = case_ticket.read_case_record(run)
     except case_ticket.ReportNotParsable:
         if truncated_by in run_end.FORCED_CLOSE_EXITS:
-            return case_ticket.escalation_comment_body(str(truncated_by)), RECEIPT_ESCALATED
-        return case_ticket.unreadable_comment_body(), RECEIPT_COMMENTED
-    return case_ticket.case_record_to_comment(rec, settings=settings), RECEIPT_COMMENTED
+            return f"{case_ticket.escalation_comment_body(str(truncated_by))}\n{link}", RECEIPT_ESCALATED
+        return f"{case_ticket.unreadable_comment_body()}\n{link}", RECEIPT_COMMENTED
+    return f"{rec.disposition}\n{link}", RECEIPT_COMMENTED
 
 
 def _ticket_key(run: Run) -> str | None:
@@ -115,7 +112,7 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
     run: Run, *, tenant: RunTenant, defender_dir: Path, env: Mapping[str, str],
     truncated_by: str | None = None, closed_before_cut: bool = False,
     request_token: str | None = None, proxy_url: str | None = None,
-    case: case_system.CaseTarget | case_system.CaseSettingsFault,
+    case: case_system.CaseTarget | case_system.CaseSettingsFault, link: str,
 ) -> None:
     """Record the investigation into the case, never close it: at most one comment on the ticket
     the alert names, no transition. Closing is a person's act, which is what lets the store's
@@ -124,7 +121,7 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
 
     `case` is the case system's verdict run start made (`case_system.case_verdict`), the one the
     write-back token was minted on; required (#1366 R16): the step never judges the record over
-    a roster of its own."""
+    a roster of its own. `link` is the investigation screen's address, which the worker built: the comment's last part."""
     run_dir = run.run_dir
     key = ""
     try:
@@ -145,16 +142,10 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
         if not request_token:  # every case system is reached through the credential proxy
             _leg_refused(run, key, REASON_NO_TOKEN)
             return
-        try:
-            if escalated(truncated_by, closed_before_cut):
-                body, word = case_ticket.escalation_comment_body(str(truncated_by)), RECEIPT_ESCALATED
-            else:
-                body, word = _comment_body(run, truncated_by, target.template)
-        except CaseTicketError as e:
-            # The template refused: no call, but the receipt still says so.
-            _leg_refused(run, key, redact_settings_path(f"{case_system.CASE_RECORD_POINTER}: {e}",
-                                                   tenant.settings))
-            return
+        if escalated(truncated_by, closed_before_cut):
+            body, word = f"{case_ticket.escalation_comment_body(str(truncated_by))}\n{link}", RECEIPT_ESCALATED
+        else:
+            body, word = _comment_body(run, truncated_by, link)
         _post_comment(run, target, key, body, word,
                       _verb_context(tenant, defender_dir, run_dir, env, request_token, proxy_url))
     except Exception as e:  # noqa: BLE001 — a post-step must never break the run

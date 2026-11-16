@@ -15,6 +15,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
 
 from defender._io import read_text_utf8
+from defender._url import check_origin as _origin
 from defender._url import split_http_url
 from defender._yaml import safe_load
 from defender.credential_proxy import store_policies
@@ -122,26 +123,6 @@ def _port(value: str) -> int:
     return int(value)
 
 
-_DEFAULT_PORTS = {"http": 80, "https": 443}
-
-
-def _origin(value: str) -> str:
-    """Scheme, host and optional port: no path (a trailing slash too), query or fragment. Written exactly as a
-    browser sends it in `Origin` (lower case, no default port, an ASCII host), since requests are compared to it
-    character for character; any other spelling refuses, naming the one to write."""
-    parts = split_http_url(value)
-    if parts.path:
-        raise ValueError("must be a scheme, host and optional port only (no path, even a trailing slash)")
-    host = parts.hostname or ""
-    if not host.isascii():
-        raise ValueError("must name its host in ASCII (an internationalized name in its xn-- form), as a browser sends it")
-    netloc = f"[{host}]" if ":" in host else host
-    if parts.port is not None and parts.port != _DEFAULT_PORTS[parts.scheme]:
-        netloc += f":{parts.port}"
-    canonical = f"{parts.scheme}://{netloc}"
-    if value != canonical:
-        raise ValueError(f"must be written as a browser sends it: {canonical}")
-    return value
 
 
 def _openbao_addr(value: str) -> str:

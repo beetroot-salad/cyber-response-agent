@@ -179,6 +179,13 @@ _END_REASONS: dict[str, frozenset[str | None]] = {
 #: (a 32-bit `INTEGER`) holds. A larger one is no count, so the record is not one.
 MAX_FINDINGS_COUNT = 2**31 - 1
 
+#: How much of a ticket receipt the worker reads (#1471 C-8): a real one is a few hundred bytes.
+RECEIPT_BYTES = 64 * 1024
+#: The receipt's own statuses the worker passes on verbatim, the word for a run that left none, and for one it cannot read.
+RECEIPT_STATUSES = ("commented", "escalated", "error", "unknown")
+NO_RECEIPT = "no_receipt"
+RECEIPT_UNKNOWN = "unknown"
+
 _PROGRESS_FIELDS = frozenset({"fork_message_id", "stage", "sibling_cost_usd"})
 _END_FIELDS = frozenset({"status", "reason", "message", "fork_message_id", "stage",
                          "findings_count", "sibling_cost_usd"})
@@ -563,6 +570,23 @@ class JobLane:
         name = PurePosixPath(str(_run_id(run_id))) / RUN_LAYOUT.report
         read = self._held.view().read(name)
         return None if read.text is None else parse_report_text(read.text).disposition
+
+    # -- the ticket write-back's receipt (#1471 W6) ---------------------------------------------------
+
+    def ticket_write_word(self, run_id: object) -> str:
+        """The outcome word for a flagged run, off the receipt the job container's record step left beside the run
+        folder (`<runs>/<id>.ticket-write.json`): `no_receipt` when there is none; the receipt's own `status`
+        (`commented`, `escalated`, `error` or `unknown`) when it is one of those; `unknown` for anything else (a link,
+        a pipe or a folder at the name, text that is not UTF-8 or not a JSON object, a status outside the set, or more
+        than `RECEIPT_BYTES`). Read no-follow and size-limited; the receipt's reason never leaves it."""
+        read = self._held.view().read(self._paths(_run_id(run_id)).ticket_write().name, max_bytes=RECEIPT_BYTES + 1)
+        if read.absent:
+            return NO_RECEIPT
+        if read.text is None or len(read.text.encode("utf-8", errors="replace")) > RECEIPT_BYTES:
+            return RECEIPT_UNKNOWN
+        obj, unreadable = _io.load_json_artifact(read.text)
+        status = obj.get("status") if unreadable is None and isinstance(obj, dict) else None
+        return status if isinstance(status, str) and status in RECEIPT_STATUSES else RECEIPT_UNKNOWN
 
     # -- cost -------------------------------------------------------------------------------------
 

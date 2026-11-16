@@ -1,4 +1,4 @@
-"""The tenant's case record as text (#1359, #1366): which system records its cases and the comment body template, and
+"""The tenant's case record as text (#1359, #1366): which system records its cases, and
 the rules that make it usable. Split from `case_ticket` (#1470 D-E) so the record judgement, which the API loads, reads
 the rules without the run-side comment writer."""
 from __future__ import annotations
@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from defender.tenancy.models import CaseRecord as StoredCaseRecord
 
 #: The tenant's case-record file inside its `settings/` folder (#1359): which system records its
-#: cases and the comment body template. Optional: a tenant with no case system has none.
+#: cases. Optional: a tenant with no case system has none.
 CASE_RECORD_REL = "case-record.yaml"
 
 #: How a case-record fault names the record when its caller names it no other way: the retired file.

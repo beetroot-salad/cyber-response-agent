@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from defender import _io
+from defender._url import check_origin
 from defender.job_socket import NETWORK_ENV
 from defender.records.formats import BUILD_COMMIT_ENV, CODE_COPY_MARKER, is_build_commit
 
@@ -41,6 +42,8 @@ DATA_ROOT_ENV = "DEFENDER_DATA_ROOT"
 SLOTS_ENV = "DEFENDER_WORKER_SLOTS"
 LEARNING_SLOTS_ENV = "DEFENDER_WORKER_LEARNING_SLOTS"
 LEARNING_CHECK_ENV = "DEFENDER_WORKER_LEARNING_CHECK_SECONDS"
+#: The origin a flagged job's ticket comment links to (#1471 W3, W9): the API's own setting, read by the same rule.
+FRONTEND_ORIGIN_ENV = "DEFENDER_API_FRONTEND_ORIGIN"
 DEFAULT_SLOTS = 3
 #: How long a tenant goes without a post-step before the worker checks it without a family (#1344
 #: amendment 1).
@@ -69,6 +72,7 @@ class Settings:
     slots: int
     learning_slots: int
     learning_check_seconds: int = DEFAULT_LEARNING_CHECK_SECONDS
+    frontend_origin: str = ""
 
 
 def _setting_count(environ: Mapping[str, str], name: str, default: int) -> int:
@@ -98,6 +102,17 @@ def build_commit(environ: Mapping[str, str]) -> str:
     return raw
 
 
+def frontend_origin(environ: Mapping[str, str]) -> str:
+    """`DEFENDER_API_FRONTEND_ORIGIN` as the API reads it (`_url.check_origin`), or `WorkerStartRefused` naming it."""
+    raw = environ.get(FRONTEND_ORIGIN_ENV)
+    if not raw:
+        raise WorkerStartRefused(f"{FRONTEND_ORIGIN_ENV} is not set: the worker builds each ticket comment's link from it")
+    try:
+        return check_origin(raw)
+    except ValueError as bad:
+        raise WorkerStartRefused(f"{FRONTEND_ORIGIN_ENV}={raw!r} {bad}") from None
+
+
 def read_settings(environ: Mapping[str, str]) -> Settings:
     """The worker's settings, judged before any work: a build stamp that is a commit
     (`build_commit`), slots of at least one, learning slots between 0 and slots - 1 (default
@@ -125,7 +140,7 @@ def read_settings(environ: Mapping[str, str]) -> Settings:
     if not root.is_dir():
         raise WorkerStartRefused(f"{DATA_ROOT_ENV}={raw_root!r} is not a folder")
     return Settings(dsn=dsn, root=root, build_commit=commit, slots=slots, learning_slots=learning,
-                    learning_check_seconds=check)
+                    learning_check_seconds=check, frontend_origin=frontend_origin(environ))
 
 
 #: The option docker sets on its own default bridge network, which reaches whatever the host reaches.

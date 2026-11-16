@@ -17,7 +17,7 @@ no `before` (`check`), everything is judged."""
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -79,12 +79,10 @@ def _segments(path: str) -> list[str]:
 
 
 def write_covers(declared: Route, route: tuple[str, str]) -> bool:
-    """C2: a declared write route covers the comment route when the method is the same, the segment count is the same,
-    and each segment is a declared `*` or the same raw literal; where the route has `*`, the declared one must too."""
+    """C2, X2: a declared write route covers the comment route only when it is that route: the same method and the same
+    segments, a `*` exactly where the route has one and the same raw literal elsewhere. No wider route covers it."""
     method, pattern = route
-    got, want = _segments(declared.path), _segments(pattern)
-    return declared.method == method and len(got) == len(want) and all(
-        g == "*" if w == "*" else g in ("*", w) for g, w in zip(got, want, strict=True))
+    return declared.method == method and _segments(declared.path) == _segments(pattern)
 
 
 def read_matches(declared: Route, route: tuple[str, str]) -> bool:
@@ -96,18 +94,31 @@ def read_matches(declared: Route, route: tuple[str, str]) -> bool:
         g == w or "*" in (g, w) for g, w in zip(got, want, strict=True))
 
 
+def _shown(routes: Iterable[Route]) -> str:
+    return ", ".join(f"{r.method} {r.path}" for r in routes)
+
+
 def cover_fault(route: tuple[str, str], declaration: AccessDeclaration) -> str | None:
-    """Why `declaration` does not cover the comment `route` (C2), as a clause, or None when it does. THE rule: the
-    store's write, `tenant check` and run start's case verdict all ask it."""
+    """Why `declaration` does not cover the comment `route` (C2, X2), as a clause, or None when it does. THE rule: the
+    store's write, `tenant check` and run start's case verdict all ask it. It covers when its declared writes are
+    exactly the comment route and every declared read is a GET."""
     method, pattern = route
     matching = [r for r in declaration.reads if read_matches(r, route)]
     if matching:
-        shown = ", ".join(f"{r.method} {r.path}" for r in matching)
-        return (f"its read route {shown} matches its comment route {method} {pattern}: the comment is allowed only as a "
-                "declared write")
-    if not any(write_covers(r, route) for r in declaration.writes):
-        return (f"no declared write route covers its comment route {method} {pattern} (same method and segments, `*` "
-                "where the route has `*`)")
+        return (f"its read route {_shown(matching)} matches its comment route {method} {pattern}: the comment is allowed "
+                "only as a declared write")
+    covering = [r for r in declaration.writes if write_covers(r, route)]
+    if not covering:
+        declared = f"; it declares {_shown(declaration.writes)}" if declaration.writes else ""
+        return (f"no declared write route covers its comment route {method} {pattern} (the same method and segments, "
+                f"`*` where the route has `*`){declared}")
+    extra = [r for r in declaration.writes if r not in covering] + covering[1:]
+    if extra:
+        return (f"its write route {_shown(extra)} is not its comment route {method} {pattern}: its declared writes must "
+                "be exactly that route")
+    mutating = [r for r in declaration.reads if r.method != "GET"]
+    if mutating:
+        return f"its read route {_shown(mutating)} is not a GET: its declared reads must all be GET"
     return None
 
 
