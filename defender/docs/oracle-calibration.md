@@ -195,7 +195,7 @@ estimate invites the point estimate to be read.
 
    Every run names its tenant, and there is no default (#1078):
    set `TENANT_ID` to an `active` tenant's UUID. A tenant is created through the platform API
-   (`POST /admin/tenants`) and `python -m defender.lifecycle serve`, which places its knowledge
+   (`POST /api/admin/tenants`) and `python -m defender.lifecycle serve`, which places its knowledge
    repo under `$DEFENDER_DATA_ROOT/$TENANT_ID/knowledge` (see
    `defender/docs/development-operations.md`); nothing is cloned or set up by hand.
 

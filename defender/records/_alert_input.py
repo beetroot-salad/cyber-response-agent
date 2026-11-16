@@ -149,7 +149,7 @@ def admit(raw: bytes) -> Admitted:
 #: wording, used by the store and by run start alike. It names the missing mapping, the command-line verb and the API route.
 ALERT_MAPPING_MISSING = (
     "the tenant has no alert mapping: save one with `tenant.py set-alert-mapping <tenant-id> <file>` "
-    "or `PUT /tenants/<tenant-id>/alert-mapping`")
+    "or `PUT /api/tenants/<tenant-id>/alert-mapping`")
 
 
 def _reasons(kind: str) -> str:

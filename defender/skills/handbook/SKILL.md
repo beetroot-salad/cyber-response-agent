@@ -10,7 +10,7 @@ On-demand reference for the **defender** track (`defender/`). This skill
 explains how the defender works — it does not investigate alerts. Use
 `defender/SKILL.md` (via `python3 defender/run.py <alert.json> --tenant <tenant>`) for an
 actual run — every run names its tenant, and there is no default; on the host,
-the tenant is created through the platform API (`POST /admin/tenants`) and the tenant lifecycle
+the tenant is created through the platform API (`POST /api/admin/tenants`) and the tenant lifecycle
 (`python -m defender.lifecycle serve`), which places its knowledge under
 `$DEFENDER_DATA_ROOT/<tenant>/knowledge`; a run works only for an `active` tenant.
 `content/design.md` says what the defender is and which gates it carries.

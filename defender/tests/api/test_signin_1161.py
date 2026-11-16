@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import urllib.parse
 from importlib import resources
 from typing import Any
@@ -306,7 +307,8 @@ class _Raising(FakeSignIn):
 
 
 def test_an_internal_fault_on_sign_in_start_is_logged_as_an_error_and_answers_error(caplog: Any) -> None:
-    """A fault is `reason=error`, not a `bad-request`, and is logged at error level. (B4, S1, principle 2)"""
+    """A fault is `reason=error`, not a `bad-request`, and is logged at error level. It keeps the return path, judged
+    before the fault, so a retry still lands there. (B4, S1, principle 2; return amended)"""
     world = World(tenants={T1: [ANN]})
     caplog.set_level(logging.INFO)
     assert world.client().get(LOGIN, params={"return": RET}).status_code == 302
@@ -314,7 +316,7 @@ def test_an_internal_fault_on_sign_in_start_is_logged_as_an_error_and_answers_er
     world.signin = _Raising(begin=True)
     world.build(administrators=(), tenants={})
     answer = world.client(raise_errors=False).get(LOGIN, params={"return": RET})
-    assert failed(answer) == ("error", {})
+    assert failed(answer) == ("error", {"return": RET})
     assert not answer.headers.get_list("set-cookie")
     assert _errors(caplog)
 
@@ -513,3 +515,173 @@ def test_the_service_refusals_after_the_cookie_keep_the_return_including_unavail
     world.signin.unavailable_signins = int(setup == "unreachable")
     got = _refusal(world, _state(start.url), code, start.cookie_value)
     assert (got.reason, got.return_path) == (reason, RET)
+
+
+# --- D6: the attempt's record stays on the server ------------------------------------------------------------------
+
+def _forged(state: str, return_path: str) -> str:
+    """A cookie value in the shape a record carried in the browser would have: state, nonce, verifier, return path."""
+    import base64
+
+    return base64.urlsafe_b64encode(json.dumps([state, "n", "v", return_path]).encode()).decode().rstrip("=")
+
+
+def test_the_attempt_cookie_carries_a_random_token_and_nothing_the_callback_acts_on() -> None:
+    """The cookie's value is one random URL-safe token: no return path, nonce or PKCE verifier. (D6)"""
+    world = lab()
+    start = world.call(world.service.begin_signin, RET)
+    sent = world.signin.started[-1]
+    assert re.fullmatch(r"[A-Za-z0-9_-]{43}", start.cookie_value), start.cookie_value
+    assert all(part not in start.cookie_value for part in (sent.state, sent.nonce, RET))
+
+
+@pytest.mark.parametrize("target", ["//evil.example", "https://evil.example/", "/sign-in-failed"])
+def test_a_forged_attempt_cookie_cannot_choose_where_the_callback_sends_the_person(target: str) -> None:
+    """A cookie planted under a real attempt's name, holding a return path of its choosing: `prelogin-missing`, no
+    session, never a redirect to that path; the real attempt still lands where it was judged to go. (D6, P2)"""
+    world = _outcome_world()
+    real = world.client()
+    state = world.begin_signin(real, RET)
+    planted = world.client()
+    planted.cookies.set(attempt_cookie(state) or "", _forged(state, target))
+    answer = _arrive(world, planted, state)
+    assert failed(answer) == ("prelogin-missing", {})
+    assert SESSION_COOKIE not in planted.cookies
+    landed = _arrive(world, real, state, code="c-2")
+    assert location(landed) == RET  # control: the real attempt was not cancelled by the forged one
+
+
+def _encoded(text: str) -> str:
+    import base64
+
+    return base64.urlsafe_b64encode(text.encode()).decode().rstrip("=")
+
+
+@pytest.mark.parametrize("cookie", [_forged("\ud800", "/"), _encoded("[" * 50000), "x" * 5000, "a=b", _forged("s", "/")],
+                         ids=["lone-surrogate", "deep-nesting", "huge", "cookie-syntax", "old-format"])
+def test_a_malformed_attempt_cookie_reads_as_no_record_and_raises_nothing(cookie: str) -> None:
+    """Whatever the value, `complete_signin` answers `prelogin-missing`, never an exception. (D6, data model)"""
+    world = _outcome_world()
+    start = world.call(world.service.begin_signin, RET)
+    got = _refusal(world, _state(start.url), "c", cookie)
+    assert (got.reason, got.return_path) == ("prelogin-missing", None)
+
+
+def test_an_attempt_is_read_once() -> None:
+    """The callback takes the attempt's record: the same state and cookie again is `prelogin-missing`. (D6)"""
+    world = _outcome_world()
+    start = world.call(world.service.begin_signin, RET)
+    world.signin.answers["c"] = VerifiedSignIn(account_id=world.signin.account_for(ME), name="Me", amr=("pwd",))
+    assert isinstance(world.call(world.service.complete_signin, _state(start.url), "c", start.cookie_value), SignedIn)
+    again = _refusal(world, _state(start.url), "c", start.cookie_value)
+    assert (again.reason, again.return_path) == ("prelogin-missing", None)
+
+
+def test_an_attempt_expires_with_its_cookie() -> None:
+    """Past the cookie's ten minutes the record is gone too: `prelogin-missing`; a moment before, it completes. (D6)"""
+    import datetime as _dt
+
+    for wait, expected in ((_dt.timedelta(minutes=10), "prelogin-missing"), (_dt.timedelta(minutes=9, seconds=59), None)):
+        world = _outcome_world()
+        start = world.call(world.service.begin_signin, RET)
+        world.signin.answers["c"] = VerifiedSignIn(account_id=world.signin.account_for(ME), name="Me", amr=("pwd",))
+        world.clock.advance(wait)
+        got = world.call(world.service.complete_signin, _state(start.url), "c", start.cookie_value)
+        assert (got.reason if isinstance(got, Refused) else None) == expected, (wait, got)
+
+
+# --- D6 (amended): a browser keeps a bounded number of open attempts ------------------------------------------------
+
+def test_a_browser_keeps_at_most_the_cap_of_open_attempts_and_the_newest_complete() -> None:
+    """Twenty-five starts in one browser: it never holds more than the cap of attempt cookies, the oldest are cleared,
+    and every attempt it still holds completes. (D6, amended: the count is bounded)"""
+    import datetime as _dt
+
+    from defender.identity.service import OPEN_SIGNIN_ATTEMPTS_KEPT
+
+    world = lab()
+    browser = world.client()
+    states = []
+    for _ in range(25):
+        world.clock.advance(_dt.timedelta(seconds=1))  # each start is later than the last: "oldest" is well defined
+        answer = browser.get(LOGIN, params={"return": RET})
+        assert answer.status_code == 302
+        states.append(_state(answer.headers["location"]))
+        held = [name for name in browser.cookies if name.startswith("__Host-defender_prelogin_")]
+        assert len(held) <= OPEN_SIGNIN_ATTEMPTS_KEPT, len(held)
+    assert sorted(held) == sorted(attempt_cookie(state) for state in states[-OPEN_SIGNIN_ATTEMPTS_KEPT:])
+    assert failed(_arrive(world, browser, states[0]))[0] == "prelogin-missing"  # evicted: its cookie is gone
+    assert location(_arrive(world, browser, states[-1])) == RET  # control: the newest completes
+
+
+def test_a_sign_in_start_clears_attempt_cookies_that_name_no_open_attempt() -> None:
+    """Cookies with the attempt prefix but no open attempt (expired, wrong token, unknown state, misshapen) are
+    cleared by the next start; an open one is kept; other cookies are not touched. (D6, amended)"""
+    import datetime as _dt
+
+    world = _outcome_world()
+    old = world.call(world.service.begin_signin, RET)
+    world.clock.advance(_dt.timedelta(minutes=10))
+    live = world.call(world.service.begin_signin, RET)
+    held = {old.cookie_name: old.cookie_value, live.cookie_name: live.cookie_value,
+            attempt_cookie("unknown-state"): "x" * 43, attempt_cookie(_state(live.url) + "a"): live.cookie_value,
+            "__Host-defender_prelogin_bad!": "v", "__Host-defender_session": "s"}
+    wrong = world.call(world.service.begin_signin, RET)
+    held[wrong.cookie_name] = "y" * 43
+    start = world.call(world.service.begin_signin, RET, held)
+    assert set(start.clear) == set(held) - {live.cookie_name, "__Host-defender_session"}, start.clear
+
+
+def test_an_attempt_cookie_beyond_the_cap_is_cleared_oldest_first() -> None:
+    """A browser holding the cap of open attempts starts one more: exactly the oldest is cleared. (D6, amended)"""
+    import datetime as _dt
+
+    from defender.identity.service import OPEN_SIGNIN_ATTEMPTS_KEPT
+
+    world = _outcome_world()
+    starts = []
+    for _ in range(OPEN_SIGNIN_ATTEMPTS_KEPT):
+        starts.append(world.call(world.service.begin_signin, RET))
+        world.clock.advance(_dt.timedelta(seconds=1))
+    held = {start.cookie_name: start.cookie_value for start in reversed(starts)}  # the browser's order is no signal
+    assert world.call(world.service.begin_signin, RET, held).clear == (starts[0].cookie_name,)
+    del held[starts[0].cookie_name]
+    assert world.call(world.service.begin_signin, RET, held).clear == ()  # control: under the cap, nothing cleared
+
+
+# --- B4: a sign-in start that fails keeps its judged return ---------------------------------------------------------
+
+def test_a_sign_in_start_the_provider_cannot_serve_keeps_its_judged_return() -> None:
+    """`unavailable` at the start carries the `return` the start judged, so the retry lands there. (B4, S1)"""
+    world = World(tenants={T1: [ANN]})
+    world.signin.unavailable_begins = 1
+    answer = world.client(raise_errors=False).get(LOGIN, params={"return": RET})
+    assert failed(answer) == ("unavailable", {"return": RET})
+
+
+# --- S1: the sign-in routes' redirects in the API's document ----------------------------------------------------------
+
+def test_the_api_document_declares_the_sign_in_redirects_without_a_body() -> None:
+    """Login's 302 and both routes' 303 are redirects with `Location`: no problem document, no body at all. (S1)"""
+    document = World(tenants={T1: [ANN]}).client().get("/api/openapi.json").json()
+    declared = {(path, code): answer for path in (LOGIN, CALLBACK)
+                for code, answer in document["paths"][path]["get"]["responses"].items()}
+    assert set(declared) == {(LOGIN, "302"), (LOGIN, "303"), (CALLBACK, "303")}, sorted(declared)
+    for key, answer in declared.items():
+        assert "content" not in answer, (key, answer)
+        assert "Location" in answer.get("headers", {}), (key, answer)
+
+
+# --- S2: what a placeholder's grammar may be ------------------------------------------------------------------------
+
+@pytest.mark.parametrize("grammar", ["[0-9]+|new", "(?:a)", ".*", "[^/]+", "a$", "", "[0-9]{2}|x"])
+def test_the_address_reader_refuses_a_placeholder_grammar_that_could_match_outside_its_segment(grammar: str) -> None:
+    """A grammar with alternation, a group, a wildcard, a negated class or an anchor is refused when the list is read,
+    so no template's pattern can match an address outside its shape. (S2)"""
+    from defender.api import addresses
+
+    document = {"placeholders": {"id": grammar}, "shapes": [{"name": "x", "template": "/t/{id}/x", "returnable": True}]}
+    with pytest.raises(ValueError, match="placeholder id"):
+        addresses._compile(document)
+    control = {**document, "placeholders": {"id": "[0-9]+"}}
+    assert addresses._compile(control)[0][1].fullmatch("/t/12/x")  # control: the allowed form compiles

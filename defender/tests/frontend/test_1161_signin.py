@@ -128,6 +128,21 @@ def test_1161_b1_a_later_401_records_a_fresh_attempt_and_redirects(world, contex
     assert navigations_to(requests, world.origin, "/sign-in-failed") == []
 
 
+def test_1161_b1_a_screen_read_that_always_401s_after_me_succeeds_stops_at_session_lost(world, context, requests):
+    """`/api/me` accepts the session but the screen's own read always answers 401: one more sign-in, then
+    `session-lost` with `return`, never a third automatic one. (B1.3, amended: the loop is bounded for screen reads too)"""
+    target = world.screen()
+    read = _read_path(world)
+    context.route(lambda u: urllib.parse.urlsplit(u).path == read, lambda route: route.fulfill(status=401, body="{}"))
+    page = context.new_page()
+    page.goto(f"{world.origin}{target}")
+    screen(page, FAILED)
+    settle(page, 1500)
+    assert reason(page) == "session-lost"
+    assert where(page) == ("/sign-in-failed", {"reason": "session-lost", "return": target})
+    assert logins(requests, world.origin) == [target, target]
+
+
 @pytest.mark.parametrize("failure", ["500", "403", "404", "429", "204", "network"])
 def test_1161_b1_a_me_that_is_not_200_or_401_shows_the_error_state_and_the_screen_makes_no_call(
         world, context, requests, failure):
@@ -216,8 +231,9 @@ def test_1161_b1_a_reload_of_the_settled_failed_screen_keeps_its_target_and_the_
 
 
 @KINDS
-def test_1161_b8_back_from_the_providers_form_is_session_lost_with_return(world, context, requests, kind):
-    """`go_back()` from the provider's form is a fresh load of the target: `session-lost` with `return`. (B8, C44)"""
+def test_1161_b8_back_from_the_providers_form_is_sign_in_left_with_return(world, context, requests, kind):
+    """`go_back()` from the provider's form is a fresh load of the target reached by history: `sign-in-left` with
+    `return`, not `session-lost`. (B8, C44; reason amended)"""
     target = _target(world, kind)
     world.front.form = True
     page = context.new_page()
@@ -226,15 +242,15 @@ def test_1161_b8_back_from_the_providers_form_is_session_lost_with_return(world,
     page.locator(world.front.FORM_BUTTON).wait_for()
     page.go_back()
     screen(page, FAILED)
-    assert reason(page) == "session-lost"
-    assert where(page) == ("/sign-in-failed", {"reason": "session-lost", "return": target})
+    assert reason(page) == "sign-in-left"
+    assert where(page) == ("/sign-in-failed", {"reason": "sign-in-left", "return": target})
     assert logins(requests, world.origin) == [target]
 
 
 @KINDS
-def test_1161_b8_a_simulated_cache_restore_signed_out_is_session_lost_with_return(world, context, requests, kind):
-    """The document stays on the target with its record; a `persisted` pageshow shows `session-lost`; a non-persisted
-    one does nothing. (B1, B8, C44)"""
+def test_1161_b8_a_simulated_cache_restore_signed_out_is_sign_in_left_with_return(world, context, requests, kind):
+    """The document stays on the target with its record; a `persisted` pageshow shows `sign-in-left`; a non-persisted
+    one does nothing. (B1, B8, C44; reason amended)"""
     target = _target(world, kind)
     aborted = abort_login_navigation(context)
     page = context.new_page()
@@ -248,8 +264,8 @@ def test_1161_b8_a_simulated_cache_restore_signed_out_is_session_lost_with_retur
     assert len(api_calls(requests, world.origin)) == before and shown(page) != FAILED
     restore_from_cache(page)
     screen(page, FAILED)
-    assert reason(page) == "session-lost"
-    assert where(page) == ("/sign-in-failed", {"reason": "session-lost", "return": target})
+    assert reason(page) == "sign-in-left"
+    assert where(page) == ("/sign-in-failed", {"reason": "sign-in-left", "return": target})
     assert aborted and len(aborted) == 1
 
 
@@ -270,7 +286,7 @@ def test_1161_b1_the_failed_screen_consumes_the_record_and_keeps_an_address_that
 
 
 @pytest.mark.parametrize("given", ["prelogin-missing", "login-attempt-invalid", "unknown-account", "otp-required", "unavailable",
-                                   "error", "session-lost", "storage-unavailable", "no-such-reason", None, "bad-request"])
+                                   "error", "session-lost", "sign-in-left", "storage-unavailable", "no-such-reason", None, "bad-request"])
 def test_1161_b1_the_failed_screen_settles_the_records_target_for_every_reason_but_bad_request(
         world, context, requests, given):
     """A record for X and the screen opened at `/sign-in-failed` with any reason (unknown or none: `error`) and no

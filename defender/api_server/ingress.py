@@ -31,7 +31,14 @@ def _upstream(value: str) -> str:
     return value
 
 
+#: What a folder path may hold. The Caddyfile reads it by text substitution before parsing, so whitespace, braces,
+#: quotes or `#` would change the Caddyfile itself.
+_DIRECTORY = re.compile(r"[A-Za-z0-9._/@+=~-]+", re.ASCII)
+
+
 def _directory(value: str) -> str:
+    if not _DIRECTORY.fullmatch(value):
+        raise ValueError("may hold only letters, digits and . _ / @ + = ~ - (no spaces, braces, quotes or #)")
     if not Path(value).is_dir():
         raise ValueError("is not a directory")
     return value
@@ -61,13 +68,13 @@ def checked(environ: Mapping[str, str]) -> dict[str, str]:
 
 def main() -> None:
     try:
-        values = checked(os.environ)
+        checked(os.environ)  # Caddy reads the same names from the environment, unchanged
     except StartRefused as why:
         sys.exit(f"ingress: {why}")
     caddy = shutil.which("caddy")
     if caddy is None:
         sys.exit("ingress: `caddy` is not on PATH")
-    os.execve(caddy, [caddy, "run", "--config", str(CADDYFILE), "--adapter", "caddyfile"], {**os.environ, **values})
+    os.execve(caddy, [caddy, "run", "--config", str(CADDYFILE), "--adapter", "caddyfile"], os.environ)
 
 
 if __name__ == "__main__":

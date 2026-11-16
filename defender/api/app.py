@@ -20,7 +20,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from defender import identity as _identity
 from defender import tenancy as _tenancy
 from defender.identity import Authenticated, IdentityService, PersonCaller, ProgramCaller, audit
-from defender.identity.service import SESSION_LIFETIME
+from defender.identity.service import SESSION_LIFETIME, SIGNIN_ATTEMPT_LIFETIME
 from defender.identity.roles import Permission
 from defender.identity.models import Role
 from defender.records.formats import (
@@ -82,6 +82,9 @@ API_VERSION = "0.1.0"
 
 #: The one prefix every route and the OpenAPI document are mounted under, on the origin the frontend shares (B3).
 API_PREFIX = "/api"
+_CALLBACK_ROUTE = "/auth/callback"
+#: The sign-in callback's path, which the provider's redirect URI names: `<frontend origin>` + this.
+SIGNIN_CALLBACK = API_PREFIX + _CALLBACK_ROUTE
 
 #: The largest page any list returns; `limit` defaults to `DEFAULT_PAGE`.
 MAX_PAGE = 200
@@ -89,7 +92,7 @@ DEFAULT_PAGE = 50
 
 #: DC-6: `__Host-` cookies are Secure, Path=/ and carry no Domain.
 SESSION_COOKIE = "__Host-defender_session"
-_PRELOGIN_MAX_AGE = 600
+_PRELOGIN_MAX_AGE = int(SIGNIN_ATTEMPT_LIFETIME.total_seconds())
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 _logger = logging.getLogger(__name__)
@@ -706,7 +709,17 @@ auth = _router(tags=["auth"])
 
 
 #: Where a person is sent when sign-in fails: a frontend screen, never a problem document (S1).
-_FAILED_SCREEN = "/sign-in-failed"
+_FAILED_SCREEN = addresses.literal("sign-in-failed")
+
+
+def _redirect(description: str) -> dict[str, Any]:
+    """An OpenAPI answer that is a redirect: no body, only `Location`."""
+    return {"description": description, "content": None,
+            "headers": {"Location": {"description": "Where the browser goes next.", "schema": {"type": "string"}}}}
+
+
+#: The sign-in routes' failure answer, for their OpenAPI declaration: a redirect, never a problem document (S1).
+_TO_FAILED_SCREEN = _redirect(f"To `{_FAILED_SCREEN}?reason=<reason>`, with `return` when the attempt judged one.")
 
 
 def _to_failed_screen(reason: str, return_path: str | None = None) -> RedirectResponse:
@@ -727,7 +740,8 @@ def _return_path(request: Request) -> str | None:
 
 
 @auth.get("/auth/login", status_code=status.HTTP_302_FOUND, response_class=RedirectResponse,
-          responses=responses(303), dependencies=[Depends(_public)])
+          responses={302: _redirect("To the provider's sign-in page, with this attempt's cookie."),
+                     303: _TO_FAILED_SCREEN}, dependencies=[Depends(_public)])
 @_any_query
 async def login(request: Request, deps: Deps) -> RedirectResponse:
     """Send the person to the sign-in page, with this attempt's cookie. Anything but that is a 303 to the failed
@@ -736,19 +750,23 @@ async def login(request: Request, deps: Deps) -> RedirectResponse:
     if return_path is None:
         return _to_failed_screen("bad-request")
     try:
-        start = await deps.identity.begin_signin(return_path)
+        start = await deps.identity.begin_signin(return_path, request.cookies)
     except _identity.SignInUnavailable:
-        return _to_failed_screen("unavailable")
+        return _to_failed_screen("unavailable", return_path)
     except Exception:
         _logger.error("sign-in start failed", exc_info=True)
-        return _to_failed_screen("error")
+        return _to_failed_screen("error", return_path)  # judged before the fault: a retry still lands there
     response = RedirectResponse(start.url, status_code=status.HTTP_302_FOUND)
+    for stale in start.clear:
+        response.delete_cookie(stale, **_cookie_options())  # type: ignore[arg-type]
     response.set_cookie(start.cookie_name, start.cookie_value, max_age=_PRELOGIN_MAX_AGE, **_cookie_options())  # type: ignore[arg-type]
     return response
 
 
-@auth.get("/auth/callback", status_code=status.HTTP_303_SEE_OTHER, response_class=RedirectResponse,
-          responses=responses(303), dependencies=[Depends(_public)])
+@auth.get(_CALLBACK_ROUTE, status_code=status.HTTP_303_SEE_OTHER, response_class=RedirectResponse,
+          responses={303: _redirect("To the attempt's return path with a session, or to "
+                                    f"`{_FAILED_SCREEN}?reason=<reason>` with `return` when the attempt judged one.")},
+          dependencies=[Depends(_public)])
 @_any_query
 async def callback(request: Request, deps: Deps) -> Response:
     """Finish a sign-in: every answer is a 303, to the judged return path with a session, or to the failed screen with

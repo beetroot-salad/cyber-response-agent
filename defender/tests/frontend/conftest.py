@@ -43,7 +43,8 @@ def browser_tools() -> None:
 
 @pytest.fixture(scope="session")
 def built_frontend(browser_tools: None) -> Path:
-    """`defender/frontend/dist`, built once per run (`npm ci && npm run build`); fails when the build does."""
+    """The frontend's `dist/`, built outside the checkout once per set of sources (`npm ci && npm run build`); fails when
+    the build does. Its `node_modules/` is beside it."""
     return ingress_harness.build_frontend()
 
 

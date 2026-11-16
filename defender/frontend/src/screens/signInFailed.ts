@@ -12,6 +12,7 @@ export const REASONS = [
   "bad-request",
   "error",
   "session-lost",
+  "sign-in-left",
   "storage-unavailable",
 ] as const;
 export type Reason = (typeof REASONS)[number];
@@ -24,7 +25,9 @@ const MESSAGES: Record<Reason, string> = {
   unavailable: "Sign-in is temporarily unavailable.",
   "bad-request": "The sign-in request was not valid.",
   error: "Sign-in failed.",
-  "session-lost": "You were signed in, but the session did not arrive.",
+  // Also shown when the person left the provider by a bookmark or a typed address: the shell sees only a fresh load.
+  "session-lost": "You signed in, but this browser did not keep the session. It may be blocking cookies for this site.",
+  "sign-in-left": "Sign-in did not finish, so you are not signed in.",
   "storage-unavailable": "This browser does not let the app keep a sign-in attempt, so it cannot sign you in automatically.",
 };
 

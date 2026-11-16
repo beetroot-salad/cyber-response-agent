@@ -121,3 +121,18 @@ def test_a_failing_send_pass_does_not_stop_the_purge() -> None:
     with world.lifespan_client():
         assert wait_until(lambda: world.repo.refusals.get("claim_set_password", 0) >= 1)
         assert wait_until(lambda: not _held(world, "old"))
+
+
+def test_the_api_removes_sign_in_attempts_never_finished_once_they_expire() -> None:
+    """#1161 D6: an attempt abandoned at the provider leaves its row; the purge removes it once expired, and keeps a
+    live one."""
+    from defender.identity.models import SignInAttempt
+
+    world = World(tenants={T1: [ANN]}, send_interval=INTERVAL)
+    now = world.clock()
+    for state, expires in (("abandoned", now - SECOND), ("live", now + _dt.timedelta(minutes=5))):
+        world.call(world.repo.add_signin_attempt, SignInAttempt(
+            state=state, token_hash="h", nonce="n", verifier="v", return_path="/", expires_at=expires))
+    with world.lifespan_client():
+        assert wait_until(lambda: "abandoned" not in world.raw_repo._attempts)
+        assert set(world.raw_repo._attempts) == {"live"}

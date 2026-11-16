@@ -214,6 +214,22 @@ class Session(Base):
     expires_at: Mapped[_dt.datetime] = mapped_column(_TIME)
 
 
+class SignInAttempt(Base):
+    """One sign-in in flight (#1161 D6): what the callback needs, kept here so the browser holds only a random token
+    under the attempt's cookie (its hash is `token_hash`). Read once: the callback deletes it on every answer, and the
+    background purge deletes one never finished, after `expires_at`."""
+
+    __tablename__ = "signin_attempts"
+    __table_args__ = (Index("signin_attempts_by_expiry", "expires_at"), {"schema": SCHEMA})
+
+    state: Mapped[str] = mapped_column(Text, primary_key=True)
+    token_hash: Mapped[str] = mapped_column(Text)
+    nonce: Mapped[str] = mapped_column(Text)
+    verifier: Mapped[str] = mapped_column(Text)
+    return_path: Mapped[str] = mapped_column(Text)
+    expires_at: Mapped[_dt.datetime] = mapped_column(_TIME)
+
+
 class ProgramCredential(Base, kw_only=True):
     """A program's way in: an API key (its hash) or an OAuth client (the realm holds the secret). Whether it is
     usable is decided by this row alone: `live` and `expires_at > now`. Rows are never deleted (audit)."""

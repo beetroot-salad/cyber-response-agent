@@ -151,7 +151,8 @@ INPUTS = {
     "DEFENDER_API_FRONTEND_ORIGIN": ["http://localhost:8000/app", "localhost:8000", "HTTP://localhost:8000"],
     "DEFENDER_ARTIFACT_DOMAIN": ["https://artifacts.defender.test", "*.defender.test", "Artifacts.Test", "a.test:8443"],
     "DEFENDER_INGRESS_API_UPSTREAM": ["localhost", "localhost:abc", "localhost:99999", ":8001", "http://localhost:8001"],
-    "DEFENDER_INGRESS_FRONTEND_DIR": ["{tmp}/no-such-dir", "{tmp}/a-file"],
+    "DEFENDER_INGRESS_FRONTEND_DIR": ["{tmp}/no-such-dir", "{tmp}/a-file", "{tmp}/my dist", "{tmp}/a}}b", "{tmp}/a{{b",
+                                      "{tmp}/a\nb", "{tmp}/a#b", '{tmp}/a"b', "{tmp}/a\tb"],
 }
 
 
@@ -207,7 +208,18 @@ def test_the_launcher_refuses_an_unset_input_naming_it_before_caddy(
 def test_the_launcher_refuses_a_misshapen_input_naming_it_before_caddy(name: str, bad: str, tmp_path: Path, fake_caddy: Path) -> None:
     """Misshapen: non-zero exit, a message naming the setting, Caddy never started. (S5)"""
     (tmp_path / "a-file").write_text("x")
+    for folder in ("my dist", "a}b", "a{b", "a\nb", "a#b", 'a"b', "a\tb"):  # each exists: only its shape is wrong
+        (tmp_path / folder).mkdir()
     done = run_launcher(_env(tmp_path, fake_caddy, **{name: bad.format(tmp=tmp_path)}))
     assert done.returncode > 0, (done.returncode, done.stderr)
     assert name in done.stdout + done.stderr
     assert not (tmp_path / "caddy-ran").exists()
+
+
+def test_the_redirect_uri_the_provider_is_sent_names_the_callback_route() -> None:
+    """The path the program puts in the provider's redirect URI is the callback route's own, under `/api`. (B3, S1)"""
+    from defender.api.app import SIGNIN_CALLBACK
+
+    world = World(tenants={T1: [ANN]})
+    assert SIGNIN_CALLBACK == "/api/auth/callback"
+    assert SIGNIN_CALLBACK in {getattr(r, "path", None) for r in _routes(world.app.routes)}

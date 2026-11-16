@@ -7,7 +7,7 @@ from __future__ import annotations
 import dataclasses
 import datetime as _dt
 import hashlib
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from typing import Any, TypeVar, get_args, overload
 
 from defender.tenancy import InMemoryTenantRepository
@@ -16,7 +16,7 @@ from defender.records.formats import CredentialId, MembershipId, ProgramId, Tena
 
 from .errors import CredentialCapReached, DataRuleViolation, TenantNotActive
 from .models import (
-    CredentialKind, Membership, MembershipStatus, Program, ProgramCredential, Session, User, UserStatus,
+    CredentialKind, Membership, MembershipStatus, Program, ProgramCredential, Session, SignInAttempt, User, UserStatus,
     normalize_email,
 )
 from .ports import ExpiryWarning
@@ -42,7 +42,7 @@ def secret_hash(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
 
-_Row = TypeVar("_Row", User, Membership, Session, ProgramCredential, Program)
+_Row = TypeVar("_Row", User, Membership, Session, SignInAttempt, ProgramCredential, Program)
 
 
 @overload
@@ -118,6 +118,7 @@ class InMemoryIdentityRepository:
         self._by_account: dict[str, str] = {}
         self._memberships: dict[str, Membership] = {}
         self._sessions: dict[str, Session] = {}
+        self._attempts: dict[str, SignInAttempt] = {}
         self._programs: dict[str, Program] = {}
         self._credentials: dict[str, ProgramCredential] = {}
         self._warning_deliveries: dict[tuple[CredentialId, int, UserId], _dt.datetime] = {}
@@ -581,4 +582,27 @@ class InMemoryIdentityRepository:
                    if row.expires_at <= now or row.last_seen_at < idle_since]
         for key in expired:
             del self._sessions[key]
+        return len(expired)
+
+    # --- sign-in attempts --------------------------------------------------------------------
+    async def add_signin_attempt(self, row: SignInAttempt) -> None:
+        if row.state in self._attempts:
+            raise DataRuleViolation("a sign-in attempt with this state already exists")
+        self._attempts[row.state] = _copy(row)
+
+    async def take_signin_attempt(self, state: str, token: str, *, now: _dt.datetime) -> SignInAttempt | None:
+        row = self._attempts.get(state)
+        if row is None or row.token_hash != secret_hash(token) or row.expires_at <= now:
+            return None
+        return self._attempts.pop(state)
+
+    async def live_signin_attempts(self, held: Mapping[str, str], *, now: _dt.datetime) -> dict[str, _dt.datetime]:
+        live = ((state, self._attempts.get(state), token) for state, token in held.items())
+        return {state: row.expires_at for state, row, token in live
+                if row is not None and row.token_hash == secret_hash(token) and row.expires_at > now}
+
+    async def purge_expired_signin_attempts(self, *, now: _dt.datetime) -> int:
+        expired = [key for key, row in self._attempts.items() if row.expires_at <= now]
+        for key in expired:
+            del self._attempts[key]
         return len(expired)

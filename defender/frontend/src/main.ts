@@ -36,14 +36,17 @@ function toFailedScreen(reason: string, target: string | null): void {
 }
 
 /** A 401: sign in (recording the attempt), or, when this load came back from one, the failed screen. */
-function unauthorized(target: string | null, consumed: attempt.Read | null): void {
+function unauthorized(target: string | null, consumed: attempt.Read | null, cameBack: boolean, again = false): void {
   generation += 1; // this document is going away: nothing of the running load shows
-  if (consumed?.status === "found") return toFailedScreen("session-lost", target);
-  if (consumed?.status === "unavailable" || !attempt.record(target)) return toFailedScreen("storage-unavailable", target);
+  // Back (or Forward) to a page that sent itself to sign in means the person left the provider before finishing;
+  // any other return with a record means sign-in finished but its session did not arrive. A bookmark or a typed
+  // address in the same tab is a fresh navigation, so it still reads as the second.
+  if (consumed?.status === "found") return toFailedScreen(cameBack ? "sign-in-left" : "session-lost", target);
+  if (consumed?.status === "unavailable" || !attempt.record(target, again)) return toFailedScreen("storage-unavailable", target);
   window.location.assign(withReturn("/api/auth/login", target));
 }
 
-async function load(): Promise<void> {
+async function load(cameBack: boolean): Promise<void> {
   generation += 1;
   const mine = generation;
   const consumed = attempt.take();
@@ -64,7 +67,11 @@ async function load(): Promise<void> {
       }
       if (mine !== generation) return { kind: "gone" };
       if (response.status === 401) {
-        unauthorized(target, null); // a later 401 records a fresh attempt
+        // A later 401 records a fresh attempt. When this load came back from a sign-in that a screen's 401 had
+        // started, `/api/me` accepts the session but the screen's reads do not: stop rather than sign in forever.
+        const returned = consumed.status === "found";
+        if (returned && consumed.again) unauthorized(target, consumed, false);
+        else unauthorized(target, null, false, returned);
         return { kind: "gone" };
       }
       if (response.status === 404) return { kind: "not-available" };
@@ -86,17 +93,23 @@ async function load(): Promise<void> {
       return;
     }
     if (mine !== generation) return;
-    if (me.status === 401) return unauthorized(target, consumed);
+    if (me.status === 401) return unauthorized(target, consumed, cameBack);
     if (me.status !== 200) return showError();
   }
   await screen.render(context);
 }
 
+/** This document was reached by Back or Forward (a fresh load of a history entry). */
+function reachedByHistory(): boolean {
+  const entry = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
+  return entry?.type === "back_forward";
+}
+
 function start(): void {
-  void load();
-  // A page restored from the back-forward cache counts as a load. `isTrusted` is not checked.
+  void load(reachedByHistory());
+  // A page restored from the back-forward cache counts as a load, reached by history. `isTrusted` is not checked.
   window.addEventListener("pageshow", (event) => {
-    if (event.persisted) void load();
+    if (event.persisted) void load(true);
   });
 }
 

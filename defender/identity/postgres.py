@@ -11,7 +11,7 @@ every field loaded. The tables come from `defender.migrations`, never from this 
 from __future__ import annotations
 
 import datetime as _dt
-from collections.abc import AsyncIterator, Collection
+from collections.abc import AsyncIterator, Collection, Mapping
 from contextlib import asynccontextmanager
 from typing import Any, cast
 
@@ -32,7 +32,7 @@ from .memory import (
 )
 from .models import (
     CredentialKind, CredentialWarningDelivery, Membership, MembershipStatus, Program, ProgramCredential,
-    Session, User, normalize_email,
+    Session, SignInAttempt, User, normalize_email,
 )
 from .ports import ExpiryWarning
 
@@ -565,3 +565,28 @@ class PostgresIdentityRepository:
             deleted = await s.execute(delete(Session).where(
                 or_(Session.expires_at <= now, Session.last_seen_at < idle_since)))
             return cast(CursorResult[Any], deleted).rowcount  # a DML statement's result is a CursorResult
+
+    # --- sign-in attempts --------------------------------------------------------------------
+    async def add_signin_attempt(self, row: SignInAttempt) -> None:
+        async with self._tx() as s:
+            s.add(SignInAttempt(state=row.state, token_hash=row.token_hash, nonce=row.nonce, verifier=row.verifier,
+                                return_path=row.return_path, expires_at=row.expires_at))
+
+    async def take_signin_attempt(self, state: str, token: str, *, now: _dt.datetime) -> SignInAttempt | None:
+        async with self._tx() as s:
+            return (await s.execute(delete(SignInAttempt).where(
+                SignInAttempt.state == state, SignInAttempt.token_hash == secret_hash(token),
+                SignInAttempt.expires_at > now).returning(SignInAttempt))).scalars().first()
+
+    async def live_signin_attempts(self, held: Mapping[str, str], *, now: _dt.datetime) -> dict[str, _dt.datetime]:
+        if not held:
+            return {}
+        async with self._tx() as s:
+            rows = (await s.execute(select(SignInAttempt.state, SignInAttempt.token_hash, SignInAttempt.expires_at).where(
+                SignInAttempt.state.in_(list(held)), SignInAttempt.expires_at > now))).all()
+        return {state: expires for state, token_hash, expires in rows if token_hash == secret_hash(held[state])}
+
+    async def purge_expired_signin_attempts(self, *, now: _dt.datetime) -> int:
+        async with self._tx() as s:
+            deleted = await s.execute(delete(SignInAttempt).where(SignInAttempt.expires_at <= now))
+            return cast(CursorResult[Any], deleted).rowcount

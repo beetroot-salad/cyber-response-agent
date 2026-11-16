@@ -29,6 +29,14 @@ const shapes = document?.shapes;
 if (typeof placeholders !== "object" || placeholders === null || !Array.isArray(shapes)) {
   fail("addresses.json must hold `placeholders` (an object) and `shapes` (an array)");
 }
+// A placeholder's grammar: character classes with optional counts, and literal letters, digits, `_` and `-`; no
+// alternation, group, anchor or wildcard. The API's reader holds the same rule (addresses.py `GRAMMAR`).
+const GRAMMAR = /^(?:\[[A-Za-z0-9_-]+\](?:\{[0-9]+(?:,[0-9]+)?\}|\+)?|[A-Za-z0-9_-])+$/;
+for (const [name, grammar] of Object.entries(placeholders)) {
+  if (typeof grammar !== "string" || !GRAMMAR.test(grammar)) {
+    fail(`placeholder ${name} has a grammar outside the allowed form: ${JSON.stringify(grammar)}`);
+  }
+}
 const names = new Set();
 for (const shape of shapes) {
   if (typeof shape?.name !== "string" || typeof shape.template !== "string" || typeof shape.returnable !== "boolean") {

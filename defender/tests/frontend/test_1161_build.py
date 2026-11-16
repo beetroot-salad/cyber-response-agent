@@ -51,11 +51,12 @@ def _build(root: Path) -> subprocess.CompletedProcess[str]:
                           check=False, timeout=600)
 
 
-def _copy(root: Path, document: Any) -> Path:
-    """A copy of the frontend (sharing `node_modules`) over the shape list `document`; the copy's root."""
+def _copy(root: Path, document: Any, built: Path) -> Path:
+    """A copy of the frontend (sharing the `node_modules` beside the built `dist/`) over the shape list `document`; the
+    copy's root."""
     shutil.copytree(FRONTEND, root / "defender" / "frontend", ignore=shutil.ignore_patterns("node_modules", "dist"))
     (root / "defender" / "api").mkdir()
-    (root / "defender" / "frontend" / "node_modules").symlink_to(FRONTEND / "node_modules")
+    (root / "defender" / "frontend" / "node_modules").symlink_to(built.parent / "node_modules")
     (root / "defender" / "api" / "addresses.json").write_text(json.dumps(document), encoding="utf-8")
     return root
 
@@ -67,7 +68,7 @@ def test_1161_s2_the_build_follows_the_shape_list_and_fails_on_a_type_error(buil
     document = json.loads(LIST.read_text(encoding="utf-8"))
     if edit is not None:
         edit(document)
-    root = _copy(tmp_path / "copy", document)
+    root = _copy(tmp_path / "copy", document, built_frontend)
     done = _build(root)
     if edit is None:
         assert done.returncode == 0, (done.stdout[-1500:], done.stderr[-1500:])
@@ -85,7 +86,7 @@ def test_1161_s2_the_build_fails_on_a_type_error_in_any_source_file(built_fronte
     assert {p.name for p in sources} >= {"main.ts", "router.ts", "root.ts", "signInFailed.ts"}, sources
     problems = []
     for index, source in enumerate([None, *sources]):
-        root = _copy(tmp_path / f"copy-{index}", document)
+        root = _copy(tmp_path / f"copy-{index}", document, built_frontend)
         if source is not None:
             with (root / "defender" / "frontend" / source).open("a", encoding="utf-8") as handle:
                 handle.write("\nexport const unrelatedTypeError: number = 'not a number';\n")
@@ -97,3 +98,22 @@ def test_1161_s2_the_build_fails_on_a_type_error_in_any_source_file(built_fronte
         elif done.returncode == 0 or built:
             problems.append(f"{source}: exit {done.returncode}, index.html {'made' if built else 'absent'}")
     assert not problems, problems
+
+
+@pytest.mark.parametrize("grammar", ["[0-9a-f]+|new", "(?:[0-9a-f]+)", ".+", "[^/]+"])
+def test_1161_s2_the_build_refuses_a_placeholder_grammar_outside_the_allowed_form(built_frontend, tmp_path, grammar):
+    """A placeholder whose grammar has alternation, a group, a wildcard or a negated class fails the build and makes
+    no `index.html`, naming the placeholder: the API's reader refuses the same grammars. (S2)"""
+    document = json.loads(LIST.read_text(encoding="utf-8"))
+    document["placeholders"]["uuid"] = grammar
+    root = _copy(tmp_path / "copy", document, built_frontend)
+    done = _build(root)
+    assert done.returncode != 0, "the build accepted a grammar that can match outside its segment"
+    assert "placeholder uuid" in done.stderr + done.stdout, done.stderr[-1500:]
+    assert not (root / "defender" / "frontend" / "dist" / "index.html").exists()
+
+
+def test_1161_the_test_build_never_writes_the_checkout(built_frontend):
+    """The built `dist/` is outside the checkout's frontend folder, so a build never replaces files another run is
+    serving. (B11, test machinery)"""
+    assert FRONTEND not in built_frontend.parents, built_frontend

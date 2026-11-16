@@ -8,11 +8,10 @@ import base64
 import contextlib
 import datetime as _dt
 import hashlib
-import json
 import logging
 import re
 import secrets
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Literal
 
 from defender._model import model
@@ -36,7 +35,7 @@ from .errors import (
 from . import roles
 from .memory import secret_hash
 from .ports import ExpiryWarning, IdentityRepository, MailPort, ProgramsPort, SignInPort
-from .models import CredentialKind, Membership, Program, ProgramCredential, Role, Session, User, postgres_text
+from .models import CredentialKind, Membership, Program, ProgramCredential, Role, Session, SignInAttempt, User, postgres_text
 from .roles import Permission
 
 _logger = logging.getLogger(__name__)
@@ -58,9 +57,10 @@ _RETRY_LAST = _dt.timedelta(hours=1)
 _SEND_HOLD = _dt.timedelta(minutes=5)
 #: One email's claim, sends and record together: past it the email is deferred like a failed send.
 SEND_DEADLINE = _dt.timedelta(seconds=30)
-_PRELOGIN_PARTS = 3
 #: A program's key starts with this, so a secret scanner can recognise it and the API routes it without parsing a JWT.
 KEY_PREFIX = "dfk_"
+#: How long a sign-in attempt waits for its callback: its row's expiry and its cookie's max-age (#1161 D6).
+SIGNIN_ATTEMPT_LIFETIME = _dt.timedelta(minutes=10)
 #: A credential's lifetime: at least a week (so the 3-day warning always fires), at most a year; 90 days unless asked.
 MIN_CREDENTIAL_LIFETIME = _dt.timedelta(days=7)
 DEFAULT_CREDENTIAL_LIFETIME = _dt.timedelta(days=90)
@@ -102,16 +102,18 @@ Authenticated = PersonCaller | ProgramCaller
 
 @model(frozen=True)
 class LoginStart:
-    """Where to send the person, and the one cookie of this attempt (#1161 D6): its name is `attempt_cookie(state)`."""
+    """Where to send the person, and the one cookie of this attempt (#1161 D6): its name is `attempt_cookie(state)`.
+    `clear` names the browser's other attempt cookies to delete: those of no open attempt, and the oldest beyond the cap."""
 
     url: str
     cookie_name: str
     cookie_value: str
+    clear: tuple[str, ...] = ()
 
 
 @model(frozen=True)
 class SignedIn:
-    """A completed sign-in: the new session's value and the return path this attempt's own cookie carried."""
+    """A completed sign-in: the new session's value and the return path this attempt's record carried."""
 
     session: str
     return_path: str
@@ -119,7 +121,7 @@ class SignedIn:
 
 @model(frozen=True)
 class Refused:
-    """A sign-in that opened no session. `return_path` is set only when this attempt's own cookie supplied it."""
+    """A sign-in that opened no session. `return_path` is set only when this attempt's own record supplied it."""
 
     reason: str
     return_path: str | None
@@ -130,8 +132,12 @@ _STATE = re.compile(r"[A-Za-z0-9_-]{1,64}", re.ASCII)
 _ATTEMPT_COOKIE_PREFIX = "__Host-defender_prelogin_"
 
 
+#: The most open sign-in attempts one browser keeps: bounds the cookies riding every request (#1161 D6, amended).
+OPEN_SIGNIN_ATTEMPTS_KEPT = 10
+
+
 def attempt_cookie(state: str) -> str | None:
-    """The name of the cookie one sign-in attempt keeps its record in, or None for a `state` that cannot be one of
+    """The name of the cookie one sign-in attempt keeps its token in, or None for a `state` that cannot be one of
     ours. Pure, and the only place the name is derived (#1161 D6)."""
     return _ATTEMPT_COOKIE_PREFIX + state if isinstance(state, str) and _STATE.fullmatch(state) else None
 
@@ -257,9 +263,9 @@ class IdentityService:
     async def run_background(self, stop: asyncio.Event) -> None:
         """Pass now and then every `send_interval` until `stop` is set: a sender pass, then, when one is due
         (on the first pass, then once per `PURGE_INTERVAL` on the clock), the purge of the sessions sign-in
-        refuses (expired, or idle past the limit) and the reconciliation of the programs realm. A stop never
-        interrupts an email: the sender ends before claiming the next one, or during its wait. A failing
-        pass, purge or reconciliation, or one cut off at `purge_deadline`, is logged, and ends neither the
+        refuses (expired, or idle past the limit), the purge of expired sign-in attempts, and the reconciliation
+        of the programs realm. A stop never interrupts an email: the sender ends before claiming the next one, or
+        during its wait. A failing pass, purge or reconciliation, or one cut off at `purge_deadline`, is logged, and ends neither the
         loop nor the others."""
         next_purge: _dt.datetime | None = None
         while not stop.is_set():
@@ -277,6 +283,12 @@ class IdentityService:
                     _logger.info("purged %d sessions sign-in refuses (expired or idle)", purged)
                 except Exception:
                     _logger.exception("a session purge failed; the next is due at %s", next_purge.isoformat())
+                try:
+                    async with asyncio.timeout(self.purge_deadline.total_seconds()):
+                        abandoned = await self._repo.purge_expired_signin_attempts(now=now)
+                    _logger.info("purged %d sign-in attempts never finished", abandoned)
+                except Exception:
+                    _logger.exception("a sign-in attempt purge failed; the next is due at %s", next_purge.isoformat())
                 try:
                     async with asyncio.timeout(self.purge_deadline.total_seconds()):
                         await self.reconcile_program_clients()
@@ -411,27 +423,46 @@ class IdentityService:
             row.id, row.notify_requested_seq, sent_at=sent, expires_at=sent + INVITATION_LIFETIME)
 
     # --- sign-in -----------------------------------------------------------------------------
-    async def begin_signin(self, return_path: str) -> LoginStart:
-        """The URL to send the person to and this attempt's cookie. Its value carries the state, nonce, PKCE verifier and
-        `return_path` (unsigned: the first three are single-use and the provider checks them; only our API writes the
-        cookie, and it judged the path). The path is carried without inspection."""
-        state, nonce, verifier = (secrets.token_urlsafe(32) for _ in range(_PRELOGIN_PARTS))
+    async def begin_signin(self, return_path: str, cookies: Mapping[str, str] | None = None) -> LoginStart:
+        """The URL to send the person to and this attempt's cookie. The cookie holds only a random token; the state,
+        nonce, PKCE verifier and `return_path` stay in the attempt's row, which the callback reads once (#1161 D6). The
+        path is carried without inspection. Nothing is stored when the provider cannot start a sign-in.
+
+        `cookies` is what the browser sent: of its attempt cookies, those naming no open attempt are cleared, and the
+        oldest open ones too, so that with this one it keeps at most `OPEN_SIGNIN_ATTEMPTS_KEPT`."""
+        state, nonce, verifier, token = (secrets.token_urlsafe(32) for _ in range(4))
         url = await self._signin.begin_signin(state=state, nonce=nonce, code_challenge=_pkce_challenge(verifier))
-        record = json.dumps([state, nonce, verifier, return_path]).encode("ascii")
+        await self._repo.add_signin_attempt(SignInAttempt(
+            state=state, token_hash=secret_hash(token), nonce=nonce, verifier=verifier, return_path=return_path,
+            expires_at=self._clock() + SIGNIN_ATTEMPT_LIFETIME))
         name = attempt_cookie(state)
         assert name is not None  # the state is token_urlsafe: always a name
-        return LoginStart(url=url, cookie_name=name, cookie_value=base64.urlsafe_b64encode(record).decode("ascii").rstrip("="))
+        return LoginStart(url=url, cookie_name=name, cookie_value=token, clear=await self._crowded(cookies or {}))
+
+    async def _crowded(self, cookies: Mapping[str, str]) -> tuple[str, ...]:
+        """The attempt cookies among `cookies` to clear so that, with a new one, at most the cap stay open."""
+        held = {name.removeprefix(_ATTEMPT_COOKIE_PREFIX): value for name, value in cookies.items()
+                if name.startswith(_ATTEMPT_COOKIE_PREFIX) and attempt_cookie(name.removeprefix(_ATTEMPT_COOKIE_PREFIX))
+                and _STATE.fullmatch(value)}
+        live = await self._repo.live_signin_attempts(held, now=self._clock()) if held else {}
+        newest_first = sorted(live, key=lambda state: live[state], reverse=True)
+        kept = set(newest_first[:OPEN_SIGNIN_ATTEMPTS_KEPT - 1])
+        return tuple(sorted(name for name in cookies if name.startswith(_ATTEMPT_COOKIE_PREFIX)
+                            and name.removeprefix(_ATTEMPT_COOKIE_PREFIX) not in kept))
 
     async def complete_signin(self, state: str, code: str, cookie_value: str | None) -> SignedIn | Refused:
-        """The new session, or why there is none. `cookie_value` is what the browser sent under `attempt_cookie(state)`."""
-        record = _read_attempt(state, cookie_value)
+        """The new session, or why there is none. `cookie_value` is what the browser sent under `attempt_cookie(state)`:
+        the attempt's row is taken (read and deleted) only when it is that attempt's token. A missing, expired,
+        malformed or another attempt's token reads alike, as no record."""
+        if attempt_cookie(state) is None or not isinstance(cookie_value, str) or not _STATE.fullmatch(cookie_value):
+            return Refused("prelogin-missing", None)
+        record = await self._repo.take_signin_attempt(state, cookie_value, now=self._clock())
         if record is None:
             return Refused("prelogin-missing", None)
-        nonce, verifier, return_path = record
         try:
-            return await self._finish_signin(code, nonce, verifier, return_path)
+            return await self._finish_signin(code, record.nonce, record.verifier, record.return_path)
         except SignInUnavailable:
-            return Refused("unavailable", return_path)
+            return Refused("unavailable", record.return_path)
 
     async def _finish_signin(self, code: str, nonce: str, verifier: str, return_path: str) -> SignedIn | Refused:
         if not code:
@@ -793,20 +824,3 @@ class IdentityService:
             elif row.status == "invited" and await self._repo.revoke_invitation(row.id):
                 audit.emit("invitation.revoke", actor=audit.SYSTEM, tenant_id=row.tenant_id, target=row.id)
 
-
-def _read_attempt(state: str, cookie_value: str | None) -> tuple[str, str, str] | None:
-    """(nonce, verifier, return path) of the attempt `cookie_value` records, only when it is the attempt `state` names:
-    a missing, expired, malformed or another attempt's cookie reads alike, as no record."""
-    if attempt_cookie(state) is None or not cookie_value:
-        return None
-    try:
-        padded = cookie_value + "=" * (-len(cookie_value) % 4)
-        parts = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")))
-    except (ValueError, UnicodeError):
-        return None
-    if not (isinstance(parts, list) and len(parts) == 4 and all(isinstance(p, str) for p in parts)):
-        return None
-    recorded, nonce, verifier, return_path = parts
-    if not (secrets.compare_digest(state.encode(), recorded.encode()) and nonce and verifier):
-        return None
-    return nonce, verifier, return_path

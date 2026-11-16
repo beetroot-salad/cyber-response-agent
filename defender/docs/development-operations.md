@@ -14,7 +14,7 @@ remote Docker daemon can resolve bind sources. There is no default data root; na
 cd defender && uv venv .venv && uv pip install --python .venv/bin/python -e '.[dev]'   # bootstrap (entrypoints re-exec into .venv themselves)
 export DEFENDER_DATA_ROOT=/path/outside/the/checkout   # every run names its tenant; there is no default (#1078)
 export DEFENDER_DATABASE_DSN=<the tenant database>   # host processes read the tenant records from it (see below)
-export TENANT_ID=<the id POST /admin/tenants answered>   # an `active` tenant: see "Creating a tenant"
+export TENANT_ID=<the id POST /api/admin/tenants answered>   # an `active` tenant: see "Creating a tenant"
 python3 defender/cli/tenant.py check "$TENANT_ID"    # admitted and its folder accepted; every finding reported
 python3 defender/run.py <alert.json> --tenant "$TENANT_ID"   # one investigation → run dir under $DEFENDER_DATA_ROOT/$TENANT_ID/runs/; --no-learn skips curation enqueue
 python3 defender/cli/learning/branch.py --tenant "$TENANT_ID" <run_id> <branch_message_id>   # fork a finished run (by id, under the tenant's runs) into a family of worlds and grade it
@@ -23,7 +23,7 @@ python3 defender/learning/loop.py --tenant "$TENANT_ID" --author-drain     # fol
 
 ### Creating a tenant (#1214)
 
-An administrator posts `POST /admin/tenants` (202; `Location` is the tenant's URL). The record is
+An administrator posts `POST /api/admin/tenants` (202; `Location` is the tenant's URL). The record is
 `creating` until the lifecycle has done its steps, which `python -m defender.lifecycle serve` runs
 (dev: the management service and the host actor in one process; hosted: one process each): the
 repository `tenants/<id>` from the committed template, a bot with write access to it alone, the
@@ -34,14 +34,14 @@ publish. Then the tenant is `active`. Nothing is cloned or set up by hand, and t
 
 An `active` tenant has no alert mapping, and its investigations and runs are refused until one is saved with
 `python3 defender/cli/tenant.py set-alert-mapping <id> <file>` (the entries are described at the top of that command's
-file), or `PUT /tenants/<id>/alert-mapping` once the API is wired to the real store (#1083). `tenant.py check` reports
+file), or `PUT /api/tenants/<id>/alert-mapping` once the API is wired to the real store (#1083). `tenant.py check` reports
 a missing mapping as a finding.
 
-- `GET /admin/tenants/<id>` shows the state, the pending action, the step and the actor, and the
-  failure of a failed step; `POST /admin/tenants/<id>/resume` retries it.
-- `POST /admin/tenants/<id>/invitations` invites the first member (an `active` tenant with no
-  members); `POST /admin/tenants/<id>/rotate-forge-credential` replaces the credential generation;
-  `POST /admin/tenants/<id>/offboard` removes the tenant's folder, secrets, credentials and
+- `GET /api/admin/tenants/<id>` shows the state, the pending action, the step and the actor, and the
+  failure of a failed step; `POST /api/admin/tenants/<id>/resume` retries it.
+- `POST /api/admin/tenants/<id>/invitations` invites the first member (an `active` tenant with no
+  members); `POST /api/admin/tenants/<id>/rotate-forge-credential` replaces the credential generation;
+  `POST /api/admin/tenants/<id>/offboard` removes the tenant's folder, secrets, credentials and
   repository (the repository is deleted 30 days later).
 - The lifecycle's settings are the files and variables `defender/lifecycle/config.py` names
   (the forge admin token and OpenBao management login are read from files, never the environment).
@@ -130,7 +130,7 @@ missing or invalid one refuses start naming it. Secret files hold one value, a t
 | `DEFENDER_DATABASE_DSN` | the database (must be at the code's migration head) |
 | `DEFENDER_API_HOST`, `DEFENDER_API_PORT` | listen address |
 | `DEFENDER_API_FRONTEND_ORIGIN` | the app's origin (no path): the one origin a cookie-authenticated write may carry, and the origin the sign-in redirect URI `<origin>/api/auth/callback` is derived from, which the operator registers in the realm; the ingress serves this origin |
-| `DEFENDER_API_DOCS` | dev only: `true` serves the interactive docs pages `/api/docs` and `/api/redoc` (off, and not served, otherwise); `/api/openapi.json` always ships |
+| `DEFENDER_API_DOCS` | dev only: `true` serves the interactive docs pages `/api/docs` and `/api/redoc`; `false` or unset serves neither, and any other value refuses to start; `/api/openapi.json` always ships |
 | `DEFENDER_API_ADMINISTRATORS_FILE` | YAML `administrators: [<email>, ...]` |
 | `DEFENDER_KEYCLOAK_SERVER_URL` | Keycloak as the API reaches it (dev: `http://keycloak:8080`) |
 | `DEFENDER_KEYCLOAK_ISSUER`, `DEFENDER_KEYCLOAK_PROGRAMS_ISSUER` | `<front-channel>/realms/<realm>` (dev: `http://localhost:8080/realms/defender`, `.../defender-programs`) |
@@ -302,7 +302,7 @@ The issuer's JWKS key id must be `fixture`; these signing keys are fixture data 
 
 Tenant IDs are canonical lowercase UUIDs. Names such as `acme` are refused by every normal
 admission path; there is no alias or automatic conversion. The replacement is a new tenant:
-`POST /admin/tenants` mints its UUID (save it).
+`POST /api/admin/tenants` mints its UUID (save it).
 
 If a pre-#1120 installation has no knowledge repository, recover it with the old checkout
 before this migration; `tenant.py migrate` is retired and no longer exists here.
@@ -314,7 +314,7 @@ the old code. Upgrade every checkout using the data root together. With all writ
    Preserve that archive, including its row, runs, episodes, sessions and learning state.
    Do not change tenant IDs inside historical records or reuse their state for the new tenant.
    A sibling archive inside the data root is refused by its single-tenant guard.
-2. Create the new tenant (`POST /admin/tenants`, then wait for it to be `active`; see "Creating a
+2. Create the new tenant (`POST /api/admin/tenants`, then wait for it to be `active`; see "Creating a
    tenant"). Its repository starts from the template: push the archived `knowledge/` history
    into it by hand as a pull request, keeping `agent/.tenant-id` as the lifecycle wrote it (the
    new UUID followed by one newline). Review and update any external credentials or identity

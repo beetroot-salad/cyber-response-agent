@@ -1091,13 +1091,10 @@ async def test_1161_b3_a_cookie_alone_reads_the_api_and_no_origin_is_granted_cor
 
 
 @pytest.mark.postgres
-@pytest.mark.parametrize(("value", "served_docs"), [("true", True), (None, False), ("false", False), ("1", False),
-                                                    ("TRUE", False), ("", False), ("True", False), ("yes", False),
-                                                    ("on", False), ("y", False), (" true", False), ("true ", False),
-                                                    ("true\n", False), ("enabled", False)])
+@pytest.mark.parametrize(("value", "served_docs"), [("true", True), (None, False), ("false", False)])
 async def test_1161_b10_the_docs_pages_are_served_only_when_the_dev_setting_is_true(
         tenants, tmp_path, value, served_docs):
-    """`DEFENDER_API_DOCS=true` serves `/api/docs` and `/api/redoc`; anything else, or unset, serves neither; the document always ships. (B10)"""
+    """`DEFENDER_API_DOCS=true` serves `/api/docs` and `/api/redoc`; `false`, or unset, serves neither; the document always ships. (B10)"""
     from defender.api_server import Settings, serving
 
     extra = {} if value is None else {"DEFENDER_API_DOCS": value}
@@ -1111,3 +1108,13 @@ async def test_1161_b10_the_docs_pages_are_served_only_when_the_dev_setting_is_t
         assert [p for p in route_paths(running.app.routes) if not p.startswith("/api/")] == []
         assert (await client.get("/api/docs/oauth2-redirect")).status_code == (200 if served_docs else 404)
         assert [(await client.get(p)).status_code for p in ("/docs", "/redoc", "/docs/oauth2-redirect", "/openapi.json")] == [404] * 4
+
+
+@pytest.mark.parametrize("value", ["1", "TRUE", "", "True", "yes", "on", "y", " true", "true ", "true\n", "enabled", "0", "off"])
+def test_1161_b10_a_misspelt_docs_setting_refuses_to_start_naming_it(tmp_path, value):
+    """Any `DEFENDER_API_DOCS` other than `true` or `false` refuses to start, naming the setting: a misspelling never
+    reads silently as off. (B10, amended)"""
+    from defender.api_server import Settings, StartRefused
+
+    with pytest.raises(StartRefused, match="DEFENDER_API_DOCS"):
+        Settings.from_environ({**environment(tmp_path, dsn="postgresql://u@h/d"), "DEFENDER_API_DOCS": value})

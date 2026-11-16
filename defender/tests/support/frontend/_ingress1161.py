@@ -6,14 +6,16 @@ four inputs are `DEFENDER_API_FRONTEND_ORIGIN`, `DEFENDER_ARTIFACT_DOMAIN`, `DEF
 launcher fail loudly (B11), never skip.
 
 - `require_tools()`: fails naming every missing tool (node, npm, caddy, playwright and its Chromium).
-- `build_frontend()`: `npm ci && npm run build` in `defender/frontend/` once per pytest run (a file lock and a stamp
-  keyed by `PYTEST_XDIST_TESTRUNUID` keep xdist workers from building at once); returns `dist/`.
+- `build_frontend()`: `npm ci && npm run build` in a copy of `defender/frontend/` outside the checkout, kept by the hash
+  of its sources (a file lock per hash keeps runs and xdist workers from building it twice); returns that copy's `dist/`,
+  beside its `node_modules/`.
 - `ingress(upstream, frontend_dir, ...)`: the launcher running; yields the origin `http://localhost:<port>`.
 - `launcher_env(...)` and `run_launcher(env)`: for the launcher's refusals."""
 from __future__ import annotations
 
 import contextlib
 import fcntl
+import hashlib
 import importlib.util
 import os
 import shutil
@@ -56,19 +58,69 @@ def _chromium_present() -> bool:
     return True
 
 
+#: What a build writes or installs in the frontend folder; never part of what a build is made from.
+_BUILD_OUTPUTS = ("node_modules", "dist", "generated")
+#: A build (with its `node_modules`, about 35 MB) unused this long is deleted by the next build; a staging folder left
+#: by a killed build, after a day. Only by age, never "not the current one": a build another run serves stays.
+_KEEP_BUILD = 7 * 24 * 3600
+_KEEP_STAGING = 24 * 3600
+
+
+def _prune(builds: Path, keep: Path) -> None:
+    now = time.time()
+    for entry in builds.iterdir():
+        if entry == keep or not entry.is_dir():
+            continue
+        age = now - entry.stat().st_mtime
+        if "-" in entry.name and age > _KEEP_STAGING:
+            shutil.rmtree(entry, ignore_errors=True)
+        elif "-" not in entry.name and age > _KEEP_BUILD:
+            with open(builds / f"{entry.name}.lock", "w") as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX)
+                shutil.rmtree(entry, ignore_errors=True)
+
+
+def _build_key(frontend: Path, shape_list: Path) -> str:
+    """A hash of everything a build reads: the frontend's files as they are on disk (not only committed ones), the shape
+    list and the Node version."""
+    digest = hashlib.sha256()
+    node = subprocess.run(["node", "--version"], capture_output=True, text=True, check=False).stdout.strip()
+    digest.update(node.encode() + b"\0")
+    files = sorted(p for p in frontend.rglob("*")
+                   if p.is_file() and not set(p.relative_to(frontend).parts) & set(_BUILD_OUTPUTS))
+    for path in [*files, shape_list]:
+        digest.update(str(path.relative_to(frontend.parent)).encode() + b"\0" + path.read_bytes() + b"\0")
+    return digest.hexdigest()[:24]
+
+
 def build_frontend(frontend: Path = FRONTEND) -> Path:
-    """The frontend built to static files, once per run; its `dist/`."""
+    """The frontend built to static files; its `dist/`. The build runs in a copy of the frontend and the shape list
+    (`npm ci && npm run build` there), in a folder outside the checkout named by the hash of what it was made from, and
+    is moved into place whole: the checkout is never written, a finished build is never changed, and another run
+    serving one is never disturbed. A run whose sources match a finished build reuses it."""
     assert (frontend / "package.json").is_file(), f"no frontend at {frontend} (#1161 B8)"
-    run_id = os.environ.get("PYTEST_XDIST_TESTRUNUID", f"pid{os.getpid()}")
-    stamp = Path(tempfile.gettempdir()) / f"defender-frontend-built-{run_id}"
-    with open(Path(tempfile.gettempdir()) / "defender-frontend-build.lock", "w") as lock:
+    shape_list = frontend.parent / "api" / "addresses.json"
+    builds = Path(tempfile.gettempdir()) / "defender-frontend-builds"
+    builds.mkdir(exist_ok=True)
+    done = builds / _build_key(frontend, shape_list)
+    dist = done / "defender" / "frontend" / "dist"
+    with open(builds / f"{done.name}.lock", "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        if not stamp.exists():
-            for argv in (["npm", "ci", "--no-audit", "--no-fund"], ["npm", "run", "build"]):
-                done = subprocess.run(argv, cwd=frontend, capture_output=True, text=True, check=False)
-                assert done.returncode == 0, f"`{' '.join(argv)}` failed:\n{done.stdout[-2000:]}\n{done.stderr[-2000:]}"
-            stamp.write_text("built")
-    dist = frontend / "dist"
+        if not done.exists():
+            staging = Path(tempfile.mkdtemp(prefix=f"{done.name}-", dir=builds))
+            try:
+                copy = staging / "defender" / "frontend"
+                shutil.copytree(frontend, copy, ignore=shutil.ignore_patterns(*_BUILD_OUTPUTS))
+                (staging / "defender" / "api").mkdir()
+                shutil.copy2(shape_list, staging / "defender" / "api" / "addresses.json")
+                for argv in (["npm", "ci", "--no-audit", "--no-fund"], ["npm", "run", "build"]):
+                    ran = subprocess.run(argv, cwd=copy, capture_output=True, text=True, check=False)
+                    assert ran.returncode == 0, f"`{' '.join(argv)}` failed:\n{ran.stdout[-2000:]}\n{ran.stderr[-2000:]}"
+                staging.rename(done)
+            finally:
+                shutil.rmtree(staging, ignore_errors=True)
+        os.utime(done)  # in use: the prune keeps it
+    _prune(builds, done)
     assert (dist / "index.html").is_file(), f"the build made no {dist / 'index.html'}"
     return dist
 
