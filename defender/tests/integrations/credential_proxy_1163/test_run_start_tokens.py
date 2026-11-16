@@ -644,14 +644,20 @@ def _mint_for(tmp_path, data_root, signer, *, world: Any = None, **seams: Any) -
     return mint
 
 
-#: The systems the sibling tenant declares on the proxy, one of each kind against `TABLE`: `cmdb` granted and declared,
-#: `identity` granted yet undeclared, `ticket` declared yet granted to no role.
-SIBLING_PROXIED = ("cmdb", "ticket")
+#: The sibling tenant's verb grants: `TABLE`, plus a third system its gather role reaches.
+SIBLING_TABLE = TABLE + """\
+  threat-intel:
+    health-check: {roles: [gather]}
+    lookup: {roles: [gather]}
+"""
+#: The systems the sibling tenant declares on the proxy, every kind against `SIBLING_TABLE` and two of the first:
+#: `cmdb` and `identity` granted and declared, `threat-intel` granted yet undeclared, `ticket` declared yet ungranted.
+SIBLING_PROXIED = ("cmdb", "identity", "ticket")
 
 
 def _plant_sibling(tmp_path, monkeypatch) -> tuple[Path, Path, Any]:
     """The sibling episode's tenant with exactly `SIBLING_PROXIED` declared on the proxy (every other `access.yaml`
-    removed), `TABLE` as its verb grants, and a live sign login; returns the episode, the data root and the records."""
+    removed), `SIBLING_TABLE` as its verb grants, and a live sign login; returns the episode, the data root and the records."""
     import os
 
     from defender.tests.runtime.providers import _spec1243 as P
@@ -661,7 +667,7 @@ def _plant_sibling(tmp_path, monkeypatch) -> tuple[Path, Path, Any]:
     folder = root / P.SIBLING_TENANT / "knowledge"
     for undeclared in (folder / "settings" / "systems").glob("*/access.yaml"):
         undeclared.unlink()
-    (folder / "settings" / "verb-grants.yaml").write_text(TABLE, encoding="utf-8")
+    (folder / "settings" / "verb-grants.yaml").write_text(SIBLING_TABLE, encoding="utf-8")
     for system in SIBLING_PROXIED:
         decl = H.declaration("http://x.invalid/api", writes=CASE_WRITES.get(system, ()))
         for rel, text in H.access_files(system, decl, env=A.env_text(system, extra=EXTRA.get(system, ""))).items():
@@ -717,7 +723,7 @@ def test_1449_a_world_reads_on_a_runs_terms_and_no_operator_run_start_signs_a_wr
         return A.grant_of(_claims_of_token(signer, access.token()))
 
     assert read_grant(world_access, world_signer) == read_grant(run_access, run_signer) == [
-        ("cmdb", "r")], "a world's read grant is not a regular run's, or not what the table grants"
+        ("cmdb", "r"), ("identity", "r")], "a world's read grant is not a regular run's, or not what the table grants"
     for signer in (run_signer, world_signer):
         assert {m for p in signer.payloads for _s, m, *_ in A.claims_of_payload(p)["grant"]} == {"r"}, (
             "a run start signed something other than its read grant")

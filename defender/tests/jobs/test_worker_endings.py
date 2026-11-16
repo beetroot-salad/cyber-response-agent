@@ -8,6 +8,7 @@ import hashlib
 import json
 import logging
 import os
+import string
 import signal
 from types import SimpleNamespace
 
@@ -291,7 +292,12 @@ async def test_1471_p5_a_flagged_rows_tenant_folder_gains_exactly_what_an_unflag
     folders = {tenant: world["root"] / tenant for tenant, _flag, _key in rows}
 
     def snapshot(folder) -> dict:
-        return {p.relative_to(folder): p.read_bytes() for p in folder.rglob("*") if p.is_file()}
+        """Every entry by kind and mode: a directory or a link is as visible to a job as a file's bytes."""
+        def entry(p):
+            kind = "link:" + os.readlink(p) if p.is_symlink() else "dir" if p.is_dir() else "file"
+            body = p.read_bytes() if kind == "file" else kind.encode()
+            return b"%o " % (p.lstat().st_mode & 0o7777) + body
+        return {p.relative_to(folder): entry(p) for p in folder.rglob("*")}
 
     before = {tenant: snapshot(folder) for tenant, folder in folders.items()}
     (flagged_id, plain_id), door = await _drain_spawned(world, rows, _child(world, exit=0, files={}))
@@ -316,6 +322,9 @@ async def test_1471_p5_a_flagged_rows_tenant_folder_gains_exactly_what_an_unflag
             out[name] = text
         return out
 
+    tokens = [launch_of(T1, flagged_id)["box_token"], launch_of(T2, plain_id)["box_token"]]
+    assert len({len(t) for t in tokens}) == 1, "the box tokens differ in shape, and a mask would hide it"
+    assert {c for t in tokens for c in t} <= set(string.ascii_letters + string.digits + "-_"), "the box tokens differ in shape"
     flagged, plain = masked(T1, flagged_id), masked(T2, plain_id)
     assert len(plain) >= 2, "premise: the worker wrote into the unflagged row's folder"
     assert sorted(flagged) == sorted(plain), "the flagged folder gained other files than the unflagged one"
