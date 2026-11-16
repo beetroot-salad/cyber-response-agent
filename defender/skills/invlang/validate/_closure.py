@@ -22,8 +22,13 @@ from ._diag import REFUTED_WEIGHT
 from ._refs import _declared_prediction_ids, _leads
 from ._predictions import _confirmed_and_standing, _settled_predictions
 from ._structure import _cell, _declared_impact_predictions, _qualify
-from ._state import _anchor_kind, _declarers_by_contract_id, outstanding_authz_contracts
-from ._gating import _check_disposition_gating, _row_states_something
+from ._state import _anchor_kind, _declarers_by_contract_id
+from ._gating import (
+    _check_disposition_gating,
+    _rendered_disposition,
+    _row_states_something,
+    outstanding_authz_under,
+)
 
 
 #: The `:T conclude.*` sub-table fields, which a block can write without the document having
@@ -210,9 +215,13 @@ def _check_authz_contract_closure(
     if gated is None:  # lint-default: ok — the standalone fallback; `diagnose` binds it
         gated = set(_check_disposition_gating(companion))
     # Skipped when `gated` is empty: `outstanding_authz_contracts` is expensive.
+    # Read through `outstanding_authz_under`, so the contracts named are the ones the close
+    # under THIS disposition names, in the words it names them.
     spoken_for = {
         f"{hid}.{_cell(c, 'id')}"
-        for hid, c, why in outstanding_authz_contracts(companion)
+        for hid, c, why in outstanding_authz_under(
+            companion, _rendered_disposition(conclude.get("disposition")),
+        )
         if why in gated
     } if gated else set()
     declarers = _declarers_by_contract_id(companion)

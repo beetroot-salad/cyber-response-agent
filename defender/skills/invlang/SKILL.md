@@ -378,9 +378,10 @@ keyed on the contract id. Columns:
   what an absent cell means — this contract has not been worked yet) or
   `exhausted` (every anchor kind applicable to this contract's predicate
   was actually queried this run and none answered). `exhausted` stops the
-  run being pushed back to re-work the contract, and it is the one shape
-  of an unsettled contract that `disposition unsanctioned-benign` accepts;
-  every other close still treats it as an escalation. It is checked against this
+  run being pushed back to re-work the contract; on a contract declared
+  `on_indet process-gap` it is also what lets `disposition
+  unsanctioned-benign` close on it, and every other close still treats it
+  as an escalation. It is checked against this
   run's own transcript: the lead named by `resolved_by` must have come back
   with something, and its `:L findings` `system` cell must name the system
   that answers the contract's anchor kind. Write `retry` (or nothing) when
@@ -391,10 +392,11 @@ Disposition gating: `disposition: benign` requires every authz
 contract on a surviving hypothesis to have a fulfilling `:R authz`
 row with `verdict: authorized`. `unauthorized` or `indeterminate`
 forces escalation per the contract's `on_unauth` / `on_indet`, with one
-exception: `disposition: unsanctioned-benign` accepts a contract that is
-`indeterminate` with a paid `basis=exhausted` (and needs at least one),
-never one that is `unauthorized` or still `retry`. A declared contract
-with no fulfilling row is treated as `indeterminate`.
+exception: under `disposition: unsanctioned-benign`, a contract declared
+`on_indet process-gap` is discharged by a paid `basis=exhausted` row
+(at least one must be), never one that is `unauthorized` or still
+`retry`. A declared contract with no fulfilling row is treated as
+`indeterminate`.
 
 **`anchor_kind: tacit-knowledge` costs two rows, not one.** The registry
 is a human-authored file, so a citation has to be backed by a lookup you
@@ -557,11 +559,11 @@ summary                "Login matched established bastion usage"
   least one `ceiling_test` RECEIPT (below) — a pointer the host verifies
   against this run's own transcript, never a sentence it judges;
   `unsanctioned-benign` — harmless activity with no authorization record —
-  needs benign's prologue and slots, every live authz contract
-  `authorized` or `indeterminate` with a paid `basis=exhausted` (at least
-  one exhausted, none `unauthorized`), at least one `:R impact` row and
-  every one `within`, and `entity_check` below naming a lead other than
-  the one whose search came back empty. Rows
+  needs benign's price, except that a contract declared `on_indet
+  process-gap` may be discharged by a paid `basis=exhausted` row (at
+  least one must be, none `unauthorized`); every other hypothesis refuted
+  `--`; and at least one impact predicate declared, every one graded
+  `within` — a deferral is not a grade. Rows
   must be distinct. All four prices are charged twice: on the write,
   against the keyword you conclude under, and again by
   `close_investigation`, against the keyword you close under. So
@@ -623,12 +625,9 @@ summary                "Login matched established bastion usage"
   describes the rule, and one run can find both. A rule that caught what it
   claims gets no row — a reassuring note reads the same as a defect nobody
   looked for.
-- `entity_check` — required by `disposition false-positive` and
-  `disposition unsanctioned-benign`, unused otherwise: the `:L findings`
-  lead that tested the ALERTED entity for suspicion independently of what
-  the close rests on — the alert's claim for `false-positive`, the
-  authorization search for `unsanctioned-benign`, so there it is the
-  actor's own session history, never the record lookup.
+- `entity_check` — required by `disposition false-positive`, unused
+  otherwise: the `:L findings` lead that tested the ALERTED entity for
+  suspicion independent of the alert's claim.
   `entity_check  l-004`
   The lead must have RETURNED a result — not merely be declared, and not a
   row whose only outcome is a `fail_reason` — and must target an entity the
@@ -816,6 +815,17 @@ Authz contracts live in `:H h-NNN.authz`:
 :H h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
 ac1|proposed|iam-policy|"service account allowed to read object at event time"|escalate|escalate
 ```
+
+`on_indet` says what an UNSETTLED answer means, decided now, before the
+search runs (`enum authz.on_indet`): `escalate`, or `process-gap` — a
+search that is worked and comes back empty may then close
+`unsanctioned-benign`. Choose `process-gap` only where a missing record
+would be a paperwork failure rather than a warning sign: routine work the
+actor's role covers, on systems they normally touch. Anything with real
+blast radius (security tooling turned off, a privileged account created,
+a bulk export) stays `escalate`. `process-gap` is accepted only on an
+anchor kind with a home system to search — change-mgmt, iam-policy or
+tacit-knowledge.
 
 `ac<n>` numbers across the DOCUMENT, not per hypothesis the way
 `p<n>`/`r<n>` do: the resolving `:R authz` row names only the contract

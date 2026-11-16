@@ -131,11 +131,11 @@ def test_1221_the_past_case_rule_is_benign_only(disposition):
 
 
 def test_a_past_case_cannot_authorize_an_unsanctioned_benign_close_either():
-    """Under `unsanctioned-benign` a past-case-only `authorized` contract is still open: it is
-    neither a real authorization nor a worked search, so the close names the contract."""
+    """Under `unsanctioned-benign` the same rule #27 refusal stands: the close reads contracts
+    through the one function `benign` does, so a past-case-only `authorized` is still refused."""
     doc = _with_disposition(_grounded("past-case", cites=PRIOR_RUN), PROCESS_GAP_DISPOSITION)
     assert any(
-        f"{PROCESS_GAP_DISPOSITION} blocked" in e and "ac1" in e and "still open" in e
+        f"{PROCESS_GAP_DISPOSITION} blocked" in e and "ac1" in e and "past case" in e
         for e in _errors(doc)
     ), _errors(doc)
 

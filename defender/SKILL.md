@@ -489,9 +489,10 @@ right trigger to loop back to PLAN with a follow-up lead, not to fetch
 inline — **unless** the row carries `basis=exhausted`, which says every
 anchor kind applicable to that contract's predicate was actually queried
 and none answered. That contract is not worth another loop. It blocks
-`benign`, and it escalates unless the case closes `unsanctioned-benign`
-(§REPORT): the record was searched for and is not there, and that absence
-is the only thing wrong. See `defender/skills/invlang/SKILL.md` §Authz
+`benign` and escalates, unless the contract was declared `on_indet
+process-gap` at PLAN and the case closes `unsanctioned-benign` (§REPORT):
+the record was searched for, is not there, and that absence is the only
+thing wrong. See `defender/skills/invlang/SKILL.md` §Authz
 contract resolution for the column shape.
 
 **A missing record is not evidence of an attack.** Real maintenance often
@@ -501,8 +502,8 @@ Is this the actor's own session (their usual source, device and hours,
 nothing suspicious just before it)? Did the action stay within what the
 actor's role routinely does? Did its consequence stay inside the
 baseline? A stolen admin credential doing admin work looks exactly like
-unticketed maintenance, so the adversary story has to be refuted by those
-measurements, not by the actor's job title.
+unticketed maintenance, so declare that story as its own hypothesis and
+refute it with those measurements, not with the actor's job title.
 
 **A contract answers about the subject its claim names, and only that
 subject.** The claim is prose. Nothing binds it to a vertex, so nothing
@@ -577,11 +578,11 @@ every authz contract on a live hypothesis `authorized`; `false-positive`
 needs `detection_notes` (the defect) and `entity_check` (that lead's id) in
 `:T conclude`; `inconclusive` needs at least one `ceiling_test` receipt
 that PAYS — mechanically verified against your own transcript, distinct
-from any other row; `unsanctioned-benign` needs benign's prologue and
-slots, every live contract `authorized` or `indeterminate` with a PAID
-`basis=exhausted` (at least one exhausted, none `unauthorized`), at least
-one `:R impact` row and every one `within`, and an `entity_check` lead
-other than the one that searched for the record. Write them FIRST — the close
+from any other row; `unsanctioned-benign` needs benign's price except
+that a contract declared `on_indet process-gap` may be discharged by a
+PAID `basis=exhausted` search (at least one must be, none
+`unauthorized`), every other hypothesis refuted `--`, and every declared
+impact predicate graded `within`, none deferred. Write them FIRST — the close
 returns without committing if they are not there. The price is charged
 against the keyword you CLOSE under, never the one you concluded under, so
 concluding under a cheaper keyword buys nothing: the log still has to have
