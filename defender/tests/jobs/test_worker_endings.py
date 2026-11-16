@@ -287,7 +287,7 @@ async def test_1471_p5_each_helper_is_started_with_its_own_flag_digest_and_link(
 
 async def test_1471_p5_a_flagged_rows_tenant_folder_changes_exactly_as_an_unflagged_rows_does(world):
     """Two tenant folders that differ only in their row's flag change alike under the worker, entry for entry (added,
-    altered or removed; by kind, mode and bytes) once each folder's own ids are masked: nothing a job can see depends
+    altered or removed; by kind, mode and decoded text) once each folder's own ids are masked: nothing a job can see depends
     on the flag. (P-5; the stand-in job writes nothing)"""
     rows = [(T1, True, "k1"), (T2, False, "k1")]
     folders = {tenant: world["root"] / tenant for tenant, _flag, _key in rows}
