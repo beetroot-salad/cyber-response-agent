@@ -142,6 +142,13 @@ def attempt_cookie(state: str) -> str | None:
     return _ATTEMPT_COOKIE_PREFIX + state if isinstance(state, str) and _STATE.fullmatch(state) else None
 
 
+def _attempt_state(name: str) -> str | None:
+    """The `state` a cookie name of ours carries, or None for any other name: the inverse of `attempt_cookie`. A name
+    is only ever sent back to a browser as `attempt_cookie(state)`, never as the browser wrote it."""
+    state = name.removeprefix(_ATTEMPT_COOKIE_PREFIX)
+    return state if state != name and attempt_cookie(state) == name else None
+
+
 @model(frozen=True)
 class InvitationView:
     """What an invitation listing shows: nothing the inviter did not type, but its own date."""
@@ -423,32 +430,39 @@ class IdentityService:
             row.id, row.notify_requested_seq, sent_at=sent, expires_at=sent + INVITATION_LIFETIME)
 
     # --- sign-in -----------------------------------------------------------------------------
-    async def begin_signin(self, return_path: str, cookies: Mapping[str, str] | None = None) -> LoginStart:
-        """The URL to send the person to and this attempt's cookie. The cookie holds only a random token; the state,
-        nonce, PKCE verifier and `return_path` stay in the attempt's row, which the callback reads once (#1161 D6). The
-        path is carried without inspection. Nothing is stored when the provider cannot start a sign-in.
+    async def begin_signin(self, return_path: str, cookies: Mapping[str, str] | None = None) -> LoginStart | Refused:
+        """The URL to send the person to and this attempt's cookie, or why not. The cookie holds only a random token;
+        the state, nonce, PKCE verifier and `return_path` stay in the attempt's row, which the callback reads once
+        (#1161 D6). The path is carried without inspection, and every refusal keeps it, so a retry still lands there.
 
         `cookies` is what the browser sent: of its attempt cookies, those naming no open attempt are cleared, and the
-        oldest open ones too, so that with this one it keeps at most `OPEN_SIGNIN_ATTEMPTS_KEPT`."""
+        oldest open ones too, so that with this one it keeps at most `OPEN_SIGNIN_ATTEMPTS_KEPT`. Every read comes
+        before the one write, the row, so a start that fails stores nothing."""
         state, nonce, verifier, token = (secrets.token_urlsafe(32) for _ in range(4))
-        url = await self._signin.begin_signin(state=state, nonce=nonce, code_challenge=_pkce_challenge(verifier))
-        await self._repo.add_signin_attempt(SignInAttempt(
-            state=state, token_hash=secret_hash(token), nonce=nonce, verifier=verifier, return_path=return_path,
-            expires_at=self._clock() + SIGNIN_ATTEMPT_LIFETIME))
+        try:
+            url = await self._signin.begin_signin(state=state, nonce=nonce, code_challenge=_pkce_challenge(verifier))
+            clear = await self._crowded(cookies or {})
+            await self._repo.add_signin_attempt(SignInAttempt(
+                state=state, token_hash=secret_hash(token), nonce=nonce, verifier=verifier, return_path=return_path,
+                expires_at=self._clock() + SIGNIN_ATTEMPT_LIFETIME))
+        except SignInUnavailable:
+            return Refused("unavailable", return_path)
+        except Exception:
+            _logger.error("sign-in start failed", exc_info=True)
+            return Refused("error", return_path)
         name = attempt_cookie(state)
         assert name is not None  # the state is token_urlsafe: always a name
-        return LoginStart(url=url, cookie_name=name, cookie_value=token, clear=await self._crowded(cookies or {}))
+        return LoginStart(url=url, cookie_name=name, cookie_value=token, clear=clear)
 
     async def _crowded(self, cookies: Mapping[str, str]) -> tuple[str, ...]:
-        """The attempt cookies among `cookies` to clear so that, with a new one, at most the cap stay open."""
-        held = {name.removeprefix(_ATTEMPT_COOKIE_PREFIX): value for name, value in cookies.items()
-                if name.startswith(_ATTEMPT_COOKIE_PREFIX) and attempt_cookie(name.removeprefix(_ATTEMPT_COOKIE_PREFIX))
-                and _STATE.fullmatch(value)}
-        live = await self._repo.live_signin_attempts(held, now=self._clock()) if held else {}
-        newest_first = sorted(live, key=lambda state: live[state], reverse=True)
-        kept = set(newest_first[:OPEN_SIGNIN_ATTEMPTS_KEPT - 1])
-        return tuple(sorted(name for name in cookies if name.startswith(_ATTEMPT_COOKIE_PREFIX)
-                            and name.removeprefix(_ATTEMPT_COOKIE_PREFIX) not in kept))
+        """The attempt cookies among `cookies` to clear so that, with a new one, at most the cap stay open. Only names
+        `attempt_cookie` makes are considered or returned; any other cookie is not ours and is left alone."""
+        held = {state: value for state, value in ((_attempt_state(name), value) for name, value in cookies.items())
+                if state is not None}
+        well_formed = {state: value for state, value in held.items() if _STATE.fullmatch(value)}
+        live = await self._repo.live_signin_attempts(well_formed, now=self._clock()) if well_formed else {}
+        kept = set(sorted(live, key=lambda state: live[state], reverse=True)[:OPEN_SIGNIN_ATTEMPTS_KEPT - 1])
+        return tuple(sorted(name for state in held if state not in kept and (name := attempt_cookie(state))))
 
     async def complete_signin(self, state: str, code: str, cookie_value: str | None) -> SignedIn | Refused:
         """The new session, or why there is none. `cookie_value` is what the browser sent under `attempt_cookie(state)`:
@@ -459,10 +473,14 @@ class IdentityService:
         record = await self._repo.take_signin_attempt(state, cookie_value, now=self._clock())
         if record is None:
             return Refused("prelogin-missing", None)
+        # From here the record is taken: every outcome, a fault included, keeps its return path.
         try:
             return await self._finish_signin(code, record.nonce, record.verifier, record.return_path)
         except SignInUnavailable:
             return Refused("unavailable", record.return_path)
+        except Exception:
+            _logger.error("sign-in callback failed after its record was taken", exc_info=True)
+            return Refused("error", record.return_path)
 
     async def _finish_signin(self, code: str, nonce: str, verifier: str, return_path: str) -> SignedIn | Refused:
         if not code:

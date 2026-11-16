@@ -751,11 +751,11 @@ async def login(request: Request, deps: Deps) -> RedirectResponse:
         return _to_failed_screen("bad-request")
     try:
         start = await deps.identity.begin_signin(return_path, request.cookies)
-    except _identity.SignInUnavailable:
-        return _to_failed_screen("unavailable", return_path)
-    except Exception:
+    except Exception:  # the service answers its own faults; this keeps S1 for one it did not foresee
         _logger.error("sign-in start failed", exc_info=True)
-        return _to_failed_screen("error", return_path)  # judged before the fault: a retry still lands there
+        return _to_failed_screen("error", return_path)
+    if isinstance(start, _identity.Refused):
+        return _to_failed_screen(start.reason, start.return_path)
     response = RedirectResponse(start.url, status_code=status.HTTP_302_FOUND)
     for stale in start.clear:
         response.delete_cookie(stale, **_cookie_options())  # type: ignore[arg-type]

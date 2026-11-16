@@ -38,6 +38,16 @@ def _assert_guarded(r: httpx.Response, what: str) -> None:
     assert {k: sorted(v) for k, v in CSP.items()} == _csp(r.headers["content-security-policy"]), what
     assert r.headers["referrer-policy"] == "strict-origin-when-cross-origin", what
     assert r.headers["x-content-type-options"] == "nosniff", what
+    assert r.headers.get_list("cache-control") == ["no-cache"], (what, r.headers)  # revalidated on every load
+
+
+@pytest.mark.parametrize("path", ["/app.js", "/style.css"])
+def test_1161_b9_the_apps_fixed_name_files_are_revalidated_on_every_load(world, path):
+    """The script and the stylesheet keep their names across deploys, so each answer says `no-cache`: a browser never
+    runs a cached app against a newer API. (B9)"""
+    r = world.get(path)
+    assert r.status_code == 200, (path, r.status_code)
+    assert r.headers.get_list("cache-control") == ["no-cache"], (path, r.headers)
 
 
 @pytest.mark.parametrize("path", APP_PATHS)

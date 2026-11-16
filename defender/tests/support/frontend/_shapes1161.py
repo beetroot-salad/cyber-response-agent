@@ -144,3 +144,32 @@ def special_picks(cases: list[GeneratedCase], seed: int, taken: list[GeneratedCa
         pool = [c for c in cases if c.origin and has_special(c, special) and c not in taken and c not in picks]
         picks.append(rng.choice(pool))
     return picks
+
+
+def _listed(placeholders: object = None, shapes: object = None) -> dict[str, object]:
+    base_shapes = [{"name": "root", "template": "/", "returnable": True},
+                   {"name": "investigation", "template": "/t/{uuid}/investigations/{uuid}", "returnable": True},
+                   {"name": "sign-in-failed", "template": "/sign-in-failed", "returnable": False}]
+    return {"placeholders": {"uuid": UUID} if placeholders is None else placeholders,
+            "shapes": base_shapes if shapes is None else shapes}
+
+
+def _with_shape(**shape: object) -> dict[str, object]:
+    document = _listed()
+    return {**document, "shapes": [*document["shapes"], shape]}  # type: ignore[misc]
+
+
+#: Shape lists both readers refuse, the API's (`addresses._compile`) and the frontend's build (S2): `(id, document,
+#: words the refusal holds)`. One table, so the two readers cannot drift apart unnoticed.
+REFUSED: tuple[tuple[str, dict[str, object], str], ...] = (
+    *((f"grammar {g!r}", _listed({"uuid": g}), "placeholder uuid") for g in (
+        "[0-9a-f]+|new", "(?:[0-9a-f]+)", ".+", "[^/]+", "a$", "", "[--z]+", "[--9]+", "[z-a]+", "[0-9]{2}|x")),
+    ("grammar not text", _listed({"uuid": 7}), "placeholder uuid"),
+    ("no placeholders", {"shapes": []}, "must hold"),
+    ("shape without returnable", _with_shape(name="x", template="/x"), "a shape needs"),
+    ("duplicate name", _with_shape(name="root", template="/again", returnable=True), "duplicate shape name root"),
+    ("no leading slash", _with_shape(name="x", template="x/{uuid}", returnable=True), "does not start with /"),
+    ("unknown placeholder", _with_shape(name="x", template="/x/{nope}", returnable=True), "unknown placeholder nope"),
+    ("brace in a literal", _with_shape(name="x", template="/a{b", returnable=True), "bad literal segment"),
+    ("non-ASCII literal", _with_shape(name="x", template="/é", returnable=True), "bad literal segment"),
+)

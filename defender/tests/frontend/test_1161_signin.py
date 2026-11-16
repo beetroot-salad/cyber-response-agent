@@ -130,7 +130,8 @@ def test_1161_b1_a_later_401_records_a_fresh_attempt_and_redirects(world, contex
 
 def test_1161_b1_a_screen_read_that_always_401s_after_me_succeeds_stops_at_session_lost(world, context, requests):
     """`/api/me` accepts the session but the screen's own read always answers 401: one more sign-in, then
-    `session-lost` with `return`, never a third automatic one. (B1.3, amended: the loop is bounded for screen reads too)"""
+    `session-refused` with `return` (cookies work: `/api/me` took the session), never a third automatic one. (B1.3,
+    amended: the loop is bounded for screen reads too)"""
     target = world.screen()
     read = _read_path(world)
     context.route(lambda u: urllib.parse.urlsplit(u).path == read, lambda route: route.fulfill(status=401, body="{}"))
@@ -138,8 +139,8 @@ def test_1161_b1_a_screen_read_that_always_401s_after_me_succeeds_stops_at_sessi
     page.goto(f"{world.origin}{target}")
     screen(page, FAILED)
     settle(page, 1500)
-    assert reason(page) == "session-lost"
-    assert where(page) == ("/sign-in-failed", {"reason": "session-lost", "return": target})
+    assert reason(page) == "session-refused"
+    assert where(page) == ("/sign-in-failed", {"reason": "session-refused", "return": target})
     assert logins(requests, world.origin) == [target, target]
 
 
@@ -286,7 +287,7 @@ def test_1161_b1_the_failed_screen_consumes_the_record_and_keeps_an_address_that
 
 
 @pytest.mark.parametrize("given", ["prelogin-missing", "login-attempt-invalid", "unknown-account", "otp-required", "unavailable",
-                                   "error", "session-lost", "sign-in-left", "storage-unavailable", "no-such-reason", None, "bad-request"])
+                                   "error", "session-lost", "sign-in-left", "session-refused", "storage-unavailable", "no-such-reason", None, "bad-request"])
 def test_1161_b1_the_failed_screen_settles_the_records_target_for_every_reason_but_bad_request(
         world, context, requests, given):
     """A record for X and the screen opened at `/sign-in-failed` with any reason (unknown or none: `error`) and no

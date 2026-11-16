@@ -21,6 +21,7 @@ from defender.tests.support.api._flow1161 import REASONS, cookies_set, failed, l
 from defender.tests.support.api._identity1306 import (  # noqa: E402
     ANN,
     BOB,
+    LAB,
     ME,
     OPS,
     SESSION_COOKIE,
@@ -37,6 +38,7 @@ from defender.tests.support.api._identity1306 import (  # noqa: E402
     set_cookie,
 )
 from defender.tests.support.frontend._shapes1161 import (  # noqa: E402
+    REFUSED,
     RETURNABLE,
     SHAPES,
     UUID,
@@ -335,8 +337,9 @@ def test_a_sign_in_start_the_provider_cannot_serve_is_a_303_unavailable_without_
     assert again.status_code == 302, again.text  # control: the same request starts when the provider is back
 
 
-def test_an_internal_fault_on_the_callback_is_logged_answers_error_without_return_and_clears_its_cookie(caplog: Any) -> None:
-    """A fault after the attempt's cookie was read: `reason=error`, no `return`, the attempt's cookie cleared, an error logged. (B4, S1, D6)"""
+def test_an_internal_fault_on_the_callback_is_logged_answers_error_with_its_return_and_clears_its_cookie(caplog: Any) -> None:
+    """A fault after the attempt's record was taken: `reason=error` with that record's `return` (so a retry still lands
+    there), the attempt's cookie cleared, an error logged. (B4, S1, D6; return amended)"""
     world = World(tenants={T1: [ANN]})
     caplog.set_level(logging.INFO)
     done = world.client()
@@ -347,7 +350,7 @@ def test_an_internal_fault_on_the_callback_is_logged_answers_error_without_retur
     browser = world.client(raise_errors=False)
     state = world.begin_signin(browser, RET)
     answer = _arrive(world, browser, state, who=ANN, account_id="acct")
-    assert failed(answer) == ("error", {})
+    assert failed(answer) == ("error", {"return": RET})
     assert is_cleared(set_cookie(answer, attempt_cookie(state) or "") or "")
     assert SESSION_COOKIE not in browser.cookies
     assert _errors(caplog)
@@ -625,11 +628,40 @@ def test_a_sign_in_start_clears_attempt_cookies_that_name_no_open_attempt() -> N
     live = world.call(world.service.begin_signin, RET)
     held = {old.cookie_name: old.cookie_value, live.cookie_name: live.cookie_value,
             attempt_cookie("unknown-state"): "x" * 43, attempt_cookie(_state(live.url) + "a"): live.cookie_value,
-            "__Host-defender_prelogin_bad!": "v", "__Host-defender_session": "s"}
+            attempt_cookie("misshapen-token"): "not a token!", "__Host-defender_session": "s"}
     wrong = world.call(world.service.begin_signin, RET)
     held[wrong.cookie_name] = "y" * 43
     start = world.call(world.service.begin_signin, RET, held)
     assert set(start.clear) == set(held) - {live.cookie_name, "__Host-defender_session"}, start.clear
+
+
+@pytest.mark.parametrize("name", ["__Host-defender_prelogin_a(b)", "__Host-defender_prelogin_", "__Host-defender_prelogin_" + "a" * 65,
+                                  "__Host-defender_prelogin_a.b"])
+def test_a_cookie_with_the_attempt_prefix_that_we_could_not_have_named_is_left_alone(name: str) -> None:
+    """A name `attempt_cookie` never makes is not ours: sign-in start still answers its 302 and neither reads nor
+    clears it; only names of ours are ever sent back. (D6, S1)"""
+    world = lab()
+    answer = world.client().get(LOGIN, params={"return": RET}, headers={"cookie": f"{name}=x"})
+    assert answer.status_code == 302, answer.headers.get("location")
+    assert list(cookies_set(answer)) == [attempt_cookie(_state(answer.headers["location"]))]
+
+
+def test_a_sign_in_start_whose_read_fails_stores_nothing_and_keeps_its_return(caplog: Any) -> None:
+    """The read of the browser's open attempts fails: `error` with the judged `return`, logged, and no attempt row is
+    left behind (every read comes before the one write). (B4, S1, D6)"""
+    world = World(administrators=[OPS], tenants={LAB: [ME]}, failing_writes=True)
+    browser = world.client(raise_errors=False)
+    real = world.begin_signin(browser, RET)  # an open attempt, so the next start has one to read
+    rows = len(world.raw_repo._attempts)
+    world.repo.failing.add("live_signin_attempts")
+    caplog.set_level(logging.INFO)
+    answer = browser.get(LOGIN, params={"return": RET})
+    assert failed(answer) == ("error", {"return": RET})
+    assert _errors(caplog)
+    assert len(world.raw_repo._attempts) == rows, "the failed start left a row"
+    world.repo.failing.clear()
+    assert location(_arrive(world, browser, real)) == RET  # control: the earlier attempt is intact
+
 
 
 def test_an_attempt_cookie_beyond_the_cap_is_cleared_oldest_first() -> None:
@@ -674,14 +706,21 @@ def test_the_api_document_declares_the_sign_in_redirects_without_a_body() -> Non
 
 # --- S2: what a placeholder's grammar may be ------------------------------------------------------------------------
 
-@pytest.mark.parametrize("grammar", ["[0-9]+|new", "(?:a)", ".*", "[^/]+", "a$", "", "[0-9]{2}|x"])
-def test_the_address_reader_refuses_a_placeholder_grammar_that_could_match_outside_its_segment(grammar: str) -> None:
-    """A grammar with alternation, a group, a wildcard, a negated class or an anchor is refused when the list is read,
-    so no template's pattern can match an address outside its shape. (S2)"""
+@pytest.mark.parametrize(("document", "words"), [pytest.param(d, w, id=i) for i, d, w in REFUSED])
+def test_the_address_reader_refuses_every_list_the_build_refuses(document: Any, words: str) -> None:
+    """Each list in the shared table is refused when read, in the build's words: a grammar that could match outside
+    its segment (however it is written), or a template the build would not compile. (S2)"""
     from defender.api import addresses
 
-    document = {"placeholders": {"id": grammar}, "shapes": [{"name": "x", "template": "/t/{id}/x", "returnable": True}]}
-    with pytest.raises(ValueError, match="placeholder id"):
+    with pytest.raises(ValueError, match=re.escape(words)):
         addresses._compile(document)
-    control = {**document, "placeholders": {"id": "[0-9]+"}}
-    assert addresses._compile(control)[0][1].fullmatch("/t/12/x")  # control: the allowed form compiles
+
+
+def test_the_address_reader_compiles_the_lists_the_table_starts_from() -> None:
+    """Control for the table: its base list and an allowed class with `-` compile, and match as before. (S2)"""
+    from defender.api import addresses
+
+    from defender.tests.support.frontend._shapes1161 import _listed
+
+    assert addresses._compile(_listed())[1][1].fullmatch(RET)
+    assert addresses._compile(_listed({"uuid": "[a-z0-9-]+"}))[1][1].fullmatch("/t/a-1/investigations/b")

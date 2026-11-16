@@ -24,7 +24,7 @@ from defender.tests.support.api._signin1161 import Choice, link_account
 from defender.tests.support.frontend._browser1161 import run_async
 
 VOCABULARY = ["prelogin-missing", "login-attempt-invalid", "unknown-account", "otp-required", "unavailable",
-              "bad-request", "error", "session-lost", "sign-in-left", "storage-unavailable"]
+              "bad-request", "error", "session-lost", "sign-in-left", "session-refused", "storage-unavailable"]
 
 
 @pytest.mark.parametrize("code", VOCABULARY)

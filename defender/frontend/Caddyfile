@@ -14,6 +14,8 @@
 			Content-Security-Policy "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self' https://*.{$DEFENDER_ARTIFACT_DOMAIN}"
 			Referrer-Policy "strict-origin-when-cross-origin"
 			X-Content-Type-Options "nosniff"
+			# Fixed file names (`/app.js`): a browser revalidates each load, so a deploy never runs an old app on a new API.
+			Cache-Control "no-cache"
 		}
 		root * {$DEFENDER_INGRESS_FRONTEND_DIR}
 		try_files {path} /index.html

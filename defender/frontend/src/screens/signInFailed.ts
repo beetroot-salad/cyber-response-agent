@@ -13,6 +13,7 @@ export const REASONS = [
   "error",
   "session-lost",
   "sign-in-left",
+  "session-refused",
   "storage-unavailable",
 ] as const;
 export type Reason = (typeof REASONS)[number];
@@ -28,6 +29,8 @@ const MESSAGES: Record<Reason, string> = {
   // Also shown when the person left the provider by a bookmark or a typed address: the shell sees only a fresh load.
   "session-lost": "You signed in, but this browser did not keep the session. It may be blocking cookies for this site.",
   "sign-in-left": "Sign-in did not finish, so you are not signed in.",
+  // `/api/me` accepted the session, but this page's own request was refused twice: signing in again cannot help.
+  "session-refused": "You are signed in, but the server refused this page. If trying again does not help, tell your administrator.",
   "storage-unavailable": "This browser does not let the app keep a sign-in attempt, so it cannot sign you in automatically.",
 };
 

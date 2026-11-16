@@ -1005,7 +1005,8 @@ async def test_1161_b4_every_failed_callback_is_a_303_to_the_failed_screen_with_
 
 @pytest.mark.postgres
 async def test_1161_b4_an_internal_fault_on_the_callback_is_logged_as_an_error_and_answers_error(served, caplog):
-    """The identity store breaks after the token step (a real fault: its table is gone): 303 `error`, no `return`, cookie cleared, error logged. (B4, S1)"""
+    """The identity store breaks after the token step (a real fault: its table is gone): 303 `error` with the attempt's
+    `return`, cookie cleared, error logged. (B4, S1; return amended: the record was taken before the fault)"""
     account = await link_account(served.dsn, ANN)
     url, cookies = await _login(served, TICKET_PATH)
     name, morsel = _prelogin(cookies)
@@ -1014,11 +1015,12 @@ async def test_1161_b4_an_internal_fault_on_the_callback_is_logged_as_an_error_a
     caplog.clear()
     execute(served.dsn, "ALTER TABLE identity.users RENAME TO users_moved")
     r = await _callback(served, authorize(url, account), {name: morsel.value})
-    assert _failed(r) == ("error", {})
+    assert _failed(r) == ("error", {"return": TICKET_PATH})
     assert deleted(set_cookies(r)[name]), r.headers.get_list("set-cookie")
-    # The callback's own record (logger `defender.api.app`, its exception the store's fault), not the identity loop's
-    # `a sender pass failed`, which also logs ERROR while the table is gone.
-    own = [x for x in caplog.records if x.name == "defender.api.app" and x.levelno >= logging.ERROR
+    # The callback's own record (logger `defender.identity.service`, which answers faults once the record is taken; its
+    # exception the store's fault), not the identity loop's `a sender pass failed`, which also logs ERROR meanwhile.
+    own = [x for x in caplog.records if x.name == "defender.identity.service" and x.levelno >= logging.ERROR
+           and "record was taken" in x.getMessage()
            and x.exc_info is not None and "users" in str(x.exc_info[1])]
     assert own, [(x.name, x.getMessage()) for x in caplog.records if x.levelno >= logging.ERROR]
 

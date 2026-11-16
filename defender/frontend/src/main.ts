@@ -70,8 +70,12 @@ async function load(cameBack: boolean): Promise<void> {
         // A later 401 records a fresh attempt. When this load came back from a sign-in that a screen's 401 had
         // started, `/api/me` accepts the session but the screen's reads do not: stop rather than sign in forever.
         const returned = consumed.status === "found";
-        if (returned && consumed.again) unauthorized(target, consumed, false);
-        else unauthorized(target, null, false, returned);
+        if (returned && consumed.again) {
+          generation += 1; // this document is going away: nothing of the running load shows
+          toFailedScreen("session-refused", target);
+        } else {
+          unauthorized(target, null, false, returned);
+        }
         return { kind: "gone" };
       }
       if (response.status === 404) return { kind: "not-available" };

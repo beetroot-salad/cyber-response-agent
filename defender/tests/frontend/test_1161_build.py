@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 from defender.tests.support.frontend._ingress1161 import FRONTEND
+from defender.tests.support.frontend._shapes1161 import REFUSED
 
 LIST = FRONTEND.parent / "api" / "addresses.json"
 
@@ -100,16 +101,14 @@ def test_1161_s2_the_build_fails_on_a_type_error_in_any_source_file(built_fronte
     assert not problems, problems
 
 
-@pytest.mark.parametrize("grammar", ["[0-9a-f]+|new", "(?:[0-9a-f]+)", ".+", "[^/]+"])
-def test_1161_s2_the_build_refuses_a_placeholder_grammar_outside_the_allowed_form(built_frontend, tmp_path, grammar):
-    """A placeholder whose grammar has alternation, a group, a wildcard or a negated class fails the build and makes
-    no `index.html`, naming the placeholder: the API's reader refuses the same grammars. (S2)"""
-    document = json.loads(LIST.read_text(encoding="utf-8"))
-    document["placeholders"]["uuid"] = grammar
+@pytest.mark.parametrize(("document", "words"), [pytest.param(d, w, id=i) for i, d, w in REFUSED])
+def test_1161_s2_the_build_refuses_every_list_the_api_refuses(built_frontend, tmp_path, document, words):
+    """Each list in the shared table fails the build, in the same words as the API's reader, and makes no
+    `index.html`: a grammar that could match outside its segment, or a template that does not compile. (S2)"""
     root = _copy(tmp_path / "copy", document, built_frontend)
     done = _build(root)
-    assert done.returncode != 0, "the build accepted a grammar that can match outside its segment"
-    assert "placeholder uuid" in done.stderr + done.stdout, done.stderr[-1500:]
+    assert done.returncode != 0, "the build accepted a list the API refuses"
+    assert words in done.stderr + done.stdout, done.stderr[-1500:]
     assert not (root / "defender" / "frontend" / "dist" / "index.html").exists()
 
 

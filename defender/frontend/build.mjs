@@ -32,8 +32,26 @@ if (typeof placeholders !== "object" || placeholders === null || !Array.isArray(
 // A placeholder's grammar: character classes with optional counts, and literal letters, digits, `_` and `-`; no
 // alternation, group, anchor or wildcard. The API's reader holds the same rule (addresses.py `GRAMMAR`).
 const GRAMMAR = /^(?:\[[A-Za-z0-9_-]+\](?:\{[0-9]+(?:,[0-9]+)?\}|\+)?|[A-Za-z0-9_-])+$/;
+// The form is checked by what each class matches, not by how it is written: `[--z]` is well formed and reaches `/`.
+const SEGMENT_CHARACTERS = /^[A-Za-z0-9_-]$/;
+function withinASegment(grammar) {
+  if (!GRAMMAR.test(grammar)) return false;
+  for (const [, body] of grammar.matchAll(/\[([^\]]*)\]/g)) {
+    let only;
+    try {
+      only = new RegExp(`^[${body}]$`);
+    } catch {
+      return false; // a backwards range such as `[z-a]`
+    }
+    for (let code = 0; code < 128; code += 1) {
+      const character = String.fromCharCode(code);
+      if (only.test(character) && !SEGMENT_CHARACTERS.test(character)) return false;
+    }
+  }
+  return true;
+}
 for (const [name, grammar] of Object.entries(placeholders)) {
-  if (typeof grammar !== "string" || !GRAMMAR.test(grammar)) {
+  if (typeof grammar !== "string" || !withinASegment(grammar)) {
     fail(`placeholder ${name} has a grammar outside the allowed form: ${JSON.stringify(grammar)}`);
   }
 }
