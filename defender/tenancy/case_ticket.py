@@ -71,6 +71,17 @@ def read_case_record(run: Run) -> CaseRecord:
 # --------------------------------------------------------------------------------------------
 
 
+def _bound_wire_bytes(text: str) -> str:
+    """Bound the whole posted body to `WIRE_BOUND_BYTES`, cutting at a whole character with
+    the ellipsis inside the bound."""
+    encoded = text.encode("utf-8")
+    if len(encoded) <= WIRE_BOUND_BYTES:
+        return text
+    budget = WIRE_BOUND_BYTES - len(_ELLIPSIS.encode("utf-8"))
+    cut = encoded[:budget].decode("utf-8", errors="ignore")
+    return cut + _ELLIPSIS
+
+
 def agent_comment_tag(run_id: str) -> str:
     """The tag line naming the run that wrote a comment: `AGENT_TAG_PREFIX`, the run id, `]`."""
     return f"{AGENT_TAG_PREFIX}{run_id}]"

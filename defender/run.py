@@ -29,6 +29,7 @@ import logging
 import json
 import os
 import sys
+import uuid
 from pathlib import Path
 
 # Hand-rolled rather than `venv_guard.reexec_into_venv`: this must run before any
@@ -68,9 +69,10 @@ from defender.investigation import driver  # noqa: E402
 from defender.investigation.run_clock import AnchoredOrigin, ClockOrigin, origin_reading  # noqa: E402
 from defender.investigation.run_state import RunState  # noqa: E402
 from defender import providers  # noqa: E402
+from defender.investigation import ticket_writer as _default_ticket_writer  # noqa: E402
 from defender.records import run_end  # noqa: E402
 from defender.tenancy import run_knowledge  # noqa: E402
-from defender.systems import system_status  # noqa: E402
+from defender.systems import case_system, system_status  # noqa: E402
 from defender._agent_role import AgentRole  # noqa: E402
 from defender.systems.run_tenant import Admitted, RunTenant, host_tenant  # noqa: E402
 from defender.tenancy.record_values import TenantRecords  # noqa: E402
@@ -1155,7 +1157,8 @@ TEARDOWN_FAULTED = "teardown_faulted"
 def _post_steps(  # noqa: PLR0913 — the run, its summary, and the page's inputs
     started: _Started, summary: dict[str, Any], *,
     visualize: Callable[..., None],
-    operator_steps: Callable[[], None] | None = None, mirror: bool = True,
+    operator_steps: Callable[[], None] | None = None, ticket_step: Callable[[], None] | None = None,
+    mirror: bool = True,
 ) -> None:
     """The post-steps both compositions share (#1342 M4), after the lifecycle has scrubbed the
     run folder: the readers of the scrubbed tree and the run page. `operator_steps` is the
@@ -1192,6 +1195,8 @@ def _post_steps(  # noqa: PLR0913 — the run, its summary, and the page's input
 
     _run.cross_check_tables(run_dir)
 
+    if ticket_step is not None:  # the job lane's own comment on its ticket (#1471), before the page shows its receipt
+        ticket_step()
     if operator_steps is not None:
         operator_steps()
 
@@ -1514,6 +1519,37 @@ def _set_up_in_container(  # noqa: PLR0913 — the request, its launch facts, th
                     check_root=tenancy.data_root_for_child(data_root))
 
 
+def _write_pass(request: Callable[..., dict[str, Any]], job: str) -> dict[str, Any]:
+    """The helper's one write pass for this flagged job (`pass.write_back`, #1471 W5), or `{}` when it refuses or cannot
+    be asked: the record step then says the write-back token could not be minted."""
+    try:
+        answer = request("pass.write_back", id=job, ask=uuid.uuid4().hex)
+    except (job_socket.Refused, OSError, ValueError) as refused:
+        _logger.warning("job %s: the helper gave no write pass (%s)", job, refused)
+        return {}
+    token, url = answer.get("token"), answer.get("proxy_url")
+    return {"request_token": token, "proxy_url": url} if isinstance(token, str) and isinstance(url, str) else {}
+
+
+def _job_ticket_step(started: _Started, summary: dict[str, Any], launch: dict[str, Any],
+                     request: Callable[..., dict[str, Any]], job: str) -> None:
+    """The flagged job's one comment on its ticket (#1471 W2): the record step's own rules, over the case system judged
+    here, with the screen link the worker handed the helper. A write pass is asked for only when the run will comment
+    and its alert names a ticket, so a silent ending or a keyless alert signs nothing (W5)."""
+    run = started.run
+    truncated_by = summary.get("truncated_by")
+    closed_before_cut = summary.get("closed_before_cut") is True
+    token: dict[str, Any] = {}
+    if _default_ticket_writer.comments_on(truncated_by, closed_before_cut) and _default_ticket_writer.ticket_key(run):
+        token = _write_pass(request, job)
+    _default_ticket_writer.record_case_ticket(
+        run, tenant=started.tenant, defender_dir=DEFENDER_DIR,
+        env=box_mod.run_env(DEFENDER_DIR, run.run_dir, tenant_agent=started.tenant.agent),
+        truncated_by=truncated_by, closed_before_cut=closed_before_cut,
+        case=case_system.case_verdict(started.tenant, defender_dir=DEFENDER_DIR, roster=started.systems.roster),
+        link=str(launch.get("ticket_link") or ""), **token)
+
+
 def job_main(  # noqa: PLR0913 — the job entry's inputs plus its injection seams
     argv: list[str],
     *,
@@ -1559,7 +1595,9 @@ def job_main(  # noqa: PLR0913 — the job entry's inputs plus its injection sea
                                     relay=request, **({"start_token": token} if token else {}))
                 # The page is saved in the run's own folder only: the helper copies it to the shared
                 # publish folder once this container has exited (#1170 A10).
-                _post_steps(started, summary, visualize=visualize, mirror=False)
+                _post_steps(started, summary, visualize=visualize, mirror=False,
+                            ticket_step=(lambda: _job_ticket_step(started, summary, launch, request, ns.job))
+                            if launch.get("post_ticket") is True else None)
                 return _exit_code(summary)
     except _PreflightRefused as refused:
         return refused.rc

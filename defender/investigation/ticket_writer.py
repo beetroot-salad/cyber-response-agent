@@ -71,7 +71,7 @@ def _comment_body(run: Run, truncated_by: str | None, link: str) -> tuple[str, s
     return f"{rec.disposition}\n{link}", RECEIPT_COMMENTED
 
 
-def _ticket_key(run: Run) -> str | None:
+def ticket_key(run: Run) -> str | None:
     """The ticket the alert names: the `case_key` fact recorded from the alert when the run began
     (#1359 P3), or `None`. Never read off the alert again."""
     record = formats.parse_alert_record(run.facts.alert_record.read() or "")
@@ -125,7 +125,7 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
     run_dir = run.run_dir
     key = ""
     try:
-        key = _ticket_key(run) or ""
+        key = ticket_key(run) or ""
         truncated_by = run_end.normalized_truncated_by(truncated_by)  # F-I — first act
         if not comments_on(truncated_by, closed_before_cut):
             clear_receipt(run)
