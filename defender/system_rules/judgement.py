@@ -94,7 +94,7 @@ def read_matches(declared: Route, route: tuple[str, str]) -> bool:
         g == w or "*" in (g, w) for g, w in zip(got, want, strict=True))
 
 
-def _shown(routes: Iterable[Route]) -> str:
+def _routes_shown(routes: Iterable[Route]) -> str:
     return ", ".join(f"{r.method} {r.path}" for r in routes)
 
 
@@ -105,20 +105,20 @@ def cover_fault(route: tuple[str, str], declaration: AccessDeclaration) -> str |
     method, pattern = route
     matching = [r for r in declaration.reads if read_matches(r, route)]
     if matching:
-        return (f"its read route {_shown(matching)} matches its comment route {method} {pattern}: the comment is allowed "
+        return (f"its read route {_routes_shown(matching)} matches its comment route {method} {pattern}: the comment is allowed "
                 "only as a declared write")
     covering = [r for r in declaration.writes if write_covers(r, route)]
     if not covering:
-        declared = f"; it declares {_shown(declaration.writes)}" if declaration.writes else ""
+        declared = f"; it declares {_routes_shown(declaration.writes)}" if declaration.writes else ""
         return (f"no declared write route covers its comment route {method} {pattern} (the same method and segments, "
                 f"`*` where the route has `*`){declared}")
     extra = [r for r in declaration.writes if r not in covering] + covering[1:]
     if extra:
-        return (f"its write route {_shown(extra)} is not its comment route {method} {pattern}: its declared writes must "
+        return (f"its write route {_routes_shown(extra)} is not its comment route {method} {pattern}: its declared writes must "
                 "be exactly that route")
     mutating = [r for r in declaration.reads if r.method != "GET"]
     if mutating:
-        return f"its read route {_shown(mutating)} is not a GET: its declared reads must all be GET"
+        return f"its read route {_routes_shown(mutating)} is not a GET: its declared reads must all be GET"
     return None
 
 

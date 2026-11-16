@@ -65,7 +65,7 @@ def _alert_ticket(made: Any) -> str | None:
     worker's alert file serves the digest check and the ticket (#1471 P-5)."""
     from defender.records import formats
 
-    record = formats.parse_alert_record(made.facts.alert_record.read() or "")
+    record = formats.parse_alert_record(made.facts.alert_record.read() or "")  # lint-run-records: ok — the alert record's own facts, off the admitted bytes
     return None if record is None else record.facts.case_key
 
 

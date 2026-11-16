@@ -1230,13 +1230,13 @@ class Worker:
 
 def _word_of(end: End) -> dict[str, str]:
     """The end write's `ticket_write` keyword: the word when there is one (W6: every end write carries it)."""
-    return {} if end.ticket_write is None else {"ticket_write": end.ticket_write}
+    return {} if end.ticket_write is None else {"ticket_write": end.ticket_write}  # lint-run-records: ok — the jobs table's ticket_write column, not a run folder's receipt
 
 
 def _unread_word(held: Held, end: End) -> End:
     """A flagged row's end that never looked at the run folder (a fault, an outage, a lane it could not open, a stop
     before launch) says `not_read`: the comment may or may not have been posted (W6)."""
-    if end.ticket_write is not None or not getattr(held.record, "update_ticket", False):
+    if end.ticket_write is not None or not getattr(held.record, "update_ticket", False):  # lint-run-records: ok — the jobs table's ticket_write column, not a run folder's receipt
         return end
     return dataclasses.replace(end, ticket_write=NOT_READ)
 
@@ -1260,10 +1260,10 @@ def _lesser_ends(end: End) -> list[End]:
     marker = job_lane.JobLane.unreadable_knowledge()
     ends = [end]
     if end.knowledge is not None and end.knowledge != marker:
-        ends.append(End(end.ending, end.cost, marker, end.ticket_write))
+        ends.append(End(end.ending, end.cost, marker, end.ticket_write))  # lint-run-records: ok — the jobs table's ticket_write column, not a run folder's receipt
     barest = End(None if end.ending is None else Ending(
         _FAILED, failure_reason=_WORKER_ERROR, failure_message="the store refused the job's ending as decided"),
-        None, None, end.ticket_write)
+        None, None, end.ticket_write)  # lint-run-records: ok — the jobs table's ticket_write column, not a run folder's receipt
     if barest != ends[-1]:
         ends.append(barest)
     return ends

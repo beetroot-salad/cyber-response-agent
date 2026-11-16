@@ -1519,7 +1519,7 @@ def _set_up_in_container(  # noqa: PLR0913 — the request, its launch facts, th
                     check_root=tenancy.data_root_for_child(data_root))
 
 
-def _write_pass(request: Callable[..., dict[str, Any]], job: str) -> dict[str, Any]:
+def _ask_write_pass(request: Callable[..., dict[str, Any]], job: str) -> dict[str, Any]:
     """The helper's one write pass for this flagged job (`pass.write_back`, #1471 W5), or `{}` when it refuses or cannot
     be asked: the record step then says the write-back token could not be minted."""
     try:
@@ -1541,7 +1541,7 @@ def _job_ticket_step(started: _Started, summary: dict[str, Any], launch: dict[st
     closed_before_cut = summary.get("closed_before_cut") is True
     token: dict[str, Any] = {}
     if _default_ticket_writer.comments_on(truncated_by, closed_before_cut) and _default_ticket_writer.ticket_key(run):
-        token = _write_pass(request, job)
+        token = _ask_write_pass(request, job)
     _default_ticket_writer.record_case_ticket(
         run, tenant=started.tenant, defender_dir=DEFENDER_DIR,
         env=box_mod.run_env(DEFENDER_DIR, run.run_dir, tenant_agent=started.tenant.agent),

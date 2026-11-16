@@ -22,7 +22,7 @@ from defender import tenancy
 from defender.kit.access import TOKEN_SEC, RequestAccess
 from defender.kit.faults import AdapterFault, ConfigFault
 from defender.kit.verbs import is_system_name
-from defender.records._alert_input import case_key_of
+from defender.records.formats import case_key_of
 
 READ = "r"
 READ_WRITE = "rw"

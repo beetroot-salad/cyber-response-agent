@@ -318,4 +318,4 @@ def investigation_record(row: InvestigationRow) -> InvestigationRecord:
         knowledge=row.knowledge, failure_reason=row.failure_reason, failure_message=row.failure_message,
         update_ticket=row.update_ticket,
         # Served only once the investigation has ended: a handed-back row keeps its word but is still live (W6).
-        ticket_write=row.ticket_write if row.update_ticket and row.stage in TERMINAL else None)
+        ticket_write=row.ticket_write if row.update_ticket and row.stage in TERMINAL else None)  # lint-run-records: ok — the jobs table's ticket_write column, not a run folder's receipt

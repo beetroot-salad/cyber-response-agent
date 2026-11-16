@@ -43,15 +43,15 @@ lifecycle service; run migrations; start the new code. The notes below say only 
 
 ## Upgrade from before #1471
 
-Stop the API, the workers and the credential proxy first, then run migrations (revision `0020_ticket_write`: the ticket
-write columns on the investigations table and the store's flag and word). Rebuild the job image: the job's helper
-and its finishing step changed. The worker now requires `DEFENDER_API_FRONTEND_ORIGIN` (the origin the screen link in a
-ticket comment points at) and exits with status 2 without it.
+Stop the API, the workers and the credential proxy first, then run migrations (revision `0020_ticket_write`). Rebuild the
+job image, and upgrade the helper and the credential proxy together: a proxy that does not know the new write-pass claim
+refuses the token. The worker now requires `DEFENDER_API_FRONTEND_ORIGIN` (the API's own name and origin rule) and
+exits with status 2 without it.
 
-Removed: the case record's `comment:` key (a record that still has it is refused: delete the key; the comment's
-wording is fixed, a disposition and a link to the investigation's screen) and the operator's `run.py --update-ticket`
-(an operator run never comments; a ticket comment is the start-investigation request's `update_ticket` flag, written
-by the job). The run page's own `--update-ticket` flag is gone too: its ticket line shows whenever a receipt exists.
+Removed: the case record's `comment:` key (a record that still has it is refused, naming the key: delete it; the
+comment's wording is fixed) and the operator's `run.py --update-ticket` (an operator run never comments and never mints a
+write-back token). A ticket comment is now the start-investigation request's `update_ticket` flag. The run page's own
+`--update-ticket` flag is gone too: its ticket line shows whenever a receipt exists.
 
 ## Upgrade from before #1083
 

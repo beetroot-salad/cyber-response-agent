@@ -686,8 +686,8 @@ class JobStore:
                        else "its worker stopped renewing its lease")
                 lapsed.failure_message = why + ("; the request used all its attempts" if capped else "; it is retried")
                 lapsed.finished_at = self._clock()
-                if lapsed.update_ticket and lapsed.ticket_write is None:
-                    lapsed.ticket_write = "not_read"  # nobody looked at the run folder (W6)
+                if lapsed.update_ticket and lapsed.ticket_write is None:  # lint-run-records: ok — the jobs table's ticket_write column, not a run folder's receipt
+                    lapsed.ticket_write = "not_read"  # nobody looked at the run folder (W6)  # lint-run-records: ok — the jobs table's ticket_write column, not a run folder's receipt
                 retry_id = None
                 if not capped:
                     retry_id = InvestigationId.mint()
@@ -996,7 +996,7 @@ class JobStore:
 def _word_after(incoming: str | None) -> Any:
     """The `ticket_write` an end write leaves (W6): a word from the run folder replaces null or `not_read` on a flagged
     row; nothing replaces a word from the run folder; no incoming word leaves the column as it is."""
-    held = InvestigationRow.ticket_write
+    held = InvestigationRow.ticket_write  # lint-run-records: ok — the jobs table's ticket_write column, not a run folder's receipt
     if incoming is None:
         return held
     return case((~InvestigationRow.update_ticket, held), (held.in_(RECEIPT_WORDS), held), else_=incoming)
@@ -1005,7 +1005,7 @@ def _word_after(incoming: str | None) -> Any:
 def _word_when_the_store_ends() -> Any:
     """The word for a row the store ends itself (W6): a flagged queued row never ran (`no_receipt`), a flagged running
     one may have posted and nobody looked (`not_read`, only where the word is null)."""
-    held = InvestigationRow.ticket_write
+    held = InvestigationRow.ticket_write  # lint-run-records: ok — the jobs table's ticket_write column, not a run folder's receipt
     return case(
         (and_(InvestigationRow.update_ticket, InvestigationRow.stage == "queued"), "no_receipt"),
         (and_(InvestigationRow.update_ticket, InvestigationRow.stage == "running", held.is_(None)), "not_read"),
