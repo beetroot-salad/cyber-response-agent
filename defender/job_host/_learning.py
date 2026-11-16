@@ -3,8 +3,8 @@ their boxes.
 
 **The learning job** (`--kind learning --job <id> --tenant T --source S`). Its host half, before the container: the
 tenant's lock, waited for at most 30 s (still busy: the learning entry's `stopped` word, which the worker hands back,
-A3, C24), the admission (`host_tenant`), the tenant's current records read once (#1366 O6: a tenant not imported is
-refused; the container, which reads no database, and every sibling's run are handed them in the launch facts), the
+A3, C24), the admission (`host_tenant`), the tenant's current records read once (#1366 O6: a tenant that is not active is
+refused, #1470 O8; the container, which reads no database, and every sibling's run are handed them in the launch facts), the
 launch-time publish under the helper's cover (C19), the grant over the export it settled on (the granted systems
 declared `http-proxy`, narrowed to those the tenant has enabled records of; down systems not subtracted, O5) and the first pass,
 signed for the learning job's own id (pre-flight's pass names the row the worker fences; O5, C12 replaced). `--source`
@@ -161,7 +161,7 @@ def _prepare_learning(session: Session, hold: contextlib.ExitStack) -> Prepared:
     _hold_within_wait(session, hold)
     admitted = _admit_tenant(session, hold)
     accepted, records = admitted.tenant, admitted.directory
-    # The tenant's current records, read once for the whole job (#1366 O6; a tenant not imported refused, R8): the
+    # The tenant's current records, read once for the whole job (#1366 O6; a tenant not active refused, #1470 O8): the
     # container, which reads no database, is handed them in the launch facts, and so is each sibling's run.
     current = setup_step(run_common.read_records, records, accepted.id)
     source = settle_knowledge(session, accepted, records)
@@ -491,7 +491,7 @@ def _oracle_box(session: Session, _ident: str) -> Any:
     _io.guarded_mkdir(folder, base=state.scratch)
     try:
         return box.start_oracle_box(env=os.environ, tenant_id=session.tenant_id, folder=folder,
-                                    docker=session.docker)
+                                    docker=session.docker, data_root=session.root_folder)
     except box.BoxStartRefused as refused:
         raise box.BoxFault(str(refused)) from None
 

@@ -583,7 +583,7 @@ OFF_THE_PATH = {
     ("__main__.py", "operator_config"), ("_app.py", "ProxyDeps.__post_init__"), ("_app.py", "_openbao_token"),
     ("_app.py", "create_app_from_config"), ("_tokens.py", "mint_request_token"),
     ("_openbao.py", "_check_tenant"), ("_openbao.py", "_check_name"), ("_openbao.py", "_secret_path"),
-    ("_openbao.py", "_OpenBao.__init__"), ("_openbao.py", "OpenBaoSecrets.put_credentials"),
+    ("_openbao.py", "_Login.__init__"), ("_openbao.py", "OpenBaoSecrets.put_credentials"),
     ("_records.py", "PostgresSystemRecords.__init__"),
 }
 #: Reached only outside a proxied request, or not reachable at all because an earlier check

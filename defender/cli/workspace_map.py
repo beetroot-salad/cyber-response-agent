@@ -50,8 +50,7 @@ def main(argv: list[str], *, directory: TenantDirectory | None = None) -> int:
         # exit 2, not a traceback.
         try:
             records = admitted.directory.current_records(admitted.tenant.id)
-            roster = TenantSystems.of(records, Catalog(read_roster(adapters_under(DEFENDER_DIR))),
-                                     tenant_id=admitted.tenant.id).roster
+            roster = TenantSystems.of(records, Catalog(read_roster(adapters_under(DEFENDER_DIR)))).roster
         except (RegistryError, TenantRefused) as e:
             sys.stderr.write(f"workspace_map: {e}\n")
             return 2

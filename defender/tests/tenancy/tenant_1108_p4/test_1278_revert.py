@@ -7,7 +7,6 @@ exit codes and PR output are in `test_revert_cli.py`; the store-level rules in `
 from __future__ import annotations
 
 import importlib
-from pathlib import Path
 
 import pytest
 
@@ -22,7 +21,6 @@ from defender.tests.support.learning.core._store1278 import (
     migrated_database,  # noqa: F401 — fixture the world needs
     world,  # noqa: F401 — fixture
 )
-from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.tenancy.tenant_1108_delivery._support import close_on_remote
 from defender.tests.tenancy.tenant_1108_p4._drain_support import (
     LESSON_NAME,
@@ -64,7 +62,6 @@ def test_reverts_a_revert_opens_beside_an_open_author_batch_and_its_commit_is_in
     assert str(authored) in str(undo.reverts)
     assert not author_row.reverts
     assert [c[0] for c in undo.changes] == [LESSON_PATH]
-    assert not (Path(location_path(t.tenant.learning)) / "commit-maker.jsonl").exists()
 
 
 def test_reverts_a_revert_that_is_running_makes_a_second_revert_wait(world):  # noqa: F811 — the imported fixture

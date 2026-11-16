@@ -55,6 +55,7 @@ import pytest
 
 from defender.tests.support.tenancy._mapping1345 import PLANTED_ALERT_MAPPING, seed_postgres, seed_twin
 from defender.tests.support.tenancy._systems1366 import DERIVED, seed_postgres_records, seed_twin_records
+from defender.tests.support.tenancy._twin1496 import seed_tenant
 
 if TYPE_CHECKING:
     from defender.tenancy import TenantDirectory
@@ -103,16 +104,16 @@ def active_repository(  # noqa: PLR0913 — one twin's whole seeding, each part 
     """The in-memory tenant repository behind `active_directory` (for a test that reads it back directly).
     #1345: it holds today's alert mapping (`_mapping1345.PLANTED_ALERT_MAPPING`) for the tenant; a test of absence
     passes `alert_mapping=None`, another mapping passes its six entries.
-    #1366 R8: the twin is born NOT imported, so it is also seeded with the tenant's current system and case records
-    (`_systems1366.seed_twin_records`): by default what the tenant's own planted or published `settings/` stands for
-    (else the committed fixture's); `records=None` leaves the tenant not imported; a `RecordsSpec` seeds exactly that."""
+    #1470 O8: the twin is also seeded with the tenant's current system and case records (`_systems1366.seed_twin_records`):
+    by default what the tenant's own planted or published `settings/` stands for (else the committed fixture's);
+    `records=None` gives it none; a `RecordsSpec` seeds exactly that."""
     from defender.tenancy import InMemoryTenantRepository
 
     twin: Any = InMemoryTenantRepository()
     extra: dict[str, Any] = {}
     if wiring:
         extra = {"repo": repo or f"tenants/{tenant}", "origin": _origin_of(data_root, tenant, origin)}
-    added = twin.add_tenant(str(tenant), created_at=CREATED, state=state, **extra)
+    added = seed_tenant(twin, str(tenant), created_at=CREATED, state=state, **extra)
     if inspect.isawaitable(added):  # GAP-0-1: the seeder's sync/async shape is not pinned
         run_sync(_await(added))
     for fields in generations:
@@ -164,7 +165,8 @@ def insert_active_tenant(dsn: str, tenant: str, *, state: str = "active", repo: 
                          origin: str | None = None, wiring: bool = True,
                          data_root: Path | None = None, generations: Sequence[Mapping[str, Any]] = (),
                          alert_mapping: Mapping[str, str | None] | None = None, records: Any = None) -> None:
-    """#1345: `alert_mapping` (six entries) is saved through the store after the rows; the default saves none
+    """#1470: records go in through the store's puts, for an active tenant only (a state that is not active holds none).
+    #1345: `alert_mapping` (six entries) is saved through the store after the rows; the default saves none
     (lifecycle and identity tests do not start runs). `_jobs1342.register_tenant` defaults it to `FIXTURE_ALERT_MAPPING`."""
     from defender.tests.support.shared._postgres1339 import execute
 
@@ -177,7 +179,20 @@ def insert_active_tenant(dsn: str, tenant: str, *, state: str = "active", repo: 
     for fields in generations:
         insert_generation(dsn, tenant, fields)
     seed_postgres(dsn, tenant, alert_mapping)
-    seed_postgres_records(dsn, tenant, records, data_root)  # #1366 R8: default none (not imported)
+    _plant_mark(dsn, tenant, state)
+    if state == "active":  # #1470 O8: the store's lock refuses a tenant that is not active, so only an active one has records
+        seed_postgres_records(dsn, tenant, records, data_root)
+    elif records is not None and records is not DERIVED:
+        raise ValueError(f"records can only be seeded for an active tenant, not {state!r}")
+
+
+def _plant_mark(dsn: str, tenant: str, state: str) -> None:
+    """Where the records mark still exists (before #1470's migration), the row the tenant create request wrote: a mark
+    for every tenant not offboarded. A base-only shim: with the table gone it does nothing."""
+    from defender.tests.support.shared._postgres1339 import execute
+
+    if state != "offboarded" and execute(dsn, "SELECT to_regclass('tenancy.records_mark')::text")[0][0] is not None:
+        execute(dsn, "INSERT INTO tenancy.records_mark (tenant_id) VALUES (%s)", (tenant,))
 
 
 def insert_generation(dsn: str, tenant: str, fields: Mapping[str, Any]) -> None:
@@ -256,3 +271,19 @@ def provision_generation(openbao: Any, tenant: str, secrets_dir: Path, *, salt: 
     path.write_text(secret["secret_id"] + "\n", encoding="utf-8")
     path.chmod(0o600)
     return fields
+
+
+async def offboard_on_database(dsn: str, tenant_id: str) -> Any:
+    """Put `tenant_id` into `offboarding` by tenancy's own `offboard`, on a connection of its own to the database at
+    `dsn` (#1496: the repository has no offboard request; the API's is the job store's, which also ends the tenant's
+    jobs). Returns the record it left; `NotFound`/`Conflict` as `offboard` refuses. The twin's is
+    `_twin1496.offboard_twin`."""
+    from defender.database import async_engine
+    from defender.tenancy import offboard
+
+    engine = async_engine(dsn)
+    try:
+        async with engine.begin() as conn:
+            return await offboard(conn, tenant_id)
+    finally:
+        await engine.dispose()

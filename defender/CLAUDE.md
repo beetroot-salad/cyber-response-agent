@@ -34,6 +34,13 @@ Alert-triage product: an in-process PydanticAI investigation runtime plus an off
 
 Load only the references relevant to the task. Historical explanations live in `docs/archive/`.
 
+## Upgrading
+
+Every upgrade that runs migrations stops the old code first: each entry point (the API, the workers and every run
+they start, the learning drains, the lifecycle service) refuses a database whose revision is not exactly its own, and a
+migration may lock the tables it changes until it commits. So: stop the API, the workers, the learning drains and the
+lifecycle service; run migrations; start the new code. The notes below say only what an upgrade needs beyond that.
+
 ## Upgrade from before #1083
 
 Stop the API, the workers and the lifecycle service, then run migrations (revision `0016_list_indexes`). It builds one
@@ -42,66 +49,50 @@ until it finishes: on a large alerts table, a running intake or worker would sta
 
 ## Upgrade from before #1366
 
-A tenant's systems and its case record are versioned records in the database, written only by
-`defender/cli/tenant.py` (its top describes the subcommands); nothing reads a tenant's
-`settings/systems/` or `settings/case-record.yaml` any more, and a tenant's systems are only those
-its records name (`tenant.py catalog` lists the adapters a record may name). Credentials live at a
-per-generation path `<tenant>/<system>/g<N>`. Once:
+A tenant's systems and its case record are versioned records in the database, and a tenant's
+systems are exactly those its records name, from its creation; nothing reads a tenant's
+`settings/systems/` or `settings/case-record.yaml` any more. A tenant admin writes them through the
+API (#1470): `PUT /systems/<id>` (settings, access declaration, enabled), `PUT
+/systems/<id>/credentials` and `PUT /case-record`; `GET /adapters` lists the adapters a record may
+name. Credentials live at a per-generation path `<tenant>/<system>/g<N>`. Once:
 
-1. Run migrations (revision `0015_system_records`). It also creates the NOLOGIN role
-   `defender_proxy_reader` (SELECT on `tenancy.system_versions` and `tenancy.records_mark` only):
-   create a login that is a member of it and set the proxy config's `records_dsn` to that login's
-   DSN in place of `data_root` (an old config refuses to start).
-2. Per tenant that existed before this change (one created after it needs none): publish its
-   merged knowledge (`tenant.py update <tenant-id>`: the import reads the published export, not
-   the clone), then `python3 defender/cli/tenant.py import <tenant-id> --dry-run`, fix every file
-   it names in the tenant's repo, publish again, and `tenant.py import <tenant-id>`. It runs once
-   per tenant, writes every system and the case record at version 1, credential generation 1, and
-   copies no credential. Until then the tenant's runs are refused and `tenant check` reports it,
-   each naming the import.
-3. Per system, at generation 1: `tenant.py set-credentials <tenant-id> <system> <file> --for-version 1
-   --token-file <operator token file>` (the file is JSON `{"kind": ..., "fields": {...}}`). The set
-   at the old path `<tenant>/<system>` is never read again; until this is done the proxy refuses the
-   system and `tenant check` reports it.
-4. Delete `settings/systems/` and `settings/case-record.yaml` from the tenant's repository:
+1. Stop the API, the credential proxy and the workers (an old process reads a table this upgrade
+   drops), then run migrations (revisions `0015_system_records` and `0019_drop_records_mark`). They
+   create the NOLOGIN role `defender_proxy_reader`, which reads `tenancy.system_versions` and the
+   `id` and `state` columns of `tenancy.tenants`, nothing else: create a login that is a member of
+   it and set the proxy config's `records_dsn` to that login's DSN in place of `data_root` (an old
+   config refuses to start). The second of those migrations stops, changing nothing, while any tenant
+   that is not offboarded predates #1366's records (its systems never moved onto them): without
+   them it would read as a tenant with no systems. Recreate such a development database.
+2. Rebuild the job image on every execution host (`docker build -f .devcontainer/Dockerfile.job -t
+   defender-job:latest .` from the repository root, or the image `DEFENDER_JOB_IMAGE` names): an
+   old job image refuses the new records wire.
+3. Delete `settings/systems/` and `settings/case-record.yaml` from the tenant's repository:
    `tenant check` reports them as retired until they are gone.
 
-From then on: change a system with `tenant.py systems <tenant-id> --export <dir>`, edit the
-folder, `tenant.py set-system <tenant-id> <system> <dir>/<system> --replaces <its version>` (it
-keeps the system enabled or disabled as it is; `--disabled` or `--enabled` changes that); a
-change of its base, CA or auth block raises its credential generation, and its credentials are
-set again. Connect hands its result to the operator as such a folder: its validator takes
-`--handoff <folder>` and no longer `--tenant`.
+From then on the tenant admin changes a system with `PUT /systems/<id>`, naming the version it
+replaces (`GET /systems` shows it) and whether it is enabled; a change of its base, CA or auth block
+raises its credential generation, and its credentials are set again (`PUT
+/systems/<id>/credentials`). Connect hands its result to the tenant admin as a folder: its
+validator takes `--handoff <folder>` and no longer `--tenant`.
 
-## Upgrade from before #1278
+## Upgrade from before #1532
 
-A tenant's learning work (queued findings, pitfalls and requests, the batches that author lessons, the commit-maker's
-record) lives in the `learning` schema of PostgreSQL; nothing reads the tenant's `<data root>/<T>/learning/` folder any
-more. Each existing tenant moves once, by a lifecycle job (like a credential rotation), in this order:
+The API's start check asks OpenBao who its token is (lookup-self) before its metadata read, and the writer policy
+`store_policies()` writes now grants that lookup. A token minted with OpenBao's default policy already holds it; one
+minted without it (`-no-default-policy`) refuses start, naming `DEFENDER_OPENBAO_ADDR` and
+`DEFENDER_API_OPENBAO_TOKEN_FILE`, until the writer policy is re-applied. Once, before starting the new API: render
+the policy for the API's mount, `python -c 'from defender.credential_proxy import store_policies;
+print(store_policies(kv_mount="<mount>")["writer"])' > writer.hcl` from the repository root, then
+`bao policy write <the writer policy's name> writer.hcl`.
 
-1. Stop the workers and the learning drains of the host, then run migrations (revisions `0013_learning_store` and
-   `0014_learning_cutover_action`). Until a tenant is cut over its old queues are not read, so its learning looks
-   empty: nothing is lost, and nothing new is drawn from the old files.
-2. For each active tenant with nothing pending: `python -m defender.lifecycle request-learning-cutover --tenant <T>` (or
-   `--all`). With the lifecycle
-   (`python -m defender.lifecycle serve`) running, its host actor works the job under the tenant's exclusive host lock
-   (a worker still holding the lock fails the step, naming it, until it is free):
-   - `import`: reads the old queues, ledgers, dead-letter and stuck records, retained deliveries and the commit
-     record, and the tenant's open learning PRs from the forge, and writes them to the store in ONE transaction. A
-     record it will not guess (an unknown ledger category, two open authoring batches on one lane, a NUL character,
-     a feedback record) or an unreachable store writes nothing and touches no file.
-   - `cutover`: only after the import committed. It moves the batch worktrees to the tenant's scratch location and
-     removes the whole `learning/` folder (queues, ledgers, markers, locks, curator traces: those have no batch to
-     attach to and are discarded).
-3. Watch `GET /admin/tenants/<T>`: `pending_action` is `learning_cutover` at step `import`, then `cutover`, then the
-   tenant is `active` with nothing pending and no failure. A failure names the step and the record; fix it (remove or
-   repair the offending file) and `POST /admin/tenants/<T>/resume`: the job restarts at the failed step. A failed
-   `cutover` is not imported again.
+## Upgrade from before #1485
 
-It is one-way: after the cutover the folder is gone and nothing recreates it, so keep a backup of
-`<data root>/<T>/learning/` first if the old state matters. Asking again for a tenant that is already cut over changes
-nothing. Findings held from a PR merged before the cutover import as waiting and are retired by the corpus check on the
-next tick. Other tenants' jobs are independent: one tenant's refused import does not stop another's.
+Migrations `0017_retire_learning_cutover` and `0018_learning_set_aside_indexes`, as in "Upgrading" above. `0017`
+stops, changing nothing, while any tenant still has a learning cutover pending: finish or resume it with the code at
+revision `0016_list_indexes` first.
+
+The #1278 learning-state cutover is retired: cut over on a revision before #1485 first; a deployment that never did will lose its old learning folder.
 
 ## Upgrade from before #1454
 
@@ -110,6 +101,28 @@ Programs (#1307) now have their own table, `identity.programs`; users and member
 `program`) or any membership's role is not `admin`: no deployment created a program through the #1307 API, so
 remove any left in a development database first. Stop the API and the
 lifecycle service before migrating; an older process fails on every program read once the columns are gone.
+
+## Upgrade from before #1469
+
+A box can no longer reach a host unix socket, and the code proves it. #1170 gave every gVisor container host-socket
+access through one daemon-wide `--host-uds=open`, boxes included; the box runtime and the job runtime are now two
+registrations of the same gVisor binary, and the helper's caller check (`SO_PEERCRED`, the container's process list and
+the `peer` refusal) is gone: the job socket is 0600 in a 0700 folder, and the filesystem alone decides who may use it.
+On every execution host, once:
+
+1. Re-register `runsc`, the box runtime, without host-socket access: `runsc install -- --oci-seccomp`.
+2. Register the job runtime next to it: `runsc install --runtime runsc-job -- --oci-seccomp --host-uds=open`.
+3. Restart Docker. `DEFENDER_BOX_RUNTIME` stays the only setting: `runsc` boxes get `runsc-job` job containers, `runc`
+   boxes get `runc` job containers (no sandbox, as before). `runsc-job` cannot be named as a box runtime.
+4. Before a process's first box under `runsc`, the code runs a box that tries to connect to a host socket in its own bind
+   and refuses the start (naming this section) unless the runtime refuses it. A host not migrated refuses boxes and the
+   operator's `run.py <alert>` at that check, and a job container is refused for the missing `runsc-job` (`box:
+   start_failed`, with the remedy). A pass is kept in memory per docker daemon and registration, so a registration
+   changed under a running worker is checked again at its next box; a runtime binary upgraded without a re-registration,
+   or a shim edited without the registration changing, is seen at the next process start.
+5. A job whose container cannot reach its socket (`runsc-job` registered without `--host-uds=open`) fails its row through
+   its own refusal; the helper logs "the job never reached its socket" with this cause. The check's folder is
+   `<data root>/.box-checks/`; a crash can leave an inert socket there, and nothing sweeps it.
 
 ## Upgrade from before #1170
 
@@ -121,14 +134,13 @@ upgrading a worker:
    from the repository root, or set `DEFENDER_JOB_IMAGE` to an image you built from it. The helper never pulls. Without
    the image every job fails its row (an investigation `worker_error`, a learning job `failed: entry_error`), and no
    job runs outside a container.
-2. Register gVisor with `--host-uds=open` on every execution host: `runsc install -- --oci-seccomp --host-uds=open`, then
-   restart Docker. The job's socket is a host unix socket mounted into the job's gVisor guest, and gVisor refuses the
-   guest's connection to it without this. The flag is daemon-wide, so every box gets the capability; a follow-up issue
-   weighs a job-only runtime. Run the worker natively on the execution host, with `ps` installed: the helper must share
-   the docker daemon's mount paths and pid namespace, and `docker top` needs `ps`
+2. Register gVisor with `--host-uds=open` on every execution host, as the job runtime `runsc-job` (see "Upgrade from
+   before #1469": the box runtime `runsc` is registered without it). The job's socket is a host unix socket mounted
+   into the job's gVisor guest, and gVisor refuses the guest's connection to it without this. Run the worker natively
+   on the execution host: the helper must share the docker daemon's mount paths
    (`docs/decisions/vps-compose-deployment.md`, brain confinement). A worker in a container beside the daemon fails
    every job.
-3. Job containers start under the box runtime (`DEFENDER_BOX_RUNTIME`). Set `DEFENDER_JOB_NETWORK` to the Docker network
+3. Job containers start under the job runtime derived from the box runtime (`DEFENDER_BOX_RUNTIME`; #1469). Set `DEFENDER_JOB_NETWORK` to the Docker network
    from which the job reaches the credential proxy and the model provider. Leave OpenBao and the database off that network.
    It is required on every deployment, and must be a bridge network created for the jobs (`docker network create
    <name>`), not one docker compose made: unset, docker's default network, `host`, `container:<name>` or a compose
@@ -161,8 +173,8 @@ The tenant's alert mapping lives in the database; nothing reads `settings/alert-
 
 1. Add `title` and `description` to the tenant's `settings/alert-mapping.yaml`, if its alerts should have them: the file
    does not name them, and an entry left out is unmapped, so its alerts would list with neither.
-2. `python3 defender/cli/tenant.py set-alert-mapping <tenant-id> <that file>`. The top of `defender/cli/tenant.py`
-   describes the six entries.
+2. A tenant admin saves the mapping with `PUT /tenants/<tenant-id>/alert-mapping` (the six entries, as `GET` on the same
+   route answers them).
 3. Delete the file from the tenant's repository.
 
 ## Upgrade from before #1377

@@ -60,7 +60,7 @@ from defender.tests.support.learning.core._declared870 import (
     silent_shim_row,
 )
 from defender import _git
-from defender.learning.store import Outcome
+from defender.learning_store import Outcome
 from defender.tests.support.learning.core._declared870 import Claim, lead_wakes, pitfall_items, queue_pitfalls, tick
 from defender.tests.support.learning.core._store1278 import migrated_database, world  # noqa: F401 — fixtures
 from defender.tests.tenancy.tenant_1108_p4.conftest import p4_tenant  # noqa: F401 — fixture `world` is built on

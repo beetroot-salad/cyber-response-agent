@@ -96,7 +96,7 @@ def _served(sink: list[Path]):
 def _decide_served(items, outcomes) -> None:
     """The fate a served request takes (the real step decides one per item): skipped, so the store leaves it no longer
     waiting. A step that served and decided nothing leaves its item waiting again (r8 Lead-author lane)."""
-    from defender.learning.store import Outcome
+    from defender.learning_store import Outcome
 
     for kind, key, _payload in items:
         outcomes[(kind, key)] = Outcome.skipped("served by the test's lane")

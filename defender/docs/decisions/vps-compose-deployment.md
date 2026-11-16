@@ -201,12 +201,14 @@ flowchart LR
     Proxy --> Models[AI providers]
     Proxy --> Systems[Customer systems]
     Proxy --> Forge
+    API -->|write-only credential role| Bao
 ```
 
 | Zone | Holds | Reaches |
 |---|---|---|
 | Edge | TLS keys | API, artifact serving |
-| Application | API database role (row-level security), session store, identity-provider client secret, blob signing key | PostgreSQL, blob, identity provider |
+| Application | API database role (row-level security), session store, identity-provider client secret, blob signing key, page-grant signing key, OpenBao write-only role for system credentials (create and update a set, read metadata, look its own token up, never read a value; #1470, #1532) | PostgreSQL, blob, identity provider, OpenBao |
+| Artifact server | page-grant verifier, its own page-cookie key, blob read | blob |
 | Credential proxy | per-tenant pass verification, system secrets, provider keys, forge logins (from OpenBao) | OpenBao, PostgreSQL, forge, providers, customer systems, worker pods (job route only) |
 | Launcher (workers) | worker database role; OpenBao role reading every tenant's sign login; the orchestrator role below | PostgreSQL, OpenBao, blob, proxy, API server; accepts connections from proxy pods only |
 | Job | its pass | proxy |
@@ -265,7 +267,9 @@ the path's tenant. Sessions live in PostgreSQL, so API replicas share them (B7).
 
 Each request costs one session lookup; at this scale that is negligible. Deleting a session stops that browser
 immediately, so logout and forced sign-out take effect at once. A membership change takes effect on the next request,
-because membership is read per request, not carried in a token.
+because membership is read per request, not carried in a token. One exception, accepted (#1161): a page already opened
+from the artifact domain stays readable in that browser until its page cookie expires, at most 15 minutes and only
+that page (§5).
 
 Cookie authentication requires request-forgery protection. Use `SameSite` session cookies and reject state-changing
 requests whose `Origin` header is not the application origin. This matters because browsers treat subdomains of one
@@ -297,8 +301,8 @@ a **per-job host helper** (`python -m defender.job_host`, the worker's child). T
 holds what reaches more than one tenant: Docker, the shared database login, OpenBao's sign and forge logins. It
 prepares the run folder, copies and exports, signs every pass (tenant, investigation or learning job id, grant,
 600 s), mints the post-step's forge tokens, writes the post-step's records, and starts, relays and stops every box.
-The job reaches it over a unix socket (the job socket), answered only to that container's processes, which the helper
-recognises by host process ids; so the helper must share the Docker daemon's mount paths and process namespace, and
+The job reaches it over a unix socket (the job socket), 0600 in a 0700 folder, so the filesystem alone decides who may
+use it (#1469: the helper no longer asks who a caller is); the helper must share the Docker daemon's mount paths, and
 the worker runs natively on the execution host. The job container joins the network `DEFENDER_JOB_NETWORK` names (a
 bridge network created for the jobs, judged once at the worker's start), holds the provider key, and mounts its
 tenant's folder, the worker's code copy and its socket's folder. One worker runs per machine (a data-root lock), and one
@@ -458,14 +462,20 @@ Artifact HTML comes in two kinds, served under different restrictions:
 - **Renderer output.** Product renderers emit a page with one fixed script of our own. Model data is embedded as inert
   JSON data islands. Serve it with a CSP that allows only that script by its fingerprint and blocks network calls,
   forms, framing, and other scripts. The serving layer owns the fingerprint list; the renderer runs on hostile input
-  and cannot add to it. The document keeps a normal origin, so cookies work.
+  and cannot add to it. The page is also sandboxed with scripts allowed (`sandbox allow-scripts`): it follows no
+  automatic refresh, opens no popups and submits no forms, so it navigates only when a person clicks (#1161).
 - **Model-written HTML**, if any product path serves it. It runs in an opaque sandbox with no same-origin authority,
   with navigation, forms, popups, and network destinations restricted, for direct navigation as well as the iframe.
 
-Delivery of renderer output: the application issues a short-lived, one-time link bound to tenant and object scope. The
-artifact server exchanges it for a host-only HttpOnly cookie scoped to that tenant hostname and run, then redirects to a
-URL without the grant. Relative assets and sibling links within the run then carry authorization with no grant in the
-URL. Opaque-sandboxed documents do not send cookies on their requests; if they need relative assets, carry the grant in
+Delivery of renderer output (#1161, built in #1082's artifact piece): a frontend screen, the page opener, asks the API
+for a short-lived grant naming one page (tenant, owner, accepted storage prefix, entry, expiry) and posts it in a
+top-level form body to the artifact server on the tenant's hostname; the grant never appears in a URL and is not
+single-use. The artifact server accepts it only from the frontend origin and exchanges it for a host-only HttpOnly
+cookie scoped to that one page's exact address, then redirects to the page. Pages load no relative files; a sibling
+link is a page address of its own and goes through the opener for its own grant. Every refusal the artifact server
+gives a person is a redirect to the page's frontend address with a reason. The artifact server holds the grant
+verifier, its own cookie key and blob read access, never the database, and serves only names on its closed list of
+page names. Opaque-sandboxed documents do not send cookies on their requests; if they need relative assets, carry the grant in
 the URL path rather than the query string, and send no referrer.
 
 Share no application tokens or cookies with artifact origins, grant no broad CORS access, and preserve hostname and
@@ -494,7 +504,7 @@ before deployment.
 ### 7. Machine identity and trust
 
 OpenBao is the proposed issuer in development and production. It stores customer system credentials (KV v2, written
-whole through a write-only role, read only by the credential proxy), tenant login secrets (KV, written once by the
+whole by the API through a write-only role, read only by the credential proxy), tenant login secrets (KV, written once by the
 lifecycle at install), and signs passes (transit, one key per tenant; the launcher may only sign and the proxy may only
 verify) (#1163). Its address is a setting, not a fixed service name.
 
@@ -599,7 +609,7 @@ application state.
 
 **First, the API checkpoint** (#1083): the real server on PostgreSQL and Keycloak (#1498) and removal of the demo server
 (#1496); tenant configuration through the API (#1470) with the real connection check (#1460); the remaining operator
-flows as API requests (#1471); run pages and artifacts in the browser (#1161 and the artifact half of #1082); the
+flows as API requests (#1471); browser sign-in and navigation (#1161) and run pages in the browser (#1082's artifact piece, from #1161); the
 learning post-step's store access (#1487). Built in this design's shape: host-power flows as jobs, evidence in blob under
 claim-scoped keys with confined readers.
 

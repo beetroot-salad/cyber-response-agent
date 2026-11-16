@@ -88,7 +88,7 @@ def test_a_program_survives_the_person_who_created_it_leaving() -> None:
 
 def test_the_last_person_leaving_does_not_stop_a_program_nor_block_platform_rescue() -> None:
     """P-I: a program is not a member in the people sense, so an empty-of-people tenant takes a rescue invitation (O4)."""
-    world = ProgramsWorld(administrators=[OPS], tenants={T1: [ANN]})
+    world = ProgramsWorld(administrators=[OPS], tenants={T1: [ANN]}, database=True)  # the program then reads alerts (#1496)
     ann, ops = world.sign_in(ANN), world.sign_in_admin()
     program_id = str(create_program(ann, T1)["id"])
     _, key = issue_key(ann, T1, program_id)
@@ -689,7 +689,7 @@ def test_no_one_is_warned_about_a_credential_of_a_tenant_being_offboarded() -> N
     """A tenant that left `active` lets no credential in (401), so none is warned about, though offboarding has not
     yet ended its memberships or revoked its credentials (#1450 review)."""
     s, control = soar(), soar()
-    s.world.call(s.world.tenants.request_offboard, T1, now=s.world.clock())
+    s.world.move_tenant(T1, "offboarding")
     for world in (s.world, control.world):
         _until_remaining(world, world.clock() + DEFAULT_LIFETIME, 14 * DAY - HOUR)
         world.send_pending()

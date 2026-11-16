@@ -770,8 +770,8 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
     with admitted:
         # The tenant's readiness over its own folder; siblings dispatch no turn-0 lead. Its
         # systems are its CURRENT records (#1366 H9, O6): the episode's served systems and every
-        # replay read the present, whatever the source run read; a tenant not imported is
-        # refused (R8). Narrowed over the catalog the launch reads (R12): a grant on a system
+        # replay read the present, whatever the source run read; a tenant that is not active is
+        # refused (#1470 O8). Narrowed over the catalog the launch reads (R12): a grant on a system
         # the tenant has no enabled record of is ignored, once, here.
         if roster is None:
             from defender._paths import adapters_under
@@ -783,7 +783,6 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
             # the job's start come in the launch facts (#1170 A6).
             records = (admitted.directory.current_records(admitted.tenant.id) if container is None
                        else _handed_records(container))
-            run_tenant_mod.require_imported(records, admitted.tenant.id)
             verdict = run_tenant_mod.tenant_systems(
                 run_tenant_mod.run_tenant_for(admitted.tenant, dispatches_lead_zero=False, records=records),
                 Catalog(roster))
@@ -838,7 +837,8 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
             source=source, branch_message_id=ns.branch_message_id,
             preflight=preflight, model=ns.model,
             allow_dirty=ns.allow_dirty,
-            live_tree=live_capture, oracle=oracle, verifier=verifier)
+            live_tree=live_capture, oracle=oracle, verifier=verifier,
+            data_root=tenancy.data_root_for_child(data_root))
         view = prepare_episode(runs, source, knowledge_commit=pinned.commit,
                                episode_id=None if lane is None else lane.job_id)
         episode = view.episode
@@ -859,7 +859,7 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
                     knowledge_commit=pinned.commit, render_page=render_page,
                     signer=signer, proxy_url=proxy_url, issuer_transport=issuer_transport,
                     directory=admitted.directory, lane=lane, container=container,
-                    token_clock=clock)
+                    token_clock=clock, data_root=tenancy.data_root_for_child(data_root))
             except SystemExit:
                 raise
             except BaseException as failed:  # noqa: BLE001 — one abort rule, see `main`'s docstring
@@ -881,7 +881,7 @@ def _run_episode(  # noqa: PLR0913, PLR0912, PLR0915, C901 — the episode's who
     knowledge_commit: str | None = None, signer: Any = None, proxy_url: str | None = None,
     issuer_transport: Any = None, directory: Any = None, lane: JobLaneHooks | None = None,
     container: JobContainer | None = None,
-    token_clock: Callable[[], float] = time.time,
+    token_clock: Callable[[], float] = time.time, data_root: Path,
 ) -> int:
     """Every `Step`, `QUESTIONER` through `JUDGE`.
 
@@ -926,7 +926,7 @@ def _run_episode(  # noqa: PLR0913, PLR0912, PLR0915, C901 — the episode's who
                                   proxy_url=proxy_url, issuer_transport=issuer_transport,
                                   directory=directory, container=container,
                                   job_id=None if lane is None else lane.job_id,
-                                  clock=token_clock)
+                                  clock=token_clock, data_root=data_root)
     if record["outcome"] != ACCEPTED:
         _logger.info(f"episode {episode_id}: {record['outcome']} before any sibling started "
                      f"({record['reason']})")
@@ -1064,7 +1064,7 @@ def _grade(runs: RunsRepository[Tenant], *, episode_id: str, judge: Any) -> None
     its findings into the learning store at the host's database address (#1278)."""
     try:
         from defender.learning import judge as judge_mod
-        from defender.learning.store import blocking
+        from defender.learning_store import blocking
         from defender.tenancy import database_address_variable
 
         # The store is opened here, once, and handed to the grade (RF5). No address, or a store

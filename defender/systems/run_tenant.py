@@ -28,8 +28,7 @@ from defender.tenancy import RecordsUnreachable
 from defender.systems.verb_dispositions import DispositionError, RunGrants, require_gather_query, run_grants
 from defender.systems.verb_grant import GrantError, VerbGrant
 from defender import tenancy
-from defender.tenancy.case_ticket import (
-    CaseRecordSettings, CaseTicketError, case_record_text, parse_case_record)
+from defender.tenancy.case_record import CaseRecordSettings, CaseTicketError, case_record_text, parse_case_record
 from defender.tenancy.record_values import CaseRecord, TenantRecords
 from defender.kit.access import AccessDeclaration
 from defender.kit.settings import SystemConfig
@@ -106,7 +105,7 @@ class RunTenant:
     stage_token: Path | None = None
     #: The tenant's current records the run was built from (#1366 R10, O6), read once at its
     #: start: every O1 surface draws the tenant's systems from them (`catalog.TenantSystems`), and
-    #: the run records their versions. A tenant not imported has none (`imported` False).
+    #: the run records their versions.
     records: TenantRecords = dataclasses.field(default_factory=TenantRecords)
 
     @property
@@ -157,29 +156,12 @@ def resolve_tenant(  # noqa: PLR0913 — the request, the folder rules' inputs a
 
     The acceptance is `_tenant.accept_tenant` (the one frame every entry point shares; the
     settings half outside `defender_dir` and every `box_mounted` tree, e.g. the runs base),
-    then run start's readiness function over the accepted tenant's settings. A tenant not
-    imported is refused (R8, `require_imported`)."""
+    then run start's readiness function over the accepted tenant's settings. A tenant whose records
+    are not known (not `active`, #1470 O8) is refused by the read itself (`TenantRefused`)."""
     tenant = accept_tenant(
         data_root, tenant_id, defender_dir=defender_dir, box_mounted=box_mounted)
     records = entry_directory(directory).current_records(tenant.id)
-    require_imported(records, tenant.id)
     return run_tenant_for(tenant, dispatches_lead_zero=dispatches_lead_zero, records=records)
-
-
-#: The operator command that makes a tenant's systems come from records (#1366 R8, O9).
-IMPORT_COMMAND = "tenant.py import"
-
-
-def not_imported_text(tenant_id: object) -> str:
-    """THE wording of R8: a tenant whose systems do not come from records yet, naming the import."""
-    return (f"tenant {str(tenant_id)!r} is not imported: its systems and case record are not in the database yet. "
-            f"Run `{IMPORT_COMMAND} {tenant_id}` once (a tenant created since #1366 needs none)")
-
-
-def require_imported(records: TenantRecords, tenant_id: object) -> None:
-    """R8: `TenantRefused` naming the import for a tenant whose import has not run."""
-    if not records.imported:
-        raise TenantRefused(not_imported_text(tenant_id))
 
 
 def run_tenant_for(  # noqa: PLR0913 — the tenant, its records, its two roots, the staged token, the flag
@@ -194,9 +176,7 @@ def run_tenant_for(  # noqa: PLR0913 — the tenant, its records, its two roots,
     `settings_root`'s table. `agent_root`/`settings_root` are the two halves of the one export
     the run reads (#1108 P4, O-B: run start hands its run copy's); each defaults to the tenant's
     own folder (`clone_halves`). `defender_dir` is accepted for callers that still pass it and is
-    not read. Whether the tenant is imported (R8) is the caller's to refuse
-    (`require_imported`), and which of its records are its systems is the catalog's
-    (`tenant_systems`)."""
+    not read. Which of its records are its systems is the catalog's (`tenant_systems`)."""
     del defender_dir
     clone_agent, clone_settings = clone_halves(tenant)
     settings = Path(settings_root) if settings_root is not None else clone_settings
@@ -214,7 +194,7 @@ def record_settings(records: TenantRecords) -> dict[str, Any]:
     parsed (`access`, K4; a declaration that does not parse is kept as its fault, located at the
     record, DC6), and the case record (`case_record`). Nothing raises for a record's content
     (O5): a part that cannot stand is carried as the fault that says why."""
-    from defender.systems.record_judgement import located_access
+    from defender.system_rules import located_access
 
     enabled = {s: r for s, r in sorted(records.systems.items()) if r.enabled}
     access: dict[str, AccessDeclaration | ConfigFault] = {}
@@ -275,13 +255,13 @@ def tenant_systems(tenant: RunTenant, catalog: Catalog) -> TenantVerdict:
     as a table that names no correlation holder withholds it."""
     from defender.systems.catalog import TenantSystems
 
-    systems = TenantSystems.of(tenant.records, catalog, tenant_id=tenant.tenant_id)
+    systems = TenantSystems.of(tenant.records, catalog)
     if systems.adapter_missing:
         named = ", ".join(sorted(systems.adapter_missing))
         raise TenantRefused(
             f"tenant {str(tenant.tenant_id)!r}: system(s) {named} name an adapter this product version no longer "
-            "carries (an upgrade removed it; `tenant.py catalog` lists the adapters): delete the record "
-            "(`tenant.py delete-system`) or move to an adapter the catalog has")
+            "carries (an upgrade removed it; `GET /adapters` lists the adapters): a tenant admin deletes the record "
+            "(`DELETE /systems/{id}`) or moves it to an adapter the catalog has")
     ours = set(systems.roster.verbs)
     known = set(catalog.roster.verbs)
     granted = set(tenant.grants.gather.systems) | set(tenant.grants.correlation.systems)
@@ -295,7 +275,7 @@ def tenant_systems(tenant: RunTenant, catalog: Catalog) -> TenantVerdict:
     except DispositionError as empty:
         raise TenantRefused(
             f"tenant {str(tenant.tenant_id)!r}: {empty} Its grants on {', '.join(ignored)} were ignored: "
-            "those systems have no enabled record (`tenant.py systems` lists the records)") from empty
+            "those systems have no enabled record (`GET /systems` lists the records)") from empty
     correlation = tenant.correlation
     if correlation is not None and correlation.system in ignored:
         correlation = dataclasses.replace(correlation, system=None, grant=grants.correlation)
@@ -495,9 +475,6 @@ __all__ = [
     "warn_ignored",
     "narrowed_to",
     "TenantVerdict",
-    "require_imported",
-    "not_imported_text",
-    "IMPORT_COMMAND",
     "run_tenant_for",
     "table_pointer",
 ]

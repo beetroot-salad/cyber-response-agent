@@ -371,7 +371,7 @@ def enqueue_curation(
         return False
     import os
 
-    from defender.learning.store import blocking
+    from defender.learning_store import blocking
 
     address = RunAddress(tenant_id=TenantId(run.tenant_id), run_id=run.id)
     # Reading the alert is guarded: a moved alert must not fail the run. So is the learning store
@@ -468,7 +468,7 @@ def _file_feedback_request(run: Run, outcome: str, run_state: Any) -> bool:
     import os
 
     from defender.investigation.record_query import captured_lookups
-    from defender.learning import store as learning_store
+    from defender import learning_store as learning_store
 
     try:
         record = formats.read_record(RunPaths(run.run_dir).alert_record)
@@ -671,13 +671,10 @@ def write_knowledge_record(run_dir: Path, source: KnowledgeSource) -> None:
 def read_records(records: Any, tenant_id: Any) -> TenantRecords:
     """The tenant's current system and case records (#1366 O6, R10), read ONCE at setup on the
     host (the operator command, or a job's host helper), or a `[run.py]` refusal: the records
-    could not be reached, or the tenant is not imported (R8, named before anything else of the
-    tenant's settings is looked at, the alert mapping included)."""
-    from defender.systems import run_tenant as run_tenant_mod
-
+    could not be reached, or the tenant's records are not known (it is not active, #1470 O8; named
+    before anything else of the tenant's settings is looked at, the alert mapping included)."""
     try:
         current = records.current_records(tenant_id)
-        run_tenant_mod.require_imported(current, tenant_id)
     except TenantRefused as refused:
         sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
     return current

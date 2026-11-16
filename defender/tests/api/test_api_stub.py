@@ -8,13 +8,10 @@ import dataclasses
 import datetime as _dt
 import inspect
 import json
-import logging
-import secrets
-import threading
 from http import HTTPStatus
 import subprocess
 import sys
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -26,27 +23,14 @@ pytest.importorskip("fastapi")
 from fastapi.routing import APIRoute  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from defender.api import fakes as fakes_module, ports as ports_module  # noqa: E402
+from defender.api import job_store as job_store_module, ports as ports_module  # noqa: E402
 from defender.api.app import MAX_PAGE, create_app  # noqa: E402
-from defender.api.demo import DEMO_ROLES, demo_deps, demo_id, demo_sessions  # noqa: E402
-from defender.api.fakes import (  # noqa: E402
-    InMemoryOffboarding,
-    InMemorySecrets,
-    InMemoryStore,
-    StubArtifactLinks,
-    StubSystemChecker,
-)
 from defender.api.models import (  # noqa: E402
     Alert,
     AlertSummary,
     Investigation,
     LearningJob,
     Lesson,
-    System,
-    CredentialsPut,
-    SystemCheck,
-    SystemPut,
-    SystemSettings,
 )
 from defender.tests.tooling.layout_contracts._spec1080 import api_forbidden  # noqa: E402
 from defender.api.ports import (  # noqa: E402
@@ -65,16 +49,15 @@ from defender.identity import (  # noqa: E402
 from defender.tenancy import InMemoryTenantRepository  # noqa: E402
 from defender.records._tenant_id import TenantId  # noqa: E402
 from pydantic import ValidationError  # noqa: E402
-from defender.records.formats import AlertId, InvestigationId  # noqa: E402
 from defender.tests.support.tenancy._mapping1345 import ALERT_MAPPING_ROUTE, alert_mapping_url  # noqa: E402
 from defender.tests.support.api._programs1307 import NoProgramsRealm  # noqa: E402
+from defender.tests.support.tenancy._twin1496 import seed_tenant  # noqa: E402
+from defender.tests.support.identity._seed1496 import seed_membership, seed_user  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 NOW = _dt.datetime(2026, 9, 28, 12, 0, tzinfo=_dt.UTC)
 
 A = fixture_uuid("tenant:tenant-a")
-DEMO_ONE = fixture_uuid("tenant:t-one")
-DEMO_TWO = fixture_uuid("tenant:t-two")
 B = fixture_uuid("tenant:tenant-b")
 USER = fixture_uuid("user:ann")
 #: The tenant is the path's `T`; the caller is a session seeded through the identity repository,
@@ -110,8 +93,6 @@ JOB = LearningJob(
     trigger="explicit", created_at=NOW,
 )
 LESSON = Lesson(lesson_id="le-1", title="t", description="d", status="live")
-SETTINGS = SystemSettings(system_id="tix", kind="ticketing", display_name="T", enabled=True,
-                          settings={"queue": "sec"})
 SIGNED = "https://blobs.invalid/signed?sig=1"
 #: A credential value long enough for any kind's secret-field minimum (#1163 A4).
 LONG = "v" * 40
@@ -158,13 +139,23 @@ EXISTING_ROUTES = {
     ("GET", "/tenants/{tenant_id}/learning-jobs"),
     ("GET", "/tenants/{tenant_id}/learning-jobs/{learning_job_id}"),
     ("GET", "/tenants/{tenant_id}/lessons"),
+    # #1470: the config routes in the record's shape (their behaviour is `test_1470_config_routes`, over the real store)
+    ("GET", "/tenants/{tenant_id}/adapters"),
     ("GET", "/tenants/{tenant_id}/systems"),
+    ("GET", "/tenants/{tenant_id}/systems/{system_id}"),
     ("PUT", "/tenants/{tenant_id}/systems/{system_id}"),
+    ("DELETE", "/tenants/{tenant_id}/systems/{system_id}"),
     ("PUT", "/tenants/{tenant_id}/systems/{system_id}/credentials"),
     ("POST", "/tenants/{tenant_id}/systems/{system_id}/check"),
+    ("GET", "/tenants/{tenant_id}/case-record"),
+    ("PUT", "/tenants/{tenant_id}/case-record"),
+    ("DELETE", "/tenants/{tenant_id}/case-record"),
     # #1345 O1: the tenant's alert mapping, read and replaced whole (sketch: invented path)
     ("GET", ALERT_MAPPING_ROUTE),
     ("PUT", ALERT_MAPPING_ROUTE),
+    # #1485 O1, O2: the tenant's set-aside items and parked batches (Names, Routes)
+    ("GET", "/tenants/{tenant_id}/learning/items"),
+    ("GET", "/tenants/{tenant_id}/learning/parked-batches"),
 }
 #: What #1306 adds (design "Endpoints"; param names pinned by this suite).
 IDENTITY_ROUTES = {
@@ -220,28 +211,21 @@ HAPPY: list[tuple[tuple[str, str], str, dict[str, Any] | None, dict[str, Any]]] 
     (("GET", "/tenants/{tenant_id}/learning-jobs/{learning_job_id}"), f"{T}/learning-jobs/c1000000-0000-4000-8000-000000000001", None,
      {"get_learning_job": JOB}),
     (("GET", "/tenants/{tenant_id}/lessons"), f"{T}/lessons", None, {"list_lessons": [LESSON]}),
-    (("GET", "/tenants/{tenant_id}/systems"), f"{T}/systems", None,
-     {"list_systems": [SETTINGS], "has_credentials": False}),
-    (("PUT", "/tenants/{tenant_id}/systems/{system_id}"), f"{T}/systems/tix",
-     {"kind": "ticketing", "display_name": "T", "enabled": True, "settings": {}},
-     {"put_system": (SETTINGS, True), "has_credentials": False}),
-    (("PUT", "/tenants/{tenant_id}/systems/{system_id}/credentials"), f"{T}/systems/tix/credentials",
-     {"kind": "static", "credentials": {"api_token": LONG}},
-     {"get_system": SETTINGS, "has_credentials": False, "put_credentials": None}),
-    (("POST", "/tenants/{tenant_id}/systems/{system_id}/check"), f"{T}/systems/tix/check", None,
-     {"get_system": SETTINGS, "has_credentials": True,
-      "check": SystemCheck(ok=True, detail="fine")}),
     (("GET", ALERT_MAPPING_ROUTE), alert_mapping_url(A), None,
      {"get_alert_mapping": _Answer("saved mapping", lambda _tenant: _alert_mapping_wire(MAPPING_BODY))}),
     (("PUT", ALERT_MAPPING_ROUTE), alert_mapping_url(A), MAPPING_BODY,
      {"put_alert_mapping": _Answer("created from the body", lambda _principal, body: (body, True))}),
+    # #1485: an empty page is a served list; the wire models are built inside the cases, never at collection.
+    (("GET", "/tenants/{tenant_id}/learning/items"), f"{T}/learning/items", None, {"list_set_aside": []}),
+    (("GET", "/tenants/{tenant_id}/learning/parked-batches"), f"{T}/learning/parked-batches", None,
+     {"list_parked_batches": []}),
 ]
 
 
 #: The announcing writes: each one port call that commits then announces, taking the principal first (#1083 Ports,
-#: Am-2, Am-6). `put_system` is the systems port's and `put_credentials` the secret port's (they announce too).
+#: Am-2, Am-6). The systems and credentials writes announce through the real ports (#1470: `test_1470_*`).
 WRITES = {"create_investigation", "cancel_investigation", "delete_investigation",
-          "create_learning_job", "put_alert_mapping", "put_system", "put_credentials"}
+          "create_learning_job", "put_alert_mapping"}
 #: Every call whose first argument is the principal: the writes and the audit-only port's `announce`.
 PRINCIPAL_CALLS = WRITES | {"announce"}
 
@@ -251,7 +235,7 @@ class Scripted:
     to raise, or a callable that answers the call; an unscripted call fails the test.
 
     A write that does not raise is recorded in `written`; the audit-only port's `announce` records into `audits`.
-    This port announces nothing for a write: announcing is the real ports' job (the demo ports, tested over the demo)."""
+    This port announces nothing for a write: announcing is the real store's job, tested over it (#1496)."""
 
     def __init__(self, answers: dict[str, Any]) -> None:
         self.answers = answers
@@ -300,19 +284,19 @@ async def _seed_identity() -> tuple[IdentityService, dict[str, str], InMemoryTen
     """Ann is a member of A, Bob of B and Cy of both, each with a seeded session. Returns the
     service, the seeded user ids by session value and the tenant twin the service shares."""
     tenants = InMemoryTenantRepository()
-    await tenants.add_tenant(TenantId(A), created_at=NOW)
-    await tenants.add_tenant(TenantId(B), created_at=NOW)
+    await seed_tenant(tenants, TenantId(A), created_at=NOW)
+    await seed_tenant(tenants, TenantId(B), created_at=NOW)
     repo = InMemoryIdentityRepository(tenants=tenants)
     users: dict[str, str] = {}
     for email, tenant, session in (("ann@a.example", A, SESSION_A), ("bob@b.example", B, SESSION_B)):
-        user = await repo.add_user(email, created_at=NOW, status="active", display_name=email)
-        await repo.add_membership(user.id, TenantId(tenant), status="active", invited_by=None,
+        user = await seed_user(repo, email, created_at=NOW, status="active", display_name=email)
+        await seed_membership(repo, user.id, TenantId(tenant), status="active", invited_by=None,
                             created_at=NOW, accepted_at=NOW)
         await repo.add_session(session, user.id, now=NOW, expires_at=NOW + _dt.timedelta(days=7))
         users[session] = user.id
-    cy = await repo.add_user("cy@c.example", created_at=NOW, status="active", display_name="cy")
+    cy = await seed_user(repo, "cy@c.example", created_at=NOW, status="active", display_name="cy")
     for tenant in (A, B):
-        await repo.add_membership(cy.id, TenantId(tenant), status="active", invited_by=None,
+        await seed_membership(repo, cy.id, TenantId(tenant), status="active", invited_by=None,
                             created_at=NOW, accepted_at=NOW)
     await repo.add_session(SESSION_AB, cy.id, now=NOW, expires_at=NOW + _dt.timedelta(days=7))
     users[SESSION_AB] = cy.id
@@ -332,7 +316,7 @@ def _deps(ports: Any) -> tuple[ApiDeps, dict[str, str]]:
     identity, users, tenants = _identity()
     return ApiDeps(
         identity=identity, tenants=tenants, frontend_origin=ORIGIN,
-        alerts=ports, investigations=ports, learning_jobs=ports, lessons=ports,
+        alerts=ports, investigations=ports, learning_jobs=ports, learning_work=ports, lessons=ports,
         systems=ports, writes=ports, secrets=ports, checker=ports, artifact_links=ports, offboarding=ports,
         alert_mapping=ports, audit=ports,  # FC-11 and the audit-only port (Am-5: every construction site)
     ), users
@@ -371,14 +355,21 @@ def test_the_published_routes_are_exactly_1131s_list_under_tenants_plus_1306s() 
     assert not [s for s in schemes.values() if str(s.get("scheme", "")).lower() == "bearer"]
 
 
+#: The routes this suite does not script: #1470's config routes answer from the real record store (`test_1470_*`), and the
+#: check still refuses (the `REFUSED` sweep below).
+CONFIG = {route for route in EXISTING_ROUTES if any(w in route[1] for w in ("/systems", "/adapters", "/case-record"))}
+
+
 def test_the_happy_path_table_covers_every_existing_route() -> None:
-    assert {route for route, *_ in HAPPY} == EXISTING_ROUTES
+    """Every route is scripted here, answered by the real store (`CONFIG`), or refused with its owner's number."""
+    assert {route for route, *_ in HAPPY} == EXISTING_ROUTES - CONFIG
+    assert len(CONFIG) == 10
 
 
 def test_the_api_never_loads_the_runtime_or_the_learning_loop() -> None:
     """The API modules, with `defender.identity`, load no runtime or learning-loop module."""
     probe = (
-        "import json, sys; import defender.api.app, defender.api.demo, defender.api.serve; "
+        "import json, sys; import defender.api.app, defender.api_server; "
         "import defender.identity; "
         "print(json.dumps(sorted(sys.modules)))"
     )
@@ -387,19 +378,6 @@ def test_the_api_never_loads_the_runtime_or_the_learning_loop() -> None:
         encoding="utf-8", check=True,
     )
     assert api_forbidden(json.loads(out.stdout)) == []
-
-
-def test_1366_h3_the_api_loads_no_record_store_so_no_route_writes_system_records() -> None:
-    """Guard: the API, demo wiring and server load nothing of the record writer, so no route writes records. (#1366 H3/R1)"""
-    probe = (
-        "import json, sys; import defender.api.app, defender.api.demo, defender.api.serve; "
-        "print(json.dumps(sorted(m for m in sys.modules if m.startswith('defender.system_records'))))"
-    )
-    out = subprocess.run(
-        [sys.executable, "-c", probe], cwd=REPO_ROOT, capture_output=True, text=True,
-        encoding="utf-8", check=True,
-    )
-    assert json.loads(out.stdout) == []
 
 
 def test_the_identity_package_loads_no_api_runtime_or_learning_module() -> None:
@@ -613,37 +591,6 @@ def test_a_write_port_that_raises_answers_500_with_the_write_called_and_the_rout
     assert failing.ports.audits == []
 
 
-def test_put_system_is_a_201_at_its_own_url_when_created_and_200_when_replaced() -> None:
-    body = {"kind": "ticketing", "display_name": "T", "enabled": False, "settings": {"q": "s"}}
-    created = Api(put_system=(SETTINGS, True), has_credentials=False)
-    response = created.client.put(f"{T}/systems/tix", headers=AUTH, json=body)  # R7-2: a stray `x=1` here is now refused, see below
-    assert (response.status_code, response.headers["Location"]) == (201, BASE + f"{T}/systems/tix")
-    # FORCED CHOICE FC-12: the systems port's `put_system(principal, system_id, body)`: the principal replaces the tenant.
-    ((principal, system_id, sent), kwargs), = created.ports.called("put_system")
-    assert (principal.tenant_id, principal.actor_id, system_id, sent.model_dump(), kwargs) == (
-        A, created.user, "tix", body, {})
-    replaced = Api(put_system=(SETTINGS, False), has_credentials=False)
-    response = replaced.client.put(f"{T}/systems/tix", headers=AUTH, json=body)
-    assert response.status_code == 200
-    assert "Location" not in response.headers
-    assert created.ports.audits == replaced.ports.audits == [], "the systems port announces `system.update`, not the route"
-
-
-@pytest.mark.parametrize("model", [SystemPut, CredentialsPut])
-def test_a_whole_record_put_body_has_no_defaults(model: type[Any]) -> None:
-    """A PUT replaces the record, so a default would silently reset whatever a caller left out."""
-    assert [name for name, field in model.model_fields.items() if not field.is_required()] == []
-
-
-@pytest.mark.parametrize("missing", ["enabled", "settings"])
-def test_put_system_without_a_field_is_refused(missing: str) -> None:
-    api = Api()
-    body = {"kind": "ticketing", "display_name": "T", "enabled": True, "settings": {}}
-    del body[missing]
-    assert api.client.put(f"{T}/systems/tix", headers=AUTH, json=body).status_code == 422
-    assert api.ports.calls == []
-
-
 # --- #1345 O1: the alert mapping's routes (shape over the scripted ports; the rules are the store's) -------
 
 
@@ -689,7 +636,9 @@ def test_1345_get_alert_mapping_answers_all_six_entries_or_404_when_none_was_sav
     ({**MAPPING_BODY, "summary": "rule..id"}, "summary"),  # an empty segment
     ({**MAPPING_BODY, "severity": "rule.level"}, "severity"),  # not one of the six
     ({k: v for k, v in MAPPING_BODY.items() if k != "event_time"}, "event_time"),  # D4: all six must be named
-], ids=["invalid-path", "empty-segment", "unknown-entry", "missing-entry"])
+    ({**MAPPING_BODY, "description": 42}, "description"),  # not a path
+    ({**MAPPING_BODY, "summary": ""}, "summary"),  # an empty path
+], ids=["invalid-path", "empty-segment", "unknown-entry", "missing-entry", "not-a-path", "empty-path"])
 def test_1345_an_invalid_or_incomplete_mapping_is_a_422_naming_the_entry_before_any_port_call(body: dict[str, str], entry: str) -> None:
     """The wire model refuses it (r5: validated through `records`' `check_mapping`; D4: all six named): 422 naming the
     entry, no port call, no audit. (#1345 O1, M2)"""
@@ -698,66 +647,6 @@ def test_1345_an_invalid_or_incomplete_mapping_is_a_422_naming_the_entry_before_
     assert response.status_code == 422, response.text
     assert entry in response.text
     assert (api.ports.calls, api.ports.audits) == ([], [])
-
-
-def _over_the_fake() -> tuple[TestClient, InMemoryStore]:
-    """The real app over the stub's own `InMemoryStore` (rule-free: it keeps what the wire model let through)."""
-    store = InMemoryStore(lambda: NOW)
-    identity, _, tenants = _identity()
-    return TestClient(create_app(ApiDeps(
-        identity=identity, tenants=tenants, frontend_origin=ORIGIN,
-        alerts=store, investigations=store, learning_jobs=store, lessons=store, systems=store,
-        writes=store, secrets=InMemorySecrets(store), checker=StubSystemChecker(),
-        artifact_links=StubArtifactLinks(), offboarding=InMemoryOffboarding(tenants, store, lambda: NOW),
-        alert_mapping=store, audit=store,  # FORCED CHOICE FC-14: the in-memory store serves the mapping read and the audit-only port
-    )), base_url=BASE), store
-
-
-def test_1345_over_the_fake_a_mapping_is_404_then_201_then_200_and_reads_back_as_put() -> None:
-    """GET is 404 until the first PUT (201, Location); a later PUT replaces whole (200); GET answers exactly the six
-    entries the PUT named; each save is audited `alert_mapping.update` for the tenant. (#1345 O1)"""
-    client, store = _over_the_fake()
-    assert client.get(alert_mapping_url(A), headers=AUTH).status_code == 404
-
-    first = client.put(alert_mapping_url(A), headers=AUTH, json=MAPPING_BODY)
-    assert (first.status_code, first.headers["Location"]) == (201, BASE + alert_mapping_url(A))
-    assert client.get(alert_mapping_url(A), headers=AUTH).json() == MAPPING_BODY
-
-    other = {**dict.fromkeys(MAPPING_ENTRIES), "case_key": "ticket.key"}
-    second = client.put(alert_mapping_url(A), headers=AUTH, json=other)
-    assert (second.status_code, "Location" in second.headers) == (200, False)
-    assert client.get(alert_mapping_url(A), headers=AUTH).json() == other, "a replace is whole: the earlier entries are gone"
-    assert [(e.action, e.tenant_id, e.target) for e in store.audit_events] == [("alert_mapping.update", A, A)] * 2
-
-
-@pytest.mark.parametrize(("body", "entry"), [
-    ({**MAPPING_BODY, "case_key": " rule.id"}, "case_key"),
-    ({**MAPPING_BODY, "summary": "rule..id"}, "summary"),
-    ({**MAPPING_BODY, "summary": ""}, "summary"),
-    ({**MAPPING_BODY, "summary": 7}, "summary"),
-    ({**MAPPING_BODY, "severity": "rule.level"}, "severity"),
-    ({k: v for k, v in MAPPING_BODY.items() if k != "description"}, "description"),
-    ({}, "signature"),
-], ids=["whitespace", "empty-segment", "empty-path", "not-a-string", "unknown-entry", "missing-entry", "empty-body"])
-def test_1345_over_the_fake_an_invalid_or_incomplete_mapping_is_refused_alike_and_writes_nothing(
-        body: dict[str, Any], entry: str) -> None:
-    """The fake refuses exactly as the scripted ports do (the wire model applies the rules before any port): 422 naming
-    the entry, no audit, the saved mapping untouched; a valid PUT right after is 201 (control). (#1345 O1, M2)"""
-    client, store = _over_the_fake()
-    scripted = Api()
-    refused = client.put(alert_mapping_url(A), headers=AUTH, json=body)
-    assert refused.status_code == 422, refused.text
-    assert entry in refused.text, refused.text
-    assert (scripted.client.put(alert_mapping_url(A), headers=AUTH, json=body).json()
-            == refused.json()), "the fake and the scripted ports must give one 422"
-    assert client.get(alert_mapping_url(A), headers=AUTH).status_code == 404
-    assert store.audit_events == []
-
-    assert client.put(alert_mapping_url(A), headers=AUTH, json=MAPPING_BODY).status_code == 201
-    saved = {**MAPPING_BODY, "title": "data.title"}
-    assert client.put(alert_mapping_url(A), headers=AUTH, json=saved).status_code == 200
-    assert client.put(alert_mapping_url(A), headers=AUTH, json={**saved, "title": "a..b"}).status_code == 422
-    assert client.get(alert_mapping_url(A), headers=AUTH).json() == saved, "a refused replace left the saved mapping"
 
 
 def test_1345_an_alert_with_no_title_or_description_is_served_with_nulls() -> None:
@@ -895,117 +784,6 @@ def test_only_keys_the_investigation_lists_are_answered(key: str) -> None:
     assert api.ports.audits == []
 
 
-# --- systems and credentials ---------------------------------------------------------------
-
-
-@pytest.mark.parametrize("has", [True, False])
-def test_has_credentials_is_the_secret_stores_answer(has: bool) -> None:
-    api = Api(list_systems=[SETTINGS], has_credentials=has,
-              get_system=SETTINGS, check=lambda tenant, system: SystemCheck(ok=True, detail="x"))
-    listed = api.client.get(f"{T}/systems", headers=AUTH).json()["items"]
-    assert listed == [System(**SETTINGS.model_dump(), has_credentials=has).model_dump(mode="json")]
-    api.client.post(f"{T}/systems/tix/check", headers=AUTH)
-    ((_, checked), _), = api.ports.called("check")
-    assert checked.has_credentials is has
-    assert api.ports.called("has_credentials")[0] == ((A, "tix"), {})
-
-
-def test_credentials_are_written_through_and_never_echoed_or_announced_by_the_route() -> None:
-    secret = "s3cr3t-value-never-echoed-" + LONG  # conflict updated: #1163 A4 (kind, minimum length)
-    api = Api(get_system=SETTINGS, has_credentials=False, put_credentials=None)
-    response = api.client.put(f"{T}/systems/tix/credentials", headers=AUTH,
-                              json={"kind": "static", "credentials": {"api_token": secret}})
-    assert (response.status_code, response.content) == (204, b"")
-    # FORCED CHOICE FC-12: the secret port's `put_credentials(principal, system_id, kind, fields)`: the principal replaces the tenant.
-    assert api.ports.called("put_credentials") == [
-        ((Principal(tenant_id=A, actor_id=api.user), "tix", "static", {"api_token": secret}), {})]
-    assert api.ports.called("has_credentials") == [], "an existence check, not a read"
-    assert api.ports.audits == [], "the secret port announces `system.credentials` after its write (Am-2)"
-
-
-def test_a_failed_credentials_write_announces_nothing() -> None:
-    """A failed credentials write answers 500 and the route announces nothing. (Am-2)"""
-    api = Api(get_system=SETTINGS, put_credentials=RuntimeError("vault down"))
-    response = api.lenient().put(f"{T}/systems/tix/credentials", headers=AUTH,
-                                 json={"kind": "static", "credentials": {"api_token": LONG}})
-    assert response.status_code == 500
-    assert (api.ports.written, api.ports.audits) == ([], [])
-
-
-#: Each as it is spelled inside a JSON string, so the body is valid JSON that decodes to it.
-@pytest.mark.parametrize("key", [r"a\u0000b", r"\ud800", "", "has space", "x" * 65, "9lead"])
-def test_a_credential_field_name_outside_the_grammar_is_refused(key: str) -> None:
-    """A field name reaches the audit detail, so one the audit store would refuse never gets in."""
-    api = Api()
-    response = api.client.put(f"{T}/systems/tix/credentials", headers={**AUTH, "Content-Type": "application/json"},
-                              content=('{"kind": "static", "credentials": {"' + key + '": "' + LONG + '"}}').encode())
-    assert response.status_code == 422
-    assert api.ports.calls == []
-
-
-def test_credentials_for_an_unknown_system_are_refused_before_the_secret_store() -> None:
-    api = Api(get_system=None)
-    response = api.client.put(f"{T}/systems/nope/credentials", headers=AUTH, json={"kind": "static", "credentials": {"k": LONG}})
-    assert response.status_code == 404
-    assert api.ports.called("put_credentials") == []
-    assert Api().client.put(f"{T}/systems/tix/credentials", headers=AUTH,
-                            json={"kind": "static", "credentials": {}}).status_code == 422
-
-
-#: (kind, credentials, accepted): secret fields per kind, #1163 r7 A19. Static: every field
-#: except `username`; oauth: every field except `client_id`.
-CREDENTIAL_SHAPES = [
-    ("static", {"api_key": LONG}, True),
-    ("static", {"api_key": "x"}, False),
-    ("static", {"username": "u", "password": LONG}, True),
-    ("static", {"username": "u", "password": "x"}, False),
-    ("static", {"username": "u", "api_key": LONG, "other": "x"}, False),
-    ("static", {"api_key": LONG, "client_id": "c"}, False),
-    ("static", {"api_key": LONG, "key_id": "k"}, False),
-    ("static", {"api_key": LONG, "user": "u"}, False),
-    ("static", {"api_key": LONG, "account": "a"}, False),
-    ("static", {"api_key": LONG, "client_id": LONG}, True),
-    ("oauth-client-credentials", {"client_id": "c", "client_secret": LONG}, True),
-    ("oauth-client-credentials", {"client_id": "c", "client_secret": "x"}, False),
-    ("oauth-client-credentials", {"client_id": "c", "client_secret": LONG, "audience": "x"}, False),
-    ("oauth-client-credentials", {"client_id": "c", "client_secret": LONG, "audience": LONG}, True),
-]
-
-
-@pytest.mark.parametrize(("kind", "credentials", "accepted"), CREDENTIAL_SHAPES)
-def test_a_secret_field_below_the_minimum_length_is_refused_at_write_time(
-        kind: str, credentials: dict[str, str], accepted: bool) -> None:
-    """A set is written whole with its kind; a too-short secret field of that kind is a 422 and
-    reaches no store, a short non-secret field passes. #1163 O5, A4."""
-    api = Api(get_system=SETTINGS, put_credentials=None)
-    response = api.client.put(f"{T}/systems/tix/credentials", headers=AUTH,
-                              json={"kind": kind, "credentials": credentials})
-    assert response.status_code == (204 if accepted else 422), response.text
-    assert api.ports.called("put_credentials") == (
-        [((Principal(tenant_id=A, actor_id=api.user), "tix", kind, credentials), {})] if accepted else [])
-
-
-@pytest.mark.parametrize("kind", [None, "", "oauth", "other"])
-def test_a_credential_write_without_a_known_kind_is_refused(kind: str | None) -> None:
-    """The write API takes the kind; none, or one that is not static or
-    oauth-client-credentials, is a 422 reaching no store. #1163 A4."""
-    api = Api(get_system=SETTINGS, put_credentials=None)
-    body = {"credentials": {"api_key": LONG}} | ({} if kind is None else {"kind": kind})
-    assert api.client.put(f"{T}/systems/tix/credentials", headers=AUTH,
-                          json=body).status_code == 422
-    assert api.ports.called("put_credentials") == []
-
-
-@pytest.mark.parametrize("method", ["GET", "POST", "DELETE", "PATCH"])
-def test_no_route_reads_a_credential_back(method: str) -> None:
-    """Only PUT exists on a system's credentials path; every other method is refused
-    unrouted. #1163 O5."""
-    api = Api(get_system=SETTINGS, has_credentials=True)
-    response = api.client.request(method, f"{T}/systems/tix/credentials", headers=AUTH)
-    assert response.status_code == 405
-    assert api.ports.called("put_credentials") == []
-
-
 # --- errors: one shape, RFC 9457 ----------------------------------------------------------
 
 PROBLEM_KEYS = {"type", "title", "status", "detail"}
@@ -1046,7 +824,7 @@ def test_a_validation_problem_lists_what_failed_and_never_echoes_the_value() -> 
     secret = 87654321987654321
     api = Api()
     response = api.client.put(f"{T}/systems/tix/credentials", headers=AUTH,
-                              json={"kind": "static", "credentials": {"api_token": secret}})
+                              json={"for_version": 1, "credentials": {"api_token": secret}})
     assert response.status_code == 422
     problem = response.json()
     assert problem["errors"] == [{"loc": ["body", "credentials", "api_token"],
@@ -1072,8 +850,8 @@ def test_the_published_contract_declares_each_routes_problems() -> None:
     assert declared[("POST", "/tenants/{tenant_id}/investigations/{investigation_id}/cancel")] >= {404, 409}
     assert declared[("DELETE", "/tenants/{tenant_id}/investigations/{investigation_id}")] >= {404, 409}
     assert declared[("POST", "/tenants/{tenant_id}/investigations")] >= {409}
-    refusable = {route for route in EXISTING_ROUTES if "/systems" in route[1] or "/lessons" in route[1]}
-    assert len(refusable) == 5
+    refusable = {route for route in EXISTING_ROUTES if "/lessons" in route[1] or route[1].endswith("/check")}
+    assert len(refusable) == 2
     assert all(501 in declared[route] for route in refusable), "the 501 is documented on every route of the unbacked families (O8)"
     assert declared[("POST", "/tenants/{tenant_id}/learning-jobs")] >= {409}
     assert declared[("GET", "/tenants/{tenant_id}/investigations/{investigation_id}/artifacts/{key}")] >= {404}
@@ -1134,6 +912,9 @@ _UNKNOWN_QUERY_ROUTES = [
     ("GET", f"{T}/lessons?bogus=x"),
     ("GET", f"{T}/systems?bogus=x"),
     ("GET", f"{T}/members?bogus=x"),
+    ("GET", f"{T}/learning/items?bogus=x"),          # #1485
+    ("GET", f"{T}/learning/items?limit=5&fired_after=2026-09-28T08:00:00Z"),
+    ("GET", f"{T}/learning/parked-batches?status=held"),
 ]
 
 
@@ -1153,16 +934,6 @@ def test_r7_2_a_query_parameter_the_route_does_not_declare_is_a_422_problem_befo
     assert api.ports.calls == [], "the handler ran for a request with an unknown query parameter"
 
 
-def test_r7_2_a_put_with_an_undeclared_query_parameter_is_refused_and_changes_nothing() -> None:
-    """`PUT /systems/tix?x=1` (once let through, its Location built without the query) is a 422 `extra_forbidden` at `["query", "x"]`; no system is written. (R7-2)"""
-    api = Api(put_system=(SETTINGS, True), has_credentials=False)
-    body = {"kind": "ticketing", "display_name": "T", "enabled": False, "settings": {"q": "s"}}
-    response = api.client.put(f"{T}/systems/tix", headers=AUTH, params={"x": "1"}, json=body)
-    assert response.status_code == 422
-    assert [(e["type"], e["loc"]) for e in response.json()["errors"]] == [("extra_forbidden", ["query", "x"])]
-    assert api.ports.called("put_system") == []
-
-
 def test_r7_2_every_unknown_query_parameter_gets_its_own_entry() -> None:
     """Two undeclared parameters give two `extra_forbidden` entries, one per name. (R7-2)"""
     api = Api()
@@ -1177,6 +948,8 @@ def test_r7_2_every_unknown_query_parameter_gets_its_own_entry() -> None:
     (f"{T}/investigations?alert_id=a1000000-0000-4000-8000-000000000001&limit=5", {"list_investigations": [INV]}),
     (f"{T}/learning-jobs?investigation_id=b1000000-0000-4000-8000-000000000001&limit=5", {"list_learning_jobs": []}),
     (f"{T}/lessons?limit=5", {"list_lessons": [LESSON]}),
+    (f"{T}/learning/items?status=held&limit=5", {"list_set_aside": []}),          # #1485
+    (f"{T}/learning/parked-batches?limit=5", {"list_parked_batches": []}),
 ])
 def test_r7_2_control_declared_query_parameters_are_served_as_before(path: str, answers: dict[str, Any]) -> None:
     """Control: the declared parameters of the same routes answer 200. (R7-2)"""
@@ -1196,8 +969,8 @@ def test_a_record_time_is_served_in_utc() -> None:
     ("GET", f"{T}/alerts/%E2%9C%93", None),
     ("GET", f"{T}/investigations/a%20b", None),
     ("GET", f"{T}/learning-jobs/-leading-dash", None),
-    ("PUT", f"{T}/systems/%E2%9C%93", {"kind": "k", "display_name": "d", "enabled": True, "settings": {}}),
-    ("PUT", f"{T}/systems/a%20b/credentials", {"credentials": {"k": "v"}}),
+    ("PUT", f"{T}/systems/%E2%9C%93", {"replaces": 0, "enabled": True, "settings": {}, "access": ""}),
+    ("PUT", f"{T}/systems/a%20b/credentials", {"for_version": 1, "credentials": {"k": "v"}}),
     ("POST", f"{T}/systems/a%20b/check", None),
     ("POST", f"{T}/investigations/a%20b/cancel", None),
     ("DELETE", f"{T}/investigations/a%20b", None),
@@ -1217,7 +990,8 @@ def test_an_id_outside_the_grammar_is_refused_at_the_boundary(
 
 
 @pytest.mark.parametrize("limit", [0, MAX_PAGE + 1])
-@pytest.mark.parametrize("path", [f"{T}/alerts", f"{T}/investigations", f"{T}/learning-jobs"])
+@pytest.mark.parametrize("path", [f"{T}/alerts", f"{T}/investigations", f"{T}/learning-jobs",
+                                  f"{T}/learning/items", f"{T}/learning/parked-batches"])
 def test_a_page_size_out_of_range_is_refused(path: str, limit: int) -> None:
     api = Api()
     assert api.client.get(path, headers=AUTH, params={"limit": limit}).status_code == 422
@@ -1241,8 +1015,6 @@ def test_a_disposition_outside_the_vocabulary_cannot_be_served() -> None:
 def test_an_id_outside_the_grammar_cannot_be_served(bad: str) -> None:
     with pytest.raises(ValueError, match="pattern"):
         INV.model_validate({**INV.model_dump(), "investigation_id": bad})
-    with pytest.raises(ValueError, match="pattern"):
-        SETTINGS.model_validate({**SETTINGS.model_dump(), "system_id": bad})
 
 
 @pytest.mark.parametrize("legacy", ["Not_A_Tenant", "acme", "playground", "tenant-a", "blue"])
@@ -1265,7 +1037,6 @@ INV_2 = INV.model_copy(update={"investigation_id": "b1000000-0000-4000-8000-0000
 JOB_2 = JOB.model_copy(update={"learning_job_id": "c1000000-0000-4000-8000-000000000002", "created_at": LATER})
 SUMMARY_2 = SUMMARY.model_copy(update={"alert_id": "a1000000-0000-4000-8000-000000000002", "fired_at": LATER})
 LESSON_2 = LESSON.model_copy(update={"lesson_id": "le-2"})
-SETTINGS_2 = SETTINGS.model_copy(update={"system_id": "tiy"})
 
 #: (path, port, the store's first two rows in the list's order, the position the second page
 #: must start after — the first row's, as the port's order names it).
@@ -1274,7 +1045,6 @@ LISTS = [
     (f"{T}/investigations", "list_investigations", [INV_2, INV], (LATER, "b1000000-0000-4000-8000-000000000002")),
     (f"{T}/learning-jobs", "list_learning_jobs", [JOB_2, JOB], (LATER, "c1000000-0000-4000-8000-000000000002")),
     (f"{T}/lessons", "list_lessons", [LESSON, LESSON_2], "le-1"),
-    (f"{T}/systems", "list_systems", [SETTINGS, SETTINGS_2], "tix"),
 ]
 
 
@@ -1287,7 +1057,7 @@ def _rows_after(rows: list[Any]) -> Callable[..., list[Any]]:
 def test_every_list_pages_by_cursor_from_the_last_row_served(
     path: str, port: str, rows: list[Any], first_after: Any,
 ) -> None:
-    api = Api(**{port: _rows_after(rows), "has_credentials": False})
+    api = Api(**{port: _rows_after(rows)})
     first = api.client.get(path, headers=AUTH, params={"limit": 1}).json()
     assert len(first["items"]) == 1
     assert first["next_cursor"]
@@ -1327,7 +1097,7 @@ def _edited(cursor: str, **changes: Any) -> str:
 def test_an_edited_cursor_cannot_hand_a_port_an_id_outside_the_grammar(
     path: str, port: str, rows: list[Any], bad_id: str,
 ) -> None:
-    api = Api(**{port: _rows_after(rows), "has_credentials": False})
+    api = Api(**{port: _rows_after(rows)})
     cursor = _edited(_cursor(api, path), id=bad_id)
     calls = len(api.ports.calls)
     response = api.client.get(path, headers=AUTH, params={"limit": 1, "cursor": cursor})
@@ -1342,7 +1112,7 @@ def test_an_edited_cursor_with_an_id_not_of_the_lists_family_is_refused_before_t
 ) -> None:
     """A newest-first list's cursor id is read as the items' own id (canonical lowercase UUID): anything else, even a
     valid record id or the same UUID in upper case, is not a position in the list (422), never a store error. (#1498)"""
-    api = Api(**{port: _rows_after(rows), "has_credentials": False})
+    api = Api(**{port: _rows_after(rows)})
     cursor = _edited(_cursor(api, path), id=bad_id)
     calls = len(api.ports.calls)
     response = api.client.get(path, headers=AUTH, params={"limit": 1, "cursor": cursor})
@@ -1365,6 +1135,223 @@ def test_a_cursor_of_the_wrong_shape_for_its_list_is_refused(
     assert response.status_code == 422
     assert "not a position in this list" in response.text
     assert len(api.ports.calls) == calls
+
+
+# --- #1485: the learning lists (items, parked batches): paging, filters, wire, demo ---------------------------------
+
+ITEM_ID = "e1000000-0000-4000-8000-000000000001"
+ITEM_ID_2 = "e1000000-0000-4000-8000-000000000002"
+BATCH = "d1000000-0000-4000-8000-000000000001"
+BATCH_2 = "d1000000-0000-4000-8000-000000000002"
+LEARNING_ITEMS = f"{T}/learning/items"
+LEARNING_PARKED = f"{T}/learning/parked-batches"
+SCRIPT_REASON = '<script>alert("x")</script> & "q" \\n </td>'
+ITEM_WIRE_FIELDS = {"item_id", "kind", "key", "status", "reason", "source_run", "batch_id", "pr_number", "updated_at"}
+PARKED_WIRE_FIELDS = {"batch_id", "batch_kind", "lane", "blocks_lane", "branch", "pr_number", "reason", "created_at", "items"}
+
+
+def _learning_api(**answers: Any) -> Api:
+    """`Api` whose `learning_work` port is its scripted port too: `_deps`'s wiring with that one field replaced."""
+    api = Api(**answers)
+    api.client = TestClient(create_app(dataclasses.replace(api.client.app.state.deps, learning_work=api.ports)),
+                            base_url=BASE)
+    return api
+
+
+def _set_aside_rows() -> list[Any]:
+    """Two held items tied on `updated_at`, in the list's order (id descending). Built in the case, not at import."""
+    from defender.api.models import SetAsideItem
+
+    first = SetAsideItem(item_id=ITEM_ID_2, kind="finding", key="run 1/f 02", status="held", reason=SCRIPT_REASON,
+                         source_run="run-1", batch_id=BATCH, pr_number=7, updated_at=LATER)
+    return [first, first.model_copy(update={"item_id": ITEM_ID, "key": "run 1/f 01", "status": "dead", "reason": None,
+                                            "source_run": None, "batch_id": None, "pr_number": None})]
+
+
+def _parked_rows() -> list[Any]:
+    """Two parked batches, newest first."""
+    from defender.api.models import ParkedBatch, ParkedItemRef
+
+    first = ParkedBatch(batch_id=BATCH_2, batch_kind="author", lane="author", blocks_lane=True, branch="learning/b2",
+                        pr_number=9, reason="the forge refused 3 times", created_at=LATER,
+                        items=[ParkedItemRef(kind="finding", key="f1")])
+    return [first, first.model_copy(update={"batch_id": BATCH, "created_at": NOW, "items": [], "blocks_lane": False,
+                                            "batch_kind": "revert", "pr_number": None, "reason": None})]
+
+
+#: (list name, path, port, rows, the position the second page must start after)
+_LEARNING_LISTS = [
+    ("learning-items", LEARNING_ITEMS, "list_set_aside", _set_aside_rows, (LATER, ITEM_ID_2)),
+    ("parked-batches", LEARNING_PARKED, "list_parked_batches", _parked_rows, (LATER, BATCH_2)),
+]
+
+
+@pytest.mark.parametrize(("name", "path", "port", "rows", "first_after"), _LEARNING_LISTS, ids=[x[0] for x in _LEARNING_LISTS])
+def test_1485_each_learning_list_pages_by_cursor_from_the_last_row_served(
+    name: str, path: str, port: str, rows: Callable[[], list[Any]], first_after: Any,
+) -> None:
+    """Both lists page like every list: the port is asked `limit + 1` after nothing, then after (time, id) of the last
+    row served; the default page is `DEFAULT_PAGE`. (Paging)"""
+    from defender.api.app import DEFAULT_PAGE
+
+    api = _learning_api(**{port: _rows_after(rows())})
+    first = api.client.get(path, headers=AUTH, params={"limit": 1}).json()
+    second = api.client.get(path, headers=AUTH, params={"limit": 1, "cursor": first["next_cursor"]}).json()
+    assert (len(first["items"]), len(second["items"]), second["next_cursor"]) == (1, 1, None)
+    (_, a), (_, b) = api.ports.called(port)
+    assert (a["after"], a["limit"], b["after"], b["limit"]) == (None, 2, first_after, 2)
+    plain = _learning_api(**{port: _rows_after(rows())})
+    plain.client.get(path, headers=AUTH)
+    assert plain.ports.called(port)[0][1]["limit"] == DEFAULT_PAGE + 1
+
+
+@pytest.mark.parametrize(("name", "path", "port", "rows", "_after"), _LEARNING_LISTS, ids=[x[0] for x in _LEARNING_LISTS])
+def test_1485_a_learning_list_serves_exactly_its_wire_fields_and_a_reason_as_plain_text(
+    name: str, path: str, port: str, rows: Callable[[], list[Any]], _after: Any,
+) -> None:
+    """Each served row carries exactly the wire's fields (`item_id` and `batch_id` included, no payload or counters) and
+    a `<script>` reason comes back byte for byte, unescaped. (Wire models, P2)"""
+    api = _learning_api(**{port: _rows_after(rows())})
+    response = api.client.get(path, headers=AUTH)
+    assert response.status_code == 200, response.text
+    served = response.json()["items"]
+    assert [set(row) for row in served] == [ITEM_WIRE_FIELDS if name == "learning-items" else PARKED_WIRE_FIELDS] * 2
+    if name == "learning-items":
+        assert served[0]['reason'] == SCRIPT_REASON
+        assert served[0]['item_id'] == ITEM_ID_2
+        assert '<script>' in response.text
+        assert '&lt;' not in response.text
+        assert '\\u003c' not in response.text
+        assert (served[1]["status"], served[1]["reason"], served[1]["batch_id"], served[1]["pr_number"]) == ("dead", None, None, None)
+    else:
+        assert [set(i) for i in served[0]["items"]] == [{"kind", "key"}]
+        assert (served[0]["blocks_lane"], served[1]["blocks_lane"], served[1]["items"]) == (True, False, [])
+
+
+@pytest.mark.parametrize("path", [LEARNING_ITEMS, LEARNING_PARKED])
+def test_1485_a_learning_list_whose_tied_rows_are_not_in_id_descending_order_is_a_500_not_a_page(path: str) -> None:
+    """Ties list by id descending: a port that answers the tied rows ascending broke its promise (500); control: the
+    descending answer is served. (Paging)"""
+    port, rows = ("list_set_aside", _set_aside_rows) if path == LEARNING_ITEMS else ("list_parked_batches", _parked_rows)
+    ordered = rows()
+    if path == LEARNING_PARKED:  # the two batches must tie for the case to bite
+        ordered = [ordered[0], ordered[1].model_copy(update={"created_at": ordered[0].created_at})]
+    else:
+        ordered = [ordered[0], ordered[1].model_copy(update={"updated_at": ordered[0].updated_at})]
+    ok = _learning_api(**{port: ordered})
+    assert ok.client.get(path, headers=AUTH).status_code == 200
+    broke = _learning_api(**{port: ordered[::-1]})
+    assert broke.lenient().get(path, headers=AUTH).status_code == 500
+
+
+@pytest.mark.parametrize("bad_id", ["abc", "A1000000-0000-4000-8000-000000000002", "not-a-uuid-but-a-record-id", "a b/é",
+                                    "' OR 1=1 --", "", "\u0000", "x" * 1363])
+@pytest.mark.parametrize(("name", "path", "port", "rows", "_after"), _LEARNING_LISTS, ids=[x[0] for x in _LEARNING_LISTS])
+def test_1485_an_edited_learning_cursor_whose_id_is_not_a_uuid_is_refused_before_the_port(
+    name: str, path: str, port: str, rows: Callable[[], list[Any]], _after: Any, bad_id: str,
+) -> None:
+    """A cursor edited to carry an id that is not a canonical UUID is a 422, whatever the text, and no port is asked. (Paging)"""
+    api = _learning_api(**{port: _rows_after(rows())})
+    cursor = _edited(_cursor(api, path), id=bad_id)
+    calls = len(api.ports.calls)
+    response = api.client.get(path, headers=AUTH, params={"limit": 1, "cursor": cursor})
+    assert response.status_code == 422
+    assert len(api.ports.calls) == calls, "the edited cursor reached a port"
+
+
+@pytest.mark.parametrize(("name", "path", "port", "rows", "_after"), _LEARNING_LISTS, ids=[x[0] for x in _LEARNING_LISTS])
+def test_1485_a_learning_cursor_of_the_wrong_shape_is_refused(
+    name: str, path: str, port: str, rows: Callable[[], list[Any]], _after: Any,
+) -> None:
+    """A cursor with no time (an id-ordered list's) is not a position in a (time, id) list: 422, no port. (Paging)"""
+    api = _learning_api(**{port: _rows_after(rows())})
+    cursor = _edited(_cursor(api, path), at=None)
+    calls = len(api.ports.calls)
+    response = api.client.get(path, headers=AUTH, params={"limit": 1, "cursor": cursor})
+    assert response.status_code == 422
+    assert "not a position in this list" in response.text
+    assert len(api.ports.calls) == calls
+
+
+#: (list, its port, its rows) for the cursor sources: the two learning lists and one list of piece 1.
+_CURSOR_SOURCES = {
+    "learning-items": (LEARNING_ITEMS, "list_set_aside", _set_aside_rows),
+    "parked-batches": (LEARNING_PARKED, "list_parked_batches", _parked_rows),
+    "alerts": (f"{T}/alerts", "list_alerts", lambda: [SUMMARY_2, SUMMARY]),
+}
+
+
+@pytest.mark.parametrize(("source", "target"), [
+    ("learning-items", "parked-batches"), ("learning-items", "alerts"),
+    ("parked-batches", "learning-items"), ("alerts", "learning-items"),
+])
+def test_1485_a_cursor_of_one_list_given_to_another_is_a_422_and_the_target_port_is_never_asked(
+    source: str, target: str,
+) -> None:
+    """An items cursor on another list, and another list's cursor on `learning/items`, is a 422 before the port is
+    asked; control: each cursor first pages its own list. (Paging, Names)"""
+    path, port, rows = _CURSOR_SOURCES[source]
+    minted = _learning_api(**{port: _rows_after(rows())})
+    cursor = _cursor(minted, path)
+    own = minted.client.get(path, headers=AUTH, params={"limit": 1, "cursor": cursor})
+    assert own.status_code == 200, own.text
+
+    target_path, target_port, target_rows = _CURSOR_SOURCES[target]
+    api = _learning_api(**{target_port: _rows_after(target_rows())})
+    response = api.client.get(target_path, headers=AUTH, params={"limit": 1, "cursor": cursor})
+    assert response.status_code == 422, response.text
+    assert api.ports.calls == [], "the cursor reached a port"
+
+
+@pytest.mark.parametrize(("status", "asked"), [("held", "held"), ("dead", "dead"), (None, None)])
+def test_1485_the_items_status_filter_reaches_the_port_as_given(status: str | None, asked: str | None) -> None:
+    """`status=held|dead` is passed to the port as that status, no `status` as `None`. (Names, Routes)"""
+    api = _learning_api(list_set_aside=_rows_after(_set_aside_rows()))
+    response = api.client.get(LEARNING_ITEMS, headers=AUTH, params={} if status is None else {"status": status})
+    assert response.status_code == 200, response.text
+    assert api.ports.called("list_set_aside")[0][1]["status"] == asked
+
+
+@pytest.mark.parametrize("bad", ["waiting", "in_batch", "published", "skipped", "Held", "HELD", "held,dead", "", "all"])
+def test_1485_a_status_outside_held_and_dead_is_a_422_before_any_port(bad: str) -> None:
+    """Any other status, a stored one included, is a 422 with the port never asked; control: `dead` reaches it. (Names)"""
+    api = _learning_api(list_set_aside=_rows_after(_set_aside_rows()))
+    assert api.client.get(LEARNING_ITEMS, headers=AUTH, params={"status": bad}).status_code == 422
+    assert api.ports.calls == []
+    assert api.client.get(LEARNING_ITEMS, headers=AUTH, params={"status": "dead"}).status_code == 200
+
+
+def test_1485_an_items_cursor_is_bound_to_its_status_filter() -> None:
+    """A cursor minted under `status=held` is refused under `status=dead` and under no status; control: under `held` it
+    pages on. (Routes: filters)"""
+    api = _learning_api(list_set_aside=_rows_after(_set_aside_rows()))
+    cursor = _cursor(api, LEARNING_ITEMS, {"status": "held"})
+    calls = len(api.ports.calls)
+    assert api.client.get(LEARNING_ITEMS, headers=AUTH, params={"limit": 1, "status": "held", "cursor": cursor}).status_code == 200
+    calls = len(api.ports.calls)
+    for params in ({"status": "dead"}, {}):
+        assert api.client.get(LEARNING_ITEMS, headers=AUTH, params={"cursor": cursor, **params}).status_code == 422, params
+    assert len(api.ports.calls) == calls
+
+
+def test_1485_the_parked_list_declares_no_status_and_no_filter_name() -> None:
+    """`status` (or any filter name) on `parked-batches` is an undeclared query name: a 422 `extra_forbidden`, no port;
+    control: its own `limit` is served. (Routes, R7-2)"""
+    api = _learning_api(list_parked_batches=_rows_after(_parked_rows()))
+    for name in ("status", "kind", "fired_after"):
+        r = api.client.get(LEARNING_PARKED, headers=AUTH, params={name: "held"})
+        assert r.status_code == 422, name
+        assert [(e["type"], e["loc"]) for e in r.json()["errors"]] == [("extra_forbidden", ["query", name])]
+    assert api.ports.calls == []
+    assert api.client.get(LEARNING_PARKED, headers=AUTH, params={"limit": 5}).status_code == 200
+
+
+def test_1485_the_published_schemas_name_exactly_the_wire_fields() -> None:
+    """The published document's `SetAsideItem`, `ParkedBatch` and `ParkedItemRef` carry exactly the wire's fields. (Wire models)"""
+    schemas = Api().client.get("/openapi.json").json()["components"]["schemas"]
+    assert set(schemas["SetAsideItem"]["properties"]) == ITEM_WIRE_FIELDS
+    assert set(schemas["ParkedBatch"]["properties"]) == PARKED_WIRE_FIELDS
+    assert set(schemas["ParkedItemRef"]["properties"]) == {"kind", "key"}
 
 
 @pytest.mark.parametrize("answer", [
@@ -1391,21 +1378,6 @@ def test_one_filter_instant_written_with_another_offset_keeps_its_cursor() -> No
     page = api.client.get(f"{T}/alerts", headers=AUTH, params={
         "limit": 1, "fired_after": "2026-09-20T06:00:00Z", "cursor": cursor})
     assert page.status_code == 200, page.text
-
-
-def test_a_store_answering_full_system_records_is_still_served_from_its_settings() -> None:
-    stored = System(**SETTINGS.model_dump(), has_credentials=False)
-    api = Api(list_systems=[stored], get_system=stored, has_credentials=True,
-              check=lambda tenant, system: SystemCheck(ok=True, detail=str(system.has_credentials)))
-    assert api.client.get(f"{T}/systems", headers=AUTH).json()["items"][0]["has_credentials"] is True
-    assert api.client.post(f"{T}/systems/tix/check", headers=AUTH).json()["detail"] == "True"
-
-
-def test_systems_are_served_only_for_the_rows_on_the_page() -> None:
-    api = Api(list_systems=[SETTINGS, SETTINGS_2], has_credentials=False)
-    page = api.client.get(f"{T}/systems", headers=AUTH, params={"limit": 1}).json()
-    assert [s["system_id"] for s in page["items"]] == ["tix"]
-    assert api.ports.called("has_credentials") == [((A, "tix"), {})]
 
 
 def test_a_short_page_is_the_last_page() -> None:
@@ -1454,7 +1426,7 @@ def test_a_cursor_is_bound_to_its_list_its_tenant_and_its_filters() -> None:
 def test_a_cursor_from_one_tenant_is_refused_in_another_by_the_same_person(
         path: str, port: str, rows: list[Any], _after: Any) -> None:
     """A cursor is bound to the path's tenant, not to the caller: a member of both tenants cannot carry it across."""
-    api = Api(**{port: _rows_after(rows), "has_credentials": False})
+    api = Api(**{port: _rows_after(rows)})
     page = api.client.get(path, headers=AUTH_AB, params={"limit": 1}).json()
     cursor = page["next_cursor"]
     assert cursor
@@ -1464,52 +1436,6 @@ def test_a_cursor_from_one_tenant_is_refused_in_another_by_the_same_person(
     assert api.client.get(other, headers=AUTH_AB, params={"cursor": cursor}).status_code == 422
     assert len(api.ports.calls) == calls
 
-
-def test_paging_the_demo_store_serves_every_row_once_across_tied_timestamps() -> None:
-    store = InMemoryStore(lambda: NOW)
-    fired = [NOW, NOW, NOW, LATER, NOW - _dt.timedelta(hours=1)]
-    for n, at in enumerate(fired):
-        store.add_alert(A, ALERT.model_copy(update={"alert_id": f"a1000000-0000-4000-8000-{n:012d}", "fired_at": at}))
-    identity, _, tenants = _identity()
-    client = TestClient(create_app(ApiDeps(
-        identity=identity, tenants=tenants, frontend_origin=ORIGIN,
-        alerts=store, investigations=store, learning_jobs=store, lessons=store, systems=store,
-        writes=store, secrets=InMemorySecrets(store), checker=StubSystemChecker(),
-        artifact_links=StubArtifactLinks(), offboarding=InMemoryOffboarding(tenants, store, lambda: NOW),
-        alert_mapping=store, audit=store,
-    )), base_url=BASE)
-    seen: list[str] = []
-    params: dict[str, Any] = {"limit": 2}
-    while True:
-        page = client.get(f"{T}/alerts", headers=AUTH, params=params).json()
-        seen += [a["alert_id"] for a in page["items"]]
-        if page["next_cursor"] is None:
-            break
-        params = {"limit": 2, "cursor": page["next_cursor"]}
-    assert seen == ["a1000000-0000-4000-8000-000000000003", "a1000000-0000-4000-8000-000000000002", "a1000000-0000-4000-8000-000000000001", "a1000000-0000-4000-8000-000000000000", "a1000000-0000-4000-8000-000000000004"]
-
-
-
-@pytest.mark.parametrize("status", ["queued", "running"])
-def test_the_demo_store_refuses_to_delete_a_live_investigation_as_the_port_promises(status: str) -> None:
-    """`delete_investigation` is a `Conflict` while the investigation is live (the port's
-    contract, which the job store keeps); an ended one is deleted. (finalize #1354)"""
-    store = InMemoryStore(lambda: NOW)
-    store.add_alert(A, ALERT)
-
-    principal = Principal(tenant_id=A, actor_id=USER)
-
-    async def scenario() -> tuple[bool, bool]:
-        inv, _ = await store.create_investigation(principal, ALERT.alert_id, "k1")
-        store.add_investigation(A, inv.model_copy(update={"status": status}))
-        with pytest.raises(Conflict):
-            await store.delete_investigation(principal, inv.investigation_id)
-        kept = await store.get_investigation(A, inv.investigation_id) is not None
-        store.add_investigation(A, inv.model_copy(update={"status": "completed"}))
-        await store.delete_investigation(principal, inv.investigation_id)
-        return kept, await store.get_investigation(A, inv.investigation_id) is None
-
-    assert anyio.run(scenario) == (True, True)
 
 def _api_routes(routes: Any) -> Any:
     """Every route under `routes` as it is served: an included router (FastAPI includes them lazily)
@@ -1540,346 +1466,25 @@ def test_every_route_and_every_dependency_is_a_coroutine_function() -> None:
     assert [f"{c.__module__}.{c.__qualname__}" for c in calls if not inspect.iscoroutinefunction(c)] == []
 
 
-def test_every_fake_port_method_is_a_coroutine_function_and_the_write_port_has_no_transaction() -> None:
-    """D11/B: each fake implementing a `defender.api.ports` Protocol answers by `await`."""
+def test_every_port_method_is_a_coroutine_function_and_the_write_port_has_no_transaction() -> None:
+    """D11/B: every method each `defender.api.ports` Protocol declares answers by `await`, whether or not anything
+    implements it yet (a backing added later inherits the shape), and the real ports (`JobStorePorts`, the one object
+    the server hands every backed family) keep it for each Protocol they implement (#1496: no fakes to check)."""
     protocols = [p for p in vars(ports_module).values()
                  if isinstance(p, type) and getattr(p, "_is_protocol", False) and p.__module__ == ports_module.__name__]
-    fakes = [f for f in vars(fakes_module).values() if isinstance(f, type) and f.__module__ == fakes_module.__name__]
-    implemented = []
+    declared = {p.__name__: [n for n in vars(p) if not n.startswith("_") and callable(vars(p)[n])] for p in protocols}
+    sync = {p.__name__: [n for n in declared[p.__name__] if not inspect.iscoroutinefunction(vars(p)[n])] for p in protocols}
+    assert sync == dict.fromkeys(declared, []), sync
+    assert len(protocols) >= 9, declared
+    assert all(declared.values()), declared  # every Protocol declares a method: none is checked vacuously
+    real = job_store_module.JobStorePorts
+    implemented = [p.__name__ for p in protocols if declared[p.__name__] and all(hasattr(real, n) for n in declared[p.__name__])]
     for protocol in protocols:
-        names = [n for n in vars(protocol) if not n.startswith("_") and callable(vars(protocol)[n])]
-        for fake in fakes:
-            if names and all(hasattr(fake, n) for n in names):
-                implemented.append((fake.__name__, protocol.__name__))
-                sync = [n for n in names if not inspect.iscoroutinefunction(getattr(fake, n))]
-                assert sync == [], (fake.__name__, protocol.__name__)
-    assert len(protocols) >= 9
-    assert len(implemented) >= 9
-    assert ("InMemoryStore", "AlertsRepository") in implemented
-    assert ("InMemoryStore", "Writes") in implemented
-    assert ("InMemoryStore", "AlertMappingRepository") in implemented
+        if protocol.__name__ in implemented:
+            assert [n for n in declared[protocol.__name__] if not inspect.iscoroutinefunction(getattr(real, n))] == [], protocol
+    assert {"AlertsRepository", "Writes", "AlertMappingRepository", "Offboarding"} <= set(implemented), implemented
     assert not hasattr(ports_module, "WriteTransaction")
-    assert not hasattr(InMemoryStore, "transaction")
-
-
-# --- the demo server -----------------------------------------------------------------------
-
-
-def _session(value: str, origin: str) -> dict[str, str]:
-    return {"Cookie": f"{SESSION_COOKIE}={value}", "Origin": origin}
-
-
-def test_the_demo_seed_serves_each_named_tenant_only_its_own_records() -> None:
-    """The demo's seeded sessions reach only their own tenant."""
-    tenants = (DEMO_ONE, DEMO_TWO)
-    deps = anyio.run(demo_deps, tenants, lambda: NOW)
-    client = TestClient(create_app(deps), base_url=BASE)
-    sessions = demo_sessions(tenants)
-    seen: dict[str, set[str]] = {}
-    for tenant in tenants:
-        for role in DEMO_ROLES:
-            auth = _session(sessions[f"{tenant}-{role}"], deps.frontend_origin)
-            alerts = client.get(f"/tenants/{tenant}/alerts", headers=auth).json()["items"]
-            assert alerts, (tenant, role)
-            for alert in alerts:
-                assert client.get(f"/tenants/{tenant}/alerts/{alert['alert_id']}",
-                                  headers=auth).status_code == 200
-            other = DEMO_TWO if tenant == DEMO_ONE else DEMO_ONE
-            assert client.get(f"/tenants/{other}/alerts", headers=auth).status_code == 404
-            body = client.get("/me", headers=auth).json()
-            assert [t["tenant_id"] for t in body["tenants"]] == [tenant]
-            # A member is never an administrator; the demo seeds members only.
-            assert body["administrator"] is False
-            assert client.get("/admin/tenants", headers=auth).status_code == 403
-            seen.setdefault(tenant, set()).update(a["alert_id"] for a in alerts)
-    assert set(seen) == set(tenants)
-    assert not seen[DEMO_ONE] & seen[DEMO_TWO]
-    auth = _session(sessions[f"{DEMO_ONE}-analyst"], deps.frontend_origin)
-    systems = client.get(f"/tenants/{DEMO_ONE}/systems", headers=auth).json()["items"]
-    assert {s["system_id"]: s["has_credentials"] for s in systems} == {"siem": False, "tickets": True}
-
-
-def test_the_demo_seed_serves_every_investigation_with_an_exact_cost_beside_a_number() -> None:
-    """The demo's investigations carry `cost_is_lower_limit` over the wire: false, each beside a number. (#1377 S2, S4)"""
-    deps = anyio.run(demo_deps, (DEMO_ONE,), lambda: NOW)
-    client = TestClient(create_app(deps), base_url=BASE)
-    auth = _session(demo_sessions((DEMO_ONE,))[f"{DEMO_ONE}-analyst"], deps.frontend_origin)
-    items = client.get(f"/tenants/{DEMO_ONE}/investigations", headers=auth).json()["items"]
-    assert items
-    assert all((i["cost_is_lower_limit"], i["cost_usd"] is not None) == (False, True) for i in items), items
-
-
-def test_a_demo_session_outlasts_the_production_idle_limit() -> None:
-    """The printed demo sessions keep working through a night unused; only their own lifetime ends them."""
-    clock = {"now": NOW}
-    deps = anyio.run(demo_deps, (DEMO_ONE,), lambda: clock["now"])
-    client = TestClient(create_app(deps), base_url=BASE)
-    auth = _session(demo_sessions((DEMO_ONE,))[f"{DEMO_ONE}-analyst"], deps.frontend_origin)
-    clock["now"] = NOW + _dt.timedelta(days=3)
-    assert client.get("/me", headers=auth).status_code == 200
-    clock["now"] = NOW + _dt.timedelta(days=366)
-    assert client.get("/me", headers=auth).status_code == 401
-
-
-def test_the_demo_sign_in_port_refuses_with_a_503_problem() -> None:
-    """The demo has no Keycloak; `/auth/login` answers a 503 problem, never a redirect."""
-    client = TestClient(create_app(anyio.run(demo_deps, (DEMO_ONE,), lambda: NOW)), base_url=BASE)
-    response = client.get("/auth/login", follow_redirects=False)
-    assert response.status_code == 503
-    assert response.headers["Content-Type"] == "application/problem+json"
-    assert "Location" not in response.headers
-
-
-def test_the_demo_store_keeps_the_audit_events_its_writes_announce() -> None:
-    """The actor is the demo session's user id (read from `/me`)."""
-    deps = anyio.run(demo_deps, (DEMO_ONE,), lambda: NOW)
-    client = TestClient(create_app(deps), base_url=BASE)
-    auth = _session(demo_sessions((DEMO_ONE,))[f"{DEMO_ONE}-analyst"], deps.frontend_origin)
-    user_id = client.get("/me", headers=auth).json()["user"]["id"]
-    created = client.post(f"/tenants/{DEMO_ONE}/investigations", headers=auth,
-                          json={"alert_id": demo_id(AlertId, DEMO_ONE, "alert-0003"), "client_request_id": "r1"})
-    assert created.status_code == 201, created.text
-    events = deps.writes.audit_events  # type: ignore[attr-defined]
-    assert [(e.tenant_id, e.user_id, e.action, e.target) for e in events] == [
-        (DEMO_ONE, user_id, "investigation.start", created.json()["investigation_id"])]
-
-
-class _AuditLog(list[Any]):
-    """The demo store's `audit_events`, noting for each event whether the write it announces was visible on arrival.
-
-    Every list mutator goes through `_arrive`; `fail` makes the announcement itself raise."""
-
-    def __init__(self, *, fail: bool = False) -> None:
-        super().__init__()
-        self.fail = fail
-        self.probe: Callable[[], Awaitable[bool]] | None = None  # bound after `demo_deps` returns
-        self.visible_on_arrival: list[bool] = []
-        self.probe_errors: list[BaseException] = []
-
-    def _write_is_visible(self) -> bool:
-        probe = self.probe
-        assert probe is not None, "the probe is bound before any request"
-        seen: list[bool] = []
-
-        def run() -> None:
-            try:
-                seen.append(anyio.run(probe))  # a loop of its own, through the ports
-            except BaseException as error:  # noqa: BLE001 - carried to the test thread
-                self.probe_errors.append(error)
-
-        thread = threading.Thread(target=run)
-        thread.start()
-        thread.join(10)
-        if thread.is_alive():
-            self.probe_errors.append(TimeoutError("the visibility probe did not end in 10 s"))
-        return seen == [True]
-
-    def _arrive(self, events: Any) -> None:
-        if self.fail:
-            raise RuntimeError("the audit log refuses the announcement")
-        for _ in events:
-            self.visible_on_arrival.append(self._write_is_visible())
-
-    def append(self, event: Any) -> None:
-        self._arrive([event])
-        super().append(event)
-
-    def extend(self, events: Any) -> None:
-        events = list(events)
-        self._arrive(events)
-        super().extend(events)
-
-    def insert(self, index: Any, event: Any) -> None:
-        self._arrive([event])
-        super().insert(index, event)
-
-    def __iadd__(self, events: Any) -> _AuditLog:  # type: ignore[misc]
-        events = list(events)
-        self._arrive(events)
-        super().extend(events)
-        return self
-
-    def __setitem__(self, index: Any, value: Any) -> None:
-        self._arrive(list(value) if isinstance(index, slice) else [value])
-        super().__setitem__(index, value)
-
-
-@dataclasses.dataclass(frozen=True)
-class _DemoWrite:
-    """One announcing write as the demo serves it: a request that succeeds, one that fails, and what each announces."""
-
-    request: tuple[str, str, dict[str, Any]]
-    failing: tuple[str, str, dict[str, Any]]
-    action: str
-    target: Callable[[Any], str]
-    detail: str
-    visible: Callable[[ApiDeps, str], Awaitable[bool]]
-
-
-_DONE = demo_id(InvestigationId, DEMO_ONE, "inv-completed")
-_RUNNING = demo_id(InvestigationId, DEMO_ONE, "inv-running")
-_DEMO_T = f"/tenants/{DEMO_ONE}"
-_UNKNOWN = "f0000000-0000-4000-8000-000000000000"
-_NEW_NAME = "Renamed by the test"
-
-
-async def _a_new_investigation(deps: ApiDeps, _secret: str) -> bool:
-    return bool(await deps.investigations.list_investigations(
-        DEMO_ONE, alert_id=demo_id(AlertId, DEMO_ONE, "alert-0003"), after=None, limit=5))
-
-
-async def _a_cancelled_investigation(deps: ApiDeps, _secret: str) -> bool:
-    found = await deps.investigations.get_investigation(DEMO_ONE, _RUNNING)
-    return found is not None and found.status == "aborted"
-
-
-async def _a_deleted_investigation(deps: ApiDeps, _secret: str) -> bool:
-    return await deps.investigations.get_investigation(DEMO_ONE, _DONE) is None
-
-
-async def _a_new_learning_job(deps: ApiDeps, _secret: str) -> bool:
-    jobs = await deps.learning_jobs.list_learning_jobs(DEMO_ONE, investigation_id=_DONE, after=None, limit=10)
-    return any(job.trigger == "explicit" for job in jobs)
-
-
-async def _a_saved_mapping(deps: ApiDeps, _secret: str) -> bool:
-    return await deps.alert_mapping.get_alert_mapping(DEMO_ONE) is not None
-
-
-async def _a_replaced_system(deps: ApiDeps, _secret: str) -> bool:
-    found = await deps.systems.get_system(DEMO_ONE, "siem")
-    return found is not None and found.display_name == _NEW_NAME
-
-
-async def _stored_credentials(deps: ApiDeps, _secret: str) -> bool:
-    return await deps.secrets.has_credentials(DEMO_ONE, "siem")
-
-
-DEMO_WRITES = {
-    "create_investigation": _DemoWrite(
-        ("POST", f"{_DEMO_T}/investigations", {"alert_id": demo_id(AlertId, DEMO_ONE, "alert-0003"), "client_request_id": "r1"}),
-        ("POST", f"{_DEMO_T}/investigations", {"alert_id": _UNKNOWN, "client_request_id": "r1"}),
-        "investigation.start", lambda response: response.json()["investigation_id"],
-        f"alert {demo_id(AlertId, DEMO_ONE, 'alert-0003')}", _a_new_investigation),
-    "cancel_investigation": _DemoWrite(
-        ("POST", f"{_DEMO_T}/investigations/{_RUNNING}/cancel", {}), ("POST", f"{_DEMO_T}/investigations/{_DONE}/cancel", {}),
-        "investigation.cancel", lambda _response: _RUNNING, "", _a_cancelled_investigation),
-    "delete_investigation": _DemoWrite(
-        ("DELETE", f"{_DEMO_T}/investigations/{_DONE}", {}), ("DELETE", f"{_DEMO_T}/investigations/{_RUNNING}", {}),
-        "investigation.delete", lambda _response: _DONE, "", _a_deleted_investigation),
-    "create_learning_job": _DemoWrite(
-        ("POST", f"{_DEMO_T}/learning-jobs", {"investigation_id": _DONE, "client_request_id": "r1"}),
-        ("POST", f"{_DEMO_T}/learning-jobs", {"investigation_id": _UNKNOWN, "client_request_id": "r1"}),
-        "learning_job.start", lambda response: response.json()["learning_job_id"],
-        f"investigation {_DONE}; trigger=explicit", _a_new_learning_job),
-    "put_alert_mapping": _DemoWrite(
-        ("PUT", alert_mapping_url(DEMO_ONE), MAPPING_BODY), ("PUT", alert_mapping_url(DEMO_ONE), {**MAPPING_BODY, "summary": 7}),
-        "alert_mapping.update", lambda _response: DEMO_ONE, "", _a_saved_mapping),
-    "put_system": _DemoWrite(
-        ("PUT", f"{_DEMO_T}/systems/siem", {"kind": "siem", "display_name": _NEW_NAME, "enabled": True, "settings": {}}),
-        ("PUT", f"{_DEMO_T}/systems/siem", {"display_name": _NEW_NAME}),
-        "system.update", lambda _response: "siem", "", _a_replaced_system),
-    "put_credentials": _DemoWrite(
-        ("PUT", f"{_DEMO_T}/systems/siem/credentials", {}), ("PUT", f"{_DEMO_T}/systems/nope/credentials", {}),
-        "system.credentials", lambda _response: "siem", "fields: api_token", _stored_credentials),
-}
-
-
-def test_every_announcing_write_the_demo_serves_is_in_the_table() -> None:
-    """The demo cases cover exactly the stub's announcing writes. (Am-2, Am-6)"""
-    assert set(DEMO_WRITES) == WRITES
-
-
-#: The writes whose failing request reaches the write port (the job store's four): only there is "announces nothing"
-#: a claim about a refused write. The other three stop at a 422 or 404 before the port (accepted trade-off).
-_PORT_REACHED = {"create_investigation", "cancel_investigation", "delete_investigation", "create_learning_job"}
-
-
-def _demo_with_audit_log(
-    name: str, *, fail: bool = False,
-) -> tuple[_DemoWrite, ApiDeps, _AuditLog, TestClient, dict[str, str], str, str, Callable[[tuple[str, str, dict[str, Any]]], Any]]:
-    """A demo whose store's `audit_events` is an `_AuditLog`, installed before any request (every announcer appends to
-    the attribute as it stands when it announces, FC-14), probe bound after."""
-    case = DEMO_WRITES[name]
-    secret = secrets.token_hex(24)
-    deps = anyio.run(demo_deps, (DEMO_ONE,), lambda: NOW)
-    store = deps.writes
-    assert isinstance(store, InMemoryStore)
-    assert store.audit_events == [], "the seed announces nothing"
-    assert all(port is store for port in (deps.systems, deps.audit, deps.alert_mapping, deps.secrets._store))  # type: ignore[attr-defined]
-    store.audit_events = log = _AuditLog(fail=fail)
-    log.probe = lambda: case.visible(deps, secret)
-    client = TestClient(create_app(deps), base_url=BASE, raise_server_exceptions=False)
-    auth = _session(demo_sessions((DEMO_ONE,))[f"{DEMO_ONE}-analyst"], deps.frontend_origin)
-    user_id = client.get("/me", headers=auth).json()["user"]["id"]
-
-    def send(request: tuple[str, str, dict[str, Any]]) -> Any:
-        method, path, body = request
-        if name == "put_credentials":
-            body = {"kind": "static", "credentials": {"api_token": secret}}
-        return client.request(method, path, headers=auth, json=body or None)
-
-    return case, deps, log, client, auth, user_id, secret, send
-
-
-@pytest.mark.parametrize("name", sorted(WRITES))
-def test_the_demo_announces_each_successful_write_once_after_it_is_visible(
-    name: str, caplog: pytest.LogCaptureFixture,
-) -> None:
-    """One audit event per successful write (action, actor, target, detail), after the write is visible, with
-    no generated secret in any record or log line; where the failing request reaches the port, it announces nothing. (Am-2, P2, FC-14)"""
-    caplog.set_level(logging.DEBUG)
-    case, deps, log, _client, _auth, user_id, secret, send = _demo_with_audit_log(name)
-
-    refused = send(case.failing)
-    assert 400 <= refused.status_code < 500, refused.text
-    if name in _PORT_REACHED:
-        assert log == [], "a failed write announces nothing"
-
-    assert not anyio.run(case.visible, deps, secret), "control: the write is not yet visible"
-    served = send(case.request)
-    assert served.status_code < 300, served.text
-    if log.probe_errors:
-        raise log.probe_errors[0]
-    [event] = log
-    assert (event.tenant_id, event.user_id, event.credential_id, event.action, event.target, event.detail) == (
-        DEMO_ONE, user_id, None, case.action, case.target(served), case.detail)
-    assert log.visible_on_arrival == [True], "the event arrives after the write is visible"
-    assert secret not in "\n".join(repr(e) for e in log) + caplog.text
-    assert anyio.run(case.visible, deps, secret), "control: the write stands"
-
-
-@pytest.mark.parametrize("name", sorted(WRITES))
-def test_a_demo_announcement_that_fails_after_the_write_answers_500_and_the_write_stands(
-    name: str,
-) -> None:
-    """A write whose audit announcement raises answers 500, and the write is visible afterwards. (Am-2)"""
-    case, deps, log, _client, _auth, _user_id, secret, send = _demo_with_audit_log(name, fail=True)
-    assert not anyio.run(case.visible, deps, secret), "control: the write is not yet visible"
-    served = send(case.request)
-    assert served.status_code == 500, served.text
-    assert log == []
-    assert anyio.run(case.visible, deps, secret), "the write stands"
-
-
-def test_the_demo_store_keys_records_by_tenant() -> None:
-    store = InMemoryStore(lambda: NOW)
-    store.add_alert(DEMO_ONE, ALERT)
-    store.add_alert(DEMO_TWO, ALERT.model_copy(update={"title": "two's"}))
-    one, two = anyio.run(store.get_alert, DEMO_ONE, "a1000000-0000-4000-8000-000000000001"), anyio.run(store.get_alert, DEMO_TWO, "a1000000-0000-4000-8000-000000000001")
-    assert one is not None
-    assert two is not None
-    assert (one.title, two.title) == ("t", "two's")
-
-
-@pytest.mark.parametrize(("tenants", "reason"), [
-    ((), "at least one tenant"),
-    ((DEMO_ONE, DEMO_ONE), "tenants repeat"),
-    (("Not_A_Tenant",), "not a tenant id"),
-])
-def test_the_demo_seed_refuses_a_bad_tenant_list(tenants: tuple[str, ...], reason: str) -> None:
-    with pytest.raises(ValueError, match=reason):
-        anyio.run(demo_deps, tenants)
+    assert not hasattr(real, "transaction")
 
 
 # --- #1083: writes are single calls; the alert mapping has its own read port; unbacked families refuse -------
@@ -1927,22 +1532,22 @@ def _refusing(issue: str) -> Any:
 
 
 def _refusing_client(others: dict[str, Any]) -> TestClient:
-    """The app over refusing ports for lessons, systems, secrets and checker; the rest scripted by `others`."""
+    """The app over refusing ports for lessons and the checker; the rest scripted by `others`."""
     deps, _ = _deps(Scripted(others))
-    deps = dataclasses.replace(deps, lessons=_refusing("#1082"), systems=_refusing("#1470"),
-                               secrets=_refusing("#1470"), checker=_refusing("#1470"))
+    deps = dataclasses.replace(deps, lessons=_refusing("#1082"), checker=_refusing("#1460"))
     return TestClient(create_app(deps), base_url=BASE)
 
 
-#: Every route of the two unbacked families, by membership of the path (not a hand-picked list).
-REFUSED = [(route, path, body, "#1082" if "/lessons" in path else "#1470")
-           for route, path, body, _ in HAPPY if "/systems" in path or "/lessons" in path]
+#: Every route still refusing, with the issue that owns it: the lessons (#1082, in the happy table) and the connection
+#: check (#1460; #1470 O15, D-C), whose route is not scripted because it has no answer.
+REFUSED = [(route, path, body, "#1082") for route, path, body, _ in HAPPY if "/lessons" in path] + [
+    (("POST", "/tenants/{tenant_id}/systems/{system_id}/check"), f"{T}/systems/tix/check", None, "#1460")]
 
 
-def test_1083_the_refused_family_is_the_systems_and_lessons_routes() -> None:
-    """Control on the sweep: five routes, both issues. (O8)"""
-    assert len(REFUSED) == 5
-    assert {issue for *_, issue in REFUSED} == {"#1082", "#1470"}
+def test_1083_the_refused_family_is_the_lessons_and_the_check() -> None:
+    """Control on the sweep: two routes, their two owners, and neither is this piece. (O8, #1470 O15)"""
+    assert len(REFUSED) == 2
+    assert {issue for *_, issue in REFUSED} == {"#1082", "#1460"}
 
 
 @pytest.mark.parametrize(("route", "path", "body", "issue"), REFUSED, ids=lambda v: str(v))
@@ -1969,9 +1574,8 @@ def test_1083_control_the_same_deps_serve_the_backed_families() -> None:
 
 
 def test_1083_the_published_document_is_the_same_whichever_ports_are_passed_and_is_not_marked_stub() -> None:
-    """The demo's, a scripted and a refusing-ports document are one document; its summary does not say "not yet real". (O8, Am-2)"""
-    demo = TestClient(create_app(anyio.run(demo_deps, (DEMO_ONE,), lambda: NOW)), base_url=BASE).get("/openapi.json").json()
+    """A scripted and a refusing-ports document are one document; its summary does not say "not yet real". (O8, Am-2)"""
     refusing = _refusing_client({}).get("/openapi.json").json()
-    assert demo["paths"]
-    assert demo == refusing == Api().client.get("/openapi.json").json()
-    assert "not yet real" not in json.dumps(demo["info"]).lower()
+    assert refusing["paths"]
+    assert refusing == Api().client.get("/openapi.json").json()
+    assert "not yet real" not in json.dumps(refusing["info"]).lower()

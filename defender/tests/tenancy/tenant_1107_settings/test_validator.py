@@ -65,18 +65,21 @@ def test_o11_the_handoffs_access_is_judged_too(tmp_path, access):
 
 
 @pytest.mark.postgres
+@pytest.mark.parametrize("part", ["settings", "access"])
 def test_o11_the_handoffs_access_fault_is_the_stores_sentence_located_by_the_file(
-        migrated_database, tmp_path, data_root, capsys, monkeypatch):  # noqa: F811
-    """The store's access fault sentence appears in the validator's report, located by the file. (#1366 O11, DC6)"""
+        part, migrated_database, tmp_path, data_root, capsys, monkeypatch):  # noqa: F811
+    """The store's fault sentence for either part (an unknown settings key, an unknown access key) appears in the
+    validator's report, located by the file. (#1366 O11, DC6)"""
+    key = "CMDB_COLOUR" if part == "settings" else "colour"
+    config = {**CMDB_CONFIG, "CMDB_COLOUR": "red"} if part == "settings" else CMDB_CONFIG
+    access = CMDB_ACCESS if part == "settings" else BAD_ACCESS
     monkeypatch.setenv("DEFENDER_DATABASE_DSN", migrated_database)
     with published_tenant(tmp_path / "forge", root=data_root, files=R.import_files()) as t:
-        register_tenant(migrated_database, t.tenant_id, data_root=t.data_root, records=None)
-        op = R.Operator(t.tenant_id, migrated_database, tmp_path / "op", capsys)
-        rc, said = op.import_()
-        assert rc == 0, said
-        rc, said = op.set_system("cmdb", replaces=1, config=CMDB_CONFIG, access=BAD_ACCESS)
+        register_tenant(migrated_database, t.tenant_id, data_root=t.data_root)
+        op = R.Admin(t.tenant_id, migrated_database, tmp_path / "op", capsys)
+        rc, said = op.set_system("cmdb", replaces=1, config=config, access=access)
     assert rc != 0, said
-    (fault,) = [line.removeprefix("[tenant.py] ").strip() for line in R.lines_naming(said, "colour")]
-    sentence = H.store_sentence(fault, "cmdb", "access")
-    report = _validated(_folder(tmp_path / "handoff", access=BAD_ACCESS))
-    assert any(sentence in line for line in H.handoff_lines(report, "colour", "cmdb", "access")), (sentence, report)
+    (fault,) = [line.removeprefix("[tenant.py] ").strip() for line in R.lines_naming(said, key)]
+    sentence = H.store_sentence(fault, "cmdb", part)
+    report = _validated(_folder(tmp_path / "handoff", config=config, access=access))
+    assert any(sentence in line for line in H.handoff_lines(report, key, "cmdb", part)), (sentence, report)

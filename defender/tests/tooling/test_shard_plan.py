@@ -59,3 +59,15 @@ def test_the_weights_table_still_names_most_test_files():
         f"{len(unweighted)} of {len(files)} test files have no recorded cost; refresh the table "
         "from a CI run where both shards finished: "
         "python3 defender/tests/_shard_weights_refresh.py <run id>")
+
+
+def test_the_refresher_reads_a_ci_log_whose_results_are_coloured():
+    """CI's pytest colours each result word (`PASSED` in ANSI escapes), and the job log keeps them: a file's cost is
+    still read from such lines, counted from the session start. (#1532 follow-up: the refresher read no cost from a
+    coloured log.)"""
+    from defender.tests._shard_weights_refresh import file_costs
+
+    log = ["2026-11-15T20:37:30.0000000Z created: 4/4 workers [6000 items]",
+           "2026-11-15T20:37:32.5000000Z [gw0] [  1%] \x1b[32mPASSED\x1b[0m tests/api/test_x.py::test_one ",
+           "2026-11-15T20:37:33.0000000Z [gw0] [  2%] \x1b[32mPASSED\x1b[0m tests/api/test_x.py::test_two "]
+    assert file_costs(log) == {"tests/api/test_x.py": 3.0}

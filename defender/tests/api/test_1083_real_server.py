@@ -19,6 +19,7 @@ import anyio
 import httpx
 import pytest
 
+from defender.tests.support.api._openbao1470 import ScriptedOpenBao
 from defender.tests.support.api._server1083 import (
     A,
     ANN,
@@ -103,7 +104,7 @@ async def served(tenants: str, tmp_path: Path) -> AsyncIterator[Served]:
 
     seeded = await seed_identity(tenants)
     keycloak = FakeKeycloak()
-    async with serving(Settings.from_environ(environment(tmp_path, dsn=tenants)), transport=keycloak) as running, \
+    async with serving(Settings.from_environ(environment(tmp_path, dsn=tenants)), transport=keycloak, openbao_transport=ScriptedOpenBao()) as running, \
             httpx.AsyncClient(transport=httpx.ASGITransport(app=running.app), base_url=ORIGIN) as client:
         yield Served(client, running.app, tenants, tmp_path, keycloak, seeded)
     assert keycloak.unmodelled == []
@@ -270,14 +271,13 @@ async def test_o6_a_learning_job_of_an_investigation_that_did_not_complete_confl
 # --- alert mapping ----------------------------------------------------------------------------------
 
 @pytest.mark.postgres
-async def test_the_alert_mapping_reads_through_its_own_port_while_systems_refuse(served):
-    """The alert mapping answers the tenant's saved mapping although the systems port refuses whole. (G2, O6)"""
+async def test_the_alert_mapping_reads_through_its_own_port(served):
+    """The alert mapping answers the tenant's saved mapping from its own port. (G2, O6; #1470: systems no longer refuse)"""
     from defender.api.models import AlertMapping
 
     got = await served.client.get(f"/tenants/{A}/alert-mapping", headers=served.ann(write=False))
     assert got.status_code == 200
     assert got.json() == {entry: FIXTURE_ALERT_MAPPING.get(entry) for entry in AlertMapping.model_fields}
-    assert (await served.client.get(f"/tenants/{A}/systems", headers=served.ann(write=False))).status_code == 501
 
 
 @pytest.mark.postgres
@@ -312,6 +312,29 @@ async def test_o6_every_subset_of_the_entries_mapped_is_replaced_and_read_back_a
         assert (got.status_code, got.json()) == (200, body), mapped
 
 
+@pytest.mark.postgres
+@pytest.mark.parametrize("state", ["creating", "offboarding", "offboarded"])
+async def test_o6_a_mapping_put_for_a_tenant_that_is_not_active_is_refused_and_stores_nothing(served, state):
+    """A tenant in `creating`, `offboarding` or `offboarded` is not one its admin is a member of at the routes (O8: "at the
+    routes a non-active tenant is already 404 by membership"): the PUT is 404 and the tenant's mapping stays as it was; the
+    same PUT once the tenant is active is 200 and replaces it (control). (O6, O8; base
+    `test_1345_o6_a_tenant_that_is_not_active_is_refused_by_host_acceptance_and_writes_nothing`)"""
+    from defender.tests.support.jobs._jobs1342 import move_tenant
+
+    held = {entry: FIXTURE_ALERT_MAPPING.get(entry) for entry in MAPPING_ENTRIES}
+    mapping = {entry: f"vendor.{entry}" for entry in MAPPING_ENTRIES}
+    url = f"/tenants/{A}/alert-mapping"
+    move_tenant(served.dsn, A, state=state)  # in place: the memberships that refer to the row stay
+    refused = await served.client.put(url, headers=served.ann(), json=mapping)
+    assert refused.status_code == 404, refused.text
+    assert await _held_async(served.dsn, A) == held
+
+    move_tenant(served.dsn, A, state="active")
+    taken = await served.client.put(url, headers=served.ann(), json=mapping)
+    assert taken.status_code == 200, taken.text
+    assert await _held_async(served.dsn, A) == mapping
+
+
 async def _held_async(dsn: str, tenant: str) -> dict[str, str | None]:
     async with job_store(dsn) as store:
         stored = await store.get_alert_mapping(tenant)
@@ -342,6 +365,41 @@ async def test_another_tenants_member_reads_every_work_record_of_a_tenant_as_abs
     assert (await served.client.get(f"/tenants/{B}/investigations/{inv}", headers=served.bob(write=False))).status_code == 404
     assert (await served.client.get(f"/tenants/{B}/alerts/{alert_id}", headers=served.bob(write=False))).status_code == 404
     assert (await served.client.get(f"/tenants/{B}/alerts", headers=served.bob(write=False))).json()["items"] == []
+
+
+# --- #1485 O4: learning work, read through the learning store the server composed --------------------------------
+
+@pytest.mark.postgres
+async def test_1485_o4_held_dead_items_and_parked_batches_are_served_from_the_learning_store_not_501(served):
+    """Rows the learning store's verbs made are what both learning routes answer on the real server (200, never 501), as
+    the store holds them (`item_id` too) and only for their tenant; `status=dead` narrows; another tenant's member is 404
+    there. (O4, O1, O2, O3)"""
+    from defender.tests.support.api._learning1485 import dead_alone, held_together, parked_revert
+    from defender.tests.support.learning.core._store1278 import learning_store
+
+    async with learning_store(served.dsn) as store:
+        batch = await held_together(store, A, [("finding", "h1")], pr=7)
+        dead = await dead_alone(store, A, "d1")
+        await held_together(store, B, [("finding", "b-only")])
+        parked = await parked_revert(store, A)
+        await parked_revert(store, B)
+        stored = {i.key: i for i in await store.work(A, statuses=["held", "dead"])}
+    ann = served.ann(write=False)
+
+    items = await served.client.get(f"/tenants/{A}/learning/items", headers=ann)
+    assert items.status_code == 200, items.text
+    assert [(i["item_id"], i["key"], i["status"], i["reason"], i["batch_id"], i["pr_number"]) for i in items.json()["items"]] == [
+        (str(i.id), i.key, i.status, i.reason, str(i.batch_id), i.pr_number)
+        for i in sorted(stored.values(), key=lambda i: (i.updated_at, str(i.id)), reverse=True)]
+    assert {stored["h1"].batch_id, stored["d1"].batch_id} == {batch, dead}
+    narrowed = await served.client.get(f"/tenants/{A}/learning/items", params={"status": "dead"}, headers=ann)
+    assert [i["key"] for i in narrowed.json()["items"]] == ["d1"]
+    listed = await served.client.get(f"/tenants/{A}/learning/parked-batches", headers=ann)
+    assert listed.status_code == 200, listed.text
+    assert [(b["batch_id"], b["batch_kind"], b["blocks_lane"]) for b in listed.json()["items"]] == [
+        (str(parked), "revert", False)]
+    for route in ("learning/items", "learning/parked-batches"):
+        assert (await served.client.get(f"/tenants/{A}/{route}", headers=served.bob(write=False))).status_code == 404
 
 
 # --- tenant administration --------------------------------------------------------------------------
@@ -417,19 +475,16 @@ async def test_o7_an_administrator_offboards_a_tenant_and_its_queued_investigati
 # --- unbacked families ------------------------------------------------------------------------------
 
 def _unbacked(document: dict[str, Any]) -> list[tuple[str, str]]:
-    """Every operation of the documented routes on systems and lessons: (path, method)."""
+    """Every operation of the documented routes still refusing 501: the lessons and the connection check (#1470 O15)."""
     return [(path, method) for path, item in document["paths"].items() for method in item
-            if ("/systems" in path or "/lessons" in path) and method in ("get", "put", "post", "delete")]
+            if ("/lessons" in path or path.endswith("/check")) and method in ("get", "put", "post", "delete")]
 
 
 @pytest.mark.postgres
-async def test_o8_systems_and_lessons_refuse_501_naming_their_issue_after_membership(served):
-    """A member gets 501 naming the backing issue on every systems and lessons route; a non-member gets 404. (O8, P1)"""
-    body = {"kind": "ticket", "display_name": "Tickets", "enabled": True, "settings": {}}
-    credentials = {"kind": "static", "credentials": {"api_token": "a-secret-of-sixteen-or-more"}}
-    cases = [("get", "/systems", None, "#1470"), ("put", "/systems/tix", body, "#1470"),
-             ("put", "/systems/tix/credentials", credentials, "#1470"), ("post", "/systems/tix/check", None, "#1470"),
-             ("get", "/lessons", None, "#1082")]
+async def test_o8_lessons_refuse_501_naming_their_issue_after_membership(served):
+    """A member gets 501 naming the backing issue on the lessons route; a non-member gets 404. (O8, P1; #1470 O15:
+    systems and credentials are real, the check's 501 is `test_1470_config_routes`')"""
+    cases = [("get", "/lessons", None, "#1082")]
     assert (await served.client.get(f"/tenants/{A}/alerts", headers=served.ann(write=False))).status_code == 200  # control
     for method, path, payload, issue in cases:
         refused = await served.client.request(method, f"/tenants/{A}{path}", headers=served.ann(), json=payload)
@@ -443,20 +498,16 @@ async def test_o8_systems_and_lessons_refuse_501_naming_their_issue_after_member
 
 
 @pytest.mark.postgres
-async def test_o8_the_real_servers_openapi_declares_the_501_on_every_systems_and_lessons_route(served):
-    """On the real and the demo server, the operations declaring 501 are exactly those on systems and lessons. (O8, Am-2)"""
-    from defender.api.app import create_app
-    from defender.api.demo import demo_deps
-
-    real = (await served.client.get("/openapi.json")).json()
-    demo = json.loads(json.dumps(create_app(await demo_deps((A,))).openapi()))
-    for server, document in (("real", real), ("demo", demo)):
-        unbacked = set(_unbacked(document))
-        assert len(unbacked) >= 5, server
-        declaring = {(path, method) for path, item in document["paths"].items() for method, op in item.items()
-                     if "501" in op["responses"]}
-        assert declaring == unbacked, (server, declaring ^ unbacked)
-        assert "not yet real" not in document["info"].get("summary", "")
+async def test_o8_the_real_servers_openapi_declares_the_501_on_exactly_the_lessons_and_the_check(served):
+    """The operations declaring 501 are exactly the lessons route and the connection check; the config routes declare
+    their real answers. (O8, Am-2; #1470 O15, G2)"""
+    document = (await served.client.get("/openapi.json")).json()
+    unbacked = set(_unbacked(document))
+    assert len(unbacked) == 2, unbacked
+    declaring = {(path, method) for path, item in document["paths"].items() for method, op in item.items()
+                 if "501" in op["responses"]}
+    assert declaring == unbacked, declaring ^ unbacked
+    assert "not yet real" not in document["info"].get("summary", "")
 
 
 @pytest.mark.postgres
@@ -605,8 +656,9 @@ def _concrete(path: str, tenant: str) -> str:
     return re.sub(r"\{(\w+)(?::\w+)?\}", fill, path)
 
 
-SYSTEM = {"kind": "ticket", "display_name": "Tickets", "enabled": True, "settings": {}}
-CREDENTIALS = {"kind": "static", "credentials": {"api_token": "a-secret-of-sixteen-or-more"}}
+SYSTEM = {"replaces": 0, "enabled": True, "settings": {}, "access": ""}
+CREDENTIALS = {"for_version": 1, "credentials": {"api_key": "a-secret-of-sixteen-or-more"}}
+CASE = {"replaces": 0, "system_id": "ticket", "comment_body": "{disposition}"}
 
 
 def _body(method: str, path: str) -> dict[str, Any]:
@@ -614,7 +666,7 @@ def _body(method: str, path: str) -> dict[str, Any]:
     if method not in {"POST", "PUT", "PATCH"}:
         return {}
     return {"json": CREDENTIALS if path.endswith("/credentials") and "/systems" in path
-            else SYSTEM if "/systems/" in path else {}}
+            else SYSTEM if "/systems/" in path else CASE if path.endswith("/case-record") else {}}
 
 
 # Copied literally from tests/api/test_programs_1307_roles.py (PERMISSION_OF, AUTOMATION): the oracle for a program
@@ -633,12 +685,20 @@ PERMISSION_OF = {
     ("GET", f"{TENANT}/learning-jobs"): "work.read",
     ("GET", f"{TENANT}/learning-jobs/{{}}"): "work.read",
     ("GET", f"{TENANT}/lessons"): "work.read",
+    ("GET", f"{TENANT}/adapters"): "config.read",
     ("GET", f"{TENANT}/systems"): "config.read",
+    ("GET", f"{TENANT}/systems/{{}}"): "config.read",
     ("PUT", f"{TENANT}/systems/{{}}"): "config.write",
+    ("DELETE", f"{TENANT}/systems/{{}}"): "config.write",
+    ("GET", f"{TENANT}/case-record"): "config.read",
+    ("PUT", f"{TENANT}/case-record"): "config.write",
+    ("DELETE", f"{TENANT}/case-record"): "config.write",
     ("PUT", f"{TENANT}/systems/{{}}/credentials"): "config.write",
     ("POST", f"{TENANT}/systems/{{}}/check"): "config.write",
     ("GET", f"{TENANT}/alert-mapping"): "config.read",
     ("PUT", f"{TENANT}/alert-mapping"): "config.write",
+    ("GET", f"{TENANT}/learning/items"): "work.read",  # #1485 O3
+    ("GET", f"{TENANT}/learning/parked-batches"): "work.read",  # #1485 O3
     ("GET", f"{TENANT}/members"): "people.manage",
     ("DELETE", f"{TENANT}/members/{{}}"): "people.manage",
     ("GET", f"{TENANT}/invitations"): "people.manage",
@@ -673,7 +733,7 @@ def _refusal(method: str, path: str, declared: str, outsider: bool, is_person: b
 
 @pytest.mark.postgres
 async def test_o5_every_route_answers_every_caller_as_the_permission_table_says(served, token_credential):
-    """Each route, by each caller: refusals are the table's exact status, nothing is 500, only systems and lessons are 501. (O5, O8, O3)"""
+    """Each route, by each caller: refusals are the table's exact status, nothing is 500, only the lessons and the check are 501. (O5, O8, O3)"""
     table = _route_table(served.app)
     kinds = {declared for _, _, declared in table}
     assert set(PERMISSION_OF.values()) | {"platform"} <= kinds, kinds  # the table covers every permission and the administrator
@@ -702,7 +762,7 @@ async def test_o5_every_route_answers_every_caller_as_the_permission_table_says(
                     continue
                 seen[name, "passed"] += 1
                 assert got not in (401, 403), who
-                unbacked = "/systems" in path or "/lessons" in path
+                unbacked = "/lessons" in path or path.endswith("/check")  # #1470: the rest of config is real
                 assert (got == 501) == unbacked, who
     # Anonymous, from the frontend's origin (so the origin layer lets a state change through to sign-in): 401 everywhere.
     rows = [(m, p) for m, p, d in table if d not in {"public"} and p != "/auth/logout"]

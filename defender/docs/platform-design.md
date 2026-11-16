@@ -321,24 +321,25 @@ model/prompt-bundle id if it varies independently of the image. `lessons_corpus_
 
 ### 2.9 Artifact link resolution
 
-API-authorized reads are the product contract. The manifest stores logical keys + metadata, **not**
-durable URLs. `GET /investigations/:id/artifacts/:key` authorizes tenant access, audits the read, and
-streams the blob or redirects to a short-lived signed URL. `runtime.html` and friends are rewritten so
-relative links resolve through that API path.
+Superseded by #1161 (design r8) and the deployment design §5. People open generated pages through a
+frontend page opener: the API issues a short-lived grant for one page of an owner's accepted output, and
+a separate artifact server on the artifact domain exchanges it for a cookie covering that page only. The
+artifact server serves only names on its closed list of page names; reports, raw query results and other
+records are not served as files. Program access to artifacts is not designed yet.
 
 ### 2.10 Auth / RBAC
 
 Tenant identities, authorization at the API boundary; no separate internal user-auth. Coarse roles:
 `read` (view), `investigate` (also fire investigations + reruns + re-learns), `write` (administer
 tenant/source bindings + credentials). Internal workers use service identity. All writes and artifact
-reads are tenant-scoped audit events.
+grants are tenant-scoped audit events (one event per page opened, #1161).
 
 **Where audit events live.** An audited action is announced as a log event, once, by the code that
 commits it, after its commit (#1342 O13, #1083 P2): the job store announces the work actions (start, cancel,
 delete, learning-job start, mapping replace), the tenant-administration routes and the identity service
 announce their own. A failed write announces nothing; an event can be lost in a crash between the commit
 and its emission. There is no audit table. Which actions are audited, and with what, is pinned by tests.
-An artifact read is announced by the route once the signed link is issued. A credentials write goes to the
+A page grant is announced by the grant route once it is issued. A credentials write goes to the
 secret store, outside the database, which announces after its write.
 
 ---

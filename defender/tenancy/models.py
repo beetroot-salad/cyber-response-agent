@@ -28,14 +28,14 @@ from defender.tenancy.record_values import CaseRecord as CaseRecord, SystemRecor
 SCHEMA = "tenancy"
 
 TenantState = Literal["creating", "active", "offboarding", "offboarded"]
-PendingAction = Literal["create", "rotate", "offboard", "delete_repo", "learning_cutover"]
+PendingAction = Literal["create", "rotate", "offboard", "delete_repo"]
 StepActor = Literal["service", "host"]
 GenerationStatus = Literal["pending", "live", "retiring", "destroyed"]
 
 #: Each state with the pending actions it allows (`None`: nothing pending).
 ALLOWED_ACTIONS: dict[str, frozenset[str | None]] = {
     "creating": frozenset({"create"}),
-    "active": frozenset({None, "rotate", "learning_cutover"}),
+    "active": frozenset({None, "rotate"}),
     "offboarding": frozenset({"offboard"}),
     "offboarded": frozenset({None, "delete_repo"}),
 }
@@ -106,8 +106,8 @@ async def offboard(executor: AsyncConnection | AsyncSession, tenant_id: TenantId
     """Move a `creating` or `active` tenant to `offboarding` (the teardown pending at its first step, any failure
     cleared) in the caller's transaction, on either a Core connection or the ORM session, and return the tenant as
     it now stands. `NotFound` for an absent tenant, `Conflict` for any other state: tenancy's own refusals, and the
-    one place the transition's rules live (#1360 D1): the repository's `request_offboard` and the job store's
-    combined offboard both run it. Takes the tenant row's lock, held until the caller's transaction ends."""
+    one place the transition's rules live (#1360 D1): the job store's combined offboard runs it (#1496: its one
+    caller in production). Takes the tenant row's lock, held until the caller's transaction ends."""
     from defender.tenancy.repository import Conflict, NotFound  # here: the repository imports these models
 
     table: Table = TenantRecord.__table__  # type: ignore[assignment]
@@ -285,15 +285,6 @@ class CaseVersionRow(Base, kw_only=True):
     deleted: Mapped[bool] = mapped_column(Boolean)
     author: Mapped[str] = mapped_column(Text)
     written_at: Mapped[_dt.datetime] = mapped_column(_TIME)
-
-
-class RecordsMark(Base, kw_only=True):
-    """Present for a tenant whose systems come from records (R8, R11). Also the row a writer locks to serialize a tenant."""
-
-    __tablename__ = "records_mark"
-    __table_args__ = {"schema": SCHEMA}
-
-    tenant_id: Mapped[TenantId] = mapped_column(IdColumn(TenantId), ForeignKey(f"{SCHEMA}.tenants.id"), primary_key=True)
 
 
 @dataclasses.dataclass(frozen=True)

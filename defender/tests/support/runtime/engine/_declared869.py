@@ -77,7 +77,7 @@ def git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProce
 
 
 def adapter_file(repo: Path, system: str) -> Path:
-    """Where an adapter for `system` lands: the inverse of `verbs._system_of`, so a hyphenated
+    """Where an adapter for `system` lands: the inverse of `system_rules.registry.system_of`, so a hyphenated
     system (`change-mgmt`) gets an underscored filename."""
     return repo / ADAPTERS_REL / f"{system.replace('-', '_')}_adapter.py"
 

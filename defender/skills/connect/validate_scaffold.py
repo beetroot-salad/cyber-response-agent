@@ -23,8 +23,8 @@ from defender.systems import (  # noqa: E402
 )
 from defender.kit.settings import PART_FILES, Part  # noqa: E402
 from defender.systems.catalog import Catalog  # noqa: E402
-from defender.systems.record_judgement import judge_records, judge_system  # noqa: E402
-from defender.tenancy.case_ticket import CaseTicketError, parse_case_record  # noqa: E402
+from defender.system_rules import judge_records, judge_system  # noqa: E402
+from defender.tenancy.case_record import CaseTicketError, parse_case_record  # noqa: E402
 from defender.tenancy.tenant_settings import read_regular_bytes  # noqa: E402
 from defender.systems.verb_dispositions import HEALTH_CHECK  # noqa: E402
 from defender.tenancy.record_values import CaseRecord, SystemRecord, TenantRecords  # noqa: E402
@@ -201,8 +201,8 @@ def check_signatures(report: Report, verbs) -> None:
 
 
 class HandoffLocator:
-    """How a fault names a part of connect's handoff folder (#1366 DC6): the file itself, so the operator fixes it
-    before handing it to `tenant.py set-system`. The sentence is the store's; only the locator differs."""
+    """How a fault names a part of connect's handoff folder (#1366 DC6): the file itself, so it is fixed before the
+    tenant admin enters it through `PUT /systems/{id}` (#1470). The sentence is the store's; only the locator differs."""
 
     def __init__(self, folder: Path, case: Path | None = None) -> None:
         self._folder = Path(folder)
@@ -219,12 +219,12 @@ class HandoffLocator:
 
 
 def check_handoff(report: Report, defender: Path, system: str, folder: Path, case: Path | None = None) -> None:
-    """Connect's handoff (#1366 O11): the folder holding `system`'s `config.env` and `access.yaml`, the input of
-    `tenant.py set-system`, judged by the record store's own judgement (K1: the adapter's settings check over a record
+    """Connect's handoff (#1366 O11): the folder holding `system`'s `config.env` and `access.yaml`, what the
+    tenant admin enters through `PUT /systems/{id}`, judged by the record store's own judgement (K1: the adapter's settings check over a record
     built from it, its access declaration parsed) with no tenant and no database. Each fault is the store's sentence,
-    naming the file. A catalog adapter connect produces is merged and deployed before the operator applies it.
+    naming the file. A catalog adapter connect produces is merged and deployed before the tenant admin applies it.
 
-    With `case` (the case-record file, the input of `tenant.py set-case`), the folder's system and that record are judged
+    With `case` (the case-record file, what the tenant admin enters through `PUT /case-record`), the folder's system and that record are judged
     together as the store judges a tenant holding just them (#1401): the template, the system it names, and the cover of
     the adapter's comment route. The report also prints that route for the folder's settings."""
     locator = HandoffLocator(folder, case)
@@ -250,9 +250,9 @@ def check_handoff(report: Report, defender: Path, system: str, folder: Path, cas
 
 def _judge_with_case(system: str, settings, access: str, case: Path, catalog: Catalog,
                      locator: HandoffLocator) -> list[str]:
-    """The store's judgement of a tenant whose records are the handoff's system and the case record `case`: the parse
-    `set-case` makes, then `judge_records` with nothing before (everything judged). The file is read as `set-case`
-    reads it: a regular file with one link, never followed, within the settings bound."""
+    """The store's judgement of a tenant whose records are the handoff's system and the case record `case`: the case
+    record parsed from the file, then `judge_records` with nothing before (everything judged). The file is read as a
+    regular file with one link, never followed, within the settings bound."""
     try:
         text = read_regular_bytes(case).decode("utf-8")
     except (OSError, UnicodeDecodeError) as unreadable:
@@ -347,13 +347,14 @@ def main() -> None:
     ap.add_argument("system")
     ap.add_argument(
         "--handoff", type=Path, default=None,
-        help="the folder connect hands the operator: the system's config.env and access.yaml, which "
-             "`tenant.py set-system` stores as the system's record; judged as the store judges it")
+        help="the folder connect hands the tenant admin: the system's config.env and access.yaml, which "
+             "`PUT /systems/{id}` stores as the system's record; judged as the store judges it")
     ap.add_argument(
         "--case", type=Path, default=None,
-        help="with --handoff: the case-record file `tenant.py set-case` stores, judged with the handoff's system as "
-             "the store judges a tenant holding just them (the template, the system it names, the comment route's "
-             "cover); set-case judges it against the tenant's stored system, so apply this handoff's set-system first")
+        help="with --handoff: the case-record file whose system and comment body `PUT /case-record` stores, judged "
+             "with the handoff's system as the store judges a tenant holding just them (the template, the system it "
+             "names, the comment route's cover); the store judges it against the tenant's stored system, so put "
+             "this handoff's system first")
     ap.add_argument(
         "--staged", type=Path, default=None,
         help="the staged tenant half, laid out as the tenant's agent/ "

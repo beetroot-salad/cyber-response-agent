@@ -23,6 +23,7 @@ from defender.tests.support.shared.contracts._data_root_1078 import tenant_direc
 from defender.tests.support.tenancy import _systems1366 as R
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107
+from defender.tests.support.tenancy._twin1496 import seed_tenant
 
 #: A catalog adapter an upgrade removed: a record can still name it (the accept-all seeder stores what it is given).
 RETIRED = "legacy-widget"
@@ -53,19 +54,15 @@ def _run(tmp_path: Path, planted: S.Planted, records: Any = R.DERIVED) -> S.Driv
     return S.run_alert(tmp_path, tenant=planted, main=S.closing_main_turns(), directory=_directory(planted, records))
 
 
-def test_1366_r8_a_run_of_a_tenant_not_yet_imported_is_refused_naming_the_import(tmp_path):
-    """Before the import the run is refused naming `tenant.py import`, with no run folder and no model call; the same
-    tenant with its records runs. (#1366 R8, O6)"""
-    planted = S.plant_tenant(fixture_uuid("tenant:acme"))
+def test_1470_o8_a_run_of_a_tenant_with_no_records_is_not_refused_for_want_of_an_import(tmp_path):
+    """No tenant is "not imported" (#1470 O8, retires #1366 R8): a tenant with no records whose grants need none runs,
+    and nothing names an import."""
+    planted = S.plant_tenant(fixture_uuid("tenant:acme"), table=TABLE_TACIT_ONLY, configs={})
 
-    refused = _run(tmp_path / "before", planted, records=None)
+    ran = _run(tmp_path / "none", planted, records=None)
 
-    assert refused.raised is None, refused.raised
-    assert R.AUTHOR[R.IMPORT] in (refused.refusal or ""), refused.refusal
-    assert (refused.run_dir, refused.main.requests) == (None, 0)
-
-    ran = _run(tmp_path / "after", planted)
     assert (ran.raised, ran.refusal, ran.rc) == (None, None, 0)
+    assert set(ran.lifecycle_calls[0]["systems"].roster.systems) == {"tacit-knowledge"}
 
 
 def test_1366_o6_a_run_uses_the_current_versions_and_records_them_beside_its_knowledge_record(tmp_path):
@@ -84,16 +81,6 @@ def test_1366_o6_a_run_uses_the_current_versions_and_records_them_beside_its_kno
     assert set(ran.lifecycle_calls[0]["systems"].roster.systems) == (set(spec.systems) - {"change-mgmt"}) | {"tacit-knowledge"}
     used = json.loads(RunPaths(ran.run_dir).record_versions.read_text(encoding="utf-8"))
     assert used == {"systems": {s: v.version for s, v in spec.systems.items()}, "case": 1}
-
-
-def test_1366_r8_not_imported_is_refused_before_the_missing_alert_mapping_is_looked_at(tmp_path):
-    """A tenant with neither records nor an alert mapping is refused naming the import, not the mapping. (#1366 R8 order)"""
-    planted = S.plant_tenant(fixture_uuid("tenant:acme"), alert_mapping=None)
-
-    refused = _run(tmp_path / "r", planted, records=None)
-
-    assert R.AUTHOR[R.IMPORT] in (refused.refusal or ""), refused.refusal
-    assert (refused.run_dir, refused.main.requests) == (None, 0)
 
 
 def test_1366_o6_a_run_with_no_case_record_runs_and_records_no_case_version(tmp_path):
@@ -198,40 +185,39 @@ def test_1366_r12_filtering_that_empties_gather_refuses_the_run_naming_the_grant
 
     assert refused.raised is None, refused.raised
     assert all(system in (refused.refusal or "") for system in ("cmdb", "elastic")), refused.refusal
-    assert R.AUTHOR[R.IMPORT] not in (refused.refusal or ""), refused.refusal
+    assert "tenant.py import" not in (refused.refusal or ""), refused.refusal
     assert (refused.run_dir, refused.main.requests) == (None, 0)
 
 
 def test_1366_r8_an_imported_tenant_with_no_records_runs_with_only_the_platform_served_system(tmp_path):
-    """Imported with zero records is not `not imported`: a tenant whose gather grant is on `tacit-knowledge` alone runs,
-    its roster is just `tacit-knowledge`, and nothing names the import. The same tenant NOT imported is refused naming it
-    (control). (#1366 R8 second half, R11)"""
+    """A tenant with zero records whose gather grant is on `tacit-knowledge` alone runs; its roster is just
+    `tacit-knowledge`. (#1366 R11; #1470 O8 dropped the "not imported" control)"""
     planted = S.plant_tenant(fixture_uuid("tenant:acme"), table=TABLE_TACIT_ONLY, configs={})
 
     ran = _run(tmp_path / "imported", planted, records=R.RecordsSpec())
-    refused = _run(tmp_path / "not-imported", planted, records=None)
 
     assert (ran.raised, ran.refusal, ran.rc) == (None, None, 0)
     assert set(ran.lifecycle_calls[0]["systems"].roster.systems) == {"tacit-knowledge"}
-    assert R.AUTHOR[R.IMPORT] in (refused.refusal or ""), refused.refusal
 
 
-def test_1366_r11_a_tenant_made_by_the_create_request_is_read_as_imported_with_no_systems_through_the_directory():
-    """Run start reads records through `TenantDirectory.current_records`: a tenant made by `request_create` reads imported,
-    empty (so it runs with no import, per the row above), and a tenant row that was only added (pre-#1366) reads not
-    imported. (#1366 R11, R8, R10)"""
+def test_1470_o8_the_directory_reads_an_active_tenants_records_and_refuses_one_that_is_not_active():
+    """Run start reads records through `TenantDirectory.current_records`: an active tenant nothing was written for reads
+    empty; a tenant still `creating` or one missing is refused as `TenantRefused`, not the transient
+    `RecordsUnreachable`. (#1470 O8, replaces #1366 R11's imported-from-creation read)"""
+    from defender.records.formats import TenantRefused
     from defender.tenancy import InMemoryTenantRepository, TenantDirectory
 
     twin = InMemoryTenantRepository()
-    made = asyncio.run(twin.request_create(now=datetime.datetime(2026, 11, 10, tzinfo=datetime.UTC)))
-    old = fixture_uuid("tenant:before-1366")
-    asyncio.run(twin.add_tenant(old, created_at=datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC), state="active"))
+    making = asyncio.run(twin.request_create(now=datetime.datetime(2026, 11, 10, tzinfo=datetime.UTC)))
+    active = fixture_uuid("tenant:active-1470")
+    asyncio.run(seed_tenant(twin, active, created_at=datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC), state="active"))
     directory = TenantDirectory(lambda: twin)
 
-    created, existing = directory.current_records(made.id), directory.current_records(old)
-
-    assert (created.imported, dict(created.systems), created.case) == (True, {}, None)
-    assert not existing.imported
+    read = directory.current_records(active)
+    assert (dict(read.systems), read.case) == ({}, None)
+    for refused in (making.id, fixture_uuid("tenant:absent-1470")):
+        with pytest.raises(TenantRefused):
+            directory.current_records(refused)
 
 
 @pytest.mark.parametrize("table", [S.TABLE_ELASTIC, S.TABLE_WITHHELD], ids=["granted", "withheld"])

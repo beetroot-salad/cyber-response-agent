@@ -256,7 +256,7 @@ def test_the_wake_gate_counts_what_the_curation_gate_counts(world, monkeypatch):
     """The lead lane's wake gate (the store claim) is what spins the drain up: eight rows of one mistake do not wake it under
     threshold 3, a second and a third distinct mistake do."""
     from defender.learning.core.store_tick import LEAD_LANE, lane_waiting
-    from defender.learning.store import blocking
+    from defender.learning_store import blocking
 
     w = world
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "3")

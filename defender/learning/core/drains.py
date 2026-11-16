@@ -38,7 +38,7 @@ from defender.learning.core.store_tick import (
     lane_waiting,
     opened_store,
 )
-from defender.learning.store import Stop
+from defender.learning_store import Stop
 
 if TYPE_CHECKING:
     import datetime
@@ -383,7 +383,7 @@ def _store_lead_work(  # noqa: PLR0913, C901 — the lane's two steps, its claim
     curation committed); an item that is not named waits again when the batch enters review (P3); a request whose
     run is gone is dead."""
     from defender.learning.author.version_control import DeliveryRefused
-    from defender.learning.store import Outcome
+    from defender.learning_store import Outcome
     from defender.records import RunAbsent
 
     for kind, key, payload in [item for item in held.items if item[0] == "curation_request"]:  # lint-half-table: ok — this lane serves the curation request's own run rule, not a lane decision
@@ -488,10 +488,10 @@ def _tick_systems(paths: LoopPaths, records: TenantDirectory) -> TenantSystems:
     if tenant is None:
         raise _Refused("the drain delivers to a tenant's repository: no tenant is selected")
     try:
-        return tenant_systems_of(paths.repo_root, records.current_records(tenant.id), tenant_id=tenant.id)
+        return tenant_systems_of(paths.repo_root, records.current_records(tenant.id))
     except RecordsUnreachable as down:
         raise _Refused(f"the tenant {tenant.id}'s records could not be read: {down}", transient=True) from None
-    except TenantRefused as refused:  # not imported (R8): the tick is refused before any claim, and nothing is charged
+    except TenantRefused as refused:  # its records are not known (not active, #1470 O8): refused before any claim, nothing charged
         raise _Refused(str(refused)) from None
     except AdaptersUnreadable as unreadable:
         raise _Refused(f"the product checkout's adapters could not be read: {unreadable}") from None

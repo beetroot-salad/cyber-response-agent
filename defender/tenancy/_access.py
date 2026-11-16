@@ -19,7 +19,7 @@ from defender.kit.access import (
     HEADER,
     HTTP_PROXY,
     OAUTH_CLIENT_CREDENTIALS,
-    PUBLIC_FIELD,
+    PUBLIC_FIELD_NAMES,
     AccessDeclaration,
     Auth,
     Route,
@@ -166,8 +166,8 @@ def _base(shown: str, value: object, key: str) -> str:
 def _field(shown: str, value: object, key: str) -> str:
     if not isinstance(value, str) or not _FIELD.fullmatch(value):
         raise ConfigFault(f"{shown}: `auth.{key}` must name a credential field")
-    if value in PUBLIC_FIELD.values():
-        # r7 A19: the secret a scheme sends may not be a field that is public by name
+    if value in PUBLIC_FIELD_NAMES:
+        # r7 A19: the secret a scheme sends may not be a field the credential schema holds public
         raise ConfigFault(f"{shown}: `auth.{key}` may not name the public field {value!r}")
     return value
 

@@ -90,6 +90,10 @@ def test_r7_2_a_path_parameters_name_is_not_a_query_name(name: str) -> None:
     ("/members", "cursor", "x"),
     ("/members", "limit", "5"),
     ("/invitations", "limit", "5"),
+    ("/learning/parked-batches", "status", "held"),  # #1485: `status` is the items list's alone
+    ("/learning/parked-batches", "fired_after", "2026-09-28T08:00:00Z"),
+    ("/learning/items", "fired_after", "2026-09-28T08:00:00Z"),
+    ("/learning/items", "kind", "finding"),
 ])
 def test_r7_2_a_name_another_route_declares_is_refused_here(path: str, name: str, value: str) -> None:
     """The declared names are the matched route's own: a name some other route reads is unknown to this one. (R7-2)"""

@@ -38,6 +38,9 @@ EXAMPLE = False
 
 #: The transport template plus the one Jira-specific key. Required, no default.
 REQUIRED_CONFIG_KEYS = (*transport.REQUIRED_CONFIG_KEYS_TEMPLATE, "SERVICE_DESK")
+#: An example value for each key a record of this adapter stores, read cold by the catalog and served to an
+#: admin as a starting point (#1470 D11); this adapter's own settings check accepts it.
+SAMPLE_SETTINGS = {"JIRA_TIMEOUT_SEC": "10", "JIRA_SERVICE_DESK": "no"}
 #: No setting goes in a request path.
 PATH_KEYS: tuple[str, ...] = ()
 

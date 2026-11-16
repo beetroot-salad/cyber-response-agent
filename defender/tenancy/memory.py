@@ -19,9 +19,9 @@ from typing import Any, Literal, TypeVar, cast, overload
 from defender.records.formats import AlertMapping, TenantId
 from defender.tenancy.models import (ALLOWED_ACTIONS, AlertMappingRow, ForgeWiring, Generation, MergeEligibility, PublishStatus,
                                      TenantRecord, TenantRecords)
+from defender.tenancy.record_refusals import refuse_unless_active
 from defender.tenancy.repository import (
     KEEP,
-    HOST,
     SERVICE,
     Conflict,
     FenceMissed,
@@ -67,36 +67,12 @@ class InMemoryTenantRepository:
 
     # --- seeders (test support and the demo; not part of the port) ----------------------------
     async def add_records(self, tenant_id: str, records: TenantRecords) -> None:
-        """Seeder: the tenant's records as given (unjudged), replacing any; the tenant must exist. A tenant without
-        a seeded set reads as not imported."""
+        """Seeder: the tenant's records as given (unjudged), replacing any; the tenant must exist. An active tenant
+        without a seeded set reads as having none (#1470 O8)."""
         with self._mutex:
             if tenant_id not in self._tenants:
                 raise KeyError(f"no tenant {tenant_id}")
             self._records[tenant_id] = records
-
-    async def add_tenant(  # noqa: PLR0913 — the pinned seeder signature
-        self, tenant_id: str, *, created_at: _dt.datetime, state: str = "active", repo: str | None = None,
-        origin: str | None = None, pending_action: str | None = None, step: str | None = None,
-        step_actor: str | None = None, failure: str | None = None,
-    ) -> TenantRecord:
-        """Seeder: a tenant row (and its forge wiring when `repo` is given) as written, not requested.
-        A state that requires a pending action gets its first step when none is named. The id is stored as given,
-        unchecked, so a case can plant one the entry points must refuse."""
-        tenant_id = cast(TenantId, tenant_id)
-        if pending_action is None and state in _SEED_JOB:
-            pending_action, step, step_actor = _SEED_JOB[state]
-        _check_pair(state, pending_action)
-        if (repo is None) != (origin is None):
-            raise ValueError("forge wiring needs both the repo and its origin")
-        row = TenantRecord(id=tenant_id, created_at=created_at, state=state, pending_action=pending_action,
-                           step=step, step_actor=step_actor, failure=failure)
-        with self._mutex:
-            if tenant_id in self._tenants:
-                raise ValueError(f"tenant {tenant_id} is already stored")
-            self._tenants[tenant_id] = row
-            if repo is not None and origin is not None:
-                self._wiring[tenant_id] = ForgeWiring(tenant_id=tenant_id, repo=repo, origin=origin)
-            return _detached(row)
 
     async def add_generation(self, tenant_id: str, **fields: Any) -> Generation:
         """Seeder: one generation row of an existing tenant, with the model's field names."""
@@ -158,6 +134,8 @@ class InMemoryTenantRepository:
 
     async def current_records(self, tenant_id: TenantId) -> TenantRecords:
         with self._mutex:
+            row = self._tenants.get(tenant_id)
+            refuse_unless_active(tenant_id, None if row is None else row.state)
             return self._records.get(tenant_id, TenantRecords())
 
     async def merge_eligibility(self, tenant_id: TenantId) -> MergeEligibility | None:
@@ -170,7 +148,6 @@ class InMemoryTenantRepository:
                            step="names", step_actor=SERVICE)
         with self._mutex:
             self._tenants[row.id] = row
-            self._records[row.id] = TenantRecords(imported=True)
             return _detached(row)
 
     def _request(self, tenant_id: TenantId, allowed: bool, refusal: str, **changes: Any) -> TenantRecord:
@@ -194,13 +171,6 @@ class InMemoryTenantRepository:
             return self._request(
                 tenant_id, row.failure is not None, "nothing to resume", failure=None)
 
-    async def request_offboard(self, tenant_id: TenantId, *, now: _dt.datetime) -> TenantRecord:
-        with self._mutex:
-            row = self._row(tenant_id)
-            return self._request(
-                tenant_id, row.state in ("creating", "active"), "only a creating or active tenant can be offboarded",
-                state="offboarding", pending_action="offboard", step="offboard", step_actor=SERVICE, failure=None)
-
     async def request_rotate(self, tenant_id: TenantId) -> TenantRecord:
         with self._mutex:
             row = self._row(tenant_id)
@@ -208,14 +178,6 @@ class InMemoryTenantRepository:
                 tenant_id, row.state == "active" and row.pending_action is None,
                 "only an active tenant with nothing pending can rotate",
                 pending_action="rotate", step="names", step_actor=SERVICE)
-
-    async def request_learning_cutover(self, tenant_id: TenantId) -> TenantRecord:
-        with self._mutex:
-            row = self._row(tenant_id)
-            return self._request(
-                tenant_id, row.state == "active" and row.pending_action is None,
-                "only an active tenant with nothing pending can have its learning state cut over",
-                pending_action="learning_cutover", step="import", step_actor=HOST)
 
     # --- host processes --------------------------------------------------------------------------
     async def record_merge_eligibility(self, tenant_id: TenantId, *, logins: frozenset[str], read_at: _dt.datetime) -> None:

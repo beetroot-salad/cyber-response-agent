@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Capture one freeze of the playground at T (#1347 O1): a set of parts and `freeze.yaml`.
 
-Operator-run, one freeze per run, no fault active, under the lab-server capture lock (D14):
+Run by the operator, one freeze per run, no fault active, under the lab-server capture lock (D14):
 
     refuse a T already past or too near for the scenarios -> take the lock -> refuse on an active
     fault -> refuse a snapshot name already taken -> check the snapshot repository -> hold off the

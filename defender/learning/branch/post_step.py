@@ -99,7 +99,7 @@ def _default_waiting(paths: Any, *, tenant_id: str) -> bool:
     """Whether the store holds work this post-step could act on (Wake): a batch of any lane not yet
     ended, or what opens the author drain's gate."""
     from defender.learning.core.drains import author_work_waiting
-    from defender.learning.store import blocking
+    from defender.learning_store import blocking
 
     with blocking(_store_dsn()) as store:
         if any(batch.phase != "ended" for batch in store.batches(tenant_id)):
@@ -173,7 +173,7 @@ def _publish_pending(tenant: Any, pending: list[str]) -> tuple[list[str], list[s
     """Each pending job's episode, published into the learning store for the tenant: the jobs
     published, and those refused for good. A job that is neither stays pending."""
     from defender.learning.judge.enqueue import FindingsRefused, publish_episode_findings
-    from defender.learning.store import TenantInactive, blocking
+    from defender.learning_store import TenantInactive, blocking
 
     published: list[str] = []
     refused: list[str] = []

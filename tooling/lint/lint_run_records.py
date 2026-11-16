@@ -90,9 +90,9 @@ OWNER_MODULES: frozenset[str] = frozenset({
 })
 
 #: The sweep set. Never shrinks below this.
-SWEEP_DIRS: tuple[str, ...] = ("investigation", "learning", "integrations", "presentation", "cli", "hooks", "box", "execution", "_filesystem",
+SWEEP_DIRS: tuple[str, ...] = ("investigation", "learning", "learning_store", "integrations", "presentation", "cli", "hooks", "box", "execution", "_filesystem",
                                "api", "api_server", "tenancy", "identity", "jobs", "knowledge", "configuration", "records", "kit", "providers",
-                               "systems", "system_records", "database", "migrations", "credential_proxy", "worker", "lifecycle",
+                               "systems", "system_rules", "system_records", "database", "migrations", "credential_proxy", "worker", "lifecycle",
                                "job_host", "job_socket")
 SWEEP_TOP_LEVEL = True
 EXCLUDED_DIRS: tuple[str, ...] = (".venv", "__pycache__", "tests")
@@ -246,8 +246,6 @@ CONVERSION_PERMISSIONS: dict[tuple[str, str], frozenset[str]] = {
     ("knowledge_lock", _EXPORT_OWNER): frozenset({"tenant_lock"}),
     ("exports_root", _EXPORT_READER): frozenset({"current_export"}),
     ("knowledge_lock", _EXPORT_READER): frozenset({"knowledge_lock_holder"}),
-    # #1278 cutover: the batch worktrees leave the learning folder for the tenant's worktrees location (A2 D10).
-    ("worktrees_root", "learning/store/_import.py"): frozenset({"cut_over_learning_state"}),
     # #1278 A1: the curators' call folders, made in the tenant's scratch location by their one owner.
     ("scratch_root", "learning/call_folders.py"): frozenset({"call_folder"}),
     # #1170: the per-job helper makes the oracle's folder in the tenant's scratch location.
@@ -259,16 +257,17 @@ CONVERSION_PERMISSIONS: dict[tuple[str, str], frozenset[str]] = {
     # #1214: the lifecycle's own setting, read once each where it makes or removes a tenant's folder.
     ("data_root", "lifecycle/config.py"): frozenset({"LifecycleConfig.__post_init__"}),
     ("data_root", "lifecycle/_host.py"): frozenset({"HostActor.__init__"}),
-    # #1278 Migration: the cutover job accepts the tenant and reads its old learning folder, in one function each.
-    ("learning_root", "lifecycle/_host.py"): frozenset({"HostActor._read_learning", "HostActor._cut_over"}),
-    ("data_root", "lifecycle/_process.py"): frozenset({"learning_delivery.open_for"}),
+    # #1469: the data root an entry point resolved is handed to a box start, where the box check makes its folder
+    # (`<data root>/.box-checks/`): the request carries it, and a drain's request is made from its tenant's.
+    ("data_root", "box/_lifecycle.py"): frozenset({"_start_boxed_request"}),
+    ("data_root", "learning/author/version_control/batch.py"): frozenset({"Batch.box_request"}),
     # #1163 A26: the credential proxy's one setting, converted once when its pipeline is built.
     ("data_root", "credential_proxy/_app.py"): frozenset({"_Proxy.__init__"}),
 }
 _ATTRIBUTE_ROLES = {
     "exports": "exports_root", "drafts": "drafts_root", "knowledge_lock": "knowledge_lock",
     "commit_record": "commit_record", "data_root": "data_root", "worktrees": "worktrees_root",
-    "scratch": "scratch_root", "learning": "learning_root",
+    "scratch": "scratch_root",
 }
 _ROOT_OVERRIDE_METHODS = frozenset({
     "run_end_sidecar", "scrub_verdict", "ticket_write", "call_join", "ticket_comments",

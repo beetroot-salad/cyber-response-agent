@@ -67,7 +67,7 @@ flowchart LR
 
 | Stage                      | Produces                                                                                      | The human decides                                 |
 | -------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| discuss-issue              | A design: behavior, scope, data models, flows, architecture, with probed facts and a code map; or a split into several issues | What to promise, how to split, and the consequential trade-offs |
+| discuss-issue              | A design: behavior, scope, data models, flows, architecture, with probed facts and a code map, tried against the code by a sketch and a spike; or a split into several issues | What to promise, how to split, and the consequential trade-offs |
 | write-tests                | A committed test contract and a map of which test enforces which promise                      | Only design amendments the tests expose           |
 | write-code-from-tests      | Code that passes the contract, attacked by wrong variants (cold-reviewed if small); a PR      | Only design amendments the code exposes           |
 | finalize or `/code-review` | A reviewed, re-greened PR; follow-up issues; new attack-deck entries                          | Whether to merge                                  |
@@ -78,13 +78,15 @@ A familiar moment: halfway through building something one way, you see how it sh
 been built. Usually that moment arrives after the expensive work is done, and then you either
 rewrite or live with the first way.
 
-write-tests arranges for that moment to come early and cheap. A thin **sketch** writes one test per
-important promise, which forces each design choice into concrete setup and expected results, where
-gaps show. A **spike** then implements the core flows for real, against the sketch, and logs every
-guess, workaround and place where the design fought the existing code. The spike's code is thrown
-away and never shown to later workers; only what it learned travels. A fresh reader checks the
-design against both, and the design is corrected before the thorough tests are written, while
-changing course costs a few files instead of a suite.
+discuss-issue arranges for that moment to come early and cheap, before you approve the design. A
+thin **sketch** writes one test per important promise, which forces each design choice into
+concrete setup and expected results, where gaps show. A **spike** then implements the core flows
+for real, against the sketch, and logs every guess, workaround and place where the design fought
+the existing code. The spike's code is thrown away; only the reviewer reads it, and only what it
+learned travels to later stages. The first independent review
+then explains, plainly and by cause, the problems both exposed, and the shapes that would remove
+them with their trade-offs. You redesign from that account before you approve, and write-tests
+starts from a design that has already met the code.
 
 ## Reading for fidelity, running for discrimination
 
@@ -171,8 +173,8 @@ inspectable by a person, and runnable headless as one command per stage.
 
 ## Rules state goals; applications are a cache
 
-For now this applies to write-tests, write-code-from-tests, proven-fix, their reference files and
-the shared `references/sort.md`. Each rule
+For now this applies to write-tests, write-code-from-tests, tested-fix, their reference files,
+discuss-issue's `sketch-and-spike.md` and the shared `references/sort.md`. Each rule
 states its goal and the principle behind it, never the list of cases it covers. How a rule applies to
 one context (the harness, the model generation, the project's toolchain, or what past runs found) is
 recorded separately, as a cache. Each of those files ends with a `Cache` section, and a project keeps
@@ -221,7 +223,7 @@ project, at `.claude/contract-first-attacks.md`; the plugin defines only its for
 
 The full pipeline is for new or changed promises. Most changes don't need it, and you pick the lane;
 skills don't route themselves. A small behavior change, one whose intent fits in a sentence and
-stays inside one owner and one surface with no lifecycle, goes through proven-fix. On such changes
+stays inside one owner and one surface with no lifecycle, goes through tested-fix. On such changes
 the full pipeline spent hours and many agents for almost no code bugs, while what did escape, a
 sibling site or a mirror case, needed a sweep and a cold review rather than attacks.
 
@@ -231,13 +233,13 @@ flowchart TD
     Q1 -->|"yes, small: intent in a sentence,<br/>one owner, one surface, no lifecycle"| PF
     Q1 -->|yes| P[discuss-issue → write-tests →<br/>write-code-from-tests → review]
     Q1 -->|no| Q2{Does code disagree with<br/>intent that's already settled?}
-    Q2 -->|"yes, and you can state it in a sentence"| PF[proven-fix: intent recorded, sweep,<br/>red test first, smallest fix,<br/>mutants, cold review]
+    Q2 -->|"yes, and you can state it in a sentence"| PF[tested-fix: intent recorded, sweep,<br/>red test first, smallest fix,<br/>mutants, cold review]
     Q2 -->|no| Q3{Does only structure change?}
     Q3 -->|yes| RF[refactor:<br/>existing suite unchanged, lint against regressions]
     Q3 -->|"unsure, or two readings of intent"| P
 ```
 
-The lighter lanes hand back rather than decide. proven-fix records one decision, the human's
+The lighter lanes hand back rather than decide. tested-fix records one decision, the human's
 one-sentence intent, in the issue or PR body; anything more, and anything in refactor, needs a
 design and goes to discuss-issue.
 
@@ -270,5 +272,5 @@ Most of the cost is agents re-reading what they already read, so the skills spen
 with smaller histories. Facts about the code are gathered once into a shared code map; each worker
 still works out on its own what must hold. Workers outline a file before reading it and read only
 the parts they need. Every dispatch names its model and effort: Opus where judgment carries the
-result (design check, fidelity review), Sonnet where the design is settled and the work is
+result (the from-scratch review, fidelity review), Sonnet where the design is settled and the work is
 expanding it (thorough authoring, spikes, attackers).

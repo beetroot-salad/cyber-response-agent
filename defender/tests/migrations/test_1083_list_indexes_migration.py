@@ -22,12 +22,11 @@ def _list_indexes(dsn: str, table: str) -> list[str]:
     return [d for d in _indexes(dsn, table) if f"(tenant_id, {LISTS[table]} DESC, id DESC)" in d and "WHERE" not in d]
 
 
-def test_the_list_indexes_revision_sits_directly_on_the_previous_head_and_is_the_head():
-    """The history's single head is a revision whose parent is `0015_system_records`. (#1083 Data)"""
-    from defender.migrations import _scripts, head
+def test_the_list_indexes_revision_sits_directly_on_the_previous_head():
+    """The list-indexes revision's parent is `0015_system_records`. Later revisions may sit on top of it. (#1083 Data)"""
+    from defender.migrations import _scripts
 
-    assert head() != PREVIOUS
-    assert _scripts().get_revision(head()).down_revision == PREVIOUS
+    assert _scripts().get_revision("0016_list_indexes").down_revision == PREVIOUS
 
 
 @pytest.mark.postgres

@@ -19,7 +19,6 @@ python3 defender/cli/tenant.py check "$TENANT_ID"    # admitted and its folder a
 python3 defender/run.py <alert.json> --tenant "$TENANT_ID"   # one investigation → run dir under $DEFENDER_DATA_ROOT/$TENANT_ID/runs/; --no-learn skips curation enqueue
 python3 defender/cli/learning/branch.py --tenant "$TENANT_ID" <run_id> <branch_message_id>   # fork a finished run (by id, under the tenant's runs) into a family of worlds and grade it
 python3 defender/learning/loop.py --tenant "$TENANT_ID" --author-drain     # fold the findings queue into lessons; --lead-author-drain is the sibling stage
-python3 defender/api/serve.py --tenant <id>           # the stub platform API on 127.0.0.1:8000, seeded for the named tenant(s) (needs the `api` extra: `uv sync --extra dev --extra runtime --extra api`, as CI does — a bare `uv sync --extra api` uninstalls the others); tokens `<id>-analyst`
 ```
 
 ### Creating a tenant (#1214)
@@ -33,10 +32,9 @@ credentials and the forge integration, the host secret file under the secrets di
 publish. Then the tenant is `active`. Nothing is cloned or set up by hand, and there is no
 `tenant.json` or other on-disk tenant row.
 
-An `active` tenant has no alert mapping, and its investigations and runs are refused until one is saved with
-`python3 defender/cli/tenant.py set-alert-mapping <id> <file>` (the entries are described at the top of that command's
-file), or `PUT /tenants/<id>/alert-mapping` once the API is wired to the real store (#1083). `tenant.py check` reports
-a missing mapping as a finding.
+An `active` tenant has no alert mapping, and its investigations and runs are refused until a tenant admin saves one with
+`PUT /tenants/<id>/alert-mapping`. Its systems and case record are written the same way (`PUT /systems/{id}`,
+`PUT /systems/{id}/credentials`, `PUT /case-record`; #1470). `tenant.py check` reports a missing mapping as a finding.
 
 - `GET /admin/tenants/<id>` shows the state, the pending action, the step and the actor, and the
   failure of a failed step; `POST /admin/tenants/<id>/resume` retries it.
@@ -85,7 +83,7 @@ are fixed when a container is created, and the running one has neither. And set
 
 ## Running jobs live from the dev container (#1170, #1475)
 
-A job's helper must share the docker daemon's mount paths and pid namespace
+A job's helper must share the docker daemon's mount paths
 (`decisions/vps-compose-deployment.md`, brain confinement). The host daemon behind
 `/var/run/docker.sock` shares neither with the dev container, so a job started through it
 fails. The dev container therefore carries a second daemon of its own, with gVisor registered
@@ -122,8 +120,8 @@ image, the other compose services) uses the host daemon. The daemon's log is
 
 ## Running the API on the dev database and real sign-in (#1083)
 
-`python -m defender.api_server` serves the platform API over PostgreSQL and Keycloak (the demo server,
-`defender.api.serve`, stays the in-memory one). Every setting is required and read from the environment; a
+`python -m defender.api_server` serves the platform API over PostgreSQL and Keycloak; it is the only way to run the
+API (the in-memory demo server was removed in #1496). Every setting is required and read from the environment; a
 missing or invalid one refuses start naming it. Secret files hold one value, a trailing newline allowed.
 
 | Setting | Meaning |
@@ -137,13 +135,20 @@ missing or invalid one refuses start naming it. Secret files hold one value, a t
 | `DEFENDER_KEYCLOAK_CLIENT_ID`, `..._CLIENT_SECRET_FILE`, `DEFENDER_KEYCLOAK_REDIRECT_URI` | the sign-in client; the redirect must equal the realm's registered one (dev: `http://localhost:8000/auth/callback`) |
 | `DEFENDER_KEYCLOAK_ADMIN_CLIENT_ID`, `..._ADMIN_CLIENT_SECRET_FILE` | sign-in realm's admin client (`manage-users`) |
 | `DEFENDER_KEYCLOAK_PROGRAMS_AUDIENCE`, `..._PROGRAMS_ADMIN_CLIENT_ID`, `..._PROGRAMS_ADMIN_CLIENT_SECRET_FILE` | programs realm (admin client holds `manage-clients`) |
+| `DEFENDER_OPENBAO_ADDR` | OpenBao as the API reaches it, the secret store of tenant credentials (#1470) |
+| `DEFENDER_OPENBAO_KV_MOUNT` | the KV v2 mount credential sets live on |
+| `DEFENDER_API_OPENBAO_TOKEN_FILE` | the API's OpenBao token, holding the write-only `writer` policy (`store_policies()`: create and update on KV data, read on KV metadata, read on `auth/token/lookup-self`) |
 
-At start it checks the database version, probes each realm (discovery names the configured issuer, signing keys
-fetch, the admin client reads users or clients) and binds the port before the bootstrap writes anything; a failure
-ends the program with that step's message on stderr. Not checked at start: the sign-in client's own secret, the
+At start it checks the database version, reads OpenBao's seal status (unreachable or a malformed answer refuses start;
+sealed starts the API, and system reads and credential writes answer 503 until it is unsealed), checks the OpenBao
+token when unsealed, first by its lookup-self, then by a metadata read under the mount; a refusal states what OpenBao
+answered to which call and names the settings that answer can come from (a 403: `DEFENDER_OPENBAO_ADDR`,
+`DEFENDER_API_OPENBAO_TOKEN_FILE`, `DEFENDER_OPENBAO_KV_MOUNT` for the read, and the token's policy; anything else:
+`DEFENDER_OPENBAO_ADDR`), never which one is wrong (#1532), probes each
+realm (discovery names the configured issuer, signing keys fetch, the admin client reads users or clients) and binds
+the port before the bootstrap writes anything; a failure ends the program with that step's message on stderr. Not checked at start: the sign-in client's own secret, the
 redirect URI's equality with the realm's, and whether an admin role is write-capable (a read-only role passes);
-each surfaces at first use. Lessons, systems, credentials and the connection check answer 501 naming their issue
-(#1082, piece 2 #1470). A stop signal leaves the app and closes every connection.
+each surfaces at first use. Lessons and the connection check answer 501 naming their issue (#1082). A stop signal leaves the app and closes every connection.
 
 Walk-through (needs the dev PostgreSQL, Keycloak with both realms imported, Mailpit, the lifecycle's Forgejo and
 OpenBao from `provision-dev-issuer.sh` with `playground-issuer/lifecycle.env`, the database migrated to head, and

@@ -10,5 +10,5 @@ if __name__ == "__main__":
     from defender._log import configure_from_env
 
     configure_from_env()
-    # No transport: each sign-in adapter builds its own connection, honouring the proxy environment (tests pass a fake).
-    raise SystemExit(run(os.environ, transport=None))
+    # No transport: each sign-in adapter and the secret store's client build their own connections (tests pass fakes).
+    raise SystemExit(run(os.environ, transport=None, openbao_transport=None))

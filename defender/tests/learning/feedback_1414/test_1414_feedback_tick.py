@@ -663,7 +663,7 @@ def test_1414_a_failed_decision_transaction_leaves_no_decision_and_no_instructio
     number = fb.opened("case-decision")
     comment = fb.forge.add_comment(number, user=OWNER, body="check the VPN log first")
     decider = S.Decider({comment["id"]: S.answer(instruction="check the VPN log first")})
-    import defender.learning.store as store_mod
+    import defender.learning_store as store_mod
 
     real_blocking = store_mod.blocking
     failed = {"n": 0}

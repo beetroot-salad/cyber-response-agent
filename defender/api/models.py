@@ -8,14 +8,14 @@ from pydantic import (
     AfterValidator, AwareDatetime, BaseModel, BeforeValidator, ConfigDict, Field, field_validator,
     model_validator,
 )
+from pydantic.json_schema import SkipJsonSchema
 
 from defender._clock import as_utc
 from defender._text import postgres_can_hold
-from defender.kit.access import secret_fields
 from defender._vocab import DISPOSITION_VALUES, normalized_disposition
 from defender.identity.models import Email
 from defender.records.formats import (
-    AlertId, AlertMappingFault, CredentialId, InvestigationId, LearningJobId, MembershipId, ProgramId, TenantId, UserId,
+    AlertId, AlertMappingFault, BatchId, CredentialId, InvestigationId, LearningJobId, MembershipId, ProgramId, TenantId, UserId, WorkItemId,
     check_mapping,
 )
 
@@ -184,6 +184,44 @@ class LearningJob(BaseModel):
     finished_at: Instant | None = None
 
 
+#: The kinds of learning work item; equal to `learning_models.KINDS` (a test ties the two).
+ItemKind = Literal["finding", "questioner_finding", "pitfall", "curation_request", "feedback_instruction"]
+
+
+class SetAsideItem(BaseModel):
+    """A learning item the loop stopped working on (#1485): held for a person, or dead. `reason` can be model-written
+    or forge text: plain text, rendered as text."""
+
+    item_id: WorkItemId
+    kind: ItemKind
+    key: str
+    status: Literal["held", "dead"]
+    reason: str | None
+    source_run: str | None
+    batch_id: BatchId | None
+    pr_number: int | None
+    updated_at: Instant
+
+
+class ParkedItemRef(BaseModel):
+    kind: ItemKind
+    key: str
+
+
+class ParkedBatch(BaseModel):
+    """A batch the loop will not touch again (#1485). `blocks_lane`: it holds its lane, so that lane's work stops."""
+
+    batch_id: BatchId
+    batch_kind: Literal["author", "revert", "registry"]
+    lane: str
+    blocks_lane: bool
+    branch: str
+    pr_number: int | None
+    reason: str | None
+    created_at: Instant
+    items: list[ParkedItemRef]
+
+
 class LearningJobCreate(_Request):
     investigation_id: InvestigationId
     client_request_id: ClientRequestId
@@ -196,42 +234,87 @@ class Lesson(BaseModel):
     status: str
 
 
-SettingValue = str | int | bool
+#: Text a record stores as it was sent (a setting, the access declaration, the case comment body): any text PostgreSQL can
+#: hold. What it must say is the record judgement's (#1470 P6), not the wire's.
+StoredText = Annotated[str, AfterValidator(_must_be_storable)]
 
 
-class SystemSettings(BaseModel):
-    """A connected system of the tenant's, as the systems repository stores it: a data source,
-    or the ticket system alerts come from."""
+class CatalogAdapter(BaseModel):
+    """One adapter a system record may name (#1470 O2): the catalog's own declarations, read from the adapter's module.
+    A catalog record's system id is its adapter id (P4)."""
+
+    adapter_id: str
+    display_name: str | None = Field(description="Null when the adapter declares none.")
+    settings_keys: list[str] = Field(description="The keys a record of this adapter stores, prefixed, as stored.")
+    sample_settings: dict[str, str] | None = Field(description="An example value for each stored key; null when the "
+                                                               "adapter declares none.")
+    lab_example: bool = Field(description="A lab example adapter, not a product integration (D6).")
+
+
+class SavedSystem(BaseModel):
+    """A tenant system's version as a save stored it (#1470 O4): the record, without `has_credentials`, since a save asks
+    the secret store nothing (r8 Am-2); a read (`System`) answers it. `system_id` is held to the system-id grammar, so a
+    hand-edited row outside it cannot be served (D13)."""
 
     system_id: RecordId
-    kind: str
-    display_name: str
+    version: int = Field(description="The version a write names as `replaces` to replace this one.")
+    display_name: str | None = Field(description="The catalog's name for the system's adapter; null when the catalog "
+                                                 "has no entry for it (an upgrade removed it).")
     enabled: bool
-    settings: dict[str, SettingValue]
+    settings: dict[str, str] = Field(description="The prefixed settings keys and their text, as stored.")
+    access: str = Field(description="The access declaration's text, as stored.")
 
 
-class System(SystemSettings):
-    """A system as the API serves it. `has_credentials` is the secret store's answer, asked at
-    read time, so it cannot disagree with where credentials are written."""
+class System(SavedSystem):
+    """A tenant system as its current version stands (#1470 O3). `has_credentials` is the secret store's answer, asked at
+    read time, for the current version's credential generation: a set entered for an earlier destination does not count
+    (D-D)."""
 
     has_credentials: bool = Field(description="Credentials are write-only; this is all a read says.")
 
 
 class SystemPut(_Request):
-    """The whole record: a PUT replaces it, so NO field has a default — a default would silently
-    reset whatever the caller left out (re-enable a disabled system, erase its settings)."""
+    """A system's next version, whole: NO field has a default — a default would silently reset whatever the caller left
+    out. `replaces` is the version a read showed, or 0 when a read showed none (P2). The adapter is the system id (P4);
+    what the record must say is the judgement's, answered as `faults`."""
 
-    kind: str = Field(min_length=1)
-    display_name: str = Field(min_length=1)
+    replaces: int
     enabled: bool
-    settings: dict[str, SettingValue]
+    settings: dict[StoredText, StoredText]
+    access: StoredText
+
+
+class CaseRecord(BaseModel):
+    """The tenant's case write-back record as its current version stands (#1470 O6)."""
+
+    version: int
+    system_id: str
+    comment_body: str
+
+
+class CaseRecordPut(_Request):
+    """The case record's next version, whole; `replaces` as a system write's (P2)."""
+
+    replaces: int
+    system_id: StoredText
+    comment_body: StoredText
+
+
+class CredentialsPut(_Request):
+    """A system's whole credential set, replaced, for the version `for_version` names (#1470 O7): accepted exactly when
+    that version's credential generation is the current version's (P3). The fields are exactly those of the current
+    version's auth scheme, and its kind is the scheme's (P4); both are the credential schema's (`kit.access`), answered
+    as `faults`."""
+
+    for_version: int
+    credentials: dict[CredentialKey, str]
 
 
 class AlertMapping(_Request):
     """The tenant's alert mapping, as a PUT names it and a GET answers it (#1345): the dotted path in the raw alert
     where each fact lives, or null for an entry the tenant leaves unmapped. A path reads nested keys, keys holding dots
-    (`alert.rule.id` as one key), or a mix; where both hold a value, the nested key wins (#1481). A PUT replaces the whole mapping, so NO
-    entry has a default (D4): it names all six. The entries and the path rule are `records`' (`check_mapping`)."""
+    (`alert.rule.id` as one key), or a mix; where both hold a value, the nested key wins (#1481). A PUT replaces the whole
+    mapping, so NO entry has a default (D4): it names all six. The entries and the path rule are `records`' (`check_mapping`)."""
 
     signature: str | None
     event_time: str | None
@@ -247,31 +330,6 @@ class AlertMapping(_Request):
         except AlertMappingFault as fault:
             raise ValueError(str(fault)) from None
         return self
-
-
-#: The shortest a secret credential value may be (#1163 A4): a typed-in placeholder is refused
-#: at write time, not found out at the first call.
-SECRET_MIN_LENGTH = 16
-
-
-class CredentialsPut(_Request):
-    """The whole credential set, replaced; no field has a default. `kind` says which fields are
-    secret, by the rule `secret_fields` states (r7 A19): all but `username` in a
-    `static` set, all but `client_id` in an `oauth-client-credentials` set."""
-
-    kind: Literal["static", "oauth-client-credentials"]
-    credentials: dict[CredentialKey, str] = Field(min_length=1)
-
-    @model_validator(mode="after")
-    def _secrets_are_long_enough(self) -> CredentialsPut:
-        secret = secret_fields(self.kind, self.credentials)
-        short = sorted(k for k in secret if len(self.credentials[k]) < SECRET_MIN_LENGTH)
-        if short:
-            raise ValueError(
-                f"secret field(s) {short} are shorter than {SECRET_MIN_LENGTH} characters")
-        return self
-
-
 
 
 class SystemCheck(BaseModel):
@@ -296,6 +354,14 @@ class Problem(BaseModel):
     detail: str | None = Field(default=None, description="What happened to this request.")
     errors: list[FieldError] | None = Field(
         default=None, description="On a 422 from validation: each failing part of the request.")
+    # Absent, never null, on the wire (the body is dumped without None), so the schema names only the present shape.
+    faults: list[str] | SkipJsonSchema[None] = Field(
+        default=None, description=("On a 422 from the record judgement or the credential schema: every fault, each a "
+                                   "sentence naming the system and the key or part. A 422 carries `errors` or `faults`, "
+                                   "never both."))
+    current_version: int | SkipJsonSchema[None] = Field(
+        default=None, description=("On a 409 for a stale write or a moved credential generation: the version a read "
+                                   "now shows (0 when none)."))
 
 
 # --- people, memberships and sign-in (#1306) ---------------------------------------------------
@@ -346,7 +412,7 @@ class TenantItem(BaseModel):
 
     tenant_id: TenantId
     state: Literal["creating", "active", "offboarding", "offboarded"]
-    pending_action: Literal["create", "rotate", "offboard", "delete_repo", "learning_cutover"] | None
+    pending_action: Literal["create", "rotate", "offboard", "delete_repo"] | None
     step: str | None
     step_actor: Literal["service", "host"] | None
     failure: str | None

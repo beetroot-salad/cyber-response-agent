@@ -43,6 +43,8 @@ from defender.tests.tenancy.lifecycle_1214.test_host_entry import (
     _tenant_placed,  # noqa: F401 — autouse fixture
 )
 from defender.tests.tenancy.tenant_1108_p4.conftest import p4_tenant  # noqa: F401 — fixture
+from defender.tests.support.tenancy._twin1496 import offboard_twin
+from defender.tests.support.tenancy._twin1496 import seed_tenant
 
 
 NOW = dt.datetime(2026, 10, 28, 12, 0, tzinfo=dt.UTC)
@@ -211,12 +213,12 @@ def test_a_directory_over_the_in_memory_twin_survives_its_calls():
     from defender.tenancy import InMemoryTenantRepository, TenantDirectory
 
     twin: Any = InMemoryTenantRepository()
-    asyncio.run(twin.add_tenant(T1, created_at=NOW, state="active", repo="tenants/t1", origin=ORIGIN))
+    asyncio.run(seed_tenant(twin, T1, created_at=NOW, state="active", repo="tenants/t1", origin=ORIGIN))
     directory = TenantDirectory(lambda: twin)
     assert [directory.state(T1), directory.state(T1)] == ["active", "active"]
     assert directory.state(T2) is None  # control: an unseeded tenant is unknown
     assert directory.forge_wiring(T1).origin == ORIGIN
-    asyncio.run(twin.request_offboard(T1, now=NOW))
+    asyncio.run(offboard_twin(twin, T1))
     assert directory.state(T1) == "offboarding"  # and it reads the twin's present state, not a copy
 
 
@@ -484,7 +486,7 @@ def _lead_tick(t: Any, tmp_path: Path, steps: _Steps, **seams: Any) -> int:
 @pytest.mark.parametrize("answer", AFTER)
 def test_a_tenant_that_stops_being_active_is_never_claimed_for_and_its_item_keeps_waiting_uncounted(p4_tenant, in_the_store, migrated_database, tmp_path, monkeypatch, answer):  # noqa: F811
     """Once the tenant is no longer active (whatever it became, even between the tick's read and its claim) no tick claims, serves or charges its waiting item. (Flow 4, O6)"""
-    from defender.learning.store import LearningStore
+    from defender.learning_store import LearningStore
     from defender.tests.support.jobs._jobs1342 import move_tenant
 
     t, dsn = p4_tenant, migrated_database

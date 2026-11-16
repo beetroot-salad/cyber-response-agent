@@ -81,9 +81,9 @@ defender/
                     #   estate/ is what a sibling world queries through. judge/ grades the archived episode.
                     #   branch/container.py is learning's door onto the job socket inside its job container
                     #   The four-stage actor/oracle/judge pipeline that used to live here was deleted (#922)
-  api/              # the platform HTTP API (#1131) — a STUB: routes + wire models + ports. The data rules are the
-                    #   store's (#1082), stated on the ports; `fakes.py` enforces none of them. Never imports
-                    #   runtime/ or learning/. `api/serve.py` runs it locally over the fakes (`--extra api`)
+  api/              # the platform HTTP API (#1131): routes + wire models + ports. The data rules are the
+                    #   store's (#1082), stated on the ports; `job_store.py` serves them over the job store. Never
+                    #   imports runtime/ or learning/. `python -m defender.api_server` serves it (#1083, `--extra api`)
   run-transcripts/  # curated transcripts of past real-alert runs
   tests/            # single collected test tree, grouped by subsystem
                     #   runtime/, sandbox/, storage/, tenancy/, invlang/, integrations/

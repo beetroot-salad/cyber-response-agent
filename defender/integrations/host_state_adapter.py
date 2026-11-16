@@ -39,6 +39,9 @@ SYSTEM = "host-state"
 PREFIX = "HOST_STATE"
 #: host-state reads no settings key: its base is its declaration's, its timeouts constants.
 REQUIRED_CONFIG_KEYS: tuple[str, ...] = ()
+#: An example value for each key a record of this adapter stores, read cold by the catalog and served to an
+#: admin as a starting point (#1470 D11); this adapter's own settings check accepts it.
+SAMPLE_SETTINGS = {}  # type: dict[str, str]
 #: No setting goes in a request path.
 PATH_KEYS: tuple[str, ...] = ()
 #: The system's name in the catalog listing (#1366 O2).

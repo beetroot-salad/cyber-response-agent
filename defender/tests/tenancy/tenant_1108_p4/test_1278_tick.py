@@ -246,8 +246,8 @@ def _snapshot(w):
 @pytest.mark.parametrize("refusal", ["LaneBusy", "TenantInactive"])
 def test_a_claim_the_store_refuses_ends_the_tick_at_zero_with_nothing_changed(world, caplog, monkeypatch, lane, refusal):  # noqa: F811 — the imported fixture
     """`LaneBusy` or `TenantInactive` raised from the claim itself (a race lost, offboarding begun) is no tick fault: the tick returns 0, claims nothing, and the same item is claimed by the next. (O3, O6, Locks)"""
-    import defender.learning.store as learning_store
-    from defender.learning.store import LearningStore
+    import defender.learning_store as learning_store
+    from defender.learning_store import LearningStore
     from defender.tests.support.learning.core._declared870 import shim_row
     from defender.tests.tenancy.tenant_1108_p4._drain_support import lead_author_drain
 

@@ -17,13 +17,16 @@ from starlette.datastructures import Headers, MutableHeaders
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from defender import identity as _identity
+from defender import system_records as _records
 from defender import tenancy as _tenancy
 from defender.identity import Authenticated, IdentityService, PersonCaller, ProgramCaller, audit
 from defender.identity.service import SESSION_LIFETIME
 from defender.identity.roles import Permission
 from defender.identity.models import Role
+from defender.kit.access import CredentialRefused
+from defender.tenancy.record_values import SystemRecord
 from defender.records.formats import (
-    AlertId, CredentialId, InvestigationId, LearningJobId, MembershipId, ProgramId, TenantId, UserId,
+    AlertId, BatchId, CredentialId, InvestigationId, LearningJobId, MembershipId, ProgramId, TenantId, UserId, WorkItemId,
 )
 
 from .models import (
@@ -31,6 +34,9 @@ from .models import (
     RECORD_ID_PATTERN,
     Alert,
     AlertSummary,
+    CaseRecord,
+    CaseRecordPut,
+    CatalogAdapter,
     Credential,
     CredentialCreate,
     CredentialIssued,
@@ -47,15 +53,17 @@ from .models import (
     Lesson,
     Me,
     Member,
+    ParkedBatch,
     MeUser,
     Program,
     ProgramCreate,
     ProgramMe,
     ProgramRef,
+    SavedSystem,
+    SetAsideItem,
     System,
     SystemCheck,
     SystemPut,
-    SystemSettings,
     TenantItem,
     TenantRef,
 )
@@ -65,9 +73,12 @@ from .problems import HANDLERS, problem, refusal, responses
 from .ports import (
     ApiDeps,
     Conflict,
+    CredentialsUnused,
     NotFound,
     OffboardNotSettled,
     Principal,
+    SecretStoreRefused,
+    SecretStoreUnavailable,
     StoreBrokePromise,
     TimePosition,
     UnknownReference,
@@ -184,6 +195,44 @@ async def _offboard_not_settled(request: Request, exc: Exception) -> Response:
     return problem(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc))
 
 
+#: Each record refusal's status (#1470 P6, G2): the store's typed refusals and the credential schema's, by type, in one
+#: place. A route adds no check of its own.
+_RECORD_STATUS: tuple[tuple[type[Exception], int], ...] = (
+    (_records.Stale, status.HTTP_409_CONFLICT),
+    (_records.Judged, 422),
+    (_records.NoSuchTenant, status.HTTP_404_NOT_FOUND),
+    (_records.TenantNotActive, status.HTTP_409_CONFLICT),
+    (_records.NoCurrentRecord, status.HTTP_404_NOT_FOUND),
+    (CredentialRefused, 422),
+    (CredentialsUnused, status.HTTP_409_CONFLICT),
+)
+
+
+async def _refused_by_record_rule(request: Request, exc: Exception) -> Response:
+    """A record refusal as its problem: a judgement's or the credential schema's 422 lists every fault (`faults`, the
+    detail a one-line summary, so no fault is cut to a line); a stale or moved write's 409 names the version a read now
+    shows (`current_version`). A refusal of no listed type is a bug of ours: the 500."""
+    found = next((code for typed, code in _RECORD_STATUS if isinstance(exc, typed)), None)
+    if found is None:
+        return await _server_error(request, exc)
+    # A note is what happened besides the refusal (a credential set stored before its re-read refused, r8 Am-3).
+    noted = "".join(f"; {n}" for n in getattr(exc, "__notes__", ()))
+    if isinstance(exc, _records.Judged | CredentialRefused):
+        faults = [str(f) for f in exc.faults]
+        what = "the record judgement" if isinstance(exc, _records.Judged) else "the credential schema"
+        return problem(found, f"{what} refused the write ({len(faults)} fault(s)); see `faults`{noted}", faults=faults)
+    if isinstance(exc, _records.Stale | CredentialsUnused):
+        return problem(found, f"{exc}{noted}", current_version=exc.current_version)
+    return problem(found, f"{exc}{noted}")
+
+
+async def _secret_store_refused(request: Request, exc: Exception) -> Response:
+    """The 500 for the secret store refusing the API's own request (any 4xx, which stores nothing): our setup,
+    not the caller's, so it is logged as an error and named in the answer (#1470 G4, r8 Am-1)."""
+    _logger.error("the secret store refused the API: %s", exc)
+    return problem(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc))
+
+
 async def _not_authenticated(request: Request, exc: Exception) -> Response:
     """The 401. A request that came the bearer way (see `_way_in`) is challenged as RFC 6750 says, so an OAuth
     client knows to fetch a new token; one that came with the session cookie, or with nothing, is not: a session
@@ -274,6 +323,7 @@ AnyCaller = Annotated[Authenticated, Depends(_any_caller)]
 
 #: The caller a tenant route holds: either kind, or a person once a people route has narrowed it.
 _Caller = TypeVar("_Caller", bound=Authenticated)
+_T = TypeVar("_T")
 
 
 class _Membered(NamedTuple, Generic[_Caller]):
@@ -404,8 +454,11 @@ _UNBACKED = {**_EVERY_ROUTE, **responses(501)}
 _ALERT_ORDER: Order[AlertSummary, TimePosition] = newest_first(lambda a: a.fired_at, lambda a: a.alert_id, AlertId)
 _INVESTIGATION_ORDER: Order[Investigation, TimePosition] = newest_first(lambda i: i.created_at, lambda i: i.investigation_id, InvestigationId)
 _LEARNING_JOB_ORDER: Order[LearningJob, TimePosition] = newest_first(lambda j: j.created_at, lambda j: j.learning_job_id, LearningJobId)
+_SET_ASIDE_ORDER: Order[SetAsideItem, TimePosition] = newest_first(lambda i: i.updated_at, lambda i: i.item_id, WorkItemId)
+_PARKED_ORDER: Order[ParkedBatch, TimePosition] = newest_first(lambda b: b.created_at, lambda b: b.batch_id, BatchId)
 _LESSON_ORDER: Order[Lesson, str] = ordered_by_id(lambda le: le.lesson_id)
-_SYSTEM_ORDER: Order[SystemSettings, str] = ordered_by_id(lambda s: s.system_id)
+_SYSTEM_ORDER: Order[SystemRecord, str] = ordered_by_id(lambda s: s.system_id)
+_ADAPTER_ORDER: Order[CatalogAdapter, str] = ordered_by_id(lambda a: a.adapter_id)
 
 
 def _filter_moment(moment: _dt.datetime | None) -> str | None:
@@ -580,6 +633,38 @@ async def get_learning_job(deps: Deps, caller: WorkReader, learning_job_id: Lear
     return job
 
 
+learning_work = _router(prefix="/learning", tags=["learning"], responses=_EVERY_ROUTE)
+
+
+@learning_work.get("/items")
+async def list_learning_items(
+    deps: Deps, caller: WorkReader,
+    status_filter: Annotated[Literal["held", "dead"] | None, Query(alias="status")] = None,
+    cursor: Cursor = None,
+    limit: Limit = DEFAULT_PAGE,
+) -> Page[SetAsideItem]:
+    """The items the learning loop set aside for a person: held (waiting for a decision) and dead (retired for good),
+    each with why. The reason is plain text, some of it model-written: render it as text."""
+    return await paginate(
+        lambda after, n: deps.learning_work.list_set_aside(caller.tenant_id, status=status_filter, after=after, limit=n),
+        _SET_ASIDE_ORDER, list_name="learning-items", tenant_id=caller.tenant_id,
+        cursor=cursor, limit=limit, filters={"status": status_filter},
+    )
+
+
+@learning_work.get("/parked-batches")
+async def list_parked_batches(
+    deps: Deps, caller: WorkReader, cursor: Cursor = None, limit: Limit = DEFAULT_PAGE
+) -> Page[ParkedBatch]:
+    """The batches the loop will not touch again, newest first, each with why and the items it still holds. An author
+    or registry batch holds its lane: that tenant's work on the lane stops until a person acts."""
+    return await paginate(
+        lambda after, n: deps.learning_work.list_parked_batches(caller.tenant_id, after=after, limit=n),
+        _PARKED_ORDER, list_name="parked-batches", tenant_id=caller.tenant_id, cursor=cursor,
+        limit=limit, filters={},
+    )
+
+
 lessons = _router(prefix="/lessons", tags=["learning"], responses=_UNBACKED)
 
 
@@ -594,62 +679,135 @@ async def list_lessons(
     )
 
 
-systems = _router(prefix="/systems", tags=["systems"], responses=_UNBACKED)
+adapters = _router(prefix="/adapters", tags=["systems"], responses=_EVERY_ROUTE)
 
 
-async def _served(deps: ApiDeps, caller: Principal, settings: SystemSettings) -> System:
-    """The system as served: its settings plus the secret store's own answer, so the flag can
-    never disagree with where credentials were written."""
-    has = await deps.secrets.has_credentials(caller.tenant_id, settings.system_id)
-    # Only the settings' own fields: a store answering a richer record cannot collide with ours.
-    return System(**settings.model_dump(include=set(SystemSettings.model_fields)), has_credentials=has)
+@adapters.get("")
+async def list_adapters(
+    deps: Deps, caller: ConfigReader, cursor: Cursor = None, limit: Limit = DEFAULT_PAGE
+) -> Page[CatalogAdapter]:
+    """Every adapter a system record may name: a record's system id is its adapter's id. Each carries the settings keys
+    its record stores and a sample value for each; `lab_example` marks the lab's example adapters."""
+    async def fetch(after: str | None, n: int) -> list[CatalogAdapter]:
+        return [a for a in await deps.systems.list_adapters() if after is None or a.adapter_id > after][:n]
+
+    return await paginate(fetch, _ADAPTER_ORDER, list_name="adapters", tenant_id=caller.tenant_id, cursor=cursor,
+                          limit=limit, filters={})
 
 
-@systems.get("")
+systems = _router(prefix="/systems", tags=["systems"], responses=_EVERY_ROUTE)
+
+#: What a read that needs the secret store's answer can say beside its own: none came (503).
+_SECRET_READ = responses(503)
+
+
+@systems.get("", responses=_SECRET_READ)
 async def list_systems(
     deps: Deps, caller: ConfigReader, cursor: Cursor = None, limit: Limit = DEFAULT_PAGE
 ) -> Page[System]:
+    """The tenant's current systems, by id. A deleted system is absent."""
     page = await paginate(
         lambda after, n: deps.systems.list_systems(caller.tenant_id, after=after, limit=n),
         _SYSTEM_ORDER, list_name="systems", tenant_id=caller.tenant_id, cursor=cursor,
         limit=limit, filters={},
     )
-    # Served after the page is cut, so the secret store is asked only about rows that are sent.
-    return Page(items=[await _served(deps, caller, s) for s in page.items], next_cursor=page.next_cursor)
+    # Served after the page is cut, so the secret store is asked only about rows that are sent: all at once, over the
+    # writer's pooled client (a bounded set of connections, kept between requests), not one after another (O3).
+    served = await _all_or_first_failure([deps.systems.served(caller.tenant_id, r) for r in page.items])
+    return Page(items=served, next_cursor=page.next_cursor)
 
 
-async def _settings(deps: ApiDeps, caller: Principal, system_id: str) -> SystemSettings:
-    settings = await deps.systems.get_system(caller.tenant_id, system_id)
-    if settings is None:
+async def _all_or_first_failure(calls: list[Coroutine[Any, Any, _T]]) -> list[_T]:
+    """Every call's answer, in order; or, once one fails, that failure itself (so its own handler answers it), the
+    others cancelled first: a page that will answer its first row's failure holds no connection for the rest."""
+    tasks = [asyncio.ensure_future(c) for c in calls]
+    try:
+        return await asyncio.gather(*tasks)
+    except BaseException:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
+
+
+@systems.get("/{system_id}", responses={**responses(404), **_SECRET_READ})
+async def get_system(deps: Deps, caller: ConfigReader, system_id: SystemPath) -> System:
+    """The system's current version; not found when it was never written or is deleted."""
+    record = await deps.systems.get_system(caller.tenant_id, system_id)
+    if record is None:
         raise _not_found("system", system_id)
-    return settings
+    return await deps.systems.served(caller.tenant_id, record)
 
 
-@systems.put("/{system_id}", responses={201: {"model": System}})
+@systems.put("/{system_id}", responses={201: {"model": SavedSystem}, **responses(409)})
 async def put_system(
     deps: Deps, caller: ConfigWriter, system_id: SystemPath, body: SystemPut, request: Request, response: Response
-) -> System:
-    """Create or replace a connected system's settings. Credentials are set separately."""
-    settings, created = await deps.systems.put_system(caller, system_id, body)
-    _answered_for("system", system_id, settings.system_id)
+) -> SavedSystem:
+    """Write the system's next version, judged in the same response. `replaces` names the version a read showed, or 0
+    when a read showed none; any other is stale (409, `current_version`). A record the judgement refuses is a 422
+    listing every fault (`faults`). 201 when a read showed none before. A change of the system's base, CA or auth block
+    raises its credential generation: a read's `has_credentials` is then false until credentials are set for the new
+    version. The answer is the version as stored, without `has_credentials` (a save asks no secret store, so it succeeds
+    while the secret store is sealed): read the system for it. Credentials are set separately."""
+    served, created = await deps.systems.put_system(caller, system_id, body)
+    _answered_for("system", system_id, served.system_id)
     if created:
-        # A PUT creates the resource at its own URL; built by the router, so no query rides along.
-        _created_at(request, response, "put_system", caller.tenant_id, system_id=system_id)
-    return await _served(deps, caller, settings)
+        _created_at(request, response, "get_system", caller.tenant_id, system_id=system_id)
+    return served
+
+
+@systems.delete("/{system_id}", status_code=status.HTTP_204_NO_CONTENT, responses=responses(404, 409))
+async def delete_system(
+    deps: Deps, caller: ConfigWriter, system_id: SystemPath, replaces: Annotated[int, Query()]
+) -> None:
+    """Delete the system's current version, which `replaces` names. Not found when it has none, whatever `replaces`
+    says; refused (422) while the case record names it."""
+    await deps.systems.delete_system(caller, system_id, replaces=replaces)
 
 
 @systems.put("/{system_id}/credentials", status_code=status.HTTP_204_NO_CONTENT,
-             responses=responses(404))
+             responses=responses(404, 409, 503))
 async def put_credentials(deps: Deps, caller: ConfigWriter, system_id: SystemPath, body: CredentialsPut) -> None:
-    """Replace the system's credentials. Write-only: no endpoint returns them."""
-    await _settings(deps, caller, system_id)
-    await deps.secrets.put_credentials(caller, system_id, body.kind, body.credentials)
+    """Replace the system's credentials, prepared for the version `for_version` names: taken exactly when that version's
+    credential generation is the current version's (else 409, `current_version`). The fields are exactly those of the
+    system's auth scheme (422, `faults`). Write-only: no endpoint returns them."""
+    await deps.secrets.put_credentials(caller, system_id, for_version=body.for_version, credentials=body.credentials)
 
 
-@systems.post("/{system_id}/check", responses=responses(404))
+@systems.post("/{system_id}/check", responses=responses(501))
 async def check_system(deps: Deps, caller: ConfigWriter, system_id: SystemPath) -> SystemCheck:
     """Test the connection and a first query."""
-    return await deps.checker.check(caller.tenant_id, await _served(deps, caller, await _settings(deps, caller, system_id)))
+    return await deps.checker.check(caller.tenant_id, system_id)
+
+
+case_record = _router(prefix="/case-record", tags=["systems"], responses=_EVERY_ROUTE)
+
+
+@case_record.get("", responses=responses(404))
+async def get_case_record(deps: Deps, caller: ConfigReader) -> CaseRecord:
+    """The tenant's case write-back record; not found when there is none or it is deleted."""
+    record = await deps.systems.get_case_record(caller.tenant_id)
+    if record is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "this tenant has no case record")
+    return record
+
+
+@case_record.put("", responses={201: {"model": CaseRecord}, **responses(409)})
+async def put_case_record(
+    deps: Deps, caller: ConfigWriter, body: CaseRecordPut, request: Request, response: Response
+) -> CaseRecord:
+    """Write the case record's next version, judged in the same response; `replaces` as a system write's. The system it
+    names must be one of the tenant's enabled systems, and the comment body a template that renders (422, `faults`)."""
+    record, created = await deps.systems.put_case_record(caller, body)
+    if created:
+        _created_at(request, response, "get_case_record", caller.tenant_id)
+    return record
+
+
+@case_record.delete("", status_code=status.HTTP_204_NO_CONTENT, responses=responses(404, 409))
+async def delete_case_record(deps: Deps, caller: ConfigWriter, replaces: Annotated[int, Query()]) -> None:
+    """Delete the case record's current version, which `replaces` names; not found when there is none."""
+    await deps.systems.delete_case_record(caller, replaces=replaces)
 
 
 # --- people, memberships and sign-in (#1306) ---------------------------------------------------
@@ -972,7 +1130,8 @@ def create_app(deps: ApiDeps) -> FastAPI:
     app.add_middleware(_ExpiryHeader)
     app.add_middleware(_FrontendOriginOnly, origin=deps.frontend_origin)
     in_tenant = _router(prefix="/tenants/{tenant_id}", responses=responses(404))
-    for router in (alerts, investigations, learning_jobs, lessons, systems, alert_mapping, people, programs):
+    for router in (alerts, investigations, learning_jobs, learning_work, lessons, adapters, systems, case_record,
+                   alert_mapping, people, programs):
         in_tenant.include_router(router)
     for router in (auth, in_tenant, admin):
         app.include_router(router)
@@ -983,6 +1142,10 @@ def create_app(deps: ApiDeps) -> FastAPI:
     # The literal, not starlette's constant: it was renamed across starlette releases.
     app.add_exception_handler(UnknownReference, refusal(422))
     app.add_exception_handler(NotImplementedYet, refusal(status.HTTP_501_NOT_IMPLEMENTED))
+    for typed in (_records.RecordRefused, CredentialRefused, CredentialsUnused):
+        app.add_exception_handler(typed, _refused_by_record_rule)
+    app.add_exception_handler(SecretStoreUnavailable, refusal(status.HTTP_503_SERVICE_UNAVAILABLE))
+    app.add_exception_handler(SecretStoreRefused, _secret_store_refused)
     app.add_exception_handler(_identity.NotAuthenticated, _not_authenticated)
     app.add_exception_handler(_identity.Forbidden, refusal(status.HTTP_403_FORBIDDEN))
     app.add_exception_handler(_identity.NotFound, refusal(status.HTTP_404_NOT_FOUND))

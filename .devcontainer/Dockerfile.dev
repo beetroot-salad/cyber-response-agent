@@ -36,7 +36,8 @@ RUN apt-get update && apt-get install -y \
 # confinement); the host daemon behind /var/run/docker.sock shares neither, this one shares both by construction.
 # Started on demand by `start-jobs-docker`, on its own socket; see defender/docs/development-operations.md.
 # gVisor comes from its own signed apt repository, as CI's .github/actions/install-gvisor installs it, registered
-# as CI registers it: --oci-seccomp (boxes are refused without it, #771) and --host-uds=open (the job's socket is a
+# as CI registers it, twice (#1469): `runsc`, the box runtime, with --oci-seccomp only (boxes are refused without it,
+# #771, and no host-socket access); `runsc-job`, the job container's runtime, adds --host-uds=open (the job's socket is a
 # unix socket of this container mounted into the job's gVisor guest, which refuses to connect to it without this).
 RUN curl -fsSL https://gvisor.dev/archive.key | gpg --dearmor -o /usr/share/keyrings/gvisor-archive-keyring.gpg \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main" \
@@ -46,7 +47,7 @@ RUN curl -fsSL https://gvisor.dev/archive.key | gpg --dearmor -o /usr/share/keyr
     && apt-get install -y --no-install-recommends runsc \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /etc/docker \
-    && printf '%s\n' '{"runtimes": {"runsc": {"path": "/usr/bin/runsc", "runtimeArgs": ["--oci-seccomp", "--host-uds=open"]}}}' \
+    && printf '%s\n' '{"runtimes": {"runsc": {"path": "/usr/bin/runsc", "runtimeArgs": ["--oci-seccomp"]}, "runsc-job": {"path": "/usr/bin/runsc", "runtimeArgs": ["--oci-seccomp", "--host-uds=open"]}}}' \
        > /etc/docker/daemon.json
 COPY .devcontainer/start-jobs-docker.sh /usr/local/bin/start-jobs-docker
 

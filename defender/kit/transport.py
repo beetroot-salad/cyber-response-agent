@@ -22,6 +22,7 @@ from defender.kit.faults import (
     USAGE_EXIT_CODE,
     AdapterFault,
     ConfigFault,
+    ConfigFaults,
     ConfinementFault,
     TransportFault,
     UpstreamFault,
@@ -149,7 +150,11 @@ def record_config(
        segment (T2, T4);
     7. a `TIMEOUT_SEC` is a whole number of seconds above zero.
 
-    The base is the declaration's, never a key: the dict carries no `URL_BASE` (O-T3)."""
+    The base is the declaration's, never a key: the dict carries no `URL_BASE` (O-T3).
+
+    Rules 1 to 7 are independent, so every one that fails is found (#1470 O4): one fault is
+    raised as it is, several as `ConfigFaults` whose text is the first's. A settings entry that
+    is absent (rule 2) leaves no keys to judge, so rules 3 to 7 then find nothing."""
     wrong = [key for key in required if key in _NEVER_KEYS]
     if wrong:
         raise ValueError(f"{system}'s adapter reads {', '.join(wrong)}: a base is its access.yaml's "
@@ -158,18 +163,36 @@ def record_config(
     if isinstance(found, ConfigFault) and not isinstance(found, ConfigAbsent):
         # A folder or file the run could not read hides what else it holds: name that first.
         raise ConfigFault(str(found))
-    record_access(tenant, system)
-    entry: Mapping[str, str]
-    if isinstance(found, ConfigAbsent) and not required:
+    faults: list[str] = []
+    try:
+        record_access(tenant, system)
+    except ConfigFault as unusable:
+        faults.append(str(unusable))
+    try:
+        entry: Mapping[str, str] = ({} if isinstance(found, ConfigAbsent) and not required
+                                    else record_entry(tenant, system))
+    except ConfigFault as absent:
+        faults.append(str(absent))
         entry = {}
     else:
-        entry = record_entry(tenant, system)
-    shown = locator_of(tenant).part(system, "settings")
+        faults += _settings_rule_faults(entry, locator_of(tenant).part(system, "settings"), system, prefix,
+                                   required, path_keys)
+    if len(faults) == 1:
+        raise ConfigFault(faults[0])
+    if faults:
+        raise ConfigFaults(tuple(faults))
+    return {key: entry[f"{prefix}_{key}"] for key in required}
+
+
+def _settings_rule_faults(entry: Mapping[str, str], shown: str, system: str, prefix: str, required: tuple[str, ...],
+                     path_keys: tuple[str, ...]) -> list[str]:
+    """`record_config`'s rules 3 to 7 over a present settings entry: every fault, in rule order."""
+    faults: list[str] = []
     declared = {f"{prefix}_{key}" for key in required}
     undeclared = sorted(key for key in entry if key not in declared)
     if undeclared:
         reads = ", ".join(sorted(declared)) or "no keys"
-        raise ConfigFault(
+        faults.append(
             f"{', '.join(undeclared)} in {shown} is not a setting of {system} "
             f"(it reads {reads}; its base is its access declaration's) — remove it; a key of the "
             f"retired docker access method is removed as {UPGRADE_POINTER} says")
@@ -177,27 +200,29 @@ def record_config(
            if not is_blank(entry.get(f"{prefix}_{key}", ""))}
     missing = [k for k in required if k not in cfg]
     if missing:
-        raise ConfigFault(
+        faults.append(
             f"missing required config keys in {shown}: "
             f"{', '.join(f'{prefix}_{k}' for k in missing)}")
-    placeholders = [f"{prefix}_{k}" for k in required if PLACEHOLDER in cfg[k]]
+    held = [k for k in required if k in cfg and PLACEHOLDER in cfg[k]]
+    placeholders = [f"{prefix}_{k}" for k in held]
     if placeholders:
-        raise ConfigFault(f"{', '.join(placeholders)} in {shown} still carries the template's "
-                          f"{PLACEHOLDER} — replace it; {NOT_CONFIGURED}")
+        faults.append(f"{', '.join(placeholders)} in {shown} still carries the template's "
+                      f"{PLACEHOLDER} — replace it; {NOT_CONFIGURED}")
     for key in path_keys:
-        why = segment_fault(cfg[key])
+        why = segment_fault(cfg[key]) if key in cfg and key not in held else None
         if why is not None:
-            raise ConfigFault(f"{prefix}_{key} in {shown} {why}: {system} puts it in a request "
-                              "path, where a value is exactly one segment — "
-                              f"{NOT_CONFIGURED}")
-    _check_timeout(prefix, cfg.get("TIMEOUT_SEC"), shown)
-    return cfg
+            faults.append(f"{prefix}_{key} in {shown} {why}: {system} puts it in a request "
+                          "path, where a value is exactly one segment — "
+                          f"{NOT_CONFIGURED}")
+    # A key still holding the placeholder is named once, by the placeholder rule.
+    timeout = None if "TIMEOUT_SEC" in held else _timeout_fault(prefix, cfg.get("TIMEOUT_SEC"), shown)
+    return faults if timeout is None else [*faults, timeout]
 
 
-def _check_timeout(prefix: str, timeout: str | None, shown: str) -> None:
+def _timeout_fault(prefix: str, timeout: str | None, shown: str) -> str | None:
     if timeout is not None and not (timeout.isascii() and timeout.isdigit() and len(timeout) <= 9 and int(timeout) > 0):
-        raise ConfigFault(
-            f"{prefix}_TIMEOUT_SEC in {shown} must be a whole number of seconds above zero, got {timeout!r}")
+        return f"{prefix}_TIMEOUT_SEC in {shown} must be a whole number of seconds above zero, got {timeout!r}"
+    return None
 
 
 def timeout_of(config: Mapping[str, str]) -> int:

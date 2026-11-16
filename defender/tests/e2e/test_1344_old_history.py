@@ -181,7 +181,6 @@ def _launch_over_the_old_run(tmp_path: Path, **seams):
         est.answer(row["system"], row["verb"], row["params"],
                    json.loads((old.run_dir / row["payload_path"]).read_text(encoding="utf-8")))
     old.stamp(tenant.id)
-    S.location_path(tenant.learning).mkdir(exist_ok=True)  # the host's prepare step makes the learning root
     spawn = S.FakeSpawn()
     seams.setdefault("questioner", S.questioner_for())
     seams.setdefault("preflight", S.no_preflight)

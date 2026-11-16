@@ -31,10 +31,14 @@ from typing import Any
 
 import pytest
 
+from defender.tests.support.tenancy._active1214 import offboard_on_database
+from defender.tests.support.tenancy._twin1496 import offboard_twin
+
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.shared._pglocks1339 import TIMEOUT, connections, until, until_blocked
 from defender.tests.support.shared._postgres1339 import database, execute
 from defender.tests.support.shared._postgres1339 import execute
+from defender.tests.support.tenancy._twin1496 import seed_tenant
 
 
 pytestmark = pytest.mark.anyio
@@ -53,6 +57,9 @@ T2 = fixture_uuid("tenant:1214-repo-2")
 
 
 ABSENT = fixture_uuid("tenant:1214-repo-absent")
+
+
+T3 = fixture_uuid("tenant:1214-repo-3")
 
 
 ORIGIN = "http://forge.test/tenants/t1.git"
@@ -114,13 +121,19 @@ class Store:
         if self.dsn is None:
             extra = {k: v for k, v in dict(pending_action=action, step=step, step_actor=actor, failure=failure,
                                            repo=repo, origin=origin).items() if v is not None}
-            await self.twin.add_tenant(tenant, created_at=SEEDED_AT, state=state, **extra)
+            await seed_tenant(self.twin, tenant, created_at=SEEDED_AT, state=state, **extra)
             return
         execute(self.dsn, """INSERT INTO tenancy.tenants (id, created_at, state, pending_action, step, step_actor, failure)
                              VALUES (%s, %s, %s, %s, %s, %s, %s)""", (tenant, SEEDED_AT, state, action, step, actor, failure))
         if repo is not None:
             execute(self.dsn, "INSERT INTO tenancy.forge_wiring (tenant_id, repo, origin) VALUES (%s, %s, %s)",
                     (tenant, repo, origin or ORIGIN))
+
+    async def offboard(self, tenant: str) -> Any:
+        """Move `tenant` to `offboarding` (#1496: the twin's seeder, or tenancy's own `offboard` on the database)."""
+        if self.dsn is None:
+            return await offboard_twin(self.twin, tenant)
+        return await offboard_on_database(self.dsn, tenant)
 
 
 async def _build(dsn: str | None) -> tuple[Any, Any]:
@@ -306,31 +319,6 @@ async def test_a_second_resume_is_a_conflict(store):
     await _refused(store.repo.request_resume(T1), "Conflict")
 
 
-# --- request_offboard -------------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("name", ["creating", "creating-failed", "backfilled", "active", "rotating", "rotating-failed"])
-async def test_offboard_from_creating_or_active_replaces_any_pending_action_and_clears_the_failure(store, name):
-    """request_offboard from `creating`|`active` sets `offboarding`, `offboard` pending, first step `offboard` (service), no failure (RC-3, DC-3)."""
-    await store.seed(T1, ALL_ROWS[name])
-    await store.seed(T2, ALL_ROWS[name])
-    before = _values(await store.repo.tenant(T1))
-    record = await store.repo.request_offboard(T1, now=NOW)
-    assert _job(record) == ("offboarding", "offboard", "offboard", "service", None)
-    assert (record.id, record.created_at) == (T1, before["created_at"])
-    assert _values(await store.repo.tenant(T1)) == _values(record)
-    assert _job(await store.repo.tenant(T2)) == ALL_ROWS[name]  # only the addressed tenant
-
-
-@pytest.mark.parametrize("name", ["offboarding", "offboarding-failed", "offboarded", "deleting"])
-async def test_offboard_from_any_other_state_is_a_conflict_and_changes_nothing(store, name):
-    """request_offboard is refused (409) unless the tenant is `creating` or `active`; the row stays (RC-3)."""
-    await store.seed(T1, ALL_ROWS[name])
-    before = _values(await store.repo.tenant(T1))
-    await _refused(store.repo.request_offboard(T1, now=NOW), "Conflict")
-    assert _values(await store.repo.tenant(T1)) == before
-
-
 # --- #1360: the tenancy `offboard` operation ---------------------------------------------------------------------
 
 REPO = Path(__file__).resolve().parents[4]
@@ -395,10 +383,11 @@ class _Abandon(Exception):
 
 @pytest.mark.postgres
 @pytest.mark.parametrize("kind", ["connection", "session"])
-@pytest.mark.parametrize("name", ["creating", "creating-failed", "active", "rotating-failed"])
-async def test_1360_offboard_moves_the_tenant_on_a_connection_or_a_session_like_request_offboard(pg_store, engine, kind, name):
-    """`offboard(executor, tenant)` leaves what `request_offboard` leaves, returns a record that outlives the executor,
-    and touches no other tenant. (#1360 D1, D6a)"""
+@pytest.mark.parametrize("name", ["creating", "creating-failed", "backfilled", "active", "rotating", "rotating-failed"])
+async def test_1360_offboard_moves_the_tenant_on_a_connection_or_a_session(pg_store, engine, kind, name):
+    """`offboard(executor, tenant)` from `creating`|`active` sets `offboarding`, `offboard` pending, first step `offboard`
+    (service), no failure, replacing any pending action; returns a record that outlives the executor and touches no
+    other tenant. (#1360 D1, D6a, RC-3, DC-3; #1496: the one offboard transition, so its cases are all here)"""
     from defender.tenancy import offboard
 
     await pg_store.seed(T1, ALL_ROWS[name])
@@ -434,7 +423,7 @@ async def test_1360_offboard_is_part_of_the_callers_transaction_and_a_rollback_t
 @pytest.mark.postgres
 @pytest.mark.parametrize("kind", ["connection", "session"])
 @pytest.mark.parametrize("name", ["offboarding", "offboarding-failed", "offboarded", "deleting", "absent"])
-async def test_1360_offboard_refuses_what_request_offboard_refuses_with_tenancys_own_errors(pg_store, engine, kind, name):
+async def test_1360_offboard_refuses_with_tenancys_own_errors(pg_store, engine, kind, name):
     """An absent tenant is `NotFound`, any state but `creating`/`active` a `Conflict`; the row stays. (#1360 D1, D6a)"""
     from defender.tenancy import Conflict, NotFound, offboard
 
@@ -483,11 +472,11 @@ async def test_a_rotate_request_after_a_rotate_request_is_a_conflict(store):
 # --- unknown tenant, and requests after requests ----------------------------------------------------
 
 
-@pytest.mark.parametrize("ask", ["request_resume", "request_rotate", "request_offboard"])
+@pytest.mark.parametrize("ask", ["request_resume", "request_rotate", "offboard"])
 async def test_a_request_for_an_unknown_tenant_is_not_found_and_stores_nothing(store, ask):
     """Every request names its tenant; an absent one is NotFound (404), and the repository gains no row (RC-3)."""
     await store.seed(T1, ACTIVE)
-    call = store.repo.request_offboard(ABSENT, now=NOW) if ask == "request_offboard" else getattr(store.repo, ask)(ABSENT)
+    call = store.offboard(ABSENT) if ask == "offboard" else getattr(store.repo, ask)(ABSENT)
     await _refused(call, "NotFound")
     assert [t.id for t in await store.repo.tenants()] == [T1]
 
@@ -496,9 +485,9 @@ async def test_requests_chain_through_the_lifecycle(store):
     """create -> (seeded active) rotate -> offboard -> rotate/offboard refused: each request sees the previous one's row (RC-3)."""
     await store.seed(T1, ACTIVE)
     await store.repo.request_rotate(T1)
-    assert _job(await store.repo.request_offboard(T1, now=NOW))[:2] == ("offboarding", "offboard")
+    assert _job(await store.offboard(T1))[:2] == ("offboarding", "offboard")
     await _refused(store.repo.request_rotate(T1), "Conflict")
-    await _refused(store.repo.request_offboard(T1, now=NOW), "Conflict")
+    await _refused(store.offboard(T1), "Conflict")
     await _refused(store.repo.request_resume(T1), "Conflict")
 
 
@@ -545,7 +534,6 @@ READS = {
     "tenants": lambda r: r.tenants(),
     "request_create": lambda r: r.request_create(now=NOW),
     "request_rotate": lambda r: r.request_rotate(T1),
-    "request_offboard": lambda r: r.request_offboard(T1, now=NOW),
     "forge_wiring": lambda r: r.forge_wiring(T1),
 }
 
@@ -676,8 +664,9 @@ async def _holding_tenant(dsn: str, tenant: str) -> AsyncIterator[None]:
             await conn.commit()
 
 
-def _ask(repo: Any, request: str, tenant: str) -> Any:
-    return repo.request_offboard(tenant, now=NOW) if request == "offboard" else getattr(repo, f"request_{request}")(tenant)
+def _ask(repo: Any, request: str, tenant: str, dsn: str) -> Any:
+    """`request` on `repo`; the offboard, tenancy's own `offboard` on a connection of its own (#1496)."""
+    return offboard_on_database(dsn, tenant) if request == "offboard" else getattr(repo, f"request_{request}")(tenant)
 
 
 RACES = {"rotate": ACTIVE, "resume": CREATING_FAILED, "offboard": ACTIVE}
@@ -695,7 +684,7 @@ async def test_two_identical_requests_racing_for_one_precondition_apply_exactly_
         async with _holding_tenant(pg_store.dsn, T1):
             tasks = []
             for count, repo in enumerate((pg_store.repo, other), start=1):
-                tasks.append(asyncio.ensure_future(_ask(repo, request_kind, T1)))
+                tasks.append(asyncio.ensure_future(_ask(repo, request_kind, T1, pg_store.dsn)))
                 await until_blocked(pg_store.dsn, count)
             assert not any(t.done() for t in tasks)
         results = await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), TIMEOUT)
@@ -719,7 +708,7 @@ async def test_a_rotate_cannot_overwrite_an_offboard_that_got_there_first(pg_sto
         async with _holding_tenant(pg_store.dsn, T1):
             tasks = {}
             for count, (kind, repo) in enumerate(zip(order, (pg_store.repo, other), strict=True), start=1):
-                tasks[kind] = asyncio.ensure_future(_ask(repo, kind, T1))
+                tasks[kind] = asyncio.ensure_future(_ask(repo, kind, T1, pg_store.dsn))
                 await until_blocked(pg_store.dsn, count)
         results = dict(zip(tasks, await asyncio.wait_for(
             asyncio.gather(*tasks.values(), return_exceptions=True), TIMEOUT), strict=True))
@@ -911,7 +900,7 @@ async def test_a_malformed_tenant_id_is_refused_by_every_read_and_request(pg_sto
     await store.seed(T1)
     assert (await store.repo.tenant(T1)).id == T1, "control: a real id is found"
     for call in (store.repo.tenant(bad), store.repo.request_resume(bad), store.repo.request_rotate(bad),
-                 store.repo.request_offboard(bad, now=NOW)):
+                 store.offboard(bad)):
         with pytest.raises(Exception):  # noqa: B017, PT011 — whatever the driver raises, so long as it is loud
             await call
     assert [t.id for t in await store.repo.tenants()] == [T1]
@@ -946,12 +935,18 @@ def _system_row(store: Store, tenant: str, system: str, version: int, *, enabled
              _declaration(system), generation, deleted, SEEDED_AT))
 
 
+def _plant_mark(dsn: str, tenant: str) -> None:
+    """Before #1470's migration the tenant create request also wrote the mark; the table is gone after it (a base-only shim)."""
+    if execute(dsn, "SELECT to_regclass('tenancy.records_mark')::text")[0][0] is not None:
+        execute(dsn, "INSERT INTO tenancy.records_mark (tenant_id) VALUES (%s)", (tenant,))
+
+
 async def _seed_records(store: Store, tenant: str, value: Any) -> None:
-    """Put `value` into the read side: the twin's seeder, or the mark and one row per record on PostgreSQL."""
+    """Put `value` into the read side: the twin's seeder, or one row per record on PostgreSQL."""
     if store.dsn is None:
         await store.twin.add_records(tenant, value)
         return
-    execute(store.dsn, "INSERT INTO tenancy.records_mark (tenant_id) VALUES (%s)", (tenant,))
+    _plant_mark(store.dsn, tenant)
     for system, rec in value.systems.items():
         _system_row(store, tenant, system, rec.version, enabled=rec.enabled, generation=rec.credential_generation)
     if value.case is not None:
@@ -960,12 +955,77 @@ async def _seed_records(store: Store, tenant: str, value: Any) -> None:
                 (tenant, value.case.version, value.case.system_id, value.case.comment_body, SEEDED_AT))
 
 
-async def test_1366_r10_a_tenant_nothing_was_imported_for_reads_as_not_imported_and_empty(store):
-    """A tenant with no records mark reads `imported=False`, no systems, no case, and so does an unknown tenant. (#1366 R10, R8)"""
+async def test_1470_o8_an_active_tenant_nothing_was_written_for_reads_empty(store):
+    """An active tenant with no records reads no systems and no case record: not a refusal. (#1470 O8; replaces #1366
+    R10's not-imported read)"""
     await store.seed(T1)
+    await _plant_mark_for(store, T1)
+    read = await store.repo.current_records(T1)
+    assert (dict(read.systems), read.case) == ({}, None)
+
+
+async def _plant_mark_for(store: Store, tenant: str) -> None:
+    if store.dsn is not None:
+        _plant_mark(store.dsn, tenant)
+
+
+@pytest.mark.parametrize("state", ["creating", "offboarding", "offboarded"])
+async def test_1470_o8_a_tenant_that_is_not_active_and_a_tenant_with_no_row_are_refused_not_read_as_empty(store, state):
+    """`current_records` of a tenant whose state is not `active`, or with no row, raises `TenantRefused` (not the transient
+    `RecordsUnreachable`), on both repositories; an active tenant beside it reads (control). (#1470 O8: known iff active)"""
+    from defender.records.formats import TenantRefused
+    from defender.tenancy import RecordsUnreachable
+
+    await store.seed(T1, ALL_ROWS[state])
+    await store.seed(T2)
+    await _plant_mark_for(store, T1)  # the mark existing must not make a tenant that is not active readable
+    await _seed_records(store, T2, _records_value(cmdb=(1, True, 1)))
+    assert set((await store.repo.current_records(T2)).systems) == {"cmdb"}, "control"
     for tenant in (T1, ABSENT):
-        read = await store.repo.current_records(tenant)
-        assert (read.imported, dict(read.systems), read.case) == (False, {}, None), tenant
+        with pytest.raises(TenantRefused) as refused:
+            await store.repo.current_records(tenant)
+        assert not isinstance(refused.value, RecordsUnreachable), tenant
+
+
+async def _move(store: Store, tenant: str, row: tuple) -> None:
+    """`tenant`'s row moved in place to `row` (state, pending action, step, actor, failure), its records kept: as a
+    lifecycle step leaves them until its last step."""
+    state, action, step, actor, failure = row
+    if store.dsn is None:
+        with store.twin._mutex:
+            held = store.twin._tenants[tenant]
+            held.state, held.pending_action, held.step, held.step_actor, held.failure = row
+        return
+    execute(store.dsn, "UPDATE tenancy.tenants SET state = %s, pending_action = %s, step = %s, step_actor = %s, "
+                       "failure = %s WHERE id = %s", (state, action, step, actor, failure, tenant))
+
+
+def _rows_not_active() -> list[str]:
+    """Every seeded row whose state is not `active`; together they hold every state of the state type but `active`."""
+    import typing
+
+    from defender.tenancy.models import TenantState
+
+    names = [n for n, row in ALL_ROWS.items() if row[0] != "active"]
+    assert {ALL_ROWS[n][0] for n in names} == set(typing.get_args(TenantState)) - {"active"}, "premise: every state"
+    return names
+
+
+@pytest.mark.parametrize("name", _rows_not_active())
+async def test_1470_o8_a_tenant_moved_out_of_active_is_refused_though_its_records_remain(store, name):
+    """T1's records are written while it is active and read (control); its row then moves to each row that is not
+    active, the records kept: `current_records` raises `TenantRefused` (not `RecordsUnreachable`), on both repositories.
+    (#1470 O8: known exactly while active, whatever records the tenant holds)"""
+    from defender.records.formats import TenantRefused
+    from defender.tenancy import RecordsUnreachable
+
+    await store.seed(T1)
+    await _seed_records(store, T1, _records_value(cmdb=(1, True, 1)))
+    assert set((await store.repo.current_records(T1)).systems) == {"cmdb"}, "control: while active the records read"
+    await _move(store, T1, ALL_ROWS[name])
+    with pytest.raises(TenantRefused) as refused:
+        await store.repo.current_records(T1)
+    assert not isinstance(refused.value, RecordsUnreachable), name
 
 
 async def test_1366_r10_the_read_is_the_asked_tenants_own_records_disabled_ones_included_and_the_case(store):
@@ -979,7 +1039,7 @@ async def test_1366_r10_the_read_is_the_asked_tenants_own_records_disabled_ones_
 
     assert await store.repo.current_records(T1) == mine
     read = await store.repo.current_records(T2)
-    assert (read.imported, set(read.systems)) == (True, {"ticket"})
+    assert set(read.systems) == {"ticket"}
 
 
 async def test_1366_r10_the_current_record_is_the_highest_version_and_a_delete_hides_the_system(pg_store):
@@ -987,7 +1047,7 @@ async def test_1366_r10_the_current_record_is_the_highest_version_and_a_delete_h
     v2 and a re-create v3 (current: v3); a case v1 then a case delete v2 (no case). (#1366 R10, O5)"""
     store, tenant = pg_store, T1
     await store.seed(tenant)
-    execute(store.dsn, "INSERT INTO tenancy.records_mark (tenant_id) VALUES (%s)", (tenant,))
+    _plant_mark(store.dsn, tenant)
     for system, version, kw in (("cmdb", 1, {}), ("cmdb", 2, {"enabled": False}), ("identity", 1, {}),
                                 ("identity", 2, {"deleted": True}), ("elastic", 1, {}), ("elastic", 2, {"deleted": True}),
                                 ("elastic", 3, {"generation": 2}), ("ticket", 1, {})):
@@ -998,34 +1058,36 @@ async def test_1366_r10_the_current_record_is_the_highest_version_and_a_delete_h
 
     read = await store.repo.current_records(tenant)
 
-    assert read.imported
     assert {s: (r.version, r.enabled, r.credential_generation) for s, r in read.systems.items()} == {
         "cmdb": (2, False, 1), "elastic": (3, True, 2), "ticket": (1, True, 1)}
     assert read.case is None
 
 
-async def test_1366_r11_a_tenant_made_by_the_create_request_is_imported_with_no_systems_and_a_seeded_one_is_not(store):
-    """`request_create` sets the mark in the same statement: the new tenant reads imported, empty; a tenant row that was not
-    requested (a pre-#1366 tenant) does not, until it is imported. (#1366 R11, R8)"""
-    made = (await store.repo.request_create(now=NOW)).id
-    await store.seed(T1)
+async def test_1470_o8_a_tenant_made_by_the_create_request_is_refused_until_it_is_active(store):
+    """`request_create` makes a `creating` tenant: its records are unknown (`TenantRefused`), as every tenant's are until
+    it is `active`. (#1470 O8: `creating` newly refused; replaces #1366 R11)"""
+    from defender.records.formats import TenantRefused
 
-    created = await store.repo.current_records(made)
-    assert (created.imported, dict(created.systems), created.case) == (True, {}, None)
-    assert not (await store.repo.current_records(T1)).imported
+    made = (await store.repo.request_create(now=NOW)).id
+    with pytest.raises(TenantRefused):
+        await store.repo.current_records(made)
 
 
 @pytest.mark.parametrize("fenced", [True, False])
-async def test_1366_o10_a_commit_that_drops_records_removes_that_tenants_versions_and_mark_only_inside_its_fence(store, fenced):
-    """`commit(drop_records=True)` of the offboarding step leaves the tenant with no mark, system or case record and the
-    other tenant's untouched; with the fence missed nothing is dropped (and the commit raises). (#1366 O10, R10)"""
+async def test_1366_o10_a_commit_that_drops_records_removes_that_tenants_versions_only_inside_its_fence(store, fenced):
+    """`commit(drop_records=True)` of the offboarding step leaves the tenant with no system or case record and the
+    other tenants' untouched (an OFFBOARDING one, whose rows are counted, and an active one, still read); with the fence
+    missed nothing is dropped (and the commit raises). The offboarded tenant's records are not read (`TenantRefused`, #1470 O8); the drop is asserted on the rows (Postgres)
+    and the twin's own records (memory). (#1366 O10, #1470 O8)"""
     from defender.tenancy import FenceMissed
 
     await store.seed(T1, OFFBOARDING)
     await store.seed(T2, OFFBOARDING)
+    await store.seed(T3)
     mine, theirs = _records_value(cmdb=(2, True, 1), ticket=(1, True, 1)), _records_value(cmdb=(1, True, 1))
     await _seed_records(store, T1, mine)
     await _seed_records(store, T2, theirs)
+    await _seed_records(store, T3, theirs)
 
     async with store.repo.lock(T1) as held:
         assert held is not None
@@ -1039,9 +1101,32 @@ async def test_1366_o10_a_commit_that_drops_records_removes_that_tenants_version
             with pytest.raises(FenceMissed):
                 await attempt
 
-    after = await store.repo.current_records(T1)
+    from defender.records.formats import TenantRefused
+
+    def rows(tenant: str) -> tuple[int, int]:
+        count = "SELECT count(*) FROM tenancy.{} WHERE tenant_id = %s"
+        return (execute(store.dsn, count.format("system_versions"), (tenant,))[0][0],
+                execute(store.dsn, count.format("case_versions"), (tenant,))[0][0])
+
     if fenced:
-        assert (after.imported, dict(after.systems), after.case) == (False, {}, None)
-    else:
-        assert after == mine
-    assert await store.repo.current_records(T2) == theirs
+        with pytest.raises(TenantRefused):  # offboarded: no longer a tenant whose records are known
+            await store.repo.current_records(T1)
+    assert await store.repo.current_records(T3) == theirs, "control: an active tenant's records stay, and are read"
+    if store.dsn is not None:  # a tenant that is not active is not read, so the rows are counted in the tables
+        assert rows(T1) == ((0, 0) if fenced else (len(mine.systems), 1)), "this tenant's records"
+        assert rows(T2) == (len(theirs.systems), 1), "control: the other tenant's rows stay"
+        assert rows(T3) == (len(theirs.systems), 1), "control: the active tenant's rows stay"
+        if not fenced:
+            from defender.tests.support.tenancy import _systems1366 as R
+
+            assert {(s, v.version, v.enabled, v.credential_generation) for s in mine.systems
+                    for v in R.system_versions(store.dsn, T1, s)} == {
+                (s, r.version, r.enabled, r.credential_generation) for s, r in mine.systems.items()}, "this tenant's records"
+            assert [(c.system_id, c.comment_body) for c in R.case_versions(store.dsn, T1)] == [
+                (mine.case.system_id, mine.case.comment_body)]
+    else:  # the twin's own records (the memory repository reads none for a tenant that is not active)
+        assert (T1 in store.twin._records) is (not fenced), "the commit's drop on the twin"
+        assert store.twin._records[T2] == theirs, "control: the other tenant's records stay"
+        assert store.twin._records[T3] == theirs
+        if not fenced:
+            assert store.twin._records[T1] == mine, "nothing of this tenant's is dropped"

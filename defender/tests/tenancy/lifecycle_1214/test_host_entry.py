@@ -23,7 +23,7 @@ from defender.tests.support.tenancy._active1214 import (
     insert_active_tenant,
 )
 from defender.tests.support.tenancy import _host1214 as H
-from defender.tests.support.tenancy._mapping1345 import FIXTURE_ALERT_MAPPING, seed_twin
+from defender.tests.support.tenancy._mapping1345 import FIXTURE_ALERT_MAPPING, seed_postgres
 from defender.tests.tenancy.tenant_1108_p4.conftest import p4_tenant  # noqa: F401 — fixture
 from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — fixture
 
@@ -296,7 +296,7 @@ def test_run_start_refuses_a_tenant_being_offboarded_through_the_api(tmp_path, d
         from defender.records.formats import ALERT_MAPPING_MISSING
         unmapped = _run_start(tenant, tmp_path, world.directory())
         assert ALERT_MAPPING_MISSING in " ".join(unmapped.split()), unmapped
-        seed_twin(world.tenants, tenant, FIXTURE_ALERT_MAPPING)
+        seed_postgres(world.dsn, tenant, FIXTURE_ALERT_MAPPING)
         assert _admits(_run_start(tenant, tmp_path, world.directory()))
         assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
         refused = _run_start(tenant, tmp_path, world.directory())
@@ -689,10 +689,7 @@ def _units(rel: str, tree: ast.Module) -> list[tuple[str, bool, list[ast.AST]]]:
 #: The A3 entry units: where a starter-covered process takes the folder raw. Their private helpers are not entries.
 A3_ENTRIES = frozenset({("learning/author/version_control/publish.py", "publish_for_run"),
                         ("learning/author/version_control/publish.py", "publish_child_main"),
-                        ("investigation/publish_launch.py", "launch_publish"),
-                        # The lifecycle job's cutover import needs the forge reads of a tenant it accepts by the folder
-                        # rules inside the lifecycle process (#1278): its one opener, like the publish entries above.
-                        ("learning/author/version_control/publish.py", "delivery_for_cutover")})
+                        ("investigation/publish_launch.py", "launch_publish")})
 
 
 def _is_barrier(rel: str, name: str) -> bool:

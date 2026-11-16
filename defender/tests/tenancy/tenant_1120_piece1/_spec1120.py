@@ -402,7 +402,7 @@ def tenant_py(module: Any, *args: str, root: Path | str | None, seed: list[str] 
 _COPY_DRIVER = """
 import asyncio, datetime, inspect, json, sys
 from defender.tenancy import InMemoryTenantRepository, TenantDirectory
-from defender.tenancy.models import AlertMappingRow, CaseRecord, SystemRecord, TenantRecords
+from defender.tenancy.models import AlertMappingRow, CaseRecord, ForgeWiring, SystemRecord, TenantRecord, TenantRecords
 from defender.records._alert_input import AlertMapping
 from defender.cli import tenant
 seeded, argv = sys.argv[1].split(","), sys.argv[2:]
@@ -410,17 +410,17 @@ mapping = AlertMapping(paths={k: v for k, v in json.loads(@@MAPPING@@).items() i
 records = json.loads(@@RECORDS@@)
 twin = InMemoryTenantRepository()
 for name in filter(None, seeded):
-    added = twin.add_tenant(name, created_at=datetime.datetime(2026, 10, 26, 9, tzinfo=datetime.timezone.utc),
-                            state="active", repo="tenants/" + name, origin="http://forge.test/tenants/" + name + ".git")
-    if inspect.isawaitable(added):
-        asyncio.run(added)
+    # The copy has no tests tree, so no seeder (#1496): the twin's rows are planted as the seeder plants them.
     with twin._mutex:
+        twin._tenants[name] = TenantRecord(id=name, created_at=datetime.datetime(2026, 10, 26, 9, tzinfo=datetime.timezone.utc),
+                                           state="active")
+        twin._wiring[name] = ForgeWiring(tenant_id=name, repo="tenants/" + name,
+                                         origin="http://forge.test/tenants/" + name + ".git")
         twin._mappings[name] = AlertMappingRow.of(name, mapping)
     held = records.get(name)
     if held is not None:
         case = held["case"]
         added = twin.add_records(name, TenantRecords(
-            imported=True,
             systems={s: SystemRecord(system_id=s, version=r["version"], adapter_id=r["adapter"], enabled=r["enabled"],
                                      settings=r["settings"], access=r["access"], credential_generation=r["generation"])
                      for s, r in held["systems"].items()},

@@ -9,6 +9,8 @@ import datetime as dt
 from typing import Any
 
 from defender.tests.support.shared._postgres1339 import execute
+from defender.tests.support.tenancy._active1214 import offboard_on_database
+from defender.tests.support.tenancy._twin1496 import offboard_twin
 
 LEFT_AT = dt.datetime(2026, 10, 26, 12, 0, tzinfo=dt.UTC)
 #: The states a tenant reaches after `active`; the standing rule and P-L treat both the same.
@@ -23,18 +25,12 @@ async def leave_active(backend: str | None, tenants: Any, tenant: str, state: st
     """
     assert state in NOT_ACTIVE, state
     if backend is None:
-        await tenants.request_offboard(tenant, now=LEFT_AT)
+        await offboard_twin(tenants, tenant)
         if state == "offboarded":
             async with tenants.lock(tenant) as held:
                 await held.commit(step=None, actor=None, state="offboarded", pending_action=None, offboarded_at=LEFT_AT)
         return
-    from defender.tenancy.postgres import PostgresTenantRepository
-
-    tenancy = PostgresTenantRepository(backend)
-    try:
-        await tenancy.request_offboard(tenant, now=LEFT_AT)
-    finally:
-        await tenancy.close()
+    await offboard_on_database(backend, tenant)
     if state == "offboarded":
         execute(backend, """UPDATE tenancy.tenants SET state = 'offboarded', pending_action = NULL, step = NULL,
                             step_actor = NULL, offboarded_at = %s WHERE id = %s""", (LEFT_AT, str(tenant)))

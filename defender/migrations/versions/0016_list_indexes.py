@@ -23,6 +23,7 @@ LISTS = (("alerts", "fired_at"), ("investigations", "created_at"), ("learning_jo
 
 def upgrade() -> None:
     for table, time in LISTS:
+        # lint-stale-ref: ok — an index name, not the job store's moved paging helper
         op.create_index(f"{table}_newest_first", table, ["tenant_id", sa.text(f"{time} DESC"), sa.text("id DESC")],
                         schema=SCHEMA)
     for table, _ in LISTS:

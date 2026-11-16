@@ -18,6 +18,7 @@ import pytest
 
 from defender.tests.migrations.test_1214_migrations import _upgrade_to
 from defender.tests.support.shared._postgres1339 import execute
+from defender.tests.migrations._marked1470 import upgrade_marking_tenants
 
 ALERT_MAPPING = "0007_alert_mapping"
 CREATED = _dt.datetime(2026, 11, 1, 8, 0, tzinfo=_dt.UTC)
@@ -81,7 +82,7 @@ def _program(dsn: str, program: str, *, tenant: str | None = TENANT, created_by:
 def test_the_upgrade_keeps_existing_people_with_admin_memberships_and_gives_users_no_kind(empty_database):
     """From `0007_alert_mapping` with two people and their memberships: at head both are as they were, every membership `admin`,
     users have no `kind` or creator column, no credentials and no programs exist. (Data model, R1)"""
-    from defender.migrations import head, upgrade
+    from defender.migrations import head
 
     assert head() != ALERT_MAPPING
     _upgrade_to(empty_database, ALERT_MAPPING)
@@ -91,7 +92,7 @@ def test_the_upgrade_keeps_existing_people_with_admin_memberships_and_gives_user
     _membership(empty_database, ANN_ROW, ANN)
     _membership(empty_database, BOB_ROW, BOB)
 
-    upgrade(empty_database)
+    upgrade_marking_tenants(empty_database)  # #1470 O12: the tenant has its mark, so the drop does not stop
 
     assert execute(empty_database, "SELECT id, email, status FROM identity.users ORDER BY email") == [
         (ANN, "ann@x.org", "active"), (BOB, "bob@x.org", "active")]
@@ -259,14 +260,14 @@ def test_the_upgrade_refuses_while_a_person_holds_a_role_other_than_admin_and_ch
 def test_the_upgrade_of_people_only_keeps_them_and_reaches_head(empty_database):
     """Control for the refusal: from `0011_merge_eligibility` with one person and her admin membership, the upgrade reaches
     head and both rows are as they were (O-G)."""
-    from defender.migrations import head, upgrade
+    from defender.migrations import head
 
     assert head() != MERGE_ELIGIBILITY
     _upgrade_to(empty_database, MERGE_ELIGIBILITY)
     _tenant(empty_database)
     _user(empty_database, ANN, "ann@x.org", kind="person")
     _membership(empty_database, ANN_ROW, ANN, role="admin")
-    upgrade(empty_database)
+    upgrade_marking_tenants(empty_database)  # #1470 O12: the tenant has its mark, so the drop does not stop
     assert _version(empty_database) == [(head(),)]
     assert execute(empty_database, "SELECT id, email, status FROM identity.users") == [(ANN, "ann@x.org", "active")]
     assert execute(empty_database, "SELECT id, user_id, status, role FROM identity.memberships") == [(ANN_ROW, ANN, "active", "admin")]

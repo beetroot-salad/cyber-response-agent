@@ -1,6 +1,6 @@
 ---
 name: connect
-description: Connect one system of record (SIEM, EDR, identity, CMDB, asset DB, threat intel, ticketing, custom API) to one tenant of this defender deployment. Configures an adapter the product already carries or generates a new one. Agrees the check that proves the system works before anything is built, scaffolds the per-system knowledge the gather subagent needs, and hands the operator the records, credential steps and that check. One system per invocation. Also records a tacit-knowledge sanction — "we have signed off on this actor doing this on these hosts" — into the human-authored registry, via tacit.md.
+description: Connect one system of record (SIEM, EDR, identity, CMDB, asset DB, threat intel, ticketing, custom API) to one tenant of this defender deployment. Configures an adapter the product already carries or generates a new one. Agrees the check that proves the system works before anything is built, scaffolds the per-system knowledge the gather subagent needs, and hands the tenant admin the records, credential steps and that check. One system per invocation. Also records a tacit-knowledge sanction — "we have signed off on this actor doing this on these hosts" — into the human-authored registry, via tacit.md.
 ---
 
 # Connect a system of record
@@ -8,7 +8,7 @@ description: Connect one system of record (SIEM, EDR, identity, CMDB, asset DB, 
 You connect **one** system of record to one tenant: the first one on a fresh install, or another
 later. The end state is a system the tenant's runs can reach through the credential proxy, the
 per-system knowledge the gather subagent needs to route and read results (when the system has
-tools for it), an ordered handoff the operator applies, and a check, agreed before anything was
+tools for it), an ordered handoff the tenant admin applies, and a check, agreed before anything was
 built, that says whether it works.
 
 > **Recording a tacit-knowledge sanction? Go to `tacit.md` instead.**
@@ -22,7 +22,7 @@ built, that says whether it works.
 There are two paths, chosen by one fact: does the product already carry an adapter for this
 system?
 
-- **Configure** — the product carries it (`tenant.py catalog` lists it). Nothing is generated:
+- **Configure** — the product carries it (`GET /adapters` lists it). Nothing is generated:
   you write the tenant's records, and its per-system knowledge if the adapter has tools the
   investigator calls. See `configure.md`.
 - **Generate** — it does not. You write a small Python adapter module the runtime imports
@@ -37,10 +37,10 @@ an HTTP API, offer the paths above.
 ## Your lane
 
 You write the adapter (generate path only), the per-system skill and a couple of seed query
-templates (only for a system with investigator tools), and the handoff the operator applies. You
+templates (only for a system with investigator tools), and the handoff the tenant admin applies. You
 do **not** author lessons (the learning loop owns the tenant's `agent/lessons/`), pre-build the
 query catalog (the offline lead-author grows it from real runs), run investigations (that's
-`run.py`), write the tenant's records or credential (the operator's), or touch another system's
+`run.py`), write the tenant's records or credential (the tenant admin's), or touch another system's
 files, `hooks/`, or `learning/`. If the maintainer asks for something outside connecting one
 system, stop and point them at the right surface.
 
@@ -72,23 +72,18 @@ Sequential; if a step blocks, diagnose and fix before moving on.
 ### 1. Orient
 
 ```bash
-python3 defender/cli/tenant.py catalog
 ls $DEFENDER_DATA_ROOT/{tenant}/exports/$(cat $DEFENDER_DATA_ROOT/{tenant}/exports/current)/agent/skills/
 ```
 
-`catalog` lists every adapter the product carries, with the settings each reads and its tools
-(`tools: none` is an adapter the investigator never calls, such as a ticket system that only
-takes the run-end comment). If the system is listed, you are on the **configure** path; never
-generate a second adapter for it.
+Ask the tenant admin for two API reads (you hold no API sign-in yourself):
 
-Ask the operator for the tenant's current records:
+- `GET /adapters` lists every adapter the product carries: its `adapter_id`, the settings keys a
+  record of it stores, and a sample value for each. If the system is listed, you are on the
+  **configure** path; never generate a second adapter for it.
+- `GET /systems` lists the tenant's current systems, each with its `version`, `enabled`,
+  `settings`, `access` (the declaration's text) and `has_credentials`.
 
-```bash
-python3 defender/cli/tenant.py systems {tenant} --export <dir>
-```
-
-It writes each stored system as a `config.env` / `access.yaml` folder and says each one's version.
-You need it for the handoff (`--replaces`, step 7), to see whether the system is already
+You need the systems for the handoff (`replaces`, step 7), to see whether the system is already
 configured, and to copy a sibling's access declaration. If the system already has a record, this
 is a deliberate update: ask what is changing, and branch `connect/{system}-update` on the
 generate path so the diff stays clean.
@@ -104,7 +99,7 @@ answers instead of asking cold (`adapter.md` → "The shape to copy").
 
 Ask one question at a time, conversationally. You need enough to configure or build the system
 and no more. On the configure path the adapter already settles transport and output shape;
-spend the interview on the settings `catalog` lists and the access declaration (`configure.md`).
+spend the interview on the settings `GET /adapters` lists and the access declaration (`configure.md`).
 
 1. **What system are you connecting?** A well-known name gives you the API
    shape from training; verify it against the real docs during the build.
@@ -121,8 +116,8 @@ spend the interview on the settings `catalog` lists and the access declaration (
    read sources are auth-less. You never ask for a secret value, token, or
    auth-bearing cURL — if one is offered, refuse it: it never goes in a file you
    write or in this conversation. This is the credential boundary; it is
-   non-negotiable. A credential is stored by the operator in the secret
-   store (`tenant.py set-credentials`, write-only); you need only its
+   non-negotiable. A credential is stored by the tenant admin in the secret
+   store (`PUT /systems/{system}/credentials`, write-only); you need only its
    scheme and the field names the scheme reads (`adapter.md` →
    "Credentials").
 
@@ -144,7 +139,7 @@ shaped by what was built.
   unknown host, a time range with no data, or for a write, reading a ticket that does not carry
   the comment. The control's failure is the red that shows the check can tell working from
   broken.
-- **Which tool answers it.** On the configure path, name the adapter tool (`catalog` lists them)
+- **Which tool answers it.** On the configure path, name the adapter tool (the `VERBS` of its `defender/integrations/<adapter>_adapter.py`)
   and its inputs. On the generate path the tools don't exist yet: write the check as the
   question and its answer, then pick the tool once the code exists, and show that pick to the
   maintainer at the review checkpoint (`adapter.md`).
@@ -155,7 +150,7 @@ give a falsifiable answer, say the check is weak and why; do not invent one.
 
 ### 4. Build
 
-- **Configure** → `configure.md`: the records for the operator, nothing generated.
+- **Configure** → `configure.md`: the records for the tenant admin, nothing generated.
 - **Generate** → `adapter.md`: it writes `integrations/{system}_adapter.py` — a `VERBS` mapping
   of `VerbContext`-taking functions that raise `faults` — on the shared transport module, runs
   the Haiku alignment loop, and **pauses at a human review checkpoint** (generated code is read
@@ -163,10 +158,10 @@ give a falsifiable answer, say the check is weak and why; do not invent one.
   registration; there is no shim. It then writes the handoff's `config.env` and `access.yaml` as
   below.
 
-The handoff is a folder outside both repos that you give the operator, never a file in the
+The handoff is a folder outside both repos that you give the tenant admin, never a file in the
 tenant's repo or in this one:
 
-- `<handoff>/{system}/config.env` — exactly the keys the adapter reads (`catalog`'s settings, or
+- `<handoff>/{system}/config.env` — exactly the keys the adapter reads (`GET /adapters`' settings keys, or
   the new adapter's `REQUIRED_CONFIG_KEYS`, prefixed; any other key is refused by name). No
   secret.
 - `<handoff>/{system}/access.yaml` — the system's base, auth scheme and routes (`adapter.md` →
@@ -176,8 +171,8 @@ tenant's repo or in this one:
 
 ### 5. Scaffold the per-system knowledge — only for a system with investigator tools
 
-A system whose adapter offers the investigator no tool beyond `health-check` (`catalog` says
-`tools: none`, or only `health-check`) has nothing for gather to route to or query: skip this
+A system whose adapter offers the investigator no tool beyond `health-check` (its
+`VERBS` holds nothing, or only `health-check`) has nothing for gather to route to or query: skip this
 step.
 
 Otherwise, read `defender/docs/system-skill-shape.md` for the exact shape; if a sibling system
@@ -243,7 +238,7 @@ change the design exists to prevent.
 ### 6. Validate
 
 Run the scaffold validator and fix every FAIL. It judges the handoff exactly as the record store
-will when the operator writes it — each FAIL there is the sentence the operator would be refused
+will when the tenant admin writes it — each FAIL there is the sentence the tenant admin's write would be refused
 with, naming the file — and prints the comment route a case adapter sends.
 
 For a system with investigator tools (either path):
@@ -287,15 +282,23 @@ lives under the tenant repo's `settings/`, which `propose` does not touch: branc
 there, and run `python3 defender/cli/tenant.py check --folder <that repo>` to see the census
 over it.
 
-**The operator's steps**, in this order — give them as one list with the handoff folder. You run
-none of them: they write the tenant's records and its secret, which are the operator's.
+**The steps after you**, in this order — give them as one list with the handoff folder. You run
+none of them: the tenant admin writes the tenant's records and its secret through the API, and
+our operator deploys the product.
 
 1. Generate path only: merge and deploy the adapter. The store refuses a record naming an adapter
    the running product does not carry.
-2. `python3 defender/cli/tenant.py set-system {tenant} {system} <handoff>/{system} --replaces <its current version from the export, 0 if none>`
-3. `python3 defender/cli/tenant.py set-credentials {tenant} {system} <credential file> --for-version <the version stored> --token-file <operator token>`
-4. Case system only: `python3 defender/cli/tenant.py set-case {tenant} <handoff>/case-record.yaml --replaces <current, 0 if none>`,
-   then the alert mapping's `case_key` line **only if** the stored mapping lacks it or names another field
+2. The tenant admin enters the folder's settings and access through `PUT /systems/{system}`, with
+   `replaces` (the system's current `version` from `GET /systems`, 0 if none), `enabled`,
+   `settings` (each `KEY=value` line of `<handoff>/{system}/config.env`) and `access` (the text of
+   `<handoff>/{system}/access.yaml`). A refusal lists every fault; fix the folder, validate it
+   again and repeat.
+3. The tenant admin stores the credential: `PUT /systems/{system}/credentials`, with
+   `for_version` (the version the write in step 2 answered) and `credentials` (the scheme's field
+   names → values; the values never pass through you).
+4. Case system only: `PUT /case-record` with `replaces` (0 if none), `system_id` and
+   `comment_body` from `<handoff>/case-record.yaml`, then the alert mapping's `case_key` line
+   (`PUT /alert-mapping`) **only if** the stored mapping lacks it or names another field
    (`configure.md` → "The ticket key").
 5. A system with investigator tools: merge the tenant's PR(s) (skill and seeds, grant table) and
    publish them (`tenant.py update {tenant}`).
@@ -311,7 +314,7 @@ run page shows the ticket receipt. Leave `check.md` in the handoff so it is run 
 exists.
 
 **You do not merge or push.** Present a summary: files touched, the agreed check, the
-validator's result, the operator's ordered steps, open items, and what to expect next (the first
+validator's result, the ordered steps after you, open items, and what to expect next (the first
 runs will hit query-composition friction; the catalog fills in post-merge via the offline
 lead-author). Tell them: "Review the diff and merge when ready." Then stop. `/ship` can open the
 PR.
@@ -322,8 +325,8 @@ PR.
 
 - **Never handle credential values.** Tokens, passwords, API keys, pasted
   auth-bearing cURL — all forbidden. If offered one, stop and refuse it.
-  `config.env` and `access.yaml` hold no secret and no reference to one: the operator
-  stores the value in the secret store (`tenant.py set-credentials`), and the skill never
+  `config.env` and `access.yaml` hold no secret and no reference to one: the tenant admin
+  stores the value in the secret store (`PUT /systems/{system}/credentials`), and the skill never
   sees it.
 - **Never write a check against a real case.** A state-changing check targets only an object the
   maintainer names as disposable.

@@ -1,23 +1,31 @@
 """#1278 repair 2, family 2: a tenant off active never gets a new learning row, even when the offboarding lands while a verb is mid-transaction.
 
-One test over every verb that creates rows (`publish_findings`, `add_pitfall`, `enqueue_request`, `claim`, `claim_revert`,
-the import): with the tenant already off active the verb refuses and adds nothing; with the verb held open on a table lock
+One test over every verb that creates rows (`publish_findings`, `add_pitfall`, `enqueue_request`, `claim`, `claim_revert`): with the tenant already off active the verb refuses and adds nothing; with the verb held open on a table lock
 after its decision, the offboarding update is fired from another session under a `lock_timeout`, and the tenant is never
 off active with the verb's new row. (O6, Offboarding, D11a)
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import anyio
 import psycopg
 import pytest
 
-from defender.tests.learning.store_1278.test_import_1278 import world  # noqa: F401 — the p4 tenant with a learning folder
-from defender.tests.support.jobs._jobs1342 import move_tenant
-from defender.tests.support.learning.core import _legacy1278 as legacy
+from defender.tests.support.jobs._jobs1342 import move_tenant, register_tenant
 from defender.tests.support.learning.core._store1278 import AUTHOR_LANE, ONE, finding, learning_store, store_mod
 from defender.tests.support.shared._postgres1339 import execute
+from defender.tests.tenancy.tenant_1108_p4._support import published_tenant
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
+
+
+@pytest.fixture
+def world(tmp_path, data_root, migrated_database):
+    """The p4 tenant (real clone, origin and forge fake) registered active in a migrated database."""
+    with published_tenant(tmp_path / "forge", root=data_root) as t:
+        register_tenant(migrated_database, t.tenant_id)
+        yield SimpleNamespace(tid=t.tenant_id, dsn=migrated_database)
 
 
 def _pitfall(pid: str) -> dict:
@@ -33,10 +41,6 @@ async def _prep_one_finding(w, store):
     await store.publish_findings(w.tid, "run-0", [finding("due")], kind="finding")
 
 
-async def _prep_legacy_queue(w, store):
-    legacy.queue(w.root, "finding", [finding("queued")])
-
-
 #: verb -> (what to set up while the tenant is active, the table whose lock holds the verb open, the call).
 VERBS = {
     "publish_findings": (_prep_nothing, "work_items",
@@ -45,8 +49,6 @@ VERBS = {
     "enqueue_request": (_prep_nothing, "work_items", lambda w, s: s.enqueue_request(w.tid, "run-1", "case-1", {"case": "c"})),
     "claim": (_prep_one_finding, "work_items", lambda w, s: s.claim(w.tid, AUTHOR_LANE, owner="host-a", thresholds=ONE)),
     "claim_revert": (_prep_nothing, "batches", lambda w, s: s.claim_revert(w.tid, owner="cli")),
-    "import": (_prep_legacy_queue, "work_items",
-               lambda w, s: store_mod().import_learning_state(s, w.tid, w.root, delivery=w.t.open_delivery())),
 }
 
 ARMS = ["already-offboarding", "already-offboarded", "offboarding-lands-mid-transaction"]
@@ -89,7 +91,7 @@ def _fire_offboarding(dsn: str, tenant: str) -> bool:
 
 @pytest.mark.parametrize("arm", ARMS)
 @pytest.mark.parametrize("verb", sorted(VERBS))
-async def test_o6_a_tenant_off_active_never_gets_a_new_row_not_even_when_the_offboarding_lands_mid_verb(world, verb, arm):  # noqa: F811 — the imported fixture
+async def test_o6_a_tenant_off_active_never_gets_a_new_row_not_even_when_the_offboarding_lands_mid_verb(world, verb, arm):  # noqa: F811
     """Already off active the verb refuses and adds nothing; with the update fired inside its transaction, off active and a new row never go together. (O6, D11a)"""
     S = store_mod()
     prep, locked, call = VERBS[verb]

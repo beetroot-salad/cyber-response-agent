@@ -19,8 +19,10 @@ from defender import _yaml
 from defender._io import TEXT_READ_ERRORS, read_plain
 from defender.knowledge import KnowledgePaths
 from defender.kit.verbs import VerbContext
+from defender.system_rules.registry import PLATFORM_SERVED_NAMES, TACIT_KNOWLEDGE
 
-SYSTEM = "tacit-knowledge"
+#: The platform-served system this module serves (its name and verb names are `system_rules.PLATFORM_SERVED_NAMES`).
+SYSTEM = TACIT_KNOWLEDGE
 
 #: The fields one entry carries, including the `id` a `:R authz` row cites as its `anchor_id`
 #: (without it a citation would name a `pattern` string, and editing that string would silently
@@ -340,8 +342,8 @@ def lookup(  # lint-dup: ok — a verb name addressed as `<system>.lookup`; `thr
     return answer
 
 
-#: The verbs the platform serves for this system, declared here and read by the roster.
+#: The verbs the platform serves for this system: each verb name `PLATFORM_SERVED_NAMES` gives it, served by this
+#: module's function of that name (`-` read as `_`). A name with no function fails this module's import.
 PLATFORM_VERBS: dict[str, Callable[..., Any]] = {
-    "health-check": health_check,
-    "lookup": lookup,
+    verb: globals()[verb.replace("-", "_")] for verb in sorted(PLATFORM_SERVED_NAMES[SYSTEM])
 }

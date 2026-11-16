@@ -26,6 +26,7 @@ from defender.box import (
 from defender.tests.support.sandbox._box1343 import AttachedStartSeam
 from defender.tests.support.shared.contracts import _daemon1195 as daemon_mod
 from defender.tests.support.tenancy._host1214 import TEST_TENANT
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
 DEFENDER = Path(__file__).resolve().parents[3]
 
@@ -130,7 +131,7 @@ def request(name: str = "defender-drain-t1195", *, writable: Path | None = None,
         mounts = (Mount(source=writable, target=writable, writable=True),)
         workdir = writable
     return BoxRequest(name=name, mounts=mounts, workdir=workdir, env={},
-                      spec=BoxSpec(runtime="runc", rootfs=rootfs), tenant_id=TEST_TENANT)
+                      spec=BoxSpec(runtime="runc", rootfs=rootfs), tenant_id=TEST_TENANT, data_root=current_data_root())
 
 
 def sandboxed(name: str, docker: Any = None) -> BoxExecutor:
@@ -414,6 +415,14 @@ class FakeDaemon(AttachedStartSeam):
 
     def docker_calls(self) -> list[list[str]]:
         return [c for c in self.calls() if c[0] == "docker"]
+
+    def check_folders(self) -> list[Path]:
+        """The host folder each box check container (#1469) this daemon ran was bound to, in order (never in `calls`: a check
+        is no box)."""
+        log = self.dir / daemon_mod.CHECK_RUNS
+        if not log.exists():
+            return []
+        return [Path(json.loads(line)["folder"]) for line in log.read_text(encoding="utf-8").splitlines() if line]
 
     def steps(self, *, of: str | None = None) -> list[str]:
         """The log as one sequence: each mark, and each docker call as `create`, `rm`,

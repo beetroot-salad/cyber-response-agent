@@ -64,7 +64,7 @@ def _is_uuid4(text: str) -> bool:
 
 
 def _admin_world(**kwargs: Any) -> tuple[World, Any]:
-    world = World(administrators=[OPS], **kwargs)
+    world = World(administrators=[OPS], **{"database": True, **kwargs})
     return world, world.sign_in_admin()
 
 
@@ -207,7 +207,7 @@ ROUTES = [
 def test_only_a_code_backed_administrator_session_reaches_the_tenant_routes(
         name: str, method: str, path: str, ok: int, audit: AuditLog) -> None:
     """A member, nobody, a flagged user without a code and a foreign origin are refused alike and change nothing; the administrator is not (O2, #1306 O5/K10)."""
-    world = lab()
+    world = lab(database=name == "offboard")  # the offboard is the real store's (#1496)
     ops = world.sign_in_admin()
     member = world.sign_in(ME)
     assert member.delete(f"/tenants/{LAB}/members/{user_id(member)}").status_code == 204
@@ -244,11 +244,6 @@ class FailingTenants(InMemoryTenantRepository):
             raise InjectedFailure("request_create failed")
         return await super().request_create(*args, **kwargs)
 
-    async def request_offboard(self, *args: Any, **kwargs: Any) -> Any:
-        if "request_offboard" in self.failing:
-            raise InjectedFailure("request_offboard failed")
-        return await super().request_offboard(*args, **kwargs)
-
     async def request_rotate(self, *args: Any, **kwargs: Any) -> Any:
         if "request_rotate" in self.failing:
             raise InjectedFailure("request_rotate failed")
@@ -257,7 +252,6 @@ class FailingTenants(InMemoryTenantRepository):
 
 @pytest.mark.parametrize(("write", "path", "action"), [
     ("request_create", "/admin/tenants", CREATE),
-    ("request_offboard", "/admin/tenants/{T}/offboard", OFFBOARD),
     ("request_rotate", "/admin/tenants/{T}/rotate-forge-credential", ROTATE),
 ])
 def test_a_request_whose_write_fails_logs_nothing_and_the_retry_logs_one(
@@ -277,6 +271,39 @@ def test_a_request_whose_write_fails_logs_nothing_and_the_retry_logs_one(
     tenants.failing.clear()  # control: the same request, written, is logged
     assert failing_browser.post(path.replace("{T}", LAB)).status_code == 202
     assert [e[0] for e in _events(audit, mark)] == [action]
+
+
+#: A job write the database refuses (#1496): the offboard's ending of the jobs fails after the tenant row moved, in the
+#: same transaction.
+_REFUSE_JOB_WRITES = (
+    "CREATE FUNCTION jobs.refuse_1496() RETURNS trigger LANGUAGE plpgsql AS "
+    "$$ BEGIN RAISE EXCEPTION 'injected: the job write fails'; END $$",
+    "CREATE TRIGGER refuse_1496 BEFORE UPDATE ON jobs.investigations FOR EACH ROW EXECUTE FUNCTION jobs.refuse_1496()",
+)
+
+
+def test_an_offboard_whose_job_write_fails_after_the_tenant_moved_changes_nothing_and_logs_nothing(audit: AuditLog) -> None:
+    """The offboard moves the tenant, then ends its jobs, in one transaction (#1360 O3): a job write that fails after the
+    tenant row is written leaves the tenant and its jobs as they were and logs nothing; the same request then logs (K11,
+    O10). The failure is the database's, inside the real store (#1496), not a refusal before the store is reached."""
+    from defender.tests.support.shared._postgres1339 import execute
+
+    world, ops = _admin_world()
+    world.register(LAB)
+    seeded = _seed_jobs(world, LAB, 9)
+    failing_browser = world.client_with_cookie(ops.cookies[SESSION_COOKIE], raise_errors=False)
+    before, jobs_before = items(ops.get("/admin/tenants")), _stored(world, LAB, seeded)
+    assert world.dsn is not None
+    for statement in _REFUSE_JOB_WRITES:
+        execute(world.dsn, statement)
+    mark = audit.mark()
+    assert failing_browser.post(f"/admin/tenants/{LAB}/offboard").status_code >= 500
+    assert items(ops.get("/admin/tenants")) == before
+    assert _stored(world, LAB, seeded) == jobs_before
+    assert _events(audit, mark) == []
+    execute(world.dsn, "DROP TRIGGER refuse_1496 ON jobs.investigations")  # control: the same request, written, is logged
+    assert failing_browser.post(f"/admin/tenants/{LAB}/offboard").status_code == 202
+    assert [e[0] for e in _events(audit, mark)] == [OFFBOARD]
 
 
 # --- #1360: the offboard request ends the tenant's jobs through the offboarding port (D6, O3) ----------------
@@ -301,12 +328,12 @@ def _seed_jobs(world: World, tenant: str, n: int) -> dict[str, Any]:
     ended_at = at - _dt.timedelta(days=1)
     rows: dict[str, Any] = {}
     for i, (status, reason) in enumerate(INVESTIGATIONS):
-        rows[f"inv-{status}"] = world.store.add_investigation(tenant, Investigation(
+        rows[f"inv-{status}"] = world.plant_investigation(tenant, Investigation(
             investigation_id=_uid("b", n, i), alert_id=_uid("a", n, i), status=status, created_at=at, cost_usd=0.0,
             cost_is_lower_limit=False, request_key=f"k{i}", attempt=1, failure_reason=reason,
             finished_at=None if status in LIVE else ended_at))
     for i, (status, reason) in enumerate(LEARNING_JOBS):
-        rows[f"job-{status}"] = world.store.add_learning_job(tenant, LearningJob(
+        rows[f"job-{status}"] = world.plant_learning_job(tenant, LearningJob(
             learning_job_id=_uid("c", n, i), investigation_id=_uid("b", n, 2), alert_id=_uid("a", n, 2), status=status,
             trigger="explicit", created_at=at, reason=reason, finished_at=None if status in LIVE else ended_at))
     return rows
@@ -353,10 +380,13 @@ def test_1360_d6_a_refused_offboard_request_ends_no_job(tenant_state: str | None
     world.register(T2)
     if tenant_state is not None:
         world.register(T1, state=tenant_state)
-    refused, control = _seed_jobs(world, T1, 1), _seed_jobs(world, T2, 2)
+    control = _seed_jobs(world, T2, 2)
+    refused = None if tenant_state is None else _seed_jobs(world, T1, 1)  # an unknown tenant holds no jobs (#1496)
 
     assert ops.post(f"/admin/tenants/{T1}/offboard").status_code == code
-    assert _stored(world, T1, refused) == refused, "a refused request ended a job"
+    if refused is not None:
+        assert _stored(world, T1, refused) == refused, "a refused request ended a job of its tenant"
+    assert _stored(world, T2, control) == control, "a refused request ended another tenant's job"
     assert ops.post(f"/admin/tenants/{T2}/offboard").status_code == 202
     assert _stored(world, T2, control)["inv-queued"].status == "aborted", "control: an accepted request ends them"
 
@@ -419,74 +449,6 @@ def test_1360_d6_a_malformed_tenant_id_never_reaches_the_offboarding_port() -> N
     assert world.offboarding.calls == []
     assert ops.post(f"/admin/tenants/{T1}/offboard").status_code == 202
     assert [t for t, _ in world.offboarding.calls] == [T1]
-
-
-def test_1360_d6_the_dev_composition_ends_the_offboarded_demo_tenants_live_jobs_and_no_other_demo_tenants() -> None:
-    """Through `demo_deps` (the development composition), `create_app` and the admin route: offboarding one demo tenant
-    moves it and ends its live demo jobs; the other demo tenant, active, keeps its live job. (#1360 D6, O3)
-
-    `demo_deps` seeds members only (`Bootstrap(administrators=())`), so no existing machinery signs in an administrator:
-    the test seeds one flagged user with a one-time-code session through the identity repository the demo composed
-    (the service's `_repo`), exactly the rows a real administrator's sign-in leaves."""
-    import anyio
-    from fastapi.testclient import TestClient
-
-    from defender.api.app import create_app
-    from defender.api.demo import demo_deps, demo_id
-    from defender.api.models import Investigation, LearningJob
-    from defender.records.formats import AlertId, InvestigationId, LearningJobId
-    from defender.tests.support.shared._fixture_uuid import fixture_uuid
-
-    one, two = fixture_uuid("tenant:1360-demo-one"), fixture_uuid("tenant:1360-demo-two")
-    now = _dt.datetime(2026, 9, 28, 12, 0, tzinfo=_dt.UTC)
-    deps = anyio.run(demo_deps, (one, two), lambda: now)
-    store = deps.writes
-
-    async def seed_admin() -> None:
-        repo = deps.identity._repo  # type: ignore[attr-defined]
-        user = await repo.add_user("ops@demo.example", created_at=now, status="active", display_name="ops",
-                                   is_platform_admin=True)
-        await repo.add_session("demo-admin-session", user.id, now=now, expires_at=now + _dt.timedelta(days=7), used_otp=True)
-    anyio.run(seed_admin)
-
-    def live_pair(tenant: str, name: str) -> tuple[Any, Any]:
-        inv = store.add_investigation(tenant, Investigation(
-            investigation_id=demo_id(InvestigationId, tenant, f"inv-{name}"), alert_id=demo_id(AlertId, tenant, "alert-0001"),
-            status="queued", request_key=f"k-{name}", attempt=1, cost_usd=0.0, cost_is_lower_limit=False, created_at=now))
-        job = store.add_learning_job(tenant, LearningJob(
-            learning_job_id=demo_id(LearningJobId, tenant, f"lj-{name}"), investigation_id=inv.investigation_id,
-            alert_id=inv.alert_id, status="queued", trigger="explicit", created_at=now))
-        return inv, job
-
-    live_pair(one, "queued")
-    theirs = live_pair(two, "queued")
-    seeded_running = demo_id(InvestigationId, one, "inv-running")  # the demo's own live job of the first tenant
-    seeded_done = demo_id(InvestigationId, one, "inv-completed")
-
-    def stored(tenant: str) -> dict[str, Any]:
-        inv = anyio.run(store.get_investigation, tenant, demo_id(InvestigationId, tenant, "inv-queued"))
-        job = anyio.run(store.get_learning_job, tenant, demo_id(LearningJobId, tenant, "lj-queued"))
-        return {"inv": inv, "job": job}
-
-    client = TestClient(create_app(deps), base_url="https://testserver")
-    client.cookies.set("__Host-defender_session", "demo-admin-session")
-    headers = {"Origin": deps.frontend_origin}
-    assert client.get("/me", headers=headers).json()["administrator"] is True, "premise: the seeded session is an administrator's"
-    done_before = anyio.run(store.get_investigation, one, seeded_done)
-    assert anyio.run(store.get_investigation, one, seeded_running).status == "running", "premise: the demo seeds a live job"
-
-    response = client.post(f"/admin/tenants/{one}/offboard", headers=headers)
-    assert response.status_code == 202, response.text
-
-    assert client.get(f"/admin/tenants/{one}").json()["state"] == "offboarding"
-    assert client.get(f"/admin/tenants/{two}").json()["state"] == "active"
-    gone = anyio.run(store.get_investigation, one, seeded_running)
-    assert (gone.status, gone.failure_reason, gone.finished_at) == ("aborted", "tenant_offboarded", now)
-    ended = stored(one)
-    assert (ended["inv"].status, ended["inv"].failure_reason) == ("aborted", "tenant_offboarded")
-    assert (ended["job"].status, ended["job"].reason) == ("skipped", "tenant_offboarded")
-    assert anyio.run(store.get_investigation, one, seeded_done) == done_before, "a completed demo investigation was changed"
-    assert stored(two) == {"inv": theirs[0], "job": theirs[1]}, "the other demo tenant's live jobs were touched"
 
 
 # --- the lifecycle world: failures and running steps ------------------------------------------------
@@ -599,7 +561,7 @@ def test_requests_return_while_a_step_is_running_and_the_late_commit_does_not_un
 @pytest.mark.parametrize("route", ["members", "invitations", "alerts"])
 def test_a_tenant_that_is_offboarding_is_404_to_its_member_and_an_active_one_is_not(route: str) -> None:
     """`member_of` needs the tenant present and `active`: the member of an offboarding tenant gets 404 before any worker ran (r9 Identity seam)."""
-    world = World(administrators=[OPS], tenants={LAB: [ME], T2: [BOB]})
+    world = World(administrators=[OPS], tenants={LAB: [ME], T2: [BOB]}, database=True)
     member, other = world.sign_in(ME), world.sign_in(BOB)
     assert member.get(f"/tenants/{LAB}/{route}").status_code == 200  # control: active
     assert other.get(f"/tenants/{T2}/{route}").status_code == 200
@@ -622,7 +584,7 @@ def test_a_member_reaches_nothing_of_an_offboarded_tenant(jobs: Any) -> None:
 
 def test_me_lists_only_memberships_of_active_tenants() -> None:
     """Both memberships are listed while both tenants are active; an offboarding tenant drops out (r9 Identity seam)."""
-    world = World(administrators=[OPS], tenants={LAB: [ME], T2: [ME]})
+    world = World(administrators=[OPS], tenants={LAB: [ME], T2: [ME]}, database=True)
     member = world.sign_in(ME)
     assert tenants_of(member) == {LAB, T2}
     assert world.sign_in_admin().post(f"/admin/tenants/{LAB}/offboard").status_code == 202
@@ -632,7 +594,7 @@ def test_me_lists_only_memberships_of_active_tenants() -> None:
 @pytest.mark.parametrize("state", SEEDED_STATES)
 def test_an_invitation_to_a_tenant_that_is_not_active_cannot_be_accepted(state: str) -> None:
     """Explicit accept: 404 and no membership once the tenant is offboarding or offboarded; the active tenant's invitation accepts (r9 Identity seam, P-L)."""
-    world = World(administrators=[OPS], tenants={LAB: [ME]})
+    world = World(administrators=[OPS], tenants={LAB: [ME]}, database=True)
     member = world.sign_in(ME)
     world.register(T1)
     world.register(T2)
@@ -650,7 +612,7 @@ def test_an_invitation_to_a_tenant_that_is_not_active_cannot_be_accepted(state: 
 @pytest.mark.parametrize("state", SEEDED_STATES)
 def test_the_first_sign_in_joins_only_active_tenants(state: str) -> None:
     """Accept at sign-in skips an invitation to a tenant that is offboarding or offboarded and takes the active one (r9 Identity seam, P-L)."""
-    world = World(administrators=[OPS])
+    world = World(administrators=[OPS], database=True)
     world.register(T1)
     world.register(T2)
     world.seed_first_members(T1, [ME])
@@ -675,7 +637,7 @@ def test_an_administrator_cannot_invite_into_a_tenant_that_is_not_active(state: 
 
 def test_end_tenant_ends_every_membership_and_revokes_every_invitation_as_system(audit: AuditLog) -> None:
     """`end_tenant(T, now=)`: active members end (ended_by system), invitations revoke; member.remove / invitation.revoke by `system`; other tenants and past rows are untouched (r9 Identity seam)."""
-    world = World(administrators=[OPS], tenants={T1: [ANN], T2: [BOB]})
+    world = World(administrators=[OPS], tenants={T1: [ANN], T2: [BOB]}, database=True)
     ann, bob = world.sign_in(ANN), world.sign_in(BOB)
     nina = world.member(ann, T1, NINA)
     gone = world.member(ann, T1, NEW)

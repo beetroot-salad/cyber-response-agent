@@ -29,6 +29,12 @@ DISPLAY_NAME = "Elastic"
 EXAMPLE = False
 #: The keys of elastic's settings this adapter requires (prefix stripped).
 REQUIRED_CONFIG_KEYS = ("EVENTS_INDEX", "ALERTS_INDEX")
+#: An example value for each key a record of this adapter stores, read cold by the catalog and served to an
+#: admin as a starting point (#1470 D11); this adapter's own settings check accepts it.
+SAMPLE_SETTINGS = {
+    "ELASTIC_EVENTS_INDEX": "logs-*",
+    "ELASTIC_ALERTS_INDEX": ".internal.alerts-security.alerts-default-*",
+}
 #: The keys whose values go in a request path (a search's index), so each is one segment (T4).
 PATH_KEYS = REQUIRED_CONFIG_KEYS
 

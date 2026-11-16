@@ -146,7 +146,7 @@ def _knobs() -> dict[str, Any]:
     network bound must be shorter than lease + grace (A4 F2 step 0, fail closed)."""
     from defender.learning.author.version_control.repository import NETWORK_TIMEOUT
     from defender.learning.core.store_tick import store_knobs
-    from defender.learning.store._store import DEFAULT_GRACE_SECONDS, DEFAULT_LEASE_SECONDS
+    from defender.learning_store import DEFAULT_GRACE_SECONDS, DEFAULT_LEASE_SECONDS
 
     knobs = store_knobs()
     lease, grace = float(knobs.get("lease", DEFAULT_LEASE_SECONDS)), float(knobs.get("grace", DEFAULT_GRACE_SECONDS))
@@ -159,7 +159,7 @@ def _knobs() -> dict[str, Any]:
 
 def _halts() -> tuple[type[BaseException], ...]:
     """What ends the tick rather than one step: a lost lease or a cancel (`Stop`), a tenant off active."""
-    from defender.learning.store import Stop, TenantInactive
+    from defender.learning_store import Stop, TenantInactive
 
     return (Stop, TenantInactive)
 
@@ -167,9 +167,9 @@ def _halts() -> tuple[type[BaseException], ...]:
 def run(paths: LoopPaths, open_delivery: Callable[[], Any], records: Any, *, decide: Callable[..., dict],
         eligibility_max_age: dt.timedelta | None = None) -> int:
     """One feedback tick for the selected tenant, under its feedback tick lease, over the learning store at
-    `DEFENDER_DATABASE_DSN` (opened through `defender.learning.store.blocking`). Another live holder of the lease,
+    `DEFENDER_DATABASE_DSN` (opened through `defender.learning_store.blocking`). Another live holder of the lease,
     or a tenant off active, is a clean exit 0 that does nothing."""
-    from defender.learning import store as store_mod
+    from defender import learning_store as store_mod
     from defender.learning.core.store_tick import DSN_ENV, owner_name
 
     tenant = paths.tenant
@@ -197,7 +197,7 @@ def _under_lease(paths: LoopPaths, store: Any, held: Any, open_delivery: Callabl
     """The tick's steps under its lease, and the lease's end: released at once on any end but a lost lease (A2 D4's
     clean stop); a lost lease does nothing more."""
     from defender.learning.core.store_tick import Holding, TickStopped
-    from defender.learning.store import LeaseLost
+    from defender.learning_store import LeaseLost
 
     lost = False
     try:
@@ -224,7 +224,7 @@ def _under_lease(paths: LoopPaths, store: Any, held: Any, open_delivery: Callabl
 
 
 def _release(store: Any, held: Any) -> None:
-    from defender.learning.store import LeaseLost
+    from defender.learning_store import LeaseLost
 
     try:
         store.end_feedback_tick(held)

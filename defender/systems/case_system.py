@@ -8,7 +8,7 @@ system among the tenant's systems (#1366 O1: its enabled records the catalog car
 whole checkout), that system's settings judged by its adapter's own `check_settings` (through
 `system_status.judge_adapter`, the run start's own rules, so a missing or crashing check is the
 adapter's defect here as there), then the cover rule over its stored access declaration
-(`record_judgement.case_cover_fault`, C2, the store's own rule). Every failure is a
+(`system_rules.case_cover_fault`, C2, the store's own rule). Every failure is a
 `CaseSettingsFault` naming the record that is wrong (DC6: `the case record`, `system <s>
 settings`, `system <s> access`), and nothing else escapes: every asker may call it unguarded.
 """
@@ -25,8 +25,7 @@ from defender.kit.verbs import COMMENT_ACTION, HOST_ACTIONS, READBACK_ACTION, Ca
 from defender.systems.run_tenant import RunTenant
 from defender.systems.system_status import AdapterBroken, NotConfigured, ReasonScope, judge_adapter
 from defender.systems.verbs import RosterRead, fresh_adapter_module
-from defender.tenancy.case_ticket import (
-    CASE_RECORD_REL, CaseRecordSettings, CaseTicketError)
+from defender.tenancy.case_record import CASE_RECORD_REL, CaseRecordSettings, CaseTicketError
 
 #: The retired system folder a tenant may still hold; `tenant check` names the new file for it.
 LEGACY_SYSTEM = "case-history"  # lint-shippable: ok — the retired system's folder name, named only to tell the operator to migrate
@@ -165,10 +164,10 @@ def case_verdict(
 def _judge_cover(system: str, module: Any, record: Any) -> None:
     """The case system's stored access declaration must be usable and cover its adapter's
     comment route (#1366 C2, C5): THE cover rule the store's write and `tenant check` ask
-    (`record_judgement.case_cover_fault`). An adapter that declares no comment route offers no
+    (`system_rules.case_cover_fault`). An adapter that declares no comment route offers no
     comment action there, catalog adapter or not. A route the settings cannot build is the
     adapter's settings fault, named at the system's settings."""
-    from defender.systems.record_judgement import case_cover_fault
+    from defender.system_rules import case_cover_fault
 
     pointer = RECORDS.part(system, "access")
     found = record.access.get(system)

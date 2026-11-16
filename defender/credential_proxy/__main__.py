@@ -7,8 +7,8 @@ Operator configuration, all read at start:
 - `DEFENDER_CREDENTIAL_PROXY_CONFIG` (required): the path of a JSON file holding the mapping
   `create_app_from_config` takes: `openbao_token` (the proxy role's login) or
   `openbao_token_file` (a file holding it), `kv_mount`, `records_dsn` (the DSN of a login that is a
-  member of `defender_proxy_reader`: it reads the tenants' current system records and nothing
-  else; the proxy keeps no tenant list), `audit_path` (the append-only audit file), and optionally
+  member of `defender_proxy_reader`: it reads the tenants' current system records and the tenant
+  row's `id` and `state`, nothing else; the proxy keeps no tenant list), `audit_path` (the append-only audit file), and optionally
   `upstream_timeout_sec`. OpenBao is the deployment's fixed address and transit mount, not
   configuration; a config still naming `openbao_addr`, `transit_mount`, `tenant_keys`,
   `tenant_exports`, `data_root` or `max_response_bytes` refuses to start (#1163 A26, #1412). The token is read from files only, never from

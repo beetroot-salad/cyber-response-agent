@@ -9,7 +9,7 @@ from typing import Any
 from fastapi.routing import APIRoute
 
 from defender.api.app import create_app
-from defender.api.fakes import InMemoryOffboarding, InMemorySecrets, InMemoryStore, StubArtifactLinks, StubSystemChecker
+from defender.api.refusing import Refusing
 from defender.api.ports import ApiDeps
 from defender.tests.support.api._identity1306 import FRONTEND_ORIGIN, T1
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
@@ -48,12 +48,10 @@ ROUTE_FLOOR = 20
 
 def route_table_deps() -> ApiDeps:
     """Dependencies enough to build the app and read its route table: no identity service is needed to list routes."""
-    store = InMemoryStore(lambda: None)  # type: ignore[arg-type]
+    store = Refusing("route table only (#1496)")
     return ApiDeps(
-        alerts=store, investigations=store, learning_jobs=store, lessons=store, systems=store, writes=store,
-        secrets=InMemorySecrets(store), checker=StubSystemChecker(), artifact_links=StubArtifactLinks(),
-        offboarding=InMemoryOffboarding(None, store, lambda: None),  # type: ignore[arg-type]
-        alert_mapping=store, audit=store,  # FC-14 (Am-5)
+        alerts=store, investigations=store, learning_jobs=store, learning_work=store, lessons=store, systems=store, writes=store,
+        secrets=store, checker=store, artifact_links=store, offboarding=store, alert_mapping=store, audit=store,
         identity=None, frontend_origin=FRONTEND_ORIGIN, tenants=None)  # type: ignore[arg-type]
 
 

@@ -12,10 +12,20 @@ pytestmark = [
 
 from typing import Any  # noqa: E402
 
-from fastapi import FastAPI  # noqa: E402
-
-from defender.api.app import Authed, create_app, unauthenticated_routes, undeclared_routes  # noqa: E402  (forced choice FC-A1: see the contract map)
+from defender.api.app import (  # noqa: E402  (forced choice FC-A1: see the contract map)
+    Authed,
+    create_app,
+    unauthenticated_routes,
+    undeclared_routes,
+)
 from defender.identity import DataRuleViolation  # noqa: E402
+from defender.tests.support.api._config1470 import (  # noqa: E402
+    CONFIG_PERMISSION,
+    CONFIG_ROUTES,
+    config_call,
+    primed,
+    stable,
+)
 from defender.tests.support.api._identity1306 import (  # noqa: E402
     ALERT,
     ANN,
@@ -43,7 +53,11 @@ from defender.tests.support.api._routes1307a import (  # noqa: E402
     route_id,
     route_table_deps,
 )
-from defender.tests.support.tenancy._mapping1345 import PLANTED_ALERT_MAPPING  # noqa: E402
+from defender.tests.support.api._server1083 import A, B
+from defender.tests.support.tenancy._mapping1345 import (
+    PLANTED_ALERT_MAPPING,  # noqa: E402
+)
+from fastapi import FastAPI  # noqa: E402
 
 #: The design's permission table (O3), written out: route -> permission, permission -> roles.
 TENANT = "/tenants/{}"
@@ -60,12 +74,20 @@ PERMISSION_OF = {
     ("GET", f"{TENANT}/learning-jobs"): "work.read",
     ("GET", f"{TENANT}/learning-jobs/{{}}"): "work.read",
     ("GET", f"{TENANT}/lessons"): "work.read",
+    ("GET", f"{TENANT}/adapters"): "config.read",
     ("GET", f"{TENANT}/systems"): "config.read",
+    ("GET", f"{TENANT}/systems/{{}}"): "config.read",
     ("PUT", f"{TENANT}/systems/{{}}"): "config.write",
+    ("DELETE", f"{TENANT}/systems/{{}}"): "config.write",
+    ("GET", f"{TENANT}/case-record"): "config.read",
+    ("PUT", f"{TENANT}/case-record"): "config.write",
+    ("DELETE", f"{TENANT}/case-record"): "config.write",
     ("PUT", f"{TENANT}/systems/{{}}/credentials"): "config.write",
     ("POST", f"{TENANT}/systems/{{}}/check"): "config.write",
     ("GET", f"{TENANT}/alert-mapping"): "config.read",
     ("PUT", f"{TENANT}/alert-mapping"): "config.write",
+    ("GET", f"{TENANT}/learning/items"): "work.read",  # #1485 O3
+    ("GET", f"{TENANT}/learning/parked-batches"): "work.read",  # #1485 O3
     ("GET", f"{TENANT}/members"): "people.manage",
     ("DELETE", f"{TENANT}/members/{{}}"): "people.manage",
     ("GET", f"{TENANT}/invitations"): "people.manage",
@@ -91,14 +113,16 @@ OUTSIDE = {
 BODIES: dict[tuple[str, str], dict[str, object]] = {
     ("POST", f"{TENANT}/investigations"): {"alert_id": ALERT.alert_id, "client_request_id": "rq"},
     ("POST", f"{TENANT}/learning-jobs"): {"investigation_id": PATH_ID, "client_request_id": "jq"},
-    ("PUT", f"{TENANT}/systems/{{}}"): {"kind": "ticketing", "display_name": "T", "enabled": True, "settings": {}},
-    ("PUT", f"{TENANT}/systems/{{}}/credentials"): {"kind": "static", "credentials": {"api_token": "v" * 40}},
+    ("PUT", f"{TENANT}/systems/{{}}"): {"replaces": 0, "enabled": True, "settings": {}, "access": ""},
+    ("PUT", f"{TENANT}/systems/{{}}/credentials"): {"for_version": 1, "credentials": {"api_key": "v" * 40}},
+    ("PUT", f"{TENANT}/case-record"): {"replaces": 0, "system_id": "ticket", "comment_body": "{disposition}"},
     ("PUT", f"{TENANT}/alert-mapping"): dict(PLANTED_ALERT_MAPPING),
     ("POST", f"{TENANT}/invitations"): {"email": NEW},
     ("POST", f"{TENANT}/programs"): {"display_name": "child"},
     ("POST", f"{TENANT}/programs/{{}}/credentials"): {"kind": "key", "name": "k"},
 }
-TENANT_ROUTES = sorted(PERMISSION_OF)
+#: The config routes run over the real record store below (#1470 O14), not over this module's in-memory world.
+TENANT_ROUTES = sorted(r for r in PERMISSION_OF if r not in CONFIG_ROUTES)
 
 
 def _served_template(route: tuple[str, str]) -> str:
@@ -146,6 +170,8 @@ def test_automation_reads_work_and_runs_investigations() -> None:
     assert program.get(f"/tenants/{T1}/investigations/{investigation_id}").status_code == 200
     assert program.post(f"/tenants/{T1}/investigations/{investigation_id}/cancel").status_code == 200
     assert program.get(f"/tenants/{T1}/learning-jobs").status_code == 200
+    for route in ("items", "parked-batches"):  # #1485 O3: `work.read` serves the learning work lists
+        assert program.get(f"/tenants/{T1}/learning/{route}").status_code == 200, route
 
 
 def test_a_program_cannot_start_a_learning_job_and_an_admin_can() -> None:
@@ -159,12 +185,39 @@ def test_a_program_cannot_start_a_learning_job_and_an_admin_can() -> None:
     assert s.ann.post(f"/tenants/{T1}/learning-jobs", json=body).status_code != 403
 
 
-def test_a_program_is_refused_the_system_check_as_config_write() -> None:
-    """The system check is `config.write` (O3): refused to automation with its settings read also refused."""
-    s = soar()
-    assert s.program().post(f"/tenants/{T1}/systems/tix/check").status_code == 403
-    assert s.program().get(f"/tenants/{T1}/systems").status_code == 403
-    assert s.ann.post(f"/tenants/{T1}/systems/tix/check").status_code not in (401, 403)
+@pytest.mark.anyio
+@pytest.mark.postgres
+async def test_a_program_is_refused_the_system_check_as_config_write(scripted) -> None:
+    """Over the real store: the check is `config.write`, refused to automation with the settings read also refused; the
+    admin is let in (the check itself still refuses, 501). (O14, O3)"""
+    ticket = f"/tenants/{A}/systems/ticket"
+    assert (await scripted.client.post(f"{ticket}/check", headers=scripted.program())).status_code == 403
+    assert (await scripted.client.get(f"/tenants/{A}/systems", headers=scripted.program())).status_code == 403
+    assert (await scripted.client.post(f"{ticket}/check", headers=scripted.ann())).status_code not in (401, 403)
+
+
+@pytest.mark.anyio
+@pytest.mark.postgres
+@pytest.mark.parametrize("route", sorted(CONFIG_ROUTES), ids=route_id)
+async def test_every_config_route_holds_its_permission_and_membership_comes_first_over_the_real_store(scripted, route) -> None:
+    """Automation holds neither config.read nor config.write (403 on each, the route's declared permission being the
+    table's); the tenant's admin passes; another tenant's admin and a program of this tenant naming another tenant
+    get 404 before permission. (O14, O3, D4)"""
+    assert PERMISSION_OF[(route[0], route[1])] == CONFIG_PERMISSION[route]
+    await primed(scripted)  # A holds a system, its case record and credentials: a skipped membership check would not be a 404
+    scripted.scripted.calls.clear()
+    held = scripted.stored_generations("ticket")
+    assert (await config_call(scripted, route, scripted.program(), **stable(route))).status_code == 403
+    outsider = await config_call(scripted, route, scripted.bob(), **stable(route))
+    assert outsider.status_code == 404
+    assert outsider.headers["Content-Type"] == "application/problem+json"
+    assert (await config_call(scripted, route, scripted.program(), tenant=B, **stable(route))).status_code == 404
+    assert scripted.versions("ticket", tenant=B) == []
+    assert [v.version for v in scripted.versions("ticket")] == [1]
+    assert scripted.stored_generations("ticket") == held
+    assert scripted.scripted.calls == [], "no secret-store call for a caller the tenant does not know"
+    # control: the same route for the tenant's own admin is served
+    assert (await config_call(scripted, route, scripted.ann(), **stable(route))).status_code not in (401, 403, 500)
 
 
 # --- O2: the order under /tenants/{T}/ (D1) ---------------------------------------------------------
@@ -270,9 +323,8 @@ def test_the_app_does_not_start_when_one_of_its_routers_holds_a_route_that_decla
     """P-H, D10: "a route that declares neither fails app start" is `create_app`'s own check. The seam is the one the app is built
     from: a route added to one of its routers before `create_app` runs (the route is taken off again afterwards, so the control and
     every other test build the real app). The failure names the route; the same call without the extra route builds."""
-    from fastapi import APIRouter
-
     from defender.api import app as app_module
+    from fastapi import APIRouter
 
     routers = [v for v in vars(app_module).values() if isinstance(v, APIRouter) and v.routes]  # every one `create_app` includes
     assert len(routers) >= 2  # control: the module's routers were found by what they are, not by a name

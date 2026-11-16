@@ -548,7 +548,7 @@ def test_a_denied_call_is_a_refused_row_and_a_listing_of_the_same_verb_is_not(tm
 
     granted = reg.authorize_call("elastic", "esql", {"query": "FROM logs\n| LIMIT 1"})
     assert granted.outcome == GRANTED
-    assert served_rows(ledger_path) == [], "a granted DECISION left a row (its row is the served one)"
+    assert served_rows(ledger_path) == [], "a granted DECISION left a row (its row is the served one)"  # lint-stale-ref: ok — a local name that only shares its spelling with a symbol the retired importer defined
 
     decision = reg.authorize_call("elastic", "get-host", asked)
     assert decision.outcome == DENIED

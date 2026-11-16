@@ -236,7 +236,7 @@ def _drain(tmp_path: Path, curator: _Curator, *, extra_rows: Iterable[dict] = ()
     """One REAL drain claim (`drain.run_batch`) over the findings the judge queued for the store (`_judged`,
     plus `extra_rows`), the curator at `invoke_agent=`, over a real batch of the fixture tenant (a curator commits
     only into a tenant batch's draft). Returns the draft lane, whose batch branch holds what the claim committed."""
-    from defender.learning.store import Outcome  # noqa: F401 — the fates the claim fills in `outcomes`
+    from defender.learning_store import Outcome  # noqa: F401 — the fates the claim fills in `outcomes`
 
     lane = L.draft_lane(tmp_path, files={})
     items = [("finding", str(row["finding_id"]), dict(row)) for row in (*_QUEUED.rows(FINDINGS), *extra_rows)]

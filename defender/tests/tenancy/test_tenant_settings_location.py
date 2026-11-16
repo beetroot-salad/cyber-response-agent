@@ -412,7 +412,7 @@ def test_1366_p4_the_policy_cli_builds_the_tenant_from_its_records_not_its_folde
     text = str(caught.value.code)
     assert text.startswith("defender-policy:"), text
     assert all(system in text for system in ("cmdb", "elastic")), text
-    assert R.AUTHOR[R.IMPORT] not in text, text
+    assert "tenant.py import" not in text, text
 
 
 @pytest.mark.parametrize("inside", ["code tree", "runs base"])

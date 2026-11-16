@@ -173,7 +173,7 @@ def knowledge_at(
     """`agent/` and `settings/` at `commit`, from git objects: every entry a regular blob
     at a plain path, `agent/.tenant-id` naming this tenant through `_tenant`'s parser."""
     entries = repository.entries(commit, ["agent", "settings"], recursive=True)
-    for mode, kind, _oid, path in entries:
+    for mode, kind, _oid, path in entries:  # lint-stale-ref: ok — a local name that only shares its spelling with a symbol the retired importer defined
         if kind != "blob" or mode not in _REGULAR_MODES:
             raise DeliveryRefused(
                 f"{commit} holds {path!r} as a {kind} of mode {mode}: only "
@@ -263,7 +263,7 @@ def agent_blobs(repository: LocalRepository, commit: str) -> dict[str, bytes]:
     objects: what the draft is copied from, derived against and reset to. An entry that is
     not a regular blob refuses (publish refused it already for an export commit)."""
     entries = repository.entries(commit, ["agent"], recursive=True)
-    for mode, kind, _oid, path in entries:
+    for mode, kind, _oid, path in entries:  # lint-stale-ref: ok — a local name that only shares its spelling with a symbol the retired importer defined
         if kind != "blob" or mode not in _REGULAR_MODES:
             raise DeliveryRefused(
                 f"{commit} holds {path!r} as a {kind} of mode {mode}: "
