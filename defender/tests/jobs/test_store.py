@@ -3854,3 +3854,57 @@ async def test_1083_a_learning_job_reads_by_id_for_its_tenant_only(dsn):
     assert found == listed
     assert (found.trigger, found.status, found.investigation_id) == ("auto", "queued", inv.investigation_id)
     assert (elsewhere, unknown) == (None, None)
+
+
+# --- #1471 r8 W1: the request's ticket write-back flag ---------------------------------------------------------
+# The store's keyword is a sketch pick: `create_investigation(..., update_ticket=)`, default False; the record field is
+# `update_ticket`, the design's column name (r8 Data model).
+
+async def test_1471_w1_a_start_stores_its_flag_and_a_read_shows_it(dsn):
+    """A flagged start reads back flagged, from the create's answer and from a later read; a start without the flag reads
+    unflagged. (W1)"""
+    async with job_store(dsn) as store:
+        flagged_alert = await an_alert(store, T1, ticket="T-1471-a")
+        plain_alert = await an_alert(store, T1, ticket="T-1471-b")
+        flagged, created = await store.create_investigation(
+            T1, flagged_alert.alert_id, "k1", actor="u-1", update_ticket=True)
+        plain, _ = await store.create_investigation(T1, plain_alert.alert_id, "k1", actor="u-1")
+        read_flagged = await store.get_investigation(T1, flagged.investigation_id)
+        read_plain = await store.get_investigation(T1, plain.investigation_id)
+
+    assert created is True
+    assert (flagged.update_ticket, read_flagged.update_ticket) == (True, True)
+    assert (plain.update_ticket, read_plain.update_ticket) == (False, False)
+
+
+async def test_1471_w1_a_replay_or_a_live_answer_returns_the_investigations_own_flag(dsn):
+    """A replay of the same request with the opposite flag, and a new request answered with the alert's live
+    investigation, both return that investigation with the flag it was started with; nothing is inserted. (W1)"""
+    async with job_store(dsn) as store:
+        alert = await an_alert(store, T1)
+        first, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1", update_ticket=True)
+        replayed, replay_created = await store.create_investigation(
+            T1, alert.alert_id, "k1", actor="u-1", update_ticket=False)
+        collapsed, live_created = await store.create_investigation(
+            T1, alert.alert_id, "k2", actor="u-2", update_ticket=False)
+
+    assert (replay_created, live_created) == (False, False)
+    assert replayed.investigation_id == collapsed.investigation_id == first.investigation_id
+    assert (replayed.update_ticket, collapsed.update_ticket) == (True, True)
+    assert _count(dsn, "investigations") == 1
+
+
+async def test_1471_w1_a_lapse_retry_carries_its_requests_flag(dsn):
+    """A flagged investigation whose lease lapsed is retried as a new row (attempt 2) that is flagged too. (W1, G33)"""
+    async with job_store(dsn) as store:
+        alert = await an_alert(store, T1)
+        first, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1", update_ticket=True)
+        claimed = await store.claim()
+        assert claimed is not None and claimed.record.investigation_id == first.investigation_id, "premise: claimed"
+        lapse_lease(dsn, first.investigation_id)
+        await store.take_over(held=frozenset())
+        retry = await store.claim()
+
+    assert retry is not None, "the take-over queued no retry"
+    assert (retry.record.investigation_id != first.investigation_id, retry.record.attempt) == (True, 2)
+    assert retry.record.update_ticket is True

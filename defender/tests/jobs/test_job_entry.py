@@ -151,12 +151,13 @@ def verified_lifecycle(ran: Ran, *, report_committed: bool = True):
 
 
 def run_job(s: Scene, run_id: str, *, lifecycle: Any = None, preflight: Any = None,
-            visualize: Any = None, ran: Ran | None = None, docker: Any = None) -> Ran:
+            visualize: Any = None, ran: Ran | None = None, docker: Any = None, signer: Any = None) -> Ran:
     """The helper and the in-container entry for `run_id` (A6: no `materialize` or `publish` seam on the entry; the helper's
     publish is answered `fresh` at the published commit and counted in `calls["publish"]`). `docker`: the helper's docker
-    (a prebuilt `ContainerStandIn`)."""
+    (a prebuilt `ContainerStandIn`). `signer`: the helper's signer (default `enter`'s marked signer)."""
     result = Ran() if ran is None else ran
-    got = enter(s.helper, run_id, lifecycle=lifecycle if lifecycle is not None else verified_lifecycle(result),
+    got = enter(s.helper, run_id, signer=signer,
+                lifecycle=lifecycle if lifecycle is not None else verified_lifecycle(result),
                 preflight=preflight if preflight is not None else (lambda *a, **k: 0),
                 visualize=visualize if visualize is not None else (lambda *a, **k: None), docker=docker)
     result.calls["publish"] += got.helper.publishes
@@ -1978,3 +1979,156 @@ def test_1345_o4_a_job_whose_tenant_has_no_mapping_is_refused_before_any_setup_w
     ran, calls = watched(run_id)
     assert scene.job_end(run_id) == SETTLED, ran.message
     assert (ran.calls["publish"], calls["copy"], calls["preflight"], calls["materialize"]) == (1, 1, 1, 1)
+
+
+
+# --- #1471 r8: a flagged job's ticket write-back (W2, W3, W4, W5) --------------------------------------------------
+# The worker's half (the flag and the link written into the launch record, the outcome word read back) is
+# `test_worker_endings.py`'s; here the launch record is planted as that worker writes it. Sketch picks the design leaves
+# open: the launch record's flag is a JSON boolean `update_ticket` and the link a string `ticket_link`; an unflagged
+# record carries the link too. The comment's layout beyond "holds these parts" is not pinned.
+
+ORIGIN_1471 = "https://app.defender.test"
+TICKET_1471 = "SEC-1471"
+#: `ALERT_BYTES`' fields plus the ticket the fixture mapping's `case_key` (`alert_id`) reads.
+KEYED_ALERT_1471 = (b'{"rule": {"id": "r-1342",  "description": "sketch"},\n'
+                    b' "alert_id": "SEC-1471", "alert_timestamp": "2026-10-29T00:00:00Z"}\n')
+DISPOSITION_1471 = "benign"
+CAUSE_1471 = "The sign-in came from the user's own managed laptop (cause-1471)."
+NARRATIVE_1471 = "NARRATIVE-1471: the model's long account, which no ticket receives."
+REPORT_1471 = (f"---\ndisposition: {DISPOSITION_1471}\nconfidence: high\ncause: \"{CAUSE_1471}\"\n---\n\n"
+               f"{NARRATIVE_1471}\n")
+
+
+@pytest.fixture
+def ticket_scene(tmp_path, monkeypatch, migrated_database):
+    """`scene` with the case system (`ticket`, the fixture's case record) reached through the proxy and granted as
+    published, so the job's read grant is `ticket` read."""
+    with _scene(tmp_path, monkeypatch, migrated_database, proxied=("ticket",)) as s:
+        yield s
+
+
+@pytest.fixture
+def ungranted_ticket_scene(tmp_path, monkeypatch, migrated_database):
+    """The case system reached through the proxy but granted to nobody: an empty read grant (W5)."""
+    from defender.tests.jobs.test_job_helper import _ticket_ungranted
+
+    with _scene(tmp_path, monkeypatch, migrated_database, proxied=("ticket",),
+                files={"settings/verb-grants.yaml": _ticket_ungranted()}) as s:
+        yield s
+
+
+def _case_store(tmp_path: Path, monkeypatch: Any) -> Any:
+    """The credential proxy's stand-in with the case store behind it (it answers the comment 201), and the helper's
+    proxy address pointed at it: the address reaches the job in its launch facts."""
+    from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107
+
+    return S1107.ProxyStandIn(tmp_path / "proxy-1471", [S1107.answer('{"id": 1}', "201")]).install(monkeypatch)
+
+
+def _plant_1471(scene: Scene, run_id: str, *, update_ticket: bool) -> str:
+    """The worker's two files for a job of the keyed alert, flagged or not; returns the link the worker built."""
+    link = f"{ORIGIN_1471}/t/{scene.t.tenant_id}/investigations/{run_id}"
+    scene.plant(run_id, alert=KEYED_ALERT_1471, launch=scene.launch_doc(
+        run_id, digest=hashlib.sha256(KEYED_ALERT_1471).hexdigest(), update_ticket=update_ticket, ticket_link=link))
+    return link
+
+
+def _reporting_lifecycle(ran: Ran):
+    """`verified_lifecycle` whose investigation also leaves a committed report with a verdict, a cause and a
+    narrative in the run folder."""
+    closes = _investigate(ran)
+
+    def investigate(*, run: Any = None, **kw: Any) -> dict[str, Any]:
+        (run.run_dir / "report.md").write_text(REPORT_1471, encoding="utf-8")
+        return closes(run=run, **kw)
+
+    return _lifecycle(None, investigate=investigate)
+
+
+def _grants_signed(signer: Any) -> list[list[tuple[str, str]]]:
+    from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
+
+    return [A.grant_of(A.claims_of_payload(p)) for p in signer.payloads]
+
+
+def test_1471_w2_w3_a_flagged_job_posts_one_comment_with_its_verdict_cause_and_screen_link(
+        ticket_scene, tmp_path, monkeypatch):
+    """A flagged job's ticket (the alert's `case_key`) receives one comment: the agent tag naming the investigation,
+    the disposition, the cause sentence and `<origin>/t/<tenant>/investigations/<investigation>`, and no narrative.
+    The receipt says `commented`. (W2, W3, P-6)"""
+    from defender.investigation.ticket_writer import receipt_path
+    from defender.tenancy import case_ticket
+    from defender.tests.tenancy.case_comment_1359 import _spec1359 as C1359
+
+    scene = ticket_scene
+    store = _case_store(tmp_path, monkeypatch)
+    run_id = str(uuid.uuid4())
+    link = _plant_1471(scene, run_id, update_ticket=True)
+    ran = Ran()
+
+    run_job(scene, run_id, ran=ran, lifecycle=_reporting_lifecycle(ran))
+
+    assert ran.raised is None, ran.message
+    assert scene.job_end(run_id) == SETTLED, ran.message  # premise: the run ended with its report committed
+    assert ran.calls["lifecycle"] == 1, ran
+    comments = C1359.comment_calls(store)
+    assert len(comments) == 1, f"expected one comment, got {store.requests()}"
+    assert comments[0]["path"].endswith(f"/tickets/{TICKET_1471}/comments"), comments[0]
+    body = str(comments[0]["body"])
+    assert case_ticket.agent_comment_tag(run_id) in body, body
+    assert DISPOSITION_1471 in body, body
+    assert CAUSE_1471 in body, body
+    assert link in body, body
+    assert "NARRATIVE-1471" not in body, f"the narrative was posted: {body}"
+    receipt = json.loads(receipt_path(scene.runs / run_id).read_text(encoding="utf-8"))
+    assert (receipt["key"], receipt["status"], receipt["ok"]) == (TICKET_1471, "commented", True), receipt
+
+
+def test_1471_w4_an_unflagged_job_posts_nothing_and_asks_for_no_write_pass(ticket_scene, tmp_path, monkeypatch):
+    """The same job unflagged: nothing reaches the case store, no receipt, and nothing `rw` is ever signed. (W4)
+    Holds at the base too (the job lane never comments today): the guard for when it does."""
+    from defender.investigation.ticket_writer import receipt_path
+    from defender.tests.support.jobs._job_helper import make_signer
+
+    scene = ticket_scene
+    store = _case_store(tmp_path, monkeypatch)
+    run_id = str(uuid.uuid4())
+    _plant_1471(scene, run_id, update_ticket=False)
+    ran, signer = Ran(), make_signer()
+
+    run_job(scene, run_id, ran=ran, lifecycle=_reporting_lifecycle(ran), signer=signer)
+
+    assert ran.raised is None, ran.message
+    assert scene.job_end(run_id) == SETTLED, ran.message
+    assert ran.calls["lifecycle"] == 1, ran
+    assert signer.payloads, "positive control: the job's read pass was signed"
+    assert store.requests() == [], store.requests()
+    assert not receipt_path(scene.runs / run_id).exists()
+    assert all(mode == "r" for grant in _grants_signed(signer) for _s, mode in grant), _grants_signed(signer)
+
+
+def test_1471_w5_a_write_that_cannot_be_signed_lets_the_flagged_run_go_on_with_the_no_token_receipt(
+        ungranted_ticket_scene, tmp_path, monkeypatch):
+    """A flagged job with an empty read grant whose signer fails when the record step asks for the write: the run
+    settles as usual, nothing is sent, and the receipt says the write-back token could not be minted. (W5)"""
+    from defender.investigation.ticket_writer import REASON_NO_TOKEN, receipt_path
+    from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
+
+    scene = ungranted_ticket_scene
+    store = _case_store(tmp_path, monkeypatch)
+    run_id = str(uuid.uuid4())
+    _plant_1471(scene, run_id, update_ticket=True)
+    ran, signer = Ran(), A.RaisingSigner(RuntimeError("sealed-1471"))
+
+    run_job(scene, run_id, ran=ran, lifecycle=_reporting_lifecycle(ran), signer=signer)
+
+    assert ran.raised is None, ran.message
+    assert scene.job_end(run_id) == SETTLED, ran.message  # the read grant is empty: no read sign refuses the job
+    assert ran.calls["lifecycle"] == 1, ran
+    assert store.requests() == [], store.requests()
+    path = receipt_path(scene.runs / run_id)
+    assert path.exists(), "the record step did not run for the flagged job"
+    receipt = json.loads(path.read_text(encoding="utf-8"))
+    assert (receipt["key"], receipt["status"], receipt["reason"]) == (TICKET_1471, "error", REASON_NO_TOKEN), receipt
+    assert signer.asked >= 1, "premise: the write was asked to be signed"

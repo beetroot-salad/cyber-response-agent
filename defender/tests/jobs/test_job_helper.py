@@ -1459,3 +1459,92 @@ def test_a3_an_investigations_helper_waits_for_a_busy_tenant_lock_and_then_runs(
 def test_premise_the_other_tenants_canary_is_planted(scene):
     """Fixture premise for O1's reachability cases: the canary exists on the host."""
     assert (scene.root / OTHER_TENANT / "canary").read_text(encoding="utf-8") == CANARY
+
+
+# --- #1471 r8 W5: the write pass, signed by the helper from the launch record's flag ------------------------------
+# Sketch picks: the request is `pass.write_back` with only `id` (the design's name), answered in `pass`'s shape
+# (`token`, `expires_at`, `proxy_url`); the launch record carries `update_ticket` as a JSON boolean beside a
+# `ticket_link` string.
+
+def _flagged_investigation(scene, *, update_ticket: bool) -> tuple[str, list[str]]:
+    """`_investigation`, with the launch record a #1471 worker writes: the flag and the screen link."""
+    import hashlib
+
+    from defender.tests.support.jobs._jobs1342 import ALERT_BYTES, TITLE
+
+    inv = str(uuid.uuid4())
+    doc = {"investigation_id": inv, "tenant_id": scene.tenant, "alert_id": str(uuid.uuid4()),
+           "digest": hashlib.sha256(ALERT_BYTES).hexdigest(), "label": TITLE, "box_token": uuid.uuid4().hex,
+           "update_ticket": update_ticket,
+           "ticket_link": f"https://app.defender.test/t/{scene.tenant}/investigations/{inv}"}
+    (scene.runs / f"{inv}.launch.json").write_text(json.dumps(doc), encoding="utf-8")
+    (scene.runs / f"{inv}.alert.json").write_bytes(ALERT_BYTES)
+    return inv, scene.argv("investigation", inv)
+
+
+def _ask_both(scene, inv: str, argv: list[str]) -> tuple[dict, Any]:
+    """Drive the helper over a job that asks `launch`, a read `pass` and a `pass.write_back`, keeping each answer or
+    its refusal code."""
+    signer = make_signer()
+    got: dict = {}
+
+    def answer_or_code(c, name: str) -> Any:
+        try:
+            return c.request(name, id=inv)
+        except Exception as refused:  # noqa: BLE001 — the typed refusal, kept by its code
+            return getattr(refused, "code", repr(refused))
+
+    def job(c) -> int:
+        got["launch"] = c.request("launch")
+        got["read"] = answer_or_code(c, "pass")
+        got["write"] = answer_or_code(c, "pass.write_back")
+        return 0
+
+    docker = ContainerStandIn(job)
+    ran = drive_helper(scene, argv, docker=docker, signer=signer)
+    assert ran.raised is None, ran.raised
+    assert docker.job_error is None, docker.job_error
+    return got, signer
+
+
+def test_1471_w5_an_unflagged_job_is_refused_a_write_pass(tmp_path, monkeypatch, migrated_database):
+    """The case system is proxied, the job is not flagged: `pass.write_back` is refused `not-flagged` and signs
+    nothing; the read pass is as before. (W5, P-5)"""
+    from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
+
+    with helper_scene(tmp_path, monkeypatch, migrated_database, proxied=("identity", "ticket"),
+                      files={"settings/verb-grants.yaml": _ticket_ungranted()}) as s:
+        inv, argv = _flagged_investigation(s, update_ticket=False)
+        got, signer = _ask_both(s, inv, argv)
+
+    assert got["write"] == "not-flagged", got["write"]
+    assert isinstance(got["read"], dict), f"control: the read pass is answered: {got['read']!r}"
+    assert [A.grant_of(A.claims_of_payload(p)) for p in signer.payloads] == [[("identity", "r")]] * len(signer.payloads)
+
+
+@pytest.mark.parametrize("proxied", [("ticket",), ("identity", "ticket")], ids=["empty-read-grant", "read-grant"])
+def test_1471_w5_a_flagged_job_gets_a_write_pass_on_the_case_system_only_and_its_read_pass_grants_no_write(
+        tmp_path, monkeypatch, migrated_database, proxied):
+    """Flagged, with the case system (`ticket`) proxied and granted to nobody: `pass.write_back` is `ticket` `rw` only,
+    for this investigation, with the normal lifetime, whether or not the job has a read grant; the read pass (or its
+    `no-grant` refusal) never carries a write. (W5)"""
+    from defender.credential_proxy import PASS_LIFETIME_SEC
+    from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
+
+    with helper_scene(tmp_path, monkeypatch, migrated_database, proxied=proxied,
+                      files={"settings/verb-grants.yaml": _ticket_ungranted()}) as s:
+        inv, argv = _flagged_investigation(s, update_ticket=True)
+        asked_at = time.time()
+        got, signer = _ask_both(s, inv, argv)
+
+    reads = [("identity", "r")] if "identity" in proxied else []
+    assert sorted(tuple(g) for g in got["launch"]["grant"]) == reads, got["launch"]["grant"]
+    if reads:
+        assert A.grant_of(claims_of(signer, got["read"]["token"])) == reads, got["read"]
+    else:
+        assert got["read"] == "no-grant", got["read"]
+    assert isinstance(got["write"], dict), f"the write pass was refused: {got['write']!r}"
+    claims = claims_of(signer, got["write"]["token"])
+    assert (claims["tenant"], claims["investigation"]) == (s.tenant, inv), claims
+    assert A.grant_of(claims) == [("ticket", "rw")], claims
+    assert claims["exp"] - asked_at <= PASS_LIFETIME_SEC + 30, claims["exp"] - asked_at

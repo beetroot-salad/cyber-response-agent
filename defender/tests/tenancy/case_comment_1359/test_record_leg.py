@@ -539,3 +539,22 @@ def test_1414_the_ticket_comment_holds_for_every_way_a_run_ends(
     assert ("ended without a verdict" in sent) == (status == C.ESCALATED), sent
     if marker is not None:
         assert marker in sent, sent
+
+
+def test_1471_w7_the_operator_command_refuses_update_ticket_as_an_unknown_argument(tmp_path, capsys):
+    """`run.py --update-ticket` is gone: argparse refuses it as an unrecognized argument (exit 2), so an operator run
+    can never comment or mint a write-back token. Control: the same command line without it parses. (#1471 r8 W7)"""
+    from defender import run as run_py
+
+    alert = tmp_path / "alert.json"
+    alert.write_text("{}", encoding="utf-8")
+    base = [str(alert), "--tenant", "00000000-0000-4000-8000-000000001471"]
+    assert run_py.parse_args(base).alert == alert, "control: the command line without the switch parses"
+    capsys.readouterr()
+
+    with pytest.raises(SystemExit) as refused:
+        run_py.parse_args([*base, "--update-ticket"])
+
+    assert refused.value.code == 2
+    err = capsys.readouterr().err
+    assert "unrecognized arguments: --update-ticket" in err, err

@@ -10,7 +10,9 @@ import pytest
 from defender.records import job_lane, run_end
 from defender.tests.support.jobs._jobs1342 import (
     NOW,
+    T1,
     WORKER_LOGGER,
+    an_alert,
     job_end,
     job_store,
     row,
@@ -201,3 +203,60 @@ async def test_o8_a_job_end_word_with_junk_anywhere_is_a_failed_run_with_no_repo
         stored = row(world["dsn"], inv)
         assert (stored["stage"], stored["disposition"], stored["failure_reason"]) == ("failed", None, "no_report"), stored
         _no_run_text(stored)
+
+
+# --- #1471 r8: the worker's half of a job's ticket write-back (W3, W6) ------------------------------------------
+# How a test hands the worker its frontend origin is a sketch pick: a `Worker(frontend_origin=)` knob, the value its
+# start reads from `DEFENDER_API_FRONTEND_ORIGIN` (W9). The store's flag keyword is `test_store.py`'s pick.
+
+ORIGIN_1471 = "https://app.defender.test"
+
+
+async def _queued_1471(store, *, update_ticket: bool) -> str:
+    alert = await an_alert(store, T1, ticket="T-1471")
+    inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1", update_ticket=update_ticket)
+    return inv.investigation_id
+
+
+@pytest.mark.parametrize("update_ticket", [True, False], ids=["flagged", "unflagged"])
+async def test_1471_w3_the_launch_record_carries_the_flag_and_the_screen_link_the_worker_built(world, update_ticket):
+    """The worker copies the row's flag into the launch record and builds the link once, from its own origin setting:
+    `<origin>/t/<tenant>/investigations/<investigation>`. (W3, P-5)"""
+    child = _child(world, exit=0, files=_committed())
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued_1471(store, update_ticket=update_ticket)
+        await _worker(world, store, child, frontend_origin=ORIGIN_1471).drain()
+
+    launch = json.loads((world["runs"] / f"{inv}.launch.json").read_text(encoding="utf-8"))
+    assert launch["update_ticket"] is update_ticket, launch
+    if update_ticket:
+        assert launch["ticket_link"] == f"{ORIGIN_1471}/t/{T1}/investigations/{inv}", launch
+
+
+def _receipt(status: str) -> str:
+    return json.dumps({"key": "SEC-1471", "status": status, "url": None, "ok": status in ("commented", "escalated"),
+                       "reason": None if status in ("commented", "escalated") else f"{MARKER} the store said no"})
+
+
+@pytest.mark.parametrize(("update_ticket", "receipt", "word"), [
+    (True, "commented", "commented"),
+    (True, "error", "refused"),  # sketch pick: the receipt's `error` is W6's `refused`
+    (True, None, "not_sent"),  # a silent ending writes no receipt
+    (False, None, None),
+], ids=["flagged-commented", "flagged-error", "flagged-no-receipt", "unflagged"])
+async def test_1471_w6_the_row_reads_the_receipts_word_after_the_container_exits(world, update_ticket, receipt, word):
+    """After the job, the worker reads the ticket receipt beside the run folder into `ticket_write`: the word only,
+    never the receipt's reason; null for an unflagged job. (W6)"""
+    from defender.records._layout import TICKET_WRITE_SUFFIX
+
+    files = _committed(**({} if receipt is None else {"{id}" + TICKET_WRITE_SUFFIX: _receipt(receipt)}))
+    child = _child(world, exit=0, files=files)
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued_1471(store, update_ticket=update_ticket)
+        await _worker(world, store, child, frontend_origin=ORIGIN_1471).drain()
+        record = await store.get_investigation(T1, inv)
+
+    assert child.seen() is not None, "the stand-in child never ran"
+    assert record.stage == "completed", record
+    assert record.ticket_write == word, record
+    _no_run_text(row(world["dsn"], inv))

@@ -207,6 +207,44 @@ async def test_o6_repeating_a_start_with_its_request_id_answers_the_same_investi
 
 
 @pytest.mark.postgres
+async def test_1471_w1_a_start_takes_update_ticket_and_the_read_shows_the_flag_that_applies(served):
+    """`update_ticket` (default false) is stored and read back; a replay with the opposite flag, and another request
+    answered with the live investigation, answer that investigation's own flag. (#1471 r8 W1)"""
+    flagged_alert, plain_alert = await _alerts(served.dsn, A, NOON, NOON - dt.timedelta(hours=1))
+    started = await served.client.post(f"/tenants/{A}/investigations", headers=served.ann(), json={
+        "alert_id": flagged_alert, "client_request_id": "req-1", "update_ticket": True})
+    assert started.status_code == 201, started.text
+    assert started.json()["update_ticket"] is True
+    inv = started.json()["investigation_id"]
+    read = await served.client.get(f"/tenants/{A}/investigations/{inv}", headers=served.ann(write=False))
+    assert read.json()["update_ticket"] is True
+
+    plain = await _start(served, plain_alert, "req-1")  # no flag given
+    assert (plain.status_code, plain.json()["update_ticket"]) == (201, False)
+
+    for key in ("req-1", "req-2"):  # the replay, then a new request the live investigation answers
+        again = await served.client.post(f"/tenants/{A}/investigations", headers=served.ann(), json={
+            "alert_id": flagged_alert, "client_request_id": key, "update_ticket": False})
+        assert (again.status_code, again.json()["investigation_id"], again.json()["update_ticket"]) == (200, inv, True)
+
+
+@pytest.mark.postgres
+async def test_1471_w6_an_unflagged_investigation_reads_a_null_ticket_write(served):
+    """The read serves `ticket_write`: null when the investigation is not flagged. A flagged one not yet ended reads
+    null too (sketch pick: the design lists no word for "not yet"). (#1471 r8 W6)"""
+    plain_alert, flagged_alert = await _alerts(served.dsn, A, NOON, NOON - dt.timedelta(hours=1))
+    plain = (await _start(served, plain_alert, "req-1")).json()
+    flagged = (await served.client.post(f"/tenants/{A}/investigations", headers=served.ann(), json={
+        "alert_id": flagged_alert, "client_request_id": "req-1", "update_ticket": True})).json()
+
+    for inv in (plain, flagged):
+        read = (await served.client.get(f"/tenants/{A}/investigations/{inv['investigation_id']}",
+                                        headers=served.ann(write=False))).json()
+        assert "ticket_write" in read, read
+        assert read["ticket_write"] is None, read
+
+
+@pytest.mark.postgres
 async def test_o6_cancel_and_delete_refuse_what_they_must_and_a_deleted_investigation_reads_absent(served):
     """Cancelling an ended investigation and deleting a live one conflict; a deleted one reads 404. (O6)"""
     [alert_id] = await _alerts(served.dsn, A, NOON)
