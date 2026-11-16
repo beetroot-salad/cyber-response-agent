@@ -55,6 +55,7 @@ LEAD = timedelta(minutes=15)  # the last scenario fires this long before T, so i
 MARGIN = timedelta(minutes=1)  # the default T without scenarios: far enough ahead to still be ahead at start
 POLL_S = 30.0
 RULES_DIR = HERE.parent / "detection-rules"
+DISK_CEILING = 0.90  # the live node's high watermark: past it the live cluster starts refusing shards
 _LOOKBACK = re.compile(r"now-(\d+)([smhd])")
 _UNITS = {"s": "seconds", "m": "minutes", "h": "hours", "d": "days"}
 IN_PROGRESS = ("IN_PROGRESS", "STARTED")
@@ -102,6 +103,26 @@ def _check_spacing(count: int, lookback: timedelta) -> None:
         raise CaptureRefused(f"{count} scenarios fire {gap} apart, closer than the longest rule "
                              f"lookback ({lookback}): two firings on one rule and host would merge into "
                              f"one alert; fire at most {most}")
+
+
+def _check_disk(es: Any, patterns: list[str]) -> None:
+    """The lab server's disk can take the verification restore: a whole copy of the patterns' primary
+    shards, on the disk the live cluster shares, stays under `DISK_CEILING`. Checked before anything fires,
+    so a capture never runs six hours of scenarios only to fail its last step."""
+    rows = es.es_request("GET", "/_cat/allocation?bytes=b&format=json&h=node,disk.avail,disk.total")
+    nodes = [r for r in rows if r.get("disk.total")]
+    if not nodes:
+        raise CaptureRefused("the live cluster reports no node's disk")
+    avail = min(int(r["disk.avail"]) for r in nodes)
+    total = int(nodes[0]["disk.total"])
+    stats = es.es_request("GET", "/" + ",".join(patterns) + "/_stats/store?expand_wildcards=all")
+    needed = int(stats["_all"]["primaries"]["store"]["size_in_bytes"])
+    after = (total - avail + needed) / total
+    if after > DISK_CEILING:
+        gb = 1024 ** 3
+        raise CaptureRefused(f"the verification restore needs {needed / gb:.1f} GiB and the lab disk has "
+                             f"{avail / gb:.1f} GiB free: it would end {after:.0%} full, over "
+                             f"{DISK_CEILING:.0%}; free space first")
 
 
 def _verify_repository(es: Any, repository: str) -> None:
@@ -160,6 +181,7 @@ def _under_lock(ops: Any, es: Any, clock: Any, token: str, *, T: datetime, scena
         raise CaptureRefused(f"snapshot {repository}:{name} already exists; capture never "
                              "overwrites or deletes a snapshot it did not create")
     _verify_repository(es, repository)
+    _check_disk(es, patterns)
     started.append("pickups")
     ops.hold_pickups()
     for scenario, at in zip(scenarios, _fire_times(T, len(scenarios)), strict=True):

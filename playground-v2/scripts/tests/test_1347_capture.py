@@ -297,7 +297,8 @@ class Rig:
                  state: str = "SUCCESS", repository_registered: bool = True, *, t=T, scenarios=None,
                  clock_start=None, clock_step: float = 1, occupied: str | None = None,
                  patterns: list[str] = PATTERNS, fail_copy_of: str | None = None,
-                 unpaused_during_copy: str | None = None):
+                 unpaused_during_copy: str | None = None, disk: tuple[int, int, int] = (84, 225, 15)):
+        self.disk = disk                  # (free, total, the patterns' primary store) in GiB, as live answers
         self.t, self.scenarios = t, SCENARIOS if scenarios is None else scenarios
         self.fail_at = fail_at
         self.fail_copy_of = fail_copy_of                  # this host's volume copies fail (exit 125)
@@ -330,6 +331,12 @@ class Rig:
                                                     "applied_at": "2026-10-20T01:00:00Z"})
 
         def route(method, path, body):
+            gib = 1024 ** 3
+            if method == "GET" and path == "/_cat/allocation":
+                return [{"node": "es01", "disk.avail": str(self.disk[0] * gib), "disk.total": str(self.disk[1] * gib)},
+                        {"node": "UNASSIGNED", "disk.avail": None, "disk.total": None}]   # live 9.3 lists one
+            if method == "GET" and path.endswith("/_stats/store"):
+                return {"_all": {"primaries": {"store": {"size_in_bytes": self.disk[2] * gib}}}}
             m = SNAP_URL.match(path)
             if m and occupied == "asked-name" and not self.preexisting:
                 self._seed(m["name"])
@@ -1099,3 +1106,34 @@ def test_a_rule_whose_lookback_cannot_be_read_refuses_the_capture(tmp_path):
     module = _module()
     with pytest.raises(module.CaptureRefused, match="odd.json"):
         module.longest_lookback(rules)
+
+
+# -- #1528: the verification restore fits on the lab disk ------------------------------------------
+
+@pytest.mark.parametrize("disk, accepted", [((84, 225, 15), True), ((20, 225, 15), False)],
+                         ids=["room-to-spare", "would-end-near-full"])
+def test_a_capture_whose_verification_restore_would_overfill_the_disk_is_refused_before_anything_fires(
+        tmp_path, disk, accepted):
+    """The verification restore copies the patterns' primary shards (about 15 GiB live) onto the disk
+    the live cluster shares. 20 GiB free would end 98% full, past the live node's high watermark (and
+    near the flood stage that makes its indices read-only); 84 GiB free ends about 69% full. The check
+    runs under the lock, after the fault check, and before the pickups are held or anything fires."""
+    rig = Rig(tmp_path, disk=disk)
+    if accepted:
+        rig.capture()
+        assert (rig.freeze_dir / "freeze.yaml").exists()
+        return
+    with pytest.raises(_FAILED, match="free space first") as caught:
+        rig.capture()
+    assert not isinstance(caught.value, _NOT_A_REFUSAL), repr(caught.value)
+    assert not rig.fired and "hold_pickups" not in rig.journal.ops()
+    assert rig.snapshots == {} and not rig.lock_held() and rig.watcher_running()
+
+
+def test_the_scratch_cluster_places_every_shard_whatever_the_shared_disk_holds(tmp_path):
+    """Past the 85% low watermark a node leaves restored shards unassigned and the count fails; the
+    scratch node is removed straight after, so its disk thresholds are off."""
+    rig = Rig(tmp_path)
+    rig.capture()
+    (run,) = [c["argv"] for c in rig.calls if c["step"] == "verify_restore"]
+    assert "cluster.routing.allocation.disk.threshold_enabled=false" in run
