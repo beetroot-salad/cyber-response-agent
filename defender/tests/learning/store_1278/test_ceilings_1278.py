@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import pytest
 
+from defender.tests.support.learning.core._release1537 import release_item_of
 from defender.tests.support.jobs._jobs1342 import register_tenant
 from defender.tests.support.learning.core._store1278 import (
     AUTHOR_LANE, ONE, finding, lapse_lease, learning_store, store_mod)
@@ -73,7 +74,7 @@ async def _attempts_in_review(store, dsn, ceiling):
         await store.in_review(held, 7 + n, {ITEM: _outcome("waiting")})
         fates.append((await _item(store)).status)
         if n + 1 < ceiling:
-            await store.abandon(TENANT, held.batch_id, by="person")  # the batch leaves review; the item is already waiting
+            await store.end_review(TENANT, held.batch_id, expect_phase="in_review", outcome="closed", published=[], held=[])  # the batch leaves review; the item is already waiting
     return fates
 
 
@@ -184,7 +185,7 @@ async def test_an_item_held_at_its_attempt_ceiling_is_claimed_by_no_one(dsn, cei
             await store.end_no_commits(await _claim(store), {})
         assert (await _item(store)).status == "held"
         assert await store.claim(TENANT, AUTHOR_LANE, owner="host-a", thresholds=ONE) is None
-        await store.release_held(TENANT, *ITEM)
+        await release_item_of(store, TENANT, *ITEM)
         assert await store.claim(TENANT, AUTHOR_LANE, owner="host-a", thresholds=ONE) is not None
 
 

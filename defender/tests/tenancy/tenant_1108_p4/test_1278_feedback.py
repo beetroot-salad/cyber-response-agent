@@ -346,19 +346,6 @@ def test_feedback_a_live_changes_requested_review_on_an_open_pr_gets_it_closed_a
     assert new.phase == "in_review"
 
 
-def test_reconcile_an_open_pr_whose_batch_ended_is_closed(world, caplog):
-    """A person abandons the in-review batch; the next tick closes its still-open PR and the items stay held. (Reconcile, O7)"""
-    w = world
-    w.seed("f1")
-    writer = FeedbackCurator(_files("f1"))
-    batch_id, _branch, number = opened(w, writer, caplog)
-    call(w.dsn, "abandon", w.t.tenant_id, batch_id, by="person")
-    tick(w, writer)
-
-    assert w.t.forge.patches == [(number, {"state": "closed"})]
-    assert _end(w, batch_id) == ("ended", "abandoned")
-    assert w.statuses() == {"f1": "held"}
-    assert len(w.t.forge.creates) == 1
 
 
 def test_feedback_close_then_crash_is_idempotent(world, caplog):
@@ -541,17 +528,6 @@ def test_replacement_a_stop_before_its_pr_keeps_the_items_due_with_the_generatio
     assert (fresh.generation, fresh.phase) == (1, "in_review")
 
 
-def test_replacement_a_persons_abandon_of_the_replacement_holds_its_items(world, caplog):
-    """A person abandons a claimed replacement: its items are held, not due. (O7)"""
-    w = world
-    old_id, _number = _due(w, caplog)
-    claim = claim_by_hand(w, "host-a")
-    call(w.dsn, "abandon", w.t.tenant_id, claim.batch_id, by="person")
-
-    assert w.statuses() == {"f1": "held"}
-    tick(w, FeedbackCurator(_files("f1")))
-    assert [b.id for b in _replacements(w, old_id)] == [claim.batch_id], "no further replacement"
-    _no_orphans(w)
 
 
 def test_replacement_the_generation_ceiling_holds_the_items(world, caplog):

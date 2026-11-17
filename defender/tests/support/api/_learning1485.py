@@ -176,9 +176,9 @@ def newest_first(rows: Iterable[Any], at: Callable[[Any], _dt.datetime], ident: 
 
 
 def wire_item(item: Any) -> dict[str, Any]:
-    """A stored `WorkItem` as the wire should carry it, `updated_at` aside (compared as an instant)."""
+    """A stored `WorkItem` as the wire should carry it, `updated_at` aside (compared as an instant). #1537 O4: `cause` too."""
     return {"item_id": str(item.id), "kind": item.kind, "key": item.key, "status": item.status, "reason": item.reason,
-            "source_run": item.source_run, "batch_id": None if item.batch_id is None else str(item.batch_id),
+            "cause": item.cause, "source_run": item.source_run, "batch_id": None if item.batch_id is None else str(item.batch_id),
             "pr_number": item.pr_number}
 
 

@@ -13,6 +13,7 @@ import uuid
 import anyio
 import pytest
 
+from defender.tests.support.learning.core._release1537 import release_item_of
 from defender.tests.support.jobs._jobs1342 import move_tenant, register_tenant
 from defender.tests.support.learning.core._store1278 import (
     AUTHOR_LANE,
@@ -365,31 +366,6 @@ async def test_d8_a_recovery_abandon_keeps_the_attempt_and_the_ceiling_holds_the
         assert await claim(store, BLUE) is None
 
 
-@pytest.mark.parametrize("phase", ["working", "in_review", "needs_person"])
-async def test_o7_a_person_abandons_any_not_ended_batch_and_its_items_are_held_then_released(dsn, phase):
-    """Whatever the phase, a person's abandon ends the batch abandoned and holds its items; a holder is fenced; release_held returns an item to waiting. (O7)"""
-    S = store_mod()
-    async with learning_store(dsn, **KNOBS) as store:
-        await publish(store, BLUE, "f1")
-        held = await claim(store, BLUE)
-        if phase == "in_review":
-            await store.in_review(held, pr_number=6, outcomes={})
-        if phase == "needs_person":
-            await store.needs_person(BLUE, held.batch_id, "a hand-made PR is on the prefix")
-
-        await store.abandon(BLUE, held.batch_id, by="person")
-
-        batch = await _batch(store, BLUE, held.batch_id)
-        assert (batch.phase, batch.outcome) == ("ended", "abandoned")
-        item = (await _work(store, BLUE))[FINDING, "f1"]
-        assert (item.status, item.batch_id) == ("held", held.batch_id)
-        if phase == "working":
-            with pytest.raises(S.LeaseLost):
-                await store.renew(held)
-
-        await store.release_held(BLUE, FINDING, "f1")
-        assert (await _work(store, BLUE))[FINDING, "f1"].status == "waiting"
-        assert await claim(store, BLUE) is not None, "control: the lane is free and the released item is claimable"
 
 
 # --- replacement claims: due items, generations, exits (D8, Feedback) -------------------------------------------
@@ -442,14 +418,6 @@ async def test_d8_a_replacement_abandoned_by_stop_or_crash_before_its_pr_leaves_
         assert again.batch_id != new.batch_id
 
 
-async def test_o7_a_person_abandoning_a_replacement_holds_its_items(dsn):
-    """A person's abandon of the replacement holds the items; it does not leave them due. (O7, Feedback)"""
-    async with learning_store(dsn) as store:
-        await _closed_with_feedback(store, BLUE, "f1")
-        new = await claim(store, BLUE)
-        await store.abandon(BLUE, new.batch_id, by="person")
-        assert (await _work(store, BLUE))[FINDING, "f1"].status == "held"
-        assert await claim(store, BLUE) is None
 
 
 async def test_d8_a_replacement_that_ends_with_no_commits_holds_its_items(dsn):
@@ -465,15 +433,6 @@ async def test_d8_a_replacement_that_ends_with_no_commits_holds_its_items(dsn):
         assert await claim(store, BLUE) is None, "held items are not claimed again"
 
 
-async def test_o7_a_persons_abandon_of_the_closed_batch_holds_the_items_a_replacement_is_due_for(dsn):
-    """Before any replacement is claimed, a person abandons the closed batch: its due items are held and nothing claims them. (G-C1, O7)"""
-    async with learning_store(dsn) as store:
-        old = await _closed_with_feedback(store, BLUE, "f1", "f2", hold=["f2"])
-        await store.abandon(BLUE, old.batch_id, by="person")
-
-        items = await _work(store, BLUE)
-        assert (items[FINDING, "f1"].status, items[FINDING, "f2"].status) == ("held", "held")
-        assert await claim(store, BLUE) is None
 
 
 async def test_o7_release_held_starts_the_item_afresh_attempts_and_deferrals_both(dsn):
@@ -489,11 +448,12 @@ async def test_o7_release_held_starts_the_item_afresh_attempts_and_deferrals_bot
         await store.abandon(BLUE, crashed.batch_id, by="recovery")
         again = await claim(store, BLUE)
         await store.in_review(again, pr_number=7, outcomes={})
-        await store.abandon(BLUE, again.batch_id, by="person")
+        await store.end_review(BLUE, again.batch_id, expect_phase="in_review", outcome="closed", published=[],
+                               held=[(FINDING, "f1")])
         item = (await _work(store, BLUE))[FINDING, "f1"]
         assert (item.status, item.deferrals, item.attempts > 0) == ("held", 2, True), "premise: held with both counters up"
 
-        await store.release_held(BLUE, FINDING, "f1")
+        await release_item_of(store, BLUE, FINDING, "f1")
 
         item = (await _work(store, BLUE))[FINDING, "f1"]
         assert (item.status, item.attempts, item.deferrals) == ("waiting", 0, 0)
@@ -647,16 +607,16 @@ async def test_d7_end_review_with_a_phase_that_is_no_longer_the_batchs_changes_n
     """A stale reconcile (the person abandoned the batch first) ends nothing and publishes nothing: the compare-and-set on phase. (D7, O7)"""
     async with learning_store(dsn, **KNOBS) as store:
         held = await _in_review(store, BLUE, "f1")
-        await store.abandon(BLUE, held.batch_id, by="person")
+        await store.end_review(BLUE, held.batch_id, expect_phase="in_review", outcome="closed", published=[], held=[(FINDING, "f1")])
         after_abandon = (await _batch(store, BLUE, held.batch_id), await _work(store, BLUE))
-        assert (after_abandon[0].phase, after_abandon[0].outcome) == ("ended", "abandoned"), "premise: the batch already ended"
+        assert (after_abandon[0].phase, after_abandon[0].outcome) == ("ended", "closed"), "premise: the batch already ended"
         published = [(FINDING, "f1")] if outcome == "merged" else []
 
         with contextlib.suppress(Exception):  # refusing is as good as ignoring
             await store.end_review(BLUE, held.batch_id, expect_phase="in_review", outcome=outcome, published=published, held=[])
 
         batch = await _batch(store, BLUE, held.batch_id)
-        assert (batch.phase, batch.outcome) == ("ended", "abandoned")
+        assert (batch.phase, batch.outcome) == ("ended", "closed")
         assert await _work(store, BLUE) == after_abandon[1], "a stale end_review moved an item"
 
 

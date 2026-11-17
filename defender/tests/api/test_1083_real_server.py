@@ -703,6 +703,9 @@ PERMISSION_OF = {
     ("PUT", f"{TENANT}/alert-mapping"): "config.write",
     ("GET", f"{TENANT}/learning/items"): "work.read",  # #1485 O3
     ("GET", f"{TENANT}/learning/parked-batches"): "work.read",  # #1485 O3
+    ("POST", f"{TENANT}/learning/items/{{}}/release"): "learning.manage",  # #1537 O7 (FC: the design names no permission)
+    ("POST", f"{TENANT}/learning/batches/{{}}/release"): "learning.manage",
+    ("POST", f"{TENANT}/learning/batches/{{}}/abandon"): "learning.manage",
     ("GET", f"{TENANT}/members"): "people.manage",
     ("DELETE", f"{TENANT}/members/{{}}"): "people.manage",
     ("GET", f"{TENANT}/invitations"): "people.manage",

@@ -267,9 +267,10 @@ def test_1083_the_moved_pinned_texts_and_the_mapping_read_port():
 # --- #1485: the learning work port and its wire models ---------------------------------------------------------------
 
 _ITEM = dict(item_id="e1000000-0000-4000-8000-000000000001", kind="finding", key="k", status="held", reason="r",
-             source_run=None, batch_id="d1000000-0000-4000-8000-000000000001", pr_number=7, updated_at=NOW)
+             cause="attempt_ceiling", source_run=None, batch_id="d1000000-0000-4000-8000-000000000001", pr_number=7, updated_at=NOW)
 _BATCH = dict(batch_id="d1000000-0000-4000-8000-000000000001", batch_kind="author", lane="author", blocks_lane=True,
-              branch="learning/b", pr_number=None, reason=None, created_at=NOW, items=[{"kind": "finding", "key": "k"}])
+              branch="learning/b", pr_number=None, reason=None, cause="forge_credential_refused", parked_at=NOW,
+              releasable=True, abandon_requested_at=None, last_checked=None, created_at=NOW, items=[{"kind": "finding", "key": "k"}])
 
 
 def test_1485_the_wire_item_kinds_are_the_stores_kinds():

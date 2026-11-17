@@ -90,6 +90,9 @@ PERMISSION_OF = {
     ("PUT", f"{TENANT}/alert-mapping"): "config.write",
     ("GET", f"{TENANT}/learning/items"): "work.read",  # #1485 O3
     ("GET", f"{TENANT}/learning/parked-batches"): "work.read",  # #1485 O3
+    ("POST", f"{TENANT}/learning/items/{{}}/release"): "learning.manage",  # #1537 O7 (FC: the design names no permission)
+    ("POST", f"{TENANT}/learning/batches/{{}}/release"): "learning.manage",
+    ("POST", f"{TENANT}/learning/batches/{{}}/abandon"): "learning.manage",
     ("GET", f"{TENANT}/members"): "people.manage",
     ("DELETE", f"{TENANT}/members/{{}}"): "people.manage",
     ("GET", f"{TENANT}/invitations"): "people.manage",
@@ -370,3 +373,17 @@ def test_a_program_cannot_be_given_a_second_membership() -> None:
         s.world.call(s.world.raw_repo.ensure_invitation, s.program_id, T2, invited_by=None,
                      now=s.world.clock())
     assert s.world.call(s.world.raw_repo.memberships_of_user, s.program_id) == before
+
+
+def test_1537_o7_one_permission_is_new_it_is_held_by_admin_alone_and_the_three_learning_actions_need_it() -> None:
+    """Admin's permissions are the seven of #1470 plus exactly one more, which `automation` lacks; the three #1537 routes
+    declare that one. (O7)"""
+    from defender.identity.roles import ROLE_PERMISSIONS
+
+    seven = {"work.read", "investigations.run", "learning.run", "investigations.delete", "config.read", "config.write",
+             "people.manage"}
+    [new] = ROLE_PERMISSIONS["admin"] - seven
+    assert seven <= ROLE_PERMISSIONS["admin"]
+    assert new not in ROLE_PERMISSIONS["automation"]
+    actions = {PERMISSION_OF[r] for r in PERMISSION_OF if r[0] == "POST" and "/learning/" in r[1]}
+    assert actions == {new}, "FC: the table's name is the new permission's"

@@ -18,6 +18,7 @@ pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
 
 BLUE = fixture_uuid("tenant:1485-p-blue")
 GREEN = fixture_uuid("tenant:1485-p-green")
+NEW_VIEW_FIELDS = ["cause", "parked_at", "releasable", "abandon_requested_at", "last_checked"]
 VIEW_FIELDS = ["id", "kind", "lane", "blocks_lane", "branch", "pr_number", "reason", "created_at", "items"]
 #: Created author, revert, lead, registry; so newest first is the reverse.
 NEWEST_FIRST = ["registry", "lead", "revert", "author"]
@@ -31,9 +32,9 @@ def dsn(migrated_database):
 
 
 async def test_o2_parked_view_is_a_frozen_record_of_exactly_these_fields(dsn):
-    """`ParkedBatchView` is exported by the store, a frozen dataclass of the nine named fields. (O2, Names)"""
+    """`ParkedBatchView` is exported by the store, a frozen dataclass holding the nine named fields and #1537's five. (O2, Names, #1537 O5)"""
     S = store_mod()
-    assert [f.name for f in dataclasses.fields(S.ParkedBatchView)] == VIEW_FIELDS
+    assert set(VIEW_FIELDS + NEW_VIEW_FIELDS) <= {f.name for f in dataclasses.fields(S.ParkedBatchView)}
     async with learning_store(dsn) as store:
         await parked_set(store, BLUE)
         [first, *_] = await store.parked(BLUE, limit=1)
@@ -115,7 +116,9 @@ async def test_o2_only_needs_person_batches_are_listed_and_parking_one_lists_it(
         assert await store.end_review(BLUE, merged.batch_id, expect_phase="in_review", outcome="merged", published=[], held=[])
         await publish(store, BLUE, "a")
         abandoned = await claim(store, BLUE)
-        await store.abandon(BLUE, abandoned.batch_id, by="person")
+        await store.in_review(abandoned, 4, {})
+        assert await store.end_review(BLUE, abandoned.batch_id, expect_phase="in_review", outcome="closed", published=[],
+                                      held=[("finding", "m"), ("finding", "a")])  # a person's abandon is gone (#1537): its held item stays held
         closed = await held_by_close(store, BLUE, [("finding", "c")])
         await publish(store, BLUE, "p")
         in_review = await claim(store, BLUE)

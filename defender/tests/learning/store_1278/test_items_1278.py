@@ -6,10 +6,10 @@ curator decides is `test_1278_curator_fates.py`.
 """
 from __future__ import annotations
 
-import contextlib
 
 import pytest
 
+from defender.tests.support.learning.core._release1537 import release_item, release_item_of
 from defender.tests.support.jobs._jobs1342 import register_tenant
 from defender.tests.support.learning.core._store1278 import (
     AUTHOR_LANE, LEAD_LANE, ONE, finding, lapse_lease, learning_store, store_mod, world_finding)
@@ -409,26 +409,8 @@ async def test_crashes_to_the_ceiling_hold_the_item_for_a_person(dsn):
         assert {i.status for i in (await store.work(BLUE))} == {"held"}
 
 
-async def test_a_person_abandon_does_not_forgive_an_attempt(dsn):
-    """Only a clean stop forgives: a person's abandon holds the items, attempt still counted. (D8, O7, design Review-1 R1-F1)"""
-    async with learning_store(dsn) as store:
-        await store.publish_findings(BLUE, "run-1", [finding("f1")], kind="finding")
-        claim = await claim_author(store)
-        await store.abandon(BLUE, claim.batch_id, by="person")
-        got = (await items(store))[("finding", "f1")]
-        assert (got.status, got.attempts) == ("held", 1), "a person's abandon always holds; stop and crash abandons (above) return items to waiting"
 
 
-async def test_o7_a_persons_abandon_of_a_batch_in_review_holds_its_items(dsn):
-    """A person abandons a batch that reached review: the batch ends abandoned and its items are held for a person. (O7, D8)"""
-    async with learning_store(dsn) as store:
-        await store.publish_findings(BLUE, "run-1", [finding("f1")], kind="finding")
-        claim = await claim_author(store)
-        await store.in_review(claim, 7, {})
-        await store.abandon(BLUE, claim.batch_id, by="person")
-        [batch] = await store.batches(BLUE)
-        assert (batch.phase, batch.outcome) == ("ended", "abandoned")
-        assert (await items(store))[("finding", "f1")].status == "held"
 
 
 # --- deferral and the item exits a holder applies -------------------------------------------------------------------------
@@ -510,7 +492,7 @@ async def test_o7_a_person_releases_a_held_item_and_the_next_claim_takes_it(dsn)
             await store.abandon(BLUE, claim.batch_id, by="recovery")
         assert (await items(store))[("finding", "f1")].status == "held", "premise: held at the ceiling"
 
-        await store.release_held(BLUE, "finding", "f1")
+        await release_item_of(store, BLUE, "finding", "f1")
 
         assert (await items(store))[("finding", "f1")].status == "waiting"
         claim = await claim_author(store)
@@ -520,14 +502,18 @@ async def test_o7_a_person_releases_a_held_item_and_the_next_claim_takes_it(dsn)
         assert (await items(store))[("finding", "f1")].status == "waiting"
 
 
-async def test_o7_releasing_an_item_that_is_not_held_changes_nothing(dsn):
-    """A released key that is waiting, in a batch, published or absent is refused or ignored and moves nothing. (O7)"""
+async def test_o7_releasing_an_item_that_is_not_held_is_a_refusal_and_changes_nothing(dsn):
+    """A released id that is in a batch is a Conflict, an id no one holds is NotFound, and nothing moves. (O7, #1537 PR3)"""
+    from defender.jobs.errors import Conflict, NotFound
+
     async with learning_store(dsn) as store:
         await store.publish_findings(BLUE, "run-1", [finding("f1"), finding("f2")], kind="finding")
         claim = await store.claim(BLUE, AUTHOR_LANE, owner="host-a", thresholds={**ONE, "finding": 2})
         assert keys(claim) == [("finding", "f1"), ("finding", "f2")]
         before = {k: (i.status, i.batch_id, i.attempts) for k, i in (await items(store)).items()}
-        for kind, key in (("finding", "f1"), ("finding", "nope")):
-            with contextlib.suppress(Exception):  # refusing is as good as ignoring
-                await store.release_held(BLUE, kind, key)
+        [f1] = [i for i in await store.work(BLUE) if i.key == "f1"]
+        with pytest.raises(Conflict):
+            await release_item(store, BLUE, f1.id)
+        with pytest.raises(NotFound):
+            await release_item(store, BLUE, "00000000-0000-4000-8000-000000001537")
         assert {k: (i.status, i.batch_id, i.attempts) for k, i in (await items(store)).items()} == before

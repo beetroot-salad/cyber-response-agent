@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import pytest
 
+from defender.tests.support.learning.core._release1537 import release_item_of
 from defender.jobs.learning_models import STATUSES
 from defender.tests.support.jobs._jobs1342 import register_tenant
 from defender.tests.support.learning.core._set_aside1485 import (
@@ -159,7 +160,7 @@ async def test_o1_an_items_id_survives_a_republish_conflict_and_hold_release_hol
         [after_conflict] = await store.set_aside(BLUE, limit=5)
         assert [i.id for i in await store.work(BLUE)] == [first.id], "control: the conflict added no second item"
 
-        await store.release_held(BLUE, "finding", "h1")
+        await release_item_of(store, BLUE, "finding", "h1")
         assert await store.set_aside(BLUE, limit=5) == [], "control: released, it is no longer set aside"
         again = await claim(store, BLUE)
         await store.in_review(again, 8, {})

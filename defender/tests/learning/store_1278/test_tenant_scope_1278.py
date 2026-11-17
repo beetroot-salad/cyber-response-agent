@@ -26,6 +26,8 @@ from defender.tests.support.learning.core._store1278 import (
     oid,
     store_mod,
 )
+from defender.jobs.errors import Conflict, NotFound
+from defender.tests.support.learning.core._release1537 import park
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.shared._postgres1339 import execute
 
@@ -103,7 +105,8 @@ async def _blue_world(store):
     await _publish(store, BLUE, "h1")
     spent = await store.claim(BLUE, AUTHOR_LANE, owner="host-b", thresholds=ONE)
     await store.record_commit(spent, oid(31), oid(32), oid(33), changes_of("agent/lessons/b.md"))
-    await store.abandon(BLUE, spent.batch_id, by="person")
+    await store.in_review(spent, 12, {})
+    await store.end_review(BLUE, spent.batch_id, expect_phase="in_review", outcome="closed", published=[], held=[("finding", "h1")])
     await _publish(store, BLUE, "a1")
     await store.add_pitfall(BLUE, _pitfall("a-pit"))
     await store.enqueue_request(BLUE, "run-a1", "case-1", {"case": "a"})
@@ -129,7 +132,7 @@ class Case:
 
     async def refused(self, coro):
         """BLUE's call about a batch that is GREEN's: it raises one of the store's can't-act errors, or does nothing."""
-        with contextlib.suppress(LookupError, self.S.NotLapsed, self.S.LeaseLost):
+        with contextlib.suppress(LookupError, NotFound, Conflict, TypeError, self.S.NotLapsed, self.S.LeaseLost):
             return self.seen(await coro)
         return None
 
@@ -289,17 +292,41 @@ async def _abandon(c):
     lapse_lease(c.dsn, lead.batch_id)
     c.freeze()
     for green in (c.g.review.batch_id, c.g.revert.batch_id, c.g.lead.batch_id):
-        await c.refused(c.store.abandon(BLUE, str(green), by="person"))
         await c.refused(c.store.abandon(BLUE, str(green), by="recovery"))
-    await c.control(c.store.abandon(BLUE, str(own_review.batch_id), by="person"))
     await c.control(c.store.abandon(BLUE, str(lead.batch_id), by="recovery"))
+    assert own_review is not None
 
 
-async def _release_held(c):
+async def _release_item(c):
+    green_held = next(i for i in await c.store.work(GREEN) if i.key == "g-held")
+    mine = next(i for i in await c.store.work(BLUE) if i.key == "h1")
     c.freeze()
-    await c.store.release_held(BLUE, "finding", "g-held")
-    await c.control(c.store.release_held(BLUE, "finding", "h1"))
+    await c.refused(c.store.release_item(BLUE, str(green_held.id)))
+    await c.control(c.store.release_item(BLUE, str(mine.id)))
     assert {i.key: i.status for i in await c.store.work(BLUE) if i.key == "h1"} == {"h1": "waiting"}
+
+
+async def _release_batch(c):
+    mine = await c.own_in_review("rb1")
+    park(c.dsn, mine.batch_id)
+    c.freeze()
+    await c.refused(c.store.release_batch(BLUE, str(c.g.review.batch_id), actor="u-1"))
+    await c.control(c.store.release_batch(BLUE, str(mine.batch_id), actor="u-1"))
+
+
+async def _request_abandon(c):
+    mine = await c.own_in_review("ra1")
+    park(c.dsn, mine.batch_id, cause="forge_refused")
+    c.freeze()
+    await c.refused(c.store.request_abandon(BLUE, str(c.g.review.batch_id), actor="u-1"))
+    await c.control(c.store.request_abandon(BLUE, str(mine.batch_id), actor="u-1"))
+
+
+async def _settle_abandon(c):
+    # The settle's arguments are the code stage's (design: the PR found, its state, and for merged the two sets): only the
+    # refusal of another tenant's batch is pinned here, whatever the call's shape.
+    c.freeze()
+    await c.refused(c.store.settle_abandon(BLUE, str(c.g.review.batch_id)))
 
 
 async def _request_cancel(c):
@@ -366,7 +393,8 @@ ENTRIES = {
     "claim": _claim, "claim_revert": _claim_revert, "take_over": _take_over,
     **{name: _holder(name) for name in ("renew", "record_commit", "in_review", "end_no_commits", "abandon_clean",
                                          "abandon_crashed", "expire_own")},
-    "abandon": _abandon, "release_held": _release_held, "request_cancel": _request_cancel,
+    "abandon": _abandon, "release_item": _release_item, "release_batch": _release_batch,
+    "request_abandon": _request_abandon, "settle_abandon": _settle_abandon, "request_cancel": _request_cancel,
     "note_check": _note_check, "note_refusal": _note_refusal, "needs_person": _needs_person, "end_review": _end_review,
     "offboard": _offboard, "purge": _purge,
     "close": None,
