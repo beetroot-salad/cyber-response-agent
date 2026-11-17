@@ -38,6 +38,7 @@ from ._state import (
     _declarers_by_contract_id,
     outstanding_authz_contracts,
 )
+from ._authorization import authz_contract_readings
 
 
 def _rendered_disposition(value: object) -> str | None:
@@ -179,8 +180,8 @@ def _check_benign_grounding(companion: CompanionBody, *, keyword: str = "benign"
     """
     if not (companion.get("prologue") or {}).get("vertices"):
         return [
-            f"disposition {keyword} blocked: no `:V prologue.vertices` row — benign says the "
-            "alerted activity was accounted for, so the log has to name the entity the "
+            f"disposition {keyword} blocked: no `:V prologue.vertices` row — {keyword} says the "
+            f"alerted activity was accounted for, so the log has to name the entity the "
             "alert was about. An `investigation.md` that records no vertex records no "
             "investigation; conclude `inconclusive` instead."
         ]
@@ -369,13 +370,23 @@ def _check_authz_row_grounding(companion: CompanionBody) -> list[str]:
     ]
 
 
-def _check_benign_gating(companion: CompanionBody) -> list[str]:
-    errors: list[str] = []
-    errors += _check_benign_grounding(companion)
-    errors += _check_benign_open_slots(companion)
-    errors += _check_benign_authz(companion)
+def _benign_price(
+    companion: CompanionBody, *, keyword: str, authz_refusals: list[str],
+) -> list[str]:
+    """`benign`'s price, which `unsanctioned-benign` pays too: one list, so a check added to
+    one is added to both. Only how the authz contracts are read differs, so the caller passes
+    those refusals in."""
+    errors = _check_benign_grounding(companion, keyword=keyword)
+    errors += _check_benign_open_slots(companion, keyword=keyword)
+    errors += authz_refusals
     errors += _check_authz_row_grounding(companion)
     return errors
+
+
+def _check_benign_gating(companion: CompanionBody) -> list[str]:
+    return _benign_price(
+        companion, keyword="benign", authz_refusals=_check_benign_authz(companion),
+    )
 
 
 #: The `basis` value that claims something about dispatch, and so owes a receipt. `retry`
@@ -390,7 +401,10 @@ assert BASIS_EXHAUSTED in vocab.AUTHZ_INDET_BASIS
 assert BASIS_DEFAULT in vocab.AUTHZ_INDET_BASIS
 
 
-def _contract_anchor_kind(companion: CompanionBody, row: Any) -> str:
+def _contract_anchor_kind(
+    companion: CompanionBody, row: Any,
+    declarers: dict[str, list[tuple[str, str]]] | None = None,
+) -> str:
     """The anchor kind whose system a `basis=exhausted` claim is checked against: the contract's
     own, via `_declarers_by_contract_id`. When a shared `ac<n>` names several kinds, the row's
     own `anchor_kind` breaks the tie (as in `_authz_contract_error`), and it is the fallback when
@@ -398,13 +412,18 @@ def _contract_anchor_kind(companion: CompanionBody, row: Any) -> str:
     """
     row_kind = _cell(row, "anchor_kind")
     cid = _cell(row, "fulfills_contract")
-    kinds = {kind for _hid, kind in _declarers_by_contract_id(companion).get(cid, [])}
+    if declarers is None:  # lint-default: ok — standalone callers; walks over rows pass it once
+        declarers = _declarers_by_contract_id(companion)
+    kinds = {kind for _hid, kind in declarers.get(cid, [])}
     if row_kind in kinds or not kinds:
         return row_kind
     return next(iter(kinds)) if len(kinds) == 1 else row_kind
 
 
-def _exhausted_receipt_error(companion: CompanionBody, row: Any) -> str | None:
+def _exhausted_receipt_error(
+    companion: CompanionBody, row: Any,
+    declarers: dict[str, list[tuple[str, str]]] | None = None,
+) -> str | None:
     """Does this `basis=exhausted` row's own lead back the claim, or `None`."""
     lead_id = _cell(row, "resolved_by_lead")
     where = (
@@ -426,7 +445,7 @@ def _exhausted_receipt_error(companion: CompanionBody, row: Any) -> str | None:
             f"{BASIS_DEFAULT}` (the contract has not been worked yet) or point the row at the "
             f"lead that made the calls"
         )
-    kind = _contract_anchor_kind(companion, row)
+    kind = _contract_anchor_kind(companion, row, declarers)
     wanted = vocab.ANCHOR_KIND_SYSTEMS.get(kind)
     if wanted is None:
         return None
@@ -515,12 +534,13 @@ def _paid_exhaustions(companion: CompanionBody) -> frozenset[tuple[str, str]]:
     PAID `basis=exhausted`: the searches `unsanctioned-benign` may count as worked and empty.
     Keyed by the contract's anchor kind, so a row for a same-id twin under another kind pays
     only for the twin."""
+    declarers = _declarers_by_contract_id(companion)
     return frozenset(
-        (_cell(row, "fulfills_contract"), _contract_anchor_kind(companion, row))
+        (_cell(row, "fulfills_contract"), _contract_anchor_kind(companion, row, declarers))
         for row in _walkers.iter_authz_resolutions(companion)
         if _cell(row, "verdict") == AUTHZ_INDETERMINATE
         and _cell(row, "basis") == BASIS_EXHAUSTED
-        and _exhausted_receipt_error(companion, row) is None
+        and _exhausted_receipt_error(companion, row, declarers) is None
     )
 
 
@@ -633,18 +653,13 @@ def _check_unsanctioned_benign_gating(companion: CompanionBody) -> list[str]:
     one contract discharged that way, one story left standing and supported, and the harm
     measured."""
     keyword = PROCESS_GAP_DISPOSITION
-    errors = _check_benign_grounding(companion, keyword=keyword)
-    errors += _check_benign_open_slots(companion, keyword=keyword)
-    under_gap = outstanding_authz_under(companion, keyword)
-    errors += [why for _hid, _c, why in under_gap]
-    errors += _check_authz_row_grounding(companion)
-
-    still_open = {(hid, _cell(c, "id")) for hid, c, _why in under_gap}
-    gap_holders = {
-        hid for hid, c, _why in outstanding_authz_contracts(companion)
-        if (hid, _cell(c, "id")) not in still_open
-    }
-    if not gap_holders and not under_gap:
+    readings = authz_contract_readings(
+        companion, keyword=keyword, gap_paid=_paid_exhaustions(companion),
+    )
+    open_refusals = [why for _hid, _c, why, _gap in readings if why is not None]
+    errors = _benign_price(companion, keyword=keyword, authz_refusals=open_refusals)
+    gap_holders = {hid for hid, _c, why, via_gap in readings if via_gap and why is None}
+    if not gap_holders and not open_refusals:
         errors.append(
             f"disposition {keyword} blocked: no authz contract was discharged as a process gap "
             f"— nothing on the record was left unsanctioned. If every contract is authorized the "
