@@ -190,3 +190,17 @@ def test_pr1_a_row_the_code_writes_has_the_cause_the_backfill_gives_its_own_text
         [(backfilled,)] = execute(old, "SELECT cause FROM learning.batches WHERE id = %s", (batch,))
     assert backfilled == got, f"the backfill of {reason!r} is {backfilled!r}, the code wrote {got!r}"
     assert backfilled != "unrecorded"
+
+
+@pytest.mark.parametrize("name", ["foreign_pr", "foreign_commits_remote", "foreign_commits_local"])
+def test_o5_a_batch_the_loop_parks_for_a_foreign_cause_records_when_not_before_it_was_created(
+        name, p4_tenant, migrated_database, monkeypatch, tmp_path, caplog):  # noqa: F811 — fixtures
+    """The real tick's park (the store's `needs_person`) for a foreign PR, foreign commits on the remote or foreign commits on the local branch sets `parked_at`, and not earlier than the batch's `created_at`. (O5)"""
+    w = make_scene(p4_tenant, migrated_database, tmp_path, monkeypatch)
+    drive, cause = CASES[name]
+    drive(w, caplog, tmp_path)
+    [(phase, got, parked_at, created_at)] = execute(
+        w.dsn, "SELECT phase, cause, parked_at, created_at FROM learning.batches WHERE tenant_id = %s", (w.t.tenant_id,))
+    assert (phase, got) == ("needs_person", cause)
+    assert parked_at is not None, "a batch parked by the loop shows no time"
+    assert parked_at >= created_at

@@ -7,16 +7,21 @@ to end in `tenancy/tenant_1108_p4/test_abandon_1537.py`. Verb names and argument
 """
 from __future__ import annotations
 
+import contextlib
 import datetime as _dt
 
+import anyio
 import pytest
 from psycopg import errors
 
 from defender.jobs.errors import Conflict, NotFound
+from defender.learning_store import LaneBusy
 from defender.tests.support.jobs._jobs1342 import register_tenant
 from defender.tests.support.learning.core._release1537 import (
     CREDENTIAL,
     item_row,
+    outcome_held,
+    outcome_skipped,
     park,
     release_batch,
     release_item,
@@ -27,6 +32,8 @@ from defender.tests.support.learning.core._release1537 import (
 )
 from defender.tests.support.learning.core._store1278 import (
     AUTHOR_LANE,
+    LEAD_LANE,
+    ONE,
     claim,
     lapse_lease,
     learning_store,
@@ -314,6 +321,102 @@ async def test_o2_another_tenants_batch_and_an_unknown_one_are_not_found_for_eve
         _same(dsn, theirs.batch_id, before)
 
 
+async def test_o2_a_release_is_blocked_only_by_a_batch_working_on_its_own_tenants_own_lane(dsn):
+    """Another tenant's working batch on the same lane name, and the same tenant's working batch on another lane, do not block a release: the parked author batch goes back to working. (O2, C11)"""
+    async with learning_store(dsn) as store:
+        batch = await _working_parked(store, dsn, BLUE, "f1")
+        await publish(store, GREEN, "g1")
+        theirs = await claim(store, GREEN)
+        await store.enqueue_request(BLUE, "run-1537", "case-1", {"case": "c"})
+        lead = await store.claim(BLUE, LEAD_LANE, owner="host-l", thresholds=ONE)
+        assert (theirs.lane, lead.lane) == (AUTHOR_LANE, LEAD_LANE), "premise: a working batch on the lane name elsewhere"
+        assert {row(dsn, theirs.batch_id)["phase"], row(dsn, lead.batch_id)["phase"]} == {"working"}
+        await release_batch(store, BLUE, batch.batch_id, actor=ACTOR)
+    assert row(dsn, batch.batch_id)["phase"] == "working"
+    assert row(dsn, theirs.batch_id)["phase"] == row(dsn, lead.batch_id)["phase"] == "working"
+
+
+async def _race_round(dsn, number: int, kind: str) -> list[tuple[str, str]]:
+    """One tenant's parked batch released while a claim beside it runs as its own task from the same start: the `(kind, phase)` of the tenant's batches after."""
+    tenant = fixture_uuid(f"tenant:1537-race-{kind}-{number}")
+    register_tenant(dsn, tenant)
+    async with learning_store(dsn) as store, learning_store(dsn) as other:
+        if kind == "revert-in-review":
+            parked = await store.claim_revert(tenant, owner="host-r")
+            await store.in_review(parked, 5, {})
+            park(dsn, parked.batch_id)
+            await publish(store, tenant, "f1")
+
+            async def beside():
+                await claim(other, tenant)  # an author claim, made as the release runs
+        else:
+            parked = await _working_parked(store, dsn, tenant, "f1")
+
+            async def beside():
+                await other.claim_revert(tenant, owner="host-r")  # a revert claim, made as the release runs
+        await other.batches(tenant)  # connections open before the start, so the two writers begin together
+        start = anyio.Event()
+
+        async def run(act, late=0.0):
+            await start.wait()
+            await anyio.sleep(late)  # the rounds sweep the claim's start across the release's whole transaction
+            with contextlib.suppress(Conflict, LaneBusy):  # the refusals the design names: the other writer won
+                await act()
+
+        async def release():
+            await release_batch(store, tenant, parked.batch_id, actor=ACTOR)
+
+        with anyio.fail_after(60):
+            async with anyio.create_task_group() as group:
+                group.start_soon(run, release)
+                group.start_soon(run, beside, (number % 20) * 0.001)
+                await anyio.sleep(0.05)
+                start.set()
+    return [(k, p) for k, p in execute(dsn, "SELECT kind, phase FROM learning.batches WHERE tenant_id = %s", (tenant,))]
+
+
+@pytest.mark.parametrize("kind", ["revert-in-review", "author-working"])
+async def test_o2_a_claim_committing_beside_a_release_never_leaves_a_revert_in_review_beside_a_working_author_batch(dsn, kind):
+    """A parked revert released into review while an author claim commits, and a parked author batch released to working while a revert claim commits, each run as concurrent tasks over many rounds: the one writer that loses is refused (Conflict, LaneBusy), never a raw database error, and the lane never holds a revert in review beside a working author batch. (O2 'both ways', C13)"""
+    for number in range(40):
+        after = await _race_round(dsn, number, kind)
+        assert ("revert", "in_review") not in after or ("author", "working") not in after, (number, after)
+        assert [p for _k, p in after].count("working") <= 1, (number, after)
+
+
+async def test_o2_a_unique_index_race_on_release_to_working_is_a_conflict_not_a_database_error(dsn):
+    """A parked working batch is released while another writer, holding none of the store's own locks, has the lane's other batch going to working in an uncommitted transaction; once that commits, the release's update meets the unique index and is a Conflict naming the lane, the lane keeping one working batch. (O2: 'also caught from the unique index')"""
+    import psycopg
+
+    async with learning_store(dsn) as store:
+        batch = await _working_parked(store, dsn, BLUE, "f1")
+        revert = await store.claim_revert(BLUE, owner="host-r")
+        park(dsn, revert.batch_id)
+        before = row(dsn, batch.batch_id)
+        outcome: dict[str, BaseException] = {}
+
+        async def releasing():
+            try:
+                await release_batch(store, BLUE, batch.batch_id, actor=ACTOR)
+            except BaseException as refused:  # noqa: BLE001 — the case is what the release raises
+                outcome["raised"] = refused
+
+        with psycopg.connect(dsn) as other:
+            [(pid,)] = other.execute("SELECT pg_backend_pid()").fetchall()
+            other.execute("UPDATE learning.batches SET phase = 'working', cause = NULL, reason = NULL, parked_at = NULL, "
+                          "lease_owner = 'host-r', lease_expiry = now() + interval '1 hour' WHERE id = %s", (str(revert.batch_id),))
+            with anyio.fail_after(60):
+                async with anyio.create_task_group() as group:
+                    group.start_soon(releasing)
+                    while not execute(dsn, "SELECT 1 FROM pg_stat_activity WHERE %s = ANY(pg_blocking_pids(pid))", (pid,)):
+                        await anyio.sleep(0.05)
+                    other.commit()
+    assert isinstance(outcome.get("raised"), Conflict), outcome
+    assert "lane" in str(outcome["raised"])
+    assert row(dsn, batch.batch_id) == before, "the refused release changed the batch"
+    assert row(dsn, revert.batch_id)["phase"] == "working"
+
+
 # --- O3: request an abandon (the store side) ------------------------------------------------------------------------
 
 
@@ -355,6 +458,23 @@ async def test_o3_a_batch_that_is_not_parked_is_a_conflict_naming_its_phase_and_
     assert row(dsn, held.batch_id)["abandon_requested_at"] is not None, "a request is accepted whatever the park cause"
 
 
+async def test_o3_a_persons_abandon_is_no_database_decision_by_person_is_refused_and_changes_nothing(dsn):
+    """`abandon(by="person")` is gone: it raises ValueError for a parked batch and for a lapsed working one alike, and the rows (batch and items) are as they were; recovery's abandon still works on the lapsed one. (O3, PR2)"""
+    async with learning_store(dsn) as store:
+        parked = await _review_parked(store, dsn, BLUE, "f1")
+        working = await store.claim_revert(BLUE, owner="host-r")
+        lapse_lease(dsn, working.batch_id)
+        before = {b.batch_id: row(dsn, b.batch_id) for b in (parked, working)}
+        items = item_row(dsn, BLUE, "f1")
+        for batch in (parked, working):
+            with pytest.raises(ValueError, match="person"):
+                await store.abandon(BLUE, str(batch.batch_id), by="person")
+        assert {b.batch_id: row(dsn, b.batch_id) for b in (parked, working)} == before
+        assert item_row(dsn, BLUE, "f1") == items
+        await store.abandon(BLUE, str(working.batch_id), by="recovery")
+    assert row(dsn, working.batch_id)["outcome"] == "abandoned"
+
+
 # --- O4: causes -----------------------------------------------------------------------------------------------------
 
 
@@ -376,6 +496,51 @@ async def test_o4_a_batch_the_store_ends_abandoned_carries_the_cause_of_how(dsn,
     got = row(dsn, held.batch_id)
     assert (got["phase"], got["outcome"], got["cause"]) == ("ended", "abandoned", how)
     assert got["reason"] is not None, "the detail text stays beside the cause"
+
+
+#: Every text the code itself writes beside a cause (the backfill's frozen table), as a curator or the gate could also write it.
+CODE_TEXTS = ["abandoned by a person", "reached the attempt ceiling (3)", "the replacement committed nothing",
+              "feedback reached the replacement ceiling (2)", "declined by the curator 3 times", "deferred 3 times",
+              "superseded by a later run", "superseded by run r-9", "artifact-missing", "row carries no value under 'finding_id'",
+              "consumed_no_systems: the world finding names no systems", "declined at the gate", "no-system", "malformed-system",
+              "undeclared-system:elastic"]
+
+
+async def test_o4_a_detail_a_curator_or_the_gate_wrote_keeps_the_cause_it_was_given_even_when_it_equals_a_text_the_code_writes(dsn):
+    """The causes of held and skipped fates come from the code that picked them, never from reading the detail: a held fate `curator_held` and a skipped one `curator_skipped` keep that cause whatever words (a text the code itself writes included) sit beside it. (PR1)"""
+    async with learning_store(dsn) as store:
+        keys = [f"c{n}" for n in range(len(CODE_TEXTS))]
+        await publish(store, BLUE, *keys, *(f"s{n}" for n in range(len(CODE_TEXTS))))
+        held = await claim(store, BLUE)
+        fates = {("finding", f"c{n}"): outcome_held("curator_held", text) for n, text in enumerate(CODE_TEXTS)}
+        fates |= {("finding", f"s{n}"): outcome_skipped("curator_skipped", text) for n, text in enumerate(CODE_TEXTS)}
+        await store.end_no_commits(held, fates)
+    for n, text in enumerate(CODE_TEXTS):
+        assert (item_row(dsn, BLUE, f"c{n}")["status"], item_row(dsn, BLUE, f"c{n}")["cause"]) == ("held", "curator_held"), text
+        assert (item_row(dsn, BLUE, f"s{n}")["status"], item_row(dsn, BLUE, f"s{n}")["cause"]) == ("skipped", "curator_skipped"), text
+        assert item_row(dsn, BLUE, f"c{n}")["reason"] == text, "the detail is kept as written"
+
+
+@pytest.mark.parametrize("replacement", [False, True])
+@pytest.mark.parametrize("how", ["crash", "recovery"])
+async def test_o4_an_item_a_crash_or_a_recovery_gives_back_at_its_attempt_ceiling_is_held_as_attempt_ceiling(dsn, how, replacement):
+    """The holder's crash and the recovery abandon give an item back with its attempt counted; at the ceiling it is held with the cause `attempt_ceiling`, for a first claim and for a replacement claim alike. (PR1, O4)"""
+    async with learning_store(dsn, max_attempts=2 if replacement else 1) as store:
+        await publish(store, BLUE, "f1")
+        held = await claim(store, BLUE)
+        if replacement:
+            await store.in_review(held, 5, {})
+            assert await store.end_review(BLUE, held.batch_id, expect_phase="in_review", outcome="closed", published=[], held=[])
+            held = await claim(store, BLUE)
+            assert held.replaces is not None, "premise: a replacement claim"
+        if how == "crash":
+            await store.abandon_crashed(held)
+        else:
+            lapse_lease(dsn, held.batch_id)
+            await store.abandon(BLUE, str(held.batch_id), by="recovery")
+    got = item_row(dsn, BLUE, "f1")
+    assert (got["status"], got["cause"], got["attempts"]) == ("held", "attempt_ceiling", 2 if replacement else 1)
+    assert got["reason"].startswith("reached the attempt ceiling")
 
 
 async def test_o4_a_batch_ended_merged_or_closed_has_no_cause_and_a_return_to_waiting_clears_an_items(dsn):
@@ -473,7 +638,7 @@ async def test_o5_every_parked_row_has_a_parked_at_not_before_it_was_created_and
 
 
 async def test_paging_an_item_cursor_stays_valid_across_a_release_after_it_and_a_new_hold_above_it(dsn):
-    """Page one of the held list, release an item after the cursor and hold a new one: the next page is the rows after the cursor less the released one; the new row is only above it. (Paging)"""
+    """Page one of the held list, release an item after the cursor and hold a new one: the next page is the rows after the cursor less the released one; the new row, and the released one claimed with it and held again at the ceiling, are only above it. (Paging, C2)"""
     for key in ("i1", "i2", "i3", "i4"):
         await _held_at_ceiling(dsn, BLUE, key)
     async with learning_store(dsn) as store:
@@ -486,7 +651,11 @@ async def test_paging_an_item_cursor_stays_valid_across_a_release_after_it_and_a
         rest = await store.set_aside(BLUE, status="held", after=cursor, limit=50)
         whole = await store.set_aside(BLUE, status="held", limit=50)
     assert [i.key for i in rest] == ["i2"]
-    assert [i.key for i in whole] == ["i5", "i4", "i3", "i2"]
+    # `_held_at_ceiling("i5")` claims every waiting finding, the released i1 with it, and holds both at the one-attempt
+    # ceiling in one transaction: a re-held item reappears above the cursor (design C2), tied with i5 on `updated_at`
+    # (the tie breaks on a random id, so the pair is compared whole).
+    assert {i.key for i in whole[:2]} == {"i1", "i5"}
+    assert [i.key for i in whole[2:]] == ["i4", "i3", "i2"]
 
 
 async def test_paging_a_parked_cursor_stays_valid_across_a_release_after_it_and_a_re_park_keeps_its_place(dsn):

@@ -716,7 +716,8 @@ def test_h15_each_answer_the_forge_can_give_counts_or_not_as_the_rule_says_and_a
         assert (b.phase, b.refusals) == want, f"after {answer!r} (before it: {previous!r}) the batch is {(b.phase, b.refusals)}"
         previous = answer
         if b.phase == "needs_person":  # a person's release, by hand: back to review with the count at zero
-            execute(w.dsn, "UPDATE learning.batches SET phase = 'in_review', refusals = 0, reason = NULL WHERE id = %s",
+            execute(w.dsn, "UPDATE learning.batches SET phase = 'in_review', refusals = 0, reason = NULL, cause = NULL, parked_at = NULL "
+                    "WHERE id = %s",
                     (batch_id,))
             count = 0
     assert w.statuses() == {"f1": "in_batch"}, "a refusal lost the item"

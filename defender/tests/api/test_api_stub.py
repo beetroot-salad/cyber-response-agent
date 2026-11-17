@@ -842,6 +842,21 @@ def test_a_validation_problem_lists_what_failed_and_never_echoes_the_value() -> 
     assert str(secret) not in response.text
 
 
+def test_1537_the_published_contract_declares_the_learning_actions_refusals_and_their_success_status() -> None:
+    """Each of the three learning actions publishes the 404 (not the tenant's) and the 409 (not in an actionable state) its refusals answer with, as problems; a release answers 200 and an abandon request 202. (O1-O3, PR3)"""
+    doc = Api().client.get(API + "/openapi.json").json()
+    base = API + "/tenants/{tenant_id}/learning"
+    for path, success, other in ((f"{base}/items/{{item_id}}/release", "200", "202"),
+                                 (f"{base}/batches/{{batch_id}}/release", "200", "202"),
+                                 (f"{base}/batches/{{batch_id}}/abandon", "202", "200")):
+        responses = doc["paths"][path]["post"]["responses"]
+        assert {success, "404", "409"} <= set(responses), (path, sorted(responses))
+        assert other not in responses, (path, sorted(responses))
+        for refusal in ("404", "409"):
+            assert responses[refusal]["content"] == {
+                "application/problem+json": {"schema": {"$ref": "#/components/schemas/Problem"}}}, (path, refusal)
+
+
 def test_the_published_contract_declares_each_routes_problems() -> None:
     doc = Api().client.get(API + "/openapi.json").json()
     assert "HTTPValidationError" not in json.dumps(doc)
@@ -1156,8 +1171,9 @@ BATCH_2 = "d1000000-0000-4000-8000-000000000002"
 LEARNING_ITEMS = f"{T}/learning/items"
 LEARNING_PARKED = f"{T}/learning/parked-batches"
 SCRIPT_REASON = '<script>alert("x")</script> & "q" \\n </td>'
-ITEM_WIRE_FIELDS = {"item_id", "kind", "key", "status", "reason", "source_run", "batch_id", "pr_number", "updated_at"}
-PARKED_WIRE_FIELDS = {"batch_id", "batch_kind", "lane", "blocks_lane", "branch", "pr_number", "reason", "created_at", "items"}
+ITEM_WIRE_FIELDS = {"item_id", "kind", "key", "status", "reason", "cause", "source_run", "batch_id", "pr_number", "updated_at"}
+PARKED_WIRE_FIELDS = {"batch_id", "batch_kind", "lane", "blocks_lane", "branch", "pr_number", "reason", "cause", "parked_at",
+                      "releasable", "abandon_requested_at", "last_checked", "created_at", "items"}
 
 
 def _learning_api(**answers: Any) -> Api:
@@ -1173,9 +1189,9 @@ def _set_aside_rows() -> list[Any]:
     from defender.api.models import SetAsideItem
 
     first = SetAsideItem(item_id=ITEM_ID_2, kind="finding", key="run 1/f 02", status="held", reason=SCRIPT_REASON,
-                         source_run="run-1", batch_id=BATCH, pr_number=7, updated_at=LATER)
+                         cause="curator_held", source_run="run-1", batch_id=BATCH, pr_number=7, updated_at=LATER)
     return [first, first.model_copy(update={"item_id": ITEM_ID, "key": "run 1/f 01", "status": "dead", "reason": None,
-                                            "source_run": None, "batch_id": None, "pr_number": None})]
+                                            "cause": "attempt_ceiling", "source_run": None, "batch_id": None, "pr_number": None})]
 
 
 def _parked_rows() -> list[Any]:
@@ -1183,10 +1199,13 @@ def _parked_rows() -> list[Any]:
     from defender.api.models import ParkedBatch, ParkedItemRef
 
     first = ParkedBatch(batch_id=BATCH_2, batch_kind="author", lane="author", blocks_lane=True, branch="learning/b2",
-                        pr_number=9, reason="the forge refused 3 times", created_at=LATER,
+                        pr_number=9, reason="the forge refused 3 times", cause="forge_credential_refused",
+                        parked_at=LATER, releasable=True, abandon_requested_at=None, last_checked=NOW, created_at=LATER,
                         items=[ParkedItemRef(kind="finding", key="f1")])
     return [first, first.model_copy(update={"batch_id": BATCH, "created_at": NOW, "items": [], "blocks_lane": False,
-                                            "batch_kind": "revert", "pr_number": None, "reason": None})]
+                                            "batch_kind": "revert", "pr_number": None, "reason": None,
+                                            "cause": "foreign_pr", "parked_at": None, "releasable": False,
+                                            "abandon_requested_at": LATER, "last_checked": None})]
 
 
 #: (list name, path, port, rows, the position the second page must start after)
@@ -1233,9 +1252,13 @@ def test_1485_a_learning_list_serves_exactly_its_wire_fields_and_a_reason_as_pla
         assert '&lt;' not in response.text
         assert '\\u003c' not in response.text
         assert (served[1]["status"], served[1]["reason"], served[1]["batch_id"], served[1]["pr_number"]) == ("dead", None, None, None)
+        assert (served[0]["cause"], served[1]["cause"]) == ("curator_held", "attempt_ceiling")
     else:
         assert [set(i) for i in served[0]["items"]] == [{"kind", "key"}]
         assert (served[0]["blocks_lane"], served[1]["blocks_lane"], served[1]["items"]) == (True, False, [])
+        assert (served[0]["cause"], served[0]["releasable"], served[1]["releasable"]) == ("forge_credential_refused", True, False)
+        assert (served[0]["abandon_requested_at"], served[1]["parked_at"], served[1]["last_checked"]) == (None, None, None)
+        assert served[1]["abandon_requested_at"] is not None
 
 
 @pytest.mark.parametrize("path", [LEARNING_ITEMS, LEARNING_PARKED])
