@@ -27,7 +27,10 @@ class AnthropicProvider:
         from pydantic_ai.models.anthropic import AnthropicModel
         from pydantic_ai.providers.anthropic import AnthropicProvider as PydanticAnthropicProvider
 
-        provider = PydanticAnthropicProvider()
+        from ._http import async_client
+
+        # No kept-alive connection, as `openai_compat.build_model` (`_http`).
+        provider = PydanticAnthropicProvider(http_client=async_client())
         # The retrier (`retry.py`) owns every retry; a client that also retried would stack up
         # to twelve wire attempts per request and ignore the retrier's bounds.
         provider.client.max_retries = 0

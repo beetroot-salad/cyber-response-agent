@@ -61,7 +61,10 @@ class OpenAICompatProvider:
                 "reinstall defender with "
                 "`uv pip install --python .venv/bin/python -e '.[runtime]'`."
             ) from e
-        provider = OpenAIProvider(base_url=self.base_url, api_key=api_key)
+        from ._http import async_client
+
+        # No kept-alive connection: a model is reused across `run_sync` calls, each on a loop of its own (`_http`).
+        provider = OpenAIProvider(base_url=self.base_url, api_key=api_key, http_client=async_client())
         # The retrier (`retry.py`) owns every retry; see `AnthropicProvider.build_model`.
         provider.client.max_retries = 0
         return OpenAIChatModel(self._model_id(name), provider=provider)
