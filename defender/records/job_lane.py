@@ -12,8 +12,9 @@ post-step (#1344 amendment 1: no job to follow) keys its record by the tenant's 
 The worker writes a job's launch record and alert file here before it starts the child; the
 child's job entry opens the same door first thing — before tenant acceptance, so a refusal there
 still leaves its job-end record — checks the launch record, and writes the job-end record as it
-exits; the worker then reads the job-end record, the knowledge record, the session pointer and
-the report through it, and the run's cost from the session database the pointer names.
+exits; the worker then reads the job-end record, the knowledge record and the session pointer
+through it, and the run's closing record and cost from the session database the pointer's case id
+derives.
 
 `<data root>/<T>/runs` is held no-follow from the tenant's folder and never made (#1342 R1: tenant
 setup makes it): absent, a link or anything but a folder is `JobLaneRefused`. Every read is a
@@ -29,6 +30,7 @@ import sys
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
+from typing import Any
 
 from defender import _io
 from defender.records._errors import RunRefused
@@ -39,7 +41,7 @@ from defender.records.job_facts import (  # noqa: F401 — the worker's reasons,
     BOX_NOT_STARTED, BOX_START_FAILED, BOX_STARTED, SETUP_CRASHED, SETUP_DONE, SETUP_REFUSED,
 )
 from defender.records._knowledge_status import UNREADABLE, api_knowledge, knowledge_status
-from defender.records._layout import RUN_LAYOUT, RunPaths, SessionPaths
+from defender.records._layout import RunPaths, SessionPaths
 from defender.records._locations import DataRoot, RunsBase, unwrap_data_root
 from defender.records._store_errors import StoreError
 from defender.records._tenant_id import TenantId, TenantRefused
@@ -555,14 +557,26 @@ class JobLane:
         what the worker records when the read itself faults (#1396)."""
         return api_knowledge(UNREADABLE)
 
-    def report_disposition(self, run_id: object) -> str | None:
-        """The disposition of the run's `report.md`, read no-follow and size-limited, or `None`
-        when there is no readable report or it names no disposition."""
-        from defender.records._report import parse_report_text
+    def closing_disposition(self, run_id: object) -> Any:
+        """The run's closing record through the job-lane route (#1534): the database its pointer's
+        case id derives (`session_database`), never the pointer's stored path. `NeverClosed` with no
+        pointer (a pre-#1235 link instead is `legacy-link`); a pointer that does not parse is
+        `pointer-unreadable`. Returns `closing.Record | NeverClosed | CouldNotLook`."""
+        from defender.records import closing
 
-        name = PurePosixPath(str(_run_id(run_id))) / RUN_LAYOUT.report
-        read = self._held.view().read(name)
-        return None if read.text is None else parse_report_text(read.text).disposition
+        run_id = _run_id(run_id)
+        try:
+            located = self.session_database(run_id)
+        except CostUnreadable as bad:
+            return closing.fault(closing.POINTER_UNREADABLE, str(bad), run_id=run_id)
+        if located is None:
+            from defender.records.session_store import _LEGACY_LINK_NAME
+
+            if not self._held.view().read(PurePosixPath(str(run_id)) / _LEGACY_LINK_NAME).absent:
+                return closing.fault(closing.LEGACY_LINK, f"run {run_id} holds a pre-#1235 link and no pointer",
+                                     run_id=run_id)
+            return closing.NeverClosed()
+        return closing.read_database(located[0], str(run_id))
 
     # -- cost -------------------------------------------------------------------------------------
 
