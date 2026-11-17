@@ -1,0 +1,32 @@
+/* The product's look over Keycloak 26.4's PatternFly v5 markup. `tokens.css` and `../img/illustration.svg` are single
+   files of defender/frontend/look/, mounted into this theme by the dev compose (PR5): there is no copy here. */
+@import "tokens.css";
+
+body,
+.pf-v5-c-login {
+  background: var(--defender-paper);
+  color: var(--defender-ink);
+}
+.pf-v5-c-login__container {
+  background-image: url("../img/illustration.svg");
+  background-repeat: no-repeat;
+  background-position: top 2rem center;
+  background-size: 9rem;
+  padding-top: 12rem;
+}
+.pf-v5-c-login__main {
+  background: var(--defender-paper);
+  border: 1px solid var(--defender-line);
+  border-radius: 0.75rem;
+}
+.pf-v5-c-login__main-header h1,
+#kc-page-title {
+  color: var(--defender-ink);
+}
+.pf-v5-c-button.pf-m-primary {
+  background-color: var(--defender-accent);
+  color: var(--defender-accent-ink);
+}
+.pf-v5-c-form-control {
+  border-color: var(--defender-line);
+}

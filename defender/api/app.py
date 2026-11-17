@@ -832,6 +832,8 @@ auth = _router(tags=["auth"])
 
 #: Where a person is sent when sign-in fails: a frontend screen, never a problem document (S1).
 _FAILED_SCREEN = addresses.literal("sign-in-failed")
+#: Where a sign-in lands when the request names no return (F4): the signed-in home, the shape list's own literal.
+_HOME = addresses.literal("home")
 
 
 def _redirect(description: str) -> dict[str, Any]:
@@ -851,12 +853,12 @@ def _to_failed_screen(reason: str, return_path: str | None = None) -> RedirectRe
 
 def _return_path(request: Request) -> str | None:
     """The sign-in start's judged return path (P2), or None when the request is malformed (B2, B4): it reads only
-    `return`, once; an absent one is the root; any present one must be, byte for byte, a returnable address."""
+    `return`, once; an absent one is the home; any present one must be, byte for byte, a returnable address."""
     items = request.query_params.multi_items()
     if any(name != "return" for name, _ in items) or len(items) > 1:
         return None
     if not items:
-        return "/"
+        return _HOME
     value = items[0][1]
     return value if addresses.match(value) in addresses.RETURNABLE else None
 

@@ -1,5 +1,6 @@
 {
   "realm": "defender",
+  "loginTheme": "defender",
   "enabled": true,
   "sslRequired": "external",
   "registrationAllowed": false,

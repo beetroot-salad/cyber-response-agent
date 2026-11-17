@@ -1,0 +1,19 @@
+/* The product's colours: one file, imported by the app and mounted into Keycloak's sign-in theme (PR5). */
+:root {
+  --defender-ink: #14213d;
+  --defender-paper: #f7f8fb;
+  --defender-accent: #2563eb;
+  --defender-accent-ink: #ffffff;
+  --defender-muted: #5b6477;
+  --defender-line: #d6dbe6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --defender-ink: #e8ecf5;
+    --defender-paper: #0f172a;
+    --defender-accent: #60a5fa;
+    --defender-accent-ink: #0b1220;
+    --defender-muted: #9aa5bd;
+    --defender-line: #26324d;
+  }
+}

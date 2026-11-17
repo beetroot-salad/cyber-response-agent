@@ -3,12 +3,29 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "The Defender app shell and screens (#1161): TypeScript, built to static files in dist/.",
+  "description": "The Defender app (#1161, #1540): React screens built by Vite to static files in dist/, commands run by Bun.",
+  "defender": {
+    "inputs": ["../api/addresses.json", "../api/openapi.json"]
+  },
   "scripts": {
-    "build": "node build.mjs"
+    "generate": "bun scripts/generate.mjs",
+    "build": "bun scripts/build.mjs",
+    "check": "bun scripts/generate.mjs && bun scripts/check.mjs",
+    "test": "bun scripts/generate.mjs && vitest run",
+    "dev": "bun scripts/generate.mjs && vite"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "5.107.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
   },
   "devDependencies": {
-    "esbuild": "0.28.2",
-    "typescript": "5.9.3"
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.3.0",
+    "openapi-typescript": "7.13.0",
+    "typescript": "5.9.3",
+    "vite": "8.3.8",
+    "vitest": "5.1.0"
   }
 }

@@ -1,0 +1,14 @@
+@import "../look/tokens.css";
+
+:root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+body { margin: 0; background: var(--defender-paper); color: var(--defender-ink); }
+main { max-width: 40rem; margin: 3rem auto; padding: 0 1rem; }
+h1 { font-size: 1.5rem; }
+dt { font-weight: 600; }
+dd { margin: 0 0 0.75rem; }
+button, a[data-action="sign-in"] {
+  font: inherit; padding: 0.4rem 1rem; border-radius: 0.4rem; border: 1px solid var(--defender-accent);
+  background: var(--defender-accent); color: var(--defender-accent-ink); text-decoration: none; cursor: pointer;
+}
+main[data-screen="root"] { text-align: center; }
+main[data-screen="root"] img { display: block; margin: 0 auto 1rem; }

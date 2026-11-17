@@ -17,7 +17,7 @@ http://:{$DEFENDER_INGRESS_LISTEN_PORT} {
 			Content-Security-Policy "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self' https://*.{$DEFENDER_ARTIFACT_DOMAIN}"
 			Referrer-Policy "strict-origin-when-cross-origin"
 			X-Content-Type-Options "nosniff"
-			# Fixed file names (`/app.js`): a browser revalidates each load, so a deploy never runs an old app on a new API.
+			# Hashed file names, revalidated on every load: a browser never runs a cached app against a newer API.
 			Cache-Control "no-cache"
 		}
 		root * {$DEFENDER_INGRESS_FRONTEND_DIR}
