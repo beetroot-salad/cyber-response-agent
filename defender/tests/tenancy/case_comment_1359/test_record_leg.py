@@ -562,7 +562,8 @@ def test_1471_review_the_record_step_asks_once_for_its_pass_and_posts_under_it(t
     assert asks.calls == 1, asks.calls
     assert len(C.comment_calls(shim)) == 1, shim.requests()
     got = S.receipt(run_dir)
-    assert got is not None and (got["status"], got["ok"]) == (C.COMMENTED, True), got
+    assert got is not None, "no receipt"
+    assert (got["status"], got["ok"]) == (C.COMMENTED, True), got
 
 
 @pytest.mark.parametrize("case", ["silent ending", "keyless alert", "bad case settings"])
@@ -583,7 +584,8 @@ def test_1471_review_the_record_step_asks_for_no_pass_when_it_will_not_comment(t
     if case == "silent ending":
         assert got is None, got
     else:
-        assert got is not None and got["status"] == C.ERROR, got
+        assert got is not None, "no receipt"
+        assert got["status"] == C.ERROR, got
         assert (C.REASON_NO_KEY in got["reason"]) == (case == "keyless alert"), got
 
 
@@ -596,7 +598,8 @@ def test_1471_review_a_refused_ask_is_the_receipt_reason_it_answered(tmp_path, m
 
     assert shim.requests() == [], shim.requests()
     got = S.receipt(run_dir)
-    assert got is not None and (got["status"], got["reason"]) == (C.ERROR, reason), got
+    assert got is not None, "no receipt"
+    assert (got["status"], got["reason"]) == (C.ERROR, reason), got
 
 
 def test_1471_review_an_ask_that_raises_is_an_error_receipt_never_the_run(tmp_path, monkeypatch):
@@ -607,8 +610,10 @@ def test_1471_review_an_ask_that_raises_is_an_error_receipt_never_the_run(tmp_pa
     run_dir = _asked_run(tmp_path, root, shim, _Asks(TypeError("/host/secret/path")))
 
     got = S.receipt(run_dir)
-    assert got is not None and got["status"] == C.ERROR, got
-    assert "TypeError" in got["reason"] and "/host/secret/path" not in got["reason"], got
+    assert got is not None, "no receipt"
+    assert got["status"] == C.ERROR, got
+    assert "TypeError" in got["reason"], got
+    assert "/host/secret/path" not in got["reason"], got
 
 
 def test_1471_review_the_helper_s_refusals_map_to_product_reasons_and_never_carry_its_text():
