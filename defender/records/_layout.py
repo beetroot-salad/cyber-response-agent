@@ -55,7 +55,6 @@ ALERT = "alert.json"
 ALERT_INPUT_DIRNAME = "alert_input"
 #: The run's record, beside the alert: its byte digest and the three facts derived at run start.
 ALERT_RECORD = _alert_input.RECORD_FILE
-REPORT = "report.md"
 INVESTIGATION = "investigation.md"
 EXECUTED_QUERIES = "executed_queries.jsonl"
 SOURCE_REFS = "source_refs.yaml"
@@ -190,10 +189,6 @@ class RunLayout:
     @property
     def alert_record(self) -> PurePosixPath:
         return self.alert_input_dir / ALERT_RECORD
-
-    @property
-    def report(self) -> PurePosixPath:
-        return PurePosixPath(REPORT)
 
     @property
     def investigation(self) -> PurePosixPath:
@@ -370,10 +365,6 @@ class RunPaths:
     @property
     def alert_record(self) -> Path:
         return self.run_dir / RUN_LAYOUT.alert_record
-
-    @property
-    def report(self) -> Path:
-        return self.run_dir / RUN_LAYOUT.report
 
     @property
     def investigation(self) -> Path:
@@ -622,7 +613,7 @@ _PAYLOAD_SHAPES = (
 #: The learning loop stages these into a run root that must withhold them from the reader
 #: (`permission.files.names_case_answer_key`). `alert.json` is the case input, not the key.
 CASE_ANSWER_KEY_NAMES = frozenset(
-    {INVESTIGATION, REPORT, SOURCE_REFS, EXECUTED_QUERIES}
+    {INVESTIGATION, SOURCE_REFS, EXECUTED_QUERIES}
 )
 
 

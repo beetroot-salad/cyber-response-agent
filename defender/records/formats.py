@@ -125,15 +125,6 @@ if TYPE_CHECKING:
         is_build_commit as is_build_commit,
         read_provenance as read_provenance,
     )
-    from defender.records._report import (
-        ReportRead as ReportRead,
-        ReportUnreadable as ReportUnreadable,
-        UNKNOWN_DISPOSITION as UNKNOWN_DISPOSITION,
-        parse_report_text as parse_report_text,
-        read_report as read_report,
-        repeats_disposition as repeats_disposition,
-        require_report as require_report,
-    )
     from defender.records._run_id import (
         OID as OID,
         RUN_ID_ALLOWED as RUN_ID_ALLOWED,
@@ -185,7 +176,6 @@ _HOMES: dict[str, str] = {
     **dict.fromkeys(("FRESH", "OPERATOR", "TRANSIENT", "api_knowledge", "knowledge_status", "read_knowledge_status",), "_knowledge_status"),
     **dict.fromkeys(("DataRoot", "DraftsRoot", "EpisodesRoot", "ExportsRoot", "KnowledgeLock", "LegacyEpisodesRoot", "LegacyRunsRoot", "RunsBase", "ScratchRoot", "SessionsRoot", "TenantRecord", "TenantRoot", "WorktreesRoot", "unwrap_data_root", "unwrap_drafts_root", "unwrap_episodes_root", "unwrap_exports_root", "unwrap_knowledge_lock", "unwrap_runs_base", "unwrap_scratch_root", "unwrap_tenant_root", "unwrap_worktrees_root",), "_locations"),
     **dict.fromkeys(("BUILD_COMMIT_ENV", "CODE_COPY_MARKER", "KnowledgeRevision", "ORIGIN_CODE_COPY", "RunProvenance", "capture_tree", "is_build_commit", "read_provenance",), "_provenance"),
-    **dict.fromkeys(("ReportRead", "ReportUnreadable", "UNKNOWN_DISPOSITION", "parse_report_text", "read_report", "repeats_disposition", "require_report",), "_report"),
     **dict.fromkeys(("OID", "RUN_ID_ALLOWED", "is_valid_run_id", "run_id_fault", "uuid_id_fault",), "_run_id"),
     **dict.fromkeys(("BranchError", "holds_content", "inherited_artifact_names", "lead_dirs", "refuse_seeded_run_dir",), "_seeded"),
     **dict.fromkeys(("parse_mapping",), "_alert_mapping_file"),

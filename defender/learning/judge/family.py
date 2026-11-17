@@ -316,7 +316,7 @@ def names_one_file(lead_id: object) -> bool:
     """Is `lead_id` a single path component this pass may join into a path?
 
     Lead ids are model-authored (any token in a `:T resolutions` row). A separator or `..` would
-    read out of the graded world — e.g. a sibling's `report.md`, disposition included — into
+    read out of the graded world — e.g. a sibling's `investigation.md` — into
     this world's prompt. The row is still carried as evidence; only the path is refused. NUL is
     barred because the bound primitive raises on it."""
     return (isinstance(lead_id, str) and bool(lead_id) and "\x00" not in lead_id

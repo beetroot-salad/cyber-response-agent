@@ -25,7 +25,7 @@ Usage:
   trace_lesson.py --tenant T <lesson_name>     # per-case: case_id  disposition  loaded_at  evidence
 
 Runs scanned: the natural runs of the tenant ``--tenant`` names (required, no default; #1105
-J8), listed and opened through its run repository — every case's ``report.md`` +
+J8), listed and opened through its run repository — every case's closing record +
 ``lessons_loaded.jsonl``. The listing rule applies (rev 4.1 H4): an entry in the runs folder
 that is not a run (a stray file, an off-rule name) fails the trace loudly, naming it, rather
 than being skipped. Lessons: the tenant's published knowledge (``agent/lessons/`` of the
@@ -54,7 +54,7 @@ from defender.knowledge import iter_lessons
 from defender.hooks.record_lesson_load import EVIDENCE_READ, exposures
 from defender._io import read_jsonl_rows, read_text_soft, use_utf8_stdio
 from defender._frontmatter import parse_frontmatter_or_none
-from defender.records.formats import UNKNOWN_DISPOSITION
+from defender._vocab import UNKNOWN_DISPOSITION
 from defender.knowledge import KnowledgePaths
 from defender._text import one_line
 from defender.records import Run, RunPaths, closing

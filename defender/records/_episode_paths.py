@@ -13,7 +13,6 @@ from defender.records._layout import (
     GATHER_SUMMARIES_DIRNAME,
     INVESTIGATION,
     LESSONS_LOADED,
-    REPORT,
     SERVED_PREFIX,
     TRACE_SUFFIX,
     WIRE_LOG_DIR,
@@ -123,10 +122,6 @@ class ArchivedWorldLeaves:
     """
 
     @property
-    def report(self) -> PurePosixPath:
-        return PurePosixPath(REPORT)
-
-    @property
     def investigation(self) -> PurePosixPath:
         return PurePosixPath(INVESTIGATION)
 
@@ -223,10 +218,6 @@ class WorldLayout:
     @property
     def dir(self) -> PurePosixPath:
         return PurePosixPath(WORLDS_DIRNAME) / self.world_id
-
-    @property
-    def report(self) -> PurePosixPath:
-        return self.dir / WORLD_LEAVES.report
 
     @property
     def investigation(self) -> PurePosixPath:
@@ -661,10 +652,6 @@ class WorldPaths:
     @property
     def dir(self) -> Path:
         return self._at(self.rel.dir, what="world_dir")
-
-    @property
-    def report(self) -> Path:
-        return self._at(self.rel.report, what="report")
 
     @property
     def investigation(self) -> Path:

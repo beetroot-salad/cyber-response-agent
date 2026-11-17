@@ -276,7 +276,7 @@ def render_runtime_headline(
       </div>
       <div class="an-health">{health_html}</div>
       <div class="an-cols">
-        <div class="an-report">{esc(body)}</div>
+        <div class="an-summary">{esc(body)}</div>
         <div class="an-leads">{_lead_summary(leads)}</div>
       </div>
     </div>
