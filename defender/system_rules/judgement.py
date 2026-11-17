@@ -21,7 +21,7 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
-from defender.kit.access import AccessDeclaration, Route
+from defender.kit.access import AccessDeclaration, Route, ticket_write_fault
 from defender.kit.faults import ConfigFault, ConfigFaults
 from defender.kit.settings import RECORDS, Locator, Part, SystemConfig
 from defender.system_rules.catalog import Catalog, route_of
@@ -119,7 +119,10 @@ def cover_fault(route: tuple[str, str], declaration: AccessDeclaration) -> str |
     mutating = [r for r in declaration.reads if r.method != "GET"]
     if mutating:
         return f"its read route {_routes_shown(mutating)} is not a GET: its declared reads must all be GET"
-    return None
+    # Last, the proxy's own rule for a ticket write (X2): what passes here, the proxy writes under (a comment route
+    # with no `*`, or more than one, has nowhere single for the ticket).
+    shape = ticket_write_fault(declaration)
+    return None if shape is None else f"its comment route {method} {pattern} cannot be written under a ticket pass: {shape}"
 
 
 # --- the judgement ------------------------------------------------------------------------------------------------

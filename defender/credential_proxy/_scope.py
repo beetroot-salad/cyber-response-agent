@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass
 from urllib.parse import unquote, urlsplit
 
-from defender.kit.access import AccessDeclaration, Route
+from defender.kit.access import AccessDeclaration, Route, ticket_write_fault
 from defender.kit.paths import holds_separator, url_form_fault, url_path_fault
 from defender.credential_proxy._refusal import CONFIG, CONFINEMENT, Refused
 from defender.kit.faults import ORIGIN_REQUEST, ORIGIN_SETUP
@@ -97,7 +97,7 @@ def _ticket_write(declaration: AccessDeclaration, system: str, method: str, path
     declares exactly one write route with exactly one wildcard segment and only GET reads (X2,
     enforced here, not trusted from the store), and `method` on `path` is that route with the
     wildcard segment decoding to `ticket`."""
-    reason = _x2_fault(declaration)
+    reason = ticket_write_fault(declaration)
     if reason is not None:
         raise Refused(CONFINEMENT, f"{system} cannot be written under a ticket pass: {reason}",
                       origin=ORIGIN_REQUEST)
@@ -110,14 +110,6 @@ def _ticket_write(declaration: AccessDeclaration, system: str, method: str, path
     if unquote(segment) != ticket:
         raise Refused(CONFINEMENT, f"{method} {path} is not on the ticket the token names",
                       origin=ORIGIN_REQUEST)
-
-
-def _x2_fault(declaration: AccessDeclaration) -> str | None:
-    if len(declaration.writes) != 1 or declaration.writes[0].path.split("/").count("*") != 1:
-        return "it must declare exactly one write route with exactly one `*` segment"
-    if any(route.method != "GET" for route in declaration.reads):
-        return "it declares a read route that is not a GET"
-    return None
 
 
 def _route_listed(routes: tuple[Route, ...], method: str, path: str) -> bool:

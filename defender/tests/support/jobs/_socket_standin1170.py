@@ -119,11 +119,11 @@ def passes(tenant_id: str, reads: tuple[str, ...], *, directory: Any, proxy_url:
     `sign-fault` as the helper's `answer_pass` refuses it. The helper's first pass at claim is not signed here: a job
     whose first pass cannot be signed is refused before its container (`tests/jobs/test_job_helper_learning.py`)."""
     from defender.credential_proxy import signing_access
-    from defender.job_host._session import PassMint
+    from defender.job_host._session import PassMint, Signing
 
     signer, address = signing_access(tenant_id, directory=directory, signer=signer, proxy_url=proxy_url,
                                      transport=transport)
-    mint = PassMint(signer, address, tenant_id, tuple(reads))
+    mint = PassMint(Signing(signer, address, tenant_id), tuple(reads))
 
     def answer(fields: dict[str, Any]) -> dict[str, Any]:
         try:

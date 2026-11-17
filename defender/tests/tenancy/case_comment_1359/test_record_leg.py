@@ -637,6 +637,7 @@ def test_1471_review_the_helper_s_refusals_map_to_product_reasons_and_never_carr
         (job_socket.Refused("RuntimeError: /host/secret", "sign-fault"), tw.REASON_NO_TOKEN),
         (OSError("gone"), tw.REASON_NO_TOKEN),
         ({"token": "", "proxy_url": "http://p"}, tw.REASON_NO_TOKEN),
+        ({"token": "t", "proxy_url": ""}, tw.REASON_NO_TOKEN),
         ({"proxy_url": "http://p"}, tw.REASON_NO_TOKEN),
         ({"token": "t", "proxy_url": "http://p"}, ("t", "http://p")),
     ]

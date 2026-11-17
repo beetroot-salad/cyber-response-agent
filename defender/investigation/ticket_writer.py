@@ -85,8 +85,7 @@ def _comment_body(run: Run, truncated_by: str | None, link: str) -> tuple[str, s
 def ticket_key(run: Run) -> str | None:
     """The ticket the alert names: the `case_key` fact recorded from the alert when the run began
     (#1359 P3), or `None`. Never read off the alert again."""
-    record = formats.parse_alert_record(run.facts.alert_record.read() or "")
-    return None if record is None else record.facts.case_key
+    return formats.ticket_of_record(run.facts.alert_record.read())
 
 
 def escalated(truncated_by: str | None, closed_before_cut: bool) -> bool:

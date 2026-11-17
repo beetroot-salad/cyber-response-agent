@@ -13,6 +13,7 @@ import importlib
 import itertools
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -345,3 +346,40 @@ def test_1471_x1_a_read_write_grant_with_no_ticket_writes_nothing_even_on_a_decl
     check_route(access, "ticket", "POST", sent, READ_WRITE, KEY)  # control: the pass naming the ticket writes
     with pytest.raises(Refused, match="names no ticket"):
         check_route(access, "ticket", "POST", sent, READ_WRITE)
+
+
+@pytest.mark.parametrize("route", [("POST", "/tickets/ABC-1/comments"), ("POST", "/projects/*/issues/*/notes")],
+                         ids=["no star", "two stars"])
+def test_1471_x2_a_comment_route_the_proxy_cannot_write_under_a_ticket_is_refused_by_the_cover_rule(route):
+    """A comment route with no `*` or several, declared exactly: the store's cover rule refuses it, naming the proxy's
+    own reason, since the proxy would refuse every ticket write under it. Control: the one-`*` route covers. (X2)"""
+    from defender.kit.access import ticket_write_fault
+
+    def declared(r: tuple[str, str]) -> Any:
+        return parse_access(R.declaration("http://store.internal:8000", writes=(r,)), system="ticket")
+
+    assert cover_fault(("POST", "/tickets/*/comments"), declared(("POST", "/tickets/*/comments"))) is None, "control"
+    shape = ticket_write_fault(declared(route))
+    assert shape is not None, "premise: the proxy refuses this shape"
+    why = cover_fault(route, declared(route))
+    assert why is not None, f"the cover rule accepts a route the proxy refuses: {route}"
+    assert shape in why, why
+
+
+def test_1471_x2_every_declaration_the_cover_rule_accepts_the_proxy_writes_under():
+    """Over declarations built from a comment route by adding, removing and changing routes: whenever the cover rule
+    accepts one, the proxy's ticket-write rule does too. (X2: one rule, asked by both)"""
+    from defender.kit.access import ticket_write_fault
+
+    route = ("PATCH", "/api/now/table/incident/*")
+    variants = [
+        ((route,), ()), ((route, ("POST", "/x/*")), ()), ((("PATCH", "/api/now/table/*/*"),), ()),
+        ((route,), (("POST", "/search"),)), ((), ()),
+    ]
+    accepted = 0
+    for writes, reads in variants:
+        access = parse_access(R.declaration("http://store.internal:8000", writes=writes, reads=reads), system="ticket")
+        if cover_fault(route, access) is None:
+            accepted += 1
+            assert ticket_write_fault(access) is None, (writes, reads)
+    assert accepted >= 1, "positive control: some declaration is accepted"

@@ -53,25 +53,18 @@ class HandBack(Exception):  # noqa: N818 — named for what it asks of the worke
 
 
 @dataclass
-class PassMint:
-    """Signs a job's passes (O5): the tenant, the investigation (or pre-flight's learning job) id, the read grant
-    (`reads`, each `r`), an expiry of one pass lifetime. Each call signs anew; the signer touches no database, so a
-    database outage stops no pass (O6)."""
+class Signing:
+    """A job's request signer and the credential proxy's address (O5), as `signing_access` checked them: the address
+    is never empty. Every investigation has one, whatever its grant (#1471 W-D8); a learning job only when it reads.
+    Each call signs anew, one at a time; the signer touches no database, so a database outage stops no pass (O6)."""
 
     signer: Any
     proxy_url: str
     tenant_id: str
-    reads: tuple[str, ...]
     _signing: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
-    def mint(self, investigation: str) -> dict[str, Any]:
-        return self._sign(investigation, {(s, "r") for s in self.reads})
-
-    def mint_write(self, investigation: str, system: str, ticket: str) -> dict[str, Any]:
-        """A pass of `rw` on `system` naming `ticket` and nothing else (#1471 X1)."""
-        return self._sign(investigation, {(system, "rw", ticket)})
-
-    def _sign(self, investigation: str, grant: set[tuple[str, ...]]) -> dict[str, Any]:
+    def sign(self, investigation: str, grant: set[tuple[str, ...]]) -> dict[str, Any]:
+        """A pass for `investigation` (or pre-flight's learning job) of `grant`, expiring one pass lifetime from now."""
         from defender.credential_proxy import mint_request_token
 
         expires_at = time.time() + PASS_LIFETIME_SEC
@@ -80,11 +73,31 @@ class PassMint:
                                        grant=grant, expires_at=datetime.fromtimestamp(expires_at, UTC))
         return {"token": token, "expires_at": expires_at, "proxy_url": self.proxy_url}
 
+    def mint_write(self, investigation: str, system: str, ticket: str) -> dict[str, Any]:
+        """A pass of `rw` on `system` naming `ticket` and nothing else (#1471 X1)."""
+        return self.sign(investigation, {(system, "rw", ticket)})
+
+
+@dataclass
+class PassMint:
+    """A job's read passes: its non-empty read grant (`reads`, each `r`) over its `signing`. A job that reads nothing
+    has none."""
+
+    signing: Signing
+    reads: tuple[str, ...]
+
+    @property
+    def proxy_url(self) -> str:
+        return self.signing.proxy_url
+
+    def mint(self, investigation: str) -> dict[str, Any]:
+        return self.signing.sign(investigation, {(s, "r") for s in self.reads})
+
 
 @dataclass
 class Prepared:
     """What a kind's `prepare` settled before the container: the `launch` answer, the container's command line, the
-    pass mint (None: an empty grant, or a kind that gets no pass), the kind's own state, and `cleanup`, closed at the
+    read-pass mint (None: an empty grant, or a kind that gets no pass), the kind's own state, and `cleanup`, closed at the
     helper's end (step 8) before the lock is released (what the helper made: copies, drafts, oracle folders)."""
 
     launch: dict[str, Any]

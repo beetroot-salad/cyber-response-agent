@@ -1554,7 +1554,7 @@ def _ask_write_pass(request: Callable[..., dict[str, Any]], job: str) -> tuple[s
         _logger.warning("job %s: the helper gave no write pass (%r)", job, lost)
         return _default_ticket_writer.REASON_NO_TOKEN
     token, url = (answer.get("token"), answer.get("proxy_url")) if isinstance(answer, dict) else (None, None)
-    if isinstance(token, str) and token and isinstance(url, str):
+    if isinstance(token, str) and token and isinstance(url, str) and url:
         return token, url
     _logger.warning("job %s: the helper's write-pass answer holds no token and proxy address", job)
     return _default_ticket_writer.REASON_NO_TOKEN

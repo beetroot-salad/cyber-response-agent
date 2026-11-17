@@ -27,7 +27,7 @@ import shutil
 import stat
 import subprocess
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -72,7 +72,8 @@ class Settings:
     slots: int
     learning_slots: int
     learning_check_seconds: int = DEFAULT_LEARNING_CHECK_SECONDS
-    frontend_origin: str = ""
+    #: The screen links' origin, as `frontend_origin` checked it (#1471 W3, W9): required, so no default the worker refuses.
+    frontend_origin: str = field(kw_only=True)
 
 
 def _setting_count(environ: Mapping[str, str], name: str, default: int) -> int:

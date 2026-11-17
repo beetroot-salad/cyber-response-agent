@@ -26,8 +26,8 @@ from typing import Any
 from defender.credential_proxy import PASS_LIFETIME_SEC
 from defender.job_socket import Refused
 
-from ._common import answer_pass, first_pass, grant, mirror_run_page, settle_knowledge, start_run_box
-from ._session import DOCKER_DID_NOT_RUN, KindSpec, Prepared, Registry, Session, SetupRefused, setup_step
+from ._common import answer_pass, grant, mirror_run_page, read_passes, set_up_signing, settle_knowledge, start_run_box
+from ._session import DOCKER_DID_NOT_RUN, KindSpec, Prepared, Registry, Session, SetupRefused, Signing, setup_step
 
 _logger = logging.getLogger(__name__)
 
@@ -43,6 +43,8 @@ class _State:
     copy: Any
     tenant: Any
     box_token: str
+    #: The job's signer (#1471 W-D8: every investigation has one): its read passes' and its write pass's.
+    signing: Signing
     #: The write pass's decision, made once here from what the worker handed the helper (#1471 P-5): whether the job is
     #: flagged, the case system when it is reached through the proxy, and the ticket the admitted alert names.
     write: _WritePass | None = None
@@ -66,8 +68,7 @@ def _alert_ticket(record_text: str | None) -> str | None:
     write is read back (#1471 P-5)."""
     from defender.records import formats
 
-    record = formats.parse_alert_record(record_text or "")
-    return None if record is None else record.facts.case_key
+    return formats.ticket_of_record(record_text)
 
 
 def _case_write_system(current: Any, run_tenant: Any) -> str | None:
@@ -149,7 +150,8 @@ def prepare(session: Session, hold: contextlib.ExitStack) -> Prepared:  # noqa: 
         roster = setup_step(run_common.run_roster, session.defender_dir)
         verdict = setup_step(run_common.tenant_verdict, run_tenant, roster, warn=False)
         reads = grant(verdict.tenant)
-        passes = first_pass(session, accepted, records, reads, always=True)
+        signing = set_up_signing(session, accepted, records)  # every investigation, whatever its grant (W-D8)
+        passes = read_passes(session, signing, reads)
         record_texts: list[str] = []
         made = _materialize(session, accepted, run, launch, mapping, source, digest=session.alert_digest, admitted=record_texts)
         setup_step(run_common.write_versions_record, Path(made.run_dir), current)
@@ -162,7 +164,7 @@ def prepare(session: Session, hold: contextlib.ExitStack) -> Prepared:  # noqa: 
     facts = {
         "kind": KIND, "tenant": session.tenant_id, "job": inv, "tenant_state": "active",
         "export_commit": source.commit, "knowledge": source.host_record(), "run_dir": str(made.run_dir),
-        "run_copy": str(copy.root), "proxy_url": passes.proxy_url if passes is not None and reads else None,
+        "run_copy": str(copy.root), "proxy_url": passes.proxy_url if passes is not None else None,
         "grant": [[s, "r"] for s in reads], "pass_lifetime": PASS_LIFETIME_SEC,
         # The records read above (#1366 O6), which the container builds its tenant from (it reads no database).
         "records": current.as_wire(),
@@ -175,7 +177,7 @@ def prepare(session: Session, hold: contextlib.ExitStack) -> Prepared:  # noqa: 
     write = _WritePass(system=_case_write_system(current, run_tenant), ticket=_alert_ticket(record_texts[0] if record_texts else None)) \
         if session.post_ticket else None
     return Prepared(launch=facts, command=list(command), passes=passes, cleanup=cleanup,
-                    state=_State(made, copy, accepted, launch.record.box_token, write), exited=_exited)
+                    state=_State(made, copy, accepted, launch.record.box_token, signing, write), exited=_exited)
 
 
 def end(session: Session, cause: str) -> None:
@@ -234,15 +236,14 @@ def _write_pass(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
     ident = session.require_minted(fields["id"])
     ask = fields["ask"]
     state = session.prepared.state if session.prepared is not None else None
-    write = state.write if isinstance(state, _State) else None
-    if write is None:
+    if not isinstance(state, _State) or state.write is None:
         raise Refused("this job is not flagged to post to its ticket", "not-flagged")
+    write = state.write
     if write.system is None:
         raise Refused("the case system is not reached through the credential proxy", "no-write-system")
     if write.ticket is None:
         raise Refused("the alert names no ticket", "no-ticket")
-    passes = session.prepared.passes if session.prepared is not None else None
-    if passes is None or not isinstance(ask, str) or not ask:
+    if not isinstance(ask, str) or not ask:
         raise Refused("pass.write_back takes a non-empty text `ask`", "bad-fields")
     with write.lock:
         if write.answer is not None:
@@ -250,7 +251,7 @@ def _write_pass(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
                 return dict(write.answer)
             raise Refused("a write pass was already signed for this job", "already-signed")
         try:
-            answer = passes.mint_write(ident, write.system, write.ticket)
+            answer = state.signing.mint_write(ident, write.system, write.ticket)
         except Exception as failed:  # noqa: BLE001 — a pass that cannot be signed is the job's to report
             raise Refused(f"the pass could not be signed: {type(failed).__name__}: {failed}", "sign-fault") from None
         write.ask, write.answer = ask, answer

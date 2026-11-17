@@ -67,12 +67,16 @@ refuses the token. The worker now requires `DEFENDER_API_FRONTEND_ORIGIN` (the A
 exits with status 2 without it.
 
 Removed: the case record's `comment:` key (a record that still has it is refused, naming the key: delete it; the
-comment's wording is fixed) and the operator's `run.py --update-ticket` (an operator run never comments and never mints a
+comment's wording is fixed; `PUT /api/tenants/<tenant-id>/case-record` likewise takes only `replaces` and `system_id` and
+refuses a `comment_body` with 422, and `GET` no longer answers it: update any client that sends or reads it) and the
+operator's `run.py --update-ticket` (an operator run never comments and never mints a
 write-back token). A ticket comment is now the start-investigation request's `update_ticket` flag. The run page's own
 `--update-ticket` flag is gone too: its ticket line shows whenever a receipt exists, as the job's own report.
 
 A case system's stored access declaration must now declare exactly one write, its adapter's comment route spelled as
-the adapter spells it (the same method and segments, `*` only where the route has `*`), and only GET reads. A wider
+the adapter spells it (the same method and segments, `*` only where the route has `*`), and only GET reads; the route
+must hold exactly one `*`, where the ticket goes, so an adapter whose comment route has none or several cannot be a
+case system (the credential proxy writes under no other shape). A wider
 write that used to cover the route (a `*` in place of a literal), a second write route, or any non-GET read is refused:
 by `PUT /systems/<id>` and `tenant check`, and at run start, where a flagged investigation then ends with an `error`
 receipt and no comment (the request is still accepted). After upgrading, run `tenant check` for each tenant with a case
