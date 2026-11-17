@@ -2,15 +2,23 @@
 `ScriptedChild` leaves (setup words, cut-short facts, junk in a job-end word). Shared setup: `_worker1342`."""
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import json
 import logging
+import os
+from types import SimpleNamespace
 
 import pytest
 
 from defender.records import job_lane, run_end
 from defender.tests.support.jobs._jobs1342 import (
     NOW,
+    T1,
+    T2,
     WORKER_LOGGER,
+    an_alert,
+    is_box_token,
     job_end,
     job_store,
     row,
@@ -201,3 +209,130 @@ async def test_o8_a_job_end_word_with_junk_anywhere_is_a_failed_run_with_no_repo
         stored = row(world["dsn"], inv)
         assert (stored["stage"], stored["disposition"], stored["failure_reason"]) == ("failed", None, "no_report"), stored
         _no_run_text(stored)
+
+
+# --- #1471: the worker's half of a job's ticket write-back (P-5, W3) ---------------------------------------------
+# The Worker's origin is C-6's required `frontend_origin=`; the helper's start carries the flag, the digest and the link
+# as C-1's `--post-ticket`, `--alert-digest <hex>`, `--ticket-link <url>`. The tests spell the origin and pass it
+# themselves, so they hold whether or not the shared `make_worker` defaults it.
+
+ORIGIN_1471 = "https://app.defender.test"
+#: `ALERT_BYTES`' fields plus the ticket the fixture mapping's `case_key` (`alert_id`) reads: a flagged create needs one (W1).
+KEYED_1471 = (b'{"rule": {"id": "r-1342",  "description": "sketch"},\n'
+              b' "alert_id": "SEC-1471", "alert_timestamp": "2026-10-29T00:00:00Z"}\n')
+DIGEST_1471 = hashlib.sha256(KEYED_1471).hexdigest()
+LAUNCH_FIELDS = {"investigation_id", "tenant_id", "alert_id", "digest", "label", "box_token"}
+
+
+def _worker_1471(world, store, child, **kw):
+    from defender.tests.support.jobs._jobs1342 import make_worker
+
+    return make_worker(store, world["root"], child, **{"frontend_origin": ORIGIN_1471, **kw})
+
+
+async def _queued_1471(store, *, update_ticket: bool, tenant: str = T1, key: str = "k1") -> str:
+    alert = await an_alert(store, tenant, ticket=f"V-{key}", raw=KEYED_1471)
+    inv, _ = await store.create_investigation(tenant, alert.alert_id, key, actor="u-1", update_ticket=update_ticket)
+    return inv.investigation_id
+
+
+def _values(argv: list[str], flag: str) -> list[str]:
+    return [argv[i + 1] for i, word in enumerate(argv[:-1]) if word == flag]
+
+
+class _Spawned:
+    """The worker's process door: records the argv the worker built for each helper, then runs the scripted stand-in
+    child for that job in its place. Fakes only inject; nothing here decides what the argv holds."""
+
+    def __init__(self, child) -> None:
+        self.child, self.argvs = child, {}
+
+    async def __call__(self, *argv, **kw):
+        argv = list(argv)
+        job = _values(argv, "--job")[0]
+        self.argvs[job] = argv
+        stand = self.child(SimpleNamespace(investigation_id=job, tenant_id=_values(argv, "--tenant")[0],
+                                           parent_pid=int(_values(argv, "--parent-pid")[0])))
+        return await asyncio.create_subprocess_exec(*stand, **kw)
+
+
+async def _drain_spawned(world, rows, child):
+    """Queue each `(tenant, flagged, key)` row, drain a worker whose default helper argv is recorded; the ids and the door."""
+    from defender.worker import run_argv
+
+    door = _Spawned(child)
+    async with job_store(world["dsn"]) as store:
+        ids = [await _queued_1471(store, update_ticket=flag, tenant=tenant, key=key) for tenant, flag, key in rows]
+        await _worker_1471(world, store, run_argv, spawn=door).drain()
+    return ids, door
+
+
+async def test_1471_p5_each_helper_is_started_with_its_own_flag_digest_and_link(world):
+    """The helper's argv carries `--post-ticket` and `--ticket-link <origin>/t/<tenant>/investigations/<id>` only for a
+    flagged row, `--alert-digest` always, each row its own tenant and id. (P-5 worker side, W3)"""
+    rows = [(T1, True, "k1"), (T1, False, "k2"), (T2, True, "k3")]
+    ids, door = await _drain_spawned(world, rows, _child(world, exit=0, files=_committed()))
+
+    assert sorted(door.argvs) == sorted(ids), "premise: every row's helper was started"
+    for inv, (tenant, flagged, _key) in zip(ids, rows, strict=True):
+        argv = door.argvs[inv]
+        assert ("--post-ticket" in argv) is flagged, (inv, argv)
+        assert _values(argv, "--alert-digest") == [DIGEST_1471], (inv, argv)
+        assert _values(argv, "--ticket-link") == ([f"{ORIGIN_1471}/t/{tenant}/investigations/{inv}"] if flagged else []), (inv, argv)
+        assert _values(argv, "--tenant") == [tenant]
+        assert _values(argv, "--job") == [inv]
+
+
+async def test_1471_p5_a_flagged_rows_tenant_folder_changes_exactly_as_an_unflagged_rows_does(world):
+    """Two tenant folders that differ only in their row's flag change alike under the worker, entry for entry (added,
+    altered or removed; by kind, mode and decoded text) once each folder's own ids are masked: nothing a job can see depends
+    on the flag. (P-5; the stand-in job writes nothing)"""
+    rows = [(T1, True, "k1"), (T2, False, "k1")]
+    folders = {tenant: world["root"] / tenant for tenant, _flag, _key in rows}
+
+    def snapshot(folder) -> dict:
+        """Every entry by kind and mode: a directory or a link is as visible to a job as a file's bytes."""
+        def entry(p):
+            kind = "link:" + os.readlink(p) if p.is_symlink() else "dir" if p.is_dir() else "file"
+            body = p.read_bytes() if kind == "file" else kind.encode()
+            return b"%o " % (p.lstat().st_mode & 0o7777) + body
+        return {p.relative_to(folder): entry(p) for p in folder.rglob("*")}
+
+    before = {tenant: snapshot(folder) for tenant, folder in folders.items()}
+    (flagged_id, plain_id), door = await _drain_spawned(world, rows, _child(world, exit=0, files={}))
+    after = {tenant: snapshot(folder) for tenant, folder in folders.items()}
+    #: Each folder's change: every path whose entry the drain added, altered or removed, as (before, after).
+    changed = {tenant: {p: (before[tenant].get(p), after[tenant].get(p)) for p in before[tenant].keys() | after[tenant].keys()
+                        if before[tenant].get(p) != after[tenant].get(p)} for tenant in folders}
+
+    assert _values(door.argvs[flagged_id], "--ticket-link") == [f"{ORIGIN_1471}/t/{T1}/investigations/{flagged_id}"], \
+        "premise: the flag reached the worker"
+    assert "--post-ticket" not in door.argvs[plain_id], "premise: the unflagged row carries no flag"
+
+    def launch_of(tenant, inv):
+        return json.loads((folders[tenant] / "runs" / f"{inv}.launch.json").read_text(encoding="utf-8"))
+
+    def masked(tenant, inv):
+        launch = launch_of(tenant, inv)
+        values = [inv, launch["alert_id"], launch["box_token"], tenant]
+
+        def mask(text):
+            for n, value in enumerate(values):
+                text = text.replace(value, f"<v{n}>")
+            return text
+
+        return {mask(str(path)): tuple(None if e is None else mask(e.decode("utf-8", "replace")) for e in pair)
+                for path, pair in changed[tenant].items()}
+
+    assert [is_box_token(launch_of(t, inv)["box_token"]) for t, inv in ((T1, flagged_id), (T2, plain_id))] == [True, True], \
+        "a box token is not of the decided form, which the mask would hide"
+    flagged, plain = masked(T1, flagged_id), masked(T2, plain_id)
+    assert len(plain) >= 2, "premise: the worker changed the unflagged row's folder"
+    assert sorted(flagged) == sorted(plain), "the flagged folder changed at other paths than the unflagged one"
+    assert {n: c for n, c in flagged.items() if c != plain[n]} == {}, "an entry of the flagged folder changed otherwise"
+    for tenant, inv in ((T1, flagged_id), (T2, plain_id)):
+        assert set(launch_of(tenant, inv)) == LAUNCH_FIELDS, launch_of(tenant, inv)
+        assert launch_of(tenant, inv)["digest"] == DIGEST_1471, "premise: the record is this row's"
+    for tenant in (T1, T2):
+        for path, (_old, data) in changed[tenant].items():
+            assert not any(w in (data or b"") for w in (b"app.defender.test", b"update_ticket", b"ticket_link", b"post_ticket")), path

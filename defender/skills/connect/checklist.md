@@ -27,8 +27,8 @@ severity — a WARN is a judgment call left to you, not a cleared bar:
   store's own judgement (every key the adapter declares and no other, no blank or
   `CHANGE-ME` value, the adapter's settings check, an access declaration that parses),
   each failure the sentence the operator would be refused with, naming the file;
-- with `--case`: the case record is one the store accepts beside the handoff's system — its body
-  template renders, it names that system, and the system's `access.yaml` declares a write route
+- with `--case`: the case record is one the store accepts beside the handoff's system — it names
+  that system, and the system's `access.yaml` declares a write route
   covering the adapter's comment route (printed as `the comment the host sends: ...`);
 - `skills/{system}/SKILL.md` frontmatter says `name: defender-{system}` — asked only for an
   adapter with a tool beyond `health-check`, and judged whenever `--staged` is given;

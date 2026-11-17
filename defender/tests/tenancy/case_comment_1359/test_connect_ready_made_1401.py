@@ -1,7 +1,8 @@
 """#1401 (design r4 D2, r5): connect's scaffold validator over a ready-made case adapter's handoff.
 
 - An adapter with no investigator tools beyond `health-check` needs no staged tenant half (skill, seed queries).
-- `--case <file>` judges the handoff's system and the case record as the store will, comment cover included.
+- `--case <file>` judges the handoff's system and the case record as the store will, comment cover included. The case
+  record is just `system:` (#1471 W7 removed its `comment.body` template); one still carrying `comment:` is refused.
 - The report prints the comment route the adapter sends for the handoff's settings.
 
 Driven through the real command over the checkout's `jira`, `servicenow` and `cmdb` adapters.
@@ -21,8 +22,6 @@ REPO = Path(__file__).resolve().parents[4]
 JIRA_CLOUD = ("POST", "/rest/api/3/issue/*/comment")
 JIRA_DESK = ("POST", "/rest/servicedeskapi/request/*/comment")
 SERVICENOW = ("PATCH", "/api/now/table/incident/*")
-
-CASE_BODY = "Disposition: {disposition}\n"
 
 
 def _access(base: str, writes: tuple[tuple[str, str], ...]) -> str:
@@ -48,9 +47,9 @@ def _servicenow(where: Path) -> Path:
                     _access("https://example.service-now.com", (SERVICENOW,)))
 
 
-def _case(where: Path, system: str, body: str = CASE_BODY) -> Path:
+def _case(where: Path, system: str) -> Path:
     path = where / "case-record.yaml"
-    path.write_text(json.dumps({"system": system, "comment": {"body": body}}) + "\n", encoding="utf-8")
+    path.write_text(json.dumps({"system": system}) + "\n", encoding="utf-8")
     return path
 
 
@@ -114,25 +113,27 @@ def test_1401_case_check_fails_a_case_record_naming_another_system(tmp_path):
 
 UNUSABLE_CASE_RECORDS = [
     pytest.param(b"- just\n- a list\n", "", id="a-list"),
-    pytest.param(b"system: jira\n", "comment.body", id="no-comment"),
     pytest.param(b"comment: {body: x}\n", "", id="no-system"),
     pytest.param(b"system: [\n", "", id="unparsable"),
-    pytest.param(b"system: 42\ncomment: {body: x}\n", "", id="system-not-text"),
-    pytest.param(b"system: ''\ncomment: {body: x}\n", "", id="system-empty"),
-    pytest.param(b"system: jira\ncomment: [x]\n", "comment.body", id="comment-a-list"),
-    pytest.param(b"system: jira\ncomment: {}\n", "comment.body", id="comment-without-body"),
-    pytest.param(b"system: jira\ncomment:\n  body: 7\n", "comment.body", id="body-not-text"),
-    pytest.param((json.dumps({"system": "jira"}) + "\n").encode(), "comment.body", id="json-no-comment-body"),
+    pytest.param(b"system: 42\n", "", id="system-not-text"),
+    pytest.param(b"system: ''\n", "", id="system-empty"),
     pytest.param(b"system: jira\n# \xff\xfe not text \x80\n", "", id="not-utf8"),
+    # #1471 W7 / W-D10: the removed template key is refused, naming it (the old `comment.body` rows, each now refused
+    # for carrying `comment:` whatever its shape).
+    pytest.param(b"system: jira\ncomment: {body: x}\n", "comment:", id="comment-with-body"),
+    pytest.param(b"system: jira\ncomment: [x]\n", "comment:", id="comment-a-list"),
+    pytest.param(b"system: jira\ncomment: {}\n", "comment:", id="comment-without-body"),
+    pytest.param(b"system: jira\ncomment:\n  body: 7\n", "comment:", id="body-not-text"),
+    pytest.param((json.dumps({"system": "jira", "comment": {"body": "x"}}) + "\n").encode(), "comment:",
+                 id="json-with-comment"),
 ]
 
 
 @pytest.mark.parametrize(("text", "expect"), UNUSABLE_CASE_RECORDS)
 def test_1401_case_check_fails_an_unusable_case_record_naming_its_file(tmp_path, text, expect):
-    """A case record that is not a mapping with a `system` and a `comment.body` (nine malformed shapes, the no-body JSON
-    form, and bytes that are not UTF-8) is refused, naming the file the maintainer fixes: a failed line, no traceback.
-    A row that lacks the comment body also names `comment.body` (`expect`; empty where the record fails earlier).
-    (#1366 O4, #1401)"""
+    """A case record that is not a mapping with a `system`, or that still carries the removed `comment:` key, or whose
+    bytes are not UTF-8, is refused, naming the file the maintainer fixes: a failed line, no traceback. A row carrying
+    `comment:` also names that key (`expect`; empty where the record fails earlier). (#1366 O4, #1401; #1471 W7, W-D10)"""
     folder = _jira(tmp_path, desk="no", writes=(JIRA_CLOUD,))
     case = tmp_path / "case-record.yaml"
     case.write_bytes(text)
@@ -142,6 +143,21 @@ def test_1401_case_check_fails_an_unusable_case_record_naming_its_file(tmp_path,
     assert rc != 0, out
     assert any(str(case) in line and expect in line for line in failed), out
     assert "Traceback" not in out, out
+
+
+@pytest.mark.parametrize("text", [b"system: jira\n", (json.dumps({"system": "jira"}) + "\n").encode()],
+                         ids=["yaml-system-only", "json-system-only"])
+def test_1401_case_check_accepts_a_case_record_with_only_a_system(tmp_path, text):
+    """Control for the rows above (#1471 W7): a record of just `system:` is valid, in YAML or JSON form; the old
+    `no-comment` and `json-no-comment-body` rows (refused for lacking `comment.body`) are these."""
+    folder = _jira(tmp_path, desk="no", writes=(JIRA_CLOUD,))
+    case = tmp_path / "case-record.yaml"
+    case.write_bytes(text)
+
+    rc, failed, out = _validate("jira", "--handoff", str(folder), "--case", str(case))
+
+    assert failed == [], out
+    assert rc == 0, out
 
 
 @pytest.mark.parametrize(("make", "route"), [

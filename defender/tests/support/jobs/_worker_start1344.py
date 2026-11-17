@@ -59,6 +59,10 @@ def network_docker(folder: Path) -> Path:
     return folder
 
 
+#: The frontend origin every started worker is given (#1471 r8 W9).
+FRONTEND_ORIGIN = "https://app.defender.test"
+
+
 def worker_env(data_root: Path, *, dsn: str = CLOSED_DSN, stamp: str | None = STAMP, slots: str | None = None,
                learning: str | None = None, extra: dict[str, str] | None = None) -> dict[str, str]:
     """The environment of an image: no PYTHONPATH, no inherited `DEFENDER_*`, the settings as named (`None` leaves one
@@ -68,6 +72,8 @@ def worker_env(data_root: Path, *, dsn: str = CLOSED_DSN, stamp: str | None = ST
            if k not in ("PYTHONPATH", "PYTHONDONTWRITEBYTECODE") and not k.startswith("DEFENDER_")}
     shims = network_docker(data_root.parent / f"{data_root.name}-docker-1170")
     env.update({"DEFENDER_DATABASE_DSN": dsn, "DEFENDER_DATA_ROOT": str(data_root), "DEFENDER_JOB_NETWORK": JOB_NETWORK,
+                # #1471 r8 W9: the origin the worker builds a job's ticket link from (the API's setting's name).
+                "DEFENDER_API_FRONTEND_ORIGIN": FRONTEND_ORIGIN,
                 "PATH": f"{shims}{os.pathsep}{env.get('PATH', '')}"})
     for name, value in (("DEFENDER_BUILD_COMMIT", stamp), ("DEFENDER_WORKER_SLOTS", slots),
                         ("DEFENDER_WORKER_LEARNING_SLOTS", learning)):
@@ -91,6 +97,19 @@ def run_to_exit(source: Path, env: dict[str, str], *, timeout: float = 60) -> su
         out, err = proc.communicate()
         raise AssertionError(f"the worker neither served nor refused within {timeout}s; stderr: {err.decode(errors='replace')[-800:]}") from None
     return subprocess.CompletedProcess(proc.args, proc.returncode, out.decode(errors="replace"), err.decode(errors="replace"))
+
+
+def run_for(source: Path, env: dict[str, str], *, within: float) -> subprocess.CompletedProcess:
+    """A start watched for `within` seconds: its exit if it ends by itself, else killed (returncode None) with what it said."""
+    proc = start(source, env)
+    try:
+        out, err = proc.communicate(timeout=within)
+        code = proc.returncode
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        out, err = proc.communicate()
+        code = None
+    return subprocess.CompletedProcess(proc.args, code, out.decode(errors="replace"), err.decode(errors="replace"))
 
 
 def wait_until(condition: Callable[[], bool], *, timeout: float, what: str, proc: subprocess.Popen | None = None) -> None:

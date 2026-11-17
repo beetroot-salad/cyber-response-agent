@@ -4,9 +4,14 @@ from __future__ import annotations
 
 import base64
 import json
+import random
 from datetime import timedelta
+from urllib.parse import quote, unquote
 
 import pytest
+
+from defender.kit.faults import ConfigFault
+from defender.records._alert_input import case_key_of
 
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
@@ -14,7 +19,12 @@ from defender.tests.integrations.credential_proxy_1163 import _tenant as T
 KEY_A = "canary-tenant-a-key-1163-aaaa11"
 KEY_B = "canary-tenant-b-key-1163-bbbb22"
 RD = {("identity", "r")}
-RW = {("identity", "rw")}
+#: X1: a write pass is `rw` naming its ticket (the third string of the entry).
+TK = "T-1"
+RW = {("identity", "rw", TK)}
+#: The one write route X2 allows: the case system's comment route, one wildcard at the key.
+CASE_ROUTE = ("POST", "/tickets/*/comments")
+COMMENT = f"/tickets/{TK}/comments"
 
 
 def _forged(r, *, investigation: str | None = None, grant=None) -> str:
@@ -58,26 +68,26 @@ def test_s4_each_of_two_tenants_tokens_is_verified_with_its_own_key(tmp_path, da
 
 # --- O3 write routes are matched on the method too -------------------------------------------
 
-WRITE_ROUTES = (("PUT", "/tickets/*"), ("DELETE", "/tickets/*"))
+WRITE_ROUTES = (CASE_ROUTE,)
 
 
 @pytest.mark.parametrize(("method", "fault"), [
-    pytest.param("POST", "ConfinementFault", id="post-on-a-put-delete-route"),
-    pytest.param("PATCH", "ConfinementFault", id="patch-on-a-put-delete-route"),
-    pytest.param("PUT", None, id="put-is-declared"),
-    pytest.param("DELETE", None, id="delete-is-declared"),
+    pytest.param("PUT", "ConfinementFault", id="put-on-a-post-route"),
+    pytest.param("PATCH", "ConfinementFault", id="patch-on-a-post-route"),
+    pytest.param("DELETE", "ConfinementFault", id="delete-on-a-post-route"),
+    pytest.param("POST", None, id="post-is-declared"),
 ])
-def test_s3_a_write_route_matches_only_the_methods_it_lists(tmp_path, data_root, method, fault):
-    """A path declared as a write only for PUT and DELETE is not writable by another method
-    even under `rw`; the declared methods are sent. O3, O7."""
+def test_s3_a_write_route_matches_only_the_method_it_lists(tmp_path, data_root, method, fault):
+    """A path declared as a write only for POST is not writable by another method even under a pass on that ticket;
+    the declared method is sent. O3, O7, X1."""
     body = '{"q": 1}' if method != "DELETE" else None
     with T.rig(tmp_path / "forge", data_root, lambda u: H.declaration(
             u + T.BASE_PATH, writes=WRITE_ROUTES)) as r:
-        answer = r.ask(method, "/tickets/7", grant=RW, body=body)
+        answer = r.ask(method, COMMENT, grant=RW, body=body)
 
     assert answer["fault"] == fault, answer
     assert [(s.method, s.path) for s in r.up.seen] == (
-        [] if fault else [(method, f"{T.BASE_PATH}/tickets/7")])
+        [] if fault else [(method, f"{T.BASE_PATH}{COMMENT}")])
 
 
 @pytest.mark.parametrize("grant", [RD, RW], ids=["read-grant", "write-grant"])
@@ -119,8 +129,9 @@ def test_s4_a_token_naming_no_investigation_is_refused(tmp_path, data_root):
 
 
 @pytest.mark.parametrize("grant", [
-    pytest.param([("identity", "r"), ("identity", "rw")], id="read-then-write"),
-    pytest.param([("identity", "rw"), ("identity", "r")], id="write-then-read"),
+    pytest.param([("identity", "r"), ("identity", "rw", TK)], id="read-then-write"),
+    pytest.param([("identity", "rw", TK), ("identity", "r")], id="write-then-read"),
+    pytest.param([("identity", "rw", TK), ("identity", "rw", "T-2")], id="two-passes"),
     pytest.param([("identity", "r"), ("identity", "r")], id="same-mode-twice"),
 ])
 def test_s4_a_token_granting_one_system_twice_is_refused(tmp_path, data_root, grant):
@@ -128,8 +139,210 @@ def test_s4_a_token_granting_one_system_twice_is_refused(tmp_path, data_root, gr
     and unread, so no entry can pick the stronger mode; one entry is honoured. O8, O3."""
     with T.rig(tmp_path / "forge", data_root, lambda u: H.declaration(
             u + T.BASE_PATH, writes=WRITE_ROUTES)) as r:
-        refused = r.ask("PUT", "/tickets/7", tok=_forged(r, grant=grant), body="{}")
+        refused = r.ask("POST", COMMENT, tok=_forged(r, grant=grant), body="{}")
         assert (refused["fault"], r.up.seen, r.store.reads) == ("ConfigFault", [], [])
-        control = r.ask("PUT", "/tickets/7", tok=_forged(r, grant=[("identity", "rw")]), body="{}")
+        control = r.ask("POST", COMMENT, tok=_forged(r, grant=[("identity", "rw", TK)]), body="{}")
 
-    assert (control["fault"], [s.method for s in r.up.seen]) == (None, ["PUT"])
+    assert (control["fault"], [s.method for s in r.up.seen]) == (None, ["POST"])
+
+
+# --- X1 a write pass names its ticket ----------------------------------------------------------
+
+REFUSED = ("ConfigFault", "ConfinementFault")
+
+
+def _declaring(**kw):
+    return lambda u: H.declaration(u + T.BASE_PATH, **{"writes": (CASE_ROUTE,), **kw})
+
+
+def _case_keys() -> list[str]:
+    """Keys of `case_key_of`'s grammar as a class: every one-character key the grammar admits, edges that stress the
+    transport's quoting (`%`, an encoded separator spelled out, `*`, query and fragment characters, dots inside), the
+    longest key, and seeded random keys of every length class. The grammar's own predicate filters the candidates."""
+    alphabet = [chr(c) for c in range(0x21, 0x7F)]
+    rng = random.Random(1471)
+    drawn = ["".join(rng.choice(alphabet) for _ in range(rng.choice((2, 3, 8, 40, 127, 128)))) for _ in range(40)]
+    edges = ["%41", "%2F", "%252F", "a%", "%", "*", "a*b", "?q=1#f", "..a", "a..", ".a", "a.", "~", "T-1", "x" * 128]
+    keys = [k for k in [*alphabet, *edges, *drawn] if case_key_of(k) == k]
+    assert len(keys) > 120, "premise: the class is generated, not a hand list"
+    assert {"%", "*"} <= set(keys), "premise: the class reaches the quoted characters"
+    assert (case_key_of("/"), case_key_of("..")) == (None, None), "premise: the grammar refuses what the class omits"
+    return keys
+
+
+def _segments_of(key: str, rng: random.Random) -> list[tuple[str, str]]:
+    """(class, wire segment) variants of `key`: spellings near it by case, padding, compatibility forms, affixes and
+    percent-encodings, some of which decode to exactly `key` (the must-send controls)."""
+    quoted = quote(key, safe="")
+    every = [f"%{b:02X}" for b in key.encode()]
+    wide = [chr(ord(c) + 0xFEE0) for c in key]
+    out = [("case", quote(rng.choice([key.swapcase(), key.lower(), key.upper()]), safe=""))]
+    out += [("padding", quote(pad.format(key), safe="")) for pad in (" {}", "{} ", "\t{}\t", "{}\x00", "{}.", "  {}  ")]
+    out += [("compat", quote("".join(wide), safe="")),
+            ("compat", quote("".join(w if rng.random() < 0.5 else c for w, c in zip(wide, key, strict=True)), safe=""))]
+    out += [("affix", quote(rng.choice("0aZ-_.~ %") + key, safe="")),
+            ("affix", quote(key + rng.choice("0aZ-_.~ %"), safe="")), ("affix", quote(key + "x", safe=""))]
+    out += [("encoding", "".join(every)), ("encoding", "".join(every).lower()),
+            ("encoding", "".join(h if rng.random() < 0.5 else h.lower() for h in every)),
+            ("encoding", quoted.lower()),
+            ("encoding", "".join(c if c == quote(c, safe="") and rng.random() < 0.5 else h for h, c in zip(every, key, strict=True))),
+            ("encoding", quote(quoted, safe="")), ("encoding", quoted + "%2e"), ("encoding", "%00" + quoted)]
+    return out
+
+
+def test_x1_a_pass_comments_on_its_ticket_whatever_the_key_and_on_no_other(tmp_path, data_root):
+    """For every key of the case-key grammar, the pass naming it sends a comment whose segment decodes (once) to
+    that key, however spelled, and refuses any other segment unsent and unread: case, padding, compatibility forms,
+    affixes, a longer key, a second decoding. X1."""
+    keys = _case_keys()
+    rng = random.Random(14713)
+    classes: dict[str, list[bool]] = {}
+    with T.rig(tmp_path / "forge", data_root, _declaring()) as r:
+        for key in keys:
+            grant = {("identity", "rw", key)}
+            path = f"/tickets/{quote(key, safe='')}/comments"
+            r.up.seen.clear()
+            sent = r.ask("POST", path, grant=grant, body="{}")
+            assert (sent["fault"], [(s.method, s.path) for s in r.up.seen]) == (
+                None, [("POST", f"{T.BASE_PATH}{path}")]), key
+            for kind, segment in _segments_of(key, rng):
+                path = f"/tickets/{segment}/comments"
+                equal = unquote(segment) == key
+                classes.setdefault(kind, []).append(equal)
+                r.up.seen.clear()
+                r.store.reads.clear()
+                answer = r.ask("POST", path, grant=grant, body="{}")
+                if equal:
+                    # the proxy may re-spell the path it sends: what is demanded is that the write is sent
+                    assert (answer["fault"], [s.method for s in r.up.seen]) == (None, ["POST"]), (key, segment)
+                    forwarded = r.up.seen[0].path.split("/")
+                    assert unquote(forwarded[forwarded.index("tickets") + 1]) == key, (key, segment, r.up.seen[0].path)
+                else:
+                    assert (answer["fault"] in REFUSED, r.up.seen, r.store.reads) == (True, [], []), (key, segment)
+            if unquote(key) != key:  # the key spelled raw decodes to another key: not the pass's
+                raw = r.ask("POST", f"/tickets/{key}/comments", grant=grant, body="{}")
+                assert (raw["fault"] in REFUSED, r.up.seen) == (True, []), key
+
+    assert set(classes) == {"case", "padding", "compat", "affix", "encoding"}, classes.keys()
+    assert all(False in flags for flags in classes.values()), "premise: every class produced a non-key segment"
+    assert True in classes["encoding"], "premise: some encodings decode exactly to the key (the controls)"
+    assert any(k != k.swapcase() for k in keys), "premise: keys with letters, so case-folding is tested"
+
+
+@pytest.mark.parametrize(("method", "path", "sent"), [
+    pytest.param("POST", COMMENT, True, id="the-ticket"),
+    pytest.param("POST", "/tickets/T-2/comments", False, id="another-ticket"),
+    pytest.param("POST", "/tickets/T-10/comments", False, id="a-longer-key"),
+    pytest.param("POST", "/tickets/T-/comments", False, id="a-prefix-of-the-key"),
+    pytest.param("POST", "/tickets//comments", False, id="an-empty-segment"),
+    pytest.param("POST", "/tickets/T-1/comments/x", False, id="one-segment-too-many"),
+    pytest.param("POST", "/tickets/T-1", False, id="one-segment-too-few"),
+    pytest.param("PUT", COMMENT, False, id="another-method"),
+    pytest.param("POST", "/tickets/T-1/transitions", False, id="another-route"),
+    pytest.param("POST", "/admin", False, id="an-unlisted-post"),
+    pytest.param("DELETE", "/users/x", False, id="an-undeclared-delete"),
+    pytest.param("DELETE", "/tickets/T-1", False, id="a-delete-of-the-ticket"),
+    pytest.param("PUT", "/search", False, id="a-put-on-a-read-path"),
+    pytest.param("POST", "/tickets/..;/comments", False, id="a-path-parameter-in-the-ticket-segment"),
+    pytest.param("POST", "/tickets/T-1/..;/comments", False, id="a-path-parameter-after-the-ticket"),
+    pytest.param("GET", COMMENT, True, id="a-read-of-the-ticket"),
+    pytest.param("GET", "/tickets/T-2/comments", True, id="a-read-of-another-ticket"),
+    pytest.param("GET", "/users/x", True, id="a-read-elsewhere"),
+    pytest.param("HEAD", "/users/x", True, id="a-head-elsewhere"),
+])
+def test_x1_under_a_pass_only_the_comment_route_on_its_ticket_writes_and_reads_are_unaffected(
+        tmp_path, data_root, method, path, sent):
+    """Under the pass naming T-1: a comment on T-1 passes; another ticket, another route, shape or method is refused
+    unsent and unread; reads pass as under a read grant. X1."""
+    with T.rig(tmp_path / "forge", data_root, _declaring()) as r:
+        answer = r.ask(method, path, grant=RW, body='{"q": 1}' if method == "POST" else None)
+
+    if sent:
+        assert answer["fault"] is None, answer
+        assert [(s.method, s.path) for s in r.up.seen] == [(method, f"{T.BASE_PATH}{path}")]
+    else:
+        assert (answer["fault"] in REFUSED, r.up.seen, r.store.reads) == (True, [], []), answer
+
+
+@pytest.mark.parametrize(("declared", "path"), [
+    pytest.param({"writes": (CASE_ROUTE, ("PUT", "/tickets/*"))}, COMMENT, id="a-second-write-route"),
+    pytest.param({"writes": (CASE_ROUTE, ("POST", "/tickets/*/transitions"))}, COMMENT, id="a-second-route-same-method"),
+    pytest.param({"writes": (("POST", "/tickets/*/comments/*"),)}, f"{COMMENT}/x", id="two-wildcards"),
+    pytest.param({"writes": (("POST", "/*/*/comments"),)}, COMMENT, id="a-widened-route"),
+    pytest.param({"writes": (("POST", f"/tickets/{TK}/comments"),)}, COMMENT, id="no-wildcard"),
+    pytest.param({"reads": (("POST", "/search"),)}, COMMENT, id="a-non-get-read"),
+    pytest.param({"reads": (("PATCH", "/tickets/*"),)}, COMMENT, id="a-mutating-read"),
+])
+def test_x1_a_declaration_that_breaks_the_cover_rule_refuses_every_write_under_a_pass(
+        tmp_path, data_root, declared, path):
+    """A system declaring other than exactly one write route with one wildcard and only GET reads is written on no
+    route even on the pass's own ticket: the proxy enforces X2 itself. Control: the compliant declaration sends the
+    same request. X1, X2."""
+    with T.rig(tmp_path / "forge", data_root, _declaring(**declared)) as r:
+        refused = r.ask("POST", path, grant=RW, body="{}")
+        assert (refused["fault"] in REFUSED, r.up.seen, r.store.reads) == (True, [], []), refused
+    with T.rig(tmp_path / "control", data_root, _declaring(reads=(("GET", "/search"),))) as r:
+        control = r.ask("POST", COMMENT, grant=RW, body="{}")
+
+    assert (control["fault"], [s.method for s in r.up.seen]) == (None, ["POST"])
+
+
+@pytest.mark.parametrize("grant", [
+    pytest.param([("identity", "rw")], id="rw-without-a-ticket"),
+    pytest.param([("identity", "r", TK)], id="a-ticket-on-a-read-entry"),
+    pytest.param([("identity", "rw", TK, "x")], id="four-strings"),
+    pytest.param([("identity", "rw", "")], id="an-empty-ticket"),
+    pytest.param([("identity", "rw", 7)], id="a-ticket-that-is-not-a-string"),
+    pytest.param([("identity", "rw", None)], id="a-null-ticket"),
+])
+def test_x1_a_token_whose_entry_breaks_the_ticket_binding_is_refused_unsent_and_unread(tmp_path, data_root, grant):
+    """A validly signed token with an `rw` entry and no ticket, a ticket on an `r` entry, or any other entry shape is
+    refused by the proxy, whatever the request; the pass naming the ticket is sent. X1, C-2."""
+    with T.rig(tmp_path / "forge", data_root, _declaring()) as r:
+        for method, path in (("POST", COMMENT), ("GET", "/users/x")):
+            refused = r.ask(method, path, tok=_forged(r, grant=grant), body="{}")
+            assert (refused["fault"] in REFUSED, r.up.seen, r.store.reads) == (True, [], []), (method, refused)
+        control = r.ask("POST", COMMENT, tok=_forged(r, grant=[("identity", "rw", TK)]), body="{}")
+
+    assert (control["fault"], [s.method for s in r.up.seen]) == (None, ["POST"])
+
+
+def _not_case_keys() -> list[str]:
+    """Third strings outside `case_key_of`'s grammar, by membership: one-character strings of every code the key refuses
+    (separators, control and non-ASCII, space), an over-long key, a key made only of dots, and keys holding a refused
+    character."""
+    refused = [chr(c) for c in (*range(0x00, 0x21), 0x7F, 0xE9, 0x2603)] + ["/", "\\", ";"]
+    candidates = [*refused, "x" * 129, ".", "..", "...", "a/b", "a;b", "a\\b", "a b", "a\n", "é", "T-1/..", "../x"]
+    keys = [k for k in candidates if k and case_key_of(k) is None]
+    assert len(keys) > 30
+    assert {"/", ".."} <= set(keys)
+    return keys
+
+
+def test_x1_a_third_string_that_is_not_a_case_key_is_refused_at_the_mint_and_at_the_proxy(tmp_path, data_root):
+    """Every string outside the case-key grammar is refused as a ticket, minted (`ConfigFault`, nothing signed) or
+    forged (refused by the proxy, unsent); a key of the grammar mints and is sent. X1, C-2."""
+    with T.rig(tmp_path / "forge", data_root, _declaring()) as r:
+        for key in _not_case_keys():
+            with pytest.raises(ConfigFault):
+                r.tok({("identity", "rw", key)})
+            forged = r.ask("POST", COMMENT, tok=_forged(r, grant=[("identity", "rw", key)]), body="{}")
+            assert (forged["fault"] in REFUSED, r.up.seen) == (True, []), repr(key)
+        minted = r.tok(RW)
+
+    assert H.claims_of(minted)["grant"] == [["identity", "rw", TK]], "the entry is [system, rw, ticket] on the wire"
+
+
+@pytest.mark.parametrize("grant", [
+    pytest.param({("identity", "rw")}, id="rw-without-a-ticket"),
+    pytest.param({("identity", "r", TK)}, id="a-ticket-on-a-read-entry"),
+])
+def test_x1_the_mint_refuses_an_entry_that_breaks_the_ticket_binding(tmp_path, data_root, grant):
+    """The minter refuses an `rw` entry with no ticket and a ticket on an `r` entry (`ConfigFault`); the two entry
+    forms it accepts mint. X1, C-2."""
+    with T.rig(tmp_path / "forge", data_root, _declaring()) as r:
+        with pytest.raises(ConfigFault):
+            r.tok(grant)
+        both = r.tok({("identity", "r"), ("cmdb", "rw", TK)})
+
+    assert sorted(H.claims_of(both)["grant"]) == [["cmdb", "rw", TK], ["identity", "r"]]

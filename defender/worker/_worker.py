@@ -57,12 +57,13 @@ import subprocess
 import sys
 import time
 import uuid
-from collections.abc import Awaitable, Callable, Coroutine
+from collections.abc import Awaitable, Callable, Coroutine, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from defender import _log
+from defender._url import check_origin
 from defender.jobs import LearningProgress, is_outage, is_refusal
 from defender.jobs.audit import SYSTEM, announce
 from defender.box import CLAIM_ENV, container_name
@@ -105,6 +106,11 @@ class Launch:
     investigation_id: str
     tenant_id: str
     parent_pid: int
+    #: What the helper is handed at its own start, never through the tenant folder (#1471 P-5): the alert's digest,
+    #: whether the job posts to its ticket, and the screen link it posts.
+    alert_digest: str | None = None
+    update_ticket: bool = False
+    ticket_link: str | None = None
 
 
 @dataclass(frozen=True)
@@ -139,18 +145,32 @@ class _PostStepOf:
     learning_job_id: str | None
 
 
-def _helper_argv(kind: str, *, job: str | None, tenant: str, parent_pid: int, source: str | None = None) -> list[str]:
-    """`python -m defender.job_host --kind <kind> [--job <id>] --tenant <T> [--source <run>] --parent-pid <pid>`."""
+def _helper_argv(kind: str, *, job: str | None, tenant: str, parent_pid: int, source: str | None = None,
+                 extra: Sequence[str] = ()) -> list[str]:
+    """`python -m defender.job_host --kind <kind> [--job <id>] --tenant <T> [--source <run>] --parent-pid <pid>`, then `extra`."""
     return [sys.executable, "-m", JOB_HOST_MODULE, "--kind", kind,
             *([] if job is None else ["--job", job]), "--tenant", tenant,
-            *([] if source is None else ["--source", source]), "--parent-pid", str(parent_pid)]
+            *([] if source is None else ["--source", source]), "--parent-pid", str(parent_pid), *extra]
 
 
 def run_argv(launch: Launch) -> list[str]:
     """The default investigation child: the per-job host helper,
     `-m defender.job_host --kind investigation --job <id> --tenant <T> --parent-pid <pid>`."""
     return _helper_argv("investigation", job=launch.investigation_id, tenant=launch.tenant_id,
-                        parent_pid=launch.parent_pid)
+                        parent_pid=launch.parent_pid, extra=_ticket_argv(launch))
+
+
+def _ticket_argv(launch: Launch) -> list[str]:
+    """`--alert-digest <hex>` always, `--post-ticket --ticket-link <url>` only for a flagged job (#1471 C-1, P-5): the
+    helper's own start carries what steers the write, so no file a job can reach does."""
+    return [*([] if launch.alert_digest is None else ["--alert-digest", launch.alert_digest]),
+            *(["--post-ticket", "--ticket-link", launch.ticket_link]
+              if launch.update_ticket and launch.ticket_link is not None else [])]
+
+
+def screen_link(origin: str, tenant: str, investigation: str) -> str:
+    """The investigation screen's address a ticket comment links to (#1471 W3): `<origin>/t/<tenant>/investigations/<id>`."""
+    return f"{origin}/t/{tenant}/investigations/{investigation}"
 
 
 def run_argv_in(root: Path) -> Callable[[Launch], list[str]]:
@@ -283,7 +303,7 @@ class Worker:
         self, store: Any, *, data_root: Path | DataRoot,
         child_argv: Callable[[Launch], list[str]] = run_argv,
         containers: Containers | None = None, slots: int = 3,
-        clock: Callable[[], _dt.datetime], stop_grace: float = 30,
+        clock: Callable[[], _dt.datetime], frontend_origin: str, stop_grace: float = 30,
         renewal_interval: float = 1.0, cost_interval: float = 15.0, takeover_interval: float = 5.0,
         open_lane: Callable[[DataRoot, object], job_lane.JobLane] = job_lane.JobLane.open,
         store_call_limit: float = 10.0,
@@ -295,6 +315,10 @@ class Worker:
         learning_check_interval: float = LEARNING_CHECK_INTERVAL,
         wait_group: Callable[[int], bool] = wait_group_gone,
     ) -> None:
+        try:
+            self._frontend_origin = check_origin(frontend_origin)
+        except ValueError as bad:
+            raise ValueError(f"the worker's frontend origin {frontend_origin!r} {bad}") from None
         if slots < 1:
             raise ValueError(f"a worker needs at least one slot, not {slots!r}")
         if not 0 <= learning_slots <= slots - 1:
@@ -694,7 +718,7 @@ class Worker:
         # start-fault cleanup removes only a container that carries it.
         token = uuid.uuid4().hex
         try:
-            await self._write_launch(record, token, tenant_state)
+            digest = await self._write_launch(record, token, tenant_state)
         except _WorkerFault as fault:
             _logger.error("investigation %s: %s", inv, fault)
             return End(Ending(_FAILED, failure_reason=_WORKER_ERROR, failure_message=str(fault)), 0.0, None)
@@ -704,7 +728,9 @@ class Worker:
             _logger.info("investigation %s: it was fenced before its child started; not launched", inv)
             return End(Ending(_FAILED, failure_reason=_WORKER_ERROR, failure_message="the job was ended before it started"),
                        0.0, None)
-        launch = Launch(inv, tenant, os.getpid())
+        flagged = record.update_ticket
+        launch = Launch(inv, tenant, os.getpid(), alert_digest=digest, update_ticket=flagged,
+                        ticket_link=screen_link(self._frontend_origin, tenant, inv) if flagged else None)
 
         async def name_left() -> None:
             await self._name_left(inv)
@@ -811,7 +837,7 @@ class Worker:
             env={**os.environ, "DEFENDER_DATA_ROOT": str(data_root_for_child(self._data_root)), CLAIM_ENV: claim},
             **where)
 
-    async def _write_launch(self, record: Any, token: str, tenant_state: str) -> None:
+    async def _write_launch(self, record: Any, token: str, tenant_state: str) -> str:
         """The launch record (carrying this claim's box token) and the alert file, create-only,
         in the tenant's runs container, for a tenant whose state at the claim was `active`
         (r7 R7-1; a teardown always wins, and a job racing it fails)."""
@@ -825,6 +851,7 @@ class Worker:
             alert_id=record.alert_id, digest=digest_of(alert.raw), label=alert.title or alert.vendor_ticket_id,
             box_token=token)
         await asyncio.to_thread(self._write_launch_files, launch, alert.raw)
+        return launch.digest
 
     def _write_launch_files(self, launch: job_lane.LaunchRecord, raw: bytes) -> None:
         try:

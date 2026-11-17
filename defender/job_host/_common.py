@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 from defender.job_socket import Refused
 
-from ._session import KINDS, Box, PassMint, Registry, Session, SetupRefused, StartFailed
+from ._session import KINDS, Box, PassMint, Registry, Session, SetupRefused, Signing, StartFailed
 
 if TYPE_CHECKING:
     from defender.records import Run
@@ -224,19 +224,31 @@ def grant(run_tenant: Any) -> tuple[str, ...]:
     return run_common.proxied_reads(run_tenant)
 
 
-def first_pass(session: Session, accepted: Any, records: Any, reads: tuple[str, ...]) -> PassMint | None:
-    """The pass mint over the grant, its first pass signed now (O5, O11); None for an empty grant (nothing to sign,
-    so a sealed signer is never asked)."""
+def set_up_signing(session: Session, accepted: Any, records: Any) -> Signing:
+    """The job's signer and the proxy's address (O5): a proxy address and a sign login for the tenant's live
+    generation, or the job is refused. Nothing is signed here, so a sealed signer is not asked yet."""
     from defender.credential_proxy import signing_access
     from defender.kit.faults import ConfigFault
 
-    if not reads:
-        return None
     try:
         signer, address = signing_access(accepted.id, directory=records, signer=session.signer)
     except ConfigFault as refused:
-        raise SetupRefused(f"the job's first pass cannot be signed: {refused.detail}") from None
-    mint = PassMint(signer, address, str(accepted.id), reads)
+        raise SetupRefused(f"the job's passes cannot be signed: {refused.detail}") from None
+    return Signing(signer, address, str(accepted.id))
+
+
+def first_pass(session: Session, accepted: Any, records: Any, reads: tuple[str, ...]) -> PassMint | None:
+    """The read-pass mint over the grant, its first pass signed now (O5, O11); None for an empty grant (nothing to
+    sign, so signing is not even set up)."""
+    return read_passes(session, set_up_signing(session, accepted, records), reads) if reads else None
+
+
+def read_passes(session: Session, signing: Signing, reads: tuple[str, ...]) -> PassMint | None:
+    """The read-pass mint over a non-empty grant on `signing`, its first pass signed now (O11); None for an empty
+    grant."""
+    if not reads:
+        return None
+    mint = PassMint(signing, reads)
     try:
         mint.mint(str(session.job_id))
     except Exception as failed:  # noqa: BLE001 — a first pass that cannot be signed refuses the job (O11)

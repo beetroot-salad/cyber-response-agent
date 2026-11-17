@@ -16,6 +16,7 @@ from defender.tests.support.tenancy import _systems1366 as R
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER, export_dir, published_tenant
 from defender.tests.support.tenancy import _tenants1106 as T1106
+from defender.tests.support.runtime.engine._spec767 import ticket_link_for
 
 STORE = "/store"
 WRITES = (("POST", "/tickets/*/comments"),)  # glob grammar: contract's pick
@@ -64,7 +65,7 @@ def _leg(t, run, rec, url, tok, shim=None, record=None):
     tenant = record if record is not None else T.run_record(t)
     S.ticket_writer().record_case_ticket(
         run, tenant=tenant, defender_dir=DEFENDER, env=env, request_token=tok,
-        proxy_url=url, case=T1106.case_for(tenant))
+        proxy_url=url, case=T1106.case_for(tenant), link=ticket_link_for(rec.run_dir_at))
     return S.receipt(rec.run_dir_at)
 
 
@@ -78,7 +79,7 @@ def test_t1_the_comment_reaches_the_store_through_the_proxy_and_leaks_nothing(
     with H.upstream() as up, _published(tmp_path / "forge", data_root, _decl(up)) as t:
         up.replies[COMMENT] = (201, {}, json.dumps({"id": 1}).encode())
         store = H.FakeStore({(t.tenant_id, SYSTEM): T.static_set()})
-        tok = T.token(t.tenant_id, {(SYSTEM, "rw")})
+        tok = T.token(t.tenant_id, {(SYSTEM, "rw", KEY)})
         rec, run = _run(tmp_path)
         with A.proxy_for(t, store) as (url, tap):
             receipt = _leg(t, run, rec, url, tok, shim)
@@ -107,9 +108,9 @@ def test_t3_failures_are_text_in_the_receipt_and_carry_no_credential(tmp_path, d
     caplog.set_level(logging.DEBUG)
     with H.upstream() as up, _published(tmp_path / "forge", data_root, _decl(up)) as t:
         cases = {
-            "401": (T.token(t.tenant_id, {(SYSTEM, "rw")}), True, True, True),
-            "no-credential": (T.token(t.tenant_id, {(SYSTEM, "rw")}), False, True, False),
-            "proxy-down": (T.token(t.tenant_id, {(SYSTEM, "rw")}), True, False, False),
+            "401": (T.token(t.tenant_id, {(SYSTEM, "rw", KEY)}), True, True, True),
+            "no-credential": (T.token(t.tenant_id, {(SYSTEM, "rw", KEY)}), False, True, False),
+            "proxy-down": (T.token(t.tenant_id, {(SYSTEM, "rw", KEY)}), True, False, False),
             "read-only-token": (T.token(t.tenant_id, {(SYSTEM, "r")}), True, True, False),
         }
         up.replies[COMMENT] = (401, {}, json.dumps({"detail": "bad key"}).encode())
@@ -150,7 +151,7 @@ def test_t6_an_access_file_with_no_write_route_is_named_by_the_receipt_and_nothi
                     "absent": None}[label]
             with _published(tmp_path / label / "forge", data_root, decl) as t:
                 store = H.FakeStore({(t.tenant_id, SYSTEM): T.static_set()})
-                tok = T.token(t.tenant_id, {(SYSTEM, "rw")})
+                tok = T.token(t.tenant_id, {(SYSTEM, "rw", KEY)})
                 rec, run = _run(tmp_path / label)
                 with A.proxy_for(t, store) as (url, tap):
                     receipt = _leg(t, run, rec, url, tok)
@@ -180,7 +181,7 @@ def test_t6b_a_write_the_proxy_refuses_at_call_time_is_a_refusal_not_a_transport
     with H.upstream() as up, _published(tmp_path / "forge", data_root, _decl(up)) as t:
         up.replies[COMMENT] = (201, {}, json.dumps({"id": 1}).encode())
         store = H.FakeStore({(t.tenant_id, SYSTEM): T.static_set()})
-        tok = T.token(t.tenant_id, {(SYSTEM, "rw")})
+        tok = T.token(t.tenant_id, {(SYSTEM, "rw", KEY)})
         rec, run = _run(tmp_path)
         started = R.derive(export_dir(t.tenant, t.commit) / "settings")  # covers the comment route at the published base
         started_with = T.run_record(t, records=started)
@@ -213,7 +214,7 @@ def test_t10_a_proxy_the_leg_cannot_use_is_the_proxys_failure_not_the_stores(tmp
     meeting the same proxy, the receipt is `unknown`."""
     with H.upstream() as up, H.upstream() as broken, _published(
             tmp_path / "forge", data_root, _decl(up)) as t:
-        tok = T.token(t.tenant_id, {(SYSTEM, "rw")})
+        tok = T.token(t.tenant_id, {(SYSTEM, "rw", KEY)})
         cases = {
             "proxy-down": (lambda: None, f"http://127.0.0.1:{H.free_port()}", "unreachable"),
             "proxy-502-unreadable": (

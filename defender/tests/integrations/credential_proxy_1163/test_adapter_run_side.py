@@ -24,6 +24,7 @@ from defender.tests.integrations.credential_proxy_1163._target import PROXY_PATH
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 from defender.tests.tenancy.tenant_1108_p4.test_r6_issuer import tls_issuer  # noqa: F401 — fixture
 from defender.tests.support.tenancy import _tenants1106 as T1106
+from defender.tests.support.runtime.engine._spec767 import ticket_link_for
 
 GRANT = {("identity", "r")}
 EXPIRED = timedelta(minutes=-1)
@@ -81,7 +82,7 @@ def test_x2_a_refused_ticket_leg_leaves_a_receipt_without_the_token_or_its_signa
     caplog.set_level(logging.DEBUG)
     lifetime, verdict, reachable = KINDS[kind]
     with H.upstream() as up, K._published(tmp_path / "forge", data_root, K._decl(up)) as t:
-        tok = T.token(t.tenant_id, {(K.SYSTEM, "rw")}, signer=A.MarkedSigner(),
+        tok = T.token(t.tenant_id, {(K.SYSTEM, "rw", K.KEY)}, signer=A.MarkedSigner(),
                       expires_in=lifetime)
         store = H.FakeStore({(t.tenant_id, K.SYSTEM): T.static_set()})
         rec, run = K._run(tmp_path)
@@ -109,14 +110,14 @@ def test_x3_the_ticket_writer_takes_the_proxy_address_from_the_run_not_the_envir
     with H.upstream() as up, K._published(tmp_path / "forge", data_root, K._decl(up)) as t:
         up.replies[K.COMMENT] = (201, {}, json.dumps({"id": 1}).encode())
         store = H.FakeStore({(t.tenant_id, K.SYSTEM): T.static_set()})
-        tok = T.token(t.tenant_id, {(K.SYSTEM, "rw")})
+        tok = T.token(t.tenant_id, {(K.SYSTEM, "rw", K.KEY)})
         with A.proxy_for(t, store) as (url, tap):
             rec, run = K._run(tmp_path / "env-only")
             env = shim.env(run_env(DEFENDER, rec.run_dir_at), **{A.DECOY_PROXY_ENV: url})
             record = T.run_record(t)
             S.ticket_writer().record_case_ticket(run, tenant=record, defender_dir=DEFENDER,
                                                  env=env, request_token=tok, proxy_url=None,
-                                                 case=T1106.case_for(record))
+                                                 case=T1106.case_for(record), link=ticket_link_for(rec.run_dir_at))
             env_only = S.receipt(rec.run_dir_at)
             reached_by_env = list(tap.tokens)
             control_rec, control_run = K._run(tmp_path / "via-run")
@@ -465,9 +466,10 @@ def test_o2_a_write_accepted_then_dropped_keeps_its_status_and_no_body(tmp_path,
     returned. O2, O8 (#1404)."""
     with H.breaks_after_status(201) as base, T.rig(
             tmp_path / "forge", data_root,
-            lambda _u: H.declaration(base + T.BASE_PATH, writes=(("POST", "/tickets"),))) as r, \
-            A.proxy_for(r.t, r.store) as (url, _tap):
-        answer = W.call(url, r.tok({("identity", "rw")}), f"{base}{T.BASE_PATH}/tickets", method="POST")
+            lambda _u: H.declaration(base + T.BASE_PATH, writes=(("POST", "/tickets/*/comments"),))) as r, \
+            A.proxy_for(r.t, r.store) as (url, _tap):  # X1/X2: the one write route, a wildcard at the ticket
+        answer = W.call(url, r.tok({("identity", "rw", "T-1")}), f"{base}{T.BASE_PATH}/tickets/T-1/comments",
+                        method="POST")
 
     assert (answer.status, answer.fault, answer.body) == (201, "TransportFault", "")
     assert answer.origin == "system"

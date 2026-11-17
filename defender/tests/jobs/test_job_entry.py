@@ -21,10 +21,15 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from defender import _vocab
+from defender.records import _knowledge_status, run_end
+from defender.investigation import ticket_writer
+from defender.tests.jobs import test_job_helper as _H1471
 from defender.tests.support.jobs._container_entry1170 import enter
 from defender.tests.support.jobs._job_helper import ContainerStandIn, helper_scene
 from defender.tests.support.jobs._jobs1342 import (
     ALERT_BYTES,
+    ALERT_DIGEST,
     AWKWARD_ALERT_BYTES,
     DECOMPOSED_ALERT_BYTES,
     DEFENDER,
@@ -65,12 +70,30 @@ class Scene:
     helper: Any = None  # the `HelperScene` beneath (its claim, its argv)
     work: Path = field(default_factory=Path)  # a scratch folder beside, not under, the data root
 
+    #: What the worker adds to the helper's argv for each planted job (#1471 r8 C-1): see `plant`.
+    helper_args: dict[str, list[str]] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """The helper's argv carries what `plant` recorded for its job beside `HelperScene.argv`'s own."""
+        if self.helper is None:
+            return
+        base = self.helper.argv
+
+        def argv(kind: str, job: str | None, **kw: Any) -> list[str]:
+            return [*base(kind, job, **kw), *self.helper_args.get(job or "", [])]
+
+        self.helper.argv = argv
+
     def launch_doc(self, run_id: str, **over: Any) -> dict[str, Any]:
         return {"investigation_id": run_id, "tenant_id": self.t.tenant_id, "alert_id": str(uuid.uuid4()),
                 "digest": hashlib.sha256(ALERT_BYTES).hexdigest(), "label": TITLE, "box_token": self.token, **over}
 
-    def plant(self, run_id: str, *, launch: Any = "default", alert: bytes | None = ALERT_BYTES) -> None:
-        """The worker's two files, create-only, beside the run folder (`<T>/runs/` already made: R1)."""
+    def plant(self, run_id: str, *, launch: Any = "default", alert: bytes | None = ALERT_BYTES,
+              flagged: bool | None = None, link: str | None = None, digest: str | None = None) -> None:
+        """The worker's two files, create-only, beside the run folder (`<T>/runs/` already made: R1), and what it hands
+        the helper at its start (C-1): the alert's digest (the launch record's own `digest` when the record is planted
+        as a dict; `digest` overrides it), always sent, and, when `flagged`, the flag and the screen `link`."""
+        held = launch.get("digest") if isinstance(launch, dict) else None
         if launch == "default":
             launch = json.dumps(self.launch_doc(run_id))
         elif isinstance(launch, dict):
@@ -79,6 +102,11 @@ class Scene:
             (self.runs / f"{run_id}.launch.json").write_text(launch, encoding="utf-8")
         if alert is not None:
             (self.runs / f"{run_id}.alert.json").write_bytes(alert)
+        worker_digest = digest or held or ALERT_DIGEST
+        extra = ["--alert-digest", worker_digest]
+        if flagged:
+            extra += ["--post-ticket", "--ticket-link", link or ""]
+        self.helper_args[run_id] = extra
 
     def job_end(self, run_id: str) -> dict[str, Any] | None:
         path = self.runs / f"{run_id}.job-end.json"
@@ -151,12 +179,13 @@ def verified_lifecycle(ran: Ran, *, report_committed: bool = True):
 
 
 def run_job(s: Scene, run_id: str, *, lifecycle: Any = None, preflight: Any = None,
-            visualize: Any = None, ran: Ran | None = None, docker: Any = None) -> Ran:
+            visualize: Any = None, ran: Ran | None = None, docker: Any = None, signer: Any = None) -> Ran:
     """The helper and the in-container entry for `run_id` (A6: no `materialize` or `publish` seam on the entry; the helper's
     publish is answered `fresh` at the published commit and counted in `calls["publish"]`). `docker`: the helper's docker
-    (a prebuilt `ContainerStandIn`)."""
+    (a prebuilt `ContainerStandIn`). `signer`: the helper's signer (default `enter`'s marked signer)."""
     result = Ran() if ran is None else ran
-    got = enter(s.helper, run_id, lifecycle=lifecycle if lifecycle is not None else verified_lifecycle(result),
+    got = enter(s.helper, run_id, signer=signer,
+                lifecycle=lifecycle if lifecycle is not None else verified_lifecycle(result),
                 preflight=preflight if preflight is not None else (lambda *a, **k: 0),
                 visualize=visualize if visualize is not None else (lambda *a, **k: None), docker=docker)
     result.calls["publish"] += got.helper.publishes
@@ -755,10 +784,9 @@ def test_m3_beneath_the_names_nothing_listed_or_opened_the_run_folder_before_the
             assert got.raised is None, got
             assert got.exit is None, got
         else:
-            rc = run_py.main([str(B.plant_alert(tmp_path / "op-alert")), "--tenant", scene.t.tenant_id,
-                              "--update-ticket"],
+            rc = run_py.main([str(B.plant_alert(tmp_path / "op-alert")), "--tenant", scene.t.tenant_id],
                              lifecycle=lifecycle, preflight=lambda *a, **k: 0, visualize=spies.seam,
-                             ticket_writer=Writer(), enqueue=lambda *a, **k: False,
+                             enqueue=lambda *a, **k: False,
                              publish=lambda *a, **k: B.fresh(scene.t.commit))
             assert rc == 0
     finally:
@@ -1484,8 +1512,9 @@ class _Tripwire:
         return refuse
 
 
-def _operator_composition_still_clears_records_and_enqueues(scene: Scene, tmp_path: Path) -> None:
-    """Positive control: the operator composition, through its seams, still clears, records and enqueues."""
+def _operator_composition_still_enqueues_and_never_records(scene: Scene, tmp_path: Path) -> None:
+    """Positive control: the operator composition, through its seams, still enqueues; it never records into a case
+    (#1471 W7: `--update-ticket` is gone and an operator run never comments; clearing a receipt is not pinned)."""
     from defender import run as run_py
 
     seen: list[str] = []
@@ -1502,12 +1531,12 @@ def _operator_composition_still_clears_records_and_enqueues(scene: Scene, tmp_pa
         return False
 
     alert = B.plant_alert(tmp_path / "op-alert")
-    rc = run_py.main([str(alert), "--tenant", scene.t.tenant_id, "--update-ticket"],
+    rc = run_py.main([str(alert), "--tenant", scene.t.tenant_id],
                      lifecycle=lambda **kw: summary(), preflight=lambda *a, **k: 0,
-                     visualize=lambda *a, **k: None, ticket_writer=Writer(), enqueue=enq,
+                     visualize=lambda *a, **k: None, enqueue=enq,
                      publish=lambda *a, **k: B.fresh(scene.t.commit))
     assert rc == 0
-    assert seen == ["clear", "record", "enqueue"], seen
+    assert [step for step in seen if step != "clear"] == ["enqueue"], seen
 
 
 @pytest.fixture
@@ -1532,7 +1561,8 @@ def docker_shim(tmp_path, monkeypatch):
 
 def test_m4_a_job_run_opens_no_ticket_and_enqueues_no_curation_while_the_operator_path_does(
         scene, tmp_path, monkeypatch, docker_shim):
-    """The job entry takes no seam for either and calls neither; `run.main` still does, by default. (M4, O11)"""
+    """The job entry takes no seam for either and calls neither; `run.main` still enqueues, by default, and never records
+    (#1471 W7). (M4, O11)"""
     import inspect
 
     from defender import run as run_py
@@ -1609,7 +1639,10 @@ def test_m4_a_job_run_opens_no_ticket_and_enqueues_no_curation_while_the_operato
     made = [k for k in set(tree(scene.root)) - before if re.search(r"curat|queue|learn", k, re.IGNORECASE)]
     assert made == [], f"the job lane left curation state behind: {made}"
 
-    _operator_composition_still_clears_records_and_enqueues(scene, tmp_path)
+    _operator_composition_still_enqueues_and_never_records(scene, tmp_path)
+    # the seam above is the operator's handed writer; the default writer module and its transport stay tripped, so an
+    # operator run that records past the seam (W7: it never comments) is caught here too
+    assert (wire.called, launched) == ([], []), f"the operator composition reached the writer past its seam: {wire.called}"
 
 def test_1414_a_job_run_opens_no_feedback_issue_whatever_the_setting_lists(tmp_path, monkeypatch, migrated_database):
     """A tenant whose setting lists every outcome still gets no `feedback_issues` row from a job-lane run (D10: no folder to look in). F1 (#1414), A4."""
@@ -1711,9 +1744,9 @@ def test_m4_the_store_check_sees_the_operator_default_enqueue(scene, tmp_path):
 
     assert waiting() == [], "premise: the tenant has no request before the run"
     before = set(tree(scene.root))
-    rc = run_py.main([str(B.plant_alert(tmp_path / "op-alert")), "--tenant", scene.t.tenant_id, "--update-ticket"],
+    rc = run_py.main([str(B.plant_alert(tmp_path / "op-alert")), "--tenant", scene.t.tenant_id],
                      lifecycle=lifecycle, preflight=lambda *a, **k: 0, visualize=lambda *a, **k: None,
-                     ticket_writer=Writer(), publish=lambda *a, **k: B.fresh(scene.t.commit))
+                     publish=lambda *a, **k: B.fresh(scene.t.commit))
     assert rc == 0
     assert len(waiting()) == 1, "the operator default enqueue left no request row the store check can see"
     assert not [k for k in set(tree(scene.root)) - before if re.search(r"learning", k)], "the request left a file under a learning folder"
@@ -1978,3 +2011,616 @@ def test_1345_o4_a_job_whose_tenant_has_no_mapping_is_refused_before_any_setup_w
     ran, calls = watched(run_id)
     assert scene.job_end(run_id) == SETTLED, ran.message
     assert (ran.calls["publish"], calls["copy"], calls["preflight"], calls["materialize"]) == (1, 1, 1, 1)
+
+
+
+# --- #1471 r8: a flagged job's ticket write-back (W2, W4, W5, P-5, P-6) --------------------------------------------------
+# The worker's half (the flag, digest and link it hands the helper) is
+# `test_worker_endings.py`'s and `test_1344_worker_start.py`'s; here `Scene.plant` hands the helper what the worker does
+# (C-1) and the launch record is the one it writes. The helper's own answers are `test_job_helper.py`'s.
+
+ORIGIN_1471 = _H1471.ORIGIN_1471
+TICKET_1471 = _H1471.TICKET_1471
+KEYED_ALERT_1471 = _H1471.KEYED_ALERT_1471
+#: Every state of the host's knowledge record, from the knowledge status's own kinds: what `stale_sentence` may answer
+#: for is none (fresh, pinned), one sentence per stale kind, and the unreadable sentence for a record with no commit.
+_KNOWLEDGE_STATES = [*sorted(_knowledge_status.KINDS - {_knowledge_status.STALE}),
+                     *sorted(_knowledge_status.STALE_KINDS), "unreadable"]
+EVIL_LINK_1471 = "https://evil.test/steered"
+NARRATIVE_1471 = "NARRATIVE-1471: the model's long account, which no ticket receives."
+
+
+@pytest.fixture
+def ticket_scene(tmp_path, monkeypatch, migrated_database):
+    """`scene` with the case system (`ticket`, the fixture's case record) reached through the proxy and granted as
+    published, so the job's read grant is `ticket` read."""
+    with _scene(tmp_path, monkeypatch, migrated_database, proxied=("ticket",)) as s:
+        yield s
+
+
+@pytest.fixture
+def ungranted_ticket_scene(tmp_path, monkeypatch, migrated_database):
+    """The case system reached through the proxy but granted to nobody: an empty read grant (W5)."""
+    with _scene(tmp_path, monkeypatch, migrated_database, proxied=("ticket",),
+                files={"settings/verb-grants.yaml": _H1471._ticket_ungranted()}) as s:
+        yield s
+
+
+def _case_store(tmp_path: Path, monkeypatch: Any) -> Any:
+    """The credential proxy's stand-in with the case store behind it (it answers the comment 201), and the helper's
+    proxy address pointed at it: the address reaches the job in its launch facts."""
+    from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107
+
+    return S1107.ProxyStandIn(tmp_path / "proxy-1471", [S1107.answer('{"id": 1}', "201")]).install(monkeypatch)
+
+
+def _report_1471(disposition: str, cause: str, *, evidence: str = NARRATIVE_1471) -> str:
+    """A report as the close tool renders it (`render_report`): its cause one of the seven it may write."""
+    from defender.investigation import close_tool
+
+    return close_tool.render_report(disposition, outcome="holds", cause=cause, evidence=evidence)
+
+
+def _reporting_lifecycle(ran: Ran, *, report: str | None, stale: str | None = None, closes: bool = True,
+                         **summary_kw: Any):
+    """`verified_lifecycle` whose investigation leaves `report` in the run folder (None: no report), the host's record of
+    knowledge saying `stale` ("transient" or "operator": stale; None: as the helper wrote it), and ends as
+    `summary_kw` says (`truncated_by`, `closed_before_cut`). `stale` may also be "fresh", "pinned" or "unreadable" (a
+    stamp naming a source over a corrupt host record)."""
+    from defender.tests.tenancy.tenant_1108_p4 import test_stale_visibility as V
+
+    closes_ = _investigate(ran, closes=closes, **summary_kw)
+
+    def investigate(*, run: Any = None, **kw: Any) -> dict[str, Any]:
+        if report is not None:
+            (run.run_dir / "report.md").write_text(report, encoding="utf-8")
+        if stale == "unreadable":
+            V.plant_unreadable_host_record(run.run_dir, "corrupt")
+        elif stale in _knowledge_status.STALE_KINDS:
+            V.write_host_record(run.run_dir, V.knowledge_source("stale", stale_kind=stale))
+        elif stale is not None:
+            V.write_host_record(run.run_dir, V.knowledge_source(stale))
+        return closes_(run=run, **kw)
+
+    return _lifecycle(None, investigate=investigate)
+
+
+def _job_1471(  # noqa: PLR0913 — the job's scene, its alert, its record and its seams
+        s: Scene, store: Any, *, flagged: bool | None = True, alert: bytes = KEYED_ALERT_1471,
+              record: dict[str, Any] | None = None, digest: str | None = None, signer: Any = None,
+              lifecycle: Any = None, visualize: Any = None, **lifecycle_kw: Any) -> tuple[str, Ran, str, list[dict[str, Any]]]:
+    """One job of `alert` the worker flagged (or not: `flagged=False`) over `lifecycle` (default
+    `_reporting_lifecycle(**lifecycle_kw)`): `(run id, what ran, the screen link the worker built, the comments this job
+    posted)`. `record` overrides fields of the launch record, planted whole."""
+    from defender.tests.tenancy.case_comment_1359 import _spec1359 as C1359
+
+    run_id = str(uuid.uuid4())
+    link = f"{ORIGIN_1471}/t/{s.t.tenant_id}/investigations/{run_id}"
+    before = len(C1359.comment_calls(store))
+    s.plant(run_id, alert=alert, flagged=flagged, link=link, digest=digest or hashlib.sha256(alert).hexdigest(),
+            launch={**s.launch_doc(run_id), "digest": hashlib.sha256(alert).hexdigest(), **(record or {})})
+    ran = Ran()
+    run_job(s, run_id, ran=ran, signer=signer, visualize=visualize,
+            lifecycle=lifecycle if lifecycle is not None else _reporting_lifecycle(ran, **lifecycle_kw))
+    return run_id, ran, link, C1359.comment_calls(store)[before:]
+
+
+def _receipt_1471(s: Scene, run_id: str) -> dict[str, Any] | None:
+    from defender.investigation.ticket_writer import receipt_path
+
+    path = receipt_path(s.runs / run_id)
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+
+
+def _stale_sentence_1471(stale: str | None) -> str | None:
+    """The sentence a run in knowledge state `stale` carries (None: none), from the writer's constants."""
+    from defender.tests.tenancy.tenant_1108_p4 import test_stale_visibility as V
+
+    if stale == "unreadable":
+        return ticket_writer.UNREADABLE_SENTENCE
+    if stale in _knowledge_status.STALE_KINDS:
+        return ticket_writer.STALE_SENTENCE[stale].format(commit=V.STALE_COMMIT)
+    return None
+
+
+def _text_1471(call: dict[str, Any]) -> str:
+    """The comment text a recorded comment request carried: the request body is the store's `{author, body}` payload
+    (as the record-leg tests read it, `calls[0]["body"]["body"]`)."""
+    payload = call["body"]
+    assert isinstance(payload, dict), f"not a comment payload: {payload!r}"
+    assert isinstance(payload.get("body"), str), f"not a comment payload: {payload!r}"
+    return payload["body"]
+
+
+def _assert_p6_1471(call: dict[str, Any], *, run_id: str, link: str, parts: list[str], stale: str | None = None) -> None:
+    """P-6, over a recorded comment request: the tag line first; then, in order, the stale sentence (when stale), the
+    disposition word or the escalation or unreadable sentence, and the link, last; nothing the report said, anywhere in
+    the payload."""
+    from defender.investigation import close_tool
+    from defender.tenancy import case_ticket
+
+    body, payload = _text_1471(call), str(call["body"])
+
+    assert body.splitlines()[0].strip() == case_ticket.agent_comment_tag(run_id), body
+    sentence = _stale_sentence_1471(stale)
+    wanted = ([sentence] if sentence else []) + parts + [link]
+    at = [body.find(p) for p in wanted]
+    assert -1 not in at, f"a part is missing ({[w for w, i in zip(wanted, at, strict=True) if i == -1]}): {body}"
+    assert at == sorted(at), f"the parts are out of order: {body}"
+    assert not any(ch.isalnum() for ch in body.split(link, 1)[1]), f"text follows the link: {body}"
+    assert ("Knowledge notice" in body) == (sentence is not None), body
+    for said in (*close_tool.REPORT_CAUSES, NARRATIVE_1471, "Disposition recorded by the close gate"):
+        assert said not in payload, f"the report's own text reached the ticket ({said!r}): {payload}"
+
+
+@pytest.mark.parametrize("disposition", _vocab.DISPOSITION_VALUES)
+def test_1471_w2_p6_a_flagged_job_with_a_verdict_posts_one_comment_with_its_tag_disposition_and_screen_link(
+        ticket_scene, tmp_path, monkeypatch, disposition):
+    """The alert's ticket receives one comment: the agent tag naming the investigation, the disposition, and
+    `<origin>/t/<tenant>/investigations/<investigation>`, with no cause sentence and none of the report's body, sent under
+    the write pass naming that ticket; the receipt says `commented`. (W2, W3, P-6)"""
+    from defender.investigation import close_tool
+
+    store = _case_store(tmp_path, monkeypatch)
+    causes = close_tool.REPORT_CAUSES
+    signer = _H1471.make_signer()
+
+    run_id, ran, link, comments = _job_1471(
+        ticket_scene, store, signer=signer,
+        report=_report_1471(disposition, causes[_vocab.DISPOSITION_VALUES.index(disposition) % len(causes)]))
+
+    assert ran.raised is None, ran.message
+    assert ticket_scene.job_end(run_id) == SETTLED, ran.message  # premise: the run ended with its report committed
+    assert len(comments) == 1, f"expected one comment, got {store.requests()}"
+    assert comments[0]["path"].endswith(f"/tickets/{TICKET_1471}/comments"), comments[0]
+    _assert_p6_1471(comments[0], run_id=run_id, link=link, parts=[disposition])
+    pass_claims = _H1471.claims_of(signer, comments[0]["token"])
+    assert [list(e) for e in pass_claims["grant"]] == [["ticket", "rw", TICKET_1471]], pass_claims
+    receipt = _receipt_1471(ticket_scene, run_id)
+    assert receipt is not None, "no receipt"
+    assert (receipt["key"], receipt["status"], receipt["ok"]) == (TICKET_1471, "commented", True), receipt
+
+
+@pytest.mark.parametrize("exit_class", sorted(run_end.ESCALATED_EXITS))
+def test_1471_w2_a_flagged_job_that_ended_escalated_without_a_verdict_posts_the_escalation_sentence_and_the_link(
+        ticket_scene, tmp_path, monkeypatch, exit_class):
+    """No verdict, an escalated exit: one comment with the tag, the escalation sentence naming the exit, and the link;
+    the receipt says `escalated`. (W2, P-6)"""
+    store = _case_store(tmp_path, monkeypatch)
+
+    run_id, ran, link, comments = _job_1471(ticket_scene, store, report=None, closes=False, truncated_by=exit_class)
+
+    assert ran.raised is None, ran.message
+    assert len(comments) == 1, store.requests()
+    _assert_p6_1471(comments[0], run_id=run_id, link=link, parts=[f"exit: {exit_class}"])
+    receipt = _receipt_1471(ticket_scene, run_id)
+    assert receipt is not None, "no receipt"
+    assert (receipt["status"], receipt["ok"]) == ("escalated", True), receipt
+
+
+@pytest.mark.parametrize(("exit_class", "status", "marker"), [
+    (None, "commented", "No disposition could be recorded"),
+    *[(e, "escalated", f"exit: {e}") for e in sorted(run_end.FORCED_CLOSE_EXITS)],
+])
+def test_1471_w2_a_flagged_job_whose_report_is_unreadable_posts_the_unreadable_or_escalation_sentence_and_the_link(
+        ticket_scene, tmp_path, monkeypatch, exit_class, status, marker):
+    """An unreadable report posts the unreadable sentence and the link (the escalation sentence when the forced close
+    that wrote it failed): never the report's own text. (W2, P-6)"""
+    store = _case_store(tmp_path, monkeypatch)
+
+    run_id, ran, link, comments = _job_1471(
+        ticket_scene, store, report=f"no front matter\n{NARRATIVE_1471}\n", truncated_by=exit_class)
+
+    assert ran.raised is None, ran.message
+    assert len(comments) == 1, store.requests()
+    _assert_p6_1471(comments[0], run_id=run_id, link=link, parts=[marker])
+    receipt = _receipt_1471(ticket_scene, run_id)
+    assert receipt is not None, "no receipt"
+    assert (receipt["status"], receipt["ok"]) == (status, True), receipt
+
+
+@pytest.mark.parametrize("exit_class", sorted(run_end.FORCED_CLOSE_EXITS))
+def test_1471_w2_a_flagged_job_force_closed_with_a_readable_report_posts_its_disposition_and_the_link(
+        ticket_scene, tmp_path, monkeypatch, exit_class):
+    """A forced close (`request-limit`, `retry-exhausted`) that left a readable `unresolved` report is commented with
+    that disposition and the link, receipt `commented`, not the escalation sentence. (W2, P-6)"""
+    from defender.investigation import close_tool
+
+    store = _case_store(tmp_path, monkeypatch)
+
+    run_id, ran, link, comments = _job_1471(
+        ticket_scene, store, report=_report_1471("unresolved", close_tool.CAUSE_STORY_SETTLED), truncated_by=exit_class)
+
+    assert ran.raised is None, ran.message
+    assert len(comments) == 1, store.requests()
+    body = _text_1471(comments[0])
+    _assert_p6_1471(comments[0], run_id=run_id, link=link, parts=["unresolved"])
+    assert f"exit: {exit_class}" not in body, body
+    receipt = _receipt_1471(ticket_scene, run_id)
+    assert receipt is not None, "no receipt"
+    assert (receipt["status"], receipt["ok"]) == ("commented", True), receipt
+
+
+@pytest.mark.parametrize("stale", ["transient", "operator"])
+def test_1471_p6_a_stale_runs_comment_opens_with_the_tag_then_the_stale_sentence_then_the_disposition_then_the_link(
+        ticket_scene, tmp_path, monkeypatch, stale):
+    """The host's knowledge record says the run used stale knowledge: its sentence sits between the tag and the
+    disposition, and the link is last. Control: the fresh comment of the same run has none. (P-6)"""
+    from defender.investigation import close_tool
+
+    store = _case_store(tmp_path, monkeypatch)
+    report = _report_1471("benign", close_tool.CAUSE_STORY_SETTLED)
+
+    run_id, ran, link, comments = _job_1471(ticket_scene, store, report=report, stale=stale)
+    fresh_id, _fresh_ran, fresh_link, fresh = _job_1471(ticket_scene, store, report=report)
+
+    assert ran.raised is None, ran.message
+    assert len(comments) == len(fresh) == 1, store.requests()
+    _assert_p6_1471(comments[0], run_id=run_id, link=link, parts=["benign"], stale=stale)
+    assert "Knowledge notice" not in _text_1471(fresh[0]), fresh[0]
+    _assert_p6_1471(fresh[0], run_id=fresh_id, link=fresh_link, parts=["benign"])
+
+
+def _closed_set_1471() -> list[tuple[str, dict[str, Any]]]:
+    """Every way a flagged job comments, by its closed-set input: each disposition, each escalated exit, an unreadable
+    report, each forced-close exit with an unreadable report."""
+    huge = "x" * 20_000  # the report's text, which the comment never holds: a comment that did would lose its end
+    from defender.investigation import close_tool
+
+    return [
+        *[(f"verdict-{d}", dict(report=_report_1471(d, close_tool.CAUSE_STORY_SETTLED, evidence=huge)))
+          for d in _vocab.DISPOSITION_VALUES],
+        *[(f"escalated-{e}", dict(report=None, closes=False, truncated_by=e)) for e in sorted(run_end.ESCALATED_EXITS)],
+        ("unreadable", dict(report=f"no front matter\n{huge}\n")),
+        *[(f"forced-close-readable-{e}", dict(report=_report_1471("unresolved", close_tool.CAUSE_STORY_SETTLED, evidence=huge),
+                                              truncated_by=e)) for e in sorted(run_end.FORCED_CLOSE_EXITS)],
+        *[(f"forced-close-unreadable-{e}", dict(report=f"no front matter\n{huge}\n", truncated_by=e))
+          for e in sorted(run_end.FORCED_CLOSE_EXITS)],
+    ]
+
+
+@pytest.mark.parametrize("stale", [None, *_KNOWLEDGE_STATES])
+def test_1471_p6_the_comment_of_every_closed_set_combination_fits_the_wire_bound_with_its_link_intact(
+        ticket_scene, tmp_path, monkeypatch, stale):
+    """Over every ending and every knowledge state (none, fresh, pinned, each stale kind, unreadable), report 20 000
+    bytes: each comment is within `WIRE_BOUND_BYTES`, uncut, with its stale sentence and whole link. (P-6)"""
+    from defender.tenancy.case_ticket import WIRE_BOUND_BYTES
+
+    store = _case_store(tmp_path, monkeypatch)
+    found: dict[str, str] = {}
+    for label, kw in _closed_set_1471():
+        run_id, ran, link, comments = _job_1471(ticket_scene, store, stale=stale, **kw)
+        assert ran.raised is None, (label, ran.message)
+        assert len(comments) == 1, (label, store.requests())
+        body = _text_1471(comments[0])
+        sentence = _stale_sentence_1471(stale)
+        found[label] = "" if (len(body.encode("utf-8")) <= WIRE_BOUND_BYTES and link in body
+                              and (sentence is None or sentence in body)
+                              and not body.endswith("\u2026")) else body[:200]
+    assert {k: v for k, v in found.items() if v} == {}, "comments that are cut, over the bound or lost their link"
+
+
+@pytest.mark.parametrize("ending", [pytest.param(e, id=e) for e in sorted(run_end.SILENT_EXITS)] + ["teardown-faulted"])
+def test_1471_w2_a_flagged_job_that_ended_silently_or_faulted_in_teardown_posts_nothing_and_asks_for_no_write_pass(
+        ticket_scene, tmp_path, monkeypatch, ending):
+    """A silent ending (`SILENT_EXITS`) or a faulted teardown leaves the ticket alone, leaves no receipt and signs no
+    write pass. Control: a verdict job in the same scene, same store, comments. (W2)"""
+    store = _case_store(tmp_path, monkeypatch)
+    report = _report_1471("benign", "the challenge review ran and left nothing about the finding unsettled")
+    _id, _ran, _link, control = _job_1471(ticket_scene, store, report=report)
+    assert len(control) == 1, "control: a verdict job posts"
+    signer = _H1471.make_signer()
+    kw: dict[str, Any] = (
+        dict(lifecycle=_lost_box_lifecycle(stop=_teardown_fault)) if ending == "teardown-faulted"
+        else dict(report=None, closes=False, truncated_by=ending))
+
+    run_id, ran, _link, comments = _job_1471(ticket_scene, store, signer=signer, **kw)
+
+    assert ran.raised is None, ran.message
+    assert comments == [], f"a {ending} job commented: {comments}"
+    assert _receipt_1471(ticket_scene, run_id) is None
+    assert _H1471._signed_writes(signer) == [], _H1471._signed_grants(signer)
+
+
+class _Boom1471(Exception):  # noqa: N818 — a lifecycle's own failure, named for what a test raises
+    """The exception a dying lifecycle raises: defined here, so nothing in the product can match it by name."""
+
+
+class _OrderWatch1471:
+    """The order of what a flagged job does at the seams: the helper's write-pass ask (the job socket's `ask`), the comment
+    request at the case store's stand-in, the receipt in the run folder and the page save (the entry's `visualize`).
+    Each event is recorded with the state at that moment: how many comments the store had taken, whether a receipt
+    existed, and, for the page, the ticket line it would carry."""
+
+    def __init__(self, s: Scene, store: Any, monkeypatch: Any) -> None:
+        from defender import job_socket
+
+        self.events: list[tuple[str, dict[str, Any]]] = []
+        self._s, self._store = s, store
+        self._receipt = ticket_writer.receipt_path(Path("RUN")).name.replace("RUN", "*", 1)  # beside the run folder
+        real = job_socket.ask
+
+        def ask(socket: Any, request: str, **fields: Any) -> dict[str, Any]:
+            if request == "pass.write_back":
+                self.events.append(("ask", self.state()))
+            return real(socket, request, **fields)
+
+        monkeypatch.setattr(job_socket, "ask", ask)  # lint-monkeypatch: ok — a recording wrapper of the one door the job asks the helper through
+
+    def state(self) -> dict[str, Any]:
+        from defender.tests.tenancy.case_comment_1359 import _spec1359 as C1359
+
+        return {"comments": len(C1359.comment_calls(self._store)),
+                "receipt": bool(list(self._s.runs.glob(self._receipt)))}
+
+    def page(self, run: Any, **_kw: Any) -> None:
+        """The entry's page seam: what the saved page would say about the ticket (the real line renderer)."""
+        from defender.presentation import visualize_run
+
+        self.events.append(("page", {**self.state(), "line": visualize_run.render_ticket_line(run.run_dir)}))
+
+    def of(self, kind: str) -> list[dict[str, Any]]:
+        return [state for name, state in self.events if name == kind]
+
+    def order(self) -> list[str]:
+        return [name for name, _state in self.events]
+
+
+def _g7_endings() -> list[Any]:
+    """Every lifecycle outcome the record step tells apart, with whether the ticket gets a comment."""
+    verdict = _report_1471("benign", "the challenge review ran and left nothing about the finding unsettled")
+    unreadable = f"no front matter\n{NARRATIVE_1471}\n"
+    return [
+        pytest.param("posts", dict(report=verdict), id="verdict"),
+        *[pytest.param("posts", dict(report=None, closes=False, truncated_by=e), id=f"escalated-{e}")
+          for e in sorted(run_end.ESCALATED_EXITS)],
+        pytest.param("posts", dict(report=unreadable), id="unreadable"),
+        *[pytest.param("posts", dict(report=unreadable, truncated_by=e), id=f"unreadable-forced-close-{e}")
+          for e in sorted(run_end.FORCED_CLOSE_EXITS)],
+        *[pytest.param("silent", dict(report=None, closes=False, truncated_by=e), id=f"silent-{e}")
+          for e in sorted(run_end.SILENT_EXITS)],
+        pytest.param("silent", "teardown-faulted", id="teardown-faulted"),
+        pytest.param("raises", "raises", id="raises"),
+    ]
+
+
+@pytest.mark.parametrize(("kind", "ending"), _g7_endings())
+def test_1471_w2_the_write_pass_ask_and_the_post_follow_a_lifecycle_that_returned_and_precede_the_page_save(
+        ticket_scene, tmp_path, monkeypatch, kind, ending):
+    """A flagged job asks for its write pass and posts only after a lifecycle that returned and ended with a comment
+    (verdict, escalated, unreadable), the ask first, both before the page is saved; the saved page shows the receipt
+    line iff a receipt exists. A silent ending, a faulted teardown or a lifecycle that raises asks, posts and receipts
+    nothing, and a raised exception reaches the caller. (W2, Flow, P-6, W7)"""
+    store = _case_store(tmp_path, monkeypatch)
+    watch = _OrderWatch1471(ticket_scene, store, monkeypatch)
+    signer = _H1471.make_signer()
+    boom = _Boom1471("the lifecycle died")
+    if ending == "teardown-faulted":
+        kw: dict[str, Any] = dict(lifecycle=_lost_box_lifecycle(stop=_teardown_fault))
+    elif ending == "raises":
+        def investigate(**_kw: Any) -> dict[str, Any]:
+            raise boom
+        kw = dict(lifecycle=_lifecycle(ticket_scene, investigate=investigate))
+    else:
+        kw = ending
+
+    run_id, ran, _link, comments = _job_1471(ticket_scene, store, signer=signer, visualize=watch.page, **kw)
+
+    asked, pages = watch.of("ask"), watch.of("page")
+    receipt = _receipt_1471(ticket_scene, run_id)
+    writes = _H1471._signed_writes(signer)
+    if ending == "raises":
+        assert ran.raised is boom, f"the lifecycle's own exception did not reach the caller: {ran.raised!r} {ran.message}"
+    else:
+        assert ran.raised is None, ran.message
+    if kind == "posts":
+        assert watch.order() == ["ask", "page"], f"the ask and the page are not once each, ask first: {watch.events}"
+        assert asked[0] == {"comments": 0, "receipt": False}, f"the ask came after the post or the receipt: {asked}"
+        assert (pages[0]["comments"], pages[0]["receipt"]) == (1, True), \
+            f"the page was saved before the post and the receipt: {pages}"
+        assert pages[0]["line"] != "", f"the page carries no ticket line for the receipt: {pages}"
+        assert len(comments) == 1, store.requests()
+        assert receipt is not None, "no receipt"
+        assert len(writes) == 1, _H1471._signed_grants(signer)
+    else:
+        assert asked == [], f"a {ending} job asked the helper for a write pass: {watch.events}"
+        assert writes == [], _H1471._signed_grants(signer)
+        assert comments == [], f"a {ending} job commented: {comments}"
+        assert receipt is None, receipt
+        assert [p for p in pages if p["comments"] or p["receipt"] or p["line"]] == [], \
+            f"the page shows a ticket write nobody made: {pages}"
+        if ending not in ("teardown-faulted", "raises"):
+            assert len(pages) == 1, f"the page was not saved once beside the silent ending: {watch.events}"
+
+
+def _case_system_fault_1471(s: Scene, monkeypatch: Any, fault: str) -> str:
+    """Make the tenant's case system (`ticket`) faulty as `fault` says, the next job reading it: `bad settings` (its
+    stored settings emptied, so its adapter's own check refuses them), `uncovered route` (its stored access declares a
+    second write route, which X2 refuses) or `crashing check` (its adapter's settings check raises). Returns the record the
+    receipt's reason must name."""
+    from defender.kit.settings import RECORDS
+    from defender.system_records import RecordStore
+    from defender.systems import case_system
+    from defender.tests.support.jobs._jobs1342 import fixed_clock
+    from defender.tests.support.tenancy import _systems1366 as R
+
+    if fault == "crashing check":
+        real = case_system.fresh_adapter_module
+
+        class Crashing:
+            def __init__(self, module: Any) -> None:
+                self._module = module
+
+            def __getattr__(self, name: str) -> Any:
+                return getattr(self._module, name)
+
+            @staticmethod
+            def check_settings(*_a: Any, **_k: Any) -> None:
+                raise RuntimeError("the settings check crashed")
+
+        monkeypatch.setattr(case_system, "fresh_adapter_module",  # lint-monkeypatch: ok — the adapter module as the verdict loads it, its check made to crash
+                            lambda roster, system: Crashing(real(roster, system)))
+        return case_system.CASE_RECORD_POINTER
+    (current,) = R.system_versions(s.dsn, s.t.tenant_id, "ticket")[-1:]
+    settings, access = dict(current.settings), current.access
+    if fault == "bad settings":
+        settings = {}
+    else:
+        import yaml
+
+        doc = yaml.safe_load(access)
+        doc["writes"] = [*doc["writes"], {"method": "POST", "path": "/tickets/*/transitions"}]
+        access = yaml.safe_dump(doc)
+
+    async def put() -> None:
+        store = RecordStore(s.dsn, clock=fixed_clock, judge=lambda after, before: [])
+        try:
+            await store.put_system(s.t.tenant_id, "ticket", replaces=current.version, adapter=current.adapter_id,
+                                   enabled=True, settings=settings, access=access, author=R.SEED_AUTHOR)
+        finally:
+            await store.close()
+
+    from defender.tests.support.tenancy._active1214 import run_sync
+
+    run_sync(put())
+    return RECORDS.part("ticket", "settings") if fault == "bad settings" else RECORDS.part("ticket", "access")
+
+
+@pytest.mark.parametrize("fault", ["bad settings", "uncovered route", "crashing check"])
+def test_1471_w5_x2_a_flagged_job_whose_case_system_is_faulty_asks_for_no_write_pass_posts_nothing_and_receipts_the_fault(
+        ticket_scene, tmp_path, monkeypatch, fault):
+    """A flagged job whose case system's verdict is faulty (bad settings, a route X2 refuses, a crashing check) asks the
+    helper for no write pass and posts nothing, and its record step receipts the fault as an `error` naming the
+    record at fault. Control: the same tenant's job before the fault asks and posts. (W5, X2, R9-3)"""
+    store = _case_store(tmp_path, monkeypatch)
+    watch = _OrderWatch1471(ticket_scene, store, monkeypatch)
+    report = _report_1471("benign", "the challenge review ran and left nothing about the finding unsettled")
+    _id, _ran, _link, control = _job_1471(ticket_scene, store, report=report)
+    assert len(control) == 1, "control: the unfaulted job posts"
+    assert watch.order() == ["ask"], "control: the unfaulted job asks for its write pass"
+    watch.events.clear()
+    signer = _H1471.make_signer()
+    pointer = _case_system_fault_1471(ticket_scene, monkeypatch, fault)
+
+    run_id, ran, _link, comments = _job_1471(ticket_scene, store, signer=signer, report=report)
+
+    assert ran.raised is None, ran.message
+    assert ticket_scene.job_end(run_id) == SETTLED, ran.message
+    assert watch.of("ask") == [], f"a job over a faulty case system asked for a write pass ({fault}): {watch.events}"
+    assert _H1471._signed_writes(signer) == [], _H1471._signed_grants(signer)
+    assert comments == [], comments
+    receipt = _receipt_1471(ticket_scene, run_id)
+    assert receipt is not None, "the record step left no receipt for the faulty case system"
+    assert (receipt["key"], receipt["status"], receipt["ok"]) == (TICKET_1471, "error", False), receipt
+    assert pointer in str(receipt["reason"]), f"the receipt does not name the record at fault ({pointer!r}): {receipt}"
+
+
+@pytest.mark.parametrize("record_says", ["silent", "flagged-with-a-link"])
+def test_1471_w4_an_unflagged_job_posts_nothing_is_never_signed_a_write_pass_and_leaves_no_receipt(
+        ticket_scene, tmp_path, monkeypatch, record_says):
+    """No flag from the worker: nothing reaches the case store, no receipt, no `rw` signed, though the tenant-folder
+    launch record claims a flag and a link. Control: the read pass was signed. (W4, P-5)"""
+    store = _case_store(tmp_path, monkeypatch)
+    signer = _H1471.make_signer()
+    record = {} if record_says == "silent" else {
+        "update_ticket": True, "post_ticket": True, "ticket_link": EVIL_LINK_1471}
+
+    run_id, ran, _link, comments = _job_1471(
+        ticket_scene, store, flagged=False, record=record, signer=signer,
+        report=_report_1471("benign", "the challenge review ran and left nothing about the finding unsettled"))
+
+    assert ran.raised is None, ran.message
+    assert ticket_scene.job_end(run_id) == SETTLED, ran.message
+    assert signer.payloads, "positive control: the job's read pass was signed"
+    assert comments == [], comments
+    assert store.requests() == [], store.requests()
+    assert _receipt_1471(ticket_scene, run_id) is None
+    assert _H1471._signed_writes(signer) == [], _H1471._signed_grants(signer)
+
+
+def test_1471_w5_a_write_that_cannot_be_signed_lets_the_flagged_run_go_on_with_the_no_token_receipt(
+        ungranted_ticket_scene, tmp_path, monkeypatch):
+    """A flagged job with an empty read grant whose signer fails when the record step asks for the write: the run
+    settles as usual, nothing is sent, and the receipt says the write-back token could not be minted. (W5)"""
+    from defender.investigation.ticket_writer import REASON_NO_TOKEN
+    from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
+
+    scene = ungranted_ticket_scene
+    store = _case_store(tmp_path, monkeypatch)
+    signer = A.RaisingSigner(RuntimeError("sealed-1471"))
+
+    run_id, ran, _link, comments = _job_1471(
+        scene, store, signer=signer,
+        report=_report_1471("benign", "the challenge review ran and left nothing about the finding unsettled"))
+
+    assert ran.raised is None, ran.message
+    assert scene.job_end(run_id) == SETTLED, ran.message  # the read grant is empty: no read sign refuses the job
+    assert comments == [], comments
+    assert store.requests() == [], store.requests()
+    receipt = _receipt_1471(scene, run_id)
+    assert receipt is not None, "the record step did not run for the flagged job"
+    assert (receipt["key"], receipt["status"], receipt["reason"]) == (TICKET_1471, "error", REASON_NO_TOKEN), receipt
+    assert signer.asked >= 1, "premise: the write was asked to be signed"
+
+
+def test_1471_w5_an_alert_that_names_no_ticket_keeps_its_own_receipt_reason_not_the_no_token_one(
+        ticket_scene, tmp_path, monkeypatch):
+    """Flagged, the alert names no ticket (the case record changed since create): the container sees no key before it asks,
+    so the receipt says so (`REASON_NO_TICKET`), not that a token could not be minted; nothing is sent, nothing `rw`
+    signed. (W5, N8)"""
+    from defender.investigation.ticket_writer import REASON_NO_TICKET
+    from defender.tests.support.jobs._jobs1342 import ALERT_BYTES
+
+    store = _case_store(tmp_path, monkeypatch)
+    signer = _H1471.make_signer()
+
+    run_id, ran, _link, comments = _job_1471(
+        ticket_scene, store, alert=ALERT_BYTES, signer=signer,
+        report=_report_1471("benign", "the challenge review ran and left nothing about the finding unsettled"))
+
+    assert ran.raised is None, ran.message
+    assert comments == [], comments
+    assert store.requests() == [], store.requests()
+    receipt = _receipt_1471(ticket_scene, run_id)
+    assert receipt is not None, "no receipt"
+    assert (receipt["status"], receipt["reason"]) == ("error", REASON_NO_TICKET), receipt
+    assert _H1471._signed_writes(signer) == [], _H1471._signed_grants(signer)
+
+
+def test_1471_p5_a_launch_record_rewritten_after_the_worker_wrote_it_steers_neither_the_flag_nor_the_ticket_nor_the_link(
+        ticket_scene, tmp_path, monkeypatch):
+    """End to end: the worker flagged the job and handed the helper the alert's digest and the link; the tenant-folder
+    launch record (which the job container can write) now says unflagged, another link and the digest of other bytes. The
+    ticket still gets one comment with the worker's link on the alert's ticket; the other link appears nowhere. (P-5)"""
+    store = _case_store(tmp_path, monkeypatch)
+    forged = {"update_ticket": False, "post_ticket": False, "ticket_link": EVIL_LINK_1471,
+              "digest": hashlib.sha256(b"other").hexdigest()}
+
+    run_id, ran, link, comments = _job_1471(
+        ticket_scene, store, record=forged,
+        report=_report_1471("malicious", "the challenge review ran and left nothing about the finding unsettled"))
+
+    assert ran.raised is None, ran.message
+    assert len(comments) == 1, f"the rewritten record unflagged the job or stopped it: {store.requests()}"
+    assert comments[0]["path"].endswith(f"/tickets/{TICKET_1471}/comments"), comments[0]
+    body = _text_1471(comments[0])
+    assert link in body, body
+    assert EVIL_LINK_1471 not in str(comments[0]["body"]), comments[0]  # the whole payload, author included
+
+
+def test_1471_p5_an_alert_swapped_after_the_worker_wrote_it_with_the_record_digest_rewritten_is_refused_and_posts_nothing(
+        ticket_scene, tmp_path, monkeypatch):
+    """The alert replaced by another ticket's and the launch record's digest rewritten to match: the worker's digest (in
+    the helper's argv) does not match, so setup is refused and nothing is posted on either ticket. (P-5, O6)"""
+    store = _case_store(tmp_path, monkeypatch)
+    worker_digest = hashlib.sha256(KEYED_ALERT_1471).hexdigest()
+
+    run_id, ran, _link, comments = _job_1471(
+        ticket_scene, store, alert=_H1471.OTHER_KEYED_ALERT_1471, digest=worker_digest,
+        report=_report_1471("benign", "the challenge review ran and left nothing about the finding unsettled"))
+
+    assert ran.raised is None, ran.message
+    assert ran.calls["lifecycle"] == 0, "the run went ahead on bytes the worker's digest does not name"
+    assert ticket_scene.job_end(run_id) == REFUSED
+    assert comments == [], comments
+    assert store.requests() == [], store.requests()

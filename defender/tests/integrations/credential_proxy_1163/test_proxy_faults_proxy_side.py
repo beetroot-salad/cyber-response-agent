@@ -289,19 +289,20 @@ def test_f4_a_lone_surrogate_in_a_request_is_classified_and_audited(
     the method) gets a 200 answer with a fault class and one audit record; nothing is sent. O7, A9, A13."""
     lone = "\ud800"
     with T.rig(tmp_path / "forge", data_root, lambda u: H.declaration(
-            u + BASE, writes=(("POST", "/tickets"),))) as r:
+            u + BASE, writes=(("POST", "/tickets/*/comments"),))) as r:
         doc = _doc(r)
         if where == "header":
             doc["headers"] = {"X-A": f"v{lone}"}
         elif where == "url":
             doc["url"] = f"{r.up.url}{BASE}/users/{lone}"
         elif where == "body":
-            doc.update(method="POST", url=f"{r.up.url}{BASE}/tickets", body=f"{{\"x\": \"{lone}\"}}")
+            doc.update(method="POST", url=f"{r.up.url}{BASE}/tickets/T-1/comments",
+                       body=f"{{\"x\": \"{lone}\"}}")
         elif where == "system":
             doc["system"] = lone
         else:
             doc["method"] = f"G{lone}T"
-        grant = {("identity", "rw")}
+        grant = {("identity", "rw", "T-1")}  # X1: the write pass names its ticket
         response = r.client.post(PROXY_PATH, headers={"Authorization": f"Bearer {r.tok(grant)}"},
                                  content=json.dumps(doc).encode("ascii"))
         control = r.ask()
@@ -635,12 +636,14 @@ def test_a26_a_forged_token_naming_a_real_other_tenant_reaches_tenant_resolution
 
 def test_a_header_value_that_is_not_ascii_is_a_config_fault_unsent(tmp_path, data_root):
     """A request header that is not ASCII is a malformed request (`ConfigFault`, unsent), not a transport failure a retry
-    could clear (r7 A18); an ASCII one is sent (control)."""
+    could clear (r7 A18); an ASCII one is sent (control). The header is one the proxy forwards (#1471 R9-5), so the
+    refusal is the value's, not the name's."""
     with T.rig(tmp_path / "forge", data_root) as r:
-        refused = r.ask(headers={"X-Name": "café"})
+        refused = r.ask(headers={"User-Agent": "café"})
         assert (refused["fault"], r.up.seen) == ("ConfigFault", [])
-        sent = r.ask(headers={"X-Name": "cafe"})
+        sent = r.ask(headers={"User-Agent": "cafe"})
     assert sent["fault"] is None, sent
+    assert [s.header("User-Agent") for s in r.up.seen] == ["cafe"]
 
 
 # --- #1412 the reply format on the proxy's side ------------------------------------------------

@@ -17,12 +17,10 @@ from typing import Any
 
 import pytest
 
-from defender.investigation import ticket_writer
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.shared.contracts._data_root_1078 import tenant_directory
 from defender.tests.support.tenancy import _systems1366 as R
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
-from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107
 from defender.tests.support.tenancy._twin1496 import seed_tenant
 
 #: A catalog adapter an upgrade removed: a record can still name it (the accept-all seeder stores what it is given).
@@ -256,81 +254,6 @@ def test_1366_r12_a_record_whose_adapter_is_no_longer_a_catalog_adapter_refuses_
     assert RETIRED in (refused.refusal or ""), (refused.raised, refused.refusal)
     assert (refused.run_dir, refused.main.requests) == (None, 0)
     assert (ran.raised, ran.refusal, ran.rc) == (None, None, 0)
-
-
-# --- C5 at run start, over RECORDS (A1) -----------------------------------------------------------------------------
-
-COMMENT_ROUTE = ("POST", "/tickets/*/comments")
-
-
-def _with_routes(spec: R.RecordsSpec, reads: tuple, writes: tuple) -> R.RecordsSpec:
-    """`spec` with the ticket record's access declaring exactly `reads` and `writes` (its base and auth kept)."""
-    doc = json.loads(spec.systems["ticket"].access)
-    doc["reads"] = [{"method": m, "path": p} for m, p in reads]
-    doc["writes"] = [{"method": m, "path": p} for m, p in writes]
-    return R.edited(spec, "ticket", access=json.dumps(doc, indent=2) + "\n")
-
-
-def _comment_run(tmp_path: Path, reads: tuple, writes: tuple) -> tuple[S.Drive, S.TicketStore, S.Planted]:
-    """One `run.main --update-ticket` run, the REAL ticket writer over a recording store, of a tenant whose ticket RECORD
-    (the case system) declares exactly `reads` and `writes`. The tenant's published folder is irrelevant: the run's tenant
-    is built from the records the directory holds."""
-    planted = S.plant_tenant(fixture_uuid("tenant:acme"), alert_mapping=S.ticketed_mapping())
-    spec = _with_routes(R.records_from_settings(planted.settings), reads, writes)
-    sink = S.TicketStore(tmp_path)
-    ran = S.run_alert(tmp_path, alert=S.ticketed_alert(), tenant=planted, tickets=S.ticket_writer(sink), update_ticket=True,
-                      main=S.closing_main_turns(), directory=_directory(planted, spec))
-    return ran, sink, planted
-
-
-_UNCOVERED = {
-    "no-write-route": ((), ()),
-    "another-write-route": ((), (("POST", "/tickets/*/transitions"),)),
-    "read-route-matching-the-comment-route": ((COMMENT_ROUTE,), (COMMENT_ROUTE,)),
-    "read-route-literal-matching-the-comment-route": ((("POST", "/tickets/ABC-1/comments"),), (COMMENT_ROUTE,)),
-}
-
-
-@pytest.mark.parametrize("label", list(_UNCOVERED))
-def test_1366_c5_a_run_whose_stored_case_record_does_not_cover_the_comment_route_posts_nothing_and_names_the_fault(
-        tmp_path, label, caplog):
-    """The case system's stored declaration lacks the comment route (no write, another write, or a read route matching
-    it): the run still ends, no request reaches the case store, and the run's receipt is an error naming ticket as a
-    case-settings fault rather than the proxy's refusal. The tenant is the records' alone: its folder covers the route.
-    (#1366 C5 run side, C3 caller 3, r5 read-route ruling, A1)"""
-    reads, writes = _UNCOVERED[label]
-    caplog.set_level(logging.INFO)
-
-    ran, sink, planted = _comment_run(tmp_path, reads, writes)
-
-    assert (ran.raised, ran.refusal, ran.rc) == (None, None, 0), (label, ran.raised, ran.refusal)
-    assert sink.calls == [], (label, sink.calls)
-    receipt = S1107.receipt(ran.run_dir)
-    assert receipt is not None, label
-    assert (receipt["ok"], receipt["status"]) == (False, "error"), (label, receipt)
-    assert "ticket" in receipt["reason"], (label, receipt)
-    assert "the credential proxy refused" not in receipt["reason"].lower(), (label, receipt)
-    # Carried over from the retired file-fault test (test_ticket_writer o6): the fault is logged by the ticket writer
-    # (not by whatever else warns in a run), and its reason names no host path (the planted data root and settings
-    # folder, as given and resolved: the data root is not under tmp_path).
-    assert [r for r in caplog.records if r.levelno >= logging.WARNING and r.name == ticket_writer.__name__], \
-        (label, "the ticket writer logged no warning", [(r.name, r.getMessage()) for r in caplog.records])
-    for host in (planted.root, planted.settings, planted.knowledge):
-        for spelled in {str(host), str(host.resolve())}:
-            assert spelled not in receipt["reason"], (label, spelled, receipt)
-
-
-def test_1366_c5_a_run_whose_stored_case_record_covers_the_comment_route_posts_the_comment(tmp_path):
-    """Control of the rows above on the same channel: the comment route among unrelated reads and writes is covered, and
-    the comment reaches the case store. (#1366 C5, C2)"""
-    ran, sink, _ = _comment_run(tmp_path, (("POST", "/tickets/*/comments/x"),),
-                             (("PUT", "/elsewhere/*"), COMMENT_ROUTE))
-
-    assert (ran.raised, ran.refusal, ran.rc) == (None, None, 0)
-    assert sink.paths(S.COMMENTS_SUFFIX) == [f"/tickets/{S.TICKET_KEY}/comments"], sink.calls
-    receipt = S1107.receipt(ran.run_dir)
-    assert receipt is not None
-    assert (receipt["ok"], receipt["status"]) == (True, "commented"), receipt
 
 
 # --- where the run's record of versions lives, and what the box is never given (C1, C2) -----------------------------

@@ -296,9 +296,9 @@ our operator deploys the product.
 3. The tenant admin stores the credential: `PUT /systems/{system}/credentials`, with
    `for_version` (the version the write in step 2 answered) and `credentials` (the scheme's field
    names → values; the values never pass through you).
-4. Case system only: `PUT /case-record` with `replaces` (0 if none), `system_id` and
-   `comment_body` from `<handoff>/case-record.yaml`, then the alert mapping's `case_key` line
-   (`PUT /alert-mapping`) **only if** the stored mapping lacks it or names another field
+4. Case system only: `PUT /case-record` with `replaces` (0 if none) and `system_id`
+   from `<handoff>/case-record.yaml` (the comment's wording is fixed), then the alert mapping's
+   `case_key` line (`PUT /alert-mapping`) **only if** the stored mapping lacks it or names another field
    (`configure.md` → "The ticket key").
 5. A system with investigator tools: merge the tenant's PR(s) (skill and seeds, grant table) and
    publish them (`tenant.py update {tenant}`).
@@ -309,8 +309,8 @@ our operator deploys the product.
 
 **The final check cannot be run from a connect conversation yet** (#1493 adds the pass and the
 runner). Say so plainly. Until then, the first signal is the operator's first real run on the
-tenant — for a case system, the first run started with `--update-ticket` on a real alert, whose
-run page shows the ticket receipt. Leave `check.md` in the handoff so it is run once the runner
+tenant — for a case system, the first investigation started with `update_ticket` set on its start-investigation request, for
+a real alert, whose run page shows the ticket receipt. Leave `check.md` in the handoff so it is run once the runner
 exists.
 
 **You do not merge or push.** Present a summary: files touched, the agreed check, the

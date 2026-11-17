@@ -11,8 +11,7 @@
   seam: a parameter named `visualize` defaulting to the reader, and `visualize=visualize`
   handed to `_post_steps` or to a composition (the job container's process wiring,
   `serve_job`, hands the seam to the composition it runs, which is held to this rule
-  itself). The operator's own readers, the case ticket and the curation
-  enqueue, come after its lifecycle.
+  itself). The operator's own reader, the curation enqueue, comes after its lifecycle.
 * The compositions, `_post_steps` and `_run_investigation_lifecycle` are each bound exactly once
   in `run.py` (a second `def`, assignment, import, class, match capture or `except ... as` of the
   name would shadow the one this rule reads), and none carries a decorator (which would wrap the
@@ -72,7 +71,7 @@ _READERS = ("iterdir", "cross_check_tables", "visualize")
 _LISTERS = ("listdir", "scandir", "walk", "glob", "rglob", "iglob")
 _CENSUS = (*_READERS, *_LISTERS)
 #: The operator composition's own readers, after its lifecycle.
-_OPERATOR_READERS = ("record_case_ticket", "enqueue_curation")
+_OPERATOR_READERS = ("enqueue_curation",)  # the operator no longer comments on a ticket (#1471 W7)
 _COMPOSITIONS = ("main", "job_main")
 _LIFECYCLE = "lifecycle"
 _POST_STEPS = "_post_steps"
