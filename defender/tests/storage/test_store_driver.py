@@ -602,6 +602,21 @@ def test_m2_a_close_the_tool_accepted_is_a_committed_report(tmp_path):
     assert "report_committed" not in result, "the run summary still carries a second source of the fact (D-ae)"
 
 
+def test_g5_a_run_whose_model_closes_leaves_its_closing_record_readable_through_the_lookup(tmp_path):
+    """`run_investigation` driven to a model close: the run handle's lookup yields a `Record` with the committed
+    disposition, stood, for this run. (V-ONE, V-FINAL)"""
+    from defender.records import closing as C
+
+    run_dir = materialize(tmp_path, GOLDEN, run_id="g5-closed")
+
+    result = drive(run_dir, run_id="g5-closed", main=_closing_replay(run_dir))
+
+    assert result["exit_reason"] is None, result
+    found = C.for_run(_run_handle_1165(run_dir))
+    assert isinstance(found, C.Record), found
+    assert (found.record.run_id, found.record.disposition, found.record.outcome) == (run_dir.name, "inconclusive", C.STANDS)
+
+
 def test_m2_a_review_record_write_fault_after_the_report_still_counts(tmp_path):
     """The report was written but the review record could not be: terminality follows the report, so true. (M2)"""
     run_dir = materialize(tmp_path, GOLDEN, run_id="m2-record-fault")

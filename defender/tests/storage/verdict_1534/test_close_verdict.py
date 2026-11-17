@@ -194,21 +194,45 @@ def test_v_fields_a_confident_close_carries_the_ceiling_receipts_and_baselines_o
     assert (baseline.anchor_kind, baseline.grounding_kind) == ("runtime-evidence", "telemetry-baseline")
 
 
-def test_v_fields_a_baseline_window_is_stored_as_the_parsed_utc_instants_not_as_written(tmp_path):
-    """A window written with an offset is kept as ISO-8601 UTC instants. (V-FIELDS)"""
-    import datetime as dt
+@pytest.mark.parametrize(("window", "start", "end"), [
+    ("2026-04-04T02:00:00+02:00/2026-05-04T02:00:00+02:00", "2026-04-04T00:00:00Z", "2026-05-04T00:00:00Z"),
+    ("2026-04-04T00:00:00Z/2026-05-04T00:00:00Z", "2026-04-04T00:00:00Z", "2026-05-04T00:00:00Z"),
+    ("2026-04-04T00:00:00.123456Z/2026-05-04T00:00:00Z", "2026-04-04T00:00:00.123456Z", "2026-05-04T00:00:00Z"),
+    ("2026-04-04T02:00:00.5+02:00/2026-05-04T00:00:00.000001Z", "2026-04-04T00:00:00.500000Z",
+     "2026-05-04T00:00:00.000001Z"),
+], ids=["offset", "already-canonical", "microseconds", "offset-and-microseconds"])
+def test_v_fields_a_baseline_window_is_stored_as_canonical_utc_instants_and_renders_as_start_over_end(
+        tmp_path, window, start, end):
+    """A window is kept as ISO-8601 UTC with `Z`, microseconds only when non-zero; the baseline line renders it as
+    `start/end` of those instants. (V-FIELDS, M2)"""
+    from defender.records import closing as C
 
-    from defender import _clock
-
-    window = "2026-04-04T02:00:00+02:00/2026-05-04T02:00:00+02:00"
     doc = scene.inconclusive_document(rows=scene.consult_block(scene.consultation_row(window=window)))
 
     (entry,) = B.close_run(tmp_path, "malicious", doc).record.runtime_evidence
 
-    assert "+02:00" not in entry.window_start + entry.window_end
-    assert _clock.parse_iso_utc(entry.window_start) == dt.datetime(2026, 4, 4, tzinfo=dt.UTC)
-    assert _clock.parse_iso_utc(entry.window_end) == dt.datetime(2026, 5, 4, tzinfo=dt.UTC)
-    assert dt.datetime.fromisoformat(entry.window_start.replace("Z", "+00:00")).utcoffset() == dt.timedelta(0)
+    assert (entry.window_start, entry.window_end) == (start, end)
+    assert f"{start}/{end}" in C.baseline_line(entry)
+
+
+@pytest.mark.parametrize(("cell", "column"), [
+    ('"runtime-evidence"', "anchor_kind"), (" runtime-evidence ", "anchor_kind"),
+    ('"telemetry-baseline"', "grounding"), (" telemetry-baseline ", "grounding"),
+], ids=["anchor-quoted", "anchor-padded", "grounding-quoted", "grounding-padded"])
+def test_v_fields_a_quoted_or_padded_kind_cell_closes_and_the_entry_holds_the_canonical_member(tmp_path, cell, column):
+    """The gate strips a quoted or padded `anchor_kind`/`grounding` cell, so such a document closes; the stored entry
+    holds the vocabulary member, not the cell as written. (V-FIELDS, L-5)"""
+    from defender.records import closing as C
+    from defender.skills.invlang.validate import validate_companion
+
+    doc = scene.inconclusive_document(rows=scene.consult_block(scene.consultation_row(**{column: cell})))
+    assert validate_companion(doc, None) == [], "fixture control: the gate accepts the cell"
+
+    (entry,) = B.close_run(tmp_path, "malicious", doc).record.runtime_evidence
+
+    assert (entry.anchor_kind, entry.grounding_kind) == ("runtime-evidence", "telemetry-baseline")
+    assert entry.anchor_kind in C.ANCHOR_KINDS
+    assert entry.grounding_kind in C.GROUNDING_KINDS
 
 
 def test_v_fields_a_row_the_walkers_reject_is_dropped_and_the_close_still_commits(tmp_path):
@@ -358,8 +382,9 @@ def test_v_text_the_forced_close_keeps_the_longest_prefix_of_receipt_lines_withi
     assert len("\n".join([*lines, lines[-1]])) > C.CEILING_LINES_BOUND
 
 
-def test_v_text_the_forced_close_cuts_baselines_to_the_count_cap_and_aggregate(tmp_path):
-    """Forty distinct baselines: a leading run within the count cap and the aggregate, maximal. (V-TEXT)"""
+def test_v_text_the_forced_close_cuts_baselines_to_the_aggregate(tmp_path):
+    """Forty distinct baselines: the longest leading run whose rendered lines join (separators counted) within the
+    aggregate, maximal. (V-TEXT)"""
     from defender.records import closing as C
 
     rows = [scene.consultation_row(anchor_id=f"tk-b-{i:03d}", result="n", reasoning="r") for i in range(40)]
@@ -368,9 +393,9 @@ def test_v_text_the_forced_close_cuts_baselines_to_the_count_cap_and_aggregate(t
     entries = rec.runtime_evidence
     lines = [C.baseline_line(e) for e in entries]
     assert [e.anchor_id for e in entries] == [f"tk-b-{i:03d}" for i in range(len(entries))]
-    assert 1 <= len(entries) <= C.BASELINE_COUNT_CAP
+    assert 1 <= len(entries) < 40
     assert len("\n".join(lines)) <= C.BASELINE_LINES_BOUND
-    assert len(entries) == C.BASELINE_COUNT_CAP or len("\n".join([*lines, lines[-1]])) > C.BASELINE_LINES_BOUND
+    assert len("\n".join([*lines, lines[-1]])) > C.BASELINE_LINES_BOUND
 
 
 def test_v_text_gated_input_at_the_bounds_is_stored_unchanged(tmp_path):
@@ -388,13 +413,33 @@ def test_v_text_gated_input_at_the_bounds_is_stored_unchanged(tmp_path):
     count = 6
     probes = [C.ceiling_line(C.CeilingEntry("nothing-to-try", None, f"fake-system-{i:03d}.fake-verb", "x"))
               for i in range(count)]
-    budget = C.CEILING_LINES_BOUND - (count - 1) - sum(len(p) - 1 for p in probes)
-    sizes = [budget // count + (1 if i < budget % count else 0) for i in range(count)]
+    sizes = B.fill_sizes(probes, C.CEILING_LINES_BOUND)
     assert max(sizes) <= C.NOTE_BOUND, "fixture control: each note fits its own bound"
     doc = S.paid(*B.capability_rows(count, lambda i: B.plain(sizes[i])))
     assert validate_companion(doc, None) == []
     entries = B.close_run(tmp_path / "aggregate", S.GAP_MEMBER, doc).record.ceiling_test
     assert len(entries) == count
+    assert len("\n".join(C.ceiling_line(e) for e in entries)) == C.CEILING_LINES_BOUND
+
+
+@pytest.mark.parametrize("disposition", B.model_dispositions())
+def test_v_text_a_model_close_at_the_bounds_stores_its_parsed_rows_treated_and_cut_nothing(tmp_path, disposition):
+    """Whatever model disposition closes, a document whose ceiling rows sit exactly at the note bound and at the aggregate
+    is stored whole: each note is its parsed text treated, none dropped. (V-TEXT, M3)"""
+    from defender.records import closing as C
+
+    count = 6
+    probes = [C.ceiling_line(C.CeilingEntry("nothing-to-try", None, f"fake-system-{i:03d}.fake-verb", "x"))
+              for i in range(count)]
+    # note 0 sits at the note bound; the rest share what is left of the aggregate
+    others = B.fill_sizes(probes[1:], C.CEILING_LINES_BOUND - len(probes[0]) - C.NOTE_BOUND)
+    assert max(others) <= C.NOTE_BOUND, "fixture control: each note fits its own bound"
+    notes = [B.expanding(C.NOTE_BOUND), *(B.plain(n) for n in others)]
+    document = B.with_ceiling(disposition, B.capability_rows(count, lambda i: notes[i]))
+
+    entries = B.close_run(tmp_path, disposition, document).record.ceiling_test
+
+    assert [e.note for e in entries] == [n.replace("ab.cd", "ab[.]cd") for n in notes]
     assert len("\n".join(C.ceiling_line(e) for e in entries)) == C.CEILING_LINES_BOUND
 
 
@@ -410,7 +455,7 @@ def test_v_text_baselines_that_fit_the_aggregate_pass_the_gate_and_one_more_does
 
     (probe,) = B.close_run(tmp_path / "probe", S.GAP_MEMBER, doc(1)).record.runtime_evidence
     fit = (C.BASELINE_LINES_BOUND + 1) // (len(C.baseline_line(probe)) + 1)
-    assert 1 < fit <= C.BASELINE_COUNT_CAP, "fixture control"
+    assert fit > 1, "fixture control"
 
     assert validate_companion(doc(fit), None) == []
     assert len(B.close_run(tmp_path / "fit", S.GAP_MEMBER, doc(fit)).record.runtime_evidence) == fit
@@ -498,12 +543,20 @@ def test_v_final_the_forced_closes_failed_write_reports_forced_close_failed(tmp_
 
 @pytest.mark.parametrize(("disposition", "forced"), [("malicious", False), (HOST, True)], ids=["reviewed", "forced"])
 def test_v_final_a_close_with_no_store_on_its_deps_raises_the_wiring_fault(tmp_path, disposition, forced):
-    """No `session_store` on MAIN's deps: `NoSessionStore`, nothing final. (V-FINAL)"""
+    """No `session_store` on MAIN's deps: `NoSessionStore` at entry, no review stage called, no row written, nothing
+    final. (V-FINAL)"""
+    from dataclasses import replace
+
     from defender.investigation import challenge_gate, close_tool
 
-    deps, _run_dir = V.closing_deps(tmp_path, S.pays_every_price("malicious"))
+    deps, run_dir = V.closing_deps(tmp_path, S.pays_every_price("malicious"))
+    opened = deps.session_store
+    assert opened is not None, "fixture control: `main_deps` opened a store"
+    stages = S9.recording(S9.holds())
     with pytest.raises(close_tool.NoSessionStore):
-        S9.close_with(deps, disposition, S9.recording(S9.holds()), forced=forced)
+        S9.close_with(replace(deps, session_store=None), disposition, stages, forced=forced)
+    assert stages.calls == []
+    assert V.scalar_rows(opened.path, run_dir.name) == []
     assert not challenge_gate.ReviewState.of(deps).closed
 
 
