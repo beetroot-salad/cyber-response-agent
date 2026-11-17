@@ -5,13 +5,14 @@ real server's composition root (#1083 piece 1)."""
 
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING, Literal, cast
 
 from defender.jobs.audit import AuditAction, announce
 from defender.records.formats import BatchId, TenantId, WorkItemId
 
 from .models import AbandonRequested, BatchReleased, ItemKind, ItemReleased, ParkedBatch, ParkedItemRef, SetAsideItem
+from defender._text import one_line
+
 from .ports import NotFound, Principal, TimePosition
 
 if TYPE_CHECKING:
@@ -23,8 +24,7 @@ _AUDIT_LINE = 200
 
 def _audit_line(done: Acted) -> str:
     """The cause and detail the row had when acted on, as one bounded line."""
-    line = re.sub(r"[\r\n]+", " ", f"{done.cause}: {done.detail or ''}")
-    return line[:_AUDIT_LINE]
+    return one_line(f"{done.cause}: {done.detail or ''}")[:_AUDIT_LINE]
 
 
 def _announce(principal: Principal, action: AuditAction, done: Acted) -> None:

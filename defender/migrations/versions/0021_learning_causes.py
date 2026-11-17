@@ -38,9 +38,16 @@ _PARKED_CAUSE = r"""
       WHEN reason ~ '^the forge refused [0-9]+ times: ' THEN
         CASE
           WHEN reason ~ '(secret file .* (could not be read|does not hold one secret id)|has no usable forge wiring)'
+            OR reason ~ 'records no .* login \(no role id\)|records no absolute .* secret file'
             THEN 'delivery_unavailable'
           WHEN reason ~ '(Client|Server) error ''(401|403) '
             OR reason ~ 'Vault identity token request failed|Vault returned no identity token'
+            OR reason ~ 'Vault returned an invalid identity token|invalid identity claims|identity claims must be an object'
+            OR reason ~ 'invalid lifetime claims|Vault identity does not match|Vault identity is expired'
+            OR reason ~ 'Vault identity role must be|Vault identity needs a tenant|Vault issuer must be an HTTPS'
+            OR reason ~ 'short-lived token budget|has no live credential generation|records no audience'
+            OR reason ~ 'issuer URL must be an HTTPS|issuer CA certificate .* is unusable'
+            OR (reason ~ 'the issuer AppRole login failed' AND reason !~ '\(HTTP [0-9]+\)')
             OR reason ~ 'the issuer AppRole login failed.*\(HTTP (401|403)\)'
             THEN 'forge_credential_refused'
           ELSE 'forge_refused'

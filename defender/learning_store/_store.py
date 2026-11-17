@@ -348,6 +348,14 @@ async def _settle_requests(s: AsyncSession, tenant: str) -> None:
         literal("learning.curation_request:") + literal(str(tenant)), 0))))
 
 
+async def _lock_lane(s: AsyncSession, tenant: str, lane: str) -> None:
+    """Take, for the rest of `s`'s transaction, the tenant's lock on one lane's membership: a claim, a revert claim and a
+    release each read the lane's batches and then write one, and without it a release's check ("no other batch is working
+    here") and a claim's can both pass before either writes, leaving a revert in review beside a working author batch."""
+    await s.execute(select(func.pg_advisory_xact_lock(func.hashtextextended(
+        literal("learning.lane:") + literal(f"{tenant}:{lane}"), 0))))
+
+
 def _superseded(item: Any) -> Any:
     """The test that a request returning to waiting has a fresher one waiting for its case (under `_settle_requests`)."""
     other = _I.alias()
@@ -575,6 +583,7 @@ class LearningStore(FeedbackVerbs):
         try:
             async with self._sessions.begin() as s:
                 await self._require_active(s, tenant)
+                await _lock_lane(s, tenant, lane)
                 await self._refuse_if_busy(s, tenant, lane)
                 held = await self._claim_replacement(s, tenant, lane, kinds, owner)
                 if held is None:
@@ -684,6 +693,7 @@ class LearningStore(FeedbackVerbs):
         try:
             async with self._sessions.begin() as s:
                 await self._require_active(s, tenant)
+                await _lock_lane(s, tenant, AUTHOR_LANE)
                 busy = (await s.execute(select(_B.c.id).where(
                     _B.c.tenant_id == TenantId(tenant), _B.c.lane == AUTHOR_LANE, _B.c.phase == "working").limit(1))).first()
                 if busy is not None:
@@ -838,6 +848,7 @@ class LearningStore(FeedbackVerbs):
                     raise Conflict("an abandon of this batch was requested")
                 if row.cause != RELEASABLE_CAUSE:
                     raise Conflict(f"the batch was parked for {row.cause}: only {RELEASABLE_CAUSE} is released")
+                await _lock_lane(s, str(row.tenant_id), row.lane)
                 busy = (await s.execute(select(_B.c.id).where(
                     _B.c.tenant_id == row.tenant_id, _B.c.lane == row.lane, _B.c.phase == "working").limit(1))).first()
                 if busy is not None:

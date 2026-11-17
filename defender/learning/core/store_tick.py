@@ -682,7 +682,7 @@ class Tick:
                 found = find_pr(forge, b.branch, record.commits_of(str(b.id)))
                 number = int(found.number) if found is not None else None
             pr = forge.pull_request(number) if number is not None else None
-            if pr is not None and pr.status == "open" and b.kind != "registry":
+            if number is not None and pr is not None and pr.status == "open" and b.kind != "registry":
                 forge.close_pr(number)
                 _logger.info(f"{self.label}: batch {b.id} is abandoned by a person's request: closed its PR #{number}")
                 pr = forge.pull_request(number)
