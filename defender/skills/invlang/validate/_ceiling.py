@@ -12,6 +12,7 @@ from defender import _yaml
 
 
 from defender._model import model
+from defender.records import closing
 
 
 
@@ -68,18 +69,17 @@ def _row_renders_as_empty_marker(value: object) -> bool:
 #: `access-denied` / `out-of-retention` need a host-side signal that tells them apart from
 #: `query-failed` mechanically (e.g. a distinct `error_class` for a permission refusal, or an
 #: adapter reporting before-retention) before they can be added.
-CEILING_QUERY_FAILED = "query-failed"
+CEILING_QUERY_FAILED = closing.CEILING_QUERY_FAILED
 
 
-CEILING_QUERY_EMPTY = "query-empty"
+CEILING_QUERY_EMPTY = closing.CEILING_QUERY_EMPTY
 
 
-CEILING_NOTHING_TO_TRY = "nothing-to-try"
+CEILING_NOTHING_TO_TRY = closing.CEILING_NOTHING_TO_TRY
 
 
-CEILING_STATES: tuple[str, ...] = (
-    CEILING_QUERY_FAILED, CEILING_QUERY_EMPTY, CEILING_NOTHING_TO_TRY,
-)
+#: The closed states live with the closing record, whose ceiling entries carry one (#1534).
+CEILING_STATES: tuple[str, ...] = closing.CEILING_STATES
 
 
 

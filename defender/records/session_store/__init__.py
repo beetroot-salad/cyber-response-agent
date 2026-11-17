@@ -37,7 +37,9 @@ from ._ledger import (  # noqa: F401
     run_spend as run_spend,
     seal_ledger as seal_ledger,
 )
+from ._closing import write_closing_record as write_closing_record
 from ._schema import (
+    ClosingRecordExists as ClosingRecordExists,
     CyclicParentChain as CyclicParentChain,
     DDL as DDL,
     HEAD_MOVE_REASONS as HEAD_MOVE_REASONS,
