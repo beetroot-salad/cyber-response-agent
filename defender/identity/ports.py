@@ -10,7 +10,7 @@ from typing import Protocol
 from defender._model import model
 from defender.records.formats import CredentialId, MembershipId, ProgramId, TenantId, UserId
 
-from .models import CredentialKind, Membership, MembershipStatus, Program, ProgramCredential, Session, User
+from .models import CredentialKind, Membership, MembershipStatus, Program, ProgramCredential, Session, SignInAttempt, User
 
 
 @model(frozen=True)
@@ -260,6 +260,22 @@ class IdentityRepository(Protocol):
     async def purge_expired_sessions(self, *, now: _dt.datetime, idle_since: _dt.datetime) -> int:
         """Delete every session sign-in refuses already: `expires_at <= now`, or last seen before
         `idle_since`; how many."""
+        ...
+
+    # --- sign-in attempts (#1161 D6)
+    async def add_signin_attempt(self, row: SignInAttempt) -> None:
+        """Store an attempt; a `state` already stored is a `DataRuleViolation`."""
+        ...
+    async def take_signin_attempt(self, state: str, token: str, *, now: _dt.datetime) -> SignInAttempt | None:
+        """Delete and return the attempt `state` names, only when `token` is its token and it has not expired;
+        otherwise None, and a stored attempt is left as it is (a wrong token cannot cancel another browser's)."""
+        ...
+    async def purge_expired_signin_attempts(self, *, now: _dt.datetime) -> int:
+        """Delete every attempt with `expires_at <= now`; how many."""
+        ...
+    async def live_signin_attempts(self, held: Mapping[str, str], *, now: _dt.datetime) -> dict[str, _dt.datetime]:
+        """Of `held` (state → token, as one browser holds them), the states whose attempt is stored with that token
+        and has not expired, each with its `expires_at`. Reads only."""
         ...
 
 

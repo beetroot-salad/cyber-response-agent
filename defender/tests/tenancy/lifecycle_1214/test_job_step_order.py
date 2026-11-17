@@ -14,6 +14,7 @@ import pytest
 pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
 
+from defender.tests.support.api._mount1161 import API  # noqa: E402
 from defender.tests.support.api._identity1306 import AuditLog  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._atk1 import Raises, watch_commits  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._fakes import FORGE_URL, OPENBAO_URL  # noqa: E402
@@ -45,11 +46,11 @@ def test_each_action_runs_its_steps_in_the_order_the_design_lists(world):
     tenant = world.active_tenant()
     assert _runs(log, "create") == CREATE
     log.clear()
-    assert world.ops.post(f"/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
     world.drive()
     assert _runs(log, "rotate") == ROTATE
     log.clear()
-    assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
     world.drive()
     assert _runs(log) == ["offboard", "teardown", "finish"]
     log.clear()
@@ -105,7 +106,7 @@ def test_a_transport_failure_after_the_unwrap_restarts_at_wrap_not_at_the_spent_
     item = world.item(tenant)
     assert (item["step"], item["step_actor"]) == ("wrap", "service")
     assert item["failure"] and "install" in item["failure"]
-    assert world.ops.post(f"/admin/tenants/{tenant}/resume").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/resume").status_code == 202
     world.drive()
     assert world.item(tenant)["state"] == "active"
 
@@ -190,7 +191,7 @@ def test_a_tenant_whose_lock_cannot_be_taken_does_not_stop_the_pass_for_the_othe
 
 def _offboarded(world):
     tenant = world.active_tenant()
-    assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
     world.drive()
     return tenant
 

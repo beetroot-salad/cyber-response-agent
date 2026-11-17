@@ -36,6 +36,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+from defender.tests.support.api._mount1161 import API
 from defender.tests.support.api._identity1306 import NEW, OPS, World, items, tenants_of
 from defender.tests.tenancy.lifecycle_1214._fakes import FORGE_URL, ISSUER_URL, OPENBAO_URL, Fakes
 
@@ -125,7 +126,7 @@ class LifecycleWorld(World):
 
     def create(self) -> str:
         """`POST /admin/tenants` as `ops`; the minted id (asserted 202)."""
-        made = self.ops.post("/admin/tenants", json={})
+        made = self.ops.post(API + "/admin/tenants", json={})
         assert made.status_code == 202, made.text
         return made.json()["tenant_id"]
 
@@ -136,7 +137,7 @@ class LifecycleWorld(World):
         return tenant
 
     def item(self, tenant: str) -> dict[str, Any]:
-        got = self.ops.get(f"/admin/tenants/{tenant}")
+        got = self.ops.get(f"{API}/admin/tenants/{tenant}")
         assert got.status_code == 200, got.text
         return got.json()
 
@@ -165,7 +166,7 @@ class LifecycleWorld(World):
     def member_of(self, tenant: str, email: str = NEW) -> Any:
         """`email` invited by `ops`, sent and signed in (the first sign-in accepts, #1306): an active
         member's browser."""
-        invited = self.ops.post(f"/admin/tenants/{tenant}/invitations", json={"email": email})
+        invited = self.ops.post(f"{API}/admin/tenants/{tenant}/invitations", json={"email": email})
         assert invited.status_code == 202, invited.text
         self.send_pending()
         browser = self.sign_in(email)

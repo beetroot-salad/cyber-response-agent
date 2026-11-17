@@ -14,7 +14,7 @@ remote Docker daemon can resolve bind sources. There is no default data root; na
 cd defender && uv venv .venv && uv pip install --python .venv/bin/python -e '.[dev]'   # bootstrap (entrypoints re-exec into .venv themselves)
 export DEFENDER_DATA_ROOT=/path/outside/the/checkout   # every run names its tenant; there is no default (#1078)
 export DEFENDER_DATABASE_DSN=<the tenant database>   # host processes read the tenant records from it (see below)
-export TENANT_ID=<the id POST /admin/tenants answered>   # an `active` tenant: see "Creating a tenant"
+export TENANT_ID=<the id POST /api/admin/tenants answered>   # an `active` tenant: see "Creating a tenant"
 python3 defender/cli/tenant.py check "$TENANT_ID"    # admitted and its folder accepted; every finding reported
 python3 defender/run.py <alert.json> --tenant "$TENANT_ID"   # one investigation → run dir under $DEFENDER_DATA_ROOT/$TENANT_ID/runs/; --no-learn skips curation enqueue
 python3 defender/cli/learning/branch.py --tenant "$TENANT_ID" <run_id> <branch_message_id>   # fork a finished run (by id, under the tenant's runs) into a family of worlds and grade it
@@ -23,7 +23,7 @@ python3 defender/learning/loop.py --tenant "$TENANT_ID" --author-drain     # fol
 
 ### Creating a tenant (#1214)
 
-An administrator posts `POST /admin/tenants` (202; `Location` is the tenant's URL). The record is
+An administrator posts `POST /api/admin/tenants` (202; `Location` is the tenant's URL). The record is
 `creating` until the lifecycle has done its steps, which `python -m defender.lifecycle serve` runs
 (dev: the management service and the host actor in one process; hosted: one process each): the
 repository `tenants/<id>` from the committed template, a bot with write access to it alone, the
@@ -33,14 +33,14 @@ publish. Then the tenant is `active`. Nothing is cloned or set up by hand, and t
 `tenant.json` or other on-disk tenant row.
 
 An `active` tenant has no alert mapping, and its investigations and runs are refused until a tenant admin saves one with
-`PUT /tenants/<id>/alert-mapping`. Its systems and case record are written the same way (`PUT /systems/{id}`,
-`PUT /systems/{id}/credentials`, `PUT /case-record`; #1470). `tenant.py check` reports a missing mapping as a finding.
+`PUT /api/tenants/<id>/alert-mapping`. Its systems and case record are written the same way (`PUT /api/tenants/<id>/systems/{id}`,
+`PUT /api/tenants/<id>/systems/{id}/credentials`, `PUT /api/tenants/<id>/case-record`; #1470). `tenant.py check` reports a missing mapping as a finding.
 
-- `GET /admin/tenants/<id>` shows the state, the pending action, the step and the actor, and the
-  failure of a failed step; `POST /admin/tenants/<id>/resume` retries it.
-- `POST /admin/tenants/<id>/invitations` invites the first member (an `active` tenant with no
-  members); `POST /admin/tenants/<id>/rotate-forge-credential` replaces the credential generation;
-  `POST /admin/tenants/<id>/offboard` removes the tenant's folder, secrets, credentials and
+- `GET /api/admin/tenants/<id>` shows the state, the pending action, the step and the actor, and the
+  failure of a failed step; `POST /api/admin/tenants/<id>/resume` retries it.
+- `POST /api/admin/tenants/<id>/invitations` invites the first member (an `active` tenant with no
+  members); `POST /api/admin/tenants/<id>/rotate-forge-credential` replaces the credential generation;
+  `POST /api/admin/tenants/<id>/offboard` removes the tenant's folder, secrets, credentials and
   repository (the repository is deleted 30 days later).
 - The lifecycle's settings are the files and variables `defender/lifecycle/config.py` names
   (the forge admin token and OpenBao management login are read from files, never the environment).
@@ -128,20 +128,23 @@ missing or invalid one refuses start naming it. Secret files hold one value, a t
 |---|---|
 | `DEFENDER_DATABASE_DSN` | the database (must be at the code's migration head) |
 | `DEFENDER_API_HOST`, `DEFENDER_API_PORT` | listen address |
-| `DEFENDER_API_FRONTEND_ORIGIN` | the one origin a cookie-authenticated write may carry (no path); the worker needs the same value too (it refuses to start without it), for the screen link in a ticket comment |
+| `DEFENDER_API_FRONTEND_ORIGIN` | the app's origin (no path): the one origin a cookie-authenticated write may carry, and the origin the sign-in redirect URI `<origin>/api/auth/callback` is derived from, which the operator registers in the realm; the ingress serves this origin; the worker needs the same value too (it refuses to start without it), for the screen link in a ticket comment |
 | `DEFENDER_API_ADMINISTRATORS_FILE` | YAML `administrators: [<email>, ...]` |
 | `DEFENDER_KEYCLOAK_SERVER_URL` | Keycloak as the API reaches it (dev: `http://keycloak:8080`) |
 | `DEFENDER_KEYCLOAK_ISSUER`, `DEFENDER_KEYCLOAK_PROGRAMS_ISSUER` | `<front-channel>/realms/<realm>` (dev: `http://localhost:8080/realms/defender`, `.../defender-programs`) |
-| `DEFENDER_KEYCLOAK_CLIENT_ID`, `..._CLIENT_SECRET_FILE`, `DEFENDER_KEYCLOAK_REDIRECT_URI` | the sign-in client; the redirect must equal the realm's registered one (dev: `http://localhost:8000/auth/callback`) |
+| `DEFENDER_KEYCLOAK_CLIENT_ID`, `..._CLIENT_SECRET_FILE` | the sign-in client; the realm must register `<DEFENDER_API_FRONTEND_ORIGIN>/api/auth/callback` (dev: `http://localhost:8000/api/auth/callback`) |
 | `DEFENDER_KEYCLOAK_ADMIN_CLIENT_ID`, `..._ADMIN_CLIENT_SECRET_FILE` | sign-in realm's admin client (`manage-users`) |
 | `DEFENDER_KEYCLOAK_PROGRAMS_AUDIENCE`, `..._PROGRAMS_ADMIN_CLIENT_ID`, `..._PROGRAMS_ADMIN_CLIENT_SECRET_FILE` | programs realm (admin client holds `manage-clients`) |
 | `DEFENDER_OPENBAO_ADDR` | OpenBao as the API reaches it, the secret store of tenant credentials (#1470) |
 | `DEFENDER_OPENBAO_KV_MOUNT` | the KV v2 mount credential sets live on |
-| `DEFENDER_API_OPENBAO_TOKEN_FILE` | the API's OpenBao token, holding the write-only `writer` policy (`store_policies()`: create and update on KV data, read on KV metadata) |
+| `DEFENDER_API_OPENBAO_TOKEN_FILE` | the API's OpenBao token, holding the write-only `writer` policy (`store_policies()`: create and update on KV data, read on KV metadata, read on `auth/token/lookup-self`) |
 
 At start it checks the database version, reads OpenBao's seal status (unreachable or a malformed answer refuses start;
 sealed starts the API, and system reads and credential writes answer 503 until it is unsealed), checks the OpenBao
-token with a metadata read when unsealed (a 403 refuses start naming `DEFENDER_API_OPENBAO_TOKEN_FILE`), probes each
+token when unsealed, first by its lookup-self, then by a metadata read under the mount; a refusal states what OpenBao
+answered to which call and names the settings that answer can come from (a 403: `DEFENDER_OPENBAO_ADDR`,
+`DEFENDER_API_OPENBAO_TOKEN_FILE`, `DEFENDER_OPENBAO_KV_MOUNT` for the read, and the token's policy; anything else:
+`DEFENDER_OPENBAO_ADDR`), never which one is wrong (#1532), probes each
 realm (discovery names the configured issuer, signing keys fetch, the admin client reads users or clients) and binds
 the port before the bootstrap writes anything; a failure ends the program with that step's message on stderr. Not checked at start: the sign-in client's own secret, the
 redirect URI's equality with the realm's, and whether an admin role is write-capable (a read-only role passes);
@@ -152,11 +155,16 @@ OpenBao from `provision-dev-issuer.sh` with `playground-issuer/lifecycle.env`, t
 `python -m defender.lifecycle serve` beside the API; no jobs daemon needed: a started investigation stays queued,
 enough to list, read and cancel):
 
-1. Start the API with the frontend origin set to its own, `http://localhost:8000` (not `127.0.0.1`: it must match
-   the realm's redirect exactly), and forward port 8000; the built-in docs page is then the client.
+1. Build the frontend (`npm ci && npm run build` in `defender/frontend/`), start the API with the frontend origin set
+   to `http://localhost:8000` (not `127.0.0.1`: it must match the realm's redirect exactly) on its own port, and start
+   the repo's ingress with `python -m defender.api_server.ingress` (inputs: `DEFENDER_INGRESS_LISTEN` = `127.0.0.1:8000`,
+   where it serves plain HTTP, `DEFENDER_ARTIFACT_DOMAIN`, `DEFENDER_INGRESS_API_UPSTREAM` = the API's `host:port`,
+   `DEFENDER_INGRESS_FRONTEND_DIR` = `defender/frontend/dist`; it needs Caddy on PATH; TLS, when there is any, ends in
+   front of it). Every API route is under `/api`. No docs page is served: for routes the app has no screen for, call
+   them with the session cookie (for example with `curl`), reading `/api/openapi.json` in a viewer on another origin.
 2. Administrator: set the password from Mailpit and sign in (a one-time code is needed: expect to enrol an
    authenticator app on a refused first sign-in, then sign in again). Create a tenant, check
-   `GET /admin/tenants/<id>` until `active` (on a failed step read the lifecycle log, fix, `resume`), invite its first member.
+   `GET /api/admin/tenants/<id>` until `active` (on a failed step read the lifecycle log, fix, `resume`), invite its first member.
 3. Member: set password, sign in, see exactly that tenant, replace the alert mapping, seed an alert
    (`python -m defender.tests.support.api.seed_alert <tenant> <ticket>`), start an investigation, list and read it, cancel it.
 4. Program: create a program and an API key and start an investigation with the key; repeat with a
@@ -300,7 +308,7 @@ The issuer's JWKS key id must be `fixture`; these signing keys are fixture data 
 
 Tenant IDs are canonical lowercase UUIDs. Names such as `acme` are refused by every normal
 admission path; there is no alias or automatic conversion. The replacement is a new tenant:
-`POST /admin/tenants` mints its UUID (save it).
+`POST /api/admin/tenants` mints its UUID (save it).
 
 If a pre-#1120 installation has no knowledge repository, recover it with the old checkout
 before this migration; `tenant.py migrate` is retired and no longer exists here.
@@ -312,7 +320,7 @@ the old code. Upgrade every checkout using the data root together. With all writ
    Preserve that archive, including its row, runs, episodes, sessions and learning state.
    Do not change tenant IDs inside historical records or reuse their state for the new tenant.
    A sibling archive inside the data root is refused by its single-tenant guard.
-2. Create the new tenant (`POST /admin/tenants`, then wait for it to be `active`; see "Creating a
+2. Create the new tenant (`POST /api/admin/tenants`, then wait for it to be `active`; see "Creating a
    tenant"). Its repository starts from the template: push the archived `knowledge/` history
    into it by hand as a pull request, keeping `agent/.tenant-id` as the lifecycle wrote it (the
    new UUID followed by one newline). Review and update any external credentials or identity

@@ -31,6 +31,8 @@ from defender.tests.support.api._config1470 import (
 )
 from defender.tests.support.api._openbao1470 import (
     KV_MOUNT,
+    LOOKUP_SELF,
+    WRITER_BEFORE_1532,
     WRITER_TOKEN,
     ScriptedOpenBao,
 )
@@ -223,7 +225,7 @@ async def test_o7_a_malformed_credential_body_is_a_validation_422_with_errors(co
     """Wire shape: `for_version` and `credentials` (field → text), nothing else; a body that carries a `kind` of any value
     is refused (the kind is the scheme's, never a write field). No credential value it carries is printed back. (O7, P4, N1)"""
     await _ticket(configured)
-    refused = await configured.put_raw(f"/tenants/{A}/systems/{TICKET}/credentials", body)
+    refused = await configured.put_raw(f"/api/tenants/{A}/systems/{TICKET}/credentials", body)
     assert refused.status_code == 422, refused.text
     assert refused.json()["errors"]
     assert "faults" not in refused.json()
@@ -244,7 +246,7 @@ async def test_a_credential_field_name_outside_the_grammar_is_refused_and_nothin
     value it carries is not printed back. (F5, G2; base `test_a_credential_field_name_outside_the_grammar_is_refused`)"""
     await _ticket(configured)
     refused = await configured.client.put(
-        f"/tenants/{A}/systems/{TICKET}/credentials", headers={**configured.ann(), "Content-Type": "application/json"},
+        f"/api/tenants/{A}/systems/{TICKET}/credentials", headers={**configured.ann(), "Content-Type": "application/json"},
         content=('{"for_version": 1, "credentials": {"' + key + '": "' + TOKEN + '"}}').encode())
     assert refused.status_code == 422, refused.text
     assert holds_no_value(refused, {"v": TOKEN}), ("a credential value was printed", refused.text)
@@ -264,7 +266,7 @@ async def test_o7_no_route_returns_a_value_and_no_answer_or_log_line_holds_one(c
             await configured.put_credentials(TICKET, 1, {"api_key": "short"}),
             await configured.put_credentials(TICKET, 9, {"api_key": TOKEN})]
     for method in ("get", "post", "delete", "patch"):
-        seen.append(await configured.client.request(method.upper(), f"/tenants/{A}/systems/{TICKET}/credentials",
+        seen.append(await configured.client.request(method.upper(), f"/api/tenants/{A}/systems/{TICKET}/credentials",
                                                     headers=configured.ann()))
     assert [r.status_code for r in seen[-4:]] == [405] * 4
     everything = " ".join([r.text for r in seen] + [r.getMessage() + str(getattr(r, "detail", "")) for r in caplog.records])
@@ -322,6 +324,30 @@ async def test_o7_o9_a_secret_store_fault_on_the_write_is_503_not_stored_or_poss
     bao.sealed = False
     control = await scripted.put_credentials(TICKET, 1, {"api_key": TOKEN})
     assert control.status_code == 204, control.text  # the same request succeeds once the fault is gone
+
+
+@anyio_mark
+@postgres
+@pytest.mark.parametrize("call", ["the credential write", "the existence check"])
+async def test_1532_k6_a_403_after_start_names_the_token_its_policy_and_the_mount_setting_not_the_login(scripted, call):
+    """A 403 from the secret store on a request after start (the API may have started sealed, so the start check never
+    ran): a 500 that names the address, the token file, the mount and the token's policy, and claims no one of them.
+    (#1532 K6, P1, r4)"""
+    await _ticket(scripted)
+    bao = scripted.scripted
+    denied = httpx.Response(403, json={"errors": ["permission denied"]})
+    if call == "the credential write":
+        bao.answer("POST", "/data/", denied, times=1)
+        refused = await scripted.put_credentials(TICKET, 1, {"api_key": TOKEN})
+    else:
+        bao.answer("GET", "/metadata/", denied, times=1)
+        refused = await scripted.get_system(TICKET)
+    assert refused.status_code == 500, refused.text
+    said = problem_text(refused)
+    for named in ("DEFENDER_OPENBAO_ADDR", "DEFENDER_API_OPENBAO_TOKEN_FILE", "DEFENDER_OPENBAO_KV_MOUNT", "polic"):
+        assert named in said, said
+    assert "login" not in said, said
+    assert TOKEN not in said
 
 
 # --- O7 / O9: the whole outcome table of a credential write ---------------------------------------------------------
@@ -411,7 +437,7 @@ async def _write_answered(client: httpx.AsyncClient, served: Configured, system:
     if failing is not None:
         logging.getLogger().addHandler(failing)
     try:
-        return await client.put(f"/tenants/{A}/systems/{system}/credentials", headers=served.ann(),
+        return await client.put(f"/api/tenants/{A}/systems/{system}/credentials", headers=served.ann(),
                                 json={"for_version": 1, "credentials": sent})
     finally:
         if failing is not None:
@@ -593,7 +619,7 @@ async def test_o7_o9_the_re_read_tells_an_unused_generation_from_a_refusal_of_th
     caplog.clear()
     try:
         async with scripted.lenient() as client:
-            got = await client.put(f"/tenants/{A}/systems/{system}/credentials", headers=scripted.ann(),
+            got = await client.put(f"/api/tenants/{A}/systems/{system}/credentials", headers=scripted.ann(),
                                    json={"for_version": 1, "credentials": sent})
     finally:
         if failing:
@@ -854,7 +880,7 @@ async def test_o9_each_stored_write_announces_one_event_naming_the_member_and_th
     assert (await configured.delete_system(TICKET, 1)).status_code == 409
     assert (await configured.delete_system(TICKET, 2)).status_code == 204
     assert (await configured.delete_system(TICKET, 3)).status_code == 404
-    mapping = await configured.put_raw(f"/tenants/{A}/alert-mapping", {e: FIXTURE_ALERT_MAPPING.get(e) for e in MAPPING_ENTRIES})
+    mapping = await configured.put_raw(f"/api/tenants/{A}/alert-mapping", {e: FIXTURE_ALERT_MAPPING.get(e) for e in MAPPING_ENTRIES})
     assert mapping.status_code == 200, mapping.text
 
     events = audit_events(caplog, *AUDITED)
@@ -924,7 +950,7 @@ async def test_o9_each_config_write_is_announced_only_after_it_is_visible(config
              lambda: configured.put_credentials(TICKET, 1, {"api_key": TOKEN})),
             ("alert_mapping.update",
              lambda: execute(configured.dsn, "SELECT title FROM tenancy.alert_mappings WHERE tenant_id = %s", (A,)) == [("vendor.c12.title",)],
-             lambda: configured.put_raw(f"/tenants/{A}/alert-mapping", mapping)),
+             lambda: configured.put_raw(f"/api/tenants/{A}/alert-mapping", mapping)),
             ("system.delete", lambda: [v.deleted for v in configured.versions(TICKET)] == [False, True],
              lambda: configured.delete_system(TICKET, 1)),
         ]
@@ -960,7 +986,7 @@ async def _set_up(served: Configured, *, system: bool = False, case: bool = Fals
 
 
 async def _write(client: httpx.AsyncClient, served: Configured, method: str, path: str, **kw: object) -> httpx.Response:
-    return await client.request(method, f"/tenants/{A}{path}", headers=served.ann(), **kw)  # type: ignore[arg-type]
+    return await client.request(method, f"/api/tenants/{A}{path}", headers=served.ann(), **kw)  # type: ignore[arg-type]
 
 
 #: (action, what the case needs first, the write, a check of the stored state after it). O9: an announcement that fails
@@ -1044,6 +1070,70 @@ def test_c10_the_scripted_stand_in_answers_as_the_writer_policy_was_observed_to(
     bao = ScriptedOpenBao()
     assert _writer_calls(bao, "http://openbao.test", WRITER_TOKEN, KV_MOUNT) == WRITER_STATUSES
     assert bao.value_reads == ["t/s/g1"]
+
+
+#: #1532 C10: each token's answers, as `(policies, lookup-self, metadata under the mount its policy names, metadata under
+#: another mount that exists)`. Observed on OpenBao 2.4.1 (#1532 probes): the policy check comes before the mount's, so
+#: an uncovered path is 403 whether or not its mount exists; lookup-self needs the current writer or the default policy.
+POLICY_STATUSES = [
+    (("writer",), 200, 404, 403),
+    (("default", "writer"), 200, 404, 403),
+    (("writer-pre-1532",), 403, 404, 403),
+    (("default", "writer-pre-1532"), 200, 404, 403),
+    (("proxy",), 403, 403, 403),
+    (("default", "proxy"), 200, 403, 403),
+    (("default",), 200, 403, 403),
+    (("c10-no-such-policy",), 403, 403, 403),
+]
+#: A writer policy written for a mount that does not exist: its metadata read is 404, as for an absent set (#1532 C4;
+#: out of scope, pinned so a change in it is seen).
+MISSING_MOUNT_STATUS = 404
+
+
+def _policy_calls(client: httpx.Client, covered: str, other: str) -> tuple[int, int, int]:
+    return (client.get(f"/v1/{LOOKUP_SELF}").status_code, client.get(f"/v1/{covered}/metadata/t/s/g1").status_code,
+            client.get(f"/v1/{other}/metadata/t/s/g1").status_code)
+
+
+def test_1532_c10_the_stand_in_answers_each_tokens_lookup_and_metadata_reads_as_openbao_was_observed_to():
+    """The stand-in's lookup-self and metadata answers for each set of policies, and for a mount that does not exist:
+    the table the real server gives in the next test. (#1532 C10, stand-in fidelity)"""
+    for policies, *statuses in POLICY_STATUSES:
+        bao = ScriptedOpenBao(policies=[p for p in policies], mounts=[KV_MOUNT, "other"])
+        with httpx.Client(transport=bao, base_url="http://openbao.test", headers={"X-Vault-Token": WRITER_TOKEN}) as c:
+            assert _policy_calls(c, KV_MOUNT, "other") == tuple(statuses), policies
+    missing = ScriptedOpenBao(policy_mount="nowhere")
+    with httpx.Client(transport=missing, base_url="http://openbao.test", headers={"X-Vault-Token": WRITER_TOKEN}) as c:
+        assert c.get("/v1/nowhere/metadata/t/s/g1").status_code == MISSING_MOUNT_STATUS
+
+
+@pytest.mark.openbao
+def test_1532_c10_each_tokens_lookup_and_metadata_reads_on_a_real_openbao(openbao):
+    """The same table on a real OpenBao: the policies `store_policies` writes today (writer, proxy), the writer as it was
+    before #1532, and OpenBao's default policy, each over the test's KV mount and a second mount created as root.
+    (#1532 C10, K4)"""
+    from defender.credential_proxy._openbao import store_policies
+
+    mount = openbao.kv_mount
+    other = f"{mount}-other"
+    openbao.ok("POST", f"sys/mounts/{other}", json={"type": "kv", "options": {"version": "2"}})
+    try:
+        written = store_policies(kv_mount=mount)
+        names = {"writer": openbao.apply_policy("c10-writer", written["writer"]),
+                 "proxy": openbao.apply_policy("c10-proxy", written["proxy"]),
+                 "writer-pre-1532": openbao.apply_policy("c10-writer-pre-1532", WRITER_BEFORE_1532.format(kv=mount))}
+        for policies, *statuses in POLICY_STATUSES:
+            # A name with no policy behind it stands for itself (a token created with none would inherit root's).
+            token = openbao.token_for(*[names.get(p, p) for p in policies if p != "default"],
+                                      default_policy="default" in policies)
+            with httpx.Client(base_url=openbao.addr, headers={"X-Vault-Token": token}) as client:
+                assert _policy_calls(client, mount, other) == tuple(statuses), policies
+        nowhere = f"{mount}-nowhere"
+        missing = openbao.token_for(openbao.apply_policy("c10-writer-nowhere", store_policies(kv_mount=nowhere)["writer"]))
+        with httpx.Client(base_url=openbao.addr, headers={"X-Vault-Token": missing}) as client:
+            assert client.get(f"/v1/{nowhere}/metadata/t/s/g1").status_code == MISSING_MOUNT_STATUS
+    finally:
+        openbao.call("DELETE", f"sys/mounts/{other}")
 
 
 @pytest.mark.openbao

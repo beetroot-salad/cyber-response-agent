@@ -207,7 +207,7 @@ flowchart LR
 | Zone | Holds | Reaches |
 |---|---|---|
 | Edge | TLS keys | API, artifact serving |
-| Application | API database role (row-level security), session store, identity-provider client secret, blob signing key, page-grant signing key, OpenBao write-only role for system credentials (create and update a set, read metadata, never read a value; #1470) | PostgreSQL, blob, identity provider, OpenBao |
+| Application | API database role (row-level security), session store, identity-provider client secret, blob signing key, page-grant signing key, OpenBao write-only role for system credentials (create and update a set, read metadata, look its own token up, never read a value; #1470, #1532) | PostgreSQL, blob, identity provider, OpenBao |
 | Artifact server | page-grant verifier, its own page-cookie key, blob read | blob |
 | Credential proxy | per-tenant pass verification, system secrets, provider keys, forge logins (from OpenBao) | OpenBao, PostgreSQL, forge, providers, customer systems, worker pods (job route only) |
 | Launcher (workers) | worker database role; OpenBao role reading every tenant's sign login; the orchestrator role below | PostgreSQL, OpenBao, blob, proxy, API server; accepts connections from proxy pods only |

@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 
+from defender.tests.support.api._mount1161 import API
 from defender.tests.support.api._identity1306 import ANN, BOB, T1, T2
 from defender.tests.support.api._learning1485 import (
     HOSTILE_REASON,
@@ -99,7 +100,7 @@ def test_o1_items_list_held_and_dead_newest_first_with_the_stored_fields_verbati
     assert len({i.updated_at for i in stored.values()}) == 3, "premise: three transactions, three times"
     expected = _expected_items(dsn, T1, "held", "dead")
 
-    r = world().sign_in(ANN).get(f"/tenants/{T1}/{ITEMS}")
+    r = world().sign_in(ANN).get(f"{API}/tenants/{T1}/{ITEMS}")
     assert r.status_code == 200, r.text
     assert set(r.json()) == {"items", "next_cursor"}
     got = r.json()["items"]
@@ -124,18 +125,18 @@ def test_o1_status_narrows_to_held_or_dead_and_any_other_status_is_a_422(dsn, wo
     assert keys['dead',] == ['d1']
     assert keys['held',], 'premise: both statuses are held by someone'
     for params, want in (({"status": "dead"}, keys[("dead",)]), ({"status": "held"}, keys[("held",)]), ({}, keys[("held", "dead")])):
-        r = ann.get(f"/tenants/{T1}/{ITEMS}", params=params)
+        r = ann.get(f"{API}/tenants/{T1}/{ITEMS}", params=params)
         assert r.status_code == 200, r.text
         assert [i["key"] for i in r.json()["items"]] == want, params
     for bad in ("waiting", "in_batch", "published", "skipped", "Held", "held,dead", ""):
-        assert ann.get(f"/tenants/{T1}/{ITEMS}", params={"status": bad}).status_code == 422, bad
+        assert ann.get(f"{API}/tenants/{T1}/{ITEMS}", params={"status": bad}).status_code == 422, bad
 
 
 def test_o1_only_held_and_dead_items_are_listed(dsn, world):
     """Published, skipped, in-batch and waiting items are not listed; the held and the dead one are (control). (O1, Non-obligations)"""
     on_store(dsn, settled_mix, T1)
     assert {i.status for i in stored_items(dsn, T1)} == {"published", "skipped", "dead", "held", "in_batch", "waiting"}, "premise"
-    got = world().sign_in(ANN).get(f"/tenants/{T1}/{ITEMS}").json()["items"]
+    got = world().sign_in(ANN).get(f"{API}/tenants/{T1}/{ITEMS}").json()["items"]
     assert sorted(i["key"] for i in got) == ["dd", "hh"]
 
 
@@ -162,7 +163,7 @@ def test_o1_twelve_items_held_by_one_close_page_each_once_in_id_order_with_a_kil
     expected = _expected_items(dsn, T1, "held", "dead")
     assert len(expected) == 14
 
-    got, sizes, cursors = walk(world().sign_in(ANN), f"/tenants/{T1}/{ITEMS}", limit=limit)
+    got, sizes, cursors = walk(world().sign_in(ANN), f"{API}/tenants/{T1}/{ITEMS}", limit=limit)
 
     assert [i["item_id"] for i in got] == [str(i.id) for i in expected]
     assert len({i["item_id"] for i in got}) == len(got), "an item came twice"
@@ -190,11 +191,11 @@ def test_o1_an_item_cursor_is_refused_by_the_parked_list_and_a_parked_cursor_by_
     ann = world().sign_in(ANN)
     cursors = {}
     for route in (ITEMS, PARKED):
-        cursors[route] = ann.get(f"/tenants/{T1}/{route}", params={"limit": 1}).json()["next_cursor"]
+        cursors[route] = ann.get(f"{API}/tenants/{T1}/{route}", params={"limit": 1}).json()["next_cursor"]
         assert cursors[route], route
-        assert ann.get(f"/tenants/{T1}/{route}", params={"limit": 1, "cursor": cursors[route]}).status_code == 200, route
-    assert ann.get(f"/tenants/{T1}/{PARKED}", params={"cursor": cursors[ITEMS]}).status_code == 422
-    assert ann.get(f"/tenants/{T1}/{ITEMS}", params={"cursor": cursors[PARKED]}).status_code == 422
+        assert ann.get(f"{API}/tenants/{T1}/{route}", params={"limit": 1, "cursor": cursors[route]}).status_code == 200, route
+    assert ann.get(f"{API}/tenants/{T1}/{PARKED}", params={"cursor": cursors[ITEMS]}).status_code == 422
+    assert ann.get(f"{API}/tenants/{T1}/{ITEMS}", params={"cursor": cursors[PARKED]}).status_code == 422
 
 
 # --- O2 ------------------------------------------------------------------------------------------------------------
@@ -224,7 +225,7 @@ def test_o2_parked_batches_list_newest_first_with_blocks_lane_items_and_every_fi
     assert sorted(AUTHOR_ITEMS) != sorted(AUTHOR_ITEMS, key=lambda i: i[1]), "premise: kind-then-key differs from key order"
 
     ann = world().sign_in(ANN)
-    r = ann.get(f"/tenants/{T1}/{PARKED}")
+    r = ann.get(f"{API}/tenants/{T1}/{PARKED}")
     assert r.status_code == 200, r.text
     got = r.json()["items"]
     assert [b["batch_id"] for b in got] == [str(v.id) for v in expected]
@@ -242,7 +243,7 @@ def test_o2_parked_batches_list_newest_first_with_blocks_lane_items_and_every_fi
     assert [(i["kind"], i["key"]) for i in by_id[str(author)]["items"]] == sorted(AUTHOR_ITEMS)
     assert by_id[str(author)]['pr_number'] == 9
     assert by_id[str(revert)]['pr_number'] is None
-    assert [i["key"] for i in ann.get(f"/tenants/{T1}/{ITEMS}").json()["items"]] == ["h1"], \
+    assert [i["key"] for i in ann.get(f"{API}/tenants/{T1}/{ITEMS}").json()["items"]] == ["h1"], \
         "the parked batch's items are in_batch, not held (control: the held one lists)"
 
 
@@ -253,7 +254,7 @@ def test_o2_a_batch_in_review_is_not_listed(dsn, world):
         return await parked_revert(store, T1)
     revert = on_store(dsn, seed)
     assert len(stored_batches(dsn, T1, "in_review")) == 1, "premise"
-    assert [b["batch_id"] for b in world().sign_in(ANN).get(f"/tenants/{T1}/{PARKED}").json()["items"]] == [str(revert)]
+    assert [b["batch_id"] for b in world().sign_in(ANN).get(f"{API}/tenants/{T1}/{PARKED}").json()["items"]] == [str(revert)]
 
 
 async def _five_reverts(store: Any, tenant: str) -> list[Any]:
@@ -272,7 +273,7 @@ def test_o2_parked_batches_tied_on_creation_page_in_id_order_each_once(dsn, worl
     assert len({v.created_at for v in views}) == 3, "premise: three instants, three of them one"
     expected = newest_first(views, lambda b: b.created_at, lambda b: b.id)
 
-    got, sizes, cursors = walk(world().sign_in(ANN), f"/tenants/{T1}/{PARKED}", limit=limit)
+    got, sizes, cursors = walk(world().sign_in(ANN), f"{API}/tenants/{T1}/{PARKED}", limit=limit)
 
     assert [b["batch_id"] for b in got] == [str(v.id) for v in expected]
     assert sizes[:-1] == [limit] * (len(sizes) - 1)
@@ -298,10 +299,10 @@ def test_o3_anonymous_is_401_another_tenants_member_404_and_each_tenant_sees_onl
     w = world()
     ann, bob = w.sign_in(ANN), w.sign_in(BOB)
     for route in (ITEMS, PARKED):
-        assert w.client().get(f"/tenants/{T1}/{route}").status_code == 401, route
-        assert bob.get(f"/tenants/{T1}/{route}").status_code == 404, route
-        assert ann.get(f"/tenants/{T2}/{route}").status_code == 404, route
-    assert [i["key"] for i in ann.get(f"/tenants/{T1}/{ITEMS}").json()["items"]] == ["a-only"]
-    assert [i["key"] for i in bob.get(f"/tenants/{T2}/{ITEMS}").json()["items"]] == ["b-only"]
-    assert [b["batch_id"] for b in ann.get(f"/tenants/{T1}/{PARKED}").json()["items"]] == [str(a_batch)]
-    assert [b["batch_id"] for b in bob.get(f"/tenants/{T2}/{PARKED}").json()["items"]] == [str(b_batch)]
+        assert w.client().get(f"{API}/tenants/{T1}/{route}").status_code == 401, route
+        assert bob.get(f"{API}/tenants/{T1}/{route}").status_code == 404, route
+        assert ann.get(f"{API}/tenants/{T2}/{route}").status_code == 404, route
+    assert [i["key"] for i in ann.get(f"{API}/tenants/{T1}/{ITEMS}").json()["items"]] == ["a-only"]
+    assert [i["key"] for i in bob.get(f"{API}/tenants/{T2}/{ITEMS}").json()["items"]] == ["b-only"]
+    assert [b["batch_id"] for b in ann.get(f"{API}/tenants/{T1}/{PARKED}").json()["items"]] == [str(a_batch)]
+    assert [b["batch_id"] for b in bob.get(f"{API}/tenants/{T2}/{PARKED}").json()["items"]] == [str(b_batch)]

@@ -17,6 +17,7 @@ pytestmark = [
     pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning"),
 ]
 
+from defender.tests.support.api._mount1161 import API  # noqa: E402
 from defender.identity import Bootstrap, DataRuleViolation, IdentityService  # noqa: E402
 from defender.tests.support.api._identity1306 import (  # noqa: E402
     ANN,
@@ -58,7 +59,7 @@ KINDS = ["key", "oauth_client"]
 
 
 def _credentials_url(program_id: str, tenant: str = T1) -> str:
-    return f"/tenants/{tenant}/programs/{program_id}/credentials"
+    return f"{API}/tenants/{tenant}/programs/{program_id}/credentials"
 
 
 def _states(world: ProgramsWorld, program_id: str) -> dict[str, str]:
@@ -66,7 +67,7 @@ def _states(world: ProgramsWorld, program_id: str) -> dict[str, str]:
 
 
 def _alerts(client: Any) -> int:
-    return int(client.get(f"/tenants/{T1}/alerts").status_code)
+    return int(client.get(f"{API}/tenants/{T1}/alerts").status_code)
 
 
 def _reconcile(world: ProgramsWorld) -> None:
@@ -80,10 +81,10 @@ def test_a_program_survives_the_person_who_created_it_leaving() -> None:
     """The program belongs to the tenant: its creator leaving changes nothing for it (O4)."""
     s = soar()
     nina = s.world.member(s.ann, T1, NINA)
-    assert s.ann.delete(f"/tenants/{T1}/members/{user_id(s.ann)}").status_code == 204
+    assert s.ann.delete(f"{API}/tenants/{T1}/members/{user_id(s.ann)}").status_code == 204
     assert _alerts(s.program()) == 200
-    assert s.program_id in {p["id"] for p in items(nina.get(f"/tenants/{T1}/programs"))}
-    assert nina.delete(f"/tenants/{T1}/programs/{s.program_id}").status_code == 204  # the tenant's admins manage it
+    assert s.program_id in {p["id"] for p in items(nina.get(f"{API}/tenants/{T1}/programs"))}
+    assert nina.delete(f"{API}/tenants/{T1}/programs/{s.program_id}").status_code == 204  # the tenant's admins manage it
 
 
 def test_the_last_person_leaving_does_not_stop_a_program_nor_block_platform_rescue() -> None:
@@ -92,18 +93,18 @@ def test_the_last_person_leaving_does_not_stop_a_program_nor_block_platform_resc
     ann, ops = world.sign_in(ANN), world.sign_in_admin()
     program_id = str(create_program(ann, T1)["id"])
     _, key = issue_key(ann, T1, program_id)
-    assert ops.post(f"/admin/tenants/{T1}/invitations", json={"email": NEW}).status_code == 409  # control: a person remains
-    assert ann.delete(f"/tenants/{T1}/members/{user_id(ann)}").status_code == 204
+    assert ops.post(f"{API}/admin/tenants/{T1}/invitations", json={"email": NEW}).status_code == 409  # control: a person remains
+    assert ann.delete(f"{API}/tenants/{T1}/members/{user_id(ann)}").status_code == 204
     assert _alerts(world.bearer(key)) == 200
-    assert ops.post(f"/admin/tenants/{T1}/invitations", json={"email": NEW}).status_code == 202
+    assert ops.post(f"{API}/admin/tenants/{T1}/invitations", json={"email": NEW}).status_code == 202
 
 
 @pytest.mark.parametrize("name", ["", "   "])
 def test_a_program_needs_a_display_name(name: str) -> None:
     """A blank name is refused and nothing is created (O4)."""
     s = soar()
-    assert s.ann.post(f"/tenants/{T1}/programs", json={"display_name": name}).status_code == 422
-    assert [p["id"] for p in items(s.ann.get(f"/tenants/{T1}/programs"))] == [s.program_id]
+    assert s.ann.post(f"{API}/tenants/{T1}/programs", json={"display_name": name}).status_code == 422
+    assert [p["id"] for p in items(s.ann.get(f"{API}/tenants/{T1}/programs"))] == [s.program_id]
 
 
 # --- O5: secrets ----------------------------------------------------------------------------------
@@ -334,10 +335,10 @@ def test_revoking_an_oauth_credential_stops_tokens_already_issued() -> None:
     s = soar()
     credential = issue_oauth(s.ann, T1, s.program_id)
     token = s.world.realm.issue(credential)
-    assert s.world.bearer(token).get(f"/tenants/{T1}/alerts").status_code == 200
+    assert s.world.bearer(token).get(f"{API}/tenants/{T1}/alerts").status_code == 200
     assert revoke(s.ann, T1, s.program_id, credential).status_code == 204
     assert credential in s.world.realm.clients
-    assert s.world.bearer(token).get(f"/tenants/{T1}/alerts").status_code == 401
+    assert s.world.bearer(token).get(f"{API}/tenants/{T1}/alerts").status_code == 401
     assert _alerts(s.program()) == 200  # the other credential lives
 
 
@@ -349,7 +350,7 @@ def test_a_token_stays_refused_after_the_reconciliation_deleted_its_client() -> 
     revoke(s.ann, T1, s.program_id, credential)
     _reconcile(s.world)
     assert credential not in s.world.realm.clients
-    assert s.world.bearer(token).get(f"/tenants/{T1}/alerts").status_code == 401
+    assert s.world.bearer(token).get(f"{API}/tenants/{T1}/alerts").status_code == 401
 
 
 def test_an_expired_key_stops_on_the_next_request() -> None:
@@ -366,10 +367,10 @@ def test_an_expired_oauth_credential_refuses_a_fresh_token_while_its_client_stil
     s = soar()
     credential = issue_oauth(s.ann, T1, s.program_id, expires_at=s.world.clock() + MIN_LIFETIME)
     s.world.clock.advance(MIN_LIFETIME - HOUR)
-    assert s.world.bearer(s.world.realm.issue(credential)).get(f"/tenants/{T1}/alerts").status_code == 200
+    assert s.world.bearer(s.world.realm.issue(credential)).get(f"{API}/tenants/{T1}/alerts").status_code == 200
     s.world.clock.advance(HOUR + SECOND)
     assert credential in s.world.realm.clients
-    assert s.world.bearer(s.world.realm.issue(credential)).get(f"/tenants/{T1}/alerts").status_code == 401
+    assert s.world.bearer(s.world.realm.issue(credential)).get(f"{API}/tenants/{T1}/alerts").status_code == 401
     assert _states(s.world, s.program_id)[credential] == "live"  # never written as a state change
 
 
@@ -380,11 +381,11 @@ def test_removing_a_program_cuts_it_off_and_revokes_every_credential_but_deletes
     s = soar()
     credential = issue_oauth(s.ann, T1, s.program_id)
     token = s.world.realm.issue(credential)
-    assert s.ann.delete(f"/tenants/{T1}/programs/{s.program_id}").status_code == 204
+    assert s.ann.delete(f"{API}/tenants/{T1}/programs/{s.program_id}").status_code == 204
     assert _alerts(s.program()) == 401
-    assert s.world.bearer(token).get(f"/tenants/{T1}/alerts").status_code == 401
+    assert s.world.bearer(token).get(f"{API}/tenants/{T1}/alerts").status_code == 401
     assert set(_states(s.world, s.program_id).values()) == {"revoked"}
-    assert s.program_id not in {p["id"] for p in items(s.ann.get(f"/tenants/{T1}/programs"))}
+    assert s.program_id not in {p["id"] for p in items(s.ann.get(f"{API}/tenants/{T1}/programs"))}
     assert (s.world.realm.deleted, credential in s.world.realm.clients) == ([], True)
     _reconcile(s.world)
     assert s.world.realm.deleted == [credential]
@@ -424,14 +425,14 @@ def test_removal_is_one_write_whichever_repository_call_fails_membership_and_cre
 
     world, ann, program = fresh()
     mark = len(world.journal)
-    assert ann.delete(f"/tenants/{T1}/programs/{program}").status_code == 204
+    assert ann.delete(f"{API}/tenants/{T1}/programs/{program}").status_code == 204
     touched = sorted({name for kind, name in world.journal[mark:] if kind == "repo"})
     assert _consistent(world, program) == (True, True)
     assert touched, "removal touched no repository call"
     for name in touched:
         world, ann, program = fresh()
         world.repo.failing = {name}
-        ann.delete(f"/tenants/{T1}/programs/{program}")
+        ann.delete(f"{API}/tenants/{T1}/programs/{program}")
         ended, revoked = _consistent(world, program)
         assert ended == revoked, f"{name} failing split the removal: membership ended={ended}, credentials revoked={revoked}"
 
@@ -469,7 +470,7 @@ def test_offboarding_revokes_program_credentials_without_ever_touching_the_realm
     token = s.world.realm.issue(credential)
     s.world.call(s.world.lifecycle_service().end_tenant, T1, now=s.world.clock())  # RaisingProgramsRealm fails on any use
     assert _alerts(s.program()) == 401
-    assert s.world.bearer(token).get(f"/tenants/{T1}/alerts").status_code == 401
+    assert s.world.bearer(token).get(f"{API}/tenants/{T1}/alerts").status_code == 401
     assert set(_states(s.world, s.program_id).values()) == {"revoked"}
     assert credential in s.world.realm.clients
     assert s.world.realm.deleted == []
@@ -484,7 +485,7 @@ def test_offboarding_one_tenant_leaves_another_tenants_programs_working() -> Non
     _, bob_key = issue_key(s.bob, T2, bob_program)
     s.world.call(s.world.lifecycle_service().end_tenant, T1, now=s.world.clock())
     assert _alerts(s.program()) == 401
-    assert s.world.bearer(bob_key).get(f"/tenants/{T2}/alerts").status_code == 200
+    assert s.world.bearer(bob_key).get(f"{API}/tenants/{T2}/alerts").status_code == 200
 
 
 # --- OAuth creation: failure, loss, race --------------------------------------------------------------
@@ -511,7 +512,7 @@ def test_a_lost_response_leaves_a_client_that_the_next_reconciliation_deletes() 
     assert response.status_code == 503
     [lost] = s.world.realm.created
     assert s.world.realm.clients[lost].secret not in response.text
-    assert s.world.bearer(s.world.realm.issue(lost)).get(f"/tenants/{T1}/alerts").status_code == 401  # revoked is not usable
+    assert s.world.bearer(s.world.realm.issue(lost)).get(f"{API}/tenants/{T1}/alerts").status_code == 401  # revoked is not usable
     assert _states(s.world, s.program_id)[lost] == "revoked"
     _reconcile(s.world)
     assert lost not in s.world.realm.clients
@@ -539,7 +540,7 @@ def test_removal_racing_an_oauth_creation_answers_409_and_returns_no_usable_secr
 
     async def racing(credential_id: str) -> tuple[str, str]:
         removed.append(await asyncio.wait_for(
-            asyncio.to_thread(remover.delete, f"/tenants/{T1}/programs/{s.program_id}"), 10))
+            asyncio.to_thread(remover.delete, f"{API}/tenants/{T1}/programs/{s.program_id}"), 10))
         return await create(credential_id)
 
     realm.create_client = racing  # type: ignore[method-assign]
@@ -549,7 +550,7 @@ def test_removal_racing_an_oauth_creation_answers_409_and_returns_no_usable_secr
     [credential] = realm.created
     assert realm.clients[credential].secret not in response.text
     assert _states(s.world, s.program_id)[credential] == "revoked"
-    assert s.world.bearer(realm.issue(credential)).get(f"/tenants/{T1}/alerts").status_code == 401
+    assert s.world.bearer(realm.issue(credential)).get(f"{API}/tenants/{T1}/alerts").status_code == 401
     _reconcile(s.world)
     assert credential not in realm.clients
 
@@ -588,7 +589,7 @@ def test_an_oauth_creation_with_no_race_goes_live_with_the_same_wiring() -> None
     s.world.realm.create_client = passing  # type: ignore[method-assign]
     credential = issue_oauth(s.ann, T1, s.program_id)
     assert seen == [credential]
-    assert s.world.bearer(s.world.realm.issue(credential)).get(f"/tenants/{T1}/alerts").status_code == 200
+    assert s.world.bearer(s.world.realm.issue(credential)).get(f"{API}/tenants/{T1}/alerts").status_code == 200
 
 
 # --- reconciliation (D3, D4) ---------------------------------------------------------------------------
@@ -652,7 +653,7 @@ def test_a_client_created_while_reconciliation_runs_is_not_deleted() -> None:
     [credential] = created
     assert credential in realm.clients
     assert realm.deleted == []
-    assert s.world.bearer(realm.issue(credential)).get(f"/tenants/{T1}/alerts").status_code == 200
+    assert s.world.bearer(realm.issue(credential)).get(f"{API}/tenants/{T1}/alerts").status_code == 200
 
 
 # --- O7 / D5: expiry warnings ---------------------------------------------------------------------------
@@ -673,7 +674,7 @@ def test_every_active_admin_and_only_they_are_warned_14_days_ahead_once() -> Non
     leaver = s.world.member(s.ann, T1, "leaver@a.example")
     assert s.world.invite(s.ann, T1, "invitee@a.example").status_code == 202
     s.world.send_pending()
-    assert s.ann.delete(f"/tenants/{T1}/members/{user_id(leaver)}").status_code == 204
+    assert s.ann.delete(f"{API}/tenants/{T1}/members/{user_id(leaver)}").status_code == 204
     expiry = s.world.clock() + DEFAULT_LIFETIME
     _until_remaining(s.world, expiry, 14 * DAY + HOUR)
     s.world.send_pending()
@@ -821,9 +822,9 @@ def test_with_no_active_person_left_a_due_warning_is_dropped_not_retried() -> No
     settled, not held for a retry: the next warning left is the 3-day one (owner's choice in the #1450 review: the
     program sees its expiry on every response, D9)."""
     s = soar()
-    ann_id = s.ann.get("/me").json()["user"]["id"]
-    assert s.ann.delete(f"/tenants/{T1}/members/{ann_id}").status_code == 204
-    assert s.program().get(f"/tenants/{T1}/alerts").status_code == 200  # control: the program is still in
+    ann_id = s.ann.get(API + "/me").json()["user"]["id"]
+    assert s.ann.delete(f"{API}/tenants/{T1}/members/{ann_id}").status_code == 204
+    assert s.program().get(f"{API}/tenants/{T1}/alerts").status_code == 200  # control: the program is still in
     _until_remaining(s.world, s.world.clock() + DEFAULT_LIFETIME, 14 * DAY - HOUR)
     s.world.send_pending()
     assert s.world.mail.warnings == []
@@ -833,10 +834,10 @@ def test_with_no_active_person_left_a_due_warning_is_dropped_not_retried() -> No
 # --- D9: the expiry header -----------------------------------------------------------------------------------
 
 @pytest.mark.parametrize(("method", "path", "body", "status"), [
-    ("get", f"/tenants/{T1}/alerts", None, 200),
-    ("post", f"/tenants/{T1}/invitations", {"email": "x@y.example"}, 403),
-    ("get", f"/tenants/{T2}/alerts", None, 404),
-    ("post", f"/tenants/{T1}/investigations", {"alert_id": 5}, 422),
+    ("get", f"{API}/tenants/{T1}/alerts", None, 200),
+    ("post", f"{API}/tenants/{T1}/invitations", {"email": "x@y.example"}, 403),
+    ("get", f"{API}/tenants/{T2}/alerts", None, 404),
+    ("post", f"{API}/tenants/{T1}/investigations", {"alert_id": 5}, 422),
 ])
 @pytest.mark.parametrize("kind", KINDS)
 def test_every_response_to_a_verified_program_carries_its_credentials_expiry(
@@ -857,8 +858,8 @@ def test_every_response_to_a_verified_program_carries_its_credentials_expiry(
 def test_the_expiry_header_is_absent_for_a_person_and_for_a_refused_credential() -> None:
     """Control: persons and requests refused before verification carry none (O7, D9)."""
     s = soar()
-    assert EXPIRY_HEADER not in s.ann.get(f"/tenants/{T1}/alerts").headers
-    refused = s.world.bearer(s.key[:-2] + "xx").get(f"/tenants/{T1}/alerts")
+    assert EXPIRY_HEADER not in s.ann.get(f"{API}/tenants/{T1}/alerts").headers
+    refused = s.world.bearer(s.key[:-2] + "xx").get(f"{API}/tenants/{T1}/alerts")
     assert refused.status_code == 401
     assert EXPIRY_HEADER not in refused.headers
-    assert EXPIRY_HEADER in s.program().get(f"/tenants/{T1}/alerts").headers
+    assert EXPIRY_HEADER in s.program().get(f"{API}/tenants/{T1}/alerts").headers

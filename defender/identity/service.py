@@ -9,8 +9,9 @@ import contextlib
 import datetime as _dt
 import hashlib
 import logging
+import re
 import secrets
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Literal
 
 from defender._model import model
@@ -20,7 +21,6 @@ from . import audit
 from .bootstrap import Bootstrap
 from .errors import (
     BootstrapRefused,
-    CallbackRefused,
     Conflict,
     CredentialCapReached,
     DataRuleViolation,
@@ -29,12 +29,13 @@ from .errors import (
     NotAuthenticated,
     NotFound,
     SignInRefused,
+    SignInUnavailable,
     TenantNotActive,
 )
 from . import roles
 from .memory import secret_hash
 from .ports import ExpiryWarning, IdentityRepository, MailPort, ProgramsPort, SignInPort
-from .models import CredentialKind, Membership, Program, ProgramCredential, Role, Session, User, postgres_text
+from .models import CredentialKind, Membership, Program, ProgramCredential, Role, Session, SignInAttempt, User, postgres_text
 from .roles import Permission
 
 _logger = logging.getLogger(__name__)
@@ -56,9 +57,10 @@ _RETRY_LAST = _dt.timedelta(hours=1)
 _SEND_HOLD = _dt.timedelta(minutes=5)
 #: One email's claim, sends and record together: past it the email is deferred like a failed send.
 SEND_DEADLINE = _dt.timedelta(seconds=30)
-_PRELOGIN_PARTS = 3
 #: A program's key starts with this, so a secret scanner can recognise it and the API routes it without parsing a JWT.
 KEY_PREFIX = "dfk_"
+#: How long a sign-in attempt waits for its callback: its row's expiry and its cookie's max-age (#1161 D6).
+SIGNIN_ATTEMPT_LIFETIME = _dt.timedelta(minutes=10)
 #: A credential's lifetime: at least a week (so the 3-day warning always fires), at most a year; 90 days unless asked.
 MIN_CREDENTIAL_LIFETIME = _dt.timedelta(days=7)
 DEFAULT_CREDENTIAL_LIFETIME = _dt.timedelta(days=90)
@@ -100,8 +102,51 @@ Authenticated = PersonCaller | ProgramCaller
 
 @model(frozen=True)
 class LoginStart:
+    """Where to send the person, and the one cookie of this attempt (#1161 D6): its name is `attempt_cookie(state)`.
+    `clear` names the browser's other attempt cookies to delete: those of no open attempt, and the oldest beyond the cap."""
+
     url: str
-    prelogin: str
+    cookie_name: str
+    cookie_value: str
+    clear: tuple[str, ...] = ()
+
+
+@model(frozen=True)
+class SignedIn:
+    """A completed sign-in: the new session's value and the return path this attempt's record carried."""
+
+    session: str
+    return_path: str
+
+
+@model(frozen=True)
+class Refused:
+    """A sign-in that opened no session. `return_path` is set only when this attempt's own record supplied it."""
+
+    reason: str
+    return_path: str | None
+
+
+#: What a sign-in `state` of ours looks like: the URL-safe text `begin_signin` mints. Any other shape names no cookie.
+_STATE = re.compile(r"[A-Za-z0-9_-]{1,64}", re.ASCII)
+_ATTEMPT_COOKIE_PREFIX = "__Host-defender_prelogin_"
+
+
+#: The most open sign-in attempts one browser keeps: bounds the cookies riding every request (#1161 D6, amended).
+OPEN_SIGNIN_ATTEMPTS_KEPT = 10
+
+
+def attempt_cookie(state: str) -> str | None:
+    """The name of the cookie one sign-in attempt keeps its token in, or None for a `state` that cannot be one of
+    ours. Pure, and the only place the name is derived (#1161 D6)."""
+    return _ATTEMPT_COOKIE_PREFIX + state if isinstance(state, str) and _STATE.fullmatch(state) else None
+
+
+def _attempt_state(name: str) -> str | None:
+    """The `state` a cookie name of ours carries, or None for any other name: the inverse of `attempt_cookie`. A name
+    is only ever sent back to a browser as `attempt_cookie(state)`, never as the browser wrote it."""
+    state = name.removeprefix(_ATTEMPT_COOKIE_PREFIX)
+    return state if state != name and attempt_cookie(state) == name else None
 
 
 @model(frozen=True)
@@ -225,9 +270,9 @@ class IdentityService:
     async def run_background(self, stop: asyncio.Event) -> None:
         """Pass now and then every `send_interval` until `stop` is set: a sender pass, then, when one is due
         (on the first pass, then once per `PURGE_INTERVAL` on the clock), the purge of the sessions sign-in
-        refuses (expired, or idle past the limit) and the reconciliation of the programs realm. A stop never
-        interrupts an email: the sender ends before claiming the next one, or during its wait. A failing
-        pass, purge or reconciliation, or one cut off at `purge_deadline`, is logged, and ends neither the
+        refuses (expired, or idle past the limit), the purge of expired sign-in attempts, and the reconciliation
+        of the programs realm. A stop never interrupts an email: the sender ends before claiming the next one, or
+        during its wait. A failing pass, purge or reconciliation, or one cut off at `purge_deadline`, is logged, and ends neither the
         loop nor the others."""
         next_purge: _dt.datetime | None = None
         while not stop.is_set():
@@ -245,6 +290,12 @@ class IdentityService:
                     _logger.info("purged %d sessions sign-in refuses (expired or idle)", purged)
                 except Exception:
                     _logger.exception("a session purge failed; the next is due at %s", next_purge.isoformat())
+                try:
+                    async with asyncio.timeout(self.purge_deadline.total_seconds()):
+                        abandoned = await self._repo.purge_expired_signin_attempts(now=now)
+                    _logger.info("purged %d sign-in attempts never finished", abandoned)
+                except Exception:
+                    _logger.exception("a sign-in attempt purge failed; the next is due at %s", next_purge.isoformat())
                 try:
                     async with asyncio.timeout(self.purge_deadline.total_seconds()):
                         await self.reconcile_program_clients()
@@ -379,34 +430,73 @@ class IdentityService:
             row.id, row.notify_requested_seq, sent_at=sent, expires_at=sent + INVITATION_LIFETIME)
 
     # --- sign-in -----------------------------------------------------------------------------
-    async def begin_signin(self) -> LoginStart:
-        """The URL to send the person to, and the pre-login cookie value that carries the state,
-        nonce and PKCE verifier back (unsigned: all three are single-use and the provider checks them)."""
-        state, nonce, verifier = (secrets.token_urlsafe(32) for _ in range(_PRELOGIN_PARTS))
-        url = await self._signin.begin_signin(state=state, nonce=nonce, code_challenge=_pkce_challenge(verifier))
-        return LoginStart(url=url, prelogin=f"{state}.{nonce}.{verifier}")
+    async def begin_signin(self, return_path: str, cookies: Mapping[str, str] | None = None) -> LoginStart | Refused:
+        """The URL to send the person to and this attempt's cookie, or why not. The cookie holds only a random token;
+        the state, nonce, PKCE verifier and `return_path` stay in the attempt's row, which the callback reads once
+        (#1161 D6). The path is carried without inspection, and every refusal keeps it, so a retry still lands there.
 
-    async def complete_signin(self, *, code: str, state: str, prelogin: str | None) -> str:
-        """The new session's value, or `CallbackRefused`."""
-        parts = (prelogin or "").split(".")
-        if len(parts) != _PRELOGIN_PARTS or not all(parts):
-            raise CallbackRefused("prelogin-missing", "there is no sign-in in progress; start again")
-        expected_state, nonce, verifier = parts
-        if not secrets.compare_digest(state.encode(), expected_state.encode()):
-            raise CallbackRefused("login-attempt-invalid", "the sign-in does not match the one started")
+        `cookies` is what the browser sent: of its attempt cookies, those naming no open attempt are cleared, and the
+        oldest open ones too, so that with this one it keeps at most `OPEN_SIGNIN_ATTEMPTS_KEPT`. Every read comes
+        before the one write, the row, so a start that fails stores nothing."""
+        state, nonce, verifier, token = (secrets.token_urlsafe(32) for _ in range(4))
+        try:
+            url = await self._signin.begin_signin(state=state, nonce=nonce, code_challenge=_pkce_challenge(verifier))
+            clear = await self._crowded(cookies or {})
+            await self._repo.add_signin_attempt(SignInAttempt(
+                state=state, token_hash=secret_hash(token), nonce=nonce, verifier=verifier, return_path=return_path,
+                expires_at=self._clock() + SIGNIN_ATTEMPT_LIFETIME))
+        except SignInUnavailable:
+            return Refused("unavailable", return_path)
+        except Exception:
+            _logger.error("sign-in start failed", exc_info=True)
+            return Refused("error", return_path)
+        name = attempt_cookie(state)
+        assert name is not None  # the state is token_urlsafe: always a name
+        return LoginStart(url=url, cookie_name=name, cookie_value=token, clear=clear)
+
+    async def _crowded(self, cookies: Mapping[str, str]) -> tuple[str, ...]:
+        """The attempt cookies among `cookies` to clear so that, with a new one, at most the cap stay open. Only names
+        `attempt_cookie` makes are considered or returned; any other cookie is not ours and is left alone."""
+        held = {state: value for state, value in ((_attempt_state(name), value) for name, value in cookies.items())
+                if state is not None}
+        well_formed = {state: value for state, value in held.items() if _STATE.fullmatch(value)}
+        live = await self._repo.live_signin_attempts(well_formed, now=self._clock()) if well_formed else {}
+        kept = set(sorted(live, key=lambda state: live[state], reverse=True)[:OPEN_SIGNIN_ATTEMPTS_KEPT - 1])
+        return tuple(sorted(name for state in held if state not in kept and (name := attempt_cookie(state))))
+
+    async def complete_signin(self, state: str, code: str, cookie_value: str | None) -> SignedIn | Refused:
+        """The new session, or why there is none. `cookie_value` is what the browser sent under `attempt_cookie(state)`:
+        the attempt's row is taken (read and deleted) only when it is that attempt's token. A missing, expired,
+        malformed or another attempt's token reads alike, as no record."""
+        if attempt_cookie(state) is None or not isinstance(cookie_value, str) or not _STATE.fullmatch(cookie_value):
+            return Refused("prelogin-missing", None)
+        record = await self._repo.take_signin_attempt(state, cookie_value, now=self._clock())
+        if record is None:
+            return Refused("prelogin-missing", None)
+        # From here the record is taken: every outcome, a fault included, keeps its return path.
+        try:
+            return await self._finish_signin(code, record.nonce, record.verifier, record.return_path)
+        except SignInUnavailable:
+            return Refused("unavailable", record.return_path)
+        except Exception:
+            _logger.error("sign-in callback failed after its record was taken", exc_info=True)
+            return Refused("error", record.return_path)
+
+    async def _finish_signin(self, code: str, nonce: str, verifier: str, return_path: str) -> SignedIn | Refused:
+        if not code:
+            return Refused("login-attempt-invalid", return_path)
         try:
             verified = await self._signin.finish_signin(code=code, code_verifier=verifier, nonce=nonce)
-        except SignInRefused as e:
-            raise CallbackRefused("login-attempt-invalid", "the sign-in could not be verified") from e
+        except SignInRefused:
+            return Refused("login-attempt-invalid", return_path)
         user = await self._repo.user_by_signin_account(verified.account_id)
         if user is None:
-            raise CallbackRefused("unknown-account", "this account is not known here")
+            return Refused("unknown-account", return_path)
         used_otp = "otp" in verified.amr
         if user.is_platform_admin and not used_otp:
             if not await self._signin.has_otp(verified.account_id):
                 await self._signin.require_otp_setup(verified.account_id)
-            raise CallbackRefused(
-                "otp-required", "administrators sign in with a one-time code; sign in again")
+            return Refused("otp-required", return_path)
         now = self._clock()
         if await self._repo.activate_user(user.id, display_name=verified.name, now=now):
             if not user.is_platform_admin:
@@ -415,7 +505,7 @@ class IdentityService:
             await self._repo.set_display_name(user.id, verified.name, now=now)
         value = secrets.token_urlsafe(32)
         await self._repo.add_session(value, user.id, now=now, expires_at=now + SESSION_LIFETIME, used_otp=used_otp)
-        return value
+        return SignedIn(session=value, return_path=return_path)
 
     async def _accept_open_invitations(self, user: User, now: _dt.datetime) -> None:
         for row in await self._repo.memberships_of_user(user.id):
@@ -751,3 +841,4 @@ class IdentityService:
                     audit.emit("member.remove", actor=audit.SYSTEM, tenant_id=row.tenant_id, target=row.user_id)
             elif row.status == "invited" and await self._repo.revoke_invitation(row.id):
                 audit.emit("invitation.revoke", actor=audit.SYSTEM, tenant_id=row.tenant_id, target=row.id)
+

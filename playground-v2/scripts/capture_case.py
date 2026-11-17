@@ -30,7 +30,9 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -52,6 +54,10 @@ from make_case import MAX_AGE  # noqa: E402
 LEAD = timedelta(minutes=15)  # the last scenario fires this long before T, so its alert exists at T
 MARGIN = timedelta(minutes=1)  # the default T without scenarios: far enough ahead to still be ahead at start
 POLL_S = 30.0
+RULES_DIR = HERE.parent / "detection-rules"
+DISK_CEILING = 0.90  # the live node's high watermark: past it the live cluster starts refusing shards
+_LOOKBACK = re.compile(r"now-(\d+)([smhd])")
+_UNITS = {"s": "seconds", "m": "minutes", "h": "hours", "d": "days"}
 IN_PROGRESS = ("IN_PROGRESS", "STARTED")
 
 
@@ -69,6 +75,54 @@ def _fire_times(T: datetime, count: int) -> list[datetime]:
     if count == 1:
         return [start]
     return [start + (end - start) * i / (count - 1) for i in range(count)]
+
+
+def longest_lookback(rules_dir: Path = RULES_DIR) -> timedelta:
+    """The longest window any detection rule looks back over (its `from`, e.g. `now-20m`).
+
+    Two firings that hit one rule on one host closer than this are counted together and fire one
+    alert, which no single label fits. A mixed batch fires an attack and the legitimate scenario
+    it mirrors on the same rule and host, so their gap must not be shorter."""
+    longest = timedelta(0)
+    for path in sorted(Path(rules_dir).glob("*.json")):
+        window = json.loads(path.read_text()).get("from", "")
+        found = _LOOKBACK.fullmatch(window)
+        if not found:
+            raise CaptureRefused(f"{path.name}: cannot read the rule's lookback {window!r}")
+        longest = max(longest, timedelta(**{_UNITS[found[2]]: int(found[1])}))
+    return longest
+
+
+def _check_spacing(count: int, lookback: timedelta) -> None:
+    """The batch's firings are at least `lookback` apart."""
+    if count < 2:
+        return
+    gap = (MAX_AGE - LEAD) / (count - 1)
+    if gap < lookback:
+        most = int((MAX_AGE - LEAD) / lookback) + 1
+        raise CaptureRefused(f"{count} scenarios fire {gap} apart, closer than the longest rule "
+                             f"lookback ({lookback}): two firings on one rule and host would merge into "
+                             f"one alert; fire at most {most}")
+
+
+def _check_disk(es: Any, patterns: list[str]) -> None:
+    """The lab server's disk can take the verification restore: a whole copy of the patterns' primary
+    shards, on the disk the live cluster shares, stays under `DISK_CEILING`. Checked before anything fires,
+    so a capture never runs six hours of scenarios only to fail its last step."""
+    rows = es.es_request("GET", "/_cat/allocation?bytes=b&format=json&h=node,disk.avail,disk.total")
+    nodes = [r for r in rows if r.get("disk.total")]
+    if not nodes:
+        raise CaptureRefused("the live cluster reports no node's disk")
+    avail = min(int(r["disk.avail"]) for r in nodes)
+    total = int(nodes[0]["disk.total"])
+    stats = es.es_request("GET", "/" + ",".join(patterns) + "/_stats/store?expand_wildcards=all")
+    needed = int(stats["_all"]["primaries"]["store"]["size_in_bytes"])
+    after = (total - avail + needed) / total
+    if after > DISK_CEILING:
+        gb = 1024 ** 3
+        raise CaptureRefused(f"the verification restore needs {needed / gb:.1f} GiB and the lab disk has "
+                             f"{avail / gb:.1f} GiB free: it would end {after:.0%} full, over "
+                             f"{DISK_CEILING:.0%}; free space first")
 
 
 def _verify_repository(es: Any, repository: str) -> None:
@@ -127,6 +181,7 @@ def _under_lock(ops: Any, es: Any, clock: Any, token: str, *, T: datetime, scena
         raise CaptureRefused(f"snapshot {repository}:{name} already exists; capture never "
                              "overwrites or deletes a snapshot it did not create")
     _verify_repository(es, repository)
+    _check_disk(es, patterns)
     started.append("pickups")
     ops.hold_pickups()
     for scenario, at in zip(scenarios, _fire_times(T, len(scenarios)), strict=True):
@@ -172,7 +227,7 @@ def _check_moment(T: datetime, scenarios: list[str], now: datetime) -> None:
 
 def capture(freeze_dir: Path, *, T: datetime, scenarios: list[str], repository: str,
             tenant_settings: Path, ops: Any, es: Any, lock_store: Any, parts_dir: Path, clock: Any,
-            captured_by: str) -> dict:
+            captured_by: str, rules_dir: Path = RULES_DIR) -> dict:
     """Capture the freeze `freeze_dir.name` at `T`; returns the freeze.yaml document.
 
     `tenant_settings` is the lab tenant's `settings/` directory: the freeze's patterns are its
@@ -181,7 +236,8 @@ def capture(freeze_dir: Path, *, T: datetime, scenarios: list[str], repository: 
     active_faults() -> list; hold_pickups(); release_pickups(); fire(scenario, lock_token);
     proc_tree(dest), stub_dumps(dest), detection_rules(dest), commit_hosts(dest),
     copy_volumes(dest) -> part names written under dest; verify_restore(repository, snapshot)
-    -> {index: count}.
+    -> {index: count}. `rules_dir` holds the detection rules whose longest lookback is the
+    shortest gap allowed between two firings.
     """
     freeze_dir, parts_dir = Path(freeze_dir), Path(parts_dir)
     freeze_id = freeze_dir.name
@@ -189,6 +245,7 @@ def capture(freeze_dir: Path, *, T: datetime, scenarios: list[str], repository: 
         raise CaptureRefused(f"freeze {freeze_id} already exists; a freeze is never overwritten")
     patterns = frozen_copy.tenant_patterns(tenant_settings)
     _check_moment(T, scenarios, clock.now())
+    _check_spacing(len(scenarios), longest_lookback(rules_dir))
     unknown = sorted(set(scenarios) - ops.scenario_ids()) if scenarios else []
     if unknown:
         raise CaptureRefused(f"no such scenario in the attack catalog: {', '.join(unknown)}")

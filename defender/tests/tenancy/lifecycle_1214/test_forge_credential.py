@@ -23,6 +23,7 @@ import pytest
 
 pytest.importorskip("fastapi")
 
+from defender.tests.support.api._mount1161 import API  # noqa: E402
 from defender.tests.support.shared._opened_paths import opened, opened_paths  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._support import LifecycleWorld  # noqa: E402
 
@@ -116,7 +117,7 @@ def test_a_credential_made_before_a_rotation_mints_for_the_new_generation_after_
     credential = scene.make(tenant)
     first = credential.token()
     assert scene.role_of(first) == before.oidc_role
-    assert world.ops.post(f"/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
     world.drive()
     after = world.live(tenant)
     assert after.oidc_role != before.oidc_role
@@ -150,7 +151,7 @@ def test_a_credential_outlives_nothing_after_offboarding(scene):
     tenant, _gen = _active(scene)
     credential = scene.make(tenant)
     credential.token()
-    assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
     world.drive()
     logins = len(scene.logins())
     scene.later()

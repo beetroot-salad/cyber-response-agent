@@ -21,6 +21,8 @@ from pathlib import Path
 from defender.tests._shard import WEIGHTS
 
 _LINE = re.compile(r"(\S+Z) (.*)$")
+#: CI's pytest colours each result word; the job log keeps the escapes.
+_COLOUR = re.compile(r"\x1b\[[0-9;]*m")
 _SESSION = re.compile(r"\d+ workers \[\d+ items\]")
 _RESULT = re.compile(r"\[(gw\d+)\] \[\s*\d+%\] \w+ (tests/[^:]+)::")
 
@@ -31,7 +33,7 @@ def file_costs(lines: Iterable[str]) -> dict[str, float]:
     last: dict[str, datetime] = {}
     start: datetime | None = None
     for line in lines:
-        m = _LINE.match(line.rstrip("\n").lstrip("﻿"))
+        m = _LINE.match(_COLOUR.sub("", line.rstrip("\n").lstrip("﻿")))
         if not m:
             continue
         at = datetime.fromisoformat(m.group(1)[:26])
@@ -61,7 +63,7 @@ def main(argv: list[str]) -> int:
     repo = _gh("repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner").strip()
     table: dict[str, float] = {}
     for job in shards:
-        table.update(file_costs(_gh("api", f"repos/{repo}/actions/jobs/{job}/logs").splitlines()))
+        table.update(file_costs(_gh("api", "--allow-escape-sequences", f"repos/{repo}/actions/jobs/{job}/logs").splitlines()))
     rounded = {name: round(cost, 1) for name, cost in sorted(table.items())}
     Path(WEIGHTS).write_text(json.dumps(rounded, indent=1) + "\n", encoding="utf-8")
     print(f"{WEIGHTS}: {len(rounded)} files, {sum(rounded.values()):.0f} worker seconds")

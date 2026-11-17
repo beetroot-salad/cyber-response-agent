@@ -14,6 +14,7 @@ pytestmark = [
     pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning"),
 ]
 
+from defender.tests.support.api._mount1161 import API  # noqa: E402
 from defender._text import postgres_can_hold  # noqa: E402
 from defender.tests.identity.test_1307_repository_contract import HOLDABLE, UNHOLDABLE  # noqa: E402
 from defender.tests.support.api._identity1306 import T1, items  # noqa: E402
@@ -30,7 +31,7 @@ def test_names_that_postgres_text_cannot_hold_are_422_for_programs_and_credentia
     display name and as a credential's name for both kinds -> 422; the same calls with holdable names are 201 (control)."""
     assert not any(postgres_can_hold(n) for n in UNHOLDABLE)
     s = soar()
-    programs, credentials = f"/tenants/{T1}/programs", f"/tenants/{T1}/programs/{s.program_id}/credentials"
+    programs, credentials = f"{API}/tenants/{T1}/programs", f"{API}/tenants/{T1}/programs/{s.program_id}/credentials"
     refused = []
     for name in UNHOLDABLE:
         for what, response in (("program", _post(s.ann, programs, display_name=name)),

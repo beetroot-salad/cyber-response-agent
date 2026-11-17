@@ -4,6 +4,7 @@
     make_case.py list <freeze-dir>
     make_case.py write <case-dir> --freeze <freeze-dir> --alert <kibana.alert.uuid> \\
         [--profile P --seed N --span-start ISO]
+    make_case.py write-batch <case-dir>=<uuid> [<case-dir>=<uuid> ...] --freeze <freeze-dir> [--profile ...]
 
 `write` writes a case only for a candidate of `list`. It takes the frozen-engine lock, readies the
 variant with a whole restore (never trusting a copy-state marker, D23), runs the chaos guard
@@ -12,7 +13,8 @@ patterns are the freeze's, which must be the lab tenant's current ones under
 `$V2_FROZEN_TENANT_DIR` (D24). The lock stays held for labelling: run
 `launch_frozen.py --reference --lock-token <token>` against the case, label it, fill `confirmed`,
 then release. Any refusal or failure leaves the case
-directory as it was and frees the lock.
+directory as it was and frees the lock. `write-batch` writes several cases of one variant from one
+restore (the content digest read once), under one lock; a failure of any writes none.
 """
 from __future__ import annotations
 
@@ -125,7 +127,8 @@ def _record(*, freeze: dict, freeze_id: str, overlay: dict | None, alert: dict, 
     T = frozen_copy.utc(freeze["T"])
     return {"freeze": freeze_id, "alert": held_out.digest(alert),
             "age": int((T - frozen_copy.utc(frozen_copy.dug(alert, "@timestamp"))).total_seconds()),
-            "overlay": overlay, "counts": copy.counts, "content": ops.content_digest(copy.touched),
+            "overlay": overlay, "counts": copy.counts,
+            "content": frozen_copy.content_of(es, ops, copy, freeze_id=freeze_id, overlay=overlay)[0],
             "confirmed": None}
 
 
@@ -160,19 +163,33 @@ def _write(case_dir: Path, alert: dict, case: dict) -> None:
     (case_dir / "case.yaml").write_text(yaml.safe_dump(case, sort_keys=False))
 
 
-def write_case(case_dir: Path, *, freeze_dir: Path, alert_uuid: str, overlay: dict | None,
-               tenant_settings: Path, parts_dir: Path, lock_store: Any, es: Any, ops: Any, clock: Any,
-               profiles_dir: Path, inventory: dict, location: str = frozen_copy.REPO_LOCATION) -> Held:
+def write_case(case_dir: Path, *, alert_uuid: str, **kw: Any) -> Held:
     """Ready the variant, check the alert and the guard, write the case; returns the held lock.
+    See `write_cases`."""
+    return write_cases([(Path(case_dir), alert_uuid)], **kw)
+
+
+def write_cases(cases: list[tuple[Path, str]], *, freeze_dir: Path, overlay: dict | None,
+                tenant_settings: Path, parts_dir: Path, lock_store: Any, es: Any, ops: Any, clock: Any,
+                profiles_dir: Path, inventory: dict, location: str = frozen_copy.REPO_LOCATION) -> Held:
+    """Ready the variant once (a whole restore, D23), check each alert and the guard, write each
+    `(case dir, alert uuid)`'s case from that one copy; returns the held lock. The content digest is
+    read once: each later case trusts the record the first wrote (`frozen_copy.content_of`).
     `tenant_settings` is the lab tenant's `settings/` directory; the copy uses the freeze's patterns,
-    which must be the tenant's current ones (D24)."""
-    case_dir, freeze_dir = Path(case_dir), Path(freeze_dir)
+    which must be the tenant's current ones (D24). A refusal or failure of any case writes none."""
+    if not cases:
+        raise CaseRefused("no case to write")
+    if len({Path(d).resolve() for d, _u in cases}) != len(cases):
+        raise CaseRefused("one case dir is named twice")
+    freeze_dir = Path(freeze_dir)
     freeze, freeze_id = _freeze_of(freeze_dir), freeze_dir.name
     frozen_copy.check_patterns(freeze, tenant_settings)
     frozen_copy.check_parts(freeze, Path(parts_dir) / freeze_id)
-    if alert_uuid not in candidates(freeze_dir, ops=ops):
-        raise CaseRefused(f"alert {alert_uuid} is not a candidate of {freeze_id} (see `list`): outside "
-                          "[T - max age, T], or it has a live run, a ticket or a changed workflow status")
+    listed = candidates(freeze_dir, ops=ops)
+    for _case_dir, alert_uuid in cases:
+        if alert_uuid not in listed:
+            raise CaseRefused(f"alert {alert_uuid} is not a candidate of {freeze_id} (see `list`): outside "
+                              "[T - max age, T], or it has a live run, a ticket or a changed workflow status")
     recorded = _overlay_of(overlay, frozen_copy.utc(freeze["T"]), profiles_dir=profiles_dir,
                            inventory=inventory)
     if recorded:   # the guard, against the rules as of T, before the copy is touched
@@ -182,24 +199,27 @@ def write_case(case_dir: Path, *, freeze_dir: Path, alert_uuid: str, overlay: di
         finally:   # needed only by the guard: removed on every exit, a refusal included
             shutil.rmtree(rules, ignore_errors=True)
     token = lock.take(lock_store, lock.FROZEN_ENGINE)
-    restore = None
+    restores: list[Any] = []
     try:
         copy = frozen_copy.ready(es, ops=ops, clock=clock, freeze=freeze, freeze_id=freeze_id,
                                  overlay=recorded, whole=True, location=location)
         ops.load_stubs(Path(parts_dir) / freeze_id, frozen_copy.stamp(freeze["T"]),
                        (recorded or {}).get("mutations") or None)
-        alert = _alert_of_copy(es, list(freeze["patterns"]), alert_uuid, case_dir)
-        case = _record(freeze=freeze, freeze_id=freeze_id, overlay=recorded, alert=alert, copy=copy,
-                       es=es, ops=ops)
-        restore = _remember(case_dir)
-        _write(case_dir, alert, case)
+        written = []
+        for case_dir, alert_uuid in cases:
+            case_dir = Path(case_dir)
+            alert = _alert_of_copy(es, list(freeze["patterns"]), alert_uuid, case_dir)
+            written.append((case_dir, alert, _record(freeze=freeze, freeze_id=freeze_id, overlay=recorded,
+                                                     alert=alert, copy=copy, es=es, ops=ops)))
+        for case_dir, alert, case in written:
+            restores.append(_remember(case_dir))
+            _write(case_dir, alert, case)
         ops.teardown()   # the stubs stop; the copy stays for the reference run
     except BaseException:
         try:
-            for undo in (restore, ops.teardown):
+            for undo in (*reversed(restores), ops.teardown):
                 try:
-                    if undo is not None:
-                        undo()
+                    undo()
                 except Exception as exc:  # noqa: BLE001 - the first failure is the one to report
                     print(f"cleanup after a failed case also failed: {exc}", file=sys.stderr)
         finally:
@@ -215,12 +235,15 @@ def main(argv: list[str] | None = None) -> int:
     ls.add_argument("freeze_dir", type=Path)
     wr = sub.add_parser("write")
     wr.add_argument("case_dir", type=Path)
-    wr.add_argument("--freeze", type=Path, required=True, dest="freeze_dir")
     wr.add_argument("--alert", required=True)
-    wr.add_argument("--profile")
-    wr.add_argument("--seed", type=int, default=42)
-    wr.add_argument("--span-start")
-    wr.add_argument("--parts-dir", type=Path, default=os.environ.get("V2_FROZEN_PARTS_DIR"))
+    wb = sub.add_parser("write-batch", help="several cases of one variant from one restore")
+    wb.add_argument("cases", nargs="+", metavar="CASE_DIR=ALERT_UUID")
+    for sp in (wr, wb):
+        sp.add_argument("--freeze", type=Path, required=True, dest="freeze_dir")
+        sp.add_argument("--profile")
+        sp.add_argument("--seed", type=int, default=42)
+        sp.add_argument("--span-start")
+        sp.add_argument("--parts-dir", type=Path, default=os.environ.get("V2_FROZEN_PARTS_DIR"))
     args = parser.parse_args(argv)
     from lab_ops import LabOps, NotConfigured
     ops = LabOps.from_environment()
@@ -233,9 +256,15 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if not args.parts_dir or bool(args.profile) != bool(args.span_start):
         parser.error("--parts-dir (or $V2_FROZEN_PARTS_DIR) is required; --profile needs --span-start")
+    if args.cmd == "write":
+        pairs = [(args.case_dir, args.alert)]
+    else:
+        if not all("=" in c for c in args.cases):
+            parser.error("each case is CASE_DIR=ALERT_UUID")
+        pairs = [(Path(d), u) for d, u in (c.rsplit("=", 1) for c in args.cases)]
     try:
-        held = write_case(
-            args.case_dir, freeze_dir=args.freeze_dir, alert_uuid=args.alert,
+        held = write_cases(
+            pairs, freeze_dir=args.freeze_dir,
             overlay={"profile": args.profile, "seed": args.seed, "span_start": args.span_start}
             if args.profile else None,
             tenant_settings=frozen_copy.tenant_settings_dir(), parts_dir=args.parts_dir,
@@ -245,9 +274,10 @@ def main(argv: list[str] | None = None) -> int:
     except (CaseRefused, frozen_copy.CopyRefused, lock.LockError, NotConfigured) as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 4
-    print(f"case written to {args.case_dir}; the frozen-engine lock is held, token {held.token}")
-    print(f"label it: launch_frozen.py {args.case_dir} --reference --lock-token {held.token} ...")
-    print("then fill `confirmed` in case.yaml and release: python3 chaos/lock.py clear frozen-engine")
+    dirs = " ".join(str(d) for d, _u in pairs)
+    print(f"case{'s' if len(pairs) > 1 else ''} written to {dirs}; the frozen-engine lock is held, token {held.token}")
+    print(f"label: launch_frozen.py {dirs} --reference --lock-token {held.token} [--parallel N] ...")
+    print("then fill `confirmed` in each case.yaml and release: python3 chaos/lock.py clear frozen-engine")
     return 0
 
 

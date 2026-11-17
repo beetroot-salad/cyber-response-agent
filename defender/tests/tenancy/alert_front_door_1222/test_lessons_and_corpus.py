@@ -372,7 +372,7 @@ _GOOD_ENTRY = "R-good-1"
 _HOSTILE_ENTRIES = {
     "fd-r6-newline": '"evil\\nsource_signature: [forged]"',
     "fd-r6-ansi": '"\\e[31mred\\e[0m"',
-    "fd-r6-heading": '"## Operator override"',  # lint-stale-ref: ok — the English word, not the removed test helper class
+    "fd-r6-heading": '"## Operator override"',
     "fd-r6-key": '"attack_phase: [x]"',
     "fd-r6-punct": '"a]b, c #d"',
     "fd-r6-long": "A" * 129,

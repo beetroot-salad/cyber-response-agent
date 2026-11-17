@@ -19,7 +19,7 @@ from defender.tests.migrations._marked1470 import upgrade_marking_tenants
 
 #: The schemas PostgreSQL itself owns; everything else in a database is ours to compare.
 _SYSTEM = "nspname !~ '^pg_' AND nspname <> 'information_schema'"
-IDENTITY_TABLES = {"users", "memberships", "sessions", "programs", "program_credentials", "warning_deliveries"}  # #1214: `tenants` moved to `tenancy`; #1307 adds credentials and their warning deliveries; #1454 gives programs their own table
+IDENTITY_TABLES = {"users", "memberships", "sessions", "programs", "program_credentials", "warning_deliveries", "signin_attempts"}  # #1161 D6: sign-in attempts in flight; #1214: `tenants` moved to `tenancy`; #1307 adds credentials and their warning deliveries; #1454 gives programs their own table
 LEARNING_TABLES = {"work_items", "batches", "commits", "commit_changes",
                    "feedback_issues", "feedback_comments", "feedback_tick"}  # #1278: learning's work tracking, A4 feedback (design: Schema)
 JOBS_TABLES = {"alerts", "investigations", "learning_jobs", "learning_checks"}  # #1342, #1344 (amendment 3: learning_checks) (#1345 r5: the mapping table is a tenant record, in `tenancy`)

@@ -10,7 +10,6 @@ from __future__ import annotations
 from .bootstrap import Bootstrap
 from .errors import (
     BootstrapRefused,
-    CallbackRefused,
     Conflict,
     DataRuleViolation,
     Forbidden,
@@ -37,13 +36,16 @@ from .service import (
     OpenInvitation,
     PersonCaller,
     ProgramCaller,
+    Refused,
+    SignedIn,
+    attempt_cookie,
 )
 
 __all__ = [
-    "Authenticated", "Bootstrap", "BootstrapRefused", "CallbackRefused", "Conflict",
+    "Authenticated", "Bootstrap", "BootstrapRefused", "Conflict",
     "DataRuleViolation", "ExpiryWarning", "Forbidden", "IdentityError", "IdentityRepository", "IdentityService",
     "InMemoryIdentityRepository", "Invalid", "InvitationView", "LoginStart", "MailPort", "MemberView",
     "Membership", "MeView", "NotAuthenticated", "NotFound", "OpenInvitation", "PersonCaller", "Program",
     "ProgramCaller", "ProgramCredential", "ProgramsPort", "Session", "TenantNotActive",
-    "SignInPort", "SignInRefused", "SignInUnavailable", "User", "VerifiedProgramToken", "VerifiedSignIn",
+    "Refused", "SignedIn", "attempt_cookie", "SignInPort", "SignInRefused", "SignInUnavailable", "User", "VerifiedProgramToken", "VerifiedSignIn",
 ]

@@ -156,6 +156,9 @@ dev = [
     # imports httpx. The `runtime` extra happens to carry it (anthropic -> httpx); a dev-only
     # sync does not.
     "httpx",
+    # The browser tests (tests/frontend, #1161 B8, B11): sync Playwright drives a headless Chromium; the lock's
+    # version pins the browser build. CI installs the browser with `playwright install chromium`.
+    "playwright>=1.65",
     "coverage",
     "ruff",
     "vulture",

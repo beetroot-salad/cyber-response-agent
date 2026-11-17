@@ -4,7 +4,7 @@ The online investigation. `python3 defender/run.py <alert.json> --tenant <tenant
 in-process PydanticAI driver against `defender/SKILL.md`; the agent works through
 the loop in a run dir and exits. `run.py` handles everything after (projection,
 transcript, learning loop). Every run names its tenant, and there is no default; on the host, the
-tenant is created through the platform API (`POST /admin/tenants`) and the tenant lifecycle
+tenant is created through the platform API (`POST /api/admin/tenants`) and the tenant lifecycle
 (`python -m defender.lifecycle serve`), which places its knowledge under
 `$DEFENDER_DATA_ROOT/<tenant>/knowledge`; a run works only for an `active` tenant.
 

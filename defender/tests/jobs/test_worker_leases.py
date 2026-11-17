@@ -249,9 +249,17 @@ async def test_b1_a_deliberate_stop_keeps_renewing_until_the_rows_last_write_so_
             began = time.monotonic()
             assert not serving.done()
             os.kill(os.getpid(), signal.SIGTERM)
-            while not serving.done() and accounting_written(dsn, inv) is None:  # the mark: the hand-back landed
-                assert row(dsn, inv)["stage"] == "running", "the row was taken over while its worker was stopping"
-                assert (lease_left(dsn, inv) or 0) > 0, "the stopping worker let the row's lease lapse"
+            while not serving.done():
+                # One read for all three: the hand-back writes the mark and an already-lapsed lease
+                # together, so reading the mark and the lease separately can see the hand-back's
+                # deliberate lapse as the stopping worker's (the CI flake this replaced).
+                stage, left, marked = execute(
+                    dsn, "SELECT stage, EXTRACT(EPOCH FROM lease_expires_at - now()), accounting_written_at "
+                         "FROM jobs.investigations WHERE id = %s", (inv,))[0]
+                if marked is not None:  # the mark: the hand-back landed
+                    break
+                assert stage == "running", "the row was taken over while its worker was stopping"
+                assert float(left or 0) > 0, "the stopping worker let the row's lease lapse"
                 await asyncio.sleep(0.1)
             await asyncio.wait_for(serving, timeout=10)
             assert time.monotonic() - began >= 2.5, "premise: the stop waited out the child's grace"

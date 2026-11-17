@@ -10,7 +10,7 @@ what a marker, an offset or a variant is. What it models:
 * Containers: `run` (`-d` = running; foreground = runs its command and exits, `--rm` removes it), `create`,
   `start`, `restart`, `stop`, `kill`, `rm [-f] [-v]` (a running container needs `-f`; `-f` on a missing one is
   silent; `-v` removes its anonymous volumes only, as docker does), `inspect -f '{{.State.Running}}'`
-  (prints `false`, rc 0, for a stopped container; rc 1 for a missing one) and `'{{.Config.Image}}'`.
+  (prints `false`, rc 0, for a stopped container; rc 1 for a missing one) `'{{.Config.Image}}'` and `'{{json .Config.Env}}'`.
   `exec` into a stopped container fails (rc 1), into a missing one too.
 * Volumes: named (`-v name:/path`, created on first use, `volume create`, `volume rm [-f]`, refused while any
   container of that scope, running or not, uses it), anonymous (`-v /path`), and binds (`-v /src:/dst`, `src`
@@ -362,6 +362,9 @@ class RigDocker(FakeDocker):
             return (0, "", "") if rest and rest[0] in ("inspect", "rm", "ls", "prune", "tag") else self._unmodelled(argv)
         if verb == "save":
             names = [a for a in rest if not a.startswith("-")]
+            if "-o" in rest and len(rest) == 3 and rest[0] == "-o":
+                Path(rest[1]).write_bytes(self.images.get((scope, rest[2]), b""))   # client-side file
+                return 0, b"", ""
             if any(a in ("-o", "--output") or a.startswith("--output=") for a in rest) or len(names) != 1:
                 return self._unmodelled(argv)
             return 0, self.images.get((scope, names[0]), b""), ""
@@ -757,6 +760,8 @@ class RigDocker(FakeDocker):
                 out.append(c.image)
             elif fmt.replace(" ", "") == "{{.State.Status}}":
                 out.append(c.state)
+            elif fmt.replace(" ", "") == "{{json.Config.Env}}":
+                out.append(json.dumps([f"{k}={v}" for k, v in c.env.items()]))
             else:
                 return self._unmodelled(["docker", "inspect", "-f", fmt, name])
         return 0, "\n".join(out) + "\n", ""

@@ -11,6 +11,7 @@ to those properties. The API serves `Investigation.knowledge = {status, commit, 
 """
 from __future__ import annotations
 
+from defender.tests.support.api._mount1161 import API
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import html
@@ -454,7 +455,7 @@ def test_the_comment_follows_the_host_outcome_when_the_box_rewrites_the_record(
 _NOW = "2026-10-22T12:00:00+00:00"
 _TENANT = "6f1c3b9e-4a5d-4e8f-9a0b-1c2d3e4f5a6b"
 #: #1306 O7: routes live under `/tenants/{T}`; the caller is a member signed in to the API test world.
-_ROUTE = f"/tenants/{_TENANT}"
+_ROUTE = f"{API}/tenants/{_TENANT}"
 _ALERT_ID = "a1000000-0000-4000-8000-000000000001"
 
 
@@ -580,7 +581,7 @@ def test_o_warn_api_published_contract_declares_the_knowledge_field():
     pytest.importorskip("fastapi")
     from defender.tests.support.api._identity1306 import World
 
-    doc = World().client().get("/openapi.json").json()  # no store is reached: no database
+    doc = World().client().get(API + "/openapi.json").json()  # no store is reached: no database
     schemas = doc["components"]["schemas"]
     inv = schemas.get("Investigation") or schemas["Investigation-Output"]
     assert "knowledge" in inv["properties"], sorted(inv["properties"])

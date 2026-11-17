@@ -44,6 +44,7 @@ import io
 import json
 import os
 import shlex
+import socket
 import subprocess
 import sys
 import tarfile
@@ -112,7 +113,9 @@ QUERY_IMAGE = "soc-playground/endpoint-query:local"
 PS_SHIM = PLAYGROUND / "hosts" / "base" / "ps-shim"
 QUERY_DIR = "/lab/endpoint-query"         # in the engine: the service's host lists
 #: Bumped when `_replica_image` builds differently: every replica image is then rebuilt.
-REPLICA_RECIPE = "replica-v2"
+REPLICA_RECIPE = "replica-v3"
+#: The live proxy's settings the frozen proxy is given too: where to find the CAs it trusts.
+PROXY_TRUST_ENV = ("SSL_CERT_DIR", "SSL_CERT_FILE")
 BASE_LABEL = "soc-playground.frozen-base"   # on a replica image: the host image it was built from
 REPLICA_TREE_DIR = "/lab/tree"            # in a replica: its captured process tree
 READONLY_PASSWORD_ENV = "V2_DEFENDER_READONLY_PASSWORD"
@@ -175,9 +178,25 @@ class FrozenEs:
             raise LabOpsError(f"frozen elasticsearch {method} {path}: curl exit {proc.returncode} "
                               f"{_text(proc.stderr).strip()[:300]}")
         payload = json.loads(text) if text.strip() else {}
+        if code == 401 and "unable to authenticate" in str(payload):
+            # A node that has just started refuses every login for some seconds, until its license
+            # is applied and the security realms are on (live: ~16 s after the port opened). A
+            # wrong password reads the same, so a health poll waits it out to its deadline and
+            # then fails naming it; every other caller fails on it at once.
+            raise frozen_copy.NodeNotReady(f"frozen elasticsearch {method} {path}: HTTP 401 (the node's "
+                                           f"security realms not on yet, or a wrong password): "
+                                           f"{str(payload)[:300]}")
         if not 200 <= code < 300:
             raise LabOpsError(f"frozen elasticsearch {method} {path}: HTTP {code}: {str(payload)[:500]}")
         return payload
+
+
+def _tcp_open(address: str, port: int, timeout_s: float = 5.0) -> bool:
+    try:
+        with socket.create_connection((address, port), timeout=timeout_s):
+            return True
+    except OSError:
+        return False
 
 
 class LabOps:
@@ -195,8 +214,9 @@ class LabOps:
                  es_image: str = DEFAULT_ES_IMAGE, cluster_name: str = "soc-playground",
                  certs_volume: str = "soc-playground_certs", repo_dir: str = "/srv/lab/frozen-cases",
                  readonly_user: str = "defender-readonly", poll_s: float = 5.0, ready_timeout_s: float = 300.0,
-                 lab_env_file: str | Path | None = None) -> None:
+                 lab_env_file: str | Path | None = None, connect: Any = None) -> None:
         self._run, self.context, self.proxy_context = run, context, proxy_context
+        self._connect = connect if connect is not None else _tcp_open
         self.tenant_dir = Path(tenant_dir) if tenant_dir else None
         self.tenant_hosts, self.frozen_endpoint = list(tenant_hosts or ()), frozen_endpoint
         self._es = es
@@ -212,6 +232,7 @@ class LabOps:
         self._shim_ready = False
         self._stubs_loaded: str | None = None   # digest of what load_stubs was given, until teardown
         self._replicas: list[str] = []
+        self._builds: list[str] = []     # replica build containers, until each is removed
 
     @classmethod
     def from_environment(cls) -> LabOps:
@@ -292,7 +313,12 @@ class LabOps:
         marker = f"{repo}:{tag}-lab-{stamp}"
         if self._inner("image", "inspect", marker, check=False).returncode == 0:
             return
-        self._inner("load", input=self._outer("save", image).stdout)
+        # Through a file, not memory: an image is gigabytes (the Elasticsearch one ~1.4 GB).
+        with tempfile.TemporaryDirectory(prefix="lab-image-") as scratch:
+            archive = Path(scratch) / "image.tar"
+            self._outer("save", "-o", str(archive), image)
+            with open(archive, "rb") as fh:
+                self._inner("load", stdin=fh)
         self._inner("tag", image, marker)
         listed = self._inner("image", "ls", "--format", "{{.Tag}}", repo, check=False)
         old = [f"{repo}:{t}" for t in _text(listed.stdout).split()
@@ -564,6 +590,7 @@ class LabOps:
         script = (f"{python} -c {shlex.quote(rewrite)} && "
                   f"exec {python} -m defender.credential_proxy")
         audit_dir = str(Path(self.audit_path).parent)
+        trust = [a for setting in self._live_proxy_trust() for a in ("-e", setting)]
         argv = ["docker", *(["--context", self.proxy_context] if self.proxy_context else []),
                 "rm", "-f", FROZEN_PROXY]
         self._exec(argv, check=False)
@@ -574,10 +601,35 @@ class LabOps:
                 "-e", "DEFENDER_CREDENTIAL_PROXY_CONFIG=/tmp/frozen-proxy.json",
                 "-e", "DEFENDER_CREDENTIAL_PROXY_HOST=0.0.0.0",
                 "-e", f"DEFENDER_CREDENTIAL_PROXY_PORT={PROXY_PORT}",
-                "-e", f"V2_FROZEN_PROXY_AUDIT={self.audit_path}",
+                "-e", f"V2_FROZEN_PROXY_AUDIT={self.audit_path}", *trust,
                 self.proxy_image, "sh", "-c", script]
         self._exec(argv)
         return f"http://{FROZEN_PROXY}:{PROXY_PORT}"
+
+    def check_reachable(self) -> None:
+        """Every port the frozen proxy reaches the copy on answers at the frozen endpoint's address (the
+        operator's forwards to the lab, D8); else `LabOpsError` naming the closed ones. Live: a forward
+        that dropped mid-batch left every agent's call failing until each run's breaker ended it."""
+        if not self.frozen_endpoint:
+            raise LabOpsError("the frozen endpoint is not configured ($V2_FROZEN_ENDPOINT)")
+        address = self.frozen_endpoint.rsplit(":", 1)[0]
+        closed = [port for port in FRONTEND_PORTS if not self._connect(address, int(port))]
+        if closed:
+            raise LabOpsError(f"the frozen copy is not reachable at {address} on port(s) "
+                              f"{', '.join(map(str, closed))}: re-open the forwards to the lab before launching")
+
+    def _live_proxy_trust(self) -> list[str]:
+        """The live proxy's TLS trust settings (`SSL_CERT_DIR=...`), for the frozen proxy to verify
+        OpenBao the same way. `--volumes-from` brings the dev issuer's CA file but not the setting
+        that names it; without it OpenBao's certificate fails to verify, which the proxy reports as
+        OpenBao unreachable (live, the first reference run)."""
+        proc = self._exec(["docker", *(["--context", self.proxy_context] if self.proxy_context else []),
+                           "inspect", "-f", "{{json .Config.Env}}", self.live_proxy_container], check=False)
+        try:
+            env = json.loads(proc.stdout or "null") or []
+        except ValueError:
+            env = []
+        return [e for e in env if isinstance(e, str) and e.split("=", 1)[0] in PROXY_TRUST_ENV]
 
     def _frontends(self) -> None:
         """The lab's edge program as the frozen copy's one frontend, every port of SURFACE, key
@@ -679,16 +731,23 @@ class LabOps:
         build = f"frozen-build-{host}"
         self._inner("rm", "-f", build, check=False)
         clear = " ".join(HOST_VOLUMES)
-        self._inner("run", "--name", build, "--network", "none", "--entrypoint", "sh", base, "-c",
-                    f"rm -rf {clear} && mkdir -p {clear} {REPLICA_TREE_DIR}")
-        for mount in HOST_VOLUMES:      # each copy as captured, unpacked by the daemon into its mount
+        self._builds.append(build)       # the teardown removes it if this build is cut short
+        self._inner("run", "-d", "--name", build, "--network", "none", "--entrypoint", "sleep", base, "infinity")
+        self._inner("exec", build, "sh", "-c", f"rm -rf {clear} && mkdir -p {clear} {REPLICA_TREE_DIR}")
+        for mount in HOST_VOLUMES:
+            # Each copy as captured, unpacked by tar inside the build container, owners and modes
+            # kept. Not `docker cp`: the daemon refuses a symlink that leaves the destination
+            # directory, and a host's /var/log holds one (README -> ../../usr/share/doc/...; live,
+            # the first reference launch).
             with open(parts / named[mount], "rb") as fh:
-                self._inner("cp", "-a", "-", f"{build}:{mount}", stdin=fh)
+                self._inner("exec", "-i", build, "tar", "-x", "-p", "--same-owner", "-C", mount, "-f", "-",
+                            stdin=fh)
         self._inner("cp", "-a", "-", f"{build}:/", input=self._tree_and_shim(parts / named["tree"]))
         self._inner("commit", '--change=ENTRYPOINT ["sleep"]', '--change=CMD ["infinity"]',
                     f"--change=ENV V2_PS_SHIM_TREE={REPLICA_TREE_DIR}/tree.txt", "--change=HEALTHCHECK NONE",
                     f"--change=LABEL {BASE_LABEL}={base}", build, tag)
         self._inner("rm", "-f", build, check=False)
+        self._builds.remove(build)
         return tag
 
     @staticmethod
@@ -753,26 +812,37 @@ class LabOps:
         for name in names:
             docs = sorted(self._document_digests(es, name))
             digest.update(json.dumps([name, docs], separators=(",", ":")).encode())
-        digest.update(self._stubs_loaded.encode())
-        for stub, path in STUB_STATE.items():
-            digest.update(self._stub_text(stub, path).encode())
+        digest.update(self._stub_part())
         return digest.hexdigest()
+
+    def stub_fingerprint(self) -> str:
+        """sha256 of the stub half of `content_digest` alone: what the stubs were loaded with and what
+        each now holds. Cheap; a launch that trusts a recorded digest of the cluster checks this live."""
+        return hashlib.sha256(self._stub_part()).hexdigest()
+
+    def _stub_part(self) -> bytes:
+        if self._stubs_loaded is None:
+            raise LabOpsError("the stubs' state was asked before the stubs were loaded")
+        return self._stubs_loaded.encode() + b"".join(self._stub_text(stub, path).encode()
+                                                      for stub, path in STUB_STATE.items())
 
     @staticmethod
     def _document_digests(es: Any, name: str) -> list[str]:
-        """sha256 of each document of the index `name`, read through one fixed view (r6.4.6)."""
+        """sha256 of each document of the index `name`, read through one fixed view (r6.4.6) a page at
+        a time: a touched index can hold millions of documents, and holding their sources at once
+        exhausted the operator machine's memory (#1347 first live case write)."""
         return [hashlib.sha256(json.dumps([h["_index"], h["_id"], h.get("_version"), h["_source"]], sort_keys=True,
                                           separators=(",", ":")).encode()).hexdigest()
-                for h in frozen_copy.walk(es, name, {"match_all": {}}, source=True, version=True)]
+                for h in frozen_copy.each(es, name, {"match_all": {}}, source=True, version=True)]
 
     def teardown(self) -> None:
-        """Stop the proxy, the frontend, the stubs, the replicas and the endpoint-query service; the
-        frozen cluster and its data stay, and so do the cached host images."""
+        """Stop the proxy, the frontend, the stubs, the replicas (and any replica build cut short) and the
+        endpoint-query service; the frozen cluster and its data stay, and so do the cached host images."""
         self._exec(["docker", *(["--context", self.proxy_context] if self.proxy_context else []),
                     "rm", "-f", FROZEN_PROXY], check=False)
         names = [FRONTEND, *(f"frontend-{p}" for p in FRONTEND_PORTS), *STUBS, HOST_STATE_SERVICE,
-                 *self._replicas]
-        self._replicas = []
+                 *self._replicas, *self._builds]
+        self._replicas, self._builds = [], []
         self._inner("rm", "-f", *names, check=False)
         self._inner("stop", ES_CONTAINER, check=False)
         self._stubs_loaded = None
@@ -893,6 +963,9 @@ class LabOps:
         self._outer("rm", "-f", "-v", name, check=False)
         self._outer("run", "-d", "--name", name, "-e", "discovery.type=single-node",
                     "-e", "xpack.security.enabled=false", "-e", f"path.repo={REPO_DIR}",
+                    # A whole restore of the snapshot can take the shared disk past the 85% low
+                    # watermark; a scratch node that then leaves shards unassigned fails the count.
+                    "-e", "cluster.routing.allocation.disk.threshold_enabled=false",
                     "-e", "ES_JAVA_OPTS=-Xms1g -Xmx1g", "-v", f"{self.repo_dir}:{REPO_DIR}:ro", self.es_image)
         try:
             def call(method: str, path: str, body: Any = None) -> Any:

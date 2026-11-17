@@ -1,7 +1,7 @@
 """A job's ticket write-back (#1471 r8): `jobs.investigations` gains `update_ticket` (the request's flag) and `ticket_write`
 (the outcome word, null until the investigation ends), and the case record loses its comment template (W7).
 
-Revision ID: 0020_ticket_write
+Revision ID: 0021_ticket_write
 Revises: 0019_drop_records_mark
 
 Existing investigations read unflagged with no word. `update_ticket` has no server default afterwards: the store sets it
@@ -13,8 +13,8 @@ There is no downgrade.
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0020_ticket_write"
-down_revision = "0019_drop_records_mark"
+revision = "0021_ticket_write"
+down_revision = "0020_signin_attempts"
 
 WORDS = ("commented", "escalated", "error", "unknown", "no_receipt", "not_read")
 

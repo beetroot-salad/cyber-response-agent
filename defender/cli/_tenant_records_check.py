@@ -129,7 +129,7 @@ def _case_findings(tenant_id: TenantId, records: TenantRecords, catalog: Catalog
     record = _CaseRecordOf(agent=agent, records=records, **record_settings(records))
     try:
         case_system.judge_case_system(record, defender_dir=defender_dir,
-                                      roster=TenantSystems.of(records, catalog, tenant_id=tenant_id).roster)
+                                      roster=TenantSystems.of(records, catalog).roster)
     except case_system.CaseSettingsFault as fault:
         return [str(fault)]
     return []

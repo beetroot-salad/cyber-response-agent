@@ -30,7 +30,7 @@ from defender.tests.support.api._config1470 import (
     served_config,
 )
 from defender.tests.support.api._openbao1470 import ScriptedOpenBao
-from defender.tests.support.api._server1083 import ANN, ORIGIN, REPO, A, B
+from defender.tests.support.api._server1083 import ANN, REPO, A, B
 from defender.tests.support.tenancy import _systems1366 as R
 from defender.tests.systems._rules1470 import write_broken_adapter
 
@@ -230,7 +230,7 @@ async def test_o3_o4_a_system_is_created_201_replaced_200_and_read_back_as_store
     assert (await configured.list_systems()).json()["items"] == []
     created = await configured.put_system(TICKET, 0)
     assert created.status_code == 201, created.text
-    assert created.headers["Location"] == f"{ORIGIN}/tenants/{A}/systems/{TICKET}"  # as every create names its resource
+    assert created.headers["Location"] == f"/api/tenants/{A}/systems/{TICKET}"  # as every create names its resource
     assert created.json() == _saved(1)
     assert (await configured.get_system(TICKET)).json() == _served(1)
 
@@ -418,12 +418,12 @@ async def test_o4_every_field_of_a_system_write_is_required_and_a_missing_one_is
     """No field defaults: a body missing `drop` is 422 with `errors` naming it (and no `faults`). (O4, G2)"""
     body = {"replaces": 0, "enabled": True, "settings": TICKET_SETTINGS, "access": TICKET_ACCESS}
     del body[drop]
-    refused = await configured.put_raw(f"/tenants/{A}/systems/{TICKET}", body)
+    refused = await configured.put_raw(f"/api/tenants/{A}/systems/{TICKET}", body)
     assert refused.status_code == 422, refused.text
     assert "faults" not in refused.json()
     assert refused.json()["errors"], refused.json()
     assert drop in str(refused.json()["errors"])
-    extra = await configured.put_raw(f"/tenants/{A}/systems/{TICKET}",
+    extra = await configured.put_raw(f"/api/tenants/{A}/systems/{TICKET}",
                                      {"replaces": 0, "enabled": True, "settings": TICKET_SETTINGS,
                                       "access": TICKET_ACCESS, "adapter": TICKET})
     assert extra.status_code == 422, extra.text  # P4: the adapter is not a write field
@@ -480,7 +480,7 @@ async def test_o3_the_systems_list_pages_by_cursor_serving_every_system_once_in_
     seen: list[str] = []
     params: dict[str, object] = {"limit": 1}
     for _ in range(len(ids) + 1):
-        page = (await configured.client.get(f"/tenants/{A}/systems", params=params,
+        page = (await configured.client.get(f"/api/tenants/{A}/systems", params=params,
                                             headers=configured.ann(write=False))).json()
         assert set(page) == {"items", "next_cursor"}, page
         assert len(page["items"]) == 1
@@ -496,7 +496,7 @@ async def test_o3_the_systems_list_asks_the_secret_store_only_for_the_rows_on_th
     one, never another; the store was asked something (the page's `has_credentials` is the secret store's answer). (O3)"""
     first, *others = await _save_three(scripted)
     scripted.scripted.calls.clear()
-    page = (await scripted.client.get(f"/tenants/{A}/systems", params={"limit": 1}, headers=scripted.ann(write=False))).json()
+    page = (await scripted.client.get(f"/api/tenants/{A}/systems", params={"limit": 1}, headers=scripted.ann(write=False))).json()
     assert [i["system_id"] for i in page["items"]] == [first]
     paths = [p for _, p in scripted.scripted.calls if f"/{A}/" in p]
     assert paths, scripted.scripted.calls
@@ -508,9 +508,9 @@ async def test_o3_the_systems_list_asks_the_secret_store_only_for_the_rows_on_th
 async def test_o3_an_edited_cursor_naming_an_id_outside_the_grammar_is_refused_before_the_secret_store(scripted, bad_id):
     """A cursor whose id was edited to something no system id can be is 422, and the secret store is asked nothing. (O3)"""
     await _save_three(scripted)
-    first = (await scripted.client.get(f"/tenants/{A}/systems", params={"limit": 1}, headers=scripted.ann(write=False))).json()
+    first = (await scripted.client.get(f"/api/tenants/{A}/systems", params={"limit": 1}, headers=scripted.ann(write=False))).json()
     scripted.scripted.calls.clear()
-    refused = await scripted.client.get(f"/tenants/{A}/systems", headers=scripted.ann(write=False),
+    refused = await scripted.client.get(f"/api/tenants/{A}/systems", headers=scripted.ann(write=False),
                                         params={"limit": 1, "cursor": edited_cursor(first["next_cursor"], id=bad_id)})
     assert refused.status_code == 422, refused.text
     assert scripted.scripted.calls == []
@@ -532,10 +532,10 @@ async def test_o3_a_systems_cursor_is_bound_to_its_tenant_even_for_a_member_of_b
     finally:
         await repo.close()
     headers = scripted.ann(write=False)
-    cursor = (await scripted.client.get(f"/tenants/{A}/systems", params={"limit": 1}, headers=headers)).json()["next_cursor"]
-    assert (await scripted.client.get(f"/tenants/{A}/systems", params={"limit": 1, "cursor": cursor}, headers=headers)).status_code == 200
+    cursor = (await scripted.client.get(f"/api/tenants/{A}/systems", params={"limit": 1}, headers=headers)).json()["next_cursor"]
+    assert (await scripted.client.get(f"/api/tenants/{A}/systems", params={"limit": 1, "cursor": cursor}, headers=headers)).status_code == 200
     calls = len(scripted.scripted.calls)
-    assert (await scripted.client.get(f"/tenants/{B}/systems", params={"cursor": cursor}, headers=headers)).status_code == 422
+    assert (await scripted.client.get(f"/api/tenants/{B}/systems", params={"cursor": cursor}, headers=headers)).status_code == 422
     assert len(scripted.scripted.calls) == calls
 
 
@@ -550,7 +550,7 @@ async def test_p2_o5_a_deleted_system_reads_absent_and_is_re_created_with_replac
     assert (await configured.list_systems()).json()["items"] == []
     recreated = await configured.put_system(TICKET, 0)
     assert recreated.status_code == 201, recreated.text
-    assert recreated.headers["Location"] == f"{ORIGIN}/tenants/{A}/systems/{TICKET}"
+    assert recreated.headers["Location"] == f"/api/tenants/{A}/systems/{TICKET}"
     assert recreated.json() == _saved(3)
     _stale(await configured.put_system(TICKET, 0), 3)
 
@@ -570,7 +570,7 @@ async def test_o5_deleting_with_no_current_record_is_404_before_any_version_chec
 async def test_o5_a_delete_names_the_version_it_replaces(configured):
     """`replaces` is required on a delete: without it, a validation 422 and the record stays. (O5)"""
     assert (await configured.put_system(TICKET, 0)).status_code == 201
-    refused = await configured.client.delete(f"/tenants/{A}/systems/{TICKET}", headers=configured.ann())
+    refused = await configured.client.delete(f"/api/tenants/{A}/systems/{TICKET}", headers=configured.ann())
     assert refused.status_code == 422
     assert refused.json()["errors"], refused.text
     assert (await configured.get_system(TICKET)).status_code == 200
@@ -591,12 +591,12 @@ async def test_o5_deleting_the_case_records_system_is_refused_by_the_cover_rule(
 
 async def test_o6_the_case_record_is_created_replaced_read_stale_refused_deleted_and_re_created(configured):
     """PUT 201 v1, GET; PUT naming 1 is 200 v2; a stale PUT 409 naming 2; DELETE 204; GET 404; PUT `replaces: 0` 201 v4. (O6, P2)"""
-    path = f"/tenants/{A}/case-record"
+    path = f"/api/tenants/{A}/case-record"
     assert (await configured.get("/case-record")).status_code == 404
     assert (await configured.put_system(TICKET, 0)).status_code == 201
     created = await configured.put_case(0)
     assert created.status_code == 201, created.text
-    assert created.headers["Location"] == f"{ORIGIN}{path}"
+    assert created.headers["Location"] == path  # a path, never an absolute URL (#1161 B3)
     record = {"version": 1, "system_id": TICKET}  # #1471 W7: no comment body
     assert created.json() == record
     assert (await configured.get("/case-record")).json() == record
@@ -610,7 +610,7 @@ async def test_o6_the_case_record_is_created_replaced_read_stale_refused_deleted
     assert (await configured.get("/case-record")).status_code == 404
     again = await configured.put_case(0)
     assert again.status_code == 201
-    assert again.headers["Location"] == f"{ORIGIN}{path}"
+    assert again.headers["Location"] == path
     assert again.json()["version"] == 4, again.text
     assert {v.author for v in R.case_versions(configured.dsn, A)} == {configured.user_id(ANN)}
     assert (await configured.client.get(path, headers=configured.ann(write=False))).json()["version"] == 4
@@ -644,17 +644,17 @@ async def test_o6_a_case_record_the_judgement_refuses_is_422_and_stores_nothing(
 
 async def test_g2_the_problem_document_declares_faults_and_current_version(scripted):
     """The served OpenAPI's Problem names `faults` (a list of text) and `current_version` (an integer). (G2, D10)"""
-    document = (await scripted.client.get("/openapi.json")).json()
+    document = (await scripted.client.get("/api/openapi.json")).json()
     properties = document["components"]["schemas"]["Problem"]["properties"]
     assert properties["faults"]["type"] == "array" or "array" in str(properties["faults"])
     assert "integer" in str(properties["current_version"])
-    put = document["paths"]["/tenants/{tenant_id}/systems/{system_id}"]["put"]["responses"]
+    put = document["paths"]["/api/tenants/{tenant_id}/systems/{system_id}"]["put"]["responses"]
     assert {"201", "200", "409", "422"} <= set(put), set(put)
 
 
 # --- D13: the served system models hold the id to the grammar -------------------------------------------------------
 
-SYSTEM_ROUTE = "/tenants/{tenant_id}/systems/{system_id}"
+SYSTEM_ROUTE = "/api/tenants/{tenant_id}/systems/{system_id}"
 
 
 def _response_model(app, method: str, template: str):
@@ -676,7 +676,7 @@ async def test_d13_an_id_outside_the_grammar_cannot_be_served_as_a_system(script
     assert (await scripted.put_system(TICKET, 0)).status_code == 201
     served = (await scripted.get_system(TICKET)).json()
     listed = (await scripted.list_systems()).json()
-    one, many = _response_model(scripted.app, "GET", SYSTEM_ROUTE), _response_model(scripted.app, "GET", "/tenants/{tenant_id}/systems")
+    one, many = _response_model(scripted.app, "GET", SYSTEM_ROUTE), _response_model(scripted.app, "GET", "/api/tenants/{tenant_id}/systems")
     one.model_validate(served)
     many.model_validate(listed)
     with pytest.raises(ValueError, match="pattern"):
@@ -687,7 +687,7 @@ async def test_d13_an_id_outside_the_grammar_cannot_be_served_as_a_system(script
 
 async def test_d13_the_published_schema_of_a_served_system_carries_the_id_pattern(scripted):
     """The OpenAPI document's system answer holds `system_id` to a pattern. (D13)"""
-    document = (await scripted.client.get("/openapi.json")).json()
+    document = (await scripted.client.get("/api/openapi.json")).json()
     ref = document["paths"][SYSTEM_ROUTE]["get"]["responses"]["200"]["content"]["application/json"]["schema"]["$ref"]
     schema = document["components"]["schemas"][ref.rsplit("/", 1)[1]]
     assert "pattern" in schema["properties"]["system_id"], schema["properties"]["system_id"]
@@ -710,13 +710,13 @@ async def test_o4_a_database_fault_on_a_system_write_is_500_and_announces_nothin
     execute(scripted.dsn, "ALTER TABLE tenancy.system_versions RENAME TO sv_away")
     try:
         async with scripted.lenient() as client:
-            refused = await client.put(f"/tenants/{A}/systems/{TICKET}", headers=scripted.ann(), json=body)
+            refused = await client.put(f"/api/tenants/{A}/systems/{TICKET}", headers=scripted.ann(), json=body)
     finally:
         execute(scripted.dsn, "ALTER TABLE tenancy.sv_away RENAME TO system_versions")
     assert refused.status_code == 500, refused.text
     assert [r for r in caplog.records if getattr(r, "action", None) == "system.update"] == []
     assert [v.version for v in scripted.versions(TICKET)] == [1]
-    assert (await scripted.put_raw(f"/tenants/{A}/systems/{TICKET}", body)).status_code == 200
+    assert (await scripted.put_raw(f"/api/tenants/{A}/systems/{TICKET}", body)).status_code == 200
 
 
 # --- reads and writes with the secret store sealed or failing --------------------------------------------------------
@@ -793,8 +793,8 @@ async def test_o4_a_save_asks_the_secret_store_nothing_and_its_answer_carries_no
 async def test_o4_the_published_schema_of_a_save_answer_carries_no_has_credentials_and_a_read_does(scripted):
     """The OpenAPI document: `PUT /systems/{id}` answers (200 and 201) a model with no `has_credentials`; `GET` answers
     one with it. (O3, O4; r8 Am-2)"""
-    doc = (await scripted.client.get("/openapi.json")).json()
-    path = doc["paths"]["/tenants/{tenant_id}/systems/{system_id}"]
+    doc = (await scripted.client.get("/api/openapi.json")).json()
+    path = doc["paths"]["/api/tenants/{tenant_id}/systems/{system_id}"]
 
     def props(answer: dict) -> set[str]:
         ref = answer["content"]["application/json"]["schema"]["$ref"].rsplit("/", 1)[-1]
@@ -865,7 +865,7 @@ async def test_o4_a_save_naming_0_after_another_admin_deleted_is_201_at_the_next
     saved = await scripted.put_system(TICKET, 0)
     assert [(v.version, v.deleted) for v in scripted.versions(TICKET)] == [(1, False), (2, True), (3, False)]
     assert saved.status_code == 201, saved.text
-    assert saved.headers.get("location", "").endswith(f"/tenants/{A}/systems/{TICKET}"), saved.headers
+    assert saved.headers.get("location", "").endswith(f"/api/tenants/{A}/systems/{TICKET}"), saved.headers
     assert saved.json()["version"] == 3
     assert (await scripted.get_system(TICKET)).json()["has_credentials"] is False
 
@@ -920,11 +920,11 @@ async def test_o4_another_tenants_admin_writes_nothing_of_this_tenant_and_asks_n
     Bob, B's admin): 404 on each config route, nothing written, no secret-store call. B holds records so that a skipped
     membership check would answer 200/204/409, not 404. (O4, O7)"""
     body = {"replaces": 0, "enabled": True, "settings": TICKET_SETTINGS, "access": TICKET_ACCESS}
-    assert (await scripted.put_raw(f"/tenants/{B}/systems/{TICKET}", body, headers=scripted.bob())).status_code == 201
+    assert (await scripted.put_raw(f"/api/tenants/{B}/systems/{TICKET}", body, headers=scripted.bob())).status_code == 201
     case = {"replaces": 0, "system_id": TICKET}
-    assert (await scripted.put_raw(f"/tenants/{B}/case-record", case, headers=scripted.bob())).status_code == 201
+    assert (await scripted.put_raw(f"/api/tenants/{B}/case-record", case, headers=scripted.bob())).status_code == 201
     creds = {"for_version": 1, "credentials": {"api_key": TOKEN}}
-    assert (await scripted.put_raw(f"/tenants/{B}/systems/{TICKET}/credentials", creds,
+    assert (await scripted.put_raw(f"/api/tenants/{B}/systems/{TICKET}/credentials", creds,
                                    headers=scripted.bob())).status_code == 204
     held = scripted.stored_generations(TICKET, tenant=B)
     assert held, "B's credentials are held"
@@ -937,8 +937,8 @@ async def test_o4_another_tenants_admin_writes_nothing_of_this_tenant_and_asks_n
     assert (await scripted.delete_system(TICKET, 1, tenant=B)).status_code == 404
     assert (await scripted.put_credentials(TICKET, 1, {"api_key": TOKEN}, tenant=B)).status_code == 404
     assert (await scripted.get("/case-record", tenant=B)).status_code == 404
-    assert (await scripted.put_raw(f"/tenants/{B}/case-record", case)).status_code == 404
-    assert (await scripted.client.delete(f"/tenants/{B}/case-record", params={"replaces": 1},
+    assert (await scripted.put_raw(f"/api/tenants/{B}/case-record", case)).status_code == 404
+    assert (await scripted.client.delete(f"/api/tenants/{B}/case-record", params={"replaces": 1},
                                          headers=scripted.ann())).status_code == 404
     assert [v.version for v in scripted.versions(TICKET, tenant=B)] == [1]
     assert [v.version for v in R.case_versions(scripted.dsn, B)] == [1]
@@ -952,15 +952,15 @@ async def test_o4_another_tenants_admin_writes_nothing_of_this_tenant_and_asks_n
 async def test_o15_the_connection_check_still_refuses_501_naming_its_owner_not_this_piece(scripted):
     """A saved system's check is 501 naming #1460, never #1470; a stranger gets 404. (O15, D-C)"""
     assert (await scripted.put_system(TICKET, 0)).status_code == 201
-    refused = await scripted.client.post(f"/tenants/{A}/systems/{TICKET}/check", headers=scripted.ann())
+    refused = await scripted.client.post(f"/api/tenants/{A}/systems/{TICKET}/check", headers=scripted.ann())
     assert refused.status_code == 501, refused.text
     assert "#1460" in refused.json()["detail"]
     assert "#1470" not in refused.json()["detail"]
-    lessons = await scripted.client.get(f"/tenants/{A}/lessons", headers=scripted.ann(write=False))
+    lessons = await scripted.client.get(f"/api/tenants/{A}/lessons", headers=scripted.ann(write=False))
     assert lessons.status_code == 501
     assert "#1082" in lessons.json()["detail"]
     assert "#1470" not in lessons.json()["detail"]
-    stranger = await scripted.client.post(f"/tenants/{B}/systems/{TICKET}/check", headers=scripted.ann())
+    stranger = await scripted.client.post(f"/api/tenants/{B}/systems/{TICKET}/check", headers=scripted.ann())
     assert stranger.status_code == 404
 
 
@@ -984,11 +984,11 @@ async def test_o6_every_field_of_a_case_record_write_is_required_and_none_is_ext
     assert (await configured.put_system(TICKET, 0)).status_code == 201
     body = {"replaces": 0, "system_id": TICKET}
     del body[drop]
-    refused = await configured.put_raw(f"/tenants/{A}/case-record", body)
+    refused = await configured.put_raw(f"/api/tenants/{A}/case-record", body)
     assert refused.status_code == 422, refused.text
     assert refused.json()["errors"]
     assert "faults" not in refused.json()
-    extra = await configured.put_raw(f"/tenants/{A}/case-record",
+    extra = await configured.put_raw(f"/api/tenants/{A}/case-record",
                                      {"replaces": 0, "system_id": TICKET, "enabled": True})
     assert extra.status_code == 422, extra.text
     assert R.case_versions(configured.dsn, A) == []
@@ -997,7 +997,7 @@ async def test_o6_every_field_of_a_case_record_write_is_required_and_none_is_ext
 async def test_r7_2_an_undeclared_query_parameter_on_a_system_write_is_refused_and_changes_nothing(configured):
     """`PUT /systems/ticket?x=1` is a 422 `extra_forbidden` at `["query", "x"]`; nothing is stored. (R7-2, O4)"""
     body = {"replaces": 0, "enabled": True, "settings": TICKET_SETTINGS, "access": TICKET_ACCESS}
-    refused = await configured.put_raw(f"/tenants/{A}/systems/{TICKET}", body, params={"x": "1"})
+    refused = await configured.put_raw(f"/api/tenants/{A}/systems/{TICKET}", body, params={"x": "1"})
     assert refused.status_code == 422, refused.text
     assert [(e["type"], e["loc"]) for e in refused.json()["errors"]] == [("extra_forbidden", ["query", "x"])]
     assert configured.versions(TICKET) == []

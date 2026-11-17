@@ -101,12 +101,13 @@ def _tenant(dsn: str, tenant: str, state: str, *, mark: bool) -> None:
 
 
 def test_the_revision_that_drops_the_mark_sits_directly_on_the_previous_head():
-    """Exactly one revision sits directly on `0018_learning_set_aside_indexes` (the head before the drop). (#1470 O8; head is
-    no longer the drop since #1471 added `0020_ticket_write` on it, whose own placement is test_1471_ticket_write_migration's)"""
+    """The revision that drops the mark sits directly on `BEFORE_DROP`, the head it was written on; later revisions
+    (#1161's `0020_signin_attempts`, #1471's `0021_ticket_write`) may follow it. (#1470 O8)"""
     from defender.migrations import _scripts
 
-    found = [r.revision for r in _scripts().walk_revisions() if r.down_revision == BEFORE_DROP]
-    assert len(found) == 1, f"one revision should sit directly on {BEFORE_DROP}, found {found}"
+    scripts = _scripts()
+    assert scripts.get_current_head() != BEFORE_DROP
+    assert scripts.get_revision("0019_drop_records_mark").down_revision == BEFORE_DROP
 
 
 @pytest.mark.postgres

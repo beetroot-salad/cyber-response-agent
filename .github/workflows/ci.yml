@@ -35,12 +35,14 @@ concurrency:
 # minutes with every test passed, so the suite went to four; and again on 2026-11-11: three of four
 # shards were cancelled at 12 minutes on main and on PR #1476 with the suite at ~8,000 tests a shard,
 # so it went to five; and again on 2026-11-12: main's five shards ran 10-11 minutes and PR #1473 lost
-# two at 12 minutes, so it went to six),
+# two at 12 minutes, so it went to six; and again on 2026-11-16: one of six shards ran past 12 minutes on main
+# and twice on PR #1535 with every test that reported passing, while the others ran 7-10 minutes, so it went to
+# eight and the cost table was refreshed from a green run of that PR),
 # and a stall that burns the gVisor step's full 5-minute bound still lands inside 12, so the
 # step's own timeout fires first and names the command. Raising the step bound without raising
 # this one inverts that and hands every stall to GitHub's generic job cancel.
 jobs:
-  # Six shards of the unit suite, run in parallel: this job is the critical path (~6-8 min against
+  # Eight shards of the unit suite, run in parallel: this job is the critical path (~6-8 min against
   # <2.5 min for every other job), and its CPU time is balanced across the runner's four cores, so
   # the only way down is more cores. `--shard I/N` (defender/tests/_shard.py) hands each shard whole
   # test files, balanced by each file's recorded cost, so together they run every test exactly once
@@ -50,13 +52,13 @@ jobs:
   # the extra runner minutes are free. `fail-fast: false` so one shard failing still reports the
   # other's results.
   test:
-    name: test (shard ${{ matrix.shard }}/6)
+    name: test (shard ${{ matrix.shard }}/8)
     runs-on: ubuntu-latest
     timeout-minutes: 12
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
 
     steps:
       - uses: actions/checkout@v5
@@ -95,6 +97,32 @@ jobs:
         # --extra api: the platform API stub (`defender/api/`, #1131) and its tests, which
         # `importorskip` fastapi and would otherwise skip here silently.
         run: uv sync --extra dev --extra runtime --extra api --locked
+
+      # #1161 B11: the browser tests (tests/frontend) build the frontend themselves (`npm ci && npm run
+      # build`, once per run, in the test fixture) and start the repo's ingress, so this job installs only
+      # their tools and builds nothing. A missing tool fails those tests; they never skip.
+      - name: Set up Node (for the frontend build)
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      # The ingress's Caddy, pinned: the release asset's sha256 (the same file whose sha512 the release's
+      # caddy_2.11.9_checksums.txt lists) is checked before it is unpacked.
+      - name: Install Caddy 2.11.9
+        env:
+          CADDY_VERSION: 2.11.9
+          CADDY_SHA256: 5b8cb7faf8726a2028ad96a66e54e6e81e8f361bc6175e5d22bbd997cc5177fb
+        run: |
+          curl -fsSL -o /tmp/caddy.tgz \
+            "https://github.com/caddyserver/caddy/releases/download/v${CADDY_VERSION}/caddy_${CADDY_VERSION}_linux_amd64.tar.gz"
+          echo "${CADDY_SHA256}  /tmp/caddy.tgz" | sha256sum -c -
+          sudo tar -xzf /tmp/caddy.tgz -C /usr/local/bin caddy
+          caddy version
+
+      # The Chromium build is the one the locked Playwright version pins; --with-deps adds its system libraries.
+      - name: Install Chromium for Playwright
+        working-directory: defender
+        run: uv run --locked playwright install --with-deps chromium
 
       # The #540 boundary suite drives a REAL container: the mounts and --network=none are the
       # boundary, so a fake cannot pin them. gVisor is the default runtime behind the knob, and
@@ -172,7 +200,7 @@ jobs:
         run: >-
           uv run pytest tests/ -v -m "not live and not gate"
           -n auto --dist loadfile --durations=25
-          --shard ${{ matrix.shard }}/6
+          --shard ${{ matrix.shard }}/8
           --ignore tests/e2e/test_box_boundary_e2e.py
 
   # The #540 boundary suite on a NATIVE daemon — the same collection the `test` job used to
@@ -305,7 +333,7 @@ jobs:
   # #1482: the dev compose's credential proxy once exited at import (its image lacked fastapi and
   # uvicorn) while every test passed against CI's venv, which syncs those itself. This runs the
   # service as compose defines it (compose builds its image, `pull_policy: build`). Its own job, not
-  # a step of `test`: five shards would build it five times.
+  # a step of `test`: eight shards would build it eight times.
   proxy-image:
     runs-on: ubuntu-latest
     timeout-minutes: 10

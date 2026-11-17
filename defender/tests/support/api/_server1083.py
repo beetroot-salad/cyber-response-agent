@@ -8,6 +8,9 @@
   realm's private signing key in `signing_keys[realm]`; `program_token(...)` mints a programs-realm access token with it.
   `answers` replaces a (realm, step)'s answer with any response or transport error (a generated failure space);
   `closes` counts the clients closed over it (one per adapter).
+  #1161 adds the sign-in realm's `authorization_code` grant (modelled on `keycloak-observed-q34.md`, Keycloak 26.4.0),
+  with self-describing codes (`authorization_code()`, `decode_code()`; the front channel in `_signin1161` mints
+  them) and the account's credential list and user record (UNOBSERVED shapes, owed the `live` check).
 - `Child`: the program in a child process. `Child.real(environ)` runs the shipped command
   (`python -m defender.api_server`, real network); `Child.faked(environ, fails=...)` runs this module's entry, which
   calls `defender.api_server.run(os.environ, transport=FakeKeycloak(...))`, reports `run returned <n>` on stdout,
@@ -30,6 +33,7 @@ import json
 import os
 import secrets
 import functools
+import hashlib
 import re
 import signal
 import socket
@@ -45,6 +49,7 @@ from typing import Any
 
 import anyio
 import httpx
+import jwt
 from defender.tests.support.identity._seed1496 import seed_membership, seed_user
 
 from defender.tests.support.api._openbao1470 import KV_MOUNT, WRITER_TOKEN, ScriptedOpenBao
@@ -70,6 +75,8 @@ ADMIN_READ = {SIGNIN_REALM: "users", PROGRAMS_REALM: "clients"}
 #: endpoint with the observed 401, so a program that sends the wrong id, or a secret file's text unstripped, is refused.
 ADMIN_CLIENTS = {SIGNIN_REALM: ("defender-api-admin", "signin-admin-secret-value"),
                  PROGRAMS_REALM: ("defender-api-programs-admin", "programs-admin-secret-value")}
+#: The sign-in client `environment()` configures, as (client id, secret): the code grant authenticates with it (HTTP Basic).
+SIGNIN_CLIENT = ("defender-api", "signin-client-secret-value")
 #: The child's failures travel in this variable (JSON list of `Fail`); it is not a setting of the program.
 FAULTS_ENV = "CF1083_KEYCLOAK_FAULTS"
 #: Set, the entry also reports every module the process loaded, once `run` returned: `loaded <json list>` (#1495).
@@ -85,7 +92,6 @@ SETTING_NAMES = (
     "DEFENDER_KEYCLOAK_ISSUER",
     "DEFENDER_KEYCLOAK_CLIENT_ID",
     "DEFENDER_KEYCLOAK_CLIENT_SECRET_FILE",
-    "DEFENDER_KEYCLOAK_REDIRECT_URI",
     "DEFENDER_KEYCLOAK_ADMIN_CLIENT_ID",
     "DEFENDER_KEYCLOAK_ADMIN_CLIENT_SECRET_FILE",
     "DEFENDER_KEYCLOAK_PROGRAMS_ISSUER",
@@ -115,11 +121,13 @@ closed_port = free_port
 
 # --- settings ---------------------------------------------------------------------------------------
 
-def environment(tmp_path: Path, *, dsn: str, keycloak: str = BACK, port: int | None = None,
-                administrators: tuple[str, ...] = (OPS,), openbao: str = OPENBAO_ADDR,
-                kv_mount: str = KV_MOUNT, token: str = WRITER_TOKEN) -> dict[str, str]:
+def environment(  # noqa: PLR0913 — each keyword is one setting a test varies; a settings object would hide which
+        tmp_path: Path, *, dsn: str, keycloak: str = BACK, port: int | None = None,
+        administrators: tuple[str, ...] = (OPS,), origin: str = ORIGIN, front: str = FRONT,
+        openbao: str = OPENBAO_ADDR, kv_mount: str = KV_MOUNT, token: str = WRITER_TOKEN) -> dict[str, str]:
     """Every setting the real program reads, valid (design FC-3). Secrets are files with a trailing newline; the
-    OpenBao token file holds `token` (#1470 G4)."""
+    OpenBao token file holds `token` (#1470 G4). `origin` is the frontend's; the redirect URI is derived from it by
+    the program (#1161 B3: no setting). `front` is the identity provider's browser-facing host, the issuers' base."""
     def secret(name: str) -> str:
         path = tmp_path / name
         path.write_text(f"{name}-value\n")
@@ -133,16 +141,15 @@ def environment(tmp_path: Path, *, dsn: str, keycloak: str = BACK, port: int | N
         "DEFENDER_DATABASE_DSN": dsn,
         "DEFENDER_API_HOST": "127.0.0.1",
         "DEFENDER_API_PORT": str(port if port is not None else free_port()),
-        "DEFENDER_API_FRONTEND_ORIGIN": ORIGIN,
+        "DEFENDER_API_FRONTEND_ORIGIN": origin,
         "DEFENDER_API_ADMINISTRATORS_FILE": str(admins),
         "DEFENDER_KEYCLOAK_SERVER_URL": keycloak,
-        "DEFENDER_KEYCLOAK_ISSUER": f"{FRONT}/realms/{SIGNIN_REALM}",
+        "DEFENDER_KEYCLOAK_ISSUER": f"{front}/realms/{SIGNIN_REALM}",
         "DEFENDER_KEYCLOAK_CLIENT_ID": "defender-api",
         "DEFENDER_KEYCLOAK_CLIENT_SECRET_FILE": secret("signin-client-secret"),
-        "DEFENDER_KEYCLOAK_REDIRECT_URI": f"{ORIGIN}/auth/callback",
         "DEFENDER_KEYCLOAK_ADMIN_CLIENT_ID": "defender-api-admin",
         "DEFENDER_KEYCLOAK_ADMIN_CLIENT_SECRET_FILE": secret("signin-admin-secret"),
-        "DEFENDER_KEYCLOAK_PROGRAMS_ISSUER": f"{FRONT}/realms/{PROGRAMS_REALM}",
+        "DEFENDER_KEYCLOAK_PROGRAMS_ISSUER": f"{front}/realms/{PROGRAMS_REALM}",
         "DEFENDER_KEYCLOAK_PROGRAMS_AUDIENCE": PROGRAMS_AUDIENCE,
         "DEFENDER_KEYCLOAK_PROGRAMS_ADMIN_CLIENT_ID": "defender-api-programs-admin",
         "DEFENDER_KEYCLOAK_PROGRAMS_ADMIN_CLIENT_SECRET_FILE": secret("programs-admin-secret"),
@@ -230,6 +237,37 @@ def realms_named(text: str) -> set[str]:
     return {realm for realm in REALMS if re.search(rf"(?<![\w-]){re.escape(realm)}(?![\w-])", text)}
 
 
+# --- authorization codes ----------------------------------------------------------------------------
+
+#: What an authorize request and the test's choices for it bind into a code (design B8): the exchange verifies them
+#: from the code itself, so the front channel (the test process) and the exchange (the API's child) share no state.
+CODE_FIELDS = ("sub", "nonce", "challenge", "redirect_uri", "amr", "name", "credentials", "fault")
+#: A per-code fault the exchange honours: the observed `invalid_grant` "Code not valid", or a refused connection.
+CODE_FAULTS = ("invalid_grant", "unavailable")
+
+
+def authorization_code(  # noqa: PLR0913 — the code's bound fields, one keyword each
+        *, sub: str, nonce: str, challenge: str, redirect_uri: str, amr: Iterable[str] = ("pwd",),
+                       name: str = "", credentials: Iterable[str] = ("password",), fault: str | None = None,
+                       session_state: str | None = None) -> str:
+    """A code in Keycloak's observed shape (three dot-joined segments: here the payload, the session state, a client
+    id), whose first segment carries `CODE_FIELDS` and a unique id (so two codes with equal fields differ)."""
+    assert fault is None or fault in CODE_FAULTS, fault
+    payload = {"sub": sub, "nonce": nonce, "challenge": challenge, "redirect_uri": redirect_uri, "amr": list(amr),
+               "name": name, "credentials": list(credentials), "fault": fault, "id": str(uuid.uuid4())}
+    return ".".join((_b64(json.dumps(payload).encode()), session_state or str(uuid.uuid4()), str(uuid.uuid4())))
+
+
+def decode_code(code: str) -> dict[str, Any] | None:
+    """The fields a code carries, or None when it is not one `authorization_code()` made."""
+    try:
+        first = code.split(".")[0]
+        fields = json.loads(base64.urlsafe_b64decode(first + "=" * (-len(first) % 4)))
+    except (ValueError, UnicodeDecodeError):
+        return None
+    return fields if isinstance(fields, dict) and all(k in fields for k in CODE_FIELDS) else None
+
+
 def _unreadable() -> httpx.Response:
     return httpx.Response(200, content=b"<html>not what was asked for</html>", headers={"content-type": "text/html"})
 
@@ -251,15 +289,32 @@ class FakeKeycloak(httpx.AsyncBaseTransport):
     409 `{"errorMessage": "User exists with same username"}` (or `... email`) for a taken username or email;
     `GET .../users?username=<u>&exact=true` lists that account; `PUT .../users/<id>/execute-actions-email` answers
     204 (404 for an unknown id), and the mail is kept in `mails` as `(realm, id, actions)`. Only the realm whose
-    admin role covers users (`ADMIN_READ`) may; the other answers 403, as for its reads."""
+    admin role covers users (`ADMIN_READ`) may; the other answers 403, as for its reads.
+
+    The sign-in realm's `authorization_code` grant (#1161 B8; observed, `keycloak-observed-q34.md`): HTTP Basic client
+    authentication (`signin_client`; 401 otherwise), a code from `authorization_code()`, and `code_verifier` and
+    `redirect_uri` that match the code's challenge (S256) and redirect URI. A code is single use by this fake's own
+    record (`spent`): a second exchange, a wrong verifier (which burns it) and a code that is not ours are
+    `invalid_grant`, with the observed texts ("Code not valid", "PKCE verification failed: Code mismatch", "Incorrect
+    redirect_uri"; a wrong redirect URI does not burn the code, UNOBSERVED). A code's `fault` is honoured at
+    exchange: `invalid_grant`, or a refused connection (`httpx.ConnectError`). The ID token is signed with the realm's
+    key and carries `iss`, `aud`, `sub`, `nonce`, `amr` and the observed companions. A step's `fails` and `answers`
+    still apply first, to the code grant as to any other token request.
+
+    The account's side, UNOBSERVED shapes (owed the `live` check): `GET .../users/<id>/credentials` lists `credentials[id]` (a code's list is recorded
+    at its exchange; default a password) as `{id, type, createdDate}`; `GET .../users/<id>` is its record (an id neither created here nor signed in at the front
+    channel answers 404 on the record `GET`, `PUT` and `GET .../credentials`; only the `GET .../credentials` status is observed (the live
+    check's last line); the record `GET` and `PUT` statuses and the body `{"error": "User not found"}` are UNOBSERVED and reached by no contract path) and `PUT` merges the body into it (204); read `records[id]["requiredActions"]` after a `PUT`."""
 
     def __init__(self, fails: Iterable[Fail] = (), *, front: str = FRONT, back: str = BACK,
                  admin_clients: Mapping[str, tuple[str, str]] = ADMIN_CLIENTS,
+                 signin_client: tuple[str, str] = SIGNIN_CLIENT,
                  on_stall: Callable[[str], None] | None = None,
                  answers: Mapping[tuple[str, str], Callable[[httpx.Request], httpx.Response]] | None = None) -> None:
         self.fails = {(f.realm, f.step): f.kind for f in fails}
         self.answers = dict(answers or {})
         self.admin_clients = dict(admin_clients)
+        self.signin_client = signin_client
         self.front = front
         parsed = urllib.parse.urlsplit(back)
         self.back_host, self.back_port = parsed.hostname, parsed.port
@@ -273,6 +328,10 @@ class FakeKeycloak(httpx.AsyncBaseTransport):
         self.unmodelled: list[tuple[str, str]] = []
         self.accounts: dict[str, dict[str, Any]] = {}  # id -> account, the sign-in realm's created accounts
         self.mails: list[tuple[str, str, list[str]]] = []
+        self.spent: set[str] = set()  # the codes exchanged, whole (the grant's own single-use record)
+        self.exchanges: list[str] = []  # each exchange's code, in order, whatever came of it
+        self.credentials: dict[str, list[str]] = {}  # account id -> credential types
+        self.records: dict[str, dict[str, Any]] = {}  # account id -> user record, for accounts not created here
         self.closes = 0
 
     async def aclose(self) -> None:
@@ -337,7 +396,10 @@ class FakeKeycloak(httpx.AsyncBaseTransport):
         return httpx.Response(200, json={"keys": keys})
 
     def _token(self, realm: str, request: httpx.Request, kind: str | None) -> httpx.Response | None:
-        if urllib.parse.parse_qs(request.content.decode()).get("grant_type") != ["client_credentials"]:
+        grant = urllib.parse.parse_qs(request.content.decode()).get("grant_type")
+        if grant == ["authorization_code"] and realm == SIGNIN_REALM:
+            return self._code_grant(realm, request)
+        if grant != ["client_credentials"]:
             return None
         client = self._basic_client(request)
         if client is None or client[0] != self.admin_clients[realm][0]:  # unknown id, or no client authentication
@@ -347,6 +409,51 @@ class FakeKeycloak(httpx.AsyncBaseTransport):
             return httpx.Response(401, json={
                 "error": "unauthorized_client", "error_description": "Invalid client or Invalid client credentials"})
         return httpx.Response(200, json={"access_token": f"admin-{realm}", "token_type": "Bearer", "expires_in": 300})
+
+    def _code_grant(self, realm: str, request: httpx.Request) -> httpx.Response:
+        form = {k: v[0] for k, v in urllib.parse.parse_qs(request.content.decode()).items()}
+        client = self._basic_client(request)
+        if client is None or client[0] != self.signin_client[0]:
+            return httpx.Response(401, json={
+                "error": "invalid_client", "error_description": "Invalid client or Invalid client credentials"})
+        if client != self.signin_client:
+            return httpx.Response(401, json={
+                "error": "unauthorized_client", "error_description": "Invalid client or Invalid client credentials"})
+        code = form.get("code", "")
+        self.exchanges.append(code)
+        fields = decode_code(code)
+        if fields is None or code in self.spent:
+            return self._invalid_grant("Code not valid")
+        if fields["fault"] == "unavailable":
+            raise httpx.ConnectError("connection refused", request=request)
+        if fields["fault"] == "invalid_grant":
+            self.spent.add(code)
+            return self._invalid_grant("Code not valid")
+        self.spent.add(code)  # observed: a wrong verifier burns the code
+        if _b64(hashlib.sha256(form.get("code_verifier", "").encode()).digest()) != fields["challenge"]:
+            return self._invalid_grant("PKCE verification failed: Code mismatch")
+        if form.get("redirect_uri") != fields["redirect_uri"]:
+            self.spent.discard(code)  # UNOBSERVED whether it burns
+            return self._invalid_grant("Incorrect redirect_uri")
+        self.credentials[fields["sub"]] = list(fields["credentials"])
+        self.records.setdefault(fields["sub"], {"id": fields["sub"], "username": fields["sub"], "enabled": True,
+                                                "emailVerified": True, "requiredActions": []})
+        now = dt.datetime.now(dt.UTC)
+        stamp = int(now.timestamp())
+        session_state = code.split(".")[1] if code.count(".") == 2 else str(uuid.uuid4())
+        claims = {"exp": stamp + 300, "iat": stamp, "auth_time": stamp, "jti": str(uuid.uuid4()),
+                  "iss": self.issuer(realm), "aud": self.signin_client[0], "sub": fields["sub"], "typ": "ID",
+                  "azp": self.signin_client[0], "nonce": fields["nonce"], "sid": session_state, "acr": "1",
+                  "email_verified": True, "amr": fields["amr"], "name": fields["name"]}
+        id_token = jwt.encode(claims, self.signing_keys[realm], algorithm="RS256", headers={"kid": SIGNING_KID})
+        return httpx.Response(200, json={
+            "access_token": "access-" + str(uuid.uuid4()), "expires_in": 300, "refresh_expires_in": 1800,
+            "refresh_token": "refresh-" + str(uuid.uuid4()), "token_type": "Bearer", "id_token": id_token,
+            "not-before-policy": 0, "session_state": session_state, "scope": "openid email profile"})
+
+    @staticmethod
+    def _invalid_grant(description: str) -> httpx.Response:
+        return httpx.Response(400, json={"error": "invalid_grant", "error_description": description})
 
     def _admin(self, realm: str, request: httpx.Request, kind: str | None) -> httpx.Response:
         if request.headers.get("authorization") != f"Bearer admin-{realm}":  # an unknown (or no) bearer
@@ -363,6 +470,9 @@ class FakeKeycloak(httpx.AsyncBaseTransport):
         """Account create and the set-password mail (UNOBSERVED, see the class); None for anything else."""
         users = f"/admin/realms/{realm}/users"
         path = request.url.path
+        person = self._person(users, path)
+        if person is not None:
+            return self._person_answer(realm, request, *person)
         create = (request.method, path) == ("POST", users)
         mail = request.method == "PUT" and path.startswith(f"{users}/") and path.endswith("/execute-actions-email")
         if not (create or mail):
@@ -383,6 +493,36 @@ class FakeKeycloak(httpx.AsyncBaseTransport):
         if account_id not in self.accounts:
             return httpx.Response(404, json={"error": "User not found"})
         self.mails.append((realm, account_id, json.loads(request.content)))
+        return httpx.Response(204)
+
+    @staticmethod
+    def _person(users: str, path: str) -> tuple[str, bool] | None:
+        """(account id, whether its credential list is asked) for `<users>/<id>` and `<users>/<id>/credentials`."""
+        if not path.startswith(f"{users}/"):
+            return None
+        rest = path.removeprefix(f"{users}/")
+        if rest.endswith("/credentials"):
+            return urllib.parse.unquote(rest.removesuffix("/credentials")), True
+        return (urllib.parse.unquote(rest), False) if rest and "/" not in rest else None
+
+    def _person_answer(self, realm: str, request: httpx.Request, account_id: str, credentials: bool
+                       ) -> httpx.Response | None:
+        if (request.method, credentials) not in (("GET", True), ("GET", False), ("PUT", False)):
+            return None
+        if request.headers.get("authorization") != f"Bearer admin-{realm}":
+            return httpx.Response(401, json={"error": "HTTP 401 Unauthorized"})
+        if ADMIN_READ[realm] != "users":
+            return httpx.Response(403, json={"error": "HTTP 403 Forbidden"})
+        record = self.accounts.get(account_id) or self.records.get(account_id)
+        if record is None:  # status observed for GET .../credentials only (live check); record GET/PUT status and body UNOBSERVED
+            return httpx.Response(404, json={"error": "User not found"})
+        if credentials:
+            return httpx.Response(200, json=[
+                {"id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"{account_id}/{kind}")), "type": kind,
+                 "createdDate": 1_700_000_000_000} for kind in self.credentials.get(account_id, ["password"])])
+        if request.method == "GET":
+            return httpx.Response(200, json=record)
+        record.update(json.loads(request.content))
         return httpx.Response(204)
 
     @staticmethod
@@ -523,14 +663,14 @@ class Child:
                          + self._err.text())
         return Ended(self.process.returncode, self._out.text(), self._err.text())
 
-    def ready(self, timeout: float = 60) -> bool:
-        """True once `GET /openapi.json` answers 200; False if the child exits or the time runs out first."""
+    def ready(self, timeout: float = 60, path: str = "/api/openapi.json") -> bool:
+        """True once `GET <path>` (the OpenAPI document; `/api/openapi.json` under #1161 B3) answers 200; False if the child exits or the time runs out first."""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             if self.process.poll() is not None:
                 return False
             try:
-                if httpx.get(f"{self.base_url}/openapi.json", timeout=2).status_code == 200:
+                if httpx.get(f"{self.base_url}{path}", timeout=2).status_code == 200:
                     return True
             except httpx.TransportError:
                 pass
@@ -657,7 +797,9 @@ def _main() -> int:
     from defender.api_server import run
 
     fails = fails_from_json(os.environ[FAULTS_ENV]) if FAULTS_ENV in os.environ else ()
-    keycloak = FakeKeycloak(fails, on_stall=lambda realm: print(f"stalled {realm}", flush=True))
+    issuer = urllib.parse.urlsplit(os.environ.get("DEFENDER_KEYCLOAK_ISSUER", FRONT))  # the browser-facing host
+    front = f"{issuer.scheme}://{issuer.netloc}"
+    keycloak = FakeKeycloak(fails, front=front, on_stall=lambda realm: print(f"stalled {realm}", flush=True))
     returned = run(os.environ, transport=keycloak, openbao_transport=ScriptedOpenBao())
     if LOADED_ENV in os.environ:
         print(f"loaded {json.dumps(sorted(sys.modules))}", flush=True)

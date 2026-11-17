@@ -11,11 +11,12 @@ import dataclasses
 import datetime as dt
 import hashlib
 import logging
+import urllib.parse
 from collections.abc import AsyncIterator, Callable, Iterator
 
 import pytest
 
-from defender.identity import Bootstrap, IdentityService, VerifiedSignIn
+from defender.identity import Bootstrap, IdentityService, SignedIn, VerifiedSignIn
 from defender.records._tenant_id import TenantId
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.shared._pglocks1339 import (
@@ -169,8 +170,11 @@ async def _invitee(stack: Stack, email: str, account: str):
 
 async def _sign_in(stack: Stack, account: str, name: str) -> str:
     stack.signin.answers[name] = VerifiedSignIn(account_id=account, name=name, amr=("pwd",))
-    login = await stack.service.begin_signin()
-    return await stack.service.complete_signin(code=name, state=login.prelogin.split(".")[0], prelogin=login.prelogin)
+    login = await stack.service.begin_signin("/")
+    state = urllib.parse.parse_qs(urllib.parse.urlsplit(login.url).query)["state"][0]
+    signed_in = await stack.service.complete_signin(state, name, login.cookie_value)
+    assert isinstance(signed_in, SignedIn), signed_in  # #1161: a refusal is a value, not an exception
+    return signed_in.session
 
 
 class Audit(logging.Handler):

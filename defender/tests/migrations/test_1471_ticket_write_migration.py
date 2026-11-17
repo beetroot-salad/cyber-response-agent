@@ -1,4 +1,4 @@
-"""#1471 r8 data model: the revision after `0019_drop_records_mark` gives `jobs.investigations` its `update_ticket` (boolean,
+"""#1471 r8 data model: the revision after `0020_signin_attempts` gives `jobs.investigations` its `update_ticket` (boolean,
 not null, false for existing rows) and `ticket_write` (text, null, one of W6's six words)."""
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from defender.tests.migrations.test_1343_migrations import TENANT, _id, _inv
 from defender.tests.support.jobs._jobs1342 import T1, an_alert, job_store, register_tenant
 from defender.tests.support.shared._postgres1339 import execute
 
-PRIOR = "0019_drop_records_mark"
+PRIOR = "0020_signin_attempts"
 WORDS = ("commented", "escalated", "error", "unknown", "no_receipt", "not_read")
 #: Words that are not in the set: the sketch's retired ones, a near miss, the empty text and a stray case.
 OUTSIDE = ("refused", "not_sent", "Commented", "not read", "")
@@ -24,7 +24,7 @@ def _revision_on_prior() -> str:
 
 
 def _plant_at_prior(dsn: str, inv: str, stage: str, ticket: str) -> None:
-    """A row at revision `0019`, written with exactly the columns that schema requires (`cost_is_lower_limit` false), so
+    """A row at revision `0020`, written with exactly the columns that schema requires (`cost_is_lower_limit` false), so
     a later revision's required column cannot change what is planted."""
 
     alert = _id("alert", ticket)
@@ -45,7 +45,7 @@ def _columns(dsn: str) -> list[tuple]:
 
 
 def test_the_history_stays_one_line_with_one_revision_on_the_records_mark_drop():
-    """One head, and exactly one revision directly on `0019_drop_records_mark`. (data model: numbered after 0019)"""
+    """One head, and exactly one revision directly on `0020_signin_attempts`. (data model: numbered after 0020)"""
     from defender.migrations import head, heads
 
     assert heads() == (head(),)
@@ -54,7 +54,7 @@ def test_the_history_stays_one_line_with_one_revision_on_the_records_mark_drop()
 
 @pytest.mark.postgres
 def test_existing_rows_read_unflagged_with_no_word_and_nothing_else_changes(empty_database):
-    """Upgrading a database holding a queued, a running and each terminal row at `0019`: every row gets
+    """Upgrading a database holding a queued, a running and each terminal row at `0020`: every row gets
     `update_ticket` false and `ticket_write` null; both columns have their types; no old column changes. (data model)"""
     dsn = empty_database
     _upgrade_to(dsn, "0018_learning_set_aside_indexes")

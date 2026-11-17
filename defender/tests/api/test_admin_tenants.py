@@ -19,6 +19,7 @@ pytestmark = [
     pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning"),
 ]
 
+from defender.tests.support.api._mount1161 import API  # noqa: E402
 from defender.tenancy import InMemoryTenantRepository  # noqa: E402
 from defender.tests.support.api._identity1306 import (  # noqa: E402
     ANN,
@@ -69,7 +70,7 @@ def _admin_world(**kwargs: Any) -> tuple[World, Any]:
 
 
 def _item(ops: Any, tenant: str) -> dict[str, Any]:
-    got = ops.get(f"/admin/tenants/{tenant}")
+    got = ops.get(f"{API}/admin/tenants/{tenant}")
     assert got.status_code == 200, got.text
     body: dict[str, Any] = got.json()
     return body
@@ -94,7 +95,7 @@ def test_create_answers_202_with_the_item_and_a_location_and_makes_no_membership
     """No body: 202, the item of a `creating` tenant (job at `names`, service), Location, no membership (O1, O2, RC-3)."""
     world, ops = _admin_world()
     mark = audit.mark()
-    made = ops.post("/admin/tenants", json=body) if body is not None else ops.post("/admin/tenants")
+    made = ops.post(API + "/admin/tenants", json=body) if body is not None else ops.post(API + "/admin/tenants")
     assert made.status_code == 202, made.text
     item = made.json()
     assert set(item) == ITEM_KEYS
@@ -102,11 +103,11 @@ def test_create_answers_202_with_the_item_and_a_location_and_makes_no_membership
     assert (item["state"], item["pending_action"], item["step"], item["step_actor"], item["failure"]) == (
         "creating", "create", "names", "service", None)
     assert _dt.datetime.fromisoformat(item["created_at"]) == world.clock.now
-    assert made.headers["location"] == f"/admin/tenants/{item['tenant_id']}"
+    assert made.headers["location"] == f"{API}/admin/tenants/{item['tenant_id']}"
     assert _item(ops, item["tenant_id"]) == item
     assert world.call(world.raw_repo.memberships_of_tenant, item["tenant_id"]) == []
     assert _events(audit, mark) == [(CREATE, user_id(ops), item["tenant_id"])]
-    other = ops.post("/admin/tenants").json()["tenant_id"]  # control: every request mints a new one
+    other = ops.post(API + "/admin/tenants").json()["tenant_id"]  # control: every request mints a new one
     assert other != item["tenant_id"]
 
 
@@ -114,8 +115,8 @@ def test_the_list_and_the_get_show_the_job_of_every_tenant() -> None:
     """Items carry the seven fields; a seeded active tenant shows no pending job; list and get agree (O2, DC-6)."""
     world = lab()
     ops = world.sign_in_admin()
-    created = ops.post("/admin/tenants").json()
-    listed = items(ops.get("/admin/tenants"))
+    created = ops.post(API + "/admin/tenants").json()
+    listed = items(ops.get(API + "/admin/tenants"))
     assert sorted(i["tenant_id"] for i in listed) == sorted([LAB, created["tenant_id"]])
     assert all(set(i) == ITEM_KEYS for i in listed)
     by_id = {i["tenant_id"]: i for i in listed}
@@ -135,9 +136,9 @@ def test_an_unknown_or_malformed_tenant_is_refused_on_every_tenant_route(tenant:
     world.register(EMPTY)
     mark = audit.mark()
     for method, path in (("GET", ""), ("POST", "/resume"), ("POST", "/offboard"), ("POST", "/rotate-forge-credential")):
-        _problem(ops.request(method, f"/admin/tenants/{tenant}{path}"), code)
+        _problem(ops.request(method, f"{API}/admin/tenants/{tenant}{path}"), code)
     assert _events(audit, mark) == []
-    assert ops.post(f"/admin/tenants/{EMPTY}/offboard").status_code == 202  # control: a real tenant
+    assert ops.post(f"{API}/admin/tenants/{EMPTY}/offboard").status_code == 202  # control: a real tenant
 
 
 # --- the transition table ---------------------------------------------------------------------------
@@ -145,13 +146,13 @@ def test_an_unknown_or_malformed_tenant_is_refused_on_every_tenant_route(tenant:
 def _in(world: World, ops: Any, state: str) -> str:
     """A tenant in `state`, reached only through the API and the seeder."""
     if state == "creating":
-        return str(ops.post("/admin/tenants").json()["tenant_id"])
+        return str(ops.post(API + "/admin/tenants").json()["tenant_id"])
     tenant = str(uuid.uuid4())
     world.register(tenant)
     if state == "rotating":
-        assert ops.post(f"/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
+        assert ops.post(f"{API}/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
     if state == "offboarding":
-        assert ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+        assert ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
     return tenant
 
 
@@ -178,7 +179,7 @@ def test_a_request_is_accepted_or_refused_by_the_tenants_state(
     tenant = _in(world, ops, state)
     before = _item(ops, tenant)
     mark = audit.mark()
-    asked = ops.post(f"/admin/tenants/{tenant}/{route}")
+    asked = ops.post(f"{API}/admin/tenants/{tenant}/{route}")
     if code == 409:
         _problem(asked, 409)
         assert _item(ops, tenant) == before
@@ -196,10 +197,10 @@ def test_a_request_is_accepted_or_refused_by_the_tenants_state(
 # --- refusals ---------------------------------------------------------------------------------------
 
 ROUTES = [
-    ("create", "POST", "/admin/tenants", 202), ("list", "GET", "/admin/tenants", 200),
-    ("get", "GET", "/admin/tenants/{T}", 200), ("resume", "POST", "/admin/tenants/{T}/resume", 409),
-    ("offboard", "POST", "/admin/tenants/{T}/offboard", 202),
-    ("rotate", "POST", "/admin/tenants/{T}/rotate-forge-credential", 202),
+    ("create", "POST", API + "/admin/tenants", 202), ("list", "GET", API + "/admin/tenants", 200),
+    ("get", "GET", API + "/admin/tenants/{T}", 200), ("resume", "POST", API + "/admin/tenants/{T}/resume", 409),
+    ("offboard", "POST", API + "/admin/tenants/{T}/offboard", 202),
+    ("rotate", "POST", API + "/admin/tenants/{T}/rotate-forge-credential", 202),
 ]
 
 
@@ -210,11 +211,11 @@ def test_only_a_code_backed_administrator_session_reaches_the_tenant_routes(
     world = lab(database=name == "offboard")  # the offboard is the real store's (#1496)
     ops = world.sign_in_admin()
     member = world.sign_in(ME)
-    assert member.delete(f"/tenants/{LAB}/members/{user_id(member)}").status_code == 204
+    assert member.delete(f"{API}/tenants/{LAB}/members/{user_id(member)}").status_code == 204
     world.restart(administrators=[OPS, ME])  # `member` is flagged now, but its session used no code
     foreign = world.client_with_cookie(ops.cookies[SESSION_COOKIE], origin="https://evil.example")
     mark = audit.mark()
-    before = items(ops.get("/admin/tenants"))
+    before = items(ops.get(API + "/admin/tenants"))
     refusals = {"member without a code": (member, 403), "anonymous": (world.client(), 401)}
     if method == "POST":
         refusals["foreign origin"] = (foreign, 403)
@@ -222,7 +223,7 @@ def test_only_a_code_backed_administrator_session_reaches_the_tenant_routes(
         for who, (browser, code) in refusals.items():
             response = browser.request(method, path.replace("{T}", tenant))
             assert response.status_code == code, f"{who}: {response.status_code} {response.text}"
-    assert items(ops.get("/admin/tenants")) == before
+    assert items(ops.get(API + "/admin/tenants")) == before
     assert _events(audit, mark) == []
     answered = ops.request(method, path.replace("{T}", LAB))  # control: the administrator is not refused
     assert answered.status_code == ok, answered.text
@@ -251,8 +252,8 @@ class FailingTenants(InMemoryTenantRepository):
 
 
 @pytest.mark.parametrize(("write", "path", "action"), [
-    ("request_create", "/admin/tenants", CREATE),
-    ("request_rotate", "/admin/tenants/{T}/rotate-forge-credential", ROTATE),
+    ("request_create", API + "/admin/tenants", CREATE),
+    ("request_rotate", API + "/admin/tenants/{T}/rotate-forge-credential", ROTATE),
 ])
 def test_a_request_whose_write_fails_logs_nothing_and_the_retry_logs_one(
         write: str, path: str, action: str, audit: AuditLog) -> None:
@@ -262,11 +263,11 @@ def test_a_request_whose_write_fails_logs_nothing_and_the_retry_logs_one(
     world.register(LAB)
     ops = world.sign_in_admin()
     failing_browser = world.client_with_cookie(ops.cookies[SESSION_COOKIE], raise_errors=False)
-    before = items(ops.get("/admin/tenants"))
+    before = items(ops.get(API + "/admin/tenants"))
     tenants.failing.add(write)
     mark = audit.mark()
     assert failing_browser.post(path.replace("{T}", LAB)).status_code >= 500
-    assert items(ops.get("/admin/tenants")) == before
+    assert items(ops.get(API + "/admin/tenants")) == before
     assert _events(audit, mark) == []
     tenants.failing.clear()  # control: the same request, written, is logged
     assert failing_browser.post(path.replace("{T}", LAB)).status_code == 202
@@ -292,17 +293,17 @@ def test_an_offboard_whose_job_write_fails_after_the_tenant_moved_changes_nothin
     world.register(LAB)
     seeded = _seed_jobs(world, LAB, 9)
     failing_browser = world.client_with_cookie(ops.cookies[SESSION_COOKIE], raise_errors=False)
-    before, jobs_before = items(ops.get("/admin/tenants")), _stored(world, LAB, seeded)
+    before, jobs_before = items(ops.get(API + "/admin/tenants")), _stored(world, LAB, seeded)
     assert world.dsn is not None
     for statement in _REFUSE_JOB_WRITES:
         execute(world.dsn, statement)
     mark = audit.mark()
-    assert failing_browser.post(f"/admin/tenants/{LAB}/offboard").status_code >= 500
-    assert items(ops.get("/admin/tenants")) == before
+    assert failing_browser.post(f"{API}/admin/tenants/{LAB}/offboard").status_code >= 500
+    assert items(ops.get(API + "/admin/tenants")) == before
     assert _stored(world, LAB, seeded) == jobs_before
     assert _events(audit, mark) == []
     execute(world.dsn, "DROP TRIGGER refuse_1496 ON jobs.investigations")  # control: the same request, written, is logged
-    assert failing_browser.post(f"/admin/tenants/{LAB}/offboard").status_code == 202
+    assert failing_browser.post(f"{API}/admin/tenants/{LAB}/offboard").status_code == 202
     assert [e[0] for e in _events(audit, mark)] == [OFFBOARD]
 
 
@@ -356,7 +357,7 @@ def test_1360_d6_the_offboard_request_ends_the_tenants_live_jobs_before_it_answe
     world.clock.advance(_dt.timedelta(hours=1))
     now = world.clock()
 
-    assert ops.post(f"/admin/tenants/{T1}/offboard").status_code == 202
+    assert ops.post(f"{API}/admin/tenants/{T1}/offboard").status_code == 202
     ended = _stored(world, T1, mine)
     for name, row in ended.items():
         if name.split("-")[1] in LIVE:
@@ -369,7 +370,7 @@ def test_1360_d6_the_offboard_request_ends_the_tenants_live_jobs_before_it_answe
     assert _stored(world, T2, theirs) == theirs, "another tenant's jobs were touched"
 
     world.clock.advance(_dt.timedelta(hours=1))
-    assert ops.post(f"/admin/tenants/{T1}/offboard").status_code == 409
+    assert ops.post(f"{API}/admin/tenants/{T1}/offboard").status_code == 409
     assert _stored(world, T1, mine) == ended, "an ended job was ended again"
 
 
@@ -383,11 +384,11 @@ def test_1360_d6_a_refused_offboard_request_ends_no_job(tenant_state: str | None
     control = _seed_jobs(world, T2, 2)
     refused = None if tenant_state is None else _seed_jobs(world, T1, 1)  # an unknown tenant holds no jobs (#1496)
 
-    assert ops.post(f"/admin/tenants/{T1}/offboard").status_code == code
+    assert ops.post(f"{API}/admin/tenants/{T1}/offboard").status_code == code
     if refused is not None:
         assert _stored(world, T1, refused) == refused, "a refused request ended a job of its tenant"
     assert _stored(world, T2, control) == control, "a refused request ended another tenant's job"
-    assert ops.post(f"/admin/tenants/{T2}/offboard").status_code == 202
+    assert ops.post(f"{API}/admin/tenants/{T2}/offboard").status_code == 202
     assert _stored(world, T2, control)["inv-queued"].status == "aborted", "control: an accepted request ends them"
 
 
@@ -397,18 +398,18 @@ def test_1360_d6_the_route_reaches_the_tenant_and_its_jobs_only_through_the_offb
     world.register(T1)
     seeded = _seed_jobs(world, T1, 1)
     failing_ops = world.client_with_cookie(ops.cookies[SESSION_COOKIE], raise_errors=False)
-    before = items(ops.get("/admin/tenants"))
+    before = items(ops.get(API + "/admin/tenants"))
     world.offboarding.failing = True
     mark = audit.mark()
 
-    assert failing_ops.post(f"/admin/tenants/{T1}/offboard").status_code >= 500
+    assert failing_ops.post(f"{API}/admin/tenants/{T1}/offboard").status_code >= 500
     assert world.offboarding.calls == [(T1, user_id(ops))]
-    assert items(ops.get("/admin/tenants")) == before, "the tenant moved though the port failed"
+    assert items(ops.get(API + "/admin/tenants")) == before, "the tenant moved though the port failed"
     assert _stored(world, T1, seeded) == seeded
     assert _events(audit, mark) == []
 
     world.offboarding.failing = False
-    assert failing_ops.post(f"/admin/tenants/{T1}/offboard").status_code == 202
+    assert failing_ops.post(f"{API}/admin/tenants/{T1}/offboard").status_code == 202
     assert world.offboarding.calls == [(T1, user_id(ops))] * 2
     assert _item(ops, T1)["state"] == "offboarding"
     assert _stored(world, T1, seeded)["inv-queued"].status == "aborted"
@@ -432,22 +433,22 @@ def test_an_offboard_that_cannot_settle_answers_503_and_changes_nothing(caplog: 
 
     world.offboarding._inner = NeverSettles()
     with caplog.at_level(logging.ERROR, logger="defender.api.app"):
-        refused = ops.post(f"/admin/tenants/{T1}/offboard")
+        refused = ops.post(f"{API}/admin/tenants/{T1}/offboard")
     _problem(refused, 503)
     assert "rolled back" in refused.json()["detail"]
     assert any(r.levelno == logging.ERROR and "rolled back" in r.getMessage() for r in caplog.records)
     assert _item(ops, T1)["state"] == "active"
     world.offboarding._inner = inner
-    assert ops.post(f"/admin/tenants/{T1}/offboard").status_code == 202  # control: repeated, it goes through
+    assert ops.post(f"{API}/admin/tenants/{T1}/offboard").status_code == 202  # control: repeated, it goes through
 
 
 def test_1360_d6_a_malformed_tenant_id_never_reaches_the_offboarding_port() -> None:
     """422 before the port is called; a real tenant's request calls it once. (#1360 D6)"""
     world, ops = _admin_world()
     world.register(T1)
-    assert ops.post(f"/admin/tenants/{MALFORMED}/offboard").status_code == 422
+    assert ops.post(f"{API}/admin/tenants/{MALFORMED}/offboard").status_code == 422
     assert world.offboarding.calls == []
-    assert ops.post(f"/admin/tenants/{T1}/offboard").status_code == 202
+    assert ops.post(f"{API}/admin/tenants/{T1}/offboard").status_code == 202
     assert [t for t, _ in world.offboarding.calls] == [T1]
 
 
@@ -485,11 +486,11 @@ def test_a_failed_job_shows_its_step_and_the_external_answer_and_resume_clears_i
     assert "injected 500" in item["failure"]
     assert jobs.config.forge_admin_token not in item["failure"]
     mark = audit.mark()
-    resumed = jobs.ops.post(f"/admin/tenants/{tenant}/resume")
+    resumed = jobs.ops.post(f"{API}/admin/tenants/{tenant}/resume")
     assert resumed.status_code == 202, resumed.text
     assert (resumed.json()["failure"], resumed.json()["step"], resumed.json()["state"]) == (None, "repo", "creating")
     assert _events(audit, mark) == [(RESUME, user_id(jobs.ops), tenant)]
-    again = jobs.ops.post(f"/admin/tenants/{tenant}/resume")  # control: nothing is left to resume
+    again = jobs.ops.post(f"{API}/admin/tenants/{tenant}/resume")  # control: nothing is left to resume
     _problem(again, 409)
 
 
@@ -497,9 +498,9 @@ def test_rotate_is_refused_for_a_failed_create_and_offboard_replaces_the_failed_
     """A failed create is `creating`: rotate 409; offboard 202 clears the failure and sets the first offboard step (r9 Endpoints, DC-4)."""
     tenant = _failed_create(jobs)
     before = jobs.item(tenant)
-    _problem(jobs.ops.post(f"/admin/tenants/{tenant}/rotate-forge-credential"), 409)
+    _problem(jobs.ops.post(f"{API}/admin/tenants/{tenant}/rotate-forge-credential"), 409)
     assert jobs.item(tenant) == before
-    asked = jobs.ops.post(f"/admin/tenants/{tenant}/offboard")
+    asked = jobs.ops.post(f"{API}/admin/tenants/{tenant}/offboard")
     assert asked.status_code == 202, asked.text
     item = asked.json()
     assert (item["state"], item["pending_action"], item["step"], item["step_actor"], item["failure"]) == (
@@ -509,13 +510,13 @@ def test_rotate_is_refused_for_a_failed_create_and_offboard_replaces_the_failed_
 def test_an_offboarded_tenant_stays_readable_and_takes_no_request(jobs: Any) -> None:
     """The tombstone is listed and gettable with `delete_repo` pending; resume, offboard, rotate are 409 (O2, r9 Endpoints)."""
     tenant = jobs.active_tenant()
-    assert jobs.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+    assert jobs.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
     jobs.drive()
     item = jobs.item(tenant)
     assert (item["state"], item["pending_action"], item["failure"]) == ("offboarded", "delete_repo", None)
-    assert tenant in [i["tenant_id"] for i in items(jobs.ops.get("/admin/tenants"))]
+    assert tenant in [i["tenant_id"] for i in items(jobs.ops.get(API + "/admin/tenants"))]
     for route in ("resume", "offboard", "rotate-forge-credential"):
-        _problem(jobs.ops.post(f"/admin/tenants/{tenant}/{route}"), 409)
+        _problem(jobs.ops.post(f"{API}/admin/tenants/{tenant}/{route}"), 409)
     assert jobs.item(tenant) == item
 
 
@@ -544,9 +545,9 @@ def test_requests_return_while_a_step_is_running_and_the_late_commit_does_not_un
     worker.start()
     try:
         assert inside.wait(WAIT), "the service never reached the repo step"
-        assert _within(WAIT, lambda: jobs.ops.get(f"/admin/tenants/{tenant}")).status_code == 200
-        assert _within(WAIT, lambda: jobs.ops.post(f"/admin/tenants/{tenant}/rotate-forge-credential")).status_code == 409
-        asked = _within(WAIT, lambda: jobs.ops.post(f"/admin/tenants/{tenant}/offboard"))
+        assert _within(WAIT, lambda: jobs.ops.get(f"{API}/admin/tenants/{tenant}")).status_code == 200
+        assert _within(WAIT, lambda: jobs.ops.post(f"{API}/admin/tenants/{tenant}/rotate-forge-credential")).status_code == 409
+        asked = _within(WAIT, lambda: jobs.ops.post(f"{API}/admin/tenants/{tenant}/offboard"))
         assert asked.status_code == 202, asked.text
     finally:
         release.set()
@@ -563,12 +564,12 @@ def test_a_tenant_that_is_offboarding_is_404_to_its_member_and_an_active_one_is_
     """`member_of` needs the tenant present and `active`: the member of an offboarding tenant gets 404 before any worker ran (r9 Identity seam)."""
     world = World(administrators=[OPS], tenants={LAB: [ME], T2: [BOB]}, database=True)
     member, other = world.sign_in(ME), world.sign_in(BOB)
-    assert member.get(f"/tenants/{LAB}/{route}").status_code == 200  # control: active
-    assert other.get(f"/tenants/{T2}/{route}").status_code == 200
+    assert member.get(f"{API}/tenants/{LAB}/{route}").status_code == 200  # control: active
+    assert other.get(f"{API}/tenants/{T2}/{route}").status_code == 200
     ops = world.sign_in_admin()
-    assert ops.post(f"/admin/tenants/{LAB}/offboard").status_code == 202
-    assert member.get(f"/tenants/{LAB}/{route}").status_code == 404
-    assert other.get(f"/tenants/{T2}/{route}").status_code == 200  # another tenant is unaffected
+    assert ops.post(f"{API}/admin/tenants/{LAB}/offboard").status_code == 202
+    assert member.get(f"{API}/tenants/{LAB}/{route}").status_code == 404
+    assert other.get(f"{API}/tenants/{T2}/{route}").status_code == 200  # another tenant is unaffected
 
 
 def test_a_member_reaches_nothing_of_an_offboarded_tenant(jobs: Any) -> None:
@@ -576,9 +577,9 @@ def test_a_member_reaches_nothing_of_an_offboarded_tenant(jobs: Any) -> None:
     tenant = jobs.active_tenant()
     member = jobs.member_of(tenant)
     assert tenant in tenants_of(member)
-    assert jobs.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+    assert jobs.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
     jobs.drive()
-    assert member.get(f"/tenants/{tenant}/members").status_code == 404
+    assert member.get(f"{API}/tenants/{tenant}/members").status_code == 404
     assert tenants_of(member) == set()
 
 
@@ -587,7 +588,7 @@ def test_me_lists_only_memberships_of_active_tenants() -> None:
     world = World(administrators=[OPS], tenants={LAB: [ME], T2: [ME]}, database=True)
     member = world.sign_in(ME)
     assert tenants_of(member) == {LAB, T2}
-    assert world.sign_in_admin().post(f"/admin/tenants/{LAB}/offboard").status_code == 202
+    assert world.sign_in_admin().post(f"{API}/admin/tenants/{LAB}/offboard").status_code == 202
     assert tenants_of(member) == {T2}
 
 
@@ -603,9 +604,9 @@ def test_an_invitation_to_a_tenant_that_is_not_active_cannot_be_accepted(state: 
     [stale] = world.call(world.raw_repo.memberships_of_tenant, T1)
     [live] = world.call(world.raw_repo.memberships_of_tenant, T2)
     world.move_tenant(T1, state)
-    assert member.post(f"/invitations/{stale.id}/accept").status_code == 404
+    assert member.post(f"{API}/invitations/{stale.id}/accept").status_code == 404
     assert tenants_of(member) == {LAB}
-    assert member.post(f"/invitations/{live.id}/accept").status_code == 200  # control
+    assert member.post(f"{API}/invitations/{live.id}/accept").status_code == 200  # control
     assert tenants_of(member) == {LAB, T2}
 
 
@@ -629,10 +630,10 @@ def test_an_administrator_cannot_invite_into_a_tenant_that_is_not_active(state: 
     world.register(T1, state=state)
     world.register(EMPTY)
     mark = audit.mark()
-    assert ops.post(f"/admin/tenants/{T1}/invitations", json={"email": NEW}).status_code == 404
+    assert ops.post(f"{API}/admin/tenants/{T1}/invitations", json={"email": NEW}).status_code == 404
     assert audit.since(mark) == []
     assert world.call(world.raw_repo.memberships_of_tenant, T1) == []
-    assert ops.post(f"/admin/tenants/{EMPTY}/invitations", json={"email": NEW}).status_code == 202  # control
+    assert ops.post(f"{API}/admin/tenants/{EMPTY}/invitations", json={"email": NEW}).status_code == 202  # control
 
 
 def test_end_tenant_ends_every_membership_and_revokes_every_invitation_as_system(audit: AuditLog) -> None:
@@ -641,11 +642,11 @@ def test_end_tenant_ends_every_membership_and_revokes_every_invitation_as_system
     ann, bob = world.sign_in(ANN), world.sign_in(BOB)
     nina = world.member(ann, T1, NINA)
     gone = world.member(ann, T1, NEW)
-    assert gone.delete(f"/tenants/{T1}/members/{user_id(gone)}").status_code == 204  # a past leaver
+    assert gone.delete(f"{API}/tenants/{T1}/members/{user_id(gone)}").status_code == 204  # a past leaver
     pending = world.invite(ann, T1, "later@n.example").json()["id"]
     rows = {m.id: m for m in world.call(world.raw_repo.memberships_of_tenant, T1)}
     elsewhere = world.call(world.raw_repo.memberships_of_tenant, T2)
-    assert world.sign_in_admin().post(f"/admin/tenants/{T1}/offboard").status_code == 202
+    assert world.sign_in_admin().post(f"{API}/admin/tenants/{T1}/offboard").status_code == 202
     mark = audit.mark()
     world.call(world.service.end_tenant, T1, now=world.clock())
     after = {m.id: m for m in world.call(world.raw_repo.memberships_of_tenant, T1)}
@@ -664,7 +665,7 @@ def test_end_tenant_ends_every_membership_and_revokes_every_invitation_as_system
     mark = audit.mark()
     world.call(world.service.end_tenant, T1, now=world.clock())  # idempotent: nothing left to end
     assert audit.since(mark) == []
-    assert bob.get(f"/tenants/{T2}/members").status_code == 200
+    assert bob.get(f"{API}/tenants/{T2}/members").status_code == 200
 
 
 # --- R7-2: unknown query parameters are refused API-wide -------------------------------------------
@@ -673,15 +674,15 @@ def test_end_tenant_ends_every_membership_and_revokes_every_invitation_as_system
 def test_r7_2_an_admin_route_refuses_an_undeclared_query_parameter_and_does_nothing(method: str) -> None:
     """`/admin/tenants?bogus=1` is a 422 problem with `extra_forbidden` at `["query", "bogus"]`; no tenant is made. (R7-2)"""
     world, ops = _admin_world()
-    before = len(ops.get("/admin/tenants").json()["items"])
-    refused = getattr(ops, method)("/admin/tenants?bogus=1")
+    before = len(ops.get(API + "/admin/tenants").json()["items"])
+    refused = getattr(ops, method)(API + "/admin/tenants?bogus=1")
     _problem(refused, 422)
     assert [(e["type"], e["loc"]) for e in refused.json()["errors"]] == [("extra_forbidden", ["query", "bogus"])]
-    assert len(ops.get("/admin/tenants").json()["items"]) == before
+    assert len(ops.get(API + "/admin/tenants").json()["items"]) == before
 
 
 def test_r7_2_control_the_same_admin_routes_without_the_parameter_answer() -> None:
     """Control: the list answers 200 and the create 202 with no query string. (R7-2)"""
     world, ops = _admin_world()
-    assert ops.get("/admin/tenants").status_code == 200
-    assert ops.post("/admin/tenants").status_code == 202
+    assert ops.get(API + "/admin/tenants").status_code == 200
+    assert ops.post(API + "/admin/tenants").status_code == 202
