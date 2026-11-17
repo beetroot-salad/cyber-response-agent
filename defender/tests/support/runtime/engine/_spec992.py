@@ -308,32 +308,68 @@ def record_files(run_dir: Path) -> list[int]:
 
 
 def frontmatter(run_dir: Path) -> dict:
-    """The committed report's frontmatter through the shared accessor."""
+    """The committed close's fields (`_spec923.committed`) read from the closing record."""
     return _spec923.committed(run_dir)
 
 
-def report_text(run_dir: Path) -> str:
-    return (run_dir / "report.md").read_text(encoding="utf-8")
+def closing_lookup(run_dir: Path) -> Any:
+    """The run's closing record through the one lookup (`closing.for_run`): `Record`, `NeverClosed` or `CouldNotLook`."""
+    from defender.records import closing as C
+    from defender.tests.storage.verdict_1534 import _spec1534 as V
+
+    return C.for_run(V.handle(run_dir))
 
 
-def report_parts(run_dir: Path) -> tuple[str, str]:
-    """`(raw frontmatter block, body)` of the committed report, as bytes on disk."""
-    text = report_text(run_dir)
-    head, _, rest = text.partition("---\n")[2].partition("---\n")
-    return head, rest
+def is_closed(run_dir: Path) -> bool:
+    """Whether the run holds a closing record (the old "report.md exists")."""
+    from defender.records import closing as C
+
+    return isinstance(closing_lookup(run_dir), C.Record)
 
 
-def receipt_note_lines(body: str) -> list[str]:
-    return [line for line in body.splitlines() if line.startswith("ceiling_test (")]
+def never_closed(run_dir: Path) -> bool:
+    """Whether the lookup says `NeverClosed`: a refused or challenged close left no record."""
+    from defender.records import closing as C
+
+    return isinstance(closing_lookup(run_dir), C.NeverClosed)
 
 
-def priced_block(companion_text: str) -> str:
-    """What the price gate's own parse of `companion_text` renders as the frontmatter receipt
-    block: the bytes the reviewed commit must carry."""
+def closing_record(run_dir: Path) -> Any:
+    from defender.records import closing as C
+
+    found = closing_lookup(run_dir)
+    assert isinstance(found, C.Record), f"{run_dir.name} has no readable closing record: {found!r}"
+    return found.record
+
+
+def record_text(run_dir: Path) -> str:
+    """Everything the record says in words: its causes and summary and every entry's rendered line (the old whole report text)."""
+    from defender.records import closing as C
+
+    rec = closing_record(run_dir)
+    lines = [rec.disposition, rec.outcome, C.CAUSE_SENTENCES[rec.cause], rec.summary or ""]
+    lines += [C.ceiling_line(e) for e in rec.ceiling_test] + [C.baseline_line(e) for e in rec.runtime_evidence]
+    return "\n".join(lines)
+
+
+def receipt_note_lines(run_dir: Path) -> list[str]:
+    """The narrative's receipt lines: the record's ceiling entries that carry a note, rendered by the one renderer."""
+    from defender.records import closing as C
+
+    return [C.ceiling_line(e) for e in closing_record(run_dir).ceiling_test if e.note]
+
+
+def committed_receipts(run_dir: Path) -> list[tuple]:
+    """The record's receipts as `(state, ref, cap)`, in order."""
+    return [(e.state, e.ref, e.cap) for e in closing_record(run_dir).ceiling_test]
+
+
+def priced_receipts(companion_text: str) -> list[tuple]:
+    """What the price gate's own parse of `companion_text` finds as receipts, `(state, ref, cap)`: what the reviewed commit must carry."""
     from defender.investigation.review.projector import parse_investigation
-    from defender.skills.invlang.validate import ceiling_test_block, conclude_ceiling_test_rows
+    from defender.skills.invlang.validate import conclude_ceiling_test_rows
 
-    return ceiling_test_block(conclude_ceiling_test_rows(parse_investigation(companion_text)))
+    return [(r.state, r.ref, r.cap) for r in conclude_ceiling_test_rows(parse_investigation(companion_text))]
 
 
 def citable(companion_text: str) -> frozenset[str]:
@@ -366,20 +402,13 @@ def pre_change_inconclusive_dir(tmp_path: Path) -> Path:
     Current code cannot produce one, so it is written by hand."""
     from defender.records import RunPaths
 
-    run_dir = tmp_path / "historical"
+    from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
+    run_dir = tmp_path / fixture_uuid("historical")
     (run_dir / "gather_raw").mkdir(parents=True)
     run_dir.joinpath("investigation.md").write_text(ceiling_companion(), encoding="utf-8")
     run_dir.joinpath("alert.json").write_text(
         json.dumps({"rule": {"id": "5710", "key": "spec.rule"}, "timestamp": "2026-05-25T15:27:22Z"}),
-        encoding="utf-8",
-    )
-    run_dir.joinpath("report.md").write_text(
-        "---\ndisposition: inconclusive\noutcome: stands\n"
-        f"cause: {SHIPPED_CAUSES[0]}\n"
-        "ceiling_test:\n- state: query-empty\n  ref: l-004\n- state: query-failed\n  ref: l-006\n"
-        "---\nDisposition recorded by the close gate. outcome=stands.\n"
-        f"ceiling_test (query-empty, l-004): {V2SSHD_NOTE}; process identity of the SSH "
-        "initiator on office-ws-1 is unresolvable\n",
         encoding="utf-8",
     )
     RunPaths(run_dir).review_record(1).write_text(json.dumps({
@@ -390,10 +419,15 @@ def pre_change_inconclusive_dir(tmp_path: Path) -> Path:
     return run_dir
 
 
-def parsed_report(run_dir: Path) -> Any:
-    from defender.presentation.visualize_primitives import parse_report
+def historical_closing(run_dir: Path) -> Any:
+    """The lookup result for `pre_change_inconclusive_dir`: a record as an unreviewed pre-#992 `inconclusive` close left it
+    (not reviewed, the two priced receipts), handed to the page directly since the hand-built folder has no database."""
+    from defender.records import closing as C
+    from defender.tests.storage.verdict_1534 import _spec1534 as V
 
-    return parse_report(run_dir)
+    receipts = tuple(C.CeilingEntry(state, ref, None, "") for state, ref in V2SSHD_RECEIPTS)
+    return C.Record(V.a_record(run_dir.name, disposition=GAP, outcome=C.STANDS, cause=C.CAUSE_NOT_REVIEWED,
+                               ceiling_test=receipts, summary=None))
 
 
 # ---------------------------------------------------------------------------------------
@@ -493,19 +527,23 @@ __all__ = [
     "normalized",
     "note_text",
     "noted_companion",
-    "parsed_report",
+    "historical_closing",
     "pre_change_inconclusive_dir",
-    "priced_block",
+    "priced_receipts",
     "raises",
     "receipt_note_lines",
+    "committed_receipts",
+    "closing_lookup",
+    "closing_record",
+    "is_closed",
+    "never_closed",
+    "record_text",
     "receipts_at_block_cap",
     "record",
     "record_files",
     "recording",
     "refusal",
     "replies",
-    "report_parts",
-    "report_text",
     "review_state",
     "reviewed_inconclusive_dir",
     "sleeps",

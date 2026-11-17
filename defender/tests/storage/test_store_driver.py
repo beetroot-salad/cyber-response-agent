@@ -55,6 +55,7 @@ import contextlib
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.jobs._jobs1342 import REFUSED, RESPONSE, UNSEEN
+from defender.tests.support.runtime.engine._spec992 import closing_record, is_closed, never_closed
 
 pytestmark = pytest.mark.e2e
 
@@ -578,14 +579,29 @@ def _closing_replay(run_dir: Path) -> ReplayFn:
     ])
 
 
-def _forced_close_run(tmp_path: Path, run_id: str, *, report_blocked: bool = False) -> tuple[Path, dict, Any]:
+def _store_holding_a_closing_row(tmp_path: Path):
+    """A `store_factory` whose store already holds a closing record for the run, so the close's write is refused
+    (`ClosingRecordExists`): the store's own fault, not one invented in the folder."""
+    from defender.tests.storage.verdict_1534 import _spec1534 as V
+
+    inner = store_factory(tmp_path)
+
+    @contextlib.contextmanager
+    def factory(case_id: str, run_dir: Path):
+        with inner(case_id, run_dir) as store:
+            V.plant(store, V.a_record(run_dir.name))
+            yield store
+
+    return factory
+
+
+def _forced_close_run(tmp_path: Path, run_id: str, *, write_refused: bool = False) -> tuple[Path, dict, Any]:
     """A run that never closes and hits its request limit, so the host forces the close."""
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id)
-    if report_blocked:
-        (run_dir / "report.md").mkdir()
     facts = _job_facts()
     result = drive(run_dir, run_id=run_id, main=NeverEndsModel(run_dir), review_state=facts.review_state,
-                   bounds=challenge_gate.Bounds(base_request_limit=_SHORT_BASE_REQUEST_LIMIT))
+                   bounds=challenge_gate.Bounds(base_request_limit=_SHORT_BASE_REQUEST_LIMIT),
+                   **({"store_factory": _store_holding_a_closing_row(tmp_path)} if write_refused else {}))
     return run_dir, result, facts
 
 
@@ -596,7 +612,7 @@ def test_m2_a_close_the_tool_accepted_is_a_committed_report(tmp_path):
     facts = _job_facts()
     result = drive(run_dir, run_id="m2-closed", review_state=facts.review_state, main=_closing_replay(run_dir))
 
-    assert (run_dir / "report.md").is_file(), "premise: the close wrote the report"
+    assert is_closed(run_dir), "premise: the close wrote the closing record"
     assert result["exit_reason"] is None, result
     assert facts.report_committed is True
     assert "report_committed" not in result, "the run summary still carries a second source of the fact (D-ae)"
@@ -628,7 +644,7 @@ def test_m2_a_review_record_write_fault_after_the_report_still_counts(tmp_path):
     drive(run_dir, run_id="m2-record-fault", review_state=facts.review_state, main=_closing_replay(run_dir))
 
     assert all(path.is_dir() and not list(path.iterdir()) for path in planted), "premise: no record was written"
-    assert (run_dir / "report.md").is_file(), "premise: the report landed past the record fault"
+    assert is_closed(run_dir), "premise: the closing record landed past the review-record fault"
     assert facts.report_committed is True
 
 
@@ -637,17 +653,17 @@ def test_m2_a_forced_close_that_succeeded_is_a_committed_report(tmp_path):
     run_dir, result, facts = _forced_close_run(tmp_path, "m2-forced")
 
     assert result["truncated_by"] == "request-limit", result
-    assert (run_dir / "report.md").is_file(), "premise: the forced close wrote the report"
+    assert closing_record(run_dir).disposition == "unresolved", "premise: the forced close wrote the closing record"
     assert result["exit_reason"] != "ForcedCloseFailed", result
     assert facts.report_committed is True
 
 
 def test_m2_a_forced_close_that_failed_is_not_a_committed_report(tmp_path):
     """The forced close could not write the report: false, and the exit says so. (M2)"""
-    run_dir, result, facts = _forced_close_run(tmp_path, "m2-forced-failed", report_blocked=True)
+    run_dir, result, facts = _forced_close_run(tmp_path, "m2-forced-failed", write_refused=True)
 
     assert result["exit_reason"] == "ForcedCloseFailed", result
-    assert (run_dir / "report.md").is_dir(), "premise: nothing was written over the blocked report"
+    assert closing_record(run_dir).disposition == "malicious", "premise: the row that stood is untouched"
     assert facts.report_committed is False
 
 
@@ -663,7 +679,7 @@ def test_m2_a_run_cut_before_any_close_is_not_a_committed_report(tmp_path):
     opened[0].release()
 
     assert result["truncated_by"] == "store", result
-    assert not (run_dir / "report.md").exists(), "premise: no report was written"
+    assert never_closed(run_dir), "premise: no closing record was written"
     assert facts.report_committed is False
 
 
@@ -681,6 +697,7 @@ def test_m2_a_report_file_planted_before_a_cut_is_not_a_committed_report(tmp_pat
 
     assert result["truncated_by"] == "store", result
     assert (run_dir / "report.md").is_file(), "premise: a report file is there, the host never closed"
+    assert never_closed(run_dir)
     assert facts.report_committed is False
 
 
@@ -695,6 +712,7 @@ def test_m2_a_report_file_planted_in_a_run_that_ends_normally_is_not_a_committed
 
     assert result["truncated_by"] is None, result
     assert (run_dir / "report.md").is_file(), "premise: a report file is there, the host never closed"
+    assert never_closed(run_dir)
     assert facts.report_committed is False
 
 
@@ -710,7 +728,7 @@ def test_m2_a_close_before_a_cut_is_a_committed_report(tmp_path):
     opened[0].release()
 
     assert result["truncated_by"] == "store", result
-    assert (run_dir / "report.md").is_file(), "premise: the close wrote the report before the cut"
+    assert is_closed(run_dir), "premise: the close wrote the closing record before the cut"
     assert result["closed_before_cut"] is True, result
     assert facts.report_committed is True
 

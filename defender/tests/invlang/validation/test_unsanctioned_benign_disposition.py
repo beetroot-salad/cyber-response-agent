@@ -12,6 +12,8 @@ system that holds its anchor kind. Three things are owed beyond that, all read o
 """
 from __future__ import annotations
 
+from defender.tests.support.runtime.engine._spec992 import never_closed
+
 import pytest
 
 from defender._vocab import DISPOSITION_ENUM
@@ -181,4 +183,4 @@ def test_the_close_refuses_an_unpaid_record(tmp_path):
     with pytest.raises(ModelRetry) as refused:
         close(deps, KEYWORD)
     assert "process-gap" in str(refused.value)
-    assert not (run_dir / "report.md").exists(), "a refused close still committed a report"
+    assert never_closed(run_dir), "a refused close still committed a report"

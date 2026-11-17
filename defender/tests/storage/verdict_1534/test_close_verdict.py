@@ -398,68 +398,47 @@ def test_v_text_the_forced_close_cuts_baselines_to_the_aggregate(tmp_path):
     assert len("\n".join([*lines, lines[-1]])) > C.BASELINE_LINES_BOUND
 
 
-def test_v_text_gated_input_at_the_bounds_is_stored_unchanged(tmp_path):
-    """Notes whose treated length is exactly the bound, and receipts whose lines join to exactly the aggregate, pass the
-    gate and are stored as written (defanged only). (V-TEXT)"""
-    from defender.records import closing as C
+_GRID = [(d, name) for d in sorted(set(DISPOSITION_VALUES) - {HOST}) for name in B.CASE_NAMES]
+_IDS = [f"{d}-{name}" for d, name in _GRID]
+
+
+@pytest.mark.parametrize(("disposition", "name"), _GRID, ids=_IDS)
+def test_v_text_a_model_close_at_every_bound_passes_both_gates_and_stores_its_rows_treated(tmp_path, disposition, name):
+    """Each bounded field, the ceiling count cap and both aggregates, at the bound, for every model disposition: the write
+    gate accepts, the close commits, and the stored entries are the parsed rows treated, none cut or dropped. (V-TEXT, M3, OD16)"""
     from defender.skills.invlang.validate import validate_companion
 
-    note = B.expanding(C.NOTE_BOUND)
-    doc = S.paid(f"state=query-failed ref=l-002 note={note}")
-    assert validate_companion(doc, None) == []
-    rec = B.close_run(tmp_path / "note", S.GAP_MEMBER, doc).record
-    assert [r[3] for r in B.ceiling_of(rec)] == [note.replace("ab.cd", "ab[.]cd")]
+    doc = B.case(name).at
+    text = doc.build(disposition)
+    assert validate_companion(text, None) == []
 
-    count = 6
-    probes = [C.ceiling_line(C.CeilingEntry("nothing-to-try", None, f"fake-system-{i:03d}.fake-verb", "x"))
-              for i in range(count)]
-    sizes = B.fill_sizes(probes, C.CEILING_LINES_BOUND)
-    assert max(sizes) <= C.NOTE_BOUND, "fixture control: each note fits its own bound"
-    doc = S.paid(*B.capability_rows(count, lambda i: B.plain(sizes[i])))
-    assert validate_companion(doc, None) == []
-    entries = B.close_run(tmp_path / "aggregate", S.GAP_MEMBER, doc).record.ceiling_test
-    assert len(entries) == count
-    assert len("\n".join(C.ceiling_line(e) for e in entries)) == C.CEILING_LINES_BOUND
+    rec = B.close_run(tmp_path, disposition, text).record
+
+    if doc.ceiling:
+        assert B.ceiling_of(rec) == doc.ceiling
+    if doc.baselines:
+        assert B.baselines_of(rec) == doc.baselines
+    assert doc.ceiling or doc.baselines, "fixture control: the case expects entries"
 
 
-@pytest.mark.parametrize("disposition", B.model_dispositions())
-def test_v_text_a_model_close_at_the_bounds_stores_its_parsed_rows_treated_and_cut_nothing(tmp_path, disposition):
-    """Whatever model disposition closes, a document whose ceiling rows sit exactly at the note bound and at the aggregate
-    is stored whole: each note is its parsed text treated, none dropped. (V-TEXT, M3)"""
-    from defender.records import closing as C
-
-    count = 6
-    probes = [C.ceiling_line(C.CeilingEntry("nothing-to-try", None, f"fake-system-{i:03d}.fake-verb", "x"))
-              for i in range(count)]
-    # note 0 sits at the note bound; the rest share what is left of the aggregate
-    others = B.fill_sizes(probes[1:], C.CEILING_LINES_BOUND - len(probes[0]) - C.NOTE_BOUND)
-    assert max(others) <= C.NOTE_BOUND, "fixture control: each note fits its own bound"
-    notes = [B.expanding(C.NOTE_BOUND), *(B.plain(n) for n in others)]
-    document = B.with_ceiling(disposition, B.capability_rows(count, lambda i: notes[i]))
-
-    entries = B.close_run(tmp_path, disposition, document).record.ceiling_test
-
-    assert [e.note for e in entries] == [n.replace("ab.cd", "ab[.]cd") for n in notes]
-    assert len("\n".join(C.ceiling_line(e) for e in entries)) == C.CEILING_LINES_BOUND
-
-
-def test_v_text_baselines_that_fit_the_aggregate_pass_the_gate_and_one_more_does_not(tmp_path):
-    """Identical-shape baselines: the largest set whose lines join within 2048 passes the gate and is stored in full;
-    one more row is refused. (V-TEXT)"""
-    from defender.records import closing as C
+@pytest.mark.parametrize(("disposition", "name"), _GRID, ids=_IDS)
+def test_v_text_a_model_close_one_over_any_bound_is_refused_at_both_gates_naming_the_field_and_the_bound(
+        tmp_path, disposition, name):
+    """One over each bound, for every model disposition: the write gate and the close both refuse, naming the field or
+    column and the bound's value, and no record is committed. (V-TEXT, M3, OD16)"""
     from defender.skills.invlang.validate import validate_companion
 
-    def doc(count):
-        rows = [scene.consultation_row(anchor_id=f"tk-b-{i:03d}", result="n", reasoning="r") for i in range(count)]
-        return scene.inconclusive_document(rows=scene.consult_block(*rows))
+    case = B.case(name)
+    text = case.over.build(disposition)
 
-    (probe,) = B.close_run(tmp_path / "probe", S.GAP_MEMBER, doc(1)).record.runtime_evidence
-    fit = (C.BASELINE_LINES_BOUND + 1) // (len(C.baseline_line(probe)) + 1)
-    assert fit > 1, "fixture control"
+    errors = validate_companion(text, None)
+    assert any(B.refusal_names(e, case.names, case.bound) for e in errors), (case.bound, errors)
 
-    assert validate_companion(doc(fit), None) == []
-    assert len(B.close_run(tmp_path / "fit", S.GAP_MEMBER, doc(fit)).record.runtime_evidence) == fit
-    assert validate_companion(doc(fit + 1), None) != []
+    with B.opened(tmp_path, text) as (deps, run_dir, store):
+        stages = S9.recording(S9.holds())
+        message = S9.refusal(deps, disposition, stages)
+        assert B.refusal_names(message, case.names, case.bound), (case.bound, message)
+        assert V.scalar_rows(store.path, run_dir.name) == []
 
 
 # --- V-ONE / V-FINAL: the write ---------------------------------------------------------------------------------------

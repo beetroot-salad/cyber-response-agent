@@ -38,7 +38,8 @@ from defender.tests.support.runtime.engine._spec992 import (
     frontmatter,
     gap,
     holds,
-    parsed_report,
+    closing_lookup,
+    historical_closing,
     pre_change_inconclusive_dir,
     record,
     recording,
@@ -81,29 +82,29 @@ def test_visualizer_renders_a_reviewed_inconclusive(tmp_path):
     assert record(reviewed, 1)["reviewed_disposition"] == GAP
     assert record(reviewed, 1)["reviewed"] is True
     assert trace_files(reviewed) == list(REVIEW_ROLES)
-    html, n = render_review_gate(reviewed, parsed_report(reviewed))
+    html, n = render_review_gate(reviewed, closing=closing_lookup(reviewed))
     assert n == 1, "the reviewed inconclusive attempt does not count as reviewed"
     assert "not reviewed" not in html
     assert "rv-stands" in html
     for role in REVIEW_ROLES:
         assert f">{role}<" in html, f"{role}'s trace card is missing"
-    assert "gate: stands" in _gate_badge_html(parsed_report(reviewed))
+    assert "gate: stands" in _gate_badge_html(closing_lookup(reviewed))
 
     assert "inconclusive" not in _BYPASS_NOTE, _BYPASS_NOTE
     assert "unresolved" in _BYPASS_NOTE
 
     historical = pre_change_inconclusive_dir(tmp_path)
     assert frontmatter(historical)["cause"] == CAUSE_NOT_REVIEWED
-    html, n = render_review_gate(historical, parsed_report(historical))
+    html, n = render_review_gate(historical, closing=historical_closing(historical))
     assert n == 0, "an unreviewed inconclusive dir (no `reviewed` field) counts as reviewed"
     assert "not reviewed" in html
     assert "rv-stands" not in html
-    assert "not reviewed" in _gate_badge_html(parsed_report(historical))
+    assert "not reviewed" in _gate_badge_html(historical_closing(historical))
 
     deps, driver_forced = deps_over(tmp_path / "driver-forced", ceiling_companion())
     assert close_with(deps, "unresolved", recording(holds()), forced=True).outcome == STANDS
     assert frontmatter(driver_forced)["cause"] == CAUSE_NOT_REVIEWED
-    assert "not reviewed" in _gate_badge_html(parsed_report(driver_forced))
+    assert "not reviewed" in _gate_badge_html(closing_lookup(driver_forced))
 
 
 def test_headline_badge_for_a_ceiling_held_versus_an_unaffordable_gap(tmp_path):
@@ -119,7 +120,7 @@ def test_headline_badge_for_a_ceiling_held_versus_an_unaffordable_gap(tmp_path):
     twin, confident = deps_over(tmp_path / "confident", ceiling_companion())
     assert close_with(twin, CONFIDENT, recording(gap(None))).outcome == "forced-inconclusive"
 
-    badges = {run.parent.name: _gate_badge_html(parsed_report(run)) for run in (held, cannot, spent, confident)}
+    badges = {run.parent.name: _gate_badge_html(closing_lookup(run)) for run in (held, cannot, spent, confident)}
     assert "gate: stands" in badges["held"], badges
     assert "gate-stands" in badges["held"], badges
     assert badges["cannot"] == badges["spent"] == badges["confident"], badges
@@ -132,13 +133,13 @@ def test_headline_badge_for_a_ceiling_held_versus_an_unaffordable_gap(tmp_path):
     }, causes
 
 
-def _split_answers(run_dir: Path) -> dict:
+def _split_answers(run_dir: Path, *, historical: bool = False) -> dict:
     """Every run-page reader keyed on the reviewed/unreviewed split, one answer each: the
     § Review gate count and section guard, the per-attempt badge and bypass note, the role
     cards and the headline badge."""
-    report = parsed_report(run_dir)
-    html, n = render_review_gate(run_dir, report)
-    badge = _gate_badge_html(report)
+    found = historical_closing(run_dir) if historical else closing_lookup(run_dir)
+    html, n = render_review_gate(run_dir, closing=found)
+    badge = _gate_badge_html(found)
     return {
         "count": n,
         "section-guard": "not reviewed" in html.split("attempt 1")[0] if "attempt 1" in html else "not reviewed" in html,
@@ -157,7 +158,7 @@ def test_every_reader_of_the_reviewed_split_agrees_on_both_populations(tmp_path)
     reviewed_dir = reviewed_inconclusive_dir(tmp_path)
     historical_dir = pre_change_inconclusive_dir(tmp_path)
     reviewed = _split_answers(reviewed_dir)
-    historical = _split_answers(historical_dir)
+    historical = _split_answers(historical_dir, historical=True)
 
     assert reviewed == {
         "count": 1, "section-guard": False, "attempt-badge-reviewed": True,
