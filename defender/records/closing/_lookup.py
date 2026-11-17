@@ -174,12 +174,12 @@ def read_database(database: Path, run_id: str) -> Lookup:
     if row is None:
         return NeverClosed()
     try:
-        return Record(record=_record_of(run_id, dict(zip(_COLUMNS, row, strict=True))))
+        return Record(record=_row_record(run_id, dict(zip(_COLUMNS, row, strict=True))))
     except (ValueError, TypeError) as e:
         return fault(ROW_INVALID, f"{database}: the row of {run_id} is not a valid record: {e}", run_id=run_id)
 
 
-def _record_of(run_id: str, row: dict[str, Any]) -> ClosingRecord:
+def _row_record(run_id: str, row: dict[str, Any]) -> ClosingRecord:
     ceiling = [CeilingEntry(**entry) for entry in _entries(row["ceiling_test"])]
     baselines = [BaselineEntry(**entry) for entry in _entries(row["runtime_evidence"])]
     return ClosingRecord(

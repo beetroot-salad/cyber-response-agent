@@ -34,7 +34,7 @@ from defender._vocab import (
 from defender.records.closing import (  # noqa: F401 — re-exported: the vocabulary lives with the record
     CAUSE_CEILING_EXAMINED, CAUSE_EVIDENCE_CANNOT_DISCRIMINATE, CAUSE_NOT_REVIEWED, CAUSE_NOTHING_LEFT_TO_ASK,
     CAUSE_REVIEW_INCOMPLETE, CAUSE_STORY_SETTLED, CAUSE_TURN_BUDGET_SPENT, CAUSES, FAILURE_KINDS,
-    FORCED_INCONCLUSIVE, STAGE_ERROR, STANDS, TIMEOUT, UNREADABLE,
+    FORCED_INCONCLUSIVE, OUTCOMES, STAGE_ERROR, STANDS, TIMEOUT, UNREADABLE,
 )
 from defender.hooks.budget_enforcer import BUDGET_EXEMPT_TOOLS  # noqa: F401 — re-export
 from defender.skills.invlang.parser import parse_dense_companion
@@ -72,6 +72,10 @@ CLOSE_RETURNS: tuple[str, ...] = (CHALLENGED, STANDS, FORCED_INCONCLUSIVE)
 #: `inconclusive` is reviewed, since its ceiling claim is something the review can judge.
 #: Matched by value, not by `forced` (see the dispatch site).
 NO_REVIEW_DISPOSITIONS: tuple[str, ...] = (HOST_ONLY_DISPOSITION,)
+
+#: The older names of the record's vocabularies, kept for callers that still spell them.
+REPORT_CAUSES = CAUSES
+COMMITTED_OUTCOMES = OUTCOMES
 
 #: The challenged attempt commits nothing, so it has no cause.
 NO_CAUSE = ""
@@ -257,14 +261,20 @@ def build_record(run_id: str, disposition: str, fields: _CloseFields, *, drafted
         run_id=run_id, disposition=disposition, outcome=fields.outcome, cause=fields.cause,
         failure_kind=fields.failure_kind, drafted_disposition=drafted,
         ceiling_test=_ceiling_entries(ceiling), runtime_evidence=_baseline_entries(baselines),
-        summary=_summary(disposition, fields, companion),
+        summary=_record_summary(disposition, fields, companion),
     )
 
 
 def _ceiling_entries(receipts: tuple[CeilingReceipt, ...]) -> tuple[closing.CeilingEntry, ...]:
     kept: list[closing.CeilingEntry] = []
-    for receipt in receipts[:closing.CEILING_COUNT_CAP]:
-        entry = closing.CeilingEntry(state=receipt.state, ref=receipt.ref, cap=receipt.cap, note=receipt.note)
+    for receipt in receipts:
+        if len(kept) == closing.CEILING_COUNT_CAP:
+            break
+        try:
+            entry = closing.CeilingEntry(state=receipt.state, ref=receipt.ref, cap=receipt.cap, note=receipt.note)
+        except ValueError as refused:
+            _dropped("ceiling receipt", receipt.raw, refused)
+            continue
         if closing.ceiling_lines_length((*kept, entry)) > closing.CEILING_LINES_BOUND:
             break
         kept.append(entry)
@@ -274,22 +284,32 @@ def _ceiling_entries(receipts: tuple[CeilingReceipt, ...]) -> tuple[closing.Ceil
 def _baseline_entries(receipts: tuple[RuntimeEvidenceReceipt, ...]) -> tuple[closing.BaselineEntry, ...]:
     kept: list[closing.BaselineEntry] = []
     for receipt in receipts:
-        entry = closing.BaselineEntry(
-            lead=receipt.resolved_by_lead, anchor_kind=receipt.anchor_kind, grounding_kind=receipt.grounding_kind,
-            anchor_id=receipt.anchor_id, window_start=closing.canonical_instant(receipt.window_start),
-            window_end=closing.canonical_instant(receipt.window_end), result=receipt.result,
-            reasoning=receipt.reasoning)
+        try:
+            entry = closing.BaselineEntry(
+                lead=receipt.resolved_by_lead, anchor_kind=receipt.anchor_kind, grounding_kind=receipt.grounding_kind,
+                anchor_id=receipt.anchor_id, window_start=closing.canonical_instant(receipt.window_start),
+                window_end=closing.canonical_instant(receipt.window_end), result=receipt.result,
+                reasoning=receipt.reasoning)
+        except ValueError as refused:
+            _dropped("baseline", receipt.window, refused)
+            continue
         if closing.baseline_lines_length((*kept, entry)) > closing.BASELINE_LINES_BOUND:
             break
         kept.append(entry)
     return tuple(kept)
 
 
+def _dropped(what: str, row: str, refused: ValueError) -> None:
+    """A row the walkers accepted that the record's own vocabulary refuses (only reachable on the
+    forced close, which skips the gates that check it): dropped, never a failed build."""
+    _logger.warning(f"the closing record drops a {what} its vocabulary refuses ({row!r}): {refused}")
+
+
 #: The `:T conclude` rows a summary is built from, in order.
 _SUMMARY_PIECES = ("summary", "detection_notes", "ceiling_rationale")
 
 
-def _summary(disposition: str, fields: _CloseFields, companion: CompanionBody | None) -> str | None:
+def _record_summary(disposition: str, fields: _CloseFields, companion: CompanionBody | None) -> str | None:
     """`:T conclude`'s summary, detection notes and ceiling rationale, each trimmed, the absent
     skipped, joined by one space; an `unresolved` record opens with its cause's opener. `None`
     when there is nothing to build from and the record is not `unresolved`. Treated (and cut to
@@ -567,10 +587,12 @@ __all__ = [
     "CAUSES",
     "CHALLENGED",
     "CLOSE_RETURNS",
+    "COMMITTED_OUTCOMES",
     "FAILURE_KINDS",
     "FORCED_INCONCLUSIVE",
     "NO_CAUSE",
     "NO_REVIEW_DISPOSITIONS",
+    "REPORT_CAUSES",
     "STAGE_ERROR",
     "STANDS",
     "TIMEOUT",

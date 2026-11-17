@@ -54,7 +54,7 @@ def treat(text: str, bound: int | None) -> str:
     whole = _unbounded(text)
     if bound is None or len(whole) <= bound:
         return whole
-    return _cut(whole, bound)
+    return _cut_to_bound(whole, bound)
 
 
 def _unbounded(text: str) -> str:
@@ -93,7 +93,7 @@ def _is_host_or_address(run: str) -> bool:
     return any(_ALPHABETIC_LABEL.fullmatch(label) for label in _DOT_SPLIT.split(run)[1:])
 
 
-def _cut(whole: str, bound: int) -> str:
+def _cut_to_bound(whole: str, bound: int) -> str:
     """Step 5 over the treated text `whole`, which is longer than `bound`."""
     space = whole.rfind(" ", 0, bound)
     if space > 0:
