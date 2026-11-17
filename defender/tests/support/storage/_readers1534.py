@@ -24,8 +24,10 @@ KINDS_BY_FAULT = ("database-missing", "pointer-unreadable", "store-unreadable", 
                   "recorded-before-1534", "row-invalid")
 #: The two kinds every reader proves, and the one beside them that tells a missing database from a changed one.
 TWO_KINDS = ("database-missing", "row-invalid")
-#: The detail a fault carries must never reach a reader's outward slot: it names the database path.
-DETAIL_MARK = "closing_record"
+#: The detail a fault carries must never reach a reader's outward slot: it names the database path. A meaningless token,
+#: planted only in the database's path (the case id), never in a reader's root or fixtures folder and never a word a
+#: fixed fault wording could hold.
+DETAIL_MARK = "ZQ1534DETAIL"
 
 
 def valid_fields(disposition: str) -> dict[str, Any]:
@@ -54,7 +56,8 @@ def baseline_entry(result: str = "no logins from this host in the prior 30 days"
 
 
 def plant_run(run_dir: Path, fields: dict[str, Any] | None = None, *, fault: str | None = None,
-              case_id: str | None = None, sessions_base: Path | None = None, invalid_as: str | None = None) -> Path | None:
+              case_id: str | None = None, sessions_base: Path | None = None, invalid_as: str | None = None,
+              at_query: bool = False) -> Path | None:
     """`run_dir`'s session pointer, a real store behind it, and (when `fields` is not None) the run's closing record;
     then `fault` applied (`KINDS_BY_FAULT`), or `NO_POINTER` for a run that never opened a store. `fields=None` is a
     run with a pointer and a table but no row. `invalid_as` is the value a `row-invalid` fault leaves in the disposition
@@ -81,11 +84,11 @@ def plant_run(run_dir: Path, fields: dict[str, Any] | None = None, *, fault: str
         if fields is not None:
             V.plant(store, V.a_record(run_dir.name, **fields))
         database = Path(store.path)
-    break_database(database, run_dir.name, fault, invalid_as=invalid_as)
+    break_database(database, run_dir.name, fault, invalid_as=invalid_as, at_query=at_query)
     return database
 
 
-def fault_run(run_dir: Path, fault: str | None, *, invalid_as: str | None = None) -> None:
+def fault_run(run_dir: Path, fault: str | None, *, invalid_as: str | None = None, at_query: bool = False) -> None:
     """Apply `fault` (`plant_run`'s kinds, including `NO_POINTER` and `LEGACY_LINK`) to a run whose pointer, store and record a
     fixture already made."""
     if fault is None:
@@ -101,11 +104,14 @@ def fault_run(run_dir: Path, fault: str | None, *, invalid_as: str | None = None
 
             os.symlink("elsewhere", Path(run_dir) / _LEGACY_LINK_NAME)
     else:
-        break_database(Path(json.loads(pointer.read_result().text)["store_path"]), Path(run_dir).name, fault, invalid_as=invalid_as)
+        break_database(Path(json.loads(pointer.read_result().text)["store_path"]), Path(run_dir).name, fault, invalid_as=invalid_as,
+                       at_query=at_query)
 
 
-def break_database(database: Path, run_id: str, fault: str | None, *, invalid_as: str | None = None) -> None:
-    """Apply `fault` to an existing database by a real primitive."""
+def break_database(database: Path, run_id: str, fault: str | None, *, invalid_as: str | None = None,
+                   at_query: bool = False) -> None:
+    """Apply `fault` to an existing database by a real primitive. `at_query` makes `store-unreadable` a read-time error of
+    the record's query (a VIEW over a missing table) in a file that opens and whose other tables read."""
     if fault is None:
         return
     if fault == "database-missing":
@@ -115,6 +121,14 @@ def break_database(database: Path, run_id: str, fault: str | None, *, invalid_as
         V.drop_table(database)
     elif fault == "row-invalid":
         V.corrupt(database, run_id, "disposition", invalid_as or "no-such-disposition")
+    elif fault == "store-unreadable" and at_query:
+        conn = sqlite3.connect(database, timeout=30)
+        try:
+            conn.execute(f"DROP TABLE IF EXISTS {V.TABLE}")
+            conn.execute(f"CREATE VIEW {V.TABLE} AS SELECT * FROM no_such_table_1534")
+            conn.commit()
+        finally:
+            conn.close()
     elif fault == "store-unreadable":
         database.write_bytes(b"this is not a database\n" * 64)
     elif fault == "schema-version":

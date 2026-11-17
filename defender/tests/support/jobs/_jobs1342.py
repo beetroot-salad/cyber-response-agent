@@ -243,7 +243,7 @@ def closing_plan(case: str, fields: dict[str, Any] | None, *, fault: str | None 
 
 
 CHILD_SCRIPT = textwrap.dedent("""
-    import json, os, signal, subprocess, sys, time
+    import contextlib, json, os, signal, subprocess, sys, time
     from pathlib import Path
 
     spec = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
@@ -280,20 +280,23 @@ CHILD_SCRIPT = textwrap.dedent("""
         if fault == "database-missing":
             return
         fresh = not session_db(runs, case).exists()
-        try:  # a test that broke the database or its version before this run left it so: nothing to plant in it
-            with open_store(case_id=case, sessions=_paths(runs)) as handle:
+        # Child setup never catches (a swallowed error here reads as "no record", which the no-row controls pass vacuously). The one
+        # thing skipped is the open of a database the spec itself staged before the run (a file at the database's path that
+        # will not open: it declares that nothing can be planted in it); every other error reaches the child's stderr.
+        with contextlib.ExitStack() as stack:
+            try:
+                handle = stack.enter_context(open_store(case_id=case, sessions=_paths(runs)))
+            except Exception:
                 if fresh:
-                    handle.new_session("main")
-                try:
-                    rows = handle.connection.execute("SELECT count(*) FROM spend_ledger WHERE run_id = ?", (run_id,)).fetchone()[0]
-                except Exception:
-                    rows = 1
-                if rows == 0 and not plan.get("unsealed"):  # a run that wrote no ledger row ended cleanly: its ledger is sealed
-                    session_store.seal_ledger(handle, run_id)
-                if plan.get("fields") is not None:
-                    R.V.plant(handle, R.V.a_record(run_id, **{**R.valid_fields(plan["fields"]["disposition"]), **plan["fields"]}))
-        except Exception:
-            return
+                    raise
+                return
+            if fresh:
+                handle.new_session("main")
+            rows = handle.connection.execute("SELECT count(*) FROM spend_ledger WHERE run_id = ?", (run_id,)).fetchone()[0]
+            if rows == 0 and not plan.get("unsealed"):  # a run that wrote no ledger row ended cleanly: its ledger is sealed
+                session_store.seal_ledger(handle, run_id)
+            if plan.get("fields") is not None:
+                R.V.plant(handle, R.V.a_record(run_id, **{**R.valid_fields(plan["fields"]["disposition"]), **plan["fields"]}))
         R.break_database(session_db(runs, case), run_id, fault)
 
     def leave_records():
