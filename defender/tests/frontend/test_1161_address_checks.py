@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 
 from defender.tests.frontend._flow1161 import HOME, api_calls, logins, screen, settle, shown, sign_in
-from defender.tests.frontend.conftest import guard_csp
+from defender.tests.frontend.conftest import guard_csp, requests_of
 from defender.tests.support.frontend import _shapes1161 as S
 
 CASES = [c for c in S.generated_set() if c.value.startswith("/")]  # a path begins with `/`; the origin is prepended
@@ -62,8 +62,7 @@ def _produce(world: Any, browser: Any, value: str, *, cookies: Any = None) -> tu
     violations = guard_csp(context)  # installed by the `browser` fixture
     if cookies:
         context.add_cookies(cookies)
-    seen: list[Any] = []
-    context.on("request", lambda r: seen.append(r))
+    seen = requests_of(context)  # the guarded context's own log
     page = context.new_page()
     try:
         page.goto(f"{world.origin}{value}")

@@ -10,6 +10,8 @@ import pytest
 
 from defender.tests.frontend._flow1161 import (
     api_calls,
+    RECONNECT,
+    VISIBLE,
     logins,
     repeated_api_gets,
     screen,
@@ -18,7 +20,7 @@ from defender.tests.frontend._flow1161 import (
     sign_in,
     where,
 )
-from defender.tests.frontend.conftest import guard_csp
+from defender.tests.frontend.conftest import guard_csp, requests_of
 from defender.tests.support.api._server1083 import A, BOB
 from defender.tests.support.frontend import _shapes1161 as S
 from defender.tests.support.frontend._browser1161 import path_is, run_async
@@ -121,8 +123,7 @@ def test_1161_b3_every_returnable_member_reaches_the_app_at_its_own_pathname_sig
     for value in values:
         with_context = browser.new_context()
         with_context.set_default_timeout(30_000)
-        seen: list[Any] = []
-        with_context.on("request", lambda r, seen=seen: seen.append(r))
+        seen = requests_of(with_context)  # the guarded context's own log
         try:
             page = with_context.new_page()
             page.goto(f"{world.origin}{value}")
@@ -160,12 +161,6 @@ def test_1540_f4_a_member_of_a_non_returnable_shape_shows_its_screen_with_no_api
 
 # --- #1540 Am-5: no load repeats an API read, whatever the page or the network does -------------------------------------
 
-#: Dispatched on `window`, where the data layer would listen: the tab coming back to the front, the network dropping and
-#: returning. Synthetic, because the pinned headless Chromium has one always-visible tab (C44's limit applies here too).
-_VISIBLE = "window.dispatchEvent(new Event('visibilitychange'))"
-_RECONNECT = "window.dispatchEvent(new Event('offline')); window.dispatchEvent(new Event('online'))"
-
-
 @pytest.mark.parametrize("stimulus", ["visible", "reconnect", "server-error"])
 def test_1540_am5_a_loaded_investigation_screen_sends_no_api_get_twice_whatever_the_page_or_network_does(
         world, context, requests, stimulus):
@@ -180,7 +175,7 @@ def test_1540_am5_a_loaded_investigation_screen_sends_no_api_get_twice_whatever_
     screen(page, "investigation")
     page.locator(f'[data-screen="investigation"][data-state="{"error" if stimulus == "server-error" else "ready"}"]').wait_for()
     if stimulus != "server-error":
-        page.evaluate(_VISIBLE if stimulus == "visible" else _RECONNECT)
+        page.evaluate(VISIBLE if stimulus == "visible" else RECONNECT)
     settle(page, 2000)
     assert [c for c in api_calls(requests[mark:], world.origin) if c == ("GET", read)] == [("GET", read)], \
         "positive control: the screen's read was sent, once"

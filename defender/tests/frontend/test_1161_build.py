@@ -1,5 +1,6 @@
 """#1161 S2, Am-4, #1540 F1/F3/PR6/F8: the frontend build type-checks, reads the one shape list and the API's document (no
-hand-kept copy), reads only its declared inputs, and the source check (`bun run check`) refuses what a screen may not do.
+hand-kept copy), reads only its declared inputs, and the source check refuses what a screen may not do (observed through
+`_gate`, the lint job's `bun run check` then `bun run test`: no test decides which command hosts the check).
 Every build runs in a `copy_frontend` copy, so the unmodified copy builds (control) and is also PR6's "the frontend
 folder plus the declared inputs suffice"."""
 from __future__ import annotations
@@ -285,21 +286,22 @@ def _gate(frontend: Path) -> Gate:
 
 
 def _check(frontend: Path) -> Gate:
-    """`bun run check` alone, in the gate's shape."""
+    """`bun run check` alone, in the gate's shape: only for an obligation about that command's own definition (F1)."""
     done = run_bun(frontend, "run", "check")
     return Gate(done.returncode, _output(done))
 
 
 def _unit_tests(frontend: Path) -> Gate:
-    """`bun run test` alone, in the gate's shape."""
+    """`bun run test` alone, in the gate's shape: only for an obligation about that command's own definition (F1)."""
     done = run_bun(frontend, "run", "test")
     return Gate(done.returncode, _output(done))
 
 
-@pytest.fixture(scope="module")
-def checked(built_frontend, tmp_path_factory) -> Path:
-    """One copy of the frontend for the source-check cases, sharing the built `node_modules`."""
-    return copy_frontend(tmp_path_factory.mktemp("check"), node_modules_from=node_modules_of(built_frontend))
+@pytest.fixture
+def checked(built_frontend, tmp_path) -> Path:
+    """A pristine copy of the frontend for this test alone (the same helper as every build case: `_copy`), so no verdict
+    depends on what an earlier test ran in it, such as whether `generated/` already exists."""
+    return _copy(tmp_path, built_frontend)
 
 
 def _with_source(frontend: Path, relative: str, text: str, run: Callable[[Path], Gate] = _gate) -> Gate:
@@ -333,25 +335,27 @@ def test_1540_f8_the_gate_passes_on_the_unmodified_tree(checked):
 
 
 def test_1540_f1_the_check_fails_on_a_plain_type_error(checked):
-    """`bun run check` is generate + type check: an unrelated type error fails it. (F1)"""
+    """`bun run check` is generate + type check: an unrelated type error fails it. Kept on that one command, because F1
+    defines it. (F1)"""
     gate = _with_source(checked, "screens/zz_type_error.ts", "export const bad: number = 'not a number';", _check)
     assert gate.refused, "check accepted a type error"
 
 
 def test_1540_f6_the_unit_test_command_passes_on_the_unmodified_tree(checked):
-    """`bun run test` exits 0 on the copy: the gate's second half is something the tree passes. (F6, F1)"""
+    """`bun run test` alone exits 0 on a pristine copy: it is generate + `vitest run` (F1), so it needs no earlier
+    `check`. Kept on that one command, because F1 defines it. (F6, F1)"""
     done = _unit_tests(checked)
     assert not done.refused, done.output[-1500:]
 
 
 def test_1540_f6_a_unit_test_file_that_throws_at_load_fails_the_unit_test_command(checked):
-    """A `src/shell/zz_fail.test.ts` whose module throws when loaded makes `bun run test` exit non-zero, naming it, and
-    the gate refuses the tree. (F6, F8)"""
+    """A `src/shell/zz_fail.test.ts` whose module throws when loaded makes the gate refuse the tree, naming it; the
+    unmodified tree passes it (control). (F6, F8)"""
+    assert not _gate(checked).refused, "control: the unmodified tree passes the gate"
     text = 'export {};\nthrow new Error("zz_fail: refused at load");'
-    failing = _with_source(checked, "shell/zz_fail.test.ts", text, _unit_tests)
-    assert failing.refused, "`bun run test` ran no unit-test file, or let a failing one pass"
+    failing = _with_source(checked, "shell/zz_fail.test.ts", text)
+    assert failing.refused, "the gate ran no unit-test file, or let a failing one pass"
     assert "zz_fail.test.ts" in failing.output, failing.output[-1500:]
-    assert _with_source(checked, "shell/zz_fail.test.ts", text).refused, "the gate accepted a failing unit-test file"
 
 
 @pytest.mark.parametrize("form", REFUSED_FORMS)
@@ -391,13 +395,25 @@ def test_1540_f8_the_source_check_allows_what_a_screen_may_hold(checked, form):
     assert not gate.refused, gate.output[-1500:]
 
 
+#: A passing test file the copy already holds, and the import it makes of its neighbour in `src/shell/`.
+CONTROL_TEST_SOURCE = "shell/decision.test.ts"
+SHELL_IMPORT, SCREEN_IMPORT = 'from "./decision"', 'from "../shell/decision"'
+#: A refused form that is never called, so the gate refuses the file by its source and not by what the runner does.
+NEVER_CALLED = 'export function zzNeverCalled(): Promise<Response> { return fetch("/x"); }'
+
+
 def test_1540_f8_a_test_file_is_not_exempt_from_the_source_check(checked):
-    """The refused `fetch` in `*.test.ts` outside the shell fails `bun run check` naming that file; the same file under
-    `src/shell/` passes it. Judged on `bun run check` alone: a unit-test file with no test fails `bun run test` by itself,
-    and a passing test is written in a runner's own API, which this contract does not name. (F8)"""
+    """A passing unit-test file (the copy's own `decision.test.ts`) outside the shell passes the gate; with a never-called
+    `fetch` appended it is refused naming the file; the same file under `src/shell/` passes. (F8)"""
     name = f"{CONTROL}.test.ts"
-    outside = _with_source(checked, f"screens/{name}", REFUSED_FORMS["fetch"], _check)
-    assert outside.refused, "check exempted a test file"
+    original = (checked / "src" / CONTROL_TEST_SOURCE).read_text(encoding="utf-8")
+    assert original.count(SHELL_IMPORT) == 1, f"{CONTROL_TEST_SOURCE} no longer imports its neighbour as {SHELL_IMPORT}"
+    moved = original.replace(SHELL_IMPORT, SCREEN_IMPORT)
+    assert SHELL_IMPORT not in moved, "the import was not rewritten"
+    control = _with_source(checked, f"screens/{name}", moved)
+    assert not control.refused, f"control: a passing test file outside the shell is refused:\n{control.output[-1500:]}"
+    outside = _with_source(checked, f"screens/{name}", f"{moved}\n{NEVER_CALLED}")
+    assert outside.refused, "the gate exempted a test file"
     assert name in outside.output, outside.output[-1500:]
-    inside = _with_source(checked, f"shell/{name}", REFUSED_FORMS["fetch"], _check)
+    inside = _with_source(checked, f"shell/{name}", f"{original}\n{NEVER_CALLED}")
     assert not inside.refused, inside.output[-1500:]

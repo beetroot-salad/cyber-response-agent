@@ -18,6 +18,10 @@ FAILED = "sign-in-failed"
 ROOT = "root"
 HOME = "home"
 ERROR = "error"
+#: Dispatched on `window`, where the data layer would listen: the tab coming back to the front, the network dropping and
+#: returning. Synthetic, because the pinned headless Chromium has one always-visible tab (C44's limit applies here too).
+VISIBLE = "window.dispatchEvent(new Event('visibilitychange'))"
+RECONNECT = "window.dispatchEvent(new Event('offline')); window.dispatchEvent(new Event('online'))"
 #: The shell makes the sessionStorage accessor throw, as a browser with storage denied does.
 NO_STORAGE = ("Object.defineProperty(window, 'sessionStorage', {configurable: true,"
               " get() { throw new DOMException('denied', 'SecurityError'); }});")
@@ -71,8 +75,11 @@ def repeated_api_gets(requests: list[Any]) -> list[str]:
         if _is_main_frame_navigation(request):
             seen.pop(_page_of(request), None)
             continue
+        page = _page_of(request)
+        if page is None:  # belongs to no load we can name: counting it would merge unrelated loads
+            continue
         if request.method == "GET" and request.resource_type in ("fetch", "xhr") and path_is(request.url, "/api"):
-            urls = seen.setdefault(_page_of(request), set())
+            urls = seen.setdefault(page, set())
             if request.url in urls:
                 repeats.append(f"GET {request.url}")
             urls.add(request.url)
@@ -81,7 +88,8 @@ def repeated_api_gets(requests: list[Any]) -> list[str]:
 
 def assert_no_repeat(requests: list[Any]) -> None:
     """Within one load, no `GET` fetch to `/api/*` repeats a URL (Am-5 point 5), over every load the requests hold."""
-    assert repeated_api_gets(requests) == [], "a load sent the same API read twice"
+    repeats = repeated_api_gets(requests)
+    assert repeats == [], f"Am-5: a load sent the same API read twice: {repeats}"
 
 
 def auth_calls(requests: list[Any], origin: str, path: str) -> list[tuple[str, str]]:

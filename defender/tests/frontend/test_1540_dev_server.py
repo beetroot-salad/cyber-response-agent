@@ -28,9 +28,10 @@ from pathlib import Path
 import httpx
 import pytest
 
-from defender.tests.frontend._flow1161 import HOME, api_calls, await_aborted, repeated_api_gets, settle
+from defender.tests.frontend._flow1161 import FAILED, HOME, RECONNECT, VISIBLE, api_calls, await_aborted, repeated_api_gets, settle
+from defender.tests.frontend.conftest import requests_of
 from defender.tests.support.frontend import _ingress1161 as harness
-from defender.tests.support.frontend._browser1161 import abort_login_navigation, path_is, record_requests
+from defender.tests.support.frontend._browser1161 import abort_login_navigation, path_is
 
 ORIGIN = "http://localhost:8000"
 START_TIMEOUT = 90.0
@@ -227,8 +228,7 @@ def test_1540_am5_the_dev_loop_signs_a_signed_out_home_in_once_with_one_attempt_
     renders of the development build reach none of B1. (Am-5 §1; "`bun run dev` (StrictMode active)")"""
     context = browser.new_context()
     context.set_default_timeout(30_000)
-    seen: list[object] = []
-    context.on("request", lambda r: seen.append(r))
+    seen = requests_of(context)
     context.route(lambda u: path_is(u, "/api/me"), lambda route: route.fulfill(status=401, body="{}"))
     aborted = abort_login_navigation(context)
     context.add_init_script(_COUNT_STORAGE_WRITES)
@@ -248,19 +248,42 @@ _ME = {"kind": "person", "user": {"id": "6f1c1e3c-55a4-4a4e-9a51-000000000001", 
 _TENANT, _INVESTIGATION = "6f1c1e3c-55a4-4a4e-9a51-000000000002", "6f1c1e3c-55a4-4a4e-9a51-000000000003"
 
 
-def test_1540_am5_the_dev_loop_sends_a_signed_in_investigations_read_once(dev: Dev, browser):
+@pytest.mark.parametrize("stimulus", ["none", "visible", "reconnect", "server-error"])
+def test_1540_am5_the_dev_loop_sends_a_signed_in_investigations_read_once(dev: Dev, browser, stimulus):
     """Through `bun run dev`, signed in (`/api/me` and the read answered by routes), the investigation screen's read is
-    sent once, and no `/api` GET repeats in the load. (Am-5 point 5: the development build's doubled effects)"""
+    sent once with no stimulus, and after the tab turning visible, the network dropping and returning, or a 500 left a
+    second to retry: no `/api` GET repeats in the load. (Am-5 point 5: the development build's doubled effects)"""
     read = f"/api/tenants/{_TENANT}/investigations/{_INVESTIGATION}"
+    failing = stimulus == "server-error"
     context = browser.new_context()
     context.set_default_timeout(30_000)
-    seen = record_requests(context)
+    seen = requests_of(context)
     context.route(lambda u: path_is(u, "/api/me"), lambda route: route.fulfill(status=200, json=_ME))
-    context.route(lambda u: path_is(u, read),
-                  lambda route: route.fulfill(status=200, json={"status": "completed", "disposition": "malicious"}))
+    context.route(lambda u: path_is(u, read), lambda route: route.fulfill(status=500, body="x") if failing else
+                  route.fulfill(status=200, json={"status": "completed", "disposition": "malicious"}))
     page = context.new_page()
     page.goto(f"{ORIGIN}/t/{_TENANT}/investigations/{_INVESTIGATION}")
-    page.locator('[data-field="status"]').wait_for()
-    settle(page, 1500)
-    assert [c for c in api_calls(seen, ORIGIN) if c == ("GET", read)] == [("GET", read)]
+    if failing:
+        page.locator('[data-screen="investigation"][data-state="error"]').wait_for()
+    else:
+        page.locator('[data-field="status"]').wait_for()
+    if stimulus in ("visible", "reconnect"):
+        page.evaluate(VISIBLE if stimulus == "visible" else RECONNECT)
+    settle(page, 2000 if failing else 1500)
+    assert [c for c in api_calls(seen, ORIGIN) if c == ("GET", read)] == [("GET", read)], "the read was sent, once"
     assert repeated_api_gets(seen) == []
+
+
+def test_1540_am5_a_context_opened_for_the_dev_server_fails_at_close_on_a_repeated_get(dev: Dev, browser):
+    """The no-repeat guard covers a context a dev-server test opens itself: two identical API GETs in one document
+    fail it at close. (Am-5 point 5, self-test)"""
+    context = browser.new_context()
+    context.set_default_timeout(30_000)
+    page = context.new_page()
+    page.goto(f"{ORIGIN}/{FAILED}")
+    read = "fetch('/api/zz-repeat').then(r => r.status)"
+    page.evaluate(read)
+    page.evaluate(read)
+    with pytest.raises(AssertionError, match="same API read twice"):
+        context.close()
+    requests_of(context).clear()  # caused on purpose and asserted above

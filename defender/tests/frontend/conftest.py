@@ -1,10 +1,14 @@
 """#1161 the frontend's browser and ingress checks: the pinned Chromium, the running world (API child, ingress,
 provider front channel) and the Q6 cookie-less request. Tools missing is a failure, never a skip (B11).
 
-CSP (#1540 F8): every browser test fails on any `securitypolicyviolation` in any page of any context the `browser` fixture
-makes. The fixture installs the one report listener in each context (so a test's own context is guarded too) and checks the
-context's list is empty when the context closes. `guard_csp(context)` looks up that installed list (each entry
-"<directive> <blocked> @ <document>"); a test that triggers a violation on purpose asserts it, then clears the list."""
+Guards (#1540 F8, Am-5): the guarded context (`GuardedContext`) is the one owner of every suite-wide browser guard, and
+`browser.new_context()` is the only way a test gets a context, so every context carries all of them and checks them when it
+closes, however a test opens it (fixture, its own, the dev server's):
+- CSP: no `securitypolicyviolation` in any page. `guard_csp(context)` looks up the list (each entry
+  "<directive> <blocked> @ <document>"); a test that triggers a violation on purpose asserts it, then clears the list.
+- No repeat: no load sent the same `GET` to `/api/*` twice. `requests_of(context)` looks up the context's request log; a test
+  that repeats a read on purpose asserts it, then clears the log.
+A new suite-wide guard goes into `GuardedContext`, not into an opt-in fixture."""
 from __future__ import annotations
 
 import dataclasses
@@ -30,7 +34,13 @@ from defender.tests.support.api._server1083 import (
 )
 from defender.tests.support.api._signin1161 import FrontChannel, link_account
 from defender.tests.support.frontend import _ingress1161 as ingress_harness
-from defender.tests.support.frontend._browser1161 import Intercepted, record_requests, run_async, without_cookies_once
+from defender.tests.support.frontend._browser1161 import (
+    Intercepted,
+    RequestLog,
+    record_requests,
+    run_async,
+    without_cookies_once,
+)
 from defender.tests.support.jobs._jobs1342 import ALERT_BYTES, job_store, register_tenant
 from defender.tests.support.shared._postgres1339 import (  # noqa: F401 — fixtures for this directory
     migrated_database,
@@ -46,13 +56,13 @@ _NOW = dt.datetime(2026, 11, 1, 12, tzinfo=dt.UTC)
 
 
 class GuardedContext:
-    """A Playwright browser context with F8's guard installed: every other attribute is the real context's. `violations`
-    is the live list of CSP violations any of its pages reported; `close()` closes the context, then fails when the list
-    is not empty."""
+    """A Playwright browser context with every suite-wide guard installed: every other attribute is the real context's.
+    `violations` is the live CSP list and `requests` the live request log; `close()` closes it, then fails on either."""
 
     def __init__(self, context: Any) -> None:
         self._context = context
         self.violations: list[str] = []
+        self.requests: RequestLog = record_requests(context)
         self.closed = False
         context.expose_binding(_CSP_BINDING, lambda source, message: self.violations.append(str(message)))
         context.add_init_script(_CSP_LISTENER)
@@ -73,6 +83,7 @@ class GuardedContext:
             self._context.close()
             self.closed = True
         assert not self.violations, f"F8: the page broke the ingress's CSP: {self.violations}"
+        assert_no_repeat(self.requests)
 
 
 def guard_csp(context: Any) -> list[str]:
@@ -83,6 +94,13 @@ def guard_csp(context: Any) -> list[str]:
     violations = getattr(context, "violations", None)
     assert isinstance(violations, list), "guard_csp: the context was not made by the `browser` fixture"
     return violations
+
+
+def requests_of(context: Any) -> RequestLog:
+    """The live log of every request any page of `context` (one the `browser` fixture made) has made, in order."""
+    log = getattr(context, "requests", None)
+    assert isinstance(log, RequestLog), "requests_of: the context was not made by the `browser` fixture"
+    return log
 
 
 class GuardedBrowser:
@@ -168,12 +186,9 @@ def context(browser: GuardedBrowser) -> Iterator[GuardedContext]:
 
 
 @pytest.fixture
-def requests(context: Any) -> Iterator[list[Any]]:
-    """Every request `context` makes, in order. When the test ends, no load of it sent the same `GET` to `/api/*` twice
-    (Am-5: each read is sent once per load)."""
-    log = record_requests(context)
-    yield log
-    assert_no_repeat(log)
+def requests(context: Any) -> RequestLog:
+    """Every request `context` makes, in order: the context's own log (its close checks it, Am-5)."""
+    return requests_of(context)
 
 
 @pytest.fixture

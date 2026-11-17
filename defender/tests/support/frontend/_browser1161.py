@@ -2,8 +2,9 @@
 
 - `in_thread(fn, *args)`: run `fn` on a helper thread and return its result. Sync Playwright leaves a running event
   loop in the main thread, so `anyio.run(...)` there fails (harness defect H1): seed through this.
-- `record_requests(context)`: every request the context makes, in order (a lambda, not `list.append`: H2), as a
-  `RequestLog`, which also remembers where `restore_from_cache` was called (a load boundary the network does not show).
+- `record_requests(context)`: installed by the guarded context alone (conftest `GuardedContext`), never by a test: every
+  request the context makes, in order (a lambda, not `list.append`: H2), as a `RequestLog`, which also remembers where
+  `restore_from_cache` was called (a load boundary the network does not show).
 - `without_cookies_once(pw, context, matches, ...)`: the Q6 mechanism, one request reaches the real API cookie-less.
 - `abort_login_navigation(context)` and `restore_from_cache(page)`: B8's simulated back-forward-cache restore.
 
@@ -58,6 +59,11 @@ class RequestLog(list[Any]):
     def __init__(self) -> None:
         super().__init__()
         self.restores: list[int] = []
+
+    def clear(self) -> None:
+        """Forget the requests and the restores (a test that caused a repeat on purpose acknowledges it so)."""
+        super().clear()
+        self.restores.clear()
 
 
 #: The log of each context `record_requests` listens to, so `restore_from_cache(page)` can mark its boundary.
@@ -134,6 +140,6 @@ def restore_from_cache(page: Any) -> None:
     """Dispatch `pageshow` with `persisted: true` on the document, as a restore from the back-forward cache does (the
     pinned browser cannot produce one: C44). The context's `RequestLog` records it as a load boundary."""
     log = _LOGS.get(page.context)
-    if log is not None:
-        log.restores.append(len(log))
+    assert log is not None, "restore_from_cache: the page's context was not made by the `browser` fixture"
+    log.restores.append(len(log))
     page.evaluate("window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted: true}))")
