@@ -106,10 +106,10 @@ MAX_REQUEST_BYTES = 16 * 1024 * 1024
 #: The most of a request's path an audit line keeps.
 _AUDIT_PATH_CAP = 512
 _REQUEST_KEYS = frozenset({"system", "method", "url", "headers", "body", "timeout_sec"})
-#: Request headers that describe the hop, not the request: never forwarded (httpx sets its own).
-_HOP_HEADERS = frozenset({"host", "content-length", "connection", "keep-alive",
-                          "proxy-connection", "te", "trailer", "transfer-encoding", "upgrade",
-                          "expect"})
+#: The request headers the proxy forwards, lower-cased, and no other (#1471 r9 R9-5): what the adapters send. A header
+#: outside it (a method override under any spelling, a forwarding header, one that describes the hop, which httpx sets
+#: itself) is dropped and the request still goes. The list is closed: a new member is a design change.
+_FORWARDED_HEADERS = frozenset({"content-type", "accept", "user-agent", "idempotency-key"})
 #: Request headers that carry a credential: an adapter holds none, so one that sends one is
 #: refused, as is one sending the declared header scheme's header.
 _CREDENTIAL_HEADERS = frozenset({"authorization", "proxy-authorization", "cookie"})
@@ -505,17 +505,17 @@ def _encodable(*texts: str | None) -> bool:
 
 
 def _forwarded(headers: Mapping[str, str], auth: Auth) -> dict[str, str]:
-    """The adapter's headers to send on: hop headers dropped; a credential header refused."""
+    """The adapter's headers to send on: a credential header refused; of the rest, only those in `_FORWARDED_HEADERS`
+    (compared case-insensitively, sent under the adapter's own spelling), every other one dropped."""
     own = {str(auth.header).lower()} if auth.scheme == HEADER else set()
     sent: dict[str, str] = {}
     for name, value in headers.items():
         lowered = name.lower()
-        if lowered in _HOP_HEADERS:
-            continue
         if lowered in _CREDENTIAL_HEADERS or lowered in own:
             raise Refused(CONFIG, f"the request carries its own {name} header; the proxy "
                                   "applies the declared credential", origin=ORIGIN_ACCESS)
-        sent[name] = value
+        if lowered in _FORWARDED_HEADERS:
+            sent[name] = value
     return sent
 
 

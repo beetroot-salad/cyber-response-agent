@@ -69,7 +69,11 @@ exits with status 2 without it.
 Removed: the case record's `comment:` key (a record that still has it is refused, naming the key: delete it; the
 comment's wording is fixed) and the operator's `run.py --update-ticket` (an operator run never comments and never mints a
 write-back token). A ticket comment is now the start-investigation request's `update_ticket` flag. The run page's own
-`--update-ticket` flag is gone too: its ticket line shows whenever a receipt exists.
+`--update-ticket` flag is gone too: its ticket line shows whenever a receipt exists, as the job's own report.
+
+The credential proxy now forwards only an allowed list of an adapter's request headers (`Content-Type`, `Accept`,
+`User-Agent`, `Idempotency-Key`, in any case) and drops every other one, the request still going; a credential header
+is still refused. A tenant adapter that relied on another header reaching its system loses it.
 
 ## Upgrade from before #1083
 

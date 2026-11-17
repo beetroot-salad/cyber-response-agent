@@ -86,7 +86,10 @@ comment to its case (its disposition and a link to its screen); a person closes 
 The receipt (`{key, status, url, ok, reason}`) is a sidecar beside the run dir,
 `<runs_base>/<run id>.ticket-write.json`, out of the box's reach. `key` is the ticket key (empty
 when the alert names none); `url` is the ticket's web link when the adapter gives one, null on
-every error receipt. Its one reader is the run page's ticket line.
+every error receipt. Its one reader is the run page's ticket line, which labels it as the job's own
+report: the job's folder is one every job of the tenant can write, so nothing treats the receipt as a
+fact, and the investigation serves no outcome word from it (#1471 r9). The trusted record of a write
+is the credential proxy's audit (tenant, investigation, method, path, outcome).
 
 **A lost answer (#1374).** When the write fails and may have reached the store
 (`TransportFault.maybe_delivered`, decided from data; the credential proxy's answer says it in

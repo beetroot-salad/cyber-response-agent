@@ -76,9 +76,6 @@ class End:
     ending: Ending | None
     cost: float | None
     knowledge: dict | None
-    #: The ticket write-back's outcome word for a flagged row (#1471 W6), carried by every end write; None for an
-    #: unflagged row, or until the worker has decided one.
-    ticket_write: str | None = None
 
 
 @dataclass(frozen=True)

@@ -141,11 +141,6 @@ class Investigation(BaseModel):
     failure_message: str | None = Field(
         default=None, description="Our own words on why it failed; never model or run output.")
     update_ticket: bool = Field(description="Whether this investigation posts its outcome to its ticket.")
-    ticket_write: str | None = Field(default=None, description=(
-        "What happened to the ticket write-back, once a flagged investigation has ended: `commented`, `escalated`, "
-        "`error` or `unknown` (the job's own receipt), `no_receipt` (none was left) or `not_read` (nobody looked). "
-        "Null while it is live and for an unflagged one."),
-        json_schema_extra={"enum": ["commented", "escalated", "error", "unknown", "no_receipt", "not_read", None]})
     artifacts: list[str] = Field(
         default_factory=list,
         description="Keys readable at `/investigations/{id}/artifacts/{key}`; empty until upload.",

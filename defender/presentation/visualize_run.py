@@ -418,11 +418,15 @@ def _render_policy_denials_section(run_dir: Path) -> str:
 
 
 RECEIPT_UNREADABLE = "receipt unreadable"
+#: What the ticket line opens with: the receipt is the job's own account of its write (#1471 r9 R9-3).
+TICKET_LINE_LABEL = "the job reports:"
 
 
 def render_ticket_line(run_dir: Path) -> str:
     """The page's one line about the case-ticket write (#1107 O6): the key, status and reason the
-    host's record step left in its receipt, or nothing when it left no receipt."""
+    job's record step left in its receipt, or nothing when it left no receipt. The line is labelled
+    as the job's own report (#1471 r9 R9-3): the receipt sits where every job of the tenant can
+    write, so the page shows what the job said, not a fact; the proxy's audit is the write's record."""
     path = RunPaths(run_dir).ticket_write()  # = ticket_writer.receipt_path
     if not path.is_symlink() and not path.exists():
         return ""
@@ -439,14 +443,14 @@ def render_ticket_line(run_dir: Path) -> str:
         and (receipt.get("reason") is None or isinstance(receipt.get("reason"), str))
     )
     if not well_formed or not isinstance(receipt, dict):
-        return f'<p class="ticket-line ticket-unreadable">ticket: {esc(RECEIPT_UNREADABLE)}</p>'
+        return f'<p class="ticket-line ticket-unreadable">{TICKET_LINE_LABEL} ticket: {esc(RECEIPT_UNREADABLE)}</p>'
     cls = "ticket-ok" if receipt["ok"] else "ticket-error"
     parts = [f'ticket <code>{esc(receipt["key"])}</code>', esc(receipt["status"])]
     if receipt.get("url"):
         parts.append(f'<code>{esc(receipt["url"])}</code>')
     if receipt.get("reason"):
         parts.append(esc(receipt["reason"]))
-    return f'<p class="ticket-line {cls}">{" — ".join(parts)}</p>'
+    return f'<p class="ticket-line {cls}">{TICKET_LINE_LABEL} {" — ".join(parts)}</p>'
 
 
 def render_knowledge_banner(run_dir: Path) -> str:
@@ -494,7 +498,7 @@ def _headline_cost(cost: LedgerCost) -> str:
 
 
 def render_runtime_page(run_dir: Path, *, cost: LedgerCost) -> str:
-    """The run's page. The ticket line shows whenever the run has a receipt (#1471 W7).
+    """The run's page. The ticket line shows whenever the run has a receipt (#1471 W7), as the job's own report (r9).
 
     `cost` is the ledger's one read, required: every dollar on the page comes from it (#1377 r7.2 P1)."""
     case_id = run_dir.name
