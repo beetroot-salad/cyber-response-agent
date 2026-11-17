@@ -26,7 +26,7 @@ def produce() -> dict[str, Any]:
 
 
 def main() -> None:
-    DOCUMENT.write_text(json.dumps(produce(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    DOCUMENT.write_text(json.dumps(produce(), indent=2, sort_keys=True) + "\n", encoding="utf-8")  # lint-unguarded-tree-write: ok — a developer command regenerating its own committed file in the repo checkout, not a shared tenant tree  # noqa: E501
     print(f"wrote {DOCUMENT}")
 
 

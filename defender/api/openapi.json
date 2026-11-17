@@ -239,10 +239,6 @@
       "CaseRecord": {
         "description": "The tenant's case write-back record as its current version stands (#1470 O6).",
         "properties": {
-          "comment_body": {
-            "title": "Comment Body",
-            "type": "string"
-          },
           "system_id": {
             "title": "System Id",
             "type": "string"
@@ -254,8 +250,7 @@
         },
         "required": [
           "version",
-          "system_id",
-          "comment_body"
+          "system_id"
         ],
         "title": "CaseRecord",
         "type": "object"
@@ -264,10 +259,6 @@
         "additionalProperties": false,
         "description": "The case record's next version, whole; `replaces` as a system write's (P2).",
         "properties": {
-          "comment_body": {
-            "title": "Comment Body",
-            "type": "string"
-          },
           "replaces": {
             "title": "Replaces",
             "type": "integer"
@@ -279,8 +270,7 @@
         },
         "required": [
           "replaces",
-          "system_id",
-          "comment_body"
+          "system_id"
         ],
         "title": "CaseRecordPut",
         "type": "object"
@@ -765,6 +755,11 @@
             ],
             "title": "Status",
             "type": "string"
+          },
+          "update_ticket": {
+            "description": "Whether this investigation posts its outcome to its ticket.",
+            "title": "Update Ticket",
+            "type": "boolean"
           }
         },
         "required": [
@@ -775,7 +770,8 @@
           "attempt",
           "cost_usd",
           "cost_is_lower_limit",
-          "created_at"
+          "created_at",
+          "update_ticket"
         ],
         "title": "Investigation",
         "type": "object"
@@ -794,6 +790,12 @@
             "minLength": 1,
             "title": "Client Request Id",
             "type": "string"
+          },
+          "update_ticket": {
+            "default": false,
+            "description": "Whether the investigation posts its outcome to the alert's ticket when it ends. Refused (409) when the alert names no ticket. A repeated request, or one answered with an alert's live investigation, keeps that investigation's own flag.",
+            "title": "Update Ticket",
+            "type": "boolean"
           }
         },
         "required": [
@@ -3725,7 +3727,7 @@
         ]
       },
       "put": {
-        "description": "Write the case record's next version, judged in the same response; `replaces` as a system write's. The system it\nnames must be one of the tenant's enabled systems, and the comment body a template that renders (422, `faults`).",
+        "description": "Write the case record's next version, judged in the same response; `replaces` as a system write's. The system it\nnames must be one of the tenant's enabled systems (422, `faults`).",
         "operationId": "put_case_record_api_tenants__tenant_id__case_record_put",
         "parameters": [
           {
@@ -3952,7 +3954,7 @@
         ]
       },
       "post": {
-        "description": "Start an investigation of an alert. While one of the alert's investigations is live, it\nis returned and nothing starts; otherwise a new one starts (a rerun, if an earlier one ended).\n\nRepeating a request with its `client_request_id` returns the investigation that request\nstarted (200). A request answered with an investigation that was already live started\nnothing, so repeating it later is a new request. A new investigation for a tenant with no\nsaved alert mapping is refused (409), naming how to save one.",
+        "description": "Start an investigation of an alert. While one of the alert's investigations is live, it\nis returned and nothing starts; otherwise a new one starts (a rerun, if an earlier one ended).\n\nRepeating a request with its `client_request_id` returns the investigation that request\nstarted (200). A request answered with an investigation that was already live started\nnothing, so repeating it later is a new request. A new investigation for a tenant with no\nsaved alert mapping is refused (409), naming how to save one. With `update_ticket`, an alert that names no ticket\nis refused too (409).",
         "operationId": "start_investigation_api_tenants__tenant_id__investigations_post",
         "parameters": [
           {
