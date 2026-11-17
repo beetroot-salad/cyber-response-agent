@@ -14,8 +14,8 @@ from ._lookup import (
     read_database,
 )
 from ._record import (
-    BaselineEntry, CeilingEntry, ClosingRecord, baseline_line, baseline_lines_length, canonical_instant,
-    ceiling_line, ceiling_lines_length, entry_lines,
+    BaselineEntry, CeilingEntry, ClosingRecord, baseline_line, baseline_line_of, baseline_lines_length,
+    canonical_instant, ceiling_line, ceiling_line_of, ceiling_lines_length, entry_lines,
 )
 from ._treat import DOTS, treat
 from ._vocab import (
@@ -39,7 +39,7 @@ __all__ = [
     "OUTCOMES", "POINTER_UNREADABLE", "REASONING_BOUND", "RECORDED_BEFORE_1534", "RESULT_BOUND",
     "ROSTER_GONE", "ROW_INVALID", "SCHEMA_VERSION_KIND", "STAGE_ERROR", "STANDS", "STORE_UNREADABLE",
     "SUMMARY_BOUND", "TABLE", "TIMEOUT", "UNREADABLE", "BaselineEntry", "CeilingEntry", "ClosingRecord",
-    "CouldNotLook", "Lookup", "NeverClosed", "Record", "baseline_line", "baseline_lines_length",
-    "canonical_instant", "ceiling_line", "ceiling_lines_length", "encode_entries", "entry_lines", "fault",
+    "CouldNotLook", "Lookup", "NeverClosed", "Record", "baseline_line", "baseline_line_of", "baseline_lines_length",
+    "canonical_instant", "ceiling_line", "ceiling_line_of", "ceiling_lines_length", "encode_entries", "entry_lines", "fault",
     "for_run", "read_database", "treat",
 ]

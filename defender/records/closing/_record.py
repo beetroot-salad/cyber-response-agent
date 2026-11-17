@@ -119,17 +119,30 @@ class BaselineEntry:
 def ceiling_line(entry: CeilingEntry) -> str:
     """The receipt's one line: `ceiling_test (<state>, <ref or cap>): <note>`; a receipt with no
     note renders without the `: <note>` part."""
-    target = entry.ref if entry.ref is not None else entry.cap
-    head = f"ceiling_test ({entry.state}, {target})" if target is not None else f"ceiling_test ({entry.state})"
-    return f"{head}: {entry.note}" if entry.note else head
+    return ceiling_line_of(state=entry.state, ref=entry.ref, cap=entry.cap, note=entry.note)
+
+
+def ceiling_line_of(*, state: str, ref: str | None, cap: str | None, note: str) -> str:
+    """`ceiling_line` over a receipt's parts, for a gate measuring rows not yet checked."""
+    target = ref if ref is not None else cap
+    head = f"ceiling_test ({state}, {target})" if target is not None else f"ceiling_test ({state})"
+    return f"{head}: {note}" if note else head
 
 
 def baseline_line(entry: BaselineEntry) -> str:
     """The baseline's one line: `<anchor kind> (<grounding>, <anchor id>, <lead>, <start>/<end>):
     <result>`, then ` — <reasoning>` when there is reasoning."""
-    line = (f"{entry.anchor_kind} ({entry.grounding_kind}, {entry.anchor_id}, {entry.lead}, "
-            f"{entry.window_start}/{entry.window_end}): {entry.result}")
-    return f"{line} — {entry.reasoning}" if entry.reasoning else line
+    return baseline_line_of(
+        lead=entry.lead, anchor_kind=entry.anchor_kind, grounding_kind=entry.grounding_kind,
+        anchor_id=entry.anchor_id, window=f"{entry.window_start}/{entry.window_end}", result=entry.result,
+        reasoning=entry.reasoning)
+
+
+def baseline_line_of(*, lead: str, anchor_kind: str, grounding_kind: str, anchor_id: str, window: str,  # noqa: PLR0913 — the line's parts
+                     result: str, reasoning: str) -> str:
+    """`baseline_line` over a baseline's parts, for a gate measuring rows not yet checked."""
+    line = f"{anchor_kind} ({grounding_kind}, {anchor_id}, {lead}, {window}): {result}"
+    return f"{line} — {reasoning}" if reasoning else line
 
 
 def ceiling_lines_length(entries: tuple[CeilingEntry, ...]) -> int:

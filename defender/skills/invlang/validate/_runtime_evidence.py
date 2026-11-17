@@ -4,15 +4,12 @@ from __future__ import annotations
 import datetime as dt
 
 
-from collections.abc import Sequence
 
-from typing import Any
 
 
 from defender import _clock
 
 from defender._model import model
-from defender.records.formats import REPORT_CLOSE_DELIMITER
 
 
 
@@ -30,21 +27,6 @@ RUNTIME_EVIDENCE = "runtime-evidence"
 
 
 
-#: Text carrying the report's closing delimiter would break the report block boundary once
-#: rendered into `report.md`'s body, so it is refused before the document lands.
-_REPORT_CLOSE_DELIMITER = REPORT_CLOSE_DELIMITER
-
-
-
-
-def _delimiter_bearing_cell(row: Any, keys: Sequence[str]) -> str | None:
-    """The first of `keys` whose cell carries the report's closing delimiter, or `None`, so the
-    refusal can name the cell to rewrite."""
-    return next((key for key in keys if _REPORT_CLOSE_DELIMITER in _cell(row, key)), None)
-
-
-
-
 @model(frozen=True)
 class RuntimeEvidenceReceipt:
     """One parsed `:R consultations` baseline row.
@@ -56,8 +38,8 @@ class RuntimeEvidenceReceipt:
     @owns window_start
 
     The window is parsed once, here: the guard compares `window_end` with the alerted event and
-    `close_tool.render_report` shows `window` as written. Frozen because it travels from the
-    projection through the close into `report.md`.
+    the close stores the parsed instants canonically. Frozen because it travels from the
+    projection through the close into the closing record.
     """
 
     resolved_by_lead: str
@@ -110,41 +92,7 @@ def _alerted_moment(companion: CompanionBody) -> dt.datetime | None:
 
 
 
-#: Bound on the report-body text baseline consultations render, charged on the rendered block
-#: (as `_MAX_CEILING_FRONTMATTER_BYTES` is). `_artifact_schema.REPORT_FILE_MAX` caps the whole
-#: report at 8192 bytes while the invlang write gate allows 65536, so consultations the write
-#: gate accepted could otherwise render a report the close refuses permanently. Sized to leave
-#: room for the frontmatter, the ceiling notes and the close's own text.
-_MAX_RUNTIME_EVIDENCE_BODY_BYTES = 2048
-
-
-
-
-def runtime_evidence_block(receipts: Sequence[RuntimeEvidenceReceipt]) -> str:
-    """@owns runtime_evidence
-
-    The `report.md` body lines for `receipts`: one per baseline, naming the grounding, entry,
-    owning lead and window, then the model's free text. The one renderer, so the bounding gate
-    and `close_tool.render_report` measure the same bytes. Each line starts with a newline;
-    empty when there are no receipts.
-    """
-    out = ""
-    for r in receipts:
-        out += (
-            f"\n{r.anchor_kind} ({r.grounding_kind}, {r.anchor_id}, {r.resolved_by_lead}, "
-            f"{r.window}): {r.result}"
-        )
-        if r.reasoning:
-            out += f" — {r.reasoning}"
-    return out
-
-
-
-
-#: Every cell `runtime_evidence_block` copies into `report.md`'s body; keep the two in step.
-#: The delimiter guard covers all of them, not just the free-text ones: `anchor_id` is an open
-#: column, and a `</report>` in any rendered cell would make the close refuse a report whose
-#: append-only source row can never be withdrawn.
+#: Every cell a baseline's line renders (`records.closing.baseline_line`): a row's identity.
 _RENDERED_BASELINE_CELLS: tuple[str, ...] = (
     "anchor_kind", "grounding_kind", "anchor_id", "resolved_by_lead",
     "effective_window", "result", "reasoning",
@@ -156,7 +104,7 @@ _RENDERED_BASELINE_CELLS: tuple[str, ...] = (
 @model(frozen=True)
 class _BaselineWalk:
     """One walk of the `:R consultations` baseline rows: the accepted receipts in document
-    order and every row-level refusal. Shared by the guard and the report reader, as
+    order and every row-level refusal. Shared by the guard and the record builder, as
     `_CeilingWalk` is."""
 
     receipts: tuple[RuntimeEvidenceReceipt, ...]
@@ -188,29 +136,18 @@ def _walk_runtime_evidence_rows(companion: CompanionBody) -> _BaselineWalk:
             f"lead {lead_id or '?'}: `:R consultations` baseline "
             f"{_cell(row, 'anchor_id') or '<no anchor_id>'}"
         )
-        # Deduplicated as in `_walk_ceiling_rows`: a repeat renders twice and spends the body
-        # budget twice. The identity is the whole rendered line, not the addressing cells:
+        # Deduplicated as in `_walk_ceiling_rows`: a repeat renders twice and spends the
+        # column's budget twice. The identity is the whole rendered line, not the addressing cells:
         # `anchor_id` is optional, so two measurements by one lead over one window are legal.
         identity = tuple(_cell(row, cell) for cell in _RENDERED_BASELINE_CELLS)
         if identity in seen:
             errors.append(
                 f"{where}: repeats an earlier baseline verbatim — a second copy measures "
-                f"nothing further and renders the same line into the committed report twice. "
+                f"nothing further and renders the same line into the closing record twice. "
                 f"Write one row per measurement"
             )
             continue
         seen.add(identity)
-        # Every rendered cell is held to the `ceiling_test` note rule: a delimiter here would
-        # make the close refuse the report, and the append-only row cannot be withdrawn.
-        delimiter = _delimiter_bearing_cell(row, _RENDERED_BASELINE_CELLS)
-        if delimiter is not None:
-            errors.append(
-                f"{where}: `{delimiter}` carries the literal {_REPORT_CLOSE_DELIMITER!r}, which "
-                f"the committed report may not carry — this text rides into `report.md`'s body, "
-                f"and a close that renders it is refused with no way left to repair the row. "
-                f"Rewrite the cell without it"
-            )
-            continue
         parsed = _parse_window(window)
         if parsed is None:
             errors.append(
@@ -221,7 +158,7 @@ def _walk_runtime_evidence_rows(companion: CompanionBody) -> _BaselineWalk:
             )
             continue
         start, end = parsed
-        # Built first and judged on its own parsed fields, so the guard and the report read one
+        # Built first and judged on its own parsed fields, so the guard and the record read one
         # value.
         receipt = RuntimeEvidenceReceipt(
             resolved_by_lead=lead_id,
@@ -262,14 +199,6 @@ def _walk_runtime_evidence_rows(companion: CompanionBody) -> _BaselineWalk:
             )
             continue
         receipts.append(receipt)
-    body_bytes = len(runtime_evidence_block(tuple(receipts)).encode("utf-8"))
-    if body_bytes > _MAX_RUNTIME_EVIDENCE_BODY_BYTES:
-        errors.append(
-            f"the accumulated `{RUNTIME_EVIDENCE}` consultations render "
-            f"{body_bytes} bytes of `report.md` body, over the "
-            f"{_MAX_RUNTIME_EVIDENCE_BODY_BYTES}-byte bound — state the recurrence and its "
-            f"scope, not every occurrence in full"
-        )
     return _BaselineWalk(receipts=tuple(receipts), errors=tuple(errors))
 
 
@@ -286,8 +215,8 @@ def _check_runtime_evidence_windows(companion: CompanionBody) -> list[str]:
 def conclude_runtime_evidence_rows(companion: CompanionBody) -> tuple[RuntimeEvidenceReceipt, ...]:
     """The `:R consultations` baseline receipts the guard accepted, in document order.
 
-    Public for the reason `conclude_ceiling_test_rows` is: the close carries them into
-    `report.md` itself. Uses the guard's own walk so only accepted rows ship, and takes the
+    Public for the reason `conclude_ceiling_test_rows` is: the close builds its record from
+    them. Uses the guard's own walk so only accepted rows ship, and takes the
     parsed companion the close already has.
     """
     return _walk_runtime_evidence_rows(companion).receipts

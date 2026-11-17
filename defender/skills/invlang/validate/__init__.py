@@ -189,8 +189,6 @@ from ._gating import (
     _lead_returned_a_result,
     _row_states_something,
     _weight_text,
-    ceiling_note_block,
-    ceiling_test_block,
     conclude_ceiling_test_rows,
     conclude_runtime_evidence_rows,
     disposition_entry_price,
@@ -200,8 +198,8 @@ from ._gating import (
     hold_capabilities,
     known_capabilities,
     release_capabilities,
-    runtime_evidence_block,
 )
+from ._entry_bounds import entry_bound_refusals
 from ._closure import (
     _Commitment,
     _NON_CLOSING_FIELDS,
@@ -282,6 +280,9 @@ def diagnose(
     found.extend(_plain(_check_authz_basis(companion)))
     found.extend(_plain(_check_tacit_lookup_outcomes(companion)))
     found.extend(_plain(_check_runtime_evidence_windows(companion)))
+    # The closing record's entry bounds, for every disposition (#1534 OD16); the close checks
+    # them again beside the entry price.
+    found.extend(_plain(entry_bound_refusals(companion)))
     found.extend(_plain(_check_screen_structure(companion)))
     # Bound once: `_check_authz_contract_closure` defers to this output, and running the gate
     # twice is the most expensive thing in the pass.
@@ -507,16 +508,14 @@ __all__ = [
     "CEILING_QUERY_FAILED",
     "CEILING_STATES",
     "CeilingReceipt",
-    "ceiling_note_block",
-    "ceiling_test_block",
     "class_slots",
     "conclude_ceiling_test_rows",
     "conclude_runtime_evidence_rows",
     "dataclass",
     "diagnose",
     "disposition_entry_price",
+    "entry_bound_refusals",
     "entry_price",
-    "runtime_evidence_block",
     "effective_vertex_state",
     "exhausted_contract_ids",
     "CapabilitiesNotRead",
