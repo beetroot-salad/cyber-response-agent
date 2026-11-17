@@ -16,6 +16,8 @@ from defender.tests.support.shared._fixture_uuid import fixture_uuid
 RUN = fixture_uuid("closing-1534-run")
 CASE = "c1534"
 WINDOW = ("2026-03-01T10:00:00Z", "2026-03-01T11:00:00Z")
+#: Canonical instants: UTC with `Z`, microseconds present exactly when non-zero.
+MICRO_WINDOW = ("2026-03-01T10:00:00.250000Z", "2026-03-01T11:00:00.000500Z")
 
 
 def _entries():
@@ -28,7 +30,8 @@ def _entries():
                                  anchor_id="policy-7", window_start=WINDOW[0], window_end=WINDOW[1],
                                  result="hit: allowed", reasoning="the policy permits it"),
                  C.BaselineEntry(lead="l-002", anchor_kind=C.ANCHOR_KINDS[-1], grounding_kind=C.GROUNDING_KINDS[-1],
-                                 anchor_id="x", window_start=WINDOW[0], window_end=WINDOW[1], result="miss", reasoning="r"))
+                                 anchor_id="x", window_start=MICRO_WINDOW[0], window_end=MICRO_WINDOW[1], result="miss",
+                                 reasoning="r"))
     return ceiling, baselines
 
 
@@ -132,14 +135,14 @@ def test_v_fields_entry_values_must_be_members_of_the_moved_vocabularies():
 
 
 def test_v_fields_the_moved_vocabularies_are_the_ones_invlang_checks_with():
-    """`ANCHOR_KINDS`, `CEILING_STATES` and the consultation groundings are the invlang vocabularies, moved down. (V-FIELDS)"""
+    """`ANCHOR_KINDS`, `GROUNDING_KINDS` and `CEILING_STATES` equal the invlang vocabularies they moved from. (V-FIELDS)"""
     from defender.records import closing as C
     from defender.skills.invlang import vocab
     from defender.skills.invlang.validate import _ceiling
 
-    assert tuple(C.ANCHOR_KINDS) == tuple(vocab.ANCHOR_KINDS)
+    assert C.ANCHOR_KINDS == vocab.ANCHOR_KINDS
+    assert C.GROUNDING_KINDS == vocab.CONSULTATION_GROUNDING
     assert tuple(C.CEILING_STATES) == tuple(_ceiling.CEILING_STATES)
-    assert set(vocab.CONSULTATION_GROUNDING) <= set(C.GROUNDING_KINDS)
 
 
 def test_v_fields_the_column_vocabularies_are_the_designs():
@@ -163,25 +166,98 @@ def test_v_fields_the_column_vocabularies_are_the_designs():
     }
     assert (C.SUMMARY_BOUND, C.NOTE_BOUND, C.ANCHOR_ID_BOUND, C.LEAD_BOUND, C.RESULT_BOUND, C.REASONING_BOUND) == (
         1500, 400, 200, 64, 400, 400)
-    assert (C.CEILING_COUNT_CAP, C.BASELINE_COUNT_CAP, C.CEILING_LINES_BOUND, C.BASELINE_LINES_BOUND) == (16, 32, 2048, 2048)
+    assert (C.CEILING_COUNT_CAP, C.CEILING_LINES_BOUND, C.BASELINE_LINES_BOUND) == (16, 2048, 2048)
+    assert not hasattr(C, "BASELINE_COUNT_CAP"), "the baseline count cap is retired; the aggregate binds"
 
 
-def test_v_fields_each_entry_renders_to_one_line_carrying_its_facts():
-    """`ceiling_line` and `baseline_line` hold the entry's state, reference, text and window, on one line. (V-FIELDS)"""
+def test_v_fields_each_entry_renders_to_one_line_and_a_baseline_line_carries_its_window_as_start_over_end():
+    """`ceiling_line` and `baseline_line` give one line; a baseline's window is its canonical `start/end`. (V-FIELDS)"""
     from defender.records import closing as C
 
     ceiling, baselines = _entries()
     for entry in ceiling:
-        line = C.ceiling_line(entry)
-        assert "\n" not in line
-        assert entry.state in line
-        assert entry.note in line
-        assert entry.ref is None or entry.ref in line
+        assert "\n" not in C.ceiling_line(entry)
     for entry in baselines:
         line = C.baseline_line(entry)
         assert "\n" not in line
-        for part in (entry.lead, entry.anchor_id, entry.result, entry.reasoning):
-            assert part in line
+        assert f"{entry.window_start}/{entry.window_end}" in line
+
+
+def test_v_fields_a_window_with_microseconds_round_trips_canonical_with_them(tmp_path):
+    """A window instant with non-zero microseconds reads back as written (`...:00.250000Z`), a whole-second one without. (V-FIELDS)"""
+    from defender.records import closing as C
+
+    ceiling, baselines = _entries()
+    run_dir, _db = V.closed_run(tmp_path, {"ceiling_test": ceiling, "runtime_evidence": baselines})
+    got = C.for_run(V.handle(run_dir))
+    assert isinstance(got, C.Record)
+    assert [(b.window_start, b.window_end) for b in got.record.runtime_evidence] == [WINDOW, MICRO_WINDOW]
+
+
+# --- construction-time treatment (L-1) -------------------------------------------------------------------------------
+
+def _model_text_fields():
+    """`(name, bound, builder)`: each bounded model-text field, built into its record or entry with a given text."""
+    from defender.records import closing as C
+
+    def baseline(**kw):
+        fields = {"lead": "l-001", "anchor_kind": C.ANCHOR_KINDS[0], "grounding_kind": C.GROUNDING_KINDS[0], "anchor_id": "a",
+                  "window_start": WINDOW[0], "window_end": WINDOW[1], "result": "r", "reasoning": "r", **kw}
+        return C.BaselineEntry(**fields)
+
+    return [
+        ("summary", C.SUMMARY_BOUND, lambda t: V.a_record(RUN, summary=t).summary),
+        ("note", C.NOTE_BOUND, lambda t: C.CeilingEntry(state=C.CEILING_STATES[0], ref=None, cap=None, note=t).note),
+        ("anchor_id", C.ANCHOR_ID_BOUND, lambda t: baseline(anchor_id=t).anchor_id),
+        ("lead", C.LEAD_BOUND, lambda t: baseline(lead=t).lead),
+        ("result", C.RESULT_BOUND, lambda t: baseline(result=t).result),
+        ("reasoning", C.REASONING_BOUND, lambda t: baseline(reasoning=t).reasoning),
+    ]
+
+
+@pytest.mark.parametrize("name", ["summary", "note", "anchor_id", "lead", "result", "reasoning"])
+def test_l1_a_model_text_field_holds_its_treated_value_or_the_construction_refuses(name):
+    """Treated text is kept as is; untreated or oversize text builds as `treat(text, bound)` or raises, never else. (L-1, V-TEXT)"""
+    from defender.records import closing as C
+
+    _name, bound, build = next(f for f in _model_text_fields() if f[0] == name)
+    treated = C.treat("see https://evil.example/x ok", bound)
+    assert build(treated) == treated, "already-treated text was altered"
+    untreated = ["see https://evil.example/x\tand  more", "a\u200bb\x00c d", "word " * (bound + 5), "x" * (bound + 1)]
+    outcomes = set()
+    for text in untreated:
+        try:
+            got = build(text)
+        except ValueError:
+            outcomes.add("refused")
+            continue
+        assert got == C.treat(text, bound), (name, text, got)
+        outcomes.add("treated")
+    assert outcomes
+
+
+def test_l1_an_unresolved_record_with_no_summary_is_refused_and_the_same_with_a_summary_builds():
+    """`unresolved` with summary None raises `ValueError`; every other disposition may carry none. (L-1, V-FIELDS)"""
+    from defender._vocab import DISPOSITION_VALUES
+
+    assert V.a_record(RUN, disposition="unresolved", cause=_not_reviewed(), summary="s")
+    with pytest.raises(ValueError, match="summary"):
+        V.a_record(RUN, disposition="unresolved", cause=_not_reviewed(), summary=None)
+    for disposition in DISPOSITION_VALUES:
+        if disposition != "unresolved":
+            assert V.a_record(RUN, disposition=disposition, cause=_stands_cause(disposition), summary=None)
+
+
+def _not_reviewed():
+    from defender.records import closing as C
+
+    return C.CAUSE_NOT_REVIEWED
+
+
+def _stands_cause(disposition):
+    from defender.records import closing as C
+
+    return C.CAUSE_CEILING_EXAMINED if disposition == "inconclusive" else C.CAUSE_STORY_SETTLED
 
 
 # --- the openers -----------------------------------------------------------------------------------------------------
@@ -376,6 +452,29 @@ def test_v_look_a_file_that_is_not_a_database_is_store_unreadable(tmp_path):
     _assert_fault(C.for_run(V.handle(run_dir)), "store-unreadable", database)
 
 
+@pytest.mark.parametrize("breakage", [
+    pytest.param("view-over-missing-table", id="view-over-a-missing-table"),
+    pytest.param("table-without-a-column", id="table-lacking-a-column"),
+])
+def test_v_look_a_row_query_that_errors_at_read_time_is_store_unreadable(tmp_path, breakage):
+    """The schema version and table name are intact but the row query fails: `store-unreadable`, not another kind. (V-LOOK)"""
+    from defender.records import closing as C
+
+    run_dir, database = V.closed_run(tmp_path, {})
+    assert isinstance(C.for_run(V.handle(run_dir)), C.Record), "premise: the intact database reads"
+    conn = sqlite3.connect(database)
+    try:
+        conn.execute(f"DROP TABLE {V.TABLE}")
+        if breakage == "view-over-missing-table":
+            conn.execute(f"CREATE VIEW {V.TABLE} AS SELECT * FROM no_such_table_1534")
+        else:
+            conn.execute(f"CREATE TABLE {V.TABLE} (run_id TEXT PRIMARY KEY)")
+        conn.commit()
+    finally:
+        conn.close()
+    _assert_fault(C.for_run(V.handle(run_dir)), "store-unreadable", database)
+
+
 @pytest.mark.parametrize("version", [0, 3, 99])
 def test_v_look_a_database_at_another_schema_version_is_schema_version(tmp_path, version):
     """`PRAGMA user_version` other than the writer's: `schema-version`. (V-LOOK)"""
@@ -407,8 +506,8 @@ def test_v_look_a_database_without_the_table_is_recorded_before_1534_and_the_rea
         conn.close()
 
 
-def test_v_look_a_pre_1235_link_in_the_run_folder_is_legacy_link_and_not_never_closed(tmp_path):
-    """A legacy link in the folder and no pointer beside it: `legacy-link`; a folder with neither is `NeverClosed`. (V-LOOK)"""
+def test_v_look_a_pre_1235_link_in_the_run_folder_is_legacy_link_only_when_no_pointer_sits_beside_it(tmp_path):
+    """A legacy link and no pointer: `legacy-link`; the same link beside a pointer: the pointer's `Record`; neither: `NeverClosed`. (V-LOOK)"""
     from defender.records import closing as C
     from defender.records.session_store._schema import _LEGACY_LINK_NAME
 
@@ -420,6 +519,13 @@ def test_v_look_a_pre_1235_link_in_the_run_folder_is_legacy_link_and_not_never_c
 
     assert isinstance(C.for_run(V.handle(neither)), C.NeverClosed)
     _assert_fault(C.for_run(V.handle(legacy)), "legacy-link", base)
+
+    pointed, _database = V.closed_run(tmp_path, {}, run_name="closing-1534-pointed")
+    assert isinstance(C.for_run(V.handle(pointed)), C.Record), "premise: the pointer reads"
+    (pointed / _LEGACY_LINK_NAME).write_text(CASE, encoding="utf-8")
+    got = C.for_run(V.handle(pointed))
+    assert isinstance(got, C.Record), "a link a box can write hid the run's own record"
+    assert got.record.run_id == pointed.name
 
 
 #: `id: (record fields, column, stored value)`; the fields are resolved against `C` when the case runs.
@@ -433,6 +539,7 @@ ROW_FAULTS = {
     "stands-with-a-failure-kind": ({}, "failure_kind", "timeout"),
     "stands-with-another-outcomes-cause": ({}, "cause", "CAUSE_NOT_REVIEWED"),
     "stands-unresolved-with-a-settled-cause": ({}, "disposition", "unresolved"),
+    "unresolved-with-no-summary": ("unresolved-stands", "summary", None),
     "forced-with-a-disposition-that-is-not-unresolved": ("forced", "disposition", "benign"),
     "forced-draft-cleared": ("forced", "drafted_disposition", None),
     "forced-draft-unresolved": ("forced", "drafted_disposition", "unresolved"),
@@ -450,6 +557,8 @@ def test_v_look_a_stored_row_outside_the_vocabulary_or_breaking_the_invariant_is
     if fields == "forced":
         fields = {"disposition": "unresolved", "outcome": C.FORCED_INCONCLUSIVE, "cause": C.CAUSE_REVIEW_INCOMPLETE,
                   "failure_kind": C.TIMEOUT, "drafted_disposition": "benign"}
+    elif fields == "unresolved-stands":
+        fields = {"disposition": "unresolved", "cause": C.CAUSE_NOT_REVIEWED, "summary": "The run was cut short."}
     elif fields == "forced-undecided":
         fields = {"disposition": "unresolved", "outcome": C.FORCED_INCONCLUSIVE,
                   "cause": C.CAUSE_EVIDENCE_CANNOT_DISCRIMINATE, "failure_kind": None, "drafted_disposition": "benign"}

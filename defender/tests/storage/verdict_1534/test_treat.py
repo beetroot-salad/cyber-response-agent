@@ -5,6 +5,7 @@ known pieces where the expected output is known by construction, so no test re-i
 from __future__ import annotations
 
 import random
+import re
 import unicodedata
 
 import pytest
@@ -149,18 +150,74 @@ def test_v_text_the_cut_falls_before_a_host_that_would_straddle_it():
     assert C.treat("see alpha.bravo.charlie.delta", 12) == "see…"
 
 
-@pytest.mark.parametrize("text", ["(alpha.bravo.charlie.delta", "(10.20.30.40", "(www.example-host.example.com"],
-                         ids=["host", "ipv4", "www-host"])
-def test_v_text_a_hard_cut_never_leaves_part_of_a_host_or_address_and_never_a_raw_dot(text):
-    """With no space to cut at, no bound leaves a piece of the host or IPv4 token; at most the `(` before it. (V-TEXT)"""
+@pytest.mark.parametrize(("text", "bound", "expected"), [
+    ("abcdefghijklmnop", 8, "abcdefg…"),
+    ("(alpha.bravo.charlie.delta", 12, "(…"),
+    ("(10.20.30.40", 8, "(…"),
+], ids=["control-no-dot-keeps-bound-minus-one", "host-backs-off-to-its-start", "ipv4-backs-off-to-its-start"])
+def test_v_text_a_hard_cut_keeps_text_and_backs_off_only_over_a_dotted_run(text, bound, expected):
+    """With no space before the bound: `bound - 1` characters and the ellipsis, backing off to the start of a dotted run. (V-TEXT)"""
     from defender.records import closing as C
 
-    for bound in range(4, 16):
-        out = C.treat(text, bound)
-        assert len(out) <= bound, (bound, out)
-        assert out.endswith(C.ELLIPSIS), (bound, out)
-        assert out[:-1] in ("", "("), (bound, out)
-        assert "." not in out, (bound, out)
+    assert C.treat(text, bound) == expected
+
+
+DOTS = ".。．｡"
+#: A scheme preceded by a non-letter or the start (the defang rule's own word boundary), an IPv4 address, and a
+#: host-shaped token: labels joined by raw dot-set characters ending in an alphabetic label of two or more letters.
+_SCHEME = re.compile(r"(?<![^\W\d_])(?:https?|ftp)://", re.IGNORECASE)
+_IPV4 = re.compile(r"(?<![\w.])\d{1,3}(?:\.\d{1,3}){3}(?![\w])")
+_HOST = re.compile(r"(?<![-\w])(?:[-\w]+[.。．｡])+[^\W\d_]{2,}(?![-\w])")
+
+
+def _cut_inputs() -> list[str]:
+    """Seeded strings of every shape the cut meets, plus runs shaped like `foo.example1zzz…` and `10.0.0.255x…`."""
+    rng = random.Random(15345)
+    parts = ("foo", "example", "a1", "zzz", "10", "255", "x", "(", "-", "/", "http://", "HTTPS://", "ftp://", "www.", "[.]",
+             ".", ".", ".", "。", "．", "｡", " ", "e", "1", "@")
+    texts = ["".join(rng.choice(parts) for _ in range(rng.randint(1, 30))) for _ in range(600)]
+    for pad in range(0, 12):
+        texts.append("foo.example1" + "z" * pad)
+        texts.append("(foo.example1" + "z" * pad)
+        texts.append("10.0.0.255x" + "y" * pad)
+        texts.append("see 10.0.0.255x" + "y" * pad)
+        texts.append("foo.example.com.example1" + "z" * pad)
+    return texts
+
+
+def test_v_text_a_cut_text_is_a_fixed_point_with_no_partial_host_scheme_or_split_dot_at_every_bound():
+    """Over arbitrary strings and every bound: idempotent, within the bound, no `[.]` split, nothing left undefanged. (V-TEXT)"""
+    from defender.records import closing as C
+
+    cut = 0
+    for text in _cut_inputs():
+        for bound in range(2, 48):
+            out = C.treat(text, bound)
+            assert C.treat(out, bound) == out, (text, bound, out)
+            assert len(out) <= bound, (text, bound, out)
+            assert out.count("[") == out.count("[.]") == out.count("]"), (text, bound, out)
+            assert not _SCHEME.search(out), (text, bound, out)
+            assert not _IPV4.search(out), (text, bound, out)
+            assert not _HOST.search(out), (text, bound, out)
+            cut += out.endswith(C.ELLIPSIS)
+    assert cut > 5000, "the generated inputs cut too rarely to say anything"
+
+
+def test_v_text_a_cut_with_no_space_and_no_dot_character_keeps_exactly_bound_minus_one_characters():
+    """No space and no dot-set character before the bound: `bound - 1` characters of the text, then the ellipsis. (V-TEXT)"""
+    from defender.records import closing as C
+
+    rng = random.Random(15346)
+    checked = 0
+    for _ in range(400):
+        text = "".join(rng.choice("abcXYZ019-/:(") for _ in range(rng.randint(1, 60)))
+        for bound in range(2, 40):
+            whole = C.treat(text, None)
+            assert not any(d in whole for d in DOTS)
+            if len(whole) > bound:
+                assert C.treat(text, bound) == whole[: bound - 1] + C.ELLIPSIS, (text, bound)
+                checked += 1
+    assert checked > 5000
 
 
 def test_v_text_no_bound_cuts_inside_a_defanged_dot():

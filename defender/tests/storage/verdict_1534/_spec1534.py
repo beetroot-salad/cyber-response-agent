@@ -122,6 +122,7 @@ def corrupt(database: Path, run_id: str, column: str, value: Any) -> None:
     assert column in SCALAR_COLUMNS, column
     conn = sqlite3.connect(database, timeout=30)
     try:
+        conn.execute("PRAGMA ignore_check_constraints = ON")  # reach the reader's own check, not the schema's
         conn.execute(f"UPDATE {TABLE} SET {column} = ? WHERE run_id = ?", (value, run_id))  # noqa: S608
         conn.commit()
     finally:

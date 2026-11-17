@@ -1,4 +1,4 @@
-"""#1534 V-NOFILE: product code and model-facing text no longer name `report.md` or a report member.
+"""#1534 V-NOFILE: no code reaches the retired `report.md`: product, tests, evaluations; model-facing text does not name it.
 
 The wire names `no_report` and `report_committed` stay; `docs/archive/` is history. The product line is
 `tooling/lint/lint_shippable_surface.EXCLUDED_PREFIXES`. An exempted line carries `# lint-report-file: ok — <reason>`."""
@@ -17,9 +17,25 @@ REPO = Path(__file__).resolve().parents[4]
 EXEMPT = "# lint-report-file: ok"
 _PRODUCT_FLOOR = 300
 NAMED_FILE = re.compile(r"report\.md")
-#: Names whose use as code is a reach into the retired file: its layout member, its readers and writer.
-REACH_NAMES = frozenset({"report", "report_text", "report_path", "REPORT", "read_report", "require_report",
-                         "validate_report", "render_report", "normalize_disposition", "ReportRead"})
+#: Retired readers and types, reached by name (an import of one, a call of one, an attribute chain ending in one).
+RETIRED_NAMES = frozenset({"read_report", "parse_report", "parse_report_text", "require_report", "render_report",
+                           "ReportUnreadable", "ReportRead"})
+#: Retired constants for the file's name.
+RETIRED_CONSTANTS = frozenset({"REPORT_NAME"})
+#: `<base>.report` is the retired layout member when the base resolves to one of these (or a `RunPaths(...)` call).
+LAYOUT_BASES = frozenset({"RUN_LAYOUT", "documents", "WORLD_LEAVES"})
+#: Tests that deliberately plant or name a legacy `report.md` (legacy-link kinds, archive "no report copied" decoys,
+#: judge decoys, this test): exempt by path from the test-side walk. The list is a proposal for the owner to confirm.
+LEGACY_PLANTERS = frozenset({
+    "defender/tests/storage/verdict_1534/test_report_file_gone.py",
+    "defender/tests/storage/verdict_1534/test_closing_record.py",
+    "defender/tests/storage/ids_1187/test_retire_command.py",
+    "defender/tests/learning/branch/test_triplet_archive.py",
+    "defender/tests/support/learning/branch/_triplet_947.py",
+    "defender/tests/learning/judge/test_family_facts.py",
+    "defender/tests/learning/judge/test_render.py",
+    "defender/tests/learning/judge/test_cut_short_decision.py",
+})
 #: Listed by the design's "Removal": docs, the records table, the stylesheet, the held-out README.
 LISTED = ("defender/docs/run-records.md", "defender/docs/learning-loop.md", "defender/docs/runtime-development.md",
           "defender/docs/runtime-gates.md", "defender/docs/case-history-write-path.md", "defender/docs/run-records-kinds.tsv",
@@ -56,14 +72,43 @@ def named_lines(source: str) -> list[str]:
     return [ln for ln in source.splitlines() if NAMED_FILE.search(ln) and EXEMPT not in ln]
 
 
-def reaches(source: str) -> list[str]:
-    """The lines of Python `source` that use a report member's name as code (not prose), unless exempted."""
+def _chain(node: ast.AST) -> str:
+    """The dotted name of an attribute chain, a call shown as `name(...)`; `?` where the chain is not a name."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return f"{_chain(node.value)}.{node.attr}"
+    if isinstance(node, ast.Call):
+        return f"{_chain(node.func)}(...)"
+    return "?"
+
+
+def reaches(source: str, *, constants: bool = False) -> list[str]:
+    """The lines of Python `source` that reach the retired file: an import of `records._report` or of a retired name, a
+    retired reader or type by name, a `.report` member of the layout, or (with `constants`) the file-name literal or constant."""
     lines = source.splitlines()
+    tree = ast.parse(source)
+    docstrings = {id(n.body[0].value) for n in ast.walk(tree)
+                  if isinstance(n, ast.Module | ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) and n.body
+                  and isinstance(n.body[0], ast.Expr) and isinstance(n.body[0].value, ast.Constant)}
     found = set()
-    for node in ast.walk(ast.parse(source)):
-        name = (node.attr if isinstance(node, ast.Attribute) else node.id if isinstance(node, ast.Name)
-                else node.name if isinstance(node, ast.alias | ast.FunctionDef | ast.ClassDef) else None)
-        if name in REACH_NAMES or (isinstance(node, ast.ImportFrom) and (node.module or "").endswith("_report")):
+    for node in ast.walk(tree):
+        hit = False
+        if isinstance(node, ast.ImportFrom):
+            hit = ((node.module or "").endswith("_report")
+                   or any(a.name == "_report" or a.name in RETIRED_NAMES or a.name in RETIRED_CONSTANTS for a in node.names))
+        elif isinstance(node, ast.Import):
+            hit = any(a.name.endswith("_report") for a in node.names)
+        elif isinstance(node, ast.Name):
+            hit = node.id in RETIRED_NAMES
+        elif isinstance(node, ast.Attribute):
+            base = node.value.func if isinstance(node.value, ast.Call) else node.value
+            tail = _chain(base).rsplit(".", 1)[-1]
+            hit = (node.attr in RETIRED_NAMES or (node.attr in RETIRED_CONSTANTS and constants)
+                   or (node.attr == "report" and (tail in LAYOUT_BASES or (isinstance(node.value, ast.Call) and tail == "RunPaths"))))
+        elif constants and isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docstrings:
+            hit = bool(NAMED_FILE.search(node.value))
+        if hit:
             found.add(node.lineno)
     return [lines[n - 1] for n in sorted(found) if EXEMPT not in lines[n - 1]]
 
@@ -72,9 +117,16 @@ def test_v_nofile_the_detector_finds_each_form_and_skips_exempted_lines_and_wire
     """Control: the file's name and each member form are found; `no_report`, `report_committed` and an exempted line are not. (V-NOFILE)"""
     for line in ("x = run / 'report.md'", "# writes report.md", "see `report.md` in the folder"):
         assert named_lines(line), line
-    for line in ("x = RUN_LAYOUT.report", "x = documents.report", "from a import read_report", "def render_report(): ...",
-                 "from defender.records._report import X", "y = world.report_text"):
+    for line in ("x = RUN_LAYOUT.report", "x = documents.report", "x = WORLD_LEAVES.report", "x = RunPaths(a, b).report",
+                 "x = records.RUN_LAYOUT.report", "from a import read_report", "x = m.parse_report_text(t)", "require_report(r)",
+                 "y: ReportUnreadable", "from defender.records._report import X", "from defender.records import _report",
+                 "import defender.records._report"):
         assert reaches(line), line
+    for line in ("x = run / 'report.md'", "x = _layout.REPORT_NAME"):
+        assert reaches(line, constants=True), line
+    for line in ("x = other.report", "x = report", "report = 1", "y = world.report_text", "def f(report): return report"):
+        assert reaches(line) == [], line
+    assert reaches('def f():\n    """Mentions report.md."""\n', constants=True) == []
     for line in ("'no_report'", "committed = row.report_committed", "no_report = 1", "reporting = 2"):
         assert named_lines(line) == []
         assert reaches(line) == [], line
@@ -82,15 +134,26 @@ def test_v_nofile_the_detector_finds_each_form_and_skips_exempted_lines_and_wire
 
 
 def test_v_nofile_no_product_python_names_the_file_or_a_report_member():
-    """No product `.py` spells `report.md` or uses a report member as code. (V-NOFILE)"""
+    """No product `.py` spells `report.md` or reaches the retired file's reader, type, layout member or module. (V-NOFILE)"""
     files = _product("defender/*.py")
     assert len(files) >= _PRODUCT_FLOOR, f"the walk found only {len(files)} product files"
     found = {}
     for rel in files:
         text = (REPO / rel).read_text(encoding="utf-8")
-        if hits := [*named_lines(text), *reaches(text)]:
+        if hits := [*named_lines(text), *reaches(text, constants=True)]:
             found[rel] = hits
     assert found == {}, f"{len(found)} product file(s) still name the retired file: {sorted(found)}"
+
+
+def test_v_nofile_no_test_or_evaluation_code_reaches_the_retired_file():
+    """No test or evaluation `.py` outside the legacy planters reaches the retired file (import, reader, layout member, literal). (V-NOFILE)"""
+    files = [rel for rel in _tracked("defender/tests/*.py", "evaluations/*.py") if rel not in LEGACY_PLANTERS]
+    assert len(files) >= _PRODUCT_FLOOR, f"the walk found only {len(files)} test and evaluation files"
+    found = {}
+    for rel in files:
+        if hits := reaches((REPO / rel).read_text(encoding="utf-8"), constants=True):
+            found[rel] = hits
+    assert found == {}, f"{len(found)} test or evaluation file(s) still reach the retired file: {sorted(found)}"
 
 
 def test_v_nofile_no_model_facing_text_names_the_file():
