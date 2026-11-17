@@ -71,6 +71,13 @@ comment's wording is fixed) and the operator's `run.py --update-ticket` (an oper
 write-back token). A ticket comment is now the start-investigation request's `update_ticket` flag. The run page's own
 `--update-ticket` flag is gone too: its ticket line shows whenever a receipt exists, as the job's own report.
 
+A case system's stored access declaration must now declare exactly one write, its adapter's comment route spelled as
+the adapter spells it (the same method and segments, `*` only where the route has `*`), and only GET reads. A wider
+write that used to cover the route (a `*` in place of a literal), a second write route, or any non-GET read is refused:
+by `PUT /systems/<id>` and `tenant check`, and at run start, where a flagged investigation then ends with an `error`
+receipt and no comment (the request is still accepted). After upgrading, run `tenant check` for each tenant with a case
+record and re-save any case system it names with `PUT /systems/<id>`.
+
 The credential proxy now forwards only an allowed list of an adapter's request headers (`Content-Type`, `Accept`,
 `User-Agent`, `Idempotency-Key`, in any case) and drops every other one, the request still going; a credential header
 is still refused. A tenant adapter that relied on another header reaching its system loses it.

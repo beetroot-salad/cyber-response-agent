@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from defender.kit.faults import AdapterFault, ConfigFault, TransportFault, UpstreamFault
@@ -53,6 +53,17 @@ REASON_NO_TICKET = (
     "holds none a ticket key can be made of")
 REASON_NO_TOKEN = (
     "the write-back token could not be minted, so the comment was not sent (see the run log)")
+REASON_NO_WRITE_SYSTEM = (
+    "the case system is not reached through the credential proxy, so no write-back token was minted "
+    "for it and the comment was not sent")
+
+#: What a write-pass ask answers (#1471 W5): the token and the proxy's address, or the receipt reason it gives none.
+AskPass = Callable[[], "tuple[str, str] | str"]
+
+
+def _escalation_body(truncated_by: str, link: str) -> str:
+    """The escalation note, then the screen link: the comment an escalated or forced-close exit posts."""
+    return f"{case_ticket.escalation_comment_body(truncated_by)}\n{link}"
 
 
 def _comment_body(run: Run, truncated_by: str | None, link: str) -> tuple[str, str]:
@@ -66,7 +77,7 @@ def _comment_body(run: Run, truncated_by: str | None, link: str) -> tuple[str, s
         rec = case_ticket.read_case_record(run)
     except case_ticket.ReportNotParsable:
         if truncated_by in run_end.FORCED_CLOSE_EXITS:
-            return f"{case_ticket.escalation_comment_body(str(truncated_by))}\n{link}", RECEIPT_ESCALATED
+            return _escalation_body(str(truncated_by), link), RECEIPT_ESCALATED
         return f"{case_ticket.unreadable_comment_body()}\n{link}", RECEIPT_COMMENTED
     return f"{rec.disposition}\n{link}", RECEIPT_COMMENTED
 
@@ -113,6 +124,7 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
     truncated_by: str | None = None, closed_before_cut: bool = False,
     request_token: str | None = None, proxy_url: str | None = None,
     case: case_system.CaseTarget | case_system.CaseSettingsFault, link: str,
+    ask_pass: AskPass | None = None,
 ) -> None:
     """Record the investigation into the case, never close it: at most one comment on the ticket
     the alert names, no transition. Closing is a person's act, which is what lets the store's
@@ -121,7 +133,11 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
 
     `case` is the case system's verdict run start made (`case_system.case_verdict`), the one the
     write-back token was minted on; required (#1366 R16): the step never judges the record over
-    a roster of its own. `link` is the investigation screen's address, which the worker built: the comment's last part."""
+    a roster of its own. `link` is the investigation screen's address, which the worker built: the comment's last part.
+
+    `ask_pass` (a job, #1471 W5) asks for the write pass when no `request_token` was handed: only once the run will
+    comment, its case system is usable and its alert names a ticket, so a silent ending or a keyless alert signs
+    nothing. It answers the token and the proxy's address, or the receipt reason it got none."""
     run_dir = run.run_dir
     key = ""
     try:
@@ -139,11 +155,17 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
         if not key:
             _leg_refused(run, key, REASON_NO_TICKET)
             return
+        if not request_token and ask_pass is not None:
+            asked = ask_pass()
+            if isinstance(asked, str):
+                _leg_refused(run, key, asked)
+                return
+            request_token, proxy_url = asked
         if not request_token:  # every case system is reached through the credential proxy
             _leg_refused(run, key, REASON_NO_TOKEN)
             return
         if escalated(truncated_by, closed_before_cut):
-            body, word = f"{case_ticket.escalation_comment_body(str(truncated_by))}\n{link}", RECEIPT_ESCALATED
+            body, word = _escalation_body(str(truncated_by), link), RECEIPT_ESCALATED
         else:
             body, word = _comment_body(run, truncated_by, link)
         _post_comment(run, target, key, body, word,

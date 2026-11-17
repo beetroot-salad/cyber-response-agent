@@ -522,3 +522,132 @@ def test_1471_w7_the_operator_command_refuses_update_ticket_as_an_unknown_argume
     assert refused.value.code == 2
     err = capsys.readouterr().err
     assert "unrecognized arguments: --update-ticket" in err, err
+
+
+# ======================================================================================
+# #1471 PR #1542 review: the job asks for its write pass inside the record step, over the verdict run start made.
+# ======================================================================================
+
+class _Asks:
+    """A write-pass ask (`record_case_ticket(ask_pass=)`): counts its calls and answers `answer`, or raises it."""
+
+    def __init__(self, answer: Any) -> None:
+        self.answer, self.calls = answer, 0
+
+    def __call__(self) -> Any:
+        self.calls += 1
+        if isinstance(self.answer, BaseException):
+            raise self.answer
+        return self.answer
+
+
+def _asked_run(tmp_path: Path, root: Path, shim: S.ProxyStandIn, asks: _Asks, *, key: str | None = C.TICKET_KEY,
+               truncated_by: str | None = None) -> Path:
+    """`_run`, but with no token handed: the record step asks `asks` for it."""
+    run_dir = _run_dir(tmp_path)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    C.plant_record(run_dir, key=key)
+    S.record_step(run_dir, S.resolve(root), env={}, link=_link(run_dir), truncated_by=truncated_by,
+                  ask_pass=asks)
+    return run_dir
+
+
+def test_1471_review_the_record_step_asks_once_for_its_pass_and_posts_under_it(tmp_path, monkeypatch):
+    """No token handed: the record step asks once, and the comment goes out under the pass it was answered. (W5)"""
+    root, _folder = _world(tmp_path)
+    shim = _shim(tmp_path, monkeypatch)
+    asks = _Asks((_pass(_run_dir(tmp_path)), shim.url))
+    run_dir = _asked_run(tmp_path, root, shim, asks)
+
+    assert asks.calls == 1, asks.calls
+    assert len(C.comment_calls(shim)) == 1, shim.requests()
+    got = S.receipt(run_dir)
+    assert got is not None and (got["status"], got["ok"]) == (C.COMMENTED, True), got
+
+
+@pytest.mark.parametrize("case", ["silent ending", "keyless alert", "bad case settings"])
+def test_1471_review_the_record_step_asks_for_no_pass_when_it_will_not_comment(tmp_path, monkeypatch, case):
+    """A run that ends silently, an alert that names no ticket, or a case system whose settings are faulty: nothing is
+    asked, so nothing is signed, and the receipt keeps its own reason. (W5)"""
+    root, folder = _world(tmp_path)
+    if case == "bad case settings":
+        S.set_key(folder, "ticket", "TICKET_TIMEOUT_SEC", "ten")
+    shim = _shim(tmp_path, monkeypatch)
+    asks = _Asks(("unused", shim.url))
+    run_dir = _asked_run(tmp_path, root, shim, asks, key=None if case == "keyless alert" else C.TICKET_KEY,
+                         truncated_by="budget" if case == "silent ending" else None)
+
+    assert asks.calls == 0, f"a pass was asked for a run that will not comment ({case})"
+    assert shim.requests() == [], shim.requests()
+    got = S.receipt(run_dir)
+    if case == "silent ending":
+        assert got is None, got
+    else:
+        assert got is not None and got["status"] == C.ERROR, got
+        assert (C.REASON_NO_KEY in got["reason"]) == (case == "keyless alert"), got
+
+
+def test_1471_review_a_refused_ask_is_the_receipt_reason_it_answered(tmp_path, monkeypatch):
+    """The ask answers a reason instead of a pass: no call, and that reason is the receipt's. (W5)"""
+    root, _folder = _world(tmp_path)
+    shim = _shim(tmp_path, monkeypatch)
+    reason = S.mod("investigation.ticket_writer").REASON_NO_WRITE_SYSTEM
+    run_dir = _asked_run(tmp_path, root, shim, _Asks(reason))
+
+    assert shim.requests() == [], shim.requests()
+    got = S.receipt(run_dir)
+    assert got is not None and (got["status"], got["reason"]) == (C.ERROR, reason), got
+
+
+def test_1471_review_an_ask_that_raises_is_an_error_receipt_never_the_run(tmp_path, monkeypatch):
+    """The ask raises: the record step's own guard holds it, an error receipt naming only the type. (W2: a post-step
+    never breaks the run)"""
+    root, _folder = _world(tmp_path)
+    shim = _shim(tmp_path, monkeypatch)
+    run_dir = _asked_run(tmp_path, root, shim, _Asks(TypeError("/host/secret/path")))
+
+    got = S.receipt(run_dir)
+    assert got is not None and got["status"] == C.ERROR, got
+    assert "TypeError" in got["reason"] and "/host/secret/path" not in got["reason"], got
+
+
+def test_1471_review_the_helper_s_refusals_map_to_product_reasons_and_never_carry_its_text():
+    """`run._ask_write_pass`: the helper's `no-ticket` and `no-write-system` refusals are the record step's own reasons;
+    any other refusal, a lost socket or an answer with no token is the no-token reason; the helper's text never
+    reaches the receipt. A good answer is the token and the proxy's address. (W5)"""
+    from defender import job_socket
+    from defender import run as run_py
+    from defender.investigation import ticket_writer as tw
+
+    def asking(outcome: Any) -> Any:
+        def request(*_a: Any, **_k: Any) -> Any:
+            if isinstance(outcome, BaseException):
+                raise outcome
+            return outcome
+        return request
+
+    cases = [
+        (job_socket.Refused("x", "no-ticket"), tw.REASON_NO_TICKET),
+        (job_socket.Refused("x", "no-write-system"), tw.REASON_NO_WRITE_SYSTEM),
+        (job_socket.Refused("RuntimeError: /host/secret", "sign-fault"), tw.REASON_NO_TOKEN),
+        (OSError("gone"), tw.REASON_NO_TOKEN),
+        ({"token": "", "proxy_url": "http://p"}, tw.REASON_NO_TOKEN),
+        ({"proxy_url": "http://p"}, tw.REASON_NO_TOKEN),
+        ({"token": "t", "proxy_url": "http://p"}, ("t", "http://p")),
+    ]
+    for outcome, wanted in cases:
+        assert run_py._ask_write_pass(asking(outcome), "job-1") == wanted, outcome
+
+
+def test_1471_review_a_crash_judging_the_case_at_run_start_is_held_as_a_fault_not_raised():
+    """Run start's case judgement crashes (here: a tenant object it cannot read): the job's setup gets a case-settings
+    fault naming only the crash's type, and nothing is raised, so the run goes on. (#1366 R16, W2)"""
+    from types import SimpleNamespace
+
+    from defender import run as run_py
+    from defender.systems import case_system
+
+    got = run_py._case_at_start(SimpleNamespace(), SimpleNamespace(roster=None), job="job-1")
+
+    assert isinstance(got, case_system.CaseSettingsFault), got
+    assert "AttributeError" in str(got), got

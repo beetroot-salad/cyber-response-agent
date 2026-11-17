@@ -978,6 +978,9 @@ class _Started:
     as_of: ClockOrigin | None = None
     #: The data root this entry point resolved, handed to the run's box start (#1469: the box check's folder).
     check_root: Path = dataclasses.field(kw_only=True)
+    #: A flagged job's case system, judged once at run start (#1366 R16, #1471 W2): the verdict its record step uses
+    #: and its write pass is asked on. `None` on a run that never comments.
+    case: case_system.CaseTarget | case_system.CaseSettingsFault | None = dataclasses.field(default=None, kw_only=True)
 
     def lifecycle_kwargs(self, ns: argparse.Namespace) -> dict[str, Any]:
         # The origin only when set, so a lifecycle seam that predates it is called as before.
@@ -1238,7 +1241,6 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
     visualize: Callable[..., None] = _run.visualize,
     enqueue: Callable[..., bool] = _run.enqueue_curation,
     enqueue_feedback: Callable[..., bool] = _run.enqueue_feedback_issue,
-    ticket_writer: Any = None,  # accepted and ignored: an operator run never comments (#1471 W7); older seams still pass it
     preflight: Callable[..., int] = preflight_role_models,
     materialize: Callable[..., Run] = _materialize_run,
     oracle: Any = None,
@@ -1512,45 +1514,64 @@ def _set_up_in_container(  # noqa: PLR0913 — the request, its launch facts, th
     rc = preflight(ns.model)
     if rc:
         raise _PreflightRefused(rc)
+    case = _case_at_start(tenant, systems, job=ns.job) if launch.get("post_ticket") is True else None
     # The run's id, announced as the first line of stdout (#1279 O5), before the box exists.
     print(f"run_id={run.run_dir.name}", flush=True)
     return _Started(accepted=accepted, tenant=tenant, run=run, model=model, world=None, episode=None,
                     systems=systems, seams={}, alert=RunPaths(run.run_dir).alert, minting=passes,
-                    check_root=tenancy.data_root_for_child(data_root))
+                    check_root=tenancy.data_root_for_child(data_root), case=case)
 
 
-def _ask_write_pass(request: Callable[..., dict[str, Any]], job: str) -> dict[str, Any]:
-    """The helper's one write pass for this flagged job (`pass.write_back`, #1471 W5), or `{}` when it refuses or cannot
-    be asked: the record step then says the write-back token could not be minted."""
+def _case_at_start(tenant: RunTenant, systems: RunSystems, *, job: str) -> case_system.CaseTarget | case_system.CaseSettingsFault:
+    """A flagged job's case system, judged once at run start over the roster the run reads (#1366 R16). The judgement
+    loads the adapter, so a crash in it is held as the record step's fault, never the run's: the run goes on, and the
+    receipt names only the crash's type (its text may carry a host path; the log has it)."""
+    try:
+        return case_system.case_verdict(tenant, defender_dir=DEFENDER_DIR, roster=systems.roster)
+    except Exception as crashed:  # noqa: BLE001 — the comment's judgement must never stop the run
+        _logger.warning("job %s: judging the case system raised: %r", job, crashed)
+        return case_system.CaseSettingsFault(
+            case_system.CASE_RECORD_POINTER, f"its case system could not be judged ({type(crashed).__name__}); see the run log")
+
+
+#: The helper's refusals of a write pass that are the record step's own reasons (#1471 W5); any other refusal, or no
+#: answer, is a token that could not be minted. The helper's own text never reaches the receipt.
+_WRITE_PASS_REFUSALS = {
+    "no-ticket": _default_ticket_writer.REASON_NO_TICKET,
+    "no-write-system": _default_ticket_writer.REASON_NO_WRITE_SYSTEM,
+}
+
+
+def _ask_write_pass(request: Callable[..., dict[str, Any]], job: str) -> tuple[str, str] | str:
+    """The helper's one write pass for this flagged job (`pass.write_back`, #1471 W5): the token and the proxy's
+    address, or the receipt reason it gave none."""
     try:
         answer = request("pass.write_back", id=job, ask=uuid.uuid4().hex)
-    except (job_socket.Refused, OSError, ValueError) as refused:
-        _logger.warning("job %s: the helper gave no write pass (%s)", job, refused)
-        return {}
-    token, url = answer.get("token"), answer.get("proxy_url")
-    return {"request_token": token, "proxy_url": url} if isinstance(token, str) and isinstance(url, str) else {}
+    except job_socket.Refused as refused:
+        _logger.warning("job %s: the helper refused the write pass (%s): %s", job, refused.code, refused)
+        return _WRITE_PASS_REFUSALS.get(str(refused.code), _default_ticket_writer.REASON_NO_TOKEN)
+    except (OSError, ValueError) as lost:
+        _logger.warning("job %s: the helper gave no write pass (%r)", job, lost)
+        return _default_ticket_writer.REASON_NO_TOKEN
+    token, url = (answer.get("token"), answer.get("proxy_url")) if isinstance(answer, dict) else (None, None)
+    if isinstance(token, str) and token and isinstance(url, str):
+        return token, url
+    _logger.warning("job %s: the helper's write-pass answer holds no token and proxy address", job)
+    return _default_ticket_writer.REASON_NO_TOKEN
 
 
-def _job_ticket_step(started: _Started, summary: dict[str, Any], launch: dict[str, Any],
+def _job_ticket_step(started: _Started, summary: dict[str, Any], launch: Mapping[str, Any],
                      request: Callable[..., dict[str, Any]], job: str) -> None:
-    """The flagged job's one comment on its ticket (#1471 W2): the record step's own rules, over the case system judged
-    here, with the screen link the worker handed the helper. A write pass is asked for only when the run will comment
-    and its alert names a ticket, so a silent ending or a keyless alert signs nothing (W5)."""
-    run = started.run
-    truncated_by = summary.get("truncated_by")
-    closed_before_cut = summary.get("closed_before_cut") is True
-    case = case_system.case_verdict(started.tenant, defender_dir=DEFENDER_DIR, roster=started.systems.roster)
-    token: dict[str, Any] = {}
-    # a case system whose settings are faulty signs nothing: the record step then receipts the fault (X2, W5)
-    if (isinstance(case, case_system.CaseTarget) and _default_ticket_writer.comments_on(truncated_by, closed_before_cut)
-            and _default_ticket_writer.ticket_key(run)):
-        token = _ask_write_pass(request, job)
+    """The flagged job's one comment on its ticket (#1471 W2): the record step over the case system run start judged,
+    with the screen link the worker handed the helper. The record step asks for the write pass itself, inside its own
+    guard, once it knows the run will comment on a usable case system and its alert names a ticket (W5)."""
+    case = started.case if started.case is not None else case_system.CaseSettingsFault(
+        case_system.CASE_RECORD_POINTER, "was not judged at run start")
     _default_ticket_writer.record_case_ticket(
-        run, tenant=started.tenant, defender_dir=DEFENDER_DIR,
-        env=box_mod.run_env(DEFENDER_DIR, run.run_dir, tenant_agent=started.tenant.agent),
-        truncated_by=truncated_by, closed_before_cut=closed_before_cut,
-        case=case,
-        link=str(launch.get("ticket_link") or ""), **token)
+        started.run, tenant=started.tenant, defender_dir=DEFENDER_DIR,
+        env=box_mod.run_env(DEFENDER_DIR, started.run.run_dir, tenant_agent=started.tenant.agent),
+        truncated_by=summary.get("truncated_by"), closed_before_cut=summary.get("closed_before_cut") is True,
+        case=case, link=str(launch.get("ticket_link") or ""), ask_pass=lambda: _ask_write_pass(request, job))
 
 
 def job_main(  # noqa: PLR0913 — the job entry's inputs plus its injection seams
