@@ -10,7 +10,7 @@ import signal
 import sys
 import threading
 import dataclasses as _dataclasses
-from collections.abc import Collection, Iterator
+from collections.abc import Callable, Collection, Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -52,7 +52,7 @@ def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the kn
     world: ResumeWorld | None = None,
     mapping: AlertMapping | None = None, knowledge: KnowledgeSource | None = None,
     launch: Launched | None = None, alert_digest: str | None = None,
-    started_at: _dt.datetime | None = None,
+    started_at: _dt.datetime | None = None, on_admitted: Callable[[str], None] | None = None,
 ) -> Run:
     """Build the run directory of a fresh run and return the tenant-bound handle the run's later
     records are saved through. No caller names the run's id (#1279 A3): `run` is the handle the
@@ -75,6 +75,9 @@ def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the kn
     `alert_digest` is the digest a job's helper was handed by its worker at the helper's own start (#1471 P-5): when
     given it replaces the launch record's, which then decides nothing about the alert.
 
+    `on_admitted` is handed the alert record's text as derived from the bytes admitted, in memory, before any file is
+    written: a caller that must act on the facts of exactly those bytes takes them here, never from the file later (#1471 P-5).
+
     `started_at` is the start the stamp records when the run clock does not start now (`--as-of`,
     #1347 O5); `None` is the wall time."""
     if not alert.is_file():
@@ -93,6 +96,8 @@ def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the kn
             run = tenant.runs_repository().create()
         except RunRefused as refused:
             sys.exit(str(refused))
+    if on_admitted is not None:
+        on_admitted(front_door.record)
     run_dir = run.run_dir
 
     # A sidecar beside the dir is a trace of an earlier run at this id; nothing clears it.

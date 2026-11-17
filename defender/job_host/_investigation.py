@@ -60,12 +60,13 @@ class _WritePass:
     answer: dict[str, Any] | None = None
 
 
-def _alert_ticket(made: Any) -> str | None:
-    """The ticket the alert names, from the facts recorded off the bytes `materialize_run` admitted: one read of the
-    worker's alert file serves the digest check and the ticket (#1471 P-5)."""
+def _alert_ticket(record_text: str | None) -> str | None:
+    """The ticket the alert names, from the record text `materialize_run` derived from the bytes it admitted and handed
+    over in memory: one read of the worker's alert file serves the digest check and the ticket, and no file a job can
+    write is read back (#1471 P-5)."""
     from defender.records import formats
 
-    record = formats.parse_alert_record(made.facts.alert_record.read() or "")  # lint-run-records: ok — the alert record's own facts, off the admitted bytes
+    record = formats.parse_alert_record(record_text or "")
     return None if record is None else record.facts.case_key
 
 
@@ -80,7 +81,7 @@ def _case_write_system(current: Any, run_tenant: Any) -> str | None:
 
 
 def _materialize(session: Session, accepted: Any, run: Any, launch: Any, mapping: Any, source: Any, *,
-                 digest: str) -> Any:
+                 digest: str, admitted: list[str]) -> Any:
     """The run folder, made by the helper (A6): its input and stamp, then the host-held knowledge record beside it."""
     from defender import run_common
     from defender.investigation.driver import resolve_main_model
@@ -88,7 +89,8 @@ def _materialize(session: Session, accepted: Any, run: Any, launch: Any, mapping
 
     try:
         made = run_common.materialize_run(launch.alert, run=run, tenant=accepted, model=resolve_main_model(None),
-                                          mapping=mapping, knowledge=source, launch=launch, alert_digest=digest)
+                                          mapping=mapping, knowledge=source, launch=launch, alert_digest=digest,
+                                          on_admitted=admitted.append)
     except TenantRefused as refused:
         raise SetupRefused(str(refused)) from None
     except SystemExit as refused:
@@ -148,7 +150,8 @@ def prepare(session: Session, hold: contextlib.ExitStack) -> Prepared:  # noqa: 
         verdict = setup_step(run_common.tenant_verdict, run_tenant, roster, warn=False)
         reads = grant(verdict.tenant)
         passes = first_pass(session, accepted, records, reads, always=True)
-        made = _materialize(session, accepted, run, launch, mapping, source, digest=session.alert_digest)
+        record_texts: list[str] = []
+        made = _materialize(session, accepted, run, launch, mapping, source, digest=session.alert_digest, admitted=record_texts)
         setup_step(run_common.write_versions_record, Path(made.run_dir), current)
     except BaseException:
         cleanup.close()
@@ -169,7 +172,7 @@ def prepare(session: Session, hold: contextlib.ExitStack) -> Prepared:  # noqa: 
         # its ticket, and the link it posts. The container asks for a write pass only when flagged.
         "post_ticket": session.post_ticket, "ticket_link": session.ticket_link,
     }
-    write = _WritePass(system=_case_write_system(current, run_tenant), ticket=_alert_ticket(made)) \
+    write = _WritePass(system=_case_write_system(current, run_tenant), ticket=_alert_ticket(record_texts[0] if record_texts else None)) \
         if session.post_ticket else None
     return Prepared(launch=facts, command=list(command), passes=passes, cleanup=cleanup,
                     state=_State(made, copy, accepted, launch.record.box_token, write), exited=_exited)
