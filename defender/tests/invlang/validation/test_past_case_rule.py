@@ -8,7 +8,7 @@ import pytest
 
 from defender._paths import PATHS
 from defender.tests.support.shared._fixture_uuid import fixture_uuid, is_fixture_uuid_shape
-from defender._vocab import DISPOSITION_VALUES
+from defender._vocab import DISPOSITION_VALUES, PROCESS_GAP_DISPOSITION
 from defender.skills.invlang.validate import diagnose, validate_companion
 
 EXAMPLE_B = PATHS.defender_dir / "examples" / "example-b-parallel-iam-cmdb.md"
@@ -109,8 +109,14 @@ def test_1221_a_benign_close_resting_on_past_cases_alone_is_refused(grounding):
     )
 
 
+#: The closes that read authorization contracts: `benign` needs every one `authorized`, and
+#: `unsanctioned-benign` every one `authorized` or worked to an exhausted search. Rule #27 says
+#: what `authorized` means, so it reaches both.
+_READS_AUTHORIZATION = {"benign", PROCESS_GAP_DISPOSITION}
+
+
 @pytest.mark.parametrize(
-    "disposition", [d for d in DISPOSITION_VALUES if d != "benign"],
+    "disposition", [d for d in DISPOSITION_VALUES if d not in _READS_AUTHORIZATION],
 )
 def test_1221_the_past_case_rule_is_benign_only(disposition):
     baseline = _errors(_with_disposition(_grounded("org-authority", cites=""), disposition))
@@ -122,6 +128,16 @@ def test_1221_the_past_case_rule_is_benign_only(disposition):
         )
         if disposition == "malicious":
             assert cited == [], f"a malicious close citing a past case was refused: {cited}"
+
+
+def test_a_past_case_cannot_authorize_an_unsanctioned_benign_close_either():
+    """Under `unsanctioned-benign` the same rule #27 refusal stands: the close reads contracts
+    through the one function `benign` does, so a past-case-only `authorized` is still refused."""
+    doc = _with_disposition(_grounded("past-case", cites=PRIOR_RUN), PROCESS_GAP_DISPOSITION)
+    assert any(
+        f"{PROCESS_GAP_DISPOSITION} blocked" in e and "ac1" in e and "past case" in e
+        for e in _errors(doc)
+    ), _errors(doc)
 
 
 def _row_error_everywhere(doc: str, why: str) -> list[str]:

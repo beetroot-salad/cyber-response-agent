@@ -12,8 +12,9 @@ from defender.tests.support.shared._fixture_uuid import fixture_uuid
 DEFENDER = Path(__file__).resolve().parents[4]
 GOLDEN_AB3 = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-sshpivot-ab3"
 
-#: The host-only fifth member, appended last to the ordered tuple. Safe only because it also
-#: sorts last: the refusal text and the tool schema are read in one round trip.
+#: The host-only member, kept last in the ordered tuple (not in sorted order, where
+#: `unsanctioned-benign` follows it): the refusal text and the tool schema are read in one round
+#: trip.
 MEMBER = "unresolved"
 
 #: The investigating model's own "I could not settle this", which must pay a `ceiling_test` price.
@@ -22,12 +23,13 @@ GAP_MEMBER = "inconclusive"
 #: What the no-review bypass does per member: `False` for the host's own verdict (skips review),
 #: `True` for every model-authored one (spends a review; `inconclusive` too, whose ceiling claim
 #: the review judges). Keyed over the whole enum, not written as a skip-set: a skip-set passes
-#: unchanged when a sixth member joins `DISPOSITION_ENUM`, so a new member must get a cell here.
+#: unchanged when a new member joins `DISPOSITION_ENUM`, so a new member must get a cell here.
 BYPASS_BY_MEMBER: dict[str, bool] = {
     "benign": True,
     "false-positive": True,
     GAP_MEMBER: True,
     "malicious": True,
+    "unsanctioned-benign": True,
     MEMBER: False,
 }
 
@@ -153,9 +155,17 @@ def paid(*rows: str, disposition: str = GAP_MEMBER, category: str = "data-ceilin
 
 
 def pays_every_price(disposition: str) -> str:
-    """A companion that owes nothing under any priced keyword, so one document can drive every
+    """A companion that owes nothing under `disposition`'s price, so one helper drives every
     member past the price gate. Each price is paid, not dodged: no `??` slot (benign), a
-    detection defect plus a lead that returned a result (false-positive), a paying receipt."""
+    detection defect plus a lead that returned a result (false-positive), a paying receipt.
+    `unsanctioned-benign` gets its own case: the open process-gap contract it needs is what
+    `benign` refuses, so no single document pays both."""
+    from defender._vocab import PROCESS_GAP_DISPOSITION
+
+    if disposition == PROCESS_GAP_DISPOSITION:
+        from defender.tests.support.invlang.validation._process_gap import document
+
+        return document()
     return doc(PROLOGUE, LEADS, LEAD_RESULT, conclude(
         disposition=disposition, confidence="high",
         **{"termination.category": "data-ceiling"},

@@ -377,7 +377,7 @@ Today's YAML `analyze:` envelope (per `soc-agent/agents/analyze.md`) is reshaped
 :A routing                                                       # PRESENT iff decision=halt
 decision               halt
 termination_category   trust-root | adversarial-refuted | severity-ceiling | exhaustion-escalation
-disposition            benign | false-positive | inconclusive | malicious
+disposition            benign | false-positive | inconclusive | malicious | unsanctioned-benign
                        # v2.18: was `benign | true_positive | unclear`.
                        # The live enum is `DISPOSITION_VALUES` in
                        # `defender/_vocab.py`; the other two spellings

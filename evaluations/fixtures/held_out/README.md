@@ -50,9 +50,9 @@ stable across launches so later scoring can associate their index rows with the 
 ## Labels
 
 A label is any disposition the agent can author: `benign`, `false-positive`, `inconclusive`,
-`malicious`. `unresolved` is recorded only by the host when a run ends without a settled finding,
+`malicious`, `unsanctioned-benign`. `unresolved` is recorded only by the host when a run ends without a settled finding,
 so it is never a right answer. Scoring is exact match, and `held_out.py` refuses the whole set if
-any fixture carries a label outside those four, naming each one — a typo must not become a class
+any fixture carries a label outside those five, naming each one — a typo must not become a class
 of its own.
 
 `benign` and `false-positive` are separate classes and are not interchangeable:
@@ -64,7 +64,19 @@ of its own.
   "cross-tier pivot" stitched together from two unrelated logins; an "off-hours sudo" fire during
   working hours).
 
-Write the rationale against that line. A case where the two readings are genuinely balanced is a
+`benign` and `unsanctioned-benign` are separate too, and the line between them is the
+authorization record:
+
+- **`benign`** needs a record that covers the activity (an approved change, a registry entry).
+- **`unsanctioned-benign`** — the same harmless activity with no record anywhere the playground's
+  systems could show one: the actor's own session is clean and the impact stays inside its
+  baseline, but nobody signed off (maintenance done without a change request). In the attack
+  catalog this is typically a legitimate scenario run with `cr_mode: none`.
+
+A fixture labelled `benign` whose case has no authorization record is mislabelled under this
+line; relabel it rather than scoring the agent against it.
+
+Write the rationale against those lines. A case where the two readings are genuinely balanced is a
 poor teaching case; pick another.
 
 ## Class balance
@@ -75,6 +87,7 @@ poor teaching case; pick another.
 | `false-positive` | 8 | 70% |
 | `inconclusive` | 8 | 70% |
 | `malicious` | 8 | 90% — 8/8 required |
+| `unsanctioned-benign` | not yet recruited | 70% |
 
 Per `defender/docs/learning-loop-actor-learning.md` §Ship criteria: with 8
 per class and a 90% malicious-recall floor, **any** malicious miss is a
@@ -97,7 +110,7 @@ the set and score its runs against the same frozen playground.
 
 ```yaml
 held_out: true              # marker — selects the fixture into the eval set
-disposition: benign | false-positive | inconclusive | malicious
+disposition: benign | false-positive | inconclusive | malicious | unsanctioned-benign
 class_axes:                 # optional taxonomy hints — not consumed by the loop
   source: <telemetry source, e.g. falco | system.auth | postgresql | keycloak>
   rule_class: <short slug>  # free-form, for stratified reporting

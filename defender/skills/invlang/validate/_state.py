@@ -822,21 +822,24 @@ def _check_vocab_class_cells(
     return list(dict.fromkeys(errors))
 
 
-def _check_benign_open_slots(companion: CompanionBody) -> list[str]:
-    """The open cells that block a benign close. Excludes `ident` (see IDENT_REFINEMENT_KEY)."""
+def _check_benign_open_slots(
+    companion: CompanionBody, *, keyword: str = "benign",
+) -> list[str]:
+    """The open cells that block a benign close (or `keyword`'s, which charges the same price).
+    Excludes `ident` (see IDENT_REFINEMENT_KEY)."""
     errors: list[str] = []
     for cell in iter_vertex_cells(companion, include_ident=False):
         if not cell.is_open:
             continue
         if cell.slot == SLOT_CLASS:
             errors.append(
-                f"disposition benign blocked: vertex {cell.vertex_id} still has an "
+                f"disposition {keyword} blocked: vertex {cell.vertex_id} still has an "
                 f"unresolved class ({cell.value!r}) — resolve via "
                 f":R attr_updates or escalate"
             )
         elif cell.slot.startswith(ATTR_PREFIX):
             errors.append(
-                f"disposition benign blocked: vertex {cell.vertex_id} attribute "
+                f"disposition {keyword} blocked: vertex {cell.vertex_id} attribute "
                 f"{cell.slot[len(ATTR_PREFIX):]!r} is still unresolved ({cell.value!r}) — "
                 f"resolve via :R attr_updates or escalate"
             )

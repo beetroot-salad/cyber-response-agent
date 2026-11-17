@@ -39,7 +39,8 @@ def test_invlang_carries_the_project_vocabulary_not_a_copy():
 
 def test_the_slot_order_is_stable():
     assert vocab.get_enum("disposition") == (
-        "benign", "false-positive", "inconclusive", "malicious", "unresolved",
+        "benign", "false-positive", "inconclusive", "malicious", "unsanctioned-benign",
+        "unresolved",
     )
 
 

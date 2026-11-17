@@ -25,7 +25,7 @@ story: |
   What is true in this world that is not true in the capture, and why an investigator would
   land somewhere else because of it.
 axis: the one axis this world varies, in one sentence
-disposition_declared: malicious | benign | false-positive | inconclusive
+disposition_declared: malicious | benign | unsanctioned-benign | false-positive | inconclusive
 label_basis: policy-rule | judgment
 ```
 
@@ -51,5 +51,11 @@ was captured, and it is what the sibling's own verdict is read against. It may m
 capture's disposition — a world where the verdict should HOLD despite a change that invites
 flipping it is a real measurement — but then say so in the story, because a world that neither
 moves the verdict nor tempts it to move measures nothing.
+Declare `unsanctioned-benign` only for a world where all three hold: no record authorizes the
+activity anywhere a served system could show one, the actor's own session is clean, and the
+consequence stays inside its baseline. A world where a record covers the activity is `benign`;
+one where a record says it was NOT allowed, or the session is not the actor's own, is
+`malicious`; one where the harm or the actor cannot be measured on any served system is
+`inconclusive`.
 `label_basis` says which kind of claim that is: `policy-rule` when the shipped detection rules
 settle it, `judgment` when it takes a reading a rule does not encode.
