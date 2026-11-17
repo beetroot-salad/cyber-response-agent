@@ -232,6 +232,16 @@ class VisibleAtEmit(logging.Handler):
 #: `<seen_dir>/<id>.json`, appends `start <id>` / `end <id>` to the events file, optionally waits for
 #: a release file, writes the spec's host records (paths relative to the runs container, `{id}`
 #: expanded) and exits with the spec's code. It never decides an outcome.
+#: A reserved `files` key (#1534): its value is `closing_plan(...)`; the child plants the run's closing record instead of a file.
+CLOSING_KEY = "{id}.closing-plant"
+
+
+def closing_plan(case: str, fields: dict[str, Any] | None, *, fault: str | None = None, unsealed: bool = False) -> str:
+    """The plan for `CLOSING_KEY`: `fields` (a `disposition`, valid fields filled in by the child) or None for a store with
+    the table and no row; `fault` is a `_readers1534` fault."""
+    return json.dumps({"case": case, "fields": fields, "fault": fault, "unsealed": unsealed})
+
+
 CHILD_SCRIPT = textwrap.dedent("""
     import json, os, signal, subprocess, sys, time
     from pathlib import Path
@@ -248,13 +258,56 @@ CHILD_SCRIPT = textwrap.dedent("""
         with open(spec["events"], "a", encoding="utf-8") as handle:
             handle.write(f"{kind} {run_id}\\n")
 
+    def plant_closing(plan):
+        # #1534: the run's pointer (store_path deliberately elsewhere: the worker derives the database from the case id),
+        # a real store with a main session and a sealed ledger, and the closing record or the fault `plan` names.
+        sys.path.insert(0, spec["worktree"])
+        from defender.records import session_store
+        from defender.records.session_store._write import open_store
+        from defender.tests.support.jobs._jobs1342 import _paths, session_db, session_pointer
+        from defender.tests.support.storage import _readers1534 as R
+        case = plan["case"]
+        pointer = runs / f"{run_id}.session-pointer.json"
+        fault = plan.get("fault")
+        if fault == "pointer-unreadable":
+            pointer.write_text("{not json", encoding="utf-8")
+            return
+        if fault == R.NO_POINTER:
+            return
+        if not pointer.exists():
+            pointer.write_text(session_pointer(case), encoding="utf-8")
+        if fault == "database-missing":
+            return
+        fresh = not session_db(runs, case).exists()
+        try:  # a test that broke the database or its version before this run left it so: nothing to plant in it
+            with open_store(case_id=case, sessions=_paths(runs)) as handle:
+                if fresh:
+                    handle.new_session("main")
+                try:
+                    rows = handle.connection.execute("SELECT count(*) FROM spend_ledger WHERE run_id = ?", (run_id,)).fetchone()[0]
+                except Exception:
+                    rows = 1
+                if rows == 0 and not plan.get("unsealed"):  # a run that wrote no ledger row ended cleanly: its ledger is sealed
+                    session_store.seal_ledger(handle, run_id)
+                if plan.get("fields") is not None:
+                    R.V.plant(handle, R.V.a_record(run_id, **{**R.valid_fields(plan["fields"]["disposition"]), **plan["fields"]}))
+        except Exception:
+            return
+        R.break_database(session_db(runs, case), run_id, fault)
+
     def leave_records():
         for rel in spec.get("dirs", []):
             (runs / fill(rel)).mkdir(parents=True, exist_ok=True)
+        closing = None
         for rel, text in spec.get("files", {}).items():
+            if rel == spec["closing_key"]:
+                closing = json.loads(text)
+                continue
             path = runs / fill(rel)
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text, encoding="utf-8")
+        if closing is not None:
+            plant_closing(closing)
         for rel, hexbytes in spec.get("binary", {}).items():
             path = runs / fill(rel)
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -435,7 +488,7 @@ class ScriptedChild:
 
     def spec_dict(self) -> dict[str, Any]:
         return {
-            "runs": str(self.runs), "seen_dir": str(self.seen_dir), "events": str(self.events_path),
+            "runs": str(self.runs), "worktree": str(WORKTREE), "closing_key": CLOSING_KEY, "seen_dir": str(self.seen_dir), "events": str(self.events_path),
             "files": self.files, "binary": self.binary, "sparse": self.sparse, "padded": self.padded, "links": self.links,
             "dirs": self.dirs, "exit": self.exit, "term": self.term, "term_mark": self.term_mark,
             "grandchild": self.grandchild, "print": self.printed, "die_by": self.die_by,

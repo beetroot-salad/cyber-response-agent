@@ -8,7 +8,9 @@ import logging
 import pytest
 
 from defender.records import job_lane, run_end
+from defender import _vocab
 from defender.tests.support.jobs._jobs1342 import (
+    CLOSING_KEY,
     NOW,
     WORKER_LOGGER,
     job_end,
@@ -20,6 +22,7 @@ from defender.tests.support.jobs._worker1342 import (
     MARKER,
     _child,
     _committed,
+    closing,
     _job_end_with,
     _names_code,
     _no_run_text,
@@ -201,3 +204,46 @@ async def test_o8_a_job_end_word_with_junk_anywhere_is_a_failed_run_with_no_repo
         stored = row(world["dsn"], inv)
         assert (stored["stage"], stored["disposition"], stored["failure_reason"]) == ("failed", None, "no_report"), stored
         _no_run_text(stored)
+
+
+# --- #1534: the disposition is the run's closing record, read through the job lane -------------------------------------
+
+@pytest.mark.parametrize("disposition", _vocab.DISPOSITION_VALUES)
+async def test_1534_a_committed_run_completes_with_the_disposition_of_its_closing_record(world, disposition):
+    """Every member of `DISPOSITION_VALUES` copies from the record in the database the pointer's case id names. (V-READERS, worker)"""
+    inv, stored = await _run_one(world, _child(world, files=_committed(**{CLOSING_KEY: closing(disposition)})))
+    assert (stored["stage"], stored["disposition"], stored["failure_reason"]) == ("completed", disposition, None), inv
+
+
+@pytest.mark.parametrize("fault", ["database-missing", "recorded-before-1534", "row-invalid", "pointer-unreadable"])
+async def test_1534_a_record_that_cannot_be_looked_up_is_unparseable_with_the_kinds_fixed_words(world, fault):
+    """`CouldNotLook` ends the row `unparseable`, `failure_message` is `FAULT_WORDING[kind]` and no detail or path. (V-READERS, worker)"""
+    from defender.records import closing as C
+
+    _inv, stored = await _run_one(world, _child(world, printed=MARKER, files=_committed(**{CLOSING_KEY: closing(fault=fault)})))
+    assert (stored["stage"], stored["disposition"]) == ("unparseable", None)
+    assert C.FAULT_WORDING[fault] in (stored["failure_message"] or ""), stored["failure_message"]
+    _no_run_text(stored)
+    assert str(world["tmp"]) not in json.dumps(stored, default=str), "a path (the lookup's detail) reached the row"
+    for other, wording in C.FAULT_WORDING.items():
+        if other != fault and wording not in C.FAULT_WORDING[fault]:
+            assert wording not in stored["failure_message"], f"{fault} reads as {other}"
+
+
+@pytest.mark.parametrize("committed", [True, False], ids=["committed", "not-committed"])
+@pytest.mark.parametrize("plan", [closing(None), closing(None, fault="no-pointer")], ids=["no-row", "no-pointer"])
+async def test_1534_a_run_with_no_record_is_unparseable_when_committed_and_no_report_when_not(world, plan, committed):
+    """`NeverClosed` with the report committed is `unparseable`; not committed, `failed/no_report`, as today. (V-READERS, worker)"""
+    files = _committed(**{CLOSING_KEY: plan, "{id}.job-end.json": job_end(report_committed=committed)})
+    _inv, stored = await _run_one(world, _child(world, files=files))
+    if committed:
+        assert (stored["stage"], stored["disposition"]) == ("unparseable", None)
+    else:
+        assert (stored["stage"], stored["failure_reason"]) == ("failed", "no_report")
+
+
+async def test_1534_a_record_beside_a_not_committed_job_end_is_never_read(world):
+    """The job-end record decides first: a record in the database does not make an uncommitted run complete. (V-READERS, worker)"""
+    _inv, stored = await _run_one(world, _child(world, files=_committed(**{
+        CLOSING_KEY: closing("malicious"), "{id}.job-end.json": job_end(report_committed=False)})))
+    assert (stored["stage"], stored["disposition"], stored["failure_reason"]) == ("failed", None, "no_report")

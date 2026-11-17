@@ -22,7 +22,11 @@ from typing import Any
 import pytest
 
 from defender.tests.support.runtime.engine._spec767 import (
-    HOST_CAUSE,
+    DEFAULT_NOTE,
+    NEVER_CLOSED,
+    host_cause,
+    long_entries,
+    narrative_of,
     WIRE_BOUND_BYTES,
     FakeStore,
     make_run,
@@ -141,10 +145,10 @@ def _ws(text: str) -> str:
 #: aborted arm of `record_case_ticket`): run-dir report text (None: a readable verdict) and the
 #: exit class handed in.
 BRANCHES = {
-    "verdict": {"text": None, "truncated_by": None},
-    "unreadable": {"text": "just prose, no fence\n", "truncated_by": None},
-    "escalation-aborted": {"text": None, "truncated_by": "aborted"},
-    "escalation-forced-close": {"text": "just prose, no fence\n", "truncated_by": "request-limit"},
+    "verdict": {"closed": True, "truncated_by": None},
+    "unreadable": {"closed": False, "truncated_by": None},
+    "escalation-aborted": {"closed": True, "truncated_by": "aborted"},
+    "escalation-forced-close": {"closed": False, "truncated_by": "request-limit"},
 }
 
 
@@ -155,15 +159,13 @@ def _store(tmp_path: Path) -> FakeStore:
 
 
 def _posted(tmp_path: Path, branch: str, source: dict[str, Any], *, label: str,
-            body: str | None = None) -> tuple[str, str]:
+            body: str | None = None, **entries: Any) -> tuple[str, str]:
     """Drive the real writer over a fresh run dir on `branch` with `source` as the run's
     knowledge source; return (the comment body below the agent tag, the whole wire body), as the
     store fake received them."""
     spec = BRANCHES[branch]
-    report_kw: dict[str, Any] = {}
-    if spec["text"] is not None:
-        report_kw["text"] = spec["text"]
-    elif body is not None:
+    report_kw: dict[str, Any] = {"closed": spec["closed"], **entries}
+    if body is not None:
         report_kw["body"] = body
     run_dir = make_run(tmp_path, name=f"s-c-{branch}-{label}", **report_kw)
     write_host_record(run_dir, source)
@@ -271,13 +273,13 @@ def test_o_warn_the_sentence_survives_the_wire_bound_on_a_long_verdict(
     use_case_record(monkeypatch, tmp_path / "dfn")
     sentence = _stale_sentence(tmp_path / "short", stale_kind)
 
-    long_narrative = "The account authenticated from a known bastion. " * 200
-    assert len(long_narrative.encode("utf-8")) > WIRE_BOUND_BYTES
+    long_narrative = long_entries(lambda n: "é" * 300)
+    assert len(narrative_of(*long_narrative["ceiling"], *long_narrative["baselines"]).encode("utf-8")) > WIRE_BOUND_BYTES
     _, fresh_wire = _posted(tmp_path, "verdict", knowledge_source("fresh"), label="long-fresh",
-                            body=long_narrative)
+                            **long_narrative)
     _, stale_wire = _posted(tmp_path, "verdict",
                             knowledge_source("stale", stale_kind=stale_kind),
-                            label="long-stale", body=long_narrative)
+                            label="long-stale", **long_narrative)
     assert len(fresh_wire.encode("utf-8")) <= WIRE_BOUND_BYTES, "positive control: bound applies"
     assert len(stale_wire.encode("utf-8")) <= WIRE_BOUND_BYTES, (
         "the stale sentence pushed the posted comment past the wire bound")
@@ -294,9 +296,8 @@ def test_o_warn_fresh_and_pinned_runs_post_exactly_todays_comment(
     use_case_record(monkeypatch, tmp_path / "dfn")
     body, _ = _posted(tmp_path, branch, knowledge_source(kind), label=kind)
     expected = {
-        "verdict": f"benign — {HOST_CAUSE}\n\n"
-                   "The account is a decommissioned service identity; no egress followed.",
-        "unreadable": case_ticket.UNREADABLE_COMMENT_BODY,
+        "verdict": _todays_verdict(),
+        "unreadable": NEVER_CLOSED,
         "escalation-aborted": case_ticket.ESCALATION_COMMENT_BODY.format(exit="aborted"),
         "escalation-forced-close": case_ticket.ESCALATION_COMMENT_BODY.format(exit="request-limit"),
     }[branch]
@@ -326,8 +327,7 @@ def test_o_warn_the_comment_follows_the_hosts_outcome_not_a_box_planted_record(
         return store.comment_body()
 
     fresh = posted("fresh", knowledge_source("fresh"))
-    assert fresh == (f"benign — {HOST_CAUSE}\n\n"
-                     "The account is a decommissioned service identity; no egress followed."), (
+    assert fresh == _todays_verdict(), (
         f"a box-planted stale record changed a fresh run's comment: {fresh!r}")
     stale = posted("stale", knowledge_source("stale", stale_kind="transient"))
     assert names_commit(stale, STALE_COMMIT), (
@@ -511,8 +511,7 @@ def test_run_main_comment_follows_the_host_outcome_when_the_box_rewrites_the_rec
             f"the box suppressed the stale sentence by rewriting the record to fresh: {body!r}")
         assert CUSTOMER_WORD["transient"] in body.lower(), body
     else:
-        assert body == (f"benign — {HOST_CAUSE}\n\n"
-                        "The account is a decommissioned service identity; no egress followed."), (
+        assert body == _todays_verdict(), (
             "the box forged a stale sentence into a fresh run's comment by rewriting "
             f"the record: {body!r}")
 
@@ -691,8 +690,12 @@ def test_o_warn_api_published_contract_declares_the_knowledge_field():
 
 #: Case (3): how the host record fails while a record should exist (the stamp names a source).
 UNREADABLE_RECORDS = {"missing-with-stamp": None, "corrupt": '{"kind": "fresh", "commit": '}
-TODAYS_VERDICT_BODY = (f"benign — {HOST_CAUSE}\n\n"
-                       "The account is a decommissioned service identity; no egress followed.")
+
+
+def _todays_verdict() -> str:
+    from defender.tests.support.storage import _readers1534 as R
+
+    return f"benign — {host_cause()}\n\n{narrative_of(R.ceiling_entry(DEFAULT_NOTE))}"
 
 
 def plant_unreadable_host_record(run_dir: Path, how: str) -> None:
@@ -719,7 +722,7 @@ def test_od22_an_unreadable_host_record_puts_the_operator_sentence_without_a_com
     names no commit id. Control: a fresh record posts the plain comment."""
     use_case_record(monkeypatch, tmp_path / "dfn")
     fresh, _ = _posted(tmp_path, "verdict", knowledge_source("fresh"), label=f"od22-fresh-{how}")
-    assert fresh == TODAYS_VERDICT_BODY, fresh
+    assert fresh == _todays_verdict(), fresh
 
     run_dir = make_run(tmp_path, name=f"s-c-od22-{how}")
     plant_unreadable_host_record(run_dir, how)
@@ -748,14 +751,14 @@ def test_od22_a_pre_p4_run_posts_todays_comment(tmp_path, monkeypatch):
     plant_pre_p4_run(old)
     store = _store(tmp_path)
     record(old, store)
-    assert store.comment_body() == TODAYS_VERDICT_BODY, (
+    assert store.comment_body() == _todays_verdict(), (
         f"a pre-P4 run's comment changed: {store.comment_body()!r}")
 
     control = make_run(tmp_path, name="s-c-od22-pre-p4-control")
     plant_unreadable_host_record(control, "missing-with-stamp")
     store = _store(tmp_path)
     record(control, store)
-    assert store.comment_body() != TODAYS_VERDICT_BODY, (
+    assert store.comment_body() != _todays_verdict(), (
         "positive control: a missing record where one should exist adds the operator sentence")
 
 

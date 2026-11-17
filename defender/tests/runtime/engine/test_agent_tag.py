@@ -11,12 +11,16 @@ from defender.tenancy import case_ticket
 from defender.tenancy.case_ticket import AGENT_TAG_PREFIX, agent_comment_tag as _tag
 from defender.investigation.payload_view import LEAF_MAX_CHARS, PASSTHROUGH_MAX_BYTES_DEFAULT
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
+from defender.tests.support.storage import _readers1534 as R
 from defender.tests.support.runtime.engine._spec767 import (
     ALERT,
     CASE_KEY,
     COMMENTS_SUFFIX,
     ELLIPSIS,
-    HOST_CAUSE,
+    NEVER_CLOSED,
+    host_cause,
+    long_entries,
+    narrative_of,
     TICKETS_PATH,
     WIRE_BOUND_BYTES,
     FakeStore,
@@ -93,13 +97,11 @@ def test_1221_the_tag_is_one_plain_line_naming_the_run():
 @pytest.mark.parametrize(
     ("arm", "report_kw", "record_kw", "expected_rest"),
     [
-        ("the record", {"body": NARRATIVE}, {},
-         f"benign — {HOST_CAUSE}\n\n{NARRATIVE}"),
-        ("the unreadable report", {"text": ""}, {},
-         case_ticket.UNREADABLE_COMMENT_BODY),
+        ("the record", {"body": NARRATIVE}, {}, None),
+        ("a run that never closed", {"closed": False}, {}, NEVER_CLOSED),
         ("the escalation note (aborted)", {"body": NARRATIVE}, {"truncated_by": "aborted"},
          case_ticket.ESCALATION_COMMENT_BODY.format(exit="aborted")),
-        ("the escalation note (a forced close that left no report)", {"text": ""},
+        ("the escalation note (a forced close that left no record)", {"closed": False},
          {"truncated_by": "request-limit"},
          case_ticket.ESCALATION_COMMENT_BODY.format(exit="request-limit")),
     ],
@@ -112,6 +114,8 @@ def test_1221_every_posted_comment_opens_with_the_tag(
     run_dir = make_run(tmp_path, name=RUN_ID, **report_kw)
     store = _store(tmp_path)
     record(run_dir, store, **record_kw)
+    if expected_rest is None:
+        expected_rest = f"benign — {host_cause()}\n\n{narrative_of(R.ceiling_entry(NARRATIVE))}"
 
     path, body = _comment_post(store)
     assert path == f"{TICKETS_PATH}/{CASE_KEY}{COMMENTS_SUFFIX}", f"{arm}: posted to {path}"
@@ -170,9 +174,9 @@ def test_1221_every_comment_kind_tags_the_run_under_a_vendor_key(
 
 
 @pytest.mark.parametrize("run_id", [RUN_ID, BRANCH_RUN_ID])
-@pytest.mark.parametrize("filler", ["x", "é", "🜁"])
+@pytest.mark.parametrize("filler", ["é", "🜁"])
 def test_1221_the_tag_survives_the_wire_bound(tmp_path, run_id, filler):
-    run_dir = make_run(tmp_path, name=run_id, body=filler * 20000)
+    run_dir = make_run(tmp_path, name=run_id, **long_entries(lambda n: filler * 300))
     store = _store(tmp_path)
     record(run_dir, store)
     body = store.wire_body()
@@ -181,7 +185,7 @@ def test_1221_the_tag_survives_the_wire_bound(tmp_path, run_id, filler):
     assert size <= WIRE_BOUND_BYTES, f"{size} bytes crossed, over the {WIRE_BOUND_BYTES} bound"
     first, rest = _tag_and_rest(body)
     assert first == _tag(run_id), f"the bound cut into the tag line: {first[:120]!r}"
-    assert rest.startswith(f"benign — {HOST_CAUSE}\n\n"), "the disposition line was lost"
+    assert rest.startswith(f"benign — {host_cause()}\n\n"), "the disposition line was lost"
     assert body.endswith(ELLIPSIS), "the cut is not visibly marked"
     assert body.count(ELLIPSIS) == 1, f"{body.count(ELLIPSIS)} ellipses, not one"
     assert size > WIRE_BOUND_BYTES - 8, (
@@ -193,16 +197,17 @@ def test_1221_the_tag_survives_the_wire_bound(tmp_path, run_id, filler):
     record(small_dir, small)
     first, rest = _tag_and_rest(small.wire_body())
     assert first == _tag(run_id)
-    assert rest == f"benign — {HOST_CAUSE}\n\n{NARRATIVE}", "a short comment was cut anyway"
+    assert rest == f"benign — {host_cause()}\n\n{narrative_of(R.ceiling_entry(NARRATIVE))}", "a short comment was cut anyway"
 
 
 def test_1221_the_tag_survives_the_listing_view_clip(tmp_path):
     """In gather's payload view one maximal comment renders verbatim; two are clipped (their last
     words gone), yet each comment still opens with its tag line."""
-    narrative = " ".join(f"word{i:05d}" for i in range(4000))
+    words = [f"word{i:05d}" for i in range(4000)]
     bodies, last_words = {}, {}
     for run_id in (RUN_ID, BRANCH_RUN_ID):
-        run_dir = make_run(tmp_path / run_id[-6:], name=run_id, body=narrative)
+        run_dir = make_run(tmp_path / run_id[-6:], name=run_id,
+                           **long_entries(lambda n: " ".join(words[n * 28:(n + 1) * 28])))
         store = _store(tmp_path)
         record(run_dir, store)
         bodies[run_id] = store.wire_body()

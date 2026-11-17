@@ -170,32 +170,56 @@ def shipped_case_record_doc() -> dict[str, Any]:
 # The run dir the writer reads
 # --------------------------------------------------------------------------------------
 
-HOST_CAUSE = "Disposition recorded by the close gate. outcome=holds"
+def host_cause() -> str:
+    """The sentence of the cause a settled close records (#1534), read from the record module when asked."""
+    from defender.records import closing as C
+
+    return C.CAUSE_SENTENCES[C.CAUSE_STORY_SETTLED]
+
+
+#: The sentence of a comment for a run that never closed (design r3.1, readers table).
+NEVER_CLOSED = "No disposition was recorded for this case: the investigation did not close."
+
+DEFAULT_NOTE = "The account is a decommissioned service identity; no egress followed."
 
 
 def write_report(
     run_dir: Path,
     *,
-    disposition: str | None = "benign",
-    cause: str | None = HOST_CAUSE,
-    confidence: str = "high",
-    body: str = "The account is a decommissioned service identity; no egress followed.",
-    text: str | None = None,
-) -> Path:
-    """Write a `report.md`. `text` writes raw bytes instead, for the unreadable members."""
-    path = run_dir / "report.md"
-    if text is not None:
-        path.write_text(text, encoding="utf-8")
-        return path
-    lines = ["---", f"case_id: {run_dir.name}"]
-    if disposition is not None:
-        lines.append(f"disposition: {disposition}")
-    lines.append(f"confidence: {confidence}")
+    disposition: str = "benign",
+    cause: str | None = None,
+    body: str | None = DEFAULT_NOTE,
+    ceiling: tuple[Any, ...] = (),
+    baselines: tuple[Any, ...] = (),
+    fault: str | None = None,
+    closed: bool = True,
+) -> None:
+    """Plant the run's closing record in a real store behind its pointer (#1534; no `report.md`). `body` is the note of one
+    ceiling entry (None or "" for none); `cause` a cause key (default: the one `disposition` settles with); `fault` a
+    `_readers1534` fault where the record is read; `closed=False` leaves a store with no row."""
+    from defender.tests.support.storage import _readers1534 as R
+
+    entries = tuple(ceiling) or ((R.ceiling_entry(body),) if body else ())
+    fields = {**R.valid_fields(disposition), "ceiling_test": entries, "runtime_evidence": tuple(baselines)}
     if cause is not None:
-        lines.append(f"cause: {cause}")
-    lines += ["---", body, ""]
-    path.write_text("\n".join(lines), encoding="utf-8")
-    return path
+        fields["cause"] = cause
+    R.plant_run(run_dir, fields if closed else None, fault=fault, sessions_base=run_dir.parent)
+
+
+def long_entries(piece: Any) -> dict[str, Any]:
+    """`write_report` keywords for a record whose rendered lines are as large as the record's bounds allow: five ceiling
+    notes and four baseline results, each `piece(n)` (at most 300 characters)."""
+    from defender.tests.support.storage import _readers1534 as R
+
+    return {"ceiling": tuple(R.ceiling_entry(piece(n), ref=f"l-00{n}") for n in range(5)),
+            "baselines": tuple(R.baseline_entry(piece(10 + n)) for n in range(4))}
+
+
+def narrative_of(*entries: Any) -> str:
+    """What the ticket narrative holds for these entries: their rendered lines, from the one line renderers."""
+    from defender.records import closing as C
+
+    return "\n".join(C.ceiling_line(e) if isinstance(e, C.CeilingEntry) else C.baseline_line(e) for e in entries)
 
 
 #: The default run's id (a run id is a canonical UUID).
@@ -204,7 +228,7 @@ RUN_ID = fixture_uuid("767-sshd")
 
 def make_run(tmp_path: Path, name: str = RUN_ID, *, alert: Any = None,
              **report_kw: Any) -> Path:
-    """A run dir carrying the two files the writer reads: `report.md` and `alert.json`. `name`
+    """A run dir carrying what the writer reads: the run's closing record (`write_report`) and `alert.json`. `name`
     is a canonical UUID (used as is) or a label (the folder is `fixture_uuid(name)`), so read
     the run's id back from `run_dir.name`, never the label."""
     run_dir = tmp_path / (name if is_fixture_uuid_shape(name) else fixture_uuid(name))

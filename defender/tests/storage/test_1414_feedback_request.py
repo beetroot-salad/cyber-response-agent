@@ -131,7 +131,7 @@ def test_1414_a_forced_close_is_its_disposition_or_unreadable(tmp_path, tenant, 
     read = _drive(tmp_path, state, "read", plan=F.Plan(exit_class, "unresolved"))
     assert _outcomes(state) == ["unresolved"]
 
-    unread = _drive(tmp_path, state, "unread", plan=F.Plan(exit_class, "unresolved", F.UNPARSABLE))
+    unread = _drive(tmp_path, state, "unread", plan=F.Plan(exit_class, "unresolved", F.UNREADABLE_FAULT))
     by_run = {r["run_id"]: r["outcome"] for r in _requests(state).values()}
     assert by_run.get(_run_id(read)) == "unresolved", by_run
     assert by_run.get(_run_id(unread)) == "unreadable", by_run
@@ -413,8 +413,7 @@ def _planned_run(name: str, outcome: str):
     plan = F.plan_for(outcome)
     planted = curation_run_dir(name)
     run_dir = make_run_dir(planted.parent, name=planted.name, disposition=plan.disposition)
-    if plan.report is not None:
-        (run_dir / "report.md").write_text(plan.report, encoding="utf-8")
+    F.plant_plan(run_dir, plan)
     scrub_mod.scrub(run_dir)
     return run_of(run_dir)
 
@@ -437,6 +436,34 @@ def test_1414_the_outcome_function_prefers_a_verdict_to_an_exit(tmp_path):
     unreadable = _planned_run("outcome-verdict-unreadable", "unreadable")
     for exit_class in FORCED_CLOSE:
         assert S.run_outcome(unreadable, truncated_by=exit_class, closed_before_cut=False) == "unreadable"
+
+
+@pytest.mark.parametrize("how", [
+    {"closed": False}, {"fault": "database-missing"}, {"fault": "recorded-before-1534"}, {"fault": "row-invalid"},
+    {"fault": "pointer-unreadable"}, {"fault": "no-pointer"}], ids=lambda how: next(iter(how.values())) if how.get("fault") else "no-row")
+def test_1534_a_run_that_never_closed_or_cannot_be_looked_up_is_unreadable_and_a_record_is_its_disposition(how):
+    """`NeverClosed` and every `CouldNotLook` kind are the tenant word `unreadable`; a record is its disposition, with a
+    contrary `report.md` beside it never read. (V-READERS, feedback outcome; OD11)"""
+    run = _planned_run("outcome-1534-control", "benign")
+    assert S.run_outcome(run, truncated_by=None, closed_before_cut=False) == "benign", "positive control"
+
+    plan = F.Plan(None, "malicious", **how)
+    planted = curation_run_dir(f"outcome-1534-{sorted(how.items())}")
+    run_dir = make_run_dir(planted.parent, name=planted.name, disposition="benign")
+    F.plant_plan(run_dir, plan)
+    (run_dir / "report.md").write_text("---\ndisposition: benign\n---\nDECOY\n", encoding="utf-8")  # lint-run-records: ok — a decoy
+    scrub_mod.scrub(run_dir)
+    assert S.run_outcome(run_of(run_dir), truncated_by=None, closed_before_cut=False) == "unreadable"
+
+
+def test_1534_a_record_beside_a_contrary_report_is_the_outcome():
+    """The record's disposition is the outcome, whatever a `report.md` beside it says. (V-READERS, feedback outcome)"""
+    planted = curation_run_dir("outcome-1534-dual")
+    run_dir = make_run_dir(planted.parent, name=planted.name, disposition="benign")
+    F.plant_plan(run_dir, F.Plan(None, "malicious"))
+    (run_dir / "report.md").write_text("---\ndisposition: benign\n---\n", encoding="utf-8")  # lint-run-records: ok — a decoy
+    scrub_mod.scrub(run_dir)
+    assert S.run_outcome(run_of(run_dir), truncated_by=None, closed_before_cut=False) == "malicious"
 
 
 # ---------------------------------------------------------------- captured lookups
