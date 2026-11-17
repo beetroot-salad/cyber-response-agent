@@ -272,6 +272,51 @@ def test_a6_a_sibling_in_the_container_takes_no_lock_runs_no_admission_and_signs
     _no_database_login(seen, scene)
 
 
+def test_o2_a_sibling_in_the_container_has_its_oracle_box_started_by_its_helper(scene, tmp_path, monkeypatch):
+    """In the container, the box a sibling's oracle runs its python in is started by the job's helper over the job
+    socket, for the sibling's own run id, as pre-flight's is: the sibling never starts a box itself (the job image has
+    no docker, #1170 O2; #1543 R-B)."""
+    from defender import run as run_py
+    from defender.job_host import _learning as helper_learning
+    from defender.learning.branch.estate import oracle as oracle_mod
+
+    # The job image has no docker: a direct start from the container meets one that refuses (the helper's own
+    # docker is its seam, never PATH).
+    no_docker = tmp_path / "no-docker"
+    no_docker.mkdir()
+    (no_docker / "docker").write_text("#!/bin/sh\necho 'no docker in the job image' >&2\nexit 127\n", encoding="utf-8")
+    (no_docker / "docker").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{no_docker}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    job_id, source = str(uuid.uuid4()), str(uuid.uuid4())
+    _ep, roster_id = plant_episode(scene, job_id, source)
+    got: dict[str, Any] = {}
+
+    def lifecycle(**kw):
+        try:
+            got["box"] = kw["serving"].box()
+        except Exception as failed:  # noqa: BLE001 — the start's failure is what the arm reports
+            got["failed"] = failed
+        return {"output": "done", "requests": 1, "truncated_by": None}
+
+    def entry(c, seen):
+        return run_py.main(["--tenant", scene.tenant, "--episode", job_id, "--world", "b"], environ=c.env,
+                           lifecycle=lifecycle, visualize=lambda *a, **k: None, preflight=lambda *a, **k: 0)
+
+    watched = {"direct": oracle_mod.start_process_box, "helper": helper_learning._oracle_box}
+    with ThreadCalls(watched) as calls:
+        seen = seen_in_container(scene, "learning", entry, job_id=job_id, source=source)
+
+    _clean(seen)
+    assert "failed" not in got, f"the sibling's oracle box did not start: {got.get('failed')!r}"
+    assert calls.container("direct") == 0, "the sibling started its oracle box itself, from the container"
+    assert calls.helper("helper") == 1, "the helper did not start the sibling's oracle box"
+    assert got["box"].sandboxed, "the sibling's oracle box is not a confined (relayed) box"
+    oracle_starts = [c for c in seen.kind.docker.creates() if any("defender-oracle-" in a for a in c)]
+    assert len(oracle_starts) == 1, f"expected one oracle box start through the helper's docker: {oracle_starts}"
+    assert roster_id, "premise: the sibling has a roster id"
+
+
 def test_a6_the_operator_sibling_from_a_host_shell_still_admits_holds_the_lock_and_copies_for_itself(tmp_path, monkeypatch):
     """Control: `run.py --episode --world` with no job socket runs as today: one admission, one run copy, the tenant's host lock held, one lifecycle. (A6: the operator path stays)"""
     from defender.tests.learning.branch.test_triplet_sibling import _episode, _no_preflight, _Recorder, _run, _sibling_argv

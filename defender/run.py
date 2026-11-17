@@ -970,19 +970,20 @@ def _case_input(ns: argparse.Namespace, world: Any, episode_runs: Any) -> Path:
     return ns.alert.resolve()
 
 
-def _world_seams(world: Any, *, oracle: Any, verifier: Any, source: Run | None, tenant_id: str,
-                 data_root: Path) -> dict[str, Any]:
+def _world_seams(world: Any, *, oracle: Any, verifier: Any, source: Run | None, tenant_id: str,  # noqa: PLR0913 — the world, its two models, its source and its box's identity
+                 data_root: Path, box: Callable[[], Any] | None = None) -> dict[str, Any]:
     """The lifecycle's world-only keywords: none for an ordinary run; for a sibling its oracle
     side, settled once here from its knobs (the launcher hands it its rate slice through the
     environment), its box labelled with the run's tenant, and threaded inward whole, and the
-    opened source run it forks."""
+    opened source run it forks. `box`: the oracle's box factory, given inside a job container,
+    where the job's helper starts it (#1170 O2); None, the operator's own start."""
     if world is None:
         return {}
     from defender.learning.branch.estate.registry import oracle_serving
     from defender.learning.core.config import process_oracle_settings
 
     return {"serving": oracle_serving(process_oracle_settings(), oracle=oracle,
-                                      verifier=verifier, tenant_id=tenant_id, data_root=data_root),
+                                      verifier=verifier, tenant_id=tenant_id, data_root=data_root, box=box),
             "source": source}
 
 
@@ -1760,8 +1761,10 @@ def _sibling_set_up(  # noqa: PLR0913 — the request, the socket and the siblin
         if rc:
             raise _PreflightRefused(rc)
         check_root = tenancy.data_root_for_child(data_root)  # the oracle's and the run box's checks, one root
+        # The job image has no docker: the sibling's oracle box is its helper's to start, for its own run (#1170 O2).
         seams = _world_seams(world, oracle=oracle, verifier=verifier, source=source,
-                             tenant_id=str(tenant.tenant_id), data_root=check_root)
+                             tenant_id=str(tenant.tenant_id), data_root=check_root,
+                             box=functools.partial(box_mod.relay_start, request, "oracle", run.run_dir.name))
         alert = _screened_source_alert(episode)
         print(f"run_id={run.run_dir.name}", flush=True)
         yield _Started(accepted=accepted, tenant=tenant, run=run, model=model, world=world, episode=episode,
