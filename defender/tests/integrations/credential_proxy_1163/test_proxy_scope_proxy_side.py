@@ -215,6 +215,8 @@ def test_x1_a_pass_comments_on_its_ticket_whatever_the_key_and_on_no_other(tmp_p
                 if equal:
                     # the proxy may re-spell the path it sends: what is demanded is that the write is sent
                     assert (answer["fault"], [s.method for s in r.up.seen]) == (None, ["POST"]), (key, segment)
+                    forwarded = r.up.seen[0].path.split("/")
+                    assert unquote(forwarded[forwarded.index("tickets") + 1]) == key, (key, segment, r.up.seen[0].path)
                 else:
                     assert (answer["fault"] in REFUSED, r.up.seen, r.store.reads) == (True, [], []), (key, segment)
             if unquote(key) != key:  # the key spelled raw decodes to another key: not the pass's
