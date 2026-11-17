@@ -231,23 +231,31 @@ def test_a_forward_that_drops_between_waves_keeps_the_rows_written_and_starts_no
     assert rig.nothing_serving() == []
 
 
-def test_a_batch_hashes_each_freeze_part_once_however_many_cases_it_holds(tmp_path):
+def _count_hashes(monkeypatch, rig) -> list[str]:
+    """Every part name the launcher hashes, in order."""
+    copy, hashed = _module(rig).frozen_copy, []
+    real = copy.sha256_file
+    monkeypatch.setattr(copy, "sha256_file", lambda path: (hashed.append(Path(path).name), real(path))[1])
+    return hashed
+
+
+def test_a_batch_hashes_each_freeze_part_once_however_many_cases_it_holds(tmp_path, monkeypatch):
     """A batch is one freeze, so its parts are checked against freeze.yaml once per launch: a 42-case
     batch on a 17 GB freeze re-read 743 GB when every case re-hashed them."""
     rig = LabRig(tmp_path)
     dirs = _cases(rig, "drop", UUIDS)
-    module = _module(rig)
-    copy = module.frozen_copy
-    real, hashed = copy.sha256_file, []
-
-    def counting(path):
-        hashed.append(Path(path).name)
-        return real(path)
-    copy.sha256_file = counting
-    try:
-        _launch(rig, dirs, Agents(rig), parallel=2)
-    finally:
-        copy.sha256_file = real
+    hashed = _count_hashes(monkeypatch, rig)
+    _launch(rig, dirs, Agents(rig), parallel=2)
 
     parts = sorted(rig.freeze["parts"])
     assert sorted(n for n in hashed if n in parts) == parts
+
+
+def test_a_batch_of_two_variants_is_refused_before_any_part_is_hashed(tmp_path, monkeypatch):
+    """The one-variant rule needs only case.yaml, so a mixed batch is refused before the slow check."""
+    rig = LabRig(tmp_path)
+    dirs = _cases(rig, "none", UUIDS[:1]) + _cases(rig, "drop", UUIDS[1:2])
+    hashed = _count_hashes(monkeypatch, rig)
+    with pytest.raises(_module(rig).LaunchRefused, match="one variant"):
+        _launch(rig, dirs, Agents(rig))
+    assert [n for n in hashed if n in rig.freeze["parts"]] == []

@@ -104,13 +104,9 @@ def alert_uuid_of(alert_file: Path) -> str:
     return uuid
 
 
-def verify(case_dir: Path, freezes_dir: Path, parts_dir: Path, reference: bool,
-           parts_checked: set[str] | None = None) -> tuple[dict, dict, dict, str]:
-    """Everything that needs no cluster: `(case, freeze, row binding, alert uuid)` or a refusal.
-
-    `parts_checked` is the launch's record of the freezes whose parts already matched freeze.yaml:
-    hashing every part is the slow step (a 17 GB freeze), and a batch's cases share one freeze, so
-    the first case of a freeze checks its parts and the rest of the launch trusts that check."""
+def verify(case_dir: Path, freezes_dir: Path, reference: bool) -> tuple[dict, str]:
+    """A case's own checks, which need no cluster and no freeze part: `(case, alert uuid)` or a refusal.
+    The freeze it names is checked once per launch, by `check_freeze_of`."""
     case = load_case(case_dir)
     if not reference and not case.get("confirmed"):
         raise LaunchRefused(f"{case_dir.name}: case.yaml is not confirmed; label it against a "
@@ -118,17 +114,19 @@ def verify(case_dir: Path, freezes_dir: Path, parts_dir: Path, reference: bool,
     freeze_id = case["freeze"]
     if Path(freeze_id).name != freeze_id:
         raise LaunchRefused(f"{freeze_id!r} is not a freeze id")
-    freeze_file = freezes_dir / freeze_id / "freeze.yaml"
-    if not freeze_file.is_file():
+    if not (freezes_dir / freeze_id / "freeze.yaml").is_file():
         raise LaunchRefused(f"{case_dir.name} names freeze {freeze_id}, which has no freeze.yaml")
-    freeze = _load_yaml(freeze_file, "freeze.yaml")
+    return case, alert_uuid_of(case_dir / "alert.json")
+
+
+def check_freeze_of(freeze_id: str, freezes_dir: Path, parts_dir: Path) -> dict:
+    """The batch's one freeze, loaded and checked: its record, every part against the digest freeze.yaml
+    names (the slow step: a 17 GB freeze is read in full), and its host parts. Runs once per launch,
+    after the one-variant rule, so neither a later case nor a refused batch hashes the parts again."""
+    freeze = _load_yaml(freezes_dir / freeze_id / "freeze.yaml", "freeze.yaml")
     try:
         frozen_copy.check_freeze(freeze, freeze_id)
-        if parts_checked is None or freeze_id not in parts_checked:
-            frozen_copy.check_parts(freeze, parts_dir / freeze_id)
-            if parts_checked is not None:
-                parts_checked.add(freeze_id)
-        bound = binding(freeze, case)
+        frozen_copy.check_parts(freeze, parts_dir / freeze_id)
     except (frozen_copy.CopyRefused, TypeError, ValueError) as exc:
         raise LaunchRefused(str(exc)) from exc
     from lab_ops import LabOps, LabOpsError
@@ -136,7 +134,14 @@ def verify(case_dir: Path, freezes_dir: Path, parts_dir: Path, reference: bool,
         LabOps.check_host_parts(freeze)
     except LabOpsError as exc:
         raise LaunchRefused(str(exc)) from exc
-    return case, freeze, {"binding": bound}, alert_uuid_of(case_dir / "alert.json")
+    return freeze
+
+
+def _bound(freeze: dict, case: dict) -> dict:
+    try:
+        return {"binding": binding(freeze, case)}
+    except (TypeError, ValueError) as exc:
+        raise LaunchRefused(str(exc)) from exc
 
 
 def _stale(case: dict, observed: dict[str, int], content: str, alert: dict | None,
@@ -256,13 +261,14 @@ def launch_batch(case_dirs: list[Path], *, freezes_dir: Path, tenant_settings: P
     if len({d.name for d in dirs}) != len(dirs):
         raise LaunchRefused("a batch names one case twice")
     clock = clock if clock is not None else frozen_copy.WallClock()
-    parts_checked: set[str] = set()
-    checked = [verify(d, Path(freezes_dir), parts_dir, reference, parts_checked) for d in dirs]
-    cases, freeze = [c[0] for c in checked], checked[0][1]
+    checked = [verify(d, Path(freezes_dir), reference) for d in dirs]
+    cases = [c[0] for c in checked]
     variants = {frozen_copy.variant_id(c["freeze"], c.get("overlay")) for c in cases}
     if len(variants) != 1:
         raise LaunchRefused("a batch is one variant (one freeze, one overlay); these cases name "
                             f"{len(variants)}: launch each variant on its own")
+    freeze = check_freeze_of(cases[0]["freeze"], Path(freezes_dir), parts_dir)
+    bindings = [_bound(freeze, c) for c in cases]
     try:
         frozen_copy.check_patterns(freeze, tenant_settings)
     except frozen_copy.CopyRefused as exc:
@@ -309,7 +315,7 @@ def launch_batch(case_dirs: list[Path], *, freezes_dir: Path, tenant_settings: P
                                     "no row written, re-launch")
                         continue
                     _report(slug, run_id, reasons[i], reference=reference, index=index,
-                            binding=checked[i][2]["binding"], verified_at=frozen_copy.stamp(clock.now()),
+                            binding=bindings[i]["binding"], verified_at=frozen_copy.stamp(clock.now()),
                             knowledge=knowledge)
                     run_ids.append(run_id)
         except BaseException:
