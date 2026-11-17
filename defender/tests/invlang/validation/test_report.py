@@ -2,15 +2,12 @@
 their caps, and the ticket egress."""
 from __future__ import annotations
 
-from defender.records._artifact_schema import REPORT_FRONTMATTER_MAX, validate_artifact
-from defender.investigation.close_tool import (
-    CAUSE_REVIEW_INCOMPLETE,
-    FAILURE_KINDS,
-    REPORT_CAUSES,
-    STANDS,
-)
+import pytest
+
+from defender.investigation.close_tool import CAUSE_REVIEW_INCOMPLETE, STANDS
 from defender.skills.invlang.validate import validate_companion
-from defender.skills.invlang.validate._gating import _MAX_CEILING_FRONTMATTER_BYTES, ceiling_test_block
+from defender.tests.storage.verdict_1534 import _close_b as B
+from defender.tests.storage.verdict_1534 import _spec1534 as V
 from defender.tests.support.runtime.engine import _spec923
 from defender.tests.support.shared.contracts import _tacit983
 from defender.tests.support.sandbox._spec791 import (  # noqa: F401 — session-scoped autouse guard
@@ -20,8 +17,8 @@ from defender.tests.support.runtime.engine._spec992 import (
     CEILING_EXAMINED,
     CONFIDENT,
     GAP,
-    NOTE_LADDER,
     UNRESOLVED,
+    V2SSHD_NOTE,
     V2SSHD_RECEIPTS,
     bounds,
     ceiling_companion,
@@ -30,19 +27,10 @@ from defender.tests.support.runtime.engine._spec992 import (
     frontmatter,
     gap,
     holds,
-    note_text,
-    noted_companion,
-    priced_block,
     raises,
-    receipt_note_lines,
-    receipts_at_block_cap,
-    record_files,
     recording,
     refusal,
-    report_parts,
     sparse_companion,
-    trace_files,
-    wide_companion,
 )
 
 _ONE_TURN = "extra_turns"
@@ -66,52 +54,45 @@ def _drive(deps, name: str, stages, kw: dict):
     return close_with(deps, GAP, stages, bounds=limits)
 
 
+def _record_of(tmp_path, name, companion, disposition, stages, **kw):
+    """The committed record of one close over `companion`, driven through `_drive`'s arms, read back through the lookup."""
+    with B.opened(tmp_path / name, companion) as (deps, run_dir, store):
+        result = _drive(deps, name, stages, {**kw, "after": kw.get("after", [])}) if disposition == GAP \
+            else close_with(deps, disposition, stages)
+        return result, B.committed_record(run_dir, store), run_dir
+
+
 def test_reviewed_inconclusive_carries_receipts(tmp_path):
-    """An `inconclusive` that STANDS after review commits its priced receipts (the frontmatter
-    block, one body note line each); one the review overrides commits `unresolved` with
-    neither, and the receipts stay in investigation.md."""
+    """An `inconclusive` that stands carries its priced receipts in the record; one the review overrides commits `unresolved`
+    with the receipts kept and the draft named. (V-FIELDS)"""
     golden = ceiling_companion()
-    deps, run_dir = deps_over(tmp_path / "holds", golden)
-    assert close_with(deps, GAP, recording(holds())).outcome == STANDS
-    head, body = report_parts(run_dir)
-    assert head.endswith(priced_block(golden)), head
-    assert priced_block(golden).startswith("ceiling_test:\n")
-    notes = receipt_note_lines(body)
-    assert len(notes) == len(V2SSHD_RECEIPTS), notes
-    for (state, ref), line in zip(V2SSHD_RECEIPTS, notes, strict=True):
-        assert line.startswith(f"ceiling_test ({state}, {ref}): "), line
+    result, rec, _ = _record_of(tmp_path, "holds", golden, GAP, recording(holds()))
+    assert result.outcome == STANDS
+    assert (rec.disposition, rec.cause, rec.drafted_disposition) == (GAP, CEILING_EXAMINED, None)
+    assert [(e.state, e.ref) for e in rec.ceiling_test] == list(V2SSHD_RECEIPTS)
+    assert rec.ceiling_test[0].note.startswith(V2SSHD_NOTE)
 
     for name, stages, kw in _override_arms():
-        deps, run_dir = deps_over(tmp_path / name, golden)
-        result = _drive(deps, name, stages, kw)
+        result, rec, run_dir = _record_of(tmp_path, name, golden, GAP, stages, **kw)
         assert result.outcome == "forced-inconclusive", (name, result)
-        assert frontmatter(run_dir)["disposition"] == UNRESOLVED, name
-        head, body = report_parts(run_dir)
-        assert "ceiling_test" not in head, (name, head)
-        assert receipt_note_lines(body) == [], (name, body)
-        assert "ceiling_test" in (run_dir / "investigation.md").read_text(encoding="utf-8")
+        assert (rec.disposition, rec.drafted_disposition) == (UNRESOLVED, GAP), name
+        assert [(e.state, e.ref) for e in rec.ceiling_test] == list(V2SSHD_RECEIPTS), name
 
-    # The baseline block rides beside the receipts on the reviewed path too.
+    # The baseline block rides beside the receipts.
     with_baseline = _tacit983.inconclusive_document(
         rows=_tacit983.consult_block(_tacit983.consultation_row()),
     )
-    deps, run_dir = deps_over(tmp_path / "baseline", with_baseline)
-    assert close_with(deps, GAP, recording(holds())).outcome == STANDS
-    head, body = report_parts(run_dir)
-    assert head.endswith(priced_block(with_baseline))
-    assert "runtime-evidence" in body
-    assert receipt_note_lines(body)
+    _, rec, _ = _record_of(tmp_path, "baseline", with_baseline, GAP, recording(holds()))
+    assert B.baselines_of(rec) == [B.DOC_BASELINE]
+    assert rec.ceiling_test
 
     # Identical whether the ablation lens ran (the golden) or was skipped (the sparse one).
-    sparse = sparse_companion()
-    deps, run_dir = deps_over(tmp_path / "sparse", sparse)
     skipped = recording(holds())
-    assert close_with(deps, GAP, skipped).outcome == STANDS
+    _, rec, _ = _record_of(tmp_path, "sparse", sparse_companion(), GAP, skipped)
     assert skipped.calls == ["support", "composer"]
-    assert report_parts(run_dir)[0].endswith(priced_block(sparse))
+    assert [(e.state, e.ref) for e in rec.ceiling_test] == [("query-failed", "l-002")]
 
-    # Two rows citing one ref with different states: the inconsistent one is refused at the
-    # price gate, before any stage.
+    # Two rows citing one ref with different states: the inconsistent one is refused at the price gate, before any stage.
     conflicting = _spec923.paid(
         "state=query-failed ref=l-002 note=matches its fail_reason",
         "state=query-empty ref=l-002 note=contradicts its fail_reason",
@@ -124,163 +105,73 @@ def test_reviewed_inconclusive_carries_receipts(tmp_path):
     assert stages.calls == []
 
 
-def test_confident_and_forced_commits_carry_no_ceiling_test(tmp_path):
-    """Receipts follow the committed verdict, not the conclude block: neither commit carries
-    them, though the composer still sees them in the companion."""
+def test_confident_and_forced_commits_carry_the_receipts_of_their_parse(tmp_path):
+    """Receipts follow the parse, not the committed disposition: a confident close and one the review overrides carry them
+    too. (V-FIELDS)"""
     golden = ceiling_companion()
 
     confident = recording(holds())
-    deps, run_dir = deps_over(tmp_path / "confident", golden)
-    assert close_with(deps, CONFIDENT, confident).outcome == STANDS
-    head, body = report_parts(run_dir)
-    assert "ceiling_test" not in head
-    assert receipt_note_lines(body) == []
+    _, rec, _ = _record_of(tmp_path, "confident", golden, CONFIDENT, confident)
+    assert rec.disposition == CONFIDENT
+    assert [(e.state, e.ref) for e in rec.ceiling_test] == list(V2SSHD_RECEIPTS)
     assert "l-004" in confident.prompt("composer")
-    assert "query-empty" in confident.prompt("composer")
 
-    deps, run_dir = deps_over(tmp_path / "forced", golden)
-    forced = close_with(deps, CONFIDENT, recording(gap(None)))
-    assert forced.outcome == "forced-inconclusive"
-    assert frontmatter(run_dir)["disposition"] == "unresolved"
-    head, body = report_parts(run_dir)
-    assert "ceiling_test" not in head
-    assert receipt_note_lines(body) == []
-
-    control = recording(holds())
-    deps, run_dir = deps_over(tmp_path / "control", golden)
-    assert close_with(deps, GAP, control).outcome == STANDS
-    assert control.calls, "the control did not spend the review"
-    head, body = report_parts(run_dir)
-    assert head.endswith(priced_block(golden))
-    assert len(receipt_note_lines(body)) == 2
+    result, rec, _ = _record_of(tmp_path, "forced", golden, CONFIDENT, recording(gap(None)))
+    assert result.outcome == "forced-inconclusive"
+    assert (rec.disposition, rec.drafted_disposition) == (UNRESOLVED, CONFIDENT)
+    assert [(e.state, e.ref) for e in rec.ceiling_test] == list(V2SSHD_RECEIPTS)
 
 
-def _near_cap_rows() -> tuple[str, ...]:
-    """As many distinct paying receipts as fit under `_MAX_CEILING_FRONTMATTER_BYTES`."""
-    from defender.investigation.review.projector import parse_investigation
-    from defender.skills.invlang.validate import conclude_ceiling_test_rows
-
-    rows: list[str] = []
-    while True:
-        candidate = rows + [
-            f"state=nothing-to-try cap=fake-system-{len(rows):03d}.fake-verb note=capability {len(rows):03d}"
-        ]
-        block = ceiling_test_block(conclude_ceiling_test_rows(parse_investigation(_spec923.paid(*candidate))))
-        if len(block.encode("utf-8")) > _MAX_CEILING_FRONTMATTER_BYTES:
-            break
-        rows = candidate
-    assert rows, "not even one receipt fits under the block cap"
-    return tuple(rows)
+def _note_doc(treated: int) -> str:
+    return _spec923.paid(f"state=query-failed ref=l-002 note={B.expanding(treated)}")
 
 
-def test_reviewed_inconclusive_report_frontmatter_stays_under_its_cap_with_the_longest_cause(tmp_path):
-    """A block at `_MAX_CEILING_FRONTMATTER_BYTES` under the longest cause commits inside the
-    frontmatter cap, and the arithmetic holds for every cause beside the longest `failure_kind`."""
-    rows = _near_cap_rows()
-    at_cap = _spec923.paid(*rows)
-    block = priced_block(at_cap)
-    assert _MAX_CEILING_FRONTMATTER_BYTES - 64 < len(block.encode("utf-8")) <= _MAX_CEILING_FRONTMATTER_BYTES
-
-    deps, run_dir = deps_over(tmp_path / "seventh-cause", at_cap)
-    assert close_with(deps, GAP, recording(holds())).outcome == STANDS
-    fm = frontmatter(run_dir)
-    assert fm["cause"] == CEILING_EXAMINED, fm
-    assert "failure_kind" not in fm, fm
-    head, _body = report_parts(run_dir)
-    assert head.endswith(block)
-    assert len(head.encode("utf-8")) <= REPORT_FRONTMATTER_MAX, len(head.encode("utf-8"))
-
-    # The arithmetic over the REAL tuple: every member, with the longest kind, plus a block at
-    # the cap, fits — and the seventh is a member.
-    assert CEILING_EXAMINED in REPORT_CAUSES
-    longest_kind = max(FAILURE_KINDS, key=len)
-    for cause in REPORT_CAUSES:
-        head = (
-            f"disposition: {GAP}\noutcome: {STANDS}\ncause: {cause}\n"
-            f"failure_kind: {longest_kind}\n"
-        )
-        assert len(head.encode("utf-8")) + _MAX_CEILING_FRONTMATTER_BYTES <= REPORT_FRONTMATTER_MAX, cause
-
-    # The cap is real: an overflowing frontmatter is refused by the report schema.
-    overflow = "---\n" + f"disposition: {GAP}\noutcome: {STANDS}\ncause: {CEILING_EXAMINED}\n" + (
-        "ceiling_test:\n" + "".join(f"- state: nothing-to-try\n  cap: fake-system-{i:03d}.fake-verb\n" for i in range(12))
-    ) + "---\nDisposition recorded by the close gate. outcome=stands.\n"
-    assert validate_artifact("report.md", overflow, None) is not None
-
-
-def test_reviewed_inconclusive_ceiling_note_overflow_is_refused(tmp_path):
-    """Rendered `ceiling_test` notes are BOUNDED at the entry-price gate, at the write gate and
-    the close alike: an over-bound note is refused before any stage and never reaches the
-    commit's whole-file cap. The ladder finds whatever bound the code declares."""
-    first_refusal_at: int | None = None
-    largest_committing: int | None = None
-    for size in NOTE_LADDER:
-        companion = noted_companion(size)
-        stages = recording(holds())
-        deps, run_dir = deps_over(tmp_path / f"note-{size}", companion)
-        at_write_gate = validate_companion(companion, None)
-        try:
-            result = close_with(deps, GAP, stages)
-        except Exception as e:  # noqa: BLE001 — the refusal's TEXT is the observable
-            text = str(e)
-            assert "report.md is" not in text, f"a {size}-character note reached the COMMIT and was refused there: {text!r}"
-            assert "over the 8192-byte limit" not in text, f"a {size}-character note reached the COMMIT and was refused there: {text!r}"
-            assert "close blocked" in text, (size, text)
-            assert "ceiling_test" in text, (size, text)
-            assert stages.calls == [], f"the refused close spent {stages.calls}"
-            assert trace_files(run_dir) == []
-            assert record_files(run_dir) == []
-            assert not (run_dir / "report.md").exists()
-            assert any(f"{GAP} blocked" in err and "ceiling_test" in err for err in at_write_gate), (
-                f"the {size}-character note is refused at the close but not at the write gate: "
-                f"{at_write_gate!r}"
-            )
-            if first_refusal_at is None:
-                first_refusal_at = size
-            continue
-        assert first_refusal_at is None, f"a {size}-character note committed above the bound"
-        largest_committing = size
-        assert at_write_gate == [], (size, at_write_gate)
-        assert result.outcome == STANDS
-        assert stages.calls
-        _head, body = report_parts(run_dir)
-        notes = receipt_note_lines(body)
-        assert len(notes) == 1, (size, notes)
-        assert notes[0].endswith(note_text(size)), (size, notes)
-    assert first_refusal_at is not None, "no note size on the ladder was refused — the note is unbounded"
-    assert first_refusal_at > NOTE_LADDER[0], "even a short note is refused"
-
-    assert largest_committing is not None
-    many = wide_companion(receipts_at_block_cap(), note_text(largest_committing))
+@pytest.mark.parametrize(("treated", "accepted"), [(400, True), (401, False)])
+def test_a_ceiling_note_is_bounded_by_its_treated_length_at_the_write_gate_and_the_close(tmp_path, treated, accepted):
+    """A note whose treated text is exactly the note bound passes both gates; one character more is refused before any
+    stage, though its raw text is shorter than the bound. (V-TEXT)"""
+    companion = _note_doc(treated)
+    at_write_gate = validate_companion(companion, None)
     stages = recording(holds())
-    deps, run_dir = deps_over(tmp_path / "many-receipts", many)
-    try:
-        assert close_with(deps, GAP, stages).outcome == STANDS
-        assert len(receipt_note_lines(report_parts(run_dir)[1])) == receipts_at_block_cap()
-    except Exception as e:  # noqa: BLE001 — the refusal's TEXT is the observable
-        text = str(e)
-        assert "report.md is" not in text, f"N receipts × the largest note reached the COMMIT: {text!r}"
-        assert "over the 8192-byte limit" not in text, text
-        assert "close blocked" in text, text
-        assert "ceiling_test" in text, text
-        assert stages.calls == [], f"the refused close spent {stages.calls}"
-        assert not (run_dir / "report.md").exists()
-        assert any(f"{GAP} blocked" in err for err in validate_companion(many, None)), (
-            "refused at the close but not at the write gate"
-        )
+    with B.opened(tmp_path, companion) as (deps, run_dir, store):
+        if accepted:
+            assert at_write_gate == []
+            assert close_with(deps, GAP, stages).outcome == STANDS
+            (entry,) = B.committed_record(run_dir, store).ceiling_test
+            assert entry.note == B.expanding(treated).replace("ab.cd", "ab[.]cd")
+        else:
+            assert any("ceiling_test" in err for err in at_write_gate), at_write_gate
+            text = refusal(deps, GAP, stages)
+            assert "close blocked" in text
+            assert "ceiling_test" in text
+            assert stages.calls == []
+            assert V.scalar_rows(store.path, run_dir.name) == []
 
-    # Positive control at a modest size: the note rides into the body in full.
-    modest = noted_companion(NOTE_LADDER[0])
-    deps, run_dir = deps_over(tmp_path / "modest", modest)
-    assert close_with(deps, GAP, recording(holds())).outcome == STANDS
-    assert len(receipt_note_lines(report_parts(run_dir)[1])) == 1
 
-    # The report delimiter in a note is still the price gate's refusal.
-    delimiter = sparse_companion("state=query-failed ref=l-002 note=the note carries </report> inside it")
-    stages = recording(holds())
-    deps, _run_dir = deps_over(tmp_path / "delimiter", delimiter)
-    assert "</report>" in refusal(deps, GAP, stages)
-    assert stages.calls == []
+def test_ceiling_receipts_are_bounded_by_count_and_by_their_rendered_lines(tmp_path):
+    """Sixteen receipts pass the write gate and seventeen are refused; receipts whose lines join to exactly the aggregate
+    pass and one character more is refused. (V-TEXT)"""
+    from defender.records import closing as C
+
+    def refused(companion: str) -> bool:
+        return any("ceiling_test" in err for err in validate_companion(companion, None))
+
+    assert validate_companion(_spec923.paid(*B.capability_rows(C.CEILING_COUNT_CAP, lambda _i: "n")), None) == []
+    assert refused(_spec923.paid(*B.capability_rows(C.CEILING_COUNT_CAP + 1, lambda _i: "n")))
+
+    count = 6
+    overhead = sum(
+        len(C.ceiling_line(C.CeilingEntry("nothing-to-try", None, f"fake-system-{i:03d}.fake-verb", "x"))) - 1
+        for i in range(count))
+    budget = C.CEILING_LINES_BOUND - (count - 1) - overhead
+
+    def sized(total: int) -> str:
+        sizes = [total // count + (1 if i < total % count else 0) for i in range(count)]
+        assert max(sizes) <= C.NOTE_BOUND, "fixture control: each note fits its own bound"
+        return _spec923.paid(*B.capability_rows(count, lambda i: B.plain(sizes[i])))
+
+    assert validate_companion(sized(budget), None) == []
+    assert refused(sized(budget + 1))
 
 
 def test_case_ticket_closing_comment_reads_a_reviewed_inconclusive_close(tmp_path, monkeypatch):
