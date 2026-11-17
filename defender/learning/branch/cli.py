@@ -108,6 +108,7 @@ from defender.learning.branch.questioner_launch import (
     _SAMPLES_PER_VERB as _SAMPLES_PER_VERB,
     _SAMPLE_CAP as _SAMPLE_CAP,
     _author as _author,
+    source_closing_of as source_closing_of,
     source_disposition_of as source_disposition_of,
     _fence_count as _fence_count,
     _joined_leads as _joined_leads,
@@ -285,6 +286,26 @@ def _prime_once(
         f"primed {report.primed} captured row(s) into {episode.served_base.path}; "
         f"{report.skipped} skipped ({report}) — a skipped key is read live per world rather "
         "than replayed")
+
+
+#: The source-lookup faults of the source's store itself, which the launch's own source checks
+#: (pre-flight, the fork pick) answer with their own endings before the record's refusal.
+_SOURCE_STORE_FAULTS = ("database-missing", "schema-version", "legacy-link")
+
+
+def _store_fault(found: Any) -> bool:
+    from defender.records import closing
+
+    return isinstance(found, closing.CouldNotLook) and found.kind in _SOURCE_STORE_FAULTS
+
+
+def _declared_or_refused(found: Any) -> str | None:
+    """`source_disposition_of`, its refusal as the launch's ending (the wording, never a path)."""
+    try:
+        return source_disposition_of(found)
+    except branch.BranchError as unreadable:
+        raise ending(f"[branch] {unreadable}", reason=LAUNCH_REFUSED,
+                     brief="the source run's closing record could not be read") from None
 
 
 def _open_launch_source(runs: RunsRepository[Tenant], source_run_id: str) -> Run:
@@ -795,15 +816,14 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
         tenant, roster = verdict.tenant, verdict.systems.roster
         runs = tenant.tenant.runs_repository()
         source = _open_launch_source(runs, ns.source_run_id)
-        # World A's declared disposition is the source's closing record (#1534), read first of
-        # all: a writer's open of the source's store (the fork pick, the branch clock) creates
-        # the table an older database lacks, which would turn a fault into an absence.
-        try:
-            source_disposition = source_disposition_of(source)
-        except branch.BranchError as unreadable:
-            raise ending(f"[branch] {unreadable}", reason=LAUNCH_REFUSED,
-                         brief="the source run's closing record could not be read",
-                         cause=unreadable) from unreadable
+        # World A's declared disposition is the source's closing record (#1534), looked up first
+        # of all: a writer's open of the source's store (the fork pick, the branch clock) creates
+        # the table an older database lacks, which would turn a fault into an absence. A fault
+        # of the record refuses here; one of the source's store itself (gone, another version,
+        # a pre-#1235 link) waits for the launch's own source checks, whose endings name it.
+        source_closing = source_closing_of(source)
+        if not _store_fault(source_closing):
+            source_disposition = _declared_or_refused(source_closing)
         _source_stamp_agrees(source, tenant.tenant_id)
         if lane is not None and lane.pick is not None:
             # The job's fork point (O3): picked here, once the source is open and its stamp
@@ -849,6 +869,8 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
             allow_dirty=ns.allow_dirty,
             live_tree=live_capture, oracle=oracle, verifier=verifier,
             data_root=tenancy.data_root_for_child(data_root))
+        if _store_fault(source_closing):
+            source_disposition = _declared_or_refused(source_closing)
         view = prepare_episode(runs, source, knowledge_commit=pinned.commit,
                                episode_id=None if lane is None else lane.job_id)
         episode = view.episode

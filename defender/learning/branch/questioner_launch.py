@@ -254,15 +254,23 @@ def _author(  # noqa: PLR0913 — the step's inputs
 
 
 
-def source_disposition_of(source: Run) -> str | None:
-    """The disposition the source run's closing record committed (#1534), read before any model
-    call: world A's declared disposition when the questioner names none. A source that never
-    closed gives none (the family is then refused naming `disposition_declared`); one whose
-    record could not be looked at refuses the launch with the lookup's fixed wording (its detail
-    is logged, never shown)."""
+def source_closing_of(source: Run) -> Any:
+    """The source run's closing-record lookup (#1534), read before anything opens the source's
+    store as a writer: such an open creates the table an older database lacks, which would turn
+    a fault into an absence. Raising on it is `source_disposition_of`'s, later, so the launch's
+    own source checks (a source gone, a store of another version) still answer first."""
     from defender.records import closing
 
-    found = closing.for_run(source)
+    return closing.for_run(source)
+
+
+def source_disposition_of(found: Any) -> str | None:
+    """World A's declared disposition when the questioner names none, from the source's lookup
+    (`source_closing_of`), before any model call: a source that never closed gives none (the
+    family is then refused naming `disposition_declared`); one whose record could not be looked
+    at refuses the launch with the lookup's fixed wording (its detail is logged, never shown)."""
+    from defender.records import closing
+
     if isinstance(found, closing.CouldNotLook):
         raise branch.BranchError("world A's declared disposition comes from the source run's "
                                  f"closing record. {found.wording}")
