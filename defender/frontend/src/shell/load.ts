@@ -184,9 +184,11 @@ export function makeLoad(options: LoadOptions): Load {
     leave,
     signIn(returns) {
       // The values are handed to the sign-in route unjudged: the API judges them (P2).
-      effects.record(returns[0] ?? null, false); // when storage allows
       const query = returns.map((value) => `return=${encodeURIComponent(value)}`).join("&");
-      return leave(() => effects.assign(`/api/auth/login${query === "" ? "" : `?${query}`}`));
+      return leave(() => {
+        effects.record(returns[0] ?? null, false); // when storage allows; a gone load records nothing
+        effects.assign(`/api/auth/login${query === "" ? "" : `?${query}`}`);
+      });
     },
     supersede() {
       superseded = true;
