@@ -1,6 +1,7 @@
 """#1108 P4 O-WARN: a run that used stale tenant knowledge says so wherever its result is read;
-here the ticket write-back and the API (the run page's banner is `test_run_page.py`, which
-imports the run-record helpers below).
+here the ticket write-back (the record step driven over a run dir, as the job lane calls it: the operator's
+`run.main` no longer comments, #1471 W7) and the API (the run page's banner is `test_run_page.py`, which imports the
+run-record helpers below).
 
 Every comment a stale run posts (verdict, unreadable-report and escalation branches) carries one
 fixed sentence naming the commit used and the kind in customer words (temporary vs awaiting
@@ -22,9 +23,8 @@ from typing import Any
 import pytest
 
 from defender.tests.support.runtime.engine._spec767 import (
-    HOST_CAUSE,
-    WIRE_BOUND_BYTES,
     FakeStore,
+    case_record_doc,
     make_run,
     record,
     use_case_record,
@@ -148,6 +148,17 @@ BRANCHES = {
 }
 
 
+#: The screen link every comment here is handed (C-7; http, so it is no fragment of a raw reason), so a stale and a fresh run's comments differ by the sentence alone.
+LINK = "http://app.defender.test/t/s-c/investigations/fixed-link"
+#: A verdict run's comment, below the agent tag (P-6: the disposition word, then the link).
+TODAYS_VERDICT_BODY = f"benign\n{LINK}"
+
+
+def _use_case_record(monkeypatch: Any, root: Path) -> Path:
+    """The tenant's case record names its system and nothing else (#1471 W7: it carries no comment template)."""
+    return use_case_record(monkeypatch, root, case_record_doc())
+
+
 def _store(tmp_path: Path) -> FakeStore:
     """A store behind a fresh proxy stand-in (one per call)."""
     n = len(list(tmp_path.glob("store-*")))
@@ -168,7 +179,7 @@ def _posted(tmp_path: Path, branch: str, source: dict[str, Any], *, label: str,
     run_dir = make_run(tmp_path, name=f"s-c-{branch}-{label}", **report_kw)
     write_host_record(run_dir, source)
     store = _store(tmp_path)
-    record(run_dir, store, truncated_by=spec["truncated_by"])
+    record(run_dir, store, truncated_by=spec["truncated_by"], link=LINK)
     return store.comment_body(), store.wire_body()
 
 
@@ -203,7 +214,7 @@ def test_o_warn_a_stale_runs_verdict_comment_carries_the_fixed_sentence_naming_c
         tmp_path, monkeypatch, stale_kind):
     """A stale run's verdict comment adds one sentence to what a fresh run posts; it names the
     commit used and the kind in customer words, and no part of the raw reason."""
-    use_case_record(monkeypatch, tmp_path / "dfn")
+    _use_case_record(monkeypatch, tmp_path / "dfn")
     sentence = _stale_sentence(tmp_path, stale_kind)
 
     assert names_commit(sentence, STALE_COMMIT), (
@@ -226,7 +237,7 @@ def test_o_warn_transient_and_operator_sentences_differ_and_each_is_fixed_per_ki
         tmp_path, monkeypatch):
     """The sentence is fixed per (kind, commit), the same whatever the reason text, and the two
     kinds read differently."""
-    use_case_record(monkeypatch, tmp_path / "dfn")
+    _use_case_record(monkeypatch, tmp_path / "dfn")
     first = {k: _stale_sentence(tmp_path / f"a-{k}", k) for k in STALE_KINDS}
     assert first["transient"] != first["operator"], (
         "a temporary outage and a fault awaiting operator action post the same sentence")
@@ -246,7 +257,7 @@ def test_o_warn_every_comment_branch_carries_the_same_stale_sentence(
         tmp_path, monkeypatch, branch, stale_kind):
     """The unreadable-report and escalation comments carry the very sentence the verdict
     comment carries; the fresh comment on the same branch carries none of it."""
-    use_case_record(monkeypatch, tmp_path / "dfn")
+    _use_case_record(monkeypatch, tmp_path / "dfn")
     sentence = _stale_sentence(tmp_path / "verdict", stale_kind)
 
     fresh, _ = _posted(tmp_path, branch, knowledge_source("fresh"), label="fresh")
@@ -263,42 +274,19 @@ def test_o_warn_every_comment_branch_carries_the_same_stale_sentence(
     assert leaked == [], f"the {branch} comment leaks the raw reason: {leaked}"
 
 
-@pytest.mark.parametrize("stale_kind", STALE_KINDS)
-def test_o_warn_the_sentence_survives_the_wire_bound_on_a_long_verdict(
-        tmp_path, monkeypatch, stale_kind):
-    """The sentence stays whole when the narrative fills the 4096-byte wire bound, which cuts
-    from the end."""
-    use_case_record(monkeypatch, tmp_path / "dfn")
-    sentence = _stale_sentence(tmp_path / "short", stale_kind)
-
-    long_narrative = "The account authenticated from a known bastion. " * 200
-    assert len(long_narrative.encode("utf-8")) > WIRE_BOUND_BYTES
-    _, fresh_wire = _posted(tmp_path, "verdict", knowledge_source("fresh"), label="long-fresh",
-                            body=long_narrative)
-    _, stale_wire = _posted(tmp_path, "verdict",
-                            knowledge_source("stale", stale_kind=stale_kind),
-                            label="long-stale", body=long_narrative)
-    assert len(fresh_wire.encode("utf-8")) <= WIRE_BOUND_BYTES, "positive control: bound applies"
-    assert len(stale_wire.encode("utf-8")) <= WIRE_BOUND_BYTES, (
-        "the stale sentence pushed the posted comment past the wire bound")
-    assert sentence in stale_wire, (
-        "the wire bound cut the stale sentence off a long verdict comment")
-
-
 @pytest.mark.parametrize("branch", list(BRANCHES))
 @pytest.mark.parametrize("kind", ["fresh", "pinned"])
 def test_o_warn_fresh_and_pinned_runs_post_exactly_todays_comment(
         tmp_path, monkeypatch, branch, kind):
     from defender.tenancy import case_ticket
 
-    use_case_record(monkeypatch, tmp_path / "dfn")
+    _use_case_record(monkeypatch, tmp_path / "dfn")
     body, _ = _posted(tmp_path, branch, knowledge_source(kind), label=kind)
     expected = {
-        "verdict": f"benign — {HOST_CAUSE}\n\n"
-                   "The account is a decommissioned service identity; no egress followed.",
-        "unreadable": case_ticket.UNREADABLE_COMMENT_BODY,
-        "escalation-aborted": case_ticket.ESCALATION_COMMENT_BODY.format(exit="aborted"),
-        "escalation-forced-close": case_ticket.ESCALATION_COMMENT_BODY.format(exit="request-limit"),
+        "verdict": TODAYS_VERDICT_BODY,
+        "unreadable": f"{case_ticket.UNREADABLE_COMMENT_BODY}\n{LINK}",
+        "escalation-aborted": f"{case_ticket.ESCALATION_COMMENT_BODY.format(exit='aborted')}\n{LINK}",
+        "escalation-forced-close": f"{case_ticket.ESCALATION_COMMENT_BODY.format(exit='request-limit')}\n{LINK}",
     }[branch]
     assert body == expected, (
         f"a {kind} run's {branch} comment changed (only a stale run adds a sentence).\n"
@@ -312,7 +300,7 @@ def test_o_warn_the_comment_follows_the_hosts_outcome_not_a_box_planted_record(
     """The stamp sits in the box's rw bind, so the comment reads the host record, never the
     stamp: a fresh run whose box planted a stale stamp posts the plain fresh comment, and a stale
     host record's commit wins over the planted one."""
-    use_case_record(monkeypatch, tmp_path / "dfn")
+    _use_case_record(monkeypatch, tmp_path / "dfn")
     planted_commit = "badc0debadc0debadc0debadc0debadc0debadc0"
     planted = knowledge_source("stale", stale_kind="operator", commit=planted_commit,
                                reason="call https://evil.invalid/ now")
@@ -322,12 +310,11 @@ def test_o_warn_the_comment_follows_the_hosts_outcome_not_a_box_planted_record(
         stamp_knowledge_source(run_dir, planted)
         write_host_record(run_dir, handed)
         store = _store(tmp_path)
-        record(run_dir, store)
+        record(run_dir, store, link=LINK)
         return store.comment_body()
 
     fresh = posted("fresh", knowledge_source("fresh"))
-    assert fresh == (f"benign — {HOST_CAUSE}\n\n"
-                     "The account is a decommissioned service identity; no egress followed."), (
+    assert fresh == TODAYS_VERDICT_BODY, (
         f"a box-planted stale record changed a fresh run's comment: {fresh!r}")
     stale = posted("stale", knowledge_source("stale", stale_kind="transient"))
     assert names_commit(stale, STALE_COMMIT), (
@@ -346,18 +333,18 @@ def _stale_outcome(stale_kind: str, reason: str) -> str:
 
 @pytest.mark.e2e
 @pytest.mark.parametrize("stale_kind", STALE_KINDS)
-def test_run_main_hands_a_stale_publish_outcome_to_the_ticket_comment_page_and_record(
+def test_run_main_hands_a_stale_publish_outcome_to_the_page_and_record(
         tmp_path, monkeypatch, p4_tenant, stale_kind):
     """Through `run.main`, a stale launch runs on `current` and run start writes the host record
-    (kind, commit, raw reason); the posted comment and the saved run page name the commit used,
-    while no file the box can read carries the raw reason. The saved `runtime.html`, written
-    after the box stops, is an operator surface and must show it (OD21)."""
+    (kind, commit, raw reason); the saved run page names the commit used, while no file the box
+    can read carries the raw reason. The saved `runtime.html`, written after the box stops, is an
+    operator surface and must show it (OD21). The operator run posts no comment (#1471 W7): the
+    stale sentence of the job lane's comment is held by the record-step tests below and by
+    `jobs/test_job_entry.py::test_1471_p6_a_stale_runs_comment_opens_with_the_tag_then_the_stale_sentence_then_the_disposition_then_the_link`."""
     from defender.records import RunPaths
     from defender.tests.support.runtime.engine._spec767 import write_report
     from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107
 
-    # The real writer, the store behind the credential proxy's stand-in (#1391 O1).
-    store = _store(tmp_path)
     publish_calls: list[tuple[tuple, dict]] = []
 
     def publish(*args: Any, **kwargs: Any) -> str:
@@ -382,25 +369,16 @@ def test_run_main_hands_a_stale_publish_outcome_to_the_ticket_comment_page_and_r
 
     alert = S1107.plant_alert(tmp_path / "alert")
     rec = S1107.RunRecorder(tmp_path / "unused" / "s-c-wiring", before_lifecycle=before_lifecycle)
-    argv = [str(alert), "--tenant", p4_tenant.tenant_id, "--update-ticket", "--no-learn"]
+    argv = [str(alert), "--tenant", p4_tenant.tenant_id, "--no-learn"]
     # The real `materialize` (run start: resolve the export, copy it, stamp the record).
-    seams = {**{k: v for k, v in rec.seams().items() if k != "materialize"},
-             **store.stand_in.seams()}  # the proxy's stand-in, and a signer for its token
+    seams = {k: v for k, v in rec.seams().items() if k != "materialize"}
     from defender import run as run_py
 
     rc = run_py.main(argv, directory=p4_tenant.directory, publish=publish, **seams)
 
     assert rc == 0, f"a stale launch with a snapshot must run to the end; rc={rc}"
     assert len(publish_calls) == 1, f"the launch published {len(publish_calls)} times"
-    comments = store.comment_payloads
-    assert len(comments) == 1, [(c.method, c.path) for c in store.calls]
-    body = store.comment_body()
     commit = p4_tenant.commit
-    assert names_commit(body, commit), (
-        f"the comment does not name the commit the stale run used ({commit}): {body!r}")
-    assert CUSTOMER_WORD[stale_kind] in body.lower(), body
-    assert [f for f in REASON_FRAGMENTS if f.lower() in body.lower()] == [], body
-
     run_dir = Path(rec.lifecycle_calls[0]["run"].run_dir)
     host = json.loads(host_record_path(run_dir).read_text(encoding="utf-8"))
     assert host.get("kind") == "stale", host
@@ -429,90 +407,43 @@ def test_run_main_hands_a_stale_publish_outcome_to_the_ticket_comment_page_and_r
         "the run page does not show operators the raw reason from the host record")
 
 
-@pytest.mark.e2e
-def test_run_main_fresh_launch_posts_todays_comment(tmp_path, monkeypatch, p4_tenant):
-    """Positive control for the wiring test: the same launch with a fresh publish posts a comment
-    naming no commit and using neither kind's words."""
-    from defender.tests.support.runtime.engine._spec767 import write_report
-    from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107
-    from defender import run as run_py
-
-    # The real writer, the store behind the credential proxy's stand-in (#1391 O1).
-    store = _store(tmp_path)
-
-    def before_lifecycle(run_dir: Path) -> None:
-        write_report(run_dir)
-        S1107.seed_session_store(run_dir)
-
-    alert = S1107.plant_alert(tmp_path / "alert")
-    rec = S1107.RunRecorder(tmp_path / "unused" / "s-c-fresh", before_lifecycle=before_lifecycle)
-    seams = {**{k: v for k, v in rec.seams().items() if k != "materialize"},
-             **store.stand_in.seams()}  # the proxy's stand-in, and a signer for its token
-    argv = [str(alert), "--tenant", p4_tenant.tenant_id, "--update-ticket", "--no-learn"]
-    rc = run_py.main(argv, directory=p4_tenant.directory, publish=lambda *a, **k: f"fresh {p4_tenant.commit}",
-                     **seams)
-    assert rc == 0
-    body = store.comment_body()
-    assert not names_commit(body, p4_tenant.commit), body
-    assert all(w not in body.lower() for w in CUSTOMER_WORD.values()), body
-
-
 #: The commit a tampering box writes into the run record: never the export the run used.
 TAMPERED_COMMIT = "0ddba110ddba110ddba110ddba110ddba110ddba"
 
 
-@pytest.mark.e2e
 @pytest.mark.parametrize("tamper", ["suppress", "forge"])
-def test_run_main_comment_follows_the_host_outcome_when_the_box_rewrites_the_record(
-        tmp_path, monkeypatch, p4_tenant, tamper):
-    """The box can rewrite the stamp's `knowledge_source` mid-run (the lifecycle stand-in does);
-    the comment follows the host's launch outcome both ways: a stale launch rewritten to fresh
-    still posts the stale sentence (suppress), and a fresh launch rewritten to stale posts
-    the plain fresh comment (forge)."""
-    from defender import run as run_py
-    from defender.tests.support.runtime.engine._spec767 import write_report
-    from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107
-
-    commit = p4_tenant.commit
+def test_the_comment_follows_the_host_outcome_when_the_box_rewrites_the_record(
+        tmp_path, monkeypatch, tamper):
+    """The box can rewrite the stamp's `knowledge_source` mid-run; the comment (the record step, as the job lane calls
+    it over a run dir holding the host's record) follows the host's launch outcome both ways: a stale launch whose stamp
+    was rewritten to fresh still posts the stale sentence (suppress), and a fresh launch whose stamp was rewritten to
+    stale posts the plain fresh comment (forge). Held since #1471 W7 at the record step, not at `run.main` (the operator
+    run no longer comments)."""
+    _use_case_record(monkeypatch, tmp_path / "dfn")
+    commit = FRESH_COMMIT
     if tamper == "suppress":
-        outcome = _stale_outcome("transient", RAW_REASON["transient"])
+        host = knowledge_source("stale", stale_kind="transient", commit=STALE_COMMIT)
         planted = knowledge_source("fresh", commit=commit)
     else:
-        outcome = f"fresh {commit}"
+        host = knowledge_source("fresh", commit=commit)
         planted = knowledge_source("stale", stale_kind="operator", commit=TAMPERED_COMMIT,
                                    reason="call https://evil.invalid/ now")
-
-    # The real writer, the store behind the credential proxy's stand-in (#1391 O1).
+    run_dir = make_run(tmp_path, name=f"s-c-tamper-{tamper}")
+    write_host_record(run_dir, host)
+    stamp_knowledge_source(run_dir, planted)  # what the box, root on its rw bind, can leave
     store = _store(tmp_path)
-    tampered: list[Path] = []
+    record(run_dir, store, link=LINK)
 
-    def box_rewrites_the_record(run_dir: Path) -> None:
-        write_report(run_dir)
-        S1107.seed_session_store(run_dir)
-        stamp_knowledge_source(run_dir, planted)
-        tampered.append(run_dir)
-
-    alert = S1107.plant_alert(tmp_path / "alert")
-    rec = S1107.RunRecorder(tmp_path / "unused" / f"s-c-tamper-{tamper}",
-                            before_lifecycle=box_rewrites_the_record)
-    seams = {**{k: v for k, v in rec.seams().items() if k != "materialize"},
-             **store.stand_in.seams()}  # the proxy's stand-in, and a signer for its token
-    argv = [str(alert), "--tenant", p4_tenant.tenant_id, "--update-ticket", "--no-learn"]
-    rc = run_py.main(argv, directory=p4_tenant.directory, publish=lambda *a, **k: outcome, **seams)
-
-    assert rc == 0, rc
-    assert tampered, "fixture: the lifecycle stand-in never rewrote the record"
     body = store.comment_body()
     assert TAMPERED_COMMIT[:SHORT_COMMIT] not in body, (
         f"the comment names the commit the box wrote into the record: {body!r}")
     assert "evil.invalid" not in body, body
     if tamper == "suppress":
-        assert names_commit(body, commit), (
+        assert names_commit(body, STALE_COMMIT), (
             f"the box suppressed the stale sentence by rewriting the record to fresh: {body!r}")
         assert CUSTOMER_WORD["transient"] in body.lower(), body
     else:
-        assert body == (f"benign — {HOST_CAUSE}\n\n"
-                        "The account is a decommissioned service identity; no egress followed."), (
+        assert body == TODAYS_VERDICT_BODY, (
             "the box forged a stale sentence into a fresh run's comment by rewriting "
             f"the record: {body!r}")
 
@@ -545,6 +476,7 @@ def _investigation(investigation_id: str, knowledge: dict[str, Any] | None) -> A
         "finished_at": _NOW,
         "request_key": f"rk-{investigation_id}", "attempt": 1,  # required on the wire model (#1342 D-d)
         "cost_is_lower_limit": False,  # required on the wire model too (#1377 r4 API field)
+        "update_ticket": False,  # and the request's flag (#1471 C-4)
     }
     if knowledge is not None:
         doc["knowledge"] = knowledge
@@ -691,8 +623,6 @@ def test_o_warn_api_published_contract_declares_the_knowledge_field():
 
 #: Case (3): how the host record fails while a record should exist (the stamp names a source).
 UNREADABLE_RECORDS = {"missing-with-stamp": None, "corrupt": '{"kind": "fresh", "commit": '}
-TODAYS_VERDICT_BODY = (f"benign — {HOST_CAUSE}\n\n"
-                       "The account is a decommissioned service identity; no egress followed.")
 
 
 def plant_unreadable_host_record(run_dir: Path, how: str) -> None:
@@ -717,14 +647,14 @@ def test_od22_an_unreadable_host_record_puts_the_operator_sentence_without_a_com
         tmp_path, monkeypatch, how):
     """Case (3): the ticket claims no freshness: the comment adds the operator-kind sentence and
     names no commit id. Control: a fresh record posts the plain comment."""
-    use_case_record(monkeypatch, tmp_path / "dfn")
+    _use_case_record(monkeypatch, tmp_path / "dfn")
     fresh, _ = _posted(tmp_path, "verdict", knowledge_source("fresh"), label=f"od22-fresh-{how}")
     assert fresh == TODAYS_VERDICT_BODY, fresh
 
     run_dir = make_run(tmp_path, name=f"s-c-od22-{how}")
     plant_unreadable_host_record(run_dir, how)
     store = _store(tmp_path)
-    record(run_dir, store)
+    record(run_dir, store, link=LINK)
     body = store.comment_body()
 
     sentence = _added(fresh, body)
@@ -743,18 +673,18 @@ def test_od22_an_unreadable_host_record_puts_the_operator_sentence_without_a_com
 def test_od22_a_pre_p4_run_posts_todays_comment(tmp_path, monkeypatch):
     """Case (2): old runs are not rewritten, so a pre-P4 run posts exactly the plain comment.
     Control: the same run with a stamp naming a source (case 3) gets the operator sentence."""
-    use_case_record(monkeypatch, tmp_path / "dfn")
+    _use_case_record(monkeypatch, tmp_path / "dfn")
     old = make_run(tmp_path, name="s-c-od22-pre-p4")
     plant_pre_p4_run(old)
     store = _store(tmp_path)
-    record(old, store)
+    record(old, store, link=LINK)
     assert store.comment_body() == TODAYS_VERDICT_BODY, (
         f"a pre-P4 run's comment changed: {store.comment_body()!r}")
 
     control = make_run(tmp_path, name="s-c-od22-pre-p4-control")
     plant_unreadable_host_record(control, "missing-with-stamp")
     store = _store(tmp_path)
-    record(control, store)
+    record(control, store, link=LINK)
     assert store.comment_body() != TODAYS_VERDICT_BODY, (
         "positive control: a missing record where one should exist adds the operator sentence")
 

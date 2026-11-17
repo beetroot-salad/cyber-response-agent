@@ -71,14 +71,20 @@ def _token_of(record: Optional[str]) -> Any:
         return _UNREADABLE
 
 
-def take(store: Any, name: str, *, clock: Callable[[], float] = time.time) -> str:
-    """Take `name` and return its token, or raise Held. One exclusive create: atomic."""
+def take(store: Any, name: str, *, clock: Callable[[], float] = time.time,
+         note: Optional[dict] = None) -> str:
+    """Take `name` and return its token, or raise Held. One exclusive create: atomic.
+    `note` is written into the record with it and never changed after: what the holder checked
+    before taking it, for a later step that joins the lock with the token (`note_of`)."""
     token = secrets.token_hex(16)
-    record = json.dumps({
+    fields = {
         "token": token,
         "taken_at": datetime.fromtimestamp(clock(), timezone.utc).isoformat(timespec="seconds"),
         "holder": f"{getpass.getuser()}@{socket.gethostname()}",
-    })
+    }
+    if note is not None:
+        fields["note"] = note
+    record = json.dumps(fields)
     if not store.create_exclusive(name, record):
         raise Held(f"lock {name!r} is held: {_describe(store.read(name))}")
     return token
@@ -91,6 +97,15 @@ def release(store: Any, name: str, token: str) -> None:
         return
     if store.read(name) is not None:
         raise WrongToken(f"lock {name!r}: the token passed is not the holder's")
+
+
+def note_of(store: Any, name: str, token: Optional[str]) -> Optional[dict]:
+    """The note the holder took `name` with, when `token` is the holder's; None otherwise."""
+    record = store.read(name)
+    if token is None or record is None or _token_of(record) != token:
+        return None
+    note = json.loads(record).get("note")
+    return note if isinstance(note, dict) else None
 
 
 def require(store: Any, name: str, token: Optional[str] = None) -> None:

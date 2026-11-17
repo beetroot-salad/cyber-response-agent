@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""The host's one write to a case (#1359): at the end of a run started with `--update-ticket`, add
-one comment to the ticket the alert names, through the case system's adapter. The product decides
+"""The job's one write to a case (#1359, #1471): at the end of a flagged investigation, add one
+comment to the ticket the alert names, through the case system's adapter. The product decides
 what and when (exit class, body, agent tag, stale sentence, bound, receipt); the adapter decides
 how (request shape, text format, what a status means, the ticket's web link). Nothing is created
 or transitioned here, and nothing is called at run start."""
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from defender.kit.faults import AdapterFault, ConfigFault, TransportFault, UpstreamFault
@@ -19,7 +19,6 @@ from defender.systems import case_system
 from defender.systems.run_tenant import RunTenant
 from defender.systems.verbs import VerbContext, redact_settings_path
 from defender.tenancy import case_ticket
-from defender.tenancy.case_record import CaseRecordSettings, CaseTicketError
 
 _logger = logging.getLogger(__name__)
 
@@ -54,31 +53,39 @@ REASON_NO_TICKET = (
     "holds none a ticket key can be made of")
 REASON_NO_TOKEN = (
     "the write-back token could not be minted, so the comment was not sent (see the run log)")
+REASON_NO_WRITE_SYSTEM = (
+    "the case system is not reached through the credential proxy, so no write-back token was minted "
+    "for it and the comment was not sent")
+
+#: What a write-pass ask answers (#1471 W5): the token and the proxy's address, or the receipt reason it gives none.
+AskPass = Callable[[], "tuple[str, str] | str"]
 
 
-def _comment_body(
-    run: Run, truncated_by: str | None, settings: CaseRecordSettings,
-) -> tuple[str, str]:
-    """The comment text and its receipt word.
+def _escalation_body(truncated_by: str, link: str) -> str:
+    """The escalation note, then the screen link: the comment an escalated or forced-close exit posts."""
+    return f"{case_ticket.escalation_comment_body(truncated_by)}\n{link}"
+
+
+def _comment_body(run: Run, truncated_by: str | None, link: str) -> tuple[str, str]:
+    """The comment text (P-6: the disposition word or the escalation or unreadable sentence, then the screen link) and
+    its receipt word. Every part is a constant, a closed-set word or an id: nothing the report says is carried.
 
     An unreadable report (`ReportNotParsable`) gets the fixed unreadable-branch sentence — or,
     on a forced-close exit, the escalation note, since the host's own forced close failed and
-    there is no verdict. Any other `CaseTicketError` (a template that does not render)
-    propagates to the caller's refusal branch (no call, a warning, an `error` receipt)."""
+    there is no verdict."""
     try:
         rec = case_ticket.read_case_record(run)
     except case_ticket.ReportNotParsable:
         if truncated_by in run_end.FORCED_CLOSE_EXITS:
-            return case_ticket.escalation_comment_body(str(truncated_by)), RECEIPT_ESCALATED
-        return case_ticket.unreadable_comment_body(), RECEIPT_COMMENTED
-    return case_ticket.case_record_to_comment(rec, settings=settings), RECEIPT_COMMENTED
+            return _escalation_body(str(truncated_by), link), RECEIPT_ESCALATED
+        return f"{case_ticket.unreadable_comment_body()}\n{link}", RECEIPT_COMMENTED
+    return f"{rec.disposition}\n{link}", RECEIPT_COMMENTED
 
 
-def _ticket_key(run: Run) -> str | None:
+def ticket_key(run: Run) -> str | None:
     """The ticket the alert names: the `case_key` fact recorded from the alert when the run began
     (#1359 P3), or `None`. Never read off the alert again."""
-    record = formats.parse_alert_record(run.facts.alert_record.read() or "")
-    return None if record is None else record.facts.case_key
+    return formats.ticket_of_record(run.facts.alert_record.read())
 
 
 def escalated(truncated_by: str | None, closed_before_cut: bool) -> bool:
@@ -105,8 +112,8 @@ def comments_on(truncated_by: str | None, closed_before_cut: bool) -> bool:
     """Does a run that ended this way comment on its case? Not a run cut short by its budget,
     its store, its model provider (down) or its box (unusable, or its fence tripped: #1421)
     before it reached a verdict (`run_end.SILENT_EXITS`): it leaves the case open and writes no
-    receipt. The one rule, read by the record step and by `run.py`, which signs no write-back
-    token for a run that will not comment."""
+    receipt. The one rule: the record step reads it before it asks for a write pass, so a run that
+    will not comment is signed none."""
     return closed_before_cut or (
         run_end.normalized_truncated_by(truncated_by) not in run_end.SILENT_EXITS)
 
@@ -115,7 +122,8 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
     run: Run, *, tenant: RunTenant, defender_dir: Path, env: Mapping[str, str],
     truncated_by: str | None = None, closed_before_cut: bool = False,
     request_token: str | None = None, proxy_url: str | None = None,
-    case: case_system.CaseTarget | case_system.CaseSettingsFault,
+    case: case_system.CaseTarget | case_system.CaseSettingsFault, link: str,
+    ask_pass: AskPass | None = None,
 ) -> None:
     """Record the investigation into the case, never close it: at most one comment on the ticket
     the alert names, no transition. Closing is a person's act, which is what lets the store's
@@ -124,11 +132,15 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
 
     `case` is the case system's verdict run start made (`case_system.case_verdict`), the one the
     write-back token was minted on; required (#1366 R16): the step never judges the record over
-    a roster of its own."""
+    a roster of its own. `link` is the investigation screen's address, which the worker built: the comment's last part.
+
+    `ask_pass` (a job, #1471 W5) asks for the write pass when no `request_token` was handed: only once the run will
+    comment, its case system is usable and its alert names a ticket, so a silent ending or a keyless alert signs
+    nothing. It answers the token and the proxy's address, or the receipt reason it got none."""
     run_dir = run.run_dir
     key = ""
     try:
-        key = _ticket_key(run) or ""
+        key = ticket_key(run) or ""
         truncated_by = run_end.normalized_truncated_by(truncated_by)  # F-I — first act
         if not comments_on(truncated_by, closed_before_cut):
             clear_receipt(run)
@@ -142,19 +154,19 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
         if not key:
             _leg_refused(run, key, REASON_NO_TICKET)
             return
+        if not request_token and ask_pass is not None:
+            asked = ask_pass()
+            if isinstance(asked, str):
+                _leg_refused(run, key, asked)
+                return
+            request_token, proxy_url = asked
         if not request_token:  # every case system is reached through the credential proxy
             _leg_refused(run, key, REASON_NO_TOKEN)
             return
-        try:
-            if escalated(truncated_by, closed_before_cut):
-                body, word = case_ticket.escalation_comment_body(str(truncated_by)), RECEIPT_ESCALATED
-            else:
-                body, word = _comment_body(run, truncated_by, target.template)
-        except CaseTicketError as e:
-            # The template refused: no call, but the receipt still says so.
-            _leg_refused(run, key, redact_settings_path(f"{case_system.CASE_RECORD_POINTER}: {e}",
-                                                   tenant.settings))
-            return
+        if escalated(truncated_by, closed_before_cut):
+            body, word = _escalation_body(str(truncated_by), link), RECEIPT_ESCALATED
+        else:
+            body, word = _comment_body(run, truncated_by, link)
         _post_comment(run, target, key, body, word,
                       _verb_context(tenant, defender_dir, run_dir, env, request_token, proxy_url))
     except Exception as e:  # noqa: BLE001 — a post-step must never break the run

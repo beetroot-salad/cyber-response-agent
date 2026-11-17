@@ -186,12 +186,12 @@ def test_c3_the_request_token_is_never_sent_upstream(tmp_path, data_root):
     """Neither the token nor its signature appears in anything any upstream saw. O4, O8."""
     with T.rig(tmp_path / "forge", data_root) as r:
         tok = r.tok()
-        r.ask(tok=tok, headers={"X-Trace": "t1"})
+        r.ask(tok=tok, headers={"Idempotency-Key": "t1"})
 
     signature = tok.rpartition(".")[2]
     assert r.up.seen
     assert not any(tok in s.blob() or signature in s.blob() for s in r.up.seen)
-    assert r.up.seen[0].header("X-Trace") == "t1"  # control: non-auth headers pass
+    assert r.up.seen[0].header("Idempotency-Key") == "t1"  # control: an allowed header passes (#1471 R9-5)
 
 
 def test_c3_an_access_token_already_expired_at_issue_is_exchanged_again(tmp_path, data_root):

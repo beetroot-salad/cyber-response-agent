@@ -308,9 +308,21 @@ class AccessDeclaration:
     ca: str | None = None
 
 
+def ticket_write_fault(declaration: AccessDeclaration) -> str | None:
+    """Why `declaration` cannot be written under a write pass naming a ticket (#1471 X2), as a clause, or None: it must
+    declare exactly one write route with exactly one `*` segment (where the ticket goes), and only GET reads. THE rule:
+    the credential proxy enforces it on every ticket write, and the case system's cover rule (`system_rules.cover_fault`)
+    asks it last, so a declaration the store accepts is one the proxy writes under."""
+    if len(declaration.writes) != 1 or declaration.writes[0].path.split("/").count("*") != 1:
+        return "it must declare exactly one write route with exactly one `*` segment"
+    if any(route.method != "GET" for route in declaration.reads):
+        return "it declares a read route that is not a GET"
+    return None
+
+
 __all__ = [
     "TOKEN_REUSE_MARGIN_SEC", "TOKEN_SEC", "BASIC", "BEARER", "CALLER_GRACE_SEC", "caller_wait_sec", "CLIENT_ID", "CLIENT_SECRET", "CREDENTIAL_KINDS", "HEADER", "HTTP_PROXY",
     "OAUTH_CLIENT_CREDENTIALS", "PASSWORD", "PROXY_OVERHEAD_SEC", "PROXY_URL_ENV", "PUBLIC_FIELD_NAMES", "SCHEMES",
     "SECRET_MIN_LENGTH", "STATIC", "USERNAME", "AccessDeclaration", "Auth", "CredentialRefused", "RequestAccess", "Route",
-    "check_credentials", "credential_faults", "credential_fields",
+    "check_credentials", "credential_faults", "credential_fields", "ticket_write_fault",
 ]

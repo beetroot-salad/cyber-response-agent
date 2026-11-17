@@ -1,7 +1,7 @@
 
 from __future__ import annotations
 
-from defender._vocab import DISPOSITION_VALUES
+from defender._vocab import CONFIDENCE_VALUES, DISPOSITION_VALUES
 
 # The one vocabulary here that invlang does not own: `disposition` is also validated in
 # `report.md`, so it is imported from the project-wide vocabulary rather than restated.
@@ -129,6 +129,17 @@ IMPACT_VERDICT: tuple[str, ...] = ("within", "exceeds", "indeterminate")
 
 CONCLUDE_IMPACT_VERDICT: tuple[str, ...] = ("none", *IMPACT_VERDICT)
 
+#: A benign close's confidence, best first (#1545). The model states one; the close commits
+#: the lower of that and the ceiling the run's record earns
+#: (`validate._gating.benign_confidence_ceiling`): `high` needs every load-bearing step
+#: authorized AND a baseline the activity matches, `medium` the authorization alone, `low` a
+#: matching baseline with nothing an attacker would have gained.
+CONCLUDE_CONFIDENCE: tuple[str, ...] = CONFIDENCE_VALUES
+
+#: What an attacker who did this would have gained (#1545). `none` is the only value that
+#: lets a benign close rest on a baseline without an authorization record.
+CONCLUDE_ATTACKER_GAIN: tuple[str, ...] = ("none", "some")
+
 #: Impact grounding excludes `past-case`: impact is about this event's consequence, which a
 #: past case cannot establish. `_check_impact_resolution_refs` refuses it by name.
 IMPACT_GROUNDING: tuple[str, ...] = (
@@ -247,6 +258,8 @@ SLOTS: dict[str, tuple[str, ...]] = {
     "impact.grounding": IMPACT_GROUNDING,
     "conclude.impact_verdict": CONCLUDE_IMPACT_VERDICT,
     "conclude.impact_severity": IMPACT_SEVERITY,
+    "conclude.confidence": CONCLUDE_CONFIDENCE,
+    "conclude.attacker_gain": CONCLUDE_ATTACKER_GAIN,
     "compute.role": COMPUTE_ROLE,
     "compute.zone": COMPUTE_ZONE,
     "compute.provenance": PROVENANCE,

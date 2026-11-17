@@ -61,6 +61,10 @@ class _Attempt:
     #: `None`: its answer is the attempt's base from then on, and the registry keeps it as a base
     #: answer of the world when the attempt commits (#1385 A3).
     re_asked: Any = None
+    #: The code whose output this attempt submitted (#1543 O4), or `None` for a literal hand-in.
+    code: str | None = None
+    #: The saved file holding this attempt's re-asked answer, once it made one (#1543 O1).
+    against_file: str | None = None
 
 
 
@@ -76,6 +80,8 @@ class _AttemptBox:
         self._lock = threading.Lock()
         self._box: Any = None
         self._ended = False
+        #: The saved reads already written into the current box's scratch, by file name (#1543 O1).
+        self.placed: set[str] = set()
 
     def get(self) -> Any:
         with self._lock:
@@ -88,6 +94,7 @@ class _AttemptBox:
             keep = not self._ended and self._box is None
             if keep:
                 self._box = box
+                self.placed = set()
         if not keep:
             _stop_box(box)
             return self.get()
@@ -145,6 +152,9 @@ class _Run:
     #: system and detail: every attempt of one serving, and its verifier runs, share one list, so a
     #: thread an earlier serving abandoned can only add to that serving's.
     ours: list[tuple[str, str]] = field(default_factory=list)
+    #: The serving's saved reads (#1543 O1), each `{name, kind, question, answer}`: the call's base,
+    #: the world's frozen rows, and the oracle's own reads and re-asks, shared by its attempts.
+    saved: list[dict] = field(default_factory=list)
     #: Whether the call's base is a live read, as opposed to the source's recording: a re-ask is
     #: allowed only on a live base (#1385).
     live: bool = False

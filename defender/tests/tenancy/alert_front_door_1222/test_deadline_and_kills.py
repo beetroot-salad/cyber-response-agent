@@ -677,9 +677,8 @@ def test_p171_run_stopped_before_mains_first_request(tmp_path: Path,
     tenant = S.ticket_the_tenant(S.plant_tenant())
     real_enqueue = S.sym("run_common", "enqueue_curation")
 
-    def post_steps() -> tuple[Any, Callable[..., bool], list[dict], list[bool]]:
-        """The REAL ticket writer over a recording store, and the REAL curation enqueue behind
-        a recorder of what run.main handed it and what it answered."""
+    def post_steps() -> tuple[Callable[..., bool], list[dict], list[bool]]:
+        """The REAL curation enqueue behind a recorder of what run.main handed it and what it answered."""
         handed: list[dict] = []
         answers: list[bool] = []
 
@@ -688,24 +687,24 @@ def test_p171_run_stopped_before_mains_first_request(tmp_path: Path,
             answers.append(bool(real_enqueue(run_dir, alert, **kw)))
             return answers[-1]
 
-        return S.ticket_writer(S.TicketStore(tmp_path)), enqueue, handed, answers
+        return enqueue, handed, answers
 
     # The existing path: MAIN's own budget kill at its first tool call.
-    tickets_a, enqueue_a, handed_a, answers_a = post_steps()
+    enqueue_a, handed_a, answers_a = post_steps()
     with monkeypatch.context() as m:
         m.setenv(_enforce_flag(), "true")
         main_kill = S.run_alert(
             tmp_path / "main", tenant=tenant,
             main=S.MainScript(S.default_main_turns(), S.LeadFault(delay=KILL_DELAY_S)),
             limits=S.default_limits(wall_clock_timeout=KILL_WALL_S, grace_seconds=0),
-            alert=S.ticketed_alert(), tickets=tickets_a, update_ticket=True, no_learn=False,
+            alert=S.ticketed_alert(), no_learn=False,
             enqueue=enqueue_a)
     # The stop before MAIN's first request: a budget kill at the lead's own tool call.
-    tickets_b, enqueue_b, handed_b, answers_b = post_steps()
+    enqueue_b, handed_b, answers_b = post_steps()
     stores: list = []
     lead_kill = _budget_kill_during_lead(
         tmp_path / "lead", tenant, monkeypatch, stores=stores,
-        alert=S.ticketed_alert(), tickets=tickets_b, update_ticket=True, no_learn=False,
+        alert=S.ticketed_alert(), no_learn=False,
         enqueue=enqueue_b)
     _assert_budget_kill_during_lead(lead_kill, stores)
     assert lead_kill.summary is not None
@@ -717,11 +716,6 @@ def test_p171_run_stopped_before_mains_first_request(tmp_path: Path,
         f"the curation enqueue was handed {handed_b!r} for the stop before MAIN, {handed_a!r} for "
         "MAIN's own kill")
     assert answers_b == answers_a
-    # A run cut by its budget leaves the ticket alone (#1359 O7: that exit class is silent), and
-    # the stop before MAIN is the same exit class: neither arm reaches the store.
-    assert [(c.method, c.path) for c in tickets_b.store.calls] == [
-        (c.method, c.path) for c in tickets_a.store.calls] == [], (
-        "the ticket's record leg did something different for the stop before MAIN")
 
 
 def test_p174_lead_and_main_failures_together_pass_the_kill_co(tmp_path: Path) -> None:

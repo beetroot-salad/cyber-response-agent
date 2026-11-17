@@ -88,3 +88,72 @@ def test_one_dir_named_twice_is_refused(tmp_path):
     with pytest.raises(Exception, match="twice"):
         _write(rig, [(d, "young"), (d, "derived-in")])
     assert "lock.create" not in rig.journal.ops()
+
+
+def _hashes(monkeypatch, rig) -> list[str]:
+    copy, hashed = rig.launch_module.frozen_copy, []
+    real = copy.sha256_file
+    monkeypatch.setattr(copy, "sha256_file", lambda path: (hashed.append(Path(path).name), real(path))[1])
+    return hashed
+
+
+def _label(rig, dirs, token):
+    from test_1347_batch_launch import Agents, _launch
+    return _launch(rig, dirs, Agents(rig), parallel=3, reference=True, lock_token=token)
+
+
+def _written(tmp_path):
+    rig = LabRig(tmp_path)
+    dirs = [rig.case_dir.parent / f"case-{u}" for u in UUIDS]
+    _mod, held = _write(rig, [(d, u) for d, u in zip(dirs, UUIDS)])
+    return rig, dirs, held
+
+
+def test_the_labelling_launch_trusts_the_parts_check_case_writing_did_under_its_lock(tmp_path, monkeypatch):
+    """Writing then labelling a batch read the 17 GB freeze twice under one held lock."""
+    rig, dirs, held = _written(tmp_path)
+    hashed = _hashes(monkeypatch, rig)
+    assert len(_label(rig, dirs, held.token)) == 3
+    assert [n for n in hashed if n in rig.freeze["parts"]] == []
+
+
+@pytest.mark.parametrize("change", ["touched", "missing"])
+def test_a_part_changed_since_case_writing_is_hashed_again_and_refused_by_name(tmp_path, monkeypatch, change):
+    import os
+    rig, dirs, held = _written(tmp_path)
+    name = sorted(rig.freeze["parts"])[0]
+    part = rig.parts / rig.freeze_dir.name / name
+    if change == "missing":
+        part.unlink()
+    else:
+        part.write_bytes(b"tampered")
+        os.utime(part, ns=(1, 1))
+    _hashes(monkeypatch, rig)
+    with pytest.raises(Exception, match=name):
+        _label(rig, dirs, held.token)
+    assert not any(k == "run" for k in rig.journal.ops())
+
+
+def test_a_lock_taken_without_the_note_still_hashes_the_parts(tmp_path, monkeypatch):
+    from chaos import lock
+    rig, dirs, held = _written(tmp_path)
+    held.release() if hasattr(held, "release") else lock.release(rig.store, lock.FROZEN_ENGINE, held.token)
+    token = lock.take(rig.store, lock.FROZEN_ENGINE)
+    hashed = _hashes(monkeypatch, rig)
+    _label(rig, dirs, token)
+    assert sorted(n for n in hashed if n in rig.freeze["parts"]) == sorted(rig.freeze["parts"])
+
+
+def test_a_scored_launch_hashes_the_parts_even_under_a_noted_lock(tmp_path, monkeypatch):
+    rig, dirs, held = _written(tmp_path)
+    for d in dirs:
+        case = _case(d)
+        case["confirmed"] = {"by": "test"}
+        (d / "case.yaml").write_text(yaml.safe_dump(case))
+    hashed = _hashes(monkeypatch, rig)
+    from test_1347_batch_launch import Agents, _launch
+    try:
+        _launch(rig, dirs, Agents(rig), lock_token=held.token)
+    except Exception:  # noqa: BLE001 - only the hashing before the copy is under test
+        pass
+    assert sorted(n for n in hashed if n in rig.freeze["parts"]) == sorted(rig.freeze["parts"])

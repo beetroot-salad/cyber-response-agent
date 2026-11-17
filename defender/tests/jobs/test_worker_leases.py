@@ -34,6 +34,7 @@ from defender.tests.support.jobs._jobs1342 import (
 )
 from defender.tests.support.shared._postgres1339 import execute
 from defender.tests.support.jobs._jobs1342 import (  # noqa: E402
+    ALERT_DIGEST,
     FaultableStore,
     LaneLanding,
     accounting_written,
@@ -139,8 +140,9 @@ def _plant_running_lapsed(dsn: str, alert_id: str, *, attempt: int = 1) -> str:
     """A `running` row nobody holds, its lease lapsed a minute ago by the database clock."""
     inv = str(uuid.uuid4())
     execute(dsn, "INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, stage, created_at, "
-                 "started_at, cost_usd, cost_is_lower_limit, lease_expires_at) VALUES (%s, %s, %s, 'planted', %s, 'running', "
-                 "%s, %s, 0, false, now() - interval '1 minute')", (inv, T1, alert_id, attempt, NOW, NOW))
+                 "started_at, cost_usd, cost_is_lower_limit, lease_expires_at, update_ticket) VALUES (%s, %s, %s, 'planted', "
+                 "%s, 'running', %s, %s, 0, false, now() - interval '1 minute', false)",  # C-3: every INSERT writes the flag
+            (inv, T1, alert_id, attempt, NOW, NOW))
     return inv
 
 
@@ -1764,8 +1766,13 @@ async def test_1170_the_worker_starts_each_investigation_as_its_tenants_host_hel
         inv = await _queued(store)
         await _worker(world, store, run_argv, spawn=as_scripted).drain()
 
-    assert asked == [[sys.executable, "-m", "defender.job_host", "--kind", "investigation", "--job", inv,
-                      "--tenant", T1, "--parent-pid", str(os.getpid())]]
+    (argv,) = asked
+    # #1471 C-1: an investigation helper is also handed the digest of the alert the worker wrote (unflagged: no
+    # `--post-ticket`, no `--ticket-link`); its place among the other flags is not decided.
+    at = argv.index("--alert-digest")
+    assert argv[at + 1] == ALERT_DIGEST, argv
+    assert argv[:at] + argv[at + 2:] == [sys.executable, "-m", "defender.job_host", "--kind", "investigation", "--job",
+                                         inv, "--tenant", T1, "--parent-pid", str(os.getpid())], argv
     assert row(world["dsn"], inv)["stage"] == "completed"
 
 

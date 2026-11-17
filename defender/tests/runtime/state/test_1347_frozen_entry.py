@@ -1,5 +1,5 @@
 """#1347 r6.4 O5/P7: `run.py --as-of T` starts the run clock (and the recorded start times) at T, is refused
-with `--update-ticket` and the branching flags, and cuts nothing; `--arrived-by` is gone."""
+with the branching flags, and cuts nothing; `--arrived-by` is gone."""
 from __future__ import annotations
 
 import contextlib
@@ -188,8 +188,6 @@ def test_an_as_of_run_keeps_the_milliseconds_it_was_given(tmp_path, data_root):
 
 
 @pytest.mark.parametrize(("argv_of", "needle"), [
-    pytest.param(lambda alert, tenant: [alert, "--tenant", tenant, "--as-of", AS_OF_Z, "--update-ticket"],
-                 "--update-ticket", id="ticket-write"),
     pytest.param(lambda alert, tenant: ["--tenant", tenant, "--episode", T.EPISODE_ID, "--world", "a",
                                         "--as-of", AS_OF_Z], "--as-of", id="episode-and-world"),
     pytest.param(lambda alert, tenant: ["--tenant", tenant, "--episode", T.EPISODE_ID, "--as-of", AS_OF_Z],
@@ -197,9 +195,9 @@ def test_an_as_of_run_keeps_the_milliseconds_it_was_given(tmp_path, data_root):
     pytest.param(lambda alert, tenant: [alert, "--tenant", tenant, "--world", "a", "--as-of", AS_OF_Z],
                  "--as-of", id="world-alone-with-an-alert"),
 ])
-def test_as_of_is_refused_with_a_ticket_write_or_a_branching_flag(tmp_path, capsys, argv_of, needle):
-    """Non-obligation (ticket writes) and O5: a frozen run never writes a ticket and is never a
-    branch. Refused naming the flag, before a run exists."""
+def test_as_of_is_refused_with_a_branching_flag(tmp_path, capsys, argv_of, needle):
+    """O5: a frozen run is never a branch. Refused naming the flag, before a run exists. (A frozen run
+    writes no ticket because no operator run does, W7.)"""
     out, base, before = attempt(tmp_path, argv_of)
 
     refused(out, capsys, needle, base, before)

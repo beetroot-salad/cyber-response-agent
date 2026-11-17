@@ -424,8 +424,7 @@ for name in filter(None, seeded):
             systems={s: SystemRecord(system_id=s, version=r["version"], adapter_id=r["adapter"], enabled=r["enabled"],
                                      settings=r["settings"], access=r["access"], credential_generation=r["generation"])
                      for s, r in held["systems"].items()},
-            case=None if case is None else CaseRecord(version=case["version"], system_id=case["system"],
-                                                      comment_body=case["body"])))
+            case=None if case is None else CaseRecord(version=case["version"], system_id=case["system"])))
         if inspect.isawaitable(added):
             asyncio.run(added)
 sys.exit(tenant.main(argv, directory=TenantDirectory(lambda: twin)))
@@ -444,8 +443,7 @@ def _records_json(root: Path | str | None, seeds: list[str]) -> str:
             "systems": {s: {"version": v.version, "adapter": v.adapter or s, "enabled": v.enabled,
                             "settings": dict(v.settings), "access": v.access, "generation": v.generation}
                         for s, v in spec.systems.items()},
-            "case": None if spec.case is None else {"version": spec.case.version, "system": spec.case.system_id,
-                                                    "body": spec.case.comment_body}}
+            "case": None if spec.case is None else {"version": spec.case.version, "system": spec.case.system_id}}
     return json.dumps(out)
 
 

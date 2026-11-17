@@ -669,8 +669,7 @@ def run_sibling(tmp_path: Path, ep: Path, main: S.MainScript) -> S.Drive:
     try:
         # The launch-time publish, in-process.
         d.rc = run_mod.main(argv, directory=directory_for_argv(argv), lifecycle=lifecycle, visualize=lambda *_a, **_k: None,
-                                    preflight=lambda *_a, **_k: 0, ticket_writer=S.NoTicket(),
-                                    publish=in_process_publish())
+                                    preflight=lambda *_a, **_k: 0, publish=in_process_publish())
     except SystemExit as exit_:
         d.refusal = exit_.code if isinstance(exit_.code, str) else None
         d.rc = exit_.code if isinstance(exit_.code, int) else 1

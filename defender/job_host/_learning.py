@@ -65,6 +65,9 @@ LOCK_WAIT_SECONDS = 30.0
 #: Where under the data root each claim's scratch folder lives (oracle boxes' binds): outside
 #: every tenant's folder, the job socket's folder and host `/tmp` (C21).
 SCRATCH = ".job-scratch"
+#: Where under a learning job's episode folder its oracle boxes' scratch folders live (#1543 D1): inside the tenant's
+#: folder, so the job's own process writes the oracle's saved reads into them.
+ORACLE_SCRATCH = ".oracle-scratch"
 _COMMIT = re.compile(r"[0-9a-f]{40}([0-9a-f]{24})?")
 
 
@@ -184,6 +187,8 @@ def _prepare_learning(session: Session, hold: contextlib.ExitStack) -> Prepared:
     cleanup = contextlib.ExitStack()
     try:
         scratch = _scratch(session, cleanup)
+        # The oracle boxes' scratch inside the episode folder (#1543 D1) goes at the helper's end, as the claim's does.
+        cleanup.callback(shutil.rmtree, _oracle_scratch(session), ignore_errors=True)
     except BaseException:
         cleanup.close()
         raise
@@ -481,17 +486,31 @@ def _sibling_box(session: Session, ident: str) -> Any:
     return start_run_box(session, sibling.run_dir, sibling.copy)
 
 
+def _oracle_scratch(session: Session) -> Path:
+    """`<T>/episodes/<job id>/.oracle-scratch`: where the job's oracle boxes' scratch folders are made (#1543 D1)."""
+    if session.tenant_folder is None:
+        raise Refused("the job's tenant is not accepted yet", "internal")
+    return session.tenant_folder / EPISODES / str(session.job_id) / ORACLE_SCRATCH
+
+
 def _oracle_box(session: Session, _ident: str) -> Any:
-    """The oracle's box (#1224), its runner and scratch folders made in a fresh folder under the claim's scratch
-    folder (C21: never host `/tmp`), removed with it at the helper's end."""
+    """The oracle's box (#1224): its runner made in a fresh folder under the claim's scratch folder (C21: never host
+    `/tmp`), removed with it at the helper's end; its scratch made inside the job's own episode folder (#1543 D1), so
+    the job's process can save the oracle's reads where its code reads them. The scratch is judged from `<T>/` down
+    with no link followed, before the start and again once it is made."""
     from defender import box
 
     state = _state(session, _Learning)
     folder = state.scratch / f"oracle-{uuid.uuid4().hex[:12]}"
     _io.guarded_mkdir(folder, base=state.scratch)
+    holder = _oracle_scratch(session)
+    session.judge_binds([holder], must_exist=False)  # a link on the way is `confinement`, before anything is made
+    _io.guarded_mkdir(holder, base=holder.parents[2])  # from `<T>/` down, no link followed
+    session.judge_binds([holder])
     try:
         return box.start_oracle_box(env=os.environ, tenant_id=session.tenant_id, folder=folder,
-                                    docker=session.docker, data_root=session.root_folder)
+                                    docker=session.docker, data_root=session.root_folder, scratch_folder=holder,
+                                    judge=lambda scratch: session.judge_binds([scratch]))
     except box.BoxStartRefused as refused:
         raise box.BoxFault(str(refused)) from None
 

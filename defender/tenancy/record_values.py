@@ -30,7 +30,6 @@ class CaseRecord:
 
     version: int
     system_id: str
-    comment_body: str
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
@@ -50,8 +49,7 @@ class TenantRecords:
                               "credential_generation": r.credential_generation,
                               "custom_ref": None if r.custom_ref is None else list(r.custom_ref)}
                         for sid, r in sorted(self.systems.items())},
-            "case": None if self.case is None else {"version": self.case.version, "system_id": self.case.system_id,
-                                                    "comment_body": self.case.comment_body},
+            "case": None if self.case is None else {"version": self.case.version, "system_id": self.case.system_id},
         }
 
     @classmethod
@@ -93,8 +91,7 @@ class TenantRecords:
         case_wire = field(wire, "case", (dict, type(None)), "records")
         case = None if case_wire is None else CaseRecord(
             version=field(case_wire, "version", int, "records: case"),
-            system_id=field(case_wire, "system_id", str, "records: case"),
-            comment_body=field(case_wire, "comment_body", str, "records: case"))
+            system_id=field(case_wire, "system_id", str, "records: case"))
         return cls(systems=systems, case=case)
 
 

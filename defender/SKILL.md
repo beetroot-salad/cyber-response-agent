@@ -526,7 +526,15 @@ only writer of `report.md`, which is not in your write scope at all —
 Call `close_investigation(disposition=...)` once ANALYZE has reached a
 confident finding. `disposition` is the closed enum:
 
-- `benign` — confident clear.
+- `benign` — the activity is accounted for, at a stated `confidence`
+  (`high`, `medium`, `low`) and with `attacker_gain` in `:T conclude`:
+  what would an attacker who did exactly this have gained? `high` closes
+  with no person reading it, so it needs every step authorized AND a
+  baseline the actor matches. Low-confidence `benign` is how you say "this
+  is routine, but I could not prove it": prefer it to `inconclusive` when
+  only one story is left standing, and to `malicious` never — an attack
+  that failed is still `malicious`. See `skills/invlang/SKILL.md`
+  §`:T conclude`.
 - `false-positive` — the RULE fired on a different kind of behavior than
   its name and description claim, and the one lead that tested the
   alerted entity independently came back clean. It describes the
@@ -556,7 +564,10 @@ confident finding. `disposition` is the closed enum:
 THREE of them carry an ENTRY PRICE, and this close reads it back out of
 `investigation.md` before anything commits. `benign` needs the alerted
 entity recorded in `:V prologue.vertices`, every `??` slot resolved, and
-every authz contract on a live hypothesis `authorized`; `false-positive`
+either every authz contract on a live hypothesis `authorized`, or (at
+`confidence low` only) every such contract searched and found empty, one
+story standing, a matching baseline and `attacker_gain none`;
+`false-positive`
 needs `detection_notes` (the defect) and `entity_check` (that lead's id) in
 `:T conclude`; `inconclusive` needs at least one `ceiling_test` receipt
 that PAYS — mechanically verified against your own transcript, distinct

@@ -24,3 +24,26 @@ def split_http_url(value: str, *, query: bool = False) -> urllib.parse.SplitResu
     if parts.username is not None:
         raise ValueError("carries credentials")
     return parts
+
+
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def check_origin(value: str) -> str:
+    """Scheme, host and optional port: no path (a trailing slash too), query or fragment. Written exactly as a
+    browser sends it in `Origin` (lower case, no default port, an ASCII host), since requests are compared to it
+    character for character; any other spelling is `ValueError`, naming the one to write. The API's frontend origin and
+    the worker's (the screen link a ticket comment carries, #1471 W3) are both read by it."""
+    parts = split_http_url(value)
+    if parts.path:
+        raise ValueError("must be a scheme, host and optional port only (no path, even a trailing slash)")
+    host = parts.hostname or ""
+    if not host.isascii():
+        raise ValueError("must name its host in ASCII (an internationalized name in its xn-- form), as a browser sends it")
+    netloc = f"[{host}]" if ":" in host else host
+    if parts.port is not None and parts.port != _DEFAULT_PORTS[parts.scheme]:
+        netloc += f":{parts.port}"
+    canonical = f"{parts.scheme}://{netloc}"
+    if value != canonical:
+        raise ValueError(f"must be written as a browser sends it: {canonical}")
+    return value

@@ -140,6 +140,7 @@ class Investigation(BaseModel):
                     "was lost; a retry follows) or `retry_cap` (lost on the last of its attempts).")
     failure_message: str | None = Field(
         default=None, description="Our own words on why it failed; never model or run output.")
+    update_ticket: bool = Field(description="Whether this investigation posts its outcome to its ticket.")
     artifacts: list[str] = Field(
         default_factory=list,
         description="Keys readable at `/investigations/{id}/artifacts/{key}`; empty until upload.",
@@ -161,6 +162,10 @@ class Investigation(BaseModel):
 class InvestigationCreate(_Request):
     alert_id: AlertId
     client_request_id: ClientRequestId
+    update_ticket: bool = Field(default=False, description=(
+        "Whether the investigation posts its outcome to the alert's ticket when it ends. Refused (409) when the alert "
+        "names no ticket. A repeated request, or one answered with an alert's live investigation, keeps that "
+        "investigation's own flag."))
 
 
 class LearningJob(BaseModel):
@@ -289,7 +294,6 @@ class CaseRecord(BaseModel):
 
     version: int
     system_id: str
-    comment_body: str
 
 
 class CaseRecordPut(_Request):
@@ -297,7 +301,6 @@ class CaseRecordPut(_Request):
 
     replaces: int
     system_id: StoredText
-    comment_body: StoredText
 
 
 class CredentialsPut(_Request):

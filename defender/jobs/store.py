@@ -39,13 +39,14 @@ from defender.records.formats import (
     admit,
     check_mapping,
     derive_display,
+    derive_facts,
 )
 
 from defender.records.job_facts import EXPIRED, LEASE_LAPSED, OFFBOARD_MESSAGE, RETRY_CAP, TENANT_OFFBOARDED
 
 from .audit import SYSTEM, announce
 from .errors import Conflict, NotFound, OffboardNotSettled, UnknownReference, UnstorableText
-from defender.tenancy.models import AlertMappingRow, TenantRecord
+from defender.tenancy.models import AlertMappingRow, CaseVersionRow, TenantRecord
 from defender.tenancy.models import offboard as _tenancy_offboard
 from defender.tenancy.models import share_tenant
 
@@ -300,14 +301,16 @@ class JobStore:
 
     async def create_investigation(
         self, tenant_id: TenantId, alert_id: AlertId, request_key: str, *, actor: str,
-        credential_id: str | None = None,
+        credential_id: str | None = None, update_ticket: bool = False,
     ) -> tuple[InvestigationRecord, bool]:
         """Start an investigation of the alert, or answer the one this request already has (#1081
         §4.1): the latest attempt under the key; else the alert's live investigation, without
         recording this key; else a new attempt 1. `created` only when this call inserted the row.
         `UnknownReference` for an alert this tenant lacks; `Conflict` naming the tenant's state when a new attempt is
-        due and the tenant is offboarding or offboarded (#1360 O4), and naming the missing mapping when it has saved
-        no alert mapping (#1345 O4)."""
+        due and the tenant is offboarding or offboarded (#1360 O4), naming the missing mapping when it has saved
+        no alert mapping (#1345 O4), and naming the ticket when `update_ticket` is set and this alert names none
+        (#1471 W1: no case record, a mapping with no `case_key`, or a key this alert does not yield). A replay or a
+        live answer is the existing row with its own flag; the new request's flag is not compared."""
         _refuse_unstorable_text(request_key=request_key)
         async with self._tx() as s:
             state = await share_tenant(s, tenant_id)
@@ -327,16 +330,35 @@ class JobStore:
             if live is not None:
                 return investigation_record(live), False
             _refuse_removed(state, tenant_id)
-            if await self._mapping_in(s, tenant_id) is None:  # never deleted, so no lock (#1345 O4)
+            mapping = await self._mapping_in(s, tenant_id)
+            if mapping is None:  # never deleted, so no lock (#1345 O4)
                 raise Conflict(ALERT_MAPPING_MISSING)
+            if update_ticket:
+                await self._refuse_without_ticket(s, tenant_id, alert_id, mapping)
             row = InvestigationRow(
                 id=InvestigationId.mint(), tenant_id=tenant_id, alert_id=alert_id, request_key=request_key,
-                attempt=1, stage="queued", created_at=self._clock(), cost_usd=0.0)
+                attempt=1, stage="queued", created_at=self._clock(), cost_usd=0.0, update_ticket=update_ticket)
             s.add(row)
             record = investigation_record(row)
         announce("investigation.start", actor=actor, tenant_id=tenant_id, target=record.investigation_id,
                  detail=f"alert {alert_id}", credential_id=credential_id)
         return record, True
+
+    @staticmethod
+    async def _refuse_without_ticket(s: AsyncSession, tenant_id: TenantId, alert_id: AlertId,
+                                     mapping: AlertMapping) -> None:
+        """`Conflict` unless this alert names a ticket: the tenant has a case record, its mapping maps a `case_key`,
+        and the key is one this alert's document yields (#1471 W1)."""
+        case_row = (await s.execute(select(CaseVersionRow).where(CaseVersionRow.tenant_id == tenant_id)
+                                    .order_by(CaseVersionRow.version.desc()).limit(1))).scalars().first()
+        if case_row is None or case_row.deleted:
+            raise Conflict("the tenant has no case record, so there is no ticket to update")
+        raw = (await s.execute(select(AlertRow.raw).where(
+            AlertRow.tenant_id == tenant_id, AlertRow.id == alert_id))).scalar_one()
+        key = derive_facts(admit(raw).document, mapping).case_key
+        if key is None:
+            raise Conflict("this alert names no ticket (the tenant's alert mapping yields no case key from it), "
+                           "so there is no ticket to update")
 
     # --- claim --------------------------------------------------------------------------
 
@@ -670,7 +692,8 @@ class JobStore:
                     s.add(InvestigationRow(
                         id=retry_id, tenant_id=lapsed.tenant_id, alert_id=lapsed.alert_id,
                         request_key=lapsed.request_key, attempt=lapsed.attempt + 1, stage="queued",
-                        created_at=self._clock(), cost_usd=0.0))
+                        created_at=self._clock(), cost_usd=0.0,
+                        update_ticket=lapsed.update_ticket))
         except _Refused:
             return _TakeOver(old_id, tenant, "", None, refused=True)
         return _TakeOver(old_id, tenant, reason, retry_id)

@@ -28,7 +28,8 @@ from defender.records.formats import validate_artifact
 from defender._untrusted import wrap_fresh
 # The set is for the exact membership test, the ordered tuple for the argument schema.
 from defender._vocab import (
-    CEILING_DISPOSITION, DISPOSITION_ENUM, DISPOSITION_VALUES, HOST_ONLY_DISPOSITION,
+    BENIGN_DISPOSITION, CEILING_DISPOSITION, DISPOSITION_ENUM, DISPOSITION_VALUES,
+    HOST_ONLY_DISPOSITION,
 )
 from defender.hooks.budget_enforcer import BUDGET_EXEMPT_TOOLS  # noqa: F401 — re-export
 from defender.skills.invlang.parser import parse_dense_companion
@@ -38,6 +39,7 @@ from defender.skills.invlang.validate import (
     RuntimeEvidenceReceipt,
     ceiling_note_block,
     ceiling_test_block,
+    committed_benign_confidence,
     conclude_ceiling_test_rows,
     conclude_runtime_evidence_rows,
     entry_price,
@@ -173,9 +175,12 @@ def render_report(  # noqa: PLR0913 — the report's full inputs; each is a host
     disposition: str, *, outcome: str, cause: str, failure_kind: str | None = None,
     evidence: str | None = None, ceiling_test: tuple[CeilingReceipt, ...] = (),
     runtime_evidence: tuple[RuntimeEvidenceReceipt, ...] = (),
+    confidence: str | None = None,
 ) -> str:
     """Render report.md from typed, host-chosen arguments; there is no model-supplied body."""
     kind_line = f"failure_kind: {failure_kind}\n" if failure_kind is not None else ""
+    # A benign close's committed confidence (#1545), computed by the host, never copied.
+    confidence_line = f"confidence: {confidence}\n" if confidence is not None else ""
     ceiling_block = ceiling_test_block(ceiling_test)
     body = f"Disposition recorded by the close gate. outcome={outcome}."
     if evidence:
@@ -190,6 +195,7 @@ def render_report(  # noqa: PLR0913 — the report's full inputs; each is a host
         f"disposition: {disposition}\n"
         f"outcome: {outcome}\n"
         f"cause: {cause}\n"
+        f"{confidence_line}"
         f"{kind_line}"
         f"{ceiling_block}"
         "---\n"
@@ -246,6 +252,9 @@ class _CloseFields:
     #: commit (including an override to `unresolved`). Empty on the bypass site, whose forced
     #: close skipped the document gate.
     runtime_evidence: tuple[RuntimeEvidenceReceipt, ...] = ()
+    #: A benign close's committed confidence: the lower of the model's and the record's
+    #: ceiling (`committed_benign_confidence`). Set only on the reviewed site, for `benign`.
+    confidence: str | None = None
 
 
 def _fields_from(
@@ -253,13 +262,14 @@ def _fields_from(
     material: tuple[RecommendedLead, ...] = (),
     ceiling_test: tuple[CeilingReceipt, ...] = (),
     runtime_evidence: tuple[RuntimeEvidenceReceipt, ...] = (),
+    confidence: str | None = None,
 ) -> _CloseFields:
     """The verdict's scalars as the commit bundle, shared by all three commit sites so a new
     field cannot be forgotten at one. Companion-derived fields come from the caller."""
     return _CloseFields(
         outcome=verdict.outcome, cause=verdict.cause, detail=verdict.detail,
         material=material, turns_used=verdict.turns_used, failure_kind=verdict.failure_kind,
-        ceiling_test=ceiling_test, runtime_evidence=runtime_evidence,
+        ceiling_test=ceiling_test, runtime_evidence=runtime_evidence, confidence=confidence,
     )
 
 
@@ -289,7 +299,7 @@ def _commit(  # noqa: PLR0913 — the commit's full inputs; the scalars are alre
     body = render_report(
         disposition, outcome=fields.outcome, cause=fields.cause,
         failure_kind=fields.failure_kind, evidence=evidence, ceiling_test=fields.ceiling_test,
-        runtime_evidence=fields.runtime_evidence,
+        runtime_evidence=fields.runtime_evidence, confidence=fields.confidence,
     )
     # Every commit is validated; a refusal writes nothing and returns the validator's reason.
     schema_reason = validator(RUN_LAYOUT.report.name, body, None)
@@ -435,6 +445,10 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
             conclude_ceiling_test_rows(companion) if verdict.disposition == CEILING_DISPOSITION else ()
         ),
         runtime_evidence=conclude_runtime_evidence_rows(companion),
+        confidence=(
+            committed_benign_confidence(companion) if verdict.disposition == BENIGN_DISPOSITION
+            else None
+        ),
     )
     return _commit(deps, verdict.disposition, fields, record, validator=validator,
                    evidence=evidence)

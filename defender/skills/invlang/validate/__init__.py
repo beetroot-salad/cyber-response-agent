@@ -201,6 +201,8 @@ from ._gating import (
     known_capabilities,
     release_capabilities,
     runtime_evidence_block,
+    benign_confidence_ceiling,
+    committed_benign_confidence,
 )
 from ._closure import (
     _Commitment,
@@ -510,6 +512,8 @@ __all__ = [
     "ceiling_note_block",
     "ceiling_test_block",
     "class_slots",
+    "benign_confidence_ceiling",
+    "committed_benign_confidence",
     "conclude_ceiling_test_rows",
     "conclude_runtime_evidence_rows",
     "dataclass",

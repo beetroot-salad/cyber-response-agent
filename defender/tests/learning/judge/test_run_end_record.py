@@ -17,13 +17,6 @@ from defender.tests.support.shared.filesystem import _spec1047 as S
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.learning.judge import _judge_921 as J
-from defender.tests.support.sandbox._spec791 import (
-    SpecTail,
-    drive_tail,
-    loop_paths,
-    plant_alert as plant_tail_alert,
-    satisfy_entrypoint_keys,
-)
 
 
 def _archive():
@@ -531,33 +524,6 @@ def test_the_episode_reader_and_the_graded_record_disagree_about_a_cut_short_wor
     assert said.get("b") == "unresolved", (
         "the episode reader stopped reading a cut-short world's archived report as its "
         "conclusion")
-
-
-@pytest.mark.parametrize(("truncated_by", "closed_before_cut"), [
-    ("aborted", True),
-    ("request-limit", False),
-])
-def test_run_py_tail_takes_both_record_fields_off_the_summary(
-        tmp_path, monkeypatch, truncated_by, closed_before_cut):
-    """Both halves of the run-end record reach the ticket lane from ONE in-process value, the
-    driver's summary — `closed_before_cut` is not read back off the sidecar."""
-    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
-    satisfy_entrypoint_keys(monkeypatch, tmp_path)
-    paths = loop_paths(tmp_path)
-
-    from defender import run as run_py
-
-    tail = SpecTail(paths, truncated_by=truncated_by, closed_before_cut=closed_before_cut)
-    rc = drive_tail(run_py.main, plant_tail_alert(tmp_path / "both"), tail, "--update-ticket")
-
-    assert rc == 0
-    assert tail.record_calls, "record_case_ticket was never called at all"
-    assert not S.sidecar_path(tail.run_dirs[0]).exists(), (
-        "the fixture wrote a sidecar, so nothing below is about the in-process value")
-    assert tail.record_calls[0] == {"truncated_by": truncated_by,
-                                    "closed_before_cut": closed_before_cut}, (
-        "run.py's tail did not thread the summary's record into record_case_ticket, leaving the "
-        f"per-exit-class table unreachable: {tail.record_calls[0]!r}")
 
 
 def test_a_failed_record_write_names_itself_in_the_exit_reason(tmp_path):

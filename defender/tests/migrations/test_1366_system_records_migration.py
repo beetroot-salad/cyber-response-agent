@@ -15,7 +15,8 @@ ROLE = "defender_proxy_reader"
 TABLES = {
     "system_versions": {"tenant_id", "system_id", "version", "adapter_id", "enabled", "settings", "access",
                         "credential_generation", "deleted", "author", "written_at"},
-    "case_versions": {"tenant_id", "version", "system_id", "comment_body", "deleted", "author", "written_at"},
+    # #1471 W7: the case record's comment template, `comment_body`, is gone.
+    "case_versions": {"tenant_id", "version", "system_id", "deleted", "author", "written_at"},
 }
 
 
@@ -100,8 +101,8 @@ def _tenant(dsn: str, tenant: str, state: str, *, mark: bool) -> None:
 
 
 def test_the_revision_that_drops_the_mark_sits_directly_on_the_previous_head():
-    """The revision that drops the mark sits directly on `BEFORE_DROP`, the head it was written on; a later revision
-    (#1161's `0020_signin_attempts`) may follow it. (#1470 O8)"""
+    """The revision that drops the mark sits directly on `BEFORE_DROP`, the head it was written on; later revisions
+    (#1161's `0020_signin_attempts`, #1471's `0021_ticket_write`) may follow it. (#1470 O8)"""
     from defender.migrations import _scripts
 
     scripts = _scripts()

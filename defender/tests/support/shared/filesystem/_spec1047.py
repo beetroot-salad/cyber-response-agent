@@ -301,6 +301,7 @@ def _handed(run_dir: Path, fake: FakeTicketSystem) -> dict[str, Any]:
 
     A configured fake gets the committed fixture tenant's record; an unconfigured one gets a
     tenant planted beside the run with no `config.env` for its case system."""
+    from defender.tests.support.runtime.engine._spec767 import ticket_link_for
     from defender.tests.support.tenancy import _tenants1106
     from defender.tests.tenancy.tenant_1107_settings import _spec1107
 
@@ -313,7 +314,8 @@ def _handed(run_dir: Path, fake: FakeTicketSystem) -> dict[str, Any]:
     return {"tenant": record, "defender_dir": _tenants1106.DEFENDER,
             "env": fake.store.env(mod("box").run_env(_tenants1106.DEFENDER, Path(run_dir))),
             "proxy_url": fake.store.url, "request_token": "token-1047",
-            "case": _tenants1106.case_for(record)}  # (#1366 R16) run start's verdict over the tenant's roster, handed in
+            "case": _tenants1106.case_for(record),  # (#1366 R16) run start's verdict over the tenant's roster, handed in
+            "link": ticket_link_for(Path(run_dir))}  # C-7: the job lane's screen link
 
 
 def receipt_path(run_dir: Path) -> Path:

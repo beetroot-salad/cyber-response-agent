@@ -28,7 +28,10 @@ from defender.tests.tenancy.tenant_1108_p4._support import published_tenant
 
 IDENTITY = {"IDENTITY_TIMEOUT_SEC": "10"}
 BASE = T.BASE_PATH
-GRANT_RW = {("identity", "rw")}
+#: X1/X2: a write pass names its ticket; the one write route a declaration may hold has a wildcard at the ticket.
+GRANT_RW = {("identity", "rw", "T-1")}
+WRITE_ROUTE = "/tickets/*/comments"
+WRITE_PATH = "/tickets/T-1/comments"
 TENANT = "66130000-0000-4000-8000-000000000001"
 OLD_KEY = "canary-old-generation-key-1366"
 NEW_KEY = H.CANARY_KEY
@@ -80,7 +83,7 @@ class _Wire:
     def base(self) -> str:
         return self.up.url + BASE
 
-    def ask(self, method: str = "GET", path: str = "/users/x", *, grant: set[tuple[str, str]] = T.GRANT_R,
+    def ask(self, method: str = "GET", path: str = "/users/x", *, grant: set[tuple[str, ...]] = T.GRANT_R,
             url: str | None = None, system: str = "identity") -> dict[str, Any]:
         tok = T.token(TENANT, grant, signer=self.signer)
         return T.ask(self.client, tok, system, method, url if url is not None else f"{self.base}{path}")
@@ -123,10 +126,10 @@ def test_1366_o7_an_address_outside_the_current_records_base_or_routes_is_refuse
     """The call is judged against the current record's base and routes: each refused with its class and nothing sent,
     while a declared write (control, same channel) is sent. (#1366 O7)"""
     with _wire({_path(1): _static(NEW_KEY)}) as w, H.upstream() as other:
-        w.port.put(_record(H.declaration(w.base, writes=(("POST", "/tickets"),))))
+        w.port.put(_record(H.declaration(w.base, writes=(("POST", WRITE_ROUTE),))))
         urls = {"outside-base-path": f"{w.up.url}/other/users/x", "another-origin": f"{other.url}{BASE}/users/x",
                 "undeclared-write": f"{w.base}/orders"}
-        assert w.ask("POST", "/tickets", grant=GRANT_RW)["fault"] is None, "control: a declared write is sent"
+        assert w.ask("POST", WRITE_PATH, grant=GRANT_RW)["fault"] is None, "control: a declared write is sent"
         sent_before = list(w.up.paths())
 
         refused = w.ask(method, grant=GRANT_RW, url=urls[target])
@@ -139,16 +142,16 @@ def test_1366_o7_a_record_edit_between_two_calls_takes_effect_on_the_next_call()
     """A write route added then dropped between calls: the same call is refused, sent, refused (no caching of the
     record; the same credentials serve all three). (#1366 O7)"""
     with _wire({_path(1): _static(NEW_KEY)}) as w:
-        write = {"method": "POST", "path": "/tickets", "grant": GRANT_RW}
+        write = {"method": "POST", "path": WRITE_PATH, "grant": GRANT_RW}
         w.port.put(_record(H.declaration(w.base)))
         first = w.ask(**write)
-        w.port.put(_record(H.declaration(w.base, writes=(("POST", "/tickets"),)), version=2))
+        w.port.put(_record(H.declaration(w.base, writes=(("POST", WRITE_ROUTE),)), version=2))
         second = w.ask(**write)
         w.port.put(_record(H.declaration(w.base), version=3))
         third = w.ask(**write)
 
         assert [a["fault"] for a in (first, second, third)] == ["ConfinementFault", None, "ConfinementFault"]
-        assert [s.path for s in w.up.seen] == [f"{BASE}/tickets"]
+        assert [s.path for s in w.up.seen] == [f"{BASE}{WRITE_PATH}"]
 
 
 def test_1366_o7_a_moved_system_refuses_the_old_base_and_has_no_credentials_until_set_at_the_new_generation():
@@ -256,7 +259,7 @@ def test_1366_o7_the_audit_trail_names_the_version_not_the_commit_and_has_it_bef
     with _wire({_path(1): _static(NEW_KEY)}) as w:
         w.port.put(_record(H.declaration(w.base), version=7))
         w.ask()
-        w.ask("POST", "/tickets", grant=GRANT_RW)
+        w.ask("POST", WRITE_PATH, grant=GRANT_RW)
         w.port.put(_record(H.declaration(w.base), version=8, generation=2))
         w.ask()
 
@@ -309,7 +312,7 @@ class _Pg:
         client = T.client_of(proxy().ProxyDeps(records=records, store=R.proxy_credentials(self.kv),
                                                verifier=H.PairedVerifier(signer), audit=audit))
 
-        def ask(method: str = "GET", path: str = "/users/x", grant: set[tuple[str, str]] = T.GRANT_R) -> dict[str, Any]:
+        def ask(method: str = "GET", path: str = "/users/x", grant: set[tuple[str, ...]] = T.GRANT_R) -> dict[str, Any]:
             return T.ask(client, T.token(self.t.tenant_id, grant, signer=signer), "identity", method, f"{self.base}{path}")
 
         return ask, audit
@@ -504,10 +507,10 @@ def test_1366_o7_an_operators_edits_between_calls_apply_to_the_next_call_without
         assert len(w.up.seen) == 1, "a disabled system's call was sent"
         assert w.op.set_system("identity", replaces=3, config=IDENTITY, access=decl, disabled=False)[0] == 0
         assert ask()["fault"] is None
-        assert ask("POST", "/tickets", GRANT_RW)["fault"] == "ConfinementFault"
-        writes = H.declaration(w.base, writes=(("POST", "/tickets"),))
+        assert ask("POST", WRITE_PATH, GRANT_RW)["fault"] == "ConfinementFault"
+        writes = H.declaration(w.base, writes=(("POST", WRITE_ROUTE),))
         assert w.op.set_system("identity", replaces=4, config=IDENTITY, access=writes)[0] == 0
-        assert ask("POST", "/tickets", GRANT_RW)["fault"] is None
+        assert ask("POST", WRITE_PATH, GRANT_RW)["fault"] is None
 
         assert [g for _, g, _ in w.op.numbers("identity")[1:]] == [2, 2, 2, 2], "premise: only the base move raised it"
         assert [(r["outcome"], r["version"]) for r in audit.records if r["outcome"] == "sent 200"] == [

@@ -28,7 +28,7 @@
 #   docker run --rm -v "<HOST_REPO_PATH>/knowledge":/workspace/knowledge:ro \
 #       defender-runtime defender/.venv/bin/python -m pytest defender -m e2e
 # The deployed command is the worker (#1344 O15): it reads DEFENDER_DATABASE_DSN, DEFENDER_DATA_ROOT,
-# DEFENDER_BUILD_COMMIT (baked, below), DEFENDER_WORKER_SLOTS (default 3) and
+# DEFENDER_BUILD_COMMIT (baked, below), DEFENDER_API_FRONTEND_ORIGIN (required since #1471: the screen link a ticket comment carries), DEFENDER_WORKER_SLOTS (default 3) and
 # DEFENDER_WORKER_LEARNING_SLOTS (default min(1, slots - 1)) and DEFENDER_WORKER_LEARNING_CHECK_SECONDS
 # (default 300: a tenant with no post-step that long is checked without a family); it refuses a build stamp that is not a
 # commit (7 to 64 lowercase hex characters, the copy marker's own grammar: no tag, branch name or suffix), takes

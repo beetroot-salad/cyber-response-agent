@@ -151,3 +151,85 @@ def test_1110_o7_a_failed_render_step_leaves_the_exit_code_at_0(tmp_path, state,
         f"the render step was never reached (ran {tail.names}) — the 0 proves nothing")
     err = capfd.readouterr().err
     assert "not rendered (#1110 O7)" in err, "the failed render was not reported on stderr"
+
+
+# --- #1471 r8 W7: the page has no ticket switch; it shows the receipt whenever one exists -----------------------------
+
+def _page_run(tmp_path, label: str):
+    """A run dir the renderer accepts (alert plus a real session store) and its handle."""
+    from defender.tests.support.shared._fixture_uuid import fixture_uuid
+    from defender.tests.support.shared.contracts._spec1077 import fixture_run
+    from defender.tests.support.storage._alert_plant import plant_alert as plant_with_record
+    from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107
+
+    run_dir = tmp_path / "runs" / fixture_uuid(label)
+    run_dir.mkdir(parents=True)
+    plant_with_record(run_dir, {"alert_id": "a-1471", "rule": {"id": "r-1471", "description": "spec 1471"},
+                                "timestamp": "2026-09-28T00:00:00Z"})
+    S1107.seed_session_store(run_dir)
+    return run_dir, fixture_run(run_dir), S1107
+
+
+def _accepted():
+    from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, set_up_tenant
+
+    return set_up_tenant(current_data_root())
+
+
+@pytest.mark.parametrize("receipt", [
+    {"key": "SOC-1471-A", "status": "commented", "url": "http://ticket-1471/tickets/SOC-1471-A", "ok": True,
+     "reason": None},
+    {"key": "SOC-1471-B", "status": "error", "url": None, "ok": False, "reason": "REASON-1471-B the store said no"},
+], ids=["commented", "error"])
+def test_1471_w7_the_run_page_shows_the_receipt_line_whenever_a_receipt_exists(tmp_path, receipt):
+    """Rendered with no flag of any kind, the page carries the receipt's key and status (and reason); with no receipt
+    it carries none of them. (W7)"""
+    import json
+
+    from defender.presentation import visualize_run
+
+    run_dir, run, S1107 = _page_run(tmp_path, "page-with")
+    S1107.receipt_path(run_dir).write_text(json.dumps(receipt), encoding="utf-8")
+    visualize_run.publish_page(run, tenant=_accepted())
+    page = S1107.page_html(run_dir)
+    assert receipt["key"] in page, "the receipt's line is not on the page"
+    assert receipt["status"] in page, "the receipt's line is not on the page"
+    if receipt["reason"]:
+        assert receipt["reason"] in page
+
+    bare_dir, bare, _ = _page_run(tmp_path, "page-without")
+    visualize_run.publish_page(bare, tenant=_accepted())
+    bare_page = S1107.page_html(bare_dir)
+    assert "spec 1471" in bare_page, "control: the receipt-less page rendered"
+    assert 'class="ticket-line' not in bare_page
+    assert receipt["key"] not in bare_page
+
+
+def test_1471_w7_no_page_step_takes_an_update_ticket_switch(tmp_path):
+    """Each step from the run's render to the page's writer refuses `update_ticket=` as an unexpected keyword. (W7)"""
+    from defender import run_common
+    from defender.presentation import visualize_run
+
+    _dir, run, _ = _page_run(tmp_path, "page-switch")
+    tenant = _accepted()
+    for call in (lambda: visualize_run.render_page(run, update_ticket=True),
+                 lambda: visualize_run.save_page(run, update_ticket=True),
+                 lambda: visualize_run.publish_page(run, tenant=tenant, update_ticket=True),
+                 lambda: run_common.visualize(run, tenant=tenant, update_ticket=True)):
+        with pytest.raises(TypeError, match="update_ticket"):
+            call()
+    visualize_run.render_page(run)  # control: the same step without it renders
+
+
+def test_1471_w7_the_page_command_refuses_update_ticket_like_any_unknown_switch(capsys):
+    """`visualize_run.py --update-ticket` is a usage refusal (64) saying so, as a made-up switch is, and its usage line
+    no longer offers it. (W7)"""
+    from defender.presentation import visualize_run
+
+    rc = visualize_run.main(["visualize_run.py", "--tenant", "t", "--update-ticket", "rid"])
+    refused = capsys.readouterr().err
+    assert rc == 64, (rc, refused)  # noqa: PLR2004
+    assert "unrecognized arguments: --update-ticket" in refused, refused
+    assert "[--update-ticket]" not in refused, refused
+    assert visualize_run.main(["visualize_run.py", "--tenant", "t", "--made-up", "rid"]) == 64  # noqa: PLR2004
+    assert "unrecognized arguments: --made-up" in capsys.readouterr().err

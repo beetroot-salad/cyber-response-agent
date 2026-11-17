@@ -153,7 +153,7 @@ class PostgresTenantRepository:
         case = None
         if case_rows and not case_rows[0].deleted:
             c = case_rows[0]
-            case = CaseRecord(version=c.version, system_id=c.system_id, comment_body=c.comment_body)
+            case = CaseRecord(version=c.version, system_id=c.system_id)
         return TenantRecords(systems=systems, case=case)
 
     async def merge_eligibility(self, tenant_id: TenantId) -> MergeEligibility | None:

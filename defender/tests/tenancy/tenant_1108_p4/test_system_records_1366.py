@@ -9,6 +9,7 @@ import asyncio
 import dataclasses
 import json
 import random
+import itertools
 import re
 import threading
 from collections.abc import Mapping
@@ -321,20 +322,6 @@ def test_1366_o4_a_case_system_that_is_not_a_current_enabled_record_is_refused(i
     assert op.current()["jira"].enabled
 
 
-@pytest.mark.postgres
-@pytest.mark.parametrize("body", ["{nosuch}", "{0}", "{unclosed", "   "])
-def test_1366_o4_a_case_template_failing_the_case_record_rules_is_refused(imported_op, body):
-    """A template naming an unknown render key, a positional one, an unclosed brace or blank text is refused and
-    stored nowhere; a good one is version 2. (#1366 O4, #1359)"""
-    before = _state(imported_op)
-
-    rc, said = imported_op.set_case(replaces=1, body=body)
-
-    _refused(imported_op, before, rc, said, (("comment.body",),), file_ok=True)  # #1359's judgement names the field
-    assert imported_op.set_case(replaces=1, body="{disposition}: {cause}")[0] == 0
-    assert _case_versions(imported_op) == [(1, "ticket", False), (2, "ticket", False)]
-
-
 
 
 
@@ -437,11 +424,19 @@ def test_1366_o3_a_case_system_whose_adapter_an_upgrade_removed_is_deleted_only_
 
 # --- C2 / C3 / C4: the cover rule at write ------------------------------------------------------------------------------
 
-#: (id, writes, reads, covers) for ticket's comment route `POST /tickets/*/comments` at base `TICKET_BASE`.
+#: (id, writes, reads, covers) for ticket's comment route `POST /tickets/*/comments` at base `TICKET_BASE`. X2: the case
+#: system's declared writes are exactly that route and its declared reads are all GET.
 TICKET_COVER = [
     ("exact", (("POST", "/tickets/*/comments"),), (), True),
-    ("beside-another-write", (("POST", "/tickets/*/transitions"), ("POST", "/tickets/*/comments")), (), True),
-    ("wildcard-for-a-literal-segment", (("POST", "/*/*/comments"),), (), True),
+    ("exact-with-get-reads", (("POST", "/tickets/*/comments"),),
+     (("GET", "/tickets/*/comments"), ("GET", "/tickets/*"), ("GET", "/search")), True),
+    ("beside-another-write", (("POST", "/tickets/*/transitions"), ("POST", "/tickets/*/comments")), (), False),
+    ("beside-another-method-write", (("POST", "/tickets/*/comments"), ("PUT", "/tickets/*")), (), False),
+    ("beside-the-key-spelled-out", (("POST", "/tickets/*/comments"), ("POST", "/tickets/ABC-1/comments")), (), False),
+    ("wildcard-for-a-literal-segment", (("POST", "/*/*/comments"),), (), False),
+    ("every-segment-a-wildcard", (("POST", "/*/*/*"),), (), False),
+    ("a-non-get-read-elsewhere", (("POST", "/tickets/*/comments"),), (("POST", "/search"),), False),
+    ("a-mutating-read-elsewhere", (("POST", "/tickets/*/comments"),), (("PATCH", "/tickets/*"),), False),
     ("no-writes", (), (), False),
     ("other-route-only", (("POST", "/tickets/*/transitions"),), (), False),
     ("other-method", (("PUT", "/tickets/*/comments"),), (), False),
@@ -457,17 +452,23 @@ TICKET_COVER = [
      (("POST", "/tickets/*/comments"),), False),
     ("read-route-with-a-star-for-a-literal-matches", (("POST", "/tickets/*/comments"),),
      (("POST", "/*/ABC-1/comments"),), False),
-    ("read-routes-that-do-not-match", (("POST", "/tickets/*/comments"),),
-     (("GET", "/tickets/*/comments"), ("POST", "/tickets/*/other"), ("POST", "/tickets/*")), True),
+    ("read-routes-that-do-not-match-but-are-not-get", (("POST", "/tickets/*/comments"),),
+     (("GET", "/tickets/*/comments"), ("POST", "/tickets/*/other"), ("POST", "/tickets/*")), False),
 ]
+#: What the refusal's cause names, by row: the route that breaks X2 (rows not listed carry the existing causes).
+COVER_CAUSE = {"beside-another-write": "/tickets/*/transitions", "beside-another-method-write": "PUT",
+               "beside-the-key-spelled-out": "/tickets/ABC-1/comments", "wildcard-for-a-literal-segment": "/*/*/comments",
+               "every-segment-a-wildcard": "/*/*/*", "a-non-get-read-elsewhere": "/search",
+               "a-mutating-read-elsewhere": "PATCH",
+               "read-routes-that-do-not-match-but-are-not-get": "/tickets/*/other"}
 
 
 @pytest.mark.postgres
 @pytest.mark.parametrize("row", TICKET_COVER, ids=[r[0] for r in TICKET_COVER])
 def test_1366_c2_a_write_to_the_case_system_is_stored_only_if_a_write_route_covers_the_comment_route(imported_op, row):
-    """ticket (the case system) is stored only with a same-method, same-length write route whose segments are `*` or
-    the raw literal, and no read route matching the comment route; else refused naming ticket's access. (#1366 C2, C4)"""
-    _, writes, reads, covers = row
+    """ticket (the case system) is stored only with exactly the comment route as its declared writes and no read route
+    that is not a GET; else refused naming ticket's access and the route that breaks the rule. (#1366 C2, C4, X2)"""
+    name, writes, reads, covers = row
     access = R.declaration(TICKET_BASE, writes=writes, reads=reads)
     before = _state(imported_op)
 
@@ -479,6 +480,8 @@ def test_1366_c2_a_write_to_the_case_system_is_stored_only_if_a_write_route_cove
     else:
         _refused(imported_op, before, rc, said, (("system ticket access",),))
         assert not R.lines_naming(said, "system ticket settings"), said
+        if name in COVER_CAUSE:
+            assert R.lines_naming(said, "system ticket access", COVER_CAUSE[name]), said
 
 
 @pytest.mark.postgres
@@ -646,18 +649,19 @@ def test_1366_o5_case_versions_number_per_tenant_and_follow_the_same_rules(impor
     """Case: set (2), delete (3); then deleting again, naming 2 or the delete (3) is refused; naming 0 (#1470 P2: a
     tombstone shows as none) stores 4. Authors are `set-case` and `delete-case`. (#1366 O5, R9)"""
     op = imported_op
-    assert op.set_case(replaces=1, body="{disposition}")[0] == 0
+    assert op.set_case(replaces=1)[0] == 0
     assert op.delete_case(replaces=2)[0] == 0
     before = _state(op)
 
     for rc, said in (op.delete_case(replaces=3), op.set_case(replaces=2), op.set_case(replaces=3)):
         _refused(op, before, rc, said, (), file_ok=True)
 
-    assert op.set_case(replaces=0, body="{cause}")[0] == 0
+    assert op.set_case(replaces=0)[0] == 0
     assert _case_versions(op) == [(1, "ticket", False), (2, "ticket", False), (3, "ticket", True), (4, "ticket", False)]
     assert [c.author for c in R.case_versions(op.dsn, op.tid)] == [
         R.SEED_AUTHOR, *[R.ADMIN_AUTHOR] * 3]
-    assert R.current_records(op.dsn, op.tid).case.comment_body == "{cause}"
+    current = R.current_records(op.dsn, op.tid).case
+    assert (current.version, current.system_id) == (4, "ticket")  # W7: the case record holds no comment body
 
 
 def _threaded(dsn: str, judge: Any, call: Any, failed: list) -> threading.Thread:
@@ -701,7 +705,7 @@ def test_1366_o5_one_tenants_writes_are_serialized_across_the_system_and_case_ta
         await store.delete_system(op.tid, "identity", replaces=1, author="test a")
 
     async def put_case(store: Any) -> None:
-        await store.put_case(op.tid, replaces=1, system_id="ticket", comment_body="{disposition}", author="test b")
+        await store.put_case(op.tid, replaces=1, system_id="ticket", author="test b")  # W7: no comment body
 
     a = _threaded(op.dsn, judge_a, delete_identity, failed)
     try:
@@ -868,14 +872,14 @@ def test_1366_dc8_disabling_and_re_enabling_is_a_version_that_keeps_the_record(i
 
 
 @pytest.mark.postgres
-def test_1366_dc8_set_case_stores_the_body_exactly_and_delete_case_removes_the_record(imported_op):
-    """Writing the case record stores its system and template text as given (version 2); deleting it makes the case record
-    not exist. (#1366 DC8, O5, H7)"""
+def test_1366_dc8_set_case_stores_the_system_and_delete_case_removes_the_record(imported_op):
+    """Writing the case record stores its system as given (version 2; W7: it holds no template); deleting it makes the
+    case record not exist. (#1366 DC8, O5, H7)"""
     op = imported_op
-    body = "{disposition} — {cause}\n\n{narrative}\nsee {case_id}"
-    assert op.set_case(replaces=1, body=body)[0] == 0
+    assert op.set_case(replaces=1)[0] == 0
     case = R.current_records(op.dsn, op.tid).case
-    assert (case.version, case.system_id, case.comment_body) == (2, "ticket", body)
+    assert (case.version, case.system_id) == (2, "ticket")
+    assert not hasattr(case, "comment_body"), "W7: the stored case record still carries a comment body"
     assert op.delete_case(replaces=2)[0] == 0
     assert R.current_records(op.dsn, op.tid).case is None
 
@@ -941,8 +945,8 @@ def _admitted_as(access: Any, mode: str) -> bool:
     from defender.credential_proxy._refusal import Refused
     from defender.credential_proxy._scope import check_route
 
-    try:
-        check_route(access, "ticket", *COMMENT, mode)
+    try:  # a write pass always names its ticket (X1): the one the comment goes to
+        check_route(access, "ticket", *COMMENT, mode, "ABC-1" if mode == "rw" else None)
     except Refused:
         return False
     return True
@@ -965,21 +969,28 @@ def _proxy_admits(access: str) -> tuple[bool, bool]:
 
 
 @pytest.mark.postgres
-def test_1366_g4_the_cover_judgement_accepts_a_declared_write_exactly_when_the_proxy_admits_the_comment_as_that_write(
+def test_1366_g4_the_cover_judgement_stores_only_the_exact_comment_route_and_only_where_the_proxy_admits_it(
         imported_op):
     """Declared write routes built from the adapter's comment pattern by segment mutations (a star, another literal,
     case changes, percent-encodings, partial stars, empty segments, a trailing `/`): the ticket system, the case system,
-    is stored with a route exactly when the proxy's own matcher (`check_route`) admits the request the adapter sends as
-    a write that read-only tokens do not get; and a route the access parser refuses is not stored. Beside the exact
-    covering write, the same spellings declared as READ routes: whenever the proxy admits the comment through the read
-    route the write is refused (a comment is allowed only as a declared write). (#1366 C2, K4; the judgement is not a
-    second matcher)"""
+    is stored with a route exactly when it is the comment route itself (X2: no wider route, however the proxy's matcher
+    admits it), which the proxy admits as a write. Beside it, the same spellings declared as POST read routes are never
+    stored, and as GET read routes are stored whenever the access parser takes them. (#1366 C2, K4; X2)"""
+    from defender.kit.faults import ConfigFault
     from defender.system_records import RecordRefused
+    from defender.tenancy import parse_access
 
     op = imported_op
     base = "http://soc-playground:8004"
     wrong: list[str] = []
     version = [op.current()["ticket"].version]
+
+    def parses(access: str) -> bool:
+        try:
+            parse_access(access, system="ticket")
+        except ConfigFault:
+            return False
+        return True
 
     async def run_through_the_door(store: Any) -> None:
         async def stored(access: str) -> bool:
@@ -993,13 +1004,15 @@ def test_1366_g4_the_cover_judgement_accepts_a_declared_write_exactly_when_the_p
 
         for path in _mutated_paths():
             access = R.declaration(base, writes=(("POST", path),))
-            if await stored(access) is not _proxy_admits(access)[0]:
-                wrong.append(f"write {path!r}: the judgement and the proxy differ on the comment as a write")
+            exact = path == COMMENT_ROUTE[1]
+            if await stored(access) is not exact:
+                wrong.append(f"write {path!r}: stored only when it is the exact comment route ({exact})")
         assert await stored(R.declaration(base, writes=(COMMENT_ROUTE,))), "control: the exact route is stored"
-        for path in _mutated_paths():
-            access = R.declaration(base, writes=(COMMENT_ROUTE,), reads=(("POST", path),))
-            if _proxy_admits(access)[1] and await stored(access):
-                wrong.append(f"read {path!r}: the proxy admits the comment through the read route, and it was stored")
+        assert _proxy_admits(R.declaration(base, writes=(COMMENT_ROUTE,)))[0], "control: the proxy admits it as a write"
+        for path, method in itertools.product(_mutated_paths(), ("POST", "GET")):
+            access = R.declaration(base, writes=(COMMENT_ROUTE,), reads=((method, path),))
+            if parses(access) and await stored(access) is (method == "POST"):
+                wrong.append(f"read {method} {path!r}: stored only when the read is a GET")
 
     _at_the_door(op, run_through_the_door)
     assert not wrong, wrong

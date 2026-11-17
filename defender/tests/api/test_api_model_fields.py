@@ -21,7 +21,8 @@ FIELDS = ("request_key", "attempt", "failure_reason", "failure_message")
 
 
 def _investigation(**extra):
-    fields = {"cost_usd": 0.0, "cost_is_lower_limit": False, "request_key": "k1", "attempt": 1, **extra}
+    fields = {"cost_usd": 0.0, "cost_is_lower_limit": False, "request_key": "k1", "attempt": 1, "update_ticket": False,  # #1471 C-4
+              **extra}
     return models.Investigation(investigation_id="b1000000-0000-4000-8000-000000000001", alert_id="a1000000-0000-4000-8000-000000000001", status="failed",
                                 created_at=NOW, **fields)
 
@@ -46,7 +47,7 @@ def test_o14_an_investigation_carries_its_request_key_attempt_and_failure_detail
 @pytest.mark.parametrize("field", ["request_key", "attempt"])
 def test_o14_every_investigation_names_its_request_key_and_attempt(field):
     """A row always has its request key and attempt, so the wire model requires both. (O14)"""
-    fields = {"cost_usd": 0.0, "cost_is_lower_limit": False, "request_key": "k1", "attempt": 1}
+    fields = {"cost_usd": 0.0, "cost_is_lower_limit": False, "request_key": "k1", "attempt": 1, "update_ticket": False}
     del fields[field]
     with pytest.raises(ValidationError, match=field):
         models.Investigation(investigation_id="b1000000-0000-4000-8000-000000000001", alert_id="a1000000-0000-4000-8000-000000000001", status="queued", created_at=NOW, **fields)
@@ -81,7 +82,7 @@ def test_s2_cost_is_lower_limit_is_required_on_the_wire_model_and_in_its_schema(
     assert field.is_required()
     assert field.annotation is bool
     assert "cost_is_lower_limit" in models.Investigation.model_json_schema()["required"]
-    fields = {"cost_usd": 0.0, "request_key": "k1", "attempt": 1}
+    fields = {"cost_usd": 0.0, "request_key": "k1", "attempt": 1, "update_ticket": False}
     with pytest.raises(ValidationError, match="cost_is_lower_limit"):
         models.Investigation(investigation_id="b1000000-0000-4000-8000-000000000001", alert_id="a1000000-0000-4000-8000-000000000001", status="queued", created_at=NOW, **fields)
 

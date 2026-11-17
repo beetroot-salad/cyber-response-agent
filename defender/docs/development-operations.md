@@ -128,7 +128,7 @@ missing or invalid one refuses start naming it. Secret files hold one value, a t
 |---|---|
 | `DEFENDER_DATABASE_DSN` | the database (must be at the code's migration head) |
 | `DEFENDER_API_HOST`, `DEFENDER_API_PORT` | listen address |
-| `DEFENDER_API_FRONTEND_ORIGIN` | the app's origin (no path): the one origin a cookie-authenticated write may carry, and the origin the sign-in redirect URI `<origin>/api/auth/callback` is derived from, which the operator registers in the realm; the ingress serves this origin |
+| `DEFENDER_API_FRONTEND_ORIGIN` | the app's origin (no path): the one origin a cookie-authenticated write may carry, and the origin the sign-in redirect URI `<origin>/api/auth/callback` is derived from, which the operator registers in the realm; the ingress serves this origin; the worker needs the same value too (it refuses to start without it), for the screen link in a ticket comment |
 | `DEFENDER_API_ADMINISTRATORS_FILE` | YAML `administrators: [<email>, ...]` |
 | `DEFENDER_KEYCLOAK_SERVER_URL` | Keycloak as the API reaches it (dev: `http://keycloak:8080`) |
 | `DEFENDER_KEYCLOAK_ISSUER`, `DEFENDER_KEYCLOAK_PROGRAMS_ISSUER` | `<front-channel>/realms/<realm>` (dev: `http://localhost:8080/realms/defender`, `.../defender-programs`) |

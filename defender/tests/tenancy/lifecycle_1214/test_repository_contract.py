@@ -950,9 +950,9 @@ async def _seed_records(store: Store, tenant: str, value: Any) -> None:
     for system, rec in value.systems.items():
         _system_row(store, tenant, system, rec.version, enabled=rec.enabled, generation=rec.credential_generation)
     if value.case is not None:
-        execute(store.dsn, """INSERT INTO tenancy.case_versions (tenant_id, version, system_id, comment_body, deleted, author,
-                              written_at) VALUES (%s, %s, %s, %s, false, 'seed', %s)""",
-                (tenant, value.case.version, value.case.system_id, value.case.comment_body, SEEDED_AT))
+        execute(store.dsn, """INSERT INTO tenancy.case_versions (tenant_id, version, system_id, deleted, author,
+                              written_at) VALUES (%s, %s, %s, false, 'seed', %s)""",  # #1471 W7: no comment body
+                (tenant, value.case.version, value.case.system_id, SEEDED_AT))
 
 
 async def test_1470_o8_an_active_tenant_nothing_was_written_for_reads_empty(store):
@@ -1053,8 +1053,8 @@ async def test_1366_r10_the_current_record_is_the_highest_version_and_a_delete_h
                                 ("elastic", 3, {"generation": 2}), ("ticket", 1, {})):
         _system_row(store, tenant, system, version, **kw)
     for version, deleted in ((1, False), (2, True)):
-        execute(store.dsn, """INSERT INTO tenancy.case_versions (tenant_id, version, system_id, comment_body, deleted, author,
-                              written_at) VALUES (%s, %s, 'ticket', 'b', %s, 'seed', %s)""", (tenant, version, deleted, SEEDED_AT))
+        execute(store.dsn, """INSERT INTO tenancy.case_versions (tenant_id, version, system_id, deleted, author,
+                              written_at) VALUES (%s, %s, 'ticket', %s, 'seed', %s)""", (tenant, version, deleted, SEEDED_AT))
 
     read = await store.repo.current_records(tenant)
 
@@ -1122,8 +1122,8 @@ async def test_1366_o10_a_commit_that_drops_records_removes_that_tenants_version
             assert {(s, v.version, v.enabled, v.credential_generation) for s in mine.systems
                     for v in R.system_versions(store.dsn, T1, s)} == {
                 (s, r.version, r.enabled, r.credential_generation) for s, r in mine.systems.items()}, "this tenant's records"
-            assert [(c.system_id, c.comment_body) for c in R.case_versions(store.dsn, T1)] == [
-                (mine.case.system_id, mine.case.comment_body)]
+            assert [(c.system_id, c.version) for c in R.case_versions(store.dsn, T1)] == [
+                (mine.case.system_id, mine.case.version)]  # #1471 W7: the record is its system and version
     else:  # the twin's own records (the memory repository reads none for a tenant that is not active)
         assert (T1 in store.twin._records) is (not fenced), "the commit's drop on the twin"
         assert store.twin._records[T2] == theirs, "control: the other tenant's records stay"

@@ -51,7 +51,9 @@ _QUERY_SCHEMA = _schema({"system": {"type": "string"}, "verb": {"type": "string"
                          "params": {"type": "object"}}, ["system", "verb"])
 
 
-_SERVED_SCHEMA = _schema({"served": _ANY, "claim": {"type": "object"}}, ["served", "claim"])
+#: A hand-in: `code` alone (#1543 O2), or `served` and `claim` as written. The host judges which.
+_SERVED_SCHEMA = _schema({"served": _ANY, "claim": {"type": "object"},
+                          "code": {"type": "string"}}, [])
 
 
 
@@ -73,11 +75,13 @@ _ORACLE_TOOLS: tuple[tuple[str, str, dict], ...] = (
                                               "verb": {"type": "string"},
                                               "params": {"type": "object"}},
                                              ["system", "verb", "params"])),
-    ("check", "Run the host checks on a draft submission.", _SERVED_SCHEMA),
+    ("check", "Run the host checks on a draft hand-in: `code` (run in your box; prints the "
+     "{served, claim, forged} document) or `served` and `claim`. Keeps nothing.", _SERVED_SCHEMA),
 )
 
 
-_SUBMIT = ("submit", "Submit the served answer and its claim; ends the turn.", _SERVED_SCHEMA)
+_SUBMIT = ("submit", "Hand in the answer and end the turn: `code` (run in your box; prints the "
+           "{served, claim, forged} document) or `served` and `claim`.", _SERVED_SCHEMA)
 
 
 _VERDICT = ("verdict", "Pass or fail the served answer, with a reason.",

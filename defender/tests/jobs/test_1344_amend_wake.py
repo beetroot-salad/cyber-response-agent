@@ -27,7 +27,7 @@ from defender.tests.jobs.test_1344_learning_jobs import (
     queued_job,
 )
 from defender.tests.support.jobs._worker1342 import _FAST, _until, _worker
-from defender.tests.support.jobs._jobs1342 import NOW, T1, T2, JobsAudit, job_store, move_tenant, register_tenant
+from defender.tests.support.jobs._jobs1342 import FRONTEND_ORIGIN, NOW, T1, T2, JobsAudit, job_store, move_tenant, register_tenant
 from defender.tests.support.shared._postgres1339 import execute
 from defender.tests.support.shared.filesystem._handoff import write_whole
 
@@ -243,7 +243,8 @@ def test_a1_the_check_interval_must_be_positive(tmp_path, bad):
     from defender.worker import Worker
 
     with pytest.raises(ValueError, match="interval"):
-        Worker(SimpleNamespace(), data_root=tmp_path, clock=lambda: NOW, learning_check_interval=bad)
+        Worker(SimpleNamespace(), data_root=tmp_path, clock=lambda: NOW, learning_check_interval=bad,
+               frontend_origin=FRONTEND_ORIGIN)
 
 
 @pytest.mark.parametrize(("raw", "seconds"), [(None, 300), ("45", 45)])
@@ -252,7 +253,7 @@ def test_a1_the_deployed_setting_defaults_to_five_minutes(tmp_path, raw, seconds
     from defender.worker._start import read_settings
 
     environ = {"DEFENDER_BUILD_COMMIT": "c" * 40, "DEFENDER_DATABASE_DSN": "postgresql://x/y",
-               "DEFENDER_DATA_ROOT": str(tmp_path)}
+               "DEFENDER_DATA_ROOT": str(tmp_path), "DEFENDER_API_FRONTEND_ORIGIN": FRONTEND_ORIGIN}  # W9: required
     if raw is not None:
         environ["DEFENDER_WORKER_LEARNING_CHECK_SECONDS"] = raw
     assert read_settings(environ).learning_check_seconds == seconds
@@ -264,6 +265,7 @@ def test_a1_a_bad_check_setting_refuses_the_start(tmp_path, raw):
     from defender.worker._start import read_settings
 
     environ = {"DEFENDER_BUILD_COMMIT": "c" * 40, "DEFENDER_DATABASE_DSN": "postgresql://x/y",
-               "DEFENDER_DATA_ROOT": str(tmp_path), "DEFENDER_WORKER_LEARNING_CHECK_SECONDS": raw}
+               "DEFENDER_DATA_ROOT": str(tmp_path), "DEFENDER_WORKER_LEARNING_CHECK_SECONDS": raw,
+               "DEFENDER_API_FRONTEND_ORIGIN": FRONTEND_ORIGIN}  # W9: so the refusal is the check setting's
     with pytest.raises(WorkerStartRefused, match="LEARNING_CHECK"):
         read_settings(environ)

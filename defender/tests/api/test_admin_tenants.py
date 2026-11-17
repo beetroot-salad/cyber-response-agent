@@ -331,7 +331,7 @@ def _seed_jobs(world: World, tenant: str, n: int) -> dict[str, Any]:
     for i, (status, reason) in enumerate(INVESTIGATIONS):
         rows[f"inv-{status}"] = world.plant_investigation(tenant, Investigation(
             investigation_id=_uid("b", n, i), alert_id=_uid("a", n, i), status=status, created_at=at, cost_usd=0.0,
-            cost_is_lower_limit=False, request_key=f"k{i}", attempt=1, failure_reason=reason,
+            cost_is_lower_limit=False, request_key=f"k{i}", attempt=1, failure_reason=reason, update_ticket=False,
             finished_at=None if status in LIVE else ended_at))
     for i, (status, reason) in enumerate(LEARNING_JOBS):
         rows[f"job-{status}"] = world.plant_learning_job(tenant, LearningJob(
