@@ -67,6 +67,7 @@ from defender.tests.support.tenancy._mapping1345 import mapping_value
 from defender.tests.support.jobs._jobs1342 import (  # noqa: E402
     accounting_written,
 )
+from defender.tests.support.jobs._jobs1342 import CLOSING_KEY
 from defender.tests.support.jobs._worker1342 import (
     CASE,
     COMMIT,
@@ -83,6 +84,7 @@ from defender.tests.support.jobs._worker1342 import (
     _StoreWhoseFinishFails,
     _child,
     _committed,
+    closing,
     _gone,
     _handed_back,
     _job_end_with,
@@ -463,7 +465,8 @@ async def test_o8_a_cost_read_fault_keeps_the_stage_and_leaves_cost_unknown(worl
         if fault == "pointed-session-not-in-database":
             pointer = session_pointer(CASE, session_id="no-such-session")
         then = {"stale-schema-version": "PRAGMA user_version = 4242", "no-ledger-table": "DROP TABLE spend_ledger"}.get(fault)
-    child = _child(world, files=_committed(**{"{id}.session-pointer.json": pointer}))
+    plan = closing(fault="database-missing") if fault == "no-database" else closing()  # the spec says there is no database: the child plants none
+    child = _child(world, files=_committed(**{"{id}.session-pointer.json": pointer, CLOSING_KEY: plan}))
     inv, stored = await _run_spent(world, child, spend, then=then)
 
     # CONFLICT-UPDATED (#1534): the disposition is read through the same pointer and database, so a fault there costs it too.
@@ -473,6 +476,12 @@ async def test_o8_a_cost_read_fault_keeps_the_stage_and_leaves_cost_unknown(worl
         assert (stored["stage"], stored["disposition"]) == ("unparseable", None)
     assert (stored["cost_usd"], lower_limit(world["dsn"], inv)) == (None, False)
     assert _warned(caplog, inv), "the cost fault was not logged"
+    kind = {"pointer-not-json": "pointer-unreadable", "no-database": "database-missing",
+            "database-will-not-open": "store-unreadable", "stale-schema-version": "schema-version"}.get(fault)
+    if kind:
+        from defender.records import closing as C
+
+        assert C.FAULT_WORDING[kind] in (stored["failure_message"] or ""), stored["failure_message"]
 
 
 async def test_o8_a_conversation_payload_the_reader_cannot_parse_does_not_make_the_cost_unknown(world):
@@ -1142,11 +1151,11 @@ async def test_o6_an_unexpected_fault_at_any_seam_ends_that_row_worker_error_and
 
 @pytest.mark.parametrize("fault_type", [RuntimeError, KeyError, TypeError, AssertionError, AttributeError,
                                         IndexError, _NobodyPlannedThis])
-@pytest.mark.parametrize("seam", ["report-disposition", "lane-cost", "lane-knowledge", "lane-close"])
+@pytest.mark.parametrize("seam", ["closing-disposition", "lane-cost", "lane-knowledge", "lane-close"])
 async def test_1396_an_unexpected_fault_after_the_ending_is_decided_keeps_that_ending(
         world, caplog, seam, fault_type):
     """A fault nobody planned for once the host committed a report and the scrub walked the tree:
-    reading the report's disposition ends the row `unparseable`, as an unreadable disposition
+    reading the closing record's disposition ends the row `unparseable`, as an unreadable disposition
     does; reading cost or knowledge, or closing the lane, keeps the decided stage and disposition,
     and the value that could not be read is unknown (cost null; knowledge the unreadable shape,
     never "no run"). Never `worker_error`; the fault is logged as an error, and another row still
@@ -1157,13 +1166,13 @@ async def test_1396_an_unexpected_fault_after_the_ending_is_decided_keeps_that_e
     async with job_store(world["dsn"]) as store:
         bad = await _queued(store, ticket="T-1", key="k1")
         good = await _queued(store, ticket="T-2", key="k2")
-        method = {"report-disposition": "report_disposition", "lane-cost": "cost",
+        method = {"closing-disposition": "closing_disposition", "lane-cost": "cost",
                   "lane-knowledge": "knowledge", "lane-close": "close"}[seam]
         await _worker(world, store, child, open_lane=_lanes_failing(bad, method, fault)).drain()
 
     stored = row(world["dsn"], bad)
     assert (stored["stage"], stored["disposition"], stored["failure_reason"]) == (
-        ("unparseable", None, None) if seam == "report-disposition" else ("completed", "inconclusive", None))
+        ("unparseable", None, None) if seam == "closing-disposition" else ("completed", "inconclusive", None))
     assert stored["cost_usd"] == (None if seam == "lane-cost" else 0)
     assert lower_limit(world["dsn"], bad) is False, "an unknown cost was marked as a lower limit"
     assert stored["knowledge"] == (STALE_OPERATOR if seam == "lane-knowledge" else _knowledge("current", COMMIT))

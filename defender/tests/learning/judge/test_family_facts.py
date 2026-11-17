@@ -128,7 +128,7 @@ def test_921_each_worlds_verdict_is_its_arms_closing_record_read_through_the_ros
         "---\ndisposition: malicious\n---\n", encoding="utf-8")
     database = J.arm_database(ep)
     with V.run_store(tmp_path / "closing-source-runs", "closing-1534-source") as store:
-        V.plant(store, V.a_record(T.SOURCE_RUN_ID, disposition="suspicious"))
+        V.plant(store, V.a_record(T.SOURCE_RUN_ID, disposition="malicious"))
     assert database == Path(store.path)
 
     rows = _rows(ep)
@@ -164,6 +164,7 @@ def test_921_a_world_that_never_closed_is_ungradable_as_a_missing_input_not_malf
     assert row["ungradable"] is True, row
     assert row.get("malformed") is not True, row
     assert row.get("ungradable_reason"), "the exclusion carries no reason"
+    assert "closing record" in row["ungradable_reason"], row["ungradable_reason"]
     assert "b" not in grade.graded_worlds
     assert not any(wording in json.dumps(row) for wording in C.FAULT_WORDING.values()), (
         "an absence was worded as a fault")

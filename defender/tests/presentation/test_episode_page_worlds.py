@@ -148,6 +148,19 @@ def test_1534_a_world_that_never_closed_shows_no_record_and_no_fault_wording(tmp
     assert not [w for w in C.FAULT_WORDING.values() if w.lower() in world], "an absence was worded as a fault"
 
 
+def test_1534_one_arm_never_set_up_with_the_container_present_reads_no_record_not_a_fault(tmp_path):
+    """A single `RunAbsent` arm (folder gone, container and roster present) is `NeverClosed` in its slot; the sibling keeps its record. (V-READERS, L-9)"""
+    from defender.records import closing as C
+
+    ep = E.sample_episode(tmp_path)
+    J.drop_arm_folder(ep.dir, E.GRADED_WORLD)
+    page = render(ep)
+    world = _world(page, E.GRADED_WORLD).lower()
+    assert "no record" in world, world
+    assert not [w for w in C.FAULT_WORDING.values() if w.lower() in world], "an arm never set up was worded as a fault"
+    assert "benign" in _world(page, E.PASSTHROUGH_WORLD), "control: the sibling's record did not show"
+
+
 @pytest.mark.parametrize("kind", J.ARM_FAULTS)
 def test_1534_a_world_whose_record_could_not_be_looked_at_shows_the_kinds_wording_in_its_slot(tmp_path, kind):
     """`CouldNotLook` shows `FAULT_WORDING[kind]` in that world's slot only, with no database detail. (V-LOOK)"""

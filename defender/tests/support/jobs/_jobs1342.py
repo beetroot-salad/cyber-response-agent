@@ -274,7 +274,8 @@ CHILD_SCRIPT = textwrap.dedent("""
             return
         if fault == R.NO_POINTER:
             return
-        if not pointer.exists():
+        staged = {fill(rel) for part in ("files", "binary", "padded", "sparse", "links") for rel in spec.get(part, {})}
+        if f"{run_id}.session-pointer.json" not in staged and not os.path.lexists(pointer):  # what the spec stages at the pointer's name wins over this default
             pointer.write_text(session_pointer(case), encoding="utf-8")
         if fault == "database-missing":
             return

@@ -9,6 +9,7 @@ import pytest
 
 from defender import _vocab
 from defender.investigation import ticket_writer
+from defender.records import run_end
 from defender.tests.storage.verdict_1534 import _spec1534 as V
 from defender.tests.support.storage import _readers1534 as R
 from defender.tests.support.runtime.engine._spec767 import (
@@ -256,6 +257,36 @@ def test_767_a_run_that_never_closed_says_so_and_a_decoy_report_changes_nothing(
     bare = _store(tmp_path)
     record(no_pointer, bare)
     assert bare.comment_body() == body, "no pointer is `NeverClosed` too"
+
+
+@pytest.mark.parametrize("exit_class", sorted(run_end.FORCED_CLOSE_EXITS))
+def test_767_a_forced_close_exit_with_no_record_posts_the_escalation_comment_and_a_clean_exit_posts_the_sentence(
+        tmp_path, monkeypatch, exit_class):
+    """`NeverClosed` on a forced-close exit posts the cut-short escalation comment; on a non-forced exit, the not-recorded sentence. O7, OD18."""
+    _setup(monkeypatch, tmp_path)
+    forced = _store(tmp_path)
+    record(make_run(tmp_path, name="run-forced", closed=False), forced, truncated_by=exit_class)
+    assert [c.path for c in forced.calls] == [COMMENT_PATH], "the forced-close exit posted no comment"
+    assert "No disposition was recorded" not in forced.comment_body(), forced.comment_body()
+    assert receipt(tmp_path / fixture_uuid("run-forced"))["status"] == ticket_writer.RECEIPT_ESCALATED
+
+    plain = _store(tmp_path)
+    record(make_run(tmp_path, name="run-plain", closed=False), plain)
+    assert "No disposition was recorded for this case: the investigation did not close." in plain.comment_body()
+
+
+def test_767_the_narrative_shows_only_receipts_with_a_note(tmp_path, monkeypatch):
+    """A record with one noted and one note-less receipt: the comment carries the noted line only. O7, OD17."""
+    from defender.records import closing as C
+
+    _setup(monkeypatch, tmp_path)
+    noted = R.ceiling_entry("a note that is shown", ref="l-001")
+    bare = R.ceiling_entry("", ref="l-002", state=C.CEILING_STATES[-1])
+    store = _store(tmp_path)
+    record(make_run(tmp_path, ceiling=(noted, bare)), store)
+    body = store.comment_body()
+    assert C.ceiling_line(noted) in body, body
+    assert C.ceiling_line(bare) not in body, "a note-less receipt reached the narrative"
 
 
 @pytest.mark.parametrize("fault", R.TWO_KINDS + ("recorded-before-1534",))
