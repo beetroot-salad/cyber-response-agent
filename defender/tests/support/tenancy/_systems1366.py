@@ -108,31 +108,11 @@ FIXTURE_FOLDERS: Mapping[str, tuple[Mapping[str, str], str]] = _read_fixture_fol
 FIXTURE_SYSTEMS = frozenset(FIXTURE_FOLDERS)
 _FIXTURE_CASE = yaml.safe_load((FIXTURE_DATA / "case-record.yaml").read_text("utf-8"))
 FIXTURE_CASE_SYSTEM = _FIXTURE_CASE["system"]
-FIXTURE_CASE_BODY = _FIXTURE_CASE["comment"]["body"]
 
 
-def _has_body() -> bool:
-    """Whether production's `CaseRecord` still has `comment_body` (a base-only shim like `imported`; #1470 D-F, W7)."""
-    import dataclasses
-
-    from defender.tenancy.models import CaseRecord
-
-    return "comment_body" in {f.name for f in dataclasses.fields(CaseRecord)}
-
-
-def _base_case_body(body: str = FIXTURE_CASE_BODY) -> dict[str, str]:
-    """`comment_body=body` while production has the field; once gone, {} for the default and a raise (W7) for any other."""
-    if _has_body():
-        return {"comment_body": body}
-    if body != FIXTURE_CASE_BODY:
-        raise AssertionError("W7 removed the case record's comment body: a test passing an explicit body has lost its premise")
-    return {}
-
-
-def case_record_text(system: str = FIXTURE_CASE_SYSTEM, body: str = FIXTURE_CASE_BODY) -> str:
-    """`case-record.yaml` text (what `set-case` and `import` read); `comment:` only while production requires it (W7)."""
-    kept = _base_case_body(body).get("comment_body")
-    return f"system: {system}\n" + ("" if kept is None else f"comment:\n  body: {json.dumps(kept)}\n")
+def case_record_text(system: str = FIXTURE_CASE_SYSTEM) -> str:
+    """`case-record.yaml` text (what `set-case` and `import` read): the case system only (#1471 W7 removed `comment:`)."""
+    return f"system: {system}\n"
 
 
 def import_files(**overrides: str | None) -> dict[str, str | None]:
@@ -164,11 +144,7 @@ class SysSpec:
 @dataclass(frozen=True)
 class CaseSpec:
     system_id: str = FIXTURE_CASE_SYSTEM
-    comment_body: str = FIXTURE_CASE_BODY
     version: int = 1
-
-    def __post_init__(self) -> None:
-        _base_case_body(self.comment_body)  # raises (W7) for an explicit body once production has none
 
 
 @dataclass(frozen=True)
@@ -252,7 +228,7 @@ def records_from_settings(settings: Path) -> RecordsSpec:
             data = yaml.safe_load(case_file.read_text("utf-8")) or {}
             if not isinstance(data, Mapping):
                 raise ValueError("not a mapping")
-            case = CaseSpec(str(data.get("system", "")), str((data.get("comment") or {}).get("body", FIXTURE_CASE_BODY)))
+            case = CaseSpec(str(data.get("system", "")))
         except (UnicodeDecodeError, yaml.YAMLError, ValueError, AttributeError) as e:
             raise unparseable(case_file, e) from e
     return RecordsSpec(systems, case)
@@ -361,8 +337,7 @@ def to_value(spec: RecordsSpec) -> Any:
     systems = {s: SystemRecord(system_id=s, version=v.version, adapter_id=v.adapter or s, enabled=v.enabled,
                                settings=dict(v.settings), access=v.access, credential_generation=v.generation)
                for s, v in spec.systems.items()}
-    case = None if spec.case is None else CaseRecord(version=spec.case.version, system_id=spec.case.system_id,
-                                                     **_base_case_body(spec.case.comment_body))
+    case = None if spec.case is None else CaseRecord(version=spec.case.version, system_id=spec.case.system_id)
     return records_value(systems, case)
 
 
@@ -422,8 +397,7 @@ def seed_postgres_records(dsn: str, tenant: str, records: Any = DERIVED, data_ro
                 await store.put_system(str(tenant), system, replaces=0, adapter=v.adapter or system, enabled=v.enabled,
                                        settings=dict(v.settings), access=v.access, author=SEED_AUTHOR)
             if spec.case is not None:
-                await store.put_case(str(tenant), replaces=0, system_id=spec.case.system_id,
-                                     author=SEED_AUTHOR, **_base_case_body(spec.case.comment_body))
+                await store.put_case(str(tenant), replaces=0, system_id=spec.case.system_id, author=SEED_AUTHOR)
         finally:
             await store.close()
 
@@ -459,7 +433,6 @@ class Version(NamedTuple):
 class CaseVersion(NamedTuple):
     version: int
     system_id: str
-    comment_body: str | None  # None once the column is gone (W7)
     deleted: bool
     author: str
     written_at: Any
@@ -491,8 +464,7 @@ def system_versions(dsn: str, tenant_id: str, system: str) -> list[Version]:
 def case_versions(dsn: str, tenant_id: str) -> list[CaseVersion]:
     from defender.tests.support.shared._postgres1339 import execute
 
-    column = "comment_body" if _has_body() else "NULL"
-    rows = execute(dsn, f"""SELECT version, system_id, {column}, deleted, author, written_at
+    rows = execute(dsn, f"""SELECT version, system_id, deleted, author, written_at
                             FROM tenancy.{CASE_VERSIONS} WHERE tenant_id = %s ORDER BY version""", (tenant_id,))  # noqa: S608
     return [CaseVersion(*row) for row in rows]
 
@@ -711,9 +683,9 @@ class Admin:
             await store.delete_system(self.tid, system, replaces=replaces, author=ADMIN_AUTHOR)
         return self._run(work)
 
-    def set_case(self, *, replaces: int, system: str = FIXTURE_CASE_SYSTEM, body: str = FIXTURE_CASE_BODY) -> tuple[int, str]:
+    def set_case(self, *, replaces: int, system: str = FIXTURE_CASE_SYSTEM) -> tuple[int, str]:
         async def work(store: Any) -> None:
-            await store.put_case(self.tid, replaces=replaces, system_id=system, author=ADMIN_AUTHOR, **_base_case_body(body))
+            await store.put_case(self.tid, replaces=replaces, system_id=system, author=ADMIN_AUTHOR)
         return self._run(work)
 
     def delete_case(self, *, replaces: int) -> tuple[int, str]:

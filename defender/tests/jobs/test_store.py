@@ -14,6 +14,7 @@ import datetime as dt
 import inspect
 import json
 import logging
+import random
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -4027,6 +4028,69 @@ async def test_1471_w1_a_flagged_start_is_refused_when_the_tenant_has_no_case_re
         unflagged, _ = await store.create_investigation(bare, alert.alert_id, "k1", actor="u-1")
 
     assert (unflagged.update_ticket, _count(dsn, "investigations")) == (False, 1)
+
+
+def _case_histories() -> list[str]:
+    """Histories of the case record as ops (`P` put where none is shown, `R` replace the shown version, `D` delete it):
+    the shapes the design's rule must tell apart, then seeded random ones over the legal moves."""
+    fixed = ["", "P", "PD", "PDP", "PRD", "PRR", "PDPD", "PRDP", "PRRD", "PDPR", "PRDPD"]
+    drawn = []
+    for seed in (1471, 1472, 1473, 1474):
+        rng = random.Random(seed)
+        for _ in range(6):
+            ops, shown = "", False
+            for _ in range(rng.randint(1, 7)):
+                op = rng.choice("RD") if shown else "P"
+                ops, shown = ops + op, op != "D"
+            drawn.append(ops)
+    return fixed + drawn
+
+
+async def test_1471_w1_a_flagged_start_is_refused_exactly_when_the_owners_read_shows_no_case_record(dsn):
+    """After any history of case-record puts, replaces and deletes through the system-records writes, a flagged start
+    of a keyed alert is 409 exactly when the tenant owner's read shows no case record, else created. (W1)"""
+    from defender.jobs import Conflict
+    from defender.system_records import RecordStore
+    from defender.tenancy.postgres import PostgresTenantRepository
+    from defender.tests.support.jobs._jobs1342 import fixed_clock
+    from defender.tests.support.tenancy._systems1366 import RecordsSpec, fixture_records
+
+    histories = _case_histories()
+    outcomes: dict[str, bool] = {}
+    records = RecordStore(dsn, clock=fixed_clock, judge=lambda after, before: [])
+    owner = PostgresTenantRepository(dsn)
+    try:
+        async with job_store(dsn) as store:
+            for n, ops in enumerate(histories):
+                tenant = fixture_uuid(f"tenant:jobs-1471-w1-history-{n}")
+                register_tenant(dsn, tenant, records=RecordsSpec(fixture_records().systems, None))
+                for op in ops:
+                    shown = (await owner.current_records(tenant)).case
+                    if op == "D":
+                        await records.delete_case(tenant, replaces=shown.version, author="u-1")
+                    else:
+                        await records.put_case(tenant, replaces=0 if shown is None else shown.version,
+                                               system_id="ticket", author="u-1")
+                has_record = (await owner.current_records(tenant)).case is not None
+                alert = await _keyed(store, tenant, ticket=f"T-w1-{n}")
+                if has_record:
+                    created, _ = await store.create_investigation(tenant, alert.alert_id, "k1", actor="u-1",
+                                                                  update_ticket=True)
+                    assert created.update_ticket is True, (ops, "a case record is shown: the start is created")
+                else:
+                    with pytest.raises(Conflict, match="(?i)ticket"):
+                        await store.create_investigation(tenant, alert.alert_id, "k1", actor="u-1", update_ticket=True)
+                outcomes[ops] = has_record
+    finally:
+        await owner.close()
+        await records.close()
+
+    for shape in ("PD", "PDP", "PRD", "PRR", "P"):
+        assert any(shape in o for o in outcomes), f"premise: no history of the shape {shape}"
+    assert [outcomes[o] for o in ("PD", "PDP", "PRD", "PRR", "P", "")] == [False, True, False, True, True, False]
+    ends = [sum(1 for has in outcomes.values() if has is end) for end in (True, False)]
+    assert min(ends) > 3, "premise: both ends are reached by many histories, with several versions behind each"
+    assert sum(len(o) > 2 for o in outcomes) > 8, "premise: histories of several versions"
 
 
 async def test_1471_w1_a_tenant_without_a_mapping_is_still_refused_for_the_mapping(unmapped_dsn):

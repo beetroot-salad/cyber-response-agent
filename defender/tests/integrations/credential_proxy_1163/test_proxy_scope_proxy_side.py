@@ -170,11 +170,33 @@ def _case_keys() -> list[str]:
     return keys
 
 
+def _segments_of(key: str, rng: random.Random) -> list[tuple[str, str]]:
+    """(class, wire segment) variants of `key`: spellings near it by case, padding, compatibility forms, affixes and
+    percent-encodings, some of which decode to exactly `key` (the must-send controls)."""
+    quoted = quote(key, safe="")
+    every = [f"%{b:02X}" for b in key.encode()]
+    wide = [chr(ord(c) + 0xFEE0) for c in key]
+    out = [("case", quote(rng.choice([key.swapcase(), key.lower(), key.upper()]), safe=""))]
+    out += [("padding", quote(pad.format(key), safe="")) for pad in (" {}", "{} ", "\t{}\t", "{}\x00", "{}.", "  {}  ")]
+    out += [("compat", quote("".join(wide), safe="")),
+            ("compat", quote("".join(w if rng.random() < 0.5 else c for w, c in zip(wide, key, strict=True)), safe=""))]
+    out += [("affix", quote(rng.choice("0aZ-_.~ %") + key, safe="")),
+            ("affix", quote(key + rng.choice("0aZ-_.~ %"), safe="")), ("affix", quote(key + "x", safe=""))]
+    out += [("encoding", "".join(every)), ("encoding", "".join(every).lower()),
+            ("encoding", "".join(h if rng.random() < 0.5 else h.lower() for h in every)),
+            ("encoding", quoted.lower()),
+            ("encoding", "".join(c if c == quote(c, safe="") and rng.random() < 0.5 else h for h, c in zip(every, key, strict=True))),
+            ("encoding", quote(quoted, safe="")), ("encoding", quoted + "%2e"), ("encoding", "%00" + quoted)]
+    return out
+
+
 def test_x1_a_pass_comments_on_its_ticket_whatever_the_key_and_on_no_other(tmp_path, data_root):
-    """For every key of the case-key grammar, the pass naming it sends a comment on that key (the transport's
-    `quote(key, safe="")` form) and refuses one on a longer key, and on a key the segment decodes to only by a second
-    decoding; so the proxy compares the decoded segment. X1."""
+    """For every key of the case-key grammar, the pass naming it sends a comment whose segment decodes (once) to
+    that key, however spelled, and refuses any other segment unsent and unread: case, padding, compatibility forms,
+    affixes, a longer key, a second decoding. X1."""
     keys = _case_keys()
+    rng = random.Random(14713)
+    classes: dict[str, list[bool]] = {}
     with T.rig(tmp_path / "forge", data_root, _declaring()) as r:
         for key in keys:
             grant = {("identity", "rw", key)}
@@ -183,12 +205,28 @@ def test_x1_a_pass_comments_on_its_ticket_whatever_the_key_and_on_no_other(tmp_p
             sent = r.ask("POST", path, grant=grant, body="{}")
             assert (sent["fault"], [(s.method, s.path) for s in r.up.seen]) == (
                 None, [("POST", f"{T.BASE_PATH}{path}")]), key
-            r.up.seen.clear()
-            other = r.ask("POST", f"/tickets/{quote(key + 'x', safe='')}/comments", grant=grant, body="{}")
-            assert (other["fault"] in REFUSED, r.up.seen) == (True, []), key
+            for kind, segment in _segments_of(key, rng):
+                path = f"/tickets/{segment}/comments"
+                equal = unquote(segment) == key
+                classes.setdefault(kind, []).append(equal)
+                r.up.seen.clear()
+                r.store.reads.clear()
+                answer = r.ask("POST", path, grant=grant, body="{}")
+                if equal:
+                    # the proxy may re-spell the path it sends: what is demanded is that the write is sent
+                    assert (answer["fault"], [s.method for s in r.up.seen]) == (None, ["POST"]), (key, segment)
+                    forwarded = r.up.seen[0].path.split("/")
+                    assert unquote(forwarded[forwarded.index("tickets") + 1]) == key, (key, segment, r.up.seen[0].path)
+                else:
+                    assert (answer["fault"] in REFUSED, r.up.seen, r.store.reads) == (True, [], []), (key, segment)
             if unquote(key) != key:  # the key spelled raw decodes to another key: not the pass's
                 raw = r.ask("POST", f"/tickets/{key}/comments", grant=grant, body="{}")
                 assert (raw["fault"] in REFUSED, r.up.seen) == (True, []), key
+
+    assert set(classes) == {"case", "padding", "compat", "affix", "encoding"}, classes.keys()
+    assert all(False in flags for flags in classes.values()), "premise: every class produced a non-key segment"
+    assert True in classes["encoding"], "premise: some encodings decode exactly to the key (the controls)"
+    assert any(k != k.swapcase() for k in keys), "premise: keys with letters, so case-folding is tested"
 
 
 @pytest.mark.parametrize(("method", "path", "sent"), [

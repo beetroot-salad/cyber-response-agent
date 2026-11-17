@@ -11,7 +11,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import yaml
 
 from defender.box import run_env
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
@@ -172,8 +171,7 @@ def records_of(v: Vendor, base: str, *, env: str | None = None, access: bool = T
             if access else "")
     case = None
     if leg:
-        body = yaml.safe_load(C.case_record_text(v.system))["comment"]["body"]
-        case = R.CaseSpec(v.system, comment_body=str(body))
+        case = R.CaseSpec(v.system)
     return R.RecordsSpec({v.system: R.SysSpec(settings, text)}, case)
 
 

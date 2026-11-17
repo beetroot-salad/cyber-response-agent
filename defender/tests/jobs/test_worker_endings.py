@@ -635,61 +635,92 @@ async def _served(store, inv):
     return (await store.get_investigation(T1, inv)).ticket_write
 
 
-async def _end_by_finish(world, flagged):
-    child = _child(world, exit=0, files=_committed(**{_RECEIPT: _receipt("commented")}))
-    async with job_store(world["dsn"]) as store:
-        inv = await _queued_1471(store, update_ticket=flagged)
-        await _worker_1471(world, store, child).drain()
-        end = await _served(store, inv)
-        return _word(world["dsn"], inv), end, end
+RUN_FOLDER_WORDS = ("commented", "escalated", "error", "unknown", "no_receipt")
 
 
-async def _end_by_barest_write(world, flagged):
-    child = _child(world, exit=0, files=_committed(**{_RECEIPT: _receipt("escalated")}))
-    async with job_store(world["dsn"]) as store:
-        inv = await _queued_1471(store, update_ticket=flagged)
-        await _worker_1471(world, _Ends(store, refuse=2), child).drain()
-        end = await _served(store, inv)
-        assert (await store.get_investigation(T1, inv)).failure_reason == "worker_error", "premise: the barest end ran"
-        return _word(world["dsn"], inv), end, end
+class _Meanwhile(_Ends):
+    """`_Ends` that runs `meanwhile()` once, just before the worker's first end write (finish or hand-back) reaches the
+    store: a store end that lands before the worker's write."""
+
+    def __init__(self, store, meanwhile=None, **kw) -> None:
+        super().__init__(store, **kw)
+        self._meanwhile = meanwhile
+
+    async def _first(self) -> None:
+        hook, self._meanwhile = self._meanwhile, None
+        if hook is not None:
+            await hook()
+
+    async def finish(self, *args, **kw):
+        await self._first()
+        return await super().finish(*args, **kw)
+
+    async def hand_back(self, *args, **kw):
+        await self._first()
+        return await super().hand_back(*args, **kw)
 
 
-async def _end_by_accounting_after_a_cancel(world, flagged):
-    release = world["tmp"] / "release"
-    child = _child(world, exit=0, files=_committed(**{_RECEIPT: _receipt("commented")}), wait_for=release)
-    async with job_store(world["dsn"]) as store:
-        inv = await _queued_1471(store, update_ticket=flagged)
-        drained = asyncio.create_task(_worker_1471(world, store, child).drain())
-        try:
-            for _ in range(1500):
-                if child.seen() is not None:
-                    break
-                await asyncio.sleep(0.01)
-            assert child.seen() is not None, "premise: the child is running"
-            await store.cancel_investigation(T1, inv, actor="u-1")
-        finally:
-            release.touch()
-        await asyncio.wait_for(drained, timeout=60)
-        end = await _served(store, inv)
-        return _word(world["dsn"], inv), end, end
+def _model(flagged: bool, steps: list[tuple], *, queued: bool = False) -> tuple[str | None, str | None, list[bool]]:
+    """W6's precedence, as a small model. A step is `("worker", kind, word)` (`kind`: `finish` ends the row, `hand_back`
+    leaves it running; the word is what the worker carries) or `("store",)` (the store ends the row). Returns the stored
+    word, the served word and whether each store end found the row live. null < not_read < any run-folder word; `not_read`
+    is written only where the word is null; nothing replaces a run-folder word; a store end of a queued flagged row writes
+    `no_receipt`; unflagged rows hold and serve null; a row not yet ended serves null."""
+    word, live, acted = None, True, []
+    for step in steps:
+        if step[0] == "store":
+            acted.append(live)
+            if live and flagged:
+                word = "no_receipt" if queued and word is None else (word if word is not None else "not_read")
+            live = False
+            queued = False
+        else:
+            _, kind, incoming = step
+            if live and kind == "finish":
+                live = False
+            if flagged and incoming is not None and word not in RUN_FOLDER_WORDS:
+                word = incoming
+    return (word if flagged else None), (word if flagged and not live else None), acted
 
 
-async def _hand_back_before_the_read(world, flagged):
-    async with job_store(world["dsn"]) as store:
-        inv = await _queued_1471(store, update_ticket=flagged)
-        await _worker_1471(world, _Ends(store, get_alert_outages=1), _child(world, exit=0, files=_committed())).drain()
-        stored, live = _word(world["dsn"], inv), await _served(store, inv)
-        assert await store.take_over(held=frozenset()) == [inv], "premise: the handed-back row was taken over"
-        return stored, live, await _served(store, inv)
+async def _cancel(world, store, inv):
+    from defender.jobs import Conflict
+
+    with contextlib.suppress(Conflict):
+        await store.cancel_investigation(T1, inv, actor="u-1")
 
 
-async def _hand_back_after_the_read(world, flagged):
-    term = str(world["tmp"] / "term-{id}")
-    child = _child(world, files={"{id}.job-end.json": _STOPPED_RUN, _RECEIPT: _receipt("commented")},
-                   wait_for=world["tmp"] / "never", term="finish", term_mark=term)
-    async with job_store(world["dsn"]) as store:
-        ends = _Ends(store)
-        inv = await _queued_1471(store, update_ticket=flagged)
+async def _offboard(world, store, inv):
+    await store.offboard_tenant(T1, actor="u-1")
+
+
+async def _take_over(world, store, inv):
+    from defender.tests.support.jobs._jobs1342 import lapse_lease
+
+    lapse_lease(world["dsn"], inv)
+    await store.take_over(held=frozenset())
+
+
+_STORE_ENDS = {"cancel": _cancel, "offboard": _offboard, "take-over": _take_over}
+_STAGES = "SELECT stage FROM jobs.investigations WHERE id = %s"
+
+
+async def _store_end(world, store, inv, name) -> bool:
+    """Run the store end `name`; whether it changed the row's stage (found it live)."""
+    from defender.tests.support.shared._postgres1339 import execute
+
+    before = execute(world["dsn"], _STAGES, (inv,))[0][0]
+    await _STORE_ENDS[name](world, store, inv)
+    return execute(world["dsn"], _STAGES, (inv,))[0][0] != before
+
+
+async def _work(world, store, inv, worker, hook, *, flagged):
+    """The worker's ending `worker` over the one queued row; `hook` (or None) runs just before its end write."""
+    if worker == "stopped":
+        term = str(world["tmp"] / "term-{id}")
+        child = _child(world, files={"{id}.job-end.json": _STOPPED_RUN, _RECEIPT: _receipt("commented")},
+                       wait_for=world["tmp"] / "never", term="finish", term_mark=term)
+        ends = _Meanwhile(store, hook)
         serving = asyncio.create_task(_worker_1471(world, ends, child, **_FAST).serve())
         try:
             for _ in range(1500):
@@ -704,45 +735,89 @@ async def _hand_back_after_the_read(world, flagged):
             await asyncio.gather(serving, return_exceptions=True)
         assert os.path.exists(term.replace("{id}", inv)), "premise: the stop signalled the child"
         assert [n for n, _ in ends.calls if n in ("hand_back", "finish")] == ["hand_back"], ends.calls
-        stored, live = _word(world["dsn"], inv), await _served(store, inv)
-        assert await store.take_over(held=frozenset()) == [inv], "premise: the handed-back row was taken over"
-        return stored, live, await _served(store, inv)
+        return
+    if worker == "unread":
+        child, ends = _child(world, exit=0, files=_committed()), _Meanwhile(store, hook, get_alert_outages=1)
+    elif worker == "barest":
+        child = _child(world, exit=0, files=_committed(**{_RECEIPT: _receipt("escalated")}))
+        ends = _Meanwhile(store, hook, refuse=2)
+    elif worker == "silent":
+        child, ends = _child(world, exit=0, files=_committed()), _Meanwhile(store, hook)
+    else:
+        child, ends = _child(world, exit=0, files=_committed(**{_RECEIPT: _receipt("commented")})), _Meanwhile(store, hook)
+    await asyncio.wait_for(_worker_1471(world, ends, child).drain(), timeout=120)
+    assert child.seen() is not None or worker == "unread", "premise: the child ran"
+    if worker == "barest" and hook is None:
+        assert (await store.get_investigation(T1, inv)).failure_reason == "worker_error", "premise: the barest end ran"
 
 
-async def _taken_over_by_the_store(world, flagged):
-    from defender.tests.support.jobs._jobs1342 import lapse_lease
+#: worker ending -> (the write's kind, the word it carries for a flagged row).
+#: decided/silent/barest: the worker read the run folder and finished the row (a receipt's word; no receipt; the barest end);
+#: stopped: it read it and handed the row back; unread: it handed the row back without reading it.
+_WORKERS = {"decided": ("finish", "commented"), "silent": ("finish", "no_receipt"), "barest": ("finish", "escalated"),
+            "stopped": ("hand_back", "commented"), "unread": ("hand_back", "not_read")}
+_STORE_POSITIONS = ("before", "after")
 
+
+def _w6_cells():
+    cells = []
+    for flagged in (True, False):
+        for worker in _WORKERS:
+            cells.append(pytest.param(worker, "none", "-", flagged, id=f"{worker}-no_store_end-{'flagged' if flagged else 'unflagged'}"))
+            for end in _STORE_ENDS:
+                for position in _STORE_POSITIONS:
+                    cells.append(pytest.param(worker, end, position, flagged,
+                                              id=f"{worker}-{end}-{position}-the-write-{'flagged' if flagged else 'unflagged'}"))
+        for end, states in (("cancel", ("queued", "running")), ("offboard", ("queued", "running")), ("take-over", ("running",))):
+            for state in states:
+                cells.append(pytest.param("none", end, state, flagged,
+                                          id=f"no_worker_write-{end}-{state}-{'flagged' if flagged else 'unflagged'}"))
+    return cells
+
+
+_W6_CELLS = _w6_cells()
+
+
+def test_1471_w6_the_cells_are_the_whole_product():
+    """Premise: every worker ending x store end x position x flag, plus the store ending a row no worker wrote to."""
+    assert len(_W6_CELLS) == 2 * (len(_WORKERS) * (1 + 3 * 2) + 5) == 80
+    assert len({c.id for c in _W6_CELLS}) == 80
+
+
+@pytest.mark.parametrize(("worker", "end", "position", "flagged"), _W6_CELLS)
+async def test_1471_w6_every_writer_of_a_rows_end_leaves_the_word_precedence_says(world, worker, end, position, flagged):
+    """Each worker ending x store end x its place (before the worker's write, or after it) x flag: the stored word and
+    the served word are the precedence model's (W6): null < not_read < a run-folder word; unflagged reads null."""
     async with job_store(world["dsn"]) as store:
         inv = await _queued_1471(store, update_ticket=flagged)
-        assert (await store.claim()).record.investigation_id == inv, "premise: claimed"
-        lapse_lease(world["dsn"], inv)
-        assert await store.take_over(held=frozenset()) == [inv], "premise: taken over"
-        retry = await store.claim()
-        assert retry is not None, "premise: the lapse was retried"
-        assert retry.record.attempt == 2
-        assert _word(world["dsn"], retry.record.investigation_id) is None, "the retry row carries a word"
-        end = await _served(store, inv)
-        return _word(world["dsn"], inv), end, end
+        acted: list[bool] = []
+        steps: list[tuple] = []
+        queued = False
+        if worker == "none":
+            queued = position == "queued"
+            if not queued:
+                assert (await store.claim()).record.investigation_id == inv, "premise: claimed"
+            acted.append(await _store_end(world, store, inv, end))
+            steps.append(("store",))
+            if end == "take-over":  # the lapse's retry is a row of its own, with no word yet (W1: it carries the flag only)
+                retry = await store.claim()
+                assert retry is not None, "premise: the lapse was retried"
+                assert retry.record.attempt == 2
+                assert _word(world["dsn"], retry.record.investigation_id) is None, "the retry row carries a word"
+        else:
+            kind, word = _WORKERS[worker]
+            hook = None
+            if end != "none" and position == "before":
+                async def hook(end=end):
+                    acted.append(await _store_end(world, store, inv, end))
+                steps.append(("store",))
+            steps.append(("worker", kind, word if flagged else None))
+            await _work(world, store, inv, worker, hook, flagged=flagged)
+            if end != "none" and position == "after":
+                acted.append(await _store_end(world, store, inv, end))
+                steps.append(("store",))
+        stored, served = _word(world["dsn"], inv), await _served(store, inv)
+        want_stored, want_served, want_acted = _model(flagged, steps, queued=queued)
 
-
-#: writer -> (driver, flagged row's (stored word, served while live, served at the end))
-_W6_WRITERS = {
-    "hand-back-before-the-read": (_hand_back_before_the_read, ("not_read", None, "not_read")),
-    "hand-back-after-the-read": (_hand_back_after_the_read, ("commented", None, "commented")),
-    "finish": (_end_by_finish, ("commented", "commented", "commented")),
-    "write-accounting-after-a-cancel": (_end_by_accounting_after_a_cancel, ("commented", "commented", "commented")),
-    "barest-end": (_end_by_barest_write, ("escalated", "escalated", "escalated")),
-    "store-take-over": (_taken_over_by_the_store, ("not_read", "not_read", "not_read")),
-}
-
-
-@pytest.mark.parametrize("flagged", [True, False], ids=["flagged", "unflagged"])
-@pytest.mark.parametrize("writer", list(_W6_WRITERS))
-async def test_1471_w6_every_writer_of_a_rows_end_leaves_the_word_precedence_says(world, writer, flagged):
-    """Each way a row ends, flagged: the stored word and then the served word are W6's; unflagged: served null. (W6)"""
-    drive, expected = _W6_WRITERS[writer]
-    stored, live, end = await drive(world, flagged)
-    if flagged:
-        assert (stored, live, end) == expected, writer
-    else:
-        assert (live, end) == (None, None), writer
+    assert acted == want_acted, f"the store end found the row live: {acted}, the model says {want_acted}"
+    assert (stored, served) == (want_stored, want_served), (steps, stored, served)

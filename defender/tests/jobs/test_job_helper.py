@@ -7,6 +7,7 @@ Names of the target (`job_host.main`, `ask`, `Refused`, `SOCKET_ENV`, `JOB_LABEL
 module's docstring."""
 from __future__ import annotations
 
+import dataclasses
 import inspect
 import json
 import logging
@@ -1509,15 +1510,17 @@ def _refusal_code(c, name: str, **fields) -> object:
         return getattr(refused, "code", repr(refused))
 
 
-def _ask_both(scene, inv: str, argv: list[str], *, signer=None) -> tuple[dict, object]:
+def _ask_both(scene, inv: str, argv: list[str], *, signer=None, before_write=None) -> tuple[dict, object]:
     """Drive the helper over a job that asks `launch`, a read `pass` and a `pass.write_back`, keeping each answer or
-    its refusal code."""
+    its refusal code. `before_write`, if given, runs in the job between its read pass and its write ask."""
     signer = signer or make_signer()
     got: dict = {}
 
     def job(c) -> int:
         got["launch"] = c.request("launch")
         got["read"] = _refusal_code(c, "pass", id=inv)
+        if before_write is not None:
+            before_write()
         got["asked_at"] = time.time()
         got["write"] = _refusal_code(c, "pass.write_back", id=inv, ask=ASK_1471)
         return 0
@@ -1540,9 +1543,22 @@ def _signed_writes(signer) -> list[list[str]]:
     return [e for grant in _signed_grants(signer) for e in grant if e[1] == "rw"]
 
 
-def _ticket_scene(tmp_path, monkeypatch, dsn, *, proxied=("ticket",)):
+def _ticket_scene(tmp_path, monkeypatch, dsn, *, proxied=("ticket",), case="ticket"):
     """The case system (`ticket`) reached through the proxy and granted to nobody: the job has an empty read grant
-    (when it is the only proxied system), yet is a flagged job's write target."""
+    (when it is the only proxied system), yet is a flagged job's write target. `case="jira"`: the tenant's case record
+    names a `jira` system (proxied, granted to nobody) instead, `ticket` staying a proxied system that is not the case's."""
+    if case != "ticket":
+        from defender.tests.support.tenancy import _systems1366 as R
+
+        make = J.proxied_records
+
+        def with_case_system(names):
+            spec = make(names)
+            record = R.SysSpec({"JIRA_TIMEOUT_SEC": "10", "JIRA_SERVICE_DESK": "no"},
+                               R.declaration("http://jira-1471:8080", writes=(("POST", "/rest/api/2/issue/*/comment"),)))
+            return dataclasses.replace(R.added(spec, case, record), case=R.CaseSpec(system_id=case))
+
+        monkeypatch.setattr(J, "proxied_records", with_case_system)  # lint-monkeypatch: ok — `helper_scene` takes no records of its own, only the proxied names
     return helper_scene(tmp_path, monkeypatch, dsn, proxied=proxied,
                         files={"settings/verb-grants.yaml": _ticket_ungranted()})
 
@@ -1563,15 +1579,17 @@ def test_1471_w5_p5_an_unflagged_job_is_refused_a_write_pass_whatever_its_launch
     assert all(e == ["identity", "r"] for grant in _signed_grants(signer) for e in grant), _signed_grants(signer)
 
 
+@pytest.mark.parametrize("case", ["ticket", "jira"])
 @pytest.mark.parametrize("proxied", [("ticket",), ("identity", "ticket")], ids=["empty-read-grant", "read-grant"])
 def test_1471_w5_a_flagged_job_gets_one_write_pass_naming_its_ticket_and_its_read_pass_grants_no_write(
-        tmp_path, monkeypatch, migrated_database, proxied):
-    """Flagged, case system `ticket` proxied: `pass.write_back` is exactly `[ticket, rw, <the alert's key>]` for this
-    tenant and investigation with the normal lifetime, whether or not the job has a read grant; the read pass (or its
+        tmp_path, monkeypatch, migrated_database, proxied, case):
+    """Flagged, the tenant's case system (`ticket`, or `jira` with `ticket` proxied beside it) proxied: `pass.write_back`
+    is exactly `[<the case system>, rw, <the alert's key>]` for this tenant and investigation with the normal lifetime,
+    whether or not the job has a read grant, and nothing is signed for any other system; the read pass (or its
     `no-grant` refusal) carries no write. (W5, C-2)"""
     from defender.credential_proxy import PASS_LIFETIME_SEC
 
-    with _ticket_scene(tmp_path, monkeypatch, migrated_database, proxied=proxied) as s:
+    with _ticket_scene(tmp_path, monkeypatch, migrated_database, proxied=proxied, case=case) as s:
         inv, argv, _link = _flagged_investigation(s, flagged=True)
         got, signer = _ask_both(s, inv, argv)
 
@@ -1584,10 +1602,11 @@ def test_1471_w5_a_flagged_job_gets_one_write_pass_naming_its_ticket_and_its_rea
     assert isinstance(got["write"], dict), f"the write pass was refused: {got['write']!r}"
     claims = claims_of(signer, got["write"]["token"])
     assert (claims["tenant"], claims["investigation"]) == (s.tenant, inv), claims
-    assert [list(e) for e in claims["grant"]] == [["ticket", "rw", TICKET_1471]], claims
+    assert [list(e) for e in claims["grant"]] == [[case, "rw", TICKET_1471]], claims
     assert PASS_LIFETIME_SEC - 1 <= claims["exp"] - got["asked_at"] <= PASS_LIFETIME_SEC + 30, (
         "the write pass does not have the normal lifetime", claims["exp"] - got["asked_at"])
-    assert _signed_writes(signer) == [["ticket", "rw", TICKET_1471]], _signed_grants(signer)
+    assert _signed_writes(signer) == [[case, "rw", TICKET_1471]], _signed_grants(signer)
+    assert all(e[0] == case for grant in _signed_grants(signer) for e in grant if len(e) == 3), _signed_grants(signer)
 
 
 @pytest.mark.parametrize(("why", "proxied", "alert"), [
@@ -1637,20 +1656,40 @@ def test_1471_w5_a_write_pass_asked_with_an_id_other_than_the_minted_one_is_refu
     assert isinstance(control["write"], dict), f"control: the minted id is answered: {control['write']!r}"
 
 
+#: Where the helper's clock reads when the later asks come, against the first pass's `expires_at` (`None`: the clock the
+#: test runs under, with the first pass signed under a clock that put its `expires_at` in the real past).
+_LATCH_CLOCKS = {"before-expiry": -1.0, "exactly-at-expiry": 0.0, "just-after-expiry": 1.0, "far-after-expiry": 36000.0,
+                 "born-expired": None}
+
+
+@pytest.mark.parametrize("when", list(_LATCH_CLOCKS))
 def test_1471_w5_the_same_ask_gets_the_same_pass_and_a_different_ask_after_a_signed_pass_is_already_signed(
-        tmp_path, monkeypatch, migrated_database):
+        tmp_path, monkeypatch, migrated_database, when):
     """The latch (C-5): the same `ask` again answers the same pass with no new signature; a different `ask` after a pass
-    was signed is refused `already-signed` and signs nothing. (W5, P-7)"""
+    was signed is refused `already-signed` and signs nothing, whatever the helper's clock reads against the first pass's
+    `expires_at` (the pass's lifetime is the proxy's to enforce, not the latch's). (W5, P-7)"""
+    real_time, frozen = time.time, {"at": None}
+    # The helper runs in this process and reads `time.time` where it needs the time: moving that one function moves its clock.
+    monkeypatch.setattr(time, "time", lambda: real_time() if frozen["at"] is None else frozen["at"])  # lint-monkeypatch: ok — the helper's wall clock has no seam; the test moves it
     with _ticket_scene(tmp_path, monkeypatch, migrated_database) as s:
         inv, argv, _link = _flagged_investigation(s, flagged=True)
         signer, got = make_signer(), {}
 
         def job(c) -> int:
-            got["first"] = c.request("pass.write_back", id=inv, ask="ask-1")
-            got["signed"] = len(signer.payloads)
-            got["again"] = _refusal_code(c, "pass.write_back", id=inv, ask="ask-1")
-            got["other"] = _refusal_code(c, "pass.write_back", id=inv, ask="ask-2")
-            got["same_after_other"] = _refusal_code(c, "pass.write_back", id=inv, ask="ask-1")
+            try:
+                if when == "born-expired":
+                    frozen["at"] = real_time() - 3600.0  # the first pass is signed with `expires_at` already past
+                got["first"] = c.request("pass.write_back", id=inv, ask="ask-1")
+                frozen["at"] = None
+                got["signed"] = len(signer.payloads)
+                got["now_before"] = real_time()
+                if _LATCH_CLOCKS[when] is not None:
+                    frozen["at"] = got["first"]["expires_at"] + _LATCH_CLOCKS[when]
+                got["again"] = _refusal_code(c, "pass.write_back", id=inv, ask="ask-1")
+                got["other"] = _refusal_code(c, "pass.write_back", id=inv, ask="ask-2")
+                got["same_after_other"] = _refusal_code(c, "pass.write_back", id=inv, ask="ask-1")
+            finally:
+                frozen["at"] = None
             got["after"] = len(signer.payloads)
             return 0
 
@@ -1659,6 +1698,11 @@ def test_1471_w5_the_same_ask_gets_the_same_pass_and_a_different_ask_after_a_sig
 
     assert ran.raised is None, ran.raised
     assert docker.job_error is None, docker.job_error
+    expires = got["first"]["expires_at"]
+    if when == "born-expired":
+        assert expires < got["now_before"], f"premise: the first pass is already past its expiry: {expires} vs {got['now_before']}"
+    else:
+        assert expires > got["now_before"], f"premise: the first pass is within its lifetime: {expires} vs {got['now_before']}"
     assert got["again"] == got["first"], got["again"]
     assert got["other"] == "already-signed", got["other"]
     assert got["same_after_other"] == got["first"], "a refused other ask took the first ask's pass away"
@@ -1873,6 +1917,59 @@ def test_1471_p5_the_ticket_is_derived_from_the_bytes_the_digest_admitted_in_one
         got, signer = _ask_both(s, inv, argv)
 
     assert len(reads) == 1, f"the alert file was read {len(reads)} times: {reads}"
+    assert isinstance(got["write"], dict), got["write"]
+    assert _signed_writes(signer) == [["ticket", "rw", TICKET_1471]], _signed_grants(signer)
+
+
+def _rewrite_every_ticket_file(folder: Path) -> list[Path]:
+    """What any file the job container can write may say: every regular file under `folder` (the tenant's folder, the
+    container's read-write bind) whose bytes hold `TICKET_1471` is rewritten, making it writable first, to name
+    `OTHER_TICKET_1471`. Returns the files rewritten."""
+    rewritten: list[Path] = []
+    for path in sorted(folder.rglob("*")):
+        if path.is_symlink() or not path.is_file():
+            continue
+        try:
+            raw = path.read_bytes()
+        except PermissionError:
+            os.chmod(path, 0o644)
+            raw = path.read_bytes()
+        if TICKET_1471.encode() not in raw:
+            continue
+        os.chmod(path.parent, path.parent.stat().st_mode | 0o300)
+        os.chmod(path, path.stat().st_mode | 0o200)
+        path.write_bytes(raw.replace(TICKET_1471.encode(), OTHER_TICKET_1471.encode()))
+        rewritten.append(path)
+    return rewritten
+
+
+@pytest.mark.parametrize("gap", ["after-the-run-folder-is-written", "before-the-write-pass-ask"])
+def test_1471_p5_whatever_a_file_the_job_can_write_says_after_admission_the_write_pass_names_the_admitted_ticket(
+        tmp_path, monkeypatch, migrated_database, gap):
+    """Every file under the tenant folder that names the ticket is rewritten to name another, once the run folder is
+    written or just before the job asks: the signed write is `[case system, rw, <the admitted ticket>]` each time. (P-5)"""
+    from defender import run_common
+    from defender.records import RunPaths
+
+    real, seen = run_common.write_versions_record, {"rewritten": [], "run_dir": None}
+
+    def then_real(run_dir, *args, **kwargs):
+        seen["run_dir"] = Path(run_dir)
+        if gap == "after-the-run-folder-is-written":
+            seen["rewritten"] = _rewrite_every_ticket_file(tenant_folder)
+        return real(run_dir, *args, **kwargs)
+
+    with _ticket_scene(tmp_path, monkeypatch, migrated_database) as s:
+        tenant_folder = s.root / s.tenant
+        inv, argv, _link = _flagged_investigation(s, flagged=True)
+        monkeypatch.setattr(run_common, "write_versions_record", then_real)  # lint-monkeypatch: ok — the gap between the run folder's writes and the job's start has no seam
+        got, signer = _ask_both(s, inv, argv, before_write=None if gap == "after-the-run-folder-is-written" else
+                                lambda: seen.update(rewritten=_rewrite_every_ticket_file(tenant_folder)))
+
+    assert seen["run_dir"] is not None, "premise: the helper wrote the run's versions record"
+    assert seen["rewritten"], f"nothing was rewritten at the gap {gap}"
+    assert RunPaths(seen["run_dir"]).alert_record in seen["rewritten"], (
+        "the run's alert record was not among the files rewritten", [str(p) for p in seen["rewritten"]])
     assert isinstance(got["write"], dict), got["write"]
     assert _signed_writes(signer) == [["ticket", "rw", TICKET_1471]], _signed_grants(signer)
 

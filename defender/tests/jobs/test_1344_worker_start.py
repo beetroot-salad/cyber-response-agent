@@ -10,6 +10,7 @@ import asyncio
 import datetime as dt
 import json
 import os
+import random
 import re
 import shutil
 import stat
@@ -131,6 +132,28 @@ _ORIGIN_MUTATIONS = {
 _ORIGIN_SPELLINGS = sorted({m(b) for b in _ORIGIN_BASES for m in _ORIGIN_MUTATIONS.values()} | {""}, key=repr)
 
 
+def _origin_start_accepted(source: Path, root: Path, value: str) -> bool:
+    """Three outcomes: exit 2 naming the setting = refused (False); the code copy made, which only a start that passed
+    its settings does = started (True); neither before the deadline, or any other exit = an error, never a refusal."""
+    proc = W.start(source, W.worker_env(root, extra={"DEFENDER_API_FRONTEND_ORIGIN": value}))
+    deadline = time.monotonic() + 180
+    try:
+        while True:
+            if proc.poll() is not None:
+                err = W.stderr_of(proc)
+                assert "No module named" not in err, f"the worker cannot be started: {err[-300:]}"
+                if proc.returncode == 2 and "DEFENDER_API_FRONTEND_ORIGIN" in err:
+                    return False
+                raise AssertionError(f"origin {value!r}: the worker ended {proc.returncode}, neither refusing it nor serving: {err[-600:]}")
+            if W.code_copies(root):
+                return True
+            if time.monotonic() > deadline:
+                raise AssertionError(f"origin {value!r}: the worker neither refused nor started within the deadline (a slow host, not a refusal)")
+            time.sleep(0.05)
+    finally:
+        W.kill_group(proc)
+
+
 def test_1471_w9_c6_the_worker_start_and_constructor_accept_exactly_the_origins_the_api_settings_reader_accepts(source, data_root, tmp_path):
     """For each spelling of an origin, the worker's start and `Worker(frontend_origin=)` refuse it exactly when the
     API's `DEFENDER_API_FRONTEND_ORIGIN` reader does, `""` included. (W3, W9, C-6)"""
@@ -162,10 +185,7 @@ def test_1471_w9_c6_the_worker_start_and_constructor_accept_exactly_the_origins_
         n, value = numbered
         root = data_root / f"w{n}"
         root.mkdir()
-        ran = W.run_for(source, W.worker_env(root, extra={"DEFENDER_API_FRONTEND_ORIGIN": value}), within=8)
-        refused = ran.returncode == 2 and "DEFENDER_API_FRONTEND_ORIGIN" in ran.stderr
-        assert "No module named" not in ran.stderr, f"the worker cannot be started: {ran.stderr[-300:]}"
-        return not refused
+        return _origin_start_accepted(source, root, value)
 
     spellings = _ORIGIN_SPELLINGS
     oracle = {v: api_accepts(v) for v in spellings}
@@ -210,6 +230,55 @@ def test_o15_invalid_slot_settings_refuse_before_serving_and_before_the_copy(sou
 
 
 # --- serving: a database ----------------------------------------------------------------------------------------
+
+
+def _accepted_origins() -> list[str]:
+    """Seeded origins the API's reader accepts, each on a random host label no default could equal: http and https, an
+    explicit non-default port, a multi-label host, an IPv6 literal. Every one is checked against the reader itself."""
+    from defender._url import check_origin
+
+    rng = random.Random(1471)
+    label = lambda: "".join(rng.choices("abcdefghijklmnopqrstuvwxyz0123456789", k=12))  # noqa: E731
+    found = [f"https://{label()}.example.test", f"http://{label()}.test:{rng.randrange(1025, 65000)}",
+             f"https://{label()}-{label()}.a.b.test:{rng.randrange(1025, 65000)}", f"http://[2001:db8::{rng.randrange(1, 9999):x}]:8080"]
+    assert [check_origin(o) for o in found] == found, "premise: the reader accepts every generated origin"
+    assert len({o.split("//", 1)[1] for o in found}) == 4
+    return found
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("origin", _accepted_origins(), ids=["https", "http-port", "https-multi-label-port", "ipv6-port"])
+def test_1471_w9_the_origin_the_worker_is_started_with_reaches_a_flagged_jobs_ticket_link(source, data_root, db, origin):
+    """The helper the real worker starts for a flagged row gets `--ticket-link <origin>/t/<tenant>/investigations/<id>`, the
+    origin being the one `DEFENDER_API_FRONTEND_ORIGIN` named, as the API's reader accepts it. (W3, W9)"""
+    from defender._url import check_origin
+
+    assert origin != W.FRONTEND_ORIGIN, "premise: no default equals it"
+    assert "defender.test" not in origin
+    assert "localhost" not in origin
+    (data_root / T1 / "runs").mkdir(parents=True, exist_ok=True)
+    keyed = (b'{"rule": {"id": "r-1344", "description": "sketch"},\n'
+             b' "alert_id": "SEC-1471", "alert_timestamp": "2026-10-29T00:00:00Z"}\n')
+
+    async def queue() -> str:
+        store = _live_store(db)
+        try:
+            alert = await an_alert(store, T1, ticket="SEC-1471", raw=keyed)
+            inv, _ = await store.create_investigation(T1, alert.alert_id, "k-flagged", actor="u-1", update_ticket=True)
+            return inv.investigation_id
+        finally:
+            await store.close()
+
+    investigation = asyncio.run(queue())
+    watch = W.ChildWatch()
+    with W.serving(source, W.worker_env(data_root, dsn=db, extra={"DEFENDER_API_FRONTEND_ORIGIN": origin}),
+                   ready=lambda: bool(W.code_copies(data_root)), watch=watch):
+        children = watch.wait_for(lambda seen: _child_of(seen, "investigation", investigation) is not None,
+                                  timeout=120, what="the investigation helper")
+    helper = _child_of(children, "investigation", investigation)
+
+    assert "--post-ticket" in helper["argv"], f"premise: the flagged row's helper carries the flag: {helper['argv']}"
+    assert _values_of(helper["argv"], "--ticket-link") == [f"{check_origin(origin)}/t/{T1}/investigations/{investigation}"], helper["argv"]
 
 
 def _live_store(dsn: str):
