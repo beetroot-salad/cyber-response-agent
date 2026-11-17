@@ -44,6 +44,46 @@ def api_calls(requests: list[Any], origin: str) -> list[tuple[str, str]]:
             if r.url.startswith(origin) and path_is(r.url, "/api") and not path_is(r.url, "/api/auth")]
 
 
+def _page_of(request: Any) -> int | None:
+    """`id` of the page `request` was made from; None when its frame is gone."""
+    try:
+        return id(request.frame.page)
+    except Exception:  # noqa: BLE001 — a request whose frame is gone belongs to no load we can name
+        return None
+
+
+def _is_main_frame_navigation(request: Any) -> bool:
+    try:
+        return bool(request.is_navigation_request()) and request.frame.parent_frame is None
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def repeated_api_gets(requests: list[Any]) -> list[str]:
+    """`GET url` of each `/api/*` fetch a page's load sent twice. A load ends at a main-frame navigation request (any
+    hop: the test's, the shell's, sign-in's) or at a `restore_from_cache` call (the context's `RequestLog` holds it)."""
+    restores = set(getattr(requests, "restores", ()))
+    seen: dict[int | None, set[str]] = {}
+    repeats: list[str] = []
+    for index, request in enumerate(requests):
+        if index in restores:
+            seen.clear()
+        if _is_main_frame_navigation(request):
+            seen.pop(_page_of(request), None)
+            continue
+        if request.method == "GET" and request.resource_type in ("fetch", "xhr") and path_is(request.url, "/api"):
+            urls = seen.setdefault(_page_of(request), set())
+            if request.url in urls:
+                repeats.append(f"GET {request.url}")
+            urls.add(request.url)
+    return repeats
+
+
+def assert_no_repeat(requests: list[Any]) -> None:
+    """Within one load, no `GET` fetch to `/api/*` repeats a URL (Am-5 point 5), over every load the requests hold."""
+    assert repeated_api_gets(requests) == [], "a load sent the same API read twice"
+
+
 def auth_calls(requests: list[Any], origin: str, path: str) -> list[tuple[str, str]]:
     """(method, path) of every request to `origin` + `path` (an `/api/auth/...` route, e.g. `/api/auth/logout`), in
     order. `api_calls` leaves these routes out, so a logout POST is seen only here."""

@@ -8,7 +8,16 @@ from typing import Any
 
 import pytest
 
-from defender.tests.frontend._flow1161 import api_calls, logins, screen, settle, shown, sign_in, where
+from defender.tests.frontend._flow1161 import (
+    api_calls,
+    logins,
+    repeated_api_gets,
+    screen,
+    settle,
+    shown,
+    sign_in,
+    where,
+)
 from defender.tests.frontend.conftest import guard_csp
 from defender.tests.support.api._server1083 import A, BOB
 from defender.tests.support.frontend import _shapes1161 as S
@@ -147,3 +156,32 @@ def test_1540_f4_a_member_of_a_non_returnable_shape_shows_its_screen_with_no_api
         assert [r.url for r in requests[mark:] if path_is(r.url, "/api") and r.url.startswith(world.origin)] == [], value
         assert logins(requests[mark:], world.origin) == [], value
         page.close()
+
+
+# --- #1540 Am-5: no load repeats an API read, whatever the page or the network does -------------------------------------
+
+#: Dispatched on `window`, where the data layer would listen: the tab coming back to the front, the network dropping and
+#: returning. Synthetic, because the pinned headless Chromium has one always-visible tab (C44's limit applies here too).
+_VISIBLE = "window.dispatchEvent(new Event('visibilitychange'))"
+_RECONNECT = "window.dispatchEvent(new Event('offline')); window.dispatchEvent(new Event('online'))"
+
+
+@pytest.mark.parametrize("stimulus", ["visible", "reconnect", "server-error"])
+def test_1540_am5_a_loaded_investigation_screen_sends_no_api_get_twice_whatever_the_page_or_network_does(
+        world, context, requests, stimulus):
+    """After the screen is up, the tab turning visible, the network dropping and returning, or a 500 left a second to
+    retry: no GET to `/api/*` repeats within the load, and the read was sent. (Am-5 point 5)"""
+    read = f"/api/tenants/{A}/investigations/{world.investigation}"
+    sign_in(world, context)
+    if stimulus == "server-error":
+        context.route(lambda u: path_is(u, read), lambda route: route.fulfill(status=500, body="x"))
+    mark = len(requests)
+    page = _open(world, context, world.screen())
+    screen(page, "investigation")
+    page.locator(f'[data-screen="investigation"][data-state="{"error" if stimulus == "server-error" else "ready"}"]').wait_for()
+    if stimulus != "server-error":
+        page.evaluate(_VISIBLE if stimulus == "visible" else _RECONNECT)
+    settle(page, 2000)
+    assert [c for c in api_calls(requests[mark:], world.origin) if c == ("GET", read)] == [("GET", read)], \
+        "positive control: the screen's read was sent, once"
+    assert repeated_api_gets(requests) == []

@@ -16,6 +16,7 @@ from typing import Any
 import httpx
 import pytest
 
+from defender.tests.frontend._flow1161 import assert_no_repeat
 from defender.tests.support.api._server1083 import (
     A,
     ANN,
@@ -55,6 +56,11 @@ class GuardedContext:
         self.closed = False
         context.expose_binding(_CSP_BINDING, lambda source, message: self.violations.append(str(message)))
         context.add_init_script(_CSP_LISTENER)
+
+    @property
+    def playwright_context(self) -> Any:
+        """The real context: what `page.context` returns for its pages."""
+        return self._context
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._context, name)
@@ -162,9 +168,12 @@ def context(browser: GuardedBrowser) -> Iterator[GuardedContext]:
 
 
 @pytest.fixture
-def requests(context: Any) -> list[Any]:
-    """Every request `context` makes, in order."""
-    return record_requests(context)
+def requests(context: Any) -> Iterator[list[Any]]:
+    """Every request `context` makes, in order. When the test ends, no load of it sent the same `GET` to `/api/*` twice
+    (Am-5: each read is sent once per load)."""
+    log = record_requests(context)
+    yield log
+    assert_no_repeat(log)
 
 
 @pytest.fixture

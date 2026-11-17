@@ -2,7 +2,8 @@
 to `DEFENDER_INGRESS_API_UPSTREAM` (host:port), started for real in a built copy of the frontend, never the checkout,
 against a stand-in API that answers every path with a JSON echo.
 
-Not a browser module: no Playwright and no async here, though the directory's conftest module-scopes Playwright.
+Two browser cases (Am-5: the dev build's doubled effects) drive the pinned Chromium at the dev server; there is no async
+here, so the directory's module-scoped Playwright is safe.
 Port 8000 is fixed by the design: a listener already there is a failure naming it (never a skip), and runs of this module
 in other xdist workers wait for a file lock, so only one dev server exists at a time."""
 from __future__ import annotations
@@ -27,7 +28,9 @@ from pathlib import Path
 import httpx
 import pytest
 
+from defender.tests.frontend._flow1161 import HOME, api_calls, await_aborted, repeated_api_gets, settle
 from defender.tests.support.frontend import _ingress1161 as harness
+from defender.tests.support.frontend._browser1161 import abort_login_navigation, path_is, record_requests
 
 ORIGIN = "http://localhost:8000"
 START_TIMEOUT = 90.0
@@ -205,3 +208,59 @@ def test_1540_f7_an_edit_to_a_source_module_the_app_loads_is_served_without_rest
             time.sleep(0.3)
     finally:
         source.write_text(original, encoding="utf-8")
+
+
+#: Counts the page's writes to its tab storage (any key), as `window.__storageWrites`, from before the app's first script.
+_COUNT_STORAGE_WRITES = """
+    window.__storageWrites = 0;
+    const setItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key, value) {
+        if (this === window.sessionStorage) window.__storageWrites += 1;
+        return setItem.call(this, key, value);
+    };
+"""
+
+
+def test_1540_am5_the_dev_loop_signs_a_signed_out_home_in_once_with_one_attempt_record(dev: Dev, browser):
+    """Through `bun run dev` (the development build, StrictMode on), a signed-out `/home` (`/api/me` answers 401) makes
+    exactly one navigation to sign-in, with `return=/home`, and writes its attempt record once: the doubled effects and
+    renders of the development build reach none of B1. (Am-5 §1; "`bun run dev` (StrictMode active)")"""
+    context = browser.new_context()
+    context.set_default_timeout(30_000)
+    seen: list[object] = []
+    context.on("request", lambda r: seen.append(r))
+    context.route(lambda u: path_is(u, "/api/me"), lambda route: route.fulfill(status=401, body="{}"))
+    aborted = abort_login_navigation(context)
+    context.add_init_script(_COUNT_STORAGE_WRITES)
+    page = context.new_page()
+    page.goto(f"{ORIGIN}/{HOME}")
+    await_aborted(page, aborted)
+    settle(page, 1500)
+    assert len(aborted) == 1, aborted
+    assert urllib.parse.parse_qs(urllib.parse.urlsplit(aborted[0]).query).get("return") == ["/home"], aborted
+    assert page.evaluate("window.__storageWrites") == 1
+    assert page.evaluate("sessionStorage.length") == 1
+    assert api_calls(seen, ORIGIN) == [("GET", "/api/me")]
+
+
+_ME = {"kind": "person", "user": {"id": "6f1c1e3c-55a4-4a4e-9a51-000000000001", "email": "ann@example.test", "display_name": "Ann"},
+       "tenants": [], "administrator": False, "invitations": []}
+_TENANT, _INVESTIGATION = "6f1c1e3c-55a4-4a4e-9a51-000000000002", "6f1c1e3c-55a4-4a4e-9a51-000000000003"
+
+
+def test_1540_am5_the_dev_loop_sends_a_signed_in_investigations_read_once(dev: Dev, browser):
+    """Through `bun run dev`, signed in (`/api/me` and the read answered by routes), the investigation screen's read is
+    sent once, and no `/api` GET repeats in the load. (Am-5 point 5: the development build's doubled effects)"""
+    read = f"/api/tenants/{_TENANT}/investigations/{_INVESTIGATION}"
+    context = browser.new_context()
+    context.set_default_timeout(30_000)
+    seen = record_requests(context)
+    context.route(lambda u: path_is(u, "/api/me"), lambda route: route.fulfill(status=200, json=_ME))
+    context.route(lambda u: path_is(u, read),
+                  lambda route: route.fulfill(status=200, json={"status": "completed", "disposition": "malicious"}))
+    page = context.new_page()
+    page.goto(f"{ORIGIN}/t/{_TENANT}/investigations/{_INVESTIGATION}")
+    page.locator('[data-field="status"]').wait_for()
+    settle(page, 1500)
+    assert [c for c in api_calls(seen, ORIGIN) if c == ("GET", read)] == [("GET", read)]
+    assert repeated_api_gets(seen) == []

@@ -359,18 +359,18 @@ def test_1161_b1_a_session_that_never_arrives_stays_session_lost_after_a_retry_a
 
 
 def test_1161_b1_a_restore_from_the_cache_counts_as_a_load_when_signed_in(world, context, requests):
-    """Each `persisted` pageshow, the second and third too, asks `/api/me` again. (B1)"""
+    """Each `persisted` pageshow, the second and third too, is a load of its own: `/api/me` and the investigation read
+    are each sent once, by that load. (B1, Am-5 §1: the restored load draws with an empty cache)"""
     sign_in(world, context)
     page = context.new_page()
     page.goto(f"{world.origin}{world.screen()}")
     screen(page, "investigation")
     settle(page)
-    before = [c for c in api_calls(requests, world.origin) if c == ("GET", "/api/me")]
-    for restores in (1, 2, 3):  # every persisted pageshow is a load, not only the first
+    for _ in range(3):  # every persisted pageshow is a load, not only the first
+        mark = len(requests)
         restore_from_cache(page)
-        page.wait_for_timeout(1000)
-        after = [c for c in api_calls(requests, world.origin) if c == ("GET", "/api/me")]
-        assert len(after) == len(before) + restores
+        settle(page, 1000)
+        assert api_calls(requests[mark:], world.origin) == [("GET", "/api/me"), ("GET", _read_path(world))]
 
 
 @pytest.mark.parametrize("path", ["/no/such/screen", "/t/x/investigations/y", "/sign-in-failedx"])
@@ -556,3 +556,122 @@ def test_1540_f3_a_me_that_is_not_the_person_shape_is_the_error_state_and_starts
     settle(page)
     assert logins(requests[mark:], world.origin) == []
     assert page.locator(f'[data-screen="{HOME}"]').count() == 0
+
+
+# --- #1540 Am-5: one owner per load, one 401 policy, one error state ----------------------------------------------------
+
+def _login_return(url: str) -> str | None:
+    """The `return` of a navigation to `/api/auth/login` (None when absent)."""
+    return dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(url).query)).get("return")
+
+
+def test_1540_am5_a_restore_after_a_later_401_left_the_document_is_a_load_that_may_sign_in_again(world, context, requests):
+    """The read's 401 starts sign-in (aborted: the document stays with its record); a `persisted` pageshow is a new
+    load that asks `/api/me` and the read again, and that read's 401 starts one more sign-in. (Am-5 §1, B1.3)"""
+    target = world.screen()
+    read = _read_path(world)
+    sign_in(world, context)
+    context.route(lambda u: urllib.parse.urlsplit(u).path == read, lambda route: route.fulfill(status=401, body="{}"))
+    aborted = abort_login_navigation(context)
+    page = context.new_page()
+    page.goto(f"{world.origin}{target}")
+    await_aborted(page, aborted)
+    settle(page)
+    assert len(aborted) == 1, "positive control: the later 401 started one sign-in"
+    assert page.evaluate("sessionStorage.length") > 0, "positive control: it wrote its attempt record"
+    mark = len(requests)
+    restore_from_cache(page)
+    settle(page, 1500)
+    assert api_calls(requests[mark:], world.origin) == [("GET", "/api/me"), ("GET", read)]
+    assert len(aborted) == 2, aborted
+    assert _login_return(aborted[1]) == target
+
+
+#: How the tab's storage fails: the accessor throws (neither read nor write works), only `setItem` throws (the attempt
+#: record cannot be written), only `getItem` throws (it cannot be read, writes work).
+WRITE_FAILS = "Storage.prototype.setItem = function () { throw new DOMException('full', 'QuotaExceededError'); };"
+READ_FAILS = "Storage.prototype.getItem = function () { throw new DOMException('denied', 'SecurityError'); };"
+STORAGE_FAILURES = {"neither": NO_STORAGE, "write-fails": WRITE_FAILS}
+
+
+def test_1540_am5_a_signed_out_load_whose_attempt_record_cannot_be_written_shows_storage_unavailable_and_starts_no_sign_in(
+        world, context, requests):
+    """Only the write fails (the record can be read): the sign-in is not started, `storage-unavailable` with `return`.
+    Neither-works is `test_1161_b1_storage_unavailable_...`. (B1.3)"""
+    target = world.screen()
+    context.add_init_script(WRITE_FAILS)
+    page = context.new_page()
+    page.goto(f"{world.origin}{target}")
+    screen(page, FAILED)
+    assert reason(page) == "storage-unavailable"
+    assert where(page) == ("/sign-in-failed", {"reason": "storage-unavailable", "return": target})
+    settle(page)
+    assert logins(requests, world.origin) == []
+
+
+@pytest.mark.parametrize("failure", ["neither", "write-fails", "read-fails"])
+def test_1540_am5_a_later_401_on_a_signed_in_screen_whose_storage_fails_shows_storage_unavailable_and_starts_no_sign_in(
+        world, context, requests, failure):
+    """Signed in, the screen's read answers 401 in a load whose storage fails (neither works; the write fails; the
+    record cannot be read though writes work): `storage-unavailable` with `return`, no login. (B1.3, Am-5 §6(b))"""
+    target = world.screen()
+    read = _read_path(world)
+    sign_in(world, context)
+    context.add_init_script({**STORAGE_FAILURES, "read-fails": READ_FAILS}[failure])
+    context.route(lambda u: urllib.parse.urlsplit(u).path == read, lambda route: route.fulfill(status=401, body="{}"))
+    mark = len(requests)
+    page = context.new_page()
+    page.goto(f"{world.origin}{target}")
+    screen(page, FAILED)
+    assert reason(page) == "storage-unavailable"
+    assert where(page) == ("/sign-in-failed", {"reason": "storage-unavailable", "return": target})
+    settle(page)
+    assert ("GET", read) in api_calls(requests[mark:], world.origin), "positive control: the read was asked and answered 401"
+    assert logins(requests[mark:], world.origin) == []
+
+
+# --- #1540 Am-5 §6(a): every uncaught error or unhandled rejection in the document is the error state ---------------------
+
+#: Records, from before the app's first script, which of the two page-wide events reached the page: a positive control that
+#: the injected failure arrived where the shell's listeners are, so a missing error state is the shell's.
+_SEEN_EVENTS = """
+    window.__seenEvents = [];
+    window.addEventListener('error', () => window.__seenEvents.push('error'));
+    window.addEventListener('unhandledrejection', () => window.__seenEvents.push('unhandledrejection'));
+"""
+_STRAYS = {
+    "timer-throw": "setTimeout(() => { throw new Error('stray timer'); }, 0)",
+    "stray-rejection": "void Promise.reject(new Error('stray rejection'))",
+}
+
+
+@pytest.mark.parametrize("stray", sorted(_STRAYS))
+def test_1540_am5_a_stray_error_or_rejection_on_a_signed_in_home_shows_the_error_state_and_starts_no_sign_in(
+        world, context, requests, stray):
+    """A timer's throw, or an unhandled rejection, in a loaded signed-in `/home`: `data-screen=error`, no login. (Am-5 §6(a))"""
+    sign_in(world, context)
+    context.add_init_script(_SEEN_EVENTS)
+    mark = len(requests)
+    page = context.new_page()
+    page.goto(f"{world.origin}/home")
+    page.locator(EMAIL).wait_for()
+    page.evaluate(_STRAYS[stray])
+    until(page, f"window.__seenEvents.includes('{'error' if stray == 'timer-throw' else 'unhandledrejection'}')")
+    screen(page, ERROR)
+    settle(page)
+    assert logins(requests[mark:], world.origin) == []
+
+
+def test_1540_am5_a_stray_error_while_the_document_is_leaving_for_sign_in_shows_no_error_state(world, context, requests):
+    """Signed out `/home`, the sign-in navigation aborted so the load is leaving and the document stays: a timer's throw
+    shows no `data-screen=error`. (Am-5 §6(a): except while the load is leaving)"""
+    aborted = abort_login_navigation(context)
+    context.add_init_script(_SEEN_EVENTS)
+    page = context.new_page()
+    page.goto(f"{world.origin}/home")
+    await_aborted(page, aborted)
+    page.evaluate(_STRAYS["timer-throw"])
+    until(page, "window.__seenEvents.includes('error')")
+    settle(page, 1000)
+    assert page.locator(f'[data-screen="{ERROR}"]').count() == 0
+    assert len(aborted) == 1
