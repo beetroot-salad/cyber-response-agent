@@ -6,8 +6,8 @@ import re
 from pathlib import Path
 from typing import NamedTuple
 
-from defender.records.formats import ReportRead
-from defender._vocab import CEILING_DISPOSITION, HOST_ONLY_DISPOSITION, normalized_disposition
+from defender.records import closing as closing_record
+from defender._vocab import CEILING_DISPOSITION, HOST_ONLY_DISPOSITION, UNKNOWN_DISPOSITION, normalized_disposition
 from defender.records import RUN_LAYOUT
 from defender.learning import lead_repository
 from defender.presentation.visualize_data import (
@@ -488,14 +488,15 @@ def _review_cost_html(costs: dict[str, float] | None) -> str:
 
 
 def render_review_gate(
-    run_dir: Path, report: ReportRead, costs: dict[str, float] | None = None,
+    run_dir: Path, closing: closing_record.Lookup, costs: dict[str, float] | None = None,
 ) -> tuple[str, int]:
     """§ Review gate — the write-time review every close but the host's own `unresolved`
     passes.
 
     Rendered as a gate, not a phase: it has no `##` header, the investigator is never in it,
     and it stays out of `visualize_data`'s phase machinery so no cost bar, wall bar or
-    transcript group implies otherwise. Its unit is the close attempt. `costs` (per lens, from
+    transcript group implies otherwise. Its unit is the close attempt. `closing` is the run's
+    closing-record lookup (#1534): what the close committed. `costs` (per lens, from
     `visualize_messages.review_cost_by_lens`) is shown here for the same reason."""
     subtitle = "— the write-time gate on a close (not a phase)"
     records = _review_records(run_dir)
@@ -506,10 +507,10 @@ def render_review_gate(
         )
         return (section("sec-review", "review", "Review gate", subtitle, body), 0)
 
-    fm = report.frontmatter
-    outcome = str(fm.get("outcome", "—"))
-    cause = str(fm.get("cause", ""))
-    failure_kind = fm.get("failure_kind")
+    record = closing.record if isinstance(closing, closing_record.Record) else None
+    outcome = record.outcome if record is not None else "—"
+    cause = closing_record.CAUSE_SENTENCES[record.cause] if record is not None else ""
+    failure_kind = record.failure_kind if record is not None else None
 
     # A bypassed close shows "nothing was reviewed", not a review that found nothing;
     # `_was_reviewed` reads that off the record.
@@ -523,7 +524,7 @@ def render_review_gate(
         return (section("sec-review", "review", "Review gate", subtitle, body), 0)
     traces = _read_role_traces(run_dir)
 
-    committed = report.disposition_or_unknown
+    committed = record.disposition if record is not None else UNKNOWN_DISPOSITION
     kind_html = (
         f'<span class="rv-badge rv-fault">failure_kind: {esc(str(failure_kind))}</span>'
         if failure_kind

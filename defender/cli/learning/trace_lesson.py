@@ -54,10 +54,10 @@ from defender.knowledge import iter_lessons
 from defender.hooks.record_lesson_load import EVIDENCE_READ, exposures
 from defender._io import read_jsonl_rows, read_text_soft, use_utf8_stdio
 from defender._frontmatter import parse_frontmatter_or_none
-from defender.records.formats import UNKNOWN_DISPOSITION, read_report
+from defender.records.formats import UNKNOWN_DISPOSITION
 from defender.knowledge import KnowledgePaths
 from defender._text import one_line
-from defender.records import Run, RunPaths
+from defender.records import Run, RunPaths, closing
 from defender.records.formats import TenantRefused
 
 if TYPE_CHECKING:
@@ -105,22 +105,19 @@ class CaseHit:
 
 
 @functools.cache
-def _report_disposition(run_dir: Path) -> str:
-    """This case's disposition for the trace table, or the unknown placeholder — read from the
-    report of the run folder it is handed (an opened run's `run.run_dir`).
-
-    Degrades rather than raises, so one bad report costs only its row. Warns when a present
-    report has no readable headline; a report never written (an in-progress run) is silent.
-    """
-    report = RunPaths(run_dir).report
-    if not report.is_file():
-        return UNKNOWN_DISPOSITION
-    read = read_report(report)
-    if read.reason is not None:
-        # Flattened: the reason can quote model-authored bytes, which could forge rows.
-        print(f"warn: {one_line(run_dir.name)}/{one_line(read.reason)} — disposition unknown",
-              file=sys.stderr)
-    return read.disposition_or_unknown
+def _closing_disposition(run: Run) -> str:
+    """This case's disposition cell for the trace table, from the run's closing record (#1534):
+    its disposition; the unknown placeholder for a run that never closed (an in-progress run
+    included); for a record that could not be looked up, the fault's fixed wording, so the row
+    reads as a fault and never as a disposition or as unknown (OD10). The lookup logs the
+    fault's detail; nothing here prints it. One bad record costs only its row. Cached per handle:
+    `--all` asks once per lesson."""
+    found = closing.for_run(run)
+    if isinstance(found, closing.Record):
+        return found.record.disposition
+    if isinstance(found, closing.CouldNotLook):
+        return found.wording
+    return UNKNOWN_DISPOSITION
 
 
 def tenant_runs(tenant: Tenant) -> list[Run]:
@@ -141,7 +138,7 @@ def in_context_cases(
 
 def _run_hits(lesson_name: str, created_at: datetime | None, run: Run) -> list[CaseHit]:
     """One run's exposures to `lesson_name` since `created_at`, read through the run's own
-    `lessons_loaded` record, then the report of its folder for the disposition."""
+    `lessons_loaded` record, then its closing record for the disposition."""
     if formats.read_record(run.facts.alert_record.path) is None:
         return []
     loaded = Path(run.observability.lessons_loaded.path)
@@ -153,7 +150,7 @@ def _run_hits(lesson_name: str, created_at: datetime | None, run: Run) -> list[C
     disposition = None
     for exposure in exposures(mine, since=created_at).lessons:
         if disposition is None:
-            disposition = _report_disposition(run.run_dir)
+            disposition = _closing_disposition(run)
         hits.append(CaseHit(str(run.id), disposition, str(exposure.evidence_at),
                             exposure.evidence))
     return hits

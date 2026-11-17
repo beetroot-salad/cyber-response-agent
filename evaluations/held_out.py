@@ -29,9 +29,9 @@ dir. A case with no counting row, or whose newest says ``stale``, is listed with
 out of the accuracy, and makes the report incomplete and the exit non-zero. A case with a missing
 freeze, or a value canonical JSON cannot carry, refuses the set. A case whose newest counting
 row names a run that is absent, or has no alert record, counts as **wrong** ("launched, no run
-record"), as does a run without a parseable ``report.md`` (missing, bad frontmatter, disposition
-outside the closed enum, or crashed). An F inside the runs dir is refused: that tree is the
-boxes' own.
+record"), as does a run with no closing record (it did not close) or one whose closing record could
+not be looked up, the latter's failure row carrying the fault's fixed wording (#1534). An F inside
+the runs dir is refused: that tree is the boxes' own.
 """
 from __future__ import annotations
 
@@ -116,13 +116,25 @@ class IndexRefused(Exception):  # noqa: N818 — named for its refusal, as `Tena
     message names it; the command line prints it on stderr and exits non-zero."""
 
 
+#: The failure reason of a run with no closing record (the lookup's `NeverClosed`).
+NO_CLOSING_RECORD = "no closing record: the run did not close"
+
+
+def closing_of(run_dir: Path) -> Any:
+    """The closing record of the run at `run_dir` (#1534), through the one lookup over its handle
+    under the runs dir: `closing.Record | NeverClosed | CouldNotLook`."""
+    from defender.records import closing
+
+    return closing.for_run_dir(run_dir)
+
+
 def predicted_disposition(run_dir: Path) -> str | None:
-    """This run's predicted disposition, or `None` when the report yields no usable headline.
-    Degrades rather than raising so one broken report does not stop scoring the rest.
-    """
-    from defender.records import RunPaths
-    from defender.records._report import read_report
-    return read_report(RunPaths(run_dir).report).disposition
+    """This run's predicted disposition: its closing record's, or `None` when there is none to
+    read. Degrades rather than raising so one broken run does not stop scoring the rest."""
+    from defender.records import closing
+
+    found = closing_of(run_dir)
+    return found.record.disposition if isinstance(found, closing.Record) else None
 
 
 @dataclass(frozen=True)
@@ -372,10 +384,15 @@ def _score_run(fx: HeldOutAlert, run_dir: Path, true_disp: str,
         failures.append((fx.slug, f"{NO_RUN_RECORD} ({absent})"))
         by_class[true_disp].append((fx.slug, None, "wrong"))
         return
+    from defender.records import closing
+
     pred = predicted_disposition(run_dir)
     verdict = "ok" if pred == true_disp else "wrong"
     if pred is None:
-        failures.append((fx.slug, "no parseable report.md"))  # lint-run-records: ok — an eval case's own file under the case tree, never a run record
+        # Why there is none: the fault's fixed wording only (never its detail, which may name
+        # a path), or that the run did not close.
+        found = closing_of(run_dir)
+        failures.append((fx.slug, found.wording if isinstance(found, closing.CouldNotLook) else NO_CLOSING_RECORD))
     by_class[true_disp].append((fx.slug, pred, verdict))
 
 

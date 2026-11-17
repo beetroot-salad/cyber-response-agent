@@ -3,9 +3,8 @@ from __future__ import annotations
 import re
 import logging
 
-from defender.records import formats
+from defender.records import closing, formats
 from defender._model import model
-from defender.records.formats import ReportUnreadable, require_report
 from defender.records import Run
 from defender.tenancy.case_record import CaseRecordSettings, CaseTicketError, format_template, render_context
 
@@ -30,13 +29,9 @@ AGENT_TAG_PREFIX = "[defender agent comment, run "
 #: The empty-narrative marker, rendered in the narrative segment alone.
 NO_NOTES = "(no notes)"
 
-#: A run whose report yields no parsable disposition still comments, with this fixed sentence
-#: and no narrative. Reached only via `ReportNotParsable`, i.e. `_report.read_report`'s own
-#: verdict, not a separate emptiness check.
-UNREADABLE_COMMENT_BODY = (
-    "No disposition could be recorded for this case: report.md was missing or carried no "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
-    "parsable disposition to record."
-)
+#: A run that never closed (the lookup's `NeverClosed`: no closing record) still comments, with
+#: this fixed sentence and no narrative (#1534).
+NEVER_CLOSED_COMMENT_BODY = "No disposition was recorded for this case: the investigation did not close."
 
 #: A run cut short with no verdict leaves the case open and asks a person to escalate.
 #: `{exit}` is the driver's exit class, from a closed vocabulary — never box-written text.
@@ -47,9 +42,20 @@ ESCALATION_COMMENT_BODY = (
 )
 
 
-class ReportNotParsable(CaseTicketError):
-    """`_report.read_report` found no disposition — the unreadable-report branch, never a
+class NeverClosed(CaseTicketError):
+    """The run has no closing record (`closing.NeverClosed`): the not-recorded branch, never a
     mapping or template defect."""
+
+
+class RecordUnreadable(CaseTicketError):
+    """The run's closing record could not be looked up (`closing.CouldNotLook`). The message is
+    the kind's fixed wording only (`wording`); `detail`, which may name a path, is for the log."""
+
+    def __init__(self, fault: closing.CouldNotLook) -> None:
+        super().__init__(fault.wording)
+        self.kind = fault.kind
+        self.wording = fault.wording
+        self.detail = fault.detail
 
 
 @model(frozen=True)
@@ -58,25 +64,27 @@ class CaseRecord:
     case_id: str
     signature_id: str
     disposition: str
-    #: The host's own sentence (frontmatter `cause`), always present on a close-tool report.
+    #: The sentence of the record's cause (`closing.CAUSE_SENTENCES`).
     cause: str
-    #: The report's body, verbatim — fence-stripping is applied at render time
-    #: (`case_record_to_comment`) and the wire bound when posted (`posted_comment`), never here.
+    #: The record's noted ceiling receipts and its baselines, one rendered line each
+    #: (`closing.entry_lines`); the summary is not in it (OD7). Fence-stripping is applied at
+    #: render time (`case_record_to_comment`) and the wire bound when posted (`posted_comment`).
     narrative: str
 
 
 def read_case_record(run: Run) -> CaseRecord:
-    # The bridge writes to a real ticket system off this record, so an unreadable headline must
-    # take the unreadable branch (`ReportNotParsable`) rather than the ordinary one. Re-raised
-    # from the shared accessor's own refusal, so this classification is a CONSUMER of
-    # `_report.read_report`'s verdict rather than a second, bespoke emptiness check (§7 R10).
-    try:
-        report = require_report(run.documents.report)
-    except ReportUnreadable as e:
-        raise ReportNotParsable(str(e)) from e
-    fm, body, disposition = report.frontmatter, report.body, report.disposition
+    """The run's closing record (`closing.for_run`) as the comment's fields. `NeverClosed` and
+    `RecordUnreadable` are the two branches a record that is not there takes; the bridge writes to
+    a real ticket system, so a fault is never read as an absence."""
+    found = closing.for_run(run)
+    if isinstance(found, closing.NeverClosed):
+        raise NeverClosed("the run has no closing record")
+    if isinstance(found, closing.CouldNotLook):
+        raise RecordUnreadable(found)
+    closed = found.record
     case_id = str(run.id)
-    cause = str(fm.get("cause") or "")
+    cause = closing.CAUSE_SENTENCES[closed.cause]
+    narrative = "\n".join(closing.entry_lines(closed, noted_only=True))
 
     # The signature is the run's recorded one (A1): never read off the alert again. A folder
     # with no usable record has none, and the existing fallback label stands.
@@ -86,9 +94,9 @@ def read_case_record(run: Run) -> CaseRecord:
     return CaseRecord(
         case_id=case_id,
         signature_id=signature_id,
-        disposition=disposition,
+        disposition=closed.disposition,
         cause=cause,
-        narrative=body,
+        narrative=narrative,
     )
 
 
@@ -161,11 +169,9 @@ def posted_comment(body: str, *, run_id: str) -> str:
     return _bound_wire_bytes(f"{agent_comment_tag(run_id)}\n{body}")
 
 
-def unreadable_comment_body() -> str:
-    """The unreadable-report branch's comment: a fixed host sentence in place of a rendered
-    narrative — never `(unreadable)` as an accidental literal, never the report's own (unparsable)
-    text."""
-    return UNREADABLE_COMMENT_BODY
+def never_closed_comment_body() -> str:
+    """The not-recorded branch's comment: a fixed host sentence in place of a rendered narrative."""
+    return NEVER_CLOSED_COMMENT_BODY
 
 
 def escalation_comment_body(truncated_by: str) -> str:

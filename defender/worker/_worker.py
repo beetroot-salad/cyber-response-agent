@@ -202,12 +202,13 @@ def _learning_without_end(held: Held, returncode: int, progress: LearningProgres
                            progress)
 
 
-def _ending_from(end: job_lane.JobEnd | None, disposition: Callable[[], str | None], *,
+def _ending_from(end: job_lane.JobEnd | None, record: Callable[[], Any], *,
                  helper_exit: int | None = None) -> Ending:
     """Rules 1-5 (O8, M9): the stage from the job-end record alone, and, once the host committed
-    a report and the scrub walked the tree, the report's disposition (read only then). With no
-    record, a helper that failed on its own (`helper_exit`, its status: `_helper_failure`) is the worker's error, not
-    the run's."""
+    its close and the scrub walked the tree, the disposition of the run's closing record (read only
+    then, through the job lane: `closing.Record | NeverClosed | CouldNotLook`). With no record, a
+    helper that failed on its own (`helper_exit`, its status: `_helper_failure`) is the worker's
+    error, not the run's."""
     if end is None and helper_exit is not None:
         return Ending(_FAILED, failure_reason=_WORKER_ERROR, failure_message=_helper_failed_words(helper_exit))
     if end is None:
@@ -220,9 +221,7 @@ def _ending_from(end: job_lane.JobEnd | None, disposition: Callable[[], str | No
         return Ending(_FAILED, failure_reason=_WORKER_ERROR,
                        failure_message="the run's box did not start")
     if end.report_committed and end.scrub_verified:
-        found = disposition()
-        return (Ending(_COMPLETED, disposition=found, decided_by_run=True) if found is not None
-                else Ending(_UNPARSEABLE, decided_by_run=True))
+        return _ending_of_record(record())
     if end.setup != job_facts.SETUP_DONE:
         why = "run setup crashed"
     elif not end.report_committed:
@@ -236,15 +235,36 @@ def _ending_from(end: job_lane.JobEnd | None, disposition: Callable[[], str | No
     return Ending(_FAILED, failure_reason=_NO_REPORT, failure_message=why)
 
 
-def _report_disposition_or_none(lane: job_lane.JobLane, inv: str) -> str | None:
-    """The committed report's disposition; a fault nobody planned for reads as none, so the run is
-    `unparseable` as with any unreadable disposition, never `worker_error` (#1396)."""
+def _ending_of_record(found: Any) -> Ending:
+    """A committed run's ending from its closing record: its disposition; `unparseable` with the
+    fixed wording of the fault (never its detail, which may name a path), or of a committed close
+    with no record."""
+    from defender.records import closing
+
+    if isinstance(found, closing.Record):
+        return Ending(_COMPLETED, disposition=found.record.disposition, decided_by_run=True)
+    if isinstance(found, closing.CouldNotLook):
+        return Ending(_UNPARSEABLE, failure_message=found.wording, decided_by_run=True)
+    return Ending(_UNPARSEABLE, failure_message=closing.FAULT_WORDING[closing.COMMITTED_WITHOUT_RECORD],
+                  decided_by_run=True)
+
+
+def _closing_record_or_fault(lane: job_lane.JobLane, inv: str) -> Any:
+    """The run's closing-record lookup; a fault nobody planned for reads as a store that could not
+    be read, so the run is `unparseable` as with any other fault, never `worker_error` (#1396)."""
+    from defender.records import closing
+
     try:
-        return lane.report_disposition(inv)
-    except Exception:  # noqa: BLE001 — the stage is decided by the job-end record (#1396)
-        _logger.error("investigation %s: reading its report's disposition failed; it is unparseable",
+        found = lane.closing_disposition(inv)
+    except Exception as e:  # noqa: BLE001 — the stage is decided by the job-end record (#1396)
+        _logger.error("investigation %s: reading its closing record failed; it is unparseable",
                       inv, exc_info=True)
-        return None
+        return closing.fault(closing.STORE_UNREADABLE, f"the job lane's read raised {e!r}", run_id=inv)
+    if isinstance(found, closing.CouldNotLook):
+        # The detail (it may name a path) goes to the worker's log, never the row.
+        _logger.warning("investigation %s: its closing record could not be looked up (%s): %s",
+                        inv, found.kind, found.detail)
+    return found
 
 
 async def _spawn_outcome(spawn: asyncio.Future[asyncio.subprocess.Process]) -> asyncio.subprocess.Process | None:
@@ -875,7 +895,7 @@ class Worker:
                     None, True, None)
         try:
             job_end = lane.read_job_end(inv)
-            ending = _ending_from(job_end, lambda: _report_disposition_or_none(lane, inv), helper_exit=helper_exit)
+            ending = _ending_from(job_end, lambda: _closing_record_or_fault(lane, inv), helper_exit=helper_exit)
             # #1396: the ending is decided; from here no fault turns it into `worker_error`
             cost: float | None
             exact = True

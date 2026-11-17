@@ -152,9 +152,11 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
             else:
                 body, word = _comment_body(run, truncated_by, target.template)
         except case_ticket.RecordUnreadable as e:
-            # The record could not be looked up: no call, and the kind's fixed wording (never
-            # the lookup's detail, which the lookup logged) on the receipt.
-            _leg_refused(run, key, str(e))
+            # The record could not be looked up: no call, and the kind's fixed wording on the
+            # receipt; the detail (it may name a path) only in the run's log.
+            _logger.warning(f"record {key or run_dir.name}: the closing record could not be looked up "
+                            f"({e.kind}): {e.detail}")
+            _leg_refused(run, key, e.wording)
             return
         except CaseTicketError as e:
             # The template refused: no call, but the receipt still says so.
