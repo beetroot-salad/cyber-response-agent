@@ -1,4 +1,4 @@
-"""#992 — what the committed report carries for a reviewed `inconclusive`: the ceiling receipts,
+"""#992 — what the closing record carries for a reviewed `inconclusive`: the ceiling receipts,
 their caps, and the ticket egress."""
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ import pytest
 
 from defender.skills.invlang.validate import validate_companion
 from defender.tests.storage.verdict_1534 import _close_b as B
-from defender.tests.storage.verdict_1534 import _spec1534 as V
 from defender.tests.support.runtime.engine import _spec923
 from defender.tests.support.shared.contracts import _tacit983
 from defender.tests.support.sandbox._spec791 import (  # noqa: F401 — session-scoped autouse guard
@@ -135,67 +134,9 @@ def _bound_errors(errors: list[str], bound: int, column: str = "ceiling_test") -
     return [e for e in errors if column in e and str(bound) in e]
 
 
-def _refused_at_both(tmp_path, disposition: str, companion: str, *, column: str, bound: int) -> None:
-    """`companion` is refused at the write gate and at the close, naming the column and bound, before any stage and
-    with no row written."""
-    at_write_gate = validate_companion(companion, None)
-    assert _bound_errors(at_write_gate, bound, column), at_write_gate
-    stages = recording(holds())
-    with B.opened(tmp_path, companion) as (deps, run_dir, store):
-        text = refusal(deps, disposition, stages)
-        assert column in text
-        assert str(bound) in text
-        assert stages.calls == []
-        assert V.scalar_rows(store.path, run_dir.name) == []
-
-
-@pytest.mark.parametrize("disposition", MODEL)
-@pytest.mark.parametrize("treated", [400, 401])
-def test_a_ceiling_note_is_bounded_by_its_treated_length_at_the_write_gate_and_the_close(tmp_path, disposition, treated):
-    """For every model disposition, a note whose treated text is exactly the note bound passes both gates; one more
-    character is refused before any stage, though its raw text is shorter. (V-TEXT, M3)"""
-    from defender.records import closing as C
-
-    companion = B.with_ceiling(disposition, [f"state=query-failed ref=l-002 note={B.expanding(treated)}"])
-    if treated > C.NOTE_BOUND:
-        _refused_at_both(tmp_path, disposition, companion, column="ceiling_test", bound=C.NOTE_BOUND)
-        return
-    assert validate_companion(companion, None) == []
-    with B.opened(tmp_path, companion) as (deps, run_dir, store):
-        assert close_with(deps, disposition, recording(holds())).outcome == _closing().STANDS
-        (entry,) = B.committed_record(run_dir, store).ceiling_test
-        assert entry.note == B.expanding(treated).replace("ab.cd", "ab[.]cd")
-
-
 def _rejected(count: int, note: str = "n") -> list[str]:
     """`count` distinct receipts no walker accepts (their `ref` is no lead of the document), `l-300` upward."""
     return [f"state=query-empty ref=l-{300 + i} note={note}" for i in range(count)]
-
-
-@pytest.mark.parametrize("disposition", MODEL)
-def test_ceiling_receipts_are_bounded_by_count_and_by_their_rendered_lines(tmp_path, disposition):
-    """For every model disposition, sixteen receipts pass and seventeen are refused; receipts whose lines join to exactly
-    the aggregate pass and one character more is refused; both refusals hold at the close. (V-TEXT, M3)"""
-    from defender.records import closing as C
-
-    def doc(rows):
-        return B.with_ceiling(disposition, rows)
-
-    assert validate_companion(doc(B.capability_rows(C.CEILING_COUNT_CAP, lambda _i: "n")), None) == []
-    _refused_at_both(tmp_path / "count", disposition, doc(B.capability_rows(C.CEILING_COUNT_CAP + 1, lambda _i: "n")),
-                     column="ceiling_test", bound=C.CEILING_COUNT_CAP)
-
-    count = 6
-    probes = [C.ceiling_line(C.CeilingEntry("nothing-to-try", None, f"fake-system-{i:03d}.fake-verb", "x"))
-              for i in range(count)]
-
-    def sized(extra: int) -> str:
-        sizes = B.fill_sizes(probes, C.CEILING_LINES_BOUND, extra)
-        assert max(sizes) <= C.NOTE_BOUND, "fixture control: each note fits its own bound"
-        return doc(B.capability_rows(count, lambda i: B.plain(sizes[i])))
-
-    assert validate_companion(sized(0), None) == []
-    _refused_at_both(tmp_path / "lines", disposition, sized(1), column="ceiling_test", bound=C.CEILING_LINES_BOUND)
 
 
 @pytest.mark.parametrize("disposition", MODEL)
@@ -233,29 +174,6 @@ def test_ceiling_rows_the_walkers_reject_still_count_toward_the_count_cap_and_th
 
 def _baseline_doc(*rows: str) -> str:
     return _tacit983.inconclusive_document(rows=_tacit983.consult_block(*rows))
-
-
-@pytest.mark.parametrize(("field", "bound_name", "make"), [
-    ("result", "RESULT_BOUND", lambda n: {"result": B.expanding(n)}),
-    ("reasoning", "REASONING_BOUND", lambda n: {"reasoning": B.expanding(n)}),
-    ("anchor_id", "ANCHOR_ID_BOUND", lambda n: {"anchor_id": "x" * n}),
-], ids=["result", "reasoning", "anchor_id"])
-@pytest.mark.parametrize("over", [False, True], ids=["at-the-bound", "one-past"])
-def test_a_baseline_field_is_bounded_by_its_treated_length_at_the_write_gate_and_the_close(tmp_path, field, bound_name,
-                                                                                         make, over):
-    """Each baseline text field passes at exactly its bound and is refused one character past it, at the write gate and
-    inside the close, before any stage. (V-TEXT, M3)"""
-    from defender.records import closing as C
-
-    bound = getattr(C, bound_name)
-    companion = _baseline_doc(_tacit983.consultation_row(**make(bound + int(over))))
-    if over:
-        _refused_at_both(tmp_path, GAP, companion, column=field, bound=bound)
-        return
-    assert validate_companion(companion, None) == []
-    with B.opened(tmp_path, companion) as (deps, run_dir, store):
-        assert close_with(deps, GAP, recording(holds())).outcome == _closing().STANDS
-        assert len(B.committed_record(run_dir, store).runtime_evidence) == 1
 
 
 def test_baseline_rows_the_walkers_reject_still_count_toward_the_field_bounds_and_the_aggregate():

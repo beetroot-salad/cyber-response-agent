@@ -135,3 +135,145 @@ def model_dispositions() -> list[str]:
     from defender.tests.support.runtime.engine import _spec923 as S
 
     return sorted(d for d in DISPOSITION_VALUES if d != S.MEMBER)
+
+
+# --- OD16 / M3: documents carrying every bounded field, for every model disposition -------------------------------------
+
+_ALERT_EDGE = (
+    "\n:E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]\n"
+    "e-000|attempted_auth|v-002|v-001|2026-05-05T03:42:11Z|siem-event:elastic|\n"
+)
+
+
+def _with_alert(text: str) -> str:
+    """`_spec923`'s prologue gains an alerted edge (the baseline guard needs one); the process-gap document has its own."""
+    from defender.tests.support.runtime.engine import _spec923 as S
+
+    if S.PROLOGUE not in text:
+        return text
+    vertices = S.PROLOGUE.replace("os=linux\n", "os=linux\nv-002|identity|user/known-corp|svc.alert|\n")
+    return text.replace(S.PROLOGUE, vertices[: -len("```\n")] + _ALERT_EDGE + "```\n")
+
+
+def _before_conclude(text: str, block: str) -> str:
+    at = text.rfind("```invlang\n:T conclude")
+    assert at >= 0, "fixture control: the document has a conclude fence"
+    return text[:at] + "```invlang\n" + block + "```\n" + text[at:]
+
+
+def baseline_document(disposition: str, rows: list[str], *, lead: str | None = None, ceiling: tuple[str, ...] | None = None) -> str:
+    """`_spec923.pays_every_price(disposition)` carrying `rows` as `:R consultations`; `lead`, when not `l-001`, is declared;
+    `ceiling` replaces the document's own receipt rows."""
+    from defender.tests.support.runtime.engine import _spec923 as S
+
+    text = _with_alert(S.pays_every_price(disposition) if ceiling is None else with_ceiling(disposition, ceiling))
+    if lead is not None and lead != scene.LEAD:
+        text = _before_conclude(
+            text, f":L findings [id|loop|name|target|tests|system|window]\n{lead}|1|long-lead|v-001||elastic|n/a\n")
+    return _before_conclude(text, scene.consult_block(*rows)) if rows else text
+
+
+class Case(NamedTuple):
+    """One generated document: the bound it probes, the names a refusal may call the field, the document at the bound
+    (`at`) and one over (`over`), each with the entries a close must store for it (`over` has none)."""
+
+    name: str
+    bound: int
+    names: tuple[str, ...]
+    at: Any
+    over: Any
+
+
+class Doc(NamedTuple):
+    build: Any  # disposition -> document text
+    ceiling: list[tuple]  # expected (state, ref, cap, note), host text defanged
+    baselines: list[tuple]  # expected (lead, anchor_kind, grounding_kind, anchor_id, result, reasoning)
+
+
+def _treated(text: str) -> str:
+    from defender.records import closing as C
+
+    return C.treat(text, None)
+
+
+def _one_baseline(**cells: str) -> Doc:
+    import inspect
+
+    lead = cells.pop("resolved_by", scene.LEAD)
+    row = scene.consultation_row(resolved_by=lead, **cells)
+    given = {k: v.default for k, v in inspect.signature(scene.consultation_row).parameters.items()} | cells
+    result, reasoning, anchor = given["result"], given["reasoning"], given["anchor_id"]
+    return Doc(lambda d: baseline_document(d, [row], lead=lead), [],
+               [(lead, "runtime-evidence", "telemetry-baseline", anchor, _treated(result), _treated(reasoning))])
+
+
+def _ceiling_doc(rows: tuple[str, ...], expected: list[tuple]) -> Doc:
+    return Doc(lambda d: with_ceiling(d, rows), expected, [])
+
+
+CASE_NAMES = ("note", "lead", "anchor_id", "result", "reasoning", "ceiling-count", "ceiling-aggregate",
+              "baseline-aggregate")
+
+
+def case(name: str) -> Case:
+    return next(c for c in _cases() if c.name == name)
+
+
+def _cases() -> list[Case]:
+    """Every bounded field of both entry types, the ceiling count cap and both aggregates, from the constants in `closing`."""
+    from defender.records import closing as C
+
+    def note(n: int) -> Doc:
+        text = expanding(n)
+        return _ceiling_doc(capability_rows(1, lambda _i: text),
+                            [("nothing-to-try", None, "fake-system-000.fake-verb", _treated(text))])
+
+    def token(prefix: str, n: int) -> str:
+        return prefix + "x" * (n - len(prefix))
+
+    def count(n: int) -> Doc:
+        return _ceiling_doc(capability_rows(n, lambda i: f"n{i}"),
+                            [("nothing-to-try", None, f"fake-system-{i:03d}.fake-verb", f"n{i}") for i in range(n)])
+
+    def ceiling_aggregate(extra: int) -> Doc:
+        probes = [C.ceiling_line(C.CeilingEntry("nothing-to-try", None, f"fake-system-{i:03d}.fake-verb", "x")) for i in range(6)]
+        sizes = fill_sizes(probes, C.CEILING_LINES_BOUND, extra)
+        assert max(sizes) <= C.NOTE_BOUND, "fixture control: each note fits its own bound"
+        return _ceiling_doc(capability_rows(6, lambda i: plain(sizes[i])),
+                            [("nothing-to-try", None, f"fake-system-{i:03d}.fake-verb", plain(sizes[i])) for i in range(6)])
+
+    def baseline_aggregate(extra: int) -> Doc:
+        window = ("2026-04-04T00:00:00Z", "2026-05-04T00:00:00Z")
+        ids = [f"tk-b-{i:03d}" for i in range(6)]
+        probes = [C.baseline_line(C.BaselineEntry(scene.LEAD, "runtime-evidence", "telemetry-baseline", a, *window, "x", "r"))
+                  for a in ids]
+        sizes = fill_sizes(probes, C.BASELINE_LINES_BOUND, extra)
+        assert max(sizes) <= C.RESULT_BOUND, "fixture control: each result fits its own bound"
+        rows = [scene.consultation_row(anchor_id=a, result=plain(s), reasoning="r") for a, s in zip(ids, sizes, strict=True)]
+        return Doc(lambda d: baseline_document(d, rows), [],
+                   [(scene.LEAD, "runtime-evidence", "telemetry-baseline", a, plain(s), "r") for a, s in zip(ids, sizes, strict=True)])
+
+    def lead(n: int) -> Doc:
+        return _one_baseline(resolved_by="l-" + "1" * (n - 2))
+
+    return [
+        Case("note", C.NOTE_BOUND, ("note",), note(C.NOTE_BOUND), note(C.NOTE_BOUND + 1)),
+        Case("lead", C.LEAD_BOUND, ("resolved_by", "lead"), lead(C.LEAD_BOUND), lead(C.LEAD_BOUND + 1)),
+        Case("anchor_id", C.ANCHOR_ID_BOUND, ("anchor_id",),
+             _one_baseline(anchor_id=token("tk-", C.ANCHOR_ID_BOUND)), _one_baseline(anchor_id=token("tk-", C.ANCHOR_ID_BOUND + 1))),
+        Case("result", C.RESULT_BOUND, ("result",),
+             _one_baseline(result=expanding(C.RESULT_BOUND)), _one_baseline(result=expanding(C.RESULT_BOUND + 1))),
+        Case("reasoning", C.REASONING_BOUND, ("reasoning",),
+             _one_baseline(reasoning=expanding(C.REASONING_BOUND)), _one_baseline(reasoning=expanding(C.REASONING_BOUND + 1))),
+        Case("ceiling-count", C.CEILING_COUNT_CAP, ("ceiling_test",), count(C.CEILING_COUNT_CAP), count(C.CEILING_COUNT_CAP + 1)),
+        Case("ceiling-aggregate", C.CEILING_LINES_BOUND, ("ceiling_test",), ceiling_aggregate(0), ceiling_aggregate(1)),
+        Case("baseline-aggregate", C.BASELINE_LINES_BOUND, ("runtime_evidence", "consultations"),
+             baseline_aggregate(0), baseline_aggregate(1)),
+    ]
+
+
+def refusal_names(text: str, names: tuple[str, ...], bound: int) -> bool:
+    """The text names one of the field's names and the bound's number as a whole number (not a bare 16 inside a row index)."""
+    import re
+
+    return any(n in text for n in names) and re.search(rf"(?<![\d.]){bound}(?![\d.])", text) is not None
