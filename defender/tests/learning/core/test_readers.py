@@ -24,17 +24,18 @@ def _plans() -> list[A.Plan]:
     plans = [A.Plan(f"is-{d}", disposition=d) for d in members]
     plans += [A.Plan("never-no-row", closed=False), A.Plan("never-no-pointer", fault=R.NO_POINTER)]
     plans += [A.Plan(f"fault-{k}", fault=k if k != "legacy-link" else R.LEGACY_LINK) for k in FAULTS]
+    plans.append(A.Plan("fault-store-unreadable-at-query", fault="store-unreadable", at_query=True))  # reaches the run page too
     return plans
 
 
 def _answers(tmp_path, plan, monkeypatch, capsys) -> dict[str, tuple[tuple[str, str], list[str]]]:
     def at(reader):
-        return tmp_path / f"{R.DETAIL_MARK}-{reader}-{plan.label}"
+        return tmp_path / f"{reader}-{plan.label}"
 
     out = {"ticket": A.ticket(at("ticket"), plan), "trace": A.trace(at("trace"), plan, monkeypatch, capsys),
            "held_out": A.held_out(at("held"), plan), "feedback": A.feedback(at("feedback"), plan),
            "worker": A.worker(at("worker"), plan)}
-    if plan.fault not in A.NOT_APPLICABLE["page"]:
+    if A.applies("page", plan):
         out["page"] = A.page(at("page"), plan, monkeypatch)
     return out
 
@@ -63,7 +64,7 @@ def test_every_reader_of_a_run_agrees_with_the_lookup(tmp_path, monkeypatch, cap
                 assert R.names_only(plan.fault, answer[1]), seen
             if plan.kind == A.ANSWER_FAULT:
                 assert not any(R.DETAIL_MARK in slot for slot in slots), f"the detail reached an outward slot: {seen}"
-        if plan.fault in ("database-missing", "store-unreadable"):
+        if plan.fault in ("database-missing", "store-unreadable") and not plan.at_query:
             assert R.DETAIL_MARK in caplog.text, f"the detail of {plan.fault} reached no log"
 
 

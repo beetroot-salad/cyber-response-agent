@@ -20,7 +20,9 @@ ANSWER_DISPOSITION, ANSWER_NEVER, ANSWER_FAULT, ANSWER_UNREADABLE = "disposition
 EPISODE_ONLY = ("roster-gone", "arm-refused")
 
 #: Per reader, the plantable kinds its route does not answer in its own slot, and why. The run page refuses a folder with no usable
-#: pointer, and reads the run's spend through that store before its record, so only a fault of the record's own read is the page's.
+#: pointer, and a database that will not open or is at another version fails the page's other reads first, so those kinds are not
+#: its own. `store-unreadable` as a QUERY-TIME fault (`Plan.at_query`: the file opens, the ledger reads, the record's query errors)
+#: does reach the page and is run against it (`applies`).
 NOT_APPLICABLE = {
     "page": ("no-pointer", "legacy-link", "pointer-unreadable", "store-unreadable", "schema-version"),
 }
@@ -36,6 +38,7 @@ class Plan:
     closed: bool = True
     fault: str | None = None
     invalid_as: str | None = None
+    at_query: bool = False  # `store-unreadable` by a VIEW over a missing table: the file opens and the rest of the store reads
 
     @property
     def kind(self) -> str:
@@ -51,13 +54,26 @@ class Plan:
         """The `CouldNotLook` kind a fault plan reads as."""
         return None if self.kind != ANSWER_FAULT else self.fault
 
+    @property
+    def case_id(self) -> str:
+        """The case id (so the database's file name) the plan's store gets: the only place `DETAIL_MARK` is planted."""
+        return f"{R.DETAIL_MARK}-{self.label}"
+
     def fields(self) -> dict | None:
         return R.valid_fields(self.disposition) if self.closed else None
 
 
+def applies(route: str, plan: Plan) -> bool:
+    """Does `route` answer `plan` in its own slot? (`NOT_APPLICABLE`, less the query-time fault the run page does reach.)"""
+    if plan.at_query and plan.fault == "store-unreadable":
+        return True
+    return plan.fault not in NOT_APPLICABLE.get(route, ())
+
+
 def plant(run_dir: Path, plan: Plan) -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
-    R.plant_run(run_dir, plan.fields(), fault=plan.fault, invalid_as=plan.invalid_as)
+    R.plant_run(run_dir, plan.fields(), fault=plan.fault, invalid_as=plan.invalid_as, case_id=plan.case_id,
+                  at_query=plan.at_query)
 
 
 def _run_id(plan: Plan) -> str:
@@ -98,8 +114,8 @@ def page(root: Path, plan: Plan, monkeypatch) -> tuple[tuple[str, str], list[str
 
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(root / "state"))
     root.mkdir(parents=True, exist_ok=True)
-    run = P._build_run(root, plan.fields(), record=plan.closed)
-    R.fault_run(run, plan.fault, invalid_as=plan.invalid_as)
+    run = P._build_run(root, plan.fields(), record=plan.closed, case_id=plan.case_id)
+    R.fault_run(run, plan.fault, invalid_as=plan.invalid_as, at_query=plan.at_query)
     try:
         html = P._page(run)
     except VisualizeFailed:

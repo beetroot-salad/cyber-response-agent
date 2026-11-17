@@ -81,24 +81,23 @@ def test_an_exit_class_the_table_does_not_name_takes_the_report_driven_fallback(
     assert unmapped.notes == []
 
 
-def test_a_run_with_no_exit_class_and_no_usable_report_records_that_and_proposes_nothing(
+def test_a_run_with_no_exit_class_and_no_closing_record_records_that_it_never_closed_and_proposes_nothing(
         tmp_path):
-    for name, write in (
-        ("absent", None),
-        ("no-frontmatter", "just some prose, no headline anywhere\n"),
-        ("bad-headline", S.report_text("not-a-disposition")),
-    ):
+    """A run with no record and no exit class posts the never-closed sentence and proposes nothing; a stray `report.md` changes nothing. (V-READERS)"""
+    from defender.tests.support.runtime.engine._spec767 import NEVER_CLOSED
+
+    for name, write in (("absent", None), ("stray-file-of-the-old-shape", S.report_text("malicious"))):
         run_dir = S.closed_run_dir(tmp_path / name, report=False)
         if write is not None:
             (run_dir / "report.md").write_text(write, encoding="utf-8")
         fake = S.record_ticket(run_dir, truncated_by=None)
-        assert fake.transitions == [], f"{name}: an unusable report still closed the ticket"
-        assert len(fake.records) == 1, f"{name}: an unusable report left the ticket in silence"
-        assert S.UNREADABLE_MARK in fake.records[0].text(), (
-            f"{name}: the record proposes something off a report that yields no disposition")
+        assert fake.transitions == [], f"{name}: a run with no record still closed the ticket"
+        assert len(fake.records) == 1, f"{name}: a run with no record left the ticket in silence"
+        assert NEVER_CLOSED in fake.records[0].text(), (
+            f"{name}: the record is not the never-closed sentence: {fake.records[0].text()!r}")
         for word in S.sym("_vocab", "DISPOSITION_VALUES"):
             assert word not in fake.records[0].text().lower(), (
-                f"{name}: an unreadable report's record names a disposition ({word!r})")
+                f"{name}: a run with no record names a disposition ({word!r})")
         assert (S.receipt(run_dir) or {}).get("ok") is True
 
 

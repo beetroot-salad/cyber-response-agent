@@ -49,7 +49,8 @@ _FULL_INVESTIGATION = (
     "## REPORT\n\nDisposition: malicious — confirmed pivot.\n"
 )
 
-def _seed_session_store(run: Path, messages: list[dict], closing: dict | None = None, *, record: bool = True) -> None:
+def _seed_session_store(run: Path, messages: list[dict], closing: dict | None = None, *, record: bool = True,
+                        case_id: str | None = None) -> None:
     """A real session store seeded from the same `messages` the fixture writes to the wire log, and holding the run's spend
     ledger (`_LEDGER`, beside another run's rows): the page reads its headline from the run's own store (#1377 r6 S5)."""
     from pydantic_ai.messages import ModelMessagesTypeAdapter
@@ -57,7 +58,7 @@ def _seed_session_store(run: Path, messages: list[dict], closing: dict | None = 
     from defender.records import session_store as ss
 
     # One database per call: pytest's 30-character tmp names repeat across parametrized cases, and a shared file would pool ledger rows.
-    with ss.open_store(case_id=f"visualize-runtime-fixture-{uuid.uuid4().hex}",
+    with ss.open_store(case_id=case_id or f"visualize-runtime-fixture-{uuid.uuid4().hex}",
                        sessions=SessionPaths(fixture_runs_base(run.parent))) as store:
         ss.write_case_pointer(_run_handle_1165(run), case_id=store.case_id, store_path=store.path)
         if record:  # the run's closing record, in the store its pointer names (#1534; no `report.md`)
@@ -78,7 +79,7 @@ def _seed_session_store(run: Path, messages: list[dict], closing: dict | None = 
     insert_spend(store_path, fixture_uuid("another run"), _OTHER_RUNS_LEDGER)
 
 
-def _build_run(tmp: Path, closing: dict | None = None, *, record: bool = True) -> Path:
+def _build_run(tmp: Path, closing: dict | None = None, *, record: bool = True, case_id: str | None = None) -> Path:
     """A run folder whose store holds its closing record: `a_record`'s defaults (a `malicious` close that stood, with
     `MARKUP_SUMMARY`) overridden by `closing`; `record=False` leaves the table with no row (a run that never closed)."""
     # A run id is a canonical UUID, so the folder is `fixture_uuid(<label>)`.
@@ -136,7 +137,7 @@ def _build_run(tmp: Path, closing: dict | None = None, *, record: bool = True) -
     wire = RunPaths(run).wire_log
     wire.parent.mkdir(parents=True, exist_ok=True)
     wire.write_text("".join(json.dumps(m) + "\n" for m in messages))
-    _seed_session_store(run, messages, closing, record=record)
+    _seed_session_store(run, messages, closing, record=record, case_id=case_id)
 
     queries = [
         {"lead_id": "l-001", "seq": 0, "system": "elastic", "verb": "search", "query_id": "elastic.ssh-auth",
