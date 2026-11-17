@@ -1539,14 +1539,17 @@ def _job_ticket_step(started: _Started, summary: dict[str, Any], launch: dict[st
     run = started.run
     truncated_by = summary.get("truncated_by")
     closed_before_cut = summary.get("closed_before_cut") is True
+    case = case_system.case_verdict(started.tenant, defender_dir=DEFENDER_DIR, roster=started.systems.roster)
     token: dict[str, Any] = {}
-    if _default_ticket_writer.comments_on(truncated_by, closed_before_cut) and _default_ticket_writer.ticket_key(run):
+    # a case system whose settings are faulty signs nothing: the record step then receipts the fault (X2, W5)
+    if (isinstance(case, case_system.CaseTarget) and _default_ticket_writer.comments_on(truncated_by, closed_before_cut)
+            and _default_ticket_writer.ticket_key(run)):
         token = _ask_write_pass(request, job)
     _default_ticket_writer.record_case_ticket(
         run, tenant=started.tenant, defender_dir=DEFENDER_DIR,
         env=box_mod.run_env(DEFENDER_DIR, run.run_dir, tenant_agent=started.tenant.agent),
         truncated_by=truncated_by, closed_before_cut=closed_before_cut,
-        case=case_system.case_verdict(started.tenant, defender_dir=DEFENDER_DIR, roster=started.systems.roster),
+        case=case,
         link=str(launch.get("ticket_link") or ""), **token)
 
 
