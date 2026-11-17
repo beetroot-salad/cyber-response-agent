@@ -572,7 +572,7 @@ def test_p003_correlation_lead_still_running_at_mains_second_r(tmp_path: Path) -
                        main=S.closing_main_turns(), limits=S.with_deadline(DEADLINE_S))
     _assert_lead_ran(done)
     _assert_summary_delivered(done, SUMMARY)
-    assert done.report is not None, "a run whose lead delivered its summary did not reach report.md"
+    assert done.closed is not None, "a run whose lead delivered its summary left no closing record"
 
     stores: list = []
     clock = _Clock()
@@ -590,7 +590,7 @@ def test_p003_correlation_lead_still_running_at_mains_second_r(tmp_path: Path) -
         "MAIN waited on the hung model request past the correlation deadline")
     _assert_timed_out_member(_session_ending(stores, L3), who="l-00c")
     _assert_never_delivered(hung, LATE)
-    assert hung.report is not None, "the run did not reach report.md after the named ending"
+    assert hung.closed is not None, "the run left no closing record after the named ending"
 
 
 def test_p009_l00c_alone_reaches_the_run_kill_count(tmp_path: Path) -> None:
@@ -621,7 +621,7 @@ def test_p009_l00c_alone_reaches_the_run_kill_count(tmp_path: Path) -> None:
         assert d.summary is not None
         assert d.summary.get("truncated_by") != _run_end().TRUNCATED_BY_ABORTED, (
             f"[{label}] l-00c's failures alone ended the run")
-        assert d.report is not None, f"[{label}] the run did not reach report.md"
+        assert d.closed is not None, f"[{label}] the run left no closing record"
         text = _prose(d)
         assert detail not in text, f"[{label}] the fault's own text reached MAIN's harness prose"
         prose[label] = text

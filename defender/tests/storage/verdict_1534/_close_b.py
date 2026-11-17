@@ -105,3 +105,33 @@ def forced_doc(*, ceiling: tuple[str, ...] = (), summary: str = "a summary", dis
 def capability_rows(count: int, note: Any) -> tuple[str, ...]:
     """`count` distinct `nothing-to-try` receipts (each pays: the capability is not in the roster); `note(i)` is row i's note."""
     return tuple(f"state=nothing-to-try cap=fake-system-{i:03d}.fake-verb note={note(i)}" for i in range(count))
+
+
+def with_ceiling(disposition: str, rows: tuple[str, ...] | list[str]) -> str:
+    """`_spec923.pays_every_price(disposition)` with its `ceiling_test` rows replaced by `rows` (any model disposition)."""
+    from defender.tests.support.runtime.engine import _spec923 as S
+
+    out = []
+    for line in S.pays_every_price(disposition).split("\n"):
+        if line.startswith("ceiling_test"):
+            continue
+        out.append(line)
+        if line.startswith("summary "):
+            out.extend(f'{"ceiling_test":<22} "{row}"' for row in rows)
+    return "\n".join(out)
+
+
+def fill_sizes(probe_lines: list[str], bound: int, extra: int = 0) -> list[int]:
+    """Note sizes, one per row, so the rendered lines (each probe line carries a one-character note) joined by "\\n"
+    come to exactly `bound + extra` characters."""
+    count = len(probe_lines)
+    total = bound + extra - (count - 1) - sum(len(p) - 1 for p in probe_lines)
+    return [total // count + (1 if i < total % count else 0) for i in range(count)]
+
+
+def model_dispositions() -> list[str]:
+    """Every disposition a model close may commit: the whole vocabulary but the host's own."""
+    from defender._vocab import DISPOSITION_VALUES
+    from defender.tests.support.runtime.engine import _spec923 as S
+
+    return sorted(d for d in DISPOSITION_VALUES if d != S.MEMBER)
