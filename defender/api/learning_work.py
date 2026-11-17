@@ -27,7 +27,7 @@ def _audit_line(done: Acted) -> str:
     return one_line(f"{done.cause}: {done.detail or ''}")[:_AUDIT_LINE]
 
 
-def _announce(principal: Principal, action: AuditAction, done: Acted) -> None:
+def _announce_learning(principal: Principal, action: AuditAction, done: Acted) -> None:
     announce(action, actor=principal.actor_id, tenant_id=principal.tenant_id, target=done.id, detail=_audit_line(done),
              credential_id=principal.credential_id)
 
@@ -57,17 +57,17 @@ class StoreLearningWork:
 
     async def release_item(self, principal: Principal, item_id: WorkItemId) -> ItemReleased:
         done = await self._store.release_item(principal.tenant_id, str(item_id))
-        _announce(principal, "learning.release_item", done)
+        _announce_learning(principal, "learning.release_item", done)
         return ItemReleased(id=item_id, status=cast("Literal['waiting', 'skipped']", done.state))
 
     async def release_batch(self, principal: Principal, batch_id: BatchId) -> BatchReleased:
         done = await self._store.release_batch(principal.tenant_id, str(batch_id), actor=principal.actor_id)
-        _announce(principal, "learning.release_batch", done)
+        _announce_learning(principal, "learning.release_batch", done)
         return BatchReleased(id=batch_id, phase=cast("Literal['in_review', 'working']", done.state))
 
     async def request_abandon(self, principal: Principal, batch_id: BatchId) -> AbandonRequested:
         done = await self._store.request_abandon(principal.tenant_id, str(batch_id), actor=principal.actor_id)
         if done.at is None:
             raise NotFound(f"no batch {batch_id}")  # unreachable: the store always stamps the request
-        _announce(principal, "learning.request_abandon", done)
+        _announce_learning(principal, "learning.request_abandon", done)
         return AbandonRequested(id=batch_id, abandon_requested_at=done.at)

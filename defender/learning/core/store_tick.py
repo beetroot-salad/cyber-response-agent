@@ -167,7 +167,7 @@ def forge_refuses(error: BaseException) -> bool:
 FAULT_TEXT_LIMIT = 600
 
 
-def _why(cause: str, detail: str) -> Any:
+def _store_why(cause: str, detail: str) -> Any:
     """The store's one value for why (a cause and its detail), loaded when first needed (the store's stack is heavy)."""
     from defender.learning_store import Why
 
@@ -196,6 +196,8 @@ def refusal_cause(fault: BaseException) -> str:
     if any(isinstance(c, CredentialMisconfigured) for c in chain):
         return "delivery_unavailable"
     status = http_status(fault)
+    if status is not None and status < 400:
+        status = None  # an answer that was not a refusal (a 200 with no token in it) says nothing about the forge
     if status in (401, 403):
         return "forge_credential_refused"
     if status is None and any(isinstance(c, ForgejoAuthError) for c in chain):
@@ -511,7 +513,7 @@ class Tick:
             return
         self._counted.add(str(b.id))
         count, phase = self.store.note_refusal(self.tenant_id, str(b.id),
-                                               _why(refusal_cause(fault), one_line(str(fault))[:FAULT_TEXT_LIMIT]))
+                                               _store_why(refusal_cause(fault), one_line(str(fault))[:FAULT_TEXT_LIMIT]))
         _logger.warning(f"{self.label}: the forge refused a request for batch {b.id} ({count} in a row, {phase}): "
                         f"{one_line(str(fault))}")
 
@@ -582,7 +584,7 @@ class Tick:
             return
         self.store.end_review(self.tenant_id, str(b.id), expect_phase="in_review", outcome="closed", published=[],
                               held=[(i.kind, i.key) for i in members],
-                              items_why=_why("closed_without_feedback",
+                              items_why=_store_why("closed_without_feedback",
                                              f"PR #{number} of batch {b.id} was closed with no feedback: held for a person"))
         _logger.info(f"{self.label}: PR #{number} of batch {b.id} was closed with no words: its items are held")
 
@@ -614,7 +616,7 @@ class Tick:
         number = b.pr_number
         self.store.end_review(self.tenant_id, str(b.id), expect_phase="in_review", outcome="merged",
                               published=published, held=held,
-                              items_why=_why("cut_from_merge", f"cited at the branch tip, not in PR #{number}'s merge")
+                              items_why=_store_why("cut_from_merge", f"cited at the branch tip, not in PR #{number}'s merge")
                               if held else None)
         _logger.info(f"{self.label}: PR #{number} of batch {b.id} merged: {len(published)} published, "
                      f"{len(held)} held")
@@ -737,13 +739,13 @@ class Tick:
                     pass
                 return
             if remote is not None and remote not in usable:
-                self.store.needs_person(self.tenant_id, str(b.id), _why(
+                self.store.needs_person(self.tenant_id, str(b.id), _store_why(
                     "foreign_commits_remote", f"the branch {b.branch} on the forge holds "
                     f"commits the commit-maker did not make for batch {b.id} (tip {remote})"))
                 _logger.error(f"{self.label}: batch {b.id}'s branch holds a foreign tip: a person must look")
                 return
             if not usable:
-                self.store.needs_person(self.tenant_id, str(b.id), _why(
+                self.store.needs_person(self.tenant_id, str(b.id), _store_why(
                     "foreign_commits_local", f"the local branch {b.branch} holds commits "
                     f"outside batch {b.id}'s record"))
                 return
@@ -850,7 +852,7 @@ class Tick:
             if foreign:
                 names = ", ".join(f"#{r['number']} ({r['headRefName']})" for r in foreign)
                 ending(self.store.needs_person, self.tenant_id, str(held.batch_id),
-                       _why("foreign_pr", f"an open PR on {prefix} that no batch made holds the lane: {names}"))
+                       _store_why("foreign_pr", f"an open PR on {prefix} that no batch made holds the lane: {names}"))
                 _logger.error(f"{self.label}: batch {held.batch_id} opens no PR beside {names}: a person must look")
                 return None
         title, body = pr_text(held, tip_message)
