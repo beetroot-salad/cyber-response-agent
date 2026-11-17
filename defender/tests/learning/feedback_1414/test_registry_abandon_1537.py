@@ -11,6 +11,7 @@ from defender.tests.learning.feedback_1414 import _spec1414 as S
 from defender.tests.learning.feedback_1414._spec1414 import OWNER
 from defender.tests.support.learning.core._release1537 import CREDENTIAL, park, row
 from defender.tests.support.learning.core._store1278 import call
+from defender.tests.support.shared._postgres1339 import execute
 from defender.tests.tenancy.tenant_1108_p4._drain_support import BoxSpy, author_drain, remote_branches
 
 pytestmark = pytest.mark.postgres
@@ -67,3 +68,21 @@ def test_o3_a_requested_registry_batch_whose_pr_read_fails_in_the_feedback_tick_
     assert (got["phase"], got["refusals"], got["abandon_requested_at"]) == ("needs_person", 3, asked["abandon_requested_at"])
     assert all(later > earlier for earlier, later in zip(stamps, stamps[1:], strict=False)), "last_checked did not move each tick"
     assert [p["state"] for p in fb.forge.prs if p["number"] == number] == ["open"]
+
+
+def test_o3_a_requested_registry_batch_with_no_recorded_pr_is_matched_to_its_open_pr_by_its_branch_and_that_pr_is_never_closed(fb):
+    """Parked with no PR number stored (as a batch parked while working is), the registry batch's PR is found by its branch: it is recorded on the batch, no PATCH is made, the PR stays open, and the batch ends abandoned. (O3, A4)"""
+    batch, branch, tip = _parked_registry(fb)
+    [pr] = [p for p in fb.forge.prs if p["head"]["ref"] == branch]
+    execute(fb.dsn, "UPDATE learning.batches SET pr_number = NULL WHERE id = %s", (str(batch.id),))
+    assert row(fb.dsn, batch.id)["pr_number"] is None, "premise"
+    call(fb.dsn, "request_abandon", fb.t.tenant_id, str(batch.id), actor="u-1537")
+
+    for _ in range(2):
+        assert author_drain(fb.t, fb.paths, trigger=None, box=BoxSpy()) == 0
+
+    got = row(fb.dsn, batch.id)
+    assert [r for r in fb.forge.requests if r.method == "PATCH"] == [], "the bot closed a registry PR"
+    assert [p["state"] for p in fb.forge.prs if p["number"] == pr["number"]] == ["open"]
+    assert remote_branches(fb.t.remote, S.FEEDBACK_PREFIX) == {branch: tip}
+    assert (got["phase"], got["outcome"], got["pr_number"]) == ("ended", "abandoned", pr["number"])

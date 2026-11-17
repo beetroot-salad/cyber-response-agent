@@ -99,8 +99,9 @@ def test_run_stage_maps_giterror_to_exit_2():
 
 
 def _set_status(dsn, tenant_id, prefix, status, *, deferrals=0):
-    execute(dsn, "UPDATE learning.work_items SET status = %s, deferrals = %s WHERE tenant_id = %s AND item_key LIKE %s",
-            (status, deferrals, tenant_id, f"{prefix}/%"))
+    cause = "curator_held" if status in {"held", "dead", "skipped"} else None  # #1537 PR1: a cause exactly when set aside
+    execute(dsn, "UPDATE learning.work_items SET status = %s, cause = %s, deferrals = %s WHERE tenant_id = %s AND item_key LIKE %s",
+            (status, cause, deferrals, tenant_id, f"{prefix}/%"))
 
 
 @pytest.mark.postgres

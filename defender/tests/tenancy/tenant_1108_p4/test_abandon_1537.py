@@ -18,11 +18,13 @@ from defender.tests.support.learning.core._feedback1278 import (
     claim_by_hand,
     make_scene,
     opened,
+    reviewer_removes_citation,
     tick,
 )
 from defender.tests.support.learning.core._faults1537 import FORGE_FAULTS, OPEN_FAULTS, Fault, normalised
 from defender.tests.support.learning.core._release1537 import CREDENTIAL, item_row, park, row
 from defender.tests.support.learning.core._store1278 import (  # noqa: F401 — `world` is a fixture
+    ONE,
     call,
     lapse_lease,
     lesson_citing,
@@ -148,7 +150,7 @@ def _parked(w, batch_id, fault: Fault, path: str, old_database: str) -> None:
     assert (got["phase"], got["cause"], got["refusals"]) == ("needs_person", fault.cause, 3)
     assert got["parked_at"] is not None
     stored, text = normalised(got["reason"], w.t.tenant_id), fault.texts[path]
-    # the loop keeps 300 characters of a fault's text, so a long one is checked by its head
+    # the loop keeps at most `FAULT_TEXT_LIMIT` (600) characters of a fault's text, so a long one is checked by its head
     assert (text if len(text) < 250 else text[:140]) in stored, (stored, text)
     assert backfilled_batch_cause(old_database, got["reason"]) == fault.cause, got["reason"]
 
@@ -201,6 +203,26 @@ def test_o4_three_deliveries_that_will_not_open_park_the_batch_with_the_cause_th
         for _ in range(3):
             _tick_through_refusal(w, writer, **seams)
     _parked(w, batch_id, fault, "open", empty_database)
+
+
+def test_o4_the_stored_detail_of_a_refusal_is_bounded_however_long_the_fault_text_is(scene, caplog, tmp_path):  # noqa: F811 — fixture
+    """A delivery that will not open names its secret file in the fault's text: with that file under a path of over a thousand characters, three refusals park the batch with the head of the text kept and the stored detail cut to a bound well below the text's own length. (O4: model- and forge-written text is only bounded detail)"""
+    w = scene
+    w.seed("f1")
+    writer = _lesson("f1")
+    batch_id, _b, _n = opened(w, writer, caplog)
+    deep = tmp_path.joinpath(*["d" * 200] * 5)
+    deep.mkdir(parents=True)
+    [fault] = [f for f in OPEN_FAULTS if f.name == "misconfigured credential"]
+    with _delivery_will_not_open(w, fault, deep) as seams:
+        for _ in range(3):
+            _tick_through_refusal(w, writer, **seams)
+    got = row(w.dsn, batch_id)
+    assert (got["phase"], got["cause"], got["refusals"]) == ("needs_person", fault.cause, 3)
+    assert got["reason"].startswith("the forge refused 3 times: the tenant "), got["reason"][:80]
+    assert len(str(deep)) > 1000, "premise: the fault's own text is long"
+    assert len(got["reason"]) <= 1000, len(got["reason"])
+    assert "\n" not in got["reason"]
 
 
 # --- O3: the settle's branches --------------------------------------------------------------------------------------
@@ -325,6 +347,64 @@ def test_o3_a_forge_that_refuses_or_fails_leaves_the_request_waiting_stamped_and
     w.t.forge.clear_refusals()
     _settle(w, writer, batch_id, number)
     assert (row(w.dsn, batch_id)["phase"], w.statuses()) == ("ended", {"f1": "held"})
+
+
+def test_o3_a_requested_revert_or_lead_lane_batch_has_its_open_pr_closed_and_kept_like_an_authors(scene):
+    """Parked in review with a request: a revert's open PR (author lane) and a lead lane batch's open PR are each closed once and kept, and each batch ends abandoned with its park cause (only a registry PR is left open). (O3, A4)"""
+    w = scene
+    tenant = w.t.tenant_id
+    revert = call(w.dsn, "claim_revert", tenant, owner="cli")
+    call(w.dsn, "in_review", revert, 5, {})
+    call(w.dsn, "enqueue_request", tenant, "run-1537", "case-1", {"case": "c"})
+    lead = call(w.dsn, "claim", tenant, "lead_author", owner="host-l", thresholds=ONE)
+    call(w.dsn, "in_review", lead, 6, {})
+    for number, held in ((5, revert), (6, lead)):
+        w.t.forge.add_pr(pr_row(number, held.branch))
+        park(w.dsn, held.batch_id)
+        _request(w, held.batch_id)
+    for _ in range(2):
+        tick(w, FeedbackCurator())
+    assert sorted(_patches(w), key=lambda p: p[0]) == [(5, {"state": "closed"}), (6, {"state": "closed"})]
+    assert {p["number"]: p["state"] for p in w.t.forge.prs} == {5: "closed", 6: "closed"}
+    for held in (revert, lead):
+        got = row(w.dsn, held.batch_id)
+        assert (got["phase"], got["outcome"], got["cause"]) == ("ended", "abandoned", CREDENTIAL), held.kind
+
+
+def test_o3_a_pr_merged_in_the_gap_after_the_close_is_settled_merged_never_abandoned(scene, caplog):
+    """The forge merges the PR as the loop's close arrives: the loop reads the PR again before it settles, so the batch ends merged (the cited lesson published, the uncited item waiting again, no cause), not abandoned with its items held. (O3: close first, then settle)"""
+    w = scene
+    batch_id, branch, number, writer = _parked_in_review(w, caplog, "f1", "f2")
+    merged: list[str] = []
+
+    def merge_as_the_close_arrives(request: Any) -> None:
+        if request.method == "PATCH" and not merged:
+            merged.append(merge_on_remote(w.t.p3, w.scratch, branch))
+
+    w.t.forge.on_request = merge_as_the_close_arrives
+    _request(w, batch_id)
+    _settle(w, writer, batch_id)
+
+    assert merged, "premise: the loop tried to close the open PR"
+    got = row(w.dsn, batch_id)
+    assert (got["phase"], got["outcome"], got["cause"], got["reason"], got["parked_at"]) == ("ended", "merged", None, None, None)
+    assert w.statuses() == {"f1": "published", "f2": "waiting"}
+
+
+def test_o3_a_lesson_cut_from_the_merge_is_held_as_cut_from_merge_when_the_requested_batch_settles_merged(scene, caplog):
+    """A reviewer's edit drops one cited finding from the merged lesson, and the batch is parked with a request: it settles merged, the kept citation published and the cut one held with the cause `cut_from_merge` (not waiting again), no cause on the batch. (O3, O4)"""
+    w = scene
+    batch_id, branch, _number, writer = _parked_in_review(w, caplog, "f1", "f2", writer=_lesson("f1", "f2"))
+    merge_on_remote(w.t.p3, w.scratch, branch, edit=reviewer_removes_citation(LESSON_NAME, lesson_citing("f2")))
+    _request(w, batch_id)
+    _settle(w, writer, batch_id)
+
+    got = row(w.dsn, batch_id)
+    assert (got["phase"], got["outcome"], got["cause"]) == ("ended", "merged", None)
+    assert w.statuses() == {"f1": "held", "f2": "published"}
+    cut = item_row(w.dsn, w.t.tenant_id, "f1")
+    assert cut["cause"] == "cut_from_merge", cut
+    assert cut["reason"], "the detail stays beside the cause"
 
 
 # --- O2: release, end to end ---------------------------------------------------------------------------------------

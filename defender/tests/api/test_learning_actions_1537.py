@@ -482,6 +482,33 @@ def test_o6_a_long_multi_line_prior_detail_arrives_shortened_on_one_line(s):
         assert TAIL not in detail
 
 
+def test_o6_a_prior_detail_with_any_line_break_or_control_character_arrives_as_one_printable_line_cut_at_exactly_200(s):
+    """A detail carrying a CR LF, a line or paragraph separator (U+2028), a next-line (U+0085), a vertical tab and an escape (a terminal control) is logged as one line of printable characters, every word of it kept and the line cut at exactly 200 characters; the same for all three actions. (O6)"""
+    dsn = s.world.dsn
+    words = ["first", "second", "third", "fourth", "fifth", "sixth"]
+    text = "first\r\nsecond\u2028third\u0085fourth\x0bfifth\x1b[31msixth" + " tail" * 80
+    item = held_item(dsn, T1, "h1")
+    set_item(dsn, T1, "h1", reason=text)
+    batch = on_store(dsn, in_review, T1, "f1")
+    park(dsn, batch, reason=text)
+    cause = item_row(dsn, item)["cause"]
+    steps = ((_release_item, item, cause, 200, ACTIONS["item"]), (_release_batch, batch, CREDENTIAL, 200, ACTIONS["batch"]),
+             (_abandon, batch, CREDENTIAL, 202, ACTIONS["abandon"]))
+    for act, target, prior_cause, status, action in steps:
+        if act is _abandon:
+            park(dsn, batch, reason=text)
+        mark = len(s.world.audit.events)
+        assert act(s.ann, T1, target).status_code == status
+        [event] = _events(s, mark)
+        detail = event.detail or ""
+        assert event.action == action
+        assert detail.startswith(f"{prior_cause}: first"), detail[:40]
+        assert all(word in detail for word in words), detail
+        assert detail.isprintable(), repr(detail)
+        assert len(detail.splitlines()) == 1, repr(detail)
+        assert len(detail) == 200, "cut at exactly 200 characters, not shortened more or less"
+
+
 def test_o6_a_refused_action_announces_nothing_and_a_successful_one_beside_it_does(s):
     """409 (not held, wrong cause, pending request), 404 and 403 announce no event; a success on a real row does. (O6)"""
     dsn = s.world.dsn

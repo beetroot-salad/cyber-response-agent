@@ -3,9 +3,13 @@ every row already stored. The revision is found as the one built directly on `00
 the revision before it (the head store cannot write them), with the texts today's code writes, frozen here."""
 from __future__ import annotations
 
+import ast
 import datetime as _dt
+import itertools
+import pathlib
 import uuid
 
+import httpx
 import pytest
 
 from defender.tests.migrations.test_1214_migrations import _upgrade_to
@@ -178,3 +182,130 @@ def test_the_upgraded_database_carries_the_new_columns_as_nullable_text_and_time
                    ("batches", "parked_at"): ("timestamp with time zone", "YES"),
                    ("batches", "abandon_requested_at"): ("timestamp with time zone", "YES"),
                    ("batches", "abandon_requested_by"): ("text", "YES")}
+
+
+# --- the census of credential-shaped refusal texts: the live classifier and the backfill agree on every one ----------------------------
+
+_SOURCE_ROOT = pathlib.Path(__file__).resolve().parents[2]
+#: Every file that raises the credential refusals a tenant's delivery meets.
+_RAISERS = sorted((_SOURCE_ROOT / "learning" / "author" / "version_control").glob("*.py")) + [_SOURCE_ROOT / "tenancy" / "_approle_login.py"]
+#: The exception classes the census covers, and the login errors whose texts they wrap (`the issuer AppRole login failed: ...`).
+_CENSUS = {"ForgejoAuthError", "CredentialMisconfigured", "LoginUnrecorded", "SecretFileUnusable"}
+_WRAPPED = {"CleartextAddress", "LoginUnreachable", "LoginRefused"}
+#: What each f-string placeholder of those raise sites stands for in a stored text (a census that meets another fails, naming it).
+_SAMPLES = {
+    "tenant_id": [TENANT], "self.tenant_id": [TENANT], "pair.name": ["delivery"], "path": ["/srv/secrets/g1"],
+    "ca": ["/etc/ssl/ca.pem"], "type(bad).__name__": ["SSLError"], "type(down).__name__": ["ConnectError"],
+    "unreadable.strerror or type(unreadable).__name__": ["No such file or directory"], "self.purpose": ["drain"],
+    "response.status_code": ["401", "403", "404"],
+}
+
+
+def _sites(*names: str) -> list[tuple[str, str, ast.expr | None]]:
+    """`(where, class name, first argument)` of every `raise <name>(...)` in the files that raise them."""
+    found = []
+    for path in _RAISERS:
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Raise) and isinstance(node.exc, ast.Call):
+                name = ast.unparse(node.exc.func).rsplit(".", 1)[-1]
+                if name in names:
+                    found.append((f"{path.name}:{node.lineno}", name, node.exc.args[0] if node.exc.args else None))
+    return found
+
+
+def _renders(where: str, node: ast.expr | None, wrapped: dict[str, list[str]]) -> list[str]:
+    """The texts a raise site's message takes: its constant words, with each placeholder replaced by its samples."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return [node.value]
+    if isinstance(node, ast.JoinedStr):
+        options = []
+        for part in node.values:
+            if isinstance(part, ast.Constant):
+                options.append([str(part.value)])
+                continue
+            key = ast.unparse(part.value)
+            assert key in {**_SAMPLES, **wrapped}, f"{where}: the census has no sample for {{{key}}}: add one to _SAMPLES"
+            options.append({**_SAMPLES, **wrapped}[key])
+        return ["".join(parts) for parts in itertools.product(*options)]
+    if isinstance(node, ast.Call) and ast.unparse(node.func) == "str" and ast.unparse(node.args[0]) in wrapped:
+        return wrapped[ast.unparse(node.args[0])]
+    raise AssertionError(f"{where}: the census cannot render {ast.unparse(node) if node else 'no message'}")
+
+
+def _status_error(status: int) -> httpx.HTTPStatusError:
+    request = httpx.Request("GET", "https://openbao.test/v1/identity/oidc/token/role")
+    return httpx.HTTPStatusError("refused", request=request, response=httpx.Response(status, request=request))
+
+
+def _login_failures() -> list[BaseException]:
+    """The login errors an issuer login wraps (`the issuer AppRole login failed: ...`), built as `approle_login` raises them: a
+    refused login carries its HTTP status and the `HTTPStatusError` it was made from, an answer with no client token carries 200."""
+    from defender import tenancy
+
+    failures: list[BaseException] = []
+    for where, name, arg in _sites(*_WRAPPED):
+        for text in _renders(where, arg, {}):
+            if name != "LoginRefused":
+                failures.append(getattr(tenancy, name)(text))
+                continue
+            status = int(text.rsplit("HTTP ", 1)[1].rstrip(")")) if "(HTTP " in text else 200
+            refused = tenancy.LoginRefused(text, status)
+            if "(HTTP " in text:
+                refused.__cause__ = _status_error(status)
+            failures.append(refused)
+    return failures
+
+
+def _met(where: str, name: str, arg: ast.expr | None, wrapped: dict[str, list[str]], failures: list[BaseException]) -> list[tuple[str, BaseException]]:
+    """The exceptions the delivery's open meets from one raise site, chained as the code chains them."""
+    from defender.learning.author.version_control import ForgejoAuthError
+    from defender.learning.author.version_control.auth import CredentialMisconfigured
+
+    out: list[tuple[str, BaseException]] = []
+    for text in _renders(where, arg, wrapped):
+        if name in {"LoginUnrecorded", "SecretFileUnusable"}:  # met as the credential wraps it: `raise CredentialMisconfigured(str(unusable)) from None`
+            out.append((f"{where} {name}: {text}", CredentialMisconfigured(text)))
+        elif "{failed}" in ast.unparse(arg):
+            error = ForgejoAuthError(text)
+            error.__cause__ = failures[wrapped["failed"].index(text.split("login failed: ", 1)[1])]
+            out.append((f"{where} {text}", error))
+        elif text == "Vault identity token request failed":  # `from e`: the issuer's HTTP answer, or a body that is not JSON
+            for cause in (_status_error(401), _status_error(403), ValueError("not json")):
+                error = ForgejoAuthError(text)
+                error.__cause__ = cause
+                out.append((f"{where} {text} after {type(cause).__name__} {getattr(getattr(cause, 'response', None), 'status_code', '')}", error))
+        else:
+            out.append((f"{where} {name}: {text}", (CredentialMisconfigured if name == "CredentialMisconfigured" else ForgejoAuthError)(text)))
+    return out
+
+
+def _refusals() -> list[tuple[str, BaseException]]:
+    """Every credential refusal the delivery's open can meet, built as the code builds it: `(label, exception)`."""
+    failures = _login_failures()
+    wrapped = {"failed": [str(f) for f in failures],
+               "unusable": [t for where, _n, arg in _sites("LoginUnrecorded", "SecretFileUnusable") for t in _renders(where, arg, {})]}
+    return [met for where, name, arg in _sites(*_CENSUS) for met in _met(where, name, arg, wrapped, failures)]
+
+
+def test_every_credential_refusal_text_the_code_can_raise_is_given_one_cause_by_the_live_classifier_and_the_backfill_alike(empty_database):
+    """Each text a `ForgejoAuthError`, `CredentialMisconfigured`, `LoginUnrecorded` or `SecretFileUnusable` raise site can carry (read off the source, the real exceptions built as the code builds and chains them, met as the delivery's open wraps them and as three refusals park the batch) is given a cause by the live classifier, the same cause by the migration's backfill of the stored park text, and never `unrecorded`. (PR1, classifier, Data backfill)"""
+    from defender._text import one_line
+    from defender.learning.core.store_tick import FAULT_TEXT_LIMIT, classified_refusal, refusal_cause
+
+    built = _refusals()
+    assert len(built) > 25, f"the census found only {len(built)} texts: the raise sites moved"
+    live: dict[str, tuple[str, str]] = {}
+    for label, error in built:
+        refused = classified_refusal(f"the tenant {TENANT}'s delivery refused: {error}", error)
+        assert refused.transient is False, f"{label}: a refusal the loop counts is not an outage"
+        live[label] = (refusal_cause(refused), PARK + one_line(str(refused))[:FAULT_TEXT_LIMIT])
+
+    dsn = empty_database
+    _upgrade_to(dsn, revisions.down_of(_after_signin()))
+    _tenant(dsn)
+    planted = {label: _batch(dsn, kind="revert", lane="author", phase="needs_person", reason=text) for label, (_c, text) in live.items()}
+    _upgrade_to(dsn, _after_signin())
+    got = {label: execute(dsn, "SELECT cause FROM learning.batches WHERE id = %s", (batch,))[0][0] for label, batch in planted.items()}
+    assert {label: cause for label, (cause, _t) in live.items() if cause == "unrecorded"} == {}
+    disagree = {label: (live[label][0], got[label]) for label in live if got[label] != live[label][0]}
+    assert disagree == {}, "(live classifier, backfill) differ for these texts"
