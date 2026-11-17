@@ -371,6 +371,57 @@ def test_o3_a_requested_revert_or_lead_lane_batch_has_its_open_pr_closed_and_kep
         assert (got["phase"], got["outcome"], got["cause"]) == ("ended", "abandoned", CREDENTIAL), held.kind
 
 
+def test_o3_an_abandon_settled_on_another_reconciled_lane_holds_back_no_claim_on_the_tick_s_own(scene, caplog):
+    """The author drain reconciles the lead lane too. Settling a lead lane batch's requested abandon frees the lead lane,
+    not the author lane, so the author lane's due work is claimed in that same pass. (O3, #1558 review)"""
+    w = scene
+    tenant = w.t.tenant_id
+    call(w.dsn, "enqueue_request", tenant, "run-1537", "case-1", {"case": "c"})
+    lead = call(w.dsn, "claim", tenant, "lead_author", owner="host-l", thresholds=ONE)
+    call(w.dsn, "in_review", lead, 6, {})
+    w.t.forge.add_pr(pr_row(6, lead.branch))
+    park(w.dsn, lead.batch_id)
+    _request(w, lead.batch_id)
+    w.seed("f1")
+    writer = _lesson("f1")
+    tick(w, writer)
+    got = row(w.dsn, lead.batch_id)
+    assert (got["phase"], got["outcome"]) == ("ended", "abandoned"), "premise: the lead batch's abandon settled this pass"
+    assert len(writer.served) == 1, "the author lane's due work waited a pass behind another lane's abandon"
+
+
+def test_o3_an_abandon_request_that_waits_on_the_tick_s_own_lane_holds_back_no_claim(scene, caplog):
+    """A revert batch is on the author lane but holds no lane. While its requested abandon waits on a failing forge, nothing
+    was given back, so the author lane's due work is claimed as usual. (O3)"""
+    w = scene
+    revert = call(w.dsn, "claim_revert", w.t.tenant_id, owner="cli")
+    call(w.dsn, "in_review", revert, 5, {})
+    w.t.forge.add_pr(pr_row(5, revert.branch))
+    park(w.dsn, revert.batch_id)
+    _request(w, revert.batch_id)
+    w.t.forge.refuse("/pulls/5", 503, method="GET")
+    w.seed("f1")
+    writer = _lesson("f1")
+    tick(w, writer)
+    assert row(w.dsn, revert.batch_id)["phase"] == "needs_person", "premise: the request waits this pass"
+    assert len(writer.served) == 1, "a request that settled nothing held back the claim"
+
+
+def test_o3_an_abandon_settled_on_the_tick_s_own_lane_holds_back_its_claim_for_one_pass(scene, caplog):
+    """An author batch's settled abandon gives its lane back: the claim that room makes waits for the next pass, then
+    happens. (O3)"""
+    w = scene
+    batch_id, _branch, _number, writer = _parked_in_review(w, caplog, "f1")
+    w.seed("f2")
+    _request(w, batch_id)
+    served = len(writer.served)
+    tick(w, writer)
+    assert row(w.dsn, batch_id)["phase"] == "ended", "premise: the abandon settled this pass"
+    assert len(writer.served) == served, "the pass that ended the batch also claimed over what it gave back"
+    tick(w, writer)
+    assert len(writer.served) == served + 1, "the next pass did not claim the waiting work"
+
+
 def test_o3_a_pr_merged_in_the_gap_after_the_close_is_settled_merged_never_abandoned(scene, caplog):
     """The forge merges the PR as the loop's close arrives: the loop reads the PR again before it settles, so the batch ends merged (the cited lesson published, the uncited item waiting again, no cause), not abandoned with its items held. (O3: close first, then settle)"""
     w = scene

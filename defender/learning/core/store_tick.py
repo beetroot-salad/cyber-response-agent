@@ -486,15 +486,17 @@ class Tick:
         items = self.store.work(self.tenant_id, statuses=OPEN_WORK)
         for b in review:
             self._reconcile(delivery, b, record, [i for i in items if i.batch_id == b.id and i.status == "in_batch"])
-        settled = False
+        freed_own = False
         for b in requested:
-            settled |= self._abandon(delivery, b, record,
-                                     [i for i in items if i.batch_id == b.id and i.status == "in_batch"])
+            settled = self._abandon(delivery, b, record,
+                                    [i for i in items if i.batch_id == b.id and i.status == "in_batch"])
+            freed_own |= settled and b.lane == self.lane
         for b in lapsed:
             self._recover(delivery, b, record)
-        # A person's abandon just freed a lane: the claim it makes room for waits for the next pass, so one tick does not
-        # both end a batch and start authoring over what that batch gave back.
-        return self._claim(delivery) if claim and not settled else 0
+        # A person's abandon just freed this tick's own lane: the claim it makes room for waits for the next pass, so one
+        # tick does not both end a batch and start authoring over what that batch gave back. Another reconciled lane's
+        # abandon frees that lane, not this one, and holds nothing back.
+        return self._claim(delivery) if claim and not freed_own else 0
 
     # -- counting what the forge said ----------------------------------------------------------------
 
