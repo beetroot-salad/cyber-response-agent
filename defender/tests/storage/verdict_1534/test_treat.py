@@ -152,17 +152,22 @@ def test_v_text_the_cut_falls_before_a_host_that_would_straddle_it():
 
 @pytest.mark.parametrize(("text", "bound", "expected"), [
     ("abcdefghijklmnop", 8, "abcdefg…"),
-    ("(alpha.bravo.charlie.delta", 12, "(…"),
-    ("(10.20.30.40", 8, "(…"),
-], ids=["control-no-dot-keeps-bound-minus-one", "host-backs-off-to-its-start", "ipv4-backs-off-to-its-start"])
+    ("(foo.example1zzz", 9, "(…"),
+    ("(alpha.bravo.charlie.delta", 12, "(alpha[.]br…"),
+    ("(10.20.30.40", 8, "(10[.]2…"),
+], ids=["control-no-dot-keeps-bound-minus-one", "raw-run-backs-off-to-its-start", "defanged-host-keeps-text",
+        "defanged-ipv4-keeps-text"])
 def test_v_text_a_hard_cut_keeps_text_and_backs_off_only_over_a_dotted_run(text, bound, expected):
-    """With no space before the bound: `bound - 1` characters and the ellipsis, backing off to the start of a dotted run. (V-TEXT)"""
+    """With no space before the bound: `bound - 1` characters and the ellipsis, backing off only over a raw dotted run. (V-TEXT)"""
     from defender.records import closing as C
 
     assert C.treat(text, bound) == expected
 
 
 DOTS = ".。．｡"
+#: Readings recorded in design r3.2 "Precision for implementers": a host-shaped token is any whole-label sub-run of a
+#: dotted run ending in an alphabetic label of 2+ letters (`_HOST`), and the scheme rule applies wherever `scheme://`
+#: appears, whatever follows, a bare `ftp://` included (`_SCHEME`).
 #: A scheme preceded by a non-letter or the start (the defang rule's own word boundary), an IPv4 address, and a
 #: host-shaped token: labels joined by raw dot-set characters ending in an alphabetic label of two or more letters.
 _SCHEME = re.compile(r"(?<![^\W\d_])(?:https?|ftp)://", re.IGNORECASE)

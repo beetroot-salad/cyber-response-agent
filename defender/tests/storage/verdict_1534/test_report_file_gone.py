@@ -1,5 +1,8 @@
 """#1534 V-NOFILE: no code reaches the retired `report.md`: product, tests, evaluations; model-facing text does not name it.
 
+Retirement is asserted as a class (the module, the layout classes and the handle's documents group have no `report`);
+the AST walk covers only retired names, imports of `records._report` and the file-name literal or constant.
+
 The wire names `no_report` and `report_committed` stay; `docs/archive/` is history. The product line is
 `tooling/lint/lint_shippable_surface.EXCLUDED_PREFIXES`. An exempted line carries `# lint-report-file: ok — <reason>`."""
 from __future__ import annotations
@@ -22,21 +25,9 @@ RETIRED_NAMES = frozenset({"read_report", "parse_report", "parse_report_text", "
                            "ReportUnreadable", "ReportRead"})
 #: Retired constants for the file's name.
 RETIRED_CONSTANTS = frozenset({"REPORT_NAME"})
-#: `<base>.report` is the retired layout member when the base resolves to one of these (or a `RunPaths(...)` call).
-LAYOUT_BASES = frozenset({"RUN_LAYOUT", "documents", "WORLD_LEAVES"})
-#: Tests that deliberately plant or name a legacy `report.md` (legacy-link kinds, archive "no report copied" decoys,
-#: judge decoys, this test): exempt by path from the test-side walk. The list is a proposal for the owner to confirm.
-LEGACY_PLANTERS = frozenset({
-    "defender/tests/storage/verdict_1534/test_report_file_gone.py",
-    "defender/tests/storage/verdict_1534/test_closing_record.py",
-    "defender/tests/storage/ids_1187/test_retire_command.py",
-    "defender/tests/learning/branch/test_triplet_archive.py",
-    "defender/tests/support/learning/branch/_triplet_947.py",
-    "defender/tests/learning/judge/test_family_facts.py",
-    "defender/tests/learning/judge/test_render.py",
-    "defender/tests/learning/judge/test_cut_short_decision.py",
-    "defender/tests/e2e/test_box_output.py",
-})
+#: The census file itself is the one exemption by path; every other deliberate decoy or absence line carries `EXEMPT`.
+CENSUS_FILE = "defender/tests/storage/verdict_1534/test_report_file_gone.py"
+RETIRED_MODULE = "defender.records._report"
 #: Listed by the design's "Removal": docs, the records table, the stylesheet, the held-out README.
 LISTED = ("defender/docs/run-records.md", "defender/docs/learning-loop.md", "defender/docs/runtime-development.md",
           "defender/docs/runtime-gates.md", "defender/docs/case-history-write-path.md", "defender/docs/run-records-kinds.tsv",
@@ -73,20 +64,9 @@ def named_lines(source: str) -> list[str]:
     return [ln for ln in source.splitlines() if NAMED_FILE.search(ln) and EXEMPT not in ln]
 
 
-def _chain(node: ast.AST) -> str:
-    """The dotted name of an attribute chain, a call shown as `name(...)`; `?` where the chain is not a name."""
-    if isinstance(node, ast.Name):
-        return node.id
-    if isinstance(node, ast.Attribute):
-        return f"{_chain(node.value)}.{node.attr}"
-    if isinstance(node, ast.Call):
-        return f"{_chain(node.func)}(...)"
-    return "?"
-
-
 def reaches(source: str, *, constants: bool = False) -> list[str]:
     """The lines of Python `source` that reach the retired file: an import of `records._report` or of a retired name, a
-    retired reader or type by name, a `.report` member of the layout, or (with `constants`) the file-name literal or constant."""
+    retired reader or type by name, or (with `constants`) the file-name literal or constant."""
     lines = source.splitlines()
     tree = ast.parse(source)
     docstrings = {id(n.body[0].value) for n in ast.walk(tree)
@@ -96,17 +76,17 @@ def reaches(source: str, *, constants: bool = False) -> list[str]:
     for node in ast.walk(tree):
         hit = False
         if isinstance(node, ast.ImportFrom):
-            hit = ((node.module or "").endswith("_report")
-                   or any(a.name == "_report" or a.name in RETIRED_NAMES or a.name in RETIRED_CONSTANTS for a in node.names))
+            module = node.module or ""
+            hit = (module == RETIRED_MODULE or module.endswith(".records._report")
+                   or (module in ("defender.records", "records") and any(a.name == "_report" for a in node.names))
+                   or (module == "" and node.level > 0 and any(a.name == "_report" for a in node.names))
+                   or any(a.name in RETIRED_NAMES or a.name in RETIRED_CONSTANTS for a in node.names))
         elif isinstance(node, ast.Import):
-            hit = any(a.name.endswith("_report") for a in node.names)
+            hit = any(a.name == RETIRED_MODULE or a.name.endswith(".records._report") for a in node.names)
         elif isinstance(node, ast.Name):
             hit = node.id in RETIRED_NAMES
         elif isinstance(node, ast.Attribute):
-            base = node.value.func if isinstance(node.value, ast.Call) else node.value
-            tail = _chain(base).rsplit(".", 1)[-1]
-            hit = (node.attr in RETIRED_NAMES or (node.attr in RETIRED_CONSTANTS and constants)
-                   or (node.attr == "report" and (tail in LAYOUT_BASES or (isinstance(node.value, ast.Call) and tail == "RunPaths"))))
+            hit = node.attr in RETIRED_NAMES or (node.attr in RETIRED_CONSTANTS and constants)
         elif constants and isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docstrings:
             hit = bool(NAMED_FILE.search(node.value))
         if hit:
@@ -118,24 +98,24 @@ def test_v_nofile_the_detector_finds_each_form_and_skips_exempted_lines_and_wire
     """Control: the file's name and each member form are found; `no_report`, `report_committed` and an exempted line are not. (V-NOFILE)"""
     for line in ("x = run / 'report.md'", "# writes report.md", "see `report.md` in the folder"):
         assert named_lines(line), line
-    for line in ("x = RUN_LAYOUT.report", "x = documents.report", "x = WORLD_LEAVES.report", "x = RunPaths(a, b).report",
-                 "x = records.RUN_LAYOUT.report", "from a import read_report", "x = m.parse_report_text(t)", "require_report(r)",
-                 "y: ReportUnreadable", "from defender.records._report import X", "from defender.records import _report",
-                 "import defender.records._report"):
+    for line in ("from a import read_report", "x = m.parse_report_text(t)", "require_report(r)", "y: ReportUnreadable",
+                 "from defender.records._report import X", "from defender.records import _report",
+                 "import defender.records._report", "from . import _report"):
         assert reaches(line), line
     for line in ("x = run / 'report.md'", "x = _layout.REPORT_NAME"):
         assert reaches(line, constants=True), line
-    for line in ("x = other.report", "x = report", "report = 1", "y = world.report_text", "def f(report): return report"):
+    for line in ("x = other.report", "x = report", "report = 1", "y = world.report_text", "def f(report): return report",
+                 "from defender.tooling.weekly_report import build", "import weekly_report", "from a._report import X"):
         assert reaches(line) == [], line
     assert reaches('def f():\n    """Mentions report.md."""\n', constants=True) == []
     for line in ("'no_report'", "committed = row.report_committed", "no_report = 1", "reporting = 2"):
         assert named_lines(line) == []
         assert reaches(line) == [], line
-    assert reaches(f"x = RUN_LAYOUT.report  {EXEMPT} — a label") == []
+    assert reaches(f"x = read_report(r)  {EXEMPT} — decoy") == []
 
 
 def test_v_nofile_no_product_python_names_the_file_or_a_report_member():
-    """No product `.py` spells `report.md` or reaches the retired file's reader, type, layout member or module. (V-NOFILE)"""
+    """No product `.py` spells `report.md` or reaches the retired file's reader, type or module. (V-NOFILE)"""
     files = _product("defender/*.py")
     assert len(files) >= _PRODUCT_FLOOR, f"the walk found only {len(files)} product files"
     found = {}
@@ -147,8 +127,8 @@ def test_v_nofile_no_product_python_names_the_file_or_a_report_member():
 
 
 def test_v_nofile_no_test_or_evaluation_code_reaches_the_retired_file():
-    """No test or evaluation `.py` outside the legacy planters reaches the retired file (import, reader, layout member, literal). (V-NOFILE)"""
-    files = [rel for rel in _tracked("defender/tests/*.py", "evaluations/*.py") if rel not in LEGACY_PLANTERS]
+    """No test or evaluation `.py` but this census reaches the retired file (import, reader, literal); decoys carry the marker. (V-NOFILE)"""
+    files = [rel for rel in _tracked("defender/tests/*.py", "evaluations/*.py") if rel != CENSUS_FILE]
     assert len(files) >= _PRODUCT_FLOOR, f"the walk found only {len(files)} test and evaluation files"
     found = {}
     for rel in files:
@@ -180,8 +160,24 @@ def test_v_nofile_the_wire_names_stay_in_product_code():
     assert "report_committed" in text
 
 
-def test_v_nofile_the_layout_no_longer_names_report_md():
-    """`report.md` is not named by the run layout any more. (V-NOFILE)"""
-    from defender.records import RUN_LAYOUT
+def test_v_nofile_the_retired_module_is_gone():
+    """`defender.records._report` no longer exists. (V-NOFILE)"""
+    assert importlib.util.find_spec("defender.records._report") is None
 
-    assert not hasattr(RUN_LAYOUT, "report")
+
+def test_v_nofile_no_layout_class_or_documents_group_has_a_report_member():
+    """`RunPaths`, the run layout, the episode world-paths classes, `WORLD_LEAVES` and the handle's documents group have no `report`. (V-NOFILE)"""
+    import uuid
+
+    from defender.records import RUN_LAYOUT, RunPaths
+    from defender.records._episode_paths import LAYOUT, WORLD_LEAVES, EpisodePaths, WorldLayout, WorldPaths
+    from defender.records._handle import GROUP_MEMBERS, MEMBER_ACCESSOR, _RecordHandleGroup
+
+    layout_world = LAYOUT.world(str(uuid.uuid4()))
+    assert type(layout_world) is WorldLayout
+    for holder in (RunPaths, type(RUN_LAYOUT), WorldLayout, WorldPaths, EpisodePaths, type(WORLD_LEAVES), RUN_LAYOUT,
+                   WORLD_LEAVES, layout_world):
+        assert not hasattr(holder, "report"), holder
+    assert "report" not in GROUP_MEMBERS["documents"]
+    assert "report" not in MEMBER_ACCESSOR
+    assert not hasattr(_RecordHandleGroup(None, "documents"), "report")  # type: ignore[arg-type]
