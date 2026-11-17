@@ -348,7 +348,7 @@ def test_1540_f6_the_unit_test_command_passes_on_the_unmodified_tree(checked):
     assert not done.refused, done.output[-1500:]
 
 
-def test_1540_f6_a_unit_test_file_that_throws_at_load_fails_the_unit_test_command(checked):
+def test_1540_f6_a_unit_test_file_that_throws_at_load_fails_the_gate(checked):
     """A `src/shell/zz_fail.test.ts` whose module throws when loaded makes the gate refuse the tree, naming it; the
     unmodified tree passes it (control). (F6, F8)"""
     assert not _gate(checked).refused, "control: the unmodified tree passes the gate"

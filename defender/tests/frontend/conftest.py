@@ -115,6 +115,10 @@ class GuardedBrowser:
         self.made.append(made)
         return made
 
+    def new_page(self, **options: Any) -> Any:
+        """A page of a guarded context of its own: Playwright's own `new_page` would open an unguarded one."""
+        return self.new_context(**options).new_page()
+
     def __getattr__(self, name: str) -> Any:
         return getattr(self._chromium, name)
 

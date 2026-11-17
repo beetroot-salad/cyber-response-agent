@@ -11,9 +11,9 @@ import pytest
 
 from defender.tests.frontend._flow1161 import FAILED, screen
 from defender.tests.frontend.conftest import WAIT_MS, requests_of
-from defender.tests.support.frontend._browser1161 import restore_from_cache
+from defender.tests.support.frontend._browser1161 import path_is, restore_from_cache
 
-READ = "fetch('/api/openapi.json').then(r => r.status)"  # a GET to `/api/*` sent by the page itself
+READ = "fetch('/api/openapi.json').then(() => true, () => true)"  # a GET to `/api/*` sent by the page itself; its answer is not the guard's business
 
 
 @pytest.fixture(params=["fixture", "own"])
@@ -42,8 +42,8 @@ def test_1540_am5_a_get_repeated_within_one_load_fails_when_the_context_closes(w
     """Two identical API GETs in one document fail the context at close, whichever way the test opened it. (Am-5 point 5)"""
     context = opened()
     page = _page(world, context)
-    assert page.evaluate(READ) == 200
-    assert page.evaluate(READ) == 200
+    page.evaluate(READ)
+    page.evaluate(READ)
     with pytest.raises(AssertionError, match="same API read twice"):
         context.close()
     requests_of(context).clear()  # caused on purpose and asserted above
@@ -53,12 +53,13 @@ def test_1540_am5_the_same_get_across_a_navigation_is_not_a_repeat(world, opened
     """The same API GET once in each of two documents passes: a navigation starts a new load. (Am-5 point 5, control)"""
     context = opened()
     page = _page(world, context)
-    assert page.evaluate(READ) == 200
+    page.evaluate(READ)
     page.goto(f"{world.origin}/{FAILED}?again=1")
     screen(page, FAILED)
-    assert page.evaluate(READ) == 200
+    page.evaluate(READ)
     context.close()
-    assert [r.url for r in requests_of(context) if r.resource_type == "fetch"] == [f"{world.origin}/api/openapi.json"] * 2
+    sent = [r.url for r in requests_of(context) if r.resource_type == "fetch" and path_is(r.url, "/api")]
+    assert sent == [f"{world.origin}/api/openapi.json"] * 2
 
 
 def test_1540_am5_the_same_get_across_a_restore_from_the_cache_is_not_a_repeat(world, opened):
@@ -66,10 +67,10 @@ def test_1540_am5_the_same_get_across_a_restore_from_the_cache_is_not_a_repeat(w
     control)"""
     context = opened()
     page = _page(world, context)
-    assert page.evaluate(READ) == 200
+    page.evaluate(READ)
     restore_from_cache(page)
     assert requests_of(context).restores, "positive control: the restore was marked on the context's own log"
-    assert page.evaluate(READ) == 200
+    page.evaluate(READ)
     context.close()
 
 
@@ -79,8 +80,19 @@ def test_1540_am5_a_get_repeated_after_a_restore_from_the_cache_fails_when_the_c
     context = opened()
     page = _page(world, context)
     restore_from_cache(page)
-    assert page.evaluate(READ) == 200
-    assert page.evaluate(READ) == 200
+    page.evaluate(READ)
+    page.evaluate(READ)
     with pytest.raises(AssertionError, match="same API read twice"):
         context.close()
     requests_of(context).clear()  # caused on purpose and asserted above
+
+
+def test_1540_am5_a_page_opened_by_the_browser_itself_is_in_a_guarded_context(world, browser):
+    """`browser.new_page()` opens its context through the guard too: the page's requests reach that context's log and the
+    context is checked at close. (Am-5 point 5, F8)"""
+    page = browser.new_page()
+    page.goto(f"{world.origin}/{FAILED}")
+    screen(page, FAILED)
+    assert len(browser.made) == 1, "positive control: the page's context was made by the guarded browser"
+    assert requests_of(browser.made[0]), "positive control: the page's requests were logged"
+    browser.made[0].close()
