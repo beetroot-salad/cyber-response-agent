@@ -703,7 +703,7 @@ def _world_access(ep: Path, records: Any, signer) -> Any:
 
     rc = run_mod.main(["--episode", ep.name, "--world", P.SIBLING_WORLD, "--tenant", P.SIBLING_TENANT, "--no-learn"],
                       directory=records.directory, lifecycle=lifecycle, visualize=lambda *_a, **_k: None,
-                      preflight=lambda *_a, **_k: 0, ticket_writer=TicketRecorder(), publish=in_process_publish(),
+                      preflight=lambda *_a, **_k: 0, publish=in_process_publish(),
                       signer=signer, proxy_url="http://proxy.invalid")
     assert rc == 0, rc
     (access,) = held

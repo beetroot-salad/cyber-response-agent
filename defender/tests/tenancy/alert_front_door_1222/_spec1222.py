@@ -1392,7 +1392,7 @@ class TicketStore(FakeStore):
 
 
 class _WriterOverTheProxy:
-    """The REAL ticket writer, as `run.main(ticket_writer=…)` takes it, for a run handed `store`'s
+    """The REAL ticket writer, driven directly as the record step, for a run handed `store`'s
     proxy stand-in and a signer (`drive`'s seams, #1391 O1). Every attribute is the writer's own
     (`clear_receipt` included; there is no open leg)."""
 
@@ -1411,7 +1411,7 @@ class _WriterOverTheProxy:
 
 
 def ticket_writer(store: TicketStore) -> Any:
-    """The real writer over `store` — what `run.main(ticket_writer=…)` takes."""
+    """The real writer over `store`, for a test that drives the record step directly."""
     return _WriterOverTheProxy(store)
 
 
@@ -1763,7 +1763,7 @@ def run_alert(  # noqa: C901, PLR0913 — one scenario's every input, each defau
         d.rc = run_main(
             argv, lifecycle=lifecycle_fn, preflight=lambda *_a, **_k: 0,
             visualize=visualize if visualize is not None else (lambda *_a, **_k: None),
-            ticket_writer=writer, enqueue=record_enqueue, **seams)
+            enqueue=record_enqueue, **seams)
     except SystemExit as exit_:
         d.refusal = exit_.code if isinstance(exit_.code, str) else None
         d.rc = exit_.code if isinstance(exit_.code, int) else 1

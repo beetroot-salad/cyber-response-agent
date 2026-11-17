@@ -786,7 +786,7 @@ def test_m3_beneath_the_names_nothing_listed_or_opened_the_run_folder_before_the
         else:
             rc = run_py.main([str(B.plant_alert(tmp_path / "op-alert")), "--tenant", scene.t.tenant_id],
                              lifecycle=lifecycle, preflight=lambda *a, **k: 0, visualize=spies.seam,
-                             ticket_writer=Writer(), enqueue=lambda *a, **k: False,
+                             enqueue=lambda *a, **k: False,
                              publish=lambda *a, **k: B.fresh(scene.t.commit))
             assert rc == 0
     finally:
@@ -1533,7 +1533,7 @@ def _operator_composition_still_enqueues_and_never_records(scene: Scene, tmp_pat
     alert = B.plant_alert(tmp_path / "op-alert")
     rc = run_py.main([str(alert), "--tenant", scene.t.tenant_id],
                      lifecycle=lambda **kw: summary(), preflight=lambda *a, **k: 0,
-                     visualize=lambda *a, **k: None, ticket_writer=Writer(), enqueue=enq,
+                     visualize=lambda *a, **k: None, enqueue=enq,
                      publish=lambda *a, **k: B.fresh(scene.t.commit))
     assert rc == 0
     assert [step for step in seen if step != "clear"] == ["enqueue"], seen
@@ -1746,7 +1746,7 @@ def test_m4_the_store_check_sees_the_operator_default_enqueue(scene, tmp_path):
     before = set(tree(scene.root))
     rc = run_py.main([str(B.plant_alert(tmp_path / "op-alert")), "--tenant", scene.t.tenant_id],
                      lifecycle=lifecycle, preflight=lambda *a, **k: 0, visualize=lambda *a, **k: None,
-                     ticket_writer=Writer(), publish=lambda *a, **k: B.fresh(scene.t.commit))
+                     publish=lambda *a, **k: B.fresh(scene.t.commit))
     assert rc == 0
     assert len(waiting()) == 1, "the operator default enqueue left no request row the store check can see"
     assert not [k for k in set(tree(scene.root)) - before if re.search(r"learning", k)], "the request left a file under a learning folder"

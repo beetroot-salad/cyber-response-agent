@@ -133,16 +133,16 @@ def test_1366_c1_the_declared_route_is_in_the_proxy_route_grammar(vendor, expect
     access = parse_access(R.declaration("http://store.internal:8000", writes=((method, pattern),)),
                           system=vendor.system)
     sent = pattern.replace("*", KEY)
-    check_route(access, vendor.system, method, sent, READ_WRITE)  # control: admitted
+    check_route(access, vendor.system, method, sent, READ_WRITE, KEY)  # control: admitted
     segments = sent.split("/")
     broken = [sent + "/x", "/".join(segments[:-1]),
               *("/".join([*segments[:i], "zz", *segments[i + 1:]]) for i in range(1, len(segments))
                 if segments[i] != KEY)]
     for path in broken:
         with pytest.raises(Refused):
-            check_route(access, vendor.system, method, path, READ_WRITE)
+            check_route(access, vendor.system, method, path, READ_WRITE, KEY)
     with pytest.raises(Refused):
-        check_route(access, vendor.system, "DELETE", sent, READ_WRITE)
+        check_route(access, vendor.system, "DELETE", sent, READ_WRITE, KEY)
 
 
 # --- K5: the request sent matches the route declared ---------------------------------------------------------------
@@ -176,7 +176,7 @@ def test_1366_k5_the_request_add_case_comment_sends_is_the_route_the_adapter_dec
     path = seen.path.split("?")[0]
     assert (seen.method, path) == (method, vendor.base_path + pattern.replace("*", KEY))
     declared = parse_access(R.declaration("http://x.test", writes=(route,)), system=vendor.system)
-    check_route(declared, vendor.system, seen.method, path.removeprefix(vendor.base_path), READ_WRITE)
+    check_route(declared, vendor.system, seen.method, path.removeprefix(vendor.base_path), READ_WRITE, KEY)
 
 
 def test_1366_k5_a_request_off_the_declared_route_is_refused_by_the_proxy_and_never_reaches_the_upstream(
@@ -334,3 +334,14 @@ def test_1366_c5_a_stored_record_that_covers_the_route_comments_whatever_else_it
             assert receipt is not None, label
             assert (receipt["ok"], receipt["status"]) == (True, "commented"), (label, receipt)
             assert len(rig.sent()) == 1, label
+
+
+def test_1471_x1_a_read_write_grant_with_no_ticket_writes_nothing_even_on_a_declared_route():
+    """A read-write mode with no ticket (which the token's reader never yields) is refused on the declared write route
+    itself: there is no write outside a write pass naming its ticket, and no ticketless path back to one. (X1)"""
+    route = ("POST", "/tickets/*/comments")
+    access = parse_access(R.declaration("http://store.internal:8000", writes=(route,)), system="ticket")
+    sent = route[1].replace("*", KEY)
+    check_route(access, "ticket", "POST", sent, READ_WRITE, KEY)  # control: the pass naming the ticket writes
+    with pytest.raises(Refused, match="names no ticket"):
+        check_route(access, "ticket", "POST", sent, READ_WRITE)

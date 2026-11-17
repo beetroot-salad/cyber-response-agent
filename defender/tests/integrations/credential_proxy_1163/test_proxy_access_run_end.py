@@ -237,7 +237,7 @@ def _proxied_sibling(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lifecycle:
     argv = ["--episode", ep.name, "--world", P.SIBLING_WORLD, "--tenant", P.SIBLING_TENANT, "--no-learn"]
     try:
         rc = run_mod.main(argv, directory=records.directory, lifecycle=lifecycle, visualize=lambda *_a, **_k: None,
-                          preflight=lambda *_a, **_k: 0, ticket_writer=S.NoTicket(), publish=in_process_publish(),
+                          preflight=lambda *_a, **_k: 0, publish=in_process_publish(),
                           signer=H.FakeSigner(), proxy_url="http://proxy.invalid")
     except SystemExit as exit_:
         rc = exit_.code if isinstance(exit_.code, int) else 1

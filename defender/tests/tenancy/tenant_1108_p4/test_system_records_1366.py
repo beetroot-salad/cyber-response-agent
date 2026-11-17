@@ -945,8 +945,8 @@ def _admitted_as(access: Any, mode: str) -> bool:
     from defender.credential_proxy._refusal import Refused
     from defender.credential_proxy._scope import check_route
 
-    try:
-        check_route(access, "ticket", *COMMENT, mode)
+    try:  # a write pass always names its ticket (X1): the one the comment goes to
+        check_route(access, "ticket", *COMMENT, mode, "ABC-1" if mode == "rw" else None)
     except Refused:
         return False
     return True

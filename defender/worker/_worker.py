@@ -728,9 +728,9 @@ class Worker:
             _logger.info("investigation %s: it was fenced before its child started; not launched", inv)
             return End(Ending(_FAILED, failure_reason=_WORKER_ERROR, failure_message="the job was ended before it started"),
                        0.0, None)
-        launch = Launch(inv, tenant, os.getpid(), alert_digest=digest, update_ticket=bool(getattr(record, "update_ticket", False)),
-                        ticket_link=screen_link(self._frontend_origin, tenant, inv)
-                        if getattr(record, "update_ticket", False) else None)
+        flagged = record.update_ticket
+        launch = Launch(inv, tenant, os.getpid(), alert_digest=digest, update_ticket=flagged,
+                        ticket_link=screen_link(self._frontend_origin, tenant, inv) if flagged else None)
 
         async def name_left() -> None:
             await self._name_left(inv)

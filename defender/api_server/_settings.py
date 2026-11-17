@@ -25,8 +25,6 @@ from defender.identity.keycloak import check_issuer, check_server_url  # lint-sh
 
 T = TypeVar("T")
 
-_origin = origin  # the name the worker start test compares against; one rule, owned by `defender._url`
-
 #: The settings the API's secret-store client is configured from, named in its faults (#1532 P1).
 OPENBAO_SETTINGS = SecretSettings(address="DEFENDER_OPENBAO_ADDR", token="DEFENDER_API_OPENBAO_TOKEN_FILE",
                                   mount="DEFENDER_OPENBAO_KV_MOUNT")
@@ -125,8 +123,6 @@ def _port(value: str) -> int:
     if not (value.isascii() and value.isdecimal()) or not 1 <= int(value) <= 65535:
         raise ValueError("is not a port number from 1 to 65535")
     return int(value)
-
-
 
 
 _LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", re.ASCII)

@@ -161,12 +161,12 @@ def test_1471_w9_c6_the_worker_start_and_constructor_accept_exactly_the_origins_
     from concurrent.futures import ThreadPoolExecutor
     from types import SimpleNamespace
 
-    from defender.api_server._settings import _origin
+    from defender.api_server._settings import origin as api_origin
     from defender.worker import Worker
 
     def api_accepts(value: str) -> bool:
         try:
-            _origin(value)
+            api_origin(value)
         except ValueError:
             return False
         return True

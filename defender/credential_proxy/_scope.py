@@ -71,23 +71,24 @@ def locate(declaration: AccessDeclaration, url: str) -> Target:
 
 def check_route(declaration: AccessDeclaration, system: str, method: str, path: str,
                 mode: str, ticket: str | None = None) -> None:
-    """`Refused` unless `method` on `path` (relative to the base) is a read, or a declared write
-    and `mode` (the token's grant on `system`) is read-write. GET and HEAD are reads; another
-    method is a read only if a read route lists it (O3, A14). Under a write pass naming `ticket`
-    (X1), every other method is judged by `_ticket_write` alone."""
+    """`Refused` unless `method` on `path` (relative to the base) is a read, or the one write a
+    write pass names. GET and HEAD are reads; another method is a read only if a read route lists
+    it (O3, A14). A read-write grant always names its ticket (X1, `_tokens`), and under it every
+    other method is judged by `_ticket_write` alone: there is no write without a ticket."""
     if not _METHOD.fullmatch(method):
         raise Refused(CONFIG, f"{method[:20]!r} is not an upper-case HTTP method", origin=ORIGIN_REQUEST)
     if method in READ_METHODS:
         return
-    if mode == READ_WRITE and ticket is not None:
+    if mode == READ_WRITE:
+        if ticket is None:
+            raise Refused(CONFINEMENT, f"the token's write pass on {system} names no ticket", origin=ORIGIN_REQUEST)
         return _ticket_write(declaration, system, method, path, ticket)
     if _route_listed(declaration.reads, method, path):
         return
-    if not _route_listed(declaration.writes, method, path):
-        raise Refused(CONFINEMENT, f"{method} {path} is not a declared route of {system}", origin=ORIGIN_REQUEST)
-    if mode != READ_WRITE:
+    if _route_listed(declaration.writes, method, path):
         raise Refused(CONFINEMENT, f"{method} {path} is a write and the token grants {system} "
                                    "read only", origin=ORIGIN_REQUEST)
+    raise Refused(CONFINEMENT, f"{method} {path} is not a declared route of {system}", origin=ORIGIN_REQUEST)
 
 
 def _ticket_write(declaration: AccessDeclaration, system: str, method: str, path: str,

@@ -162,7 +162,7 @@ def test_947_a_sibling_run_writes_no_ticket_row(tmp_path):
 
     writer = Writer()
     _run().main(_sibling_argv(ep / "family.yaml"), lifecycle=_Recorder([]),
-                visualize=lambda p, **kw: None, preflight=_no_preflight, ticket_writer=writer)
+                visualize=lambda p, **kw: None, preflight=_no_preflight)
     assert writer.calls == []
 
 

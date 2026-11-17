@@ -606,6 +606,9 @@ UNREACHED = (
     ("_app.py", "_Proxy._current_record", "the request token names no tenant id"),
     # A record's access text is parsed (`_declared`) before the URL is located, and the parser refuses such a base.
     ("_scope.py", "locate", "the system's declared base does not parse"),
+    # The token's own reader refuses a read-write grant that names no ticket (`_tokens._entry_of`, X1) before a route
+    # is judged; `test_comment_route_1366`'s unit case drives the refusal.
+    ("_scope.py", "check_route", "the token's write pass on "),
     ("_credentials.py", "CredentialSet.__post_init__", "a credential set's kind"),
     ("_openbao.py", "_OpenBao._call", "OpenBao at {} is unreachable"),
 )

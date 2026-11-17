@@ -330,10 +330,11 @@ class JobStore:
             if live is not None:
                 return investigation_record(live), False
             _refuse_removed(state, tenant_id)
-            if await self._mapping_in(s, tenant_id) is None:  # never deleted, so no lock (#1345 O4)
+            mapping = await self._mapping_in(s, tenant_id)
+            if mapping is None:  # never deleted, so no lock (#1345 O4)
                 raise Conflict(ALERT_MAPPING_MISSING)
             if update_ticket:
-                await self._refuse_without_ticket(s, tenant_id, alert_id)
+                await self._refuse_without_ticket(s, tenant_id, alert_id, mapping)
             row = InvestigationRow(
                 id=InvestigationId.mint(), tenant_id=tenant_id, alert_id=alert_id, request_key=request_key,
                 attempt=1, stage="queued", created_at=self._clock(), cost_usd=0.0, update_ticket=update_ticket)
@@ -343,17 +344,18 @@ class JobStore:
                  detail=f"alert {alert_id}", credential_id=credential_id)
         return record, True
 
-    async def _refuse_without_ticket(self, s: AsyncSession, tenant_id: TenantId, alert_id: AlertId) -> None:
+    @staticmethod
+    async def _refuse_without_ticket(s: AsyncSession, tenant_id: TenantId, alert_id: AlertId,
+                                     mapping: AlertMapping) -> None:
         """`Conflict` unless this alert names a ticket: the tenant has a case record, its mapping maps a `case_key`,
         and the key is one this alert's document yields (#1471 W1)."""
         case_row = (await s.execute(select(CaseVersionRow).where(CaseVersionRow.tenant_id == tenant_id)
                                     .order_by(CaseVersionRow.version.desc()).limit(1))).scalars().first()
         if case_row is None or case_row.deleted:
             raise Conflict("the tenant has no case record, so there is no ticket to update")
-        mapping = await self._mapping_in(s, tenant_id)
         raw = (await s.execute(select(AlertRow.raw).where(
             AlertRow.tenant_id == tenant_id, AlertRow.id == alert_id))).scalar_one()
-        key = None if mapping is None else derive_facts(admit(raw).document, mapping).case_key
+        key = derive_facts(admit(raw).document, mapping).case_key
         if key is None:
             raise Conflict("this alert names no ticket (the tenant's alert mapping yields no case key from it), "
                            "so there is no ticket to update")

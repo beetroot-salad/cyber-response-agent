@@ -281,7 +281,7 @@ def _resume_sibling(ep: Path, *, records: Any = None, **directory: Any) -> Path:
     argv = ["--episode", ep.name, "--world", "b", "--tenant", TENANT, "--no-learn"]
     rc = S.sym(RUN, "main")(
         argv, directory=records.directory() if records is not None else directory_for_argv(argv, **directory), lifecycle=life, visualize=lambda *_a, **_k: None, preflight=lambda *_a, **_k: 0,
-        ticket_writer=S.NoTicket(), publish=in_process_publish())
+        publish=in_process_publish())
     assert life.run_dir is not None, f"the sibling never reached its run (rc={rc!r})"
     return life.run_dir
 

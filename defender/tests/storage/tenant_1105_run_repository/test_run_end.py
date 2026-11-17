@@ -133,7 +133,7 @@ def _drive(arm: Any, monkeypatch: Any, *, fail: str | None = None, directory: An
             given = directory(root, str(tenant.id)) if directory is not None else directory_for_argv(argv)
             outcome: Any = run_py.main(argv, directory=given, lifecycle=lifecycle,
                                        visualize=tail.visualize,
-                                       ticket_writer=tail, enqueue=tail.enqueue,
+                                       enqueue=tail.enqueue,
                                        publish=in_process_publish(),
                                        **({} if signer is None else {"signer": signer}))
         except Exception as exc:  # noqa: BLE001 — a raising step's propagation is observed
