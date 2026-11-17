@@ -36,9 +36,6 @@ AGENT_AUTHOR = "defender"
 WIRE_BOUND_BYTES = 4096
 ELLIPSIS = "…"
 
-#: The empty-narrative marker.
-NO_NOTES = "(no notes)"
-
 COMMENTS_SUFFIX = "/comments"
 TRANSITIONS_SUFFIX = "/transitions"
 TICKETS_PATH = "/tickets"
@@ -60,9 +57,6 @@ ALERT = {
     "timestamp": "2026-05-07T07:15:01.561+0000",
 }
 
-#: The rendered comment body. The em-dash separator is the mapping's, not a code literal.
-COMMENT_BODY_TEMPLATE = "{disposition} — {cause}\n\n{narrative}"
-
 #: The case-record file and the case system's config below a tenant's settings folder.
 CASE_RECORD_RELPATH = T1106.CASE_RECORD_REL
 CONFIG_RELPATH = f"systems/{CASE_SYSTEM}/config.env"
@@ -80,16 +74,11 @@ FRONTEND_ORIGIN = "https://app.defender.test"
 # --------------------------------------------------------------------------------------
 
 
-def case_record_doc(*, body: Any = COMMENT_BODY_TEMPLATE, system: Any = CASE_SYSTEM,
-                    with_comment: bool = True) -> dict[str, Any]:
-    """The case-record file as a dict (`system:`, `comment.body:`). `with_comment=False` drops the
-    comment section; a `None` member is left out."""
-    doc: dict[str, Any] = {}
-    if system is not None:
-        doc["system"] = system
-    if with_comment:
-        doc["comment"] = {} if body is None else {"body": body}
-    return doc
+def case_record_doc(*, system: Any = CASE_SYSTEM) -> dict[str, Any]:
+    """The case-record file as a dict (`system:`). It carries no `comment:` section: the ticket comment's
+    shape is fixed by the platform (#1471 W7, P-6), and a case record that names one is refused. A `None`
+    system is left out."""
+    return {} if system is None else {"system": system}
 
 
 def settings_of(root: Path) -> Path:
@@ -154,18 +143,6 @@ def current_record(*, config: dict[str, str] | None | object = _CONFIG_UNSET) ->
     settings = current_settings()
     _write_case_config(settings, CONFIG if config is _CONFIG_UNSET else config)
     return T1106.run_tenant(T1106.accept(settings.parents[2], TENANT_ID))
-
-
-def shipped_case_record_doc() -> dict[str, Any]:
-    """The case record the committed fixture tenant runs with, as the case-record file spells it
-    (`system:`, `comment.body:`). #1366 O9: the checked-in `settings/case-record.yaml` is gone;
-    the fixture tenant's case is the record its seeder holds (`R.fixture_records()`, read from
-    the retired copy of that file), so this reads the seeded record, not a path in the checkout."""
-    from defender.tests.support.tenancy import _systems1366 as R
-
-    case = R.fixture_records().case
-    assert case is not None, "the fixture tenant's records carry no case record"
-    return {"system": case.system_id, "comment": {"body": case.comment_body}}
 
 
 # --------------------------------------------------------------------------------------

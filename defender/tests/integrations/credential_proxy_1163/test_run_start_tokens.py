@@ -106,7 +106,7 @@ def _drive(tmp_path, data_root, *, signer=None, ticket=False, summary=None, **se
             seams["directory"] = _records(data_root, tmp_path)[0].directory
     try:
         rc, refused = S.drive_run(
-            S.run_argv(alert, data_root, update_ticket=ticket), rec,
+            S.run_argv(alert, data_root), rec,
             proxy_url="http://proxy.invalid", **seams)
     except ConfigFault as fault:
         rc, refused = None, fault

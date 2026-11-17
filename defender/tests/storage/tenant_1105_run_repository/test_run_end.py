@@ -29,7 +29,6 @@ from defender.tests.support.sandbox._spec791 import (
 )
 
 CROSS_CHECK = "cross_check"
-TICKET = "record_case_ticket"
 ENQUEUE = "enqueue"
 PAGE = "visualize"
 
@@ -75,13 +74,8 @@ class _Tail(SpecTail):
         if self.sample is not None:
             self.sample(name)
 
-    def record_case_ticket(self, run: Any, **kw: Any) -> None:
-        super().record_case_ticket(run, **kw)
-        if self.fail == TICKET:
-            raise OSError(errno.EIO, "spec 1105: the ticket store failed (RG-08-b)")
-
-    def visualize(self, run: Any, *, tenant: Any, update_ticket: bool = False) -> None:
-        super().visualize(run, tenant=tenant, update_ticket=update_ticket)
+    def visualize(self, run: Any, *, tenant: Any) -> None:
+        super().visualize(run, tenant=tenant)
         if self.fail == PAGE:
             raise run_common.VisualizeFailed("spec 1105: the page was not saved (RG-08-d)")
 
@@ -104,7 +98,7 @@ def _waiting_runs(paths: Any) -> list[str]:
 
 def _drive(arm: Any, monkeypatch: Any, *, fail: str | None = None, directory: Any = None, during: Any = None,
            tails: list[Any] | None = None, sample: Any = None, signer: Any = None):
-    """The REAL `run.main` over one alert under `--update-ticket`, with the tail's seams
+    """The REAL `run.main` over one alert, with the tail's seams
     injected and this arm's own learning state; returns (the order the steps ran in, main's
     return value or what it raised, the curation requests queued)."""
     require_tail_seam(run_py.main)
@@ -133,7 +127,7 @@ def _drive(arm: Any, monkeypatch: Any, *, fail: str | None = None, directory: An
     logger.addHandler(handler)
     try:
         alert = plant_alert(arm / f"alert-{arm.name}")
-        argv = [str(alert), "--tenant", str(tenant.id), "--update-ticket"]
+        argv = [str(alert), "--tenant", str(tenant.id)]
         try:
             # Plus the in-process launch-time publish.
             given = directory(root, str(tenant.id)) if directory is not None else directory_for_argv(argv)
@@ -149,22 +143,14 @@ def _drive(arm: Any, monkeypatch: Any, *, fail: str | None = None, directory: An
     return order, outcome, sorted(set(_waiting_runs(paths)) - before)
 
 
-def test_1105_run_end_keeps_todays_order_cross_check_ticket_curation_page(tmp_path, monkeypatch):
+def test_1105_run_end_keeps_todays_order_cross_check_curation_page(tmp_path, monkeypatch):
     order, outcome, queued = _drive(tmp_path / "ok", monkeypatch)
-    tail_steps = [s for s in order if s in (CROSS_CHECK, TICKET, ENQUEUE, PAGE)]
-    assert tail_steps == [CROSS_CHECK, TICKET, ENQUEUE, PAGE], (
-        f"run end ran {order}, not cross-check -> ticket -> curation -> page")
+    tail_steps = [s for s in order if s in (CROSS_CHECK, ENQUEUE, PAGE)]
+    assert tail_steps == [CROSS_CHECK, ENQUEUE, PAGE], (
+        f"run end ran {order}, not cross-check -> curation -> page")
     assert outcome == 0, f"a completing run exits 0: {outcome!r}"
     assert queued, "no curation request was queued"
     assert order.index("lifecycle") < order.index(CROSS_CHECK), "run end follows the lifecycle"
-
-    order, outcome, queued = _drive(tmp_path / "ticket-fails", monkeypatch, fail=TICKET)
-    assert isinstance(outcome, OSError), (
-        f"a raising ticket record did not propagate out of run.main: {outcome!r}")
-    assert outcome.errno == errno.EIO, f"the ticket store's own fault propagates: {outcome!r}"
-    assert ENQUEUE not in order, f"the enqueue ran after a raising ticket record: {order}"
-    assert PAGE not in order, f"the page ran after a raising ticket record: {order}"
-    assert queued == [], f"a curation request was queued after a raising ticket record: {queued}"
 
     order, outcome, queued = _drive(tmp_path / "enqueue-fails", monkeypatch, fail=ENQUEUE)
     assert isinstance(outcome, OSError), (
@@ -207,8 +193,7 @@ def test_the_run_end_curation_request_uses_the_runs_tenant_with_no_second_read(t
         run_sync(offboard_twin(twin, tenant_id))
 
     tails: list[Any] = []
-    # The case system is proxied (#1391), so the record step mints a write-back token at run end; a
-    # signer that needs no login keeps that mint's own record read (#1163 R4d) out of this count.
+    # A signer that needs no login keeps the mint's own record read (#1163 R4d) out of this count.
     from defender.tests.integrations.credential_proxy_1163._harness import FakeSigner
     order, outcome, queued = _drive(tmp_path / "offboarded-mid-run", monkeypatch, directory=directory,
                                     during=offboard, tails=tails, signer=FakeSigner())
@@ -250,7 +235,7 @@ def test_the_run_is_recorded_under_its_tenants_host_lock_for_as_long_as_it_runs(
 
 
 def test_the_run_stays_recorded_and_locked_through_every_step_of_its_end(tmp_path, monkeypatch):
-    """The cross-check, the case ticket, the curation request and the page each run while this process is recorded under
+    """The cross-check, the curation request and the page each run while this process is recorded under
     the run's tenant lock and the lock is held, and neither outlasts `main` (r10 O-A2: for as long as the command works)."""
     from defender.tests.support.tenancy import _host1214 as H
     from defender.tests.support.shared.contracts._data_root_1078 import tenant_directory
@@ -269,7 +254,7 @@ def test_the_run_stays_recorded_and_locked_through_every_step_of_its_end(tmp_pat
     _order, outcome, queued = _drive(tmp_path / "held-to-the-end", monkeypatch, directory=directory, sample=sample)
     assert outcome == 0, f"a completing run exits 0: {outcome!r}"
     assert queued, "control: a completing run queues its request"
-    steps = (CROSS_CHECK, TICKET, ENQUEUE, PAGE)
+    steps = (CROSS_CHECK, ENQUEUE, PAGE)
     assert {step: seen.get(step) for step in steps} == dict.fromkeys(steps, (True, True)), (
         f"(recorded, locked) at each run-end step: {seen}")
     data_root, tenant_id = where["at"]

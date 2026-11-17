@@ -21,6 +21,10 @@ from defender.tests.integrations.credential_proxy_1163 import _tenant as T
 BASE = T.BASE_PATH
 CAP = 1024
 OVERHEAD_SEC = 0.5
+#: The one write route X2 allows (a wildcard at the ticket) and the ticket a write pass names (X1).
+TICKET = "T-1"
+WRITE_ROUTE = "/tickets/*/comments"
+WRITE_PATH = f"/tickets/{TICKET}/comments"
 DEADLINE_SEC = 1
 GAP_SEC = 0.6
 Script = Callable[[socket.socket], None]
@@ -190,8 +194,10 @@ def served(  # noqa: PLR0913 — one keyword per thing a case varies
             kw["max_response_bytes"] = ending.cap
         store = _ExplodingStore() if ending.how == "store raises" else r.store
         url, _tap = stack.enter_context(A.proxy_for(r.t, store, audit=audit, **kw))
-        granted = set() if ending.how == "ungranted" else {("identity", grant)}
-        path = "/tickets" if writes else "/users/x"
+        # X1/X2: a write pass names its ticket, and the one write route declared carries it as its wildcard.
+        entry = ("identity", grant, TICKET) if grant == "rw" else ("identity", grant)
+        granted = set() if ending.how == "ungranted" else {entry}
+        path = WRITE_PATH if writes else "/users/x"
         yield Exchange(None, None, audit, up, url, r.tok(granted), f"{up.url}{BASE}{path}", r,
                        exchanged)
 

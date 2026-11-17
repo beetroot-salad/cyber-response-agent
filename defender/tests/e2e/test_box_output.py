@@ -683,30 +683,32 @@ def test_o8_o9_a_run_the_model_had_closed_keeps_its_report_and_its_case_comment_
 @pytest.mark.parametrize(("exchange", "code", "named"), [
     (EXEC_KILLED, 5, "box-lost"), (OVER_THE_FENCE, 6, "box-output-limit")], ids=["box-lost", "fence"])
 @pytest.mark.parametrize("closed", [True, False], ids=["model-closed", "not-closed"])
-def test_o8_o9_the_case_is_commented_on_only_when_the_model_had_closed_before_the_ending(
+def test_o8_o9_an_operator_run_the_box_ended_posts_no_comment_whether_or_not_the_model_had_closed(
         tmp_path, exchange, code, named, closed):
-    """Through the ticketed run: one comment for a model-closed run, none for an unclosed one. (O8, O9, decision 3)"""
+    """Through the ticketed run: the ending's exit, name and report-iff-closed stand, and the operator run posts no
+    comment either way (#1471 W7: the job lane comments; the rule is `comments_on`, held by the test below). (O8, O9, decision 3)"""
     store = S.TicketStore(tmp_path)
     main = S.MainScript([*(S.closing_main_turns()[:2] if closed else []),
                          S.call("bash", command=COMMAND), S.text(S.DONE)])
     result = S.run_alert(tmp_path, main=main, alert=S.ticketed_alert(),
                          tenant=S.ticket_the_tenant(S.plant_tenant()), tickets=S.ticket_writer(store),
-                         update_ticket=True, box_lifecycle=_boxed("exited", _exchange_runs(*exchange)))
+                         box_lifecycle=_boxed("exited", _exchange_runs(*exchange)))
     assert result.raised is None, result.raised
     assert result.rc == code
     assert _run_end(result).truncated_by == named
     assert (result.report is not None) is closed
-    assert len(store.comment_payloads) == (1 if closed else 0), store.calls
+    assert store.comment_payloads == [], store.calls
 
 
-def test_control_a_closed_run_with_no_ending_comments_on_the_case_through_the_same_harness(tmp_path):
-    """The ticketed, learn-enabled harness does see a comment and a curation enqueue when due. (O8)"""
+def test_control_a_closed_run_with_no_ending_enqueues_curation_and_posts_no_comment_through_the_same_harness(tmp_path):
+    """The ticketed, learn-enabled harness does see a curation enqueue when due, and the operator run posts no comment
+    (#1471 W7). (O8)"""
     store = S.TicketStore(tmp_path)
     result = S.run_alert(tmp_path, main=S.MainScript(S.closing_main_turns()), alert=S.ticketed_alert(),
                          tenant=S.ticket_the_tenant(S.plant_tenant()), tickets=S.ticket_writer(store),
-                         update_ticket=True, no_learn=False)
+                         no_learn=False)
     assert result.rc == 0
-    assert len(store.comment_payloads) == 1, store.calls
+    assert store.comment_payloads == [], store.calls
     assert len(result.enqueued) == 1, result.enqueued
 
 
@@ -718,7 +720,7 @@ def test_o8_o9_a_model_closed_run_whose_stop_faulted_is_not_commented_or_curated
     stops: list[str] = []
     main = S.MainScript([*S.closing_main_turns()[:2], S.call("bash", command=COMMAND), S.text(S.DONE)])
     result = S.run_alert(tmp_path, main=main, alert=S.ticketed_alert(), tenant=S.ticket_the_tenant(S.plant_tenant()),
-                         tickets=S.ticket_writer(store), update_ticket=True, no_learn=False,
+                         tickets=S.ticket_writer(store), no_learn=False,
                          box_lifecycle=_torn_down(exchange, teardown_faults=True, seen=stops))
     assert stops, "the lifecycle never tore the box down, so the fault proves nothing"
     assert result.raised is None, result.raised

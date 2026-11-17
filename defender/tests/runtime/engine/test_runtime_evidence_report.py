@@ -11,7 +11,7 @@ import json
 from defender._frontmatter import split_frontmatter
 from defender.investigation import close_tool
 from defender.tests.support.shared.contracts import _tacit983 as scene
-from defender.tests.support.runtime.engine._spec767 import posted_comment_body
+from defender.tests.support.runtime.engine._spec767 import posted_comment_body, ticket_link_for
 
 WINDOW_90D = "2026-02-04T00:00:00Z/2026-05-04T00:00:00Z"
 ANCHOR_90D = "tk-baseline-90d"
@@ -133,7 +133,9 @@ def test_runtime_evidence_consultation_lands_in_report_body():
     )
 
 
-def test_baseline_context_now_reaches_the_recorded_comment(tmp_path):
+def test_baseline_context_stays_in_the_report_and_off_the_recorded_comment(tmp_path):
+    """The baseline rides the report body; the ticket comment carries nothing of the report but its
+    disposition and the screen link (#1471 P-6). The report half is `test_runtime_evidence_consultation_lands_in_report_body`."""
     receipts = _receipts(BENIGN_DOC)
     report = close_tool.render_report(
         "benign", outcome=close_tool.STANDS, cause=close_tool.CAUSE_STORY_SETTLED,
@@ -153,9 +155,8 @@ def test_baseline_context_now_reaches_the_recorded_comment(tmp_path):
     # #1359: observed at the record leg's posted comment (below the agent tag line).
     wire = posted_comment_body(run_dir, tmp_path)
     for crossed in ("runtime-evidence", "1500 occurrences", scene.WINDOW_BEFORE_ALERT):
-        assert crossed in wire, (
-            f"{crossed!r} did not reach the outbound comment, which carries the whole report body"
-        )
+        assert crossed not in wire, f"{crossed!r} reached the outbound comment, which carries no report text"
+    assert wire == f"benign\n{ticket_link_for(run_dir)}", wire
 
 
 

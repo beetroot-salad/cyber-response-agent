@@ -784,8 +784,7 @@ def test_m3_beneath_the_names_nothing_listed_or_opened_the_run_folder_before_the
             assert got.raised is None, got
             assert got.exit is None, got
         else:
-            rc = run_py.main([str(B.plant_alert(tmp_path / "op-alert")), "--tenant", scene.t.tenant_id,
-                              "--update-ticket"],
+            rc = run_py.main([str(B.plant_alert(tmp_path / "op-alert")), "--tenant", scene.t.tenant_id],
                              lifecycle=lifecycle, preflight=lambda *a, **k: 0, visualize=spies.seam,
                              ticket_writer=Writer(), enqueue=lambda *a, **k: False,
                              publish=lambda *a, **k: B.fresh(scene.t.commit))
@@ -1513,8 +1512,9 @@ class _Tripwire:
         return refuse
 
 
-def _operator_composition_still_clears_records_and_enqueues(scene: Scene, tmp_path: Path) -> None:
-    """Positive control: the operator composition, through its seams, still clears, records and enqueues."""
+def _operator_composition_still_enqueues_and_never_records(scene: Scene, tmp_path: Path) -> None:
+    """Positive control: the operator composition, through its seams, still enqueues; it never records into a case
+    (#1471 W7: `--update-ticket` is gone and an operator run never comments; clearing a receipt is not pinned)."""
     from defender import run as run_py
 
     seen: list[str] = []
@@ -1531,12 +1531,12 @@ def _operator_composition_still_clears_records_and_enqueues(scene: Scene, tmp_pa
         return False
 
     alert = B.plant_alert(tmp_path / "op-alert")
-    rc = run_py.main([str(alert), "--tenant", scene.t.tenant_id, "--update-ticket"],
+    rc = run_py.main([str(alert), "--tenant", scene.t.tenant_id],
                      lifecycle=lambda **kw: summary(), preflight=lambda *a, **k: 0,
                      visualize=lambda *a, **k: None, ticket_writer=Writer(), enqueue=enq,
                      publish=lambda *a, **k: B.fresh(scene.t.commit))
     assert rc == 0
-    assert seen == ["clear", "record", "enqueue"], seen
+    assert [step for step in seen if step != "clear"] == ["enqueue"], seen
 
 
 @pytest.fixture
@@ -1561,7 +1561,8 @@ def docker_shim(tmp_path, monkeypatch):
 
 def test_m4_a_job_run_opens_no_ticket_and_enqueues_no_curation_while_the_operator_path_does(
         scene, tmp_path, monkeypatch, docker_shim):
-    """The job entry takes no seam for either and calls neither; `run.main` still does, by default. (M4, O11)"""
+    """The job entry takes no seam for either and calls neither; `run.main` still enqueues, by default, and never records
+    (#1471 W7). (M4, O11)"""
     import inspect
 
     from defender import run as run_py
@@ -1638,7 +1639,10 @@ def test_m4_a_job_run_opens_no_ticket_and_enqueues_no_curation_while_the_operato
     made = [k for k in set(tree(scene.root)) - before if re.search(r"curat|queue|learn", k, re.IGNORECASE)]
     assert made == [], f"the job lane left curation state behind: {made}"
 
-    _operator_composition_still_clears_records_and_enqueues(scene, tmp_path)
+    _operator_composition_still_enqueues_and_never_records(scene, tmp_path)
+    # the seam above is the operator's handed writer; the default writer module and its transport stay tripped, so an
+    # operator run that records past the seam (W7: it never comments) is caught here too
+    assert (wire.called, launched) == ([], []), f"the operator composition reached the writer past its seam: {wire.called}"
 
 def test_1414_a_job_run_opens_no_feedback_issue_whatever_the_setting_lists(tmp_path, monkeypatch, migrated_database):
     """A tenant whose setting lists every outcome still gets no `feedback_issues` row from a job-lane run (D10: no folder to look in). F1 (#1414), A4."""
@@ -1740,7 +1744,7 @@ def test_m4_the_store_check_sees_the_operator_default_enqueue(scene, tmp_path):
 
     assert waiting() == [], "premise: the tenant has no request before the run"
     before = set(tree(scene.root))
-    rc = run_py.main([str(B.plant_alert(tmp_path / "op-alert")), "--tenant", scene.t.tenant_id, "--update-ticket"],
+    rc = run_py.main([str(B.plant_alert(tmp_path / "op-alert")), "--tenant", scene.t.tenant_id],
                      lifecycle=lifecycle, preflight=lambda *a, **k: 0, visualize=lambda *a, **k: None,
                      ticket_writer=Writer(), publish=lambda *a, **k: B.fresh(scene.t.commit))
     assert rc == 0
@@ -2118,11 +2122,23 @@ def _stale_sentence_1471(stale: str | None) -> str | None:
     return None
 
 
-def _assert_p6_1471(body: str, *, run_id: str, link: str, parts: list[str], stale: str | None = None) -> None:
-    """P-6: the tag line first; then, in order, the stale sentence (when stale), the disposition word or the escalation or
-    unreadable sentence, and the link, last; nothing the report said."""
+def _text_1471(call: dict[str, Any]) -> str:
+    """The comment text a recorded comment request carried: the request body is the store's `{author, body}` payload
+    (as the record-leg tests read it, `calls[0]["body"]["body"]`)."""
+    payload = call["body"]
+    assert isinstance(payload, dict), f"not a comment payload: {payload!r}"
+    assert isinstance(payload.get("body"), str), f"not a comment payload: {payload!r}"
+    return payload["body"]
+
+
+def _assert_p6_1471(call: dict[str, Any], *, run_id: str, link: str, parts: list[str], stale: str | None = None) -> None:
+    """P-6, over a recorded comment request: the tag line first; then, in order, the stale sentence (when stale), the
+    disposition word or the escalation or unreadable sentence, and the link, last; nothing the report said, anywhere in
+    the payload."""
     from defender.investigation import close_tool
     from defender.tenancy import case_ticket
+
+    body, payload = _text_1471(call), str(call["body"])
 
     assert body.splitlines()[0].strip() == case_ticket.agent_comment_tag(run_id), body
     sentence = _stale_sentence_1471(stale)
@@ -2133,7 +2149,7 @@ def _assert_p6_1471(body: str, *, run_id: str, link: str, parts: list[str], stal
     assert not any(ch.isalnum() for ch in body.split(link, 1)[1]), f"text follows the link: {body}"
     assert ("Knowledge notice" in body) == (sentence is not None), body
     for said in (*close_tool.REPORT_CAUSES, NARRATIVE_1471, "Disposition recorded by the close gate"):
-        assert said not in body, f"the report's own text reached the ticket ({said!r}): {body}"
+        assert said not in payload, f"the report's own text reached the ticket ({said!r}): {payload}"
 
 
 @pytest.mark.parametrize("disposition", _vocab.DISPOSITION_VALUES)
@@ -2156,8 +2172,7 @@ def test_1471_w2_p6_a_flagged_job_with_a_verdict_posts_one_comment_with_its_tag_
     assert ticket_scene.job_end(run_id) == SETTLED, ran.message  # premise: the run ended with its report committed
     assert len(comments) == 1, f"expected one comment, got {store.requests()}"
     assert comments[0]["path"].endswith(f"/tickets/{TICKET_1471}/comments"), comments[0]
-    body = str(comments[0]["body"])
-    _assert_p6_1471(body, run_id=run_id, link=link, parts=[disposition])
+    _assert_p6_1471(comments[0], run_id=run_id, link=link, parts=[disposition])
     pass_claims = _H1471.claims_of(signer, comments[0]["token"])
     assert [list(e) for e in pass_claims["grant"]] == [["ticket", "rw", TICKET_1471]], pass_claims
     receipt = _receipt_1471(ticket_scene, run_id)
@@ -2176,7 +2191,7 @@ def test_1471_w2_a_flagged_job_that_ended_escalated_without_a_verdict_posts_the_
 
     assert ran.raised is None, ran.message
     assert len(comments) == 1, store.requests()
-    _assert_p6_1471(str(comments[0]["body"]), run_id=run_id, link=link, parts=[f"exit: {exit_class}"])
+    _assert_p6_1471(comments[0], run_id=run_id, link=link, parts=[f"exit: {exit_class}"])
     receipt = _receipt_1471(ticket_scene, run_id)
     assert receipt is not None, "no receipt"
     assert (receipt["status"], receipt["ok"]) == ("escalated", True), receipt
@@ -2197,7 +2212,7 @@ def test_1471_w2_a_flagged_job_whose_report_is_unreadable_posts_the_unreadable_o
 
     assert ran.raised is None, ran.message
     assert len(comments) == 1, store.requests()
-    _assert_p6_1471(str(comments[0]["body"]), run_id=run_id, link=link, parts=[marker])
+    _assert_p6_1471(comments[0], run_id=run_id, link=link, parts=[marker])
     receipt = _receipt_1471(ticket_scene, run_id)
     assert receipt is not None, "no receipt"
     assert (receipt["status"], receipt["ok"]) == (status, True), receipt
@@ -2217,8 +2232,8 @@ def test_1471_w2_a_flagged_job_force_closed_with_a_readable_report_posts_its_dis
 
     assert ran.raised is None, ran.message
     assert len(comments) == 1, store.requests()
-    body = str(comments[0]["body"])
-    _assert_p6_1471(body, run_id=run_id, link=link, parts=["unresolved"])
+    body = _text_1471(comments[0])
+    _assert_p6_1471(comments[0], run_id=run_id, link=link, parts=["unresolved"])
     assert f"exit: {exit_class}" not in body, body
     receipt = _receipt_1471(ticket_scene, run_id)
     assert receipt is not None, "no receipt"
@@ -2240,9 +2255,9 @@ def test_1471_p6_a_stale_runs_comment_opens_with_the_tag_then_the_stale_sentence
 
     assert ran.raised is None, ran.message
     assert len(comments) == len(fresh) == 1, store.requests()
-    _assert_p6_1471(str(comments[0]["body"]), run_id=run_id, link=link, parts=["benign"], stale=stale)
-    assert "Knowledge notice" not in str(fresh[0]["body"]), fresh[0]["body"]
-    _assert_p6_1471(str(fresh[0]["body"]), run_id=fresh_id, link=fresh_link, parts=["benign"])
+    _assert_p6_1471(comments[0], run_id=run_id, link=link, parts=["benign"], stale=stale)
+    assert "Knowledge notice" not in _text_1471(fresh[0]), fresh[0]
+    _assert_p6_1471(fresh[0], run_id=fresh_id, link=fresh_link, parts=["benign"])
 
 
 def _closed_set_1471() -> list[tuple[str, dict[str, Any]]]:
@@ -2276,7 +2291,7 @@ def test_1471_p6_the_comment_of_every_closed_set_combination_fits_the_wire_bound
         run_id, ran, link, comments = _job_1471(ticket_scene, store, stale=stale, **kw)
         assert ran.raised is None, (label, ran.message)
         assert len(comments) == 1, (label, store.requests())
-        body = str(comments[0]["body"])
+        body = _text_1471(comments[0])
         sentence = _stale_sentence_1471(stale)
         found[label] = "" if (len(body.encode("utf-8")) <= WIRE_BOUND_BYTES and link in body
                               and (sentence is None or sentence in body)
@@ -2394,9 +2409,9 @@ def test_1471_p5_a_launch_record_rewritten_after_the_worker_wrote_it_steers_neit
     assert ran.raised is None, ran.message
     assert len(comments) == 1, f"the rewritten record unflagged the job or stopped it: {store.requests()}"
     assert comments[0]["path"].endswith(f"/tickets/{TICKET_1471}/comments"), comments[0]
-    body = str(comments[0]["body"])
+    body = _text_1471(comments[0])
     assert link in body, body
-    assert EVIL_LINK_1471 not in body, body
+    assert EVIL_LINK_1471 not in str(comments[0]["body"]), comments[0]  # the whole payload, author included
 
 
 def test_1471_p5_an_alert_swapped_after_the_worker_wrote_it_with_the_record_digest_rewritten_is_refused_and_posts_nothing(

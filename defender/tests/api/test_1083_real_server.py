@@ -750,7 +750,7 @@ def _concrete(path: str, tenant: str) -> str:
 
 SYSTEM = {"replaces": 0, "enabled": True, "settings": {}, "access": ""}
 CREDENTIALS = {"for_version": 1, "credentials": {"api_key": "a-secret-of-sixteen-or-more"}}
-CASE = {"replaces": 0, "system_id": "ticket", "comment_body": "{disposition}"}
+CASE = {"replaces": 0, "system_id": "ticket"}  # #1471 W7: no comment body
 
 
 def _body(method: str, path: str) -> dict[str, Any]:

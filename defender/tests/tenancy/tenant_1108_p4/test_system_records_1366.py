@@ -322,20 +322,6 @@ def test_1366_o4_a_case_system_that_is_not_a_current_enabled_record_is_refused(i
     assert op.current()["jira"].enabled
 
 
-@pytest.mark.postgres
-@pytest.mark.parametrize("body", ["{nosuch}", "{0}", "{unclosed", "   "])
-def test_1366_o4_a_case_template_failing_the_case_record_rules_is_refused(imported_op, body):
-    """A template naming an unknown render key, a positional one, an unclosed brace or blank text is refused and
-    stored nowhere; a good one is version 2. (#1366 O4, #1359)"""
-    before = _state(imported_op)
-
-    rc, said = imported_op.set_case(replaces=1, body=body)
-
-    _refused(imported_op, before, rc, said, (("comment.body",),), file_ok=True)  # #1359's judgement names the field
-    assert imported_op.set_case(replaces=1, body="{disposition}: {cause}")[0] == 0
-    assert _case_versions(imported_op) == [(1, "ticket", False), (2, "ticket", False)]
-
-
 
 
 
@@ -663,18 +649,19 @@ def test_1366_o5_case_versions_number_per_tenant_and_follow_the_same_rules(impor
     """Case: set (2), delete (3); then deleting again, naming 2 or the delete (3) is refused; naming 0 (#1470 P2: a
     tombstone shows as none) stores 4. Authors are `set-case` and `delete-case`. (#1366 O5, R9)"""
     op = imported_op
-    assert op.set_case(replaces=1, body="{disposition}")[0] == 0
+    assert op.set_case(replaces=1)[0] == 0
     assert op.delete_case(replaces=2)[0] == 0
     before = _state(op)
 
     for rc, said in (op.delete_case(replaces=3), op.set_case(replaces=2), op.set_case(replaces=3)):
         _refused(op, before, rc, said, (), file_ok=True)
 
-    assert op.set_case(replaces=0, body="{cause}")[0] == 0
+    assert op.set_case(replaces=0)[0] == 0
     assert _case_versions(op) == [(1, "ticket", False), (2, "ticket", False), (3, "ticket", True), (4, "ticket", False)]
     assert [c.author for c in R.case_versions(op.dsn, op.tid)] == [
         R.SEED_AUTHOR, *[R.ADMIN_AUTHOR] * 3]
-    assert R.current_records(op.dsn, op.tid).case.comment_body == "{cause}"
+    current = R.current_records(op.dsn, op.tid).case
+    assert (current.version, current.system_id) == (4, "ticket")  # W7: the case record holds no comment body
 
 
 def _threaded(dsn: str, judge: Any, call: Any, failed: list) -> threading.Thread:
@@ -718,7 +705,7 @@ def test_1366_o5_one_tenants_writes_are_serialized_across_the_system_and_case_ta
         await store.delete_system(op.tid, "identity", replaces=1, author="test a")
 
     async def put_case(store: Any) -> None:
-        await store.put_case(op.tid, replaces=1, system_id="ticket", comment_body="{disposition}", author="test b")
+        await store.put_case(op.tid, replaces=1, system_id="ticket", author="test b")  # W7: no comment body
 
     a = _threaded(op.dsn, judge_a, delete_identity, failed)
     try:
@@ -885,14 +872,14 @@ def test_1366_dc8_disabling_and_re_enabling_is_a_version_that_keeps_the_record(i
 
 
 @pytest.mark.postgres
-def test_1366_dc8_set_case_stores_the_body_exactly_and_delete_case_removes_the_record(imported_op):
-    """Writing the case record stores its system and template text as given (version 2); deleting it makes the case record
-    not exist. (#1366 DC8, O5, H7)"""
+def test_1366_dc8_set_case_stores_the_system_and_delete_case_removes_the_record(imported_op):
+    """Writing the case record stores its system as given (version 2; W7: it holds no template); deleting it makes the
+    case record not exist. (#1366 DC8, O5, H7)"""
     op = imported_op
-    body = "{disposition} — {cause}\n\n{narrative}\nsee {case_id}"
-    assert op.set_case(replaces=1, body=body)[0] == 0
+    assert op.set_case(replaces=1)[0] == 0
     case = R.current_records(op.dsn, op.tid).case
-    assert (case.version, case.system_id, case.comment_body) == (2, "ticket", body)
+    assert (case.version, case.system_id) == (2, "ticket")
+    assert not hasattr(case, "comment_body"), "W7: the stored case record still carries a comment body"
     assert op.delete_case(replaces=2)[0] == 0
     assert R.current_records(op.dsn, op.tid).case is None
 

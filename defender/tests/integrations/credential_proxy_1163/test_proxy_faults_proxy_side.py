@@ -289,19 +289,20 @@ def test_f4_a_lone_surrogate_in_a_request_is_classified_and_audited(
     the method) gets a 200 answer with a fault class and one audit record; nothing is sent. O7, A9, A13."""
     lone = "\ud800"
     with T.rig(tmp_path / "forge", data_root, lambda u: H.declaration(
-            u + BASE, writes=(("POST", "/tickets"),))) as r:
+            u + BASE, writes=(("POST", "/tickets/*/comments"),))) as r:
         doc = _doc(r)
         if where == "header":
             doc["headers"] = {"X-A": f"v{lone}"}
         elif where == "url":
             doc["url"] = f"{r.up.url}{BASE}/users/{lone}"
         elif where == "body":
-            doc.update(method="POST", url=f"{r.up.url}{BASE}/tickets", body=f"{{\"x\": \"{lone}\"}}")
+            doc.update(method="POST", url=f"{r.up.url}{BASE}/tickets/T-1/comments",
+                       body=f"{{\"x\": \"{lone}\"}}")
         elif where == "system":
             doc["system"] = lone
         else:
             doc["method"] = f"G{lone}T"
-        grant = {("identity", "rw")}
+        grant = {("identity", "rw", "T-1")}  # X1: the write pass names its ticket
         response = r.client.post(PROXY_PATH, headers={"Authorization": f"Bearer {r.tok(grant)}"},
                                  content=json.dumps(doc).encode("ascii"))
         control = r.ask()

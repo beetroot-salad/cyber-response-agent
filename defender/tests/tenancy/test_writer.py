@@ -46,7 +46,7 @@ def _store(tmp_path, **kw) -> FakeStore:
 
 def _setup(monkeypatch, tmp_path, doc=None):
     """The tenant's case record names its system and nothing else (#1471 W7: no comment template)."""
-    return use_case_record(monkeypatch, tmp_path / "dfn", case_record_doc(with_comment=False) if doc is None else doc)
+    return use_case_record(monkeypatch, tmp_path / "dfn", case_record_doc() if doc is None else doc)
 
 
 def test_767_record_posts_one_comment_on_the_alerts_ticket_and_receipts(tmp_path, monkeypatch):

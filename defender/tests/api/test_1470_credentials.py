@@ -15,7 +15,6 @@ import pytest
 from defender.tests.support.api._config1470 import (
     remove_tenant,
     BASE_MOVED,
-    BODY,
     ELASTIC,
     ELASTIC_ACCESS,
     ELASTIC_SETTINGS,
@@ -973,7 +972,7 @@ _ANNOUNCED = [
     ("system.delete", {"system": True}, lambda c, s: _write(c, s, "DELETE", f"/systems/{TICKET}", params={"replaces": 1}),
      lambda s: [v.deleted for v in s.versions(TICKET)] == [False, True]),
     ("case_record.update", {"system": True}, lambda c, s: _write(c, s, "PUT", "/case-record", json={
-        "replaces": 0, "system_id": TICKET, "comment_body": BODY}),
+        "replaces": 0, "system_id": TICKET}),
      lambda s: [v.deleted for v in _case_versions(s)] == [False]),
     ("case_record.delete", {"system": True, "case": True}, lambda c, s: _write(c, s, "DELETE", "/case-record", params={"replaces": 1}),
      lambda s: [v.deleted for v in _case_versions(s)] == [False, True]),

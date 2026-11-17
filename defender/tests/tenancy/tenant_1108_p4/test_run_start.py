@@ -336,33 +336,6 @@ def test_o8_the_run_process_hands_the_publish_child_identifiers_only_and_holds_n
         "issuer material in the run process's environment")
 
 
-def test_o8_operator_issuer_variables_never_reach_the_runs_environment(tenant, tmp_path,
-                                                                       monkeypatch):
-    """An operator shell exported `BAO_TOKEN`/`VAULT_TOKEN`: the environment run start builds
-    for its host lanes (`run_env`, seen through the ticket writer's record leg) carries neither. Control: an
-    ordinary variable passes."""
-    monkeypatch.setenv("BAO_TOKEN", "s-b-operator-bao-token-77e1")
-    monkeypatch.setenv("VAULT_TOKEN", "s-b-operator-vault-token-91a4")
-    monkeypatch.setenv("S_B_ORDINARY", "s-b-ordinary-value")
-    envs: list[dict] = []
-
-    class Writer:
-        def clear_receipt(self, *_a: Any, **_k: Any) -> None:  # the seam's run-start method (#1359)
-            pass
-
-        def record_case_ticket(self, *_a: Any, env: Any, **_k: Any) -> None:
-            envs.append(dict(env))
-
-    out = B.launch(tenant, tmp_path, publish=lambda *a, **k: B.fresh(tenant.commit),
-                   argv_extra=("--update-ticket",), ticket_writer=Writer())
-    assert out.reached, out.text()
-    assert envs, "the ticket writer was never handed the run's environment"
-    assert all(env.get("S_B_ORDINARY") == "s-b-ordinary-value" for env in envs), "control"
-    assert B.leaks(("s-b-operator-bao-token-77e1", "s-b-operator-vault-token-91a4"),
-                   run_env=envs) == [], "operator issuer material reached the run's env"
-    assert [k for env in envs for k in env if B.ISSUER_ENV.search(k)] == []
-
-
 def _no_copy_left(t: Any) -> None:
     """Nothing of a run is left under `<T>/run-knowledge/` after it ended."""
     copies = B.run_copies(t)
@@ -370,25 +343,16 @@ def _no_copy_left(t: Any) -> None:
     assert left == [], f"a run copy outlived its run: {left}"
 
 
-@pytest.mark.parametrize("seam", ["ticket_writer", "visualize"])
-def test_r_s4_a_raise_after_the_lifecycle_still_removes_the_run_copy(tenant, tmp_path, seam):
-    """A post-lifecycle step (the ticket write-back, the page) raises; the run copy is removed
-    anyway (`finally`)."""
+def test_r_s4_a_raise_after_the_lifecycle_still_removes_the_run_copy(tenant, tmp_path):
+    """A post-lifecycle step (the page) raises; the run copy is removed anyway (`finally`). The ticket write-back
+    is no longer a step of the operator run (#1471 W7), so the page is the one post-lifecycle step left."""
     class Boom(Exception):
         pass
 
     def boom(*_a: Any, **_k: Any) -> None:
-        raise Boom(seam)
+        raise Boom("visualize")
 
-    class Writer:
-        def clear_receipt(self, *_a: Any, **_k: Any) -> None:  # the seam's run-start method (#1359)
-            pass
-
-        record_case_ticket = staticmethod(boom)
-
-    seams = ({"ticket_writer": Writer()} if seam == "ticket_writer" else {"visualize": boom})
-    out = B.launch(tenant, tmp_path, publish=lambda *a, **k: B.fresh(tenant.commit),
-                   argv_extra=("--update-ticket",) if seam == "ticket_writer" else (), **seams)
+    out = B.launch(tenant, tmp_path, publish=lambda *a, **k: B.fresh(tenant.commit), visualize=boom)
     assert out.reached, out.text()
     assert isinstance(out.raised, Boom), out.text()
     _no_copy_left(tenant)

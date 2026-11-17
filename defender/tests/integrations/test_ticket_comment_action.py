@@ -67,7 +67,7 @@ def test_o3_store_answers_map_to_the_shared_fault_classes(tmp_path, monkeypatch,
 # - `test_p2_the_agent_facing_post_entry_cannot_write_a_comment` pinned the docker route's
 #   write-endpoint table. Every request now goes through the proxy, whose route check is the only
 #   guard (#1163 A6): a read token's POST on the comment route is refused unsent there
-#   (`credential_proxy_1163/test_proxy_scope.py::test_s3_only_declared_reads_and_granted_writes_are_sent`).
+#   (`credential_proxy_1163/test_proxy_scope.py::test_s3_only_declared_reads_are_sent_and_a_write_needs_a_pass_on_that_system`).
 # - `test_1374_a_curl_route_write_fault_says_whether_it_may_have_reached_the_store` and
 #   `test_1374_a_missing_docker_cli_did_not_reach_the_store` pinned how curl's and docker's exits
 #   decided "may have reached the store". On the proxy route the proxy says so (`sent`), covered by

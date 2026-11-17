@@ -296,12 +296,24 @@ _BROKEN = [pytest.param(v, r, label, id=f"{i}-{label}") for i, v, r in _LEG for 
 
 @pytest.mark.parametrize(("vendor", "route", "label"), _BROKEN)
 def test_1366_c5_a_stored_record_that_no_longer_covers_the_route_is_a_case_settings_fault_nothing_is_sent(
-        vendor, route, label, tmp_path, data_root):
-    """The leg's verdict is the settings fault: an error receipt naming the case system, no call to the proxy, none to
-    the store, and not the proxy's refusal. (#1366 C5, C2)"""
+        vendor, route, label, tmp_path, data_root, caplog):
+    """The leg's verdict is the settings fault: an error receipt naming the case system and no host path, a warning the
+    ticket writer logs, no call to the proxy, none to the store, and not the proxy's refusal. (#1366 C5, C2; the log and
+    host-path rows moved here from the retired operator-run C5 tests, #1471 W7)"""
+    import logging
+
+    from defender.investigation import ticket_writer
+
     reads, writes = _not_covering(route)[label]
+    caplog.set_level(logging.INFO)
     with _stored(tmp_path, data_root, vendor, reads, writes) as rig:
         receipt = rig.leg("leg")
+        assert receipt is not None, label
+        assert [r for r in caplog.records if r.levelno >= logging.WARNING and r.name == ticket_writer.__name__], \
+            ("the ticket writer logged no warning", [(r.name, r.getMessage()) for r in caplog.records])
+        for host in (tmp_path, data_root):
+            for spelled in {str(host), str(Path(host).resolve())}:
+                assert spelled not in receipt["reason"], (spelled, receipt)
         assert receipt is not None, label
         assert (receipt["ok"], receipt["status"]) == (False, "error"), receipt
         assert vendor.system in receipt["reason"], receipt

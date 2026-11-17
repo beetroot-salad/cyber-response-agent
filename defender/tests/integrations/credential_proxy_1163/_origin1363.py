@@ -34,6 +34,10 @@ NO_EXPORTS = "0b8f6a52-1163-4c1e-9d0e-6f2b3a4c5d72"
 BASIC_SYSTEM = "basic-sys"
 BROKEN_SYSTEM = "wiki"
 OVERHEAD_SEC = 0.3
+#: X1/X2: the one write route a declaration may hold (a wildcard at the ticket), and the ticket a write pass names.
+WRITE_ROUTE = "/tickets/*/comments"
+WRITE_TICKET = "T-1"
+WRITE_PATH = f"/tickets/{WRITE_TICKET}/comments"
 
 
 @dataclass
@@ -248,12 +252,9 @@ def stored(data: Any, version: Any = 1) -> httpx.MockTransport:
 # --- the rows ------------------------------------------------------------------------------
 
 def bearer_rows() -> list[Row]:  # noqa: C901, PLR0915 — one row per cause
-    """Causes on the default rig: a bearer key on `identity`, a write route `POST /tickets`, a
+    """Causes on the default rig: a bearer key on `identity`, the one write route `POST /tickets/*/comments` (X2), a
     basic-auth `BASIC_SYSTEM`, an unparsable declaration at `BROKEN_SYSTEM`, a ghost tenant."""
     from defender.credential_proxy._app import _Unread
-
-    def grant_rw(r: T.Rig) -> str:
-        return r.tok({("identity", "rw")})
 
     def set_for(value: Any, system: str = "identity") -> Callable[[T.Rig], Req]:
         def make(r: T.Rig) -> Req:
@@ -294,7 +295,8 @@ def bearer_rows() -> list[Row]:  # noqa: C901, PLR0915 — one row per cause
         return lambda r: Req(body(r), f"Bearer {T.token(tenant, T.GRANT_R, signer=r.signer)}")
 
     def write(path: str, grant: str) -> Callable[[T.Rig], Req]:
-        return lambda r: req(r, tok=r.tok({("identity", grant)}), method="POST", url=under(r, path), body="{}")
+        entry = ("identity", grant, WRITE_TICKET) if grant == "rw" else ("identity", grant)  # X1: a pass names its ticket
+        return lambda r: req(r, tok=r.tok({entry}), method="POST", url=under(r, path), body="{}")
 
     def other_system(name: str) -> Callable[[T.Rig], Req]:
         return lambda r: req(r, tok=r.tok({(name, "r")}), system=name, url=under(r, "/x"))
@@ -316,7 +318,12 @@ def bearer_rows() -> list[Row]:  # noqa: C901, PLR0915 — one row per cause
         Row("url-not-under-the-base", "request", lambda r: req(r, url=f"{r.up.url}/elsewhere")),
         Row("url-encoded-separator", "request", url("/a%2Fb")),
         Row("route-not-declared", "request", write("/nope", "rw")),
-        Row("write-without-a-write-grant", "request", write("/tickets", "r")),
+        Row("write-route-not-declared-under-a-read-grant", "request", write("/nope", "r")),
+        Row("write-on-another-ticket-than-the-pass-names", "request", write("/tickets/T-2/comments", "rw")),
+        Row("write-pass-on-a-system-that-is-not-one-write-route", "request",
+            lambda r: req(r, tok=r.tok({(BASIC_SYSTEM, "rw", WRITE_TICKET)}), system=BASIC_SYSTEM, method="POST",
+                          url=under(r, WRITE_PATH), body="{}")),
+        Row("write-without-a-write-grant", "request", write(WRITE_PATH, "r")),
         Row("method-not-upper-case", "request", lambda r: req(r, method="get")),
         Row("request-too-large", "request", lambda r: Req(_Unread.TOO_LARGE, f"Bearer {r.tok()}")),
         Row("request-did-not-arrive-in-time", "request", lambda r: Req(_Unread.TOO_SLOW, f"Bearer {r.tok()}")),
@@ -356,6 +363,8 @@ def bearer_rows() -> list[Row]:  # noqa: C901, PLR0915 — one row per cause
         Row("token-expiry-not-whole-seconds", "access", hand(claims(exp="soon"))),
         Row("token-grant-not-a-list", "access", hand(claims(grant={}))),
         Row("token-grant-entry-malformed", "access", hand(claims(grant=[["identity"]]))),
+        Row("token-write-pass-names-no-ticket", "access", hand(claims(grant=[["identity", "rw"]]))),
+        Row("token-write-pass-names-no-case-key", "access", hand(claims(grant=[["identity", "rw", "not a key"]]))),
         Row("token-grants-a-bad-system-name", "access", hand(claims(grant=[["Bad Name", "r"]]))),
         Row("token-grants-a-bad-mode", "access", hand(claims(grant=[["identity", "x"]]))),
         Row("token-grants-a-system-twice", "access", hand(claims(grant=[["identity", "r"], ["identity", "r"]]))),
@@ -550,6 +559,10 @@ def sites_in(source: str, file: str, *, callees: frozenset[str] = FAULT_CALLEES)
     """Every construction of a fault inside a function of `source`: the place a cause is named."""
     found: list[Site] = []
     stack: list[str] = []
+    tree = ast.parse(source)
+    #: A message kept in a module-level constant (`raise ConfigFault(_SHAPE)`) is the constant's text.
+    constants = {t.id: node.value for node in tree.body if isinstance(node, ast.Assign)
+                 for t in node.targets if isinstance(t, ast.Name)}
 
     class Visitor(ast.NodeVisitor):
         def _scope(self, node: Any) -> None:
@@ -562,12 +575,13 @@ def sites_in(source: str, file: str, *, callees: frozenset[str] = FAULT_CALLEES)
         def visit_Call(self, node: ast.Call) -> None:
             callee = node.func.id if isinstance(node.func, ast.Name) else getattr(node.func, "attr", None)
             if callee in callees and stack:
-                message = next((t for a in node.args if (t := _template(a)) is not None), None)
+                message = next((t for a in node.args
+                                if (t := _template(constants.get(a.id, a) if isinstance(a, ast.Name) else a)) is not None), None)
                 found.append(Site(file, ".".join(stack), node.lineno, message[0] if message else "",
                                   message[1] if message else None))
             self.generic_visit(node)
 
-    Visitor().visit(ast.parse(source))
+    Visitor().visit(tree)
     return found
 
 

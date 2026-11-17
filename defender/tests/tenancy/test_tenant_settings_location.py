@@ -141,18 +141,13 @@ def test_every_settings_file_is_denied_by_both_read_surfaces_and_a_corpus_file_i
 MARK = "injected"
 
 
-#: The injected tenant's comment template; the checkout's fixture carries a different one.
-INJECTED_BODY = "injected-tenant-body {disposition}"
-
-
 @pytest.fixture
 def injected(tmp_path) -> Path:
     """The injected tenant's settings folder: `<tmp root>/<T>/knowledge/settings`, every value
-    carrying `MARK`, its case-record body distinct from the checkout's."""
+    carrying `MARK`."""
     root = tmp_path / "injected-root"
     S.plant(
         root, T.PLAYGROUND_ID, table=T.TABLE_B, marker=MARK,
-        case_body=INJECTED_BODY,
     )
     td = T.accept(root, T.PLAYGROUND_ID)
     assert not td.settings.is_relative_to(T.REPO_ROOT), "the fixture root must be outside"
@@ -219,16 +214,17 @@ def test_a_system_with_no_settings_in_the_injected_tenant_is_a_config_fault_nami
 
 def test_the_record_leg_comments_to_the_injected_tenants_store_with_its_case_record(
         injected, tmp_path):
-    """The `--update-ticket` lane: the real record leg, handed the run's record, addresses the
-    injected tenant's case store (`ticket/config.env`) and renders the injected tenant's
-    case record body (#1366: seeded from its planted `case-record.yaml`), not the fixture's. Replaces the retired `case-history` mapping
+    """The ticket step: the real record leg, handed the run's record, addresses the injected tenant's
+    case store (`ticket/config.env`), not the fixture's. The comment's body is no tenant's to choose
+    (#1471 W7 removed the case record's template; P-6 fixes the parts), so the store address is what
+    tells the injected tenant from the checkout's. Replaces the retired `case-history` mapping
     reader tests (#1359 O2: the open leg and `load_case_mapping` are gone)."""
     from defender.tests.tenancy.case_comment_1359 import _spec1359 as C
 
     run_dir = tmp_path / fixture_uuid("run-1106")
     run_dir.mkdir()
     C.plant_record(run_dir)
-    write_report(run_dir)  # a readable report: the injected body renders over it
+    write_report(run_dir)  # a readable report: the comment is posted over it
     proxy = S.ProxyStandIn(tmp_path / "proxy", S.store_answers_ok())
     S.record_step(run_dir, _record(injected), env={}, proxy_url=proxy.url,
                   request_token="write-token-1106")
@@ -237,8 +233,6 @@ def test_the_record_leg_comments_to_the_injected_tenants_store_with_its_case_rec
     assert len(posts) == 1, proxy.requests()
     (post,) = posts
     assert post["url"] == f"http://ticket-{MARK}:8080/tickets/{C.TICKET_KEY}/comments", post
-    assert "injected-tenant-body" in post["body"]["body"], "the injected case-record body was not sent"
-    assert "injected-tenant-body" not in R.FIXTURE_CASE_BODY, "the fixture no longer discriminates"
 
 
 # ---- lead-zero ---------------------------------------------------------------------------------

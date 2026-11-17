@@ -450,8 +450,8 @@ def test_1345_o5_the_run_settings_check_neither_requires_nor_parses_the_alert_ma
 # Further cases
 
 def test_p102_a_run_with_no_alert_mapping_starts_nothing(tmp_path: Path, capsys: Any) -> None:
-    """A run for a tenant with no mapping saved is refused and reaches neither the ticket leg nor the curation enqueue;
-    with its mapping both happen. (#1345 O4; was #1222 p102 over a faulted file)"""
+    """A run for a tenant with no mapping saved is refused and does not reach the curation enqueue;
+    with its mapping it does (an operator run has no ticket leg, W7). (#1345 O4; was #1222 p102 over a faulted file)"""
     w = world(tmp_path, capsys)
     enqueued: list[Any] = []
 
@@ -459,27 +459,21 @@ def test_p102_a_run_with_no_alert_mapping_starts_nothing(tmp_path: Path, capsys:
         enqueued.append((args, kw))
         return True
 
-    # Positive control, on both channels a refused run must leave untouched: a started run is
-    # enqueued for curation and its record leg comments on the alert's ticket.
+    # Positive control, on the channel a refused run must leave untouched: a started run is
+    # enqueued for curation.
     S.ticket_the_tenant(w.planted)
-    store = S.TicketStore(w.tmp)
-    ok = at_run_start(w, alert=S.ticketed_alert(), tickets=S.ticket_writer(store),
-                      update_ticket=True, enqueue=enqueue)
+    ok = at_run_start(w, alert=S.ticketed_alert(), enqueue=enqueue)
     assert_passed(ok)
     assert enqueued, "a started run was not enqueued for curation"
-    assert store.paths(S.COMMENTS_SUFFIX) == [f"/tickets/{S.TICKET_KEY}/comments"], store.calls
     from defender.records.formats import ALERT_MAPPING_MISSING
 
     S.remap(w.planted, None)
-    store = S.TicketStore(w.tmp)
     enqueued.clear()
-    v = at_run_start(w, alert=S.ticketed_alert(), tickets=S.ticket_writer(store),
-                     update_ticket=True, enqueue=enqueue)
+    v = at_run_start(w, alert=S.ticketed_alert(), enqueue=enqueue)
     assert v.refused, v.text
     assert not v.passed, v.text
     assert " ".join(ALERT_MAPPING_MISSING.split()) in " ".join(v.text.split()), v.text
     assert_no_run(v)
-    assert store.calls == [], f"a ticket leg ran for a refused run: {store.calls!r}"
     assert not enqueued, "a refused run was enqueued for curation"
     assert not v.detail.enqueued, "a refused run reached the curation enqueue"
 

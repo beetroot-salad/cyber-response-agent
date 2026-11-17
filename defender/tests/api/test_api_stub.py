@@ -84,6 +84,7 @@ INV = Investigation(
     investigation_id="b1000000-0000-4000-8000-000000000001", alert_id="a1000000-0000-4000-8000-000000000001", status="completed", disposition="benign",
     request_key="req-1", attempt=1,
     cost_usd=1.5, cost_is_lower_limit=False, created_at=NOW, artifacts=["report.md", "gather_raw/L1/0.json"],
+    update_ticket=False,  # #1471 C-4: the request's flag
     # The knowledge revision the run used (`current` = the run record's `fresh`).
     knowledge={"status": "current", "commit": "f4e5c0de0000f4e5c0de0000f4e5c0de0000f4e5",
                "stale_kind": None},
@@ -528,14 +529,15 @@ def test_1379_a_client_request_id_postgresql_cannot_hold_is_a_422_naming_it(
 # --- creates: 201 or replay ----------------------------------------------------------------
 
 
-@pytest.mark.parametrize(("path", "body", "port", "record", "location"), [
+@pytest.mark.parametrize(("path", "body", "port", "record", "location", "flag"), [
+    # #1471 C-3/C-4: the investigation create's port call also carries the request's `update_ticket` (default false).
     (f"{T}/investigations", {"alert_id": "a1000000-0000-4000-8000-000000000001", "client_request_id": "r1"}, "create_investigation",
-     INV, f"{T}/investigations/b1000000-0000-4000-8000-000000000001"),
+     INV, f"{T}/investigations/b1000000-0000-4000-8000-000000000001", [False]),
     (f"{T}/learning-jobs", {"investigation_id": "b1000000-0000-4000-8000-000000000001", "client_request_id": "r1"},
-     "create_learning_job", JOB, f"{T}/learning-jobs/c1000000-0000-4000-8000-000000000001"),
+     "create_learning_job", JOB, f"{T}/learning-jobs/c1000000-0000-4000-8000-000000000001", []),
 ])
 def test_a_create_is_a_201_with_location_only_when_the_store_created(
-    path: str, body: dict[str, str], port: str, record: Any, location: str,
+    path: str, body: dict[str, str], port: str, record: Any, location: str, flag: list[bool],
 ) -> None:
     """A create is one write call, principal first; 201 with Location when created, 200 without on a replay; the route announces nothing. (Ports, P2)"""
     created = Api(**{port: (record, True)})
@@ -544,7 +546,7 @@ def test_a_create_is_a_201_with_location_only_when_the_store_created(
     assert response.headers["Location"] == BASE + location
     assert response.json() == record.model_dump(mode="json")
     [((principal, *rest), kwargs)] = created.ports.called(port)
-    assert (principal, rest, kwargs) == (Principal(tenant_id=A, actor_id=created.user), [*body.values()], {})
+    assert (principal, rest, kwargs) == (Principal(tenant_id=A, actor_id=created.user), [*body.values(), *flag], {})
     assert [name for name, _ in created.ports.written] == [port]
     assert created.ports.audits == [], "the route announces nothing"
 
@@ -1008,7 +1010,8 @@ def test_a_blank_client_request_id_is_refused() -> None:
 def test_a_disposition_outside_the_vocabulary_cannot_be_served() -> None:
     with pytest.raises(ValueError, match="not a disposition"):
         Investigation(investigation_id="i", alert_id="a", status="completed", disposition="fine",
-                      request_key="k", attempt=1, cost_usd=0.0, cost_is_lower_limit=False, created_at=NOW)
+                      request_key="k", attempt=1, cost_usd=0.0, cost_is_lower_limit=False, created_at=NOW,
+                      update_ticket=False)
 
 
 @pytest.mark.parametrize("bad", ["a/b", "a b", "a?b#c", "é", ""])
@@ -1027,7 +1030,7 @@ def test_a_principal_carries_a_checked_tenant(legacy) -> None:
 def test_a_naive_time_cannot_be_served() -> None:
     with pytest.raises(ValueError, match="timezone"):
         Investigation(investigation_id="i", alert_id="a", status="queued", cost_usd=0.0, cost_is_lower_limit=False,
-                      request_key="k", attempt=1, created_at=NOW.replace(tzinfo=None))
+                      request_key="k", attempt=1, created_at=NOW.replace(tzinfo=None), update_ticket=False)
 
 
 # --- pagination ----------------------------------------------------------------------------

@@ -71,14 +71,12 @@ def _drive(tmp_path: Path, planted: S.Planted, alert: Mapping[str, Any] | bytes,
            mapping: Mapping[str, Any] | None = None, main: Sequence[S.Turn] | None = None,
            ) -> S.Drive:
     """One alert through `run.main` with every reader recorded: the orientation lookups'
-    argv, the case ticket's record leg (its comment renders the signature). The alert names its
-    ticket. MAIN closes a report unless `main` says otherwise: the comment renders the
-    signature only from a readable report. `mapping` (when given) is written first."""
+    argv and the run's record. The alert names its ticket (an operator run posts no comment, W7).
+    MAIN closes a report unless `main` says otherwise. `mapping` (when given) is written first."""
     S.ticket_the_tenant(planted, mapping)
     d = S.run_alert(tmp_path, alert=S.ticketed_alert(alert), tenant=planted,
                     main=main if main is not None else S.closing_main_turns(),
-                    orient_shim=S.RecordingShim(), tickets=S.ticket_writer(S.TicketStore(tmp_path)),
-                    update_ticket=True)
+                    orient_shim=S.RecordingShim())
     ran = d.raised is None and d.refusal is None and d.rc == 0 and d.main.requests >= 1
     assert ran, (f"the run did not run to MAIN: rc={d.rc!r} refusal={d.refusal!r} "
                  f"raised={d.raised!r}")
@@ -126,12 +124,10 @@ def _hands(d: S.Drive, value: str) -> bool:
     return any(a == value or a.endswith("=" + value) for a in _handed(d))
 
 
-def _comment_signature(d: S.Drive) -> str | None:
-    """The signature the record leg's one comment (on the alert's ticket) rendered, or None."""
-    store = d.tickets.store
-    assert store.paths(S.COMMENTS_SUFFIX) == [f"/tickets/{S.TICKET_KEY}/comments"], store.calls
-    found = S.COMMENT_SIGNATURE.search(store.comment_body())
-    return found.group(1) if found else None
+def _recorded_signature(d: S.Drive) -> str | None:
+    """The signature the run's record holds (the one fact that reached no reader of the run but its record
+    once the operator run stopped commenting, W7)."""
+    return d.recorded("signature")
 
 
 def _diff(a: str, b: str, a_name: str, b_name: str) -> str:
@@ -141,8 +137,8 @@ def _diff(a: str, b: str, a_name: str, b_name: str) -> str:
 
 def _unlike_unmapped(case: S.Drive, ref: S.Drive, label: str) -> list[str]:
     """Every channel on which `case` was NOT treated exactly like the unmapped reference: what
-    MAIN was told and instructed, what each orientation lookup was handed, the signature the case
-    ticket's comment carries."""
+    MAIN was told and instructed, what each orientation lookup was handed, the signature the run's
+    record holds."""
     problems: list[str] = []
     told, ref_told = _told(case), _told(ref)
     if told != ref_told:
@@ -153,23 +149,23 @@ def _unlike_unmapped(case: S.Drive, ref: S.Drive, label: str) -> list[str]:
     if _argvs(case) != _argvs(ref):
         problems.append(f"[{label}] the orientation lookups were handed {_argvs(case)!r}; the "
                         f"unmapped run's were {_argvs(ref)!r}")
-    if _comment_signature(case) != _comment_signature(ref):
-        problems.append(f"[{label}] the case ticket's comment carries {_comment_signature(case)!r}; "
-                        f"the unmapped run's carries {_comment_signature(ref)!r}")
+    if _recorded_signature(case) != _recorded_signature(ref):
+        problems.append(f"[{label}] the run's record holds {_recorded_signature(case)!r}; "
+                        f"the unmapped run's holds {_recorded_signature(ref)!r}")
     return problems
 
 
 def _carries(d: S.Drive, signature: str, label: str) -> list[str]:
     """Every reader that did NOT yield `signature` — the orientation lookups (one whole argument),
-    the ticket comment's signature — or that yielded the decoy `rule.id` instead."""
+    the record's signature — or that yielded the decoy `rule.id` instead."""
     problems: list[str] = []
     if not _hands(d, signature):
         problems.append(f"[{label}] no orientation lookup was handed {signature!r}: {_argvs(d)!r}")
     if _hands(d, DECOY):
         problems.append(f"[{label}] an orientation lookup was handed the alert's rule.id "
                         f"{DECOY!r} instead: {_argvs(d)!r}")
-    if _comment_signature(d) != signature:
-        problems.append(f"[{label}] the case ticket's comment carries {_comment_signature(d)!r}, "
+    if _recorded_signature(d) != signature:
+        problems.append(f"[{label}] the run's record holds {_recorded_signature(d)!r}, "
                         f"not {signature!r}")
     return problems
 
@@ -205,8 +201,8 @@ def test_alert_facts_resolve_each_mapped_path_or_absent(tmp_path: Path) -> None:
     # Never another field: neither the alert's rule.id, its detected_at nor its rule.description.
     for d, label in ((absent, "paths absent"), (partial, "signature and event_time unmapped")):
         problems += _not_handed(d, [DECOY, DETECTED_AT], label)
-        if _comment_signature(d) == DECOY:
-            problems.append(f"[{label}] the case ticket's signature is the alert's rule.id")
+        if _recorded_signature(d) == DECOY:
+            problems.append(f"[{label}] the recorded signature is the alert's rule.id")
     assert not problems, _fail(problems)
 
     assert {f: mapped.recorded(f) for f in S.FACTS} == {
@@ -450,10 +446,8 @@ def test_p083_event_time_mapped_to_a_number_zero_or_object(tmp_path: Path) -> No
 
     problems: list[str] = []
     for name, _want, d in generic:
-        if _comment_signature(d) != "R-EVT-1":
-            problems.append(f"[{name}] the ticket comment's signature is {_comment_signature(d)!r}")
-        if len(d.tickets.store.comment_payloads) != 1:
-            problems.append(f"[{name}] the ticket's record leg posted {d.tickets.store.calls!r}")
+        if _recorded_signature(d) != "R-EVT-1":
+            problems.append(f"[{name}] the recorded signature is {_recorded_signature(d)!r}")
     assert not problems, _fail(problems)
 
     for slug, stamp, d in fixtures:
@@ -504,9 +498,9 @@ def test_p181_negative_zero_padded_and_string_versus_integer_i(tmp_path: Path) -
     problems += _not_handed(padded, ["5710"], "zero-padded text")
     problems += _carries(as_text, "5710", "'5710' as text")
     problems += _carries(as_int, "5710", "5710 as an integer")
-    if _comment_signature(as_text) != _comment_signature(as_int):
-        problems.append(f"the text and the integer 5710 sign the ticket differently: "
-                        f"{_comment_signature(as_text)!r} vs {_comment_signature(as_int)!r}")
+    if _recorded_signature(as_text) != _recorded_signature(as_int):
+        problems.append(f"the text and the integer 5710 are recorded differently: "
+                        f"{_recorded_signature(as_text)!r} vs {_recorded_signature(as_int)!r}")
     assert not problems, _fail(problems)
 
     assert negative.recorded("signature") is None
@@ -586,9 +580,8 @@ def test_1345_o3_the_facts_come_from_the_tenants_mapping_never_a_leftover_file(t
     assert _facts(other) == SHIPPED_FACTS  # positive control: the database row is what changed the facts
 
 
-def test_1345_m4_a_mapping_replaced_after_the_start_changes_nothing_that_run_recorded_or_wrote(tmp_path: Path) -> None:
-    """Replacing the tenant's mapping while a run is under way changes neither its recorded facts nor the ticket comment
-    later written from them; a new run derives from the new mapping. (#1345 M4)"""
+def test_1345_m4_a_mapping_replaced_after_the_start_changes_nothing_that_run_recorded(tmp_path: Path) -> None:
+    """Replacing the tenant's mapping while a run is under way changes none of its recorded facts; a new run derives from the new mapping. (#1345 M4)"""
     planted = S.plant_tenant(fixture_uuid("tenant:acme"))
     S.ticket_the_tenant(planted, SHIPPED)
     records = _Records(planted, S.current_mapping(planted))
@@ -596,17 +589,14 @@ def test_1345_m4_a_mapping_replaced_after_the_start_changes_nothing_that_run_rec
     def replace(_run_dir: Path) -> None:
         records.entries = EDITED
 
-    store = S.TicketStore(tmp_path)
     first = S.run_alert(tmp_path / "first", alert=S.ticketed_alert(_alert()), tenant=planted, main=S.closing_main_turns(),
-                        tickets=S.ticket_writer(store), update_ticket=True, before=replace, directory=records.directory())
+                        before=replace, directory=records.directory())
     assert first.raised is None, first.raised
     assert first.refusal is None, first.refusal
     assert first.run_dir is not None
     assert records.entries == EDITED, "premise: the replace happened while the run was under way"
 
     assert _facts(first) == SHIPPED_FACTS
-    assert store.paths(S.COMMENTS_SUFFIX) == [f"/tickets/{S.TICKET_KEY}/comments"], store.calls
-    assert S.COMMENT_SIGNATURE.search(store.comment_body()).group(1) == DECOY  # type: ignore[union-attr]
     retry = _started(tmp_path / "retry", planted, _alert(), directory=records.directory())
     assert _facts(retry) == EDITED_FACTS
 

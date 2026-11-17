@@ -409,22 +409,24 @@ def test_the_jobs_columns_are_the_designed_ones_without_server_defaults(migrated
     assert set(investigations) == {"id", "tenant_id", "alert_id", "request_key", "attempt", "stage", "created_at",
                                    "started_at", "finished_at", "disposition", "cost_usd", "knowledge",
                                    "failure_reason", "failure_message", "lease_expires_at", "accounting_written_at",
-                                   "cost_is_lower_limit"}
+                                   "cost_is_lower_limit", "update_ticket", "ticket_write"}  # #1471: the request's flag and the outcome word
     # #1345 (data model): the store derives an alert's title and description from the tenant's mapping, so both are nullable.
     assert {n for n, (_, nullable, _) in alerts.items() if nullable} == {"title", "description"}
     nullable = {n for n, (_, can_be_null, _) in investigations.items() if can_be_null}
     assert nullable == {"started_at", "finished_at", "disposition", "cost_usd", "knowledge", "failure_reason",
-                        "failure_message", "lease_expires_at", "accounting_written_at"}
+                        "failure_message", "lease_expires_at", "accounting_written_at", "ticket_write"}  # #1471: `update_ticket` is required
     assert alerts["raw"][0] == "bytea"
     assert investigations["cost_usd"][0] == "double precision"
     assert investigations["cost_is_lower_limit"][0] == "boolean"
+    assert (investigations["update_ticket"][0], investigations["ticket_write"][0]) == ("boolean", "text")
     assert [c for cols in (alerts, investigations) for c, (_, _, default) in cols.items() if default is not None] == []
 
 
 @pytest.mark.postgres
 def test_the_jobs_constraints_are_exactly_the_designed_ones(migrated_database):
-    """PKs, the tenant FK, the alert uniques, the composite FK, the attempt unique, a stage CHECK, #1343's lease CHECK and #1377's
-    lower-limit-needs-a-cost CHECK; no other constraint (#1342 M10; #1377 S4: the job row enforces it)."""
+    """PKs, the tenant FK, the alert uniques, the composite FK, the attempt unique, a stage CHECK, #1343's lease CHECK, #1377's
+    lower-limit-needs-a-cost CHECK and #1471's ticket_write-word CHECK; no other constraint (#1342 M10; #1377 S4: the job row
+    enforces it; #1471 W6, its words are pinned in test_1471_ticket_write_migration)."""
     alerts = _jobs_constraints(migrated_database, "alerts")
     assert [(kind, cols) for kind, cols, _ in alerts] == sorted([
         ("f", ("tenant_id",)), ("p", ("id",)), ("u", ("id", "tenant_id")),
@@ -440,13 +442,15 @@ def test_the_jobs_constraints_are_exactly_the_designed_ones(migrated_database):
     assert foreign == "FOREIGN KEY (tenant_id, alert_id) REFERENCES jobs.alerts(tenant_id, id)", \
         "no ON DELETE / ON UPDATE action: delete and cascade are the store's, under the alert lock (M10, O10)"
     checks = [d for k, _, d in investigations if k == "c"]
-    assert len(checks) == 3, "the stage CHECK, #1343's running-has-a-lease CHECK and #1377's mark-needs-a-cost CHECK, no other"
+    assert len(checks) == 4, ("the stage CHECK, #1343's running-has-a-lease CHECK, #1377's mark-needs-a-cost CHECK and "
+                              "#1471's ticket_write-word CHECK, no other")
+    [word] = [d for d in checks if "ticket_write" in d]
     [check] = [d for d in checks if "completed" in d]
     for stage in ("queued", "running", "completed", "unparseable", "failed", "aborted"):
         assert f"'{stage}'" in check
     [mark] = [d for d in checks if "cost_is_lower_limit" in d]
     assert "cost_usd" in mark
-    [lease] = [d for d in checks if "completed" not in d and d != mark]
+    [lease] = [d for d in checks if "completed" not in d and d not in (mark, word)]
     assert "lease_expires_at" in lease
     assert "'running'" in lease  # (#1343: second CHECK; conflict updated)
 

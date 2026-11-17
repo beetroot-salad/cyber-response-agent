@@ -197,7 +197,7 @@ RECEIPT_CASES = [
 @pytest.mark.parametrize(("vendor", "status"), RECEIPT_CASES)
 def test_o6_the_comment_reaches_the_store_through_the_record_leg_and_the_receipt_says_so(
         vendor, status, tmp_path, data_root):
-    """A tenant planted as /connect leaves it: one request on the key, receipt `commented` with the adapter's link. O6, O1."""
+    """A tenant planted as /connect leaves it: one request on the key carrying the P-6 body, receipt `commented` with the adapter's link. O6, O1."""
     with R.planted(tmp_path, data_root, vendor, leg=True) as rig:
         rig.reply(KEY, status, {"id": "10001"})
         receipt = rig.leg("run")
@@ -209,9 +209,14 @@ def test_o6_the_comment_reaches_the_store_through_the_record_leg_and_the_receipt
     assert receipt.get("url") == vendor.link(base, KEY), receipt
     assert [(s.method, s.path.split("?")[0]) for s in seen] == [
         (vendor.method, vendor.base_path + vendor.route(KEY))]
-    lines = _lines(vendor, seen[0].body)
-    assert any(" \u2014 " in ln for ln in lines), (
-        f"the case-record template's body did not reach the store: {lines}")
+    from defender.tenancy.case_ticket import agent_comment_tag
+    from defender.tests.support.runtime.engine._spec767 import ticket_link_for
+
+    # #1471 W7/P-6: no template; the body is the tag line, the report's disposition word and the screen link
+    run_dir = C.CaseRunRecorder(tmp_path / "run").run_dir_at
+    lines = [ln for ln in _lines(vendor, seen[0].body) if ln]
+    assert lines == [agent_comment_tag(run_dir.name), "benign", ticket_link_for(run_dir)], (
+        f"the job lane's comment did not reach the store in the vendor's shape: {lines}")
 
 
 @vendors

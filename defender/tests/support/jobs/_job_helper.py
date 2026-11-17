@@ -93,8 +93,11 @@ def helper_child(mode: str, commit: str, marks: Path, launch: Any, *, stderr_to:
     """A worker's `child_argv` answer for an investigation: the real helper in front of the replay job entry
     (`_helper_child1170.py`; `mode`, `commit` and `marks` are `_job_entry1342.py`'s), in place of `python -m
     defender.job_host` (which would need a real vault, publish and docker). `stderr_to`: the child's stderr appended to it."""
+    # C-1 (#1471 P-5): the worker's own start hands the helper the alert digest (required) and, flagged, the post flag and link.
+    ticket = [*(["--alert-digest", launch.alert_digest] if launch.alert_digest is not None else []),
+              *(["--post-ticket", "--ticket-link", launch.ticket_link] if launch.update_ticket else [])]
     child = [sys.executable, str(_HELPER_CHILD), mode, commit, str(marks), "--job", launch.investigation_id,
-             "--tenant", launch.tenant_id, "--parent-pid", str(launch.parent_pid)]
+             "--tenant", launch.tenant_id, "--parent-pid", str(launch.parent_pid), *ticket]
     return ["/bin/sh", "-c", 'exec "$@" 2>>"$0"', str(stderr_to), *child] if stderr_to is not None else child
 
 
@@ -503,6 +506,10 @@ class ContainerStandIn(RecordingDocker):
         return [n for n, labels in self.live.items() if labels.get(label) == value]
 
 
+#: The digest of the alert `HelperScene.plant` writes: what the worker hands an investigation helper (C-1).
+PLANTED_DIGEST = hashlib.sha256(ALERT_BYTES).hexdigest()
+
+
 @dataclass
 class HelperScene:
     root: Path
@@ -549,14 +556,19 @@ class HelperScene:
 
         execute(self.dsn, "DELETE FROM tenancy.alert_mappings WHERE tenant_id = %s", (self.tenant,))
 
-    def argv(self, kind: str, job: str | None, *, source: str | None = None, parent: int | None = None) -> list[str]:
-        """The helper's command line (a sketch choice): the job's kind, its id, its tenant, the worker's pid."""
+    def argv(self, kind: str, job: str | None, *, source: str | None = None, parent: int | None = None,
+             alert_digest: str | None = PLANTED_DIGEST) -> list[str]:
+        """The helper's command line (a sketch choice): the job's kind, its id, its tenant, the worker's pid; for an
+        investigation, `--alert-digest` (C-1, required): by default the digest of the alert `plant` writes, as the worker
+        hands the digest of the alert it wrote (None: no digest, for a test of its absence or one that sends its own)."""
         out = ["--kind", kind]
         if job is not None:
             out += ["--job", job]
         out += ["--tenant", self.tenant]
         if source is not None:
             out += ["--source", source]
+        if kind == "investigation" and alert_digest is not None:
+            out += ["--alert-digest", alert_digest]
         return [*out, "--parent-pid", str(os.getppid() if parent is None else parent)]
 
 

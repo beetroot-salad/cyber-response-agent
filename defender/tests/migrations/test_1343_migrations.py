@@ -42,15 +42,15 @@ def test_b_the_history_stays_one_line_with_the_new_revision_on_the_uuid_ids_revi
 
 
 def _plant(dsn: str, inv: str, stage: str, ticket: str, *, cost: float = 0, at_head: bool = False) -> None:
-    """A row at the database's revision: `at_head` adds #1377's required `cost_is_lower_limit` (false), which a database
-    at an older revision does not have."""
+    """A row at the database's revision: `at_head` adds the head's required columns, #1377's `cost_is_lower_limit` and
+    #1471's `update_ticket` (both false), which a database at an older revision does not have."""
     alert = _id("alert", ticket)
     execute(dsn, "INSERT INTO jobs.alerts (id, tenant_id, vendor, vendor_ticket_id, fired_at, changed_at, received_at, "
                  "title, description, raw) VALUES (%s, %s, 'elastic', %s, now(), now(), now(), 't', 'd', '\\x7b7d')",
             (alert, TENANT, ticket))
     started = "now() - interval '2 hours'" if stage != "queued" else "NULL"
     finished = "now() - interval '1 hour'" if stage in TERMINAL else "NULL"
-    mark_column, mark = (", cost_is_lower_limit", ", false") if at_head else ("", "")
+    mark_column, mark = (", cost_is_lower_limit, update_ticket", ", false, false") if at_head else ("", "")
     execute(dsn, "INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, stage, created_at, "
                  f"started_at, finished_at, cost_usd{mark_column}) VALUES (%s, %s, %s, 'k', 1, %s, now(), {started}, {finished}, "  # noqa: S608
                  f"%s{mark})", (inv, TENANT, alert, stage, cost))
@@ -123,8 +123,8 @@ def test_b_a_running_row_must_have_a_lease_and_other_stages_need_none(migrated_d
         _plant(dsn, _inv(ticket), "queued", ticket, at_head=True)
     i_1 = _inv("1")
     insert = ("INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, stage, created_at, started_at, "
-              f"cost_usd, cost_is_lower_limit, lease_expires_at) VALUES ('{_inv('new')}', '{TENANT}', '{_id('alert', 'new')}', 'k', 1, %s, "
-              "now(), now(), 0, false, {lease})")  # cost_is_lower_limit: #1377's required column, at head
+              f"cost_usd, cost_is_lower_limit, update_ticket, lease_expires_at) VALUES ('{_inv('new')}', '{TENANT}', '{_id('alert', 'new')}', 'k', 1, %s, "
+              "now(), now(), 0, false, false, {lease})")  # #1377's `cost_is_lower_limit` and #1471's `update_ticket`: required columns, at head
     execute(dsn, "INSERT INTO jobs.alerts (id, tenant_id, vendor, vendor_ticket_id, fired_at, changed_at, received_at, title, "
                  "description, raw) VALUES (%s, %s, 'elastic', 'new', now(), now(), now(), 't', 'd', '\\x7b7d')",
             (_id("alert", "new"), TENANT))

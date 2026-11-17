@@ -550,14 +550,11 @@ def run_py() -> Any:
     return mod("run")
 
 
-def run_argv(alert: Path, data_root: Path, *, update_ticket: bool = False) -> list[str]:
+def run_argv(alert: Path, data_root: Path) -> list[str]:
     """`run.py`'s argv for the playground tenant, planted under `data_root` (this test's).
     `run.py` takes no run id: a run's id is the name of the folder its `RunRecorder` builds."""
     _require_data_root(data_root)
-    argv = [str(alert), "--tenant", PLAYGROUND_ID]
-    if update_ticket:
-        argv.append("--update-ticket")
-    return argv
+    return [str(alert), "--tenant", PLAYGROUND_ID]  # an operator run takes no ticket switch (#1471 W7)
 
 
 def plant_alert(where: Path, *, alert_id: str = "a-1107") -> Path:
@@ -671,6 +668,10 @@ def record_step(run_dir: Path, record: Any, *, env: Mapping[str, str], **kw: Any
     handed in (`tenant=`, `defender_dir=`, `env=`), and the case-system verdict run start made over the tenant's roster
     (`case=`, #1366 R16: the step never judges it over a roster of its own; a caller passes its own to stand one in)."""
     kw.setdefault("case", T1106.case_for(record, DEFENDER))
+    if "link" not in kw:  # C-7: the job lane's screen link
+        from defender.tests.support.runtime.engine._spec767 import ticket_link_for
+
+        kw["link"] = ticket_link_for(Path(run_dir))
     return ticket_writer().record_case_ticket(
         _run_handle_1165(Path(run_dir)), tenant=record, defender_dir=DEFENDER, env=dict(env), **kw)
 
@@ -698,14 +699,13 @@ def store_answers_ok() -> list[dict[str, Any]]:
 # The run page.
 # ======================================================================================
 
-def render_page(run_dir: Path, *, update_ticket: bool) -> str:
-    """Render the page as run.py does after teardown (`run_common.visualize`, handed run.py's
-    `--update-ticket` flag as `update_ticket=`) and return its HTML."""
+def render_page(run_dir: Path) -> str:
+    """Render the page as run.py does after teardown (`run_common.visualize`) and return its HTML."""
     from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, set_up_tenant
 
     run = _run_handle_1165(Path(run_dir))
     tenant = set_up_tenant(current_data_root())  # the accepted Tenant rides beside the run
-    mod("run_common").visualize(run, tenant=tenant, update_ticket=update_ticket)
+    mod("run_common").visualize(run, tenant=tenant)
     return page_html(run_dir)
 
 

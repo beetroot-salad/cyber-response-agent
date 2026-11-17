@@ -51,7 +51,7 @@ def test_1471_w7_a_stored_case_record_renders_as_text_that_parses_and_names_no_c
 
 
 @pytest.mark.postgres
-def test_1471_w7_the_store_keeps_a_case_version_without_a_template_and_the_column_is_gone(migrated_database):
+def test_1471_w7_the_store_keeps_a_case_version_without_a_template_and_the_column_is_gone(migrated_database):  # noqa: F811 — the imported fixture
     """`put_case` takes a system and an author; the version it writes has no template and the table has no
     `comment_body` column. (W7)"""
     tenant = str(uuid.uuid4())
