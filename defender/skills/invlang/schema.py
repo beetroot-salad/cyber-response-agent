@@ -326,8 +326,8 @@ class Conclude(TypedDict, total=False):
     ceiling_rationale: str | None
     summary: str | None
     # What the detector got wrong, separate from `summary` because a run can find two
-    # independent things (the alert's claim fails; the host is compromised anyway). Not
-    # mirrored into `report.md`, which carries no model prose.
+    # independent things (the alert's claim fails; the host is compromised anyway). Joined
+    # after `summary` into the closing record's summary (treated there).
     detection_notes: str | None
     # The checks the run could not make, one entry per gap, so a reader can tell a benign close
     # that checked everything from one with a load-bearing gap. A bare `none` projects as

@@ -1,9 +1,9 @@
-"""The content schema for the run's two model-authored artifacts.
+"""The content schema for the run's model-authored artifact.
 
-`report.md` and `investigation.md` are the only model-authored files that leave the system
-(into the judge prompt and the ticket bridge's HTTP egress). This module owns what a
-well-formed one is: the report's frontmatter grammar and `disposition` enum, UTF-8 byte
-bounds, and the investigation's invlang structure.
+`investigation.md` is the only model-authored file that leaves the system (into the judge
+prompt). This module owns what a well-formed one is: its UTF-8 byte bound and its invlang
+structure. (The run's headline is the closing record the close writes, #1534, which no model
+write reaches.)
 
 It owns no authorization (`investigation/permission/files.py` does) and never sees a policy, run
 dir, or path. Entry points return a deny reason or `None`, not a `permission.Decision`, so
@@ -17,10 +17,6 @@ from collections.abc import Callable, Sequence
 from typing import Protocol
 
 from defender.records import RUN_LAYOUT
-from defender._frontmatter import FrontmatterError, split_frontmatter
-from defender._yaml import duplicate_top_level_key
-# Not the normalizer: the write gate tests the value exactly (see `validate_report`).
-from defender._vocab import DISPOSITION_ENUM
 
 _logger = logging.getLogger(__name__)
 
@@ -75,23 +71,17 @@ def _validator() -> tuple[
     return _diagnose, _warn_diagnostics
 
 # Volume bounds on bytes that leave the system, in UTF-8 bytes — not a content check.
-REPORT_FRONTMATTER_MAX = 512
-REPORT_FILE_MAX = 8192
 INVESTIGATION_FILE_MAX = 65536
-
-# Refused even though the judge frames report bytes in a salted frame: the report contract
-# should not depend on that prompt-layer hardening.
-REPORT_CLOSE_DELIMITER = "</report>"
 
 # The gate iterates this to decide whether a write target is a gated artifact, so a third
 # artifact is added here. A function so names always come from the run-dir owner; this module
 # must not hold record names of its own.
 def artifact_names() -> tuple[str, ...]:
     """The artifacts this module has a schema for, by name, from the run-dir owner."""
-    return (RUN_LAYOUT.report.name, RUN_LAYOUT.investigation.name)
+    return (RUN_LAYOUT.investigation.name,)
 
 # Only the append-only investigation validates against its history. The gate reads the
-# baseline only for these names, keeping a raising `read_text` off the report path.
+# baseline only for these names.
 def needs_baseline(name: str) -> bool:
     """Does validating this artifact need the CURRENT on-disk text?"""
     return name == RUN_LAYOUT.investigation.name
@@ -100,14 +90,6 @@ def needs_baseline(name: str) -> bool:
 def utf8_len(text: str) -> int:
     """Byte length under UTF-8 — `len(str)` would under-count multibyte codepoints."""
     return len(text.encode("utf-8"))
-
-
-def _has_duplicate_top_level_key(raw: str) -> bool:
-    """True iff the frontmatter declares a top-level key twice — `safe_load` keeps the last,
-    so a valid `disposition:` could shadow an invalid one. Delegates to `_yaml` so the gate and
-    the permission table agree on what `safe_load` collapses; False on parse trouble.
-    """
-    return duplicate_top_level_key(raw)
 
 
 def encodable_or_reason(proposed_text: str, artifact: str) -> str | None:
@@ -124,53 +106,6 @@ def encodable_or_reason(proposed_text: str, artifact: str) -> str | None:
             "rewrite it as UTF-8 text and retry."
         )
     return None
-
-
-def validate_report(proposed_text: str) -> str | None:
-    """The report.md schema. Fail-closed on: unparseable frontmatter; a missing, duplicated,
-    non-string or out-of-enum top-level `disposition`; frontmatter or file over its byte bound;
-    or a literal `</report>`. Only `disposition` is required (`case_id` comes from the run dir,
-    `confidence` is untyped).
-
-    Reasons are model-facing (raised as ModelRetry). After the frontmatter parses, all
-    independent problems are reported together so the model fixes them in one retry."""
-    try:
-        fm, raw, _body = split_frontmatter(proposed_text)
-    except FrontmatterError as e:
-        return f"report.md frontmatter is malformed — fix and rewrite: {e}"  # lint-run-records: ok — a message naming the record for the model or operator, not a path
-    problems: list[str] = []
-    if _has_duplicate_top_level_key(raw):
-        problems.append(
-            "report.md frontmatter declares a top-level key more than once — remove the "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
-            "duplicate and rewrite."
-        )
-    disposition = fm.get("disposition")
-    # `isinstance(str)` first: an unhashable value would raise TypeError in the set test.
-    # lint-vocabulary: ok — the write gate is exact where readers normalize: there is still an
-    # author to ask, so a zero-width-laced disposition is denied with retry text.
-    if not (isinstance(disposition, str) and disposition in DISPOSITION_ENUM):
-        problems.append(
-            "report.md frontmatter must carry a top-level `disposition` in "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
-            f"{sorted(DISPOSITION_ENUM)} (got {disposition!r}) — fix and rewrite."
-        )
-    if utf8_len(raw) > REPORT_FRONTMATTER_MAX:
-        problems.append(
-            f"report.md frontmatter is {utf8_len(raw)} bytes, over the "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
-            f"{REPORT_FRONTMATTER_MAX}-byte limit — trim it and rewrite."
-        )
-    if utf8_len(proposed_text) > REPORT_FILE_MAX:
-        problems.append(
-            f"report.md is {utf8_len(proposed_text)} bytes, over the "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
-            f"{REPORT_FILE_MAX}-byte limit — trim it and rewrite."
-        )
-    if REPORT_CLOSE_DELIMITER in proposed_text:
-        problems.append(
-            f"report.md contains the literal {REPORT_CLOSE_DELIMITER!r} delimiter, which would "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
-            "break out of the judge's report block — remove it and rewrite."
-        )
-    if not problems:
-        return None
-    return " ".join(problems)
 
 
 #: Every refusal on this artifact leads with it. The model treats its context as the file, so
@@ -298,7 +233,7 @@ def committed_investigation_reason(text: str) -> str | None:
         return None
     return (
         "close blocked: `investigation.md` does not pass invlang validation, and the close is "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
-        "what publishes it — the report commits against this document and the review gate "
+        "what records the disposition — the closing record commits against this document and the review gate "
         "reads it.\n\n"
         + rendered
         + "\n\nRepair those rows with `fix_row(old_row, new_row)` — or delete one with "
@@ -313,8 +248,6 @@ def validate_artifact(name: str, proposed_text: str, current: str | None) -> str
     reason = encodable_or_reason(proposed_text, name)
     if reason is not None:
         return reason
-    if name == RUN_LAYOUT.report.name:
-        return validate_report(proposed_text)
     if name == RUN_LAYOUT.investigation.name:
         return validate_investigation(proposed_text, current)
     raise ValueError(f"no content schema for artifact {name!r}")

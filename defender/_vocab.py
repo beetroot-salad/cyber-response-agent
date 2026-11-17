@@ -1,7 +1,7 @@
 """Closed vocabularies that more than one schema must agree on; domain-specific ones stay
 with their owner (e.g. `skills/invlang/vocab.py`).
 
-`disposition` lives here because both `report.md` frontmatter and invlang's `conclude` block
+`disposition` lives here because both the closing record and invlang's `conclude` block
 validate it, and the report schema imports invlang's validator, so either home would risk a
 cycle. Each set sits beside its membership test; `lint_borrowed_vocabulary` catches consumers
 that re-derive the test.

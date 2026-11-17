@@ -61,16 +61,17 @@ def _comment_body(
 ) -> tuple[str, str]:
     """The comment text and its receipt word.
 
-    An unreadable report (`ReportNotParsable`) gets the fixed unreadable-branch sentence — or,
-    on a forced-close exit, the escalation note, since the host's own forced close failed and
-    there is no verdict. Any other `CaseTicketError` (a template that does not render)
-    propagates to the caller's refusal branch (no call, a warning, an `error` receipt)."""
+    A run with no closing record (`case_ticket.NeverClosed`) gets the fixed not-recorded sentence —
+    or, on a forced-close exit, the escalation note, since the host's own forced close failed and
+    there is no verdict. A record that could not be looked up (`RecordUnreadable`) and any other
+    `CaseTicketError` (a template that does not render) propagate to the caller's refusal branch
+    (no call, a warning, an `error` receipt)."""
     try:
         rec = case_ticket.read_case_record(run)
-    except case_ticket.ReportNotParsable:
+    except case_ticket.NeverClosed:
         if truncated_by in run_end.FORCED_CLOSE_EXITS:
             return case_ticket.escalation_comment_body(str(truncated_by)), RECEIPT_ESCALATED
-        return case_ticket.unreadable_comment_body(), RECEIPT_COMMENTED
+        return case_ticket.never_closed_comment_body(), RECEIPT_COMMENTED
     return case_ticket.case_record_to_comment(rec, settings=settings), RECEIPT_COMMENTED
 
 
@@ -88,16 +89,16 @@ def escalated(truncated_by: str | None, closed_before_cut: bool) -> bool:
 
 def run_outcome(run: Run, *, truncated_by: str | None, closed_before_cut: bool) -> str:
     """The word naming how a run ended, as the feedback setting matches it (#1414 O1): the escalated
-    word when the run ended in an escalated exit without a verdict; `unreadable` when the report
-    cannot be parsed; otherwise the report's disposition. It differs from the case ticket on one
-    path, by design (C21): a forced close whose report cannot be parsed is `unreadable` here,
-    while the ticket posts the escalation note for it (`_comment_body`)."""
+    word when the run ended in an escalated exit without a verdict; `unreadable` when the run has
+    no closing record or it could not be looked up; otherwise the record's disposition. It differs
+    from the case ticket on one path, by design (C21): a forced close that left no record is
+    `unreadable` here, while the ticket posts the escalation note for it (`_comment_body`)."""
     truncated_by = run_end.normalized_truncated_by(truncated_by)
     if escalated(truncated_by, closed_before_cut):
         return str(truncated_by)
     try:
         return case_ticket.read_case_record(run).disposition
-    except case_ticket.ReportNotParsable:
+    except (case_ticket.NeverClosed, case_ticket.RecordUnreadable):
         return "unreadable"
 
 
@@ -150,6 +151,11 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
                 body, word = case_ticket.escalation_comment_body(str(truncated_by)), RECEIPT_ESCALATED
             else:
                 body, word = _comment_body(run, truncated_by, target.template)
+        except case_ticket.RecordUnreadable as e:
+            # The record could not be looked up: no call, and the kind's fixed wording (never
+            # the lookup's detail, which the lookup logged) on the receipt.
+            _leg_refused(run, key, str(e))
+            return
         except CaseTicketError as e:
             # The template refused: no call, but the receipt still says so.
             _leg_refused(run, key, redact_settings_path(f"{case_system.CASE_RECORD_POINTER}: {e}",

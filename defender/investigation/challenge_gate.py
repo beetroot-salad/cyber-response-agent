@@ -227,7 +227,7 @@ class GateVerdict:
 
     `cause` is the host's own sentence (one of `records.closing.CAUSES`), never composed from
     a stage reply. `detail` is the only field that may quote a stage, so it goes to the review
-    record and never to report.md."""
+    record and never to the closing record."""
 
     outcome: str
     disposition: str
@@ -307,7 +307,7 @@ def review_cannot_run(deps: Any, reason: str) -> GateVerdict:
 
     The trace-marker write is contained here, unlike elsewhere: this arm is reached on a fault
     in the run dir itself, where the write is likely to fail too, and an `OSError` escaping the
-    tool would end the run with no report.md."""
+    tool would end the run with no closing record."""
 
     state = ReviewState.of(deps)
     try:
@@ -391,7 +391,7 @@ def _route(
 
     state.raised_asks[target] = mentions_now
     state.turns += 1
-    # NO_CAUSE: this attempt commits no report.md.
+    # NO_CAUSE: this attempt commits no closing record.
     return _verdict(
         CHALLENGED, disposition, NO_CAUSE, review.review,
         material=((target, review.ask.prose),),

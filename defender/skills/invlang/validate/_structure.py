@@ -366,7 +366,7 @@ def _check_vocab_weights(companion: CompanionBody) -> list[str]:
 def _check_vocab_anchor_kinds(companion: CompanionBody) -> list[str]:
     """`anchor_kind` against `vocab.ANCHOR_KINDS`, on all three surfaces that carry one:
     `:H h-NNN.authz` contracts, `:R authz` rows, and `:R consultations` rows (which feed
-    `report.md` and the anchor-id cross-check).
+    the closing record and the anchor-id cross-check).
     """
     errors: list[str] = []
     for h in _walkers.all_hypotheses(companion).values():
