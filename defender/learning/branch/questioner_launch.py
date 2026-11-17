@@ -195,8 +195,8 @@ def _sample_text(source_answer: Path | None) -> str | None:
 
 
 def _author(  # noqa: PLR0913 — the step's inputs
-    ns: argparse.Namespace, *, source: Run, episode: Episode, questioner: Any,
-    lessons_dir: Path, served: Sequence[str], reachable: Sequence[str],
+    ns: argparse.Namespace, *, source: Run, source_disposition: str | None, episode: Episode,
+    questioner: Any, lessons_dir: Path, served: Sequence[str], reachable: Sequence[str],
 ) -> Family:
     """`Step.QUESTIONER`: the questioner authors the family, and it is validated before anything
     reads it.
@@ -231,6 +231,7 @@ def _author(  # noqa: PLR0913 — the step's inputs
         served_systems=tuple(served),
         samples=samples,
         lessons=lessons,
+        source_disposition=source_disposition,
     )
     # The source is named by its id alone (O1(c), declared change 9): no run-folder path is
     # written into the manifest.
@@ -251,6 +252,21 @@ def _author(  # noqa: PLR0913 — the step's inputs
     return family
 
 
+
+
+def source_disposition_of(source: Run) -> str | None:
+    """The disposition the source run's closing record committed (#1534), read before any model
+    call: world A's declared disposition when the questioner names none. A source that never
+    closed gives none (the family is then refused naming `disposition_declared`); one whose
+    record could not be looked at refuses the launch with the lookup's fixed wording (its detail
+    is logged, never shown)."""
+    from defender.records import closing
+
+    found = closing.for_run(source)
+    if isinstance(found, closing.CouldNotLook):
+        raise branch.BranchError("world A's declared disposition comes from the source run's "
+                                 f"closing record. {found.wording}")
+    return found.record.disposition if isinstance(found, closing.Record) else None
 
 
 def _fence_count(source: Run, branch_message_id: int, *, as_of: Any) -> int:

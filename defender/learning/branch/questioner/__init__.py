@@ -14,8 +14,7 @@ import yaml
 from defender import _yaml
 from defender.configuration import env_str
 from defender._io import read_guarded, read_text_utf8
-from defender.records.formats import read_report
-from defender.records import RunPaths, artifact_file
+from defender.records import RunPaths
 from defender._untrusted import message_salt
 from defender.learning._prompt import section_text, stage_user_message, titled_section
 from defender.learning.core.validate import MalformedReply, reply_document_text
@@ -275,18 +274,6 @@ def _reply_document(reply: Any, *, what: str) -> dict[str, Any]:
     return dict(doc)
 
 
-def _captured_disposition(source_run_dir: Path) -> str | None:
-    """The disposition the source run itself published in `report.md`, or `None`.
-
-    Screened with `artifact_file` first: the source run dir is a prior box's rw bind, and
-    `read_report` follows symlinks. An unreadable report is not an error here; `parse_family`
-    names the field if no source supplies it."""
-    report = RunPaths(source_run_dir).report
-    if not artifact_file(report):
-        return None
-    return read_report(report).disposition
-
-
 def _declared_base_world(family: dict[str, Any]) -> dict[str, Any]:
     """The base world Call 1 declared, if it declared one (seat invariants are re-imposed)."""
     worlds = family.get("worlds")
@@ -300,20 +287,22 @@ def _declared_base_world(family: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
-def _base_world(family: dict[str, Any], source_run_dir: Path) -> dict[str, Any]:
+def _base_world(family: dict[str, Any], source_disposition: str | None) -> dict[str, Any]:
     """World A, composed rather than authored by a call of its own.
 
     No facts, a null axis and the base role are imposed, never read from a reply: they make A
     the control, and a fact would change the world the others are measured against.
 
     The declared disposition is taken from, in order: Call 1's `base_disposition`, the base
-    entry in Call 1's `worlds`, the source run's `report.md`. If all are silent the key is left
-    absent so `parse_family` refuses rather than a verdict being defaulted."""
+    entry in Call 1's `worlds`, the disposition the source run's closing record committed
+    (`source_disposition`, which the launcher read before any model call; #1534). If all are
+    silent the key is left absent so `parse_family` refuses rather than a verdict being
+    defaulted."""
     world: dict[str, Any] = _declared_base_world(family)
     declared = (
         family.get("base_disposition")
         or world.get("disposition_declared")
-        or _captured_disposition(source_run_dir)
+        or source_disposition
     )
     if declared is not None:
         world["disposition_declared"] = declared
@@ -448,8 +437,11 @@ def author_family(  # noqa: PLR0913 — one keyword per captured input plus `les
     served_systems: Sequence[str] = (),
     samples: Any = None,
     lessons: Any = None,
+    source_disposition: str | None = None,
 ) -> dict[str, Any]:
-    """Author one family document: one family call plus one call per planned world."""
+    """Author one family document: one family call plus one call per planned world.
+    `source_disposition` is the source run's committed disposition (its closing record), or
+    `None` when it never closed."""
     served = list(dict.fromkeys(served_systems))
     header = _measurement_header(Path(source_run_dir), Path(episode_dir), served)
     # Rendered once for all calls; framing is per call because the salt is.
@@ -465,7 +457,7 @@ def author_family(  # noqa: PLR0913 — one keyword per captured input plus `les
     axes = list(axes) if isinstance(axes, list) else []
 
     planned = _planned_worlds(family) or [{} for _ in WORLD_SEATS]
-    worlds: list[dict[str, Any]] = [_base_world(family, Path(source_run_dir))]
+    worlds: list[dict[str, Any]] = [_base_world(family, source_disposition)]
     for seat_index, plan in enumerate(planned):
         seat = _seat_letter(seat_index)
         reply = invoke(

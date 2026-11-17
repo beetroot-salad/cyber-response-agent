@@ -4,9 +4,11 @@ database, written by the close and read through one lookup.
 `records` owns the record's words: the column and entry vocabularies and bounds (`_vocab`), the
 one treatment of model text (`_treat.treat`), the record and entry types with one line renderer
 per entry (`_record`), and the lookup with its three outcomes (`_lookup`). The table itself and
-its write are the session store's (`session_store.write_closing_record`)."""
+its write are the session store's (`session_store.write_closing_record`). The episode-view route
+(`_episode.for_world`) reads an episode world's record through its arm."""
 from __future__ import annotations
 
+from ._episode import for_world, roster_fault
 from ._lookup import (
     ARM_REFUSED, COMMITTED_WITHOUT_RECORD, DATABASE_MISSING, FAULT_KINDS, FAULT_WORDING, LEGACY_LINK,
     POINTER_UNREADABLE, RECORDED_BEFORE_1534, ROSTER_GONE, ROW_INVALID, SCHEMA_VERSION_KIND,
@@ -41,5 +43,5 @@ __all__ = [
     "SUMMARY_BOUND", "TABLE", "TIMEOUT", "UNREADABLE", "BaselineEntry", "CeilingEntry", "ClosingRecord",
     "CouldNotLook", "Lookup", "NeverClosed", "Record", "baseline_line", "baseline_line_of", "baseline_lines_length",
     "canonical_instant", "ceiling_line", "ceiling_line_of", "ceiling_lines_length", "encode_entries", "entry_lines", "fault",
-    "for_run", "read_database", "treat",
+    "for_run", "for_world", "read_database", "roster_fault", "treat",
 ]

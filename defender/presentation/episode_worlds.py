@@ -11,6 +11,7 @@ from typing import Any
 
 
 
+from defender.records import closing
 from defender.records.formats import WORLD_LEAVES
 
 
@@ -69,6 +70,17 @@ _BUCKET_CLASS = {
 
 
 
+
+
+def _closing_slot(found: closing.Lookup) -> str:
+    """A world's closing-record slot (#1534): the committed disposition; "no record" when its
+    arm never closed; the lookup's fixed wording when it could not be looked at (never its
+    detail, which may name a path)."""
+    if isinstance(found, closing.Record):
+        return f"closing record: {_uv(found.record.disposition)}"
+    if isinstance(found, closing.CouldNotLook):
+        return esc(found.wording)
+    return "closing record: no record — the world's arm never closed"
 
 def _raw(x: Any) -> str:
     """`x` as plain text, unescaped, for a string another function escapes once."""
@@ -268,15 +280,7 @@ def _render_one_world(ep: _Episode, label: str) -> str:  # noqa: C901, PLR0912, 
     if archived is None:
         bits.append('<div class="w-archive">not archived</div>')
     else:
-        if archived.report.absent:
-            bits.append(
-                f'<div class="w-archive">{esc(str(WORLD_LEAVES.report))}: not archived</div>')
-        else:
-            headline = archived.report.disposition_or_unknown
-            if archived.report.disposition is None and archived.report.reason:
-                # No headline: show the reader's own reason beside the placeholder.
-                headline += f" — {archived.report.reason}"
-            bits.append(f'<div class="w-report">{_uv(headline)}</div>')
+        bits.append(f'<div class="w-report">{_closing_slot(archived.closing)}</div>')
         if not archived.investigation_present:
             bits.append(
                 f'<div class="w-archive">{esc(str(WORLD_LEAVES.investigation))}: '

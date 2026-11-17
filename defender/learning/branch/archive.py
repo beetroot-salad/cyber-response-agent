@@ -78,7 +78,6 @@ def _single_files(run_dir: Path, world: WorldPaths) -> tuple[tuple[Path, Path], 
     """
     paths = RunPaths(run_dir)
     return (
-        (paths.report, world.report),
         (paths.investigation, world.investigation),
         (paths.provenance, world.provenance),
         # The sidecars beside the run dir. Inside `worlds/<X>/` they take the episode

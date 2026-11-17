@@ -16,7 +16,7 @@ from defender._clock import parse_iso_utc
 
 
 
-from defender.records.formats import ReportRead
+from defender.records import closing
 
 
 
@@ -180,14 +180,15 @@ class _Timing:
 
 
 class _WorldArchive:
-    """What `worlds/<world-uuid>/` holds: the archived report, whether the investigation is
-    archived, and the two JSON stamps (`None` when absent or unreadable)."""
+    """What one world shows beside `worlds/<world-uuid>/`: its arm's closing record (the lookup's
+    result, #1534), whether the investigation is archived, and the two JSON stamps (`None` when
+    absent or unreadable)."""
 
-    __slots__ = ("report", "investigation_present", "provenance", "scrub")
+    __slots__ = ("closing", "investigation_present", "provenance", "scrub")
 
-    def __init__(self, *, report: ReportRead, investigation_present: bool,
+    def __init__(self, *, closing: closing.Lookup, investigation_present: bool,
                  provenance: dict[str, Any] | None, scrub: dict[str, Any] | None) -> None:
-        self.report = report
+        self.closing = closing
         self.investigation_present = investigation_present
         self.provenance = provenance
         self.scrub = scrub

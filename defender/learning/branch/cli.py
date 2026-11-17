@@ -108,6 +108,7 @@ from defender.learning.branch.questioner_launch import (
     _SAMPLES_PER_VERB as _SAMPLES_PER_VERB,
     _SAMPLE_CAP as _SAMPLE_CAP,
     _author as _author,
+    source_disposition_of as source_disposition_of,
     _fence_count as _fence_count,
     _joined_leads as _joined_leads,
     _logger as _logger,
@@ -794,6 +795,15 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
         tenant, roster = verdict.tenant, verdict.systems.roster
         runs = tenant.tenant.runs_repository()
         source = _open_launch_source(runs, ns.source_run_id)
+        # World A's declared disposition is the source's closing record (#1534), read first of
+        # all: a writer's open of the source's store (the fork pick, the branch clock) creates
+        # the table an older database lacks, which would turn a fault into an absence.
+        try:
+            source_disposition = source_disposition_of(source)
+        except branch.BranchError as unreadable:
+            raise ending(f"[branch] {unreadable}", reason=LAUNCH_REFUSED,
+                         brief="the source run's closing record could not be read",
+                         cause=unreadable) from unreadable
         _source_stamp_agrees(source, tenant.tenant_id)
         if lane is not None and lane.pick is not None:
             # The job's fork point (O3): picked here, once the source is open and its stamp
@@ -851,7 +861,8 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
                 # first sibling is about to start (`start_runs`).
                 author = seams.model_seam(episode.dir) if questioner is None else questioner
                 return _run_episode(
-                    ns, source=source, source_stamp=checked.source_stamp,
+                    ns, source=source, source_disposition=source_disposition,
+                    source_stamp=checked.source_stamp,
                     launch_waived=checked.waived, episode=episode, view=view,
                     questioner=author, spawn=spawn, judge=judge, lessons_dir=questioner_lessons_dir,
                     tenant=tenant, runs=runs, served=served, oracle=oracle,
@@ -873,8 +884,8 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
 
 
 def _run_episode(  # noqa: PLR0913, PLR0912, PLR0915, C901 — the episode's whole identity plus its seams
-    ns: argparse.Namespace, *, source: Run, source_stamp: dict, launch_waived: Sequence[str] = (),
-    episode: Episode,
+    ns: argparse.Namespace, *, source: Run, source_stamp: dict, source_disposition: str | None,
+    launch_waived: Sequence[str] = (), episode: Episode,
     view: EpisodeRuns, questioner: Any, spawn: Any, lessons_dir: Path, judge: Any = None,
     tenant: RunTenant, runs: RunsRepository[Tenant], served: Sequence[str], oracle: Any,
     verifier: Any, roster: Any, started: threading.Event, render_page: PageRenderer | None,
@@ -905,7 +916,8 @@ def _run_episode(  # noqa: PLR0913, PLR0912, PLR0915, C901 — the episode's who
     stage(Step.QUESTIONER)
     with clock.step(Step.QUESTIONER):
         try:
-            family = _author(ns, source=source, episode=episode, questioner=questioner,
+            family = _author(ns, source=source, source_disposition=source_disposition,
+                             episode=episode, questioner=questioner,
                              lessons_dir=lessons_dir, served=served,
                              reachable=reachable_systems(tenant.grants.gather))
         except (FamilyError, branch.BranchError) as unparsed:
