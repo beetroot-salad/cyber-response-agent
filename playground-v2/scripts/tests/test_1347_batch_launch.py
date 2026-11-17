@@ -229,3 +229,25 @@ def test_a_forward_that_drops_between_waves_keeps_the_rows_written_and_starts_no
     assert [r["slug"] for r in rig.rows()] == [dirs[0].name]
     assert [c for k, c in agents.log if k == "start"] == [dirs[0].name]
     assert rig.nothing_serving() == []
+
+
+def test_a_batch_hashes_each_freeze_part_once_however_many_cases_it_holds(tmp_path):
+    """A batch is one freeze, so its parts are checked against freeze.yaml once per launch: a 42-case
+    batch on a 17 GB freeze re-read 743 GB when every case re-hashed them."""
+    rig = LabRig(tmp_path)
+    dirs = _cases(rig, "drop", UUIDS)
+    module = _module(rig)
+    copy = module.frozen_copy
+    real, hashed = copy.sha256_file, []
+
+    def counting(path):
+        hashed.append(Path(path).name)
+        return real(path)
+    copy.sha256_file = counting
+    try:
+        _launch(rig, dirs, Agents(rig), parallel=2)
+    finally:
+        copy.sha256_file = real
+
+    parts = sorted(rig.freeze["parts"])
+    assert sorted(n for n in hashed if n in parts) == parts

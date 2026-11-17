@@ -104,8 +104,13 @@ def alert_uuid_of(alert_file: Path) -> str:
     return uuid
 
 
-def verify(case_dir: Path, freezes_dir: Path, parts_dir: Path, reference: bool) -> tuple[dict, dict, dict, str]:
-    """Everything that needs no cluster: `(case, freeze, row binding, alert uuid)` or a refusal."""
+def verify(case_dir: Path, freezes_dir: Path, parts_dir: Path, reference: bool,
+           parts_checked: set[str] | None = None) -> tuple[dict, dict, dict, str]:
+    """Everything that needs no cluster: `(case, freeze, row binding, alert uuid)` or a refusal.
+
+    `parts_checked` is the launch's record of the freezes whose parts already matched freeze.yaml:
+    hashing every part is the slow step (a 17 GB freeze), and a batch's cases share one freeze, so
+    the first case of a freeze checks its parts and the rest of the launch trusts that check."""
     case = load_case(case_dir)
     if not reference and not case.get("confirmed"):
         raise LaunchRefused(f"{case_dir.name}: case.yaml is not confirmed; label it against a "
@@ -119,7 +124,10 @@ def verify(case_dir: Path, freezes_dir: Path, parts_dir: Path, reference: bool) 
     freeze = _load_yaml(freeze_file, "freeze.yaml")
     try:
         frozen_copy.check_freeze(freeze, freeze_id)
-        frozen_copy.check_parts(freeze, parts_dir / freeze_id)
+        if parts_checked is None or freeze_id not in parts_checked:
+            frozen_copy.check_parts(freeze, parts_dir / freeze_id)
+            if parts_checked is not None:
+                parts_checked.add(freeze_id)
         bound = binding(freeze, case)
     except (frozen_copy.CopyRefused, TypeError, ValueError) as exc:
         raise LaunchRefused(str(exc)) from exc
@@ -248,7 +256,8 @@ def launch_batch(case_dirs: list[Path], *, freezes_dir: Path, tenant_settings: P
     if len({d.name for d in dirs}) != len(dirs):
         raise LaunchRefused("a batch names one case twice")
     clock = clock if clock is not None else frozen_copy.WallClock()
-    checked = [verify(d, Path(freezes_dir), parts_dir, reference) for d in dirs]
+    parts_checked: set[str] = set()
+    checked = [verify(d, Path(freezes_dir), parts_dir, reference, parts_checked) for d in dirs]
     cases, freeze = [c[0] for c in checked], checked[0][1]
     variants = {frozen_copy.variant_id(c["freeze"], c.get("overlay")) for c in cases}
     if len(variants) != 1:
