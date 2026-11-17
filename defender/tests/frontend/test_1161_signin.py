@@ -518,9 +518,10 @@ def test_1540_pr2_signing_out_when_already_signed_out_still_leaves_for_the_landi
     assert auth_calls(requests, world.origin, "/api/auth/logout") == [("POST", "/api/auth/logout")]
 
 
-@pytest.mark.parametrize("failure", ["500", "network"])
+@pytest.mark.parametrize("failure", ["500", "403", "404", "429", "network"])
 def test_1540_pr2_a_failed_sign_out_shows_the_error_state_and_does_not_leave(world, context, requests, failure):
-    """Any answer but 2xx or 401, or a network failure, is the shell's error state; no navigation to `/`. (PR2 signOut)"""
+    """Any answer but 2xx or 401 (a 4xx as much as a 5xx), or a network failure, is the shell's error state; no
+    navigation to `/`. (PR2 signOut)"""
     page = _signed_in_home(world, context, requests)
     mark = len(requests)
 
@@ -528,7 +529,7 @@ def test_1540_pr2_a_failed_sign_out_shows_the_error_state_and_does_not_leave(wor
         if failure == "network":
             route.abort()
         else:
-            route.fulfill(status=500, body="x")
+            route.fulfill(status=int(failure), body="x")
 
     context.route(lambda u: path_is(u, "/api/auth/logout"), handle)
     page.locator(SIGN_OUT).click()
@@ -539,8 +540,10 @@ def test_1540_pr2_a_failed_sign_out_shows_the_error_state_and_does_not_leave(wor
     assert [r for r in requests[mark:] if r.is_navigation_request()] == [], "no navigation followed the failure"
 
 
-def test_1540_f3_a_me_that_is_not_the_person_shape_is_the_error_state_and_starts_no_sign_in(world, context, requests):
-    """`/api/me` answers 200 with a program's view: the shell's error state, no sign-in, no home screen. (F3)"""
+@pytest.mark.parametrize("kind", ["home", "investigation"])
+def test_1540_f3_a_me_that_is_not_the_person_shape_is_the_error_state_and_starts_no_sign_in(world, context, requests, kind):
+    """`/api/me` answers 200 with a program's view: the shell's error state, no sign-in, not the screen, no screen read;
+    also on a screen that never reads the person (the investigation), so the narrowing is the shell's. (F3)"""
     from defender.api.models import ProgramMe
 
     uid = "6f1c1e3c-55a4-4a4e-9a51-00000000000%d"
@@ -551,11 +554,12 @@ def test_1540_f3_a_me_that_is_not_the_person_shape_is_the_error_state_and_starts
     mark = len(requests)
     context.route(lambda u: path_is(u, "/api/me"), lambda route: route.fulfill(status=200, json=program))
     page = context.new_page()
-    page.goto(f"{world.origin}/home")
+    page.goto(f"{world.origin}{_target(world, kind)}")
     screen(page, ERROR)
     settle(page)
     assert logins(requests[mark:], world.origin) == []
-    assert page.locator(f'[data-screen="{HOME}"]').count() == 0
+    assert page.locator(f'[data-screen="{kind}"]').count() == 0
+    assert api_calls(requests[mark:], world.origin) == [("GET", "/api/me")], "no screen read follows a refused `/api/me`"
 
 
 # --- #1540 Am-5: one owner per load, one 401 policy, one error state ----------------------------------------------------
@@ -675,3 +679,144 @@ def test_1540_am5_a_stray_error_while_the_document_is_leaving_for_sign_in_shows_
     settle(page, 1000)
     assert page.locator(f'[data-screen="{ERROR}"]').count() == 0
     assert len(aborted) == 1
+
+
+#: A stray whose value is not an `Error`: a thrown string, a rejection with a plain object.
+_NON_ERROR_STRAYS = {
+    "thrown-string": ("setTimeout(() => { throw 'stray string'; }, 0)", "error"),
+    "rejected-plain-object": ("void Promise.reject({ stray: 'plain object' })", "unhandledrejection"),
+}
+
+
+@pytest.mark.parametrize("when", ["first-load", "after-a-restore"])
+@pytest.mark.parametrize("stray", sorted(_NON_ERROR_STRAYS))
+def test_1540_am5_a_stray_that_is_not_an_error_shows_the_error_state_on_the_first_load_and_after_a_restore(
+        world, context, requests, stray, when):
+    """A timer's throw of a string, or a rejection with a plain object, in a loaded signed-in `/home`, on the document's
+    first load or on the load a restore from the cache made: `data-screen=error`, no login. (Am-5 §6(a): every
+    uncaught error or unhandled rejection, whatever its value, on every load)"""
+    sign_in(world, context)
+    context.add_init_script(_SEEN_EVENTS)
+    mark = len(requests)
+    page = context.new_page()
+    page.goto(f"{world.origin}/home")
+    page.locator(EMAIL).wait_for()
+    if when == "after-a-restore":
+        restore_from_cache(page)
+        settle(page, 1000)
+        page.locator(EMAIL).wait_for()
+        assert api_calls(requests[mark:], world.origin).count(("GET", "/api/me")) == 2, "positive control: a restored load"
+    script, event = _NON_ERROR_STRAYS[stray]
+    page.evaluate(script)
+    until(page, f"window.__seenEvents.includes('{event}')")
+    settle(page)
+    assert page.locator(f'[data-screen="{ERROR}"]').count() == 1, f"{stray} on the {when} did not show the error state"
+    assert logins(requests[mark:], world.origin) == []
+
+
+def test_1540_am5_a_load_leaving_after_its_screen_reads_401_shows_nothing_whatever_strays_after(world, context, requests):
+    """Signed in, the investigation read answers 401 and the shell's sign-in navigation is aborted, so the load is
+    leaving and the document stays: a timer's throw and an unhandled rejection after it show neither the shell's error
+    state nor the screen's. (Am-5 §6(a), point 4: a leaving load shows nothing)"""
+    read = _read_path(world)
+    sign_in(world, context)
+    context.add_init_script(_SEEN_EVENTS)
+    context.route(lambda u: urllib.parse.urlsplit(u).path == read, lambda route: route.fulfill(status=401, body="{}"))
+    aborted = abort_login_navigation(context)
+    page = context.new_page()
+    page.goto(f"{world.origin}{world.screen()}")
+    await_aborted(page, aborted)
+    for script in _STRAYS.values():
+        page.evaluate(script)
+    until(page, "window.__seenEvents.includes('error') && window.__seenEvents.includes('unhandledrejection')")
+    settle(page, 1000)
+    assert page.locator(f'[data-screen="{ERROR}"]').count() == 0, "the shell's error state showed while leaving"
+    assert page.locator('[data-state="error"]').count() == 0, "the screen drew its error state while leaving"
+    assert len(aborted) == 1
+
+
+def _abort_navigations_to(context: Any, path: str) -> list[str]:
+    """Abort (`ERR_ABORTED`, the document stays) every document navigation to exactly `path`; the URLs, in order."""
+    aborted: list[str] = []
+
+    def handle(route: Any) -> None:
+        if not route.request.is_navigation_request():
+            return route.fallback()
+        aborted.append(route.request.url)
+        return route.abort("aborted")
+
+    context.route(lambda u: urllib.parse.urlsplit(u).path == path, handle)
+    return aborted
+
+
+#: What an exit leaves behind: the page, the navigations it aborted, and the control that triggers it again (if any).
+_Exited = tuple[Any, list[str], str | None]
+
+
+def _exit_signs_in(world: Any, context: Any, requests: list[Any], cookieless_once: Any) -> _Exited:
+    """Signed out `/home`: `/api/me` answers 401 and the shell leaves for sign-in (aborted)."""
+    aborted = abort_login_navigation(context)
+    page = context.new_page()
+    page.goto(f"{world.origin}/home")
+    await_aborted(page, aborted)
+    return page, aborted, None
+
+
+def _exit_to_the_failed_screen(world: Any, context: Any, requests: list[Any], cookieless_once: Any) -> _Exited:
+    """Back from sign-in with the attempt record found, `/api/me` answers 401: the shell leaves for the failed screen
+    (aborted)."""
+    aborted = _abort_navigations_to(context, "/sign-in-failed")
+    lost = cookieless_once(lambda u: path_is(u, "/api/me"), skip=1)
+    page = context.new_page()
+    page.goto(f"{world.origin}/home")
+    await_aborted(page, aborted)
+    assert lost.done, "positive control: the returning load's `/api/me` went cookie-less"
+    return page, aborted, None
+
+
+def _exit_by_retry(world: Any, context: Any, requests: list[Any], cookieless_once: Any) -> _Exited:
+    """On the failed screen (session-lost), the retry leaves for sign-in (aborted)."""
+    cookieless_once(lambda u: path_is(u, "/api/me"), skip=1)
+    page = context.new_page()
+    page.goto(f"{world.origin}/home")
+    screen(page, FAILED)
+    settle(page)
+    aborted = abort_login_navigation(context)
+    page.locator(RETRY).click()
+    await_aborted(page, aborted)
+    return page, aborted, RETRY
+
+
+def _exit_by_sign_out(world: Any, context: Any, requests: list[Any], cookieless_once: Any) -> _Exited:
+    """On the signed-in home, sign-out's logout answers and the shell leaves for `/` (aborted)."""
+    page = _signed_in_home(world, context, requests)
+    aborted = _abort_navigations_to(context, "/")
+    page.locator(SIGN_OUT).click()
+    await_aborted(page, aborted)
+    return page, aborted, SIGN_OUT
+
+
+_EXITS = {"401-to-sign-in": _exit_signs_in, "401-to-the-failed-screen": _exit_to_the_failed_screen,
+          "retry": _exit_by_retry, "sign-out": _exit_by_sign_out}
+
+
+@pytest.mark.parametrize("exit_", sorted(_EXITS))
+def test_1540_am5_every_exit_leaves_once_and_the_leaving_load_shows_nothing_after_it(
+        world, context, requests, cookieless_once, exit_):
+    """Each way the shell leaves the document (a 401 to sign-in, a 401 to the failed screen, retry, a signed-out
+    sign-out), its navigation aborted so the document stays: the trigger pressed again, a stray throw and a stray
+    rejection show no error state, and the load navigated exactly once. (Am-5 points 1, 6(a): `leave` is the one exit)"""
+    context.add_init_script(_SEEN_EVENTS)
+    mark = len(requests)
+    page, aborted, trigger = _EXITS[exit_](world, context, requests, cookieless_once)
+    if trigger is not None:
+        page.locator(trigger).click()
+        settle(page)
+    for script in _STRAYS.values():
+        page.evaluate(script)
+    until(page, "window.__seenEvents.includes('error') && window.__seenEvents.includes('unhandledrejection')")
+    settle(page, 1000)
+    assert page.locator(f'[data-screen="{ERROR}"]').count() == 0, f"{exit_}: the error state showed while leaving"
+    assert len(aborted) == 1, f"{exit_}: the load navigated {len(aborted)} times: {aborted}"
+    if exit_ == "sign-out":
+        assert auth_calls(requests[mark:], world.origin, "/api/auth/logout") == [("POST", "/api/auth/logout")]

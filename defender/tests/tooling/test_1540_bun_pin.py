@@ -66,21 +66,45 @@ def _analyse(label: str, text: str) -> Site:
     return site
 
 
+#: A `bun` command word in a shell text: not a path's last segment (`/usr/local/bin/bun`) or part of a name (`bun-v1`).
+_BUN_COMMAND = re.compile(r"(?<![\w./-])bun(?=\s|$)", re.M)
+
+
+def _instructions(text: str) -> list[str]:
+    """A Dockerfile's instructions, continuation lines joined, comments dropped."""
+    joined = re.sub(r"\\\r?\n", " ", "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#")))
+    return [line.strip() for line in joined.splitlines() if line.strip()]
+
+
 def _dockerfile_sites(label: str, text: str) -> list[Site]:
     env: dict[str, str] = {}
     sites = []
-    for instruction in re.sub(r"\\\r?\n", " ", text).splitlines():
-        words = instruction.strip().split(None, 1)
-        if not words:
-            continue
+    stage = 0
+    for instruction in _instructions(text):
+        words = instruction.split(None, 1)
+        if words[0] == "FROM":
+            stage += 1
+            env = {}
         if words[0] in {"ARG", "ENV"} and len(words) > 1:
             for pair in words[1].split():
                 key, sep, value = pair.partition("=")
                 if sep:
                     env[key] = value.strip("\"'")
         elif words[0] == "RUN" and _DOWNLOAD in _expand(instruction, env):
-            sites.append(_analyse(f"{label}:RUN", _expand(instruction, env)))
+            sites.append(_analyse(f"{label}:stage{stage}", _expand(instruction, env)))
     return sites
+
+
+def _dockerfile_runners(label: str, text: str) -> set[str]:
+    """The stages of a Dockerfile whose `RUN` holds a `bun` command (the site's own `bun --version` included)."""
+    stage, found = 0, set()
+    for instruction in _instructions(text):
+        words = instruction.split(None, 1)
+        if words[0] == "FROM":
+            stage += 1
+        elif words[0] == "RUN" and len(words) > 1 and _BUN_COMMAND.search(words[1]):
+            found.add(f"{label}:stage{stage}")
+    return found
 
 
 def _workflow_sites(label: str, text: str) -> list[Site]:
@@ -95,6 +119,33 @@ def _workflow_sites(label: str, text: str) -> list[Site]:
     return sites
 
 
+def _workflow_runners(label: str, text: str) -> tuple[set[str], list[str]]:
+    """The jobs of a workflow whose steps run a `bun` command, and each step that takes Bun from `setup-bun`."""
+    workflow = yaml.safe_load(text) or {}
+    runners, setups = set(), []
+    for job_id, job in (workflow.get("jobs") or {}).items():
+        for step in job.get("steps") or []:
+            if _BUN_COMMAND.search(str(step.get("run", ""))):
+                runners.add(f"{label}:{job_id}")
+            if "setup-bun" in str(step.get("uses", "")):
+                setups.append(f"{label}:{job_id}: Bun from `{step['uses']}`, not a pinned and checked download")
+    return runners, setups
+
+
+def bun_runners(texts: Mapping[str, str]) -> tuple[set[str], list[str]]:
+    """Every workflow job and image stage in `texts` that runs a `bun` command, and every `setup-bun` step."""
+    runners: set[str] = set()
+    setups: list[str] = []
+    for label, text in texts.items():
+        if label.endswith((".yml", ".yaml")):
+            found, steps = _workflow_runners(label, text)
+            runners |= found
+            setups += steps
+        else:
+            runners |= _dockerfile_runners(label, text)
+    return runners, setups
+
+
 def bun_sites(texts: Mapping[str, str]) -> list[Site]:
     """Every Bun download in the given `{path: text}` (`*.yml`/`*.yaml` as workflows, the rest as Dockerfiles)."""
     sites: list[Site] = []
@@ -107,7 +158,8 @@ def bun_sites(texts: Mapping[str, str]) -> list[Site]:
 
 def check_every_bun_install_holds_one_pin(texts: Mapping[str, str]) -> None:
     """F6: Bun is installed in two CI jobs (test, lint) and a dev image; all sites share version and sha256, and each
-    verifies the sha it pins."""
+    verifies the sha it pins. Every job or image stage that runs a `bun` command gets it from such a site in that same
+    job or stage, never from `setup-bun` or from another job's site."""
     sites = bun_sites(texts)
     problems = [f"{s.label}: {p}" for s in sites for p in s.problems]
     assert not problems, problems
@@ -117,6 +169,10 @@ def check_every_bun_install_holds_one_pin(texts: Mapping[str, str]) -> None:
     assert images, f"expected a Bun install in a dev image, found {[s.label for s in sites]}"
     assert len({s.version for s in sites}) == 1, {s.label: s.version for s in sites}
     assert len({s.sha for s in sites}) == 1, {s.label: s.sha for s in sites}
+    runners, setups = bun_runners(texts)
+    assert not setups, setups
+    unpinned = sorted(runners - {s.label for s in sites})
+    assert not unpinned, f"these run `bun` but get it from no pinned site in the same job or stage: {unpinned}"
 
 
 def _repo_texts() -> dict[str, str]:
@@ -146,14 +202,17 @@ _STEP = """
           echo "${{BUN_SHA256}}  /tmp/bun.zip" | sha256sum -c -
           sudo unzip -j /tmp/bun.zip -d /usr/local/bin
 """
+_RUNS_BUN = "      - run: bun install --frozen-lockfile\n"
+_DECOY_JOB = "  decoy:\n    runs-on: x\n    steps:" + _STEP.format(sha=SHA)
 GOOD = {
     ".github/workflows/ci.yml": "on: push\njobs:\n  test:\n    runs-on: x\n    steps:" + _STEP.format(sha=SHA)
-    + "  lint:\n    runs-on: x\n    steps:" + _STEP.format(sha=SHA),
+    + "  lint:\n    runs-on: x\n    steps:" + _STEP.format(sha=SHA) + _RUNS_BUN,
     ".devcontainer/Dockerfile.dev": (
         "FROM x\nARG BUN_VERSION=1.4.4\nARG BUN_SHA256=" + SHA + "\n"
         'RUN curl -fsSL -o /tmp/bun.zip "https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/bun-linux-x64.zip" \\\n'
         '    && echo "${BUN_SHA256}  /tmp/bun.zip" | sha256sum -c - \\\n'
-        "    && unzip -j /tmp/bun.zip -d /usr/local/bin\n"),
+        "    && unzip -j /tmp/bun.zip -d /usr/local/bin\n"
+        "RUN bun --version\n"),
 }
 
 
@@ -177,6 +236,15 @@ MUTATIONS = {
         **GOOD, ".devcontainer/Dockerfile.job": GOOD[".devcontainer/Dockerfile.dev"].replace(SHA, OTHER_SHA)},
     "a-job-without-bun": {**GOOD, ".github/workflows/ci.yml": GOOD[".github/workflows/ci.yml"].split("  lint:")[0]},
     "no-dev-image": {k: v for k, v in GOOD.items() if "Dockerfile" not in k},
+    "a-job-takes-bun-from-setup-bun-with-a-decoy-pin-in-another-job": {
+        **GOOD, ".github/workflows/ci.yml": GOOD[".github/workflows/ci.yml"].replace(
+            "  lint:\n    runs-on: x\n    steps:" + _STEP.format(sha=SHA),
+            "  lint:\n    runs-on: x\n    steps:\n      - uses: oven-sh/setup-bun@v2\n        with:\n          bun-version: latest\n")
+        + _DECOY_JOB},
+    "a-job-runs-bun-with-no-site-of-its-own": {
+        **GOOD, ".github/workflows/ci.yml": GOOD[".github/workflows/ci.yml"] + "  other:\n    runs-on: x\n    steps:\n" + _RUNS_BUN},
+    "an-image-stage-runs-bun-installed-in-another-stage": {
+        **GOOD, ".devcontainer/Dockerfile.dev": GOOD[".devcontainer/Dockerfile.dev"] + "FROM y\nRUN bun install\n"},
 }
 
 
@@ -188,6 +256,7 @@ def test_1540_f6_the_pin_check_accepts_a_good_set_of_sites():
 
 @pytest.mark.parametrize("texts", MUTATIONS.values(), ids=MUTATIONS.keys())
 def test_1540_f6_the_pin_check_refuses_each_break(texts):
-    """A different version or sha at one site, a missing or misdirected sha check, a late check, a new site. (F6)"""
+    """A different version or sha at one site, a missing or misdirected sha check, a late check, a new site, a job or image
+    stage that runs `bun` without a pinned site of its own (setup-bun, another job's or stage's site). (F6)"""
     with pytest.raises(AssertionError):
         check_every_bun_install_holds_one_pin(texts)

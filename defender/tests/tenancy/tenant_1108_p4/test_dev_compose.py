@@ -456,3 +456,34 @@ def test_1540_pr5_the_twin_search_finds_a_copy_anywhere_under_the_frontend_and_i
     twin = frontend / "src" / "assets" / "again.svg"
     twin.write_text("<svg>art</svg>")
     assert twins_of([art], frontend) == [(art, twin)]
+
+
+_CUSTOM_PROPERTY = re.compile(r"(--[A-Za-z0-9_-]+)\s*:")
+
+
+def _theme_mounts() -> dict[str, Path]:
+    """Keycloak theme path (relative to the theme folder) -> the host file the compose file mounts there."""
+    keycloak = _compose()["services"]["keycloak"]
+    return {target.removeprefix(THEME_IN_KEYCLOAK + "/"): (COMPOSE_DIR / source).resolve()
+            for kind, source, target in _mounts(keycloak) if kind == "bind" and target.startswith(THEME_IN_KEYCLOAK + "/")}
+
+
+def test_1540_pr5_the_tokens_are_declared_once_and_the_themes_mount_targets_hold_no_copy():
+    """No file of the frontend besides the mounted tokens file declares a custom property that file declares (names read
+    from it), and the theme's own file at each mount target is empty or absent, so no near copy of a look survives. (PR5)"""
+    mounts = _theme_mounts()
+    sheets = [source for source in mounts.values() if source.suffix == ".css"]
+    assert sheets, f"the tokens are a stylesheet mounted into the theme: {mounts}"
+    names = {name for sheet in sheets for name in _CUSTOM_PROPERTY.findall(sheet.read_text(encoding="utf-8"))}
+    assert names, f"control: the mounted tokens declare custom properties: {sheets}"
+    declared_again = []
+    for other in _files_below(FRONTEND):
+        if other.resolve() in sheets:
+            continue
+        text = other.read_bytes().decode("utf-8", errors="ignore")
+        again = sorted(names & set(_CUSTOM_PROPERTY.findall(text)))
+        if again:
+            declared_again.append(f"{other.relative_to(FRONTEND)}: {again}")
+    assert declared_again == [], f"PR5: the tokens are declared again outside their one file: {declared_again}"
+    filled = [relative for relative in mounts if (THEME / relative).is_file() and (THEME / relative).stat().st_size]
+    assert filled == [], f"PR5: the theme keeps its own content where a look is mounted: {filled}"

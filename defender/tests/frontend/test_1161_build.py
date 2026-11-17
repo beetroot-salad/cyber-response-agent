@@ -10,6 +10,7 @@ import copy
 import dataclasses
 import json
 import re
+import shutil
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -182,19 +183,52 @@ def _person_email(document: dict[str, Any]) -> None:
                                   lambda d: _drop_property(d, "Investigation", "status"), _person_email],
                          ids=["produced-unedited", "no-disposition", "no-status", "no-person-email"])
 def test_1540_f3_a_document_without_a_field_a_screen_reads_fails_the_build(built_frontend, tmp_path, edit):
-    """Over the document the app produces: unedited it builds and writes `index.html` (control); without a field a
-    screen reads (disposition, status, the person's email) the build fails and writes none. (F3, F1 b)"""
+    """Over the document the app produces: unedited it builds and writes `index.html` (control); then, in that same
+    copy, without a field a screen reads (disposition, status, the person's email) the build fails and writes none. (F3, F1 b)"""
     document = _produced()
-    if edit is not None:
-        edit(document)
     frontend = _copy(tmp_path, built_frontend, openapi=_bytes(document))
-    done = _failing_build(frontend) if edit is not None else run_bun(frontend, "run", "build")
-    if edit is None:
-        assert done.returncode == 0, (done.stdout[-1500:], done.stderr[-1500:])
-        assert (frontend / "dist" / "index.html").is_file()
-    else:
+    done = run_bun(frontend, "run", "build")
+    assert done.returncode == 0, (done.stdout[-1500:], done.stderr[-1500:])
+    assert (frontend / "dist" / "index.html").is_file()
+    if edit is not None:
+        # The same copy, built once over the unedited document: its generated types must not outlive the edit.
+        edit(document)
+        (frontend / OPENAPI).write_bytes(_bytes(document))
+        done = _failing_build(frontend)
         assert done.returncode != 0, "the build accepted a document that lacks a field a screen reads"
         assert _no_index(frontend)
+
+
+#: The investigation screen's read, as the document keys it.
+INVESTIGATION_READ = "/api/tenants/{tenant_id}/investigations/{investigation_id}"
+
+
+def _rename_path_parameter(document: dict[str, Any]) -> None:
+    """The read's `investigation_id` parameter is renamed in its parameter list (the path key is left as it is)."""
+    [parameter] = [p for p in document["paths"][INVESTIGATION_READ]["get"]["parameters"]
+                   if p["in"] == "path" and p["name"] == "investigation_id"]
+    parameter["name"] = "zz_investigation"
+
+
+def _require_query_parameter(document: dict[str, Any]) -> None:
+    """The read gains a required query parameter the screen does not send."""
+    document["paths"][INVESTIGATION_READ]["get"]["parameters"].append(
+        {"name": "zz_required", "in": "query", "required": True, "schema": {"type": "string"}})
+
+
+@pytest.mark.parametrize("edit", [_rename_path_parameter, _require_query_parameter],
+                         ids=["path-parameter-renamed", "required-query-parameter-added"])
+def test_1540_f3_a_document_whose_read_takes_parameters_the_screen_does_not_send_fails_the_build(
+        built_frontend, tmp_path, edit):
+    """The investigation read's parameters change in the document (a path parameter renamed, a required query parameter
+    added): the screen's call no longer type-checks, so the build fails and writes no `index.html`. The unedited
+    document builds (control: the F3 field test above). (F3, Am-6: `read(key, params)` typed by the generated types)"""
+    document = _produced()
+    edit(document)
+    frontend = _copy(tmp_path, built_frontend, openapi=_bytes(document))
+    done = _failing_build(frontend)
+    assert done.returncode != 0, "the build accepted a read whose parameters the screen does not send"
+    assert _no_index(frontend)
 
 
 def test_1161_the_test_build_never_writes_the_checkout(built_frontend):
@@ -417,3 +451,163 @@ def test_1540_f8_a_test_file_is_not_exempt_from_the_source_check(checked):
     assert name in outside.output, outside.output[-1500:]
     inside = _with_source(checked, f"shell/{name}", f"{original}\n{NEVER_CALLED}")
     assert not inside.refused, inside.output[-1500:]
+
+
+# --- F8: the corpus of refused and allowed forms, one gate run per corpus -----------------------------------------------
+
+#: The DOM library's refused members of the window and global scope, each reachable from every window-like receiver.
+_WINDOW_SYMBOLS = ("fetch", "XMLHttpRequest", "EventSource", "WebSocket", "localStorage", "sessionStorage", "indexedDB",
+                   "caches", "location", "history", "open")
+
+
+@dataclasses.dataclass(frozen=True)
+class _Receiver:
+    """Where a refused symbol is read from: `params` and `prelude` set it up, `expression` names it, `type` types it."""
+
+    name: str
+    expression: str
+    type: str
+    params: str = ""
+    prelude: str = ""
+
+
+def _receivers(home: str, type_: str) -> list[_Receiver]:
+    """The receivers of a symbol whose home object is `home` (typed `type_`): itself, an alias, a typed parameter."""
+    return [_Receiver(home, home, type_), _Receiver(f"alias of {home}", "zzAlias", type_, prelude=f"const zzAlias = {home};"),
+            _Receiver(f"parameter typed {type_}", "zzParam", type_, params=f"zzParam: {type_}")]
+
+
+def _window_type(symbol: str) -> str:
+    """The type a parameter holding a window is given: `Window`, or for the constructors (declared on the global scope,
+    not on the `Window` interface) the global scope's type."""
+    return "typeof globalThis" if symbol in {"XMLHttpRequest", "EventSource", "WebSocket"} else "Window"
+
+
+#: symbol -> its receivers: the window members from `window`, `self`, `globalThis`, an alias and a `Window` parameter;
+#: `location` and `cookie` from `document`; `sendBeacon` from `navigator`.
+_SYMBOL_RECEIVERS: dict[str, list[_Receiver]] = {
+    **{symbol: [*_receivers("window", _window_type(symbol)), _Receiver("self", "self", _window_type(symbol)),
+                _Receiver("globalThis", "globalThis", "typeof globalThis")] for symbol in _WINDOW_SYMBOLS},
+    "document.location": _receivers("document", "Document"),
+    "cookie": _receivers("document", "Document"),
+    "sendBeacon": _receivers("navigator", "Navigator"),
+}
+
+#: How the symbol is reached from the receiver; `{S}` is the symbol, `{R}` the receiver expression.
+_REACHES: dict[str, str] = {
+    "access": "return {R}.{S};",
+    "shorthand destructure": "const {{ {S} }} = {R}; return {S};",
+    "renamed destructure": "const {{ {S}: zzValue }} = {R}; return zzValue;",
+    "nested destructure": "const {{ zzInner: {{ {S}: zzValue }} }} = {{ zzInner: {R} }}; return zzValue;",
+    "for-of head": "for (const {{ {S}: zzValue }} of [{R}]) {{ return zzValue; }} return undefined;",
+    "assignment destructure": "let zzValue: unknown; ({{ {S}: zzValue }} = {R}); return zzValue;",
+}
+
+
+def _refused_corpus() -> dict[str, str]:
+    """Every refused form (F8): description -> one module's text. Symbols x receivers x reaches, a parameter destructured
+    by type, the bare globals, and `/api/auth/` as a string, a template with no substitution, a template head and a JSX
+    attribute. Left out: `for ({ fetch } of [window])` (an assignment pattern in a for-of head)."""
+    corpus: dict[str, str] = {}
+    for key, receivers in _SYMBOL_RECEIVERS.items():
+        symbol = key.rsplit(".", 1)[-1]
+        if key in _WINDOW_SYMBOLS:
+            corpus[f"bare {symbol}"] = f"export const zzForm = () => {symbol};"
+        for receiver in receivers:
+            for reach, body in _REACHES.items():
+                text = body.format(S=symbol, R=receiver.expression)
+                corpus[f"{symbol} from {receiver.name}, {reach}"] = (
+                    f"export const zzForm = ({receiver.params}) => {{ {receiver.prelude} {text} }};")
+        for type_ in sorted({r.type for r in receivers}):
+            corpus[f"{symbol} from a parameter of type {type_}, parameter destructure"] = (
+                f"export const zzForm = ({{ {symbol}: zzValue }}: {type_}) => zzValue;")
+    corpus.update({
+        "auth path string": 'export const zzForm = "/api/auth/login";',
+        "auth path template without substitution": "export const zzForm = `/api/auth/login`;",
+        "auth path template head": "export const zzForm = (zzWhere: string) => `/api/auth/${zzWhere}`;",
+        "auth path JSX attribute": 'export const zzForm = <a href="/api/auth/logout">out</a>;',
+    })
+    return corpus
+
+
+#: Locals, parameters and properties merely named like the refused globals, and `/api/auth/` outside a string (F8: by
+#: resolved symbol and by string value, never by name).
+ALLOWED_CORPUS: dict[str, str] = {
+    "a local array named history": "export const zzForm = () => { const history: number[] = []; history.push(1); return history; };",
+    "a parameter named location": "export const zzForm = (location: string) => location;",
+    "a local function named fetch": 'export const zzForm = () => { const fetch = (u: string) => u; return fetch("/x"); };',
+    "a parameter named localStorage": 'export const zzForm = (localStorage: Map<string, string>) => localStorage.get("k");',
+    "properties named like globals": ("export const zzForm = () => { const r = { location: \"x\", fetch: 1, cookie: \"c\" };"
+                                      " return [r.location, r.fetch, r.cookie]; };"),
+    "a destructure of a local object": ('export const zzForm = () => { const { location, open } = { location: "x", open: true };'
+                                        " return [location, open]; };"),
+    "a class with members named like globals": ("export class ZzForm { open = false; location = \"x\";"
+                                                " toggle() { this.open = !this.open; return this.location; } }"),
+    "an interface with members named like globals": "export interface ZzForm { fetch(): void; caches: string[]; history: number[] }",
+    "a type field named location": "export type ZzForm = { location: string; sessionStorage: boolean };",
+    "an api field read through a typed value": ("export const zzForm = (zzValue: { location: string; cookie: string })"
+                                                " => zzValue.location + zzValue.cookie;"),
+}
+
+
+def _corpus_files(corpus: dict[str, str], prefix: str) -> dict[str, str]:
+    """file name -> description, one module per form (`.tsx`, so the JSX form type-checks with the rest)."""
+    return {f"{prefix}{index:04d}.tsx": description for index, description in enumerate(corpus)}
+
+
+def _with_sources(frontend: Path, directory: str, files: dict[str, str], run: Callable[[Path], Gate] = _gate) -> Gate:
+    """`run(frontend)` with `files` (name -> text) in the fresh directory `src/<directory>`, which goes again."""
+    folder = frontend / "src" / directory
+    folder.mkdir(parents=True)
+    for name, text in files.items():
+        (folder / name).write_text(text + "\n", encoding="utf-8")
+    try:
+        return run(frontend)
+    finally:
+        shutil.rmtree(folder)
+
+
+def test_1540_f8_the_source_check_refuses_every_form_of_the_corpus_outside_the_shell_and_allows_every_named_alike_form(
+        checked):
+    """Each refused form, one module apiece, under `src/screens/` fails one gate run that names every one of those files;
+    the same modules under `src/shell/` pass it (no type error refused them); locals, parameters and properties merely
+    named like a refused global, each in its own module, pass it. (F8)"""
+    corpus = _refused_corpus()
+    names = _corpus_files(corpus, "zz_refused_")
+    texts = {name: corpus[description] for name, description in names.items()}
+    inside = _with_sources(checked, "shell/zz_corpus", texts)
+    assert not inside.refused, f"control: the corpus type-checks and the shell may hold it:\n{inside.output[-3000:]}"
+    outside = _with_sources(checked, "screens/zz_corpus", texts)
+    assert outside.refused, "the gate accepted the refused corpus"
+    missed = [description for name, description in names.items() if name not in outside.output]
+    assert missed == [], f"forms the source check did not refuse: {missed}"
+    allowed = _corpus_files(ALLOWED_CORPUS, "zz_allowed_")
+    passed = _with_sources(checked, "screens/zz_corpus", {name: ALLOWED_CORPUS[d] for name, d in allowed.items()})
+    named = [description for name, description in allowed.items() if name in passed.output]
+    assert not passed.refused, f"the gate refused forms only named like a refused global: {named}\n{passed.output[-3000:]}"
+
+
+# --- F8: the source check names the file that holds the form, wherever it sits outside the shell -------------------------
+
+#: Every existing source file outside `src/shell/` and `src/generated/` (declaration files aside: they hold no code).
+PLACES = sorted(p.relative_to(FRONTEND / "src").as_posix() for pattern in ("*.ts", "*.tsx")
+                for p in (FRONTEND / "src").rglob(pattern)
+                if not {"shell", "generated"} & set(p.relative_to(FRONTEND / "src").parts) and not p.name.endswith(".d.ts"))
+
+
+@pytest.mark.parametrize("place", PLACES)
+def test_1540_f8_a_refused_form_appended_to_an_existing_source_file_fails_the_gate_naming_that_file_alone(checked, place):
+    """A never-called `fetch` appended to this existing file fails the gate; the output names it and no other file of
+    the tree it left untouched. (F8: every source outside the shell and the generated types)"""
+    assert len({Path(p).name for p in PLACES}) == len(PLACES), f"file names repeat, so naming is ambiguous: {PLACES}"
+    path = checked / "src" / place
+    original = path.read_text(encoding="utf-8")
+    path.write_text(f"{original}\n{NEVER_CALLED}\n", encoding="utf-8")
+    try:
+        gate = _gate(checked)
+    finally:
+        path.write_text(original, encoding="utf-8")
+    assert gate.refused, f"the gate accepted a refused form in src/{place}"
+    assert Path(place).name in gate.output, gate.output[-1500:]
+    others = [p for p in PLACES if p != place and Path(p).name in gate.output]
+    assert others == [], f"untouched files named as holding the form: {others}\n{gate.output[-1500:]}"
