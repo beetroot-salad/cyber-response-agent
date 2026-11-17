@@ -19,8 +19,10 @@ from defender.skills.invlang.validate._structure import _cell
 
 def entry_bound_refusals(companion: CompanionBody) -> list[str]:
     """Every entry bound `companion`'s ceiling receipts and baselines break, as refusals naming
-    the field or column and the bound."""
-    return [*_ceiling_refusals(companion), *_baseline_refusals(companion)]
+    the field or column and the bound, each headed by the disposition it blocks (the gates' form)."""
+    disposition = (companion.get("conclude") or {}).get("disposition")
+    head = f"disposition {disposition} blocked: " if isinstance(disposition, str) and disposition else "close blocked: "
+    return [head + e for e in (*_ceiling_refusals(companion), *_baseline_refusals(companion))]
 
 
 def _ceiling_refusals(companion: CompanionBody) -> list[str]:

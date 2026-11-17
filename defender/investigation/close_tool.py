@@ -157,9 +157,13 @@ class _CloseFields:
     material: tuple[RecommendedLead, ...]
     turns_used: int
     failure_kind: str | None
-    #: The parse the close made for the entry price, which the record is built from; `None` for
-    #: the overrule of an unreadable document, which has none.
-    companion: CompanionBody | None = None
+    #: The parse's `:T conclude.ceiling_test` receipts and `:R consultations` baselines, as the
+    #: walkers accept them, carried on every committed disposition (OD8). Empty for the overrule
+    #: of an unreadable document, which has no parse.
+    ceiling_test: tuple[CeilingReceipt, ...] = ()
+    runtime_evidence: tuple[RuntimeEvidenceReceipt, ...] = ()
+    #: The `:T conclude` rows the record's summary is built from, trimmed, the absent skipped.
+    summary_pieces: tuple[str, ...] = ()
 
 
 def _fields_from(
@@ -168,11 +172,14 @@ def _fields_from(
     companion: CompanionBody | None = None,
 ) -> _CloseFields:
     """The verdict's scalars as the commit bundle, shared by all three commit sites so a new
-    field cannot be forgotten at one. The parse comes from the caller."""
+    field cannot be forgotten at one. The parse (none: no entries, no pieces) comes from the
+    caller; its walkers run here, once, for every site."""
     return _CloseFields(
         outcome=verdict.outcome, cause=verdict.cause, detail=verdict.detail,
         material=material, turns_used=verdict.turns_used, failure_kind=verdict.failure_kind,
-        companion=companion,
+        ceiling_test=conclude_ceiling_test_rows(companion) if companion is not None else (),
+        runtime_evidence=conclude_runtime_evidence_rows(companion) if companion is not None else (),
+        summary_pieces=_summary_pieces(companion),
     )
 
 
@@ -253,15 +260,12 @@ def build_record(run_id: str, disposition: str, fields: _CloseFields, *, drafted
     order while each column stays within its count cap and aggregate bound: for a document the
     gates passed this changes nothing; only the host's forced close, which skips the gates over a
     box-writable document, is ever cut. The build never refuses on size."""
-    companion = fields.companion
-    ceiling: tuple[CeilingReceipt, ...] = conclude_ceiling_test_rows(companion) if companion is not None else ()
-    baselines: tuple[RuntimeEvidenceReceipt, ...] = (
-        conclude_runtime_evidence_rows(companion) if companion is not None else ())
     return closing.ClosingRecord(
         run_id=run_id, disposition=disposition, outcome=fields.outcome, cause=fields.cause,
         failure_kind=fields.failure_kind, drafted_disposition=drafted,
-        ceiling_test=_ceiling_entries(ceiling), runtime_evidence=_baseline_entries(baselines),
-        summary=_record_summary(disposition, fields, companion),
+        ceiling_test=_ceiling_entries(fields.ceiling_test),
+        runtime_evidence=_baseline_entries(fields.runtime_evidence),
+        summary=_record_summary(disposition, fields),
     )
 
 
@@ -309,14 +313,19 @@ def _dropped(what: str, row: str, refused: ValueError) -> None:
 _SUMMARY_PIECES = ("summary", "detection_notes", "ceiling_rationale")
 
 
-def _record_summary(disposition: str, fields: _CloseFields, companion: CompanionBody | None) -> str | None:
+def _summary_pieces(companion: CompanionBody | None) -> tuple[str, ...]:
     """`:T conclude`'s summary, detection notes and ceiling rationale, each trimmed, the absent
-    skipped, joined by one space; an `unresolved` record opens with its cause's opener. `None`
-    when there is nothing to build from and the record is not `unresolved`. Treated (and cut to
-    the summary bound) by the record."""
+    skipped."""
     conclude = (companion or {}).get("conclude") or {}
-    pieces = [text.strip() for key in _SUMMARY_PIECES
-              if isinstance(text := conclude.get(key), str) and text.strip()]
+    return tuple(text.strip() for key in _SUMMARY_PIECES
+                 if isinstance(text := conclude.get(key), str) and text.strip())
+
+
+def _record_summary(disposition: str, fields: _CloseFields) -> str | None:
+    """The pieces joined by one space; an `unresolved` record opens with its cause's opener.
+    `None` when there is nothing to build from and the record is not `unresolved`. Treated (and
+    cut to the summary bound) by the record."""
+    pieces = list(fields.summary_pieces)
     if disposition == HOST_ONLY_DISPOSITION:
         pieces.insert(0, closing.OPENERS[(fields.cause, fields.failure_kind)])
     return " ".join(pieces) or None
