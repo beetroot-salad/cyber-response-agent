@@ -25,7 +25,10 @@ if TYPE_CHECKING:
         DEFAULT_LEASE_SECONDS as DEFAULT_LEASE_SECONDS,
         BatchView as BatchView,
         CommitRecord as CommitRecord,
+        Acted as Acted,
+        BatchCause as BatchCause,
         Held as Held,
+        ItemCause as ItemCause,
         ItemRefused as ItemRefused,
         LaneBusy as LaneBusy,
         LaneWork as LaneWork,
@@ -36,6 +39,7 @@ if TYPE_CHECKING:
         ParkedBatchView as ParkedBatchView,
         Stop as Stop,
         TenantInactive as TenantInactive,
+        Why as Why,
         WorkItem as WorkItem,
     )
     from defender.learning_store._keys import (
@@ -47,7 +51,7 @@ if TYPE_CHECKING:
 _HOMES: dict[str, str] = {
     **dict.fromkeys(("BlockingStore", "blocking",), "_blocking"),
     **dict.fromkeys(("FeedbackComment", "FeedbackHeld", "FeedbackIssue",), "_feedback"),
-    **dict.fromkeys(("DEFAULT_GRACE_SECONDS", "DEFAULT_LEASE_SECONDS", "BatchView", "CommitRecord", "Held", "ItemRefused", "LaneBusy", "LaneWork", "LearningStore", "LeaseLost", "NotLapsed", "Outcome", "ParkedBatchView", "Stop", "TenantInactive", "WorkItem",), "_store"),
+    **dict.fromkeys(("DEFAULT_GRACE_SECONDS", "DEFAULT_LEASE_SECONDS", "Acted", "BatchCause", "BatchView", "CommitRecord", "Held", "ItemCause", "ItemRefused", "LaneBusy", "LaneWork", "LearningStore", "LeaseLost", "NotLapsed", "Outcome", "ParkedBatchView", "Stop", "TenantInactive", "Why", "WorkItem",), "_store"),
     **dict.fromkeys(("is_reducer_row", "pitfall_key",), "_keys"),
 }
 

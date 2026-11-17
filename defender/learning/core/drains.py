@@ -389,7 +389,7 @@ def _store_lead_work(  # noqa: PLR0913, C901 — the lane's two steps, its claim
     for kind, key, payload in [item for item in held.items if item[0] == "curation_request"]:  # lint-half-table: ok — this lane serves the curation request's own run rule, not a lane decision
         run = _run_of(payload, paths.tenant)
         if isinstance(run, RunAbsent):
-            outcomes[(kind, key)] = Outcome.dead("artifact-missing")
+            outcomes[(kind, key)] = Outcome.dead("artifact_missing", "artifact-missing")
             continue
         if not isinstance(run, Run):
             outcomes.setdefault((kind, key), Outcome.waiting())

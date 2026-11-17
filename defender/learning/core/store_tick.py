@@ -64,15 +64,18 @@ class Refused(Exception):
     """A delivery refusal met while the tick opens its tenant delivery or starts its batch: the stage's
     one-line refusal, unless `transient` (an outage that may pass by itself), which skips the tick."""
 
-    def __init__(self, message: str, *, transient: bool = False) -> None:
+    def __init__(self, message: str, *, transient: bool = False, fault: BaseException | None = None) -> None:
         super().__init__(message)
         self.transient = transient
+        #: The fault the delivery's open met (the chain a classifier reads for a status or a credential failure); `None`
+        #: for a refusal decided locally (no forge wiring recorded).
+        self.fault = fault
 
 
 def classified_refusal(message: str, fault: BaseException) -> Refused:
     from defender.learning.author.version_control.status import TRANSIENT, classify
 
-    return Refused(message, transient=classify(fault)[0] == TRANSIENT)
+    return Refused(message, transient=classify(fault)[0] == TRANSIENT, fault=fault)
 
 
 class TickStopped(KeyboardInterrupt):
@@ -158,6 +161,46 @@ def forge_refuses(error: BaseException) -> bool:
     """A non-transient refusal: 401, 403 or another 4xx but a timeout or a rate limit."""
     status = http_status(error)
     return status is not None and 400 <= status < 500 and status not in (408, 429)
+
+
+#: The most of a refused request's own words a batch's park detail keeps.
+FAULT_TEXT_LIMIT = 600
+
+
+def _why(cause: str, detail: str) -> Any:
+    """The store's one value for why (a cause and its detail), loaded when first needed (the store's stack is heavy)."""
+    from defender.learning_store import Why
+
+    return Why(cause, detail)  # type: ignore[arg-type]
+
+
+def refusal_cause(fault: BaseException) -> str:
+    """The one classifier of what the loop counts toward a batch's person ceiling (H15, #1537 PR1): the batch cause the
+    refusal parks it with. A 401 or 403 (the forge's, the issuer's, the secret store's), and a credential failure with no
+    status at all (a token the issuer would not mint), is `forge_credential_refused`: the work is fine, the key was not,
+    so a person may release it. A delivery that cannot open for want of setup (a host secret file missing or empty, no
+    forge wiring recorded) is `delivery_unavailable`: retrying will not fix it. Any other lasting refusal is
+    `forge_refused`. Every counting path passes through here; none picks a cause of its own."""
+    from defender.learning.author.version_control import ForgejoAuthError
+    from defender.learning.author.version_control.auth import CredentialMisconfigured
+
+    if isinstance(fault, Refused):
+        if fault.fault is None:
+            return "delivery_unavailable"
+        fault = fault.fault
+    chain: list[BaseException] = []
+    seen: BaseException | None = fault
+    while seen is not None and all(seen is not c for c in chain):
+        chain.append(seen)
+        seen = seen.__cause__ or seen.__context__
+    if any(isinstance(c, CredentialMisconfigured) for c in chain):
+        return "delivery_unavailable"
+    status = http_status(fault)
+    if status in (401, 403):
+        return "forge_credential_refused"
+    if status is None and any(isinstance(c, ForgejoAuthError) for c in chain):
+        return "forge_credential_refused"
+    return "forge_refused"
 
 
 #: What a forge or git read raises: the faults the tick sorts into refusal or unknown.
@@ -399,42 +442,48 @@ class Tick:
     # -- what there is to do -----------------------------------------------------------------------
 
     def _to_tend(self, views: Sequence[Any]) -> tuple[list[Any], list[Any], list[Any]]:
-        """`(in review, lapsed, ended with a PR to close)`: what this tick reconciles and recovers."""
+        """`(in review, lapsed, requested)`: what this tick reconciles, recovers and carries a person's abandon request
+        out for (a parked batch with a request, #1537 O3)."""
         review = [b for b in views if b.phase == "in_review" and b.lane in self.reconcile_lanes]
         lapsed = [b for b in views if b.lane == self.lane and b.lapsed]
-        closing = [b for b in views if b.lane in self.reconcile_lanes and open_pr_of_ended(b)]
-        return review, lapsed, closing
+        requested = [b for b in views if b.lane in self.reconcile_lanes and b.phase == "needs_person"
+                     and b.abandon_requested_at is not None]
+        return review, lapsed, requested
 
     def run(self) -> int:
         views = self.store.batches(self.tenant_id)
-        review, lapsed, closing = self._to_tend(views)
+        review, lapsed, requested = self._to_tend(views)
         work = self.store.lane_work(self.tenant_id, self.lane, thresholds=self.thresholds)
         claim = work.claimable and not work.busy
-        if not (review or lapsed or closing or claim):
-            _logger.info(f"{self.label}: nothing in review, nothing lapsed and nothing at threshold — skipping")
+        if not (review or lapsed or requested or claim):
+            _logger.info(f"{self.label}: nothing in review, nothing lapsed, no abandon requested and nothing at "
+                         "threshold — skipping")
             return 0
         with contextlib.ExitStack() as stack:
             try:
                 delivery = stack.enter_context(self.open_delivery())
             except Refused as refused:
-                # Opening the repository is a request the reconcile and the recovery make (R2-1).
+                # Opening the repository is a request the reconcile and the recovery make (R2-1). A requested batch is
+                # parked already: it waits, shown as checked, and counts nothing.
                 if not refused.transient:
                     for b in [*review, *lapsed]:
                         self._refusal(b, refused)
+                for b in requested:
+                    self._waits(b)
                 raise
             from defender.jobs.learning_models import BRANCH_PREFIX
 
             delivery = dataclasses.replace(delivery, branch_prefix=BRANCH_PREFIX[self.lane])
-            return self._opened(delivery, review, lapsed, closing)
+            return self._opened(delivery, review, lapsed, requested)
 
     def tend(self, delivery: TenantDelivery) -> None:
         """Reconcile and recover with no claim, over a delivery the caller opened (the feedback tick's
         registry lane: its claim is its own, A4)."""
-        review, lapsed, closing = self._to_tend(self.store.batches(self.tenant_id))
-        if review or lapsed or closing:
-            self._opened(delivery, review, lapsed, closing, claim=False)
+        review, lapsed, requested = self._to_tend(self.store.batches(self.tenant_id))
+        if review or lapsed or requested:
+            self._opened(delivery, review, lapsed, requested, claim=False)
 
-    def _opened(self, delivery: TenantDelivery, review: list[Any], lapsed: list[Any], closing: list[Any], *,
+    def _opened(self, delivery: TenantDelivery, review: list[Any], lapsed: list[Any], requested: list[Any], *,
                 claim: bool = True) -> int:
         from defender.learning.author.version_control.store_delivery import StoreRecord
 
@@ -442,21 +491,39 @@ class Tick:
         items = self.store.work(self.tenant_id, statuses=OPEN_WORK)
         for b in review:
             self._reconcile(delivery, b, record, [i for i in items if i.batch_id == b.id and i.status == "in_batch"])
-        for b in closing:
-            self._close_ended(delivery, b)
+        settled = False
+        for b in requested:
+            settled |= self._abandon(delivery, b, record,
+                                     [i for i in items if i.batch_id == b.id and i.status == "in_batch"])
         for b in lapsed:
             self._recover(delivery, b, record)
-        return self._claim(delivery) if claim else 0
+        # A person's abandon just freed a lane: the claim it makes room for waits for the next pass, so one tick does not
+        # both end a batch and start authoring over what that batch gave back.
+        return self._claim(delivery) if claim and not settled else 0
 
     # -- counting what the forge said ----------------------------------------------------------------
 
     def _refusal(self, b: Any, fault: BaseException) -> None:
+        if self._requested(b):
+            self._waits(b)
+            return
         if str(b.id) in self._counted:
             return
         self._counted.add(str(b.id))
-        count, phase = self.store.note_refusal(self.tenant_id, str(b.id), one_line(str(fault))[:300])
+        count, phase = self.store.note_refusal(self.tenant_id, str(b.id),
+                                               _why(refusal_cause(fault), one_line(str(fault))[:FAULT_TEXT_LIMIT]))
         _logger.warning(f"{self.label}: the forge refused a request for batch {b.id} ({count} in a row, {phase}): "
                         f"{one_line(str(fault))}")
+
+    @staticmethod
+    def _requested(b: Any) -> bool:
+        """A parked batch whose person asked for its abandon: it is parked already, so nothing it meets is counted."""
+        return b.phase == "needs_person" and b.abandon_requested_at is not None
+
+    def _waits(self, b: Any) -> None:
+        """The request waits: the loop looked and could not finish, so the batch shows as checked, counting nothing."""
+        with contextlib.suppress(Exception):
+            self.store.note_check(self.tenant_id, str(b.id), reset_refusals=False)
 
     def _fault(self, b: Any, fault: BaseException, doing: str) -> None:
         """A forge or git fault met while `doing` something for batch `b`: a refusal counts, an unknown waits."""
@@ -466,9 +533,7 @@ class Tick:
         _logger.warning(f"{self.label}: {doing} for batch {b.id} could not be done now ({one_line(str(fault))}): "
                         "unknown, so the batch waits")
         with contextlib.suppress(Exception):
-            # An ended batch is selected again while its PR is open and unchecked since it ended
-            # (`open_pr_of_ended`): a fault is not a check, so it must not stamp one.
-            if b.phase not in ("working", "ended"):
+            if b.phase != "working":
                 self.store.note_check(self.tenant_id, str(b.id), reset_refusals=False)
 
     def _fetch(self, delivery: TenantDelivery) -> None:
@@ -503,7 +568,7 @@ class Tick:
                 return
             if b.kind == "revert":
                 self.store.end_review(self.tenant_id, str(b.id), expect_phase="in_review", outcome="closed",
-                                      published=[], held=[], reason=f"revert PR #{number} closed unmerged")
+                                      published=[], held=[], why=f"revert PR #{number} closed unmerged")
                 return
             reviews, comments = forge.reviews(number), forge.comments(number)
         except _forge_faults() as fault:
@@ -517,7 +582,8 @@ class Tick:
             return
         self.store.end_review(self.tenant_id, str(b.id), expect_phase="in_review", outcome="closed", published=[],
                               held=[(i.kind, i.key) for i in members],
-                              reason=f"PR #{number} of batch {b.id} was closed with no feedback: held for a person")
+                              items_why=_why("closed_without_feedback",
+                                             f"PR #{number} of batch {b.id} was closed with no feedback: held for a person"))
         _logger.info(f"{self.label}: PR #{number} of batch {b.id} was closed with no words: its items are held")
 
     def _reconcile_registry(self, forge: Any, b: Any, number: int) -> None:
@@ -537,14 +603,31 @@ class Tick:
                               held=[])
         _logger.info(f"{self.label}: registry PR #{number} of batch {b.id} was {outcome}: the batch ended")
 
-    def _merged(  # noqa: C901 — one rule per lane and per citation source, kept in the one merge reading (H16, D7, D9)
-            self, delivery: TenantDelivery, b: Any, pr: Any, record: Any, members: list[Any]) -> None:
+    def _merged(self, delivery: TenantDelivery, b: Any, pr: Any, record: Any, members: list[Any]) -> None:
         """Merged: the cited are published; cited at the branch tip but absent from the merge commit's tree
         (a reviewer removed the citation) are held; the rest wait again (H16). The lead lane has no citation
         field: every item its curator committed is published (D9)."""
+        read = self._read_merge(delivery, b, pr, record, members)
+        if read is None:
+            return
+        published, held = read
+        number = b.pr_number
+        self.store.end_review(self.tenant_id, str(b.id), expect_phase="in_review", outcome="merged",
+                              published=published, held=held,
+                              items_why=_why("cut_from_merge", f"cited at the branch tip, not in PR #{number}'s merge")
+                              if held else None)
+        _logger.info(f"{self.label}: PR #{number} of batch {b.id} merged: {len(published)} published, "
+                     f"{len(held)} held")
+
+    def _read_merge(  # noqa: C901 — one rule per lane and per citation source, kept in the one merge reading (H16, D7, D9)
+            self, delivery: TenantDelivery, b: Any, pr: Any, record: Any,
+            members: list[Any]) -> tuple[list[tuple[str, str]], list[tuple[str, str]]] | None:
+        """What a merged PR settles for `b`'s items: `(published, held)`; `None` when the merge could not be read now
+        (a fault, already routed: counted for a batch in review, waited out for a requested one)."""
         from defender.learning.author.version_control.store_delivery import cited_in_paths, cited_in_tree
 
         repository = delivery.repository
+        number = b.pr_number if b.pr_number is not None else pr.number
         merge = getattr(pr, "merge_commit_sha", None)
         published: list[tuple[str, str]] = []
         held: list[tuple[str, str]] = []
@@ -552,12 +635,12 @@ class Tick:
             published = [(i.kind, i.key) for i in members]
         elif members:
             if not merge:
-                self._fault(b, RuntimeError(f"merged PR #{b.pr_number} names no merge commit"), "reading the merge")
-                return
+                self._fault(b, RuntimeError(f"merged PR #{number} names no merge commit"), "reading the merge")
+                return None
             try:
                 self._fetch(delivery)
                 if not repository.holds_commit(merge):
-                    raise RuntimeError(f"the merge commit {merge} of PR #{b.pr_number} is not in the clone")
+                    raise RuntimeError(f"the merge commit {merge} of PR #{number} is not in the clone")
                 commits = record.commits_of(str(b.id))
                 tip = pr.head_sha if pr.head_sha and repository.holds_commit(pr.head_sha) else None
                 if tip is None:
@@ -581,25 +664,45 @@ class Tick:
                         held.append((i.kind, i.key))
             except _forge_faults() + (RuntimeError,) as fault:
                 self._fault(b, fault, "reading the merge commit")
-                return
-        self.store.end_review(self.tenant_id, str(b.id), expect_phase="in_review", outcome="merged",
-                              published=published, held=held,
-                              reason=f"cited at the branch tip, not in PR #{b.pr_number}'s merge" if held else None)
-        _logger.info(f"{self.label}: PR #{b.pr_number} of batch {b.id} merged: {len(published)} published, "
-                     f"{len(held)} held")
+                return None
+        return published, held
 
-    def _close_ended(self, delivery: TenantDelivery, b: Any) -> None:
-        """A batch that ended (a person's abandon) while its PR was open: the PR is closed (Reconcile)."""
+    # -- a person's abandon request (#1537 O3) -----------------------------------------------------------
+
+    def _abandon(self, delivery: TenantDelivery, b: Any, record: Any, members: list[Any]) -> bool:
+        """Carry out a parked batch's abandon request, which the database alone could not decide: read its PR on the
+        forge (the recorded number, else the one on its branch). Close first, then settle: an open PR (not a registry's:
+        the bot never closes one, A4) is closed, and the PR is read again, so a PR merged in the gap is settled as merged,
+        never as abandoned. A fault leaves the request waiting, shown as checked, and counts nothing: the batch is already
+        parked."""
         forge = delivery.repository.forge
         try:
-            pr = forge.pull_request(int(b.pr_number))
-            if pr.status == "open":
-                forge.close_pr(int(b.pr_number))
-                _logger.info(f"{self.label}: batch {b.id} ended with its PR #{b.pr_number} open: closed it")
+            number = int(b.pr_number) if b.pr_number is not None else None
+            if number is None:
+                found = find_pr(forge, b.branch, record.commits_of(str(b.id)))
+                number = int(found.number) if found is not None else None
+            pr = forge.pull_request(number) if number is not None else None
+            if pr is not None and pr.status == "open" and b.kind != "registry":
+                forge.close_pr(number)
+                _logger.info(f"{self.label}: batch {b.id} is abandoned by a person's request: closed its PR #{number}")
+                pr = forge.pull_request(number)
         except _forge_faults() as fault:
-            self._fault(b, fault, f"closing PR #{b.pr_number}")
-            return
-        self.store.note_check(self.tenant_id, str(b.id))
+            _logger.warning(f"{self.label}: the abandon requested for batch {b.id} waits "
+                            f"({one_line(str(fault))})")
+            self._waits(b)
+            return False
+        published: list[tuple[str, str]] = []
+        held: list[tuple[str, str]] = []
+        if pr is not None and pr.status == "merged":
+            read = self._read_merge(delivery, b, pr, record, members)
+            if read is None:
+                return False
+            published, held = read
+        settled = self.store.settle_abandon(self.tenant_id, str(b.id), pr_number=number,
+                                  pr_state=None if pr is None else pr.status, published=published, held=held)
+        _logger.info(f"{self.label}: batch {b.id}'s requested abandon is settled "
+                     f"({'no PR' if pr is None else f'PR #{number} {pr.status}'})")
+        return bool(settled)
 
     # -- crash recovery (O1, O5, R2-1) ----------------------------------------------------------------------
 
@@ -634,13 +737,15 @@ class Tick:
                     pass
                 return
             if remote is not None and remote not in usable:
-                self.store.needs_person(self.tenant_id, str(b.id), f"the branch {b.branch} on the forge holds "
-                                        f"commits the commit-maker did not make for batch {b.id} (tip {remote})")
+                self.store.needs_person(self.tenant_id, str(b.id), _why(
+                    "foreign_commits_remote", f"the branch {b.branch} on the forge holds "
+                    f"commits the commit-maker did not make for batch {b.id} (tip {remote})"))
                 _logger.error(f"{self.label}: batch {b.id}'s branch holds a foreign tip: a person must look")
                 return
             if not usable:
-                self.store.needs_person(self.tenant_id, str(b.id), f"the local branch {b.branch} holds commits "
-                                        f"outside batch {b.id}'s record")
+                self.store.needs_person(self.tenant_id, str(b.id), _why(
+                    "foreign_commits_local", f"the local branch {b.branch} holds commits "
+                    f"outside batch {b.id}'s record"))
                 return
             tip = local if local in usable else remote
             push = tip if tip != remote else None
@@ -745,7 +850,7 @@ class Tick:
             if foreign:
                 names = ", ".join(f"#{r['number']} ({r['headRefName']})" for r in foreign)
                 ending(self.store.needs_person, self.tenant_id, str(held.batch_id),
-                       f"an open PR on {prefix} that no batch made holds the lane: {names}")
+                       _why("foreign_pr", f"an open PR on {prefix} that no batch made holds the lane: {names}"))
                 _logger.error(f"{self.label}: batch {held.batch_id} opens no PR beside {names}: a person must look")
                 return None
         title, body = pr_text(held, tip_message)
@@ -946,23 +1051,18 @@ def _stop_after_work(stop_box: Callable[..., None], box: Any, *, work_ok: bool, 
         _logger.error(f"{label}: the batch's box could not be torn down after a failed batch: {e!r}")
 
 
-def open_pr_of_ended(b: Any) -> bool:
-    """An abandoned batch whose PR is still to be closed (not checked since it ended). The bot never closes a registry
-    PR (A4): a person's abandon leaves it open for a person."""
-    return (b.kind != "registry" and b.phase == "ended" and b.outcome == "abandoned" and b.pr_number is not None
-            and (b.last_checked is None or (b.ended_at is not None and b.last_checked < b.ended_at)))
-
-
 def lane_waiting(store: Any, tenant_id: str, lane: str, *, tick_thresholds: Mapping[str, int] | None = None,
                  reconcile_lanes: Sequence[str] | None = None) -> bool:
     """Whether a tick of `lane` (reconciling `reconcile_lanes`, by default its own) could act now or later without a
     person (G-T1): a batch of its lane working (to recover should its lease lapse), one of a reconciled lane in review
-    (its PR may change) or ended with its PR still to close, or a claim the store would make (`lane_work`, the claim's
-    own rules). A batch waiting for a person is none of these: no tick moves it, so it keeps no check clock running."""
+    (its PR may change), a parked one with a person's abandon request (its tick carries it out), or a claim the store
+    would make (`lane_work`, the claim's own rules). A batch waiting for a person with no request is none of these: no
+    tick moves it, so it keeps no check clock running."""
     reconciled = set(reconcile_lanes or (lane,))
     for b in store.batches(tenant_id):
         if (b.lane == lane and b.phase == "working") or (
-                b.lane in reconciled and (b.phase == "in_review" or open_pr_of_ended(b))):
+                b.lane in reconciled and (b.phase == "in_review" or (
+                    b.phase == "needs_person" and b.abandon_requested_at is not None))):
             return True
     work = store.lane_work(tenant_id, lane, thresholds=dict(tick_thresholds or thresholds()))
     return bool(work.claimable and not work.busy)
@@ -970,5 +1070,5 @@ def lane_waiting(store: Any, tenant_id: str, lane: str, *, tick_thresholds: Mapp
 
 __all__ = ["AUTHOR_LANE", "CORPUS_OF", "DSN_ENV", "FEEDBACK_LANE", "GRACE_ENV", "Holding", "LEAD_LANE", "LEASE_ENV", "RENEW_ENV",
            "Refused", "STOP_PUSH_SECONDS", "Tick", "TickStopped", "classified_refusal", "closed_with_feedback",
-           "framed_feedback", "forge_refuses", "http_status", "lane_waiting", "live_changes_requested", "open_pr_of_ended", "opened_store",
-           "owner_name", "store_knobs", "thresholds"]
+           "framed_feedback", "forge_refuses", "http_status", "lane_waiting", "live_changes_requested", "opened_store",
+           "owner_name", "refusal_cause", "store_knobs", "thresholds"]

@@ -50,6 +50,16 @@ BATCH_KINDS = ("author", "revert", "registry")
 AUTHORING_KINDS = ("author", "registry")
 PHASES = ("working", "in_review", "needs_person", "ended")
 OUTCOMES = ("merged", "closed", "abandoned")
+#: Why a held, dead or skipped item is set aside (#1537 PR1): one closed list, picked by code; the model's and the forge's own
+#: words are only the detail (`reason`) beside it.
+ITEM_CAUSES = (
+    "attempt_ceiling", "replacement_ceiling", "replacement_committed_nothing", "closed_without_feedback", "cut_from_merge",
+    "curator_held", "malformed_row", "abandoned_by_person", "declined_ceiling", "deferral_ceiling", "artifact_missing",
+    "superseded", "declined_at_gate", "consumed_no_systems", "unteachable_system", "curator_skipped", "unrecorded")
+#: Why a batch is parked or ended abandoned (#1537 PR1). `forge_credential_refused` is the one a person may release.
+BATCH_CAUSES = (
+    "forge_credential_refused", "forge_refused", "delivery_unavailable", "foreign_commits_remote", "foreign_commits_local",
+    "foreign_pr", "holder_lost", "holder_crashed", "stopped", "no_commits", "abandoned_by_person", "unrecorded")
 
 _TIME = DateTime(timezone=True)
 
@@ -71,6 +81,12 @@ class BatchRow(Base, kw_only=True):
         CheckConstraint("phase <> 'working' OR (lease_owner IS NOT NULL AND lease_expiry IS NOT NULL)",
                         name="working_has_a_lease"),
         CheckConstraint("phase <> 'in_review' OR pr_number IS NOT NULL", name="in_review_has_a_pr"),
+        # A cause exactly when the batch is parked or ended abandoned, from the batch list (#1537 PR1).
+        CheckConstraint("(phase = 'needs_person' OR outcome IS NOT DISTINCT FROM 'abandoned') = (cause IS NOT NULL)", name="cause_follows_state"),
+        CheckConstraint("cause IS NULL OR " + _in_list("cause", BATCH_CAUSES), name="cause"),
+        CheckConstraint("parked_at IS NULL OR phase = 'needs_person'", name="parked_at_only_when_parked"),
+        CheckConstraint("(abandon_requested_at IS NULL) = (abandon_requested_by IS NULL)", name="request_is_whole"),
+        CheckConstraint("abandon_requested_at IS NULL OR phase IN ('needs_person', 'ended')", name="request_only_when_parked"),
         # One open authoring batch per lane (O3, H4): working, in review or waiting on a person.
         Index("batches_one_open_author_per_lane", "tenant_id", "lane", unique=True,
               postgresql_where=text(_in_list("kind", AUTHORING_KINDS) + " AND phase <> 'ended'")),
@@ -107,6 +123,13 @@ class BatchRow(Base, kw_only=True):
     last_checked: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
     #: Why the batch ended abandoned, went to a person, or has no replacement.
     reason: Mapped[str | None] = mapped_column(Text, default=None)
+    #: The closed-list cause behind `reason` (the detail): set exactly while parked or ended abandoned (#1537 PR1).
+    cause: Mapped[str | None] = mapped_column(Text, default=None)
+    #: When the batch entered `needs_person`; null otherwise and for batches parked before #1537.
+    parked_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
+    #: A person's request to abandon the parked batch (kept after the batch ends: the row's record of who asked).
+    abandon_requested_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
+    abandon_requested_by: Mapped[str | None] = mapped_column(Text, default=None)
     created_at: Mapped[_dt.datetime] = mapped_column(_TIME)
     ended_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
 
@@ -118,6 +141,9 @@ class WorkItemRow(Base, kw_only=True):
         ForeignKeyConstraint(["batch_id"], [f"{SCHEMA}.batches.id"]),
         CheckConstraint(_in_list("kind", KINDS), name="kind"),
         CheckConstraint(_in_list("status", STATUSES), name="status"),
+        # A cause exactly when the item is held, dead or skipped, from the item list (#1537 PR1).
+        CheckConstraint("(status IN ('held', 'dead', 'skipped')) = (cause IS NOT NULL)", name="cause_follows_status"),
+        CheckConstraint("cause IS NULL OR " + _in_list("cause", ITEM_CAUSES), name="cause"),
         # A request case is unique while waiting; the later run wins (r8 coalesce key).
         Index("work_items_one_waiting_request_per_case", "tenant_id", "kind", "coalesce_key", unique=True,
               postgresql_where=text("status = 'waiting' AND coalesce_key IS NOT NULL")),
@@ -139,6 +165,8 @@ class WorkItemRow(Base, kw_only=True):
     source_run: Mapped[str | None] = mapped_column(Text, default=None)
     status: Mapped[str] = mapped_column(Text)
     reason: Mapped[str | None] = mapped_column(Text, default=None)
+    #: The closed-list cause behind `reason` while held, dead or skipped (#1537 PR1).
+    cause: Mapped[str | None] = mapped_column(Text, default=None)
     fault: Mapped[str | None] = mapped_column(Text, default=None)
     batch_id: Mapped[BatchId | None] = mapped_column(IdColumn(BatchId), default=None)
     attempts: Mapped[int] = mapped_column(Integer)
