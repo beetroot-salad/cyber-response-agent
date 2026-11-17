@@ -11,13 +11,12 @@ from _by_path import load_lint_gate
 _GATE = load_lint_gate("lint_scrub_order")
 
 # #1342 M3: `main` and `job_main` are compositions; each calls the lifecycle, then the shared
-# post-steps phase, which alone holds the readers of the scrubbed folder. The ticket comment and
-# the curation enqueue stay in the operator composition, after the lifecycle.
+# post-steps phase, which alone holds the readers of the scrubbed folder. The curation enqueue
+# stays in the operator composition, after the lifecycle (the operator posts no ticket comment).
 _MAIN = (
     "def main():\n"
     "    summary = lifecycle()\n"
     "    _post_steps(summary)\n"
-    "    ticket_writer.record_case_ticket()\n"
     "    enqueue_curation()\n"
     "def job_main():\n"
     "    summary = lifecycle()\n"
@@ -179,7 +178,7 @@ def test_a_reader_before_the_lifecycle_is_found(tmp_path):
 
 @pytest.mark.parametrize(("composition", "name"), [
     ("job_main", "lifecycle"), ("job_main", "_post_steps"),
-    ("main", "lifecycle"), ("main", "_post_steps"), ("main", "record_case_ticket"), ("main", "enqueue_curation"),
+    ("main", "lifecycle"), ("main", "_post_steps"), ("main", "enqueue_curation"),
 ])
 def test_a_vanished_call_in_a_composition_is_a_finding_not_a_pass(tmp_path, composition, name):
     start = _MAIN.index(f"def {composition}():\n")
