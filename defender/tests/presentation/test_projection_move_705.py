@@ -133,6 +133,7 @@ def test_the_moved_projection_still_parses_as_replay_harness_turns(tmp_path):
 def test_the_moved_projection_preserves_the_runtime_html_event_stream(tmp_path):
     """`runtime.html` renders from the store-derived events; `message.id` takes the re-minted `{session_id}/…` form."""
     from defender.presentation import visualize_run
+    from defender.tests.support.presentation._page1534 import render_unclosed
 
     run_dir, store, replay = _driven_run(tmp_path, run_id="runtime-html")
     session_id = sql(store, "SELECT session_id FROM session ORDER BY rowid")[0][0]
@@ -141,7 +142,7 @@ def test_the_moved_projection_preserves_the_runtime_html_event_stream(tmp_path):
 
     # r7.2 P1: the page takes its cost as an argument; this run's own ledger, read as the post-run step reads it.
     cost = visualize_run.LedgerCost(ss.read_ledger(store, run_dir.name))
-    page = visualize_run.render_runtime_page(run_dir, cost=cost)
+    page = render_unclosed(run_dir, cost=cost)
     assert page.strip(), "runtime.html rendered empty"
 
     events = [json.loads(line) for line in

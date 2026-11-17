@@ -417,8 +417,9 @@ async def test_o8_a_run_that_crashed_still_has_its_spend_recorded(world):
 async def test_o8_no_session_pointer_costs_nothing(world, caplog):
     """No pointer (the store was never opened) → cost 0 and exact, not unknown. (O8 cost, S4)"""
     caplog.set_level(logging.INFO, logger=WORKER_LOGGER)
-    inv, stored = await _run_one(world, _child(world, files=_committed()))
-    assert stored["stage"] == "completed"
+    files = {"{id}.job-end.json": job_end(setup="crashed", box="not_started", report_committed=False, scrub_verified=False)}
+    inv, stored = await _run_one(world, _child(world, files=files))  # CONFLICT-UPDATED (#1534): a committed run always has a pointer
+    assert (stored["stage"], stored["failure_reason"]) == ("failed", "no_report")
     assert (stored["cost_usd"], lower_limit(world["dsn"], inv)) == (0, False)
     assert not _warned(caplog, inv), "a run with no pointer logged a cost fault"
 
@@ -465,7 +466,11 @@ async def test_o8_a_cost_read_fault_keeps_the_stage_and_leaves_cost_unknown(worl
     child = _child(world, files=_committed(**{"{id}.session-pointer.json": pointer}))
     inv, stored = await _run_spent(world, child, spend, then=then)
 
-    assert (stored["stage"], stored["disposition"]) == ("completed", "inconclusive")
+    # CONFLICT-UPDATED (#1534): the disposition is read through the same pointer and database, so a fault there costs it too.
+    if fault in ("no-ledger-table", "no-main-session", "pointed-session-not-in-database"):
+        assert (stored["stage"], stored["disposition"]) == ("completed", "inconclusive")
+    else:
+        assert (stored["stage"], stored["disposition"]) == ("unparseable", None)
     assert (stored["cost_usd"], lower_limit(world["dsn"], inv)) == (None, False)
     assert _warned(caplog, inv), "the cost fault was not logged"
 
@@ -490,7 +495,7 @@ async def test_o8_a_session_pointer_of_the_wrong_shape_keeps_the_stage_and_leave
                "a case id that is a number": json.dumps({"case_id": 5, "store_path": "/nonexistent/elsewhere.db"})}[shape]
     inv, stored = await _run_one(world, _child(world, files=_committed(**{"{id}.session-pointer.json": pointer})))
 
-    assert (stored["stage"], stored["disposition"]) == ("completed", "inconclusive")
+    assert (stored["stage"], stored["disposition"]) == ("unparseable", None)  # CONFLICT-UPDATED (#1534): pointer-unreadable
     assert (stored["cost_usd"], lower_limit(world["dsn"], inv)) == (None, False)
     assert _warned(caplog, inv), "the cost fault was not logged"
 
@@ -1391,6 +1396,8 @@ async def test_m1_a_symlinked_or_oversize_host_record_is_unreadable_not_followed
 
     if which == "job-end":  # unreadable = absent: rule 1
         assert (stored["stage"], stored["failure_reason"]) == ("failed", "no_report")
+    elif which == "pointer":  # CONFLICT-UPDATED (#1534): pointer-unreadable costs the disposition too
+        assert (stored["stage"], stored["disposition"]) == ("unparseable", None)
     else:
         assert (stored["stage"], stored["disposition"]) == ("completed", "inconclusive")
     if which == "knowledge":
