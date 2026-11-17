@@ -731,7 +731,7 @@ class Oracle:
 
     def _attempt(self, call: tuple[str, str, dict], base: Any, real: Callable[[], RealData], *,  # noqa: PLR0913 — `serve`'s call plus its pre-branch framing and gate
                  first: bool, fixed: bool = False, live: bool = False,
-                 ours: list[tuple[str, str]], saved: list[dict] | None = None,
+                 ours: list[tuple[str, str]], saved: list[dict],
                  gate: Callable[[Any], str | None] | None = None) -> _Submitted | str:
         """One attempt: one run of the oracle's agent loop over the conversation so far. The
         loop answers every tool call of every reply, so the conversation it hands back is
@@ -751,7 +751,7 @@ class Oracle:
         box = _AttemptBox(self.box_factory)
         run = _Run(door=self.door, deadline=self.turn_deadline, call=call, base=base, real=real,
                    box=box, gate=gate, live=live, fixed=fixed,
-                   ours=ours, saved=saved if saved is not None else [])
+                   ours=ours, saved=saved)
         # A verdict already handed over as a tool's result leaves nothing pending: the
         # conversation then ends on that request, and the run continues from it.
         history = [*self._conversation, *([ModelRequest(parts=self._pending)]  # lint-stale-ref: ok — unrelated local attribute named _pending, not the retired learning queue
@@ -801,8 +801,14 @@ class Oracle:
             if run.ended is not None:
                 return _NOT_RUN
             try:
-                boxed = name == "python" or (name == "check" and "code" in args)
-                invoke = run.box_work if boxed else run.blocking
+                if name == "check" and "code" in args:
+                    handed = await run.box_work(lambda: self._handed_in_or_refusal(run, args))
+                    if isinstance(handed, str):
+                        return f"check refused: {wrap_fresh(handed, 'untrusted')}"
+                    served, claim, staged = handed
+                    return await run.blocking(lambda: _check_text(
+                        self._check(run, served, claim, staged=staged).failures))
+                invoke = run.box_work if name == "python" else run.blocking
                 return await invoke(lambda: self._tool(name, args, run))
             except _ArgumentRefused as refused:
                 return f"{name} refused: {wrap_fresh(str(refused), 'untrusted')}"
@@ -855,14 +861,7 @@ class Oracle:
         if name == "re_ask":
             return self._re_ask(args, run)
         if name == "check":
-            if "code" in args:
-                served, claim, staged = self._handed_in(run, args, staged=dict(run.attempt.forged))
-                failures = self._check(run, served, claim, staged=staged).failures
-            else:
-                failures = self._check(run, args.get("served"), args.get("claim")).failures
-            if not failures:
-                return "The draft passes the host checks."
-            return "The draft fails:\n" + "\n".join(failures)
+            return _check_text(self._check(run, args.get("served"), args.get("claim")).failures)
         return f"There is no tool named {wrap_fresh(str(name), 'untrusted')}."
 
     def _run_query(self, actor: str, args: dict, run: _Run) -> str:
@@ -984,11 +983,18 @@ class Oracle:
             raise _BoxLost("the box was lost; a fresh one starts on the next run") from None
         return result, unsaved
 
-    def _handed_in(self, run: _Run, args: dict, *,
-                   staged: dict[str, dict]) -> tuple[Any, Any, dict[str, dict]]:
+    def _handed_in_or_refusal(self, run: _Run, args: dict) -> tuple[Any, Any, dict[str, dict]] | str:
+        """`_handed_in`, its refusal returned as text: a worker a deadline left to settle never
+        raises a refusal into the attempt's settlement, where it would fault the world."""
+        try:
+            return self._handed_in(run, args)
+        except _ArgumentRefused as refused:
+            return str(refused)
+
+    def _handed_in(self, run: _Run, args: dict) -> tuple[Any, Any, dict[str, dict]]:
         """A code hand-in (#1543 O2): the code is run once, its standard output parsed as one
-        strict JSON document `{served, claim, forged}`, and its forged rows staged on `staged`
-        under `forge`'s rules. Returns `(served, claim, staged)`; any fault is `_ArgumentRefused`."""
+        strict JSON document `{served, claim, forged}`, and its forged rows staged on a copy of the
+        attempt's under `forge`'s rules. Returns `(served, claim, staged)`; any fault is `_ArgumentRefused`."""
         code = args.get("code")
         if set(args) != {"code"} or not isinstance(code, str):
             raise _ArgumentRefused("a hand-in is `code` alone, or `served` and `claim`, never "
@@ -1011,10 +1017,11 @@ class Oracle:
         if parsed is None:
             raise _ArgumentRefused(f"its claim: {why}")
         named = {entry["forged_id"] for entry in parsed.added}
+        staged = dict(run.attempt.forged)
         staging = _Attempt(forged=staged, facts=run.attempt.facts)
         for row in rows:
             fid = row.get("forged_id") if isinstance(row, Mapping) else None
-            if fid not in named:
+            if not isinstance(fid, str) or fid not in named:
                 raise _ArgumentRefused(f"its forged row {fid!r} is named by no `added` entry of "
                                        "its claim")
             said = self._forge(dict(row), staging, system=run.call[0],
@@ -1113,11 +1120,10 @@ class Oracle:
 
     async def _submitted(self, run: _Run, args: dict) -> _Submitted | str:  # noqa: C901 — the two hand-in forms, then one judgement
         if "code" in args:
-            try:
-                served, claim, staged = await run.box_work(
-                    lambda: self._handed_in(run, args, staged=dict(run.attempt.forged)))
-            except _ArgumentRefused as bad_hand_in:
-                return self._verdict([f"the code's hand-in: {wrap_fresh(str(bad_hand_in), 'untrusted')}"])
+            handed = await run.box_work(lambda: self._handed_in_or_refusal(run, args))
+            if isinstance(handed, str):
+                return self._verdict([f"the code's hand-in: {wrap_fresh(handed, 'untrusted')}"])
+            served, claim, staged = handed
             run.attempt.forged = staged
             run.attempt.code = args["code"]
         elif "served" not in args or "claim" not in args:
@@ -1220,10 +1226,25 @@ _INPUTS = "inputs"
 _HAND_IN_CAP = 8 * 1024 * 1024
 #: How much of a failed hand-in's output the oracle is shown.
 _HAND_IN_HEAD = 2000
+#: The most characters of the oracle's code the verifier is shown.
+_CODE_SHOWN = 16 * 1024
 
 
 def _no_constant(name: str) -> Any:
     raise ValueError(f"{name} is not JSON")
+
+
+def _finite(text: str) -> float:
+    value = float(text)
+    if value in (float("inf"), float("-inf")):
+        raise ValueError(f"{text} is past a finite number")
+    return value
+
+
+def _check_text(failures: list[str]) -> str:
+    if not failures:
+        return "The draft passes the host checks."
+    return "The draft fails:\n" + "\n".join(failures)
 
 
 def _document(result: Any, unsaved: str) -> dict:
@@ -1239,13 +1260,17 @@ def _document(result: Any, unsaved: str) -> dict:
         raise _ArgumentRefused(f"the code printed {len(out)} bytes, past the {_HAND_IN_CAP}-byte "
                                "cap of a served answer")
     try:
-        document = json.loads(out.decode("utf-8"), parse_constant=_no_constant)
-    except (UnicodeDecodeError, ValueError) as bad:
+        document = json.loads(out.decode("utf-8"), parse_constant=_no_constant,
+                              parse_float=_finite)
+    except (UnicodeDecodeError, ValueError, RecursionError) as bad:
         raise _ArgumentRefused(f"its standard output is not one strict JSON document "
                                f"({type(bad).__name__}: {bad}){shown}") from None
     if not (isinstance(document, dict) and {"served", "claim"} <= set(document)
             and set(document) <= {"served", "claim", "forged"}):
         raise _ArgumentRefused(f"its document must be {{served, claim, forged}}{shown}")
+    if document["served"] == BASE_HANDLE:
+        raise _ArgumentRefused(f"{BASE_HANDLE} is for the literal hand-in only: print the "
+                               "answer itself (the base is saved for your code)")
     return document
 
 
@@ -1262,7 +1287,7 @@ def _place(run: _Run, box: Any) -> str:
     from defender._io import rooted_mkdir, rooted_write
 
     scratch = getattr(box, "scratch", None)
-    if scratch is None or run.box is None:
+    if scratch is None or run.box is None:  # `run.box` is set wherever a box runs; the type says otherwise
         return "Note: this box has no scratch folder; no saved files are there."
     entries = list(run.saved)
     base = entries[0]["name"] if entries else None
@@ -1286,17 +1311,36 @@ def _place(run: _Run, box: Any) -> str:
     return ""
 
 
+def _bare_string(statement: Any) -> bool:
+    import ast
+
+    value = statement.value if isinstance(statement, ast.Expr) else None
+    return isinstance(value, ast.Constant) and isinstance(value.value, str)
+
+
 def _without_comments(code: str) -> str:
-    """`code` with its comments dropped, as the verifier is shown it (#1543 O4)."""
-    import io
-    import tokenize
+    """`code` as the verifier is shown it (#1543 O4): parsed and printed back, so its comments
+    and every bare string statement (docstrings included) are gone, and cut to `_CODE_SHOWN`, so
+    the oracle's code cannot crowd the evidence out of the verifier's budget. Code that does not
+    parse is not shown."""
+    import ast
 
     try:
-        kept = [tok for tok in tokenize.generate_tokens(io.StringIO(code).readline)
-                if tok.type != tokenize.COMMENT]
-        return tokenize.untokenize(kept)
-    except (tokenize.TokenError, SyntaxError, IndentationError):
-        return code
+        tree = ast.parse(code)
+    except (SyntaxError, ValueError, RecursionError):
+        return "(the code does not parse as Python; it is not shown)"
+    for node in ast.walk(tree):
+        body = getattr(node, "body", None)
+        if isinstance(body, list):
+            kept = [s for s in body if not _bare_string(s)]
+            node.body = kept or [ast.Pass()]  # type: ignore[attr-defined]
+    try:
+        shown = ast.unparse(tree)
+    except (ValueError, RecursionError):
+        return "(the code could not be shown)"
+    if len(shown) > _CODE_SHOWN:
+        return shown[:_CODE_SHOWN] + f"\n# ... cut: the code runs past {_CODE_SHOWN} characters"
+    return shown
 
 
 def _base_resolved(run: _Run, served: Any) -> Any:

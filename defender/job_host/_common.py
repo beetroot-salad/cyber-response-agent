@@ -10,6 +10,8 @@ A4), so a lane's windows work the same whichever side holds the daemon; all but 
 the helper is signalled, so the job can unwind (A1)."""
 from __future__ import annotations
 
+import shutil
+
 import contextlib
 import logging
 import math
@@ -137,6 +139,10 @@ def _box_stop(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
             answer = relay_stop(box.executor, session.docker, box.windows)
             if answer.get("result") == "stopped":
                 box.stopped = answer
+                # An oracle box's folders go with it, proven stopped (#1543 D1, #1552): nothing runs in them now.
+                for folder in (getattr(box.executor, "scratch", None), getattr(box.executor, "runner", None)):
+                    if folder is not None:
+                        shutil.rmtree(folder, ignore_errors=True)
             return answer
         return dict(box.stopped)
 

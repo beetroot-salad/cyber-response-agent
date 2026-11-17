@@ -10,7 +10,7 @@ import os
 import secrets
 import shutil
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any
@@ -97,7 +97,8 @@ def _on_path(path: str | None) -> DockerFn:
 
 
 def start_oracle_box(*, env: Mapping[str, str], tenant_id: str, data_root: Path, folder: Path | None = None,  # noqa: PLR0913 — the start's identity, its two folders and its seam
-                     docker: DockerFn | None = None, scratch_folder: Path | None = None) -> Any:
+                     docker: DockerFn | None = None, scratch_folder: Path | None = None,
+                     judge: Callable[[Path], None] | None = None) -> Any:
     """Start the oracle's sandboxed box for `tenant_id`; `data_root` is the data root its entry point resolved, where the
     box check runs (#1469); `env` is the process environment handed
     in (its `PATH` finds the `docker` binary, its box knobs size the container). `folder` is
@@ -106,7 +107,9 @@ def start_oracle_box(*, env: Mapping[str, str], tenant_id: str, data_root: Path,
     box is started and run through, used as given (a job's helper passes its own); None, the
     real one with `env`'s `PATH`. `scratch_folder`: where the scratch folder is made instead of
     `folder` (#1543 D1: a job's helper makes it inside the job's tenant folder, so the job's own
-    process can save the oracle's reads into it)."""
+    process can save the oracle's reads into it). `judge`: asked of the scratch folder once it is
+    made and before the box starts over it (the helper's no-link judgement: a folder the job can
+    write is judged at the last moment before docker binds it)."""
     runner = _make_runner(folder)
     try:
         scratch = Path(tempfile.mkdtemp(prefix="defender-oracle-", dir=scratch_folder or folder))
@@ -118,6 +121,12 @@ def start_oracle_box(*, env: Mapping[str, str], tenant_id: str, data_root: Path,
         shutil.rmtree(scratch, ignore_errors=True)
         shutil.rmtree(runner, ignore_errors=True)
 
+    if judge is not None:
+        try:
+            judge(scratch)
+        except BaseException:
+            discard()
+            raise
     request = oracle_box_request(scratch, runner, env=env, tenant_id=tenant_id, data_root=data_root)
     if docker is None:
         docker = _on_path(env.get("PATH"))
