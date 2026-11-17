@@ -155,13 +155,21 @@ OpenBao from `provision-dev-issuer.sh` with `playground-issuer/lifecycle.env`, t
 `python -m defender.lifecycle serve` beside the API; no jobs daemon needed: a started investigation stays queued,
 enough to list, read and cancel):
 
-1. Build the frontend (`npm ci && npm run build` in `defender/frontend/`), start the API with the frontend origin set
+1. Build the frontend (`bun install --frozen-lockfile && bun run build` in `defender/frontend/`), start the API with the frontend origin set
    to `http://localhost:8000` (not `127.0.0.1`: it must match the realm's redirect exactly) on its own port, and start
    the repo's ingress with `python -m defender.api_server.ingress` (inputs: `DEFENDER_INGRESS_LISTEN` = `127.0.0.1:8000`,
    where it serves plain HTTP, `DEFENDER_ARTIFACT_DOMAIN`, `DEFENDER_INGRESS_API_UPSTREAM` = the API's `host:port`,
    `DEFENDER_INGRESS_FRONTEND_DIR` = `defender/frontend/dist`; it needs Caddy on PATH; TLS, when there is any, ends in
    front of it). Every API route is under `/api`. No docs page is served: for routes the app has no screen for, call
    them with the session cookie (for example with `curl`), reading `/api/openapi.json` in a viewer on another origin.
+   For a hot-reload loop use `bun run dev` instead of the ingress: Vite's dev server on `http://localhost:8000` (the
+   origin the realm registers), with `/api` sent to `DEFENDER_INGRESS_API_UPSTREAM`. It has no CSP; the built ingress is the
+   parity path. Keycloak's sign-in screens wear the product's look through the `defender` login theme, which the dev compose
+   mounts; Keycloak imports the realm on first start only, so a dev stack started before the theme needs Keycloak's
+   data recreated (`docker compose down -v`, which also wipes the dev PostgreSQL where Keycloak keeps it) or the realm's login
+   theme set to `defender` in the admin console. A production Keycloak needs the theme folder (`defender/frontend/keycloak-theme/`)
+   and the two files the compose mounts into it (`look/illustration.svg`, `look/tokens.css`) placed in its themes directory,
+   and the realm's `loginTheme` set to `defender`.
 2. Administrator: set the password from Mailpit and sign in (a one-time code is needed: expect to enrol an
    authenticator app on a refused first sign-in, then sign in again). Create a tenant, check
    `GET /api/admin/tenants/<id>` until `active` (on a failed step read the lifecycle log, fix, `resume`), invite its first member.

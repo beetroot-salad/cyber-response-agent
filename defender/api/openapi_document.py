@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from defender._log import configure_from_env
 from defender.api.app import create_app
 from defender.api.ports import ApiDeps
 
@@ -30,4 +31,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    configure_from_env()
     main()

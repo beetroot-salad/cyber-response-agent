@@ -219,7 +219,8 @@ services:
       # The programs' realm (#1307): the OAuth clients of program credentials and nothing else.
       - ./keycloak/realm-defender-programs.json:/opt/keycloak/data/import/realm-defender-programs.json:ro
       # The sign-in theme (#1540 F5) and the two single files of the product's look it uses (PR5): the folder holds no
-      # copy of them. Keycloak imports the realm on first start only: recreate its volume to pick up `loginTheme`.
+      # copy of them. The theme folder holds an empty file at each of those two paths: Docker cannot create a mount point inside
+      # a read-only mount, so the single-file mounts need a file to land on. Keycloak imports the realm on first start only.
       - ../defender/frontend/keycloak-theme:/opt/keycloak/themes/defender:ro
       - ../defender/frontend/look/illustration.svg:/opt/keycloak/themes/defender/login/resources/img/illustration.svg:ro
       - ../defender/frontend/look/tokens.css:/opt/keycloak/themes/defender/login/resources/css/tokens.css:ro

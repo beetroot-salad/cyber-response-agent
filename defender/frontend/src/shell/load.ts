@@ -5,7 +5,7 @@
 import { QueryClient } from "@tanstack/react-query";
 import { literalAddress } from "../addresses";
 import { decideUnauthorized, type Decision, type Taken } from "./decision";
-import type { Person, ReadKey, ReadParams, ReadResult } from "./types";
+import type { Person, ReadBody, ReadKey, ReadParams, ReadResult } from "./types";
 
 export interface Effects {
   /** The page's `fetch`. */
@@ -73,9 +73,9 @@ function addressOf(key: string, params: unknown): string {
   return search.size === 0 ? filled : `${filled}?${search.toString()}`;
 }
 
-function isPerson(body: unknown): body is Person {
-  const candidate = body as { user?: { email?: unknown } } | null;
-  return typeof body === "object" && candidate !== null && typeof candidate.user?.email === "string";
+/** F3: a cookie session is always a person, so `/api/me` is narrowed once, on the generated union's own `kind`. */
+function isPerson(body: ReadBody<"/api/me">): body is Person {
+  return body.kind === "person";
 }
 
 export function makeLoad(options: LoadOptions): Load {
@@ -142,7 +142,7 @@ export function makeLoad(options: LoadOptions): Load {
       if (sent.kind === "failed" || sent.response.status !== 200) return { kind: "error" };
       const read = await jsonOf(sent.response);
       if (read.kind === "gone") return { kind: "gone" };
-      return read.kind === "body" && isPerson(read.body) ? { kind: "ok", me: read.body } : { kind: "error" };
+      return read.kind === "body" && isPerson(read.body as ReadBody<"/api/me">) ? { kind: "ok", me: read.body as Person } : { kind: "error" };
     },
     async read<K extends ReadKey>(key: K, params: ReadParams<K>): Promise<ReadResult<K>> {
       const sent = await request(addressOf(key, params), GET, "later");
