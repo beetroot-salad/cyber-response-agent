@@ -113,8 +113,8 @@ def comments_on(truncated_by: str | None, closed_before_cut: bool) -> bool:
     """Does a run that ended this way comment on its case? Not a run cut short by its budget,
     its store, its model provider (down) or its box (unusable, or its fence tripped: #1421)
     before it reached a verdict (`run_end.SILENT_EXITS`): it leaves the case open and writes no
-    receipt. The one rule, read by the record step and by `run.py`, which signs no write-back
-    token for a run that will not comment."""
+    receipt. The one rule: the record step reads it before it asks for a write pass, so a run that
+    will not comment is signed none."""
     return closed_before_cut or (
         run_end.normalized_truncated_by(truncated_by) not in run_end.SILENT_EXITS)
 
