@@ -561,8 +561,10 @@ summary                "Login matched established bastion usage"
   `unsanctioned-benign` — harmless activity with no authorization record —
   needs benign's price, except that a contract declared `on_indet
   process-gap` may be discharged by a paid `basis=exhausted` row (at
-  least one must be, none `unauthorized`); every other hypothesis refuted
-  `--`; and at least one impact predicate declared, every one graded
+  least one must be, none `unauthorized`, and one with any `authorized` row
+  is read as benign reads it); exactly one hypothesis left standing, the
+  one holding that contract, at `+` or `++` — every other is refuted
+  `--`, even one carrying a process gap of its own; and at least one impact predicate declared, every one graded
   `within` — a deferral is not a grade. Rows
   must be distinct. All four prices are charged twice: on the write,
   against the keyword you conclude under, and again by

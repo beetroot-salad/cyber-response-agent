@@ -142,9 +142,10 @@ def _authz_contract_error(
     else:
         rows = [(v, cited) for v, _a, cited in candidates]
 
-    if gap_paid is not None and (
-        not rows or any(v != "authorized" for v, _cited in rows)
-    ):
+    # A contract with any `authorized` row is not a process gap: the record says the activity
+    # WAS allowed, so it is read as `benign` reads it, past-case rule included, and a row
+    # beside it saying otherwise contradicts it.
+    if gap_paid is not None and not any(v == "authorized" for v, _cited in rows):
         return _process_gap_verdict(hid, contract, cid, anchor, rows, keyword, gap_paid)
 
     if not rows:

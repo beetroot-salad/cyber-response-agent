@@ -580,8 +580,9 @@ needs `detection_notes` (the defect) and `entity_check` (that lead's id) in
 that PAYS — mechanically verified against your own transcript, distinct
 from any other row; `unsanctioned-benign` needs benign's price except
 that a contract declared `on_indet process-gap` may be discharged by a
-PAID `basis=exhausted` search (at least one must be, none
-`unauthorized`), every other hypothesis refuted `--`, and every declared
+PAID `basis=exhausted` search (at least one must be, and a contract with
+any `authorized` row is not a gap), exactly one hypothesis left standing —
+the one holding that contract, supported `+` or `++` — and every declared
 impact predicate graded `within`, none deferred. Write them FIRST — the close
 returns without committing if they are not there. The price is charged
 against the keyword you CLOSE under, never the one you concluded under, so

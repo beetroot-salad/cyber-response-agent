@@ -537,6 +537,29 @@ def outstanding_authz_under(
     )
 
 
+def impact_grades(companion: CompanionBody) -> dict[str, list[str]]:
+    """Every `:R impact` grade, keyed by the qualified predicate it grades — the one reading of
+    how a `pred_ref` resolves, shared with `_check_impact_closure`."""
+    grades: dict[str, list[str]] = {}
+    for lead in _leads(companion):
+        lid = lead.get("id", "?")
+        for row in (lead.get("outcome") or {}).get("impact_resolutions") or []:
+            ref = _cell(row, "prediction_ref") if isinstance(row, dict) else ""
+            if ref:
+                grades.setdefault(_qualify(lid, ref), []).append(_cell(row, "verdict"))
+    return grades
+
+
+def unmeasured_under(companion: CompanionBody, disposition: str | None) -> set[str]:
+    """The declared impact predicates the close under `disposition` refuses as never graded.
+    Only `unsanctioned-benign` refuses them; the closure gate stands down for these, so the
+    model is not told to defer a predicate the price says a deferral cannot pay for."""
+    if disposition != PROCESS_GAP_DISPOSITION:
+        return set()
+    grades = impact_grades(companion)
+    return {ref for ref in _declared_impact_predictions(companion) if not grades.get(ref)}
+
+
 def _check_process_gap_impact(companion: CompanionBody) -> list[str]:
     """"No harm detected" is a claim about measurements: at least one impact predicate declared,
     and every declared one graded, every grade `within`. A deferred predicate was not measured,
@@ -549,13 +572,7 @@ def _check_process_gap_impact(companion: CompanionBody) -> list[str]:
             f"activity did no harm, so register what harm would look like "
             f"(`:L l-NNN.impact_preds`) and grade it with `:R impact`"
         ]
-    grades: dict[str, list[str]] = {}
-    for lead in _leads(companion):
-        lid = lead.get("id", "?")
-        for row in (lead.get("outcome") or {}).get("impact_resolutions") or []:
-            ref = _cell(row, "prediction_ref") if isinstance(row, dict) else ""
-            if ref:
-                grades.setdefault(_qualify(lid, ref), []).append(_cell(row, "verdict"))
+    grades = impact_grades(companion)
     errors: list[str] = []
     for ref in declared:
         graded = grades.get(ref)
@@ -575,9 +592,46 @@ def _check_process_gap_impact(companion: CompanionBody) -> list[str]:
     return errors
 
 
+#: Where the one story `unsanctioned-benign` names may stand: measured toward, not merely
+#: left unrefuted.
+_SUPPORTED_WEIGHTS = frozenset({"+", vocab.CONFIRMED_WEIGHT})
+assert set(vocab.WEIGHT_BUCKETS) >= _SUPPORTED_WEIGHTS
+
+
+def _check_one_story(companion: CompanionBody, gap_holders: set[str]) -> list[str]:
+    """The close names ONE story: legitimate activity whose only defect is the missing record.
+    So exactly one hypothesis is left standing, it holds the process gap, and a measurement
+    moved toward it. A second gap holder is no exemption: the record cannot say which story is
+    the legitimate one, so the stolen-credential reading with its own planned gap must be
+    refuted like any other."""
+    keyword = PROCESS_GAP_DISPOSITION
+    weights = _walkers.final_weights(companion)
+    live = sorted(_walkers.live_hypothesis_ids(companion))
+    if len(live) > 1:
+        return [
+            f"disposition {keyword} blocked: hypotheses {', '.join(live)} are all still "
+            f"standing — the close names one story, legitimate activity whose one defect is a "
+            f"missing record, so every other story has to be refuted (`--`) by a measurement, "
+            f"whatever contracts it holds. Refute all but one, or conclude in another vocabulary"
+        ]
+    errors: list[str] = []
+    for hid in live:
+        if hid not in gap_holders:
+            continue
+        if weights.get(hid) not in _SUPPORTED_WEIGHTS:
+            errors.append(
+                f"disposition {keyword} blocked: hypothesis {hid} holds the process gap but "
+                f"stands at {weights.get(hid) or 'null'} — the close says this activity "
+                f"happened and was legitimate, which a measurement has to support (`+` or "
+                f"`++`), not merely fail to refute"
+            )
+    return errors
+
+
 def _check_unsanctioned_benign_gating(companion: CompanionBody) -> list[str]:
     """`benign`'s price with the process-gap exception, plus what the exception owes: at least
-    one contract discharged that way, every other story refuted, and the harm measured."""
+    one contract discharged that way, one story left standing and supported, and the harm
+    measured."""
     keyword = PROCESS_GAP_DISPOSITION
     errors = _check_benign_grounding(companion, keyword=keyword)
     errors += _check_benign_open_slots(companion, keyword=keyword)
@@ -597,13 +651,7 @@ def _check_unsanctioned_benign_gating(companion: CompanionBody) -> list[str]:
             f"close is `benign`"
         )
     if gap_holders:
-        for hid in sorted(set(_walkers.live_hypothesis_ids(companion)) - gap_holders):
-            errors.append(
-                f"disposition {keyword} blocked: hypothesis {hid} is still standing — the close "
-                f"says the only story left is legitimate activity whose one defect is a missing "
-                f"record, so every other story has to be refuted (`--`) by a measurement. "
-                f"Refute {hid}, or conclude in another vocabulary"
-            )
+        errors += _check_one_story(companion, gap_holders)
     errors += _check_process_gap_impact(companion)
     return errors
 
@@ -668,8 +716,9 @@ _UNSANCTIONED_BENIGN_PRICE = _Price(
         "process finding, not a security one. It is `benign`'s price with one exception: a "
         "contract planned `on_indet process-gap`, whose anchor kind has a home system, is "
         "discharged by a paid `basis=exhausted` search of that system. It also owes what the "
-        "exception claims: at least one contract discharged that way, none `unauthorized`, every "
-        "other story refuted (`--`), and every declared impact predicate graded `within`."
+        "exception claims: at least one contract discharged that way, none `unauthorized`; one "
+        "story left standing, holding that contract and supported (`+`/`++`), every other "
+        "refuted (`--`); and every declared impact predicate graded `within`."
     ),
 )
 

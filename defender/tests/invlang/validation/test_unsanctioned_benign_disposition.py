@@ -5,8 +5,9 @@ plan declared `on_indet process-gap` is discharged by a PAID `basis=exhausted` s
 system that holds its anchor kind. Three things are owed beyond that, all read off the record:
 
 - at least one contract was discharged that way, and none is `unauthorized`;
-- every story other than the one holding that contract is refuted — the stolen-credential reading
-  of an unrecorded admin action has to be measured away, not outvoted;
+- one story is left standing, it holds that contract, and a measurement supports it — the
+  stolen-credential reading of an unrecorded admin action has to be measured away, not outvoted,
+  even when it carries a planned process gap of its own;
 - every declared impact predicate is graded `within`, none deferred.
 """
 from __future__ import annotations
@@ -21,11 +22,18 @@ from defender.tests.support.invlang.validation._process_gap import (
     _IMPACT_PREDS,
     _IP2,
     KEYWORD,
+    REFUTE_H2,
     authz,
     authz_row,
     document,
     impact,
 )
+
+
+_H2_OWN_GAP = """
+:H h-002.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+ac2|e-001|change-mgmt|"an approved change let an outside party use alice.ops's account"|escalate|process-gap
+"""
 
 
 def _blocked(doc: str) -> list[str]:
@@ -78,6 +86,19 @@ def test_an_unknown_on_indet_is_refused_on_write():
     # The stolen-credential story is still standing.
     ("attack-story-left-standing", document(refute_h2=False),
      "h-002"),
+    # ... or confirmed, carrying its own planned process gap: holding a gap is no exemption.
+    ("attack-story-confirmed-with-its-own-gap",
+     document(h2_contract=_H2_OWN_GAP,
+              rows=authz() + authz_row(fulfills="ac2") + impact("within"))
+     .replace(REFUTE_H2, REFUTE_H2.replace("null → --", "null → ++")),
+     "h-002"),
+    # The one story left was never measured toward: unrefuted is not supported.
+    ("gap-holder-unsupported",
+     document().replace("h-001  null → ++", "h-001  null → -"), "h-001"),
+    # A record that says the activity WAS authorized is not a missing record.
+    ("authorized-beside-exhausted",
+     document(rows=authz(verdict="authorized", basis="") + authz_row() + impact("within")),
+     "indeterminate"),
     # Harm: graded over what was DECLARED.
     ("impact-exceeded", document(rows=authz() + impact("within", "exceeds")), "exceeds"),
     ("impact-indeterminate", document(rows=authz() + impact("indeterminate")), "ip1"),
@@ -114,6 +135,13 @@ def test_an_open_contract_is_refused_once_not_twice():
     """The closure rule stands down for a contract the close's own price already names."""
     errors = validate_companion(document(rows=impact("within")), None)
     assert [e for e in errors if "ac1" in e and "deferred_authz" in e] == [], errors
+
+
+def test_an_ungraded_predicate_is_refused_once_not_told_to_defer():
+    """The closure rule would say "defer it", which the price says does not pay."""
+    errors = validate_companion(document(rows=authz()), None)
+    assert any(f"{KEYWORD} blocked" in e and "ip1" in e for e in errors), errors
+    assert [e for e in errors if "deferred_impact" in e] == [], errors
 
 
 def test_a_bare_conclude_owes_the_price():

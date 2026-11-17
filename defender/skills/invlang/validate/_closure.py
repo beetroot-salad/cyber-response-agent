@@ -19,15 +19,17 @@ from ..schema import (
     DeferralRecord,
 )
 from ._diag import REFUTED_WEIGHT
-from ._refs import _declared_prediction_ids, _leads
+from ._refs import _declared_prediction_ids
 from ._predictions import _confirmed_and_standing, _settled_predictions
-from ._structure import _cell, _declared_impact_predictions, _qualify
+from ._structure import _cell, _declared_impact_predictions
 from ._state import _anchor_kind, _declarers_by_contract_id
 from ._gating import (
     _check_disposition_gating,
     _rendered_disposition,
     _row_states_something,
+    impact_grades,
     outstanding_authz_under,
+    unmeasured_under,
 )
 
 
@@ -273,19 +275,15 @@ def _check_impact_closure(companion: CompanionBody) -> list[str]:
     conclude = companion.get("conclude") or {}
     if not _is_closing(companion):
         return []
-    resolved: set[str] = set()
-    for lead in _leads(companion):
-        lid = lead.get("id", "?")
-        for row in (lead.get("outcome") or {}).get("impact_resolutions") or []:
-            # Same `_cell` + `_qualify` reading as `_check_impact_resolution_refs`, so the two
-            # rules resolve a `pred_ref` identically.
-            ref = _cell(row, "prediction_ref") if isinstance(row, dict) else ""
-            if ref:
-                resolved.add(_qualify(lid, ref))
-    # The same index `_check_impact_resolution_refs` resolves against.
+    resolved = set(impact_grades(companion))
+    # The same index `_check_impact_resolution_refs` resolves against. A predicate the close's
+    # own price already refuses as never graded is left to that refusal, which says a deferral
+    # does not pay for it; this rule would tell the model to defer it.
+    spoken_for = unmeasured_under(companion, _rendered_disposition(conclude.get("disposition")))
     declared = [
         _Commitment(*ref.rsplit(".", 1))
         for ref in _declared_impact_predictions(companion)
+        if ref not in spoken_for
     ]
     errors = [
         _closure_refusal(
