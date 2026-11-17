@@ -134,6 +134,9 @@ def _served_in_turn(registry: WorldRegistry, system: str, verb: str, asked: dict
                   "decision": decision,
                   "base_digest": digest, "claim": claim, "verifier_verdict": verdict,
                   "attempts": attempts}
+        if getattr(staged, "code", None) is not None:
+            # The code whose output was served, kept for the record (#1543 O4); repeats serve the output.
+            answer["code"] = staged.code
         if re_asked is not None:
             # The question and the rows the cut dropped ride the answer for audit.
             answer["re_ask"] = {"system": re_asked.system, "verb": re_asked.verb,
