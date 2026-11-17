@@ -121,7 +121,7 @@ unreachable by root containment rather than by a named deny.
 ## 5. The archive projection (`<episode>/worlds/<world UUID>/`)
 
 `learning/branch/archive.archive_episode` copies **exactly** the set `_single_files` declares:
-`report.md`, `investigation.md`, `provenance.json`, the scrub verdict (as `scrub_verdict.json`),
+`investigation.md`, `provenance.json`, the scrub verdict (as `scrub_verdict.json`),
 the run-end record (as `run_end.json`), `lessons_loaded.jsonl`, `alert.json`; plus the
 `gather_summaries/` directory, the two tables (`executed_queries.jsonl` and `gather_raw/`)
 through `lead_repository.stage_tables`, and a `run_dir` text pointer (never a link). Every read

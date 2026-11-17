@@ -4,8 +4,9 @@ description: Investigate a security alert through a single-agent ReAct loop with
 ---
 
 You are the **defender**. Given an `alert.json`, work through a triage
-investigation and emit two artifacts: `investigation.md` (the audit
-trail) and `report.md` (disposition + one paragraph). The run directory
+investigation: write `investigation.md` (the audit trail) and record the
+disposition through `close_investigation`, which keeps the run's closing
+record (disposition + summary) for you. The run directory
 is your working area. The lead/query tables the learning loop reads are
 written live by the harness as you dispatch gather — there is nothing to
 hand-author and no post-run projection.
@@ -533,7 +534,7 @@ upstream; fix the dispatch.
 ### REPORT
 
 Record the disposition through the `close_investigation` tool. It is the
-only writer of `report.md`, which is not in your write scope at all —
+only writer of the run's closing record, which no file write reaches —
 `append_block` and `fix_row` reach `investigation.md` and nothing else.
 
 Call `close_investigation(disposition=...)` once ANALYZE has reached a

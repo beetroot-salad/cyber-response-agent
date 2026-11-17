@@ -455,7 +455,7 @@ Two uses, and they are different:
   telemetry-baseline`). How often this estate does the alerted thing, over
   what window, with what scope, and whether anything adverse fell inside
   it. This is descriptive context for whoever reads the closed case — it
-  rides into `report.md`'s body — and it buys the close **nothing**: the
+  rides into the closing record — and it buys the close **nothing**: the
   benign gate never reads it. Its window must end **strictly before** the
   alerted event; a pattern that begins with the incident is the incident.
   That comparison needs the alerted moment, so a document with no
@@ -541,7 +541,7 @@ summary                "Login matched established bastion usage"
 ```
 
 - `disposition` — closed vocab (`enum disposition`), and the SAME keywords
-  `report.md`'s frontmatter carries — SIX of them, `unresolved` the sixth.
+  closing record carries — SIX of them, `unresolved` the sixth.
   A value outside the enum is denied on write; there is no `escalate`
   keyword — an escalation is `termination.category exhaustion-escalation`
   with `disposition inconclusive`. `unresolved` is a member of the enum

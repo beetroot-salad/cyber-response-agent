@@ -17,8 +17,6 @@ writable scratch space.
                           #   stamped by the host at run-dir creation, before any agent exists
   investigation.md        # ORIENT/PLAN/GATHER/ANALYZE/REPORT log, dense invlang
                           #   (:V/:E/:H/:L/:R/:T blocks)
-  report.md               # frontmatter (disposition, outcome, cause, failure_kind?) + one line
-                          #   — host-rendered by close_tool, never model-authored
   review_record.{turn}.json  # the REVIEW GATE's verdict, one per close attempt
   review_{role}_trace.jsonl  # one per review role: support, ablation, composer
   executed_queries.jsonl  # the QUERIES table — one row per executed query (FK lead_id)
@@ -56,13 +54,15 @@ episode dir alone.
 - **`investigation.md`** — the agent's audit trail, written across the loop.
   The human + machine debug surface where the agent shows its work. See
   `content/invlang.md` for the block grammar.
-- **`report.md`** — the headline, written by `investigation/close_tool.py` and by
-  nothing else (it is not in the agent's write scope). The body is
-  **host-rendered from typed arguments** — no model-supplied prose reaches it,
-  because this file rides verbatim into the judge's prompt (the family judge
-  reads each archived world's `report.md`) and out through the ticket bridge's
-  egress. Frontmatter is the load-bearing part: the
-  learning-loop normalizer parses it, so a run with no frontmatter is unusable.
+- **The closing record** (#1534) — the headline: one row per closed run in the
+  `closing_record` table of the run's session database (the one its
+  `session_store_pointer.json` names), written by `investigation/close_tool.py`
+  and by nothing else; no file write reaches it. Every reader (the worker, the
+  ticket bridge, the run page, the judge, held-out scoring, the trace CLI) reads
+  it through one lookup, `records.closing.for_run`, which answers a record, "never
+  closed", or "could not look" with a fixed wording per fault. Its model text (the
+  summary, ceiling-receipt notes, baseline cells) is treated once at the close:
+  controls removed, links defanged, each field cut to its bound.
   `disposition` is a closed enum (`benign` | `false-positive` | `inconclusive`
   | `malicious` | `unsanctioned-benign` | `unresolved`); schema lives in `defender/SKILL.md` §REPORT.
   `unresolved` (#923) is the HOST's own verdict — recorded when a run is cut
@@ -70,10 +70,10 @@ episode dir alone.
   complete, or the framework's own close of a run cut short) — never written by
   the investigating model. It also carries
   the gate's `outcome` (`stands` | `forced-inconclusive`), a `cause` sentence
-  drawn from `close_tool.REPORT_CAUSES`, and — only when the review itself
+  drawn from `records.closing.CAUSES`, and — only when the review itself
   failed — `failure_kind` (`timeout` | `error` | `unreadable`).
 - **`review_record.{turn}.json`** — the review gate's own record, written by
-  `close_tool._commit` **before** `report.md` (record first, so a close is never
+  `close_tool._commit` **before** the closing record (review record first, so a close is never
   committed with no record of what let it through). One per close *attempt*:
   a challenged close writes its record and commits nothing, so a run that was
   challenged once has `review_record.1.json` and `review_record.2.json`. Fields:
@@ -165,7 +165,7 @@ ANALYZE in `investigation.md`). The learning loop joins across cases on
   the assessments and the disposition).
 - **When the committed disposition is `unresolved` but the investigation reads
   confident**, the gate is the explanation, not the agent: check `outcome` and
-  `failure_kind` in `report.md`'s frontmatter, then `review_record.*.json` for
+  `failure_kind` on the closing record (the run page's headline shows them), then `review_record.*.json` for
   the `detail`. A `failure_kind` means the review broke and the run fails closed
   — that is machinery to fix, not a finding about the case. § Review gate in
   `runtime.html` renders all of this per close attempt.

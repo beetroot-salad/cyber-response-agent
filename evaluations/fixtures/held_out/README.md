@@ -135,7 +135,7 @@ python3 -m evaluations.held_out "$DEFENDER_DATA_ROOT/$TENANT_ID/runs" --index F
 
 A case counts only through a row whose `binding` is its current one; one without is listed and
 makes the report incomplete. `held_out.py` reports aggregate accuracy plus per-class recall and counts runs
-that crashed or produced no parseable `report.md` as **wrong** against the ground-truth class
+that crashed or left no closing record (or one that could not be read) as **wrong** against the ground-truth class
 (see the failure-accounting rule in §Metrics of the design doc). A confident close whose review
 cannot run is recorded `inconclusive`, so a dip in malicious recall can be the review gate rather
 than the investigation — open the run before reading it as a reasoning miss.

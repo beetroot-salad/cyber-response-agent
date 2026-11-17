@@ -857,7 +857,7 @@ jobs:
 
       # A module importing another module's closed vocabulary and re-deriving the membership
       # test itself instead of calling the normalizer that ships beside it (#785). The six
-      # interpreters of report.md's disposition each looked fine alone; they disagreed only
+      # interpreters of the old report file's disposition each looked fine alone; they disagreed only
       # BETWEEN themselves, and five had silently dropped the #722 zero-width strip on a field
       # attacker-influenced by construction. A vocabulary is watched only once its owner
       # defines an answer for it, so the gate arms itself as later folds land. No disposition
@@ -990,7 +990,7 @@ jobs:
         run: defender/.venv/bin/python tooling/lint/lint_unaccounted_selection.py
 
       # An invariant enforced at a gate, and then believed of the ARTIFACT. `_artifact_schema`
-      # owns what a well-formed investigation.md / report.md is, and the permission gate
+      # owns what a well-formed investigation.md is, and the permission gate
       # applies it to every write a MODEL makes — which made "a committed investigation
       # parses" true of the verbs the agent writes through, and false of two writers nobody
       # had censused: the harness seeding a `:L findings` row before MAIN's first turn (#964),

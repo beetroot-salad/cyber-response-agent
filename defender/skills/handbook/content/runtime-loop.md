@@ -54,8 +54,8 @@ code, the investigator never occupies it, and it writes no `##` header into
   PLAN predictions with `:R` blocks (`++`/`+`/`-`/`--`). Decide whether
   there's enough to disposition; if not, loop back to PLAN.
 - **REPORT** — call `close_investigation(disposition=…)`. It is the **only**
-  writer of `report.md`, which is not in the agent's write scope at all; the
-  body is host-rendered from typed arguments, so there is nothing to compose.
+  writer of the run's closing record, which no file write reaches; the host
+  fills it from the close and the document, so there is nothing to compose.
   `disposition` is a closed enum: `benign` | `false-positive` |
   `inconclusive` | `malicious` | `unsanctioned-benign` | `unresolved`. `unresolved` (#923) is the
   HOST's own verdict — recorded when a run is cut short without a settled
@@ -84,7 +84,7 @@ bit (`holds` | `gap`) plus prose and an optional `ask`.
 **The reviewer never picks the outcome.** It reports a finding; the host routes
 it, on turn count and raised-ask state no review role can see:
 
-| Gate outcome | What happens | `report.md` |
+| Gate outcome | What happens | Closing record |
 |---|---|---|
 | `stands` | the drafted disposition commits — a confident close under "the story settled", an `inconclusive` one under "the ceiling claim was examined" | `outcome: stands` |
 | `challenged` | **nothing commits** — the ask comes back as discriminating material and the agent gets another ANALYZE/GATHER turn (`EXTRA_TURN_BOUND = 2`) | not written yet |
