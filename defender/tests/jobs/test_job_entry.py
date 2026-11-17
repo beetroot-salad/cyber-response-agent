@@ -2085,9 +2085,10 @@ def _reporting_lifecycle(ran: Ran, *, report: str | None, stale: str | None = No
     return _lifecycle(None, investigate=investigate)
 
 
-def _job_1471(s: Scene, store: Any, *, flagged: bool | None = True, alert: bytes = KEYED_ALERT_1471,
+def _job_1471(  # noqa: PLR0913 — the job's scene, its alert, its record and its seams
+        s: Scene, store: Any, *, flagged: bool | None = True, alert: bytes = KEYED_ALERT_1471,
               record: dict[str, Any] | None = None, digest: str | None = None, signer: Any = None,
-              lifecycle: Any = None, **lifecycle_kw: Any) -> tuple[str, Ran, str, list[dict[str, Any]]]:
+              lifecycle: Any = None, visualize: Any = None, **lifecycle_kw: Any) -> tuple[str, Ran, str, list[dict[str, Any]]]:
     """One job of `alert` the worker flagged (or not: `flagged=False`) over `lifecycle` (default
     `_reporting_lifecycle(**lifecycle_kw)`): `(run id, what ran, the screen link the worker built, the comments this job
     posted)`. `record` overrides fields of the launch record, planted whole."""
@@ -2099,7 +2100,7 @@ def _job_1471(s: Scene, store: Any, *, flagged: bool | None = True, alert: bytes
     s.plant(run_id, alert=alert, flagged=flagged, link=link, digest=digest or hashlib.sha256(alert).hexdigest(),
             launch={**s.launch_doc(run_id), "digest": hashlib.sha256(alert).hexdigest(), **(record or {})})
     ran = Ran()
-    run_job(s, run_id, ran=ran, signer=signer,
+    run_job(s, run_id, ran=ran, signer=signer, visualize=visualize,
             lifecycle=lifecycle if lifecycle is not None else _reporting_lifecycle(ran, **lifecycle_kw))
     return run_id, ran, link, C1359.comment_calls(store)[before:]
 
@@ -2319,6 +2320,199 @@ def test_1471_w2_a_flagged_job_that_ended_silently_or_faulted_in_teardown_posts_
     assert comments == [], f"a {ending} job commented: {comments}"
     assert _receipt_1471(ticket_scene, run_id) is None
     assert _H1471._signed_writes(signer) == [], _H1471._signed_grants(signer)
+
+
+class _Boom1471(Exception):  # noqa: N818 — a lifecycle's own failure, named for what a test raises
+    """The exception a dying lifecycle raises: defined here, so nothing in the product can match it by name."""
+
+
+class _OrderWatch1471:
+    """The order of what a flagged job does at the seams: the helper's write-pass ask (the job socket's `ask`), the comment
+    request at the case store's stand-in, the receipt in the run folder and the page save (the entry's `visualize`).
+    Each event is recorded with the state at that moment: how many comments the store had taken, whether a receipt
+    existed, and, for the page, the ticket line it would carry."""
+
+    def __init__(self, s: Scene, store: Any, monkeypatch: Any) -> None:
+        from defender import job_socket
+
+        self.events: list[tuple[str, dict[str, Any]]] = []
+        self._s, self._store = s, store
+        self._receipt = ticket_writer.receipt_path(Path("RUN")).name.replace("RUN", "*", 1)  # beside the run folder
+        real = job_socket.ask
+
+        def ask(socket: Any, request: str, **fields: Any) -> dict[str, Any]:
+            if request == "pass.write_back":
+                self.events.append(("ask", self.state()))
+            return real(socket, request, **fields)
+
+        monkeypatch.setattr(job_socket, "ask", ask)  # lint-monkeypatch: ok — a recording wrapper of the one door the job asks the helper through
+
+    def state(self) -> dict[str, Any]:
+        from defender.tests.tenancy.case_comment_1359 import _spec1359 as C1359
+
+        return {"comments": len(C1359.comment_calls(self._store)),
+                "receipt": bool(list(self._s.runs.glob(self._receipt)))}
+
+    def page(self, run: Any, **_kw: Any) -> None:
+        """The entry's page seam: what the saved page would say about the ticket (the real line renderer)."""
+        from defender.presentation import visualize_run
+
+        self.events.append(("page", {**self.state(), "line": visualize_run.render_ticket_line(run.run_dir)}))
+
+    def of(self, kind: str) -> list[dict[str, Any]]:
+        return [state for name, state in self.events if name == kind]
+
+    def order(self) -> list[str]:
+        return [name for name, _state in self.events]
+
+
+def _g7_endings() -> list[Any]:
+    """Every lifecycle outcome the record step tells apart, with whether the ticket gets a comment."""
+    verdict = _report_1471("benign", "the challenge review ran and left nothing about the finding unsettled")
+    unreadable = f"no front matter\n{NARRATIVE_1471}\n"
+    return [
+        pytest.param("posts", dict(report=verdict), id="verdict"),
+        *[pytest.param("posts", dict(report=None, closes=False, truncated_by=e), id=f"escalated-{e}")
+          for e in sorted(run_end.ESCALATED_EXITS)],
+        pytest.param("posts", dict(report=unreadable), id="unreadable"),
+        *[pytest.param("posts", dict(report=unreadable, truncated_by=e), id=f"unreadable-forced-close-{e}")
+          for e in sorted(run_end.FORCED_CLOSE_EXITS)],
+        *[pytest.param("silent", dict(report=None, closes=False, truncated_by=e), id=f"silent-{e}")
+          for e in sorted(run_end.SILENT_EXITS)],
+        pytest.param("silent", "teardown-faulted", id="teardown-faulted"),
+        pytest.param("raises", "raises", id="raises"),
+    ]
+
+
+@pytest.mark.parametrize(("kind", "ending"), _g7_endings())
+def test_1471_w2_the_write_pass_ask_and_the_post_follow_a_lifecycle_that_returned_and_precede_the_page_save(
+        ticket_scene, tmp_path, monkeypatch, kind, ending):
+    """A flagged job asks for its write pass and posts only after a lifecycle that returned and ended with a comment
+    (verdict, escalated, unreadable), the ask first, both before the page is saved; the saved page shows the receipt
+    line iff a receipt exists. A silent ending, a faulted teardown or a lifecycle that raises asks, posts and receipts
+    nothing, and a raised exception reaches the caller. (W2, Flow, P-6, W7)"""
+    store = _case_store(tmp_path, monkeypatch)
+    watch = _OrderWatch1471(ticket_scene, store, monkeypatch)
+    signer = _H1471.make_signer()
+    boom = _Boom1471("the lifecycle died")
+    if ending == "teardown-faulted":
+        kw: dict[str, Any] = dict(lifecycle=_lost_box_lifecycle(stop=_teardown_fault))
+    elif ending == "raises":
+        def investigate(**_kw: Any) -> dict[str, Any]:
+            raise boom
+        kw = dict(lifecycle=_lifecycle(ticket_scene, investigate=investigate))
+    else:
+        kw = ending
+
+    run_id, ran, _link, comments = _job_1471(ticket_scene, store, signer=signer, visualize=watch.page, **kw)
+
+    asked, pages = watch.of("ask"), watch.of("page")
+    receipt = _receipt_1471(ticket_scene, run_id)
+    writes = _H1471._signed_writes(signer)
+    if ending == "raises":
+        assert ran.raised is boom, f"the lifecycle's own exception did not reach the caller: {ran.raised!r} {ran.message}"
+    else:
+        assert ran.raised is None, ran.message
+    if kind == "posts":
+        assert watch.order() == ["ask", "page"], f"the ask and the page are not once each, ask first: {watch.events}"
+        assert asked[0] == {"comments": 0, "receipt": False}, f"the ask came after the post or the receipt: {asked}"
+        assert (pages[0]["comments"], pages[0]["receipt"]) == (1, True), \
+            f"the page was saved before the post and the receipt: {pages}"
+        assert pages[0]["line"] != "", f"the page carries no ticket line for the receipt: {pages}"
+        assert len(comments) == 1, store.requests()
+        assert receipt is not None, "no receipt"
+        assert len(writes) == 1, _H1471._signed_grants(signer)
+    else:
+        assert asked == [], f"a {ending} job asked the helper for a write pass: {watch.events}"
+        assert writes == [], _H1471._signed_grants(signer)
+        assert comments == [], f"a {ending} job commented: {comments}"
+        assert receipt is None, receipt
+        assert [p for p in pages if p["comments"] or p["receipt"] or p["line"]] == [], \
+            f"the page shows a ticket write nobody made: {pages}"
+        if ending not in ("teardown-faulted", "raises"):
+            assert len(pages) == 1, f"the page was not saved once beside the silent ending: {watch.events}"
+
+
+def _case_system_fault_1471(s: Scene, monkeypatch: Any, fault: str) -> str:
+    """Make the tenant's case system (`ticket`) faulty as `fault` says, the next job reading it: `bad settings` (its
+    stored settings emptied, so its adapter's own check refuses them), `uncovered route` (its stored access declares a
+    second write route, which X2 refuses) or `crashing check` (its adapter's settings check raises). Returns the record the
+    receipt's reason must name."""
+    from defender.kit.settings import RECORDS
+    from defender.system_records import RecordStore
+    from defender.systems import case_system
+    from defender.tests.support.jobs._jobs1342 import fixed_clock
+    from defender.tests.support.tenancy import _systems1366 as R
+
+    if fault == "crashing check":
+        real = case_system.fresh_adapter_module
+
+        class Crashing:
+            def __init__(self, module: Any) -> None:
+                self._module = module
+
+            def __getattr__(self, name: str) -> Any:
+                return getattr(self._module, name)
+
+            @staticmethod
+            def check_settings(*_a: Any, **_k: Any) -> None:
+                raise RuntimeError("the settings check crashed")
+
+        monkeypatch.setattr(case_system, "fresh_adapter_module",  # lint-monkeypatch: ok — the adapter module as the verdict loads it, its check made to crash
+                            lambda roster, system: Crashing(real(roster, system)))
+        return case_system.CASE_RECORD_POINTER
+    (current,) = R.system_versions(s.dsn, s.t.tenant_id, "ticket")[-1:]
+    settings, access = dict(current.settings), current.access
+    if fault == "bad settings":
+        settings = {}
+    else:
+        import yaml
+
+        doc = yaml.safe_load(access)
+        doc["writes"] = [*doc["writes"], {"method": "POST", "path": "/tickets/*/transitions"}]
+        access = yaml.safe_dump(doc)
+
+    async def put() -> None:
+        store = RecordStore(s.dsn, clock=fixed_clock, judge=lambda after, before: [])
+        try:
+            await store.put_system(s.t.tenant_id, "ticket", replaces=current.version, adapter=current.adapter_id,
+                                   enabled=True, settings=settings, access=access, author=R.SEED_AUTHOR)
+        finally:
+            await store.close()
+
+    from defender.tests.support.tenancy._active1214 import run_sync
+
+    run_sync(put())
+    return RECORDS.part("ticket", "settings") if fault == "bad settings" else RECORDS.part("ticket", "access")
+
+
+@pytest.mark.parametrize("fault", ["bad settings", "uncovered route", "crashing check"])
+def test_1471_w5_x2_a_flagged_job_whose_case_system_is_faulty_asks_for_no_write_pass_posts_nothing_and_receipts_the_fault(
+        ticket_scene, tmp_path, monkeypatch, fault):
+    """A flagged job whose case system's verdict is faulty (bad settings, a route X2 refuses, a crashing check) asks the
+    helper for no write pass and posts nothing, and its record step receipts the fault as an `error` naming the
+    record at fault. Control: the same tenant's job before the fault asks and posts. (W5, X2, W6)"""
+    store = _case_store(tmp_path, monkeypatch)
+    watch = _OrderWatch1471(ticket_scene, store, monkeypatch)
+    report = _report_1471("benign", "the challenge review ran and left nothing about the finding unsettled")
+    _id, _ran, _link, control = _job_1471(ticket_scene, store, report=report)
+    assert len(control) == 1, "control: the unfaulted job posts"
+    assert watch.order() == ["ask"], "control: the unfaulted job asks for its write pass"
+    watch.events.clear()
+    signer = _H1471.make_signer()
+    pointer = _case_system_fault_1471(ticket_scene, monkeypatch, fault)
+
+    run_id, ran, _link, comments = _job_1471(ticket_scene, store, signer=signer, report=report)
+
+    assert ran.raised is None, ran.message
+    assert ticket_scene.job_end(run_id) == SETTLED, ran.message
+    assert watch.of("ask") == [], f"a job over a faulty case system asked for a write pass ({fault}): {watch.events}"
+    assert _H1471._signed_writes(signer) == [], _H1471._signed_grants(signer)
+    assert comments == [], comments
+    receipt = _receipt_1471(ticket_scene, run_id)
+    assert receipt is not None, "the record step left no receipt for the faulty case system"
+    assert (receipt["key"], receipt["status"], receipt["ok"]) == (TICKET_1471, "error", False), receipt
+    assert pointer in str(receipt["reason"]), f"the receipt does not name the record at fault ({pointer!r}): {receipt}"
 
 
 @pytest.mark.parametrize("record_says", ["silent", "flagged-with-a-link"])

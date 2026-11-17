@@ -545,8 +545,15 @@ def test_a_create_is_a_201_with_location_only_when_the_store_created(
     assert response.status_code == 201
     assert response.headers["Location"] == BASE + location
     assert response.json() == record.model_dump(mode="json")
-    [((principal, *rest), kwargs)] = created.ports.called(port)
-    assert (principal, rest, kwargs) == (Principal(tenant_id=A, actor_id=created.user), [*body.values(), *flag], {})
+    [(args, kwargs)] = created.ports.called(port)
+    # #1471 C-4 names the flag, not how the route passes it: bound to the port's own signature, positional or keyword
+    # are the same call, and the flag must still be passed (not left to the port's default).
+    signature = inspect.signature(getattr(ports_module.Writes, port))
+    params = [name for name in signature.parameters if name != "self"]
+    expected = [Principal(tenant_id=A, actor_id=created.user), *body.values(), *flag]
+    assert args[:1] == (expected[0],), "principal first"
+    bound = signature.bind(None, *args, **kwargs).arguments
+    assert {k: v for k, v in bound.items() if k != "self"} == dict(zip(params, expected, strict=True)), (args, kwargs)
     assert [name for name, _ in created.ports.written] == [port]
     assert created.ports.audits == [], "the route announces nothing"
 
