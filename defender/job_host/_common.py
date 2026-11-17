@@ -71,7 +71,12 @@ def _box_start(session: Session, fields: dict[str, Any], *, registry: Registry) 
         # Signalled while it started (O8): the box goes at the helper's end with the others, and the job unwinds.
         _logger.warning("the %s box for %s started as the helper was told to stop", box_kind, ident)
     clock = getattr(executor, "clock_file", None)
-    return {"handle": handle, "clock_file": str(clock) if clock is not None else None}
+    scratch = getattr(executor, "scratch", None)
+    answer = {"handle": handle, "clock_file": str(clock) if clock is not None else None}
+    if scratch is not None:
+        # An oracle box's scratch, inside the job's tenant folder (#1543 D1): the job saves its reads there.
+        answer["scratch"] = str(scratch)
+    return answer
 
 
 def _session_box(session: Session, handle: object) -> Box:

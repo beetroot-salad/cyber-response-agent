@@ -96,18 +96,20 @@ def _on_path(path: str | None) -> DockerFn:
     return on_path
 
 
-def start_oracle_box(*, env: Mapping[str, str], tenant_id: str, data_root: Path, folder: Path | None = None,
-                     docker: DockerFn | None = None) -> Any:
+def start_oracle_box(*, env: Mapping[str, str], tenant_id: str, data_root: Path, folder: Path | None = None,  # noqa: PLR0913 — the start's identity, its two folders and its seam
+                     docker: DockerFn | None = None, scratch_folder: Path | None = None) -> Any:
     """Start the oracle's sandboxed box for `tenant_id`; `data_root` is the data root its entry point resolved, where the
     box check runs (#1469); `env` is the process environment handed
     in (its `PATH` finds the `docker` binary, its box knobs size the container). `folder` is
     where its runner and scratch folders are made (#1170 C21: a per-claim folder under the data
     root, for a job's helper), else the host's temporary folder. `docker` is the docker seam the
     box is started and run through, used as given (a job's helper passes its own); None, the
-    real one with `env`'s `PATH`."""
+    real one with `env`'s `PATH`. `scratch_folder`: where the scratch folder is made instead of
+    `folder` (#1543 D1: a job's helper makes it inside the job's tenant folder, so the job's own
+    process can save the oracle's reads into it)."""
     runner = _make_runner(folder)
     try:
-        scratch = Path(tempfile.mkdtemp(prefix="defender-oracle-", dir=folder))
+        scratch = Path(tempfile.mkdtemp(prefix="defender-oracle-", dir=scratch_folder or folder))
     except BaseException:
         shutil.rmtree(runner, ignore_errors=True)
         raise

@@ -65,6 +65,9 @@ LOCK_WAIT_SECONDS = 30.0
 #: Where under the data root each claim's scratch folder lives (oracle boxes' binds): outside
 #: every tenant's folder, the job socket's folder and host `/tmp` (C21).
 SCRATCH = ".job-scratch"
+#: Where under a learning job's episode folder its oracle boxes' scratch folders live (#1543 D1): inside the tenant's
+#: folder, so the job's own process writes the oracle's saved reads into them.
+ORACLE_SCRATCH = ".oracle-scratch"
 _COMMIT = re.compile(r"[0-9a-f]{40}([0-9a-f]{24})?")
 
 
@@ -482,18 +485,30 @@ def _sibling_box(session: Session, ident: str) -> Any:
 
 
 def _oracle_box(session: Session, _ident: str) -> Any:
-    """The oracle's box (#1224), its runner and scratch folders made in a fresh folder under the claim's scratch
-    folder (C21: never host `/tmp`), removed with it at the helper's end."""
+    """The oracle's box (#1224): its runner made in a fresh folder under the claim's scratch folder (C21: never host
+    `/tmp`), removed with it at the helper's end; its scratch made inside the job's own episode folder (#1543 D1), so
+    the job's process can save the oracle's reads where its code reads them. The scratch is judged from `<T>/` down
+    with no link followed, before the start and again once it is made."""
     from defender import box
 
     state = _state(session, _Learning)
     folder = state.scratch / f"oracle-{uuid.uuid4().hex[:12]}"
     _io.guarded_mkdir(folder, base=state.scratch)
+    episode = _episode_folder(session)
+    holder = episode / ORACLE_SCRATCH
+    _io.guarded_mkdir(holder, base=episode)
+    session.judge_binds([holder])
     try:
-        return box.start_oracle_box(env=os.environ, tenant_id=session.tenant_id, folder=folder,
-                                    docker=session.docker, data_root=session.root_folder)
+        started = box.start_oracle_box(env=os.environ, tenant_id=session.tenant_id, folder=folder,
+                                       docker=session.docker, data_root=session.root_folder, scratch_folder=holder)
     except box.BoxStartRefused as refused:
         raise box.BoxFault(str(refused)) from None
+    try:
+        session.judge_binds([started.scratch])
+    except BaseException:
+        box.stop_oracle_box(started)
+        raise
+    return started
 
 
 # --- the post-step's requests -------------------------------------------------------------------------------------------

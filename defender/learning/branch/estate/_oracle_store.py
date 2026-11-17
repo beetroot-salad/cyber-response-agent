@@ -192,7 +192,9 @@ class OracleStore:
         """One trace row for a model request of `actor` that did not return (#1543 O6): its type,
         HTTP status, a bounded message and its exception chain, cost unknown (null). Best effort:
         an unwritable trace is logged and never replaces the failure being recorded."""
-        chain, seen, link = [], set(), exc
+        chain: list[dict] = []
+        seen: set[int] = set()
+        link: BaseException | None = exc
         while link is not None and id(link) not in seen and len(chain) < _CHAIN_CAP:
             seen.add(id(link))
             chain.append({"type": type(link).__name__, "message": str(link)[:_MESSAGE_CAP]})
