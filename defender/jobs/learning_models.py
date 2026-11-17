@@ -26,6 +26,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from defender.database import Base, IdColumn
 from defender.records.formats import BatchId, CommitId, TenantId, WorkItemId
+from defender.records.learning_causes import BATCH_CAUSES, ITEM_CAUSES
 from defender.tenancy.models import SCHEMA as TENANCY_SCHEMA
 
 SCHEMA = "learning"
@@ -50,17 +51,6 @@ BATCH_KINDS = ("author", "revert", "registry")
 AUTHORING_KINDS = ("author", "registry")
 PHASES = ("working", "in_review", "needs_person", "ended")
 OUTCOMES = ("merged", "closed", "abandoned")
-#: Why a held, dead or skipped item is set aside (#1537 PR1): one closed list, picked by code; the model's and the forge's own
-#: words are only the detail (`reason`) beside it.
-ITEM_CAUSES = (
-    "attempt_ceiling", "replacement_ceiling", "replacement_committed_nothing", "closed_without_feedback", "cut_from_merge",
-    "curator_held", "malformed_row", "abandoned_by_person", "declined_ceiling", "deferral_ceiling", "artifact_missing",
-    "superseded", "declined_at_gate", "consumed_no_systems", "unteachable_system", "curator_skipped", "unrecorded")
-#: Why a batch is parked or ended abandoned (#1537 PR1). `forge_credential_refused` is the one a person may release.
-BATCH_CAUSES = (
-    "forge_credential_refused", "forge_refused", "delivery_unavailable", "foreign_commits_remote", "foreign_commits_local",
-    "foreign_pr", "holder_lost", "holder_crashed", "stopped", "no_commits", "abandoned_by_person", "unrecorded")
-
 _TIME = DateTime(timezone=True)
 
 

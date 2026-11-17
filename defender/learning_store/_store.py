@@ -14,7 +14,7 @@ import dataclasses
 import datetime as _dt
 import uuid
 from collections.abc import Mapping, Sequence
-from typing import Any, Literal, cast
+from typing import Any, cast
 
 from sqlalchemy import Table, Text, and_, case, collate, delete, exists, false, func, literal, or_, select, true, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -25,6 +25,7 @@ from defender._text import postgres_cannot_hold
 from defender.database import async_engine, newest_first_query, sessions
 from defender.jobs.errors import Conflict, NotFound
 from defender.records.formats import BatchId, CommitId, TenantId, WorkItemId
+from defender.records.learning_causes import BatchCause, ItemCause, Why
 from defender.tenancy.models import TenantRecord
 
 from defender.jobs.learning_models import (
@@ -86,24 +87,6 @@ class TenantInactive(Exception):
 
 class ItemRefused(Exception):
     """The database will never take this item (a NUL character jsonb refuses): waiting cannot cure it."""
-
-
-ItemCause = Literal[
-    "attempt_ceiling", "replacement_ceiling", "replacement_committed_nothing", "closed_without_feedback", "cut_from_merge",
-    "curator_held", "malformed_row", "abandoned_by_person", "declined_ceiling", "deferral_ceiling", "artifact_missing",
-    "superseded", "declined_at_gate", "consumed_no_systems", "unteachable_system", "curator_skipped", "unrecorded"]
-BatchCause = Literal[
-    "forge_credential_refused", "forge_refused", "delivery_unavailable", "foreign_commits_remote", "foreign_commits_local",
-    "foreign_pr", "holder_lost", "holder_crashed", "stopped", "no_commits", "abandoned_by_person", "unrecorded"]
-
-
-@dataclasses.dataclass(frozen=True)
-class Why:
-    """Why a row is set aside (#1537 PR1): a cause from the table's closed list, which code picks, and the detail text
-    beside it (a model's or a forge's own words, shown but never read as the cause). The store writes the two together."""
-
-    cause: ItemCause | BatchCause
-    detail: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -234,17 +217,29 @@ class BatchView:
     abandon_requested_at: _dt.datetime | None = None
     abandon_requested_by: str | None = None
 
+    @property
+    def abandon_pending(self) -> bool:
+        """Parked, with a person's abandon request the loop has yet to carry out (#1537 O3): the one reading of it, for
+        the tick's selection, its refusal counting and the wake gate alike."""
+        return self.phase == "needs_person" and self.abandon_requested_at is not None
+
 
 @dataclasses.dataclass(frozen=True)
 class Acted:
     """What a person's verb did: the row's id, the state it is in now (`status` of an item, `phase` of a batch), and the cause
-    and detail it had when acted on (for the audit record). `at` is the request's time for `request_abandon`."""
+    and detail it had when acted on (for the audit record)."""
 
     id: str
     state: str
     cause: str | None
     detail: str | None
-    at: _dt.datetime | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class AbandonAsked(Acted):
+    """`request_abandon`'s `Acted`, with the time the request was recorded."""
+
+    at: _dt.datetime
 
 
 @dataclasses.dataclass(frozen=True)
@@ -774,14 +769,14 @@ class LearningStore(FeedbackVerbs):
             await self._apply(s, held.tenant_id, held.batch_id, outcomes, default=(
                 Outcome.held("replacement_committed_nothing", "the replacement committed nothing")
                 if row.replaces is not None else Outcome.waiting()))
-            await self._end(s, held.batch_id, "abandoned", why=Why("no_commits", "no commits"), token=held.token + 1)
+            await self._end(s, held.batch_id, "abandoned", why=Why.batch("no_commits", "no commits"), token=held.token + 1)
 
     async def abandon_clean(self, held: Held) -> None:
         """A clean stop: the batch ends abandoned; its items return with the attempt forgiven (a deploy costs nothing)."""
         async with self._sessions.begin() as s:
             row = await self._guard(s, held)
             await self._give_back(s, held.tenant_id, row, forgive=True, hold=False)
-            await self._end(s, held.batch_id, "abandoned", why=Why("stopped", "stopped"), token=held.token + 1)
+            await self._end(s, held.batch_id, "abandoned", why=Why.batch("stopped", "stopped"), token=held.token + 1)
 
     async def abandon_crashed(self, held: Held) -> None:
         """The holder's own crash with nothing on any branch: the batch ends abandoned and its items return as a recovery
@@ -790,7 +785,7 @@ class LearningStore(FeedbackVerbs):
         async with self._sessions.begin() as s:
             row = await self._guard(s, held)
             await self._give_back(s, held.tenant_id, row, forgive=False, hold=False)
-            await self._end(s, held.batch_id, "abandoned", why=Why("holder_crashed", "its holder crashed"),
+            await self._end(s, held.batch_id, "abandoned", why=Why.batch("holder_crashed", "its holder crashed"),
                             token=held.token + 1)
 
     async def expire_own(self, held: Held) -> None:
@@ -813,7 +808,7 @@ class LearningStore(FeedbackVerbs):
             if not await self._is_lapsed(s, row):
                 raise NotLapsed(batch_id)
             await self._give_back(s, tenant, row, forgive=False, hold=False)
-            await self._end(s, row.id, "abandoned", why=Why("holder_lost", "its holder was lost"), token=row.fencing_token + 1)
+            await self._end(s, row.id, "abandoned", why=Why.batch("holder_lost", "its holder was lost"), token=row.fencing_token + 1)
 
     # -- a person's verbs (#1537) --------------------------------------------------------------------------
 
@@ -866,7 +861,7 @@ class LearningStore(FeedbackVerbs):
                 raise Conflict("another batch is working on this lane: try again later") from None
             raise
 
-    async def request_abandon(self, tenant: str, batch_id: str, *, actor: str) -> Acted:
+    async def request_abandon(self, tenant: str, batch_id: str, *, actor: str) -> AbandonAsked:
         """A person asks for a parked batch to be abandoned. Only the request is recorded: what the batch's PR is on the
         forge is the loop's to read, and it ends the batch (`settle_abandon`). A request cannot be withdrawn. `NotFound`;
         `Conflict` for a batch not parked or already requested."""
@@ -877,7 +872,7 @@ class LearningStore(FeedbackVerbs):
             at = (await s.execute(update(_B).where(_B.c.id == row.id).values(
                 abandon_requested_at=func.clock_timestamp(), abandon_requested_by=actor)
                 .returning(_B.c.abandon_requested_at))).scalar_one()
-            return Acted(id=str(row.id), state="needs_person", cause=row.cause, detail=row.reason, at=at)
+            return AbandonAsked(id=str(row.id), state="needs_person", cause=row.cause, detail=row.reason, at=at)
 
     async def _parked_batch(self, s: AsyncSession, tenant: str, batch_id: str) -> Any:
         """The tenant's batch, locked, if it is parked (`NotFound`; else `Conflict` naming its phase)."""
@@ -905,14 +900,14 @@ class LearningStore(FeedbackVerbs):
             if row.pr_number is None and pr_number is not None:
                 await s.execute(update(_B).where(_B.c.id == row.id).values(pr_number=pr_number))
             if pr_state == "merged":
-                items_why = Why("cut_from_merge", f"cited at the branch tip, not in PR #{pr_number}'s merge")
+                items_why = Why.item("cut_from_merge", f"cited at the branch tip, not in PR #{pr_number}'s merge")
                 await self._finish_review(s, tenant, batch_id, expect_phase="needs_person", outcome="merged",
-                                          published=published, held=held, why=None, items_why=items_why)
+                                          published=published, held=held, detail=None, items_why=items_why)
             else:
                 await self._give_back(s, tenant, row, forgive=False, hold=True,
-                                      why=Why("abandoned_by_person", "abandoned by a person"))
-                await self._end(s, row.id, "abandoned", why=Why(row.cause, row.reason or "abandoned by a person"),
-                                token=row.fencing_token + 1)
+                                      why=Why.item("abandoned_by_person", "abandoned by a person"))
+                await self._end(s, row.id, "abandoned", token=row.fencing_token + 1,
+                                why=Why.batch(cast(BatchCause, row.cause), row.reason or "abandoned by a person"))
             return True
 
     async def request_cancel(self, tenant: str) -> None:
@@ -935,7 +930,7 @@ class LearningStore(FeedbackVerbs):
             await s.execute(update(_B).where(_B.c.id == BatchId(batch_id), _B.c.tenant_id == TenantId(tenant))
                             .values(**values))
 
-    async def note_refusal(self, tenant: str, batch_id: str, why: Why) -> tuple[int, str]:
+    async def note_refusal(self, tenant: str, batch_id: str, why: Why[BatchCause]) -> tuple[int, str]:
         """A non-transient forge refusal (H15): count it; at the ceiling the batch goes to a person, with `why.cause` and
         the text "the forge refused N times: <why.detail>". Returns `(refusals, phase)`."""
         async with self._sessions.begin() as s:
@@ -945,55 +940,54 @@ class LearningStore(FeedbackVerbs):
             count = row.refusals + 1
             values: dict[str, Any] = {"refusals": count, "last_checked": func.now()}
             if count >= self.refusal_ceiling and row.phase != "needs_person":
-                values.update(self._to_person(row, Why(why.cause, f"the forge refused {count} times: {why.detail}")))
+                values.update(self._to_person(row, Why.batch(why.cause, f"the forge refused {count} times: {why.detail}")))
             await s.execute(update(_B).where(_B.c.id == row.id).values(**values))
             return count, values.get("phase", row.phase)
 
-    async def needs_person(self, tenant: str, batch_id: str, why: Why) -> None:
+    async def needs_person(self, tenant: str, batch_id: str, why: Why[BatchCause]) -> None:
         """The batch cannot go on without a person (a foreign tip, a hand-made PR, repeated refusals)."""
         async with self._sessions.begin() as s:
             row = await self._batch(s, tenant, batch_id)
             if row.phase in {"working", "in_review"}:
                 await s.execute(update(_B).where(_B.c.id == row.id).values(**self._to_person(row, why)))
 
-    def _to_person(self, row: Any, why: Why) -> dict[str, Any]:
+    def _to_person(self, row: Any, why: Why[BatchCause]) -> dict[str, Any]:
         return {"phase": "needs_person", "cause": why.cause, "reason": why.detail, "parked_at": func.now(),
                 "lease_owner": None, "lease_expiry": None, "fencing_token": row.fencing_token + 1}
 
     async def end_review(self, tenant: str, batch_id: str, *, expect_phase: str, outcome: str,
                          published: Sequence[tuple[str, str]], held: Sequence[tuple[str, str]],
-                         why: Why | str | None = None, items_why: Why | None = None) -> bool:
+                         detail: str | None = None, items_why: Why[ItemCause] | None = None) -> bool:
         """End a batch in review as `merged` or `closed`, only if it is still in `expect_phase` (D7).
 
         Merged: `published` items are published, `held` are held, any other still in the batch return to waiting.
         Closed: `held` items are held; the rest stay in the batch, a replacement due. `items_why` is the cause and detail
-        of the held items (required when any is held). `why.detail` is the text a closed batch keeps beside it (a batch
-        ended merged or closed has no cause; a merged one keeps no text). False: nothing changed."""
+        of the held items (required when any is held). `detail` is the text a closed batch keeps (a batch ended merged or
+        closed has no cause; a merged one keeps no text; `None` keeps the text it had). False: nothing changed."""
         if outcome not in {"merged", "closed"}:
             raise ValueError(outcome)
         if held and items_why is None:
             raise ValueError("items held without a cause")
         async with self._sessions.begin() as s:
             return await self._finish_review(s, tenant, batch_id, expect_phase=expect_phase, outcome=outcome,
-                                             published=published, held=held, why=why, items_why=items_why)
+                                             published=published, held=held, detail=detail, items_why=items_why)
 
     async def _finish_review(  # noqa: PLR0913
             self, s: AsyncSession, tenant: str, batch_id: str, *, expect_phase: str, outcome: str,
-                             published: Sequence[tuple[str, str]], held: Sequence[tuple[str, str]], why: Why | str | None,
-                             items_why: Why | None) -> bool:
-        text = why.detail if isinstance(why, Why) else why
-        detail = None if outcome == "merged" else (_B.c.reason if text is None else literal(text, Text))
+                             published: Sequence[tuple[str, str]], held: Sequence[tuple[str, str]], detail: str | None,
+                             items_why: Why[ItemCause] | None) -> bool:
+        kept = None if outcome == "merged" else (_B.c.reason if detail is None else literal(detail, Text))
         ended = (await s.execute(update(_B).where(
             _B.c.id == BatchId(batch_id), _B.c.tenant_id == TenantId(tenant), _B.c.phase == expect_phase)
             .values(phase="ended", outcome=outcome, ended_at=func.now(), last_checked=func.now(), refusals=0,
-                    lease_owner=None, lease_expiry=None, cause=None, parked_at=None, reason=detail)
+                    lease_owner=None, lease_expiry=None, cause=None, parked_at=None, reason=kept)
             .returning(_B.c.id))).first()
         if ended is None:
             return False
         outcomes: dict[tuple[str, str], Outcome] = {k: Outcome.published() for k in published}
         if held:
             assert items_why is not None
-            outcomes.update({k: Outcome.held(cast(Any, items_why.cause), items_why.detail) for k in held})
+            outcomes.update({k: Outcome.held(items_why.cause, items_why.detail) for k in held})
         await self._apply(s, tenant, batch_id, outcomes, default=Outcome.waiting() if outcome == "merged" else None)
         return True
 
@@ -1063,7 +1057,7 @@ class LearningStore(FeedbackVerbs):
                                else_=None)}
 
     async def _give_back(self, s: AsyncSession, tenant: str, row: Any, *, forgive: bool, hold: bool,
-                         why: Why | None = None) -> None:
+                         why: Why[ItemCause] | None = None) -> None:
         """The batch's items leave it unfinished. A replacement's go back to the batch it replaces (still due);
         otherwise they wait (held for a person, or at the attempt ceiling)."""
         await _settle_requests(s, tenant)
@@ -1094,7 +1088,7 @@ class LearningStore(FeedbackVerbs):
                 reason=case((ceiling, f"reached the attempt ceiling ({self.max_attempts})"), else_=waiting["reason"]),
                 updated_at=func.now()))
 
-    async def _end(self, s: AsyncSession, batch_id: str, outcome: str, *, why: Why, token: int) -> None:
+    async def _end(self, s: AsyncSession, batch_id: str, outcome: str, *, why: Why[BatchCause], token: int) -> None:
         """End a batch abandoned, with its cause and detail (a batch ended abandoned has a cause)."""
         await s.execute(update(_B).where(_B.c.id == BatchId(batch_id)).values(
             phase="ended", outcome=outcome, ended_at=func.now(), cause=why.cause, reason=why.detail, parked_at=None,

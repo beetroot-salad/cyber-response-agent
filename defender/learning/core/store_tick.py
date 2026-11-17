@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from defender import box as box_mod
 from defender._text import one_line
+from defender.records.learning_causes import BatchCause, Why
 from defender.learning.core.config import FatalConfigError, author_max_attempts, env_int, pitfalls_threshold, provenance_field
 
 if TYPE_CHECKING:
@@ -167,14 +168,7 @@ def forge_refuses(error: BaseException) -> bool:
 FAULT_TEXT_LIMIT = 600
 
 
-def _store_why(cause: str, detail: str) -> Any:
-    """The store's one value for why (a cause and its detail), loaded when first needed (the store's stack is heavy)."""
-    from defender.learning_store import Why
-
-    return Why(cause, detail)  # type: ignore[arg-type]
-
-
-def refusal_cause(fault: BaseException) -> str:
+def refusal_cause(fault: BaseException) -> BatchCause:
     """The one classifier of what the loop counts toward a batch's person ceiling (H15, #1537 PR1): the batch cause the
     refusal parks it with. A 401 or 403 (the forge's, the issuer's, the secret store's), and a credential failure with no
     status at all (a token the issuer would not mint), is `forge_credential_refused`: the work is fine, the key was not,
@@ -448,8 +442,7 @@ class Tick:
         out for (a parked batch with a request, #1537 O3)."""
         review = [b for b in views if b.phase == "in_review" and b.lane in self.reconcile_lanes]
         lapsed = [b for b in views if b.lane == self.lane and b.lapsed]
-        requested = [b for b in views if b.lane in self.reconcile_lanes and b.phase == "needs_person"
-                     and b.abandon_requested_at is not None]
+        requested = [b for b in views if b.lane in self.reconcile_lanes and b.abandon_pending]
         return review, lapsed, requested
 
     def run(self) -> int:
@@ -506,26 +499,24 @@ class Tick:
     # -- counting what the forge said ----------------------------------------------------------------
 
     def _refusal(self, b: Any, fault: BaseException) -> None:
-        if self._requested(b):
+        if b.abandon_pending:
             self._waits(b)
             return
         if str(b.id) in self._counted:
             return
         self._counted.add(str(b.id))
         count, phase = self.store.note_refusal(self.tenant_id, str(b.id),
-                                               _store_why(refusal_cause(fault), one_line(str(fault))[:FAULT_TEXT_LIMIT]))
+                                               Why.batch(refusal_cause(fault), one_line(str(fault))[:FAULT_TEXT_LIMIT]))
         _logger.warning(f"{self.label}: the forge refused a request for batch {b.id} ({count} in a row, {phase}): "
                         f"{one_line(str(fault))}")
 
-    @staticmethod
-    def _requested(b: Any) -> bool:
-        """A parked batch whose person asked for its abandon: it is parked already, so nothing it meets is counted."""
-        return b.phase == "needs_person" and b.abandon_requested_at is not None
-
     def _waits(self, b: Any) -> None:
         """The request waits: the loop looked and could not finish, so the batch shows as checked, counting nothing."""
-        with contextlib.suppress(Exception):
+        try:
             self.store.note_check(self.tenant_id, str(b.id), reset_refusals=False)
+        except Exception as e:  # noqa: BLE001 — a failed stamp must not stop the tick; the next pass looks again
+            _logger.warning(f"{self.label}: batch {b.id}'s waiting abandon request could not be marked checked: "
+                            f"{one_line(str(e))}")
 
     def _fault(self, b: Any, fault: BaseException, doing: str) -> None:
         """A forge or git fault met while `doing` something for batch `b`: a refusal counts, an unknown waits."""
@@ -570,7 +561,7 @@ class Tick:
                 return
             if b.kind == "revert":
                 self.store.end_review(self.tenant_id, str(b.id), expect_phase="in_review", outcome="closed",
-                                      published=[], held=[], why=f"revert PR #{number} closed unmerged")
+                                      published=[], held=[], detail=f"revert PR #{number} closed unmerged")
                 return
             reviews, comments = forge.reviews(number), forge.comments(number)
         except _forge_faults() as fault:
@@ -584,7 +575,7 @@ class Tick:
             return
         self.store.end_review(self.tenant_id, str(b.id), expect_phase="in_review", outcome="closed", published=[],
                               held=[(i.kind, i.key) for i in members],
-                              items_why=_store_why("closed_without_feedback",
+                              items_why=Why.item("closed_without_feedback",
                                              f"PR #{number} of batch {b.id} was closed with no feedback: held for a person"))
         _logger.info(f"{self.label}: PR #{number} of batch {b.id} was closed with no words: its items are held")
 
@@ -616,7 +607,7 @@ class Tick:
         number = b.pr_number
         self.store.end_review(self.tenant_id, str(b.id), expect_phase="in_review", outcome="merged",
                               published=published, held=held,
-                              items_why=_store_why("cut_from_merge", f"cited at the branch tip, not in PR #{number}'s merge")
+                              items_why=Why.item("cut_from_merge", f"cited at the branch tip, not in PR #{number}'s merge")
                               if held else None)
         _logger.info(f"{self.label}: PR #{number} of batch {b.id} merged: {len(published)} published, "
                      f"{len(held)} held")
@@ -739,13 +730,13 @@ class Tick:
                     pass
                 return
             if remote is not None and remote not in usable:
-                self.store.needs_person(self.tenant_id, str(b.id), _store_why(
+                self.store.needs_person(self.tenant_id, str(b.id), Why.batch(
                     "foreign_commits_remote", f"the branch {b.branch} on the forge holds "
                     f"commits the commit-maker did not make for batch {b.id} (tip {remote})"))
                 _logger.error(f"{self.label}: batch {b.id}'s branch holds a foreign tip: a person must look")
                 return
             if not usable:
-                self.store.needs_person(self.tenant_id, str(b.id), _store_why(
+                self.store.needs_person(self.tenant_id, str(b.id), Why.batch(
                     "foreign_commits_local", f"the local branch {b.branch} holds commits "
                     f"outside batch {b.id}'s record"))
                 return
@@ -852,7 +843,7 @@ class Tick:
             if foreign:
                 names = ", ".join(f"#{r['number']} ({r['headRefName']})" for r in foreign)
                 ending(self.store.needs_person, self.tenant_id, str(held.batch_id),
-                       _store_why("foreign_pr", f"an open PR on {prefix} that no batch made holds the lane: {names}"))
+                       Why.batch("foreign_pr", f"an open PR on {prefix} that no batch made holds the lane: {names}"))
                 _logger.error(f"{self.label}: batch {held.batch_id} opens no PR beside {names}: a person must look")
                 return None
         title, body = pr_text(held, tip_message)
@@ -1063,8 +1054,7 @@ def lane_waiting(store: Any, tenant_id: str, lane: str, *, tick_thresholds: Mapp
     reconciled = set(reconcile_lanes or (lane,))
     for b in store.batches(tenant_id):
         if (b.lane == lane and b.phase == "working") or (
-                b.lane in reconciled and (b.phase == "in_review" or (
-                    b.phase == "needs_person" and b.abandon_requested_at is not None))):
+                b.lane in reconciled and (b.phase == "in_review" or b.abandon_pending)):
             return True
     work = store.lane_work(tenant_id, lane, thresholds=dict(tick_thresholds or thresholds()))
     return bool(work.claimable and not work.busy)

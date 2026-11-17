@@ -13,7 +13,7 @@ from defender.records.formats import BatchId, TenantId, WorkItemId
 from .models import AbandonRequested, BatchReleased, ItemKind, ItemReleased, ParkedBatch, ParkedItemRef, SetAsideItem
 from defender._text import one_line
 
-from .ports import NotFound, Principal, TimePosition
+from .ports import Principal, TimePosition
 
 if TYPE_CHECKING:
     from defender.learning_store import Acted, LearningStore
@@ -67,7 +67,5 @@ class StoreLearningWork:
 
     async def request_abandon(self, principal: Principal, batch_id: BatchId) -> AbandonRequested:
         done = await self._store.request_abandon(principal.tenant_id, str(batch_id), actor=principal.actor_id)
-        if done.at is None:
-            raise NotFound(f"no batch {batch_id}")  # unreachable: the store always stamps the request
         _announce_learning(principal, "learning.request_abandon", done)
         return AbandonRequested(id=batch_id, abandon_requested_at=done.at)

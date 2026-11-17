@@ -638,6 +638,11 @@ jobs:
       - name: Agent retries fence (empty allow-list)
         run: defender/.venv/bin/python tooling/lint/lint_agent_retries.py
 
+      # Learning causes (#1537): one owner of the closed cause lists (records/learning_causes.py), and
+      # no bare Why(...) in product code, whose cause an untyped callee takes on trust. No baseline.
+      - name: Learning causes fence (empty allow-list)
+        run: defender/.venv/bin/python tooling/lint/lint_learning_causes.py
+
       # Run-ending precedence (#1465): only investigation/run_endings.py orders the endings a
       # run can take; no site reads a group with its own override list. No baseline.
       - name: Run-ending order fence (empty allow-list)
