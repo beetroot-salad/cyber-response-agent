@@ -799,7 +799,7 @@ async def put_case_record(
     deps: Deps, caller: ConfigWriter, body: CaseRecordPut, request: Request, response: Response
 ) -> CaseRecord:
     """Write the case record's next version, judged in the same response; `replaces` as a system write's. The system it
-    names must be one of the tenant's enabled systems, and the comment body a template that renders (422, `faults`)."""
+    names must be one of the tenant's enabled systems (422, `faults`)."""
     record, created = await deps.systems.put_case_record(caller, body)
     if created:
         _created_at(request, response, "get_case_record", caller.tenant_id)

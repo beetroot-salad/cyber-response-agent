@@ -17,10 +17,6 @@ CASE_RECORD_REL = "case-record.yaml"
 #: How a case-record fault names the record when its caller names it no other way: the retired file.
 CASE_RECORD_FILE = f"settings/{CASE_RECORD_REL}"
 
-#: The keys a comment body template may render (`render_context`).
-RENDER_KEYS = ("case_id", "signature", "summary", "disposition", "cause", "narrative", "event_time")
-
-
 class CaseTicketError(Exception):
     """A case record (or a comment rendered from it) that cannot be used."""
 
@@ -31,29 +27,6 @@ class CaseRecordSettings:
     system that records cases."""
 
     system: str
-
-
-def format_template(template: str, ctx: dict[str, str], where: str) -> str:
-    """`str.format_map`, with every bad-template fault folded into `CaseTicketError` so a
-    broken tenant template refuses with a receipt like any other case-settings fault."""
-    try:
-        return template.format_map(ctx)
-    except KeyError as e:
-        raise CaseTicketError(
-            f"the case record's `{where}` names a render key the context does not "
-            f"carry: {e}"
-        ) from e
-    except (ValueError, IndexError, AttributeError, TypeError) as e:
-        raise CaseTicketError(
-            f"the case record's `{where}` is not a valid template: {e}"
-        ) from e
-
-
-def render_context(**kw: str) -> dict[str, str]:
-    """Every render key (`RENDER_KEYS`) empty, then `kw`."""
-    base = dict.fromkeys(RENDER_KEYS, "")
-    base.update(kw)
-    return base
 
 
 def parse_case_record(text: str, *, named: str = CASE_RECORD_FILE) -> CaseRecordSettings:
@@ -89,5 +62,5 @@ def case_record_text(record: StoredCaseRecord) -> str:
     return safe_dump({"system": record.system_id}, sort_keys=False)
 
 
-__all__ = ["CASE_RECORD_FILE", "CASE_RECORD_REL", "RENDER_KEYS", "CaseRecordSettings", "CaseTicketError",
-           "case_record_text", "format_template", "parse_case_record", "render_context"]
+__all__ = ["CASE_RECORD_FILE", "CASE_RECORD_REL", "CaseRecordSettings", "CaseTicketError",
+           "case_record_text", "parse_case_record"]
