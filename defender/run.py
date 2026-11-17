@@ -970,7 +970,7 @@ def _case_input(ns: argparse.Namespace, world: Any, episode_runs: Any) -> Path:
     return ns.alert.resolve()
 
 
-def _world_seams(world: Any, *, oracle: Any, verifier: Any, source: Run | None, tenant_id: str,  # noqa: PLR0913 — the world, its two models, its source and its box's identity
+def _world_seams(world: Any, *, oracle: Any, verifier: Any, source: Run | None, tenant_id: str,
                  data_root: Path, box: Callable[[], Any] | None = None) -> dict[str, Any]:
     """The lifecycle's world-only keywords: none for an ordinary run; for a sibling its oracle
     side, settled once here from its knobs (the launcher hands it its rate slice through the
@@ -1760,7 +1760,7 @@ def _sibling_set_up(  # noqa: PLR0913 — the request, the socket and the siblin
         rc = preflight(ns.model, branching=True)
         if rc:
             raise _PreflightRefused(rc)
-        check_root = tenancy.data_root_for_child(data_root)  # the oracle's and the run box's checks, one root
+        check_root = tenancy.data_root_for_child(data_root)  # the run box's checks; the helper runs the oracle box's
         # The job image has no docker: the sibling's oracle box is its helper's to start, for its own run (#1170 O2).
         seams = _world_seams(world, oracle=oracle, verifier=verifier, source=source,
                              tenant_id=str(tenant.tenant_id), data_root=check_root,

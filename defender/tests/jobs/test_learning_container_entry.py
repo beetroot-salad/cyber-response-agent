@@ -303,18 +303,32 @@ def test_o2_a_sibling_in_the_container_has_its_oracle_box_started_by_its_helper(
         return run_py.main(["--tenant", scene.tenant, "--episode", job_id, "--world", "b"], environ=c.env,
                            lifecycle=lifecycle, visualize=lambda *a, **k: None, preflight=lambda *a, **k: 0)
 
+    helper_start = helper_learning._oracle_box.__code__
+
+    class _Calls(ThreadCalls):
+        """`ThreadCalls`, also keeping the id each helper-side oracle box start was asked for."""
+
+        def __init__(self, functions: dict[str, Any]) -> None:
+            super().__init__(functions)
+            self.idents: list[Any] = []
+
+        def _hook(self, frame: Any, event: str, arg: object) -> None:
+            super()._hook(frame, event, arg)
+            if self._active and event == "call" and frame.f_code is helper_start:
+                self.idents.append(frame.f_locals.get("_ident"))
+
     watched = {"direct": oracle_mod.start_process_box, "helper": helper_learning._oracle_box}
-    with ThreadCalls(watched) as calls:
+    with _Calls(watched) as calls:
         seen = seen_in_container(scene, "learning", entry, job_id=job_id, source=source)
 
     _clean(seen)
     assert "failed" not in got, f"the sibling's oracle box did not start: {got.get('failed')!r}"
     assert calls.container("direct") == 0, "the sibling started its oracle box itself, from the container"
     assert calls.helper("helper") == 1, "the helper did not start the sibling's oracle box"
+    assert calls.idents == [roster_id], f"the oracle box was not started for the sibling's own run: {calls.idents}"
     assert got["box"].sandboxed, "the sibling's oracle box is not a confined (relayed) box"
     oracle_starts = [c for c in seen.kind.docker.creates() if any("defender-oracle-" in a for a in c)]
     assert len(oracle_starts) == 1, f"expected one oracle box start through the helper's docker: {oracle_starts}"
-    assert roster_id, "premise: the sibling has a roster id"
 
 
 def test_a6_the_operator_sibling_from_a_host_shell_still_admits_holds_the_lock_and_copies_for_itself(tmp_path, monkeypatch):
