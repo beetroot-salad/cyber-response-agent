@@ -636,12 +636,14 @@ def test_a26_a_forged_token_naming_a_real_other_tenant_reaches_tenant_resolution
 
 def test_a_header_value_that_is_not_ascii_is_a_config_fault_unsent(tmp_path, data_root):
     """A request header that is not ASCII is a malformed request (`ConfigFault`, unsent), not a transport failure a retry
-    could clear (r7 A18); an ASCII one is sent (control)."""
+    could clear (r7 A18); an ASCII one is sent (control). The header is one the proxy forwards (#1471 R9-5), so the
+    refusal is the value's, not the name's."""
     with T.rig(tmp_path / "forge", data_root) as r:
-        refused = r.ask(headers={"X-Name": "café"})
+        refused = r.ask(headers={"User-Agent": "café"})
         assert (refused["fault"], r.up.seen) == ("ConfigFault", [])
-        sent = r.ask(headers={"X-Name": "cafe"})
+        sent = r.ask(headers={"User-Agent": "cafe"})
     assert sent["fault"] is None, sent
+    assert [s.header("User-Agent") for s in r.up.seen] == ["cafe"]
 
 
 # --- #1412 the reply format on the proxy's side ------------------------------------------------

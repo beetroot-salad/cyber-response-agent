@@ -3865,13 +3865,11 @@ async def test_1083_a_learning_job_reads_by_id_for_its_tenant_only(dsn):
     assert (elsewhere, unknown) == (None, None)
 
 
-# --- #1471 r8: the request's ticket write-back flag (W1) and the outcome word's store side (W6) ---------------------
-# Seams are C-3's: `create_investigation(..., update_ticket=)`, `InvestigationRecord.update_ticket` / `.ticket_write`, and
-# `ticket_write=` on `finish`, `hand_back` and `write_accounting`. The fixture mapping's `case_key` reads `alert_id`, which
-# `ALERT_BYTES` lacks: a flagged start needs an alert that names a ticket.
+# --- #1471: the request's ticket write-back flag (W1) -----------------------------------------------------------------
+# Seams are C-3's: `create_investigation(..., update_ticket=)` and `InvestigationRecord.update_ticket` (r9 R9-1: the
+# store serves no outcome word). The fixture mapping's `case_key` reads `alert_id`, which `ALERT_BYTES` lacks: a flagged
+# start needs an alert that names a ticket.
 
-WORDS_1471 = ("commented", "escalated", "error", "unknown", "no_receipt", "not_read")
-RUN_FOLDER_WORDS_1471 = WORDS_1471[:5]
 FIXTURE_NO_CASE_KEY = {**FIXTURE_ALERT_MAPPING, "case_key": None}
 
 
@@ -3883,22 +3881,6 @@ def _alert_naming(key: Any) -> bytes:
 
 async def _keyed(store: Any, tenant: str = T1, *, ticket: str = "T-1471", key: Any = "SEC-1471") -> Any:
     return await an_alert(store, tenant, ticket=ticket, raw=_alert_naming(key))
-
-
-def _word(dsn: str, investigation_id: str) -> Any:
-    """The stored `ticket_write` column (the read serves null while the row is live)."""
-    return execute(dsn, "SELECT ticket_write FROM jobs.investigations WHERE id = %s", (investigation_id,))[0][0]
-
-
-async def _live_row(store: Any, n: int, *, flagged: bool, running: bool) -> Any:
-    """A queued or running (claimed at once, so only this row is queued) investigation of its own keyed alert."""
-    alert = await _keyed(store, ticket=f"T-1471-{n}")
-    created, _ = await store.create_investigation(T1, alert.alert_id, f"k{n}", actor="u-1", update_ticket=flagged)
-    if running:
-        claimed = await store.claim()
-        assert claimed is not None
-        assert claimed.record.investigation_id == created.investigation_id, "premise: claimed"
-    return created
 
 
 async def test_1471_w1_a_start_stores_its_flag_and_a_read_shows_it(dsn):
@@ -4107,8 +4089,8 @@ async def test_1471_w1_a_tenant_without_a_mapping_is_still_refused_for_the_mappi
 
 
 @pytest.mark.parametrize("flagged", [True, False])
-async def test_1471_w1_a_lapse_retry_carries_its_requests_flag_and_no_word(dsn, flagged):
-    """An investigation whose lease lapsed is retried as a new row (attempt 2) with the same flag and no outcome word. (W1)"""
+async def test_1471_w1_a_lapse_retry_carries_its_requests_flag(dsn, flagged):
+    """An investigation whose lease lapsed is retried as a new row (attempt 2) with the same flag. (W1)"""
     async with job_store(dsn) as store:
         alert = await _keyed(store)
         first, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1", update_ticket=flagged)
@@ -4121,147 +4103,6 @@ async def test_1471_w1_a_lapse_retry_carries_its_requests_flag_and_no_word(dsn, 
 
     assert retry is not None, "the take-over queued no retry"
     assert (retry.record.investigation_id != first.investigation_id, retry.record.attempt) == (True, 2)
-    assert (retry.record.update_ticket, retry.record.ticket_write) == (flagged, None)
-    assert _word(dsn, retry.record.investigation_id) is None, "the stored column of the retry"
-
-
-# --- W6, store side: the words the store writes when it ends a row itself -------------------------------------------
-
-async def _rows_of_every_kind(store: Any) -> dict[tuple[bool, bool], Any]:
-    """`{(flagged, running): investigation}`: running rows are claimed first, so each claim takes the row just made."""
-    made = {}
-    for n, (flagged, running) in enumerate([(True, True), (False, True), (True, False), (False, False)]):
-        made[(flagged, running)] = await _live_row(store, n, flagged=flagged, running=running)
-    return made
-
-
-@pytest.mark.parametrize("how", ["cancel", "offboard"])
-async def test_1471_w6_a_row_the_store_ends_reads_not_read_if_it_ran_and_no_receipt_if_it_never_ran(dsn, how):
-    """Cancel or offboard: a flagged running row reads `not_read`, a flagged queued row `no_receipt`, an unflagged row
-    null either way. (W6: the store's ends)"""
-    async with job_store(dsn) as store:
-        made = await _rows_of_every_kind(store)
-        if how == "cancel":
-            for made_row in made.values():
-                await store.cancel_investigation(T1, made_row.investigation_id, actor="u-1")
-        else:
-            await store.offboard_tenant(T1, actor="u-1")
-        served = {key: (await store.get_investigation(T1, r.investigation_id)).ticket_write for key, r in made.items()}
-
-    assert served == {(True, True): "not_read", (False, True): None, (True, False): "no_receipt", (False, False): None}
-    assert {key: _word(dsn, r.investigation_id) for key, r in made.items()} == served
-
-
-@pytest.mark.parametrize("attempt", [1, 3], ids=["retried", "retry_cap"])
-@pytest.mark.parametrize("flagged", [True, False])
-async def test_1471_w6_a_take_over_ends_a_running_row_with_not_read_only_when_flagged(dsn, flagged, attempt):
-    """A lapsed running row ended by take-over (retried, or capped at attempt 3) reads `not_read` when flagged, null when
-    not. (W6)"""
-    async with job_store(dsn) as store:
-        alert = await _keyed(store)
-        investigation = _plant_investigation(dsn, tenant=T1, alert_id=alert.alert_id, key="k1", attempt=attempt,
-                                             stage="running", flagged=flagged)
-        lapse_lease(dsn, investigation)
-        assert await store.take_over(held=frozenset()) == [investigation], "premise: taken over"
-        ended = await store.get_investigation(T1, investigation)
-
-    assert (ended.stage, ended.ticket_write) == ("failed", "not_read" if flagged else None)
-    assert _word(dsn, investigation) == ended.ticket_write
-
-
-@pytest.mark.parametrize("word", RUN_FOLDER_WORDS_1471)
-async def test_1471_w6_a_handed_back_word_is_kept_not_served_while_live_and_not_replaced_by_the_take_over_or_a_cancel(dsn, word):
-    """`hand_back` carries the worker's word: stored at once, served null while the row still runs, and kept when the
-    take-over (or a cancel of the still-running row) ends it. (W6: carried; precedence)"""
-    async with job_store(dsn) as store:
-        # Cancel first: a take-over queues the lapsed row's retry, which the next `claim()` (oldest queued) would take.
-        for n, ending in enumerate(["cancel", "take_over"]):
-            alert = await _keyed(store, ticket=f"T-{ending}")
-            created, _ = await store.create_investigation(T1, alert.alert_id, f"k{n}", actor="u-1", update_ticket=True)
-            assert (await store.claim()).record.investigation_id == created.investigation_id, "premise: claimed"
-            handed = await store.hand_back(T1, created.investigation_id, cost_usd=1.0, knowledge=None, ticket_write=word)
-            assert handed is not None
-            assert handed.ticket_write is None, "served null while the row is still running"
-            assert _word(dsn, created.investigation_id) == word
-            assert (await store.get_investigation(T1, created.investigation_id)).ticket_write is None, "the read, too"
-            if ending == "take_over":
-                assert await store.take_over(held=frozenset()) == [created.investigation_id]
-            else:
-                await store.cancel_investigation(T1, created.investigation_id, actor="u-1")
-            ended = await store.get_investigation(T1, created.investigation_id)
-            assert (ended.stage, ended.ticket_write) == (("failed" if ending == "take_over" else "aborted"), word)
-            assert _word(dsn, created.investigation_id) == word
-
-
-async def test_1471_w6_a_hand_back_without_a_word_leaves_the_take_over_to_write_not_read(dsn):
-    """A hand-back that carries no word (the worker did not look) leaves the word null, so the take-over writes
-    `not_read`. (W6: `not_read` only where the word is null)"""
-    async with job_store(dsn) as store:
-        alert = await _keyed(store)
-        created, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1", update_ticket=True)
-        assert (await store.claim()).record.investigation_id == created.investigation_id, "premise: claimed"
-        assert await store.hand_back(T1, created.investigation_id, cost_usd=1.0, knowledge=None) is not None
-        assert _word(dsn, created.investigation_id) is None
-        await store.take_over(held=frozenset())
-        ended = await store.get_investigation(T1, created.investigation_id)
-
-    assert ended.ticket_write == "not_read"
-
-
-@pytest.mark.parametrize("word", WORDS_1471)
-async def test_1471_w6_finish_carries_the_word_to_the_ended_row(dsn, word):
-    """`finish` stores the word it is given and the read serves it once the row has ended. (W6: every end write carries it)"""
-    async with job_store(dsn) as store:
-        created = await _live_row(store, 0, flagged=True, running=True)
-        before = (await store.get_investigation(T1, created.investigation_id)).ticket_write
-        done = await store.finish(T1, created.investigation_id, stage="failed", failure_reason="worker_error",
-                                  cost_usd=1.0, ticket_write=word)
-        read = await store.get_investigation(T1, created.investigation_id)
-
-    assert before is None
-    assert (done.ticket_write, read.ticket_write, _word(dsn, created.investigation_id)) == (word, word, word)
-
-
-@pytest.mark.parametrize("word", WORDS_1471)
-async def test_1471_w6_write_accounting_carries_the_word_onto_a_cancelled_row(dsn, word):
-    """The accounting write after a cancel carries the worker's word; a run-folder word replaces the store's `not_read`,
-    and `not_read` leaves it. (W6: write_accounting; precedence)"""
-    async with job_store(dsn) as store:
-        created = await _live_row(store, 0, flagged=True, running=True)
-        await store.cancel_investigation(T1, created.investigation_id, actor="u-1")
-        assert _word(dsn, created.investigation_id) == "not_read", "premise: the store's end wrote not_read"
-        written = await store.write_accounting(T1, created.investigation_id, cost_usd=1.0, knowledge=None, ticket_write=word)
-        read = await store.get_investigation(T1, created.investigation_id)
-
-    assert written is not None
-    assert (read.ticket_write, _word(dsn, created.investigation_id)) == (word, word)
-
-
-async def test_1471_w6_an_accounting_write_without_a_word_leaves_not_read_and_a_fenced_finish_changes_nothing(dsn):
-    """After a cancel, `finish` changes nothing (its fence) and an accounting write carrying no word keeps `not_read`. (W6)"""
-    async with job_store(dsn) as store:
-        created = await _live_row(store, 0, flagged=True, running=True)
-        await store.cancel_investigation(T1, created.investigation_id, actor="u-1")
-        fenced = await store.finish(T1, created.investigation_id, stage="completed", disposition="benign", cost_usd=1.0,
-                                    ticket_write="commented")
-        assert fenced is None
-        assert _word(dsn, created.investigation_id) == "not_read"
-        await store.write_accounting(T1, created.investigation_id, cost_usd=1.0, knowledge=None)
-
-    assert _word(dsn, created.investigation_id) == "not_read"
-
-
-@pytest.mark.parametrize("held", ["commented", "error"])
-@pytest.mark.parametrize("incoming", ["unknown", "no_receipt", "not_read", None])
-async def test_1471_w6_nothing_replaces_a_word_from_the_run_folder(dsn, held, incoming):
-    """An ended row already holding a run-folder word keeps it through a later accounting write carrying any other word. (W6 precedence)"""
-    async with job_store(dsn) as store:
-        alert = await _keyed(store)
-        planted = _plant_investigation(dsn, tenant=T1, alert_id=alert.alert_id, key="k1", attempt=1, stage="aborted",
-                                       worked=("cancelled", False), flagged=True)
-        execute(dsn, "UPDATE jobs.investigations SET ticket_write = %s WHERE id = %s", (held, planted))
-        await store.write_accounting(T1, planted, cost_usd=2.0, knowledge=None, ticket_write=incoming)
-        read = await store.get_investigation(T1, planted)
-
-    assert (read.ticket_write, _word(dsn, planted)) == (held, held)
-    assert read.cost_usd == 2.0, "premise: the accounting write itself landed"
+    assert retry.record.update_ticket is flagged
+    assert execute(dsn, "SELECT update_ticket FROM jobs.investigations WHERE id = %s",
+                   (retry.record.investigation_id,)) == [(flagged,)], "the stored column of the retry"

@@ -2015,7 +2015,7 @@ def test_1345_o4_a_job_whose_tenant_has_no_mapping_is_refused_before_any_setup_w
 
 
 # --- #1471 r8: a flagged job's ticket write-back (W2, W4, W5, P-5, P-6) --------------------------------------------------
-# The worker's half (the flag, digest and link it hands the helper, the outcome word it reads back) is
+# The worker's half (the flag, digest and link it hands the helper) is
 # `test_worker_endings.py`'s and `test_1344_worker_start.py`'s; here `Scene.plant` hands the helper what the worker does
 # (C-1) and the launch record is the one it writes. The helper's own answers are `test_job_helper.py`'s.
 
@@ -2491,7 +2491,7 @@ def test_1471_w5_x2_a_flagged_job_whose_case_system_is_faulty_asks_for_no_write_
         ticket_scene, tmp_path, monkeypatch, fault):
     """A flagged job whose case system's verdict is faulty (bad settings, a route X2 refuses, a crashing check) asks the
     helper for no write pass and posts nothing, and its record step receipts the fault as an `error` naming the
-    record at fault. Control: the same tenant's job before the fault asks and posts. (W5, X2, W6)"""
+    record at fault. Control: the same tenant's job before the fault asks and posts. (W5, X2, R9-3)"""
     store = _case_store(tmp_path, monkeypatch)
     watch = _OrderWatch1471(ticket_scene, store, monkeypatch)
     report = _report_1471("benign", "the challenge review ran and left nothing about the finding unsettled")

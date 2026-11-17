@@ -259,46 +259,6 @@ async def test_1471_w1_a_flagged_start_of_an_alert_that_names_no_ticket_is_409_a
 
 
 @pytest.mark.postgres
-async def test_1471_w6_the_read_serves_the_ticket_write_word_only_once_the_investigation_ended(served):
-    """`ticket_write` reads null for an unflagged investigation and for a flagged one still queued or running, and the
-    word the store wrote for a flagged one it ended: `no_receipt` (queued), `not_read` (running), the worker's word
-    once finished. (#1471 r8 W6, C-4)"""
-    alerts = await _alerts(served.dsn, A, *(NOON - dt.timedelta(hours=n) for n in range(4)), raw=KEYED_ALERT)
-    plain, queued, running, finished = alerts
-
-    async def read(inv: str) -> dict[str, Any]:
-        return (await served.client.get(f"/tenants/{A}/investigations/{inv}", headers=served.ann(write=False))).json()
-
-    async def cancel(inv: str) -> None:
-        assert (await served.client.post(f"/tenants/{A}/investigations/{inv}/cancel", headers=served.ann())).status_code == 200
-
-    async def started(alert_id: str, *, flagged: bool, claim: bool) -> str:
-        """One start at a time, claimed at once, so the claim takes this row."""
-        inv = (await _start(served, alert_id, "req-1", update_ticket=flagged)).json()["investigation_id"]
-        if claim:
-            async with job_store(served.dsn) as store:
-                assert str((await store.claim()).record.investigation_id) == inv, "premise: this start was claimed"
-        return inv
-
-    plain_inv = await started(plain, flagged=False, claim=False)
-    queued_inv = await started(queued, flagged=True, claim=False)
-    assert [(await read(i))["ticket_write"] for i in (plain_inv, queued_inv)] == [None, None]
-    await cancel(plain_inv)
-    await cancel(queued_inv)
-    assert ((await read(plain_inv))["ticket_write"], (await read(queued_inv))["ticket_write"]) == (None, "no_receipt")
-
-    running_inv = await started(running, flagged=True, claim=True)
-    assert (await read(running_inv))["ticket_write"] is None
-    await cancel(running_inv)
-    assert (await read(running_inv))["ticket_write"] == "not_read"
-
-    finished_inv = await started(finished, flagged=True, claim=True)
-    async with job_store(served.dsn) as store:
-        await store.finish(A, finished_inv, stage="completed", disposition="benign", cost_usd=0.0, ticket_write="commented")
-    assert (await read(finished_inv))["ticket_write"] == "commented"
-
-
-@pytest.mark.postgres
 async def test_o6_cancel_and_delete_refuse_what_they_must_and_a_deleted_investigation_reads_absent(served):
     """Cancelling an ended investigation and deleting a live one conflict; a deleted one reads 404. (O6)"""
     [alert_id] = await _alerts(served.dsn, A, NOON)

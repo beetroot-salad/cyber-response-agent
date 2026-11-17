@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import secrets
 import time
 from datetime import timedelta
 
@@ -232,6 +233,112 @@ def test_c1_an_adapter_cannot_steer_the_upstream_with_a_host_header(tmp_path, da
 
 def _decl(scheme):
     return lambda u: H.declaration(u + BASE, scheme=scheme)
+
+
+# --- #1471 r9 R9-5: the proxy forwards only an allowed list of request headers ------------------
+# The list is closed. These tests name only the four headers R9-5 says the adapters send; any other member is the
+# implementation's choice. A header outside the list is dropped and the request still goes; a credential header is
+# still refused, and a hop header is still dropped.
+
+#: Named by R9-5 as what the adapters send: each passes through, under any spelling of its name.
+ALLOWED_R95 = ("Content-Type", "Accept", "User-Agent", "Idempotency-Key")
+#: Named outside the list: every method-override spelling and the forwarding headers.
+OUTSIDE_R95 = ("X-HTTP-Method-Override", "X-HTTP-Method", "X-Method-Override",
+               "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "X-Forwarded-Prefix")
+#: Header names no list could anticipate, made in the test body (so collection stays the same under xdist).
+MINTED_R95 = ("minted-x-prefixed", "minted-plain")
+SPELLINGS_R95 = {"as-named": lambda n: n, "lower-case": str.lower, "upper-case": str.upper}
+CREDENTIALS_R95 = [
+    pytest.param(H.header_scheme("X-Api-Key"), "X-Api-Key", id="declared-own-header"),
+    pytest.param({"scheme": "bearer", "field": "api_key"}, "Authorization", id="authorization"),
+    pytest.param({"scheme": "bearer", "field": "api_key"}, "Proxy-Authorization", id="proxy-authorization"),
+    pytest.param({"scheme": "bearer", "field": "api_key"}, "Cookie", id="cookie"),
+]
+HOP_R95 = ("Connection", "Keep-Alive", "Proxy-Connection", "TE", "Trailer", "Upgrade", "Expect")
+
+
+def _canary() -> str:
+    return f"r95-canary-{secrets.token_hex(8)}"
+
+
+def _named_r95(name: str) -> str:
+    """`name`, or for a minted one a fresh token-shaped name: `X-` prefixed, or with no prefix at all."""
+    if name == "minted-x-prefixed":
+        return f"X-Adapter-{secrets.token_hex(4)}"
+    if name == "minted-plain":
+        return f"Adapter{secrets.token_hex(4)}"
+    return name
+
+
+def _allowed_values() -> dict[str, str]:
+    """A value for each named allowed header that no client library would set by itself."""
+    tag = secrets.token_hex(4)
+    return {"Content-Type": f"application/vnd.r95-{tag}+json", "Accept": f"application/vnd.r95-{tag}+json",
+            "User-Agent": f"r95-adapter/{tag}", "Idempotency-Key": f"r95-key-{tag}"}
+
+
+@pytest.mark.parametrize("spelling", list(SPELLINGS_R95))
+@pytest.mark.parametrize("name", [*OUTSIDE_R95, *MINTED_R95])
+def test_1471_r95_a_header_outside_the_allowed_list_is_dropped_and_the_request_still_goes(
+        tmp_path, data_root, name, spelling):
+    """A request header outside the allowed list (any method-override spelling, a forwarding header, a name nobody
+    listed), however cased, is dropped and the request is sent without it, beside the allowed headers that pass. R9-5."""
+    header, value, allowed = SPELLINGS_R95[spelling](_named_r95(name)), _canary(), _allowed_values()
+    with T.rig(tmp_path / "forge", data_root) as r:
+        answer = r.ask(headers={header: value, **allowed})
+
+    assert answer["fault"] is None, f"{header}: refused, not dropped: {answer}"
+    assert len(r.up.seen) == 1, "the request was not sent once"
+    [seen] = r.up.seen
+    assert (seen.method, seen.path) == ("GET", f"{BASE}/users/x"), "the request changed on the way"
+    assert seen.header(header) is None, f"{header} reached the upstream"
+    assert value not in seen.blob(), f"the value of {header} reached the upstream"
+    assert {n: seen.header(n) for n in allowed} == allowed, "control: the allowed headers of the same request pass"
+
+
+@pytest.mark.parametrize("spelling", list(SPELLINGS_R95))
+@pytest.mark.parametrize("name", ALLOWED_R95)
+def test_1471_r95_an_allowed_header_reaches_the_upstream_with_its_value_in_any_case(
+        tmp_path, data_root, name, spelling):
+    """Content type, accept, user agent and idempotency key pass through with the adapter's value, however the name is
+    cased. R9-5."""
+    value = _allowed_values()[name]
+    with T.rig(tmp_path / "forge", data_root) as r:
+        answer = r.ask(headers={SPELLINGS_R95[spelling](name): value})
+
+    assert answer["fault"] is None, answer
+    assert [s.header(name) for s in r.up.seen] == [value]
+
+
+@pytest.mark.parametrize("spelling", list(SPELLINGS_R95))
+@pytest.mark.parametrize(("scheme", "name"), CREDENTIALS_R95)
+def test_1471_r95_a_credential_header_is_still_refused_not_dropped(tmp_path, data_root, scheme, name, spelling):
+    """A credential header (Authorization, Proxy-Authorization, Cookie, the declared scheme's own header), however
+    cased, is refused as a `ConfigFault` and nothing is sent: the allowed list does not turn the refusal into a drop.
+    The same request without it is sent (control). R9-5, #1163 O2."""
+    value = _canary()
+    with T.rig(tmp_path / "forge", data_root, _decl(scheme)) as r:
+        refused = r.ask(headers={SPELLINGS_R95[spelling](name): value, "Accept": "application/json"})
+        assert (refused["fault"], r.up.seen) == ("ConfigFault", []), refused
+        control = r.ask(headers={"Accept": "application/json"})
+
+    assert control["fault"] is None, control
+    assert len(r.up.seen) == 1
+    assert value not in r.up.seen[0].blob()
+
+
+@pytest.mark.parametrize("spelling", list(SPELLINGS_R95))
+@pytest.mark.parametrize("name", HOP_R95)
+def test_1471_r95_a_hop_header_is_still_dropped_and_the_request_still_goes(tmp_path, data_root, name, spelling):
+    """A header that describes the hop, however cased, is dropped: the request is sent and the adapter's value never
+    reaches the upstream. R9-5."""
+    value = _canary()
+    with T.rig(tmp_path / "forge", data_root) as r:
+        answer = r.ask(headers={SPELLINGS_R95[spelling](name): value})
+
+    assert answer["fault"] is None, answer
+    assert len(r.up.seen) == 1
+    assert value not in r.up.seen[0].blob()
 
 
 # --- O4 the whole injected Authorization header -------------------------------------------
