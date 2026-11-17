@@ -10,13 +10,12 @@ pointer's case id, `job_lane`), and an episode's run view (roster -> arm run -> 
 from __future__ import annotations
 
 import json
-import logging
 import os
 import sqlite3
 from collections.abc import Mapping
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from defender._model import model
 from defender.records._run_id import refuse_bad_case_id
@@ -24,7 +23,9 @@ from defender.records._store_errors import StoreError
 
 from ._record import BaselineEntry, CeilingEntry, ClosingRecord
 
-_logger = logging.getLogger(__name__)
+if TYPE_CHECKING:
+    from defender.records._handle import Run
+
 
 TABLE = "closing_record"
 
@@ -103,12 +104,13 @@ _COLUMNS = ("disposition", "outcome", "cause", "failure_kind", "drafted_disposit
 
 
 def fault(kind: str, detail: str, *, run_id: object = "") -> CouldNotLook:
-    """A `CouldNotLook`, its detail logged here (the only place a detail goes)."""
-    _logger.warning("the closing record of run %s could not be looked up (%s): %s", run_id, kind, detail)
+    """A `CouldNotLook`. Not logged here: a CLI's log is its stderr, an outward slot, so each
+    reader with a log of its own (the worker, the ticket leg, the run page) logs `detail`."""
+    del run_id  # the route's own name for the run, kept at every call site for the readers' logs
     return CouldNotLook(kind=kind, detail=detail)
 
 
-def for_run(run: Any) -> Lookup:
+def for_run(run: Run) -> Lookup:
     """The run-handle route: the database the run's host-written pointer recorded."""
     run_id = str(run.id)
     pointer = run.observability.session_pointer
@@ -131,6 +133,14 @@ def for_run(run: Any) -> Lookup:
     if isinstance(database, str):
         return fault(POINTER_UNREADABLE, f"the session pointer {pointer.path} {database}", run_id=run_id)
     return read_database(database, run_id)
+
+
+def for_run_dir(run_dir: Path) -> Lookup:
+    """`for_run` over the handle of the run folder `run_dir` under its runs folder: for a view or
+    a scorer handed a folder rather than a `Run`."""
+    from defender.records._lookup import run_of_folder
+
+    return for_run(run_of_folder(Path(run_dir)))
 
 
 def _pointer_database(text: str) -> Path | str:

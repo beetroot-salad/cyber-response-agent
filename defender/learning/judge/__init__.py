@@ -347,7 +347,7 @@ def grade_episode(  # noqa: PLR0913 — the orchestration's whole configuration 
             return _grade_episode(episode, judge=resolved_judge, draws=configured,
                                   git_show=git_show, state=sink, tenant=runs.tenant,
                                   job_lane=job_lane,
-                                  episode_runs=_open_episode_runs(runs, episode_id, episode))
+                                  episode_runs=_judged_episode_runs(runs, episode_id, episode))
     except JudgeRefused:
         raise
     # Every input-driven failure arrives as `JudgeRefused`, which is what the launcher catches.
@@ -368,7 +368,7 @@ def _open_episode(runs: RunsRepository[Tenant], episode_id: str) -> Episode:
         raise JudgeRefused(f"episode {episode_id}: {refused}") from refused
 
 
-def _open_episode_runs(runs: RunsRepository[Tenant], episode_id: str, episode: Episode) -> Any:
+def _judged_episode_runs(runs: RunsRepository[Tenant], episode_id: str, episode: Episode) -> Any:
     """The pass's episode run view over its held episode (`runs.episode(id, held=...)`): where
     each world's arm, and so its closing record, is found (#1534). Adopted, so the pass's
     handle stays the one owner."""

@@ -12,7 +12,7 @@ from ._episode import for_world, roster_fault
 from ._lookup import (
     ARM_REFUSED, COMMITTED_WITHOUT_RECORD, DATABASE_MISSING, FAULT_KINDS, FAULT_WORDING, LEGACY_LINK,
     POINTER_UNREADABLE, RECORDED_BEFORE_1534, ROSTER_GONE, ROW_INVALID, SCHEMA_VERSION_KIND,
-    STORE_UNREADABLE, TABLE, CouldNotLook, Lookup, NeverClosed, Record, encode_entries, fault, for_run,
+    STORE_UNREADABLE, TABLE, CouldNotLook, Lookup, NeverClosed, Record, encode_entries, fault, for_run, for_run_dir,
     read_database,
 )
 from ._record import (
@@ -43,5 +43,5 @@ __all__ = [
     "SUMMARY_BOUND", "TABLE", "TIMEOUT", "UNREADABLE", "BaselineEntry", "CeilingEntry", "ClosingRecord",
     "CouldNotLook", "Lookup", "NeverClosed", "Record", "baseline_line", "baseline_line_of", "baseline_lines_length",
     "canonical_instant", "ceiling_line", "ceiling_line_of", "ceiling_lines_length", "encode_entries", "entry_lines", "fault",
-    "for_run", "for_world", "read_database", "roster_fault", "treat",
+    "for_run", "for_run_dir", "for_world", "read_database", "roster_fault", "treat",
 ]
