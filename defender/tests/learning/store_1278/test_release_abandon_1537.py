@@ -22,6 +22,7 @@ from defender.tests.support.learning.core._release1537 import (
     release_item,
     request_abandon,
     row,
+    why,
     set_held,
 )
 from defender.tests.support.learning.core._store1278 import (
@@ -229,7 +230,7 @@ async def test_o2_a_batch_that_is_not_parked_is_a_conflict_naming_its_phase(dsn)
         steps = [("working", None)]
         for phase, move in (("in_review", store.in_review(held, 5, {})),
                             ("ended", store.end_review(BLUE, held.batch_id, expect_phase="in_review", outcome="closed",
-                                                       published=[], held=[("finding", "w1")]))):
+                                                       published=[], held=[("finding", "w1")], items_why=why("closed_without_feedback", "the PR closed without feedback")))):
             steps.append((phase, move))
         for phase, move in steps:
             if move is not None:

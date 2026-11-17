@@ -476,7 +476,7 @@ def test_o6_a_long_multi_line_prior_detail_arrives_shortened_on_one_line(s):
         detail = event.detail or ""
         assert event.action == action
         assert detail.startswith(f"{prior_cause}: {LONG_LINE[:40]}"), detail[:80]
-        assert len(detail) <= 200
+        assert len(detail) == 200, "cut at exactly 200 characters, not shortened more or less"
         assert "\n" not in detail
         assert "\r" not in detail
         assert TAIL not in detail

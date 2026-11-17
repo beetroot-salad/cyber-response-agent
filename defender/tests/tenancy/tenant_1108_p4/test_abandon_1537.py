@@ -20,7 +20,7 @@ from defender.tests.support.learning.core._feedback1278 import (
     opened,
     tick,
 )
-from defender.tests.support.learning.core._faults1537 import FORGE_FAULTS, OPEN_FAULTS, PARK, Fault, normalised
+from defender.tests.support.learning.core._faults1537 import FORGE_FAULTS, OPEN_FAULTS, Fault, normalised
 from defender.tests.support.learning.core._release1537 import CREDENTIAL, item_row, park, row
 from defender.tests.support.learning.core._store1278 import (  # noqa: F401 — `world` is a fixture
     call,
@@ -28,7 +28,8 @@ from defender.tests.support.learning.core._store1278 import (  # noqa: F401 — 
     lesson_citing,
     world,
 )
-from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — fixture
+from defender.tests.migrations.test_1537_causes_migration import backfilled_batch_cause
+from defender.tests.support.shared._postgres1339 import empty_database, migrated_database  # noqa: F401 — fixtures
 from defender.tests.tenancy.tenant_1108_delivery._support import close_on_remote, comment_row, merge_on_remote, pr_row
 from defender.tests.tenancy.tenant_1108_p4._drain_support import LESSON_NAME, remote_branches
 
@@ -129,30 +130,34 @@ def _delivery_will_not_open(w, fault: Fault, tmp_path):
         yield {}
     else:
         scene_minting = minting(w.t, tmp_path)
-        if fault.step == "secret_file_gone":
-            Path(scene_minting.fields["host_secret_file"]).unlink()
+        if fault.step in {"secret_file_gone", "secret_file_empty"}:
+            secret_file = Path(scene_minting.fields["host_secret_file"])
+            if fault.step == "secret_file_gone":
+                secret_file.unlink()
+            else:
+                secret_file.write_text("\n", encoding="utf-8")
             yield {"mint": True, "identity": scene_minting.credential}
         else:
             yield {"mint": True, "identity": secret_store_credential(w.t, scene_minting, int(fault.step.split(":")[1]))}
 
 
-def _parked(w, batch_id, fault: Fault, path: str) -> None:
-    """Parked by the third refusal with the table's cause, and the stored reason the very text the table freezes for `path`."""
+def _parked(w, batch_id, fault: Fault, path: str, old_database: str) -> None:
+    """Parked by the third refusal with the table's cause; the stored reason holds the fault's own text, and the migration's
+    backfill of that stored reason gives the same cause (the wording around the text is the code's, never frozen here)."""
     got = row(w.dsn, batch_id)
     assert (got["phase"], got["cause"], got["refusals"]) == ("needs_person", fault.cause, 3)
     assert got["parked_at"] is not None
-    stored, frozen = normalised(got["reason"], w.t.tenant_id), fault.park_text(path)
-    if len(got["reason"]) >= len(PARK) + 300:  # the loop keeps 300 characters of a fault's text; a temp dir lengthens one
-        assert frozen.startswith(stored[:len(PARK) + 140]), (stored, frozen)
-    else:
-        assert stored == frozen
+    stored, text = normalised(got["reason"], w.t.tenant_id), fault.texts[path]
+    # the loop keeps 300 characters of a fault's text, so a long one is checked by its head
+    assert (text if len(text) < 250 else text[:140]) in stored, (stored, text)
+    assert backfilled_batch_cause(old_database, got["reason"]) == fault.cause, got["reason"]
 
 
 # --- O4: the one classifier, one table of fault shapes through every counting path ---------------------------------------
 
 
 @pytest.mark.parametrize("fault", FORGE_FAULTS, ids=lambda f: f.name)
-def test_o4_three_refusals_of_a_reviews_read_park_the_batch_with_the_cause_the_fault_names(scene, caplog, fault):
+def test_o4_three_refusals_of_a_reviews_read_park_the_batch_with_the_cause_the_fault_names(scene, caplog, fault, empty_database):  # noqa: F811 — fixture
     """In-review reconcile: three reads the forge refuses with the fault's status park the batch with the table's cause; the forge's words stay the detail. (O4, classifier)"""
     w = scene
     w.seed("f1")
@@ -162,12 +167,12 @@ def test_o4_three_refusals_of_a_reviews_read_park_the_batch_with_the_cause_the_f
     w.t.forge.refuse("/reviews", fault.forge_status)
     for _ in range(3):
         tick(w, writer)
-    _parked(w, batch_id, fault, "reviews")
+    _parked(w, batch_id, fault, "reviews", empty_database)
     assert w.statuses() == {"f1": "in_batch"}
 
 
 @pytest.mark.parametrize("fault", FORGE_FAULTS, ids=lambda f: f.name)
-def test_o4_three_refusals_of_the_pr_read_in_recovery_park_the_lapsed_batch_with_the_cause_the_fault_names(scene, fault):
+def test_o4_three_refusals_of_the_pr_read_in_recovery_park_the_lapsed_batch_with_the_cause_the_fault_names(scene, fault, empty_database):  # noqa: F811 — fixture
     """Lapsed recovery: three PR lookups the forge refuses with the fault's status park the lapsed working batch with the table's cause. (O4, classifier)"""
     w = scene
     w.seed("f1")
@@ -176,12 +181,12 @@ def test_o4_three_refusals_of_the_pr_read_in_recovery_park_the_lapsed_batch_with
     w.t.forge.refuse("/pulls", fault.forge_status, method="GET")
     for _ in range(3):
         tick(w, FeedbackCurator())
-    _parked(w, held.batch_id, fault, "pulls")
+    _parked(w, held.batch_id, fault, "pulls", empty_database)
 
 
 @pytest.mark.parametrize("state", ["in_review", "lapsed"])
 @pytest.mark.parametrize("fault", OPEN_FAULTS, ids=lambda f: f.name)
-def test_o4_three_deliveries_that_will_not_open_park_the_batch_with_the_cause_the_fault_names(scene, caplog, tmp_path, fault, state):
+def test_o4_three_deliveries_that_will_not_open_park_the_batch_with_the_cause_the_fault_names(scene, caplog, tmp_path, fault, state, empty_database):  # noqa: F811 — fixture
     """Delivery open: three ticks whose delivery fails to open as the fault says (at the issuer, the secret store, the host secret file or the wiring) park an in-review or a lapsed batch with the table's cause. (O4, classifier)"""
     w = scene
     w.seed("f1")
@@ -195,7 +200,7 @@ def test_o4_three_deliveries_that_will_not_open_park_the_batch_with_the_cause_th
     with _delivery_will_not_open(w, fault, tmp_path) as seams:
         for _ in range(3):
             _tick_through_refusal(w, writer, **seams)
-    _parked(w, batch_id, fault, "open")
+    _parked(w, batch_id, fault, "open", empty_database)
 
 
 # --- O3: the settle's branches --------------------------------------------------------------------------------------

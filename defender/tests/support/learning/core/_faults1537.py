@@ -36,7 +36,7 @@ class Fault:
     forge_status: int | None = None
     #: How the delivery's open fails at its edge: attributes set on the tenant's issuer fake (`status`, `body`) ...
     issuer: dict[str, Any] | None = None
-    #: ... or a named step: `secret_store:<status>` (the AppRole login answers it), `secret_file_gone`, `no_wiring`.
+    #: ... or a named step: `secret_store:<status>` (the AppRole login answers it), `secret_file_gone`, `secret_file_empty`, `no_wiring`.
     step: str | None = None
     #: What the reason of a park by this fault says after the park's prefix, by the path that counted it: `reviews`, `pulls`
     #: (the forge's refused read) or `open` (the delivery not opening), as the real paths wrote it (probed 2026-11-17) with the
@@ -64,6 +64,8 @@ FAULTS: tuple[Fault, ...] = (
         _OPEN + "the issuer AppRole login failed: OpenBao refused tenant {tenant}'s delivery AppRole login (HTTP 403)")}),
     Fault("misconfigured credential", UNAVAILABLE, step="secret_file_gone", texts={"open": (
         _OPEN + "tenant {tenant}'s delivery secret file {file} could not be read: No such file or directory")}),
+    Fault("secret file holds no secret id", UNAVAILABLE, step="secret_file_empty", texts={"open": (
+        _OPEN + "tenant {tenant}'s delivery secret file {file} does not hold one secret id")}),
     Fault("no usable forge wiring", UNAVAILABLE, step="no_wiring", texts={"open": (
         "the tenant {tenant} has no usable forge wiring: tenant {tenant} has no forge wiring recorded: its repository is not "
         "bound to a forge")}),
@@ -77,7 +79,7 @@ def normalised(reason: str, tenant: str) -> str:
     import re
 
     text = re.sub(r"http://127\.0\.0\.1:\d+", "http://forge.invalid", reason).replace(tenant, "{tenant}")
-    return re.sub(r"secret file \S+ could not", "secret file {file} could not", text)
+    return re.sub(r"secret file \S+ (could not|does not)", r"secret file {file} \1", text)
 
 
 def secret_store_credential(t: Any, scene: Any, status: int) -> Any:

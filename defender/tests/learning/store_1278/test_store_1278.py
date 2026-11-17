@@ -13,7 +13,7 @@ import uuid
 import anyio
 import pytest
 
-from defender.tests.support.learning.core._release1537 import outcome_skipped, release_item_of
+from defender.tests.support.learning.core._release1537 import outcome_skipped, release_item_of, why
 from defender.tests.support.jobs._jobs1342 import move_tenant, register_tenant
 from defender.tests.support.learning.core._store1278 import (
     AUTHOR_LANE,
@@ -375,7 +375,7 @@ async def _closed_with_feedback(store, tenant, *ids, hold=(), pr=7):
     """Batch A over `ids`, in review as `pr`, then closed with feedback: its items but `hold` stay in_batch (replacement due)."""
     first = await _in_review(store, tenant, *ids, pr=pr)
     await store.end_review(tenant, first.batch_id, expect_phase="in_review", outcome="closed",
-                           published=[], held=[(FINDING, key) for key in hold])
+                           published=[], held=[(FINDING, key) for key in hold], items_why=why("closed_without_feedback", "the PR closed without feedback"))
     return first
 
 
@@ -449,7 +449,7 @@ async def test_o7_release_held_starts_the_item_afresh_attempts_and_deferrals_bot
         again = await claim(store, BLUE)
         await store.in_review(again, pr_number=7, outcomes={})
         await store.end_review(BLUE, again.batch_id, expect_phase="in_review", outcome="closed", published=[],
-                               held=[(FINDING, "f1")])
+                               held=[(FINDING, "f1")], items_why=why("closed_without_feedback", "the PR closed without feedback"))
         item = (await _work(store, BLUE))[FINDING, "f1"]
         assert (item.status, item.deferrals, item.attempts > 0) == ("held", 2, True), "premise: held with both counters up"
 
@@ -490,11 +490,10 @@ async def test_tick_in_review_returns_items_the_batch_did_not_cite_and_keeps_the
 
 async def test_tick_no_commits_ends_the_batch_and_returns_items_with_their_outcomes(dsn):
     """A batch with no commits ends: a skipped item is skipped with its reason, the rest wait, the lane is free. (Tick flow, D1)"""
-    S = store_mod()
     async with learning_store(dsn) as store:
         await publish(store, BLUE, "f1", "f2")
         held = await claim(store, BLUE)
-        await store.end_no_commits(held, {(FINDING, "f1"): S.Outcome.skipped("already known")})
+        await store.end_no_commits(held, {(FINDING, "f1"): outcome_skipped("curator_skipped", "already known")})
 
         items = await _work(store, BLUE)
         assert (items[FINDING, "f1"].status, items[FINDING, "f1"].reason) == ("skipped", "already known")
@@ -607,7 +606,8 @@ async def test_d7_end_review_with_a_phase_that_is_no_longer_the_batchs_changes_n
     """A stale reconcile (the person abandoned the batch first) ends nothing and publishes nothing: the compare-and-set on phase. (D7, O7)"""
     async with learning_store(dsn, **KNOBS) as store:
         held = await _in_review(store, BLUE, "f1")
-        await store.end_review(BLUE, held.batch_id, expect_phase="in_review", outcome="closed", published=[], held=[(FINDING, "f1")])
+        await store.end_review(BLUE, held.batch_id, expect_phase="in_review", outcome="closed", published=[], held=[(FINDING, "f1")],
+                               items_why=why("closed_without_feedback", "the PR closed without feedback"))
         after_abandon = (await _batch(store, BLUE, held.batch_id), await _work(store, BLUE))
         assert (after_abandon[0].phase, after_abandon[0].outcome) == ("ended", "closed"), "premise: the batch already ended"
         published = [(FINDING, "f1")] if outcome == "merged" else []
@@ -637,7 +637,8 @@ async def test_d9_a_lead_batchs_curation_requests_keep_their_own_fate_until_the_
         assert {items["curation_request", "run-2"].status, items["pitfall", "p1"].status} == {"in_batch"}, "premise: committed items wait for the PR"
 
         await store.end_review(BLUE, held.batch_id, expect_phase="in_review", outcome="closed", published=[],
-                               held=[] if words else [("curation_request", "run-2"), ("pitfall", "p1")])
+                               held=[] if words else [("curation_request", "run-2"), ("pitfall", "p1")],
+                               items_why=why("closed_without_feedback", "the PR closed without feedback"))
 
         items = await _work(store, BLUE)
         assert (items["curation_request", "run-1"].status, "names no system" in (items["curation_request", "run-1"].reason or "")) \

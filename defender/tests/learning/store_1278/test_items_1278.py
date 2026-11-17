@@ -28,9 +28,9 @@ def dsn(migrated_database):
     return migrated_database
 
 
-def outcome(name: str, *reason: str):
-    """`Outcome.<name>(reason?)`: the store's outcome values (interface request: callable constructors)."""
-    return getattr(store_mod().Outcome, name)(*reason)
+def outcome(name: str, *why: str):
+    """`Outcome.<name>()`, or `Outcome.<held|skipped|dead>(cause, detail)` (r3.1): the store's outcome values."""
+    return getattr(store_mod().Outcome, name)(*why)
 
 
 def pitfall(pid: str, **extra):
@@ -93,7 +93,7 @@ async def test_items_tenants_keep_their_own_rows_for_one_key(dsn):
 @pytest.mark.parametrize("how", ["published", "skipped", "dead"])
 async def test_a_finding_id_is_unique_for_good_past_published_skipped_and_dead(dsn, how):
     """Past any end it can reach, a republished finding id adds nothing and changes no row. (work_items, O14)"""
-    reason = {"published": (), "skipped": ("duplicate",), "dead": ("unkeyable",)}[how]
+    reason = {"published": (), "skipped": ("curator_skipped", "duplicate"), "dead": ("malformed_row", "unkeyable")}[how]
     async with learning_store(dsn) as store:
         await store.publish_findings(BLUE, "run-1", [finding("f1")], kind="finding")
         claim = await claim_author(store)
@@ -453,8 +453,9 @@ async def test_deferrals_and_attempts_are_separate_counters_with_the_deferral_ce
 
 
 @pytest.mark.parametrize(("name", "reason", "status"), [
-    ("skipped", ("duplicate",), "skipped"), ("held", ("missing_field(contrast_evidence)",), "held"),
-    ("dead", ("unkeyable",), "dead"), ("published", (), "published"), ("waiting", (), "waiting")])
+    ("skipped", ("curator_skipped", "duplicate"), "skipped"),
+    ("held", ("curator_held", "missing_field(contrast_evidence)"), "held"),
+    ("dead", ("malformed_row", "unkeyable"), "dead"), ("published", (), "published"), ("waiting", (), "waiting")])
 async def test_each_outcome_a_holder_reports_becomes_its_status_and_reason(dsn, name, reason, status):
     """Every outcome value lands as the status of the same name, a reason where it carries one. (D1)"""
     async with learning_store(dsn) as store:
@@ -463,7 +464,7 @@ async def test_each_outcome_a_holder_reports_becomes_its_status_and_reason(dsn, 
         await store.end_no_commits(claim, {("finding", "f1"): outcome(name, *reason)})
         got = (await items(store))[("finding", "f1")]
         assert got.status == status
-        assert all(r in (got.reason or "") for r in reason)
+        assert all(r in (got.reason or "") for r in reason[1:]), "the detail is the reason a person reads"
         [batch] = await store.batches(BLUE)
         assert batch.phase == "ended", "no commits: the batch ends with its items' outcomes"
 
@@ -473,7 +474,7 @@ async def test_an_item_the_holder_names_no_outcome_for_returns_to_waiting(dsn):
     async with learning_store(dsn) as store:
         await store.publish_findings(BLUE, "run-1", [finding("f1"), finding("f2")], kind="finding")
         claim = await claim_author(store)
-        await store.end_no_commits(claim, {("finding", "f1"): outcome("skipped", "duplicate")})
+        await store.end_no_commits(claim, {("finding", "f1"): outcome("skipped", "curator_skipped", "duplicate")})
         got = await items(store)
         assert (got[("finding", "f1")].status, got[("finding", "f2")].status) == ("skipped", "waiting")
         assert all(i.status != "in_batch" for i in got.values()), "an ended batch leaves nothing in_batch"

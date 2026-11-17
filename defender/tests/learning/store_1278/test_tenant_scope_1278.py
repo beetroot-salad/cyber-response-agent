@@ -34,6 +34,7 @@ from defender.tests.support.learning.core._release1537 import (
     outcome_held,
     outcome_skipped,
     park,
+    why,
     request,
     settle_abandon,
 )
@@ -115,7 +116,8 @@ async def _blue_world(store):
     spent = await store.claim(BLUE, AUTHOR_LANE, owner="host-b", thresholds=ONE)
     await store.record_commit(spent, oid(31), oid(32), oid(33), changes_of("agent/lessons/b.md"))
     await store.in_review(spent, 12, {})
-    await store.end_review(BLUE, spent.batch_id, expect_phase="in_review", outcome="closed", published=[], held=[("finding", "h1")])
+    await store.end_review(BLUE, spent.batch_id, expect_phase="in_review", outcome="closed", published=[], held=[("finding", "h1")],
+                           items_why=why("closed_without_feedback", "the PR closed without feedback"))
     await _publish(store, BLUE, "a1")
     await store.add_pitfall(BLUE, _pitfall("a-pit"))
     await store.enqueue_request(BLUE, "run-a1", "case-1", {"case": "a"})
@@ -316,10 +318,12 @@ async def _release_item(c):
 
 
 async def _release_batch(c):
-    """GREEN's batch is parked with the credential cause, so BLUE's refusal is about whose it is, not its state."""
+    """GREEN's batch is parked with the credential cause and GREEN's lane is free (its working revert is given back), so only
+    the tenant filter can refuse BLUE: GREEN's own release would run."""
     mine = await c.own_in_review("rb1")
     park(c.dsn, mine.batch_id)
     park(c.dsn, c.g.review.batch_id)
+    await c.store.abandon_clean(c.g.revert)
     c.freeze()
     await c.refused(c.store.release_batch(BLUE, str(c.g.review.batch_id), actor="u-1"))
     await c.control(c.store.release_batch(BLUE, str(mine.batch_id), actor="u-1"))
@@ -381,7 +385,8 @@ async def _end_review(c):
     for outcome in ("merged", "closed"):
         assert not await c.refused(c.store.end_review(
             BLUE, str(c.g.review.batch_id), expect_phase="in_review", outcome=outcome,
-            published=[("finding", "k1")], held=[("finding", "k2")])), "BLUE ended GREEN's batch"
+            published=[("finding", "k1")], held=[("finding", "k2")],
+            items_why=why("closed_without_feedback", "the PR closed without feedback"))), "BLUE ended GREEN's batch"
     assert await c.control(c.store.end_review(BLUE, str(own.batch_id), expect_phase="in_review", outcome="merged",
                                               published=[], held=[]))
 

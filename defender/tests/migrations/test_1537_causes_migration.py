@@ -57,6 +57,14 @@ ITEMS = {
     "dead deferred": ("dead", "deferred 5 times", "deferral_ceiling"),
     "skipped superseded": ("skipped", "superseded by a later run", "superseded"),
     "skipped superseded by run": ("skipped", "superseded by run r-2", "superseded"),
+    "dead artifact missing": ("dead", "artifact-missing", "artifact_missing"),
+    "dead row without a value": ("dead", "row carries no value under 'finding_id'", "malformed_row"),
+    "dead pitfall row without an id": ("dead", "row carries no value under 'pitfall_id'", "malformed_row"),
+    "skipped consumed no systems": ("skipped", "consumed_no_systems: the world finding names no systems", "consumed_no_systems"),
+    "skipped declined at the gate": ("skipped", "declined at the gate", "declined_at_gate"),
+    "skipped no system": ("skipped", "no-system", "unteachable_system"),
+    "skipped malformed system": ("skipped", "malformed-system", "unteachable_system"),
+    "skipped undeclared system": ("skipped", "undeclared-system:elastik", "unteachable_system"),
     "held model text": ("held", "this finding is not about the alert", "unrecorded"),
     "held no reason": ("held", None, "unrecorded"),
     "waiting stale reason": ("waiting", "reached the attempt ceiling (5)", None),
@@ -91,6 +99,16 @@ def _item(dsn: str, key: str, status: str, reason: str | None) -> None:
     execute(dsn, """INSERT INTO learning.work_items (tenant_id, kind, id, item_key, payload, status, reason, attempts,
         deferrals, offers_declined, enqueued_at, updated_at) VALUES (%s, 'finding', %s, %s, '{}', %s, %s, 1, 0, 0, %s, %s)""",
             (TENANT, str(uuid.uuid4()), key, status, reason, CREATED, CREATED))
+
+
+def backfilled_batch_cause(dsn: str, reason: str) -> str | None:
+    """The cause the migration gives a parked batch whose stored reason is `reason`: planted at the revision before it, upgraded, read."""
+    _upgrade_to(dsn, revisions.down_of(_after_signin()))
+    _tenant(dsn)
+    batch = _batch(dsn, kind="revert", lane="author", phase="needs_person", reason=reason)
+    _upgrade_to(dsn, _after_signin())
+    [(cause,)] = execute(dsn, "SELECT cause FROM learning.batches WHERE id = %s", (batch,))
+    return cause
 
 
 @pytest.fixture
