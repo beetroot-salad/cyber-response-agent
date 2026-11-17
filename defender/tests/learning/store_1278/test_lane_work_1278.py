@@ -10,6 +10,7 @@ import pytest
 
 from defender.learning.core.store_tick import lane_waiting
 from defender.tests.support.jobs._jobs1342 import register_tenant
+from defender.tests.support.learning.core._release1537 import why
 from defender.tests.support.learning.core._store1278 import AUTHOR_LANE, LEAD_LANE
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
@@ -56,7 +57,7 @@ def test_a_batch_waiting_for_a_person_is_no_work_for_any_tick(store):
     and the claim refuses the busy lane. (finding 4)"""
     store.publish_findings(BLUE, "run-1", [_finding("f1")], kind="finding")
     held = store.claim(BLUE, AUTHOR_LANE, owner="o", thresholds=ONE)
-    store.needs_person(BLUE, held.batch_id, "an open PR on the prefix that no batch made")
+    store.needs_person(BLUE, held.batch_id, why("foreign_pr", "an open PR on the prefix that no batch made"))
     store.publish_findings(BLUE, "run-2", [_finding("f2")], kind="finding")
 
     assert not lane_waiting(store, BLUE, AUTHOR_LANE, tick_thresholds=ONE)

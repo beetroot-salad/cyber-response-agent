@@ -9,6 +9,7 @@ import pytest
 
 from defender.jobs.learning_models import AUTHORING_KINDS, STATUSES
 from defender.tests.support.jobs._jobs1342 import register_tenant
+from defender.tests.support.learning.core._release1537 import needs_person, outcome_dead, outcome_held, outcome_skipped
 from defender.tests.support.learning.core._set_aside1485 import held_by_close, page_parked, parked_set
 from defender.tests.support.learning.core._store1278 import ONE, claim, learning_store, publish, store_mod
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
@@ -32,9 +33,9 @@ def dsn(migrated_database):
 
 
 async def test_o2_parked_view_is_a_frozen_record_of_exactly_these_fields(dsn):
-    """`ParkedBatchView` is exported by the store, a frozen dataclass holding the nine named fields and #1537's five. (O2, Names, #1537 O5)"""
+    """`ParkedBatchView` is exported by the store, a frozen dataclass of the nine named fields and #1537's five, in that order. (O2, Names, #1537 O5)"""
     S = store_mod()
-    assert set(VIEW_FIELDS + NEW_VIEW_FIELDS) <= {f.name for f in dataclasses.fields(S.ParkedBatchView)}
+    assert [f.name for f in dataclasses.fields(S.ParkedBatchView)] == VIEW_FIELDS + NEW_VIEW_FIELDS
     async with learning_store(dsn) as store:
         await parked_set(store, BLUE)
         [first, *_] = await store.parked(BLUE, limit=1)
@@ -86,7 +87,7 @@ async def test_o2_items_are_the_in_batch_items_sorted_by_kind_then_key_in_codepo
         await publish(store, BLUE, "q1", kind="questioner_finding")
         author = await claim(store, BLUE)
         await store.in_review(author, 7, {})
-        await store.needs_person(BLUE, author.batch_id, "by hand")
+        await needs_person(store, BLUE, author.batch_id, "foreign_pr", "by hand")
         await publish(store, BLUE, "later")
         [got] = await store.parked(BLUE, limit=5)
         waiting = await store.work(BLUE, statuses=["waiting"])
@@ -113,13 +114,12 @@ async def test_o2_only_needs_person_batches_are_listed_and_parking_one_lists_it(
         await publish(store, BLUE, "m")
         merged = await claim(store, BLUE)
         await store.in_review(merged, 3, {})
-        assert await store.end_review(BLUE, merged.batch_id, expect_phase="in_review", outcome="merged", published=[], held=[])
+        assert await store.end_review(BLUE, merged.batch_id, expect_phase="in_review", outcome="merged",
+                                      published=[("finding", "m")], held=[])
+        closed = await held_by_close(store, BLUE, [("finding", "c")])
         await publish(store, BLUE, "a")
         abandoned = await claim(store, BLUE)
-        await store.in_review(abandoned, 4, {})
-        assert await store.end_review(BLUE, abandoned.batch_id, expect_phase="in_review", outcome="closed", published=[],
-                                      held=[("finding", "m"), ("finding", "a")])  # a person's abandon is gone (#1537): its held item stays held
-        closed = await held_by_close(store, BLUE, [("finding", "c")])
+        await store.abandon_clean(abandoned)  # ended abandoned, its own item back to waiting
         await publish(store, BLUE, "p")
         in_review = await claim(store, BLUE)
         await store.in_review(in_review, 9, {})
@@ -129,9 +129,10 @@ async def test_o2_only_needs_person_batches_are_listed_and_parking_one_lists_it(
         working = await store.claim(BLUE, "lead_author", owner="host-a", thresholds=ONE)
         phases = {str(b.id): b.phase for b in await store.batches(BLUE)}
         assert sorted(phases.values()) == ["ended", "ended", "ended", "in_review", "working"], "premise: one of each phase"
+        assert [b.outcome for b in await store.batches(BLUE) if b.id == abandoned.batch_id] == ["abandoned"], "premise: ended abandoned"
         before = await store.parked(BLUE, limit=50)
-        await store.needs_person(BLUE, in_review.batch_id, "parked")
-        await store.needs_person(BLUE, working.batch_id, "parked")
+        await needs_person(store, BLUE, in_review.batch_id, "foreign_pr", "parked")
+        await needs_person(store, BLUE, working.batch_id, "foreign_commits_local", "parked")
         after = await store.parked(BLUE, limit=50)
     assert phases[str(closed)] == "ended"
     assert before == []
@@ -198,10 +199,10 @@ async def _batch_of_every_status(store, tenant):
     taken = sorted((kind, key) for kind, key, _p in batch.items)
     assert taken == sorted([*_IN_BATCH, *_SET_ASIDE.values()]), "premise: the claim took every item"
     await store.in_review(batch, 7, {
-        _SET_ASIDE["held"]: S.Outcome.held("a person must look"), _SET_ASIDE["dead"]: S.Outcome.dead("retired"),
-        _SET_ASIDE["published"]: S.Outcome.published(), _SET_ASIDE["skipped"]: S.Outcome.skipped("not a lesson"),
+        _SET_ASIDE["held"]: outcome_held("curator_held", "a person must look"), _SET_ASIDE["dead"]: outcome_dead("attempt_ceiling", "retired"),
+        _SET_ASIDE["published"]: S.Outcome.published(), _SET_ASIDE["skipped"]: outcome_skipped("curator_skipped", "not a lesson"),
         _SET_ASIDE["waiting"]: S.Outcome.waiting()})
-    await store.needs_person(tenant, batch.batch_id, "by hand")
+    await needs_person(store, tenant, batch.batch_id, "foreign_pr", "by hand")
     return batch.batch_id
 
 

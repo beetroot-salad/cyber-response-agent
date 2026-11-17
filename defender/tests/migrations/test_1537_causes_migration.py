@@ -9,6 +9,7 @@ import uuid
 import pytest
 
 from defender.tests.migrations.test_1214_migrations import _upgrade_to
+from defender.tests.support.learning.core._faults1537 import FAULTS
 from defender.tests.support.shared import _revisions1485 as revisions
 from defender.tests.support.shared._postgres1339 import execute
 
@@ -18,18 +19,19 @@ TENANT = "b1537000-0000-4000-8000-000000000001"
 CREATED = _dt.datetime(2026, 11, 1, 8, 0, tzinfo=_dt.UTC)
 CREDENTIAL = "forge_credential_refused"
 PARK = "the forge refused 3 times: "
-STATUS_403 = "Forgejo GET failed: Client error '403 Forbidden' for url 'https://forge.invalid/api/v1/repos/o/r/pulls/7'"
-STATUS_401 = "Forgejo GET failed: Client error '401 Unauthorized' for url 'https://forge.invalid/api/v1/repos/o/r/pulls/7'"
 #: A 422 whose URL (not its status line) holds "403".
 STATUS_422 = "Forgejo GET failed: Client error '422 Unprocessable Entity' for url 'https://forge.invalid/api/v1/repos/403/r/pulls/7'"
-DELIVERY = f"the tenant {TENANT}'s delivery refused: the issuer AppRole login failed"
+
+#: Every fault shape the loop counts, as the park text the real paths wrote for it (the one table in `_faults1537`, which the
+#: loop's tests drive through each counting path), and the cause it must backfill to: the cause the live classifier gives it.
+FAULT_TEXTS = {f"fault {fault.name} ({path})": (fault.park_text(path).replace("{tenant}", TENANT).replace("{file}", "/srv/secrets/g1"),
+                                                fault.cause)
+               for fault in FAULTS for path in fault.texts}
 
 #: (reason as stored today, parked-batch cause it backfills to)
 PARKED = {
-    "403 in the status line": (PARK + STATUS_403, CREDENTIAL),
-    "401 in the status line": (PARK + STATUS_401, CREDENTIAL),
+    **FAULT_TEXTS,
     "422 with 403 in its url": (PARK + STATUS_422, "forge_refused"),
-    "statusless credential failure at delivery open": (PARK + DELIVERY, CREDENTIAL),
     "foreign tip on the forge": ("the branch lessons/ab12 on the forge holds commits the commit-maker did not make for batch "
                                  "b1 (tip abc123)", "foreign_commits_remote"),
     "foreign local commits": ("the local branch lessons/ab12 holds commits outside batch b1's record", "foreign_commits_local"),
@@ -121,7 +123,7 @@ def test_the_migration_is_the_one_revision_after_0020_and_the_head_is_not_behind
 
 
 def test_the_backfill_gives_every_batch_the_cause_its_frozen_text_names_and_unmatched_text_is_unrecorded(planted):
-    """Each stored batch reason maps to its cause (a 403 or 401 inside the park's status line, or a statusless credential failure at delivery open, `forge_credential_refused`; a 403 elsewhere in the text is not), unmatched or missing text `unrecorded`; merged, closed and in-review batches get none. (Data backfill, PR1)"""
+    """Each stored batch reason maps to its cause (every fault shape of the loop's one table: a 401 or 403 in the status line or a credential failure at delivery open is `forge_credential_refused`, another status `forge_refused`, a misconfigured credential or missing forge wiring `delivery_unavailable`; a 403 elsewhere in the text is not), unmatched or missing text `unrecorded`; merged, closed and in-review batches get none. (Data backfill, PR1)"""
     dsn, rows = planted
     _upgrade_to(dsn, _after_signin())
     got = {name: execute(dsn, "SELECT cause FROM learning.batches WHERE id = %s", (batch,))[0][0] for name, (batch, _w) in rows.items()}

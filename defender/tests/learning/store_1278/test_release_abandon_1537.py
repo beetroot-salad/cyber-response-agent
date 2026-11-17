@@ -40,7 +40,7 @@ pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
 BLUE = fixture_uuid("tenant:1537-blue")
 GREEN = fixture_uuid("tenant:1537-green")
 ACTOR = "u-1537"
-EPOCH_BOUND = _dt.datetime(2000, 1, 1, tzinfo=_dt.UTC)
+EPOCH = _dt.datetime(1970, 1, 1, tzinfo=_dt.UTC)
 #: Parked batch causes that are not a credential refusal (design: the closed list's park entries).
 OTHER_PARK_CAUSES = ["forge_refused", "delivery_unavailable", "foreign_commits_remote", "foreign_commits_local",
                      "foreign_pr", "unrecorded"]
@@ -173,20 +173,21 @@ async def test_o2_a_credential_parked_batch_with_a_pr_goes_back_to_review_with_i
     assert lane.busy is True
 
 
-async def test_o2_a_credential_parked_batch_with_no_pr_goes_back_to_working_on_a_lease_that_has_lapsed_whatever_the_grace(dsn):
-    """Parked while working, released: `working`, owner `released:<actor>`, a lease long past, the token moved, refusals 0; lapsed even under a very large grace, taken over, and the old holder is fenced. (O2, C14)"""
+async def test_o2_a_credential_parked_batch_with_no_pr_goes_back_to_working_on_a_lease_that_is_the_epoch_whatever_the_grace(dsn):
+    """Parked while working, released by a default-grace store: `working`, owner `released:<actor>`, expiry exactly 1970-01-01 UTC, the token moved, refusals 0; another store with a grace of about 1.5e9 s still finds it lapsed and takes it over, and the old holder is fenced. (O2, C14)"""
     S = store_mod()
-    async with learning_store(dsn, grace=10**9) as store:
+    async with learning_store(dsn) as store:
         batch = await _working_parked(store, dsn, BLUE, "f1")
         parked = row(dsn, batch.batch_id)
         await release_batch(store, BLUE, batch.batch_id, actor=ACTOR)
         got = row(dsn, batch.batch_id)
-        [view] = [b for b in await store.batches(BLUE) if b.id == batch.batch_id]
-        taken = await store.take_over(BLUE, str(batch.batch_id), owner="host-b")
+    async with learning_store(dsn, grace=1_500_000_000) as wide:
+        [view] = [b for b in await wide.batches(BLUE) if b.id == batch.batch_id]
+        taken = await wide.take_over(BLUE, str(batch.batch_id), owner="host-b")
         with pytest.raises(S.LeaseLost):
-            await store.renew(batch)
+            await wide.renew(batch)
     assert (got["phase"], got["pr_number"], got["refusals"], got["lease_owner"]) == ("working", None, 0, f"released:{ACTOR}")
-    assert got["lease_expiry"] < EPOCH_BOUND
+    assert got["lease_expiry"] == EPOCH
     assert got["fencing_token"] > parked["fencing_token"]
     assert (got["cause"], got["reason"], got["parked_at"]) == (None, None, None)
     assert view.lapsed is True
@@ -266,6 +267,20 @@ async def test_o2_a_working_release_beside_another_working_batch_on_the_lane_is_
         await store.abandon_clean(revert)
         await release_batch(store, BLUE, batch.batch_id, actor=ACTOR)
     assert row(dsn, batch.batch_id)["phase"] == "working"
+
+
+async def test_o2_an_author_batch_parked_in_review_is_not_released_beside_a_working_revert_and_is_once_it_is_gone(dsn):
+    """An author batch parked from review with a revert working on its lane: Conflict naming the lane's working batch, still parked; with the revert gone, it returns to review (control). (O2, C13)"""
+    async with learning_store(dsn) as store:
+        batch = await _review_parked(store, dsn, BLUE, "f1")
+        revert = await store.claim_revert(BLUE, owner="host-r")
+        before = row(dsn, batch.batch_id)
+        with pytest.raises(Conflict, match="working"):
+            await release_batch(store, BLUE, batch.batch_id, actor=ACTOR)
+        _same(dsn, batch.batch_id, before)
+        await store.abandon_clean(revert)
+        await release_batch(store, BLUE, batch.batch_id, actor=ACTOR)
+    assert row(dsn, batch.batch_id)["phase"] == "in_review"
 
 
 async def test_o2_a_revert_released_into_review_beside_a_working_author_batch_is_refused(dsn):

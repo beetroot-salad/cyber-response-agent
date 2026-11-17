@@ -90,7 +90,7 @@ PERMISSION_OF = {
     ("PUT", f"{TENANT}/alert-mapping"): "config.write",
     ("GET", f"{TENANT}/learning/items"): "work.read",  # #1485 O3
     ("GET", f"{TENANT}/learning/parked-batches"): "work.read",  # #1485 O3
-    ("POST", f"{TENANT}/learning/items/{{}}/release"): "learning.manage",  # #1537 O7 (FC: the design names no permission)
+    ("POST", f"{TENANT}/learning/items/{{}}/release"): "learning.manage",  # #1537 O7 (r3.1 forced choice)
     ("POST", f"{TENANT}/learning/batches/{{}}/release"): "learning.manage",
     ("POST", f"{TENANT}/learning/batches/{{}}/abandon"): "learning.manage",
     ("GET", f"{TENANT}/members"): "people.manage",
@@ -386,4 +386,4 @@ def test_1537_o7_one_permission_is_new_it_is_held_by_admin_alone_and_the_three_l
     assert seven <= ROLE_PERMISSIONS["admin"]
     assert new not in ROLE_PERMISSIONS["automation"]
     actions = {PERMISSION_OF[r] for r in PERMISSION_OF if r[0] == "POST" and "/learning/" in r[1]}
-    assert actions == {new}, "FC: the table's name is the new permission's"
+    assert actions == {new}, "r3.1: the table's name is the new permission's"

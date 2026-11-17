@@ -513,11 +513,11 @@ class Lane:
 
     def __call__(self, _paths: Any, _state: Any, run: Any, *, box: Any = None,
                  on_done: Any = None, items: Any = (), outcomes: Any = None, **_kw: Any) -> None:
-        from defender.learning_store import Outcome
+        from defender.tests.support.learning.core._release1537 import outcome_skipped
 
         self.handed.append(run)
         for kind, key, _payload in items:  # served: the real step decides a fate for each item it was handed
-            outcomes[(kind, key)] = Outcome.skipped("served by the test's lane")
+            outcomes[(kind, key)] = outcome_skipped("curator_skipped", "served by the test's lane")
         if on_done is not None:
             on_done(None)
 

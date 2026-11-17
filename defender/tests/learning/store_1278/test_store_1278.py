@@ -13,7 +13,7 @@ import uuid
 import anyio
 import pytest
 
-from defender.tests.support.learning.core._release1537 import release_item_of
+from defender.tests.support.learning.core._release1537 import outcome_skipped, release_item_of
 from defender.tests.support.jobs._jobs1342 import move_tenant, register_tenant
 from defender.tests.support.learning.core._store1278 import (
     AUTHOR_LANE,
@@ -623,7 +623,6 @@ async def test_d7_end_review_with_a_phase_that_is_no_longer_the_batchs_changes_n
 @pytest.mark.parametrize("words", [False, True], ids=["closed-without-words", "closed-with-words"])
 async def test_d9_a_lead_batchs_curation_requests_keep_their_own_fate_until_the_batch_ends(dsn, words):
     """A request the curator skipped stays skipped when the lead PR closes; the rest are held when it closed without words, and stay due when it closed with. (D9, H2)"""
-    S = store_mod()
     async with learning_store(dsn, **KNOBS) as store:
         await store.enqueue_request(BLUE, "run-1", "case-A", {"n": 1})
         await store.enqueue_request(BLUE, "run-2", "case-B", {"n": 2})
@@ -632,7 +631,7 @@ async def test_d9_a_lead_batchs_curation_requests_keep_their_own_fate_until_the_
                                        "stderr_digest": "exit=1; digest", "error_class": "agent-fixable"})
         held = await store.claim(BLUE, LEAD_LANE, owner="host-a", thresholds=ONE)
         assert len(held.items) == 3
-        await store.in_review(held, pr_number=9, outcomes={("curation_request", "run-1"): S.Outcome.skipped("names no system")})
+        await store.in_review(held, pr_number=9, outcomes={("curation_request", "run-1"): outcome_skipped("curator_skipped", "names no system")})
         items = await _work(store, BLUE)
         assert items["curation_request", "run-1"].status == "skipped", "premise: the curator's fate for one request"
         assert {items["curation_request", "run-2"].status, items["pitfall", "p1"].status} == {"in_batch"}, "premise: committed items wait for the PR"

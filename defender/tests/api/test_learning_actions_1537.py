@@ -3,10 +3,10 @@
 adapter over a real learning store; admin `ann` of T1, admin `bob` of T2, a T1 program on `automation`).
 
 Rows come from `support/api/_actions1537` (store verbs; r3's park state by one UPDATE over the design's columns). Each
-refusal sits beside the admin's success on a real row (a missing route is a 404/405 for everyone). Forced choices
-the design leaves open are tagged `FC-n`:
-FC-1 the response's id key (the id is found by value); FC-2 the audit event carries the prior cause and detail in
-`detail` (the only free field of `announce`); FC-3 the 409's words name a status, phase or cause as text.
+refusal sits beside the admin's success on a real row (a missing route is a 404/405 for everyone). Pinned by design r3.1
+(forced choices): the response key `id`; the audit actions `learning.release_item`, `learning.release_batch`,
+`learning.request_abandon`; the event's `detail` is one line `"<cause>: <detail>"` cut at 200 characters. FC-3, the 409's
+words naming a status, phase or cause as text, stays lenient about `_` against a space (the API's words are for people).
 """
 from __future__ import annotations
 
@@ -45,6 +45,7 @@ pytestmark = [pytest.mark.postgres]
 
 LEARNING = "learning"
 LONG_LINE = "the forge said: " + "x" * 300
+ACTIONS = {"item": "learning.release_item", "batch": "learning.release_batch", "abandon": "learning.request_abandon"}
 TAIL = "TAIL-SENTINEL-NEVER-LOGGED"
 
 
@@ -71,8 +72,8 @@ def _listed(client: Any, tenant: str, route: str) -> list[dict[str, Any]]:
 
 
 def _carries(body: dict[str, Any], identifier: Any) -> bool:
-    """FC-1: the body names the row by id, under whatever key (`id`, `item_id`, `batch_id`)."""
-    return str(identifier) in {str(v) for v in body.values()}
+    """The body names the row under the key `id` (r3.1)."""
+    return body.get("id") == str(identifier)
 
 
 @pytest.fixture
@@ -242,6 +243,26 @@ def test_o2_a_batch_parked_from_working_is_not_released_while_another_batch_work
     assert batch_row(dsn, batch) == row
 
 
+def test_o2_a_batch_parked_from_review_is_not_released_while_a_revert_works_on_its_lane_and_is_once_it_is_gone(s):
+    """An author batch parked from review whose lane has a working revert: 409 naming the lane, still parked; with the revert ended, it releases to review. (O2)"""
+    dsn = s.world.dsn
+    batch = on_store(dsn, in_review, T1, "f1")
+    park(dsn, batch)
+    revert = on_store(dsn, working_revert, T1)
+    assert batch_row(dsn, revert)["phase"] == "working", "premise: another batch works on the lane"
+    row = batch_row(dsn, batch)
+
+    r = _release_batch(s.ann, T1, batch)
+    assert r.status_code == 409, r.text
+    assert names(r.json()["detail"], "lane"), r.json()["detail"]  # FC-3
+    assert batch_row(dsn, batch) == row
+
+    set_batch(dsn, revert, phase="ended", outcome="abandoned", cause="stopped", lease_owner=None, lease_expiry=None)
+    released = _release_batch(s.ann, T1, batch)
+    assert released.status_code == 200, released.text
+    assert batch_row(dsn, batch)["phase"] == "in_review"
+
+
 @pytest.mark.parametrize("act", [_release_batch, _abandon], ids=["release", "abandon"])
 def test_o2_o3_another_tenants_batch_and_an_unknown_id_are_404_and_the_batch_stays_parked(s, act):
     """T2's parked batch through T1, and an unknown id: 404, nothing changes; T2's admin acts on it (control). (O2, O3)"""
@@ -378,6 +399,11 @@ def test_o5_parked_at_and_a_request_show_and_last_checked_shows_for_a_request_on
     [wire] = _listed(s.ann, T1, "parked-batches")
     assert instant(wire["parked_at"]) == parked
     assert wire["abandon_requested_at"] is None
+    stamped = OLD.replace(month=2)
+    set_batch(dsn, batch, last_checked=stamped)
+    assert instant(_listed(s.ann, T1, "parked-batches")[0]["last_checked"]) == stamped, "no request: the stored value, whatever its age"
+    set_batch(dsn, batch, last_checked=None)
+    assert _listed(s.ann, T1, "parked-batches")[0]["last_checked"] is None
     set_batch(dsn, batch, parked_at=None)
     assert _listed(s.ann, T1, "parked-batches")[0]["parked_at"] is None
 
@@ -407,29 +433,30 @@ def test_o6_each_successful_action_is_one_event_with_the_actor_tenant_target_and
     cause = item_row(dsn, item)["cause"]
     ann = user_id(s.ann)
     seen = []
-    for target, prior_cause, prior_detail, act in ((item, cause, "held until a person looks", _release_item),
-                                                    (batch, CREDENTIAL, "refused three times", _release_batch)):
+    for target, prior_cause, prior_detail, act, action in (
+            (item, cause, "held until a person looks", _release_item, ACTIONS["item"]),
+            (batch, CREDENTIAL, "refused three times", _release_batch, ACTIONS["batch"])):
         mark = len(s.world.audit.events)
         assert act(s.ann, T1, target).status_code == 200
         [event] = _events(s, mark)
         assert (event.user_id, event.tenant_id, event.target, event.credential_id) == (ann, T1, str(target), None)
-        assert prior_cause in (event.detail or "")  # FC-2
-        assert prior_detail in (event.detail or "")
+        assert event.action == action
+        assert event.detail == f"{prior_cause}: {prior_detail}"
         seen.append(event.action)
     park(dsn, batch, reason="refused again")
     mark = len(s.world.audit.events)
     assert _abandon(s.ann, T1, batch).status_code == 202
     [event] = _events(s, mark)
     assert (event.user_id, event.tenant_id, event.target, event.credential_id) == (ann, T1, batch, None)
-    assert CREDENTIAL in (event.detail or "")  # FC-2
-    assert "refused again" in (event.detail or "")
+    assert event.action == ACTIONS["abandon"]
+    assert event.detail == f"{CREDENTIAL}: refused again"
     seen.append(event.action)
-    assert len(set(seen)) == 3, seen
+    assert seen == [ACTIONS["item"], ACTIONS["batch"], ACTIONS["abandon"]]
 
 
 def test_o6_a_long_multi_line_prior_detail_arrives_shortened_on_one_line(s):
-    """A model- or forge-written prior detail of many lines and thousands of characters is logged on one line, bounded, with
-    its start and the cause kept and its tail dropped; the same holds for all three actions. (O6)"""
+    """A model- or forge-written prior detail of many lines and thousands of characters is logged as `<cause>: <start of the
+    detail>` on one line of at most 200 characters, its tail dropped; the same holds for all three actions. (O6)"""
     dsn = s.world.dsn
     long_text = LONG_LINE + "\n" + "\n".join(f"line {n} " + "y" * 200 for n in range(60)) + "\n" + TAIL
     assert len(long_text) > 10_000
@@ -438,20 +465,21 @@ def test_o6_a_long_multi_line_prior_detail_arrives_shortened_on_one_line(s):
     batch = on_store(dsn, in_review, T1, "f1")
     park(dsn, batch, reason=long_text)
     cause = item_row(dsn, item)["cause"]
-    steps = ((_release_item, item, cause, 200), (_release_batch, batch, CREDENTIAL, 200), (_abandon, batch, CREDENTIAL, 202))
-    for act, target, prior_cause, status in steps:
+    steps = ((_release_item, item, cause, 200, ACTIONS["item"]), (_release_batch, batch, CREDENTIAL, 200, ACTIONS["batch"]),
+             (_abandon, batch, CREDENTIAL, 202, ACTIONS["abandon"]))
+    for act, target, prior_cause, status, action in steps:
         if act is _abandon:
             park(dsn, batch, reason=long_text)
         mark = len(s.world.audit.events)
         assert act(s.ann, T1, target).status_code == status
         [event] = _events(s, mark)
         detail = event.detail or ""
-        assert prior_cause in detail  # FC-2
-        assert LONG_LINE[:40] in detail
+        assert event.action == action
+        assert detail.startswith(f"{prior_cause}: {LONG_LINE[:40]}"), detail[:80]
+        assert len(detail) <= 200
         assert "\n" not in detail
         assert "\r" not in detail
         assert TAIL not in detail
-        assert len(detail) < len(long_text) // 2
 
 
 def test_o6_a_refused_action_announces_nothing_and_a_successful_one_beside_it_does(s):

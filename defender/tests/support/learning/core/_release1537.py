@@ -8,6 +8,7 @@ records it). `park` and `set_held` write only the columns and values the design 
 """
 from __future__ import annotations
 
+import importlib
 from typing import Any
 
 from defender.tests.support.shared._postgres1339 import execute
@@ -19,6 +20,37 @@ PARK_REASON = "the forge refused 3 times: 403 Forbidden: bad credentials"
 BATCH_COLUMNS = ("phase", "outcome", "cause", "reason", "parked_at", "abandon_requested_at", "abandon_requested_by",
                  "last_checked", "refusals", "pr_number", "lease_owner", "lease_expiry", "fencing_token")
 ITEM_COLUMNS = ("status", "cause", "reason", "attempts", "deferrals", "offers_declined", "batch_id")
+
+
+def _store_mod() -> Any:
+    return importlib.import_module("defender.learning_store")
+
+
+def why(cause: str, detail: str) -> Any:
+    """The design's one value for why (`Why(cause, detail)`), exported by `defender.learning_store` beside `Outcome` (r3.1)."""
+    return _store_mod().Why(cause, detail)
+
+
+def outcome_held(cause: str, detail: str) -> Any:
+    return _store_mod().Outcome.held(cause, detail)
+
+
+def outcome_dead(cause: str, detail: str) -> Any:
+    return _store_mod().Outcome.dead(cause, detail)
+
+
+def outcome_skipped(cause: str, detail: str) -> Any:
+    return _store_mod().Outcome.skipped(cause, detail)
+
+
+async def needs_person(store: Any, tenant: str, batch_id: Any, cause: str = "foreign_pr", detail: str = "by hand") -> None:
+    """`needs_person(tenant, batch_id, why)` (r3.1). The cause defaults to one a person's hand-park is not special to."""
+    await store.needs_person(tenant, batch_id, why(cause, detail))
+
+
+async def note_refusal(store: Any, tenant: str, batch_id: Any, cause: str = "forge_refused", detail: str = "the forge said no") -> Any:
+    """`note_refusal(tenant, batch_id, why)` (r3.1): the cause the ceiling parks with, and the text beside it."""
+    return await store.note_refusal(tenant, batch_id, why(cause, detail))
 
 
 async def release_item(store: Any, tenant: str, item_id: Any) -> Any:
@@ -39,6 +71,14 @@ async def request_abandon(store: Any, tenant: str, batch_id: Any, *, actor: str 
     return await store.request_abandon(tenant, str(batch_id), actor=actor)
 
 
+async def settle_abandon(store: Any, tenant: str, batch_id: Any, *, pr_number: int | None, pr_state: str | None,
+                         published: Any = (), held: Any = ()) -> Any:
+    """`settle_abandon(tenant, batch_id, *, pr_number, pr_state, published=(), held=())` (r3.1); `pr_state` is the forge's
+    `open`, `merged` or `closed` (`pr.status`), None when no PR was found."""
+    return await store.settle_abandon(tenant, str(batch_id), pr_number=pr_number, pr_state=pr_state,
+                                      published=published, held=held)
+
+
 def row(dsn: str, batch_id: Any) -> dict[str, Any]:
     [values] = execute(dsn, f"SELECT {', '.join(BATCH_COLUMNS)} FROM learning.batches WHERE id = %s", (str(batch_id),))  # noqa: S608
     return dict(zip(BATCH_COLUMNS, values, strict=True))
@@ -56,6 +96,12 @@ def park(dsn: str, batch_id: Any, *, cause: str = CREDENTIAL, reason: str = PARK
     execute(dsn, "UPDATE learning.batches SET phase = 'needs_person', cause = %s, reason = %s, parked_at = now(), "
                  "lease_owner = NULL, lease_expiry = NULL, fencing_token = fencing_token + 1, refusals = %s, "
                  "last_checked = now() WHERE id = %s", (cause, reason, refusals, str(batch_id)))
+
+
+def request(dsn: str, batch_id: Any, *, by: str = "u-1537") -> None:
+    """A parked batch carries an abandon request: the two columns the request writes."""
+    execute(dsn, "UPDATE learning.batches SET abandon_requested_at = now(), abandon_requested_by = %s WHERE id = %s",
+            (by, str(batch_id)))
 
 
 def set_held(dsn: str, tenant: str, key: str, *, cause: str = "curator_held", reason: str = "held by the curator") -> None:

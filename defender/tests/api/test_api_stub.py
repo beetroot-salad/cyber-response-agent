@@ -157,6 +157,10 @@ EXISTING_ROUTES = {
     # #1485 O1, O2: the tenant's set-aside items and parked batches (Names, Routes)
     ("GET", API + "/tenants/{tenant_id}/learning/items"),
     ("GET", API + "/tenants/{tenant_id}/learning/parked-batches"),
+    # #1537 O1-O3: a person's release of an item and of a batch, and an abandon request (names as the design's API section gives them)
+    ("POST", API + "/tenants/{tenant_id}/learning/items/{item_id}/release"),
+    ("POST", API + "/tenants/{tenant_id}/learning/batches/{batch_id}/release"),
+    ("POST", API + "/tenants/{tenant_id}/learning/batches/{batch_id}/abandon"),
 }
 #: What #1306 adds (design "Endpoints"; param names pinned by this suite).
 IDENTITY_ROUTES = {
@@ -359,12 +363,17 @@ def test_the_published_routes_are_exactly_1131s_list_under_tenants_plus_1306s() 
 #: The routes this suite does not script: #1470's config routes answer from the real record store (`test_1470_*`), and the
 #: check still refuses (the `REFUSED` sweep below).
 CONFIG = {route for route in EXISTING_ROUTES if any(w in route[1] for w in ("/systems", "/adapters", "/case-record"))}
+#: #1537's three learning actions answer from the real adapter over a real store (`test_learning_actions_1537`: success,
+#: refusals, audit, roles), so they are not scripted here; the sweeps over `EXISTING_ROUTES` (declared problems) still cover them.
+LEARNING_ACTIONS = {route for route in EXISTING_ROUTES
+                    if route[0] == "POST" and route[1].endswith(("/release", "/abandon")) and "/learning/" in route[1]}
 
 
 def test_the_happy_path_table_covers_every_existing_route() -> None:
-    """Every route is scripted here, answered by the real store (`CONFIG`), or refused with its owner's number."""
-    assert {route for route, *_ in HAPPY} == EXISTING_ROUTES - CONFIG
+    """Every route is scripted here, answered by the real store (`CONFIG`, `LEARNING_ACTIONS`), or refused with its owner's number."""
+    assert {route for route, *_ in HAPPY} == EXISTING_ROUTES - CONFIG - LEARNING_ACTIONS
     assert len(CONFIG) == 10
+    assert len(LEARNING_ACTIONS) == 3
 
 
 def test_the_api_never_loads_the_runtime_or_the_learning_loop() -> None:

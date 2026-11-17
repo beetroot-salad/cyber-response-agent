@@ -8,6 +8,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
+from defender.tests.support.learning.core._release1537 import needs_person, note_refusal, outcome_dead, outcome_held, outcome_skipped, why
 from defender.tests.support.learning.core._store1278 import ONE, QUESTIONER, claim, finding, publish, store_mod
 
 #: A reason a model could write: markup and quotes must come back as the same text (P2).
@@ -25,7 +26,7 @@ async def held_by_close(store: Any, tenant: str, items: Sequence[tuple[str, str]
     assert sorted((k, key) for k, key, _p in held.items) == sorted(items), "premise: the claim took exactly these"
     await store.in_review(held, pr, {})
     assert await store.end_review(tenant, held.batch_id, expect_phase="in_review", outcome="closed",
-                                  published=[], held=list(items), reason=reason)
+                                  published=[], held=list(items), items_why=why("closed_without_feedback", reason))
     return held.batch_id
 
 
@@ -33,7 +34,7 @@ async def dead_without_pr(store: Any, tenant: str, key: str, reason: str = "offe
     """One finding that a batch with no commits retired as dead: no PR. The batch id."""
     await publish(store, tenant, key, run="run-dead")
     held = await claim(store, tenant)
-    await store.end_no_commits(held, {("finding", key): store_mod().Outcome.dead(reason)})
+    await store.end_no_commits(held, {("finding", key): outcome_dead("attempt_ceiling", reason)})
     return held.batch_id
 
 
@@ -43,9 +44,9 @@ async def settled_in_one_review(store: Any, tenant: str) -> Any:
     S = store_mod()
     await publish(store, tenant, "p1", "s1", "dd", "hh")
     held = await claim(store, tenant)
-    await store.in_review(held, 5, {("finding", "p1"): S.Outcome.published(), ("finding", "s1"): S.Outcome.skipped("not a lesson"),
-                                    ("finding", "dd"): S.Outcome.dead("retired for good"),
-                                    ("finding", "hh"): S.Outcome.held("needs a person's eye")})
+    await store.in_review(held, 5, {("finding", "p1"): S.Outcome.published(), ("finding", "s1"): outcome_skipped("curator_skipped", "not a lesson"),
+                                    ("finding", "dd"): outcome_dead("attempt_ceiling", "retired for good"),
+                                    ("finding", "hh"): outcome_held("curator_held", "needs a person's eye")})
     assert await store.end_review(tenant, held.batch_id, expect_phase="in_review", outcome="merged", published=[], held=[])
     return held.batch_id
 
@@ -124,11 +125,11 @@ async def parked_set(store: Any, tenant: str, *, tag: str = "") -> dict[str, Any
     registry = await store.claim_registry(tick)
     reasons = {"revert": "a foreign tip on its branch", "registry": "a PR the loop did not make is open on the lane",
                "lead": "local commits outside its record"}
-    await store.needs_person(tenant, revert.batch_id, reasons["revert"])
-    await store.needs_person(tenant, registry.batch_id, reasons["registry"])
-    await store.needs_person(tenant, lead.batch_id, reasons["lead"])
+    await needs_person(store, tenant, revert.batch_id, "foreign_commits_remote", reasons["revert"])
+    await needs_person(store, tenant, registry.batch_id, "foreign_pr", reasons["registry"])
+    await needs_person(store, tenant, lead.batch_id, "foreign_commits_local", reasons["lead"])
     for _ in range(3):
-        await store.note_refusal(tenant, author.batch_id, "403 Forbidden: <b>bad credentials</b>")
+        await note_refusal(store, tenant, author.batch_id, "forge_credential_refused", "403 Forbidden: <b>bad credentials</b>")
     ids.update(author=author.batch_id, revert=revert.batch_id, lead=lead.batch_id, registry=registry.batch_id)
     return {"ids": ids, "reasons": reasons}
 

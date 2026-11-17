@@ -20,6 +20,7 @@ import anyio
 
 from defender.api.app import create_app
 from defender.tests.support.api._identity1306 import World
+from defender.tests.support.learning.core._release1537 import needs_person, note_refusal, outcome_dead, outcome_held, outcome_skipped, why
 from defender.tests.support.learning.core._store1278 import QUESTIONER, call, claim, learning_store, publish, store_mod
 from defender.tests.support.shared._postgres1339 import execute
 
@@ -79,7 +80,7 @@ async def held_together(store: Any, tenant: str, items: Sequence[tuple[str, str]
     assert sorted((k, key) for k, key, _p in held.items) == sorted(items), "premise: the claim took exactly these"
     await store.in_review(held, pr, {})
     assert await store.end_review(tenant, held.batch_id, expect_phase="in_review", outcome="closed",
-                                  published=[], held=list(items), reason=reason)
+                                  published=[], held=list(items), items_why=why("closed_without_feedback", reason))
     return held.batch_id
 
 
@@ -87,7 +88,7 @@ async def dead_alone(store: Any, tenant: str, key: str, reason: str = "offered t
     """One finding that a batch with no commits retired as dead: no PR. The batch id."""
     await publish(store, tenant, key, run="run-dead")
     held = await claim(store, tenant)
-    await store.end_no_commits(held, {("finding", key): store_mod().Outcome.dead(reason)})
+    await store.end_no_commits(held, {("finding", key): outcome_dead("attempt_ceiling", reason)})
     return held.batch_id
 
 
@@ -95,7 +96,7 @@ async def curator_held(store: Any, tenant: str, key: str, reason: str) -> Any:
     """One finding the curator held with `reason` (a model-written text), in a batch with no commits: no PR."""
     await publish(store, tenant, key, run="run-c")
     held = await claim(store, tenant)
-    await store.end_no_commits(held, {("finding", key): store_mod().Outcome.held(reason)})
+    await store.end_no_commits(held, {("finding", key): outcome_held("curator_held", reason)})
     return held.batch_id
 
 
@@ -106,9 +107,9 @@ async def settled_mix(store: Any, tenant: str) -> None:
     await publish(store, tenant, "p1", "s1", "dd", "hh")
     batch = await claim(store, tenant)
     await store.in_review(batch, 5, {("finding", "p1"): S.Outcome.published(),
-                                     ("finding", "s1"): S.Outcome.skipped("not a lesson"),
-                                     ("finding", "dd"): S.Outcome.dead("retired for good"),
-                                     ("finding", "hh"): S.Outcome.held("needs a person's eye")})
+                                     ("finding", "s1"): outcome_skipped("curator_skipped", "not a lesson"),
+                                     ("finding", "dd"): outcome_dead("attempt_ceiling", "retired for good"),
+                                     ("finding", "hh"): outcome_held("curator_held", "needs a person's eye")})
     assert await store.end_review(tenant, batch.batch_id, expect_phase="in_review", outcome="merged",
                                   published=[], held=[])
     await publish(store, tenant, "b1")
@@ -124,7 +125,7 @@ async def parked_author(store: Any, tenant: str, items: Sequence[tuple[str, str]
     assert sorted((k, key) for k, key, _p in author.items) == sorted(items), "premise: the claim took exactly these"
     await store.in_review(author, pr, {})
     for _ in range(3):
-        await store.note_refusal(tenant, author.batch_id, "403 Forbidden: <b>bad credentials</b>")
+        await note_refusal(store, tenant, author.batch_id, "forge_credential_refused", "403 Forbidden: <b>bad credentials</b>")
     return author.batch_id
 
 
@@ -139,7 +140,7 @@ async def in_review_author(store: Any, tenant: str, key: str, *, pr: int = 11) -
 async def parked_revert(store: Any, tenant: str, reason: str = "a foreign tip on its branch") -> Any:
     """A revert batch parked by `needs_person`. Its id."""
     revert = await store.claim_revert(tenant, owner="host-a")
-    await store.needs_person(tenant, revert.batch_id, reason)
+    await needs_person(store, tenant, revert.batch_id, "foreign_commits_remote", reason)
     return revert.batch_id
 
 
@@ -148,7 +149,7 @@ async def parked_registry(store: Any, tenant: str, reason: str = "a PR the loop 
     tick = await store.begin_feedback_tick(tenant, owner="host-a")
     assert tick is not None, "premise: the feedback tick began"
     registry = await store.claim_registry(tick)
-    await store.needs_person(tenant, registry.batch_id, reason)
+    await needs_person(store, tenant, registry.batch_id, "foreign_pr", reason)
     return registry.batch_id
 
 

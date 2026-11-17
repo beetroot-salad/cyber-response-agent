@@ -9,10 +9,8 @@ ticks at most twice and asserts the final state and that the batch is never ende
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Callable
 from typing import Any
 
-import httpx
 import pytest
 
 from defender.tests.support.learning.core._feedback1278 import (
@@ -22,6 +20,7 @@ from defender.tests.support.learning.core._feedback1278 import (
     opened,
     tick,
 )
+from defender.tests.support.learning.core._faults1537 import FORGE_FAULTS, OPEN_FAULTS, PARK, Fault, normalised
 from defender.tests.support.learning.core._release1537 import CREDENTIAL, item_row, park, row
 from defender.tests.support.learning.core._store1278 import (  # noqa: F401 — `world` is a fixture
     call,
@@ -87,78 +86,116 @@ def _lane_free(w) -> bool:
     return not call(w.dsn, "lane_work", w.t.tenant_id, "author", thresholds={"finding": 1}).busy
 
 
-def _authentication_failure(*, status: int | None) -> BaseException:
-    from defender.learning.author.version_control import ForgejoAuthError
+def _tick(w, writer, **seams: Any) -> int:
+    from defender.tests.tenancy.tenant_1108_p4._drain_support import BoxSpy, author_drain
 
-    error = ForgejoAuthError("the issuer AppRole login failed")
-    if status is not None:
-        request = httpx.Request("POST", "http://issuer.invalid/login")
-        error.__cause__ = httpx.HTTPStatusError(str(status), request=request,
-                                                response=httpx.Response(status, request=request))
-    return error
+    return author_drain(w.t, w.paths, trigger=writer, box=BoxSpy(), **seams)
 
 
-def _misconfigured() -> BaseException:
-    from defender.learning.author.version_control.auth import CredentialMisconfigured
-
-    return CredentialMisconfigured("the generation records no host secret file")
+def _tick_through_refusal(w, writer, **seams: Any) -> None:
+    with contextlib.suppress(Exception, SystemExit):
+        _tick(w, writer, **seams)
 
 
 @contextlib.contextmanager
-def _delivery_will_not_open(w, error: BaseException):
-    """The tenant's delivery refuses to open with `error` (the credential step, before any forge request)."""
-    def refuse(*_a: Any, **_k: Any) -> Any:
-        raise error
-    with (getattr(w, "mp", None) or w.monkeypatch).context() as m:
-        m.setattr(f"{VC}.opened_delivery", refuse)  # lint-monkeypatch: ok — the delivery open is the seam the credential fault enters by
+def _issuer_answers(w, **attributes: Any):
+    """The tenant's issuer fake answers as `attributes` say (`status`, `body`): the credential fault met at the issuer's own
+    transport, the edge the drain's fresh identity reads."""
+    vault = w.t.vault
+    before = {name: getattr(vault, name) for name in attributes}
+    for name, value in attributes.items():
+        setattr(vault, name, value)
+    try:
         yield
+    finally:
+        for name, value in before.items():
+            setattr(vault, name, value)
 
 
-def _tick_through_refusal(w, writer) -> None:
-    with contextlib.suppress(Exception, SystemExit):
-        tick(w, writer)
+@contextlib.contextmanager
+def _delivery_will_not_open(w, fault: Fault, tmp_path):
+    """The delivery fails to open as `fault` says, at the edge it enters by: the issuer's answer, the secret store's login, the
+    host secret file, or the tenant's recorded wiring. Yields the seams to give the tick."""
+    from pathlib import Path
+
+    from defender.tests.support.learning.core._faults1537 import secret_store_credential
+    from defender.tests.tenancy.tenant_1108_p4._support import minting, unbind_forge
+
+    if fault.issuer is not None:
+        with _issuer_answers(w, **fault.issuer):
+            yield {}
+    elif fault.step == "no_wiring":
+        unbind_forge(w.t)
+        yield {}
+    else:
+        scene_minting = minting(w.t, tmp_path)
+        if fault.step == "secret_file_gone":
+            Path(scene_minting.fields["host_secret_file"]).unlink()
+            yield {"mint": True, "identity": scene_minting.credential}
+        else:
+            yield {"mint": True, "identity": secret_store_credential(w.t, scene_minting, int(fault.step.split(":")[1]))}
 
 
-# --- O4: the one classifier ---------------------------------------------------------------------------------------
+def _parked(w, batch_id, fault: Fault, path: str) -> None:
+    """Parked by the third refusal with the table's cause, and the stored reason the very text the table freezes for `path`."""
+    got = row(w.dsn, batch_id)
+    assert (got["phase"], got["cause"], got["refusals"]) == ("needs_person", fault.cause, 3)
+    assert got["parked_at"] is not None
+    stored, frozen = normalised(got["reason"], w.t.tenant_id), fault.park_text(path)
+    if len(got["reason"]) >= len(PARK) + 300:  # the loop keeps 300 characters of a fault's text; a temp dir lengthens one
+        assert frozen.startswith(stored[:len(PARK) + 140]), (stored, frozen)
+    else:
+        assert stored == frozen
 
 
-@pytest.mark.parametrize(("status", "cause"), [(401, CREDENTIAL), (403, CREDENTIAL), (404, "forge_refused"),
-                                                (422, "forge_refused")])
-def test_o4_three_refusals_of_a_reviews_read_park_the_batch_with_the_cause_its_status_names(scene, caplog, status, cause):
-    """401 and 403 park for `forge_credential_refused`, another 4xx for `forge_refused`; the forge's words stay the detail, `parked_at` is set. (O4, classifier)"""
+# --- O4: the one classifier, one table of fault shapes through every counting path ---------------------------------------
+
+
+@pytest.mark.parametrize("fault", FORGE_FAULTS, ids=lambda f: f.name)
+def test_o4_three_refusals_of_a_reviews_read_park_the_batch_with_the_cause_the_fault_names(scene, caplog, fault):
+    """In-review reconcile: three reads the forge refuses with the fault's status park the batch with the table's cause; the forge's words stay the detail. (O4, classifier)"""
     w = scene
     w.seed("f1")
     writer = _lesson("f1")
     batch_id, _b, _n = opened(w, writer, caplog)
-    w.t.forge.refuse("/reviews", status)
+    assert (row(w.dsn, batch_id)["phase"], row(w.dsn, batch_id)["refusals"]) == ("in_review", 0), "premise"
+    w.t.forge.refuse("/reviews", fault.forge_status)
     for _ in range(3):
         tick(w, writer)
-    got = row(w.dsn, batch_id)
-    assert (got["phase"], got["cause"]) == ("needs_person", cause)
-    assert got["reason"]
-    assert got["parked_at"] is not None
+    _parked(w, batch_id, fault, "reviews")
     assert w.statuses() == {"f1": "in_batch"}
 
 
-@pytest.mark.parametrize(("error", "cause"), [
-    pytest.param(lambda: _authentication_failure(status=None), CREDENTIAL, id="statusless credential failure"),
-    pytest.param(lambda: _authentication_failure(status=403), CREDENTIAL, id="credential failure carrying a 403"),
-    pytest.param(lambda: _authentication_failure(status=401), CREDENTIAL, id="credential failure carrying a 401"),
-    pytest.param(_misconfigured, "delivery_unavailable", id="misconfigured delivery"),
-])
-def test_o4_a_delivery_that_will_not_open_parks_a_lapsed_batch_with_its_class_of_refusal(scene, error: Callable, cause):
-    """Three ticks whose delivery refuses to open park a lapsed working batch: credential failures (with or without a status) as `forge_credential_refused`, a misconfiguration as `delivery_unavailable`. (O4, classifier)"""
+@pytest.mark.parametrize("fault", FORGE_FAULTS, ids=lambda f: f.name)
+def test_o4_three_refusals_of_the_pr_read_in_recovery_park_the_lapsed_batch_with_the_cause_the_fault_names(scene, fault):
+    """Lapsed recovery: three PR lookups the forge refuses with the fault's status park the lapsed working batch with the table's cause. (O4, classifier)"""
     w = scene
     w.seed("f1")
     held = claim_by_hand(w, "host-lost")
     lapse_lease(w.dsn, held.batch_id)
-    with _delivery_will_not_open(w, error()):
+    w.t.forge.refuse("/pulls", fault.forge_status, method="GET")
+    for _ in range(3):
+        tick(w, FeedbackCurator())
+    _parked(w, held.batch_id, fault, "pulls")
+
+
+@pytest.mark.parametrize("state", ["in_review", "lapsed"])
+@pytest.mark.parametrize("fault", OPEN_FAULTS, ids=lambda f: f.name)
+def test_o4_three_deliveries_that_will_not_open_park_the_batch_with_the_cause_the_fault_names(scene, caplog, tmp_path, fault, state):
+    """Delivery open: three ticks whose delivery fails to open as the fault says (at the issuer, the secret store, the host secret file or the wiring) park an in-review or a lapsed batch with the table's cause. (O4, classifier)"""
+    w = scene
+    w.seed("f1")
+    writer = _lesson("f1")
+    if state == "in_review":
+        batch_id, _b, _n = opened(w, writer, caplog)
+    else:
+        held = claim_by_hand(w, "host-lost")
+        lapse_lease(w.dsn, held.batch_id)
+        batch_id = held.batch_id
+    with _delivery_will_not_open(w, fault, tmp_path) as seams:
         for _ in range(3):
-            _tick_through_refusal(w, FeedbackCurator())
-    got = row(w.dsn, held.batch_id)
-    assert (got["phase"], got["cause"], got["pr_number"]) == ("needs_person", cause, None)
-    assert got["parked_at"] is not None
-    assert got["reason"]
+            _tick_through_refusal(w, writer, **seams)
+    _parked(w, batch_id, fault, "open")
 
 
 # --- O3: the settle's branches --------------------------------------------------------------------------------------
@@ -250,9 +287,10 @@ def test_o3_a_batch_parked_with_no_recorded_pr_is_found_by_its_branch_and_its_pr
     assert w.statuses() == {"f1": "held"}
 
 
-@pytest.mark.parametrize("how", ["read refused 403", "read server error", "close refused", "delivery will not open"])
+@pytest.mark.parametrize("how", ["read refused 403", "read server error", "close refused", "delivery refuses to open",
+                                 "delivery fails to open transiently"])
 def test_o3_a_forge_that_refuses_or_fails_leaves_the_request_waiting_stamped_and_uncounted_until_it_answers(scene, caplog, how):
-    """With the forge refusing the read (403), failing it (503), refusing the close, or the delivery not opening: the batch stays parked with its request, `last_checked` moves each pass, refusals stay 3; with the fault cleared the next passes settle it. (O3, O5)"""
+    """With the forge refusing the read (403), failing it (503), refusing the close, the delivery refusing to open (the issuer answers 403) or failing to open transiently (503): the batch stays parked with its request, `last_checked` moves each pass, refusals stay 3; with the fault cleared the next passes settle it. (O3, O5)"""
     w = scene
     batch_id, _branch, number, writer = _parked_in_review(w, caplog, "f1")
     _request(w, batch_id)
@@ -261,8 +299,8 @@ def test_o3_a_forge_that_refuses_or_fails_leaves_the_request_waiting_stamped_and
               "read server error": lambda: w.t.forge.refuse(f"/pulls/{number}", 503, method="GET"),
               "close refused": lambda: w.t.forge.refuse(f"/pulls/{number}", 403, method="PATCH")}
     stamps = [before["last_checked"]]
-    if how == "delivery will not open":
-        with _delivery_will_not_open(w, _authentication_failure(status=None)):
+    if how.startswith("delivery"):
+        with _issuer_answers(w, status=403 if how == "delivery refuses to open" else 503):
             for _ in range(4):
                 _tick_through_refusal(w, writer)
                 stamps.append(row(w.dsn, batch_id)["last_checked"])
@@ -321,7 +359,7 @@ def test_o2_a_batch_parked_while_working_is_released_taken_over_by_recovery_and_
     assert s.open_prs() == []
     lapse_lease(w.dsn, batch.id)
 
-    with _delivery_will_not_open(w, _authentication_failure(status=None)):
+    with _issuer_answers(w, body={"data": {}}):
         for _ in range(3):
             s.run(Cast(s, tag="-down"))
     parked = row(w.dsn, batch.id)

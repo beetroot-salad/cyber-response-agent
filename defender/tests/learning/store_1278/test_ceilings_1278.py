@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from defender.tests.support.learning.core._release1537 import release_item_of
+from defender.tests.support.learning.core._release1537 import note_refusal, release_item_of
 from defender.tests.support.jobs._jobs1342 import register_tenant
 from defender.tests.support.learning.core._store1278 import (
     AUTHOR_LANE, ONE, finding, lapse_lease, learning_store, store_mod)
@@ -118,7 +118,7 @@ async def _refusals(store, dsn, ceiling):
     await store.in_review(held, 7, {})
     fates = []
     for _ in range(ceiling):
-        await store.note_refusal(TENANT, held.batch_id, "the forge said no")
+        await note_refusal(store, TENANT, held.batch_id, "forge_refused", "the forge said no")
         fates.append((await _batch(store, held.batch_id)).phase)
     return fates
 

@@ -31,7 +31,9 @@ def test_o3_an_abandoned_registry_batch_ends_abandoned_with_its_pr_left_open_and
     """With a request, a tick ends the parked registry batch `abandoned` (park cause kept), its PR still open, no PATCH, its branch at the same tip; with none, nothing moves. (O3, A4)"""
     batch, branch, tip = _parked_registry(fb)
     [pr] = [p for p in fb.forge.prs if p["head"]["ref"] == branch]
-    assert row(fb.dsn, batch.id)["phase"] == "needs_person", "premise"
+    parked = row(fb.dsn, batch.id)
+    assert (parked["phase"], parked["cause"]) == ("needs_person", CREDENTIAL), "premise"
+    assert parked["parked_at"] is not None, "premise"
     if requested:
         call(fb.dsn, "request_abandon", fb.t.tenant_id, str(batch.id), actor="u-1537")
 
@@ -42,5 +44,26 @@ def test_o3_an_abandoned_registry_batch_ends_abandoned_with_its_pr_left_open_and
     assert [r for r in fb.forge.requests if r.method == "PATCH"] == []
     assert [p["state"] for p in fb.forge.prs if p["number"] == pr["number"]] == ["open"]
     assert remote_branches(fb.t.remote, S.FEEDBACK_PREFIX) == {branch: tip}
-    want = ("ended", "abandoned", CREDENTIAL, None) if requested else ("needs_person", None, CREDENTIAL, got["parked_at"])
-    assert (got["phase"], got["outcome"], got["cause"], got["parked_at"]) == want
+    if requested:
+        assert (got["phase"], got["outcome"], got["cause"], got["parked_at"]) == ("ended", "abandoned", CREDENTIAL, None)
+    else:
+        assert got == parked, "a parked batch with no request is not touched, its parked_at included"
+
+
+@pytest.mark.parametrize("fault", [("a forge refusal", 403), ("an unknown fault", 503)])
+def test_o3_a_requested_registry_batch_whose_pr_read_fails_in_the_feedback_tick_is_stamped_unchanged_and_uncounted(fb, fault):
+    """Through `tend` (the feedback tick's own pass): the PR read refused (403) or failing unknown (503): `last_checked` moves each tick, refusals stay 3, the batch stays parked with its request, its PR open. (O3, O5)"""
+    _what, status = fault
+    batch, _branch, _tip = _parked_registry(fb)
+    number = batch.pr_number
+    call(fb.dsn, "request_abandon", fb.t.tenant_id, str(batch.id), actor="u-1537")
+    asked = row(fb.dsn, batch.id)
+    fb.forge.refuse(f"/pulls/{number}", status, method="GET")
+    stamps = [asked["last_checked"]]
+    for _ in range(2):
+        assert fb.tick(S.Decider({})) == 0
+        stamps.append(row(fb.dsn, batch.id)["last_checked"])
+    got = row(fb.dsn, batch.id)
+    assert (got["phase"], got["refusals"], got["abandon_requested_at"]) == ("needs_person", 3, asked["abandon_requested_at"])
+    assert all(later > earlier for earlier, later in zip(stamps, stamps[1:], strict=False)), "last_checked did not move each tick"
+    assert [p["state"] for p in fb.forge.prs if p["number"] == number] == ["open"]

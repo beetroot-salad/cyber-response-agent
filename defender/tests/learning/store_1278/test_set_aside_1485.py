@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from defender.tests.support.learning.core._release1537 import release_item_of
+from defender.tests.support.learning.core._release1537 import release_item_of, why
 from defender.jobs.learning_models import STATUSES
 from defender.tests.support.jobs._jobs1342 import register_tenant
 from defender.tests.support.learning.core._set_aside1485 import (
@@ -165,7 +165,7 @@ async def test_o1_an_items_id_survives_a_republish_conflict_and_hold_release_hol
         again = await claim(store, BLUE)
         await store.in_review(again, 8, {})
         assert await store.end_review(BLUE, again.batch_id, expect_phase="in_review", outcome="closed", published=[],
-                                      held=[("finding", "h1")], reason="held again")
+                                      held=[("finding", "h1")], items_why=why("closed_without_feedback", "held again"))
         held_again = next(i for i in await store.set_aside(BLUE, limit=5) if i.key == "h1")
     assert after_conflict.id == first.id
     assert held_again.id == first.id
