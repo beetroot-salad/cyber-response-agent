@@ -173,6 +173,19 @@ def test_1534_the_prompt_carries_the_records_host_fields_and_entry_lines_and_not
     assert "SUMMARY-MARKER-NEVER-SHOWN" not in prompt, "the summary reached the judge (OD7)"
 
 
+def test_1534_the_prompt_carries_a_receipt_with_no_note_that_the_ticket_narrative_leaves_out(tmp_path):
+    """The judge's prompt renders every receipt, noted or not. (V-FIELDS, OD17)"""
+    from defender.records import closing as C
+
+    noted, bare = J.ceiling_note("NOTED-RECEIPT-MARKER"), J.ceiling_note("")
+    ep = J.accepted_episode(tmp_path, dispositions={"a": "benign", "b": "malicious", "c": "malicious"},
+                            ledgers={"b": [J.oracle_row("b")], "c": []})
+    J.set_closing(ep, "b", ceiling_test=(noted, bare))
+    prompt = _world_prompt(ep)
+    assert C.ceiling_line(noted) in prompt
+    assert C.ceiling_line(bare) in prompt, "a note-less receipt was left out of the judge's prompt"
+
+
 def test_1534_a_reference_worlds_forced_close_reads_unresolved_in_its_header_not_its_drafted_disposition(tmp_path):
     """The reference run's `reached verdict` is the committed disposition; the drafted one is a separate field. (V-FIELDS)"""
     from defender.records import closing as C

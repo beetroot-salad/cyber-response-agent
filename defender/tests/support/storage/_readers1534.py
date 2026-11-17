@@ -5,6 +5,8 @@ deleted file, a dropped table, a scalar column UPDATE, garbage bytes, a differen
 the structured columns are never encoded here."""
 from __future__ import annotations
 
+import json
+import os
 import sqlite3
 import uuid
 from pathlib import Path
@@ -16,6 +18,8 @@ from defender.tests.support.shared.contracts._spec1077 import fixture_run
 
 #: Faults a reader meets at its slot, by the kind it must report. `NO_POINTER` is not a fault: it is `NeverClosed`.
 NO_POINTER = "no-pointer"
+#: A kind `plant_run` can also make: no pointer, and a pre-#1235 link in the folder (not in `KINDS_BY_FAULT`: not every reader's route reaches it).
+LEGACY_LINK = "legacy-link"
 KINDS_BY_FAULT = ("database-missing", "pointer-unreadable", "store-unreadable", "schema-version",
                   "recorded-before-1534", "row-invalid")
 #: The two kinds every reader proves, and the one beside them that tells a missing database from a changed one.
@@ -50,16 +54,22 @@ def baseline_entry(result: str = "no logins from this host in the prior 30 days"
 
 
 def plant_run(run_dir: Path, fields: dict[str, Any] | None = None, *, fault: str | None = None,
-              case_id: str | None = None, sessions_base: Path | None = None) -> Path | None:
+              case_id: str | None = None, sessions_base: Path | None = None, invalid_as: str | None = None) -> Path | None:
     """`run_dir`'s session pointer, a real store behind it, and (when `fields` is not None) the run's closing record;
     then `fault` applied (`KINDS_BY_FAULT`), or `NO_POINTER` for a run that never opened a store. `fields=None` is a
-    run with a pointer and a table but no row. Returns the database (None when no pointer or an unreadable one)."""
+    run with a pointer and a table but no row. `invalid_as` is the value a `row-invalid` fault leaves in the disposition
+    column. Returns the database (None when no pointer or an unreadable one)."""
     from defender.records import SessionPaths
     from defender.records import session_store as ss
 
     run_dir = Path(run_dir)
     run = fixture_run(run_dir)
     if fault == NO_POINTER:
+        return None
+    if fault == LEGACY_LINK:
+        from defender.records.session_store._schema import _LEGACY_LINK_NAME
+
+        os.symlink("elsewhere", run_dir / _LEGACY_LINK_NAME)
         return None
     if fault == "pointer-unreadable":
         run.observability.session_pointer.write("{not json")
@@ -71,11 +81,30 @@ def plant_run(run_dir: Path, fields: dict[str, Any] | None = None, *, fault: str
         if fields is not None:
             V.plant(store, V.a_record(run_dir.name, **fields))
         database = Path(store.path)
-    break_database(database, run_dir.name, fault)
+    break_database(database, run_dir.name, fault, invalid_as=invalid_as)
     return database
 
 
-def break_database(database: Path, run_id: str, fault: str | None) -> None:
+def fault_run(run_dir: Path, fault: str | None, *, invalid_as: str | None = None) -> None:
+    """Apply `fault` (`plant_run`'s kinds, including `NO_POINTER` and `LEGACY_LINK`) to a run whose pointer, store and record a
+    fixture already made."""
+    if fault is None:
+        return
+    run = fixture_run(Path(run_dir))
+    pointer = run.observability.session_pointer
+    if fault == "pointer-unreadable":
+        pointer.write("{not json")
+    elif fault in (NO_POINTER, LEGACY_LINK):
+        Path(pointer.path).unlink()
+        if fault == LEGACY_LINK:
+            from defender.records.session_store._schema import _LEGACY_LINK_NAME
+
+            os.symlink("elsewhere", Path(run_dir) / _LEGACY_LINK_NAME)
+    else:
+        break_database(Path(json.loads(pointer.read_result().text)["store_path"]), Path(run_dir).name, fault, invalid_as=invalid_as)
+
+
+def break_database(database: Path, run_id: str, fault: str | None, *, invalid_as: str | None = None) -> None:
     """Apply `fault` to an existing database by a real primitive."""
     if fault is None:
         return
@@ -85,7 +114,7 @@ def break_database(database: Path, run_id: str, fault: str | None) -> None:
     elif fault == "recorded-before-1534":
         V.drop_table(database)
     elif fault == "row-invalid":
-        V.corrupt(database, run_id, "disposition", "no-such-disposition")
+        V.corrupt(database, run_id, "disposition", invalid_as or "no-such-disposition")
     elif fault == "store-unreadable":
         database.write_bytes(b"this is not a database\n" * 64)
     elif fault == "schema-version":

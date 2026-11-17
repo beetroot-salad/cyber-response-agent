@@ -237,7 +237,10 @@ async def test_1534_a_run_with_no_record_is_unparseable_when_committed_and_no_re
     files = _committed(**{CLOSING_KEY: plan, "{id}.job-end.json": job_end(report_committed=committed)})
     _inv, stored = await _run_one(world, _child(world, files=files))
     if committed:
+        from defender.records import closing as C
+
         assert (stored["stage"], stored["disposition"]) == ("unparseable", None)
+        assert stored["failure_message"] == C.FAULT_WORDING["committed-without-record"], stored["failure_message"]
     else:
         assert (stored["stage"], stored["failure_reason"]) == ("failed", "no_report")
 
