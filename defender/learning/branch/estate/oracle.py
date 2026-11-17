@@ -1234,7 +1234,7 @@ def _no_constant(name: str) -> Any:
     raise ValueError(f"{name} is not JSON")
 
 
-def _finite(text: str) -> float:
+def _finite_float(text: str) -> float:
     value = float(text)
     if value in (float("inf"), float("-inf")):
         raise ValueError(f"{text} is past a finite number")
@@ -1261,7 +1261,7 @@ def _document(result: Any, unsaved: str) -> dict:
                                "cap of a served answer")
     try:
         document = json.loads(out.decode("utf-8"), parse_constant=_no_constant,
-                              parse_float=_finite)
+                              parse_float=_finite_float)
     except (UnicodeDecodeError, ValueError, RecursionError) as bad:
         raise _ArgumentRefused(f"its standard output is not one strict JSON document "
                                f"({type(bad).__name__}: {bad}){shown}") from None
