@@ -24,6 +24,10 @@ _UPGRADE_NOTES = "## Upgrade from before"
 _REQUEST_FLAG_ZONES = ("api/", "api_server/", "jobs/", "job_host/", "job_socket/", "worker/", "migrations/")
 #: The history of the schema names what it dropped: not shipped behaviour.
 _HISTORY = "migrations/versions/"
+#: Generated, not authored (#1540): the API document `create_app().openapi()` writes, committed so the frontend can
+#: generate its types from it. Its `comment_body` is the case write-back record's own property (`tenancy/case_ticket.py`),
+#: not the removed operator comment template. Skipped by name; every other file stays scanned.
+_GENERATED = frozenset({"api/openapi.json"})
 
 _REMOVED_SWITCH = re.compile("|".join(re.escape(s) for s in sorted(REMOVED_1471)))
 #: An identifier, not a substring: the escalation and unreadable sentences keep `*_comment_body` names.
@@ -39,7 +43,7 @@ def _shipped() -> list[tuple[str, list[str]]]:
     for path in sorted(_DEFENDER.rglob("*")):
         rel = path.relative_to(_DEFENDER).as_posix()
         if (not path.is_file() or path.is_symlink() or path.suffix not in _SHIPPED_SUFFIXES or rel.startswith("tests/")
-                or rel.startswith("docs/archive/") or rel.startswith(_HISTORY)
+                or rel.startswith("docs/archive/") or rel.startswith(_HISTORY) or rel in _GENERATED
                 or any(part in {".venv", "__pycache__", "node_modules"} for part in path.parts)):
             continue
         kept, in_notes = [], False
@@ -114,6 +118,7 @@ def test_1471_w7_the_census_reads_every_shipped_file_the_skills_and_docs_too_and
     assert len(names) > 200, "premise: the scan reads the shipped tree"  # noqa: PLR2004
     assert {"skills", "docs", "presentation", "tenancy", "jobs", "api"} <= {rel.split("/")[0] for rel in names}
     assert "run.py" in names
+    assert not names & _GENERATED, "the generated API document is skipped by name"
     assert not [rel for rel in names if rel.startswith(("tests/", _HISTORY, "docs/archive/"))]
     notes = _DEFENDER / "CLAUDE.md"
     assert any("## Upgrade from before" in line for line in notes.read_text("utf-8").splitlines()), "premise: notes exist"
