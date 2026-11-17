@@ -35,6 +35,7 @@ LEGACY_PLANTERS = frozenset({
     "defender/tests/learning/judge/test_family_facts.py",
     "defender/tests/learning/judge/test_render.py",
     "defender/tests/learning/judge/test_cut_short_decision.py",
+    "defender/tests/e2e/test_box_output.py",
 })
 #: Listed by the design's "Removal": docs, the records table, the stylesheet, the held-out README.
 LISTED = ("defender/docs/run-records.md", "defender/docs/learning-loop.md", "defender/docs/runtime-development.md",
