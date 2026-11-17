@@ -119,14 +119,18 @@ def verify(case_dir: Path, freezes_dir: Path, reference: bool) -> tuple[dict, st
     return case, alert_uuid_of(case_dir / "alert.json")
 
 
-def check_freeze_of(freeze_id: str, freezes_dir: Path, parts_dir: Path) -> dict:
+def check_freeze_of(freeze_id: str, freezes_dir: Path, parts_dir: Path,
+                    trusted: dict | None = None) -> dict:
     """The batch's one freeze, loaded and checked: its record, every part against the digest freeze.yaml
     names (the slow step: a 17 GB freeze is read in full), and its host parts. Runs once per launch,
-    after the one-variant rule, so neither a later case nor a refused batch hashes the parts again."""
+    after the one-variant rule, so neither a later case nor a refused batch hashes the parts again.
+    `trusted` is what case writing recorded on the lock a labelling launch joins: the hashing is
+    skipped only when the parts look exactly as they did then (`frozen_copy.parts_checked`)."""
     freeze = _load_yaml(freezes_dir / freeze_id / "freeze.yaml", "freeze.yaml")
     try:
         frozen_copy.check_freeze(freeze, freeze_id)
-        frozen_copy.check_parts(freeze, parts_dir / freeze_id)
+        if trusted is None or trusted != frozen_copy.parts_checked(freeze, freeze_id, parts_dir / freeze_id):
+            frozen_copy.check_parts(freeze, parts_dir / freeze_id)
     except (frozen_copy.CopyRefused, TypeError, ValueError) as exc:
         raise LaunchRefused(str(exc)) from exc
     from lab_ops import LabOps, LabOpsError
@@ -267,7 +271,10 @@ def launch_batch(case_dirs: list[Path], *, freezes_dir: Path, tenant_settings: P
     if len(variants) != 1:
         raise LaunchRefused("a batch is one variant (one freeze, one overlay); these cases name "
                             f"{len(variants)}: launch each variant on its own")
-    freeze = check_freeze_of(cases[0]["freeze"], Path(freezes_dir), parts_dir)
+    # Only a labelling launch joining make-a-case's lock trusts its parts check; a scored launch hashes.
+    note = lock.note_of(lock_store, lock.FROZEN_ENGINE, lock_token) if reference and lock_token else None
+    freeze = check_freeze_of(cases[0]["freeze"], Path(freezes_dir), parts_dir,
+                             trusted=(note or {}).get("parts_checked"))
     bindings = [_bound(freeze, c) for c in cases]
     try:
         frozen_copy.check_patterns(freeze, tenant_settings)
