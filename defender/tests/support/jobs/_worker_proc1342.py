@@ -10,7 +10,7 @@ import json
 import sys
 from pathlib import Path
 
-from defender.tests.support.jobs._jobs1342 import ScriptedChild, StandInContainers, fixed_clock
+from defender.tests.support.jobs._jobs1342 import FRONTEND_ORIGIN, ScriptedChild, StandInContainers, fixed_clock
 
 
 def _child(config: dict):
@@ -32,7 +32,8 @@ async def _main(config: dict) -> None:
     try:
         worker = Worker(store, data_root=Path(config["data_root"]), child_argv=_child(config),
                         containers=StandInContainers(Path(config["containers"])), slots=3,
-                        clock=fixed_clock, stop_grace=config.get("stop_grace", 30.0))
+                        clock=fixed_clock, stop_grace=config.get("stop_grace", 30.0),
+                        frontend_origin=FRONTEND_ORIGIN)
         Path(config["ready"]).touch()
         await worker.serve()
     finally:

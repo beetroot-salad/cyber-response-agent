@@ -389,16 +389,15 @@ def _child_publish(t, *, mint: bool = False, lines: list | None = None, identity
 def test_o7b_a_run_launched_after_a_merge_reads_and_stamps_the_merge(tenant, tmp_path, monkeypatch):
     """End to end with the real child: the run reads and stamps the merge (fresh), and the host secret
     file's value appears in none of the run's environment, what it handed the child, the stamp, host
-    record, page, comment or report line (control: a value planted in the environment is found)."""
+    record, page or report line (control: a value planted in the environment is found). The operator
+    run posts no comment (#1471 W7); the job lane's comment is constant or closed-set (P-6)."""
     import os
 
     from defender import run_common
-    from defender.tests.support.runtime.engine._spec767 import FakeStore, write_report
+    from defender.tests.support.runtime.engine._spec767 import write_report
     from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107
 
     merged = tenant.merge(B.MERGE_FILES)
-    # The real writer; the store is behind the credential proxy's stand-in (#1391 O1).
-    store = FakeStore(tmp_path / "ticket-store")
     lines: list[str] = []
 
     def seed(seen: B.Seen) -> None:
@@ -408,17 +407,14 @@ def test_o7b_a_run_launched_after_a_merge_reads_and_stamps_the_merge(tenant, tmp
     scene = minting(tenant, tmp_path, purpose="publish")
     secrets = scene.secrets
     out = B.launch(tenant, tmp_path, publish=_child_publish(tenant, lines=lines, identity=scene.credential),
-                   argv_extra=("--update-ticket",), during=seed,
-                   visualize=run_common.visualize, **store.stand_in.seams())
+                   during=seed, visualize=run_common.visualize)
     assert out.reached, out.text()
     scene.assert_logged_in_with_the_file()
-    assert store.calls, "control: the run posted its comment"
     page = out.run_dir / "runtime.html"
     assert page.is_file(), "control: the run page was saved"
     assert B.leaks(
         secrets, env=out.seen[0].environ, handed=out.publish_calls, report_line=lines,
         stamp=out.stamp_after, host_record=out.host_after, page=page.read_text(encoding="utf-8") if page.is_file() else "",
-        comment=[str(c.body) for c in store.calls],
     ) == [], "the host secret left the publish child"
     monkeypatch.setenv("S_B_CONTROL_PROBE", scene.secret)
     assert B.leaks(secrets, env=dict(os.environ)) == [("env", scene.secret)]

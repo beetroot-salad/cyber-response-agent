@@ -123,18 +123,20 @@ def test_947_resume_with_a_world_the_manifest_does_not_declare_refuses_before_ma
     assert sorted(p.name for p in base.iterdir()) == before
 
 
-def test_947_resume_refuses_update_ticket(tmp_path, d9_tenant):
-    """The resume path refuses the ticket flag outright rather than accepting and ignoring it:
-    the two ticket calls are ordered around the curation marker, so suppressing one would break
-    the pairing. The tenant exists and the episode is past RUNS, so the refusal is the flag's."""
+def test_947_resume_refuses_update_ticket(tmp_path, d9_tenant, capsys):
+    """The resume path refuses the ticket flag outright rather than accepting and ignoring it. #1471 W7 removed the
+    operator's switch, so the refusal is argparse's own, as for any unknown switch (exit 2, "unrecognized arguments"),
+    and it comes before the lifecycle. (The same command line without it runs: `test_947_resume_run_returns_its_own_run_dir_and_verdict`.) The tenant exists and the
+    episode is past RUNS, so the refusal is the flag's."""
     _base, src = location_path(T.runs_base)(tmp_path, tenant_id=d9_tenant)
     manifest = _episode(tmp_path, src) / "family.yaml"
-    assert _run().parse_args(_sibling_argv(manifest)).update_ticket is False
+    order: list[str] = []
+    kw = dict(lifecycle=_Recorder(order), visualize=lambda p, **kw: None, preflight=_no_preflight)
     with pytest.raises(SystemExit) as bad:
-        _run().main([*_sibling_argv(manifest, tenant=d9_tenant), "--update-ticket"],
-                    lifecycle=_Recorder([]), visualize=lambda p, **kw: None,
-                    preflight=_no_preflight)
-    assert "--update-ticket" in str(bad.value)
+        _run().main([*_sibling_argv(manifest, tenant=d9_tenant), "--update-ticket"], **kw)
+    assert bad.value.code == 2, bad.value.code  # noqa: PLR2004
+    assert "unrecognized arguments: --update-ticket" in capsys.readouterr().err
+    assert order == [], "the resume ran its lifecycle under a refused switch"
 
 
 # the two lanes a sibling must not take

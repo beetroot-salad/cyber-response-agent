@@ -17,7 +17,6 @@ import pytest
 from defender.tests.support.api._config1470 import (
     remove_tenant,
     BASE_MOVED,
-    BODY,
     ELASTIC,
     ELASTIC_ACCESS,
     ELASTIC_SETTINGS,
@@ -206,10 +205,10 @@ async def test_1470_each_version_row_a_config_write_inserts_names_the_acting_mem
             lambda: [(v.version, v.author) for v in scripted.versions(ELASTIC)])
         version = (rows()[-1][0] if rows() else 0) + 1
         if case:
-            execute(scripted.dsn, "INSERT INTO tenancy.case_versions (tenant_id, version, system_id, comment_body, deleted, "
-                                  "author, written_at) VALUES (%s, %s, %s, %s, false, 'planted', now())",
-                    (A, version, TICKET, BODY))
-            body = {"replaces": version, "system_id": TICKET, "comment_body": BODY}
+            execute(scripted.dsn, "INSERT INTO tenancy.case_versions (tenant_id, version, system_id, deleted, "
+                                  "author, written_at) VALUES (%s, %s, %s, false, 'planted', now())",
+                    (A, version, TICKET))  # #1471 W7: the column is gone
+            body = {"replaces": version, "system_id": TICKET}
         else:
             scripted.plant_version(ELASTIC, version, settings=ELASTIC_SETTINGS, access=ELASTIC_ACCESS)
             body = {"replaces": version, "enabled": True, "settings": ELASTIC_SETTINGS, "access": ELASTIC_ACCESS}
@@ -598,13 +597,13 @@ async def test_o6_the_case_record_is_created_replaced_read_stale_refused_deleted
     created = await configured.put_case(0)
     assert created.status_code == 201, created.text
     assert created.headers["Location"] == f"{ORIGIN}{path}"
-    record = {"version": 1, "system_id": TICKET, "comment_body": BODY}
+    record = {"version": 1, "system_id": TICKET}  # #1471 W7: no comment body
     assert created.json() == record
     assert (await configured.get("/case-record")).json() == record
-    edited = await configured.put_case(1, comment_body="{disposition}")
+    edited = await configured.put_case(1)
     assert edited.status_code == 200, edited.text
     assert "Location" not in edited.headers
-    assert edited.json() == record | {"version": 2, "comment_body": "{disposition}"}
+    assert edited.json() == record | {"version": 2}
     _stale(await configured.put_case(1), 2)
     _stale(await configured.delete_case(1), 2)
     assert (await configured.delete_case(2)).status_code == 204
@@ -628,11 +627,11 @@ async def test_o6_deleting_a_case_record_that_is_absent_is_404_whatever_it_repla
 
 @pytest.mark.parametrize(("label", "write"), [
     ("a system with no record", {"system_id": ELASTIC}),
-    ("a template that cannot render", {"comment_body": "{0}"}),
-    ("an empty template", {"comment_body": "   "}),
+    # #1471 W7 retired the template rows ("cannot render", "empty"): the record has no template; a body still carrying
+    # `comment_body` is a 422 (test_case_record_api_1471).
 ])
 async def test_o6_a_case_record_the_judgement_refuses_is_422_and_stores_nothing(configured, label, write):
-    """The case system must be a configured system and the body a renderable template: 422 `faults` (O6, P6)"""
+    """The case system must be a configured system: 422 `faults` (O6, P6; #1471 W7: no template to judge)"""
     assert (await configured.put_system(TICKET, 0)).status_code == 201
     refused = await configured.put_case(0, **write)
     assert refused.status_code == 422, (label, refused.text)
@@ -922,7 +921,7 @@ async def test_o4_another_tenants_admin_writes_nothing_of_this_tenant_and_asks_n
     membership check would answer 200/204/409, not 404. (O4, O7)"""
     body = {"replaces": 0, "enabled": True, "settings": TICKET_SETTINGS, "access": TICKET_ACCESS}
     assert (await scripted.put_raw(f"/tenants/{B}/systems/{TICKET}", body, headers=scripted.bob())).status_code == 201
-    case = {"replaces": 0, "system_id": TICKET, "comment_body": BODY}
+    case = {"replaces": 0, "system_id": TICKET}
     assert (await scripted.put_raw(f"/tenants/{B}/case-record", case, headers=scripted.bob())).status_code == 201
     creds = {"for_version": 1, "credentials": {"api_key": TOKEN}}
     assert (await scripted.put_raw(f"/tenants/{B}/systems/{TICKET}/credentials", creds,
@@ -979,18 +978,18 @@ def test_o15_no_refusal_the_api_serves_names_this_piece_and_the_blob_stores_name
     assert any("#1082" in lit for lit in literals), literals
 
 
-@pytest.mark.parametrize("drop", ["replaces", "system_id", "comment_body"])
+@pytest.mark.parametrize("drop", ["replaces", "system_id"])  # #1471 W7: `comment_body` is no field any more
 async def test_o6_every_field_of_a_case_record_write_is_required_and_none_is_extra(configured, drop):
     """No field defaults: a case-record body missing `drop`, or carrying one more, is a validation 422 with `errors`. (O6, G2)"""
     assert (await configured.put_system(TICKET, 0)).status_code == 201
-    body = {"replaces": 0, "system_id": TICKET, "comment_body": BODY}
+    body = {"replaces": 0, "system_id": TICKET}
     del body[drop]
     refused = await configured.put_raw(f"/tenants/{A}/case-record", body)
     assert refused.status_code == 422, refused.text
     assert refused.json()["errors"]
     assert "faults" not in refused.json()
     extra = await configured.put_raw(f"/tenants/{A}/case-record",
-                                     {"replaces": 0, "system_id": TICKET, "comment_body": BODY, "enabled": True})
+                                     {"replaces": 0, "system_id": TICKET, "enabled": True})
     assert extra.status_code == 422, extra.text
     assert R.case_versions(configured.dsn, A) == []
 

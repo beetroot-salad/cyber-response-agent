@@ -132,20 +132,13 @@ def test_1363_o7_concurrent_calls_losing_access_together_end_the_run_once_proxy_
     assert _cmdb_rows(d) == [], d.rows
 
 
-def test_1363_o7_a_run_that_lost_access_leaves_the_case_without_a_comment(tmp_path: Path) -> None:
-    """A real run with the real ticket writer over a recording store makes no store call when it ends
-    `proxy-access`; control: the same run ending normally comments. #1363 O7 (silent), C1."""
-    def drive(where: Path, origin: str) -> S.Drive:
-        return _drive(where, origin, tenant=S.ticket_the_tenant(S.plant_tenant()), alert=S.ticketed_alert(),
-                      tickets=S.ticket_writer(S.TicketStore(where)), update_ticket=True)
-
-    lost = drive(tmp_path / "lost", "access")
-    P.assert_ended_proxy_access(lost)
-    assert lost.tickets.store.calls == [], f"a proxy-access run reached the case system: {lost.tickets.store.calls}"
-    ok = drive(tmp_path / "ok", "system")
-    assert ok.raised is None, (ok.raised, ok.summary)
-    assert (ok.summary or {}).get("truncated_by") is None, (ok.raised, ok.summary)
-    assert ok.tickets.store.comment_payloads, "control: the run's own comment did not reach the store"
+# Retired (#1471 W7): `test_1363_o7_a_run_that_lost_access_leaves_the_case_without_a_comment` drove an OPERATOR run
+# (`run.main(update_ticket=True)`) with a recording ticket writer and expected the normal-ending control to comment.
+# An operator run never comments (the writer seam is inert), so the control pinned removed behaviour and the lost-access
+# half ("no store call") would pass trivially. The subject, a proxy-access ending leaves the case without a comment,
+# is held by `test_1363_o7_the_ticket_lane_leaves_a_proxy_access_ticket_open_with_no_call` below (the record step
+# makes no call for `truncated_by=proxy-access`, with or without a report) and
+# `test_1363_o7_a_run_that_had_closed_with_a_verdict_before_access_was_lost_still_comments` (its uncut control).
 
 
 @pytest.mark.parametrize("report", [False, True])

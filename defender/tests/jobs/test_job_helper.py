@@ -1496,7 +1496,8 @@ def _flagged_investigation(scene, *, flagged: bool, alert: bytes = KEYED_ALERT_1
     (scene.runs / f"{inv}.launch.json").write_text(json.dumps(doc), encoding="utf-8")
     (scene.runs / f"{inv}.alert.json").write_bytes(alert)
     sent = ["--alert-digest", digest or hashlib.sha256(alert).hexdigest()] if send_digest else []
-    argv = [*scene.argv("investigation", inv), *sent, *(["--post-ticket", "--ticket-link", link] if flagged else [])]
+    argv = [*scene.argv("investigation", inv, alert_digest=None), *sent,
+            *(["--post-ticket", "--ticket-link", link] if flagged else [])]
     return inv, argv, link
 
 
@@ -1584,7 +1585,8 @@ def test_1471_w5_a_flagged_job_gets_one_write_pass_naming_its_ticket_and_its_rea
     claims = claims_of(signer, got["write"]["token"])
     assert (claims["tenant"], claims["investigation"]) == (s.tenant, inv), claims
     assert [list(e) for e in claims["grant"]] == [["ticket", "rw", TICKET_1471]], claims
-    assert claims["exp"] - got["asked_at"] <= PASS_LIFETIME_SEC + 30, claims["exp"] - got["asked_at"]
+    assert PASS_LIFETIME_SEC - 1 <= claims["exp"] - got["asked_at"] <= PASS_LIFETIME_SEC + 30, (
+        "the write pass does not have the normal lifetime", claims["exp"] - got["asked_at"])
     assert _signed_writes(signer) == [["ticket", "rw", TICKET_1471]], _signed_grants(signer)
 
 

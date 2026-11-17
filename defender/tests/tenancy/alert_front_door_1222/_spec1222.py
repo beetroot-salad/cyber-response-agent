@@ -89,8 +89,6 @@ SIGNATURE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@+=-]{0,127}")
 SIGNATURE_MAX = 128
 #: The findings key when the record holds no signature.
 UNKEYED = "unkeyed"
-#: Case-history's fallback signature label (`case_ticket._SIGNATURE_FALLBACK`).
-CASE_FALLBACK_SIGNATURE = "unknown"
 #: The lead's named endings other than `summary` (A2). Each reaches MAIN as one fixed sentence
 #: outside the lead's frame.
 ENDINGS = (
@@ -439,14 +437,6 @@ def alert_mapping_text(mapping: Mapping[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
-#: A case-record comment body that ALSO renders `{signature}`, as `[sig=<value>]` (D-14: the
-#: template keeps every placeholder it has; the signature recorded at run start reaches the
-#: ticket only through the comment). Pass it as `plant_tenant(case_body=SIGNED_COMMENT_BODY)`;
-#: read the value back with `COMMENT_SIGNATURE`. Written as `T6.case_record_text` writes a body
-#: (YAML double-quoted, so `\\n` is a newline).
-SIGNED_COMMENT_BODY = "{disposition} — {cause} [sig={signature}]\\n\\n{narrative}"
-COMMENT_SIGNATURE = re.compile(r"\[sig=(.*?)\]")
-
 #: The ticket the suite's alerts name (#1359 P3): the member `ticket.key`, mapped by the
 #: `case_key` entry. A run names a ticket only when both are in place (`ticketed_mapping`,
 #: `ticketed_alert`); otherwise its record leg has no ticket to comment on.
@@ -477,13 +467,11 @@ def ticketed_alert(alert: Mapping[str, Any] | bytes | None = None) -> Any:
 
 
 def ticket_the_tenant(planted: Planted, mapping: Mapping[str, Any] | None = None) -> Planted:
-    """Make `planted`'s runs name their ticket and render their signature in the comment: its alert
-    mapping becomes `mapping` (default: its current entries) plus `case_key`, and its case-record
-    file the one with `SIGNED_COMMENT_BODY`. Pair with `ticketed_alert`."""
+    """Make `planted`'s runs name their ticket: its alert mapping becomes `mapping` (default: its
+    current entries) plus `case_key`. An operator run posts no comment (W7); the ticket is what the
+    run's record names. Pair with `ticketed_alert`."""
     current = mapping if mapping is not None else (current_mapping(planted) or {})
     remap(planted, ticketed_mapping(current))
-    (planted.settings / T6.CASE_RECORD_REL).write_text(
-        T6.case_record_text("ticket", body=SIGNED_COMMENT_BODY), encoding="utf-8")
     return planted
 
 
@@ -588,7 +576,6 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
     tenant_id: str = _TENANT_ACME, *,
     root: Path | None = None,
     alert_mapping: Mapping[str, Any] | str | None = DEFAULT_MAPPING_GENERIC,
-    case_body: str = T6.COMMENT_BODY,
     table: str = TABLE_ELASTIC,
     configs: Mapping[str, str] | None = None,
     omit_systems: Iterable[str] = (),
@@ -598,8 +585,7 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
     from the environment). `alert_mapping` is a dict (#1345: the mapping the tenant's directory holds, which
     `planted.directory` seeds; entries left out are unmapped), raw text (a leftover FILE, written verbatim and
     inert: the tenant then holds no mapping), or None (no mapping saved: a run is refused, O4).
-    `case_body` is the comment template of the tenant's `settings/case-record.yaml` (`SIGNED_COMMENT_BODY`
-    also renders the signature). The tenant's ticket system accepts keys of `TICKET_KEY_PATTERN`. `omit_systems` drops those
+    The tenant's ticket system accepts keys of `TICKET_KEY_PATTERN`. `omit_systems` drops those
     systems' `config.env` and `access.yaml`: each is planted as configured-but-broken (#1366: a record with empty settings
     and access, judged down at start, as the folder world judged an unconfigured system; NOT left unrecorded, which
     would drop it from the roster and ignore its grant). `lessons` plants files (name -> text) in the
@@ -613,7 +599,7 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
     for system in omitted:
         texts.pop(system, None)
     knowledge = T6.place_tenant(root, tenant_id, table=table,
-                                configs=texts, case_body=case_body, unconfigured=omitted)
+                                configs=texts, unconfigured=omitted)
     planted = Planted(root=root, tenant_id=tenant_id, knowledge=knowledge)
     (root / tenant_id / "learning").mkdir(exist_ok=True)  # setup provisions mutable state
     _MAPPINGS[(str(root), tenant_id)] = None if isinstance(alert_mapping, str) else alert_mapping
@@ -1681,7 +1667,6 @@ def run_alert(  # noqa: C901, PLR0913 — one scenario's every input, each defau
     defender_dir: Path | None = None,
     orient_shim: Any = None,
     tickets: Any = None,
-    update_ticket: bool = False,
     no_learn: bool = True,
     enqueue: Callable[..., bool] | None = None,
     before: Callable[[Path], None] | None = None,
@@ -1762,8 +1747,6 @@ def run_alert(  # noqa: C901, PLR0913 — one scenario's every input, each defau
     argv = [str(input_path), "--tenant", planted.tenant_id]
     if no_learn and enqueue is None:
         argv.append("--no-learn")
-    if update_ticket:
-        argv.append("--update-ticket")
     argv += list(extra_argv)
     run_main = sym("run", "main")
     writer = tickets if tickets is not None else NoTicket()

@@ -12,7 +12,7 @@ pytest.importorskip("pydantic_ai")
 
 from defender.tenancy import case_ticket  # noqa: E402
 from defender.systems.verbs import VerbContext  # noqa: E402
-from defender.tests.support.runtime.engine._spec767 import FakeStore, make_run, record  # noqa: E402
+from defender.tests.support.runtime.engine._spec767 import FakeStore, make_run, record, ticket_link_for  # noqa: E402
 from defender.tests.support.shared._fixture_uuid import fixture_uuid  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     GOLDEN_AB3,
@@ -33,7 +33,6 @@ SELF = fixture_uuid("1221-later-run")
 PRIOR = fixture_uuid("20261001t090000z-1221-prior-run")
 LEAD = "l-001"
 ENRICHMENT = "OWN-CASE-ENRICHMENT-1221: the host is a CI runner owned by build-infra"
-PRIOR_NOTES = "PRIOR-RUN-NOTES-1221: the binary is the fleet's packaged metrics shipper"
 DONE = Turn(text="Summary: ticket correlation complete.")
 
 
@@ -72,11 +71,15 @@ def test_a_posted_agent_comment_on_an_open_case_reaches_gather_beside_the_own_ca
     """The real writer's posted body, served back on an open case beside the run's own, reaches gather."""
     tag = case_ticket.agent_comment_tag(PRIOR)
 
-    prior_dir = make_run(tmp_path / "prior", name=PRIOR, body=PRIOR_NOTES)
+    # The comment is the tag line, the disposition word and the screen link (#1471 P-6): no notes. The link
+    # names the prior run, so it is what tells the prior run's comment came through whole.
+    prior_dir = make_run(tmp_path / "prior", name=PRIOR)
     store = FakeStore(tmp_path / "store")
     record(prior_dir, store)
     posted = store.only_comment()
     assert posted["body"].startswith(tag + "\n"), "the writer posted an untagged comment"
+    link = ticket_link_for(prior_dir)
+    assert posted["body"] == f"{tag}\nbenign\n{link}", f"fixture: the writer posted {posted['body']!r}"
 
     listing = {"total": 2, "source": "ticket-store", "tickets": [
         {"key": SELF, "summary": "the case under investigation", "status": "open",
@@ -102,6 +105,7 @@ def test_a_posted_agent_comment_on_an_open_case_reaches_gather_beside_the_own_ca
     assert _capture(run_dir) == listing, "the captured reply is not what the store answered"
     seen = _delta(gather)
     for needle, what in ((SELF, "the run's own case"), (ENRICHMENT, "its enrichment note"),
-                         (PRIOR, "the prior run's case"), (PRIOR_NOTES, "the prior run's notes"),
-                         (json.dumps(tag)[1:-1], "the agent tag line naming the prior run")):
+                         (PRIOR, "the prior run's case"),
+                         (json.dumps(tag)[1:-1], "the agent tag line naming the prior run"),
+                         (json.dumps(posted["body"])[1:-1], "the prior run's whole comment, link included")):
         assert needle in seen, f"{what} never reached the gather model"

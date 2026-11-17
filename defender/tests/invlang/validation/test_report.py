@@ -284,8 +284,9 @@ def test_reviewed_inconclusive_ceiling_note_overflow_is_refused(tmp_path):
 
 
 def test_case_ticket_closing_comment_reads_a_reviewed_inconclusive_close(tmp_path, monkeypatch):
-    """The ticket comment for a ceiling-held `inconclusive` carries the seventh cause verbatim; a
-    machinery-failed one renders as the `unresolved` it committed, never as the ceiling claim.
+    """The ticket comment for a ceiling-held `inconclusive` carries that disposition word; a
+    machinery-failed one carries the `unresolved` it committed, never the ceiling claim. The cause rides
+    the report's frontmatter, not the comment (#1471 P-6: the comment is the word and the link).
     (#1359: read at the wire, the comment the record leg posts to the alert's ticket.)"""
     from defender.tests.support.runtime.engine import _spec767 as S767
     from defender.tests.support.storage._alert_plant import plant_alert
@@ -302,12 +303,16 @@ def test_case_ticket_closing_comment_reads_a_reviewed_inconclusive_close(tmp_pat
     assert close_with(deps, GAP, recording(holds())).outcome == STANDS
     fm = frontmatter(run_dir)
     assert (fm["disposition"], fm["outcome"], fm["cause"]) == (GAP, STANDS, CEILING_EXAMINED)
-    assert posted(run_dir, 0).startswith(f"{GAP} — {CEILING_EXAMINED}")
+    held = posted(run_dir, 0)
+    assert held == f"{GAP}\n{S767.ticket_link_for(run_dir)}", held
+    assert CEILING_EXAMINED not in held, "the cause reached the comment"
 
     deps, run_dir = deps_over(tmp_path / "broken", ceiling_companion())
     broken = close_with(deps, GAP, recording(faults={"composer": raises(RuntimeError("down"))}))
     assert broken.outcome == "forced-inconclusive"
     assert broken.failure_kind is not None
     body = posted(run_dir, 1)
-    assert body.startswith(f"{UNRESOLVED} — {CAUSE_REVIEW_INCOMPLETE}"), body
+    assert body == f"{UNRESOLVED}\n{S767.ticket_link_for(run_dir)}", body
     assert CEILING_EXAMINED not in body
+    assert CAUSE_REVIEW_INCOMPLETE not in body, "the cause reached the comment"
+    assert frontmatter(run_dir)["cause"] == CAUSE_REVIEW_INCOMPLETE, "the cause no longer rides the report"

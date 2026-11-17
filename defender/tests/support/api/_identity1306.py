@@ -789,10 +789,11 @@ class World:
         lease = inv.created_at + DAY if inv.status == "running" else None
         self._sql("INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, stage, created_at, "
                   "started_at, finished_at, disposition, cost_usd, cost_is_lower_limit, failure_reason, "
-                  "lease_expires_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                  "lease_expires_at, update_ticket, ticket_write) "
+                  "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                   (inv.investigation_id, tenant, inv.alert_id, inv.request_key, inv.attempt, inv.status, inv.created_at,
                    inv.started_at, inv.finished_at, inv.disposition, inv.cost_usd, inv.cost_is_lower_limit,
-                   inv.failure_reason, lease))
+                   inv.failure_reason, lease, inv.update_ticket, inv.ticket_write))  # C-3: every INSERT writes the flag
         return inv
 
     def plant_learning_job(self, tenant: str, job: Any) -> Any:

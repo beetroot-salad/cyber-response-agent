@@ -30,8 +30,9 @@ def _reader_answers(run_dir: Path) -> dict[str, tuple[str, object]]:
         "learning_validate": call(lambda: normalize_disposition(report)),
         "held_out": call(lambda: predicted_disposition(run_dir)),
         # #1359: the lane is observed where it leaves the host, as the disposition head of the
-        # comment the record leg posts (a verdict it cannot read leaves the one host sentence).
-        "ticket_lane": call(lambda: posted_comment_body(run_dir, run_dir.parent).split(" — ", 1)[0]),
+        # comment the record leg posts (a verdict it cannot read leaves the one host sentence). The
+        # comment below the tag is the word (or sentence) on its first line, then the link (#1471 P-6).
+        "ticket_lane": call(lambda: posted_comment_body(run_dir, run_dir.parent).split("\n", 1)[0]),
         "trace_lesson": call(lambda: _report_disposition(run_dir)),
     }
 

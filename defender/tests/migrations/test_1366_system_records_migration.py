@@ -15,7 +15,8 @@ ROLE = "defender_proxy_reader"
 TABLES = {
     "system_versions": {"tenant_id", "system_id", "version", "adapter_id", "enabled", "settings", "access",
                         "credential_generation", "deleted", "author", "written_at"},
-    "case_versions": {"tenant_id", "version", "system_id", "comment_body", "deleted", "author", "written_at"},
+    # #1471 W7: the case record's comment template, `comment_body`, is gone.
+    "case_versions": {"tenant_id", "version", "system_id", "deleted", "author", "written_at"},
 }
 
 
@@ -100,12 +101,12 @@ def _tenant(dsn: str, tenant: str, state: str, *, mark: bool) -> None:
 
 
 def test_the_revision_that_drops_the_mark_sits_directly_on_the_previous_head():
-    """The one new revision follows `0016_list_indexes`. (#1470 O8)"""
+    """Exactly one revision sits directly on `0018_learning_set_aside_indexes` (the head before the drop). (#1470 O8; head is
+    no longer the drop since #1471 added `0020_ticket_write` on it, whose own placement is test_1471_ticket_write_migration's)"""
     from defender.migrations import _scripts
 
-    head = _scripts().get_current_head()
-    assert head != BEFORE_DROP
-    assert _scripts().get_revision(head).down_revision == BEFORE_DROP
+    found = [r.revision for r in _scripts().walk_revisions() if r.down_revision == BEFORE_DROP]
+    assert len(found) == 1, f"one revision should sit directly on {BEFORE_DROP}, found {found}"
 
 
 @pytest.mark.postgres

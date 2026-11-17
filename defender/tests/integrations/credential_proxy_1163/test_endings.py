@@ -70,10 +70,10 @@ def test_o8_a_write_the_system_took_is_accepted_whatever_became_of_its_reply(
         tmp_path, data_root, ending, method, status):
     """A 2xx write is judged by its status alone on every ending where the status arrived, so a
     reply that broke or was withheld never makes an accepted write look refused. #1412 O8, #1359."""
-    with E.served(tmp_path, data_root, ending, status=status, writes=(("POST", "/tickets"), ("PUT", "/tickets")),
+    with E.served(tmp_path, data_root, ending, status=status, writes=((method, E.WRITE_ROUTE),),
                   grant="rw") as ex:
         ctx = A.ctx_for(tmp_path, T.run_record(ex.rig.t), ex.url, ex.tok)
-        host_write(ctx, "identity", method, "/tickets", body={"body": "x"},  # raises if refused
+        host_write(ctx, "identity", method, E.WRITE_PATH, body={"body": "x"},  # raises if refused
               timeout_sec=ending.timeout)
 
 
@@ -84,11 +84,11 @@ def test_o8_the_write_judgement_still_refuses_a_non_2xx_status_on_a_complete_rep
     status is a refusal, so "did not raise" there is a real result. #1412 O8, #1359."""
     ending = E.ENDINGS[0]
     assert ending.name == "complete"
-    with E.served(tmp_path, data_root, ending, status=status, writes=(("POST", "/tickets"),),
+    with E.served(tmp_path, data_root, ending, status=status, writes=(("POST", E.WRITE_ROUTE),),
                   grant="rw") as ex:
         ctx = A.ctx_for(tmp_path, T.run_record(ex.rig.t), ex.url, ex.tok)
         with pytest.raises(fault):
-            host_write(ctx, "identity", "POST", "/tickets", body={"body": "x"}, timeout_sec=ending.timeout)
+            host_write(ctx, "identity", "POST", E.WRITE_PATH, body={"body": "x"}, timeout_sec=ending.timeout)
 
 
 @pytest.mark.parametrize("ending", E.STATUSED, ids=lambda e: e.name)

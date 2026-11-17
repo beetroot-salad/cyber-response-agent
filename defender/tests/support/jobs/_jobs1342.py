@@ -35,6 +35,8 @@ GOLDEN_REPORT = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-v2sshd" / "rep
 MALICIOUS_REPORT = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-sshpivot-ab3" / "report.md"  # malicious
 
 NOW = dt.datetime(2026, 10, 29, 12, 0, tzinfo=dt.UTC)
+#: The frontend origin `make_worker` hands every `Worker` unless a test passes its own (C-6 makes it required, W3).
+FRONTEND_ORIGIN = "https://app.defender.test"
 T1 = fixture_uuid("tenant:jobs-1342-a")
 T2 = fixture_uuid("tenant:jobs-1342-b")
 JOBS_AUDIT_LOGGER = "defender.jobs.audit"
@@ -626,7 +628,7 @@ def make_worker(store: Any, data_root: Path, child: Callable[[Any], list[str]], 
                 containers: Any = None, slots: int = 3, stop_grace: float | None = None,
                 open_lane: Any = None, **knobs: Any) -> Any:
     """`knobs` (#1343 sketch, unratified): `renewal_interval`, `cost_interval`, `takeover_interval`
-    in seconds."""
+    in seconds; `frontend_origin` (C-6, required by `Worker`) defaults to `FRONTEND_ORIGIN`."""
     from defender.worker import Worker
 
     if containers is None:
@@ -638,7 +640,7 @@ def make_worker(store: Any, data_root: Path, child: Callable[[Any], list[str]], 
         if not beside.resolve().is_relative_to(Path(tempfile.gettempdir()).resolve()):
             raise ValueError(f"make_worker: {data_root} is not under the temp directory; pass containers=StandInContainers(tmp_path / ...)")
         containers = StandInContainers(beside / "containers")
-    extra = {**knobs, **({} if stop_grace is None else {"stop_grace": stop_grace})}
+    extra = {"frontend_origin": FRONTEND_ORIGIN, **knobs, **({} if stop_grace is None else {"stop_grace": stop_grace})}
     if open_lane is not None:
         extra["open_lane"] = open_lane
     return Worker(store, data_root=data_root, child_argv=child,
@@ -651,7 +653,8 @@ def plant_queued_investigation(dsn: str, *, tenant: str, alert_id: str, investig
     """A `queued` row with a chosen id, as SQL (the store mints ids; a case that must plant a file
     named for the id before the claim needs to know it)."""
     execute(dsn, "INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, "
-                 "stage, created_at, cost_usd, cost_is_lower_limit) VALUES (%s, %s, %s, %s, 1, 'queued', %s, 0, false)",
+                 "stage, created_at, cost_usd, cost_is_lower_limit, update_ticket) "  # C-3: every INSERT writes the flag
+                 "VALUES (%s, %s, %s, %s, 1, 'queued', %s, 0, false, false)",
             (investigation_id, tenant, alert_id, key, NOW))
 
 

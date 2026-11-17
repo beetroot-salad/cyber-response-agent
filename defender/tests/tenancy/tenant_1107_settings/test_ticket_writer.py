@@ -53,23 +53,45 @@ def _shim(tmp_path: Path, monkeypatch, *answers: dict[str, Any], name: str = "pr
 def _run(  # noqa: PLR0913 — the run's seams, one keyword each
         tmp_path: Path, root: Path, alert: Path, *, run_id: str = "r1107",
         summary: dict[str, Any] | None = None, page: bool = False, before: Any = None,
-        update_ticket: bool = True, records: Any = None) -> tuple[int | None, Any, Path, S.RunRecorder]:
-    """`run.main` over one alert with the real ticket writer. `page=True` leaves the real renderer
-    in place; otherwise the recorder's `visualize` stands in. `records` (a `RecordsSpec`) are the tenant's records for this
+        job: bool = True, records: Any = None) -> tuple[int | None, Any, Path, S.RunRecorder]:
+    """One investigation of one alert: `run.main` (the operator's run, which never comments, #1471 W7), then, when `job`,
+    the ticket step the job container runs after the investigation (`_job_ticket_step`: the real record step over the
+    run's own tenant and case-system verdict) and, with `page`, the page rendered after it. `page=True` leaves the real
+    renderer in place for the operator run; otherwise the recorder's `visualize` stands in. `records` (a `RecordsSpec`) are the tenant's records for this
     run: a test that changes the run states the change as records (`_with_case`, `R.edited`), not as an edit of the planted
     folder, which the run no longer reads (R10; the directory derives its records before the launch publish and from the
     previous export). Returns (rc, refusal, run dir, recorder)."""
-    from defender.tests.integrations.credential_proxy_1163._harness import FakeSigner
-
     rec = S.RunRecorder(tmp_path / "runs" / run_id, summary=summary, before_lifecycle=before)
-    seams: dict[str, Any] = {"signer": FakeSigner()}
+    seams: dict[str, Any] = {}
     if not page:
         seams["visualize"] = rec.visualize
-    argv = S.run_argv(alert, root, update_ticket=update_ticket)
+    argv = S.run_argv(alert, root)
     if records is not None:
         seams["directory"] = directory_for_argv(argv, root, records=records)
     rc, refused = S.drive_run(argv, rec, **seams)
+    if job and refused is None and rec.lifecycle_calls:
+        _job_ticket_step(rec)
+        if page:
+            S.render_page(rec.run_dir_at)
     return rc, refused, rec.run_dir_at, rec
+
+
+def _job_ticket_step(rec: S.RunRecorder) -> None:
+    """The job container's ticket step (`run._job_ticket_step`) over the run `rec` drove: the record step handed the
+    tenant the run was admitted as, the case-system verdict over the roster it judged, its run environment, the run's end
+    record, and a write pass for the proxy stand-in (which checks none)."""
+    import os
+
+    from defender import box as box_mod
+    from defender.tests.support.runtime.engine._spec767 import WRITE_TOKEN
+
+    started = rec.lifecycle_calls[0]
+    tenant, run_dir = started["tenant"], rec.run_dir_at
+    case = S.mod("systems.case_system").case_verdict(tenant, defender_dir=S.DEFENDER, roster=started["systems"].roster)
+    S.record_step(
+        run_dir, tenant, env=box_mod.run_env(S.DEFENDER, run_dir, tenant_agent=tenant.agent), case=case,
+        truncated_by=rec.summary.get("truncated_by"), closed_before_cut=rec.summary.get("closed_before_cut") is True,
+        request_token=WRITE_TOKEN, proxy_url=os.environ.get(S.mod("kit.access").PROXY_URL_ENV))
 
 
 def _planted(folder: Path) -> Any:
@@ -185,7 +207,7 @@ def test_o6_bad_config_receipt(tmp_path, monkeypatch, caplog):
 
 def test_o5_no_case_record_file_leaves_a_receipt_naming_it(tmp_path, monkeypatch):
     """A tenant with no case record (the planter's `case_system=None` seeds none: `R.NO_CASE`; or one still holding
-    `systems/case-history/`, which nothing reads) run with `--update-ticket`: no call, an error receipt saying there is
+    `systems/case-history/`, which nothing reads) run through the job's ticket step: no call, an error receipt saying there is
     no case record, no silent ignore. The retired file is not named (#1366 O9, DC6: the case record is a database row,
     nothing reads `case-record.yaml`). O2, O5."""
     shim = _shim(tmp_path, monkeypatch, *S.store_answers_ok())
@@ -200,7 +222,7 @@ def test_o5_no_case_record_file_leaves_a_receipt_naming_it(tmp_path, monkeypatch
         assert refused is None, f"{arm}: rc={rc} refused={refused}"
         assert rc == 0, f"{arm}: rc={rc}"
         got = S.receipt(run_dir)
-        assert got is not None, f"{arm}: no receipt for --update-ticket with no case-record file"
+        assert got is not None, f"{arm}: no receipt for a ticket step with no case-record file"
         assert (got["status"], got["ok"]) == ("error", False), got
         assert "case record" in (got.get("reason") or "").replace("-", " ").lower(), got
         for host in _host_paths(folder, root):
@@ -208,87 +230,14 @@ def test_o5_no_case_record_file_leaves_a_receipt_naming_it(tmp_path, monkeypatch
     assert not _post_calls(shim), "a call was made for a tenant with no case system"
 
     root, _folder, alert = _world(tmp_path, name="no-flag", case_system=None)
-    _rc, _ref, run_dir, _rec = _run(tmp_path, root, alert, run_id="r-no-flag", update_ticket=False)
-    assert not S.receipt_path(run_dir).exists(), "a run without --update-ticket wrote a receipt"
+    _rc, _ref, run_dir, _rec = _run(tmp_path, root, alert, run_id="r-no-flag", job=False)
+    assert not S.receipt_path(run_dir).exists(), "an operator run wrote a receipt (#1471 W7)"
 
 
-def _comment_argv(proxy: S.ProxyStandIn) -> dict[str, Any]:
-    (request,) = _post_calls(proxy)
-    return request
-
-
-def _sent_body(request: dict[str, Any]) -> str:
-    return json.dumps(request["body"])
-
-
-def _with_report(run_dir: Path) -> None:
-    """A readable report: the comment template renders over it (without one the fixed
-    unreadable-report sentence is sent in its place)."""
-    from defender.tests.support.runtime.engine._spec767 import write_report
-
-    write_report(run_dir)
-
-
-def _directory_with_twin(root: Path, tenant: str) -> tuple[Any, Any]:
-    """`(directory, twin)`: the in-process directory `with_publish` would build for `tenant` (active, forge wiring,
-    mapping and records derived from its planted settings, the sign generation run start needs for the proxied elastic,
-    #1391 P1/D12), with its memory twin kept so a test can write records through the twin's public seeder while a run is
-    under way (`R.directory_with_twin`)."""
-    from defender.tests.support.tenancy import _systems1366 as R
-
-    return R.directory_with_twin(root, tenant)
-
-
-def test_o8_a_case_version_written_after_run_start_changes_nothing_the_comment_carries(tmp_path, monkeypatch):
-    """A new case version (a different comment body) written to the tenant's records while the run is under way is not
-    the body the comment carries: the run read the records at start and sends that body; control: the same version
-    written BEFORE the run starts is the body sent. D-18; #1366 O6/H9 (a run's case record is pinned at start; the
-    run records the version it used)."""
-    from defender.tests.support.tenancy import _systems1366 as R
-
-    edited_body = "EDITED-BODY {disposition}"
-
-    def newer_case(folder: Path) -> Any:
-        sound = R.derive(S.settings_of(folder))
-        return R.value_of(R.RecordsSpec(sound.systems, R.CaseSpec(sound.case.system_id, edited_body, version=2)))
-
-    def write(twin: Any, folder: Path) -> None:
-        R.write_twin_records(twin, S.PLAYGROUND_ID, newer_case(folder))
-
-    control_shim = _shim(tmp_path, monkeypatch, *S.store_answers_ok(), name="proxy-control")
-    root, folder, alert = _world(tmp_path, name="control")
-    directory, twin = _directory_with_twin(root, S.PLAYGROUND_ID)
-    write(twin, folder)
-    rec = S.RunRecorder(tmp_path / "runs" / "r-control", before_lifecycle=_with_report)
-    rc, refused = S.drive_run(S.run_argv(alert, root, update_ticket=True), rec, directory=directory, signer=_signer(),
-                              visualize=rec.visualize)
-    assert (rc, refused) == (0, None), f"rc={rc} refused={refused}"
-    assert "EDITED-BODY" in _sent_body(_comment_argv(control_shim)), "control: a version written before start is read"
-
-    shim = _shim(tmp_path, monkeypatch, *S.store_answers_ok(), name="proxy-edited")
-    root, folder, alert = _world(tmp_path, name="edited")
-    directory, twin = _directory_with_twin(root, S.PLAYGROUND_ID)
-
-    def write_during_the_run(run_dir: Path) -> None:
-        _with_report(run_dir)
-        write(twin, folder)
-
-    rec = S.RunRecorder(tmp_path / "runs" / "r-edited", before_lifecycle=write_during_the_run)
-    rc, refused = S.drive_run(S.run_argv(alert, root, update_ticket=True), rec, directory=directory, signer=_signer(),
-                              visualize=rec.visualize)
-    assert (rc, refused) == (0, None), f"rc={rc} refused={refused}"
-    argv = _comment_argv(shim)
-    assert argv["url"] == f"http://ticket-{MARKER}:8080/tickets/{KEY}/comments", argv
-    assert "EDITED-BODY" not in _sent_body(argv), "a case version written during the run reached the comment"
-    got = S.receipt(rec.run_dir_at)
-    assert got is not None
-    assert (got["status"], got["ok"]) == ("commented", True), got
-
-
-def _signer() -> Any:
-    from defender.tests.integrations.credential_proxy_1163._harness import FakeSigner
-
-    return FakeSigner()
+# Retired by #1471 W7: `test_o8_a_case_version_written_after_run_start_changes_nothing_the_comment_carries` read the
+# version through the case record's comment template, which is gone (a case record is its system id alone, and an explicit
+# body is refused by `R.CaseSpec`). That a run uses and records the versions it read at start is held by
+# `tenancy/alert_front_door_1222/test_run_records_1366.py::test_1366_o6_a_run_uses_the_current_versions_and_records_them_beside_its_knowledge_record`.
 
 
 def test_o6_transport_fault_receipt(tmp_path, monkeypatch, caplog):

@@ -115,7 +115,7 @@ BODIES: dict[tuple[str, str], dict[str, object]] = {
     ("POST", f"{TENANT}/learning-jobs"): {"investigation_id": PATH_ID, "client_request_id": "jq"},
     ("PUT", f"{TENANT}/systems/{{}}"): {"replaces": 0, "enabled": True, "settings": {}, "access": ""},
     ("PUT", f"{TENANT}/systems/{{}}/credentials"): {"for_version": 1, "credentials": {"api_key": "v" * 40}},
-    ("PUT", f"{TENANT}/case-record"): {"replaces": 0, "system_id": "ticket", "comment_body": "{disposition}"},
+    ("PUT", f"{TENANT}/case-record"): {"replaces": 0, "system_id": "ticket"},
     ("PUT", f"{TENANT}/alert-mapping"): dict(PLANTED_ALERT_MAPPING),
     ("POST", f"{TENANT}/invitations"): {"email": NEW},
     ("POST", f"{TENANT}/programs"): {"display_name": "child"},

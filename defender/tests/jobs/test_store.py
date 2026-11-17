@@ -4110,7 +4110,8 @@ async def test_1471_w6_a_handed_back_word_is_kept_not_served_while_live_and_not_
     """`hand_back` carries the worker's word: stored at once, served null while the row still runs, and kept when the
     take-over (or a cancel of the still-running row) ends it. (W6: carried; precedence)"""
     async with job_store(dsn) as store:
-        for n, ending in enumerate(["take_over", "cancel"]):
+        # Cancel first: a take-over queues the lapsed row's retry, which the next `claim()` (oldest queued) would take.
+        for n, ending in enumerate(["cancel", "take_over"]):
             alert = await _keyed(store, ticket=f"T-{ending}")
             created, _ = await store.create_investigation(T1, alert.alert_id, f"k{n}", actor="u-1", update_ticket=True)
             assert (await store.claim()).record.investigation_id == created.investigation_id, "premise: claimed"
