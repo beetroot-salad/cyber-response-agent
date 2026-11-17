@@ -73,13 +73,6 @@ ANCHOR_KINDS: tuple[str, ...] = (
 #: frontier reacts to this; the verdict and its escalation are unchanged.
 AUTHZ_INDET_BASIS: tuple[str, ...] = ("retry", "exhausted")
 
-#: `:H h-NNN.authz`' `on_indet` cell: what an unsettled answer to the contract MEANS, decided at
-#: PLAN before the search runs. `escalate` (the default): an unsettled contract escalates.
-#: `process-gap`: a search that was worked and came back empty (`basis=exhausted`) may close
-#: `unsanctioned-benign` — accepted only for an anchor kind with a home system in
-#: `ANCHOR_KIND_SYSTEMS`, so the exhaustion can be checked against the system that holds it.
-AUTHZ_ON_INDET: tuple[str, ...] = ("escalate", "process-gap")
-
 #: `:R consultations`' `grounding` cell. `past-case` is excluded: grounding a baseline on a
 #: past case is precedent-by-similarity. (The authorization side conversely excludes
 #: `telemetry-baseline`: a statistical pattern is context, never a verdict.)
@@ -247,7 +240,6 @@ SLOTS: dict[str, tuple[str, ...]] = {
     "anchor-kinds": ANCHOR_KINDS,
     "auth-kinds": AUTH_KINDS,
     "authz.basis": AUTHZ_INDET_BASIS,
-    "authz.on_indet": AUTHZ_ON_INDET,
     "consultation.grounding": CONSULTATION_GROUNDING,
     "consultation.lookup_outcome": TACIT_LOOKUP_OUTCOMES,
     "impact.dimension": IMPACT_DIMENSION,

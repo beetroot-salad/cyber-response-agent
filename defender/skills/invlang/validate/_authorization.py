@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 
-from defender.skills.invlang import _walkers, vocab
+from defender.skills.invlang import _walkers
 from defender.skills.invlang.schema import AuthorizationContract, CompanionBody
 from defender.skills.invlang.validate._structure import _cell
 
@@ -45,104 +45,44 @@ def _declarers_by_contract_id(
 
 
 
-#: The `on_indet` value that lets a worked, empty search end as a process gap, and the keyword
-#: that accepts it. Checked against their vocabularies so a rename cannot pass silently.
-PROCESS_GAP_ON_INDET = "process-gap"
-assert PROCESS_GAP_ON_INDET in vocab.AUTHZ_ON_INDET
-
-
-def _process_gap_error(
-    contract: AuthorizationContract, cid: str, anchor: str,
-    gap_paid: frozenset[tuple[str, str]],
-) -> str | None:
-    """Why a contract that is not `authorized` is not discharged as a process gap either — or
-    `None` when it is: the plan declared `on_indet process-gap`, its anchor kind has a home
-    system, and a paid `basis=exhausted` row searched that system for this contract."""
-    if _cell(contract, "on_indeterminate") != PROCESS_GAP_ON_INDET:
-        return (
-            f"its plan says `on_indet {_cell(contract, 'on_indeterminate') or 'escalate'}`, so an "
-            f"unsettled answer escalates — an empty search ends as a process gap only when the "
-            f"contract was declared `on_indet {PROCESS_GAP_ON_INDET}` at PLAN, before the search"
-        )
-    if anchor not in vocab.ANCHOR_KIND_SYSTEMS:
-        return (
-            f"its anchor kind {anchor!r} has no home system "
-            f"({', '.join(sorted(vocab.ANCHOR_KIND_SYSTEMS))} do), so no search can be shown to "
-            f"have exhausted it"
-        )
-    if (cid, anchor) not in gap_paid:
-        return (
-            f"no `:R authz` row answers it `indeterminate` with a PAID `basis=exhausted` — a "
-            f"search of the {vocab.ANCHOR_KIND_SYSTEMS[anchor]!r} system that came back empty"
-        )
-    return None
-
-
-def _process_gap_verdict(
-    hid: str, contract: AuthorizationContract, cid: str, anchor: str,
-    rows: list[tuple[str, bool]], keyword: str, gap_paid: frozenset[tuple[str, str]],
-) -> str | None:
-    """The process-gap reading of a contract that is not `authorized`: refused outright when a
-    row says `unauthorized`, otherwise discharged or refused by `_process_gap_error`."""
-    if any(v == "unauthorized" for v, _cited in rows):
-        return (
-            f"disposition {keyword} blocked: authz contract {cid} on live hypothesis {hid} "
-            f"resolved 'unauthorized' — a record saying the activity was NOT allowed is a "
-            f"finding against it, never a process gap. Escalate"
-        )
-    gap = _process_gap_error(contract, cid, anchor, gap_paid)
-    if gap is None:
-        return None
-    return (
-        f"disposition {keyword} blocked: authz contract {cid} on live hypothesis {hid} is "
-        f"neither authorized nor a process gap: {gap}"
-    )
-
-
-def _attributable_rows(
+def _authz_contract_error(
     hid: str,
     contract: AuthorizationContract,
     declarers: dict[str, list[tuple[str, str]]],
     verdicts: dict[str, list[tuple[str, str, bool]]],
-    keyword: str,
-) -> tuple[str | None, list[tuple[str, bool]]]:
-    """The `(verdict, cites_past_case)` rows that answer THIS contract, or why none can be
-    attributed to it. A shared id is scoped by anchor kind."""
+) -> str | None:
+    """Why this ONE contract on this LIVE hypothesis does not close benign — or `None`."""
     cid = _cell(contract, "id") or "?"
     anchor = _anchor_kind(contract)
     competing = [(h, a) for h, a in declarers.get(cid, []) if h != hid]
     candidates = verdicts.get(cid) or []
-    if not competing:
-        return None, [(v, cited) for v, _a, cited in candidates]
-    # The anchor kind is always present (`_hyp_sub_authz_row` requires it), which makes it
-    # usable as a discriminator.
-    twins = sorted(h for h, a in competing if a == anchor)
-    if twins:
-        return (
-            f"disposition {keyword} blocked: authz contract {cid} on live hypothesis "
-            f"{hid} shares BOTH its id and its anchor kind {anchor!r} with a contract "
-            f"on {', '.join(twins)} — a `:R authz` row names only the contract it "
-            f"fulfills, so no row can be attributed to this one and none discharges "
-            f"it; number `ac*` across the document, not per hypothesis"
-        ), []
-    rows = [(v, cited) for v, a, cited in candidates if a == anchor]
+
+    if competing:
+        # The anchor kind is always present (`_hyp_sub_authz_row` requires it), which makes it
+        # usable as a discriminator.
+        twins = sorted(h for h, a in competing if a == anchor)
+        if twins:
+            return (
+                f"disposition benign blocked: authz contract {cid} on live hypothesis "
+                f"{hid} shares BOTH its id and its anchor kind {anchor!r} with a contract "
+                f"on {', '.join(twins)} — a `:R authz` row names only the contract it "
+                f"fulfills, so no row can be attributed to this one and none discharges "
+                f"it; number `ac*` across the document, not per hypothesis"
+            )
+        rows = [(v, cited) for v, a, cited in candidates if a == anchor]
+        if not rows:
+            return (
+                f"disposition benign blocked: authz contract {cid} on live hypothesis "
+                f"{hid} asks an {anchor!r} question, and {cid} is also declared by "
+                f"{', '.join(sorted(h for h, _a in competing))} — so only a `:R authz` row "
+                f"carrying anchor kind {anchor!r} discharges it, and the document has none"
+            )
+    else:
+        rows = [(v, cited) for v, _a, cited in candidates]
+
     if not rows:
         return (
-            f"disposition {keyword} blocked: authz contract {cid} on live hypothesis "
-            f"{hid} asks an {anchor!r} question, and {cid} is also declared by "
-            f"{', '.join(sorted(h for h, _a in competing))} — so only a `:R authz` row "
-            f"carrying anchor kind {anchor!r} discharges it, and the document has none"
-        ), []
-    return None, rows
-
-
-def _authorized_verdict(
-    hid: str, cid: str, rows: list[tuple[str, bool]], keyword: str,
-) -> str | None:
-    """`benign`'s reading: every attributable row `authorized`, not all of them past cases."""
-    if not rows:
-        return (
-            f"disposition {keyword} blocked: authz contract {cid} on "
+            f"disposition benign blocked: authz contract {cid} on "
             f"live hypothesis {hid} resolved 'no fulfilling :R authz "
             f"row', not 'authorized' — benign requires every contract "
             f"authorized"
@@ -152,78 +92,38 @@ def _authorized_verdict(
     bad = [v for v, _cited in rows if v != "authorized"]
     if bad:
         return (
-            f"disposition {keyword} blocked: authz contract {cid} on "
+            f"disposition benign blocked: authz contract {cid} on "
             f"live hypothesis {hid} resolved {bad[0]!r}, not 'authorized' "
-            f"— a contract any row calls authorized is discharged only when every row "
-            f"answering it agrees"
+            f"— benign requires every contract authorized"
         )
     # Spec rule #27: a past case (an earlier run's verdict) is precedent, never the whole of
     # an authorization. A row is a past case when it cites one (`cites_past_case`), whatever
     # its grounding word says: a filled cell cannot be misspelled into an empty one.
     if all(cited for _v, cited in rows):
         return (
-            f"disposition {keyword} blocked: authz contract {cid} on live hypothesis {hid} is "
+            f"disposition benign blocked: authz contract {cid} on live hypothesis {hid} is "
             f"authorized only by rows citing a past case (`cites_past_case`) — a past case is an earlier "
-            f"run's verdict, and an authorization cannot rest on past cases alone (rule #27). Resolve "
+            f"run's verdict, and benign cannot rest on past cases alone (rule #27). Resolve "
             f"{cid} on an authored record too (an iam-policy, a change-mgmt hit, a "
             f"tacit-knowledge registry entry), or leave it `indeterminate`"
         )
     return None
 
 
-def _authz_contract_reading(
-    hid: str,
-    contract: AuthorizationContract,
-    declarers: dict[str, list[tuple[str, str]]],
-    verdicts: dict[str, list[tuple[str, str, bool]]],
-    *,
-    keyword: str = "benign",
-    gap_paid: frozenset[tuple[str, str]] | None = None,
-) -> tuple[str | None, bool]:
-    """Why this ONE contract on this LIVE hypothesis does not close `keyword` (or `None`), and
-    whether the process-gap reading was the one applied.
-
-    `gap_paid` is `None` for `benign`. For `unsanctioned-benign` it holds the `(contract id,
-    anchor kind)` pairs a paid `basis=exhausted` row searched; a contract with no `authorized`
-    row is then read as a process gap. One with any `authorized` row says the activity WAS
-    allowed, so it is read as `benign` reads it, and a row beside it saying otherwise
-    contradicts it.
-    """
-    cid = _cell(contract, "id") or "?"
-    unattributable, rows = _attributable_rows(hid, contract, declarers, verdicts, keyword)
-    if unattributable is not None:
-        return unattributable, False
-    if gap_paid is not None and not any(v == "authorized" for v, _cited in rows):
-        anchor = _anchor_kind(contract)
-        return _process_gap_verdict(hid, contract, cid, anchor, rows, keyword, gap_paid), True
-    return _authorized_verdict(hid, cid, rows, keyword), False
 
 
-def _authz_contract_error(
-    hid: str,
-    contract: AuthorizationContract,
-    declarers: dict[str, list[tuple[str, str]]],
-    verdicts: dict[str, list[tuple[str, str, bool]]],
-    *,
-    keyword: str = "benign",
-    gap_paid: frozenset[tuple[str, str]] | None = None,
-) -> str | None:
-    """Why this ONE contract on this LIVE hypothesis does not close `keyword` — or `None`."""
-    why, _via_gap = _authz_contract_reading(
-        hid, contract, declarers, verdicts, keyword=keyword, gap_paid=gap_paid,
-    )
-    return why
-
-
-def authz_contract_readings(
+def outstanding_authz_contracts(
     companion: CompanionBody,
-    *,
-    keyword: str = "benign",
-    gap_paid: frozenset[tuple[str, str]] | None = None,
-) -> list[tuple[str, AuthorizationContract, str | None, bool]]:
-    """Every `(hypothesis, contract, why-not-discharged or None, read-as-process-gap)` on a
-    live hypothesis: one walk that `outstanding_authz_contracts` filters, and that the
-    `unsanctioned-benign` price reads whole to learn which contracts the gap discharged."""
+) -> list[tuple[str, AuthorizationContract, str]]:
+    """Every `(hypothesis, contract, why)` on a live hypothesis that no `:R authz` row
+    discharges — the definition of "this authorization question is still open".
+
+    Public so `_check_benign_authz` and `frontier._open_contracts` share one answer. A second
+    reading of "discharged" — a bare `fulfills_contract` id set, say — silently disagrees with
+    this one on every shared id, and in the harmful direction: the frontier would drop the
+    contract that is actually wedging the close. A shared id is scoped by anchor kind
+    (`_authz_contract_error`).
+    """
     live = set(_walkers.live_hypothesis_ids(companion))
     hyps = _walkers.all_hypotheses(companion)
     declarers = _declarers_by_contract_id(companion)
@@ -239,7 +139,7 @@ def authz_contract_readings(
                  bool(_cell(row, "cites_past_case")))
             )
 
-    out: list[tuple[str, AuthorizationContract, str | None, bool]] = []
+    out: list[tuple[str, AuthorizationContract, str]] = []
     for hid in sorted(live):
         hyp = hyps.get(hid)
         if hyp is None:
@@ -247,35 +147,12 @@ def authz_contract_readings(
         for c in hyp.get("authorization_contract") or []:
             if not isinstance(c, dict):
                 continue
-            why, via_gap = _authz_contract_reading(
-                hid, c, declarers, verdicts, keyword=keyword, gap_paid=gap_paid,
-            )
-            out.append((hid, c, why, via_gap))
+            found = _authz_contract_error(hid, c, declarers, verdicts)
+            if found is not None:
+                out.append((hid, c, found))
     return out
 
 
-def outstanding_authz_contracts(
-    companion: CompanionBody,
-    *,
-    keyword: str = "benign",
-    gap_paid: frozenset[tuple[str, str]] | None = None,
-) -> list[tuple[str, AuthorizationContract, str]]:
-    """Every `(hypothesis, contract, why)` on a live hypothesis that no `:R authz` row
-    discharges — the definition of "this authorization question is still open".
-
-    Public so `_check_benign_authz` and `frontier._open_contracts` share one answer. A second
-    reading of "discharged" — a bare `fulfills_contract` id set, say — silently disagrees with
-    this one on every shared id, and in the harmful direction: the frontier would drop the
-    contract that is actually wedging the close. A shared id is scoped by anchor kind
-    (`_attributable_rows`).
-    """
-    return [
-        (hid, c, why)
-        for hid, c, why, _via_gap in authz_contract_readings(
-            companion, keyword=keyword, gap_paid=gap_paid,
-        )
-        if why is not None
-    ]
 
 
 def _check_benign_authz(companion: CompanionBody) -> list[str]:

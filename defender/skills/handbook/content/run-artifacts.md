@@ -64,7 +64,7 @@ episode dir alone.
   egress. Frontmatter is the load-bearing part: the
   learning-loop normalizer parses it, so a run with no frontmatter is unusable.
   `disposition` is a closed enum (`benign` | `false-positive` | `inconclusive`
-  | `malicious` | `unsanctioned-benign` | `unresolved`); schema lives in `defender/SKILL.md` §REPORT.
+  | `malicious` | `unresolved`); schema lives in `defender/SKILL.md` §REPORT.
   `unresolved` (#923) is the HOST's own verdict — recorded when a run is cut
   short without a settled finding (a gate overrule, a review that could not
   complete, or the framework's own close of a run cut short) — never written by

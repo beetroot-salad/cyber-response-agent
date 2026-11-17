@@ -10,7 +10,7 @@ from typing import Any
 
 from defender._model import model
 from defender._text import strip_zero_width
-from defender._vocab import DISPOSITION_ENUM, PROCESS_GAP_DISPOSITION
+from defender._vocab import DISPOSITION_ENUM
 from .. import _walkers, vocab
 from ..parser import (
     is_conclude_empty_marker,
@@ -24,21 +24,12 @@ from ._diag import REFUTED_WEIGHT
 from ._refs import _HYPOTHESIS_DECLARING_BLOCKS, _known_ids, _leads
 from defender.records.formats import run_id_fault
 
-from ._structure import (
-    PAST_CASE,
-    _cell,
-    _check_vocab,
-    _declared_impact_predictions,
-    _folded_grounding,
-    _qualify,
-)
+from ._structure import PAST_CASE, _cell, _check_vocab, _folded_grounding
 from ._state import (
     _check_benign_authz,
     _check_benign_open_slots,
     _declarers_by_contract_id,
-    outstanding_authz_contracts,
 )
-from ._authorization import authz_contract_readings
 
 
 def _rendered_disposition(value: object) -> str | None:
@@ -169,7 +160,7 @@ def _check_false_positive_gating(companion: CompanionBody) -> list[str]:
     return errors
 
 
-def _check_benign_grounding(companion: CompanionBody, *, keyword: str = "benign") -> list[str]:
+def _check_benign_grounding(companion: CompanionBody) -> list[str]:
     """`benign` needs a log that recorded what the alert was about: a prologue vertex.
 
     The other benign checks refuse contradictions (an open slot, an unfulfilled contract) and
@@ -180,8 +171,8 @@ def _check_benign_grounding(companion: CompanionBody, *, keyword: str = "benign"
     """
     if not (companion.get("prologue") or {}).get("vertices"):
         return [
-            f"disposition {keyword} blocked: no `:V prologue.vertices` row — {keyword} says the "
-            f"alerted activity was accounted for, so the log has to name the entity the "
+            "disposition benign blocked: no `:V prologue.vertices` row — benign says the "
+            "alerted activity was accounted for, so the log has to name the entity the "
             "alert was about. An `investigation.md` that records no vertex records no "
             "investigation; conclude `inconclusive` instead."
         ]
@@ -370,23 +361,13 @@ def _check_authz_row_grounding(companion: CompanionBody) -> list[str]:
     ]
 
 
-def _benign_price(
-    companion: CompanionBody, *, keyword: str, authz_refusals: list[str],
-) -> list[str]:
-    """`benign`'s price, which `unsanctioned-benign` pays too: one list, so a check added to
-    one is added to both. Only how the authz contracts are read differs, so the caller passes
-    those refusals in."""
-    errors = _check_benign_grounding(companion, keyword=keyword)
-    errors += _check_benign_open_slots(companion, keyword=keyword)
-    errors += authz_refusals
+def _check_benign_gating(companion: CompanionBody) -> list[str]:
+    errors: list[str] = []
+    errors += _check_benign_grounding(companion)
+    errors += _check_benign_open_slots(companion)
+    errors += _check_benign_authz(companion)
     errors += _check_authz_row_grounding(companion)
     return errors
-
-
-def _check_benign_gating(companion: CompanionBody) -> list[str]:
-    return _benign_price(
-        companion, keyword="benign", authz_refusals=_check_benign_authz(companion),
-    )
 
 
 #: The `basis` value that claims something about dispatch, and so owes a receipt. `retry`
@@ -401,10 +382,7 @@ assert BASIS_EXHAUSTED in vocab.AUTHZ_INDET_BASIS
 assert BASIS_DEFAULT in vocab.AUTHZ_INDET_BASIS
 
 
-def _contract_anchor_kind(
-    companion: CompanionBody, row: Any,
-    declarers: dict[str, list[tuple[str, str]]] | None = None,
-) -> str:
+def _contract_anchor_kind(companion: CompanionBody, row: Any) -> str:
     """The anchor kind whose system a `basis=exhausted` claim is checked against: the contract's
     own, via `_declarers_by_contract_id`. When a shared `ac<n>` names several kinds, the row's
     own `anchor_kind` breaks the tie (as in `_authz_contract_error`), and it is the fallback when
@@ -412,18 +390,13 @@ def _contract_anchor_kind(
     """
     row_kind = _cell(row, "anchor_kind")
     cid = _cell(row, "fulfills_contract")
-    if declarers is None:  # lint-default: ok — standalone callers; walks over rows pass it once
-        declarers = _declarers_by_contract_id(companion)
-    kinds = {kind for _hid, kind in declarers.get(cid, [])}
+    kinds = {kind for _hid, kind in _declarers_by_contract_id(companion).get(cid, [])}
     if row_kind in kinds or not kinds:
         return row_kind
     return next(iter(kinds)) if len(kinds) == 1 else row_kind
 
 
-def _exhausted_receipt_error(
-    companion: CompanionBody, row: Any,
-    declarers: dict[str, list[tuple[str, str]]] | None = None,
-) -> str | None:
+def _exhausted_receipt_error(companion: CompanionBody, row: Any) -> str | None:
     """Does this `basis=exhausted` row's own lead back the claim, or `None`."""
     lead_id = _cell(row, "resolved_by_lead")
     where = (
@@ -445,7 +418,7 @@ def _exhausted_receipt_error(
             f"{BASIS_DEFAULT}` (the contract has not been worked yet) or point the row at the "
             f"lead that made the calls"
         )
-    kind = _contract_anchor_kind(companion, row, declarers)
+    kind = _contract_anchor_kind(companion, row)
     wanted = vocab.ANCHOR_KIND_SYSTEMS.get(kind)
     if wanted is None:
         return None
@@ -468,8 +441,7 @@ def exhausted_contract_ids(companion: CompanionBody) -> frozenset[str]:
 
     Read by `frontier._open_contracts`, which stops offering these for another retrieval loop,
     while `outstanding_authz_contracts` still reports them so the benign gate blocks and
-    `on_indet` escalates — unless the contract was planned `on_indet process-gap`, when a paid
-    exhaustion lets `unsanctioned-benign` close on it (`outstanding_authz_under`). Keyed per fulfilled id: one row's claim says nothing about a sibling
+    `on_indet` escalates. Keyed per fulfilled id: one row's claim says nothing about a sibling
     contract. Whether the claim was paid is `_check_authz_basis`'s business.
     """
     return frozenset(
@@ -521,153 +493,6 @@ def _check_authz_basis(companion: CompanionBody) -> list[str]:
         problem = _exhausted_receipt_error(companion, row)
         if problem is not None:
             errors.append(problem)
-    return errors
-
-
-#: The `:R impact` grade that says a consequence stayed inside its threshold.
-IMPACT_WITHIN = "within"
-assert IMPACT_WITHIN in vocab.IMPACT_VERDICT
-
-
-def _paid_exhaustions(companion: CompanionBody) -> frozenset[tuple[str, str]]:
-    """The `(contract id, anchor kind)` pairs some `:R authz` row answered `indeterminate` with a
-    PAID `basis=exhausted`: the searches `unsanctioned-benign` may count as worked and empty.
-    Keyed by the contract's anchor kind, so a row for a same-id twin under another kind pays
-    only for the twin."""
-    declarers = _declarers_by_contract_id(companion)
-    return frozenset(
-        (_cell(row, "fulfills_contract"), _contract_anchor_kind(companion, row, declarers))
-        for row in _walkers.iter_authz_resolutions(companion)
-        if _cell(row, "verdict") == AUTHZ_INDETERMINATE
-        and _cell(row, "basis") == BASIS_EXHAUSTED
-        and _exhausted_receipt_error(companion, row, declarers) is None
-    )
-
-
-def outstanding_authz_under(
-    companion: CompanionBody, disposition: str | None,
-) -> list[tuple[str, Any, str]]:
-    """`outstanding_authz_contracts` as the close under `disposition` reads it: the one place
-    that knows `unsanctioned-benign` also discharges a planned, paid process gap. The closure
-    gate reads it too, so the two name the same open contracts."""
-    if disposition != PROCESS_GAP_DISPOSITION:
-        return outstanding_authz_contracts(companion)
-    return outstanding_authz_contracts(
-        companion, keyword=PROCESS_GAP_DISPOSITION, gap_paid=_paid_exhaustions(companion),
-    )
-
-
-def impact_grades(companion: CompanionBody) -> dict[str, list[str]]:
-    """Every `:R impact` grade, keyed by the qualified predicate it grades — the one reading of
-    how a `pred_ref` resolves, shared with `_check_impact_closure`."""
-    grades: dict[str, list[str]] = {}
-    for lead in _leads(companion):
-        lid = lead.get("id", "?")
-        for row in (lead.get("outcome") or {}).get("impact_resolutions") or []:
-            ref = _cell(row, "prediction_ref") if isinstance(row, dict) else ""
-            if ref:
-                grades.setdefault(_qualify(lid, ref), []).append(_cell(row, "verdict"))
-    return grades
-
-
-def unmeasured_under(companion: CompanionBody, disposition: str | None) -> set[str]:
-    """The declared impact predicates the close under `disposition` refuses as never graded.
-    Only `unsanctioned-benign` refuses them; the closure gate stands down for these, so the
-    model is not told to defer a predicate the price says a deferral cannot pay for."""
-    if disposition != PROCESS_GAP_DISPOSITION:
-        return set()
-    grades = impact_grades(companion)
-    return {ref for ref in _declared_impact_predictions(companion) if not grades.get(ref)}
-
-
-def _check_process_gap_impact(companion: CompanionBody) -> list[str]:
-    """"No harm detected" is a claim about measurements: at least one impact predicate declared,
-    and every declared one graded, every grade `within`. A deferred predicate was not measured,
-    so it does not count."""
-    keyword = PROCESS_GAP_DISPOSITION
-    declared = list(_declared_impact_predictions(companion))
-    if not declared:
-        return [
-            f"disposition {keyword} blocked: no impact predicate declared — the close says the "
-            f"activity did no harm, so register what harm would look like "
-            f"(`:L l-NNN.impact_preds`) and grade it with `:R impact`"
-        ]
-    grades = impact_grades(companion)
-    errors: list[str] = []
-    for ref in declared:
-        graded = grades.get(ref)
-        if not graded:
-            errors.append(
-                f"disposition {keyword} blocked: impact predicate {ref} was declared and never "
-                f"graded — a deferral is not a measurement, and an unmeasured consequence is not "
-                f"a `{IMPACT_WITHIN}`. Grade it, or conclude `inconclusive`"
-            )
-        for verdict in graded or []:
-            if verdict != IMPACT_WITHIN:
-                errors.append(
-                    f"disposition {keyword} blocked: impact predicate {ref} graded "
-                    f"{verdict or '<none>'!r}, not '{IMPACT_WITHIN}' — a consequence outside its "
-                    f"threshold, or one that could not be graded, is an escalation"
-                )
-    return errors
-
-
-#: Where the one story `unsanctioned-benign` names may stand: measured toward, not merely
-#: left unrefuted.
-_SUPPORTED_WEIGHTS = frozenset({"+", vocab.CONFIRMED_WEIGHT})
-assert set(vocab.WEIGHT_BUCKETS) >= _SUPPORTED_WEIGHTS
-
-
-def _check_one_story(companion: CompanionBody, gap_holders: set[str]) -> list[str]:
-    """The close names ONE story: legitimate activity whose only defect is the missing record.
-    So exactly one hypothesis is left standing, it holds the process gap, and a measurement
-    moved toward it. A second gap holder is no exemption: the record cannot say which story is
-    the legitimate one, so the stolen-credential reading with its own planned gap must be
-    refuted like any other."""
-    keyword = PROCESS_GAP_DISPOSITION
-    weights = _walkers.final_weights(companion)
-    live = sorted(_walkers.live_hypothesis_ids(companion))
-    if len(live) > 1:
-        return [
-            f"disposition {keyword} blocked: hypotheses {', '.join(live)} are all still "
-            f"standing — the close names one story, legitimate activity whose one defect is a "
-            f"missing record, so every other story has to be refuted (`--`) by a measurement, "
-            f"whatever contracts it holds. Refute all but one, or conclude in another vocabulary"
-        ]
-    errors: list[str] = []
-    for hid in live:
-        if hid not in gap_holders:
-            continue
-        if weights.get(hid) not in _SUPPORTED_WEIGHTS:
-            errors.append(
-                f"disposition {keyword} blocked: hypothesis {hid} holds the process gap but "
-                f"stands at {weights.get(hid) or 'null'} — the close says this activity "
-                f"happened and was legitimate, which a measurement has to support (`+` or "
-                f"`++`), not merely fail to refute"
-            )
-    return errors
-
-
-def _check_unsanctioned_benign_gating(companion: CompanionBody) -> list[str]:
-    """`benign`'s price with the process-gap exception, plus what the exception owes: at least
-    one contract discharged that way, one story left standing and supported, and the harm
-    measured."""
-    keyword = PROCESS_GAP_DISPOSITION
-    readings = authz_contract_readings(
-        companion, keyword=keyword, gap_paid=_paid_exhaustions(companion),
-    )
-    open_refusals = [why for _hid, _c, why, _gap in readings if why is not None]
-    errors = _benign_price(companion, keyword=keyword, authz_refusals=open_refusals)
-    gap_holders = {hid for hid, _c, why, via_gap in readings if via_gap and why is None}
-    if not gap_holders and not open_refusals:
-        errors.append(
-            f"disposition {keyword} blocked: no authz contract was discharged as a process gap "
-            f"— nothing on the record was left unsanctioned. If every contract is authorized the "
-            f"close is `benign`"
-        )
-    if gap_holders:
-        errors += _check_one_story(companion, gap_holders)
-    errors += _check_process_gap_impact(companion)
     return errors
 
 
@@ -724,24 +549,10 @@ _INCONCLUSIVE_PRICE = _Price(
     ),
 )
 
-_UNSANCTIONED_BENIGN_PRICE = _Price(
-    check=_check_unsanctioned_benign_gating,
-    rationale=(
-        "`unsanctioned-benign` says the activity did no harm but no record authorized it — a "
-        "process finding, not a security one. It is `benign`'s price with one exception: a "
-        "contract planned `on_indet process-gap`, whose anchor kind has a home system, is "
-        "discharged by a paid `basis=exhausted` search of that system. It also owes what the "
-        "exception claims: at least one contract discharged that way, none `unauthorized`; one "
-        "story left standing, holding that contract and supported (`+`/`++`), every other "
-        "refuted (`--`); and every declared impact predicate graded `within`."
-    ),
-)
-
 _DISPOSITION_GATES: dict[str, _Price] = {
     "benign": _BENIGN_PRICE,
     "false-positive": _FALSE_POSITIVE_PRICE,
     "inconclusive": _INCONCLUSIVE_PRICE,
-    PROCESS_GAP_DISPOSITION: _UNSANCTIONED_BENIGN_PRICE,
 }
 
 

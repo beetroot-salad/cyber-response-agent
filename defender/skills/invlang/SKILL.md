@@ -378,10 +378,8 @@ keyed on the contract id. Columns:
   what an absent cell means — this contract has not been worked yet) or
   `exhausted` (every anchor kind applicable to this contract's predicate
   was actually queried this run and none answered). `exhausted` stops the
-  run being pushed back to re-work the contract; on a contract declared
-  `on_indet process-gap` it is also what lets `disposition
-  unsanctioned-benign` close on it, and every other close still treats it
-  as an escalation. It is checked against this
+  run being pushed back to re-work the contract and changes nothing else —
+  the verdict and its forced escalation stand. It is checked against this
   run's own transcript: the lead named by `resolved_by` must have come back
   with something, and its `:L findings` `system` cell must name the system
   that answers the contract's anchor kind. Write `retry` (or nothing) when
@@ -391,11 +389,8 @@ keyed on the contract id. Columns:
 Disposition gating: `disposition: benign` requires every authz
 contract on a surviving hypothesis to have a fulfilling `:R authz`
 row with `verdict: authorized`. `unauthorized` or `indeterminate`
-forces escalation per the contract's `on_unauth` / `on_indet`, with one
-exception: under `disposition: unsanctioned-benign`, a contract declared
-`on_indet process-gap` is discharged by a paid `basis=exhausted` row
-(at least one must be), never one that is `unauthorized` or still
-`retry`. A declared contract with no fulfilling row is treated as
+forces escalation per the contract's `on_unauth` / `on_indet`. A
+declared contract with no fulfilling row is treated as
 `indeterminate`.
 
 **`anchor_kind: tacit-knowledge` costs two rows, not one.** The registry
@@ -541,14 +536,14 @@ summary                "Login matched established bastion usage"
 ```
 
 - `disposition` — closed vocab (`enum disposition`), and the SAME keywords
-  `report.md`'s frontmatter carries — SIX of them, `unresolved` the sixth.
+  `report.md`'s frontmatter carries — FIVE of them, `unresolved` the fifth.
   A value outside the enum is denied on write; there is no `escalate`
   keyword — an escalation is `termination.category exhaustion-escalation`
   with `disposition inconclusive`. `unresolved` is a member of the enum
   because it must be free to name in prose, but it is the HOST's own
   verdict — recorded when a run is cut short without a settled finding —
   and `conclude.disposition unresolved` is denied on write just like a
-  garbage value; you never conclude it yourself. FOUR keywords carry an
+  garbage value; you never conclude it yourself. THREE keywords carry an
   ENTRY PRICE. `benign` needs at least one `:V prologue.vertices` row — a
   log that never recorded the alerted entity accounts for nothing — plus
   every `??` slot resolved (§Open questions) and every authz contract on a
@@ -557,16 +552,8 @@ summary                "Login matched established bastion usage"
   rule that fired on a different kind of behavior than it claims — needs
   `detection_notes` and `entity_check` below; `inconclusive` needs at
   least one `ceiling_test` RECEIPT (below) — a pointer the host verifies
-  against this run's own transcript, never a sentence it judges;
-  `unsanctioned-benign` — harmless activity with no authorization record —
-  needs benign's price, except that a contract declared `on_indet
-  process-gap` may be discharged by a paid `basis=exhausted` row (at
-  least one must be, none `unauthorized`, and one with any `authorized` row
-  is read as benign reads it); exactly one hypothesis left standing, the
-  one holding that contract, at `+` or `++` — every other is refuted
-  `--`, even one carrying a process gap of its own; and at least one impact predicate declared, every one graded
-  `within` — a deferral is not a grade. Rows
-  must be distinct. All four prices are charged twice: on the write,
+  against this run's own transcript, never a sentence it judges. Rows
+  must be distinct. All three prices are charged twice: on the write,
   against the keyword you conclude under, and again by
   `close_investigation`, against the keyword you close under. So
   concluding under a cheaper keyword buys nothing — the log itself still
@@ -817,17 +804,6 @@ Authz contracts live in `:H h-NNN.authz`:
 :H h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
 ac1|proposed|iam-policy|"service account allowed to read object at event time"|escalate|escalate
 ```
-
-`on_indet` says what an UNSETTLED answer means, decided now, before the
-search runs (`enum authz.on_indet`): `escalate`, or `process-gap` — a
-search that is worked and comes back empty may then close
-`unsanctioned-benign`. Choose `process-gap` only where a missing record
-would be a paperwork failure rather than a warning sign: routine work the
-actor's role covers, on systems they normally touch. Anything with real
-blast radius (security tooling turned off, a privileged account created,
-a bulk export) stays `escalate`. `process-gap` is accepted only on an
-anchor kind with a home system to search — change-mgmt, iam-policy or
-tacit-knowledge.
 
 `ac<n>` numbers across the DOCUMENT, not per hypothesis the way
 `p<n>`/`r<n>` do: the resolving `:R authz` row names only the contract
