@@ -275,7 +275,6 @@
  "tests/learning/core/test_queue_idempotency.py": 9.0,
  "tests/learning/core/test_readers.py": 1.0,
  "tests/learning/core/test_row_schema.py": 0.3,
- "tests/learning/core/test_validate_content_less.py": 0.1,
  "tests/learning/curation/test_1278_call_folders.py": 34.3,
  "tests/learning/curation/test_1278_curator_fates.py": 17.4,
  "tests/learning/curation/test_author_atomic.py": 28.4,
