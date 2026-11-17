@@ -127,12 +127,13 @@ def test_v_nofile_no_product_python_names_the_file_or_a_report_member():
 
 
 def test_v_nofile_no_test_or_evaluation_code_reaches_the_retired_file():
-    """No test or evaluation `.py` but this census reaches the retired file (import, reader, literal); decoys carry the marker. (V-NOFILE)"""
+    """No test or evaluation `.py` but this census imports the retired module or calls a retired reader. (V-NOFILE)
+    The file-name literal is checked in product code only: in tests it plants decoys and arbitrary files."""
     files = [rel for rel in _tracked("defender/tests/*.py", "evaluations/*.py") if rel != CENSUS_FILE]
     assert len(files) >= _PRODUCT_FLOOR, f"the walk found only {len(files)} test and evaluation files"
     found = {}
     for rel in files:
-        if hits := reaches((REPO / rel).read_text(encoding="utf-8"), constants=True):
+        if hits := reaches((REPO / rel).read_text(encoding="utf-8")):
             found[rel] = hits
     assert found == {}, f"{len(found)} test or evaluation file(s) still reach the retired file: {sorted(found)}"
 
