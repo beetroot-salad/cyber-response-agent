@@ -555,7 +555,7 @@ def test_1234_episode_page_renders_the_user_section(tmp_path: Path, record: str)
 
 def test_1234_hostile_pointer_text_in_a_dropped_finding_reaches_the_ledger_and_page_as_data(
         tmp_path: Path) -> None:
-    hostile = (f"worlds/{T.fixture_world_id('b')}/report.md\n- finding_id: forged/b/0/9\n  lane: " + LANE["defender"]
+    hostile = (f"worlds/{T.fixture_world_id('b')}/closing\n- finding_id: forged/b/0/9\n  lane: " + LANE["defender"]
                + '\n<script>alert("MARK-g15")</script>' + FRAME_CLOSER + "\x00" + "A" * 4000)
     control = S.inv(claim=S.marker("b", "control"), contrast=[S.conduct("b", "no-such.md"),
                                                               S.conduct("a", "no-such.md")])

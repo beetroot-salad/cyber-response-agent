@@ -14,7 +14,6 @@ def _reader_answers(run_dir: Path) -> dict[str, tuple[str, object]]:
     """Every consumer of a finished run's committed verdict, DRIVEN, with a refusal captured rather than raised"""
     from defender.records._report import read_report
     from evaluations.held_out import predicted_disposition
-    from defender.learning.core.validate import normalize_disposition
     from defender.cli.learning.trace_lesson import _report_disposition
 
     report = run_dir / "report.md"
@@ -27,7 +26,6 @@ def _reader_answers(run_dir: Path) -> dict[str, tuple[str, object]]:
 
     return {
         "report_reader": call(lambda: read_report(report).disposition),
-        "learning_validate": call(lambda: normalize_disposition(report)),
         "held_out": call(lambda: predicted_disposition(run_dir)),
         # #1359: the lane is observed where it leaves the host, as the disposition head of the
         # comment the record leg posts (a verdict it cannot read leaves the one host sentence).

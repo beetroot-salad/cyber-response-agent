@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -16,7 +17,6 @@ from defender.records._episode_handle import Episode
 from defender.tests.support.shared.filesystem import _spec1047 as S
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.support.learning.branch import _triplet_947 as T
-from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.sandbox._spec791 import (
     SpecTail,
     drive_tail,
@@ -105,7 +105,7 @@ def test_a_pre_existing_record_at_the_destination_is_overwritten_through_the_gua
     assert victim.read_text(encoding="utf-8") == "VICTIM\n", (
         "the archive wrote this world's record through a hard link planted at the "
         "destination, landing it outside the archive tree")
-    assert not (world / "report.md").exists(), (
+    assert not (world / "investigation.md").exists(), (
         "the archive copied part of the world before refusing the planted hard link")
 
 
@@ -119,7 +119,7 @@ def test_an_unreadable_sidecar_is_copied_verbatim_and_the_judge_reads_no_record(
         archived = ep / "worlds" / T.world_id(ep, "b") / S.run_end_name()
         assert archived.read_text(encoding="utf-8") == raw, (
             f"{name}: the archive rewrote the sidecar's bytes instead of copying them")
-        assert (ep / "worlds" / T.world_id(ep, "b") / "report.md").is_file(), (
+        assert (ep / "worlds" / T.world_id(ep, "b") / "investigation.md").is_file(), (
             f"{name}: an unreadable sidecar cost the world its other artifacts")
         graded = S.cut_short_episode(tmp_path / f"{name}-graded")
         S.plant_archived_record(graded, "b", raw=raw)
@@ -135,7 +135,7 @@ def test_a_directory_squatting_the_sidecars_name_refuses_the_world_like_any_plan
     S.sidecar_path(dirs["b"]).mkdir(parents=True, exist_ok=True)
     with pytest.raises(S.refusals()), Episode.open(ep) as episode:
         _archive().archive_episode(episode, {T.world_id(episode.dir, label): path for label, path in dirs.items()})
-    assert not (ep / "worlds" / T.world_id(ep, "b") / "report.md").exists(), (
+    assert not (ep / "worlds" / T.world_id(ep, "b") / "investigation.md").exists(), (
         "the archive copied part of the world before refusing it")
 
 
@@ -279,28 +279,31 @@ def test_the_driver_records_whether_the_model_had_already_closed_when_the_exit_w
         "`closed_before_cut: true`, so the field distinguishes nothing")
 
 
-def test_a_failed_run_end_write_is_a_reason_not_to_write_the_forced_report(tmp_path):
-    from defender.tests.support.runtime.engine import _spec923
+def test_a_failed_run_end_write_is_a_reason_not_to_write_the_forced_closing_record(tmp_path):
+    from defender.tests.storage.verdict_1534 import _spec1534 as V
 
     deps, run_dir = _deps(tmp_path / "blocked")
-    blocked = S.sidecar_path(run_dir)
-    blocked.mkdir(parents=True, exist_ok=True)
-    _run, truncated_by, _reason = _spec923.drive_to_retry_exhaustion(deps)
+    S.sidecar_path(run_dir).mkdir(parents=True, exist_ok=True)
+    with V.run_store(V.runs_base(tmp_path / "blocked"), "blocked-1047") as store:
+        _run, truncated_by, _reason = V.drive_forced_close(deps, store)
+        database = Path(store.path)
     assert truncated_by == "retry-exhausted", (
-        "the run did not reach a forced-close-set exit, so no forced report was ever owed")
+        "the run did not reach a forced-close-set exit, so no forced close was ever owed")
     assert S.sidecar_doc(run_dir) is None, (
         "fixture: the record write landed despite a directory at its own path")
-    assert not (run_dir / "report.md").exists(), (
-        "the forced `unresolved` report was written although the run-end record write failed")
+    assert V.scalar_rows(database, run_dir.name) == [], (
+        "the forced `unresolved` closing record was written although the run-end record write failed")
 
     ok_deps, ok_run = _deps(tmp_path / "ok")
-    _run, ok_truncated, _reason = _spec923.drive_to_retry_exhaustion(ok_deps)
+    with V.run_store(V.runs_base(tmp_path / "ok"), "ok-1047") as store:
+        _run, ok_truncated, _reason = V.drive_forced_close(ok_deps, store)
+        ok_database = Path(store.path)
     control_failed = (
         "the control failed: the same exit class with a writable sidecar path did not produce "
-        "a record AND a forced report, so the suppression above is not about the failed write")
+        "a record AND a forced closing record, so the suppression above is not about the failed write")
     assert ok_truncated == "retry-exhausted", control_failed
     assert S.sidecar_doc(ok_run) is not None, control_failed
-    assert (ok_run / "report.md").is_file(), control_failed
+    assert len(V.scalar_rows(ok_database, ok_run.name)) == 1, control_failed
 
 
 def test_one_world_is_cut_short_while_a_sibling_archive_is_refused(tmp_path):
@@ -315,13 +318,13 @@ def test_one_world_is_cut_short_while_a_sibling_archive_is_refused(tmp_path):
     S.plant_sidecar(dirs["c"], truncated_by="aborted")
     secret = tmp_path / "secret.md"
     secret.write_text("ROOT-PRIVATE-KEY", encoding="utf-8")
-    (dirs["c"] / "report.md").unlink()
-    (dirs["c"] / "report.md").symlink_to(secret)
+    (dirs["c"] / "investigation.md").unlink()
+    (dirs["c"] / "investigation.md").symlink_to(secret)
     with pytest.raises(S.refusals()), Episode.open(ep) as episode:
         _archive().archive_episode(episode, {T.world_id(episode.dir, label): path for label, path in dirs.items()})
     assert _record(ep, "b") == {"truncated_by": "request-limit", "closed_before_cut": False}, (
         "world c's refusal cost world b the record its own run produced")
-    assert not (ep / "worlds" / T.world_id(ep, "c") / "report.md").exists()
+    assert not (ep / "worlds" / T.world_id(ep, "c") / "investigation.md").exists()
 
 
 def test_a_run_dir_emptied_or_corrupted_by_the_box_at_run_end_still_grades_a_genuinely_cut_short_world_correctly(
@@ -497,40 +500,21 @@ def test_pass_lessons_commit_still_returns_none_when_the_gradable_set_is_empty(t
 # the run dir itself
 
 
-def test_a_host_write_into_the_run_dir_still_goes_through_write_guarded_and_the_destination_screen(
-        tmp_path):
-    from defender.tests.support.runtime.engine import _spec923
+def test_the_forced_close_of_a_run_cut_short_writes_its_closing_record_into_the_run_database(tmp_path):
+    """The forced close lands one `unresolved` record in the lineage database, not a file in the run folder. (V-ONE)"""
+    from defender.tests.storage.verdict_1534 import _spec1534 as V
 
-    victim = tmp_path / "victim.md"
-    victim.write_text("VICTIM\n", encoding="utf-8")
-    deps, run_dir = _spec923.main_deps(tmp_path / "planted")
-    (run_dir / "report.md").symlink_to(victim)
-    _run, truncated_by, _reason = _spec923.drive_to_retry_exhaustion(deps)
+    deps, run_dir = _deps(tmp_path)
+    with V.run_store(V.runs_base(tmp_path), "forced-1047") as store:
+        _run, truncated_by, _reason = V.drive_forced_close(deps, store)
+        database = Path(store.path)
     assert truncated_by is not None, "the run was not cut short, so no forced close was due"
-    assert victim.read_text(encoding="utf-8") == "VICTIM\n", (
-        "the host's forced close followed a link the box planted at report.md and wrote this "
-        "run's report wherever it pointed")
-
-    clean_deps, clean_run = _spec923.main_deps(tmp_path / "clean")
-    _spec923.drive_to_retry_exhaustion(clean_deps)
-    assert (clean_run / "report.md").is_file(), (
-        "control: the forced close writes no report even with nothing planted")
+    rows = V.scalar_rows(database, run_dir.name)
+    assert [row[1] for row in rows] == ["unresolved"], rows
+    assert not (run_dir / "report.md").exists()  # lint-run-records: ok — the file is gone for good
 
 
 # the report's other readers — deliberately unmoved
-
-
-def test_the_episode_reader_and_the_graded_record_disagree_about_a_cut_short_world(tmp_path):
-    episode_mod = S.mod("learning.branch.episode")
-    ep = S.cut_short_episode(tmp_path, cut={"b": "request-limit"})
-    (ep / "worlds" / T.world_id(ep, "b") / "report.md").write_text(S.report_text("unresolved"), encoding="utf-8")
-    row = S.graded(ep)["b"]
-    said = J.through_view(ep, episode_mod.verdicts)
-    assert row.get("ungradable") is True, "the cut-short world graded as a verdict"
-    assert row.get("cut_short") == "request-limit"
-    assert said.get("b") == "unresolved", (
-        "the episode reader stopped reading a cut-short world's archived report as its "
-        "conclusion")
 
 
 @pytest.mark.parametrize(("truncated_by", "closed_before_cut"), [

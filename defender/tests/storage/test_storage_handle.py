@@ -181,15 +181,12 @@ def test_a_field_whose_record_is_unparseable_reads_none_and_records_the_fault(ba
 
 def test_a_field_whose_record_is_wrong_shaped_reads_none_and_records_the_fault(base, run_dir):
     S.plant_stamp(run_dir, commit="c0ffee", dirty=False, tenant_id="t", world_id=17)
-    (run_dir / "report.md").write_text("disposition: [a, list]\n", encoding="utf-8")
     record = S.Run().at(run_dir).record
 
     assert record.world_id is None, "a numeric world_id is a wrong shape, not a value"
-    assert record.disposition is None
     assert record.faults, "the record read as None but recorded no fault"
     # An explicitly-NULL key is no fault: `str | None` admits it.
     S.plant_stamp(run_dir, commit="c0ffee", dirty=False, tenant_id=None, world_id=None)
-    (run_dir / "report.md").write_text("disposition: benign\n", encoding="utf-8")
     quiet = S.Run().at(run_dir).record
     assert quiet.tenant_id is None
     assert quiet.world_id is None

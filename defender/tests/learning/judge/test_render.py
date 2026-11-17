@@ -126,21 +126,65 @@ def test_921_graded_world_keeps_its_own_facts_and_is_not_withheld(tmp_path):
 
 
 def test_921_render_builds_the_input_from_the_archive_the_runs_base_and_the_commit(tmp_path):
-    import shutil
-
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
     T.plant_roster(ep)
     runs = ep / "runs"
-    J.sibling_run_dir(runs, "b")
+    decoy = J.sibling_run_dir(runs, "b")
     git_show = J.FakeGitShow(bodies={("deadbee", "defender/lessons/L1.md"): "# L1 body\n"})
 
     with_dirs = J.render_at(ep, "b", git_show=git_show)
-    shutil.rmtree(runs)
+    # The run's own `report.md` is no input (#1534): the closing record is read through the roster.
+    (decoy / "report.md").unlink()  # lint-run-records: ok — the retired report file is removed to show it is no input
     without = J.render_at(ep, "b", git_show=git_show)
 
     assert with_dirs == without, (
-        "the rendered input changed when the sibling run dirs were removed")
+        "the rendered input changed when the sibling run's report file was removed")
     assert "# L1 body" in _lessons_view(without)
+
+
+def test_1534_the_render_requires_the_episode_run_view_and_has_no_tree_only_fallback(tmp_path):
+    """Omitting the episode run view from the render is a `TypeError`. (V-VIEW)"""
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
+    repository = J.episode_runs_for(ep)
+    with repository.episode_files(ep.name) as episode, pytest.raises(TypeError):
+        _render().render(ep, "b", bound=episode.view())
+
+
+def test_1534_the_prompt_carries_the_records_host_fields_and_entry_lines_and_not_its_summary(tmp_path):
+    """The judged world's prompt names disposition, cause sentence, failure kind, drafted disposition and the entry
+    lines, with model text framed, and omits the summary. (V-FIELDS, OD7)"""
+    from defender.records import closing as C
+
+    cause, failure = next(key for key in C.OPENERS if key[1] is not None)
+    ceiling, baseline = J.ceiling_note("CEILING-NOTE-MARKER"), J.baseline_entry(result="BASELINE-RESULT-MARKER")
+    ep = J.accepted_episode(tmp_path, dispositions={"a": "benign", "b": "malicious", "c": "malicious"},
+                            ledgers={"b": [J.oracle_row("b")], "c": []})
+    J.set_closing(ep, "b", disposition="unresolved", outcome=C.FORCED_INCONCLUSIVE, cause=cause,
+                  failure_kind=failure, drafted_disposition="malicious", ceiling_test=(ceiling,),
+                  runtime_evidence=(baseline,), summary="SUMMARY-MARKER-NEVER-SHOWN")
+    prompt = _world_prompt(ep)
+
+    for host in ("unresolved", C.CAUSE_SENTENCES[cause], failure, "malicious"):
+        assert host in J.outside_untrusted_frames(prompt), f"the host field {host!r} is not in the prompt's host text"
+    assert C.ceiling_line(ceiling) in prompt
+    assert C.baseline_line(baseline) in prompt
+    J.assert_wrapped_untrusted(prompt, "CEILING-NOTE-MARKER", "the ceiling note")
+    J.assert_wrapped_untrusted(prompt, "BASELINE-RESULT-MARKER", "the baseline result")
+    assert "SUMMARY-MARKER-NEVER-SHOWN" not in prompt, "the summary reached the judge (OD7)"
+
+
+def test_1534_a_reference_worlds_forced_close_reads_unresolved_in_its_header_not_its_drafted_disposition(tmp_path):
+    """The reference run's `reached verdict` is the committed disposition; the drafted one is a separate field. (V-FIELDS)"""
+    from defender.records import closing as C
+
+    ep = J.accepted_episode(tmp_path, dispositions={"a": "benign", "b": "malicious", "c": "malicious"},
+                            ledgers={"b": [J.oracle_row("b")], "c": []})
+    J.set_closing(ep, "c", disposition="unresolved", outcome=C.FORCED_INCONCLUSIVE,
+                  cause=C.CAUSE_EVIDENCE_CANNOT_DISCRIMINATE, drafted_disposition="false-positive")
+    prompt = _world_prompt(ep)
+    headers = [line for line in prompt.splitlines() if "reached verdict (" in line]
+    assert [h for h in headers if "unresolved" in h], headers
+    assert not [h for h in headers if "false-positive" in h], headers
 
 
 def test_921_archive_writes_gather_summaries_lessons_loaded_and_alert_json(tmp_path):
@@ -163,7 +207,7 @@ def test_921_archive_writes_gather_summaries_lessons_loaded_and_alert_json(tmp_p
     assert (world / "lessons_loaded.jsonl").is_file()
     assert (world / "alert.json").is_file()
     # The four it already carried are untouched.
-    for name in ("report.md", "investigation.md", "provenance.json", "executed_queries.jsonl"):
+    for name in ("investigation.md", "provenance.json", "executed_queries.jsonl"):
         assert (world / name).exists(), f"{name} stopped being archived"
 
 
@@ -189,7 +233,7 @@ def test_921_the_archived_directory_input_refuses_a_non_artifact_entry_and_keeps
     assert kept.read_text(encoding="utf-8") == "a real summary\n"
     assert not (world / "gather_summaries" / "l-002.md").exists(), (
         "a link's TARGET was copied into the archive as if the world had written it")
-    assert (world / "report.md").exists(), "the rest of the world stopped archiving"
+    assert (world / "investigation.md").exists(), "the rest of the world stopped archiving"
 
 
 def test_921_lesson_bodies_are_not_archived_and_are_read_at_the_recorded_commit(tmp_path):

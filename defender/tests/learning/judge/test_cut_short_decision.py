@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 
 from defender.tests.support.shared.filesystem import _spec1047 as S
+from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.shared._locations_1210 import location_path
 from defender.records._episode_handle import Episode
@@ -255,13 +256,9 @@ def test_no_exit_class_transitions_the_ticket(tmp_path):
     assert seen_writes, "the control failed: no drive wrote anything, so the census is empty"
 
 
-#: The host's forced close as `_close_a_run_cut_short` leaves it: an `unresolved` report.
-FORCED_REPORT = S.report_text("unresolved")
-
-
 def _forced_close(episode_dir):
-    """Overwrite world b's archived report with the host's forced `unresolved` close."""
-    (episode_dir / "worlds" / T.world_id(episode_dir, "b") / "report.md").write_text(FORCED_REPORT, encoding="utf-8")
+    """World b's arm holds the host's forced `unresolved` close (cause: not reviewed)."""
+    J.set_closing(episode_dir, "b", disposition="unresolved")
 
 
 # the third row shape
@@ -303,29 +300,26 @@ def test_a_cut_short_world_does_not_reach_the_family_call_as_a_verdict(tmp_path)
 
 def test_the_third_row_shape_keeps_the_two_tiers_separable(tmp_path):
     ep = S.cut_short_episode(tmp_path, cut={"b": "request-limit"})
-    (ep / "worlds" / T.world_id(ep, "c") / "report.md").unlink()
+    J.no_closing(ep, "c")
     graded = S.graded(ep)
     assert "malformed" not in graded["b"], "the cut-short row claims tier 2"
     assert graded["c"].get("ungradable") is True
     assert graded["c"].get("malformed") is not True, (
         "an absent input was recorded as a malformed one")
     assert graded["c"].get("cut_short") is None, (
-        "a world ungradable for an absent report acquired a cut_short key")
+        "a world ungradable for an absent closing record acquired a cut_short key")
 
 
-def test_an_aborted_budget_or_store_world_names_its_exit_not_a_missing_report(tmp_path):
+def test_an_aborted_budget_or_store_world_names_its_exit_not_a_missing_closing_record(tmp_path):
     for exit_class in S.NO_REPORT_EXITS:
         ep = S.cut_short_episode(tmp_path / exit_class, cut={"b": exit_class})
-        (ep / "worlds" / T.world_id(ep, "b") / "report.md").unlink()
+        J.no_closing(ep, "b")
         row = S.graded(ep)["b"]
         assert row.get("cut_short") == exit_class, (
             f"{exit_class}: the row does not name the exit class")
         reason = row.get("ungradable_reason") or ""
         assert exit_class in reason, (
-            f"{exit_class}: the generic missing-report reason won: {reason!r}")
-        assert "report.md" not in reason, (
-            f"{exit_class}: the reason blames a missing report.md for a class that never "
-            "writes one")
+            f"{exit_class}: the generic missing-input reason won: {reason!r}")
 
 
 # a model that closed, and a run cut short afterwards
@@ -352,9 +346,6 @@ def test_a_world_whose_model_closed_and_was_then_cut_short(tmp_path):
 
 def test_the_record_must_distinguish_a_host_written_close_from_the_models_own(tmp_path):
     ep = S.cut_short_episode(tmp_path, cut={"b": "aborted", "c": "aborted"}, closed=("c",))
-    for label in ("b", "c"):
-        (ep / "worlds" / T.world_id(ep, label) / "report.md").write_text(
-            S.report_text("malicious"), encoding="utf-8")
     graded = S.graded(ep)
     assert graded["b"].get("cut_short") == "aborted", (
         "the world whose model never closed was not filed as cut short")
@@ -423,8 +414,9 @@ def test_a_cut_short_world_and_a_malformed_world_in_the_same_episode(tmp_path):
         dispositions={"a": "benign", "b": "malicious", "c": "malicious", "d": "malicious"},
         ledgers={"b": [S.staged_row("b")], "c": [], "d": []},
         cut={"b": "request-limit"})
-    (ep / "worlds" / T.world_id(ep, "c") / "report.md").write_text(
-        S.report_text("not-a-disposition"), encoding="utf-8")
+    (ep / "worlds" / T.world_id(ep, "c") / "investigation.md").write_text(
+        "# investigation c\n\n```invlang\n:T resolutions\n"
+        "h-001  open → held    [l-001 r1 severe ⟂ e-001 :: cut off here\n", encoding="utf-8")
     graded = S.graded(ep)
     assert graded["b"].get("cut_short") == "request-limit"
     assert "malformed" not in graded["b"], "the cut-short row claims tier 2"
@@ -531,27 +523,6 @@ def test_a_file_named_like_the_archived_run_end_record_planted_anywhere_under_th
     assert archived == S.record_doc("aborted"), (
         f"a plant under the run dir reached the archived record: {archived!r}")
     assert S.graded(ep)["b"].get("cut_short") == "aborted"
-
-
-# report frontmatter — the surface the first design would have trusted
-
-
-def _frontmatter_row(tmp_path, name, extra=None):
-    """One episode whose world b carries a planted `report.md`, graded."""
-    ep = S.cut_short_episode(tmp_path / name)
-    S.plant_frontmatter(ep / "worlds" / T.world_id(ep, "b"), extra=extra or "")
-    return _rows_and_word(ep)
-
-
-def test_grading_given_a_planted_truncated_by_frontmatter_line_with_a_valid_value(tmp_path):
-    """A `truncated_by:` line spliced into world b's report frontmatter, which the report
-    validator admits, changes nothing for any vocabulary member."""
-    control_rows, control_word = _rows_and_word(S.cut_short_episode(tmp_path / "control"))
-    for member in S.vocabulary():
-        rows, word = _frontmatter_row(tmp_path, f"valid-{member}",
-                                      extra=f"truncated_by: {member}\n")
-        assert rows == control_rows, f"{member}: a planted valid member moved the grade"
-        assert word == control_word, f"{member}: a planted valid member moved the word"
 
 
 # the owner's input channel, and whose world a record is about

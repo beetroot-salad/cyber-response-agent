@@ -207,7 +207,7 @@ def test_1025_an_episode_whose_judge_failed_at_the_enqueue_still_renders_its_sta
             assert agent_id.split(":")[1] in world_ids
             self.default = J.as_reply_text(J.reply_doc(
                 bucket="lead-quality", systems=["idp"],
-                findings=[J.finding_doc(evidence=[f"worlds/{world_id}/report.md"
+                findings=[J.finding_doc(evidence=[f"worlds/{world_id}/closing"
                                                   for world_id in world_ids])]))
             return super().__call__(prompt, agent_id=agent_id, **kwargs)
 

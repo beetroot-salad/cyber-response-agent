@@ -76,30 +76,6 @@ def test_1025_a_world_directory_with_no_search_permission_is_that_worlds_refusal
     assert f"f-{E.PASSTHROUGH_WORLD}-0-0" in page.ids
 
 
-@NOT_ROOT
-def test_1025_an_unreadable_report_md_is_named_as_unreadable_not_as_an_alias(tmp_path):
-    """A mode-000 `report.md` reads "could not be read" with the errno; a symlinked one gets the alias
-    refusal exactly once."""
-    family = E.mod("learning.judge.family")
-    ep = E.sample_episode(tmp_path)
-    bound = E.mod("_io").bind(ep.dir)
-    report = ep.world(E.GRADED_WORLD) / "report.md"
-    with _restoring([report], 0):
-        got = family.read_archived_report(bound, f"worlds/{T.fixture_world_id(E.GRADED_WORLD)}/report.md")
-    assert got.disposition is None
-    assert "Permission denied" in got.reason, got.reason
-    assert "aliased" not in got.reason, got.reason
-
-    target = tmp_path / "elsewhere.md"
-    target.write_text("---\ndisposition: benign\n---\n", encoding="utf-8")
-    link = ep.world(E.PASSTHROUGH_WORLD) / "report.md"
-    link.unlink()
-    link.symlink_to(target)
-    got = family.read_archived_report(bound, f"worlds/{T.fixture_world_id(E.PASSTHROUGH_WORLD)}/report.md")
-    assert got.disposition is None
-    assert got.reason.count("non-plain or aliased") == 1, got.reason
-
-
 def test_1025_the_ledgers_malformed_row_count_is_the_judges_own(tmp_path):
     """A ledger row with an unknown `source` is malformed to `read_world_facts`; the page shows that count."""
     ep = E.sample_episode(tmp_path)
