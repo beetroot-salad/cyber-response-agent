@@ -30,6 +30,14 @@ DISPOSITION_ENUM = frozenset(DISPOSITION_VALUES)
 #: (`test_authoring_surfaces.py` enumerates them).
 HOST_ONLY_DISPOSITION = "unresolved"
 
+#: The one disposition that carries a confidence (#1545): `report.md`'s `confidence` is set
+#: only on it.
+BENIGN_DISPOSITION = "benign"
+
+#: A benign close's confidence, best first (#1545). Here because `report.md`'s schema and
+#: invlang's `conclude` both read it, like the disposition vocabulary.
+CONFIDENCE_VALUES: tuple[str, ...] = ("high", "medium", "low")
+
 #: The model's own "I could not settle this", which must pay for its close with `ceiling_test`
 #: receipts (`skills/invlang/validate/_gating.py`).
 CEILING_DISPOSITION = "inconclusive"

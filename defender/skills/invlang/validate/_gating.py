@@ -27,6 +27,7 @@ from defender.records.formats import run_id_fault
 from ._structure import PAST_CASE, _cell, _check_vocab, _folded_grounding
 from ._state import (
     _check_benign_authz,
+    outstanding_authz_contracts,
     _check_benign_open_slots,
     _declarers_by_contract_id,
 )
@@ -365,9 +366,139 @@ def _check_benign_gating(companion: CompanionBody) -> list[str]:
     errors: list[str] = []
     errors += _check_benign_grounding(companion)
     errors += _check_benign_open_slots(companion)
-    errors += _check_benign_authz(companion)
     errors += _check_authz_row_grounding(companion)
+    errors += _check_benign_confidence_cells(companion)
+    if benign_confidence_ceiling(companion) is None:
+        errors += _check_benign_authz(companion)
+        # The baseline route is explained only once the run is evidently on it (a contract
+        # searched and found empty): otherwise the authorization refusals are the whole story.
+        if exhausted_contract_ids(companion):
+            errors.append(
+                "disposition benign blocked: with no authorization record, benign is reachable "
+                "only at `confidence low`, which still needs "
+                + "; ".join(_baseline_route_gaps(companion))
+                + ". Otherwise conclude `inconclusive` (two stories still standing) or "
+                "`malicious`"
+            )
     return errors
+
+
+# --- Benign confidence (#1545) --------------------------------------------------------------
+#
+# The model states `confidence`; the run's record sets a ceiling; the close commits the lower.
+# Three routes, best first:
+#   high   — every contract on the live story authorized (benign's authorized route) AND a
+#            `telemetry-baseline` consultation the activity matches: the steps are allowed and
+#            the actor behaved like itself.
+#   medium — the authorized route without a baseline: allowed, but nothing checked the session.
+#   low    — no authorization record (every undischarged contract searched and found empty,
+#            `basis=exhausted`, none `unauthorized`), one story left standing, a baseline the
+#            activity matches, impact not exceeded, and `attacker_gain none`: nothing an
+#            attacker would have gained. Also, with no requirement beyond benign's own, a close
+#            whose live story declared no contract at all: it never asked, so it cannot rise.
+
+CONFIDENCE_HIGH, CONFIDENCE_MEDIUM, CONFIDENCE_LOW = vocab.CONCLUDE_CONFIDENCE
+ATTACKER_GAIN_NONE = vocab.CONCLUDE_ATTACKER_GAIN[0]
+AUTHZ_UNAUTHORIZED = "unauthorized"
+_IMPACT_BLOCKING = frozenset({"exceeds", "indeterminate"})
+
+
+def _check_benign_confidence_cells(companion: CompanionBody) -> list[str]:
+    """`confidence` and `attacker_gain`, when written, are in their vocabularies."""
+    conclude = companion.get("conclude") or {}
+    errors: list[str] = []
+    for key, allowed in (
+        ("confidence", vocab.CONCLUDE_CONFIDENCE),
+        ("attacker_gain", vocab.CONCLUDE_ATTACKER_GAIN),
+    ):
+        if key in conclude and _cell(conclude, key).lower() not in allowed:
+            errors.append(
+                f"conclude: `{key} {conclude.get(key)!r}` is not one of {list(allowed)} "
+                f"(`enum conclude.{key}`)"
+            )
+    return errors
+
+
+def _has_baseline(companion: CompanionBody) -> bool:
+    return bool(conclude_runtime_evidence_rows(companion))
+
+
+def _authorized_route_paid(companion: CompanionBody) -> bool:
+    """Every contract on a live story is discharged `authorized`, and at least one row is: an
+    authorization nobody asked about does not authorize anything."""
+    if _check_benign_authz(companion):
+        return False
+    return any(
+        _cell(row, "verdict") == AUTHZ_AUTHORIZED
+        for row in _walkers.iter_authz_resolutions(companion)
+    )
+
+
+def _baseline_route_gaps(companion: CompanionBody) -> list[str]:
+    """What the low (baseline) route still owes; empty when it is paid."""
+    conclude = companion.get("conclude") or {}
+    gaps: list[str] = []
+    live = _walkers.live_hypothesis_ids(companion)
+    if len(live) != 1:
+        gaps.append(
+            f"exactly one story left standing (live: {sorted(live) or 'none'}); with two "
+            f"standing the case is `inconclusive`"
+        )
+    if not _has_baseline(companion):
+        gaps.append(
+            "a `:R consultations` baseline row (`runtime-evidence`, `telemetry-baseline`) the "
+            "activity matches"
+        )
+    if _cell(conclude, "attacker_gain").lower() != ATTACKER_GAIN_NONE:
+        gaps.append(
+            "`attacker_gain none` — an attacker who did this would have gained nothing; a "
+            "foothold, a credential, a key or a step closer to one is a gain"
+        )
+    if _cell(conclude, "impact_verdict").lower() in _IMPACT_BLOCKING:
+        gaps.append("an `impact_verdict` of `within` or `none`")
+    exhausted = exhausted_contract_ids(companion)
+    unauthorized = {
+        _cell(row, "fulfills_contract")
+        for row in _walkers.iter_authz_resolutions(companion)
+        if _cell(row, "verdict") == AUTHZ_UNAUTHORIZED
+    }
+    for hid, contract, _why in outstanding_authz_contracts(companion):
+        cid = _cell(contract, "id") or "?"
+        if cid in unauthorized:
+            gaps.append(f"no `unauthorized` contract ({cid} on {hid} is)")
+        elif cid not in exhausted:
+            gaps.append(
+                f"contract {cid} on {hid} searched and found empty (`verdict indeterminate`, "
+                f"`basis=exhausted`) rather than left open"
+            )
+    return gaps
+
+
+def benign_confidence_ceiling(companion: CompanionBody) -> str | None:
+    """The highest confidence this run's record earns for `benign`, or `None` when no route is
+    paid (then `benign` is refused). See the block comment above for the three routes.
+    """
+    if _authorized_route_paid(companion):
+        return CONFIDENCE_HIGH if _has_baseline(companion) else CONFIDENCE_MEDIUM
+    if not _check_benign_authz(companion):
+        # No contract on the live story: nobody asked an authorization question, so nothing
+        # is authorized and nothing is missing. Benign as before, but never above `low`.
+        return CONFIDENCE_LOW
+    return None if _baseline_route_gaps(companion) else CONFIDENCE_LOW
+
+
+def committed_benign_confidence(companion: CompanionBody) -> str | None:
+    """The confidence a benign close commits: the lower of the model's stated `confidence`
+    and the record's ceiling. A close that states none is capped at `medium`: `high` resolves
+    without a person, so it is never reached by default.
+    """
+    ceiling = benign_confidence_ceiling(companion)
+    if ceiling is None:
+        return None
+    order = vocab.CONCLUDE_CONFIDENCE
+    stated = _cell(companion.get("conclude") or {}, "confidence").lower()
+    claimed = stated if stated in order else CONFIDENCE_MEDIUM
+    return max(claimed, ceiling, key=order.index)
 
 
 #: The `basis` value that claims something about dispatch, and so owes a receipt. `retry`
@@ -522,7 +653,12 @@ _BENIGN_PRICE = _Price(
         "an unfulfilled authorization contract on a live hypothesis directly contradicts, "
         "and which a log that never named the alerted entity does not support at all — so "
         "it is reachable only from an `investigation.md` that recorded the entity and "
-        "settled what it left open."
+        "settled what it left open. It then needs one of two routes: every load-bearing step "
+        "authorized (confidence `high` with a baseline the activity matches, `medium` "
+        "without), or, with no authorization record, the baseline route at `low`: one story "
+        "standing, every contract searched and found empty (`basis=exhausted`), a matching "
+        "baseline, and `attacker_gain none`. The close commits the lower of your "
+        "`confidence` and the route's."
     ),
 )
 _FALSE_POSITIVE_PRICE = _Price(

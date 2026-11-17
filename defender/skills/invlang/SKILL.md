@@ -378,20 +378,22 @@ keyed on the contract id. Columns:
   what an absent cell means — this contract has not been worked yet) or
   `exhausted` (every anchor kind applicable to this contract's predicate
   was actually queried this run and none answered). `exhausted` stops the
-  run being pushed back to re-work the contract and changes nothing else —
-  the verdict and its forced escalation stand. It is checked against this
+  run being pushed back to re-work the contract; it is also the record a
+  low-confidence `benign` needs (see `confidence` under `:T conclude`).
+  The verdict stays `indeterminate`. It is checked against this
   run's own transcript: the lead named by `resolved_by` must have come back
   with something, and its `:L findings` `system` cell must name the system
   that answers the contract's anchor kind. Write `retry` (or nothing) when
   there is still somewhere to look.
 - `reasoning` — short citation of the supporting fact (quoted).
 
-Disposition gating: `disposition: benign` requires every authz
-contract on a surviving hypothesis to have a fulfilling `:R authz`
-row with `verdict: authorized`. `unauthorized` or `indeterminate`
-forces escalation per the contract's `on_unauth` / `on_indet`. A
-declared contract with no fulfilling row is treated as
-`indeterminate`.
+Disposition gating: `disposition: benign` at `medium` or `high`
+requires every authz contract on a surviving hypothesis to have a
+fulfilling `:R authz` row with `verdict: authorized`. Without that,
+`benign` is reachable only at `low`, and only when every such contract
+is `indeterminate` with `basis=exhausted` (see `confidence` under
+`:T conclude`). `unauthorized` never closes `benign`. A declared
+contract with no fulfilling row is treated as `indeterminate`.
 
 **`anchor_kind: tacit-knowledge` costs two rows, not one.** The registry
 is a human-authored file, so a citation has to be backed by a lookup you
@@ -449,9 +451,11 @@ Two uses, and they are different:
 - **A baseline** (`anchor_kind: runtime-evidence`, `grounding:
   telemetry-baseline`). How often this estate does the alerted thing, over
   what window, with what scope, and whether anything adverse fell inside
-  it. This is descriptive context for whoever reads the closed case — it
-  rides into `report.md`'s body — and it buys the close **nothing**: the
-  benign gate never reads it. Its window must end **strictly before** the
+  it. It rides into `report.md`'s body for whoever reads the closed case,
+  and it never authorizes anything: it cannot discharge a contract. What
+  it does buy is confidence: it is how a `benign` close shows the actor
+  behaved like itself, which `high` needs, and which `low` needs when no
+  record authorized the activity (`confidence` under `:T conclude`). Its window must end **strictly before** the
   alerted event; a pattern that begins with the incident is the incident.
   That comparison needs the alerted moment, so a document with no
   parseable `when` on any `:E prologue.edges` row cannot carry a baseline
@@ -531,6 +535,7 @@ termination.category   adversarial-refuted
 disposition            benign
 impact_verdict         none
 confidence             high
+attacker_gain          some
 matched_archetype      routine-admin-login
 summary                "Login matched established bastion usage"
 ```
@@ -546,8 +551,8 @@ summary                "Login matched established bastion usage"
   garbage value; you never conclude it yourself. THREE keywords carry an
   ENTRY PRICE. `benign` needs at least one `:V prologue.vertices` row — a
   log that never recorded the alerted entity accounts for nothing — plus
-  every `??` slot resolved (§Open questions) and every authz contract on a
-  live hypothesis `authorized` (§`:R authz`); `false-positive` — the one
+  every `??` slot resolved (§Open questions), and one of the two routes
+  under `confidence` below; `false-positive` — the one
   keyword that describes the RULE rather than the alerted entity, for a
   rule that fired on a different kind of behavior than it claims — needs
   `detection_notes` and `entity_check` below; `inconclusive` needs at
@@ -558,6 +563,32 @@ summary                "Login matched established bastion usage"
   `close_investigation`, against the keyword you close under. So
   concluding under a cheaper keyword buys nothing — the log itself still
   has to have paid for the keyword the close commits.
+- `confidence` — `benign` only (`enum conclude.confidence`): how sure you
+  are, `high`, `medium` or `low`. Say what you actually believe; the close
+  commits the LOWER of yours and what the record earns, and never goes
+  above `medium` if you leave it out. `high` is resolved without a person
+  reading it. What the record earns:
+  - `high` — every authz contract on the live story `authorized`, AND a
+    `:R consultations` baseline (`runtime-evidence`, `telemetry-baseline`)
+    the activity matches: every step was allowed and the actor behaved
+    like itself.
+  - `medium` — every contract `authorized`, no baseline: allowed, but
+    nothing checked that the session was really its owner.
+  - `low` — no authorization record. Every undischarged contract was
+    searched and came back empty (`verdict indeterminate`,
+    `basis=exhausted`) and none is `unauthorized`; exactly ONE story is
+    left standing (every other `--`); a baseline the activity matches;
+    `impact_verdict` `within` or `none`; and `attacker_gain none`. A
+    story with no contract at all also closes at `low`.
+  With a second story still standing, the case is `inconclusive`, not
+  low-confidence `benign`. An attack that failed is `malicious` with
+  `impact_verdict within`, never `benign`.
+- `attacker_gain` — `enum conclude.attacker_gain`: if an attacker had done
+  exactly this, what would they have gained? `none`, or `some` (a
+  foothold, a credential, a key, code run, data read, or a step closer to
+  any of them). Not "was anything damaged": a planted key that was never
+  used is `some`. Only `none` lets `benign` rest on a baseline without an
+  authorization record.
 - `ceiling_test` — the checks you could NOT make, as a RECEIPT the host
   verifies mechanically. One row per gap, repeated, shaped
   `state=<state> [ref=<lead-id>|cap=<system[.verb]>] note=<text>` —
