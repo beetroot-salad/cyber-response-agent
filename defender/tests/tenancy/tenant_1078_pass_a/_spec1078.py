@@ -204,14 +204,13 @@ def source_run(base: Path, run_id: str = T.SOURCE_RUN_ID) -> Path:
     (src / "gather_raw").mkdir(parents=True, exist_ok=True)
     plant_alert_input(src, {"rule": {"id": "v2-cross-tier-ssh-pivot"}})
     (src / "investigation.md").write_text(T.branchable_investigation(), encoding="utf-8")
-    (src / "report.md").write_text("disposition: malicious\n", encoding="utf-8")
     (src / "executed_queries.jsonl").write_text("", encoding="utf-8")
     T.capture_call(src)
     at_tenant = base.name == "runs" and (base.parent / "knowledge").is_dir()
     stamped = base.parent.name if at_tenant else None
     (src / "provenance.json").write_text(json.dumps(T.provenance_record(tenant_id=stamped)),
                                          encoding="utf-8")
-    T.seed_source_session(base, src)
+    T.seed_source_session(base, src, closing={"disposition": "malicious"})
     return src
 
 

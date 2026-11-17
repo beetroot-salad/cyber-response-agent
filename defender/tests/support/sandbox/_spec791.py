@@ -131,12 +131,13 @@ def plant_alert_in_run(run_dir: Path, raw: bytes) -> None:
 
 def populate_run_dir(run_dir: Path, *, disposition: str = "inconclusive") -> Path:
     """The same artifacts, written into a run dir that ALREADY EXISTS: in the tail scenarios
-    that is the run dir `main` materializes, not one the test chose."""
+    that is the run dir `main` materializes, not one the test chose. The close is a closing record for
+    `disposition` (a member of `DISPOSITION_VALUES`) in a store beside the run's runs base."""
     (run_dir / "gather_raw").mkdir(parents=True, exist_ok=True)
-    run_dir.joinpath("report.md").write_text(
-        f"---\ndisposition: {disposition}\nconfidence: high\n---\n\nspec791 run\n",
-        encoding="utf-8",
-    )
+    from defender.tests.support.storage import _readers1534 as R
+
+    # The close is the run's closing record in a real store behind its pointer (#1534), not a `report.md`.
+    R.plant_run(run_dir, R.valid_fields(disposition), sessions_base=run_dir.parent)
     run_dir.joinpath("investigation.md").write_text("+ spec791 investigation\n", encoding="utf-8")
 
     (run_dir / "gather_raw" / "l-001").mkdir(parents=True, exist_ok=True)

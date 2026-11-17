@@ -826,12 +826,16 @@ def sibling_run_dir(  # noqa: PLR0913 — one keyword per stamp field a scenario
                     scrub_ran: bool = True,
                     commit: str | None = "deadbee", dirty: bool | None = False,
                     unavailable: str | None = None,
-                    model: str = "m-1", stamp: bool = True, **record: Any) -> Path:
-    """A finished sibling run dir plus its scrub-verdict SIDECAR, under `base`."""
+                    model: str = "m-1", stamp: bool = True, closed: bool = True, **record: Any) -> Path:
+    """A finished sibling run dir plus its scrub-verdict SIDECAR, under `base`. `closed` (default) plants the arm's
+    `malicious` closing record in a store of its own behind its pointer (#1534); no `report.md`."""
     base = Path(base)
     run_dir = base / (arm_id if arm_id is not None else _arm_name(base, label))
     (run_dir / "gather_raw").mkdir(parents=True, exist_ok=True)
-    (run_dir / "report.md").write_text(report_text("malicious"), encoding="utf-8")
+    if closed:
+        from defender.tests.support.storage import _readers1534 as R
+
+        R.plant_run(run_dir, R.valid_fields("malicious"), sessions_base=base)
     (run_dir / "investigation.md").write_text(f"# world {label}\n", encoding="utf-8")
     (run_dir / "executed_queries.jsonl").write_text("", encoding="utf-8")
     if stamp:

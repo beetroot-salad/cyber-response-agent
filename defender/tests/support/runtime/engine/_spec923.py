@@ -4,6 +4,7 @@ from __future__ import annotations
 from defender.tests.support.shared._locations_1210 import fixture_runs_base
 
 import asyncio
+import contextlib
 import json
 from pathlib import Path
 from typing import Any
@@ -191,20 +192,43 @@ def _with_run_state(deps: Any) -> Any:
                    run_state=RunState(deps.run_dir, "r-923"))
 
 
+#: The stores `main_deps` opened, held open for the deps' lifetime (a close writes through
+#: `deps.session_store`) and closed by `tests/conftest.py`'s autouse `_close_main_stores` when the test ends.
+_OPEN_STORES = contextlib.ExitStack()
+
+
+def close_main_stores() -> None:
+    """Close every store `main_deps` opened since the last call (the autouse fixture's teardown)."""
+    _OPEN_STORES.close()
+
+
 def main_deps(tmp_path: Path, companion: str | None = None) -> tuple[Any, Path]:
     """MAIN deps through the real `bind` seam — real compiled policy, real gate — with
-    `companion` seeded as the run's `investigation.md`."""
+    `companion` seeded as the run's `investigation.md`, carrying the run's open session store (#1534) under
+    this `tmp_path`'s own runs base (`tmp_path/runs`, sessions beside it), the run's pointer written as the
+    driver does."""
+    from dataclasses import replace
+
     from defender.agents import MAIN_DEF
     from defender.investigation.agent_definition import bind
+    from defender.records import Run, SessionPaths
+    from defender.records import session_store as ss
+    from defender.records.session_store._write import open_store
 
+    base = tmp_path / "runs"
     # A run folder's name is its canonical UUID run id.
-    run_dir = tmp_path / fixture_uuid("run")
+    run_dir = base / fixture_uuid("run")
     (run_dir / "gather_raw").mkdir(parents=True, exist_ok=True)
     if companion is not None:
         (run_dir / "investigation.md").write_text(companion, encoding="utf-8")
     dfn = tmp_path / "defender"
     dfn.mkdir(parents=True, exist_ok=True)
-    return _with_run_state(bind(MAIN_DEF, run_dir, defender_dir=dfn)), run_dir
+    store = _OPEN_STORES.enter_context(open_store(case_id="c923", sessions=SessionPaths(fixture_runs_base(base))))
+    store.new_session(agent_id="main")
+    ss.write_case_pointer(Run.under(fixture_runs_base(base), run_dir.name), case_id=store.case_id,
+                          store_path=store.path)
+    deps = replace(_with_run_state(bind(MAIN_DEF, run_dir, defender_dir=dfn)), session_store=store)
+    return deps, run_dir
 
 
 #: Sentinel for "no argument given", so an explicit `stages=None` still reaches the gate as an
@@ -232,16 +256,10 @@ def close(deps: Any, disposition: str, *, stages: Any = _UNBOUND, forced: bool =
 def ab3_deps(tmp_path: Path) -> tuple[Any, Path]:
     """MAIN deps over the shipped ab3 golden, whose real citable ids a gate-overrule scenario
     needs: an ask naming an id the document never recorded fails the review as unreadable."""
-    from defender.agents import MAIN_DEF
-    from defender.investigation.agent_definition import bind
-
-    run_dir = tmp_path / fixture_uuid("run")
-    (run_dir / "gather_raw").mkdir(parents=True, exist_ok=True)
+    deps, run_dir = main_deps(tmp_path)
     (run_dir / "alert.json").write_bytes((GOLDEN_AB3 / "alert.json").read_bytes())
     (run_dir / "investigation.md").write_bytes((GOLDEN_AB3 / "investigation.md").read_bytes())
-    dfn = tmp_path / "defender"
-    dfn.mkdir(parents=True, exist_ok=True)
-    return _with_run_state(bind(MAIN_DEF, run_dir, defender_dir=dfn)), run_dir
+    return deps, run_dir
 
 
 def real_targets(deps: Any) -> list[str]:
@@ -253,21 +271,34 @@ def real_targets(deps: Any) -> list[str]:
     return sorted(citable_refs(parse_investigation(inv)))
 
 
-def committed(run_dir: Path) -> dict:
-    """The committed report's frontmatter, read through the shared accessor off `report.md` alone."""
-    from defender.records._report import read_report
+def _closing(run_dir: Path) -> Any:
+    """The run's closing record through the one lookup (`records.closing.for_run`); a run that never closed or
+    whose lookup faulted fails the helper's caller there, naming the result."""
+    from defender.records import closing as C
+    from defender.tests.storage.verdict_1534 import _spec1534 as V
 
-    return dict(read_report(run_dir / "report.md").frontmatter or {})
+    found = C.for_run(V.handle(run_dir))
+    assert isinstance(found, C.Record), f"{run_dir.name} has no readable closing record: {found!r}"
+    return found.record
+
+
+def committed(run_dir: Path) -> dict:
+    """The committed close as the fields the old report frontmatter carried, read from the closing record:
+    `disposition`, `outcome`, `cause` (its sentence), `failure_kind`, `drafted_disposition` and `ceiling_test`
+    rows as `{state, ref}` dicts (`cap` when set)."""
+    from defender.records import closing as C
+
+    rec = _closing(run_dir)
+    rows = [{"state": e.state, "ref": e.ref, **({"cap": e.cap} if e.cap is not None else {})}
+            for e in rec.ceiling_test]
+    return {"disposition": rec.disposition, "outcome": rec.outcome, "cause": C.CAUSE_SENTENCES[rec.cause],
+            "failure_kind": rec.failure_kind, "drafted_disposition": rec.drafted_disposition,
+            "ceiling_test": rows}
 
 
 def committed_verdict(run_dir: Path) -> str | None:
-    """The committed disposition read verbatim off the frontmatter line, not through the
-    normalizer, so a zero-width-laced value is seen as written."""
-    text = (run_dir / "report.md").read_text(encoding="utf-8")
-    for line in text.splitlines():
-        if line.startswith("disposition:"):
-            return line.split(":", 1)[1].strip()
-    return None
+    """The committed disposition exactly as the closing record holds it (no normalizer on the way)."""
+    return _closing(run_dir).disposition
 
 
 class StuckModel:
@@ -319,18 +350,25 @@ HOST_CAUSE = "the disposition was recorded without a challenge review"
 
 
 def finished_run(tmp_path: Path, *, disposition: str) -> Path:
-    """A finished run dir a downstream reader accepts, whose `report.md` carries `disposition`
-    and one paid `ceiling_test` row."""
-    run_dir = tmp_path / fixture_uuid("case-923")
-    (run_dir / "gather_raw").mkdir(parents=True, exist_ok=True)
+    """A finished run dir a downstream reader accepts, whose closing record (in a real store behind the run's
+    pointer) carries `disposition` and one paid `ceiling_test` row. A `disposition` that is not a member of
+    `DISPOSITION_VALUES` (a malformed spelling) is stored by corrupting the scalar column of a valid `malicious`
+    record, the way a damaged row reads."""
+    from defender._vocab import DISPOSITION_VALUES
+    from defender.records import closing as C
+    from defender.tests.storage.verdict_1534 import _spec1534 as V
+    from defender.tests.support.storage import _readers1534 as R
+
+    member = disposition in DISPOSITION_VALUES
+    note = "EDR execve logs for web-1 never came back; the collector returned HTTP 503"
+    run_dir, database = V.closed_run(tmp_path, {
+        **R.valid_fields(disposition if member else "malicious"),
+        "ceiling_test": (C.CeilingEntry(state="query-failed", ref="l-002", cap=None, note=note),),
+    }, case_id="c923", run_name="case-923")
+    if not member:
+        V.corrupt(database, run_dir.name, "disposition", disposition)
     run_dir.joinpath("alert.json").write_text(
         json.dumps({"rule": {"id": "5710", "key": "spec.rule"}, "timestamp": "2024-05-01T00:00:00Z"}),
-        encoding="utf-8",
-    )
-    run_dir.joinpath("report.md").write_text(
-        f"---\ndisposition: {disposition}\noutcome: stands\ncause: {HOST_CAUSE}\n"
-        f"confidence: medium\nceiling_test:\n- {PAYING_ROW}\n---\n\n"
-        "Disposition recorded by the close gate. outcome=stands.\n",
         encoding="utf-8",
     )
     run_dir.joinpath("investigation.md").write_text(paid(PAYING_ROW), encoding="utf-8")

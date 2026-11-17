@@ -66,7 +66,7 @@ def closing_deps(tmp_path: Path, companion: str | None) -> tuple[Any, Path]:
     """MAIN deps through the real `bind` seam (`_spec923.main_deps`), the run folder under this test's own runs base."""
     from defender.tests.support.runtime.engine import _spec923 as S
 
-    return S.main_deps(runs_base(tmp_path), companion)
+    return S.main_deps(tmp_path, companion)
 
 
 def a_record(run_id: str, **fields: Any) -> Any:

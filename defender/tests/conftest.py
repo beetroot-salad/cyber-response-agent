@@ -74,6 +74,18 @@ def _close_test_worlds() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
+def _close_main_stores() -> Iterator[None]:
+    """The session stores `_spec923.main_deps` opened for MAIN deps are closed when the test ends (#1534): the
+    deps carry them open, so no caller needs a fixture of its own. Only when the module was imported."""
+    yield
+    import sys
+
+    spec = sys.modules.get("defender.tests.support.runtime.engine._spec923")
+    if spec is not None:
+        spec.close_main_stores()
+
+
+@pytest.fixture(autouse=True)
 def _held_capabilities(checkout_roster):
     """Every test starts with the `nothing-to-try` gate holding the real checkout's roster, as a
     production process does at start, and ends with it released, so a test that pointed the gate

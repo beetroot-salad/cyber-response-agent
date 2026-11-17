@@ -993,7 +993,6 @@ class FakeSibling:
         runs = ep / "runs"
         run_dir = sibling_run_dir(runs, label, arm_id=arm_id, commit=self.commit,
                                   **self.stamp_fields)
-        (run_dir / "report.md").write_text(report_text("malicious"), encoding="utf-8")
         (run_dir / "investigation.md").write_text(
             investigation_document(label), encoding="utf-8")
         summaries = run_dir / "gather_summaries"

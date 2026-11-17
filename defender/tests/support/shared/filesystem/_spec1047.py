@@ -332,7 +332,7 @@ def receipt(run_dir: Path) -> dict | None:
 
 
 def closed_run_dir(tmp_path: Path, *, disposition: str = "malicious", report: bool = True) -> Path:
-    """A finished run dir as `run.py`'s tail meets it: an alert, and a committed `report.md`
+    """A finished run dir as `run.py`'s tail meets it: an alert, and a closing record
     unless `report=False`. The folder is the run's id, so a test reads it as `run_dir.name`.
 
     `report=False` is the shape the three no-report exit classes leave, and a forced-close
@@ -347,7 +347,10 @@ def closed_run_dir(tmp_path: Path, *, disposition: str = "malicious", report: bo
                           "timestamp": "2026-09-16T11:00:00Z", "alert_id": CASE_KEY},
                 mapping=ALERT_MAPPING)
     if report:
-        (run_dir / "report.md").write_text(report_text(disposition), encoding="utf-8")
+        from defender.tests.support.storage import _readers1534 as R
+
+        # The committed close is the run's closing record in a store behind its pointer (#1534), not a `report.md`.
+        R.plant_run(run_dir, R.valid_fields(disposition), sessions_base=run_dir.parent)
     return run_dir
 
 
