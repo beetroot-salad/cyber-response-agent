@@ -191,9 +191,7 @@ def test_every_authorable_disposition_is_a_label_and_scores_as_its_own_class(tmp
     included — and a run that says exactly that label is scored right."""
     from evaluations.held_out import LABELS
 
-    assert set(LABELS) == {
-        "benign", "false-positive", "inconclusive", "malicious", "unsanctioned-benign",
-    }
+    assert set(LABELS) == {"benign", "false-positive", "inconclusive", "malicious"}
     runs = tmp_path / "runs"
     fixtures = _fixture_set(tmp_path / "fixtures", {f"case-{d}": d for d in LABELS})
     rows = [(f"case-{d}", _run(runs, says=d).name) for d in LABELS]

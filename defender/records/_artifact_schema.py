@@ -20,7 +20,7 @@ from defender.records import RUN_LAYOUT
 from defender._frontmatter import FrontmatterError, split_frontmatter
 from defender._yaml import duplicate_top_level_key
 # Not the normalizer: the write gate tests the value exactly (see `validate_report`).
-from defender._vocab import DISPOSITION_ENUM
+from defender._vocab import BENIGN_DISPOSITION, CONFIDENCE_VALUES, DISPOSITION_ENUM
 
 _logger = logging.getLogger(__name__)
 
@@ -130,7 +130,7 @@ def validate_report(proposed_text: str) -> str | None:
     """The report.md schema. Fail-closed on: unparseable frontmatter; a missing, duplicated,
     non-string or out-of-enum top-level `disposition`; frontmatter or file over its byte bound;
     or a literal `</report>`. Only `disposition` is required (`case_id` comes from the run dir,
-    `confidence` is untyped).
+    `confidence`, when present, is one of `CONFIDENCE_VALUES` and only beside `benign`, #1545).
 
     Reasons are model-facing (raised as ModelRetry). After the frontmatter parses, all
     independent problems are reported together so the model fixes them in one retry."""
@@ -152,6 +152,14 @@ def validate_report(proposed_text: str) -> str | None:
         problems.append(
             "report.md frontmatter must carry a top-level `disposition` in "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             f"{sorted(DISPOSITION_ENUM)} (got {disposition!r}) — fix and rewrite."
+        )
+    if "confidence" in fm and (
+        fm.get("confidence") not in CONFIDENCE_VALUES or disposition != BENIGN_DISPOSITION
+    ):
+        problems.append(
+            f"report.md frontmatter's `confidence` must be one of {list(CONFIDENCE_VALUES)} "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
+            f"and only on a `benign` close (got {fm.get('confidence')!r} on "
+            f"{disposition!r}) — fix and rewrite."
         )
     if utf8_len(raw) > REPORT_FRONTMATTER_MAX:
         problems.append(
