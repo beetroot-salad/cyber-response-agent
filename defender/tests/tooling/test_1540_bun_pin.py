@@ -84,7 +84,6 @@ def _dockerfile_sites(label: str, text: str) -> list[Site]:
         words = instruction.split(None, 1)
         if words[0] == "FROM":
             stage += 1
-            env = {}
         if words[0] in {"ARG", "ENV"} and len(words) > 1:
             for pair in words[1].split():
                 key, sep, value = pair.partition("=")
