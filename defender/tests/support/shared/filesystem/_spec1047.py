@@ -157,7 +157,7 @@ def _family_view_of(prompt: str) -> dict[str, str]:
     noise = prompt.split("## NOISE CONTEXT", 1)[-1]
     view: dict[str, str] = {}
     for label, block in re.findall(r"(?ms)^### run (\S+)\n(.*?)(?=^### run |\Z)", header):
-        reached = re.search(r"reached verdict \(its archived report\.md\): <(run-[0-9a-f]+)-"
+        reached = re.search(r"reached verdict \([^)]*\): <(run-[0-9a-f]+)-"
                             r"untrusted>\n(.*?)\n</\1-untrusted>", block, re.S)
         view[label] = f"verdict={reached.group(2)!r}" if reached else block.strip()
     for label in re.findall(r"(?m)^- world (\S+): ", noise):

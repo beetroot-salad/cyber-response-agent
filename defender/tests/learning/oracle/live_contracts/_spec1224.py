@@ -1559,7 +1559,8 @@ def default_calls() -> list[Call]:
 
 def source_run(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = None,
                tenant_id: str = FIXTURE_TENANT,
-               after_source: Callable[[Path], None] | None = None) -> tuple[Path, Path]:
+               after_source: Callable[[Path], None] | None = None,
+               source_closing: dict | None = None, source_fault: str | None = None) -> tuple[Path, Path]:
     """A runs base on the fixture tenant holding ONE finished source run whose captured calls
     are `calls` (default `default_calls()`), each also answered by the live estate with the
     same payload — so a clean replay finds no drift. Returns `(runs base, source run dir)`."""
@@ -1579,7 +1580,8 @@ def source_run(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = No
         if after_source is not None:
             after_source(src)
 
-    base, src = location_path(T.runs_base)(tmp_path, tenant_id=tenant_id, land_calls=land)
+    base, src = location_path(T.runs_base)(
+        tmp_path, tenant_id=tenant_id, land_calls=land, source_closing=source_closing, source_fault=source_fault)
     for seq, c in enumerate(post):
         T.capture_call(src, system=c.system, verb=c.verb, params=dict(c.params),
                        payload=c.payload, lead=POST_BRANCH_LEAD, seq=seq)
@@ -1620,8 +1622,9 @@ def questioner_for(doc: dict | None = None) -> FakeAgent:
     return FakeAgent(authored, *seats)
 
 
-def launch(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = None,
+def launch(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = None,  # noqa: PLR0913 — one keyword per scenario knob
            after_source: Callable[[Path], None] | None = None,
+           source_closing: dict | None = None, source_fault: str | None = None,
            spawn: Any = None, argv_extra: Iterable[str] = (),
            oracle: ScriptedModel | None = None, verifier: ScriptedModel | None = None,
            **seams: Any) -> Launch:
@@ -1629,7 +1632,8 @@ def launch(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = None,
     (`rc`, `message` — the `sys.exit` text of a refusal, else "" —, `spawn`, `ep`). Every seam
     not named defaults to a recording double; the role preflight is neutralised
     (`no_preflight`) for every scenario not about it."""
-    _base, src = source_run(tmp_path, est, calls=calls, after_source=after_source)
+    _base, src = source_run(tmp_path, est, calls=calls, after_source=after_source,
+                            source_closing=source_closing, source_fault=source_fault)
     spawn = spawn if spawn is not None else FakeSpawn()  # lint-default: ok — a test builder's fresh per-call double or fixture, never a shared instance
     seams.setdefault("questioner", questioner_for())
     seams.setdefault("preflight", no_preflight)

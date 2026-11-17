@@ -88,7 +88,7 @@ def defender_queue_row(fid: str = "ep-1/b/0/1", **extra) -> dict:
     row = dict(D.finding_row(fid, run_id="ep-1", direction="family"),
                subject=W.SUBJECT_DEFENDER, type="lead-set",
                subject_anchor="l-001", subject_topic="coverage",
-               contrast_evidence=[f"worlds/{T.fixture_world_id('b')}/report.md", f"worlds/{T.fixture_world_id('a')}/report.md"],
+               contrast_evidence=[f"worlds/{T.fixture_world_id('b')}/closing", f"worlds/{T.fixture_world_id('a')}/closing"],
                on_verdict_path=True, world_label_doubted=False,
                source_run_dir="episodes/ep-1/worlds/b")
     row.pop("judge_outcome", None)          # a row carrying the retired name is held (#1234)

@@ -26,7 +26,7 @@ def _family_row(fid: str = "ep-1/b/0/0", **over) -> dict:
                type="decision-discipline", subject="defender",
                subject_anchor="l-001", subject_topic="holding-system coverage",
                source_run_dir="episodes/ep-1/worlds/b",
-               contrast_evidence=[f"worlds/{T.fixture_world_id('b')}/report.md", f"worlds/{T.fixture_world_id('a')}/report.md"],
+               contrast_evidence=[f"worlds/{T.fixture_world_id('b')}/closing", f"worlds/{T.fixture_world_id('a')}/closing"],
                on_verdict_path=True, world_label_doubted=False)
     # `D.finding_row` is the adversarial channel's shape, which still spells the retired word.
     row.pop("judge_outcome", None)
@@ -39,7 +39,7 @@ def _graded(tmp_path, store=None, **kw):
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"},
                             **kw)
-    (ep / "worlds" / T.world_id(ep, "b") / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
+    J.set_closing(ep, "b", disposition="benign")
     J.grade_at(
         ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
         draws=1, store=store if store is not None else MemoryStore())
@@ -155,7 +155,7 @@ def test_921_finding_id_is_stable_across_a_retry_and_distinct_across_world_draw_
         J.finding_doc(topic="first"), J.finding_doc(topic="second", anchor="l-002")]))
     ep2 = J.accepted_episode(tmp_path / "two", ledgers={"b": [J.staged_row("b")], "c": []},
                              dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
-    (ep2 / "worlds" / T.world_id(ep2, "b") / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
+    J.set_closing(ep2, "b", disposition="benign")
     own = MemoryStore()
     J.grade_at(
         ep2, judge=J.scripted_judge(default=two), draws=2, store=own)
@@ -259,7 +259,7 @@ def test_921_a_store_already_holding_a_finding_does_not_change_what_a_pass_queue
 
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
-    (ep / "worlds" / T.world_id(ep, "b") / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
+    J.set_closing(ep, "b", disposition="benign")
     J.grade_at(
         ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
         draws=1, store=store)
@@ -312,7 +312,7 @@ def test_921_archived_drift_reaches_the_judge_and_a_family_incoherent_finding_ke
 
 def test_921_a_world_whose_facts_a_gap_kept_back_is_not_measured_and_enqueues_nothing(tmp_path):
     gap = {"what": "elastic esql", "how": "the served system does not hold the field",
-           "evidence": [f"worlds/{T.fixture_world_id('b')}/report.md"], "kept_facts_from_investigator": True}
+           "evidence": [f"worlds/{T.fixture_world_id('b')}/closing"], "kept_facts_from_investigator": True}
     kept = J.as_reply_text(J.reply_doc(gaps=[gap]))
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
                             labels=("a", "b"))

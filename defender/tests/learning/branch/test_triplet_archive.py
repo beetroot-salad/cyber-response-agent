@@ -63,10 +63,38 @@ def test_947_each_archived_world_carries_every_declared_artifact(tmp_path):
         _archive().archive_episode(episode, {T.world_id(episode.dir, label): path for label, path in dirs.items()})
     for w in T.WORLDS:
         world = ep / "worlds" / T.world_id(ep, w)
-        for name in ("report.md", "investigation.md", "executed_queries.jsonl", "gather_raw",
+        for name in ("investigation.md", "executed_queries.jsonl", "gather_raw",
                      "provenance.json", "scrub_verdict.json"):
             assert (world / name).exists(), f"{w} is missing {name}"
         assert not os.path.lexists(world / "run_dir"), f"{w}: the run_dir pointer was written"
+
+
+def test_1534_the_archive_copies_neither_the_report_nor_the_session_pointer(tmp_path):
+    """A world's verdict is read from the database, so the archive keeps no copy of a report or of the pointer. (OD5)"""
+    from defender.records import Run
+    from defender.records import session_store as ss
+    from defender.tests.storage.verdict_1534 import _spec1534 as V
+    from defender.tests.support.shared._locations_1210 import fixture_runs_base
+
+    base, src = location_path(T.runs_base)(tmp_path)
+    ep = T.episode(tmp_path)
+    run_dir = T.sibling_run_dir(base, "b")
+    (run_dir / "report.md").write_text(  # lint-run-records: ok — a leftover file the archive must not copy
+        "---\ndisposition: benign\n---\nREPORT-MARKER-1534\n", encoding="utf-8")
+    with V.run_store(tmp_path / "arm-runs", "archive-1534") as store:
+        ss.write_case_pointer(Run.under(fixture_runs_base(base), run_dir.name), case_id=store.case_id,
+                              store_path=store.path)
+        database = str(store.path)
+    with Episode.open(ep) as episode:
+        archived = _archive().archive_episode(episode, {T.world_id(episode.dir, "b"): run_dir})
+    world = archived[T.world_id(ep, "b")]
+
+    assert (world / "investigation.md").is_file(), "control: the rest of the world was not archived"
+    assert not (world / "report.md").exists(), "the archive copied a report"
+    for path in (p for p in world.rglob("*") if p.is_file()):
+        text = path.read_bytes().decode("utf-8", "replace")
+        assert "REPORT-MARKER-1534" not in text, (f"{path.name} carries the report's body or the session pointer")
+        assert database not in text, (f"{path.name} carries the report's body or the session pointer")
 
 
 def test_947_archive_copies_tables_through_stage_tables_and_artifact_file(tmp_path):
@@ -76,11 +104,11 @@ def test_947_archive_copies_tables_through_stage_tables_and_artifact_file(tmp_pa
     run_dir = T.sibling_run_dir(base, "b")
     secret = tmp_path / "secret.md"
     secret.write_text("ROOT-PRIVATE-KEY", encoding="utf-8")
-    (run_dir / "report.md").unlink()
-    (run_dir / "report.md").symlink_to(secret)
+    (run_dir / "investigation.md").unlink()
+    (run_dir / "investigation.md").symlink_to(secret)
     with Episode.open(ep) as episode, pytest.raises(T.refusals()):
         _archive().archive_episode(episode, {T.world_id(episode.dir, 'b'): run_dir})
-    assert not (ep / "worlds" / T.world_id(ep, "b") / "report.md").exists()
+    assert not (ep / "worlds" / T.world_id(ep, "b") / "investigation.md").exists()
     src_text = (T.DEFENDER / "learning" / "branch" / "archive.py").read_text(encoding="utf-8")
     assert "stage_tables" in src_text
     assert "artifact_file" in src_text

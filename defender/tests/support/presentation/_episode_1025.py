@@ -66,8 +66,8 @@ OUTCOME_REASON = "pre-flight calibrated every world against the live estate"
 SYSTEM = "elastic"
 #: The default `contrast_evidence` of a sample defender finding: each sibling's report and the
 #: control's, so whichever sibling's draw files it, it rests on a two-run conduct pair.
-SAMPLE_CONTRAST = (f"worlds/{T.fixture_world_id(GRADED_WORLD)}/report.md", f"worlds/{T.fixture_world_id(PASSTHROUGH_WORLD)}/report.md",
-                   f"worlds/{T.fixture_world_id(CONTROL)}/report.md")
+SAMPLE_CONTRAST = (f"worlds/{T.fixture_world_id(GRADED_WORLD)}/closing", f"worlds/{T.fixture_world_id(PASSTHROUGH_WORLD)}/closing",
+                   f"worlds/{T.fixture_world_id(CONTROL)}/closing")
 
 
 @dataclass(frozen=True)
@@ -480,7 +480,7 @@ def _world_findings_rows(label: str = GRADED_WORLD) -> list[dict[str, Any]]:
     rows = [finding(subject="defender", bucket=b, claim=f"defender claim {i}",
                     root_cause=f"defender root cause {i}", topic=f"defender topic {i}",
                     anchor=f"l-00{i + 1}",
-                    evidence=[f"worlds/{T.fixture_world_id(label)}/report.md", f"worlds/{T.fixture_world_id(CONTROL)}/report.md"])
+                    evidence=[f"worlds/{T.fixture_world_id(label)}/closing", f"worlds/{T.fixture_world_id(CONTROL)}/closing"])
             for i, b in enumerate(SIBLING_BUCKETS[label])]
     rows.append(finding(subject="world", bucket=SIBLING_WORLD_BUCKET,
                         claim="the fact never reached the defender as a readable answer",
@@ -734,6 +734,8 @@ def sample_episode(tmp_path: Path, *, root: Path | None = None, judge: bool = Tr
     if runs:
         for label in WORLDS:
             run_dir(ep, label, cost=SAMPLE.run_cost[label], duration_ms=SAMPLE.run_ms[label])
+    else:
+        J.plan_of(ep).arm_folders = False
     if timing:
         write_timing(ep, every_step())
     if stamp:

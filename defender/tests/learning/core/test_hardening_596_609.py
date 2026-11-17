@@ -16,8 +16,6 @@ from defender.knowledge._corpus import iter_lessons
 from defender._frontmatter import (
     parse_frontmatter_or_none,
 )
-from defender.learning.core.config import RunUnprocessable
-from defender.learning.core.validate import normalize_disposition
 from defender.tests.support.storage._alert_plant import plant_alert
 from defender.tests.support.learning.retrieval._lessons_corpus import accepted_trace_tenant, trace_main
 
@@ -175,16 +173,6 @@ def test_d_b9_named_flood_lesson_still_traces(tmp_path, capsys):
     assert _case_ids(cap.out) == [C("case-a")]
     assert "malformed or missing frontmatter" in cap.err
 
-
-
-def test_d_b10_learn_normalize_disposition_flood_is_run_unprocessable(tmp_path):
-    rp = tmp_path / "report.md"
-    rp.write_text("---\ndescription: [unclosed\n---\nbody\n", encoding="utf-8")
-    with pytest.raises(RunUnprocessable):
-        normalize_disposition(rp)
-    rp.write_text(_flood_doc(_flow_flood()), encoding="utf-8")
-    with pytest.raises(RunUnprocessable):
-        normalize_disposition(rp)
 
 
 def test_d_a1_all_marks_unparseable_created_at_row(tmp_path, capsys):

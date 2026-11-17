@@ -249,7 +249,7 @@ def write_finding(
         "citations": [{"source": "investigation", "quote": "..."}],
         "source_run_dir": f"episodes/{run_id}",
         # The three fields `_gate_family` reads as a family row's ground truth (#1234).
-        "contrast_evidence": ["worlds/b/report.md", "worlds/a/report.md"],
+        "contrast_evidence": ["worlds/b/closing", "worlds/a/closing"],
         "on_verdict_path": True,
         "world_label_doubted": False,
     }
