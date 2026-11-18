@@ -129,20 +129,32 @@ def test_1025_the_world_block_shows_the_verdict_line_and_the_stored_bucket_never
 
 def test_1534_a_worlds_slot_shows_the_disposition_its_arm_closed_with_and_the_siblings_keep_theirs(tmp_path):
     """A record in the arm's database shows as its disposition in that world's slot, read through the roster. (V-READERS)"""
-    ep = E.sample_episode(tmp_path)
-    J.set_closing(ep.dir, E.GRADED_WORLD, disposition="false-positive")
+    ep = E.sample_episode(tmp_path, closings={E.GRADED_WORLD: {"disposition": "false-positive"}})
     page = render(ep)
     assert "false-positive" in _world(page, E.GRADED_WORLD), _world(page, E.GRADED_WORLD)
     assert "false-positive" not in _world(page, E.PASSTHROUGH_WORLD), "the record leaked into the sibling's slot"
     assert "benign" in _world(page, E.PASSTHROUGH_WORLD), _world(page, E.PASSTHROUGH_WORLD)
 
 
+def test_1534_an_overridden_close_shows_the_committed_disposition_in_its_slot_never_the_drafted_one(tmp_path):
+    """A forced-inconclusive record shows what the host committed, not the draft it overrode. (V-READERS, V-FIELDS)"""
+    from defender.records import closing as C
+
+    overridden = {"disposition": "unresolved", "outcome": C.FORCED_INCONCLUSIVE, "cause": C.CAUSE_REVIEW_INCOMPLETE,
+                  "failure_kind": C.TIMEOUT, "drafted_disposition": "false-positive"}
+    page = render(E.sample_episode(tmp_path, closings={E.GRADED_WORLD: overridden}))
+    world = _world(page, E.GRADED_WORLD)
+    assert "unresolved" in world, world
+    assert "false-positive" not in world, f"the slot shows the drafted disposition: {world}"
+    control = render(E.sample_episode(tmp_path / "control", closings={E.GRADED_WORLD: {"disposition": "false-positive"}}))
+    assert "false-positive" in _world(control, E.GRADED_WORLD), "control: a committed false-positive did not show"
+
+
 def test_1534_a_world_that_never_closed_shows_no_record_and_no_fault_wording(tmp_path):
     """`NeverClosed` reads as an absence: no record, and no kind's wording. (V-READERS)"""
     from defender.records import closing as C
 
-    ep = E.sample_episode(tmp_path)
-    J.no_closing(ep.dir, E.GRADED_WORLD)
+    ep = E.sample_episode(tmp_path, closings={E.GRADED_WORLD: None})
     world = _world(render(ep), E.GRADED_WORLD).lower()
     assert "no record" in world, world
     assert not [w for w in C.FAULT_WORDING.values() if w.lower() in world], "an absence was worded as a fault"

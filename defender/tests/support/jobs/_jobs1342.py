@@ -236,10 +236,12 @@ class VisibleAtEmit(logging.Handler):
 CLOSING_KEY = "{id}.closing-plant"
 
 
-def closing_plan(case: str, fields: dict[str, Any] | None, *, fault: str | None = None, unsealed: bool = False) -> str:
+def closing_plan(case: str, fields: dict[str, Any] | None, *, fault: str | None = None, unsealed: bool = False,
+                 then: str | None = None) -> str:
     """The plan for `CLOSING_KEY`: `fields` (a `disposition`, valid fields filled in by the child) or None for a store with
-    the table and no row; `fault` is a `_readers1534` fault."""
-    return json.dumps({"case": case, "fields": fields, "fault": fault, "unsealed": unsealed})
+    the table and no row; `fault` is a `_readers1534` fault; `then` is SQL the child runs on the database after the record is
+    planted (a fault of the store's other tables, which the plant's writer open would otherwise heal)."""
+    return json.dumps({"case": case, "fields": fields, "fault": fault, "unsealed": unsealed, "then": then})
 
 
 CHILD_SCRIPT = textwrap.dedent("""
@@ -262,11 +264,10 @@ CHILD_SCRIPT = textwrap.dedent("""
         # #1534: the run's pointer (store_path deliberately elsewhere: the worker derives the database from the case id),
         # a real store with a main session and a sealed ledger, and the closing record or the fault `plan` names.
         sys.path.insert(0, spec["worktree"])
-        from defender.records import session_store
-        from defender.records.session_store._write import open_store
-        from defender.tests.support.jobs._jobs1342 import _paths, session_db, session_pointer
+        from defender.tests.support.jobs._jobs1342 import session_pointer
         from defender.tests.support.storage import _readers1534 as R
         case = plan["case"]
+        (runs / run_id).mkdir(exist_ok=True)  # a run that reached its close had its folder (the worker's run-started check)
         pointer = runs / f"{run_id}.session-pointer.json"
         fault = plan.get("fault")
         if fault == "pointer-unreadable":
@@ -279,6 +280,26 @@ CHILD_SCRIPT = textwrap.dedent("""
             pointer.write_text(session_pointer(case), encoding="utf-8")
         if fault == "database-missing":
             return
+        # Children that share a case plant one at a time: a sibling's database half made is not one the spec staged.
+        import fcntl
+        if planting:  # a SIGTERM handler's `leave_records` inside this child's own plant: it already holds the lock
+            plant_store(plan, case, fault)
+            return
+        with open(runs.parent / ".closing-plant.lock", "a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            planting.append(True)
+            try:
+                plant_store(plan, case, fault)
+            finally:
+                planting.clear()
+
+    planting = []
+
+    def plant_store(plan, case, fault):
+        from defender.records import session_store
+        from defender.records.session_store._write import open_store
+        from defender.tests.support.jobs._jobs1342 import _paths, session_db
+        from defender.tests.support.storage import _readers1534 as R
         fresh = not session_db(runs, case).exists()
         # Child setup never catches (a swallowed error here reads as "no record", which the no-row controls pass vacuously). The one
         # thing skipped is the open of a database the spec itself staged before the run (a file at the database's path that
@@ -298,6 +319,14 @@ CHILD_SCRIPT = textwrap.dedent("""
             if plan.get("fields") is not None:
                 R.V.plant(handle, R.V.a_record(run_id, **{**R.valid_fields(plan["fields"]["disposition"]), **plan["fields"]}))
         R.break_database(session_db(runs, case), run_id, fault)
+        if plan.get("then"):
+            import sqlite3
+            conn = sqlite3.connect(session_db(runs, case), timeout=30)
+            try:
+                conn.execute(plan["then"])
+                conn.commit()
+            finally:
+                conn.close()
 
     def leave_records():
         for rel in spec.get("dirs", []):
