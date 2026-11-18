@@ -14,6 +14,7 @@ from defender._clock import as_utc
 from defender._text import postgres_can_hold
 from defender._vocab import DISPOSITION_VALUES, normalized_disposition
 from defender.identity.models import Email
+from defender.records.learning_causes import BatchCause, ItemCause
 from defender.records.formats import (
     AlertId, AlertMappingFault, BatchId, CredentialId, InvestigationId, LearningJobId, MembershipId, ProgramId, TenantId, UserId, WorkItemId,
     check_mapping,
@@ -197,7 +198,8 @@ class SetAsideItem(BaseModel):
     key: str
     status: Literal["held", "dead"]
     reason: str | None
-    cause: str | None
+    #: Why it is set aside: a cause from the closed item list (`reason` is the detail text beside it).
+    cause: ItemCause | None
     source_run: str | None
     batch_id: BatchId | None
     pr_number: int | None
@@ -219,8 +221,8 @@ class ParkedBatch(BaseModel):
     branch: str
     pr_number: int | None
     reason: str | None
-    #: Why it is parked: a cause from a closed list (`reason` is the detail text beside it).
-    cause: str | None
+    #: Why it is parked: a cause from the closed batch list (`reason` is the detail text beside it).
+    cause: BatchCause | None
     parked_at: Instant | None
     #: A person may release it: parked for a credential refusal (a release withdraws a pending abandon request).
     releasable: bool

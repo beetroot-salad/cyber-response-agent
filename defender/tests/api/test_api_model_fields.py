@@ -342,3 +342,14 @@ def test_1485_the_learning_work_port_and_its_fake_take_the_tenant_then_status_af
     field = {f.name: f for f in dataclasses.fields(ports.ApiDeps)}["learning_work"]
     assert field.default is dataclasses.MISSING
     assert field.default_factory is dataclasses.MISSING
+
+
+@pytest.mark.parametrize(("model", "causes"), [("SetAsideItem", "ITEM_CAUSES"), ("ParkedBatch", "BATCH_CAUSES")])
+def test_1537_a_set_aside_cause_is_published_as_its_closed_list_not_free_text(model, causes):
+    """The wire's `cause` is the closed list the database checks (#1537): the schema names each cause, and nothing else."""
+    from defender.api import models
+    from defender.records import learning_causes
+
+    schema = getattr(models, model).model_json_schema()["properties"]["cause"]
+    [listed] = [s for s in schema["anyOf"] if s.get("type") != "null"]
+    assert sorted(listed["enum"]) == sorted(getattr(learning_causes, causes))

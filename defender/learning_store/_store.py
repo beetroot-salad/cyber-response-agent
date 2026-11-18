@@ -44,7 +44,7 @@ from defender.jobs.learning_models import (
 #: The epoch: the expiry a released batch's lease carries, so the store's one lapsed test selects it whatever the grace.
 _EPOCH = _dt.datetime(1970, 1, 1, tzinfo=_dt.UTC)
 #: The one batch cause a person may release (a credential refusal: the work is fine, the key was not).
-RELEASABLE_CAUSE = "forge_credential_refused"
+RELEASABLE_CAUSE: BatchCause = "forge_credential_refused"
 
 from ._feedback import FeedbackVerbs
 from ._keys import digest, mistake_key_of
@@ -167,7 +167,7 @@ class WorkItem:
     enqueued_at: _dt.datetime
     updated_at: _dt.datetime
     #: Why the item is held, dead or skipped (#1537 PR1); `None` otherwise.
-    cause: str | None = None
+    cause: ItemCause | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -187,7 +187,7 @@ class ParkedBatchView:
     #: Why it is parked (#1537 PR1); `parked_at` when (`None` for a batch parked before #1537); `releasable`: the cause is a
     #: credential refusal (a release withdraws a pending abandon request); `abandon_requested_at`: a person asked, the loop has not yet carried
     #: it out; `last_checked`: for a requested batch, the loop's last look at it since the request (else as stored).
-    cause: str | None = None
+    cause: BatchCause | None = None
     parked_at: _dt.datetime | None = None
     releasable: bool = False
     abandon_requested_at: _dt.datetime | None = None
@@ -220,7 +220,7 @@ class BatchView:
     #: The database's own reading: working, and its lease and grace have run out. The one lapse test (O1, P6);
     #: no host reads a clock of its own for it.
     lapsed: bool = False
-    cause: str | None = None
+    cause: BatchCause | None = None
     parked_at: _dt.datetime | None = None
     abandon_requested_at: _dt.datetime | None = None
     abandon_requested_by: str | None = None

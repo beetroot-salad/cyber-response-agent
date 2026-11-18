@@ -7,12 +7,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal, cast
 
-from defender.jobs.audit import AuditAction, announce
+from defender.jobs.audit import AuditAction
 from defender.records.formats import BatchId, TenantId, WorkItemId
 
 from .models import AbandonRequested, BatchReleased, ItemKind, ItemReleased, ParkedBatch, ParkedItemRef, SetAsideItem
 from defender._text import one_line
 
+from .config_records import _announce
 from .ports import Principal, TimePosition
 
 if TYPE_CHECKING:
@@ -28,8 +29,7 @@ def _audit_line(done: Acted) -> str:
 
 
 def _announce_learning(principal: Principal, action: AuditAction, done: Acted) -> None:
-    announce(action, actor=principal.actor_id, tenant_id=principal.tenant_id, target=done.id, detail=_audit_line(done),
-             credential_id=principal.credential_id)
+    _announce(principal, action, done.id, _audit_line(done))
 
 
 class StoreLearningWork:
