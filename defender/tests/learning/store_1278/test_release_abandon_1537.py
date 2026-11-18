@@ -111,6 +111,17 @@ async def test_o1_release_starts_a_held_item_afresh_clears_its_cause_and_detail_
     assert [key for _k, key, _p in taken.items] == ["h1"]
 
 
+async def test_o1_release_starts_the_curator_s_decline_count_afresh_too(dsn):
+    """A held item that the curator had declined is released with its decline count 0 as well: afresh is every count, so
+    the next decline is its first, not the one that kills it. (O1)"""
+    await _held_at_ceiling(dsn, BLUE, "h2")
+    execute(dsn, "UPDATE learning.work_items SET offers_declined = 2 WHERE tenant_id = %s AND item_key = 'h2'", (BLUE,))
+    async with learning_store(dsn, max_attempts=3) as store:
+        [item] = await store.work(BLUE)
+        await release_item(store, BLUE, item.id)
+    assert item_row(dsn, BLUE, "h2")["offers_declined"] == 0
+
+
 @pytest.mark.parametrize("fresher", [True, False])
 async def test_o1_a_held_request_with_a_fresher_one_waiting_is_skipped_as_superseded_else_it_waits(dsn, fresher):
     """Released, a held curation request is `skipped` with cause `superseded` when a fresher request for its case waits; with none it waits. (O1)"""

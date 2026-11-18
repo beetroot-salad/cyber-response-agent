@@ -369,6 +369,10 @@ def _to_waiting() -> dict[str, Any]:
             "reason": case((sup, "superseded by a later run"), else_=None)}
 
 
+#: An item started afresh by a person's release: every count it carries, so none survives to end it early.
+_FRESH_COUNTS: dict[str, int] = {"attempts": 0, "deferrals": 0, "offers_declined": 0}
+
+
 class LearningStore(FeedbackVerbs):
     """Async store over PostgreSQL schema `learning`; tenant id is the first argument of every verb (a holder's verb
     takes its proof instead). #1414's feedback verbs are `FeedbackVerbs` (A4)."""
@@ -813,8 +817,9 @@ class LearningStore(FeedbackVerbs):
     # -- a person's verbs (#1537) --------------------------------------------------------------------------
 
     async def release_item(self, tenant: str, item_id: str) -> Acted:
-        """A person's release: a held item starts afresh (attempts and deferrals both, cause and detail cleared) and waits
-        again, or is skipped as superseded when a fresher request for its case already waits. `NotFound` for an item not
+        """A person's release: a held item starts afresh (every count at 0: attempts, deferrals and curator declines; cause
+        and detail cleared) and waits again, or is skipped as superseded when a fresher request for its case already
+        waits. `NotFound` for an item not
         the tenant's; `Conflict` naming its status when it is not held."""
         async with self._sessions.begin() as s:
             await _settle_requests(s, tenant)
@@ -826,7 +831,7 @@ class LearningStore(FeedbackVerbs):
                 raise Conflict(f"the item is {row.status}, not held")
             now = (await s.execute(update(_I).where(_I.c.tenant_id == row.tenant_id, _I.c.kind == row.kind,
                                                     _I.c.item_key == row.item_key)
-                                   .values(**_to_waiting(), attempts=0, deferrals=0, updated_at=func.now())
+                                   .values(**_to_waiting(), **_FRESH_COUNTS, updated_at=func.now())
                                    .returning(_I.c.status))).scalar_one()
             return Acted(id=str(row.id), state=now, cause=row.cause, detail=row.reason)
 
