@@ -35,7 +35,7 @@ def launch(tmp_path: Path, *, argv_extra=()):
         tmp_path, S.estate(tmp_path),
         calls=[S.Call("idp", "query", S.query_params("user:alice"), _BASE),
                S.Call("edr", "query", S.query_params("host:db-1"), _BASE)],
-        argv_extra=argv_extra, oracle=S.oracle(then=S.submit(_BASE, S.EMPTY_CLAIM)),
+        argv_extra=argv_extra, oracle=S.oracle(then=S.submit()),
         verifier=S.passing_verifier())
     return run.rc, run.spawn, run.ep
 
@@ -80,7 +80,7 @@ def test_long_label_worlds_launch_and_keep_uuid_artifacts(tmp_path, length):
     run = S.launch(
         tmp_path, S.estate(tmp_path), questioner=S.questioner_for(doc), spawn=J.FakeSibling(),
         calls=[S.Call("idp", "query", S.query_params("user:alice"), _BASE)],
-        oracle=S.oracle(then=S.submit(_BASE, S.EMPTY_CLAIM)), verifier=S.passing_verifier())
+        oracle=S.oracle(then=S.submit()), verifier=S.passing_verifier())
     assert run.rc == 0, run.message
     assert label in run.spawn.worlds
     wid = T.world_id(run.ep, label)
@@ -141,7 +141,7 @@ def test_preflight_checks_the_same_roster_capacity_before_oracle_or_writes(tmp_p
     doc.update(source_run_id=src.name, source_run_dir=str(src))
     rows = [S.captured(c.system, c.verb, c.params, c.payload) for c in P.source_calls()]
     ep = S.episode_v2(tmp_path, doc=doc, base_rows=rows)
-    oracle = S.oracle(then=S.submit(P.BASE_ANSWER, S.EMPTY_CLAIM))
+    oracle = S.oracle(then=S.submit())
     before = {path.relative_to(ep): path.read_bytes() for path in ep.rglob("*") if path.is_file()}
     paths_before, calls_before = sorted(ep.rglob("*")), est.calls()
     with Episode.open(ep) as episode:

@@ -1611,7 +1611,7 @@ Routed = S24.Routed
 
 def passing_oracle() -> Any:
     """An oracle serving the recorded answer unchanged, empty claim, for every call."""
-    return S24.oracle(then=S24.submit(BASE_ANSWER, S24.EMPTY_CLAIM))
+    return S24.oracle(then=S24.submit())
 
 
 def on_post(double: Any, *, name: str) -> Routed:
@@ -1619,10 +1619,17 @@ def on_post(double: Any, *, name: str) -> Routed:
     return Routed({QP["q"]: double}, default=passing_oracle(), name=name, last_wins=True)
 
 
+def serve_frozen_b() -> dict:
+    """World b's hand-in on the post-branch call: add FORGED_B as fg-b-1 (the base plus it, i.e.
+    CHANGED_B). Given whole, so it serves whether or not pre-flight froze the row already (a
+    launch may run no pre-flight); the host accepts a frozen row handed in exactly as frozen."""
+    return S24.handin(S24.op_add("/rows/-", FORGED_B, forged_id="fg-b-1", fact_id="f1"))
+
+
 def altering_oracle() -> Routed:
     """World b's sibling oracle: on the post-branch call it serves the forged row (claim adds
     fg-b-1 for f1); every other call passes unchanged."""
-    return on_post(S24.oracle(S24.submit(CHANGED_B, S24.claim(added=[S24.added("fg-b-1", "f1")]))),
+    return on_post(S24.oracle(S24.submit(serve_frozen_b())),
                    name="oracle-b")
 
 
@@ -1630,9 +1637,9 @@ def preflight_oracle() -> Routed:
     """Pre-flight's oracle for the default triad: b forges f1 on the post-branch call; c
     passes; routed by each world's fact statement."""
     forging = on_post(S24.oracle(
-        S24.forge("fg-b-1", "f1", "idp", FORGED_B),
         S24.record_fact("alice", "logon_host", "db-1"),
-        S24.submit(CHANGED_B, S24.claim(added=[S24.added("fg-b-1", "f1")]))), name="pre-b")
+        S24.submit(S24.handin(S24.op_add("/rows/-", FORGED_B, forged_id="fg-b-1", fact_id="f1")))),
+        name="pre-b")
     return Routed({_MARK_FACT["b"]: forging, _MARK_FACT["c"]: passing_oracle()},
                   name="preflight")
 

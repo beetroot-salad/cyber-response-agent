@@ -177,7 +177,7 @@ def test_r5_pre_flight_refuses_a_manifest_naming_another_episode(tmp_path, monke
                             roster=est.roster(), tenant=est.run_tenant(), oracle=oracle.model,
                             verifier=S.passing_verifier().model, data_root=data_root)
 
-    unasked = S.oracle(then=S.submit(P.BASE_ANSWER, S.EMPTY_CLAIM))
+    unasked = S.oracle(then=S.submit())
     err = preflight(unasked)
     assert err is not None, "pre-flight calibrated an episode whose manifest names another"
     assert not isinstance(err, (TypeError, AttributeError, NameError)), f"machinery: {err!r}"
@@ -188,7 +188,7 @@ def test_r5_pre_flight_refuses_a_manifest_naming_another_episode(tmp_path, monke
     assert not (ep / "outcome.yaml").exists(), "pre-flight recorded an outcome for it"
 
     T.write_family(ep, doc(episode_id))
-    asked = S.oracle(then=S.submit(P.BASE_ANSWER, S.EMPTY_CLAIM))
+    asked = S.oracle(then=S.submit())
     assert preflight(asked) is None, "control: pre-flight over its own manifest refused"
     assert asked.requests > 0, "control: pre-flight never asked its oracle"
     assert (ep / "outcome.yaml").is_file(), "control: pre-flight wrote no outcome record"
@@ -523,7 +523,7 @@ class OracleFailingC:
 
     def __init__(self) -> None:
         self.failing = S.oracle(then=S.text_only("no served answer fits this world"))
-        self.passing = S.oracle(then=S.submit(P.BASE_ANSWER, S.EMPTY_CLAIM))
+        self.passing = S.oracle(then=S.submit())
         self.hits = {"c": 0, "other": 0}
         self._model: Any = None
 

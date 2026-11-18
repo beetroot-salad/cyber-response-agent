@@ -456,7 +456,7 @@ def test_1120_every_run_tenant_reader_takes_the_accepted_tenant(
     calls = [S1224.Call("idp", "query", S1224.query_params("user:alice"), response),
              S1224.Call("edr", "query", S1224.query_params("host:db-1"), response)]
     run = S1224.launch(tmp_path, est, calls=calls,
-                       oracle=S1224.oracle(then=S1224.submit(response, S1224.EMPTY_CLAIM)),
+                       oracle=S1224.oracle(then=S1224.submit()),
                        verifier=S1224.passing_verifier())
     assert run.message == "", f"the launcher refused a source whose tenant accept_tenant " \
                               f"accepts: {run.message}"

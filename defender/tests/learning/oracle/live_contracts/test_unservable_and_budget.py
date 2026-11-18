@@ -33,7 +33,7 @@ HOST_DB1 = S.query_params("host:db-1")
 HOST_DB2 = S.query_params("host:db-2")
 EDR_ROWS = S.default_calls()[1].payload
 LOOKUP_ALICE = {"entity": "alice", "risk": "low", "record_id": "r-0001"}
-#: A row the claim never declares.
+#: A row no hand-in forges (the `_off_world` hand-in's replacement row).
 UNDECLARED = {"user": "alice", "event_id": "e-999", "action": "logon", "host": "db-1",
               "ts": "2026-07-28T15:22:00Z"}
 #: World b's fact f1 ("alice obtained a TGT and logged on to db-1 at 15:22Z"), as one forged
@@ -44,8 +44,10 @@ TINY_BUDGET = 1e-9
 SUBMIT = S.COINED["tool.submit"]
 
 
-def _with_undeclared(answer: dict) -> dict:
-    return {"rows": [*answer["rows"], dict(UNDECLARED)]}
+def _off_world() -> dict:
+    """A hand-in that fails check 1: it replaces the base's first row with `UNDECLARED` for a
+    fact (`f9`) the world does not hold."""
+    return S.handin(S.op_replace("/rows/0", dict(UNDECLARED), fact_id="f9"))
 
 
 def _q(q: str, system: str = "idp") -> Any:
@@ -294,8 +296,8 @@ def _tool_result(model: S.ScriptedModel, i: int, tool: str) -> str:
     return "\n".join(out)
 
 
-def _carries_submission(model: S.ScriptedModel, i: int, served: Any) -> bool:
-    """Request `i`'s history still holds the double's earlier `submit` of `served` — the same
+def _carries_submission(model: S.ScriptedModel, i: int, handin: Any) -> bool:
+    """Request `i`'s history still holds the double's earlier `submit` of `handin` — the same
     conversation, appended to, not a fresh one."""
     from pydantic_ai.messages import ModelResponse, ToolCallPart
 
@@ -304,7 +306,7 @@ def _carries_submission(model: S.ScriptedModel, i: int, served: Any) -> bool:
             continue
         for part in msg.parts:
             if (isinstance(part, ToolCallPart) and part.tool_name == SUBMIT
-                    and part.args_as_dict().get("served") == served):
+                    and part.args_as_dict() == handin):
                 return True
     return False
 
@@ -365,8 +367,8 @@ def test_1224_failed_check_is_appended_to_the_oracle_conversation_and_retried(tm
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     ep = S.episode_v2(tmp_path)
-    bad = _with_undeclared(ALICE_ROWS)
-    o = S.oracle(S.submit(bad, S.EMPTY_CLAIM), S.submit(ALICE_ROWS, S.EMPTY_CLAIM))
+    bad = _off_world()
+    o = S.oracle(S.submit(bad), S.submit())
     reg = S.world_registry(ep, "b", est, oracle=o, verifier=S.passing_verifier(), retry_cap=3)
 
     served = S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice")
@@ -391,7 +393,7 @@ def test_1224_query_tool_reraises_oracle_unservable_with_no_row_and_no_breaker_c
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     est.answer("idp", "query", BOB, BOB_ROWS)
     ep = S.episode_v2(tmp_path)
-    o = S.oracle(S.submit(ALICE_ROWS), *[S.text_only("ORCL-MARK-d05b: I will not.")] * 3)
+    o = S.oracle(S.submit(), *[S.text_only("ORCL-MARK-d05b: I will not.")] * 3)
     reg = S.world_registry(ep, "b", est, oracle=o, verifier=S.passing_verifier(), retry_cap=1)
 
     run = _drive(tmp_path, est, reg, [_q("user:alice"), _q("user:bob"), S.done_turn()])
@@ -412,8 +414,8 @@ def test_1224_no_oracle_error_reaches_the_sibling_transcript_or_evidence(tmp_pat
     est.answer("idp", "query", BOB, BOB_ROWS)
     ep = S.episode_v2(tmp_path)
     vrfy, orcl = "VRFY-MARK-7f3 the logon telemetry is absent", "ORCL-MARK-9c2 I cannot do it"
-    o = S.oracle(S.submit(ALICE_ROWS), S.submit(_with_undeclared(BOB_ROWS)),
-                 S.submit(BOB_ROWS), *[S.text_only(orcl)] * 3)
+    o = S.oracle(S.submit(), S.submit(_off_world()),
+                 S.submit(), *[S.text_only(orcl)] * 3)
     v = S.verifier(S.verdict(True), S.verdict(False, vrfy))
     reg = S.world_registry(ep, "b", est, oracle=o, verifier=v, retry_cap=3)
 
@@ -439,8 +441,8 @@ def test_1224_oracle_retries_charge_no_investigator_budget(tmp_path):
     est.answer("edr", "query", HOST_DB1, EDR_ROWS)
     est.answer("idp", "lookup", {"entity": "alice"}, LOOKUP_ALICE)
     ep = S.episode_v2(tmp_path)
-    o = S.oracle(_explore(), _explore(), S.check(ALICE_ROWS),
-                 S.submit(_with_undeclared(ALICE_ROWS)), _explore(), S.submit(ALICE_ROWS))
+    o = S.oracle(_explore(), _explore(), S.check(),
+                 S.submit(_off_world()), _explore(), S.submit())
     v = S.verifier(S.run_query("idp", "lookup", {"entity": "alice"}), S.verdict(True))
     reg = S.world_registry(ep, "b", est, oracle=o, verifier=v, retry_cap=3)
     turns = [_q("user:alice"), S.done_turn()]
@@ -483,7 +485,7 @@ def test_1224_oracle_verifier_and_exploration_cost_is_charged_to_the_oracle_budg
     # The verifier's turns and exploration.
     v2 = S.verifier(*[_explore()] * 25)
     reg2 = S.world_registry(S.episode_v2(tmp_path / "v"), "b", est,
-                            oracle=S.oracle(S.submit(ALICE_ROWS)), verifier=v2,
+                            oracle=S.oracle(S.submit()), verifier=v2,
                             budget=TINY_BUDGET, retry_cap=3)
     with pytest.raises(U) as stopped2:
         S.call(reg2, "idp", "query", est.ctx(tmp_path / "inv-v"), q="user:alice")
@@ -493,7 +495,7 @@ def test_1224_oracle_verifier_and_exploration_cost_is_charged_to_the_oracle_budg
 
     # Control: the same exploration under the default budget runs and serves.
     calls_before = len(est.calls("edr", "query"))
-    o3 = S.oracle(_explore(), _explore(), _explore(), S.submit(ALICE_ROWS))
+    o3 = S.oracle(_explore(), _explore(), _explore(), S.submit())
     reg3 = S.world_registry(S.episode_v2(tmp_path / "c"), "b", est, oracle=o3,
                             verifier=S.passing_verifier(), retry_cap=3)
     assert S.call(reg3, "idp", "query", est.ctx(tmp_path / "inv-c"),
@@ -509,14 +511,14 @@ def test_1224_exhausted_oracle_budget_makes_the_sibling_unservable(tmp_path):
     U = S.unservable_cls()
 
     reg = S.world_registry(S.episode_v2(tmp_path / "r"), "b", est,
-                           oracle=S.oracle(S.submit(ALICE_ROWS)),
+                           oracle=S.oracle(S.submit()),
                            verifier=S.passing_verifier(), budget=TINY_BUDGET)
     with pytest.raises(U) as stopped:
         S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice")
     assert stopped.value.reason == S.REASON_BUDGET
 
     reg2 = S.world_registry(S.episode_v2(tmp_path / "d"), "b", est,
-                            oracle=S.oracle(S.submit(ALICE_ROWS)),
+                            oracle=S.oracle(S.submit()),
                             verifier=S.passing_verifier(), budget=TINY_BUDGET)
     run = _drive(tmp_path / "w", est, reg2, [_q("user:alice"), S.done_turn()])
     assert isinstance(run.raised, U), (
@@ -531,14 +533,15 @@ def test_1224_exhausted_oracle_budget_makes_the_sibling_unservable(tmp_path):
     assert "OracleUnservable" not in run.transcript
 
     ctl = S.world_registry(S.episode_v2(tmp_path / "c"), "b", est,
-                           oracle=S.oracle(S.submit(ALICE_ROWS)),
+                           oracle=S.oracle(S.submit()),
                            verifier=S.passing_verifier())
     ok = _drive(tmp_path / "k", est, ctl, [_q("user:alice"), S.done_turn()])
     assert ok.rows_for("idp", "user:alice")[0]["exit_code"] == 0
 
 
 def test_1224_side_query_rerun_sees_data_that_moved_since_the_oracle_ran(tmp_path):
-    """Data moving before check 5's re-run fails the attempt on the count; the claimed answer is never served or cached."""
+    """Data moving before check 5's re-run so the proof no longer selects the removed row fails the attempt; the
+    patched answer is never served or cached."""
     r1 = {"user": "alice", "event_id": "e-100", "action": "logon", "host": "web-1",
           "ts": "2026-07-28T15:00:00Z"}
     r2 = {"user": "alice", "event_id": "e-101", "action": "logon", "host": "10.0.0.9",
@@ -547,15 +550,15 @@ def test_1224_side_query_rerun_sees_data_that_moved_since_the_oracle_ran(tmp_pat
           "ts": "2026-07-28T15:02:00Z"}
     side = {"entity": "10.0.0.9"}
     served = {"rows": [r1]}
-    the_claim = S.claim(removed=[S.removed(r2, system="idp", verb="lookup", params=side,
-                                           count=1)])
+    removal = S.handin(S.op_remove("/rows/1", fact_id="f1"),
+                       proofs=[S.proof("idp", "lookup", side)])
 
     def scenario(root: Path, *, moves: bool) -> tuple[Any, Path, S.Estate]:
         est = S.estate(root)
         est.answer("idp", "query", ALICE, {"rows": [r1, r2]})
         est.answer("idp", "lookup", side, {"rows": [r2]})
         ep = S.episode_v2(root)
-        o = S.oracle(S.run_query("idp", "lookup", side), S.submit(served, the_claim),
+        o = S.oracle(S.run_query("idp", "lookup", side), S.submit(removal),
                      fault=S.Fault(delay=0.4))
         reg = S.world_registry(ep, "b", est, oracle=o, verifier=S.passing_verifier(),
                                retry_cap=1)
@@ -564,7 +567,7 @@ def test_1224_side_query_rerun_sees_data_that_moved_since_the_oracle_ran(tmp_pat
                 deadline = time.monotonic() + 10
                 while not est.calls("idp", "lookup") and time.monotonic() < deadline:
                     time.sleep(0.02)
-                est.answer("idp", "lookup", side, {"rows": [r2, r3]})
+                est.answer("idp", "lookup", side, {"rows": [r3]})
             threading.Thread(target=watch, daemon=True).start()
         return reg, ep, est
 
@@ -574,7 +577,7 @@ def test_1224_side_query_rerun_sees_data_that_moved_since_the_oracle_ran(tmp_pat
     reg, ep, est = scenario(tmp_path / "mv", moves=True)
     with pytest.raises(S.unservable_cls()):
         S.call(reg, "idp", "query", est.ctx(tmp_path / "inv-m"), q="user:alice")
-    assert len(est.calls("idp", "lookup")) >= 2, "check 5 never re-ran the side query"
+    assert len(est.calls("idp", "lookup")) >= 2, "check 5 never re-ran the proof"
     assert _served_rows(ep, "b", "user:alice") == []
     assert _cached(ep, "b", "user:alice") == []
 
@@ -584,10 +587,10 @@ def test_oracle_turn_ends_without_submitting(tmp_path):
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     o = S.oracle(S.text_only("I think the answer is the base answer."),
+                 # Not hand-ins: the retired `served` literal, and a patch with a field no hand-in has.
                  S.Move(SUBMIT, {"served": ALICE_ROWS}),
-                 S.Move(SUBMIT, {"served": ALICE_ROWS,
-                                 "claim": {**S.EMPTY_CLAIM, "confidence": "high"}}),
-                 S.submit(ALICE_ROWS))
+                 S.Move(SUBMIT, {**S.EMPTY, "confidence": "high"}),
+                 S.submit())
     reg = S.world_registry(S.episode_v2(tmp_path / "a"), "b", est, oracle=o,
                            verifier=S.passing_verifier(), retry_cap=4)
 
@@ -616,9 +619,9 @@ def test_input_oracle_model_returns_nothing_usable(tmp_path):
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     refusal = "I won't fabricate attack telemetry; that could be used to cause harm."
-    cut_off = '{"served": {"rows": [{"user": "alice", "event_id": "e-1'
+    cut_off = '{"patch": [{"op": "add", "path": "/rows/-", "value": {"user": "alice", "event_id": "e-1'
     o = S.oracle(S.text_only(""), S.text_only(refusal), S.text_only(cut_off),
-                 S.submit(ALICE_ROWS))
+                 S.submit())
     reg = S.world_registry(S.episode_v2(tmp_path / "a"), "b", est, oracle=o,
                            verifier=S.passing_verifier(), retry_cap=4)
 
@@ -644,7 +647,7 @@ def test_verifier_provider_fails_after_the_host_checks_passed(tmp_path):
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     ep = S.episode_v2(tmp_path / "a")
-    o = S.oracle(S.submit(ALICE_ROWS))
+    o = S.oracle(S.submit())
     # The verifier's first request fails as its provider client fails after retries.
     v = S.verifier(S.raising(S.OUTAGE), S.verdict(True))
     reg = S.world_registry(ep, "b", est, oracle=o, verifier=v, retry_cap=2)
@@ -663,7 +666,7 @@ def test_verifier_provider_fails_after_the_host_checks_passed(tmp_path):
         assert leak not in run.evidence_text, leak
 
     ep2 = S.episode_v2(tmp_path / "b")
-    o2 = S.oracle(then=S.submit(ALICE_ROWS))
+    o2 = S.oracle(then=S.submit())
     v2 = S.verifier(then=S.raising(S.OUTAGE))  # on every request
     reg2 = S.world_registry(ep2, "b", est, oracle=o2, verifier=v2, retry_cap=2)
     with pytest.raises(S.unservable_cls()):
@@ -681,7 +684,7 @@ def test_verifier_replies_with_neither_a_pass_nor_a_failure(tmp_path):
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     ep = S.episode_v2(tmp_path / "a")
-    o = S.oracle(S.submit(ALICE_ROWS), S.submit(ALICE_ROWS))
+    o = S.oracle(S.submit(), S.submit())
     v = S.verifier(*[S.text_only("VERDICT: PASS - the logon telemetry is present.")] * 8)
     reg = S.world_registry(ep, "b", est, oracle=o, verifier=v, retry_cap=2)
 
@@ -693,7 +696,7 @@ def test_verifier_replies_with_neither_a_pass_nor_a_failure(tmp_path):
     assert _cached(ep, "b", "user:alice") == []
 
     ctl = S.world_registry(S.episode_v2(tmp_path / "c"), "b", est,
-                           oracle=S.oracle(S.submit(ALICE_ROWS)),
+                           oracle=S.oracle(S.submit()),
                            verifier=S.verifier(S.verdict(True)), retry_cap=2)
     assert S.call(ctl, "idp", "query", est.ctx(tmp_path / "inv-c"),
                   q="user:alice") == ALICE_ROWS
@@ -706,7 +709,7 @@ def test_exploration_query_errors_on_the_real_system(tmp_path):
     est.fail("edr", "query", HOST_DB1, fault="TransportFault",
              detail="EXPLORE-ERR-55: the edr cluster lacks this feature")
     ep = S.episode_v2(tmp_path)
-    o = S.oracle(_explore(), S.submit(ALICE_ROWS))
+    o = S.oracle(_explore(), S.submit())
     reg = S.world_registry(ep, "b", est, oracle=o, verifier=S.passing_verifier(), retry_cap=1)
 
     run = _drive(tmp_path, est, reg, [_q("user:alice"), S.done_turn()])
@@ -770,7 +773,7 @@ def test_1363_o8_a_verifiers_lookup_failing_on_our_side_fails_the_attempt(tmp_pa
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     _lost_edr(est, origin)
     v = S.verifier(then=_explore())
-    reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=S.oracle(then=S.submit(ALICE_ROWS)),
+    reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=S.oracle(then=S.submit()),
                            verifier=v, retry_cap=2)
 
     run = _drive(tmp_path, est, reg, [_q("user:alice"), S.done_turn()])
@@ -812,7 +815,7 @@ def test_1363_o7_the_mark_belongs_to_the_serving_not_to_the_oracle(tmp_path):
     est.answer("idp", "query", BOB, BOB_ROWS)
     est.answer("idp", "query", CAROL, CAROL_ROWS)
     _lost_edr(est, "access")
-    o = S.oracle(_explore(), S.submit(BOB_ROWS), then=S.text_only("no"))
+    o = S.oracle(_explore(), S.submit(), then=S.text_only("no"))
     reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o, verifier=S.passing_verifier(), retry_cap=2)
 
     run = _drive(tmp_path, est, reg, [_q("user:bob"), _q("user:carol"), S.done_turn()])
@@ -842,7 +845,7 @@ def test_1363_o7_the_cause_a_give_up_names_is_its_own_servings_not_an_earlier_on
     est.fail("edr", "query", HOST_DB1, fault="TransportFault", detail="FIRST-SERVING", origin="setup")
     est.fail("edr", "query", S.query_params("host:db-2"), fault="TransportFault", detail="SECOND-SERVING",
              origin="setup")
-    o = S.oracle(_explore("host:db-1"), S.submit(BOB_ROWS), _explore("host:db-2"), then=S.text_only("no"))
+    o = S.oracle(_explore("host:db-1"), S.submit(), _explore("host:db-2"), then=S.text_only("no"))
     reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o, verifier=S.passing_verifier(), retry_cap=2)
 
     run = _drive(tmp_path, est, reg, [_q("user:bob"), _q("user:carol"), S.done_turn()])
@@ -965,7 +968,7 @@ def test_1363_o8_control_a_lookup_failing_with_the_systems_origin_is_shown_to_th
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     est.fail("edr", "query", HOST_DB1, fault="TransportFault", detail=OURS, origin="system")
-    o = S.oracle(_explore(), then=S.submit(ALICE_ROWS))
+    o = S.oracle(_explore(), then=S.submit())
     reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o, verifier=S.passing_verifier(),
                            retry_cap=1)
 
@@ -986,8 +989,8 @@ def test_python_runs_past_its_time_limit(tmp_path):
     served = {"rows": [*ALICE_ROWS["rows"], FORGED_ROW]}
     o = S.oracle(S.python("import time\nwhile True:\n    time.sleep(1)\n"),
                  S.python("while True:\n    print('A' * 4096)\n"),
-                 S.forge("fx-1", "f1", "idp", FORGED_ROW),
-                 S.submit(served, S.claim(added=[S.added("fx-1", "f1")])))
+                 S.submit(S.handin(S.op_add("/rows/-", FORGED_ROW, forged_id="fx-1",
+                                            fact_id="f1"))))
     reg = S.world_registry(ep, "b", est, oracle=o, verifier=S.passing_verifier(), box=box,
                            retry_cap=1)
 
@@ -1026,12 +1029,12 @@ def test_resumed_sibling_leaves_the_oracle_side_trace_of_the_first_attempt(tmp_p
     base_before = (ep / "served" / "base.jsonl").read_bytes()
 
     first = S.world_registry(
-        ep, "b", est, oracle=S.oracle(_explore("host:db-1"), S.submit(ALICE_ROWS)),
+        ep, "b", est, oracle=S.oracle(_explore("host:db-1"), S.submit()),
         verifier=S.verifier(S.run_query("siem-x", "lookup", {"entity": "alice"}),
                             S.verdict(True)))
     run1 = _drive(tmp_path / "w", est, first, [_q("user:alice"), S.done_turn()])
     resumed = S.world_registry(
-        ep, "b", est, oracle=S.oracle(_explore("host:db-2"), S.submit(BOB_ROWS)),
+        ep, "b", est, oracle=S.oracle(_explore("host:db-2"), S.submit()),
         verifier=S.passing_verifier())
     run2 = _drive(tmp_path / "r", est, resumed, [_q("user:bob"), S.done_turn()])
 
@@ -1057,8 +1060,8 @@ def test_conc_15_calls_issued_after_the_sibling_is_unservable(tmp_path):
     for params, rows in ((ALICE, ALICE_ROWS), (BOB, BOB_ROWS), (CAROL, CAROL_ROWS)):
         est.answer("idp", "query", params, rows)
     ep = S.episode_v2(tmp_path)
-    o = S.oracle(S.submit(ALICE_ROWS), *[S.text_only("ORCL-MARK-159: no.")] * 3,
-                 S.submit(CAROL_ROWS), S.submit(BOB_ROWS))
+    o = S.oracle(S.submit(), *[S.text_only("ORCL-MARK-159: no.")] * 3,
+                 S.submit(), S.submit())
     reg = S.world_registry(ep, "b", est, oracle=o, verifier=S.passing_verifier(), retry_cap=1)
     ctx = est.ctx(tmp_path / "inv")
     U = S.unservable_cls()
@@ -1141,7 +1144,7 @@ def test_resume_after_the_sibling_was_already_unservable(tmp_path, monkeypatch):
     unseal_fixture_input(first.run.run_dir)
     shutil.rmtree(first.run.run_dir)
 
-    o2 = S.oracle(S.submit(BOB_ROWS))
+    o2 = S.oracle(S.submit())
     again = _resume(ep, est, oracle=o2, verifier=S.passing_verifier(), turns=turns,
                     retry_cap=1)
 
@@ -1157,10 +1160,10 @@ def test_disk_full_while_freezing_forged_rows(tmp_path):
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     served = {"rows": [*ALICE_ROWS["rows"], FORGED_ROW]}
-    the_claim = S.claim(added=[S.added("fx-1", "f1")])
+    add = S.handin(S.op_add("/rows/-", FORGED_ROW, forged_id="fx-1", fact_id="f1"))
 
     def moves() -> list[S.Move]:
-        return [S.forge("fx-1", "f1", "idp", FORGED_ROW), S.submit(served, the_claim)]
+        return [S.submit(add)]
 
     ctl_ep = S.episode_v2(tmp_path / "c")
     ctl = S.world_registry(ctl_ep, "b", est, oracle=S.oracle(*moves()),
@@ -1193,14 +1196,14 @@ def test_oracle_ledger_append_fails_after_a_good_answer(tmp_path):
     est.answer("edr", "query", HOST_DB1, EDR_ROWS)
 
     ctl_ep = S.episode_v2(tmp_path / "c")
-    ctl = S.world_registry(ctl_ep, "b", est, oracle=S.oracle(_explore(), S.submit(ALICE_ROWS)),
+    ctl = S.world_registry(ctl_ep, "b", est, oracle=S.oracle(_explore(), S.submit()),
                            verifier=S.passing_verifier(), retry_cap=1)
     assert S.call(ctl, "idp", "query", est.ctx(tmp_path / "inv-c"),
                   q="user:alice") == ALICE_ROWS
     assert [r for r in S.oracle_rows(ctl_ep, "b", "ledger") if r.get("system") == "edr"]
 
     ep = S.episode_v2(tmp_path / "f")
-    reg = S.world_registry(ep, "b", est, oracle=S.oracle(_explore(), S.submit(ALICE_ROWS)),
+    reg = S.world_registry(ep, "b", est, oracle=S.oracle(_explore(), S.submit()),
                            verifier=S.passing_verifier(), retry_cap=1)
     _blocked(S.oracle_dir(ep, "b") / "ledger.jsonl")
     run = _drive(tmp_path / "w", est, reg, [_q("user:alice"), S.done_turn()])
@@ -1230,7 +1233,7 @@ def test_oracle_budget_is_spent_by_pre_flight_before_the_sibling_starts(tmp_path
 
     est.answer("idp", "query", BOB, BOB_ROWS)
     U = S.unservable_cls()
-    o2, v2 = S.oracle(S.submit(BOB_ROWS)), S.passing_verifier()
+    o2, v2 = S.oracle(S.submit()), S.passing_verifier()
     reg = S.world_registry(launched.ep, "b", est, oracle=o2, verifier=v2, budget=TINY_BUDGET)
     with pytest.raises(U) as stopped:
         S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:bob")
@@ -1240,7 +1243,7 @@ def test_oracle_budget_is_spent_by_pre_flight_before_the_sibling_starts(tmp_path
 
     # The isolating control: the same tiny budget on a world pre-flight never spent from lets
     # the oracle make its first request, then stops the call for budget.
-    o4 = S.oracle(S.submit(BOB_ROWS))
+    o4 = S.oracle(S.submit())
     fresh = S.world_registry(S.episode_v2(tmp_path / "fresh-tiny"), "b", est, oracle=o4,
                              verifier=S.passing_verifier(), budget=TINY_BUDGET)
     with pytest.raises(U) as fresh_stopped:
@@ -1251,7 +1254,7 @@ def test_oracle_budget_is_spent_by_pre_flight_before_the_sibling_starts(tmp_path
         "budget")
 
     monkeypatch.delenv(S.KNOB_BUDGET)
-    o3 = S.oracle(S.submit(BOB_ROWS))
+    o3 = S.oracle(S.submit())
     ctl = S.world_registry(S.episode_v2(tmp_path / "fresh"), "b", est, oracle=o3,
                            verifier=S.passing_verifier())
     assert S.call(ctl, "idp", "query", est.ctx(tmp_path / "inv-c"), q="user:bob") == BOB_ROWS
@@ -1273,14 +1276,14 @@ def test_1224_retry_cap_zero_is_refused_and_one_allows_exactly_one_failed_attemp
     U = S.unservable_cls()
     ctx = est.ctx(tmp_path / "inv")
 
-    check = S.oracle(S.submit(_with_undeclared(ALICE_ROWS)), S.submit(ALICE_ROWS))
+    check = S.oracle(S.submit(_off_world()), S.submit())
     reg = S.world_registry(S.episode_v2(tmp_path / "h"), "b", est, oracle=check,
                            verifier=S.passing_verifier(), retry_cap=1)
     with pytest.raises(U):
         S.call(reg, "idp", "query", ctx, q="user:alice")
     assert check.submissions() == 1, "a failed host check was retried under a cap of one"
 
-    vo = S.oracle(S.submit(ALICE_ROWS), S.submit(ALICE_ROWS))
+    vo = S.oracle(S.submit(), S.submit())
     vv = S.verifier(S.verdict(False, "f1's logon is missing"), S.verdict(True))
     reg = S.world_registry(S.episode_v2(tmp_path / "v"), "b", est, oracle=vo, verifier=vv,
                            retry_cap=1)
@@ -1288,7 +1291,7 @@ def test_1224_retry_cap_zero_is_refused_and_one_allows_exactly_one_failed_attemp
         S.call(reg, "idp", "query", ctx, q="user:alice")
     assert vo.submissions() == 1, "a verifier failure was retried under a cap of one"
 
-    slow = S.oracle(S.submit(ALICE_ROWS), S.submit(ALICE_ROWS), fault=S.Fault(delay=2.0))
+    slow = S.oracle(S.submit(), S.submit(), fault=S.Fault(delay=2.0))
     reg = S.world_registry(S.episode_v2(tmp_path / "d"), "b", est, oracle=slow,
                            verifier=S.passing_verifier(), retry_cap=1, turn_deadline=0.3)
     began = time.monotonic()
@@ -1304,7 +1307,7 @@ def test_1224_retry_cap_zero_is_refused_and_one_allows_exactly_one_failed_attemp
         S.call(reg, "idp", "query", ctx, q="user:alice")
 
     before = len(est.calls("edr", "query"))
-    paced = S.oracle(_explore(), _explore(), _explore(), S.submit(ALICE_ROWS))
+    paced = S.oracle(_explore(), _explore(), _explore(), S.submit())
     reg = S.world_registry(S.episode_v2(tmp_path / "r"), "b", est, oracle=paced,
                            verifier=S.passing_verifier(), retry_cap=1, rate=1.0,
                            turn_deadline=1.5)
@@ -1323,7 +1326,7 @@ def test_1543_o6_every_failed_model_request_leaves_a_trace_row_with_its_status(t
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     ep = S.episode_v2(tmp_path / "a")
-    o = S.oracle(S.raising(S.OUTAGE), S.submit(ALICE_ROWS))
+    o = S.oracle(S.raising(S.OUTAGE), S.submit())
     v = S.verifier(S.raising(429), S.verdict(True))
     reg = S.world_registry(ep, "b", est, oracle=o, verifier=v, retry_cap=2)
 

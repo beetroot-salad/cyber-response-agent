@@ -114,7 +114,7 @@ def _branch_launch_preflight_replay(request: pytest.FixtureRequest) -> tuple[lis
     tmp_path, monkeypatch = request.getfixturevalue("tmp_path"), request.getfixturevalue("monkeypatch")
     daemon = _on_path_daemon(tmp_path, monkeypatch)
     est = S.estate(tmp_path)
-    oracle = _by_world(*[S.oracle(S.python("print('checked')"), then=S.submit(_BASE, S.EMPTY_CLAIM)) for _ in range(2)])
+    oracle = _by_world(*[S.oracle(S.python("print('checked')"), then=S.submit()) for _ in range(2)])
     _base, src = S.source_run(tmp_path, est, calls=_calls())
     _main(src, est, oracle=oracle, verifier=S.passing_verifier())
     return daemon.check_folders(), Path(os.environ["DEFENDER_DATA_ROOT"])

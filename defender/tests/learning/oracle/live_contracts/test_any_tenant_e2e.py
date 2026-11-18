@@ -60,7 +60,7 @@ def _branch_end_to_end(tmp_path: Path, est: S.Estate, *, doc: dict, calls: list,
     """Launch over `est`, serve one sibling call on `system` in world b, grade world b, then
     select lessons for a later episode by the systems the judge recorded."""
     questioner = S.questioner_for(doc)
-    pre_oracle = S.oracle(then=S.submit(SHARED, S.EMPTY_CLAIM))
+    pre_oracle = S.oracle(then=S.submit())
     pre_verifier = S.passing_verifier()
     launch = S.launch(tmp_path, est, calls=calls, questioner=questioner, oracle=pre_oracle,
                       verifier=pre_verifier,
@@ -68,9 +68,8 @@ def _branch_end_to_end(tmp_path: Path, est: S.Estate, *, doc: dict, calls: list,
 
     est.answer(system, "query", sibling_params, sibling_base)
     key = next(iter(sibling_base))
-    served = {key: [*sibling_base[key], forged_row]}
-    sibling_oracle = S.oracle(S.forge("fg-1", "f1", system, forged_row),
-                              S.submit(served, S.claim(added=[S.added("fg-1", "f1")])))
+    sibling_oracle = S.oracle(S.submit(S.handin(
+        S.op_add(f"/{key}/-", forged_row, forged_id="fg-1", fact_id="f1"))))
     box, _log = S.sandboxed_box()
     registry = S.world_registry(launch.ep, "b", est, oracle=sibling_oracle,
                                 verifier=S.passing_verifier(), box=box, retry_cap=3)

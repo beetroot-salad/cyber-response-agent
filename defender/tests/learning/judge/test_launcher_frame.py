@@ -44,7 +44,7 @@ def _launch(tmp_path, *, judge=None, spawn=None, **seams):
         judge = _launch_judge()
     launched = S.launch(tmp_path, est,
                         calls=[S.Call("idp", "query", S.query_params("user:alice"), _EMPTY)],
-                        oracle=S.oracle(then=S.submit(_EMPTY, S.EMPTY_CLAIM)),
+                        oracle=S.oracle(then=S.submit()),
                         verifier=S.passing_verifier(), spawn=spawn, judge=judge, **seams)
     return launched.rc, judge, launched.ep
 
