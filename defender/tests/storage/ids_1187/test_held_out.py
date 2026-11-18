@@ -41,14 +41,18 @@ def _fixtures(root: Path, truths: dict[str, str]) -> Path:
 def _run(runs: Path, run_id: str | None = None, *, says: str | None,
          record: bool = True, fault: str | None = None) -> Path:
     """Create a run with an alert record and its closing record: `says` its disposition, or (None) a store with the table and
-    no row; `fault` breaks where the record is read (#1534)."""
-    from defender.records import RunPaths
+    no row; `fault` breaks where the record is read (#1534). A folder named by a slug, not a run id, gets its record through a
+    handle built at that folder (scoring must never reach it)."""
+    from defender.records import Run, RunPaths
+    from defender.tests.support.shared._fixture_uuid import is_fixture_uuid_shape
+    from defender.tests.support.shared._locations_1210 import fixture_runs_base
     from defender.tests.support.storage import _readers1534 as R
 
     run_dir = S.make_run(runs, run_id)
     if not record:
         RunPaths(run_dir).alert_record.unlink()
-    R.plant_run(run_dir, None if says is None else R.valid_fields(says), fault=fault)
+    handle = None if is_fixture_uuid_shape(run_dir.name) else Run(run_dir, runs_base=fixture_runs_base(runs))
+    R.plant_run(run_dir, None if says is None else R.valid_fields(says), fault=fault, run=handle)
     return run_dir
 
 
