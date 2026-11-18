@@ -266,7 +266,7 @@ CHILD_SCRIPT = textwrap.dedent("""
         sys.path.insert(0, spec["worktree"])
         from defender.tests.support.jobs._jobs1342 import session_pointer
         from defender.tests.support.storage import _readers1534 as R
-        case = plan["case"]
+        case = own.get("case", plan["case"])  # a live child's record goes in the database it wrote and pointed at
         (runs / run_id).mkdir(exist_ok=True)  # a run that reached its close had its folder (the worker's run-started check)
         pointer = runs / f"{run_id}.session-pointer.json"
         fault = plan.get("fault")
@@ -294,6 +294,7 @@ CHILD_SCRIPT = textwrap.dedent("""
                 planting.clear()
 
     planting = []
+    own = {}  # a live child's (`sessions`) own case: the database its spend wrote and its pointer names
 
     def plant_store(plan, case, fault):
         from defender.records import session_store
@@ -308,7 +309,7 @@ CHILD_SCRIPT = textwrap.dedent("""
             try:
                 handle = stack.enter_context(open_store(case_id=case, sessions=_paths(runs)))
             except Exception:
-                if fresh:
+                if fresh or own:  # a live child's database is its own, never one the spec staged
                     raise
                 return
             if fresh:
@@ -431,6 +432,7 @@ CHILD_SCRIPT = textwrap.dedent("""
         import hashlib
         case = hashlib.md5(run_id.encode()).hexdigest() if spend.get("per_run") else spend["case"]  # per run: a retry never shares its parent's database
         (runs / f"{run_id}.session-pointer.json").write_text(session_pointer(case), encoding="utf-8")
+        own["case"] = case
         marks = Path(spend["marks"])
         marks.mkdir(parents=True, exist_ok=True)
         if spend.get("seal", True):
