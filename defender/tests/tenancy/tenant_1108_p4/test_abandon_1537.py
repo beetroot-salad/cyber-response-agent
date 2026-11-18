@@ -262,7 +262,8 @@ def test_o4_a_run_of_404s_is_a_credential_refusal_only_when_the_repository_itsel
         assert "cannot see the repository" in got["reason"], got["reason"]
     else:
         assert got["cause"] == "forge_refused", got
-        assert "cannot see" not in got["reason"] and "404 Not Found" in got["reason"], got["reason"]
+        assert "cannot see" not in got["reason"], got["reason"]
+        assert "404 Not Found" in got["reason"], got["reason"]
 
 
 def test_o3_a_parked_batch_is_left_alone_until_asked_then_its_open_pr_is_closed_once_kept_and_the_batch_settled_abandoned(scene, caplog):

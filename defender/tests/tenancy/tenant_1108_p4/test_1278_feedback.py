@@ -370,7 +370,8 @@ def test_feedback_a_close_that_never_takes_is_counted_to_the_ceiling_and_goes_to
     assert got["refusals"] == passes
     assert got["phase"] == ("needs_person" if passes == 3 else "in_review")
     if passes == 3:
-        assert got["cause"] == "forge_refused" and "still reads open" in got["reason"], got
+        assert got["cause"] == "forge_refused", got
+        assert "still reads open" in got["reason"], got
 
 
 def test_feedback_a_close_for_changes_requested_that_does_not_take_ends_nothing_and_is_made_again_next_pass(world, caplog):
