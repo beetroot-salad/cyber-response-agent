@@ -67,7 +67,7 @@ def plant_run(run_dir: Path, fields: dict[str, Any] | None = None, *, fault: str
     from defender.records import session_store as ss
 
     run_dir = Path(run_dir)
-    run = fixture_run(run_dir) if run is None else run
+    handle = fixture_run(run_dir) if run is None else run
     if fault == NO_POINTER:
         return None
     if fault == LEGACY_LINK:
@@ -76,12 +76,12 @@ def plant_run(run_dir: Path, fields: dict[str, Any] | None = None, *, fault: str
         os.symlink("elsewhere", run_dir / _LEGACY_LINK_NAME)
         return None
     if fault == "pointer-unreadable":
-        run.observability.session_pointer.write("{not json")
+        handle.observability.session_pointer.write("{not json")
         return None
     sessions = SessionPaths(fixture_runs_base(sessions_base or run_dir.parent))
     with ss.open_store(case_id=case_id or f"c1534-{uuid.uuid4().hex[:12]}", sessions=sessions) as store:
         store.new_session(agent_id="main")
-        ss.write_case_pointer(run, case_id=store.case_id, store_path=store.path)
+        ss.write_case_pointer(handle, case_id=store.case_id, store_path=store.path)
         if fields is not None:
             V.plant(store, V.a_record(run_dir.name, **fields))
         database = Path(store.path)
