@@ -154,7 +154,7 @@ def ticket(root: Path, plan: Plan, *, case: str, run_id: str, **_: Any) -> Read:
         body = store.comment_body()
         if "No disposition was recorded" in body:
             return Read((ANSWER_NEVER, ""), [body], run)
-        return Read((ANSWER_DISPOSITION, body.split(" — ", 1)[0]), [body], run)
+        return Read((ANSWER_DISPOSITION, body.split("\n", 1)[0]), [body], run)  # #1471 P-6: the word, then the link
     reason = receipt(run_dir)["reason"] or ""
     return Read((ANSWER_FAULT, reason), [json.dumps(receipt(run_dir))], run)
 

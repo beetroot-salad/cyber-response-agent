@@ -10,7 +10,7 @@ import time
 
 import pytest
 
-from defender._vocab import DISPOSITION_VALUES, PROCESS_GAP_DISPOSITION
+from defender._vocab import DISPOSITION_VALUES
 from defender.tests.storage.verdict_1534 import _close_b as B
 from defender.tests.storage.verdict_1534 import _spec1534 as V
 from defender.tests.support.runtime.engine import _spec923 as S
@@ -23,7 +23,6 @@ from defender.tests.support.shared.contracts import _tacit983 as scene
 HOST = S.MEMBER
 #: The two free-text rows `S.pays_every_price` writes, in the design's piece order (summary, detection_notes).
 JOINED = "one document that owes no keyword anything Groups by host, so the actor the rule names is never tested."
-PROCESS_GAP_SUMMARY = "routine maintenance by alice[.]ops with no change record"
 LOCK_HELD_S = 2.0
 
 
@@ -49,10 +48,9 @@ def test_v_one_every_model_disposition_commits_one_record_and_no_report_file(tmp
     cause = C.CAUSE_CEILING_EXAMINED if disposition == S.GAP_MEMBER else C.CAUSE_STORY_SETTLED
     assert (rec.run_id, rec.disposition, rec.outcome, rec.cause, rec.failure_kind, rec.drafted_disposition) == (
         done.run_dir.name, disposition, C.STANDS, cause, None, None)
-    gap_free = disposition == PROCESS_GAP_DISPOSITION
-    assert B.ceiling_of(rec) == ([] if gap_free else [(
-        "query-failed", "l-002", None, "EDR execve logs for web-1 never came back; the collector returned HTTP 503")])
-    assert rec.summary == (PROCESS_GAP_SUMMARY if gap_free else JOINED)
+    assert B.ceiling_of(rec) == [(
+        "query-failed", "l-002", None, "EDR execve logs for web-1 never came back; the collector returned HTTP 503")]
+    assert rec.summary == JOINED
     assert not (done.run_dir / "report.md").exists(), "the close wrote report.md"
     assert S9.record_files(done.run_dir) == [1]
     assert challenge_gate.ReviewState.of(done.deps).closed

@@ -78,14 +78,13 @@ def _receipt(cap: str, note: str) -> str:
 
 
 def _ceiling_rows(rng: random.Random, mode: str, disposition: str) -> tuple[list[str], set[str]]:
-    from defender._vocab import PROCESS_GAP_DISPOSITION
     from defender.records import closing as C
     from defender.tests.support.runtime.engine import _spec923 as S
 
     features: set[str] = set()
     if mode == "few":
         rows = [_receipt(_cap(rng, i, over=rng.random() < 0.3), _short_text(rng)) for i in range(rng.randint(1, 3))]
-        if disposition != PROCESS_GAP_DISPOSITION and rng.random() < 0.5:
+        if rng.random() < 0.5:
             rows.append(S.PAYING_ROW)
         if rng.random() < 0.4:
             rows.append(rng.choice((S.SOURCE_ONLY_ROW, rows[0])))  # a row the walker refuses, or a repeat

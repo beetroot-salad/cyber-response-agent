@@ -86,9 +86,9 @@ def test_v_fields_the_outcome_cause_failure_draft_and_disposition_combinations_c
         allowed += want
         refused += not want
     assert wrong == []
-    # 6 settled-by-disposition rows that stand, and 5 drafts x 6 (cause, failure kind) pairs that force `unresolved`.
-    assert allowed == 36, "the design's table allows 36 combinations"
-    assert refused > 2000
+    # 5 settled-by-disposition rows that stand, and 4 drafts x 6 (cause, failure kind) pairs that force `unresolved`.
+    assert allowed == 29, "the design's table allows 29 combinations"
+    assert refused > 1600
 
 
 @pytest.mark.parametrize("field", ["outcome", "cause", "failure_kind", "drafted_disposition", "disposition"])
@@ -318,11 +318,11 @@ def _plant_all_valid(tmp_path):
 
 
 def test_v_look_every_valid_record_reads_back_whole_from_its_own_run_handle(tmp_path):
-    """Each of the 36 valid records, with ceiling receipts and baselines, reads as `Record` equal to what was written. (V-LOOK)"""
+    """Each of the 29 valid records, with ceiling receipts and baselines, reads as `Record` equal to what was written. (V-LOOK)"""
     from defender.records import closing as C
 
     made = _plant_all_valid(tmp_path)
-    assert len(made) == 36
+    assert len(made) == 29
     for run_dir, record in made:
         got = C.for_run(V.handle(run_dir))
         assert isinstance(got, C.Record), (record.outcome, record.cause, got)

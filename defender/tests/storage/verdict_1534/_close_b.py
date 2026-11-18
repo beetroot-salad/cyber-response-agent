@@ -150,7 +150,7 @@ _ALERT_EDGE = (
 
 
 def _with_alert(text: str) -> str:
-    """`_spec923`'s prologue gains an alerted edge (the baseline guard needs one); the process-gap document has its own."""
+    """`_spec923`'s prologue gains an alerted edge (the baseline guard needs one); a document without that prologue is unchanged."""
     from defender.tests.support.runtime.engine import _spec923 as S
 
     if S.PROLOGUE not in text:

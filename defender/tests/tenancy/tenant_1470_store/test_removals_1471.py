@@ -91,7 +91,7 @@ def test_1471_w7_the_census_patterns_find_what_was_removed_and_not_what_stays():
     that stay. (W7)"""
     zone = [("run.py", ["p.add_argument('--update-ticket')"]), ("jobs/x.py", ["--update-ticket"])]
     assert _hits(zone)["switch"] == ["run.py", "jobs/x.py"], "the switch is banned in every zone"
-    stays = [("a.py", ["def escalation_comment_body(x): pass", "unreadable_comment_body()", "_comment_body = 1",
+    stays = [("a.py", ["def escalation_comment_body(x): pass", "unreadable_comment_body()", "_comment_body = 1",  # lint-stale-ref: ok — census string
                        "body = comment.body", "# post with --post-ticket"]),
              ("b.md", ["the request flag `update_ticket`, and --post-ticket"])]
     assert not any(_hits(stays).values()), _hits(stays)
