@@ -60,7 +60,7 @@ from defender.tests.support.learning.core._declared870 import (
     silent_shim_row,
 )
 from defender import _git
-from defender.learning_store import Outcome
+from defender.tests.support.learning.core._release1537 import outcome_dead, outcome_skipped
 from defender.tests.support.learning.core._declared870 import Claim, lead_wakes, pitfall_items, queue_pitfalls, tick
 from defender.tests.support.learning.core._store1278 import migrated_database, world  # noqa: F401 — fixtures
 from defender.tests.tenancy.tenant_1108_p4.conftest import p4_tenant  # noqa: F401 — fixture `world` is built on
@@ -100,6 +100,9 @@ def lane(tmp_path: Path, monkeypatch):
     })
 
 
+UNTEACHABLE = "unteachable_system"  # r3.1: the reducer's system texts
+
+
 def _fate(lane, row: dict):
     """Run one real tick over a claim holding only `row` and read the fate the dropped row took (`None` if it took none, so
     an undecided row fails the caller's comparison, not a `KeyError` here)."""
@@ -110,18 +113,18 @@ def _fate(lane, row: dict):
 
 
 def test_a_systemless_row_retires_as_no_system(lane):
-    assert _fate(lane, pitfall_row("r:l-000:0", "")) == Outcome.skipped("no-system")
+    assert _fate(lane, pitfall_row("r:l-000:0", "")) == outcome_skipped(UNTEACHABLE, "no-system")
 
 
 def test_a_malformed_name_retires_as_malformed_system(lane):
     for i, malformed in enumerate(("../evil", "a\\b", ".hidden", "a\x00b")):
         assert is_system_name(malformed) is False, malformed
-        assert _fate(lane, pitfall_row(f"m:l-00{i}:0", malformed)) == Outcome.skipped("malformed-system")
+        assert _fate(lane, pitfall_row(f"m:l-00{i}:0", malformed)) == outcome_skipped(UNTEACHABLE, "malformed-system")
 
     # Whitespace is stripped before the shape check, so this row is `no-system` under either
     # alphabet; the probe only keeps that traceable.
     assert is_system_name("   ") is False, "the name alphabet admits whitespace"
-    assert _fate(lane, pitfall_row("w:l-000:0", "   ")) == Outcome.skipped("no-system")
+    assert _fate(lane, pitfall_row("w:l-000:0", "   ")) == outcome_skipped(UNTEACHABLE, "no-system")
 
     # Outside the alphabet: two homoglyphs, and the uppercase spelling #914 moved out.
     for i, outside in enumerate(("\u0435lastic", "\uff45lastic", "Elastic")):
@@ -129,7 +132,7 @@ def test_a_malformed_name_retires_as_malformed_system(lane):
             f"the name alphabet admits {outside!r}, so it reads as an onboarding miss, "
             f"not as attacker-shaped"
         )
-        assert _fate(lane, pitfall_row(f"u:l-00{i}:0", outside)) == Outcome.skipped("malformed-system")
+        assert _fate(lane, pitfall_row(f"u:l-00{i}:0", outside)) == outcome_skipped(UNTEACHABLE, "malformed-system")
 
 
 def test_a_row_with_no_id_is_dead_at_once_and_does_not_hold_back_the_taught_one(lane):
@@ -142,13 +145,13 @@ def test_a_row_with_no_id_is_dead_at_once_and_does_not_hold_back_the_taught_one(
     assert tick(lane, Spawn(_curate_execution_md("elastic"), root=Path(lane.batch.draft_root)), claim) == 0
 
     assert claim.committed == {"k:l-000:0"}
-    assert claim.outcomes == {("pitfall", "digest-key"): Outcome.dead("row carries no value under 'pitfall_id'")}
+    assert claim.outcomes == {("pitfall", "digest-key"): outcome_dead("malformed_row", "row carries no value under 'pitfall_id'")}
 
 
 def test_an_undeclared_name_retires_naming_itself(lane):
-    assert _fate(lane, pitfall_row("r:l-001:0", "newsys")) == Outcome.skipped("undeclared-system:newsys")
-    assert _fate(lane, pitfall_row("r:l-002:0", "alsomissing")) == Outcome.skipped(
-        "undeclared-system:alsomissing"), "the one false string all three classes shared survived"
+    assert _fate(lane, pitfall_row("r:l-001:0", "newsys")) == outcome_skipped(UNTEACHABLE, "undeclared-system:newsys")
+    assert _fate(lane, pitfall_row("r:l-002:0", "alsomissing")) == outcome_skipped(
+        UNTEACHABLE, "undeclared-system:alsomissing"), "the one false string all three classes shared survived"
 
 
 RUN = Path("reviewer-measure-0807-b")

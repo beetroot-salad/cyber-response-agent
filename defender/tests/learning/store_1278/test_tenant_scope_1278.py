@@ -26,6 +26,18 @@ from defender.tests.support.learning.core._store1278 import (
     oid,
     store_mod,
 )
+from defender.jobs.errors import Conflict, NotFound
+from defender.tests.support.learning.core._release1537 import (
+    needs_person,
+    note_refusal,
+    outcome_dead,
+    outcome_held,
+    outcome_skipped,
+    park,
+    why,
+    request,
+    settle_abandon,
+)
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.shared._postgres1339 import execute
 
@@ -73,10 +85,10 @@ async def _green_world(store, dsn):
     g = SimpleNamespace(batches=[], commits=[oid(11), oid(12), oid(13), oid(21), oid(22), oid(23)])
     await _publish(store, GREEN, "h1", "g-held", "g-published", "g-skipped", "g-dead")
     first = await store.claim(GREEN, AUTHOR_LANE, owner="host-g", thresholds=ONE)
-    await store.in_review(first, 5, {("finding", "h1"): S.Outcome.held("r"), ("finding", "g-held"): S.Outcome.held("r"),
+    await store.in_review(first, 5, {("finding", "h1"): outcome_held("curator_held", "r"), ("finding", "g-held"): outcome_held("curator_held", "r"),
                                      ("finding", "g-published"): S.Outcome.published(),
-                                     ("finding", "g-skipped"): S.Outcome.skipped("s"),
-                                     ("finding", "g-dead"): S.Outcome.dead("d")})
+                                     ("finding", "g-skipped"): outcome_skipped("curator_skipped", "s"),
+                                     ("finding", "g-dead"): outcome_dead("attempt_ceiling", "d")})
     assert await store.end_review(GREEN, first.batch_id, expect_phase="in_review", outcome="merged", published=[], held=[])
     await _publish(store, GREEN, "k1", "k2")
     g.review = await store.claim(GREEN, AUTHOR_LANE, owner="host-g", thresholds=ONE)
@@ -103,7 +115,9 @@ async def _blue_world(store):
     await _publish(store, BLUE, "h1")
     spent = await store.claim(BLUE, AUTHOR_LANE, owner="host-b", thresholds=ONE)
     await store.record_commit(spent, oid(31), oid(32), oid(33), changes_of("agent/lessons/b.md"))
-    await store.abandon(BLUE, spent.batch_id, by="person")
+    await store.in_review(spent, 12, {})
+    await store.end_review(BLUE, spent.batch_id, expect_phase="in_review", outcome="closed", published=[], held=[("finding", "h1")],
+                           items_why=why("closed_without_feedback", "the PR closed without feedback"))
     await _publish(store, BLUE, "a1")
     await store.add_pitfall(BLUE, _pitfall("a-pit"))
     await store.enqueue_request(BLUE, "run-a1", "case-1", {"case": "a"})
@@ -129,7 +143,7 @@ class Case:
 
     async def refused(self, coro):
         """BLUE's call about a batch that is GREEN's: it raises one of the store's can't-act errors, or does nothing."""
-        with contextlib.suppress(LookupError, self.S.NotLapsed, self.S.LeaseLost):
+        with contextlib.suppress(LookupError, NotFound, Conflict, self.S.NotLapsed, self.S.LeaseLost):
             return self.seen(await coro)
         return None
 
@@ -198,11 +212,11 @@ async def _set_aside(c):
 
 async def _parked(c):
     """GREEN's parked batch, with its items, is not BLUE's; BLUE's own parked batch is listed with its own items. (#1485 O2)"""
-    await c.store.needs_person(GREEN, str(c.g.review.batch_id), "a person must look at GREEN's batch")
+    await needs_person(c.store, GREEN, str(c.g.review.batch_id), "foreign_pr", "a person must look at GREEN's batch")
     own = await c.own_in_review("a2")
     c.freeze()
     assert c.seen(await c.store.parked(BLUE, limit=50)) == [], "control: BLUE has nothing parked yet"
-    await c.control(c.store.needs_person(BLUE, str(own.batch_id), "by hand"))
+    await c.control(needs_person(c.store, BLUE, str(own.batch_id), "foreign_pr", "by hand"))
     [mine] = c.seen(await c.store.parked(BLUE, limit=50))
     claimed = tuple(sorted((kind, key) for kind, key, _pending in own.items))  # the claim's threshold may take BLUE's other waiting items
     assert ("finding", "a2") in claimed, "premise: the claim took a2"
@@ -289,17 +303,51 @@ async def _abandon(c):
     lapse_lease(c.dsn, lead.batch_id)
     c.freeze()
     for green in (c.g.review.batch_id, c.g.revert.batch_id, c.g.lead.batch_id):
-        await c.refused(c.store.abandon(BLUE, str(green), by="person"))
         await c.refused(c.store.abandon(BLUE, str(green), by="recovery"))
-    await c.control(c.store.abandon(BLUE, str(own_review.batch_id), by="person"))
     await c.control(c.store.abandon(BLUE, str(lead.batch_id), by="recovery"))
+    assert own_review is not None
 
 
-async def _release_held(c):
+async def _release_item(c):
+    green_held = next(i for i in await c.store.work(GREEN) if i.key == "g-held")
+    mine = next(i for i in await c.store.work(BLUE) if i.key == "h1")
     c.freeze()
-    await c.store.release_held(BLUE, "finding", "g-held")
-    await c.control(c.store.release_held(BLUE, "finding", "h1"))
+    await c.refused(c.store.release_item(BLUE, str(green_held.id)))
+    await c.control(c.store.release_item(BLUE, str(mine.id)))
     assert {i.key: i.status for i in await c.store.work(BLUE) if i.key == "h1"} == {"h1": "waiting"}
+
+
+async def _release_batch(c):
+    """GREEN's batch is parked with the credential cause and GREEN's lane is free (its working revert is given back), so only
+    the tenant filter can refuse BLUE: GREEN's own release would run."""
+    mine = await c.own_in_review("rb1")
+    park(c.dsn, mine.batch_id)
+    park(c.dsn, c.g.review.batch_id)
+    await c.store.abandon_clean(c.g.revert)
+    c.freeze()
+    await c.refused(c.store.release_batch(BLUE, str(c.g.review.batch_id), actor="u-1"))
+    await c.control(c.store.release_batch(BLUE, str(mine.batch_id), actor="u-1"))
+
+
+async def _request_abandon(c):
+    mine = await c.own_in_review("ra1")
+    park(c.dsn, mine.batch_id, cause="forge_refused")
+    park(c.dsn, c.g.review.batch_id, cause="forge_refused")
+    c.freeze()
+    await c.refused(c.store.request_abandon(BLUE, str(c.g.review.batch_id), actor="u-1"))
+    await c.control(c.store.request_abandon(BLUE, str(mine.batch_id), actor="u-1"))
+
+
+async def _settle_abandon(c):
+    """GREEN's batch is parked with an abandon request, so BLUE's refusal is about whose it is, not its state."""
+    mine = await c.own_in_review("sa1")
+    park(c.dsn, mine.batch_id, cause="forge_refused")
+    request(c.dsn, mine.batch_id)
+    park(c.dsn, c.g.review.batch_id, cause="forge_refused")
+    request(c.dsn, c.g.review.batch_id)
+    c.freeze()
+    await c.refused(settle_abandon(c.store, BLUE, c.g.review.batch_id, pr_number=7, pr_state="closed"))
+    await c.control(settle_abandon(c.store, BLUE, mine.batch_id, pr_number=9, pr_state="closed"))
 
 
 async def _request_cancel(c):
@@ -319,15 +367,15 @@ async def _note_check(c):
 async def _note_refusal(c):
     own = await c.own_in_review("a2")
     c.freeze()
-    await c.refused(c.store.note_refusal(BLUE, str(c.g.review.batch_id), "forge said no"))
-    assert (await c.control(c.store.note_refusal(BLUE, str(own.batch_id), "forge said no")))[0] == 1
+    await c.refused(note_refusal(c.store, BLUE, str(c.g.review.batch_id), "forge_refused", "forge said no"))
+    assert (await c.control(note_refusal(c.store, BLUE, str(own.batch_id), "forge_refused", "forge said no")))[0] == 1
 
 
 async def _needs_person(c):
     own = await c.own_in_review("a2")
     c.freeze()
-    await c.refused(c.store.needs_person(BLUE, str(c.g.review.batch_id), "by hand"))
-    await c.control(c.store.needs_person(BLUE, str(own.batch_id), "by hand"))
+    await c.refused(needs_person(c.store, BLUE, str(c.g.review.batch_id), "foreign_pr", "by hand"))
+    await c.control(needs_person(c.store, BLUE, str(own.batch_id), "foreign_pr", "by hand"))
     assert [b.phase for b in await c.store.batches(BLUE) if b.id == own.batch_id] == ["needs_person"]
 
 
@@ -337,7 +385,8 @@ async def _end_review(c):
     for outcome in ("merged", "closed"):
         assert not await c.refused(c.store.end_review(
             BLUE, str(c.g.review.batch_id), expect_phase="in_review", outcome=outcome,
-            published=[("finding", "k1")], held=[("finding", "k2")])), "BLUE ended GREEN's batch"
+            published=[("finding", "k1")], held=[("finding", "k2")],
+            items_why=why("closed_without_feedback", "the PR closed without feedback"))), "BLUE ended GREEN's batch"
     assert await c.control(c.store.end_review(BLUE, str(own.batch_id), expect_phase="in_review", outcome="merged",
                                               published=[], held=[]))
 
@@ -366,7 +415,8 @@ ENTRIES = {
     "claim": _claim, "claim_revert": _claim_revert, "take_over": _take_over,
     **{name: _holder(name) for name in ("renew", "record_commit", "in_review", "end_no_commits", "abandon_clean",
                                          "abandon_crashed", "expire_own")},
-    "abandon": _abandon, "release_held": _release_held, "request_cancel": _request_cancel,
+    "abandon": _abandon, "release_item": _release_item, "release_batch": _release_batch,
+    "request_abandon": _request_abandon, "settle_abandon": _settle_abandon, "request_cancel": _request_cancel,
     "note_check": _note_check, "note_refusal": _note_refusal, "needs_person": _needs_person, "end_review": _end_review,
     "offboard": _offboard, "purge": _purge,
     "close": None,

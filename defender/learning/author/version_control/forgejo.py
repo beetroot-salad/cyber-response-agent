@@ -374,6 +374,13 @@ class ForgejoForge:
             "PATCH", f"{self.address.api}/pulls/{number}", json={"state": "closed"}
         )
 
+    def reopen_pr(self, number: int) -> None:
+        """Reopen PR `number`, closed unmerged (`PATCH /pulls/{n}` with `state` `open`): the loop undoing its own close
+        when a person's later word (a release) beat it (#1537)."""
+        self._request(
+            "PATCH", f"{self.address.api}/pulls/{number}", json={"state": "open"}
+        )
+
     def open_pr(self, *, base: str, head: str, title: str, body: str) -> str:
         response = self._request(
             "POST",

@@ -14,6 +14,7 @@ from defender._clock import as_utc
 from defender._text import postgres_can_hold
 from defender._vocab import DISPOSITION_VALUES, normalized_disposition
 from defender.identity.models import Email
+from defender.records.learning_causes import BatchCause, ItemCause
 from defender.records.formats import (
     AlertId, AlertMappingFault, BatchId, CredentialId, InvestigationId, LearningJobId, MembershipId, ProgramId, TenantId, UserId, WorkItemId,
     check_mapping,
@@ -202,6 +203,8 @@ class SetAsideItem(BaseModel):
     key: str
     status: Literal["held", "dead"]
     reason: str | None
+    #: Why it is set aside: a cause from the closed item list (`reason` is the detail text beside it).
+    cause: ItemCause | None
     source_run: str | None
     batch_id: BatchId | None
     pr_number: int | None
@@ -223,8 +226,38 @@ class ParkedBatch(BaseModel):
     branch: str
     pr_number: int | None
     reason: str | None
+    #: Why it is parked: a cause from the closed batch list (`reason` is the detail text beside it).
+    cause: BatchCause | None
+    parked_at: Instant | None
+    #: A person may release it: parked for a credential refusal (a release withdraws a pending abandon request).
+    releasable: bool
+    #: Set once a person asked to abandon it and until the loop carries it out.
+    abandon_requested_at: Instant | None
+    #: When the loop last looked at it (for a requested batch, only a look at or after the request).
+    last_checked: Instant | None
     created_at: Instant
     items: list[ParkedItemRef]
+
+
+class ItemReleased(BaseModel):
+    """A held item released (#1537 O1): `status` is `waiting`, or `skipped` when a fresher request for its case waits."""
+
+    id: WorkItemId
+    status: Literal["waiting", "skipped"]
+
+
+class BatchReleased(BaseModel):
+    """A parked batch released (#1537 O2): `in_review` (it had a PR) or `working` (it had none)."""
+
+    id: BatchId
+    phase: Literal["in_review", "working"]
+
+
+class AbandonRequested(BaseModel):
+    """An abandon request recorded (#1537 O3); the loop carries it out on its next pass over the batch."""
+
+    id: BatchId
+    abandon_requested_at: Instant
 
 
 class LearningJobCreate(_Request):

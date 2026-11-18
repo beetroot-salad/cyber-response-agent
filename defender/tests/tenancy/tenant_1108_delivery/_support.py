@@ -584,16 +584,23 @@ class ForgeHTTP:
             rows = self.comments.get(int(parts[2]), [])
             return httpx.Response(200, json=rows, headers={"X-Total-Count": str(len(rows))})
         if len(parts) == 3 and parts[1] == "pulls" and request.method == "PATCH":
-            rows = list(self.prs)
-            found = [row for row in rows if str(row["number"]) == parts[2]]
-            if not found:
-                return httpx.Response(404, json={"message": "pull request does not exist"})
-            if json.loads(request.content).get("state") == "closed" and found[0]["state"] == "open":
-                found[0]["state"] = "closed"
-            if self.remote is not None:
-                _save_pulls(self.remote, rows)
-            return httpx.Response(201, json=found[0])
+            return self._patch_pull(request, parts[2])
         return None
+
+    def _patch_pull(self, request, number):
+        """`PATCH /pulls/N` with a `state`: close an open PR, or reopen one closed unmerged (a merged one stays merged)."""
+        rows = list(self.prs)
+        found = [row for row in rows if str(row["number"]) == number]
+        if not found:
+            return httpx.Response(404, json={"message": "pull request does not exist"})
+        wanted = json.loads(request.content).get("state")
+        if wanted == "closed" and found[0]["state"] == "open":
+            found[0]["state"] = "closed"
+        elif wanted == "open" and found[0]["state"] == "closed" and not found[0].get("merged"):
+            found[0]["state"] = "open"
+        if self.remote is not None:
+            _save_pulls(self.remote, rows)
+        return httpx.Response(201, json=found[0])
 
     def _paged_reviews(self, request, rows):
         """Forgejo 17 (probe, 70 reviews, #1278 C30): a review listing sent with neither `page` nor `limit` answers
