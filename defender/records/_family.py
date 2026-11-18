@@ -62,6 +62,9 @@ _WORLD_FIELDS = (
 
 #: Every field a fact declares.
 _FACT_FIELDS = ("fact_id", "statement", "entities")
+#: The fact_id the oracle reserves for a change back to the branch point (#1543): no world's
+#: fact may be named so.
+FORK_FACT_ID = "fork"
 
 #: The fields a manifest written before the oracle carries, by where they sit (sequence items
 #: and `<<` merges collapsed). Their presence refuses the manifest, empty or null included:
@@ -196,6 +199,9 @@ def _parse_fact(raw: Any, at: str) -> Fact:
     fact_id = raw["fact_id"]
     if (why := _printable_fault(fact_id, bound=FACT_ID_MAX_LEN)) is not None:
         raise FamilyError(f"{at}.fact_id is {why}")
+    if fact_id == FORK_FACT_ID:
+        raise FamilyError(f"{at}.fact_id {quoted(fact_id)} is reserved: the oracle names a change "
+                          "back to the branch point by it")
     return Fact(fact_id=fact_id, statement=_checked_statement(raw["statement"], at),
                 entities=_checked_entities(raw["entities"], at))
 
@@ -236,7 +242,7 @@ def _checked_entities(entities: Any, at: str) -> tuple[str, ...]:
     return tuple(entities)
 
 
-def _parse_facts(raw: Any, at: str) -> tuple[Fact, ...]:
+def parse_facts(raw: Any, at: str) -> tuple[Fact, ...]:
     """A world's facts: a list (the control world's is the explicit `[]`), fact_ids unique."""
     if raw is None:
         raise FamilyError(
@@ -298,7 +304,7 @@ def parse_world(raw: Any, *, where: str = "worlds") -> World:
     story = raw.get("story")
     if not isinstance(story, str):
         raise FamilyError(f"{at}.story must be a string")
-    facts = _parse_facts(raw.get("facts"), at)
+    facts = parse_facts(raw.get("facts"), at)
     if role == BASE_ROLE and facts:
         raise FamilyError(
             f"{at} is the control world (role {BASE_ROLE!r}) but declares facts — the control "
@@ -756,6 +762,7 @@ def refuse_bad_episode_id(episode_id: str) -> None:
 
 __all__ = [
     "BASE_ROLE",
+    "FORK_FACT_ID",
     "Fact",
     "Family",
     "FamilyError",
@@ -772,6 +779,7 @@ __all__ = [
     "load_manifest_document",
     "manifest_world_ids",
     "parse_as_of",
+    "parse_facts",
     "parse_family",
     "parse_world",
     "refuse_bad_episode_id",

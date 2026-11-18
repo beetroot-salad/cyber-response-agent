@@ -485,7 +485,7 @@ def test_a_nested_real_identifier_reused_by_a_forged_row_fails_check_3():
 
 
 def test_a_frozen_row_s_nested_id_collision_is_recorded():
-    from defender.learning.branch.estate.checks import frozen_id_collisions, run_checks
+    from defender.learning.branch.estate.checks import apply_handin, frozen_id_collisions, run_checks
 
     row = {"@timestamp": "2026-03-01T09:30:00Z", "event": {"action": "exec"},
            "process": {"name": "curl", "entity_id": _PROCESS_ID}}
@@ -493,7 +493,7 @@ def test_a_frozen_row_s_nested_id_collision_is_recorded():
     store = CheckStore(frozen={"fg-1": record}, staged={}, facts={}, rerun=lambda *_a: {})
     real = RealData(answers=[("s", {"hits": [_REAL_EVENT]})])
     handin = parse_handin(_add("/hits/-", row))[0]
-    checked = run_checks({"hits": []}, {"hits": [row]}, handin,
+    checked = run_checks(apply_handin({"hits": []}, handin), handin,
                          world=SimpleNamespace(facts=[SimpleNamespace(fact_id="F")]),
                          store=store, real_data=real)
 
@@ -1371,13 +1371,14 @@ def test_a_forged_id_collides_only_with_a_real_identifier():
 
 
 def test_a_frozen_row_records_only_collisions_with_real_identifiers():
-    from defender.learning.branch.estate.checks import frozen_id_collisions, run_checks
+    from defender.learning.branch.estate.checks import apply_handin, frozen_id_collisions, run_checks
 
     row = {"pid": 1, "user_id": "u-9", "total": 2}
     record = {"forged_id": "fg-1", "fact_id": "F", "system": "s", "row": row}
     store = CheckStore(frozen={"fg-1": record}, staged={}, facts={}, rerun=lambda *_a: {})
     real = RealData(answers=[("s", {"rows": [{"pid": 5, "user_id": "u-9", "total": 1}]})])
-    checked = run_checks({"rows": []}, {"rows": [row]}, parse_handin(_add("/rows/-", row))[0],
+    handin = parse_handin(_add("/rows/-", row))[0]
+    checked = run_checks(apply_handin({"rows": []}, handin), handin,
                          world=SimpleNamespace(facts=[SimpleNamespace(fact_id="F")]),
                          store=store, real_data=real)
     found = frozen_id_collisions(checked, store=store, real_data=real)

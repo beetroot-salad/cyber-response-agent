@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import copy
 import functools
 import hashlib
 import json
@@ -34,8 +33,9 @@ from .checks import (
     CheckStore,
     RealData,
     Refused,
-    esql_names,
+    Applied,
     as_row,
+    esql_names,
     canonical_json,
     check_submission,
     frozen_id_collisions,
@@ -46,6 +46,8 @@ from .checks import (
     re_asked,
     render_changes,
     run_checks,
+    shown_changes,
+    table_row,
 )
 
 from defender.learning.branch.estate._oracle_store import (
@@ -180,17 +182,21 @@ call's framing says how to re-ask its question first (`re_ask`); the re-asked an
 the base. What the query cannot say (a system of record, a forged row, a field or a count a \
 fact moves) you hand in as a patch: a JSON Patch (RFC 6902) on the base answer (the re-asked answer once you made one), whose \
 every operation names the world fact it serves (`fact_id`):
-- `remove` a row or a value the facts say is not there;
+- `remove` a row the facts say is not there (or an item of a list inside a row);
 - `replace` a value a fact changes: a field, a count, a total that moves with your other \
-changes;
-- `add` a forged row into a list (`path` at an index, or `-` for its end) with a `forged_id` \
-of its own and the row as `value`; to serve a row already frozen in this world, `add` it by \
-its `forged_id` with no `value`;
+changes. A value keeps its kind (and a mapping its keys). Replacing a whole row serves a new \
+row: give it a `forged_id`, as an `add`;
+- `add` a forged row into a table (`path` at an index, or `-` for its end) with a \
+`forged_id` of its own and the row as `value` (in an ES|QL table, a value array in column \
+order, or a mapping of exactly its columns); to serve a row already frozen in this world, \
+`add` it by its `forged_id` with no `value`: it is served only where the call's table has \
+exactly its columns;
 - `test` (optional, no fact) asserts a value before you change it.
+A forged row is served as you forge it: never edit it with a later operation.
 A change that only rolls the answer back to how it stood at the branch point (undoing what \
 happened after it, such as the source run's own later writes) names `"fork"` as its fact \
 instead: a `remove` or `replace`, in any world, the control world included.
-There is no `move` or `copy`, and no new key in a mapping. Operations apply in order (remove \
+There is no `move` or `copy`, and no key added to or removed from a mapping. Operations apply in order (remove \
 from the highest index first). The host applies the patch, checks the result, and shows you \
 each change as it lands against the call (`check`). An empty patch serves the base unchanged.
 
@@ -546,10 +552,11 @@ class Oracle:
         # The world's earlier servings most like this call, saved for the code and shown in a
         # fresh call's prefix (#1543): what the world served before carries across calls.
         self._similar = similar_servings(self.store.servings, call)
+        answers = self.store.served_answers({r["id"] for r in self._similar if r.get("id")})
         saved += [_saved("serving", {"system": r["system"], "verb": r["verb"],
                                      "params": r.get("params") or {}},
                          {"code": r.get("code"), "changes": r.get("changes"),
-                          "served": r.get("served")}) for r in self._similar]
+                          "served": answers.get(str(r.get("id")))}) for r in self._similar]
         first = True
         while True:
             try:
@@ -866,8 +873,8 @@ class Oracle:
                     handed = await invoke(lambda: self._handed_in_or_refusal(run, args))
                     if isinstance(handed, str):
                         return f"check refused: {wrap_fresh(handed, 'untrusted')}"
-                    served, handin, staged = handed
-                    return await run.blocking(lambda: self._check_reply(run, served, handin,
+                    applied, handin, staged = handed
+                    return await run.blocking(lambda: self._check_reply(run, applied, handin,
                                                                         staged))
                 invoke = run.box_work if name == "python" else run.blocking
                 return await invoke(lambda: self._tool(name, args, run))
@@ -1039,7 +1046,7 @@ class Oracle:
             raise _BoxLost("the box was lost; a fresh one starts on the next run") from None
         return result, unsaved
 
-    def _handed_in_or_refusal(self, run: _Run, args: dict) -> tuple[Any, Handin, dict[str, dict]] | str:
+    def _handed_in_or_refusal(self, run: _Run, args: dict) -> tuple[Applied, Handin, dict[str, dict]] | str:
         """`_handed_in`, its refusal returned as text: a worker a deadline left to settle never
         raises a refusal into the attempt's settlement, where it would fault the world."""
         try:
@@ -1047,12 +1054,13 @@ class Oracle:
         except _ArgumentRefused as refused:
             return str(refused)
 
-    def _handed_in(self, run: _Run, args: dict) -> tuple[Any, Handin, dict[str, dict]]:  # noqa: C901 — the two hand-in forms, then each add staged, then the patch applied
+    def _handed_in(self, run: _Run, args: dict) -> tuple[Applied, Handin, dict[str, dict]]:  # noqa: C901 — the two hand-in forms, then the patch applied with its rows staged
         """A hand-in (#1543): `code` run once in the attempt's box, its standard output one strict
-        JSON document `{patch, entity_refs, proofs}`, or those fields as arguments. Each `add` is
-        staged as a forged row on a copy of the attempt's (a frozen row's `add` without a value
-        is filled with the frozen row), and the patch is applied to the attempt's base. Returns
-        `(served, handin, staged)`; any fault is `_ArgumentRefused`."""
+        JSON document `{patch, entity_refs, proofs}`, or those fields as arguments (bounded as the
+        code's output is). The patch is applied to the attempt's base once (`apply_handin`), each
+        forged row staged on a copy of the attempt's as it goes (a frozen row's `add` without a
+        value is filled with the frozen row, in the shape this call's table serves). Returns
+        `(applied, handin, staged)`; any fault is `_ArgumentRefused`."""
         if "code" in args:
             code = args.get("code")
             if set(args) != {"code"} or not isinstance(code, str):
@@ -1070,37 +1078,37 @@ class Oracle:
             if set(args) - set(document) or "patch" not in args:
                 raise _ArgumentRefused("a hand-in is `code` alone, or `patch` (with "
                                        "`entity_refs` and `proofs`)")
+            if len(canonical_json(document).encode()) > _HAND_IN_CAP:
+                raise _ArgumentRefused(f"the hand-in is past the {_HAND_IN_CAP}-byte cap")
         handin, why = parse_handin(document)
         if handin is None:
             raise _ArgumentRefused(f"its hand-in: {why}")
-        names = esql_names(run.against)
         staged = dict(run.attempt.forged)
         staging = _Attempt(forged=staged, facts=run.attempt.facts)
-        for i, op in enumerate(handin.ops):
-            if op["op"] != "add":
-                continue
+
+        def stage(i: int, op: dict, names: list[str] | None) -> Any:
             fid = op["forged_id"]
-            frozen = self.store.frozen.get(fid)
-            if "value" not in op:
+            if "value" in op:
+                row = op["value"]
+            else:
+                frozen = self.store.frozen.get(fid)
                 if frozen is None:
-                    raise _ArgumentRefused(f"patch operation {i} adds {fid!r} with no value, and "
-                                           "no row of that id is frozen in this world")
+                    raise PatchRefused(f"patch operation {i} adds {fid!r} with no value, and no "
+                                       "row of that id is frozen in this world")
                 row = frozen.get("row")
-                cells = as_row(row, names) if names is not None else None
-                op["value"] = ([cells[n] for n in names] if cells is not None and names is not None
-                               and set(cells) == set(names) else copy.deepcopy(row))
-            said = self._forge({"forged_id": fid, "fact_id": op["fact_id"], "row": op["value"]},
+            served_row = table_row(row, names, what=f"patch operation {i}'s row")
+            said = self._forge({"forged_id": fid, "fact_id": op["fact_id"], "row": served_row},
                                staging, system=run.call[0], names=names)
             if said.startswith("forge refused"):
-                raise _ArgumentRefused(f"patch operation {i}: {said}")
+                raise PatchRefused(f"patch operation {i}: {said}")
+            return served_row
+
         try:
-            served = apply_handin(run.against, handin)
+            applied = apply_handin(run.against, handin, stage=stage)
         except PatchRefused as refused:
-            raise _ArgumentRefused(str(refused)) from None
-        if len(canonical_json(served).encode()) > _HAND_IN_CAP:
-            raise _ArgumentRefused(f"the patched answer is past the {_HAND_IN_CAP}-byte cap of a "
-                                   "served answer")
-        return served, handin, staged
+            # The patch's own rules are check 1's: it applies, and keeps the base's shape.
+            raise _ArgumentRefused(f"check 1: {refused}") from None
+        return applied, handin, staged
 
     def _re_ask(self, args: dict, run: _Run) -> str:
         """The `re_ask` tool (#1385): the host reads the call's own question bounded at the branch
@@ -1148,27 +1156,28 @@ class Oracle:
                           facts={**self.store.facts, **run.attempt.facts},
                           rerun=lambda system, verb, params: self._rerun(run, system, verb, params))
 
-    def _check(self, run: _Run, served: Any, handin: Handin, *,
+    def _check(self, run: _Run, applied: Applied, handin: Handin, *,
                staged: dict[str, dict] | None = None) -> Checked:
         """The one host checker, behind both the advisory `check` and `submit`. `staged`: the
         rows the hand-in staged on a copy (`check` keeps nothing)."""
-        return run_checks(run.against, served, handin, world=self.world,
+        return run_checks(applied, handin, world=self.world,
                           store=self._check_store(run, staged), real_data=run.real())
 
-    def _rendered(self, run: _Run, handin: Handin, proven: set[str] | None = None) -> dict:
-        """The hand-in's changes seen through the call's own query (`render_changes`)."""
+    def _rendered(self, run: _Run, applied: Applied, handin: Handin,
+                  proven: set[str] | None = None) -> dict:
+        """The hand-in's changes seen through the call's own query, whole (`render_changes`)."""
         system, verb, params = run.call
         base_was = ("re-asked" if run.attempt.re_asked is not None
                     else "live" if run.live else "recorded")
-        return render_changes(run.against, handin, query={"system": system, "verb": verb,
+        return render_changes(applied, handin, query={"system": system, "verb": verb,
                                                           "params": dict(params)},
                               base_was=base_was, proven=proven)
 
-    def _check_reply(self, run: _Run, served: Any, handin: Handin,
+    def _check_reply(self, run: _Run, applied: Applied, handin: Handin,
                      staged: dict[str, dict]) -> str:
         """`check`'s reply: the host checks' failures, then the changes as they would be served."""
-        checked = self._check(run, served, handin, staged=staged)
-        changes = self._rendered(run, handin, checked.proven)
+        checked = self._check(run, applied, handin, staged=staged)
+        changes = shown_changes(self._rendered(run, applied, handin, checked.proven))
         shown = (_framed("The host would serve these changes", changes)
                  if changes["changes"] else "The host would serve the base answer unchanged.")
         return f"{_check_text(checked.failures)}\n{shown}"
@@ -1213,7 +1222,8 @@ class Oracle:
         handed = await invoke(lambda: self._handed_in_or_refusal(run, args))
         if isinstance(handed, str):
             return self._verdict([f"the hand-in: {wrap_fresh(handed, 'untrusted')}"])
-        served, handin, staged = handed
+        applied, handin, staged = handed
+        served = applied.served
         run.attempt.forged = staged
         if "code" in args:
             run.attempt.code = args["code"]
@@ -1222,14 +1232,14 @@ class Oracle:
             # Before the host checks' side queries and the verifier's pass: nothing is paid
             # for an answer that cannot be served.
             return self._verdict([refused])
-        checked = await run.blocking(lambda: self._check(run, served, handin))
+        checked = await run.blocking(lambda: self._check(run, applied, handin))
         if checked.failures:
             return self._verdict(checked.failures)
         # Only the rows the patch adds are frozen with the answer, at either commit.
         named = {entry["forged_id"] for entry in handin.added}
         run.attempt.forged = {fid: row for fid, row in run.attempt.forged.items() if fid in named}
-        changes = self._rendered(run, handin, checked.proven)
-        verdict = await self._verify(run, served, changes)
+        changes = self._rendered(run, applied, handin, checked.proven)
+        verdict = await self._verify(run, served, shown_changes(changes))
         if not verdict.get("passed"):
             return self._verdict([f"the verifier failed the answer: "
                                   f"{wrap_fresh(str(verdict.get('reason') or ''), 'untrusted')}"])
@@ -1369,15 +1379,16 @@ def similar_servings(servings: list[dict], call: tuple[str, str, dict],
                      k: int = _SIMILAR_SERVINGS) -> list[dict]:
     """The `k` earlier servings most like `call` (#1543): those of its own system first (all of
     them when it has none), ranked by the call's verb, then by the idf-weighted overlap of the
-    call's query text with each serving's query and code; the newest wins a tie."""
+    call's query with each serving's query (never its code: a long code would only dilute the
+    overlap of the very servings worth reusing); the newest wins a tie."""
     from defender.learning.leads.lead_neighbors import build_idf, tokenize_query, weighted_jaccard
 
     system, verb, params = call
     pool = [r for r in servings if r.get("system") == system] or list(servings)
     if not pool:
         return []
-    tokens = [tokenize_query(f"{r.get('verb')} {canonical_json(r.get('params') or {})} "
-                             f"{r.get('code') or ''}") for r in pool]
+    tokens = [tokenize_query(f"{r.get('verb')} {canonical_json(r.get('params') or {})}")
+              for r in pool]
     idf = build_idf(tokens)
     own = tokenize_query(f"{verb} {canonical_json(dict(params))}")
     order = sorted(range(len(pool)), key=lambda i: (

@@ -142,11 +142,14 @@ def test_the_evidence_holds_the_prebranch_recorded_answers_and_no_later_call(tmp
     late = row("elastic", "alerts", {"limit": 99}, {"total": 7})
     base.write_text("\n".join(json.dumps(r) for r in (early, late)) + "\n", encoding="utf-8")
 
-    evidence = prebranch_answers({request_key("elastic", "alerts", {"limit": 10})}, base)
+    from defender._io import read_jsonl_rows
+
+    evidence = prebranch_answers({request_key("elastic", "alerts", {"limit": 10})},
+                                 read_jsonl_rows(base))
 
     assert evidence == [{"call": {"system": "elastic", "verb": "alerts", "params": {"limit": 10}},
                          "answer": {"total": 6}}]
-    assert prebranch_answers(set(), base) == []
+    assert prebranch_answers(set(), read_jsonl_rows(base)) == []
 
 
 def test_the_revisions_record_is_written_only_when_the_check_named_a_world(tmp_path):
@@ -165,3 +168,54 @@ def test_the_revisions_record_is_written_only_when_the_check_named_a_world(tmp_p
     assert not (quiet / "world_revisions.yaml").exists()
     written = _yaml.safe_load((named / "world_revisions.yaml").read_text(encoding="utf-8"))
     assert written == {"worlds": [entry]}
+
+
+def test_a_revision_whose_facts_the_family_would_refuse_drops_only_its_world(tmp_path):
+    """A revised fact without its entities would fail the family's parse later: the world is
+    dropped here, and the worlds that never conflicted are kept."""
+    bad = {"story": "b rebuilt", "facts": [{"fact_id": "f1r", "statement": "s"}]}
+    family, _agent, check, recorded = _run(
+        tmp_path, questioner_replies=[*three_replies(), bad],
+        check_replies=[_conflict("b", "f1")])
+
+    assert _labels(family) == ["a", "c"]
+    assert check.calls == 1
+    assert recorded[0][0]["dropped"]
+
+
+def test_a_check_that_faults_leaves_the_family_as_authored(tmp_path):
+    def faulting(*_a, **_k):
+        raise TimeoutError("the premise check timed out")
+
+    paths = W.loop_paths(tmp_path)
+    agent = W.FakeAgent(*three_replies())
+    recorded: list[list[dict]] = []
+    family = author(tmp_path, paths, invoke=agent, premise_check=faulting, prebranch=PREBRANCH,
+                    record_revisions=recorded.append)
+
+    assert _labels(family) == ["a", "b", "c"]
+    assert recorded == [[]]
+
+
+def test_a_revision_that_faults_leaves_the_family_as_authored(tmp_path):
+    replies = iter(three_replies())
+
+    def questioner(prompt, **kwargs):
+        if kwargs.get("agent_id", "").endswith(":revise"):
+            raise TimeoutError("the revision timed out")
+        return next(replies)
+
+    paths = W.loop_paths(tmp_path)
+    check = W.FakeAgent(_conflict("b", "f1"))
+    family = author(tmp_path, paths, invoke=questioner, premise_check=check, prebranch=PREBRANCH)
+
+    assert _labels(family) == ["a", "b", "c"]
+
+
+def test_a_world_fact_may_not_take_the_oracles_reserved_fork_name():
+    import pytest
+
+    from defender.records.formats import FamilyError, parse_facts
+
+    with pytest.raises(FamilyError, match="reserved"):
+        parse_facts([{"fact_id": "fork", "statement": "s", "entities": ["web-1"]}], "w")

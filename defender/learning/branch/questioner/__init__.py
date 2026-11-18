@@ -14,7 +14,7 @@ import yaml
 from defender import _yaml
 from defender.configuration import env_str
 from defender._io import read_guarded, read_text_utf8
-from defender.records.formats import read_report
+from defender.records.formats import FamilyError, parse_facts, read_report
 from defender.records import RunPaths, artifact_file
 from defender._untrusted import message_salt
 from defender.learning._prompt import section_text, stage_user_message, titled_section
@@ -432,8 +432,6 @@ its authorization differs, say), not just the wording of the offending fact. Her
 
 """
 
-#: How many times a conflicting world is revised before it is dropped.
-PREMISE_REVISIONS = 1
 #: The most characters one pre-branch answer, and all of them together, take in the check.
 _PREBRANCH_ANSWER_CAP = 4000
 _PREBRANCH_TOTAL_CAP = 60_000
@@ -473,17 +471,12 @@ def _premise_prompt(*, family: dict[str, Any], worlds: Sequence[dict[str, Any]],
 
 def _conflicts(check: Any, *, family: dict[str, Any], worlds: Sequence[dict[str, Any]],
                prebranch: Sequence[dict[str, Any]], agent_id: str) -> dict[str, list[dict]]:
-    """The check's conflicts by world label. A reply the host cannot read finds none: the check
-    never refuses the family on its own fault."""
+    """The check's conflicts by world label. A reply the host cannot read raises: the caller
+    keeps the family as authored (`author_family`)."""
     labels = {str(w.get("label")) for w in worlds}
-    try:
-        reply = check(_premise_prompt(family=family, worlds=worlds, prebranch=prebranch),
-                      role=AgentRole.QUESTIONER, agent_id=agent_id)
-        doc = _reply_document(reply, what="the premise check")
-    except BranchError as unread:
-        _logger.warning(f"the premise check's reply could not be read ({unread}); no world is "
-                        "revised")
-        return {}
+    reply = check(_premise_prompt(family=family, worlds=worlds, prebranch=prebranch),
+                  role=AgentRole.QUESTIONER, agent_id=agent_id)
+    doc = _reply_document(reply, what="the premise check")
     found: dict[str, list[dict]] = {}
     for entry in doc.get("conflicts") or ():
         if isinstance(entry, dict) and str(entry.get("label")) in labels:
@@ -492,11 +485,17 @@ def _conflicts(check: Any, *, family: dict[str, Any], worlds: Sequence[dict[str,
     return found
 
 
-def _revised_facts(authored: dict[str, Any]) -> list[dict[str, Any]] | None:
+def _revised_facts(authored: dict[str, Any], *, seat: str) -> list[dict[str, Any]] | None:
+    """A revision's facts, held to the family's own rule for a world's facts (`parse_facts`),
+    or None: a revision whose facts would not parse drops its world, never the family."""
     facts = authored.get("facts")
-    if not (isinstance(facts, list) and facts and all(
-            isinstance(f, dict) and isinstance(f.get("fact_id"), str)
-            and isinstance(f.get("statement"), str) for f in facts)):
+    if not (isinstance(facts, list) and facts):
+        return None
+    try:
+        parse_facts(facts, f"the revision of seat {seat}")
+    except FamilyError as refused:
+        _logger.warning(f"seat {seat}'s revised facts are refused ({refused}); its world is "
+                        "dropped")
         return None
     return [dict(f) for f in facts]
 
@@ -535,7 +534,7 @@ def _held_to_history(  # noqa: PLR0913 — the worlds, the two seams and what th
             _logger.warning(f"seat {seat}'s revision could not be read ({unread}); its world is "
                             "dropped")
             authored = {}
-        facts = _revised_facts(authored)
+        facts = _revised_facts(authored, seat=seat)
         if facts is None:
             entry["dropped"] = True
             continue
@@ -637,9 +636,16 @@ def author_family(  # noqa: PLR0913 — one keyword per captured input plus `les
         worlds.append(world)
 
     if premise_check is not None:
-        kept, revisions = _held_to_history(
-            worlds[1:], check=premise_check, invoke=invoke, family=family,
-            family_reply=family_reply, header=header, capture=capture, prebranch=prebranch)
+        # Advisory: whatever fails inside the check (a reply it cannot read, a model or seam
+        # fault, a usage limit) leaves the family as the seats wrote it.
+        try:
+            kept, revisions = _held_to_history(
+                worlds[1:], check=premise_check, invoke=invoke, family=family,
+                family_reply=family_reply, header=header, capture=capture, prebranch=prebranch)
+        except Exception as failed:  # noqa: BLE001 — the check never refuses the family on its own fault
+            _logger.warning(f"the premise check failed ({failed!r}); the family is kept as "
+                            "authored")
+            kept, revisions = worlds[1:], []
         worlds = [worlds[0], *kept]
         if record_revisions is not None:
             record_revisions(revisions)

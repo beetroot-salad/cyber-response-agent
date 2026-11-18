@@ -215,10 +215,14 @@ and the world's facts, and this world's earlier servings most like the call (the
 and output; each call starts a fresh conversation), may explore real examples through the same
 grant decision (rate-limited, recorded only on the oracle side), and hands in its changes as a
 JSON Patch on the base (#1543), usually printed by code: every operation names the fact it
-serves, an `add` is a forged row, and optional proofs back a removal. The host applies the
-patch, so the served answer and its changes never disagree, and shows the changes through the
-call's own query (table, row, column, the row before and after); that rendering is what the
-verifier judges and the answer stores. Host checks (`estate/checks.py`) hold the result to the
+serves, and optional proofs back a removal. The host reads the patch row by row: an `add`, or a
+replace of a whole row, serves a forged row (it carries a `forged_id` and gets the forged-row
+checks; a frozen row is served in the shape the call's table serves, or refused where the query
+projects other columns); every other operation edits a value, keeps its kind and keys, and never
+replaces a value that holds rows or touches a row the patch forges. One pass applies the patch and
+records each change whole, so the served answer, the forged rows, the ledger label and the shown
+changes all come from it: the changes seen through the call's own query (table, row, column, the
+row before and after), cut for length, are what the verifier judges and the answer stores. Host checks (`estate/checks.py`) hold the result to the
 base's shape, the forged rows to the real columns, ids and recorded facts, and each proof to a
 removed row; then a verifier
 (`AgentRole.ORACLE_CHECK`), in its own context and never shown the oracle's

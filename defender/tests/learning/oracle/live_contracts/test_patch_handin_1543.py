@@ -82,7 +82,7 @@ def test_removing_one_user_from_a_directory_list_needs_only_its_fact(tmp_path):
     ({"op": "remove", "path": "/users/9", "fact_id": "f1"}, "patch operation 0 (remove"),
     ({"op": "move", "from": "/users/0", "path": "/users/2", "fact_id": "f1"}, "no move or copy"),
     ({"op": "add", "path": "/extra", "value": 1, "fact_id": "f1", "forged_id": "x"},
-     "never a new key"),
+     "adds a whole row to a table"),
     ({"op": "remove", "path": "/users/0"}, "needs the fact_id"),
     ({"op": "remove", "path": "/users/0", "fact_id": "f9"}, "not this world's"),
     ({"op": "add", "path": "/users/-", "value": {"username": "x"}, "fact_id": "f1"},
@@ -259,3 +259,16 @@ def test_a_preflight_serving_is_kept_for_the_siblings_later_calls(tmp_path):
     prompt = sibling_oracle.seen[0]
     assert "This world's earlier servings most like this call" in prompt
     assert "user:alice" in prompt, "the sibling's prompt did not show the calibration's call"
+
+
+def test_a_base_past_the_hand_in_cap_is_still_served_unchanged(tmp_path):
+    """The cap bounds what the oracle hands in, never the host's own base answer."""
+    from defender.learning.branch.estate import oracle as oracle_mod
+
+    big = {"total": 1, "users": [{"username": "u" * (oracle_mod._HAND_IN_CAP + 1024),
+                                  "realm_role": "r"}]}
+    reg, ctx, _ep, oracle, _v = _registry(
+        tmp_path, S.submit(), captured=[S.captured("idp", "lookup", DIRECTORY, big)])
+
+    assert S.call(reg, "idp", "lookup", ctx, **DIRECTORY) == big
+    assert oracle.submissions() == 1

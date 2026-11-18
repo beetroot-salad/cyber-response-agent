@@ -13,7 +13,7 @@ import logging
 
 
 
-from collections.abc import Callable, Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 
 from pathlib import Path
 
@@ -194,19 +194,18 @@ def _sample_text(source_answer: Path | None) -> str | None:
 
 
 
-def prebranch_answers(keys: Collection[str], base_path: Path) -> list[dict]:
+def prebranch_answers(keys: Collection[str], base_rows: Iterable[Mapping[str, Any]]) -> list[dict]:
     """The calls the source run made before the branch point (`keys`: their request keys, as
-    `prebranch_calls` derives them), each with the answer the primed base recording at
-    `base_path` holds for it, in recorded order (#1561): what the investigator's inherited
+    `prebranch_calls` derives them), each with the answer the primed base recording's rows
+    (`base_rows`) hold for it, in recorded order (#1561): what the investigator's inherited
     transcript already shows. A call after the branch point is never evidence."""
-    from defender._io import read_jsonl_rows
     from defender.learning.branch.ledger import request_key
 
     if not keys:
         return []
     out: list[dict] = []
     seen: set[str] = set()
-    for row in read_jsonl_rows(base_path):
+    for row in base_rows:
         system, verb, params = row.get("system"), row.get("verb"), row.get("params") or {}
         if not (isinstance(system, str) and isinstance(row.get("payload_text"), str)):
             continue
@@ -225,7 +224,10 @@ def prebranch_answers(keys: Collection[str], base_path: Path) -> list[dict]:
 def _prebranch_evidence(source: Run, branch_message_id: int, episode: Episode) -> list[dict]:
     from defender.learning.branch.estate.registry import prebranch_calls
 
-    return prebranch_answers(prebranch_calls(source, branch_message_id), episode.served_base.path)
+    from defender._io import read_jsonl_rows
+
+    keys = prebranch_calls(source, branch_message_id)
+    return prebranch_answers(keys, read_jsonl_rows(episode.served_base.path) if keys else [])
 
 
 def write_world_revisions(episode: Episode, entries: list[dict]) -> None:

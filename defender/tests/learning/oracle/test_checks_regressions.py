@@ -38,8 +38,6 @@ def test_an_add_naming_no_staged_forged_row_is_an_unclaimed_row():
     failures = _check(base, [_add("/rows/-", {"a": "EVIL", "n": 1}, "f1")])
     assert any(f.startswith("check 1") and "'f1' names no forged row" in f
                for f in failures), failures
-    assert any(f.startswith("check 1") and "that is no forged row" in f
-               for f in failures), failures
 
 
 def test_control_an_add_of_the_staged_forged_row_passes():
@@ -52,9 +50,8 @@ def test_an_add_whose_value_is_not_its_forged_row_is_refused():
     store = _store(_forged("f1", {"a": "y", "n": 1}))
     base = {"rows": [{"a": "x", "n": 2}]}
     failures = _check(base, [_add("/rows/-", {"a": "EVIL", "n": 1}, "f1")], store)
-    assert any(f.startswith("check 1") and "that is no forged row" in f
-               for f in failures), failures
-    assert any("forged row 'f1' is not in the served answer" in f for f in failures), failures
+    assert any(f.startswith("check 1") and "served with other content than it was forged"
+               in f for f in failures), failures
 
 
 # --- an added forged row stays served -------------------------------------------------------
@@ -64,7 +61,7 @@ def test_a_forged_row_the_patch_adds_then_removes_is_not_served():
     store = _store(_forged("f1", {"a": 1}))
     patch = [_add("/rows/-", {"a": 1}, "f1"), {"op": "remove", "path": "/rows/0", "fact_id": "F"}]
     failures = _check({"rows": []}, patch, store)
-    assert any(f.startswith("check 1") and "forged row 'f1' is not in the served answer" in f
+    assert any(f.startswith("check 1") and "changes a row this patch forges" in f
                for f in failures), failures
 
 

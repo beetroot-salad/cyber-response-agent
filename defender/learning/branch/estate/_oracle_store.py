@@ -16,7 +16,7 @@ import time
 
 import uuid
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 
 from dataclasses import dataclass
 
@@ -91,6 +91,11 @@ def _trace_spent(rows: list[dict]) -> float:
 
 
 
+
+def _indexed(serving: Mapping[str, Any]) -> dict:
+    """A serving as the store keeps it in memory: everything but its served answer."""
+    return {k: v for k, v in serving.items() if k != "served"}
+
 class OracleStore:
     """`oracle/<world-uuid>/`: frozen forged rows, recorded facts, the served-answer cache, the
     oracle-side ledger, this world's live base answers and the oracle's spend trace."""
@@ -130,8 +135,10 @@ class OracleStore:
         #: Each row carries its own `id`: a failed append may have landed some of them whole,
         #: and the rewrite of those is counted once (`_trace_spent`).
         self._unwritten: list[dict] = []
-        #: Every verified serving so far, oldest first (`commit(serving=)`, #1543).
-        self.servings: list[dict] = [r for r in read_jsonl_rows(self.paths.servings)
+        #: Every verified serving so far, oldest first (`commit(serving=)`, #1543), less its
+        #: served answer: ranking reads the call and the code, and a chosen serving's answer is
+        #: read back from the file (`served_answers`).
+        self.servings: list[dict] = [_indexed(r) for r in read_jsonl_rows(self.paths.servings)
                                      if isinstance(r.get("system"), str)]
         #: The `(forged_id, column, value)` of every collision already recorded.
         self._collided = {(r.get("forged_id"), r.get("column"), r.get("value"))
@@ -248,13 +255,22 @@ class OracleStore:
                 key = request_key(answer["system"], answer["verb"], answer["params"])
                 self.answers[key] = answer
             if serving is not None:
+                serving = {"id": uuid.uuid4().hex, **serving}
                 try:
                     self._append(self.paths.servings, [serving])
                 except OSError as unwritable:
                     self._torn.add(self.paths.servings)
                     _logger.warning(f"a verified serving could not be kept for reuse "
                                     f"({unwritable!r}); the answer is served")
-                self.servings.append(serving)
+                self.servings.append(_indexed(serving))
+
+    def served_answers(self, ids: Collection[str]) -> dict[str, Any]:
+        """The served answers of the servings `ids` names, read back from the servings file."""
+        if not ids:
+            return {}
+        with self._lock:
+            return {r["id"]: r.get("served") for r in read_jsonl_rows(self.paths.servings)
+                    if r.get("id") in ids}
 
 
 

@@ -342,8 +342,8 @@ def test_1224_forged_row_is_written_once_and_never_rewritten(tmp_path):
 
     assert sc.call(reg, "idp", "query", **DB1) == {"rows": [FORGED_ROW]}
     _assert_verdict(o, 2, "is frozen with other content")
-    text = _assert_verdict(o, 3, "check 4")
-    assert "frozen row 'fg-1' is not served exactly as frozen" in text, text
+    text = _assert_verdict(o, 3, "check 1")
+    assert "changes a row this patch forges" in text, text
     _spent(o)
     assert sc.rows("forged") == frozen, "the second write of fg-1 was refused; one row, unchanged"
     assert all("db-2" not in r["payload_text"] for r in sc.ledger()), sc.ledger()

@@ -49,7 +49,7 @@ from ..ledger import (
     LedgerError,
     ServedCall,
 )
-from .checks import FORK_FACT, RealData, canonical_json
+from .checks import FORK_FACT, RealData, canonical_json, shown_changes
 from .limiter import RateLimiter
 from .oracle import (
     DEFAULT_RESTART_AFTER,
@@ -132,7 +132,7 @@ def _served_in_turn(registry: WorldRegistry, system: str, verb: str, asked: dict
         answer = {"system": system, "verb": verb, "params": asked,
                   "served": json.loads(payload_text_of(served if changed else base)),
                   "decision": decision,
-                  "base_digest": digest, "claim": claim, "verifier_verdict": verdict,
+                  "base_digest": digest, "claim": shown_changes(claim), "verifier_verdict": verdict,
                   "attempts": attempts}
         if getattr(staged, "code", None) is not None:
             # The code whose output was served, kept for the record (#1543 O4); repeats serve the output.
@@ -201,7 +201,8 @@ def serving_row(system: str, verb: str, params: Mapping[str, Any], served: Any, 
     """One verified serving as later calls reuse it (#1543): the call, the code that built it
     (None for a literal hand-in), its changes seen through the call's query, and the answer."""
     return {"system": system, "verb": verb, "params": dict(params),
-            "code": getattr(staged, "code", None), "changes": dict(changes), "served": served}
+            "code": getattr(staged, "code", None), "changes": shown_changes(changes),
+            "served": served}
 
 
 def served_label(base: Any, served: Any, changes: Mapping[str, Any],  # noqa: PLR0913 — the answer, its changes and what decides its label
@@ -209,7 +210,8 @@ def served_label(base: Any, served: Any, changes: Mapping[str, Any],  # noqa: PL
                  changed: bool | None = None) -> str:
     """The ledger label of a verified answer (#1385 A1): decided by the difference, not by
     whether the answer changed. Unchanged from the live base is `passthrough`. A changed answer
-    is `oracle` ("showed the world's difference") when its changes (`render_changes`, #1543) add
+    is `oracle` ("showed the world's difference") when its changes (`render_changes`, #1543,
+    whole: never the cut `shown_changes`) add
     a forged row, or remove or replace a row, value or record naming an entity a fact names
     (a change back to the branch point never counts), or the
     re-ask dropped a row naming one (the cut: the live base against the re-asked answer);
