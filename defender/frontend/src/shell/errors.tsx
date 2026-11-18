@@ -21,7 +21,10 @@ export function ErrorScreen({ kind }: { readonly kind: ErrorKind }) {
 }
 
 /** Turns a render error of a screen into the error state, unless the load may no longer show anything. */
-export class ErrorBoundary extends Component<{ readonly load: Load; readonly children: ReactNode }, { readonly failed: boolean }> {
+export class ErrorBoundary extends Component<
+  { readonly load: Load; readonly children: ReactNode },
+  { readonly failed: boolean }
+> {
   override state = { failed: false };
 
   static getDerivedStateFromError(): { failed: boolean } {

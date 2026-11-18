@@ -10,25 +10,26 @@ import type { Gone, Person, ReadKey, ReadParams, ReadResult } from "./types";
 export type { FailedReason } from "./decision";
 export type { CallbackReason, Person } from "./types";
 
-/** The closed list of actions a screen may take (PR2). Writes and streams will be added here, each with a stated 401 policy. */
+/** The closed list of actions a screen may take (PR2). Writes and streams will be added here, each with a stated 401
+ * policy. */
 export interface Actions {
   /** The failed screen's retry: sign in again, handing the address's `return` values on unjudged. */
-  retry(): void;
+  readonly retry: () => void;
   /** `POST /api/auth/logout`, then to the landing page by replace. */
-  signOut(): void;
+  readonly signOut: () => void;
 }
 
 /** A read-only copy of the address's query. */
 export interface AddressQuery {
-  get(name: string): string | null;
-  getAll(name: string): string[];
+  readonly get: (name: string) => string | null;
+  readonly getAll: (name: string) => string[];
 }
 
 /** What a screen's hooks read. Nothing here names a browser type: screens are compiled without the browser library
  * (`tsconfig.screens.json`), and this module is compiled with them. */
 export interface Shell {
   /** The load's one read path (`source: "later"`), and the query cache it sends each read through at most once. */
-  read<K extends ReadKey>(key: K, params: ReadParams<K>): Promise<ReadResult<K>>;
+  read: <K extends ReadKey>(key: K, params: ReadParams<K>) => Promise<ReadResult<K>>;
   readonly queryClient: QueryClient;
   readonly me: Person | null;
   /** The address's path and the shape it is a member of (null: the not-found screen). */

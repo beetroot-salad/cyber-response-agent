@@ -391,7 +391,8 @@ jobs:
         # otherwise collapse to `Any`.
         run: uv sync --extra dev --extra runtime --extra api --locked
 
-      # The frontend's own gate (#1540 F6, F8): generated types, the type check, the source check, then the unit tests.
+      # The frontend's own gate (#1540 F6, F8): generated types, the type check, the source check, the unit tests, then
+      # the lint (ESLint, Prettier's layout, unused code: defender/docs/development-lints.md).
       - name: Install Bun
         run: sudo sh tooling/install-bun.sh
 
@@ -406,6 +407,10 @@ jobs:
       - name: Frontend unit tests
         working-directory: defender/frontend
         run: bun run test
+
+      - name: Frontend lint
+        working-directory: defender/frontend
+        run: bun run lint
 
       # Hard gate — blocks CI. Keeps the baseline (pyflakes + pycodestyle E)
       # clean repo-wide; extra rule sets are reported in the code-smells job.

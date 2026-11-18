@@ -1,5 +1,5 @@
-// B1's decision (#1161 B1, #1540 Am-5): what a 401 means, as a pure function. It takes no target and does no effect; the
-// load carries the decision out.
+// B1's decision (#1161 B1, #1540 Am-5): what a 401 means, as a pure function. It takes no target and does no effect;
+// the load carries the decision out.
 
 /** What reading this load's attempt record found. */
 export type Taken =
@@ -13,7 +13,8 @@ export type FailedReason = "session-lost" | "sign-in-left" | "storage-unavailabl
 /** Which call of the load was answered 401: its own `/api/me`, or a later one. */
 export type Source = "me" | "later";
 
-export type Decision = { readonly kind: "sign-in"; readonly again: boolean } | { readonly kind: "failed"; readonly reason: FailedReason };
+export type Decision =
+  { readonly kind: "sign-in"; readonly again: boolean } | { readonly kind: "failed"; readonly reason: FailedReason };
 
 export function decideUnauthorized(input: {
   readonly taken: Taken;
@@ -30,8 +31,8 @@ export function decideUnauthorized(input: {
     // other return with a record means sign-in finished but its session did not arrive.
     return { kind: "failed", reason: byHistory ? "sign-in-left" : "session-lost" };
   }
-  // A later call: `/api/me` accepted the session but this one is refused. After a sign-in that a call's own 401 started,
-  // a second such 401 stops instead of signing in forever.
+  // A later call: `/api/me` accepted the session but this one is refused. After a sign-in that a call's own 401
+  // started, a second such 401 stops instead of signing in forever.
   if (taken.status === "found") {
     return taken.again ? { kind: "failed", reason: "session-refused" } : { kind: "sign-in", again: true };
   }

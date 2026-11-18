@@ -1,20 +1,72 @@
 @import "../keycloak-theme/login/resources/css/tokens.css";
 
-:root { color-scheme: dark; font: 14.5px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-body { margin: 0; background: var(--app-paper); color: var(--app-ink); }
-a { color: var(--app-accent); }
-main { max-width: 40rem; margin: 4rem auto; padding: 0 1.5rem; }
-h1 { font-size: 1.5rem; font-weight: 600; color: var(--app-ink-bright); }
-p { color: var(--app-muted); }
-dt { font-weight: 600; }
-dd { margin: 0 0 0.75rem; }
-[data-field="email"] { font-family: "SF Mono", Menlo, Consolas, monospace; color: var(--app-ink-bright); }
-button, a[data-action="sign-in"] {
-  font: inherit; padding: 0.4rem 1rem; border-radius: 6px; border: 1px solid var(--app-accent);
-  background: var(--app-accent); color: var(--app-accent-ink); text-decoration: none; cursor: pointer; font-weight: 600;
+:root {
+  color-scheme: dark;
+  font:
+    14.5px/1.6 -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
 }
-button[data-action="sign-out"] { background: transparent; color: var(--app-ink); border-color: var(--app-line); }
-button[data-action="sign-out"]:hover { border-color: var(--app-accent); }
-main[data-screen="error"] h1, main[data-screen="sign-in-failed"] h1 { color: var(--app-bad); }
-main[data-screen="root"] { text-align: center; }
-main[data-screen="root"] img { display: block; margin: 0 auto 1rem; }
+body {
+  margin: 0;
+  background: var(--app-paper);
+  color: var(--app-ink);
+}
+a {
+  color: var(--app-accent);
+}
+main {
+  max-width: 40rem;
+  margin: 4rem auto;
+  padding: 0 1.5rem;
+}
+h1 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--app-ink-bright);
+}
+p {
+  color: var(--app-muted);
+}
+dt {
+  font-weight: 600;
+}
+dd {
+  margin: 0 0 0.75rem;
+}
+[data-field="email"] {
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  color: var(--app-ink-bright);
+}
+button,
+a[data-action="sign-in"] {
+  font: inherit;
+  padding: 0.4rem 1rem;
+  border-radius: 6px;
+  border: 1px solid var(--app-accent);
+  background: var(--app-accent);
+  color: var(--app-accent-ink);
+  text-decoration: none;
+  cursor: pointer;
+  font-weight: 600;
+}
+button[data-action="sign-out"] {
+  background: transparent;
+  color: var(--app-ink);
+  border-color: var(--app-line);
+}
+button[data-action="sign-out"]:hover {
+  border-color: var(--app-accent);
+}
+main[data-screen="error"] h1,
+main[data-screen="sign-in-failed"] h1 {
+  color: var(--app-bad);
+}
+main[data-screen="root"] {
+  text-align: center;
+}
+main[data-screen="root"] img {
+  display: block;
+  margin: 0 auto 1rem;
+}

@@ -17,7 +17,8 @@ function refuse(message) {
   throw new Refused(message);
 }
 
-/** The file package.json's `defender.inputs` names `name` by (PR6: every file read from outside this folder is named). */
+/** The file package.json's `defender.inputs` names `name` by (PR6: every file read from outside this folder is
+ * named). */
 function declaredInput(name) {
   const declared = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")).defender?.inputs;
   if (!Array.isArray(declared)) refuse("package.json must name the build's inputs in `defender.inputs`");
@@ -38,16 +39,19 @@ function readJson(file) {
 // alphabets, each an explicit list of segment characters; a piece is literal text or [alphabet, count] /
 // [alphabet, least, most]. Each placeholder's pattern is made from its pieces, as the API's reader makes it.
 const SEGMENT_CHARACTER = /^[A-Za-z0-9_-]$/;
-const segmentText = (text) => typeof text === "string" && text !== "" && [...text].every((c) => SEGMENT_CHARACTER.test(c));
+const segmentText = (text) =>
+  typeof text === "string" && text !== "" && [...text].every((c) => SEGMENT_CHARACTER.test(c));
 const isCount = (value) => Number.isInteger(value) && value >= 1;
 const escapeCharacter = (c) => (c === "-" ? "\\-" : c);
 const escapeLiteral = (text) => text.replace(/[\\^$.*+?()[\]{}|/-]/g, "\\$&");
 
 /** Each placeholder's pattern, from its pieces. */
 function placeholderPatterns(alphabets, placeholders) {
-  if (typeof alphabets !== "object" || alphabets === null || Array.isArray(alphabets)) refuse("addresses.json must hold `alphabets` (an object)");
+  if (typeof alphabets !== "object" || alphabets === null || Array.isArray(alphabets))
+    refuse("addresses.json must hold `alphabets` (an object)");
   for (const [name, characters] of Object.entries(alphabets)) {
-    if (!segmentText(characters)) refuse(`alphabet ${name} must list segment characters only (letters, digits, _ and -)`);
+    if (!segmentText(characters))
+      refuse(`alphabet ${name} must list segment characters only (letters, digits, _ and -)`);
   }
   const patterns = {};
   for (const [name, pieces] of Object.entries(placeholders)) {
@@ -56,13 +60,21 @@ function placeholderPatterns(alphabets, placeholders) {
     for (const piece of pieces) {
       if (segmentText(piece)) {
         parts.push([...piece].map(escapeCharacter).join(""));
-      } else if (Array.isArray(piece) && (piece.length === 2 || piece.length === 3) && typeof piece[0] === "string" &&
-                 Object.hasOwn(alphabets, piece[0]) && piece.slice(1).every(isCount) && piece[1] <= piece[piece.length - 1]) {
+      } else if (
+        Array.isArray(piece) &&
+        (piece.length === 2 || piece.length === 3) &&
+        typeof piece[0] === "string" &&
+        Object.hasOwn(alphabets, piece[0]) &&
+        piece.slice(1).every(isCount) &&
+        piece[1] <= piece[piece.length - 1]
+      ) {
         const counts = piece.length === 2 || piece[1] === piece[2] ? `${piece[1]}` : `${piece[1]},${piece[2]}`;
         parts.push(`[${[...alphabets[piece[0]]].map(escapeCharacter).join("")}]{${counts}}`);
       } else {
-        refuse(`placeholder ${name} has a piece that is neither text of segment characters nor ` +
-               `[a known alphabet, a count of at least 1, optionally a larger one]: ${JSON.stringify(piece)}`);
+        refuse(
+          `placeholder ${name} has a piece that is neither text of segment characters nor ` +
+            `[a known alphabet, a count of at least 1, optionally a larger one]: ${JSON.stringify(piece)}`,
+        );
       }
     }
     patterns[name] = parts.join("");
@@ -75,23 +87,32 @@ function placeholderPatterns(alphabets, placeholders) {
 function compiledShapes(shapes, patterns) {
   const names = new Set();
   return shapes.map((shape) => {
-    if (typeof shape?.name !== "string" || typeof shape.template !== "string" || typeof shape.returnable !== "boolean") {
+    if (
+      typeof shape?.name !== "string" ||
+      typeof shape.template !== "string" ||
+      typeof shape.returnable !== "boolean"
+    ) {
       refuse(`a shape needs a string name, a string template and a boolean returnable: ${JSON.stringify(shape)}`);
     }
     if (names.has(shape.name)) refuse(`duplicate shape name ${shape.name}`);
     names.add(shape.name);
     if (!shape.template.startsWith("/")) refuse(`template ${shape.template} does not start with /`);
     let count = 0;
-    const parts = shape.template.split("/").slice(1).map((segment) => {
-      const named = PLACEHOLDER.exec(segment);
-      if (named) {
-        if (!Object.hasOwn(patterns, named[1])) refuse(`template ${shape.template} names an unknown placeholder ${named[1]}`);
-        count += 1;
-        return `(${patterns[named[1]]})`;
-      }
-      if (!/^[\x20-\x7e]*$/.test(segment) || /[{}]/.test(segment)) refuse(`template ${shape.template} has a bad literal segment ${JSON.stringify(segment)}`);
-      return escapeLiteral(segment);
-    });
+    const parts = shape.template
+      .split("/")
+      .slice(1)
+      .map((segment) => {
+        const named = PLACEHOLDER.exec(segment);
+        if (named) {
+          if (!Object.hasOwn(patterns, named[1]))
+            refuse(`template ${shape.template} names an unknown placeholder ${named[1]}`);
+          count += 1;
+          return `(${patterns[named[1]]})`;
+        }
+        if (!/^[\x20-\x7e]*$/.test(segment) || /[{}]/.test(segment))
+          refuse(`template ${shape.template} has a bad literal segment ${JSON.stringify(segment)}`);
+        return escapeLiteral(segment);
+      });
     return { ...shape, pattern: new RegExp(`^(?:/${parts.join("/")})$`), count };
   });
 }
@@ -110,11 +131,16 @@ function shapesModule(compiled) {
     `export const PATTERNS: { readonly [K in ShapeName]: RegExp } = {\n${entries((shape) => String(shape.pattern))}};\n` +
     `/** Each shape's placeholder values, in the template's order. */\n` +
     `export interface ShapeValues {\n` +
-    compiled.map((shape) => `  ${key(shape.name)}: readonly [${Array(shape.count).fill("string").join(", ")}];\n`).join("") +
+    compiled
+      .map((shape) => `  ${key(shape.name)}: readonly [${Array(shape.count).fill("string").join(", ")}];\n`)
+      .join("") +
     `}\n` +
     `/** Each shape's values from a match of its pattern: \`value(i)\` is its i-th group. */\n` +
     `export const VALUES: { readonly [K in ShapeName]: (value: (index: number) => string) => ShapeValues[K] } = {\n` +
-    entries((shape) => `(${shape.count === 0 ? "" : "value"}) => [${Array.from({ length: shape.count }, (_, i) => `value(${i})`).join(", ")}]`) +
+    entries(
+      (shape) =>
+        `(${shape.count === 0 ? "" : "value"}) => [${Array.from({ length: shape.count }, (_, i) => `value(${i})`).join(", ")}]`,
+    ) +
     `};\n` +
     `/** The shapes with no placeholder: each has one address, its template. */\n` +
     `export type LiteralShape = ${literal.map((shape) => key(shape.name)).join(" | ") || "never"};\n` +

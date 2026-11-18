@@ -21,32 +21,34 @@ interface Case {
   readonly byHistory: boolean;
   readonly expected: Decision;
 }
-const row = (source: Source, label: string, taken: Taken, byHistory: boolean, expected: Decision): Case => ({
+/** One case: source, the record's label, the record, byHistory, and the decision expected. */
+type Row = readonly [Source, string, Taken, boolean, Decision];
+
+const ROWS: readonly Row[] = [
+  ["me", "none", NONE, false, SIGN_IN_FIRST],
+  ["me", "none", NONE, true, SIGN_IN_FIRST],
+  ["me", "found", FOUND_FIRST, false, failed("session-lost")],
+  ["me", "found", FOUND_FIRST, true, failed("sign-in-left")],
+  ["me", "found again", FOUND_AGAIN, false, failed("session-lost")],
+  ["me", "found again", FOUND_AGAIN, true, failed("sign-in-left")],
+  ["me", "unavailable", UNAVAILABLE, false, failed("storage-unavailable")],
+  ["me", "unavailable", UNAVAILABLE, true, failed("storage-unavailable")],
+  ["later", "none", NONE, false, SIGN_IN_FIRST],
+  ["later", "none", NONE, true, SIGN_IN_FIRST],
+  ["later", "found", FOUND_FIRST, false, SIGN_IN_AGAIN],
+  ["later", "found", FOUND_FIRST, true, SIGN_IN_AGAIN],
+  ["later", "found again", FOUND_AGAIN, false, failed("session-refused")],
+  ["later", "found again", FOUND_AGAIN, true, failed("session-refused")],
+  ["later", "unavailable", UNAVAILABLE, false, failed("storage-unavailable")],
+  ["later", "unavailable", UNAVAILABLE, true, failed("storage-unavailable")],
+];
+const TABLE: readonly Case[] = ROWS.map(([source, label, taken, byHistory, expected]) => ({
   source,
   label,
   taken,
   byHistory,
   expected,
-});
-
-const TABLE: readonly Case[] = [
-  row("me", "none", NONE, false, SIGN_IN_FIRST),
-  row("me", "none", NONE, true, SIGN_IN_FIRST),
-  row("me", "found", FOUND_FIRST, false, failed("session-lost")),
-  row("me", "found", FOUND_FIRST, true, failed("sign-in-left")),
-  row("me", "found again", FOUND_AGAIN, false, failed("session-lost")),
-  row("me", "found again", FOUND_AGAIN, true, failed("sign-in-left")),
-  row("me", "unavailable", UNAVAILABLE, false, failed("storage-unavailable")),
-  row("me", "unavailable", UNAVAILABLE, true, failed("storage-unavailable")),
-  row("later", "none", NONE, false, SIGN_IN_FIRST),
-  row("later", "none", NONE, true, SIGN_IN_FIRST),
-  row("later", "found", FOUND_FIRST, false, SIGN_IN_AGAIN),
-  row("later", "found", FOUND_FIRST, true, SIGN_IN_AGAIN),
-  row("later", "found again", FOUND_AGAIN, false, failed("session-refused")),
-  row("later", "found again", FOUND_AGAIN, true, failed("session-refused")),
-  row("later", "unavailable", UNAVAILABLE, false, failed("storage-unavailable")),
-  row("later", "unavailable", UNAVAILABLE, true, failed("storage-unavailable")),
-];
+}));
 
 describe("decideUnauthorized", () => {
   it("is tested over all 16 combinations of source, taken and byHistory", () => {

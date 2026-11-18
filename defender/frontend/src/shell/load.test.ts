@@ -1,8 +1,8 @@
 // The load (B1's owner, Am-5, Am-6): two 401s of one load make one navigation; a 401 to a superseded load does nothing.
 // The effects are the load's only way out. Each appends its name to one ordered log, and every case asserts the whole
 // log, so an extra `record`, `assign` or `replace` fails any case. Reads go through `load.client.read(key, params)`
-// directly (Am-6). The 401 cases share one settling discipline (`loadWithHeldAnswers` and `settle`), so none assumes when
-// a call happens; the cases of what a single answer comes to use `loadAnswering`, which answers at once.
+// directly (Am-6). The 401 cases share one settling discipline (`loadWithHeldAnswers` and `settle`), so none assumes
+// when a call happens; the cases of what a single answer comes to use `loadAnswering`, which answers at once.
 import { describe, expect, it } from "vitest";
 import { makeLoad } from "./load";
 
@@ -16,14 +16,14 @@ function unauthorized(): Response {
 }
 
 /**
- * The one settling discipline of this file. The injected `fetch` holds each request, and a responder answers whatever is
- * held every millisecond, so a client may send at any time (or never) and no case guesses when. `answerOnce` lets a case
- * decide when the held requests are answered (it is asked whenever some are held, with how many) and what it does at
- * that moment. Every case then ends with `settle`, once, before it asserts the whole log.
+ * The one settling discipline of this file. The injected `fetch` holds each request, and a responder answers whatever
+ * is held every millisecond, so a client may send at any time (or never) and no case guesses when. `answerOnce` lets a
+ * case decide when the held requests are answered (it is asked whenever some are held, with how many) and what it does
+ * at that moment. Every case then ends with `settle`, once, before it asserts the whole log.
  */
 function loadWithHeldAnswers(answerOnce: (held: number) => boolean = () => true) {
   const log: string[] = [];
-  const held: Array<(response: Response) => void> = [];
+  const held: ((response: Response) => void)[] = [];
   const effects = {
     fetch: () => {
       log.push("fetch");
@@ -40,7 +40,13 @@ function loadWithHeldAnswers(answerOnce: (held: number) => boolean = () => true)
       log.push("replace");
     },
   };
-  const load = makeLoad({ taken: { status: "none" }, byHistory: false, target: "/home", origin: "http://app.test", effects });
+  const load = makeLoad({
+    taken: { status: "none" },
+    byHistory: false,
+    target: "/home",
+    origin: "http://app.test",
+    effects,
+  });
   const responder = setInterval(() => {
     if (held.length > 0 && answerOnce(held.length)) held.splice(0).forEach((answer) => answer(unauthorized()));
   }, 1);
@@ -88,7 +94,11 @@ describe("a load's reads", () => {
 });
 
 /** A load whose every request is answered by `answer` at once, with effects that do nothing but what `record` does. */
-function loadAnswering(answer: () => Promise<Response>, record: () => boolean = () => true, assign: () => void = () => undefined) {
+function loadAnswering(
+  answer: () => Promise<Response>,
+  record: () => boolean = () => true,
+  assign: () => void = () => undefined,
+) {
   const effects = { fetch: answer, record, assign, replace: () => undefined };
   return makeLoad({ taken: { status: "none" }, byHistory: false, target: "/home", origin: "http://app.test", effects });
 }
@@ -100,23 +110,32 @@ describe("what a read comes to", () => {
   });
 
   it("an answer that is not JSON is the error state's", async () => {
-    const load = loadAnswering(async () => new Response("<html>", { status: 200, headers: { "Content-Type": "application/json" } }));
+    const load = loadAnswering(() =>
+      Promise.resolve(new Response("<html>", { status: 200, headers: { "Content-Type": "application/json" } })),
+    );
     expect((await load.client.read(KEY, params("i"))).kind).toBe("error");
   });
 
   it("a fault of the shell's own while it handles an answer is not passed off as the server's: it reaches the caller", async () => {
     const fault = new Error("the shell's own fault");
-    const load = loadAnswering(async () => unauthorized(), () => {
-      throw fault;
-    });
+    const load = loadAnswering(
+      () => Promise.resolve(unauthorized()),
+      () => {
+        throw fault;
+      },
+    );
     await expect(load.client.read(KEY, params("i"))).rejects.toBe(fault);
   });
 
   it("a navigation that throws is the shell's own fault: it reaches the caller, and the load may still show it", async () => {
     const fault = new Error("the navigation's own fault");
-    const load = loadAnswering(async () => unauthorized(), () => true, () => {
-      throw fault;
-    });
+    const load = loadAnswering(
+      () => Promise.resolve(unauthorized()),
+      () => true,
+      () => {
+        throw fault;
+      },
+    );
     await expect(load.client.read(KEY, params("i"))).rejects.toBe(fault);
     expect(load.mayShow()).toBe(true);
   });

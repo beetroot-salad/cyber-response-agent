@@ -1,12 +1,22 @@
 // The frontend build (#1161 S2, B8, #1540 F1): the app by Vite, then the address matcher alone, in library mode. Each
 // build is written to a folder of its own under `dist-builds/`, and `dist` is a link to the build being served. Only a
-// whole build is linked, and the link is replaced in one rename, which can't be caught halfway: `dist` is always one whole build, and a failed or killed
-// build, at any step, leaves the previous one served as it was (F1 b).
+// whole build is linked, and the link is replaced in one rename, which can't be caught halfway: `dist` is always one
+// whole build, and a failed or killed build, at any step, leaves the previous one served as it was (F1 b).
 //
 // A browser may still hold the previous build's `index.html`, which names that build's files under `assets/` (named by
 // their content, so a name never means other bytes). The new build keeps those files beside its own, so such a page
 // still loads; a page two builds old gets 404 for them, and a reload fixes it.
-import { cpSync, existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  lstatSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+} from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build as vite } from "vite";
@@ -86,8 +96,8 @@ function sweep() {
   }
 }
 
-/** The build step (after generate and check, `scripts/run.mjs`): the problems that stopped it, or none. Whatever stopped
- * it, what it left is swept. */
+/** The build step (after generate and check, `scripts/run.mjs`): the problems that stopped it, or none. Whatever
+ * stopped it, what it left is swept. */
 export async function build() {
   const name = `${Date.now()}-${process.pid}`;
   const folder = path.join(builds, name);

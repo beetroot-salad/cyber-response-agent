@@ -2,12 +2,22 @@
 // membership meaning the API's reader has: a value is a member when the WHOLE string matches a shape, as ASCII,
 // case-sensitive, with no decoding, normalising or trailing-/ tolerance. The build writes each shape's whole pattern;
 // nothing here parses a template. No DOM here: Node loads this file's build.
-import { LITERAL_ADDRESSES, PATTERNS, SHAPES, VALUES, type LiteralShape, type ShapeName, type ShapeValues } from "./generated/shapes";
+import {
+  LITERAL_ADDRESSES,
+  PATTERNS,
+  SHAPES,
+  VALUES,
+  type LiteralShape,
+  type ShapeName,
+  type ShapeValues,
+} from "./generated/shapes";
 
 export type { ShapeName, ShapeValues };
 
 /** The shapes a person may be sent back to after sign-in. */
-export const RETURNABLE: ReadonlySet<ShapeName> = new Set(SHAPES.filter((shape) => shape.returnable).map((shape) => shape.name));
+export const RETURNABLE: ReadonlySet<ShapeName> = new Set(
+  SHAPES.filter((shape) => shape.returnable).map((shape) => shape.name),
+);
 
 /** The one address of a shape with no placeholder (its template). A shape with placeholders is not a `LiteralShape`. */
 export function literalAddress(name: LiteralShape): string {

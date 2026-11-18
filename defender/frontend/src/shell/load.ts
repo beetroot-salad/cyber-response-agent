@@ -1,6 +1,7 @@
 // The load (#1161 B1, #1540 Am-5, Am-6): one object per document load or back-forward restore, made outside React. It
 // carries out what a 401 means for this load, sends every API call through its typed client, and owns its own TanStack
-// `QueryClient`. Everything it does to the outside goes through four effects, so the unit tests drive it with no browser.
+// `QueryClient`. Everything it does to the outside goes through four effects, so the unit tests drive it with no
+// browser.
 //
 // Every API call goes through `openapi-fetch`, typed by the generated `paths` (PR3, F3): a path, a parameter or a field
 // the document does not have is a compile error, the client fills paths and encodes queries, and answers come back
@@ -14,13 +15,13 @@ import type { Outcome, Person, ReadBody, ReadKey, ReadParams, ReadResult } from 
 
 export interface Effects {
   /** The page's `fetch`, given the request the typed client made. */
-  fetch(request: Request): Promise<Response>;
+  readonly fetch: (request: Request) => Promise<Response>;
   /** Record an attempt for `target` (and whether it is a repeat); false when the storage cannot be used. */
-  record(target: string | null, again: boolean): boolean;
+  readonly record: (target: string | null, again: boolean) => boolean;
   /** Navigate away, keeping this page in the history (sign-in). */
-  assign(url: string): void;
+  readonly assign: (url: string) => void;
   /** Navigate away, replacing this page in the history (the failed screen, sign-out). */
-  replace(url: string): void;
+  readonly replace: (url: string) => void;
 }
 
 interface LoadOptions {
@@ -33,29 +34,42 @@ interface LoadOptions {
   readonly effects: Effects;
 }
 
-export type MeResult = Outcome<{ readonly kind: "ok"; readonly me: Person }>;
-export type SignOutResult = Outcome<{ readonly kind: "left" }>;
+type MeResult = Outcome<{ readonly kind: "ok"; readonly me: Person }>;
+type SignOutResult = Outcome<{ readonly kind: "left" }>;
 
 /** What a call does with a 401 answer: carry out B1's decision for that source, or return it like any other answer
  * (sign-out's "already signed out"). Every call states its own. */
 type On401 = Source | "returned";
 
+/** A load's calls. Each is a plain function, so it can be handed on alone. */
+interface Client {
+  /** `/api/me` as this load's own call (its 401 is B1's for `me`). */
+  readonly me: () => Promise<MeResult>;
+  /** One screen read (its 401 is B1's for a later call), keyed by the OpenAPI path key. */
+  readonly read: <K extends ReadKey>(key: K, params: ReadParams<K>) => Promise<ReadResult<K>>;
+  /** `POST /api/auth/logout`: 2xx or 401 (already signed out) leaves by replace; anything else is the error state. */
+  readonly signOut: () => Promise<SignOutResult>;
+}
+
+/** Whether a load may still show anything, and its one way of navigating away. */
+interface Exit {
+  /** Neither leaving nor superseded: the one check before the load shows anything. */
+  readonly mayShow: () => boolean;
+  /** A newer load is the page's: whatever this one reports is ignored. */
+  readonly supersede: () => void;
+  /** Navigate away by `navigate`: nothing (and false) when the load is already leaving or superseded. Once the
+   * navigation has started, the document is going away and nothing of the load shows; a navigation that throws is a
+   * fault of the shell's own, and the load is not leaving. */
+  readonly leave: (navigate: () => void) => boolean;
+}
+
 export interface Load {
   readonly queryClient: QueryClient;
-  readonly client: {
-    /** `/api/me` as this load's own call (its 401 is B1's for `me`). */
-    me(): Promise<MeResult>;
-    /** One screen read (its 401 is B1's for a later call), keyed by the OpenAPI path key. */
-    read<K extends ReadKey>(key: K, params: ReadParams<K>): Promise<ReadResult<K>>;
-    /** `POST /api/auth/logout`: 2xx or 401 (already signed out) leaves by replace; anything else is the error state. */
-    signOut(): Promise<SignOutResult>;
-  };
+  readonly client: Client;
   /** Sign in again from the failed screen: records an attempt when storage allows, then leaves for the sign-in. */
-  signIn(returns: readonly string[]): void;
-  /** A newer load is the page's: whatever this one reports is ignored. */
-  supersede(): void;
-  /** Neither leaving nor superseded: the one check before the load shows anything. */
-  mayShow(): boolean;
+  readonly signIn: (returns: readonly string[]) => void;
+  readonly supersede: Exit["supersede"];
+  readonly mayShow: Exit["mayShow"];
 }
 
 /** The sign-in route, checked against the document (it is a navigation, not a call, so the client does not send it).
@@ -110,122 +124,158 @@ async function getByPathKey<K extends ReadKey>(
   return { status: response.status, body: data as ReadBody<K> | undefined };
 }
 
-export function makeLoad(options: LoadOptions): Load {
-  const { taken, byHistory, target, origin, effects } = options;
+function makeExit(): Exit {
   let leaving = false;
   let superseded = false;
   const mayShow = (): boolean => !leaving && !superseded;
+  return {
+    mayShow,
+    supersede: () => {
+      superseded = true;
+    },
+    leave: (navigate) => {
+      if (!mayShow()) return false;
+      navigate();
+      leaving = true;
+      return true;
+    },
+  };
+}
 
-  /** The one way the load navigates away: nothing (and false) when it is already leaving or superseded. Once the
-   * navigation has started, the document is going away and nothing of the load shows; a navigation that throws is a
-   * fault of the shell's own, and the load is not leaving. */
-  function leave(navigate: () => void): boolean {
-    if (!mayShow()) return false;
-    navigate();
-    leaving = true;
-    return true;
+/** What a load's clients send through: its origin and effects, its exit, and what it does with a 401 (B1's
+ * decision). */
+interface Wiring {
+  readonly origin: string;
+  readonly effects: Effects;
+  readonly exit: Exit;
+  readonly unauthorized: (source: Source) => void;
+}
+
+/** A typed client whose every request is the load's: none is sent once the load is gone, and a 401 is `on401`'s. */
+function clientFor(on401: On401, { origin, effects, exit, unauthorized }: Wiring): Api {
+  return createClient<paths>({
+    baseUrl: origin,
+    credentials: "same-origin",
+    cache: "no-store",
+    headers: { Accept: "application/json" },
+    async fetch(request) {
+      if (!exit.mayShow()) throw new GoneSignal();
+      let response: Response;
+      let body: string;
+      try {
+        response = await effects.fetch(request);
+        body = await response.text(); // read whole here, so a body cut off is no answer either
+      } catch {
+        throw exit.mayShow() ? new UnusableAnswer() : new GoneSignal();
+      }
+      if (!exit.mayShow()) throw new GoneSignal();
+      if (on401 !== "returned" && response.status === 401) {
+        unauthorized(on401);
+        throw new GoneSignal();
+      }
+      if (body !== "" && !isJson(body)) throw new UnusableAnswer();
+      const { status, statusText, headers } = response;
+      return new Response(body === "" ? null : body, { status, statusText, headers });
+    },
+  });
+}
+
+/** One call: gone, the server's error, or its answer. Anything else it throws is the shell's own fault, and goes on
+ * to the caller (the error state's "something stopped working"). */
+async function send<T>(
+  exit: Exit,
+  call: () => Promise<T>,
+): Promise<Outcome<{ readonly kind: "answer"; readonly answer: T }>> {
+  try {
+    const answer = await call();
+    return exit.mayShow() ? { kind: "answer", answer } : { kind: "gone" };
+  } catch (error) {
+    if (error instanceof GoneSignal) return { kind: "gone" };
+    if (error instanceof UnusableAnswer) return { kind: "error" };
+    throw error;
   }
+}
 
-  function toFailedScreen(reason: FailedReason): void {
-    leave(() => effects.replace(withQuery(literalAddress("sign-in-failed"), { reason, return: target })));
-  }
-
-  /** A 401: carry out B1's decision. The load leaves, so a second 401 answered later finds it gone. */
-  function unauthorized(source: Source): void {
-    const decision = decideUnauthorized({ taken, byHistory, source });
-    if (decision.kind === "failed") return toFailedScreen(decision.reason);
-    if (!effects.record(target, decision.again)) return toFailedScreen("storage-unavailable");
-    leave(() => effects.assign(withQuery(SIGN_IN, { return: target })));
-  }
-
-  /** A typed client whose every request is the load's: none is sent once the load is gone, and a 401 is `on401`'s. */
-  function clientFor(on401: On401): Api {
-    return createClient<paths>({
-      baseUrl: origin,
-      credentials: "same-origin",
-      cache: "no-store",
-      headers: { Accept: "application/json" },
-      async fetch(request) {
-        if (!mayShow()) throw new GoneSignal();
-        let response: Response;
-        let body: string;
-        try {
-          response = await effects.fetch(request);
-          body = await response.text(); // read whole here, so a body cut off is no answer either
-        } catch {
-          throw mayShow() ? new UnusableAnswer() : new GoneSignal();
-        }
-        if (!mayShow()) throw new GoneSignal();
-        if (on401 !== "returned" && response.status === 401) {
-          unauthorized(on401);
-          throw new GoneSignal();
-        }
-        if (body !== "" && !isJson(body)) throw new UnusableAnswer();
-        const { status, statusText, headers } = response;
-        return new Response(body === "" ? null : body, { status, statusText, headers });
-      },
-    });
-  }
-  /** One client per 401 policy. */
-  const api: Readonly<Record<On401, Api>> = { me: clientFor("me"), later: clientFor("later"), returned: clientFor("returned") };
-
-  /** One call: gone, the server's error, or its answer. Anything else it throws is the shell's own fault, and goes on
-   * to the caller (the error state's "something stopped working"). */
-  async function send<T>(call: () => Promise<T>): Promise<Outcome<{ readonly kind: "answer"; readonly answer: T }>> {
-    try {
-      const answer = await call();
-      return mayShow() ? { kind: "answer", answer } : { kind: "gone" };
-    } catch (error) {
-      if (error instanceof GoneSignal) return { kind: "gone" };
-      if (error instanceof UnusableAnswer) return { kind: "error" };
-      throw error;
-    }
-  }
-
-  const client: Load["client"] = {
-    async me() {
-      const sent = await send(() => api.me.GET("/api/me"));
+/** The load's calls over its clients, one per 401 policy. */
+function clientOver(api: Readonly<Record<On401, Api>>, exit: Exit, effects: Effects): Client {
+  return {
+    me: async () => {
+      const sent = await send(exit, () => api.me.GET("/api/me"));
       if (sent.kind !== "answer") return sent;
       const { data, response } = sent.answer;
       // A cookie session is always a person (F3); the union's own `kind` says so.
       return response.status === 200 && data?.kind === "person" ? { kind: "ok", me: data } : { kind: "error" };
     },
-    async read<K extends ReadKey>(key: K, params: ReadParams<K>): Promise<ReadResult<K>> {
-      const sent = await send(() => getByPathKey(api.later, key, params));
+    read: async (key, params) => {
+      const sent = await send(exit, () => getByPathKey(api.later, key, params));
       if (sent.kind !== "answer") return sent;
       const { body, status } = sent.answer;
       if (status === 404) return { kind: "not-available" };
       return status === 200 && body !== undefined ? { kind: "ok", body } : { kind: "error" };
     },
-    async signOut() {
-      const sent = await send(() => api.returned.POST("/api/auth/logout", { parseAs: "stream" }));
+    signOut: async () => {
+      const sent = await send(exit, () => api.returned.POST("/api/auth/logout", { parseAs: "stream" }));
       if (sent.kind !== "answer") return sent;
       const { response } = sent.answer;
       // 2xx: signed out. 401: already signed out, the same exit; replace, so Back cannot return to a signed-in page.
       if (!(response.ok || response.status === 401)) return { kind: "error" };
-      return leave(() => effects.replace(literalAddress("root"))) ? { kind: "left" } : { kind: "gone" };
+      return exit.leave(() => {
+        effects.replace(literalAddress("root"));
+      })
+        ? { kind: "left" }
+        : { kind: "gone" };
     },
   };
+}
 
+/** Each read is sent at most once per load: retries off, no refetch on focus or reconnect, data that never goes stale
+ * and entries kept for the load's life. A query function throws only for a fault, which `useRead` rethrows. */
+function onceQueryClient(): QueryClient {
+  const once = { retry: false, refetchOnWindowFocus: false, refetchOnReconnect: false, refetchOnMount: false } as const;
+  return new QueryClient({ defaultOptions: { queries: { ...once, staleTime: Infinity, gcTime: Infinity } } });
+}
+
+export function makeLoad(options: LoadOptions): Load {
+  const { taken, byHistory, target, origin, effects } = options;
+  const exit = makeExit();
+
+  function toFailedScreen(reason: FailedReason): void {
+    exit.leave(() => {
+      effects.replace(withQuery(literalAddress("sign-in-failed"), { reason, return: target }));
+    });
+  }
+
+  /** A 401: carry out B1's decision. The load leaves, so a second 401 answered later finds it gone. */
+  function unauthorized(source: Source): void {
+    const decision = decideUnauthorized({ taken, byHistory, source });
+    if (decision.kind === "failed") {
+      toFailedScreen(decision.reason);
+    } else if (!effects.record(target, decision.again)) {
+      toFailedScreen("storage-unavailable");
+    } else {
+      exit.leave(() => {
+        effects.assign(withQuery(SIGN_IN, { return: target }));
+      });
+    }
+  }
+
+  const wiring: Wiring = { origin, effects, exit, unauthorized };
+  const clientWith = (on401: On401): Api => clientFor(on401, wiring);
   return {
-    // Each read is sent at most once per load: retries off, no refetch on focus or reconnect, data that never goes
-    // stale and entries kept for the load's life. A query function throws only for a fault, which `useRead` rethrows.
-    queryClient: new QueryClient({
-      defaultOptions: {
-        queries: { retry: false, refetchOnWindowFocus: false, refetchOnReconnect: false, refetchOnMount: false, staleTime: Infinity, gcTime: Infinity },
-      },
-    }),
-    client,
-    signIn(returns) {
+    queryClient: onceQueryClient(),
+    client: clientOver(
+      { me: clientWith("me"), later: clientWith("later"), returned: clientWith("returned") },
+      exit,
+      effects,
+    ),
+    signIn: (returns) => {
       // The values are handed to the sign-in route unjudged: the API judges them.
-      leave(() => {
+      exit.leave(() => {
         effects.record(returns[0] ?? null, false); // when storage allows
         effects.assign(withQuery(SIGN_IN, { return: returns }));
       });
     },
-    supersede() {
-      superseded = true;
-    },
-    mayShow,
+    supersede: exit.supersede,
+    mayShow: exit.mayShow,
   };
 }
