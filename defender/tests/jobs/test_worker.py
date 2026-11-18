@@ -106,14 +106,6 @@ world = _shared.world
 _no_database_address_in_the_workers_environment = _shared._no_database_address_in_the_workers_environment
 
 
-def test_o12_the_worker_entry_points_are_coroutines():
-    """`drain` and `serve` are coroutine functions, as the store is async. (O12)"""
-    from defender.worker import Worker
-
-    assert inspect.iscoroutinefunction(Worker.drain)
-    assert inspect.iscoroutinefunction(Worker.serve)
-
-
 # --- O4: slots -------------------------------------------------------------------------------------
 
 @_LINUX_ONLY

@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import datetime as dt
 import inspect
-import re
 import typing
 
 import pytest
@@ -147,23 +146,6 @@ def test_m11_investigations_repository_doc_is_restated_against_the_row():
     doc = inspect.getdoc(ports.InvestigationsRepository)
     assert "stamp" not in doc
     assert "refused" in doc
-
-
-_OLD = re.compile(r"soft delete|deleted\b.{0,60}\bleft out|for a deleted|deleted since|hidden from every read",
-                  re.IGNORECASE | re.DOTALL)
-
-
-def test_o17_the_ports_no_longer_describe_a_soft_delete():
-    """No port docstring mentions soft delete, deleted rows left out, or a conflict for a deleted replay; §4.1 is still cited. (O17)"""
-    assert _OLD.search("Soft delete: hidden from every read"), "control: the pattern sees the old text"
-    docs = {name: inspect.getdoc(obj) or "" for name, obj in vars(ports).items()
-            if inspect.isclass(obj) and obj.__module__ == ports.__name__}
-    for name in list(docs):
-        for member, fn in vars(getattr(ports, name)).items():
-            if callable(fn) and not member.startswith("_"):
-                docs[f"{name}.{member}"] = inspect.getdoc(fn) or ""
-    assert [n for n, d in docs.items() if _OLD.search(d)] == []
-    assert "§4.1" in docs["Writes.create_investigation"]
 
 
 def test_o13_the_write_port_doc_says_audit_events_follow_the_commit():

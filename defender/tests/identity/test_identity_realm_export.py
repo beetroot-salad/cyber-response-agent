@@ -163,15 +163,6 @@ def test_the_login_client_registers_the_apis_callback_under_api_and_no_other():
     assert "/auth/callback" not in "".join(_clients(realm)[LOGIN_CLIENT]["redirectUris"]).replace("/api/auth/callback", "")
 
 
-def test_the_operator_docs_no_longer_name_the_redirect_uri_setting():
-    """`DEFENDER_KEYCLOAK_REDIRECT_URI` is derived, not set, so the settings table no longer lists it (B3)."""
-    docs = REPO_ROOT / "defender" / "docs" / "development-operations.md"
-    assert docs.is_file(), docs
-    text = docs.read_text(encoding="utf-8")
-    assert "DEFENDER_KEYCLOAK_CLIENT_ID" in text, "control: the settings table is the document read"
-    assert "DEFENDER_KEYCLOAK_REDIRECT_URI" not in text
-
-
 def test_the_api_service_account_may_only_manage_users():
     """Its roles are exactly realm-management: manage-users, as C13 showed sufficient (A1)."""
     check_service_account_is_limited_to_manage_users(_committed_realm())

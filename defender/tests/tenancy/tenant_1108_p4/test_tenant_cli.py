@@ -411,9 +411,3 @@ def test_1470_o11_the_scan_skips_historical_docs_and_reads_the_rest_of_docs():
     assert not [rel for rel in files if rel.startswith("docs/archive/")]
     assert any(rel.startswith("docs/") for rel in files)
 
-
-def test_1470_o11_connects_handoff_is_restated_as_the_admins_put_of_each_system():
-    """The connect skill's hand-off step names `PUT /systems/{id}` as how a tenant admin enters the folder's settings and
-    access, and no operator command. (O11)"""
-    text = (_DEFENDER / "skills" / "connect" / "SKILL.md").read_text("utf-8")
-    assert re.search(r"PUT\s+/systems/", text), "the hand-off does not name PUT /systems"

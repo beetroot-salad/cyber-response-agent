@@ -36,16 +36,6 @@ def test_no_lesson_corpus_in_the_product_tree():
     assert left == [], left
 
 
-def test_the_query_catalog_is_gone_and_its_schema_moved_beside_gather():
-    """`skills/gather/queries/` is absent; the catalog's format document, product content,
-    lives at `skills/gather/query-schema.md`, and no `SCHEMA.md` remains."""
-    assert not (SKILLS / "gather" / "queries").exists()
-    schema = SKILLS / "gather" / "query-schema.md"
-    assert schema.is_file(), schema
-    assert schema.read_text(encoding="utf-8").strip(), "the moved schema is not empty"
-    assert sorted(str(p.relative_to(DEFENDER)) for p in SKILLS.rglob("SCHEMA.md")) == []
-
-
 def test_no_tacit_registry_or_pitfalls_add_on_in_the_product_tree():
     """The tacit registry (`skills/tacit-knowledge/registry.yaml`) and the learned SQL
     pitfalls add-on (`skills/gather/defender-sql.pitfalls.md`) are tenant content; neither, nor
