@@ -3,8 +3,8 @@
 A worker with learning slots, not stopping, starts a family-less post-step for an `active` tenant with learning jobs
 once that tenant has gone `learning_check_interval` without a post-step (amendment 3: its clock is a row in the store,
 started by the tenant's first queued job, and stops while the tenant's last post-step left nothing waiting). The
-check is learning-class, is picked before a queued job, and is handed the tenant's `pending` jobs; its record is
-`<tenant id>.post-step.json`. Real database, scripted children, as `test_1344_learning_jobs`."""
+check is learning-class and is picked before a queued job; since #1487 it is handed nothing and leaves no record (the
+worker asks the store whether work still waits, `test_1487_post_step_waiting.py`). Real database, scripted children, as `test_1344_learning_jobs`."""
 from __future__ import annotations
 
 import asyncio
@@ -35,14 +35,12 @@ pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
 
 
 class CheckChild(PostStepChild):
-    """`post_step_argv` for a family-less post-step (no job): records `(None, pending, tenant)` and answers through
-    the tenant-keyed record (its script's `--job` names the file it writes, so it is handed the tenant id)."""
+    """`post_step_argv` for a family-less post-step (no job): records `(None, tenant)`. It hands over and answers
+    nothing (#1487 O7: no list, no record)."""
 
     def __call__(self, launch) -> list[str]:
         assert launch.job_id is None, "premise: this stand-in only serves family-less launches"
-        pending = sorted(launch.pending_job_ids)
-        self.handed.append((None, pending, launch.tenant_id))
-        self.files = {"{id}.post-step.json": json.dumps({"published": pending, "refused": []})}
+        self.handed.append((None, launch.tenant_id))
         write_whole(self.spec, json.dumps(self.spec_dict()))
         return [sys.executable, str(self.script), str(self.spec), "--job", launch.tenant_id,
                 "--tenant", launch.tenant_id, "--parent-pid", str(launch.parent_pid)]
@@ -53,10 +51,25 @@ def _either(follow, check):
     return lambda launch: (check if launch.job_id is None else follow)(launch)
 
 
-def _strand(dsn: str, job: str) -> None:
-    """End `job` `completed` with its findings `pending`, as a lost post-step leaves it."""
-    execute(dsn, "UPDATE jobs.learning_jobs SET status = 'completed', publish_state = 'pending', findings_count = 1, "
+def _end_completed(dsn: str, job: str) -> None:
+    """End `job` `completed` with its findings stored (`done`): a job nothing runs for any more, its tenant's clock armed
+    by its queueing."""
+    execute(dsn, "UPDATE jobs.learning_jobs SET status = 'completed', publish_state = 'done', findings_count = 1, "
                  "finished_at = %s, lease_expires_at = NULL WHERE id = %s", (NOW, job))
+
+
+def _work_waits(dsn: str, monkeypatch) -> None:
+    """Leave the store holding work the author gate would act on (one finding, the worker's threshold 1), so a post-step
+    of the tenant ends with the clock still running (Flow 3)."""
+    from defender.tests.support.learning.core._store1278 import call, finding
+
+    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
+    call(dsn, "publish_findings", T1, "run-earlier", [finding("earlier/w-b/0/0")], kind="finding")
+
+
+def _idle(dsn: str) -> bool:
+    [(idle,)] = execute(dsn, "SELECT idle FROM jobs.learning_checks WHERE tenant_id = %s", (T1,))
+    return bool(idle)
 
 
 def _tenant_dirs(root: Path, tenant: str) -> None:
@@ -81,35 +94,35 @@ def world(migrated_database: str, tmp_path: Path) -> dict:
     return {"dsn": migrated_database, "root": root, "runs": root / T1 / "runs", "tmp": tmp_path}
 
 
-async def test_a1_a_tenant_no_family_follows_is_checked_and_its_stranded_job_published(world, caplog):
-    """A stranded `pending` job and nothing queued: after the interval a family-less post-step is handed it, the worker
-    records `done` from `<tenant>.post-step.json`, and announces one `learning_post_step` for the tenant. (amendment 1, O14)"""
+async def test_a1_a_tenant_no_family_follows_is_checked_and_a_check_that_leaves_nothing_waiting_stops_its_clock(world, caplog):
+    """A job ended and nothing queued, the clock armed: after the interval a family-less post-step starts (handed
+    nothing, writing no record), one `learning_post_step` event is announced for the tenant, and, the store holding no
+    work, the worker ends the hold idle. (amendment 1, O7, Flow 3)"""
     audit = JobsAudit(caplog)
     dsn = world["dsn"]
     check = CheckChild(world["tmp"] / "check", world["runs"], dsn=dsn)
     async with job_store(dsn) as store:
         job = await queued_job(world, store, ticket="J-1")
-        _strand(dsn, job)
+        _end_completed(dsn, job)
         worker = learning_worker(world, store, job=job_child(world), post=_either(post_child(world), check),
                                  learning_check_interval=0.5, **_FAST)
-        await _serve_until(worker, lambda: job_row(dsn, job)["publish_state"] == "done", "the stranded job published")
+        await _serve_until(worker, lambda: check.handed and _idle(dsn), "the check, then an idle clock")
 
-    assert check.handed[0] == (None, [job], T1)
-    assert json.loads((world["runs"] / f"{T1}.post-step.json").read_text(encoding="utf-8")) == {
-        "published": [job], "refused": []}
+    assert check.handed[0] == (None, T1)
+    assert [p.name for p in world["runs"].iterdir() if "post-step" in p.name] == [], "the check left a record or a list"
     events = [e for e in audit.events() if e.action == "learning_post_step"]
     assert events, "no learning_post_step event"
     assert (events[0].actor, events[0].tenant_id, events[0].target) == ("system", T1, T1)
 
 
 async def test_a1_the_check_clock_starts_with_the_tenant_s_first_job(world):
-    """With an interval longer than the serve, no family-less post-step starts, so a stranded job waits for it.
+    """With an interval longer than the serve, no family-less post-step starts.
     (amendment 3: a tenant's clock starts with its first queued job, not with the worker; amendment 1)"""
     dsn = world["dsn"]
     check = CheckChild(world["tmp"] / "check", world["runs"], dsn=dsn)
     async with job_store(dsn) as store:
         job = await queued_job(world, store, ticket="J-1")
-        _strand(dsn, job)
+        _end_completed(dsn, job)
         worker = learning_worker(world, store, job=job_child(world), post=_either(post_child(world), check),
                                  learning_check_interval=600, **_FAST)
         serving = asyncio.create_task(worker.serve())
@@ -120,12 +133,13 @@ async def test_a1_the_check_clock_starts_with_the_tenant_s_first_job(world):
             await asyncio.wait_for(serving, timeout=15)
 
     assert check.handed == []
-    assert job_row(dsn, job)["publish_state"] == "pending"
 
 
-async def test_a1_a_job_s_own_post_step_restarts_its_tenant_s_clock(world):
-    """A job runs and its post-step follows at once; within the interval after it no family-less one starts. (amendment 1)"""
+async def test_a1_a_job_s_own_post_step_restarts_its_tenant_s_clock(world, monkeypatch):
+    """A job runs and its post-step follows at once; within the interval after it no family-less one starts, and with
+    work still waiting in the store one does once it passes. (amendment 1, Flow 3)"""
     dsn = world["dsn"]
+    _work_waits(dsn, monkeypatch)
     check = CheckChild(world["tmp"] / "check", world["runs"], dsn=dsn)
     follow = post_child(world)
     async with job_store(dsn) as store:
@@ -134,7 +148,7 @@ async def test_a1_a_job_s_own_post_step_restarts_its_tenant_s_clock(world):
                                  post=_either(follow, check), learning_check_interval=3.0, **_FAST)
         serving = asyncio.create_task(worker.serve())
         try:
-            await _until(lambda: job_row(dsn, job)["publish_state"] == "done", "the job's own post-step")
+            await _until(lambda: ("end", job) in follow.events(), "the job's own post-step")
             await asyncio.sleep(1.5)
             assert check.handed == [], "a family-less check followed a post-step within the interval"
             await _until(lambda: check.handed, "the family-less check once the interval passed")
@@ -142,7 +156,7 @@ async def test_a1_a_job_s_own_post_step_restarts_its_tenant_s_clock(world):
             _stop_serving(serving)
             await asyncio.wait_for(serving, timeout=15)
     assert [h[0] for h in follow.handed] == [job]
-    assert check.handed[0] == (None, [], T1), "nothing was left pending, and the check still ran the gate"
+    assert check.handed[0] == (None, T1), "work still waited, so the clock ran on and the check ran the gate"
 
 
 async def test_a1_an_overdue_check_is_picked_before_a_queued_job(world):
@@ -187,15 +201,15 @@ async def test_a1_an_overdue_check_is_picked_before_a_queued_job(world):
             release_check.touch()
             _stop_serving(serving)
             await asyncio.wait_for(serving, timeout=15)
-    assert check.handed[0] == (None, [], T1)
+    assert check.handed[0] == (None, T1)
 
 
 async def test_a1_a_worker_with_no_learning_slots_checks_nothing(world):
-    """L=0 is no learning: no family-less post-step, and a stranded job stays pending. (amendment 1)"""
+    """L=0 is no learning: no family-less post-step starts for an armed clock. (amendment 1)"""
     dsn = world["dsn"]
     async with job_store(dsn) as store:
         job = await queued_job(world, store, ticket="J-1")
-        _strand(dsn, job)
+        _end_completed(dsn, job)
         worker = _worker(world, store, job_child(world, name="inv"), slots=2, learning_check_interval=0.2, **_FAST)
         serving = asyncio.create_task(worker.serve())
         try:
@@ -203,24 +217,23 @@ async def test_a1_a_worker_with_no_learning_slots_checks_nothing(world):
         finally:
             _stop_serving(serving)
             await asyncio.wait_for(serving, timeout=15)
-    assert job_row(dsn, job)["publish_state"] == "pending"
-    assert not (world["runs"] / f"{T1}.post-step.json").exists()
+    assert [p.name for p in world["runs"].iterdir() if "post-step" in p.name] == []
 
 
 async def test_a1_a_stopping_worker_signals_its_family_less_post_step(world):
-    """The check is in the one supervision registry: a stop signals it, and its job stays pending. (amendment 1, O9)"""
+    """The check is in the one supervision registry: a stop signals it, and the job's ending is untouched. (amendment 1, O9)"""
     dsn = world["dsn"]
     mark = world["tmp"] / "check-termed"
     check = CheckChild(world["tmp"] / "check", world["runs"], dsn=dsn, term="mark", term_mark=str(mark),
                        wait_for=world["tmp"] / "never")
     async with job_store(dsn) as store:
         job = await queued_job(world, store, ticket="J-1")
-        _strand(dsn, job)
+        _end_completed(dsn, job)
         worker = learning_worker(world, store, job=job_child(world), post=_either(post_child(world), check),
                                  learning_check_interval=0.3, stop_grace=30, **_FAST)
         await _serve_until(worker, lambda: check.events(), "the family-less post-step")
     assert mark.exists(), "the family-less post-step was not told to stop"
-    assert job_row(dsn, job)["publish_state"] == "pending"
+    assert job_row(dsn, job)["status"] == "completed"
 
 
 async def test_a1_only_active_tenants_with_learning_jobs_are_checked(world):
