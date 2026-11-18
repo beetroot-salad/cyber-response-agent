@@ -515,6 +515,74 @@ def test_o3_a_recorded_pr_the_forge_answers_404_for_is_no_pr_only_when_the_repos
         assert got["phase"] == "needs_person", f"a 404 settled the batch though the listing was {listed}"
 
 
+def test_o2_a_release_that_lands_as_the_tick_closes_the_pr_wins_and_the_pr_is_reopened(scene, caplog):
+    """A person releases the batch while the tick is closing its PR for their earlier abandon request. The release is the
+    later word, so it wins: the tick's settle finds no request, and the tick undoes its own close by reopening the PR. The
+    batch is back in review with its items, and the next pass reads an open PR, not one closed with no feedback. (O2, O3;
+    #1558 review: last write wins across the database and the forge)"""
+    import json
+
+    w = scene
+    batch_id, _branch, number, writer = _parked_in_review(w, caplog, "f1")
+    _request(w, batch_id)
+    released: list[Any] = []
+
+    def release_as_the_close_arrives(request: Any) -> None:
+        if request.method == "PATCH" and json.loads(request.content).get("state") == "closed" and not released:
+            released.append(call(w.dsn, "release_batch", w.t.tenant_id, str(batch_id), actor=ACTOR))
+
+    w.t.forge.on_request = release_as_the_close_arrives
+    tick(w, writer)
+    assert released, "premise: the release landed as the close arrived"
+    assert [p["state"] for p in w.t.forge.prs if p["number"] == number] == ["open"], "the tick's close beat the release"
+    got = row(w.dsn, batch_id)
+    assert (got["phase"], got["abandon_requested_at"]) == ("in_review", None)
+    tick(w, writer)
+    assert (row(w.dsn, batch_id)["phase"], w.statuses()) == ("in_review", {"f1": "in_batch"})
+
+
+def test_o2_a_release_that_lands_as_the_tick_reads_a_pr_a_person_closed_reopens_nothing(scene, caplog):
+    """The PR was closed on the forge by a person, and the release lands while the tick reads it: the tick closed nothing,
+    so it undoes nothing; a PR a person closed stays closed. (O2, O3)"""
+    w = scene
+    batch_id, branch, number, writer = _parked_in_review(w, caplog, "f1")
+    close_on_remote(w.t.p3, branch)
+    _request(w, batch_id)
+    released: list[Any] = []
+
+    def release_as_the_pr_is_read(request: Any) -> None:
+        if request.method == "GET" and request.url.path.endswith(f"/pulls/{number}") and not released:
+            released.append(call(w.dsn, "release_batch", w.t.tenant_id, str(batch_id), actor=ACTOR))
+
+    w.t.forge.on_request = release_as_the_pr_is_read
+    tick(w, writer)
+    assert released, "premise: the release landed as the PR was read"
+    assert [p["state"] for p in w.t.forge.prs if p["number"] == number] == ["closed"]
+    assert _patches(w) == [], "the tick reopened a PR it never closed"
+
+
+def test_o3_an_abandon_another_tick_settles_while_this_one_closes_the_pr_is_not_undone(scene, caplog):
+    """Another tick settles the request while this one is closing the PR: the batch ended abandoned, so this tick's
+    refused settle undoes nothing, and the PR stays closed. (O3)"""
+    import json
+
+    w = scene
+    batch_id, _branch, number, writer = _parked_in_review(w, caplog, "f1")
+    _request(w, batch_id)
+    settled: list[Any] = []
+
+    def settle_elsewhere_as_the_close_arrives(request: Any) -> None:
+        if request.method == "PATCH" and json.loads(request.content).get("state") == "closed" and not settled:
+            settled.append(call(w.dsn, "settle_abandon", w.t.tenant_id, str(batch_id), pr_number=number,
+                                pr_state="closed", published=[], held=[]))
+
+    w.t.forge.on_request = settle_elsewhere_as_the_close_arrives
+    tick(w, writer)
+    assert settled == [True], "premise: the other settle ended the batch"
+    assert (row(w.dsn, batch_id)["phase"], row(w.dsn, batch_id)["outcome"]) == ("ended", "abandoned")
+    assert [p["state"] for p in w.t.forge.prs if p["number"] == number] == ["closed"], "a settled abandon's close was undone"
+
+
 def test_o3_a_pr_merged_in_the_gap_after_the_close_is_settled_merged_never_abandoned(scene, caplog):
     """The forge merges the PR as the loop's close arrives: the loop reads the PR again before it settles, so the batch ends merged (the cited lesson published, the uncited item waiting again, no cause), not abandoned with its items held. (O3: close first, then settle)"""
     w = scene

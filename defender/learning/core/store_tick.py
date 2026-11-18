@@ -690,8 +690,10 @@ class Tick:
                 number = int(found.number) if found is not None else None
             pr = self._recorded_pr(forge, number) if number is not None else None
             closable = b.kind != "registry"
+            closed_now = False
             if number is not None and pr is not None and pr.status == "open" and closable:
                 forge.close_pr(number)
+                closed_now = True
                 _logger.info(f"{self.label}: batch {b.id} is abandoned by a person's request: closed its PR #{number}")
                 pr = forge.pull_request(number)
         except _forge_faults() as fault:
@@ -721,7 +723,23 @@ class Tick:
         else:
             _logger.warning(f"{self.label}: batch {b.id}'s requested abandon was not settled ({seen}): the batch is no "
                             "longer parked with a request (released by a person, or settled by another tick)")
+            if closed_now and pr is not None and pr.status == "closed":
+                self._undo_close(forge, b, number)
         return bool(settled)
+
+    def _undo_close(self, forge: Any, b: Any, number: Any) -> None:
+        """This pass closed the PR for a request a person withdrew meanwhile (a release, the later word): the batch is
+        taken up again, so the close is undone. Last write wins across the database and the forge."""
+        now = next((v for v in self.store.batches(self.tenant_id) if str(v.id) == str(b.id)), None)
+        if now is None or now.phase == "ended" or now.abandon_pending:
+            return
+        try:
+            forge.reopen_pr(number)
+        except _forge_faults() as fault:
+            _logger.error(f"{self.label}: batch {b.id} was released while its PR #{number} was being closed, and the PR "
+                          f"could not be reopened ({one_line(str(fault))}): reopen it by hand")
+            return
+        _logger.warning(f"{self.label}: batch {b.id} was released while its PR #{number} was being closed: reopened it")
 
     @staticmethod
     def _recorded_pr(forge: Any, number: int) -> Any | None:

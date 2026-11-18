@@ -588,8 +588,11 @@ class ForgeHTTP:
             found = [row for row in rows if str(row["number"]) == parts[2]]
             if not found:
                 return httpx.Response(404, json={"message": "pull request does not exist"})
-            if json.loads(request.content).get("state") == "closed" and found[0]["state"] == "open":
+            wanted = json.loads(request.content).get("state")
+            if wanted == "closed" and found[0]["state"] == "open":
                 found[0]["state"] = "closed"
+            elif wanted == "open" and found[0]["state"] == "closed" and not found[0].get("merged"):
+                found[0]["state"] = "open"  # Forgejo reopens a PR closed unmerged; a merged one stays merged
             if self.remote is not None:
                 _save_pulls(self.remote, rows)
             return httpx.Response(201, json=found[0])
