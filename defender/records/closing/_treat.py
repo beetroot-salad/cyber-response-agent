@@ -8,8 +8,9 @@ builder measure the same thing. In order:
 3. whitespace runs collapse to one space, and the ends are trimmed;
 4. links are defanged, never removed: a scheme URL's scheme becomes `hxxp`/`hxxps`/`fxp` and
    every dot of its authority `[.]`; a dotted run that holds a host-shaped token (a whole-label
-   sub-run ending in an alphabetic label of two or more letters) or an IPv4 address gets `[.]`
-   for every dot;
+   sub-run ending in a label of two or more letters-or-marks, or in an `xn--` label) or an IPv4
+   address gets `[.]` for every dot. A label is letters, digits, `-` and Unicode marks
+   (category M), so a script whose words carry vowel signs (`example.भारत`) still forms one;
 5. the bound: a cut at the last space before it, else a hard cut keeping `bound - 1`
    characters, backed off to the start of a raw dotted run whose defanging the cut would change.
    The ellipsis counts inside the bound and a cut never falls inside `[.]`.
@@ -27,18 +28,9 @@ _SPACE_LIKE = frozenset("\t\n\x0b\x0c\r\x85\x1c\x1d\x1e\x1f")
 #: The dot set, each member defanged to `[.]`.
 DOTS = ".。．｡"
 _DEFANGED_DOT = "[.]"
-#: A label character: a Unicode letter or digit, or `-`.
-_LABEL_CHAR = r"(?:[^\W_]|-)"
-#: A stretch of label and dot-set characters: where dotted runs (labels joined by single
-#: dot-set characters, two labels or more) are found. A single character class repeated, so a
-#: search over it is linear, where a pattern for the run itself backtracks over every start of a
-#: long space-free label (quadratic).
-_SEGMENT = re.compile(rf"(?:{_LABEL_CHAR}|[{DOTS}])+")
-#: One label or dot-set character.
-_SEGMENT_CHAR = re.compile(rf"{_LABEL_CHAR}|[{DOTS}]")
 _DOT_SPLIT = re.compile(f"[{DOTS}]")
-#: An alphabetic label of two or more letters: what a host-shaped token ends in.
-_ALPHABETIC_LABEL = re.compile(r"[^\W\d_]{2,}")
+#: The ASCII-compatible prefix of an internationalized label (punycode, RFC 3492).
+_PUNYCODE_PREFIX = "xn--"
 #: Four 1-3 digit groups joined by dot-set characters, not inside a longer digit string.
 _IPV4 = re.compile(rf"(?<!\d)\d{{1,3}}(?:[{DOTS}]\d{{1,3}}){{3}}(?!\d)")
 #: A scheme preceded by a non-letter or the start, matched case-insensitively.
@@ -84,16 +76,54 @@ def _defang(text: str) -> str:
     return "".join(_DEFANGED_DOT if i in marked else ch for i, ch in enumerate(chars))
 
 
+def _is_mark(ch: str) -> bool:
+    return unicodedata.category(ch).startswith("M")
+
+
+def _is_label_char(ch: str) -> bool:
+    """A Unicode letter or digit (`str.isalnum`, what `[^\\W_]` matches), `-`, or a mark."""
+    return ch.isalnum() or ch == "-" or _is_mark(ch)
+
+
+def _is_segment_char(ch: str) -> bool:
+    return ch in DOTS or _is_label_char(ch)
+
+
+def _is_host_label(label: str) -> bool:
+    """What a host-shaped token ends in: two or more letters-or-marks (a letter being what
+    `[^\\W\\d_]` matches), or an `xn--` label with something after the prefix."""
+    if label[:len(_PUNYCODE_PREFIX)].lower() == _PUNYCODE_PREFIX:
+        return len(label) > len(_PUNYCODE_PREFIX)
+    return len(label) >= 2 and all((ch.isalnum() and not ch.isdecimal()) or _is_mark(ch) for ch in label)
+
+
+def _label_stretches(text: str) -> list[tuple[int, str]]:
+    """Each maximal stretch of label and dot-set characters, with where it starts: where dotted
+    runs are found. One pass over the characters, where a pattern for the run itself backtracks
+    over every start of a long space-free label (quadratic)."""
+    found: list[tuple[int, str]] = []
+    start = None
+    for i, ch in enumerate(text):
+        if _is_segment_char(ch):
+            if start is None:
+                start = i
+        elif start is not None:
+            found.append((start, text[start:i]))
+            start = None
+    if start is not None:
+        found.append((start, text[start:]))
+    return found
+
+
 def _dotted_runs(text: str) -> list[tuple[int, int]]:
     """The `(start, end)` of every dotted run in `text`, in order: maximal sequences of two or
     more non-empty labels joined by single dot-set characters (what a leftmost-longest search for
     `label (dot label)+` finds), in one linear pass. A doubled or end dot ends a run."""
     runs: list[tuple[int, int]] = []
-    for segment in _SEGMENT.finditer(text):
-        position = segment.start()
+    for position, segment in _label_stretches(text):
         first = last = position
         labels = 0
-        for label in _DOT_SPLIT.split(segment.group()):
+        for label in _DOT_SPLIT.split(segment):
             if label:
                 if labels == 0:
                     first = position
@@ -113,7 +143,7 @@ def _trailing_run_start(text: str) -> int | None:
     """Where the trailing stretch of label and dot-set characters begins, or `None` if `text`
     does not end in one."""
     start = len(text)
-    while start > 0 and _SEGMENT_CHAR.match(text, start - 1):
+    while start > 0 and _is_segment_char(text[start - 1]):
         start -= 1
     return start if start < len(text) else None
 
@@ -125,10 +155,10 @@ def _already_defanged(text: str, i: int) -> bool:
 
 def _is_host_or_address(run: str) -> bool:
     """A dotted run whose defanging is due: one holding an IPv4 address, or a whole-label
-    sub-run ending in an alphabetic label of two or more letters (any label after the first)."""
+    sub-run ending in a host label (any label after the first)."""
     if _IPV4.search(run):
         return True
-    return any(_ALPHABETIC_LABEL.fullmatch(label) for label in _DOT_SPLIT.split(run)[1:])
+    return any(_is_host_label(label) for label in _DOT_SPLIT.split(run)[1:])
 
 
 def _cut_to_bound(whole: str, bound: int) -> str:
