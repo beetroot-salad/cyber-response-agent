@@ -1221,7 +1221,7 @@ def judged_episode(tmp_path: Path, *, doc: dict | None = None,
     base recording, every world archived under `worlds/<X>/` (`J.archived_judge_world`), the
     world ledgers with the query-table rows they answered (`write_call_table`), each planted
     world's oracle store directory, and pre-flight's outcome record (`outcome=None` writes
-    none)."""
+    none). Each world's arm closes with the disposition its manifest declares (`J.closing_plan`, #1534)."""
     ep = episode_v2(tmp_path, doc=doc, root=root, episode_id=episode_id, base_rows=[
         captured("idp", "query", query_params("user:alice"),
                  {"rows": [{"user": "alice", "event_id": "e-100", "action": "logon"}]})])
@@ -1246,6 +1246,7 @@ def judged_episode(tmp_path: Path, *, doc: dict | None = None,
         outcome_record(ep, outcome)
     if labels:
         T.plant_roster(ep)
+        J.closing_plan(ep, tmp_path, {label: {"disposition": declared.get(label, "malicious")} for label in labels})
     return ep
 
 
