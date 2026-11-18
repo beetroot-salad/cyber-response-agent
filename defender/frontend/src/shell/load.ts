@@ -60,17 +60,21 @@ export interface Load {
 
 const GET: RequestInit = { credentials: "same-origin", headers: { Accept: "application/json" }, cache: "no-store" };
 
-function withReturn(base: string, target: string | null): string {
-  return target === null ? base : `${base}${base.includes("?") ? "&" : "?"}return=${encodeURIComponent(target)}`;
+/** `path`, then a query of the pairs whose value is given, each name and value escaped: the one way this module writes a
+ * query (a read's parameters, the failed screen's reason, the sign-in's `return` values). */
+function address(path: string, pairs: readonly (readonly [string, unknown])[]): string {
+  const query = pairs
+    .filter(([, value]) => value !== undefined && value !== null)
+    .map(([name, value]) => `${encodeURIComponent(name)}=${encodeURIComponent(String(value))}`)
+    .join("&");
+  return query === "" ? path : `${path}?${query}`;
 }
 
 /** The request path of a read: each `{name}` of the OpenAPI key filled (escaped), then the query. */
 function addressOf(key: string, params: unknown): string {
   const { path = {}, query = {} } = (params ?? {}) as { path?: Record<string, unknown>; query?: Record<string, unknown> };
   const filled = key.replace(/\{([^}]+)\}/g, (_, name: string) => encodeURIComponent(String(path[name])));
-  const search = new URLSearchParams();
-  for (const [name, value] of Object.entries(query)) if (value !== undefined && value !== null) search.append(name, String(value));
-  return search.size === 0 ? filled : `${filled}?${search.toString()}`;
+  return address(filled, Object.entries(query));
 }
 
 /** F3: a cookie session is always a person, so `/api/me` is narrowed once, on the generated union's own `kind`. */
@@ -92,7 +96,7 @@ export function makeLoad(options: LoadOptions): Load {
   }
 
   function toFailedScreen(reason: string): void {
-    leave(() => effects.replace(withReturn(`${literalAddress("sign-in-failed")}?reason=${reason}`, target)));
+    leave(() => effects.replace(address(literalAddress("sign-in-failed"), [["reason", reason], ["return", target]])));
   }
 
   /** A 401: carry out B1's decision. The load leaves, so a second 401 answered later is gone (point 4). */
@@ -100,7 +104,7 @@ export function makeLoad(options: LoadOptions): Load {
     const decision: Decision = decideUnauthorized({ taken, byHistory, source });
     if (decision.kind === "failed") return toFailedScreen(decision.reason);
     if (!effects.record(target, decision.again)) return toFailedScreen("storage-unavailable");
-    leave(() => effects.assign(withReturn("/api/auth/login", target)));
+    leave(() => effects.assign(address("/api/auth/login", [["return", target]])));
   }
 
   /** The one network path: gone (nothing more), a network failure, or the answer, with a 401 already handled. */
@@ -184,10 +188,9 @@ export function makeLoad(options: LoadOptions): Load {
     leave,
     signIn(returns) {
       // The values are handed to the sign-in route unjudged: the API judges them (P2).
-      const query = returns.map((value) => `return=${encodeURIComponent(value)}`).join("&");
       return leave(() => {
         effects.record(returns[0] ?? null, false); // when storage allows; a gone load records nothing
-        effects.assign(`/api/auth/login${query === "" ? "" : `?${query}`}`);
+        effects.assign(address("/api/auth/login", returns.map((value) => ["return", value] as const)));
       });
     },
     supersede() {
