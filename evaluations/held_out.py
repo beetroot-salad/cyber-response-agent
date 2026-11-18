@@ -128,15 +128,6 @@ def closing_of(run_dir: Path) -> Any:
     return closing.for_run_dir(run_dir)
 
 
-def predicted_disposition(run_dir: Path) -> str | None:
-    """This run's predicted disposition: its closing record's, or `None` when there is none to
-    read. Degrades rather than raising so one broken run does not stop scoring the rest."""
-    from defender.records import closing
-
-    found = closing_of(run_dir)
-    return found.record.disposition if isinstance(found, closing.Record) else None
-
-
 @dataclass(frozen=True)
 class HeldOutAlert:
     slug: str
@@ -386,12 +377,15 @@ def _score_run(fx: HeldOutAlert, run_dir: Path, true_disp: str,
         return
     from defender.records import closing
 
-    pred = predicted_disposition(run_dir)
+    # One lookup: the prediction (its closing record's disposition, `None` when there is none to
+    # read, so one broken run does not stop scoring the rest) and, when there is none, why, both
+    # come from it; a second lookup could see a fault healed and call it a run that did not close.
+    found = closing_of(run_dir)
+    pred = found.record.disposition if isinstance(found, closing.Record) else None
     verdict = "ok" if pred == true_disp else "wrong"
     if pred is None:
         # Why there is none: the fault's fixed wording only (never its detail, which may name
         # a path), or that the run did not close.
-        found = closing_of(run_dir)
         failures.append((fx.slug, found.wording if isinstance(found, closing.CouldNotLook) else NO_CLOSING_RECORD))
     by_class[true_disp].append((fx.slug, pred, verdict))
 
