@@ -172,9 +172,10 @@ def test_1534_a_source_whose_record_could_not_be_looked_at_refuses_the_job_befor
                    source_closing={"disposition": "benign"}, source_fault=fault,
                    oracle=S.oracle(then=S.submit(_BASE, S.EMPTY_CLAIM)), verifier=S.passing_verifier())
     assert run.rc != 0
-    assert C.FAULT_WORDING[kind] in run.message, run.message
+    assert run.message.rstrip().endswith(C.FAULT_WORDING[kind]), (
+        f"the refusal is not the kind's wording alone (the fault's detail follows it): {run.message!r}")
     assert agent.calls == 0, "the questioner was called although the source's record could not be looked at"
-    assert str(tmp_path) not in run.message, "the fault's detail (a path) reached the refusal"
+    assert str(tmp_path.parent) not in run.message, "the fault's detail (a path) reached the refusal"
 
 
 def test_947_un_nameable_episode_token_is_refused_before_the_questioner_runs(tmp_path):

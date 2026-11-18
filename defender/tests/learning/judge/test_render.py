@@ -133,12 +133,12 @@ def test_921_render_builds_the_input_from_the_archive_the_runs_base_and_the_comm
     git_show = J.FakeGitShow(bodies={("deadbee", "defender/lessons/L1.md"): "# L1 body\n"})
 
     with_dirs = J.render_at(ep, "b", git_show=git_show)
-    # The run's own `report.md` is no input (#1534): the closing record is read through the roster.
-    (decoy / "report.md").unlink()  # lint-run-records: ok — the retired report file is removed to show it is no input
+    # The sibling run folder is no input: the archive is, and the verdict is its arm's closing record (#1534).
+    (decoy / "investigation.md").write_text("# a document the render must not read\n", encoding="utf-8")
     without = J.render_at(ep, "b", git_show=git_show)
 
     assert with_dirs == without, (
-        "the rendered input changed when the sibling run's report file was removed")
+        "the rendered input changed when the sibling run folder's own document changed")
     assert "# L1 body" in _lessons_view(without)
 
 

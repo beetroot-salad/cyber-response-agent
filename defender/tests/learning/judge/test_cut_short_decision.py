@@ -83,22 +83,19 @@ def test_an_exit_class_the_table_does_not_name_takes_the_report_driven_fallback(
 
 def test_a_run_with_no_exit_class_and_no_closing_record_records_that_it_never_closed_and_proposes_nothing(
         tmp_path):
-    """A run with no record and no exit class posts the never-closed sentence and proposes nothing; a stray `report.md` changes nothing. (V-READERS)"""
+    """A run with no record and no exit class posts the never-closed sentence and proposes nothing. (V-READERS)"""
     from defender.tests.support.runtime.engine._spec767 import NEVER_CLOSED
 
-    for name, write in (("absent", None), ("stray-file-of-the-old-shape", S.report_text("malicious"))):
-        run_dir = S.closed_run_dir(tmp_path / name, report=False)
-        if write is not None:
-            (run_dir / "report.md").write_text(write, encoding="utf-8")
-        fake = S.record_ticket(run_dir, truncated_by=None)
-        assert fake.transitions == [], f"{name}: a run with no record still closed the ticket"
-        assert len(fake.records) == 1, f"{name}: a run with no record left the ticket in silence"
-        assert NEVER_CLOSED in fake.records[0].text(), (
-            f"{name}: the record is not the never-closed sentence: {fake.records[0].text()!r}")
-        for word in S.sym("_vocab", "DISPOSITION_VALUES"):
-            assert word not in fake.records[0].text().lower(), (
-                f"{name}: a run with no record names a disposition ({word!r})")
-        assert (S.receipt(run_dir) or {}).get("ok") is True
+    run_dir = S.closed_run_dir(tmp_path / "absent", report=False)
+    fake = S.record_ticket(run_dir, truncated_by=None)
+    assert fake.transitions == [], "a run with no record still closed the ticket"
+    assert len(fake.records) == 1, "a run with no record left the ticket in silence"
+    assert NEVER_CLOSED in fake.records[0].text(), (
+        f"the record is not the never-closed sentence: {fake.records[0].text()!r}")
+    for word in S.sym("_vocab", "DISPOSITION_VALUES"):
+        assert word not in fake.records[0].text().lower(), (
+            f"a run with no record names a disposition ({word!r})")
+    assert (S.receipt(run_dir) or {}).get("ok") is True
 
 
 # the exit class and a genuine model verdict, together
@@ -137,7 +134,7 @@ def test_a_forced_close_set_exit_whose_own_forced_close_failed_leaves_the_ticket
         decided = S.closed_run_dir(tmp_path / f"{exit_class}-decided", report=False)
         both = S.record_ticket(decided, truncated_by=exit_class, closed_before_cut=True)
         assert both.records == [], (
-            f"{exit_class}: a run that had closed but left no report.md still recorded a verdict")
+            f"{exit_class}: a run that had closed but left no closing record still recorded a verdict")
         assert len(both.notes) == 1, (
             f"{exit_class}: `closed_before_cut=True` swallowed the escalation of a failed "
             "forced close")
@@ -171,7 +168,6 @@ def test_no_planted_file_under_the_run_dir_changes_which_comment_record_case_tic
         clean = S.closed_run_dir(tmp_path / f"clean-{exit_class}", disposition="unresolved")
         salted = S.closed_run_dir(tmp_path / f"salted-{exit_class}", disposition="unresolved")
         S.salt_run_dir(salted, value="request-limit")
-        (salted / "report.md").write_text(S.report_text("unresolved"), encoding="utf-8")
         a = S.record_ticket(clean, truncated_by=exit_class)
         b = S.record_ticket(salted, truncated_by=exit_class)
         assert [(c.path.split("/")[-1], c.body) for c in a.calls] == \
@@ -181,6 +177,10 @@ def test_no_planted_file_under_the_run_dir_changes_which_comment_record_case_tic
 
 def test_a_forged_session_store_pointer_file_is_never_consulted_by_the_ticket_lane_for_any_exit_class(
         tmp_path):
+    """A pointer-shaped file inside the box-writable run folder is no input; the host-written sidecar is, and a damaged
+    one is a fault (no comment, an `error` receipt in the kind's words), never a reason to post. (V-LOOK, C10, OD8)"""
+    from defender.tests.support.storage import _readers1534 as R
+
     in_folder_name = "session_store_pointer.json"
 
     def addresses(run_dir: Path) -> dict[str, Path]:
@@ -194,26 +194,38 @@ def test_a_forged_session_store_pointer_file_is_never_consulted_by_the_ticket_la
         "not-json": "{{{ not json at all",
         "empty": "",
     }
+    posted = []
     for exit_class in (*S.vocabulary(), None):
         control = S.record_ticket(
             S.closed_run_dir(tmp_path / f"control-{exit_class}", disposition="unresolved"),
             truncated_by=exit_class)
-        for where in ("in-folder", "sidecar"):
-            for name, content in forgeries.items():
-                run_dir = S.closed_run_dir(tmp_path / f"{where}-{name}-{exit_class}",
-                                           disposition="unresolved")
-                addresses(run_dir)[where].write_text(content, encoding="utf-8")
-                fake = S.record_ticket(run_dir, truncated_by=exit_class)
-                assert [c.path.split("/")[-1] for c in fake.calls] == \
-                       [c.path.split("/")[-1] for c in control.calls], (
-                    f"{exit_class}/{where}/{name}: a forged case pointer moved the ticket lane")
+        paths = [c.path.split("/")[-1] for c in control.calls]
+        posted.append(bool(paths))
+        for name, content in forgeries.items():
+            run_dir = S.closed_run_dir(tmp_path / f"in-folder-{name}-{exit_class}", disposition="unresolved")
+            addresses(run_dir)["in-folder"].write_text(content, encoding="utf-8")
+            fake = S.record_ticket(run_dir, truncated_by=exit_class)
+            assert [c.path.split("/")[-1] for c in fake.calls] == paths, (
+                f"{exit_class}/in-folder/{name}: a forged case pointer in the run folder moved the ticket lane")
+
+            damaged = S.closed_run_dir(tmp_path / f"sidecar-{name}-{exit_class}", disposition="unresolved")
+            addresses(damaged)["sidecar"].write_text(content, encoding="utf-8")
+            fake = S.record_ticket(damaged, truncated_by=exit_class)
+            seen = [c.path.split("/")[-1] for c in fake.calls]
+            if seen != paths:  # the lane looked the record up: a fault posts nothing
+                assert seen == [], f"{exit_class}/sidecar/{name}: a damaged sidecar still posted {seen}"
+                receipt = json.dumps(S.receipt(damaged))
+                assert R.names_only("pointer-unreadable", receipt), (
+                    f"{exit_class}/sidecar/{name}: the receipt does not carry the fault kind's wording: {receipt}")
+    assert any(posted), "positive control: no exit class posted a comment for its control run"
 
     for where in ("in-folder", "sidecar"):
         dangling = S.closed_run_dir(tmp_path / f"dangling-{where}", disposition="unresolved")
+        addresses(dangling)[where].unlink(missing_ok=True)  # the planted sidecar is the one to dangle
         addresses(dangling)[where].symlink_to(tmp_path / "nowhere.json")
-        assert len(S.record_ticket(dangling, truncated_by="request-limit").records) == 1, (
-            f"a dangling symlink at the case pointer's {where} address stopped the ticket lane, "
-            "so something is reading it")
+        records = len(S.record_ticket(dangling, truncated_by="request-limit").records)
+        assert records == (1 if where == "in-folder" else 0), (
+            f"a dangling symlink at the case pointer's {where} address: {records} record(s)")
 
 
 def test_a_forged_ticket_write_receipt_claiming_prior_closure_does_not_suppress_the_real_record_or_note_call(
@@ -467,7 +479,6 @@ def test_no_file_a_box_can_write_is_an_input_to_was_this_run_cut_short(tmp_path)
         S.closed_run_dir(tmp_path / "ticket-clean", disposition="benign"), truncated_by=None)
     salted = S.closed_run_dir(tmp_path / "ticket-salted", disposition="benign")
     S.salt_run_dir(salted, value="aborted")
-    (salted / "report.md").write_text(S.report_text("benign"), encoding="utf-8")
     forged_ticket = S.record_ticket(salted, truncated_by=None)
     assert [(c.path.split("/")[-1], c.body) for c in forged_ticket.calls] == \
            [(c.path.split("/")[-1], c.body) for c in control_ticket.calls], (
@@ -567,7 +578,6 @@ def test_no_box_writable_files_content_is_ever_fed_as_the_value_argument_to_the_
     clean_run = S.closed_run_dir(tmp_path / "ticket-clean", disposition="unresolved")
     forged_run = S.closed_run_dir(tmp_path / "ticket-forged", disposition="unresolved")
     S.salt_run_dir(forged_run, value="request-limit")
-    (forged_run / "report.md").write_text(S.report_text("unresolved"), encoding="utf-8")
     a = S.record_ticket(clean_run, truncated_by="aborted")
     b = S.record_ticket(forged_run, truncated_by="aborted")
     assert [c.path.split("/")[-1] for c in a.calls] == [c.path.split("/")[-1] for c in b.calls]

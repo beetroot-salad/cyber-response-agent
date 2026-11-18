@@ -1,4 +1,4 @@
-"""#947: the archive, its two derived readers, and where a sibling's artifacts may live."""
+"""#947: the archive, its derived reader, and where a sibling's artifacts may live."""
 from __future__ import annotations
 from defender.tests.support.tenancy._mapping1345 import planted_mapping
 
@@ -128,7 +128,7 @@ def test_947_archive_reads_the_scrub_verdict_at_its_sidecar_path(tmp_path):
 
 
 def test_947_readers_compute_from_the_episode_dir_with_run_dirs_removed(tmp_path):
-    """No run-dir pointer is archived, and both derived readers answer identically once the arms
+    """No run-dir pointer is archived, and the derived reader answers identically once the arms
     they were archived from are gone."""
     import shutil
 
@@ -143,14 +143,14 @@ def test_947_readers_compute_from_the_episode_dir_with_run_dirs_removed(tmp_path
     (ep / "served" / f"{T.fixture_world_id('b')}.jsonl").write_text(
         json.dumps(T.captured_row(key="k1", payload={"hits": [{"_id": "planted"}]})) + "\n",
         encoding="utf-8")
-    before = (J.through_view(ep, _episode().delta_o), J.through_view(ep, _episode().verdicts))
+    before = J.through_view(ep, _episode().delta_o)
     for d in dirs.values():
         shutil.rmtree(d)
-    assert (J.through_view(ep, _episode().delta_o), J.through_view(ep, _episode().verdicts)) == before
+    assert J.through_view(ep, _episode().delta_o) == before
 
 
 def test_947_no_episode_reader_opens_a_siblings_run_dir(tmp_path):
-    """Neither derived reader's source names the runs base, and both answer from the episode
+    """The derived reader's source does not name the runs base, and it answers from the episode
     dir alone."""
     base, src = location_path(T.runs_base)(tmp_path)
     ep = _archived(tmp_path)
@@ -159,11 +159,10 @@ def test_947_no_episode_reader_opens_a_siblings_run_dir(tmp_path):
         (T.DEFENDER / "learning" / "branch" / "episode.py").read_text(encoding="utf-8"))
     assert "runs_base" not in src_text
     assert "resolve_runs_base" not in src_text
-    assert J.through_view(ep, _episode().verdicts)
     assert J.through_view(ep, _episode().delta_o) is not None
 
 
-# the two derived readers
+# the derived reader
 
 
 def test_947_delta_o_returns_class_per_shared_correlation_key(tmp_path):
@@ -189,35 +188,15 @@ def test_947_delta_o_subtracts_the_controls_drift_keys(tmp_path):
     assert "k1" not in out.get("b", {})
 
 
-def test_947_verdicts_returns_disposition_per_world(tmp_path):
-    """The per-world reader returns one disposition per archived world, read from that world's
-    own archived report."""
-    ep = _accepted(tmp_path)
-    T.archived_world(ep, "a", disposition="benign")
-    T.archived_world(ep, "b", disposition="malicious")
-    assert J.through_view(ep, _episode().verdicts) == {"a": "benign", "b": "malicious"}
-
-
-def test_947_verdicts_refuses_disposition_outside_enum(tmp_path):
-    """The per-world reader inherits the shipped disposition membership gate rather than
-    re-implementing it: an archived report naming a value outside that vocabulary refuses."""
-    ep = _accepted(tmp_path)
-    T.archived_world(ep, "a", disposition="probably-bad")
-    with pytest.raises(T.refusals()) as bad:
-        J.through_view(ep, _episode().verdicts)
-    assert "probably-bad" in str(bad.value)
-
-
-def test_947_readers_over_an_episode_with_no_archived_worlds_return_empty(tmp_path):
+def test_947_the_derived_reader_over_an_episode_with_no_archived_worlds_returns_empty(tmp_path):
     ep = _accepted(tmp_path)
     (ep / "worlds").mkdir(exist_ok=True)
-    assert J.through_view(ep, _episode().verdicts) == {}
     assert J.through_view(ep, _episode().delta_o) == {}
 
 
 @pytest.mark.parametrize("outcome", ["unusable", "refused", None])
-def test_947_the_derived_readers_refuse_to_compare_an_incomplete_episode(tmp_path, outcome):
-    """The derived readers refuse an episode whose recorded outcome is not `accepted`, naming the
+def test_947_the_derived_reader_refuses_to_compare_an_incomplete_episode(tmp_path, outcome):
+    """The derived reader refuses an episode whose recorded outcome is not `accepted`, naming the
     outcome (or its absence)."""
     if outcome is None:
         ep = T.episode(tmp_path)
@@ -225,10 +204,9 @@ def test_947_the_derived_readers_refuse_to_compare_an_incomplete_episode(tmp_pat
         ep = _accepted(tmp_path, outcome=outcome, reason="two worlds failed calibration")
     for w in ("a", "b"):
         T.archived_world(ep, w)
-    for reader in (_episode().delta_o, _episode().verdicts):
-        with pytest.raises(T.refusals()) as bad:
-            J.through_view(ep, reader)
-        assert (outcome or "no outcome record") in str(bad.value), reader.__name__
+    with pytest.raises(T.refusals()) as bad:
+        J.through_view(ep, _episode().delta_o)
+    assert (outcome or "no outcome record") in str(bad.value)
 
 
 # containment, and where the episodes root lives
