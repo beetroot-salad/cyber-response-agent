@@ -292,8 +292,16 @@ def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, 
     # and the post-run step surfaces it rather than swallowing it to stderr
     with pytest.raises(run_common.VisualizeFailed) as raised:
         _visualize(run_dir)
-    assert str(run_dir) in str(raised.value), (
-        "the surfaced failure must name the run dir it could not render")
+    if breakage == "missing-pointer":
+        assert str(run_dir) in str(raised.value), (
+            "the surfaced failure must name the run dir it could not render")
+    else:
+        # #1534 OD19: the closing-record lookup reads `database-missing`, and the surfaced failure
+        # carries only that kind's fixed wording, never the detail that names the store path.
+        from defender.records import closing
+
+        assert closing.FAULT_WORDING["database-missing"] in str(raised.value), str(raised.value)
+        assert str(body["store_path"]) not in str(raised.value), str(raised.value)
     assert not (run_dir / "runtime.html").is_file(), (
         "a failed render must not leave a page behind that a reader would trust")
 
