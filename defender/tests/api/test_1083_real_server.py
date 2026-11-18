@@ -20,6 +20,7 @@ import anyio
 import httpx
 import pytest
 
+from defender._git import REPO_ROOT
 from defender.tests.support.api._openbao1470 import ScriptedOpenBao
 from defender.tests.support.api._server1083 import (
     A,
@@ -564,6 +565,17 @@ async def test_o8_the_real_servers_openapi_declares_the_501_on_exactly_the_lesso
                  if "501" in op["responses"]}
     assert declaring == unbacked, declaring ^ unbacked
     assert "not yet real" not in document["info"].get("summary", "")
+
+
+@pytest.mark.postgres
+async def test_1540_f3_the_committed_api_document_is_what_the_real_server_serves(served):
+    """`defender/api/openapi.json`, which the frontend generates its types from, equals the document the app serves when
+    the real server composes it over its real dependencies: an API change that alters a shape fails here until the
+    document is regenerated (`python -m defender.api.openapi_document`). (#1540 F3, grounding C3)"""
+    committed = json.loads((REPO_ROOT / "defender" / "api" / "openapi.json").read_text(encoding="utf-8"))
+    served_document = (await served.client.get("/api/openapi.json")).json()
+    assert committed == served_document, (
+        "defender/api/openapi.json is stale: run `python -m defender.api.openapi_document` and commit the result")
 
 
 @pytest.mark.postgres
