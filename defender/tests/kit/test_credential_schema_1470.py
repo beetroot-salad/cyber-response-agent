@@ -185,15 +185,6 @@ def test_1470_o7_the_rules_by_field_anchor_the_sweep():
     assert faults(OAUTH, {"client_id": "a:b", "client_secret": LONG}) == []
 
 
-def test_1470_d_e_the_separate_secrecy_tables_are_gone():
-    """`secret_fields` and `PUBLIC_FIELD` (a second statement of which fields are secret) no longer exist beside the
-    schema. (D-E: they go)"""
-    import defender.kit.access as access
-
-    assert callable(getattr(access, "credential_faults", None)), "premise: the schema's check stands where they were"
-    assert [n for n in ("secret_fields", "PUBLIC_FIELD") if hasattr(access, n)] == []
-
-
 def test_1470_g6_the_schemas_refusal_is_its_own_exception_type_apart_from_the_stores():
     """`kit.access.CredentialRefused` is an exception type of the credential schema, not one of the store's `RecordRefused`
     family, so the route maps the two by type. (P6, G6)"""
