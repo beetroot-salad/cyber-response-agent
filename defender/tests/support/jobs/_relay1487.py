@@ -128,9 +128,13 @@ class Recorder:
 def adopt_scene(t: Any, dsn: str, monkeypatch: Any) -> Any:
     """A helper scene over a tenant a case already published and registered active in `dsn` (the tick tests' `world`),
     for a `PostStepHelper`: the worker's claim in the environment, the tenant's runs folder. What `helper_scene` builds
-    around a tenant of its own, without making another."""
+    around a tenant of its own, without making another. The helper's job socket lives under the tenant's data root, so a
+    root that is not from the short-root provider is refused at once (`require_short_root`), before anything starts."""
     from defender.box import CLAIM_ENV
     from defender.tests.support.jobs._job_helper import HelperScene
+    from defender.tests.support.jobs._short_root import require_short_root
+
+    require_short_root(t.data_root)
 
     claim = uuid.uuid4().hex
     monkeypatch.setenv(CLAIM_ENV, claim)  # the worker hands each child its claim (`_worker._spawn`)
@@ -182,7 +186,8 @@ class PostStepHelper:
         return self.container(ask).tick_store()
 
     def requests(self) -> list[str]:
-        """The store requests the helper answered so far (counted in the helper), from every process that asked."""
+        """The store requests the helper received so far (counted in the helper at dispatch, refused ones included), from
+        every process that asked."""
         return self._process.requests()
 
     def signal(self) -> None:

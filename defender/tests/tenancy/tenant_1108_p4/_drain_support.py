@@ -232,7 +232,7 @@ def author_drain(t: Any, paths: Any, *, trigger: Any, box: BoxSpy, mint: bool = 
 #: over them.
 TICK_IMPLS = ("adapter", "port")
 
-#: The lanes whose tick the port serves: the author lane's (the lead lane's port is not in #1487, Amendment r5.1 item 12).
+#: The lanes whose tick the port serves: the author lane's (the lead lane's port is not in #1487, design r5 "Not here", #1546).
 PORT_LANES = ("author",)
 
 #: Where the running case's `TickImpl` is carried: on its tenant (`PublishedTenant.carried`), so the choice belongs to the
@@ -254,14 +254,14 @@ class TickImpl:
     (a real post-step helper process over the case's tenant and database, started at the author tick's first use so it reads
     the settings the case set, one per tick, closed when the tick ends; `prestart` starts it now, for a tick that runs in a
     forked child). The port serves the author lane only, as the helper binds it from the claim: another lane's tick runs on
-    the adapter and starts no helper. Each helper's answered requests are counted on the helper's side (a tick in a forked
+    the adapter and starts no helper. Each helper's received requests are counted on the helper's side (a tick in a forked
     child counts) when it is closed: `unreached` is the self-check that a port case reached the port."""
 
     def __init__(self, name: str, world: Any, scratch: Path, monkeypatch: Any) -> None:
         self.name, self.world, self.scratch, self.monkeypatch = name, world, scratch, monkeypatch
         self._ready: Any = None
         self._open: list[Any] = []
-        self.answered: list[list[str]] = []
+        self.received: list[list[str]] = []
 
     def _start(self) -> Any:
         from defender.tests.support.jobs._relay1487 import PostStepHelper, adopt_scene
@@ -284,10 +284,10 @@ class TickImpl:
         return self._start(), True
 
     def release(self, helper: Any) -> None:
-        """Count what `helper` answered, then close it."""
+        """Count what `helper` received, then close it."""
         self._open.remove(helper)
         try:
-            self.answered.append(helper.requests())
+            self.received.append(helper.requests())
         finally:
             helper.close()
 
@@ -296,15 +296,15 @@ class TickImpl:
             self.release(self._open[0])
 
     def unreached(self) -> str | None:
-        """For a port case that ran to its end: why the port was not exercised (no helper started, or one that answered no
+        """For a port case that ran to its end: why the port was not exercised (no helper started, or one that received no
         store request), else None."""
         if self.name != "port":
             return None
-        if not self.answered:
+        if not self.received:
             return "the case ran over the port but started no helper: its tick never reached the port"
-        silent = [i for i, names in enumerate(self.answered) if not names]
+        silent = [i for i, names in enumerate(self.received) if not names]
         if silent:
-            return f"{len(silent)} of {len(self.answered)} helper(s) the case started answered no store request"
+            return f"{len(silent)} of {len(self.received)} helper(s) the case started received no store request"
         return None
 
 

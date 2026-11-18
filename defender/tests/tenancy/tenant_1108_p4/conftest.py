@@ -9,8 +9,6 @@ tenant holds (`_drain_support.carried_impl`); nothing is kept by a module. Every
 `defender/tests` has no `__init__.py`, so a relative import loads a second copy of it."""
 from __future__ import annotations
 
-import shutil
-import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -34,21 +32,29 @@ def p4_tenant(tmp_path, data_root):
 
 @pytest.fixture(autouse=True)
 def data_root(data_root, request, monkeypatch) -> Iterator[Path]:
-    """A case that requests `tick_impl` gets a short data root (under `/tmp`): over the port the helper's job socket lives
-    under it, and a unix socket's path holds about 100 bytes, which pytest's nested temporary folders (xdist's
-    `popen-gwN`, the test's own `data-rootNN`) overrun, so the helper would refuse to start. Any other case keeps the
-    suite's (`tests/conftest.py`), which this wraps. Emptied and removed after a pass, kept after a failure."""
-    if "tick_impl" not in request.fixturenames:
-        yield data_root
-        return
+    """Every case of this folder gets a short data root from the one provider (`support/jobs/_short_root`), whatever fixtures
+    it requests: any of them may build a world a helper starts over (`adopt_scene`), whose job socket lives under the root
+    and is refused at 108 bytes, which pytest's nested temporary folders (`popen-gwN/data-rootNNN`) overrun from about the
+    hundredth test on a worker. This wraps the suite's (`tests/conftest.py`). A case that passed removes its root at once;
+    a failed case's stays until the session's end (`_short_roots_removed`)."""
+    from defender.tests.support.jobs._short_root import release, short_root
     from defender.tests.support.shared.contracts._data_root_1078 import DATA_ROOT_ENV
 
-    short = Path(tempfile.mkdtemp(prefix="p4r", dir="/tmp"))
+    short = short_root()
     monkeypatch.setenv(DATA_ROOT_ENV, str(short))
     yield short
     call = getattr(request.node, "rep_call", None)
     if call is not None and call.passed:
-        shutil.rmtree(short, ignore_errors=True)
+        release(short)
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _short_roots_removed() -> Iterator[None]:
+    """The session's short roots (one parent per xdist worker) are removed when it ends, failed cases' included."""
+    from defender.tests.support.jobs._short_root import remove_all
+
+    yield
+    remove_all()
 
 
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
@@ -61,7 +67,7 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     """Drop the port cases whose tick is of a lane the port does not serve (the lead lane's port is not in #1487,
-    Amendment r5.1 item 12): over the port they would be the adapter's own cases again."""
+    design r5 "Not here", #1546): over the port they would be the adapter's own cases again."""
     kept, dropped = [], []
     for item in items:
         params = getattr(getattr(item, "callspec", None), "params", {})
@@ -84,7 +90,7 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo):
 def tick_impl(request, tmp_path, monkeypatch):
     """The implementation of the tick's store the case runs over (`param`, else the adapter): a `TickImpl`, carried on the
     case's tenant for `_drain_support.tick_store`. None for a case with no `world` (no tick to give a store). Over the port,
-    a case that passed must have reached the port: at its end each helper it started has answered a store request, counted
+    a case that passed must have reached the port: at its end each helper it started has received a store request, counted
     in the helper, so a tick in a forked child counts (a case that fails already has its own failure to show)."""
     if "world" not in request.fixturenames:
         yield None
