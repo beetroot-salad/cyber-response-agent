@@ -304,8 +304,10 @@ def _baseline_entries(receipts: tuple[RuntimeEvidenceReceipt, ...]) -> tuple[clo
 
 
 def _dropped(what: str, row: str, refused: ValueError) -> None:
-    """A row the walkers accepted that the record's own vocabulary refuses (only reachable on the
-    forced close, which skips the gates that check it): dropped, never a failed build."""
+    """A row the walkers accepted that the record still refuses: dropped and logged, never a
+    failed build. The walkers share the record's vocabulary checks (`closing.grounding_acceptable`,
+    the ceiling states), so what reaches here is what only the record checks, such as an invisible
+    character in a ceiling `ref` or `cap`."""
     _logger.warning(f"the closing record drops a {what} its vocabulary refuses ({row!r}): {refused}")
 
 

@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from defender._vocab import HOST_ONLY_DISPOSITION
+from defender.records import closing
 
 from .. import _walkers, vocab
 from .._cells import _unquote
@@ -407,14 +408,14 @@ def _check_vocab_anchor_kinds(companion: CompanionBody) -> list[str]:
             f"{where}: anchor_kind {kind!r} is not known (`enum anchor-kinds`)",
         )
         grounding = _cell(consult, "grounding_kind")
-        errors += _check_vocab(
-            grounding, vocab.CONSULTATION_GROUNDING,
+        # The record's own check (empty accepted), so a baseline the gate passes is one it keeps.
+        errors += [] if closing.grounding_acceptable(grounding) else [
             f"{where}: grounding {grounding!r} is not one of "
             f"{', '.join(vocab.CONSULTATION_GROUNDING)} (`enum consultation.grounding`) — a "
             f"consultation records what a system of record or a telemetry baseline SAYS, and "
             f"`past-case` in particular is excluded by name: grounding a baseline on a past "
             f"case is precedent-by-similarity, which this axis does not admit",
-        )
+        ]
     return errors
 
 def _check_conclude_vocab(companion: CompanionBody) -> list[str]:

@@ -27,7 +27,7 @@ from ._vocab import (
     CEILING_COUNT_CAP, CEILING_LINES_BOUND, CEILING_NOTHING_TO_TRY, CEILING_QUERY_EMPTY,
     CEILING_QUERY_FAILED, CEILING_STATES, ELLIPSIS, FAILURE_KINDS, FORCED_INCONCLUSIVE, GROUNDING_KINDS,
     LEAD_BOUND, NOTE_BOUND, OPENERS, OUTCOMES, REASONING_BOUND, RESULT_BOUND, STAGE_ERROR, STANDS,
-    SUMMARY_BOUND, TIMEOUT, UNREADABLE,
+    SUMMARY_BOUND, TIMEOUT, UNREADABLE, grounding_acceptable,
 )
 
 __all__ = [
@@ -43,5 +43,5 @@ __all__ = [
     "SUMMARY_BOUND", "TABLE", "TIMEOUT", "UNREADABLE", "BaselineEntry", "CeilingEntry", "ClosingRecord",
     "CouldNotLook", "Lookup", "NeverClosed", "Record", "baseline_line", "baseline_line_of", "baseline_lines_length",
     "canonical_instant", "ceiling_line", "ceiling_line_of", "ceiling_lines_length", "encode_entries", "entry_lines", "fault",
-    "for_run", "for_run_dir", "for_world", "read_database", "roster_fault", "treat",
+    "for_run", "for_run_dir", "for_world", "grounding_acceptable", "read_database", "roster_fault", "treat",
 ]

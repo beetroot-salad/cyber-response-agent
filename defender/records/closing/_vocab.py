@@ -104,6 +104,13 @@ ANCHOR_KINDS: tuple[str, ...] = (
 #: past case is precedent-by-similarity.
 GROUNDING_KINDS: tuple[str, ...] = ("org-authority", "telemetry-baseline")
 
+
+def grounding_acceptable(value: str) -> bool:
+    """Whether `value` may stand in a baseline's `grounding` cell: one of `GROUNDING_KINDS`, or
+    empty (the cell is optional). The one check the invlang write gate, the baseline walker and
+    `BaselineEntry` share, so a baseline the gate accepts is one the record keeps."""
+    return value == "" or value in GROUNDING_KINDS
+
 # -- bounds (characters of treated text) ------------------------------------------------------
 
 SUMMARY_BOUND = 1500

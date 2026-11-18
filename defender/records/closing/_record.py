@@ -23,7 +23,7 @@ from ._vocab import (
     CAUSE_REVIEW_INCOMPLETE, CAUSE_STORY_SETTLED, CAUSE_TURN_BUDGET_SPENT, CAUSES,
     CEILING_COUNT_CAP, CEILING_LINES_BOUND, CEILING_STATES, FAILURE_KINDS, FORCED_INCONCLUSIVE,
     GROUNDING_KINDS, LEAD_BOUND, NOTE_BOUND, OUTCOMES, REASONING_BOUND, RESULT_BOUND, STANDS,
-    SUMMARY_BOUND,
+    SUMMARY_BOUND, grounding_acceptable,
 )
 
 #: The cause a `stands` record carries, by disposition (any other: `CAUSE_STORY_SETTLED`).
@@ -112,8 +112,8 @@ class BaselineEntry:
     def __post_init__(self) -> None:
         if self.anchor_kind not in ANCHOR_KINDS:
             raise ValueError(f"anchor kind {self.anchor_kind!r} is not one of {ANCHOR_KINDS}")
-        if self.grounding_kind not in GROUNDING_KINDS:
-            raise ValueError(f"grounding kind {self.grounding_kind!r} is not one of {GROUNDING_KINDS}")
+        if not grounding_acceptable(self.grounding_kind):
+            raise ValueError(f"grounding kind {self.grounding_kind!r} is not one of {GROUNDING_KINDS}, nor empty")
 
 
 def ceiling_line(entry: CeilingEntry) -> str:

@@ -10,6 +10,7 @@ import datetime as dt
 from defender import _clock
 
 from defender._model import model
+from defender.records import closing
 
 
 
@@ -158,6 +159,10 @@ def _walk_runtime_evidence_rows(companion: CompanionBody) -> _BaselineWalk:
             )
             continue
         start, end = parsed
+        if not closing.grounding_acceptable(_cell(row, "grounding_kind")):
+            # The record's own check: such a row is no baseline the record could keep. The
+            # vocabulary gate reports it (`_check_vocab_anchor_kinds`), once.
+            continue
         # Built first and judged on its own parsed fields, so the guard and the record read one
         # value.
         receipt = RuntimeEvidenceReceipt(
