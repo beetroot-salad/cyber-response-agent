@@ -108,10 +108,11 @@ def _unexpected_sigterm(_signum, _frame):
 def run_entry(  # noqa: PLR0913 — one keyword per seam a scenario may replace
         tmp_path, *, candidates=None, spawn=None, judge=None, questioner=None, live_tree=None,
         oracle=None, fix_source=None, job=JOB, grade=None, preflight=None, after_source=None,
-        estate=None, calls=None, **extra) -> Ran:
+        estate=None, calls=None, helper_answers=None, **extra) -> Ran:
     """The job entry in-process over `_spec1224`'s fixture tenant (or `estate`, made at `tmp_path`), the source run
     holding `calls` (default: `_calls()`); every paid seam a recording double. `extra` seams (the launcher's
-    `proxy_url`, `issuer_transport`, `directory`, ...) are handed as given, over the defaults."""
+    `proxy_url`, `issuer_transport`, `directory`, ...) are handed as given, over the defaults; `helper_answers`, more
+    requests the stand-in helper answers (#1487: the findings hand-in)."""
     from defender.tests.support.jobs._socket_standin1170 import SocketStandIn, handed_records
     from defender.tests.support.jobs._socket_standin1170 import materialise as materialise_export
     from defender.tests.support.jobs._socket_standin1170 import passes as helper_passes
@@ -139,7 +140,7 @@ def run_entry(  # noqa: PLR0913 — one keyword per seam a scenario may replace
     if grade is not None:
         seams["grade"] = grade
     launch: dict[str, Any] = {"kind": "learning", "job": job}
-    answers: dict[str, Any] = {"export.materialise": materialise_export(tenant)}
+    answers: dict[str, Any] = {"export.materialise": materialise_export(tenant), **(helper_answers or {})}
     if "proxy_url" in extra:
         # The helper signs the job's passes (#1170 O5): the launcher's signing seams become the stand-in helper's.
         launch["proxy_url"], answers["pass"] = helper_passes(
