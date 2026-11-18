@@ -7,8 +7,11 @@ from __future__ import annotations
 import itertools
 import json
 import sqlite3
+import typing
 
 import pytest
+
+from defender._filesystem.bound import RefusalKind
 
 from defender.tests.storage.verdict_1534 import _spec1534 as V
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
@@ -63,8 +66,9 @@ def _every_combination():
 def _record(outcome, cause, failure_kind, draft, disposition, run_id=RUN, **more):
     from defender.records import closing as C
 
+    fields = {"ceiling_test": (), "runtime_evidence": (), "summary": "s"} | more
     return C.ClosingRecord(run_id=run_id, disposition=disposition, outcome=outcome, cause=cause, failure_kind=failure_kind,
-                           drafted_disposition=draft, ceiling_test=(), runtime_evidence=(), summary="s", **more)
+                           drafted_disposition=draft, **fields)
 
 
 def test_v_fields_the_outcome_cause_failure_draft_and_disposition_combinations_construct_exactly_when_the_design_allows():
@@ -407,14 +411,16 @@ def _assert_fault(got, kind, database):
 
 
 def test_v_look_the_fault_kinds_and_their_fixed_wording_are_a_closed_set():
-    """`FAULT_KINDS` is the design's nine, each with a distinct non-empty outward wording. (V-LOOK)"""
+    """`FAULT_KINDS` is the design's nine; `FAULT_WORDING` holds them and the worker's `committed-without-record`, each a
+    distinct non-empty wording. (V-LOOK, r3.2 M4 ii)"""
     from defender.records import closing as C
 
     assert set(C.FAULT_KINDS) == {"database-missing", "pointer-unreadable", "store-unreadable", "schema-version",
                                   "recorded-before-1534", "legacy-link", "roster-gone", "arm-refused", "row-invalid"}
-    assert set(C.FAULT_WORDING) == set(C.FAULT_KINDS)
+    assert "committed-without-record" not in C.FAULT_KINDS
+    assert set(C.FAULT_WORDING) == {*C.FAULT_KINDS, "committed-without-record"}
     assert all(isinstance(w, str) and w for w in C.FAULT_WORDING.values())
-    assert len(set(C.FAULT_WORDING.values())) == len(C.FAULT_KINDS)
+    assert len(set(C.FAULT_WORDING.values())) == len(C.FAULT_WORDING)
 
 
 def _pointer_path(run_dir):
@@ -439,6 +445,51 @@ def test_v_look_a_pointer_that_cannot_be_used_is_pointer_unreadable_and_a_good_o
     _assert_fault(C.for_run(V.handle(run_dir)), "pointer-unreadable", database)
 
     path.write_text(json.dumps({"case_id": CASE, "store_path": str(database)}), encoding="utf-8")
+    assert isinstance(C.for_run(V.handle(run_dir)), C.Record)
+
+
+def _alias(path, good):
+    (target := path.with_name("pointer-target.json")).write_text(good, encoding="utf-8")
+    path.symlink_to(target)
+
+
+def _oversize(path, _good):
+    from defender._filesystem.bound import READ_LIMIT
+
+    with path.open("wb") as f:
+        f.truncate(READ_LIMIT + 1)
+
+
+#: One way to make the pointer's bounded read refuse, per `RefusalKind` (a new kind fails the lookup below).
+_POINTER_REFUSALS = {
+    "alias": _alias,
+    "not_file": lambda path, _good: path.mkdir(),
+    "undecodable": lambda path, _good: path.write_bytes(b'{"case_id": "\xff\xfe"}'),
+    "fault": _oversize,
+}
+
+
+@pytest.mark.parametrize("kind", typing.get_args(RefusalKind))
+def test_v_look_a_pointer_the_bounded_read_refuses_is_pointer_unreadable_for_every_refusal_kind(tmp_path, kind):
+    """Each refusal of the pointer's read (link, folder, non-UTF-8, oversize) is `pointer-unreadable`, never absence; the
+    good pointer back reads the record. (V-LOOK)"""
+    from defender.records import closing as C
+
+    assert set(_POINTER_REFUSALS) == set(typing.get_args(RefusalKind))
+    run_dir, database = V.closed_run(tmp_path, {})
+    path = _pointer_path(run_dir)
+    good = path.read_text(encoding="utf-8")
+    path.unlink()
+    _POINTER_REFUSALS[kind](path, good)
+    read = V.handle(run_dir).observability.session_pointer.read_result()
+    assert (read.absent, read.refused_by) == (False, kind), "fixture control: the read refuses as this kind"
+    _assert_fault(C.for_run(V.handle(run_dir)), "pointer-unreadable", database)
+
+    if path.is_dir() and not path.is_symlink():
+        path.rmdir()
+    else:
+        path.unlink()
+    path.write_text(good, encoding="utf-8")
     assert isinstance(C.for_run(V.handle(run_dir)), C.Record)
 
 
