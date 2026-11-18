@@ -1,7 +1,6 @@
 """Forks rerun a tool-calling response without injecting an opening message."""
 from __future__ import annotations
 
-
 import pytest
 
 pytest.importorskip("pydantic_ai")
@@ -217,6 +216,7 @@ AFTER_A_REFUSAL = {
     "bash refused two steps back, an append landed since": (
         (S.append(CHUNKS[0]), REFUSED_BASH, S.append(CHUNKS[1]), S.echo("x"), S.done()), 3,
         "bash"),
+    # The shape of `c8933cce`, the run #1567 was found in.
     "bash refused, never called again, other tools landed since": (
         (S.append(CHUNKS[0]), REFUSED_BASH, S.append(CHUNKS[1]), S.append(CHUNKS[2]), S.done()),
         3, "bash"),
@@ -239,6 +239,13 @@ def test_1567_a_branch_point_after_a_refused_call_launches(tmp_path, point):
                for p in answered.parts), (
         f"the fixture's `{carrier}` call was not refused for retry — the case would be "
         f"vacuous: {[(type(p).__name__, getattr(p, 'tool_name', None)) for p in answered.parts]}")
+    rows = dict(S.main_rows(source.store))
+    for step in responses[1:index]:
+        refused = {p.tool_name for p in rows[_row_after(source, step)].parts
+                   if isinstance(p, RetryPromptPart)}
+        assert refused == ({carrier} if step == responses[1] else set()), (
+            f"fixture: only the `{carrier}` call should be refused before the branch point, and "
+            f"every other call should land; {refused} were refused")
 
     arm = S.drive_arm(tmp_path, S.spec_for(source, responses[index]), S.Recorder([S.done()]))
     _arm_launched(arm)
