@@ -212,19 +212,20 @@ STREAKS = {
     "previous bash call refused": (
         (S.append(CHUNKS[0]), REFUSED_BASH, S.echo("two"), S.echo("three"), S.done()), 2, True,
         "bash"),
-    "bash refused two steps back": (
-        (S.append(CHUNKS[0]), REFUSED_BASH, S.append(CHUNKS[1]), S.echo("x"), S.done()), 3, True,
+    # #1567: any tool's success clears every carried count, so these two are branchable.
+    "bash refused two steps back, an append landed since": (
+        (S.append(CHUNKS[0]), REFUSED_BASH, S.append(CHUNKS[1]), S.echo("x"), S.done()), 3, False,
         "bash"),
-    "another tool carries a retry": (
+    "bash refused, never called again, other tools landed since": (
         (S.append(CHUNKS[0]), REFUSED_BASH, S.append(CHUNKS[1]), S.append(CHUNKS[2]), S.done()),
-        3, True, "bash"),
+        3, False, "bash"),
     "previous bash call ran": (
         (S.append(CHUNKS[0]), REFUSED_BASH, S.echo("two"), S.echo("three"), S.done()), 3, False,
         "bash"),
     "read_file refused, bash at the branch point": (
         (S.append(CHUNKS[0]), REFUSED_READ, S.echo("x"), S.done()), 2, True, "read_file"),
     "append_block refused, bash ran twice since": (
-        (S.append(CHUNKS[0]), REFUSED_APPEND, S.echo("x"), S.echo("y"), S.done()), 3, True,
+        (S.append(CHUNKS[0]), REFUSED_APPEND, S.echo("x"), S.echo("y"), S.done()), 3, False,
         "append_block"),
     "append_block refused, then an append landed": (
         (S.append(CHUNKS[0]), REFUSED_APPEND, S.append(CHUNKS[1]), S.echo("x"), S.done()), 3,
@@ -261,3 +262,36 @@ def test_d2_a_branch_point_inside_a_retry_streak_is_refused_at_launch(tmp_path, 
     assert S.child_sessions(source.store) == []
     assert "retry" in caplog.text.lower(), (
         f"the refusal does not name the retry streak: {caplog.text[-400:]!r}")
+
+
+def test_1567_a_tool_refused_beside_a_call_that_landed_still_carries_its_retry(tmp_path, caplog):
+    """The reset is by an earlier step's success: a refusal in the very step another call landed
+    in is carried into the next response."""
+    mixed = Turn(tool_calls=[*REFUSED_BASH.tool_calls, *S.append(CHUNKS[1]).tool_calls])
+    source = S.drive_source(tmp_path, (S.append(CHUNKS[0]), mixed, S.echo("x"), S.done()))
+    responses = S.tool_calling_responses(source.store)
+    answered = dict(S.main_rows(source.store))[_row_after(source, responses[1])]
+    kinds = {(type(p).__name__, getattr(p, "tool_name", None)) for p in answered.parts}
+    assert {("RetryPromptPart", "bash"), ("ToolReturnPart", "append_block")} <= kinds, (
+        f"fixture: the mixed step did not refuse bash and land the append: {kinds}")
+
+    caplog.set_level(logging.INFO)
+    arm = S.drive_arm(tmp_path, S.spec_for(source, responses[2]), S.Recorder([S.done()]))
+    assert not S.launched(arm), "bash's refusal in the step before was dropped by the append"
+    assert arm.summary.get("exit_reason") == "BranchError", arm.summary
+    assert "retry" in caplog.text.lower(), caplog.text[-400:]
+
+
+@pytest.mark.parametrize("outcome", ["failed", "denied", "interrupted"])
+def test_1567_only_a_call_that_succeeded_clears_a_carried_retry(outcome):
+    """A tool return the framework marks failed, denied or interrupted is not a success: it
+    leaves the count a refusal carried into its step (#1567)."""
+    from defender.investigation.branch import carried_retries
+
+    refused = ModelRequest(parts=[RetryPromptPart(content="no", tool_name="bash", tool_call_id="a")])
+    after = ModelRequest(parts=[ToolReturnPart(
+        tool_name="append_block", content="x", tool_call_id="b", outcome=outcome)])
+    landed = ModelRequest(parts=[ToolReturnPart(
+        tool_name="append_block", content="x", tool_call_id="c")])
+    assert carried_retries([refused, after]) == {"bash": 1}
+    assert carried_retries([refused, after, landed]) == {}, "the positive control failed"

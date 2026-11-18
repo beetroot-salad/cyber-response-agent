@@ -161,8 +161,10 @@ def _admitted_on(main: MainRead, spec: BranchSpec, *, source_run: Run,  # noqa: 
     if carried:
         raise BranchError(
             f"message {spec.branch_message_id} is inside a retry streak ({carried} carried) — "
-            "the framework's per-tool retry counts cannot be seeded into an arm, so it would "
-            "take that step differently. Branch at a response no tool carries a retry into", kind=REFUSED_RETRY_STREAK)
+            "a tool call was refused for retry and no call has succeeded since, and the "
+            "framework's per-tool retry counts cannot be seeded into an arm, so it would take "
+            "that step differently. Branch at a response after a step where a call succeeded",
+            kind=REFUSED_RETRY_STREAK)
 
     snapshot = main.snapshot(upto)
     if snapshot is None:

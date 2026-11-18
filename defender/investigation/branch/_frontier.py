@@ -307,18 +307,25 @@ def _lead_of(name: str) -> str:
 
 
 def carried_retries(prefix: list) -> dict[str, int]:
-    """The retry count each tool carries into the step after `prefix` — the framework's own
-    bookkeeping, replayed over the conversation (rev 5 C1)."""
+    """The retry count each tool carries into the step after `prefix`, replayed over the
+    conversation: a step where any call succeeded (a `success` return, not `failed`, `denied`
+    or `interrupted`) clears every count carried into it; a tool that failed in that same step
+    still counts, on top of its earlier count as the framework counts it (#1567).
+
+    Looser than the framework, which clears a tool's count only when that same tool succeeds
+    (#1255 C1, reversed by #1567): an arm may allow that tool up to its carried count of extra
+    failures before the retry limit. The model never sees the count."""
     retries: dict[str, int] = {}
     for message in prefix:
         if not isinstance(message, ModelRequest):
             continue
         failed = {p.tool_name for p in message.parts
                   if isinstance(p, RetryPromptPart) and p.tool_name}
-        succeeded = {p.tool_name for p in message.parts if isinstance(p, ToolReturnPart)}
+        succeeded = any(isinstance(p, ToolReturnPart) and p.outcome == "success"
+                        for p in message.parts)
         if not failed and not succeeded:
             continue
-        carried = {tool: n for tool, n in retries.items() if tool not in succeeded}
+        carried = {} if succeeded else dict(retries)
         carried.update({tool: retries.get(tool, 0) + 1 for tool in failed})
         retries = carried
     return {tool: n for tool, n in retries.items() if n}
