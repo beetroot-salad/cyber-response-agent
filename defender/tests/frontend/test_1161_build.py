@@ -496,6 +496,7 @@ _SYMBOL_RECEIVERS: dict[str, list[_Receiver]] = {
 #: How the symbol is reached from the receiver; `{S}` is the symbol, `{R}` the receiver expression.
 _REACHES: dict[str, str] = {
     "access": "return {R}.{S};",
+    "element access": 'return {R}["{S}"];',
     "shorthand destructure": "const {{ {S} }} = {R}; return {S};",
     "renamed destructure": "const {{ {S}: zzValue }} = {R}; return zzValue;",
     "nested destructure": "const {{ zzInner: {{ {S}: zzValue }} }} = {{ zzInner: {R} }}; return zzValue;",
@@ -506,7 +507,8 @@ _REACHES: dict[str, str] = {
 
 def _refused_corpus() -> dict[str, str]:
     """Every refused form (F8): description -> one module's text. Symbols x receivers x reaches, a parameter destructured
-    by type, the bare globals, and `/api/auth/` as a string, a template with no substitution, a template head and a JSX
+    by type, the bare globals, `Reflect.get` on `globalThis`, an import of any shell module but the provider (static,
+    side-effect, re-export, dynamic), and `/api/auth/` as a string, a template with no substitution, a template head and a JSX
     attribute. Left out: `for ({ fetch } of [window])` (an assignment pattern in a for-of head)."""
     corpus: dict[str, str] = {}
     for key, receivers in _SYMBOL_RECEIVERS.items():
@@ -526,6 +528,12 @@ def _refused_corpus() -> dict[str, str]:
         "auth path template without substitution": "export const zzForm = `/api/auth/login`;",
         "auth path template head": "export const zzForm = (zzWhere: string) => `/api/auth/${zzWhere}`;",
         "auth path JSX attribute": 'export const zzForm = <a href="/api/auth/logout">out</a>;',
+        "fetch by Reflect.get on globalThis": 'export const zzForm = () => Reflect.get(globalThis, "fetch");',
+        # PR2's other half: a module outside the shell reaches it through the provider alone.
+        "an import of a shell module other than the provider": 'import { makeLoad } from "../../shell/load";\nexport const zzForm = makeLoad;',
+        "a side-effect import of a shell module": 'import "../../shell/attempt";\nexport const zzForm = 1;',
+        "a re-export from a shell module": 'export { record as zzForm } from "../../shell/attempt";',
+        "a dynamic import of a shell module": 'export const zzForm = () => import("../../shell/attempt");',
     })
     return corpus
 
@@ -547,6 +555,10 @@ ALLOWED_CORPUS: dict[str, str] = {
     "a type field named location": "export type ZzForm = { location: string; sessionStorage: boolean };",
     "an api field read through a typed value": ("export const zzForm = (zzValue: { location: string; cookie: string })"
                                                 " => zzValue.location + zzValue.cookie;"),
+    "a DOM member named like a global": ("export const zzForm = (zzEvent: { currentTarget: HTMLElement }) =>"
+                                         " zzEvent.currentTarget.focus();"),
+    "the provider's hooks": 'import { useMe } from "../../shell/provider";\nexport const zzForm = useMe;',
+    "a type from another shell module": 'import type { ReadKey } from "../../shell/types";\nexport type ZzForm = ReadKey;',
 }
 
 

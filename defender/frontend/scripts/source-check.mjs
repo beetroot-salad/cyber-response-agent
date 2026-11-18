@@ -1,5 +1,5 @@
 // The type check and the source check (#1540 F1 b, F8): one TypeScript program over the whole project (screens, shell and
-// unit-test files alike), whose diagnostics fail the run, and a syntactic scan of every source outside `src/shell/` and
+// unit-test files alike), whose diagnostics fail the run, and a scan of every source outside `src/shell/` and
 // `src/generated/` for what only the shell may do (PR2). A function only: `scripts/check.mjs` (`bun run check`) and
 // `scripts/build.mjs` call it in their own process, so no command depends on how it was started.
 import path from "node:path";
@@ -8,80 +8,72 @@ import ts from "typescript";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-// The DOM library's network, storage and navigation declarations, by name; a member is refused only on the containers
-// named (so `document.open()` and `XMLHttpRequest`'s own methods are not caught by a bare name).
-const GLOBAL_OR_WINDOW = new Set(["", "Window", "WindowOrWorkerGlobalScope", "WorkerGlobalScope", "WindowLocalStorage", "WindowSessionStorage"]);
-const REFUSED_NAMES = new Map([
-  ["fetch", null],
-  ["XMLHttpRequest", null],
-  ["EventSource", null],
-  ["WebSocket", null],
-  ["localStorage", null],
-  ["sessionStorage", null],
-  ["indexedDB", null],
-  ["caches", null],
-  ["location", null],
-  ["history", null],
-  ["navigation", null],
-  ["sendBeacon", new Set(["Navigator"])],
-  ["cookie", new Set(["Document"])],
-  ["open", GLOBAL_OR_WINDOW],
-]);
 const AUTH_PREFIX = "/api/auth/";
 
-/** The name of the interface (or "" for the global scope) a declaration belongs to. */
-function containerOf(declaration) {
-  const parent = declaration.parent;
-  return parent && (ts.isInterfaceDeclaration(parent) || ts.isClassDeclaration(parent)) && parent.name ? parent.name.text : "";
+// PR2 by its roots, not by a list of the DOM's network, storage and navigation names. Every way to those starts at a value
+// the DOM library declares globally (`window`, `document`, `fetch`, `localStorage`, `location`, ...) or at `globalThis`,
+// or at a value typed as one of those globals' own types (`Window`, `Document`, `Storage`, ...). Outside the shell no
+// such value and no such type may be named, so how a member is then reached (`.x`, `["x"]`, destructuring, an alias)
+// does not matter. A module outside the shell imports from it only `src/shell/provider` (types from anywhere in it):
+// the shell's other modules are its own. Not covered: a DOM object a screen is handed (a React event's
+// `currentTarget.ownerDocument`); only a sandbox would close that.
+
+function isDomLibrary(sourceFile) {
+  return /[\\/]lib\.(dom|webworker)[^\\/]*\.d\.ts$/.test(sourceFile.fileName);
 }
 
-function isDomLibrary(declaration) {
-  return /[\\/]lib\.(dom|webworker)[^\\/]*\.d\.ts$/.test(declaration.getSourceFile().fileName);
-}
-
-/** Whether `symbol` is one of the DOM library's refused declarations. */
-function refusedSymbol(symbol) {
-  if (!symbol) return null;
-  const rule = REFUSED_NAMES.get(symbol.name);
-  if (rule === undefined) return null;
-  const declarations = (symbol.declarations ?? []).filter(isDomLibrary);
-  if (declarations.length === 0) return null;
-  if (rule !== null && !declarations.some((declaration) => rule.has(containerOf(declaration)))) return null;
-  return symbol.name;
-}
-
-/** True when the object literal is the left side of `=`, the head of a `for…of`/`for…in`, or nested in such a pattern. */
-function isAssignmentTarget(node) {
-  let child = node;
-  let parent = node.parent;
-  while (parent) {
-    if (ts.isBinaryExpression(parent)) return parent.left === child && parent.operatorToken.kind === ts.SyntaxKind.EqualsToken;
-    if ((ts.isForOfStatement(parent) || ts.isForInStatement(parent))) return parent.initializer === child;
-    if (ts.isParenthesizedExpression(parent) || ts.isArrayLiteralExpression(parent) || ts.isPropertyAssignment(parent)
-        || ts.isObjectLiteralExpression(parent) || ts.isShorthandPropertyAssignment(parent) || ts.isSpreadElement(parent)) {
-      child = parent;
-      parent = parent.parent;
-      continue;
+/** The names of the DOM library's global values, and of the named types they are declared with. */
+function domGlobals(program) {
+  const values = new Set();
+  const types = new Set();
+  for (const file of program.getSourceFiles()) {
+    if (!isDomLibrary(file)) continue;
+    for (const statement of file.statements) {
+      if (ts.isFunctionDeclaration(statement) && statement.name) values.add(statement.name.text);
+      if (!ts.isVariableStatement(statement)) continue;
+      for (const declaration of statement.declarationList.declarations) {
+        if (!ts.isIdentifier(declaration.name)) continue;
+        values.add(declaration.name.text);
+        const type = declaration.type;
+        for (const part of type && ts.isIntersectionTypeNode(type) ? type.types : type ? [type] : []) {
+          if (ts.isTypeReferenceNode(part) && ts.isIdentifier(part.typeName)) types.add(part.typeName.text);
+        }
+      }
     }
-    return false;
   }
-  return false;
+  return { values, types };
 }
 
-/** The type being unpacked by the object pattern `node` written as an assignment target (`({ a: { b } } = value)`). */
-function assignedType(checker, node) {
-  const path = [];
+/** True when `symbol` is the DOM library's own global: declared at a DOM library file's top level (a member such as
+ * `Document.location` or `HTMLElement.focus` is not), and nowhere in the project's own sources (a local is not). */
+function isDomGlobal(symbol) {
+  const declarations = symbol?.declarations ?? [];
+  const topLevel = (declaration) => {
+    const file = declaration.getSourceFile();
+    const statement = ts.isVariableDeclaration(declaration) ? declaration.parent.parent : declaration;
+    return isDomLibrary(file) && statement.parent === file;
+  };
+  return declarations.some(topLevel) && declarations.every((declaration) => declaration.getSourceFile().isDeclarationFile);
+}
+
+/** True when `node` is the name in a type reference (`x: Window`), where a type, not a value, is meant. */
+function isTypeName(node) {
   let child = node;
-  let parent = node.parent;
-  while (parent && !ts.isBinaryExpression(parent) && !ts.isForOfStatement(parent) && !ts.isForInStatement(parent)) {
-    if (ts.isPropertyAssignment(parent) && ts.isIdentifier(parent.name)) path.unshift(parent.name.text);
-    child = parent;
-    parent = parent.parent;
-  }
-  if (!parent || !ts.isBinaryExpression(parent)) return checker.getTypeAtLocation(node);
-  let type = checker.getTypeAtLocation(parent.right);
-  for (const name of path) type = checker.getPropertyOfType(type, name) ? checker.getTypeOfSymbol(checker.getPropertyOfType(type, name)) : type;
-  return type;
+  while (ts.isQualifiedName(child.parent)) child = child.parent;
+  return ts.isTypeReferenceNode(child.parent) && child.parent.typeName === child;
+}
+
+/** True when the import or export moves only types (`import type`, `export type`, or every name marked `type`). */
+function typeOnly(node) {
+  if (ts.isImportTypeNode(node)) return true;
+  if (ts.isExportDeclaration(node)) return node.isTypeOnly;
+  if (ts.isCallExpression(node)) return false;
+  const clause = node.importClause;
+  if (!clause) return false; // `import "./x"`: runs the module
+  if (clause.isTypeOnly) return true;
+  const named = clause.namedBindings;
+  return !clause.name && named !== undefined && ts.isNamedImports(named) && named.elements.length > 0
+    && named.elements.every((element) => element.isTypeOnly);
 }
 
 export function check() {
@@ -103,44 +95,50 @@ export function check() {
   if (problems.length > 0) return problems;
 
   const checker = program.getTypeChecker();
+  const { values, types } = domGlobals(program);
+  const src = path.join(root, "src") + path.sep;
   const shell = path.join(root, "src", "shell") + path.sep;
   const generated = path.join(root, "src", "generated") + path.sep;
+  const door = path.join(root, "src", "shell", "provider");
   for (const file of program.getSourceFiles()) {
     const name = path.resolve(file.fileName);
-    if (!name.startsWith(path.join(root, "src") + path.sep) || name.startsWith(shell) || name.startsWith(generated)) continue;
+    if (!name.startsWith(src) || name.startsWith(shell) || name.startsWith(generated)) continue;
+    const isTest = /\.test\.tsx?$/.test(name); // never bundled into the app, so it may import the module it tests
     const report = (node, what) => {
       const { line } = file.getLineAndCharacterOfPosition(node.getStart(file));
       problems.push(`${path.relative(root, name)}:${line + 1}: only the shell may use ${what} (src/shell/ owns the network, storage and the address)`);
+    };
+    const importsFrom = (node, specifier) => {
+      if (isTest || typeOnly(node)) return;
+      if (!specifier || !ts.isStringLiteralLike(specifier)) {
+        report(node, "an import whose path is not written out");
+        return;
+      }
+      const resolved = ts.resolveModuleName(specifier.text, file.fileName, program.getCompilerOptions(), ts.sys).resolvedModule;
+      const target = resolved ? path.resolve(resolved.resolvedFileName) : path.resolve(path.dirname(name), specifier.text);
+      if (target.startsWith(shell) && target.replace(/\.(d\.)?tsx?$/, "") !== door) {
+        report(node, `${path.relative(root, target)} (import the shell's hooks from src/shell/provider)`);
+      }
     };
     const visit = (node) => {
       if (ts.isStringLiteralLike(node) || ts.isTemplateHead(node)) {
         if (node.text.startsWith(AUTH_PREFIX)) report(node, `a path under ${AUTH_PREFIX}`);
       }
+      if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
+        if (node.moduleSpecifier) importsFrom(node, node.moduleSpecifier);
+      } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+        importsFrom(node, node.arguments[0]);
+      }
       if (ts.isIdentifier(node)) {
-        const refused = refusedSymbol(checker.getSymbolAtLocation(node));
-        if (refused) report(node, refused);
-      }
-      if (ts.isBindingElement(node) && ts.isObjectBindingPattern(node.parent)) {
-        // `const { fetch } = window`, `function f({ fetch }: Window)`, `const { document: { cookie } } = window`,
-        // `for (const { fetch } of [window])`: the name is a new local, so ask the pattern's type for the property.
-        const key = node.propertyName ?? node.name;
-        if (ts.isIdentifier(key) || ts.isStringLiteral(key)) {
-          const property = checker.getPropertyOfType(checker.getTypeAtLocation(node.parent), key.text);
-          const refused = refusedSymbol(property);
-          if (refused) report(node, refused);
-        }
-      }
-      if (ts.isObjectLiteralExpression(node) && isAssignmentTarget(node)) {
-        // `({ fetch: g } = window)`, `[{ fetch }] = [window]`: an object pattern written as an assignment target.
-        for (const member of node.properties) {
-          if (ts.isShorthandPropertyAssignment(member) || ts.isPropertyAssignment(member)) {
-            const key = member.name;
-            if (ts.isIdentifier(key) || ts.isStringLiteral(key)) {
-              const property = checker.getPropertyOfType(assignedType(checker, node), key.text);
-              const refused = refusedSymbol(property);
-              if (refused) report(member, refused);
-            }
-          }
+        const symbol = ts.isShorthandPropertyAssignment(node.parent) && node.parent.name === node
+          ? checker.getShorthandAssignmentValueSymbol(node.parent)
+          : checker.getSymbolAtLocation(node);
+        if (symbol && symbol.name === "globalThis" && !(symbol.declarations ?? []).some((d) => !d.getSourceFile().isDeclarationFile)) {
+          report(node, "globalThis");
+        } else if (isTypeName(node)) {
+          if (types.has(node.text) && isDomGlobal(symbol)) report(node, `the type ${node.text}`);
+        } else if (values.has(node.text) && isDomGlobal(symbol)) {
+          report(node, node.text);
         }
       }
       ts.forEachChild(node, visit);
