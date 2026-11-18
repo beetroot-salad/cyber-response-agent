@@ -182,6 +182,56 @@ def _validate_world_row(row: dict[str, Any], *, episode_dir: Path | None = None)
                            f"({_PLAN_PREFIX}...) — only a design finding reaches the questioner")
 
 
+#: The longest finding id a job's findings may carry, in UTF-8 bytes of the whole id (its `<job id>/` included): well
+#: below the store's index-row limit, so an id the screen passes is one the store can key (#1487 r5.1 item 2).
+FINDING_ID_MAX_BYTES = 1024
+#: The largest finding row a job's findings may carry, in UTF-8 bytes of the row's JSON (`json.dumps` as it stands,
+#: measured by `job_lane.findings_text_bytes`, the cap's own measure) (#1487 r5.1 item 2).
+FINDING_ROW_MAX_BYTES = 1024 * 1024
+
+#: Each findings channel's rule, by the learning store's kind (the keys of a job's findings text).
+_CHANNEL_RULES = {"finding": _validate_row, "questioner_finding": _validate_world_row}
+
+
+def screen_findings(channel: str, rows: object, job_id: str) -> None:
+    """The channel rules' one public door (#1487 Flow 1 step 2): `JudgeRefused` unless `rows` is a list of rows each of
+    which the worker may store as job `job_id`'s `channel` (the store's kind, `"finding"` or `"questioner_finding"`):
+    an object of at most `FINDING_ROW_MAX_BYTES` of JSON, whose `finding_id` is text under `<job_id>/` of at most
+    `FINDING_ID_MAX_BYTES`, holding nothing the store can never hold, and passing the channel's own rule (the one
+    the judge's appenders run). The first failing row refuses the whole channel; anything else that goes wrong in a
+    rule is a refusal too, never another exception."""
+    rule = _CHANNEL_RULES.get(channel) if isinstance(channel, str) else None
+    if rule is None:
+        raise JudgeRefused(f"{channel!r} is not a findings channel")
+    if not isinstance(rows, list):
+        raise JudgeRefused(f"the {channel} rows are not a list")
+    prefix = f"{job_id}/"
+    for index, row in enumerate(rows):
+        try:
+            _screen_row(rule, row, prefix)
+        except JudgeRefused:
+            raise
+        except Exception as failed:  # noqa: BLE001 — screening is total: anything a rule raises is a refusal
+            raise JudgeRefused(f"{channel} row {index} could not be screened ({type(failed).__name__})") from None
+
+
+def _screen_row(rule: Any, row: object, prefix: str) -> None:
+    """One row, cheapest checks first, so an oversized row is refused before any rule walks it."""
+    from defender.records.job_lane import findings_text_bytes
+
+    if not isinstance(row, dict):
+        raise JudgeRefused(f"a findings row is a {type(row).__name__}, not an object")
+    if findings_text_bytes(json.dumps(row)) > FINDING_ROW_MAX_BYTES:
+        raise JudgeRefused(f"a findings row is over {FINDING_ROW_MAX_BYTES} bytes of JSON")
+    finding_id = row.get("finding_id")
+    if not isinstance(finding_id, str) or not finding_id.startswith(prefix) or finding_id == prefix:
+        raise JudgeRefused("a findings row's finding_id is not one of this job's (`<job id>/...`)")
+    if findings_text_bytes(finding_id) > FINDING_ID_MAX_BYTES:
+        raise JudgeRefused(f"a findings row's finding_id is over {FINDING_ID_MAX_BYTES} bytes")
+    _refuse_unstorable_row(row, "", "job's")
+    rule(row)
+
+
 def append_rows(episode_dir: Path, rows: list[dict[str, Any]], *,
                 state: FindingsSink) -> int:
     """Append `rows` to the defender findings channel through `state`; how many were appended
@@ -421,7 +471,8 @@ def check_disposition_entry(entry: dict[str, Any]) -> dict[str, Any]:
 
 
 __all__ = [
-    "DrawnRows", "DrawsSkipReport", "EnqueueReport", "FindingsSink", "LANE_DEFENDER", "LANE_UNQUEUEABLE",
+    "DrawnRows", "DrawsSkipReport", "EnqueueReport", "FINDING_ID_MAX_BYTES", "FINDING_ROW_MAX_BYTES", "FindingsSink",
+    "LANE_DEFENDER", "LANE_UNQUEUEABLE", "held_findings", "screen_findings",
     "LANE_WORLD", "LEDGER_LANES", "StoreFindings", "WORLD_LABEL_DOUBTED", "append_rows", "append_rows_report",
     "append_world_rows", "append_world_rows_report", "build_finding_row", "check_disposition_entry", "defender_lane_blocked",
     "disposition_entry", "draws_on_disk", "draws_on_disk_report", "enqueue_report",
@@ -550,10 +601,23 @@ class PublishReport:
     world_appended: int = 0
 
 
-def held_findings_count(episode: formats.Episode) -> int:
-    """How many finding rows a job's episode holds, both channels."""
+def held_findings(episode: formats.Episode) -> dict[str, Any]:
+    """A completed job's findings field for its end record (#1487 Flow 1 step 1): every row its episode holds, by
+    the store's kind, as `{"state": "ok", "text": <the rows as JSON text>}`, checked with the worker's own bounded
+    parser (`job_lane.findings_field`); `{"state": "over_cap"}` for text over `FINDINGS_CAP_BYTES`;
+    `{"state": "malformed"}` when a held line is not a row or the text fails the parser. Never a single row
+    dropped: one failure refuses them all. A held record that cannot be read raises (`OSError`): the entry then
+    keeps the record's `unreadable`."""
+    from defender.records.job_lane import findings_field
+
     sink = EpisodeFindings(episode)
-    return len(sink.rows(FINDINGS)) + len(sink.rows(QUESTIONER_FINDINGS))
+    held: dict[str, list[dict[str, Any]]] = {}
+    for channel in (FINDINGS, QUESTIONER_FINDINGS):
+        rows, malformed = sink.rows_report(channel)
+        if malformed:
+            return findings_field(None)
+        held[_store_kind(channel)] = rows
+    return findings_field(json.dumps(held))
 
 
 def publish_episode_findings(episode: formats.Episode, *, store: Any, tenant_id: str) -> PublishReport:

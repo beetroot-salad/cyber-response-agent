@@ -82,10 +82,12 @@ class End:
 class LearningOutcome:
     """What a learning job's holder writes last (#1344): the terminal `status` with its `reason`
     and `message`, or, `status` None, the row handed back. `progress` is the final fork pick,
-    stage and sibling cost (None keeps what the row was last given)."""
+    stage and sibling cost (None keeps what the row was last given). `findings` (#1487) is a
+    `completed` end's findings the worker accepted, `{kind: rows}`, stored with the ending; None
+    for any other end, and for a `completed` one whose findings are refused."""
 
     status: str | None
     reason: str | None = None
     message: str | None = None
     progress: Any = None
-    findings_count: int = 0
+    findings: Any = None

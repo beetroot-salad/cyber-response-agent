@@ -7,8 +7,11 @@ batch per lane and one working batch per lane, one run per feedback issue."""
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as _dt
-from typing import Any
+import logging
+from collections.abc import Mapping, Sequence
+from typing import Any, cast
 
 from sqlalchemy import (
     BigInteger,
@@ -18,12 +21,17 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
+    Table,
     Text,
+    func,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
+from defender._text import postgres_cannot_hold
 from defender.database import Base, IdColumn
 from defender.records.formats import BatchId, CommitId, TenantId, WorkItemId
 from defender.records.learning_causes import BATCH_CAUSES, ITEM_CAUSES
@@ -278,3 +286,107 @@ class FeedbackTickRow(Base, kw_only=True):
     lease_expiry: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
     fencing_token: Mapped[int] = mapped_column(Integer)
     cancel_requested: Mapped[bool] = mapped_column(Boolean)
+
+
+# -- findings into the author lane's queue (#1487): the one insert the worker's end write and the operator lane share --
+
+_logger = logging.getLogger(__name__)
+
+
+class ItemRefused(Exception):
+    """The database will never take this item (a NUL character jsonb refuses): waiting cannot cure it."""
+
+
+def refuse_unholdable(value: Any) -> None:
+    """Refuse, before anything is written, a value PostgreSQL could never hold (`postgres_cannot_hold`): every store
+    verb screens all the text it was given."""
+    why = postgres_cannot_hold(value)
+    if why is not None:
+        raise ItemRefused(why)
+
+
+def refuse_unkeyed(row: Mapping[str, Any]) -> None:
+    """A finding's key is its `finding_id` as the judge made it: a string with something in it. A missing, null,
+    numeric or empty one would be keyed `'None'`, `'5'` or `''`, and a later row could collide with the made-up key."""
+    key = row.get("finding_id")
+    if not isinstance(key, str) or not key.strip():
+        raise ItemRefused(f"a finding row carries no string finding_id (got {key!r})")
+
+
+#: SQLSTATE classes an insert's own content causes, which waiting cannot cure: data (22), integrity (23) and limits
+#: (54, which the driver reports as an operational error, so it is read before the outage test).
+_CONTENT_CLASSES = frozenset({"22", "23", "54"})
+
+
+@dataclasses.dataclass(frozen=True)
+class FindingsInsert:
+    """What `insert_findings` did: every row stored (`stored`, with `added` of them new; a finding id the store already
+    holds stays as it is), or none of them (`refused`, the refusal's words in `why`)."""
+
+    stored: bool
+    added: int = 0
+    why: str | None = None
+
+
+async def insert_findings(s: AsyncSession, tenant: str, channels: Mapping[str, Sequence[Mapping[str, Any]]], *,
+                          source_run: str) -> FindingsInsert:
+    """Insert, in the transaction `s` is in, each channel's rows (`{kind: rows}`, author-lane kinds) as
+    `waiting` items of `tenant` from `source_run`, all under one savepoint: every row is stored, or, refused, none of
+    any channel (the savepoint rolled back, the transaction usable). The caller holds the tenant's state for the
+    transaction. Refused: a row PostgreSQL could never hold or with no finding id (`refuse_unholdable`,
+    `refuse_unkeyed`); an error of SQLSTATE class 22, 23 or 54; any other `Exception` that is not an outage (a
+    deterministic database error such as a missing permission, or a fault in this code), logged. An outage
+    (`jobs.is_outage`: a lost connection, deadlock, lock timeout, cancel, full disk) propagates, for the caller to
+    retry whole. A `BaseException` (a cancellation) is never caught."""
+    for kind in channels:
+        if LANE_OF.get(kind) != AUTHOR_LANE:
+            raise ValueError(f"not a findings kind: {kind}")
+    try:
+        for rows in channels.values():
+            refuse_unholdable(list(rows))
+            for row in rows:
+                refuse_unkeyed(row)
+    except ItemRefused as refused:
+        return FindingsInsert(False, why=str(refused))
+    try:
+        added = 0
+        async with s.begin_nested():
+            for kind, rows in channels.items():
+                for row in rows:
+                    added += len((await s.execute(_finding_insert(tenant, kind, row, source_run))).all())
+    except Exception as fault:  # noqa: BLE001 — classified: content refuses, an outage is raised again
+        return FindingsInsert(False, why=_refusal_of(fault))
+    return FindingsInsert(True, added=added)
+
+
+def _finding_insert(tenant: str, kind: str, row: Mapping[str, Any], source_run: str) -> Any:
+    """One finding as a `waiting` item keyed by its `finding_id`, the conflict on an id held for good doing nothing."""
+    table = cast(Table, WorkItemRow.__table__)
+    return pg_insert(table).values(
+        tenant_id=TenantId(tenant), kind=kind, item_key=row["finding_id"], payload=dict(row), source_run=source_run,
+        status="waiting", reason=None, fault=None, batch_id=None, attempts=0, deferrals=0, offers_declined=0,
+        coalesce_key=None, mistake_key=None, enqueued_at=func.now(), updated_at=func.now(),
+    ).on_conflict_do_nothing(index_elements=["tenant_id", "kind", "item_key"]).returning(table.c.item_key)
+
+
+def _refusal_of(fault: Exception) -> str:
+    """The refusal `fault` makes of an insert, in P4's order; an outage is raised again."""
+    from defender.jobs.store import is_outage
+
+    code = _sqlstate(fault)
+    if code is not None and code[:2] in _CONTENT_CLASSES:
+        return f"the database refused a finding (SQLSTATE {code})"
+    if is_outage(fault):
+        raise fault
+    _logger.error("storing findings failed with %s, which waiting cannot cure; they are refused", type(fault).__name__,
+                  exc_info=fault)
+    return f"storing the findings failed ({type(fault).__name__}" + (f", SQLSTATE {code})" if code else ")")
+
+
+def _sqlstate(fault: BaseException) -> str | None:
+    """The SQLSTATE a database error carries (the driver's error, or the one SQLAlchemy wraps), else `None`."""
+    for candidate in (fault, getattr(fault, "orig", None)):
+        code = getattr(candidate, "sqlstate", None)
+        if isinstance(code, str) and len(code) == 5:
+            return code
+    return None

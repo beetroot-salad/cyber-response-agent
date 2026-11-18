@@ -21,7 +21,6 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from defender._text import postgres_cannot_hold
 from defender.database import async_engine, newest_first_query, sessions
 from defender.jobs.errors import Conflict, NotFound
 from defender.records.formats import BatchId, CommitId, TenantId, WorkItemId
@@ -38,7 +37,11 @@ from defender.jobs.learning_models import (
     BatchRow,
     CommitChangeRow,
     CommitRow,
+    ItemRefused,
     WorkItemRow,
+    insert_findings,
+    refuse_unholdable,
+    refuse_unkeyed,
 )
 
 #: The epoch: the expiry a released batch's lease carries, so the store's one lapsed test selects it whatever the grace.
@@ -83,10 +86,6 @@ class LaneBusy(Exception):
 
 class TenantInactive(Exception):
     """The tenant is not active: no new batch and no new findings (O6)."""
-
-
-class ItemRefused(Exception):
-    """The database will never take this item (a NUL character jsonb refuses): waiting cannot cure it."""
 
 
 #: The outcomes that set an item aside, each carrying the cause code picked for it.
@@ -322,22 +321,6 @@ def _checked_since_request(last_checked: _dt.datetime | None, requested: _dt.dat
     return last_checked if last_checked >= requested else None
 
 
-def _refuse_unholdable(value: Any) -> None:
-    """Refuse, before anything is written, a value PostgreSQL could never hold (`postgres_cannot_hold`): every store
-    verb screens all the text it was given."""
-    why = postgres_cannot_hold(value)
-    if why is not None:
-        raise ItemRefused(why)
-
-
-def _refuse_unkeyed(row: Mapping[str, Any]) -> None:
-    """A finding's key is its `finding_id` as the judge made it: a string with something in it. A missing, null,
-    numeric or empty one would be keyed `'None'`, `'5'` or `''`, and a later row could collide with the made-up key."""
-    key = row.get("finding_id")
-    if not isinstance(key, str) or not key.strip():
-        raise ItemRefused(f"a finding row carries no string finding_id (got {key!r})")
-
-
 def _items_with_pr() -> Any:
     """Every item column and its batch's PR (none when it has no batch)."""
     return select(_I, _B.c.pr_number).select_from(_I.outerjoin(_B, _I.c.batch_id == _B.c.id))
@@ -450,22 +433,24 @@ class LearningStore(FeedbackVerbs):
 
     async def publish_findings(self, tenant: str, run_id: str, rows: Sequence[Mapping[str, Any]], *,
                                kind: str) -> tuple[int, int]:
-        """Queue `rows` as `kind`: `(added, duplicates)`. A finding id is unique for good (O14)."""
+        """Queue `rows` as `kind`: `(added, duplicates)`. A finding id is unique for good (O14). The insert is the
+        worker's own (`jobs.learning_models.insert_findings`): whatever it refuses is `ItemRefused` with nothing of
+        the call stored; an outage propagates."""
         if LANE_OF.get(kind) != AUTHOR_LANE:
             raise ValueError(f"not a findings kind: {kind}")
-        _refuse_unholdable([run_id, *rows])
+        refuse_unholdable([run_id, *rows])
         for row in rows:
-            _refuse_unkeyed(row)
-        added = 0
+            refuse_unkeyed(row)
         async with self._sessions.begin() as s:
             await self._require_active(s, tenant)
-            for row in rows:
-                added += await self._insert_item(s, tenant, kind, row["finding_id"], dict(row), source_run=run_id)
-        return added, len(rows) - added
+            inserted = await insert_findings(s, tenant, {kind: rows}, source_run=run_id)
+            if not inserted.stored:
+                raise ItemRefused(inserted.why or "the store refused a finding")
+        return inserted.added, len(rows) - inserted.added
 
     async def add_pitfall(self, tenant: str, row: Mapping[str, Any]) -> bool:
         """Queue one pitfall occurrence; a repeated pitfall id is ignored, a keyless row is keyed by its digest."""
-        _refuse_unholdable(row)
+        refuse_unholdable(row)
         key = str(row["pitfall_id"]) if row.get("pitfall_id") else digest(dict(row))
         mistake = mistake_key_of(row, key)
         async with self._sessions.begin() as s:
@@ -475,7 +460,7 @@ class LearningStore(FeedbackVerbs):
 
     async def enqueue_request(self, tenant: str, run_id: str, case_id: str, spec: Mapping[str, Any]) -> bool:
         """File a curation request for `case_id`; the later run wins: an older waiting request is skipped, superseded."""
-        _refuse_unholdable([run_id, case_id, spec])
+        refuse_unholdable([run_id, case_id, spec])
         async with self._sessions.begin() as s:
             await self._require_active(s, tenant)
             await _settle_requests(s, tenant)
