@@ -236,6 +236,7 @@ def _steps(paths: LoopPaths, store: Any, held: Any, hold: Any, open_delivery: Ca
            decide: Callable[..., dict], eligibility_max_age: dt.timedelta | None) -> None:
     from defender.jobs.learning_models import BRANCH_PREFIX
     from defender.learning.core import drains, store_tick
+    from defender.learning_store.tick import StoreAdapter
     from defender.tenancy import RecordsUnreachable
 
     tenant = paths.tenant
@@ -248,7 +249,11 @@ def _steps(paths: LoopPaths, store: Any, held: Any, hold: Any, open_delivery: Ca
             raise drains._Refused(f"the tenant {tenant.id}'s records could not be read: {down}", transient=True) from None
         delivery = dataclasses.replace(opened, branch_prefix=BRANCH_PREFIX[store_tick.FEEDBACK_LANE])
         ctx = Tick(store, held, hold, delivery.repository.forge, bots, str(tenant.id), eligible)
-        lane = store_tick.Tick(paths=paths, lane=store_tick.FEEDBACK_LANE, label=FEEDBACK_DRAIN_LABEL, store=store,
+        # The registry lane's tick reaches the store through the adapter bound to it (#1487 Flow 2); the feedback
+        # tick's own verbs (its lease, its records) stay on `store`.
+        bound = StoreAdapter(store, tenant=str(tenant.id), lane=store_tick.FEEDBACK_LANE,
+                             owner=store_tick.owner_name(str(FEEDBACK_DRAIN_LABEL)), thresholds=store_tick.thresholds())
+        lane = store_tick.Tick(paths=paths, lane=store_tick.FEEDBACK_LANE, label=FEEDBACK_DRAIN_LABEL, store=bound,
                                open_delivery=open_delivery, author_work=_no_work, start_box=None,
                                stop_box=_no_box, reconcile_lanes=(store_tick.FEEDBACK_LANE,), boxed=False,
                                parent=hold)

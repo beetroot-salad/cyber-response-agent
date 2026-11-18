@@ -10,8 +10,9 @@ The port's wire request names are the implementer's: tests learn them by recordi
 The tick's interface (`TickStore`) is the census's verbs without the tenant, lane, owner, threshold, `by` or settings
 argument: `batches()`, `lane_work()`, `work(statuses=, kind=)`, `claim()`, `take_over(batch_id)`, `renew(held)`,
 `record_commit(held, commit, base, start, changes)`, `in_review(held, pr, outcomes)`, `commit_record()`,
-`note_check(batch_id, reset_refusals=)`, `note_refusal(batch_id, reason)`, `needs_person(batch_id, reason)`,
-`end_review(batch_id, expect_phase=, outcome=, published=, held=, reason=)`, `expire_own(held)`, `abandon_clean(held)`,
+`note_check(batch_id, reset_refusals=)`, `note_refusal(batch_id, why)`, `needs_person(batch_id, why)` (a
+`Why[BatchCause]`, #1537), `end_review(batch_id, expect_phase=, outcome=, published=, held=, detail=, items_why=)`,
+`settle_abandon(batch_id, pr_number=, pr_state=, published=, held=)`, `expire_own(held)`, `abandon_clean(held)`,
 `abandon(batch_id)`, `end_no_commits(held, outcomes)`, `abandon_crashed(held)`; attributes `renew_every`,
 `generation_ceiling`."""
 from __future__ import annotations
@@ -29,6 +30,7 @@ from typing import Any
 
 import pytest
 
+from defender.records.learning_causes import Why
 from defender.tests.support.jobs import _job_helper as J
 from defender.tests.support.jobs import _relay1487 as R
 from defender.tests.support.jobs._job_helper import OTHER_TENANT
@@ -427,8 +429,8 @@ def _by_id(store: Any, batch_id: str) -> dict[str, Any]:
         "abandon": lambda: store.abandon(batch_id),
         "end_review": lambda: store.end_review(batch_id, expect_phase="in_review", outcome="closed", published=[], held=[]),
         "note_check": lambda: store.note_check(batch_id),
-        "note_refusal": lambda: store.note_refusal(batch_id, "the forge said no"),
-        "needs_person": lambda: store.needs_person(batch_id, "a foreign tip"),
+        "note_refusal": lambda: store.note_refusal(batch_id, Why.batch("forge_refused", "the forge said no")),
+        "needs_person": lambda: store.needs_person(batch_id, Why.batch("foreign_commits_remote", "a foreign tip")),
     }
 
 
@@ -538,7 +540,7 @@ def test_o5_another_reconcile_lanes_batch_is_closed_or_checked_but_never_taken_o
 
     _refused(E, _by_id(port, lead_review), scene.dsn, scene.tenant, but=("end_review", "note_check", "note_refusal"))
     port.note_check(lead_review)
-    assert port.note_refusal(lead_review, "the forge said no")[0] == 1
+    assert port.note_refusal(lead_review, Why.batch("forge_refused", "the forge said no"))[0] == 1
     assert port.end_review(lead_review, expect_phase="in_review", outcome="closed", published=[], held=[]) is True
 
 
@@ -589,8 +591,8 @@ def test_o5_a_listed_in_review_batch_of_the_lane_is_accepted_by_every_verb_by_id
     assert view.phase == "in_review"
 
     port.note_check(str(view.id))
-    assert port.note_refusal(str(view.id), "no")[0] == 1
-    port.needs_person(str(view.id), "a foreign tip")
+    assert port.note_refusal(str(view.id), Why.batch("forge_refused", "no"))[0] == 1
+    port.needs_person(str(view.id), Why.batch("foreign_commits_remote", "a foreign tip"))
     [batch] = call(scene.dsn, "batches", scene.tenant)
     assert batch.phase == "needs_person"
 
@@ -729,7 +731,7 @@ def test_o6_every_reader_and_reconciling_verb_is_answered_after_the_signal(scene
         got["views"] = [str(b.id) for b in port.batches()]
         got["work"], got["lane_work"], got["record"] = port.work(), port.lane_work(), port.commit_record()
         port.note_check(review)
-        got["refusal"] = port.note_refusal(review, "no")
+        got["refusal"] = port.note_refusal(review, Why.batch("forge_refused", "no"))
         got["ended"] = port.end_review(review, expect_phase="in_review", outcome="closed", published=[], held=[])
 
     R.in_post_step(scene, body, rc=143)
@@ -832,8 +834,8 @@ def _drive_every_verb(port: Any) -> None:
     target = held if held is not None else ghost
     other = str(uuid.uuid4())
     for step in (lambda: port.record_commit(target, oid(1), oid(2), oid(3), changes_of("a.md")), lambda: port.renew(target),
-                 lambda: port.in_review(target, 5, {}), lambda: port.note_check(other), lambda: port.note_refusal(other, "x"),
-                 lambda: port.needs_person(other, "x"),
+                 lambda: port.in_review(target, 5, {}), lambda: port.note_check(other), lambda: port.note_refusal(other, Why.batch("forge_refused", "x")),
+                 lambda: port.needs_person(other, Why.batch("foreign_commits_remote", "x")),
                  lambda: port.end_review(other, expect_phase="in_review", outcome="closed", published=[], held=[]),
                  lambda: port.take_over(other), lambda: port.abandon(other), lambda: port.expire_own(target),
                  lambda: port.abandon_clean(target), lambda: port.end_no_commits(target, {}),

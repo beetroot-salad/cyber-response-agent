@@ -23,8 +23,8 @@ oracle's box, its bind folders in a per-claim folder under the data root, never 
 lock and admission (waiting as today). Its requests: `batch.start(lanes=)`, the drain's publish and draft, made here
 (the draft owned by this helper, C23), its id minted here; `forge.token(min_validity=)`, a fresh token of the tenant's
 forge credential, for at most 150 s (C25: fail closed above it); `record.published(commit=)` and
-`record.refusal(kind=, reason=)`, the drain's publish outcomes written to the tenant records (O3, O4). Box: `batch`,
-over a draft this helper made.
+`record.refusal(kind=, reason=)`, the drain's publish outcomes written to the tenant records (O3, O4); and the tick's
+store, `store.*` (#1487 Flow 2, `_store_relay`). Box: `batch`, over a draft this helper made.
 
 **Endings before the container** (A3, r4.1): a learning job's in the learning entry's own words (setup refused:
 `failed: launch_refused`; cannot be started confined or the helper crashed: `failed: entry_error`; a busy lock or a
@@ -105,6 +105,13 @@ class _PostStep:
     credential: Any = None
     delivery: Any = None
     batches: dict[str, Any] = field(default_factory=dict)
+    #: The tick's store relay (`_store_relay`), made at the first store request.
+    relay: Any = None
+
+
+def post_step_state(session: Session) -> _PostStep:
+    """The post-step's state, or `Refused` (`internal`) before it is set up."""
+    return _state(session, _PostStep)
 
 
 def _state(session: Session, kind: type) -> Any:
