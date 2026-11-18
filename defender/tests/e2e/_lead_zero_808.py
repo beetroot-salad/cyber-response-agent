@@ -287,14 +287,14 @@ class Res:
         return path.read_text(encoding="utf-8") if path.is_file() else ""
 
 
-def materialize_alert(root: Path, doc: dict) -> Path:
+def materialize_alert(root: Path, doc: dict, *, label: str = "run") -> Path:
     """The on-disk run dir a driven run starts from — `_replay_harness.materialize`'s shape,
     but planting a SYNTHESIZED alert (and the record the front door settles beside it) rather
-    than copying a golden."""
+    than copying a golden. `label` names its run id: two runs of one lineage need distinct ones (#1534)."""
     from defender.tests.support.storage import _alert_plant
 
     # A run folder's name is its canonical UUID run id (#1187).
-    run_dir = root / fixture_uuid("run")
+    run_dir = root / fixture_uuid(label)
     (run_dir / "gather_raw").mkdir(parents=True)
     _alert_plant.plant_alert(run_dir, doc)
     return run_dir
