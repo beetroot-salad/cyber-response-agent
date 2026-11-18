@@ -133,3 +133,30 @@ def test_o1_each_channel_alone_is_carried(tmp_path, held):
     found = _findings(run_entry(tmp_path, grade=_holding(*held)))
     body = json.loads(found["text"])
     assert (len(body[FINDING]), len(body[QUESTIONER])) == held
+
+
+@pytest.mark.parametrize("how", ["torn-line", "unreadable"])
+@pytest.mark.parametrize("channel", ["defender", "questioner"])
+def test_p4_damage_to_one_channels_sink_alone_refuses_both_channels(tmp_path, channel, how):
+    """Both channels hold rows and only one channel's sink is damaged (a torn last line, or a directory in its place):
+    the whole findings read `malformed` or `unreadable`, no text, the ending `completed`. (P4, Flow 1 step 1)"""
+    import os
+    from pathlib import Path
+
+    marker = {"defender": "/w-b/", "questioner": "/w-c/"}[channel]
+
+    def damage_one(episode_id):
+        ep = next(Path(os.environ["DEFENDER_DATA_ROOT"]).glob(f"*/episodes/{episode_id}"))
+        sinks = sink_files(p for p in ep.rglob("*") if p.is_file())
+        [path] = [p for p in sinks if marker in p.read_text(encoding="utf-8")]
+        assert len(sinks) == 2, "premise: both channels hold rows; only one is damaged"
+        if how == "torn-line":
+            with path.open("a", encoding="utf-8") as sink:
+                sink.write('{"finding_id": "torn')
+        else:
+            path.unlink()
+            path.mkdir()
+
+    found = _findings(run_entry(tmp_path, grade=_holding(2, 2, after=damage_one)))
+    assert found["state"] == {"torn-line": "malformed", "unreadable": "unreadable"}[how], found
+    assert "text" not in found

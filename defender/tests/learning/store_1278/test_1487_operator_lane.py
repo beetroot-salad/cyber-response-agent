@@ -73,3 +73,19 @@ def test_an_outage_class_error_is_not_read_as_a_refusal(dsn, sqlstate):
     assert not isinstance(raised.value, ItemRefused)
     assert F.all_items(dsn) == []
     assert tuple(call(dsn, "publish_findings", T1, "run", rows, kind="finding")) == (1, 0)
+
+
+@pytest.mark.parametrize("make", F.OUTAGE_FAULTS, ids=F.OUTAGE_FAULT_IDS)
+def test_an_outage_with_no_sqlstate_is_not_read_as_a_refusal(dsn, make):
+    """A lost or closed connection, an interface error, a pool timeout or an invalidated connection, none carrying a
+    SQLSTATE, at the insert: it propagates, not `ItemRefused`, nothing stored, and the same call then succeeds. (r5.1
+    item 7; P4: `is_outage` names these, whatever their SQLSTATE; `_findings1487.OUTAGE_FAULTS`, the worker's retry set)"""
+    from defender.learning_store import ItemRefused
+
+    rows = [finding("run/w/0/0", run_id="run")]
+    with F.statement_fault(make(), once=True) as hit, pytest.raises(Exception) as raised:  # noqa: PT011 — not the contract
+        call(dsn, "publish_findings", T1, "run", rows, kind="finding")
+    assert hit, "premise: the insert met the fault"
+    assert not isinstance(raised.value, ItemRefused), raised.value
+    assert F.all_items(dsn) == []
+    assert tuple(call(dsn, "publish_findings", T1, "run", rows, kind="finding")) == (1, 0)

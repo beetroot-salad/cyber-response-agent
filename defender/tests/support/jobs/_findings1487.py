@@ -115,16 +115,18 @@ def fault_fired(dsn: str, name: str = "f1487") -> bool:
 
 
 @contextlib.contextmanager
-def statement_fault(exc: BaseException, *, containing: str = "INSERT INTO learning.work_items") -> Iterator[list[str]]:
+def statement_fault(exc: BaseException, *, containing: str = "INSERT INTO learning.work_items",
+                    once: bool = False) -> Iterator[list[str]]:
     """Every statement run through an engine that contains `containing` raises `exc` first (not a database error: the
-    way a bug in the insert path would surface). Yields the statements it raised for."""
+    way a bug in the insert path would surface), or only the first such statement (`once`). Yields the statements it
+    raised for."""
     from sqlalchemy import event
     from sqlalchemy.engine import Engine
 
     hit: list[str] = []
 
     def before(_conn, _cursor, statement, _parameters, _context, _many):
-        if containing in statement:
+        if containing in statement and not (once and hit):
             hit.append(statement)
             raise exc
 
@@ -165,6 +167,40 @@ REFUSED_SQLSTATES = ["22001", "22021", "22P02", "23502", "23505", "23514", "5400
 REFUSED_EXCEPTIONS = [RuntimeError("boom"), ValueError("v"), KeyError("k"), MemoryError()]
 OUTAGE_SQLSTATES = ["40P01", "55P03", "57014", "53100"]
 OUTAGE_IDS = ["deadlock", "lock-timeout", "cancel", "disk-full"]
+
+
+def _closed() -> BaseException:
+    import psycopg
+    from sqlalchemy.exc import OperationalError
+
+    return OperationalError("INSERT", {}, psycopg.OperationalError("consuming input failed: the connection is closed"))
+
+
+def _interface() -> BaseException:
+    import psycopg
+    from sqlalchemy.exc import InterfaceError
+
+    return InterfaceError("INSERT", {}, psycopg.InterfaceError("the connection is lost"))
+
+
+def _pool_timeout() -> BaseException:
+    from sqlalchemy.exc import TimeoutError as PoolTimeout
+
+    return PoolTimeout("QueuePool limit of size 10 overflow 0 reached, connection timed out, timeout 30.00")
+
+
+def _invalidated() -> BaseException:
+    import psycopg
+    from sqlalchemy.exc import DBAPIError
+
+    return DBAPIError("INSERT", {}, psycopg.DatabaseError("server closed the connection unexpectedly"),
+                      connection_invalidated=True)
+
+
+# Outages that carry no SQLSTATE (design r5 P4: "a lost connection ... pool timeout"), as the driver and the pool raise
+# them; each call makes a fresh exception. Both lanes: the worker retries them, the operator lane lets them propagate.
+OUTAGE_FAULTS = [_closed, _interface, _pool_timeout, _invalidated]
+OUTAGE_FAULT_IDS = ["connection-closed", "interface-error", "pool-timeout", "connection-invalidated"]
 
 
 def row_of_json_bytes(row: dict[str, Any], size: int, *, compact: bool = False) -> dict[str, Any]:
