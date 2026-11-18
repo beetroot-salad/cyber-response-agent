@@ -97,7 +97,7 @@ from defender.records import RunPaths
 from defender._io import write_guarded
 def f(run_dir):
     owner = RunPaths(run_dir)
-    target = owner.investigation
+    target = owner.provenance
     alias = target
     write_guarded(alias, 'report')
 """

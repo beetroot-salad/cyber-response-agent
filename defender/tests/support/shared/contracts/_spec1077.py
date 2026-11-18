@@ -181,7 +181,7 @@ VERBS = ("write", "append", "update", "open", "append_text", "start_stream", "cr
 
 #: The archive's copied set, as `ArchivedWorld` accessor names.
 ARCHIVED_WORLD_MEMBERS = (
-    "report", "investigation", "provenance", "scrub_verdict", "run_end", "lessons_loaded",
+    "investigation", "provenance", "scrub_verdict", "run_end", "lessons_loaded",
     "alert", "gather_summaries", "executed_queries", "gather_raw")
 
 
@@ -228,7 +228,6 @@ STAGE = "questioner"
 
 ACCESSOR_FOR_KIND: tuple[Accessor, ...] = (
     Accessor("alert", "run", "alert"),
-    Accessor("report", "run", "report"),
     Accessor("investigation", "run", "investigation"),
     Accessor("queries", "run", "executed_queries"),
     Accessor("gather_raw", "run", "payload", (LEAD_ID, SEQ), composing=True),
