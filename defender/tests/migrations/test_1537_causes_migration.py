@@ -46,7 +46,9 @@ PARKED = {
 ENDED_ABANDONED = {
     "no commits": ("no commits", "no_commits"), "stopped": ("stopped", "stopped"),
     "crashed": ("its holder crashed", "holder_crashed"), "lost": ("its holder was lost", "holder_lost"),
-    "person": ("abandoned by a person", "abandoned_by_person"), "text": ("something a person typed", "unrecorded"),
+    # A batch's cause is why it was parked, never who ended it (the live settle keeps the park cause): a person's abandon
+    # before #1537 overwrote that text, so there is no park cause left to give.
+    "person": ("abandoned by a person", "unrecorded"), "text": ("something a person typed", "unrecorded"),
     "none": (None, "unrecorded"),
 }
 #: (status, reason as stored today, cause) of items
@@ -69,6 +71,7 @@ ITEMS = {
     "skipped no system": ("skipped", "no-system", "unteachable_system"),
     "skipped malformed system": ("skipped", "malformed-system", "unteachable_system"),
     "skipped undeclared system": ("skipped", "undeclared-system:elastik", "unteachable_system"),
+    "held by the curator's default": ("held", "held by the curator", "curator_held"),
     "held model text": ("held", "this finding is not about the alert", "unrecorded"),
     "held no reason": ("held", None, "unrecorded"),
     "waiting stale reason": ("waiting", "reached the attempt ceiling (5)", None),

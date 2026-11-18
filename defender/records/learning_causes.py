@@ -21,7 +21,7 @@ ItemCause = Literal[
 #: Why a batch is parked or ended abandoned. `forge_credential_refused` is the one a person may release.
 BatchCause = Literal[
     "forge_credential_refused", "forge_refused", "delivery_unavailable", "foreign_commits_remote", "foreign_commits_local",
-    "foreign_pr", "holder_lost", "holder_crashed", "stopped", "no_commits", "abandoned_by_person", "unrecorded"]
+    "foreign_pr", "holder_lost", "holder_crashed", "stopped", "no_commits", "unrecorded"]
 
 ITEM_CAUSES: tuple[str, ...] = get_args(ItemCause)
 BATCH_CAUSES: tuple[str, ...] = get_args(BatchCause)

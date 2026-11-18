@@ -25,7 +25,7 @@ ITEM_CAUSES = (
     "superseded", "declined_at_gate", "consumed_no_systems", "unteachable_system", "curator_skipped", "unrecorded")
 BATCH_CAUSES = (
     "forge_credential_refused", "forge_refused", "delivery_unavailable", "foreign_commits_remote", "foreign_commits_local",
-    "foreign_pr", "holder_lost", "holder_crashed", "stopped", "no_commits", "abandoned_by_person", "unrecorded")
+    "foreign_pr", "holder_lost", "holder_crashed", "stopped", "no_commits", "unrecorded")
 
 
 def _in_list(column: str, allowed: tuple[str, ...]) -> str:
@@ -58,13 +58,14 @@ _PARKED_CAUSE = r"""
       ELSE 'unrecorded'
     END"""
 
+#: A batch's cause is why it was parked, never who ended it: one a person abandoned before #1537 kept no park cause (its
+#: text was overwritten with "abandoned by a person"), so it is `unrecorded`, the text kept as its detail.
 _ABANDONED_CAUSE = """
     CASE reason
       WHEN 'no commits' THEN 'no_commits'
       WHEN 'stopped' THEN 'stopped'
       WHEN 'its holder crashed' THEN 'holder_crashed'
       WHEN 'its holder was lost' THEN 'holder_lost'
-      WHEN 'abandoned by a person' THEN 'abandoned_by_person'
       ELSE 'unrecorded'
     END"""
 
@@ -83,6 +84,7 @@ _ITEM_CAUSE = r"""
       WHEN reason ~ '^row carries no value under ' THEN 'malformed_row'
       WHEN reason ~ '^consumed_no_systems' THEN 'consumed_no_systems'
       WHEN reason = 'declined at the gate' THEN 'declined_at_gate'
+      WHEN reason = 'held by the curator' AND status = 'held' THEN 'curator_held'
       WHEN reason IN ('no-system', 'malformed-system') OR reason ~ '^undeclared-system:' THEN 'unteachable_system'
       ELSE 'unrecorded'
     END"""
