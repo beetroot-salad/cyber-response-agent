@@ -435,6 +435,28 @@ def test_o3_a_settled_revert_abandon_on_the_tick_s_own_lane_holds_back_no_claim(
     assert len(writer.served) == 1, "a revert's settled abandon held back the author lane's claim"
 
 
+def test_o3_a_settled_revert_abandon_holds_back_no_claim_even_when_another_batch_held_the_lane_as_the_pass_began(scene, caplog):
+    """The author batch in review holds the lane as the pass begins and merges in it; a parked revert's requested abandon
+    settles in the same pass. The revert held nothing, so the merge's freed lane is claimed in that pass as it would be
+    without the revert. (O3, #1558 review)"""
+    w = scene
+    w.seed("f1")
+    writer = _lesson("f1")
+    batch_id, branch, _number = opened(w, writer, caplog)
+    revert = call(w.dsn, "claim_revert", w.t.tenant_id, owner="cli")
+    call(w.dsn, "in_review", revert, 5, {})
+    w.t.forge.add_pr(pr_row(5, revert.branch))
+    park(w.dsn, revert.batch_id)
+    _request(w, revert.batch_id)
+    merge_on_remote(w.t.p3, w.scratch, branch)
+    w.seed("f2")
+    served = len(writer.served)
+    tick(w, writer)
+    assert row(w.dsn, batch_id)["outcome"] == "merged", "premise: the author batch merged this pass"
+    assert row(w.dsn, revert.batch_id)["outcome"] == "abandoned", "premise: the revert's abandon settled this pass"
+    assert len(writer.served) == served + 1, "a revert's settled abandon held back the claim the merge made room for"
+
+
 def test_o3_an_abandon_settled_on_the_tick_s_own_lane_holds_back_its_claim_for_one_pass(scene, caplog):
     """An author batch's settled abandon gives its lane back: the claim that room makes waits for the next pass, then
     happens. (O3)"""
@@ -470,25 +492,27 @@ def test_o3_a_pr_still_open_after_its_close_is_not_settled_and_the_close_is_made
     assert (row(w.dsn, batch_id)["phase"], row(w.dsn, batch_id)["outcome"]) == ("ended", "abandoned")
 
 
-@pytest.mark.parametrize("listed", [True, False], ids=["the_repository_reads", "the_listing_fails_too"])
+@pytest.mark.parametrize("listed", ["gone", "failing", "still_listed"],
+                         ids=["the_repository_reads", "the_listing_fails_too", "the_listing_still_shows_it"])
 def test_o3_a_recorded_pr_the_forge_answers_404_for_is_no_pr_only_when_the_repository_reads(scene, caplog, listed):
     """The recorded PR answers 404. Forgejo answers 404 too for a repository the token cannot see, so a 404 alone is no
     answer: when the same pass lists the repository's PRs and the PR is not among them, the batch settles abandoned with no
-    PR; when the listing fails as well, the request waits. (O3, #1558 review)"""
+    PR; when the listing fails as well, or still shows the PR, the request waits. (O3, #1558 review)"""
     w = scene
     batch_id, _branch, number, writer = _parked_in_review(w, caplog, "f1")
     w.t.forge.refuse(f"/pulls/{number}", 404, method="GET")
-    _forget_pr(w, number)
-    if not listed:
+    if listed != "still_listed":
+        _forget_pr(w, number)
+    if listed == "failing":
         w.t.forge.refuse("/pulls", 404, method="GET")
     _request(w, batch_id)
     tick(w, writer)
     got = row(w.dsn, batch_id)
-    if listed:
+    if listed == "gone":
         assert (got["phase"], got["outcome"]) == ("ended", "abandoned"), "a PR the listing shows gone left the request waiting"
         assert w.statuses() == {"f1": "held"}
     else:
-        assert got["phase"] == "needs_person", "a 404 with the repository unreadable settled the batch"
+        assert got["phase"] == "needs_person", f"a 404 settled the batch though the listing was {listed}"
 
 
 def test_o3_a_pr_merged_in_the_gap_after_the_close_is_settled_merged_never_abandoned(scene, caplog):

@@ -231,6 +231,17 @@ class BatchView:
         the tick's selection, its refusal counting and the wake gate alike."""
         return self.phase == "needs_person" and self.abandon_requested_at is not None
 
+    @property
+    def blocks_lane(self) -> bool:
+        """Parked, it still holds its lane: a claim there waits for it (an author or registry batch does, a revert does
+        not; `_busy` is the rule's database reading)."""
+        return parked_blocks_lane(self.kind)
+
+
+def parked_blocks_lane(kind: str) -> bool:
+    """Whether a parked batch of `kind` holds its lane (#1485): the one reading, for the parked list and the tick alike."""
+    return kind in AUTHORING_KINDS
+
 
 @dataclasses.dataclass(frozen=True)
 class Acted:
@@ -542,7 +553,7 @@ class LearningStore(FeedbackVerbs):
             batches.setdefault(r.id, r)
             if r.item_kind is not None:
                 items.setdefault(r.id, []).append((r.item_kind, r.item_key))
-        return [ParkedBatchView(id=b.id, kind=b.kind, lane=b.lane, blocks_lane=b.kind in AUTHORING_KINDS, branch=b.branch,
+        return [ParkedBatchView(id=b.id, kind=b.kind, lane=b.lane, blocks_lane=parked_blocks_lane(b.kind), branch=b.branch,
                                 pr_number=b.pr_number, reason=b.reason, created_at=b.created_at,
                                 items=tuple(items.get(b.id, ())), cause=b.cause, parked_at=b.parked_at,
                                 releasable=b.cause == RELEASABLE_CAUSE,

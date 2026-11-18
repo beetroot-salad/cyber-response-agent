@@ -469,7 +469,7 @@ class Tick:
             from defender.jobs.learning_models import BRANCH_PREFIX
 
             delivery = dataclasses.replace(delivery, branch_prefix=BRANCH_PREFIX[self.lane])
-            return self._opened(delivery, review, lapsed, requested, held=work.busy)
+            return self._opened(delivery, review, lapsed, requested)
 
     def tend(self, delivery: TenantDelivery) -> None:
         """Reconcile and recover with no claim, over a delivery the caller opened (the feedback tick's
@@ -479,8 +479,7 @@ class Tick:
             self._opened(delivery, review, lapsed, requested, claim=False)
 
     def _opened(self, delivery: TenantDelivery, review: list[Any], lapsed: list[Any], requested: list[Any], *,
-                claim: bool = True, held: bool = False) -> int:
-        """`held`: the store found this tick's lane held (a claim must wait) when the pass began."""
+                claim: bool = True) -> int:
         from defender.learning.author.version_control.store_delivery import StoreRecord
 
         record = StoreRecord.of(self.store.commit_record(self.tenant_id))
@@ -491,13 +490,13 @@ class Tick:
         for b in requested:
             settled = self._abandon(delivery, b, record,
                                     [i for i in items if i.batch_id == b.id and i.status == "in_batch"])
-            freed_own |= held and settled and b.lane == self.lane
+            freed_own |= settled and b.lane == self.lane and b.blocks_lane
         for b in lapsed:
             self._recover(delivery, b, record)
         # A person's abandon just freed this tick's own lane: the claim it makes room for waits for the next pass, so one
         # tick does not both end a batch and start authoring over what that batch gave back. Another reconciled lane's
-        # abandon frees that lane, not this one, and a lane no batch held (a revert never holds it) had nothing to free:
-        # neither holds anything back. Which batches hold a lane is the store's rule (`lane_work`), not read here.
+        # abandon frees that lane, not this one, and a batch that never held the lane (a revert) frees nothing: neither
+        # holds anything back. Which parked batches hold a lane is the store's reading (`blocks_lane`).
         return self._claim(delivery) if claim and not freed_own else 0
 
     # -- counting what the forge said ----------------------------------------------------------------
@@ -705,8 +704,12 @@ class Tick:
             published, held = read
         settled = self.store.settle_abandon(self.tenant_id, str(b.id), pr_number=number,
                                   pr_state=None if pr is None else pr.status, published=published, held=held)
-        _logger.info(f"{self.label}: batch {b.id}'s requested abandon is settled "
-                     f"({'no PR' if pr is None else f'PR #{number} {pr.status}'})")
+        seen = "no PR" if pr is None else f"PR #{number} {pr.status}"
+        if settled:
+            _logger.info(f"{self.label}: batch {b.id}'s requested abandon is settled ({seen})")
+        else:
+            _logger.warning(f"{self.label}: batch {b.id}'s requested abandon was not settled ({seen}): the batch is no "
+                            "longer parked with a request (a person released it)")
         return bool(settled)
 
     @staticmethod
