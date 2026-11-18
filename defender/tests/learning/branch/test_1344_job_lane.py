@@ -603,6 +603,7 @@ class SpendingSibling(J.FakeSibling):
     def _bill(self, label: str, usage: dict) -> None:
         from defender.records import SessionPaths
         from defender.records import session_store as ss
+        from defender.tests.storage.verdict_1534 import _spec1534 as V
         from defender.tests.support.shared._locations_1210 import fixture_runs_base
         from defender.tests.support.shared.contracts._spec1077 import fixture_run
 
@@ -618,6 +619,7 @@ class SpendingSibling(J.FakeSibling):
             _row(store, arm, usage)
             ss.write_case_pointer(fixture_run(self.episode_dir / "runs" / arm), case_id=case_id,
                                   store_path=store.path, session_id=fork)
+            V.plant(store, J._record_for(arm, {}))  # the sibling's closing: the judge reads each arm's record
 
 
 def _label_of(argv: list[str]) -> str | None:
