@@ -29,6 +29,7 @@ from defender.tests.support.learning.core._release1537 import (
     row,
     why,
     set_held,
+    settle_abandon,
 )
 from defender.tests.support.learning.core._store1278 import (
     AUTHOR_LANE,
@@ -260,18 +261,23 @@ async def test_o2_a_batch_that_is_not_parked_is_a_conflict_naming_its_phase(dsn)
             _same(dsn, held.batch_id, before)
 
 
-async def test_o2_a_pending_abandon_request_refuses_the_release_and_the_request_refuses_a_second_one(dsn):
-    """With a request recorded, release and a second request are Conflicts and change nothing; before it, both are accepted on another batch. (O2, O3, PR3)"""
+async def test_o2_a_release_withdraws_a_pending_abandon_request_and_the_request_refuses_a_second_one(dsn):
+    """A second request is a Conflict and changes nothing. A release is the person's later word: it takes the batch up
+    again and clears the request, so the loop's settle then finds nothing to settle. (O2, O3, PR3; #1558 review: a request
+    the forge never lets settle has a way out)"""
     async with learning_store(dsn) as store:
         batch = await _review_parked(store, dsn, BLUE, "f1")
         await request_abandon(store, BLUE, batch.batch_id, actor=ACTOR)
         before = row(dsn, batch.batch_id)
         with pytest.raises(Conflict):
-            await release_batch(store, BLUE, batch.batch_id, actor=ACTOR)
-        with pytest.raises(Conflict):
             await request_abandon(store, BLUE, batch.batch_id, actor="u-other")
         _same(dsn, batch.batch_id, before)
         assert before["abandon_requested_by"] == ACTOR, "the second request did not replace the first's actor"
+        await release_batch(store, BLUE, batch.batch_id, actor=ACTOR)
+        got = row(dsn, batch.batch_id)
+        assert (got["phase"], got["abandon_requested_at"], got["abandon_requested_by"]) == ("in_review", None, None)
+        assert await settle_abandon(store, BLUE, batch.batch_id, pr_number=9, pr_state="closed") is False
+        assert row(dsn, batch.batch_id)["phase"] == "in_review", "a withdrawn request was settled"
 
 
 async def test_o2_a_working_release_beside_another_working_batch_on_the_lane_is_refused_and_released_once_it_is_gone(dsn):
@@ -628,7 +634,7 @@ async def test_o4_an_outcome_that_sets_an_item_aside_cannot_be_made_without_its_
 
 
 async def test_o5_the_parked_view_carries_cause_parked_at_releasable_the_request_and_last_checked(dsn):
-    """A credential-parked batch lists releasable with its cause, `parked_at` and `last_checked` as stored; a request makes it not releasable and shows when; another cause is not releasable. (O5)"""
+    """A credential-parked batch lists releasable with its cause, `parked_at` and `last_checked` as stored; a request shows when and leaves it releasable (a release withdraws the request); another cause is not releasable. (O5)"""
     async with learning_store(dsn) as store:
         mine = await _review_parked(store, dsn, BLUE, "f1")
         got = {v.id: v for v in await store.parked(BLUE, limit=5)}[mine.batch_id]
@@ -637,7 +643,7 @@ async def test_o5_the_parked_view_carries_cause_parked_at_releasable_the_request
         assert (got.parked_at, got.last_checked) == (stored["parked_at"], stored["last_checked"])
         await request_abandon(store, BLUE, mine.batch_id, actor=ACTOR)
         asked = {v.id: v for v in await store.parked(BLUE, limit=5)}[mine.batch_id]
-        assert (asked.releasable, asked.abandon_requested_at) == (False, row(dsn, mine.batch_id)["abandon_requested_at"])
+        assert (asked.releasable, asked.abandon_requested_at) == (True, row(dsn, mine.batch_id)["abandon_requested_at"])
         other = await store.claim_revert(BLUE, owner="host-r")
         park(dsn, other.batch_id, cause="forge_refused")
         views = {v.id: v for v in await store.parked(BLUE, limit=5)}

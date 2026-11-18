@@ -222,7 +222,7 @@ class ParkedBatch(BaseModel):
     #: Why it is parked: a cause from a closed list (`reason` is the detail text beside it).
     cause: str | None
     parked_at: Instant | None
-    #: A person may release it: parked for a credential refusal and no abandon requested.
+    #: A person may release it: parked for a credential refusal (a release withdraws a pending abandon request).
     releasable: bool
     #: Set once a person asked to abandon it and until the loop carries it out.
     abandon_requested_at: Instant | None

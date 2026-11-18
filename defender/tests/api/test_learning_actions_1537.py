@@ -204,10 +204,9 @@ def test_o2_a_credential_parked_batch_with_no_pr_is_released_to_working(s):
     assert _listed(s.ann, T1, "parked-batches") == []
 
 
-def test_o2_release_is_refused_for_every_other_cause_and_for_a_pending_request_naming_why_until_neither_holds(s):
-    """One parked batch: each cause other than `forge_credential_refused` is a 409 naming the cause, a pending abandon
-    request is a 409 naming the request; every refusal leaves the row as it was; with the credential cause and no
-    request the same batch releases (control). (O2, PR3)"""
+def test_o2_release_is_refused_for_every_other_cause_and_withdraws_a_pending_request(s):
+    """One parked batch: each cause other than `forge_credential_refused` is a 409 naming the cause and leaves the row as
+    it was; with the credential cause the same batch releases, a pending abandon request withdrawn by it. (O2, PR3)"""
     dsn = s.world.dsn
     batch = on_store(dsn, in_review, T1, "f1")
     park(dsn, batch)
@@ -219,13 +218,10 @@ def test_o2_release_is_refused_for_every_other_cause_and_for_a_pending_request_n
         assert names(r.json()["detail"], cause), (cause, r.json()["detail"])  # FC-3
         assert batch_row(dsn, batch) == row, cause
     set_batch(dsn, batch, cause=CREDENTIAL, abandon_requested_at=OLD, abandon_requested_by=user_id(s.ann))
-    row = batch_row(dsn, batch)
     pending = _release_batch(s.ann, T1, batch)
-    assert pending.status_code == 409, pending.text
-    assert names(pending.json()["detail"], "abandon"), pending.json()["detail"]  # FC-3
-    assert batch_row(dsn, batch) == row
-    set_batch(dsn, batch, abandon_requested_at=None, abandon_requested_by=None)
-    assert _release_batch(s.ann, T1, batch).status_code == 200
+    assert pending.status_code == 200, pending.text
+    got = batch_row(dsn, batch)
+    assert (got["phase"], got["abandon_requested_at"], got["abandon_requested_by"]) == ("in_review", None, None), got
 
 
 def test_o2_a_batch_parked_from_working_is_not_released_while_another_batch_works_on_its_lane(s):
@@ -370,8 +366,8 @@ def test_o4_the_lists_carry_each_rows_stored_cause(s):
     assert wire["cause"] == "foreign_pr"
 
 
-def test_o5_a_parked_batch_is_releasable_only_for_the_credential_cause_with_no_pending_request(s):
-    """Every cause but `forge_credential_refused` is not releasable; the credential cause is, until a request is pending. (O5)"""
+def test_o5_a_parked_batch_is_releasable_only_for_the_credential_cause_a_pending_request_or_not(s):
+    """Every cause but `forge_credential_refused` is not releasable; the credential cause is, with a request pending too. (O5)"""
     dsn = s.world.dsn
     batch = on_store(dsn, in_review, T1, "f1")
     park(dsn, batch)
@@ -384,9 +380,7 @@ def test_o5_a_parked_batch_is_releasable_only_for_the_credential_cause_with_no_p
         set_batch(dsn, batch, cause=cause)
         assert releasable() is False, cause
     set_batch(dsn, batch, cause=CREDENTIAL, abandon_requested_at=OLD, abandon_requested_by=user_id(s.ann))
-    assert releasable() is False
-    set_batch(dsn, batch, abandon_requested_at=None, abandon_requested_by=None)
-    assert releasable() is True
+    assert releasable() is True, "a pending request leaves the batch releasable: a release withdraws it"
 
 
 def test_o5_parked_at_and_a_request_show_and_last_checked_shows_for_a_request_only_from_the_request_on(s):

@@ -686,14 +686,14 @@ async def release_learning_item(deps: Deps, caller: LearningManager, item_id: Wo
 @learning_work.post("/batches/{batch_id}/release", responses=responses(404, 409))
 async def release_parked_batch(deps: Deps, caller: LearningManager, batch_id: BatchId) -> BatchReleased:
     """Release a batch parked for a credential refusal: the loop takes it up again from where it was (`in_review` when it
-    has a PR, `working` on an already lapsed lease when it has none). Refused for another cause, a pending abandon request,
-    or while another batch is working on its lane."""
+    has a PR, `working` on an already lapsed lease when it has none), withdrawing a pending abandon request. Refused for another
+    cause, or while another batch is working on its lane."""
     return await deps.learning_work.release_batch(caller, batch_id)
 
 
 @learning_work.post("/batches/{batch_id}/abandon", status_code=status.HTTP_202_ACCEPTED, responses=responses(404, 409))
 async def abandon_parked_batch(deps: Deps, caller: LearningManager, batch_id: BatchId) -> AbandonRequested:
-    """Ask for a parked batch to be abandoned. The request is recorded now and cannot be withdrawn; the loop's next pass
+    """Ask for a parked batch to be abandoned. The request is recorded now (a release withdraws it); the loop's next pass
     reads the batch's PR on the forge and carries it out (its PR closed and kept, its items held)."""
     return await deps.learning_work.request_abandon(caller, batch_id)
 

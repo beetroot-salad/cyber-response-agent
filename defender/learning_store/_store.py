@@ -185,7 +185,7 @@ class ParkedBatchView:
     created_at: _dt.datetime
     items: tuple[tuple[str, str], ...]
     #: Why it is parked (#1537 PR1); `parked_at` when (`None` for a batch parked before #1537); `releasable`: the cause is a
-    #: credential refusal and no abandon is requested; `abandon_requested_at`: a person asked, the loop has not yet carried
+    #: credential refusal (a release withdraws a pending abandon request); `abandon_requested_at`: a person asked, the loop has not yet carried
     #: it out; `last_checked`: for a requested batch, the loop's last look at it since the request (else as stored).
     cause: str | None = None
     parked_at: _dt.datetime | None = None
@@ -545,7 +545,7 @@ class LearningStore(FeedbackVerbs):
         return [ParkedBatchView(id=b.id, kind=b.kind, lane=b.lane, blocks_lane=b.kind in AUTHORING_KINDS, branch=b.branch,
                                 pr_number=b.pr_number, reason=b.reason, created_at=b.created_at,
                                 items=tuple(items.get(b.id, ())), cause=b.cause, parked_at=b.parked_at,
-                                releasable=b.cause == RELEASABLE_CAUSE and b.abandon_requested_at is None,
+                                releasable=b.cause == RELEASABLE_CAUSE,
                                 abandon_requested_at=b.abandon_requested_at,
                                 last_checked=_checked_since_request(b.last_checked, b.abandon_requested_at))
                 for b in batches.values()]
@@ -846,14 +846,13 @@ class LearningStore(FeedbackVerbs):
     async def release_batch(self, tenant: str, batch_id: str, *, actor: str) -> Acted:
         """A person's release of a batch parked for a credential refusal: its refusal count resets and the loop takes it
         up again from where it was. With a PR it returns to review; without one it returns to working on a lease that has
-        already lapsed, so the next recovery pass takes it over as it would a crashed holder's batch. `NotFound`;
-        `Conflict` for a batch not parked, parked for another cause, with an abandon requested, or while another batch
-        is working on its lane."""
+        already lapsed, so the next recovery pass takes it over as it would a crashed holder's batch. A pending abandon
+        request is withdrawn: the release is the person's later word (and the way out of a request the forge never lets
+        settle). `NotFound`; `Conflict` for a batch not parked, parked for another cause, or while another batch is
+        working on its lane."""
         try:
             async with self._sessions.begin() as s:
                 row = await self._parked_batch(s, tenant, batch_id)
-                if row.abandon_requested_at is not None:
-                    raise Conflict("an abandon of this batch was requested")
                 if row.cause != RELEASABLE_CAUSE:
                     raise Conflict(f"the batch was parked for {row.cause}: only {RELEASABLE_CAUSE} is released")
                 await _lock_lane(s, str(row.tenant_id), row.lane)
@@ -861,7 +860,8 @@ class LearningStore(FeedbackVerbs):
                     _B.c.tenant_id == row.tenant_id, _B.c.lane == row.lane, _B.c.phase == "working").limit(1))).first()
                 if busy is not None:
                     raise Conflict("another batch is working on this lane: try again later")
-                cleared: dict[str, Any] = {"refusals": 0, "cause": None, "reason": None, "parked_at": None}
+                cleared: dict[str, Any] = {"refusals": 0, "cause": None, "reason": None, "parked_at": None,
+                                           "abandon_requested_at": None, "abandon_requested_by": None}
                 if row.pr_number is not None:
                     values = {**cleared, "phase": "in_review", "lease_owner": None, "lease_expiry": None}
                 else:
@@ -876,7 +876,7 @@ class LearningStore(FeedbackVerbs):
 
     async def request_abandon(self, tenant: str, batch_id: str, *, actor: str) -> AbandonAsked:
         """A person asks for a parked batch to be abandoned. Only the request is recorded: what the batch's PR is on the
-        forge is the loop's to read, and it ends the batch (`settle_abandon`). A request cannot be withdrawn. `NotFound`;
+        forge is the loop's to read, and it ends the batch (`settle_abandon`); a release withdraws it first. `NotFound`;
         `Conflict` for a batch not parked or already requested."""
         async with self._sessions.begin() as s:
             row = await self._parked_batch(s, tenant, batch_id)

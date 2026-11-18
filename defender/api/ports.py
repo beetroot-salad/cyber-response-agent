@@ -136,8 +136,8 @@ class LearningWorkRepository(Protocol):
         ...
 
     async def release_batch(self, principal: Principal, batch_id: BatchId) -> BatchReleased:
-        """Release a batch parked for a credential refusal. `NotFound`; `Conflict` for another phase or cause, a pending
-        abandon request, or another batch working on the lane."""
+        """Release a batch parked for a credential refusal. `NotFound`; `Conflict` for another phase or cause, or another
+        batch working on the lane; a pending abandon request is withdrawn."""
         ...
 
     async def request_abandon(self, principal: Principal, batch_id: BatchId) -> AbandonRequested:
