@@ -267,7 +267,7 @@ def _preflight(tmp_path, monkeypatch, data_root, *, working_tree_edit: bool = Fa
             address = (f"http://127.0.0.1:{H.free_port()}" if unreachable_proxy
                        else url if proxy_address else None)
             run = S.launch(tmp_path, r.est, calls=r.calls, oracle=oracle if oracle is not None else S.oracle(
-                then=S.submit(r.idp.payload, S.EMPTY_CLAIM)),
+                then=S.submit()),
                 verifier=S.passing_verifier(), issuer_transport=r.bao, proxy_url=address,
                 directory=r.records, after_source=r.after_source, **seams)
             if settle is not None:
@@ -369,7 +369,7 @@ def test_p3_preflight_with_no_proxy_address_is_refused_once_and_contacts_no_open
 def _side_lookups(*qs: str) -> S.ScriptedModel:
     """An oracle whose first requests (any world's) each look idp up through the door, then submit."""
     return S.oracle(*[S.run_query("idp", "query", S.query_params(q)) for q in qs],
-                    then=S.submit(S.default_calls()[0].payload, S.EMPTY_CLAIM))
+                    then=S.submit())
 
 
 def _sign_requests(bao: A.OpenBaoStandIn) -> int:
@@ -406,7 +406,7 @@ class HeldOracle(S.ScriptedModel):
 def _one_failing_lookup() -> HeldOracle:
     """Exactly one lookup, answered first; every later request submits."""
     return HeldOracle(S.run_query("idp", "query", S.query_params("user:bob")),
-                      then=S.submit(S.default_calls()[0].payload, S.EMPTY_CLAIM))
+                      then=S.submit())
 
 
 def _calls_per_world(ep: Any) -> dict[str, int]:
@@ -505,7 +505,7 @@ def test_p5_a_proxy_unreachable_during_the_live_reads_refuses_the_pass_before_ca
     """No proxy at the handed address: the live read is an `access` fault, so the pass is `refused`
     naming the credential proxy, no unservable world, and calibration never starts (the oracle is
     never asked). Today it reads `accepted` (G25). #1363 O6, D2."""
-    oracle = S.oracle(then=S.submit(S.default_calls()[0].payload, S.EMPTY_CLAIM))
+    oracle = S.oracle(then=S.submit())
     run, outcome, bao, _tap, merged, _wt = _preflight(
         tmp_path, monkeypatch, data_root, oracle=oracle, unreachable_proxy=True)
     assert outcome is not None, run.message
@@ -522,7 +522,7 @@ def test_p6_no_credential_set_for_the_read_system_refuses_the_pass_naming_it(
     """No credential set stored for idp: the first live read is a `setup` fault, so the pass is `refused` naming
     our setup for idp, with no unservable world; the second live read is never made, nor any oracle turn.
     #1363 O4, O5, O6"""
-    oracle = S.oracle(then=S.submit(S.default_calls()[0].payload, S.EMPTY_CLAIM))
+    oracle = S.oracle(then=S.submit())
     run, outcome, _bao, tap, merged, _wt = _preflight(
         tmp_path, monkeypatch, data_root, credential_set=False, source="idp2", oracle=oracle)
     assert outcome is not None, run.message
@@ -539,7 +539,7 @@ def test_p5b_a_sign_that_fails_at_the_first_read_refuses_the_pass_before_calibra
         tmp_path, monkeypatch, data_root):
     """OpenBao refuses the first sign: access is lost at the first live read, the pass is `refused` naming the
     credential proxy, calibration never starts, and no sign is tried again. #1363 O1, O5, O6, D8"""
-    oracle = S.oracle(then=S.submit(S.default_calls()[0].payload, S.EMPTY_CLAIM))
+    oracle = S.oracle(then=S.submit())
     run, outcome, bao, tap, merged, _wt = _preflight(
         tmp_path, monkeypatch, data_root, source="idp2", oracle=oracle, sign_script=[(0, 503)])
     assert outcome is not None, run.message
@@ -574,7 +574,7 @@ def test_p5c_a_pass_whose_reads_need_no_live_proxied_call_still_proves_it_can_si
     proxy. Pre-flight is the gate before siblings launch, so it signs once up front all the same: a sign that
     fails refuses the pass naming the token, before any oracle turn; one that succeeds is the only sign.
     Control: the succeeding sign. Review of #1468 (finding 3)."""
-    oracle = S.oracle(then=S.submit(S.default_calls()[0].payload, S.EMPTY_CLAIM))
+    oracle = S.oracle(then=S.submit())
     run, outcome, bao, tap, merged, _wt = _preflight(
         tmp_path, monkeypatch, data_root, source="unproxied", oracle=oracle,
         sign_script=[(0, sign_answer)])

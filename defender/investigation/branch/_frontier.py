@@ -14,7 +14,7 @@ from pathlib import Path
 from collections.abc import Callable, Iterator
 from typing import Any
 
-from pydantic_ai.messages import ModelRequest, RetryPromptPart, ToolCallPart, ToolReturnPart
+from pydantic_ai.messages import RetryPromptPart, ToolCallPart, ToolReturnPart
 
 from defender import _clock
 from defender.records import Run, RUN_LAYOUT, RunPaths, artifact_dir
@@ -304,24 +304,6 @@ def _lead_of(name: str) -> str:
     """The lead a per-lead entry belongs to: the name up to the first dot (`l-001/`,
     `l-001.lead.json`, `l-001.md`). Suffix-stripping, so an unknown shape is not dropped."""
     return name.split(".", 1)[0]
-
-
-def carried_retries(prefix: list) -> dict[str, int]:
-    """The retry count each tool carries into the step after `prefix` — the framework's own
-    bookkeeping, replayed over the conversation (rev 5 C1)."""
-    retries: dict[str, int] = {}
-    for message in prefix:
-        if not isinstance(message, ModelRequest):
-            continue
-        failed = {p.tool_name for p in message.parts
-                  if isinstance(p, RetryPromptPart) and p.tool_name}
-        succeeded = {p.tool_name for p in message.parts if isinstance(p, ToolReturnPart)}
-        if not failed and not succeeded:
-            continue
-        carried = {tool: n for tool, n in retries.items() if tool not in succeeded}
-        carried.update({tool: retries.get(tool, 0) + 1 for tool in failed})
-        retries = carried
-    return {tool: n for tool, n in retries.items() if n}
 
 
 def lead_records(run: Run) -> Iterator[tuple[str, tuple[Any, ...]]]:

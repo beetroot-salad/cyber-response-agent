@@ -72,7 +72,6 @@ COINED = {
     "exc.sandbox": "OracleSandboxError",
     "fn.settings": "oracle_settings",
     "tool.run_query": "run_query",
-    "tool.forge": "forge",
     "tool.record_fact": "record_fact",
     "tool.python": "python",
     "tool.re_ask": "re_ask",
@@ -602,11 +601,6 @@ def run_query(system: str, verb: str, params: Mapping[str, Any] | None = None) -
                                            "params": dict(params or {})})
 
 
-def forge(forged_id: str, fact_id: str, system: str, row: Mapping[str, Any]) -> Move:
-    return Move(COINED["tool.forge"], {"forged_id": forged_id, "fact_id": fact_id,
-                                       "system": system, "row": dict(row)})
-
-
 def record_fact(entity: str, field_: str, value: Any) -> Move:
     return Move(COINED["tool.record_fact"], {"entity": entity, "field": field_, "value": value})
 
@@ -622,12 +616,15 @@ def re_ask(spec: Any) -> Move:
     return Move(COINED["tool.re_ask"], args)
 
 
-def check(served: Any, claim_: Mapping[str, Any] | None = None) -> Move:
-    return Move(COINED["tool.check"], {"served": served, "claim": dict(claim_ or claim())})
+def check(handin_: Mapping[str, Any] | None = None) -> Move:
+    """The oracle's `check` on a literal hand-in (`handin(...)`; none is the empty patch)."""
+    return Move(COINED["tool.check"], dict(handin_ if handin_ is not None else handin()))
 
 
-def submit(served: Any, claim_: Mapping[str, Any] | None = None) -> Move:
-    return Move(COINED["tool.submit"], {"served": served, "claim": dict(claim_ or claim())})
+def submit(handin_: Mapping[str, Any] | None = None) -> Move:
+    """The oracle's `submit` of a literal hand-in (`handin(...)`; none is the empty patch,
+    which serves the base unchanged)."""
+    return Move(COINED["tool.submit"], dict(handin_ if handin_ is not None else handin()))
 
 
 def verdict(passed: bool, reason: str = "the fact's telemetry is present and plausible") -> Move:
@@ -638,42 +635,109 @@ def text_only(text: str = "I could not decide what to serve.") -> Move:
     return Move(None, text=text)
 
 
-def claim(*, added: Iterable[Mapping] = (), removed: Iterable[Mapping] = (),
-          changed: Iterable[Mapping] = (), counts: Iterable[Mapping] = (),
-          entity_refs: Iterable[Mapping] = ()) -> dict:
-    """A claim document, as `check` and `submit` take it."""
-    return {"added": [dict(a) for a in added], "removed": [dict(r) for r in removed],
-            "changed": [dict(c) for c in changed], "counts": [dict(c) for c in counts],
-            "entity_refs": [dict(e) for e in entity_refs]}
+def handin(*ops: Mapping[str, Any], entity_refs: Iterable[Mapping] = (),
+           proofs: Iterable[Mapping] = ()) -> dict:
+    """A hand-in document (#1543), as `check` and `submit` take it: a JSON Patch on the base."""
+    return {"patch": [dict(o) for o in ops], "entity_refs": [dict(e) for e in entity_refs],
+            "proofs": [dict(p) for p in proofs]}
 
 
-EMPTY_CLAIM = claim()
+EMPTY = handin()
 
 
-def added(forged_id: str, fact_id: str) -> dict:
-    return {"forged_id": forged_id, "fact_id": fact_id}
+def op_add(path: str, row: Any, *, forged_id: str, fact_id: str) -> dict:
+    """Add one forged row into a list (`path` at an index, or ending `/-`)."""
+    return {"op": "add", "path": path, "value": row, "forged_id": forged_id, "fact_id": fact_id}
 
 
-def removed(row: Mapping[str, Any], *, system: str, verb: str, params: Mapping[str, Any],
-            count: int) -> dict:
-    return {"row": dict(row), "side_query": {"system": system, "verb": verb,
-                                             "params": dict(params)}, "count": count}
+def op_add_frozen(path: str, *, forged_id: str, fact_id: str) -> dict:
+    """Serve a row frozen in this world by its id: the host fills in its value."""
+    return {"op": "add", "path": path, "forged_id": forged_id, "fact_id": fact_id}
+
+
+def op_remove(path: str, *, fact_id: str) -> dict:
+    return {"op": "remove", "path": path, "fact_id": fact_id}
+
+
+def op_replace(path: str, value: Any, *, fact_id: str) -> dict:
+    return {"op": "replace", "path": path, "value": value, "fact_id": fact_id}
+
+
+def op_test(path: str, value: Any) -> dict:
+    return {"op": "test", "path": path, "value": value}
+
+
+def proof(system: str, verb: str, params: Mapping[str, Any] | None = None) -> dict:
+    """A proof (check 5): a query whose answer selects a row the patch removes."""
+    return {"system": system, "verb": verb, "params": dict(params or {})}
+
+
+def _canon(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, default=str)
+
+
+def _pointer(path: tuple[str, ...]) -> str:
+    return "".join("/" + str(p).replace("~", "~0").replace("/", "~1") for p in path)
+
+
+def _patch_ops(base: Any, served: Any, path: tuple[str, ...], fact_id: str,  # noqa: C901, PLR0913 — one arm per JSON shape pair
+               forged: Mapping[str, str], out: list[dict]) -> None:
+    if isinstance(base, dict) and isinstance(served, dict):
+        for key in base:
+            if key not in served:
+                out.append(op_remove(_pointer((*path, key)), fact_id=fact_id))
+        for key in served:
+            if key not in base:
+                # A new key: no hand-in may add one; spelled so the host refuses it.
+                out.append({"op": "add", "path": _pointer((*path, key)), "value": served[key],
+                            "fact_id": fact_id, "forged_id": f"key-{key}"})
+            else:
+                _patch_ops(base[key], served[key], (*path, key), fact_id, forged, out)
+        return
+    if isinstance(base, list) and isinstance(served, list):
+        import difflib
+        matcher = difflib.SequenceMatcher(a=[_canon(x) for x in base],
+                                          b=[_canon(x) for x in served], autojunk=False)
+        # Last span first, so the indices of earlier spans still hold.
+        for tag, i1, i2, j1, j2 in reversed(matcher.get_opcodes()):
+            if tag == "equal":
+                continue
+            olds, news = base[i1:i2], served[j1:j2]
+            if len(olds) == len(news) and not [n for n in news if _canon(n) in forged]:
+                for k in range(len(olds) - 1, -1, -1):
+                    _patch_ops(olds[k], news[k], (*path, str(i1 + k)), fact_id, forged, out)
+                continue
+            for k in range(i2 - 1, i1 - 1, -1):
+                out.append(op_remove(_pointer((*path, str(k))), fact_id=fact_id))
+            for k, new in enumerate(news):
+                fid = forged.get(_canon(new), f"added-{i1 + k}")
+                out.append(op_add(_pointer((*path, str(i1 + k))), new, forged_id=fid,
+                                  fact_id=fact_id))
+        return
+    if _canon(base) != _canon(served):
+        out.append(op_replace(_pointer(path), served, fact_id=fact_id))
+
+
+def patch_to(base: Any, served: Any, *, fact_id: str,
+             forged: Mapping[str, Any] | None = None,
+             facts: Mapping[str, str] | None = None,
+             entity_refs: Iterable[Mapping] = (), proofs: Iterable[Mapping] = ()) -> dict:
+    """The hand-in that turns `base` into `served` (a test convenience): `forged` maps each
+    forged row's id to its row (added rows matching one are added under that id), every
+    operation names `fact_id` (or `facts[forged_id]` for a forged row's add)."""
+    by_row = {_canon(row): fid for fid, row in (forged or {}).items()}
+    ops: list[dict] = []
+    _patch_ops(base, served, (), fact_id, by_row, ops)
+    for op in ops:
+        if op["op"] == "add" and facts and op.get("forged_id") in facts:
+            op["fact_id"] = facts[op["forged_id"]]
+    return handin(*ops, entity_refs=entity_refs, proofs=proofs)
 
 
 def re_asked(*, system: str, verb: str, params: Mapping[str, Any]) -> dict:
     """A re-ask (#1385), as the `re_ask` tool takes it: the call's own question, bounded at the
     branch point."""
     return {"system": system, "verb": verb, "params": dict(params)}
-
-
-def changed(entity: str, field_: str, old: Any, new: Any) -> dict:
-    return {"entity": entity, "field": field_, "old": old, "new": new}
-
-
-def counted(group: str, *, base: int, added_: int = 0, removed_: int = 0,
-            served: int | None = None) -> dict:
-    return {"group": group, "base": base, "added": added_, "removed": removed_,
-            "served": base + added_ - removed_ if served is None else served}
 
 
 def entity_ref(forged_id: str, column: str, entity: str) -> dict:
@@ -809,6 +873,10 @@ class ScriptedModel:
         return out
 
 
+#: How the oracle opens a call's own turn (`Oracle._start_call`).
+CALL_TURN = "A new call to serve."
+
+
 class Routed:
     """A model double that hands each request to the scripted double whose MARKER the
     request's inbound text carries (a world's fact statement, or a call's params). It injects
@@ -839,6 +907,11 @@ class Routed:
 
     def __call__(self, messages: list[Any], info: Any) -> Any:
         text = _messages_text(messages) + "\n" + (getattr(info, "instructions", None) or "")
+        if self.last_wins:
+            # Call routing reads the current call's own turn: the prefix before it lists this
+            # world's earlier servings (#1543), whose calls carry other calls' markers.
+            turn = text.rfind(CALL_TURN)
+            text = text[turn:] if turn >= 0 else text
         hits = [double for marker, double in self.routes.items() if marker in text]
         if len(hits) > 1 and self.last_wins:
             hits = [self.routes[max(self.routes, key=text.rfind)]]
@@ -1715,3 +1788,41 @@ class Launch:
     message: str
     spawn: Any
     ep: Path
+
+
+def host_box(tmp_path: Path) -> tuple[Any, list[Path]]:
+    """A box factory whose boxes RUN each frame's argv on the host, in a fresh scratch folder
+    (#1543): the oracle's code really reads the files the host saved and really prints its
+    document. Marked sandboxed only so the oracle accepts it; it confines nothing."""
+    import subprocess
+    import sys
+
+    spec_mod = mod("box._spec")
+    codec = mod("execution.box_codec")
+    oracle_box = sym("box._oracle", "OracleBox")
+    scratches: list[Path] = []
+
+    @dataclass(frozen=True)
+    class _HostRun(spec_mod._DockerTransport):
+        def __call__(self, frame: bytes, *, cwd: Path, timeout: float) -> Any:
+            argv = codec.decode_request(frame)[0].stages[0].argv
+            argv = [sys.executable if a == "python3" else a for a in argv]
+            done = subprocess.run(argv, cwd=cwd, capture_output=True, timeout=timeout, check=False)
+            return codec.RawExec(rc=done.returncode, stdout=codec.encode_response(
+                codec.BoxResult(rc=done.returncode, out=done.stdout, err=done.stderr)), stderr=b"")
+
+    def factory() -> Any:
+        scratch = tmp_path / f"scratch-{len(scratches)}"
+        scratch.mkdir()
+        scratches.append(scratch)
+        transport = _HostRun(name=f"oracle-box-{len(scratches)}", spec=spec_mod.BoxSpec())
+        return oracle_box(spec=spec_mod.BoxSpec(), transport=transport, name=transport.name,
+                          scratch=scratch)
+
+    return factory, scratches
+
+
+def code(code_: str, tool: str = "submit") -> Move:
+    """A code hand-in (`check` or `submit`): the code runs in the oracle's box and prints the
+    `{patch, entity_refs, proofs}` document."""
+    return Move(COINED[f"tool.{tool}"], {"code": code_})

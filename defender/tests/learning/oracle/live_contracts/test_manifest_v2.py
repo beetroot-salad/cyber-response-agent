@@ -239,7 +239,7 @@ def test_input_fact_entity_is_an_idp_principal(tmp_path):
     msg = _refused(lambda: _parse(_doc(("b", [bad]), ("c", [_F2]))), _family_error())
     assert _names(msg, "ali\x07ce"), msg
 
-    oracle = S.oracle(S.submit(_BASE_PAYLOAD, S.EMPTY_CLAIM))
+    oracle = S.oracle(S.submit())
     reg, _est, _ep, ctx = _serving(tmp_path, doc, "b", oracle=oracle,
                                    verifier=S.passing_verifier(), retry_cap=1)
     S.call(reg, "idp", "query", ctx, q="user:alice")
@@ -283,7 +283,7 @@ def test_input_fact_with_wrong_types(tmp_path):
         assert field_name in msg, (field_name, msg)
 
     # The positive control: a well-formed world IS served through the oracle.
-    oracle = S.oracle(S.submit(_BASE_PAYLOAD, S.EMPTY_CLAIM))
+    oracle = S.oracle(S.submit())
     reg, _est, _ep, ctx = _serving(tmp_path / "well-formed", _doc(("oddfact", [_F1]),
                                                                   ("c", [_F2])),
                                    "oddfact", oracle=oracle, verifier=S.passing_verifier(),
@@ -293,7 +293,7 @@ def test_input_fact_with_wrong_types(tmp_path):
 
     half = _doc(("oddfact", [_F1]), ("c", [_F2]))
     half["worlds"][1]["facts"] = cases[2][1]
-    never = S.oracle(S.submit(_BASE_PAYLOAD, S.EMPTY_CLAIM))
+    never = S.oracle(S.submit())
     with pytest.raises(FamilyError):
         _serving(tmp_path / "half-parsed", half, "oddfact", oracle=never,
                  verifier=S.passing_verifier(), retry_cap=1)
@@ -332,7 +332,7 @@ def test_input_facts_share_a_fact_id_across_worlds(tmp_path):
     store_b.mkdir(parents=True, exist_ok=True)
     (store_b / "forged.jsonl").write_text(json.dumps(forged_b) + "\n", encoding="utf-8")
 
-    oracle = S.oracle(S.submit(_BASE_PAYLOAD, S.EMPTY_CLAIM))
+    oracle = S.oracle(S.submit())
     verifier = S.passing_verifier()
     reg, _est, ep, ctx = _serving(tmp_path, doc, "c", oracle=oracle, verifier=verifier,
                                   retry_cap=1)
@@ -497,7 +497,7 @@ def test_1224_hostile_world_label_or_system_name_never_forges_a_section_or_leave
 
 def test_input_manifest_has_no_branch_point_clock(tmp_path):
     FamilyError = _family_error()
-    control_oracle = S.oracle(S.submit(_BASE_PAYLOAD, S.EMPTY_CLAIM))
+    control_oracle = S.oracle(S.submit())
     reg, est, _ep, ctx = _serving(tmp_path / "clocked", _doc(), "a", oracle=control_oracle,
                                   verifier=S.passing_verifier())
     S.call(reg, "idp", "query", ctx, q="user:alice")
@@ -515,7 +515,7 @@ def test_input_manifest_has_no_branch_point_clock(tmp_path):
         assert "as_of" in _refused(lambda doc=doc: _parse(doc), FamilyError)
         ep = _episode(tmp_path / f"clock-{i}", doc)
         assert "as_of" in _refused(lambda ep=ep: _resume(ep, "b"), FamilyError)
-        oracle = S.oracle(S.submit(_BASE_PAYLOAD, S.EMPTY_CLAIM))
+        oracle = S.oracle(S.submit())
         before = len(est.calls())
         with pytest.raises(FamilyError):
             S.world_registry(ep, "b", est, oracle=oracle, verifier=S.passing_verifier(),

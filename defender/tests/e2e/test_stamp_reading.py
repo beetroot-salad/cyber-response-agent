@@ -44,7 +44,7 @@ def test_1385_each_call_is_shown_the_reading_of_its_own_row_when_calls_run_toget
     for n, params in enumerate(asked):
         est.answer("idp", "query", params, {"rows": [{"user": f"stamp{n}", "event_id": _mark(n)}]})
     ep = S.episode_v2(tmp_path, base_rows=[])
-    oracle = S.oracle(then=S.submit("$BASE", S.EMPTY_CLAIM))
+    oracle = S.oracle(then=S.submit())
     reg = S.sandboxed_registry(ep, "b", est, oracle=oracle, verifier=S.passing_verifier())
 
     def together(*which: int) -> Any:

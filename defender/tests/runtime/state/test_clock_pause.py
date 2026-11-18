@@ -87,8 +87,8 @@ def _bash_refused(main: C.Clocked) -> bool:
 
 def test_p1_an_oracle_turn_moves_no_visible_time_and_no_elapsed_time(tmp_path):
     clock = C.FakeClock(START)
-    oracle = WorldTakesTime(S.submit(EMPTY, S.EMPTY_CLAIM), clock=clock, seconds=WORLD_SECONDS,
-                            then=S.submit(EMPTY, S.EMPTY_CLAIM))
+    oracle = WorldTakesTime(S.submit(), clock=clock, seconds=WORLD_SECONDS,
+                            then=S.submit())
     est, reg = _counterfactual(tmp_path, clock, oracle)
 
     run_dir, main = _drive(tmp_path, clock, reg, est)
@@ -103,8 +103,8 @@ def test_p1_an_oracle_turn_moves_no_visible_time_and_no_elapsed_time(tmp_path):
 
 def test_p1_control_the_investigators_own_seconds_count_in_full(tmp_path):
     clock = C.FakeClock(START)
-    oracle = WorldTakesTime(S.submit(EMPTY, S.EMPTY_CLAIM), clock=clock, seconds=0,
-                            then=S.submit(EMPTY, S.EMPTY_CLAIM))
+    oracle = WorldTakesTime(S.submit(), clock=clock, seconds=0,
+                            then=S.submit())
     est, reg = _counterfactual(tmp_path, clock, oracle)
 
     run_dir, main = _drive(tmp_path, clock, reg, est, lead_seconds=20 + WORLD_SECONDS)
@@ -121,8 +121,8 @@ def test_p2_a_rate_limit_wait_moves_no_visible_time_and_no_elapsed_time(tmp_path
     limiter = RateLimiter(1.0, clock=waiting.now, sleep=waiting.sleep)
     oracle = WorldTakesTime(S.run_query("idp", "query", S.query_params("probe-1")),
                             S.run_query("idp", "query", S.query_params("probe-2")),
-                            S.submit(EMPTY, S.EMPTY_CLAIM), clock=clock, seconds=0,
-                            then=S.submit(EMPTY, S.EMPTY_CLAIM))
+                            S.submit(), clock=clock, seconds=0,
+                            then=S.submit())
     est, reg = _counterfactual(tmp_path, clock, oracle, limiter=limiter)
     est.answer("idp", "query", None, EMPTY)
 
@@ -137,8 +137,8 @@ def test_p2_a_rate_limit_wait_moves_no_visible_time_and_no_elapsed_time(tmp_path
 
 def test_p3_the_control_worlds_oracle_turn_also_moves_no_visible_time(tmp_path):
     clock = C.FakeClock(START)
-    oracle = WorldTakesTime(S.submit(EMPTY, S.EMPTY_CLAIM), clock=clock, seconds=WORLD_SECONDS,
-                            then=S.submit(EMPTY, S.EMPTY_CLAIM))
+    oracle = WorldTakesTime(S.submit(), clock=clock, seconds=WORLD_SECONDS,
+                            then=S.submit())
     est = S.estate(tmp_path)
     est.answer("idp", "query", None, EMPTY)
     ep = S.episode_v2(tmp_path, base_rows=[S.captured("idp", "query", ALICE, EMPTY)])

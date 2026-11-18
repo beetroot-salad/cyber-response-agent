@@ -34,7 +34,6 @@ from ._spec import (
     REFUSED_NOT_A_MESSAGE,
     REFUSED_NOTHING_OPEN,
     REFUSED_OFF_MAIN_PATH,
-    REFUSED_RETRY_STREAK,
     REFUSED_SOURCE_CHANGED,
     REFUSED_UNOPENED,
     REFUSED_UNREADABLE_FORK_SNAPSHOT,
@@ -49,7 +48,6 @@ from ._snapshot import ForkSnapshot, SnapshotWriter, snapshot_at
 from ._frontier import (
     MainRead,
     DISPATCH_TOOL,
-    carried_retries,
     _appended_text,
     _as_of_of,
     _call_args,
@@ -156,13 +154,6 @@ def _admitted_on(main: MainRead, spec: BranchSpec, *, source_run: Run,  # noqa: 
             f"{'text-only response' if isinstance(branch_response, ModelResponse) else 'request'}"
             " — a branch point is a MAIN response that called tools, so the arm resumes by "
             "running those calls against its own world and is handed no message of its own", kind=REFUSED_NO_TOOL_CALL)
-
-    carried = carried_retries(upto[:-1])
-    if carried:
-        raise BranchError(
-            f"message {spec.branch_message_id} is inside a retry streak ({carried} carried) — "
-            "the framework's per-tool retry counts cannot be seeded into an arm, so it would "
-            "take that step differently. Branch at a response no tool carries a retry into", kind=REFUSED_RETRY_STREAK)
 
     snapshot = main.snapshot(upto)
     if snapshot is None:
@@ -292,7 +283,6 @@ __all__ = [
     "REFUSED_NOT_A_MESSAGE",
     "REFUSED_NOTHING_OPEN",
     "REFUSED_OFF_MAIN_PATH",
-    "REFUSED_RETRY_STREAK",
     "REFUSED_SOURCE_CHANGED",
     "REFUSED_UNOPENED",
     "REFUSED_UNREADABLE_FORK_SNAPSHOT",
@@ -327,7 +317,6 @@ __all__ = [
     "point_time",
     "attach_case_pointer",
     "branch_point_time",
-    "carried_retries",
     "contextlib",
     "dataclass",
     "datetime",

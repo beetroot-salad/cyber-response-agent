@@ -1,6 +1,7 @@
 """The five host checks every oracle submission passes before anything is served (#1224, M4)."""
 from __future__ import annotations
 
+import copy
 import difflib
 import hashlib
 import json
@@ -11,10 +12,21 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from defender._untrusted import wrap_fresh
+from defender.records.formats import FORK_FACT_ID
 
-#: The claim's structured keys (coined, `_spec1224`). Anything else at the top level is a claim
-#: the host cannot read, and fails check 1.
-CLAIM_KEYS = ("added", "removed", "changed", "counts", "entity_refs")
+#: A hand-in's keys (#1543): its patch on the base answer, the forged columns that name real
+#: entities, and the optional proofs of its removals. Anything else is a hand-in the host
+#: cannot read, and fails check 1.
+HANDIN_KEYS = ("patch", "entity_refs", "proofs")
+#: The JSON Patch operations a hand-in may use: no `move` or `copy`, which carry no fact.
+PATCH_OPS = ("add", "remove", "replace", "test")
+#: The reserved `fact_id` of a change that rolls the answer back to how it stood at the branch
+#: point (undoing what happened after it, such as the source run's own later writes), rather
+#: than serving one of the world's facts: open to every world, the control world included, for
+#: a remove or replace only; a forged row always serves a world fact.
+FORK_FACT = FORK_FACT_ID
+#: The most characters of one rendered row or value.
+_RENDER_CAP = 2000
 
 #: Values that stand for "no value" and are never ids (check 3).
 _PLACEHOLDERS = frozenset({"", "-", "--", "0", "none", "null", "n/a", "na", "unknown", "nil"})
@@ -210,103 +222,236 @@ def _row_text(row: Any, names: list[str] | None) -> str:
     return canonical_json(row if cells is None else cells)
 
 
-def _row_values(row: Any) -> set[str]:
-    """The scalar values a row carries, nested ones included (counts' groups)."""
-    if isinstance(row, Mapping):
-        return set(_scalar_values(flatten(row)))
-    if isinstance(row, list):
-        return {canonical_json(v) for v in _scalars(row)}
-    return set()
-
 
 @dataclass
-class _Claim:
-    added: list[dict]
-    removed: list[dict]
-    changed: list[dict]
-    counts: list[dict]
+class Handin:
+    """A parsed hand-in (#1543): the patch on the call's base answer, the forged columns that
+    name real entities, and the optional proofs backing its removals."""
+
+    ops: list[dict]
     entity_refs: list[dict]
+    proofs: list[dict]
+
+    @property
+    def added(self) -> list[dict]:
+        """The forged rows the patch serves: `{forged_id, fact_id}` per operation that adds a
+        row or replaces a whole one (`apply_handin` refuses a whole-row replace without one)."""
+        return [{"forged_id": op["forged_id"], "fact_id": op["fact_id"]}
+                for op in self.ops if op["op"] in ("add", "replace") and "forged_id" in op]
+
+
+class PatchRefused(Exception):
+    """A hand-in whose patch cannot be applied to the call's base: a bad path, a failed `test`,
+    or an operation the row model refuses (`apply_handin`)."""
 
 
 # --------------------------------------------------------------------------------------------
-# The claim document.
+# The hand-in document: a JSON Patch (RFC 6902) on the base answer.
 # --------------------------------------------------------------------------------------------
 
 
-def parse_claim(claim: Any) -> tuple[_Claim | None, str | None]:  # noqa: C901 — one validation per claim key, each refusing with its own reason
-    """The claim's structured entries, or why it is not a claim the host can read."""
-    if not isinstance(claim, Mapping):
-        return None, "the claim is not a mapping"
-    unknown = sorted(str(k) for k in claim if k not in CLAIM_KEYS)
+def parse_handin(document: Any) -> tuple[Handin | None, str | None]:  # noqa: C901, PLR0912 — one validation per key and operation member, each refusing with its own reason
+    """The hand-in's structured parts, or why it is not a hand-in the host can read. Every
+    operation but a `test` names the world fact it serves; an `add` adds one forged row."""
+    if not isinstance(document, Mapping):
+        return None, "the hand-in is not a mapping"
+    unknown = sorted(str(k) for k in document if k not in HANDIN_KEYS)
     if unknown:
-        return None, f"the claim carries fields the host does not know: {unknown}"
+        return None, f"the hand-in carries fields the host does not know: {unknown}"
     parts: dict[str, list[dict]] = {}
-    for key in CLAIM_KEYS:
-        entries = claim.get(key, [])
-        if entries is None:
-            entries = []
+    for key in HANDIN_KEYS:
+        entries = document.get(key) or []
         if not isinstance(entries, list) or not all(isinstance(e, Mapping) for e in entries):
-            return None, f"the claim's {key!r} is not a list of entries"
+            return None, f"its {key!r} is not a list of entries"
         parts[key] = [dict(e) for e in entries]
-    for entry in parts["added"]:
-        if not (isinstance(entry.get("forged_id"), str) and isinstance(entry.get("fact_id"), str)):
-            return None, "an `added` entry needs a string forged_id and fact_id"
-    for entry in parts["removed"]:
-        side = entry.get("side_query")
-        if "row" not in entry or not isinstance(side, Mapping) or not isinstance(
-                side.get("system"), str) or not isinstance(side.get("verb"), str) or not (
-                isinstance(side.get("params", {}), Mapping)):
-            return None, "a `removed` entry needs a row and a side_query {system, verb, params}"
-    for entry in parts["changed"]:
-        if not ({"entity", "field", "old", "new"} <= set(entry)):
-            return None, "a `changed` entry needs entity, field, old and new"
-    for entry in parts["counts"]:
-        if "group" not in entry:
-            return None, "a `counts` entry needs a group"
+    for i, op in enumerate(parts["patch"]):
+        kind = op.get("op")
+        if kind not in PATCH_OPS:
+            return None, (f"patch operation {i} is {kind!r}: the operations are "
+                          f"{', '.join(PATCH_OPS)} (no move or copy)")
+        if not isinstance(op.get("path"), str):
+            return None, f"patch operation {i} needs a string path (a JSON Pointer)"
+        if kind != "test" and not isinstance(op.get("fact_id"), str):
+            return None, f"patch operation {i} ({kind}) needs the fact_id of the fact it serves"
+        if kind == "test" and "value" not in op:
+            return None, f"patch operation {i} (test) needs a value"
+        if "forged_id" in op and not (isinstance(op["forged_id"], str) and op["forged_id"]):
+            return None, f"patch operation {i} has a forged_id that is not a non-empty string"
+        if kind == "add" and "forged_id" not in op:
+            return None, (f"patch operation {i} is an add without a forged_id: an add adds one "
+                          "forged row to a table (to change a value, replace it)")
+        if kind == "replace" and "value" not in op and "forged_id" not in op:
+            return None, f"patch operation {i} (replace) needs a value"
     for entry in parts["entity_refs"]:
         if not all(isinstance(entry.get(k), str) for k in ("forged_id", "column", "entity")):
             return None, "an `entity_refs` entry needs string forged_id, column and entity"
-    return _Claim(**parts), None
-
-
-def structured(claim: _Claim) -> dict:
-    """The claim's structured entries only — what the verifier is shown (M17=A): no free text
-    beside an entry or the claim."""
-    return {
-        "added": [{"forged_id": e["forged_id"], "fact_id": e["fact_id"]} for e in claim.added],
-        "removed": [{"row": e["row"], "side_query": {
-            "system": e["side_query"]["system"], "verb": e["side_query"]["verb"],
-            "params": dict(e["side_query"].get("params") or {})},
-            "count": e.get("count")} for e in claim.removed],
-        "changed": [{k: e[k] for k in ("entity", "field", "old", "new")} for e in claim.changed],
-        "counts": [{k: e.get(k) for k in ("group", "base", "added", "removed", "served")}
-                   for e in claim.counts],
-        "entity_refs": [{k: e[k] for k in ("forged_id", "column", "entity")}
-                        for e in claim.entity_refs],
-    }
-
-
-# --------------------------------------------------------------------------------------------
-# Check 1: the structural diff.
-# --------------------------------------------------------------------------------------------
+    for proof in parts["proofs"]:
+        if not (isinstance(proof.get("system"), str) and isinstance(proof.get("verb"), str)
+                and isinstance(proof.get("params", {}), Mapping)):
+            return None, "a proof needs a system, a verb and a params mapping"
+    return Handin(ops=parts["patch"], entity_refs=parts["entity_refs"],
+                  proofs=parts["proofs"]), None
 
 
 _Names = list[str] | None
-#: A row the diff found added or removed: its table path, the row (an ES|QL value array
-#: already zipped into cells), and its table's ES|QL column names.
-_Found = tuple[_Path, Any, _Names]
 
 
 @dataclass
-class _Diff:
-    added: list[_Found] = field(default_factory=list)
-    removed: list[_Found] = field(default_factory=list)
-    #: `(key, old, new, base mapping, served mapping, table row, path)`; key "" is a bare
-    #: value, no mapping; the table row is the base row the changed value sits in (None outside
-    #: rows); the path is the holding mapping's key path.
-    changed: list[tuple[str, Any, Any, dict, dict, dict | None, tuple[str, ...]]] = field(
-        default_factory=list)
-    unclaimed: list[str] = field(default_factory=list)
+class Change:
+    """One patch operation as the host applied it, placed by the base's table map and kept
+    whole (never cut: `shown_changes` cuts it for display). `row_at` is the pointer of the row
+    it lands in (`[]` outside any table), `table` that table's identity as `tables()` names it,
+    `names` its ES|QL column names, `rest` the pointer inside the row (`[]`: the whole row)."""
+
+    op: dict
+    row_at: list[str]
+    table: _Path
+    names: _Names
+    rest: list[str]
+    #: The operation lands where a row sits but edits no row: a bare (scalar) list item, or a
+    #: row replaced by its equal (no new row is served, so none is forged).
+    item: bool = False
+    row_before: Any = None
+    row_after: Any = None
+    before: Any = None
+    after: Any = None
+    record_before: Any = None
+    record_after: Any = None
+
+    @property
+    def whole_row(self) -> bool:
+        return bool(self.row_at) and not self.rest and not self.item
+
+
+@dataclass
+class Applied:
+    """A patch applied to a base, once: the served answer and each operation's change."""
+
+    served: Any
+    changes: list[Change]
+
+    @property
+    def forged(self) -> list[Change]:
+        """The changes that serve a forged row: every add, and every whole-row replace."""
+        return [c for c in self.changes
+                if c.whole_row and c.op["op"] in ("add", "replace")]
+
+    @property
+    def removed(self) -> list[tuple[Any, _Names]]:
+        """The rows the patch takes out of the base, with their table's ES|QL column names: a
+        removed row (or bare list item), or the row a whole-row replace stands in for."""
+        return [(c.row_before, c.names) for c in self.changes
+                if c.row_at and not c.rest and (c.op["op"] == "remove"
+                                                or (c.whole_row and c.op["op"] == "replace"))]
+
+
+#: Turns a whole-row add or replace into the row the table serves (filling a frozen row in,
+#: and staging it as forged): `(operation index, operation, table's ES|QL names) -> row`.
+#: Raises `PatchRefused` to refuse the operation.
+Stage = Callable[[int, dict, _Names], Any]
+
+
+def table_row(row: Any, names: _Names, *, what: str) -> Any:
+    """`row` in the shape its table serves: in an ES|QL table, a value array in the table's
+    column order (a mapping must carry exactly the table's columns); elsewhere as it is."""
+    if names is None or not isinstance(row, Mapping):
+        return copy.deepcopy(row)
+    if set(row) != set(names):
+        raise PatchRefused(f"{what} has columns {sorted(row)}; this ES|QL table's are {names}: a "
+                           "row is served only where the query projects exactly its columns")
+    return [copy.deepcopy(row[n]) for n in names]
+
+
+def _given_value(i: int, op: dict, names: _Names) -> Any:
+    if "value" not in op:
+        raise PatchRefused(f"patch operation {i} gives no value, and no frozen row fills it in")
+    return table_row(op["value"], names, what=f"patch operation {i}'s row")
+
+
+def _pointer_tokens(i: int, path: str) -> list[str]:
+    import jsonpointer
+
+    try:
+        return list(jsonpointer.JsonPointer(path).parts)
+    except jsonpointer.JsonPointerException as bad:
+        raise PatchRefused(f"patch operation {i} has a path that is no JSON Pointer: "
+                           f"{bad}") from None
+
+
+@dataclass(frozen=True)
+class _TableAt:
+    """One table of an answer: its identity (`tables()`'s path: mapping keys, no list index)
+    and its ES|QL column names."""
+
+    path: _Path
+    names: _Names
+
+
+@dataclass
+class TableMap:
+    """Where an answer's rows are, read once from the base by the same walk as `tables()`: each
+    outermost table by the pointer of the list holding its rows, and the ES|QL column lists, which
+    follow the query and are never patched. A list of rows inside a row is part of that row."""
+
+    tables: dict[tuple[str, ...], _TableAt]
+    fixed: set[tuple[str, ...]]
+
+    def locate(self, tokens: list[str]) -> tuple[list[str], _TableAt | None, list[str]]:
+        """`(row pointer, its table, pointer inside the row)` for `tokens`, or `([], None,
+        tokens)` outside every table."""
+        for k in range(len(tokens)):
+            table = self.tables.get(tuple(tokens[:k]))
+            if table is not None:
+                return list(tokens[:k + 1]), table, list(tokens[k + 1:])
+        return [], None, list(tokens)
+
+    def in_fixed(self, tokens: list[str]) -> bool:
+        return any(tuple(tokens[:len(f)]) == f for f in self.fixed)
+
+
+def table_map(payload: Any) -> TableMap:
+    """The `TableMap` of `payload`. A list is a table when it holds a mapping or is empty (a
+    forged row may be added to it); an ES|QL answer's `values` is one, with its column names."""
+    out = TableMap(tables={}, fixed=set())
+
+    def walk(node: Any, ptr: tuple[str, ...], path: _Path) -> None:
+        if isinstance(node, Mapping):
+            names = esql_names(node)
+            for key, value in node.items():
+                at = (*ptr, str(key))
+                if names is not None and key == "values":
+                    out.tables[at] = _TableAt((*path, "values"), names)
+                elif names is not None and key == "columns":
+                    out.fixed.add(at)
+                else:
+                    walk(value, at, (*path, str(key)))
+        elif isinstance(node, list):
+            if not node or any(isinstance(x, Mapping) for x in node):
+                out.tables[ptr] = _TableAt(path, None)
+                return
+            for i, item in enumerate(node):
+                walk(item, (*ptr, str(i)), path)   # a list of lists: one table, as `tables()`
+
+    walk(payload, (), ())
+    return out
+
+
+def _at(doc: Any, tokens: list[str]) -> Any:
+    node = doc
+    for token in tokens:
+        if isinstance(node, Mapping):
+            node = node.get(token)
+        elif isinstance(node, list) and token.isdigit() and int(token) < len(node):
+            node = node[int(token)]
+        else:
+            return None
+    return node
+
+
+def _record_fields(doc: Mapping[str, Any]) -> dict:
+    """A top-level document's own fields, its lists left out: the record a change outside any
+    list belongs to."""
+    return {k: copy.deepcopy(v) for k, v in doc.items() if not isinstance(v, list)}
 
 
 def _shape_kind(value: Any) -> str:
@@ -317,88 +462,206 @@ def _shape_kind(value: Any) -> str:
     return "scalar"
 
 
-def _where(path: tuple[str, ...]) -> str:
-    return "/".join(path) or "the top level"
+def _holds_rows(value: Any) -> bool:
+    """Whether `value` holds a table: a list whose items are mappings or value arrays."""
+    if isinstance(value, Mapping):
+        return any(_holds_rows(v) for v in value.values())
+    if isinstance(value, list):
+        return any(isinstance(v, (Mapping, list)) for v in value) or False
+    return False
 
 
-def _zipped(node: Mapping[str, Any], names: list[str]) -> dict:
-    """An ES|QL answer with its value arrays zipped into rows of named cells, so an edited row
-    pairs with its old self and a changed cell is named by its column."""
-    rows = [as_row(v, names) or v for v in node["values"]]
-    return {**node, "values": rows}
+def _field_refusal(i: int, op: dict, doc: Any, tokens: list[str], change: Change) -> str | None:
+    """Why an operation on a value (inside a row, a bare list item, or outside any table) is
+    refused: it would change the answer's shape."""
+    kind, path = op["op"], op["path"]
+    if not tokens and (kind != "replace" or _shape_kind(doc) != "scalar"):
+        return (f"patch operation {i} ({kind}) targets the whole answer: a patch changes its "
+                "parts (only a bare scalar answer is replaced whole)")
+    if kind == "add":
+        return (f"patch operation {i} adds at {path!r}, inside a row or outside any table: an "
+                "add adds a whole row to a table; to change a value, replace it")
+    parent = _at(doc, tokens[:-1])
+    if kind == "remove" and (not isinstance(parent, list)
+                             or _shape_kind(_at(doc, tokens)) != "scalar"
+                             or (change.names is not None and len(change.rest) == 1)):
+        return (f"patch operation {i} removes {path!r}, a key, an ES|QL cell or a list item that "
+                "is no row: that changes the answer's shape; replace its value instead")
+    if kind == "replace":
+        before, after = _at(doc, tokens), op["value"]
+        if _holds_rows(before) or _holds_rows(after):
+            return (f"patch operation {i} replaces {path!r}, which holds rows: rows change only "
+                    "row by row (remove, add or replace each one)")
+        if _shape_kind(before) != _shape_kind(after) or (
+                isinstance(before, Mapping) and set(before) != set(after)):
+            return (f"patch operation {i} replaces {path!r} with a value of another shape: a "
+                    "field keeps its kind and, for a mapping, its keys")
+    return None
 
 
-def _diff(base: Any, served: Any, path: tuple[str, ...], out: _Diff,  # noqa: C901 — one arm per JSON shape pair
-          is_addition: Callable[[Any, _Names], bool], names: _Names = None,
-          row: dict | None = None) -> None:
-    kb, ks = _shape_kind(base), _shape_kind(served)
-    if kb != ks:
-        out.unclaimed.append(f"the value at {_where(path)} changed shape ({kb} to {ks})")
-        return
-    if kb == "mapping":
-        esql = esql_names(base)
-        if esql is not None and esql == esql_names(served):
-            base, served = _zipped(base, esql), _zipped(served, esql)
+def apply_handin(base: Any, handin: Handin, *, stage: Stage | None = None) -> Applied:  # noqa: C901, PLR0912 — one arm per kind of operation the row model reads
+    """`handin`'s patch applied to a copy of `base`, one operation at a time, read through the
+    row model as it goes. A whole-row `add` or `replace` serves a forged row (`stage` gives the
+    row; a whole-row replace without a forged_id is refused: it stands in for a new row). Any
+    other operation edits a value: it keeps the answer's shape and never touches a row this
+    patch forges. `PatchRefused` names the first operation that cannot apply."""
+    import jsonpatch
+    import jsonpointer
+
+    stage = stage or _given_value
+    tmap = table_map(base)
+    doc = copy.deepcopy(base)
+    forged_rows: set[int] = set()
+    changes: list[Change] = []
+    for i, given in enumerate(handin.ops):
+        op = dict(given)
+        tokens = _pointer_tokens(i, op["path"])
+        if op["op"] != "test" and tmap.in_fixed(tokens):
+            raise PatchRefused(f"patch operation {i} changes an ES|QL answer's columns at "
+                               f"{op['path']!r}: they follow the query (re-ask it instead)")
+        row_at, table, rest = tmap.locate(tokens)
+        names = table.names if table is not None else None
+        if row_at and row_at[-1] == "-":
+            held = _at(doc, row_at[:-1])
+            row_at = [*row_at[:-1], str(len(held) if isinstance(held, list) else 0)]
+        change = Change(op=op, row_at=row_at, table=table.path if table is not None else (),
+                        names=names, rest=rest)
+        if row_at and not rest and op["op"] != "add":
+            held = _at(doc, row_at)
+            change.item = not (isinstance(held, Mapping)
+                               or (names is not None and isinstance(held, list))) or (
+                op["op"] == "replace" and "forged_id" not in op and "value" in op
+                and _row_text(op["value"], names) == _row_text(held, names))
+        if op["op"] not in ("test", "add") and row_at and id(_at(doc, row_at)) in forged_rows:
+            raise PatchRefused(f"patch operation {i} changes a row this patch forges: a forged "
+                               "row is served as it is forged")
+        if op["op"] != "test":
+            if change.whole_row and op["op"] == "replace" and "forged_id" not in op:
+                raise PatchRefused(f"patch operation {i} replaces the whole row {op['path']!r}: "
+                                   "that serves a new row, so it needs a forged_id (or replace "
+                                   "only the values that change)")
+            if not change.whole_row:
+                why = _field_refusal(i, op, doc, tokens, change)
+                if why is not None:
+                    raise PatchRefused(why)
+                if "forged_id" in op:
+                    raise PatchRefused(f"patch operation {i} names a forged_id but changes a "
+                                       "value, not a whole row")
+            if change.whole_row and op["op"] in ("add", "replace"):
+                op["value"] = stage(i, op, names)
+        if row_at:
+            change.row_before = copy.deepcopy(_at(doc, row_at)) if op["op"] != "add" else None
         else:
-            esql = None
-        for key in sorted(set(base) - set(served)):
-            out.unclaimed.append(f"key {key!r} at {_where(path)} was removed")
-        for key in sorted(set(served) - set(base)):
-            out.unclaimed.append(f"key {key!r} at {_where(path)} was added")
-        for key in sorted(set(base) & set(served)):
-            b, s = base[key], served[key]
-            if _shape_kind(b) == "scalar" and _shape_kind(s) == "scalar":
-                if canonical_json(b) != canonical_json(s):
-                    out.changed.append((str(key), b, s, dict(base), dict(served), row, path))
+            change.before = copy.deepcopy(_at(doc, tokens))
+            if tokens and isinstance(doc, Mapping):
+                change.record_before = _record_fields(doc)
+        try:
+            doc = jsonpatch.JsonPatch([_rfc_op(op)]).apply(doc, in_place=True)
+        except (jsonpatch.JsonPatchException, jsonpointer.JsonPointerException,
+                TypeError, ValueError, IndexError, KeyError) as failed:
+            raise PatchRefused(f"patch operation {i} ({op['op']} at {op['path']!r}) cannot "
+                               f"apply: {failed}") from None
+        if row_at and op["op"] != "remove":
+            change.row_after = copy.deepcopy(_at(doc, row_at))
+            if change.whole_row and op["op"] != "test":
+                forged_rows.add(id(_at(doc, row_at)))
+        elif not row_at and op["op"] != "remove":
+            change.after = copy.deepcopy(op.get("value"))
+            if tokens and isinstance(doc, Mapping):
+                change.record_after = _record_fields(doc)
+        changes.append(change)
+    return Applied(served=doc, changes=changes)
+
+
+def _rfc_op(op: Mapping[str, Any]) -> dict:
+    """An operation as RFC 6902 reads it: the host's own members (fact_id, forged_id) left out."""
+    return {k: v for k, v in op.items() if k in ("op", "path", "value")}
+
+
+def _cells(row: Any, names: _Names) -> Any:
+    return as_row(row, names) or row
+
+
+def render_changes(applied: Applied, handin: Handin, *, query: Mapping[str, Any],  # noqa: C901 — one arm per part of a change's view
+                   base_was: str, proven: set[str] | None = None) -> dict:
+    """The hand-in seen through the call's own query, whole: each operation with its fact,
+    where it lands (the table, the row, an ES|QL column by name, or a field) and the row before
+    and after it. A removed row a proof selects is `proven`. The ledger label reads it whole;
+    what the oracle's `check` shows, the verifier judges and the answer stores is
+    `shown_changes` of it."""
+    proven = proven or set()
+    out: list[dict] = []
+    for c in applied.changes:
+        op = c.op
+        entry: dict[str, Any] = {"op": op["op"], "path": op["path"]}
+        if op["op"] != "test":
+            entry["fact_id"] = op["fact_id"]
+        if "forged_id" in op:
+            entry["forged_id"] = op["forged_id"]
+        if c.row_at:
+            entry["table"] = "/".join(c.table) or "the top level"
+            entry["row_index"] = int(c.row_at[-1]) if c.row_at[-1].isdigit() else c.row_at[-1]
+        if c.names is not None and c.rest and c.rest[0].isdigit() and int(c.rest[0]) < len(c.names):
+            entry["column"] = c.names[int(c.rest[0])]
+        elif c.rest:
+            entry["field"] = "/".join(c.rest)
+        if op["op"] in ("remove", "replace"):
+            if c.row_at:
+                entry["row_before"] = _cells(c.row_before, c.names)
             else:
-                _diff(b, s, (*path, str(key)), out, is_addition,
-                      esql if esql is not None and key == "values" else None, row)
-        return
-    if kb == "list":
-        a = [canonical_json(x) for x in base]
-        b = [canonical_json(x) for x in served]
-        matcher = difflib.SequenceMatcher(a=a, b=b, autojunk=False)
-        for op, i1, i2, j1, j2 in matcher.get_opcodes():
-            if op == "equal":
-                continue
-            olds, news = list(base[i1:i2]), list(served[j1:j2])
-            pairs, olds, news = _pair_rows(olds, news, lambda new: is_addition(new, names))
-            for o, n in pairs:
-                # A paired item is a table row (`_pair_rows` pairs mappings only).
-                _diff(o, n, path, out, is_addition, row=dict(o))
-            out.removed.extend((path, x, names) for x in olds)
-            out.added.extend((path, x, names) for x in news)
-        return
-    if canonical_json(base) != canonical_json(served):
-        # A bare value (a scalar count): only a `counts` entry of group "*" can claim it.
-        out.changed.append(("", base, served, {}, {}, row, path))
+                entry["before"] = c.before
+                if c.record_before is not None:
+                    entry["record_before"] = c.record_before
+        if op["op"] in ("add", "replace"):
+            if c.row_at:
+                entry["row_after"] = _cells(c.row_after, c.names)
+            else:
+                entry["after"] = c.after
+                if c.record_after is not None:
+                    entry["record_after"] = c.record_after
+        if c.row_at and not c.rest and (op["op"] == "remove" or c.whole_row and op["op"] == "replace"):
+            entry["proven"] = _row_text(c.row_before, c.names) in proven
+        out.append(entry)
+    return {"query": dict(query), "base": base_was, "changes": out,
+            "entity_refs": [dict(e) for e in handin.entity_refs],
+            "proofs": [dict(p) for p in handin.proofs]}
 
 
-def _pair_rows(olds: list[Any], news: list[Any], is_addition: Callable[[Any], bool],
-          ) -> tuple[list[tuple[Any, Any]], list[Any], list[Any]]:
-    """Pair replaced rows that are edits of one another: same keys, the most equal values (at
-    least one). A new row that is a claimed forged row is an addition, never an edit."""
-    pairs: list[tuple[Any, Any]] = []
-    left: list[Any] = []
-    free = list(news)
-    for old in olds:
-        best, best_score = None, 0
-        if isinstance(old, Mapping):
-            for i, new in enumerate(free):
-                if not isinstance(new, Mapping) or set(new) != set(old) or is_addition(new):
-                    continue
-                score = sum(1 for k in old if canonical_json(old[k]) == canonical_json(new[k]))
-                if score > best_score:
-                    best, best_score = i, score
-        if best is None:
-            left.append(old)
-        else:
-            pairs.append((old, free.pop(best)))
-    return pairs, left, free
+#: The rendered parts of a change that `shown_changes` bounds.
+_SHOWN_PARTS = ("row_before", "row_after", "before", "after", "record_before", "record_after")
 
 
-def _scalar_values(mapping: Mapping[str, Any]) -> list[str]:
-    return [canonical_json(v) for v in mapping.values() if _shape_kind(v) == "scalar"]
+def _shown_value(value: Any, cap: int = _RENDER_CAP) -> Any:
+    text = canonical_json(value)
+    return value if len(text) <= cap else f"{text[:cap]} ... [cut: {len(text)} characters]"
+
+
+#: The most characters all the shown changes of one hand-in take together.
+_SHOWN_TOTAL_CAP = 60_000
+
+
+def shown_changes(rendering: Mapping[str, Any]) -> dict:
+    """A rendering (`render_changes`) as it is shown and stored: each row and value bounded,
+    and the changes kept in order until they fill `_SHOWN_TOTAL_CAP`; how many were left out is
+    said (`changes_not_shown`)."""
+    entries = list(rendering.get("changes") or ())
+    changes: list[dict] = []
+    room = _SHOWN_TOTAL_CAP
+    for entry in entries:
+        shown = {k: (_shown_value(v) if k in _SHOWN_PARTS else v) for k, v in entry.items()}
+        room -= len(canonical_json(shown))
+        if room < 0 and changes:
+            break
+        changes.append(shown)
+    out = {**rendering, "changes": changes}
+    if len(changes) < len(entries):
+        out["changes_not_shown"] = len(entries) - len(changes)
+    return out
+
+
+# --------------------------------------------------------------------------------------------
+# Check 1: every operation serves a fact, every forged row is one the host staged.
+# --------------------------------------------------------------------------------------------
 
 
 #: A served forged row: its table, the served row (cells; an ES|QL row zipped), the forged
@@ -406,168 +669,35 @@ def _scalar_values(mapping: Mapping[str, Any]) -> list[str]:
 _Matched = list[tuple[_Table, Any, Mapping[str, Any]]]
 
 
-def _check_structure(base: Any, served: Any, claim: _Claim, store: CheckStore,  # noqa: C901 — check 1's reconciliation of the diff against each claim bucket
-                     world_facts: set[str]) -> tuple[list[str], _Matched, list[Mapping[str, Any]]]:
-    """Check 1. Returns its failures, the added rows matched to claimed forged rows (with the
-    forged record) for checks 2 and 3, and the claimed forged rows missing from the answer
-    that no count covers, for check 4."""
+def _check_structure(applied: Applied, handin: Handin, store: CheckStore,
+                     world_facts: set[str]) -> tuple[list[str], _Matched]:
+    """Check 1: every operation serves one of the world's facts (or rolls back to the branch
+    point, `FORK_FACT`), and every forged row it serves is one the host staged or froze. The
+    patch's shape rules are `apply_handin`'s. Returns the failures and the served forged rows
+    matched to their records (for checks 2 and 3)."""
     failures: list[str] = []
-    claimed: list[Mapping[str, Any]] = []
-    for entry in claim.added:
-        fid, fact_id = entry["forged_id"], entry["fact_id"]
-        if fact_id not in world_facts:
-            failures.append(f"added {fid!r} names fact {fact_id!r}, which is not this world's")
+    for i, op in enumerate(handin.ops):
+        if op["op"] == "test" or op["fact_id"] in world_facts:
             continue
+        if op["fact_id"] == FORK_FACT and "forged_id" not in op:
+            continue
+        failures.append(f"patch operation {i} names fact {op['fact_id']!r}, which is not "
+                        f"this world's" + (" (a forged row serves a world fact, never "
+                                           f"{FORK_FACT!r})" if op["fact_id"] == FORK_FACT else ""))
+    matched: _Matched = []
+    for c in applied.forged:
+        fid = c.op["forged_id"]
         record = store.forged(fid)
         if record is None:
-            failures.append(f"added {fid!r} names no forged row (forge it first)")
+            failures.append(f"forged row {fid!r} names no forged row")
             continue
-        claimed.append(record)
-
-    def is_addition(new: Any, names: _Names) -> bool:
-        # A replaced row that IS a claimed forged row is an addition beside a removal, not an
-        # edit of the old row.
-        text = canonical_json(new)
-        return any(_row_text(r.get("row"), names) == text for r in claimed)
-
-    diff = _Diff()
-    _diff(base, served, (), diff, is_addition)
-    failures.extend(diff.unclaimed)
-
-    remaining = list(claimed)
-    matched: _Matched = []
-    counts = list(claim.counts)
-    buckets = list(counts)  # each count entry claims at most one new bucket row
-    for path, element, names in diff.added:
-        text = canonical_json(element)
-        hit = next((i for i, r in enumerate(remaining)
-                    if _row_text(r.get("row"), names) == text), None)
-        if hit is not None:
-            matched.append((_table(path, names), element, remaining.pop(hit)))
+        served_row = _cells(c.row_after, c.names)
+        if _row_text(record.get("row"), c.names) != _row_text(served_row, c.names):
+            failures.append(f"forged row {fid!r} is served with other content than it was "
+                            "forged with")
             continue
-        if isinstance(element, Mapping) and _bucket_counted(element, buckets):
-            continue
-        failures.append(f"an unclaimed row was added at {_where(path)}: "
-                        f"{wrap_fresh(text, 'untrusted')}")
-    removals = list(claim.removed)
-    for path, element, names in diff.removed:
-        text = canonical_json(element)
-        hit = next((i for i, e in enumerate(removals) if _row_text(e["row"], names) == text), None)
-        if hit is not None:
-            removals.pop(hit)
-            continue
-        failures.append(f"a row was removed at {_where(path)} without a claimed removal: "
-                        f"{wrap_fresh(text, 'untrusted')}")
-    changes = list(claim.changed)
-    count_cells = list(counts)  # each count entry accounts for at most one changed count cell
-    for key, old, new, base_map, served_map, row, where in diff.changed:
-        values = set(_scalar_values(base_map)) | set(_scalar_values(served_map))
-        hit = next((i for i, c in enumerate(changes)
-                    if key and str(c["field"]) == key and canonical_json(c["old"]) == canonical_json(old)
-                    and canonical_json(c["new"]) == canonical_json(new)
-                    and canonical_json(c["entity"]) in values), None)
-        if hit is not None:
-            changes.pop(hit)
-            continue
-        hit = next((i for i, c in enumerate(count_cells)
-                    if _counts_change(c, key, old, new, base_map, served_map, row, where)),
-                   None)
-        if hit is not None:
-            count_cells.pop(hit)
-            continue
-        failures.append(f"field {key!r} changed from {wrap_fresh(canonical_json(old), 'untrusted')} "
-                        f"to {wrap_fresh(canonical_json(new), 'untrusted')} without a claimed change")
-    missing = _uncounted(remaining, counts)
-    if missing:
-        ids = sorted(str(r.get("forged_id")) for r in missing)
-        failures.append(f"claimed forged row(s) {ids} are not in the served answer")
-    if removals:
-        failures.append(f"{len(removals)} claimed removal(s) name rows the base answer does not "
-                        "lose in the served answer")
-    if changes:
-        failures.append(f"{len(changes)} claimed change(s) are not differences in the served "
-                        "answer")
-    return [f"check 1: {f}" for f in failures], matched, missing
-
-
-def _bucket_counted(element: Mapping[str, Any], buckets: list[dict]) -> bool:
-    """A new row that is a count's new bucket: a base-0 count whose group is a value the row
-    itself carries, and whose served count the row carries too. The entry is consumed, so one
-    count claims one bucket row; "*" names no bucket and claims none."""
-    values = _row_values(element)
-    for i, c in enumerate(buckets):
-        group = c.get("group")
-        if (_is_int(c.get("base")) and c.get("base") == 0 and _is_int(c.get("served"))
-                and group != "*" and canonical_json(group) in values
-                and canonical_json(c.get("served")) in values):
-            buckets.pop(i)
-            return True
-    return False
-
-
-def _uncounted(records: list[Mapping[str, Any]], counts: list[dict]) -> list[Mapping[str, Any]]:
-    """The claimed forged rows absent from the served answer that no count accounts for. A
-    count covers a row only within its own group — "*" (the whole answer) or a group value the
-    forged row itself carries — and at most `added` rows."""
-    left = {i: c["added"] for i, c in enumerate(counts) if _is_int(c.get("added")) and c["added"] > 0}
-    uncovered: list[Mapping[str, Any]] = []
-    for record in records:
-        values = _row_values(record.get("row"))
-        hit = next((i for i, n in left.items() if n > 0 and (
-            counts[i].get("group") == "*" or canonical_json(counts[i].get("group")) in values)), None)
-        if hit is None:
-            uncovered.append(record)
-        else:
-            left[hit] -= 1
-    return uncovered
-
-
-#: The keys that name a count outside a table row (compared without case): an answer's
-#: total, a count, an aggregation bucket's or a result's row count. A cell keyed by one, or
-#: held by a mapping keyed by one (ES `hits.total.value`), is a count cell.
-_COUNT_KEYS = frozenset({"count", "total", "doc_count", "row_count", "total_count"})
-#: The keys holding an answer's aggregations: every whole number under one is an aggregate.
-_AGGREGATION_KEYS = frozenset({"aggregations", "aggs"})
-
-
-def _count_named(key: str, path: tuple[str, ...]) -> bool:
-    """A cell outside every table row is a count cell only when the answer names it one: its
-    own key or its holding mapping's key is a count key, or it sits under an aggregation."""
-    held_by = path[-1].casefold() if path else ""
-    return (key.casefold() in _COUNT_KEYS or held_by in _COUNT_KEYS
-            or any(p.casefold() in _AGGREGATION_KEYS for p in path))
-
-
-def _whole_numbers(values: Any) -> bool:
-    return all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in values)
-
-
-def _counts_change(entry: Mapping[str, Any], key: str, old: Any, new: Any,  # noqa: PLR0913 — one changed value and where it sits
-                   base_map: Mapping[str, Any], served_map: Mapping[str, Any],
-                   row: Mapping[str, Any] | None, path: tuple[str, ...] = ()) -> bool:
-    """A count entry accounts for this changed value: the value is a count cell (a whole
-    number) going from the entry's `base` to its `served`, and it is the entry's group's count."""
-    if not (_is_int(old) and _is_int(new)):
-        return False
-    if canonical_json(entry.get("base")) != canonical_json(old) or canonical_json(
-            entry.get("served")) != canonical_json(new):
-        return False
-    group = entry.get("group")
-    if group == "*":
-        if row is not None:
-            return _whole_numbers(v for _c, v in _leaves(flatten(row)))
-        return not key or _count_named(key, path)
-    if not key:
-        return False
-    if row is None:
-        return group == key and (_count_named(key, path) or _whole_numbers(base_map.values()))
-    text = canonical_json(group)
-    holders = [k for k, v in base_map.items() if k != key and k in served_map
-               and canonical_json(v) == text and canonical_json(served_map[k]) == text]
-    if not holders:
-        return False
-    return key.casefold() in _COUNT_KEYS or _whole_numbers(
-        v for k, v in base_map.items() if k != key and k not in holders)
+        matched.append((_table(c.table, c.names), served_row, record))
+    return [f"check 1: {f}" for f in failures], matched
 
 
 # --------------------------------------------------------------------------------------------
@@ -702,14 +832,14 @@ def _forged_leaves(element: Any) -> Iterator[tuple[str, Any]]:
     yield from _leaves(flatten(element) if isinstance(element, Mapping) else {"": element})
 
 
-def _check_ids(matched: _Matched, claim: _Claim, store: CheckStore, real: RealData) -> list[str]:
+def _check_ids(matched: _Matched, handin: Handin, store: CheckStore, real: RealData) -> list[str]:
     failures: list[str] = []
     for _t, element, record in _fresh(matched, store):
         fid = str(record.get("forged_id"))
         for column, value in _forged_leaves(element):
             if not _id_like(column, value) or _value_text(value) not in real.by_id:
                 continue
-            if _declared_reference(fid, column, value, claim, real):
+            if _declared_reference(fid, column, value, handin, real):
                 continue
             where = f" in column {column!r}" if column else ""
             failures.append(f"check 3: forged row {fid!r} reuses a real identifier{where} "
@@ -745,6 +875,8 @@ class Checked:
 
     failures: list[str]
     matched: _Matched = field(default_factory=list)
+    #: The removed rows' spellings some proof selects (check 5).
+    proven: set[str] = field(default_factory=set)
 
 
 def frozen_id_collisions(checked: Checked, *, store: CheckStore,
@@ -772,12 +904,12 @@ def frozen_id_collisions(checked: Checked, *, store: CheckStore,
     return found
 
 
-def _declared_reference(fid: str, column: str, value: Any, claim: _Claim,
+def _declared_reference(fid: str, column: str, value: Any, handin: Handin,
                         real: RealData) -> bool:
-    """The claim names this forged column a reference to an entity, and some real flat row
+    """The hand-in names this forged column a reference to an entity, and some real flat row
     carries that entity beside this very value in that column (looked up by value)."""
     text = canonical_json(value)
-    for ref in claim.entity_refs:
+    for ref in handin.entity_refs:
         if ref["forged_id"] != fid or ref["column"] != column:
             continue
         entity = ref["entity"]
@@ -797,35 +929,23 @@ def _contradicts(mapping: Mapping[str, Any], entity: str, field_: str, value: An
     return field_ in mapping and entity in names and canonical_json(mapping[field_]) != canonical_json(value)
 
 
-def _check_facts(served: Any, claim: _Claim, store: CheckStore,
-                 missing: list[Mapping[str, Any]]) -> list[str]:
+
+def _check_facts(served: Any, handin: Handin, store: CheckStore) -> list[str]:
     failures: list[str] = []
     for (entity, field_), value in store.facts.items():
         if any(_contradicts(mapping, entity, field_, value) for mapping in _mappings(served)):
             failures.append(f"check 4: {wrap_fresh(entity, 'untrusted')}'s {field_!r} "
                             "is served with a value other than the recorded fact")
-        for change in claim.changed:
-            if change["entity"] == entity and change["field"] == field_ and canonical_json(
-                    change["new"]) != canonical_json(value):
-                failures.append(f"check 4: the claimed change of {field_!r} contradicts the "
-                                "recorded fact")
-    for entry in claim.added:
+    for entry in handin.added:
         # Fresh or frozen, a row backs the fact it was forged for: the verifier is told the
-        # claim's fact, and the commit keeps the forge record's.
+        # operation's fact, and the commit keeps the forge record's.
         record = store.forged(entry["forged_id"])
         if record is not None and record.get("fact_id") != entry["fact_id"]:
             kind = "frozen" if entry["forged_id"] in store.frozen else "forged"
             failures.append(f"check 4: {kind} row {entry['forged_id']!r} was forged for fact "
                             f"{record.get('fact_id')!r}, not {entry['fact_id']!r}")
-    for record in missing:
-        fid = str(record.get("forged_id"))
-        if fid in store.frozen:
-            failures.append(f"check 4: frozen row {fid!r} is not served exactly as frozen")
     return failures
 
-
-def _is_int(value: Any) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool)
 
 
 def _selected(payload: Any) -> tuple[list[Any], _Names]:
@@ -847,47 +967,38 @@ def _selected(payload: Any) -> tuple[list[Any], _Names]:
     return [], None
 
 
-def _check_counts(claim: _Claim, store: CheckStore) -> list[str]:
+
+def _check_proofs(handin: Handin, store: CheckStore,
+                  removed: list[tuple[Any, _Names]]) -> tuple[list[str], set[str]]:
+    """Check 5: each proof the hand-in names is re-run, and must select at least one row the
+    patch removed. A proof is optional: a removal without one is judged by the verifier on the
+    world's facts. Returns the failures and the removed rows' spellings some proof selects."""
     failures: list[str] = []
-    for entry in claim.counts:
-        nums = [entry.get(k) for k in ("base", "added", "removed", "served")]
-        if not all(_is_int(n) for n in nums):
-            failures.append(f"check 5: count for group {wrap_fresh(canonical_json(entry.get('group')), 'untrusted')} "
-                            "is not four whole numbers")
-            continue
-        base, added, removed, served = (int(n) for n in nums if n is not None)
-        if base + added - removed != served:
-            failures.append(f"check 5: count for group "
-                            f"{wrap_fresh(canonical_json(entry.get('group')), 'untrusted')} does not add "
-                            f"up ({base} + {added} - {removed} != {served})")
-    for entry in claim.removed:
-        side = entry["side_query"]
-        count = entry.get("count")
-        if not _is_int(count):
-            failures.append("check 5: a removal's count is not a whole number")
-            continue
+    proven: set[str] = set()
+    for i, proof in enumerate(handin.proofs):
         try:
-            answer = store.rerun(side["system"], side["verb"], dict(side.get("params") or {}))
+            answer = store.rerun(proof["system"], proof["verb"], dict(proof.get("params") or {}))
         except Refused as refused:
-            failures.append(f"check 5: a removal's side query could not be re-run: "
+            failures.append(f"check 5: proof {i} could not be re-run: "
                             f"{wrap_fresh(str(refused), 'untrusted')}")
             continue
         rows, names = _selected(answer)
-        if len(rows) != count:
-            failures.append(f"check 5: a removal's side query selects {len(rows)} row(s), not "
-                            f"the claimed {count}")
-        elif _row_text(entry["row"], names) not in {canonical_json(r) for r in rows}:
-            failures.append("check 5: a removal's side query does not select the removed row")
-    return failures
+        selected = {canonical_json(r) for r in rows} | {_row_text(r, names) for r in rows}
+        hits = {_row_text(r, own) for r, own in removed
+                if _row_text(r, own) in selected or canonical_json(r) in selected}
+        if not hits:
+            failures.append(f"check 5: proof {i} selects {len(rows)} row(s), none of them a row "
+                            "the patch removes")
+        proven |= hits
+    return failures, proven
 
 
 def cut_rows(live: Any, re_asked: Any) -> tuple[list[Any], list[Any]]:
     """`(dropped, brought_in)`: the rows the live base has that the re-asked answer lacks, and the
     older rows the re-asked answer has that the live base lacks (#1385 A3)."""
-    out = _Diff()
-    _diff(live, re_asked, (), out, lambda _new, _names: True)
-    dropped = [row for _path, row, _names in out.removed]
-    brought_in = [row for _path, row, _names in out.added]
+    dropped: list[Any] = []
+    brought_in: list[Any] = []
+    _row_diff(live, re_asked, dropped, brought_in)
     # A row the re-ask only reorders reads as removed at one place and added at another: it is
     # neither dropped nor brought in. Cancel each such pair, one for one (a multiset).
     kept = Counter(canonical_json(row) for row in dropped)
@@ -909,31 +1020,70 @@ def _less_reordered(rows: list[Any], cancel: Counter[str]) -> list[Any]:
     return out
 
 
-def run_checks(base: Any, served: Any, claim: Any, *, world: Any, store: CheckStore,
+def _zipped(node: Mapping[str, Any], names: list[str]) -> dict:
+    """An ES|QL answer with its value arrays zipped into rows of named cells."""
+    return {**node, "values": [as_row(v, names) or v for v in node["values"]]}
+
+
+def _row_diff(base: Any, other: Any, removed: list[Any], added: list[Any]) -> None:
+    """The rows `base` has that `other` lacks (`removed`) and the reverse (`added`), table by
+    table: two real answers compared, an ES|QL table's rows as named cells."""
+    if isinstance(base, Mapping) and isinstance(other, Mapping):
+        names = esql_names(base)
+        if names is not None and names == esql_names(other):
+            base, other = _zipped(base, names), _zipped(other, names)
+        for key in sorted(set(base) & set(other), key=str):
+            _row_diff(base[key], other[key], removed, added)
+    elif isinstance(base, list) and isinstance(other, list):
+        a = [canonical_json(x) for x in base]
+        b = [canonical_json(x) for x in other]
+        for op, i1, i2, j1, j2 in difflib.SequenceMatcher(a=a, b=b, autojunk=False).get_opcodes():
+            if op != "equal":
+                removed.extend(base[i1:i2])
+                added.extend(other[j1:j2])
+
+
+def _world_fact_ids(world: Any) -> set[str]:
+    return {str(getattr(f, "fact_id", None) or (f.get("fact_id") if isinstance(f, Mapping) else ""))
+            for f in (getattr(world, "facts", None) or ())}
+
+
+def run_checks(applied: Applied, handin: Handin, *, world: Any, store: CheckStore,
                real_data: RealData) -> Checked:
-    """Checks 1-5 for one submission, the structural diff computed once (`check_submission`).
-    `base` is the answer the claim is made against: the call's base, or the answer of the
-    attempt's accepted re-ask (#1385)."""
-    parsed, malformed = parse_claim(claim)
-    if parsed is None:
-        return Checked([f"check 1: the claim cannot be read: {malformed}"])
-    world_facts = {str(getattr(f, "fact_id", None) or (f.get("fact_id") if isinstance(f, Mapping) else ""))
-                   for f in (getattr(world, "facts", None) or ())}
-    failures, matched, missing = _check_structure(base, served, parsed, store, world_facts)
+    """Checks 1-5 for one hand-in, its patch already applied to the call's base (or the answer
+    of the attempt's accepted re-ask, #1385)."""
+    failures, matched = _check_structure(applied, handin, store, _world_fact_ids(world))
     failures += _check_shape(_fresh(matched, store), real_data)
-    failures += _check_ids(matched, parsed, store, real_data)
-    failures += _check_facts(served, parsed, store, missing)
-    failures += _check_counts(parsed, store)
-    return Checked(failures, matched)
+    failures += _check_ids(matched, handin, store, real_data)
+    failures += _check_facts(applied.served, handin, store)
+    proofs, proven = _check_proofs(handin, store, applied.removed)
+    failures += proofs
+    return Checked(failures, matched, proven)
 
 
-def check_submission(base: Any, served: Any, claim: Any, *, world: Any, store: CheckStore,
+def frozen_stage(store: CheckStore) -> Stage:
+    """The `Stage` of rows already in `store` (staged or frozen): a row given whole is served as
+    given; an add with no value serves the frozen row of its forged_id."""
+    def stage(i: int, op: dict, names: _Names) -> Any:
+        if "value" in op:
+            return _given_value(i, op, names)
+        record = store.frozen.get(op["forged_id"])
+        if record is None:
+            raise PatchRefused(f"patch operation {i} adds {op['forged_id']!r} with no value, and "
+                               "no row of that id is frozen in this world")
+        return table_row(record.get("row"), names, what=f"frozen row {op['forged_id']!r}")
+    return stage
+
+
+def check_submission(base: Any, handin: Any, *, world: Any, store: CheckStore,
                      real_data: RealData) -> list[str]:
-    """Every failure of checks 1-5 for one submission, each naming its check; `[]` passes.
-
-    `world` is the served world (its `facts` give the fact ids a claim may name), `store` the
-    world's frozen and staged state plus the side-query door, `real_data` this world's real
-    answers. The host gate and the oracle's `check` tool both call this (through
-    `run_checks`)."""
-    return run_checks(base, served, claim, world=world, store=store,
-                      real_data=real_data).failures
+    """Every failure of one hand-in (a document `{patch, entity_refs, proofs}`), each naming
+    its check; `[]` passes. A hand-in the host cannot read or apply fails check 1."""
+    parsed, why = parse_handin(handin)
+    if parsed is None:
+        return [f"check 1: the hand-in cannot be read: {why}"]
+    try:
+        applied = apply_handin(base, parsed, stage=frozen_stage(store))
+    except PatchRefused as refused:
+        return [f"check 1: {refused}"]
+    return run_checks(applied, parsed, world=world, store=store, real_data=real_data).failures

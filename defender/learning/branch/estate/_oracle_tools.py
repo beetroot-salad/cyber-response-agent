@@ -51,9 +51,12 @@ _QUERY_SCHEMA = _schema({"system": {"type": "string"}, "verb": {"type": "string"
                          "params": {"type": "object"}}, ["system", "verb"])
 
 
-#: A hand-in: `code` alone (#1543 O2), or `served` and `claim` as written. The host judges which.
-_SERVED_SCHEMA = _schema({"served": _ANY, "claim": {"type": "object"},
-                          "code": {"type": "string"}}, [])
+#: A hand-in (#1543): `code` alone, whose output is the `{patch, entity_refs, proofs}` document,
+#: or those fields as written. The host judges which.
+_HANDIN_SCHEMA = _schema({"code": {"type": "string"},
+                          "patch": {"type": "array", "items": {"type": "object"}},
+                          "entity_refs": {"type": "array", "items": {"type": "object"}},
+                          "proofs": {"type": "array", "items": {"type": "object"}}}, [])
 
 
 
@@ -61,10 +64,6 @@ _SERVED_SCHEMA = _schema({"served": _ANY, "claim": {"type": "object"},
 _ORACLE_TOOLS: tuple[tuple[str, str, dict], ...] = (
     ("run_query", "Read a real system through the gather grant (read verbs only).",
      _QUERY_SCHEMA),
-    ("forge", "Stage a forged row of the call's system for one of this world's facts.",
-     _schema({"forged_id": {"type": "string"}, "fact_id": {"type": "string"},
-              "row": {"type": ["object", "array"]}},
-             ["forged_id", "fact_id", "row"])),
     ("record_fact", "Record the value a fact fixes for an entity's field.",
      _schema({"entity": {"type": "string"}, "field": {"type": "string"}, "value": _ANY},
              ["entity", "field", "value"])),
@@ -75,13 +74,14 @@ _ORACLE_TOOLS: tuple[tuple[str, str, dict], ...] = (
                                               "verb": {"type": "string"},
                                               "params": {"type": "object"}},
                                              ["system", "verb", "params"])),
-    ("check", "Run the host checks on a draft hand-in: `code` (run in your box; prints the "
-     "{served, claim, forged} document) or `served` and `claim`. Keeps nothing.", _SERVED_SCHEMA),
+    ("check", "Run the host checks on a draft hand-in and see its changes: `code` (run in your "
+     "box; prints the {patch, entity_refs, proofs} document) or those fields. Keeps nothing.",
+     _HANDIN_SCHEMA),
 )
 
 
 _SUBMIT = ("submit", "Hand in the answer and end the turn: `code` (run in your box; prints the "
-           "{served, claim, forged} document) or `served` and `claim`.", _SERVED_SCHEMA)
+           "{patch, entity_refs, proofs} document) or those fields.", _HANDIN_SCHEMA)
 
 
 _VERDICT = ("verdict", "Pass or fail the served answer, with a reason.",
@@ -120,7 +120,7 @@ class _Outcome:
 
 def _no_submission(_text: str) -> _Outcome:
     return _Outcome(None, "", failure="the turn ended without a submission: call "
-                                      "submit(served, claim) to end a turn")
+                                      "submit(code) (or submit(patch=...)) to end a turn")
 
 
 

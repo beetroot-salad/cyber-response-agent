@@ -285,8 +285,17 @@ jobs:
         timeout-minutes: 5
         uses: ./.github/actions/install-gvisor
 
+      # The registry's CDN resets a connection now and then (`connection reset by peer` mid-layer), which failed
+      # the whole job before any test ran: retry the pull, bounded, so a persistent outage still fails here.
       - name: Pre-pull the box rootfs
-        run: docker pull python:3.11-slim
+        timeout-minutes: 5
+        run: |
+          for attempt in 1 2 3 4; do
+            docker pull python:3.11-slim && exit 0
+            echo "docker pull failed (attempt $attempt of 4)" >&2
+            sleep $((attempt * 5))
+          done
+          exit 1
 
       # Quoted: an unquoted YAML scalar treats " #" as a comment, which silently truncated
       # this name to "Run the" — and the #631 workflow gate reports steps BY name.

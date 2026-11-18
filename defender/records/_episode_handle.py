@@ -20,6 +20,7 @@ RECORD_VERBS: dict[str, tuple[str, ...]] = {
     "family_stamp": ("write",),
     "review": ("write",),
     "samples": ("write",),
+    "world_revisions": ("write",),
     "judge": ("write",),
     "timing": ("write",),
     "learning_html": ("write",),
@@ -203,6 +204,10 @@ class Episode:
     @property
     def samples(self) -> WriteRecord:
         return WriteRecord(*self._at(LAYOUT.samples))
+
+    @property
+    def world_revisions(self) -> WriteRecord:
+        return WriteRecord(*self._at(LAYOUT.world_revisions))
 
     @property
     def judge(self) -> WriteRecord:

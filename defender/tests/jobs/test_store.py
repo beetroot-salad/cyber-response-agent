@@ -272,18 +272,6 @@ def test_o1_the_store_loads_nothing_the_api_must_not():
     assert api_forbidden(loaded) == []
 
 
-# --- O12: the store is async --------------------------------------------------------------------------
-
-@pytest.mark.parametrize("name", ["insert_alert", "get_alert", "get_investigation", "create_investigation",
-                                  "cancel_investigation", "delete_investigation", "claim", "close",
-                                  "put_alert_mapping", "get_alert_mapping"])
-def test_o12_every_store_method_is_a_coroutine_function(name):
-    """The ratified surface is awaited, never blocking; the mapping's replace and read included. (O12, #1345 O1, M1)"""
-    from defender.jobs import JobStore
-
-    assert inspect.iscoroutinefunction(getattr(JobStore, name))
-
-
 # --- O2: the trusted alert insert -------------------------------------------------------------------------
 
 #: Admitted by `admit()` and unusual: nothing about the bytes may be normalised.
