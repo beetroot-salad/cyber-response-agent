@@ -28,7 +28,8 @@ CALLS = [("user:alice", ALICE_ROWS), ("user:bob", BOB_ROWS)]
 
 
 def _submit(rows: dict) -> tuple[str, dict]:
-    return "submit", {"served": rows, "claim": S.EMPTY_CLAIM}
+    del rows  # the base is served unchanged: an empty patch
+    return "submit", dict(S.EMPTY)
 
 
 #: The verifier's tool call: it passes every submission.
