@@ -33,6 +33,7 @@ from defender.tests.support.jobs import _relay1487 as R
 from defender.tests.support.jobs._job_helper import OTHER_TENANT
 from defender.tests.support.jobs._job_helper_learning import run_kind
 from defender.tests.support.jobs._jobs1342 import register_tenant
+from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — the scene's database
 from defender.tests.support.learning.core._store1278 import (
     AUTHOR_LANE,
     FINDING,
