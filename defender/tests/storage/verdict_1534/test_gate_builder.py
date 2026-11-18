@@ -76,8 +76,8 @@ def test_g2_a_document_the_gate_accepts_closes_with_every_walker_accepted_entry_
             continue
         ceiling, baselines = G.receipts(plan.text)
         record = B.close_run(tmp_path / plan.name, plan.disposition, plan.text).record
-        assert G.stored_ceiling(record) == G.uncut_ceiling(ceiling), plan.name
-        assert G.stored_baselines(record) == G.uncut_baselines(baselines), plan.name
+        assert G.stored_ceiling(record) == G.uncut_ceiling(ceiling), ("ceiling", plan.name)
+        assert G.stored_baselines(record) == G.uncut_baselines(baselines), ("baselines", plan.name)
         closed += 1
     assert closed >= 1, "fixture control: the chunk holds an accepted document"
 
@@ -92,18 +92,25 @@ def test_g2_the_forced_close_commits_the_longest_leading_run_of_buildable_accept
         for stored, built, fits in ((record.ceiling_test, G.buildable_ceiling(ceiling), G.ceiling_fits),
                                     (record.runtime_evidence, G.buildable_baselines(baselines), G.baselines_fit)):
             n = G.longest_fitting_prefix(built, fits)
-            assert list(stored) == built[:n], (plan.name, len(stored), n, len(built))
+            assert list(stored) == built[:n], (plan.name, "stored", len(stored), "prefix", n, "built", len(built))
 
 
-def test_g2_a_window_beyond_the_utc_range_neither_crashes_the_gate_nor_fails_the_forced_close(tmp_path):
-    """A walker-parsed window whose start has no UTC form (year 1, ahead of UTC): the gate answers, and the forced close
-    commits with the other baseline kept. (G2, design "Bounds": the build never fails)"""
+def _beyond_utc() -> str:
+    """A benign document whose first baseline's window starts at year 1 ahead of UTC (it has no UTC form), then a plain one."""
     rows = [scene.consultation_row(anchor_id="tk-edge", window="0001-01-01T00:00:00+05:00/2026-05-04T00:00:00Z"),
             scene.consultation_row(anchor_id="tk-plain")]
-    text = B.baseline_document("benign", rows)
+    return B.baseline_document("benign", rows)
 
-    assert isinstance(_gate(text), list)
-    record = B.forced_close(tmp_path, text).record
+
+def test_g2_a_window_beyond_the_utc_range_does_not_crash_the_write_gate():
+    """The gate answers with a list (accepting or refusing the row is not pinned). (G2, design "Bounds")"""
+    assert isinstance(_gate(_beyond_utc()), list)
+
+
+def test_g2_a_window_beyond_the_utc_range_does_not_fail_the_forced_close(tmp_path):
+    """The host's forced close commits, the plain baseline kept (the edge row's fate is not pinned). (G2, design "Bounds":
+    the build never fails)"""
+    record = B.forced_close(tmp_path, _beyond_utc()).record
     assert "tk-plain" in [e.anchor_id for e in record.runtime_evidence]
 
 
@@ -170,17 +177,18 @@ def test_cap_the_forced_close_cuts_an_over_bound_cap_and_keeps_the_receipt(tmp_p
 
 # --- owner decision (a): an empty grounding is accepted by the gate, the walker and the record alike -------------------
 
-def _groundings() -> list[str]:
-    from defender.records import closing as C
-
-    return ["", *C.GROUNDING_KINDS]
+#: Empty and every `GROUNDING_KINDS` member (a literal, so collection never needs the record module; checked below).
+GROUNDINGS = ("", "org-authority", "telemetry-baseline")
 
 
 @pytest.mark.parametrize("disposition", ["benign", "inconclusive"])
-@pytest.mark.parametrize("grounding", _groundings(), ids=lambda g: g or "empty")
+@pytest.mark.parametrize("grounding", GROUNDINGS, ids=lambda g: g or "empty")
 def test_grounding_every_acceptable_grounding_is_kept_by_the_model_close_and_the_forced_close(tmp_path, grounding,
                                                                                                disposition):
     """Empty or a vocabulary member: the gate accepts the baseline and both closes store it with that grounding. (decision a)"""
+    from defender.records import closing as C
+
+    assert ("", *C.GROUNDING_KINDS) == GROUNDINGS, "fixture control: the literal is the whole accepted set"
     text = B.baseline_document(disposition, [scene.consultation_row(grounding=grounding)])
     assert _gate(text) == []
 
