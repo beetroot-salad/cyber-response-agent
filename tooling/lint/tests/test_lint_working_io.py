@@ -33,7 +33,7 @@ def f(run):
     run.tables.queries.seed([{'lead_id': 'l-001'}])
     run.tables.queries.append([{'lead_id': 'l-001'}])
     run.tables.payloads('l-001', 0).write(b'opaque')
-    run.documents.report.write('report')
+    run.documents.investigation.write('report')
     run.observability.wire_log.append_text('line\\n')
 """
     assert _GATE.census_source("investigation/planted.py", body) == []
@@ -97,7 +97,7 @@ from defender.records import RunPaths
 from defender._io import write_guarded
 def f(run_dir):
     owner = RunPaths(run_dir)
-    target = owner.report
+    target = owner.investigation
     alias = target
     write_guarded(alias, 'report')
 """

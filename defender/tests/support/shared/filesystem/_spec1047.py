@@ -434,26 +434,4 @@ def salt_run_dir(run_dir: Path, value: str = "request-limit") -> list[Path]:
         path = run_dir / name
         path.write_text(json.dumps(record_doc(value)), encoding="utf-8")
         planted.append(path)
-    # And the one surface that is not JSON: the report's frontmatter, which `validate_report`
-    # admits an unknown key into.
-    report = run_dir / "report.md"
-    if report.is_file():
-        report.write_text(report_text("malicious", extra=f"truncated_by: {value}\n"),
-                          encoding="utf-8")
-        planted.append(report)
     return planted
-
-
-def plant_frontmatter(world_dir: Path, extra: str, *, raw: str | bytes | None = None) -> Path:
-    """Rewrite an archived world's `report.md` with `extra` spliced into its frontmatter.
-
-    `validate_report` accepts an unknown frontmatter key, and the judge reads the archived copy
-    of a file the box could write: this is the forgery the design must make inert."""
-    path = Path(world_dir) / "report.md"
-    if raw is None:
-        path.write_text(report_text("malicious", extra=extra), encoding="utf-8")
-    elif isinstance(raw, bytes):
-        path.write_bytes(raw)
-    else:
-        path.write_text(raw, encoding="utf-8")
-    return path
