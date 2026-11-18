@@ -144,7 +144,8 @@ def _served_in_turn(registry: WorldRegistry, system: str, verb: str, asked: dict
         registry.store.commit(forged=list(staged.forged.values()),
                               facts=[{"entity": e, "field": f, "value": v}
                                      for (e, f), v in staged.facts.items()],
-                              answer=answer)
+                              answer=answer,
+                              serving=serving_row(system, verb, asked, served, claim, staged))
         if re_asked is not None:
             # Then the re-asked answer, as a base answer of this world under its own request key
             # (A3): kept across resume and indexed as real data. After the commit, so a failed
@@ -195,26 +196,36 @@ def names_an_entity(value: Any, entities: Collection[str]) -> bool:
     return False
 
 
-def served_label(base: Any, served: Any, claim: Mapping[str, Any],  # noqa: PLR0913 — the answer, its claim and what decides its label
+def serving_row(system: str, verb: str, params: Mapping[str, Any], served: Any,  # noqa: PLR0913 — the call, its answer and how it was made
+                changes: Mapping[str, Any], staged: Any) -> dict:
+    """One verified serving as later calls reuse it (#1543): the call, the code that built it
+    (None for a literal hand-in), its changes seen through the call's query, and the answer."""
+    return {"system": system, "verb": verb, "params": dict(params),
+            "code": getattr(staged, "code", None), "changes": dict(changes), "served": served}
+
+
+def served_label(base: Any, served: Any, changes: Mapping[str, Any],  # noqa: PLR0913 — the answer, its changes and what decides its label
                  world_facts: Collection[Any], re_asked: Any = None, *,
                  changed: bool | None = None) -> str:
     """The ledger label of a verified answer (#1385 A1): decided by the difference, not by
     whether the answer changed. Unchanged from the live base is `passthrough`. A changed answer
-    is `oracle` ("showed the world's difference") when it carries a forged row, a `changed`
-    entry on an entity a fact names, or a removal or dropped row (the cut: the live base against
-    the re-asked answer) with a string value equal to such an entity; otherwise `reconstructed`.
-    Rows the cut brings in never count. A world without facts names no entity, so it is never
-    `oracle`. `changed`: `changes_base(served, base)` when the caller has it already."""
+    is `oracle` ("showed the world's difference") when its changes (`render_changes`, #1543) add
+    a forged row, or remove or replace a row or value naming an entity a fact names, or the
+    re-ask dropped a row naming one (the cut: the live base against the re-asked answer);
+    otherwise `reconstructed`. Rows the cut brings in never count. A world without facts names
+    no entity, so it is never `oracle`. `changed`: `changes_base(served, base)` when the caller
+    has it already."""
     if not (changes_base(served, base) if changed is None else changed):
         return PASSTHROUGH
     entities = fact_entities(world_facts)
     if not entities:
         return RECONSTRUCTED
     dropped = re_asked.dropped if re_asked is not None else []
-    shown = (bool(claim.get("added"))
-             or any(isinstance(e.get("entity"), str) and e["entity"] in entities
-                    for e in claim.get("changed") or ())
-             or any(names_an_entity(e.get("row"), entities) for e in claim.get("removed") or ())
+    entries = [e for e in (changes.get("changes") or ()) if isinstance(e, Mapping)]
+    shown = (any(e.get("op") == "add" for e in entries)
+             or any(names_an_entity([e.get(k) for k in ("row_before", "row_after", "before",
+                                                        "after")], entities)
+                    for e in entries if e.get("op") in ("remove", "replace"))
              or any(names_an_entity(row, entities) for row in dropped))
     return ORACLE if shown else RECONSTRUCTED
 
@@ -306,15 +317,17 @@ def calibrate_one(registry: WorldRegistry, ctx: Any, system: str, verb: str,  # 
     asked = dict(params)
     registry.store.log_query("preflight", system, verb, asked)
 
-    def commit(served: Any, _claim: dict, _verdict: dict, _attempts: int, staged: Any) -> None:
+    def commit(served: Any, changes: dict, _verdict: dict, _attempts: int, staged: Any) -> None:
         if fixed and changes_base(served, base):
             raise PrebranchChanged(
                 f"the world's verified answer changes {system}.{verb}, a call the source run "
                 "made before the branch point — that prefix is fixed (M01=A)")
+        # A calibration serving is kept for reuse too: a sibling of this world builds on it.
         registry.store.commit(forged=list(staged.forged.values()),
                               facts=[{"entity": e, "field": f, "value": v}
                                      for (e, f), v in staged.facts.items()],
-                              answer=None)
+                              answer=None,
+                              serving=serving_row(system, verb, asked, served, changes, staged))
 
     with registry._turn(ctx, pauses_clock=False):
         registry.oracle.serve((system, verb, asked), base,

@@ -130,6 +130,9 @@ class OracleStore:
         #: Each row carries its own `id`: a failed append may have landed some of them whole,
         #: and the rewrite of those is counted once (`_trace_spent`).
         self._unwritten: list[dict] = []
+        #: Every verified serving so far, oldest first (`commit(serving=)`, #1543).
+        self.servings: list[dict] = [r for r in read_jsonl_rows(self.paths.servings)
+                                     if isinstance(r.get("system"), str)]
         #: The `(forged_id, column, value)` of every collision already recorded.
         self._collided = {(r.get("forged_id"), r.get("column"), r.get("value"))
                           for r in read_jsonl_rows(self.paths.collisions)}
@@ -221,11 +224,13 @@ class OracleStore:
                 self._append(self.paths.collisions, new)
                 self._collided.update((e["forged_id"], e["column"], e["value"]) for e in new)
 
-    def commit(self, *, forged: list[dict], facts: list[dict], answer: dict | None) -> None:
+    def commit(self, *, forged: list[dict], facts: list[dict], answer: dict | None,
+               serving: dict | None = None) -> None:
         """Freeze this attempt's forged rows and facts with the verified answer (M15=B): rows
         and facts first, then the answer that cites them. `answer=None` is pre-flight's
         calibration (Amendment 2, S1): the rows and facts are frozen, no served answer is
-        cached."""
+        cached. `serving`: the verified serving kept for later calls to reuse (#1543); its
+        append is best effort and never fails the commit."""
         with self._lock:
             new_rows = [r for r in forged if r["forged_id"] not in self.frozen]
             new_facts = [f for f in facts if (f["entity"], f["field"]) not in self.facts]
@@ -242,6 +247,14 @@ class OracleStore:
             if answer is not None:
                 key = request_key(answer["system"], answer["verb"], answer["params"])
                 self.answers[key] = answer
+            if serving is not None:
+                try:
+                    self._append(self.paths.servings, [serving])
+                except OSError as unwritable:
+                    self._torn.add(self.paths.servings)
+                    _logger.warning(f"a verified serving could not be kept for reuse "
+                                    f"({unwritable!r}); the answer is served")
+                self.servings.append(serving)
 
 
 
