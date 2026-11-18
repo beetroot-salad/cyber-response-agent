@@ -553,9 +553,15 @@ class Tick:
                 # a batch ended beside it would leave an open PR nothing tracks. A merge in the gap is read as merged.
                 pr = forge.pull_request(number)
                 if pr.status == "open":
+                    # Counted like a refusal, so a close that never takes reaches a person at the ceiling instead of
+                    # being retried for good behind a clean check.
+                    count, phase = self.store.note_refusal(self.tenant_id, str(b.id), Why.batch(
+                        "forge_refused", f"the forge took the close of PR #{number} (changes requested) but it still "
+                                         "reads open"))
                     _logger.warning(f"{self.label}: PR #{number} of batch {b.id} has changes requested but still reads "
-                                    "open after its close: the batch stays in review and the next pass closes it again")
-                elif pr.status == "closed":
+                                    f"open after its close ({count} in a row, {phase}): the next pass closes it again")
+                    return
+                if pr.status == "closed":
                     self.store.end_review(self.tenant_id, str(b.id), expect_phase="in_review", outcome="closed",
                                           published=[], held=[])
                     _logger.info(f"{self.label}: PR #{number} of batch {b.id} has changes requested: closed, "
@@ -714,7 +720,7 @@ class Tick:
             _logger.info(f"{self.label}: batch {b.id}'s requested abandon is settled ({seen})")
         else:
             _logger.warning(f"{self.label}: batch {b.id}'s requested abandon was not settled ({seen}): the batch is no "
-                            "longer parked with a request (a person released it)")
+                            "longer parked with a request (released by a person, or settled by another tick)")
         return bool(settled)
 
     @staticmethod

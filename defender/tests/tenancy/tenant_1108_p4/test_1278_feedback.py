@@ -348,6 +348,31 @@ def test_feedback_a_live_changes_requested_review_on_an_open_pr_gets_it_closed_a
 
 
 
+def batch_row_of(w, batch_id):
+    from defender.tests.support.learning.core._release1537 import row
+
+    return row(w.dsn, batch_id)
+
+
+@pytest.mark.parametrize("passes", [1, 3], ids=["one_pass", "to_the_ceiling"])
+def test_feedback_a_close_that_never_takes_is_counted_to_the_ceiling_and_goes_to_a_person(world, caplog, passes):
+    """Each pass's close the forge takes but never applies counts like a refusal: the batch reaches a person at the
+    ceiling instead of looping behind a clean check. (H15; #1558 review)"""
+    w = world
+    w.seed("f1")
+    writer = FeedbackCurator(_files("f1"))
+    batch_id, _branch, _number = opened(w, writer, caplog)
+    w.t.forge.reviews[_number] = [review_row(638, "owner", "REQUEST_CHANGES", body="wrong lane")]
+    w.t.forge.respond = lambda request: httpx.Response(201, json={}) if request.method == "PATCH" else None
+    for _ in range(passes):
+        tick(w, writer)
+    got = batch_row_of(w, batch_id)
+    assert got["refusals"] == passes
+    assert got["phase"] == ("needs_person" if passes == 3 else "in_review")
+    if passes == 3:
+        assert got["cause"] == "forge_refused" and "still reads open" in got["reason"], got
+
+
 def test_feedback_a_close_for_changes_requested_that_does_not_take_ends_nothing_and_is_made_again_next_pass(world, caplog):
     """The forge accepts the close but the PR reads open again: the batch is not ended closed beside a PR still open (no
     replacement opens over it, nothing would close it later); it stays in review and the next pass closes and replaces.
@@ -362,6 +387,7 @@ def test_feedback_a_close_for_changes_requested_that_does_not_take_ends_nothing_
     assert [p["state"] for p in w.t.forge.prs if p["number"] == number] == ["open"], "premise: the close did not take"
     assert _end(w, batch_id) == ("in_review", None), "the batch ended closed beside its open PR"
     assert _replacements(w, batch_id) == []
+    assert batch_row_of(w, batch_id)["refusals"] == 1, "a close that did not take was not counted"
     w.t.forge.respond = None
     tick(w, writer)
     assert _end(w, batch_id) == ("ended", "closed")
