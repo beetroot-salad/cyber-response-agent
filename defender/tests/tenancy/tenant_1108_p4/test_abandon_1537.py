@@ -407,6 +407,23 @@ def test_o3_an_abandon_request_that_waits_on_the_tick_s_own_lane_holds_back_no_c
     assert len(writer.served) == 1, "a request that settled nothing held back the claim"
 
 
+def test_o3_a_settled_revert_abandon_on_the_tick_s_own_lane_holds_back_no_claim(scene, caplog):
+    """A revert batch is on the author lane but never holds it, so settling its requested abandon frees nothing a claim was
+    waiting for: the author lane's due work is claimed in that same pass. (O3, #1558 review)"""
+    w = scene
+    revert = call(w.dsn, "claim_revert", w.t.tenant_id, owner="cli")
+    call(w.dsn, "in_review", revert, 5, {})
+    w.t.forge.add_pr(pr_row(5, revert.branch))
+    park(w.dsn, revert.batch_id)
+    _request(w, revert.batch_id)
+    w.seed("f1")
+    writer = _lesson("f1")
+    tick(w, writer)
+    got = row(w.dsn, revert.batch_id)
+    assert (got["phase"], got["outcome"]) == ("ended", "abandoned"), "premise: the revert's abandon settled this pass"
+    assert len(writer.served) == 1, "a revert's settled abandon held back the author lane's claim"
+
+
 def test_o3_an_abandon_settled_on_the_tick_s_own_lane_holds_back_its_claim_for_one_pass(scene, caplog):
     """An author batch's settled abandon gives its lane back: the claim that room makes waits for the next pass, then
     happens. (O3)"""

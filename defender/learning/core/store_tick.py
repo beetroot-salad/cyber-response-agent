@@ -469,7 +469,7 @@ class Tick:
             from defender.jobs.learning_models import BRANCH_PREFIX
 
             delivery = dataclasses.replace(delivery, branch_prefix=BRANCH_PREFIX[self.lane])
-            return self._opened(delivery, review, lapsed, requested)
+            return self._opened(delivery, review, lapsed, requested, held=work.busy)
 
     def tend(self, delivery: TenantDelivery) -> None:
         """Reconcile and recover with no claim, over a delivery the caller opened (the feedback tick's
@@ -479,7 +479,8 @@ class Tick:
             self._opened(delivery, review, lapsed, requested, claim=False)
 
     def _opened(self, delivery: TenantDelivery, review: list[Any], lapsed: list[Any], requested: list[Any], *,
-                claim: bool = True) -> int:
+                claim: bool = True, held: bool = False) -> int:
+        """`held`: the store found this tick's lane held (a claim must wait) when the pass began."""
         from defender.learning.author.version_control.store_delivery import StoreRecord
 
         record = StoreRecord.of(self.store.commit_record(self.tenant_id))
@@ -490,12 +491,13 @@ class Tick:
         for b in requested:
             settled = self._abandon(delivery, b, record,
                                     [i for i in items if i.batch_id == b.id and i.status == "in_batch"])
-            freed_own |= settled and b.lane == self.lane
+            freed_own |= held and settled and b.lane == self.lane
         for b in lapsed:
             self._recover(delivery, b, record)
         # A person's abandon just freed this tick's own lane: the claim it makes room for waits for the next pass, so one
         # tick does not both end a batch and start authoring over what that batch gave back. Another reconciled lane's
-        # abandon frees that lane, not this one, and holds nothing back.
+        # abandon frees that lane, not this one, and a lane no batch held (a revert never holds it) had nothing to free:
+        # neither holds anything back. Which batches hold a lane is the store's rule (`lane_work`), not read here.
         return self._claim(delivery) if claim and not freed_own else 0
 
     # -- counting what the forge said ----------------------------------------------------------------
