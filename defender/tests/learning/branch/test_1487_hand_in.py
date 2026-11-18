@@ -1,65 +1,135 @@
-"""#1487 sketch (design r1, Flow 1): at its end, the learning job in its container hands its episode's held findings to
-its helper in one `findings.publish` request, and opens no store. Driven as `test_1344_job_end.py` drives the entry
-(`run_entry`: the real `job_entry.main` over a job-socket stand-in); the helper's own answer is
-`tests/jobs/test_1487_store_relay.py`'s. No database."""
+"""#1487 (design r5, Flow 1 steps 1-2, P4 container side): at its end the learning job's entry reads the episode's held
+findings and carries them in its own end record's `findings` field; it opens no store and never drops a single row.
+Driven as `test_1344_job_end.py` drives the entry (`run_entry`). No database."""
 from __future__ import annotations
 
 import json
 
-from defender.tests.learning.branch.test_1344_job_lane import run_entry, sink_files
-from defender.tests.support.jobs._relay1487 import FINDINGS, QUESTIONER
+import pytest
+
+from defender.tests.learning.branch.test_1344_job_lane import choose, run_entry, sink_files
+from defender.tests.support.jobs._findings1487 import FINDING, QUESTIONER, defender_row, world_row
 
 
-def _graded_with_one_finding(runs, episode_id, **kw):
-    """The judge's real job-lane pass, then one defender finding held in the episode as the judge's sink holds it
-    (the fixture family's judge files none)."""
-    from defender.learning.core.state import FINDINGS as CHANNEL
-    from defender.learning.judge import grade_episode
-    from defender.learning.judge.enqueue import EpisodeFindings
-    from defender.tests.support.jobs._relay1487 import defender_row
+def _holding(defender=1, questioner=1, *, after=None):
+    """The `grade` seam: the judge's real job-lane pass, then rows held in the episode as the judge's sink holds them
+    (the fixture family's judge files none); `after(episode_dir)` may then damage the sink."""
+    def grade(runs, episode_id, **kw):
+        from defender.learning.core.state import FINDINGS, QUESTIONER_FINDINGS
+        from defender.learning.judge import grade_episode
+        from defender.learning.judge.enqueue import EpisodeFindings
 
-    graded = grade_episode(runs, episode_id, **kw)
-    with runs.episode_files(episode_id) as episode:
-        EpisodeFindings(episode).append(CHANNEL, [defender_row(str(episode_id))], dedup_key="finding_id")
-    return graded
+        graded = grade_episode(runs, episode_id, **kw)
+        job = str(episode_id)
+        with runs.episode_files(episode_id) as episode:
+            sink = EpisodeFindings(episode)
+            if defender:
+                sink.append(FINDINGS, [defender_row(job, n) for n in range(defender)], dedup_key="finding_id")
+            if questioner:
+                sink.append(QUESTIONER_FINDINGS, [world_row(job, n) for n in range(questioner)], dedup_key="finding_id")
+        if after is not None:
+            after(episode_id)
+        return graded
+    return grade
 
 
-def _held_ids(ep) -> set[str]:
-    """The finding ids the episode's sink files hold, read from the files (not through the sink's reader)."""
-    ids: set[str] = set()
-    for path in sink_files(p for p in ep.rglob("*") if p.is_file()):
-        ids |= {json.loads(line)["finding_id"] for line in path.read_text(encoding="utf-8").splitlines() if line.strip()}
-    return ids
-
-
-def test_o1_the_completed_learning_job_hands_its_held_findings_to_the_helper_once(tmp_path):
-    """A family graded with one finding held: the entry ends `completed` and has sent exactly one
-    `findings.publish`, carrying every held row by channel, the ids the episode holds. (O1, Flow 1 steps 1-2)"""
-    asked: list[dict] = []
-
-    def publish(fields: dict) -> dict:
-        asked.append(fields)
-        return {"outcome": "published", "counts": {"finding": len(fields.get("channels", {}).get(FINDINGS, []))}}
-
-    ran = run_entry(tmp_path, grade=_graded_with_one_finding, helper_answers={"findings.publish": publish})
-
-    assert ran.end is not None
+def _findings(ran) -> dict:
+    assert ran.end is not None, f"no end record (exit {ran.exit!r})"
     assert ran.end["status"] == "completed", ran.end
-    held = _held_ids(ran.ep)
-    assert held, "premise: the judge left a finding in the episode"
-    assert len(asked) == 1, f"the entry sent {len(asked)} hand-ins"
-    channels = asked[0].get("channels", {})
-    assert set(channels) <= {FINDINGS, QUESTIONER}, set(channels)
-    assert {r["finding_id"] for rows in channels.values() for r in rows} == held
+    assert isinstance(ran.end.get("findings"), dict), ran.end
+    return ran.end["findings"]
 
 
-def test_flow1_a_job_that_ends_other_than_completed_sends_no_hand_in(tmp_path):
-    """A job with no fork point ends `skipped` and hands nothing in. (Flow 1 step 5)"""
-    from defender.tests.learning.branch.test_1344_job_lane import choose
+def _damage(tmp_path_of, how):
+    """After grading, damage the episode's held-findings files (found by content, as `sink_files` does)."""
+    def after(episode_id):
+        import os
+        from pathlib import Path
 
-    asked: list[dict] = []
-    ran = run_entry(tmp_path, candidates=choose(), helper_answers={"findings.publish": lambda f: asked.append(f) or {}})
+        ep = next(Path(os.environ["DEFENDER_DATA_ROOT"]).glob(f"*/episodes/{episode_id}"))
+        sinks = sink_files(p for p in ep.rglob("*") if p.is_file())
+        assert sinks, "premise: the episode holds sink files to damage"
+        for path in sinks:
+            how(path)
+    return after
 
-    assert ran.end is not None
-    assert ran.end["status"] == "skipped", ran.end
-    assert asked == []
+
+def test_o1_the_completed_job_carries_every_held_row_by_channel_in_its_end_record(tmp_path):
+    """Two defender rows and one questioner row held: `findings.state` `ok`, its text the rows as held, by store kind.
+    (O1, Flow 1 step 1)"""
+    ran = run_entry(tmp_path, grade=_holding(2, 1))
+    found = _findings(ran)
+    assert found["state"] == "ok", found
+    job = ran.ep.name
+    assert json.loads(found["text"]) == {FINDING: [defender_row(job, 0), defender_row(job, 1)],
+                                         QUESTIONER: [world_row(job, 0)]}
+
+
+def test_o1_a_pass_that_held_nothing_carries_ok_findings_with_both_channels_empty(tmp_path):
+    """Zero held rows is `ok` with empty channels, not `unreadable`. (O1: zero findings included)"""
+    found = _findings(run_entry(tmp_path, grade=_holding(0, 0)))
+    assert found["state"] == "ok", found
+    assert json.loads(found["text"]) == {FINDING: [], QUESTIONER: []}
+
+
+def test_p4_one_malformed_held_line_makes_the_whole_findings_malformed_and_drops_no_row(tmp_path):
+    """A held line that is not JSON: `malformed`, no `text` (the entry never drops one row and keeps the rest); the
+    ending is still `completed`. (P4, Flow 1 step 1)"""
+    def spoil(path):
+        with path.open("a", encoding="utf-8") as sink:
+            sink.write("this is not a finding row\n")
+
+    found = _findings(run_entry(tmp_path, grade=_holding(1, 1, after=_damage(None, spoil))))
+    assert found["state"] == "malformed", found
+    assert "text" not in found
+
+
+def test_p4_held_rows_the_job_cannot_read_read_unreadable_and_the_ending_stands(tmp_path):
+    """The sink file is unreadable (a directory in its place): `unreadable`, status `completed`. (P4, Flow 1 step 1)"""
+    def unreadable(path):
+        path.unlink()
+        path.mkdir()
+
+    found = _findings(run_entry(tmp_path, grade=_holding(1, 1, after=_damage(None, unreadable))))
+    assert found["state"] == "unreadable", found
+    assert "text" not in found
+
+
+def test_p4_held_findings_over_the_cap_read_over_cap_with_no_text(tmp_path):
+    """Rows whose text is over `FINDINGS_CAP_BYTES` (8 MiB): `over_cap`, no text, the ending `completed`. (P4, O2)"""
+    from defender.records.job_lane import FINDINGS_CAP_BYTES
+
+    def big(job):
+        return dict(defender_row(job, 0), finding="z" * (FINDINGS_CAP_BYTES // 4 + 1024))
+
+    def grade(runs, episode_id, **kw):
+        from defender.learning.core.state import FINDINGS
+        from defender.learning.judge import grade_episode
+        from defender.learning.judge.enqueue import EpisodeFindings
+
+        graded = grade_episode(runs, episode_id, **kw)
+        with runs.episode_files(episode_id) as episode:
+            sink = EpisodeFindings(episode)
+            for n in range(5):
+                sink.append(FINDINGS, [dict(big(str(episode_id)), finding_id=f"{episode_id}/w-b/0/{n}")],
+                            dedup_key="finding_id")
+        return graded
+
+    found = _findings(run_entry(tmp_path, grade=grade))
+    assert found["state"] == "over_cap", found
+    assert "text" not in found
+
+
+def test_flow1_an_ending_other_than_completed_carries_no_held_rows(tmp_path):
+    """A job with no fork point ends `skipped`; its record carries no findings text. (Flow 1: only `completed`)"""
+    ran = run_entry(tmp_path, candidates=choose())
+    assert ran.end is not None and ran.end["status"] == "skipped", ran.end  # noqa: PT018
+    assert "text" not in (ran.end.get("findings") or {})
+
+
+@pytest.mark.parametrize("held", [(1, 0), (0, 1)], ids=["only-defender", "only-questioner"])
+def test_o1_each_channel_alone_is_carried(tmp_path, held):
+    """A channel alone holding rows still travels, the other empty. (O1)"""
+    found = _findings(run_entry(tmp_path, grade=_holding(*held)))
+    body = json.loads(found["text"])
+    assert (len(body[FINDING]), len(body[QUESTIONER])) == held

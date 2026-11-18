@@ -64,9 +64,13 @@ def world(migrated_database: str, tmp_path: Path) -> dict:
 
 def learning_end(status: str, reason: str | None = None, *, message: str | None = None, findings: int = 0,
                  cost: float = 0.0, fork: str | None = "m-1", stage: str | None = "judge") -> str:
-    """The entry's end record, in the interface's whole shape."""
-    return json.dumps({"status": status, "reason": reason, "message": message, "fork_message_id": fork,
-                       "stage": stage, "findings_count": findings, "sibling_cost_usd": cost})
+    """The entry's end record, in the interface's whole shape. `findings` is the envelope's own count, which the worker
+    ignores (#1487): a completed record carries `ok` findings with no rows, as a pass that held none."""
+    body = {"status": status, "reason": reason, "message": message, "fork_message_id": fork,
+            "stage": stage, "findings_count": findings, "sibling_cost_usd": cost}
+    if status == "completed":
+        body["findings"] = {"state": "ok", "text": json.dumps({"finding": [], "questioner_finding": []})}
+    return json.dumps(body)
 
 
 def jobs_of(dsn: str, investigation: str) -> list[dict]:
@@ -373,7 +377,8 @@ async def test_the_end_record_alone_decides_the_row(world, record, status, reaso
     stored = job_row(world["dsn"], job)
     assert (stored["status"], stored["reason"]) == (status, reason), stored
     assert (stored["message"] or None) == want["message"]
-    assert (stored["findings_count"], stored["sibling_cost_usd"]) == (want["findings_count"], 0.75)
+    # #1487: the count is derived from the stored rows (none here), never the record's own figure
+    assert (stored["findings_count"], stored["sibling_cost_usd"]) == (0 if status == "completed" else want["findings_count"], 0.75)
     assert (stored["fork_message_id"], stored["stage"]) == (want["fork_message_id"], want["stage"])
     assert stored["publish_state"] == ("done" if status == "completed" else "none")
     assert RUN_TEXT not in json.dumps(stored, default=str), "run text reached the row"
@@ -611,7 +616,7 @@ async def test_a_stopped_record_from_a_child_nobody_signalled_is_still_a_hand_ba
 
 
 @pytest.mark.parametrize(("record", "status", "publish"), [
-    pytest.param(learning_end("completed", findings=2), "completed", "pending", id="completed"),
+    pytest.param(learning_end("completed", findings=2), "completed", "done", id="completed"),
     pytest.param(learning_end("failed", "judge_failed", message="m"), "failed", "none", id="failed"),
     pytest.param(learning_end("skipped", "no_fork_point", message="m", fork=None, stage="fork"), "skipped", "none",
                  id="skipped"),
@@ -1068,7 +1073,7 @@ async def test_o13_the_progress_record_is_copied_to_the_running_row_and_the_end_
 
     stored = job_row(dsn, job)
     assert (stored["status"], stored["stage"], stored["sibling_cost_usd"], stored["findings_count"]) == (
-        "completed", "judge", 2.0, 3)
+        "completed", "judge", 2.0, 0)
     assert stored["fork_message_id"] == "m-7"
 
 
@@ -1311,7 +1316,7 @@ async def test_o9_a_stopping_worker_signals_its_post_step(world):
             await asyncio.wait_for(serving, timeout=15)
     assert mark.exists(), "the post-step was not told to stop"
     stored = job_row(world["dsn"], job)
-    assert (stored["status"], stored["publish_state"]) == ("completed", "pending")
+    assert (stored["status"], stored["publish_state"]) == ("completed", "done")
 
 
 # --- O10: delete -----------------------------------------------------------------------------------
