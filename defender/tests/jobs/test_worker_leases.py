@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import logging
 import os
 import signal
@@ -400,9 +401,11 @@ async def test_r7_s4_a_ledger_row_of_an_unknown_agent_id_leaves_the_finished_job
     assert (lower_limit(dsn, inv), final.cost_is_lower_limit) == (False, False)
 
 
+@pytest.mark.parametrize("broken", ["unreadable", "names-no-session"])
 @pytest.mark.parametrize("end", ["finish", "cancel", "stop"])
-async def test_b2_a_failed_cost_read_keeps_the_last_good_figure_mid_run_and_writes_null_in_the_end_write(world, end):
-    """The pointer goes unreadable after one copied figure: the row keeps 3.0 for several ticks while still renewed; the end write (finish, final accounting or hand-back) then carries cost NULL, not 3.0. (B2, R2)"""
+async def test_b2_a_failed_cost_read_keeps_the_last_good_figure_mid_run_and_writes_null_in_the_end_write(world, end, broken):
+    """The pointer breaks after one copied figure: the row keeps 3.0 for several ticks while still renewed; the end write
+    (finish, final accounting or hand-back) then carries cost NULL, not 3.0. (B2, R2)"""
     child, marks = _spending(world, _SPEND, files=_committed(), term="mark", term_mark=_term_mark(world))
     dsn = world["dsn"]
     async with job_store(dsn) as store:
@@ -411,7 +414,12 @@ async def test_b2_a_failed_cost_read_keeps_the_last_good_figure_mid_run_and_writ
         try:
             await _until(lambda: (marks / "wrote-0").exists(), "the child's spend")
             await _until(lambda: row(dsn, inv)["cost_usd"] == pytest.approx(SONNET_IN), "the first copy", timeout=5)
-            (world["runs"] / f"{inv}.session-pointer.json").write_text("not json", encoding="utf-8")
+            pointer = world["runs"] / f"{inv}.session-pointer.json"
+            if broken == "unreadable":
+                pointer.write_text("not json", encoding="utf-8")
+            else:  # the run's own case, a session it never opened: the cost read fails, the record still reads
+                case = json.loads(pointer.read_text(encoding="utf-8"))["case_id"]
+                pointer.write_text(session_pointer(case, session_id="no-such-session"), encoding="utf-8")
             for _ in range(15):  # about five cost ticks
                 await asyncio.sleep(0.1)
                 assert row(dsn, inv)["cost_usd"] == pytest.approx(SONNET_IN), "a failed read replaced the last good figure"
@@ -434,8 +442,9 @@ async def test_b2_a_failed_cost_read_keeps_the_last_good_figure_mid_run_and_writ
     assert final["cost_usd"] is None, "an unreadable final cost was written as a figure"
     # CONFLICT-UPDATED (#1534; was: finish ends `completed`): the record is read through the same pointer, so a finish over
     # an unreadable one is `unparseable` with that kind's words (V-READERS, worker row).
-    assert final["stage"] == {"finish": "unparseable", "cancel": "aborted", "stop": "running"}[end]
-    if end == "finish":
+    finished = "unparseable" if broken == "unreadable" else "completed"
+    assert final["stage"] == {"finish": finished, "cancel": "aborted", "stop": "running"}[end]
+    if end == "finish" and broken == "unreadable":
         from defender.records import closing as C
 
         assert C.FAULT_WORDING["pointer-unreadable"] in (final["failure_message"] or ""), final["failure_message"]
@@ -1203,6 +1212,10 @@ async def test_b11_a_stopped_childs_row_is_finished_when_the_reader_says_complet
         await _worker(world, store, alone, **_FAST).drain()
         ended = row(dsn, control)
         assert (ended["stage"], ended["failure_reason"], ended["disposition"]) == plan["expect"], "premise: the run alone ended otherwise"
+        if case == "4-record-unreadable":
+            from defender.records import closing as C
+
+            assert C.FAULT_WORDING["row-invalid"] in (ended["failure_message"] or ""), "premise: the record fault never landed"
         assert ended["cost_usd"] == pytest.approx(SONNET_IN), "premise: the run alone read no cost"
         if "{id}.knowledge-source.json" in plan["spec"].get("files", {}):
             assert ended["knowledge"] is not None, "premise: the run alone read no knowledge"
@@ -1220,8 +1233,8 @@ async def test_b11_a_stopped_childs_row_is_finished_when_the_reader_says_complet
     assert _termed(world, inv), "premise: the stop signalled the child"
     if plan["expect"][0] in ("completed", "unparseable") or plan["expect"][1] == "setup_refused":
         got, want = row(dsn, inv), ended
-        assert {k: got[k] for k in ("stage", "disposition", "failure_reason", "cost_usd", "knowledge")} == {
-            k: want[k] for k in ("stage", "disposition", "failure_reason", "cost_usd", "knowledge")}
+        kept = ("stage", "disposition", "failure_reason", "failure_message", "cost_usd", "knowledge")
+        assert {k: got[k] for k in kept} == {k: want[k] for k in kept}
         assert lower_limit(dsn, inv) is lower_limit(dsn, control), "the stopped run's mark differs from the run alone"
         assert accounting_written(dsn, inv) is not None
     else:
