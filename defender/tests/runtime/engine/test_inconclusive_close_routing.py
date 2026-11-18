@@ -126,7 +126,7 @@ def test_holds_commits_inconclusive_ceiling_examined(tmp_path):
     assert (result.outcome, result.cause, result.failure_kind) == (STANDS, CEILING_EXAMINED, None)
     fm = frontmatter(run_dir)
     assert (fm["disposition"], fm["outcome"], fm["cause"]) == (GAP, STANDS, CEILING_EXAMINED)
-    assert "failure_kind" not in fm
+    assert fm["failure_kind"] is None
     assert record(run_dir, 1)["verdict"] == STANDS
     from defender.records import closing as C
 
@@ -160,7 +160,7 @@ def test_null_ask_gap_overrides_cannot_discriminate(tmp_path):
         assert (fm["disposition"], fm["outcome"], fm["cause"]) == (
             UNRESOLVED, FORCED_INCONCLUSIVE, CAUSE_EVIDENCE_CANNOT_DISCRIMINATE,
         )
-        assert "failure_kind" not in fm
+        assert fm["failure_kind"] is None
         for role in _ALL_ROLES:
             assert not any(row.get("incomplete") for row in trace_rows(run_dir, role)), role
 

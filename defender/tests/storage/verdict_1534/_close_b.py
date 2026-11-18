@@ -3,11 +3,15 @@
 `production names that do not exist yet are imported inside functions`, as in `_spec1534`."""
 from __future__ import annotations
 
+import asyncio
 import contextlib
+import sqlite3
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, NamedTuple
 
+from defender.records._store_errors import StoreError
 from defender.tests.storage.verdict_1534 import _spec1534 as V
 from defender.tests.support.runtime.engine import _spec992 as S9
 from defender.tests.support.shared.contracts import _tacit983 as scene
@@ -277,3 +281,85 @@ def refusal_names(text: str, names: tuple[str, ...], bound: int) -> bool:
     import re
 
     return any(n in text for n in names) and re.search(rf"(?<![\d.]){bound}(?![\d.])", text) is not None
+
+
+# --- V-FINAL: a write the database refuses that is not the duplicate ---------------------------------------------------
+
+class SqliteFault(sqlite3.Error):
+    """A test's own `sqlite3.Error` subclass, raised where the database refuses a write."""
+
+
+class StoreFault(StoreError):
+    """A test's own `StoreError` subclass, raised where the database refuses a write."""
+
+
+#: Each write fault that is not `ClosingRecordExists`: `PRAGMA query_only` as the database raises it, and the same
+#: refusal re-raised as each test-defined class.
+WRITE_FAULTS = {"query-only": sqlite3.OperationalError, "sqlite3-error-subclass": SqliteFault,
+                "store-error-subclass": StoreFault}
+
+
+def _translating(raised: type[BaseException] | None, seen: list[int] | None) -> type[sqlite3.Connection]:
+    """A connection class re-raising any `sqlite3.Error` of its statements as `raised` (None: as the database raised it);
+    with `seen`, it records the connection's `busy_timeout` as each statement naming the `closing_record` table starts."""
+
+    def run(cursor: sqlite3.Cursor, call: Any, sql: str, *a: Any) -> Any:
+        if seen is not None and V.TABLE in sql:
+            seen.append(sqlite3.Connection.execute(cursor.connection, "PRAGMA busy_timeout").fetchone()[0])
+        try:
+            return call(sql, *a)
+        except sqlite3.Error as e:
+            if raised is None or isinstance(e, raised):
+                raise
+            raise raised(str(e)) from e
+
+    class Cursor(sqlite3.Cursor):
+        def execute(self, sql: str, *a: Any) -> Any:
+            return run(self, super().execute, sql, *a)
+
+        def executemany(self, sql: str, *a: Any) -> Any:
+            return run(self, super().executemany, sql, *a)
+
+    class Connection(sqlite3.Connection):
+        def cursor(self, factory: Any = Cursor) -> Any:
+            return super().cursor(factory)
+
+        def execute(self, sql: str, *a: Any) -> Any:
+            return self.cursor().execute(sql, *a)
+
+        def executemany(self, sql: str, *a: Any) -> Any:
+            return self.cursor().executemany(sql, *a)
+
+    return Connection
+
+
+@contextlib.contextmanager
+def second_handle(store: Any, fault: str | None, *, seen: list[int] | None = None) -> Iterator[Any]:
+    """The run's store handle over a second connection to its database, at the store's ordinary busy timeout; with
+    `fault`, the database refuses every write on it (`PRAGMA query_only`), raised as `WRITE_FAULTS[fault]`. None: a
+    healthy second connection (the control). `seen`: see `_translating`."""
+    from defender.records.session_store import STORE_BUSY_TIMEOUT_MS
+
+    conn = sqlite3.connect(str(store.path), timeout=STORE_BUSY_TIMEOUT_MS / 1000, isolation_level=None,
+                           factory=_translating(None if fault is None else WRITE_FAULTS[fault], seen))
+    try:
+        if fault is not None:
+            conn.execute("PRAGMA query_only = ON")
+        yield replace(store, connection=conn)
+    finally:
+        conn.close()
+
+
+def drive_forced_close_over(deps: Any, store: Any, close_store: Any) -> str | None:
+    """The driver's own forced close of a run cut short: the driver holds `store`, the close gets `close_store` on MAIN's
+    deps (`AgentDeps.session_store`). Returns the exit reason."""
+    from defender.investigation import challenge_gate, driver
+    from defender.tests.support.invlang.validation._invlang_warn_836 import build_main_agent
+    from defender.tests.support.runtime.engine._spec923 import StuckModel
+
+    session = store.new_session(agent_id="main")
+    _run, _end, exit_reason = asyncio.run(driver._drive_agent(
+        build_main_agent(StuckModel()), "go", V.with_store(deps, close_store), store, session,
+        challenge_gate.default_bounds(),
+    ))
+    return exit_reason

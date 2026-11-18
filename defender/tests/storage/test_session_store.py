@@ -547,6 +547,29 @@ def test_v_one_a_second_closing_record_for_a_run_is_refused_and_the_first_row_is
     assert issubclass(ss.ClosingRecordExists, ss.StoreError)
 
 
+def test_v_one_the_database_itself_refuses_a_second_row_for_a_run_written_around_the_store(tmp_path):
+    """A raw duplicate INSERT from a second connection raises `IntegrityError` and leaves one row; another run's copy lands. (V-ONE)"""
+    from defender.tests.storage.verdict_1534 import _spec1534 as V
+    from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
+    run_id, other = fixture_uuid("closing-1534-raw"), fixture_uuid("closing-1534-raw-other")
+    with V.run_store(runs_base(tmp_path), "c1534") as store:
+        V.plant(store, V.a_record(run_id))
+        database = store.path
+    conn = sqlite3.connect(database, timeout=30, isolation_level=None)
+    try:
+        copy = f"INSERT INTO {V.TABLE} SELECT * FROM {V.TABLE} WHERE run_id = ?"  # noqa: S608
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(copy, (run_id,))
+        conn.execute(f"CREATE TEMP TABLE c AS SELECT * FROM {V.TABLE} WHERE run_id = ?", (run_id,))  # noqa: S608
+        conn.execute("UPDATE c SET run_id = ?", (other,))
+        conn.execute(f"INSERT INTO {V.TABLE} SELECT * FROM c")  # noqa: S608
+    finally:
+        conn.close()
+    assert len(_closing_rows(database, run_id)) == 1
+    assert len(_closing_rows(database, other)) == 1
+
+
 def test_v_one_runs_that_share_a_database_each_keep_their_own_row(tmp_path):
     """A source and an arm written to one database: two rows, each its own. (V-ONE)"""
     from defender.tests.storage.verdict_1534 import _spec1534 as V

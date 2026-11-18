@@ -419,84 +419,6 @@ def pre_change_inconclusive_dir(tmp_path: Path) -> Path:
     return run_dir
 
 
-def historical_closing(run_dir: Path) -> Any:
-    """The lookup result for `pre_change_inconclusive_dir`: a record as an unreviewed pre-#992 `inconclusive` close left it
-    (not reviewed, the two priced receipts), handed to the page directly since the hand-built folder has no database."""
-    from defender.records import closing as C
-    from defender.tests.storage.verdict_1534 import _spec1534 as V
-
-    receipts = tuple(C.CeilingEntry(state, ref, None, "") for state, ref in V2SSHD_RECEIPTS)
-    return C.Record(V.a_record(run_dir.name, disposition=GAP, outcome=C.STANDS, cause=C.CAUSE_NOT_REVIEWED,
-                               ceiling_test=receipts, summary=None))
-
-
-# ---------------------------------------------------------------------------------------
-# The note-cap ladder.
-# ---------------------------------------------------------------------------------------
-
-#: Note sizes, doubling, from well under any sane bound to past the whole-file cap
-#: (`_artifact_schema.REPORT_FILE_MAX` = 8192), so a test can check that the first refusal is
-#: the price gate's and never the commit's, whatever the bound.
-NOTE_LADDER: tuple[int, ...] = (128, 256, 512, 1024, 2048, 4096, 8192, 9000)
-
-
-def note_text(note_len: int) -> str:
-    """`note_len` characters of analyst-facing prose for a receipt's note."""
-    return ("the EDR collector returned HTTP 503 and every retry did too; " * 400)[:note_len]
-
-
-def noted_companion(note_len: int) -> str:
-    """`_spec923.paid()` with a receipt whose note is `note_len` characters of prose."""
-    return sparse_companion(f"state=query-failed ref=l-002 note={note_text(note_len)}")
-
-
-#: How many `query-failed` leads the wide companion declares — enough that the block cap, not
-#: the lead count, bounds how many receipts pay.
-_WIDE_LEAD_COUNT = 16
-
-
-def _wide_leads() -> str:
-    rows = ["l-001|1|sshd-auth-events-detail|v-001|||elastic|30d"]
-    rows += [
-        f"l-{n:03d}|1|collector-{n:03d}|v-001|collector {n:03d} returned HTTP 503||elastic|30d"
-        for n in range(2, 2 + _WIDE_LEAD_COUNT)
-    ]
-    return (
-        "```invlang\n"
-        ":L findings [id|loop|name|target|fail_reason|tests|system|window]\n"
-        + "".join(f"{row}\n" for row in rows) + "```\n"
-    )
-
-
-def wide_companion(receipts: int, note: str) -> str:
-    """`_spec923`'s prologue and lead result over a WIDE `:L findings` table: `receipts`
-    distinct paying `query-failed` receipts (one per failed lead) each carrying `note`."""
-    assert 1 <= receipts <= _WIDE_LEAD_COUNT
-    rows = tuple(f"state=query-failed ref=l-{n:03d} note={note}" for n in range(2, 2 + receipts))
-    return _spec923.doc(_spec923.PROLOGUE, _wide_leads(), _spec923.LEAD_RESULT, _spec923.conclude(
-        disposition=GAP, confidence="medium", **{"termination.category": "data-ceiling"},
-        summary='"could not settle the actor"', ceiling_test=rows,
-    ))
-
-
-def receipts_at_block_cap() -> int:
-    """The largest number of distinct `ref=` receipts the price gate's FRONTMATTER block cap
-    admits (`_MAX_CEILING_FRONTMATTER_BYTES` over the rendered block) — computed against the
-    real renderer, never assumed."""
-    from defender.investigation.review.projector import parse_investigation
-    from defender.skills.invlang.validate import ceiling_test_block, conclude_ceiling_test_rows
-    from defender.skills.invlang.validate._gating import _MAX_CEILING_FRONTMATTER_BYTES
-
-    best = 0
-    for n in range(1, _WIDE_LEAD_COUNT + 1):
-        block = ceiling_test_block(conclude_ceiling_test_rows(parse_investigation(wide_companion(n, "x"))))
-        if len(block.encode("utf-8")) > _MAX_CEILING_FRONTMATTER_BYTES:
-            break
-        best = n
-    assert 0 < best < _WIDE_LEAD_COUNT, best
-    return best
-
-
 __all__ = [
     "CEILING_EXAMINED",
     "CEILING_QUESTION_MARKERS",
@@ -505,7 +427,6 @@ __all__ = [
     "CONFIDENT_QUESTION_PHRASES",
     "FRAME_RE",
     "GAP",
-    "NOTE_LADDER",
     "RECORD_ID_PREFIXES",
     "SHIPPED_CAUSES",
     "V2SSHD_NOTE",
@@ -525,9 +446,6 @@ __all__ = [
     "host_text",
     "non_utf8_companion",
     "normalized",
-    "note_text",
-    "noted_companion",
-    "historical_closing",
     "pre_change_inconclusive_dir",
     "priced_receipts",
     "raises",
@@ -538,7 +456,6 @@ __all__ = [
     "is_closed",
     "never_closed",
     "record_text",
-    "receipts_at_block_cap",
     "record",
     "record_files",
     "recording",
@@ -550,5 +467,4 @@ __all__ = [
     "sparse_companion",
     "trace_files",
     "trace_rows",
-    "wide_companion",
 ]

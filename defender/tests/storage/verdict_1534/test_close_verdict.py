@@ -467,12 +467,15 @@ def test_v_one_a_second_write_for_the_same_run_is_refused_and_the_close_is_not_f
 
 
 def test_v_final_the_write_waits_for_the_stores_lock_and_the_review_record_is_written_first(tmp_path):
-    """A write lock held about two seconds (past the ledger's one) then released: the close commits; the review record was
-    on disk while the closing write waited. (V-FINAL)"""
+    """A write lock held about two seconds then released: the close commits, its every `closing_record` statement at the
+    store's ordinary busy timeout; the review record was on disk meanwhile. (V-FINAL)"""
     from defender.investigation import challenge_gate
+    from defender.records.session_store import STORE_BUSY_TIMEOUT_MS
 
-    held, seen = threading.Event(), {}
-    with B.opened(tmp_path, S.pays_every_price("malicious")) as (deps, run_dir, store):
+    held, seen, timeouts = threading.Event(), {}, []
+    with B.opened(tmp_path, S.pays_every_price("malicious")) as (deps, run_dir, store), \
+            B.second_handle(store, None, seen=timeouts) as handle:
+        deps = V.with_store(deps, handle)
         def hold():
             with V.write_locked(store.path):
                 held.set()
@@ -488,6 +491,8 @@ def test_v_final_the_write_waits_for_the_stores_lock_and_the_review_record_is_wr
         holder.join()
 
         assert waited >= LOCK_HELD_S - 0.5
+        assert timeouts, "fixture control: the close's write reached the observed handle"
+        assert set(timeouts) == {STORE_BUSY_TIMEOUT_MS}, timeouts
         assert seen["review_records"] == [1]
         assert len(V.scalar_rows(store.path, run_dir.name)) == 1
         assert challenge_gate.ReviewState.of(deps).closed
@@ -518,6 +523,32 @@ def test_v_final_the_forced_closes_failed_write_reports_forced_close_failed(tmp_
         assert exit_reason == "ForcedCloseFailed"
         assert not challenge_gate.ReviewState.of(deps).closed
         assert V.scalar_rows(store.path, run_dir.name) == before
+
+
+@pytest.mark.parametrize("path", ["model-close", "forced-close"])
+@pytest.mark.parametrize("fault", sorted(B.WRITE_FAULTS))
+def test_v_final_a_write_fault_that_is_not_the_duplicate_is_raised_and_the_close_is_not_final(tmp_path, fault, path):
+    """The database refuses the closing write (not `ClosingRecordExists`): the model close raises that fault, the driver's
+    forced close reports `ForcedCloseFailed`; nothing final, no row. A healthy handle commits. (V-FINAL)"""
+    from defender.investigation import challenge_gate
+
+    for name, given in (("faulted", fault), ("control", None)):
+        doc = B.DOC if path == "forced-close" else S.pays_every_price("malicious")
+        with B.opened(tmp_path / name, doc) as (deps, run_dir, store), B.second_handle(store, given) as handle:
+            if path == "forced-close":
+                exit_reason = B.drive_forced_close_over(deps, store, handle)
+                deps = V.with_store(deps, handle)
+                assert (exit_reason == "ForcedCloseFailed") is (given is not None), (name, exit_reason)
+            elif given is not None:
+                deps = V.with_store(deps, handle)
+                with pytest.raises(B.WRITE_FAULTS[given]):
+                    S9.close_with(deps, "malicious", S9.recording(S9.holds()))
+                assert S9.record_files(run_dir) == [1], "the review record is written first"
+            else:
+                deps = V.with_store(deps, handle)
+                S9.close_with(deps, "malicious", S9.recording(S9.holds()))
+            assert challenge_gate.ReviewState.of(deps).closed is (given is None), name
+            assert len(V.scalar_rows(store.path, run_dir.name)) == (0 if given else 1), name
 
 
 @pytest.mark.parametrize(("disposition", "forced"), [("malicious", False), (HOST, True)], ids=["reviewed", "forced"])

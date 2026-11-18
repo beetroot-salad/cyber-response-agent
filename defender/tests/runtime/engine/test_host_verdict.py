@@ -34,6 +34,7 @@ from defender.tests.support.runtime.engine._spec923 import (
     pays_every_price,
     real_targets,
 )
+from defender.tests.support.runtime.engine._spec992 import is_closed, never_closed
 from defender.tests.support.sandbox._spec791 import (  # noqa: F401 — session-scoped autouse guard
     worktree_package_guard,
 )
@@ -51,7 +52,7 @@ def _overrule(deps, *, ask=None, bounds=None):
 # The committed verdict.
 
 def test_a_host_terminated_close_commits_the_fifth_member_verbatim(tmp_path):
-    """Every host-terminated close commits the literal string `unresolved` into `report.md`'s frontmatter `disposition` field, verbatim and unnormalized."""
+    """Every host-terminated close commits the literal string `unresolved` as the closing record's `disposition`, verbatim and unnormalized."""
     deps, run_dir = ab3_deps(tmp_path)
     _overrule(deps)
 
@@ -201,17 +202,15 @@ def test_a_model_authored_new_state_close_is_refused_without_spending_a_review(t
         close(deps, MEMBER, stages=stages.bundle())
 
     assert MEMBER in str(e.value)
-    assert not (run_dir / "report.md").exists(), "the refused close committed anyway"
+    assert never_closed(run_dir), "the refused close committed anyway"
     assert stages.calls == [], f"the refused close spent a review: {stages.calls}"
 
 
-# The committed report partitions on `disposition` alone.
+# The committed record partitions on `disposition` alone.
 
 def test_no_host_terminated_run_appears_in_the_gap_set(tmp_path):
-    """Partitioned on `disposition` alone, the `inconclusive` reports hold no host-terminated run
+    """Partitioned on `disposition` alone, the `inconclusive` records hold no host-terminated run
     and each names a gap."""
-    from defender.records._report import read_report
-
     host_deps, host_run = ab3_deps(tmp_path / "host-overruled")
     _overrule(host_deps)
 
@@ -224,9 +223,8 @@ def test_no_host_terminated_run_appears_in_the_gap_set(tmp_path):
     host_terminated = {host_run, fail_run}
     gap_set = set()
     for run_dir in (host_run, fail_run, model_run):
-        report = read_report(run_dir / "report.md")
-        assert report.disposition is not None, run_dir
-        if report.disposition == GAP_MEMBER:
+        disposition = committed_verdict(run_dir)
+        if disposition == GAP_MEMBER:
             gap_set.add(run_dir)
 
     assert gap_set == {model_run}, (
@@ -238,20 +236,20 @@ def test_no_host_terminated_run_appears_in_the_gap_set(tmp_path):
 
     rows = committed(model_run).get("ceiling_test")
     rows = [rows] if isinstance(rows, str) else list(rows or [])
-    assert rows, "a report in the gap set names no gap — the set carries no finding"
+    assert rows, "a record in the gap set names no gap — the set carries no finding"
 
 
 # The forced close and the no-review bypass.
 
 def test_the_frameworks_forced_close_is_not_refused_by_the_new_price(tmp_path):
-    """The framework's retry-exhaustion close still commits a `report.md` (its `unresolved` owes
+    """The framework's retry-exhaustion close still commits a closing record (its `unresolved` owes
     no price), while a model's `inconclusive` close of the same gapless document is refused."""
     from pydantic_ai.exceptions import ModelRetry
 
     deps, run_dir = main_deps(tmp_path, gapless())
     _run, _truncated_by, exit_reason = drive_to_retry_exhaustion(deps)
     assert exit_reason == "UnexpectedModelBehavior"
-    assert (run_dir / "report.md").is_file(), (
+    assert is_closed(run_dir), (
         "the framework's own close was refused by the new price and the run has no disposition"
     )
     assert committed_verdict(run_dir) == MEMBER
@@ -260,7 +258,7 @@ def test_the_frameworks_forced_close_is_not_refused_by_the_new_price(tmp_path):
     with pytest.raises(ModelRetry) as e:
         close(model_deps, GAP_MEMBER)
     assert "close blocked" in str(e.value)
-    assert not (model_run / "report.md").exists(), (
+    assert never_closed(model_run), (
         "the same gapless document bought a model-authored close — the exemption above is a "
         "hole rather than the framework's own path"
     )
@@ -283,7 +281,7 @@ def test_the_no_review_bypass_matches_the_host_verdict_and_no_other(tmp_path):
         concluded = GAP_MEMBER if member == MEMBER else member
         deps, run_dir = main_deps(tmp_path / f"member-{member}", pays_every_price(concluded))
         close(deps, member, stages=stages.bundle(), forced=member == MEMBER)
-        assert (run_dir / "report.md").is_file(), f"{member} did not commit at all"
+        assert is_closed(run_dir), f"{member} did not commit at all"
         observed[member] = bool(stages.calls)
 
     assert observed == BYPASS_BY_MEMBER, (
@@ -294,7 +292,7 @@ def test_the_no_review_bypass_matches_the_host_verdict_and_no_other(tmp_path):
     forced_stages = recording_stages("holds")
     deps, run_dir = main_deps(tmp_path / "forced-confident", pays_every_price("malicious"))
     close(deps, "malicious", stages=forced_stages.bundle(), forced=True)
-    assert (run_dir / "report.md").is_file()
+    assert is_closed(run_dir)
     assert forced_stages.calls, (
         "a forced confident close spent no review: the bypass is keyed on `forced`, not only "
         "on the verdict"

@@ -117,15 +117,13 @@ def test_validate_investigation_returns_none_on_warn_only(tmp_path):
 
 def test_validate_artifact_still_returns_str_or_none():
     """`validate_artifact` keeps its `str | None` contract: the close tool and the permission
-    gate are both written against it."""
+    gate are both written against it. `report.md` has no schema any more (#1534 Removal): its name raises."""
     from defender.records._artifact_schema import validate_artifact
 
     assert validate_artifact("investigation.md", WARN_DOC, None) is None
     assert isinstance(validate_artifact("investigation.md", _PARSE_ERROR, None), str)
-    assert isinstance(validate_artifact("report.md", "not frontmatter", None), str)
-    assert validate_artifact(
-        "report.md", "---\ndisposition: benign\n---\nbody\n", None
-    ) is None
+    with pytest.raises(ValueError, match="no content schema"):
+        validate_artifact("report.md", "---\ndisposition: benign\n---\nbody\n", None)
 
 
 def test_validate_companion_drops_warnings():

@@ -46,7 +46,10 @@ def _deps(tmp_path: Path):
     (run_dir / "investigation.md").write_bytes((GOLDEN / "investigation.md").read_bytes())
     dfn = tmp_path / "defender"
     dfn.mkdir(exist_ok=True)
-    return _with_fixture_run_1165(bind(MAIN_DEF, run_dir, defender_dir=dfn), run=_fixture_run_1165(run_dir)), run_dir
+    from defender.tests.support.runtime.engine._spec923 import with_session_store
+
+    deps = _with_fixture_run_1165(bind(MAIN_DEF, run_dir, defender_dir=dfn), run=_fixture_run_1165(run_dir))
+    return with_session_store(deps, tmp_path), run_dir
 
 
 
@@ -216,25 +219,26 @@ def _warned_about_turn_1(caplog) -> list[str]:
             if r.levelno >= logging.WARNING and re.search(r"turn\W*1\b", r.getMessage(), re.IGNORECASE)]
 
 
-REASON = "frontmatter: key 'x' is missing\nbody: section 'Why' is empty\nbody: section 'Evidence' is empty"
 
 
-def test_a_schema_refused_report_is_the_closes_refusal_whatever_the_record_write_did(tmp_path):
-    """The validator refuses the body and the review record cannot be written either: the model is told the validator's whole (multi-line) reason, the very message a close with a healthy record gives, and nothing of the record's fault. (M2)"""
-    def refusing(*_a):
-        return REASON
+def test_a_refused_close_is_the_closes_refusal_whatever_the_record_write_did(tmp_path):
+    """The close's gate refuses the document and the review record cannot be written either: the model is told the very
+    message a close with a healthy record gives, and nothing of the record's fault. (M2; the report validator is retired, #1534)"""
+    from defender.tests.support.runtime.engine._spec923 import gapless
 
-    healthy_deps, _ = _deps(tmp_path / "healthy")
+    healthy_deps, healthy_dir = _deps(tmp_path / "healthy")
+    (healthy_dir / "investigation.md").write_text(gapless(), encoding="utf-8")
     with pytest.raises(ModelRetry) as healthy:
-        close_investigation(healthy_deps, "inconclusive", stages=_stages(), validator=refusing)
+        close_investigation(healthy_deps, "inconclusive", stages=_stages())
 
     deps, run_dir = _deps(tmp_path / "faulty")
+    (run_dir / "investigation.md").write_text(gapless(), encoding="utf-8")
     record = _a_directory_where_the_review_record_goes(run_dir)
     with pytest.raises(ModelRetry) as excinfo:
-        close_investigation(deps, "inconclusive", stages=_stages(), validator=refusing)
+        close_investigation(deps, "inconclusive", stages=_stages())
 
     message = str(excinfo.value)
-    assert REASON in message, f"the model was not given the validator's whole reason: {message!r}"
+    assert "close blocked" in message, f"fixture control: the gate refused the document: {message!r}"
     assert message == str(healthy.value), f"the record's fault changed what the model was told: {message!r}"
     assert record.name not in message
     assert never_closed(run_dir)
