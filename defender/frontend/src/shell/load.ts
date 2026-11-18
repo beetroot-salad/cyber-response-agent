@@ -23,7 +23,7 @@ export interface Effects {
   replace(url: string): void;
 }
 
-export interface LoadOptions {
+interface LoadOptions {
   readonly taken: Taken;
   readonly byHistory: boolean;
   /** The pathname when it is a member of a returnable shape: what sign-in brings the person back to. */
@@ -74,8 +74,20 @@ function withQuery(path: string, query: Record<string, string | readonly string[
 /** Thrown by the client's `fetch` when the load is gone, a 401 included (B1 has then already been carried out). */
 class GoneSignal extends Error {}
 
-/** Thrown by the client's `fetch` when no whole answer came: the request or the body's read failed. */
-class NoAnswer extends Error {}
+/** Thrown by the client's `fetch` when the answer can't be used: none came whole (the request or the body's read
+ * failed), or its body is not JSON, which every API answer is. */
+class UnusableAnswer extends Error {}
+
+/** True when `text` is JSON. `JSON.parse` throws when it is not; the value itself is the client's to read, and JSON has
+ * no `undefined`, so a parsed value is never one. */
+function isJson(text: string): boolean {
+  try {
+    const value: unknown = JSON.parse(text);
+    return value !== undefined;
+  } catch {
+    return false;
+  }
+}
 
 type Api = ReturnType<typeof createClient<paths>>;
 
@@ -104,11 +116,13 @@ export function makeLoad(options: LoadOptions): Load {
   let superseded = false;
   const mayShow = (): boolean => !leaving && !superseded;
 
-  /** The one way the load navigates away: nothing (and false) when it is already leaving or superseded. */
+  /** The one way the load navigates away: nothing (and false) when it is already leaving or superseded. Once the
+   * navigation has started, the document is going away and nothing of the load shows; a navigation that throws is a
+   * fault of the shell's own, and the load is not leaving. */
   function leave(navigate: () => void): boolean {
     if (!mayShow()) return false;
-    leaving = true; // this document is going away: nothing of the running load shows
     navigate();
+    leaving = true;
     return true;
   }
 
@@ -134,36 +148,36 @@ export function makeLoad(options: LoadOptions): Load {
       async fetch(request) {
         if (!mayShow()) throw new GoneSignal();
         let response: Response;
-        let body: ArrayBuffer;
+        let body: string;
         try {
           response = await effects.fetch(request);
-          body = await response.arrayBuffer(); // read whole here, so a body cut off is no answer too
+          body = await response.text(); // read whole here, so a body cut off is no answer either
         } catch {
-          throw new NoAnswer();
+          throw mayShow() ? new UnusableAnswer() : new GoneSignal();
         }
         if (!mayShow()) throw new GoneSignal();
         if (on401 !== "returned" && response.status === 401) {
           unauthorized(on401);
           throw new GoneSignal();
         }
+        if (body !== "" && !isJson(body)) throw new UnusableAnswer();
         const { status, statusText, headers } = response;
-        return new Response(body.byteLength === 0 ? null : body, { status, statusText, headers });
+        return new Response(body === "" ? null : body, { status, statusText, headers });
       },
     });
   }
   /** One client per 401 policy. */
   const api: Readonly<Record<On401, Api>> = { me: clientFor("me"), later: clientFor("later"), returned: clientFor("returned") };
 
-  /** One call: gone, failed, or its answer. Anything else it throws is the shell's own fault, and goes on to the
-   * caller (the error state's "something stopped working"). */
+  /** One call: gone, the server's error, or its answer. Anything else it throws is the shell's own fault, and goes on
+   * to the caller (the error state's "something stopped working"). */
   async function send<T>(call: () => Promise<T>): Promise<Outcome<{ readonly kind: "answer"; readonly answer: T }>> {
     try {
       const answer = await call();
       return mayShow() ? { kind: "answer", answer } : { kind: "gone" };
     } catch (error) {
-      if (error instanceof GoneSignal || !mayShow()) return { kind: "gone" };
-      // The client reads the body as JSON (`Response.json`), which throws `SyntaxError` for an answer that is not.
-      if (error instanceof NoAnswer || error instanceof SyntaxError) return { kind: "error" };
+      if (error instanceof GoneSignal) return { kind: "gone" };
+      if (error instanceof UnusableAnswer) return { kind: "error" };
       throw error;
     }
   }

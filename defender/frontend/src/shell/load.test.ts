@@ -88,8 +88,8 @@ describe("a load's reads", () => {
 });
 
 /** A load whose every request is answered by `answer` at once, with effects that do nothing but what `record` does. */
-function loadAnswering(answer: () => Promise<Response>, record: () => boolean = () => true) {
-  const effects = { fetch: answer, record, assign: () => undefined, replace: () => undefined };
+function loadAnswering(answer: () => Promise<Response>, record: () => boolean = () => true, assign: () => void = () => undefined) {
+  const effects = { fetch: answer, record, assign, replace: () => undefined };
   return makeLoad({ taken: { status: "none" }, byHistory: false, target: "/home", origin: "http://app.test", effects });
 }
 
@@ -110,5 +110,14 @@ describe("what a read comes to", () => {
       throw fault;
     });
     await expect(load.client.read(KEY, params("i"))).rejects.toBe(fault);
+  });
+
+  it("a navigation that throws is the shell's own fault: it reaches the caller, and the load may still show it", async () => {
+    const fault = new Error("the navigation's own fault");
+    const load = loadAnswering(async () => unauthorized(), () => true, () => {
+      throw fault;
+    });
+    await expect(load.client.read(KEY, params("i"))).rejects.toBe(fault);
+    expect(load.mayShow()).toBe(true);
   });
 });

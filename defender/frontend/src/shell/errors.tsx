@@ -7,7 +7,7 @@ import type { Load } from "./load";
 export type ErrorKind = "server" | "broken";
 
 const MESSAGES: Readonly<Record<ErrorKind, string>> = {
-  server: "The app could not reach its server. Reload to try again.",
+  server: "The server did not answer as expected. Reload to try again.",
   broken: "Something on this page stopped working. Reload to try again.",
 };
 

@@ -1,4 +1,4 @@
-// The type check and the source check (#1540 F1 b, F8). A function only: `bun run check` and the build call it.
+// The type check and the source check (#1540 F1 b, F8). A function only: `scripts/run.mjs` calls it.
 //
 // 1. The whole project (screens, shell and unit-test files alike) is type-checked with the browser library.
 // 2. Everything outside `src/shell/` is type-checked again without it (`tsconfig.screens.json`), with only what
@@ -71,7 +71,7 @@ function isConstAssertion(node) {
   return ts.isTypeReferenceNode(node.type) && ts.isIdentifier(node.type.typeName) && node.type.typeName.text === "const";
 }
 
-/** True when the `any`-typed `node` is given the type `unknown` where it is made: `const x: unknown = JSON.parse(s)`. */
+/** True when the `any`-typed `node` is given the type `unknown` where it is made (`const x: unknown = JSON.parse(s)`). */
 function madeUnknown(node) {
   const parent = node.parent;
   return ts.isVariableDeclaration(parent) && parent.initializer === node && parent.type?.kind === ts.SyntaxKind.UnknownKeyword;
@@ -115,9 +115,11 @@ function resolve(made, file, specifier) {
   return resolved ? path.resolve(resolved.resolvedFileName) : null;
 }
 
-/** Rule 3, honesty, over the files of `made` in the shell (`inShell`) or outside it. */
-function honesty(made, inShell, problems) {
+/** Rule 3, honesty, over the files of `made` in `part` ("shell" or "outside"): the problems found. */
+function honesty(made, part) {
+  const inShell = part === "shell";
   const checker = made.getTypeChecker();
+  const problems = [];
   for (const file of sourcesOf(made, inShell)) {
     const report = reporterFor(file, problems, inShell ? "" : ` ${SCREENS_HINT}`);
     for (const match of file.text.matchAll(/@ts-(ignore|expect-error|nocheck)\b/g)) {
@@ -141,71 +143,78 @@ function honesty(made, inShell, problems) {
     };
     visit(file);
   }
+  return problems;
 }
 
-/** Rules 4 and 5, the boundary, over the files outside the shell in the screens' compile. */
-function boundary(made, problems) {
-  const checker = made.getTypeChecker();
+/** The import that binds `identifier` in `file`: its declaration, its module's text and the file it resolves to; or
+ * null when no import binds it. */
+function importOf(made, file, identifier) {
+  const declaration = made.getTypeChecker().getSymbolAtLocation(identifier)?.declarations?.[0];
+  let node = declaration;
+  while (node && !ts.isImportDeclaration(node)) node = node.parent;
+  if (!node || !ts.isStringLiteral(node.moduleSpecifier)) return null;
+  const specifier = node.moduleSpecifier.text;
+  return { declaration, specifier, target: resolve(made, file, specifier) };
+}
+
+/** True for an address attribute's value that can only be an app address or an asset (rule 5). */
+function appAddress(made, file, value) {
+  if (value === undefined) return true;
+  if (ts.isStringLiteral(value)) {
+    const text = value.text;
+    return (text.startsWith("/") && !text.startsWith("//") && !/^\/api(\/|$)/i.test(text)) || text.startsWith("#");
+  }
+  if (!ts.isJsxExpression(value) || !value.expression) return false;
+  const expression = value.expression;
+  if (ts.isIdentifier(expression)) {
+    const bound = importOf(made, file, expression);
+    return bound !== null && ts.isImportClause(bound.declaration) && ASSET.test(bound.specifier);
+  }
+  if (ts.isCallExpression(expression) && ts.isIdentifier(expression.expression)) {
+    return importOf(made, file, expression.expression)?.target === ADDRESSES_MODULE;
+  }
+  return false;
+}
+
+/** True for an import of React's element-making functions or runtimes, or a use of one through React's namespace. */
+function makesElements(made, file, node) {
+  if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
+    const from = node.moduleSpecifier.text;
+    if (ELEMENT_RUNTIMES.has(from)) return true;
+    const named = node.importClause?.namedBindings;
+    return from === "react" && named !== undefined && ts.isNamedImports(named)
+      && named.elements.some((element) => ELEMENT_MAKERS.has((element.propertyName ?? element.name).text));
+  }
+  return ts.isPropertyAccessExpression(node) && ELEMENT_MAKERS.has(node.name.text) && ts.isIdentifier(node.expression)
+    && importOf(made, file, node.expression)?.specifier === "react";
+}
+
+/** Rule 4 for one import or export of `file` (`specifier` is its module, as written). */
+function checkImport(made, file, node, specifier, report) {
+  if (!specifier || !ts.isStringLiteralLike(specifier)) {
+    report(node, "outside the shell, an import's path must be written out");
+    return;
+  }
+  const name = path.resolve(file.fileName);
+  const target = resolve(made, file, specifier.text) ?? path.resolve(path.dirname(name), specifier.text);
+  if (TEST_FILE.test(target)) report(node, `outside the shell, no module may import a test file (${path.relative(root, target)})`);
+  // A test file is never bundled into the app, so it may import the module it tests.
+  if (TEST_FILE.test(name) || typeOnly(node)) return;
+  if (target.startsWith(SHELL) && target.replace(/\.(d\.)?tsx?$/, "") !== PROVIDER_MODULE) {
+    report(node, `outside the shell, a module imports from the shell only src/shell/provider, not ${path.relative(root, target)}`);
+  }
+}
+
+/** Rules 4 and 5, the boundary, over the files outside the shell in the screens' compile: the problems found. */
+function boundary(made) {
+  const problems = [];
   for (const file of sourcesOf(made, false)) {
-    const name = path.resolve(file.fileName);
-    const isTest = TEST_FILE.test(name); // never bundled into the app, so it may import the module it tests
     const report = reporterFor(file, problems, ` ${SCREENS_HINT}`);
-    const importsFrom = (node, specifier) => {
-      if (!specifier || !ts.isStringLiteralLike(specifier)) {
-        report(node, "outside the shell, an import's path must be written out");
-        return;
-      }
-      const target = resolve(made, file, specifier.text) ?? path.resolve(path.dirname(name), specifier.text);
-      if (TEST_FILE.test(target)) report(node, `outside the shell, no module may import a test file (${path.relative(root, target)})`);
-      if (isTest || typeOnly(node)) return;
-      if (target.startsWith(SHELL) && target.replace(/\.(d\.)?tsx?$/, "") !== PROVIDER_MODULE) {
-        report(node, `outside the shell, a module imports from the shell only src/shell/provider, not ${path.relative(root, target)}`);
-      }
-    };
-    /** The import that binds `identifier` in this file: its declaration, its module's text and the file it resolves to. */
-    const importOf = (identifier) => {
-      const declaration = checker.getSymbolAtLocation(identifier)?.declarations?.[0];
-      let node = declaration;
-      while (node && !ts.isImportDeclaration(node)) node = node.parent;
-      if (!node || !ts.isStringLiteral(node.moduleSpecifier)) return null;
-      const specifier = node.moduleSpecifier.text;
-      return { declaration, specifier, target: resolve(made, file, specifier) };
-    };
-    /** True for an address attribute's value that can only be an app address or an asset (rule 5). */
-    const appAddress = (value) => {
-      if (value === undefined) return true;
-      if (ts.isStringLiteral(value)) {
-        const text = value.text;
-        return (text.startsWith("/") && !text.startsWith("//") && !/^\/api(\/|$)/i.test(text)) || text.startsWith("#");
-      }
-      if (!ts.isJsxExpression(value) || !value.expression) return false;
-      const expression = value.expression;
-      if (ts.isIdentifier(expression)) {
-        const bound = importOf(expression);
-        return bound !== null && ts.isImportClause(bound.declaration) && ASSET.test(bound.specifier);
-      }
-      if (ts.isCallExpression(expression) && ts.isIdentifier(expression.expression)) {
-        return importOf(expression.expression)?.target === ADDRESSES_MODULE;
-      }
-      return false;
-    };
-    /** An import of React's element-making functions or runtimes, or a use of one through React's namespace. */
-    const makesElements = (node) => {
-      if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
-        const from = node.moduleSpecifier.text;
-        if (ELEMENT_RUNTIMES.has(from)) return true;
-        const named = node.importClause?.namedBindings;
-        return from === "react" && named !== undefined && ts.isNamedImports(named)
-          && named.elements.some((element) => ELEMENT_MAKERS.has((element.propertyName ?? element.name).text));
-      }
-      return ts.isPropertyAccessExpression(node) && ELEMENT_MAKERS.has(node.name.text) && ts.isIdentifier(node.expression)
-        && importOf(node.expression)?.specifier === "react";
-    };
     const visit = (node) => {
       if (ts.isJsxAttribute(node)) {
         const attribute = node.name.getText(file);
         if (OPAQUE_ATTRIBUTES.has(attribute)) report(node, `outside the shell, no \`${attribute}\`: it could carry an address past the markup rule`);
-        if (ADDRESS_ATTRIBUTES.has(attribute) && !appAddress(node.initializer)) {
+        if (ADDRESS_ATTRIBUTES.has(attribute) && !appAddress(made, file, node.initializer)) {
           report(node, `outside the shell, \`${attribute}\` is a path written out from the root (not under /api), an imported asset, or made by src/addresses.ts`);
         }
       }
@@ -213,34 +222,34 @@ function boundary(made, problems) {
         const tag = node.parent.parent.tagName;
         if (ts.isIdentifier(tag) && /^[a-z]/.test(tag.text)) report(node, "outside the shell, no spread onto an HTML element: it could carry an address");
       }
-      if (makesElements(node)) report(node, "outside the shell, no element made by React's functions directly: write it as markup");
+      if (makesElements(made, file, node)) report(node, "outside the shell, no element made by React's functions directly: write it as markup");
       if (ts.isStringLiteralLike(node) || ts.isTemplateHead(node) || ts.isTemplateMiddle(node) || ts.isTemplateTail(node)) {
         if (node.text.includes(AUTH_PREFIX)) report(node, `outside the shell, a path under ${AUTH_PREFIX} is the shell's`);
       }
       if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
-        if (node.moduleSpecifier) importsFrom(node, node.moduleSpecifier);
+        if (node.moduleSpecifier) checkImport(made, file, node, node.moduleSpecifier, report);
       } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
-        importsFrom(node, node.arguments[0]);
+        checkImport(made, file, node, node.arguments[0], report);
       }
       ts.forEachChild(node, visit);
     };
     visit(file);
   }
+  return problems;
 }
 
 /** The type checks and the rules: every problem, or none. */
 export function check() {
+  // The whole project's type errors stop the check: its rules read types, and would report the errors' echoes.
   const whole = program("tsconfig.json");
   if (whole.problems.length > 0) return whole.problems;
+  // The screens' compile is expected to refuse a browser name; that is reported beside the rules, which still run. Only
+  // a config that can't be read at all leaves nothing to check.
   const screens = program("tsconfig.screens.json");
   if (!screens.program) return screens.problems;
-  const problems = [];
   // Each file is read with the types it is compiled with: the shell's with the browser library, every other with the
   // screens' compile, where a browser name is a value of type `any`.
-  honesty(whole.program, true, problems);
-  honesty(screens.program, false, problems);
-  boundary(screens.program, problems);
-  // The screens' compile and the rules both report: a file the compile refuses may break a rule too.
+  const problems = [...honesty(whole.program, "shell"), ...honesty(screens.program, "outside"), ...boundary(screens.program)];
   const compiled = screens.problems.length > 0 ? [...screens.problems, SCREENS_HINT] : [];
   return [...new Set([...compiled, ...problems])];
 }

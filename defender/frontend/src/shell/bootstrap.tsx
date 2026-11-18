@@ -2,17 +2,16 @@
 // outside React, decides what the address needs, asks `/api/me` through the load's client, and renders the chosen screen
 // into one React root under the load's provider.
 //
-// A fault of the shell's own (a throw in a step below, or in an action's call) is left to reach the page: the one
-// listener for uncaught failures shows the error state for it, and the browser logs it.
+// A fault of the shell's own (a throw in a step below, or in an action's call) is caught where it happens, logged, and
+// shown as the error state's "something stopped working" (Am-5 point 6).
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { route, type Route } from "../router";
 import * as attempt from "./attempt";
-import type { CallbackReason } from "./decision";
 import { ErrorBoundary, ErrorScreen, raisedByApp, type ErrorKind } from "./errors";
 import { makeLoad, type Effects, type Load } from "./load";
 import { ShellProvider, type AddressQuery, type Shell } from "./provider";
-import type { Outcome, Person } from "./types";
+import type { CallbackReason, Outcome, Person } from "./types";
 
 const effects: Effects = {
   // The session cookie alone: same-origin, no Authorization header.
@@ -65,11 +64,20 @@ export function start(): void {
     if (load.mayShow()) root.render(<ErrorScreen kind={kind} />);
   }
 
-  /** An action's call: the server's error is the error state; a fault of the shell's own reaches the page. */
-  function act(load: Load, call: () => Promise<Outcome<{ readonly kind: string }>>): void {
-    void call().then((result) => {
-      if (result.kind === "error") showError(load, "server");
-    });
+  /** A fault of the shell's own: logged for whoever debugs it, and shown as "something stopped working". */
+  function broken(load: Load, fault: unknown): void {
+    console.error(fault);
+    showError(load, "broken");
+  }
+
+  /** An action's call: the server's error is the error state, and so is a fault of the shell's own. */
+  function runAction(load: Load, call: Promise<{ readonly kind: string }>): void {
+    call.then(
+      (result) => {
+        if (result.kind === "error") showError(load, "server");
+      },
+      (fault: unknown) => broken(load, fault),
+    );
   }
 
   /** The person the screen is drawn for: asked of `/api/me` when the screen needs a session, else none. */
@@ -89,7 +97,7 @@ export function start(): void {
       query,
       actions: {
         retry: () => load.signIn(query.getAll("return")),
-        signOut: () => act(load, () => load.client.signOut()),
+        signOut: () => runAction(load, load.client.signOut()),
       },
     };
   }
@@ -98,24 +106,28 @@ export function start(): void {
     current?.supersede();
     sequence += 1;
     const taken = attempt.take();
-    const read = { pathname: window.location.pathname, search: window.location.search };
-    const routed = route(read.pathname);
+    const opened = { pathname: window.location.pathname, search: window.location.search };
+    const routed = route(opened.pathname);
     const load = makeLoad({ taken, byHistory, target: routed.target, origin: window.location.origin, effects });
     current = load;
-    const address = routed.shape === "sign-in-failed" ? settleReturn(taken, read) : read;
-    const session = await sessionFor(load, routed);
-    if (session.kind === "gone") return;
-    if (session.kind === "error") return showError(load, "server");
-    const Screen = routed.Screen;
-    root.render(
-      <StrictMode>
-        <ShellProvider key={sequence} shell={shellFor(load, routed, session.me, address)}>
-          <ErrorBoundary load={load}>
-            <Screen />
-          </ErrorBoundary>
-        </ShellProvider>
-      </StrictMode>,
-    );
+    try {
+      const address = routed.shape === "sign-in-failed" ? settleReturn(taken, opened) : opened;
+      const session = await sessionFor(load, routed);
+      if (session.kind === "gone") return;
+      if (session.kind === "error") return showError(load, "server");
+      const Screen = routed.Screen;
+      root.render(
+        <StrictMode>
+          <ShellProvider key={sequence} shell={shellFor(load, routed, session.me, address)}>
+            <ErrorBoundary load={load}>
+              <Screen />
+            </ErrorBoundary>
+          </ShellProvider>
+        </StrictMode>,
+      );
+    } catch (fault) {
+      broken(load, fault);
+    }
   }
 
   // An uncaught error or unhandled rejection the app's own code raised is the error state, unless the load may no

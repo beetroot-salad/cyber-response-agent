@@ -1,6 +1,6 @@
 // The frontend build (#1161 S2, B8, #1540 F1): the app by Vite, then the address matcher alone, in library mode. Each
-// build is written to a folder of its own under `dist-builds/`, and `dist` is a link to the build being served. Only a whole build is linked, and the link is
-// replaced in one rename, which can't be caught halfway: `dist` is always one whole build, and a failed or killed
+// build is written to a folder of its own under `dist-builds/`, and `dist` is a link to the build being served. Only a
+// whole build is linked, and the link is replaced in one rename, which can't be caught halfway: `dist` is always one whole build, and a failed or killed
 // build, at any step, leaves the previous one served as it was (F1 b).
 //
 // A browser may still hold the previous build's `index.html`, which names that build's files under `assets/` (named by

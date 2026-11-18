@@ -1,5 +1,5 @@
 // The API's types, from the OpenAPI document the API's own app produced (PR3, F3), and what a call of the load comes
-// to. Nothing here describes a response by hand.
+// to. Nothing here describes a response by hand but the sign-in callback's reasons, which the document has no field for.
 import type { components, paths } from "../generated/api";
 
 /** The OpenAPI path keys that have a GET: what `useRead` and the load's `client.read` are keyed by. */
@@ -23,3 +23,14 @@ export type Outcome<T> = Gone | ServerError | T;
 export type ReadResult<K extends ReadKey> = Outcome<{ readonly kind: "ok"; readonly body: ReadBody<K> } | { readonly kind: "not-available" }>;
 
 export type Person = components["schemas"]["Me"];
+
+/** The reasons the API's sign-in callback sends a person to the failed screen with (the API's identity service). Not in
+ * the OpenAPI document: the callback answers with a redirect. */
+export type CallbackReason =
+  | "prelogin-missing"
+  | "login-attempt-invalid"
+  | "unknown-account"
+  | "otp-required"
+  | "unavailable"
+  | "bad-request"
+  | "error";

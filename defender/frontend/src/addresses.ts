@@ -4,7 +4,7 @@
 // nothing here parses a template. No DOM here: Node loads this file's build.
 import { LITERAL_ADDRESSES, PATTERNS, SHAPES, VALUES, type LiteralShape, type ShapeName, type ShapeValues } from "./generated/shapes";
 
-export type { LiteralShape, ShapeName, ShapeValues };
+export type { ShapeName, ShapeValues };
 
 /** The shapes a person may be sent back to after sign-in. */
 export const RETURNABLE: ReadonlySet<ShapeName> = new Set(SHAPES.filter((shape) => shape.returnable).map((shape) => shape.name));

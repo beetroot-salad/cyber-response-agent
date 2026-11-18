@@ -4,11 +4,11 @@
 import { useQuery, type QueryClient } from "@tanstack/react-query";
 import { createContext, useContext, type ReactNode } from "react";
 import { valuesOf, type ShapeName, type ShapeValues } from "../addresses";
-import type { Person, ReadKey, ReadParams, ReadResult } from "./types";
+import type { Gone, Person, ReadKey, ReadParams, ReadResult } from "./types";
 
 // The shell's types a screen may need, from the one module screens import the shell through.
-export type { CallbackReason, FailedReason } from "./decision";
-export type { Person } from "./types";
+export type { FailedReason } from "./decision";
+export type { CallbackReason, Person } from "./types";
 
 /** The closed list of actions a screen may take (PR2). Writes and streams will be added here, each with a stated 401 policy. */
 export interface Actions {
@@ -75,10 +75,10 @@ export function useActions(): Actions {
 }
 
 /** What a screen's read shows: the answer, or loading. A gone load shows nothing new, so it reads as loading. */
-export type ScreenRead<K extends ReadKey> = Exclude<ReadResult<K>, { readonly kind: "gone" }> | { readonly kind: "loading" };
+export type ScreenRead<K extends ReadKey> = Exclude<ReadResult<K>, Gone> | { readonly kind: "loading" };
 
 /** A data screen's state, as its `data-state` says it: one name per kind of read. */
-export type ScreenState = "loading" | "ready" | "not-available" | "error";
+type ScreenState = "loading" | "ready" | "not-available" | "error";
 
 const STATES: Readonly<Record<ScreenRead<ReadKey>["kind"], ScreenState>> = {
   loading: "loading",
