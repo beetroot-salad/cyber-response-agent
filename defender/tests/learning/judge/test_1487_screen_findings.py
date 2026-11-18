@@ -1,13 +1,14 @@
 """#1487 (design r5, Flow 1 step 2): `screen_findings(channel, rows, job_id)`, the one public door of the channel rules,
-refuses a channel's rows whole on any failing row. `channel` is the episode sink's channel object
-(`learning.core.state.FINDINGS`, `QUESTIONER_FINDINGS`), as every other function here takes it. No database."""
+refuses a channel's rows whole on any failing row. `channel` is the store kind string (`"finding"`,
+`"questioner_finding"`: the keys of the findings text; amendment r5.1 item 5). The id and row bounds are the exported
+`FINDING_ID_MAX_BYTES` and `FINDING_ROW_MAX_BYTES` (item 2). No database."""
 from __future__ import annotations
 
 import random
 
 import pytest
 
-from defender.tests.support.jobs._findings1487 import defender_row, world_row
+from defender.tests.support.jobs._findings1487 import defender_row, id_of_utf8_bytes, row_of_json_bytes, world_row
 
 JOB = "6b0f2d9c-0d0c-4b1e-8f10-0a1b2c3d4e5f"
 OTHER = "0e6f7a8b-1c2d-4e3f-9a0b-1c2d3e4f5a6b"
@@ -20,9 +21,48 @@ def _screen():
 
 
 def _channels():
-    from defender.learning.core.state import FINDINGS, QUESTIONER_FINDINGS
+    return {"defender": ("finding", defender_row), "questioner": ("questioner_finding", world_row)}
 
-    return {"defender": (FINDINGS, defender_row), "questioner": (QUESTIONER_FINDINGS, world_row)}
+
+def _bounds():
+    from defender.learning.judge.enqueue import FINDING_ID_MAX_BYTES, FINDING_ROW_MAX_BYTES
+
+    return FINDING_ID_MAX_BYTES, FINDING_ROW_MAX_BYTES
+
+
+def test_the_bounds_are_the_named_values():
+    """Amendment r5.1 item 2: 1024 bytes of id, 1 MiB of row JSON."""
+    assert _bounds() == (1024, 1024 * 1024)
+
+
+@pytest.mark.parametrize("which", ["defender", "questioner"])
+def test_a_row_and_an_id_exactly_at_their_bounds_are_screened_clean(which):
+    """At-bound positive controls: an id of exactly `FINDING_ID_MAX_BYTES` UTF-8 bytes (ASCII, and multi-byte), a row
+    whose JSON is exactly `FINDING_ROW_MAX_BYTES`. (O2 bounds)"""
+    screen, _ = _screen()
+    channel, make = _channels()[which]
+    id_max, row_max = _bounds()
+    row = make(JOB, 0)
+    for filler in ("x", "\u00e9"):
+        screen(channel, [dict(row, finding_id=id_of_utf8_bytes(JOB, id_max, filler))], JOB)
+    screen(channel, [row_of_json_bytes(row, row_max)], JOB)
+
+
+@pytest.mark.parametrize("which", ["defender", "questioner"])
+def test_a_row_or_an_id_one_over_its_bound_is_refused(which):
+    """One byte over each bound is refused; so is an id whose characters are under the bound but whose UTF-8 bytes are
+    over it. The row is one byte over by the compact measure (so over by any serialisation). (O2 bounds)"""
+    screen, refused = _screen()
+    channel, make = _channels()[which]
+    id_max, row_max = _bounds()
+    row = make(JOB, 0)
+    over = [dict(row, finding_id=id_of_utf8_bytes(JOB, id_max + 1)),
+            dict(row, finding_id=f"{JOB}/" + "\u00e9" * id_max),
+            row_of_json_bytes(row, row_max + 1, compact=True)]
+    assert len(over[1]["finding_id"]) < id_max, "premise: under the bound in characters"
+    for bad in over:
+        with pytest.raises(refused):
+            screen(channel, [bad], JOB)
 
 
 @pytest.mark.parametrize("which", ["defender", "questioner"])
@@ -38,13 +78,15 @@ def _bad(which: str):
     channel, make = _channels()[which]
     row = make(JOB, 0)
     rng = random.Random(1487)
+    id_max, row_max = _bounds()
     return channel, {
         "row-not-a-dict": ["x", 5, None, [row], 1.5],
         "id-not-under-the-job": [dict(row, finding_id=f"{OTHER}/w/0/0"), dict(row, finding_id=JOB),
                                  dict(row, finding_id=f"{JOB}x/w/0/0"), dict(row, finding_id=""),
                                  dict(row, finding_id=None), dict(row, finding_id=7)],
-        "id-too-long": [dict(row, finding_id=f"{JOB}/" + "x" * n) for n in (5000, 100_000)],
-        "row-too-large": [dict(row, finding="y" * (6 * 1024 * 1024))],
+        "id-too-long": [dict(row, finding_id=id_of_utf8_bytes(JOB, id_max + 1)),
+                        dict(row, finding_id=f"{JOB}/" + "x" * 100_000)],
+        "row-too-large": [row_of_json_bytes(row, row_max + 1, compact=True)],
         "nul": [dict(row, finding="a\x00b"), dict(row, **{"k\x00": 1})],
         "lone-surrogate": [dict(row, finding="\ud800")],
         "fails-the-channel-rule": [{k: v for k, v in row.items() if k != "type"},
