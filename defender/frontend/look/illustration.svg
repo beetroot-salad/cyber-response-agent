@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" role="img" aria-label="An agent standing guard in front of a shield">
-  <circle cx="120" cy="120" r="112" fill="#2563eb" fill-opacity="0.1"/>
-  <path d="M120 28 L196 56 V120 C196 164 164 196 120 214 C76 196 44 164 44 120 V56 Z" fill="#2563eb"/>
-  <path d="M120 44 L180 66 V120 C180 154 156 180 120 196 C84 180 60 154 60 120 V66 Z" fill="#ffffff" fill-opacity="0.16"/>
-  <circle cx="120" cy="104" r="20" fill="#ffffff"/>
-  <path d="M82 164 C82 140 98 128 120 128 C142 128 158 140 158 164 C148 174 136 180 120 180 C104 180 92 174 82 164 Z" fill="#ffffff"/>
-  <path d="M112 100 H128" stroke="#2563eb" stroke-width="5" stroke-linecap="round"/>
+  <circle cx="120" cy="120" r="112" fill="#58a6ff" fill-opacity="0.1"/>
+  <path d="M120 28 L196 56 V120 C196 164 164 196 120 214 C76 196 44 164 44 120 V56 Z" fill="#58a6ff"/>
+  <path d="M120 44 L180 66 V120 C180 154 156 180 120 196 C84 180 60 154 60 120 V66 Z" fill="#0d1117" fill-opacity="0.16"/>
+  <circle cx="120" cy="104" r="20" fill="#0d1117"/>
+  <path d="M82 164 C82 140 98 128 120 128 C142 128 158 140 158 164 C148 174 136 180 120 180 C104 180 92 174 82 164 Z" fill="#0d1117"/>
+  <path d="M112 100 H128" stroke="#58a6ff" stroke-width="5" stroke-linecap="round"/>
 </svg>

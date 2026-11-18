@@ -7,7 +7,7 @@ export function Root() {
   return (
     <main data-screen="root">
       <img src={illustration} alt="" width="160" height="160" />
-      <h1>Defender</h1>
+      <h1>Sluice</h1>
       <p>An agent that investigates what your systems raise, so people see the answer first.</p>
       <a href={literalAddress("home")} data-action="sign-in">
         Sign in

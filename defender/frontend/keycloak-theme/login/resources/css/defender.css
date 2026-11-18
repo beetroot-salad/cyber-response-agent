@@ -4,8 +4,8 @@
 
 body,
 .pf-v5-c-login {
-  background: var(--defender-paper);
-  color: var(--defender-ink);
+  background: var(--app-paper);
+  color: var(--app-ink);
 }
 .pf-v5-c-login__container {
   background-image: url("../img/illustration.svg");
@@ -15,18 +15,18 @@ body,
   padding-top: 12rem;
 }
 .pf-v5-c-login__main {
-  background: var(--defender-paper);
-  border: 1px solid var(--defender-line);
+  background: var(--app-raised);
+  border: 1px solid var(--app-line);
   border-radius: 0.75rem;
 }
 .pf-v5-c-login__main-header h1,
 #kc-page-title {
-  color: var(--defender-ink);
+  color: var(--app-ink);
 }
 .pf-v5-c-button.pf-m-primary {
-  background-color: var(--defender-accent);
-  color: var(--defender-accent-ink);
+  background-color: var(--app-accent);
+  color: var(--app-accent-ink);
 }
 .pf-v5-c-form-control {
-  border-color: var(--defender-line);
+  border-color: var(--app-line);
 }
