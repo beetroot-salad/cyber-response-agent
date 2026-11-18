@@ -14,7 +14,7 @@ from pydantic import model_validator
 
 from defender import _clock
 from defender._model import model, unwrap_before
-from defender._vocab import DISPOSITION_VALUES, HOST_ONLY_DISPOSITION
+from defender._vocab import BENIGN_DISPOSITION, CONFIDENCE_VALUES, DISPOSITION_VALUES, HOST_ONLY_DISPOSITION
 
 from ._treat import treat
 from ._vocab import (
@@ -170,7 +170,9 @@ class ClosingRecord:
     `not reviewed` exactly for `unresolved`, `ceiling examined` exactly for `inconclusive`, else
     `story settled`; `forced-inconclusive` is `unresolved` with a draft from the other
     dispositions, cause `review incomplete` exactly when there is a failure kind, else one of the
-    three overrule causes. An `unresolved` record carries a summary (its opener at least)."""
+    three overrule causes. An `unresolved` record carries a summary (its opener at least). A
+    `confidence` (#1545, the close's committed one) is one of `CONFIDENCE_VALUES` and only beside
+    `benign`."""
 
     run_id: str
     disposition: str
@@ -181,6 +183,7 @@ class ClosingRecord:
     ceiling_test: tuple[CeilingEntry, ...]
     runtime_evidence: tuple[BaselineEntry, ...]
     summary: str | None
+    confidence: str | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -216,6 +219,10 @@ class ClosingRecord:
             raise ValueError(f"failure_kind {self.failure_kind!r} is not one of {FAILURE_KINDS}")
         if self.drafted_disposition is not None and self.drafted_disposition not in DISPOSITION_VALUES:
             raise ValueError(f"drafted_disposition {self.drafted_disposition!r} is not one of {DISPOSITION_VALUES}")
+        if self.confidence is not None and (
+                self.confidence not in CONFIDENCE_VALUES or self.disposition != BENIGN_DISPOSITION):
+            raise ValueError(f"confidence {self.confidence!r} is one of {CONFIDENCE_VALUES} and only beside "
+                             f"{BENIGN_DISPOSITION!r} (the record commits {self.disposition!r})")
 
     def _check_invariant(self) -> None:
         if self.outcome == STANDS:

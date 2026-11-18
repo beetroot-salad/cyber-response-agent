@@ -241,13 +241,17 @@ def render_runtime_headline(
     leads: list,
 ) -> str:
     """The headline: the record's disposition, the review's status (and, for an overridden close,
-    the disposition the model drafted), and the record's summary, escaped. A run with no record
+    the disposition the model drafted), a benign close's confidence, and the record's summary, escaped. A run with no record
     shows the unknown disposition and no summary."""
     record = closing.record if isinstance(closing, closing_record.Record) else None
     disposition = record.disposition if record is not None else UNKNOWN_DISPOSITION
     drafted_html = (
         f'<span class="an-drafted">drafted: {esc(record.drafted_disposition)}</span>'
         if record is not None and record.drafted_disposition else ""
+    )
+    conf_html = (
+        f'<span class="an-conf">confidence: {esc(record.confidence)}</span>'
+        if record is not None and record.confidence else ""
     )
     if record is None:
         body = "(the run has no closing record)"
@@ -272,6 +276,7 @@ def render_runtime_headline(
         <span class="disp-badge disp-{esc(disposition)}">{esc(disposition)}</span>
         {_gate_badge_html(closing)}
         {drafted_html}
+        {conf_html}
       </div>
       <div class="an-health">{health_html}</div>
       <div class="an-cols">

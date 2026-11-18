@@ -100,7 +100,7 @@ class CouldNotLook:
 Lookup = Record | NeverClosed | CouldNotLook
 
 _COLUMNS = ("disposition", "outcome", "cause", "failure_kind", "drafted_disposition", "ceiling_test",
-            "runtime_evidence", "summary")
+            "runtime_evidence", "summary", "confidence")
 
 
 def fault(kind: str, detail: str, *, run_id: object = "") -> CouldNotLook:
@@ -195,7 +195,8 @@ def _row_record(run_id: str, row: dict[str, Any]) -> ClosingRecord:
     return ClosingRecord(
         run_id=run_id, disposition=row["disposition"], outcome=row["outcome"], cause=row["cause"],
         failure_kind=row["failure_kind"], drafted_disposition=row["drafted_disposition"],
-        ceiling_test=tuple(ceiling), runtime_evidence=tuple(baselines), summary=row["summary"])
+        ceiling_test=tuple(ceiling), runtime_evidence=tuple(baselines), summary=row["summary"],
+        confidence=row["confidence"])
 
 
 def _entries(stored: object) -> list[dict[str, Any]]:

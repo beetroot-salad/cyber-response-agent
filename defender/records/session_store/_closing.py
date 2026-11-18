@@ -19,10 +19,11 @@ def write_closing_record(store: Any, record: Any) -> None:
     try:
         store.connection.execute(
             "INSERT INTO closing_record (run_id, disposition, outcome, cause, failure_kind, "
-            "drafted_disposition, ceiling_test, runtime_evidence, summary) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "drafted_disposition, ceiling_test, runtime_evidence, summary, confidence) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (record.run_id, record.disposition, record.outcome, record.cause, record.failure_kind,
              record.drafted_disposition, encode_entries(record.ceiling_test),
-             encode_entries(record.runtime_evidence), record.summary))
+             encode_entries(record.runtime_evidence), record.summary, record.confidence))
     except sqlite3.IntegrityError as e:
         held = store.connection.execute(
             "SELECT 1 FROM closing_record WHERE run_id = ?", (record.run_id,)).fetchone()

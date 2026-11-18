@@ -198,7 +198,8 @@ CREATE TABLE IF NOT EXISTS spend_ledger_seal (
 -- run id (a branch arm joins its source's database, and each run keeps its own row; a second
 -- write for a run is refused). Host columns hold closed-vocabulary values the record type checks
 -- on read; `ceiling_test` and `runtime_evidence` are JSON arrays of the entries; `summary` and the
--- entries' text parts are model text, treated once when the record was built. No vocabulary CHECK:
+-- entries' text parts are model text, treated once when the record was built; `confidence` is a
+-- benign close's committed confidence (#1545), NULL otherwise. No vocabulary CHECK:
 -- the record type (`records.closing`) is the one owner of the words, and a reader reads a row
 -- outside them as `row-invalid`.
 CREATE TABLE IF NOT EXISTS closing_record (
@@ -210,7 +211,8 @@ CREATE TABLE IF NOT EXISTS closing_record (
     drafted_disposition TEXT,
     ceiling_test TEXT NOT NULL,
     runtime_evidence TEXT NOT NULL,
-    summary TEXT
+    summary TEXT,
+    confidence TEXT
 ) STRICT;
 
 -- gather_boundary — the danger-lens surface, scoped to each session's PATH from its

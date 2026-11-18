@@ -29,7 +29,7 @@ from pydantic_ai.exceptions import ModelRetry
 from defender._untrusted import wrap_fresh
 # The set is for the exact membership test, the ordered tuple for the argument schema.
 from defender._vocab import (
-    CEILING_DISPOSITION, DISPOSITION_ENUM, DISPOSITION_VALUES, HOST_ONLY_DISPOSITION,
+    BENIGN_DISPOSITION, CEILING_DISPOSITION, DISPOSITION_ENUM, DISPOSITION_VALUES, HOST_ONLY_DISPOSITION,
 )
 from defender.records.closing import (  # noqa: F401 — re-exported: the vocabulary lives with the record
     CAUSE_CEILING_EXAMINED, CAUSE_EVIDENCE_CANNOT_DISCRIMINATE, CAUSE_NOT_REVIEWED, CAUSE_NOTHING_LEFT_TO_ASK,
@@ -44,6 +44,7 @@ from defender.skills.invlang.validate import (
     RuntimeEvidenceReceipt,
     conclude_ceiling_test_rows,
     conclude_runtime_evidence_rows,
+    committed_benign_confidence,
     entry_bound_refusals,
     entry_price,
 )
@@ -164,12 +165,16 @@ class _CloseFields:
     runtime_evidence: tuple[RuntimeEvidenceReceipt, ...] = ()
     #: The `:T conclude` rows the record's summary is built from, trimmed, the absent skipped.
     summary_pieces: tuple[str, ...] = ()
+    #: A benign close's committed confidence: the lower of the model's and the record's
+    #: ceiling (`committed_benign_confidence`, #1545). Set only on the reviewed site, for `benign`.
+    confidence: str | None = None
 
 
 def _fields_from(
     verdict: challenge_gate.GateVerdict, *,
     material: tuple[RecommendedLead, ...] = (),
     companion: CompanionBody | None = None,
+    confidence: str | None = None,
 ) -> _CloseFields:
     """The verdict's scalars as the commit bundle, shared by all three commit sites so a new
     field cannot be forgotten at one. The parse (none: no entries, no pieces) comes from the
@@ -179,7 +184,7 @@ def _fields_from(
         material=material, turns_used=verdict.turns_used, failure_kind=verdict.failure_kind,
         ceiling_test=conclude_ceiling_test_rows(companion) if companion is not None else (),
         runtime_evidence=conclude_runtime_evidence_rows(companion) if companion is not None else (),
-        summary_pieces=_summary_pieces(companion),
+        summary_pieces=_summary_pieces(companion), confidence=confidence,
     )
 
 
@@ -265,7 +270,7 @@ def build_record(run_id: str, disposition: str, fields: _CloseFields, *, drafted
         failure_kind=fields.failure_kind, drafted_disposition=drafted,
         ceiling_test=_ceiling_entries(fields.ceiling_test),
         runtime_evidence=_baseline_entries(fields.runtime_evidence),
-        summary=_record_summary(disposition, fields),
+        summary=_record_summary(disposition, fields), confidence=fields.confidence,
     )
 
 
@@ -435,7 +440,8 @@ async def _close_investigation_async(
 
     # The post-review site: the ceiling receipts and baselines of the parse ride on every
     # committed disposition (OD8), an override to `unresolved` included.
-    fields = _fields_from(verdict, material=material, companion=companion)
+    confidence = committed_benign_confidence(companion) if verdict.disposition == BENIGN_DISPOSITION else None
+    fields = _fields_from(verdict, material=material, companion=companion, confidence=confidence)
     return _commit(deps, verdict.disposition, fields, record, drafted=disposition)
 
 
