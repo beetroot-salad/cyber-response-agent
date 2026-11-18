@@ -575,7 +575,7 @@ def test_1224_run_query_is_decided_by_the_gather_grant(tmp_path):
     refusal = withheld.refusal.split(" Withheld")[0]
     oracle = S.oracle(S.run_query("edr", "query", EXPLORE),
                       S.run_query("edr", "lookup", {"entity": "db-1"}),
-                      S.submit(BASE))
+                      S.submit())
     _e, _ep, reg = _scene(tmp_path, oracle, est=est)
 
     _ask(reg, est, tmp_path / "run")
@@ -598,7 +598,7 @@ def test_1224_run_query_refuses_an_ungranted_or_rw_verb(tmp_path):
     refused = [S.run_query("edr", "lookup", {"entity": "db-1"}),
                S.run_query("idp", S.WRITE_VERB, {"host": "web-1"}),
                S.run_query("edr", S.WRITE_VERB, {"host": "db-1"})]
-    oracle = S.oracle(*refused, S.run_query("edr", "query", EXPLORE), S.submit(BASE))
+    oracle = S.oracle(*refused, S.run_query("edr", "query", EXPLORE), S.submit())
     verifier = S.verifier(*refused, S.run_query("siem-x", "lookup", VERIFY), S.verdict(True))
     _e, _ep, reg = _scene(tmp_path, oracle, verifier, est=est)
 
@@ -617,19 +617,19 @@ def test_1224_oracle_verifier_and_preflight_queries_share_one_grant_door(tmp_pat
     est = _estate(tmp_path, withheld=(("edr", "lookup"),))
     denied = {"entity": "db-1"}
     est.answer("edr", "lookup", None, {"entity": "db-1", "note": "must-never-be-read"})
-    removal = S.claim(removed=[S.removed(BASE_ROW, system="edr", verb="lookup",
-                                         params={"entity": "web-1"}, count=1)])
+    removal = S.handin(S.op_remove("/rows/0", fact_id="f1"),
+                       proofs=[S.proof("edr", "lookup", {"entity": "web-1"})])
     oracle = S.oracle(S.run_query("edr", "lookup", denied),
                       S.run_query("edr", "query", EXPLORE),
-                      S.submit({"rows": []}, removal),
-                      S.submit(BASE))
+                      S.submit(removal),
+                      S.submit())
     verifier = S.verifier(S.run_query("edr", "lookup", denied),
                           S.run_query("siem-x", "lookup", VERIFY), S.verdict(True))
     _e, _ep, reg = _scene(tmp_path / "sibling", oracle, verifier, est=est)
 
     _ask(reg, est, tmp_path / "run")
     sibling = est.calls()
-    replay_oracle = S.oracle(then=S.submit(BASE))
+    replay_oracle = S.oracle(then=S.submit())
     denied_call = S.Call("edr", "lookup", denied, {"entity": "db-1"})
     preflight = _launch(tmp_path / "launch", est, monkeypatch, oracle=replay_oracle,
                         calls=[CALL_IDP],
@@ -647,7 +647,7 @@ def test_1224_oracle_verifier_and_preflight_queries_share_one_grant_door(tmp_pat
     assert "user:alice" in replay_oracle.all_seen(), (
         "positive control: pre-flight calibrated the granted call")
     assert _newly_named(oracle, 3, "check 5"), (
-        "check 5 passed a removal whose side query the grant refuses to re-run")
+        "check 5 passed a removal whose proof the grant refuses to re-run")
     outcome = S.read_outcome(preflight.ep) or {}
     assert ("edr", "lookup") in {(n["system"], n["verb"])
                                  for n in outcome.get("not_replayable", [])}, (
@@ -659,7 +659,7 @@ def test_1224_preflight_reader_refuses_a_denied_verb_and_an_undeclared_system(
     """Neither is sent; both are listed as not replayable."""
     est = _estate(tmp_path, systems=(*S.SYSTEMS, UNGRANTED), ungranted=(UNGRANTED,))
 
-    replay_oracle = S.oracle(then=S.submit(BASE))
+    replay_oracle = S.oracle(then=S.submit())
     launched = _launch(tmp_path, est, monkeypatch, oracle=replay_oracle, calls=[CALL_IDP],
                        after_source=_failed(est, FAILED_IDP, WRITE_CALL, UNGRANTED_CALL))
 
@@ -688,7 +688,7 @@ def test_1366_h9_preflight_reads_the_tenants_current_records_not_the_source_runs
     edr_failed = S.Call("edr", "query", S.query_params("host:db-9"), {"events": []})
     directory = est.directory(records=R.without(est.records(), "edr"))  # the estate's records, edr deleted since the source run
 
-    replay_oracle = S.oracle(then=S.submit(BASE))
+    replay_oracle = S.oracle(then=S.submit())
     monkeypatch.setenv(S.KNOB_RATE, f"{FAST:g}")
     monkeypatch.setenv(S.KNOB_RETRY_CAP, "2")
     launched = S.launch(tmp_path, est, calls=[CALL_IDP], oracle=replay_oracle, verifier=S.passing_verifier(),
@@ -719,11 +719,11 @@ def test_1224_preflight_reader_cannot_be_built_without_a_gather_grant(tmp_path):
     # Pre-flight takes the walked view's held episode (`view.episode`), never a path.
     with J.walked_view(ep) as view, pytest.raises(grant_error):
         preflight_replay(view.episode, source=T.open_source(src), roster=est.roster(),
-                         tenant=grantless, oracle=S.oracle(then=S.submit(BASE)).model,
+                         tenant=grantless, oracle=S.oracle(then=S.submit()).model,
                          verifier=S.passing_verifier().model, data_root=current_data_root())
     assert est.calls() == [], "a reader with no gather grant sent a call"
 
-    granted = S.oracle(then=S.submit(BASE))
+    granted = S.oracle(then=S.submit())
     with J.walked_view(ep) as view:
         preflight_replay(view.episode, source=T.open_source(src), roster=est.roster(), tenant=rt,
                          oracle=granted.model, verifier=S.passing_verifier().model,
@@ -740,7 +740,7 @@ def test_1224_sibling_query_tool_via_decides_each_call(tmp_path):
              S.query_turn(CONFINED, "search", {"index": "secret-*"}),
              S.query_turn("idp", "query", {"q": "user:alice"})]
     real_dir, _real = _gather(tmp_path / "real", _plain_registry(est), est, *turns)
-    oracle = S.oracle(S.submit(BASE))
+    oracle = S.oracle(S.submit())
     _e, ep, reg = _scene(tmp_path / "sibling", oracle, est=est)
 
     sibling_dir, _gather_fn = _gather(tmp_path / "sibling", reg, est, *turns)
@@ -789,7 +789,7 @@ def test_p083_call_window_extends_past_the_branch_point(tmp_path, data_root):
     now = S.query_params("user:alice", end="now")
     est.answer("edr", "query", late, {"events": []})
     est.answer("idp", "query", now, {"rows": []})
-    oracle = S.oracle(S.run_query("edr", "query", late), S.submit(BASE))
+    oracle = S.oracle(S.run_query("edr", "query", late), S.submit())
     verifier = S.verifier(S.run_query("idp", "query", now), S.verdict(True))
     _e, _ep, reg = _scene(tmp_path, oracle, verifier, est=est)
     _ask(reg, est, tmp_path / "run")
@@ -808,9 +808,9 @@ def test_sibling_starts_long_after_the_branch_point_clock_was_set(tmp_path, monk
                       served_systems=(*S.SYSTEMS, CAPTURING))
     ep = S.episode_v2(tmp_path, doc=doc, base_rows=[])
     first = S.load_world(ep, "b")
-    oracle = S.oracle(S.run_query("edr", "query", EXPLORE), S.submit(BASE),
+    oracle = S.oracle(S.run_query("edr", "query", EXPLORE), S.submit(),
                       S.run_query(CAPTURING, "query", {"q": "oracle-side"}),
-                      S.submit("$BASE", S.EMPTY_CLAIM))
+                      S.submit())
     verifier = S.verifier(S.run_query("siem-x", "lookup", VERIFY), S.verdict(True),
                           S.run_query(CAPTURING, "query", {"q": "verifier-side"}), S.verdict(True))
     _e, _p, reg = _scene(tmp_path, oracle, verifier, est=est, ep=ep)
@@ -825,7 +825,7 @@ def test_sibling_starts_long_after_the_branch_point_clock_was_set(tmp_path, monk
     gc.collect()
 
     resumed = S.load_world(ep, "b")
-    again = S.oracle(S.run_query("edr", "query", S.query_params("host:db-2")), S.submit(BASE))
+    again = S.oracle(S.run_query("edr", "query", S.query_params("host:db-2")), S.submit())
     est.answer("edr", "query", S.query_params("host:db-2"), {"events": []})
     _e, _p, reg2 = _scene(tmp_path, again, est=est, ep=ep)
     _ask(reg2, est, tmp_path / "run", q="user:alice", limit=20)
@@ -840,7 +840,7 @@ def test_sibling_starts_long_after_the_branch_point_clock_was_set(tmp_path, monk
     _launch(tmp_path / "launch", est, monkeypatch, calls=[CALL_IDP],
             after_source=_failed(est, preflight),
             oracle=S.oracle(S.run_query(CAPTURING, "query", {"q": "preflight-oracle-side"}),
-                            then=S.submit("$BASE", S.EMPTY_CLAIM)))
+                            then=S.submit()))
 
     seen = _recorded_by_the_capturing_adapter(est)
     reached = {row["params"].get("q") for row in seen}
@@ -865,7 +865,7 @@ def test_1224_tacit_knowledge_run_query_is_judged_on_wall_time(tmp_path):
         plain = tacit_verbs["lookup"](ctx, **TACIT_LOOKUP)
     assert (plain["matched"] or {}).get("id") == TACIT_ENTRY_TODAY["id"], (
         "premise: with no run clock the lookup reads the registry on wall time")
-    oracle = S.oracle(S.run_query("tacit-knowledge", "lookup", TACIT_LOOKUP), S.submit(BASE))
+    oracle = S.oracle(S.run_query("tacit-knowledge", "lookup", TACIT_LOOKUP), S.submit())
     _e, _ep, reg = _scene(tmp_path, oracle, est=est)
 
     # The side query runs during a sibling's call, whose run clock stands on the branch date. It
@@ -887,9 +887,8 @@ def test_1224_oracle_side_queries_land_in_no_sibling_record(tmp_path):
     ep = S.episode_v2(tmp_path, base_rows=[])
     family_base = (ep / "served" / "base.jsonl").read_bytes()
     oracle = S.oracle(S.run_query("edr", "query", EXPLORE),
-                      S.forge("fg-1", "f1", "idp", FORGED),
-                      S.submit({"rows": [BASE_ROW, FORGED]},
-                               S.claim(added=[S.added("fg-1", "f1")])))
+                      S.submit(S.handin(S.op_add("/rows/-", FORGED, forged_id="fg-1",
+                                                 fact_id="f1"))))
     verifier = S.verifier(S.run_query("siem-x", "lookup", VERIFY), S.verdict(True))
     _e, _p, reg = _scene(tmp_path, oracle, verifier, est=est, ep=ep)
 
@@ -907,7 +906,8 @@ def test_1224_oracle_side_queries_land_in_no_sibling_record(tmp_path):
 
 
 def test_1224_host_rerun_of_a_removal_side_query(tmp_path):
-    """It goes through the gather grant, with no clock on it, within the rate slice, and leaves no sibling record."""
+    """A removal's proof (check 5) goes through the gather grant, with no clock on it, within the rate slice, and
+    leaves no sibling record."""
     rate = 3
     est = _estate(tmp_path, withheld=(("edr", "lookup"),))
     kept = BASE_ROW
@@ -918,23 +918,22 @@ def test_1224_host_rerun_of_a_removal_side_query(tmp_path):
     est.answer("idp", "query", ALICE, base)
     est.answer("idp", "query", side, {"rows": [gone]})
     est.answer("edr", "query", None, {"events": [{"event_id": "x-50", "host": "db-1"}]})
-    denied = S.claim(removed=[S.removed(gone, system="edr", verb="lookup",
-                                        params={"entity": "web-2"}, count=1)])
-    granted = S.claim(removed=[S.removed(gone, system="idp", verb="query", params=side,
-                                         count=1)])
+    remove = S.op_remove("/rows/1", fact_id="f1")
+    denied = S.handin(remove, proofs=[S.proof("edr", "lookup", {"entity": "web-2"})])
+    granted = S.handin(remove, proofs=[S.proof("idp", "query", side)])
     reads = [S.query_params(f"host:n{i}") for i in range(4)]
-    oracle = S.oracle(S.submit({"rows": [kept]}, denied),
+    oracle = S.oracle(S.submit(denied),
                       *[S.run_query("edr", "query", p) for p in reads],
-                      S.submit({"rows": [kept]}, granted))
+                      S.submit(granted))
     _e, ep, reg = _scene(tmp_path, oracle, est=est, rate=rate)
     family_base = (ep / "served" / "base.jsonl").read_bytes()
 
     run_dir, _g = _gather(tmp_path, reg, est, S.query_turn("idp", "query", {"q": "user:alice"}))
 
-    assert est.calls("edr", "lookup") == [], "check 5 re-ran a side query the grant withholds"
-    assert _newly_named(oracle, 1, "check 5"), "check 5 passed a side query it could not re-run"
+    assert est.calls("edr", "lookup") == [], "check 5 re-ran a proof the grant withholds"
+    assert _newly_named(oracle, 1, "check 5"), "check 5 passed a proof it could not re-run"
     rerun = _hits(est, "idp", "query", side)
-    assert rerun, "check 5 never re-ran the granted side query"
+    assert rerun, "check 5 never re-ran the granted proof"
     oracle_side = rerun + [r for r in est.calls("edr") if r["params"] in reads]
     assert _densest(_stamps(oracle_side), 1.0 - SLACK) <= rate, (
         "the re-run and the oracle's queries together exceeded the sibling's slice")
@@ -947,7 +946,8 @@ def test_1224_host_rerun_of_a_removal_side_query(tmp_path):
 
 
 def test_p046_removal_side_query_built_from_a_payload_value_with_query_metacharacters(tmp_path):
-    """It is re-run verbatim through a read verb; its count mismatch fails check 5."""
+    """A removal's proof is re-run verbatim through a read verb; a re-run selecting none of the removed rows
+    fails check 5."""
     est = _estate(tmp_path)
     nasty = 'web-2",x*|y'
     row = {"user": "bob", "event_id": "e-103", "action": "logon", "host": nasty,
@@ -955,11 +955,11 @@ def test_p046_removal_side_query_built_from_a_payload_value_with_query_metachara
     base = {"rows": [BASE_ROW, row]}
     side = S.query_params(f'host:"{nasty}"')
     est.answer("idp", "query", ALICE, base)
-    # The live re-run selects two rows where the claim removed one: a count mismatch.
-    est.answer("idp", "query", side, {"rows": [row, dict(row, event_id="e-104")]})
-    oracle = S.oracle(S.submit({"rows": [BASE_ROW]}, S.claim(removed=[
-        S.removed(row, system="idp", verb="query", params=side, count=1)])),
-        S.submit(base))
+    # The live re-run selects a row, but not the one the patch removes.
+    est.answer("idp", "query", side, {"rows": [dict(row, event_id="e-104")]})
+    oracle = S.oracle(S.submit(S.handin(S.op_remove("/rows/1", fact_id="f1"),
+                                        proofs=[S.proof("idp", "query", side)])),
+                      S.submit())
     _e, ep, reg = _scene(tmp_path, oracle, est=est)
 
     _ask(reg, est, tmp_path / "run")
@@ -969,7 +969,7 @@ def test_p046_removal_side_query_built_from_a_payload_value_with_query_metachara
     assert est.calls(verb=S.WRITE_VERB) == []
     assert all(r["verb"] in S.READ_VERBS for r in est.calls())
     assert _newly_named(oracle, 1, "check 5"), (
-        "a removal whose side query re-runs to a different count passed check 5")
+        "a removal whose proof re-runs to select none of the removed rows passed check 5")
     assert any(r.get("actor") == "host-check" and r["params"] == side
                for r in S.oracle_rows(ep, "b", "ledger"))
     assert oracle.submissions() == 2
@@ -985,7 +985,7 @@ def test_system_marked_down_by_real_failures_is_also_needed_by_the_oracle(tmp_pa
     failing = S.query_params("host:db-9")
     est.fail("edr", "query", failing, fault="TransportFault", detail="edr connection reset")
     oracle = S.oracle(S.run_query("edr", "query", failing), S.run_query("edr", "query", EXPLORE),
-                      S.submit(BASE))
+                      S.submit())
     _e, ep, reg = _scene(tmp_path, oracle, est=est)
 
     run_dir, _g, state = _gather_run(tmp_path, reg, est,
@@ -1015,7 +1015,7 @@ def test_p011_call_params_smuggle_the_investigators_conclusion(tmp_path):
     reasoning = "REASONING-ONLY-91c: I think the backup account is a decoy"
     est = _estate(tmp_path)
     est.answer("idp", "query", None, BASE)
-    oracle = S.oracle(S.submit(BASE))
+    oracle = S.oracle(S.submit())
     verifier = S.passing_verifier()
     _e, _ep, reg = _scene(tmp_path, oracle, verifier, est=est)
 
@@ -1040,11 +1040,11 @@ def test_1224_exploration_result_never_reaches_another_worlds_oracle(tmp_path):
     first = {"events": [{"event_id": "x-7", "host": "db-1", "process": "seen-by-b-only-41a"}]}
     later = {"events": [{"event_id": "x-7", "host": "db-1", "process": "live-for-c-93d"}]}
     est.answer("edr", "query", EXPLORE, first)
-    ob = S.oracle(S.run_query("edr", "query", EXPLORE), S.submit(BASE))
+    ob = S.oracle(S.run_query("edr", "query", EXPLORE), S.submit())
     _e, _p, reg_b = _scene(tmp_path, ob, est=est, ep=ep, label="b")
     _ask(reg_b, est, tmp_path / "run-b")
     est.answer("edr", "query", EXPLORE, later)
-    oc = S.oracle(S.run_query("edr", "query", EXPLORE), S.submit(BASE))
+    oc = S.oracle(S.run_query("edr", "query", EXPLORE), S.submit())
     _e, _p, reg_c = _scene(tmp_path, oc, est=est, ep=ep, label="c")
 
     _ask(reg_c, est, tmp_path / "run-c")
@@ -1067,15 +1067,14 @@ def test_1224_world_bs_facts_and_exploration_never_reach_world_cs_oracle(tmp_pat
                {"events": [{"event_id": "x-21", "host": "db-1", "process": "krbtgt-b-5aa"}]})
     b_forged = dict(FORGED, action="tgt-forged-b-8e1")
     ob = S.oracle(S.run_query("edr", "query", b_query),
-                  S.forge("fg-1", "f1", "idp", b_forged),
-                  S.submit({"rows": [BASE_ROW, b_forged]},
-                           S.claim(added=[S.added("fg-1", "f1")])))
+                  S.submit(S.handin(S.op_add("/rows/-", b_forged, forged_id="fg-1",
+                                             fact_id="f1"))))
     _e, _p, reg_b = _scene(tmp_path, ob, est=est, ep=ep, label="b")
     _ask(reg_b, est, tmp_path / "run-b")
     c_query = S.query_params("host:10.0.0.9")
     est.answer("edr", "query", c_query,
                {"events": [{"event_id": "x-31", "host": "10.0.0.9", "process": "c-own-d02"}]})
-    oc = S.oracle(S.run_query("edr", "query", c_query), S.submit(BASE))
+    oc = S.oracle(S.run_query("edr", "query", c_query), S.submit())
     _e, _p, reg_c = _scene(tmp_path, oc, est=est, ep=ep, label="c")
 
     _ask(reg_c, est, tmp_path / "run-c")
@@ -1092,10 +1091,10 @@ def test_1224_world_bs_facts_and_exploration_never_reach_world_cs_oracle(tmp_pat
 def test_1224_grant_narrowed_between_preflight_and_the_sibling_start(tmp_path, monkeypatch):
     """A verb withheld after pre-flight calibrated on it is refused at call time, before the oracle."""
     est = _estate(tmp_path)
-    launched = _launch(tmp_path, est, monkeypatch, oracle=S.oracle(then=S.submit(BASE)))
+    launched = _launch(tmp_path, est, monkeypatch, oracle=S.oracle(then=S.submit()))
     narrowed = _narrow(est, [("idp", "query")])
     calibrated = len(est.calls())
-    oracle = S.oracle(S.submit(EXPLORE_ANSWER))
+    oracle = S.oracle(S.submit())
     _e, _p, reg = _scene(tmp_path / "sibling", oracle, est=est, ep=launched.ep, tenant=narrowed)
 
     run_dir, _g = _gather(tmp_path, reg, est,
@@ -1125,7 +1124,7 @@ def test_1224_oracle_side_queries_never_exceed_the_configured_rate(tmp_path):
     est.answer("edr", "query", None, {"events": [{"event_id": "x-60", "host": "db-1"}]})
     slice_rate = 8
     sib_reads = [S.query_params(f"host:sib-{i}") for i in range(12)]
-    oracle = S.oracle(*[S.run_query("edr", "query", p) for p in sib_reads], S.submit(BASE))
+    oracle = S.oracle(*[S.run_query("edr", "query", p) for p in sib_reads], S.submit())
     _e, _p, reg = _scene(tmp_path / "sibling", oracle, est=est, rate=slice_rate)
     _ask(reg, est, tmp_path / "run")
     sibling = [r for r in est.calls() if r["params"] in sib_reads]
@@ -1146,7 +1145,7 @@ def test_1224_rate_zero_is_refused_and_a_positive_rate_gives_a_positive_slice(
     episode_rate = 2
     est = _estate(tmp_path)
     launched = _launch(tmp_path, est, monkeypatch, rate=episode_rate,
-                       oracle=S.oracle(then=S.submit(BASE)))
+                       oracle=S.oracle(then=S.submit()))
     k = len(launched.spawn.launches)
     assert k == len(S.WORLDS), "premise: every world launched"
     for la in launched.spawn.launches:
@@ -1221,7 +1220,7 @@ def test_p006_base_answer_text_asks_the_oracle_to_explore_without_end(tmp_path):
     est.answer("idp", "query", ALICE, hostile)
     est.answer("edr", "query", None, {"events": [{"event_id": "x-95", "host": "db-1"}]})
     reads = [S.query_params(f"host:x{i}") for i in range(13)]
-    oracle = S.oracle(*[S.run_query("edr", "query", p) for p in reads], S.submit(hostile))
+    oracle = S.oracle(*[S.run_query("edr", "query", p) for p in reads], S.submit())
     _e, ep, reg = _scene(tmp_path / "sibling", oracle, est=est, rate=rate)
     turn = S.query_turn("idp", "query", {"q": "user:alice"})
 
@@ -1246,7 +1245,7 @@ def test_p006_base_answer_text_asks_the_oracle_to_explore_without_end(tmp_path):
     assert len(S.ledger_rows(ep, "b")) == 1
 
     starved = S.oracle(S.run_query("edr", "query", reads[0]),
-                       S.run_query("edr", "query", reads[1]), S.submit(hostile))
+                       S.run_query("edr", "query", reads[1]), S.submit())
     _e, _p, poor = _scene(tmp_path / "starved", starved, est=est, label="c", budget=1e-9)
     with pytest.raises(S.unservable_cls()) as caught:
         _ask(poor, est, tmp_path / "run-c")
@@ -1260,7 +1259,7 @@ def test_1390_preflight_never_calibrates_a_platform_served_call(tmp_path):
     _base, src = S.source_run(tmp_path, est, calls=[CALL_IDP, tacit_call])
     ep = S.episode_v2(tmp_path, doc=S.family_v2(source_run_dir=str(src)),
                       base_rows=[S.captured("idp", "query", ALICE, BASE)])
-    oracle = S.oracle(then=S.submit(BASE))
+    oracle = S.oracle(then=S.submit())
 
     with J.walked_view(ep) as view:
         S.sym(S.CLI, S.COINED["fn.preflight"])(

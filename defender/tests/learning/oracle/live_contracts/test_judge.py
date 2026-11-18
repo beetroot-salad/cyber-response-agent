@@ -219,6 +219,17 @@ def _sibling_says(ep: Path, label: str, disposition: str) -> None:
         J.report_text(disposition), encoding="utf-8")
 
 
+def _replaced(field_: str, before: Any, after: Any, *, q: str = "user:alice") -> dict:
+    """A stored claim as the host renders a verified hand-in (#1543): one replaced value in
+    alice's row, seen through the call's own query."""
+    return {"query": _call(q), "base": "recorded",
+            "changes": [{"op": "replace", "path": f"/rows/0/{field_}", "fact_id": "f1",
+                         "table": "rows", "row_index": 0, "field": field_,
+                         "row_before": {"user": "alice", field_: before},
+                         "row_after": {"user": "alice", field_: after}}],
+            "entity_refs": [], "proofs": []}
+
+
 def _oracle_row(q: str, *, label: str = "b", claim: dict | None = None,
                 verdict: dict | None = None, **extra: Any) -> dict:
     """A served `oracle` ledger row (with base_digest, claim, verifier_verdict, attempts)."""
@@ -344,7 +355,7 @@ def test_1224_judge_model_gets_facts_verdict_calls_claims_movement_and_served_sy
         S.world_v2("c", disposition_declared="benign",
                    facts=[S.fact("f2", "bob reset carol's password", ("bob", "carol"))]),
     ])
-    claim = S.claim(changed=[S.changed("alice", "MARKERCLAIMFIELD", "absent", "present")])
+    claim = _replaced("MARKERCLAIMFIELD", "absent", "present", q="user:MARKERCALL")
     ledger = [_oracle_row("user:MARKERCALL", claim=claim,
                           verdict={"passed": True, "reason": "fact f1's logon is present"})]
     ep = S.judged_episode(tmp_path, doc=doc, ledgers={"b": ledger})
@@ -600,7 +611,7 @@ def test_served_system_grants_only_health_checks(tmp_path, monkeypatch):
         S.captured("idp", "query", S.query_params("user:alice"), payload)])
     est.answer("idp", "query", S.query_params("user:alice"), payload)
     oracle = S.oracle(S.run_query("siem-x", "query", S.query_params("user:alice")),
-                      S.submit(payload, S.EMPTY_CLAIM), then=S.text_only())
+                      S.submit(), then=S.text_only())
     reg = S.world_registry(ep, "b", est, oracle=oracle, verifier=S.passing_verifier(),
                            retry_cap=1)
     try:
@@ -733,8 +744,8 @@ def test_1224_original_call_unservable_in_preflight_and_the_worlds_ledger(tmp_pa
 
 
 def test_judge_input_has_a_served_call_with_no_verified_claim(tmp_path):
-    verified = _oracle_row("user:MARKER-VERIFIED", claim=S.claim(changed=[
-        S.changed("alice", "MARKER-CLAIMED", "absent", "present")]),
+    verified = _oracle_row("user:MARKER-VERIFIED", claim=_replaced(
+        "MARKER-CLAIMED", "absent", "present", q="user:MARKER-VERIFIED"),
         verdict={"passed": True, "reason": "fact f1's logon is present"})
     claimless = _oracle_row("user:MARKER-NOCLAIM")
     ep = S.judged_episode(tmp_path, ledgers={"b": [verified, claimless]})
@@ -871,7 +882,7 @@ def test_1224_judge_prompt_over_a_world_with_hundreds_of_verified_claims(tmp_pat
 
     def ledgers() -> dict[str, list[dict]]:
         bulky = {"rows": [{"user": "alice", "blob": blob}]}
-        claim = S.claim(changed=[S.changed("alice", "logon", "absent", "present")])
+        claim = _replaced("logon", "absent", "present")
         rows = [_oracle_row(f"user:MARKER-ORC-{i:03d}", claim=claim,
                             verdict={"passed": True, "reason": "ok"}) for i in range(120)]
         for row in rows:

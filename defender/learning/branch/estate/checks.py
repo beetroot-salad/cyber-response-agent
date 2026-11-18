@@ -20,6 +20,11 @@ from defender._untrusted import wrap_fresh
 HANDIN_KEYS = ("patch", "entity_refs", "proofs")
 #: The JSON Patch operations a hand-in may use: no `move` or `copy`, which carry no fact.
 PATCH_OPS = ("add", "remove", "replace", "test")
+#: The reserved `fact_id` of a change that rolls the answer back to how it stood at the branch
+#: point (undoing what happened after it, such as the source run's own later writes), rather
+#: than serving one of the world's facts: open to every world, the control world included, for
+#: a remove or replace only; a forged row always serves a world fact.
+FORK_FACT = "fork"
 #: The most characters of one rendered row or value.
 _RENDER_CAP = 2000
 
@@ -317,7 +322,7 @@ def _pointer_tokens(path: str) -> list[str]:
         return []
 
 
-def _located(doc: Any, tokens: list[str]) -> tuple[list[str], list[str] | None, list[str]]:
+def _change_located(doc: Any, tokens: list[str]) -> tuple[list[str], list[str] | None, list[str]]:
     """Where a pointer lands, as rows go: the tokens of the row it sits in (the element of the
     first list on its way: a table's row, or `[]` outside any table), that table's ES|QL column
     names when it is one, and the tokens left inside the row."""
@@ -344,16 +349,22 @@ def _at(doc: Any, tokens: list[str]) -> Any:
     return node
 
 
-def _shown(value: Any, cap: int = _RENDER_CAP) -> Any:
+def _shown_value(value: Any, cap: int = _RENDER_CAP) -> Any:
     text = canonical_json(value)
     return value if len(text) <= cap else f"{text[:cap]} ... [cut: {len(text)} characters]"
 
 
 def _cells(row: Any, names: list[str] | None) -> Any:
-    return _shown(as_row(row, names) or row)
+    return _shown_value(as_row(row, names) or row)
 
 
-def render_changes(base: Any, handin: Handin, *, query: Mapping[str, Any], base_was: str,  # noqa: C901 — one arm per part of a change's view
+def _record_fields(doc: Mapping[str, Any]) -> Any:
+    """A top-level document's own fields, its lists left out: the record a change outside any
+    list belongs to, bounded as a shown value."""
+    return _shown_value({k: v for k, v in doc.items() if not isinstance(v, list)})
+
+
+def render_changes(base: Any, handin: Handin, *, query: Mapping[str, Any], base_was: str,  # noqa: C901, PLR0912 — one arm per part of a change's view
                    proven: set[str] | None = None) -> dict:
     """The hand-in seen through the call's own query: each operation with its fact, where it
     lands (the table, the row, an ES|QL column by name, or a field) and the row before and after
@@ -366,13 +377,16 @@ def render_changes(base: Any, handin: Handin, *, query: Mapping[str, Any], base_
     changes: list[dict] = []
     for op in handin.ops:
         tokens = _pointer_tokens(op["path"])
-        row_at, names, rest = _located(doc, tokens)
+        row_at, names, rest = _change_located(doc, tokens)
         if row_at and row_at[-1] == "-":
             held = _at(doc, row_at[:-1])
             row_at = [*row_at[:-1], str(len(held) if isinstance(held, list) else 0)]
         # Copies: the patch applies in place, and the rows before it must stay as they were.
         before_row = copy.deepcopy(_at(doc, row_at)) if row_at else None
         before = copy.deepcopy(_at(doc, tokens))
+        # A change outside any list (a field of a looked-up record) is shown with the record's
+        # own fields: what it is about.
+        record_before = _record_fields(doc) if not row_at and tokens and isinstance(doc, Mapping) else None
         # Rendered only after the patch applied whole; a stray failure is shown unapplied.
         with contextlib.suppress(Exception):
             doc = jsonpatch.JsonPatch([_rfc_op(op)]).apply(doc, in_place=True)
@@ -393,12 +407,16 @@ def render_changes(base: Any, handin: Handin, *, query: Mapping[str, Any], base_
             if before_row is not None:
                 entry["row_before"] = _cells(before_row, names)
             else:
-                entry["before"] = _shown(before)
+                entry["before"] = _shown_value(before)
+                if record_before is not None:
+                    entry["record_before"] = record_before
         if op["op"] in ("add", "replace"):
             if after_row is not None:
                 entry["row_after"] = _cells(after_row, names)
             else:
-                entry["after"] = _shown(op.get("value"))
+                entry["after"] = _shown_value(op.get("value"))
+                if not row_at and tokens and isinstance(doc, Mapping):
+                    entry["record_after"] = _record_fields(doc)
         if op["op"] == "remove" and row_at and not rest and before_row is not None:
             entry["proven"] = _row_text(before_row, names) in proven
         changes.append(entry)
@@ -534,9 +552,13 @@ def _check_structure(base: Any, served: Any, handin: Handin, store: CheckStore, 
     rows the answer does not serve (check 4), and the rows the patch removed (check 5)."""
     failures: list[str] = []
     for i, op in enumerate(handin.ops):
-        if op["op"] != "test" and op["fact_id"] not in world_facts:
-            failures.append(f"patch operation {i} names fact {op['fact_id']!r}, which is not "
-                            "this world's")
+        if op["op"] == "test" or op["fact_id"] in world_facts:
+            continue
+        if op["fact_id"] == FORK_FACT and op["op"] in ("remove", "replace"):
+            continue
+        failures.append(f"patch operation {i} names fact {op['fact_id']!r}, which is not "
+                        f"this world's" + (" (a forged row serves a world fact, never "
+                                           f"{FORK_FACT!r})" if op["fact_id"] == FORK_FACT else ""))
     claimed: list[Mapping[str, Any]] = []
     for entry in handin.added:
         record = store.forged(entry["forged_id"])

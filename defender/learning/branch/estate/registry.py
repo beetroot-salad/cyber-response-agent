@@ -49,7 +49,7 @@ from ..ledger import (
     LedgerError,
     ServedCall,
 )
-from .checks import RealData, canonical_json
+from .checks import FORK_FACT, RealData, canonical_json
 from .limiter import RateLimiter
 from .oracle import (
     DEFAULT_RESTART_AFTER,
@@ -210,7 +210,8 @@ def served_label(base: Any, served: Any, changes: Mapping[str, Any],  # noqa: PL
     """The ledger label of a verified answer (#1385 A1): decided by the difference, not by
     whether the answer changed. Unchanged from the live base is `passthrough`. A changed answer
     is `oracle` ("showed the world's difference") when its changes (`render_changes`, #1543) add
-    a forged row, or remove or replace a row or value naming an entity a fact names, or the
+    a forged row, or remove or replace a row, value or record naming an entity a fact names
+    (a change back to the branch point never counts), or the
     re-ask dropped a row naming one (the cut: the live base against the re-asked answer);
     otherwise `reconstructed`. Rows the cut brings in never count. A world without facts names
     no entity, so it is never `oracle`. `changed`: `changes_base(served, base)` when the caller
@@ -221,10 +222,13 @@ def served_label(base: Any, served: Any, changes: Mapping[str, Any],  # noqa: PL
     if not entities:
         return RECONSTRUCTED
     dropped = re_asked.dropped if re_asked is not None else []
-    entries = [e for e in (changes.get("changes") or ()) if isinstance(e, Mapping)]
+    # A change back to the branch point (`FORK_FACT`) reconstructs; it shows no difference.
+    entries = [e for e in (changes.get("changes") or ())
+               if isinstance(e, Mapping) and e.get("fact_id") != FORK_FACT]
     shown = (any(e.get("op") == "add" for e in entries)
              or any(names_an_entity([e.get(k) for k in ("row_before", "row_after", "before",
-                                                        "after")], entities)
+                                                        "after", "record_before",
+                                                        "record_after")], entities)
                     for e in entries if e.get("op") in ("remove", "replace"))
              or any(names_an_entity(row, entities) for row in dropped))
     return ORACLE if shown else RECONSTRUCTED

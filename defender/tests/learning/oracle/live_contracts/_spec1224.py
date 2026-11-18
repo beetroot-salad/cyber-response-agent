@@ -873,6 +873,10 @@ class ScriptedModel:
         return out
 
 
+#: How the oracle opens a call's own turn (`Oracle._start_call`).
+CALL_TURN = "A new call to serve."
+
+
 class Routed:
     """A model double that hands each request to the scripted double whose MARKER the
     request's inbound text carries (a world's fact statement, or a call's params). It injects
@@ -903,6 +907,11 @@ class Routed:
 
     def __call__(self, messages: list[Any], info: Any) -> Any:
         text = _messages_text(messages) + "\n" + (getattr(info, "instructions", None) or "")
+        if self.last_wins:
+            # Call routing reads the current call's own turn: the prefix before it lists this
+            # world's earlier servings (#1543), whose calls carry other calls' markers.
+            turn = text.rfind(CALL_TURN)
+            text = text[turn:] if turn >= 0 else text
         hits = [double for marker, double in self.routes.items() if marker in text]
         if len(hits) > 1 and self.last_wins:
             hits = [self.routes[max(self.routes, key=text.rfind)]]

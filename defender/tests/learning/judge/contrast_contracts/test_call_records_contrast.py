@@ -119,8 +119,7 @@ def altering(*markers: str) -> Any:
     forged row (claim adds fg-b-1 for f1, as `S.altering_oracle` does on QP); every other call
     passes unchanged."""
     s24 = S.S24
-    return S.Routed({m: s24.oracle(s24.submit(S.CHANGED_B, s24.claim(
-        added=[s24.added("fg-b-1", "f1")]))) for m in markers},
+    return S.Routed({m: s24.oracle(s24.submit(S.serve_frozen_b())) for m in markers},
         default=S.passing_oracle(), name="oracle-b", last_wins=True)
 
 

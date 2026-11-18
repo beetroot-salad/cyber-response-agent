@@ -114,12 +114,16 @@ def _forged(**over: Any) -> dict:
     return row
 
 
-def _honest(fid: str = "fg-1", *, row: dict = FORGED_ROW, base_rows: tuple = (BASE_ROW,),
-            system: str = "idp", fact_id: str = "f1", **claim_kw: Any) -> list[S.Move]:
-    """Forge one row for a fact and submit the base plus that row, claiming exactly it."""
-    return [S.forge(fid, fact_id, system, row),
-            S.submit({"rows": [*base_rows, row]},
-                     S.claim(added=[S.added(fid, fact_id)], **claim_kw))]
+def _honest(fid: str = "fg-1", *, row: dict = FORGED_ROW, fact_id: str = "f1",
+            **handin_kw: Any) -> list[S.Move]:
+    """Submit the base plus one forged row for a fact: a patch of one `add`."""
+    return [S.submit(S.handin(S.op_add("/rows/-", row, forged_id=fid, fact_id=fact_id),
+                              **handin_kw))]
+
+
+def _smuggled(rows: list[Any]) -> dict:
+    """A hand-in that replaces the whole `rows` list: any row it brings in is no forged row."""
+    return S.handin(S.op_replace("/rows", list(rows), fact_id="f1"))
 
 
 def _move_index(o: S.ScriptedModel, tool: str, k: int) -> int:
@@ -237,21 +241,20 @@ def _control(tmp_path: Path, **scene_kw: Any) -> _Scene:
     return _scene(tmp_path / "control", **scene_kw)
 
 
-def test_1224_answer_differing_exactly_by_its_claim_is_served_as_oracle(tmp_path):
+def test_1224_answer_differing_exactly_by_its_patch_is_served_as_oracle(tmp_path):
     vpn = {"user": "alice", "event_id": "e-101", "action": "vpn", "host": "vpn-1", "ts": TS_BASE}
     side = S.query_params("event_id:e-101")
     siem = {"entity": "alice", "risk": "low", "record_id": "r-0001"}
     sc = _scene(tmp_path, live=[("idp", "query", ALICE, {"rows": [BASE_ROW, vpn]}),
                                 ("idp", "query", side, {"rows": [vpn]}),
                                 ("siem-x", "lookup", SIEM_ALICE, siem)])
-    rows_claim = S.claim(added=[S.added("fg-1", "f1")],
-                         removed=[S.removed(vpn, system="idp", verb="query", params=side,
-                                            count=1)])
+    rows_handin = S.handin(S.op_remove("/rows/1", fact_id="f1"),
+                           S.op_add("/rows/-", FORGED_ROW, forged_id="fg-1", fact_id="f1"),
+                           proofs=[S.proof("idp", "query", side)])
     rows_served = {"rows": [BASE_ROW, FORGED_ROW]}
-    change_claim = S.claim(changed=[S.changed("alice", "risk", "low", "high")])
+    change_handin = S.handin(S.op_replace("/risk", "high", fact_id="f1"))
     siem_served = {**siem, "risk": "high"}
-    o = S.oracle(S.forge("fg-1", "f1", "idp", FORGED_ROW), S.submit(rows_served, rows_claim),
-                 S.submit(siem_served, change_claim))
+    o = S.oracle(S.submit(rows_handin), S.submit(change_handin))
     v = S.passing_verifier()
     reg = sc.registry(o, v)
 
@@ -263,18 +266,26 @@ def test_1224_answer_differing_exactly_by_its_claim_is_served_as_oracle(tmp_path
 
     ledger = sc.ledger()
     assert [r["source"] for r in ledger] == [S.ORACLE_DECISION, S.ORACLE_DECISION], ledger
-    for row, served, claim_ in ((ledger[0], rows_served, rows_claim),
-                                (ledger[1], siem_served, change_claim)):
+    for row, served in ((ledger[0], rows_served), (ledger[1], siem_served)):
         assert _payload(row) == served, row
         assert row.get("attempts") == 1, row
         assert row.get("base_digest"), f"an oracle row carries the base answer's digest: {row}"
         assert row.get("verifier_verdict") is not None, row
-        recorded = row.get("claim") or {}
-        for key, value in claim_.items():
-            assert recorded.get(key) == value, (key, recorded)
-    # The removal's side query reached the tenant through the oracle-side door.
+    # Each stored answer keeps its changes as the host applied them, through the call's query.
+    rows_claim, change_claim = (a["claim"] for a in sc.rows("answers"))
+    assert rows_claim["query"] == {"system": "idp", "verb": "query", "params": ALICE}, rows_claim
+    removal, addition = rows_claim["changes"]
+    assert (removal["op"], removal["fact_id"], removal["row_before"], removal["proven"]) == (
+        "remove", "f1", vpn, True), removal
+    assert (addition["op"], addition["forged_id"], addition["row_after"]) == (
+        "add", "fg-1", FORGED_ROW), addition
+    assert rows_claim["proofs"] == [S.proof("idp", "query", side)], rows_claim
+    [change] = change_claim["changes"]
+    assert (change["op"], change["fact_id"], change["before"], change["after"]) == (
+        "replace", "f1", "low", "high"), change
+    # The removal's proof reached the tenant through the oracle-side door.
     side_calls = [c for c in sc.est.calls("idp", "query") if c["params"] == side]
-    assert side_calls, "check 5 re-ran the removal's side query against the real system"
+    assert side_calls, "check 5 re-ran the removal's proof against the real system"
     assert _has_row(sc.rows("ledger"), actor="host-check", system="idp", verb="query",
                     params=side), sc.rows("ledger")
     # Committed with the verified answer: the forged row and both stored answers.
@@ -287,17 +298,14 @@ def test_1224_answer_contradicting_a_recorded_fact_fails_check_4_and_retries(tmp
     siem = {"entity": "alice", "risk": "low", "record_id": "r-0001", "department": "sales"}
     sc = _scene(tmp_path, doc=_doc(DEPT_FACT),
                 live=[("idp", "query", ALICE, BASE), ("siem-x", "lookup", SIEM_ALICE, siem)])
-    contradicting = {**siem, "department": "marketing"}
     consistent = {**siem, "department": "finance"}
     o = S.oracle(
         S.record_fact("alice", "department", "finance"), *_honest(),
-        # call 2 (another system), attempt 1: alice's department claimed to a value the record
+        # call 2 (another system), attempt 1: alice's department served at a value the record
         # does not hold.
-        S.submit(contradicting, S.claim(changed=[
-            S.changed("alice", "department", "sales", "marketing")])),
+        S.submit(S.handin(S.op_replace("/department", "marketing", fact_id="f1"))),
         # attempt 2: the recorded value.
-        S.submit(consistent, S.claim(changed=[
-            S.changed("alice", "department", "sales", "finance")])))
+        S.submit(S.handin(S.op_replace("/department", "finance", fact_id="f1"))))
     reg = sc.registry(o)
 
     assert sc.call(reg, "idp", "query", **ALICE) == SERVED
@@ -318,11 +326,13 @@ def test_1224_forged_row_is_written_once_and_never_rewritten(tmp_path):
     rewritten = _forged(action="tgs", host="db-2")
     o = S.oracle(
         *_honest(),
-        # call 2, attempt 1: rewrite the frozen fg-1 and serve the rewrite.
-        S.forge("fg-1", "f1", "idp", rewritten),
-        S.submit({"rows": [rewritten]}, S.claim(added=[S.added("fg-1", "f1")])),
-        # attempt 2: the frozen row, reused.
-        S.submit({"rows": [FORGED_ROW]}, S.claim(added=[S.added("fg-1", "f1")])))
+        # call 2, attempt 1: add the frozen fg-1 rewritten, and serve the rewrite.
+        S.submit(S.handin(S.op_add("/rows/-", rewritten, forged_id="fg-1", fact_id="f1"))),
+        # attempt 2: the frozen row added by its id, then edited in the same patch.
+        S.submit(S.handin(S.op_add_frozen("/rows/-", forged_id="fg-1", fact_id="f1"),
+                          S.op_replace("/rows/0/host", "db-2", fact_id="f1"))),
+        # attempt 3: the frozen row, reused by its id.
+        S.submit(S.handin(S.op_add_frozen("/rows/-", forged_id="fg-1", fact_id="f1"))))
     reg = sc.registry(o)
 
     assert sc.call(reg, "idp", "query", **ALICE) == SERVED
@@ -331,7 +341,9 @@ def test_1224_forged_row_is_written_once_and_never_rewritten(tmp_path):
                        "row": FORGED_ROW}], frozen
 
     assert sc.call(reg, "idp", "query", **DB1) == {"rows": [FORGED_ROW]}
-    _assert_verdict(o, 2, "check 4")
+    _assert_verdict(o, 2, "is frozen with other content")
+    text = _assert_verdict(o, 3, "check 4")
+    assert "frozen row 'fg-1' is not served exactly as frozen" in text, text
     _spent(o)
     assert sc.rows("forged") == frozen, "the second write of fg-1 was refused; one row, unchanged"
     assert all("db-2" not in r["payload_text"] for r in sc.ledger()), sc.ledger()
@@ -358,7 +370,7 @@ def test_1224_forged_store_and_recorded_facts_live_under_the_world_dir(tmp_path)
     assert b"cc-4417" in before[1], before
 
     # The conversation restarts: a fresh oracle, nothing of the first conversation in it.
-    o2 = S.oracle(S.submit(siem, S.EMPTY_CLAIM))
+    o2 = S.oracle(S.submit())
     reg2 = sc.registry(o2)
     assert (forged_file.read_bytes(), facts_file.read_bytes()) == before
     assert sc.call(reg2, "siem-x", "lookup", **SIEM_ALICE) == siem
@@ -372,7 +384,7 @@ def test_1224_forged_store_and_recorded_facts_live_under_the_world_dir(tmp_path)
 def test_1224_undeclared_added_row_fails_check_1_and_is_not_served(tmp_path):
     sc = _scene(tmp_path, live=[("idp", "query", ALICE, BASE)])
     undeclared = _forged(event_id="e-bad1", action="tgs")
-    o = S.oracle(S.submit({"rows": [BASE_ROW, undeclared]}, S.EMPTY_CLAIM), *_honest())
+    o = S.oracle(S.submit(_smuggled([BASE_ROW, undeclared])), *_honest())
     reg = sc.registry(o)
 
     _run_dir, gather = S.drive_gather(
@@ -399,11 +411,12 @@ AT_BRANCH = {"rows": [BASE_ROW, OLDER_ROW]}
 
 
 def test_1385_older_real_rows_pass_check_1_only_after_a_re_ask(tmp_path):
-    """Rows a bounded re-ask brings in are no unclaimed addition; without one they are (T1)."""
+    """Rows a bounded re-ask brings in are its base, not an addition; without one, a patch that
+    brings them in adds rows that are no forged rows (T1)."""
     sc = _scene(tmp_path, live=[("idp", "query", CAPPED, {"rows": [POST_ROW, BASE_ROW]}),
                                 ("idp", "query", BOUNDED, AT_BRANCH)])
     re_ask = S.re_asked(system="idp", verb="query", params=BOUNDED)
-    o = S.oracle(S.submit(AT_BRANCH, S.EMPTY_CLAIM), S.re_ask(re_ask), S.submit(AT_BRANCH, S.EMPTY_CLAIM))
+    o = S.oracle(S.submit(_smuggled(AT_BRANCH["rows"])), S.re_ask(re_ask), S.submit())
     reg = sc.registry(o)
 
     assert sc.call(reg, "idp", "query", **CAPPED) == AT_BRANCH
@@ -421,44 +434,43 @@ def test_1385_older_real_rows_pass_check_1_only_after_a_re_ask(tmp_path):
         ("idp", "query", AT_BRANCH)], "the re-asked answer was not kept as a base answer (A3)"
 
 
-def test_1385_a_claim_that_carries_a_re_ask_fails_check_1(tmp_path):
-    """A re-ask is made with the `re_ask` tool, never declared in a claim: a claim carrying one is
-    a claim the host cannot read, and nothing is read for it."""
+def test_1385_a_hand_in_that_carries_a_re_ask_is_refused(tmp_path):
+    """A re-ask is made with the `re_ask` tool, never declared in a hand-in: a hand-in carrying
+    one is a hand-in the host cannot read, and nothing is read for it."""
     sc = _scene(tmp_path, live=[("idp", "query", CAPPED, {"rows": [POST_ROW, BASE_ROW]}),
                                 ("idp", "query", BOUNDED, AT_BRANCH)])
     spec = S.re_asked(system="idp", verb="query", params=BOUNDED)
-    o = S.oracle(S.submit(AT_BRANCH, {**S.EMPTY_CLAIM, "re_ask": spec}),
-                 S.submit({"rows": [POST_ROW, BASE_ROW]}, S.EMPTY_CLAIM))
+    o = S.oracle(S.submit({**S.EMPTY, "re_ask": spec}), S.submit())
     assert sc.call(sc.registry(o), "idp", "query", **CAPPED) == {"rows": [POST_ROW, BASE_ROW]}
-    _assert_verdict(o, 1, "check 1")
+    _assert_verdict(o, 1, "a hand-in is `code` alone, or `patch`")
     _spent(o)
     assert not [c for c in sc.est.calls("idp", "query") if c["params"] == BOUNDED], (
         "the host read a re-ask a claim declared")
 
 
-#: Rows no claim covers: one after the branch point, one real older row the re-ask never returned.
+#: Rows no forged row covers: one after the branch point, one real older row the re-ask never returned.
 STRAY_ROW = {"user": "alice", "event_id": "e-050", "action": "logon", "host": "web-2",
              "ts": "2026-07-28T13:00:00Z"}
 
 
 @pytest.mark.parametrize("extra", [POST_ROW, STRAY_ROW], ids=["post-branch-row", "unclaimed-row"])
 def test_1385_a_re_ask_does_not_excuse_a_row_beyond_its_answer(tmp_path, extra):
-    """A served answer of the re-asked answer plus another unclaimed row fails check 1; the
+    """A served answer of the re-asked answer plus another row that is no forged row fails check 1; the
     re-asked answer alone passes (T1, O4)."""
     live = [("idp", "query", CAPPED, {"rows": [POST_ROW, BASE_ROW]}),
             ("idp", "query", BOUNDED, AT_BRANCH)]
     re_ask = S.re_asked(system="idp", verb="query", params=BOUNDED)
     padded = {"rows": [*AT_BRANCH["rows"], extra]}
     sc = _scene(tmp_path / "flawed", live=live)
-    o = S.oracle(S.re_ask(re_ask), S.submit(padded, S.EMPTY_CLAIM),
-                 S.re_ask(re_ask), S.submit(AT_BRANCH, S.EMPTY_CLAIM))
+    o = S.oracle(S.re_ask(re_ask), S.submit(_smuggled(padded["rows"])),
+                 S.re_ask(re_ask), S.submit())
     assert sc.call(sc.registry(o), "idp", "query", **CAPPED) == AT_BRANCH
     _assert_verdict(o, 1, "check 1")
     _spent(o)
     assert o.submissions() == 2, "the padded answer was served"
 
     ctl = _scene(tmp_path / "control", live=live)
-    o = S.oracle(S.re_ask(re_ask), S.submit(AT_BRANCH, S.EMPTY_CLAIM))
+    o = S.oracle(S.re_ask(re_ask), S.submit())
     assert ctl.call(ctl.registry(o), "idp", "query", **CAPPED) == AT_BRANCH
     _spent(o)
     assert o.submissions() == 1, "positive control: the re-asked answer alone was refused"
@@ -507,7 +519,9 @@ def test_1385_the_host_refuses_a_re_ask_that_is_not_the_calls_own_question_bound
     refused, and the attempt's base stays the call's own; without that flaw it is served (T1, O4).
     Every flaw but the ES|QL columns is refused before the host reads anything."""
     sc, base, served, re_ask = _re_ask_scene(tmp_path / "flawed", case, flawed=True)
-    o = S.oracle(S.re_ask(re_ask), S.submit(served, S.EMPTY_CLAIM), S.submit(base, S.EMPTY_CLAIM))
+    # Attempt 1 serves the refused re-ask's answer anyway, as a patch on the call's own base.
+    onto = S.handin(*(S.op_replace(f"/{key}", served[key], fact_id="f1") for key in served))
+    o = S.oracle(S.re_ask(re_ask), S.submit(onto), S.submit())
     assert sc.call(sc.registry(o), "idp", "query", **CAPPED) == base
     _assert_re_ask_refused(o)
     _assert_some_check(o, 1)
@@ -522,85 +536,79 @@ def test_1385_the_host_refuses_a_re_ask_that_is_not_the_calls_own_question_bound
         "a refused re-ask was kept as a base answer")
 
     ctl, base, served, re_ask = _re_ask_scene(tmp_path / "control", case, flawed=False)
-    o = S.oracle(S.re_ask(re_ask), S.submit(served, S.EMPTY_CLAIM))
+    o = S.oracle(S.re_ask(re_ask), S.submit())
     assert ctl.call(ctl.registry(o), "idp", "query", **CAPPED) == served
     _spent(o)
     assert o.submissions() == 1, "positive control: the same re-ask without the flaw was refused"
 
 
-def test_1224_silent_edit_of_a_base_row_fails_check_1(tmp_path):
+def test_1224_an_edit_of_a_base_row_is_judged_with_the_row_before_and_after_it(tmp_path):
+    """No edit is silent: a base row's value changes only by a `replace` naming its fact, and
+    the verifier is handed the row before and after it (#1543; check 1's unclaimed edit and
+    check 4(b) are gone with the claim)."""
     sc = _scene(tmp_path, live=[("idp", "query", ALICE, BASE)])
-    edited = {**BASE_ROW, "host": "db-9"}
-    o = S.oracle(S.forge("fg-1", "f1", "idp", FORGED_ROW),
-                 S.submit({"rows": [edited, FORGED_ROW]}, S.claim(added=[S.added("fg-1", "f1")])),
+    reason = "nothing in f1 moves web-1's logon to db-9"
+    o = S.oracle(S.submit(S.handin(
+                     S.op_replace("/rows/0/host", "db-9", fact_id="f1"),
+                     S.op_add("/rows/-", FORGED_ROW, forged_id="fg-1", fact_id="f1"))),
                  *_honest())
-    reg = sc.registry(o)
+    v = S.verifier(S.verdict(False, reason), S.verdict(True))
+    reg = sc.registry(o, v)
 
     assert sc.call(reg, "idp", "query", **ALICE) == SERVED
-    _assert_verdict(o, 1, "check 1")
+    _assert_verdict(o, 1, "verifier")
+    edit = v.seen[0]
+    for shown in ("db-9", "row_before", "row_after", "/rows/0/host"):
+        assert shown in edit, (
+            f"the verifier was not handed the edit ({shown!r}) with its row before and after: "
+            f"{edit[-1500:]!r}")
     _spent(o)
     row = _only_oracle_row(sc, attempts=2, served=SERVED)
     assert "db-9" not in row["payload_text"], row
 
 
-def test_1224_wrong_count_or_unreproducible_removal_fails_check_5(tmp_path):
-    count_q = S.query_params("count by host")
-    counts = {"counts": [{"host": "web-1", "count": 3}, {"host": "db-1", "count": 1}]}
+def test_1224_a_proof_selecting_no_removed_row_fails_check_5(tmp_path):
+    """A proof is re-run and must select a row the patch removes; one selecting other rows
+    beside it passes (#1543: at least one, not exactly the removed rows)."""
     vpn = {"user": "alice", "event_id": "e-101", "action": "vpn", "host": "vpn-1", "ts": TS_BASE}
     vpn2 = {**vpn, "event_id": "e-102"}
     loose = S.query_params("user:alice action:vpn")
-    tight = S.query_params("event_id:e-101")
-    sc = _scene(tmp_path, live=[("siem-x", "query", count_q, counts),
-                                ("idp", "query", ALICE, {"rows": [BASE_ROW, vpn]}),
+    other = S.query_params("event_id:e-102")
+    sc = _scene(tmp_path, live=[("idp", "query", ALICE, {"rows": [BASE_ROW, vpn]}),
                                 ("idp", "query", loose, {"rows": [vpn, vpn2]}),
-                                ("idp", "query", tight, {"rows": [vpn]})])
-    event = {"host": "db-1", "user": "alice", "event_id": "s-9f03", "ts": TS_FACT}
+                                ("idp", "query", other, {"rows": [vpn2]})])
 
-    def counted_answer(n: int) -> dict:
-        return {"counts": [{"host": "web-1", "count": 3}, {"host": "db-1", "count": n}]}
+    def removal(params: dict) -> S.Move:
+        return S.submit(S.handin(S.op_remove("/rows/1", fact_id="f1"),
+                                 proofs=[S.proof("idp", "query", params)]))
 
-    def removal(params: dict) -> dict:
-        return S.claim(removed=[S.removed(vpn, system="idp", verb="query", params=params,
-                                          count=1)])
-
-    o = S.oracle(
-        # call 1, attempt 1: 1 + 1 claimed as 3, and 3 served.
-        S.forge("fg-1", "f1", "siem-x", event),
-        S.submit(counted_answer(3), S.claim(added=[S.added("fg-1", "f1")], counts=[
-            S.counted("db-1", base=1, added_=1, served=3)])),
-        # attempt 2: the arithmetic holds.
-        S.forge("fg-1", "f1", "siem-x", event),
-        S.submit(counted_answer(2), S.claim(added=[S.added("fg-1", "f1")], counts=[
-            S.counted("db-1", base=1, added_=1)])),
-        # call 2, attempt 1: one row removed, but its side query selects two.
-        S.submit(BASE, removal(loose)),
-        # attempt 2: a side query that selects exactly the removed row.
-        S.submit(BASE, removal(tight)))
+    # attempt 1: the proof selects only a row the patch does not remove; attempt 2: one that
+    # selects the removed row and another.
+    o = S.oracle(removal(other), removal(loose))
     reg = sc.registry(o)
 
-    assert sc.call(reg, "siem-x", "query", **count_q) == counted_answer(2)
-    _assert_verdict(o, 1, "check 5")
     assert sc.call(reg, "idp", "query", **ALICE) == BASE
-    _assert_verdict(o, 3, "check 5")
+    text = _assert_verdict(o, 1, "check 5")
+    assert "none of them a row the patch removes" in text, text
     _spent(o)
 
-    reruns = [c for c in sc.est.calls("idp", "query") if c["params"] in (loose, tight)]
+    reruns = [c for c in sc.est.calls("idp", "query") if c["params"] in (loose, other)]
     assert {json.dumps(c["params"], sort_keys=True) for c in reruns} == {
-        json.dumps(loose, sort_keys=True), json.dumps(tight, sort_keys=True)}, reruns
+        json.dumps(loose, sort_keys=True), json.dumps(other, sort_keys=True)}, reruns
     oracle_ledger = sc.rows("ledger")
     assert _has_row(oracle_ledger, actor="host-check", params=loose), oracle_ledger
     ledger = sc.ledger()
-    assert len(ledger) == 2, f"one world-ledger row per investigator call, none for a re-run: {ledger}"
-    assert [_payload(r) for r in ledger] == [counted_answer(2), BASE], ledger
+    assert len(ledger) == 1, f"one world-ledger row per investigator call, none for a re-run: {ledger}"
+    assert [_payload(r) for r in ledger] == [BASE], ledger
+    [removed] = sc.rows("answers")[0]["claim"]["changes"]
+    assert removed["proven"] is True, removed
 
 
 def test_1224_check_tool_and_host_return_one_verdict(tmp_path):
     sc = _scene(tmp_path, live=[("idp", "query", ALICE, BASE)])
-    bad = {"rows": [BASE_ROW, _forged(event_id="e-bad1")]}
-    honest_claim = S.claim(added=[S.added("fg-1", "f1")])
-    o = S.oracle(S.check(bad, S.EMPTY_CLAIM), S.submit(bad, S.EMPTY_CLAIM),
-                 S.forge("fg-1", "f1", "idp", FORGED_ROW),
-                 S.check(SERVED, honest_claim), S.submit(SERVED, honest_claim))
+    bad = _smuggled([BASE_ROW, _forged(event_id="e-bad1")])
+    honest = S.handin(S.op_add("/rows/-", FORGED_ROW, forged_id="fg-1", fact_id="f1"))
+    o = S.oracle(S.check(bad), S.submit(bad), S.check(honest), S.submit(honest))
     reg = sc.registry(o)
 
     assert sc.call(reg, "idp", "query", **ALICE) == SERVED
@@ -626,13 +634,11 @@ def test_1224_forged_row_with_missing_extra_or_mistyped_column_fails_check_2(tmp
     extra = _forged(event_id="e-9f0b", note="forged for f1")
     mistyped = _forged(event_id="e-9f0c", ts=1785252120)
 
-    def attempt(fid: str, row: dict) -> list[S.Move]:
-        return _honest(fid, row=row, base_rows=(BASE_ROW, with_null))
-
-    o = S.oracle(*attempt("fg-m", {**missing, "event_id": "e-9f0a"}), *attempt("fg-x", extra),
-                 *attempt("fg-t", mistyped), *attempt("fg-1", FORGED_ROW),
-                 S.forge("fg-2", "f1", "edr", edr_row),
-                 S.submit({"events": [edr_row]}, S.claim(added=[S.added("fg-2", "f1")])))
+    o = S.oracle(*_honest("fg-m", row={**missing, "event_id": "e-9f0a"}),
+                 *_honest("fg-x", row=extra), *_honest("fg-t", row=mistyped),
+                 *_honest("fg-1", row=FORGED_ROW),
+                 S.submit(S.handin(S.op_add("/events/-", edr_row, forged_id="fg-2",
+                                            fact_id="f1"))))
     reg = sc.registry(o, retry_cap=5)
 
     assert sc.call(reg, "idp", "query", **ALICE) == {"rows": [BASE_ROW, with_null, FORGED_ROW]}
@@ -657,15 +663,11 @@ def _sid_row(event_id: str) -> dict:
     return {**SID_ROW, "event_id": event_id, "action": "tgt", "host": "db-1", "ts": TS_FACT}
 
 
-def _sid_attempt(fid: str, event_id: str, *, base_rows: tuple = (SID_ROW,),
-                 declare: bool = True) -> list[S.Move]:
-    """Forge alice's row (carrying her real SID, declared as a reference to her when
-    `declare`) under `event_id`, and submit the base plus it."""
+def _sid_attempt(fid: str, event_id: str, *, declare: bool = True) -> list[S.Move]:
+    """Add alice's forged row (carrying her real SID, declared as a reference to her when
+    `declare`) under `event_id` to the base."""
     refs = [S.entity_ref(fid, "user_id", "alice")] if declare else []
-    row = _sid_row(event_id)
-    return [S.forge(fid, "f1", "idp", row),
-            S.submit({"rows": [*base_rows, row]},
-                     S.claim(added=[S.added(fid, "f1")], entity_refs=refs))]
+    return _honest(fid, row=_sid_row(event_id), entity_refs=refs)
 
 
 def _plant_alert(tmp_path: Path) -> Path:
@@ -697,11 +699,11 @@ def test_1224_forged_id_occurring_in_any_real_answer_fails_check_3(tmp_path):
         *_sid_attempt("fg-1", "e-9f01"),               # fresh: served
         # call 2 (idp query host:db-1; live base empty)
         S.run_query("idp", "query", BOB),
-        *_sid_attempt("fg-c", "e-555", base_rows=()),  # this world's exploration result
-        *_sid_attempt("fg-d", "r-0042", base_rows=()),  # the verifier's run_query result
-        *_sid_attempt("fg-e", "a-31337", base_rows=()),  # the source alert
-        *_sid_attempt("fg-f", "e-9f02", base_rows=(), declare=False),  # undeclared SID
-        *_sid_attempt("fg-2", "e-9f02", base_rows=()))  # declared reference: exempt
+        *_sid_attempt("fg-c", "e-555"),  # this world's exploration result
+        *_sid_attempt("fg-d", "r-0042"),  # the verifier's run_query result
+        *_sid_attempt("fg-e", "a-31337"),  # the source alert
+        *_sid_attempt("fg-f", "e-9f02", declare=False),  # undeclared SID
+        *_sid_attempt("fg-2", "e-9f02"))  # declared reference: exempt
     v = S.verifier(S.run_query("siem-x", "lookup", SIEM_ALICE), S.verdict(True),
                    then=S.verdict(True))
     reg = sc.registry(o, v, retry_cap=6)
@@ -736,9 +738,8 @@ def test_input_record_fact_value_is_null_empty_or_typed_differently(tmp_path):
     retyped = (("mfa", True), ("display", "alice"), ("logons", "5"), ("manager", ""))
     o = S.oracle(
         *(S.record_fact("alice", f, value) for f, value in records), *_honest(),
-        *(S.submit({**siem, f: new}, S.claim(changed=[S.changed("alice", f, siem[f], new)]))
-          for f, new in retyped),
-        S.submit(siem, S.EMPTY_CLAIM))
+        *(S.submit(S.handin(S.op_replace(f"/{f}", new, fact_id="f1"))) for f, new in retyped),
+        S.submit())
     reg = sc.registry(o, retry_cap=6)
 
     assert sc.call(reg, "idp", "query", **ALICE) == SERVED
@@ -764,10 +765,8 @@ def test_input_record_fact_conflicts_with_itself_or_names_a_stranger(tmp_path):
         *_honest(),
         # call 2: record the refused value again, and serve it.
         S.record_fact("alice", "department", "legal"),
-        S.submit({**siem, "department": "legal"}, S.claim(changed=[
-            S.changed("alice", "department", "sales", "legal")])),
-        S.submit({**siem, "department": "finance"}, S.claim(changed=[
-            S.changed("alice", "department", "sales", "finance")])))
+        S.submit(S.handin(S.op_replace("/department", "legal", fact_id="f1"))),
+        S.submit(S.handin(S.op_replace("/department", "finance", fact_id="f1"))))
     reg = sc.registry(o)
 
     assert sc.call(reg, "idp", "query", **ALICE) == SERVED
@@ -789,17 +788,20 @@ def test_input_oracle_forges_for_a_fact_the_call_does_not_cover_or_that_does_not
     bob_rows = tuple(bob_base["rows"])
     sc = _scene(tmp_path, live=[("idp", "query", BOB, bob_base)])
     reason = "f1 is about alice; this call reads bob's events"
-    o = S.oracle(*_honest("fg-c", fact_id="f2", base_rows=bob_rows),
-                 *_honest("fg-n", fact_id="f9", base_rows=bob_rows),
-                 _scratch(), *_honest("fg-1", fact_id="f1", base_rows=bob_rows),
-                 S.submit(bob_base, S.EMPTY_CLAIM))
+    o = S.oracle(*_honest("fg-c", fact_id="f2"),
+                 *_honest("fg-n", fact_id="f9"),
+                 _scratch(), *_honest("fg-1", fact_id="f1"),
+                 S.submit())
     v = S.verifier(S.verdict(False, reason), S.verdict(True))
     reg = sc.registry(o, v, retry_cap=5)
 
     assert sc.call(reg, "idp", "query", **BOB) == bob_base
     _spent(o)
-    assert _named(_after(o, SUBMIT, 1)), "another world's fact_id fails a host check"
-    assert _named(_after(o, SUBMIT, 2)), "a fact_id that exists nowhere fails a host check"
+    # An add names its fact when it is staged: another world's fact, or one that exists
+    # nowhere, is refused before the host checks run.
+    for k, fid in ((1, "f2"), (2, "f9")):
+        text = _assert_verdict(o, k, "is not one of this world's facts")
+        assert fid in text, (k, text)
     _assert_verdict(o, 3, "verifier")
     assert not v.overrun
     assert v.requests == 2, "the verifier judged only what passed 1-5"
@@ -813,7 +815,7 @@ def test_input_oracle_forges_for_a_fact_the_call_does_not_cover_or_that_does_not
 
     # Control: the verifier-refused (third) submission, alone, under a passing verifier.
     ctl = _control(tmp_path, live=[("idp", "query", BOB, bob_base)])
-    oc = S.oracle(*_honest("fg-1", fact_id="f1", base_rows=bob_rows))
+    oc = S.oracle(*_honest("fg-1", fact_id="f1"))
     with_f1 = {"rows": [*bob_rows, FORGED_ROW]}
     assert ctl.call(ctl.registry(oc, S.passing_verifier()), "idp", "query", **BOB) == with_f1, (
         "under a passing verdict the f1 row is served on bob's call: no host rule refuses it")
@@ -833,21 +835,19 @@ def test_input_two_forged_rows_get_one_forged_id(tmp_path):
                 live=[("idp", "query", ALICE, BASE), ("idp", "query", carol, {"rows": []})])
     o = S.oracle(
         # call 1, attempt 1: two different rows under fg-1.
-        S.forge("fg-1", "f1", "idp", FORGED_ROW), S.forge("fg-1", "f1", "idp", other),
-        S.submit({"rows": [BASE_ROW, FORGED_ROW, other]}, S.claim(
-            added=[S.added("fg-1", "f1"), S.added("fg-1", "f1")])),
+        S.submit(S.handin(S.op_add("/rows/-", FORGED_ROW, forged_id="fg-1", fact_id="f1"),
+                          S.op_add("/rows/-", other, forged_id="fg-1", fact_id="f1"))),
         *_honest(),
         # call 2, attempt 1: the frozen fg-1 reused for carol's fact.
-        S.forge("fg-1", "f3", "idp", carol_row),
-        S.submit({"rows": [carol_row]}, S.claim(added=[S.added("fg-1", "f3")])),
-        *_honest("fg-3", row=carol_row, base_rows=(), fact_id="f3"))
+        S.submit(S.handin(S.op_add_frozen("/rows/-", forged_id="fg-1", fact_id="f3"))),
+        *_honest("fg-3", row=carol_row, fact_id="f3"))
     reg = sc.registry(o)
 
     assert sc.call(reg, "idp", "query", **ALICE) == SERVED
     assert sc.call(reg, "idp", "query", **carol) == {"rows": [carol_row]}
     _spent(o)
-    _assert_some_check(o, 1)
-    _assert_some_check(o, 3)
+    _assert_verdict(o, 1, "already forged in this attempt with other content")
+    _assert_verdict(o, 3, "is frozen with other content")
     forged = sc.rows("forged")
     assert sorted((r["forged_id"], r["fact_id"]) for r in forged) == [
         ("fg-1", "f1"), ("fg-3", "f3")], forged
@@ -861,34 +861,21 @@ def test_input_base_answer_is_a_scalar_or_a_count(tmp_path):
     grouped = {"counts": [{"host": "web-1", "count": big}]}
     sc = _scene(tmp_path, live=[("siem-x", "query", scalar_q, 0),
                                 ("siem-x", "query", grouped_q, grouped)])
-
-    def event(eid: str, host: str) -> dict:
-        return {"user": "alice", "event_id": eid, "host": host, "ts": TS_FACT}
-
-    grouped_served = {"counts": [{"host": "web-1", "count": big + 1},
-                                 {"host": "db-1", "count": 1}]}
+    bucket = {"host": "db-1", "count": 1}
+    grouped_served = {"counts": [{"host": "web-1", "count": big + 1}, bucket]}
     o = S.oracle(
-        S.forge("fg-1", "f1", "siem-x", event("s-9f01", "db-1")),
-        S.submit(2, S.claim(added=[S.added("fg-1", "f1")], counts=[
-            S.counted("*", base=0, added_=1, served=2)])),
-        S.forge("fg-1", "f1", "siem-x", event("s-9f01", "db-1")),
-        S.submit(1, S.claim(added=[S.added("fg-1", "f1")], counts=[
-            S.counted("*", base=0, added_=1)])),
-        S.forge("fg-2", "f1", "siem-x", event("s-9f02", "web-1")),
-        S.forge("fg-3", "f1", "siem-x", event("s-9f03", "db-1")),
-        S.submit(grouped_served, S.claim(
-            added=[S.added("fg-2", "f1"), S.added("fg-3", "f1")],
-            counts=[S.counted("web-1", base=big, added_=1), S.counted("db-1", base=0,
-                                                                     added_=1)])))
+        # A bare scalar answer is replaced whole (the pointer "" is the document itself).
+        S.submit(S.handin(S.op_replace("", 1, fact_id="f1"))),
+        S.submit(S.handin(S.op_replace("/counts/0/count", big + 1, fact_id="f1"),
+                          S.op_add("/counts/-", bucket, forged_id="fg-3", fact_id="f1"))))
     reg = sc.registry(o)
 
     assert sc.call(reg, "siem-x", "query", **scalar_q) == 1
-    _assert_verdict(o, 1, "check 5")
     served = sc.call(reg, "siem-x", "query", **grouped_q)
     _spent(o)
     assert served == grouped_served
     assert served["counts"][0]["count"] == big + 1
-    assert [r.get("attempts") for r in sc.ledger()] == [2, 1], sc.ledger()
+    assert [r.get("attempts") for r in sc.ledger()] == [1, 1], sc.ledger()
 
 
 def test_input_base_rows_are_heterogeneous(tmp_path):
@@ -901,11 +888,10 @@ def test_input_base_rows_are_heterogeneous(tmp_path):
     union = {**FORGED_ROW, "event_id": "e-9f0b", "src_ip": "10.0.0.7", "parent": None}
     sc = _scene(tmp_path, live=[("idp", "query", ALICE, base)])
     no_parent = {k: v for k, v in r2_shaped.items() if k != "parent"}
-    o = S.oracle(*_honest("fg-p", row={**no_parent, "event_id": "e-9f0a"}, base_rows=(r1, r2)),
-                 *_honest("fg-u", row=union, base_rows=(r1, r2)),
-                 *_honest("fg-x", row={**r2_shaped, "event_id": "e-9f0c", "note": "x"},
-                          base_rows=(r1, r2)),
-                 *_honest(row=r2_shaped, base_rows=(r1, r2)))
+    o = S.oracle(*_honest("fg-p", row={**no_parent, "event_id": "e-9f0a"}),
+                 *_honest("fg-u", row=union),
+                 *_honest("fg-x", row={**r2_shaped, "event_id": "e-9f0c", "note": "x"}),
+                 *_honest(row=r2_shaped))
     reg = sc.registry(o, retry_cap=5)
 
     assert sc.call(reg, "idp", "query", **ALICE) == {"rows": [r1, r2, r2_shaped]}
@@ -922,11 +908,9 @@ def test_input_forged_id_is_a_substring_of_a_real_id_or_contains_one(tmp_path):
             _forged(event_id="e-1002001", message="tgt issued"),
             _forged(event_id="e-9f01", message="saw e-100200 in /tmp/e-100200.log")]
     o = S.oracle(
-        *_honest("fg-x", row=_forged(event_id="e-100200", message="tgt issued"),
-                 base_rows=(real,)),
-        *(S.forge(f"fg-{i}", "f1", "idp", row) for i, row in enumerate(rows)),
-        S.submit({"rows": [real, *rows]},
-                 S.claim(added=[S.added(f"fg-{i}", "f1") for i in range(len(rows))])))
+        *_honest("fg-x", row=_forged(event_id="e-100200", message="tgt issued")),
+        S.submit(S.handin(*(S.op_add("/rows/-", row, forged_id=f"fg-{i}", fact_id="f1")
+                            for i, row in enumerate(rows)))))
     reg = sc.registry(o)
 
     assert sc.call(reg, "idp", "query", **ALICE) == {"rows": [real, *rows]}
@@ -989,8 +973,8 @@ def test_input_real_id_appears_in_family_data_after_the_forged_id_was_frozen(tmp
                                 ("idp", "query", BOB, {"rows": []}),
                                 ("idp", "query", DB1, {"rows": []})])
     o = S.oracle(*_honest(),
-                 S.run_query("idp", "query", dave_q), S.submit({"rows": []}, S.EMPTY_CLAIM),
-                 S.submit({"rows": [FORGED_ROW]}, S.claim(added=[S.added("fg-1", "f1")])))
+                 S.run_query("idp", "query", dave_q), S.submit(),
+                 S.submit(S.handin(S.op_add_frozen("/rows/-", forged_id="fg-1", fact_id="f1"))))
     reg = sc.registry(o)
 
     assert sc.call(reg, "idp", "query", **ALICE) == SERVED
@@ -1027,12 +1011,10 @@ def test_1224_forged_row_must_reuse_a_real_entitys_identifier(tmp_path):
     sc = _scene(tmp_path, live=[("idp", "query", ALICE, {"rows": list(base_rows)})])
     bob_sid_row = {**_sid_row("e-9f0b"), "user_id": "S-1-5-21-2002"}
     o = S.oracle(
-        *_sid_attempt("fg-u", "e-9f0a", base_rows=base_rows, declare=False),
-        S.forge("fg-w", "f1", "idp", bob_sid_row),
-        S.submit({"rows": [*base_rows, bob_sid_row]}, S.claim(
-            added=[S.added("fg-w", "f1")],
-            entity_refs=[S.entity_ref("fg-w", "user_id", "alice")])),
-        *_sid_attempt("fg-1", "e-9f01", base_rows=base_rows))
+        *_sid_attempt("fg-u", "e-9f0a", declare=False),
+        *_honest("fg-w", row=bob_sid_row,
+                 entity_refs=[S.entity_ref("fg-w", "user_id", "alice")]),
+        *_sid_attempt("fg-1", "e-9f01"))
     reg = sc.registry(o, retry_cap=4)
 
     served = {"rows": [*base_rows, _sid_row("e-9f01")]}
@@ -1048,8 +1030,9 @@ def test_input_served_answer_differs_only_in_row_order_or_spacing(tmp_path):
     r2 = {"action": "logoff", "host": "web-1"}
     base = {"rows": [r1, r2]}
     sc = _scene(tmp_path, live=[("idp", "query", ALICE, base)])
-    o = S.oracle(S.submit({"rows": [r2, r1]}, S.EMPTY_CLAIM),
-                 S.submit({"rows": [{"host": "web-1", "action": "logon"}, r2]}, S.EMPTY_CLAIM))
+    o = S.oracle(S.submit(_smuggled([r2, r1])),
+                 S.submit(S.handin(S.op_replace("/rows/0", {"host": "web-1", "action": "logon"},
+                                                fact_id="f1"))))
     reg = sc.registry(o)
 
     assert sc.call(reg, "idp", "query", **ALICE) == base
@@ -1059,42 +1042,23 @@ def test_input_served_answer_differs_only_in_row_order_or_spacing(tmp_path):
     assert [(r["source"], _payload(r)) for r in ledger] == [(S.PASSTHROUGH, base)], ledger
 
 
-def test_p040_served_answer_changes_a_value_to_a_textually_equal_value_of_another_type(tmp_path):
-    """Equal text of another JSON type, unclaimed, is a difference check 1 refuses."""
+def test_p040_a_value_replaced_by_a_textually_equal_value_of_another_type_is_a_change(tmp_path):
+    """Equal text of another JSON type is a difference (N09): the replace is served as a change,
+    shown before and after, never folded into the base unchanged."""
     base = {"rows": [{**BASE_ROW, "port": 22}]}
     sc = _scene(tmp_path, live=[("idp", "query", ALICE, base)])
-    o = S.oracle(S.submit({"rows": [{**BASE_ROW, "port": "22"}]}, S.EMPTY_CLAIM),
-                 S.submit(base, S.EMPTY_CLAIM))
+    o = S.oracle(S.submit(S.handin(S.op_replace("/rows/0/port", "22", fact_id="f1"))))
     reg = sc.registry(o)
 
-    assert sc.call(reg, "idp", "query", **ALICE) == base
-    _assert_verdict(o, 1, "check 1")
+    served = {"rows": [{**BASE_ROW, "port": "22"}]}
+    assert sc.call(reg, "idp", "query", **ALICE) == served
     _spent(o)
-    assert [_payload(r) for r in sc.ledger()] == [base], sc.ledger()
-
-
-def test_1224_claim_arithmetic_arrives_as_an_expression(tmp_path):
-    count_q = S.query_params("count user:alice")
-    canary = tmp_path / "evaluated-on-the-host"
-    code = f"__import__('pathlib').Path({str(canary)!r}).write_text('ran')"
-    sc = _scene(tmp_path, live=[("siem-x", "query", count_q, {"count": 1})])
-    event = {"user": "alice", "event_id": "s-9f01", "host": "db-1", "ts": TS_FACT}
-
-    def attempt(served_expr: Any) -> list[S.Move]:
-        return [S.forge("fg-1", "f1", "siem-x", event),
-                S.submit({"count": 2}, S.claim(added=[S.added("fg-1", "f1")], counts=[
-                    {"group": "*", "base": 1, "added": 1, "removed": 0,
-                     "served": served_expr}]))]
-
-    o = S.oracle(*attempt("1+1"), *attempt(code), *attempt(2))
-    reg = sc.registry(o, retry_cap=4)
-
-    assert sc.call(reg, "siem-x", "query", **count_q) == {"count": 2}
-    _spent(o)
-    assert not canary.exists(), "the claim's text was evaluated on the host"
-    for k in (1, 2):
-        assert _after(o, SUBMIT, k).strip(), f"attempt {k}'s refusal reached the oracle"
-    _only_oracle_row(sc, attempts=3, served={"count": 2})
+    [row] = sc.ledger()
+    assert row["source"] != S.PASSTHROUGH, row
+    assert _payload(row) == served, row
+    [change] = sc.rows("answers")[0]["claim"]["changes"]
+    assert (change["field"], change["row_before"]["port"], change["row_after"]["port"]) == (
+        "port", 22, "22"), change
 
 
 class _StoreWitness(S.ScriptedModel):
@@ -1141,15 +1105,15 @@ def test_failed_attempt_forged_rows_and_facts_when_the_next_attempt_differs(tmp_
     sc = _scene(tmp_path, doc=_doc(DEPT_FACT),
                 live=[("idp", "query", ALICE, BASE), ("idp", "query", DB1, {"rows": []}),
                       ("siem-x", "lookup", SIEM_ALICE, siem)])
-    edited = {**BASE_ROW, "host": "db-9"}
     o = S.oracle(
         S.record_fact("alice", "department", "finance"),
-        S.forge("fg-1", "f1", "idp", FORGED_ROW),
-        S.submit({"rows": [edited, FORGED_ROW]}, S.claim(added=[S.added("fg-1", "f1")])),
-        S.submit(BASE, S.EMPTY_CLAIM),
+        # attempt 1 stages fg-1, and fails check 1 on an edit naming a fact no world has.
+        S.submit(S.handin(S.op_replace("/rows/0/host", "db-9", fact_id="f9"),
+                          S.op_add("/rows/-", FORGED_ROW, forged_id="fg-1", fact_id="f1"))),
+        S.submit(),
         # later calls: neither the uncommitted fg-1 nor the uncommitted record binds them.
-        *_honest(row=_forged(action="tgs"), base_rows=()),
-        S.submit(siem, S.EMPTY_CLAIM))
+        *_honest(row=_forged(action="tgs")),
+        S.submit())
     reg = sc.registry(o)
 
     assert sc.call(reg, "idp", "query", **ALICE) == BASE
@@ -1170,9 +1134,8 @@ def test_1224_sibling_reissues_an_original_call_after_recording_a_conflicting_va
                 live=[("idp", "query", ALICE, BASE)])
     held = {**original, "department": "finance"}
     o = S.oracle(S.record_fact("alice", "department", "finance"), *_honest(),
-                 S.submit(original, S.EMPTY_CLAIM),
-                 S.submit(held, S.claim(changed=[
-                     S.changed("alice", "department", "sales", "finance")])))
+                 S.submit(),
+                 S.submit(S.handin(S.op_replace("/department", "finance", fact_id="f1"))))
     reg = sc.registry(o)
 
     assert sc.call(reg, "idp", "query", **ALICE) == SERVED

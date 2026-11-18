@@ -264,8 +264,7 @@ def pass_through() -> dict[str, Any]:
     recorded `passthrough`); it decides nothing a test here asserts."""
     from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 
-    base = S.sym("learning.branch.estate.oracle", "BASE_HANDLE")
-    return {"oracle": S.oracle(then=S.submit(base, S.EMPTY_CLAIM)).model,
+    return {"oracle": S.oracle(then=S.submit()).model,
             "verifier": S.passing_verifier().model}
 
 

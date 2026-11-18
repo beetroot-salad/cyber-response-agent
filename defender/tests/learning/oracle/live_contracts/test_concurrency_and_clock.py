@@ -39,11 +39,10 @@ def _forged(n: int, **over: Any) -> dict:
     return row
 
 
-def _forge_and_submit(forged_id: str, row: dict, base_rows: list[dict], *,
-                      fact_id: str = "f1", system: str = "idp") -> list[S.Move]:
-    """One attempt that forges `row` for the fact and serves base + row, declaring it."""
-    return [S.forge(forged_id, fact_id, system, row),
-            S.submit({"rows": [*base_rows, row]}, S.claim(added=[S.added(forged_id, fact_id)]))]
+def _forge_and_submit(forged_id: str, row: dict, *, fact_id: str = "f1",
+                      table: str = "rows") -> list[S.Move]:
+    """One attempt that serves the base plus `row`, added as the fact's forged row."""
+    return [S.submit(S.handin(S.op_add(f"/{table}/-", row, forged_id=forged_id, fact_id=fact_id)))]
 
 
 def _as_text(value: Any) -> str:
@@ -171,7 +170,7 @@ class _ExploreThenSubmit(_ParallelScripted):
                        for p in getattr(last, "parts", ()))
         with self._turn_lock:
             if explored:
-                self.moves.insert(0, S.submit(EMPTY, S.EMPTY_CLAIM))
+                self.moves.insert(0, S.submit())
             else:
                 first = self._issued
                 self._issued += self.n
@@ -290,15 +289,18 @@ def test_1224_oracle_latency_trips_no_investigator_time_limit(tmp_path, monkeypa
     monkeypatch.setenv(ENFORCE, "true")
     est = S.estate(tmp_path)
     ep = _episode(tmp_path, [("idp", "query", ALICE, {"rows": [BASE_ROW]})])
-    oracle = S.oracle(*_forge_and_submit("fg-1", _forged(1), [BASE_ROW]),
-                      fault=S.Fault(delay=3.0))
+    # Two oracle requests (a recorded fact, then the hand-in) and one verifier pass, together
+    # well past the 5s limit.
+    oracle = S.oracle(S.record_fact("alice", "seen_by", "the oracle"),
+                      *_forge_and_submit("fg-1", _forged(1)), fault=S.Fault(delay=3.0))
     verifier = S.passing_verifier(fault=S.Fault(delay=3.0))
     reg = S.world_registry(ep, "b", est, oracle=oracle, verifier=verifier, retry_cap=3)
     run_dir, router, summary = _drive(
         tmp_path, verbs=reg, tenant=est.place(), limits=_limits(5.0),
         leads={"l-001": [_q(ALICE), _q(ALICE), S.done_turn()]})
 
-    assert oracle.submissions() == 1, "no oracle turn was taken"
+    assert oracle.submissions() == 1, ("no oracle turn was taken", oracle.requests,
+                                       verifier.requests)
     assert verifier.requests >= 1, "no oracle turn was taken"
     assert _held(oracle, verifier) >= 7.5, "the oracle and verifier held the turn too briefly"
     assert _refusal_stem() not in router.shown("l-001"), (
@@ -312,7 +314,7 @@ def test_1224_oracle_latency_trips_no_investigator_time_limit(tmp_path, monkeypa
     est_c = S.estate(control)
     ep_c = _episode(control, [("idp", "query", ALICE, {"rows": [BASE_ROW]})])
     reg_c = S.world_registry(ep_c, "b", est_c,
-                             oracle=S.oracle(*_forge_and_submit("fg-1", _forged(1), [BASE_ROW])),
+                             oracle=S.oracle(*_forge_and_submit("fg-1", _forged(1))),
                              verifier=S.passing_verifier(), retry_cap=3)
 
     def slow_investigator() -> Any:
@@ -335,7 +337,7 @@ def test_1385_an_oracle_turn_pauses_the_runs_own_clock_through_the_query_tool(tm
 
     est = S.estate(tmp_path)
     ep = _episode(tmp_path, [("idp", "query", ALICE, {"rows": [BASE_ROW]})])
-    oracle = S.oracle(*_forge_and_submit("fg-1", _forged(1), [BASE_ROW]),
+    oracle = S.oracle(*_forge_and_submit("fg-1", _forged(1)),
                       fault=S.Fault(delay=delay))
     reg = S.world_registry(ep, "b", est, oracle=oracle, verifier=S.passing_verifier(),
                            retry_cap=3)
@@ -359,8 +361,8 @@ def test_conc_12_queue_wait_behind_another_leads_turn(tmp_path, monkeypatch):
     ep = _episode(tmp_path, [("idp", "query", ALICE, EMPTY), ("idp", "query", other, EMPTY)])
     oracle = S.oracle(S.run_query("idp", "query", S.query_params("probe-1")),
                       S.run_query("idp", "query", S.query_params("probe-2")),
-                      S.submit(EMPTY, S.EMPTY_CLAIM),
-                      then=S.submit(EMPTY, S.EMPTY_CLAIM), fault=S.Fault(delay=0.6))
+                      S.submit(),
+                      then=S.submit(), fault=S.Fault(delay=0.6))
     reg = S.world_registry(ep, "b", est, oracle=oracle, verifier=S.passing_verifier(),
                            retry_cap=3, rate=1.0)
 
@@ -389,7 +391,7 @@ def test_slow_real_system_and_slow_oracle_in_one_call(tmp_path, monkeypatch):
     _slow_adapter(est, "edr", 2.2)
     est.answer("edr", "query", None, {"events": [EDR_ROW]})
     ep = _episode(tmp_path, [])
-    oracle = S.oracle(then=S.submit({"events": [EDR_ROW]}, S.EMPTY_CLAIM),
+    oracle = S.oracle(then=S.submit(),
                       fault=S.Fault(delay=2.5))
     reg = S.world_registry(ep, "b", est, oracle=oracle, verifier=S.passing_verifier(),
                            retry_cap=3)
@@ -415,7 +417,7 @@ def test_slow_real_system_and_slow_oracle_in_one_call(tmp_path, monkeypatch):
 def test_1224_two_identical_concurrent_calls_get_one_turn_and_identical_bytes(tmp_path):
     est = S.estate(tmp_path)
     ep = _episode(tmp_path, [("idp", "query", ALICE, {"rows": [BASE_ROW]})])
-    oracle = S.oracle(*_forge_and_submit("fg-1", _forged(1), [BASE_ROW]),
+    oracle = S.oracle(*_forge_and_submit("fg-1", _forged(1)),
                       fault=S.Fault(delay=0.3))
     reg = S.world_registry(ep, "b", est, oracle=oracle, verifier=S.passing_verifier(),
                            retry_cap=3)
@@ -441,7 +443,7 @@ def test_1224_two_identical_concurrent_calls_get_one_turn_and_identical_bytes(tm
     est2 = S.estate(two)
     p1, p2 = S.query_params("user:carol"), S.query_params("user:dave")
     ep2 = _episode(two, [("idp", "query", p1, EMPTY), ("idp", "query", p2, EMPTY)])
-    oracle2 = S.oracle(then=S.submit(EMPTY, S.EMPTY_CLAIM))
+    oracle2 = S.oracle(then=S.submit())
     reg2 = S.world_registry(ep2, "b", est2, oracle=oracle2, verifier=S.passing_verifier(),
                             retry_cap=3)
     ctx2 = est2.ctx(two / "run")
@@ -472,12 +474,14 @@ def test_conc_03_two_calls_forge_for_one_fact_concurrently(tmp_path):
     edr_row = {"event_id": "x-9001", "host": "db-1", "process": "kinit",
                "ts": "2026-07-28T15:22:00Z"}
     oracle = S.oracle(
-        *_forge_and_submit("fg-1", idp_row, [BASE_ROW]),
-        S.forge("fg-1", "f1", "idp", _forged(1, ts="2026-07-28T18:00:00Z")),
-        S.forge("fg-2", "f1", "edr", edr_row),
-        S.submit({"events": [EDR_ROW, edr_row]}, S.claim(added=[S.added("fg-2", "f1")])),
-        S.forge("fg-2", "f1", "edr", edr_row),
-        S.submit({"events": [EDR_ROW, edr_row]}, S.claim(added=[S.added("fg-2", "f1")])),
+        *_forge_and_submit("fg-1", idp_row),
+        # The second call re-forges the fact's frozen fg-1 with other content beside its own
+        # row: refused; then it hands in its own row alone.
+        S.submit(S.handin(S.op_add("/events/-", _forged(1, ts="2026-07-28T18:00:00Z"),
+                                   forged_id="fg-1", fact_id="f1"),
+                          S.op_add("/events/-", edr_row, forged_id="fg-2", fact_id="f1"))),
+        *_forge_and_submit("fg-2", edr_row, table="events"),
+        *_forge_and_submit("fg-2", edr_row, table="events"),
         fault=S.Fault(delay=0.2))
     verifier = S.passing_verifier()
     reg = S.world_registry(ep, "b", est, oracle=oracle, verifier=verifier, retry_cap=3)
@@ -506,13 +510,10 @@ def test_conc_04_record_fact_conflict_between_concurrent_calls(tmp_path):
                              ("idp", "lookup", {"entity": "alice"}, idp)])
     oracle = S.oracle(
         S.record_fact("alice", "risk", "high"),
-        S.submit(dict(siem, risk="high"), S.claim(changed=[S.changed("alice", "risk", "low",
-                                                                      "high")])),
+        S.submit(S.handin(S.op_replace("/risk", "high", fact_id="f1"))),
         S.record_fact("alice", "risk", "critical"),
-        S.submit(dict(idp, risk="critical"), S.claim(changed=[S.changed("alice", "risk", "low",
-                                                                         "critical")])),
-        S.submit(dict(idp, risk="high"), S.claim(changed=[S.changed("alice", "risk", "low",
-                                                                     "high")])),
+        S.submit(S.handin(S.op_replace("/risk", "critical", fact_id="f1"))),
+        S.submit(S.handin(S.op_replace("/risk", "high", fact_id="f1"))),
         fault=S.Fault(delay=0.2))
     reg = S.world_registry(ep, "b", est, oracle=oracle, verifier=S.passing_verifier(),
                            retry_cap=3)
@@ -537,9 +538,10 @@ def test_conc_05_check_then_commit_window_on_frozen_rows(tmp_path):
     ep = _episode(tmp_path, [("idp", "query", ALICE, {"rows": [BASE_ROW]}),
                              ("idp", "query", later, {"rows": [BASE_ROW]})])
     first, rival = _forged(1), _forged(1, host="RIVAL-HOST-1224")
-    oracle = S.oracle(*_forge_and_submit("fg-1", first, [BASE_ROW]),
-                      *_forge_and_submit("fg-1", rival, [BASE_ROW]),
-                      S.submit({"rows": [BASE_ROW, first]}, S.claim(added=[S.added("fg-1", "f1")])),
+    oracle = S.oracle(*_forge_and_submit("fg-1", first),
+                      *_forge_and_submit("fg-1", rival),
+                      S.submit(S.handin(S.op_add_frozen("/rows/-", forged_id="fg-1",
+                                                        fact_id="f1"))),
                       fault=S.Fault(delay=0.2))
     reg = S.world_registry(ep, "b", est, oracle=oracle, verifier=S.passing_verifier(),
                            retry_cap=3)
@@ -566,9 +568,9 @@ def test_1224_two_concurrent_calls_take_sequential_oracle_turns_that_never_inter
     second = S.query_params("host:db-B-1224")
     ep = _episode(tmp_path, [("idp", "query", first, {"rows": [BASE_ROW]}),
                              ("idp", "query", second, EMPTY)])
-    oracle = S.oracle(S.submit({"rows": [BASE_ROW]}, S.EMPTY_CLAIM),
-                      *_forge_and_submit("fg-1", _forged(1), [BASE_ROW]),
-                      S.submit(EMPTY, S.EMPTY_CLAIM), fault=S.Fault(delay=0.5))
+    oracle = S.oracle(S.submit(),
+                      *_forge_and_submit("fg-1", _forged(1)),
+                      S.submit(), fault=S.Fault(delay=0.5))
     verifier = S.verifier(S.verdict(False, "VERDICT-MARK-1224 fact f1 is missing"),
                           S.verdict(True), S.verdict(True), fault=S.Fault(delay=0.5))
     reg = S.world_registry(ep, "b", est, oracle=oracle, verifier=verifier, retry_cap=3)
@@ -585,13 +587,13 @@ def test_1224_two_concurrent_calls_take_sequential_oracle_turns_that_never_inter
     assert not oracle.overrun
     assert oracle.submissions() == 3
     _assert_never_overlap(oracle, verifier)
-    assert verifier.finished[1] <= oracle.started[3] + 1e-3, (
+    assert verifier.finished[1] <= oracle.started[2] + 1e-3, (
         "the second call's turn began before the first call's verifier pass ended")
-    for text in oracle.seen[:3]:
+    for text in oracle.seen[:2]:
         assert "B-1224" not in text, "the second call's params entered the first call's turn"
     assert S.verdict_names(oracle.seen[1], "verifier")
     assert "VERDICT-MARK-1224" in oracle.seen[1], "the failure verdict never reached the retry"
-    S.assert_wrapped_untrusted(oracle.seen[3], "host:db-B-1224",
+    S.assert_wrapped_untrusted(oracle.seen[2], "host:db-B-1224",
                                "the second call's params in its own turn")
     for text in verifier.seen[:2]:
         assert "B-1224" not in text, "the second call's params entered the first's verifier pass"
@@ -614,9 +616,9 @@ def test_conc_09_conversation_restart_with_a_turn_in_flight(tmp_path):
     ep = _episode(tmp_path, [("siem-x", "lookup", {"entity": "alice"}, siem),
                              ("idp", "query", ALICE, {"rows": [BASE_ROW]})])
     oracle = S.oracle(S.record_fact("alice", "risk_tier", "TIER-XQ7-1224"),
-                      S.submit(siem, S.EMPTY_CLAIM),
-                      S.submit({"rows": [BASE_ROW]}, S.EMPTY_CLAIM),
-                      *_forge_and_submit("fg-1", _forged(1), [BASE_ROW]))
+                      S.submit(),
+                      S.submit(),
+                      *_forge_and_submit("fg-1", _forged(1)))
     verifier = S.verifier(S.verdict(True), S.verdict(False, "FAILMARK-1224 f1 is absent"),
                           S.verdict(True))
     reg = S.world_registry(ep, "b", est, oracle=oracle, verifier=verifier, retry_cap=3,
@@ -627,18 +629,21 @@ def test_conc_09_conversation_restart_with_a_turn_in_flight(tmp_path):
     assert not oracle.overrun
     assert oracle.submissions() == 3
 
-    restarts = [i for i in range(1, len(oracle.messages))
-                if len(oracle.messages[i]) < len(oracle.messages[i - 1])]
-    assert restarts, "the conversation never restarted at its restart point"
-    first = restarts[0]
-    assert oracle.instructions[first] == oracle.instructions[0], "the prefix changed"
-    statement = S.fact()["statement"]
-    for i in range(first, oracle.requests):
-        assert "TIER-XQ7-1224" in oracle.seen[i], (
-            f"request {i} after the restart does not carry the recorded fact")
-        assert statement in oracle.seen[i], f"request {i} lost the world block"
-    assert "FAILMARK-1224" in oracle.seen[-2], (
+    # Every call starts a fresh conversation (#1543), so a restart is one WITHIN a call: the
+    # idp call's retry (request 3) starts over from the prefix after its one attempt.
+    from pydantic_ai.messages import ModelResponse
+
+    retry = 3
+    assert "FAILMARK-1224" in oracle.seen[retry], (
         "the in-flight call's retry lost its failure history across the restart")
+    assert not any(isinstance(m, ModelResponse) for m in oracle.messages[retry]), (
+        "the conversation never restarted at its restart point")
+    assert oracle.instructions[retry] == oracle.instructions[0], "the prefix changed"
+    statement = S.fact()["statement"]
+    for i in (2, retry):
+        assert "TIER-XQ7-1224" in oracle.seen[i], (
+            f"request {i} of the later call does not carry the recorded fact")
+        assert statement in oracle.seen[i], f"request {i} lost the world block"
 
 
 def test_conc_18_lead_ended_mid_serve(tmp_path, monkeypatch):
@@ -652,7 +657,7 @@ def test_conc_18_lead_ended_mid_serve(tmp_path, monkeypatch):
         _slow_adapter(est, "idp", read_s)
         est.answer("idp", "query", late, {"rows": [BASE_ROW]})
         ep = _episode(root, [])
-        oracle = S.oracle(*_forge_and_submit("fg-1", _forged(1), [BASE_ROW]))
+        oracle = S.oracle(*_forge_and_submit("fg-1", _forged(1)))
         reg = S.world_registry(ep, "b", est, oracle=oracle, verifier=S.passing_verifier(),
                                retry_cap=3)
         marks: dict[str, float] = {}
@@ -728,7 +733,7 @@ def test_conc_32_siblings_first_use_of_shared_state_together(tmp_path):
         doubles[label] = S.oracle(*[S.run_query("idp", "query",
                                                 S.query_params(f"probe-{label}-{i}"))
                                     for i in range(3)],
-                                  S.submit(EMPTY, S.EMPTY_CLAIM))
+                                  S.submit())
         regs[label] = S.world_registry(ep, label, est, oracle=doubles[label],
                                        verifier=S.passing_verifier(), retry_cap=3, rate=1.0)
     ctx_b, ctx_c = est.ctx(tmp_path / "run-b"), est.ctx(tmp_path / "run-c")
@@ -756,7 +761,7 @@ def test_1224_concurrent_leads_leave_one_intact_world_ledger_row_per_call(tmp_pa
     for p in broken:
         est.fail("idp", "query", p)
     ep = _episode(tmp_path, [("idp", "query", p, EMPTY) for p in served])
-    oracle = S.oracle(then=S.submit(EMPTY, S.EMPTY_CLAIM), fault=S.Fault(delay=0.1))
+    oracle = S.oracle(then=S.submit(), fault=S.Fault(delay=0.1))
     reg = S.world_registry(ep, "b", est, oracle=oracle, verifier=S.passing_verifier(),
                            retry_cap=3)
     ctx = est.ctx(tmp_path / "run")
@@ -792,12 +797,10 @@ def test_1224_forged_store_has_one_writer_and_commits_rows_with_the_verified_ans
         json.dumps(kept) + "\n" + '{"forged_id": "fg-torn", "fact_id": "f1", "sys',
         encoding="utf-8")
     oracle = S.oracle(
-        S.forge("fg-1", "f1", "idp", _forged(1)),
         S.record_fact("alice", "risk", "ATTEMPT-ONE-1224"),
-        S.submit({"rows": [BASE_ROW, _forged(1)]}, S.claim(added=[S.added("fg-1", "f1")])),
-        S.forge("fg-torn", "f1", "idp", _forged(2)),
+        *_forge_and_submit("fg-1", _forged(1)),
         S.record_fact("alice", "risk", "ATTEMPT-TWO-1224"),
-        S.submit({"rows": [BASE_ROW, _forged(2)]}, S.claim(added=[S.added("fg-torn", "f1")])))
+        *_forge_and_submit("fg-torn", _forged(2)))
     verifier = S.verifier(S.verdict(False, "the ticket grant is implausible"), S.verdict(True))
     reg = S.world_registry(ep, "b", est, oracle=oracle, verifier=verifier, retry_cap=3)
     S.call(reg, "idp", "query", est.ctx(tmp_path / "run"), **ALICE)
@@ -819,7 +822,7 @@ def test_1224_forged_store_has_one_writer_and_commits_rows_with_the_verified_ans
     est_l = S.estate(launched)
     spawn = _SnapshotSpawn()
     out = S.launch(launched, est_l, calls=[S.Call("idp", "query", ALICE, EMPTY)],
-                   oracle=S.oracle(then=S.submit(EMPTY, S.EMPTY_CLAIM)),
+                   oracle=S.oracle(then=S.submit()),
                    verifier=S.passing_verifier(), spawn=spawn)
     assert out.rc == 0, out.message
     assert spawn.snapshots, "no sibling was started"
@@ -860,7 +863,7 @@ def test_1224_parallel_run_queries_in_one_turn_leave_one_intact_oracle_ledger_ro
     ep = _episode(tmp_path, [("idp", "query", ALICE, EMPTY)])
     probes = [S.query_params(f"probe-{i}") for i in range(5)]
     oracle = _ParallelScripted(parallel(*[S.run_query("idp", "query", p) for p in probes]),
-                               S.submit(EMPTY, S.EMPTY_CLAIM), name="oracle")
+                               S.submit(), name="oracle")
     reg = S.world_registry(ep, "b", est, oracle=oracle, verifier=S.passing_verifier(),
                            retry_cap=3, rate=100.0)
     S.call(reg, "idp", "query", est.ctx(tmp_path / "run"), **ALICE)
@@ -893,7 +896,7 @@ def test_oracle_trace_sink_is_already_open_when_a_second_oracle_turn_starts(tmp_
     est = S.estate(tmp_path)
     one, two = S.query_params("user:alice-1"), S.query_params("user:alice-2")
     ep = _episode(tmp_path, [("idp", "query", one, EMPTY), ("idp", "query", two, EMPTY)])
-    oracle = S.oracle(then=S.submit(EMPTY, S.EMPTY_CLAIM), fault=S.Fault(delay=0.3))
+    oracle = S.oracle(then=S.submit(), fault=S.Fault(delay=0.3))
     verifier = S.passing_verifier(fault=S.Fault(delay=0.2))
     reg = S.world_registry(ep, "b", est, oracle=oracle, verifier=verifier, retry_cap=3)
     H = S.replay_harness()
@@ -923,7 +926,7 @@ def test_oracle_trace_sink_is_already_open_when_a_second_oracle_turn_starts(tmp_
     launched = tmp_path / "launch"
     est_l = S.estate(launched)
     out = S.launch(launched, est_l, calls=[S.Call("idp", "query", ALICE, EMPTY)],
-                   oracle=S.oracle(then=S.submit(EMPTY, S.EMPTY_CLAIM), fault=S.Fault(delay=0.3)),
+                   oracle=S.oracle(then=S.submit(), fault=S.Fault(delay=0.3)),
                    verifier=S.passing_verifier())
     assert out.rc == 0, out.message
     assert "FileExistsError" not in out.message, out.message
@@ -938,7 +941,7 @@ def test_1224_in_process_limiter_never_passes_two_queries_for_one_remaining_slot
     ep = _episode(tmp_path, [("idp", "query", ALICE, EMPTY)])
     probes = [S.query_params(f"probe-{i}") for i in range(5)]
     oracle = _ParallelScripted(parallel(*[S.run_query("idp", "query", p) for p in probes]),
-                               S.submit(EMPTY, S.EMPTY_CLAIM), name="oracle")
+                               S.submit(), name="oracle")
     reg = S.world_registry(ep, "b", est, oracle=oracle, verifier=S.passing_verifier(),
                            retry_cap=3, rate=2.0)
     S.call(reg, "idp", "query", est.ctx(tmp_path / "run"), **ALICE)

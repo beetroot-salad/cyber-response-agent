@@ -45,7 +45,8 @@ def test_no_conflict_leaves_the_family_and_calls_no_revision(tmp_path):
         tmp_path, questioner_replies=three_replies(), check_replies=[{"conflicts": []}])
 
     assert _labels(family) == ["a", "b", "c"]
-    assert agent.calls == 3 and check.calls == 1
+    assert agent.calls == 3
+    assert check.calls == 1
     assert check.agent_ids == ["questioner:check"]
     assert recorded == [[]]
 
@@ -55,8 +56,10 @@ def test_the_check_is_shown_the_worlds_facts_and_the_prebranch_answers(tmp_path)
         tmp_path, questioner_replies=three_replies(), check_replies=[{"conflicts": []}])
 
     prompt = check.prompts[0]
-    assert "dfd163bc7918" in prompt and "authorized_keys modification" in prompt
-    assert '"label": "b"' in prompt and '"fact_id": "f1"' in prompt
+    assert "dfd163bc7918" in prompt
+    assert "authorized_keys modification" in prompt
+    assert '"label": "b"' in prompt
+    assert '"fact_id": "f1"' in prompt
 
 
 def test_a_conflicting_world_is_rebuilt_by_its_seat_and_kept_once_it_holds(tmp_path):
@@ -66,13 +69,17 @@ def test_a_conflicting_world_is_rebuilt_by_its_seat_and_kept_once_it_holds(tmp_p
 
     b = next(w for w in family["worlds"] if w["label"] == "b")
     assert [f["fact_id"] for f in b["facts"]] == ["f1r"]
-    assert b["story"] == "b rebuilt" and b["role"] == "B"
+    assert b["story"] == "b rebuilt"
+    assert b["role"] == "B"
     assert agent.agent_ids[-1] == "questioner:b:revise"
     revise = agent.prompts[-1]
-    assert "This is a revision" in revise and "6 such alerts" in revise
+    assert "This is a revision" in revise
+    assert "6 such alerts" in revise
     assert check.agent_ids == ["questioner:check", "questioner:check:2"]
     [entry] = recorded[0]
-    assert entry["label"] == "b" and entry["revised"] and not entry["dropped"]
+    assert entry["label"] == "b"
+    assert entry["revised"]
+    assert not entry["dropped"]
     assert [f["fact_id"] for f in entry["original_facts"]] == ["f1"]
 
 
@@ -83,7 +90,9 @@ def test_a_world_that_still_conflicts_after_its_revision_is_dropped(tmp_path):
 
     assert _labels(family) == ["a", "c"]
     [entry] = recorded[0]
-    assert entry["revised"] and entry["dropped"] and entry["conflicts_after"]
+    assert entry["revised"]
+    assert entry["dropped"]
+    assert entry["conflicts_after"]
 
 
 def test_a_revision_with_no_usable_facts_drops_the_world(tmp_path):
@@ -93,7 +102,8 @@ def test_a_revision_with_no_usable_facts_drops_the_world(tmp_path):
 
     assert _labels(family) == ["a", "b"]
     assert check.calls == 1
-    assert recorded[0][0]["dropped"] and not recorded[0][0]["revised"]
+    assert recorded[0][0]["dropped"]
+    assert not recorded[0][0]["revised"]
 
 
 def test_an_unreadable_check_reply_changes_nothing(tmp_path):
@@ -111,4 +121,5 @@ def test_without_a_check_seam_the_family_is_authored_as_before(tmp_path):
 
     family = author(tmp_path, paths, invoke=agent)
 
-    assert _labels(family) == ["a", "b", "c"] and agent.calls == 3
+    assert _labels(family) == ["a", "b", "c"]
+    assert agent.calls == 3

@@ -68,10 +68,12 @@ def test_removing_one_user_from_a_directory_list_needs_only_its_fact(tmp_path):
     assert "svc.monitoring" in verifier.all_seen(), "the verifier was not shown the removed row"
     [answer] = _answers(ep)
     removal, total = answer["claim"]["changes"]
-    assert removal["op"] == "remove" and removal["fact_id"] == "f1"
+    assert removal["op"] == "remove"
+    assert removal["fact_id"] == "f1"
     assert removal["row_before"]["username"] == "svc.monitoring"
     assert removal["proven"] is False
-    assert total["before"] == 3 and total["after"] == 2
+    assert total["before"] == 3
+    assert total["after"] == 2
     assert answer["claim"]["query"] == {"system": "idp", "verb": "lookup", "params": DIRECTORY}
     assert answer["decision"] in ("oracle", "reconstructed")
 
@@ -107,7 +109,8 @@ def test_check_shows_the_changes_the_host_would_serve(tmp_path):
 
     reply = oracle.seen[1]
     assert "The draft passes the host checks." in reply
-    assert "The host would serve these changes" in reply and "svc.monitoring" in reply
+    assert "The host would serve these changes" in reply
+    assert "svc.monitoring" in reply
 
 
 def test_a_forged_row_is_added_and_a_frozen_one_is_served_again_by_its_id(tmp_path):
@@ -135,7 +138,9 @@ def test_an_esql_change_is_shown_by_its_column_name(tmp_path):
 
     assert served["values"] == [["alice", 3], ["bob", 4]]
     [change] = _answers(ep)[0]["claim"]["changes"]
-    assert change["column"] == "n" and change["table"] == "values" and change["row_index"] == 1
+    assert change["column"] == "n"
+    assert change["table"] == "values"
+    assert change["row_index"] == 1
     assert change["row_before"] == {"user": "bob", "n": 5}
     assert change["row_after"] == {"user": "bob", "n": 4}
 

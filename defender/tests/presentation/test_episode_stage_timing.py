@@ -153,7 +153,7 @@ def _launch(tmp_path, *, judge=None, spawn=None, calls=None, oracle=None, verifi
         judge = J.FakeJudge(
             default=J.as_reply_text(J.reply_doc(findings=[], bucket="none", systems=[])),
             family_default=J.as_reply_text(J.family_reply()))
-    oracle = oracle if oracle is not None else S.oracle(then=S.submit(_BASE, S.EMPTY_CLAIM))  # lint-default: ok — a test builder's fresh per-call double, never a shared instance
+    oracle = oracle if oracle is not None else S.oracle(then=S.submit())  # lint-default: ok — a test builder's fresh per-call double, never a shared instance
     verifier = verifier if verifier is not None else S.passing_verifier()  # lint-default: ok — a test builder's fresh per-call double, never a shared instance
     seams.setdefault("questioner", S.questioner_for())
     seams.setdefault("preflight", S.no_preflight)
