@@ -348,6 +348,27 @@ def test_feedback_a_live_changes_requested_review_on_an_open_pr_gets_it_closed_a
 
 
 
+def test_feedback_a_close_for_changes_requested_that_does_not_take_ends_nothing_and_is_made_again_next_pass(world, caplog):
+    """The forge accepts the close but the PR reads open again: the batch is not ended closed beside a PR still open (no
+    replacement opens over it, nothing would close it later); it stays in review and the next pass closes and replaces.
+    (H7, D8; #1558 review: the same rule as an abandon's close)"""
+    w = world
+    w.seed("f1")
+    writer = FeedbackCurator(_files("f1"))
+    batch_id, _branch, number = opened(w, writer, caplog)
+    w.t.forge.reviews[number] = [review_row(637, "owner", "REQUEST_CHANGES", body="wrong lane")]
+    w.t.forge.respond = lambda request: httpx.Response(201, json={}) if request.method == "PATCH" else None
+    tick(w, writer)
+    assert [p["state"] for p in w.t.forge.prs if p["number"] == number] == ["open"], "premise: the close did not take"
+    assert _end(w, batch_id) == ("in_review", None), "the batch ended closed beside its open PR"
+    assert _replacements(w, batch_id) == []
+    w.t.forge.respond = None
+    tick(w, writer)
+    assert _end(w, batch_id) == ("ended", "closed")
+    [new] = _replacements(w, batch_id)
+    assert new.phase == "in_review"
+
+
 def test_feedback_close_then_crash_is_idempotent(world, caplog):
     """The close landed on the forge, the store still says in_review: the next tick rereads closed plus the review, closes nothing again, replaces once. (Feedback)"""
     w = world

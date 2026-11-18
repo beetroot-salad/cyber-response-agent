@@ -547,16 +547,21 @@ class Tick:
             return
         try:
             pr = forge.pull_request(number)
+            if pr.status == "open" and b.kind == "author" and live_changes_requested(forge.reviews(number)):
+                forge.close_pr(number)
+                # Read back, as an abandon's close is: a close the forge took but did not apply leaves the PR open, and
+                # a batch ended beside it would leave an open PR nothing tracks. A merge in the gap is read as merged.
+                pr = forge.pull_request(number)
+                if pr.status == "open":
+                    _logger.warning(f"{self.label}: PR #{number} of batch {b.id} has changes requested but still reads "
+                                    "open after its close: the batch stays in review and the next pass closes it again")
+                elif pr.status == "closed":
+                    self.store.end_review(self.tenant_id, str(b.id), expect_phase="in_review", outcome="closed",
+                                          published=[], held=[])
+                    _logger.info(f"{self.label}: PR #{number} of batch {b.id} has changes requested: closed, "
+                                 "its items are due a replacement")
+                    return
             if pr.status == "open":
-                if b.kind == "author":
-                    reviews = forge.reviews(number)
-                    if live_changes_requested(reviews):
-                        forge.close_pr(number)
-                        self.store.end_review(self.tenant_id, str(b.id), expect_phase="in_review", outcome="closed",
-                                              published=[], held=[])
-                        _logger.info(f"{self.label}: PR #{number} of batch {b.id} has changes requested: closed, "
-                                     "its items are due a replacement")
-                        return
                 self.store.note_check(self.tenant_id, str(b.id))
                 return
             if pr.status == "merged":
