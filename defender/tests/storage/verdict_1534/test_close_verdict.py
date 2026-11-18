@@ -533,15 +533,19 @@ def test_v_final_a_write_fault_that_is_not_the_duplicate_is_raised_and_the_close
     from defender.investigation import challenge_gate
 
     for name, given in (("faulted", fault), ("control", None)):
-        with B.opened(tmp_path / name, B.DOC) as (deps, run_dir, store), B.second_handle(store, given) as handle:
+        doc = B.DOC if path == "forced-close" else S.pays_every_price("malicious")
+        with B.opened(tmp_path / name, doc) as (deps, run_dir, store), B.second_handle(store, given) as handle:
             if path == "forced-close":
                 exit_reason = B.drive_forced_close_over(deps, store, handle)
+                deps = V.with_store(deps, handle)
                 assert (exit_reason == "ForcedCloseFailed") is (given is not None), (name, exit_reason)
             elif given is not None:
+                deps = V.with_store(deps, handle)
                 with pytest.raises(B.WRITE_FAULTS[given]):
                     S9.close_with(deps, "malicious", S9.recording(S9.holds()))
                 assert S9.record_files(run_dir) == [1], "the review record is written first"
             else:
+                deps = V.with_store(deps, handle)
                 S9.close_with(deps, "malicious", S9.recording(S9.holds()))
             assert challenge_gate.ReviewState.of(deps).closed is (given is None), name
             assert len(V.scalar_rows(store.path, run_dir.name)) == (0 if given else 1), name

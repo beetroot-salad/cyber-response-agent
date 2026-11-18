@@ -73,7 +73,8 @@ def test_a_close_over_an_error_severity_document_commits_nothing_and_names_the_r
     assert never_closed(run), "the close committed a report anyway"
     assert "refined twice in this write" in message
     assert "fix_row" in message
-    assert "publishes" in message, "say why a close is the moment this is checked"
+    assert "closing record" in message, "say why a close is the moment this is checked (it commits the closing record)"
+    assert "report" not in message, "the refusal still names the retired report (#1534 V-NOFILE)"
 
 
 def test_the_same_document_without_the_defect_closes(tmp_path):

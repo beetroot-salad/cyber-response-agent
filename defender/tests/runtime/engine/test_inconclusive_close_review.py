@@ -120,14 +120,15 @@ def test_headline_badge_for_a_ceiling_held_versus_an_unaffordable_gap(tmp_path):
     twin, confident = deps_over(tmp_path / "confident", ceiling_companion())
     assert close_with(twin, CONFIDENT, recording(gap(None))).outcome == "forced-inconclusive"
 
-    badges = {run.parent.name: _gate_badge_html(closing_lookup(run)) for run in (held, cannot, spent, confident)}
+    runs = {"held": held, "cannot": cannot, "spent": spent, "confident": confident}
+    badges = {name: _gate_badge_html(closing_lookup(run)) for name, run in runs.items()}
     assert "gate: stands" in badges["held"], badges
     assert "gate-stands" in badges["held"], badges
     assert badges["cannot"] == badges["spent"] == badges["confident"], badges
     assert "gate: forced-inconclusive" in badges["cannot"], badges
     assert "gate-forced" in badges["cannot"], badges
     assert all("not reviewed" not in b for b in badges.values())
-    causes = {run.parent.name: frontmatter(run)["cause"] for run in (held, cannot, spent)}
+    causes = {name: frontmatter(runs[name])["cause"] for name in ("held", "cannot", "spent")}
     assert set(causes.values()) == {
         CEILING_EXAMINED, CAUSE_EVIDENCE_CANNOT_DISCRIMINATE, CAUSE_TURN_BUDGET_SPENT,
     }, causes
