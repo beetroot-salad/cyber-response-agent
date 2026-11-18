@@ -83,7 +83,12 @@ def main(argv: list[str], *, author_tick: Callable[..., int] | None = None,
     try:
         if watch_stdin:
             sigterm_on_stdin_eof()
-        paths, store = _opened(ns, which, ask)
+        try:
+            container = JobContainer.connect(ask, tenant=ns.tenant)  # the helper's launch facts name this tenant
+            tenant = tenancy.accept_tenant(tenancy.resolve_data_root(), ns.tenant, defender_dir=process_defender_dir())
+        except (TenantRefused, OSError, ValueError) as unusable:
+            sys.exit(f"[post-step] {which}: the tenant cannot be used: {unusable}")
+        paths, store = _opened(tenant, container, which)
         tick = author_tick if author_tick is not None else _default_tick
         exit_code = tick(paths, store=store)
         _logger.info(f"post-step of {which}: the tick ended with status {exit_code}")
@@ -93,18 +98,11 @@ def main(argv: list[str], *, author_tick: Callable[..., int] | None = None,
             signal.signal(signal.SIGTERM, previous if previous is not None else signal.SIG_DFL)
 
 
-def _opened(ns: argparse.Namespace, which: str, ask: Callable[..., Any]) -> tuple[Any, Any]:
-    """The tenant's learning paths (accepted by the folder rules) and the tick's store (the job container's port), or the
-    step's refusal."""
+def _opened(tenant: Any, container: JobContainer, which: str) -> tuple[Any, Any]:
+    """The accepted tenant's learning paths and the tick's store (the job container's port), or the step's refusal."""
     from defender.learning.core.config import LoopPaths
     from defender.learning_store.tick import StoreUnavailable
 
-    try:
-        container = JobContainer.connect(ask, tenant=ns.tenant)  # the helper's launch facts name this tenant
-        data_root = tenancy.resolve_data_root()
-        tenant = tenancy.accept_tenant(data_root, ns.tenant, defender_dir=process_defender_dir())
-    except (TenantRefused, OSError, ValueError) as unusable:
-        sys.exit(f"[post-step] {which}: the tenant cannot be used: {unusable}")
     try:
         store = container.tick_store()
     except (StoreUnavailable, ValueError) as unreachable:
