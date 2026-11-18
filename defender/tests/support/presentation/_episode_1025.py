@@ -330,10 +330,11 @@ def run_dir(episode_dir: Path, label: str, *, cost: float | Any = 0.25,  # noqa:
     """`runs/<arm id>/` — the sibling's run dir at the id the episode's arm roster holds for
     `label` (read-only), or at `arm_id` when given (a stray arm no roster entry names), plus its
     scrub sidecar (`_triplet_947.sibling_run_dir`), with `tool_trace.jsonl` ending in a result
-    event and the `runtime.html` the run's own visualizer leaves."""
+    event and the `runtime.html` the run's own visualizer leaves. Its closing record is the episode's closing plan's
+    (`J.ensure_closings`, through the arm's pointer): no store of its own, which would replace that pointer."""
     runs = Path(episode_dir) / "runs"
     runs.mkdir(parents=True, exist_ok=True)
-    rd = T.sibling_run_dir(runs, label, arm_id=arm_id)
+    rd = T.sibling_run_dir(runs, label, arm_id=arm_id, closed=False)
     write_tool_trace(rd, [
         {"type": "assistant", "message": {"content": [{"type": "text", "text": "hello"}]}},
         result_event(cost=cost, duration_ms=duration_ms),
@@ -673,17 +674,19 @@ class Episode:
         return self.dir / name
 
 
-def sample_episode(tmp_path: Path, *, root: Path | None = None, judge: bool = True,  # noqa: PLR0913, C901 — one switch per record so a scenario about a record's absence names exactly that record
+def sample_episode(tmp_path: Path, *, root: Path | None = None, judge: bool = True,  # noqa: PLR0913, PLR0912, C901 — one switch per record so a scenario about a record's absence names exactly that record
                    family_draw: bool = True, traces: bool = True, runs: bool = True,
                    timing: bool = False, stamp: bool = True, samples: bool = True,
-                   extra_worlds: tuple[dict[str, Any], ...] = ()) -> Episode:
+                   extra_worlds: tuple[dict[str, Any], ...] = (),
+                   closings: dict[str, dict[str, Any] | None] | None = None) -> Episode:
     """The fresh-authkeys-SHAPED episode, suite-built, every record through its writer.
 
     Switches turn a record off for the scenarios about its absence; `timing=True` adds the
     every-step `timing.json` a post-prep launch leaves (the archives predate it).
     `extra_worlds` are further manifest worlds that NEVER STARTED: in the manifest before the
     RUNS step, so the arm roster names them (one entry per manifest world), with no archive, no
-    ledger and no arm folder."""
+    ledger and no arm folder. `closings` is label -> the `ClosingRecord` fields that world's arm closed with (None: it never
+    closed), declared before the build's first read plants the records (#1534: a record is write-once)."""
     manifest = sample_manifest()
     manifest["worlds"].extend(dict(w) for w in extra_worlds)
     ep = J.accepted_episode(
@@ -697,6 +700,11 @@ def sample_episode(tmp_path: Path, *, root: Path | None = None, judge: bool = Tr
                                            verifier_verdict={"passed": True,
                                                              "reason": "present"},
                                            attempts=1)]})
+    for label, fields in (closings or {}).items():
+        if fields is None:
+            J.no_closing(ep, label)
+        else:
+            J.set_closing(ep, label, **fields)
     # the manifest the sample carries: base story, a real axis per sibling, the control's null
     T.write_family(ep, manifest)
     # An archived, judged episode reached RUNS: `runs/` and its arm roster naming every manifest
