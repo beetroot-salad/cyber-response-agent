@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from defender.learning_store import Outcome
+from defender.tests.support.learning.core._release1537 import outcome_skipped
 from defender.tests.support.learning.core._declared870 import Claim, tick
 from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.runtime.engine._declared869 import (
@@ -62,6 +62,6 @@ def test_a_dropped_row_takes_a_terminal_undeclared_category(tmp_path, monkeypatc
     lane, claim, spawn = _mixed_batch(tmp_path, monkeypatch, name="undeclared")
     assert tick(lane, spawn, claim) == 0
 
-    assert claim.outcomes == {("pitfall", "r:l-002:0"): Outcome.skipped("undeclared-system:elastik")}, (
+    assert claim.outcomes == {("pitfall", "r:l-002:0"): outcome_skipped("unteachable_system", "undeclared-system:elastik")}, (
         f"the dropped row's fate is {claim.outcomes}")
     assert "agent/skills/elastic/execution.md" in lane.landed()

@@ -15,6 +15,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from defender.learning.author._config import BucketSpec
+from defender.learning.author.lessons.run import FINDINGS_BUCKETS
+from defender.tests.support.learning.core._release1537 import outcome_dead, outcome_held, outcome_skipped
 from defender.tests.support.learning.curation import _spec773 as S
 from defender.learning.author import drain
 
@@ -33,3 +36,44 @@ def test_an_empty_claim_never_reaches_the_agent_and_decides_nothing(tmp_path: Pa
                                curator=S.FakeCurator(raises=S.author_error("so the agent is seen to run")))
     assert live.run() == 2
     assert len(live.curator.calls) == 1
+
+
+def test_a_row_with_no_id_is_dead_as_malformed_naming_its_key_and_the_keyed_row_is_still_authored(tmp_path: Path):
+    """An id-less row is dead at once with the cause `malformed_row` and the missing key named; the keyed row is not held back. (1537 R4)"""
+    idless = {k: v for k, v in S.finding_row("x/0", run_id="x").items() if k != "finding_id"}
+    sc = S.build_draft_scene(tmp_path, rows=[idless, S.finding_row("a/0", run_id="a")], curator=S.FakeCurator())
+    sc.curator.writes = {"a.md": S.lesson("a/0")}
+
+    assert sc.run() == 0
+    assert sc.outcomes == {("finding", "unkeyed-0"): outcome_dead("malformed_row", "row carries no value under 'finding_id'")}
+    assert sc.curator.calls, "control: the keyed row beside it reached the agent"
+
+
+def test_a_world_finding_naming_no_systems_is_skipped_as_consumed_no_systems(tmp_path: Path):
+    """The questioner's finding that names no systems drains unauthored, skipped with the cause `consumed_no_systems`. (1537 R4)"""
+    sc = S.build_questioner_scene(tmp_path, rows=[S.world_row("w1", systems=[])], curator=S.FakeCurator())
+
+    assert sc.run() == 0
+    [(key, got)] = sc.outcomes.items()
+    assert (key, got.name) == (("questioner_finding", "w1"), "skipped")
+    assert got == outcome_skipped("consumed_no_systems", "consumed_no_systems: the world finding names no systems"), got
+
+
+def test_a_gate_hold_a_curator_hold_and_a_curator_skip_are_each_written_with_the_cause_of_who_decided_them(tmp_path: Path):
+    """The gate's hold of a retired direction, a row the curator files in a `held` bucket (no shipped channel declares one; the drain supports it) and one it skips are held `curator_held`, held `curator_held` and skipped `curator_skipped`, each keeping the words beside the cause. (1537 PR1)"""
+    held_bucket = BucketSpec(name="held", disposition="held", reason_field="held_reason", formatter=str)
+    sc = S.build_draft_scene(
+        tmp_path,
+        rows=[S.finding_row("old", run_id="old", direction="adversarial"), S.finding_row("h", run_id="h"),
+              S.finding_row("s", run_id="s"), S.finding_row("a", run_id="a")],
+        curator=S.FakeCurator(writes={"a.md": S.lesson("a")}, committed=["a"],
+                              consumed_skip=[{"finding_id": "s", "reason": "already taught"}],
+                              extra_result={"held": [{"finding_id": "h", "reason": "too vague to teach"}]}),
+        buckets=(*FINDINGS_BUCKETS, held_bucket))
+
+    assert sc.run() == 0
+    assert sc.outcomes == {
+        ("finding", "old"): outcome_held("curator_held", "retired_direction('adversarial')"),
+        ("finding", "h"): outcome_held("curator_held", "too vague to teach"),
+        ("finding", "s"): outcome_skipped("curator_skipped", "already taught"),
+    }

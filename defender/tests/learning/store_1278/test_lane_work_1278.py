@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import pytest
 
+from defender.learning.core.drains import AUTHOR_DRAIN_RECONCILES
 from defender.learning.core.store_tick import lane_waiting
 from defender.tests.support.jobs._jobs1342 import register_tenant
+from defender.tests.support.learning.core._release1537 import request, why
 from defender.tests.support.learning.core._store1278 import AUTHOR_LANE, LEAD_LANE
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
@@ -56,12 +58,45 @@ def test_a_batch_waiting_for_a_person_is_no_work_for_any_tick(store):
     and the claim refuses the busy lane. (finding 4)"""
     store.publish_findings(BLUE, "run-1", [_finding("f1")], kind="finding")
     held = store.claim(BLUE, AUTHOR_LANE, owner="o", thresholds=ONE)
-    store.needs_person(BLUE, held.batch_id, "an open PR on the prefix that no batch made")
+    store.needs_person(BLUE, held.batch_id, why("foreign_pr", "an open PR on the prefix that no batch made"))
     store.publish_findings(BLUE, "run-2", [_finding("f2")], kind="finding")
 
     assert not lane_waiting(store, BLUE, AUTHOR_LANE, tick_thresholds=ONE)
     work = store.lane_work(BLUE, AUTHOR_LANE, thresholds=ONE)
     assert (work.busy, work.claimable) == (True, True)
+
+
+def test_a_parked_batch_with_a_pending_abandon_request_is_work_for_a_tick(store, migrated_database):
+    """A parked batch a person asked to abandon is a tick's to settle, so the lane has work; unrequested, the same batch
+    keeps no tick running. (1537 R8)"""
+    store.publish_findings(BLUE, "run-1", [_finding("f1")], kind="finding")
+    held = store.claim(BLUE, AUTHOR_LANE, owner="o", thresholds=ONE)
+    store.needs_person(BLUE, held.batch_id, why("foreign_pr", "an open PR on the prefix that no batch made"))
+    assert not lane_waiting(store, BLUE, AUTHOR_LANE, tick_thresholds=ONE), "control: unrequested, a parked batch is no work"
+
+    request(migrated_database, held.batch_id)
+
+    assert lane_waiting(store, BLUE, AUTHOR_LANE, tick_thresholds=ONE), "a pending request is work a tick can act on"
+    assert lane_waiting(store, BLUE, LEAD_LANE, tick_thresholds=ONE) is False, "control: the other lane has none"
+
+
+@pytest.mark.parametrize("lane", ["lead_author", "feedback"])
+def test_a_parked_lead_or_registry_batch_with_a_pending_request_is_work_for_the_author_drains_gate_and_only_then(store, migrated_database, lane):
+    """The author drain's tick settles requests on every lane it reconciles (`AUTHOR_DRAIN_RECONCILES`), so a requested parked lead or registry batch keeps its wake gate on; unrequested it keeps none, and the lead drain's own gate (its lane alone) does not count the registry batch. (1537 O3, wake)"""
+    if lane == LEAD_LANE:
+        store.enqueue_request(BLUE, "run-1537", "case-1", {"case": "c"})
+        held = store.claim(BLUE, LEAD_LANE, owner="o", thresholds=ONE)
+    else:
+        held = store.claim_registry(store.begin_feedback_tick(BLUE, owner="o"))
+    store.needs_person(BLUE, held.batch_id, why("foreign_pr", "an open PR on the prefix that no batch made"))
+
+    def gate() -> bool:
+        return lane_waiting(store, BLUE, AUTHOR_LANE, tick_thresholds=ONE, reconcile_lanes=AUTHOR_DRAIN_RECONCILES)
+
+    assert not gate(), "control: unrequested, a parked batch is no work"
+    request(migrated_database, held.batch_id)
+    assert gate(), "a pending request is work the author drain's tick carries out"
+    assert lane_waiting(store, BLUE, AUTHOR_LANE, tick_thresholds=ONE) is False, "control: by its own lane alone the author tick would not"
 
 
 def test_an_author_lane_revert_in_review_makes_the_lane_busy_as_the_claim_finds_it(store):

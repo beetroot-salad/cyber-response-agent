@@ -9,14 +9,15 @@ from .models import Role
 
 Permission = Literal[
     "work.read", "investigations.run", "learning.run", "investigations.delete",
-    "config.read", "config.write", "people.manage",
+    "config.read", "config.write", "people.manage", "learning.manage",
 ]
 
 _ALL: frozenset[Permission] = frozenset({
     "work.read", "investigations.run", "learning.run", "investigations.delete",
-    "config.read", "config.write", "people.manage",
+    "config.read", "config.write", "people.manage", "learning.manage",
 })
 
+#: `learning.manage` (#1537 O7) releases set-aside work and abandons parked batches: admins only.
 #: `admin` holds every permission; `automation` reads work and runs investigations, and starts no learning
 #: job until a caller asks (D8).
 ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {

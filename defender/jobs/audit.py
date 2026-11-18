@@ -17,6 +17,8 @@ AuditAction = Literal[
     "learning_post_step",
     # #1470: the API's config writes, announced by its record ports after the record store commits.
     "system.update", "system.delete", "system.credentials", "case_record.update", "case_record.delete",
+    # #1537: a person's release of set-aside learning work and request to abandon a parked batch (the API adapter announces them).
+    "learning.release_item", "learning.release_batch", "learning.request_abandon",
 ]
 
 __all__ = ["SYSTEM", "AuditAction", "announce"]

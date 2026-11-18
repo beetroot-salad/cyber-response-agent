@@ -500,7 +500,7 @@ def _claimed_rows(
     for kind, key, payload in items:
         pid = payload.get("pitfall_id")
         if not isinstance(pid, str) or not pid or pid in item_of:
-            outcomes[(kind, key)] = Outcome.dead("row carries no value under 'pitfall_id'")
+            outcomes[(kind, key)] = Outcome.dead("malformed_row", "row carries no value under 'pitfall_id'")
             continue
         rows.append(dict(payload))
         item_of[pid] = (kind, key)
@@ -518,7 +518,7 @@ def _skip_dropped(
     dropped = set(dropped_ids)
     for r in rows:
         if r["pitfall_id"] in dropped:
-            outcomes[item_of[r["pitfall_id"]]] = Outcome.skipped(_deadletter_reason(r))
+            outcomes[item_of[r["pitfall_id"]]] = Outcome.skipped("unteachable_system", _deadletter_reason(r))
 
 
 def run_pitfalls(  # noqa: PLR0913 — one claim's whole injection surface

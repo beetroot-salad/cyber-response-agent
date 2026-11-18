@@ -12,18 +12,21 @@ from defender.identity import IdentityService
 # The store's refusals are the API's: one class each, so the store's raise is the API's answer
 # with no mapping between them (#1342).
 from defender.jobs.errors import Conflict, NotFound, OffboardNotSettled, UnknownReference  # noqa: F401 — re-exported: the API's refusals
-from defender.records.formats import AlertId, CredentialId, InvestigationId, LearningJobId, ProgramId, TenantId, UserId
+from defender.records.formats import AlertId, BatchId, CredentialId, InvestigationId, LearningJobId, ProgramId, TenantId, UserId, WorkItemId
 
 from defender.tenancy.record_values import SystemRecord
 
 from .models import (
+    AbandonRequested,
     Alert,
     AlertMapping,
     AlertSummary,
+    BatchReleased,
     CaseRecord,
     CaseRecordPut,
     CatalogAdapter,
     Investigation,
+    ItemReleased,
     LearningJob,
     Lesson,
     ParkedBatch,
@@ -111,7 +114,8 @@ class LearningJobsRepository(Protocol):
 
 
 class LearningWorkRepository(Protocol):
-    """The learning loop's set-aside work (#1485): held and dead items, and parked batches. Read only."""
+    """The learning loop's set-aside work (#1485): held and dead items, and parked batches; and (#1537) a person's three
+    actions on it. The adapter announces each action's audit event after the store commits, as the config records do."""
 
     async def list_set_aside(
         self, tenant_id: TenantId, *, status: Literal["held", "dead"] | None, after: TimePosition | None, limit: int
@@ -124,6 +128,21 @@ class LearningWorkRepository(Protocol):
         self, tenant_id: TenantId, *, after: TimePosition | None, limit: int
     ) -> list[ParkedBatch]:
         """Up to `limit` batches in phase `needs_person` strictly after `after`, newest first by `(created_at, id)`."""
+        ...
+
+    async def release_item(self, principal: Principal, item_id: WorkItemId) -> ItemReleased:
+        """Release a held item of the principal's tenant: it starts afresh and waits (or is skipped as superseded).
+        `NotFound`; `Conflict` naming its status when it is not held."""
+        ...
+
+    async def release_batch(self, principal: Principal, batch_id: BatchId) -> BatchReleased:
+        """Release a batch parked for a credential refusal. `NotFound`; `Conflict` for another phase or cause, or another
+        batch working on the lane; a pending abandon request is withdrawn."""
+        ...
+
+    async def request_abandon(self, principal: Principal, batch_id: BatchId) -> AbandonRequested:
+        """Record a request to abandon a parked batch; the loop carries it out. `NotFound`; `Conflict` for a batch not
+        parked or already requested."""
         ...
 
 
@@ -220,6 +239,9 @@ AuditAction = Literal[
     "learning_job.takeover",
     "learning_job.retry",
     "learning_post_step",
+    "learning.release_item",
+    "learning.release_batch",
+    "learning.request_abandon",
     "system.update",
     "system.delete",
     "system.credentials",

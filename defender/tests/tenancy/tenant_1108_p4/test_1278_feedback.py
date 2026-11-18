@@ -346,19 +346,54 @@ def test_feedback_a_live_changes_requested_review_on_an_open_pr_gets_it_closed_a
     assert new.phase == "in_review"
 
 
-def test_reconcile_an_open_pr_whose_batch_ended_is_closed(world, caplog):
-    """A person abandons the in-review batch; the next tick closes its still-open PR and the items stay held. (Reconcile, O7)"""
+
+
+def batch_row_of(w, batch_id):
+    from defender.tests.support.learning.core._release1537 import row
+
+    return row(w.dsn, batch_id)
+
+
+@pytest.mark.parametrize("passes", [1, 3], ids=["one_pass", "to_the_ceiling"])
+def test_feedback_a_close_that_never_takes_is_counted_to_the_ceiling_and_goes_to_a_person(world, caplog, passes):
+    """Each pass's close the forge takes but never applies counts like a refusal: the batch reaches a person at the
+    ceiling instead of looping behind a clean check. (H15; #1558 review)"""
+    w = world
+    w.seed("f1")
+    writer = FeedbackCurator(_files("f1"))
+    batch_id, _branch, _number = opened(w, writer, caplog)
+    w.t.forge.reviews[_number] = [review_row(638, "owner", "REQUEST_CHANGES", body="wrong lane")]
+    w.t.forge.respond = lambda request: httpx.Response(201, json={}) if request.method == "PATCH" else None
+    for _ in range(passes):
+        tick(w, writer)
+    got = batch_row_of(w, batch_id)
+    assert got["refusals"] == passes
+    assert got["phase"] == ("needs_person" if passes == 3 else "in_review")
+    if passes == 3:
+        assert got["cause"] == "forge_refused", got
+        assert "still reads open" in got["reason"], got
+
+
+def test_feedback_a_close_for_changes_requested_that_does_not_take_ends_nothing_and_is_made_again_next_pass(world, caplog):
+    """The forge accepts the close but the PR reads open again: the batch is not ended closed beside a PR still open (no
+    replacement opens over it, nothing would close it later); it stays in review and the next pass closes and replaces.
+    (H7, D8; #1558 review: the same rule as an abandon's close)"""
     w = world
     w.seed("f1")
     writer = FeedbackCurator(_files("f1"))
     batch_id, _branch, number = opened(w, writer, caplog)
-    call(w.dsn, "abandon", w.t.tenant_id, batch_id, by="person")
+    w.t.forge.reviews[number] = [review_row(637, "owner", "REQUEST_CHANGES", body="wrong lane")]
+    w.t.forge.respond = lambda request: httpx.Response(201, json={}) if request.method == "PATCH" else None
     tick(w, writer)
-
-    assert w.t.forge.patches == [(number, {"state": "closed"})]
-    assert _end(w, batch_id) == ("ended", "abandoned")
-    assert w.statuses() == {"f1": "held"}
-    assert len(w.t.forge.creates) == 1
+    assert [p["state"] for p in w.t.forge.prs if p["number"] == number] == ["open"], "premise: the close did not take"
+    assert _end(w, batch_id) == ("in_review", None), "the batch ended closed beside its open PR"
+    assert _replacements(w, batch_id) == []
+    assert batch_row_of(w, batch_id)["refusals"] == 1, "a close that did not take was not counted"
+    w.t.forge.respond = None
+    tick(w, writer)
+    assert _end(w, batch_id) == ("ended", "closed")
+    [new] = _replacements(w, batch_id)
+    assert new.phase == "in_review"
 
 
 def test_feedback_close_then_crash_is_idempotent(world, caplog):
@@ -541,17 +576,6 @@ def test_replacement_a_stop_before_its_pr_keeps_the_items_due_with_the_generatio
     assert (fresh.generation, fresh.phase) == (1, "in_review")
 
 
-def test_replacement_a_persons_abandon_of_the_replacement_holds_its_items(world, caplog):
-    """A person abandons a claimed replacement: its items are held, not due. (O7)"""
-    w = world
-    old_id, _number = _due(w, caplog)
-    claim = claim_by_hand(w, "host-a")
-    call(w.dsn, "abandon", w.t.tenant_id, claim.batch_id, by="person")
-
-    assert w.statuses() == {"f1": "held"}
-    tick(w, FeedbackCurator(_files("f1")))
-    assert [b.id for b in _replacements(w, old_id)] == [claim.batch_id], "no further replacement"
-    _no_orphans(w)
 
 
 def test_replacement_the_generation_ceiling_holds_the_items(world, caplog):
@@ -740,7 +764,8 @@ def test_h15_each_answer_the_forge_can_give_counts_or_not_as_the_rule_says_and_a
         assert (b.phase, b.refusals) == want, f"after {answer!r} (before it: {previous!r}) the batch is {(b.phase, b.refusals)}"
         previous = answer
         if b.phase == "needs_person":  # a person's release, by hand: back to review with the count at zero
-            execute(w.dsn, "UPDATE learning.batches SET phase = 'in_review', refusals = 0, reason = NULL WHERE id = %s",
+            execute(w.dsn, "UPDATE learning.batches SET phase = 'in_review', refusals = 0, reason = NULL, cause = NULL, parked_at = NULL "
+                    "WHERE id = %s",
                     (batch_id,))
             count = 0
     assert w.statuses() == {"f1": "in_batch"}, "a refusal lost the item"
