@@ -245,7 +245,7 @@ learning_jobs(
   status           queued | running | completed | failed | skipped,
   stage, fork_message_id, sibling_cost_usd,   -- progress, copied from the job entry; never resumed from
   findings_count,
-  publish_state    none | pending | done | refused,
+  publish_state    none | done | refused,
   reason, message,                        -- a fixed reason word and our own sentence (O12)
   created_at, started_at, finished_at, lease_expires_at
 )
@@ -266,8 +266,8 @@ learning_jobs(
   `launch_refused`, `verify_refused`, `source_unavailable`, `judge_failed`, `entry_error`,
   `exited_without_result`, `worker_error`, `lease_lapsed`, `retry_cap`, `tenant_offboarded`); the message is our own code's,
   never launcher or run text. A `completed` job with no findings carries the judge's verdict word.
-- **Publish state.** Findings wait in the episode folder until the row ends; `completed` sets `pending`,
-  and the worker writes `done` or `refused` from the post-step's record (§4.3).
+- **Publish state.** Findings travel in the learning job's end record; the worker's end write for
+  `completed` stores them (`done`) or refuses them whole (`refused`) in the same transaction (#1487).
 - **Delete** is the investigation delete: it locks the jobs' rows, refuses (`Conflict`) while one runs,
   and otherwise removes queued and ended jobs with the investigation. Episode folders stay on disk.
 - **No durable URLs** — `lessons_corpus_version` resolves to a blob bundle and the PR link is a GitHub URL;
@@ -556,7 +556,7 @@ only on real throughput / fan-out / independent-scaling need (§6).
 > a family's sibling base answers can be live reads. Learning runs as child processes of the worker, in
 > its one image, on the worker's slots (deployment doc §4). A job ends at the judge; **authoring has no
 > job row of its own**: after any job whose child started a family step, a post-step in the same slot
-> publishes the tenant's `pending` findings and runs the drain's own gate (threshold, retained
+> runs the drain's own gate (threshold, retained
 > deliveries), which keeps its own lock, requeue and dead-letter handling. The text below is the earlier
 > design and stands only where this note does not contradict it.
 

@@ -41,6 +41,16 @@ they start, the learning drains, the lifecycle service) refuses a database whose
 migration may lock the tables it changes until it commits. So: stop the API, the workers, the learning drains and the
 lifecycle service; run migrations; start the new code. The notes below say only what an upgrade needs beyond that.
 
+## Upgrade from before #1487
+
+Stop the API, the workers, the learning drains and the lifecycle service, then run migrations (revision
+`0023_findings_at_job_end`). A learning job's findings are now stored by the worker in the transaction that records the
+job `completed`, and the post-step only runs the author's tick. The migration moves every learning job still marked
+`pending` (its findings possibly never published, since #1170 a post-step in a job container could not reach the
+database) to `refused`, and logs how many per tenant: these jobs' findings are not recovered. Rebuild the job image and
+upgrade the worker and the job host together. Old `<job>.post-step.json` and `<job>.post-step-pending.json` files in a
+tenant's runs folder are no longer read.
+
 ## Upgrade from before #1161
 
 Every API route is under `/api` (`/api/me`, `/api/admin/tenants/<T>/resume`, `/api/openapi.json`); nothing answers at
