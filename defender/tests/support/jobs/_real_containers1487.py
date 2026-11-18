@@ -124,6 +124,7 @@ folder, seen = observe(tenant)
 try:
     ids = json.loads((folder / "obs1487" / "ids.json").read_text(encoding="utf-8"))
     from defender.learning.branch.container import JobContainer
+    from defender.records.learning_causes import Why
     store = JobContainer.in_environ().tick_store()
     seen["own_work"] = [[i.kind, i.key] for i in store.work()]
     seen["listed"] = [str(b.id) for b in store.batches()]
@@ -143,7 +144,7 @@ try:
     attempt("lead_lapsed_abandon", lambda: store.abandon(ids["lead_lapsed"]))
     attempt("lead_lapsed_end_review", lambda: store.end_review(ids["lead_lapsed"], **ended))
     attempt("feedback_working_abandon", lambda: store.abandon(ids["feedback_working"]))
-    attempt("feedback_working_park", lambda: store.needs_person(ids["feedback_working"], "parked from a job container"))
+    attempt("feedback_working_park", lambda: store.needs_person(ids["feedback_working"], Why.batch("foreign_pr", "parked from a job container")))
     attempt("feedback_working_end", lambda: store.end_review(ids["feedback_working"], **ended))
     attempt("own_lapsed_take_over", lambda: store.take_over(ids["author_lapsed"]))
 except BaseException:

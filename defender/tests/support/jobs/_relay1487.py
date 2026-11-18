@@ -23,6 +23,7 @@ from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
+from defender.records.learning_causes import Why
 from defender.tests.support.learning.curation._drain719 import finding_row
 from defender.tests.support.learning.curation._spec773 import world_row
 
@@ -440,11 +441,11 @@ class Runner:
 
     def _note_refusal(self, i: int) -> Callable[[], Any] | None:
         view = self._listed(i)
-        return None if view is None else (lambda: self.store.note_refusal(str(view.id), "the forge said no"))
+        return None if view is None else (lambda: self.store.note_refusal(str(view.id), Why.batch("forge_refused", "the forge said no")))
 
     def _needs_person(self, i: int) -> Callable[[], Any] | None:
         view = self._listed(i, own=True)
-        return None if view is None else (lambda: self.store.needs_person(str(view.id), "a foreign tip"))
+        return None if view is None else (lambda: self.store.needs_person(str(view.id), Why.batch("foreign_commits_remote", "a foreign tip")))
 
     def _end_review(self, i: int, outcome: str) -> Callable[[], Any] | None:
         view = self._listed(i, review=True)

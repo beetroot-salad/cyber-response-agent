@@ -32,7 +32,7 @@ import uuid
 from collections.abc import Iterator
 from typing import Any
 
-from . import _common, _investigation, _learning
+from . import _common, _investigation, _learning, _store_relay
 from ._container import (
     STOP_GRACE,
     job_container_name,
@@ -60,6 +60,7 @@ def registry() -> Registry:
     _common.register_common(built)
     _investigation.register_investigation(built)
     _learning.register(built)
+    _store_relay.register_store(built)
     return built
 
 

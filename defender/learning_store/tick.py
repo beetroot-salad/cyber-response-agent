@@ -251,8 +251,8 @@ class StoreAdapter:
                           published=published, held=held)
 
 
-async def lane_waiting(store: Any, tenant: str, *, reconcile_lanes: Sequence[str],
-                       thresholds: Mapping[str, int]) -> bool:
+async def lane_waiting(  # lint-dup: ok — the worker's async predicate (Flow 3); store_tick's sync one is the host's (r5.1 12)
+        store: Any, tenant: str, *, reconcile_lanes: Sequence[str], thresholds: Mapping[str, int]) -> bool:
     """Whether a post-step's author tick, reconciling `reconcile_lanes`, could act now or later without a person (#1278
     Wake, #1487 Flow 3), read from the async store `store`: any batch of the tenant not yet ended, whatever its lane or
     phase (its lease may lapse, its PR change, a person release it or ask for its abandon, which a tick carries out), or
