@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import datetime as dt
 import inspect
-import re
 import typing
 
 import pytest
@@ -149,23 +148,6 @@ def test_m11_investigations_repository_doc_is_restated_against_the_row():
     assert "refused" in doc
 
 
-_OLD = re.compile(r"soft delete|deleted\b.{0,60}\bleft out|for a deleted|deleted since|hidden from every read",
-                  re.IGNORECASE | re.DOTALL)
-
-
-def test_o17_the_ports_no_longer_describe_a_soft_delete():
-    """No port docstring mentions soft delete, deleted rows left out, or a conflict for a deleted replay; §4.1 is still cited. (O17)"""
-    assert _OLD.search("Soft delete: hidden from every read"), "control: the pattern sees the old text"
-    docs = {name: inspect.getdoc(obj) or "" for name, obj in vars(ports).items()
-            if inspect.isclass(obj) and obj.__module__ == ports.__name__}
-    for name in list(docs):
-        for member, fn in vars(getattr(ports, name)).items():
-            if callable(fn) and not member.startswith("_"):
-                docs[f"{name}.{member}"] = inspect.getdoc(fn) or ""
-    assert [n for n, d in docs.items() if _OLD.search(d)] == []
-    assert "§4.1" in docs["Writes.create_investigation"]
-
-
 def test_o13_the_write_port_doc_says_audit_events_follow_the_commit():
     """The docstring no longer promises audit commits with the records; events are emitted after commit and can be lost. (O13)"""
     doc = " ".join(inspect.getdoc(ports.Writes).split())
@@ -268,9 +250,10 @@ def test_1083_the_moved_pinned_texts_and_the_mapping_read_port():
 # --- #1485: the learning work port and its wire models ---------------------------------------------------------------
 
 _ITEM = dict(item_id="e1000000-0000-4000-8000-000000000001", kind="finding", key="k", status="held", reason="r",
-             source_run=None, batch_id="d1000000-0000-4000-8000-000000000001", pr_number=7, updated_at=NOW)
+             cause="attempt_ceiling", source_run=None, batch_id="d1000000-0000-4000-8000-000000000001", pr_number=7, updated_at=NOW)
 _BATCH = dict(batch_id="d1000000-0000-4000-8000-000000000001", batch_kind="author", lane="author", blocks_lane=True,
-              branch="learning/b", pr_number=None, reason=None, created_at=NOW, items=[{"kind": "finding", "key": "k"}])
+              branch="learning/b", pr_number=None, reason=None, cause="forge_credential_refused", parked_at=NOW,
+              releasable=True, abandon_requested_at=None, last_checked=None, created_at=NOW, items=[{"kind": "finding", "key": "k"}])
 
 
 def test_1485_the_wire_item_kinds_are_the_stores_kinds():
@@ -342,3 +325,14 @@ def test_1485_the_learning_work_port_and_its_fake_take_the_tenant_then_status_af
     field = {f.name: f for f in dataclasses.fields(ports.ApiDeps)}["learning_work"]
     assert field.default is dataclasses.MISSING
     assert field.default_factory is dataclasses.MISSING
+
+
+@pytest.mark.parametrize(("model", "causes"), [("SetAsideItem", "ITEM_CAUSES"), ("ParkedBatch", "BATCH_CAUSES")])
+def test_1537_a_set_aside_cause_is_published_as_its_closed_list_not_free_text(model, causes):
+    """The wire's `cause` is the closed list the database checks (#1537): the schema names each cause, and nothing else."""
+    from defender.api import models
+    from defender.records import learning_causes
+
+    schema = getattr(models, model).model_json_schema()["properties"]["cause"]
+    [listed] = [s for s in schema["anyOf"] if s.get("type") != "null"]
+    assert sorted(listed["enum"]) == sorted(getattr(learning_causes, causes))

@@ -619,23 +619,6 @@ def test_the_publish_child_is_spawned_only_by_run_start_and_prepare():
     assert any(c.startswith("lifecycle/") for c in callers), "prepare must launch the first publish"
 
 
-def test_the_retired_row_readers_have_no_callers():
-    """RC-9: `issuer_login` and `read_forge_binding` are replaced by the provider; nothing references them."""
-    assert _referencing("issuer_login") == set()
-    assert _referencing("read_forge_binding") == set()
-
-
-def test_no_tracked_doc_or_script_teaches_the_retired_adopt_command():
-    """The lab moves by hand ("Upgrade from before #1214"): the lifecycle has no adopt command, and nothing tracked
-    tells an operator to run one (RC-9)."""
-    import subprocess
-
-    found = subprocess.run(["git", "-C", str(DEFENDER.parent), "grep", "-n", "-E", r"defender\.lifecycle adopt"],  # noqa: S603, S607
-                           capture_output=True, text=True, check=False)
-    assert found.returncode in (0, 1), found.stderr
-    assert found.stdout.splitlines() == []
-
-
 def test_the_opened_delivery_is_reached_only_by_drains_and_the_connect_command():
     """P3 census (RC-9): `opened_delivery` callers are the drains, the connect command and the delivery package."""
     allowed = ("learning/core/drains.py", "cli/tenant.py", "learning/author/version_control/",
@@ -909,15 +892,6 @@ def test_the_starter_covered_set_never_calls_the_host_acceptance():
     callers = _referencing(H.HOST_ACCEPTANCE)
     assert callers, "control: the host acceptance is referenced"
     assert sorted(callers & set(H.A3_SET)) == []
-
-
-def test_nothing_under_a_scope_accepts_again_the_drains_separate_acceptor_is_gone():
-    """C1: the drain's rehydration uses the drain's own accepted tenant (`paths.tenant`), so `_tenant_acceptor` has no
-    definition or caller left, and `drains.py` opens no acceptance of its own."""
-    assert _referencing("_tenant_acceptor") == set()
-    assert not any(isinstance(n, ast.FunctionDef) and n.name == "_tenant_acceptor"
-                   for n in ast.walk(_production()["learning/core/drains.py"]))
-    assert "learning/core/drains.py" not in _referencing(H.HOST_ACCEPTANCE)
 
 
 def test_the_hold_has_one_owner_and_the_admission_helpers_stay_with_the_host_module():

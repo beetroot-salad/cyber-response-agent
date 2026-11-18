@@ -116,6 +116,8 @@ def insert(dsn: str, table: str, **given: Any) -> None:
 def item(dsn: str, tenant: str, kind: str, key: str, status: str, **more: Any) -> None:
     tenant_col = _tenant_column(dsn, "work_items")
     key_col = next(c for c in _primary_key(dsn, "work_items") if c not in {tenant_col, "kind"})
+    if status in {"held", "dead", "skipped"}:  # #1537 PR1: an item set aside has a cause; which one is not these cases' business
+        more.setdefault("cause", "unrecorded")
     insert(dsn, "work_items", **{tenant_col: tenant, "kind": kind, key_col: key, "status": status}, **more)
 
 
@@ -124,6 +126,8 @@ def batch(dsn: str, tenant: str, lane: str, phase: str, *, kind: str = "author",
     given: dict[str, Any] = {_tenant_column(dsn, "batches"): tenant, "lane": lane, "kind": kind, "phase": phase}
     if phase == "ended":
         given["outcome"] = "abandoned"
+    if phase in {"needs_person", "ended"}:  # #1537 PR1: a parked or abandoned batch has a cause; which one is not these cases' business
+        given["cause"] = "unrecorded"
     if phase == "working":  # a working batch holds a lease
         given.update({c: v for c, v in {"lease_owner": "holder", "lease_expiry": "2030-01-01T00:00:00Z",
                                         "fencing_token": "1"}.items() if c in columns})

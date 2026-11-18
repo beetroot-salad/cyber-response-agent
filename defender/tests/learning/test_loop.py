@@ -80,6 +80,7 @@ def test_reply_document_text_strips_thinking_prelude():
 pytest.importorskip("pydantic_ai")
 
 from defender.tests.support.learning.core import _state1135 as S  # noqa: E402
+from defender.tests.support.learning.core._release1537 import item_row  # noqa: E402
 from defender.tests.support.learning.core._store1278 import call, migrated_database, world  # noqa: E402, F401 — fixtures
 from defender.tests.tenancy.tenant_1108_p4._drain_support import (  # noqa: E402
     BoxSpy, author_drain, critical_text, lead_author_drain, remote_branches)
@@ -183,6 +184,7 @@ def test_lead_author_drain_kills_a_request_whose_run_is_gone_and_serves_the_rest
     assert seen == [run_dir.resolve()]
     dead = _items(w)[("curation_request", gone.name)]
     assert (dead.status, dead.reason) == ("dead", "artifact-missing")
+    assert item_row(w.dsn, w.t.tenant_id, gone.name)["cause"] == "artifact_missing", "the live transition names its cause (1537 R4)"
 
 
 @pytest.mark.postgres

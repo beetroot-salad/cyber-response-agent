@@ -285,8 +285,17 @@ jobs:
         timeout-minutes: 5
         uses: ./.github/actions/install-gvisor
 
+      # The registry's CDN resets a connection now and then (`connection reset by peer` mid-layer), which failed
+      # the whole job before any test ran: retry the pull, bounded, so a persistent outage still fails here.
       - name: Pre-pull the box rootfs
-        run: docker pull python:3.11-slim
+        timeout-minutes: 5
+        run: |
+          for attempt in 1 2 3 4; do
+            docker pull python:3.11-slim && exit 0
+            echo "docker pull failed (attempt $attempt of 4)" >&2
+            sleep $((attempt * 5))
+          done
+          exit 1
 
       # Quoted: an unquoted YAML scalar treats " #" as a comment, which silently truncated
       # this name to "Run the" — and the #631 workflow gate reports steps BY name.
@@ -637,6 +646,11 @@ jobs:
       # Agent retries (#631): every production pydantic_ai Agent(...) passes retries=.
       - name: Agent retries fence (empty allow-list)
         run: defender/.venv/bin/python tooling/lint/lint_agent_retries.py
+
+      # Learning causes (#1537): one owner of the closed cause lists (records/learning_causes.py), and
+      # no bare Why(...) in product code, whose cause an untyped callee takes on trust. No baseline.
+      - name: Learning causes fence (empty allow-list)
+        run: defender/.venv/bin/python tooling/lint/lint_learning_causes.py
 
       # Run-ending precedence (#1465): only investigation/run_endings.py orders the endings a
       # run can take; no site reads a group with its own override list. No baseline.

@@ -29,10 +29,10 @@ def blocking(dsn: str):
     return open_blocking(dsn)
 
 
-def _outcome(name: str, *reason: str):
+def _outcome(name: str, *why: str):
     from defender.learning_store import Outcome
 
-    return getattr(Outcome, name)(*reason)
+    return getattr(Outcome, name)(*why)
 
 
 @pytest.fixture
@@ -50,8 +50,8 @@ def seen(migrated_database, data_root):  # noqa: F811 — the imported fixture
         store.publish_findings(BLUE, "run-1", [world_finding("q1")], kind="questioner_finding")
         store.publish_findings(GREEN, "run-2", [finding("g1")], kind="finding")
         claim = store.claim(BLUE, AUTHOR_LANE, owner="host-a", thresholds=ONE)
-        store.in_review(claim, 7, {("finding", "f1"): _outcome("waiting"), ("finding", "f2"): _outcome("held", SCRIPT),
-                                   ("finding", "f3"): _outcome("dead", "unkeyable")})
+        store.in_review(claim, 7, {("finding", "f1"): _outcome("waiting"), ("finding", "f2"): _outcome("held", "curator_held", SCRIPT),
+                                   ("finding", "f3"): _outcome("dead", "malformed_row", "unkeyable")})
         store.add_pitfall(BLUE, {"schema_version": 1, "pitfall_id": "p1", "source_run": "r", "system": "elastic",
                                  "query_id": "elastic.esql", "goal": "g", "executed_query": "x",
                                  "stderr_digest": "exit=1; d", "error_class": "agent-fixable"})
@@ -199,8 +199,8 @@ def test_o2_hostile_text_in_every_rendered_string_field_is_escaped_on_the_page(m
         store.publish_findings(BLUE, "run-1", [world_finding(fields["questioner id"])], kind="questioner_finding")
         store.enqueue_request(BLUE, fields["request run"], "case-1", {"case": "case-1"})
         claim = store.claim(BLUE, AUTHOR_LANE, owner="host-a", thresholds=ONE)
-        outcomes = {("finding", fields["held id"]): _outcome("held", fields["held reason"]),
-                    ("finding", fields["dead id"]): _outcome("dead", fields["dead reason"])}
+        outcomes = {("finding", fields["held id"]): _outcome("held", "curator_held", fields["held reason"]),
+                    ("finding", fields["dead id"]): _outcome("dead", "malformed_row", fields["dead reason"])}
         for key in (fields["finding id"], fields["in-batch id"], fields["waiting id"]):
             outcomes[("finding", key)] = _outcome("waiting")
         store.in_review(claim, 7, outcomes)

@@ -651,9 +651,9 @@ def blocking(dsn: str):
 
 
 def _skipped(reason: str):
-    from defender.learning_store import Outcome
+    from defender.tests.support.learning.core._release1537 import outcome_skipped
 
-    return Outcome.skipped(reason)
+    return outcome_skipped("curator_skipped", reason)
 
 
 @pytest.fixture

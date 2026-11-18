@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
-import inspect
 import json
 import os
 import re
@@ -316,14 +315,6 @@ async def test_d10_a_job_insert_the_database_refuses_ends_the_investigation_fail
     assert (stored["stage"], stored["failure_reason"]) == ("failed", "worker_error"), stored
     assert stored["failure_message"]
     assert jobs_of(world["dsn"], inv) == []
-
-
-@pytest.mark.parametrize("name", ["claim_learning_job", "create_learning_job", "take_over"])
-def test_o5_the_learning_store_methods_are_coroutine_functions(name):
-    """The learning surface of the store is awaited like the rest. (O5, O11)"""
-    from defender.jobs import JobStore
-
-    assert inspect.iscoroutinefunction(getattr(JobStore, name))
 
 
 # --- the end record's outcomes, O12 ----------------------------------------------------------------

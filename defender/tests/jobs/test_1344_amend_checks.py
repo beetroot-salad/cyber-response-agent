@@ -49,6 +49,17 @@ def _clock(dsn: str, tenant: str = T1) -> dict | None:
     return None if not rows else dict(zip(("idle", "held", "holder"), rows[0], strict=True))
 
 
+def _no_check_until_a_post_step_ends(dsn: str, tenant: str = T1) -> None:
+    """Park the tenant's clock an hour ahead, so no family-less check is due until a post-step ends and restarts it.
+
+    Queueing a job arms the clock at that moment, and the worker claims an overdue check before a queued job. With a
+    0.3 s interval, any pause between queueing and the worker's first claim (building the worker, a loaded runner)
+    made an empty check run first: it held the clock, so the job's own post-step was refused, or it took the place of
+    the check the test waits for. A post-step's end sets the clock to now, so the check the test is about still follows
+    it within the interval."""
+    execute(dsn, "UPDATE jobs.learning_checks SET checked_at = now() + interval '1 hour' WHERE tenant_id = %s", (tenant,))
+
+
 def _age(dsn: str, seconds: float, tenant: str = T1) -> None:
     """Move the tenant's clock `seconds` into the past, as that much time passing would."""
     execute(dsn, "UPDATE jobs.learning_checks SET checked_at = checked_at - make_interval(secs => %s) "
@@ -342,6 +353,7 @@ async def test_a3_a_post_step_that_leaves_nothing_waiting_stops_its_tenant_s_che
     follow = post_child(world)
     async with job_store(dsn) as store:
         job = await queued_job(world, store, ticket="J-1")
+        _no_check_until_a_post_step_ends(dsn)
         worker = learning_worker(world, store, job=job_child(world, files={END: learning_end("completed", findings=1)}),
                                  post=_either(follow, check), learning_check_interval=0.3, **_FAST)
         serving = asyncio.create_task(worker.serve())
@@ -363,6 +375,7 @@ async def test_a3_a_post_step_that_leaves_work_waiting_keeps_its_tenant_s_checks
     check = CheckChild(world["tmp"] / "check", world["runs"], dsn=dsn)
     async with job_store(dsn) as store:
         await queued_job(world, store, ticket="J-1")
+        _no_check_until_a_post_step_ends(dsn)
         worker = learning_worker(world, store, job=job_child(world, files={END: learning_end("completed", findings=1)}),
                                  post=_either(post_child(world), check), learning_check_interval=0.3, **_FAST)
         serving = asyncio.create_task(worker.serve())

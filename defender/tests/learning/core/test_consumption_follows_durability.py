@@ -34,7 +34,7 @@ from defender import _git
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
 from defender.learning.leads import lead_author, pitfalls_curator
 from defender.learning.leads.lead_extraction import ExecutedLead
-from defender.learning_store import Outcome
+from defender.tests.support.learning.core._release1537 import outcome_skipped
 from defender.tests.support.learning.core import _state1135
 from defender.tests.support.learning.core._declared870 import (
     REDUCER_REL,
@@ -267,4 +267,4 @@ def test_952_m4_run_pitfalls_hands_its_partition_to_on_curated_and_decides_only_
         "the reducer offer was never made, so the held arm is vacuous"
     assert captured == [pitfalls_curator.PitfallsDisposition(committed_ids=("c:l-000:0",), sha=sha, held_ids=("h:l-003:0",))]
     assert set(outcomes) == {("pitfall", "u:l-001:0")}, f"the claim's committed or held rows were decided early: {outcomes}"
-    assert outcomes[("pitfall", "u:l-001:0")] == Outcome.skipped("undeclared-system:newsys")
+    assert outcomes[("pitfall", "u:l-001:0")] == outcome_skipped("unteachable_system", "undeclared-system:newsys")

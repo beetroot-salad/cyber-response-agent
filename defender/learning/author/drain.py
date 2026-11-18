@@ -95,13 +95,13 @@ def _gate_outcome(rec: dict) -> Any:
     from defender.learning_store import Outcome
 
     if "held_reason" in rec:
-        return Outcome.held(str(rec["held_reason"]))
+        return Outcome.held("curator_held", str(rec["held_reason"]))
     category = str(rec.get("consumed_category") or "")
     if category == "consumed_idempotent":
         return Outcome.published()
     if category == "consumed_no_systems":
-        return Outcome.skipped("consumed_no_systems: the world finding names no systems")
-    return Outcome.skipped(category or "declined at the gate")
+        return Outcome.skipped("consumed_no_systems", "consumed_no_systems: the world finding names no systems")
+    return Outcome.skipped("declined_at_gate", category or "declined at the gate")
 
 
 def _keyed(
@@ -117,7 +117,7 @@ def _keyed(
         row = dict(payload)
         rid = _row_id(row, key)
         if rid is None or rid in item_of:
-            outcomes[(kind, item_key)] = Outcome.dead(f"row carries no value under {key!r}")
+            outcomes[(kind, item_key)] = Outcome.dead("malformed_row", f"row carries no value under {key!r}")
             continue
         keyed.append(row)
         item_of[rid] = (kind, item_key)
@@ -207,10 +207,10 @@ def _record_fates(
     for rows in outcome.bucket_consumed.values():
         for rec in rows:
             outcomes[item_of[rec[key]]] = Outcome.skipped(
-                str(rec.get("skip_reason") or rec.get("consumed_category")))
+                "curator_skipped", str(rec.get("skip_reason") or rec.get("consumed_category")))
     for rows in outcome.bucket_held.values():
         for rec in rows:
-            outcomes[item_of[rec[key]]] = Outcome.held(str(rec.get("held_reason") or "held by the curator"))
+            outcomes[item_of[rec[key]]] = Outcome.held("curator_held", str(rec.get("held_reason") or "held by the curator"))
 
 
 # ---------------------------------------------------------------------------

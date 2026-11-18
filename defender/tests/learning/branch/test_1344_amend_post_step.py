@@ -217,7 +217,9 @@ def _lane_batch(dsn: str, tenant: str, lane: str, phase: str) -> None:
     if phase in ("in_review", "needs_person"):
         call(dsn, "in_review", claim, 7, {})
     if phase == "needs_person":
-        call(dsn, "needs_person", tenant, claim.batch_id, "a person is needed")
+        from defender.tests.support.learning.core._release1537 import why
+
+        call(dsn, "needs_person", tenant, claim.batch_id, why("foreign_pr", "a person is needed"))
     if lane == "feedback":
         call(dsn, "end_feedback_tick", held)
 
