@@ -424,7 +424,7 @@ def test_1540_f4_the_landing_page_shows_the_same_signed_out_or_in_and_makes_no_a
     assert link.evaluate("e => e.tagName") == "A"
     assert link.get_attribute("href") == "/home"
     assert (link.text_content() or "").strip() == "Sign in"
-    assert "Defender" in (page.locator(f'[data-screen="{ROOT}"]').first.text_content() or ""), "the product name"
+    assert "Sluice" in (page.locator(f'[data-screen="{ROOT}"]').first.text_content() or ""), "the product name"
     assert signed_in(context) == (phase == "signed-in")
     assert [r.url for r in requests[mark:] if not r.url.startswith(world.origin)] == [], "no third-party origin (F1)"
 
