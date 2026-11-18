@@ -432,7 +432,13 @@ async def test_b2_a_failed_cost_read_keeps_the_last_good_figure_mid_run_and_writ
 
     final = row(dsn, inv)
     assert final["cost_usd"] is None, "an unreadable final cost was written as a figure"
-    assert final["stage"] == {"finish": "completed", "cancel": "aborted", "stop": "running"}[end]
+    # CONFLICT-UPDATED (#1534; was: finish ends `completed`): the record is read through the same pointer, so a finish over
+    # an unreadable one is `unparseable` with that kind's words (V-READERS, worker row).
+    assert final["stage"] == {"finish": "unparseable", "cancel": "aborted", "stop": "running"}[end]
+    if end == "finish":
+        from defender.records import closing as C
+
+        assert C.FAULT_WORDING["pointer-unreadable"] in (final["failure_message"] or ""), final["failure_message"]
 
 
 async def test_b2_a_cost_read_that_hangs_never_delays_the_lease_renewal(world):
@@ -1178,11 +1184,12 @@ async def test_b3_b11_a_stop_or_fence_between_the_claim_and_the_childs_existence
 
 
 def _stopped_endings() -> dict[str, str]:
-    """One case of `CASES` per ending the reader can give (stage, reason, disposition), and an unparseable one whose fault is in reading the report and a failed one that read its knowledge."""
+    """One case of `CASES` per ending the reader can give (stage, reason, disposition), an unparseable one whose fault is in
+    reading the record, and a failed one that read its knowledge."""
     first: dict[tuple, str] = {}
     for name, plan in CASES.items():
         first.setdefault(tuple(plan["expect"]), name)
-    return {name: name for name in [*first.values(), "4-report-not-utf8", "5-tree-not-verified"]}
+    return {name: name for name in [*first.values(), "4-record-unreadable", "5-tree-not-verified"]}
 
 
 @pytest.mark.parametrize("case", list(_stopped_endings()))
@@ -1195,6 +1202,7 @@ async def test_b11_a_stopped_childs_row_is_finished_when_the_reader_says_complet
         control = await _queued(store, ticket="T-1", key="k1")
         await _worker(world, store, alone, **_FAST).drain()
         ended = row(dsn, control)
+        assert (ended["stage"], ended["failure_reason"], ended["disposition"]) == plan["expect"], "premise: the run alone ended otherwise"
         assert ended["cost_usd"] == pytest.approx(SONNET_IN), "premise: the run alone read no cost"
         if "{id}.knowledge-source.json" in plan["spec"].get("files", {}):
             assert ended["knowledge"] is not None, "premise: the run alone read no knowledge"

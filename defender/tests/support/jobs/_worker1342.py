@@ -281,6 +281,8 @@ CASES = {
                                        expect=("unparseable", None, None)),
     "4-report-only": _spec(files=_committed(**{CLOSING_KEY: None, "{id}/report.md": GOOD}),
                            expect=("unparseable", None, None)),
+    "4-record-unreadable": _spec(files=_committed(**{CLOSING_KEY: closing(fault="row-invalid")}),
+                                 expect=("unparseable", None, None)),  # a fault in reading the record (V-READERS, worker)
     # rule 4 after an abnormal child end whose facts are both true (r5 C2: the driver raised after a clean close)
     "4-completed-when-the-child-died-after-both-facts": _spec(files=_committed(), exit=1,
                                                               expect=("completed", None, "inconclusive")),
