@@ -14,7 +14,7 @@ import httpx
 import pytest
 
 from defender.tests.support.api._server1083 import A
-from defender.tests.tenancy.tenant_1108_p4.test_dev_compose import COMPOSE_DIR, mounted_theme_sources
+from defender.tests.tenancy.tenant_1108_p4.test_dev_compose import theme_looks
 from defender.tests.support.frontend._ingress1161 import ARTIFACT_DOMAIN, REPO, ingress, launcher_env
 
 UUID = "3400a0c8-beda-4fe6-86fb-3c6da1ea4a11"
@@ -120,11 +120,11 @@ def test_1540_f1_the_built_landing_page_loads_from_the_apps_own_origin_with_noth
     assert loaded, "positive control: the illustration is an image request to the app's origin"
 
 
-def test_1540_pr5_the_landing_pages_illustration_is_the_file_the_theme_gets_mounted(world, context, requests):
-    """The landing page's illustration, as the ingress serves it, is byte for byte one of the files the dev compose mounts
-    into the Keycloak theme: one file, the app's and the theme's. (PR5, F1: asset inlining is off)"""
-    mounted = {path: path.read_bytes() for path in mounted_theme_sources(COMPOSE_DIR)}
-    assert mounted, "positive control: the compose file mounts sources into the theme"
+def test_1540_pr5_the_landing_pages_illustration_is_the_themes_own_file(world, context, requests):
+    """The landing page's illustration, as the ingress serves it, is byte for byte one of the files the Keycloak theme's
+    stylesheet uses: one file, the app's and the theme's. (PR5, F1: asset inlining is off)"""
+    looks = {path: path.read_bytes() for path in theme_looks()}
+    assert looks, "positive control: the theme's stylesheet uses files of the theme"
     page = context.new_page()
     page.goto(f"{world.origin}/")
     page.locator('[data-screen="root"]').first.wait_for()
@@ -132,9 +132,9 @@ def test_1540_pr5_the_landing_pages_illustration_is_the_file_the_theme_gets_moun
     served = [r.response().body() for r in requests
               if r.resource_type == "image" and urllib.parse.urlsplit(r.url).path != "/favicon.ico" and r.response()]
     assert served, "positive control: the landing page requested an image"
-    assert any(body in mounted.values() for body in served), (
-        f"no image the landing page loads equals a mounted source: {[len(b) for b in served]} bytes against "
-        f"{ {p.name: len(b) for p, b in mounted.items()} }")
+    assert any(body in looks.values() for body in served), (
+        f"no image the landing page loads equals a file of the theme: {[len(b) for b in served]} bytes against "
+        f"{ {p.name: len(b) for p, b in looks.items()} }")
 
 
 def _header_set(r: httpx.Response) -> list[tuple[str, str]]:

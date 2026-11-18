@@ -167,9 +167,8 @@ enough to list, read and cancel):
    parity path. Keycloak's sign-in screens wear the product's look through the `defender` login theme, which the dev compose
    mounts; Keycloak imports the realm on first start only, so a dev stack started before the theme needs Keycloak's
    data recreated (`docker compose down -v`, which also wipes the dev PostgreSQL where Keycloak keeps it) or the realm's login
-   theme set to `defender` in the admin console. A production Keycloak needs the theme folder (`defender/frontend/keycloak-theme/`)
-   and the two files the compose mounts into it (`look/illustration.svg`, `look/tokens.css`) placed in its themes directory,
-   and the realm's `loginTheme` set to `defender`.
+   theme set to `defender` in the admin console. A production Keycloak needs the theme folder (`defender/frontend/keycloak-theme/`, complete as it is: the
+   product's look lives in it) placed in its themes directory, and the realm's `loginTheme` set to `defender`.
 2. Administrator: set the password from Mailpit and sign in (a one-time code is needed: expect to enrol an
    authenticator app on a refused first sign-in, then sign in again). Create a tenant, check
    `GET /api/admin/tenants/<id>` until `active` (on a failed step read the lifecycle log, fix, `resume`), invite its first member.

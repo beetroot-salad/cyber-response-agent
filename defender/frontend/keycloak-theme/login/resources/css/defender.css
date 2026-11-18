@@ -1,5 +1,5 @@
-/* The product's look over Keycloak 26.4's PatternFly v5 markup. `tokens.css` and `../img/illustration.svg` are single
-   files of defender/frontend/look/, mounted into this theme by the dev compose (PR5): there is no copy here. */
+/* The product's look over Keycloak 26.4's PatternFly v5 markup. `tokens.css` and `../img/illustration.svg` live here,
+   in the theme, and the app imports these same files (PR5): there is one copy, and this folder alone is the theme. */
 @import "tokens.css";
 
 body,
