@@ -38,7 +38,7 @@ ESCALATION_COMMENT_BODY = (
 
 class NeverClosed(CaseTicketError):
     """The run has no closing record (`closing.NeverClosed`): the not-recorded branch, never a
-    mapping or template defect."""
+    mapping defect."""
 
 
 class RecordUnreadable(CaseTicketError):
@@ -111,7 +111,7 @@ def posted_comment(body: str, *, run_id: str) -> str:
 
 
 def never_closed_comment_body() -> str:
-    """The not-recorded branch's comment: a fixed host sentence in place of a rendered narrative."""
+    """The not-recorded branch's comment: a fixed host sentence in place of the disposition word."""
     return NEVER_CLOSED_COMMENT_BODY
 
 
