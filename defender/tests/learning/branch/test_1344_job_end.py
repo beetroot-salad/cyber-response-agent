@@ -565,6 +565,33 @@ def test_knowledge_the_tenant_cannot_pin_ends_failed_launch_refused(tmp_path):
     assert (ran.questioner.calls, ran.spawn.launches) == (0, [])
 
 
+_UNLOOKABLE = ["recorded-before-1534", "pointer-unreadable"]
+
+
+@pytest.mark.parametrize("fault", _UNLOOKABLE)
+def test_1534_a_source_whose_closing_record_cannot_be_looked_at_ends_failed_launch_refused(tmp_path, fault):
+    """A source recorded before #1534 (or with an unreadable pointer) refuses the job before any spend. (OD6, V-LOOK, owner decision d)"""
+    ran = run_entry(tmp_path, source_closing={"disposition": "benign"}, source_fault=fault)
+    _failed_with(ran, "failed", "launch_refused")
+    assert (ran.questioner.calls, ran.spawn.launches) == (0, [])
+
+
+def test_1534_a_source_with_a_readable_closing_record_completes_the_job(tmp_path):
+    """The positive control of the refusals above: the same source, record planted and nothing broken. (V-LOOK)"""
+    _ended(run_entry(tmp_path, source_closing={"disposition": "benign"}), "completed", None)
+
+
+@pytest.mark.parametrize("fault", _UNLOOKABLE)
+def test_1534_the_refused_jobs_message_carries_the_kinds_wording_and_no_path(tmp_path, fault):
+    """The end record's message is the kind's fixed wording, never the lookup's detail (a path). (V-LOOK, OD19)"""
+    from defender.records import closing as C
+
+    message = _failed_with(run_entry(tmp_path, source_closing={"disposition": "benign"}, source_fault=fault),
+                           "failed", "launch_refused")
+    assert C.FAULT_WORDING[fault] in message, message
+    assert str(tmp_path) not in message, "the fault's detail (a path) reached the job's message"
+
+
 @pytest.mark.parametrize("knowledge", [T.NO_KNOWLEDGE_KEY, "unversioned"], ids=["not recorded", "unversioned"])
 def test_knowledge_no_commit_proves_ends_failed_launch_refused(tmp_path, knowledge):
     """A source whose stamp records no knowledge commit, or says unversioned: refused before any spend. (r5 table)"""

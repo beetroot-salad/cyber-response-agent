@@ -108,16 +108,18 @@ def _unexpected_sigterm(_signum, _frame):
 def run_entry(  # noqa: PLR0913 — one keyword per seam a scenario may replace
         tmp_path, *, candidates=None, spawn=None, judge=None, questioner=None, live_tree=None,
         oracle=None, fix_source=None, job=JOB, grade=None, preflight=None, after_source=None,
-        estate=None, calls=None, **extra) -> Ran:
+        estate=None, calls=None, source_closing=None, source_fault=None, **extra) -> Ran:
     """The job entry in-process over `_spec1224`'s fixture tenant (or `estate`, made at `tmp_path`), the source run
     holding `calls` (default: `_calls()`); every paid seam a recording double. `extra` seams (the launcher's
-    `proxy_url`, `issuer_transport`, `directory`, ...) are handed as given, over the defaults."""
+    `proxy_url`, `issuer_transport`, `directory`, ...) are handed as given, over the defaults. `source_closing` and
+    `source_fault` plant the source's closing record and a fault on its lookup (`_triplet_947.runs_base`, #1534)."""
     from defender.tests.support.jobs._socket_standin1170 import SocketStandIn, handed_records
     from defender.tests.support.jobs._socket_standin1170 import materialise as materialise_export
     from defender.tests.support.jobs._socket_standin1170 import passes as helper_passes
 
     est = estate(tmp_path) if estate is not None else S.estate(tmp_path)
-    _base, src = S.source_run(tmp_path, est, calls=_calls() if calls is None else calls, after_source=after_source)
+    _base, src = S.source_run(tmp_path, est, calls=_calls() if calls is None else calls, after_source=after_source,
+                              source_closing=source_closing, source_fault=source_fault)
     if fix_source is not None:
         fix_source(src)
     tenant = src.parent.parent.name
