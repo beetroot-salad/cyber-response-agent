@@ -123,7 +123,7 @@ def list_tickets(
     """Tickets, filterable.
 
     `require_closed` pins status=closed regardless of `status`, so a duplicate `--status open`
-    cannot widen the offline benign judge's scoped list to the in-flight ticket. It is
+    cannot widen the learning judge's scoped list to the in-flight ticket. It is
     `wrapper_only`: the judge's tool hard-codes it off the model-facing schema. Gather must not
     set it, or it would drop the open siblings it is meant to correlate.
     """
