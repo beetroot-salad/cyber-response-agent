@@ -85,6 +85,17 @@ def _settle(w, writer, batch_id, number=None) -> None:
             assert row(w.dsn, batch_id)["phase"] == "needs_person", "the batch ended while its PR was open"
 
 
+def _forget_pr(w, number) -> None:
+    """The forge no longer has PR `number` (its listing leaves it out)."""
+    from defender.tests.tenancy.tenant_1108_delivery._support import _save_pulls
+
+    kept = [p for p in w.t.forge.prs if p["number"] != number]
+    if w.t.forge.remote is None:
+        w.t.forge._rows[:] = kept
+    else:
+        _save_pulls(w.t.forge.remote, kept)
+
+
 def _lane_free(w) -> bool:
     return not call(w.dsn, "lane_work", w.t.tenant_id, "author", thresholds={"finding": 1}).busy
 
@@ -437,6 +448,47 @@ def test_o3_an_abandon_settled_on_the_tick_s_own_lane_holds_back_its_claim_for_o
     assert len(writer.served) == served, "the pass that ended the batch also claimed over what it gave back"
     tick(w, writer)
     assert len(writer.served) == served + 1, "the next pass did not claim the waiting work"
+
+
+def test_o3_a_pr_still_open_after_its_close_is_not_settled_and_the_close_is_made_again_next_pass(scene, caplog):
+    """The forge accepts the close but the PR reads open again: an open PR the loop may close is no final answer, so the
+    batch is not ended with it open (nothing would close it later); the request waits, and the next pass closes and settles.
+    (O3, #1558 review)"""
+    import httpx
+
+    w = scene
+    batch_id, _branch, number, writer = _parked_in_review(w, caplog, "f1")
+    w.t.forge.respond = lambda request: httpx.Response(201, json={}) if request.method == "PATCH" else None
+    _request(w, batch_id)
+    tick(w, writer)
+    assert [p["state"] for p in w.t.forge.prs if p["number"] == number] == ["open"], "premise: the close did not take"
+    got = row(w.dsn, batch_id)
+    assert (got["phase"], got["abandon_requested_at"] is not None) == ("needs_person", True), "settled with its PR open"
+    w.t.forge.respond = None
+    tick(w, writer)
+    assert [p["state"] for p in w.t.forge.prs if p["number"] == number] == ["closed"]
+    assert (row(w.dsn, batch_id)["phase"], row(w.dsn, batch_id)["outcome"]) == ("ended", "abandoned")
+
+
+@pytest.mark.parametrize("listed", [True, False], ids=["the_repository_reads", "the_listing_fails_too"])
+def test_o3_a_recorded_pr_the_forge_answers_404_for_is_no_pr_only_when_the_repository_reads(scene, caplog, listed):
+    """The recorded PR answers 404. Forgejo answers 404 too for a repository the token cannot see, so a 404 alone is no
+    answer: when the same pass lists the repository's PRs and the PR is not among them, the batch settles abandoned with no
+    PR; when the listing fails as well, the request waits. (O3, #1558 review)"""
+    w = scene
+    batch_id, _branch, number, writer = _parked_in_review(w, caplog, "f1")
+    w.t.forge.refuse(f"/pulls/{number}", 404, method="GET")
+    _forget_pr(w, number)
+    if not listed:
+        w.t.forge.refuse("/pulls", 404, method="GET")
+    _request(w, batch_id)
+    tick(w, writer)
+    got = row(w.dsn, batch_id)
+    if listed:
+        assert (got["phase"], got["outcome"]) == ("ended", "abandoned"), "a PR the listing shows gone left the request waiting"
+        assert w.statuses() == {"f1": "held"}
+    else:
+        assert got["phase"] == "needs_person", "a 404 with the repository unreadable settled the batch"
 
 
 def test_o3_a_pr_merged_in_the_gap_after_the_close_is_settled_merged_never_abandoned(scene, caplog):

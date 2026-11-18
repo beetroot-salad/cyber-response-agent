@@ -678,14 +678,22 @@ class Tick:
             if number is None:
                 found = find_pr(forge, b.branch, record.commits_of(str(b.id)))
                 number = int(found.number) if found is not None else None
-            pr = forge.pull_request(number) if number is not None else None
-            if number is not None and pr is not None and pr.status == "open" and b.kind != "registry":
+            pr = self._recorded_pr(forge, number) if number is not None else None
+            closable = b.kind != "registry"
+            if number is not None and pr is not None and pr.status == "open" and closable:
                 forge.close_pr(number)
                 _logger.info(f"{self.label}: batch {b.id} is abandoned by a person's request: closed its PR #{number}")
                 pr = forge.pull_request(number)
         except _forge_faults() as fault:
             _logger.warning(f"{self.label}: the abandon requested for batch {b.id} waits "
                             f"({one_line(str(fault))})")
+            self._waits(b)
+            return False
+        if pr is not None and pr.status == "open" and closable:
+            # The forge took the close but the PR reads open: no final answer. Ending the batch now would leave an open PR
+            # nothing tracks; the request waits and the next pass closes it again.
+            _logger.warning(f"{self.label}: batch {b.id}'s PR #{number} still reads open after its close: the abandon "
+                            "requested waits")
             self._waits(b)
             return False
         published: list[tuple[str, str]] = []
@@ -700,6 +708,21 @@ class Tick:
         _logger.info(f"{self.label}: batch {b.id}'s requested abandon is settled "
                      f"({'no PR' if pr is None else f'PR #{number} {pr.status}'})")
         return bool(settled)
+
+    @staticmethod
+    def _recorded_pr(forge: Any, number: int) -> Any | None:
+        """The batch's recorded PR, or `None` when the forge no longer has it. Forgejo answers 404 as well for a repository
+        the token cannot see, so a 404 is believed only when the repository's own PR listing reads and leaves it out; any
+        other fault, or a listing that fails, propagates and the request waits."""
+        try:
+            return forge.pull_request(number)
+        except _forge_faults() as fault:
+            if http_status(fault) != 404:
+                raise
+            listed = [pr for pr in forge.pull_requests() if pr.number == number]
+            if listed:
+                raise
+            return None
 
     # -- crash recovery (O1, O5, R2-1) ----------------------------------------------------------------------
 
