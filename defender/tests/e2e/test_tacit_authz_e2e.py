@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import datetime as dt
 import json
-import re
 from dataclasses import replace
 from pathlib import Path
 
@@ -19,6 +18,8 @@ from defender.tests.e2e._replay_harness import (
     ReplayFn,
     Turn,
     VerbRecorder,
+    committed_disposition,
+    committed_record,
     drive,
     materialize,
 )
@@ -138,11 +139,8 @@ def _investigation(run_dir: Path, replay: ReplayFn) -> str:
 
 
 def _committed_disposition(run_dir: Path) -> str | None:
-    report = run_dir / "report.md"
-    if not report.is_file():
-        return None
-    m = re.search(r"^disposition:\s*(\S+)", report.read_text(encoding="utf-8"), re.M)
-    return m.group(1) if m else None
+    """The disposition of the run's closing record, or None when the close never committed."""
+    return committed_disposition(run_dir)
 
 
 def _feedback(replay: ReplayFn) -> str:
@@ -227,26 +225,25 @@ def test_a_citation_the_lookup_never_returned_does_not_close_benign(tmp_path):
     )
 
 
-def test_runtime_evidence_lands_in_a_benign_report_body(tmp_path):
+def test_runtime_evidence_lands_in_a_benign_closing_record(tmp_path):
+    """The baseline consultation reaches the committed record's `runtime_evidence` once, window and result with it."""
+    from defender.records import closing as C
+
     doc = scene.benign_document(rows=scene.authorized_rows(baseline=True))
     run_dir, replay = _run(tmp_path, doc, "benign", run_id="tacit-benign-body")
 
     _investigation(run_dir, replay)
-    assert (run_dir / "report.md").is_file(), f"the close was refused:\n{_feedback(replay)[-2000:]}"
-    report = (run_dir / "report.md").read_text(encoding="utf-8")
-    head, _, body = report.partition("---\n")[2].partition("---\n")
-    assert "runtime-evidence" in body, (
-        "the baseline consultation did not reach the committed report's body"
-    )
-    assert scene.WINDOW_BEFORE_ALERT in body, "the window did not travel with it"
-    assert "1500 occurrences over 30d" in body, "the occurrence count did not travel with it"
-    assert "runtime-evidence" not in head, (
-        "the baseline reached the FRONTMATTER, which is capped at 512 bytes and gates things"
-    )
-    assert body.count("tk-baseline-30d") == 1
-    assert scene.ENTRY_ID not in body, (
-        "the lead's `tacit-knowledge` lookup record rode out with the baseline"
-    )
+    record = committed_record(run_dir)
+    assert record is not None, f"the close was refused:\n{_feedback(replay)[-2000:]}"
+    assert record.disposition == "benign", f"premise: the close committed benign:\n{_feedback(replay)[-2000:]}"
+    [entry] = record.runtime_evidence
+    assert entry.anchor_id == "tk-baseline-30d", "the baseline consultation did not reach the committed record"
+    assert (entry.window_start, entry.window_end) == tuple(scene.WINDOW_BEFORE_ALERT.split("/")), (
+        "the window did not travel with it")
+    assert "1500 occurrences over 30d" in entry.result, "the occurrence count did not travel with it"
+    assert scene.ENTRY_ID not in C.baseline_line(entry), "the lead's `tacit-knowledge` lookup record rode out with the baseline"
+    assert all(e.anchor_id != scene.ENTRY_ID for e in record.runtime_evidence), (
+        "the lead's `tacit-knowledge` lookup record became a baseline entry")
 
 
 # ---------------------------------------------------------------- the three fakes
