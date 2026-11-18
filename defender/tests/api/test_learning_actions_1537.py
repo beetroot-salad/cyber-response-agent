@@ -294,7 +294,7 @@ def test_o3_an_abandon_is_202_recorded_with_who_and_when_and_decides_nothing_els
     [wire] = _listed(s.ann, T1, "parked-batches")
     assert wire["batch_id"] == batch
     assert instant(wire["abandon_requested_at"]) == row["abandon_requested_at"]
-    assert wire["releasable"] is False
+    assert wire["releasable"] is True, "a pending request leaves the batch releasable: a release withdraws it"
     assert wire["last_checked"] is None
 
 
@@ -504,7 +504,7 @@ def test_o6_a_prior_detail_with_any_line_break_or_control_character_arrives_as_o
 
 
 def test_o6_a_refused_action_announces_nothing_and_a_successful_one_beside_it_does(s):
-    """409 (not held, wrong cause, pending request), 404 and 403 announce no event; a success on a real row does. (O6)"""
+    """409 (not held, wrong cause, a second request), 404 and 403 announce no event; a success on a real row does. (O6)"""
     dsn = s.world.dsn
     item = held_item(dsn, T1, "h1")
     batch = on_store(dsn, in_review, T1, "f1")
@@ -523,6 +523,7 @@ def test_o6_a_refused_action_announces_nothing_and_a_successful_one_beside_it_do
     mark_after_success = len(s.world.audit.events)
     assert mark_after_success == mark + 1, "premise: the one success announced"
     assert _abandon(s.ann, T1, batch).status_code == 409
+    set_batch(dsn, batch, cause="forge_refused")
     assert _release_batch(s.ann, T1, batch).status_code == 409
     assert _release_item(s.ann, T1, item).status_code == 200
     assert _release_item(s.ann, T1, item).status_code == 409
