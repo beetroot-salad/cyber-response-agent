@@ -3,11 +3,12 @@
 // into one React root under the load's provider.
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { route } from "../router";
+import { route, type Route } from "../router";
 import * as attempt from "./attempt";
 import { ErrorBoundary, ErrorScreen, type ErrorKind } from "./errors";
-import { makeLoad, type Effects, type Load } from "./load";
-import { ShellProvider, type Actions, type Query } from "./provider";
+import { makeLoad, type Effects, type Load, type MeResult } from "./load";
+import { ShellProvider, type AddressQuery, type Shell } from "./provider";
+import type { CallbackReason, Person } from "./types";
 
 const effects: Effects = {
   // The session cookie alone: same-origin, no Authorization header.
@@ -17,12 +18,15 @@ const effects: Effects = {
   replace: (url) => window.location.replace(url),
 };
 
+/** The API's refusal of the return address itself: the failed screen must not offer that address again. */
+const REFUSED_RETURN: CallbackReason = "bad-request";
+
 function reachedByHistory(): boolean {
   const entry = performance.getEntriesByType("navigation")[0];
   return entry instanceof PerformanceNavigationTiming && entry.type === "back_forward";
 }
 
-function queryOf(search: string): Query {
+function parseQuery(search: string): AddressQuery {
   const params = new URLSearchParams(search);
   return { get: (name) => params.get(name), getAll: (name) => params.getAll(name) };
 }
@@ -31,7 +35,7 @@ function queryOf(search: string): Query {
  * address has a return already or the target was the one refused. */
 function settleReturn(taken: attempt.Read): void {
   const params = new URLSearchParams(window.location.search);
-  if (params.has("return") || params.get("reason") === "bad-request") return;
+  if (params.has("return") || params.get("reason") === REFUSED_RETURN) return;
   if (taken.status !== "found" || taken.target === null) return;
   params.set("return", taken.target);
   const state: unknown = window.history.state; // kept as it is: this only changes the address
@@ -75,8 +79,37 @@ export function start(): void {
   let sequence = 0;
 
   function showError(load: Load, kind: ErrorKind): void {
-    if (load !== current || load.isGone()) return;
+    if (load !== current || !load.mayShow()) return;
     root.render(<ErrorScreen kind={kind} />);
+  }
+
+  /** The person the screen is drawn for: asked of `/api/me` when the screen needs a session, else none. */
+  async function sessionFor(load: Load, routed: Route): Promise<{ readonly kind: "ok"; readonly me: Person | null } | Exclude<MeResult, { readonly kind: "ok" }>> {
+    if (!routed.needsSession) return { kind: "ok", me: null };
+    const asked = await load.client.me();
+    return load === current ? asked : { kind: "gone" };
+  }
+
+  /** What the screen's hooks read, for this load. */
+  function shellFor(load: Load, routed: Route, me: Person | null): Shell {
+    const query = parseQuery(window.location.search);
+    return {
+      read: load.client.read,
+      queryClient: load.queryClient,
+      me,
+      pathname: window.location.pathname,
+      shape: routed.shape,
+      query,
+      actions: {
+        retry: () => load.signIn(query.getAll("return")),
+        signOut: () => {
+          load.client.signOut().then(
+            (result) => (result.kind === "error" ? showError(load, "unreachable") : undefined),
+            () => showError(load, "broken"),
+          );
+        },
+      },
+    };
   }
 
   async function begin(byHistory: boolean): Promise<void> {
@@ -88,27 +121,13 @@ export function start(): void {
     current = load;
     try {
       if (routed.shape === "sign-in-failed") settleReturn(taken);
-      let me = null;
-      if (routed.needsSession) {
-        const asked = await load.client.me();
-        if (asked.kind === "gone" || load !== current) return;
-        if (asked.kind === "error") return showError(load, "unreachable");
-        me = asked.me;
-      }
-      const actions: Actions = {
-        retry: () => load.signIn(new URLSearchParams(window.location.search).getAll("return")),
-        signOut: () => {
-          load.client.signOut().then(
-            (result) => (result === "error" ? showError(load, "unreachable") : undefined),
-            () => showError(load, "broken"),
-          );
-        },
-      };
-      const shell = { read: load.client.read, queryClient: load.queryClient, me, pathname: window.location.pathname, shape: routed.shape, query: queryOf(window.location.search), actions };
+      const session = await sessionFor(load, routed);
+      if (session.kind === "gone") return;
+      if (session.kind === "error") return showError(load, "unreachable");
       const Screen = routed.Screen;
       root.render(
         <StrictMode>
-          <ShellProvider key={sequence} shell={shell}>
+          <ShellProvider key={sequence} shell={shellFor(load, routed, session.me)}>
             <ErrorBoundary load={load}>
               <Screen />
             </ErrorBoundary>
@@ -120,9 +139,9 @@ export function start(): void {
     }
   }
 
-  // An uncaught error or unhandled rejection the app's own code raised is the error state, except while the load is
-  // leaving. One the app's code did not raise (the browser's own reports, an extension's script, an injected script)
-  // leaves the screen as it is: it says nothing about the app.
+  // An uncaught error or unhandled rejection the app's own code raised is the error state, unless the load may no
+  // longer show anything. One the app's code did not raise (the browser's own reports, an extension's script, an
+  // injected script) leaves the screen as it is: it says nothing about the app.
   const stray = (event: Event): void => {
     if (current !== null && raisedByApp(event)) showError(current, "broken");
   };

@@ -1,41 +1,36 @@
 // The minimal investigation screen (B7): the status and outcome of the investigation read, as their raw codes.
-import { usePlaceholders, useRead } from "../shell/provider";
+import type { ReactNode } from "react";
+import { usePlaceholders, useRead, type ScreenRead } from "../shell/provider";
+
+const READ = "/api/tenants/{tenant_id}/investigations/{investigation_id}";
 
 export function Investigation() {
   const [tenant_id, investigation_id] = usePlaceholders("investigation");
-  const result = useRead("/api/tenants/{tenant_id}/investigations/{investigation_id}", { path: { tenant_id, investigation_id } });
-  if (result.kind === "loading" || result.kind === "gone") {
-    return (
-      <main data-screen="investigation" data-state="loading">
-        <h1>Investigation</h1>
-      </main>
-    );
-  }
-  if (result.kind === "not-available") {
-    return (
-      <main data-screen="investigation" data-state="not-available">
-        <h1>Investigation</h1>
-        <p>This investigation is not available.</p>
-      </main>
-    );
-  }
-  if (result.kind === "error") {
-    return (
-      <main data-screen="investigation" data-state="error">
-        <h1>Investigation</h1>
-        <p>The investigation could not be loaded.</p>
-      </main>
-    );
-  }
+  const result = useRead(READ, { path: { tenant_id, investigation_id } });
   return (
-    <main data-screen="investigation" data-state="ready">
+    <main data-screen="investigation" data-state={result.kind === "ok" ? "ready" : result.kind}>
       <h1>Investigation</h1>
-      <dl>
-        <dt>Status</dt>
-        <dd data-field="status">{result.body.status}</dd>
-        <dt>Outcome</dt>
-        <dd data-field="outcome">{result.body.disposition ?? "none"}</dd>
-      </dl>
+      {content(result)}
     </main>
   );
+}
+
+function content(result: ScreenRead<typeof READ>): ReactNode {
+  switch (result.kind) {
+    case "loading":
+      return null;
+    case "not-available":
+      return <p>This investigation is not available.</p>;
+    case "error":
+      return <p>The investigation could not be loaded.</p>;
+    case "ok":
+      return (
+        <dl>
+          <dt>Status</dt>
+          <dd data-field="status">{result.body.status}</dd>
+          <dt>Outcome</dt>
+          <dd data-field="outcome">{result.body.disposition ?? "none"}</dd>
+        </dl>
+      );
+  }
 }

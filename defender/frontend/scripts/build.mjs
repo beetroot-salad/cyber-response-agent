@@ -10,7 +10,8 @@
 import { cpSync, existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { build } from "vite";
+import { build as vite } from "vite";
+import { generate } from "./generate.mjs";
 import { check } from "./source-check.mjs";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -34,18 +35,14 @@ function ownAssets(folder) {
   return [...new Set(files)].filter((file) => file.startsWith("assets/"));
 }
 
-async function main() {
-  // Run in this process, so the build does not depend on which runtime started it. On a bad input it exits non-zero
-  // itself, before anything is written.
-  await import("./generate.mjs");
-  const problems = check();
-  if (problems.length > 0) {
-    for (const problem of problems) console.error(problem);
-    throw new Error("check failed");
-  }
-  await build({ root, logLevel: "warn", build: { outDir: fresh, emptyOutDir: true, manifest: true } });
+/** Build into `fresh` and swap it in; the problems that stopped it before the swap, or none. */
+async function buildAndSwap() {
+  const problems = [...(await generate())];
+  if (problems.length === 0) problems.push(...check());
+  if (problems.length > 0) return problems;
+  await vite({ root, logLevel: "warn", build: { outDir: fresh, emptyOutDir: true, manifest: true } });
   // The matcher alone (no DOM), for Bun and Node: the module the app imports.
-  await build({
+  await vite({
     root,
     configFile: false,
     publicDir: false,
@@ -73,6 +70,7 @@ async function main() {
   for (const old of readdirSync(builds)) {
     if (old !== name) rmSync(path.join(builds, old), { recursive: true, force: true });
   }
+  return [];
 }
 
 /** Remove what a killed build left: a build folder `dist` does not link to, and a link never swapped in. */
@@ -90,12 +88,14 @@ function sweep() {
   }
 }
 
-sweep();
-try {
-  await main();
-} catch (error) {
-  console.error(`build: ${error.message}`);
-  process.exitCode = 1;
-} finally {
+/** The build (`bun run build`): the problems that stopped it, or none. Whatever stopped it, what it left is swept. */
+export async function build() {
   sweep();
+  try {
+    return await buildAndSwap();
+  } catch (error) {
+    return [error.message]; // Vite's own report of a source it could not build
+  } finally {
+    sweep();
+  }
 }

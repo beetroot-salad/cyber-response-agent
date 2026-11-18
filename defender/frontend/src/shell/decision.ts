@@ -7,16 +7,19 @@ export type Taken =
   | { readonly status: "found"; readonly again: boolean }
   | { readonly status: "unavailable" };
 
-export type Decision =
-  | { readonly kind: "sign-in"; readonly again: boolean }
-  | { readonly kind: "failed"; readonly reason: "session-lost" | "sign-in-left" | "storage-unavailable" | "session-refused" };
+/** Why the shell sends a load to the failed screen. */
+export type FailedReason = "session-lost" | "sign-in-left" | "storage-unavailable" | "session-refused";
+
+/** Which call of the load was answered 401: its own `/api/me`, or a later one. */
+export type Source = "me" | "later";
+
+export type Decision = { readonly kind: "sign-in"; readonly again: boolean } | { readonly kind: "failed"; readonly reason: FailedReason };
 
 export function decideUnauthorized(input: {
   readonly taken: Taken;
   /** Reached by Back/Forward, or restored from the back-forward cache. */
   readonly byHistory: boolean;
-  /** The load's own `/api/me`, or a later call of the load. */
-  readonly source: "me" | "later";
+  readonly source: Source;
 }): Decision {
   const { taken, byHistory, source } = input;
   // A load that could not read its record starts no sign-in, whichever call was answered 401 (B1.3).

@@ -663,6 +663,7 @@ HONESTY_CORPUS: dict[str, str] = {
         " (zzEl as unknown as { ownerDocument: { cookie: string } }).ownerDocument.cookie;"),
     "a parsed value of type any": "export const zzForm = (zzText: string) => JSON.parse(zzText).fetch;",
     "type checking switched off by a comment": "// @ts-ignore\nexport const zzForm = window;",
+    "a type predicate, which the compiler never checks": 'export const zzForm = (zzValue: unknown): zzValue is string => typeof zzValue === "number";',
 }
 #: The shell's two honest forms: an assertion under a `// trust: <reason>` line, and `JSON.parse` given `unknown`.
 SHELL_ALLOWED: dict[str, str] = {

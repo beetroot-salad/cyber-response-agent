@@ -1,6 +1,6 @@
 // B1's decision, over every input of Am-5's table: 2 sources x 4 takes of the attempt record x 2 ways of arriving.
 import { describe, expect, it } from "vitest";
-import { decideUnauthorized, type Decision, type Taken } from "./decision";
+import { decideUnauthorized, type Decision, type FailedReason, type Source, type Taken } from "./decision";
 
 const NONE: Taken = { status: "none" };
 const FOUND_FIRST: Taken = { status: "found", again: false };
@@ -9,12 +9,11 @@ const UNAVAILABLE: Taken = { status: "unavailable" };
 
 const SIGN_IN_FIRST: Decision = { kind: "sign-in", again: false };
 const SIGN_IN_AGAIN: Decision = { kind: "sign-in", again: true };
-const failed = (reason: "session-lost" | "sign-in-left" | "storage-unavailable" | "session-refused"): Decision => ({
+const failed = (reason: FailedReason): Decision => ({
   kind: "failed",
   reason,
 });
 
-type Source = "me" | "later";
 interface Case {
   readonly source: Source;
   readonly label: string;

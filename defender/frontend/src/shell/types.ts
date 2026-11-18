@@ -10,7 +10,7 @@ export type ReadBody<K extends ReadKey> = GetOperation<K> extends { responses: {
   ? B
   : never;
 
-/** A read's closed result (Am-5 point 4). */
+/** A read's closed result, as the load's client gives it (Am-5 point 4). A screen's `useRead` shows `gone` as loading. */
 export type ReadResult<K extends ReadKey> =
   /** The load is leaving or is no longer the page's: the screen does nothing, whatever the answer was. */
   | { readonly kind: "gone" }
@@ -19,3 +19,13 @@ export type ReadResult<K extends ReadKey> =
   | { readonly kind: "error" };
 
 export type Person = components["schemas"]["Me"];
+
+/** The reasons the API's sign-in callback sends a person to the failed screen with (`defender/api`'s sign-in routes). */
+export type CallbackReason =
+  | "prelogin-missing"
+  | "login-attempt-invalid"
+  | "unknown-account"
+  | "otp-required"
+  | "unavailable"
+  | "bad-request"
+  | "error";

@@ -1,4 +1,5 @@
-// The shell's error state (#1161 B1, #1540 Am-5 point 6): one screen with a message per kind, and the boundary that shows it for a render error.
+// The shell's error state (#1161 B1, #1540 Am-7): one screen with a message per kind of failure, and the boundary that
+// shows it for a render error.
 import { Component, type ReactNode } from "react";
 import type { Load } from "./load";
 
@@ -19,7 +20,7 @@ export function ErrorScreen({ kind }: { readonly kind: ErrorKind }) {
   );
 }
 
-/** Turns a render error of a screen into the error state, unless the load is leaving (then nothing shows). */
+/** Turns a render error of a screen into the error state, unless the load may no longer show anything. */
 export class ErrorBoundary extends Component<{ readonly load: Load; readonly children: ReactNode }, { readonly failed: boolean }> {
   override state = { failed: false };
 
@@ -29,6 +30,6 @@ export class ErrorBoundary extends Component<{ readonly load: Load; readonly chi
 
   override render(): ReactNode {
     if (!this.state.failed) return this.props.children;
-    return this.props.load.isLeaving() ? null : <ErrorScreen kind="broken" />;
+    return this.props.load.mayShow() ? <ErrorScreen kind="broken" /> : null;
   }
 }

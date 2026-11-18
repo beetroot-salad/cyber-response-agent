@@ -1,5 +1,4 @@
-// The type check and the source check (#1540 F1 b, F8). A function only: `scripts/check.mjs` (`bun run check`) and
-// `scripts/build.mjs` call it in their own process, so no command depends on how it was started.
+// The type check and the source check (#1540 F1 b, F8). A function only: `bun run check` and the build call it.
 //
 // 1. The whole project (screens, shell and unit-test files alike) is type-checked with the browser library.
 // 2. Everything outside `src/shell/` is type-checked again without it (`tsconfig.screens.json`), with only what
@@ -8,8 +7,9 @@
 //    address, however it is spelled (PR2). The compiler is the boundary; nothing below lists the browser's names.
 // 3. Everywhere (shell included, the generated types aside) the compiler is kept honest: no `any`, no value of type
 //    `any` (but one given the type `unknown` where it is made, as `JSON.parse`'s), no comment that switches type checking
-//    off, and no type assertion but `as const`. In the shell, an assertion is allowed only under a `// trust: <reason>`
-//    comment on the line above: the step the compiler cannot check, said out loud.
+//    off, and no type assertion but `as const`. A type predicate (`x is T`, `asserts x`) is an assertion too: the compiler
+//    never checks its body. In the shell, an assertion is allowed only under a `// trust: <reason>` comment on the line
+//    above: the step the compiler cannot check, said out loud.
 // 4. Outside the shell: imports from the shell only of `src/shell/provider` (types from anywhere in it), no import of a
 //    test file into the app, and no `/api/auth/` path in a string. That last one is a guard against an accident, not a
 //    boundary: a string can be built any way.
@@ -94,7 +94,7 @@ export function check() {
   const src = path.join(root, "src") + path.sep;
   const shell = path.join(root, "src", "shell") + path.sep;
   const generated = path.join(root, "src", "generated") + path.sep;
-  const door = path.join(root, "src", "shell", "provider");
+  const providerModule = path.join(root, "src", "shell", "provider");
   const addresses = path.join(root, "src", "addresses.ts");
   const problems = [];
   const reporter = (file, name, hint) => (node, what) => {
@@ -104,11 +104,11 @@ export function check() {
 
   // 3. Honesty, everywhere but the generated types. Each file is read with the types it is compiled with: the shell's
   // with the browser library, every other with the screens' compile, where a browser name is a value of type `any`.
-  const honest = [
+  const honestyPasses = [
     { made: whole.program, inShell: true },
     { made: screens.program, inShell: false },
   ];
-  for (const { made, inShell } of honest) {
+  for (const { made, inShell } of honestyPasses) {
     const checker = made.getTypeChecker();
     for (const file of made.getSourceFiles()) {
       const name = path.resolve(file.fileName);
@@ -120,7 +120,7 @@ export function check() {
         problems.push(`${path.relative(root, name)}:${line + 1}: no comment may switch type checking off (${match[0]})`);
       }
       const visit = (node) => {
-        if ((ts.isAsExpression(node) && !isConstAssertion(node)) || ts.isTypeAssertionExpression(node)) {
+        if ((ts.isAsExpression(node) && !isConstAssertion(node)) || ts.isTypeAssertionExpression(node) || ts.isTypePredicateNode(node)) {
           if (!(inShell && trusted(file, node))) {
             report(node, inShell
               ? "a type assertion needs a `// trust: <reason>` comment on the line above (only `as const` needs none)"
@@ -155,7 +155,7 @@ export function check() {
       const target = resolved ? path.resolve(resolved.resolvedFileName) : path.resolve(path.dirname(name), specifier.text);
       if (/\.test\.tsx?$/.test(target)) report(node, `outside the shell, no module may import a test file (${path.relative(root, target)})`);
       if (isTest || typeOnly(node)) return;
-      if (target.startsWith(shell) && target.replace(/\.(d\.)?tsx?$/, "") !== door) {
+      if (target.startsWith(shell) && target.replace(/\.(d\.)?tsx?$/, "") !== providerModule) {
         report(node, `outside the shell, a module imports from the shell only src/shell/provider, not ${path.relative(root, target)}`);
       }
     };

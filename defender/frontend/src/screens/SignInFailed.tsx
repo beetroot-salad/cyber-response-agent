@@ -1,23 +1,15 @@
 // The sign-in-failed screen (B1, B4): shows why sign-in did not complete, and a retry. It makes no authenticated call at
-// load; the shell has settled its `return` into the address, and `retry` passes it on to the shell's sign-in, which the API judges.
+// load; the shell has settled its `return` into the address, and `retry` passes it on to the shell's sign-in, which the
+// API judges.
+import type { FailedReason } from "../shell/decision";
 import { useActions, useQueryOfAddress } from "../shell/provider";
+import type { CallbackReason } from "../shell/types";
 
-export const REASONS = [
-  "prelogin-missing",
-  "login-attempt-invalid",
-  "unknown-account",
-  "otp-required",
-  "unavailable",
-  "bad-request",
-  "error",
-  "session-lost",
-  "sign-in-left",
-  "session-refused",
-  "storage-unavailable",
-] as const;
-export type Reason = (typeof REASONS)[number];
+/** Every reason the failed screen is sent with: the API's callback's and the shell's own. A reason without a message
+ * here does not compile. */
+type Reason = CallbackReason | FailedReason;
 
-const MESSAGES: Record<Reason, string> = {
+const MESSAGES: Readonly<Record<Reason, string>> = {
   "prelogin-missing": "This sign-in attempt was not found. It may have expired or been opened in another browser.",
   "login-attempt-invalid": "The identity provider did not accept this sign-in attempt.",
   "unknown-account": "Your account is not known here.",
@@ -32,19 +24,18 @@ const MESSAGES: Record<Reason, string> = {
   "session-refused": "You are signed in, but the server refused this page. If trying again does not help, tell your administrator.",
   "storage-unavailable": "This browser does not let the app keep a sign-in attempt, so it cannot sign you in automatically.",
 };
-
-function reasonOf(value: string | null): Reason {
-  return REASONS.find((reason) => reason === value) ?? "error";
-}
+const BY_CODE: ReadonlyMap<string, string> = new Map(Object.entries(MESSAGES));
 
 export function SignInFailed() {
-  const query = useQueryOfAddress();
+  const asked = useQueryOfAddress().get("reason");
   const actions = useActions();
-  const reason = reasonOf(query.get("reason"));
+  // The address is anyone's to type: a reason this screen does not know is shown as the general failure.
+  const message = asked === null ? undefined : BY_CODE.get(asked);
+  const [reason, text] = asked !== null && message !== undefined ? [asked, message] : ["error", MESSAGES.error];
   return (
     <main data-screen="sign-in-failed">
       <h1>Sign-in failed</h1>
-      <p data-reason={reason}>{MESSAGES[reason]}</p>
+      <p data-reason={reason}>{text}</p>
       <button type="button" data-action="retry" onClick={() => actions.retry()}>
         Try again
       </button>

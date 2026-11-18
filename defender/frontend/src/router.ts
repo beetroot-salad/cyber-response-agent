@@ -20,7 +20,8 @@ export interface Route {
   readonly Screen: ComponentType;
   /** The pathname when it is a member of a returnable shape: what sign-in brings the person back to. */
   readonly target: string | null;
-  /** F4: a non-returnable shape needs no session. The not-found screen still asks `/api/me`. */
+  /** Whether the screen needs `/api/me` first: a returnable shape does, a non-returnable one does not (F4), and the
+   * not-found screen does. */
   readonly needsSession: boolean;
 }
 

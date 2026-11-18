@@ -1,5 +1,6 @@
-// The load in React (#1540 Am-5 point 3): the provider and the four hooks screens reach the shell through. A screen has no
-// other way to the network, storage or the address (PR2); F8's source check enforces it.
+// The load in React (#1540 Am-5, Am-7): the provider, and the hooks that are a screen's only way to the session, the
+// address, the server and the shell's actions. A screen has no other way to the network, storage or the address (PR2);
+// the screens' own compile and the source check enforce it (F8).
 import { useQuery, type QueryClient } from "@tanstack/react-query";
 import { createContext, useContext, type ReactNode } from "react";
 import { valuesOf, type ShapeName, type ShapeValues } from "../addresses";
@@ -14,7 +15,7 @@ export interface Actions {
 }
 
 /** A read-only copy of the address's query. */
-export interface Query {
+export interface AddressQuery {
   get(name: string): string | null;
   getAll(name: string): string[];
 }
@@ -29,7 +30,7 @@ export interface Shell {
   /** The address's path and the shape it is a member of (null: the not-found screen). */
   readonly pathname: string;
   readonly shape: ShapeName | null;
-  readonly query: Query;
+  readonly query: AddressQuery;
   readonly actions: Actions;
 }
 
@@ -53,7 +54,7 @@ export function useMe(): Person {
 }
 
 /** The address's read-only query. */
-export function useQueryOfAddress(): Query {
+export function useQueryOfAddress(): AddressQuery {
   return useShell().query;
 }
 
@@ -69,10 +70,14 @@ export function useActions(): Actions {
   return useShell().actions;
 }
 
+/** What a screen's read shows: the answer, or loading. A gone load shows nothing new, so it reads as loading. */
+export type ScreenRead<K extends ReadKey> = Exclude<ReadResult<K>, { readonly kind: "gone" }> | { readonly kind: "loading" };
+
 /** A typed GET keyed by the OpenAPI document's own path key. Sent at most once per load; a 401 is the shell's. */
-export function useRead<K extends ReadKey>(key: K, params: ReadParams<K>): ReadResult<K> | { readonly kind: "loading" } {
+export function useRead<K extends ReadKey>(key: K, params: ReadParams<K>): ScreenRead<K> {
   const { read, queryClient } = useShell();
   const result = useQuery({ queryKey: [key, params], queryFn: () => read(key, params) }, queryClient);
-  if (result.status === "error") throw result.error; // the read's own bug: the boundary shows the error state
-  return result.status === "success" ? result.data : { kind: "loading" };
+  if (result.status === "error") throw result.error; // the read's own fault: the boundary shows the error state
+  if (result.status === "pending" || result.data.kind === "gone") return { kind: "loading" };
+  return result.data;
 }
