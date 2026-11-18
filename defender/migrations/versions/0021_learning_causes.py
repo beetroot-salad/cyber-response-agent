@@ -41,6 +41,7 @@ _PARKED_CAUSE = r"""
             OR reason ~ 'records no .* login \(no role id\)|records no absolute .* secret file'
             THEN 'delivery_unavailable'
           WHEN reason ~ '(Client|Server) error ''(401|403) '
+            OR reason ~ 'Client error ''404 [^'']*'' for url ''[^'']*/api/v1/repos/[^/'']+/[^/'']+/?'''
             OR reason ~ 'Vault identity token request failed|Vault returned no identity token'
             OR reason ~ 'Vault returned an invalid identity token|invalid identity claims|identity claims must be an object'
             OR reason ~ 'invalid lifetime claims|Vault identity does not match|Vault identity is expired'

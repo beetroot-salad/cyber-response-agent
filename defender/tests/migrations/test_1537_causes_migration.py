@@ -36,6 +36,13 @@ FAULT_TEXTS = {f"fault {fault.name} ({path})": (fault.park_text(path).replace("{
 PARKED = {
     **FAULT_TEXTS,
     "422 with 403 in its url": (PARK + STATUS_422, "forge_refused"),
+    # The repository itself answering 404 is the token not seeing it, as the live classifier reads it (#1558 review).
+    "the repository itself 404": (PARK + "the tenant t's delivery refused: Forgejo GET failed: Client error '404 Not Found' "
+                                  "for url 'http://forge.invalid/api/v1/repos/tenants/fixture' For more information check: "
+                                  "https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404", "forge_credential_refused"),
+    "a PR's reviews 404": (PARK + "Forgejo GET failed: Client error '404 Not Found' for url 'http://forge.invalid/api/v1/"
+                           "repos/tenants/fixture/pulls/7/reviews?page=1&limit=50' For more information check: "
+                           "https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404", "forge_refused"),
     "foreign tip on the forge": ("the branch lessons/ab12 on the forge holds commits the commit-maker did not make for batch "
                                  "b1 (tip abc123)", "foreign_commits_remote"),
     "foreign local commits": ("the local branch lessons/ab12 holds commits outside batch b1's record", "foreign_commits_local"),

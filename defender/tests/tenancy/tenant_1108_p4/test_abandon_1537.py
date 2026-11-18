@@ -239,6 +239,32 @@ def test_o4_the_stored_detail_of_a_refusal_is_bounded_however_long_the_fault_tex
 # --- O3: the settle's branches --------------------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("repository", ["unseen", "readable"])
+def test_o4_a_run_of_404s_is_a_credential_refusal_only_when_the_repository_itself_answers_404(scene, caplog, repository):
+    """404s to the refusal ceiling. Forgejo answers 404 as well for a repository the token cannot see, and opening the
+    delivery reads the repository itself, so that read is the token check. The repository unseen: the batch parks as a
+    credential refusal (a person may release it once the token is fixed), its detail saying the token cannot see the
+    repository. The repository readable and the PR's reviews 404: the thing asked for is gone, and the batch parks as the
+    forge's refusal in the forge's own words. (O4, H15; #1558 review)"""
+    w = scene
+    w.seed("f1")
+    writer = _lesson("f1")
+    batch_id, _branch, _number = opened(w, writer, caplog)
+    w.t.forge.refuse("/reviews", 404)
+    if repository == "unseen":
+        w.t.forge.refuse("/repos/tenants/fixture", 404, method="GET")
+    for _ in range(3):
+        tick(w, writer)
+    got = row(w.dsn, batch_id)
+    assert got["phase"] == "needs_person", "premise: parked at the refusal ceiling"
+    if repository == "unseen":
+        assert got["cause"] == CREDENTIAL, got
+        assert "cannot see the repository" in got["reason"], got["reason"]
+    else:
+        assert got["cause"] == "forge_refused", got
+        assert "cannot see" not in got["reason"] and "404 Not Found" in got["reason"], got["reason"]
+
+
 def test_o3_a_parked_batch_is_left_alone_until_asked_then_its_open_pr_is_closed_once_kept_and_the_batch_settled_abandoned(scene, caplog):
     """No request: the tick touches nothing. Requested: the PR is closed once and kept, the branch keeps its tip, no new PR opens, the batch ends abandoned keeping its park cause, items held `abandoned_by_person`, the lane free. (O3, O4, O5)"""
     w = scene

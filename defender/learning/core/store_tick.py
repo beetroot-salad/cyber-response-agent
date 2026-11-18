@@ -20,6 +20,7 @@ import dataclasses
 import logging
 import math
 import os
+import re
 import signal
 import socket
 import threading
@@ -168,13 +169,36 @@ def forge_refuses(error: BaseException) -> bool:
 FAULT_TEXT_LIMIT = 600
 
 
+def repository_unseen(fault: BaseException) -> bool:
+    """Whether the refusal is the repository itself answering 404 (`GET /repos/{o}/{r}`, which opening a delivery reads):
+    Forgejo's answer for a repository the token may not see. That read is the token check; a 404 on anything else, a PR
+    or its reviews, comes after the repository was read in the same pass, so it means the thing asked for is gone."""
+    import httpx
+
+    seen: list[BaseException] = []
+    link: BaseException | None = fault.fault if isinstance(fault, Refused) else fault
+    while link is not None and all(link is not s for s in seen):
+        seen.append(link)
+        if (isinstance(link, httpx.HTTPStatusError) and link.response is not None and link.response.status_code == 404
+                and _REPOSITORY_PATH.search(link.request.url.path)):
+            return True
+        link = link.__cause__ or link.__context__
+    return False
+
+
+#: A Forgejo repository's own API path, nothing below it.
+_REPOSITORY_PATH = re.compile(r"/api/v1/repos/[^/]+/[^/]+/?$")
+
+
 def refusal_cause(fault: BaseException) -> BatchCause:
     """The one classifier of what the loop counts toward a batch's person ceiling (H15, #1537 PR1): the batch cause the
     refusal parks it with. A 401 or 403 (the forge's, the issuer's, the secret store's), and a credential failure with no
     status at all (a token the issuer would not mint), is `forge_credential_refused`: the work is fine, the key was not,
     so a person may release it. A delivery that cannot open for want of setup (a host secret file missing or empty, no
     forge wiring recorded) is `delivery_unavailable`: retrying will not fix it. Any other lasting refusal is
-    `forge_refused`. Every counting path passes through here; none picks a cause of its own."""
+    `forge_refused`, except the repository itself answering 404 (`repository_unseen`): the token cannot see the
+    repository, so it is `forge_credential_refused`. Every counting path passes through here; none picks a cause of its
+    own."""
     from defender.learning.author.version_control import ForgejoAuthError
     from defender.learning.author.version_control.auth import CredentialMisconfigured
 
@@ -192,7 +216,7 @@ def refusal_cause(fault: BaseException) -> BatchCause:
     status = http_status(fault)
     if status is not None and status < 400:
         status = None  # an answer that was not a refusal (a 200 with no token in it) says nothing about the forge
-    if status in (401, 403):
+    if status in (401, 403) or repository_unseen(fault):
         return "forge_credential_refused"
     if status is None and any(isinstance(c, ForgejoAuthError) for c in chain):
         return "forge_credential_refused"
@@ -508,8 +532,11 @@ class Tick:
         if str(b.id) in self._counted:
             return
         self._counted.add(str(b.id))
-        count, phase = self.store.note_refusal(self.tenant_id, str(b.id),
-                                               Why.batch(refusal_cause(fault), one_line(str(fault))[:FAULT_TEXT_LIMIT]))
+        said = one_line(str(fault))
+        if repository_unseen(fault):
+            said = f"the token cannot see the repository (the repository itself answers 404): {said}"
+        count, phase = self.store.note_refusal(self.tenant_id, str(b.id), Why.batch(
+            refusal_cause(fault), said[:FAULT_TEXT_LIMIT]))
         _logger.warning(f"{self.label}: the forge refused a request for batch {b.id} ({count} in a row, {phase}): "
                         f"{one_line(str(fault))}")
 
