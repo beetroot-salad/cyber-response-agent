@@ -377,8 +377,7 @@ def test_run_main_hands_a_stale_publish_outcome_to_the_ticket_comment_page_and_r
             for path in sorted(root.rglob("*")) if root.is_dir() else ():
                 if path.is_file() and not path.is_symlink():
                     box_readable[str(path)] = path.read_bytes()
-        write_report(run_dir)
-        S1107.seed_session_store(run_dir)
+        write_report(run_dir)  # its store and pointer are the page's too (#1534): a second store would replace the pointer
 
     alert = S1107.plant_alert(tmp_path / "alert")
     rec = S1107.RunRecorder(tmp_path / "unused" / "s-c-wiring", before_lifecycle=before_lifecycle)
@@ -441,8 +440,7 @@ def test_run_main_fresh_launch_posts_todays_comment(tmp_path, monkeypatch, p4_te
     store = _store(tmp_path)
 
     def before_lifecycle(run_dir: Path) -> None:
-        write_report(run_dir)
-        S1107.seed_session_store(run_dir)
+        write_report(run_dir)  # its store and pointer are the page's too (#1534): a second store would replace the pointer
 
     alert = S1107.plant_alert(tmp_path / "alert")
     rec = S1107.RunRecorder(tmp_path / "unused" / "s-c-fresh", before_lifecycle=before_lifecycle)
@@ -487,8 +485,7 @@ def test_run_main_comment_follows_the_host_outcome_when_the_box_rewrites_the_rec
     tampered: list[Path] = []
 
     def box_rewrites_the_record(run_dir: Path) -> None:
-        write_report(run_dir)
-        S1107.seed_session_store(run_dir)
+        write_report(run_dir)  # its store and pointer are the page's too (#1534): a second store would replace the pointer
         stamp_knowledge_source(run_dir, planted)
         tampered.append(run_dir)
 
