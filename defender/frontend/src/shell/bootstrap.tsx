@@ -11,15 +11,15 @@ import { ShellProvider, type Actions, type Query } from "./provider";
 
 const effects: Effects = {
   // The session cookie alone: same-origin, no Authorization header.
-  fetch: (url, init) => window.fetch(url, init),
+  fetch: (request) => window.fetch(request),
   record: (target, again) => attempt.record(target, again),
   assign: (url) => window.location.assign(url),
   replace: (url) => window.location.replace(url),
 };
 
 function reachedByHistory(): boolean {
-  const entry = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
-  return entry?.type === "back_forward";
+  const entry = performance.getEntriesByType("navigation")[0];
+  return entry instanceof PerformanceNavigationTiming && entry.type === "back_forward";
 }
 
 function queryOf(search: string): Query {
@@ -34,7 +34,8 @@ function settleReturn(taken: attempt.Read): void {
   if (params.has("return") || params.get("reason") === "bad-request") return;
   if (taken.status !== "found" || taken.target === null) return;
   params.set("return", taken.target);
-  window.history.replaceState(window.history.state, "", `${window.location.pathname}?${params.toString()}`);
+  const state: unknown = window.history.state; // kept as it is: this only changes the address
+  window.history.replaceState(state, "", `${window.location.pathname}?${params.toString()}`);
 }
 
 export function start(): void {
@@ -54,7 +55,7 @@ export function start(): void {
     sequence += 1;
     const taken = attempt.take();
     const routed = route(window.location.pathname);
-    const load = makeLoad({ taken, byHistory, target: routed.target, effects });
+    const load = makeLoad({ taken, byHistory, target: routed.target, origin: window.location.origin, effects });
     current = load;
     try {
       if (routed.shape === "sign-in-failed") settleReturn(taken);

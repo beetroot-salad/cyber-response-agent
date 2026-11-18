@@ -39,7 +39,7 @@ function loadWithHeldAnswers(answerOnce: (held: number) => boolean = () => true)
       log.push("replace");
     },
   };
-  const load = makeLoad({ taken: { status: "none" }, byHistory: false, target: "/home", effects });
+  const load = makeLoad({ taken: { status: "none" }, byHistory: false, target: "/home", origin: "http://app.test", effects });
   const responder = setInterval(() => {
     if (held.length > 0 && answerOnce(held.length)) held.splice(0).forEach((answer) => answer(unauthorized()));
   }, 1);

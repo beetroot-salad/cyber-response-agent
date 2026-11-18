@@ -537,7 +537,6 @@ def _refused_corpus() -> dict[str, str]:
         "auth path template without substitution": "export const zzForm = `/api/auth/login`;",
         "auth path template head": "export const zzForm = (zzWhere: string) => `/api/auth/${zzWhere}`;",
         "auth path JSX attribute": 'export const zzForm = <a href="/api/auth/logout">out</a>;',
-        "fetch by Reflect.get on globalThis": 'export const zzForm = () => Reflect.get(globalThis, "fetch");',
         # A DOM object a screen is handed (a React ref's element, an event's target) leads to the globals too.
         "cookie from an element's document, access": "export const zzForm = (zzEl: HTMLElement) => zzEl.ownerDocument.cookie;",
         "cookie from an element's document, element access": (
@@ -550,14 +549,7 @@ def _refused_corpus() -> dict[str, str]:
         "cookie from an element's document, for-of head": (
             "export const zzForm = (zzEl: HTMLElement) => { for (const { ownerDocument: { cookie } } of [zzEl])"
             " { return cookie; } return undefined; };"),
-        # What could claim a value is anything, so would reach the globals the screens' compile has not got.
-        "an element's document through an any cast": (
-            "export const zzForm = (zzEl: HTMLElement) => (zzEl as any).ownerDocument.defaultView.localStorage;"),
-        "an element's document through a cast to a made-up type": (
-            "export const zzForm = (zzEl: HTMLElement) =>"
-            " (zzEl as unknown as { ownerDocument: { cookie: string } }).ownerDocument.cookie;"),
-        "a parsed value of type any": "export const zzForm = (zzText: string) => JSON.parse(zzText).fetch;",
-        "type checking switched off by a comment": "// @ts-ignore\nexport const zzForm = window;",
+        "fetch by Reflect.get on globalThis": 'export const zzForm = () => Reflect.get(globalThis, "fetch");',
         "auth path in a template's middle": "export const zzForm = (zzBase: string) => `${zzBase}/api/auth/logout`;",
         "fetch from an element's window": (
             'export const zzForm = (zzEl: HTMLElement) => zzEl.ownerDocument.defaultView?.fetch("/x");'),
@@ -594,6 +586,43 @@ ALLOWED_CORPUS: dict[str, str] = {
     "the provider's hooks": 'import { useMe } from "../../shell/provider";\nexport const zzForm = useMe;',
     "a type from another shell module": 'import type { ReadKey } from "../../shell/types";\nexport type ZzForm = ReadKey;',
 }
+
+
+#: What could claim a value is anything (an `any`, a cast, a comment switching type checking off), so would reach what
+#: a compile does not have: refused everywhere, the shell included (the shell's assertions need a `// trust:` line).
+HONESTY_CORPUS: dict[str, str] = {
+    "an element's document through an any cast": (
+        "export const zzForm = (zzEl: HTMLElement) => (zzEl as any).ownerDocument.defaultView.localStorage;"),
+    "an element's document through a cast to a made-up type": (
+        "export const zzForm = (zzEl: HTMLElement) =>"
+        " (zzEl as unknown as { ownerDocument: { cookie: string } }).ownerDocument.cookie;"),
+    "a parsed value of type any": "export const zzForm = (zzText: string) => JSON.parse(zzText).fetch;",
+    "type checking switched off by a comment": "// @ts-ignore\nexport const zzForm = window;",
+}
+#: The shell's two honest forms: an assertion under a `// trust: <reason>` line, and `JSON.parse` given `unknown`.
+SHELL_ALLOWED: dict[str, str] = {
+    "a trusted assertion": "// trust: the zz value is a number\nexport const zzForm = (1 as unknown) as number;",
+    "a parse given unknown": "export const zzForm = (zzText: string) => { const zzValue: unknown = JSON.parse(zzText); return zzValue; };",
+}
+
+
+def test_1540_f8_the_honesty_rules_refuse_every_form_in_the_shell_and_outside_it_and_allow_the_shells_honest_forms(checked):
+    """Each `any`, cast and type-checking switch, one module apiece, fails one gate run naming every file, under
+    `src/screens/` and under `src/shell/` alike; under `src/shell/`, an assertion under a `// trust:` line and a parse
+    given `unknown` pass; without the `// trust:` line the assertion is refused. (F8, PR2)"""
+    names = _corpus_files(HONESTY_CORPUS, "zz_honesty_")
+    texts = {name: HONESTY_CORPUS[description] for name, description in names.items()}
+    for where in ("screens/zz_corpus", "shell/zz_corpus"):
+        gate = _with_sources(checked, where, texts)
+        assert gate.refused, f"the gate accepted the honesty corpus under src/{where}"
+        missed = [description for name, description in names.items() if name not in gate.output]
+        assert missed == [], f"forms not refused under src/{where}: {missed}"
+    allowed = _corpus_files(SHELL_ALLOWED, "zz_shell_ok_")
+    passed = _with_sources(checked, "shell/zz_corpus", {name: SHELL_ALLOWED[d] for name, d in allowed.items()})
+    assert not passed.refused, passed.output[-3000:]
+    untrusted = _with_source(checked, "shell/zz_untrusted.ts", SHELL_ALLOWED["a trusted assertion"].split("\n", 1)[1])
+    assert untrusted.refused, "an assertion in the shell without a `// trust:` line passed"
+    assert "zz_untrusted.ts" in untrusted.output, untrusted.output[-1500:]
 
 
 def _corpus_files(corpus: dict[str, str], prefix: str) -> dict[str, str]:

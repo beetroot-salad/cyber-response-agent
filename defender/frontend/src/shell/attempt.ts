@@ -19,9 +19,11 @@ export function take(): Read {
     let target: string | null = null;
     let again = false;
     try {
-      const parsed = JSON.parse(raw) as { target?: unknown; again?: unknown } | null;
-      if (typeof parsed?.target === "string") target = parsed.target;
-      again = parsed?.again === true;
+      const parsed: unknown = JSON.parse(raw);
+      if (typeof parsed === "object" && parsed !== null) {
+        if ("target" in parsed && typeof parsed.target === "string") target = parsed.target;
+        again = "again" in parsed && parsed.again === true;
+      }
     } catch {
       // a record that cannot be read is still a record
     }
