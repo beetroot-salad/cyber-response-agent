@@ -30,6 +30,7 @@ import threading
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
+from defender._clock import parse_iso_utc
 from defender.job_socket import Refused
 from defender.records.formats import BatchId, TenantId, WorkItemId
 from defender.records.learning_causes import BATCH_CAUSES, ITEM_CAUSES, Why
@@ -93,10 +94,10 @@ def _float_decode(v: Any) -> float:
 
 def _time_decode(v: Any) -> _dt.datetime:
     _expect(type(v) is str, "a time")
-    try:
-        return _dt.datetime.fromisoformat(v)
-    except ValueError:
-        raise _Unreadable("a time") from None
+    parsed = parse_iso_utc(v)
+    if parsed is None:
+        raise _Unreadable("a time")
+    return parsed
 
 
 def _json_decode(v: Any) -> dict[str, Any]:
@@ -356,15 +357,26 @@ def _crossing_of(name: str, refused: Refused) -> Exception:
     if refused.code == FOREIGN:
         return ForeignBatch(str(refused))
     if refused.code == RAISED:
-        try:
-            raised = json.loads(str(refused))
-            kind = CROSSING[raised["type"]]
-            args = raised["args"]
-            _expect(type(args) is list, "arguments")
-            return kind(*args)
-        except (ValueError, KeyError, TypeError, _Unreadable):
-            pass
+        crossed = _raised_of(str(refused))
+        if crossed is not None:
+            return crossed
     return StoreUnavailable(f"the helper did not answer {name} ({refused.code}): {refused}")
+
+
+def _raised_of(reason: str) -> Exception | None:
+    """The store exception a `store-raised` refusal names (`{"type": name, "args": [...]}`), or None if it is not one."""
+    try:
+        raised = json.loads(reason)
+    except ValueError:
+        return None
+    if not isinstance(raised, dict):
+        return None
+    name, args = raised.get("type"), raised.get("args")
+    kind = CROSSING.get(name) if isinstance(name, str) else None
+    if kind is None or not isinstance(args, list):
+        return None
+    exception: Exception = kind(*args)
+    return exception
 
 
 # --- the relay: the helper's side ------------------------------------------------------------------------------------
@@ -426,10 +438,11 @@ def _outcome_map(v: Any) -> dict[tuple[str, str], Outcome]:
     return out
 
 
-def _why_of(v: Any, causes: tuple[str, ...]) -> Why[Any]:
+def _why_of(v: Any, causes: tuple[str, ...], build: Callable[[Any, str], Why[Any]]) -> Why[Any]:
+    """A `(cause, detail)` row as the table's `Why` (`build`: `Why.batch` or `Why.item`), its cause one of `causes`."""
     _need(type(v) is list and len(v) == 2, "why is (cause, detail)")
     _need(v[0] in causes, "cause is one of the store's")
-    return Why(_field_text(v[0], "a cause"), _field_text(v[1], "a detail"))
+    return build(_field_text(v[0], "a cause"), _field_text(v[1], "a detail"))
 
 
 @dataclasses.dataclass
@@ -562,7 +575,7 @@ def _record_commit(r: TickRelay, f: Mapping[str, Any]) -> Any:
 
 def _end_review(r: TickRelay, f: Mapping[str, Any]) -> Any:
     batch = r.issued(f, other_lanes=True)
-    items_why = None if f["items_why"] is None else _why_of(f["items_why"], ITEM_CAUSES)
+    items_why = None if f["items_why"] is None else _why_of(f["items_why"], ITEM_CAUSES, Why.item)
     return r.adapter().end_review(
         batch, expect_phase=_field_text(f["expect_phase"], "expect_phase"), outcome=_field_text(f["outcome"], "outcome"),
         published=_pair_list(f["published"], "published"), held=_pair_list(f["held"], "held"),
@@ -577,6 +590,10 @@ def _settle_abandon(r: TickRelay, f: Mapping[str, Any]) -> Any:
                                       held=_pair_list(f["held"], "held"))
 
 
+def _commit_record(r: TickRelay, _f: Mapping[str, Any]) -> Any:
+    return r.adapter().commit_record()
+
+
 def _note_check(r: TickRelay, f: Mapping[str, Any]) -> Any:
     _need(type(f["reset"]) is bool, "reset is a flag")
     return r.adapter().note_check(r.issued(f, other_lanes=True), reset_refusals=f["reset"])
@@ -587,7 +604,7 @@ _VERBS: dict[str, Callable[[TickRelay, Mapping[str, Any]], Any]] = {
     "store.batches": lambda r, _f: r.listed(r.adapter().batches()),
     "store.lane_work": lambda r, _f: r.adapter().lane_work(),
     "store.work": _work,
-    "store.commit_record": lambda r, _f: r.adapter().commit_record(),
+    "store.commit_record": _commit_record,
     "store.claim": _relay_claim,
     "store.take_over": _take_over,
     "store.renew": lambda r, f: r.adapter().renew(r.leased(f)),
@@ -600,9 +617,9 @@ _VERBS: dict[str, Callable[[TickRelay, Mapping[str, Any]], Any]] = {
     "store.abandon": lambda r, f: r.adapter().abandon(r.issued(f, other_lanes=False)),
     "store.note_check": _note_check,
     "store.note_refusal": lambda r, f: r.adapter().note_refusal(r.issued(f, other_lanes=True),
-                                                                _why_of(f["why"], BATCH_CAUSES)),
+                                                                _why_of(f["why"], BATCH_CAUSES, Why.batch)),
     "store.needs_person": lambda r, f: r.adapter().needs_person(r.issued(f, other_lanes=False),
-                                                                _why_of(f["why"], BATCH_CAUSES)),
+                                                                _why_of(f["why"], BATCH_CAUSES, Why.batch)),
     "store.end_review": _end_review,
     "store.settle_abandon": _settle_abandon,
 }
