@@ -600,10 +600,12 @@ summary                "Login matched established bastion usage"
 
   `note` is free text FOR THE ANALYST reading the closing record — explain
   the gap in your own words. Only `state`/`ref`/`cap` are checked against
-  the transcript; the note rides into the closing record's ceiling-test
-  entries as written (links defanged) — but each note and the receipts
-  together are bounded, so keep each one to what the gap actually needs:
-  an oversized note is refused before the close, not after. Two rows claiming the SAME `(state, ref)`
+  the transcript; the note and any `cap` ride into the closing record's
+  ceiling-test entries as written (links and dotted names defanged, so
+  `sandbox.detonate` reads `sandbox[.]detonate`) — but each note, each
+  `cap` (64 characters) and the receipts together are bounded, so keep
+  each one to what the gap actually needs: an oversized note or `cap` is
+  refused before the close, not after. Two rows claiming the SAME `(state, ref)`
   or `(state, cap)` do not pay for two gaps. Omit the row (or write
   `none`) when nothing was out of reach. `ceiling_rationale` is the
   companion scalar: why concluding anyway is sound despite those gaps.

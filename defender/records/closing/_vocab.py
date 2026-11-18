@@ -115,6 +115,10 @@ def grounding_acceptable(value: str) -> bool:
 
 SUMMARY_BOUND = 1500
 NOTE_BOUND = 400
+#: A ceiling receipt's `cap`: model text, not a value (it names a capability the deployment does
+#: NOT have, so no closed vocabulary checks it). 64, as `lead`: room for a `<system>.<verb>` name
+#: or a short phrase, never a second note.
+CAP_BOUND = 64
 ANCHOR_ID_BOUND = 200
 LEAD_BOUND = 64
 RESULT_BOUND = 400

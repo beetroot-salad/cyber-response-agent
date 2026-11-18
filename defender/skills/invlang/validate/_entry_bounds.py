@@ -1,7 +1,8 @@
 """The closing record's entry bounds, checked at the write gate and again at the close (#1534 OD16).
 
 Over every parsed ceiling row (accepted by the walker or not) and every parsed baseline row, for
-every disposition: each model-text field's treated length against its bound, the ceiling count
+every disposition: each model-text field's treated length against its bound (a receipt's `note`
+and `cap`; a baseline's lead, anchor id, result and reasoning), the ceiling count
 cap, and each column's aggregate of rendered lines. The close's record builder measures the same
 treated text with the same line renderers, so for a document these accept it changes nothing.
 A row's other faults are the walkers' to report; this measures only size."""
@@ -40,7 +41,14 @@ def _ceiling_refusals(companion: CompanionBody) -> list[str]:
             errors.append(
                 f"`ceiling_test` row {row!r}: its `note` is {len(note)} characters once treated, over the "
                 f"{closing.NOTE_BOUND}-character bound — shorten the note; it is free text for the analyst")
-        lines.append(closing.ceiling_line_of(state=receipt.state, ref=receipt.ref, cap=receipt.cap, note=note))
+        # `cap` is model text too (no closed vocabulary checks it): measured treated, as the record holds it.
+        cap = closing.treat(receipt.cap, None) if receipt.cap is not None else None
+        if cap is not None and len(cap) > closing.CAP_BOUND:
+            errors.append(
+                f"`ceiling_test` row {row!r}: its `cap` is {len(cap)} characters once treated, over the "
+                f"{closing.CAP_BOUND}-character bound — name the missing capability as `<system>` or "
+                f"`<system.verb>`; explain it in the note")
+        lines.append(closing.ceiling_line_of(state=receipt.state, ref=receipt.ref, cap=cap, note=note))
     if len(lines) > closing.CEILING_COUNT_CAP:
         errors.append(
             f"`ceiling_test` carries {len(lines)} receipts, over the cap of {closing.CEILING_COUNT_CAP} — name "

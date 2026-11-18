@@ -18,7 +18,7 @@ from defender._vocab import DISPOSITION_VALUES, HOST_ONLY_DISPOSITION
 
 from ._treat import treat
 from ._vocab import (
-    ANCHOR_ID_BOUND, ANCHOR_KINDS, BASELINE_LINES_BOUND, CAUSE_CEILING_EXAMINED,
+    ANCHOR_ID_BOUND, ANCHOR_KINDS, CAP_BOUND, BASELINE_LINES_BOUND, CAUSE_CEILING_EXAMINED,
     CAUSE_EVIDENCE_CANNOT_DISCRIMINATE, CAUSE_NOT_REVIEWED, CAUSE_NOTHING_LEFT_TO_ASK,
     CAUSE_REVIEW_INCOMPLETE, CAUSE_STORY_SETTLED, CAUSE_TURN_BUDGET_SPENT, CAUSES,
     CEILING_COUNT_CAP, CEILING_LINES_BOUND, CEILING_STATES, FAILURE_KINDS, FORCED_INCONCLUSIVE,
@@ -63,7 +63,8 @@ def canonical_instant(value: dt.datetime | str) -> str:
 @model(frozen=True)
 class CeilingEntry:
     """One ceiling receipt: `state` from `CEILING_STATES`, the host-checked `ref` (a lead id) or
-    `cap` (a capability), and the model's `note`."""
+    the model's `cap` (a capability the deployment lacks: treated text, bounded by `CAP_BOUND`,
+    since no closed vocabulary checks it), and the model's `note`."""
 
     state: str
     ref: str | None
@@ -73,13 +74,12 @@ class CeilingEntry:
     @model_validator(mode="before")
     @classmethod
     def _treat_text(cls, value: Any) -> Any:
-        return _treated(unwrap_before(cls, value), {"note": NOTE_BOUND})
+        return _treated(unwrap_before(cls, value), {"cap": CAP_BOUND, "note": NOTE_BOUND})
 
     def __post_init__(self) -> None:
         if self.state not in CEILING_STATES:
             raise ValueError(f"ceiling state {self.state!r} is not one of {CEILING_STATES}")
         _refuse_control("ref", self.ref)
-        _refuse_control("cap", self.cap)
 
 
 @model(frozen=True)
