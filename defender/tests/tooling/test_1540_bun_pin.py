@@ -1,73 +1,64 @@
-"""#1540 F6: every place that downloads a Bun release (CI workflow steps, dev images; found by search, not by a list)
-pins the same version and the same sha256, and checks that sha on the downloaded file before unpacking it.
+"""#1540 F6: Bun is downloaded in one place, `tooling/install-bun.sh`, which pins one version and one sha256 and checks
+that sha on the downloaded file before unpacking it. Every CI job and dev-image stage that runs a `bun` command runs
+that script itself (found by search, not by a list); nothing else downloads Bun or takes it from `setup-bun`.
 
 The check is a function over texts, so it also runs on a synthetic good input and on mutations of it: a check that
-cannot fail would be vacuous. It reads the install the way a shell would: `${VAR}`/`$VAR`/`${{ env.VAR }}` are
-replaced from the step's, job's and workflow's `env` (workflows) or the `ARG`/`ENV` defaults (Dockerfiles), so it does
-not care what the variables are called. It does need: the release URL spelled out (`.../releases/download/bun-vX.Y.Z/`),
-the sha256 as a literal hex in the verifying `sha256sum -c` line, and the download written to a named file (`-o`/`-O`).
+cannot fail would be vacuous. It reads the script the way a shell would: `${VAR}`/`$VAR` are replaced from the
+script's own upper-case assignments, so it does not care what the variables are called. It does need: the release URL
+spelled out (`.../releases/download/bun-vX.Y.Z/`), the sha256 as the literal value of a variable or a literal hex in
+the verifying `sha256sum -c` line, and the download written to a named file (`-o`/`-O`).
 """
 from __future__ import annotations
 
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass, field
 
 import pytest
 import yaml
 
 from defender._git import REPO_ROOT
 
+SCRIPT = "tooling/install-bun.sh"
 _DOWNLOAD = "oven-sh/bun/releases/download"
 _VERSION = re.compile(r"/releases/download/bun-v(\d+\.\d+\.\d+)/")
 _TARGET = re.compile(r"\s(?:-[A-Za-z]*[oO]|--output(?:-document)?)[ =](\S+)")
 _SHA_LINE = re.compile(r"\b([0-9a-f]{64})\s+\*?(\S+)")
 _VERIFY = re.compile(r"sha256sum\s+(?:-c|--check)\b|shasum\s+-a\s+256\s+(?:-c|--check)\b")
-
-
-@dataclass
-class Site:
-    label: str
-    version: str | None = None
-    sha: str | None = None
-    problems: list[str] = field(default_factory=list)
+_ASSIGNMENT = re.compile(r"^([A-Z][A-Z0-9_]*)=(\S+)$", re.M)
+#: A `bun` command word in a shell text: not a path's last segment (`/usr/local/bin/bun`) or part of a name (`bun-v1`,
+#: `install-bun.sh`).
+_BUN_COMMAND = re.compile(r"(?<![\w./-])bun(?=\s|$)", re.M)
 
 
 def _expand(text: str, env: Mapping[str, str]) -> str:
     def name(match: re.Match[str]) -> str:
         return str(env.get(match.group(1), match.group(0)))
 
-    for pattern in (r"\$\{\{\s*env\.(\w+)\s*\}\}", r"\$\{(\w+)\}", r"\$(\w+)"):
+    for pattern in (r"\$\{(\w+)\}", r"\$(\w+)"):
         text = re.sub(pattern, name, text)
     return text
 
 
-def _analyse(label: str, text: str) -> Site:
-    site = Site(label)
-    found = _VERSION.search(text)
-    if found:
-        site.version = found.group(1)
-    else:
-        site.problems.append("the release URL does not spell out `bun-vX.Y.Z`")
+def script_problems(text: str) -> list[str]:
+    """What is wrong with the install script: its pin, its sha check, or the order of check and unpack."""
+    text = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
+    env = {key: value.strip("\"'") for key, value in _ASSIGNMENT.findall(text)}
+    text = _expand(text, env)
+    problems = []
+    if not _VERSION.search(text):
+        problems.append("the release URL does not spell out `bun-vX.Y.Z`")
     target = _TARGET.search(text)
     if not target:
-        site.problems.append("the download is not written to a named file (`-o FILE`)")
-        return site
+        return [*problems, "the download is not written to a named file (`-o FILE`)"]
     path = target.group(1).strip("\"'")
     checks = [m for m in _SHA_LINE.finditer(text) if m.group(2).strip("\"'") == path]
     verify = _VERIFY.search(text)
     if not checks or not verify:
-        site.problems.append(f"no sha256 check of {path}: need a literal sha256 line for it and `sha256sum -c`")
-        return site
-    site.sha = checks[0].group(1)
+        return [*problems, f"no sha256 check of {path}: need a literal sha256 line for it and `sha256sum -c`"]
     unpack = re.search(r"\bunzip\b", text)
     if unpack and unpack.start() < verify.start():
-        site.problems.append("the zip is unpacked before its sha256 is checked")
-    return site
-
-
-#: A `bun` command word in a shell text: not a path's last segment (`/usr/local/bin/bun`) or part of a name (`bun-v1`).
-_BUN_COMMAND = re.compile(r"(?<![\w./-])bun(?=\s|$)", re.M)
+        problems.append("the zip is unpacked before its sha256 is checked")
+    return problems
 
 
 def _instructions(text: str) -> list[str]:
@@ -76,102 +67,68 @@ def _instructions(text: str) -> list[str]:
     return [line.strip() for line in joined.splitlines() if line.strip()]
 
 
-def _dockerfile_sites(label: str, text: str) -> list[Site]:
-    env: dict[str, str] = {}
-    sites = []
+def _dockerfile(label: str, text: str) -> dict[str, set[str]]:
+    """Per stage of a Dockerfile: whether it runs `bun`, runs the script, copies the script in, or downloads Bun."""
+    found: dict[str, set[str]] = {}
     stage = 0
     for instruction in _instructions(text):
         words = instruction.split(None, 1)
         if words[0] == "FROM":
             stage += 1
-        if words[0] in {"ARG", "ENV"} and len(words) > 1:
-            for pair in words[1].split():
-                key, sep, value = pair.partition("=")
-                if sep:
-                    env[key] = value.strip("\"'")
-        elif words[0] == "RUN" and _DOWNLOAD in _expand(instruction, env):
-            sites.append(_analyse(f"{label}:stage{stage}", _expand(instruction, env)))
-    return sites
-
-
-def _dockerfile_runners(label: str, text: str) -> set[str]:
-    """The stages of a Dockerfile whose `RUN` holds a `bun` command (the site's own `bun --version` included)."""
-    stage, found = 0, set()
-    for instruction in _instructions(text):
-        words = instruction.split(None, 1)
-        if words[0] == "FROM":
-            stage += 1
-        elif words[0] == "RUN" and len(words) > 1 and _BUN_COMMAND.search(words[1]):
-            found.add(f"{label}:stage{stage}")
+        rest = words[1] if len(words) > 1 else ""
+        marks = found.setdefault(f"{label}:stage{stage}", set())
+        if words[0] == "COPY" and SCRIPT in rest:
+            marks.add("copies")
+        if words[0] == "RUN":
+            if "install-bun.sh" in rest:
+                marks.add("installs")
+            if _BUN_COMMAND.search(rest):
+                marks.add("runs")
+            if _DOWNLOAD in rest:
+                marks.add("downloads")
     return found
 
 
-def _workflow_sites(label: str, text: str) -> list[Site]:
-    workflow = yaml.safe_load(text) or {}
-    sites = []
-    for job_id, job in (workflow.get("jobs") or {}).items():
+def _workflow(label: str, text: str) -> dict[str, set[str]]:
+    """Per job of a workflow: whether it runs `bun`, runs the script, downloads Bun, or uses `setup-bun`."""
+    found: dict[str, set[str]] = {}
+    for job_id, job in ((yaml.safe_load(text) or {}).get("jobs") or {}).items():
+        marks = found.setdefault(f"{label}:{job_id}", set())
         for step in job.get("steps") or []:
-            env = {**(workflow.get("env") or {}), **(job.get("env") or {}), **(step.get("env") or {})}
-            run = _expand(str(step.get("run", "")), {k: str(v) for k, v in env.items()})
+            run = str(step.get("run", ""))
+            if SCRIPT in run:
+                marks.add("installs")
+            if _BUN_COMMAND.search(run):
+                marks.add("runs")
             if _DOWNLOAD in run:
-                sites.append(_analyse(f"{label}:{job_id}", run))
-    return sites
-
-
-def _workflow_runners(label: str, text: str) -> tuple[set[str], list[str]]:
-    """The jobs of a workflow whose steps run a `bun` command, and each step that takes Bun from `setup-bun`."""
-    workflow = yaml.safe_load(text) or {}
-    runners, setups = set(), []
-    for job_id, job in (workflow.get("jobs") or {}).items():
-        for step in job.get("steps") or []:
-            if _BUN_COMMAND.search(str(step.get("run", ""))):
-                runners.add(f"{label}:{job_id}")
+                marks.add("downloads")
             if "setup-bun" in str(step.get("uses", "")):
-                setups.append(f"{label}:{job_id}: Bun from `{step['uses']}`, not a pinned and checked download")
-    return runners, setups
+                marks.add("setup-bun")
+    return found
 
 
-def bun_runners(texts: Mapping[str, str]) -> tuple[set[str], list[str]]:
-    """Every workflow job and image stage in `texts` that runs a `bun` command, and every `setup-bun` step."""
-    runners: set[str] = set()
-    setups: list[str] = []
+def check_bun_comes_from_one_script(script: str, texts: Mapping[str, str]) -> None:
+    """F6: the script holds the one pin and checks it; two CI jobs (test, lint) and a dev image run it; every job or
+    image stage that runs `bun` runs it there too (an image stage after copying it in); nothing else downloads Bun or
+    takes it from `setup-bun`."""
+    problems = [f"{SCRIPT}: {p}" for p in script_problems(script)]
+    places: dict[str, set[str]] = {}
     for label, text in texts.items():
-        if label.endswith((".yml", ".yaml")):
-            found, steps = _workflow_runners(label, text)
-            runners |= found
-            setups += steps
-        else:
-            runners |= _dockerfile_runners(label, text)
-    return runners, setups
-
-
-def bun_sites(texts: Mapping[str, str]) -> list[Site]:
-    """Every Bun download in the given `{path: text}` (`*.yml`/`*.yaml` as workflows, the rest as Dockerfiles)."""
-    sites: list[Site] = []
-    for label, text in texts.items():
-        if _DOWNLOAD not in text:
-            continue
-        sites += _workflow_sites(label, text) if label.endswith((".yml", ".yaml")) else _dockerfile_sites(label, text)
-    return sites
-
-
-def check_every_bun_install_holds_one_pin(texts: Mapping[str, str]) -> None:
-    """F6: Bun is installed in two CI jobs (test, lint) and a dev image; all sites share version and sha256, and each
-    verifies the sha it pins. Every job or image stage that runs a `bun` command gets it from such a site in that same
-    job or stage, never from `setup-bun` or from another job's site."""
-    sites = bun_sites(texts)
-    problems = [f"{s.label}: {p}" for s in sites for p in s.problems]
+        places |= _workflow(label, text) if label.endswith((".yml", ".yaml")) else _dockerfile(label, text)
+    for place, marks in sorted(places.items()):
+        if "downloads" in marks:
+            problems.append(f"{place}: downloads Bun itself; run {SCRIPT} instead")
+        if "setup-bun" in marks:
+            problems.append(f"{place}: Bun from `setup-bun`, not {SCRIPT}")
+        if "runs" in marks and "installs" not in marks:
+            problems.append(f"{place}: runs `bun` but does not run {SCRIPT} in the same job or stage")
+        if "installs" in marks and ":stage" in place and "copies" not in marks:
+            problems.append(f"{place}: runs {SCRIPT} without copying it into that stage")
     assert not problems, problems
-    jobs = {s.label for s in sites if ".yml" in s.label or ".yaml" in s.label}
-    images = [s for s in sites if ".yml" not in s.label and ".yaml" not in s.label]
-    assert len(jobs) >= 2, f"expected a Bun install in two workflow jobs, found {[s.label for s in sites]}"
-    assert images, f"expected a Bun install in a dev image, found {[s.label for s in sites]}"
-    assert len({s.version for s in sites}) == 1, {s.label: s.version for s in sites}
-    assert len({s.sha for s in sites}) == 1, {s.label: s.sha for s in sites}
-    runners, setups = bun_runners(texts)
-    assert not setups, setups
-    unpinned = sorted(runners - {s.label for s in sites})
-    assert not unpinned, f"these run `bun` but get it from no pinned site in the same job or stage: {unpinned}"
+    jobs = sorted(p for p, m in places.items() if "installs" in m and ":stage" not in p)
+    images = sorted(p for p, m in places.items() if "installs" in m and ":stage" in p)
+    assert len(jobs) >= 2, f"expected {SCRIPT} run in two workflow jobs, found {jobs}"
+    assert images, f"expected {SCRIPT} run in a dev image, found {sorted(places)}"
 
 
 def _repo_texts() -> dict[str, str]:
@@ -182,80 +139,88 @@ def _repo_texts() -> dict[str, str]:
     return {str(p.relative_to(REPO_ROOT)): p.read_text(encoding="utf-8") for p in [*workflows, *images]}
 
 
-def test_1540_f6_every_bun_install_in_ci_and_the_dev_image_holds_the_same_pinned_version_and_sha256():
-    """Bun installs found by search share one version and sha256, each checked before unpacking. (F6)"""
-    check_every_bun_install_holds_one_pin(_repo_texts())
+def test_1540_f6_bun_comes_from_the_one_pinned_and_checked_install_script_everywhere_it_runs():
+    """CI's jobs and the dev image get Bun from `tooling/install-bun.sh`, which pins and checks it. (F6)"""
+    check_bun_comes_from_one_script((REPO_ROOT / SCRIPT).read_text(encoding="utf-8"), _repo_texts())
 
 
 # --- the check itself can fail ---------------------------------------------------------------------
 
 SHA = "a" * 64
-OTHER_SHA = "b" * 64
-_STEP = """
-      - name: Install Bun
-        env:
-          BUN_VERSION: 1.4.4
-          BUN_SHA256: {sha}
-        run: |
-          curl -fsSL -o /tmp/bun.zip "https://github.com/oven-sh/bun/releases/download/bun-v${{BUN_VERSION}}/bun-linux-x64.zip"
-          echo "${{BUN_SHA256}}  /tmp/bun.zip" | sha256sum -c -
-          sudo unzip -j /tmp/bun.zip -d /usr/local/bin
+GOOD_SCRIPT = f"""#!/bin/sh
+# Needs curl, sha256sum and unzip.
+set -eu
+BUN_VERSION=1.4.4
+BUN_SHA256={SHA}
+curl -fsSL -o "$work/bun.zip" "https://github.com/oven-sh/bun/releases/download/bun-v${{BUN_VERSION}}/bun-linux-x64.zip"
+echo "${{BUN_SHA256}}  $work/bun.zip" | sha256sum -c -
+unzip -q "$work/bun.zip" -d "$work"
 """
+_INSTALL = "      - run: sudo sh tooling/install-bun.sh\n"
 _RUNS_BUN = "      - run: bun install --frozen-lockfile\n"
-_DECOY_JOB = "  decoy:\n    runs-on: x\n    steps:" + _STEP.format(sha=SHA)
+_INLINE = ('      - run: curl -fsSL -o /tmp/b.zip "https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/x.zip"\n')
 GOOD = {
-    ".github/workflows/ci.yml": "on: push\njobs:\n  test:\n    runs-on: x\n    steps:" + _STEP.format(sha=SHA)
-    + "  lint:\n    runs-on: x\n    steps:" + _STEP.format(sha=SHA) + _RUNS_BUN,
-    ".devcontainer/Dockerfile.dev": (
-        "FROM x\nARG BUN_VERSION=1.4.4\nARG BUN_SHA256=" + SHA + "\n"
-        'RUN curl -fsSL -o /tmp/bun.zip "https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/bun-linux-x64.zip" \\\n'
-        '    && echo "${BUN_SHA256}  /tmp/bun.zip" | sha256sum -c - \\\n'
-        "    && unzip -j /tmp/bun.zip -d /usr/local/bin\n"
-        "RUN bun --version\n"),
+    ".github/workflows/ci.yml": "on: push\njobs:\n  test:\n    runs-on: x\n    steps:\n" + _INSTALL
+    + "  lint:\n    runs-on: x\n    steps:\n" + _INSTALL + _RUNS_BUN,
+    ".devcontainer/Dockerfile.dev": ("FROM x\nCOPY tooling/install-bun.sh /tmp/install-bun.sh\n"
+                                     "RUN sh /tmp/install-bun.sh && rm /tmp/install-bun.sh\nRUN bun --version\n"),
 }
 
 
-def _mutated(path: str, old: str, new: str, *, count: int = 1) -> dict[str, str]:
+def _mutated(path: str, old: str, new: str) -> dict[str, str]:
     assert old in GOOD[path], f"control: {old!r} is in the good text"
-    return {**GOOD, path: GOOD[path].replace(old, new, count)}
+    return {**GOOD, path: GOOD[path].replace(old, new, 1)}
 
 
-MUTATIONS = {
-    "version-differs-in-one-job": _mutated(".github/workflows/ci.yml", "1.4.4", "1.4.3"),
-    "version-differs-in-the-image": _mutated(".devcontainer/Dockerfile.dev", "ARG BUN_VERSION=1.4.4", "ARG BUN_VERSION=1.4.3"),
-    "sha-differs-in-one-job": _mutated(".github/workflows/ci.yml", SHA, OTHER_SHA),
-    "sha-differs-in-the-image": _mutated(".devcontainer/Dockerfile.dev", "BUN_SHA256=" + SHA, "BUN_SHA256=" + OTHER_SHA),
-    "no-sha-check-in-a-job": _mutated(".github/workflows/ci.yml", '          echo "${BUN_SHA256}  /tmp/bun.zip" | sha256sum -c -\n', ""),
-    "no-sha-check-in-the-image": _mutated(".devcontainer/Dockerfile.dev", '    && echo "${BUN_SHA256}  /tmp/bun.zip" | sha256sum -c - \\\n', ""),
-    "sha-names-another-file": _mutated(".devcontainer/Dockerfile.dev", "  /tmp/bun.zip\" | sha256sum", "  /tmp/other.zip\" | sha256sum"),
-    "checked-after-unpacking": _mutated(
-        ".devcontainer/Dockerfile.dev", '    && echo "${BUN_SHA256}  /tmp/bun.zip" | sha256sum -c - \\\n    && unzip -j /tmp/bun.zip -d /usr/local/bin\n',
-        '    && unzip -j /tmp/bun.zip -d /usr/local/bin \\\n    && echo "${BUN_SHA256}  /tmp/bun.zip" | sha256sum -c -\n'),
-    "a-fourth-site-in-another-image-with-another-pin": {
-        **GOOD, ".devcontainer/Dockerfile.job": GOOD[".devcontainer/Dockerfile.dev"].replace(SHA, OTHER_SHA)},
-    "a-job-without-bun": {**GOOD, ".github/workflows/ci.yml": GOOD[".github/workflows/ci.yml"].split("  lint:")[0]},
-    "no-dev-image": {k: v for k, v in GOOD.items() if "Dockerfile" not in k},
-    "a-job-takes-bun-from-setup-bun-with-a-decoy-pin-in-another-job": {
-        **GOOD, ".github/workflows/ci.yml": GOOD[".github/workflows/ci.yml"].replace(
-            "  lint:\n    runs-on: x\n    steps:" + _STEP.format(sha=SHA),
-            "  lint:\n    runs-on: x\n    steps:\n      - uses: oven-sh/setup-bun@v2\n        with:\n          bun-version: latest\n")
-        + _DECOY_JOB},
-    "a-job-runs-bun-with-no-site-of-its-own": {
+def _script(old: str, new: str) -> str:
+    assert old in GOOD_SCRIPT, f"control: {old!r} is in the good script"
+    return GOOD_SCRIPT.replace(old, new, 1)
+
+
+SCRIPT_MUTATIONS = {
+    "version-not-spelled-out": _script("bun-v${BUN_VERSION}/", "latest/"),
+    "no-sha-check": _script('echo "${BUN_SHA256}  $work/bun.zip" | sha256sum -c -\n', ""),
+    "sha-names-another-file": _script('  $work/bun.zip" | sha256sum', '  $work/other.zip" | sha256sum'),
+    "checked-after-unpacking": _script(
+        'echo "${BUN_SHA256}  $work/bun.zip" | sha256sum -c -\nunzip -q "$work/bun.zip" -d "$work"\n',
+        'unzip -q "$work/bun.zip" -d "$work"\necho "${BUN_SHA256}  $work/bun.zip" | sha256sum -c -\n'),
+    "no-named-download-file": _script('-o "$work/bun.zip" ', ""),
+}
+
+TEXT_MUTATIONS = {
+    "a-job-downloads-bun-itself": {**GOOD, ".github/workflows/ci.yml": GOOD[".github/workflows/ci.yml"] + _INLINE},
+    "the-image-downloads-bun-itself": _mutated(
+        ".devcontainer/Dockerfile.dev", "RUN bun --version\n",
+        'RUN curl -o /tmp/b.zip "https://github.com/oven-sh/bun/releases/download/bun-v1.4.3/x.zip"\nRUN bun --version\n'),
+    "a-job-takes-bun-from-setup-bun": _mutated(
+        ".github/workflows/ci.yml", "  lint:\n    runs-on: x\n    steps:\n" + _INSTALL,
+        "  lint:\n    runs-on: x\n    steps:\n      - uses: oven-sh/setup-bun@v2\n" + _INSTALL),
+    "a-job-runs-bun-without-the-script": {
         **GOOD, ".github/workflows/ci.yml": GOOD[".github/workflows/ci.yml"] + "  other:\n    runs-on: x\n    steps:\n" + _RUNS_BUN},
     "an-image-stage-runs-bun-installed-in-another-stage": {
         **GOOD, ".devcontainer/Dockerfile.dev": GOOD[".devcontainer/Dockerfile.dev"] + "FROM y\nRUN bun install\n"},
+    "the-image-runs-the-script-without-copying-it": _mutated(
+        ".devcontainer/Dockerfile.dev", "COPY tooling/install-bun.sh /tmp/install-bun.sh\n", ""),
+    "only-one-job-runs-the-script": {**GOOD, ".github/workflows/ci.yml": GOOD[".github/workflows/ci.yml"].split("  lint:")[0]},
+    "no-dev-image": {k: v for k, v in GOOD.items() if "Dockerfile" not in k},
 }
 
 
-def test_1540_f6_the_pin_check_accepts_a_good_set_of_sites():
-    """Positive control for the mutations below: the synthetic sites pass and are all found. (F6)"""
-    check_every_bun_install_holds_one_pin(GOOD)
-    assert len(bun_sites(GOOD)) == 3
+def test_1540_f6_the_pin_check_accepts_a_good_script_and_good_sites():
+    """Positive control for the mutations below. (F6)"""
+    check_bun_comes_from_one_script(GOOD_SCRIPT, GOOD)
 
 
-@pytest.mark.parametrize("texts", MUTATIONS.values(), ids=MUTATIONS.keys())
-def test_1540_f6_the_pin_check_refuses_each_break(texts):
-    """A different version or sha at one site, a missing or misdirected sha check, a late check, a new site, a job or image
-    stage that runs `bun` without a pinned site of its own (setup-bun, another job's or stage's site). (F6)"""
+@pytest.mark.parametrize("script", SCRIPT_MUTATIONS.values(), ids=SCRIPT_MUTATIONS.keys())
+def test_1540_f6_the_pin_check_refuses_each_break_of_the_script(script):
+    """A version not spelled out, a missing or misdirected sha check, a check after unpacking, no named file. (F6)"""
     with pytest.raises(AssertionError):
-        check_every_bun_install_holds_one_pin(texts)
+        check_bun_comes_from_one_script(script, GOOD)
+
+
+@pytest.mark.parametrize("texts", TEXT_MUTATIONS.values(), ids=TEXT_MUTATIONS.keys())
+def test_1540_f6_the_pin_check_refuses_each_place_that_gets_bun_another_way(texts):
+    """A second download (a job, an image), `setup-bun`, a job or image stage that runs `bun` without running the script
+    itself, an image that runs it without copying it in, fewer than two jobs or no image running it. (F6)"""
+    with pytest.raises(AssertionError):
+        check_bun_comes_from_one_script(GOOD_SCRIPT, texts)

@@ -101,19 +101,10 @@ jobs:
 
       # #1161 B11: the browser tests (tests/frontend) build the frontend themselves (`bun install --frozen-lockfile
       # && bun run build`, once per run, in the test fixture) and start the repo's ingress, so this job installs only
-      # their tools and builds nothing. A missing tool fails those tests; they never skip. Bun is pinned by
-      # version and sha256 (#1540 F6), checked before it is unpacked; the same pin is in the lint job and the dev image.
-      - name: Install Bun 1.4.4
-        env:
-          BUN_VERSION: 1.4.4
-          BUN_SHA256: bf8ccbfb2b0b80159e0f9a6d15c55317add8077534dbc6130a3edb52fccb395c
-        run: |
-          curl -fsSL -o /tmp/bun.zip \
-            "https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/bun-linux-x64.zip"
-          echo "${BUN_SHA256}  /tmp/bun.zip" | sha256sum -c -
-          unzip -q /tmp/bun.zip -d /tmp/bun
-          sudo install -m 0755 /tmp/bun/bun-linux-x64/bun /usr/local/bin/bun
-          bun --version
+      # their tools and builds nothing. A missing tool fails those tests; they never skip. Bun comes from
+      # tooling/install-bun.sh (#1540 F6), the pinned release checked by sha256, as in the lint job and the dev image.
+      - name: Install Bun
+        run: sudo sh tooling/install-bun.sh
 
       # The ingress's Caddy, pinned: the release asset's sha256 (the same file whose sha512 the release's
       # caddy_2.11.9_checksums.txt lists) is checked before it is unpacked.
@@ -401,17 +392,8 @@ jobs:
         run: uv sync --extra dev --extra runtime --extra api --locked
 
       # The frontend's own gate (#1540 F6, F8): generated types, the type check, the source check, then the unit tests.
-      - name: Install Bun 1.4.4
-        env:
-          BUN_VERSION: 1.4.4
-          BUN_SHA256: bf8ccbfb2b0b80159e0f9a6d15c55317add8077534dbc6130a3edb52fccb395c
-        run: |
-          curl -fsSL -o /tmp/bun.zip \
-            "https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/bun-linux-x64.zip"
-          echo "${BUN_SHA256}  /tmp/bun.zip" | sha256sum -c -
-          unzip -q /tmp/bun.zip -d /tmp/bun
-          sudo install -m 0755 /tmp/bun/bun-linux-x64/bun /usr/local/bin/bun
-          bun --version
+      - name: Install Bun
+        run: sudo sh tooling/install-bun.sh
 
       - name: Frontend install
         working-directory: defender/frontend

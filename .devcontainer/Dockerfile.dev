@@ -73,16 +73,11 @@ RUN curl -fsSL -o /tmp/caddy.tgz "https://github.com/caddyserver/caddy/releases/
     && tar -xzf /tmp/caddy.tgz -C /usr/local/bin caddy \
     && rm /tmp/caddy.tgz
 
-# Bun, the frontend's package manager and command runner (#1540 F6): the same pinned release and checksum as CI's two
-# jobs, checked before it is unpacked. `unzip` is for it.
-ARG BUN_VERSION=1.4.4
-ARG BUN_SHA256=bf8ccbfb2b0b80159e0f9a6d15c55317add8077534dbc6130a3edb52fccb395c
+# Bun, the frontend's package manager and command runner (#1540 F6): tooling/install-bun.sh, the one pinned and
+# sha256-checked install CI's jobs run too. `unzip` is for it.
 RUN apt-get update && apt-get install -y --no-install-recommends unzip && rm -rf /var/lib/apt/lists/*
-RUN curl -fsSL -o /tmp/bun.zip "https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/bun-linux-x64.zip" \
-    && echo "${BUN_SHA256}  /tmp/bun.zip" | sha256sum -c - \
-    && unzip -q /tmp/bun.zip -d /tmp/bun \
-    && install -m 0755 /tmp/bun/bun-linux-x64/bun /usr/local/bin/bun \
-    && rm -rf /tmp/bun /tmp/bun.zip
+COPY tooling/install-bun.sh /tmp/install-bun.sh
+RUN sh /tmp/install-bun.sh && rm /tmp/install-bun.sh
 
 # Set working directory
 WORKDIR /workspace
