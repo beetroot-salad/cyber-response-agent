@@ -514,9 +514,10 @@ def wire_error(status: int, *, retry_after: str | None = None) -> WireAnswer:
 class FakeProvider:
     """A provider endpoint on 127.0.0.1: answers each POST from `answers` in order (the last one
     repeats) and counts every hit, with the real monotonic time it arrived (`hit_times`). A
-    context manager; `url` is its base URL."""
+    context manager; `url` is its base URL. `keep_alive`: it speaks HTTP/1.1 and keeps each
+    connection open, so a client pools it (the stdlib default closes after every answer)."""
 
-    def __init__(self, answers: Sequence[WireAnswer]) -> None:
+    def __init__(self, answers: Sequence[WireAnswer], *, keep_alive: bool = False) -> None:
         assert answers, "a fake provider needs at least one answer"
         self.answers = list(answers)
         self.hits: list[str] = []
@@ -525,6 +526,8 @@ class FakeProvider:
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1" if keep_alive else BaseHTTPRequestHandler.protocol_version
+
             def do_POST(self) -> None:  # noqa: N802 — the stdlib's name
                 length = int(self.headers.get("content-length") or 0)
                 self.rfile.read(length)
