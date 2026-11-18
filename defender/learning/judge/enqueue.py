@@ -591,16 +591,6 @@ class EpisodeFindings:
         return str(getattr(self._episode, self._record(channel)).path)
 
 
-@model
-class PublishReport:
-    """What one `publish_episode_findings` call put into the store: rows newly inserted as the
-    defender and questioner kinds (a row whose finding id the store already holds, whatever
-    became of it, is not counted)."""
-
-    appended: int = 0
-    world_appended: int = 0
-
-
 def held_findings(episode: formats.Episode) -> dict[str, Any]:
     """A completed job's findings field for its end record (#1487 Flow 1 step 1): every row its episode holds, by
     the store's kind, as `{"state": "ok", "text": <the rows as JSON text>}`, checked with the worker's own bounded
@@ -618,48 +608,3 @@ def held_findings(episode: formats.Episode) -> dict[str, Any]:
             return findings_field(None)
         held[_store_kind(channel)] = rows
     return findings_field(json.dumps(held))
-
-
-def publish_episode_findings(episode: formats.Episode, *, store: Any, tenant_id: str) -> PublishReport:
-    """Publish a job episode's held findings into the learning store `store` (its synchronous
-    face) for `tenant_id` (#1344 "Publishing", #1278 "Findings arrive"). Every row of both
-    channels is screened by its channel's own rule first, a NUL character included, so a held row
-    that fails it is `FindingsRefused` with nothing of the job's inserted in either kind; then
-    each kind is inserted, the store deduplicating by finding id for good, so a republish after a
-    crash, a concurrent post-step or an author's merge adds nothing. A row the store itself
-    refuses for good (`ItemRefused`) is `FindingsRefused` too. An episode with no findings held
-    publishes nothing. Anything else that fails (the episode cannot be read, the store cannot be
-    reached, the tenant is not active: `TenantInactive`) is raised as it is: the job stays
-    pending.
-
-    `episode` is the handle from the tenant's runs repository (`episode_files`): a library
-    function never makes a tenant out of a path."""
-    return _publish_held(episode, store=store, tenant_id=str(tenant_id))
-
-
-def _publish_held(episode: formats.Episode, *, store: Any, tenant_id: str) -> PublishReport:
-    sink = EpisodeFindings(episode)
-    where = _refusal_prefix(episode.dir)
-    held: dict[str, list[dict[str, Any]]] = {}
-    for channel, validate in ((FINDINGS, _validate_row), (QUESTIONER_FINDINGS, _validate_world_row)):
-        rows, malformed = sink.rows_report(channel)
-        if malformed:
-            raise FindingsRefused(f"{where}{malformed} held line(s) of {sink.describe(channel)} "
-                                  "are not finding rows, so the job's findings are not published")
-        for row in rows:
-            try:
-                validate(row, episode_dir=episode.dir)
-                _refuse_unstorable_row(row, where, channel.name)
-            except JudgeRefused as bad:
-                raise FindingsRefused(f"a held row fails the {channel.name} rule, so the job's "
-                                      f"findings are not published: {bad}") from None
-        held[channel.name] = rows
-    report = PublishReport()
-    run_id = Path(episode.dir).name
-    if held[FINDINGS.name]:
-        report.appended = _insert(store, tenant_id, run_id, held[FINDINGS.name], kind=_store_kind(FINDINGS))
-    if held[QUESTIONER_FINDINGS.name]:
-        report.world_appended = _insert(store, tenant_id, run_id, held[QUESTIONER_FINDINGS.name],
-                                        kind=_store_kind(QUESTIONER_FINDINGS))
-    return report
-
