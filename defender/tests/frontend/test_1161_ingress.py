@@ -35,13 +35,16 @@ def _csp(value: str) -> dict[str, list[str]]:
     return parsed
 
 
-def _assert_guarded(r: httpx.Response, what: str) -> None:
+REVALIDATED, KEPT = "no-cache", "public, max-age=31536000, immutable"
+
+
+def _assert_guarded(r: httpx.Response, what: str, cache: str = REVALIDATED) -> None:
     for name in GUARDED:
         assert len(r.headers.get_list(name)) == 1, (what, name, r.headers)
     assert {k: sorted(v) for k, v in CSP.items()} == _csp(r.headers["content-security-policy"]), what
     assert r.headers["referrer-policy"] == "strict-origin-when-cross-origin", what
     assert r.headers["x-content-type-options"] == "nosniff", what
-    assert r.headers.get_list("cache-control") == ["no-cache"], (what, r.headers)  # revalidated on every load
+    assert r.headers.get_list("cache-control") == [cache], (what, r.headers)
 
 
 @pytest.mark.parametrize("path", APP_PATHS)
@@ -80,19 +83,25 @@ class _Assets(HTMLParser):
 
 
 # Caddy's own error answers (a 400 to a malformed escape) are outside B9's header promise (owner ruling): untested.
-def test_1161_b9_every_built_file_carries_the_headers_and_is_revalidated_on_every_load(world, built_frontend):
-    """Every file under the built `dist/`, fetched through the ingress, answers 200 with the three headers and
-    `no-cache`, whatever the build named it: a browser never runs a cached app against a newer API. (B9, B11, F2)"""
+def test_1161_b9_every_built_file_carries_the_headers_and_only_content_named_files_are_kept(world, built_frontend):
+    """Every file under the built `dist/`, fetched through the ingress, answers 200 with the three headers. A file Vite
+    named by its content (under `assets/`) is kept for good; every other file, `index.html` (which names them) first, is
+    revalidated on every load, and so is the app a missing `assets/` path falls back to: a browser never runs a cached
+    app against a newer API. (B9, B11, F2)"""
     parsed = _Assets()
     parsed.feed(world.get("/").text)
     assert parsed.scripts, "positive control: the app references a script"
     assert parsed.styles, "positive control: the app references a stylesheet"
     built = sorted(p.relative_to(built_frontend).as_posix() for p in built_frontend.rglob("*") if p.is_file())
     assert {urllib.parse.urlsplit(a).path.lstrip("/") for a in (*parsed.scripts, *parsed.styles)} <= set(built)
+    assert any(name.startswith("assets/") for name in built), "positive control: the build names files by content"
     for name in built:
         r = world.get("/" + urllib.parse.quote(name))
         assert r.status_code == 200, name
-        _assert_guarded(r, name)
+        _assert_guarded(r, name, KEPT if name.startswith("assets/") else REVALIDATED)
+    missing = world.get("/assets/zz-not-built.js")
+    assert missing.text == world.get("/").text, "a missing asset path is the app's document"
+    _assert_guarded(missing, "a missing asset path")
 
 
 def test_1540_f1_the_built_landing_page_loads_from_the_apps_own_origin_with_nothing_inlined(world, context, requests):
