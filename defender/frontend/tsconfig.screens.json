@@ -1,0 +1,7 @@
+{
+  "//": "Everything outside src/shell/, compiled without the browser library (#1540 PR2, F8): no window, document, fetch, storage or location exists here, so only the shell can use them. What screens may use of the browser is declared in screens-env.d.ts. Checked by scripts/source-check.mjs.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "lib": ["ES2022"] },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "screens-env.d.ts"],
+  "exclude": ["src/shell/**"]
+}

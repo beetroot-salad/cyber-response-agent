@@ -1,99 +1,45 @@
-// The type check and the source check (#1540 F1 b, F8): one TypeScript program over the whole project (screens, shell and
-// unit-test files alike), whose diagnostics fail the run, and a scan of every source outside `src/shell/` and
-// `src/generated/` for what only the shell may do (PR2). A function only: `scripts/check.mjs` (`bun run check`) and
+// The type check and the source check (#1540 F1 b, F8). A function only: `scripts/check.mjs` (`bun run check`) and
 // `scripts/build.mjs` call it in their own process, so no command depends on how it was started.
+//
+// 1. The whole project (screens, shell and unit-test files alike) is type-checked with the browser library.
+// 2. Everything outside `src/shell/` is type-checked again without it (`tsconfig.screens.json`), with only what
+//    `screens-env.d.ts` declares. There `window`, `document`, `fetch`, storage and `location` do not exist, and React's
+//    types give a DOM element no members beyond those declared, so no route to the network, storage or the address can be
+//    written there, however it is spelled (PR2). The compiler is the boundary; nothing below lists the browser's names.
+// 3. A few syntactic rules keep the compiler honest outside the shell: no value of type `any` and no type assertion
+//    (either could claim a value is anything), no comment that switches type checking off, imports from the shell only of
+//    `src/shell/provider` (types from anywhere in it), no import of a test file into the app, and no `/api/auth/` path in
+//    a string. That last one is a guard against an accident, not a boundary: a string can be built any way.
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
-
 const AUTH_PREFIX = "/api/auth/";
+const SCREENS_HINT = "(outside src/shell/ the browser library does not exist: src/shell/ owns the network, storage and the "
+  + "address, and screens-env.d.ts declares what else a screen may use)";
 
-// PR2 by its roots, not by a list of the DOM's network, storage and navigation names. Every way to those starts at a value
-// the DOM library declares globally (`window`, `document`, `fetch`, `localStorage`, `location`, ...) or at `globalThis`,
-// or at a value of one of those globals' own types (`Window`, `Document`, `Storage`, ...). Outside the shell no such
-// value may be named, no such type may be written, and no expression may have such a type, however it was reached (a
-// parameter, a React ref's `ownerDocument`, an event's `view`). So how a member is then read (`.x`, `["x"]`,
-// destructuring, an alias) does not matter. A module outside the shell imports from it only `src/shell/provider`
-// (types from anywhere in it): the shell's other modules are its own. No module imports a test file.
-
-function isDomLibrary(sourceFile) {
-  return /[\\/]lib\.(dom|webworker)[^\\/]*\.d\.ts$/.test(sourceFile.fileName);
-}
-
-/** The names of the DOM library's global values, and of the named types they are declared with. */
-function domGlobals(program) {
-  const values = new Set();
-  const types = new Set();
-  for (const file of program.getSourceFiles()) {
-    if (!isDomLibrary(file)) continue;
-    for (const statement of file.statements) {
-      if (ts.isFunctionDeclaration(statement) && statement.name) values.add(statement.name.text);
-      if (!ts.isVariableStatement(statement)) continue;
-      for (const declaration of statement.declarationList.declarations) {
-        if (!ts.isIdentifier(declaration.name)) continue;
-        values.add(declaration.name.text);
-        const type = declaration.type;
-        for (const part of type && ts.isIntersectionTypeNode(type) ? type.types : type ? [type] : []) {
-          if (ts.isTypeReferenceNode(part) && ts.isIdentifier(part.typeName)) types.add(part.typeName.text);
-        }
-      }
+function program(config) {
+  const configPath = path.join(root, config);
+  const read = ts.readConfigFile(configPath, ts.sys.readFile);
+  if (read.error) return { problems: [`${config}: ${ts.flattenDiagnosticMessageText(read.error.messageText, "\n")}`] };
+  const parsed = ts.parseJsonConfigFileContent(read.config, ts.sys, root, undefined, configPath);
+  const made = ts.createProgram({ rootNames: parsed.fileNames, options: parsed.options });
+  const problems = [];
+  for (const diagnostic of ts.getPreEmitDiagnostics(made)) {
+    const text = ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n");
+    if (diagnostic.file && diagnostic.start !== undefined) {
+      const { line } = diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start);
+      problems.push(`${path.relative(root, diagnostic.file.fileName)}:${line + 1}: TS${diagnostic.code}: ${text}`);
+    } else {
+      problems.push(`TS${diagnostic.code}: ${text}`);
     }
   }
-  return { values, types };
-}
-
-/** True when `symbol` is the DOM library's own global: declared at a DOM library file's top level (a member such as
- * `Document.location` or `HTMLElement.focus` is not), and nowhere in the project's own sources (a local is not). */
-function isDomGlobal(symbol) {
-  const declarations = symbol?.declarations ?? [];
-  const topLevel = (declaration) => {
-    const file = declaration.getSourceFile();
-    const statement = ts.isVariableDeclaration(declaration) ? declaration.parent.parent : declaration;
-    return isDomLibrary(file) && statement.parent === file;
-  };
-  return declarations.some(topLevel) && declarations.every((declaration) => declaration.getSourceFile().isDeclarationFile);
-}
-
-/** True when `type`, or a member of it as a union or intersection, is one of the DOM globals' own types. */
-function hasGlobalType(type, types, seen = new Set()) {
-  if (seen.has(type)) return false;
-  seen.add(type);
-  if (type.isUnionOrIntersection()) return type.types.some((member) => hasGlobalType(member, types, seen));
-  const symbol = type.getSymbol() ?? type.aliasSymbol;
-  return symbol !== undefined && types.has(symbol.name) && isDomGlobal(symbol);
-}
-
-/** True when the object or array literal is the left side of `=`, the head of a `for…of`/`for…in`, or nested in such a
- * pattern: a destructuring assignment, whose parts are reached without an expression of their type. */
-function isAssignmentPattern(node) {
-  let child = node;
-  let parent = node.parent;
-  while (parent) {
-    if (ts.isBinaryExpression(parent)) return parent.left === child && parent.operatorToken.kind === ts.SyntaxKind.EqualsToken;
-    if (ts.isForOfStatement(parent) || ts.isForInStatement(parent)) return parent.initializer === child;
-    if (ts.isParenthesizedExpression(parent) || ts.isArrayLiteralExpression(parent) || ts.isPropertyAssignment(parent)
-        || ts.isObjectLiteralExpression(parent) || ts.isShorthandPropertyAssignment(parent) || ts.isSpreadElement(parent)) {
-      child = parent;
-      parent = parent.parent;
-      continue;
-    }
-    return false;
-  }
-  return false;
-}
-
-/** True when `node` is the name in a type reference (`x: Window`), where a type, not a value, is meant. */
-function isTypeName(node) {
-  let child = node;
-  while (ts.isQualifiedName(child.parent)) child = child.parent;
-  return ts.isTypeReferenceNode(child.parent) && child.parent.typeName === child;
+  return { program: made, problems };
 }
 
 /** True when the import or export moves only types (`import type`, `export type`, or every name marked `type`). */
 function typeOnly(node) {
-  if (ts.isImportTypeNode(node)) return true;
   if (ts.isExportDeclaration(node)) return node.isTypeOnly;
   if (ts.isCallExpression(node)) return false;
   const clause = node.importClause;
@@ -104,84 +50,70 @@ function typeOnly(node) {
     && named.elements.every((element) => element.isTypeOnly);
 }
 
-export function check() {
-  const configPath = path.join(root, "tsconfig.json");
-  const read = ts.readConfigFile(configPath, ts.sys.readFile);
-  if (read.error) return [ts.flattenDiagnosticMessageText(read.error.messageText, "\n")];
-  const config = ts.parseJsonConfigFileContent(read.config, ts.sys, root);
-  const program = ts.createProgram({ rootNames: config.fileNames, options: config.options });
-  const problems = [];
-  for (const diagnostic of ts.getPreEmitDiagnostics(program)) {
-    const text = ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n");
-    if (diagnostic.file && diagnostic.start !== undefined) {
-      const { line } = diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start);
-      problems.push(`${path.relative(root, diagnostic.file.fileName)}:${line + 1}: TS${diagnostic.code}: ${text}`);
-    } else {
-      problems.push(`TS${diagnostic.code}: ${text}`);
-    }
-  }
-  if (problems.length > 0) return problems;
+/** True for `x as const`, the one assertion that claims nothing about what a value is. */
+function isConstAssertion(node) {
+  return ts.isTypeReferenceNode(node.type) && ts.isIdentifier(node.type.typeName) && node.type.typeName.text === "const";
+}
 
-  const checker = program.getTypeChecker();
-  const { values, types } = domGlobals(program);
+export function check() {
+  const whole = program("tsconfig.json");
+  if (whole.problems.length > 0) return whole.problems;
+  const screens = program("tsconfig.screens.json");
+  if (!screens.program) return screens.problems;
+
+  const checker = screens.program.getTypeChecker();
   const src = path.join(root, "src") + path.sep;
   const shell = path.join(root, "src", "shell") + path.sep;
   const generated = path.join(root, "src", "generated") + path.sep;
   const door = path.join(root, "src", "shell", "provider");
-  for (const file of program.getSourceFiles()) {
+  const problems = [];
+  for (const file of screens.program.getSourceFiles()) {
     const name = path.resolve(file.fileName);
     if (!name.startsWith(src) || name.startsWith(shell) || name.startsWith(generated)) continue;
     const isTest = /\.test\.tsx?$/.test(name); // never bundled into the app, so it may import the module it tests
     const report = (node, what) => {
       const { line } = file.getLineAndCharacterOfPosition(node.getStart(file));
-      problems.push(`${path.relative(root, name)}:${line + 1}: only the shell may use ${what} (src/shell/ owns the network, storage and the address)`);
+      problems.push(`${path.relative(root, name)}:${line + 1}: outside the shell, ${what} ${SCREENS_HINT}`);
     };
+    for (const match of file.text.matchAll(/@ts-(ignore|expect-error|nocheck)\b/g)) {
+      const { line } = file.getLineAndCharacterOfPosition(match.index);
+      problems.push(`${path.relative(root, name)}:${line + 1}: outside the shell, no comment may switch type checking off (${match[0]})`);
+    }
     const importsFrom = (node, specifier) => {
-      if (isTest || typeOnly(node)) return;
       if (!specifier || !ts.isStringLiteralLike(specifier)) {
-        report(node, "an import whose path is not written out");
+        report(node, "an import's path must be written out");
         return;
       }
-      const resolved = ts.resolveModuleName(specifier.text, file.fileName, program.getCompilerOptions(), ts.sys).resolvedModule;
+      const resolved = ts.resolveModuleName(specifier.text, file.fileName, screens.program.getCompilerOptions(), ts.sys).resolvedModule;
       const target = resolved ? path.resolve(resolved.resolvedFileName) : path.resolve(path.dirname(name), specifier.text);
+      if (/\.test\.tsx?$/.test(target)) report(node, `no module may import a test file (${path.relative(root, target)})`);
+      if (isTest || typeOnly(node)) return;
       if (target.startsWith(shell) && target.replace(/\.(d\.)?tsx?$/, "") !== door) {
-        report(node, `${path.relative(root, target)} (import the shell's hooks from src/shell/provider)`);
+        report(node, `a module imports from the shell only src/shell/provider, not ${path.relative(root, target)}`);
       }
-      if (/\.test\.tsx?$/.test(target)) report(node, `${path.relative(root, target)} (a test file is never part of the app)`);
     };
     const visit = (node) => {
-      if (ts.isStringLiteralLike(node) || ts.isTemplateHead(node)) {
-        if (node.text.startsWith(AUTH_PREFIX)) report(node, `a path under ${AUTH_PREFIX}`);
+      if (ts.isStringLiteralLike(node) || ts.isTemplateHead(node) || ts.isTemplateMiddle(node) || ts.isTemplateTail(node)) {
+        if (node.text.includes(AUTH_PREFIX)) report(node, `a path under ${AUTH_PREFIX} is the shell's`);
       }
       if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
         if (node.moduleSpecifier) importsFrom(node, node.moduleSpecifier);
       } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
         importsFrom(node, node.arguments[0]);
       }
-      if (ts.isIdentifier(node)) {
-        const symbol = ts.isShorthandPropertyAssignment(node.parent) && node.parent.name === node
-          ? checker.getShorthandAssignmentValueSymbol(node.parent)
-          : checker.getSymbolAtLocation(node);
-        if (symbol && symbol.name === "globalThis" && !(symbol.declarations ?? []).some((d) => !d.getSourceFile().isDeclarationFile)) {
-          report(node, "globalThis");
-        } else if (isTypeName(node)) {
-          if (types.has(node.text) && isDomGlobal(symbol)) report(node, `the type ${node.text}`);
-        } else if (values.has(node.text) && isDomGlobal(symbol)) {
-          report(node, node.text);
-        }
+      if ((ts.isAsExpression(node) && !isConstAssertion(node)) || ts.isTypeAssertionExpression(node)) {
+        report(node, "no type assertion (only `as const`): it could claim a value is anything");
       }
-      // A destructuring pattern unpacks a value no expression names, so the pattern's own type is checked as well.
-      let type;
-      if ((ts.isIdentifier(node) && !isTypeName(node)) || ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)
-          || ts.isCallExpression(node) || ts.isObjectBindingPattern(node) || ts.isArrayBindingPattern(node)) {
-        type = checker.getTypeAtLocation(node);
-      } else if ((ts.isObjectLiteralExpression(node) || ts.isArrayLiteralExpression(node)) && isAssignmentPattern(node)) {
-        type = checker.getTypeOfAssignmentPattern(node);
+      if (node.kind === ts.SyntaxKind.AnyKeyword) report(node, "no `any`: it could hold anything");
+      if ((ts.isCallExpression(node) || ts.isNewExpression(node) || ts.isPropertyAccessExpression(node)
+           || ts.isElementAccessExpression(node)) && (checker.getTypeAtLocation(node).flags & ts.TypeFlags.Any)) {
+        report(node, "no value of type `any`: it could hold anything");
       }
-      if (type && hasGlobalType(type, types)) report(node, `a value of type ${checker.typeToString(type)}`);
       ts.forEachChild(node, visit);
     };
     visit(file);
   }
-  return [...new Set(problems)];
+  // The screens' compile and the rules both report: a file the compile refuses may break a rule too.
+  const compiled = screens.problems.length > 0 ? [...screens.problems, SCREENS_HINT] : [];
+  return [...new Set([...compiled, ...problems])];
 }

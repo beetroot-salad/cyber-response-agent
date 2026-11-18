@@ -6,6 +6,7 @@ import { PLACEHOLDERS, SHAPES } from "./generated/shapes";
 export type ShapeName = (typeof SHAPES)[number]["name"];
 
 const SEGMENT = /^\{([a-z]+)\}$/;
+const GRAMMARS: ReadonlyMap<string, string> = new Map(Object.entries(PLACEHOLDERS));
 
 function escapeLiteral(text: string): string {
   return text.replace(/[\\^$.*+?()[\]{}|/-]/g, "\\$&");
@@ -18,7 +19,7 @@ function compile(template: string): RegExp {
     .slice(1)
     .map((segment) => {
       const named = SEGMENT.exec(segment);
-      const grammar = named === null ? undefined : (PLACEHOLDERS as Record<string, string>)[named[1] ?? ""];
+      const grammar = named === null ? undefined : GRAMMARS.get(named[1] ?? "");
       return grammar ?? escapeLiteral(segment);
     });
   return new RegExp(`^(?:/${parts.join("/")})$`);

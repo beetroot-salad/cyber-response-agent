@@ -541,6 +541,15 @@ def _refused_corpus() -> dict[str, str]:
         "cookie from an element's document, for-of head": (
             "export const zzForm = (zzEl: HTMLElement) => { for (const { ownerDocument: { cookie } } of [zzEl])"
             " { return cookie; } return undefined; };"),
+        # What could claim a value is anything, so would reach the globals the screens' compile has not got.
+        "an element's document through an any cast": (
+            "export const zzForm = (zzEl: HTMLElement) => (zzEl as any).ownerDocument.defaultView.localStorage;"),
+        "an element's document through a cast to a made-up type": (
+            "export const zzForm = (zzEl: HTMLElement) =>"
+            " (zzEl as unknown as { ownerDocument: { cookie: string } }).ownerDocument.cookie;"),
+        "a parsed value of type any": "export const zzForm = (zzText: string) => JSON.parse(zzText).fetch;",
+        "type checking switched off by a comment": "// @ts-ignore\nexport const zzForm = window;",
+        "auth path in a template's middle": "export const zzForm = (zzBase: string) => `${zzBase}/api/auth/logout`;",
         "fetch from an element's window": (
             'export const zzForm = (zzEl: HTMLElement) => zzEl.ownerDocument.defaultView?.fetch("/x");'),
         # PR2's other half: a module outside the shell reaches it through the provider alone.
@@ -571,6 +580,8 @@ ALLOWED_CORPUS: dict[str, str] = {
                                                 " => zzValue.location + zzValue.cookie;"),
     "a DOM member named like a global": ("export const zzForm = (zzEvent: { currentTarget: HTMLElement }) =>"
                                          " zzEvent.currentTarget.focus();"),
+    "a timer and the console": "export const zzForm = () => setTimeout(() => console.log(\"zz\"), 5);",
+    "a const assertion": 'export const zzForm = ["a", "b"] as const;',
     "the provider's hooks": 'import { useMe } from "../../shell/provider";\nexport const zzForm = useMe;',
     "a type from another shell module": 'import type { ReadKey } from "../../shell/types";\nexport type ZzForm = ReadKey;',
 }

@@ -1,8 +1,7 @@
 // The load in React (#1540 Am-5 point 3): the provider and the four hooks screens reach the shell through. A screen has no
 // other way to the network, storage or the address (PR2); F8's source check enforces it.
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, type QueryClient } from "@tanstack/react-query";
 import { createContext, useContext, type ReactNode } from "react";
-import type { Load } from "./load";
 import type { Person, ReadKey, ReadParams, ReadResult } from "./types";
 
 /** The closed list of actions a screen may take (PR2). Writes and streams will be added here, each with a stated 401 policy. */
@@ -19,8 +18,12 @@ export interface Query {
   getAll(name: string): string[];
 }
 
+/** What a screen's hooks read. Nothing here names a browser type: screens are compiled without the browser library
+ * (`tsconfig.screens.json`), and this module is compiled with them. */
 export interface Shell {
-  readonly load: Load;
+  /** The load's one read path (`source: "later"`), and the query cache it sends each read through at most once. */
+  read<K extends ReadKey>(key: K, params: ReadParams<K>): Promise<ReadResult<K>>;
+  readonly queryClient: QueryClient;
   readonly me: Person | null;
   readonly segments: readonly string[];
   readonly query: Query;
@@ -58,7 +61,7 @@ export function useActions(): Actions {
 
 /** A typed GET keyed by the OpenAPI document's own path key. Sent at most once per load; a 401 is the shell's. */
 export function useRead<K extends ReadKey>(key: K, params: ReadParams<K>): ReadResult<K> | { readonly kind: "loading" } {
-  const { load } = useShell();
-  const result = useQuery({ queryKey: [key, params], queryFn: () => load.client.read(key, params) }, load.queryClient);
+  const { read, queryClient } = useShell();
+  const result = useQuery({ queryKey: [key, params], queryFn: () => read(key, params) }, queryClient);
   return result.data ?? { kind: "loading" };
 }
