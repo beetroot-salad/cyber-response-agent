@@ -10,6 +10,7 @@ fake (`VaultHTTP`) plus OpenBao's AppRole login. A drain hands each lane step it
 """
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import importlib
 import json
@@ -19,7 +20,7 @@ import shutil
 import subprocess
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -219,8 +220,28 @@ def author_drain(t: Any, paths: Any, *, trigger: Any, box: BoxSpy, mint: bool = 
     seams.setdefault("directory", t.directory)
     if not mint:  # with `mint=True` the drain mints from the live generation's host secret file
         seams.setdefault("identity", t.vault.identity())
-    return run_stage(lambda: drains().author_drain(
-        paths, trigger_author=trigger, start_box=box.start, stop_box=box.stop, **seams))
+    with _tick_store(t, "author", seams) as store:
+        return run_stage(lambda: drains().author_drain(
+            paths, trigger_author=trigger, start_box=box.start, stop_box=box.stop, store=store, **seams))
+
+
+@contextlib.contextmanager
+def _tick_store(t: Any, lane: str, seams: dict[str, Any]) -> Iterator[Any]:
+    """The tick's store (#1487 P2): the case's own (`store=`), else the adapter over the in-process store at the
+    database the `world` fixture sets, bound to the tenant, `lane` and the environment's thresholds, as the tick's host
+    entry binds it. Mechanical follow-through for every case that does not choose a store."""
+    given = seams.pop("store", None)
+    if given is not None:
+        yield given
+        return
+    from defender.learning.core.store_tick import thresholds
+    from defender.tests.support.jobs._relay1487 import adapter_store
+
+    knobs = {key: float(os.environ[env]) for key, env in (("lease", "DEFENDER_LEARNING_LEASE_SECONDS"),
+                                                        ("grace", "DEFENDER_LEARNING_GRACE_SECONDS"),
+                                                        ("renew", "DEFENDER_LEARNING_RENEW_SECONDS")) if os.environ.get(env)}
+    with adapter_store(store_dsn(), t.tenant_id, lane=lane, thresholds=thresholds(), owner="drain-test", **knobs) as store:
+        yield store
 
 
 LEAD_PREFIX = "lead-author/"
@@ -234,8 +255,9 @@ def lead_author_drain(t: Any, paths: Any, *, box: BoxSpy, mint: bool = False, **
     seams.setdefault("directory", t.directory)
     if not mint:  # with `mint=True` the drain mints from the live generation's host secret file
         seams.setdefault("identity", t.vault.identity())
-    return run_stage(lambda: drains().lead_author_drain(
-        paths, start_box=box.start, stop_box=box.stop, **seams))
+    with _tick_store(t, "lead_author", seams) as store:
+        return run_stage(lambda: drains().lead_author_drain(
+            paths, start_box=box.start, stop_box=box.stop, store=store, **seams))
 
 
 def remote_branches(remote: Path, prefix: str = LESSONS_PREFIX) -> dict[str, str]:
