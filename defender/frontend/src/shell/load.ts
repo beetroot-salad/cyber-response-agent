@@ -10,7 +10,7 @@ import createClient, { createQuerySerializer, type MaybeOptionalInit } from "ope
 import { literalAddress } from "../addresses";
 import type { paths } from "../generated/api";
 import { decideUnauthorized, type FailedReason, type Source, type Taken } from "./decision";
-import type { Person, ReadBody, ReadKey, ReadParams, ReadResult } from "./types";
+import type { Outcome, Person, ReadBody, ReadKey, ReadParams, ReadResult } from "./types";
 
 export interface Effects {
   /** The page's `fetch`, given the request the typed client made. */
@@ -33,13 +33,12 @@ export interface LoadOptions {
   readonly effects: Effects;
 }
 
-/** The load is leaving or is no longer the page's: whatever the answer was, nothing more is done or shown. */
-type Gone = { readonly kind: "gone" };
-/** No answer, or an answer that is not JSON: the server's failure, not the app's. */
-type Failed = { readonly kind: "error" };
+export type MeResult = Outcome<{ readonly kind: "ok"; readonly me: Person }>;
+export type SignOutResult = Outcome<{ readonly kind: "left" }>;
 
-export type MeResult = Gone | Failed | { readonly kind: "ok"; readonly me: Person };
-export type SignOutResult = Gone | Failed | { readonly kind: "left" };
+/** What a call does with a 401 answer: carry out B1's decision for that source, or return it like any other answer
+ * (sign-out's "already signed out"). Every call states its own. */
+type On401 = Source | "returned";
 
 export interface Load {
   readonly queryClient: QueryClient;
@@ -52,7 +51,7 @@ export interface Load {
     signOut(): Promise<SignOutResult>;
   };
   /** Sign in again from the failed screen: records an attempt when storage allows, then leaves for the sign-in. */
-  signIn(returns: readonly string[]): boolean;
+  signIn(returns: readonly string[]): void;
   /** A newer load is the page's: whatever this one reports is ignored. */
   supersede(): void;
   /** Neither leaving nor superseded: the one check before the load shows anything. */
@@ -125,9 +124,8 @@ export function makeLoad(options: LoadOptions): Load {
     leave(() => effects.assign(withQuery(SIGN_IN, { return: target })));
   }
 
-  /** A typed client whose every request is the load's: none is sent once the load is gone. A 401 answer is B1's for
-   * `onUnauthorized`'s source, or, with `"an answer"`, returned like any other (sign-out's "already signed out"). */
-  function clientFor(onUnauthorized: Source | "an answer"): Api {
+  /** A typed client whose every request is the load's: none is sent once the load is gone, and a 401 is `on401`'s. */
+  function clientFor(on401: On401): Api {
     return createClient<paths>({
       baseUrl: origin,
       credentials: "same-origin",
@@ -144,8 +142,8 @@ export function makeLoad(options: LoadOptions): Load {
           throw new NoAnswer();
         }
         if (!mayShow()) throw new GoneSignal();
-        if (onUnauthorized !== "an answer" && response.status === 401) {
-          unauthorized(onUnauthorized);
+        if (on401 !== "returned" && response.status === 401) {
+          unauthorized(on401);
           throw new GoneSignal();
         }
         const { status, statusText, headers } = response;
@@ -153,11 +151,12 @@ export function makeLoad(options: LoadOptions): Load {
       },
     });
   }
-  const api = { me: clientFor("me"), later: clientFor("later"), signOut: clientFor("an answer") };
+  /** One client per 401 policy. */
+  const api: Readonly<Record<On401, Api>> = { me: clientFor("me"), later: clientFor("later"), returned: clientFor("returned") };
 
   /** One call: gone, failed, or its answer. Anything else it throws is the shell's own fault, and goes on to the
    * caller (the error state's "something stopped working"). */
-  async function send<T>(call: () => Promise<T>): Promise<Gone | Failed | { readonly kind: "answer"; readonly answer: T }> {
+  async function send<T>(call: () => Promise<T>): Promise<Outcome<{ readonly kind: "answer"; readonly answer: T }>> {
     try {
       const answer = await call();
       return mayShow() ? { kind: "answer", answer } : { kind: "gone" };
@@ -185,7 +184,7 @@ export function makeLoad(options: LoadOptions): Load {
       return status === 200 && body !== undefined ? { kind: "ok", body } : { kind: "error" };
     },
     async signOut() {
-      const sent = await send(() => api.signOut.POST("/api/auth/logout", { parseAs: "stream" }));
+      const sent = await send(() => api.returned.POST("/api/auth/logout", { parseAs: "stream" }));
       if (sent.kind !== "answer") return sent;
       const { response } = sent.answer;
       // 2xx: signed out. 401: already signed out, the same exit; replace, so Back cannot return to a signed-in page.
@@ -205,7 +204,7 @@ export function makeLoad(options: LoadOptions): Load {
     client,
     signIn(returns) {
       // The values are handed to the sign-in route unjudged: the API judges them.
-      return leave(() => {
+      leave(() => {
         effects.record(returns[0] ?? null, false); // when storage allows
         effects.assign(withQuery(SIGN_IN, { return: returns }));
       });

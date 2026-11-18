@@ -1,7 +1,8 @@
 // The load (B1's owner, Am-5, Am-6): two 401s of one load make one navigation; a 401 to a superseded load does nothing.
 // The effects are the load's only way out. Each appends its name to one ordered log, and every case asserts the whole
 // log, so an extra `record`, `assign` or `replace` fails any case. Reads go through `load.client.read(key, params)`
-// directly (Am-6); one settling discipline (`loadWithHeldAnswers` and `settle`) serves every case, so none assumes when a call happens.
+// directly (Am-6). The 401 cases share one settling discipline (`loadWithHeldAnswers` and `settle`), so none assumes when
+// a call happens; the cases of what a single answer comes to use `loadAnswering`, which answers at once.
 import { describe, expect, it } from "vitest";
 import { makeLoad } from "./load";
 

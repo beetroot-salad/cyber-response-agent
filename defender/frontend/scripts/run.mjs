@@ -9,7 +9,7 @@ import { check } from "./source-check.mjs";
 const COMMANDS = {
   generate: [generate],
   check: [generate, check],
-  build: [build],
+  build: [generate, check, build],
 };
 
 const command = process.argv[2];

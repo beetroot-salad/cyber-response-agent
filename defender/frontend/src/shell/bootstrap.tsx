@@ -1,25 +1,35 @@
 // The shell's bootstrap (#1161 B1, #1540 Am-5): on every document load and every back-forward restore it makes one load
 // outside React, decides what the address needs, asks `/api/me` through the load's client, and renders the chosen screen
 // into one React root under the load's provider.
+//
+// A fault of the shell's own (a throw in a step below, or in an action's call) is left to reach the page: the one
+// listener for uncaught failures shows the error state for it, and the browser logs it.
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { route, type Route } from "../router";
 import * as attempt from "./attempt";
-import { ErrorBoundary, ErrorScreen, type ErrorKind } from "./errors";
-import { makeLoad, type Effects, type Load, type MeResult } from "./load";
+import type { CallbackReason } from "./decision";
+import { ErrorBoundary, ErrorScreen, raisedByApp, type ErrorKind } from "./errors";
+import { makeLoad, type Effects, type Load } from "./load";
 import { ShellProvider, type AddressQuery, type Shell } from "./provider";
-import type { CallbackReason, Person } from "./types";
+import type { Outcome, Person } from "./types";
 
 const effects: Effects = {
   // The session cookie alone: same-origin, no Authorization header.
   fetch: (request) => window.fetch(request),
-  record: (target, again) => attempt.record(target, again),
+  record: attempt.record,
   assign: (url) => window.location.assign(url),
   replace: (url) => window.location.replace(url),
 };
 
 /** The API's refusal of the return address itself: the failed screen must not offer that address again. */
 const REFUSED_RETURN: CallbackReason = "bad-request";
+
+/** The address a load is for, read once when it starts. */
+interface Address {
+  readonly pathname: string;
+  readonly search: string;
+}
 
 function reachedByHistory(): boolean {
   const entry = performance.getEntriesByType("navigation")[0];
@@ -31,44 +41,17 @@ function parseQuery(search: string): AddressQuery {
   return { get: (name) => params.get(name), getAll: (name) => params.getAll(name) };
 }
 
-/** The failed screen's `return`, settled into the address before render (PR2): the consumed record's target, unless the
- * address has a return already or the target was the one refused. */
-function settleReturn(taken: attempt.Read): void {
-  const params = new URLSearchParams(window.location.search);
-  if (params.has("return") || params.get("reason") === REFUSED_RETURN) return;
-  if (taken.status !== "found" || taken.target === null) return;
+/** The failed screen's address with its `return` settled in (PR2): the consumed record's target, unless the address has
+ * a return already or the target was the one refused. The page's address is changed to it, before render. */
+function settleReturn(taken: attempt.TakenRecord, address: Address): Address {
+  const params = new URLSearchParams(address.search);
+  if (params.has("return") || params.get("reason") === REFUSED_RETURN) return address;
+  if (taken.status !== "found" || taken.target === null) return address;
   params.set("return", taken.target);
+  const settled = { pathname: address.pathname, search: `?${params.toString()}` };
   const state: unknown = window.history.state; // kept as it is: this only changes the address
-  window.history.replaceState(state, "", `${window.location.pathname}?${params.toString()}`);
-}
-
-/** True when `url` is a script file of the page's origin. Every script of the app is one (the CSP allows no other, and
- * no inline script), so the page's own address is not: the browser names it for what no script raised, as its own
- * ResizeObserver report. */
-function isAppScript(url: string): boolean {
-  const own = `${window.location.origin}/`;
-  if (!url.startsWith(own)) return false;
-  const [pathname] = url.slice(own.length - 1).split(/[?#]/);
-  return pathname !== window.location.pathname;
-}
-
-/** A stack frame's URL: V8 writes a frame as "    at f (url:line:col)", Gecko and WebKit as "f@url:line:col". */
-const FRAME = /^\s+at\s.*?(https?:\/\/[^\s()]+?):\d+:\d+|@(https?:\/\/[^\s()]+?):\d+:\d+/;
-
-/** A failure is the app's when the code that raised it is an app script: an error event's file, or the first frame of
- * a rejected `Error`'s stack that names a file (a built-in, as `JSON.parse`, names none). A rejection with no stack (a
- * plain object, a string) names no origin: not counted. */
-function raisedByApp(event: Event): boolean {
-  if (event instanceof ErrorEvent) return isAppScript(event.filename);
-  if (!(event instanceof PromiseRejectionEvent)) return false;
-  const reason: unknown = event.reason;
-  if (!(reason instanceof Error) || reason.stack === undefined) return false;
-  for (const line of reason.stack.split("\n")) {
-    const found = FRAME.exec(line);
-    const url = found?.[1] ?? found?.[2];
-    if (url !== undefined) return isAppScript(url);
-  }
-  return false;
+  window.history.replaceState(state, "", `${settled.pathname}${settled.search}`);
+  return settled;
 }
 
 export function start(): void {
@@ -79,35 +62,34 @@ export function start(): void {
   let sequence = 0;
 
   function showError(load: Load, kind: ErrorKind): void {
-    if (load !== current || !load.mayShow()) return;
-    root.render(<ErrorScreen kind={kind} />);
+    if (load.mayShow()) root.render(<ErrorScreen kind={kind} />);
+  }
+
+  /** An action's call: the server's error is the error state; a fault of the shell's own reaches the page. */
+  function act(load: Load, call: () => Promise<Outcome<{ readonly kind: string }>>): void {
+    void call().then((result) => {
+      if (result.kind === "error") showError(load, "server");
+    });
   }
 
   /** The person the screen is drawn for: asked of `/api/me` when the screen needs a session, else none. */
-  async function sessionFor(load: Load, routed: Route): Promise<{ readonly kind: "ok"; readonly me: Person | null } | Exclude<MeResult, { readonly kind: "ok" }>> {
-    if (!routed.needsSession) return { kind: "ok", me: null };
-    const asked = await load.client.me();
-    return load === current ? asked : { kind: "gone" };
+  async function sessionFor(load: Load, routed: Route): Promise<Outcome<{ readonly kind: "ok"; readonly me: Person | null }>> {
+    return routed.needsSession ? load.client.me() : { kind: "ok", me: null };
   }
 
   /** What the screen's hooks read, for this load. */
-  function shellFor(load: Load, routed: Route, me: Person | null): Shell {
-    const query = parseQuery(window.location.search);
+  function shellFor(load: Load, routed: Route, me: Person | null, address: Address): Shell {
+    const query = parseQuery(address.search);
     return {
       read: load.client.read,
       queryClient: load.queryClient,
       me,
-      pathname: window.location.pathname,
+      pathname: address.pathname,
       shape: routed.shape,
       query,
       actions: {
         retry: () => load.signIn(query.getAll("return")),
-        signOut: () => {
-          load.client.signOut().then(
-            (result) => (result.kind === "error" ? showError(load, "unreachable") : undefined),
-            () => showError(load, "broken"),
-          );
-        },
+        signOut: () => act(load, () => load.client.signOut()),
       },
     };
   }
@@ -116,27 +98,24 @@ export function start(): void {
     current?.supersede();
     sequence += 1;
     const taken = attempt.take();
-    const routed = route(window.location.pathname);
+    const read = { pathname: window.location.pathname, search: window.location.search };
+    const routed = route(read.pathname);
     const load = makeLoad({ taken, byHistory, target: routed.target, origin: window.location.origin, effects });
     current = load;
-    try {
-      if (routed.shape === "sign-in-failed") settleReturn(taken);
-      const session = await sessionFor(load, routed);
-      if (session.kind === "gone") return;
-      if (session.kind === "error") return showError(load, "unreachable");
-      const Screen = routed.Screen;
-      root.render(
-        <StrictMode>
-          <ShellProvider key={sequence} shell={shellFor(load, routed, session.me)}>
-            <ErrorBoundary load={load}>
-              <Screen />
-            </ErrorBoundary>
-          </ShellProvider>
-        </StrictMode>,
-      );
-    } catch {
-      showError(load, "broken");
-    }
+    const address = routed.shape === "sign-in-failed" ? settleReturn(taken, read) : read;
+    const session = await sessionFor(load, routed);
+    if (session.kind === "gone") return;
+    if (session.kind === "error") return showError(load, "server");
+    const Screen = routed.Screen;
+    root.render(
+      <StrictMode>
+        <ShellProvider key={sequence} shell={shellFor(load, routed, session.me, address)}>
+          <ErrorBoundary load={load}>
+            <Screen />
+          </ErrorBoundary>
+        </ShellProvider>
+      </StrictMode>,
+    );
   }
 
   // An uncaught error or unhandled rejection the app's own code raised is the error state, unless the load may no

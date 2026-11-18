@@ -95,10 +95,11 @@ def _failing_build(frontend: Path) -> subprocess.CompletedProcess[str]:
     """`bun run build` over a copy holding a previous build's `dist/index.html`, which a failed build leaves as it was
     (F1 b: the served folder is only ever one whole build)."""
     dist = frontend / "dist"
-    if dist.is_symlink():  # an earlier build's link to its folder
+    if dist.is_symlink():  # an earlier build's link to its folder, which this previous build replaces with it
         dist.unlink()
     else:
         shutil.rmtree(dist, ignore_errors=True)
+    shutil.rmtree(frontend / "dist-builds", ignore_errors=True)
     dist.mkdir()
     (frontend / "dist" / "index.html").write_text(PREVIOUS_BUILD, encoding="utf-8")
     return run_bun(frontend, "run", "build")

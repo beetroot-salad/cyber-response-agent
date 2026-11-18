@@ -7,6 +7,17 @@ export type Taken =
   | { readonly status: "found"; readonly again: boolean }
   | { readonly status: "unavailable" };
 
+/** The reasons the API's sign-in callback sends a person to the failed screen with (the API's identity service). Not in
+ * the OpenAPI document: the callback answers with a redirect. */
+export type CallbackReason =
+  | "prelogin-missing"
+  | "login-attempt-invalid"
+  | "unknown-account"
+  | "otp-required"
+  | "unavailable"
+  | "bad-request"
+  | "error";
+
 /** Why the shell sends a load to the failed screen. */
 export type FailedReason = "session-lost" | "sign-in-left" | "storage-unavailable" | "session-refused";
 

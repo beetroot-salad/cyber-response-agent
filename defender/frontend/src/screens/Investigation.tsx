@@ -1,6 +1,6 @@
 // The minimal investigation screen (B7): the status and outcome of the investigation read, as their raw codes.
 import type { ReactNode } from "react";
-import { usePlaceholders, useRead, type ScreenRead } from "../shell/provider";
+import { stateOf, usePlaceholders, useRead, type ScreenRead } from "../shell/provider";
 
 const READ = "/api/tenants/{tenant_id}/investigations/{investigation_id}";
 
@@ -8,7 +8,7 @@ export function Investigation() {
   const [tenant_id, investigation_id] = usePlaceholders("investigation");
   const result = useRead(READ, { path: { tenant_id, investigation_id } });
   return (
-    <main data-screen="investigation" data-state={result.kind === "ok" ? "ready" : result.kind}>
+    <main data-screen="investigation" data-state={stateOf(result)}>
       <h1>Investigation</h1>
       {content(result)}
     </main>

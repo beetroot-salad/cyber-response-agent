@@ -2,17 +2,16 @@
 // sign-in was started for (a matched returnable pathname, or none). Written when the shell or the failed screen's
 // retry sends the browser to sign in; read and deleted on every load. `again` marks an attempt started by a screen's
 // own 401 on a load that had itself come back from sign-in: a second such 401 stops instead of signing in again.
-import type { Taken } from "./decision";
-
 const KEY = "defender.attempt";
 
-/** What the decision takes (`Taken`), with the target a found record names. */
-export type Read =
-  | Exclude<Taken, { readonly status: "found" }>
-  | (Extract<Taken, { readonly status: "found" }> & { readonly target: string | null });
+/** What taking the record found: the decision's `Taken`, with the target a found record names. */
+export type TakenRecord =
+  | { readonly status: "none" }
+  | { readonly status: "found"; readonly target: string | null; readonly again: boolean }
+  | { readonly status: "unavailable" };
 
 /** Read and delete this tab's record. `unavailable` when the storage cannot be used. */
-export function take(): Read {
+export function take(): TakenRecord {
   let raw: string | null;
   try {
     const storage = window.sessionStorage;

@@ -6,6 +6,10 @@ import { createContext, useContext, type ReactNode } from "react";
 import { valuesOf, type ShapeName, type ShapeValues } from "../addresses";
 import type { Person, ReadKey, ReadParams, ReadResult } from "./types";
 
+// The shell's types a screen may need, from the one module screens import the shell through.
+export type { CallbackReason, FailedReason } from "./decision";
+export type { Person } from "./types";
+
 /** The closed list of actions a screen may take (PR2). Writes and streams will be added here, each with a stated 401 policy. */
 export interface Actions {
   /** The failed screen's retry: sign in again, handing the address's `return` values on unjudged. */
@@ -72,6 +76,21 @@ export function useActions(): Actions {
 
 /** What a screen's read shows: the answer, or loading. A gone load shows nothing new, so it reads as loading. */
 export type ScreenRead<K extends ReadKey> = Exclude<ReadResult<K>, { readonly kind: "gone" }> | { readonly kind: "loading" };
+
+/** A data screen's state, as its `data-state` says it: one name per kind of read. */
+export type ScreenState = "loading" | "ready" | "not-available" | "error";
+
+const STATES: Readonly<Record<ScreenRead<ReadKey>["kind"], ScreenState>> = {
+  loading: "loading",
+  ok: "ready",
+  "not-available": "not-available",
+  error: "error",
+};
+
+/** The state a screen shows for its read. */
+export function stateOf<K extends ReadKey>(result: ScreenRead<K>): ScreenState {
+  return STATES[result.kind];
+}
 
 /** A typed GET keyed by the OpenAPI document's own path key. Sent at most once per load; a 401 is the shell's. */
 export function useRead<K extends ReadKey>(key: K, params: ReadParams<K>): ScreenRead<K> {

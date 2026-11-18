@@ -85,89 +85,91 @@ function trusted(file, node) {
   return /^\s*\/\/ trust: \S/.test(above);
 }
 
-export function check() {
-  const whole = program("tsconfig.json");
-  if (whole.problems.length > 0) return whole.problems;
-  const screens = program("tsconfig.screens.json");
-  if (!screens.program) return screens.problems;
+const SRC = path.join(root, "src") + path.sep;
+const SHELL = path.join(root, "src", "shell") + path.sep;
+const GENERATED = path.join(root, "src", "generated") + path.sep;
+const PROVIDER_MODULE = path.join(root, "src", "shell", "provider");
+const ADDRESSES_MODULE = path.join(root, "src", "addresses.ts");
+const TEST_FILE = /\.test\.tsx?$/;
 
-  const src = path.join(root, "src") + path.sep;
-  const shell = path.join(root, "src", "shell") + path.sep;
-  const generated = path.join(root, "src", "generated") + path.sep;
-  const providerModule = path.join(root, "src", "shell", "provider");
-  const addresses = path.join(root, "src", "addresses.ts");
-  const problems = [];
-  const reporter = (file, name, hint) => (node, what) => {
-    const { line } = file.getLineAndCharacterOfPosition(node.getStart(file));
-    problems.push(`${path.relative(root, name)}:${line + 1}: ${what}${hint}`);
-  };
-
-  // 3. Honesty, everywhere but the generated types. Each file is read with the types it is compiled with: the shell's
-  // with the browser library, every other with the screens' compile, where a browser name is a value of type `any`.
-  const honestyPasses = [
-    { made: whole.program, inShell: true },
-    { made: screens.program, inShell: false },
-  ];
-  for (const { made, inShell } of honestyPasses) {
-    const checker = made.getTypeChecker();
-    for (const file of made.getSourceFiles()) {
-      const name = path.resolve(file.fileName);
-      if (!name.startsWith(src) || name.startsWith(generated) || file.isDeclarationFile) continue;
-      if (name.startsWith(shell) !== inShell) continue;
-      const report = reporter(file, name, inShell ? "" : ` ${SCREENS_HINT}`);
-      for (const match of file.text.matchAll(/@ts-(ignore|expect-error|nocheck)\b/g)) {
-        const { line } = file.getLineAndCharacterOfPosition(match.index);
-        problems.push(`${path.relative(root, name)}:${line + 1}: no comment may switch type checking off (${match[0]})`);
-      }
-      const visit = (node) => {
-        if ((ts.isAsExpression(node) && !isConstAssertion(node)) || ts.isTypeAssertionExpression(node) || ts.isTypePredicateNode(node)) {
-          if (!(inShell && trusted(file, node))) {
-            report(node, inShell
-              ? "a type assertion needs a `// trust: <reason>` comment on the line above (only `as const` needs none)"
-              : "no type assertion outside the shell (only `as const`): it could claim a value is anything");
-          }
-        }
-        if (node.kind === ts.SyntaxKind.AnyKeyword) report(node, "no `any`: it could hold anything");
-        if ((ts.isCallExpression(node) || ts.isNewExpression(node) || ts.isPropertyAccessExpression(node)
-             || ts.isElementAccessExpression(node)) && (checker.getTypeAtLocation(node).flags & ts.TypeFlags.Any)
-            && !madeUnknown(node)) {
-          report(node, "no value of type `any` (give it the type `unknown` where it is made): it could hold anything");
-        }
-        ts.forEachChild(node, visit);
-      };
-      visit(file);
-    }
-  }
-
-  // 4 and 5. The boundary's own rules, outside the shell, over the screens' compile.
-  const checker = screens.program.getTypeChecker();
-  for (const file of screens.program.getSourceFiles()) {
+/** The app's own sources in `made` (not the generated types, not declaration files), in the shell or outside it. */
+function sourcesOf(made, inShell) {
+  return made.getSourceFiles().filter((file) => {
     const name = path.resolve(file.fileName);
-    if (!name.startsWith(src) || name.startsWith(shell) || name.startsWith(generated)) continue;
-    const isTest = /\.test\.tsx?$/.test(name); // never bundled into the app, so it may import the module it tests
-    const report = reporter(file, name, ` ${SCREENS_HINT}`);
+    return name.startsWith(SRC) && !name.startsWith(GENERATED) && !file.isDeclarationFile && name.startsWith(SHELL) === inShell;
+  });
+}
+
+/** Problems found in `file`, each `file:line: what`, with `hint` after it. */
+function reporterFor(file, problems, hint) {
+  const where = path.relative(root, path.resolve(file.fileName));
+  return (position, what) => {
+    const { line } = file.getLineAndCharacterOfPosition(typeof position === "number" ? position : position.getStart(file));
+    problems.push(`${where}:${line + 1}: ${what}${hint}`);
+  };
+}
+
+/** The file `specifier` resolves to from `file`, or null when it resolves to none. */
+function resolve(made, file, specifier) {
+  const resolved = ts.resolveModuleName(specifier, file.fileName, made.getCompilerOptions(), ts.sys).resolvedModule;
+  return resolved ? path.resolve(resolved.resolvedFileName) : null;
+}
+
+/** Rule 3, honesty, over the files of `made` in the shell (`inShell`) or outside it. */
+function honesty(made, inShell, problems) {
+  const checker = made.getTypeChecker();
+  for (const file of sourcesOf(made, inShell)) {
+    const report = reporterFor(file, problems, inShell ? "" : ` ${SCREENS_HINT}`);
+    for (const match of file.text.matchAll(/@ts-(ignore|expect-error|nocheck)\b/g)) {
+      report(match.index, `no comment may switch type checking off (${match[0]})`);
+    }
+    const visit = (node) => {
+      if ((ts.isAsExpression(node) && !isConstAssertion(node)) || ts.isTypeAssertionExpression(node) || ts.isTypePredicateNode(node)) {
+        if (!(inShell && trusted(file, node))) {
+          report(node, inShell
+            ? "a type assertion needs a `// trust: <reason>` comment on the line above (only `as const` needs none)"
+            : "no type assertion outside the shell (only `as const`): it could claim a value is anything");
+        }
+      }
+      if (node.kind === ts.SyntaxKind.AnyKeyword) report(node, "no `any`: it could hold anything");
+      if ((ts.isCallExpression(node) || ts.isNewExpression(node) || ts.isPropertyAccessExpression(node)
+           || ts.isElementAccessExpression(node)) && (checker.getTypeAtLocation(node).flags & ts.TypeFlags.Any)
+          && !madeUnknown(node)) {
+        report(node, "no value of type `any` (give it the type `unknown` where it is made): it could hold anything");
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(file);
+  }
+}
+
+/** Rules 4 and 5, the boundary, over the files outside the shell in the screens' compile. */
+function boundary(made, problems) {
+  const checker = made.getTypeChecker();
+  for (const file of sourcesOf(made, false)) {
+    const name = path.resolve(file.fileName);
+    const isTest = TEST_FILE.test(name); // never bundled into the app, so it may import the module it tests
+    const report = reporterFor(file, problems, ` ${SCREENS_HINT}`);
     const importsFrom = (node, specifier) => {
       if (!specifier || !ts.isStringLiteralLike(specifier)) {
         report(node, "outside the shell, an import's path must be written out");
         return;
       }
-      const resolved = ts.resolveModuleName(specifier.text, file.fileName, screens.program.getCompilerOptions(), ts.sys).resolvedModule;
-      const target = resolved ? path.resolve(resolved.resolvedFileName) : path.resolve(path.dirname(name), specifier.text);
-      if (/\.test\.tsx?$/.test(target)) report(node, `outside the shell, no module may import a test file (${path.relative(root, target)})`);
+      const target = resolve(made, file, specifier.text) ?? path.resolve(path.dirname(name), specifier.text);
+      if (TEST_FILE.test(target)) report(node, `outside the shell, no module may import a test file (${path.relative(root, target)})`);
       if (isTest || typeOnly(node)) return;
-      if (target.startsWith(shell) && target.replace(/\.(d\.)?tsx?$/, "") !== providerModule) {
+      if (target.startsWith(SHELL) && target.replace(/\.(d\.)?tsx?$/, "") !== PROVIDER_MODULE) {
         report(node, `outside the shell, a module imports from the shell only src/shell/provider, not ${path.relative(root, target)}`);
       }
     };
-    /** The import that binds `identifier` in this file, as [its declaration, the module it resolves to], or null. */
+    /** The import that binds `identifier` in this file: its declaration, its module's text and the file it resolves to. */
     const importOf = (identifier) => {
       const declaration = checker.getSymbolAtLocation(identifier)?.declarations?.[0];
       let node = declaration;
       while (node && !ts.isImportDeclaration(node)) node = node.parent;
       if (!node || !ts.isStringLiteral(node.moduleSpecifier)) return null;
       const specifier = node.moduleSpecifier.text;
-      const resolved = ts.resolveModuleName(specifier, file.fileName, screens.program.getCompilerOptions(), ts.sys).resolvedModule;
-      return { declaration, specifier, target: resolved ? path.resolve(resolved.resolvedFileName) : null };
+      return { declaration, specifier, target: resolve(made, file, specifier) };
     };
     /** True for an address attribute's value that can only be an app address or an asset (rule 5). */
     const appAddress = (value) => {
@@ -183,7 +185,7 @@ export function check() {
         return bound !== null && ts.isImportClause(bound.declaration) && ASSET.test(bound.specifier);
       }
       if (ts.isCallExpression(expression) && ts.isIdentifier(expression.expression)) {
-        return importOf(expression.expression)?.target === addresses;
+        return importOf(expression.expression)?.target === ADDRESSES_MODULE;
       }
       return false;
     };
@@ -224,6 +226,20 @@ export function check() {
     };
     visit(file);
   }
+}
+
+/** The type checks and the rules: every problem, or none. */
+export function check() {
+  const whole = program("tsconfig.json");
+  if (whole.problems.length > 0) return whole.problems;
+  const screens = program("tsconfig.screens.json");
+  if (!screens.program) return screens.problems;
+  const problems = [];
+  // Each file is read with the types it is compiled with: the shell's with the browser library, every other with the
+  // screens' compile, where a browser name is a value of type `any`.
+  honesty(whole.program, true, problems);
+  honesty(screens.program, false, problems);
+  boundary(screens.program, problems);
   // The screens' compile and the rules both report: a file the compile refuses may break a rule too.
   const compiled = screens.problems.length > 0 ? [...screens.problems, SCREENS_HINT] : [];
   return [...new Set([...compiled, ...problems])];

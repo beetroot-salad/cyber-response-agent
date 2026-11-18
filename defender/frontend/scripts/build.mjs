@@ -1,6 +1,5 @@
-// The frontend build (#1161 S2, B8, #1540 F1): the generated sources, the type check and the source check, the app by
-// Vite, then the address matcher alone, in library mode. Each build is written to a folder of its own under
-// `dist-builds/`, and `dist` is a link to the build being served. Only a whole build is linked, and the link is
+// The frontend build (#1161 S2, B8, #1540 F1): the app by Vite, then the address matcher alone, in library mode. Each
+// build is written to a folder of its own under `dist-builds/`, and `dist` is a link to the build being served. Only a whole build is linked, and the link is
 // replaced in one rename, which can't be caught halfway: `dist` is always one whole build, and a failed or killed
 // build, at any step, leaves the previous one served as it was (F1 b).
 //
@@ -11,14 +10,10 @@ import { cpSync, existsSync, lstatSync, readdirSync, readFileSync, readlinkSync,
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build as vite } from "vite";
-import { generate } from "./generate.mjs";
-import { check } from "./source-check.mjs";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dist = path.join(root, "dist");
 const builds = path.join(root, "dist-builds");
-const name = `${Date.now()}-${process.pid}`;
-const fresh = path.join(builds, name);
 /** Vite's list of the files a build wrote, read to tell a build's own `assets/` files from those it kept. */
 const MANIFEST = path.join(".vite", "manifest.json");
 
@@ -35,29 +30,35 @@ function ownAssets(folder) {
   return [...new Set(files)].filter((file) => file.startsWith("assets/"));
 }
 
-/** Build into `fresh` and swap it in; the problems that stopped it before the swap, or none. */
-async function buildAndSwap() {
-  const problems = [...(await generate())];
-  if (problems.length === 0) problems.push(...check());
-  if (problems.length > 0) return problems;
-  await vite({ root, logLevel: "warn", build: { outDir: fresh, emptyOutDir: true, manifest: true } });
-  // The matcher alone (no DOM), for Bun and Node: the module the app imports.
-  await vite({
-    root,
-    configFile: false,
-    publicDir: false,
-    logLevel: "warn",
-    build: {
-      outDir: fresh,
-      emptyOutDir: false,
-      target: "es2022",
-      lib: { entry: path.join(root, "src", "addresses.ts"), formats: ["es"], fileName: () => "addresses.mjs" },
-    },
-  });
+/** The app, then the address matcher alone (no DOM, for Bun and Node: the module the app imports), into `folder`.
+ * Vite's report of a source it could not build is the problem; any other fault is this script's own, and is thrown. */
+async function bundle(folder) {
+  try {
+    await vite({ root, logLevel: "warn", build: { outDir: folder, emptyOutDir: true, manifest: true } });
+    await vite({
+      root,
+      configFile: false,
+      publicDir: false,
+      logLevel: "warn",
+      build: {
+        outDir: folder,
+        emptyOutDir: false,
+        target: "es2022",
+        lib: { entry: path.join(root, "src", "addresses.ts"), formats: ["es"], fileName: () => "addresses.mjs" },
+      },
+    });
+    return [];
+  } catch (error) {
+    return [error.message];
+  }
+}
+
+/** Swap the build in `folder` in for the served one, keeping the served build's own `assets/` files beside its own. */
+function swapIn(folder, name) {
   const before = served();
   if (before !== null && existsSync(path.join(before, MANIFEST))) {
     for (const file of ownAssets(before)) {
-      if (!existsSync(path.join(fresh, file))) cpSync(path.join(before, file), path.join(fresh, file));
+      if (!existsSync(path.join(folder, file))) cpSync(path.join(before, file), path.join(folder, file));
     }
   }
   if (existsSync(dist) && before === null) {
@@ -65,15 +66,12 @@ async function buildAndSwap() {
     renameSync(dist, path.join(builds, `${name}-unlinked`));
   }
   const link = path.join(root, `dist-link-${name}`);
-  symlinkSync(path.relative(root, fresh), link);
+  symlinkSync(path.relative(root, folder), link);
   renameSync(link, dist); // the swap: one rename over the old link
-  for (const old of readdirSync(builds)) {
-    if (old !== name) rmSync(path.join(builds, old), { recursive: true, force: true });
-  }
-  return [];
 }
 
-/** Remove what a killed build left: a build folder `dist` does not link to, and a link never swapped in. */
+/** Remove every build folder `dist` does not link to, and any link never swapped in: a killed build's, or the one just
+ * replaced. */
 function sweep() {
   const kept = served();
   if (existsSync(builds)) {
@@ -88,13 +86,16 @@ function sweep() {
   }
 }
 
-/** The build (`bun run build`): the problems that stopped it, or none. Whatever stopped it, what it left is swept. */
+/** The build step (after generate and check, `scripts/run.mjs`): the problems that stopped it, or none. Whatever stopped
+ * it, what it left is swept. */
 export async function build() {
+  const name = `${Date.now()}-${process.pid}`;
+  const folder = path.join(builds, name);
   sweep();
   try {
-    return await buildAndSwap();
-  } catch (error) {
-    return [error.message]; // Vite's own report of a source it could not build
+    const problems = await bundle(folder);
+    if (problems.length === 0) swapIn(folder, name);
+    return problems;
   } finally {
     sweep();
   }

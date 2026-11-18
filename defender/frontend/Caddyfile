@@ -35,8 +35,13 @@ http://:{$DEFENDER_INGRESS_LISTEN_PORT} {
 		header @hashed Cache-Control "public, max-age=31536000, immutable"
 		header @revalidated Cache-Control "no-cache"
 		root * {$DEFENDER_INGRESS_FRONTEND_DIR}
-		@app not path /assets/*
-		try_files @app {path} /index.html
-		file_server
+		@assets path /assets/*
+		handle @assets {
+			file_server
+		}
+		handle {
+			try_files {path} /index.html
+			file_server
+		}
 	}
 }
