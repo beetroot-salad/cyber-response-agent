@@ -511,24 +511,28 @@ def _sent_comment(shim: S.DockerShim) -> str:
     return str(call["body"])
 
 
-@pytest.mark.parametrize(("exit_class", "report", "status", "marker"), [
-    *[(None, f"---\ndisposition: {d}\nconfidence: high\n---\n\nbody\n", C.COMMENTED, None)
-      for d in _vocab.DISPOSITION_VALUES],
-    *[(e, "---\ndisposition: benign\nconfidence: high\n---\n\nbody\n", C.ESCALATED, f"exit: {e}")
-      for e in sorted(run_end.ESCALATED_EXITS)],
-    *[(e, "---\ndisposition: unresolved\nconfidence: high\n---\n\nbody\n", C.COMMENTED, None)
-      for e in sorted(run_end.FORCED_CLOSE_EXITS)],
-    *[(e, "no front matter\n", C.ESCALATED, f"exit: {e}") for e in sorted(run_end.FORCED_CLOSE_EXITS)],
-    (None, "no front matter\n", C.COMMENTED, "No disposition could be recorded"),
+#: A run that never closed: `NeverClosed` (a pointer and a table, no row), as a run cut short leaves it.
+NO_RECORD = None
+
+
+@pytest.mark.parametrize(("exit_class", "closed_as", "status", "marker"), [
+    *[(None, d, C.COMMENTED, None) for d in _vocab.DISPOSITION_VALUES],
+    *[(e, "benign", C.ESCALATED, f"exit: {e}") for e in sorted(run_end.ESCALATED_EXITS)],
+    *[(e, "unresolved", C.COMMENTED, None) for e in sorted(run_end.FORCED_CLOSE_EXITS)],
+    *[(e, NO_RECORD, C.ESCALATED, f"exit: {e}") for e in sorted(run_end.FORCED_CLOSE_EXITS)],
+    (None, NO_RECORD, C.COMMENTED, "No disposition was recorded for this case"),
 ])
 def test_1414_the_ticket_comment_holds_for_every_way_a_run_ends(
-        tmp_path, monkeypatch, exit_class, report, status, marker):
-    """The ticket's receipt and body are unchanged by the shared outcome function: unreadable on a forced close still escalates. O1/A5 (C21)."""
+        tmp_path, monkeypatch, exit_class, closed_as, status, marker):
+    """The ticket's receipt and body follow the run's closing record (or its absence) and the exit: a forced close that left no record still escalates. O1/A5 (C21)."""
+    from defender.tests.support.storage import _readers1534 as R
+
     root, _folder, alert = _world(tmp_path)
     shim = _shim(tmp_path, monkeypatch)
     rc, refused, run_dir = _run(tmp_path, root, alert, summary={
         "output": "spec1414", "requests": 0, "truncated_by": exit_class, "closed_before_cut": False},
-        before=lambda d: (d / "report.md").write_text(report, encoding="utf-8"))
+        before=lambda d: R.plant_run(d, None if closed_as is NO_RECORD else R.valid_fields(closed_as),
+                                     sessions_base=d.parent))
 
     assert refused is None, refused
     assert rc == (7 if exit_class == "provider-rejected" else 0), rc
@@ -539,3 +543,48 @@ def test_1414_the_ticket_comment_holds_for_every_way_a_run_ends(
     assert ("ended without a verdict" in sent) == (status == C.ESCALATED), sent
     if marker is not None:
         assert marker in sent, sent
+
+
+@pytest.mark.parametrize("fault", [pytest.param(k, id=k) for k in (
+    "database-missing", "pointer-unreadable", "store-unreadable", "schema-version", "recorded-before-1534", "row-invalid")])
+@pytest.mark.parametrize("exit_class", [None, *sorted(run_end.FORCED_CLOSE_EXITS)])
+def test_1414_a_record_that_could_not_be_looked_up_posts_no_comment_on_any_reading_exit(
+        tmp_path, monkeypatch, exit_class, fault):
+    """A `CouldNotLook` on an exit that reads the record: no call to the store, an `error` receipt with the kind's fixed wording, never the lookup's detail. (V-LOOK, M4 iii)"""
+    from defender.records import closing as C_
+    from defender.tests.support.storage import _readers1534 as R
+    from defender.tests.support.shared.contracts._spec1077 import fixture_run
+
+    assert fault in R.KINDS_BY_FAULT, "the fault list is the readers' own"
+    root, _folder, alert = _world(tmp_path)
+    shim = _shim(tmp_path, monkeypatch)
+    rc, refused, run_dir = _run(tmp_path, root, alert, summary={
+        "output": "spec1414", "requests": 0, "truncated_by": exit_class, "closed_before_cut": False},
+        before=lambda d: R.plant_run(d, R.valid_fields("benign"), fault=fault, sessions_base=d.parent))
+
+    assert refused is None, refused
+    assert rc == 0, rc
+    looked = C_.for_run(fixture_run(run_dir))
+    assert isinstance(looked, C_.CouldNotLook), f"premise: the fault reads as {fault}: {looked!r}"
+    assert looked.kind == fault, looked
+    assert looked.detail, "premise: the lookup holds a detail to withhold"
+    assert shim.requests() == [], f"a comment was posted for a record nobody could read: {shim.requests()}"
+    got = S.receipt(run_dir)
+    assert got is not None, "no receipt"
+    assert (got["status"], got["ok"]) == (C.ERROR, False), got
+    assert C_.FAULT_WORDING[fault] in got["reason"], got
+    assert looked.detail not in got["reason"], "the lookup's detail reached the receipt"
+
+
+def test_1414_a_record_that_can_be_looked_up_does_comment(tmp_path, monkeypatch):
+    """Positive control for the fault test: the same run with an intact record comments once."""
+    from defender.tests.support.storage import _readers1534 as R
+
+    root, _folder, alert = _world(tmp_path)
+    shim = _shim(tmp_path, monkeypatch)
+    _rc, _refused, run_dir = _run(tmp_path, root, alert, summary={
+        "output": "spec1414", "requests": 0, "truncated_by": None, "closed_before_cut": False},
+        before=lambda d: R.plant_run(d, R.valid_fields("benign"), sessions_base=d.parent))
+
+    assert len(C.comment_calls(shim)) == 1
+    assert S.receipt(run_dir)["status"] == C.COMMENTED

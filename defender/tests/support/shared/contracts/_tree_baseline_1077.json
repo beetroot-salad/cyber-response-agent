@@ -1,8 +1,7 @@
 {
   "commit": "e39f8945c6c886fa77cf405aebda4d95f8470ef4",
   "content": {
-    "investigation.md": "e4963b53a0f71467aa3061b8d9d15e2724d2176a8b27f196c006db0bf66d382b",
-    "report.md": "570f1b50d6f17bcf0058fdb08ac50aef56f87652f425e454724bd8a3d926b6a1"
+    "investigation.md": "e4963b53a0f71467aa3061b8d9d15e2724d2176a8b27f196c006db0bf66d382b"
   },
   "entries": {
     "alert_input": [
@@ -30,10 +29,6 @@
       null
     ],
     "provenance.json": [
-      "file",
-      null
-    ],
-    "report.md": [
       "file",
       null
     ],

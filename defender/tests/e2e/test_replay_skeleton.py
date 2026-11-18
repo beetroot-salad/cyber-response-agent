@@ -1,7 +1,6 @@
 """Golden-replay e2e scripts — deterministic + hermetic."""
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 import pytest
@@ -16,6 +15,8 @@ from defender.tests.e2e._replay_harness import (
     FakeVerbs,
     ReplayFn,
     Turn,
+    committed_disposition,
+    committed_record,
     drive,
     load_turns_from_trace,
     materialize,
@@ -25,7 +26,7 @@ from defender._io import read_jsonl_rows
 from defender.records import RunPaths
 from defender.investigation import permission, tools as runtime_tools
 from defender.investigation.agent_definition import compile_policy_for
-from defender.investigation.close_tool import CAUSE_EVIDENCE_CANNOT_DISCRIMINATE
+from defender.records.closing import CAUSE_EVIDENCE_CANNOT_DISCRIMINATE, FORCED_INCONCLUSIVE, STANDS
 from defender.investigation.driver import GATHER_DEF, MAIN_DEF
 from defender.tests.support.tenancy import _tenants1106
 from defender.investigation.lead_zero import RESERVED_LEAD_IDS
@@ -57,9 +58,7 @@ def test_replay_golden_v2sshd(tmp_path):
            normalize(inv_text, run_dir=run_dir, run_id=run_id)
     assert validate_companion(produced_inv, None) == []
 
-    m = re.search(r"^disposition:\s*(\w+)", (run_dir / "report.md").read_text(), re.M)
-    assert m is not None
-    assert m.group(1) == "inconclusive"
+    assert committed_disposition(run_dir) == "inconclusive"
 
     assert (run_dir / "tool_trace.jsonl").is_file()
     assert RunPaths(run_dir).wire_log.is_file()
@@ -107,14 +106,13 @@ def test_replay_full_run_ab3(tmp_path, monkeypatch):
 
     assert validate_companion(produced, None) == []
 
-    report = (run_dir / "report.md").read_text()
-    m = re.search(r"^disposition:\s*(\w+)", report, re.M)
-    assert m is not None
-    assert m.group(1) == "malicious", (
+    record = committed_record(run_dir)
+    assert record is not None, "the close left no closing record"
+    assert record.disposition == "malicious", (
         "a review that ran and found the close sound must leave the drafted disposition alone"
     )
-    assert "failure_kind:" not in report, (
-        "the frontmatter names a machinery failure on a run where every stage answered"
+    assert (record.outcome, record.failure_kind, record.drafted_disposition) == (STANDS, None, None), (
+        "the record names an override or a machinery failure on a run where every stage answered"
     )
 
     # The reviewer really ran, rather than the close committing past a gate that never
@@ -164,16 +162,16 @@ def test_a_gap_the_review_cannot_measure_overrides_the_confident_close(tmp_path)
               "gap", review="the pivot rests on one inference no lead measured", ask=None,
           )))
 
-    report = (run_dir / "report.md").read_text()
-    m = re.search(r"^disposition:\s*(\w+)", report, re.M)
-    assert m is not None
+    record = committed_record(run_dir)
+    assert record is not None, "the close left no closing record"
     # The gate's overrule commits `unresolved`, the host's own verdict; `inconclusive` is
-    # reserved for the model's own close (#923).
-    assert m.group(1) == "unresolved", (
-        "the drafted `malicious` reached disk past a review that found a gap"
+    # reserved for the model's own close (#923). The model's draft is kept beside it.
+    assert record.disposition == "unresolved", (
+        "the drafted `malicious` was committed past a review that found a gap"
     )
-    assert CAUSE_EVIDENCE_CANNOT_DISCRIMINATE in report
-    assert "failure_kind:" not in report, (
+    assert (record.outcome, record.cause, record.drafted_disposition) == (
+        FORCED_INCONCLUSIVE, CAUSE_EVIDENCE_CANNOT_DISCRIMINATE, "malicious")
+    assert record.failure_kind is None, (
         "an override the review DECIDED is recorded as the review machinery failing"
     )
 

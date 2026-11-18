@@ -408,8 +408,8 @@ def seed_run_tree(run_dir: Path) -> Path:
 #   `snapshot` / `tree_diff`: the SAME SET OF NAMES, each with its kind (and a symlink's
 #   target); no bytes at all. Files carry timestamps, per-run salts and random ids, so there
 #   is deliberately no exemption list and no `exclude` argument.
-#   `capture_baseline` also records the digests of `investigation.md` and `report.md`
-#   (`content_digests`); no test compares them now.
+#   `capture_baseline` also records the digest of `investigation.md` (`content_digests`); no test
+#   compares it now. The verdict is no file of the run tree (V-NOFILE: it is a closing record in the run's database).
 # ======================================================================================
 
 @dataclasses.dataclass(frozen=True)
@@ -449,8 +449,8 @@ def tree_diff(a: dict[str, Entry], b: dict[str, Entry]) -> list[str]:
     return findings
 
 
-#: The two documents whose digests `capture_baseline` records.
-O3_CONTENT = ("investigation.md", "report.md")
+#: The documents whose digests `capture_baseline` records.
+O3_CONTENT = ("investigation.md",)
 
 
 def content_digests(root: Path) -> dict[str, str | None]:
@@ -493,7 +493,7 @@ def head_commit() -> str:
 
 
 def load_baseline() -> dict[str, Any]:
-    """The captured baseline: `commit` (informational), the structural `entries` and the two
+    """The captured baseline: `commit` (informational), the structural `entries` and the
     `content` digests."""
     return json.loads(TREE_BASELINE.read_text(encoding="utf-8"))
 
@@ -503,7 +503,7 @@ def baseline_entries(doc: dict[str, Any]) -> dict[str, Entry]:
 
 
 def capture_baseline(run_dir: Path, *, path: Path = TREE_BASELINE) -> dict[str, Any]:
-    """Write the tree baseline for `run_dir`: the whole name set, the two documents' bytes, and
+    """Write the tree baseline for `run_dir`: the whole name set, the documents' digests, and
     the commit it was taken on."""
     doc = {
         "commit": head_commit(),
