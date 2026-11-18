@@ -4,8 +4,12 @@ The literal cases are the design's own examples and rules. The properties draw s
 known pieces where the expected output is known by construction, so no test re-implements the treatment."""
 from __future__ import annotations
 
+import json
+import os
 import random
 import re
+import subprocess
+import sys
 import unicodedata
 
 import pytest
@@ -29,6 +33,15 @@ LITERALS = [
     pytest.param("пример.рф", "пример[.]рф",
                  id="non-ascii-labels"),
     pytest.param("bücher.example", "bücher[.]example", id="non-ascii-label-before-ascii"),
+    # Owner decision (c): a label may carry marks (Mn/Mc/Me); a host's last label is 2+ letters-or-marks or `xn--…`.
+    pytest.param("evil.xn--p1ai", "evil[.]xn--p1ai", id="punycode-tld-p1ai"),
+    pytest.param("evil.xn--j1amh", "evil[.]xn--j1amh", id="punycode-tld-j1amh"),
+    pytest.param("example.भारत", "example[.]भारत", id="mark-tld-devanagari"),
+    pytest.param("example.বাংলা", "example[.]বাংলা", id="mark-tld-bengali"),
+    pytest.param("example.இந்தியா", "example[.]இந்தியா", id="mark-tld-tamil"),
+    pytest.param("example.ไทย", "example[.]ไทย", id="thai-tld"),
+    pytest.param("नमस्ते.भारत", "नमस्ते[.]भारत", id="mark-labels-both-sides"),
+    pytest.param("evil.xn-p1ai", "evil.xn-p1ai", id="control-single-hyphen-is-not-punycode"),
     pytest.param("https://example.com/a.b.cd", "hxxps://example[.]com/a[.]b[.]cd", id="host-rule-runs-over-url-paths"),
     pytest.param("http://example.com/file.txt", "hxxp://example[.]com/file[.]txt", id="url-path-file-name"),
     # Positive controls: dotted text the rule does not call host-shaped keeps every dot.
@@ -164,22 +177,85 @@ def test_v_text_a_hard_cut_keeps_text_and_backs_off_only_over_a_dotted_run(text,
     assert C.treat(text, bound) == expected
 
 
+#: G4: a space-free run this long, treated whole and at two bounds, inside a budget a linear treatment never nears
+#: (each 64k input takes well under a second) and a treatment quadratic in the run's length always overruns.
+LONG_RUN = 1 << 16
+TIME_BUDGET_S = 60.0
+_LONG_RUN_CHILD = """
+import json, sys
+from defender.records.closing import treat
+n = int(sys.argv[1])
+texts = {
+    "label": "a" * n,
+    "dotted": ("ab." * n)[:n - 1] + "b",
+    "dotted-every-dot-form": ("a.b。c．d｡" * n)[:n - 1] + "e",
+    "digits-dotted": ("10.0.0." * n)[:n - 1] + "1",
+    "label-then-host": "a" * (n - 4) + ".com",
+    "marked-label": ("\u0915\u094d" * n)[:n],
+    "scheme-then-label": "http://" + "a" * (n - 7),
+}
+facts = {}
+for name, text in texts.items():
+    whole = treat(text, None)
+    cuts = [treat(text, b) for b in (400, len(whole) - 1)]
+    facts[name] = [len(whole), whole.count("[.]"), *(len(c) for c in cuts), *(c.endswith("\u2026") for c in cuts)]
+print(json.dumps(facts))
+"""
+
+
+def test_v_text_a_64k_space_free_run_treats_within_a_generous_time_budget():
+    """Long space-free labels and dotted runs treat, whole and cut, in a child killed at the budget. (V-TEXT, G4)"""
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(p for p in sys.path if p)}
+    try:
+        done = subprocess.run([sys.executable, "-c", _LONG_RUN_CHILD, str(LONG_RUN)], env=env, capture_output=True,
+                              text=True, timeout=TIME_BUDGET_S, check=False)
+    except subprocess.TimeoutExpired:
+        pytest.fail(f"treating 64k-character space-free runs took over {TIME_BUDGET_S}s (the child was killed)")
+    assert done.returncode == 0, done.stderr[-2000:]
+    facts = json.loads(done.stdout)
+    n = LONG_RUN
+    assert facts["label"] == [n, 0, 400, n - 1, True, True]
+    assert facts["dotted"][1] == n // 3, "every dot of a host-shaped run is defanged"
+    assert facts["label-then-host"][:2] == [n + 2, 1]
+    assert facts["marked-label"][:2] == [n, 0]
+    for name, (whole, _dots, small, large, small_cut, large_cut) in facts.items():
+        assert (small <= 400, large <= whole - 1, small_cut, large_cut) == (True,) * 4, (name, facts[name])
+
+
 DOTS = ".。．｡"
 #: Readings recorded in design r3.2 "Precision for implementers": a host-shaped token is any whole-label sub-run of a
-#: dotted run ending in an alphabetic label of 2+ letters (`_HOST`), and the scheme rule applies wherever `scheme://`
-#: appears, whatever follows, a bare `ftp://` included (`_SCHEME`).
+#: dotted run ending in a host label (`_HOST`), and the scheme rule applies wherever `scheme://` appears, whatever
+#: follows, a bare `ftp://` included (`_SCHEME`). Owner decision (c): a label is letters, digits, `-` and Unicode marks
+#: (category M); a host label is two or more letters-or-marks, or an `xn--` label.
 #: A scheme preceded by a non-letter or the start (the defang rule's own word boundary), an IPv4 address, and a
-#: host-shaped token: labels joined by raw dot-set characters ending in an alphabetic label of two or more letters.
+#: host-shaped token: labels joined by raw dot-set characters ending in a host label.
+
+
+def _class_of(category: str) -> str:
+    """A regex class body for every code point whose Unicode category starts with `category`, as ranges."""
+    points = [cp for cp in range(0x110000) if unicodedata.category(chr(cp)).startswith(category)]
+    ranges: list[tuple[int, int]] = []
+    for cp in points:
+        if ranges and ranges[-1][1] == cp - 1:
+            ranges[-1] = (ranges[-1][0], cp)
+        else:
+            ranges.append((cp, cp))
+    return "".join(re.escape(chr(a)) if a == b else f"{re.escape(chr(a))}-{re.escape(chr(b))}" for a, b in ranges)
+
+
+_MARKS = _class_of("M")
+_LABEL_CHAR = rf"(?:[^\W_]|[-{_MARKS}])"
+_HOST_LABEL = rf"(?:(?:[^\W\d_]|[{_MARKS}]){{2,}}|xn--{_LABEL_CHAR}+)"
 _SCHEME = re.compile(r"(?<![^\W\d_])(?:https?|ftp)://", re.IGNORECASE)
 _IPV4 = re.compile(r"(?<![\w.])\d{1,3}(?:\.\d{1,3}){3}(?![\w])")
-_HOST = re.compile(r"(?<![-\w])(?:[-\w]+[.。．｡])+[^\W\d_]{2,}(?![-\w])")
+_HOST = re.compile(rf"(?<![-\w{_MARKS}])(?:{_LABEL_CHAR}+[.。．｡])+{_HOST_LABEL}(?![-\w{_MARKS}])")
 
 
 def _cut_inputs() -> list[str]:
     """Seeded strings of every shape the cut meets, plus runs shaped like `foo.example1zzz…` and `10.0.0.255x…`."""
     rng = random.Random(15345)
     parts = ("foo", "example", "a1", "zzz", "10", "255", "x", "(", "-", "/", "http://", "HTTPS://", "ftp://", "www.", "[.]",
-             ".", ".", ".", "。", "．", "｡", " ", "e", "1", "@")
+             ".", ".", ".", "。", "．", "｡", " ", "e", "1", "@", "xn--p1ai", "xn--", "भारत", "ि", "্", "বাংলা", "ไทย")
     texts = ["".join(rng.choice(parts) for _ in range(rng.randint(1, 30))) for _ in range(600)]
     for pad in range(0, 12):
         texts.append("foo.example1" + "z" * pad)
@@ -187,6 +263,8 @@ def _cut_inputs() -> list[str]:
         texts.append("10.0.0.255x" + "y" * pad)
         texts.append("see 10.0.0.255x" + "y" * pad)
         texts.append("foo.example.com.example1" + "z" * pad)
+        texts.append("foo.example.xn--p1a" + "i" * pad)
+        texts.append("(foo.भारत" + "ि" * pad)
     return texts
 
 
@@ -245,12 +323,13 @@ PIECES = {
     "www.site.org": "www[.]site[.]org", "user@mail.example.com": "user@mail[.]example[.]com",
     "http://x.example/p": "hxxp://x[.]example/p", "https://y.test/a.b.cd": "hxxps://y[.]test/a[.]b[.]cd",
     "ftp://f.example": "fxp://f[.]example",
+    "evil.xn--p1ai": "evil[.]xn--p1ai", "example.भारत": "example[.]भारत", "site.বাংলা": "site[.]বাংলা",
 }
 
 #: Fragments for inputs with no expected output: controls, every dot form, schemes in any case, wide characters.
 WILD = ("a", "bc", " ", "  ", "\t", "\n", "\r\n", "\x0b", "\x85", "\x1c", "​", "‮", "\x00", "\ud800", "",
         ".", "。", "．", "｡", "evil.example", "10.0.0.5", "HTTP://", "https://", "ftp://", "www.", "x@y.zz",
-        "[.]", "hxxp://", "пр.рф", "bü.cher", "-", "/", ":", "1", "e.g.", "...")
+        "[.]", "hxxp://", "пр.рф", "bü.cher", "a.xn--p1ai", "x.भारत", "ि", "-", "/", ":", "1", "e.g.", "...")
 
 
 def _pieces_text(rng: random.Random) -> tuple[str, str]:

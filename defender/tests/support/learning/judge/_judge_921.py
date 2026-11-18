@@ -630,7 +630,7 @@ def episode_runs_for(episode_dir: Path) -> Any:
 
 def through_view(episode_dir: Path, reader: Any, *args: Any, **kw: Any) -> Any:
     """`reader(view, *args, **kw)` over the episode's walked view (`walked_view`), closed
-    after. The episode's readers (`episode.delta_o`, `episode.verdicts`) take that view, not a
+    after. The episode's readers (`episode.delta_o`) take that view, not a
     `Path`: a bare path carries no tenant to walk."""
     with walked_view(episode_dir) as view:
         return reader(view, *args, **kw)

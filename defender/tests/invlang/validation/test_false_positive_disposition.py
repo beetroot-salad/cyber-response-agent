@@ -186,7 +186,10 @@ def _close(tmp_path, companion: str | None, disposition: str):
         (run_dir / "investigation.md").write_text(companion, encoding="utf-8")
     dfn = tmp_path / "defender"
     dfn.mkdir(exist_ok=True)
-    deps = _with_live_run_1165(bind(MAIN_DEF, run_dir, defender_dir=dfn), run=_live_run_1165(run_dir))
+    from defender.tests.support.runtime.engine._spec923 import with_session_store
+
+    deps = with_session_store(
+        _with_live_run_1165(bind(MAIN_DEF, run_dir, defender_dir=dfn), run=_live_run_1165(run_dir)), tmp_path)
     return asyncio.run(_close_investigation_async(
         deps, disposition, stages=_bundle(composer=_composer(finding="holds")),
         bounds=challenge_gate.default_bounds(),

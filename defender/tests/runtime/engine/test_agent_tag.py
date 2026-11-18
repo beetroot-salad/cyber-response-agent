@@ -154,9 +154,9 @@ def test_1221_the_tag_names_the_run_not_the_case_key(tmp_path, monkeypatch):
     ("arm", "report_kw", "record_kw"),
     [
         ("the record", {"body": NARRATIVE}, {}),
-        ("the unreadable report", {"text": ""}, {}),
+        ("a run that never closed", {"closed": False}, {}),
         ("the escalation note (aborted)", {"body": NARRATIVE}, {"truncated_by": "aborted"}),
-        ("the escalation note (a forced close that left no report)", {"text": ""},
+        ("the escalation note (a forced close that left no record)", {"closed": False},
          {"truncated_by": "request-limit"}),
     ],
 )
@@ -200,14 +200,34 @@ def test_1221_the_tag_survives_the_wire_bound(tmp_path, run_id, filler):
     assert rest == f"benign — {host_cause()}\n\n{narrative_of(R.ceiling_entry(NARRATIVE))}", "a short comment was cut anyway"
 
 
+def _maximal_entries(words: list[str], count: int = 6) -> dict:
+    """`write_report` keywords for the largest record the bounds allow: each column's rendered lines fill its aggregate
+    bound (from the constants), the text distinct words taken in order."""
+    from defender.records import closing as C
+
+    stream = iter(words)
+
+    def text(n: int) -> str:
+        out = ""
+        while len(out) < n:
+            out += next(stream) + " "
+        return out[:n].strip()
+
+    def sized(make, render, bound: int) -> tuple:
+        overhead = sum(len(render(make(i, "x"))) - 1 for i in range(count)) + count - 1
+        return tuple(make(i, text((bound - overhead) // count)) for i in range(count))
+
+    return {"ceiling": sized(lambda i, t: R.ceiling_entry(t, ref=f"l-00{i}"), C.ceiling_line, C.CEILING_LINES_BOUND),
+            "baselines": sized(lambda _i, t: R.baseline_entry(t), C.baseline_line, C.BASELINE_LINES_BOUND)}
+
+
 def test_1221_the_tag_survives_the_listing_view_clip(tmp_path):
     """In gather's payload view one maximal comment renders verbatim; two are clipped (their last
     words gone), yet each comment still opens with its tag line."""
     words = [f"word{i:05d}" for i in range(4000)]
     bodies, last_words = {}, {}
     for run_id in (RUN_ID, BRANCH_RUN_ID):
-        run_dir = make_run(tmp_path / run_id[-6:], name=run_id,
-                           **long_entries(lambda n: " ".join(words[n * 28:(n + 1) * 28])))
+        run_dir = make_run(tmp_path / run_id[-6:], name=run_id, **_maximal_entries(words))
         store = _store(tmp_path)
         record(run_dir, store)
         bodies[run_id] = store.wire_body()

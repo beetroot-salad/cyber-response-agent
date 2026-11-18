@@ -23,6 +23,7 @@ from defender.learning.core.state import FINDINGS
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.learning.judge._memory_store import MemoryStore
+from defender.tests.support.storage import _readers1534 as R
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.tenancy import _tenants1106 as T1106
@@ -77,14 +78,11 @@ def _episode(tmp_path: Path, name: str, *, raw: bytes | None = None,
     `<data root>/<T>/episodes/<uuid>` (where a door reaches it by id), with the launch's copies
     of `raw` (default `_alert(name)`) and a record carrying `signature` (default `SIG-<name>`;
     None = no signature recorded). `copy=False` plants no copies."""
-    ep = J.accepted_episode(tmp_path)
     # Distinct scenarios share a queue, so each episode gets its own uuid (#1241), and the
     # manifest names that id: every manifest reader refuses a mismatched `episode_id`, and a test
-    # about the record would then pass on the wrong refusal.
-    episode_id = fixture_uuid(f"1222-episode-{name}")
-    ep = ep.rename(ep.with_name(episode_id))
-    doc = _yaml.safe_load((ep / "family.yaml").read_text(encoding="utf-8"))
-    T.write_family(ep, {**doc, "episode_id": episode_id})
+    # about the record would then pass on the wrong refusal. Built under that id (never renamed),
+    # so the episode's closing plan and arm roster are keyed by the folder the judge reads (#1534).
+    ep = J.accepted_episode(tmp_path, episode_id=fixture_uuid(f"1222-episode-{name}"))
     alert = _alert(name) if raw is None else raw
     if copy:
         sig = f"SIG-{name}" if signature == "" else signature
@@ -105,11 +103,13 @@ def _set_source_run_id(ep: Path, source_run_id: str) -> None:
     T.write_family(ep, doc)
 
 
-def _trial(base: Path, name: str, raw: bytes, *, disposition: str = "benign", **kw: Any) -> Path:
-    """A finished trial of `raw` under `base`: the alert, (default) its record and a report;
-    `kw` reaches `S.plant_run` (`record=False`, `facts=`)."""
-    return S.plant_run(base, name, alert=raw,
-                       files={"report.md": T.report_text(disposition)}, **kw)
+def _trial(base: Path, name: str, raw: bytes, *, closing: dict[str, Any] | None = None, **kw: Any) -> Path:
+    """A finished trial of `raw` under `base`: the alert and (default) its record; `kw` reaches `S.plant_run`
+    (`record=False`, `facts=`). `closing` (the fields of a closing record, for a folder named by a UUID) plants one."""
+    run = S.plant_run(base, name, alert=raw, **kw)
+    if closing is not None:
+        R.plant_run(run, {**R.valid_fields("malicious"), **closing})
+    return run
 
 
 def _grade(ep: Path, base: Path, *, judge: J.FakeJudge | None = None) -> tuple[Any, J.FakeJudge]:
@@ -264,7 +264,7 @@ class _Lifecycle:
 
     def __call__(self, **kw: Any) -> dict[str, Any]:
         self.run_dir = Path(kw["run"].run_dir)
-        (self.run_dir / "report.md").write_text(T.report_text("benign"), encoding="utf-8")
+        R.plant_run(self.run_dir, R.valid_fields("benign"))
         return {"output": "done", "requests": 1, "truncated_by": None}
 
 
@@ -489,8 +489,7 @@ def test_p120_source_alert_json_is_not_a_regular_file(tmp_path):
     ep, raw = _episode(tmp_path, "p120")
     _trial(base, "trial-genuine", raw)
 
-    far = _trial(outside, "far-run", raw, disposition="malicious")
-    (far / "report.md").write_text(T.report_text("malicious", body=marker), encoding="utf-8")
+    far = _trial(outside, fixture_uuid("far-run"), raw, closing={"ceiling_test": (J.ceiling_note(marker),)})
     linked_record = _trial(base, "cand-link-record", raw)
     S.record_file(linked_record).unlink()
     S.record_file(linked_record).symlink_to(S.record_file(far))
@@ -515,12 +514,11 @@ def test_p120_source_alert_json_is_not_a_regular_file(tmp_path):
 
 
 def test_p121_family_record_names_a_hostile_source_run(tmp_path):
-    marker = "HOSTILE-SOURCE-p121"
+    marker = "SIG-DECOY-p121"  # the hostile source runs' own record signature (their folders cannot hold a closing record)
     base = tmp_path / "d1" / "d2" / "runs"
     decoy = _alert("p121-decoy")
     for target in (tmp_path / "d1" / "escaped-src", tmp_path / "abs-src"):
-        run = _trial(target.parent, target.name, decoy, facts={"signature": "SIG-DECOY-p121"})
-        (run / "report.md").write_text(T.report_text("malicious", body=marker), encoding="utf-8")
+        _trial(target.parent, target.name, decoy, facts={"signature": marker})
     for name, source_run_id in (("escape", "../../escaped-src"),
                                 ("absolute", str(tmp_path / "abs-src"))):
         before = len(_rows())

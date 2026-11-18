@@ -231,6 +231,23 @@ def main_deps(tmp_path: Path, companion: str | None = None) -> tuple[Any, Path]:
     return deps, run_dir
 
 
+def with_session_store(deps: Any, root: Path, *, case_id: str = "c-close") -> Any:
+    """`deps` carrying an open session store whose database lies under `root` (the test's own folder, never shared),
+    with the run's pointer naming it, as the driver hands both to the close (#1534). Closed at the test's end."""
+    from dataclasses import replace
+
+    from defender.records import Run, SessionPaths
+    from defender.records import session_store as ss
+    from defender.records.session_store._write import open_store
+
+    (root / "runs").mkdir(parents=True, exist_ok=True)
+    store = _OPEN_STORES.enter_context(open_store(case_id=case_id, sessions=SessionPaths(fixture_runs_base(root / "runs"))))
+    store.new_session(agent_id="main")
+    ss.write_case_pointer(Run.under(fixture_runs_base(deps.run_dir.parent), deps.run_dir.name), case_id=store.case_id,
+                          store_path=store.path)
+    return replace(deps, session_store=store)
+
+
 #: Sentinel for "no argument given", so an explicit `stages=None` still reaches the gate as an
 #: unbound bundle (one of the faults `challenge_gate._fail` handles).
 _UNBOUND = object()

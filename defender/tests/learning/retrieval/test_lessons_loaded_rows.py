@@ -32,6 +32,7 @@ from defender.tests.support.learning.retrieval._lessons_corpus import (
     _write_lesson,
     trace_main,
 )
+from defender.tests.support.storage import _readers1534 as R
 from defender.tests.support.storage._alert_plant import plant_alert
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H1105
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
@@ -206,9 +207,9 @@ def _mk_run(runs: Path, name: str, rows: list[dict], *, disposition: str = "beni
     rd = runs / run_id
     rd.mkdir(parents=True)
     plant_alert(rd)
-    (rd / "report.md").write_text(f"---\ndisposition: {disposition}\n---\nbody\n", encoding="utf-8")
     (rd / "lessons_loaded.jsonl").write_text(
         "".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    R.plant_run(rd, R.valid_fields(disposition))  # its closing record (#1534)
     return rd
 
 

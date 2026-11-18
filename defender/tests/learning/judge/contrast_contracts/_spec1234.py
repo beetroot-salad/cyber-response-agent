@@ -1385,8 +1385,11 @@ def render_context(where: Any, label: str, *, payload_cap: int = 20000) -> Any:
     fam = mod(JUDGE_FAMILY)
     rnd = mod(JUDGE_RENDER)
     outcome = mod(OUTCOME)
-    with J.episode_runs_for(ep).episode_files(ep.name) as episode:
+    repository = J.episode_runs_for(ep)
+    with repository.episode_files(ep.name) as episode:
         bound = episode.view()
+        # The episode's run view (#1534): each run's verdict is its arm's closing record, read through it.
+        view = repository.episode(ep.name, held=episode)
         manifest = fam.read_manifest(bound, expected_episode_id=ep.name)
         samples = fam.read_samples_record(bound)
         try:
@@ -1395,11 +1398,11 @@ def render_context(where: Any, label: str, *, payload_cap: int = 20000) -> Any:
         except outcome.OutcomeUnreadable:
             pre, failed = None, {}
         world = next(w for w in manifest["worlds"] if w["label"] == label)
-        _row, facts = fam.read_world(bound, world, episode_dir=ep)
+        _row, facts = fam.read_world(bound, world, episode_dir=ep, episode_runs=view)
         return rnd.render(ep, label, git_show=FakeGitShow(),
                           payload_cap=payload_cap, facts=facts, lessons_commit=None,
                           manifest=manifest, samples=samples,
-                          family_text=rnd.render_family_text(pre, failed), bound=bound)
+                          family_text=rnd.render_family_text(pre, failed), bound=bound, episode_runs=view)
 
 
 # --------------------------------------------------------------------------------------

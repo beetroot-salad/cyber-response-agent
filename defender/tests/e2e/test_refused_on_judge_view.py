@@ -554,10 +554,9 @@ def test_key_flow_rows_a_real_run_wrote_render_as_the_pinned_kinds(tmp_path, jud
     ep = J.accepted_episode(tmp_path, ledgers={"b": [oracle], "c": []})
     base, _src = location_path(J.runs_base)(tmp_path)
     world = ep / "worlds" / J.world_id(ep, "b")
-    for name in ("report.md", "lessons_loaded.jsonl"):
-        if (world / name).is_file():
-            (r.run_dir / name).write_text((world / name).read_text(encoding="utf-8"),
-                                          encoding="utf-8")
+    if (world / "lessons_loaded.jsonl").is_file():
+        (r.run_dir / "lessons_loaded.jsonl").write_text((world / "lessons_loaded.jsonl").read_text(encoding="utf-8"),
+                                                        encoding="utf-8")
     with Episode.open(ep) as episode:
         T.mod("learning.branch.archive").archive_episode(episode, {T.world_id(episode.dir, 'b'): r.run_dir})
     assert (world / "executed_queries.jsonl").is_file()

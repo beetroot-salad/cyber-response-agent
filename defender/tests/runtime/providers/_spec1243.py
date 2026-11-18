@@ -429,6 +429,15 @@ def gather_agent(lead: str) -> str:
     return f"{GATHER_AGENT_ID_PREFIX}{lead}"
 
 
+def assert_no_closing_record(folder: Path, what: str) -> None:
+    """The run at `folder` never closed: its lookup reads `NeverClosed`, not a record and not a fault (V-LOOK)."""
+    from defender.records import closing
+    from defender.tests.storage.verdict_1534._spec1534 import handle
+
+    found = closing.for_run(handle(folder))
+    assert isinstance(found, closing.NeverClosed), f"{what}: the closing-record lookup read {found!r}, not NeverClosed"
+
+
 def sidecar(run_dir: Path) -> dict[str, Any] | None:
     """The host-side run-end record beside `run_dir`, parsed by the production reader."""
     path = RunPaths(run_dir).run_end_sidecar()
@@ -475,7 +484,7 @@ def assert_ended_provider_down(d: S.Drive, *, rc: bool = True) -> None:
     rec = sidecar(d.folder)
     assert rec is not None, "no run-end record (or one the production reader refuses)"
     assert rec["truncated_by"] == PROVIDER_DOWN, rec
-    assert not d.paths.report.exists(), "a provider-down run wrote report.md"
+    assert_no_closing_record(d.folder, "a provider-down run")
     if rc:
         assert d.rc == PROVIDER_DOWN_EXIT, (
             f"run.py exited {d.rc!r} on a provider-down run, not {PROVIDER_DOWN_EXIT}")
@@ -718,7 +727,7 @@ def assert_ended_proxy_access(d: S.Drive, *, rc: bool = True) -> None:
     rec = sidecar(d.folder)
     assert rec is not None, "no run-end record (or one the production reader refuses)"
     assert rec["truncated_by"] == PROXY_ACCESS, rec
-    assert not d.paths.report.exists(), "a proxy-access run wrote report.md"
+    assert_no_closing_record(d.folder, "a proxy-access run")
     if rc:
         assert d.rc == PROXY_ACCESS_EXIT, (
             f"run.py exited {d.rc!r} on a proxy-access run, not {PROXY_ACCESS_EXIT}")

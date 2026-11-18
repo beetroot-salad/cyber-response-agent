@@ -37,7 +37,7 @@ _ALIASED_WRITE = (
     "from defender._io import write_guarded as w\n"
     "\n"
     "def commit(run_dir, body):\n"
-    '    w(run_dir / "report.md", body)\n'
+    '    w(run_dir / "investigation.md", body)\n'
 )
 #: The duck-typed shape: the receiver is a Path VALUE, so there is no import to resolve.
 _DUCK_TYPED_WRITE = (
@@ -50,9 +50,9 @@ _INJECTED_VALIDATOR = (
     "from defender._io import write_guarded\n"
     "\n"
     "def commit(run_dir, body, validator):\n"
-    '    if validator("report.md", body, None) is not None:\n'
+    '    if validator("investigation.md", body, None) is not None:\n'
     "        return\n"
-    '    write_guarded(run_dir / "report.md", body)\n'
+    '    write_guarded(run_dir / "investigation.md", body)\n'
 )
 #: Routed through the permission gate, which applies the schema on the caller's behalf.
 _THROUGH_THE_GATE = (
@@ -86,8 +86,8 @@ def _names(findings) -> set[str]:
 
 
 def test_the_two_shipped_defects_are_both_flagged(tmp_path):
-    """#964's shape and a report-side sibling, each reduced to the code that made it a bug:
-    a write of one of the two artifacts with no schema in the frame."""
+    """#964's shape and an aliased-write sibling, each reduced to the code that made it a bug:
+    a write of the investigation with no schema in the frame."""
     tree = tmp_path / "scope"
     _pyfile(tree, "investigation/lead_zero.py", _UNGATED_SEED)
     _pyfile(tree, "investigation/close_tool.py", _ALIASED_WRITE)
@@ -116,6 +116,16 @@ def test_the_schema_call_is_the_clean_spelling(tmp_path):
     assert _GATE.main([], scope=tree, baseline_path=tmp_path / "empty.json") == 0
 
 
+def test_a_write_of_the_retired_report_file_is_not_the_gates_business(tmp_path):
+    """`report.md` is no longer an artifact (#1534): the shapes flagged for `investigation.md` are clean for it."""
+    retired, live = tmp_path / "retired", tmp_path / "live"
+    for name, src in (("aliased.py", _ALIASED_WRITE), ("ducked.py", _DUCK_TYPED_WRITE)):
+        _pyfile(retired, name, src.replace("investigation.md", "report.md"))
+        _pyfile(live, name, src)
+    assert _GATE._scan(retired) == []
+    assert _names(_GATE._scan(live)) == {"aliased.py:commit", "ducked.py:commit"}, "control: the same shapes on investigation.md"
+
+
 def test_a_write_of_some_other_file_is_not_the_gates_business(tmp_path):
     tree = tmp_path / "scope"
     _pyfile(
@@ -136,10 +146,10 @@ def test_a_nested_function_gets_its_own_verdict(tmp_path):
         "from defender._io import write_guarded\n"
         "\n"
         "def outer(run_dir, body):\n"
-        '    validate_artifact("report.md", body, None)\n'
+        '    validate_artifact("investigation.md", body, None)\n'
         "\n"
         "    def inner():\n"
-        '        write_guarded(run_dir / "report.md", body)\n'
+        '        write_guarded(run_dir / "investigation.md", body)\n'
         "\n"
         "    return inner\n",
     )
@@ -171,8 +181,8 @@ def test_the_blind_spots_are_real_and_pinned(tmp_path):
         "from defender._io import write_guarded\n"
         "\n"
         "def commit(run_dir, checked, actual):\n"
-        '    validate_artifact("report.md", checked, None)\n'
-        '    write_guarded(run_dir / "report.md", actual)\n',
+        '    validate_artifact("investigation.md", checked, None)\n'
+        '    write_guarded(run_dir / "investigation.md", actual)\n',
     )
     _pyfile(
         tree, "split.py",

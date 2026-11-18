@@ -247,6 +247,14 @@ def _c_row_names(built: Any, path: Path) -> bool:
     return bool(said) and path.name in str(row_c.get("ungradable_reason", ""))
 
 
+def _family_before_the_manifest_is_damaged(tmp_path: Path) -> Any:
+    """The family with its arms' closing records already planted: planting reads the manifest (#1534), so it
+    cannot wait for the first read of the episode once the manifest is the damaged file."""
+    built = S.family(tmp_path)
+    J.ensure_closings(built.ep)
+    return built
+
+
 def _manifest_case(built: Any) -> dict[str, Any]:
     """The manifest boundary over an already-built (and possibly damaged) family: b's reply
     cites the plan at b's own entry (design). Read back whether the pass refused naming the
@@ -620,7 +628,7 @@ def test_1234_pointer_with_hostile_syntax(tmp_path: Path) -> None:
 # The undamaged manifest twin is the oversize test's `manifest-plain-twin` row.
 @pytest.mark.parametrize("link", ["to_a_byte_copy_of_itself", "to_a_reference_runs_report"])
 def test_1234_manifest_replaced_by_a_link_and_cited_as_design(tmp_path: Path, link: str) -> None:
-    built = S.family(tmp_path)
+    built = _family_before_the_manifest_is_damaged(tmp_path)
     manifest = built.ep / "family.yaml"
     if link == "to_a_byte_copy_of_itself":
         S.plant_symlink(manifest, S.scratch_copy(tmp_path, manifest, "manifest-copy.yaml"))
@@ -637,7 +645,7 @@ _FIVE = ("manifest", "conduct", "oracle", "served", "table")
 def test_1234_an_oversize_file_is_refused_by_name_on_every_read_cell(tmp_path: Path, where: str,
                                                                      damaged: bool) -> None:
     if where == "manifest":
-        built = S.family(tmp_path)
+        built = _family_before_the_manifest_is_damaged(tmp_path)
         if damaged:
             S.plant_oversize(built.ep / "family.yaml")
         assert _manifest_case(built) == _manifest_expected(damaged=damaged)
@@ -653,7 +661,7 @@ def test_1234_an_oversize_file_is_refused_by_name_on_every_read_cell(tmp_path: P
 def test_1234_pointer_naming_a_fifo_or_directory_does_not_resolve_and_does_not_hang(
         tmp_path: Path, where: str, kind: str) -> None:
     if where == "manifest":
-        built = S.family(tmp_path)
+        built = _family_before_the_manifest_is_damaged(tmp_path)
         _damage(tmp_path, built.ep / "family.yaml", kind)
         assert _manifest_case(built) == _manifest_expected(damaged=True)
         return

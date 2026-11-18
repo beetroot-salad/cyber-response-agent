@@ -131,7 +131,7 @@ def flagged_rows(text: str) -> tuple[str, ...]:
 
 def main_deps(tmp_path: Path) -> tuple[Any, Path]:
     """MAIN deps through the real `bind` seam — real compiled policy, real gate — built as
-    `test_append_only_write_lane.py::_main_deps` builds them."""
+    `test_append_only_write_lane.py::_main_deps` builds them, carrying the run's open store (#1534)."""
     # A run folder's name is its canonical UUID run id (#1187).
     run = tmp_path / fixture_uuid("run")
     run.mkdir(parents=True)
@@ -141,8 +141,11 @@ def main_deps(tmp_path: Path) -> tuple[Any, Path]:
     # on deps without it (#1235).
     from defender.records import Run
 
-    return replace(bind(MAIN_DEF, run, defender_dir=dfn),
-                   run=Run.under(fixture_runs_base(run.parent), run.name), run_state=RunState(run, "r-836")), run
+    from defender.tests.support.runtime.engine._spec923 import with_session_store
+
+    deps = replace(bind(MAIN_DEF, run, defender_dir=dfn),
+                   run=Run.under(fixture_runs_base(run.parent), run.name), run_state=RunState(run, "r-836"))
+    return with_session_store(deps, tmp_path), run
 
 
 def seed_investigation(run_dir: Path, text: str) -> Path:

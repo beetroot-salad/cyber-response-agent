@@ -938,13 +938,15 @@ def test_input_forged_id_is_a_substring_of_a_real_id_or_contains_one(tmp_path):
 _JUDGE_REPLY = S.as_reply_text(J.reply_doc(findings=[], bucket="none", systems=[]))
 
 
-def _judged_in_place(ep: Path) -> None:
+def _judged_in_place(ep: Path, tmp_path: Path) -> None:
     """Make the registry-written episode `ep` (built on the default `S.family_v2()` manifest) a
     judged one IN PLACE: exactly what `S.judged_episode` adds to the episode it creates (every
     world's #921 archive, the samples and outcome records), plus an empty ledger for each world
     that has none — without re-creating the episode, so the ledgers and oracle-side stores the
-    registry wrote stay as they are."""
+    registry wrote stay as they are. Each world's arm closes with its declared disposition (`J.closing_plan`, #1534)."""
     doc = S.family_v2()
+    J.closing_plan(ep, tmp_path, {w["label"]: {"disposition": w.get("disposition_declared", "malicious")}
+                                  for w in doc["worlds"]})
     for world in doc["worlds"]:
         label = world["label"]
         S.archived_judge_world(ep, label,
@@ -1007,7 +1009,7 @@ def test_input_real_id_appears_in_family_data_after_the_forged_id_was_frozen(tmp
         "the exploration's row reached the sibling's ledger")
 
     # The collision, recorded for the judge: grade THIS episode and read world b's prompt.
-    _judged_in_place(sc.ep)
+    _judged_in_place(sc.ep, tmp_path)
     judge = S.FakeJudge(default=_JUDGE_REPLY)
     _grade(sc.ep, judge, tmp_path)
     world_b = "\n".join(p for p, a in zip(judge.prompts, judge.agent_ids, strict=True)

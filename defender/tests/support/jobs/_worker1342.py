@@ -106,9 +106,10 @@ def _child(world: dict, **kw) -> ScriptedChild:
     return ScriptedChild(world["tmp"] / "child", world["runs"], **kw)
 
 
-def closing(disposition: str | None = "inconclusive", *, fault: str | None = None) -> str:
-    """The plan a child follows to leave the run's closing record (`disposition` None: the table and no row)."""
-    return closing_plan(CASE, None if disposition is None else {"disposition": disposition}, fault=fault)
+def closing(disposition: str | None = "inconclusive", *, fault: str | None = None, then: str | None = None) -> str:
+    """The plan a child follows to leave the run's closing record (`disposition` None: the table and no row); `then` is SQL
+    it runs on the database afterwards (`closing_plan`)."""
+    return closing_plan(CASE, None if disposition is None else {"disposition": disposition}, fault=fault, then=then)
 
 
 def _committed(**overrides) -> dict[str, str]:
@@ -280,6 +281,8 @@ CASES = {
                                        expect=("unparseable", None, None)),
     "4-report-only": _spec(files=_committed(**{CLOSING_KEY: None, "{id}/report.md": GOOD}),
                            expect=("unparseable", None, None)),
+    "4-record-unreadable": _spec(files=_committed(**{CLOSING_KEY: closing(fault="row-invalid")}),
+                                 expect=("unparseable", None, None)),  # a fault in reading the record (V-READERS, worker)
     # rule 4 after an abnormal child end whose facts are both true (r5 C2: the driver raised after a clean close)
     "4-completed-when-the-child-died-after-both-facts": _spec(files=_committed(), exit=1,
                                                               expect=("completed", None, "inconclusive")),

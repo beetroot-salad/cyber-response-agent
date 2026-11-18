@@ -21,6 +21,7 @@ from defender.tests.support.learning.core._store1278 import (  # noqa: E402
     call, lesson_citing, migrated_database, world)  # noqa: F401 — fixtures
 from defender.tests.support.learning.curation import _drain719 as D  # noqa: E402
 from defender.tests.support.learning.judge import _gate_1278 as G  # noqa: E402
+from defender.tests.support.learning.judge import _judge_921 as J  # noqa: E402
 from defender.tests.learning.judge.contrast_contracts import _spec1234 as S  # noqa: E402
 from defender.learning.core.state import FINDINGS, QUESTIONER_FINDINGS  # noqa: E402
 from defender.tests.tenancy.tenant_1108_p4._drain_support import (  # noqa: E402
@@ -252,6 +253,7 @@ def test_nothing_lands_outside_the_declared_write_set(tmp_path, monkeypatch):
     """A graded pass writes nothing outside the declared episode artifacts, and its rows go to the store."""
     built = W.contrast_family(tmp_path, monkeypatch)
     ep = built.ep
+    J.ensure_closings(ep)  # the fixture's own arm records and pointers, planted before the pass is measured
     before = {p.relative_to(ep) for p in ep.rglob("*") if p.is_file()}
     judge = S.judge({"b": S.world_reply("lead-quality", ["idp"], investigator=[S.inv()],
                                         world=[S.wf("mislabelled")])})

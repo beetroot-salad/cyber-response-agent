@@ -296,7 +296,7 @@ def test_h1_the_archive_refuses_a_linked_world_folder_and_copies_nothing_through
     world = ep / "worlds" / WORLD_B
     assert archived == {T.world_id(ep, "b"): world}
     assert_real_folder(world)
-    assert (world / "report.md").is_file()
+    assert (world / "investigation.md").is_file()
 
 
 # =======================================================================================

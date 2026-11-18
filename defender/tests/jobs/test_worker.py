@@ -465,9 +465,11 @@ async def test_o8_a_cost_read_fault_keeps_the_stage_and_leaves_cost_unknown(worl
         if fault == "pointed-session-not-in-database":
             pointer = session_pointer(CASE, session_id="no-such-session")
         then = {"stale-schema-version": "PRAGMA user_version = 4242", "no-ledger-table": "DROP TABLE spend_ledger"}.get(fault)
-    plan = closing(fault="database-missing") if fault == "no-database" else closing()  # the spec says there is no database: the child plants none
+    # The spec says there is no database: the child plants none. `then` runs after the child planted the record: its writer
+    # open would recreate a dropped table (B2).
+    plan = closing(fault="database-missing") if fault == "no-database" else closing(then=then)
     child = _child(world, files=_committed(**{"{id}.session-pointer.json": pointer, CLOSING_KEY: plan}))
-    inv, stored = await _run_spent(world, child, spend, then=then)
+    inv, stored = await _run_spent(world, child, spend)
 
     # CONFLICT-UPDATED (#1534): the disposition is read through the same pointer and database, so a fault there costs it too.
     if fault in ("no-ledger-table", "no-main-session", "pointed-session-not-in-database"):
@@ -509,7 +511,7 @@ async def test_o8_a_session_pointer_of_the_wrong_shape_keeps_the_stage_and_leave
     assert _warned(caplog, inv), "the cost fault was not logged"
 
 
-_DONE, _NO_REPORT = ("completed", None), ("failed", "no_report")
+_DONE, _NO_REPORT, _UNREADABLE = ("completed", None), ("failed", "no_report"), ("unparseable", None)
 
 
 @pytest.mark.parametrize(("ending", "ledger", "expect"), [
@@ -528,7 +530,8 @@ _DONE, _NO_REPORT = ("completed", None), ("failed", "no_report")
     ("no job-end, exit 77", "sealed, no rows", (*_NO_REPORT, 0.0, False)),  # a run that made no request and sealed: exactly 0
     ("no job-end, exit 77", "unsealed, no rows", (*_NO_REPORT, 0.0, True)),  # opened its store, never sealed
     ("clean", "sealed, no rows", (*_DONE, 0.0, False)),
-    ("clean", "unreadable database", (*_DONE, None, False)),
+    # #1534: the closing record is read from the same database, so a clean run's unreadable one is `unparseable` (V-READERS).
+    ("clean", "unreadable database", (*_UNREADABLE, None, False)),
     ("no job-end, exit 77", "unreadable database", (*_NO_REPORT, None, False)),
     ("clean", "no ledger table", (*_DONE, None, False)),
     ("no job-end, exit 77", "no pointer", (*_NO_REPORT, 0.0, False)),  # the store was never opened: no ledger, exactly 0 (a different case from an unsealed one)
@@ -543,17 +546,22 @@ async def test_s2_s4_the_final_cost_and_its_lower_limit_mark_follow_the_flag_tab
         files["{id}.session-pointer.json"] = session_pointer(CASE)
     # The `exit N` of a case is its container's; its helper served the job either way and exits 0 (#1170), so the
     # worker sees 0 for every case, as the flag table's own rule says: the mark is not read from an exit code.
+    if ledger == "no ledger table":  # dropped after the child planted the record: its writer open would recreate it (B2)
+        files[CLOSING_KEY] = closing(then="DROP TABLE spend_ledger")
     child = _child(world, files=files, exit=0)
     if ledger == "unreadable database":
         _break_database(world["runs"], CASE)
     spend = {"sealed rows": _LEDGER, "unsealed rows": _LEDGER, "sealed, no rows": [], "unsealed, no rows": [], "no ledger table": _LEDGER}.get(ledger)
-    inv, _ = await _run_spent(world, child, spend, sealed=not ledger.startswith("unsealed"),
-                              then="DROP TABLE spend_ledger" if ledger == "no ledger table" else None)
+    inv, _ = await _run_spent(world, child, spend, sealed=not ledger.startswith("unsealed"))
     stored = row(world["dsn"], inv)
 
     assert (stored["stage"], stored["failure_reason"], stored["cost_usd"], lower_limit(world["dsn"], inv)) == (
         expect[0], expect[1], None if expect[2] is None else pytest.approx(expect[2]), expect[3])
-    if expect[1] is None:
+    if expect[:2] == _UNREADABLE:
+        from defender.records import closing as C
+
+        assert C.FAULT_WORDING["store-unreadable"] in (stored["failure_message"] or ""), stored["failure_message"]
+    elif expect[1] is None:
         assert stored["failure_message"] is None, stored["failure_message"]
     else:
         assert stored["failure_message"], "a failed row carries our own message"

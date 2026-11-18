@@ -341,10 +341,7 @@ def assert_same_refusal(got: BaseException | None, owner: BaseException, *, wher
 
 
 def document(m: Member, tag: str) -> str:
-    """A whole document `m.write` accepts. The report must meet its schema; every other
-    written record, the investigation included, takes plain text."""
-    if m.rel == RUN_LAYOUT.report:
-        return S.report_text(f"{m.name} {tag}\n")
+    """A whole document `m.write` accepts: every written record, the investigation included, takes plain text."""
     return f"{m.name} {tag}\n"
 
 
@@ -428,7 +425,6 @@ def _fill_record_sources(tree: Tree) -> None:
         commit="0" * 40, dirty=False, model="m-1111", tenant_id=S.DEFAULT_TENANT_ID,
         world_id="w-1111").as_json(), encoding="utf-8")
     plant_alert(run_dir, b'{"alert": "1111"}\n')
-    owner.report.write_text(S.report_text("# the report\n"), encoding="utf-8")
     owner.run_end_sidecar(fixture_runs_base(tree.runs_base)).write_text(
         json.dumps({"truncated_by": "budget", "closed_before_cut": False}), encoding="utf-8")
 
@@ -458,7 +454,7 @@ def test_o1_o3_a_plant_at_any_file_run_record_reads_counts_as_absent(tree, kind)
     _fill_record_sources(tree)
     sources = _record_sources(tree)
     owner = RunPaths(location_path(tree.runs_base) / RUN_ID)
-    floor = {owner.provenance, owner.alert, owner.alert_record, owner.report,
+    floor = {owner.provenance, owner.alert, owner.alert_record,
              owner.run_end_sidecar(fixture_runs_base(tree.runs_base))}
     assert floor <= set(sources), f"run.record's recorded reads {sources} miss {floor}"
     full = tree.run().record

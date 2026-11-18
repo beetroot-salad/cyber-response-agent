@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from defender.knowledge._corpus import iter_lessons
-from defender.records._report import parse_report_text
+from defender._frontmatter import parse_frontmatter_or_none
 from defender._text import as_int
 from evaluations.oracle_golden import judge
 from defender.investigation import record_query as rq
@@ -19,13 +19,12 @@ _ODD_KEYS = (("on", True), ("2024-01-01", datetime.date(2024, 1, 1)), ("1", 1))
 
 
 @pytest.mark.parametrize(("spelled", "built"), _ODD_KEYS)
-def test_read_report_stays_total_over_a_non_string_frontmatter_key(spelled, built):
-    text = f"---\ndisposition: benign\n{spelled}: x\n---\nbody\n"
-    read = parse_report_text(text)
-    assert read.disposition == "benign"
-    assert read.reason is None
-    assert read.frontmatter[built] == "x"
-    assert read.text == text
+def test_the_frontmatter_reader_stays_total_over_a_non_string_key(spelled, built):
+    """The canonical frontmatter reader maps a non-`str` YAML key and keeps the other keys (the retired report reader's boundary)."""
+    fm = parse_frontmatter_or_none(f"---\nname: good\n{spelled}: x\n---\nbody\n")
+    assert fm is not None
+    assert fm["name"] == "good"
+    assert fm[built] == "x"
 
 
 @pytest.mark.parametrize(("spelled", "built"), _ODD_KEYS)

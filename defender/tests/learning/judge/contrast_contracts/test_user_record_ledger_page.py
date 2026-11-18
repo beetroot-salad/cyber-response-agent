@@ -14,6 +14,7 @@ import pytest
 from defender import _yaml
 from defender.tests.support.presentation import _episode_1025 as E
 from defender.tests.learning.judge.contrast_contracts import _spec1234 as S
+from defender.tests.support.learning.judge import _judge_921 as J
 
 
 RUN = S.COINED["found.run"]
@@ -344,6 +345,7 @@ def test_1234_am_found_gap_census_on_a_stamped_pass_with_a_damaged_ledger(
             assert S.found_gaps(built) == [], "a refused manifest writes no census"
         else:
             built = S.family(tmp_path, worlds)
+            J.ensure_closings(built.ep)  # planting reads the manifest: do it before the manifest is damaged
             (built.ep / "family.yaml").write_text("- not\n- a family\n", encoding="utf-8")
             S.grade_refused(built, judge)
             assert not (built.ep / "judge.yaml").exists(), "raises and writes nothing"
