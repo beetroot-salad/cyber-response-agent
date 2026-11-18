@@ -288,24 +288,29 @@ def _prime_once(
         "than replayed")
 
 
-#: The source-lookup faults of the source's store itself, which the launch's own source checks
-#: (pre-flight, the fork pick) answer with their own endings before the record's refusal.
-_SOURCE_STORE_FAULTS = ("database-missing", "schema-version", "legacy-link")
-
-
-def _store_fault(found: Any) -> bool:
-    from defender.records import closing
-
-    return isinstance(found, closing.CouldNotLook) and found.kind in _SOURCE_STORE_FAULTS
+#: The job's ending for a source-lookup fault of the source's store itself, beside the kind's
+#: wording: its reason, and the type current code refuses that store with (named, as the launch's
+#: own store checks name it). Every other kind ends `launch_refused`.
+_SOURCE_STORE_ENDINGS = {
+    "database-missing": (SOURCE_UNAVAILABLE, None),
+    "schema-version": (HISTORY_UNREADABLE, "UnknownSchemaVersion"),
+    "legacy-link": (HISTORY_UNREADABLE, "LegacyRunLink"),
+}
 
 
 def _declared_or_refused(found: Any) -> str | None:
-    """`source_disposition_of`, its refusal as the launch's ending (the wording, never a path)."""
+    """`source_disposition_of`, its refusal as the launch's ending: the kind's wording, never the
+    lookup's detail (a path)."""
+    from defender.records import closing
+
     try:
         return source_disposition_of(found)
     except branch.BranchError as unreadable:
-        raise ending(f"[branch] {unreadable}", reason=LAUNCH_REFUSED,
-                     brief="the source run's closing record could not be read") from None
+        wording = found.wording if isinstance(found, closing.CouldNotLook) else str(unreadable)
+        kind = found.kind if isinstance(found, closing.CouldNotLook) else None
+        reason, refused_as = _SOURCE_STORE_ENDINGS.get(kind or "", (LAUNCH_REFUSED, None))
+        brief = wording if refused_as is None else f"{wording} ({refused_as})"
+        raise ending(f"[branch] {unreadable}", reason=reason, brief=brief) from None
 
 
 def _open_launch_source(runs: RunsRepository[Tenant], source_run_id: str) -> Run:
@@ -817,13 +822,10 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
         runs = tenant.tenant.runs_repository()
         source = _open_launch_source(runs, ns.source_run_id)
         # World A's declared disposition is the source's closing record (#1534), looked up first
-        # of all: a writer's open of the source's store (the fork pick, the branch clock) creates
-        # the table an older database lacks, which would turn a fault into an absence. A fault
-        # of the record refuses here; one of the source's store itself (gone, another version,
-        # a pre-#1235 link) waits for the launch's own source checks, whose endings name it.
-        source_closing = source_closing_of(source)
-        if not _store_fault(source_closing):
-            source_disposition = _declared_or_refused(source_closing)
+        # of all and refused here on any fault, with the kind's wording: a writer's open of the
+        # source's store (the fork pick, the branch clock) creates the table an older database
+        # lacks, or a database where a missing one was, which would turn a fault into an absence.
+        source_disposition = _declared_or_refused(source_closing_of(source))
         _source_stamp_agrees(source, tenant.tenant_id)
         if lane is not None and lane.pick is not None:
             # The job's fork point (O3): picked here, once the source is open and its stamp
@@ -869,8 +871,6 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
             allow_dirty=ns.allow_dirty,
             live_tree=live_capture, oracle=oracle, verifier=verifier,
             data_root=tenancy.data_root_for_child(data_root))
-        if _store_fault(source_closing):
-            source_disposition = _declared_or_refused(source_closing)
         view = prepare_episode(runs, source, knowledge_commit=pinned.commit,
                                episode_id=None if lane is None else lane.job_id)
         episode = view.episode
