@@ -29,8 +29,13 @@ DOTS = ".。．｡"
 _DEFANGED_DOT = "[.]"
 #: A label character: a Unicode letter or digit, or `-`.
 _LABEL_CHAR = r"(?:[^\W_]|-)"
-#: A dotted run: labels joined by single dot-set characters (maximal, by leftmost-longest search).
-_RUN = re.compile(rf"{_LABEL_CHAR}+(?:[{DOTS}]{_LABEL_CHAR}+)+")
+#: A stretch of label and dot-set characters: where dotted runs (labels joined by single
+#: dot-set characters, two labels or more) are found. A single character class repeated, so a
+#: search over it is linear, where a pattern for the run itself backtracks over every start of a
+#: long space-free label (quadratic).
+_SEGMENT = re.compile(rf"(?:{_LABEL_CHAR}|[{DOTS}])+")
+#: One label or dot-set character.
+_SEGMENT_CHAR = re.compile(rf"{_LABEL_CHAR}|[{DOTS}]")
 _DOT_SPLIT = re.compile(f"[{DOTS}]")
 #: An alphabetic label of two or more letters: what a host-shaped token ends in.
 _ALPHABETIC_LABEL = re.compile(r"[^\W\d_]{2,}")
@@ -42,7 +47,6 @@ _SCHEME_DEFANGED = {"http": "hxxp", "https": "hxxps", "ftp": "fxp"}
 #: The authority after `scheme://`: up to whitespace or the first `/`, `?` or `#`.
 _AUTHORITY = re.compile(r"[^\s/?#]*")
 _WHITESPACE = re.compile(r"\s+")
-_TRAILING_RUN = re.compile(rf"(?:{_LABEL_CHAR}|[{DOTS}])+\Z")
 
 
 def treat(text: str, bound: int | None) -> str:
@@ -74,10 +78,44 @@ def _defang(text: str) -> str:
         assert authority is not None  # `*` always matches
         marked.update(i for i in range(authority.start(), authority.end())
                       if text[i] in DOTS and not _already_defanged(text, i))
-    for run in _RUN.finditer(text):
-        if _is_host_or_address(run.group()):
-            marked.update(i for i in range(run.start(), run.end()) if text[i] in DOTS)
+    for start, end in _dotted_runs(text):
+        if _is_host_or_address(text[start:end]):
+            marked.update(i for i in range(start, end) if text[i] in DOTS)
     return "".join(_DEFANGED_DOT if i in marked else ch for i, ch in enumerate(chars))
+
+
+def _dotted_runs(text: str) -> list[tuple[int, int]]:
+    """The `(start, end)` of every dotted run in `text`, in order: maximal sequences of two or
+    more non-empty labels joined by single dot-set characters (what a leftmost-longest search for
+    `label (dot label)+` finds), in one linear pass. A doubled or end dot ends a run."""
+    runs: list[tuple[int, int]] = []
+    for segment in _SEGMENT.finditer(text):
+        position = segment.start()
+        first = last = position
+        labels = 0
+        for label in _DOT_SPLIT.split(segment.group()):
+            if label:
+                if labels == 0:
+                    first = position
+                labels += 1
+                last = position + len(label)
+            else:
+                if labels >= 2:
+                    runs.append((first, last))
+                labels = 0
+            position += len(label) + 1
+        if labels >= 2:
+            runs.append((first, last))
+    return runs
+
+
+def _trailing_run_start(text: str) -> int | None:
+    """Where the trailing stretch of label and dot-set characters begins, or `None` if `text`
+    does not end in one."""
+    start = len(text)
+    while start > 0 and _SEGMENT_CHAR.match(text, start - 1):
+        start -= 1
+    return start if start < len(text) else None
 
 
 def _already_defanged(text: str, i: int) -> bool:
@@ -107,6 +145,6 @@ def _cut_to_bound(whole: str, bound: int) -> str:
     kept = whole[:keep]
     while _unbounded(kept) != kept:
         # The cut left a raw dotted run that would now defang: back off to its start.
-        tail = _TRAILING_RUN.search(kept)
-        kept = kept[:tail.start()] if tail is not None else kept[:-1]
+        tail = _trailing_run_start(kept)
+        kept = kept[:tail] if tail is not None else kept[:-1]
     return kept + ELLIPSIS
