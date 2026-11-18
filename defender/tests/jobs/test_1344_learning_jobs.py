@@ -106,25 +106,20 @@ class JobChild(ScriptedChild):
 
 
 class PostStepChild(ScriptedChild):
-    """`post_step_argv`: records what the worker handed over and the job's row as the child starts, and answers with a
-    record naming the handed jobs as published, except `refuse` (refused) and `omit` (in neither: a queue-level
-    failure). `recording=False`: it leaves no record; `record_text`: it leaves exactly that text as its record."""
+    """`post_step_argv`: records the job the worker started it for and that job's row as the child starts (`handed`:
+    `(job id or None, status)`). The worker hands it no list of jobs and reads no record from it (#1487 O7): whatever a
+    test makes it leave in `files` is a file the worker must not read."""
 
-    def __init__(self, *a, dsn: str, refuse: tuple[str, ...] = (), omit: tuple[str, ...] = (),
-                 recording: bool = True, record_text: str | None = None, **kw) -> None:
+    def __init__(self, *a, dsn: str, **kw) -> None:
         super().__init__(*a, **kw)
-        self.dsn, self.refuse, self.omit, self.recording, self.record_text = dsn, refuse, omit, recording, record_text
-        self.handed: list[tuple[str, list[str], str]] = []
+        self.dsn = dsn
+        self.handed: list[tuple[str | None, str | None]] = []
 
     def __call__(self, launch) -> list[str]:
-        pending = sorted(launch.pending_job_ids)
-        self.handed.append((launch.job_id, pending, job_row(self.dsn, launch.job_id)["status"]))
-        self.files = {} if not self.recording else {"{id}.post-step.json": self.record_text if self.record_text is not None
-                                                       else json.dumps({
-            "published": [j for j in pending if j not in (*self.refuse, *self.omit)],
-            "refused": [j for j in pending if j in self.refuse]})}
+        status = None if launch.job_id is None else job_row(self.dsn, launch.job_id)["status"]
+        self.handed.append((launch.job_id, status))
         write_whole(self.spec, json.dumps(self.spec_dict()))
-        return [sys.executable, str(self.script), str(self.spec), "--job", launch.job_id,
+        return [sys.executable, str(self.script), str(self.spec), "--job", launch.job_id or launch.tenant_id,
                 "--tenant", launch.tenant_id, "--parent-pid", str(launch.parent_pid)]
 
 
@@ -177,14 +172,6 @@ UNREADABLE_END = [
     pytest.param(json.dumps({"status": "completed"}), id="missing-fields"),
     pytest.param(learning_end("done"), id="unknown-status"),
 ]
-#: Likewise for the post-step record's.
-UNREADABLE_POST = [
-    pytest.param("", id="empty"), pytest.param('{"published": [', id="truncated"), pytest.param("[]", id="not-an-object"),
-    pytest.param(json.dumps({"published": []}), id="missing-refused"),
-    pytest.param(json.dumps({"published": "x", "refused": []}), id="wrong-type"),
-]
-
-
 #: Out-of-domain JSON values, by kind. A field's own domain (below) picks which kinds fall outside it.
 _ODD_VALUES: dict[str, list] = {
     "list": [[], ["m-1"]], "object": [{}, {"x": 1}], "text": ["seven", "1.5"], "bool": [True, False],
@@ -194,11 +181,9 @@ _ODD_VALUES: dict[str, list] = {
 _NOT_TEXT = ("list", "object", "bool", "negative", "nan", "infinite", "huge", "fraction", "number")
 _NOT_A_COST = ("list", "object", "text", "blank", "bool", "negative", "nan", "infinite", "huge")
 _NOT_A_COUNT = (*_NOT_A_COST, "fraction")
-_NOT_IDS = ("object", "text", "blank", "bool", "negative", "nan", "infinite", "huge", "fraction", "number")
 _PROGRESS_BASE = {"fork_message_id": "m-1", "stage": "judge", "sibling_cost_usd": 0.5}
 _COMPLETED_BASE = json.loads(learning_end("completed", findings=2, cost=0.5))
 _FAILED_BASE = json.loads(learning_end("failed", "judge_failed", message="the judge failed", cost=0.5))
-_POST_BASE = {"published": ["j-1"], "refused": ["j-2"]}
 #: `(record, its base, field, the kinds of value outside the field's domain, extra values outside it)`.
 _FIELD_DOMAINS = [
     ("progress", _PROGRESS_BASE, "fork_message_id", _NOT_TEXT, []),
@@ -214,8 +199,6 @@ _FIELD_DOMAINS = [
     ("end-completed", _COMPLETED_BASE, "message", _NOT_TEXT, []),
     ("end-failed", _FAILED_BASE, "reason", (*_NOT_TEXT, "blank", "text"), [None, "no_fork_point", "history_unreadable"]),
     ("end-failed", _FAILED_BASE, "message", (*_NOT_TEXT, "blank"), [None]),
-    *[("post-step", _POST_BASE, field, _NOT_IDS, [None, *[[v] for k in _NOT_TEXT for v in _ODD_VALUES[k]], [None]])
-      for field in ("published", "refused")],
 ]
 
 
@@ -229,17 +212,16 @@ def _out_of_domain() -> list:
 
 def test_f5_premise_every_base_record_parses(tmp_path):
     """The bases the property starts from are records the readers accept, so each case below changes one field only."""
-    from defender.records.job_lane import LearningEnd, LearningProgress, PostStepRecord
+    from defender.records.job_lane import LearningEnd, LearningProgress
 
     assert LearningProgress.parse(json.dumps(_PROGRESS_BASE)) is not None
     assert LearningEnd.parse(json.dumps(_COMPLETED_BASE)) is not None
     assert LearningEnd.parse(json.dumps(_FAILED_BASE)) is not None
-    assert PostStepRecord.parse(json.dumps(_POST_BASE)) is not None
 
 
 @pytest.mark.parametrize(("record", "fields"), _out_of_domain())
 def test_f5_a_record_with_any_field_out_of_its_domain_is_no_record_and_never_raises(tmp_path, record, fields):
-    """One field of a valid progress, end or post-step record replaced by a JSON value outside its domain (a wrong
+    """One field of a valid progress or end record replaced by a JSON value outside its domain (a wrong
     type, a bool, a negative, NaN, an infinity, an integer too big for a float, blank text, a reason another status
     owns): the parser and the lane's reader both answer no record, and neither raises. (#1344 records)"""
     from defender.records import job_lane
@@ -250,15 +232,13 @@ def test_f5_a_record_with_any_field_out_of_its_domain_is_no_record_and_never_rai
         "progress": (job_lane.LearningProgress.parse, "read_learning_progress"),
         "end-completed": (job_lane.LearningEnd.parse, "read_learning_end"),
         "end-failed": (job_lane.LearningEnd.parse, "read_learning_end"),
-        "post-step": (job_lane.PostStepRecord.parse, "read_post_step"),
     }[record]
     assert parse(text) is None, (record, fields)
 
     job = "5e1f0b8a-4c2d-4e7f-9a31-6b8c0d2e4f13"
     runs = tmp_path / "data" / T1 / "runs"
     runs.mkdir(parents=True)
-    suffix = {"progress": "learning-progress", "end-completed": "learning-end", "end-failed": "learning-end",
-              "post-step": "post-step"}[record]
+    suffix = {"progress": "learning-progress", "end-completed": "learning-end", "end-failed": "learning-end"}[record]
     (runs / f"{job}.{suffix}.json").write_text(text, encoding="utf-8")
     with job_lane.JobLane.open(data_root_from_path(tmp_path / "data"), T1) as lane:
         assert getattr(lane, read)(job) is None, (record, fields)
@@ -382,7 +362,7 @@ async def test_the_end_record_alone_decides_the_row(world, record, status, reaso
     assert (stored["fork_message_id"], stored["stage"]) == (want["fork_message_id"], want["stage"])
     assert stored["publish_state"] == ("done" if status == "completed" else "none")
     assert RUN_TEXT not in json.dumps(stored, default=str), "run text reached the row"
-    assert post.handed == [(job, [job] if status == "completed" else [], status)]
+    assert post.handed == [(job, status)]
     assert len(jobs_of(world["dsn"], inv)) == 1, "an ending the child decided was retried"
 
 
@@ -670,7 +650,7 @@ async def test_o2_a_job_row_moved_while_its_child_runs_is_not_written_and_nothin
     assert snapshot["publish_state"] == "none"
     assert not Path(str(mark).replace("{id}", other)).exists(), "an unmoved row's child was ended"
     assert job_row(dsn, other)["status"] == "completed"
-    assert all(fenced not in pending for _, pending, _ in post.handed), "the moved row was handed to a post-step"
+    assert all(fenced != followed for followed, _ in post.handed), "a post-step followed the moved row"
 
 
 async def test_o6_a_running_job_keeps_its_lease_renewed(world):
@@ -1097,7 +1077,7 @@ async def test_o13_the_spend_already_copied_stays_visible_when_the_child_leaves_
     assert (stored["reason"], stored["sibling_cost_usd"], stored["fork_message_id"]) == ("exited_without_result", 0.75, "m-3")
 
 
-# --- O8, O14: publishing pending jobs and the author gate --------------------------------------------
+# --- O8: the post-step holds the slot, is renewed, and is started for each ended job (#1487: it publishes nothing) ---
 
 
 async def test_o5_a_post_step_holds_the_learning_slot(world):
@@ -1136,105 +1116,12 @@ async def test_o8_renewals_never_end_a_running_post_step(world):
         finally:
             release.touch()
         await asyncio.wait_for(draining, timeout=60)
-    assert job_row(world["dsn"], job)["publish_state"] == "done"
+    assert job_row(world["dsn"], job)["status"] == "completed", "a renewal tick ended the job"
 
 
-async def test_o14_a_stranded_completed_job_is_published_by_the_next_post_step_of_any_status(world):
-    """A's post-step dies: A stays `completed`/`pending`. B then fails, and B's post-step is handed A, and the worker
-    writes `done` from its record. Findings are never published before the row ended. (O8, O14, D5)"""
-    dsn = world["dsn"]
-    ended = job_child(world, name="a", files={END: learning_end("completed", findings=1)})
-    lost = post_child(world, name="lost", recording=False, exit=3)
-    async with job_store(dsn) as store:
-        a = await queued_job(world, store, ticket="J-1")
-        await learning_worker(world, store, job=ended, post=lost).drain()
-        stored = job_row(dsn, a)
-        assert (stored["status"], stored["reason"], stored["publish_state"]) == ("completed", None, "pending")
-        assert lost.handed == [(a, [a], "completed")], "its own pending job, after the row ended"
-
-        failing = job_child(world, name="b", files={END: learning_end("failed", "control_failed", message="m")})
-        post = post_child(world, name="post")
-        b = await queued_job(world, store, ticket="J-2")
-        await learning_worker(world, store, job=failing, post=post).drain()
-
-    assert post.handed == [(b, [a], "failed")]
-    assert job_row(dsn, a)["publish_state"] == "done"
-    assert job_row(dsn, b)["publish_state"] == "none", "a failed job has nothing to publish"
-
-
-async def test_o14_findings_failing_validation_end_refused_and_are_not_handed_over_again(world):
-    """`refused` is visible on the row, and one bad job never retries. (O14)"""
-    dsn = world["dsn"]
-    ended = job_child(world, files={END: learning_end("completed", findings=1)})
-    async with job_store(dsn) as store:
-        a = await queued_job(world, store, ticket="J-1")
-        await learning_worker(world, store, job=ended, post=post_child(world, name="p1", recording=False)).drain()
-        assert job_row(dsn, a)["publish_state"] == "pending", "premise"
-
-        b = await queued_job(world, store, ticket="J-2")
-        await learning_worker(world, store, job=ended, post=post_child(world, name="p2", refuse=(a,))).drain()
-        assert job_row(dsn, a)["publish_state"] == "refused"
-        assert job_row(dsn, b)["publish_state"] == "done"
-
-        c = await queued_job(world, store, ticket="J-3")
-        later = post_child(world, name="p3")
-        await learning_worker(world, store, job=ended, post=later).drain()
-    assert later.handed == [(c, [c], "completed")], "a refused or done job was handed over again"
-
-
-async def test_o14_a_queue_level_failure_leaves_the_job_pending_to_be_handed_again(world):
-    """A job the record names neither published nor refused stays `pending` (not `refused`) and is handed over next time. (O14)"""
-    dsn = world["dsn"]
-    ended = job_child(world, files={END: learning_end("completed", findings=1)})
-    async with job_store(dsn) as store:
-        a = await queued_job(world, store, ticket="J-1")
-        await learning_worker(world, store, job=ended, post=post_child(world, name="p1", omit=(a,))).drain()
-        assert job_row(dsn, a)["publish_state"] == "pending"
-
-        b = await queued_job(world, store, ticket="J-2")
-        later = post_child(world, name="p2")
-        await learning_worker(world, store, job=ended, post=later).drain()
-    assert later.handed == [(b, sorted([a, b]), "completed")]
-    assert [job_row(dsn, j)["publish_state"] for j in (a, b)] == ["done", "done"]
-
-
-@pytest.mark.parametrize("text", UNREADABLE_POST)
-async def test_o14_a_post_step_record_that_cannot_be_read_counts_as_none_and_the_job_stays_pending(world, text):
-    """An unreadable post-step record leaves the job `pending` (not `done`, not `refused`) to be handed over again. (O14, O8)"""
-    dsn = world["dsn"]
-    ended = job_child(world, files={END: learning_end("completed", findings=1)})
-    async with job_store(dsn) as store:
-        a = await queued_job(world, store, ticket="J-1")
-        await learning_worker(world, store, job=ended, post=post_child(world, name="p1", record_text=text)).drain()
-        assert job_row(dsn, a)["publish_state"] == "pending"
-
-        b = await queued_job(world, store, ticket="J-2")
-        later = post_child(world, name="p2")
-        await learning_worker(world, store, job=ended, post=later).drain()
-    assert later.handed == [(b, sorted([a, b]), "completed")]
-    assert [job_row(dsn, j)["publish_state"] for j in (a, b)] == ["done", "done"]
-
-
-@pytest.mark.parametrize("text", UNREADABLE_POST)
-async def test_o14_a_post_step_record_left_as_the_worker_stops_it_counts_as_none_when_unreadable(world, text):
-    """A signalled post-step whose record is unreadable: the job stays `completed`/`pending`. (O14, O9)"""
-    jobs = job_child(world, files={END: learning_end("completed", findings=1)})
-    post = post_child(world, record_text=text, term="finish", term_mark=str(world["tmp"] / "post-termed"),
-                      wait_for=world["tmp"] / "never")
-    async with job_store(world["dsn"]) as store:
-        job = await queued_job(world, store, ticket="J-1")
-        serving = asyncio.create_task(learning_worker(world, store, job=jobs, post=post, stop_grace=30, **_FAST).serve())
-        try:
-            await _until(lambda: post.seen(job), "the post-step")
-        finally:
-            _stop_serving(serving)
-            await asyncio.wait_for(serving, timeout=15)
-    stored = job_row(world["dsn"], job)
-    assert (stored["status"], stored["publish_state"]) == ("completed", "pending")
-
-
-async def test_o8_a_post_step_that_cannot_be_spawned_leaves_its_row_alone_and_the_next_one_publishes_it(world):
-    """An unexecutable post-step command: the job keeps its ending and `pending`, the worker carries on, and the next post-step is handed it. (O8, O14)"""
+async def test_o8_a_post_step_that_cannot_be_spawned_leaves_its_row_alone_and_the_tenants_check_clock_not_idle(world):
+    """An unexecutable post-step command: the job keeps its ending, the worker carries on to the next job's post-step,
+    and the tenant's clock is not idle, so a later check retries. (O8, O7)"""
     dsn = world["dsn"]
     ended = job_child(world, files={END: learning_end("completed", findings=1)})
     good = post_child(world)
@@ -1250,52 +1137,25 @@ async def test_o8_a_post_step_that_cannot_be_spawned_leaves_its_row_alone_and_th
 
     stored = job_row(dsn, a)
     assert (stored["status"], stored["reason"]) == ("completed", None), "a lost post-step changed the job's ending"
-    assert good.handed == [(b, sorted([a, b]), "completed")]
-    assert [job_row(dsn, j)["publish_state"] for j in (a, b)] == ["done", "done"]
+    assert good.handed == [(b, "completed")]
+    [(idle,)] = execute(dsn, "SELECT idle FROM jobs.learning_checks WHERE tenant_id = %s", (T1,))
+    assert idle is False, "a lost post-step left the tenant's clock idle: nothing would retry"
 
 
-async def test_o14_a_post_step_is_handed_only_its_own_tenants_pending_jobs(world):
-    """Another tenant's `pending` job is not handed to this tenant's post-step, and stays pending. (O14, O8)"""
-    dsn = world["dsn"]
-    register_tenant(dsn, T2)
-    ended = job_child(world, files={END: learning_end("completed", findings=1)})
-    post = post_child(world)
-    async with job_store(dsn) as store:
-        theirs = await queued_job(world, store, ticket="J-0", tenant=T2)
-        execute(dsn, "UPDATE jobs.learning_jobs SET status = 'completed', publish_state = 'pending', findings_count = 1, "
-                     "finished_at = %s, lease_expires_at = NULL WHERE id = %s", (NOW, theirs))
-        ours = await queued_job(world, store, ticket="J-1")
-        await learning_worker(world, store, job=ended, post=post).drain()
-
-    assert post.handed == [(ours, [ours], "completed")]
-    assert job_row(dsn, theirs)["publish_state"] == "pending"
-    assert job_row(dsn, ours)["publish_state"] == "done"
-
-
-def _count_of(word: str, text: str) -> int:
-    found = re.search(rf"{word}\D{{0,4}}(\d+)|(\d+)\D{{0,4}}{word}", text)
-    assert found, f"no {word} count in {text!r}"
-    return int(found.group(1) or found.group(2))
-
-
-async def test_o8_each_post_step_announces_one_audit_event_with_its_published_and_refused_counts(world, caplog):
-    """After a post-step that published two jobs and refused one: one `learning_post_step` event by the system for the
-    tenant, carrying 2 and 1. (O8)"""
+async def test_o8_each_post_step_announces_one_audit_event_for_its_tenant(world, caplog):
+    """After each post-step: one `learning_post_step` event by the system for the tenant (the counts it once carried
+    came from the retired record, so none is asserted). (O8, #1487 O7)"""
     audit = JobsAudit(caplog)
     dsn = world["dsn"]
     ended = job_child(world, files={END: learning_end("completed", findings=1)})
     async with job_store(dsn) as store:
-        a, b = [await queued_job(world, store, ticket=f"J-{n}") for n in (1, 2)]
-        await learning_worker(world, store, job=ended, post=post_child(world, name="lost", recording=False)).drain()
-        seen = len([e for e in audit.events() if e.action == "learning_post_step"])
-        await queued_job(world, store, ticket="J-3")
-        await learning_worker(world, store, job=ended, post=post_child(world, name="p", refuse=(a,))).drain()
+        await queued_job(world, store, ticket="J-1")
+        await queued_job(world, store, ticket="J-2")
+        await learning_worker(world, store, job=ended, post=post_child(world, name="p")).drain()
 
-    new = [e for e in audit.events() if e.action == "learning_post_step"][seen:]
-    assert len(new) == 1, f"events of `defender.jobs.audit` after the second drain: {[e.action for e in audit.events()]}"
-    assert (new[0].actor, new[0].tenant_id) == ("system", T1)
-    assert (_count_of("published", new[0].detail or ""), _count_of("refused", new[0].detail or "")) == (2, 1)
-    assert job_row(dsn, b)["publish_state"] == "done"
+    events = [e for e in audit.events() if e.action == "learning_post_step"]
+    assert len(events) == 2, f"events of `defender.jobs.audit`: {[e.action for e in audit.events()]}"
+    assert {(e.actor, e.tenant_id) for e in events} == {("system", T1)}
 
 
 # --- O9: a stopping worker's post-step stops --------------------------------------------------------
@@ -1316,7 +1176,7 @@ async def test_o9_a_stopping_worker_signals_its_post_step(world):
             await asyncio.wait_for(serving, timeout=15)
     assert mark.exists(), "the post-step was not told to stop"
     stored = job_row(world["dsn"], job)
-    assert (stored["status"], stored["publish_state"]) == ("completed", "done")
+    assert (stored["status"], stored["publish_state"]) == ("completed", "done"), "a stop changed the job's ending"
 
 
 # --- O10: delete -----------------------------------------------------------------------------------
@@ -1348,13 +1208,13 @@ async def test_o10_delete_removes_the_investigations_queued_attempts_and_leaves_
 @pytest.mark.parametrize("record", [
     learning_end("completed", findings=1), learning_end("failed", "judge_failed", message="m"),
     learning_end("skipped", "no_fork_point", message="m", fork=None, stage="fork")], ids=["completed", "failed", "skipped"])
-async def test_o10_delete_removes_finished_jobs_and_a_deleted_pending_jobs_findings_are_never_published(world, record):
-    """Finished jobs go with the investigation; a deleted `pending` job is not handed to a later post-step. (O10, O14)"""
+async def test_o10_delete_removes_finished_jobs_and_a_later_post_step_is_unaffected(world, record):
+    """Finished jobs go with the investigation; the next job's post-step follows that job alone. (O10)"""
     dsn = world["dsn"]
     ended = job_child(world, files={END: record})
     async with job_store(dsn) as store:
         inv = await completed_investigation(store, ticket="T-1")
-        await learning_worker(world, store, job=ended, post=post_child(world, name="p1", recording=False)).drain()
+        await learning_worker(world, store, job=ended, post=post_child(world, name="p1")).drain()
         assert jobs_of(dsn, inv)[0]["status"] != "queued", "premise: the job ended"
         await store.delete_investigation(T1, inv, actor="u-1")
         assert jobs_of(dsn, inv) == []
@@ -1363,7 +1223,7 @@ async def test_o10_delete_removes_finished_jobs_and_a_deleted_pending_jobs_findi
         post = post_child(world, name="p2")
         await learning_worker(world, store, job=job_child(world, name="b", files={END: learning_end(
             "failed", "judge_failed", message="m")}), post=post).drain()
-    assert post.handed == [(later, [], "failed")], "a deleted job's findings were handed over"
+    assert post.handed == [(later, "failed")]
 
 
 async def test_o10_delete_is_a_conflict_while_any_of_its_jobs_runs_and_removes_nothing(world):
@@ -1603,7 +1463,7 @@ async def test_o7_every_child_the_worker_builds_exits_at_once_under_a_parent_tha
     try:
         argv = {"run": lambda: W.run_argv_in(WORKTREE)(W.Launch(inv, T1, bystander.pid)),
                 "job_entry": lambda: W.job_entry_argv(W.LearningLaunch(job["id"], T1, bystander.pid, inv)),
-                "post_step": lambda: W.post_step_argv(W.PostStepLaunch(job["id"], T1, bystander.pid, (job["id"],))),
+                "post_step": lambda: W.post_step_argv(W.PostStepLaunch(job["id"], T1, bystander.pid)),
                 }[command]()
         before = _tree(world["root"])
         proc = subprocess.run(argv, env={**os.environ, "DEFENDER_DATA_ROOT": str(world["root"]),  # noqa: S603

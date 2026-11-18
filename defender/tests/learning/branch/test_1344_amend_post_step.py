@@ -1,34 +1,63 @@
-"""#1344 amendment 1 (from #1278, owner-approved 2026-11-07): the family-less post-step's CLI form and record.
-
-Without `--job` the post-step is the worker's family-less check of a tenant: it does the same work (publish the
-handed `pending` jobs, then the drain's gate), and its record is kept under the tenant's own id,
-`<runs>/<tenant id>.post-step.json`, one per tenant, named by `job_lane.post_step_key`. What it publishes and what it
-leaves waiting are the learning store's (#1278): a real PostgreSQL."""
+"""#1344 amendment 1 and #1278 Wake, as #1487 Flow 3 moves them: the family-less post-step's CLI form, and the worker's
+"work still waiting" question, now an async predicate in `defender.learning_store.tick` over the learning store with the
+reconcile lanes and the thresholds passed as values (`learning_store` may not import `defender.learning`). The post-step
+writes no record, so what it leaves waiting is read from the store alone. Store state is built with the store's own
+verbs, a real PostgreSQL. The post-step's own behaviour (no record, no hand-over, no database) is
+`test_1344_post_step.py`; the worker's use of the predicate is `tests/jobs/test_1487_post_step_waiting.py`."""
 from __future__ import annotations
 
-import json
-import os
 import re
-from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
+import anyio
 import pytest
 
 from defender.learning.branch import post_step
-from defender.records.job_lane import post_step_key
-from defender.tests.learning.branch.test_1344_post_step import (  # noqa: F401 — store_dsn is the module's autouse fixture
-    _job_episode, _learning_paths, _queue, hand_pending, post_step_in_container, store_dsn)
 from defender.tests.learning.feedback_1414 import _lessons1414 as L
-from defender.tests.support.learning.core._store1278 import AUTHOR_LANE, LEAD_LANE, ONE, call, finding, lapse_lease
-from defender.tests.support.learning.judge import _judge_921 as J
+from defender.tests.support.jobs._jobs1342 import T1, T2, register_tenant
+from defender.tests.support.learning.core._store1278 import (
+    AUTHOR_LANE,
+    LEAD_LANE,
+    ONE,
+    call,
+    finding,
+    lapse_lease,
+    learning_store,
+)
 from defender.tests.support.shared._postgres1339 import execute, migrated_database  # noqa: F401 — fixture
 
 pytestmark = pytest.mark.postgres
 
+#: The lanes the author tick reconciles (`AUTHOR_DRAIN_RECONCILES`), spelled out as the worker passes them.
+RECONCILES = (AUTHOR_LANE, LEAD_LANE, "feedback")
+TENANT = T1
 
-def _record_at(ep: Path, key: str) -> dict:
-    data_root, tenant_id = J.episode_location(ep)
-    return json.loads((Path(data_root) / tenant_id / "runs" / f"{key}.post-step.json").read_text(encoding="utf-8"))
+
+@pytest.fixture(autouse=True)
+def _tenant(migrated_database):  # noqa: F811 — the imported fixture
+    """The tenant the scenarios build state for, active in the test's own database."""
+    register_tenant(migrated_database, TENANT)
+    return migrated_database
+
+
+def thresholds_of(finding_at: int = 1) -> dict[str, int]:
+    """The kinds' thresholds as the worker's environment gives them: `finding` varies, the rest are the defaults of
+    `learning.core.store_tick.thresholds` (questioner 5, pitfalls 3, one request or instruction wakes)."""
+    return {"finding": finding_at, "questioner_finding": 5, "pitfall": 3, "curation_request": 1,
+            "feedback_instruction": 1}
+
+
+def waiting_of(dsn: str, tenant: str, *, finding_at: int = 1, reconcile_lanes=RECONCILES) -> bool:
+    """`lane_waiting` over a store of its own, from sync code, the lanes and thresholds handed in as values."""
+    from defender.learning_store.tick import lane_waiting
+
+    async def go() -> bool:
+        async with learning_store(dsn) as store:
+            return await lane_waiting(store, tenant, reconcile_lanes=reconcile_lanes, thresholds=thresholds_of(finding_at))
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(anyio.run, go).result()
 
 
 def test_a1_without_a_job_the_argv_parses_as_a_family_less_post_step():
@@ -37,46 +66,7 @@ def test_a1_without_a_job_the_argv_parses_as_a_family_less_post_step():
     assert ns.job is None
 
 
-def test_a1_the_record_key_is_the_job_or_else_the_tenant():
-    """One place names the record: the job it followed, or the tenant's own id without one. (amendment 1)"""
-    tenant = "0b5f2b4e-3c7d-4f7a-9a51-1f0a8f0c2d11"
-    job = "6f1d2c3b-8e4a-4b5c-9d6e-7f8a9b0c1d2e"
-    assert str(post_step_key(tenant, job)) == job
-    assert str(post_step_key(tenant, None)) == tenant
-
-
-def test_a1_a_family_less_post_step_publishes_runs_the_gate_and_records_under_the_tenant(tmp_path):
-    """No `--job`: the handed pending job is published, the gate runs after it, and the record is
-    `<tenant id>.post-step.json`. (amendment 1, O8, O14)"""
-    ep, _new = _job_episode(tmp_path, "a")
-    data_root, tenant_id = J.episode_location(ep)
-    seen: list[int] = []
-
-    hand_pending(data_root, tenant_id, None, [ep.name])
-    post_step_in_container(None, tenant_id, author_tick=lambda *_a, **_k: seen.append(len(_queue(ep))) or 0)
-
-    assert seen, "the gate did not run"
-    assert seen[0] > 0, "the gate ran before publishing"
-    assert _record_at(ep, tenant_id) == {"published": [ep.name], "refused": [], "waiting": False}  # below threshold (amendment 3)
-    data_root, _ = J.episode_location(ep)
-    assert not (Path(data_root) / tenant_id / "runs" / f"{ep.name}.post-step.json").exists(), \
-        "a family-less post-step wrote under a job's name"
-
-
-def test_a1_a_family_less_post_step_with_nothing_pending_still_runs_the_gate(tmp_path):
-    """The check's point is the gate: it runs with nothing to publish, and the record says nothing was. (amendment 1)"""
-    ep, _new = _job_episode(tmp_path, "b")
-    data_root, tenant_id = J.episode_location(ep)
-    ticks: list[int] = []
-
-    hand_pending(data_root, tenant_id, None, [])
-    post_step_in_container(None, tenant_id, author_tick=lambda *_a, **_k: ticks.append(1) or 0)
-
-    assert ticks == [1]
-    assert _record_at(ep, tenant_id) == {"published": [], "refused": [], "waiting": False}  # nothing queued (amendment 3)
-
-
-# --- Wake (#1278 amendment): the record's `waiting` counts the store's state ----------------------------------------
+# --- Flow 3: the predicate over the store ------------------------------------------------------------------------------
 
 
 def _queued(dsn: str, tenant: str, *ids: str) -> None:
@@ -131,6 +121,28 @@ def _merged(dsn: str, tenant: str) -> None:
          published=[("finding", "f1")], held=[])
 
 
+def _abandoned_with_pr(dsn: str, tenant: str, lane: str = AUTHOR_LANE, *, checked: bool = False) -> None:
+    """A batch of `lane` in review whose PR a person closed by abandoning it: ended, the PR still to be closed by a
+    tick (unless a reconcile has looked since, `checked`)."""
+    if lane == LEAD_LANE:
+        _pitfalls(dsn, tenant)
+        claim = call(dsn, "claim", tenant, LEAD_LANE, owner="lead-drain", thresholds=ONE)
+    else:
+        _queued(dsn, tenant, "f1")
+        claim = call(dsn, "claim", tenant, AUTHOR_LANE, owner="host-a", thresholds=ONE)
+    call(dsn, "in_review", claim, 7, {})
+    call(dsn, "abandon", tenant, claim.batch_id, by="person")
+    if checked:
+        call(dsn, "note_check", tenant, claim.batch_id)
+
+
+def _others_batch(dsn: str, tenant: str) -> None:
+    """Every kind of state of scenarios above, in another tenant: none of it is this tenant's."""
+    register_tenant(dsn, T2)
+    _reviewed(dsn, T2)
+    _queued(dsn, T2, "g1", "g2")
+
+
 #: Store state a family-less post-step finds, built with the store's own verbs.
 _SCENARIOS = {
     "items_at_threshold": lambda dsn, t: _queued(dsn, t, "f1", "f2"),
@@ -144,34 +156,44 @@ _SCENARIOS = {
     "lead_batch_closed_with_words": _lead_rejected,  # a lead replacement is operator-only: Wake does not count it (D9)
     "one_feedback_instruction_item": lambda dsn, t: L.instruct(dsn, t, 101),  # threshold 1, below the judge's 5 (A4 Wake)
     "pitfalls_at_threshold": _pitfalls,  # the lead lane is operator-only: nothing a post-step can act on (D9)
+    "abandoned_author_batch_pr_open": _abandoned_with_pr,  # closing: its PR is still to be closed
+    "abandoned_author_batch_pr_checked": lambda dsn, t: _abandoned_with_pr(dsn, t, checked=True),
+    "another_tenants_batches_and_items": _others_batch,
 }
 
 
 @pytest.mark.parametrize(("scenario", "waiting"), [
     ("items_at_threshold", True), ("lapsed_lease", True), ("overdue_check", True), ("due_replacement", True),
-    ("fresh_check_in_review", True), ("live_working_batch", True),
+    ("fresh_check_in_review", True), ("live_working_batch", True), ("abandoned_author_batch_pr_open", True),
     ("one_feedback_instruction_item", True),
     ("below_threshold", False), ("merged_and_nothing_else", False), ("pitfalls_at_threshold", False),
-    ("lead_batch_closed_with_words", False)])
-def test_wake_the_post_step_says_work_waits_exactly_when_the_stores_state_gives_it_something_to_do(
-        tmp_path, monkeypatch, scenario, waiting):
-    """Items at threshold, a lapsed lease, a batch overdue for a check, a due replacement, or any batch still to be
-    reconciled (its lease may lapse and its PR change later, so the tenant's checks must go on) leave the record without
-    `waiting: false`; items below threshold, a merged batch with nothing else, or lead-lane items alone leave it.
-    (Wake, D9, amendment 3)"""
-    from defender.tests.support.learning.core._store1278 import DSN_ENV
+    ("lead_batch_closed_with_words", False), ("abandoned_author_batch_pr_checked", False),
+    ("another_tenants_batches_and_items", False)])
+def test_o7_flow3_the_predicate_is_true_exactly_when_the_stores_state_gives_the_tenant_something_to_do(
+        migrated_database, scenario, waiting):  # noqa: F811 — the imported fixture
+    """Items at threshold, a lapsed lease, a batch overdue for a check, a due replacement, any batch still to be
+    reconciled, or an abandoned batch whose PR is still to close: waiting. Items below threshold, a merged batch alone,
+    lead-lane items alone, a checked abandoned batch, another tenant's state: not. (O7, Flow 3, Wake, D9)"""
+    dsn = migrated_database
+    _SCENARIOS[scenario](dsn, TENANT)
 
-    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "2" if scenario in {"items_at_threshold", "below_threshold"} else "1")
-    monkeypatch.setenv("LEARNING_QUESTIONER_THRESHOLD", "5")
-    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "3")
-    ep, _ = _job_episode(tmp_path, f"wake-{scenario}", findings=False)
-    data_root, tenant_id = J.episode_location(ep)
-    _SCENARIOS[scenario](os.environ[DSN_ENV], tenant_id)
+    assert waiting_of(dsn, TENANT, finding_at=2 if scenario in {"items_at_threshold", "below_threshold"} else 1) is waiting
 
-    hand_pending(data_root, tenant_id, None, [])
-    post_step_in_container(None, tenant_id, author_tick=lambda *_a, **_k: 0)
 
-    assert _record_at(ep, tenant_id) == {"published": [], "refused": [], **({} if waiting else {"waiting": False})}
+@pytest.mark.parametrize(("finding_at", "waiting"), [(2, True), (3, False)])
+def test_o7_flow3_the_thresholds_are_the_values_the_caller_passes(migrated_database, finding_at, waiting):  # noqa: F811
+    """Two queued findings: at threshold 2 the author gate opens, so work waits; at 3 it stays shut. The predicate reads
+    the thresholds it is handed, not a setting of its own. (O7, Flow 3)"""
+    _queued(migrated_database, TENANT, "f1", "f2")
+    assert waiting_of(migrated_database, TENANT, finding_at=finding_at) is waiting
+
+
+@pytest.mark.parametrize(("reconcile_lanes", "waiting"), [(RECONCILES, True), ((AUTHOR_LANE, "feedback"), False)])
+def test_o7_flow3_the_reconcile_lanes_are_the_values_the_caller_passes(migrated_database, reconcile_lanes, waiting):  # noqa: F811
+    """A lead-lane batch abandoned with its PR open is a closing batch of a reconciled lane only when the caller names
+    the lane. (O7, Flow 3)"""
+    _abandoned_with_pr(migrated_database, TENANT, LEAD_LANE)
+    assert waiting_of(migrated_database, TENANT, reconcile_lanes=reconcile_lanes) is waiting
 
 
 # --- Wake: every batch not yet ended, whatever its lane and phase ---------------------------------------------------------
@@ -204,27 +226,15 @@ WAKE_LANES = ("author", "lead_author", "revert", "feedback")
 WAKE_PHASES = ("working", "in_review", "needs_person")
 
 
-@pytest.mark.parametrize("gate", ["as_it_is", "finds_nothing"])
 @pytest.mark.parametrize("lane", WAKE_LANES)
 @pytest.mark.parametrize("phase", WAKE_PHASES)
-def test_wake_a_batch_of_any_lane_in_any_phase_but_ended_keeps_the_tenants_checks_running(tmp_path, monkeypatch, lane, phase, gate):
-    """With nothing else queued, a not-yet-ended batch of any lane, working, in review or waiting for a person, leaves the record without `waiting: false`, whatever the author gate itself finds: its lease, PR or release may still change what a tick must do. (Wake)"""
-    from defender.learning.core import drains
-    from defender.tests.support.learning.core._store1278 import DSN_ENV
+def test_o7_flow3_a_batch_of_any_lane_in_any_phase_but_ended_makes_the_predicate_true(migrated_database, lane, phase):  # noqa: F811
+    """With nothing else queued and every threshold above what exists, a not-yet-ended batch of any lane, working, in
+    review or waiting for a person, keeps the tenant waiting: its lease, PR or release may still change what a tick must
+    do. (O7, Flow 3, Wake)"""
+    _lane_batch(migrated_database, TENANT, lane, phase)
 
-    if gate == "finds_nothing":
-        monkeypatch.setattr(drains, "author_work_waiting", lambda _paths: False)  # lint-monkeypatch: ok — the gate answers "nothing" while the store still holds a batch: the post-step reads that function by module attribute and no seam carries it
-    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "5")
-    monkeypatch.setenv("LEARNING_QUESTIONER_THRESHOLD", "5")
-    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "3")
-    ep, _ = _job_episode(tmp_path, f"wake-{lane}-{phase}", findings=False)
-    data_root, tenant_id = J.episode_location(ep)
-    _lane_batch(os.environ[DSN_ENV], tenant_id, lane, phase)
-
-    hand_pending(data_root, tenant_id, None, [])
-    post_step_in_container(None, tenant_id, author_tick=lambda *_a, **_k: 0)
-
-    assert _record_at(ep, tenant_id) == {"published": [], "refused": []}
+    assert waiting_of(migrated_database, TENANT, finding_at=5) is True
 
 
 def test_wake_the_lanes_and_phases_above_are_every_one_the_schema_allows(migrated_database):  # noqa: F811 — the imported fixture

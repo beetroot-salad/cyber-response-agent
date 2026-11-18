@@ -560,10 +560,9 @@ def test_o15_the_default_child_commands_run_a_job_whose_source_is_missing_to_sou
         assert _values_of(entry["argv"], "--tenant") == [t.tenant_id], entry["argv"]
         post = _child_of(children, "post-step", job)
         assert post is not None, "no post-step helper was observed"
-        assert "--pending" not in post["argv"], "the pending jobs are handed in a record, never on the command line"
+        assert "--pending" not in post["argv"], "no list of jobs is on the post-step's command line"
         assert _values_of(post["argv"], "--tenant") == [t.tenant_id], post["argv"]
-        handed = json.loads((runs / f"{job}.post-step-pending.json").read_text(encoding="utf-8"))
-        assert handed == {"pending": []}, "control: nothing was pending before this job"
+        assert not list(runs.glob("*.post-step*.json")), "the worker handed the post-step a list or it left a record"
 
         # No job image here, so the container never starts: the job ends failed with a recorded reason (never a crash), and
         # the post-step is still started for it. `source_unavailable` is the entry's verdict inside the container
@@ -578,8 +577,9 @@ def test_o15_the_default_child_commands_run_a_job_whose_source_is_missing_to_sou
 
 
 @pytest.mark.postgres
-def test_o15_the_default_post_step_command_lists_the_tenants_earlier_pending_job(source, data_root, db, tmp_path):
-    """An earlier job `completed`/`pending` and a new one: the real post-step helper is started for the new job and is handed the earlier job's id in its pending record. (O15, O14, Worker start)"""
+def test_o15_the_default_post_step_command_hands_the_post_step_no_list_of_jobs(source, data_root, db, tmp_path):
+    """An earlier job ended and a new one: the real post-step helper is started for the new job, and nothing in the
+    tenant's runs names a hand-over or a record (the pending set retired). (O15, #1487 O7)"""
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
     with B.run_tenant(tmp_path, data_root) as t:
@@ -587,19 +587,18 @@ def test_o15_the_default_post_step_command_lists_the_tenants_earlier_pending_job
         runs = data_root / t.tenant_id / "runs"
         runs.mkdir(exist_ok=True)
         earlier = _job_of(db, _queue_investigation(db, "J-1", complete=True, tenant=t.tenant_id))
-        execute(db, "UPDATE jobs.learning_jobs SET status = 'completed', publish_state = 'pending', "
+        execute(db, "UPDATE jobs.learning_jobs SET status = 'completed', publish_state = 'done', "
                     "started_at = now(), finished_at = now(), lease_expires_at = NULL WHERE id = %s", (earlier,))
-        assert execute(db, "SELECT status, publish_state FROM jobs.learning_jobs WHERE id = %s", (earlier,)) == [("completed", "pending")]
         new = _job_of(db, _queue_investigation(db, "J-2", complete=True, tenant=t.tenant_id))
         watch = W.ChildWatch()
         with W.serving(source, W.worker_env(data_root, dsn=db), ready=lambda: bool(W.code_copies(data_root)), watch=watch) as proc:
             children = watch.wait_for(lambda seen: _child_of(seen, "post-step", new), timeout=120, what="the post-step helper")
-            W.wait_until(lambda: (runs / f"{new}.post-step-pending.json").is_file(), timeout=120, what="the post-step's pending record", proc=proc)
+            W.wait_until(lambda: _job_status_by_id(db, new) in ("failed", "completed"), timeout=120, what="the new job's ending", proc=proc)
         post = _child_of(children, "post-step", new)
         assert post is not None, f"no post-step helper was observed; saw {[c['argv'] for c in children]}"
         assert _values_of(post["argv"], "--tenant") == [t.tenant_id], post["argv"]
-        handed = json.loads((runs / f"{new}.post-step-pending.json").read_text(encoding="utf-8"))
-        assert earlier in handed["pending"], handed
+        assert "--pending" not in post["argv"]
+        assert not list(runs.glob("*.post-step*.json")), "the worker wrote a hand-over for the post-step"
 
 
 # --- image entry: the real entries from a copy, no PYTHONPATH --------------------------------------------------------
