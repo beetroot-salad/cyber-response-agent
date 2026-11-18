@@ -14,7 +14,7 @@ from pathlib import Path
 from collections.abc import Callable, Iterator
 from typing import Any
 
-from pydantic_ai.messages import ModelRequest, RetryPromptPart, ToolCallPart, ToolReturnPart
+from pydantic_ai.messages import RetryPromptPart, ToolCallPart, ToolReturnPart
 
 from defender import _clock
 from defender.records import Run, RUN_LAYOUT, RunPaths, artifact_dir
@@ -304,31 +304,6 @@ def _lead_of(name: str) -> str:
     """The lead a per-lead entry belongs to: the name up to the first dot (`l-001/`,
     `l-001.lead.json`, `l-001.md`). Suffix-stripping, so an unknown shape is not dropped."""
     return name.split(".", 1)[0]
-
-
-def carried_retries(prefix: list) -> dict[str, int]:
-    """The retry count each tool carries into the step after `prefix`, replayed over the
-    conversation: a step where any call succeeded (a `success` return, not `failed`, `denied`
-    or `interrupted`) clears every count carried into it; a tool that failed in that same step
-    still counts, on top of its earlier count as the framework counts it (#1567).
-
-    Looser than the framework, which clears a tool's count only when that same tool succeeds
-    (#1255 C1, reversed by #1567): an arm may allow that tool up to its carried count of extra
-    failures before the retry limit. The model never sees the count."""
-    retries: dict[str, int] = {}
-    for message in prefix:
-        if not isinstance(message, ModelRequest):
-            continue
-        failed = {p.tool_name for p in message.parts
-                  if isinstance(p, RetryPromptPart) and p.tool_name}
-        succeeded = any(isinstance(p, ToolReturnPart) and p.outcome == "success"
-                        for p in message.parts)
-        if not failed and not succeeded:
-            continue
-        carried = {} if succeeded else dict(retries)
-        carried.update({tool: retries.get(tool, 0) + 1 for tool in failed})
-        retries = carried
-    return {tool: n for tool, n in retries.items() if n}
 
 
 def lead_records(run: Run) -> Iterator[tuple[str, tuple[Any, ...]]]:

@@ -1,7 +1,6 @@
 """Forks rerun a tool-calling response without injecting an opening message."""
 from __future__ import annotations
 
-import logging
 
 import pytest
 
@@ -208,90 +207,39 @@ REFUSED_READ = Turn(tool_calls=[("read_file", {"path": "no-such-notes-1255.md"})
 REFUSED_APPEND = S.append("```yaml\nverdict: benign\n```\n")
 
 
-STREAKS = {
+MIXED = Turn(tool_calls=[*REFUSED_BASH.tool_calls, *S.append(CHUNKS[1]).tool_calls])
+
+# #1567 retired the retry-streak refusal (#1255 C1): an arm starts every tool's retry count at
+# zero wherever it branches, so a refusal before the branch point no longer stops the launch.
+AFTER_A_REFUSAL = {
     "previous bash call refused": (
-        (S.append(CHUNKS[0]), REFUSED_BASH, S.echo("two"), S.echo("three"), S.done()), 2, True,
-        "bash"),
-    # #1567: any tool's success clears every carried count, so these two are branchable.
+        (S.append(CHUNKS[0]), REFUSED_BASH, S.echo("two"), S.echo("three"), S.done()), 2, "bash"),
     "bash refused two steps back, an append landed since": (
-        (S.append(CHUNKS[0]), REFUSED_BASH, S.append(CHUNKS[1]), S.echo("x"), S.done()), 3, False,
+        (S.append(CHUNKS[0]), REFUSED_BASH, S.append(CHUNKS[1]), S.echo("x"), S.done()), 3,
         "bash"),
     "bash refused, never called again, other tools landed since": (
         (S.append(CHUNKS[0]), REFUSED_BASH, S.append(CHUNKS[1]), S.append(CHUNKS[2]), S.done()),
-        3, False, "bash"),
-    "previous bash call ran": (
-        (S.append(CHUNKS[0]), REFUSED_BASH, S.echo("two"), S.echo("three"), S.done()), 3, False,
-        "bash"),
+        3, "bash"),
     "read_file refused, bash at the branch point": (
-        (S.append(CHUNKS[0]), REFUSED_READ, S.echo("x"), S.done()), 2, True, "read_file"),
-    "append_block refused, bash ran twice since": (
-        (S.append(CHUNKS[0]), REFUSED_APPEND, S.echo("x"), S.echo("y"), S.done()), 3, False,
-        "append_block"),
-    "append_block refused, then an append landed": (
-        (S.append(CHUNKS[0]), REFUSED_APPEND, S.append(CHUNKS[1]), S.echo("x"), S.done()), 3,
-        False, "append_block"),
+        (S.append(CHUNKS[0]), REFUSED_READ, S.echo("x"), S.done()), 2, "read_file"),
+    "append_block refused just before": (
+        (S.append(CHUNKS[0]), REFUSED_APPEND, S.echo("x"), S.done()), 2, "append_block"),
+    "bash refused beside an append that landed": (
+        (S.append(CHUNKS[0]), MIXED, S.echo("x"), S.done()), 2, "bash"),
 }
 
 
-@pytest.mark.parametrize("point", list(STREAKS))
-def test_d2_a_branch_point_inside_a_retry_streak_is_refused_at_launch(tmp_path, caplog, point):
-    script, index, refused, carrier = STREAKS[point]
+@pytest.mark.parametrize("point", list(AFTER_A_REFUSAL))
+def test_1567_a_branch_point_after_a_refused_call_launches(tmp_path, point):
+    script, index, carrier = AFTER_A_REFUSAL[point]
     source = S.drive_source(tmp_path, script)
     responses = S.tool_calling_responses(source.store)
-    rows = dict(S.main_rows(source.store))
-    (refused_call,) = S.calls_of(S.message_at(source.store, responses[1]))
-    assert refused_call.tool_name == carrier, f"the fixture's refused call moved: {refused_call}"
-    answered = rows[_row_after(source, responses[1])]
+    answered = dict(S.main_rows(source.store))[_row_after(source, responses[1])]
     assert any(isinstance(p, RetryPromptPart) and p.tool_name == carrier
                for p in answered.parts), (
-        f"the fixture's `{carrier}` call was not refused for retry — the streak arm would be "
+        f"the fixture's `{carrier}` call was not refused for retry — the case would be "
         f"vacuous: {[(type(p).__name__, getattr(p, 'tool_name', None)) for p in answered.parts]}")
-    for between in responses[2:index]:
-        reply = rows[_row_after(source, between)]
-        assert not any(isinstance(p, RetryPromptPart) for p in reply.parts), (
-            "fixture: a call between the refusal and the branch point was refused too")
 
-    caplog.set_level(logging.INFO)
     arm = S.drive_arm(tmp_path, S.spec_for(source, responses[index]), S.Recorder([S.done()]))
-
-    if not refused:
-        _arm_launched(arm)
-        return
-    assert not S.launched(arm), "an arm was launched inside a retry streak it cannot reproduce"
-    assert arm.summary.get("exit_reason") == "BranchError", arm.summary
-    assert S.child_sessions(source.store) == []
-    assert "retry" in caplog.text.lower(), (
-        f"the refusal does not name the retry streak: {caplog.text[-400:]!r}")
-
-
-def test_1567_a_tool_refused_beside_a_call_that_landed_still_carries_its_retry(tmp_path, caplog):
-    """The reset is by an earlier step's success: a refusal in the very step another call landed
-    in is carried into the next response."""
-    mixed = Turn(tool_calls=[*REFUSED_BASH.tool_calls, *S.append(CHUNKS[1]).tool_calls])
-    source = S.drive_source(tmp_path, (S.append(CHUNKS[0]), mixed, S.echo("x"), S.done()))
-    responses = S.tool_calling_responses(source.store)
-    answered = dict(S.main_rows(source.store))[_row_after(source, responses[1])]
-    kinds = {(type(p).__name__, getattr(p, "tool_name", None)) for p in answered.parts}
-    assert {("RetryPromptPart", "bash"), ("ToolReturnPart", "append_block")} <= kinds, (
-        f"fixture: the mixed step did not refuse bash and land the append: {kinds}")
-
-    caplog.set_level(logging.INFO)
-    arm = S.drive_arm(tmp_path, S.spec_for(source, responses[2]), S.Recorder([S.done()]))
-    assert not S.launched(arm), "bash's refusal in the step before was dropped by the append"
-    assert arm.summary.get("exit_reason") == "BranchError", arm.summary
-    assert "retry" in caplog.text.lower(), caplog.text[-400:]
-
-
-@pytest.mark.parametrize("outcome", ["failed", "denied", "interrupted"])
-def test_1567_only_a_call_that_succeeded_clears_a_carried_retry(outcome):
-    """A tool return the framework marks failed, denied or interrupted is not a success: it
-    leaves the count a refusal carried into its step (#1567)."""
-    from defender.investigation.branch import carried_retries
-
-    refused = ModelRequest(parts=[RetryPromptPart(content="no", tool_name="bash", tool_call_id="a")])
-    after = ModelRequest(parts=[ToolReturnPart(
-        tool_name="append_block", content="x", tool_call_id="b", outcome=outcome)])
-    landed = ModelRequest(parts=[ToolReturnPart(
-        tool_name="append_block", content="x", tool_call_id="c")])
-    assert carried_retries([refused, after]) == {"bash": 1}
-    assert carried_retries([refused, after, landed]) == {}, "the positive control failed"
+    _arm_launched(arm)
+    assert len(S.child_sessions(source.store)) == 1, "the launched arm forked no child session"
