@@ -1,4 +1,4 @@
-"""#1170 sketch: what a real job container can reach, observed from inside it. NOT RUN HERE: they need a native docker
+"""#1170 sketch (test_o3 rewritten for #1487 O8c): what a real job container can reach, observed from inside it. NOT RUN HERE: they need a native docker
 daemon with the levered runtime (gVisor `runsc`) and skip in this devcontainer (docker-outside-of-Docker); CI runs them.
 They also need the job container's image, which the design does not yet say where comes from (dev, CI, prod).
 
@@ -166,11 +166,53 @@ def test_s2_under_runsc_boxes_the_job_container_runs_on_runsc_job_and_reaches_it
     assert seen["shell"] == ["ok", "box-ok\n"], seen["shell"]
 
 
-def test_o3_from_inside_no_database_login_is_held_and_a_connect_fails(probed):
-    """(O3) not run here."""
-    scene, seen, _viz = probed
-    assert seen["db"] != "connected"
-    assert not any(scene.dsn in v or "postgresql://" in v for v in seen["env"].values())
+@pytest.fixture
+def post_step_reach(tmp_path, monkeypatch, migrated_database):  # noqa: F811
+    """A real post-step container of the scene's tenant (the one kind that gets the tick's store) running the reach program, over batches the host seeded; what it saw."""
+    from defender.box import run_docker
+    from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
+    from defender.tests.support.jobs import _real_containers1487 as R
+    from defender.tests.support.jobs._jobs1342 import register_tenant
+    from defender.tests.support.learning.core._store1278 import batches
+
+    R.compiled()
+    with helper_scene(tmp_path, monkeypatch, migrated_database) as scene:
+        register_tenant(scene.dsn, OTHER_TENANT)
+        seeded = R.seed_reach(scene.dsn, scene.tenant, OTHER_TENANT)
+        R.prepare(scene.root, scene.tenant, scene.dsn, ids=seeded.ids)
+        monkeypatch.setenv("DEFENDER_DEPLOYMENT", "dev")
+        ensure_job_network(run_docker)
+
+        def state() -> dict:
+            every = batches(scene.dsn, scene.tenant) + batches(scene.dsn, OTHER_TENANT)
+            return {str(b.id): (b.phase, b.outcome, b.token, b.lease_owner, b.reason) for b in every}
+
+        before = state()
+        ran = drive_helper(scene, scene.argv("post-step", None), docker=run_docker, signer=A.MarkedSigner(),
+                           command=["python3", "-c", R.REACH, scene.tenant])
+        assert ran.raised is None, ran.raised
+        yield scene, seeded, R.observed(scene.root, scene.tenant, "reach"), before, state()
+
+
+def test_o3_from_inside_no_database_address_login_or_route_is_held_and_the_helper_reaches_only_the_own_tenants_and_lanes(
+        post_step_reach):
+    """(O8c; #1170 O3 rewritten) no database held; own work reachable; another tenant's batch unseen; another lane's lapsed batch not taken over, its working batch not parked or ended."""
+    from defender.tests.support.jobs import _real_containers1487 as R
+
+    scene, seeded, seen, before, after = post_step_reach
+    ids = seeded.ids
+    assert R.host_can_dial(scene.dsn), "control: the address the container dials is live from the host"
+    assert R.database_held(seen, scene.dsn) == []
+    assert ["finding", seeded.own_finding] in seen["own_work"], "control: the tenant's own work is reachable through the helper"
+    assert ids["other_working"] not in seen["listed"], "another tenant's batch was listed"
+    assert not any(k.startswith("other-a/") for _kind, k in seen["own_work"]), "another tenant's work was listed"
+    calls = seen["calls"]
+    assert calls["own_lapsed_take_over"] == {"returned": "Held"}, "control: the own lane's lapsed batch can be taken over"
+    refused = {name: call for name, call in calls.items() if name != "own_lapsed_take_over"}
+    assert refused == {name: {"raised": "ForeignBatch"} for name in refused}, refused
+    for name in ("lead_lapsed", "feedback_working", "other_working"):
+        assert after[ids[name]] == before[ids[name]], f"{name} was changed"
+    assert after[ids["author_lapsed"]] != before[ids["author_lapsed"]], "control: the taken-over batch changed"
 
 
 def test_o4_from_inside_no_sign_login_openbao_login_or_forge_secret_is_readable(probed):

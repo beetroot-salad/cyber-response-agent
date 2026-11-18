@@ -1,68 +1,109 @@
-"""#1487 sketch (design r1, O8): the store relay seen from inside a real post-step job container. NOT RUN HERE: like
-`test_job_box_boundary_e2e.py` it needs a native docker daemon with the levered runtime and the job image; CI runs it.
+"""#1487 O8 (a), (b) and O1's "no process in its container held a database address", in real job containers. NOT RUN
+HERE: like `test_job_box_boundary_e2e.py` it needs a native docker daemon with the levered runtime and the job image;
+CI's `test` job runs it.
 
-The real helper (`job_host.main`, the real docker) starts a post-step container whose command is a probe: it holds no
-database address, login or route, and through the helper's store relay it lists its own tenant's work and not
-another's. The finding it reads was handed in by a learning job and made claimable by the worker's end write; here the
-host side seeds it with the store's own verb (the chain through a worker is `tests/jobs/test_1487_*`)."""
+One flow: a real worker over a completed investigation runs its learning job in a real container (the helper's real
+docker); the container writes the job's end record with its finding; the worker's own end write stores it; the worker
+then starts the post-step in a second real container, whose tick store (through the helper) claims that finding. The
+host seeds nothing of the finding. The programs are `tests/support/jobs/_real_containers1487.py`'s: the learning
+container's real entry (reading the episode's held rows) is `tests/learning/branch/test_1487_hand_in.py`'s."""
 from __future__ import annotations
-
-import json
-import uuid
 
 import pytest
 
 from defender.tests.e2e.test_job_box_boundary_e2e import requires_box
-from defender.tests.support.jobs._job_helper import OTHER_TENANT, drive_helper, ensure_job_network, helper_scene
-from defender.tests.support.jobs._jobs1342 import register_tenant
-from defender.tests.support.learning.core._store1278 import call, finding
-from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — fixture
+from defender.tests.support.jobs import _real_containers1487 as R
+from defender.tests.support.jobs._job_helper import ensure_job_network, helper_scene
+from defender.tests.support.jobs._jobs1342 import StandInContainers, an_alert, job_store, make_worker
+from defender.tests.support.learning.core._store1278 import AUTHOR_LANE, batches, call
+from defender.tests.support.shared._postgres1339 import execute, migrated_database  # noqa: F401 — fixture
 
 pytestmark = [pytest.mark.e2e, pytest.mark.box, pytest.mark.postgres, requires_box]
 
-PROBE = r'''
-import json, os, sys
-out, tenant, other = sys.argv[1], sys.argv[2], sys.argv[3]
-seen = {"env": dict(os.environ)}
-try:
-    try:
-        import psycopg
-        psycopg.connect("", connect_timeout=5).close()
-        seen["db"] = "connected"
-    except Exception as e:
-        seen["db"] = f"<{type(e).__name__}>"
-    from defender.learning.branch.container import JobContainer
-    store = JobContainer.in_environ().store()
-    seen["own"] = [i.key for i in store.work(tenant)]
-    seen["asked_other"] = [i.key for i in store.work(other)]
-except BaseException:
-    import traceback
-    seen["error"] = traceback.format_exc()
-finally:
-    json.dump(seen, open(out, "w"))
-'''
+R.compiled()
 
 
-def test_o8_o3_from_inside_a_post_step_no_database_is_held_and_the_own_tenants_work_is_reachable_through_the_helper(
-        tmp_path, monkeypatch, migrated_database):  # noqa: F811
-    """(O8; #1170 O3 rewritten) not run here."""
+@pytest.fixture
+def flow(tmp_path, monkeypatch, migrated_database):  # noqa: F811
+    """The worker's run over one completed investigation: what the host reads after it, what each container saw."""
+    import anyio
+
     from defender.box import run_docker
-    from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 
     with helper_scene(tmp_path, monkeypatch, migrated_database) as scene:
-        register_tenant(scene.dsn, OTHER_TENANT)
-        call(scene.dsn, "publish_findings", scene.tenant, "run-own", [finding("own/w/0/0")], kind="finding")
-        call(scene.dsn, "publish_findings", OTHER_TENANT, "run-other", [finding("other/w/0/0")], kind="finding")
-        out = scene.root / scene.tenant / f"probe-{uuid.uuid4().hex[:8]}.json"
         monkeypatch.setenv("DEFENDER_DEPLOYMENT", "dev")
+        monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")  # the helper binds the thresholds: one finding is due
+        monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
         ensure_job_network(run_docker)
-        ran = drive_helper(scene, scene.argv("post-step", None), docker=run_docker, signer=A.MarkedSigner(),
-                           command=["python3", "-c", PROBE, str(out), scene.tenant, OTHER_TENANT])
-        assert ran.raised is None, ran.raised
-        seen = json.loads(out.read_text(encoding="utf-8"))
+        (scene.root / scene.tenant / "learning").mkdir(exist_ok=True)
+        out: dict = {"scene": scene}
 
-    assert "error" not in seen, seen["error"]
-    assert seen["db"] != "connected"
-    assert not any(scene.dsn in v or "postgresql://" in v for v in seen["env"].values())
-    assert seen["own"] == ["own/w/0/0"], "control: the tenant's own work is reachable through the helper"
-    assert seen["asked_other"] == ["own/w/0/0"], "another tenant's work was reached"
+        async def go() -> None:
+            async with job_store(scene.dsn) as store:
+                alert = await an_alert(store, scene.tenant)
+                inv, _ = await store.create_investigation(scene.tenant, alert.alert_id, "k1", actor="u-1")
+                claim = await store.claim()
+                assert claim.record.investigation_id == inv.investigation_id, "premise: only this one was queued"
+                await store.finish(scene.tenant, inv.investigation_id, stage="completed", disposition="malicious",
+                                   cost_usd=0.0)
+                ((job,),) = execute(scene.dsn, "SELECT id FROM jobs.learning_jobs WHERE investigation_id = %s",
+                                    (inv.investigation_id,))
+                job = str(job)
+                rows = [_row(job)]
+                R.prepare(scene.root, scene.tenant, scene.dsn, rows=rows)
+                out.update(job=job, rows=rows, host_dial=R.host_can_dial(scene.dsn))
+                worker = make_worker(
+                    store, scene.root, lambda _launch: ["/bin/false"],
+                    containers=StandInContainers(tmp_path / "containers"), slots=3, learning_slots=1,
+                    learning_argv=R.real_child(scene.t.commit, "learning"),
+                    post_step_argv=R.real_child(scene.t.commit, "post-step"))
+                await worker.drain()
+
+        anyio.run(go)
+        out["learning"] = R.observed(scene.root, scene.tenant, "learning")
+        out["post_step"] = R.observed(scene.root, scene.tenant, "post-step")
+        yield out
+
+
+def _row(job: str) -> dict:
+    from defender.tests.support.learning.core._store1278 import finding
+
+    return finding(f"{job}/w-b/0/0", run_id=job)
+
+
+def _job_row(flow) -> dict:
+    cols = ("status", "reason", "findings_count", "publish_state")
+    (found,) = execute(flow["scene"].dsn, f"SELECT {', '.join(cols)} FROM jobs.learning_jobs WHERE id = %s",  # noqa: S608
+                       (flow["job"],))
+    return dict(zip(cols, found, strict=True))
+
+
+def test_o8a_a_learning_jobs_container_ends_completed_and_the_workers_end_write_stores_its_finding(flow):
+    """(O8a, O1) the end record the container wrote is `completed`; the worker's end write derived the count and stored the finding as the job's."""
+    scene, job = flow["scene"], flow["job"]
+    assert _job_row(flow) == {"status": "completed", "reason": None, "findings_count": 1, "publish_state": "done"}
+    seen = flow["post_step"]["work_before"]
+    assert [row[:2] + row[3:] for row in seen] == [["finding", f"{job}/w-b/0/0", job]], "stored for the tenant, its source run the job"
+    assert [row[2] for row in seen] == ["waiting"], "waiting when the post-step's tick looked"
+    held = {i.key: i for i in call(scene.dsn, "work", scene.tenant)}
+    assert held[f"{job}/w-b/0/0"].source_run == job
+
+
+def test_o8b_a_post_step_containers_tick_claims_that_finding_through_the_helper(flow):
+    """(O8b) the claim the post-step container made through its helper is a working author batch holding the finding, as the host reads it."""
+    scene, job = flow["scene"], flow["job"]
+    claimed = flow["post_step"]["claimed"]
+    assert claimed is not None, "nothing was due: the finding never reached the helper's thresholds"
+    assert claimed["lane"] == AUTHOR_LANE
+    assert claimed["keys"] == [["finding", f"{job}/w-b/0/0"]]
+    (batch,) = [b for b in batches(scene.dsn, scene.tenant) if b.lane == AUTHOR_LANE]
+    assert (str(batch.id), batch.phase) == (claimed["batch"], "working")
+    (item,) = [i for i in call(scene.dsn, "work", scene.tenant) if i.key == f"{job}/w-b/0/0"]
+    assert (item.status, str(item.batch_id)) == ("in_batch", claimed["batch"])
+
+
+@pytest.mark.parametrize("which", ["learning", "post_step"])
+def test_o1_no_process_in_a_job_container_held_a_database_address_login_or_a_connect(flow, which):
+    """(O1) in each real container: no address, login or variable of the database in any process, no open connection to it, a dial of its address fails."""
+    assert flow["host_dial"], "control: the address the container dials is live from the host"
+    assert R.database_held(flow[which], flow["scene"].dsn) == []
