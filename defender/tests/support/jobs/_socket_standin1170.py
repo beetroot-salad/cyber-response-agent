@@ -30,9 +30,13 @@ class SocketStandIn:
     """A job socket answering `launch` and `answers`; use as a context manager (it serves until closed)."""
 
     def __init__(self, tenant: str, *, launch: Mapping[str, Any] | None = None,
-                 answers: Mapping[str, Callable[[dict[str, Any]], dict[str, Any]]] | None = None) -> None:
+                 answers: Mapping[str, Callable[[dict[str, Any]], dict[str, Any]]] | None = None,
+                 forward: Callable[..., dict[str, Any]] | None = None) -> None:
         self.launch = {"tenant": tenant, "tenant_state": "active", "proxy_url": None, **(launch or {})}
         self.answers = dict(answers or {})
+        #: A job-socket client (`ask(name, **fields)`, e.g. a real helper's `PostStepHelper.ask`) every request this stand-in
+        #: has no answer for is passed to; its answer or typed refusal is returned as it came. Decides nothing here.
+        self.forward = forward
         self.asked: list[tuple[str, dict[str, Any]]] = []
         self._folder = Path(tempfile.mkdtemp(prefix="j", dir="/tmp"))
         self.path = self._folder / "job.sock"
@@ -80,6 +84,8 @@ class SocketStandIn:
                     answer: Any = {"ok": dict(self.launch)}
                 elif name in self.answers:
                     answer = {"ok": self.answers[name](dict(fields))}
+                elif self.forward is not None:
+                    answer = {"ok": self.forward(name, **fields)}
                 else:
                     raise job_socket.Refused(f"the stand-in answers no {name!r}", "unknown-request")
             except job_socket.Refused as refused:
