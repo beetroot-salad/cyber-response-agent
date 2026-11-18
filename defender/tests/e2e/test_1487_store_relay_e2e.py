@@ -102,6 +102,16 @@ def test_o8b_a_post_step_containers_tick_claims_that_finding_through_the_helper(
     assert (item.status, str(item.batch_id)) == ("in_batch", claimed["batch"])
 
 
+def test_o4_the_real_post_step_hands_its_tick_the_job_containers_port(flow):
+    """(O4, Amendment 1) `post_step.main` in the container called its tick with `store=` only, and that store is the port
+    `JobContainer.tick_store()` builds there, not an adapter over a database of its own."""
+    seen = flow["post_step"]
+    assert seen["exit"] == 0
+    assert seen["tick_kwargs"] == ["store"], seen["tick_kwargs"]
+    assert seen["tick_store"] == seen["port"], (seen["tick_store"], seen["port"])
+    assert "StoreAdapter" not in seen["tick_store"], seen["tick_store"]
+
+
 @pytest.mark.parametrize("which", ["learning", "post_step"])
 def test_o1_no_process_in_a_job_container_held_a_database_address_login_or_a_connect(flow, which):
     """(O1) in each real container: no address, login or variable of the database in any process, no open connection to it, a dial of its address fails."""

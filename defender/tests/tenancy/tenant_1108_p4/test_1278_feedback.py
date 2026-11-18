@@ -50,7 +50,9 @@ from defender.tests.tenancy.tenant_1108_p4._drain_support import (
     BoxSpy,
     PitfallsStep,
     critical_text,
+    author_drain,
     lead_author_drain,
+    own_store,
     remote_branches,
 )
 
@@ -503,8 +505,9 @@ def test_replacement_a_successor_abandoned_before_its_pr_passes_its_replaces_on(
     _no_orphans(w)
 
 
+@own_store("the tick is the post-step's: its store is the port over the child's job socket")
 @pytest.mark.parametrize("how", ["cancel", "sigterm"])
-def test_replacement_a_stop_before_its_pr_keeps_the_items_due_with_the_generation_unchanged(world, caplog, monkeypatch, how):
+def test_replacement_a_stop_before_its_pr_keeps_the_items_due_with_the_generation_unchanged(world, post_step_helper, caplog, monkeypatch, how):
     """The post-step, forked, is stopped while the replacement's curator is blocked in a subprocess: the batch ends abandoned, the items are due again, the next tick replaces. (O7, D4, D8)"""
     from defender.tests.learning.branch.test_1344_post_step import post_step_in_container
 
@@ -513,11 +516,12 @@ def test_replacement_a_stop_before_its_pr_keeps_the_items_due_with_the_generatio
     marker = w.scratch / "sleeper"
     blocked = FeedbackCurator(_files("f1"), before_commit=blocked_in_subprocess(marker))
     monkeypatch.setenv(RENEW_ENV, "0.2")
+    helper = post_step_helper()
 
     def body():
-        return post_step_in_container(None, w.t.tenant_id,
-                              author_tick=lambda _paths: tick(w, blocked),
-                              still_waiting=lambda _paths: False)
+        return post_step_in_container(None, w.t.tenant_id, forward=helper.ask,
+                                      author_tick=lambda _paths, *, store: author_drain(
+                                          w.t, w.paths, trigger=blocked, box=BoxSpy(), store=store))
     child = TickChild(body, w.scratch / f"child-{how}.json")
     sleeper = int(await_file(marker))
     try:

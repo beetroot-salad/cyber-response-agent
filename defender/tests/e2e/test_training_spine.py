@@ -23,6 +23,7 @@ from defender.tests.tenancy.tenant_1108_p4._drain_support import (
     drain_paths,
     product_repo,
     remote_branches,
+    tick_store,
     touched,
     under,
 )
@@ -132,9 +133,10 @@ def drive_tenant_author_drain(t, paths, trigger, *, rec=None):
     """The real `author_drain` over the tenant path, with the forge fake's client, an identity
     over its issuer fake, and the box seams."""
     rec = rec or B.BoxLifecycleRecorder()
-    rc = drains.author_drain(
-        paths, trigger_author=trigger, client=t.forge.client, identity=t.vault.identity(), directory=t.directory,
-        start_box=rec.start_box, stop_box=rec.stop_box)
+    with tick_store(t, "author") as store:  # #1487: the tick is handed its store
+        rc = drains.author_drain(
+            paths, trigger_author=trigger, client=t.forge.client, identity=t.vault.identity(), directory=t.directory,
+            start_box=rec.start_box, stop_box=rec.stop_box, store=store)
     return rc, rec
 
 

@@ -18,6 +18,7 @@ import os
 import random
 import re
 import signal
+import uuid
 from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
@@ -122,6 +123,22 @@ class Recorder:
             self._answers = False
             return self._answer
         return self._ask(name, **fields)
+
+
+def adopt_scene(t: Any, dsn: str, monkeypatch: Any) -> Any:
+    """A helper scene over a tenant a case already published and registered active in `dsn` (the tick tests' `world`),
+    for a `PostStepHelper`: the worker's claim in the environment, the tenant's runs folder. What `helper_scene` builds
+    around a tenant of its own, without making another."""
+    from defender.box import CLAIM_ENV
+    from defender.tests.support.jobs._job_helper import HelperScene
+
+    claim = uuid.uuid4().hex
+    monkeypatch.setenv(CLAIM_ENV, claim)  # the worker hands each child its claim (`_worker._spawn`)
+    monkeypatch.setenv("DEFENDER_DATA_ROOT", str(t.data_root))
+    monkeypatch.setenv("DEFENDER_DATABASE_DSN", dsn)  # the helper holds the database login (N7)
+    runs = Path(t.data_root) / t.tenant_id / "runs"
+    runs.mkdir(parents=True, exist_ok=True)
+    return HelperScene(Path(t.data_root), t, runs, dsn, claim)
 
 
 class PostStepHelper:

@@ -63,6 +63,7 @@ from defender.tests.tenancy.tenant_1108_p4._drain_support import (
     owner_record,
     process_start,
     product_repo,
+    tick_store,
     product_state,
     queue,
     queued_run,
@@ -699,7 +700,8 @@ def _default_box_tick(w: Any, monkeypatch: Any, drain: str, label: str) -> tuple
         def trigger(*_a: Any, **_k: Any) -> None:
             ran.append("curator")
 
-        return run_stage(lambda: drains().author_drain(paths, trigger_author=trigger, **seams)), ran
+        with tick_store(t, "author", seams) as store:  # #1487: the tick is handed its store
+            return run_stage(lambda: drains().author_drain(paths, trigger_author=trigger, store=store, **seams)), ran
     paths, _run, _step = _lead_tick(w, monkeypatch, label)
 
     def lead(*_a: Any, **_k: Any) -> None:
@@ -709,8 +711,9 @@ def _default_box_tick(w: Any, monkeypatch: Any, drain: str, label: str) -> tuple
         ran.append("pitfalls")
         return 0
 
-    return run_stage(lambda: drains().lead_author_drain(
-        paths, run_lead_author=lead, run_pitfalls=pitfalls, **seams)), ran
+    with tick_store(t, "lead_author", seams) as store:  # #1487: the tick is handed its store
+        return run_stage(lambda: drains().lead_author_drain(
+            paths, run_lead_author=lead, run_pitfalls=pitfalls, store=store, **seams)), ran
 
 
 @postgres

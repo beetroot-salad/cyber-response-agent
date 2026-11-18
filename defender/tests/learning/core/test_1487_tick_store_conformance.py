@@ -20,6 +20,7 @@ import contextlib
 import dataclasses
 import json
 import os
+import re
 import signal
 import sys
 import uuid
@@ -147,7 +148,8 @@ def test_p2_a_scripted_sequence_is_answered_alike_and_raises_the_store_exception
     assert_same(ops, adapter, port)
     for index, name in raises.items():
         got = adapter[index]
-        assert got[0] == "raised" and got[1].rsplit(".", 1)[-1] == name, f"call {index} {ops[index]}: {got!r}"
+        assert got[0] == "raised", f"call {index} {ops[index]}: {got!r}"
+        assert got[1].rsplit(".", 1)[-1] == name, f"call {index} {ops[index]}: {got!r}"
         assert got[1].startswith("defender.learning_store"), f"{name} is not the store's own class: {got[1]}"
     if not raises:
         assert [o[0] for o in adapter[:6]] == ["ok"] * 6, adapter[:6]
@@ -188,7 +190,8 @@ def test_p2_a_tenant_not_active_refuses_a_claim_alike(scene, start):
             helper.close()
         restate_tenant(scene.dsn, scene.tenant, state="active", data_root=scene.root)
 
-    assert outcomes["adapter"][0] == "raised" and outcomes["adapter"][1].endswith(".TenantInactive"), outcomes["adapter"]
+    assert outcomes["adapter"][0] == "raised", outcomes["adapter"]
+    assert outcomes["adapter"][1].endswith(".TenantInactive"), outcomes["adapter"]
     assert outcomes["port"] == outcomes["adapter"]
 
 
@@ -231,7 +234,8 @@ def test_p2_o3_a_store_outage_is_the_one_outage_exception_on_every_verb(scene, s
     answered = [(op, o) for op, o in zip(_AFTER_CUT, after, strict=True) if o != ("skipped",)]
     assert len(answered) >= 12, f"too few verbs met the outage: {after}"
     for op, got in answered:
-        assert got[0] == "raised" and got[1] == f"{E.StoreUnavailable.__module__}.StoreUnavailable", (op, got)
+        assert got[0] == "raised", (op, got)
+        assert got[1] == f"{E.StoreUnavailable.__module__}.StoreUnavailable", (op, got)
     assert not issubclass(E.StoreUnavailable, OSError), "the tick reads an OSError as a forge fault"
     assert settings == (R.RENEW, 3)
 
@@ -329,7 +333,9 @@ def test_p1_thresholds_are_the_trusted_side_s_and_a_claim_waits_for_them(scene, 
         helper.close()
 
     assert two == (False, None), two
-    assert three[0] is True and three[1] is not None and len(three[1].items) == 3, three
+    assert three[0] is True, three
+    assert three[1] is not None, three
+    assert len(three[1].items) == 3, three
 
 
 @pytest.mark.parametrize("impl", R.IMPLS)
@@ -394,19 +400,21 @@ def test_p2_the_port_answers_the_helpers_own_settings_not_a_default(scene, start
         assert port.generation_ceiling == adapter.generation_ceiling
 
 
-@pytest.mark.parametrize(("lease", "starts"), [(_STOP_WINDOW, False), (_STOP_WINDOW + 1, True)])
+@pytest.mark.parametrize(("lease", "starts"), [(10, False), (_STOP_WINDOW, False), (_STOP_WINDOW + 1, True)])
 def test_o6_the_port_refuses_to_start_when_the_lease_is_not_longer_than_the_stop_window(scene, start, monkeypatch,
                                                                                       lease, starts):
-    """A lease of 22 s (the stop window) is refused at the port's start; 23 s starts. A batch the unwind could not reach
-    then lapses to recovery. (O6)"""
+    """A lease of 10 s or of 22 s (the stop window) is refused at the port's start with a `ValueError` naming both
+    durations (amendment 4); 23 s starts. A batch the unwind could not reach then lapses to recovery. (O6)"""
     R.settings_env(monkeypatch, lease=lease)
     helper = start()
     if starts:
         assert helper.port() is not None
         return
-    with pytest.raises(Exception) as refused:  # noqa: PT011 — the refusal's type is the implementer's; the 23 s control pins it is the refusal
+    with pytest.raises(ValueError, match=r"\d") as refused:
         helper.port()
-    assert not isinstance(refused.value, (AttributeError, ImportError, NameError)), refused.value
+    for seconds in (lease, _STOP_WINDOW):
+        assert re.search(rf"(?<![\d.]){seconds}(\.0+)?(?![\d.])", str(refused.value)), (
+            f"the refusal does not name {seconds} s: {refused.value}")
     assert call(scene.dsn, "batches", scene.tenant) == [], "a store verb ran on a port that refused to start"
 
 
@@ -522,7 +530,7 @@ def test_o5_a_listed_lapsed_batch_is_acted_on_by_id_but_its_lease_verbs_need_thi
 
 def test_o5_another_reconcile_lanes_batch_is_closed_or_checked_but_never_taken_over_abandoned_or_parked(scene, start):
     """A lead-lane batch in review, listed: `end_review`, `note_check` and `note_refusal` are accepted; `take_over`,
-    `abandon` and `needs_person` raise `ForeignBatch`. The lead lane's live working batch is refused by all. (O5, #1546)"""
+    `abandon` and `needs_person` raise `ForeignBatch`. (O5, #1546; the lane's working batch is the next case's)"""
     E = _exceptions()
     review = lead_review = R.lead_batch_in_review(scene.dsn, scene.tenant)
     port = start().port()
@@ -535,8 +543,9 @@ def test_o5_another_reconcile_lanes_batch_is_closed_or_checked_but_never_taken_o
 
 
 def test_o5_another_lanes_working_batch_cannot_be_parked_or_ended_and_its_lapsed_one_cannot_be_taken(scene, start):
-    """#1546's live lead batch: not listed as issued, so `end_review`, `note_check`, `note_refusal`, `needs_person` and
-    `abandon` on it raise `ForeignBatch` and it does not move; lapsed, it still cannot be taken over. (O5)"""
+    """#1546's live lead batch: not listed as issued, so `end_review`, `note_check`, `note_refusal`, `needs_person`,
+    `abandon` and `take_over` on it raise `ForeignBatch` and it does not move; lapsed, it is still not issued (a lead
+    batch is issued only in review or closing), so every verb raises `ForeignBatch` again. (O5, Flow 2, decision 4)"""
     E = _exceptions()
     for n in range(2):
         call(scene.dsn, "add_pitfall", scene.tenant, {"schema_version": 1, "source_run": f"r{n}", "system": "elastic",
@@ -550,7 +559,7 @@ def test_o5_another_lanes_working_batch_cannot_be_parked_or_ended_and_its_lapsed
     _refused(E, _by_id(port, str(lead.batch_id)), scene.dsn, scene.tenant)
     lapse_lease(scene.dsn, str(lead.batch_id))
     port.batches()
-    _refused(E, _by_id(port, str(lead.batch_id)), scene.dsn, scene.tenant, but=("end_review", "note_check", "note_refusal"))
+    _refused(E, _by_id(port, str(lead.batch_id)), scene.dsn, scene.tenant)  # a lapsed lead batch is never issued: every verb
 
 
 def test_o5_an_id_one_session_was_issued_is_foreign_to_the_next(scene, start):
@@ -564,7 +573,8 @@ def test_o5_an_id_one_session_was_issued_is_foreign_to_the_next(scene, start):
     second = start().port()
 
     _refused(E, _by_id(second, review), scene.dsn, scene.tenant)
-    assert second.batches() and review in [str(b.id) for b in second.batches()]
+    assert second.batches()
+    assert review in [str(b.id) for b in second.batches()]
     assert second.note_check(review) is None
 
 
@@ -594,8 +604,8 @@ def _signal_and_wait(container: Any) -> None:
 
 
 def test_o6_after_the_signal_a_lease_is_refused_with_stop_whatever_else_the_lane_says(scene, monkeypatch):
-    """After the signal `claim` raises the store's `Stop` even though the lane has a working batch (not `LaneBusy`), and
-    `take_over` raises `Stop` on a batch listed lapsed, which stays lapsed. (O6, Stop signal)"""
+    """After the signal `claim` raises the store's `Stop`, each time it is asked, even though the lane has a working
+    batch (not `LaneBusy`). `take_over` is the next case's. (O6, Stop signal)"""
     from defender.learning_store import Stop
 
     R.settings_env(monkeypatch)
@@ -851,11 +861,13 @@ def test_p1_no_request_the_port_sends_has_a_field_for_the_tenant_lane_owner_thre
     from defender import job_host
 
     seen = _recorded(scene, start)
-    assert len({name for name, _ in seen}) >= 1 and len(seen) >= 10, f"the port sent too little to judge: {seen}"
+    assert len({name for name, _ in seen}) >= 1, f"the port sent too little to judge: {seen}"
+    assert len(seen) >= 10, f"the port sent too little to judge: {seen}"
     banned = {"tenant", "tenant_id", "lane", "owner", "thresholds", "by", "lease", "grace", "settings"}
     for name, fields in seen:
         assert not banned & set(fields), (name, fields)
-        assert scene.tenant not in json.dumps(fields) and "recovery" not in json.dumps(fields), (name, fields)
+        assert scene.tenant not in json.dumps(fields), (name, fields)
+        assert "recovery" not in json.dumps(fields), (name, fields)
 
     helper = start()
     before = snapshot(scene.dsn, scene.tenant), item_states(scene.dsn, scene.tenant)
@@ -930,7 +942,8 @@ def test_o4_a_tick_claims_authors_and_opens_a_review_through_either_store(scene,
     assert rc == 0
     assert len(writer.served) == 1, "the curator was not served the claimed batch"
     [batch] = call(scene.dsn, "batches", scene.tenant)
-    assert batch.phase == "in_review" and batch.pr_number is not None, batch
+    assert batch.phase == "in_review", batch
+    assert batch.pr_number is not None, batch
     assert [b for b in remote_branches(scene.t.remote)] == [batch.branch]
     assert item_states(scene.dsn, scene.tenant)["t1"][0] == "in_batch"
 
@@ -962,6 +975,67 @@ def test_o4_a_lapsed_batch_is_recovered_through_either_store(scene, tick):
     assert (old.phase, old.outcome, old.reason) == ("ended", "abandoned", "its holder was lost"), old
     assert later, "the recovered items were not claimed again"
     assert item_states(scene.dsn, scene.tenant)["op/w/0/0"][1] == 1, "the lost holder's attempt was not counted"
+
+
+def _wire_names_of(helper: R.PostStepHelper, verb: str) -> set[str]:
+    """The request names the port sends for `verb()` alone (a reference port over a recorder, its start's own requests
+    left out): the wire's names are the implementer's, so they are learned, never spelled."""
+    recorder = R.Recorder(helper.ask)
+    port = helper.port(recorder)
+    before = len(recorder.calls)
+    getattr(port, verb)()
+    names = {name for name, _fields in recorder.calls[before:]}
+    assert names, f"premise: `{verb}()` sent nothing"
+    return names
+
+
+def test_amendment1_the_real_post_step_hands_its_tick_the_port_and_the_tick_s_calls_arrive_at_the_helper(scene, start):
+    """`post_step.main` over a real helper (the job socket forwards to it), only its tick replaced: the tick is called
+    with `store=` a port (not the adapter), and a call it makes on that store is a request the helper received. The
+    container's environment holds no database address, so a store the post-step built for itself could not be reached.
+    (Amendment 1, O4)"""
+    from defender.learning_store.tick import StoreAdapter
+    from defender.tests.learning.branch.test_1344_post_step import post_step_in_container
+
+    helper = start()
+    listing = _wire_names_of(helper, "batches")
+    reference = type(helper.port())
+    got: dict[str, Any] = {}
+    asked: list = []
+
+    def tick(paths: Any, **kwargs: Any) -> int:
+        got["kwargs"] = set(kwargs)
+        got["store"] = kwargs.get("store")
+        got["batches"] = got["store"].batches()
+        return 0
+
+    code = post_step_in_container(None, scene.tenant, forward=helper.ask, record=asked, author_tick=tick)
+
+    assert code == 0
+    assert got["kwargs"] == {"store"}, got["kwargs"]
+    assert type(got["store"]) is reference, f"the tick's store is a {type(got['store']).__name__}, not the job container's port"
+    assert not isinstance(got["store"], StoreAdapter)
+    assert got["batches"] == [], "premise: the scene's tenant holds no batch"
+    assert listing <= {name for name, _fields in asked}, f"the tick's listing never reached the helper: {asked}"
+
+
+def test_amendment1_the_real_post_step_s_default_tick_reads_the_lane_through_the_helper(scene, start):
+    """`post_step.main` over a real helper with nothing replaced (no tick, no curator: nothing is due, so none is asked
+    for): the default tick, `author_drain(paths, store=store)`, ends 0 and its reconcile's listing of the tenant's batches
+    is a request the helper received. With no address in the environment, a default tick that opened its own store
+    would raise instead. (Amendment 1, O4, Flow 2)"""
+    from defender.tests.learning.branch.test_1344_post_step import post_step_in_container
+
+    R.reset_learning(scene.dsn)
+    helper = start()
+    listing = _wire_names_of(helper, "batches")
+    asked: list = []
+
+    code = post_step_in_container(None, scene.tenant, forward=helper.ask, record=asked)
+
+    assert code == 0
+    assert listing <= {name for name, _fields in asked}, f"the default tick's listing never reached the helper: {asked}"
+    assert call(scene.dsn, "batches", scene.tenant) == [], "nothing was due: no batch should exist"
 
 
 def test_o6_a_stopping_tick_returns_its_unpushed_batch_through_the_port(scene, start, tmp_path, monkeypatch):

@@ -49,6 +49,7 @@ from defender.tests.tenancy.tenant_1108_p4._drain_support import (
     critical_text,
     drafts_dir,
     lead_author_drain,
+    own_store,
     remote_branches,
 )
 from defender.tests.tenancy.tenant_1108_p4._support import git
@@ -456,17 +457,20 @@ def test_o1_a_lapsed_batch_with_nothing_anywhere_is_abandoned_and_its_item_autho
 STOP_BOUND = 30.0
 
 
-def _post_step_child(w, writer, *, how):
-    """A forked child running the real post-step (a family-less one) whose tick is `author_drain` over `writer`.
-    `how` is how the stop will be delivered: `cancel` sets the store's flag, `sigterm` signals the child."""
+def _post_step_child(w, start, writer, *, how):
+    """A forked child running the real post-step (a family-less one) over a real helper (`start()`, after this sets the
+    renewal), whose tick is `author_drain` over `writer` and takes the store the post-step hands it (#1487 Amendment 1:
+    the port over the child's job socket, which forwards to the helper). `how` is how the stop will be delivered: `cancel`
+    sets the store's flag, `sigterm` signals the child."""
     from defender.tests.learning.branch.test_1344_post_step import post_step_in_container
 
     w.monkeypatch.setenv(RENEW_ENV, "0.2")
+    helper = start()
 
     def body():
-        return post_step_in_container(None, w.t.tenant_id,
-                              author_tick=lambda _paths: author_drain(w.t, w.paths, trigger=writer, box=BoxSpy()),
-                              still_waiting=lambda _paths: False)
+        return post_step_in_container(None, w.t.tenant_id, forward=helper.ask,
+                                      author_tick=lambda _paths, *, store: author_drain(
+                                          w.t, w.paths, trigger=writer, box=BoxSpy(), store=store))
     return TickChild(body, w.scratch / f"child-{how}.json")
 
 
@@ -477,6 +481,7 @@ def _stop(w, child, how):
         child.terminate()
 
 
+@own_store("no store: the post-step's tick is a sleep")
 def test_control_a_sigterm_reaches_the_post_step_blocked_in_a_subprocess(world):  # noqa: F811 — the imported fixture
     """Harness control, no store: the post-step's tick blocked in `sleep` ends on SIGTERM as a KeyboardInterrupt. (Renewal and stop)"""
     from defender.tests.learning.branch.test_1344_post_step import post_step_in_container
@@ -487,8 +492,7 @@ def test_control_a_sigterm_reaches_the_post_step_blocked_in_a_subprocess(world):
 
     def body():
         return post_step_in_container(None, w.t.tenant_id,
-                              author_tick=lambda _paths: block(None) or 0,
-                              still_waiting=lambda _paths: False)
+                              author_tick=lambda _paths, **_kw: block(None) or 0)
     child = TickChild(body, w.scratch / "child-control.json")
     sleeper = int(await_file(marker))
     try:
@@ -498,14 +502,15 @@ def test_control_a_sigterm_reaches_the_post_step_blocked_in_a_subprocess(world):
         kill_if_alive(sleeper)
 
 
+@own_store("the tick is the post-step's: its store is the port over the child's job socket")
 @pytest.mark.parametrize("how", ["cancel", "sigterm"])
-def test_stop_a_stop_while_the_curator_is_blocked_in_a_subprocess_ends_the_tick_and_abandons_a_batch_with_no_commits(world, how):  # noqa: F811 — the imported fixture
+def test_stop_a_stop_while_the_curator_is_blocked_in_a_subprocess_ends_the_tick_and_abandons_a_batch_with_no_commits(world, post_step_helper, how):  # noqa: F811 — the imported fixture
     """Cancel flag or SIGTERM while the step waits on a child process: the tick ends in time, the batch is abandoned cleanly, f1 waits, attempt forgiven, lane free. (Renewal and stop, D4, D8)"""
     w = world
     _seed(w, "f1")
     marker = w.scratch / "sleeper"
     writer = LessonWriter({LESSON_NAME: lesson_citing("f1")}, before_commit=blocked_in_subprocess(marker))
-    child = _post_step_child(w, writer, how=how)
+    child = _post_step_child(w, post_step_helper, writer, how=how)
     sleeper = int(await_file(marker))
     try:
         _stop(w, child, how)
@@ -523,14 +528,15 @@ def test_stop_a_stop_while_the_curator_is_blocked_in_a_subprocess_ends_the_tick_
     assert call(w.dsn, "claim", w.t.tenant_id, AUTHOR_LANE, owner="next-host", thresholds=ONE) is not None
 
 
+@own_store("the tick is the post-step's: its store is the port over the child's job socket")
 @pytest.mark.parametrize("how", ["cancel", "sigterm"])
-def test_stop_a_stop_after_the_commit_leaves_the_batch_for_takeover_at_once_and_one_pr(world, caplog, how):  # noqa: F811 — the imported fixture
+def test_stop_a_stop_after_the_commit_leaves_the_batch_for_takeover_at_once_and_one_pr(world, post_step_helper, caplog, how):  # noqa: F811 — the imported fixture
     """Stopped while blocked after committing: the batch is not abandoned and its own lease is expired, so the next tick delivers it at once, within grace, with no rerun. (Renewal and stop, D4)"""
     w = world
     _seed(w, "f1")
     marker = w.scratch / "sleeper"
     writer = LessonWriter({LESSON_NAME: lesson_citing("f1")}, after_commit=blocked_in_subprocess(marker))
-    child = _post_step_child(w, writer, how=how)
+    child = _post_step_child(w, post_step_helper, writer, how=how)
     sleeper = int(await_file(marker))
     try:
         _stop(w, child, how)
@@ -553,13 +559,14 @@ def test_stop_a_stop_after_the_commit_leaves_the_batch_for_takeover_at_once_and_
     assert (_batches(w)[batch_id].phase, _batches(w)[batch_id].pr_number) == ("in_review", pr["number"])
 
 
-def test_stop_a_lease_lost_while_the_curator_is_blocked_in_a_subprocess_ends_the_tick_and_pushes_nothing(world):  # noqa: F811 — the imported fixture
+@own_store("the tick is the post-step's: its store is the port over the child's job socket")
+def test_stop_a_lease_lost_while_the_curator_is_blocked_in_a_subprocess_ends_the_tick_and_pushes_nothing(world, post_step_helper):  # noqa: F811 — the imported fixture
     """The lease lapses (by SQL) while the step waits on a child process: the renewer sees it lost, the tick ends in time, nothing is pushed, no PR opens. (P6, Renewal and stop)"""
     w = world
     _seed(w, "f1")
     marker = w.scratch / "sleeper"
     writer = LessonWriter({LESSON_NAME: lesson_citing("f1")}, after_commit=blocked_in_subprocess(marker))
-    child = _post_step_child(w, writer, how="lease")
+    child = _post_step_child(w, post_step_helper, writer, how="lease")
     sleeper = int(await_file(marker))
     try:
         [batch_id] = _batches(w)

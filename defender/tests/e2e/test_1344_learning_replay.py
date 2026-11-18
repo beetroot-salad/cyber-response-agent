@@ -161,8 +161,7 @@ async def test_o1_o8_o14_a_completed_investigation_is_learned_from_end_to_end_an
     gate = flow["marks"] / "post-step" / "gate"
     assert gate.is_file(), "the drain gate never ran"
     assert int(gate.read_text(encoding="utf-8")) >= 1, "the gate ran before this job's findings were published"
-    record = json.loads((flow["root"] / flow["tenant"] / "runs" / f"{job['id']}.post-step.json").read_text(encoding="utf-8"))
-    assert record == {"published": [job["id"]], "refused": [], "waiting": False}  # one finding: below the gate's threshold (amendment 3)
+    assert not (flow["root"] / flow["tenant"] / "runs" / f"{job['id']}.post-step.json").exists(), "the post-step wrote a record (#1487 O7: the worker answers 'waiting')"
     assert sorted(p.name for p in (flow["marks"] / "family").glob("sibling-*")), "no sibling ran as a real run"
 
 
@@ -181,8 +180,7 @@ async def test_o3_a_completed_investigation_with_no_gather_ends_its_job_skipped_
     gate = flow["marks"] / "post-step" / "gate"
     assert gate.is_file(), "the job's child started, so the post-step runs the gate whatever the ending"
     assert int(gate.read_text(encoding="utf-8")) == 0
-    record = json.loads((flow["root"] / flow["tenant"] / "runs" / f"{job['id']}.post-step.json").read_text(encoding="utf-8"))
-    assert record == {"published": [], "refused": [], "waiting": False}  # nothing queued (amendment 3)
+    assert not (flow["root"] / flow["tenant"] / "runs" / f"{job['id']}.post-step.json").exists(), "the post-step wrote a record (#1487 O7)"
     assert not list((flow["marks"] / "family").glob("sibling-*")), "a sibling started with no fork point"
 
 

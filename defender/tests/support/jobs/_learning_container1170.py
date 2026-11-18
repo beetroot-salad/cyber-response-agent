@@ -178,7 +178,7 @@ finally:
 POST_STEP_HOLD = _PROLOGUE + r'''
 from defender.learning.branch import cli
 from defender.learning.core import drains
-def author_drain(paths):
+def author_drain(paths, *, store=None):  # #1487 Amendment 1: the default tick is `author_drain(paths, store=store)`
     try:
         cli._default_spawn([sys.executable, "-c", "import os,sys,time;open(sys.argv[1],'w').write(str(os.getpid()));time.sleep(600)",
                             str(marks / "child.pid")], env=dict(os.environ))

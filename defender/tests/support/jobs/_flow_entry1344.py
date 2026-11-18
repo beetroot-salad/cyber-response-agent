@@ -230,6 +230,7 @@ def _store_from_a_newer_format(runs: Path, investigation: str) -> None:
 
 def post_step() -> int:
     from defender.learning.branch import post_step as step
+    from defender.tests.support.jobs._socket_standin1170 import stubbed_port
     from defender.tests.support.learning.core._store1278 import call
 
     tenant = argv[argv.index("--tenant") + 1]
@@ -243,7 +244,7 @@ def post_step() -> int:
 
     try:
         job = argv[argv.index("--job") + 1] if "--job" in argv else None
-        with _socket(tenant, kind="post-step", job=job) as helper:
+        with _socket(tenant, kind="post-step", job=job) as helper, stubbed_port():  # #1487: the gate stands for the tick; its store is not looked at
             step.main(_in_container_argv(), environ=helper.environ(), author_tick=gate)
     except SystemExit as stop:
         return stop.code if isinstance(stop.code, int) else 1

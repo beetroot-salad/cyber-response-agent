@@ -212,27 +212,105 @@ class BoxSpy:
         self.stopped += 1
 
 
-def author_drain(t: Any, paths: Any, *, trigger: Any, box: BoxSpy, mint: bool = False, **seams: Any) -> int:
+def author_drain(t: Any, paths: Any, *, trigger: Any, box: BoxSpy, mint: bool = False, impl: str | None = None,
+                 **seams: Any) -> int:
     """`author_drain` through the stage runner, the tenant's forge fake as its forge client and
     a fresh identity over its issuer fake (login skipped) unless the case passes others; `directory=`
-    is `t.directory` (#1214 Flow 4: the tenant is admitted from the directory) unless the case passes one."""
+    is `t.directory` (#1214 Flow 4: the tenant is admitted from the directory) unless the case passes one. The tick's store
+    is `tick_store`'s: the adapter, or (the case parametrized over `TICK_IMPLS`, `impl=`) the port over a real helper."""
     seams.setdefault("client", t.forge.client)
     seams.setdefault("directory", t.directory)
     if not mint:  # with `mint=True` the drain mints from the live generation's host secret file
         seams.setdefault("identity", t.vault.identity())
-    with _tick_store(t, "author", seams) as store:
+    with tick_store(t, "author", seams, impl=impl) as store:
         return run_stage(lambda: drains().author_drain(
             paths, trigger_author=trigger, start_box=box.start, stop_box=box.stop, store=store, **seams))
 
 
+#: The tick's store implementations the tick tests run over (#1487 Flow 2, Conformance: "the existing tick tests run over
+#: both implementations against one store"): the adapter over the in-process store, and the port over a real post-step
+#: helper on the same database. `conftest.tick_impl` parametrizes the tick modules over them.
+TICK_IMPLS = ("adapter", "port")
+
+#: The implementation the running case is parametrized over (set by `conftest.tick_impl`); None: the adapter.
+ACTIVE: list[TickImpl] = []
+
+
+def own_store(reason: str) -> Callable[[Any], Any]:
+    """Mark a case that is not run once per implementation: it chooses its own store, or its subject is one of them
+    (`reason`)."""
+    def mark(fn: Any) -> Any:
+        fn.own_store = reason
+        return fn
+    return mark
+
+
+class TickImpl:
+    """One implementation of the tick's store for the running case: `adapter`, or `port` (a real post-step helper process
+    over the case's tenant and database, started at the tick's first use so it reads the settings the case set, one per
+    tick, closed when the tick ends; `prestart` starts it now, for a tick that runs in a forked child). The port is bound
+    to the author lane, as the helper binds it from the claim: a lane's tick that is not the author's runs on the adapter."""
+
+    def __init__(self, name: str, world: Any, scratch: Path, monkeypatch: Any) -> None:
+        self.name, self.world, self.scratch, self.monkeypatch = name, world, scratch, monkeypatch
+        self._ready: Any = None
+        self._started: list[Any] = []
+
+    def _start(self) -> Any:
+        from defender.tests.support.jobs._relay1487 import PostStepHelper, adopt_scene
+
+        helper = PostStepHelper(adopt_scene(self.world.t, self.world.dsn, self.monkeypatch), self.scratch)
+        self._started.append(helper)
+        return helper
+
+    def prestart(self) -> None:
+        """Start the helper in this process now (before a fork): the next `tick_store` uses it, and leaves its close to
+        `close`."""
+        if self.name == "port" and self._ready is None:
+            self._ready = self._start()
+
+    def take(self) -> tuple[Any, bool]:
+        """`(helper, owned)`: the prestarted one (not the caller's to close), else a new one (the caller's)."""
+        if self._ready is not None:
+            ready, self._ready = self._ready, None
+            return ready, False
+        return self._start(), True
+
+    def close(self) -> None:
+        for helper in self._started:
+            helper.close()
+        self._started.clear()
+
+
+def prestart_tick_store() -> None:
+    """For a case that runs its tick in a forked child: the port's helper started in the parent (after the case set its
+    settings), so the child uses it and a signal to the child never strands it. A no-op over the adapter."""
+    if ACTIVE:
+        ACTIVE[-1].prestart()
+
+
 @contextlib.contextmanager
-def _tick_store(t: Any, lane: str, seams: dict[str, Any]) -> Iterator[Any]:
-    """The tick's store (#1487 P2): the case's own (`store=`), else the adapter over the in-process store at the
-    database the `world` fixture sets, bound to the tenant, `lane` and the environment's thresholds, as the tick's host
-    entry binds it. Mechanical follow-through for every case that does not choose a store."""
-    given = seams.pop("store", None)
+def tick_store(t: Any, lane: str, seams: dict[str, Any] | None = None, *, impl: str | None = None) -> Iterator[Any]:
+    """The tick's store (#1487 P2): the case's own (`store=` in `seams`), else the implementation the case is run over
+    (`impl=`, else the one `conftest.tick_impl` set, else the adapter): the adapter over the in-process store at the
+    database the `world` fixture sets, bound to the tenant, `lane` and the environment's thresholds as a host entry binds
+    it, or the port over a real helper on that database. A caller of a drain that is not `author_drain` below asks for
+    its own store here."""
+    given = (seams or {}).pop("store", None)
     if given is not None:
         yield given
+        return
+    active = ACTIVE[-1] if ACTIVE else None
+    which = impl or (active.name if active is not None else "adapter")
+    if which == "port" and lane == "author":
+        assert active is not None, "the port needs the case's world: run the case under `conftest.tick_impl`"
+        helper, owned = active.take()
+        try:
+            yield helper.port()
+        finally:
+            if owned:
+                helper.close()
+                active._started.remove(helper)
         return
     from defender.learning.core.store_tick import thresholds
     from defender.tests.support.jobs._relay1487 import adapter_store
@@ -255,7 +333,7 @@ def lead_author_drain(t: Any, paths: Any, *, box: BoxSpy, mint: bool = False, **
     seams.setdefault("directory", t.directory)
     if not mint:  # with `mint=True` the drain mints from the live generation's host secret file
         seams.setdefault("identity", t.vault.identity())
-    with _tick_store(t, "lead_author", seams) as store:
+    with tick_store(t, "lead_author", seams) as store:
         return run_stage(lambda: drains().lead_author_drain(
             paths, start_box=box.start, stop_box=box.stop, store=store, **seams))
 

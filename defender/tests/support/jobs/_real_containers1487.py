@@ -6,10 +6,12 @@ job runs it (the job image is built there, `defender-job:latest`).
   with product code (`JobLane.write_learning_end`, `LearningEnd(findings=...)`), `completed` with the findings the host
   planted for it (`obs1487/rows.json`), under an envelope `findings_count` of 0 that the worker must not copy. The real
   entry's own read of the episode's held rows is not run here (it is `tests/learning/branch/test_1487_hand_in.py`'s).
-- `POST_STEP`: a post-step container. It records what it can reach, then asks the helper for the tick's store
-  (`JobContainer.tick_store()`), lists its work and claims.
+- `POST_STEP`: a post-step container. It records what it can reach, then runs the real `post_step.main` with only its
+  tick replaced (no curator is woken: the tick claims and stops): the tick records the store it was handed (it must be the
+  job container's port), lists its work and claims through it.
 - `REACH`: a post-step container that tries each store request a hostile post-step could make on a batch it was never
-  given (another tenant's, another lane's lapsed and working ones) beside the controls.
+  given (another tenant's, another lane's lapsed and working ones, `end_review` on the lapsed lead batch included)
+  beside the controls.
 
 Every program leaves one JSON file in the tenant's own folder, `obs1487/<name>.json`, read here. Container processes are
 observed through `/proc` (every process's command line and environment, the connection table); the host judges them
@@ -94,12 +96,23 @@ POST_STEP = OBSERVE + r'''
 tenant = sys.argv[1]
 folder, seen = observe(tenant)
 try:
+    from defender.learning.branch import post_step
     from defender.learning.branch.container import JobContainer
-    store = JobContainer.in_environ().tick_store()
-    seen["work_before"] = [[i.kind, i.key, i.status, i.source_run] for i in store.work()]
-    held = store.claim()
-    seen["claimed"] = None if held is None else {"batch": str(held.batch_id), "lane": held.lane,
-                                                 "keys": [[kind, key] for kind, key, _payload in held.items]}
+
+    def tick(paths, **kwargs):
+        # The real post-step's tick seam (Amendment 1): what it is handed is the job container's port. The curator needs
+        # no stub: the program claims and stops, so no curator is woken.
+        store = kwargs.get("store")
+        seen["tick_kwargs"] = sorted(kwargs)
+        seen["tick_store"] = type(store).__module__ + "." + type(store).__qualname__
+        seen["port"] = (lambda p: type(p).__module__ + "." + type(p).__qualname__)(JobContainer.in_environ().tick_store())
+        seen["work_before"] = [[i.kind, i.key, i.status, i.source_run] for i in store.work()]
+        held = store.claim()
+        seen["claimed"] = None if held is None else {"batch": str(held.batch_id), "lane": held.lane,
+                                                     "keys": [[kind, key] for kind, key, _payload in held.items]}
+        return 0
+
+    seen["exit"] = post_step.main(["--tenant", tenant], author_tick=tick)
 except BaseException:
     seen["error"] = traceback.format_exc()
 leave(folder, "post-step", seen)
@@ -128,6 +141,7 @@ try:
     attempt("other_tenant_end_review", lambda: store.end_review(ids["other_working"], **ended))
     attempt("lead_lapsed_take_over", lambda: store.take_over(ids["lead_lapsed"]))
     attempt("lead_lapsed_abandon", lambda: store.abandon(ids["lead_lapsed"]))
+    attempt("lead_lapsed_end_review", lambda: store.end_review(ids["lead_lapsed"], **ended))
     attempt("feedback_working_abandon", lambda: store.abandon(ids["feedback_working"]))
     attempt("feedback_working_park", lambda: store.needs_person(ids["feedback_working"], "parked from a job container"))
     attempt("feedback_working_end", lambda: store.end_review(ids["feedback_working"], **ended))

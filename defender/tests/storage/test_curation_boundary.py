@@ -39,7 +39,7 @@ from defender.tests.support.sandbox._spec791 import (  # noqa: E402
     satisfy_entrypoint_keys,
 )
 
-from defender.tests.tenancy.tenant_1108_p4._drain_support import drain_paths, product_repo  # noqa: E402
+from defender.tests.tenancy.tenant_1108_p4._drain_support import drain_paths, product_repo, tick_store  # noqa: E402
 from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, published_tenant  # noqa: E402
 
 pytestmark = pytest.mark.postgres
@@ -72,9 +72,10 @@ def published(tmp_path, data_root):
 def _lead_drain(t, paths, **steps) -> int:
     """The REAL `lead_author_drain` over the tenant path, with the tenant forge fake's client,
     an identity over its issuer fake, and no-op box start/stop."""
-    return drains.lead_author_drain(
-        paths, client=t.forge.client, identity=t.vault.identity(), directory=t.directory,
-        start_box=noop_start_box, stop_box=noop_stop_box, **steps)
+    with tick_store(t, "lead_author") as store:  # #1487: the tick is handed its store
+        return drains.lead_author_drain(
+            paths, client=t.forge.client, identity=t.vault.identity(), directory=t.directory,
+            start_box=noop_start_box, stop_box=noop_stop_box, store=store, **steps)
 
 
 def _waiting_runs(paths) -> list[str]:

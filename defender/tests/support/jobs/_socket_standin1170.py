@@ -19,7 +19,7 @@ import shutil
 import socket
 import tempfile
 import threading
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -104,6 +104,29 @@ class SocketStandIn:
 
     def __exit__(self, *_exc: object) -> None:
         self.close()
+
+
+class StubPort:
+    """The tick's store where the case does not look at it (`stubbed_port`): any use of it is a failure of the case, which
+    stubbed the tick that would have used it."""
+
+    def __getattr__(self, name: str) -> Any:
+        raise AssertionError(f"the case stubbed its tick, yet the tick's store was used: {name}")
+
+
+@contextlib.contextmanager
+def stubbed_port() -> Iterator[StubPort]:
+    """For a case that stubs the post-step's tick and whose subject is not the store (#1487 Amendment 1: `post_step.main`
+    hands its tick `JobContainer.tick_store()`, whose construction asks the helper for the settings, and this stand-in has
+    no helper behind it): the port is a `StubPort` for the length of the run. The real port is the conformance suite's,
+    and a case that wants it forwards to a real helper (`SocketStandIn(forward=)`) instead."""
+    from unittest import mock
+
+    from defender.learning.branch.container import JobContainer
+
+    stub = StubPort()
+    with mock.patch.object(JobContainer, "tick_store", return_value=stub, create=True):
+        yield stub
 
 
 def materialise(tenant_id: str) -> Callable[[dict[str, Any]], dict[str, Any]]:
