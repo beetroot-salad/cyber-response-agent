@@ -108,8 +108,8 @@ writeFileSync(
     `export const SHAPES = ${JSON.stringify(shapes, null, 2)} as const;\n` +
     `export type ShapeName = (typeof SHAPES)[number]["name"];\n` +
     `/** Each shape's whole pattern; a placeholder is a group, in the template's order. */\n` +
-    `export const PATTERNS: { readonly [K in ShapeName]: string } = {\n` +
-    compiled.map((shape) => `  ${key(shape.name)}: ${JSON.stringify(shape.pattern)},\n`).join("") +
+    `export const PATTERNS: { readonly [K in ShapeName]: RegExp } = {\n` +
+    compiled.map((shape) => `  ${key(shape.name)}: ${new RegExp(shape.pattern)},\n`).join("") +
     `};\n` +
     `/** Each shape's placeholder values, in the template's order. */\n` +
     `export interface ShapeValues {\n` +

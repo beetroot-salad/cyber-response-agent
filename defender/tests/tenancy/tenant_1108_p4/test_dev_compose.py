@@ -308,7 +308,7 @@ def test_the_credential_proxy_mounts_the_whole_data_root_and_no_tenant_folder_A2
 
 FRONTEND = REPO_ROOT / "defender" / "frontend"
 THEME_IN_KEYCLOAK = f"/opt/keycloak/themes/{THEME_NAME}"
-_BUILD_OUTPUTS = {"node_modules", "dist", "dist-staging", "dist-previous", "generated"}
+_BUILD_OUTPUTS = {"node_modules", "dist", "dist-builds", "generated"}
 
 
 def _theme_stylesheet(theme: Path) -> Path:
@@ -430,13 +430,13 @@ def test_1540_pr5_the_twin_search_finds_a_copy_anywhere_under_the_frontend_and_i
     frontend = tmp_path / "frontend"
     (frontend / "src" / "assets").mkdir(parents=True)
     (frontend / "dist").mkdir()
-    (frontend / "dist-staging").mkdir()
+    (frontend / "dist-builds").mkdir()
     art = frontend / "art.svg"
     art.write_text("<svg>art</svg>")
     (frontend / "other.svg").write_text("<svg>other</svg>")
     assert twins_of([art], frontend) == []
     (frontend / "dist" / "built.svg").write_text("<svg>art</svg>")
-    (frontend / "dist-staging" / "built.svg").write_text("<svg>art</svg>")
+    (frontend / "dist-builds" / "built.svg").write_text("<svg>art</svg>")
     assert twins_of([art], frontend) == [], "a build output is not a copy"
     twin = frontend / "src" / "assets" / "again.svg"
     twin.write_text("<svg>art</svg>")

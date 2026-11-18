@@ -42,23 +42,29 @@ function settleReturn(taken: attempt.Read): void {
  * no inline script), so the page's own address is not: the browser names it for what no script raised, as its own
  * ResizeObserver report. */
 function isAppScript(url: string): boolean {
-  if (!URL.canParse(url)) return false;
-  const where = new URL(url);
-  return where.origin === window.location.origin && where.pathname !== window.location.pathname;
+  const own = `${window.location.origin}/`;
+  if (!url.startsWith(own)) return false;
+  const [pathname] = url.slice(own.length - 1).split(/[?#]/);
+  return pathname !== window.location.pathname;
 }
 
-/** A failure is the app's when the code that raised it is an app script: an error event's file, or the top frame of a
- * rejected `Error`'s stack. A rejection with no stack (a plain object, a string) names no origin: not counted. */
+/** A stack frame's URL: V8 writes a frame as "    at f (url:line:col)", Gecko and WebKit as "f@url:line:col". */
+const FRAME = /^\s+at\s.*?(https?:\/\/[^\s()]+?):\d+:\d+|@(https?:\/\/[^\s()]+?):\d+:\d+/;
+
+/** A failure is the app's when the code that raised it is an app script: an error event's file, or the first frame of
+ * a rejected `Error`'s stack that names a file (a built-in, as `JSON.parse`, names none). A rejection with no stack (a
+ * plain object, a string) names no origin: not counted. */
 function raisedByApp(event: Event): boolean {
   if (event instanceof ErrorEvent) return isAppScript(event.filename);
   if (!(event instanceof PromiseRejectionEvent)) return false;
   const reason: unknown = event.reason;
   if (!(reason instanceof Error) || reason.stack === undefined) return false;
-  // V8 writes a frame as "    at f (url:line:col)"; Gecko and WebKit, which have no message line, as "f@url:line:col".
-  const lines = reason.stack.split("\n");
-  const top = lines.find((line) => /^\s+at\s/.test(line)) ?? lines.find((line) => line.includes("@"));
-  const url = top?.match(/(https?:\/\/[^\s()]+?):\d+:\d+/)?.[1];
-  return url !== undefined && isAppScript(url);
+  for (const line of reason.stack.split("\n")) {
+    const found = FRAME.exec(line);
+    const url = found?.[1] ?? found?.[2];
+    if (url !== undefined) return isAppScript(url);
+  }
+  return false;
 }
 
 export function start(): void {

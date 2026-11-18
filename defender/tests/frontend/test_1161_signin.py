@@ -649,6 +649,8 @@ OWN_SCRIPT = "/zz-own-stray.js"
 _STRAYS = {
     "timer-throw": "setTimeout(() => { throw new Error('stray timer'); }, 0);",
     "stray-rejection": "void Promise.reject(new Error('stray rejection'));",
+    # The stack's first frame is the built-in's, which names no file: the next one is the app's.
+    "built-in-rejection": "void Promise.resolve('not json {').then((text) => JSON.parse(text));",
 }
 
 

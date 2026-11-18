@@ -4,8 +4,8 @@
 // 1. The whole project (screens, shell and unit-test files alike) is type-checked with the browser library.
 // 2. Everything outside `src/shell/` is type-checked again without it (`tsconfig.screens.json`), with only what
 //    `screens-env.d.ts` declares. There `window`, `document`, `fetch`, storage and `location` do not exist, and React's
-//    types give a DOM element no members beyond those declared, so no route to the network, storage or the address can be
-//    written there, however it is spelled (PR2). The compiler is the boundary; nothing below lists the browser's names.
+//    types give a DOM element no members beyond those declared, so no script there can reach the network, storage or the
+//    address, however it is spelled (PR2). The compiler is the boundary; nothing below lists the browser's names.
 // 3. Everywhere (shell included, the generated types aside) the compiler is kept honest: no `any`, no value of type
 //    `any` (but one given the type `unknown` where it is made, as `JSON.parse`'s), no comment that switches type checking
 //    off, and no type assertion but `as const`. In the shell, an assertion is allowed only under a `// trust: <reason>`
@@ -13,12 +13,25 @@
 // 4. Outside the shell: imports from the shell only of `src/shell/provider` (types from anywhere in it), no import of a
 //    test file into the app, and no `/api/auth/` path in a string. That last one is a guard against an accident, not a
 //    boundary: a string can be built any way.
+// 5. Outside the shell, the markup the browser sends requests for: an address attribute (`src`, `href`, `action`, ...)
+//    is a path written out from the root and not under `/api`, an imported asset's URL, or made by `src/addresses.ts`
+//    (which makes only the app's own addresses). What could carry an address past that is refused: a spread onto an
+//    HTML element, raw HTML, an inline style, and React's element-making functions called directly. So a screen's
+//    markup makes the browser request no API path: the shell's client, and its 401 policy, sends every one.
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const AUTH_PREFIX = "/api/auth/";
+/** The attributes whose value the browser requests or navigates to. */
+const ADDRESS_ATTRIBUTES = new Set(["src", "srcSet", "href", "action", "formAction", "poster", "data", "ping", "cite", "background", "xlinkHref"]);
+/** Markup that could carry an address past the address-attribute rule. */
+const OPAQUE_ATTRIBUTES = new Set(["dangerouslySetInnerHTML", "style"]);
+/** React's element-making functions and runtimes, which take attributes as a plain object. */
+const ELEMENT_MAKERS = new Set(["createElement", "cloneElement", "jsx", "jsxs", "jsxDEV"]);
+const ELEMENT_RUNTIMES = new Set(["react/jsx-runtime", "react/jsx-dev-runtime", "react-dom", "react-dom/client", "react-dom/server"]);
+const ASSET = /\.(svg|png|jpe?g|gif|webp|avif|ico)$/;
 const SCREENS_HINT = "(outside src/shell/ the browser library does not exist: src/shell/ owns the network, storage and the "
   + "address, and screens-env.d.ts declares what else a screen may use)";
 
@@ -82,6 +95,7 @@ export function check() {
   const shell = path.join(root, "src", "shell") + path.sep;
   const generated = path.join(root, "src", "generated") + path.sep;
   const door = path.join(root, "src", "shell", "provider");
+  const addresses = path.join(root, "src", "addresses.ts");
   const problems = [];
   const reporter = (file, name, hint) => (node, what) => {
     const { line } = file.getLineAndCharacterOfPosition(node.getStart(file));
@@ -125,7 +139,8 @@ export function check() {
     }
   }
 
-  // 4. The boundary's own rules, outside the shell, over the screens' compile.
+  // 4 and 5. The boundary's own rules, outside the shell, over the screens' compile.
+  const checker = screens.program.getTypeChecker();
   for (const file of screens.program.getSourceFiles()) {
     const name = path.resolve(file.fileName);
     if (!name.startsWith(src) || name.startsWith(shell) || name.startsWith(generated)) continue;
@@ -144,7 +159,59 @@ export function check() {
         report(node, `outside the shell, a module imports from the shell only src/shell/provider, not ${path.relative(root, target)}`);
       }
     };
+    /** The import that binds `identifier` in this file, as [its declaration, the module it resolves to], or null. */
+    const importOf = (identifier) => {
+      const declaration = checker.getSymbolAtLocation(identifier)?.declarations?.[0];
+      let node = declaration;
+      while (node && !ts.isImportDeclaration(node)) node = node.parent;
+      if (!node || !ts.isStringLiteral(node.moduleSpecifier)) return null;
+      const specifier = node.moduleSpecifier.text;
+      const resolved = ts.resolveModuleName(specifier, file.fileName, screens.program.getCompilerOptions(), ts.sys).resolvedModule;
+      return { declaration, specifier, target: resolved ? path.resolve(resolved.resolvedFileName) : null };
+    };
+    /** True for an address attribute's value that can only be an app address or an asset (rule 5). */
+    const appAddress = (value) => {
+      if (value === undefined) return true;
+      if (ts.isStringLiteral(value)) {
+        const text = value.text;
+        return (text.startsWith("/") && !text.startsWith("//") && !/^\/api(\/|$)/i.test(text)) || text.startsWith("#");
+      }
+      if (!ts.isJsxExpression(value) || !value.expression) return false;
+      const expression = value.expression;
+      if (ts.isIdentifier(expression)) {
+        const bound = importOf(expression);
+        return bound !== null && ts.isImportClause(bound.declaration) && ASSET.test(bound.specifier);
+      }
+      if (ts.isCallExpression(expression) && ts.isIdentifier(expression.expression)) {
+        return importOf(expression.expression)?.target === addresses;
+      }
+      return false;
+    };
+    /** An import of React's element-making functions or runtimes, or a use of one through React's namespace. */
+    const makesElements = (node) => {
+      if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
+        const from = node.moduleSpecifier.text;
+        if (ELEMENT_RUNTIMES.has(from)) return true;
+        const named = node.importClause?.namedBindings;
+        return from === "react" && named !== undefined && ts.isNamedImports(named)
+          && named.elements.some((element) => ELEMENT_MAKERS.has((element.propertyName ?? element.name).text));
+      }
+      return ts.isPropertyAccessExpression(node) && ELEMENT_MAKERS.has(node.name.text) && ts.isIdentifier(node.expression)
+        && importOf(node.expression)?.specifier === "react";
+    };
     const visit = (node) => {
+      if (ts.isJsxAttribute(node)) {
+        const attribute = node.name.getText(file);
+        if (OPAQUE_ATTRIBUTES.has(attribute)) report(node, `outside the shell, no \`${attribute}\`: it could carry an address past the markup rule`);
+        if (ADDRESS_ATTRIBUTES.has(attribute) && !appAddress(node.initializer)) {
+          report(node, `outside the shell, \`${attribute}\` is a path written out from the root (not under /api), an imported asset, or made by src/addresses.ts`);
+        }
+      }
+      if (ts.isJsxSpreadAttribute(node)) {
+        const tag = node.parent.parent.tagName;
+        if (ts.isIdentifier(tag) && /^[a-z]/.test(tag.text)) report(node, "outside the shell, no spread onto an HTML element: it could carry an address");
+      }
+      if (makesElements(node)) report(node, "outside the shell, no element made by React's functions directly: write it as markup");
       if (ts.isStringLiteralLike(node) || ts.isTemplateHead(node) || ts.isTemplateMiddle(node) || ts.isTemplateTail(node)) {
         if (node.text.includes(AUTH_PREFIX)) report(node, `outside the shell, a path under ${AUTH_PREFIX} is the shell's`);
       }

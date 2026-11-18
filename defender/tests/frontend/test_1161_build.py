@@ -94,8 +94,12 @@ PREVIOUS_BUILD = "<html>the previous build</html>"
 def _failing_build(frontend: Path) -> subprocess.CompletedProcess[str]:
     """`bun run build` over a copy holding a previous build's `dist/index.html`, which a failed build leaves as it was
     (F1 b: the served folder is only ever one whole build)."""
-    shutil.rmtree(frontend / "dist", ignore_errors=True)
-    (frontend / "dist").mkdir()
+    dist = frontend / "dist"
+    if dist.is_symlink():  # an earlier build's link to its folder
+        dist.unlink()
+    else:
+        shutil.rmtree(dist, ignore_errors=True)
+    dist.mkdir()
     (frontend / "dist" / "index.html").write_text(PREVIOUS_BUILD, encoding="utf-8")
     return run_bun(frontend, "run", "build")
 
@@ -124,6 +128,41 @@ def test_1161_s2_the_build_follows_the_shape_list_and_fails_on_a_type_error(buil
         done = _failing_build(frontend)
         assert done.returncode != 0, "the build accepted a shape list its router does not match"
         assert _previous_build_kept(frontend)
+
+
+def _own_assets(frontend: Path) -> set[str]:
+    """The `assets/` files the served build wrote itself: its Vite manifest's."""
+    manifest = json.loads((frontend / "dist" / ".vite" / "manifest.json").read_text(encoding="utf-8"))
+    return {f for chunk in manifest.values() for f in (chunk["file"], *chunk.get("css", ()), *chunk.get("assets", ()))
+            if f.startswith("assets/")}
+
+
+def _served_assets(frontend: Path) -> set[str]:
+    return {p.relative_to(frontend / "dist").as_posix() for p in (frontend / "dist" / "assets").iterdir()}
+
+
+def test_1540_f1_b_a_build_is_swapped_in_whole_and_keeps_the_previous_builds_own_files_one_build_long(built_frontend, tmp_path):
+    """Three builds of a copy, each with a changed screen: `dist` links to the newest build's folder, and nothing else
+    is left (no other build folder, no link not swapped in); each build serves its own `assets/` files and the previous
+    build's own, so a page that build served still loads; the build before that is gone. (F1 b)"""
+    frontend = _copy(tmp_path, built_frontend)
+    screen = frontend / "src" / "screens" / "NotFound.tsx"
+    owns = []
+    for n in range(3):
+        screen.write_text(screen.read_text(encoding="utf-8").replace("</h1>", f" zz{n}</h1>", 1), encoding="utf-8")
+        done = run_bun(frontend, "run", "build")
+        assert done.returncode == 0, (done.stdout[-1500:], done.stderr[-1500:])
+        assert (frontend / "dist").is_symlink(), "dist is a link to the served build"
+        folders = list((frontend / "dist-builds").iterdir())
+        assert [f.resolve() for f in folders] == [(frontend / "dist").resolve()], folders
+        assert [p.name for p in frontend.iterdir() if p.name.startswith("dist-link-")] == []
+        owns.append(_own_assets(frontend))
+        assert owns[-1] <= _served_assets(frontend)
+        if n > 0:
+            assert owns[-2] - owns[-1], "positive control: the changed screen changed a file's name"
+            assert owns[-2] <= _served_assets(frontend), "the previous build's own files are kept"
+        if n > 1:
+            assert not (owns[-3] - owns[-2] - owns[-1]) & _served_assets(frontend), "two builds back is gone"
 
 
 #: Every TypeScript source of the app outside the generated types and declaration files (a `skipLibCheck` honestly skips
@@ -558,6 +597,22 @@ def _refused_corpus() -> dict[str, str]:
         "a side-effect import of a shell module": 'import "../../shell/attempt";\nexport const zzForm = 1;',
         "a re-export from a shell module": 'export { record as zzForm } from "../../shell/attempt";',
         "a dynamic import of a shell module": 'export const zzForm = () => import("../../shell/attempt");',
+        # Rule 5: markup the browser sends a request for, without the shell's client.
+        "an image of an API path built in a template": (
+            "export const zzForm = (zzId: string) => <img src={`/a${\"pi\"}/tenants/${zzId}`} alt=\"\" />;"),
+        "a link to an API path in another case": 'export const zzForm = <a href="/API/me">me</a>;',
+        "a link to an API path by a relative path": 'export const zzForm = <a href="../api/me">me</a>;',
+        "a form posting to an address held in a variable": (
+            'const zzWhere = "/home";\nexport const zzForm = <form method="post" action={zzWhere}><button /></form>;'),
+        "a spread onto an HTML element": (
+            "export const zzForm = (zzProps: { src: string }) => <img alt=\"\" {...zzProps} />;"),
+        "raw HTML": ('export const zzForm = <div dangerouslySetInnerHTML={{ __html: "<img src=/api/me>" }} />;'),
+        "an inline style": "export const zzForm = <div style={{ backgroundImage: \"url(/api/me)\" }} />;",
+        "React's createElement imported": (
+            'import { createElement } from "react";\nexport const zzForm = createElement("img", { src: "/api/me" });'),
+        "React's createElement through its namespace": (
+            'import * as React from "react";\nexport const zzForm = React.createElement("img", { src: "/api/me" });'),
+        "React's JSX runtime": 'import { jsx } from "react/jsx-runtime";\nexport const zzForm = jsx("img", { src: "/api/me" });',
     })
     return corpus
 
@@ -585,6 +640,16 @@ ALLOWED_CORPUS: dict[str, str] = {
     "a const assertion": 'export const zzForm = ["a", "b"] as const;',
     "the provider's hooks": 'import { useMe } from "../../shell/provider";\nexport const zzForm = useMe;',
     "a type from another shell module": 'import type { ReadKey } from "../../shell/types";\nexport type ZzForm = ReadKey;',
+    # Rule 5's three honest addresses, and names merely like the refused ones.
+    "a link to an app path written out": 'export const zzForm = <a href="/home">home</a>;',
+    "a link to a fragment": 'export const zzForm = <a href="#main">skip</a>;',
+    "an imported image": ('import zzArt from "../../../keycloak-theme/login/resources/img/illustration.svg";\n'
+                          'export const zzForm = <img src={zzArt} alt="" />;'),
+    "a link made by the addresses module": ('import { literalAddress } from "../../addresses";\n'
+                                            'export const zzForm = <a href={literalAddress("home")}>home</a>;'),
+    "a spread onto a component": ("const ZzBox = (zzProps: { title: string }) => <p>{zzProps.title}</p>;\n"
+                                  'export const zzForm = (zzProps: { title: string }) => <ZzBox {...zzProps} />;'),
+    "a local function named createElement": "export const zzForm = () => { const createElement = () => 1; return createElement(); };",
 }
 
 

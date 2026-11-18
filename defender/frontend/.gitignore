@@ -1,5 +1,5 @@
 node_modules/
-dist/
+dist
 src/generated/
-dist-staging/
-dist-previous/
+dist-builds/
+dist-link-*

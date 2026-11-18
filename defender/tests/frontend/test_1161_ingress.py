@@ -86,8 +86,8 @@ class _Assets(HTMLParser):
 def test_1161_b9_every_built_file_carries_the_headers_and_only_content_named_files_are_kept(world, built_frontend):
     """Every file under the built `dist/`, fetched through the ingress, answers 200 with the three headers. A file Vite
     named by its content (under `assets/`) is kept for good; every other file, `index.html` (which names them) first, is
-    revalidated on every load, and so is the app a missing `assets/` path falls back to: a browser never runs a cached
-    app against a newer API. (B9, B11, F2)"""
+    revalidated on every load: a browser never runs a cached app against a newer API. A missing `assets/` path is a 404,
+    never the app's document (a page asking for a script must not get HTML), and is not kept. (B9, B11, F2)"""
     parsed = _Assets()
     parsed.feed(world.get("/").text)
     assert parsed.scripts, "positive control: the app references a script"
@@ -100,7 +100,8 @@ def test_1161_b9_every_built_file_carries_the_headers_and_only_content_named_fil
         assert r.status_code == 200, name
         _assert_guarded(r, name, KEPT if name.startswith("assets/") else REVALIDATED)
     missing = world.get("/assets/zz-not-built.js")
-    assert missing.text == world.get("/").text, "a missing asset path is the app's document"
+    assert missing.status_code == 404, "a missing asset path is not found"
+    assert missing.text != world.get("/").text, "a missing asset path is not the app's document"
     _assert_guarded(missing, "a missing asset path")
 
 

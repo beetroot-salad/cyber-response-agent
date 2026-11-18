@@ -6,8 +6,6 @@ import { PATTERNS, SHAPES, VALUES, type ShapeName, type ShapeValues } from "./ge
 
 export type { ShapeName, ShapeValues };
 
-const COMPILED: readonly (readonly [ShapeName, RegExp])[] = SHAPES.map((shape) => [shape.name, new RegExp(PATTERNS[shape.name])] as const);
-
 /** The shapes a person may be sent back to after sign-in. */
 export const RETURNABLE: ReadonlySet<ShapeName> = new Set(SHAPES.filter((shape) => shape.returnable).map((shape) => shape.name));
 
@@ -20,16 +18,13 @@ export function literalAddress(name: ShapeName): string {
 
 /** The name of the shape `value` is a member of, or null. */
 export function match(value: string): ShapeName | null {
-  for (const [name, pattern] of COMPILED) {
-    if (pattern.test(value)) return name;
-  }
-  return null;
+  return SHAPES.find((shape) => PATTERNS[shape.name].test(value))?.name ?? null;
 }
 
 /** The placeholder values of `value`, a member of shape `name`, in the template's order. Throws when it is not one: the
  * caller had the shape from `match`, so that is a bug, not an address. */
 export function valuesOf<N extends ShapeName>(name: N, value: string): ShapeValues[N] {
-  const found = new RegExp(PATTERNS[name]).exec(value);
+  const found = PATTERNS[name].exec(value);
   if (found === null) throw new Error(`${value} is not a ${name} address`);
   return VALUES[name]((index) => {
     const group = found[index + 1];
