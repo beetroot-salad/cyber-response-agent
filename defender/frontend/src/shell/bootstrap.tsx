@@ -98,7 +98,7 @@ export function start(): void {
           );
         },
       };
-      const shell = { read: load.client.read, queryClient: load.queryClient, me, segments: window.location.pathname.split("/").slice(1), query: queryOf(window.location.search), actions };
+      const shell = { read: load.client.read, queryClient: load.queryClient, me, pathname: window.location.pathname, shape: routed.shape, query: queryOf(window.location.search), actions };
       const Screen = routed.Screen;
       root.render(
         <StrictMode>

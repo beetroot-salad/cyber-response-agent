@@ -81,7 +81,11 @@ function withQuery(path: string, query: Record<string, string | readonly string[
 /** Thrown by the client's `fetch` when the load is gone, a 401 included (B1 has then already been carried out). */
 class Gone extends Error {}
 
-/** What one call came to: gone (nothing more), failed (no answer, or not the JSON it should be), or its answer. */
+/** Thrown by the client's `fetch` when no whole answer came: the request or the body's read failed. */
+class NoAnswer extends Error {}
+
+/** What one call came to: gone (nothing more), failed (no answer, or not JSON), or its answer. Anything else the call
+ * throws is the shell's own bug, and goes on to the caller: the error state, "something stopped working". */
 type Sent<T> = { readonly kind: "gone" } | { readonly kind: "failed" } | { readonly kind: "answer"; readonly answer: T };
 
 /** F3: a cookie session is always a person, so `/api/me` is narrowed once, on the generated union's own `kind`. */
@@ -143,13 +147,21 @@ export function makeLoad(options: LoadOptions): Load {
       headers: { Accept: "application/json" },
       async fetch(request) {
         if (isGone()) throw new Gone();
-        const response = await effects.fetch(request); // a network failure throws: failed
+        let response: Response;
+        let body: ArrayBuffer;
+        try {
+          response = await effects.fetch(request);
+          body = await response.arrayBuffer(); // read whole here, so a body cut off is no answer too
+        } catch {
+          throw new NoAnswer();
+        }
         if (isGone()) throw new Gone();
         if (source !== null && response.status === 401) {
           unauthorized(source);
           throw new Gone();
         }
-        return response;
+        const { status, statusText, headers } = response;
+        return new Response(body.byteLength === 0 ? null : body, { status, statusText, headers });
       },
     });
   }
@@ -160,7 +172,10 @@ export function makeLoad(options: LoadOptions): Load {
       const answer = await call();
       return isGone() ? { kind: "gone" } : { kind: "answer", answer };
     } catch (error) {
-      return error instanceof Gone || isGone() ? { kind: "gone" } : { kind: "failed" };
+      if (error instanceof Gone || isGone()) return { kind: "gone" };
+      // The client reads the body as JSON (`Response.json`), which throws `SyntaxError` for an answer that is not.
+      if (error instanceof NoAnswer || error instanceof SyntaxError) return { kind: "failed" };
+      throw error;
     }
   }
 
@@ -196,7 +211,7 @@ export function makeLoad(options: LoadOptions): Load {
     byHistory,
     target,
     // Each read is sent at most once per load: retries off, no refetch on focus or reconnect, data that never goes
-    // stale and entries kept for the load's life. The query function never throws, so TanStack's error state is unused.
+    // stale and entries kept for the load's life. A query function throws only for a bug, which `useRead` rethrows.
     queryClient: new QueryClient({
       defaultOptions: {
         queries: { retry: false, refetchOnWindowFocus: false, refetchOnReconnect: false, refetchOnMount: false, staleTime: Infinity, gcTime: Infinity },

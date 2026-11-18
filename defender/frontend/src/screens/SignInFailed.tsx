@@ -1,6 +1,6 @@
 // The sign-in-failed screen (B1, B4): shows why sign-in did not complete, and a retry. It makes no authenticated call at
 // load; the shell has settled its `return` into the address, and `retry` passes it on to the shell's sign-in, which the API judges.
-import { useActions, useAddress } from "../shell/provider";
+import { useActions, useQueryOfAddress } from "../shell/provider";
 
 export const REASONS = [
   "prelogin-missing",
@@ -38,7 +38,7 @@ function reasonOf(value: string | null): Reason {
 }
 
 export function SignInFailed() {
-  const { query } = useAddress();
+  const query = useQueryOfAddress();
   const actions = useActions();
   const reason = reasonOf(query.get("reason"));
   return (

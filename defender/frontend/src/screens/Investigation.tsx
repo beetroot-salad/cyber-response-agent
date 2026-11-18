@@ -1,12 +1,9 @@
 // The minimal investigation screen (B7): the status and outcome of the investigation read, as their raw codes.
-import { useAddress, useRead } from "../shell/provider";
+import { usePlaceholders, useRead } from "../shell/provider";
 
 export function Investigation() {
-  const { segments } = useAddress();
-  const [, tenant, , id] = segments;
-  const result = useRead("/api/tenants/{tenant_id}/investigations/{investigation_id}", {
-    path: { tenant_id: tenant ?? "", investigation_id: id ?? "" },
-  });
+  const [tenant_id, investigation_id] = usePlaceholders("investigation");
+  const result = useRead("/api/tenants/{tenant_id}/investigations/{investigation_id}", { path: { tenant_id, investigation_id } });
   if (result.kind === "loading" || result.kind === "gone") {
     return (
       <main data-screen="investigation" data-state="loading">

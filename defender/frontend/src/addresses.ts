@@ -1,31 +1,12 @@
 // The frontend's addresses (#1161 S2): the shapes in ../api/addresses.json (via the build), compiled to the one
 // membership meaning the API's reader has: a value is a member when the WHOLE string matches a shape, as ASCII,
-// case-sensitive, with no decoding, normalising or trailing-/ tolerance. No DOM here: Node loads this file's build.
-import { PLACEHOLDERS, SHAPES } from "./generated/shapes";
+// case-sensitive, with no decoding, normalising or trailing-/ tolerance. The build writes each shape's whole pattern;
+// nothing here parses a template. No DOM here: Node loads this file's build.
+import { PATTERNS, SHAPES, VALUES, type ShapeName, type ShapeValues } from "./generated/shapes";
 
-export type ShapeName = (typeof SHAPES)[number]["name"];
+export type { ShapeName, ShapeValues };
 
-const SEGMENT = /^\{([a-z]+)\}$/;
-const GRAMMARS: ReadonlyMap<string, string> = new Map(Object.entries(PLACEHOLDERS));
-
-function escapeLiteral(text: string): string {
-  return text.replace(/[\\^$.*+?()[\]{}|/-]/g, "\\$&");
-}
-
-/** A template as `^(?:...)$`, no flags: literals escaped, each `{name}` replaced by that placeholder's grammar. */
-function compile(template: string): RegExp {
-  const parts = template
-    .split("/")
-    .slice(1)
-    .map((segment) => {
-      const named = SEGMENT.exec(segment);
-      const grammar = named === null ? undefined : GRAMMARS.get(named[1] ?? "");
-      return grammar ?? escapeLiteral(segment);
-    });
-  return new RegExp(`^(?:/${parts.join("/")})$`);
-}
-
-const COMPILED: readonly (readonly [ShapeName, RegExp])[] = SHAPES.map((shape) => [shape.name, compile(shape.template)] as const);
+const COMPILED: readonly (readonly [ShapeName, RegExp])[] = SHAPES.map((shape) => [shape.name, new RegExp(PATTERNS[shape.name])] as const);
 
 /** The shapes a person may be sent back to after sign-in. */
 export const RETURNABLE: ReadonlySet<ShapeName> = new Set(SHAPES.filter((shape) => shape.returnable).map((shape) => shape.name));
@@ -43,4 +24,16 @@ export function match(value: string): ShapeName | null {
     if (pattern.test(value)) return name;
   }
   return null;
+}
+
+/** The placeholder values of `value`, a member of shape `name`, in the template's order. Throws when it is not one: the
+ * caller had the shape from `match`, so that is a bug, not an address. */
+export function valuesOf<N extends ShapeName>(name: N, value: string): ShapeValues[N] {
+  const found = new RegExp(PATTERNS[name]).exec(value);
+  if (found === null) throw new Error(`${value} is not a ${name} address`);
+  return VALUES[name]((index) => {
+    const group = found[index + 1];
+    if (group === undefined) throw new Error(`${name}'s pattern has no group ${index + 1}`);
+    return group;
+  });
 }

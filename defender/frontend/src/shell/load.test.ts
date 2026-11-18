@@ -85,3 +85,29 @@ describe("a load's reads", () => {
     expect([[], ["fetch"]]).toContainEqual(log);
   });
 });
+
+/** A load whose every request is answered by `answer` at once, with effects that do nothing but what `record` does. */
+function loadAnswering(answer: () => Promise<Response>, record: () => boolean = () => true) {
+  const effects = { fetch: answer, record, assign: () => undefined, replace: () => undefined };
+  return makeLoad({ taken: { status: "none" }, byHistory: false, target: "/home", origin: "http://app.test", effects });
+}
+
+describe("what a read comes to", () => {
+  it("no answer (the request fails) is the error state's", async () => {
+    const load = loadAnswering(() => Promise.reject(new TypeError("Failed to fetch")));
+    expect((await load.client.read(KEY, params("i"))).kind).toBe("error");
+  });
+
+  it("an answer that is not JSON is the error state's", async () => {
+    const load = loadAnswering(async () => new Response("<html>", { status: 200, headers: { "Content-Type": "application/json" } }));
+    expect((await load.client.read(KEY, params("i"))).kind).toBe("error");
+  });
+
+  it("a fault of the shell's own while it handles an answer is not passed off as the server's: it reaches the caller", async () => {
+    const fault = new Error("the shell's own fault");
+    const load = loadAnswering(async () => unauthorized(), () => {
+      throw fault;
+    });
+    await expect(load.client.read(KEY, params("i"))).rejects.toBe(fault);
+  });
+});

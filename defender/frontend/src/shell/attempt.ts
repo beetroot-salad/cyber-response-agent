@@ -34,7 +34,7 @@ export function take(): Read {
 }
 
 /** Record an attempt for `target`; false when the storage cannot be used. */
-export function record(target: string | null, again = false): boolean {
+export function record(target: string | null, again: boolean): boolean {
   try {
     window.sessionStorage.setItem(KEY, JSON.stringify(again ? { target, again } : { target }));
     return true;

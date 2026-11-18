@@ -2,6 +2,7 @@
 // other way to the network, storage or the address (PR2); F8's source check enforces it.
 import { useQuery, type QueryClient } from "@tanstack/react-query";
 import { createContext, useContext, type ReactNode } from "react";
+import { valuesOf, type ShapeName, type ShapeValues } from "../addresses";
 import type { Person, ReadKey, ReadParams, ReadResult } from "./types";
 
 /** The closed list of actions a screen may take (PR2). Writes and streams will be added here, each with a stated 401 policy. */
@@ -25,7 +26,9 @@ export interface Shell {
   read<K extends ReadKey>(key: K, params: ReadParams<K>): Promise<ReadResult<K>>;
   readonly queryClient: QueryClient;
   readonly me: Person | null;
-  readonly segments: readonly string[];
+  /** The address's path and the shape it is a member of (null: the not-found screen). */
+  readonly pathname: string;
+  readonly shape: ShapeName | null;
   readonly query: Query;
   readonly actions: Actions;
 }
@@ -49,10 +52,17 @@ export function useMe(): Person {
   return me;
 }
 
-/** The address's segments after the leading `/`, and its read-only query. */
-export function useAddress(): { readonly segments: readonly string[]; readonly query: Query } {
-  const { segments, query } = useShell();
-  return { segments, query };
+/** The address's read-only query. */
+export function useQueryOfAddress(): Query {
+  return useShell().query;
+}
+
+/** The address's placeholder values, in its template's order, for the screen of shape `name` (the router drew it for
+ * that shape, so any other is a bug: it throws, and the boundary shows the error state). */
+export function usePlaceholders<N extends ShapeName>(name: N): ShapeValues[N] {
+  const { pathname, shape } = useShell();
+  if (shape !== name) throw new Error(`the ${name} screen was drawn for ${shape ?? "no"} shape`);
+  return valuesOf(name, pathname);
 }
 
 export function useActions(): Actions {
@@ -63,5 +73,6 @@ export function useActions(): Actions {
 export function useRead<K extends ReadKey>(key: K, params: ReadParams<K>): ReadResult<K> | { readonly kind: "loading" } {
   const { read, queryClient } = useShell();
   const result = useQuery({ queryKey: [key, params], queryFn: () => read(key, params) }, queryClient);
-  return result.data ?? { kind: "loading" };
+  if (result.status === "error") throw result.error; // the read's own bug: the boundary shows the error state
+  return result.status === "success" ? result.data : { kind: "loading" };
 }
