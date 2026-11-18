@@ -222,12 +222,19 @@ def prebranch_answers(keys: Collection[str], base_rows: Iterable[Mapping[str, An
 
 
 def _prebranch_evidence(source: Run, branch_message_id: int, episode: Episode) -> list[dict]:
+    """The premise check's evidence (`prebranch_answers`), or none when it cannot be read: with
+    no evidence the check names no world, so the family is authored as it would be without it."""
     from defender.learning.branch.estate.registry import prebranch_calls
 
     from defender._io import read_jsonl_rows
 
-    keys = prebranch_calls(source, branch_message_id)
-    return prebranch_answers(keys, read_jsonl_rows(episode.served_base.path) if keys else [])
+    try:
+        keys = prebranch_calls(source, branch_message_id)
+        return prebranch_answers(keys, read_jsonl_rows(episode.served_base.path) if keys else [])
+    except Exception as unread:  # noqa: BLE001 — evidence that cannot be read is no evidence
+        _logger.warning(f"the run's pre-branch answers could not be read ({unread!r}); the "
+                        "premise check is skipped")
+        return []
 
 
 def write_world_revisions(episode: Episode, entries: list[dict]) -> None:

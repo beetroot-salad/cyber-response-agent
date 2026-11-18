@@ -298,13 +298,14 @@ _Names = list[str] | None
 
 @dataclass
 class Change:
-    """One patch operation as the host applied it, read through the row model and kept whole
-    (never cut: `shown_changes` cuts it for display). `row_at` is the pointer of the row it
-    lands in (the element of the first list on its path; `[]` outside any table), `names` that
-    table's ES|QL column names, `rest` the pointer inside the row (`[]`: the whole row)."""
+    """One patch operation as the host applied it, placed by the base's table map and kept
+    whole (never cut: `shown_changes` cuts it for display). `row_at` is the pointer of the row
+    it lands in (`[]` outside any table), `table` that table's identity as `tables()` names it,
+    `names` its ES|QL column names, `rest` the pointer inside the row (`[]`: the whole row)."""
 
     op: dict
     row_at: list[str]
+    table: _Path
     names: _Names
     rest: list[str]
     #: The operation lands where a row sits but edits no row: a bare (scalar) list item, or a
@@ -320,10 +321,6 @@ class Change:
     @property
     def whole_row(self) -> bool:
         return bool(self.row_at) and not self.rest and not self.item
-
-    @property
-    def table(self) -> _Path:
-        return tuple(t for t in self.row_at[:-1] if not t.isdigit())
 
 
 @dataclass
@@ -381,19 +378,62 @@ def _pointer_tokens(i: int, path: str) -> list[str]:
                            f"{bad}") from None
 
 
-def _change_located(doc: Any, tokens: list[str]) -> tuple[list[str], _Names, list[str]]:
-    """Where a pointer lands, as rows go: the tokens of the row it sits in (the element of the
-    first list on its way: a table's row, or `[]` outside any table), that table's ES|QL column
-    names when it is one, and the tokens left inside the row."""
-    node, names_here = doc, None
-    for k, token in enumerate(tokens):
-        if isinstance(node, list):
-            return tokens[:k + 1], names_here, tokens[k + 1:]
-        if not isinstance(node, Mapping):
-            break
-        names_here = esql_names(node) if token == "values" else None
-        node = node.get(token)
-    return [], None, list(tokens)
+@dataclass(frozen=True)
+class _TableAt:
+    """One table of an answer: its identity (`tables()`'s path: mapping keys, no list index)
+    and its ES|QL column names."""
+
+    path: _Path
+    names: _Names
+
+
+@dataclass
+class TableMap:
+    """Where an answer's rows are, read once from the base by the same walk as `tables()`: each
+    outermost table by the pointer of the list holding its rows, and the ES|QL column lists, which
+    follow the query and are never patched. A list of rows inside a row is part of that row."""
+
+    tables: dict[tuple[str, ...], _TableAt]
+    fixed: set[tuple[str, ...]]
+
+    def locate(self, tokens: list[str]) -> tuple[list[str], _TableAt | None, list[str]]:
+        """`(row pointer, its table, pointer inside the row)` for `tokens`, or `([], None,
+        tokens)` outside every table."""
+        for k in range(len(tokens)):
+            table = self.tables.get(tuple(tokens[:k]))
+            if table is not None:
+                return list(tokens[:k + 1]), table, list(tokens[k + 1:])
+        return [], None, list(tokens)
+
+    def in_fixed(self, tokens: list[str]) -> bool:
+        return any(tuple(tokens[:len(f)]) == f for f in self.fixed)
+
+
+def table_map(payload: Any) -> TableMap:
+    """The `TableMap` of `payload`. A list is a table when it holds a mapping or is empty (a
+    forged row may be added to it); an ES|QL answer's `values` is one, with its column names."""
+    out = TableMap(tables={}, fixed=set())
+
+    def walk(node: Any, ptr: tuple[str, ...], path: _Path) -> None:
+        if isinstance(node, Mapping):
+            names = esql_names(node)
+            for key, value in node.items():
+                at = (*ptr, str(key))
+                if names is not None and key == "values":
+                    out.tables[at] = _TableAt((*path, "values"), names)
+                elif names is not None and key == "columns":
+                    out.fixed.add(at)
+                else:
+                    walk(value, at, (*path, str(key)))
+        elif isinstance(node, list):
+            if not node or any(isinstance(x, Mapping) for x in node):
+                out.tables[ptr] = _TableAt(path, None)
+                return
+            for i, item in enumerate(node):
+                walk(item, (*ptr, str(i)), path)   # a list of lists: one table, as `tables()`
+
+    walk(payload, (), ())
+    return out
 
 
 def _at(doc: Any, tokens: list[str]) -> Any:
@@ -443,9 +483,10 @@ def _field_refusal(i: int, op: dict, doc: Any, tokens: list[str], change: Change
                 "add adds a whole row to a table; to change a value, replace it")
     parent = _at(doc, tokens[:-1])
     if kind == "remove" and (not isinstance(parent, list)
+                             or _shape_kind(_at(doc, tokens)) != "scalar"
                              or (change.names is not None and len(change.rest) == 1)):
-        return (f"patch operation {i} removes {path!r}, a key or an ES|QL cell: that changes the "
-                "answer's shape; replace its value instead")
+        return (f"patch operation {i} removes {path!r}, a key, an ES|QL cell or a list item that "
+                "is no row: that changes the answer's shape; replace its value instead")
     if kind == "replace":
         before, after = _at(doc, tokens), op["value"]
         if _holds_rows(before) or _holds_rows(after):
@@ -468,17 +509,23 @@ def apply_handin(base: Any, handin: Handin, *, stage: Stage | None = None) -> Ap
     import jsonpointer
 
     stage = stage or _given_value
+    tmap = table_map(base)
     doc = copy.deepcopy(base)
     forged_rows: set[int] = set()
     changes: list[Change] = []
     for i, given in enumerate(handin.ops):
         op = dict(given)
         tokens = _pointer_tokens(i, op["path"])
-        row_at, names, rest = _change_located(doc, tokens)
+        if op["op"] != "test" and tmap.in_fixed(tokens):
+            raise PatchRefused(f"patch operation {i} changes an ES|QL answer's columns at "
+                               f"{op['path']!r}: they follow the query (re-ask it instead)")
+        row_at, table, rest = tmap.locate(tokens)
+        names = table.names if table is not None else None
         if row_at and row_at[-1] == "-":
             held = _at(doc, row_at[:-1])
             row_at = [*row_at[:-1], str(len(held) if isinstance(held, list) else 0)]
-        change = Change(op=op, row_at=row_at, names=names, rest=rest)
+        change = Change(op=op, row_at=row_at, table=table.path if table is not None else (),
+                        names=names, rest=rest)
         if row_at and not rest and op["op"] != "add":
             held = _at(doc, row_at)
             change.item = not (isinstance(held, Mapping)
@@ -589,11 +636,27 @@ def _shown_value(value: Any, cap: int = _RENDER_CAP) -> Any:
     return value if len(text) <= cap else f"{text[:cap]} ... [cut: {len(text)} characters]"
 
 
+#: The most characters all the shown changes of one hand-in take together.
+_SHOWN_TOTAL_CAP = 60_000
+
+
 def shown_changes(rendering: Mapping[str, Any]) -> dict:
-    """A rendering (`render_changes`) as it is shown and stored: each row and value bounded."""
-    changes = [{k: (_shown_value(v) if k in _SHOWN_PARTS else v) for k, v in entry.items()}
-               for entry in rendering.get("changes") or ()]
-    return {**rendering, "changes": changes}
+    """A rendering (`render_changes`) as it is shown and stored: each row and value bounded,
+    and the changes kept in order until they fill `_SHOWN_TOTAL_CAP`; how many were left out is
+    said (`changes_not_shown`)."""
+    entries = list(rendering.get("changes") or ())
+    changes: list[dict] = []
+    room = _SHOWN_TOTAL_CAP
+    for entry in entries:
+        shown = {k: (_shown_value(v) if k in _SHOWN_PARTS else v) for k, v in entry.items()}
+        room -= len(canonical_json(shown))
+        if room < 0 and changes:
+            break
+        changes.append(shown)
+    out = {**rendering, "changes": changes}
+    if len(changes) < len(entries):
+        out["changes_not_shown"] = len(entries) - len(changes)
+    return out
 
 
 # --------------------------------------------------------------------------------------------

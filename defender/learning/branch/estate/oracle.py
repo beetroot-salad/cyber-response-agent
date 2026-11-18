@@ -228,8 +228,8 @@ of `code`). Your code reads saved files: `inputs/index.json` names this call's b
 the answer the patch applies to (`against`: a re-ask's, once you made one), the world's \
 frozen forged rows and every answer your own `run_query` and `re_ask` calls got (each reply \
 names its file). Those files last for this call only; this world's earlier servings most \
-like the call are saved too (`servings` in the index: each one's call, code, changes and \
-served answer): reuse their code where it fits, and serve a row they froze by its \
+like the call are saved too (`servings` in the index: each one's call, code and \
+changes): reuse their code where it fits, and serve a row they froze by its \
 `forged_id`. Query on demand, then build forged rows \
 from real rows of the saved answers: give each forged event fresh ids of its own (event, \
 document, process ids), and keep its event times at or before the branch point. Seed any \
@@ -361,9 +361,6 @@ _PROMPT_BUDGET = 2 * _CONTEXT_CAP
 #: that depends on the world, so the block stays byte-identical across siblings.
 _FAMILY_CAP = _PROMPT_BUDGET // 4
 
-
-def _call_text(system: str, verb: str, params: Mapping[str, Any]) -> str:
-    return _framed(f"The call ({system}.{verb}) params", dict(params))
 
 from defender.learning.branch.estate._oracle_dialogue import (
     _AttemptOver as _AttemptOver,
@@ -552,11 +549,10 @@ class Oracle:
         # The world's earlier servings most like this call, saved for the code and shown in a
         # fresh call's prefix (#1543): what the world served before carries across calls.
         self._similar = similar_servings(self.store.servings, call)
-        answers = self.store.served_answers({r["id"] for r in self._similar if r.get("id")})
         saved += [_saved("serving", {"system": r["system"], "verb": r["verb"],
                                      "params": r.get("params") or {}},
-                         {"code": r.get("code"), "changes": r.get("changes"),
-                          "served": answers.get(str(r.get("id")))}) for r in self._similar]
+                         {"code": r.get("code"), "changes": r.get("changes")})
+                  for r in self._similar]
         first = True
         while True:
             try:
@@ -712,18 +708,18 @@ class Oracle:
                 return str(getattr(world, "disposition_declared", "") or "")
         return ""
 
-    def _oversized(self, *extra: Any) -> bool:
-        """Whether the conversation, what is pending for its next request and `extra` parts
-        together pass `_PROMPT_BUDGET` (`_conversation_size`): the conversation then restarts
-        from its prefix."""
+    def _oversized(self) -> bool:
+        """Whether the conversation and what is pending for its next request together pass
+        `_PROMPT_BUDGET` (`_conversation_size`): the conversation then restarts from its
+        prefix."""
         size = sum(_conversation_size(message.parts) for message in self._conversation)
-        return size + _conversation_size([*self._pending, *extra]) > _PROMPT_BUDGET  # lint-stale-ref: ok — unrelated local attribute named _pending, not the retired learning queue
+        return size + _conversation_size(self._pending) > _PROMPT_BUDGET  # lint-stale-ref: ok — unrelated local attribute named _pending, not the retired learning queue
 
     def _start_call(self, call: tuple[str, str, dict], base: Any, *, fixed: bool = False,
                     live: bool = False) -> None:
-        """Open a call's turn: appended to the conversation, or a fresh conversation from its
-        prefix when there is none, it has held `restart_after` attempts, or the call would take
-        it past `_PROMPT_BUDGET`.
+        """Open a fresh conversation for a call's turn, from its prefix (`_attempt` calls it at
+        every call's first attempt, and when a retry's conversation held `restart_after` attempts
+        or grew past `_PROMPT_BUDGET`).
 
         A restart loses nothing the world has settled: frozen rows and recorded facts live in
         the store (`OracleStore.frozen` / `.facts`), never only in the conversation, and the
@@ -736,13 +732,6 @@ class Oracle:
         # A pre-branch call is fixed only over its recorded answer (`WorldRegistry.fixes`), so
         # it is told only to serve it unchanged; any other call is told what kind of base it holds.
         framing = [_PREBRANCH_LINE] if fixed else [_LIVE_BASE_LINE if live else _RECORDED_BASE_LINE]
-        turn = UserPromptPart(content="\n".join([
-            "A new call to serve.", *framing, _call_text(system, verb, params),
-            _base_text(base)]))
-        if (self._conversation and self._in_conversation < self.restart_after
-                and not self._oversized(turn)):
-            self._pending = [*self._pending, turn]  # lint-stale-ref: ok — unrelated local attribute named _pending, not the retired learning queue
-            return
         self._conversation = []
         self._in_conversation = 0
         family = self._family_block()

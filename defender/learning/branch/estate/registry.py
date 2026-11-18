@@ -145,7 +145,7 @@ def _served_in_turn(registry: WorldRegistry, system: str, verb: str, asked: dict
                               facts=[{"entity": e, "field": f, "value": v}
                                      for (e, f), v in staged.facts.items()],
                               answer=answer,
-                              serving=serving_row(system, verb, asked, served, claim, staged))
+                              serving=serving_row(system, verb, asked, claim, staged))
         if re_asked is not None:
             # Then the re-asked answer, as a base answer of this world under its own request key
             # (A3): kept across resume and indexed as real data. After the commit, so a failed
@@ -196,13 +196,17 @@ def names_an_entity(value: Any, entities: Collection[str]) -> bool:
     return False
 
 
-def serving_row(system: str, verb: str, params: Mapping[str, Any], served: Any,  # noqa: PLR0913 — the call, its answer and how it was made
-                changes: Mapping[str, Any], staged: Any) -> dict:
+def serving_row(system: str, verb: str, params: Mapping[str, Any],
+                changes: Mapping[str, Any], staged: Any) -> dict | None:
     """One verified serving as later calls reuse it (#1543): the call, the code that built it
-    (None for a literal hand-in), its changes seen through the call's query, and the answer."""
-    return {"system": system, "verb": verb, "params": dict(params),
-            "code": getattr(staged, "code", None), "changes": shown_changes(changes),
-            "served": served}
+    (None for a literal hand-in) and its changes seen through the call's query. What is reused is
+    how the answer was made, never the answer (a later call's base differs). None for a serving
+    that changed nothing and ran no code: it has nothing to reuse."""
+    code = getattr(staged, "code", None)
+    if code is None and not changes.get("changes"):
+        return None
+    return {"system": system, "verb": verb, "params": dict(params), "code": code,
+            "changes": shown_changes(changes)}
 
 
 def served_label(base: Any, served: Any, changes: Mapping[str, Any],  # noqa: PLR0913 — the answer, its changes and what decides its label
@@ -227,7 +231,8 @@ def served_label(base: Any, served: Any, changes: Mapping[str, Any],  # noqa: PL
     # A change back to the branch point (`FORK_FACT`) reconstructs; it shows no difference.
     entries = [e for e in (changes.get("changes") or ())
                if isinstance(e, Mapping) and e.get("fact_id") != FORK_FACT]
-    shown = (any(e.get("op") == "add" for e in entries)
+    # A change carrying a forged_id serves a forged row (an add, or a whole-row replace).
+    shown = (any("forged_id" in e for e in entries)
              or any(names_an_entity([e.get(k) for k in ("row_before", "row_after", "before",
                                                         "after", "record_before",
                                                         "record_after")], entities)
@@ -333,7 +338,7 @@ def calibrate_one(registry: WorldRegistry, ctx: Any, system: str, verb: str,  # 
                               facts=[{"entity": e, "field": f, "value": v}
                                      for (e, f), v in staged.facts.items()],
                               answer=None,
-                              serving=serving_row(system, verb, asked, served, changes, staged))
+                              serving=serving_row(system, verb, asked, changes, staged))
 
     with registry._turn(ctx, pauses_clock=False):
         registry.oracle.serve((system, verb, asked), base,

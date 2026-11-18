@@ -73,7 +73,8 @@ def test_a_conflicting_world_is_rebuilt_by_its_seat_and_kept_once_it_holds(tmp_p
     assert b["role"] == "B"
     assert agent.agent_ids[-1] == "questioner:b:revise"
     revise = agent.prompts[-1]
-    assert "This is a revision" in revise
+    assert "a revision: rebuild one sibling world" in revise
+    assert "Anything else you return is discarded" not in revise, "the revision is told to drop its facts"
     assert "6 such alerts" in revise
     assert check.agent_ids == ["questioner:check", "questioner:check:2"]
     [entry] = recorded[0]
@@ -197,7 +198,7 @@ def test_a_check_that_faults_leaves_the_family_as_authored(tmp_path):
     assert recorded == [[]]
 
 
-def test_a_revision_that_faults_leaves_the_family_as_authored(tmp_path):
+def test_a_revision_that_faults_drops_only_its_world(tmp_path):
     replies = iter(three_replies())
 
     def questioner(prompt, **kwargs):
@@ -207,9 +208,12 @@ def test_a_revision_that_faults_leaves_the_family_as_authored(tmp_path):
 
     paths = W.loop_paths(tmp_path)
     check = W.FakeAgent(_conflict("b", "f1"))
-    family = author(tmp_path, paths, invoke=questioner, premise_check=check, prebranch=PREBRANCH)
+    recorded: list[list[dict]] = []
+    family = author(tmp_path, paths, invoke=questioner, premise_check=check, prebranch=PREBRANCH,
+                    record_revisions=recorded.append)
 
-    assert _labels(family) == ["a", "b", "c"]
+    assert _labels(family) == ["a", "c"]
+    assert recorded[0][0]["dropped"]
 
 
 def test_a_world_fact_may_not_take_the_oracles_reserved_fork_name():
@@ -219,3 +223,26 @@ def test_a_world_fact_may_not_take_the_oracles_reserved_fork_name():
 
     with pytest.raises(FamilyError, match="reserved"):
         parse_facts([{"fact_id": "fork", "statement": "s", "entities": ["web-1"]}], "w")
+
+
+def test_a_re_check_that_faults_drops_the_rebuilt_world_and_records_it(tmp_path):
+    """A rebuild the second check never confirmed is not kept, and is not replaced by the world
+    the first check found false."""
+    family, _agent, _check, recorded = _run(
+        tmp_path, questioner_replies=[*three_replies(), _revision()],
+        check_replies=[_conflict("b", "f1"), "not yaml: [unclosed"])
+
+    assert _labels(family) == ["a", "c"]
+    [entry] = recorded[0]
+    assert entry["revised"]
+    assert entry["dropped"]
+
+
+def test_no_prebranch_evidence_skips_the_check(tmp_path):
+    paths = W.loop_paths(tmp_path)
+    agent = W.FakeAgent(*three_replies())
+    check = W.FakeAgent()
+    family = author(tmp_path, paths, invoke=agent, premise_check=check, prebranch=[])
+
+    assert _labels(family) == ["a", "b", "c"]
+    assert check.calls == 0

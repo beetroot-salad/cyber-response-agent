@@ -211,11 +211,14 @@ in the attempt its answer is the base the patch applies to; a committed re-ask i
 base answer of the world. For a system of record it
 undoes the source run's own later writes (each such change names the reserved fact `fork`) and
 edits the response to the world's facts. It sees the call, the base answer (saved for its code)
-and the world's facts, and this world's earlier servings most like the call (their code, changes
-and output; each call starts a fresh conversation), may explore real examples through the same
+and the world's facts, and this world's earlier servings most like the call (how each was made:
+its code and changes, for servings that changed something or ran code; each call starts a fresh
+conversation), may explore real examples through the same
 grant decision (rate-limited, recorded only on the oracle side), and hands in its changes as a
 JSON Patch on the base (#1543), usually printed by code: every operation names the fact it
-serves, and optional proofs back a removal. The host reads the patch row by row: an `add`, or a
+serves, and optional proofs back a removal. The host reads the patch row by row, placing each operation by a map of the base's tables
+built once by the same walk the forged-row checks use (an ES|QL answer's columns are never
+patched): an `add`, or a
 replace of a whole row, serves a forged row (it carries a `forged_id` and gets the forged-row
 checks; a frozen row is served in the shape the call's table serves, or refused where the query
 projects other columns); every other operation edits a value, keeps its kind and keys, and never

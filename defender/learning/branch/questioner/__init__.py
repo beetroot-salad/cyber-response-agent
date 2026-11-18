@@ -366,10 +366,10 @@ def _world_prompt(seat: str, *, axis: Any, family_reply: Any, header: str,  # no
     salt = message_salt(seeded, capture.leads, capture.alert, capture.frontier, capture.samples,
                         conflict)
     axis_line = f"Your axis, as call 1 named it: {axis}\n" if axis is not None else ""
+    # A revision has its own prompt: it returns the facts that `world.md` tells a seat never to.
     return (
-        f"{_prompt('world.md')}\n"
+        f"{_prompt('world.md' if revision is None else 'revise.md')}\n"
         f"## Your seat\n\nYou are authoring the world in seat {seat}.\n{axis_line}\n"
-        + (_REVISION_TASK if revision is not None else "")
         + f"{header}\n"
         + stage_user_message(
             salt,
@@ -417,20 +417,6 @@ def read_frontier(source_run_dir: Path, *, fences_at: int) -> str:
 SEAT_AUTHORED_FIELDS: frozenset[str] = frozenset({"story", "axis", "disposition_declared",
                                                   "label_basis"})
 
-
-#: A revision's task (#1561), host text after the seat's own: the world as written denies what
-#: the run saw before the branch point, so the seat rebuilds it rather than rewording a fact.
-_REVISION_TASK = """## This is a revision
-
-The world written for this seat contradicts what the investigation already saw before the
-branch point (the conflict and its evidence are below). Keep the axis's question, but rebuild
-the world so that every fact holds alongside everything observed before the branch point:
-change which facts carry the difference (the activity exists but its attribution, its timing or
-its authorization differs, say), not just the wording of the offending fact. Here you return
-`facts` too, beside the four keys: the world's whole list of facts, each with `fact_id`,
-`statement` and `entities`, as call 1 wrote them.
-
-"""
 
 #: The most characters one pre-branch answer, and all of them together, take in the check.
 _PREBRANCH_ANSWER_CAP = 4000
@@ -500,56 +486,84 @@ def _revised_facts(authored: dict[str, Any], *, seat: str) -> list[dict[str, Any
     return [dict(f) for f in facts]
 
 
-def _held_to_history(  # noqa: PLR0913 — the worlds, the two seams and what the seats were shown
+def _rebuilt(world: dict[str, Any], conflicts: list[dict], *, invoke: Any,  # noqa: PLR0913 — the world, its conflicts and what its seat was shown
+             family_reply: Any, header: str, capture: _Capture) -> dict[str, Any] | None:
+    """`world` as its seat rebuilds it against `conflicts`, or None when the rebuild fails or
+    returns facts the family would refuse."""
+    seat = str(world.get("role"))
+    try:
+        reply = invoke(_world_prompt(seat, axis=world.get("axis"), family_reply=family_reply,
+                                     header=header, capture=capture, revision=conflicts),
+                       role=AgentRole.QUESTIONER, agent_id=f"questioner:{seat.lower()}:revise")
+        authored = _reply_document(reply, what=f"the revision of seat {seat}")
+    except Exception as failed:  # noqa: BLE001 — a rebuild that fails drops its world alone
+        _logger.warning(f"seat {seat}'s revision failed ({failed!r}); its world is dropped")
+        return None
+    facts = _revised_facts(authored, seat=seat)
+    if facts is None:
+        return None
+    return {**world, **{k: v for k, v in authored.items() if k in SEAT_AUTHORED_FIELDS},
+            "facts": facts}
+
+
+def _still_conflicting(check: Any, rebuilt: dict[str, dict[str, Any]], *,
+                       family: dict[str, Any],
+                       prebranch: Sequence[dict[str, Any]]) -> dict[str, list[dict]]:
+    """The second check over the rebuilt worlds. One that fails confirms none of them."""
+    try:
+        return _conflicts(check, family=family, worlds=list(rebuilt.values()),
+                          prebranch=prebranch, agent_id="questioner:check:2")
+    except Exception as failed:  # noqa: BLE001 — an unconfirmed rebuild is not kept
+        _logger.warning(f"the premise re-check failed ({failed!r}); the rebuilt worlds are "
+                        "dropped")
+        return {label: [] for label in rebuilt}
+
+
+def _held_to_history(  # noqa: C901, PLR0913 — one rule over each failure path; the worlds, the two seams and what the seats were shown
         worlds: list[dict[str, Any]], *, check: Any, invoke: Any, family: dict[str, Any],
         family_reply: Any, header: str, capture: _Capture,
         prebranch: Sequence[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict]]:
-    """#1561: the authored worlds checked against the run's pre-branch answers. A world that
-    contradicts them is sent back to its seat once to be rebuilt (not reworded), checked again,
-    and dropped if it still conflicts. Returns the worlds kept and the record of each world the
-    check named."""
-    conflicts = _conflicts(check, family=family, worlds=worlds, prebranch=prebranch,
-                           agent_id="questioner:check")
-    if not conflicts:
+    """#1561: the authored worlds checked against the run's pre-branch answers, settled world by
+    world under one rule: a world the check never named is kept as authored; a named world is
+    kept only once its seat's rebuild passed the second check; anything else drops it. So a
+    failure anywhere (no evidence, a first check that faults or cannot be read, a rebuild or a
+    second check that does) never refuses the family and never keeps a world found false.
+    Returns the worlds kept and the record of each world the check named."""
+    if not prebranch:
+        return worlds, []
+    try:
+        conflicts = _conflicts(check, family=family, worlds=worlds, prebranch=prebranch,
+                               agent_id="questioner:check")
+    except Exception as failed:  # noqa: BLE001 — a check that fails names no world
+        _logger.warning(f"the premise check failed ({failed!r}); no world is named")
         return worlds, []
     record: dict[str, dict] = {}
-    revised: list[dict[str, Any]] = []
-    out: list[dict[str, Any]] = []
+    rebuilt: dict[str, dict[str, Any]] = {}
     for world in worlds:
         label = str(world.get("label"))
         if label not in conflicts:
+            continue
+        record[label] = {"label": label, "conflicts": conflicts[label], "revised": False,
+                         "dropped": True, "original_facts": world.get("facts")}
+        world_rebuilt = _rebuilt(world, conflicts[label], invoke=invoke,
+                                 family_reply=family_reply, header=header, capture=capture)
+        if world_rebuilt is not None:
+            record[label]["revised"] = True
+            rebuilt[label] = world_rebuilt
+    if rebuilt:
+        still = _still_conflicting(check, rebuilt, family=family, prebranch=prebranch)
+        for label in rebuilt:
+            if label in still:
+                record[label]["conflicts_after"] = still[label]
+            else:
+                record[label]["dropped"] = False
+    out: list[dict[str, Any]] = []
+    for world in worlds:
+        label = str(world.get("label"))
+        if label not in record:
             out.append(world)
-            continue
-        entry = {"label": label, "conflicts": conflicts[label], "revised": False,
-                 "dropped": False, "original_facts": world.get("facts")}
-        record[label] = entry
-        seat = str(world.get("role"))
-        reply = invoke(_world_prompt(seat, axis=world.get("axis"), family_reply=family_reply,
-                                     header=header, capture=capture,
-                                     revision=conflicts[label]),
-                       role=AgentRole.QUESTIONER, agent_id=f"questioner:{seat.lower()}:revise")
-        try:
-            authored = _reply_document(reply, what=f"the revision of seat {seat}")
-        except BranchError as unread:
-            _logger.warning(f"seat {seat}'s revision could not be read ({unread}); its world is "
-                            "dropped")
-            authored = {}
-        facts = _revised_facts(authored, seat=seat)
-        if facts is None:
-            entry["dropped"] = True
-            continue
-        world = {**world, **{k: v for k, v in authored.items() if k in SEAT_AUTHORED_FIELDS},
-                 "facts": facts}
-        entry["revised"] = True
-        revised.append(world)
-        out.append(world)
-    if revised:
-        still = _conflicts(check, family=family, worlds=revised, prebranch=prebranch,
-                           agent_id="questioner:check:2")
-        for label, found in still.items():
-            record[label]["dropped"] = True
-            record[label]["conflicts_after"] = found
-        out = [w for w in out if not record.get(str(w.get("label")), {}).get("dropped")]
+        elif not record[label]["dropped"]:
+            out.append(rebuilt[label])
     return out, list(record.values())
 
 
@@ -636,16 +650,9 @@ def author_family(  # noqa: PLR0913 — one keyword per captured input plus `les
         worlds.append(world)
 
     if premise_check is not None:
-        # Advisory: whatever fails inside the check (a reply it cannot read, a model or seam
-        # fault, a usage limit) leaves the family as the seats wrote it.
-        try:
-            kept, revisions = _held_to_history(
-                worlds[1:], check=premise_check, invoke=invoke, family=family,
-                family_reply=family_reply, header=header, capture=capture, prebranch=prebranch)
-        except Exception as failed:  # noqa: BLE001 — the check never refuses the family on its own fault
-            _logger.warning(f"the premise check failed ({failed!r}); the family is kept as "
-                            "authored")
-            kept, revisions = worlds[1:], []
+        kept, revisions = _held_to_history(
+            worlds[1:], check=premise_check, invoke=invoke, family=family,
+            family_reply=family_reply, header=header, capture=capture, prebranch=prebranch)
         worlds = [worlds[0], *kept]
         if record_revisions is not None:
             record_revisions(revisions)

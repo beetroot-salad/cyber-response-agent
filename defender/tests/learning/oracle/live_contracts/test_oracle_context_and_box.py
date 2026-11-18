@@ -691,9 +691,12 @@ def test_1224_oracle_conversation_is_static_family_world_then_calls(tmp_path):
         est.answer("idp", "query", q, _answer(*idp_rows))
     lookup = {"entity": "alice", "risk": "low"}
     est.answer("siem-x", "lookup", {"entity": "alice"}, lookup)
-    ob = S.oracle(_passthrough(), _passthrough())
+    # World b hands in code (a serving that changed nothing and ran no code is not kept).
+    unchanged = 'import json; print(json.dumps({"patch": []}))'
+    ob = S.oracle(S.code(unchanged), S.code(unchanged))
     oc = S.oracle(_passthrough())
-    reg_b = S.sandboxed_registry(ep, "b", est, ob, S.passing_verifier())
+    reg_b = S.sandboxed_registry(ep, "b", est, ob, S.passing_verifier(),
+                                 box=S.host_box(tmp_path)[0])
     reg_c = S.sandboxed_registry(ep, "c", est, oc, S.passing_verifier())
 
     _ask(reg_b, est, tmp_path, params=q_b)

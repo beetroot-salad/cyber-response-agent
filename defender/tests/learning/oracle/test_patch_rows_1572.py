@@ -72,7 +72,7 @@ def test_a_value_edit_keeps_its_kind_and_a_key_cannot_be_removed():
 
     assert any("another shape" in f for f in _check(
         base, [{"op": "replace", "path": "/total", "value": {"n": 2}, "fact_id": "F"}]))
-    assert any("a key or an ES|QL cell" in f for f in _check(
+    assert any("a key, an ES|QL cell" in f for f in _check(
         base, [{"op": "remove", "path": "/rows/0/user", "fact_id": "F"}]))
     assert _check(base, [{"op": "remove", "path": "/rows/0/tags/1", "fact_id": "F"}]) == []
 
@@ -130,21 +130,14 @@ def test_the_label_reads_the_whole_row_not_the_cut_one():
     assert "[cut:" in shown_changes(whole)["changes"][0]["row_before"]
 
 
-def test_a_serving_is_kept_in_memory_without_its_answer_and_read_back_when_chosen(tmp_path):
-    from defender.learning.branch.estate import oracle as oracle_mod
+def test_a_serving_keeps_how_it_was_made_and_one_that_changed_nothing_is_not_kept():
+    from defender.learning.branch.estate.registry import serving_row
 
-    store = oracle_mod.OracleStore(tmp_path / "oracle")
-    served = {"rows": [{"user": "alice"}]}
-    store.commit(forged=[], facts=[], answer=None,
-                 serving={"system": "s", "verb": "v", "params": {}, "code": "print(1)",
-                          "changes": {}, "served": served})
-
-    [kept] = store.servings
-    assert "served" not in kept
-    assert store.served_answers({kept["id"]}) == {kept["id"]: served}
-    [reread] = oracle_mod.OracleStore(tmp_path / "oracle").servings
-    assert reread["id"] == kept["id"]
-    assert "served" not in reread
+    made = serving_row("s", "v", {}, {"changes": []}, SimpleNamespace(code="print(1)"))
+    assert made is not None
+    assert made["code"] == "print(1)"
+    assert "served" not in made
+    assert serving_row("s", "v", {}, {"changes": []}, SimpleNamespace(code=None)) is None
 
 
 def test_long_code_does_not_bury_a_serving_whose_query_matches():
@@ -158,3 +151,56 @@ def test_long_code_does_not_bury_a_serving_whose_query_matches():
     ranked = similar_servings(servings, ("idp", "query", {"q": "user:alice host:web-1"}), k=1)
 
     assert ranked[0]["code"] == code
+
+
+def test_an_esql_answer_s_columns_are_never_patched():
+    """Reproduced: removing a column entry served a column list out of line with its values."""
+    for op in ({"op": "remove", "path": "/columns/1", "fact_id": "F"},
+               {"op": "replace", "path": "/columns/1/name", "value": "x", "fact_id": "F"}):
+        failures = _check(ESQL, [op])
+        assert any("columns" in f and "follow the query" in f for f in failures), failures
+
+
+def test_a_table_under_a_number_like_key_is_named_as_real_rows_name_it():
+    """Reproduced: a forged row under `agents/001/events` skipped check 2 for want of real rows."""
+    base = {"agents": {"001": {"events": [{"id": "e-1", "x": 1}]}}}
+    row = {"totally": "other"}
+    store = _store(staged=_record("fg-1", row))
+
+    failures = check_submission(
+        base, {"patch": [{"op": "add", "path": "/agents/001/events/-", "value": row,
+                          "forged_id": "fg-1", "fact_id": "F"}], "entity_refs": [], "proofs": []},
+        world=WORLD, store=store, real_data=RealData(answers=[("s", base)]))
+
+    assert any(f.startswith("check 2") for f in failures), failures
+
+
+def test_a_list_item_that_is_no_row_is_not_removed_as_a_value():
+    base = {"meta": {"pairs": [[1, 2], [3, 4]]}, "rows": [{"a": 1}]}
+
+    assert any("no row" in f for f in _check(
+        base, [{"op": "remove", "path": "/meta/pairs/0", "fact_id": "F"}]))
+
+
+def test_a_forged_row_replace_is_labelled_as_showing_the_difference():
+    base = {"hits": [{"event_id": "e-1", "user": "carol"}]}
+    new = {"event_id": "e-9", "user": "dave"}
+    handin = parse_handin({"patch": [{"op": "replace", "path": "/hits/0", "value": new,
+                                      "forged_id": "fg-1", "fact_id": "F"}]})[0]
+    applied = apply_handin(base, handin)
+    whole = render_changes(applied, handin, query={}, base_was="live")
+
+    assert served_label(base, applied.served, whole,
+                        [{"fact_id": "F", "entities": ["web-7"]}]) == ORACLE
+
+
+def test_shown_changes_are_capped_in_all_and_say_how_many_were_left_out():
+    rows = [{"n": i, "pad": "x" * 1500} for i in range(100)]
+    handin = parse_handin({"patch": [{"op": "remove", "path": f"/rows/{i}", "fact_id": "F"}
+                                     for i in range(99, -1, -1)]})[0]
+    applied = apply_handin({"rows": rows}, handin)
+
+    shown = shown_changes(render_changes(applied, handin, query={}, base_was="live"))
+
+    assert 0 < len(shown["changes"]) < 100
+    assert shown["changes_not_shown"] == 100 - len(shown["changes"])
