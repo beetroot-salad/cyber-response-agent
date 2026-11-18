@@ -212,33 +212,37 @@ class BoxSpy:
         self.stopped += 1
 
 
-def author_drain(t: Any, paths: Any, *, trigger: Any, box: BoxSpy, mint: bool = False, impl: str | None = None,
-                 **seams: Any) -> int:
+def author_drain(t: Any, paths: Any, *, trigger: Any, box: BoxSpy, mint: bool = False, **seams: Any) -> int:
     """`author_drain` through the stage runner, the tenant's forge fake as its forge client and
     a fresh identity over its issuer fake (login skipped) unless the case passes others; `directory=`
     is `t.directory` (#1214 Flow 4: the tenant is admitted from the directory) unless the case passes one. The tick's store
-    is `tick_store`'s: the adapter, or (the case parametrized over `TICK_IMPLS`, `impl=`) the port over a real helper."""
+    is `tick_store`'s: the adapter, or (the case run over `conftest.tick_impl`'s `port`) the port over a real helper."""
     seams.setdefault("client", t.forge.client)
     seams.setdefault("directory", t.directory)
     if not mint:  # with `mint=True` the drain mints from the live generation's host secret file
         seams.setdefault("identity", t.vault.identity())
-    with tick_store(t, "author", seams, impl=impl) as store:
+    with tick_store(t, "author", seams) as store:
         return run_stage(lambda: drains().author_drain(
             paths, trigger_author=trigger, start_box=box.start, stop_box=box.stop, store=store, **seams))
 
 
 #: The tick's store implementations the tick tests run over (#1487 Flow 2, Conformance: "the existing tick tests run over
 #: both implementations against one store"): the adapter over the in-process store, and the port over a real post-step
-#: helper on the same database. `conftest.tick_impl` parametrizes the tick modules over them.
+#: helper on the same database. `conftest.tick_impl` is requested by the tick modules (`usefixtures`) and parametrized
+#: over them.
 TICK_IMPLS = ("adapter", "port")
 
-#: The implementation the running case is parametrized over (set by `conftest.tick_impl`); None: the adapter.
-ACTIVE: list[TickImpl] = []
+#: The lanes whose tick the port serves: the author lane's (the lead lane's port is not in #1487, Amendment r5.1 item 12).
+PORT_LANES = ("author",)
+
+#: Where the running case's `TickImpl` is carried: on its tenant (`PublishedTenant.carried`), so the choice belongs to the
+#: case and no module holds it.
+CARRIED = "tick_impl"
 
 
 def own_store(reason: str) -> Callable[[Any], Any]:
-    """Mark a case that is not run once per implementation: it chooses its own store, or its subject is one of them
-    (`reason`)."""
+    """Mark a case that is not run once per implementation: it chooses its own store, or its subject is one of them, or
+    its tick never reaches the port (`reason`). It runs on the adapter only."""
     def mark(fn: Any) -> Any:
         fn.own_store = reason
         return fn
@@ -246,21 +250,24 @@ def own_store(reason: str) -> Callable[[Any], Any]:
 
 
 class TickImpl:
-    """One implementation of the tick's store for the running case: `adapter`, or `port` (a real post-step helper process
-    over the case's tenant and database, started at the tick's first use so it reads the settings the case set, one per
-    tick, closed when the tick ends; `prestart` starts it now, for a tick that runs in a forked child). The port is bound
-    to the author lane, as the helper binds it from the claim: a lane's tick that is not the author's runs on the adapter."""
+    """One implementation of the tick's store for the running case (the value of `conftest.tick_impl`): `adapter`, or `port`
+    (a real post-step helper process over the case's tenant and database, started at the author tick's first use so it reads
+    the settings the case set, one per tick, closed when the tick ends; `prestart` starts it now, for a tick that runs in a
+    forked child). The port serves the author lane only, as the helper binds it from the claim: another lane's tick runs on
+    the adapter and starts no helper. Each helper's answered requests are counted on the helper's side (a tick in a forked
+    child counts) when it is closed: `unreached` is the self-check that a port case reached the port."""
 
     def __init__(self, name: str, world: Any, scratch: Path, monkeypatch: Any) -> None:
         self.name, self.world, self.scratch, self.monkeypatch = name, world, scratch, monkeypatch
         self._ready: Any = None
-        self._started: list[Any] = []
+        self._open: list[Any] = []
+        self.answered: list[list[str]] = []
 
     def _start(self) -> Any:
         from defender.tests.support.jobs._relay1487 import PostStepHelper, adopt_scene
 
         helper = PostStepHelper(adopt_scene(self.world.t, self.world.dsn, self.monkeypatch), self.scratch)
-        self._started.append(helper)
+        self._open.append(helper)
         return helper
 
     def prestart(self) -> None:
@@ -276,41 +283,64 @@ class TickImpl:
             return ready, False
         return self._start(), True
 
-    def close(self) -> None:
-        for helper in self._started:
+    def release(self, helper: Any) -> None:
+        """Count what `helper` answered, then close it."""
+        self._open.remove(helper)
+        try:
+            self.answered.append(helper.requests())
+        finally:
             helper.close()
-        self._started.clear()
+
+    def close(self) -> None:
+        while self._open:
+            self.release(self._open[0])
+
+    def unreached(self) -> str | None:
+        """For a port case that ran to its end: why the port was not exercised (no helper started, or one that answered no
+        store request), else None."""
+        if self.name != "port":
+            return None
+        if not self.answered:
+            return "the case ran over the port but started no helper: its tick never reached the port"
+        silent = [i for i, names in enumerate(self.answered) if not names]
+        if silent:
+            return f"{len(silent)} of {len(self.answered)} helper(s) the case started answered no store request"
+        return None
 
 
-def prestart_tick_store() -> None:
+def carried_impl(t: Any) -> TickImpl | None:
+    """The `TickImpl` the case `t` belongs to is run over, None outside `conftest.tick_impl`."""
+    return t.carried.get(CARRIED)
+
+
+def prestart_tick_store(t: Any, lane: str) -> None:
     """For a case that runs its tick in a forked child: the port's helper started in the parent (after the case set its
-    settings), so the child uses it and a signal to the child never strands it. A no-op over the adapter."""
-    if ACTIVE:
-        ACTIVE[-1].prestart()
+    settings), so the child uses it and a signal to the child never strands it. A no-op over the adapter, and for a lane
+    the port does not serve."""
+    active = carried_impl(t)
+    if active is not None and lane in PORT_LANES:
+        active.prestart()
 
 
 @contextlib.contextmanager
-def tick_store(t: Any, lane: str, seams: dict[str, Any] | None = None, *, impl: str | None = None) -> Iterator[Any]:
+def tick_store(t: Any, lane: str, seams: dict[str, Any] | None = None) -> Iterator[Any]:
     """The tick's store (#1487 P2): the case's own (`store=` in `seams`), else the implementation the case is run over
-    (`impl=`, else the one `conftest.tick_impl` set, else the adapter): the adapter over the in-process store at the
+    (`conftest.tick_impl`, carried on `t`; the adapter without it): the adapter over the in-process store at the
     database the `world` fixture sets, bound to the tenant, `lane` and the environment's thresholds as a host entry binds
-    it, or the port over a real helper on that database. A caller of a drain that is not `author_drain` below asks for
-    its own store here."""
+    it, or, for the author lane over the port, a real helper on that database. A caller of a drain that is not
+    `author_drain` below asks for its own store here."""
     given = (seams or {}).pop("store", None)
     if given is not None:
         yield given
         return
-    active = ACTIVE[-1] if ACTIVE else None
-    which = impl or (active.name if active is not None else "adapter")
-    if which == "port" and lane == "author":
-        assert active is not None, "the port needs the case's world: run the case under `conftest.tick_impl`"
+    active = carried_impl(t)
+    if active is not None and active.name == "port" and lane in PORT_LANES:
         helper, owned = active.take()
         try:
             yield helper.port()
         finally:
             if owned:
-                helper.close()
-                active._started.remove(helper)
+                active.release(helper)
         return
     from defender.learning.core.store_tick import thresholds
     from defender.tests.support.jobs._relay1487 import adapter_store
@@ -333,9 +363,8 @@ def lead_author_drain(t: Any, paths: Any, *, box: BoxSpy, mint: bool = False, **
     seams.setdefault("directory", t.directory)
     if not mint:  # with `mint=True` the drain mints from the live generation's host secret file
         seams.setdefault("identity", t.vault.identity())
-    with tick_store(t, "lead_author", seams) as store:
-        return run_stage(lambda: drains().lead_author_drain(
-            paths, start_box=box.start, stop_box=box.stop, store=store, **seams))
+    return run_stage(lambda: drains().lead_author_drain(
+        paths, start_box=box.start, stop_box=box.stop, **seams))
 
 
 def remote_branches(remote: Path, prefix: str = LESSONS_PREFIX) -> dict[str, str]:

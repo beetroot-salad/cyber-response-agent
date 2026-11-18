@@ -182,7 +182,8 @@ def row_of_json_bytes(row: dict[str, Any], size: int, *, compact: bool = False) 
 
 
 def id_of_utf8_bytes(job: str, size: int, filler: str = "x") -> str:
-    """`<job>/` plus `filler` repeated so that the whole id is exactly `size` UTF-8 bytes (`filler` of 1 or 2 bytes)."""
+    """`<job>/` plus `filler` repeated so that the whole id is exactly `size` UTF-8 bytes (`filler` of 1 to 4 bytes; an ASCII
+    pad takes up what a whole filler cannot)."""
     head = f"{job}/"
     width = len(filler.encode())
     body = size - len(head.encode())
@@ -190,6 +191,20 @@ def id_of_utf8_bytes(job: str, size: int, filler: str = "x") -> str:
     pad = filler * (body // width) + "x" * (body % width)
     assert len((head + pad).encode()) == size
     return head + pad
+
+
+#: Fillers of 2, 3 and 4 UTF-8 bytes (one character each): the ids a character count and a byte count tell apart.
+MULTIBYTE_FILLERS = ("\u00e9", "\u20ac", "\U0001f600")
+
+
+def id_over_in_bytes_only(job: str, bound: int, filler: str) -> str:
+    """The shortest `<job>/` plus `filler`s id whose UTF-8 bytes exceed `bound` while its characters do not: over the bound
+    by one byte count, within it by a character count. Asserts both measures."""
+    head = f"{job}/"
+    pad = filler * ((bound - len(head.encode())) // len(filler.encode()) + 1)
+    made = head + pad
+    assert len(made) <= bound < len(made.encode()), (len(made), len(made.encode()), bound)
+    return made
 
 
 def path_of(runs: Path, job: str) -> Path:

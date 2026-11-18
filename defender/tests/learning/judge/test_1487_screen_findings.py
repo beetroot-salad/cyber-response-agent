@@ -8,7 +8,14 @@ import random
 
 import pytest
 
-from defender.tests.support.jobs._findings1487 import defender_row, id_of_utf8_bytes, row_of_json_bytes, world_row
+from defender.tests.support.jobs._findings1487 import (
+    MULTIBYTE_FILLERS,
+    defender_row,
+    id_of_utf8_bytes,
+    id_over_in_bytes_only,
+    row_of_json_bytes,
+    world_row,
+)
 
 JOB = "6b0f2d9c-0d0c-4b1e-8f10-0a1b2c3d4e5f"
 OTHER = "0e6f7a8b-1c2d-4e3f-9a0b-1c2d3e4f5a6b"
@@ -43,23 +50,29 @@ def test_a_row_and_an_id_exactly_at_their_bounds_are_screened_clean(which):
     channel, make = _channels()[which]
     id_max, row_max = _bounds()
     row = make(JOB, 0)
-    for filler in ("x", "\u00e9"):
-        screen(channel, [dict(row, finding_id=id_of_utf8_bytes(JOB, id_max, filler))], JOB)
+    for filler in ("x", *MULTIBYTE_FILLERS):
+        at_bound = id_of_utf8_bytes(JOB, id_max, filler)
+        assert len(at_bound.encode()) == id_max, "premise: exactly at the byte bound"
+        assert len(at_bound) <= id_max, "premise: within the bound in characters"
+        screen(channel, [dict(row, finding_id=at_bound)], JOB)
     screen(channel, [row_of_json_bytes(row, row_max)], JOB)
 
 
 @pytest.mark.parametrize("which", ["defender", "questioner"])
 def test_a_row_or_an_id_one_over_its_bound_is_refused(which):
-    """One byte over each bound is refused; so is an id whose characters are under the bound but whose UTF-8 bytes are
-    over it. The row is one byte over by the compact measure (so over by any serialisation). (O2 bounds)"""
+    """One byte over each bound is refused; so is an id, of 2-, 3- and 4-byte characters, whose characters are within the
+    bound but whose UTF-8 bytes are over it (a count of characters would let it in). The row is one byte over by the compact
+    measure (so over by any serialisation). (O2 bounds)"""
     screen, refused = _screen()
     channel, make = _channels()[which]
     id_max, row_max = _bounds()
     row = make(JOB, 0)
+    by_bytes_only = [id_over_in_bytes_only(JOB, id_max, filler) for filler in MULTIBYTE_FILLERS]
+    for long_id in by_bytes_only:
+        assert len(long_id) <= id_max < len(long_id.encode()), "premise: within the bound in characters, over it in bytes"
     over = [dict(row, finding_id=id_of_utf8_bytes(JOB, id_max + 1)),
-            dict(row, finding_id=f"{JOB}/" + "\u00e9" * id_max),
+            *(dict(row, finding_id=long_id) for long_id in by_bytes_only),
             row_of_json_bytes(row, row_max + 1, compact=True)]
-    assert len(over[1]["finding_id"]) < id_max, "premise: under the bound in characters"
     for bad in over:
         with pytest.raises(refused):
             screen(channel, [bad], JOB)

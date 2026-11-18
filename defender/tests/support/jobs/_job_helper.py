@@ -881,7 +881,17 @@ _DRIVER = textwrap.dedent("""\
     from defender import job_host
     from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
+    from defender.job_host import _session as S
     cfg = json.loads(sys.argv[1])
+    real_answer = S.Registry.answer
+
+    def answer(self, session, name, fields):
+        # the helper's own count of the requests its socket was asked (one line each, before it answers)
+        with open(cfg["requests"], "a") as out:
+            out.write(str(name) + "\\n")
+        return real_answer(self, session, name, fields)
+
+    S.Registry.answer = answer
     sys.exit(job_host.main(cfg["argv"], signer=A.MarkedSigner(), publish=lambda *a, **k: B.fresh(cfg["commit"])))
 """)
 
@@ -913,7 +923,7 @@ class ProcessHelper:
         shim.write_text(_SHIM.replace("PYTHON", sys.executable).replace("STATE", str(self.state)), encoding="utf-8")
         shim.chmod(0o755)
         env = child_env({**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}"})
-        cfg = json.dumps({"argv": argv, "commit": scene.t.commit})
+        cfg = json.dumps({"argv": argv, "commit": scene.t.commit, "requests": str(self.state / "requests.log")})
         command = [sys.executable, "-c", _PARENT, cfg, _DRIVER] if worker else [sys.executable, "-c", _DRIVER, cfg]
         self.proc = subprocess.Popen(command, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                      stderr=subprocess.PIPE)
@@ -921,8 +931,34 @@ class ProcessHelper:
         self.helper_pid = int(self.proc.stdout.readline()) if worker else self.proc.pid
 
     def container_pid(self, timeout: float = 30.0) -> int:
-        return int(until(lambda: (self.state / "started").exists() and (self.state / "started").read_text(),
-                         "the stand-in container to start", timeout))
+        try:
+            return int(until(lambda: (self.state / "started").exists() and (self.state / "started").read_text(),
+                             "the stand-in container to start", timeout))
+        except AssertionError as timed_out:
+            raise AssertionError(f"{timed_out} (helper pid {self.helper_pid}, exit status {self.proc.poll()}); "
+                                 f"its stderr so far:\n{self._stderr_so_far()}") from None
+
+    def _stderr_so_far(self) -> str:
+        """What the helper has written to stderr that can be read now (never waits: a container the helper started may hold
+        the pipe open)."""
+        stream = self.proc.stderr
+        if stream is None:
+            return ""
+        chunks: list[bytes] = []
+        try:
+            os.set_blocking(stream.fileno(), False)
+            while chunk := stream.read(65536):
+                chunks.append(chunk)
+        except (OSError, ValueError):
+            pass
+        return b"".join(chunks).decode("utf-8", "replace") or "(nothing)"
+
+    def requests(self) -> list[str]:
+        """The name of each request the helper's socket was asked, as the helper counted it, the helper's own
+        lifecycle requests (`launch`, `box.*`) left out: the store verbs a tick over the port sent, from whatever process."""
+        log = self.state / "requests.log"
+        names = log.read_text(encoding="utf-8").split() if log.exists() else []
+        return [n for n in names if n != "launch" and not n.startswith("box.")]
 
     def records(self) -> dict[str, dict[str, Any]]:
         return {p.name: json.loads(p.read_text(encoding="utf-8")) for p in (self.state / "containers").glob("*")}

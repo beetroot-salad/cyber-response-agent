@@ -56,7 +56,7 @@ from defender.tests.tenancy.tenant_1108_p4._drain_support import (
     remote_branches,
 )
 
-pytestmark = pytest.mark.postgres
+pytestmark = [pytest.mark.postgres, pytest.mark.usefixtures("tick_impl")]  # the tick over each store implementation (conftest)
 
 READ_ISSUE = {"write:repository", "write:issue"}  # the integration's scopes (A4); `read:issue` alone also reads
 #: How long the forked post-step may take to end after its stop.

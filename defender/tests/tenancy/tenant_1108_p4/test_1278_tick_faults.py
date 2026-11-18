@@ -37,7 +37,7 @@ from defender.tests.support.learning.core._tickfaults1278 import (
 )
 from defender.tests.tenancy.tenant_1108_p4._drain_support import BoxSpy, critical_text
 
-pytestmark = pytest.mark.postgres
+pytestmark = [pytest.mark.postgres, pytest.mark.usefixtures("tick_impl")]  # the tick over each store implementation (conftest)
 
 LANES = (AUTHOR_LANE, LEAD_LANE)
 

@@ -194,7 +194,7 @@ def post_step_reach(tmp_path, monkeypatch, migrated_database):  # noqa: F811
         yield scene, seeded, R.observed(scene.root, scene.tenant, "reach"), before, state()
 
 
-def test_o3_from_inside_no_database_address_login_or_route_is_held_and_the_helper_reaches_only_the_own_tenants_and_lanes(
+def test_o3_from_inside_no_database_address_or_login_is_held_and_the_helper_reaches_only_the_own_tenants_and_lanes(
         post_step_reach):
     """(O8c; #1170 O3 rewritten) no database held; own work reachable; another tenant's batch unseen; another lane's lapsed batch not taken over, its working batch not parked or ended."""
     from defender.tests.support.jobs import _real_containers1487 as R

@@ -303,17 +303,15 @@ def _tick(t: Any, paths: Any, *, lane: Any, pitfalls: list[str], box: _Box) -> i
     """One REAL `lead_author_drain` tick over the tenant path, with the tenant forge fake's
     client and an issuer-fake identity."""
     from defender.learning.core import drains
-    from defender.tests.tenancy.tenant_1108_p4._drain_support import tick_store
 
     def run_pitfalls(_wt_paths: Any, _state: Any, **_kw: Any) -> int:
         pitfalls.append("pitfalls")
         return 0
 
-    with tick_store(t, "lead_author") as store:  # #1487: the tick is handed its store
-        return drains.lead_author_drain(
-            paths, run_lead_author=lane, run_pitfalls=run_pitfalls,
-            client=t.forge.client, identity=t.vault.identity(), directory=t.directory, start_box=box.start,
-            stop_box=lambda *_a, **_k: None, store=store)
+    return drains.lead_author_drain(
+        paths, run_lead_author=lane, run_pitfalls=run_pitfalls,
+        client=t.forge.client, identity=t.vault.identity(), directory=t.directory, start_box=box.start,
+        stop_box=lambda *_a, **_k: None)
 
 
 @pytest.mark.postgres

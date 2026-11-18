@@ -2,15 +2,26 @@
 
 `tick_impl` runs the tick modules' cases once per implementation of the tick's store (#1487 Flow 2, Conformance: "the
 existing tick and store-verb tests run over both implementations against one store"): the adapter over the in-process
-store and the port over a real post-step helper on the same database. A case opts out with `_drain_support.own_store`."""
+store and the port over a real post-step helper on the same database. A tick module requests it for every case
+(`pytestmark = pytest.mark.usefixtures("tick_impl")`), so it is in each case's fixture closure; a case opts out, to the
+adapter alone, with `_drain_support.own_store`. The implementation is carried on the fixture's value, which the case's
+tenant holds (`_drain_support.carried_impl`); nothing is kept by a module. Every module is named by its absolute name:
+`defender/tests` has no `__init__.py`, so a relative import loads a second copy of it."""
 from __future__ import annotations
+
+import shutil
+import tempfile
+from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 
-from ._support import published_tenant
+from defender.tests.tenancy.tenant_1108_p4._drain_support import CARRIED, PORT_LANES, TICK_IMPLS, TickImpl
+from defender.tests.tenancy.tenant_1108_p4._support import published_tenant
 
-#: The modules whose cases drive the author tick (through `_drain_support.author_drain`, or `_feedback1278.tick`).
-TICK_MODULES = {"test_1278_tick", "test_1278_feedback", "test_1278_tick_faults", "test_drains"}
+#: The case parameters that name the lane a tick runs: a port case of a lane the port does not serve never reaches the port
+#: (its tick is the adapter's), so it is not collected.
+LANE_PARAMS = {"lane": {"lead_author": "lead_author"}, "drain": {"lead": "lead_author"}}
 
 
 @pytest.fixture
@@ -21,30 +32,75 @@ def p4_tenant(tmp_path, data_root):
         yield published
 
 
-def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
-    """Each tick case over the adapter and over the port, unless it is marked `own_store`."""
-    from ._drain_support import TICK_IMPLS
+@pytest.fixture(autouse=True)
+def data_root(data_root, request, monkeypatch) -> Iterator[Path]:
+    """A case that requests `tick_impl` gets a short data root (under `/tmp`): over the port the helper's job socket lives
+    under it, and a unix socket's path holds about 100 bytes, which pytest's nested temporary folders (xdist's
+    `popen-gwN`, the test's own `data-rootNN`) overrun, so the helper would refuse to start. Any other case keeps the
+    suite's (`tests/conftest.py`), which this wraps. Emptied and removed after a pass, kept after a failure."""
+    if "tick_impl" not in request.fixturenames:
+        yield data_root
+        return
+    from defender.tests.support.shared.contracts._data_root_1078 import DATA_ROOT_ENV
 
-    if (metafunc.module.__name__.rsplit(".", 1)[-1] in TICK_MODULES and "world" in metafunc.fixturenames
+    short = Path(tempfile.mkdtemp(prefix="p4r", dir="/tmp"))
+    monkeypatch.setenv(DATA_ROOT_ENV, str(short))
+    yield short
+    call = getattr(request.node, "rep_call", None)
+    if call is not None and call.passed:
+        shutil.rmtree(short, ignore_errors=True)
+
+
+def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
+    """A case that requests `tick_impl` and drives the tick (it has the `world`) runs over each implementation, unless it
+    is marked `own_store`: that one runs once, over the adapter."""
+    if ("tick_impl" in metafunc.fixturenames and "world" in metafunc.fixturenames
             and not hasattr(metafunc.function, "own_store")):
-        metafunc.fixturenames.append("tick_impl")
         metafunc.parametrize("tick_impl", TICK_IMPLS, indirect=True)
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Drop the port cases whose tick is of a lane the port does not serve (the lead lane's port is not in #1487,
+    Amendment r5.1 item 12): over the port they would be the adapter's own cases again."""
+    kept, dropped = [], []
+    for item in items:
+        params = getattr(getattr(item, "callspec", None), "params", {})
+        lane = next((lanes.get(params[name]) for name, lanes in LANE_PARAMS.items() if name in params), None)
+        (dropped if params.get("tick_impl") == "port" and lane is not None and lane not in PORT_LANES else kept).append(item)
+    if dropped:
+        config.hook.pytest_deselected(items=dropped)
+        items[:] = kept
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo):
+    """Keep each phase's report on the item, for `tick_impl`'s self-check."""
+    report = yield
+    setattr(item, f"rep_{report.when}", report)
+    return report
 
 
 @pytest.fixture
 def tick_impl(request, tmp_path, monkeypatch):
-    """The implementation of the tick's store the case runs over (`param`): `_drain_support.tick_store` hands the case's
-    ticks that store. Requested after `world`, whose environment the port's helper reads."""
-    from ._drain_support import ACTIVE, TickImpl
-
+    """The implementation of the tick's store the case runs over (`param`, else the adapter): a `TickImpl`, carried on the
+    case's tenant for `_drain_support.tick_store`. None for a case with no `world` (no tick to give a store). Over the port,
+    a case that passed must have reached the port: at its end each helper it started has answered a store request, counted
+    in the helper, so a tick in a forked child counts (a case that fails already has its own failure to show)."""
+    if "world" not in request.fixturenames:
+        yield None
+        return
     world = request.getfixturevalue("world")
     chosen = TickImpl(getattr(request, "param", "adapter"), world, tmp_path, monkeypatch)
-    ACTIVE.append(chosen)
+    world.t.carried[CARRIED] = chosen
     try:
         yield chosen
     finally:
-        ACTIVE.remove(chosen)
+        world.t.carried.pop(CARRIED, None)
         chosen.close()
+    call = getattr(request.node, "rep_call", None)
+    if call is not None and call.passed and (why := chosen.unreached()):
+        pytest.fail(f"{why} ({request.node.nodeid}): run it over the adapter only (`own_store`) or drive its tick "
+                    f"through the author lane", pytrace=False)
 
 
 @pytest.fixture

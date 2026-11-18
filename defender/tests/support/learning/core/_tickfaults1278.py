@@ -166,7 +166,7 @@ class Scene:
         from defender.tests.tenancy.tenant_1108_p4._drain_support import prestart_tick_store
 
         self.w.monkeypatch.setenv(RENEW_ENV, "0.2")
-        prestart_tick_store()  # over the port: the helper starts here, in the parent, so a signal to the child never strands it
+        prestart_tick_store(self.w.t, self.lane)  # over the port: the helper starts here, in the parent, so a signal to the child never strands it
         return TickChild(lambda: _rc(self.run(cast)), self.w.scratch / f"child-{tag}.json")
 
     def branch_tip_on_remote(self, branch: str) -> str | None:

@@ -449,8 +449,9 @@ def _bad_cases(job: str, other: str, seed: int):
             {F.FINDING: [good], F.QUESTIONER: [dict(world_good, finding_id=bad)]})}))
     from defender.learning.judge.enqueue import FINDING_ID_MAX_BYTES, FINDING_ROW_MAX_BYTES
 
-    for label, long_id in (("id-one-over", F.id_of_utf8_bytes(job, FINDING_ID_MAX_BYTES + 1)),
-                           ("id-chars-under-bytes-over", f"{job}/" + "\u00e9" * FINDING_ID_MAX_BYTES),
+    by_bytes_only = [(f"id-chars-within-bytes-over-{len(filler.encode())}b",
+                      F.id_over_in_bytes_only(job, FINDING_ID_MAX_BYTES, filler)) for filler in F.MULTIBYTE_FILLERS]
+    for label, long_id in (("id-one-over", F.id_of_utf8_bytes(job, FINDING_ID_MAX_BYTES + 1)), *by_bytes_only,
                            ("id-long", f"{job}/" + "x" * 100_000)):
         cases.append((label, {"state": "ok", "text": json.dumps(
             {F.FINDING: [dict(good, finding_id=long_id)], F.QUESTIONER: []})}))
@@ -566,7 +567,7 @@ async def test_o2_findings_over_the_cap_are_refused_at_the_cap_not_before_and_ne
 
 async def test_o2_a_row_and_an_id_at_their_bounds_are_stored_and_one_byte_over_refuses_the_job(world):  # noqa: F811
     """Through the worker's end write: a job whose rows are an id of exactly `FINDING_ID_MAX_BYTES` UTF-8 bytes
-    (ASCII, and two-byte characters) and a row whose JSON is exactly `FINDING_ROW_MAX_BYTES` stores all of them in
+    (ASCII, and 2-, 3- and 4-byte characters) and a row whose JSON is exactly `FINDING_ROW_MAX_BYTES` stores all of them in
     both channels; one byte over either bound refuses the whole job. (O2, amendment r5.1 item 2)"""
     from defender.learning.judge.enqueue import FINDING_ID_MAX_BYTES, FINDING_ROW_MAX_BYTES
 
@@ -576,8 +577,9 @@ async def test_o2_a_row_and_an_id_at_their_bounds_are_stored_and_one_byte_over_r
     def at(job):
         return F.record(findings=F.ok(
             [id_row(F.defender_row, job, 0, FINDING_ID_MAX_BYTES),
-             id_row(F.defender_row, job, 1, FINDING_ID_MAX_BYTES, "\u00e9"),
-             F.row_of_json_bytes(F.defender_row(job, 2), FINDING_ROW_MAX_BYTES)],
+             *(id_row(F.defender_row, job, n, FINDING_ID_MAX_BYTES, filler)
+               for n, filler in enumerate(F.MULTIBYTE_FILLERS, 1)),
+             F.row_of_json_bytes(F.defender_row(job, 4), FINDING_ROW_MAX_BYTES)],
             [id_row(F.world_row, job, 0, FINDING_ID_MAX_BYTES),
              F.row_of_json_bytes(F.world_row(job, 1), FINDING_ROW_MAX_BYTES)]))
 
@@ -589,6 +591,6 @@ async def test_o2_a_row_and_an_id_at_their_bounds_are_stored_and_one_byte_over_r
                 F.world_row(j, 0), FINDING_ROW_MAX_BYTES + 1, compact=True)]))]
     first, *refused = await _run(world, [at, *over], slots=len(over) + 1)
     dsn = world["dsn"]
-    assert job_row(dsn, first)["publish_state"] == "done" and len(_stored(dsn, first)) == 5  # noqa: PT018
+    assert job_row(dsn, first)["publish_state"] == "done" and len(_stored(dsn, first)) == 7  # noqa: PT018
     for job in refused:
         _refused_whole(dsn, job)

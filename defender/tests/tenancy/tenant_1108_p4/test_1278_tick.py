@@ -54,7 +54,7 @@ from defender.tests.tenancy.tenant_1108_p4._drain_support import (
 )
 from defender.tests.tenancy.tenant_1108_p4._support import git
 
-pytestmark = pytest.mark.postgres
+pytestmark = [pytest.mark.postgres, pytest.mark.usefixtures("tick_impl")]  # the tick over each store implementation (conftest)
 
 
 def _seed(w, *fids):
@@ -243,6 +243,7 @@ def _snapshot(w):
             len(_record(w)), len(w.t.forge.creates), len([r for r in w.t.forge.requests if r.method != "GET"]))
 
 
+@own_store("the refusal is raised in-process at `LearningStore.claim`: the port's helper holds its own store, and the port's refusals are the conformance module's")
 @pytest.mark.parametrize("lane", ["author", "lead_author"])
 @pytest.mark.parametrize("refusal", ["LaneBusy", "TenantInactive"])
 def test_a_claim_the_store_refuses_ends_the_tick_at_zero_with_nothing_changed(world, caplog, monkeypatch, lane, refusal):  # noqa: F811 — the imported fixture

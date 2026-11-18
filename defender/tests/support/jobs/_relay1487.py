@@ -181,6 +181,10 @@ class PostStepHelper:
     def port(self, ask: Callable[..., dict[str, Any]] | None = None) -> Any:
         return self.container(ask).tick_store()
 
+    def requests(self) -> list[str]:
+        """The store requests the helper answered so far (counted in the helper), from every process that asked."""
+        return self._process.requests()
+
     def signal(self) -> None:
         """Tell the helper to stop, as the worker does."""
         os.kill(self._process.helper_pid, signal.SIGTERM)
