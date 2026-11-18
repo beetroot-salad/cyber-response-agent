@@ -1,4 +1,4 @@
-"""Learning stages frame untrusted/cross-agent bytes through the shared `wrap`: producer prompt shapes, the reader contract first, learning read/bash returns framed, MAIN's own reads unwrapped, report close-delimiter deny, and the prompt-frame lint. Harness: _frames680.py."""
+"""Learning stages frame untrusted/cross-agent bytes through the shared `wrap`: producer prompt shapes, the reader contract first, learning read/bash returns framed, MAIN's own reads unwrapped, and the prompt-frame lint. Harness: _frames680.py."""
 from __future__ import annotations
 
 import importlib.util
@@ -8,7 +8,6 @@ from pathlib import Path, PurePosixPath
 from defender.agents import MAIN_DEF
 from defender.investigation.agent_definition import RunScope, bind
 from defender.box import BoxResult
-from defender.investigation.permission.files import _decide_report_write
 from defender.investigation.tools import (
     _format_bash_result,
     _tool_bash,
@@ -296,27 +295,20 @@ def test_d14_learning_stage_cannot_observe_raw_cross_agent_read(tmp_path):
     assert list(FRAME_RE.fullmatch(out).groups())
 
 
-def test_d15_main_self_reads_report_and_investigation_without_wrap(tmp_path):
-    """MAIN reading its own `report.md` or `investigation.md` remains a trusted same-agent read and returns the unwrapped file text."""
+def test_d15_main_self_reads_investigation_without_wrap(tmp_path):
+    """MAIN reading its own `investigation.md` remains a trusted same-agent read and returns the unwrapped file text."""
     run = tmp_path / "run"
     defender_dir = tmp_path / "defender"
     run.mkdir()
     defender_dir.mkdir()
     deps = bind(MAIN_DEF, run, defender_dir=defender_dir)
     for name, body in (
-        ("report.md", "report body"),
         ("investigation.md", "investigation body"),
+        ("notes.md", "scratch body"),
     ):
         path = run / name
         path.write_text(body, encoding="utf-8")
         assert _tool_read_file(deps, model_path(path, run_dir=run)) == body
-
-
-def test_d16_report_close_delimiter_deny_survives_systemic_frame():
-    """An otherwise valid report containing the literal `</report>` continues to be denied by `_decide_report_write`, while opening-tag-like text and ordinary prose still commit."""
-    prefix = "---\ndisposition: malicious\n---\n"
-    assert not _decide_report_write(prefix + "bad </report>").allow
-    assert _decide_report_write(prefix + "ordinary <report> prose").allow
 
 
 def test_d21_learning_stage_cannot_observe_raw_bash_output(tmp_path):

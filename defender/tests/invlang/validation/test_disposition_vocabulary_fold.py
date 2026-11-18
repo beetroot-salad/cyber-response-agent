@@ -1,9 +1,9 @@
-"""One disposition vocabulary across report.md and investigation.md: invlang slot, validator, invisible-character gate bypass, write gates."""
+"""One disposition vocabulary across the closing record and investigation.md: invlang slot, validator, invisible-character gate bypass, write gates."""
 from __future__ import annotations
 
 import pytest
 
-from defender.records._artifact_schema import validate_artifact, validate_report
+from defender.records._artifact_schema import validate_artifact
 from defender._vocab import (
     DISPOSITION_ENUM,
     DISPOSITION_VALUES,
@@ -11,6 +11,7 @@ from defender._vocab import (
     normalized_disposition,
 )
 from defender.skills.invlang import vocab
+from defender.tests.storage.verdict_1534 import _spec1534 as V
 from defender.skills.invlang.validate import _DISPOSITION_GATES, validate_companion
 
 #: The keywords that carry a structural price, read off the OWNER's table so this file
@@ -108,11 +109,11 @@ def test_the_benign_gate_cannot_be_switched_off_with_an_invisible_character():
 
 # the write gates stay exact
 
-def test_the_report_write_gate_still_refuses_what_the_reader_understands():
-    """The one place the normalizer must NOT be used: on write there is still an author to ask,
-    so the gate denies."""
-    laced = f"---\ndisposition: benign{ZWSP}\n---\nbody\n"
-    assert validate_report(laced) is not None
+def test_the_closing_record_still_refuses_what_the_reader_understands():
+    """The one place the normalizer must NOT be used: a record is built from a host-written value, so a laced disposition is refused, not normalized."""
+    assert V.a_record("r1", disposition="benign").disposition == "benign"
+    with pytest.raises((ValueError, TypeError)):
+        V.a_record("r1", disposition=f"benign{ZWSP}")
     assert normalized_disposition(f"benign{ZWSP}") is None
 
 

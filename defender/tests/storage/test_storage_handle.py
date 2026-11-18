@@ -208,7 +208,7 @@ def test_each_accessor_is_checked_against_its_own_root_not_one_assumed_root(base
     assert location_path(owner.sessions_dir(fixture_runs_base(base))) == sessions, (
         "the sessions directory is not a sibling of the runs base")
     assert owner.session_db(fixture_runs_base(base), S.LINEAGE_ID).parent == sessions
-    for name in ("alert", "report", "investigation", "executed_queries", "wire_log",
+    for name in ("alert", "investigation", "executed_queries", "wire_log",
                  "provenance", "tool_trace"):
         assert getattr(owner, name).is_relative_to(run_dir), f"{name}'s root is the run directory"
 

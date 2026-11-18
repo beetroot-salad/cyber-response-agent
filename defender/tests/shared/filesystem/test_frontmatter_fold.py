@@ -1,14 +1,11 @@
-"""Each frontmatter reader (predicted_disposition, read_description, descriptor_catalog, parse_report, check_skill, strip_frontmatter) routes through the one canonical grammar."""
+"""Each frontmatter reader (read_description, descriptor_catalog, check_skill) routes through the one canonical grammar."""
 from __future__ import annotations
 
 from pathlib import Path
 
 from defender._frontmatter import parse_frontmatter_or_none
 from defender.tests.support.shared.contracts._by_path import DEFENDER, load_module
-from evaluations.held_out import predicted_disposition
-from defender._vocab import DISPOSITION_ENUM
 from defender.systems.verb_grant import VerbGrant
-from defender.presentation import visualize_primitives as vp
 from defender.systems.verbs import read_roster
 from defender.tests.support.shared.contracts import _system_index_1256 as SI
 
@@ -25,11 +22,6 @@ def _scaffold():
                        name="vscaffold591")
 
 
-def _report_run(tmp: Path, name: str, content: bytes) -> Path:
-    r = tmp / name
-    r.mkdir(parents=True, exist_ok=True)
-    (r / "report.md").write_bytes(content)
-    return r
 
 
 def _skill(skills_dir: Path, system: str, content: bytes) -> None:
@@ -63,27 +55,6 @@ def _mk_scaffold_tree(tmp: Path, system: str, content: bytes) -> Path:
     return defroot
 
 
-def test_d0_predicted_disposition(tmp_path):
-    assert predicted_disposition(
-        _report_run(tmp_path, "ok", b"---\ndisposition: benign\n---\nbody\n")
-    ) == "benign"
-    assert predicted_disposition(tmp_path / "nope") is None
-    assert predicted_disposition(
-        _report_run(tmp_path, "junk", b"---disposition: benign\n...\n---\nbody\n")
-    ) is None
-    assert predicted_disposition(
-        _report_run(tmp_path, "absent", b"---\ncase_id: x\n---\nbody\n")
-    ) is None
-    assert predicted_disposition(
-        _report_run(tmp_path, "nonstr", b"---\ndisposition: 123\n---\nbody\n")
-    ) is None
-    assert "escalate" not in DISPOSITION_ENUM
-    assert predicted_disposition(
-        _report_run(tmp_path, "nonenum", b"---\ndisposition: escalate\n---\nbody\n")
-    ) is None
-    assert predicted_disposition(
-        _report_run(tmp_path, "nonutf8", b"---\ndisposition: benign\n---\n\xff\xfe\n")
-    ) is None
 
 
 def test_d0_read_description(tmp_path):
@@ -134,20 +105,6 @@ def test_d0_descriptor_catalog_seam(tmp_path):
     assert SI.listing(b) == []
 
 
-def test_d0_parse_report(tmp_path):
-    missing = vp.parse_report(tmp_path / "nope")
-    assert (missing.disposition, missing.body) == (None, "")
-    undecodable = vp.parse_report(
-        _report_run(tmp_path, "nb", b"---\ndisposition: benign\n---\n\xff\xfe\n")
-    )
-    assert (undecodable.disposition, undecodable.body) == (None, "")
-    whole = b"---\ndisposition: [unterminated\n---\nbody text\n"
-    malformed = vp.parse_report(_report_run(tmp_path, "mal", whole))
-    assert (malformed.disposition, malformed.body) == (None, whole.decode())
-    got = vp.parse_report(
-        _report_run(tmp_path, "ok", b"---\ndisposition: benign\n---\n\n  body middle  \n\n")
-    )
-    assert (got.disposition, got.body) == ("benign", "body middle")
 
 
 def test_d0_check_skill(tmp_path):
@@ -178,34 +135,34 @@ def test_d0_check_skill(tmp_path):
 
 
 def test_d_parity_grammar(tmp_path):
+    """`read_description` accepts exactly the frontmatter the canonical grammar parses to a mapping with a non-blank string `description`."""
+    hook = _hook()
     corpus = {
-        "well-formed": b"---\ndisposition: benign\n---\nbody\n",
-        "junk-opener": b"---disposition: benign\n...\n---\nbody\n",
-        "trailing-space-opener": b"--- \ndisposition: benign\n---\nbody\n",
-        "four-dash-opener": b"----\ndisposition: benign\n---\nbody\n",
-        "crlf": b"---\r\ndisposition: benign\r\n---\r\nbody\r\n",
-        "no-closer": b"---\ndisposition: benign\nbody no closer\n",
-        "loose-closer": b"---\ndisposition: benign\n--- junk\nbody\n",
+        "well-formed": b"---\ndescription: real desc\n---\nbody\n",
+        "junk-opener": b"---description: real desc\n...\n---\nbody\n",
+        "trailing-space-opener": b"--- \ndescription: real desc\n---\nbody\n",
+        "four-dash-opener": b"----\ndescription: real desc\n---\nbody\n",
+        "crlf": b"---\r\ndescription: real desc\r\n---\r\nbody\r\n",
+        "no-closer": b"---\ndescription: real desc\nbody no closer\n",
+        "loose-closer": b"---\ndescription: real desc\n--- junk\nbody\n",
         "empty-mapping": b"---\n---\n",
         "non-mapping": b"---\n- a\n- b\n---\nbody\n",
-        "second-fence-block": b"---\ndisposition: benign\n---\nbody\n---\nother: x\n---\n",
-        "non-str-disposition": b"---\ndisposition: 123\n---\nbody\n",
-        "non-enum-disposition": b"---\ndisposition: escalate\n---\nbody\n",
+        "second-fence-block": b"---\ndescription: real desc\n---\nbody\n---\nother: x\n---\n",
+        "non-str-description": b"---\ndescription: 123\n---\nbody\n",
+        "blank-description": b"---\ndescription: '   '\n---\nbody\n",
     }
+    skills = tmp_path / "skills"
     for label, content in corpus.items():
-        run = _report_run(tmp_path, label, content)
-        pred = predicted_disposition(run)
+        _skill(skills, label, content)
+        got = hook.read_description(label, skills_dir=skills)
         fm = parse_frontmatter_or_none(content.decode("utf-8"))
-        ref_disp = fm.get("disposition") if isinstance(fm, dict) else None
-        ref_valid = isinstance(ref_disp, str) and ref_disp in DISPOSITION_ENUM
-        assert (pred is not None) == ref_valid, label
-        if ref_valid:
-            assert pred == ref_disp, label
+        ref = fm.get("description") if isinstance(fm, dict) else None
+        valid = isinstance(ref, str) and bool(ref.strip())
+        assert (got is not None) == valid, label
+        if valid:
+            assert got == ref.strip(), label
+    assert any(hook.read_description(label, skills_dir=skills) for label in corpus), "control: the corpus holds an accepted case"
 
-
-def test_d_crlf_report_parses(tmp_path):
-    run = _report_run(tmp_path, "crlf", b"---\r\ndisposition: benign\r\n---\r\nbody\r\n")
-    assert predicted_disposition(run) == "benign"
 
 
 def test_d_unfenced_skill_none(tmp_path):
@@ -290,16 +247,8 @@ def test_d_catalog_survival():
     assert "—" in out, "the description's em-dash did not survive the fold"
 
 
-def test_d_non_mapping_collapse(tmp_path):
-    whole = b"---\n- a\n- b\n---\nbody\n"
-    got = vp.parse_report(_report_run(tmp_path, "lst", whole))
-    assert (got.disposition, got.body) == (None, whole.decode())
 
 
-def test_d_crlf_viewer_fix(tmp_path):
-    got = vp.parse_report(_report_run(tmp_path, "crlf", b"---\r\ndisposition: benign\r\n---\r\nbody\r\n"))
-    assert got.disposition == "benign"
-    assert got.body == "body"
 
 
 def test_d_uniform_indent_name_pass(tmp_path):

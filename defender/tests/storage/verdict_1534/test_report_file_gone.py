@@ -1,4 +1,4 @@
-"""#1534 V-NOFILE: no code reaches the retired `report.md`: product, tests, evaluations; model-facing text does not name it.
+"""#1534 V-NOFILE: no code reaches the retired `report.md`: product, tests, evaluations; no shipped text names it.
 
 Retirement is asserted as a class (the module, the layout classes and the handle's documents group have no `report`);
 the AST walk covers only retired names, imports of `records._report` and the file-name literal or constant.
@@ -19,10 +19,14 @@ import pytest
 REPO = Path(__file__).resolve().parents[4]
 EXEMPT = "# lint-report-file: ok"
 _PRODUCT_FLOOR = 300
+_TEXT_FLOOR = 30
+#: Left to the design's `LISTED` check (docs), to the tests, to `examples/` folders and to the three narrative files.
+EXEMPT_PREFIXES = ("defender/docs/", "defender/tests/")
+EXEMPT_NAMES = frozenset({"CLAUDE.md", "AGENTS.md", "README.md"})
 NAMED_FILE = re.compile(r"report\.md")
 #: Retired readers and types, reached by name (an import of one, a call of one, an attribute chain ending in one).
 RETIRED_NAMES = frozenset({"read_report", "parse_report", "parse_report_text", "require_report", "render_report",
-                           "ReportUnreadable", "ReportRead"})
+                           "validate_report", "read_archived_report", "_decide_report_write", "ReportUnreadable", "ReportRead"})
 #: Retired constants for the file's name.
 RETIRED_CONSTANTS = frozenset({"REPORT_NAME"})
 #: The census file itself is the one exemption by path; every other deliberate decoy or absence line carries `EXEMPT`.
@@ -99,6 +103,7 @@ def test_v_nofile_the_detector_finds_each_form_and_skips_exempted_lines_and_wire
     for line in ("x = run / 'report.md'", "# writes report.md", "see `report.md` in the folder"):
         assert named_lines(line), line
     for line in ("from a import read_report", "x = m.parse_report_text(t)", "require_report(r)", "y: ReportUnreadable",
+                 "validate_report(t)", "family.read_archived_report(b, p)", "from f import _decide_report_write",
                  "from defender.records._report import X", "from defender.records import _report",
                  "import defender.records._report", "from . import _report"):
         assert reaches(line), line
@@ -138,12 +143,31 @@ def test_v_nofile_no_test_or_evaluation_code_reaches_the_retired_file():
     assert found == {}, f"{len(found)} test or evaluation file(s) still reach the retired file: {sorted(found)}"
 
 
-def test_v_nofile_no_model_facing_text_names_the_file():
-    """`SKILL.md`, every skill page and the handbook no longer name `report.md`. (V-NOFILE)"""
-    files = [rel for rel in _tracked("defender/SKILL.md", "defender/skills/**/*.md")]
-    assert len(files) >= 10, f"the walk found only {len(files)} model-facing pages"
-    found = {rel: hits for rel in files if (hits := named_lines((REPO / rel).read_text(encoding="utf-8")))}
-    assert found == {}, f"model-facing text still names the file: {sorted(found)}"
+def _walked_text_files() -> list[str]:
+    """Every tracked non-Python file under `defender/` that is shipped text: not the docs (checked from `LISTED`), the tests,
+    an `examples/` folder, or a `CLAUDE.md`, `AGENTS.md` or `README.md`."""
+    return [rel for rel in _tracked("defender/*")
+            if not rel.endswith(".py") and not rel.startswith(EXEMPT_PREFIXES)
+            and "examples" not in Path(rel).parts and Path(rel).name not in EXEMPT_NAMES]
+
+
+def test_v_nofile_no_shipped_text_file_names_the_file():
+    """No tracked non-Python file under `defender/` outside the exempt set (skills, handbook, role prompts, config, assets) names `report.md`. (V-NOFILE)"""
+    files = _walked_text_files()
+    assert len(files) >= _TEXT_FLOOR, f"the walk found only {len(files)} files"
+    assert "defender/SKILL.md" in files
+    assert len([rel for rel in files if rel.startswith("defender/skills/") and rel.endswith(".md")]) >= 10
+    found = {rel: hits for rel in files if (hits := named_lines((REPO / rel).read_text(encoding="utf-8", errors="replace")))}
+    assert found == {}, f"shipped text still names the file: {sorted(found)}"
+
+
+def test_v_nofile_the_text_walk_is_not_limited_to_model_facing_pages():
+    """Control: the walk reaches a role prompt, a stylesheet and a non-Markdown file, and skips docs, tests, examples and the three exempt names."""
+    files = _walked_text_files()
+    assert any(rel.startswith("defender/learning/judge/") and rel.endswith(".md") for rel in files)
+    assert any(rel.endswith(".css") for rel in files)
+    assert any(not rel.endswith((".md", ".css")) for rel in files)
+    assert not [rel for rel in files if rel.startswith(EXEMPT_PREFIXES) or Path(rel).name in EXEMPT_NAMES]
 
 
 @pytest.mark.parametrize("rel", LISTED)

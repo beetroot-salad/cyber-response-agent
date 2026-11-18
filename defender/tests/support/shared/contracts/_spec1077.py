@@ -120,7 +120,7 @@ GROUPS = ("tables", "facts", "documents", "observability", "session")
 GROUP_MEMBERS: dict[str, tuple[str, ...]] = {
     "tables": ("queries", "policy_denials", "leads", "payloads", "ticket_reads"),
     "facts": ("alert", "alert_record", "provenance", "run_end", "scrub_verdict"),
-    "documents": ("investigation", "report", "gather_summaries", "lead_author"),
+    "documents": ("investigation", "gather_summaries", "lead_author"),
     "observability": (
         "wire_log", "review_trace", "tool_trace", "review_record",
         "lessons_loaded", "ticket_write", "runtime_html", "box_sentinel", "session_pointer"),
@@ -134,7 +134,7 @@ MEMBER_ACCESSOR: dict[str, str] = {
     "payloads": "payload", "ticket_reads": "ticket_read",
     "alert": "alert", "alert_record": "alert_record", "provenance": "provenance", "run_end": "run_end_sidecar",
     "scrub_verdict": "scrub_verdict",
-    "investigation": "investigation", "report": "report",
+    "investigation": "investigation",
     "gather_summaries": "gather_summary", "lead_author": "lead_author",
     "wire_log": "wire_log", "review_trace": "review_trace",
     "tool_trace": "tool_trace",
@@ -152,7 +152,7 @@ MEMBER_VERB: dict[str, str | None] = {
     "queries": "append", "policy_denials": "append", "leads": "write", "payloads": "write",
     "ticket_reads": "write",
     "alert": "write", "alert_record": "write", "provenance": "write", "run_end": "write", "scrub_verdict": "write",
-    "investigation": "write", "report": "write", "gather_summaries": "write",
+    "investigation": "write", "gather_summaries": "write",
     "lead_author": None,
     "wire_log": "append", "review_trace": "append",
     "tool_trace": "append", "review_record": "write", "lessons_loaded": "append",
@@ -181,7 +181,7 @@ VERBS = ("write", "append", "update", "open", "append_text", "start_stream", "cr
 
 #: The archive's copied set, as `ArchivedWorld` accessor names.
 ARCHIVED_WORLD_MEMBERS = (
-    "report", "investigation", "provenance", "scrub_verdict", "run_end", "lessons_loaded",
+    "investigation", "provenance", "scrub_verdict", "run_end", "lessons_loaded",
     "alert", "gather_summaries", "executed_queries", "gather_raw")
 
 
@@ -228,7 +228,6 @@ STAGE = "questioner"
 
 ACCESSOR_FOR_KIND: tuple[Accessor, ...] = (
     Accessor("alert", "run", "alert"),
-    Accessor("report", "run", "report"),
     Accessor("investigation", "run", "investigation"),
     Accessor("queries", "run", "executed_queries"),
     Accessor("gather_raw", "run", "payload", (LEAD_ID, SEQ), composing=True),
