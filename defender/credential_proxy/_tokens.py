@@ -2,7 +2,7 @@
 
 Wire form: `<payload>.<signature>`, where `<payload>` is base64url (no padding) of a JSON object
 with exactly `tenant` (tenant id), `investigation` (the run id, #1081), `grant` (a list of
-`[system, "r" | "rw"]`, sorted) and `exp` (expiry, Unix seconds). The signer signs the payload's
+`[system, "r"]` or `[system, "rw", ticket]`, sorted) and `exp` (expiry, Unix seconds). The signer signs the payload's
 ASCII bytes, and the verifier is handed those same bytes: the claims are read only once the
 signature over them is valid, and with the key of the tenant they name (A11). The token names no
 commit: the proxy always applies `current` (P-2)."""
@@ -14,7 +14,7 @@ import json
 import re
 import time
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
@@ -22,6 +22,7 @@ from defender import tenancy
 from defender.kit.access import TOKEN_SEC, RequestAccess
 from defender.kit.faults import AdapterFault, ConfigFault
 from defender.kit.verbs import is_system_name
+from defender.records.formats import case_key_of
 
 READ = "r"
 READ_WRITE = "rw"
@@ -52,20 +53,23 @@ class TokenVerifier(Protocol):
 
 @dataclass(frozen=True)
 class Claims:
-    """A token's claims: `grant` maps each granted system to its mode."""
+    """A token's claims: `grant` maps each granted system to its mode, and `tickets` each `rw`
+    system to the ticket its write pass names (X1; a `r` system has none)."""
 
     tenant: str
     investigation: str
     grant: Mapping[str, str]
     exp: int
+    tickets: Mapping[str, str] = field(default_factory=dict)
 
 
 def mint_request_token(signer: TokenSigner, *, tenant_id: str, investigation: str,
-                       grant: Iterable[tuple[str, str]], expires_at: datetime) -> str:
-    """A token for `tenant_id`'s run `investigation`, granting each `(system, "r" | "rw")` of
-    `grant` until `expires_at` (aware), signed by `signer`. Any claim out of shape (a system
-    name outside the grammar included, or a system granted twice) is `ConfigFault` and nothing
-    is signed."""
+                       grant: Iterable[tuple[str, ...]], expires_at: datetime) -> str:
+    """A token for `tenant_id`'s run `investigation`, granting each `(system, "r")` or
+    `(system, "rw", ticket)` of `grant` until `expires_at` (aware), signed by `signer`: a write
+    pass names its ticket (X1), a case key. Any claim out of shape (a system name outside the
+    grammar, a system granted twice, `rw` without a ticket, a ticket on `r` or outside the case-key
+    grammar included) is `ConfigFault` and nothing is signed."""
     if not isinstance(expires_at, datetime) or expires_at.tzinfo is None:
         raise ConfigFault("a request token's expiry must be an aware datetime")
     doc: dict[str, Any] = {"tenant": tenant_id, "investigation": investigation,
@@ -79,12 +83,12 @@ def mint_request_token(signer: TokenSigner, *, tenant_id: str, investigation: st
 
 
 def run_token_mint(signer: TokenSigner, *, tenant_id: str,
-                   investigation: str) -> Callable[[Iterable[tuple[str, str]], float], str]:
+                   investigation: str) -> Callable[[Iterable[tuple[str, ...]], float], str]:
     """The one way a process signs its run's tokens, read and write-back alike: `mint(grant,
     expires_at)` signs `grant` for `tenant_id`'s run `investigation` until `expires_at`, in
     seconds of the caller's clock."""
 
-    def mint(grant: Iterable[tuple[str, str]], expires_at: float) -> str:
+    def mint(grant: Iterable[tuple[str, ...]], expires_at: float) -> str:
         return mint_request_token(signer, tenant_id=tenant_id, investigation=investigation,
                                   grant=grant, expires_at=datetime.fromtimestamp(expires_at, UTC))
 
@@ -123,7 +127,7 @@ def split_token(token: str) -> tuple[bytes, str, Claims]:
     return payload.encode("ascii"), signature, _claims_of(doc)
 
 
-def _claims_of(doc: Any) -> Claims:  # noqa: C901 — one flat shape check
+def _claims_of(doc: Any) -> Claims:
     if not isinstance(doc, dict) or set(doc) != _CLAIM_KEYS:
         raise ConfigFault(f"request token claims must be exactly {sorted(_CLAIM_KEYS)}")
     tenant, investigation, grant, exp = (doc["tenant"], doc["investigation"], doc["grant"],
@@ -136,22 +140,44 @@ def _claims_of(doc: Any) -> Claims:  # noqa: C901 — one flat shape check
     if isinstance(exp, bool) or not isinstance(exp, int):
         raise ConfigFault("a request token's expiry must be whole Unix seconds")
     if not isinstance(grant, list):
-        raise ConfigFault("a request token's grant must be a list of [system, mode]")
+        raise ConfigFault(_GRANT_SHAPE)
     granted: dict[str, str] = {}
+    tickets: dict[str, str] = {}
     for entry in grant:
-        if not (isinstance(entry, list) and len(entry) == 2
-                and all(isinstance(part, str) for part in entry)):
-            raise ConfigFault("a request token's grant must be a list of [system, mode]")
-        system, mode = entry
-        if not is_system_name(system):
-            raise ConfigFault(f"a request token may not grant {system!r}: not a system name")
-        if mode not in MODES:
-            raise ConfigFault(f"a request token grants {system} with mode {mode!r}, not one of "
-                              f"{list(MODES)}")
+        system, mode, ticket = _entry_of(entry)
         if system in granted:
             raise ConfigFault(f"a request token grants {system} twice")
         granted[system] = mode
-    return Claims(tenant=tenant, investigation=investigation, grant=granted, exp=exp)
+        if ticket is not None:
+            tickets[system] = ticket
+    return Claims(tenant=tenant, investigation=investigation, grant=granted, exp=exp,
+                  tickets=tickets)
+
+
+_GRANT_SHAPE = ('a request token\'s grant must be a list of [system, "r"] and [system, "rw", '
+                "ticket]")
+
+
+def _entry_of(entry: Any) -> tuple[str, str, str | None]:
+    """One grant entry as `(system, mode, ticket)`: `[system, "r"]` or `[system, "rw", ticket]`,
+    the ticket a case key (X1), or `ConfigFault`."""
+    if not (isinstance(entry, list) and len(entry) in (2, 3)
+            and all(isinstance(part, str) for part in entry)):
+        raise ConfigFault(_GRANT_SHAPE)
+    system, mode, *rest = entry
+    ticket = rest[0] if rest else None
+    if not is_system_name(system):
+        raise ConfigFault(f"a request token may not grant {system!r}: not a system name")
+    if mode not in MODES:
+        raise ConfigFault(f"a request token grants {system} with mode {mode!r}, not one of "
+                          f"{list(MODES)}")
+    if (mode == READ_WRITE) != (ticket is not None):
+        raise ConfigFault(f"a request token grants {system} with mode {mode!r}: only a "
+                          f"`{READ_WRITE}` entry names a ticket, and it must")
+    if ticket is not None and case_key_of(ticket) != ticket:
+        raise ConfigFault(f"a request token's write pass on {system} names a ticket that is not a "
+                          "case key")
+    return system, mode, ticket
 
 
 __all__ = ["MODES", "READ", "READ_WRITE", "Claims", "TokenSigner", "TokenVerifier",

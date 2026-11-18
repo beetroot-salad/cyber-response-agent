@@ -409,22 +409,24 @@ def test_the_jobs_columns_are_the_designed_ones_without_server_defaults(migrated
     assert set(investigations) == {"id", "tenant_id", "alert_id", "request_key", "attempt", "stage", "created_at",
                                    "started_at", "finished_at", "disposition", "cost_usd", "knowledge",
                                    "failure_reason", "failure_message", "lease_expires_at", "accounting_written_at",
-                                   "cost_is_lower_limit"}
+                                   "cost_is_lower_limit", "update_ticket"}  # #1471: the request's flag
     # #1345 (data model): the store derives an alert's title and description from the tenant's mapping, so both are nullable.
     assert {n for n, (_, nullable, _) in alerts.items() if nullable} == {"title", "description"}
     nullable = {n for n, (_, can_be_null, _) in investigations.items() if can_be_null}
     assert nullable == {"started_at", "finished_at", "disposition", "cost_usd", "knowledge", "failure_reason",
-                        "failure_message", "lease_expires_at", "accounting_written_at"}
+                        "failure_message", "lease_expires_at", "accounting_written_at"}  # #1471: `update_ticket` is required
     assert alerts["raw"][0] == "bytea"
     assert investigations["cost_usd"][0] == "double precision"
     assert investigations["cost_is_lower_limit"][0] == "boolean"
+    assert investigations["update_ticket"][0] == "boolean"
     assert [c for cols in (alerts, investigations) for c, (_, _, default) in cols.items() if default is not None] == []
 
 
 @pytest.mark.postgres
 def test_the_jobs_constraints_are_exactly_the_designed_ones(migrated_database):
     """PKs, the tenant FK, the alert uniques, the composite FK, the attempt unique, a stage CHECK, #1343's lease CHECK and #1377's
-    lower-limit-needs-a-cost CHECK; no other constraint (#1342 M10; #1377 S4: the job row enforces it)."""
+    lower-limit-needs-a-cost CHECK; no other constraint (#1342 M10; #1377 S4: the job row enforces it; #1471 r9 R9-1: no
+    outcome-word CHECK)."""
     alerts = _jobs_constraints(migrated_database, "alerts")
     assert [(kind, cols) for kind, cols, _ in alerts] == sorted([
         ("f", ("tenant_id",)), ("p", ("id",)), ("u", ("id", "tenant_id")),

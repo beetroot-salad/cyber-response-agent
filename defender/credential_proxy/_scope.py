@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass
 from urllib.parse import unquote, urlsplit
 
-from defender.kit.access import AccessDeclaration, Route
+from defender.kit.access import AccessDeclaration, Route, ticket_write_fault
 from defender.kit.paths import holds_separator, url_form_fault, url_path_fault
 from defender.credential_proxy._refusal import CONFIG, CONFINEMENT, Refused
 from defender.kit.faults import ORIGIN_REQUEST, ORIGIN_SETUP
@@ -70,19 +70,46 @@ def locate(declaration: AccessDeclaration, url: str) -> Target:
 
 
 def check_route(declaration: AccessDeclaration, system: str, method: str, path: str,
-                mode: str) -> None:
-    """`Refused` unless `method` on `path` (relative to the base) is a read, or a declared write
-    and `mode` (the token's grant on `system`) is read-write. GET and HEAD are reads; another
-    method is a read only if a read route lists it (O3, A14)."""
+                mode: str, ticket: str | None = None) -> None:
+    """`Refused` unless `method` on `path` (relative to the base) is a read, or the one write a
+    write pass names. GET and HEAD are reads; another method is a read only if a read route lists
+    it (O3, A14). A read-write grant always names its ticket (X1, `_tokens`), and under it every
+    other method is judged by `_ticket_write` alone: there is no write without a ticket."""
     if not _METHOD.fullmatch(method):
         raise Refused(CONFIG, f"{method[:20]!r} is not an upper-case HTTP method", origin=ORIGIN_REQUEST)
-    if method in READ_METHODS or _route_listed(declaration.reads, method, path):
+    if method in READ_METHODS:
         return
-    if not _route_listed(declaration.writes, method, path):
-        raise Refused(CONFINEMENT, f"{method} {path} is not a declared route of {system}", origin=ORIGIN_REQUEST)
-    if mode != READ_WRITE:
+    if mode == READ_WRITE:
+        if ticket is None:
+            raise Refused(CONFINEMENT, f"the token's write pass on {system} names no ticket", origin=ORIGIN_REQUEST)
+        return _ticket_write(declaration, system, method, path, ticket)
+    if _route_listed(declaration.reads, method, path):
+        return
+    if _route_listed(declaration.writes, method, path):
         raise Refused(CONFINEMENT, f"{method} {path} is a write and the token grants {system} "
                                    "read only", origin=ORIGIN_REQUEST)
+    raise Refused(CONFINEMENT, f"{method} {path} is not a declared route of {system}", origin=ORIGIN_REQUEST)
+
+
+def _ticket_write(declaration: AccessDeclaration, system: str, method: str, path: str,
+                  ticket: str) -> None:
+    """X1: under a write pass naming `ticket`, a non-read method is allowed only when the system
+    declares exactly one write route with exactly one wildcard segment and only GET reads (X2,
+    enforced here, not trusted from the store), and `method` on `path` is that route with the
+    wildcard segment decoding to `ticket`."""
+    reason = ticket_write_fault(declaration)
+    if reason is not None:
+        raise Refused(CONFINEMENT, f"{system} cannot be written under a ticket pass: {reason}",
+                      origin=ORIGIN_REQUEST)
+    (route,) = declaration.writes
+    if route.method != method or not _route_pattern_matches(route.path, path):
+        raise Refused(CONFINEMENT, f"{method} {path} is not the one write route of {system}",
+                      origin=ORIGIN_REQUEST)
+    wanted = route.path.split("/")
+    segment = path.split("/")[wanted.index("*")]
+    if unquote(segment) != ticket:
+        raise Refused(CONFINEMENT, f"{method} {path} is not on the ticket the token names",
+                      origin=ORIGIN_REQUEST)
 
 
 def _route_listed(routes: tuple[Route, ...], method: str, path: str) -> bool:

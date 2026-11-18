@@ -110,7 +110,7 @@ async def _run_flow(migrated_database, tmp_path, monkeypatch, request, *, invest
 
         def investigation(launch) -> list[str]:
             return [sys.executable, str(entry), investigate_mode, t.commit, str(marks / "investigate"),
-                    *tail(launch, launch.investigation_id)]
+                    *tail(launch, launch.investigation_id), "--alert-digest", launch.alert_digest]  # C-1: the digest the worker hands the helper
 
         async with job_store(migrated_database) as store:
             alert = await an_alert(store, t.tenant_id, raw=(golden / "alert.json").read_bytes())

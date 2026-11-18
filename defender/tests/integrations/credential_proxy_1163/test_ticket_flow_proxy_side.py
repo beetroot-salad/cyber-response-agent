@@ -35,6 +35,7 @@ from defender.tests.integrations.credential_proxy_1163.test_proxy_faults_proxy_s
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER
 from defender.tests.support.tenancy import _tenants1106 as T1106
+from defender.tests.support.runtime.engine._spec767 import ticket_link_for
 
 REASON = "store says no: duplicate-or-invalid"
 
@@ -49,7 +50,7 @@ def _comment_leg(tmp_path, data_root, status: int, caplog):
                                json.dumps({"detail": REASON}).encode())
         store = H.FakeStore({(t.tenant_id, SYSTEM): T.static_set()})
         with A.proxy_for(t, store) as (url, _tap):
-            receipt = _leg(t, run, rec, url, T.token(t.tenant_id, {(SYSTEM, "rw")}))
+            receipt = _leg(t, run, rec, url, T.token(t.tenant_id, {(SYSTEM, "rw", KEY)}))
         return receipt, up
 
 
@@ -90,7 +91,7 @@ def test_t7_a_store_nothing_listens_at_is_reported_as_could_not_be_reached(tmp_p
         rec, run = _run(tmp_path)
         store = H.FakeStore({(t.tenant_id, SYSTEM): T.static_set()})
         with A.proxy_for(t, store) as (url, tap):
-            receipt = _leg(t, run, rec, url, T.token(t.tenant_id, {(SYSTEM, "rw")}))
+            receipt = _leg(t, run, rec, url, T.token(t.tenant_id, {(SYSTEM, "rw", KEY)}))
     assert tap.tokens, "control: the proxy was reached"
     assert receipt is not None
     assert (receipt["ok"], receipt["status"], receipt["key"]) == (False, "error", KEY), receipt
@@ -117,7 +118,7 @@ def test_t5_a_proxy_blip_loses_the_comment_not_the_run_and_the_next_one_posts(
     caplog.set_level(logging.INFO)
     with H.upstream() as up, _published(tmp_path / "forge", data_root, _decl(up)) as t:
         store = _DownOnce({(t.tenant_id, SYSTEM): T.static_set()})
-        tok = T.token(t.tenant_id, {(SYSTEM, "rw")})
+        tok = T.token(t.tenant_id, {(SYSTEM, "rw", KEY)})
         with A.proxy_for(t, store) as (url, _tap):
             first_rec, first_run = _run(tmp_path / "a")
             lost = _leg(t, first_run, first_rec, url, tok)
@@ -144,7 +145,8 @@ def _leg_with_adapter_raising(tmp_path, data_root, raises):
         stub = dataclasses.replace(real, module=types.SimpleNamespace(add_case_comment=raises))
         S.ticket_writer().record_case_ticket(
             run, tenant=tenant, defender_dir=DEFENDER, env=run_env(DEFENDER, rec.run_dir_at),
-            request_token=T.token(t.tenant_id, {(SYSTEM, "rw")}), proxy_url=up.url, case=stub)
+            request_token=T.token(t.tenant_id, {(SYSTEM, "rw", KEY)}), proxy_url=up.url, case=stub,
+            link=ticket_link_for(rec.run_dir_at))
         return S.receipt(rec.run_dir_at)
 
 
@@ -196,7 +198,7 @@ def _proxied_leg(tmp_path, data_root, make_store, *, decl=None, before=None, **d
         rec, run = _run(tmp_path)
         store = make_store({(t.tenant_id, SYSTEM): T.static_set()})
         with A.proxy_for(t, store, **deps_kw) as (url, tap):
-            receipt = _leg(t, run, rec, url, T.token(t.tenant_id, {(SYSTEM, "rw")}))
+            receipt = _leg(t, run, rec, url, T.token(t.tenant_id, {(SYSTEM, "rw", KEY)}))
         return receipt, tap, up
 
 
@@ -293,7 +295,7 @@ def test_t14_a_store_that_accepted_the_comment_and_then_dropped_the_reply_has_it
             rec, run = _run(tmp_path)
             store = H.FakeStore({(t.tenant_id, SYSTEM): T.static_set()})
             with A.proxy_for(t, store, **deps_kw) as (url, tap):
-                receipt = _leg(t, run, rec, url, T.token(t.tenant_id, {(SYSTEM, "rw")}))
+                receipt = _leg(t, run, rec, url, T.token(t.tenant_id, {(SYSTEM, "rw", KEY)}))
     assert tap.tokens, "positive control: the proxy was reached"
     assert receipt is not None
     assert (receipt["ok"], receipt["status"], receipt["key"]) == (True, "commented", KEY), receipt
@@ -329,7 +331,7 @@ def _write_fault(tmp_path, data_root, kind):
             up.replies[COMMENT] = (201, {}, b"{}")
         with _published(tmp_path / "forge", data_root, decl) as t:
             store = stores.get(kind, H.FakeStore)({(t.tenant_id, SYSTEM): T.static_set()})
-            tok = T.token(t.tenant_id, {(SYSTEM, "rw")})
+            tok = T.token(t.tenant_id, {(SYSTEM, "rw", KEY)})
             with A.proxy_for(t, store, **deps_kw) as (url, _tap):
                 if kind == "no-proxy-address":
                     url = None

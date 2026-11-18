@@ -94,6 +94,8 @@ class InvestigationRow(Base, kw_only=True):
     lease_expires_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
     #: When the holder wrote its final cost and knowledge: internal, written once (#1343 B-P2).
     accounting_written_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
+    #: Whether the investigation posts to its ticket (#1471 W1): set at create, copied by a retry.
+    update_ticket: Mapped[bool] = mapped_column(Boolean)
 
 
 LEARNING_STATUSES = ("queued", "running", "completed", "failed", "skipped")
@@ -207,6 +209,7 @@ class InvestigationRecord:
     knowledge: dict[str, Any] | None
     failure_reason: str | None
     failure_message: str | None
+    update_ticket: bool
 
 
 @dataclasses.dataclass(frozen=True)
@@ -302,4 +305,5 @@ def investigation_record(row: InvestigationRow) -> InvestigationRecord:
         attempt=row.attempt, stage=row.stage, created_at=row.created_at, started_at=row.started_at,
         finished_at=row.finished_at, disposition=row.disposition, cost_usd=row.cost_usd,
         cost_is_lower_limit=reads_at_least(row),
-        knowledge=row.knowledge, failure_reason=row.failure_reason, failure_message=row.failure_message)
+        knowledge=row.knowledge, failure_reason=row.failure_reason, failure_message=row.failure_message,
+        update_ticket=row.update_ticket)

@@ -45,27 +45,18 @@ never ask for, or accept, a value.
 
 ## A case system — the run-end comment
 
-A case system is the ticketing system an investigation started with `--update-ticket` comments
-on when it ends: its findings, as one comment on the ticket the alert names. Today only operator
-runs comment; alerts that arrive through the API never do.
+A case system is the ticketing system an investigation comments on when it ends, if its
+start-investigation request set `update_ticket`: one comment on the ticket the alert names, naming
+the disposition and linking the investigation's screen. The wording is fixed by the product, not
+the tenant's; an operator's hand-run investigation never comments.
 
-**The case record — `case-record.yaml`.** Which system takes the comment and the comment's body
-template:
+**The case record — `case-record.yaml`.** Which system takes the comment:
 
 ```yaml
 system: jira
-comment:
-  body: |
-    Disposition: {disposition}
-    {cause}
-
-    {narrative}
 ```
 
-The body is the tenant's: there is no product default, so agree it with the maintainer. It may
-use `{case_id}`, `{signature}`, `{summary}`, `{disposition}`, `{cause}`, `{narrative}` and
-`{event_time}`; anything else is refused. The host opens every comment with its own tag line
-naming the run, so the body need not.
+The host opens every comment with its own tag line naming the run.
 
 **The ticket key.** The alert must carry the key of the ticket the run comments on, and the
 tenant's alert mapping must point `case_key` at that field (a dotted path into the alert). Ask the

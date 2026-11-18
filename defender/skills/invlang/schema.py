@@ -321,7 +321,10 @@ class Conclude(TypedDict, total=False):
     disposition: str | None
     impact_verdict: str | None
     impact_severity: str | None
+    # `enum conclude.confidence`; benign only. The committed value is computed at the close.
     confidence: str | None
+    # `enum conclude.attacker_gain`: what an attacker who did this would have gained.
+    attacker_gain: str | None
     matched_archetype: str | None
     ceiling_rationale: str | None
     summary: str | None

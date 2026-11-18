@@ -179,7 +179,8 @@ def _leg_over_planted_adapter(tmp_path: Path, monkeypatch: Any, *, method: str, 
     record = M.current_record()
     ticket_writer.record_case_ticket(
         fixture_run(run_dir), tenant=record, defender_dir=tree, case=T1106.case_for(record, tree),
-        env=box_mod.run_env(S.DEFENDER, run_dir), proxy_url=store.url, request_token=M.WRITE_TOKEN)
+        env=box_mod.run_env(S.DEFENDER, run_dir), proxy_url=store.url, request_token=M.WRITE_TOKEN,
+        link=M.ticket_link_for(run_dir))
     return store, M.receipt(run_dir)
 
 

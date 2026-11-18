@@ -19,7 +19,7 @@ import pytest
 
 from defender.systems import case_system
 from defender.systems.verb_grant import GrantError
-from defender.tests.support.runtime.engine._spec767 import write_report
+from defender.tests.support.runtime.engine._spec767 import ticket_link_for, write_report
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.tenancy import _systems1366 as R
 from defender.tests.support.tenancy import _tenants1106 as T
@@ -82,7 +82,7 @@ def _answer(surface: str, tenant: Any, tmp_path: Path) -> Any:
         # the very argument this surface is asked without.
         S.ticket_writer().record_case_ticket(
             S._run_handle_1165(run_dir), tenant=tenant, defender_dir=S.DEFENDER, env={},
-            proxy_url=proxy.url, request_token="write-token-r16")
+            proxy_url=proxy.url, request_token="write-token-r16", link=ticket_link_for(run_dir))
         receipt = S.receipt(run_dir) or {}
         return ("receipt", receipt.get("status"), [r for r in proxy.requests() if r["method"] == "POST"],
                 receipt.get("reason") or "")

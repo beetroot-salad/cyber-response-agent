@@ -8,14 +8,14 @@ person's request to abandon a parked batch, which the loop carries out.
 The backfill reads the texts today's code writes, frozen here so a later change to a text cannot change what an old row
 means. Any text it does not know (anything a model wrote) is `unrecorded`. Batches already parked keep `parked_at` NULL.
 
-Revision ID: 0021_learning_causes
-Revises: 0020_signin_attempts
+Revision ID: 0022_learning_causes
+Revises: 0021_ticket_write
 """
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0021_learning_causes"
-down_revision = "0020_signin_attempts"
+revision = "0022_learning_causes"
+down_revision = "0021_ticket_write"
 
 SCHEMA = "learning"
 

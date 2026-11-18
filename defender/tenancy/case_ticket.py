@@ -1,18 +1,14 @@
 from __future__ import annotations
 
-import re
 import logging
 
-from defender.records import formats
 from defender._model import model
 from defender.records.formats import ReportUnreadable, require_report
 from defender.records import Run
-from defender.tenancy.case_record import CaseRecordSettings, CaseTicketError, format_template, render_context
+from defender.tenancy.case_record import CaseTicketError
 
 _logger = logging.getLogger(__name__)
 
-
-_SIGNATURE_FALLBACK = "unknown"
 
 #: The one bound on the posted comment body, tag line included, in UTF-8 bytes. The cut rounds
 #: down to a whole character and the ellipsis fits inside the bound.
@@ -26,9 +22,6 @@ _ELLIPSIS = "…"
 #: in a vendor UI and in gather's escaped view; at the START of the body because gather's view
 #: keeps only the first characters of a long comment (`payload_view.LEAF_MAX_CHARS`).
 AGENT_TAG_PREFIX = "[defender agent comment, run "
-
-#: The empty-narrative marker, rendered in the narrative segment alone.
-NO_NOTES = "(no notes)"
 
 #: A run whose report yields no parsable disposition still comments, with this fixed sentence
 #: and no narrative. Reached only via `ReportNotParsable`, i.e. `_report.read_report`'s own
@@ -54,15 +47,11 @@ class ReportNotParsable(CaseTicketError):
 
 @model(frozen=True)
 class CaseRecord:
+    """What a run's report tells the ticket step: the run and its disposition. Nothing the model wrote reaches the
+    comment (#1471 P-6)."""
 
     case_id: str
-    signature_id: str
     disposition: str
-    #: The host's own sentence (frontmatter `cause`), always present on a close-tool report.
-    cause: str
-    #: The report's body, verbatim — fence-stripping is applied at render time
-    #: (`case_record_to_comment`) and the wire bound when posted (`posted_comment`), never here.
-    narrative: str
 
 
 def read_case_record(run: Run) -> CaseRecord:
@@ -74,46 +63,12 @@ def read_case_record(run: Run) -> CaseRecord:
         report = require_report(run.documents.report)
     except ReportUnreadable as e:
         raise ReportNotParsable(str(e)) from e
-    fm, body, disposition = report.frontmatter, report.body, report.disposition
-    case_id = str(run.id)
-    cause = str(fm.get("cause") or "")
-
-    # The signature is the run's recorded one (A1): never read off the alert again. A folder
-    # with no usable record has none, and the existing fallback label stands.
-    record = formats.parse_alert_record(run.facts.alert_record.read() or "")
-    signature_id = (record.signature if record is not None else None) or _SIGNATURE_FALLBACK
-
-    return CaseRecord(
-        case_id=case_id,
-        signature_id=signature_id,
-        disposition=disposition,
-        cause=cause,
-        narrative=body,
-    )
+    return CaseRecord(case_id=str(run.id), disposition=report.disposition)
 
 
 # --------------------------------------------------------------------------------------------
-# The comment renderer
+# The comment's parts (#1471 P-6)
 # --------------------------------------------------------------------------------------------
-
-# Strips an attacker-planted frontmatter delimiter from free text. Only a standalone `---`
-# line counts (indentation allowed); `----` rules and `--- | ---` table rows survive. Line
-# breaks are normalised first (`_LINE_BREAKS`), since a UI may break on `\r` or U+2028.
-_FENCE_SPLIT = re.compile(r"(?m)^[ \t]*---[ \t]*$")  # lint-frontmatter: ok — strips a planted delimiter from free text, not a frontmatter parse
-_LINE_BREAKS = re.compile("\r\n|\r|\u2028|\u2029|\x85|\x0b|\x0c")
-
-
-def _strip_planted_fence(text: str) -> str:
-    """Strip everything from the first line-anchored `---` onward (a planted frontmatter
-    fence). Runs before the wire bound, so a cut cannot produce a bare fence. Applied to every
-    free-text slot, `cause` included, even though `cause` is host-composed today."""
-    return _FENCE_SPLIT.split(_LINE_BREAKS.sub("\n", text))[0].strip()
-
-
-def _prepare_narrative(narrative: str) -> str:
-    """`_strip_planted_fence`, with the no-notes marker for an empty result."""
-    stripped = _strip_planted_fence(narrative)
-    return stripped if stripped else NO_NOTES
 
 
 def _bound_wire_bytes(text: str) -> str:
@@ -125,20 +80,6 @@ def _bound_wire_bytes(text: str) -> str:
     budget = WIRE_BOUND_BYTES - len(_ELLIPSIS.encode("utf-8"))
     cut = encoded[:budget].decode("utf-8", errors="ignore")
     return cut + _ELLIPSIS
-
-
-def case_record_to_comment(rec: CaseRecord, *, settings: CaseRecordSettings) -> str:
-    """The comment body: the tenant's own `comment.body` template (default
-    `"{disposition} — {cause}\\n\\n{narrative}"`) rendered over the record, fence-stripped.
-    The wire bound is applied once, to the posted body with its tag (`posted_comment`)."""
-    ctx = render_context(
-        case_id=rec.case_id,
-        signature=rec.signature_id,
-        disposition=rec.disposition,
-        cause=_strip_planted_fence(rec.cause),
-        narrative=_prepare_narrative(rec.narrative),
-    )
-    return format_template(settings.body, ctx, "comment.body")
 
 
 def agent_comment_tag(run_id: str) -> str:
@@ -155,7 +96,8 @@ def carries_agent_tag(text: str, run_id: str) -> bool:
 
 def posted_comment(body: str, *, run_id: str) -> str:
     """@owns comment body — the body as it reaches the store: the agent tag line naming
-    `run_id`, then the comment the template rendered, the whole bounded to `WIRE_BOUND_BYTES`.
+    `run_id`, then the comment's parts (each a constant, a closed-set word or an id, #1471 P-6), the whole bounded to
+    `WIRE_BOUND_BYTES`.
     The bound cuts from the end, so the tag line always survives it. `run_id` is the run's, not
     the case key, which on the platform is the vendor's ticket id."""
     return _bound_wire_bytes(f"{agent_comment_tag(run_id)}\n{body}")

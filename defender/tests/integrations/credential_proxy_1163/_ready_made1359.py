@@ -11,14 +11,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import yaml
 
 from defender.box import run_env
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
 from defender.tests.integrations.credential_proxy_1163._target import ACCESS_FILE
-from defender.tests.support.runtime.engine._spec767 import write_report
+from defender.tests.support.runtime.engine._spec767 import ticket_link_for, write_report
 from defender.tests.support.tenancy import _systems1366 as R
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.tenancy.case_comment_1359 import _spec1359 as C
@@ -105,8 +104,11 @@ class Rig:
     #: from the published folders); `R.DERIVED` = what the published `settings/` stands for (`R.derive`); None = NOT imported.
     records: Any = R.DERIVED
 
-    def token(self, mode: str = "rw") -> str:
-        return T.token(self.t.tenant_id, {(self.vendor.system, mode)})
+    def token(self, mode: str = "rw", ticket: str = C.TICKET_KEY) -> str:
+        """A request token on the vendor's system: `r`, or the write pass `rw` NAMING `ticket` (#1471 X1/C-2: an `rw` entry is
+        `(system, "rw", ticket)`, a two-string one is refused at mint)."""
+        entry = (self.vendor.system, mode, ticket) if mode == "rw" else (self.vendor.system, mode)
+        return T.token(self.t.tenant_id, {entry})
 
     def record(self) -> Any:
         return T.run_record(self.t, self.records)
@@ -120,12 +122,12 @@ class Rig:
 
     def comment(self, roster: Any, key: str, body: str = BODY) -> str | None:
         """The adapter's comment action called straight, as the record leg calls it."""
-        ctx = A.ctx_for(self.tmp, self.record(), self.url, self.token())
+        ctx = A.ctx_for(self.tmp, self.record(), self.url, self.token(ticket=key))
         return self.module(roster).add_case_comment(ctx, key=key, body=body)
 
     def read(self, roster: Any, key: str) -> Any:
         """The adapter's read of a case's comments called straight, as the record leg calls it."""
-        ctx = A.ctx_for(self.tmp, self.record(), self.url, self.token())
+        ctx = A.ctx_for(self.tmp, self.record(), self.url, self.token(ticket=key))
         return getattr(self.module(roster), C.READBACK_ACTION)(ctx, key=key)
 
     def leg(self, name: str, key: str | None = C.TICKET_KEY) -> dict[str, Any] | None:
@@ -135,8 +137,8 @@ class Rig:
         write_report(rec.run_dir_at)  # a readable report: the template renders over it
         record = self.record()
         C.record_leg()(run, tenant=record, defender_dir=DEFENDER, case=T1106.case_for(record),
-                       env=run_env(DEFENDER, rec.run_dir_at), request_token=self.token(),
-                       proxy_url=self.url)
+                       env=run_env(DEFENDER, rec.run_dir_at), request_token=self.token(ticket=key or C.TICKET_KEY),
+                       proxy_url=self.url, link=ticket_link_for(rec.run_dir_at))  # C-7: the job lane's screen link
         return S.receipt(rec.run_dir_at)
 
     def sent(self) -> list[H.Seen]:
@@ -169,8 +171,7 @@ def records_of(v: Vendor, base: str, *, env: str | None = None, access: bool = T
             if access else "")
     case = None
     if leg:
-        body = yaml.safe_load(C.case_record_text(v.system))["comment"]["body"]
-        case = R.CaseSpec(v.system, str(body))
+        case = R.CaseSpec(v.system)
     return R.RecordsSpec({v.system: R.SysSpec(settings, text)}, case)
 
 

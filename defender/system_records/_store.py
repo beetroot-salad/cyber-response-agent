@@ -144,7 +144,7 @@ class RecordStore:
     def _current_case(row: Any) -> CaseRecord | None:
         if row is None or row.deleted:
             return None
-        return CaseRecord(version=row.version, system_id=row.system_id, comment_body=row.comment_body)
+        return CaseRecord(version=row.version, system_id=row.system_id)
 
     def _refuse_if_faulty(self, after: TenantRecords, before: TenantRecords) -> None:
         """The judge sees the after-state and the state it replaces: it judges what the write changes and names the part
@@ -222,7 +222,7 @@ class RecordStore:
                 enabled=row.enabled, settings=row.settings, access=row.access,
                 credential_generation=row.credential_generation, deleted=True, author=author, written_at=self._clock()))
 
-    async def put_case(self, tenant: TenantId, *, replaces: int, system_id: str, comment_body: str,
+    async def put_case(self, tenant: TenantId, *, replaces: int, system_id: str,
                        author: str) -> CaseWrite:
         """The case record's next version, replacing the version a read shows (`replaces`, 0 for none)."""
         async with self._locked(tenant) as conn:
@@ -230,12 +230,12 @@ class RecordStore:
             shown = _shown(last)
             if replaces != shown:
                 raise Stale("the case record", current_version=shown, named=replaces)
-            case = CaseRecord(version=_next(last), system_id=system_id, comment_body=comment_body)
+            case = CaseRecord(version=_next(last), system_id=system_id)
             systems = self._current(await self._latest(conn, tenant))
             self._refuse_if_faulty(TenantRecords(systems=systems, case=case),
                                    TenantRecords(systems=systems, case=self._current_case(last)))
             await conn.execute(insert(_CV).values(tenant_id=tenant, version=case.version, system_id=system_id,
-                                                  comment_body=comment_body, deleted=False, author=author,
+                                                  deleted=False, author=author,
                                                   written_at=self._clock()))
             return CaseWrite(record=case, created=shown == 0)
 
@@ -251,7 +251,7 @@ class RecordStore:
             self._refuse_if_faulty(TenantRecords(systems=systems, case=None),
                                    TenantRecords(systems=systems, case=self._current_case(last)))
             await conn.execute(insert(_CV).values(tenant_id=tenant, version=_next(last), system_id=last.system_id,
-                                                  comment_body=last.comment_body, deleted=True, author=author,
+                                                  deleted=True, author=author,
                                                   written_at=self._clock()))
 
     # --- the credential slot (#1470 P3) -----------------------------------------------------------------------------

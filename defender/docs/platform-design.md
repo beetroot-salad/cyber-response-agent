@@ -285,7 +285,7 @@ scope. Alert rows are upserted out of band by the adapter (§1.5), so there's no
 ```
 GET  /alerts                                  alert history / review (list + filter)
 GET  /alerts/:id                              one alert + investigation-history drill-down
-POST /investigations   { alert_id, client_request_id }       start/rerun for an alert_id
+POST /investigations   { alert_id, client_request_id, update_ticket? }   start/rerun for an alert_id; update_ticket posts the verdict to its ticket
 GET  /investigations          ?alert_id=      execution list, optionally scoped to one alert
 GET  /investigations/:id                      poll job status + heartbeat (~30s); coarse DB state (§4.5)
 POST /investigations/:id/cancel               request an aborted terminal stop (audit event)

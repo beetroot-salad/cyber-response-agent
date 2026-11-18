@@ -114,11 +114,11 @@ class JobStorePorts:
     # --- Writes -------------------------------------------------------------------------
 
     async def create_investigation(
-        self, principal: Principal, alert_id: AlertId, client_request_id: str
+        self, principal: Principal, alert_id: AlertId, client_request_id: str, update_ticket: bool = False,
     ) -> tuple[Investigation, bool]:
         record, created = await self._store.create_investigation(
             principal.tenant_id, alert_id, client_request_id, actor=principal.actor_id,
-            credential_id=principal.credential_id)
+            credential_id=principal.credential_id, update_ticket=update_ticket)
         return _investigation(record), created
 
     async def cancel_investigation(self, principal: Principal, investigation_id: InvestigationId) -> Investigation:

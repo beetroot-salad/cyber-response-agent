@@ -126,12 +126,6 @@ def _argv_mentions(shim: S.RecordingShim, value: str) -> bool:
     return value in joined or re.escape(value) in joined
 
 
-def _ticket_text(store: S.TicketStore) -> str:
-    """Every outbound ticket request body, as one text."""
-    return "\n".join(json.dumps(c.body, ensure_ascii=False, sort_keys=True)
-                     for c in store.calls)
-
-
 def _named_refusal(d: S.Drive) -> bool:
     """Whether `run.main` exited by refusing with text (a named reason), not by raising."""
     return d.raised is None and isinstance(d.refusal, str) and bool(d.refusal.strip())
@@ -343,19 +337,13 @@ def test_p045_alert_nests_deeper_than_the_parser_follows(tmp_path):
 
 def test_p086_mapped_value_has_an_unpaired_surrogate_escape_at(tmp_path):
     planted = S.ticket_the_tenant(S.plant_tenant())
-    refused_store = S.TicketStore(tmp_path)
-    d = _drive(tmp_path, planted, alert=S.admission_bytes("lone_surrogate"),
-               tickets=S.ticket_writer(refused_store), update_ticket=True)
+    d = _drive(tmp_path, planted, alert=S.admission_bytes("lone_surrogate"))
     _assert_refused_before_any_folder(d, "lone surrogate in the mapped summary")
-    assert refused_store.calls == [], f"a ticket leg met the refused alert: {refused_store.calls}"
 
-    store = S.TicketStore(tmp_path)
     summary, event_time = "before\x00after", f"{EVENT_TIME}\x00"
     nul = _drive(tmp_path, planted, alert=S.ticketed_alert(S.generic_alert(
-                     rule=_rule(description=summary), detected_at=event_time)),
-                 tickets=S.ticket_writer(store), update_ticket=True)
+                     rule=_rule(description=summary), detected_at=event_time)))
     run_dir = _assert_admitted(nul, "NUL in summary and event_time")
-    assert len(store.comment_payloads) == 1, "the record leg did not post its comment"
     assert S.recorded(run_dir, "summary") == summary
     assert S.recorded(run_dir, "event_time") == event_time
 
@@ -452,18 +440,16 @@ def test_facts_are_recorded_beside_the_alert_at_run_start(tmp_path):
 def test_alert_mapping_is_read_once_at_run_start(tmp_path):
     planted = S.plant_tenant(
         alert_mapping=S.ticketed_mapping({"signature": "host.hostname", "event_time": "detected_at",
-                                          "summary": "rule.description"}),
-        case_body=S.SIGNED_COMMENT_BODY)
+                                          "summary": "rule.description"}))
     edited: list[Path] = []
 
     def edit_after_run_start(run_dir: Path) -> None:
         S.remap(planted, S.ticketed_mapping())
         edited.append(Path(run_dir))
 
-    shim, store = _failed_shims(), S.TicketStore(tmp_path)
+    shim = _failed_shims()
     d = _drive(tmp_path, planted, alert=S.ticketed_alert(), before=edit_after_run_start,
-               orient_shim=shim, tickets=S.ticket_writer(store), update_ticket=True,
-               main=S.closing_main_turns())
+               orient_shim=shim, main=S.closing_main_turns())
     run_dir = _assert_admitted(d, "an ordinary alert")
     assert edited, "the mapping was never edited after run start"
 
@@ -471,12 +457,6 @@ def test_alert_mapping_is_read_once_at_run_start(tmp_path):
         f"orientation's vocabulary lookup was not handed the run-start signature: {shim.argvs()}")
     assert not _argv_mentions(shim, "R-1001"), (
         f"an orientation lookup read the edited mapping: {shim.argvs()}")
-    comments = store.comment_payloads
-    assert len(comments) == 1, f"the post-run record leg posted {len(comments)} comments"
-    assert "[sig=app-7]" in store.comment_body(), (
-        f"the post-run record leg did not carry the run-start signature: {comments}")
-    assert "R-1001" not in _ticket_text(store), (
-        "a ticket leg read the edited mapping")
     assert S.recorded(run_dir, "signature") == "app-7"
 
 
@@ -490,24 +470,21 @@ def test_p141_record_for_a_value_the_signature_rule_refuses(tmp_path):
         "over-bound": _alert(id=over_bound),
         "key": _alert(id="K-1"),
     }
-    seen: dict[str, tuple[S.Drive, Path, S.RecordingShim, S.TicketStore]] = {}
+    seen: dict[str, tuple[S.Drive, Path, S.RecordingShim]] = {}
     for arm, alert in arms.items():
-        shim, store = _failed_shims(), S.TicketStore(tmp_path)
+        shim = _failed_shims()
         d = _drive(tmp_path, planted, alert=S.ticketed_alert(alert), orient_shim=shim,
-                   tickets=S.ticket_writer(store), update_ticket=True,
                    main=S.closing_main_turns())
-        seen[arm] = (d, _assert_admitted(d, arm), shim, store)
+        seen[arm] = (d, _assert_admitted(d, arm), shim)
 
-    _key_d, key_dir, key_shim, key_store = seen["key"]
+    _key_d, key_dir, key_shim = seen["key"]
     assert _handed_signatures(key_shim) == ["K-1"], key_shim.argvs()
-    assert "[sig=K-1]" in key_store.comment_body()
 
     for arm, refused in (("whitespace", "R 1001"), ("over-bound", over_bound)):
-        d, run_dir, shim, store = seen[arm]
+        d, run_dir, shim = seen[arm]
         for value in {refused, refused[:S.SIGNATURE_MAX]}:
             assert not _argv_mentions(shim, value), (
                 f"{arm}: the refused value reached an orientation lookup: {shim.argvs()}")
-            assert value not in _ticket_text(store), f"{arm}: the refused value reached a ticket leg"
             assert value not in S.harness_text(d.opening_message), (
                 f"{arm}: the refused value reached MAIN's opening message as harness prose")
             assert value.encode("utf-8") not in S.record_file(run_dir).read_bytes(), (

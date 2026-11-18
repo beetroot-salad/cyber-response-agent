@@ -58,6 +58,12 @@ _logger = logging.getLogger(__name__)
 
 
 
+#: The most characters of a failed request's message, per link of its chain, the trace keeps.
+_MESSAGE_CAP = 2000
+#: The most links of a failed request's exception chain the trace keeps.
+_CHAIN_CAP = 8
+
+
 def _ends_torn(path: Path) -> bool:
     try:
         data = read_bytes_capped(path)
@@ -181,6 +187,27 @@ class OracleStore:
             else:
                 self._unwritten = []
         return cost
+
+    def record_failure(self, actor: str, exc: BaseException) -> None:
+        """One trace row for a model request of `actor` that did not return (#1543 O6): its type,
+        HTTP status, a bounded message and its exception chain, cost unknown (null). Best effort:
+        an unwritable trace is logged and never replaces the failure being recorded."""
+        chain: list[dict] = []
+        seen: set[int] = set()
+        link: BaseException | None = exc
+        while link is not None and id(link) not in seen and len(chain) < _CHAIN_CAP:
+            seen.add(id(link))
+            chain.append({"type": type(link).__name__, "message": str(link)[:_MESSAGE_CAP]})
+            link = link.__cause__ or link.__context__
+        row = {"id": uuid.uuid4().hex, "actor": actor, "failed": type(exc).__name__,
+               "status": getattr(exc, "status_code", None), "message": str(exc)[:_MESSAGE_CAP],
+               "chain": chain, "cost_usd": None, "at": time.time()}
+        with self._lock:
+            try:
+                self._append(self.paths.trace, [row])
+            except OSError as unwritable:
+                self._torn.add(self.paths.trace)
+                _logger.warning(f"the oracle's trace could not record a failed request ({unwritable!r})")
 
     def record_collisions(self, entries: list[dict]) -> None:
         """Append each frozen-row collision not already recorded (M12=A), keyed on

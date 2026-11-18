@@ -14,6 +14,7 @@ import datetime as dt
 import inspect
 import json
 import logging
+import random
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -36,10 +37,16 @@ from defender.tests.support.jobs._jobs1342 import (
     lower_limit,
     register_tenant,
     row,
+    seed_alert_mapping,
 )
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.shared._pglocks1339 import blocked, until, until_blocked
 from defender.tests.support.shared._postgres1339 import execute
-from defender.tests.support.tenancy._mapping1345 import assert_missing_wording_names_verb_and_route, mapping_value
+from defender.tests.support.tenancy._mapping1345 import (
+    FIXTURE_ALERT_MAPPING,
+    assert_missing_wording_names_verb_and_route,
+    mapping_value,
+)
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
 
@@ -75,8 +82,10 @@ def _plant_alert(dsn: str, *, tenant: str = T1, ticket: str = "P-1", vendor: str
     return alert_id
 
 
-def _plant_investigation(dsn: str, *, tenant: str, alert_id: str, key: str, attempt: int, stage: str,
-                         created_at: dt.datetime = NOW, worked: tuple[str, bool] | None = None) -> str:
+def _plant_investigation(  # noqa: PLR0913 — the planted row's columns
+        dsn: str, *, tenant: str, alert_id: str, key: str, attempt: int, stage: str,
+                         created_at: dt.datetime = NOW, worked: tuple[str, bool] | None = None,
+                         flagged: bool = False) -> str:
     """A row in `stage`. `worked` = (`failure_reason` or "", whether its holder wrote its final figure) plants a row that was
     started, cost 1.25 and ended."""
     investigation_id = str(uuid.uuid4())
@@ -84,10 +93,10 @@ def _plant_investigation(dsn: str, *, tenant: str, alert_id: str, key: str, atte
     reason, accounted = worked or ("", False)
     execute(dsn, "INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, stage, created_at, "
                  "started_at, finished_at, failure_reason, accounting_written_at, "
-                 f"cost_usd, cost_is_lower_limit, lease_expires_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, false, {lease})",  # noqa: S608
+                 f"cost_usd, cost_is_lower_limit, lease_expires_at, update_ticket) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, false, {lease}, %s)",  # noqa: S608
             (investigation_id, tenant, alert_id, key, attempt, stage, created_at, NOW if worked else None,
              NOW if worked else None, reason or None, NOW if accounted else None,
-             1.25 if worked else 0))
+             1.25 if worked else 0, flagged))  # #1471 C-3: no server default, so the INSERT writes `update_ticket`
     return investigation_id
 
 
@@ -650,7 +659,7 @@ async def test_o4_rows_created_together_are_claimed_lowest_id_first(dsn):
     alerts = [_plant_alert(dsn, ticket=f"P-{n}") for n in range(2)]
     for investigation_id, alert_id in ((high, alerts[0]), (low, alerts[1])):  # the higher id goes in first
         execute(dsn, "INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, "
-                     "stage, created_at, cost_usd, cost_is_lower_limit) VALUES (%s, %s, %s, 'k', 1, 'queued', %s, 0, false)",
+                     "stage, created_at, cost_usd, cost_is_lower_limit, update_ticket) VALUES (%s, %s, %s, 'k', 1, 'queued', %s, 0, false, false)",
                 (investigation_id, T1, alert_id, NOW))
     async with job_store(dsn) as store:
         got = [await store.claim() for _ in range(3)]
@@ -1830,8 +1839,8 @@ def _plant_running(dsn: str, *, alert_id: str, key: str, attempt: int, lapsed: b
     when = "now() - interval '1 minute'" if lapsed else "now() + interval '30 seconds'"
     mark = "now()" if marked else "NULL"
     execute(dsn, "INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, stage, "
-                 "created_at, started_at, cost_usd, cost_is_lower_limit, lease_expires_at, accounting_written_at) VALUES "
-                 f"(%s, %s, %s, %s, %s, 'running', %s, %s, 1.25, false, {when}, {mark})",  # noqa: S608
+                 "created_at, started_at, cost_usd, cost_is_lower_limit, lease_expires_at, accounting_written_at, update_ticket) VALUES "
+                 f"(%s, %s, %s, %s, %s, 'running', %s, %s, 1.25, false, {when}, {mark}, false)",  # noqa: S608
             (investigation_id, tenant, alert_id, key, attempt, NOW, NOW))
     return investigation_id
 
@@ -3332,8 +3341,8 @@ def _plant_running_pair(dsn: str, investigation_ids: list[str], job_ids: list[st
     unique index, which reads ascending) meets the rows in the order given."""
     for inv, alert_id in zip(investigation_ids, sorted(str(uuid.uuid4()) for _ in investigation_ids), strict=True):
         execute(dsn, "INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, stage, created_at, "
-                     "started_at, cost_usd, cost_is_lower_limit, lease_expires_at) "
-                     "VALUES (%s, %s, %s, 'k', 1, 'running', %s, %s, 0, false, now() + interval '30 seconds')",
+                     "started_at, cost_usd, cost_is_lower_limit, lease_expires_at, update_ticket) "
+                     "VALUES (%s, %s, %s, 'k', 1, 'running', %s, %s, 0, false, now() + interval '30 seconds', false)",
                 (inv, T1, _plant_alert(dsn, ticket=f"W-{inv}", alert_id=alert_id), NOW, NOW))
     alerts, parents = (sorted(str(uuid.uuid4()) for _ in job_ids) for _ in range(2))
     for job, alert_id, parent_id in zip(job_ids, alerts, parents, strict=True):
@@ -3854,3 +3863,246 @@ async def test_1083_a_learning_job_reads_by_id_for_its_tenant_only(dsn):
     assert found == listed
     assert (found.trigger, found.status, found.investigation_id) == ("auto", "queued", inv.investigation_id)
     assert (elsewhere, unknown) == (None, None)
+
+
+# --- #1471: the request's ticket write-back flag (W1) -----------------------------------------------------------------
+# Seams are C-3's: `create_investigation(..., update_ticket=)` and `InvestigationRecord.update_ticket` (r9 R9-1: the
+# store serves no outcome word). The fixture mapping's `case_key` reads `alert_id`, which `ALERT_BYTES` lacks: a flagged
+# start needs an alert that names a ticket.
+
+FIXTURE_NO_CASE_KEY = {**FIXTURE_ALERT_MAPPING, "case_key": None}
+
+
+def _alert_naming(key: Any) -> bytes:
+    """An admissible alert whose `alert_id` (the fixture mapping's `case_key`) is `key`; `ALERT_BYTES`' other fields."""
+    return json.dumps({"rule": {"id": "r-1342", "description": "sketch"}, "alert_id": key,
+                       "alert_timestamp": "2026-10-29T00:00:00Z"}).encode()
+
+
+async def _keyed(store: Any, tenant: str = T1, *, ticket: str = "T-1471", key: Any = "SEC-1471") -> Any:
+    return await an_alert(store, tenant, ticket=ticket, raw=_alert_naming(key))
+
+
+async def test_1471_w1_a_start_stores_its_flag_and_a_read_shows_it(dsn):
+    """A flagged start reads back flagged, from the create's answer and from a later read; one without the flag reads
+    unflagged. (W1)"""
+    async with job_store(dsn) as store:
+        flagged_alert, plain_alert = await _keyed(store, ticket="T-a"), await _keyed(store, ticket="T-b")
+        flagged, created = await store.create_investigation(
+            T1, flagged_alert.alert_id, "k1", actor="u-1", update_ticket=True)
+        plain, _ = await store.create_investigation(T1, plain_alert.alert_id, "k1", actor="u-1")
+        read_flagged = await store.get_investigation(T1, flagged.investigation_id)
+        read_plain = await store.get_investigation(T1, plain.investigation_id)
+
+    assert created is True
+    assert (flagged.update_ticket, read_flagged.update_ticket) == (True, True)
+    assert (plain.update_ticket, read_plain.update_ticket) == (False, False)
+
+
+async def test_1471_w1_a_replay_or_a_live_answer_returns_the_investigations_own_flag_whatever_the_request_says(dsn):
+    """A replay with the opposite flag, and a new request answered by the alert's live investigation, return that
+    investigation with the flag it was started with; nothing is inserted. (W1)"""
+    async with job_store(dsn) as store:
+        alert = await _keyed(store)
+        first, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1", update_ticket=True)
+        replayed, replay_created = await store.create_investigation(
+            T1, alert.alert_id, "k1", actor="u-1", update_ticket=False)
+        collapsed, live_created = await store.create_investigation(
+            T1, alert.alert_id, "k2", actor="u-2", update_ticket=False)
+
+    assert (replay_created, live_created) == (False, False)
+    assert replayed.investigation_id == collapsed.investigation_id == first.investigation_id
+    assert (replayed.update_ticket, collapsed.update_ticket) == (True, True)
+    assert _count(dsn, "investigations") == 1
+
+
+async def test_1471_w1_an_unflagged_investigation_answers_an_unflagged_replay_for_a_flagged_request(dsn):
+    """The converse: an unflagged investigation answers a flagged replay and a flagged live request unflagged. (W1)"""
+    async with job_store(dsn) as store:
+        alert = await _keyed(store)
+        first, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1")
+        replayed, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1", update_ticket=True)
+        collapsed, _ = await store.create_investigation(T1, alert.alert_id, "k2", actor="u-1", update_ticket=True)
+
+    assert replayed.investigation_id == collapsed.investigation_id == first.investigation_id
+    assert (replayed.update_ticket, collapsed.update_ticket) == (False, False)
+    assert _count(dsn, "investigations") == 1
+
+
+async def test_1471_w1_a_replay_and_a_live_answer_come_before_the_ticket_refusal(dsn):
+    """A flagged request answered by an existing row is never refused for the alert's missing ticket, even after the
+    mapping stopped naming one; only a request that needs a new row is. (W1: the request's flag is not compared)"""
+    from defender.jobs import Conflict
+
+    async with job_store(dsn) as store:
+        keyless = await _keyed(store, ticket="T-keyless", key=None)
+        plain, _ = await store.create_investigation(T1, keyless.alert_id, "k1", actor="u-1")
+        replayed, _ = await store.create_investigation(T1, keyless.alert_id, "k1", actor="u-1", update_ticket=True)
+        collapsed, _ = await store.create_investigation(T1, keyless.alert_id, "k2", actor="u-1", update_ticket=True)
+        assert replayed.investigation_id == collapsed.investigation_id == plain.investigation_id
+        await store.cancel_investigation(T1, plain.investigation_id, actor="u-1")
+        again, _ = await store.create_investigation(T1, keyless.alert_id, "k1", actor="u-1", update_ticket=True)
+        assert again.investigation_id == plain.investigation_id, "the replay of an ended request still answers"
+        with pytest.raises(Conflict):
+            await store.create_investigation(T1, keyless.alert_id, "k3", actor="u-1", update_ticket=True)
+
+        keyed = await _keyed(store, ticket="T-keyed")
+        flagged, _ = await store.create_investigation(T1, keyed.alert_id, "k1", actor="u-1", update_ticket=True)
+        seed_alert_mapping(dsn, T1, FIXTURE_NO_CASE_KEY)  # the mapping no longer names a ticket
+        after, created = await store.create_investigation(T1, keyed.alert_id, "k1", actor="u-1", update_ticket=True)
+
+    assert (created, after.investigation_id, after.update_ticket) == (False, flagged.investigation_id, True)
+    assert _count(dsn, "investigations") == 2
+
+
+#: Values the alert's `alert_id` can take that are not one URL path segment: the class a flagged start is refused for.
+NOT_A_KEY = [None, "", "a/b", "a\\b", "a;b", "..", "has space", "x" * 129, {"k": 1}, ["SEC-1471"]]
+
+
+@pytest.mark.parametrize("value", NOT_A_KEY, ids=repr)
+async def test_1471_w1_a_flagged_start_is_refused_when_the_alert_yields_no_ticket_key(dsn, value):
+    """A flagged start of an alert whose mapped `case_key` is no ticket key is 409 and stores nothing; the same alert
+    unflagged is accepted, and a keyed alert flagged is too. (W1)"""
+    from defender.jobs import Conflict
+    from defender.records.formats import ALERT_MAPPING_MISSING
+
+    async with job_store(dsn) as store:
+        bad = await _keyed(store, ticket="T-bad", key=value)
+        with pytest.raises(Conflict) as refused:
+            await store.create_investigation(T1, bad.alert_id, "k1", actor="u-1", update_ticket=True)
+        assert _count(dsn, "investigations") == 0, "a refused start stores nothing"
+        unflagged, created = await store.create_investigation(T1, bad.alert_id, "k1", actor="u-1")
+        good = await _keyed(store, ticket="T-good")
+        flagged, _ = await store.create_investigation(T1, good.alert_id, "k1", actor="u-1", update_ticket=True)
+
+    assert "ticket" in str(refused.value).lower()
+    assert str(refused.value) != ALERT_MAPPING_MISSING
+    assert (created, unflagged.update_ticket, flagged.update_ticket) == (True, False, True)
+
+
+async def test_1471_w1_a_flagged_start_is_refused_when_the_mapping_maps_no_case_key(dsn):
+    """With the tenant's mapping naming no `case_key`, a flagged start of an alert that does carry an `alert_id` is
+    409, and the same start unflagged is accepted; the other tenant, whose mapping names one, is accepted. (W1)"""
+    from defender.jobs import Conflict
+
+    seed_alert_mapping(dsn, T1, FIXTURE_NO_CASE_KEY)
+    async with job_store(dsn) as store:
+        alert, other = await _keyed(store), await _keyed(store, T2)
+        with pytest.raises(Conflict, match="(?i)ticket"):
+            await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1", update_ticket=True)
+        unflagged, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1")
+        elsewhere, _ = await store.create_investigation(T2, other.alert_id, "k1", actor="u-1", update_ticket=True)
+
+    assert (unflagged.update_ticket, elsewhere.update_ticket) == (False, True)
+
+
+async def test_1471_w1_a_flagged_start_is_refused_when_the_tenant_has_no_case_record(dsn):
+    """A tenant with systems but no case record: a flagged start of a keyed alert is 409, unflagged is accepted. (W1)"""
+    from defender.jobs import Conflict
+    from defender.tests.support.tenancy._systems1366 import RecordsSpec, fixture_records
+
+    bare = fixture_uuid("tenant:jobs-1471-no-case-record")
+    register_tenant(dsn, bare, records=RecordsSpec(fixture_records().systems, None))
+    async with job_store(dsn) as store:
+        alert = await _keyed(store, bare)
+        with pytest.raises(Conflict, match="(?i)ticket"):
+            await store.create_investigation(bare, alert.alert_id, "k1", actor="u-1", update_ticket=True)
+        unflagged, _ = await store.create_investigation(bare, alert.alert_id, "k1", actor="u-1")
+
+    assert (unflagged.update_ticket, _count(dsn, "investigations")) == (False, 1)
+
+
+def _case_histories() -> list[str]:
+    """Histories of the case record as ops (`P` put where none is shown, `R` replace the shown version, `D` delete it):
+    the shapes the design's rule must tell apart, then seeded random ones over the legal moves."""
+    fixed = ["", "P", "PD", "PDP", "PRD", "PRR", "PDPD", "PRDP", "PRRD", "PDPR", "PRDPD"]
+    drawn = []
+    for seed in (1471, 1472, 1473, 1474):
+        rng = random.Random(seed)
+        for _ in range(6):
+            ops, shown = "", False
+            for _ in range(rng.randint(1, 7)):
+                op = rng.choice("RD") if shown else "P"
+                ops, shown = ops + op, op != "D"
+            drawn.append(ops)
+    return fixed + drawn
+
+
+async def test_1471_w1_a_flagged_start_is_refused_exactly_when_the_owners_read_shows_no_case_record(dsn):
+    """After any history of case-record puts, replaces and deletes through the system-records writes, a flagged start
+    of a keyed alert is 409 exactly when the tenant owner's read shows no case record, else created. (W1)"""
+    from defender.jobs import Conflict
+    from defender.system_records import RecordStore
+    from defender.tenancy.postgres import PostgresTenantRepository
+    from defender.tests.support.jobs._jobs1342 import fixed_clock
+    from defender.tests.support.tenancy._systems1366 import RecordsSpec, fixture_records
+
+    histories = _case_histories()
+    outcomes: dict[str, bool] = {}
+    records = RecordStore(dsn, clock=fixed_clock, judge=lambda after, before: [])
+    owner = PostgresTenantRepository(dsn)
+    try:
+        async with job_store(dsn) as store:
+            for n, ops in enumerate(histories):
+                tenant = fixture_uuid(f"tenant:jobs-1471-w1-history-{n}")
+                register_tenant(dsn, tenant, records=RecordsSpec(fixture_records().systems, None))
+                for op in ops:
+                    shown = (await owner.current_records(tenant)).case
+                    if op == "D":
+                        await records.delete_case(tenant, replaces=shown.version, author="u-1")
+                    else:
+                        await records.put_case(tenant, replaces=0 if shown is None else shown.version,
+                                               system_id="ticket", author="u-1")
+                has_record = (await owner.current_records(tenant)).case is not None
+                alert = await _keyed(store, tenant, ticket=f"T-w1-{n}")
+                if has_record:
+                    created, _ = await store.create_investigation(tenant, alert.alert_id, "k1", actor="u-1",
+                                                                  update_ticket=True)
+                    assert created.update_ticket is True, (ops, "a case record is shown: the start is created")
+                else:
+                    with pytest.raises(Conflict, match="(?i)ticket"):
+                        await store.create_investigation(tenant, alert.alert_id, "k1", actor="u-1", update_ticket=True)
+                outcomes[ops] = has_record
+    finally:
+        await owner.close()
+        await records.close()
+
+    for shape in ("PD", "PDP", "PRD", "PRR", "P"):
+        assert any(shape in o for o in outcomes), f"premise: no history of the shape {shape}"
+    assert [outcomes[o] for o in ("PD", "PDP", "PRD", "PRR", "P", "")] == [False, True, False, True, True, False]
+    ends = [sum(1 for has in outcomes.values() if has is end) for end in (True, False)]
+    assert min(ends) > 3, "premise: both ends are reached by many histories, with several versions behind each"
+    assert sum(len(o) > 2 for o in outcomes) > 8, "premise: histories of several versions"
+
+
+async def test_1471_w1_a_tenant_without_a_mapping_is_still_refused_for_the_mapping(unmapped_dsn):
+    """The existing missing-mapping refusal keeps its own wording for a flagged start. (W1: follows ALERT_MAPPING_MISSING)"""
+    from defender.jobs import Conflict
+    from defender.records.formats import ALERT_MAPPING_MISSING
+
+    async with job_store(unmapped_dsn) as store:
+        alert = await _keyed(store)
+        with pytest.raises(Conflict) as refused:
+            await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1", update_ticket=True)
+
+    assert str(refused.value) == ALERT_MAPPING_MISSING
+
+
+@pytest.mark.parametrize("flagged", [True, False])
+async def test_1471_w1_a_lapse_retry_carries_its_requests_flag(dsn, flagged):
+    """An investigation whose lease lapsed is retried as a new row (attempt 2) with the same flag. (W1)"""
+    async with job_store(dsn) as store:
+        alert = await _keyed(store)
+        first, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1", update_ticket=flagged)
+        claimed = await store.claim()
+        assert claimed is not None
+        assert claimed.record.investigation_id == first.investigation_id, "premise: claimed"
+        lapse_lease(dsn, first.investigation_id)
+        await store.take_over(held=frozenset())
+        retry = await store.claim()
+
+    assert retry is not None, "the take-over queued no retry"
+    assert (retry.record.investigation_id != first.investigation_id, retry.record.attempt) == (True, 2)
+    assert retry.record.update_ticket is flagged
+    assert execute(dsn, "SELECT update_ticket FROM jobs.investigations WHERE id = %s",
+                   (retry.record.investigation_id,)) == [(flagged,)], "the stored column of the retry"

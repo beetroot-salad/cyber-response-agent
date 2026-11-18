@@ -342,8 +342,9 @@ def claims_of_payload(payload: bytes) -> dict[str, Any]:
         return json.loads(base64.urlsafe_b64decode(payload + b"=" * (-len(payload) % 4)))
 
 
-def grant_of(claims: Mapping[str, Any]) -> list[tuple[str, str]]:
-    return sorted((str(s), str(m)) for s, m in claims["grant"])
+def grant_of(claims: Mapping[str, Any]) -> list[tuple[str, ...]]:
+    """The token's grant entries, sorted: `(system, mode)`, or `(system, "rw", ticket)` for a write pass (X1)."""
+    return sorted(tuple(str(part) for part in entry) for entry in claims["grant"])
 
 
 class Tap:

@@ -73,6 +73,10 @@ def _parse_argv(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--source", help="a learning job's source run")
     p.add_argument("--parent-pid", required=True, type=int,
                    help="the worker that started this process; exit at once under any other")
+    p.add_argument("--alert-digest", help="an investigation's alert digest (sha256 hex), from the worker (#1471 P-5)")
+    p.add_argument("--post-ticket", action="store_true",
+                   help="the investigation was flagged to post to its ticket (#1471 W1), from the worker")
+    p.add_argument("--ticket-link", help="with --post-ticket: the investigation screen's address (#1471 W3)")
     ns = p.parse_args(argv)
     if ns.kind != "post-step" and not ns.job:
         p.error(f"a {ns.kind} job needs --job")
@@ -290,7 +294,9 @@ def main(argv: list[str], *, docker: Any = None, signer: Any = None, publish: An
                       root_folder=tenancy.data_root_for_child(root), claim=claim,
                       docker=docker if docker is not None else run_docker,
                       defender_dir=process_defender_dir().resolve(), signer=signer, publish=publish, forge=forge,
-                      client=client, command=list(command) if command is not None else None)
+                      client=client, command=list(command) if command is not None else None,
+                      alert_digest=ns.alert_digest, post_ticket=bool(ns.post_ticket),
+                      ticket_link=ns.ticket_link if ns.post_ticket else None)
     session.container = job_container_name(session)
     spec = registry().kinds.get(ns.kind)
     if spec is None:

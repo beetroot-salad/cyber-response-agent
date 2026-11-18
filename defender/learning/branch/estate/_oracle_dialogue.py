@@ -128,14 +128,19 @@ def _guard(oracle: Oracle, actor: str) -> Any:
             except (_BudgetSpent, _AttemptOver):
                 raise
             except Exception as exc:  # noqa: BLE001 — a provider failure ends the attempt
+                oracle.store.record_failure(actor, exc)  # #1543 O6: before `from None` drops the chain
                 if actor == "verifier" and not run.reasked:  # the verifier re-asks once (M03=A)
                     run.reasked = True
                     return await self.wrap_model_request(
                         ctx, request_context=request_context, handler=handler)
-                name = type(exc).__name__
+                status = getattr(exc, "status_code", None)
+                name = type(exc).__name__ if status is None else f"{type(exc).__name__}, status {status}"
                 if actor == "verifier":
                     raise _VerifierGaveUp(f"the verifier's model request failed ({name})") from None
                 raise _AttemptOver(f"the model request failed ({name})") from None
+            except BaseException as cancelled:  # a cancellation: recorded, and re-raised as itself
+                oracle.store.record_failure(actor, cancelled)
+                raise
             # Outside the provider-failure handling: the request succeeded and was paid for.
             oracle.charge(actor, response)
             return response

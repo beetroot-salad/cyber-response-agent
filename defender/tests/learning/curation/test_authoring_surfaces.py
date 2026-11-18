@@ -156,9 +156,11 @@ def test_the_cause_stays_composed_from_report_causes_and_the_verdict_stays_host_
 
     # #1359: observed at the record leg's posted comment (below the agent tag line).
     posted = posted_comment_body(run_dir, tmp_path)
-    assert posted.split(" — ", 1)[0] in DISPOSITION_ENUM, (
+    # Below the tag line the comment is the disposition word, then the screen link (#1471 P-6).
+    assert posted.split("\n", 1)[0] in DISPOSITION_ENUM, (
         "the outbound comment's disposition head is not a member of the closed enum"
     )
+    assert marker not in posted, "model-authored text reached the outbound comment"
 
     rows = frontmatter.get("ceiling_test")
     rows = [rows] if isinstance(rows, dict) else list(rows or [])

@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 
 from defender.tests.migrations.test_1214_migrations import _upgrade_to
-from defender.tests.migrations.test_1537_causes_migration import _after_signin, _batch, _item, _tenant
+from defender.tests.migrations.test_1537_causes_migration import _after_ticket_write, _batch, _item, _tenant
 from defender.tests.support.learning.core._feedback1278 import FeedbackCurator, make_scene, opened, reviewer_removes_citation, tick
 from defender.tests.support.learning.core._store1278 import ONE, call, lapse_lease, lesson_citing, store_mod
 from defender.tests.support.shared import _revisions1485 as revisions
@@ -178,12 +178,12 @@ def test_pr1_a_row_the_code_writes_has_the_cause_the_backfill_gives_its_own_text
     assert reason, "the transition stored a text"
 
     old = empty_database
-    _upgrade_to(old, revisions.down_of(_after_signin()))
+    _upgrade_to(old, revisions.down_of(_after_ticket_write()))
     _tenant(old)
     if table == "item":
         _item(old, "planted", status, reason)
     batch = _batch(old, kind="revert", lane="author", phase="needs_person", reason=reason) if table == "batch" else None
-    _upgrade_to(old, _after_signin())
+    _upgrade_to(old, _after_ticket_write())
     if table == "item":
         [(backfilled,)] = execute(old, "SELECT cause FROM learning.work_items WHERE item_key = 'planted'")
     else:

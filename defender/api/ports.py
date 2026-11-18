@@ -259,14 +259,14 @@ class Writes(Protocol):
     between the commit and its emission."""
 
     async def create_investigation(
-        self, principal: Principal, alert_id: AlertId, client_request_id: str
+        self, principal: Principal, alert_id: AlertId, client_request_id: str, update_ticket: bool = False,
     ) -> tuple[Investigation, bool]:
         """Start an investigation of `alert_id`, or answer the one this request already has —
         the rules are §4.1's (the latest attempt of a repeated request, one live investigation
         per alert). Returns `(investigation, created)`, `created` only when this call inserted
         the row. `UnknownReference` for an alert this tenant does not have; `Conflict` naming the
         missing mapping when a new investigation is due and the tenant has saved no alert mapping
-        (#1345 O4)."""
+        (#1345 O4), and naming the ticket when `update_ticket` is set and the alert names none (#1471 W1)."""
         ...
 
     async def cancel_investigation(self, principal: Principal, investigation_id: InvestigationId) -> Investigation:

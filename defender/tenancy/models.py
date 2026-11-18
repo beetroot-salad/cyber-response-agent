@@ -281,7 +281,6 @@ class CaseVersionRow(Base, kw_only=True):
     tenant_id: Mapped[TenantId] = mapped_column(IdColumn(TenantId), ForeignKey(f"{SCHEMA}.tenants.id"), primary_key=True)
     version: Mapped[int] = mapped_column(Integer, primary_key=True)
     system_id: Mapped[str] = mapped_column(Text)
-    comment_body: Mapped[str] = mapped_column(Text)
     deleted: Mapped[bool] = mapped_column(Boolean)
     author: Mapped[str] = mapped_column(Text)
     written_at: Mapped[_dt.datetime] = mapped_column(_TIME)

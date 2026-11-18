@@ -1313,3 +1313,26 @@ def test_1224_retry_cap_zero_is_refused_and_one_allows_exactly_one_failed_attemp
     explored = est.calls("edr", "query")[before:]
     assert len(explored) == 3
     assert explored[-1]["t"] - explored[0]["t"] >= 1.8, "the limiter never made a query wait"
+
+
+def test_1543_o6_every_failed_model_request_leaves_a_trace_row_with_its_status(tmp_path):
+    """Each model request that does not return (the oracle's, and the verifier's first, re-asked one) writes one row to the
+    world's oracle trace: its type, HTTP status, message and exception chain, with no cost; the spend count ignores it."""
+    import json
+
+    est = S.estate(tmp_path)
+    est.answer("idp", "query", ALICE, ALICE_ROWS)
+    ep = S.episode_v2(tmp_path / "a")
+    o = S.oracle(S.raising(S.OUTAGE), S.submit(ALICE_ROWS))
+    v = S.verifier(S.raising(429), S.verdict(True))
+    reg = S.world_registry(ep, "b", est, oracle=o, verifier=v, retry_cap=2)
+
+    run = _drive(tmp_path / "w", est, reg, [_q("user:alice"), S.done_turn()])
+
+    assert run.raised is None
+    traces = list(S.oracle_dir(ep, "b").rglob("trace.jsonl"))
+    assert len(traces) == 1, traces
+    failed = [r for r in map(json.loads, traces[0].read_text().splitlines()) if r.get("failed")]
+    assert [(r["actor"], r["failed"], r["status"]) for r in failed] == [
+        ("oracle", "ModelHTTPError", S.OUTAGE), ("verifier", "ModelHTTPError", 429)]
+    assert all(r["cost_usd"] is None and r["chain"] and r["message"] for r in failed)

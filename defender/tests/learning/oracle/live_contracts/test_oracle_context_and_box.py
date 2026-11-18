@@ -1,6 +1,8 @@
 """What reaches the oracle and the verifier (framed, fact side only, static-to-volatile conversation order) and where oracle Python runs (sandboxed box of its own)."""
 from __future__ import annotations
 
+import contextlib
+
 from defender.tests.support.learning.judge._memory_store import MemoryStore
 from defender.tests.support.shared._locations_1210 import location_path
 
@@ -1329,9 +1331,10 @@ def test_1224_claim_text_cannot_close_the_verifiers_or_the_judges_frame(tmp_path
     _never_outside(prompts, "HOSTO34-3434", "the judge's prompt")
 
 
-def test_box_output_overflow_ends_the_world_without_retrying_or_replacing_the_box(tmp_path):
+def test_box_output_overflow_fails_the_python_call_and_retires_the_box_and_the_world_goes_on(tmp_path):
+    """#1543 O5 (supersedes #1271's world fault): the host fence's trip fails that python call and the box is stopped,
+    since its refusal latch is permanent; the attempt goes on and its answer is served."""
     from defender import box as box_mod
-    from defender.learning.branch.estate.oracle import OracleUnservable
 
     starts = []
     calls = []
@@ -1353,11 +1356,9 @@ def test_box_output_overflow_ends_the_world_without_retrying_or_replacing_the_bo
     ep = _episode(tmp_path)
     model = S.oracle(S.python("print('result')"), *_forge_submit())
     registry = S.sandboxed_registry(ep, "b", est, model, S.passing_verifier(), box=factory)
-    with pytest.raises(OracleUnservable) as caught:
-        _ask(registry, est, tmp_path)
-    assert caught.value.reason == "fault"
+    _ask(registry, est, tmp_path)
     assert len(starts) == 1
-    assert model.requests == 1
+    assert "python failed: its output passed the box's limit" in model.all_seen()
     assert ["docker", "stop", "-t", "0", "overflow-oracle"] in calls
 
 
@@ -1438,13 +1439,12 @@ def test_overflow_cleanup_crossing_deadline_is_settled_before_attempt_can_retry(
     registry = S.sandboxed_registry(ep, "b", est, model, S.passing_verifier(), box=factory,
                                     retry_cap=2, turn_deadline=0.3)
     try:
-        with pytest.raises(OracleUnservable) as caught:
+        # #1543 O5: the overflow no longer faults the world; whatever the attempt ends on, the box's worker settles
+        # before its container is removed.
+        with contextlib.suppress(OracleUnservable):
             _ask(registry, est, tmp_path)
-        assert caught.value.reason == "fault"
         assert worker_finished.is_set()
-        assert len(starts) == 1
-        assert model.requests == 1
-        assert len(stop_calls) == 2
-        assert removed_before_settlement == [False]
+        assert stop_calls
+        assert removed_before_settlement.count(True) == 0
     finally:
         release_cleanup.set()

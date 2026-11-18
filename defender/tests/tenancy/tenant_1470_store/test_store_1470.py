@@ -43,7 +43,7 @@ def delete(tenant: str, *, replaces: int, system: str = "ticket"):
 
 def put_case(tenant: str, *, replaces: int):
     async def work(store):
-        return await store.put_case(tenant, replaces=replaces, system_id="ticket", comment_body="Hello", author=K.SEED)
+        return await store.put_case(tenant, replaces=replaces, system_id="ticket", author=K.SEED)
     return work
 
 
@@ -344,8 +344,8 @@ def _plant_system(dsn: str, tenant: str, version: int, *, generation: int = 1, d
 
 
 def _plant_case(dsn: str, tenant: str, version: int, *, deleted: bool = False) -> None:
-    execute(dsn, "INSERT INTO tenancy.case_versions (tenant_id, version, system_id, comment_body, deleted, author, "
-                 "written_at) VALUES (%s, %s, 'ticket', 'Hello', %s, 'planted', now())", (tenant, version, deleted))
+    execute(dsn, "INSERT INTO tenancy.case_versions (tenant_id, version, system_id, deleted, author, "
+                 "written_at) VALUES (%s, %s, 'ticket', %s, 'planted', now())", (tenant, version, deleted))
 
 
 def _meeting(dsn: str, tenant: str, door: str, faults: frozenset[str]):

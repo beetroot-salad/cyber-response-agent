@@ -181,6 +181,22 @@ def check_patterns(freeze: dict, tenant_settings: Any) -> None:
                           f"current {current}: the tenant changed since the capture")
 
 
+def parts_checked(freeze: dict, freeze_id: str, directory: Path) -> dict | None:
+    """What a full `check_parts` saw, cheap to compare again: the freeze, the digests it wants, the parts
+    directory, and each part's size and modification time. None when a part cannot be read. Case
+    writing records it on the frozen-engine lock it keeps for labelling, and the labelling launch
+    that joins the lock skips the hashing only when it recomputes the same."""
+    seen = {}
+    for name in sorted(freeze["parts"]):
+        try:
+            st = (Path(directory) / name).stat()
+        except OSError:
+            return None
+        seen[name] = [st.st_size, st.st_mtime_ns]
+    return {"freeze": freeze_id, "want": {k: str(v) for k, v in freeze["parts"].items()},
+            "dir": str(Path(directory).resolve()), "seen": seen}
+
+
 def check_parts(freeze: dict, directory: Path) -> None:
     """Every part of the freeze is present and has the digest freeze.yaml names."""
     problems = []

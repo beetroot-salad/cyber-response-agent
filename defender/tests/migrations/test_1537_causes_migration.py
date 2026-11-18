@@ -86,9 +86,9 @@ ITEMS = {
 }
 
 
-def _after_signin() -> str:
-    """The one revision built directly on `0020_signin_attempts`."""
-    base = revisions.by_suffix("_signin_attempts")
+def _after_ticket_write() -> str:
+    """The one revision built directly on `0021_ticket_write` (#1471's, merged first)."""
+    base = revisions.by_suffix("_ticket_write")
     [child] = [r.revision for r in revisions.scripts().walk_revisions() if r.down_revision == base]
     return child
 
@@ -117,10 +117,10 @@ def _item(dsn: str, key: str, status: str, reason: str | None) -> None:
 
 def backfilled_batch_cause(dsn: str, reason: str) -> str | None:
     """The cause the migration gives a parked batch whose stored reason is `reason`: planted at the revision before it, upgraded, read."""
-    _upgrade_to(dsn, revisions.down_of(_after_signin()))
+    _upgrade_to(dsn, revisions.down_of(_after_ticket_write()))
     _tenant(dsn)
     batch = _batch(dsn, kind="revert", lane="author", phase="needs_person", reason=reason)
-    _upgrade_to(dsn, _after_signin())
+    _upgrade_to(dsn, _after_ticket_write())
     [(cause,)] = execute(dsn, "SELECT cause FROM learning.batches WHERE id = %s", (batch,))
     return cause
 
@@ -129,7 +129,7 @@ def backfilled_batch_cause(dsn: str, reason: str) -> str | None:
 def planted(empty_database):
     """The database at the revision before the migration, holding a row for each text above."""
     dsn = empty_database
-    _upgrade_to(dsn, revisions.down_of(_after_signin()))
+    _upgrade_to(dsn, revisions.down_of(_after_ticket_write()))
     _tenant(dsn)
     rows: dict[str, tuple[str, str | None]] = {}
     for name, (reason, want) in PARKED.items():
@@ -146,9 +146,9 @@ def planted(empty_database):
     return dsn, rows
 
 
-def test_the_migration_is_the_one_revision_after_0020_and_the_head_is_not_behind_it():
-    """Exactly one revision sits on `0020_signin_attempts`, and it is an ancestor of the head. (Data)"""
-    child = _after_signin()
+def test_the_migration_is_the_one_revision_after_0021_and_the_head_is_not_behind_it():
+    """Exactly one revision sits on `0021_ticket_write`, and it is an ancestor of the head. (Data)"""
+    child = _after_ticket_write()
     heads = revisions.scripts().get_heads()
     assert len(heads) == 1
     assert child in revisions.ancestors(heads[0])
@@ -157,7 +157,7 @@ def test_the_migration_is_the_one_revision_after_0020_and_the_head_is_not_behind
 def test_the_backfill_gives_every_batch_the_cause_its_frozen_text_names_and_unmatched_text_is_unrecorded(planted):
     """Each stored batch reason maps to its cause (every fault shape of the loop's one table: a 401 or 403 in the status line or a credential failure at delivery open is `forge_credential_refused`, another status `forge_refused`, a misconfigured credential or missing forge wiring `delivery_unavailable`; a 403 elsewhere in the text is not), unmatched or missing text `unrecorded`; merged, closed and in-review batches get none. (Data backfill, PR1)"""
     dsn, rows = planted
-    _upgrade_to(dsn, _after_signin())
+    _upgrade_to(dsn, _after_ticket_write())
     got = {name: execute(dsn, "SELECT cause FROM learning.batches WHERE id = %s", (batch,))[0][0] for name, (batch, _w) in rows.items()}
     assert got == {name: want for name, (_b, want) in rows.items()}
 
@@ -165,7 +165,7 @@ def test_the_backfill_gives_every_batch_the_cause_its_frozen_text_names_and_unma
 def test_the_backfill_gives_every_held_dead_and_skipped_item_its_cause_and_the_rest_none(planted):
     """Each stored item reason maps to its cause; unmatched or missing reasons are `unrecorded`; a waiting or published item has none. (Data backfill, PR1)"""
     dsn, _rows = planted
-    _upgrade_to(dsn, _after_signin())
+    _upgrade_to(dsn, _after_ticket_write())
     got = dict(execute(dsn, "SELECT item_key, cause FROM learning.work_items WHERE tenant_id = %s", (TENANT,)))
     assert got == {name: cause for name, (_s, _r, cause) in ITEMS.items()}
 
@@ -175,7 +175,7 @@ def test_the_backfill_leaves_parked_at_and_the_request_empty_and_keeps_every_rea
     dsn, _rows = planted
     before = execute(dsn, "SELECT id, reason FROM learning.batches ORDER BY id")
     items_before = execute(dsn, "SELECT item_key, status FROM learning.work_items ORDER BY item_key")
-    _upgrade_to(dsn, _after_signin())
+    _upgrade_to(dsn, _after_ticket_write())
     assert execute(dsn, "SELECT count(*) FROM learning.batches WHERE parked_at IS NOT NULL OR abandon_requested_at IS NOT NULL "
                         "OR abandon_requested_by IS NOT NULL") == [(0,)]
     assert execute(dsn, "SELECT id, reason FROM learning.batches ORDER BY id") == before
@@ -311,10 +311,10 @@ def test_every_credential_refusal_text_the_code_can_raise_is_given_one_cause_by_
         live[label] = (refusal_cause(refused), PARK + one_line(str(refused))[:FAULT_TEXT_LIMIT])
 
     dsn = empty_database
-    _upgrade_to(dsn, revisions.down_of(_after_signin()))
+    _upgrade_to(dsn, revisions.down_of(_after_ticket_write()))
     _tenant(dsn)
     planted = {label: _batch(dsn, kind="revert", lane="author", phase="needs_person", reason=text) for label, (_c, text) in live.items()}
-    _upgrade_to(dsn, _after_signin())
+    _upgrade_to(dsn, _after_ticket_write())
     got = {label: execute(dsn, "SELECT cause FROM learning.batches WHERE id = %s", (batch,))[0][0] for label, batch in planted.items()}
     assert {label: cause for label, (cause, _t) in live.items() if cause == "unrecorded"} == {}
     disagree = {label: (live[label][0], got[label]) for label in live if got[label] != live[label][0]}
