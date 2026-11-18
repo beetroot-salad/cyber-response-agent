@@ -238,6 +238,89 @@ async def test_o7_the_queue_time_arms_do_not_set_the_mark(world, arm):
     assert _clock(dsn)["idle"] is True, f"{arm} set the mark"
 
 
+@pytest.mark.parametrize("arm", ["a job queued", "a take-over retry", "an explicit start"])
+async def test_o7_a_queue_time_arm_after_the_mark_leaves_it_for_the_hold_s_end(world, arm):
+    """A job ended `completed` while a check held the clock (the mark is set); then a job is queued, a lapsed job is
+    retried, or a job is started explicitly: none of these spends the mark, so the hold's idle end still leaves the
+    tenant not idle and due at once. (O7: only a hold's end spends the mark; queue-time arms leave it)"""
+    dsn = world["dsn"]
+    async with job_store(dsn) as store:
+        job = await _running_job(store, ticket="J-1")
+        other = await _running_job(store, ticket="J-2")
+        _age(dsn, 2 * HOUR)
+        assert await store.claim_learning_check(HOUR, "h1") == T1, "premise: the check was claimed"
+        await _finish(store, job, "completed")
+        if arm == "a job queued":
+            await completed_investigation(store, ticket="J-3", key="k3")
+        elif arm == "a take-over retry":
+            execute(dsn, "UPDATE jobs.learning_jobs SET lease_expires_at = now() - interval '1 second' WHERE id = %s",
+                    (other,))
+            assert await store.take_over() == [other], "premise: the lapsed job was retried"
+        else:
+            await store.create_learning_job(T1, investigation_of(dsn, other), "req-1", actor="u-1")
+
+        assert await store.end_learning_check(T1, "h1", idle=True) is True
+        assert _clock(dsn) == {"idle": False, "held": False, "holder": None}, f"{arm} spent the mark"
+        assert await store.claim_learning_check(HOUR, "h2") == T1, f"after {arm} the tenant was not due at once"
+
+
+def _finish_elsewhere(dsn: str, job: str) -> None:
+    """`job`'s `completed` end write through a store of its own, on a thread and event loop of its own: another
+    worker's end write, run to its commit while the caller waits. Bounded, so a wait on a lock fails rather than hangs."""
+    import threading
+
+    failed: list[BaseException] = []
+
+    async def go() -> None:
+        async with job_store(dsn) as elsewhere:
+            await _finish(elsewhere, job, "completed")
+
+    def run() -> None:
+        try:
+            asyncio.run(go())
+        except BaseException as fault:  # noqa: BLE001 — carried to the caller
+            failed.append(fault)
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    thread.join(timeout=30)
+    assert not thread.is_alive(), "the other worker's completed end did not finish within 30 s (it waited on a lock)"
+    assert not failed, failed
+
+
+async def test_o7_a_completed_end_that_lands_while_the_hold_ends_is_never_lost(world):
+    """Another worker's `completed` end commits just before the hold's end writes the clock (after anything the hold's
+    end read first): the clock is not idle and the tenant due at once. The mark is read and the clock written in one
+    statement on the locked row, so no read can go stale between them. (O7, data model: one statement)"""
+    import threading
+
+    from sqlalchemy import event
+    from sqlalchemy.engine import Engine
+
+    dsn = world["dsn"]
+    caller = threading.get_ident()
+    injected: list[str] = []
+
+    def before(_conn, _cursor, statement, _parameters, _context, _many):
+        # the hold's end writes the clock row; the completed end lands just before that write, as a race would put it
+        if (threading.get_ident() == caller and not injected
+                and statement.lstrip().startswith("UPDATE jobs.learning_checks") and "holder" in statement):
+            injected.append(statement)
+            _finish_elsewhere(dsn, job)
+
+    async with job_store(dsn) as store:
+        job = await _held_by(world, store)
+        event.listen(Engine, "before_cursor_execute", before)
+        try:
+            assert await store.end_learning_check(T1, "h1", idle=True) is True
+        finally:
+            event.remove(Engine, "before_cursor_execute", before)
+        assert injected, "premise: the completed end was injected before the hold's end wrote the clock"
+        assert job_row(dsn, job)["status"] == "completed", "premise: the other worker's end landed"
+        assert _clock(dsn) == {"idle": False, "held": False, "holder": None}, "the completed end's wake was lost"
+        assert await store.claim_learning_check(HOUR, "h2") == T1, "not due at once"
+
+
 def _clock_row(dsn: str, tenant: str = T1) -> tuple | None:
     """The tenant's whole clock row, or None."""
     rows = execute(dsn, "SELECT checked_at, idle, checking_until, holder FROM jobs.learning_checks WHERE tenant_id = %s",

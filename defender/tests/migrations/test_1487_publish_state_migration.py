@@ -1,5 +1,6 @@
-"""#1487 data model and O9: the revision after `0021_ticket_write` moves every `pending` learning-job publish state to
-`refused`, reports how many per tenant in its log output, drops `pending` from the CHECK, and refuses nothing."""
+"""#1487 data model and O9: the revision after `0022_learning_causes` moves every `pending` learning-job publish state to
+`refused`, reports how many per tenant in its log output, drops `pending` from the CHECK, adds the armed-while-held mark
+to every clock row, and refuses nothing."""
 from __future__ import annotations
 
 import logging
@@ -8,10 +9,11 @@ import re
 import pytest
 
 from defender.tests.migrations.test_1214_migrations import _upgrade_to
+from defender.tests.support.shared import _revisions1485 as revisions
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.shared._postgres1339 import execute
 
-PRIOR = "0021_ticket_write"
+PRIOR = "0022_learning_causes"
 A, B, C, D = (fixture_uuid(f"1487-mig-{n}") for n in "abcd")
 COLS = ("id, tenant_id, alert_id, investigation_id, request_key, attempt, trigger, status, reason, message, "
         "created_at, finished_at, sibling_cost_usd, findings_count, publish_state")
@@ -25,16 +27,18 @@ def _revision_on_prior() -> str:
     return found[0]
 
 
-def test_the_history_has_one_head_and_one_revision_on_the_ticket_write_revision():
-    """One line of history; exactly one revision directly on `0021_ticket_write`. (data model: one migration)"""
+def test_the_history_has_one_head_and_one_revision_on_the_learning_causes_revision():
+    """One line of history; exactly one revision directly on `0022_learning_causes`, and the head is not behind it
+    (later revisions may follow it). (data model: one migration)"""
     from defender.migrations import head, heads
 
     assert heads() == (head(),)
-    assert _revision_on_prior()
+    child = _revision_on_prior()
+    assert child == head() or child in revisions.ancestors(head())
 
 
 def _plant(dsn: str, tenant: str, n: int, state: str, status: str = "completed") -> str:
-    """One learning job of `tenant` at revision 0021 with publish state `state` (and its alert and investigation)."""
+    """One learning job of `tenant` at the prior revision with publish state `state` (and its alert and investigation)."""
     alert, inv, job = (fixture_uuid(f"1487-mig-{what}-{tenant}-{n}") for what in ("alert", "inv", "job"))
     execute(dsn, "INSERT INTO jobs.alerts (id, tenant_id, vendor, vendor_ticket_id, fired_at, changed_at, received_at, "
                  "title, description, raw) VALUES (%s, %s, 'elastic', %s, now(), now(), now(), 't', 'd', '\\x7b7d')",
@@ -129,3 +133,21 @@ def test_a_database_with_no_pending_row_upgrades_and_the_check_no_longer_takes_p
 def _plant_head(dsn: str, tenant: str, n: int, state: str) -> str:
     """`_plant` on the upgraded schema (the same columns suffice)."""
     return _plant(dsn, tenant, n, state)
+
+
+@pytest.mark.postgres
+def test_a_clock_row_that_exists_at_upgrade_gets_the_mark_unset(at_prior):
+    """A deployment's tenants already have check clocks (held, idle, due) when it upgrades: the upgrade adds the mark to
+    each of them as not set, and the clock's own columns stay. (Data model: the migration adds the mark)"""
+    dsn = at_prior
+    execute(dsn, "INSERT INTO jobs.learning_checks (tenant_id, checked_at, idle) VALUES (%s, now(), true)", (A,))
+    execute(dsn, "INSERT INTO jobs.learning_checks (tenant_id, checked_at, idle) VALUES (%s, now(), false)", (B,))
+    execute(dsn, "INSERT INTO jobs.learning_checks (tenant_id, checked_at, idle, holder, checking_until) "
+                 "VALUES (%s, now(), false, 'worker-1', now() + interval '1 hour')", (D,))
+    before = {r[0]: r[1:] for r in execute(dsn, "SELECT tenant_id, idle, holder FROM jobs.learning_checks")}
+
+    _upgrade_to(dsn, _revision_on_prior())
+
+    after = execute(dsn, "SELECT tenant_id, armed_while_held, idle, holder FROM jobs.learning_checks")
+    assert {r[0]: r[1] for r in after} == {A: False, B: False, D: False}
+    assert {r[0]: r[2:] for r in after} == before

@@ -615,16 +615,22 @@ async def test_a_stop_landing_after_a_record_does_not_override_it(world, record,
 
 @pytest.mark.parametrize("moved", [("failed", "worker_error"), ("skipped", "expired")], ids=["failed", "skipped"])
 async def test_o2_a_job_row_moved_while_its_child_runs_is_not_written_and_nothing_is_published(world, moved):
-    """A running job's row moved under it: its child is ended, the row keeps every column, no `pending` is made, the other job is untouched. (O2, P1)"""
+    """A running job's row moved under it: its child is ended, the row keeps every column, no `pending` is made and none
+    of its findings (valid, `ok`) is stored; the other job is untouched and stores its own. The post-step still follows,
+    as #1360 O6's control pins. (O2, P1; #1487 Flow 1 step 3: the fence before the findings)"""
+    from defender.tests.support.jobs import _findings1487 as F
+
     status, reason = moved
     dsn = world["dsn"]
     release, mark = world["tmp"] / "release", world["tmp"] / "term-{id}"
-    jobs = job_child(world, files={END: learning_end("completed", findings=2, cost=1.5)}, wait_for=release, term="finish",
-                     term_mark=str(mark))
+    jobs = F.child_class()(world["tmp"] / "job", world["runs"], wait_for=release, term="finish", term_mark=str(mark))
+    jobs.records = {}
     post = post_child(world)
     async with job_store(dsn) as store:
         fenced = await queued_job(world, store, ticket="T-1")
         other = await queued_job(world, store, ticket="T-2")
+        for job in (fenced, other):
+            jobs.records[job] = F.record(findings=F.ok([F.defender_row(job)], [F.world_row(job)]), count=2, cost=1.5)
         draining = asyncio.create_task(learning_worker(
             world, store, job=jobs, post=post, slots=3, learning_slots=2, **_FAST).drain())
         try:
@@ -641,7 +647,10 @@ async def test_o2_a_job_row_moved_while_its_child_runs_is_not_written_and_nothin
     assert snapshot["publish_state"] == "none"
     assert not Path(str(mark).replace("{id}", other)).exists(), "an unmoved row's child was ended"
     assert job_row(dsn, other)["status"] == "completed"
-    assert all(fenced != followed for followed, _ in post.handed), "a post-step followed the moved row"
+    assert (job_row(dsn, other)["publish_state"], len(F.work_items(dsn, other))) == ("done", 2), \
+        "control: the same findings of the unmoved job are stored"
+    assert F.work_items(dsn, fenced) == [], "findings of a row that no longer ran were stored"
+    assert fenced in [followed for followed, _ in post.handed], "as #1360 O6's control: the post-step follows"
 
 
 async def test_o6_a_running_job_keeps_its_lease_renewed(world):
@@ -1111,15 +1120,16 @@ async def test_o8_renewals_never_end_a_running_post_step(world):
 
 
 async def test_o8_a_post_step_that_cannot_be_spawned_leaves_its_row_alone_and_the_tenants_check_clock_not_idle(world):
-    """An unexecutable post-step command: the job keeps its ending, the worker carries on to the next job's post-step,
-    and the tenant's clock is not idle, so a later check retries. (O8, O7)"""
+    """An unexecutable post-step command, after another job's post-step that ran: the job keeps its ending, and the
+    tenant's clock is left not idle by the lost one, though the store holds nothing waiting (which a post-step that ran
+    would answer idle), so a later check retries. (O8, O7; #1487 Flow 3: only an answered false predicate is idle)"""
     dsn = world["dsn"]
     ended = job_child(world, files={END: learning_end("completed", findings=1)})
     good = post_child(world)
     async with job_store(dsn) as store:
         a = await queued_job(world, store, ticket="J-1")
         b = await queued_job(world, store, ticket="J-2")
-        set_created(dsn, "learning_jobs", a, NOW - dt.timedelta(hours=1))
+        set_created(dsn, "learning_jobs", b, NOW - dt.timedelta(hours=1))  # b and its post-step first; a's is the last
 
         def post(launch):
             return [str(world["tmp"] / "no-such-program")] if launch.job_id == a else good(launch)

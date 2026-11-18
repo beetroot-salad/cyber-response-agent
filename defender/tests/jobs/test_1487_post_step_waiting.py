@@ -7,6 +7,7 @@ truth table is `tests/learning/branch/test_1344_amend_post_step.py`; the armed-w
 learning schema in the database its job store is on."""
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
@@ -23,6 +24,7 @@ from defender.tests.jobs.test_1344_learning_jobs import (
     world,  # noqa: F401 — fixture
 )
 from defender.tests.support.jobs._jobs1342 import T1, job_store
+from defender.tests.support.jobs._worker1342 import _until
 from defender.tests.support.learning.core._store1278 import AUTHOR_LANE, ONE, call, finding
 from defender.tests.support.shared._postgres1339 import execute
 
@@ -72,6 +74,68 @@ async def test_o7_after_a_jobs_post_step_the_clock_goes_idle_exactly_when_the_st
 
     assert post.handed == [(job, "failed")], "premise: the post-step ran"
     assert _idle(dsn) is (not waits)
+
+
+#: What a post-step's tick leaves in the store while its container runs, its worker's threshold, and whether work waits.
+_LEFT_BY_THE_POST_STEP = {
+    "a-finding-it-published": (lambda dsn: _finding_waits(dsn, "a/w-b/0/0"), "1", True),
+    "a-batch-it-left-in-review": (_batch_in_review, "5", True),
+    "nothing": (lambda dsn: None, "1", False),
+}
+
+
+@pytest.mark.parametrize("left", _LEFT_BY_THE_POST_STEP)
+@pg
+async def test_o7_the_question_is_asked_after_the_post_step_exits_and_sees_what_it_left(
+        world, monkeypatch, left):  # noqa: F811 — the imported fixture
+    """The post-step's container runs (held open); while it runs, the store gains what its tick would leave (a finding
+    published, a batch left in review); then it exits. The worker's answer reads the store as the container left it: not
+    idle. The control leaves nothing: idle. (O7, Flow 3: "after a post-step's container exits, the worker answers")"""
+    leave, threshold, waits = _LEFT_BY_THE_POST_STEP[left]
+    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", threshold)
+    dsn = world["dsn"]
+    release = world["tmp"] / "release-post"
+    post = post_child(world, wait_for=release)
+    async with job_store(dsn) as store:
+        job = await queued_job(world, store, ticket="J-1")
+        draining = asyncio.create_task(
+            learning_worker(world, store, job=job_child(world, files={END: FAILED}), post=post).drain())
+        try:
+            await _until(lambda: ("start", job) in post.events(), "the post-step's container to start")
+            leave(dsn)
+        finally:
+            release.touch()
+            await asyncio.wait_for(draining, timeout=60)
+
+    assert post.handed == [(job, "failed")], "premise: the post-step ran"
+    assert ("end", job) in post.events(), "premise: the post-step ran to its end"
+    assert _idle(dsn) is (not waits), "the answer did not read the store as the post-step left it"
+
+
+@pg
+async def test_o7_the_worker_asks_one_learning_store_made_once_and_closed_when_it_stops(world):  # noqa: F811
+    """Two jobs, two post-steps, two answers: the worker builds one learning store for them all and closes it once its
+    drain ends. (Data model: "the worker keeps one long-lived `LearningStore`")"""
+    from defender.learning.core.store_tick import thresholds
+    from defender.learning_store import LearningStore
+    from defender.tests.support.tenancy._host1214 import counting_calls
+
+    dsn = world["dsn"]
+    post = post_child(world)
+    async with job_store(dsn) as store:
+        jobs = [await queued_job(world, store, ticket=f"J-{n}") for n in (1, 2)]
+        worker = learning_worker(world, store, job=job_child(world, files={END: FAILED}), post=post)
+        with counting_calls(built=LearningStore.__init__, closed=LearningStore.close, asked=thresholds) as calls:
+            await worker.drain()
+
+    assert sorted(h[0] for h in post.handed) == sorted(jobs), "premise: both post-steps ran"
+    # the thresholds are read once per question (Amendment r5.1 item 10); `close` is a coroutine, whose every resumption
+    # the profile hook also counts, so the stores it closed are told apart by the store itself
+    assert calls.counts["asked"] >= 2, "premise: the worker asked after each post-step"
+    assert calls.counts["built"] == 1, "a learning store was built per question, not kept"
+    [kept] = [seen["self"] for seen in calls.locals["built"]]
+    closed = {id(seen["self"]) for seen in calls.locals["closed"]}
+    assert closed == {id(kept)}, "the worker's one learning store was not closed when its drain ended"
 
 
 @pytest.mark.parametrize("record", OLD_RECORD)

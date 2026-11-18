@@ -181,6 +181,30 @@ async def test_o3_an_outage_at_the_insert_retries_and_never_refuses(world, sqlst
     assert len(_stored(dsn, job)) == 3
 
 
+@pytest.mark.parametrize("make", F.OUTAGE_FAULTS, ids=F.OUTAGE_FAULT_IDS)
+async def test_o3_an_outage_with_no_sqlstate_at_the_insert_retries_and_never_refuses(world, make):  # noqa: F811
+    """A lost or closed connection, an interface error, a pool timeout or an invalidated connection, none carrying a
+    SQLSTATE, at the first insert: the end write is retried and the findings are stored, `done`, one attempt. (O3, P4:
+    `is_outage` names these, whatever their SQLSTATE)"""
+    fault = make()
+    assert getattr(getattr(fault, "orig", None), "sqlstate", None) is None, "premise: no SQLSTATE"
+    dsn = world["dsn"]
+    child = F.child_class()(world["tmp"] / "job", world["runs"])
+    child.records = {}
+    async with job_store(dsn) as store:
+        job = await queued_job(world, store, ticket="J-1")
+        child.records[job] = _both(job)
+        with F.statement_fault(fault, once=True) as hit:
+            await asyncio.wait_for(learning_worker(
+                world, store, job=child, post=F.quiet_post_class()(world["tmp"] / "post", world["runs"]),
+                slots=2, learning_slots=1).drain(), timeout=120)
+    assert hit, "premise: the insert met the fault"
+    row = job_row(dsn, job)
+    assert (row["status"], row["publish_state"]) == ("completed", "done"), row
+    assert len(_stored(dsn, job)) == 3
+    assert len(jobs_of(dsn, _inv(dsn, job))) == 1, "the retry was a new attempt"
+
+
 async def test_o2_a_refusal_is_logged_with_the_job_it_refused(world, caplog):  # noqa: F811
     """Each refused job's findings leave a log line carrying its job id and the refusal's kind: two jobs refused for
     different kinds (text that is not an object, a row failing its rule) log lines that differ once the job id is
@@ -383,6 +407,79 @@ async def test_o2_a_tenant_not_active_at_the_end_refuses_the_findings_and_the_en
             release.touch()
         await asyncio.wait_for(draining, timeout=120)
     _refused_whole(dsn, job)
+
+
+def _end_write_waits_on_a_lock(dsn: str, holder_pid: int) -> bool:
+    """Whether a backend of this database other than the offboard's waits on a lock on the tenants table."""
+    return bool(execute(dsn, "SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' "
+                             "AND pid NOT IN (%s, pg_backend_pid()) AND query ILIKE '%%tenancy.tenants%%'", (holder_pid,)))
+
+
+@pytest.mark.parametrize("ends_the_row", [False, True], ids=["offboard-commits", "offboard-then-ends-the-job-row"])
+async def test_o2_the_end_write_takes_the_tenant_lock_first_waiting_out_an_offboard_and_never_deadlocking_it(
+        world, ends_the_row):  # noqa: F811
+    """An offboard's transaction holds the tenant row (moved to `offboarding`, not committed) as the job's completed
+    record lands: the end write waits on the tenant lock, holding nothing the offboard needs. Committed alone, the end
+    write then reads the tenant not active and refuses the findings; when the offboard first ends the job row as it
+    does, that statement runs at once, no deadlock, and the end write finds its row moved. (Flow 1 step 3: the tenant
+    share lock first; tenancy's lock rule, G13)"""
+    import psycopg
+
+    from defender.tests.support.tenancy._active1214 import _JOB
+
+    dsn = world["dsn"]
+    release = world["tmp"] / "release"
+    child = F.child_class()(world["tmp"] / "job", world["runs"], wait_for=release)
+    child.records = {}
+    async with job_store(dsn) as store:
+        job = await queued_job(world, store, ticket="J-1")
+        child.records[job] = _both(job)
+        draining = asyncio.create_task(learning_worker(
+            world, store, job=child, post=F.quiet_post_class()(world["tmp"] / "post", world["runs"]),
+            slots=2, learning_slots=1, renewal_interval=0.2).drain())
+        holder = psycopg.connect(dsn, autocommit=False)
+        try:
+            for _ in range(400):
+                if child.seen(job):
+                    break
+                await asyncio.sleep(0.05)
+            else:
+                pytest.fail("premise: the job's child started")
+            action, step, actor = _JOB["offboarding"]
+            holder.execute("SET lock_timeout = '20s'")
+            holder.execute("UPDATE tenancy.tenants SET state = 'offboarding', pending_action = %s, step = %s, "
+                           "step_actor = %s WHERE id = %s", (action, step, actor, T1))
+            holder_pid = holder.info.backend_pid
+            release.touch()
+            for _ in range(600):
+                if _end_write_waits_on_a_lock(dsn, holder_pid) or job_row(dsn, job)["status"] != "running":
+                    break
+                await asyncio.sleep(0.05)
+            # Past the deadlock timeout (1 s), so a cycle the next statement closes is found by the offboard's own wait.
+            await asyncio.sleep(1.5)
+            assert _end_write_waits_on_a_lock(dsn, holder_pid), "the end write did not wait for the offboard's tenant lock"
+            assert (job_row(dsn, job)["status"], _stored(dsn, job)) == ("running", []), "the end write went past the offboard"
+            if ends_the_row:
+                try:
+                    await asyncio.to_thread(
+                        holder.execute, "UPDATE jobs.learning_jobs SET status = 'skipped', reason = 'tenant_offboarded', "
+                        "message = 'offboarded', finished_at = now(), lease_expires_at = NULL WHERE id = %s "
+                        "AND status = 'running'", (job,))
+                except psycopg.errors.DeadlockDetected:
+                    pytest.fail("the offboard ending the job row deadlocked with the end write: it holds the row")
+                assert _end_write_waits_on_a_lock(dsn, holder_pid), "the end write stopped waiting before the commit"
+            holder.commit()
+        finally:
+            holder.close()
+            release.touch()
+        await asyncio.wait_for(draining, timeout=120)
+    if ends_the_row:
+        row = job_row(dsn, job)
+        assert (row["status"], row["reason"], row["publish_state"]) == ("skipped", "tenant_offboarded", "none"), row
+        assert _stored(dsn, job) == []
+        assert len(jobs_of(dsn, _inv(dsn, job))) == 1
+    else:
+        _refused_whole(dsn, job)
 
 
 # --- O2: generated findings content ---------------------------------------------------------------------------------

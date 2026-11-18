@@ -121,9 +121,12 @@ def _merged(dsn: str, tenant: str) -> None:
          published=[("finding", "f1")], held=[])
 
 
-def _abandoned_with_pr(dsn: str, tenant: str, lane: str = AUTHOR_LANE, *, checked: bool = False) -> None:
-    """A batch of `lane` in review whose PR a person closed by abandoning it: ended, the PR still to be closed by a
-    tick (unless a reconcile has looked since, `checked`)."""
+def _abandon_asked(dsn: str, tenant: str, lane: str = AUTHOR_LANE, *, settled: bool = False) -> None:
+    """A batch of `lane` in review, parked for a person, who asked for its abandon (#1537: only the request is recorded;
+    a tick carries it out once it has read the PR, `settle_abandon`). `settled`: a tick has since carried it out (its PR
+    found closed), so the batch is ended."""
+    from defender.tests.support.learning.core._release1537 import why
+
     if lane == LEAD_LANE:
         _pitfalls(dsn, tenant)
         claim = call(dsn, "claim", tenant, LEAD_LANE, owner="lead-drain", thresholds=ONE)
@@ -131,9 +134,11 @@ def _abandoned_with_pr(dsn: str, tenant: str, lane: str = AUTHOR_LANE, *, checke
         _queued(dsn, tenant, "f1")
         claim = call(dsn, "claim", tenant, AUTHOR_LANE, owner="host-a", thresholds=ONE)
     call(dsn, "in_review", claim, 7, {})
-    call(dsn, "abandon", tenant, claim.batch_id, by="person")
-    if checked:
-        call(dsn, "note_check", tenant, claim.batch_id)
+    call(dsn, "needs_person", tenant, claim.batch_id, why("foreign_pr", "a person is needed"))
+    call(dsn, "request_abandon", tenant, str(claim.batch_id), actor="person")
+    if settled:
+        assert call(dsn, "settle_abandon", tenant, str(claim.batch_id), pr_number=7, pr_state="closed") is True, \
+            "premise: the abandon was carried out"
 
 
 def _others_batch(dsn: str, tenant: str) -> None:
@@ -156,24 +161,24 @@ _SCENARIOS = {
     "lead_batch_closed_with_words": _lead_rejected,  # a lead replacement is operator-only: Wake does not count it (D9)
     "one_feedback_instruction_item": lambda dsn, t: L.instruct(dsn, t, 101),  # threshold 1, below the judge's 5 (A4 Wake)
     "pitfalls_at_threshold": _pitfalls,  # the lead lane is operator-only: nothing a post-step can act on (D9)
-    "abandoned_author_batch_pr_open": _abandoned_with_pr,  # closing: its PR is still to be closed
-    "abandoned_author_batch_pr_checked": lambda dsn, t: _abandoned_with_pr(dsn, t, checked=True),
+    "abandon_asked_author_batch": _abandon_asked,  # a person's abandon a tick has still to carry out (#1537)
+    "abandon_settled_author_batch": lambda dsn, t: _abandon_asked(dsn, t, settled=True),
     "another_tenants_batches_and_items": _others_batch,
 }
 
 
 @pytest.mark.parametrize(("scenario", "waiting"), [
     ("items_at_threshold", True), ("lapsed_lease", True), ("overdue_check", True), ("due_replacement", True),
-    ("fresh_check_in_review", True), ("live_working_batch", True), ("abandoned_author_batch_pr_open", True),
+    ("fresh_check_in_review", True), ("live_working_batch", True), ("abandon_asked_author_batch", True),
     ("one_feedback_instruction_item", True),
     ("below_threshold", False), ("merged_and_nothing_else", False), ("pitfalls_at_threshold", False),
-    ("lead_batch_closed_with_words", False), ("abandoned_author_batch_pr_checked", False),
+    ("lead_batch_closed_with_words", False), ("abandon_settled_author_batch", False),
     ("another_tenants_batches_and_items", False)])
 def test_o7_flow3_the_predicate_is_true_exactly_when_the_stores_state_gives_the_tenant_something_to_do(
         migrated_database, scenario, waiting):  # noqa: F811 — the imported fixture
     """Items at threshold, a lapsed lease, a batch overdue for a check, a due replacement, any batch still to be
-    reconciled, or an abandoned batch whose PR is still to close: waiting. Items below threshold, a merged batch alone,
-    lead-lane items alone, a checked abandoned batch, another tenant's state: not. (O7, Flow 3, Wake, D9)"""
+    reconciled, or a person's abandon a tick has still to carry out: waiting. Items below threshold, a merged batch
+    alone, lead-lane items alone, an abandon carried out, another tenant's state: not. (O7, Flow 3, Wake, D9, #1537)"""
     dsn = migrated_database
     _SCENARIOS[scenario](dsn, TENANT)
 
@@ -188,11 +193,14 @@ def test_o7_flow3_the_thresholds_are_the_values_the_caller_passes(migrated_datab
     assert waiting_of(migrated_database, TENANT, finding_at=finding_at) is waiting
 
 
-@pytest.mark.parametrize(("reconcile_lanes", "waiting"), [(RECONCILES, True), ((AUTHOR_LANE, "feedback"), False)])
-def test_o7_flow3_the_reconcile_lanes_are_the_values_the_caller_passes(migrated_database, reconcile_lanes, waiting):  # noqa: F811
-    """A lead-lane batch abandoned with its PR open is a closing batch of a reconciled lane only when the caller names
-    the lane. (O7, Flow 3)"""
-    _abandoned_with_pr(migrated_database, TENANT, LEAD_LANE)
+@pytest.mark.parametrize("reconcile_lanes", [RECONCILES, (AUTHOR_LANE, "feedback")], ids=["with-lead", "without-lead"])
+@pytest.mark.parametrize(("settled", "waiting"), [(False, True), (True, False)], ids=["abandon-asked", "abandon-settled"])
+def test_o7_flow3_the_reconcile_lanes_are_the_values_the_caller_passes(  # noqa: F811 — the imported fixture
+        migrated_database, reconcile_lanes, settled, waiting):  # noqa: F811
+    """A lead-lane batch a person asked to abandon is a batch not yet ended, so work waits whichever reconcile lanes
+    the caller names; once a tick has carried the abandon out, nothing waits, whichever lanes. Since #1537 no ended
+    batch is left for a tick to close, so the lanes passed add nothing a not-ended batch does not. (O7, Flow 3)"""
+    _abandon_asked(migrated_database, TENANT, LEAD_LANE, settled=settled)
     assert waiting_of(migrated_database, TENANT, reconcile_lanes=reconcile_lanes) is waiting
 
 
