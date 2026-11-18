@@ -446,7 +446,7 @@ def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,  # noqa: PL
     """A runs base holding ONE ordinary finished run. Returns (base, source_run_dir).
 
     `source_closing` plants the source's closing record (fields over a valid one) in its database; `source_fault`
-    (`recorded-before-1534` or `pointer-unreadable`) then makes that lookup a `CouldNotLook` (#1534).
+    (a `_readers1534` fault, or a dict of `fault_run`'s arguments) is then applied where that lookup reads (#1534).
 
     `published=True` sets the tenant up as published, so the source's default knowledge stamp
     (`scene_knowledge`) names a commit its clone holds, as a branch launch over it needs."""
@@ -516,7 +516,7 @@ def _source_handle(src: Path) -> Any:
 
 
 def seed_source_session(base: Path, src: Path, *, pre_snapshot: bool = False, closing: dict | None = None,
-                        fault: str | None = None) -> None:
+                        fault: str | dict | None = None) -> None:
     """Give the source run the session store a branch is actually taken from."""
     from defender.records import RunPaths, SessionPaths
 
@@ -551,15 +551,10 @@ def seed_source_session(base: Path, src: Path, *, pre_snapshot: bool = False, cl
             from defender.tests.support.learning.judge import _judge_921 as J
 
             V.plant(store, J._record_for(src.name, closing))
-        database = Path(store.path)
-    if fault == "recorded-before-1534":
-        from defender.tests.storage.verdict_1534 import _spec1534 as V
+    if fault is not None:  # a `_readers1534` fault, or a dict of `fault_run`'s arguments
+        from defender.tests.support.storage import _readers1534 as R
 
-        V.drop_table(database)
-    elif fault == "pointer-unreadable":
-        RunPaths(src).session_pointer().write_text("{not json", encoding="utf-8")
-    else:
-        assert fault is None, fault
+        R.fault_run(src, **({"fault": fault} if isinstance(fault, str) else fault))
 
 
 def capture_call(run_dir: Path, *, system: str = "elastic", verb: str = "query",

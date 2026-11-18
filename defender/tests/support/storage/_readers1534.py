@@ -25,9 +25,9 @@ KINDS_BY_FAULT = ("database-missing", "pointer-unreadable", "store-unreadable", 
 #: The two kinds every reader proves, and the one beside them that tells a missing database from a changed one.
 TWO_KINDS = ("database-missing", "row-invalid")
 #: The detail a fault carries must never reach a reader's outward slot: it names the database path. A meaningless token,
-#: planted only in the database's path (the case id), never in a reader's root or fixtures folder and never a word a
-#: fixed fault wording could hold.
-DETAIL_MARK = "ZQ1534DETAIL"
+#: planted only in the database's path (the case id, so lower case: a case id is case-stable), never in a reader's root or
+#: fixtures folder and never a word a fixed fault wording could hold.
+DETAIL_MARK = "zq1534detail"
 
 
 def valid_fields(disposition: str) -> dict[str, Any]:
@@ -57,16 +57,17 @@ def baseline_entry(result: str = "no logins from this host in the prior 30 days"
 
 def plant_run(run_dir: Path, fields: dict[str, Any] | None = None, *, fault: str | None = None,
               case_id: str | None = None, sessions_base: Path | None = None, invalid_as: str | None = None,
-              at_query: bool = False) -> Path | None:
+              at_query: bool = False, run: Any = None) -> Path | None:
     """`run_dir`'s session pointer, a real store behind it, and (when `fields` is not None) the run's closing record;
     then `fault` applied (`KINDS_BY_FAULT`), or `NO_POINTER` for a run that never opened a store. `fields=None` is a
     run with a pointer and a table but no row. `invalid_as` is the value a `row-invalid` fault leaves in the disposition
-    column. Returns the database (None when no pointer or an unreadable one)."""
+    column. `run` is the folder's handle when its name is not a fixture id (`fixture_run`'s). Returns the database (None
+    when no pointer or an unreadable one)."""
     from defender.records import SessionPaths
     from defender.records import session_store as ss
 
     run_dir = Path(run_dir)
-    run = fixture_run(run_dir)
+    run = fixture_run(run_dir) if run is None else run
     if fault == NO_POINTER:
         return None
     if fault == LEGACY_LINK:
