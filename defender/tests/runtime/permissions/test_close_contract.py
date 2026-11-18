@@ -90,7 +90,7 @@ def test_inconclusive_close_return_contract(tmp_path):
     assert fm["outcome"] == STANDS
     assert fm["cause"] in STANDING_CAUSES, fm["cause"]
     assert fm["cause"] != CAUSE_NOT_REVIEWED
-    assert "failure_kind" not in fm, "a review that completed is not a machinery failure"
+    assert fm["failure_kind"] is None, "a review that completed is not a machinery failure"
     rec = record(run_dir, 1)
     assert rec["verdict"] == STANDS
     assert rec["reviewed_disposition"] == GAP

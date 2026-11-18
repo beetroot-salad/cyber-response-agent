@@ -39,7 +39,7 @@ from defender.tests.support.runtime.engine._spec992 import (
     gap,
     holds,
     closing_lookup,
-    historical_closing,
+    never_closed,
     pre_change_inconclusive_dir,
     record,
     recording,
@@ -76,7 +76,7 @@ from defender.tests.support.runtime.engine._spec992 import (
 def test_visualizer_renders_a_reviewed_inconclusive(tmp_path):
     """A reviewed `inconclusive` renders as a reviewed attempt with its role traces, while a
     pre-#992 dir and a forced `unresolved` read 'not reviewed': `_was_reviewed` reads the
-    record's own `reviewed` field."""
+    review record's own `reviewed` field. The pre-#992 dir has no closing record (OD6), so no headline badge."""
     reviewed = reviewed_inconclusive_dir(tmp_path)
     assert frontmatter(reviewed)["cause"] == CEILING_EXAMINED
     assert record(reviewed, 1)["reviewed_disposition"] == GAP
@@ -94,12 +94,12 @@ def test_visualizer_renders_a_reviewed_inconclusive(tmp_path):
     assert "unresolved" in _BYPASS_NOTE
 
     historical = pre_change_inconclusive_dir(tmp_path)
-    assert frontmatter(historical)["cause"] == CAUSE_NOT_REVIEWED
-    html, n = render_review_gate(historical, closing=historical_closing(historical))
+    assert never_closed(historical), "fixture control: a hand-built pre-#1534 dir holds no closing record"
+    html, n = render_review_gate(historical, closing=closing_lookup(historical))
     assert n == 0, "an unreviewed inconclusive dir (no `reviewed` field) counts as reviewed"
     assert "not reviewed" in html
     assert "rv-stands" not in html
-    assert "not reviewed" in _gate_badge_html(historical_closing(historical))
+    assert _gate_badge_html(closing_lookup(historical)) == "", "a run with no record claims a gate outcome"
 
     deps, driver_forced = deps_over(tmp_path / "driver-forced", ceiling_companion())
     assert close_with(deps, "unresolved", recording(holds()), forced=True).outcome == STANDS
@@ -133,11 +133,11 @@ def test_headline_badge_for_a_ceiling_held_versus_an_unaffordable_gap(tmp_path):
     }, causes
 
 
-def _split_answers(run_dir: Path, *, historical: bool = False) -> dict:
+def _split_answers(run_dir: Path) -> dict:
     """Every run-page reader keyed on the reviewed/unreviewed split, one answer each: the
     § Review gate count and section guard, the per-attempt badge and bypass note, the role
-    cards and the headline badge."""
-    found = historical_closing(run_dir) if historical else closing_lookup(run_dir)
+    cards and the headline badge (whether it claims a review ran)."""
+    found = closing_lookup(run_dir)
     html, n = render_review_gate(run_dir, closing=found)
     badge = _gate_badge_html(found)
     return {
@@ -148,6 +148,7 @@ def _split_answers(run_dir: Path, *, historical: bool = False) -> dict:
         "live-bypass-note": _BYPASS_NOTE in html,
         "role-cards": all(f">{role}<" in html for role in REVIEW_ROLES),
         "headline-not-reviewed": "not reviewed" in badge,
+        "headline-claims-a-review": "gate: " in badge and "not reviewed" not in badge,
     }
 
 
@@ -158,17 +159,17 @@ def test_every_reader_of_the_reviewed_split_agrees_on_both_populations(tmp_path)
     reviewed_dir = reviewed_inconclusive_dir(tmp_path)
     historical_dir = pre_change_inconclusive_dir(tmp_path)
     reviewed = _split_answers(reviewed_dir)
-    historical = _split_answers(historical_dir, historical=True)
+    historical = _split_answers(historical_dir)
 
     assert reviewed == {
         "count": 1, "section-guard": False, "attempt-badge-reviewed": True,
         "bypass-note": False, "live-bypass-note": False, "role-cards": True,
-        "headline-not-reviewed": False,
+        "headline-not-reviewed": False, "headline-claims-a-review": True,
     }, reviewed
     assert historical == {
         "count": 0, "section-guard": True, "attempt-badge-reviewed": False,
         "bypass-note": True, "live-bypass-note": False, "role-cards": False,
-        "headline-not-reviewed": True,
+        "headline-not-reviewed": False, "headline-claims-a-review": False,
     }, historical
 
     # The two populations are told apart by the record's own word, not by the disposition on
@@ -357,7 +358,7 @@ def test_ceiling_claim_reaches_composer_inside_untrusted_frame(tmp_path):
     rec = record(run_dir, 1)
     assert rec["verdict"] == STANDS
     assert rec["failure_kind"] is None
-    assert "failure_kind" not in frontmatter(run_dir)
+    assert frontmatter(run_dir)["failure_kind"] is None
 
 
 def test_reply_contract_shared_on_inconclusive(tmp_path):

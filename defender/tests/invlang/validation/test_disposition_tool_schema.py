@@ -46,7 +46,10 @@ def _deps(tmp_path: Path):
     (run_dir / "investigation.md").write_bytes((GOLDEN / "investigation.md").read_bytes())
     dfn = tmp_path / "defender"
     dfn.mkdir(exist_ok=True)
-    return _with_fixture_run_1165(bind(MAIN_DEF, run_dir, defender_dir=dfn), run=_fixture_run_1165(run_dir)), run_dir
+    from defender.tests.support.runtime.engine._spec923 import with_session_store
+
+    deps = _with_fixture_run_1165(bind(MAIN_DEF, run_dir, defender_dir=dfn), run=_fixture_run_1165(run_dir))
+    return with_session_store(deps, tmp_path), run_dir
 
 
 

@@ -571,6 +571,11 @@ def _job_facts():
 _APPENDS_THROUGH_THE_CLOSE = 3
 
 
+#: The store end the M2 cuts use: a full disk stops the run's appends and leaves the database readable, so the lookup
+#: still answers whether a closing record landed (a corrupted file would read `store-unreadable`, never absence: V-LOOK).
+_CUT = "disk-full"
+
+
 def _closing_replay(run_dir: Path) -> ReplayFn:
     return ReplayFn([
         Turn(tool_calls=[("append_block", {"text": (GOLDEN / "investigation.md").read_text(encoding="utf-8")})]),
@@ -672,7 +677,7 @@ def test_m2_a_run_cut_before_any_close_is_not_a_committed_report(tmp_path):
     run_dir = materialize(tmp_path, GOLDEN, run_id="m2-cut")
     opened: list = []
     replay = ReplayFn(_read_alert_turns(run_dir, 6) + [Turn(text="done")])
-    factory = store_factory(tmp_path, fault=StoreFault(on="append", after=2, mode="corrupt"), sink=opened)
+    factory = store_factory(tmp_path, fault=StoreFault(on="append", after=2, mode=_CUT), sink=opened)
 
     facts = _job_facts()
     result = drive(run_dir, run_id="m2-cut", review_state=facts.review_state, main=replay, store_factory=factory)
@@ -689,7 +694,7 @@ def test_m2_a_report_file_planted_before_a_cut_is_not_a_committed_report(tmp_pat
     (run_dir / "report.md").write_text("# planted by the box\n\nDisposition: benign\n", encoding="utf-8")
     opened: list = []
     replay = ReplayFn(_read_alert_turns(run_dir, 6) + [Turn(text="done")])
-    factory = store_factory(tmp_path, fault=StoreFault(on="append", after=2, mode="corrupt"), sink=opened)
+    factory = store_factory(tmp_path, fault=StoreFault(on="append", after=2, mode=_CUT), sink=opened)
 
     facts = _job_facts()
     result = drive(run_dir, run_id="m2-planted", review_state=facts.review_state, main=replay, store_factory=factory)
@@ -720,7 +725,7 @@ def test_m2_a_close_before_a_cut_is_a_committed_report(tmp_path):
     """The model closed, then a store fault cut the run: the close still counts, whatever the exit. (M2)"""
     run_dir = materialize(tmp_path, GOLDEN, run_id="m2-closed-then-cut")
     opened: list = []
-    factory = store_factory(tmp_path, fault=StoreFault(on="append", after=_APPENDS_THROUGH_THE_CLOSE, mode="corrupt"),
+    factory = store_factory(tmp_path, fault=StoreFault(on="append", after=_APPENDS_THROUGH_THE_CLOSE, mode=_CUT),
                             sink=opened)
 
     facts = _job_facts()
