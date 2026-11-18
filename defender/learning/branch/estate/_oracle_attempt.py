@@ -164,6 +164,9 @@ class _Run:
     box: _AttemptBox | None = None
     #: Asked of a submission before its checks (`Oracle.serve`'s `gate`).
     gate: Callable[[Any], str | None] | None = None
+    #: The agents entered on the oracle attempt's event loop, closed with the attempt outside its deadline
+    #: (`Oracle._attempt`); `None` on a verifier's run.
+    entered: contextlib.AsyncExitStack | None = None
     #: Python workers are owned by the attempt even when its tool coroutine is cancelled.
     _box_workers: list[asyncio.Task[Any]] = field(default_factory=list, repr=False)
 
