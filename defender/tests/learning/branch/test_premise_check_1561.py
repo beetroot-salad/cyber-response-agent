@@ -123,3 +123,45 @@ def test_without_a_check_seam_the_family_is_authored_as_before(tmp_path):
 
     assert _labels(family) == ["a", "b", "c"]
     assert agent.calls == 3
+
+
+def test_the_evidence_holds_the_prebranch_recorded_answers_and_no_later_call(tmp_path):
+    """The launcher's evidence: each pre-branch call with the primed recording's answer for it;
+    a call recorded after the branch point is left out."""
+    import json
+
+    from defender.learning.branch.ledger import request_key
+    from defender.learning.branch.questioner_launch import prebranch_answers
+
+    def row(system, verb, params, answer):
+        return {"system": system, "verb": verb, "params": params,
+                "payload_text": json.dumps(answer)}
+
+    base = tmp_path / "base.jsonl"
+    early = row("elastic", "alerts", {"limit": 10}, {"total": 6})
+    late = row("elastic", "alerts", {"limit": 99}, {"total": 7})
+    base.write_text("\n".join(json.dumps(r) for r in (early, late)) + "\n", encoding="utf-8")
+
+    evidence = prebranch_answers({request_key("elastic", "alerts", {"limit": 10})}, base)
+
+    assert evidence == [{"call": {"system": "elastic", "verb": "alerts", "params": {"limit": 10}},
+                         "answer": {"total": 6}}]
+    assert prebranch_answers(set(), base) == []
+
+
+def test_the_revisions_record_is_written_only_when_the_check_named_a_world(tmp_path):
+    from defender import _yaml
+    from defender.learning.branch.questioner_launch import write_world_revisions
+    from defender.records._episode_handle import Episode
+
+    entry = {"label": "b", "conflicts": [{"fact_id": "f1"}], "revised": True, "dropped": False,
+             "original_facts": []}
+    quiet, named = tmp_path / "quiet", tmp_path / "named"
+    for ep, entries in ((quiet, []), (named, [entry])):
+        ep.mkdir()
+        with Episode.open(ep) as episode:
+            write_world_revisions(episode, entries)
+
+    assert not (quiet / "world_revisions.yaml").exists()
+    written = _yaml.safe_load((named / "world_revisions.yaml").read_text(encoding="utf-8"))
+    assert written == {"worlds": [entry]}

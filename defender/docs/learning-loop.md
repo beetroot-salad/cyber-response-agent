@@ -207,15 +207,20 @@ Otherwise the world's **oracle** (`estate/oracle.py`, `AgentRole.ORACLE`) takes
 one turn, in which it serves the world as it stood at the branch point: for a system that takes a
 query it makes a **re-ask** with its `re_ask` tool (the call's own question, edited to end there):
 the host refuses one that is not that question before reading anything, reads it, and from then on
-in the attempt its answer is the base the claim is held against; a committed re-ask is kept as a
+in the attempt its answer is the base the patch applies to; a committed re-ask is kept as a
 base answer of the world. For a system of record it
-undoes the source run's own later writes and edits the response to the world's facts. It sees the
-call, a handle to the base answer and the world's facts,
-may explore real examples through the same grant decision (rate-limited,
-recorded only on the oracle side), forges telemetry for facts the call covers,
-and submits a served answer plus a claim of every difference. Host checks
-(`estate/checks.py`) hold the claim to the answer, the forged rows to the real
-columns, ids and recorded facts, and the counting arithmetic; then a verifier
+undoes the source run's own later writes (each such change names the reserved fact `fork`) and
+edits the response to the world's facts. It sees the call, the base answer (saved for its code)
+and the world's facts, and this world's earlier servings most like the call (their code, changes
+and output; each call starts a fresh conversation), may explore real examples through the same
+grant decision (rate-limited, recorded only on the oracle side), and hands in its changes as a
+JSON Patch on the base (#1543), usually printed by code: every operation names the fact it
+serves, an `add` is a forged row, and optional proofs back a removal. The host applies the
+patch, so the served answer and its changes never disagree, and shows the changes through the
+call's own query (table, row, column, the row before and after); that rendering is what the
+verifier judges and the answer stores. Host checks (`estate/checks.py`) hold the result to the
+base's shape, the forged rows to the real columns, ids and recorded facts, and each proof to a
+removed row; then a verifier
 (`AgentRole.ORACLE_CHECK`), in its own context and never shown the oracle's
 reasoning, asks whether each covered fact's telemetry is present and plausible.
 A failure goes back to the oracle and the turn retries; past the cap the world is

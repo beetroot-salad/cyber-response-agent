@@ -233,3 +233,29 @@ def test_similar_servings_prefer_the_calls_own_system_and_verb():
     ranked = similar_servings(servings, ("idp", "query", {"q": "user:alice"}), k=3)
 
     assert [r["params"] for r in ranked] == [{"q": "user:alice"}, {"q": "user:carol"}, {}]
+
+
+def test_a_preflight_serving_is_kept_for_the_siblings_later_calls(tmp_path):
+    """Pre-flight's calibration commits no answer, but keeps its serving: a sibling registry over
+    the same world later lists it among the earlier servings in its call's prompt."""
+    from defender.learning.branch.estate.registry import calibrate_one
+
+    add = S.handin(S.op_add("/rows/-", FORGED, forged_id="fg-1", fact_id="f1"))
+    est = S.estate(tmp_path)
+    ep = S.episode_v2(tmp_path / "ep",
+                      base_rows=[S.captured("idp", "query", BOB, {"rows": [BOB_ROW]})])
+    pre = S.sandboxed_registry(ep, "b", est, oracle=S.oracle(S.submit(add)),
+                               verifier=S.passing_verifier())
+    calibrate_one(pre, est.ctx(tmp_path / "pre"), "idp", "query", ALICE,
+                  {"rows": [ALICE_ROW]}, fixed=False)
+    assert [s["params"] for s in _servings(ep)] == [ALICE]
+    assert not _answers(ep), "calibration committed an answer"
+
+    sibling_oracle = S.oracle(S.submit())
+    sibling = S.sandboxed_registry(ep, "b", est, oracle=sibling_oracle,
+                                   verifier=S.passing_verifier())
+    S.call(sibling, "idp", "query", est.ctx(tmp_path / "run"), **BOB)
+
+    prompt = sibling_oracle.seen[0]
+    assert "This world's earlier servings most like this call" in prompt
+    assert "user:alice" in prompt, "the sibling's prompt did not show the calibration's call"
