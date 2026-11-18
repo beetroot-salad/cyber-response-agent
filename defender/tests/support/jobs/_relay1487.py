@@ -17,6 +17,7 @@ import datetime as _dt
 import os
 import random
 import re
+import shutil
 import signal
 import uuid
 from collections.abc import Callable, Iterator, Mapping
@@ -196,7 +197,15 @@ class PostStepHelper:
         os.kill(self._process.helper_pid, signal.SIGTERM)
 
     def close(self) -> None:
-        self._process.close()
+        """Stop the helper (`ProcessHelper.close` kills it, so it never cleans up) and take away the claim's socket
+        folder it made (`job_host._container.make_socket_folder`, made exclusively): the next helper of this scene, or
+        an in-process one of the same claim, makes it afresh."""
+        from defender.job_host._container import SOCKETS
+
+        try:
+            self._process.close()
+        finally:
+            shutil.rmtree(self.scene.root / SOCKETS / self.scene.claim, ignore_errors=True)
 
 
 def in_post_step(scene: Any, body: Callable[[Any], Any], *, rc: int = 0) -> Any:

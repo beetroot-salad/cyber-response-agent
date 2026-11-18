@@ -25,6 +25,7 @@ import re
 import signal
 import sys
 import uuid
+from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any
 
@@ -136,13 +137,17 @@ _SCRIPTS: dict[str, tuple[list[tuple], dict[int, str]]] = {
     "an outcome the store does not know": (
         [("claim",), ("in_review", 0, 9), ("batches",), ("end_review", 0, "bogus")], {3: "ValueError"}),
 }
+#: The exceptions that cross which the store raises as Python's own classes (`_store.py` `_batch`, `end_review`): the
+#: port must raise exactly what the adapter raised (`assert_same`), with no store module to name.
+_BUILTIN_RAISES = ("LookupError", "ValueError")
 
 
 @pytest.mark.parametrize("script", sorted(_SCRIPTS))
 def test_p2_a_scripted_sequence_is_answered_alike_and_raises_the_store_exceptions_as_they_are(scene, start, script):
     """The census's verbs in a tick's order and in the races it has (a rival's takeover, a lapse, a cancel, a lane held
     by another, a purged batch) answer and raise the same over the adapter and the port; each exception named is the
-    store's own class. (P2, O4; Exceptions that cross)"""
+    class the store raised (its own, or the builtin `LookupError`/`ValueError` it raises), the port's the same. (P2, O4;
+    Exceptions that cross)"""
     ops, raises = _SCRIPTS[script]
     adapter = run_over("adapter", scene, start, ops)
     port = run_over("port", scene, start, ops)
@@ -152,7 +157,8 @@ def test_p2_a_scripted_sequence_is_answered_alike_and_raises_the_store_exception
         got = adapter[index]
         assert got[0] == "raised", f"call {index} {ops[index]}: {got!r}"
         assert got[1].rsplit(".", 1)[-1] == name, f"call {index} {ops[index]}: {got!r}"
-        assert got[1].startswith("defender.learning_store"), f"{name} is not the store's own class: {got[1]}"
+        if name not in _BUILTIN_RAISES:  # the store raises these as the builtins: same-as-adapter is the whole check
+            assert got[1].startswith("defender.learning_store"), f"{name} is not the store's own class: {got[1]}"
     if not raises:
         assert [o[0] for o in adapter[:6]] == ["ok"] * 6, adapter[:6]
         assert adapter[0][1][0] == "Held", "control: the claim did not return a Held"
@@ -171,9 +177,10 @@ def test_p2_a_generated_sequence_with_races_is_answered_alike_per_call(scene, st
 
 
 def test_p2_a_tenant_not_active_refuses_a_claim_alike(scene, start):
-    """The tenant goes to offboarding after the helper started: the claim raises the store's `TenantInactive` over both.
-    (P2, Exceptions that cross)"""
-    from defender.tests.support.jobs._jobs1342 import restate_tenant
+    """The tenant goes to offboarding after the helper started (its row moved in place, as the lifecycle moves it; a
+    missing row is not a state any deployment reaches, Amendment r5.1 item 8): the claim raises the store's
+    `TenantInactive` over both. (P2, Exceptions that cross)"""
+    from defender.tests.support.jobs._jobs1342 import move_tenant
 
     outcomes = {}
     for impl in R.IMPLS:
@@ -186,11 +193,11 @@ def test_p2_a_tenant_not_active_refuses_a_claim_alike(scene, start):
             store_cm = contextlib.nullcontext(helper.port())
         with store_cm as store:
             call(scene.dsn, "publish_findings", scene.tenant, "run-1", [finding("f/w/0/0")], kind=FINDING)
-            restate_tenant(scene.dsn, scene.tenant, state="offboarding", data_root=scene.root)
+            move_tenant(scene.dsn, scene.tenant, state="offboarding")
             outcomes[impl] = R.Canon().outcome(store.claim)
         if helper is not None:
             helper.close()
-        restate_tenant(scene.dsn, scene.tenant, state="active", data_root=scene.root)
+        move_tenant(scene.dsn, scene.tenant, state="active")
 
     assert outcomes["adapter"][0] == "raised", outcomes["adapter"]
     assert outcomes["adapter"][1].endswith(".TenantInactive"), outcomes["adapter"]
@@ -402,11 +409,13 @@ def test_p2_the_port_answers_the_helpers_own_settings_not_a_default(scene, start
         assert port.generation_ceiling == adapter.generation_ceiling
 
 
-@pytest.mark.parametrize(("lease", "starts"), [(10, False), (_STOP_WINDOW, False), (_STOP_WINDOW + 1, True)])
+@pytest.mark.parametrize(("lease", "starts"), [(10, False), (_STOP_WINDOW, False), (_STOP_WINDOW + 0.001, True),
+                                               (_STOP_WINDOW + 0.5, True), (_STOP_WINDOW + 1, True)])
 def test_o6_the_port_refuses_to_start_when_the_lease_is_not_longer_than_the_stop_window(scene, start, monkeypatch,
                                                                                       lease, starts):
     """A lease of 10 s or of 22 s (the stop window) is refused at the port's start with a `ValueError` naming both
-    durations (amendment 4); 23 s starts. A batch the unwind could not reach then lapses to recovery. (O6)"""
+    durations (amendment 4); any lease longer than the window starts: 22.001 s, 22.5 s, 23 s. A batch the unwind could
+    not reach then lapses to recovery. (O6)"""
     R.settings_env(monkeypatch, lease=lease)
     helper = start()
     if starts:
@@ -741,6 +750,78 @@ def test_o6_every_reader_and_reconciling_verb_is_answered_after_the_signal(scene
     assert got["ended"] is True
 
 
+# --- #1537: a person's abandon request, carried out through the port ----------------------------------------------------
+
+#: Three findings in one batch: the merge settles one published, one held (cut from the merge), the third back waiting.
+_ABANDON_ITEMS = [f"ab/w/0/{i}" for i in range(3)]
+_SETTLED = {"published": [(FINDING, _ABANDON_ITEMS[0])], "held": [(FINDING, _ABANDON_ITEMS[1])]}
+
+
+def _abandon_scenario(store: Any, dsn: str, tenant: str, when: str, *, signal_stop: Callable[[], None]) -> list[tuple]:
+    """The tick's half of #1537 over `store`, from an earlier tick's batch of `_ABANDON_ITEMS`. `parked`: the batch was
+    parked while working (no PR recorded) and a person asked to abandon it before the listing, so it is listed parked with
+    the request (never in review, never lapsed); the tick settles it merged as PR 12. `after the signal`: the batch is
+    listed in review (PR 9), the stop signal comes (`signal_stop`), the tick parks it (`needs_person`), the person asks,
+    the tick lists it again and settles it merged. Each tick call's canonical outcome."""
+    canon = R.Canon()
+    held = call(dsn, "claim", tenant, AUTHOR_LANE, owner="earlier-tick", thresholds=ONE)
+    assert held is not None, "premise: the earlier tick claimed"
+    assert len(held.items) == len(_ABANDON_ITEMS), "premise: one batch holds the three findings"
+    batch_id = str(held.batch_id)
+    why = Why.batch("foreign_commits_remote", "a foreign tip")
+    out: list[tuple] = []
+    if when == "parked":
+        call(dsn, "needs_person", tenant, batch_id, why)
+        call(dsn, "request_abandon", tenant, batch_id, actor="person")
+        out.append(canon.outcome(store.batches))
+        pr = 12
+    else:
+        call(dsn, "in_review", held, 9, {})
+        out.append(canon.outcome(store.batches))
+        signal_stop()
+        out.append(canon.outcome(lambda: store.needs_person(batch_id, why)))
+        # the person's request is part of what is compared: it is refused if the tick's park was not answered
+        out.append(canon.outcome(lambda: call(dsn, "request_abandon", tenant, batch_id, actor="person")))
+        out.append(canon.outcome(store.batches))
+        pr = 9
+    out.append(canon.outcome(lambda: store.settle_abandon(batch_id, pr_number=pr, pr_state="merged", **_SETTLED)))
+    return out
+
+
+@pytest.mark.parametrize("when", ["parked", "after the signal"])
+def test_o4_a_persons_abandon_request_is_settled_alike_through_either_store(scene, monkeypatch, when):
+    """#1537's abandon path, over the adapter and over the port (the real helper in this process): a batch parked with a
+    person's abandon request (listed only as parked, never in review or lapsed) is settled merged with a PR the tick
+    found, and after the stop signal `needs_person` and `settle_abandon` are still answered (part of the unwind's
+    reconcile). Every call answers alike, and the store ends alike: the batch ended `merged` with the PR, the item named
+    published published, the one named held held, the third waiting. (P2, O4, O6, Batch references; #1537 O3)"""
+    R.settings_env(monkeypatch)
+    results: dict[str, tuple] = {}
+    for impl in R.IMPLS:
+        R.reset_learning(scene.dsn)
+        call(scene.dsn, "publish_findings", scene.tenant, "run-ab", [finding(k) for k in _ABANDON_ITEMS], kind=FINDING)
+        if impl == "adapter":
+            with R.adapter_store(scene.dsn, scene.tenant) as store:
+                calls = _abandon_scenario(store, scene.dsn, scene.tenant, when, signal_stop=lambda: None)
+        else:
+            def body(c: Any) -> list[tuple]:
+                return _abandon_scenario(R.container_port(c, scene.tenant), scene.dsn, scene.tenant, when,
+                                         signal_stop=lambda: _signal_and_wait(c))
+            calls = R.in_post_step(scene, body, rc=143 if when == "after the signal" else 0)
+        [batch] = call(scene.dsn, "batches", scene.tenant)
+        results[impl] = (calls, (batch.phase, batch.outcome, batch.pr_number), item_states(scene.dsn, scene.tenant))
+
+    adapter_calls, adapter_batch, adapter_items = results["adapter"]
+    assert adapter_calls[-1] == ("ok", True), f"control: the adapter did not settle the request: {adapter_calls}"
+    assert adapter_batch == ("ended", "merged", 12 if when == "parked" else 9), adapter_batch
+    assert {k: v[0] for k, v in adapter_items.items()} == {
+        _ABANDON_ITEMS[0]: "published", _ABANDON_ITEMS[1]: "held", _ABANDON_ITEMS[2]: "waiting"}, adapter_items
+    port_calls, port_batch, port_items = results["port"]
+    assert port_calls == adapter_calls, f"the port answered {port_calls}, the adapter {adapter_calls}"
+    assert port_batch == adapter_batch, f"the batch ended {port_batch} through the port, {adapter_batch} through the adapter"
+    assert port_items == adapter_items, f"the items ended {port_items} through the port, {adapter_items} through the adapter"
+
+
 # --- Outages the port adds: lost transport, unreadable answers, the helper's own faults ----------------------------------
 
 _LOST = [TimeoutError("the 300 s wait ran out"), ConnectionResetError("reset"), ConnectionRefusedError("refused"),
@@ -839,9 +920,37 @@ def _drive_every_verb(port: Any) -> None:
                  lambda: port.end_review(other, expect_phase="in_review", outcome="closed", published=[], held=[]),
                  lambda: port.take_over(other), lambda: port.abandon(other), lambda: port.expire_own(target),
                  lambda: port.abandon_clean(target), lambda: port.end_no_commits(target, {}),
-                 lambda: port.abandon_crashed(target)):
+                 lambda: port.abandon_crashed(target), lambda: _settle_any(port, other)):
         with contextlib.suppress(Exception):
             step()
+
+
+def _settle_any(port: Any, batch_id: str) -> Any:
+    """`settle_abandon` as the tick calls it (#1537), with a PR and both item lists: every field the request has."""
+    return port.settle_abandon(batch_id, pr_number=12, pr_state="merged", published=[(FINDING, "p/w/0/0")],
+                               held=[(FINDING, "p/w/0/1")])
+
+
+def _names_sent_by(start, act: Callable[[Any], Any]) -> set[str]:
+    """The request names a fresh helper's port sends for `act(port)` alone (its start's own requests left out; a refusal
+    is fine): the wire's names are the implementer's, so they are learned, never spelled."""
+    helper = start()
+    try:
+        recorder = R.Recorder(helper.ask)
+        port = helper.port(recorder)
+        before = len(recorder.calls)
+        with contextlib.suppress(Exception):
+            act(port)
+        return {name for name, _fields in recorder.calls[before:]}
+    finally:
+        helper.close()
+
+
+def _settle_reached(start, seen: list[tuple[str, dict[str, Any]]]) -> None:
+    """Premise of the census checks: the driver's `settle_abandon` (#1537) is among the requests recorded."""
+    settle = _names_sent_by(start, lambda port: _settle_any(port, str(uuid.uuid4())))
+    assert settle, "premise: `settle_abandon` sent nothing"
+    assert settle <= {name for name, _fields in seen}, f"the driver's `settle_abandon` was not recorded: {seen}"
 
 
 def _recorded(scene, start) -> list[tuple[str, dict[str, Any]]]:
@@ -858,13 +967,14 @@ def _recorded(scene, start) -> list[tuple[str, dict[str, Any]]]:
 
 
 def test_p1_no_request_the_port_sends_has_a_field_for_the_tenant_lane_owner_thresholds_or_by(scene, start):
-    """The requests the tick's verbs send, recorded: none names or carries the tenant, a lane, an owner, thresholds, `by`
+    """The requests the tick's verbs send (every census verb, `settle_abandon` included), recorded: none names or carries the tenant, a lane, an owner, thresholds, `by`
     or a lease; and one with such a field added is refused `bad-fields` with the store unmoved. (P1, O5)"""
     from defender import job_host
 
     seen = _recorded(scene, start)
     assert len({name for name, _ in seen}) >= 1, f"the port sent too little to judge: {seen}"
     assert len(seen) >= 10, f"the port sent too little to judge: {seen}"
+    _settle_reached(start, seen)
     banned = {"tenant", "tenant_id", "lane", "owner", "thresholds", "by", "lease", "grace", "settings"}
     for name, fields in seen:
         assert not banned & set(fields), (name, fields)
@@ -888,6 +998,7 @@ def test_p6_o5_a_learning_job_and_an_investigation_get_no_store_request(scene, s
     `not-for-kind` while the kind's own request is answered. (O5, P6)"""
     seen = _recorded(scene, start)
     assert seen, "the port sent nothing to replay"
+    _settle_reached(start, seen)
     job_id = str(uuid.uuid4())
     if kind == "investigation":
         scene.plant(job_id)
@@ -965,7 +1076,8 @@ def test_o4_a_merged_review_is_reconciled_through_either_store(scene, tick):
 
 def test_o4_a_lapsed_batch_is_recovered_through_either_store(scene, tick):
     """A holder died with nothing on any branch and its lease and grace ran out: the tick recovers the batch (its holder
-    was lost) and the items it held are claimed again. (O4)"""
+    was lost) and the items it held are claimed again: the lost holder's attempt kept and the new claim's counted, two
+    (as `tenant_1108_p4/test_1278_tick.py::test_o1_a_lapsed_batch_with_nothing_anywhere_is_abandoned_...` holds). (O4)"""
     from defender.tests.tenancy.tenant_1108_p4._drain_support import LESSON_NAME
 
     _operator_batch(scene.dsn, scene.tenant, lapsed=True)
@@ -976,7 +1088,8 @@ def test_o4_a_lapsed_batch_is_recovered_through_either_store(scene, tick):
     old, *later = call(scene.dsn, "batches", scene.tenant)
     assert (old.phase, old.outcome, old.reason) == ("ended", "abandoned", "its holder was lost"), old
     assert later, "the recovered items were not claimed again"
-    assert item_states(scene.dsn, scene.tenant)["op/w/0/0"][1] == 1, "the lost holder's attempt was not counted"
+    assert item_states(scene.dsn, scene.tenant)["op/w/0/0"][:2] == ("in_batch", 2), (
+        "the lost holder's attempt is kept (crash abandon) and the recovering tick's claim counts its own")
 
 
 def _wire_names_of(helper: R.PostStepHelper, verb: str) -> set[str]:

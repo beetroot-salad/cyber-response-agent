@@ -216,14 +216,20 @@ def author_drain(t: Any, paths: Any, *, trigger: Any, box: BoxSpy, mint: bool = 
     """`author_drain` through the stage runner, the tenant's forge fake as its forge client and
     a fresh identity over its issuer fake (login skipped) unless the case passes others; `directory=`
     is `t.directory` (#1214 Flow 4: the tenant is admitted from the directory) unless the case passes one. The tick's store
-    is `tick_store`'s: the adapter, or (the case run over `conftest.tick_impl`'s `port`) the port over a real helper."""
+    is `tick_store`'s: the adapter, or (the case run over `conftest.tick_impl`'s `port`) the port over a real helper. The
+    store is bound inside the stage, as the host entry binds it (`cli._host_author_drain` under `_run_stage`): a refusal
+    while binding it (a malformed threshold) is the stage's exit 2, not an exception out of the runner."""
     seams.setdefault("client", t.forge.client)
     seams.setdefault("directory", t.directory)
     if not mint:  # with `mint=True` the drain mints from the live generation's host secret file
         seams.setdefault("identity", t.vault.identity())
-    with tick_store(t, "author", seams) as store:
-        return run_stage(lambda: drains().author_drain(
-            paths, trigger_author=trigger, start_box=box.start, stop_box=box.stop, store=store, **seams))
+
+    def stage() -> int:
+        with tick_store(t, "author", seams) as store:
+            return drains().author_drain(paths, trigger_author=trigger, start_box=box.start, stop_box=box.stop,
+                                         store=store, **seams)
+
+    return run_stage(stage)
 
 
 #: The tick's store implementations the tick tests run over (#1487 Flow 2, Conformance: "the existing tick tests run over
