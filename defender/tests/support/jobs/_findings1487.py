@@ -146,23 +146,50 @@ def all_items(dsn: str) -> list[tuple[str, str, str]]:
                                            "ORDER BY tenant_id, kind, item_key")]
 
 
-def breaking_screen(monkeypatch: Any, exc: BaseException) -> list[str]:
-    """Every loaded `defender` module's `screen_findings` raises `exc` (and records its call); the modules patched."""
-    import importlib
+def raising_screen(exc: BaseException):
+    """A findings screen for the worker's `screen_findings=` keyword: every call records itself in `.called` and raises
+    `exc`. Injected through the worker's construction, so nothing is patched."""
+    called: list[tuple[Any, ...]] = []
 
-    importlib.import_module("defender.learning.judge.enqueue")
-    called: list[str] = []
-
-    def screen(*_a: Any, **_k: Any) -> None:
-        called.append("called")
+    def screen(*args: Any, **_kw: Any) -> None:
+        called.append(args)
         raise exc
 
-    patched = [name for name, module in list(sys.modules.items())
-               if name.startswith("defender.") and "screen_findings" in getattr(module, "__dict__", {})]
-    for name in patched:
-        monkeypatch.setattr(sys.modules[name], "screen_findings", screen)
-    breaking_screen.called = called  # type: ignore[attr-defined]
-    return patched
+    screen.called = called  # type: ignore[attr-defined]
+    return screen
+
+
+# One error set for both lanes that insert findings (the worker's end write and the operator lane's `publish_findings`),
+# so the two cannot drift: what each lane must treat as a refusal, and what as an outage (design r5.1 items 4, 7).
+REFUSED_SQLSTATES = ["22001", "22021", "22P02", "23502", "23505", "23514", "54000", "54001", "42501"]
+REFUSED_EXCEPTIONS = [RuntimeError("boom"), ValueError("v"), KeyError("k"), MemoryError()]
+OUTAGE_SQLSTATES = ["40P01", "55P03", "57014", "53100"]
+OUTAGE_IDS = ["deadlock", "lock-timeout", "cancel", "disk-full"]
+
+
+def row_of_json_bytes(row: dict[str, Any], size: int, *, compact: bool = False) -> dict[str, Any]:
+    """`row` with its `finding` text padded (ASCII) so that its JSON measures exactly `size` bytes by
+    `findings_text_bytes`: with `json.dumps`' default separators, or the compact ones."""
+    from defender.records.job_lane import findings_text_bytes
+
+    def measure(r: dict[str, Any]) -> int:
+        return findings_text_bytes(json.dumps(r, separators=(",", ":")) if compact else json.dumps(r))
+
+    padded = dict(row, finding="")
+    padded["finding"] = "y" * (size - measure(padded))
+    assert measure(padded) == size, "premise: the padding measures exactly"
+    return padded
+
+
+def id_of_utf8_bytes(job: str, size: int, filler: str = "x") -> str:
+    """`<job>/` plus `filler` repeated so that the whole id is exactly `size` UTF-8 bytes (`filler` of 1 or 2 bytes)."""
+    head = f"{job}/"
+    width = len(filler.encode())
+    body = size - len(head.encode())
+    assert body >= 0
+    pad = filler * (body // width) + "x" * (body % width)
+    assert len((head + pad).encode()) == size
+    return head + pad
 
 
 def path_of(runs: Path, job: str) -> Path:

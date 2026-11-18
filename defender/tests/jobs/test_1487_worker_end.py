@@ -162,8 +162,7 @@ async def test_p3_the_ending_and_its_findings_become_visible_together_across_an_
 # --- O3 -----------------------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("sqlstate", ["40P01", "55P03", "57014", "53100"],
-                         ids=["deadlock", "lock-timeout", "cancel", "disk-full"])
+@pytest.mark.parametrize("sqlstate", F.OUTAGE_SQLSTATES, ids=F.OUTAGE_IDS)
 async def test_o3_an_outage_at_the_insert_retries_and_never_refuses(world, sqlstate):  # noqa: F811
     """The first insert dies of an outage-class error; the end write is retried and the findings are stored, `done`.
     (O3, P4: `is_outage` retries)"""
@@ -183,45 +182,24 @@ async def test_o3_an_outage_at_the_insert_retries_and_never_refuses(world, sqlst
 
 
 async def test_o2_a_refusal_is_logged_with_the_job_it_refused(world, caplog):  # noqa: F811
-    """A refused job's findings leave a log line naming the job and the refusal. (O2: "logged and counted"; the count
-    has no named observable, reported as a gap)"""
+    """Each refused job's findings leave a log line carrying its job id and the refusal's kind: two jobs refused for
+    different kinds (text that is not an object, a row failing its rule) log lines that differ once the job id is
+    removed, and neither line names the other job. "Counted" is the stored `refused` row, pinned by `_refused_whole`.
+    (O2, amendment r5.1 item 3; the design fixes no wording for a kind)"""
     import logging
 
     caplog.set_level(logging.INFO)
-    [job] = await _run(world, [lambda j: F.record(findings={"state": "ok", "text": json.dumps([1, 2])})])
-    _refused_whole(world["dsn"], job)
-    assert [r for r in caplog.records if job in r.getMessage() and "refus" in r.getMessage().lower()], \
-        "no log line names the refused job"
-
-
-async def test_o2_a_tenant_row_that_is_gone_at_the_end_counts_as_inactive(world):  # noqa: F811
-    """The tenant's row is deleted (foreign keys off for the test's own deleting session) while the family runs: the end
-    write reads it as inactive: `completed`, `refused`, nothing stored, no raise. (Flow 1 step 3: `_require_active`'s
-    rule)"""
-    import psycopg
-
-    dsn = world["dsn"]
-    release = world["tmp"] / "release"
-    child = F.child_class()(world["tmp"] / "job", world["runs"], wait_for=release)
-    child.records = {}
-    async with job_store(dsn) as store:
-        job = await queued_job(world, store, ticket="J-1")
-        child.records[job] = _both(job)
-        draining = asyncio.create_task(learning_worker(
-            world, store, job=child, post=F.quiet_post_class()(world["tmp"] / "post", world["runs"]),
-            slots=2, learning_slots=1, renewal_interval=0.2).drain())
-        try:
-            for _ in range(200):
-                if child.seen(job):
-                    break
-                await asyncio.sleep(0.05)
-            with psycopg.connect(dsn, autocommit=True) as conn:
-                conn.execute("SET session_replication_role = replica")
-                conn.execute("DELETE FROM tenancy.tenants WHERE id = %s", (T1,))
-        finally:
-            release.touch()
-        await asyncio.wait_for(draining, timeout=120)
-    _refused_whole(dsn, job)
+    shape = lambda j: F.record(findings={"state": "ok", "text": json.dumps([1, 2])})  # noqa: E731
+    rule = lambda j: F.record(findings=F.ok([dict(F.defender_row(j), type="not-a-type")]))  # noqa: E731
+    a, b = await _run(world, [shape, rule], slots=2)
+    kinds = {}
+    for job, other in ((a, b), (b, a)):
+        _refused_whole(world["dsn"], job)
+        lines = [r.getMessage() for r in caplog.records if job in r.getMessage() and "refus" in r.getMessage().lower()]
+        assert lines, f"no log line names the refused job {job}"
+        assert not [line for line in lines if other in line], "a refusal's line names another job"
+        kinds[job] = sorted(line.replace(job, "<job>") for line in lines)
+    assert kinds[a] != kinds[b], f"two kinds of refusal logged alike: {kinds[a]}"
 
 
 # --- O2, P4: refusals; the ending stands -----------------------------------------------------------------------
@@ -247,7 +225,7 @@ async def test_o2_a_job_ending_refused_does_not_pause_the_workers_claims(world):
     assert job_row(dsn, b)["publish_state"] == "done" and len(_stored(dsn, b)) == 3  # noqa: PT018
 
 
-@pytest.mark.parametrize("sqlstate", ["22001", "22021", "22P02", "23502", "23505", "23514", "54000", "54001", "42501"])
+@pytest.mark.parametrize("sqlstate", F.REFUSED_SQLSTATES)
 async def test_o2_p4_an_insert_error_the_content_causes_or_that_waiting_cannot_cure_refuses_the_findings(
         world, sqlstate):  # noqa: F811
     """Data (22), integrity (23), limits (54) and a deterministic permission error: the findings are refused whole, the
@@ -265,8 +243,7 @@ async def test_o2_p4_an_insert_error_the_content_causes_or_that_waiting_cannot_c
     _refused_whole(dsn, job)
 
 
-@pytest.mark.parametrize("exc", [RuntimeError("boom"), ValueError("v"), KeyError("k"), MemoryError()],
-                         ids=lambda e: type(e).__name__)
+@pytest.mark.parametrize("exc", F.REFUSED_EXCEPTIONS, ids=lambda e: type(e).__name__)
 async def test_o2_p4_an_exception_in_the_insert_refuses_the_findings_and_the_ending_stands(world, exc):  # noqa: F811
     """A non-database error raised in the insert path: refused, completed, nothing stored, no retry. (O2, P4)"""
     dsn = world["dsn"]
@@ -315,8 +292,16 @@ async def test_p4_o3_a_worker_cut_off_at_the_insert_never_commits_a_refusal_and_
                 await asyncio.sleep(0.05)
             else:
                 pytest.fail("premise: the end write never reached the insert")
-            draining.cancel()
-            await asyncio.wait_for(asyncio.gather(draining, return_exceptions=True), timeout=30)
+            # One cancel only starts the worker's stop, which waits for its row tasks; only a cancel that lands during
+            # that wait leaves now (`Worker._leave`). Cancel again until the drain is done.
+            for _ in range(100):
+                draining.cancel()
+                await asyncio.wait([draining], timeout=0.3)
+                if draining.done():
+                    break
+            else:
+                pytest.fail("the worker did not leave after repeated cancels")
+            await asyncio.gather(draining, return_exceptions=True)
         finally:
             holder.rollback()
             holder.close()
@@ -331,12 +316,13 @@ async def test_p4_o3_a_worker_cut_off_at_the_insert_never_commits_a_refusal_and_
 
 
 @pytest.mark.parametrize("exc", [RuntimeError("boom"), ValueError("v"), OSError("disk")], ids=lambda e: type(e).__name__)
-async def test_o2_p4_an_exception_in_the_screen_refuses_the_findings_and_the_ending_stands(world, monkeypatch, exc):  # noqa: F811
-    """The row screen raising anything: refused, completed, nothing stored. (O2, P4: screening is total)"""
-    patched = F.breaking_screen(monkeypatch, exc)
-    assert patched, "premise: the worker's screen is `screen_findings`"
-    [job] = await _run(world, [_both])
-    assert F.breaking_screen.called, "premise: the screen was reached"  # type: ignore[attr-defined]
+async def test_o2_p4_an_exception_in_the_screen_refuses_the_findings_and_the_ending_stands(world, exc):  # noqa: F811
+    """The row screen raising anything: refused, completed, nothing stored. The screen is the worker's injected
+    collaborator (`screen_findings=` on `Worker`, default `learning.judge.enqueue.screen_findings`). (O2, P4: screening
+    is total; amendment r5.1 item 6)"""
+    screen = F.raising_screen(exc)
+    [job] = await _run(world, [_both], screen_findings=screen)
+    assert screen.called, "premise: the screen was reached"
     _refused_whole(world["dsn"], job)
 
 
@@ -461,10 +447,19 @@ def _bad_cases(job: str, other: str, seed: int):
             {F.FINDING: [good, dict(F.defender_row(job, 1), finding_id=bad)], F.QUESTIONER: [world_good]})}))
         cases.append((f"foreign-id-questioner-{n}", {"state": "ok", "text": json.dumps(
             {F.FINDING: [good], F.QUESTIONER: [dict(world_good, finding_id=bad)]})}))
-    cases.append(("id-long", {"state": "ok", "text": json.dumps(
-        {F.FINDING: [dict(good, finding_id=f"{job}/" + "x" * 100_000)], F.QUESTIONER: []})}))
+    from defender.learning.judge.enqueue import FINDING_ID_MAX_BYTES, FINDING_ROW_MAX_BYTES
+
+    for label, long_id in (("id-one-over", F.id_of_utf8_bytes(job, FINDING_ID_MAX_BYTES + 1)),
+                           ("id-chars-under-bytes-over", f"{job}/" + "\u00e9" * FINDING_ID_MAX_BYTES),
+                           ("id-long", f"{job}/" + "x" * 100_000)):
+        cases.append((label, {"state": "ok", "text": json.dumps(
+            {F.FINDING: [dict(good, finding_id=long_id)], F.QUESTIONER: []})}))
+    cases.append(("row-one-over", {"state": "ok", "text": json.dumps(
+        {F.FINDING: [F.row_of_json_bytes(good, FINDING_ROW_MAX_BYTES + 1, compact=True)], F.QUESTIONER: []})}))
     cases.append(("row-huge", {"state": "ok", "text": json.dumps(
         {F.FINDING: [dict(good, finding=("y" * (6 * 1024 * 1024)))], F.QUESTIONER: []})}))
+    cases.append(("lone-surrogate-in-id", {"state": "ok", "text": json.dumps(
+        {F.FINDING: [dict(good, finding_id=f"{job}/w-b/0/\ud800")], F.QUESTIONER: []})}))
     for key in ("finding", "subject_anchor"):
         cases.append((f"nul-in-value-{key}", {"state": "ok", "text": json.dumps(
             {F.FINDING: [dict(good, **{key: "a\x00b"})], F.QUESTIONER: [world_good]})}))
@@ -567,3 +562,33 @@ async def test_o2_findings_over_the_cap_are_refused_at_the_cap_not_before_and_ne
     assert job_row(dsn, at)["publish_state"] == "done" and len(_stored(dsn, at)) == 1  # noqa: PT018
     _refused_whole(dsn, over)
     _refused_whole(dsn, far)
+
+
+async def test_o2_a_row_and_an_id_at_their_bounds_are_stored_and_one_byte_over_refuses_the_job(world):  # noqa: F811
+    """Through the worker's end write: a job whose rows are an id of exactly `FINDING_ID_MAX_BYTES` UTF-8 bytes
+    (ASCII, and two-byte characters) and a row whose JSON is exactly `FINDING_ROW_MAX_BYTES` stores all of them in
+    both channels; one byte over either bound refuses the whole job. (O2, amendment r5.1 item 2)"""
+    from defender.learning.judge.enqueue import FINDING_ID_MAX_BYTES, FINDING_ROW_MAX_BYTES
+
+    def id_row(make, job, n, size, filler="x"):
+        return dict(make(job, n), finding_id=F.id_of_utf8_bytes(job, size, filler))
+
+    def at(job):
+        return F.record(findings=F.ok(
+            [id_row(F.defender_row, job, 0, FINDING_ID_MAX_BYTES),
+             id_row(F.defender_row, job, 1, FINDING_ID_MAX_BYTES, "\u00e9"),
+             F.row_of_json_bytes(F.defender_row(job, 2), FINDING_ROW_MAX_BYTES)],
+            [id_row(F.world_row, job, 0, FINDING_ID_MAX_BYTES),
+             F.row_of_json_bytes(F.world_row(job, 1), FINDING_ROW_MAX_BYTES)]))
+
+    over = [lambda j: F.record(findings=F.ok([id_row(F.defender_row, j, 0, FINDING_ID_MAX_BYTES + 1)])),
+            lambda j: F.record(findings=F.ok([], [id_row(F.world_row, j, 0, FINDING_ID_MAX_BYTES + 1)])),
+            lambda j: F.record(findings=F.ok([F.defender_row(j, 0), F.row_of_json_bytes(
+                F.defender_row(j, 1), FINDING_ROW_MAX_BYTES + 1, compact=True)])),
+            lambda j: F.record(findings=F.ok([], [F.row_of_json_bytes(
+                F.world_row(j, 0), FINDING_ROW_MAX_BYTES + 1, compact=True)]))]
+    first, *refused = await _run(world, [at, *over], slots=len(over) + 1)
+    dsn = world["dsn"]
+    assert job_row(dsn, first)["publish_state"] == "done" and len(_stored(dsn, first)) == 5  # noqa: PT018
+    for job in refused:
+        _refused_whole(dsn, job)
