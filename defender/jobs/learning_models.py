@@ -348,6 +348,9 @@ async def insert_findings(s: AsyncSession, tenant: str, channels: Mapping[str, S
                 refuse_unkeyed(row)
     except ItemRefused as refused:
         return FindingsInsert(False, why=str(refused))
+    except Exception as fault:  # noqa: BLE001 — rows the screens cannot even read are refused, never raised
+        _logger.error("screening findings failed with %s; they are refused", type(fault).__name__, exc_info=fault)
+        return FindingsInsert(False, why=f"screening the findings failed ({type(fault).__name__})")
     try:
         added = 0
         async with s.begin_nested():
