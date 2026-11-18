@@ -430,11 +430,12 @@ def gather_agent(lead: str) -> str:
 
 
 def assert_no_closing_record(folder: Path, what: str) -> None:
-    """The run at `folder` holds no closing record: its lookup is not a `Record` (never closed, or nothing to look in)."""
+    """The run at `folder` never closed: its lookup reads `NeverClosed`, not a record and not a fault (V-LOOK)."""
     from defender.records import closing
     from defender.tests.storage.verdict_1534._spec1534 import handle
 
-    assert not isinstance(closing.for_run(handle(folder)), closing.Record), f"{what} wrote a closing record"
+    found = closing.for_run(handle(folder))
+    assert isinstance(found, closing.NeverClosed), f"{what}: the closing-record lookup read {found!r}, not NeverClosed"
 
 
 def sidecar(run_dir: Path) -> dict[str, Any] | None:
