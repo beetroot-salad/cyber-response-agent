@@ -634,7 +634,8 @@ def test_1540_am5_a_later_401_on_a_signed_in_screen_whose_storage_fails_shows_st
     assert logins(requests[mark:], world.origin) == []
 
 
-# --- #1540 Am-5 §6(a): every uncaught error or unhandled rejection in the document is the error state ---------------------
+# --- #1540 Am-5 §6(a), as amended: an uncaught error or unhandled rejection from the app's own code is the error state;
+# --- one the app's code did not raise (the browser's, an extension's, a script of another origin) is not ------------------
 
 #: Records, from before the app's first script, which of the two page-wide events reached the page: a positive control that
 #: the injected failure arrived where the shell's listeners are, so a missing error state is the shell's.
@@ -643,58 +644,101 @@ _SEEN_EVENTS = """
     window.addEventListener('error', () => window.__seenEvents.push('error'));
     window.addEventListener('unhandledrejection', () => window.__seenEvents.push('unhandledrejection'));
 """
+#: The app's own code: a script served from the app's origin (every script of the page is, under `script-src 'self'`).
+OWN_SCRIPT = "/zz-own-stray.js"
 _STRAYS = {
-    "timer-throw": "setTimeout(() => { throw new Error('stray timer'); }, 0)",
-    "stray-rejection": "void Promise.reject(new Error('stray rejection'))",
+    "timer-throw": "setTimeout(() => { throw new Error('stray timer'); }, 0);",
+    "stray-rejection": "void Promise.reject(new Error('stray rejection'));",
 }
 
 
+def run_as_own_code(context: Any, page: Any, code: str) -> None:
+    """Run `code` as a script the app's origin serves (`OWN_SCRIPT`, routed), so what it throws is the app's own."""
+    context.route(lambda u: urllib.parse.urlsplit(u).path == OWN_SCRIPT,
+                  lambda route: route.fulfill(status=200, content_type="text/javascript", body=code))
+    page.evaluate("(src) => { const s = document.createElement('script'); s.src = src; document.head.append(s); }", OWN_SCRIPT)
+
+
 @pytest.mark.parametrize("stray", sorted(_STRAYS))
-def test_1540_am5_a_stray_error_or_rejection_on_a_signed_in_home_shows_the_error_state_and_starts_no_sign_in(
+def test_1540_am5_a_stray_error_or_rejection_of_the_apps_own_code_on_a_signed_in_home_shows_the_error_state(
         world, context, requests, stray):
-    """A timer's throw, or an unhandled rejection, in a loaded signed-in `/home`: `data-screen=error`, no login. (Am-5 §6(a))"""
+    """A timer's throw, or an unhandled rejection, from a script of the app's origin in a loaded signed-in `/home`:
+    `data-screen=error` with `data-kind=broken`, no login. (Am-5 §6(a) as amended)"""
     sign_in(world, context)
     context.add_init_script(_SEEN_EVENTS)
     mark = len(requests)
     page = context.new_page()
     page.goto(f"{world.origin}/home")
     page.locator(EMAIL).wait_for()
-    page.evaluate(_STRAYS[stray])
+    run_as_own_code(context, page, _STRAYS[stray])
     until(page, f"window.__seenEvents.includes('{'error' if stray == 'timer-throw' else 'unhandledrejection'}')")
     screen(page, ERROR)
+    assert page.locator(f'[data-screen="{ERROR}"]').get_attribute("data-kind") == "broken"
     settle(page)
+    assert logins(requests[mark:], world.origin) == []
+
+
+#: Failures the app's code did not raise: injected by the test runner (no file of the app's origin, and a stack of
+#: `<anonymous>` frames), and the browser's own ResizeObserver report (the page's address, which no script of the app is).
+_FOREIGN_STRAYS = {
+    "injected-throw": ("setTimeout(() => { throw new Error('not ours'); }, 0)", "error"),
+    "injected-rejection": ("void Promise.reject(new Error('not ours'))", "unhandledrejection"),
+    # As Chrome reports a real one: the page's own address as the file, line 0.
+    "browser-report": ("window.dispatchEvent(new ErrorEvent('error', { message: "
+                       "'ResizeObserver loop completed with undelivered notifications.', filename: location.href, lineno: 0 }))",
+                       "error"),
+}
+
+
+@pytest.mark.parametrize("stray", sorted(_FOREIGN_STRAYS))
+def test_1540_am5_a_stray_the_apps_code_did_not_raise_leaves_the_screen_as_it_is(world, context, requests, stray):
+    """A failure no script of the app's origin raised, in a loaded signed-in `/home`: the screen stays, no error state,
+    no login. (Am-5 §6(a) as amended)"""
+    sign_in(world, context)
+    context.add_init_script(_SEEN_EVENTS)
+    mark = len(requests)
+    page = context.new_page()
+    page.goto(f"{world.origin}/home")
+    page.locator(EMAIL).wait_for()
+    script, event = _FOREIGN_STRAYS[stray]
+    page.evaluate(script)
+    until(page, f"window.__seenEvents.includes('{event}')")
+    settle(page, 1000)
+    assert page.locator(f'[data-screen="{ERROR}"]').count() == 0, f"{stray} replaced the screen"
+    assert page.locator(EMAIL).count() == 1
     assert logins(requests[mark:], world.origin) == []
 
 
 def test_1540_am5_a_stray_error_while_the_document_is_leaving_for_sign_in_shows_no_error_state(world, context, requests):
     """Signed out `/home`, the sign-in navigation aborted so the load is leaving and the document stays: a timer's throw
-    shows no `data-screen=error`. (Am-5 §6(a): except while the load is leaving)"""
+    from the app's own code shows no `data-screen=error`. (Am-5 §6(a): except while the load is leaving)"""
     aborted = abort_login_navigation(context)
     context.add_init_script(_SEEN_EVENTS)
     page = context.new_page()
     page.goto(f"{world.origin}/home")
     await_aborted(page, aborted)
-    page.evaluate(_STRAYS["timer-throw"])
+    run_as_own_code(context, page, _STRAYS["timer-throw"])
     until(page, "window.__seenEvents.includes('error')")
     settle(page, 1000)
     assert page.locator(f'[data-screen="{ERROR}"]').count() == 0
     assert len(aborted) == 1
 
 
-#: A stray whose value is not an `Error`: a thrown string, a rejection with a plain object.
+#: A stray of the app's own code whose value is not an `Error`: a thrown string (its file still names the script) and a
+#: rejection with a plain object (nothing names its origin, so it is not the app's: see the foreign cases).
 _NON_ERROR_STRAYS = {
-    "thrown-string": ("setTimeout(() => { throw 'stray string'; }, 0)", "error"),
-    "rejected-plain-object": ("void Promise.reject({ stray: 'plain object' })", "unhandledrejection"),
+    "thrown-string": ("setTimeout(() => { throw 'stray string'; }, 0);", "error", True),
+    "rejected-plain-object": ("void Promise.reject({ stray: 'plain object' });", "unhandledrejection", False),
 }
 
 
 @pytest.mark.parametrize("when", ["first-load", "after-a-restore"])
 @pytest.mark.parametrize("stray", sorted(_NON_ERROR_STRAYS))
-def test_1540_am5_a_stray_that_is_not_an_error_shows_the_error_state_on_the_first_load_and_after_a_restore(
+def test_1540_am5_a_stray_that_is_not_an_error_is_judged_by_its_origin_on_the_first_load_and_after_a_restore(
         world, context, requests, stray, when):
-    """A timer's throw of a string, or a rejection with a plain object, in a loaded signed-in `/home`, on the document's
-    first load or on the load a restore from the cache made: `data-screen=error`, no login. (Am-5 §6(a): every
-    uncaught error or unhandled rejection, whatever its value, on every load)"""
+    """From a script of the app's origin, in a loaded signed-in `/home`, on the document's first load or on the load a
+    restore from the cache made: a thrown string is the error state; a rejection with a plain object, which names no
+    origin, leaves the screen. No login either way. (Am-5 §6(a) as amended, on every load)"""
     sign_in(world, context)
     context.add_init_script(_SEEN_EVENTS)
     mark = len(requests)
@@ -706,11 +750,11 @@ def test_1540_am5_a_stray_that_is_not_an_error_shows_the_error_state_on_the_firs
         settle(page, 1000)
         page.locator(EMAIL).wait_for()
         assert api_calls(requests[mark:], world.origin).count(("GET", "/api/me")) == 2, "positive control: a restored load"
-    script, event = _NON_ERROR_STRAYS[stray]
-    page.evaluate(script)
+    script, event, shown = _NON_ERROR_STRAYS[stray]
+    run_as_own_code(context, page, script)
     until(page, f"window.__seenEvents.includes('{event}')")
     settle(page)
-    assert page.locator(f'[data-screen="{ERROR}"]').count() == 1, f"{stray} on the {when} did not show the error state"
+    assert page.locator(f'[data-screen="{ERROR}"]').count() == (1 if shown else 0), f"{stray} on the {when}"
     assert logins(requests[mark:], world.origin) == []
 
 
@@ -726,8 +770,7 @@ def test_1540_am5_a_load_leaving_after_its_screen_reads_401_shows_nothing_whatev
     page = context.new_page()
     page.goto(f"{world.origin}{world.screen()}")
     await_aborted(page, aborted)
-    for script in _STRAYS.values():
-        page.evaluate(script)
+    run_as_own_code(context, page, "\n".join(_STRAYS.values()))
     until(page, "window.__seenEvents.includes('error') && window.__seenEvents.includes('unhandledrejection')")
     settle(page, 1000)
     assert page.locator(f'[data-screen="{ERROR}"]').count() == 0, "the shell's error state showed while leaving"
@@ -812,8 +855,7 @@ def test_1540_am5_every_exit_leaves_once_and_the_leaving_load_shows_nothing_afte
     if trigger is not None:
         page.locator(trigger).click()
         settle(page)
-    for script in _STRAYS.values():
-        page.evaluate(script)
+    run_as_own_code(context, page, "\n".join(_STRAYS.values()))
     until(page, "window.__seenEvents.includes('error') && window.__seenEvents.includes('unhandledrejection')")
     settle(page, 1000)
     assert page.locator(f'[data-screen="{ERROR}"]').count() == 0, f"{exit_}: the error state showed while leaving"

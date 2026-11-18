@@ -1,12 +1,20 @@
-// The shell's error state (#1161 B1, #1540 Am-5 point 6): one screen, and the boundary that shows it for a render error.
+// The shell's error state (#1161 B1, #1540 Am-5 point 6): one screen with a message per kind, and the boundary that shows it for a render error.
 import { Component, type ReactNode } from "react";
 import type { Load } from "./load";
 
-export function ErrorScreen() {
+/** Why the error state shows: the server could not be reached or answered wrongly, or the app's own code failed. */
+export type ErrorKind = "unreachable" | "broken";
+
+const MESSAGES: Readonly<Record<ErrorKind, string>> = {
+  unreachable: "The app could not reach its server. Reload to try again.",
+  broken: "Something on this page stopped working. Reload to try again.",
+};
+
+export function ErrorScreen({ kind }: { readonly kind: ErrorKind }) {
   return (
-    <main data-screen="error">
+    <main data-screen="error" data-kind={kind}>
       <h1>Something went wrong</h1>
-      <p>The app could not reach its server. Reload to try again.</p>
+      <p>{MESSAGES[kind]}</p>
     </main>
   );
 }
@@ -21,6 +29,6 @@ export class ErrorBoundary extends Component<{ readonly load: Load; readonly chi
 
   override render(): ReactNode {
     if (!this.state.failed) return this.props.children;
-    return this.props.load.isLeaving() ? null : <ErrorScreen />;
+    return this.props.load.isLeaving() ? null : <ErrorScreen kind="broken" />;
   }
 }

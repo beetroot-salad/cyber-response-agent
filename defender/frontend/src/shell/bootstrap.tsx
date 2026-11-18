@@ -5,7 +5,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { route } from "../router";
 import * as attempt from "./attempt";
-import { ErrorBoundary, ErrorScreen } from "./errors";
+import { ErrorBoundary, ErrorScreen, type ErrorKind } from "./errors";
 import { makeLoad, type Effects, type Load } from "./load";
 import { ShellProvider, type Actions, type Query } from "./provider";
 
@@ -38,6 +38,29 @@ function settleReturn(taken: attempt.Read): void {
   window.history.replaceState(state, "", `${window.location.pathname}?${params.toString()}`);
 }
 
+/** True when `url` is a script file of the page's origin. Every script of the app is one (the CSP allows no other, and
+ * no inline script), so the page's own address is not: the browser names it for what no script raised, as its own
+ * ResizeObserver report. */
+function isAppScript(url: string): boolean {
+  if (!URL.canParse(url)) return false;
+  const where = new URL(url);
+  return where.origin === window.location.origin && where.pathname !== window.location.pathname;
+}
+
+/** A failure is the app's when the code that raised it is an app script: an error event's file, or the top frame of a
+ * rejected `Error`'s stack. A rejection with no stack (a plain object, a string) names no origin: not counted. */
+function raisedByApp(event: Event): boolean {
+  if (event instanceof ErrorEvent) return isAppScript(event.filename);
+  if (!(event instanceof PromiseRejectionEvent)) return false;
+  const reason: unknown = event.reason;
+  if (!(reason instanceof Error) || reason.stack === undefined) return false;
+  // V8 writes a frame as "    at f (url:line:col)"; Gecko and WebKit, which have no message line, as "f@url:line:col".
+  const lines = reason.stack.split("\n");
+  const top = lines.find((line) => /^\s+at\s/.test(line)) ?? lines.find((line) => line.includes("@"));
+  const url = top?.match(/(https?:\/\/[^\s()]+?):\d+:\d+/)?.[1];
+  return url !== undefined && isAppScript(url);
+}
+
 export function start(): void {
   const container = document.getElementById("app");
   if (container === null) throw new Error("the page has no #app");
@@ -45,9 +68,9 @@ export function start(): void {
   let current: Load | null = null;
   let sequence = 0;
 
-  function showError(load: Load): void {
+  function showError(load: Load, kind: ErrorKind): void {
     if (load !== current || load.isGone()) return;
-    root.render(<ErrorScreen />);
+    root.render(<ErrorScreen kind={kind} />);
   }
 
   async function begin(byHistory: boolean): Promise<void> {
@@ -63,15 +86,15 @@ export function start(): void {
       if (routed.needsSession) {
         const asked = await load.client.me();
         if (asked.kind === "gone" || load !== current) return;
-        if (asked.kind === "error") return showError(load);
+        if (asked.kind === "error") return showError(load, "unreachable");
         me = asked.me;
       }
       const actions: Actions = {
         retry: () => load.signIn(new URLSearchParams(window.location.search).getAll("return")),
         signOut: () => {
           load.client.signOut().then(
-            (result) => (result === "error" ? showError(load) : undefined),
-            () => showError(load),
+            (result) => (result === "error" ? showError(load, "unreachable") : undefined),
+            () => showError(load, "broken"),
           );
         },
       };
@@ -87,13 +110,15 @@ export function start(): void {
         </StrictMode>,
       );
     } catch {
-      showError(load);
+      showError(load, "broken");
     }
   }
 
-  // Every uncaught error or unhandled rejection in the document is the error state, except while the load is leaving.
-  const stray = (): void => {
-    if (current !== null) showError(current);
+  // An uncaught error or unhandled rejection the app's own code raised is the error state, except while the load is
+  // leaving. One the app's code did not raise (the browser's own reports, an extension's script, an injected script)
+  // leaves the screen as it is: it says nothing about the app.
+  const stray = (event: Event): void => {
+    if (current !== null && raisedByApp(event)) showError(current, "broken");
   };
   window.addEventListener("error", stray);
   window.addEventListener("unhandledrejection", stray);
