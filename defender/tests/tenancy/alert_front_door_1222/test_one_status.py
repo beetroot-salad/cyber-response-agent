@@ -331,8 +331,7 @@ def _run_main_over(tree: Path, tmp_path: Path, tenant: S.Planted, *, main: S.Mai
     try:
         out["rc"] = run_py.main(
             argv, directory=directory_for_argv(argv, records=_over(tenant, tree).records), lifecycle=lifecycle, preflight=lambda *_a, **_k: 0,
-            visualize=lambda *_a, **_k: None, ticket_writer=S.NoTicket(),
-            enqueue=lambda *_a, **_k: False, roster=read_roster(adapters_under(tree)),
+            visualize=lambda *_a, **_k: None, enqueue=lambda *_a, **_k: False, roster=read_roster(adapters_under(tree)),
             # The in-process launch-time publish.
             publish=in_process_publish())
     except SystemExit as exit_:

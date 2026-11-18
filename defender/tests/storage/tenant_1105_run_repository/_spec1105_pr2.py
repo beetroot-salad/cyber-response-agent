@@ -313,27 +313,13 @@ def drive_run_py(argv: list[str], rec: SiblingRecorder, **override: Any) -> tupl
 @dataclass
 class StdoutRun:
     """`drive_run_py` with stdout captured: `seen[step]` is what stdout held when `step`'s seam
-    ran (`preflight`, `ticket`, `lifecycle`, ...)."""
+    ran (`preflight`, `lifecycle`, ...)."""
 
     rc: int | None
     refusal: BaseException | None
     err: str
     out: str
     seen: dict[str, str]
-
-
-class _TicketTap:
-    """A ticket writer seam that records stdout when the ticket lane begins (`--update-ticket`).
-    #1359: there is no open leg; run start's first act on the lane is `clear_receipt`."""
-
-    def __init__(self, tap: Any) -> None:
-        self._tap = tap
-
-    def clear_receipt(self, *_a: Any, **_kw: Any) -> None:
-        self._tap("ticket")
-
-    def record_case_ticket(self, *_a: Any, **_kw: Any) -> None:
-        return None
 
 
 def drive_run_py_stdout(argv: list[str], rec: SiblingRecorder, **override: Any) -> StdoutRun:
@@ -350,7 +336,6 @@ def drive_run_py_stdout(argv: list[str], rec: SiblingRecorder, **override: Any) 
         return call
 
     seams = {name: tapped(name, seam) for name, seam in rec.seams().items()}
-    seams["ticket_writer"] = _TicketTap(tap)
     with redirect_stdout(out):
         rc, refusal, err = drive_run_py(argv, rec, **{**seams, **override})
     return StdoutRun(rc, refusal, err, out.getvalue(), seen)
@@ -513,11 +498,11 @@ class Lane:
 
     def __call__(self, _paths: Any, _state: Any, run: Any, *, box: Any = None,
                  on_done: Any = None, items: Any = (), outcomes: Any = None, **_kw: Any) -> None:
-        from defender.learning_store import Outcome
+        from defender.tests.support.learning.core._release1537 import outcome_skipped
 
         self.handed.append(run)
         for kind, key, _payload in items:  # served: the real step decides a fate for each item it was handed
-            outcomes[(kind, key)] = Outcome.skipped("served by the test's lane")
+            outcomes[(kind, key)] = outcome_skipped("curator_skipped", "served by the test's lane")
         if on_done is not None:
             on_done(None)
 

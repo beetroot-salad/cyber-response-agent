@@ -490,22 +490,9 @@ escalation regardless of behavioral grading; `indeterminate` is the
 right trigger to loop back to PLAN with a follow-up lead, not to fetch
 inline — **unless** the row carries `basis=exhausted`, which says every
 anchor kind applicable to that contract's predicate was actually queried
-and none answered. That contract is not worth another loop. It blocks
-`benign` and escalates, unless the contract was declared `on_indet
-process-gap` at PLAN and the case closes `unsanctioned-benign` (§REPORT):
-the record was searched for, is not there, and that absence is the only
-thing wrong. See `defender/skills/invlang/SKILL.md` §Authz
-contract resolution for the column shape.
-
-**A missing record is not evidence of an attack.** Real maintenance often
-skips the ticket. When the authorization search comes back empty, do not
-escalate on that alone: ask the questions a missing record cannot answer.
-Is this the actor's own session (their usual source, device and hours,
-nothing suspicious just before it)? Did the action stay within what the
-actor's role routinely does? Did its consequence stay inside the
-baseline? A stolen admin credential doing admin work looks exactly like
-unticketed maintenance, so declare that story as its own hypothesis and
-refute it with those measurements, not with the actor's job title.
+and none answered. That contract is not worth another loop; it still
+escalates. See `defender/skills/invlang/SKILL.md` §Authz contract
+resolution for the column shape.
 
 **A contract answers about the subject its claim names, and only that
 subject.** The claim is prose. Nothing binds it to a vertex, so nothing
@@ -541,7 +528,15 @@ only writer of the run's closing record, which no file write reaches —
 Call `close_investigation(disposition=...)` once ANALYZE has reached a
 confident finding. `disposition` is the closed enum:
 
-- `benign` — confident clear.
+- `benign` — the activity is accounted for, at a stated `confidence`
+  (`high`, `medium`, `low`) and with `attacker_gain` in `:T conclude`:
+  what would an attacker who did exactly this have gained? `high` closes
+  with no person reading it, so it needs every step authorized AND a
+  baseline the actor matches. Low-confidence `benign` is how you say "this
+  is routine, but I could not prove it": prefer it to `inconclusive` when
+  only one story is left standing, and to `malicious` never — an attack
+  that failed is still `malicious`. See `skills/invlang/SKILL.md`
+  §`:T conclude`.
 - `false-positive` — the RULE fired on a different kind of behavior than
   its name and description claim, and the one lead that tested the
   alerted entity independently came back clean. It describes the
@@ -561,11 +556,6 @@ confident finding. `disposition` is the closed enum:
   learning loop authors no lesson from a standing `inconclusive` either
   way.
 - `malicious` — confident escalate, story confirmed.
-- `unsanctioned-benign` — the activity did no harm, but nothing authorized
-  it: a finding about the process, not an incident. Reach for it when the missing authorization record is
-  the ONLY thing unsettled. If a record exists, the close is `benign`; if
-  anything says the activity was not allowed or was hostile, it escalates;
-  if you could not measure the harm or the actor, it is `inconclusive`.
 - `unresolved` — the HOST's own verdict, never yours. Recorded when a
   run is cut short without a settled finding — a challenge review that
   overruled your close, a review that could not complete, or the
@@ -573,19 +563,17 @@ confident finding. `disposition` is the closed enum:
   as an argument here. If you cannot settle the case, close
   `inconclusive` and name the gap; do not reach for this member.
 
-FOUR of them carry an ENTRY PRICE, and this close reads it back out of
+THREE of them carry an ENTRY PRICE, and this close reads it back out of
 `investigation.md` before anything commits. `benign` needs the alerted
 entity recorded in `:V prologue.vertices`, every `??` slot resolved, and
-every authz contract on a live hypothesis `authorized`; `false-positive`
+either every authz contract on a live hypothesis `authorized`, or (at
+`confidence low` only) every such contract searched and found empty, one
+story standing, a matching baseline and `attacker_gain none`;
+`false-positive`
 needs `detection_notes` (the defect) and `entity_check` (that lead's id) in
 `:T conclude`; `inconclusive` needs at least one `ceiling_test` receipt
 that PAYS — mechanically verified against your own transcript, distinct
-from any other row; `unsanctioned-benign` needs benign's price except
-that a contract declared `on_indet process-gap` may be discharged by a
-PAID `basis=exhausted` search (at least one must be, and a contract with
-any `authorized` row is not a gap), exactly one hypothesis left standing —
-the one holding that contract, supported `+` or `++` — and every declared
-impact predicate graded `within`, none deferred. Write them FIRST — the close
+from any other row. Write them FIRST — the close
 returns without committing if they are not there. The price is charged
 against the keyword you CLOSE under, never the one you concluded under, so
 concluding under a cheaper keyword buys nothing: the log still has to have

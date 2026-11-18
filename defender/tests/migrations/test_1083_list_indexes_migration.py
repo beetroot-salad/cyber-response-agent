@@ -64,10 +64,12 @@ def test_a_tenants_newest_first_page_is_read_in_index_order_without_a_sort(migra
 def test_an_upgrade_over_stored_work_keeps_every_row_and_adds_the_indexes(empty_database):
     """A database at the previous head holding an alert keeps it through the upgrade and gains the list indexes. (#1083 Data)"""
     from defender.migrations import check_version, upgrade
-    from defender.tests.support.jobs._jobs1342 import NOW, T1, register_tenant
+    from defender.tests.support.jobs._jobs1342 import NOW, T1
 
     _upgrade_to(empty_database, PREVIOUS)
-    register_tenant(empty_database, T1)
+    # The bare tenant row this schema takes: `register_tenant` writes the head's case record (no `comment_body`, #1471 W7).
+    execute(empty_database, "INSERT INTO tenancy.tenants (id, created_at, state) VALUES (%s, now(), 'active')", (T1,))
+    execute(empty_database, "INSERT INTO tenancy.records_mark (tenant_id) VALUES (%s)", (T1,))  # the mark drop's guard (#1470 O12)
     execute(empty_database, "INSERT INTO jobs.alerts (id, tenant_id, vendor, vendor_ticket_id, fired_at, changed_at, "
                             "received_at, title, description, raw) VALUES (%s, %s, 'elastic', 'T-1', %s, %s, %s, 't', 'd', %s)",
             ("6b0d9f7e-1083-4c00-8a00-000000000001", T1, NOW, NOW, NOW, b"{}"))

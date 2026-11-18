@@ -85,8 +85,8 @@ class RunTenant:
     #: the run's start check (O-8), never here (D4). Asking for a system with no record gets the
     #: "not configured" fault.
     systems: Mapping[str, SystemConfig | ConfigFault]
-    #: The tenant's case record (#1359, #1366 H7): the system that records cases and the comment
-    #: body template, held for the run (D-18); `None` for a tenant with none; a record #1359's
+    #: The tenant's case record (#1359, #1366 H7): the system that records cases,
+    #: held for the run (D-18); `None` for a tenant with none; a record #1359's
     #: rules now refuse is kept as its error.
     case_record: CaseRecordSettings | CaseTicketError | None
     #: One entry per enabled system record (#1391 P1, #1366 K4), its stored declaration parsed

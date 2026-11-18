@@ -94,8 +94,9 @@ class RunAtHandedRecorder(S.RunRecorder):
         return super().materialize(alert, **kw)
 
 
-def _drive(tmp_path, data_root, *, signer=None, ticket=True, summary=None, **seams):
-    """Drive `run.main`; with no `signer` none is injected (the production signing path)."""
+def _drive(tmp_path, data_root, *, signer=None, ticket=False, summary=None, **seams):
+    """Drive `run.main`; with no `signer` none is injected (the production signing path). The operator command has no
+    ticket flag (W7): `ticket` stays False and is kept for the callers that name it."""
     rec, tickets = RunAtHandedRecorder(tmp_path / "run", summary=summary), TicketRecorder()
     alert = S.plant_alert(tmp_path / "in")
     started = time.time()
@@ -105,7 +106,7 @@ def _drive(tmp_path, data_root, *, signer=None, ticket=True, summary=None, **sea
             seams["directory"] = _records(data_root, tmp_path)[0].directory
     try:
         rc, refused = S.drive_run(
-            S.run_argv(alert, data_root, update_ticket=ticket), rec, ticket_writer=tickets,
+            S.run_argv(alert, data_root), rec,
             proxy_url="http://proxy.invalid", **seams)
     except ConfigFault as fault:
         rc, refused = None, fault
@@ -123,39 +124,29 @@ def _claims_of_token(signer: H.FakeSigner, token: str) -> dict[str, Any]:
     return A.claims_of_payload(signer.payloads[n - 1])
 
 
-def test_r1_the_read_token_is_signed_when_first_asked_and_a_write_back_token_for_the_record_leg(
+def test_r1_the_read_token_is_signed_when_first_asked_and_an_operator_run_signs_no_write_pass(
         tmp_path, data_root, caplog):
-    """Run start signs no read token; the record leg's one write-back token is `rw` on the case system only.
-    The read token, asked of the run's access, is signed then, grants only http-proxy systems,
-    lives 600 s and is reused while it has life left; no token reaches disk or log.
-    O8, O10, O4, A7, r7 A20."""
+    """Run start signs no token and the operator run never signs a write pass (`rw`, W7); the read token, asked of the
+    run's access, is signed then, grants only the http-proxy systems the role reads, lives 600 s and is reused while it has life left; no
+    token reaches disk or log. O8, O10, O4, A7, r7 A20, W7."""
     caplog.set_level(logging.DEBUG)
     _plant(data_root, proxy=("identity", "ticket"))
     signer = A.MarkedSigner()
-    rec, tickets, rc, refused, started = _drive(tmp_path, data_root, signer=signer)
+    rec, _tickets, rc, refused, _started = _drive(tmp_path, data_root, signer=signer)
 
     assert refused is None, (rc, refused)
     assert rc == 0, (rc, refused)
     run_id = rec.run_dir_at.name
-    write_back = [A.claims_of_payload(p) for p in signer.payloads]
-    assert [A.grant_of(c) for c in write_back] == [[("ticket", "rw")]], (
-        "nothing but the record leg's one write-back token was signed during the run")
+    assert signer.payloads == [], "a token was signed during the run, before any call asked for one"
     access = read_access(rec)
     asked = time.time()
     first = access.token()
     assert access.token() == first, "a token with life left is reused"
-    assert len(signer.payloads) == 2
-    read = A.claims_of_payload(signer.payloads[1])
+    assert len(signer.payloads) == 1
+    read = A.claims_of_payload(signer.payloads[0])
     assert A.grant_of(read) == [("identity", "r")], "cmdb, which has no declaration, is not granted"
-    for c in [*write_back, read]:
-        assert (c["tenant"], c["investigation"]) == (S.PLAYGROUND_ID, run_id)
+    assert (read["tenant"], read["investigation"]) == (S.PLAYGROUND_ID, run_id)
     assert TOKEN_SEC - 1 <= read["exp"] - asked <= TOKEN_SEC + CLOCK_TOLERANCE, read["exp"] - asked
-    for c in write_back:
-        assert started < c["exp"] <= started + TOKEN_SEC + CLOCK_TOLERANCE
-
-    record_tok = tickets.leg("record")["request_token"]
-    assert A.grant_of(_claims_of_token(signer, record_tok)) == [("ticket", "rw")]
-    assert [n for n, _ in tickets.calls if n not in ("clear", "record")] == [], "an open leg ran"
 
     (life,) = rec.lifecycle_calls
     for held in (life["tenant"], life["run"], life["systems"]):
@@ -168,38 +159,18 @@ def test_r1_the_read_token_is_signed_when_first_asked_and_a_write_back_token_for
     assert "run_dir=" in caplog.text, "positive control: the log channel is read"
 
 
-@pytest.mark.parametrize("truncated_by", ["budget", "store", "provider-down", "proxy-access"])  # #1363 O7
-def test_r1_a_run_that_will_not_comment_signs_no_write_back_token(tmp_path, data_root, truncated_by):
-    """A run cut short before a verdict leaves the case alone: no write-back token is signed for
-    it, and the record step is handed none. The case system was judged once, at run start, and
-    that verdict reaches the record step. Control: `test_r1_the_read_token_is_signed_…` signs one
-    for a run that ends normally. #1392 review."""
-    _plant(data_root, proxy=("identity", "ticket"))
-    signer = A.MarkedSigner()
-    _rec, tickets, rc, refused, _started = _drive(
-        tmp_path, data_root, signer=signer, summary={
-            "output": "x", "requests": 0, "truncated_by": truncated_by, "closed_before_cut": False})
-
-    assert refused is None, (rc, refused)
-    assert signer.payloads == [], "a write-back token was signed for a run that will not comment"
-    leg = tickets.leg("record")
-    assert "request_token" not in leg, leg
-    assert type(leg["case"]).__name__ == "CaseTarget", leg["case"]
-
-
-def test_r2_a_ticket_system_with_no_declaration_gets_no_write_back_token(tmp_path, data_root):
-    """Only the identity system is declared: the record leg is handed no token, and the
-    one token signed is the read token, when asked. A7, r7 A20."""
+def test_r2_a_ticket_system_with_no_declaration_is_not_granted_to_the_read_token(tmp_path, data_root):
+    """Only the identity system is declared: the one token signed is the read token, when asked, and it grants
+    identity only. A7, r7 A20."""
     _plant(data_root, proxy=("identity",))
     signer = A.MarkedSigner()
-    rec, tickets, rc, refused, _ = _drive(tmp_path, data_root, signer=signer)
+    rec, _tickets, rc, refused, _ = _drive(tmp_path, data_root, signer=signer)
 
     assert refused is None, (rc, refused)
     assert rc == 0, (rc, refused)
     assert signer.payloads == []
     read_access(rec).token()
     assert [A.grant_of(A.claims_of_payload(p)) for p in signer.payloads] == [[("identity", "r")]]
-    assert tickets.leg("record").get("request_token") is None
 
 
 # R3 and R7b ("a run with no http-proxy system never contacts the signer / needs no sign login") are
@@ -626,7 +597,6 @@ def test_r7_an_http_proxy_tenant_with_no_usable_sign_login_refuses_run_start(
     assert _config_refusal(refused, "sign", "generation", "login"), refused
     assert bao.requests == []
     assert "materialize" not in rec.order, "the run folder was made before the refusal"
-    assert tickets.calls == []
 
 
 
@@ -648,53 +618,126 @@ def test_r7c_an_injected_signer_does_not_excuse_a_missing_sign_login(tmp_path, d
     assert _config_refusal(refused, "sign", "generation", "login"), refused
     assert signer.payloads == []
     assert "materialize" not in rec.order, "the run folder was made before the refusal"
-    assert tickets.calls == []
 
 
-def _mint_for(tmp_path, data_root, signer, *, world: Any, **seams: Any) -> Any:
-    """The run's token mint, built directly (#1449): a tenant whose `identity` and `ticket` are
-    `http-proxy` systems the gather role is granted, `ticket` its judged case system, and
-    `--update-ticket` set. `world` is the sibling's world (any object), or None for a run. `seams` (#1363: the holder's `clock=`) are handed to the mint as given."""
-    import argparse
-    import types
+def _mint_for(tmp_path, data_root, signer, *, world: Any = None, **seams: Any) -> Any:
+    """The run's token mint, for the holder tests that need the holder's `clock=`/`on_fault=` (#1363), which `run.main` has no seam
+    for: the run is driven through the public start over a tenant whose gather role reads `identity` and `ticket`, and `seams` ride on the one `for_run` call."""
+    from unittest import mock
 
-    from defender.kit.access import AccessDeclaration
     from defender.run import _TokenMint
-    from defender.systems import case_system
+    from defender.tests.support.tenancy._tenants1106 import FIXTURE
 
-    records, _fields = _records(data_root, tmp_path)
-    declared = AccessDeclaration(base="http://x.invalid/api", auth=None)
-    tenant = types.SimpleNamespace(
-        tenant_id=S.PLAYGROUND_ID, access={"identity": declared, "ticket": declared},
-        grants=types.SimpleNamespace(gather=types.SimpleNamespace(
-            systems=frozenset({"identity", "ticket", "cmdb"}))))
-    return _TokenMint.for_run(
-        tenant, types.SimpleNamespace(down=frozenset()),
-        ns=argparse.Namespace(update_ticket=True), world=world,
-        case=case_system.CaseTarget(system="ticket", template=None, module=None),
-        run_id=fixture_uuid("1449-mint"), accepted=types.SimpleNamespace(id=S.PLAYGROUND_ID),
-        records=records.directory, signer=signer, proxy_url="http://proxy.invalid",
-        issuer_transport=None, **seams)
+    assert world is None, "a world's access is observed through `_world_access`"
+    table = data_root / S.PLAYGROUND_ID / "knowledge" / "settings" / "verb-grants.yaml"
+    table.write_text((FIXTURE / "settings" / "verb-grants.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+    real, made = _TokenMint.for_run, []
+
+    def spy(*args: Any, **kw: Any) -> Any:
+        made.append(real(*args, **kw, **seams))
+        return made[-1]
+
+    with mock.patch.object(_TokenMint, "for_run", spy):
+        _rec, _tickets, rc, refused, _started = _drive(tmp_path, data_root, signer=signer)
+    assert (rc, refused) == (0, None), (rc, refused)
+    (mint,) = made
+    return mint
 
 
-def test_1449_a_world_reads_on_a_runs_terms_and_is_never_minted_a_write_back_token(tmp_path, data_root):
-    """A branched run is a run (#1449 W1, W3): the mint built for a world grants the same reads a
-    regular run's does, and signs no write-back token even with `--update-ticket` set, which
-    the regular run's control gets (`rw` on the case system). Run start already refuses
-    `--update-ticket` with `--episode`; this pins the mint's own guard behind that refusal."""
-    _plant(data_root, proxy=("identity", "ticket"))
+#: The sibling tenant planted with a system in every combination of the three facts the read rule reads (granted to
+#: the gather role, declared on the proxy, up: judged so, or exempt from judging as platform-served), two where all three hold, so dropping or cutting any part of
+#: the rule changes the grant:
+#:   granted  declared  up    system           read?
+#:   yes      yes       yes   cmdb, identity   yes
+#:   yes      yes       no    host-state       no   (declared, but its folder holds a key it does not read: it reads none)
+#:   yes      no        yes   tacit-knowledge  no   (served by the platform: never proxied, never judged)
+#:   yes      no        no    threat-intel     no
+#:   no       yes       -     ticket           no   (no role is granted it, so it is not judged)
+#:   no       no        -     the roster's others
+SIBLING_TABLE = TABLE + """\
+  host-state:
+    health-check: {roles: [gather]}
+  tacit-knowledge:
+    health-check: {roles: [gather]}
+  threat-intel:
+    health-check: {roles: [gather]}
+    lookup: {roles: [gather]}
+"""
+SIBLING_PROXIED = ("cmdb", "host-state", "identity", "ticket")
+
+
+def _plant_sibling(tmp_path, monkeypatch) -> tuple[Path, Path, Any]:
+    """The sibling episode's tenant with exactly `SIBLING_PROXIED` declared on the proxy (every other `access.yaml`
+    removed), `SIBLING_TABLE` as its verb grants, and a live sign login; returns the episode, the data root and the records."""
+    import os
+
+    from defender.tests.runtime.providers import _spec1243 as P
+
+    ep = P.sibling_episode(tmp_path, monkeypatch)
+    root = Path(os.environ["DEFENDER_DATA_ROOT"])
+    folder = root / P.SIBLING_TENANT / "knowledge"
+    for undeclared in (folder / "settings" / "systems").glob("*/access.yaml"):
+        undeclared.unlink()
+    (folder / "settings" / "verb-grants.yaml").write_text(SIBLING_TABLE, encoding="utf-8")
+    for system in SIBLING_PROXIED:
+        decl = H.declaration("http://x.invalid/api", writes=CASE_WRITES.get(system, ()))
+        for rel, text in H.access_files(system, decl, env=A.env_text(system, extra=EXTRA.get(system, ""))).items():
+            (folder / rel).parent.mkdir(parents=True, exist_ok=True)
+            (folder / rel).write_text(text, encoding="utf-8")
+    records = A.Records(root, {P.SIBLING_TENANT: [A.generation(
+        P.SIBLING_TENANT, tmp_path / "secrets", sign_role_id="sign-role", sign_secret="sign-secret")]})
+    return ep, root, records
+
+
+def _world_access(ep: Path, records: Any, signer) -> Any:
+    """The read access a sibling world's run start hands its lifecycle, through `run.main --episode`."""
+    from defender import run as run_mod
+    from defender.tests.runtime.providers import _spec1243 as P
+    from defender.tests.support.tenancy._launch_publish_p4 import in_process_publish
+
+    held: list[Any] = []
+
+    def lifecycle(**kw: Any) -> dict:
+        held.append(kw.get("access"))
+        return {"output": "done", "requests": 1, "truncated_by": None}
+
+    rc = run_mod.main(["--episode", ep.name, "--world", P.SIBLING_WORLD, "--tenant", P.SIBLING_TENANT, "--no-learn"],
+                      directory=records.directory, lifecycle=lifecycle, visualize=lambda *_a, **_k: None,
+                      preflight=lambda *_a, **_k: 0, publish=in_process_publish(),
+                      signer=signer, proxy_url="http://proxy.invalid")
+    assert rc == 0, rc
+    (access,) = held
+    return access
+
+
+def _run_access_on_sibling(tmp_path, records: Any, signer) -> Any:
+    """The read access a regular run's start hands its lifecycle, through `run.main` on the sibling tenant."""
+    from defender.tests.runtime.providers import _spec1243 as P
+
+    rec = RunAtHandedRecorder(tmp_path / "run")
+    alert = S.plant_alert(tmp_path / "in")
+    rc, refused = S.drive_run([str(alert), "--tenant", P.SIBLING_TENANT], rec, directory=records.directory,
+                              signer=signer, proxy_url="http://proxy.invalid")
+    assert (rc, refused) == (0, None), (rc, refused)
+    return read_access(rec)
+
+
+def test_1449_a_world_reads_on_a_runs_terms_and_no_operator_run_start_signs_a_write_pass(tmp_path, data_root, monkeypatch):
+    """A branched run is a run (#1449 W1, W3): a world's run start and a regular run's, on one tenant, grant the same reads,
+    and neither signs a write pass (`rw`) though `ticket` is proxied: the operator command never comments (W7, C-9)."""
+    ep, _root, records = _plant_sibling(tmp_path, monkeypatch)
     run_signer, world_signer = A.MarkedSigner(), A.MarkedSigner()
-    run = _mint_for(tmp_path / "run", data_root, run_signer, world=None)
-    world = _mint_for(tmp_path / "world", data_root, world_signer, world=object())
+    run_access = _run_access_on_sibling(tmp_path / "r", records, run_signer)
+    world_access = _world_access(ep, records, world_signer)
 
-    def read_grant(mint: Any, signer: A.MarkedSigner) -> list[tuple[str, str]]:
-        token = mint.access_kwargs()["access"].token()
-        return A.grant_of(_claims_of_token(signer, token))
+    def read_grant(access: Any, signer: A.MarkedSigner) -> list[tuple[str, str]]:
+        return A.grant_of(_claims_of_token(signer, access.token()))
 
-    assert read_grant(world, world_signer) == read_grant(run, run_signer) == [
-        ("identity", "r"), ("ticket", "r")], "a world's read grant is not a regular run's"
-    assert run.write_back(), "control: the regular run's mint signs no write-back token"
-    assert world.write_back() == {}, "a world's mint signed a write-back token"
+    assert read_grant(world_access, world_signer) == read_grant(run_access, run_signer) == [
+        ("cmdb", "r"), ("identity", "r")], "a world's read grant is not a regular run's, or not what the table grants"
+    for signer in (run_signer, world_signer):
+        assert {m for p in signer.payloads for _s, m, *_ in A.claims_of_payload(p)["grant"]} == {"r"}, (
+            "a run start signed something other than its read grant")
 
 
 def test_a6_the_job_entry_never_builds_a_request_signer():

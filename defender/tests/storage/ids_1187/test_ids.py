@@ -214,14 +214,13 @@ def test_1279_o5_run_py_rejects_the_equals_form_of_run_id(tmp_path, data_root):
     assert rec.order == []
 
 
-@pytest.mark.parametrize("update_ticket", [False, True], ids=["plain", "with-ticket"])
-def test_1279_o5_the_minted_id_is_the_first_stdout_line_before_the_ticket_and_box(
-        tmp_path, data_root, update_ticket):
-    """`run_id=<uuid>` is stdout's first line, after setup and before ticket and lifecycle."""
+def test_1279_o5_the_minted_id_is_the_first_stdout_line_before_the_box(tmp_path, data_root):
+    """`run_id=<uuid>` is stdout's first line, after setup and before the lifecycle (the operator ticket lane is
+    gone, #1471 W7)."""
     t = S.tenant(data_root)
     alert = H.alert_file(tmp_path / "in")
     rec = P.SiblingRecorder()
-    argv = [str(alert), "--tenant", t.id, "--no-learn"] + (["--update-ticket"] if update_ticket else [])
+    argv = [str(alert), "--tenant", t.id, "--no-learn"]
 
     ran = P.drive_run_py_stdout(argv, rec)
 
@@ -234,8 +233,6 @@ def test_1279_o5_the_minted_id_is_the_first_stdout_line_before_the_ticket_and_bo
     assert ran.out.splitlines(keepends=True)[:1] == [line], ran.out
     assert ran.seen["preflight"] == "", f"stdout before setup: {ran.seen['preflight']!r}"
     assert ran.seen["lifecycle"] == line, f"stdout when the box was reached: {ran.seen['lifecycle']!r}"
-    if update_ticket:
-        assert ran.seen["ticket"] == line, f"stdout when the ticket lane began (run start's clear_receipt): {ran.seen['ticket']!r}"
 
 
 def test_1279_o5_the_announce_is_flushed_not_left_in_stdouts_block_buffer(tmp_path, data_root):

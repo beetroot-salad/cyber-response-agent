@@ -10,7 +10,7 @@ import signal
 import sys
 import threading
 import dataclasses as _dataclasses
-from collections.abc import Collection, Iterator
+from collections.abc import Callable, Collection, Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -51,8 +51,8 @@ def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the kn
     alert: Path, *, tenant: tenancy.Tenant, run: Run | None = None, model: str | None = None,
     world: ResumeWorld | None = None,
     mapping: AlertMapping | None = None, knowledge: KnowledgeSource | None = None,
-    launch: Launched | None = None,
-    started_at: _dt.datetime | None = None,
+    launch: Launched | None = None, alert_digest: str | None = None,
+    started_at: _dt.datetime | None = None, on_admitted: Callable[[str], None] | None = None,
 ) -> Run:
     """Build the run directory of a fresh run and return the tenant-bound handle the run's later
     records are saved through. No caller names the run's id (#1279 A3): `run` is the handle the
@@ -72,6 +72,12 @@ def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the kn
     bytes admitted are compared to the record's digest (one read, as a sibling's are to its
     record), and the stamp's label is the record's (the alert's title), not the file's name.
 
+    `alert_digest` is the digest a job's helper was handed by its worker at the helper's own start (#1471 P-5): when
+    given it replaces the launch record's, which then decides nothing about the alert.
+
+    `on_admitted` is handed the alert record's text as derived from the bytes admitted, in memory, before any file is
+    written: a caller that must act on the facts of exactly those bytes takes them here, never from the file later (#1471 P-5).
+
     `started_at` is the start the stamp records when the run clock does not start now (`--as-of`,
     #1347 O5); `None` is the wall time."""
     if not alert.is_file():
@@ -83,13 +89,15 @@ def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the kn
         raise TypeError("materialize_run needs the tenant's alert mapping (`mapping=`) for a fresh run")
     started = _started_at() if started_at is None else _clock.z_seconds(started_at)
     front_door = _admit_input(alert, mapping=mapping, world=world,
-                              digest=None if launch is None else launch.record.digest)
+                              digest=alert_digest if alert_digest is not None else (None if launch is None else launch.record.digest))
     world_id: str | None = None
     if run is None:
         try:
             run = tenant.runs_repository().create()
         except RunRefused as refused:
             sys.exit(str(refused))
+    if on_admitted is not None:
+        on_admitted(front_door.record)
     run_dir = run.run_dir
 
     # A sidecar beside the dir is a trace of an earlier run at this id; nothing clears it.
@@ -237,7 +245,7 @@ def _stamp(  # noqa: PLR0913 — one keyword per stamped fact
                       "nothing downstream can prove which code it ran")
 
 
-def visualize(run: Run, *, tenant: tenancy.Tenant, update_ticket: bool = False, mirror: bool = True) -> None:
+def visualize(run: Run, *, tenant: tenancy.Tenant, mirror: bool = True) -> None:
     """The post-run page step as `run.py` takes it: load the renderer, then hand it the run
     (`visualize_run.publish_page` renders, saves the record through `run`, and makes the dev-only
     copy). Runs in the process holding the handle, after the sandbox has exited and the tree has
@@ -251,9 +259,9 @@ def visualize(run: Run, *, tenant: tenancy.Tenant, update_ticket: bool = False, 
     except Exception as e:
         raise VisualizeFailed("the renderer could not be loaded") from e
     if mirror:
-        vr.publish_page(run, tenant=tenant, update_ticket=update_ticket)
+        vr.publish_page(run, tenant=tenant)
     else:
-        vr.save_page(run, update_ticket=update_ticket)
+        vr.save_page(run)
 
 
 def cross_check_tables(run_dir: Path) -> None:

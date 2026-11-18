@@ -43,8 +43,11 @@ from .models import (
     CredentialIssued,
     CredentialRef,
     CredentialsPut,
+    AbandonRequested,
+    BatchReleased,
     Instant,
     Invitation,
+    ItemReleased,
     InvitationRef,
     InviteCreate,
     Investigation,
@@ -396,6 +399,7 @@ WorkReader = Annotated[Principal, Depends(_caller_with("work.read"))]
 InvestigationRunner = Annotated[Principal, Depends(_caller_with("investigations.run"))]
 InvestigationDeleter = Annotated[Principal, Depends(_caller_with("investigations.delete"))]
 LearningRunner = Annotated[Principal, Depends(_caller_with("learning.run"))]
+LearningManager = Annotated[Principal, Depends(_caller_with("learning.manage"))]
 ConfigReader = Annotated[Principal, Depends(_caller_with("config.read"))]
 ConfigWriter = Annotated[Principal, Depends(_caller_with("config.write"))]
 
@@ -535,8 +539,10 @@ async def start_investigation(
     Repeating a request with its `client_request_id` returns the investigation that request
     started (200). A request answered with an investigation that was already live started
     nothing, so repeating it later is a new request. A new investigation for a tenant with no
-    saved alert mapping is refused (409), naming how to save one."""
-    investigation, created = await deps.writes.create_investigation(caller, body.alert_id, body.client_request_id)
+    saved alert mapping is refused (409), naming how to save one. With `update_ticket`, an alert that names no ticket
+    is refused too (409)."""
+    investigation, created = await deps.writes.create_investigation(
+        caller, body.alert_id, body.client_request_id, body.update_ticket)
     _answered_for("alert", body.alert_id, investigation.alert_id)
     if created:
         _created_at(request, response, "get_investigation", caller.tenant_id,
@@ -672,6 +678,28 @@ async def list_parked_batches(
     )
 
 
+@learning_work.post("/items/{item_id}/release", responses=responses(404, 409))
+async def release_learning_item(deps: Deps, caller: LearningManager, item_id: WorkItemId) -> ItemReleased:
+    """Release a held item: it starts afresh (attempts and deferrals reset, cause cleared) and waits again, or is skipped as
+    superseded when a fresher request for its case waits; `status` says which. Refused naming its status when it is not held."""
+    return await deps.learning_work.release_item(caller, item_id)
+
+
+@learning_work.post("/batches/{batch_id}/release", responses=responses(404, 409))
+async def release_parked_batch(deps: Deps, caller: LearningManager, batch_id: BatchId) -> BatchReleased:
+    """Release a batch parked for a credential refusal: the loop takes it up again from where it was (`in_review` when it
+    has a PR, `working` on an already lapsed lease when it has none), withdrawing a pending abandon request. Refused for another
+    cause, or while another batch is working on its lane."""
+    return await deps.learning_work.release_batch(caller, batch_id)
+
+
+@learning_work.post("/batches/{batch_id}/abandon", status_code=status.HTTP_202_ACCEPTED, responses=responses(404, 409))
+async def abandon_parked_batch(deps: Deps, caller: LearningManager, batch_id: BatchId) -> AbandonRequested:
+    """Ask for a parked batch to be abandoned. The request is recorded now (a release withdraws it); the loop's next pass
+    reads the batch's PR on the forge and carries it out (its PR closed and kept, its items held)."""
+    return await deps.learning_work.request_abandon(caller, batch_id)
+
+
 lessons = _router(prefix="/lessons", tags=["learning"], responses=_UNBACKED)
 
 
@@ -804,7 +832,7 @@ async def put_case_record(
     deps: Deps, caller: ConfigWriter, body: CaseRecordPut, request: Request, response: Response
 ) -> CaseRecord:
     """Write the case record's next version, judged in the same response; `replaces` as a system write's. The system it
-    names must be one of the tenant's enabled systems, and the comment body a template that renders (422, `faults`)."""
+    names must be one of the tenant's enabled systems (422, `faults`)."""
     record, created = await deps.systems.put_case_record(caller, body)
     if created:
         _created_at(request, response, "get_case_record", caller.tenant_id)

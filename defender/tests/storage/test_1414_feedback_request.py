@@ -271,8 +271,7 @@ def _drive_sibling(tmp_path, tenant, tail: F.FeedbackTail) -> None:
     with Episode.open(manifest.parent) as held:
         T.episode_view(held, tenant=tenant).close()
     argv = ["--tenant", str(tenant.id), "--episode", manifest.parent.name, "--world", "b"]
-    run_py.main(argv, lifecycle=tail.lifecycle, visualize=tail.visualize, ticket_writer=tail,
-                preflight=lambda *a, **k: 0, publish=in_process_publish(), directory=directory_for_argv(argv))
+    run_py.main(argv, lifecycle=tail.lifecycle, visualize=tail.visualize, preflight=lambda *a, **k: 0, publish=in_process_publish(), directory=directory_for_argv(argv))
 
 
 _REFUSED_ENDS = ["sibling world", "--no-learn", "held-out by path", "held-out by digest", "unverified tree"]

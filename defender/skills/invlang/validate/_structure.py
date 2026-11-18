@@ -381,14 +381,6 @@ def _check_vocab_anchor_kinds(companion: CompanionBody) -> list[str]:
                 f"{c.get('id', '?')}: anchor_kind {ak!r} is not known "
                 f"(`enum anchor-kinds`)",
             )
-            on_indet = _cell(c, "on_indeterminate")
-            errors += _check_vocab(
-                on_indet, vocab.AUTHZ_ON_INDET,
-                f"hypothesis {h.get('id', '?')} contract {c.get('id', '?')}: on_indet "
-                f"{on_indet!r} is not one of {', '.join(vocab.AUTHZ_ON_INDET)} "
-                f"(`enum authz.on_indet`) — the cell says what an unsettled answer means, and "
-                f"a misspelling would decide that silently",
-            )
     for row in _walkers.iter_authz_resolutions(companion):
         row_ak = row.get("anchor_kind")
         errors += _check_vocab(

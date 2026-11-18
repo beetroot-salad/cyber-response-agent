@@ -1,23 +1,24 @@
-"""#1359 the record leg comments on the ticket the alert names, through the case system's adapter
-(through the credential proxy, #1391 O1), driven through `run.main` with the real writer. Here: O1, O5, O7 end to end."""
+"""#1359 the record leg comments on the ticket the alert names, through the case system's adapter (through the credential
+proxy, #1391 O1). Driven through `record_case_ticket` itself (#1471 r8 C-7: no operator run comments), under a pass
+`[ticket, rw, key]` (C-2). Here: O1, O5, O7."""
 from __future__ import annotations
 
 import html
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from defender import _vocab
-from defender.records import run_end
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, ensure_d9_tenant
 from defender.tests.support.shared.contracts._spec1077 import fixture_run
 from defender.tests.tenancy.case_comment_1359 import _spec1359 as C
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 
 
-def _world(tmp_path: Path, *, key: str | None = C.TICKET_KEY, **kw: Any) -> tuple[Path, Path, Path]:
+def _world(tmp_path: Path, **kw: Any) -> tuple[Path, Path]:
     ensure_d9_tenant()
     root = current_data_root()
     folder = C.plant_case_tenant(root, **kw)
@@ -28,14 +29,7 @@ def _world(tmp_path: Path, *, key: str | None = C.TICKET_KEY, **kw: Any) -> tupl
         # it declares the ticket store's access, comment route included.
         (systems / case).mkdir(parents=True, exist_ok=True)
         (systems / case / "access.yaml").write_bytes((systems / "ticket" / "access.yaml").read_bytes())
-    return root, folder, C.plant_alert(tmp_path / "in", key=key)
-
-
-def _signer() -> Any:
-    """A signer that signs anything: run start mints the run's tokens for the proxied systems."""
-    from defender.tests.integrations.credential_proxy_1163._harness import FakeSigner
-
-    return FakeSigner()
+    return root, folder
 
 
 def _shim(tmp_path: Path, monkeypatch, *answers: dict[str, Any]) -> S.ProxyStandIn:
@@ -44,30 +38,61 @@ def _shim(tmp_path: Path, monkeypatch, *answers: dict[str, Any]) -> S.ProxyStand
                           ).install(monkeypatch)
 
 
-def _run(tmp_path: Path, root: Path, alert: Path, *, summary: dict[str, Any] | None = None,
-         before: Any = None, page: bool = False) -> tuple[int | None, Any, Path]:
-    rec = C.CaseRunRecorder(tmp_path / "runs" / "r1359", summary=summary, before_lifecycle=before)
-    seams = {} if page else {"visualize": rec.visualize}
-    rc, refused = S.drive_run(S.run_argv(alert, root, update_ticket=True), rec, signer=_signer(), **seams)
-    return rc, refused, rec.run_dir_at
+def _run_dir(tmp_path: Path) -> Path:
+    return tmp_path / "runs" / fixture_uuid("r1359")
 
 
-def test_o1_one_comment_on_the_alert_named_ticket_and_no_call_at_run_start(tmp_path, monkeypatch):
-    """The store receives one comment POST on the alert's key and nothing else; none before the lifecycle.
-    O1, O5."""
-    root, _folder, alert = _world(tmp_path)
+def _link(run_dir: Path) -> str:
+    """The investigation-screen link the job lane hands the record step (C-7)."""
+    return f"https://app.defender.test/t/{S.PLAYGROUND_ID}/investigations/{run_dir.name}"
+
+
+def _pass(run_dir: Path, system: str = "ticket", key: str = C.TICKET_KEY) -> str:
+    """The write pass the job lane's record step holds, minted as the helper mints it: `[system, rw, ticket]` (C-2)."""
+    from defender.credential_proxy._tokens import mint_request_token
+    from defender.tests.integrations.credential_proxy_1163._harness import FakeSigner
+
+    return mint_request_token(FakeSigner(), tenant_id=S.PLAYGROUND_ID, investigation=run_dir.name,
+                              grant=[(system, "rw", key)], expires_at=datetime.now(UTC) + timedelta(minutes=5))
+
+
+def _run(tmp_path: Path, root: Path, shim: S.ProxyStandIn, *, key: str | None = C.TICKET_KEY, summary: dict[str, Any] | None = None,
+         roster: Any = None, system: str = "ticket") -> tuple[Path, Any]:
+    """Plant the run (its alert naming `key`) and drive `record_case_ticket` over the tenant planted at `root`, handing
+    it the link, `shim`'s address and a pass naming the key (none when the alert names none: the container asks for none
+    then, W5); `roster` stands in the case system's adapters. Returns `(run dir, the tenant record)`."""
+    run_dir = _run_dir(tmp_path)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    C.plant_record(run_dir, key=key)
+    record = S.resolve(root)
+    kw: dict[str, Any] = {}
+    if roster is not None:
+        kw["case"] = S.mod("systems.case_system").case_verdict(record, defender_dir=S.DEFENDER, roster=roster)
+    S.record_step(run_dir, record, env={}, proxy_url=shim.url, link=_link(run_dir),
+                  request_token=_pass(run_dir, system) if key else None,
+                  truncated_by=(summary or {}).get("truncated_by"),
+                  closed_before_cut=(summary or {}).get("closed_before_cut", False), **kw)
+    return run_dir, record
+
+
+def test_o1_one_comment_on_the_alert_named_ticket_under_a_pass_naming_it(tmp_path, monkeypatch):
+    """The store receives one comment POST on the alert's key and nothing else, tagged, ending in the link, under a pass
+    `[ticket, rw, key]`. O1, O5, C-2, C-7."""
+    from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
+
+    root, _folder = _world(tmp_path)
     shim = _shim(tmp_path, monkeypatch)
-    at_start: list[int] = []
-    rc, refused, run_dir = _run(tmp_path, root, alert,
-                                before=lambda _d: at_start.append(len(shim.requests())))
+    run_dir, _record = _run(tmp_path, root, shim)
 
-    assert refused is None, refused
-    assert rc == 0, rc
-    assert at_start == [0], f"the store was called at run start: {shim.requests()}"
     calls = shim.requests()
     assert len(calls) == 1, f"expected one store call, got {calls}"
     assert calls[0]["method"] == "POST", calls[0]
     assert calls[0]["path"].endswith(f"/tickets/{C.TICKET_KEY}/comments"), calls[0]
+    body = str(calls[0]["body"]["body"])
+    assert body.startswith(S.mod("tenancy.case_ticket").agent_comment_tag(run_dir.name)), body
+    assert body.rstrip().endswith(_link(run_dir)), body
+    claims = A.claims_of_payload(calls[0]["token"].split(".")[0].encode("ascii"))
+    assert [list(e) for e in claims["grant"]] == [["ticket", "rw", C.TICKET_KEY]], claims
     got = S.receipt(run_dir)
     assert got is not None, "no receipt"
     assert set(got) == C.RECEIPT_KEYS, got
@@ -76,11 +101,10 @@ def test_o1_one_comment_on_the_alert_named_ticket_and_no_call_at_run_start(tmp_p
 
 def test_o1_a_store_that_does_not_know_the_key_leaves_a_not_found_receipt(tmp_path, monkeypatch):
     """A 404 on the comment leaves an error receipt naming "not found" and the key. O1, O5."""
-    root, _folder, alert = _world(tmp_path)
+    root, _folder = _world(tmp_path)
     shim = _shim(tmp_path, monkeypatch, S.answer(json.dumps({"detail": "no such ticket"}), "404"))
-    rc, refused, run_dir = _run(tmp_path, root, alert)
+    run_dir, _record = _run(tmp_path, root, shim)
 
-    assert refused is None, refused
     assert len(C.comment_calls(shim)) == 1, f"positive control: the comment was sent: {shim.requests()}"
     got = S.receipt(run_dir)
     assert got is not None, "no receipt"
@@ -90,14 +114,14 @@ def test_o1_a_store_that_does_not_know_the_key_leaves_a_not_found_receipt(tmp_pa
 
 
 def test_o5_an_alert_naming_no_ticket_is_an_empty_key_receipt_the_page_shows(tmp_path, monkeypatch):
-    """No case_key: no call, receipt key "" with the reason, and the page shows the reason, not "receipt unreadable".
-    O5, flow step 3."""
-    root, _folder, alert = _world(tmp_path, key=None)
-    shim = _shim(tmp_path, monkeypatch)
-    rc, refused, run_dir = _run(tmp_path, root, alert, page=True)
+    """No case_key: no call (the container asks for no pass, W5), receipt key "" with the reason, and the page's ticket
+    line shows the reason, not "receipt unreadable". O5, flow step 3."""
+    from defender.presentation import visualize_run
 
-    assert refused is None, refused
-    assert rc == 0, rc
+    root, _folder = _world(tmp_path)
+    shim = _shim(tmp_path, monkeypatch)
+    run_dir, _record = _run(tmp_path, root, shim, key=None)
+
     assert shim.requests() == [], f"a call was made with no key: {shim.requests()}"
     got = S.receipt(run_dir)
     assert got is not None, "no receipt"
@@ -105,8 +129,8 @@ def test_o5_an_alert_naming_no_ticket_is_an_empty_key_receipt_the_page_shows(tmp
     assert (got["key"], got["status"], got["ok"], got["url"]) == ("", C.ERROR, False, None), got
     reason = got.get("reason") or ""
     assert C.REASON_NO_KEY in reason, got
-    page = S.page_html(run_dir)
-    assert page, "positive control: the page rendered"
+    page = visualize_run.render_ticket_line(run_dir)
+    assert page, "positive control: the ticket line rendered"
     assert html.escape(reason) in page or reason in page, "the page does not show the reason"
     assert S.RECEIPT_UNREADABLE not in page
 
@@ -114,13 +138,11 @@ def test_o5_an_alert_naming_no_ticket_is_an_empty_key_receipt_the_page_shows(tmp
 def test_run_start_bad_case_settings_make_no_call_and_name_the_record(tmp_path, monkeypatch):
     """A case system whose settings fail its check: no store call, the run goes on, the receipt names the system's
     settings record (`system ticket settings`, #1366 DC6, not the retired file). Run-start flow, O5."""
-    root, folder, alert = _world(tmp_path)
+    root, folder = _world(tmp_path)
     S.set_key(folder, "ticket", "TICKET_TIMEOUT_SEC", "ten")
     shim = _shim(tmp_path, monkeypatch)
-    rc, refused, run_dir = _run(tmp_path, root, alert)
+    run_dir, _record = _run(tmp_path, root, shim)
 
-    assert refused is None, refused
-    assert rc == 0, rc
     assert shim.requests() == [], shim.requests()
     got = S.receipt(run_dir)
     assert got is not None, "no receipt"
@@ -134,12 +156,10 @@ def test_o7_a_forced_close_escalates_and_the_posted_comments_row_is_keyed_on_the
         tmp_path, monkeypatch):
     """An aborted run escalates on the alert's key; the posted-comments row is keyed by the ticket
     key (not the run folder), its body tagged with the run. O7, r3 Data."""
-    root, _folder, alert = _world(tmp_path)
+    root, _folder = _world(tmp_path)
     shim = _shim(tmp_path, monkeypatch)
-    rc, refused, run_dir = _run(tmp_path, root, alert, summary={
-        "output": "spec1359", "requests": 0, "truncated_by": "aborted", "closed_before_cut": False})
+    run_dir, _record = _run(tmp_path, root, shim, summary={"truncated_by": "aborted", "closed_before_cut": False})
 
-    assert refused is None, refused
     assert len(C.comment_calls(shim)) == 1, shim.requests()
     got = S.receipt(run_dir)
     assert got is not None, "no receipt"
@@ -165,15 +185,11 @@ def test_o7_exit_class_decides_whether_the_run_comments(tmp_path, monkeypatch, t
                                                         closed_before_cut, expected):
     """Which exit classes comment, escalate or stay silent is unchanged: silent means no call and
     no receipt. O7."""
-    root, _folder, alert = _world(tmp_path)
+    root, _folder = _world(tmp_path)
     shim = _shim(tmp_path, monkeypatch)
-    rc, refused, run_dir = _run(tmp_path, root, alert, summary={
-        "output": "spec1359", "requests": 0, "truncated_by": truncated_by,
-        "closed_before_cut": closed_before_cut})
+    run_dir, _record = _run(tmp_path, root, shim, summary={"truncated_by": truncated_by,
+                                                           "closed_before_cut": closed_before_cut})
 
-    # A run whose model provider stayed down exits 4 (`run.PROVIDER_DOWN_EXIT`): that status is
-    # the run's own and unrelated to the record leg, which is silent for it.
-    assert (refused, rc) == (None, 4 if truncated_by == "provider-down" else 0)
     got = S.receipt(run_dir)
     if expected is None:
         assert shim.requests() == [], f"a silent exit class called the store: {shim.requests()}"
@@ -186,13 +202,13 @@ def test_o7_exit_class_decides_whether_the_run_comments(tmp_path, monkeypatch, t
 
 def test_o1_a_failed_comment_adds_no_posted_comments_row(tmp_path, monkeypatch):
     """A refused comment leaves no posted-comments row, a sent one leaves exactly one. O7, #1255."""
-    root, _folder, alert = _world(tmp_path)
-    _shim(tmp_path, monkeypatch, S.answer(json.dumps({"detail": "no such ticket"}), "404"))
-    _rc, _refused, failed = _run(tmp_path, root, alert)
+    root, _folder = _world(tmp_path)
+    refusing = _shim(tmp_path, monkeypatch, S.answer(json.dumps({"detail": "no such ticket"}), "404"))
+    failed, _record = _run(tmp_path, root, refusing)
     assert S.mod("tenancy.case_ticket").read_posted_comments(fixture_run(failed)) == []
 
-    _shim(tmp_path, monkeypatch)
-    _rc, _refused, sent = _run(tmp_path / "again", root, alert)
+    accepting = _shim(tmp_path / "again", monkeypatch)
+    sent, _record = _run(tmp_path / "again", root, accepting)
     assert len(S.mod("tenancy.case_ticket").read_posted_comments(fixture_run(sent))) == 1
 
 
@@ -200,18 +216,17 @@ def test_o5_a_redirect_is_the_store_refusing_not_a_comment(tmp_path, monkeypatch
     """A 302 on the comment is not a 2xx: an error receipt carrying the status and no
     posted-comments row, so no world is later served a comment the store never stored. Control:
     a 201 comments. O5, #1392 review."""
-    root, _folder, alert = _world(tmp_path)
-    _shim(tmp_path, monkeypatch, S.answer("", "302"))
-    _rc, refused, run_dir = _run(tmp_path, root, alert)
-    assert refused is None, refused
+    root, _folder = _world(tmp_path)
+    redirecting = _shim(tmp_path, monkeypatch, S.answer("", "302"))
+    run_dir, _record = _run(tmp_path, root, redirecting)
     got = S.receipt(run_dir)
     assert got is not None, "no receipt"
     assert (got["status"], got["ok"], got["url"]) == (C.ERROR, False, None), got
     assert "302" in (got.get("reason") or ""), got
     assert S.mod("tenancy.case_ticket").read_posted_comments(fixture_run(run_dir)) == []
 
-    _shim(tmp_path, monkeypatch)
-    _rc, _refused, sent = _run(tmp_path / "again", root, alert)
+    accepting = _shim(tmp_path / "again", monkeypatch)
+    sent, _record = _run(tmp_path / "again", root, accepting)
     assert S.receipt(sent)["status"] == C.COMMENTED, S.receipt(sent)
 
 
@@ -235,20 +250,16 @@ def test_run_start_a_crashing_case_check_is_a_receipt_that_names_no_host_root(tm
 
     from defender.systems.verbs import read_roster
 
-    root, _folder, alert = _world(tmp_path, case_system="casesys")
+    root, _folder = _world(tmp_path, case_system="casesys")
     tree = tmp_path / "tree" / "defender"
     shutil.copytree(S.DEFENDER / "integrations", tree / "integrations",
                     ignore=shutil.ignore_patterns("__pycache__"))
     (tree / "integrations" / "casesys_adapter.py").write_text(CRASHING_CASE_ADAPTER, encoding="utf-8")
     shim = _shim(tmp_path, monkeypatch)
-    rec = C.CaseRunRecorder(tmp_path / "runs" / "r1359")
-    rc, refused = S.drive_run(S.run_argv(alert, root, update_ticket=True), rec, signer=_signer(),
-                              visualize=rec.visualize,
-                              roster=read_roster(tree / "integrations"))
+    run_dir, _record = _run(tmp_path, root, shim, system="casesys", roster=read_roster(tree / "integrations"))
 
-    assert (refused, rc) == (None, 0), (refused, rc)
     assert shim.requests() == [], shim.requests()
-    got = S.receipt(rec.run_dir_at)
+    got = S.receipt(run_dir)
     assert got is not None, "no receipt"
     reason = got.get("reason") or ""
     assert (got["status"], got["ok"]) == (C.ERROR, False), got
@@ -275,9 +286,8 @@ def _ticket(*bodies: str) -> dict[str, Any]:
 
 
 def _tag(tmp_path: Path) -> str:
-    """This run's tag line, known before the run: `_run`'s recorder names the run folder, and the
-    folder's name is the run id."""
-    run_dir = C.CaseRunRecorder(tmp_path / "runs" / "r1359").run_dir_at
+    """This run's tag line, known before the run: `_run` names the run folder, and the folder's name is the run id."""
+    run_dir = _run_dir(tmp_path)
     return S.mod("tenancy.case_ticket").agent_comment_tag(run_dir.name)
 
 
@@ -306,11 +316,10 @@ def test_1374_a_lost_answer_is_settled_by_one_read_back(
     receipt with the link and the comment recorded (O2); anything else, absent included (r4), is
     `unknown` naming the ticket and the tag to look for, and never claims the store could not be
     reached (O4). One write, one read (P4)."""
-    root, _folder, alert = _world(tmp_path)
+    root, _folder = _world(tmp_path)
     ours = _tag(tmp_path)
     shim = _shim(tmp_path, monkeypatch, S.timed_out(), read(ours))
-    _rc, refused, run_dir = _run(tmp_path, root, alert)
-    assert refused is None, refused
+    run_dir, _record = _run(tmp_path, root, shim)
     assert ours == S.mod("tenancy.case_ticket").agent_comment_tag(run_dir.name), "not this run's tag"
     argvs = shim.requests()
     assert len(C.comment_calls(shim)) == 1, (label, argvs)
@@ -348,10 +357,9 @@ def test_1374_a_write_that_did_not_reach_or_was_refused_is_not_read_back(
     """A write proven never sent (the proxy never connected) or one the store answered is
     decided as before: an error receipt and no read-back (O5, O6). The read the shim would
     answer next holds this run's comment, so a read-back would show as a success."""
-    root, _folder, alert = _world(tmp_path)
+    root, _folder = _world(tmp_path)
     shim = _shim(tmp_path, monkeypatch, write, _ticket(f"{_tag(tmp_path)}\nthe verdict"))
-    _rc, refused, run_dir = _run(tmp_path, root, alert)
-    assert refused is None, refused
+    run_dir, _record = _run(tmp_path, root, shim)
     assert _read_backs(shim) == [], (label, shim.requests())
     got = S.receipt(run_dir)
     assert (got["status"], got["ok"]) == (C.ERROR, False), (label, got)
@@ -399,20 +407,17 @@ def test_1374_an_unsettled_outcome_is_unknown_and_not_recorded(tmp_path, monkeyp
     """A connector with no read-back, or one whose read-back raises anything at all, leaves the
     outcome unsettled: an `unknown` receipt (not ok, no link) naming the ticket and the tag to
     look for, and no posted-comments row (O4, D2)."""
-    root, _folder, alert = _world(tmp_path, case_system="casesys")
-    _shim(tmp_path, monkeypatch)
-    rec = C.CaseRunRecorder(tmp_path / "runs" / "r1359")
-    rc, refused = S.drive_run(S.run_argv(alert, root, update_ticket=True), rec, signer=_signer(),
-                              visualize=rec.visualize, roster=_case_adapter(tmp_path, read_back))
-    assert (refused, rc) == (None, 0), (refused, rc)
-    got = S.receipt(rec.run_dir_at)
+    root, _folder = _world(tmp_path, case_system="casesys")
+    shim = _shim(tmp_path, monkeypatch)
+    run_dir, _record = _run(tmp_path, root, shim, system="casesys", roster=_case_adapter(tmp_path, read_back))
+    got = S.receipt(run_dir)
     assert got is not None, f"[{label}] no receipt"
     assert (got["status"], got["ok"], got["url"]) == (C.UNKNOWN, False, None), (label, got)
     reason = got.get("reason") or ""
     assert why in reason, (label, reason)
     assert C.TICKET_KEY in reason, (label, reason)
     assert _tag(tmp_path) in reason, (label, reason)
-    assert S.mod("tenancy.case_ticket").read_posted_comments(fixture_run(rec.run_dir_at)) == []
+    assert S.mod("tenancy.case_ticket").read_posted_comments(fixture_run(run_dir)) == []
 
 
 def _read_answering(texts: str) -> str:
@@ -431,20 +436,17 @@ def test_1374_the_host_decides_from_what_the_connector_read(
     """The connector only reads; the host applies the rules, so every connector inherits them. A
     comment whose own line is this run's tag is a success (P3). A read can only prove a comment is
     there, so no such comment is `unknown` however much was read (r4)."""
-    root, _folder, alert = _world(tmp_path, case_system="casesys")
-    _shim(tmp_path, monkeypatch)
+    root, _folder = _world(tmp_path, case_system="casesys")
+    shim = _shim(tmp_path, monkeypatch)
     tag = _tag(tmp_path)
     texts = repr((text.replace("{tag}", tag),))
-    rec = C.CaseRunRecorder(tmp_path / "runs" / "r1359")
-    rc, refused = S.drive_run(S.run_argv(alert, root, update_ticket=True), rec, signer=_signer(),
-                              visualize=rec.visualize,
-                              roster=_case_adapter(tmp_path, _read_answering(texts)))
-    assert (refused, rc) == (None, 0), (refused, rc)
-    got = S.receipt(rec.run_dir_at)
+    run_dir, _record = _run(tmp_path, root, shim, system="casesys",
+                            roster=_case_adapter(tmp_path, _read_answering(texts)))
+    got = S.receipt(run_dir)
     assert got is not None, label
     assert got["status"] == status, (label, got)
     assert got["url"] == ("http://store/t" if rows else None), (label, got)
-    posted = S.mod("tenancy.case_ticket").read_posted_comments(fixture_run(rec.run_dir_at))
+    posted = S.mod("tenancy.case_ticket").read_posted_comments(fixture_run(run_dir))
     assert len(posted) == rows, (label, posted)
 
 
@@ -454,12 +456,11 @@ def test_1374_the_host_decides_from_what_the_connector_read(
 ], ids=["may-have-landed", "refused"])
 def test_1374_a_write_fault_reaches_the_receipt_cut_short(tmp_path, monkeypatch, raises, status):
     """A write fault's detail can carry the store's whole reply too, whichever receipt it ends in."""
-    root, _folder, alert = _world(tmp_path, case_system="casesys")
-    _shim(tmp_path, monkeypatch)
-    rec = C.CaseRunRecorder(tmp_path / "runs" / "r1359")
-    S.drive_run(S.run_argv(alert, root, update_ticket=True), rec, signer=_signer(), visualize=rec.visualize,
-                roster=_case_adapter(tmp_path, None, write_raises=raises))
-    got = S.receipt(rec.run_dir_at)
+    root, _folder = _world(tmp_path, case_system="casesys")
+    shim = _shim(tmp_path, monkeypatch)
+    run_dir, _record = _run(tmp_path, root, shim, system="casesys",
+                            roster=_case_adapter(tmp_path, None, write_raises=raises))
+    got = S.receipt(run_dir)
     assert got["status"] == status, got
     assert "y" * 100 in got["reason"], "positive control: the detail reached the receipt"
     assert "y" * 1000 not in got["reason"], len(got["reason"])
@@ -473,13 +474,11 @@ def test_1374_a_write_fault_reaches_the_receipt_cut_short(tmp_path, monkeypatch,
 def test_1374_a_read_fault_reaches_the_receipt_cut_short(tmp_path, monkeypatch):
     """A failed read's detail can carry the store's whole reply (other people's comments): the
     receipt holds a bounded part of it, and still names the ticket and the tag."""
-    root, _folder, alert = _world(tmp_path, case_system="casesys")
-    _shim(tmp_path, monkeypatch)
+    root, _folder = _world(tmp_path, case_system="casesys")
+    shim = _shim(tmp_path, monkeypatch)
     long = f"def {C.READBACK_ACTION}(ctx, *, key):\n    raise TransportFault('x' * 5000)\n"
-    rec = C.CaseRunRecorder(tmp_path / "runs" / "r1359")
-    S.drive_run(S.run_argv(alert, root, update_ticket=True), rec, signer=_signer(), visualize=rec.visualize,
-                roster=_case_adapter(tmp_path, long))
-    got = S.receipt(rec.run_dir_at)
+    run_dir, _record = _run(tmp_path, root, shim, system="casesys", roster=_case_adapter(tmp_path, long))
+    got = S.receipt(run_dir)
     assert got["status"] == C.UNKNOWN, got
     assert "x" * 100 in got["reason"], "positive control: the detail reached the receipt"
     assert "x" * 1000 not in got["reason"], len(got["reason"])
@@ -506,85 +505,155 @@ def test_1374_the_page_tells_unknown_from_error_by_its_words(tmp_path):
     assert "ticket-ok" not in lines[C.UNKNOWN], lines
 
 
-def _sent_comment(shim: S.DockerShim) -> str:
-    [call] = C.comment_calls(shim)
-    return str(call["body"])
+def test_1471_w7_the_operator_command_refuses_update_ticket_as_an_unknown_argument(tmp_path, capsys):
+    """`run.py --update-ticket` is gone: argparse refuses it as an unrecognized argument (exit 2), so an operator run
+    can never comment or mint a write-back token. Control: the same command line without it parses. (#1471 r8 W7)"""
+    from defender import run as run_py
+
+    alert = tmp_path / "alert.json"
+    alert.write_text("{}", encoding="utf-8")
+    base = [str(alert), "--tenant", "00000000-0000-4000-8000-000000001471"]
+    assert run_py.parse_args(base).alert == alert, "control: the command line without the switch parses"
+    capsys.readouterr()
+
+    with pytest.raises(SystemExit) as refused:
+        run_py.parse_args([*base, "--update-ticket"])
+
+    assert refused.value.code == 2
+    err = capsys.readouterr().err
+    assert "unrecognized arguments: --update-ticket" in err, err
 
 
-#: A run that never closed: `NeverClosed` (a pointer and a table, no row), as a run cut short leaves it.
-NO_RECORD = None
+# ======================================================================================
+# #1471 PR #1542 review: the job asks for its write pass inside the record step, over the verdict run start made.
+# ======================================================================================
+
+class _Asks:
+    """A write-pass ask (`record_case_ticket(ask_pass=)`): counts its calls and answers `answer`, or raises it."""
+
+    def __init__(self, answer: Any) -> None:
+        self.answer, self.calls = answer, 0
+
+    def __call__(self) -> Any:
+        self.calls += 1
+        if isinstance(self.answer, BaseException):
+            raise self.answer
+        return self.answer
 
 
-@pytest.mark.parametrize(("exit_class", "closed_as", "status", "marker"), [
-    *[(None, d, C.COMMENTED, None) for d in _vocab.DISPOSITION_VALUES],
-    *[(e, "benign", C.ESCALATED, f"exit: {e}") for e in sorted(run_end.ESCALATED_EXITS)],
-    *[(e, "unresolved", C.COMMENTED, None) for e in sorted(run_end.FORCED_CLOSE_EXITS)],
-    *[(e, NO_RECORD, C.ESCALATED, f"exit: {e}") for e in sorted(run_end.FORCED_CLOSE_EXITS)],
-    (None, NO_RECORD, C.COMMENTED, "No disposition was recorded for this case"),
-])
-def test_1414_the_ticket_comment_holds_for_every_way_a_run_ends(
-        tmp_path, monkeypatch, exit_class, closed_as, status, marker):
-    """The ticket's receipt and body follow the run's closing record (or its absence) and the exit: a forced close that left no record still escalates. O1/A5 (C21)."""
-    from defender.tests.support.storage import _readers1534 as R
+def _asked_run(tmp_path: Path, root: Path, shim: S.ProxyStandIn, asks: _Asks, *, key: str | None = C.TICKET_KEY,
+               truncated_by: str | None = None) -> Path:
+    """`_run`, but with no token handed: the record step asks `asks` for it."""
+    run_dir = _run_dir(tmp_path)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    C.plant_record(run_dir, key=key)
+    S.record_step(run_dir, S.resolve(root), env={}, link=_link(run_dir), truncated_by=truncated_by,
+                  ask_pass=asks)
+    return run_dir
 
-    root, _folder, alert = _world(tmp_path)
+
+def test_1471_review_the_record_step_asks_once_for_its_pass_and_posts_under_it(tmp_path, monkeypatch):
+    """No token handed: the record step asks once, and the comment goes out under the pass it was answered. (W5)"""
+    root, _folder = _world(tmp_path)
     shim = _shim(tmp_path, monkeypatch)
-    rc, refused, run_dir = _run(tmp_path, root, alert, summary={
-        "output": "spec1414", "requests": 0, "truncated_by": exit_class, "closed_before_cut": False},
-        before=lambda d: R.plant_run(d, None if closed_as is NO_RECORD else R.valid_fields(closed_as),
-                                     sessions_base=d.parent))
+    asks = _Asks((_pass(_run_dir(tmp_path)), shim.url))
+    run_dir = _asked_run(tmp_path, root, shim, asks)
 
-    assert refused is None, refused
-    assert rc == (7 if exit_class == "provider-rejected" else 0), rc
+    assert asks.calls == 1, asks.calls
+    assert len(C.comment_calls(shim)) == 1, shim.requests()
     got = S.receipt(run_dir)
     assert got is not None, "no receipt"
-    assert (got["status"], got["ok"]) == (status, True), got
-    sent = _sent_comment(shim)
-    assert ("ended without a verdict" in sent) == (status == C.ESCALATED), sent
-    if marker is not None:
-        assert marker in sent, sent
+    assert (got["status"], got["ok"]) == (C.COMMENTED, True), got
 
 
-@pytest.mark.parametrize("fault", [pytest.param(k, id=k) for k in (
-    "database-missing", "pointer-unreadable", "store-unreadable", "schema-version", "recorded-before-1534", "row-invalid")])
-@pytest.mark.parametrize("exit_class", [None, *sorted(run_end.FORCED_CLOSE_EXITS)])
-def test_1414_a_record_that_could_not_be_looked_up_posts_no_comment_on_any_reading_exit(
-        tmp_path, monkeypatch, exit_class, fault):
-    """A `CouldNotLook` on an exit that reads the record: no call to the store, an `error` receipt with the kind's fixed wording, never the lookup's detail. (V-LOOK, M4 iii)"""
-    from defender.records import closing as C_
-    from defender.tests.support.storage import _readers1534 as R
-    from defender.tests.support.shared.contracts._spec1077 import fixture_run
-
-    assert fault in R.KINDS_BY_FAULT, "the fault list is the readers' own"
-    root, _folder, alert = _world(tmp_path)
+@pytest.mark.parametrize("case", ["silent ending", "keyless alert", "bad case settings"])
+def test_1471_review_the_record_step_asks_for_no_pass_when_it_will_not_comment(tmp_path, monkeypatch, case):
+    """A run that ends silently, an alert that names no ticket, or a case system whose settings are faulty: nothing is
+    asked, so nothing is signed, and the receipt keeps its own reason. (W5)"""
+    root, folder = _world(tmp_path)
+    if case == "bad case settings":
+        S.set_key(folder, "ticket", "TICKET_TIMEOUT_SEC", "ten")
     shim = _shim(tmp_path, monkeypatch)
-    rc, refused, run_dir = _run(tmp_path, root, alert, summary={
-        "output": "spec1414", "requests": 0, "truncated_by": exit_class, "closed_before_cut": False},
-        before=lambda d: R.plant_run(d, R.valid_fields("benign"), fault=fault, sessions_base=d.parent))
+    asks = _Asks(("unused", shim.url))
+    run_dir = _asked_run(tmp_path, root, shim, asks, key=None if case == "keyless alert" else C.TICKET_KEY,
+                         truncated_by="budget" if case == "silent ending" else None)
 
-    assert refused is None, refused
-    assert rc == 0, rc
-    looked = C_.for_run(fixture_run(run_dir))
-    assert isinstance(looked, C_.CouldNotLook), f"premise: the fault reads as {fault}: {looked!r}"
-    assert looked.kind == fault, looked
-    assert looked.detail, "premise: the lookup holds a detail to withhold"
-    assert shim.requests() == [], f"a comment was posted for a record nobody could read: {shim.requests()}"
+    assert asks.calls == 0, f"a pass was asked for a run that will not comment ({case})"
+    assert shim.requests() == [], shim.requests()
+    got = S.receipt(run_dir)
+    if case == "silent ending":
+        assert got is None, got
+    else:
+        assert got is not None, "no receipt"
+        assert got["status"] == C.ERROR, got
+        assert (C.REASON_NO_KEY in got["reason"]) == (case == "keyless alert"), got
+
+
+def test_1471_review_a_refused_ask_is_the_receipt_reason_it_answered(tmp_path, monkeypatch):
+    """The ask answers a reason instead of a pass: no call, and that reason is the receipt's. (W5)"""
+    root, _folder = _world(tmp_path)
+    shim = _shim(tmp_path, monkeypatch)
+    reason = S.mod("investigation.ticket_writer").REASON_NO_WRITE_SYSTEM
+    run_dir = _asked_run(tmp_path, root, shim, _Asks(reason))
+
+    assert shim.requests() == [], shim.requests()
     got = S.receipt(run_dir)
     assert got is not None, "no receipt"
-    assert (got["status"], got["ok"]) == (C.ERROR, False), got
-    assert C_.FAULT_WORDING[fault] in got["reason"], got
-    assert looked.detail not in got["reason"], "the lookup's detail reached the receipt"
+    assert (got["status"], got["reason"]) == (C.ERROR, reason), got
 
 
-def test_1414_a_record_that_can_be_looked_up_does_comment(tmp_path, monkeypatch):
-    """Positive control for the fault test: the same run with an intact record comments once."""
-    from defender.tests.support.storage import _readers1534 as R
-
-    root, _folder, alert = _world(tmp_path)
+def test_1471_review_an_ask_that_raises_is_an_error_receipt_never_the_run(tmp_path, monkeypatch):
+    """The ask raises: the record step's own guard holds it, an error receipt naming only the type. (W2: a post-step
+    never breaks the run)"""
+    root, _folder = _world(tmp_path)
     shim = _shim(tmp_path, monkeypatch)
-    _rc, _refused, run_dir = _run(tmp_path, root, alert, summary={
-        "output": "spec1414", "requests": 0, "truncated_by": None, "closed_before_cut": False},
-        before=lambda d: R.plant_run(d, R.valid_fields("benign"), sessions_base=d.parent))
+    run_dir = _asked_run(tmp_path, root, shim, _Asks(TypeError("/host/secret/path")))
 
-    assert len(C.comment_calls(shim)) == 1
-    assert S.receipt(run_dir)["status"] == C.COMMENTED
+    got = S.receipt(run_dir)
+    assert got is not None, "no receipt"
+    assert got["status"] == C.ERROR, got
+    assert "TypeError" in got["reason"], got
+    assert "/host/secret/path" not in got["reason"], got
+
+
+def test_1471_review_the_helper_s_refusals_map_to_product_reasons_and_never_carry_its_text():
+    """`run._ask_write_pass`: the helper's `no-ticket` and `no-write-system` refusals are the record step's own reasons;
+    any other refusal, a lost socket or an answer with no token is the no-token reason; the helper's text never
+    reaches the receipt. A good answer is the token and the proxy's address. (W5)"""
+    from defender import job_socket
+    from defender import run as run_py
+    from defender.investigation import ticket_writer as tw
+
+    def asking(outcome: Any) -> Any:
+        def request(*_a: Any, **_k: Any) -> Any:
+            if isinstance(outcome, BaseException):
+                raise outcome
+            return outcome
+        return request
+
+    cases = [
+        (job_socket.Refused("x", "no-ticket"), tw.REASON_NO_TICKET),
+        (job_socket.Refused("x", "no-write-system"), tw.REASON_NO_WRITE_SYSTEM),
+        (job_socket.Refused("RuntimeError: /host/secret", "sign-fault"), tw.REASON_NO_TOKEN),
+        (OSError("gone"), tw.REASON_NO_TOKEN),
+        ({"token": "", "proxy_url": "http://p"}, tw.REASON_NO_TOKEN),
+        ({"token": "t", "proxy_url": ""}, tw.REASON_NO_TOKEN),
+        ({"proxy_url": "http://p"}, tw.REASON_NO_TOKEN),
+        ({"token": "t", "proxy_url": "http://p"}, ("t", "http://p")),
+    ]
+    for outcome, wanted in cases:
+        assert run_py._ask_write_pass(asking(outcome), "job-1") == wanted, outcome
+
+
+def test_1471_review_a_crash_judging_the_case_at_run_start_is_held_as_a_fault_not_raised():
+    """Run start's case judgement crashes (here: a tenant object it cannot read): the job's setup gets a case-settings
+    fault naming only the crash's type, and nothing is raised, so the run goes on. (#1366 R16, W2)"""
+    from types import SimpleNamespace
+
+    from defender import run as run_py
+    from defender.systems import case_system
+
+    got = run_py._case_at_start(SimpleNamespace(), SimpleNamespace(roster=None), job="job-1")
+
+    assert isinstance(got, case_system.CaseSettingsFault), got
+    assert "AttributeError" in str(got), got

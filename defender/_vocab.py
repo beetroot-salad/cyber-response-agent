@@ -18,18 +18,11 @@ from __future__ import annotations
 # (`_check_false_positive_gating`, `skills/invlang/validate.py`) and selects no learning
 # direction (`learning/core/directions.py`).
 #
-# `unsanctioned-benign` is harmless activity with no authorization record behind it: the
-# authorization question was worked and came back empty (an `exhausted` contract), the alerted
-# entity was checked on its own, and the measured impact stayed within its threshold. It is a
-# process finding, not a security one, and is priced in `skills/invlang/validate/_gating.py`.
-# Listed before `unresolved`, which stays last.
-#
 # `unresolved` is recorded only by the host when it ends a run without a settled finding (gate
 # overrule, incomplete review, run cut short); the model's own "could not settle" is
 # `inconclusive`. See `HOST_ONLY_DISPOSITION`.
 DISPOSITION_VALUES: tuple[str, ...] = (
-    "benign", "false-positive", "inconclusive", "malicious", "unsanctioned-benign",
-    "unresolved",
+    "benign", "false-positive", "inconclusive", "malicious", "unresolved",
 )
 DISPOSITION_ENUM = frozenset(DISPOSITION_VALUES)
 
@@ -37,12 +30,17 @@ DISPOSITION_ENUM = frozenset(DISPOSITION_VALUES)
 #: (`test_authoring_surfaces.py` enumerates them).
 HOST_ONLY_DISPOSITION = "unresolved"
 
+#: The one disposition that carries a confidence (#1545): `report.md`'s `confidence` is set
+#: only on it.
+BENIGN_DISPOSITION = "benign"
+
+#: A benign close's confidence, best first (#1545). Here because `report.md`'s schema and
+#: invlang's `conclude` both read it, like the disposition vocabulary.
+CONFIDENCE_VALUES: tuple[str, ...] = ("high", "medium", "low")
+
 #: The model's own "I could not settle this", which must pay for its close with `ceiling_test`
 #: receipts (`skills/invlang/validate/_gating.py`).
 CEILING_DISPOSITION = "inconclusive"
-
-#: Harmless activity that skipped the process meant to authorize it (see above).
-PROCESS_GAP_DISPOSITION = "unsanctioned-benign"
 
 # What a surface shows where a disposition should be and none could be read.
 UNKNOWN_DISPOSITION = "?"

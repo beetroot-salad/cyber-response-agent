@@ -185,6 +185,7 @@ def write_cases(cases: list[tuple[Path, str]], *, freeze_dir: Path, overlay: dic
     freeze, freeze_id = _freeze_of(freeze_dir), freeze_dir.name
     frozen_copy.check_patterns(freeze, tenant_settings)
     frozen_copy.check_parts(freeze, Path(parts_dir) / freeze_id)
+    checked = frozen_copy.parts_checked(freeze, freeze_id, Path(parts_dir) / freeze_id)
     listed = candidates(freeze_dir, ops=ops)
     for _case_dir, alert_uuid in cases:
         if alert_uuid not in listed:
@@ -198,7 +199,9 @@ def write_cases(cases: list[tuple[Path, str]], *, freeze_dir: Path, overlay: dic
             check_mutations(recorded["mutations"], rules_dir=rules)
         finally:   # needed only by the guard: removed on every exit, a refusal included
             shutil.rmtree(rules, ignore_errors=True)
-    token = lock.take(lock_store, lock.FROZEN_ENGINE)
+    # The labelling launch joins this lock; the note spares it hashing the parts again (one 17 GB read).
+    token = lock.take(lock_store, lock.FROZEN_ENGINE,
+                      note=None if checked is None else {"parts_checked": checked})
     restores: list[Any] = []
     try:
         copy = frozen_copy.ready(es, ops=ops, clock=clock, freeze=freeze, freeze_id=freeze_id,

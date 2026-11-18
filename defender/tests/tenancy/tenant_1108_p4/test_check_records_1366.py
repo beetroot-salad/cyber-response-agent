@@ -262,10 +262,14 @@ def test_1366_o9_check_reports_an_unreadable_leftover_case_file_as_retired_with_
     pytest.param((), (("POST", "/tickets/*/transitions"),), id="write-route-missing"),
     pytest.param((COMMENT_ROUTE,), (COMMENT_ROUTE,), id="read-route-matches-the-comment-route"),
     pytest.param((("POST", "/tickets/ABC-1/comments"),), (COMMENT_ROUTE,), id="read-route-literal-matches-the-comment-route"),
+    pytest.param((), (COMMENT_ROUTE, ("POST", "/tickets/*/transitions")), id="a-second-write-route"),
+    pytest.param((), (("POST", "/*/*/comments"),), id="a-widened-write-route"),
+    pytest.param((("POST", "/search"),), (COMMENT_ROUTE,), id="a-non-get-read-elsewhere"),
 ])
 def test_1366_c5_check_reports_a_case_record_whose_system_no_longer_covers_its_comment_route(tenants, reads, writes):
     """The ticket system's stored declaration writes only `POST /tickets/*/transitions`, or lists a read route that
-    matches the comment route (the r5 ruling: refused even with a covering write): `check` reports the case record's lost
+    matches the comment route (the r5 ruling: refused even with a covering write), or declares a second or a widened write
+    route or a read that is not a GET (X2): `check` reports the case record's lost
     cover naming ticket and exits nonzero; the tenant whose declaration covers it gets no such line. (#1366 C5, C2, B2)"""
     sound = _findings(tenants())
     lost = R.edited(R.fixture_records(), "ticket",

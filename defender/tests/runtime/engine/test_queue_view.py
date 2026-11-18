@@ -105,10 +105,10 @@ def blocking(dsn: str):
     return open_blocking(dsn)
 
 
-def _outcome(name: str, *reason: str):
+def _outcome(name: str, *why: str):
     from defender.learning_store import Outcome
 
-    return getattr(Outcome, name)(*reason)
+    return getattr(Outcome, name)(*why)
 
 
 def _write_json(path: Path, payload: dict) -> None:
@@ -192,8 +192,8 @@ def stored(migrated_database, data_root, tmp_path):  # noqa: F811 — the import
     with blocking(dsn) as store:
         store.publish_findings(str(tenant.id), "run-1", [finding(f) for f in ("f1", "f2", "f3", "f4")], kind="finding")
         claim = store.claim(str(tenant.id), AUTHOR_LANE, owner="host-a", thresholds=ONE)
-        store.in_review(claim, 7, {("finding", "f1"): _outcome("waiting"), ("finding", "f2"): _outcome("held", SCRIPT_PAYLOAD),
-                                   ("finding", "f3"): _outcome("dead", IMG_PAYLOAD)})
+        store.in_review(claim, 7, {("finding", "f1"): _outcome("waiting"), ("finding", "f2"): _outcome("held", "curator_held", SCRIPT_PAYLOAD),
+                                   ("finding", "f3"): _outcome("dead", "malformed_row", IMG_PAYLOAD)})
     paths = dataclasses.replace(LoopPaths.for_tenant(tenant), repo_root=tmp_path / "checkout")  # its own archive
     _seed_set_aside(paths)
     return dsn, paths

@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 from defender.tests.support.api._mount1161 import API
+from defender.tests.support.api._actions1537 import batch_row
 from defender.tests.support.api._identity1306 import ANN, BOB, T1, T2
 from defender.tests.support.api._learning1485 import (
     HOSTILE_REASON,
@@ -43,8 +44,11 @@ pytestmark = [pytest.mark.postgres]
 ITEMS = "learning/items"
 PARKED = "learning/parked-batches"
 #: The wire's fields (Names, wire models): `item_id` included; no payload, fault, counters or lease.
-ITEM_FIELDS = {"item_id", "kind", "key", "status", "reason", "source_run", "batch_id", "pr_number", "updated_at"}
-BATCH_FIELDS = {"batch_id", "batch_kind", "lane", "blocks_lane", "branch", "pr_number", "reason", "created_at", "items"}
+#: #1537 O4, O5 (conflict, updated): items gain `cause`; parked batches gain `cause`, `parked_at`, `releasable`,
+#: `abandon_requested_at` and `last_checked`.
+ITEM_FIELDS = {"item_id", "kind", "key", "status", "reason", "cause", "source_run", "batch_id", "pr_number", "updated_at"}
+BATCH_FIELDS = {"batch_id", "batch_kind", "lane", "blocks_lane", "branch", "pr_number", "reason", "cause", "parked_at",
+                "releasable", "abandon_requested_at", "last_checked", "created_at", "items"}
 
 
 def _cursors_after(got: list[dict], cursors: list[str], limit: int, tied: Callable[[dict], bool]) -> list[str]:
@@ -81,6 +85,7 @@ def _check_item(wire: dict[str, Any], stored: Any) -> None:
     assert set(wire) == ITEM_FIELDS
     assert {k: v for k, v in wire.items() if k != "updated_at"} == wire_item(stored)
     assert instant(wire["updated_at"]) == stored.updated_at
+    assert wire["cause"] is not None, "#1537 PR1: a held or dead item has a cause"
 
 
 # --- O1 ------------------------------------------------------------------------------------------------------------
@@ -234,6 +239,12 @@ def test_o2_parked_batches_list_newest_first_with_blocks_lane_items_and_every_fi
         assert (wire["batch_kind"], wire["lane"], wire["branch"], wire["pr_number"], wire["reason"]) == (
             view.kind, view.lane, view.branch, view.pr_number, view.reason)
         assert instant(wire["created_at"]) == view.created_at
+        stored = batch_row(dsn, wire["batch_id"])  # #1537 O4, O5: cause, parked_at, request as stored; releasable by the design's rule
+        assert stored["cause"] is not None, "premise: a parked batch has a cause"
+        assert wire["cause"] == stored["cause"]
+        assert (instant(wire["parked_at"]) if wire["parked_at"] else None) == stored["parked_at"]
+        assert wire["abandon_requested_at"] is None
+        assert wire["releasable"] is (stored["cause"] == "forge_credential_refused")
         assert wire["items"] == [{"kind": k, "key": key} for k, key in records[wire["batch_id"]].items]
         assert all(set(i) == {"kind", "key"} for i in wire["items"])
     by_id = {b["batch_id"]: b for b in got}

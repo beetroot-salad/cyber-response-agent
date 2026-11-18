@@ -68,35 +68,21 @@ def _run_dir(d: S.Drive) -> Path:
     return d.run_dir
 
 
-def _comment_signature(store: S.TicketStore) -> str:
-    """The signature the record leg rendered into its one comment, on the alert's ticket (D-14:
-    the signature recorded at run start reaches the ticket only through the comment)."""
-    assert store.paths(S.COMMENTS_SUFFIX) == [f"/tickets/{S.TICKET_KEY}/comments"], store.calls
-    found = S.COMMENT_SIGNATURE.search(store.comment_body())
-    assert found, f"the comment rendered no signature slot: {store.wire_body()!r}"
-    return found.group(1)
-
-
 def _ticketed(tmp_path: Path, *, alert: Mapping[str, Any] | bytes,
               mapping: Mapping[str, Any] | None = MAPPING,
               shim: S.RecordingShim | None = None, main: Any = None,
               before: Callable[[Path], None] | None = None,
-              lessons: Mapping[str, Sequence[str]] | None = None,
-              store: S.TicketStore | None = None) -> tuple[S.Drive, S.TicketStore]:
-    """One run through `run.main` with `--update-ticket`: the driver, then the record leg — the REAL
-    ticket writer over `store` (default a fresh `TicketStore`), which records each request. The
-    alert names its ticket, and the case-record template renders `{signature}`."""
+              lessons: Mapping[str, Sequence[str]] | None = None) -> S.Drive:
+    """One run through `run.main`: the driver and its record. The alert names its ticket; an operator
+    run posts no comment (W7), so the signature is observed where it is recorded and read."""
     planted = S.plant_tenant(
-        alert_mapping=None if mapping is None else S.ticketed_mapping(mapping),
-        case_body=S.SIGNED_COMMENT_BODY)
+        alert_mapping=None if mapping is None else S.ticketed_mapping(mapping))
     for name, entries in (lessons or {}).items():
         S.plant_lesson(name, source_signature=list(entries))
-    sink = store if store is not None else S.TicketStore(tmp_path)
-    d = S.run_alert(tmp_path, alert=S.ticketed_alert(alert), tenant=planted, tickets=S.ticket_writer(sink),
-                    update_ticket=True, orient_shim=shim,
+    d = S.run_alert(tmp_path, alert=S.ticketed_alert(alert), tenant=planted, orient_shim=shim,
                     main=main if main is not None else S.closing_main_turns(),
                     before=before)
-    return _completed(d), sink
+    return _completed(d)
 
 
 # Orientation and MAIN
@@ -324,13 +310,11 @@ def test_o10_orientation_names_the_missing_signature(tmp_path: Path) -> None:
 def test_o10_no_reader_falls_back_to_a_vendor_field(tmp_path: Path) -> None:
     alert = _alert(alert_id=None, signature=TOP_SIG, id=TOP_ID)
     shim = S.RecordingShim()
-    d, store = _ticketed(tmp_path, alert=alert, mapping=NO_SIG_MAPPING, shim=shim)
+    d = _ticketed(tmp_path, alert=alert, mapping=NO_SIG_MAPPING, shim=shim)
 
     harness = S.harness_text(d.opening_message)
     assert any(RULE_ID in body for body in S.framed_bodies(d.opening_message)), (
         "the raw alert never reached MAIN, so its absence below proves nothing")
-    comment = store.comment_payloads
-    assert comment, "the record leg posted nothing"
     run_dir = _run_dir(d)
     corpus, _report = _corpus(run_dir.parent)
     mine = [c for c in corpus if c.case_id == run_dir.name]
@@ -338,7 +322,6 @@ def test_o10_no_reader_falls_back_to_a_vendor_field(tmp_path: Path) -> None:
     for value in VENDOR_VALUES:
         assert value not in harness, f"orientation's harness prose fell back to {value!r}"
         assert not _argv_carries(shim.argvs(), value), f"a lookup was keyed on {value!r}"
-        assert value not in json.dumps(comment), f"the record comment fell back to {value!r}"
     assert mine[0].signature_id is None, f"the corpus attributed the run to {mine[0].signature_id!r}"
 
     _ep, _judge, rows = _graded(tmp_path / "judge", alert=d.stored_alert,
@@ -402,14 +385,14 @@ def test_a6_every_sink_carries_and_matches_one_signature_text(tmp_path: Path) ->
     near = ("R-10", "r-1", "XR-1")
     lessons = {"fd1222-a6-exact": [sig], **{f"fd1222-a6-{i}": [v] for i, v in enumerate(near)}}
     shim = S.RecordingShim()
-    d, store = _ticketed(tmp_path, alert=S.generic_alert(rule_id=sig),
+    d = _ticketed(tmp_path, alert=S.generic_alert(rule_id=sig),
                          mapping=S.DEFAULT_MAPPING_GENERIC, shim=shim, lessons=lessons,
                          main=_MainRunsOrientationLookup(shim, then=S.closing_main_turns()))
     assert _argv_carries(shim.lessons_lookups(), sig), (
         f"orientation's lookup was not handed the signature verbatim: {shim.lessons_lookups()}")
     assert _listed(d.opening_message, lessons) == {"fd1222-a6-exact"}, "orientation's lookup"
     assert _listed(_first_tool_return(d), lessons) == {"fd1222-a6-exact"}, "MAIN's own lookup"
-    assert _comment_signature(store) == sig
+    assert d.recorded("signature") == sig
 
     base = tmp_path / "past"
     for i, value in enumerate((sig, *near)):
@@ -462,19 +445,16 @@ def test_p056_alert_key_names_are_hostile_and_the_harness_name(tmp_path: Path) -
 
 
 def test_p082_signature_with_spaces_or_commas_as_a_ticket_labe(tmp_path: Path) -> None:
-    """The comment carries the recorded signature verbatim; a signature the rule refuses (spaces,
-    commas) is the fallback, never the raw value. D-14, O7."""
-    signed, store = _ticketed(tmp_path / "signed", alert=S.generic_alert(rule_id=RULE_ID),
+    """The record holds the signature verbatim; a signature the rule refuses (spaces, commas) is
+    recorded as none, never the raw value. D-14, O7."""
+    signed = _ticketed(tmp_path / "signed", alert=S.generic_alert(rule_id=RULE_ID),
                               mapping=S.DEFAULT_MAPPING_GENERIC)
-    assert _comment_signature(store) == RULE_ID, (
-        "the comment's signature is not the recorded signature verbatim")
     assert signed.recorded("signature") == RULE_ID
 
     name = "Beacon, outbound: rare destination"
     alert = S.generic_alert(rule={"id": RULE_ID, "name": name, "description": DESCRIPTION})
-    d, store = _ticketed(tmp_path / "unsigned", alert=alert,
+    d = _ticketed(tmp_path / "unsigned", alert=alert,
                          mapping={**S.DEFAULT_MAPPING_GENERIC, "signature": "rule.name"})
-    assert _comment_signature(store) == S.CASE_FALLBACK_SIGNATURE
     assert d.recorded("signature") is None
 
 
@@ -487,17 +467,15 @@ def test_p089_signatures_that_look_identical_but_differ_in_cod(tmp_path: Path) -
     lessons = {"fd1222-p089-upper": [upper], "fd1222-p089-lower": [lower]}
     for value, other in ((upper, lower), (lower, upper)):
         shim = S.RecordingShim()
-        d, store = _ticketed(tmp_path / value, alert=S.generic_alert(rule_id=value),
+        d = _ticketed(tmp_path / value, alert=S.generic_alert(rule_id=value),
                              mapping=S.DEFAULT_MAPPING_GENERIC, shim=shim, lessons=lessons)
-        assert _comment_signature(store) == value
+        assert d.recorded("signature") == value
         assert _listed(d.opening_message, lessons) == {f"fd1222-p089-{'upper' if value == upper else 'lower'}"}, (
             f"the lessons lookup for {value!r} folded case into {other!r}")
     for i, value in enumerate((LOOKALIKE, "Ré", "Ré", "R-1 ")):
-        d, store = _ticketed(tmp_path / f"nonkey-{i}", alert=S.generic_alert(rule_id=value),
+        d = _ticketed(tmp_path / f"nonkey-{i}", alert=S.generic_alert(rule_id=value),
                              mapping=S.DEFAULT_MAPPING_GENERIC)
-        assert _comment_signature(store) == S.CASE_FALLBACK_SIGNATURE, (
-            f"{value!r}, not a valid signature, reached the ticket comment")
-        assert d.recorded("signature") is None
+        assert d.recorded("signature") is None, f"{value!r}, not a valid signature, was recorded"
     base = tmp_path / "past"
     _plant_past(base, "past-upper", alert=S.generic_alert(rule_id=upper), facts={"signature": upper})
     _plant_past(base, "past-lower", alert=S.generic_alert(rule_id=lower), facts={"signature": lower})
@@ -539,15 +517,14 @@ class _RewritesAlertAtClose(S.MainScript):
 
 
 def test_p112_case_ticket_opened_then_recorded_after_the_alert(tmp_path: Path) -> None:
-    """The comment carries the signature recorded at run start, not the rewritten alert's. D-14, O7."""
+    """The record holds the signature recorded at run start, not the rewritten alert's. D-14, O7."""
     rewritten = S.alert_bytes(S.generic_alert(rule_id="R9999"))
     main = _RewritesAlertAtClose(rewritten)
 
     def remember(run_dir: Path) -> None:
         main.run_dir = run_dir
 
-    d, store = _ticketed(tmp_path, alert=S.generic_alert(rule_id=RULE_ID), main=main,
+    d = _ticketed(tmp_path, alert=S.generic_alert(rule_id=RULE_ID), main=main,
                          mapping=S.DEFAULT_MAPPING_GENERIC, before=remember)
     assert d.closed is not None, "the run never closed, so the record leg had no closing record"
-    assert _comment_signature(store) == RULE_ID, "the record leg took the rewritten alert's value"
     assert d.recorded("signature") == RULE_ID

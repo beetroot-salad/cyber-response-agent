@@ -21,7 +21,8 @@ FIELDS = ("request_key", "attempt", "failure_reason", "failure_message")
 
 
 def _investigation(**extra):
-    fields = {"cost_usd": 0.0, "cost_is_lower_limit": False, "request_key": "k1", "attempt": 1, **extra}
+    fields = {"cost_usd": 0.0, "cost_is_lower_limit": False, "request_key": "k1", "attempt": 1, "update_ticket": False,  # #1471 C-4
+              **extra}
     return models.Investigation(investigation_id="b1000000-0000-4000-8000-000000000001", alert_id="a1000000-0000-4000-8000-000000000001", status="failed",
                                 created_at=NOW, **fields)
 
@@ -46,7 +47,7 @@ def test_o14_an_investigation_carries_its_request_key_attempt_and_failure_detail
 @pytest.mark.parametrize("field", ["request_key", "attempt"])
 def test_o14_every_investigation_names_its_request_key_and_attempt(field):
     """A row always has its request key and attempt, so the wire model requires both. (O14)"""
-    fields = {"cost_usd": 0.0, "cost_is_lower_limit": False, "request_key": "k1", "attempt": 1}
+    fields = {"cost_usd": 0.0, "cost_is_lower_limit": False, "request_key": "k1", "attempt": 1, "update_ticket": False}
     del fields[field]
     with pytest.raises(ValidationError, match=field):
         models.Investigation(investigation_id="b1000000-0000-4000-8000-000000000001", alert_id="a1000000-0000-4000-8000-000000000001", status="queued", created_at=NOW, **fields)
@@ -81,7 +82,7 @@ def test_s2_cost_is_lower_limit_is_required_on_the_wire_model_and_in_its_schema(
     assert field.is_required()
     assert field.annotation is bool
     assert "cost_is_lower_limit" in models.Investigation.model_json_schema()["required"]
-    fields = {"cost_usd": 0.0, "request_key": "k1", "attempt": 1}
+    fields = {"cost_usd": 0.0, "request_key": "k1", "attempt": 1, "update_ticket": False}
     with pytest.raises(ValidationError, match="cost_is_lower_limit"):
         models.Investigation(investigation_id="b1000000-0000-4000-8000-000000000001", alert_id="a1000000-0000-4000-8000-000000000001", status="queued", created_at=NOW, **fields)
 
@@ -267,9 +268,10 @@ def test_1083_the_moved_pinned_texts_and_the_mapping_read_port():
 # --- #1485: the learning work port and its wire models ---------------------------------------------------------------
 
 _ITEM = dict(item_id="e1000000-0000-4000-8000-000000000001", kind="finding", key="k", status="held", reason="r",
-             source_run=None, batch_id="d1000000-0000-4000-8000-000000000001", pr_number=7, updated_at=NOW)
+             cause="attempt_ceiling", source_run=None, batch_id="d1000000-0000-4000-8000-000000000001", pr_number=7, updated_at=NOW)
 _BATCH = dict(batch_id="d1000000-0000-4000-8000-000000000001", batch_kind="author", lane="author", blocks_lane=True,
-              branch="learning/b", pr_number=None, reason=None, created_at=NOW, items=[{"kind": "finding", "key": "k"}])
+              branch="learning/b", pr_number=None, reason=None, cause="forge_credential_refused", parked_at=NOW,
+              releasable=True, abandon_requested_at=None, last_checked=None, created_at=NOW, items=[{"kind": "finding", "key": "k"}])
 
 
 def test_1485_the_wire_item_kinds_are_the_stores_kinds():
@@ -341,3 +343,14 @@ def test_1485_the_learning_work_port_and_its_fake_take_the_tenant_then_status_af
     field = {f.name: f for f in dataclasses.fields(ports.ApiDeps)}["learning_work"]
     assert field.default is dataclasses.MISSING
     assert field.default_factory is dataclasses.MISSING
+
+
+@pytest.mark.parametrize(("model", "causes"), [("SetAsideItem", "ITEM_CAUSES"), ("ParkedBatch", "BATCH_CAUSES")])
+def test_1537_a_set_aside_cause_is_published_as_its_closed_list_not_free_text(model, causes):
+    """The wire's `cause` is the closed list the database checks (#1537): the schema names each cause, and nothing else."""
+    from defender.api import models
+    from defender.records import learning_causes
+
+    schema = getattr(models, model).model_json_schema()["properties"]["cause"]
+    [listed] = [s for s in schema["anyOf"] if s.get("type") != "null"]
+    assert sorted(listed["enum"]) == sorted(getattr(learning_causes, causes))

@@ -78,10 +78,12 @@ def investigate(*, gathers: bool = True) -> int:
 
 def _in_container_argv() -> list[str]:
     """This child's argv as the helper starts the entry in its container: no `--parent-pid` (A5, A6)."""
-    if "--parent-pid" not in argv:
-        return list(argv)
-    at = argv.index("--parent-pid")
-    return [*argv[:at], *argv[at + 2:]]
+    out = list(argv)
+    for flag in ("--parent-pid", "--alert-digest"):  # the worker's start hands both to the helper, never to the container's entry (C-1)
+        if flag in out:
+            at = out.index(flag)
+            del out[at:at + 2]
+    return out
 
 
 def helper_in_front() -> int:
@@ -102,7 +104,8 @@ def helper_in_front() -> int:
                               env=env, cwd=str(root), stdin=subprocess.DEVNULL, check=False).returncode
 
     return job_host.main(["--kind", "investigation", "--job", job, "--tenant", tenant,
-                          "--parent-pid", argv[argv.index("--parent-pid") + 1]],
+                          "--parent-pid", argv[argv.index("--parent-pid") + 1],
+                          "--alert-digest", argv[argv.index("--alert-digest") + 1]],  # C-1: as the worker handed it
                          docker=ContainerStandIn(entry), signer=A.MarkedSigner(),
                          publish=lambda *a, **k: B.fresh(commit))
 

@@ -1033,8 +1033,15 @@ def relay_start(relay: RelayRequest, kind: str, ident: str) -> BoxExecutor:
     if not isinstance(handle, str) or not handle:
         raise BoxFault(f"the helper's answer to the {kind} box start for {ident} names no handle")
     clock = answer.get("clock_file")
-    return BoxExecutor(transport=RelayTransport(relay, handle), name=handle,
-                       clock_file=Path(clock) if isinstance(clock, str) and clock else None)
+    clock_file = Path(clock) if isinstance(clock, str) and clock else None
+    scratch = answer.get("scratch")
+    if kind == "oracle" and isinstance(scratch, str) and scratch:
+        # The oracle box's scratch, inside the job's tenant folder at its own path (#1543 D1).
+        from defender.box._oracle import OracleBox
+
+        return OracleBox(transport=RelayTransport(relay, handle), name=handle, clock_file=clock_file,
+                         scratch=Path(scratch))
+    return BoxExecutor(transport=RelayTransport(relay, handle), name=handle, clock_file=clock_file)
 
 
 def _carried_docker(box: object) -> DockerFn:

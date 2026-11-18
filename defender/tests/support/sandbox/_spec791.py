@@ -15,7 +15,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
 # The investigation tail's undrivable dependencies; everything else in the tail runs for real.
-TAIL_SEAM = ("lifecycle", "visualize", "ticket_writer")
+TAIL_SEAM = ("lifecycle", "visualize")
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -276,7 +276,7 @@ def drive_tail(main, alert: Path, tail: SpecTail, *args: str) -> int:
     publish = ({"publish": in_process_publish(), "directory": directory_for_argv(argv)}
                if "publish" in inspect.signature(main).parameters else {})
     return main(argv, lifecycle=tail.lifecycle,
-                visualize=tail.visualize, ticket_writer=tail, **publish)
+                visualize=tail.visualize, **publish)
 
 
 def plant_alert(tmp_path: Path, *, alert_bytes: bytes | None = None) -> Path:

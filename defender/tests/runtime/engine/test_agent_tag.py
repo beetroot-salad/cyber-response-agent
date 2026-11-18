@@ -11,28 +11,22 @@ from defender.tenancy import case_ticket
 from defender.tenancy.case_ticket import AGENT_TAG_PREFIX, agent_comment_tag as _tag
 from defender.investigation.payload_view import LEAF_MAX_CHARS, PASSTHROUGH_MAX_BYTES_DEFAULT
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
-from defender.tests.support.storage import _readers1534 as R
 from defender.tests.support.runtime.engine._spec767 import (
     ALERT,
     CASE_KEY,
     COMMENTS_SUFFIX,
     ELLIPSIS,
     NEVER_CLOSED,
-    host_cause,
-    long_entries,
-    narrative_of,
     TICKETS_PATH,
     WIRE_BOUND_BYTES,
     FakeStore,
     comment,
     listing,
     make_run,
-    case_record_doc,
     record,
     rendered,
-    shipped_case_record_doc,
     ticket,
-    use_case_record,
+    ticket_link_for,
 )
 
 #: A live run's and a branch run's ids: canonical UUIDs (`fixture_uuid(<label>)`), the label
@@ -97,7 +91,7 @@ def test_1221_the_tag_is_one_plain_line_naming_the_run():
 @pytest.mark.parametrize(
     ("arm", "report_kw", "record_kw", "expected_rest"),
     [
-        ("the record", {"body": NARRATIVE}, {}, None),
+        ("the record", {"body": NARRATIVE}, {}, "benign"),
         ("a run that never closed", {"closed": False}, {}, NEVER_CLOSED),
         ("the escalation note (aborted)", {"body": NARRATIVE}, {"truncated_by": "aborted"},
          case_ticket.ESCALATION_COMMENT_BODY.format(exit="aborted")),
@@ -108,46 +102,37 @@ def test_1221_the_tag_is_one_plain_line_naming_the_run():
 )
 def test_1221_every_posted_comment_opens_with_the_tag(
         tmp_path, arm, report_kw, record_kw, expected_rest):
-    assert shipped_case_record_doc()["comment"]["body"] == "{disposition} — {cause}\n\n{narrative}", (
-        "the fixture tenant's comment template moved; re-spell the expected record body"
-    )
+    """Every kind of comment opens with the run's tag line; below it come the disposition word (or the
+    fixed sentence) and the screen link, and nothing of the report (#1471 P-6)."""
     run_dir = make_run(tmp_path, name=RUN_ID, **report_kw)
     store = _store(tmp_path)
     record(run_dir, store, **record_kw)
-    if expected_rest is None:
-        expected_rest = f"benign — {host_cause()}\n\n{narrative_of(R.ceiling_entry(NARRATIVE))}"
 
     path, body = _comment_post(store)
     assert path == f"{TICKETS_PATH}/{CASE_KEY}{COMMENTS_SUFFIX}", f"{arm}: posted to {path}"
     first, rest = _tag_and_rest(body)
     assert first == _tag(RUN_ID), f"{arm}: the body's first line is {first!r}, not the agent tag"
-    assert rest == expected_rest, f"{arm}: the comment below the tag is {rest!r}"
+    assert rest == f"{expected_rest}\n{ticket_link_for(run_dir)}", f"{arm}: the comment below the tag is {rest!r}"
+    assert NARRATIVE not in rest, f"{arm}: the report's body crossed"
 
 
-def test_1221_the_tag_names_the_run_not_the_case_key(tmp_path, monkeypatch):
+def test_1221_the_tag_names_the_run_not_the_case_key(tmp_path):
     key = "SOC-VENDOR-4242"
+    link = "https://screen.example.test/t/t-1/investigations/screen-id"
     run_dir = make_run(tmp_path, name=RUN_ID, body=NARRATIVE, alert={**ALERT, "alert_id": key})
     assert _tag(RUN_ID) != _tag(key), "the control is vacuous: the two ids tag alike"
 
-    use_case_record(monkeypatch, tmp_path / "dfn", case_record_doc(body="{disposition}"))
     bare = _store(tmp_path)
-    record(run_dir, bare)
+    record(run_dir, bare, link=link)
     path, body = _comment_post(bare)
     assert path == f"{TICKETS_PATH}/{key}{COMMENTS_SUFFIX}", f"posted to {path}, not the case key"
     first, rest = _tag_and_rest(body)
     assert first == _tag(RUN_ID), (
         f"the first line {first!r} is not the tag naming the RUN — the case key was {key}"
     )
-    assert rest == "benign", f"the template's own rendering changed: {rest!r}"
-    assert RUN_ID not in rest, "the run id leaked into the template's rendering"
-
-    use_case_record(monkeypatch, tmp_path / "dfn",
-                    case_record_doc(body="[{case_id}] {disposition}"))
-    named = _store(tmp_path)
-    record(run_dir, named)
-    first, rest = _tag_and_rest(_comment_post(named)[1])
-    assert first == _tag(RUN_ID)
-    assert rest == f"[{RUN_ID}] benign", f"the template's `{{case_id}}` rendered {rest!r}"
+    assert rest == f"benign\n{link}", f"the comment below the tag changed: {rest!r}"
+    assert RUN_ID not in rest, "the run id leaked below the tag"
+    assert key not in rest, "the case key leaked below the tag"
 
 
 @pytest.mark.parametrize(
@@ -174,18 +159,18 @@ def test_1221_every_comment_kind_tags_the_run_under_a_vendor_key(
 
 
 @pytest.mark.parametrize("run_id", [RUN_ID, BRANCH_RUN_ID])
-@pytest.mark.parametrize("filler", ["é", "🜁"])
+@pytest.mark.parametrize("filler", ["x", "é", "🜁"])
 def test_1221_the_tag_survives_the_wire_bound(tmp_path, run_id, filler):
-    run_dir = make_run(tmp_path, name=run_id, **long_entries(lambda n: filler * 300))
-    store = _store(tmp_path)
-    record(run_dir, store)
-    body = store.wire_body()
+    """The bound cuts from the end, so the tag line survives it. P-6 leaves no input that makes the host's comment
+    overrun the bound (and the link is never cut), so the over-bound body is the writer's own `posted_comment` over a
+    long part, as in the listing-view test below: the tag line and the bound are the real ones."""
+    body = case_ticket.posted_comment("benign\n" + filler * 20000, run_id=run_id)
 
     size = len(body.encode("utf-8"))
     assert size <= WIRE_BOUND_BYTES, f"{size} bytes crossed, over the {WIRE_BOUND_BYTES} bound"
     first, rest = _tag_and_rest(body)
     assert first == _tag(run_id), f"the bound cut into the tag line: {first[:120]!r}"
-    assert rest.startswith(f"benign — {host_cause()}\n\n"), "the disposition line was lost"
+    assert rest.startswith("benign\n"), "the disposition line was lost"
     assert body.endswith(ELLIPSIS), "the cut is not visibly marked"
     assert body.count(ELLIPSIS) == 1, f"{body.count(ELLIPSIS)} ellipses, not one"
     assert size > WIRE_BOUND_BYTES - 8, (
@@ -197,40 +182,18 @@ def test_1221_the_tag_survives_the_wire_bound(tmp_path, run_id, filler):
     record(small_dir, small)
     first, rest = _tag_and_rest(small.wire_body())
     assert first == _tag(run_id)
-    assert rest == f"benign — {host_cause()}\n\n{narrative_of(R.ceiling_entry(NARRATIVE))}", "a short comment was cut anyway"
-
-
-def _maximal_entries(words: list[str], count: int = 6) -> dict:
-    """`write_report` keywords for the largest record the bounds allow: each column's rendered lines fill its aggregate
-    bound (from the constants), the text distinct words taken in order."""
-    from defender.records import closing as C
-
-    stream = iter(words)
-
-    def text(n: int) -> str:
-        out = ""
-        while len(out) < n:
-            out += next(stream) + " "
-        return out[:n].strip()
-
-    def sized(make, render, bound: int) -> tuple:
-        overhead = sum(len(render(make(i, "x"))) - 1 for i in range(count)) + count - 1
-        return tuple(make(i, text((bound - overhead) // count)) for i in range(count))
-
-    return {"ceiling": sized(lambda i, t: R.ceiling_entry(t, ref=f"l-00{i}"), C.ceiling_line, C.CEILING_LINES_BOUND),
-            "baselines": sized(lambda _i, t: R.baseline_entry(t), C.baseline_line, C.BASELINE_LINES_BOUND)}
+    assert rest == f"benign\n{ticket_link_for(small_dir)}", "a short comment was cut anyway"
 
 
 def test_1221_the_tag_survives_the_listing_view_clip(tmp_path):
     """In gather's payload view one maximal comment renders verbatim; two are clipped (their last
     words gone), yet each comment still opens with its tag line."""
-    words = [f"word{i:05d}" for i in range(4000)]
+    narrative = " ".join(f"word{i:05d}" for i in range(4000))
     bodies, last_words = {}, {}
     for run_id in (RUN_ID, BRANCH_RUN_ID):
-        run_dir = make_run(tmp_path / run_id[-6:], name=run_id, **_maximal_entries(words))
-        store = _store(tmp_path)
-        record(run_dir, store)
-        bodies[run_id] = store.wire_body()
+        # P-6 leaves no way to make the host's comment this long, so the maximal comment is the
+        # writer's own `posted_comment` over a long body: the tag line and the bound are the real ones.
+        bodies[run_id] = case_ticket.posted_comment(narrative, run_id=run_id)
         assert bodies[run_id][:LEAF_MAX_CHARS].startswith(_tag(run_id) + "\n"), (
             "the tag line is not inside the first LEAF_MAX_CHARS characters of the body"
         )

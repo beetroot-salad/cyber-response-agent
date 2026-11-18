@@ -16,20 +16,18 @@ from defender.tests.support.runtime.engine._spec767 import (
     ALERT,
     ALERT_MAPPING,
     CASE_KEY,
-    CASE_RECORD_RELPATH,
     COMMENTS_SUFFIX,
-    ELLIPSIS,
-    host_cause,
-    narrative_of,
-    NO_NOTES,
     TICKET_BASE,
     TICKETS_PATH,
     TRANSITIONS_SUFFIX,
     WIRE_BOUND_BYTES,
+    _CONFIG_UNSET,
     FakeStore,
+    _handed,
+    _run_handle_1165,
     case_record_doc,
-    current_settings,
     make_run,
+    NEVER_CLOSED,
     receipt,
     receipt_path,
     record,
@@ -52,7 +50,8 @@ def _store(tmp_path, **kw) -> FakeStore:
 
 
 def _setup(monkeypatch, tmp_path, doc=None):
-    return use_case_record(monkeypatch, tmp_path / "dfn", doc)
+    """The tenant's case record names its system and nothing else (#1471 W7: no comment template)."""
+    return use_case_record(monkeypatch, tmp_path / "dfn", case_record_doc() if doc is None else doc)
 
 
 def test_767_record_posts_one_comment_on_the_alerts_ticket_and_receipts(tmp_path, monkeypatch):
@@ -78,98 +77,6 @@ def test_767_record_posts_one_comment_on_the_alerts_ticket_and_receipts(tmp_path
     bad = receipt(failed_dir)
     # The write timed out after it may have reached the store and the read-back timed out too (#1374).
     assert (bad["key"], bad["ok"], bad["status"]) == (CASE_KEY, False, ticket_writer.RECEIPT_UNKNOWN), bad
-
-
-def test_767_the_comment_is_the_templates_body_under_the_agent_tag(tmp_path, monkeypatch):
-    """The wire body is the tenant template rendered from disposition, the record's cause sentence and the rendered
-    ceiling and baseline lines; no entries render the no-notes marker; the placeholder sentence is gone. O7, OD15."""
-    _setup(monkeypatch, tmp_path)
-    ceiling, baseline = R.ceiling_entry("The account is a decommissioned service identity."), R.baseline_entry()
-    run_dir = make_run(tmp_path, ceiling=(ceiling,), baselines=(baseline,))
-    store = _store(tmp_path)
-    record(run_dir, store)
-    body = store.comment_body()
-    assert body.startswith(f"benign — {host_cause()}\n\n"), body
-    assert narrative_of(ceiling) in body, body
-    assert narrative_of(baseline) in body, body
-    assert "Disposition recorded by the close gate" not in body, "the placeholder sentence is still rendered (OD15)"
-    payload = store.only_comment()
-    assert set(payload) == {"author", "body"}, sorted(payload)
-    assert isinstance(payload["author"], str), payload
-    assert payload["author"].strip(), payload
-
-    empty = _store(tmp_path)
-    record(make_run(tmp_path, name="run-empty", body=""), empty)
-    assert empty.comment_body() == f"benign — {host_cause()}\n\n{NO_NOTES}"
-
-
-def test_767_case_id_in_the_template_is_the_run_folder_not_the_ticket(tmp_path, monkeypatch):
-    """`{case_id}` renders the run folder name while the request goes to the ticket key. r3 Data."""
-    _setup(monkeypatch, tmp_path, case_record_doc(body="run {case_id} / {disposition}"))
-    run_dir = make_run(tmp_path)
-    store = _store(tmp_path)
-    record(run_dir, store)
-    assert store.comment_body() == f"run {run_dir.name} / benign"
-    assert [c.path for c in store.calls] == [COMMENT_PATH]
-
-
-def test_767_signature_in_the_template_is_the_runs_recorded_signature(tmp_path, monkeypatch):
-    """`{signature}` renders the signature recorded at run start from the alert ("5710"), not the
-    ticket key or the run folder, with the run's alert as the only source. D-14, O7."""
-    _setup(monkeypatch, tmp_path, case_record_doc(body="sig={signature} / {disposition}"))
-    run_dir = make_run(tmp_path)
-    assert ALERT["rule"]["id"] == "5710", "fixture: the alert's rule id is the expected signature"
-    store = _store(tmp_path)
-    record(run_dir, store)
-    assert store.comment_body() == "sig=5710 / benign"
-    assert [c.path for c in store.calls] == [COMMENT_PATH]
-
-    other = make_run(tmp_path, name="run-other-sig",
-                     alert={**ALERT, "rule": {**ALERT["rule"], "id": "R-9001"}})
-    other_store = _store(tmp_path)
-    record(other, other_store)
-    assert other_store.comment_body() == "sig=R-9001 / benign", (
-        "the signature does not follow the run's own record (control)")
-
-
-def test_767_summary_and_event_time_placeholders_are_accepted_and_render_as_today(
-        tmp_path, monkeypatch):
-    """`{summary}` and `{event_time}` stay valid comment placeholders (a template naming them is
-    not a template fault) and render as the base comment renderer does: base
-    `case_record_to_comment` hands the context neither, so both render empty, whether or not the
-    alert carries them. Control: the sibling placeholders render. D-14, O7."""
-    _setup(monkeypatch, tmp_path, case_record_doc(body="[{summary}][{event_time}] {disposition}"))
-    assert ALERT["rule"]["description"], "fixture: the alert carries a summary"
-    assert ALERT["timestamp"], "fixture: the alert carries an event time"
-    present = _store(tmp_path)
-    record(make_run(tmp_path), present)
-    assert present.comment_body() == "[][] benign", present.wire_body()
-    absent_alert = {k: v for k, v in ALERT.items() if k != "timestamp"}
-    absent_alert["rule"] = {"id": ALERT["rule"]["id"]}
-    absent = _store(tmp_path)
-    run_dir = make_run(tmp_path, name="run-absent-facts", alert=absent_alert)
-    record(run_dir, absent)
-    assert absent.comment_body() == "[][] benign", absent.wire_body()
-    assert receipt(run_dir)["status"] == ticket_writer.RECEIPT_COMMENTED, receipt(run_dir)
-
-
-@pytest.mark.parametrize(("why", "rule"), [
-    ("no rule id in the alert", {"description": "sshd: Attempt to login using a non-existent user"}),
-    ("a rule id the signature rule refuses", {"id": "R 5710", "description": "x"}),
-])
-def test_767_signature_is_unknown_when_the_record_has_none(tmp_path, monkeypatch, why, rule):
-    """A run whose record holds no signature renders `unknown` in `{signature}` and still comments
-    on the ticket. D-14, O7."""
-    _setup(monkeypatch, tmp_path, case_record_doc(body="sig={signature} / {disposition}"))
-    control = _store(tmp_path)
-    record(make_run(tmp_path, name="run-with-sig"), control)
-    assert control.comment_body() == "sig=5710 / benign", "control: a recorded signature renders"
-
-    run_dir = make_run(tmp_path, name="run-without-sig", alert={**ALERT, "rule": rule})
-    store = _store(tmp_path)
-    record(run_dir, store)
-    assert store.comment_body() == "sig=unknown / benign", why
-    assert [c.path for c in store.calls] == [COMMENT_PATH]
 
 
 def test_767_no_host_payload_sets_a_verdict_or_opens_a_case(tmp_path, monkeypatch, capsys):
@@ -222,40 +129,34 @@ def test_767_a_key_is_sent_as_one_path_segment(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("disposition", _vocab.DISPOSITION_VALUES)
-def test_767_comment_first_line_is_the_records_disposition_and_cause_sentence(tmp_path, monkeypatch, disposition):
-    """Every member of `DISPOSITION_VALUES`: the first line is its disposition and its cause's sentence, then the narrative. O7."""
-    from defender.records import closing as C
-
+def test_767_comment_first_line_is_the_records_disposition(tmp_path, monkeypatch, disposition):
+    """Every member of `DISPOSITION_VALUES`: the comment's first line is the closing record's disposition (#1534), and
+    nothing of its entries follows it (#1471 P-6). O7."""
     _setup(monkeypatch, tmp_path)
     entry = R.ceiling_entry("model notes")
     run_dir = make_run(tmp_path, name=f"run-{disposition}", disposition=disposition, ceiling=(entry,))
     store = _store(tmp_path)
-    record(run_dir, store)
-    first, blank, rest = store.comment_body().split("\n", 2)
-    cause = R.valid_fields(disposition)["cause"]
-    assert first == f"{disposition} — {C.CAUSE_SENTENCES[cause]}", f"first line is {first!r}"
-    assert blank == "", "the host line and the narrative are not separated by a blank line"
-    assert rest.strip() == narrative_of(entry)
+    _record_linked(run_dir, store, _P6_LINK)
+    assert store.comment_body() == f"{disposition}\n{_P6_LINK}", store.comment_body()
 
 
 def test_767_a_run_that_never_closed_says_so_and_a_decoy_report_changes_nothing(tmp_path, monkeypatch):
-    """`NeverClosed` comments with the fixed sentence and no narrative; a contrary `report.md` beside it is not read. O7."""
+    """`NeverClosed` comments with the fixed sentence; a contrary `report.md` beside it is not read. O7."""
     _setup(monkeypatch, tmp_path)
     run_dir = make_run(tmp_path, name="run-never", closed=False)
     (run_dir / "report.md").write_text("---\ndisposition: malicious\n---\nDECOY\n", encoding="utf-8")  # lint-run-records: ok — a decoy the bridge must not read
     store = _store(tmp_path)
-    record(run_dir, store)
+    _record_linked(run_dir, store, _P6_LINK)
     body = store.comment_body()
-    assert "No disposition was recorded for this case: the investigation did not close." in body, body
+    assert body == f"{NEVER_CLOSED}\n{_P6_LINK}", body
     assert "DECOY" not in body, body
     assert "malicious" not in body, body
-    assert NO_NOTES not in body, "the ordinary branch's marker was rendered instead"
 
     no_pointer = tmp_path / fixture_uuid("run-no-pointer")
     no_pointer.mkdir()
     plant_alert(no_pointer, ALERT, mapping=ALERT_MAPPING)
     bare = _store(tmp_path)
-    record(no_pointer, bare)
+    _record_linked(no_pointer, bare, _P6_LINK)
     assert bare.comment_body() == body, "no pointer is `NeverClosed` too"
 
 
@@ -267,26 +168,12 @@ def test_767_a_forced_close_exit_with_no_record_posts_the_escalation_comment_and
     forced = _store(tmp_path)
     record(make_run(tmp_path, name="run-forced", closed=False), forced, truncated_by=exit_class)
     assert [c.path for c in forced.calls] == [COMMENT_PATH], "the forced-close exit posted no comment"
-    assert "No disposition was recorded" not in forced.comment_body(), forced.comment_body()
+    assert NEVER_CLOSED not in forced.comment_body(), forced.comment_body()
     assert receipt(tmp_path / fixture_uuid("run-forced"))["status"] == ticket_writer.RECEIPT_ESCALATED
 
     plain = _store(tmp_path)
     record(make_run(tmp_path, name="run-plain", closed=False), plain)
-    assert "No disposition was recorded for this case: the investigation did not close." in plain.comment_body()
-
-
-def test_767_the_narrative_shows_only_receipts_with_a_note(tmp_path, monkeypatch):
-    """A record with one noted and one note-less receipt: the comment carries the noted line only. O7, OD17."""
-    from defender.records import closing as C
-
-    _setup(monkeypatch, tmp_path)
-    noted = R.ceiling_entry("a note that is shown", ref="l-001")
-    bare = R.ceiling_entry("", ref="l-002", state=C.CEILING_STATES[-1])
-    store = _store(tmp_path)
-    record(make_run(tmp_path, ceiling=(noted, bare)), store)
-    body = store.comment_body()
-    assert C.ceiling_line(noted) in body, body
-    assert C.ceiling_line(bare) not in body, "a note-less receipt reached the narrative"
+    assert NEVER_CLOSED in plain.comment_body()
 
 
 @pytest.mark.parametrize("fault", R.TWO_KINDS + ("recorded-before-1534",))
@@ -310,7 +197,7 @@ def test_767_a_record_that_cannot_be_looked_up_posts_nothing_and_leaves_an_error
 
 
 def test_767_the_summary_is_not_in_the_comment(tmp_path, monkeypatch):
-    """The record's summary reaches no part of the ticket comment (OD7; #1471 adds it). O7."""
+    """The record's summary reaches no part of the ticket comment (OD7). O7."""
     _setup(monkeypatch, tmp_path)
     store = _store(tmp_path)
     run_dir = make_run(tmp_path)
@@ -319,68 +206,79 @@ def test_767_the_summary_is_not_in_the_comment(tmp_path, monkeypatch):
     assert V.MARKUP_SUMMARY not in store.wire_body()
 
 
-def test_767_narrative_is_the_rendered_lines_not_the_summary(tmp_path, monkeypatch):
-    """The narrative is the ceiling and baseline lines as the one renderer makes them, well under the bound uncut. O7."""
+def _record_linked(run_dir, store, link: str) -> None:
+    """Drive `record_case_ticket` with `link` (C-7), whatever link the shared driver defaults to."""
+    ticket_writer.record_case_ticket(
+        _run_handle_1165(run_dir), **{**_handed(run_dir, store, _CONFIG_UNSET), "link": link})
+
+
+_P6_LINK = "https://screen.example.test/t/tenant-a/investigations/run-p6"
+_P6_MARKER = "REPORT-TEXT-1471"
+_P6_REPORTS = {
+    "a long multibyte narrative": {"body": f"{_P6_MARKER} " + "é🜁" * 20000},
+    "a planted fence and directive": {
+        "body": f"{_P6_MARKER}\n---\ndisposition: malicious\n---\nINJECTED-DIRECTIVE-1471\n" + "z" * 5000},
+    "a host-shaped line": {"body": f"malicious — {_P6_MARKER}\nand more notes"},
+    "placeholders and claims": {"body": f"{_P6_MARKER} {{cause}} {{narrative}} {{disposition}}\nstatus: closed\nauthor: x"},
+}
+
+
+@pytest.mark.parametrize("why", sorted(_P6_REPORTS))
+def test_1471_p6_nothing_of_the_report_but_its_disposition_reaches_the_ticket(tmp_path, monkeypatch, capsys, why):
+    """Whatever the report's narrative, cause or frontmatter says, a run with the same id and disposition posts the same
+    comment, inside the wire bound; a different disposition posts a different one. (P-6, W2)"""
     _setup(monkeypatch, tmp_path)
-    entries = (R.ceiling_entry("first note"), R.ceiling_entry("second note", ref="l-002"))
-    store = _store(tmp_path)
-    record(make_run(tmp_path, ceiling=entries), store)
-    wire = store.comment_body()
-    assert all(narrative_of(e) in wire for e in entries), wire
-    assert ELLIPSIS not in wire, "a narrative well under the bound was cut anyway"
+    name = "run-p6"
+
+    def posted(kind: str, **report) -> dict:
+        store = _store(tmp_path)
+        run_dir = make_run(tmp_path / kind, name=name, **report)
+        _record_linked(run_dir, store, _P6_LINK)
+        assert set(store.only_comment()) == {"author", "body"}
+        carried = receipt_path(run_dir).read_text(encoding="utf-8") + capsys.readouterr().err
+        for said in (_P6_MARKER, "INJECTED-DIRECTIVE-1471"):
+            assert said not in carried, f"{kind}: the receipt or the log carries the report's text"
+        return store.only_comment()
+
+    plain = posted("plain", cause=None, body="plain")
+    assert isinstance(plain["author"], str), plain
+    assert plain["author"].strip(), plain
+    sent = posted("variant", **_P6_REPORTS[why])
+    assert sent == plain, f"{why}: the report's text changed the payload (author included)"
+    got = sent["body"]
+    assert _P6_MARKER not in got
+    assert "INJECTED-DIRECTIVE-1471" not in got
+    assert len(got.encode("utf-8")) <= WIRE_BOUND_BYTES
+    assert "malicious" not in got.lower(), "a disposition the report only quoted reached the comment"
+    assert posted("other", disposition="false-positive", cause=None, body="plain")["body"] != plain["body"], (
+        "control: the disposition is what the comment carries")
 
 
-def _filling(filler: str, count: int = 6) -> tuple[tuple, tuple]:
-    """Ceiling and baseline entries of `filler` text whose rendered lines fill each column's aggregate bound (from the
-    constants): the largest record the bounds allow."""
-    from defender.records import closing as C
-
-    def sized(make, bound: int) -> tuple:
-        probes = [make(i, "x") for i in range(count)]
-        lines = [C.ceiling_line(p) if isinstance(p, C.CeilingEntry) else C.baseline_line(p) for p in probes]
-        each = (bound - (count - 1) - sum(len(line) - 1 for line in lines)) // count
-        return tuple(make(i, filler * each) for i in range(count))
-
-    ceiling = sized(lambda i, text: R.ceiling_entry(text, ref=f"l-00{i}"), C.CEILING_LINES_BOUND)
-    baselines = sized(lambda _i, text: R.baseline_entry(text), C.BASELINE_LINES_BOUND)
-    return ceiling, baselines
-
-
-@pytest.mark.parametrize(("why", "filler"), [("two-byte characters", "é"), ("four-byte characters", "🜁")])
-def test_767_comment_body_is_bounded_on_the_wire(tmp_path, monkeypatch, why, filler):
-    """The whole wire body (tag line included) is at most 4096 UTF-8 bytes, cut on a whole character with a visible
-    ellipsis, however large the record's lines (both columns at their aggregate bounds). O7."""
+@pytest.mark.parametrize("link", [
+    "https://screen.example.test/t/tenant-a/investigations/run-link-1",
+    "http://127.0.0.1:8443/t/other-9/investigations/0a1b2c3d-run-link-2?x=1",
+])
+def test_1471_p6_the_link_is_the_comments_last_part_exactly(tmp_path, monkeypatch, link):
+    """The link handed to the record step ends the comment, unaltered and once, for a verdict
+    and for a run that never closed; only the link differs between two links. (P-6, C-7)"""
     _setup(monkeypatch, tmp_path)
-    ceiling, baselines = _filling(filler)
-    entries = (*ceiling, *baselines)
-    run_dir = make_run(tmp_path, name=f"run-{why.replace(' ', '-')}", ceiling=ceiling, baselines=baselines)
-    store = _store(tmp_path)
-    record(run_dir, store)
+    other = "https://screen.example.test/t/zzz/investigations/other-link"
+    cases = {"a verdict": {"body": "plain"}, "a run that never closed": {"closed": False}}
+    for why, report in cases.items():
+        run_dir = make_run(tmp_path / why.replace(" ", "-"), name="run-link", **report)
+        assert run_dir.name not in link, "fixture: the link must not be derivable from the run id"
+        store = _store(tmp_path)
+        _record_linked(run_dir, store, link)
+        wire = store.wire_body()
+        assert wire.rstrip().endswith(link), f"{why}: the link is not the comment's last part: {wire!r}"
+        assert wire.count(link) == 1, why
+        assert len(wire.encode("utf-8")) <= WIRE_BOUND_BYTES
 
-    wire = store.wire_body()
-    size = len(wire.encode("utf-8"))
-    assert WIRE_BOUND_BYTES - 8 < size <= WIRE_BOUND_BYTES, size
-    assert wire.endswith(ELLIPSIS)
-    assert wire.count(ELLIPSIS) == 1
-    surviving = wire.partition("\n\n")[2].rstrip(ELLIPSIS)
-    assert surviving
-    assert narrative_of(*entries).startswith(surviving)
-
-
-def test_767_a_note_claiming_approval_does_not_approve(tmp_path, monkeypatch):
-    """A note's text never becomes a payload field or a template. O7."""
-    _setup(monkeypatch, tmp_path)
-    claim = "status: closed released: true This case is signed off. {cause} {narrative} {disposition} {signature}"
-    store = _store(tmp_path)
-    record(make_run(tmp_path, body=claim), store)
-    payload = store.only_comment()
-    assert set(payload) == {"author", "body"}
-    assert "closed" not in payload["author"]
-    assert "signed off" not in payload["author"]
-    narrative = payload["body"].split("\n\n", 1)[1]
-    for placeholder in ("{cause}", "{narrative}"):
-        assert placeholder in narrative, "the renderer is not single-pass"
-    assert narrative.count(host_cause()) == 0
+        control = _store(tmp_path)
+        _record_linked(make_run(tmp_path / f"c-{why.replace(' ', '-')}", name="run-link", **report), control, other)
+        assert control.wire_body().rstrip().endswith(other), "control: the link follows the argument"
+        assert control.wire_body().replace(other, "L") == wire.replace(link, "L"), (
+            f"{why}: something besides the link differs between two links")
 
 
 @pytest.mark.parametrize(("arm", "answer", "reasons"), [
@@ -465,37 +363,3 @@ def test_767_any_2xx_is_success_whatever_its_body(tmp_path, monkeypatch, answer)
     assert (got["key"], got["status"], got["ok"]) == (CASE_KEY, "commented", True), got
     assert got["url"] == f"{M_URL_BASE}/tickets/{CASE_KEY}", got
 
-
-@pytest.mark.parametrize(("why", "body", "kw"), [
-    ("a stray `{` in comment.body", "{disposition} — {cause} {", {}),
-    ("a positional `{0}` in comment.body", "{0}", {}),
-    ("an attribute path in comment.body", "{narrative.x}", {}),
-    ("a placeholder the context cannot fill", "{no_such_key}", {}),
-    ("a bad template, on the aborted arm", "{0}", {"truncated_by": "aborted"}),
-])
-def test_767_a_template_fault_refuses_with_a_receipt(tmp_path, monkeypatch, capsys, why, body, kw):
-    """A comment template that cannot render sends nothing and says so, naming the case record (#1366 DC6: the record's
-    locator, not a file), on every arm that meant to call out. O5."""
-    _setup(monkeypatch, tmp_path, case_record_doc(body=body))
-    run_dir = make_run(tmp_path)
-    store = _store(tmp_path)
-    assert record(run_dir, store, **kw) is None, f"{why}: the leg raised into the run"
-    assert store.calls == [], f"{why}: something was sent off a broken template"
-    got = receipt(run_dir)
-    assert (got["ok"], got["status"]) == (False, "error"), got
-    assert "the case record" in got["reason"], got
-    err = capsys.readouterr().err
-    assert "WARN" in err, err
-    assert "raised, ignored" not in err, err
-
-
-def test_767_the_template_is_the_case_record_files_not_the_checkouts(tmp_path, monkeypatch):
-    """Editing `comment.body` in the tenant's case-record file changes the wire body. O7."""
-    _setup(monkeypatch, tmp_path, case_record_doc(body="{cause}//{narrative}"))
-    store = _store(tmp_path)
-    from defender.records import closing as C
-
-    entry = R.ceiling_entry("the model's own notes")
-    record(make_run(tmp_path, cause=C.CAUSE_STORY_SETTLED, ceiling=(entry,)), store)
-    assert store.comment_body() == f"{host_cause()}//{narrative_of(entry)}"
-    assert current_settings().joinpath(CASE_RECORD_RELPATH).is_file()

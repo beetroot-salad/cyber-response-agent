@@ -202,12 +202,15 @@ flowchart LR
     Proxy --> Systems[Customer systems]
     Proxy --> Forge
     API -->|write-only credential role| Bao
+    API -->|caller's cookie or credential| Minter[Token minter]
+    Minter --> DB
 ```
 
 | Zone | Holds | Reaches |
 |---|---|---|
 | Edge | TLS keys | API, artifact serving |
-| Application | API database role (row-level security), session store, identity-provider client secret, blob signing key, page-grant signing key, OpenBao write-only role for system credentials (create and update a set, read metadata, look its own token up, never read a value; #1470, #1532) | PostgreSQL, blob, identity provider, OpenBao |
+| Application | API database role (row-level security keyed on the minter's token; it cannot mint), identity-provider client secret, blob signing key, page-grant signing key, OpenBao write-only role for system credentials (create and update a set, read metadata, look its own token up, never read a value; #1470, #1532) | PostgreSQL, blob, identity provider, OpenBao |
+| Token minter (#1547) | session store, program-credential hashes, minter database role (identity tables only), the tenant-token signing keys | PostgreSQL |
 | Artifact server | page-grant verifier, its own page-cookie key, blob read | blob |
 | Credential proxy | per-tenant pass verification, system secrets, provider keys, forge logins (from OpenBao) | OpenBao, PostgreSQL, forge, providers, customer systems, worker pods (job route only) |
 | Launcher (workers) | worker database role; OpenBao role reading every tenant's sign login; the orchestrator role below | PostgreSQL, OpenBao, blob, proxy, API server; accepts connections from proxy pods only |
@@ -256,6 +259,12 @@ email.
 Each user belongs to exactly one tenant. This is a product constraint, not a technical one: enrollment refuses a
 second membership, and a person who needs two tenants uses two accounts. Lifting it later requires choosing the active
 tenant at token issuance, with the issuer checking membership, never through a client-supplied selector.
+
+Session and credential verification move out of the API into an independent token minter (#1082 piece C, #1547).
+The API forwards the caller's cookie or credential. The minter verifies it, reads membership on every mint, and
+returns a short-lived token pair: one Postgres checks per transaction for row-level security, and one OpenBao accepts
+(subject = the tenant id) to unwrap a page's data key. The API holds no session or credential hashes and cannot mint.
+The text below describes the shipped #1161 piece 1 shape that this replaces.
 
 The backend keeps the session in PostgreSQL (it holds no tokens) and gives the browser an opaque, HttpOnly, Secure,
 host-only session cookie. The browser never holds OAuth tokens, so reload and refresh need no hidden IdP frame and are
@@ -400,7 +409,9 @@ API observes status through the same database, never by a synchronous call to a 
 **The claim lives on the row.** The claim transaction writes the claim token and the worker's address on the row.
 **Live** means the row is running and unfinished under that claim, not "lease unexpired": a lapsed row nobody took
 over may renew and recover; a take-over fails the old claim, so its passes are refused and the sweep deletes its pods.
-Post-steps, which hold no row today, get one, so the same rule covers them.
+Post-steps, which hold no row today, get one, so the same rule covers them. #1082 piece A (#1546) pulls this forward:
+a `jobs.claims` row is inserted in the claim's own transaction for every launched child, owner rows reference it, and
+the helper's staged facts and uploads are keyed on it. The worker's address on the claim stays with work item 2.
 
 The worker reports progress, validates collected outputs, transfers artifacts, and commits terminal state. The job
 cannot declare its own success beyond its typed outcome record. Fenced writes reject stale claims, and the claim check
@@ -609,8 +620,9 @@ application state.
 
 **First, the API checkpoint** (#1083): the real server on PostgreSQL and Keycloak (#1498) and removal of the demo server
 (#1496); tenant configuration through the API (#1470) with the real connection check (#1460); the remaining operator
-flows as API requests (#1471); browser sign-in and navigation (#1161) and run pages in the browser (#1082's artifact piece, from #1161); the
-learning post-step's store access (#1487). Built in this design's shape: host-power flows as jobs, evidence in blob under
+flows as API requests (#1471); browser sign-in and navigation (#1161); the learning post-step's store access (#1487), which lands before any of
+#1082's pieces start (owner, 2026-11-17); then #1082's pieces: the evidence store (#1546), database isolation and the
+token minter (#1547), run pages in the browser (#1548), and model-call records (#1549). Built in this design's shape: host-power flows as jobs, evidence in blob under
 claim-scoped keys with confined readers.
 
 **Then the boundaries work**, each a later issue:
@@ -622,7 +634,7 @@ claim-scoped keys with confined readers.
 3. #1491: model and forge calls through the proxy, the raw forge token retired, proxy replicas, per-route egress
    (#1501).
 4. Tenant login secrets into OpenBao; the OpenBao address as a setting; a lifecycle with no host steps.
-5. The job route through the proxy (#1469 and #1381 dissolved).
+5. The job route through the proxy (#1469 dissolved; #1381 is folded into #1082 instead, as #1546's staged rows).
 6. Operator commands as jobs, for whatever #1471 did not cover.
 7. The launcher on the orchestrator: templates, admission policy, boxes as pods, the row-based sweep (#1502 rewritten).
 8. Delete the host lock, data-root lock, process-id owners and code copy (#1369, #1434).

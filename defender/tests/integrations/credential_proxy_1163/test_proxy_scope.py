@@ -183,8 +183,9 @@ def test_s2_the_encoded_separator_check_reads_only_the_path_under_the_base(tmp_p
 
 READS = (("POST", "/search"),)
 WRITES = (("POST", "/tickets/*/comments"), ("PUT", "/tickets/*"), ("DELETE", "/tickets/*"))
-RW = {("identity", "rw")}
 RD = {("identity", "r")}
+#: X1: a write pass is `rw` naming its ticket; its writes are the one-route tests of `test_proxy_scope_proxy_side.py`.
+RW_OTHER = {("identity", "r"), ("cmdb", "rw", "T-7")}
 
 
 @pytest.mark.parametrize(("method", "path", "grant", "fault"), [
@@ -192,24 +193,16 @@ RD = {("identity", "r")}
     pytest.param("HEAD", "/users/x", RD, None, id="head-is-a-read"),
     pytest.param("GET", "/tickets/7/comments", RD, None, id="get-on-a-write-route-is-a-read"),
     pytest.param("POST", "/search", RD, None, id="listed-post-read"),
-    pytest.param("PUT", "/search", RW, "ConfinementFault", id="listed-read-other-method"),
-    pytest.param("POST", "/admin", RW, "ConfinementFault", id="unlisted-post"),
-    pytest.param("DELETE", "/users/x", RW, "ConfinementFault", id="undeclared-delete"),
+    pytest.param("PUT", "/search", RD, "ConfinementFault", id="listed-read-other-method"),
     pytest.param("DELETE", "/tickets/7", RD, "ConfinementFault", id="declared-delete-read-grant"),
-    pytest.param("DELETE", "/tickets/7", RW, None, id="declared-delete-granted"),
     pytest.param("POST", "/tickets/7/comments", RD, "ConfinementFault", id="write-with-read-grant"),
     pytest.param("PUT", "/tickets/7", RD, "ConfinementFault", id="put-write-with-read-grant"),
-    pytest.param("POST", "/tickets/7/comments", {("identity", "r"), ("cmdb", "rw")},
-                 "ConfinementFault", id="write-grant-on-another-system"),
-    pytest.param("POST", "/tickets/7/comments", RW, None, id="write-granted"),
-    pytest.param("PUT", "/tickets/7", RW, None, id="put-write-granted"),
-    pytest.param("POST", "/tickets/7/delete", RW, "ConfinementFault", id="undeclared-under-rw"),
-    pytest.param("POST", "/tickets/..;/comments", RW, "ConfinementFault", id="write-wildcard-path-parameter"),
+    pytest.param("POST", "/tickets/7/comments", RW_OTHER, "ConfinementFault", id="write-grant-on-another-system"),
 ])
-def test_s3_only_declared_reads_and_granted_writes_are_sent(
+def test_s3_only_declared_reads_are_sent_and_a_write_needs_a_pass_on_that_system(
         tmp_path, data_root, method, path, grant, fault):
-    """GET and HEAD are reads; another method is a read only if listed; a declared write needs
-    `rw` on that system. Routes are relative to the base. O3, O7, A2."""
+    """GET and HEAD are reads; another method is a read only if listed; a write is refused under a read grant or a pass
+    on another system. Routes are relative to the base. O3, O7, A2, X1."""
     body = '{"q": 1}' if method in ("POST", "PUT") else None
     with T.rig(tmp_path / "forge", data_root, lambda u: H.declaration(
             u + T.BASE_PATH, reads=READS, writes=WRITES)) as r:

@@ -9,8 +9,8 @@ this doc and the code disagree, the code wins.
 
 The benign (FP-direction) learning loop wants to ground dispositions in the org's *past closed
 cases*, and a person reviewing a case wants the defender's findings on the ticket they already
-have. Each investigated alert, run with `--update-ticket`, adds one comment of findings to its
-case; a person closes it.
+have. Each investigated alert whose start-investigation request sets `update_ticket` adds one
+comment to its case (its disposition and a link to its screen); a person closes it.
 
 ## Decisions
 
@@ -41,22 +41,22 @@ case; a person closes it.
 
 - **Which system records cases is the tenant's setting.** Its case record (#1366: a database
   record the tenant admin writes with `PUT /case-record`) names the
-  `system:` and the `comment.body:` template. A tenant without one has no case system and
+  `system:`; the comment's wording is fixed by the product. A tenant without one has no case system and
   needs none. `tenant check` and the record step share one judgement (`systems/case_system.py`):
   the system on the roster, its adapter accepted and exporting the action, its `check_settings`
   and, through the credential proxy, a declared write route. The settings are read once when the
   run begins (D-18); a folder still holding `systems/case-history/` is told to move to the file.
 
 - **Cut-short runs record per exit class (#1047 O2), still as comments.** The exit class comes
-  in-process from `run.py` off the driver's own summary. `aborted` / `provider-rejected` → an escalation note (no
+  in-process from the job's finishing step off the driver's own summary. `aborted` / `provider-rejected` → an escalation note (no
   verdict), ticket stays open. `request-limit` / `retry-exhausted` → the record, proposing the
   host's forced `unresolved`; with no usable report → the escalation note. `budget` / `store` /
   `provider-down` / `box-lost` / `box-output-limit` / `proxy-access` → no call at all (the case stays open). Anything else → the record off the report. A run whose model
   had already closed when the cut landed (`closed_before_cut`) records its own verdict.
 
 - **Anti-corruption boundary.** The run's closing record (+ its alert record) is the internal case
-  model; the ticket is the external one. `tenancy/case_ticket.py` renders the comment from the
-  tenant's template; the drivers and the record never bind to ticket field names.
+  model; the ticket is the external one. `tenancy/case_ticket.py` renders the fixed comment; the
+  drivers and the record never bind to ticket field names.
 
 - **One transport.** The comment goes through the shared adapter transport's host write entry
   (`kit.transport.host_write`, through the proxy: any 2xx is success, a 4xx is an
@@ -64,10 +64,11 @@ case; a person closes it.
   There is no second copy of the route in the writer.
 
 - **Never breaks the run.** Every failure is a WARN, a receipt and a return, never a raise/exit.
-  The write-back token is minted at the record step; a run that cannot sign goes on and the
-  receipt says the write-back token could not be minted.
+  The write-back token is asked of the job's host helper at the record step; a run that cannot get one
+  goes on and the receipt says the write-back token could not be minted.
 
-- **Opt-in.** `--update-ticket` (default off); `--episode` refuses it.
+- **Opt-in.** The request flag `update_ticket` on the start-investigation request (default off).
+  An operator's hand-run `run.py` never comments and mints no write-back token (#1471).
 
 ## Shape
 
@@ -79,13 +80,17 @@ case; a person closes it.
   every branch that called out), `clear_receipt`.
 - `integrations/{ticket,jira,servicenow}_adapter.py` — the adapters' `add_case_comment`, and the
   optional `read_case_comments` (never a verb; `kit.verbs.CaseComments` holds its contract).
-- `run.py` — `--update-ticket`: clear the receipt at run start; at run end judge the case
-  settings, mint the write-back token, call `record_case_ticket`.
+- The job's finishing step, when the request set `update_ticket`: judge the case settings, take
+  the write-back token from the job's host helper (`pass.write_back`), call `record_case_ticket`.
+  `run.py` does none of it.
 
 The receipt (`{key, status, url, ok, reason}`) is a sidecar beside the run dir,
 `<runs_base>/<run id>.ticket-write.json`, out of the box's reach. `key` is the ticket key (empty
 when the alert names none); `url` is the ticket's web link when the adapter gives one, null on
-every error receipt. Its one reader is the run page's ticket line.
+every error receipt. Its one reader is the run page's ticket line, which labels it as the job's own
+report: the job's folder is one every job of the tenant can write, so nothing treats the receipt as a
+fact, and the investigation serves no outcome word from it (#1471 r9). The trusted record of a write
+is the credential proxy's audit (tenant, investigation, method, path, outcome).
 
 **A lost answer (#1374).** When the write fails and may have reached the store
 (`TransportFault.maybe_delivered`, decided from data; the credential proxy's answer says it in

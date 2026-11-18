@@ -101,7 +101,7 @@ def test_o4_no_canary_reaches_any_channel_of_a_real_run(tmp_path, data_root, mon
                     TENANT, tmp_path / "secrets", sign_role_id="role-1163-census",
                     sign_secret="secret-1163-census")]),
                 preflight=lambda *_a, **_k: 0, visualize=lambda *_a, **_k: None,
-                ticket_writer=S.NoTicket(), enqueue=lambda *_a, **_k: False,
+                enqueue=lambda *_a, **_k: False,
                 roster=read_roster(adapters_under(S.DEFENDER)), publish=in_process_publish(),
                 signer=signer, proxy_url=proxy_url)
 

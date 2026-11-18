@@ -40,26 +40,6 @@ class StartBoxRecorder:
         return box_mod.unboxed_executor()
 
 
-class TicketWriterRecorder:
-    """`main`'s `ticket_writer` seam (a module-shaped object: `clear_receipt` and `record_case_ticket`,
-    no open leg, #1359), recording each call and its tenant."""
-
-    def __init__(self) -> None:
-        self.cleared: list[tuple[tuple, dict]] = []
-        self.recorded: list[tuple[tuple, dict]] = []
-        self.tenants: list[Any] = []
-
-    def clear_receipt(self, *args: Any, **kwargs: Any) -> None:
-        # The writer seam's first method (#1359 r4): run start clears an earlier receipt.
-        self.cleared.append((args, dict(kwargs)))
-
-    def record_case_ticket(self, *args: Any, tenant: Any, defender_dir: Any, env: Any,
-                           **kwargs: Any) -> None:
-        self.tenants.append(tenant)
-        self.recorded.append((args, {"tenant": tenant, "defender_dir": defender_dir,
-                                     "env": env, **kwargs}))
-
-
 @pytest.fixture
 def world(tmp_path, monkeypatch):
     """An alert, a data root outside the checkout (`DEFENDER_DATA_ROOT`), and helpers that choose or
@@ -254,7 +234,7 @@ def _grant_of(call: tuple[tuple, dict]) -> Any:
 
 def test_one_process_runs_tenant_a_then_b_and_each_run_carries_only_its_own_tenant(world, capsys):
     """Each run reads its own RUN COPY (`<T>/run-knowledge/<run_id>/`): the box gets its `agent/`,
-    the driver and ticket writer its `settings/`; never the clone, the other tenant, or the
+    the driver its `settings/`; never the clone, the other tenant, or the
     checkout's committed copy."""
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
     from defender.tests.tenancy.tenant_1108_p4._support import published_tenant
@@ -276,16 +256,15 @@ def test_one_process_runs_tenant_a_then_b_and_each_run_carries_only_its_own_tena
             _RegistryRecorder.built = []
             driven: list[dict] = []
             start = StartBoxRecorder(stop=False)
-            writer = TicketWriterRecorder()
             investigate = functools.partial(
                 run._drive_investigation, registry_cls=_RegistryRecorder,
                 investigate=lambda driven=driven, **kw: (
                     driven.append(kw) or {"output": "done", "requests": 0}))
-            argv = [str(world["alert"]), "--tenant", tenant_id, "--no-learn", "--update-ticket"]
+            argv = [str(world["alert"]), "--tenant", tenant_id, "--no-learn"]
             rc = run.main(
                 argv, directory=own.directory,
                 lifecycle=_lifecycle(start, investigate=investigate), visualize=lambda p, **kw: None,
-                preflight=lambda m: 0, ticket_writer=writer,
+                preflight=lambda m: 0,
                 publish=lambda *a, own=own, **k: B.fresh(own.commit))
             assert rc == 0, capsys.readouterr().err
             assert len(driven) == 1
@@ -312,10 +291,8 @@ def test_one_process_runs_tenant_a_then_b_and_each_run_carries_only_its_own_tena
             grant = _grant_of(_RegistryRecorder.built[0])
             assert {(s, v) for s, v, _ in grant.entries} == set(expected[tenant_id]), tenant_id
 
-            # The writer seam: run start cleared through it (it takes the run, not the settings).
-            assert writer.cleared, "run start never cleared the receipt through the seam"
-            # The driver and the ticket writer: this run copy's settings, and no other.
-            for seam, payload in (("driver", driven[0]), ("ticket record", writer.recorded)):
+            # The driver: this run copy's settings, and no other. (An operator run has no ticket lane, W7.)
+            for seam, payload in (("driver", driven[0]),):
                 assert payload, seam
                 assert T.reaches(payload, own_settings), f"{seam} was not handed {own_settings}"
                 assert not T.reaches(payload, B.clone_dir(own) / "settings"), f"{seam} got the clone's"

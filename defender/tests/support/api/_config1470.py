@@ -52,7 +52,6 @@ ELASTIC_ACCESS = R.FIXTURE_FOLDERS[ELASTIC][1]
 TICKET_NAME = "Ticket store (lab)"  # ticket_adapter.DISPLAY_NAME
 TOKEN = "a-ticket-token-of-sixteen-or-more"
 PASSWORD = "a-password-of-sixteen-or-more"
-BODY = "{disposition} — {cause}\n\n{narrative}"
 BASE_MOVED = ("http://soc-playground:8004", "http://soc-elsewhere:8004")
 
 #: The routes this piece makes real or keeps refusing, as the app serves them (the tenant segment erased).
@@ -70,7 +69,7 @@ CONFIG_BODIES: dict[tuple[str, str], dict[str, Any]] = {
     ("PUT", "/api/tenants/{}/systems/{}"): {"replaces": 0, "enabled": True, "settings": TICKET_SETTINGS,
                                         "access": TICKET_ACCESS},
     ("PUT", "/api/tenants/{}/systems/{}/credentials"): {"for_version": 1, "credentials": {"api_key": TOKEN}},
-    ("PUT", "/api/tenants/{}/case-record"): {"replaces": 0, "system_id": TICKET, "comment_body": BODY},
+    ("PUT", "/api/tenants/{}/case-record"): {"replaces": 0, "system_id": TICKET},  # #1471 W7: no comment body
 }
 
 
@@ -131,9 +130,9 @@ class Configured:
         return await self.client.delete(f"/api/tenants/{tenant}/systems/{system}", params={"replaces": replaces},
                                         headers=self.ann())
 
-    async def put_case(self, replaces: int, system_id: str = TICKET, comment_body: str = BODY) -> httpx.Response:
-        return await self.put_raw(f"/api/tenants/{A}/case-record",
-                                  {"replaces": replaces, "system_id": system_id, "comment_body": comment_body})
+    async def put_case(self, replaces: int, system_id: str = TICKET) -> httpx.Response:
+        """The case record's write: its system alone (#1471 W7: the comment body is gone)."""
+        return await self.put_raw(f"/api/tenants/{A}/case-record", {"replaces": replaces, "system_id": system_id})
 
     async def delete_case(self, replaces: int) -> httpx.Response:
         return await self.client.delete(f"/api/tenants/{A}/case-record", params={"replaces": replaces}, headers=self.ann())

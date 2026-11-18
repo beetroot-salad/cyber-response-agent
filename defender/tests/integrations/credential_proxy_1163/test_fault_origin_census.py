@@ -46,7 +46,7 @@ def _all_groups(tmp_path, data_root):
         seen.extend(got)
         found.extend(bad)
 
-    with T.rig(tmp_path / "bearer", data_root, lambda u: H.declaration(u + BASE, writes=(("POST", "/tickets"),)),
+    with T.rig(tmp_path / "bearer", data_root, lambda u: H.declaration(u + BASE, writes=(("POST", O.WRITE_ROUTE),)),
                ghosts={O.GHOST: Path()}) as r:
         r.t.merge({f"settings/systems/{O.BASIC_SYSTEM}/access.yaml": H.declaration(r.up.url + BASE, scheme=H.basic_scheme()),
                    f"settings/systems/{O.BROKEN_SYSTEM}/access.yaml": "{ not a declaration"}, "more systems")

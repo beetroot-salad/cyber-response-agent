@@ -52,6 +52,7 @@ from defender.tests.support.jobs._jobs1342 import (
     job_store,
     register_tenant,
     row,
+    seed_alert_mapping,
 )
 from defender.tests.support.shared._postgres1339 import execute
 from defender.tests.support.tenancy._mapping1345 import FIXTURE_ALERT_MAPPING
@@ -120,11 +121,16 @@ async def token_credential(served: Served) -> TokenCredential:
     return await seed_token_credential(served.dsn, served.seeded)
 
 
-async def _alerts(dsn: str, tenant: str, *fired: dt.datetime) -> list[str]:
+#: `ALERT_BYTES`' fields plus the ticket the fixture mapping's `case_key` (`alert_id`) reads: a flagged start needs one (#1471 W1).
+KEYED_ALERT = (b'{"rule": {"id": "r-1342",  "description": "sketch"}, "alert_id": "SEC-1471",'
+               b' "alert_timestamp": "2026-10-29T00:00:00Z"}\n')
+
+
+async def _alerts(dsn: str, tenant: str, *fired: dt.datetime, raw: bytes = ALERT_BYTES) -> list[str]:
     """One stored alert per `fired`, through the store's trusted insert (no product command creates alerts, N9)."""
     async with job_store(dsn) as store:
         stored = [await store.insert_alert(tenant, vendor="elastic", vendor_ticket_id=f"T-{tenant[-2:]}-{at.isoformat()}",
-                                           fired_at=at, changed_at=at, received_at=at, raw=ALERT_BYTES)
+                                           fired_at=at, changed_at=at, received_at=at, raw=raw)
                   for at in fired]
     return [str(s.alert_id) for s in stored]
 
@@ -139,9 +145,12 @@ async def _completed(dsn: str, tenant: str, alert_id: str) -> str:
     return str(inv.investigation_id)
 
 
-async def _start(served: Served, alert_id: str, key: str, headers: dict[str, str] | None = None) -> httpx.Response:
-    return await served.client.post(f"/api/tenants/{A}/investigations", headers=headers or served.ann(),
-                                    json={"alert_id": alert_id, "client_request_id": key})
+async def _start(served: Served, alert_id: str, key: str, headers: dict[str, str] | None = None, *,
+                 update_ticket: bool | None = None) -> httpx.Response:
+    body: dict[str, Any] = {"alert_id": alert_id, "client_request_id": key}
+    if update_ticket is not None:
+        body["update_ticket"] = update_ticket
+    return await served.client.post(f"/api/tenants/{A}/investigations", headers=headers or served.ann(), json=body)
 
 
 # --- alerts -----------------------------------------------------------------------------------------
@@ -208,6 +217,49 @@ async def test_o6_repeating_a_start_with_its_request_id_answers_the_same_investi
 
     other = await _start(served, alert_id, "req-2")  # another request while one is live: the live one answers
     assert (other.status_code, other.json()["investigation_id"]) == (200, first.json()["investigation_id"])
+
+
+@pytest.mark.postgres
+async def test_1471_w1_a_start_takes_update_ticket_and_the_read_shows_the_flag_that_applies(served):
+    """`update_ticket` (default false) is stored and read back; a replay with the opposite flag, and another request
+    answered with the live investigation, answer that investigation's own flag. (#1471 r8 W1, C-4)"""
+    flagged_alert, plain_alert = await _alerts(served.dsn, A, NOON, NOON - dt.timedelta(hours=1), raw=KEYED_ALERT)
+    started = await served.client.post(f"/api/tenants/{A}/investigations", headers=served.ann(), json={
+        "alert_id": flagged_alert, "client_request_id": "req-1", "update_ticket": True})
+    assert started.status_code == 201, started.text
+    assert started.json()["update_ticket"] is True
+    inv = started.json()["investigation_id"]
+    read = await served.client.get(f"/api/tenants/{A}/investigations/{inv}", headers=served.ann(write=False))
+    assert read.json()["update_ticket"] is True
+
+    plain = await _start(served, plain_alert, "req-1")  # no flag given
+    assert (plain.status_code, plain.json()["update_ticket"]) == (201, False)
+
+    for key in ("req-1", "req-2"):  # the replay, then a new request the live investigation answers
+        again = await served.client.post(f"/api/tenants/{A}/investigations", headers=served.ann(), json={
+            "alert_id": flagged_alert, "client_request_id": key, "update_ticket": False})
+        assert (again.status_code, again.json()["investigation_id"], again.json()["update_ticket"]) == (200, inv, True)
+
+
+@pytest.mark.postgres
+async def test_1471_w1_a_flagged_start_of_an_alert_that_names_no_ticket_is_409_and_starts_nothing(served):
+    """A flagged start is 409 whose detail names the missing ticket when the alert yields no key, and again when the
+    tenant's mapping maps no `case_key`; the same starts without the flag are 201. (#1471 r8 W1, C-4)"""
+    [keyless] = await _alerts(served.dsn, A, NOON)
+    [keyed] = await _alerts(served.dsn, A, NOON - dt.timedelta(hours=1), raw=KEYED_ALERT)
+
+    refused = await _start(served, keyless, "req-1", update_ticket=True)
+    assert refused.status_code == 409, refused.text
+    assert "ticket" in refused.json()["detail"].lower()
+    assert execute(served.dsn, "SELECT count(*) FROM jobs.investigations") == [(0,)]
+    assert (await _start(served, keyless, "req-1")).status_code == 201  # control: only the flag is refused
+    assert (await _start(served, keyed, "req-1", update_ticket=True)).status_code == 201  # control: a keyed alert starts
+
+    seed_alert_mapping(served.dsn, A, {**FIXTURE_ALERT_MAPPING, "case_key": None})
+    [another] = await _alerts(served.dsn, A, NOON + dt.timedelta(hours=1), raw=KEYED_ALERT)
+    unmapped = await _start(served, another, "req-1", update_ticket=True)
+    assert (unmapped.status_code, "ticket" in unmapped.json()["detail"].lower()) == (409, True)
+    assert (await _start(served, another, "req-1")).status_code == 201
 
 
 @pytest.mark.postgres
@@ -662,7 +714,7 @@ def _concrete(path: str, tenant: str) -> str:
 
 SYSTEM = {"replaces": 0, "enabled": True, "settings": {}, "access": ""}
 CREDENTIALS = {"for_version": 1, "credentials": {"api_key": "a-secret-of-sixteen-or-more"}}
-CASE = {"replaces": 0, "system_id": "ticket", "comment_body": "{disposition}"}
+CASE = {"replaces": 0, "system_id": "ticket"}  # #1471 W7: no comment body
 
 
 def _body(method: str, path: str) -> dict[str, Any]:
@@ -703,6 +755,9 @@ PERMISSION_OF = {
     ("PUT", f"{TENANT}/alert-mapping"): "config.write",
     ("GET", f"{TENANT}/learning/items"): "work.read",  # #1485 O3
     ("GET", f"{TENANT}/learning/parked-batches"): "work.read",  # #1485 O3
+    ("POST", f"{TENANT}/learning/items/{{}}/release"): "learning.manage",  # #1537 O7 (r3.1 forced choice)
+    ("POST", f"{TENANT}/learning/batches/{{}}/release"): "learning.manage",
+    ("POST", f"{TENANT}/learning/batches/{{}}/abandon"): "learning.manage",
     ("GET", f"{TENANT}/members"): "people.manage",
     ("DELETE", f"{TENANT}/members/{{}}"): "people.manage",
     ("GET", f"{TENANT}/invitations"): "people.manage",

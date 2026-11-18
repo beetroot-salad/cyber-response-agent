@@ -29,6 +29,7 @@ ENTRY = Path(__file__).resolve().with_name("_job_entry1342.py")
 mode, commit, marks, argv = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4:]
 job_id, tenant = argv[argv.index("--job") + 1], argv[argv.index("--tenant") + 1]
 parent = argv[argv.index("--parent-pid") + 1]
+ticket = argv[argv.index("--parent-pid") + 2:]  # C-1: `--alert-digest`, and for a flagged job `--post-ticket --ticket-link`, as the worker sent them
 
 
 def entry(container) -> int:
@@ -38,6 +39,6 @@ def entry(container) -> int:
                           env=env, cwd=str(ROOT), stdin=subprocess.DEVNULL, check=False).returncode
 
 
-sys.exit(job_host.main(["--kind", "investigation", "--job", job_id, "--tenant", tenant, "--parent-pid", parent],
+sys.exit(job_host.main(["--kind", "investigation", "--job", job_id, "--tenant", tenant, "--parent-pid", parent, *ticket],
                        docker=ContainerStandIn(entry), signer=A.MarkedSigner(),
                        publish=lambda *a, **k: B.fresh(commit)))

@@ -206,6 +206,22 @@ def test_d1_the_gate_holds_a_retired_row_with_its_reason_and_the_model_never_see
     assert items[("finding", "f1")].status == "in_batch"
 
 
+def test_d1_the_real_drain_stores_the_cause_curator_held_for_a_gate_hold_and_curator_skipped_for_a_model_skip(world, caplog):  # noqa: F811 — the imported fixture
+    """Over the real drain and the real store: a row the gate holds (a retired direction) is held with the cause `curator_held`, a finding the model skips is skipped with `curator_skipped`, and the cited one carries none. (1537 PR1, D1)"""
+    w = world
+    call(w.dsn, "publish_findings", w.t.tenant_id, "run-1", [_row("old", direction="per-case"), _row("f1"), _row("f2")], kind="finding")
+    model = ScriptedModel(lessons=Reply({"l1.md": lesson_citing("f1")},
+                                        result(committed=["f1"], skipped=[("f2", "restates an existing lesson")])))
+
+    _tick(w, model)
+
+    items = _items(w)
+    assert model.keys_shown(LESSONS) == ["f1", "f2"], critical_text(caplog)
+    assert (items[("finding", "old")].status, items[("finding", "old")].cause) == ("held", "curator_held")
+    assert (items[("finding", "f2")].status, items[("finding", "f2")].cause) == ("skipped", "curator_skipped")
+    assert (items[("finding", "f1")].status, items[("finding", "f1")].cause) == ("in_batch", None)
+
+
 def test_d1_a_finding_the_corpus_already_cites_is_published_and_not_shown_to_the_model(world, caplog):  # noqa: F811 — the imported fixture
     """The corpus check at authoring stays: f1 is cited by a lesson already on main, so it is published at the batch's
     review and the model is shown f2 only. (D1 corpus check, P1)"""

@@ -22,6 +22,7 @@ from defender.jobs.models import LEARNING_TRIGGERS
 from defender.jobs.store import is_refusal
 from defender.tests.support.jobs._worker1342 import _FAST, _child, _committed, _queued, _run_one, _until, _worker
 from defender.tests.support.jobs._jobs1342 import (
+    FRONTEND_ORIGIN,
     NOW,
     T1,
     T2,
@@ -908,9 +909,9 @@ async def test_a_bare_worker_claims_no_job_and_learning_slots_need_both_commands
         for refused in ({"learning_argv": jobs}, {"post_step_argv": post}, {}):
             with pytest.raises(ValueError, match="learning"):
                 Worker(store, data_root=world["root"], child_argv=_child(world), slots=3, learning_slots=1,
-                       clock=lambda: NOW, containers=object(), **refused)
+                       clock=lambda: NOW, containers=object(), frontend_origin=FRONTEND_ORIGIN, **refused)
         Worker(store, data_root=world["root"], child_argv=_child(world), slots=1, clock=lambda: NOW,
-               containers=object())  # a bare slots=1 is valid
+               containers=object(), frontend_origin=FRONTEND_ORIGIN)  # a bare slots=1 is valid
 
 
 @pytest.mark.parametrize(("slots", "learning"), [(3, 3), (1, 1), (3, -1)])
@@ -921,7 +922,7 @@ def test_o5_learning_slots_stay_within_zero_and_slots_minus_one(tmp_path, slots,
     with pytest.raises(ValueError, match="learning"):
         Worker(SimpleNamespace(lease_seconds=30.0), data_root=tmp_path, child_argv=lambda launch: [], slots=slots,
                learning_slots=learning, clock=lambda: NOW, containers=object(), learning_argv=lambda launch: [],
-               post_step_argv=lambda launch: [])
+               post_step_argv=lambda launch: [], frontend_origin=FRONTEND_ORIGIN)
 
 
 @pytest.mark.parametrize(("max_age", "hours", "runs"), [

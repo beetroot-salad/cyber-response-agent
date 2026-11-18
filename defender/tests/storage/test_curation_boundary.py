@@ -96,10 +96,10 @@ def _served(sink: list[Path]):
 def _decide_served(items, outcomes) -> None:
     """The fate a served request takes (the real step decides one per item): skipped, so the store leaves it no longer
     waiting. A step that served and decided nothing leaves its item waiting again (r8 Lead-author lane)."""
-    from defender.learning_store import Outcome
+    from defender.tests.support.learning.core._release1537 import outcome_skipped
 
     for kind, key, _payload in items:
-        outcomes[(kind, key)] = Outcome.skipped("served by the test's lane")
+        outcomes[(kind, key)] = outcome_skipped("curator_skipped", "served by the test's lane")
 
 
 def _certified_run(*, name="case-791", alert_bytes=None, tenant_id=None) -> Path:
@@ -163,16 +163,18 @@ def test_791_the_investigation_tail_takes_its_dependencies_through_a_seam(tmp_pa
     )
 
     tail = SpecTail(state)
-    assert drive_tail(run_py.main, plant_alert(tmp_path / "seam"), tail, "--update-ticket") == 0
+    assert drive_tail(run_py.main, plant_alert(tmp_path / "seam"), tail) == 0
     assert tail.run_dirs, "main never drove the injected lifecycle"
     run_dir = tail.run_dirs[0]
     assert run_dir.is_dir(), "the lifecycle was handed a run dir that does not exist"
     assert RunPaths(run_dir).alert.is_file(), \
         "the lifecycle was handed a run dir the entrypoint had not materialized the alert into"
-    # #1359 H1/r4: the open leg is retired; run start clears through the seam instead.
-    for step in ("clear_receipt", "lifecycle", "record_case_ticket", "visualize"):
+    # #1359 H1/r4: the open leg is retired. #1471 W7: so is the operator's comment, receipt clearing included; the job
+    # lane's flagged investigation posts it (`test_job_entry`'s `test_1471_w2_*`), the operator run never touches the ticket.
+    for step in ("lifecycle", "visualize"):
         assert step in tail.names, f"the tail never reached {step} (ran {tail.names})"
-    assert "open_case_ticket" not in tail.names, "the retired open leg ran"
+    for step in ("open_case_ticket", "clear_receipt", "record_case_ticket"):
+        assert step not in tail.names, f"the operator tail ran {step}, which W7 removed (ran {tail.names})"
 
 
 def test_791_finished_investigation_drives_catalog_curation(published, tmp_path, state):
@@ -404,8 +406,8 @@ def test_791_enqueue_curation_cannot_be_called_unguarded(tmp_path, state):
 
 def test_791_the_curation_trigger_joins_the_scrub_ordering_property(tmp_path, state):
     tail = SpecTail(state)
-    assert drive_tail(run_py.main, plant_alert(tmp_path / "ordered"), tail, "--update-ticket") == 0
-    for consumer in ("record_case_ticket", "visualize"):
+    assert drive_tail(run_py.main, plant_alert(tmp_path / "ordered"), tail) == 0
+    for consumer in ("visualize",):  # #1471 W7: the operator tail no longer records the case's ticket
         assert tail.step(consumer).tree_certified, \
             f"{consumer} read the run dir BEFORE the lifecycle certified it"
     assert author_markers(state), \

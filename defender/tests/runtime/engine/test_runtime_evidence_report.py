@@ -9,7 +9,7 @@ import json
 
 from defender.investigation import close_tool
 from defender.tests.support.shared.contracts import _tacit983 as scene
-from defender.tests.support.runtime.engine._spec767 import posted_comment_body
+from defender.tests.support.runtime.engine._spec767 import posted_comment_body, ticket_link_for
 
 WINDOW_90D = "2026-02-04T00:00:00Z/2026-05-04T00:00:00Z"
 ANCHOR_90D = "tk-baseline-90d"
@@ -126,8 +126,9 @@ def test_runtime_evidence_consultation_lands_in_the_closing_record(tmp_path):
     )
 
 
-def test_baseline_context_now_reaches_the_recorded_comment(tmp_path):
-    """The closing record's baseline line reaches the record leg's posted comment. (#1359, OD15)"""
+def test_baseline_context_stays_in_the_record_and_off_the_recorded_comment(tmp_path):
+    """The closing record keeps the baseline line; the ticket comment carries nothing of the record but its
+    disposition and the screen link (#1471 P-6). (#1359, OD15)"""
     closed = _closed(tmp_path / "close", "benign", BENIGN_DOC)
     assert "1500 occurrences" in _line_of(closed.record.runtime_evidence[0]), "fixture control: the record carries the baseline"
     (closed.run_dir / "alert.json").write_text(
@@ -139,9 +140,8 @@ def test_baseline_context_now_reaches_the_recorded_comment(tmp_path):
     # #1359: observed at the record leg's posted comment (below the agent tag line).
     wire = posted_comment_body(closed.run_dir, tmp_path)
     for crossed in ("runtime-evidence", "1500 occurrences", scene.WINDOW_BEFORE_ALERT):
-        assert crossed in wire, (
-            f"{crossed!r} did not reach the outbound comment, which carries the record's baseline lines"
-        )
+        assert crossed not in wire, f"{crossed!r} reached the outbound comment, which carries no record text"
+    assert wire == f"benign\n{ticket_link_for(closed.run_dir)}", wire
 
 
 def test_the_projection_and_the_record_read_one_set(tmp_path):

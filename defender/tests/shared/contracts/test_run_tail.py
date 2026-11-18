@@ -1,21 +1,17 @@
-"""#767 — the investigation tail: when the run records its ticket comment, and when it does not (real `run.main`)."""
+"""#767 — the investigation tail of the operator run (real `run.main`): it reaches neither the ticket seam's clear nor its
+record (#1471 W7: the operator's `--update-ticket` is gone; the comment is the job lane's)."""
 from __future__ import annotations
 
 import dataclasses
 
 
-from defender.tests.support.learning.branch import _triplet_947 as T
-from defender.records._episode_handle import Episode
-
 import pytest
 
 from defender import run as run_py
-from defender.tests.support.runtime.engine._spec767 import TENANT_ID
 from defender.tests.support.sandbox._curation_store1278 import reach_store
 from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — fixture
 from defender.tests.support.sandbox._spec791 import (
     SpecTail,
-    author_markers,
     drive_tail,
     plant_alert,
     satisfy_entrypoint_keys,
@@ -53,23 +49,21 @@ def state(tmp_path, monkeypatch, migrated_database):  # noqa: F811 — the impor
 
 
 @pytest.mark.postgres
-def test_767_run_under_flag_leaves_an_agent_comment(tmp_path, state):
-    """Under `--update-ticket`, run start clears the receipt through the seam, a run whose
-    lifecycle COMPLETES then records after it, and one that dies does not. No open leg. O1, r4."""
+def test_767_an_operator_run_never_reaches_the_ticket_seam(tmp_path, state):
+    """An operator run completes its tail (lifecycle, render) and reaches neither of the writer seam's methods: no
+    clear, no record. #1471 W7 removed `--update-ticket`: the seam is accepted and ignored, and the ticket comment is the
+    job lane's. A run that dies in its lifecycle records nothing either. The resume path's refusal of the removed switch
+    is `test_947_resume_refuses_update_ticket`; the operator command's, `test_1471_w7_the_operator_command_refuses_...`."""
     tail = Tail(state)
-    assert drive_tail(run_py.main, plant_alert(tmp_path / "flagged"), tail, "--update-ticket") == 0
-    assert RECORD_STEP in tail.names, (
-        f"a completing run under the flag never recorded into its case (ran {tail.names})")
-    assert tail.names.index(CLEAR_STEP) < tail.names.index("lifecycle") < tail.names.index(
-        RECORD_STEP
-    ), (
-        f"the tail did not clear at run start and record after a completed lifecycle (ran {tail.names})"
-    )
-    assert "open_case_ticket" not in tail.names, "the open leg ran"
-    assert tail.run_dirs, "main never drove the injected lifecycle"
-    assert tail.step(RECORD_STEP).tree_certified, (
-        "the record step read the run dir BEFORE the lifecycle certified it"
-    )
+    assert drive_tail(run_py.main, plant_alert(tmp_path / "operator"), tail) == 0
+    for step in ("lifecycle", "visualize"):
+        assert step in tail.names, (
+            f"the operator run did not complete its tail at all (ran {tail.names})"
+        )
+    for step in (CLEAR_STEP, RECORD_STEP):
+        assert step not in tail.names, (
+            f"an operator run reached the ticket seam anyway (ran {tail.names})"
+        )
 
     class Dying(Tail):
         def lifecycle(self, **kw):
@@ -77,59 +71,5 @@ def test_767_run_under_flag_leaves_an_agent_comment(tmp_path, state):
 
     dying = Dying(state)
     with pytest.raises(RuntimeError):
-        drive_tail(run_py.main, plant_alert(tmp_path / "dying"), dying, "--update-ticket")
+        drive_tail(run_py.main, plant_alert(tmp_path / "dying"), dying)
     assert RECORD_STEP not in dying.names, "a run that never completed its lifecycle recorded anyway"
-
-
-@pytest.mark.postgres
-def test_767_no_store_write_without_the_flag(tmp_path, state, monkeypatch):
-    """`--update-ticket` is the whole switch: without it nothing reaches the ticket store, and
-    the resume path refuses the flag."""
-    assert run_py.parse_args(["/tmp/alert.json", "--tenant", TENANT_ID]).update_ticket is False, (
-        "the ticket flag is no longer opt-in"
-    )
-
-    tail = Tail(state)
-    assert drive_tail(run_py.main, plant_alert(tmp_path / "unflagged"), tail) == 0
-    for step in ("lifecycle", "visualize"):
-        assert step in tail.names, (
-            f"the unflagged run did not complete its tail at all (ran {tail.names})"
-        )
-    for step in (CLEAR_STEP, RECORD_STEP):
-        assert step not in tail.names, (
-            f"a run without --update-ticket reached the estate anyway (ran {tail.names})"
-        )
-
-    # A sibling resume names its episode by id; its container exists before any sibling runs.
-    from defender.tests.support.shared._fixture_uuid import fixture_uuid
-
-    episode_id = fixture_uuid("767-run-tail-resume")
-    ep = T.episode(tmp_path, episode_id=episode_id,
-                   doc={**T.family_doc(), "episode_id": episode_id})
-    with Episode.open(ep) as held:
-        T.episode_view(held).close()
-    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
-
-    argv = ["--episode", episode_id, "--world", "b", "--tenant", ep.parent.parent.name, "--update-ticket"]
-    with pytest.raises(SystemExit) as refusal:
-        run_py.main(argv, directory=directory_for_argv(argv))
-    assert "--update-ticket" in str(refusal.value), "the resume path accepted the ticket flag"
-
-
-@pytest.mark.postgres
-def test_767_record_runs_before_the_curation_marker(tmp_path, state):
-    """The record step runs before the curation marker is queued, and before the render."""
-    tail = Tail(state)
-    assert drive_tail(run_py.main, plant_alert(tmp_path / "ordered"), tail, "--update-ticket") == 0
-
-    assert tail.step(RECORD_STEP).curation_requests == (), (
-        "the curation request was already on the queue when the ticket was recorded — a "
-        "drainer can start the moment the marker lands"
-    )
-    assert author_markers(state), (
-        "no curation request was written at all, so the ordering assertion above proves "
-        "nothing about where the record step sits"
-    )
-    assert tail.names.index(RECORD_STEP) < tail.names.index("visualize"), (
-        f"the record step no longer precedes the render step (ran {tail.names})"
-    )

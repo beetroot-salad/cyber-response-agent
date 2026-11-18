@@ -57,7 +57,7 @@ code, the investigator never occupies it, and it writes no `##` header into
   writer of the run's closing record, which no file write reaches; the host
   fills it from the close and the document, so there is nothing to compose.
   `disposition` is a closed enum: `benign` | `false-positive` |
-  `inconclusive` | `malicious` | `unsanctioned-benign` | `unresolved`. `unresolved` (#923) is the
+  `inconclusive` | `malicious` | `unresolved`. `unresolved` (#923) is the
   HOST's own verdict — recorded when a run is cut short without a settled
   finding — and refused as an argument here; the agent never writes it. A
   confident close then passes the review gate (below) before anything is

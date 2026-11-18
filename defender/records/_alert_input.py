@@ -347,6 +347,13 @@ def record_beside(alert_path: Path) -> Path:
     return alert_path.with_name(RECORD_FILE)
 
 
+def ticket_of_record(text: str | None) -> str | None:
+    """The ticket an alert record names: its `case_key` fact, or `None` for no record or no key. The one reading of it:
+    the helper binds the write pass to it and the record step comments on it (#1471 X1), so the two cannot differ."""
+    record = parse_alert_record(text or "")
+    return None if record is None else record.facts.case_key
+
+
 def parse_alert_record(text: str) -> AlertRecord | None:
     """The record in `text`, or `None` when it is not one: not a JSON object, no hex digest. A
     fact that is not text, or a signature that is not key-shaped, reads as absent — the record

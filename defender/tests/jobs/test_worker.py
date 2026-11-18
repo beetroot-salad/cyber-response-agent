@@ -26,6 +26,7 @@ import pytest
 from defender.tests.support.jobs._jobs1342 import (
     ALERT_BYTES,
     ALERT_DIGEST,
+    FRONTEND_ORIGIN,
     AWKWARD_ALERT_BYTES,
     DECOMPOSED_ALERT_BYTES,
     FEFF_RICH_ALERT_BYTES,
@@ -1060,7 +1061,8 @@ async def test_o7_a_worker_given_no_containers_uses_docker_and_removes_only_its_
         ids = {}
         for n, (kind, child) in enumerate((("own", own), ("foreign", foreign), ("clean", bare))):
             ids[kind] = await _queued(store, ticket=f"T-{n}", key=f"k{n}")
-            await Worker(store, data_root=world["root"], child_argv=child, slots=3, clock=fixed_clock).drain()
+            await Worker(store, data_root=world["root"], child_argv=child, slots=3, clock=fixed_clock,
+                         frontend_origin=FRONTEND_ORIGIN).drain()
 
     assert daemon.names() == sorted(["defender-run-someone-else", f"defender-run-{ids['foreign']}"]), daemon.names()
     for kind, inv in ids.items():

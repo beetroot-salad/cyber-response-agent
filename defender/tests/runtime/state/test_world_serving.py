@@ -476,15 +476,15 @@ def test_1255_a_worlds_oracle_is_given_the_sources_own_closing_ticket_comment(
     from defender.tests.support.runtime.engine import _spec767 as S767
     from defender.tests.support.shared.contracts._spec1077 import fixture_run
 
-    marker = "CLOSING-NOTE-1255: alice's db-1 logon was the TGT abuse; account disabled"
-    source_dir = S767.make_run(tmp_path / "runs", name=S24.SOURCE_RUN_ID,
-                               disposition="malicious", body=marker)
+    # The closing comment is the tag line, the disposition word and the screen link (#1471 P-6); the link is
+    # unique to the source run, so it is what shows the oracle was handed the comment's own text.
+    source_dir = S767.make_run(tmp_path / "runs", name=S24.SOURCE_RUN_ID, disposition="malicious")
     store = S767.FakeStore(tmp_path / "store")
     S767.record(source_dir, store)
     posted = store.wire_body()
     tag = case_ticket.agent_comment_tag(S24.SOURCE_RUN_ID)
-    assert tag in posted, f"fixture: the source posted {posted!r}"
-    assert marker in posted, f"fixture: the source posted {posted!r}"
+    marker = S767.ticket_link_for(source_dir)
+    assert posted == f"{tag}\nmalicious\n{marker}", f"fixture: the source posted {posted!r}"
 
     est = S24.estate(tmp_path)
     est.answer("idp", "query", BOB, BOB_ANSWER)
@@ -499,6 +499,7 @@ def test_1255_a_worlds_oracle_is_given_the_sources_own_closing_ticket_comment(
     assert W.FORK_TIME in inbound, "the oracle was not told the fork time"
     assert tag in inbound, "the oracle was not told the source's post-fork comment (its tag)"
     assert marker in inbound, "the oracle was not told what the source's closing comment says"
+    assert "malicious" in inbound, "the oracle was not told the disposition the source's comment closed on"
 
 
 @pytest.mark.parametrize(("gone", "expected"), [

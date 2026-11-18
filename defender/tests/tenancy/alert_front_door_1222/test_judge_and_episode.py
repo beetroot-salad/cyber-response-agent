@@ -27,6 +27,7 @@ from defender.tests.support.storage import _readers1534 as R
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.tenancy import _tenants1106 as T1106
+from defender.tests.support.runtime.engine._spec767 import ticket_link_for
 
 JUDGE = "learning.judge"
 CLI = "learning.branch.cli"
@@ -204,11 +205,11 @@ def _assert_names_record(text: str, what: str) -> None:
 # --- the launcher ----------------------------------------------------------------------------
 
 def _source(tmp_path: Path, raw: bytes, *, record: bool = True, signature: str | None = None, alert_mapping: Any = S.DEFAULT_MAPPING_GENERIC,
-            case_body: str = S.T6.COMMENT_BODY, case_key: str | None = None) -> tuple[S.Planted, Path, Path]:
+            case_key: str | None = None) -> tuple[S.Planted, Path, Path]:
     """A finished source run on tenant `TENANT`: `T.runs_base`'s stamped, branchable run (its
     capture, session and runs-base record), its alert replaced by `raw` at the run's alert
     place and (default) its record beside it. Returns (tenant, runs base, source run)."""
-    planted = S.plant_tenant(TENANT, alert_mapping=alert_mapping, case_body=case_body)
+    planted = S.plant_tenant(TENANT, alert_mapping=alert_mapping)
     base, src = location_path(T.runs_base)(tmp_path, tenant_id=TENANT)
     former = src / "alert.json"
     if former != S.alert_file(src):
@@ -280,7 +281,7 @@ def _resume_sibling(ep: Path, *, records: Any = None, **directory: Any) -> Path:
     argv = ["--episode", ep.name, "--world", "b", "--tenant", TENANT, "--no-learn"]
     rc = S.sym(RUN, "main")(
         argv, directory=records.directory() if records is not None else directory_for_argv(argv, **directory), lifecycle=life, visualize=lambda *_a, **_k: None, preflight=lambda *_a, **_k: 0,
-        ticket_writer=S.NoTicket(), publish=in_process_publish())
+        publish=in_process_publish())
     assert life.run_dir is not None, f"the sibling never reached its run (rc={rc!r})"
     return life.run_dir
 
@@ -551,7 +552,7 @@ def test_p062_mapping_edited_between_a_source_run_and_a_resume(tmp_path):
                "summary": "rule.description"}
     raw = _alert("p062")
     planted, _base, src = _source(tmp_path, raw, signature="SIG-p062", alert_mapping=mapping,
-                                  case_body=S.SIGNED_COMMENT_BODY, case_key=S.TICKET_KEY)
+                                  case_key=S.TICKET_KEY)
     ep = _launch(planted, src)
     T.write_family(ep, T.family_doc(source_run_dir=str(src), episode_id=ep.name))
     S.remap(planted, {**mapping, "signature": "user.login"})
@@ -564,11 +565,12 @@ def test_p062_mapping_edited_between_a_source_run_and_a_resume(tmp_path):
     sibling_tenant = planted.run_tenant(dispatches_lead_zero=False)
     S.ticket_writer(store).record_case_ticket(
         _run_handle_1165(sib), tenant=sibling_tenant, defender_dir=S.DEFENDER,
-        env={}, case=T1106.case_for(sibling_tenant))
+        env={}, case=T1106.case_for(sibling_tenant), link=ticket_link_for(sib))
     assert len(store.comment_payloads) == 1, (
         f"the record leg posted {len(store.comment_payloads)} comments: {store.calls}")
-    assert "sig=SIG-p062" in store.comment_body(), (
-        f"the sibling's ticket comment does not carry the recorded signature: {store.wire_body()!r}")
+    # The signature is no part of the comment (P-6); the sibling's record, above, holds it.
+    assert "SIG-p062" not in store.wire_body(), (
+        f"the sibling's ticket comment carries the recorded signature: {store.wire_body()!r}")
 
 
 # #1345 O3 — a sibling carries its source's record and never reads a mapping

@@ -6,10 +6,10 @@ curator decides is `test_1278_curator_fates.py`.
 """
 from __future__ import annotations
 
-import contextlib
 
 import pytest
 
+from defender.tests.support.learning.core._release1537 import release_item, release_item_of
 from defender.tests.support.jobs._jobs1342 import register_tenant
 from defender.tests.support.learning.core._store1278 import (
     AUTHOR_LANE, LEAD_LANE, ONE, finding, lapse_lease, learning_store, store_mod, world_finding)
@@ -28,9 +28,9 @@ def dsn(migrated_database):
     return migrated_database
 
 
-def outcome(name: str, *reason: str):
-    """`Outcome.<name>(reason?)`: the store's outcome values (interface request: callable constructors)."""
-    return getattr(store_mod().Outcome, name)(*reason)
+def outcome(name: str, *why: str):
+    """`Outcome.<name>()`, or `Outcome.<held|skipped|dead>(cause, detail)` (r3.1): the store's outcome values."""
+    return getattr(store_mod().Outcome, name)(*why)
 
 
 def pitfall(pid: str, **extra):
@@ -93,7 +93,7 @@ async def test_items_tenants_keep_their_own_rows_for_one_key(dsn):
 @pytest.mark.parametrize("how", ["published", "skipped", "dead"])
 async def test_a_finding_id_is_unique_for_good_past_published_skipped_and_dead(dsn, how):
     """Past any end it can reach, a republished finding id adds nothing and changes no row. (work_items, O14)"""
-    reason = {"published": (), "skipped": ("duplicate",), "dead": ("unkeyable",)}[how]
+    reason = {"published": (), "skipped": ("curator_skipped", "duplicate"), "dead": ("malformed_row", "unkeyable")}[how]
     async with learning_store(dsn) as store:
         await store.publish_findings(BLUE, "run-1", [finding("f1")], kind="finding")
         claim = await claim_author(store)
@@ -409,26 +409,8 @@ async def test_crashes_to_the_ceiling_hold_the_item_for_a_person(dsn):
         assert {i.status for i in (await store.work(BLUE))} == {"held"}
 
 
-async def test_a_person_abandon_does_not_forgive_an_attempt(dsn):
-    """Only a clean stop forgives: a person's abandon holds the items, attempt still counted. (D8, O7, design Review-1 R1-F1)"""
-    async with learning_store(dsn) as store:
-        await store.publish_findings(BLUE, "run-1", [finding("f1")], kind="finding")
-        claim = await claim_author(store)
-        await store.abandon(BLUE, claim.batch_id, by="person")
-        got = (await items(store))[("finding", "f1")]
-        assert (got.status, got.attempts) == ("held", 1), "a person's abandon always holds; stop and crash abandons (above) return items to waiting"
 
 
-async def test_o7_a_persons_abandon_of_a_batch_in_review_holds_its_items(dsn):
-    """A person abandons a batch that reached review: the batch ends abandoned and its items are held for a person. (O7, D8)"""
-    async with learning_store(dsn) as store:
-        await store.publish_findings(BLUE, "run-1", [finding("f1")], kind="finding")
-        claim = await claim_author(store)
-        await store.in_review(claim, 7, {})
-        await store.abandon(BLUE, claim.batch_id, by="person")
-        [batch] = await store.batches(BLUE)
-        assert (batch.phase, batch.outcome) == ("ended", "abandoned")
-        assert (await items(store))[("finding", "f1")].status == "held"
 
 
 # --- deferral and the item exits a holder applies -------------------------------------------------------------------------
@@ -471,8 +453,9 @@ async def test_deferrals_and_attempts_are_separate_counters_with_the_deferral_ce
 
 
 @pytest.mark.parametrize(("name", "reason", "status"), [
-    ("skipped", ("duplicate",), "skipped"), ("held", ("missing_field(contrast_evidence)",), "held"),
-    ("dead", ("unkeyable",), "dead"), ("published", (), "published"), ("waiting", (), "waiting")])
+    ("skipped", ("curator_skipped", "duplicate"), "skipped"),
+    ("held", ("curator_held", "missing_field(contrast_evidence)"), "held"),
+    ("dead", ("malformed_row", "unkeyable"), "dead"), ("published", (), "published"), ("waiting", (), "waiting")])
 async def test_each_outcome_a_holder_reports_becomes_its_status_and_reason(dsn, name, reason, status):
     """Every outcome value lands as the status of the same name, a reason where it carries one. (D1)"""
     async with learning_store(dsn) as store:
@@ -481,7 +464,7 @@ async def test_each_outcome_a_holder_reports_becomes_its_status_and_reason(dsn, 
         await store.end_no_commits(claim, {("finding", "f1"): outcome(name, *reason)})
         got = (await items(store))[("finding", "f1")]
         assert got.status == status
-        assert all(r in (got.reason or "") for r in reason)
+        assert all(r in (got.reason or "") for r in reason[1:]), "the detail is the reason a person reads"
         [batch] = await store.batches(BLUE)
         assert batch.phase == "ended", "no commits: the batch ends with its items' outcomes"
 
@@ -491,7 +474,7 @@ async def test_an_item_the_holder_names_no_outcome_for_returns_to_waiting(dsn):
     async with learning_store(dsn) as store:
         await store.publish_findings(BLUE, "run-1", [finding("f1"), finding("f2")], kind="finding")
         claim = await claim_author(store)
-        await store.end_no_commits(claim, {("finding", "f1"): outcome("skipped", "duplicate")})
+        await store.end_no_commits(claim, {("finding", "f1"): outcome("skipped", "curator_skipped", "duplicate")})
         got = await items(store)
         assert (got[("finding", "f1")].status, got[("finding", "f2")].status) == ("skipped", "waiting")
         assert all(i.status != "in_batch" for i in got.values()), "an ended batch leaves nothing in_batch"
@@ -510,7 +493,7 @@ async def test_o7_a_person_releases_a_held_item_and_the_next_claim_takes_it(dsn)
             await store.abandon(BLUE, claim.batch_id, by="recovery")
         assert (await items(store))[("finding", "f1")].status == "held", "premise: held at the ceiling"
 
-        await store.release_held(BLUE, "finding", "f1")
+        await release_item_of(store, BLUE, "finding", "f1")
 
         assert (await items(store))[("finding", "f1")].status == "waiting"
         claim = await claim_author(store)
@@ -520,14 +503,18 @@ async def test_o7_a_person_releases_a_held_item_and_the_next_claim_takes_it(dsn)
         assert (await items(store))[("finding", "f1")].status == "waiting"
 
 
-async def test_o7_releasing_an_item_that_is_not_held_changes_nothing(dsn):
-    """A released key that is waiting, in a batch, published or absent is refused or ignored and moves nothing. (O7)"""
+async def test_o7_releasing_an_item_that_is_not_held_is_a_refusal_and_changes_nothing(dsn):
+    """A released id that is in a batch is a Conflict, an id no one holds is NotFound, and nothing moves. (O7, #1537 PR3)"""
+    from defender.jobs.errors import Conflict, NotFound
+
     async with learning_store(dsn) as store:
         await store.publish_findings(BLUE, "run-1", [finding("f1"), finding("f2")], kind="finding")
         claim = await store.claim(BLUE, AUTHOR_LANE, owner="host-a", thresholds={**ONE, "finding": 2})
         assert keys(claim) == [("finding", "f1"), ("finding", "f2")]
         before = {k: (i.status, i.batch_id, i.attempts) for k, i in (await items(store)).items()}
-        for kind, key in (("finding", "f1"), ("finding", "nope")):
-            with contextlib.suppress(Exception):  # refusing is as good as ignoring
-                await store.release_held(BLUE, kind, key)
+        [f1] = [i for i in await store.work(BLUE) if i.key == "f1"]
+        with pytest.raises(Conflict):
+            await release_item(store, BLUE, f1.id)
+        with pytest.raises(NotFound):
+            await release_item(store, BLUE, "00000000-0000-4000-8000-000000001537")
         assert {k: (i.status, i.batch_id, i.attempts) for k, i in (await items(store)).items()} == before

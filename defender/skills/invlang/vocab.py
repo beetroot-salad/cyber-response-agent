@@ -1,7 +1,7 @@
 
 from __future__ import annotations
 
-from defender._vocab import DISPOSITION_VALUES
+from defender._vocab import CONFIDENCE_VALUES, DISPOSITION_VALUES
 from defender.records import closing
 
 # The one vocabulary here that invlang does not own: `disposition` is also validated in
@@ -69,13 +69,6 @@ ANCHOR_KINDS: tuple[str, ...] = closing.ANCHOR_KINDS
 #: frontier reacts to this; the verdict and its escalation are unchanged.
 AUTHZ_INDET_BASIS: tuple[str, ...] = ("retry", "exhausted")
 
-#: `:H h-NNN.authz`' `on_indet` cell: what an unsettled answer to the contract MEANS, decided at
-#: PLAN before the search runs. `escalate` (the default): an unsettled contract escalates.
-#: `process-gap`: a search that was worked and came back empty (`basis=exhausted`) may close
-#: `unsanctioned-benign` — accepted only for an anchor kind with a home system in
-#: `ANCHOR_KIND_SYSTEMS`, so the exhaustion can be checked against the system that holds it.
-AUTHZ_ON_INDET: tuple[str, ...] = ("escalate", "process-gap")
-
 #: `:R consultations`' `grounding` cell. `past-case` is excluded: grounding a baseline on a
 #: past case is precedent-by-similarity. (The authorization side conversely excludes
 #: `telemetry-baseline`: a statistical pattern is context, never a verdict.)
@@ -131,6 +124,17 @@ IMPACT_DIMENSION: tuple[str, ...] = (
 IMPACT_VERDICT: tuple[str, ...] = ("within", "exceeds", "indeterminate")
 
 CONCLUDE_IMPACT_VERDICT: tuple[str, ...] = ("none", *IMPACT_VERDICT)
+
+#: A benign close's confidence, best first (#1545). The model states one; the close commits
+#: the lower of that and the ceiling the run's record earns
+#: (`validate._gating.benign_confidence_ceiling`): `high` needs every load-bearing step
+#: authorized AND a baseline the activity matches, `medium` the authorization alone, `low` a
+#: matching baseline with nothing an attacker would have gained.
+CONCLUDE_CONFIDENCE: tuple[str, ...] = CONFIDENCE_VALUES
+
+#: What an attacker who did this would have gained (#1545). `none` is the only value that
+#: lets a benign close rest on a baseline without an authorization record.
+CONCLUDE_ATTACKER_GAIN: tuple[str, ...] = ("none", "some")
 
 #: Impact grounding excludes `past-case`: impact is about this event's consequence, which a
 #: past case cannot establish. `_check_impact_resolution_refs` refuses it by name.
@@ -243,7 +247,6 @@ SLOTS: dict[str, tuple[str, ...]] = {
     "anchor-kinds": ANCHOR_KINDS,
     "auth-kinds": AUTH_KINDS,
     "authz.basis": AUTHZ_INDET_BASIS,
-    "authz.on_indet": AUTHZ_ON_INDET,
     "consultation.grounding": CONSULTATION_GROUNDING,
     "consultation.lookup_outcome": TACIT_LOOKUP_OUTCOMES,
     "impact.dimension": IMPACT_DIMENSION,
@@ -251,6 +254,8 @@ SLOTS: dict[str, tuple[str, ...]] = {
     "impact.grounding": IMPACT_GROUNDING,
     "conclude.impact_verdict": CONCLUDE_IMPACT_VERDICT,
     "conclude.impact_severity": IMPACT_SEVERITY,
+    "conclude.confidence": CONCLUDE_CONFIDENCE,
+    "conclude.attacker_gain": CONCLUDE_ATTACKER_GAIN,
     "compute.role": COMPUTE_ROLE,
     "compute.zone": COMPUTE_ZONE,
     "compute.provenance": PROVENANCE,

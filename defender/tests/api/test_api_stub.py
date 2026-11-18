@@ -85,6 +85,7 @@ INV = Investigation(
     investigation_id="b1000000-0000-4000-8000-000000000001", alert_id="a1000000-0000-4000-8000-000000000001", status="completed", disposition="benign",
     request_key="req-1", attempt=1,
     cost_usd=1.5, cost_is_lower_limit=False, created_at=NOW, artifacts=["report.md", "gather_raw/L1/0.json"],
+    update_ticket=False,  # #1471 C-4: the request's flag
     # The knowledge revision the run used (`current` = the run record's `fresh`).
     knowledge={"status": "current", "commit": "f4e5c0de0000f4e5c0de0000f4e5c0de0000f4e5",
                "stale_kind": None},
@@ -157,6 +158,10 @@ EXISTING_ROUTES = {
     # #1485 O1, O2: the tenant's set-aside items and parked batches (Names, Routes)
     ("GET", API + "/tenants/{tenant_id}/learning/items"),
     ("GET", API + "/tenants/{tenant_id}/learning/parked-batches"),
+    # #1537 O1-O3: a person's release of an item and of a batch, and an abandon request (names as the design's API section gives them)
+    ("POST", API + "/tenants/{tenant_id}/learning/items/{item_id}/release"),
+    ("POST", API + "/tenants/{tenant_id}/learning/batches/{batch_id}/release"),
+    ("POST", API + "/tenants/{tenant_id}/learning/batches/{batch_id}/abandon"),
 }
 #: What #1306 adds (design "Endpoints"; param names pinned by this suite).
 IDENTITY_ROUTES = {
@@ -359,12 +364,17 @@ def test_the_published_routes_are_exactly_1131s_list_under_tenants_plus_1306s() 
 #: The routes this suite does not script: #1470's config routes answer from the real record store (`test_1470_*`), and the
 #: check still refuses (the `REFUSED` sweep below).
 CONFIG = {route for route in EXISTING_ROUTES if any(w in route[1] for w in ("/systems", "/adapters", "/case-record"))}
+#: #1537's three learning actions answer from the real adapter over a real store (`test_learning_actions_1537`: success,
+#: refusals, audit, roles), so they are not scripted here; the sweeps over `EXISTING_ROUTES` (declared problems) still cover them.
+LEARNING_ACTIONS = {route for route in EXISTING_ROUTES
+                    if route[0] == "POST" and route[1].endswith(("/release", "/abandon")) and "/learning/" in route[1]}
 
 
 def test_the_happy_path_table_covers_every_existing_route() -> None:
-    """Every route is scripted here, answered by the real store (`CONFIG`), or refused with its owner's number."""
-    assert {route for route, *_ in HAPPY} == EXISTING_ROUTES - CONFIG
+    """Every route is scripted here, answered by the real store (`CONFIG`, `LEARNING_ACTIONS`), or refused with its owner's number."""
+    assert {route for route, *_ in HAPPY} == EXISTING_ROUTES - CONFIG - LEARNING_ACTIONS
     assert len(CONFIG) == 10
+    assert len(LEARNING_ACTIONS) == 3
 
 
 def test_the_api_never_loads_the_runtime_or_the_learning_loop() -> None:
@@ -529,14 +539,15 @@ def test_1379_a_client_request_id_postgresql_cannot_hold_is_a_422_naming_it(
 # --- creates: 201 or replay ----------------------------------------------------------------
 
 
-@pytest.mark.parametrize(("path", "body", "port", "record", "location"), [
+@pytest.mark.parametrize(("path", "body", "port", "record", "location", "flag"), [
+    # #1471 C-3/C-4: the investigation create's port call also carries the request's `update_ticket` (default false).
     (f"{T}/investigations", {"alert_id": "a1000000-0000-4000-8000-000000000001", "client_request_id": "r1"}, "create_investigation",
-     INV, f"{T}/investigations/b1000000-0000-4000-8000-000000000001"),
+     INV, f"{T}/investigations/b1000000-0000-4000-8000-000000000001", [False]),
     (f"{T}/learning-jobs", {"investigation_id": "b1000000-0000-4000-8000-000000000001", "client_request_id": "r1"},
-     "create_learning_job", JOB, f"{T}/learning-jobs/c1000000-0000-4000-8000-000000000001"),
+     "create_learning_job", JOB, f"{T}/learning-jobs/c1000000-0000-4000-8000-000000000001", []),
 ])
 def test_a_create_is_a_201_with_location_only_when_the_store_created(
-    path: str, body: dict[str, str], port: str, record: Any, location: str,
+    path: str, body: dict[str, str], port: str, record: Any, location: str, flag: list[bool],
 ) -> None:
     """A create is one write call, principal first; 201 with Location when created, 200 without on a replay; the route announces nothing. (Ports, P2)"""
     created = Api(**{port: (record, True)})
@@ -544,8 +555,15 @@ def test_a_create_is_a_201_with_location_only_when_the_store_created(
     assert response.status_code == 201
     assert response.headers["Location"] == location
     assert response.json() == record.model_dump(mode="json")
-    [((principal, *rest), kwargs)] = created.ports.called(port)
-    assert (principal, rest, kwargs) == (Principal(tenant_id=A, actor_id=created.user), [*body.values()], {})
+    [(args, kwargs)] = created.ports.called(port)
+    # #1471 C-4 names the flag, not how the route passes it: bound to the port's own signature, positional or keyword
+    # are the same call, and the flag must still be passed (not left to the port's default).
+    signature = inspect.signature(getattr(ports_module.Writes, port))
+    params = [name for name in signature.parameters if name != "self"]
+    expected = [Principal(tenant_id=A, actor_id=created.user), *body.values(), *flag]
+    assert args[:1] == (expected[0],), "principal first"
+    bound = signature.bind(None, *args, **kwargs).arguments
+    assert {k: v for k, v in bound.items() if k != "self"} == dict(zip(params, expected, strict=True)), (args, kwargs)
     assert [name for name, _ in created.ports.written] == [port]
     assert created.ports.audits == [], "the route announces nothing"
 
@@ -833,6 +851,21 @@ def test_a_validation_problem_lists_what_failed_and_never_echoes_the_value() -> 
     assert str(secret) not in response.text
 
 
+def test_1537_the_published_contract_declares_the_learning_actions_refusals_and_their_success_status() -> None:
+    """Each of the three learning actions publishes the 404 (not the tenant's) and the 409 (not in an actionable state) its refusals answer with, as problems; a release answers 200 and an abandon request 202. (O1-O3, PR3)"""
+    doc = Api().client.get(API + "/openapi.json").json()
+    base = API + "/tenants/{tenant_id}/learning"
+    for path, success, other in ((f"{base}/items/{{item_id}}/release", "200", "202"),
+                                 (f"{base}/batches/{{batch_id}}/release", "200", "202"),
+                                 (f"{base}/batches/{{batch_id}}/abandon", "202", "200")):
+        responses = doc["paths"][path]["post"]["responses"]
+        assert {success, "404", "409"} <= set(responses), (path, sorted(responses))
+        assert other not in responses, (path, sorted(responses))
+        for refusal in ("404", "409"):
+            assert responses[refusal]["content"] == {
+                "application/problem+json": {"schema": {"$ref": "#/components/schemas/Problem"}}}, (path, refusal)
+
+
 def test_the_published_contract_declares_each_routes_problems() -> None:
     doc = Api().client.get(API + "/openapi.json").json()
     assert "HTTPValidationError" not in json.dumps(doc)
@@ -1009,7 +1042,8 @@ def test_a_blank_client_request_id_is_refused() -> None:
 def test_a_disposition_outside_the_vocabulary_cannot_be_served() -> None:
     with pytest.raises(ValueError, match="not a disposition"):
         Investigation(investigation_id="i", alert_id="a", status="completed", disposition="fine",
-                      request_key="k", attempt=1, cost_usd=0.0, cost_is_lower_limit=False, created_at=NOW)
+                      request_key="k", attempt=1, cost_usd=0.0, cost_is_lower_limit=False, created_at=NOW,
+                      update_ticket=False)
 
 
 @pytest.mark.parametrize("bad", ["a/b", "a b", "a?b#c", "é", ""])
@@ -1028,7 +1062,7 @@ def test_a_principal_carries_a_checked_tenant(legacy) -> None:
 def test_a_naive_time_cannot_be_served() -> None:
     with pytest.raises(ValueError, match="timezone"):
         Investigation(investigation_id="i", alert_id="a", status="queued", cost_usd=0.0, cost_is_lower_limit=False,
-                      request_key="k", attempt=1, created_at=NOW.replace(tzinfo=None))
+                      request_key="k", attempt=1, created_at=NOW.replace(tzinfo=None), update_ticket=False)
 
 
 # --- pagination ----------------------------------------------------------------------------
@@ -1147,8 +1181,9 @@ BATCH_2 = "d1000000-0000-4000-8000-000000000002"
 LEARNING_ITEMS = f"{T}/learning/items"
 LEARNING_PARKED = f"{T}/learning/parked-batches"
 SCRIPT_REASON = '<script>alert("x")</script> & "q" \\n </td>'
-ITEM_WIRE_FIELDS = {"item_id", "kind", "key", "status", "reason", "source_run", "batch_id", "pr_number", "updated_at"}
-PARKED_WIRE_FIELDS = {"batch_id", "batch_kind", "lane", "blocks_lane", "branch", "pr_number", "reason", "created_at", "items"}
+ITEM_WIRE_FIELDS = {"item_id", "kind", "key", "status", "reason", "cause", "source_run", "batch_id", "pr_number", "updated_at"}
+PARKED_WIRE_FIELDS = {"batch_id", "batch_kind", "lane", "blocks_lane", "branch", "pr_number", "reason", "cause", "parked_at",
+                      "releasable", "abandon_requested_at", "last_checked", "created_at", "items"}
 
 
 def _learning_api(**answers: Any) -> Api:
@@ -1164,9 +1199,9 @@ def _set_aside_rows() -> list[Any]:
     from defender.api.models import SetAsideItem
 
     first = SetAsideItem(item_id=ITEM_ID_2, kind="finding", key="run 1/f 02", status="held", reason=SCRIPT_REASON,
-                         source_run="run-1", batch_id=BATCH, pr_number=7, updated_at=LATER)
+                         cause="curator_held", source_run="run-1", batch_id=BATCH, pr_number=7, updated_at=LATER)
     return [first, first.model_copy(update={"item_id": ITEM_ID, "key": "run 1/f 01", "status": "dead", "reason": None,
-                                            "source_run": None, "batch_id": None, "pr_number": None})]
+                                            "cause": "attempt_ceiling", "source_run": None, "batch_id": None, "pr_number": None})]
 
 
 def _parked_rows() -> list[Any]:
@@ -1174,10 +1209,13 @@ def _parked_rows() -> list[Any]:
     from defender.api.models import ParkedBatch, ParkedItemRef
 
     first = ParkedBatch(batch_id=BATCH_2, batch_kind="author", lane="author", blocks_lane=True, branch="learning/b2",
-                        pr_number=9, reason="the forge refused 3 times", created_at=LATER,
+                        pr_number=9, reason="the forge refused 3 times", cause="forge_credential_refused",
+                        parked_at=LATER, releasable=True, abandon_requested_at=None, last_checked=NOW, created_at=LATER,
                         items=[ParkedItemRef(kind="finding", key="f1")])
     return [first, first.model_copy(update={"batch_id": BATCH, "created_at": NOW, "items": [], "blocks_lane": False,
-                                            "batch_kind": "revert", "pr_number": None, "reason": None})]
+                                            "batch_kind": "revert", "pr_number": None, "reason": None,
+                                            "cause": "foreign_pr", "parked_at": None, "releasable": False,
+                                            "abandon_requested_at": LATER, "last_checked": None})]
 
 
 #: (list name, path, port, rows, the position the second page must start after)
@@ -1224,9 +1262,13 @@ def test_1485_a_learning_list_serves_exactly_its_wire_fields_and_a_reason_as_pla
         assert '&lt;' not in response.text
         assert '\\u003c' not in response.text
         assert (served[1]["status"], served[1]["reason"], served[1]["batch_id"], served[1]["pr_number"]) == ("dead", None, None, None)
+        assert (served[0]["cause"], served[1]["cause"]) == ("curator_held", "attempt_ceiling")
     else:
         assert [set(i) for i in served[0]["items"]] == [{"kind", "key"}]
         assert (served[0]["blocks_lane"], served[1]["blocks_lane"], served[1]["items"]) == (True, False, [])
+        assert (served[0]["cause"], served[0]["releasable"], served[1]["releasable"]) == ("forge_credential_refused", True, False)
+        assert (served[0]["abandon_requested_at"], served[1]["parked_at"], served[1]["last_checked"]) == (None, None, None)
+        assert served[1]["abandon_requested_at"] is not None
 
 
 @pytest.mark.parametrize("path", [LEARNING_ITEMS, LEARNING_PARKED])

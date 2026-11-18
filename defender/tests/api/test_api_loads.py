@@ -140,7 +140,7 @@ assert len(ids) >= 9, ids
 for adapter in ids:
     catalog.module(adapter)
     record = SystemRecord(system_id=adapter, version=1, adapter_id=adapter, settings={}, access="")
-    case = CaseRecord(version=1, system_id=adapter, comment_body="a case comment")
+    case = CaseRecord(version=1, system_id=adapter)
     judge_records(TenantRecords(systems={adapter: record}, case=case), None, catalog=catalog)
 print(json.dumps(sorted(sys.modules)))
 """

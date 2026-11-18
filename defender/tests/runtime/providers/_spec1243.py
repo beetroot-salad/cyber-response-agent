@@ -512,6 +512,8 @@ class WireAnswer:
     status: int
     body: Mapping[str, Any]
     headers: Mapping[str, str] = field(default_factory=dict)
+    #: Real seconds the endpoint waits before it answers: a request hung past its caller's deadline.
+    delay: float = 0.0
 
 
 def wire_error(status: int, *, retry_after: str | None = None) -> WireAnswer:
@@ -523,9 +525,10 @@ def wire_error(status: int, *, retry_after: str | None = None) -> WireAnswer:
 class FakeProvider:
     """A provider endpoint on 127.0.0.1: answers each POST from `answers` in order (the last one
     repeats) and counts every hit, with the real monotonic time it arrived (`hit_times`). A
-    context manager; `url` is its base URL."""
+    context manager; `url` is its base URL. `keep_alive`: it speaks HTTP/1.1 and keeps each
+    connection open, so a client pools it (the stdlib default closes after every answer)."""
 
-    def __init__(self, answers: Sequence[WireAnswer]) -> None:
+    def __init__(self, answers: Sequence[WireAnswer], *, keep_alive: bool = False) -> None:
         assert answers, "a fake provider needs at least one answer"
         self.answers = list(answers)
         self.hits: list[str] = []
@@ -534,6 +537,8 @@ class FakeProvider:
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1" if keep_alive else BaseHTTPRequestHandler.protocol_version
+
             def do_POST(self) -> None:  # noqa: N802 — the stdlib's name
                 length = int(self.headers.get("content-length") or 0)
                 self.rfile.read(length)
@@ -541,6 +546,8 @@ class FakeProvider:
                     owner.hits.append(self.path)
                     owner.hit_times.append(time.monotonic())
                     answer = owner.answers[min(len(owner.hits), len(owner.answers)) - 1]
+                if answer.delay:
+                    time.sleep(answer.delay)
                 payload = json.dumps(answer.body).encode("utf-8")
                 self.send_response(answer.status)
                 self.send_header("content-type", "application/json")
@@ -678,8 +685,7 @@ def run_sibling(tmp_path: Path, ep: Path, main: S.MainScript) -> S.Drive:
     try:
         # The launch-time publish, in-process.
         d.rc = run_mod.main(argv, directory=directory_for_argv(argv), lifecycle=lifecycle, visualize=lambda *_a, **_k: None,
-                                    preflight=lambda *_a, **_k: 0, ticket_writer=S.NoTicket(),
-                                    publish=in_process_publish())
+                                    preflight=lambda *_a, **_k: 0, publish=in_process_publish())
     except SystemExit as exit_:
         d.refusal = exit_.code if isinstance(exit_.code, str) else None
         d.rc = exit_.code if isinstance(exit_.code, int) else 1

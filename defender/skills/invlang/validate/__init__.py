@@ -198,6 +198,8 @@ from ._gating import (
     hold_capabilities,
     known_capabilities,
     release_capabilities,
+    benign_confidence_ceiling,
+    committed_benign_confidence,
 )
 from ._entry_bounds import entry_bound_refusals
 from ._closure import (
@@ -509,6 +511,8 @@ __all__ = [
     "CEILING_STATES",
     "CeilingReceipt",
     "class_slots",
+    "benign_confidence_ceiling",
+    "committed_benign_confidence",
     "conclude_ceiling_test_rows",
     "conclude_runtime_evidence_rows",
     "dataclass",

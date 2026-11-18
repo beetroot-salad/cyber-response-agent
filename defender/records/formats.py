@@ -16,6 +16,7 @@ if TYPE_CHECKING:
         AlertMappingFault as AlertMappingFault,
         AlertRecord as AlertRecord,
         AlertRefused as AlertRefused,
+        case_key_of as case_key_of,
         AlertReplaced as AlertReplaced,
         REFUSE_SIZE as REFUSE_SIZE,
         MAPPING_KEYS as MAPPING_KEYS,
@@ -26,6 +27,7 @@ if TYPE_CHECKING:
         derive_facts as derive_facts,
         digest_of as digest_of,
         parse_alert_record as parse_alert_record,
+        ticket_of_record as ticket_of_record,
         read_operator_alert as read_operator_alert,
         unrecorded_facts as unrecorded_facts,
         read_record as read_record,
@@ -167,7 +169,7 @@ if TYPE_CHECKING:
 
 #: Each name this door serves, and the submodule that defines it.
 _HOMES: dict[str, str] = {
-    **dict.fromkeys(("ALERT_BYTE_CAP", "ALERT_MAPPING_MISSING", "DISPLAY_CAPS", "AlertFacts", "AlertMapping", "AlertMappingFault", "AlertRecord", "AlertRefused", "AlertReplaced", "MAPPING_KEYS", "admit", "check_mapping", "derive_display", "derive_facts", "digest_of", "parse_alert_record", "read_operator_alert", "read_record", "record_beside", "record_text", "unrecorded_facts", "verified_alert", "verified_document", "verified_input", "verify_input_bytes", "REFUSE_SIZE",), "_alert_input"),  # lint-run-records: ok — the submodule `records/_alert_input.py`, not the run folder of that name
+    **dict.fromkeys(("ALERT_BYTE_CAP", "ALERT_MAPPING_MISSING", "DISPLAY_CAPS", "AlertFacts", "AlertMapping", "AlertMappingFault", "AlertRecord", "AlertRefused", "AlertReplaced", "MAPPING_KEYS", "admit", "case_key_of", "check_mapping", "derive_display", "derive_facts", "digest_of", "parse_alert_record", "ticket_of_record", "read_operator_alert", "read_record", "record_beside", "record_text", "unrecorded_facts", "verified_alert", "verified_document", "verified_input", "verify_input_bytes", "REFUSE_SIZE",), "_alert_input"),  # lint-run-records: ok — the submodule `records/_alert_input.py`, not the run folder of that name
     **dict.fromkeys(("UNCHANGED_LEAD", "UNCHANGED_NOTICE", "artifact_names", "committed_investigation_reason", "encodable_or_reason", "needs_baseline", "register_invlang_validator", "render_diagnostic", "utf8_len", "validate_artifact",), "_artifact_schema"),
     **dict.fromkeys(("AppendRecord", "Episode", "EpisodeRefused", "refuse_bad_episode_id",), "_episode_handle"),
     **dict.fromkeys(("EpisodePaths", "LAYOUT", "OracleStorePaths", "WORLD_LEAVES", "WorldPaths",), "_episode_paths"),
