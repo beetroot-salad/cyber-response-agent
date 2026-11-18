@@ -294,7 +294,7 @@ def _baseline_entries(receipts: tuple[RuntimeEvidenceReceipt, ...]) -> tuple[clo
                 anchor_id=receipt.anchor_id, window_start=closing.canonical_instant(receipt.window_start),
                 window_end=closing.canonical_instant(receipt.window_end), result=receipt.result,
                 reasoning=receipt.reasoning)
-        except ValueError as refused:
+        except (ValueError, OverflowError) as refused:  # the build never fails
             _dropped("baseline", receipt.window, refused)
             continue
         if closing.baseline_lines_length((*kept, entry)) > closing.BASELINE_LINES_BOUND:
@@ -303,7 +303,7 @@ def _baseline_entries(receipts: tuple[RuntimeEvidenceReceipt, ...]) -> tuple[clo
     return tuple(kept)
 
 
-def _dropped(what: str, row: str, refused: ValueError) -> None:
+def _dropped(what: str, row: str, refused: ValueError | OverflowError) -> None:
     """A row the walkers accepted that the record still refuses: dropped and logged, never a
     failed build. The walkers share the record's vocabulary checks (`closing.grounding_acceptable`,
     the ceiling states), so what reaches here is what only the record checks, such as an invisible

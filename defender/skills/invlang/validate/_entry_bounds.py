@@ -100,4 +100,7 @@ def _window(written: Any) -> str:
     parsed = _parse_window(written) if isinstance(written, str) else None
     if parsed is None:
         return str(written)
-    return f"{closing.canonical_instant(parsed[0])}/{closing.canonical_instant(parsed[1])}"
+    try:
+        return f"{closing.canonical_instant(parsed[0])}/{closing.canonical_instant(parsed[1])}"
+    except (ValueError, OverflowError):  # the walker refuses such a row; the gate never raises
+        return str(written)

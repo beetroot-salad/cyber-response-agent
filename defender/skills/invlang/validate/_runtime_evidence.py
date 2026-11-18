@@ -56,12 +56,13 @@ class RuntimeEvidenceReceipt:
 
 
 
-def _parse_window(text: str) -> tuple[dt.datetime, dt.datetime] | None:
-    """An `<start>/<end>` window as two aware UTC datetimes, or `None` if either half fails.
+def _parse_halves(text: str) -> tuple[dt.datetime, dt.datetime] | None:
+    """An `<start>/<end>` window as two aware datetimes, as written (any offset), or `None` if
+    either half fails.
 
     A real parse, not a string comparison, since the guard must order instants. Through
     `_clock.parse_iso_utc`, which owns the naive-is-UTC rule (a local reading would vary by host,
-    and comparing naive with aware raises). The caller fails closed on `None`.
+    and comparing naive with aware raises).
     """
     start_text, sep, end_text = text.partition("/")
     if not sep:
@@ -71,6 +72,20 @@ def _parse_window(text: str) -> tuple[dt.datetime, dt.datetime] | None:
     if start is None or end is None:
         return None
     return start, end
+
+
+def _parse_window(text: str) -> tuple[dt.datetime, dt.datetime] | None:
+    """An `<start>/<end>` window as two UTC datetimes, or `None` if either half fails to parse or
+    has no UTC form (`0001-01-01T00:00:00+05:00` is before the first representable instant). The
+    caller fails closed on `None`; the record stores the window in UTC, so a window with no UTC
+    form is no baseline it could keep."""
+    halves = _parse_halves(text)
+    if halves is None:
+        return None
+    try:
+        return halves[0].astimezone(dt.UTC), halves[1].astimezone(dt.UTC)
+    except OverflowError:
+        return None
 
 
 
@@ -150,6 +165,13 @@ def _walk_runtime_evidence_rows(companion: CompanionBody) -> _BaselineWalk:
             continue
         seen.add(identity)
         parsed = _parse_window(window)
+        if parsed is None and _parse_halves(window) is not None:
+            errors.append(
+                f"{where}: `effective_window` {window!r} has an end with no UTC form (it falls "
+                f"outside the years 1-9999 once read in UTC) — the closing record keeps a "
+                f"window in UTC. Write both ends as instants within that range"
+            )
+            continue
         if parsed is None:
             errors.append(
                 f"{where}: `effective_window` {window!r} is not an "
