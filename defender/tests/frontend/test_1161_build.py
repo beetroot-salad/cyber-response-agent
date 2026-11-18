@@ -88,21 +88,30 @@ def _copy(tmp_path: Path, built: Path, **override: bytes | None) -> Path:
     return copy_frontend(tmp_path / "copy", inputs_override=inputs, node_modules_from=node_modules_of(built))
 
 
+PREVIOUS_BUILD = "<html>the previous build</html>"
+
+
 def _failing_build(frontend: Path) -> subprocess.CompletedProcess[str]:
-    """`bun run build` over a copy holding a stale `dist/index.html`, which a failed build must leave gone (F1 b)."""
-    (frontend / "dist").mkdir(exist_ok=True)
-    (frontend / "dist" / "index.html").write_text("<html>stale</html>", encoding="utf-8")
+    """`bun run build` over a copy holding a previous build's `dist/index.html`, which a failed build leaves as it was
+    (F1 b: the served folder is only ever one whole build)."""
+    shutil.rmtree(frontend / "dist", ignore_errors=True)
+    (frontend / "dist").mkdir()
+    (frontend / "dist" / "index.html").write_text(PREVIOUS_BUILD, encoding="utf-8")
     return run_bun(frontend, "run", "build")
 
 
-def _no_index(frontend: Path) -> bool:
-    return not (frontend / "dist" / "index.html").exists()
+def _previous_build_kept(frontend: Path) -> bool:
+    """The failed build left the previous build in `dist/` untouched, and nothing half-built anywhere (F1 b)."""
+    index = frontend / "dist" / "index.html"
+    leftovers = [p.name for p in frontend.iterdir() if p.name.startswith("dist") and p.name != "dist"]
+    return index.read_text(encoding="utf-8") == PREVIOUS_BUILD and leftovers == [] and sorted(
+        p.name for p in (frontend / "dist").iterdir()) == ["index.html"]
 
 
 @pytest.mark.parametrize("edit", [None, _add_one, _drop_one], ids=["unmodified", "shape-added", "shape-removed"])
 def test_1161_s2_the_build_follows_the_shape_list_and_fails_on_a_type_error(built_frontend, tmp_path, edit):
-    """A copy builds as is; with one shape added to or removed from the list the build fails and leaves no
-    `index.html`, so every shape has a route and every route a shape. (S2, F1 b)"""
+    """A copy builds as is; with one shape added to or removed from the list the build fails and leaves the
+    previous build as it was, so every shape has a route and every route a shape. (S2, F1 b)"""
     document = json.loads(LIST.read_text(encoding="utf-8"))
     if edit is not None:
         edit(document)
@@ -114,7 +123,7 @@ def test_1161_s2_the_build_follows_the_shape_list_and_fails_on_a_type_error(buil
     else:
         done = _failing_build(frontend)
         assert done.returncode != 0, "the build accepted a shape list its router does not match"
-        assert _no_index(frontend)
+        assert _previous_build_kept(frontend)
 
 
 #: Every TypeScript source of the app outside the generated types and declaration files (a `skipLibCheck` honestly skips
@@ -132,36 +141,36 @@ def test_1540_f1_the_source_set_the_type_error_test_walks_spans_the_shell_and_th
 
 @pytest.mark.parametrize("source", SOURCES, ids=[s.as_posix() for s in SOURCES])
 def test_1161_s2_the_build_fails_on_a_type_error_in_any_source_file(built_frontend, tmp_path, source):
-    """One unrelated type error put in this source file fails the build, and a stale `dist/index.html` is gone
-    afterwards (`dist/` is removed first). The unmodified copy builds (control, above). (F1 b, S2, B8)"""
+    """One unrelated type error put in this source file fails the build, and the previous build in `dist/` is left as
+    it was (the build writes to a staging folder). The unmodified copy builds (control, above). (F1 b, S2, B8)"""
     frontend = _copy(tmp_path, built_frontend)
     with (frontend / source).open("a", encoding="utf-8") as handle:
         handle.write("\nexport const unrelatedTypeError: number = 'not a number';\n")
     done = _failing_build(frontend)
     assert done.returncode != 0, f"{source}: the build accepted a type error"
-    assert _no_index(frontend), f"{source}: index.html remains"
+    assert _previous_build_kept(frontend), f"{source}: the failed build touched dist/"
 
 
 @pytest.mark.parametrize(("document", "words"), [pytest.param(d, w, id=i) for i, d, w in REFUSED])
 def test_1161_s2_the_build_refuses_every_list_the_api_refuses(built_frontend, tmp_path, document, words):
-    """Each list in the shared table fails the build, in the same words as the API's reader, and leaves no
-    `index.html` (a stale one included): a grammar that could match outside its segment, or a template that does not compile. (F1 c, S2)"""
+    """Each list in the shared table fails the build, in the same words as the API's reader, and leaves the
+    previous build as it was: a grammar that could match outside its segment, or a template that does not compile. (F1 c, S2)"""
     frontend = _copy(tmp_path, built_frontend, addresses=_bytes(document))
     done = _failing_build(frontend)
     assert done.returncode != 0, "the build accepted a list the API refuses"
     assert words in done.stderr + done.stdout, done.stderr[-1500:]
-    assert _no_index(frontend)
+    assert _previous_build_kept(frontend)
 
 
 @pytest.mark.parametrize("omitted", _declared())
 def test_1540_pr6_a_build_missing_a_declared_input_fails(built_frontend, tmp_path, omitted):
-    """The copy lacks this one input the build declares: the build fails and leaves no `index.html`, a stale one
-    included (the unmodified copy above is the sufficiency control). (PR6, F1 b)"""
+    """The copy lacks this one input the build declares: the build fails and leaves the previous build as it
+    was (the unmodified copy above is the sufficiency control). (PR6, F1 b)"""
     frontend = copy_frontend(tmp_path / "copy", inputs_override={omitted: None},
                              node_modules_from=node_modules_of(built_frontend))
     done = _failing_build(frontend)
     assert done.returncode != 0, f"the build ran without {omitted}"
-    assert _no_index(frontend)
+    assert _previous_build_kept(frontend)
 
 
 def _drop_property(document: dict[str, Any], schema: str, prop: str) -> None:
@@ -196,7 +205,7 @@ def test_1540_f3_a_document_without_a_field_a_screen_reads_fails_the_build(built
         (frontend / OPENAPI).write_bytes(_bytes(document))
         done = _failing_build(frontend)
         assert done.returncode != 0, "the build accepted a document that lacks a field a screen reads"
-        assert _no_index(frontend)
+        assert _previous_build_kept(frontend)
 
 
 #: The investigation screen's read, as the document keys it.
@@ -228,7 +237,7 @@ def test_1540_f3_a_document_whose_read_takes_parameters_the_screen_does_not_send
     frontend = _copy(tmp_path, built_frontend, openapi=_bytes(document))
     done = _failing_build(frontend)
     assert done.returncode != 0, "the build accepted a read whose parameters the screen does not send"
-    assert _no_index(frontend)
+    assert _previous_build_kept(frontend)
 
 
 def test_1161_the_test_build_never_writes_the_checkout(built_frontend):

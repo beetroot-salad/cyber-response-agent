@@ -308,7 +308,7 @@ def test_the_credential_proxy_mounts_the_whole_data_root_and_no_tenant_folder_A2
 
 FRONTEND = REPO_ROOT / "defender" / "frontend"
 THEME_IN_KEYCLOAK = f"/opt/keycloak/themes/{THEME_NAME}"
-_BUILD_OUTPUTS = {"node_modules", "dist", "dist-staging", "generated"}
+_BUILD_OUTPUTS = {"node_modules", "dist", "dist-staging", "dist-previous", "generated"}
 
 
 def _theme_stylesheet(theme: Path) -> Path:

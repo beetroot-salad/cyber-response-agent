@@ -1,7 +1,8 @@
 // The frontend build (#1161 S2, B8, #1540 F1): the generated sources, the type check and the source check, the app by
-// Vite, then the address matcher alone, in library mode. Everything is written to `dist-staging/`, which becomes `dist/`
-// only once every step has succeeded: a failed build, at any step, leaves no `dist/` at all.
-import { renameSync, rmSync } from "node:fs";
+// Vite, then the address matcher alone, in library mode. Everything is written to `dist-staging/`, which replaces `dist/`
+// only once every step has succeeded (F1 b): `dist/` is only ever one whole build, and a failed build, at any step,
+// leaves the previous one being served as it was.
+import { existsSync, renameSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "vite";
@@ -10,6 +11,7 @@ import { check } from "./source-check.mjs";
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dist = path.join(root, "dist");
 const staging = path.join(root, "dist-staging");
+const previous = path.join(root, "dist-previous");
 
 async function main() {
   // Run in this process, so the build does not depend on which runtime started it. On a bad input it exits non-zero
@@ -34,11 +36,14 @@ async function main() {
       lib: { entry: path.join(root, "src", "addresses.ts"), formats: ["es"], fileName: () => "addresses.mjs" },
     },
   });
+  // Two renames: the old build steps aside and the new one takes its name, so `dist/` is missing only between them.
+  if (existsSync(dist)) renameSync(dist, previous);
   renameSync(staging, dist);
+  rmSync(previous, { recursive: true, force: true });
 }
 
-rmSync(dist, { recursive: true, force: true });
 rmSync(staging, { recursive: true, force: true });
+rmSync(previous, { recursive: true, force: true });
 try {
   await main();
 } catch (error) {

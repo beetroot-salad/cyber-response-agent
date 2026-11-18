@@ -74,7 +74,7 @@ def _chromium_present() -> bool:
 
 
 #: What a build writes or installs in the frontend folder; never part of what a build is made from.
-_BUILD_OUTPUTS = ("node_modules", "dist", "dist-staging", "generated")
+_BUILD_OUTPUTS = ("node_modules", "dist", "dist-staging", "dist-previous", "generated")
 #: A build (with its `node_modules`) unused this long is deleted by the next build; a staging folder left
 #: by a killed build, after a day. Only by age, never "not the current one": a build another run serves stays.
 _KEEP_BUILD = 7 * 24 * 3600
