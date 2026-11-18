@@ -12,11 +12,11 @@ const AUTH_PREFIX = "/api/auth/";
 
 // PR2 by its roots, not by a list of the DOM's network, storage and navigation names. Every way to those starts at a value
 // the DOM library declares globally (`window`, `document`, `fetch`, `localStorage`, `location`, ...) or at `globalThis`,
-// or at a value typed as one of those globals' own types (`Window`, `Document`, `Storage`, ...). Outside the shell no
-// such value and no such type may be named, so how a member is then reached (`.x`, `["x"]`, destructuring, an alias)
-// does not matter. A module outside the shell imports from it only `src/shell/provider` (types from anywhere in it):
-// the shell's other modules are its own. Not covered: a DOM object a screen is handed (a React event's
-// `currentTarget.ownerDocument`); only a sandbox would close that.
+// or at a value of one of those globals' own types (`Window`, `Document`, `Storage`, ...). Outside the shell no such
+// value may be named, no such type may be written, and no expression may have such a type, however it was reached (a
+// parameter, a React ref's `ownerDocument`, an event's `view`). So how a member is then read (`.x`, `["x"]`,
+// destructuring, an alias) does not matter. A module outside the shell imports from it only `src/shell/provider`
+// (types from anywhere in it): the shell's other modules are its own. No module imports a test file.
 
 function isDomLibrary(sourceFile) {
   return /[\\/]lib\.(dom|webworker)[^\\/]*\.d\.ts$/.test(sourceFile.fileName);
@@ -54,6 +54,34 @@ function isDomGlobal(symbol) {
     return isDomLibrary(file) && statement.parent === file;
   };
   return declarations.some(topLevel) && declarations.every((declaration) => declaration.getSourceFile().isDeclarationFile);
+}
+
+/** True when `type`, or a member of it as a union or intersection, is one of the DOM globals' own types. */
+function hasGlobalType(type, types, seen = new Set()) {
+  if (seen.has(type)) return false;
+  seen.add(type);
+  if (type.isUnionOrIntersection()) return type.types.some((member) => hasGlobalType(member, types, seen));
+  const symbol = type.getSymbol() ?? type.aliasSymbol;
+  return symbol !== undefined && types.has(symbol.name) && isDomGlobal(symbol);
+}
+
+/** True when the object or array literal is the left side of `=`, the head of a `for…of`/`for…in`, or nested in such a
+ * pattern: a destructuring assignment, whose parts are reached without an expression of their type. */
+function isAssignmentPattern(node) {
+  let child = node;
+  let parent = node.parent;
+  while (parent) {
+    if (ts.isBinaryExpression(parent)) return parent.left === child && parent.operatorToken.kind === ts.SyntaxKind.EqualsToken;
+    if (ts.isForOfStatement(parent) || ts.isForInStatement(parent)) return parent.initializer === child;
+    if (ts.isParenthesizedExpression(parent) || ts.isArrayLiteralExpression(parent) || ts.isPropertyAssignment(parent)
+        || ts.isObjectLiteralExpression(parent) || ts.isShorthandPropertyAssignment(parent) || ts.isSpreadElement(parent)) {
+      child = parent;
+      parent = parent.parent;
+      continue;
+    }
+    return false;
+  }
+  return false;
 }
 
 /** True when `node` is the name in a type reference (`x: Window`), where a type, not a value, is meant. */
@@ -119,6 +147,7 @@ export function check() {
       if (target.startsWith(shell) && target.replace(/\.(d\.)?tsx?$/, "") !== door) {
         report(node, `${path.relative(root, target)} (import the shell's hooks from src/shell/provider)`);
       }
+      if (/\.test\.tsx?$/.test(target)) report(node, `${path.relative(root, target)} (a test file is never part of the app)`);
     };
     const visit = (node) => {
       if (ts.isStringLiteralLike(node) || ts.isTemplateHead(node)) {
@@ -141,6 +170,15 @@ export function check() {
           report(node, node.text);
         }
       }
+      // A destructuring pattern unpacks a value no expression names, so the pattern's own type is checked as well.
+      let type;
+      if ((ts.isIdentifier(node) && !isTypeName(node)) || ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)
+          || ts.isCallExpression(node) || ts.isObjectBindingPattern(node) || ts.isArrayBindingPattern(node)) {
+        type = checker.getTypeAtLocation(node);
+      } else if ((ts.isObjectLiteralExpression(node) || ts.isArrayLiteralExpression(node)) && isAssignmentPattern(node)) {
+        type = checker.getTypeOfAssignmentPattern(node);
+      }
+      if (type && hasGlobalType(type, types)) report(node, `a value of type ${checker.typeToString(type)}`);
       ts.forEachChild(node, visit);
     };
     visit(file);

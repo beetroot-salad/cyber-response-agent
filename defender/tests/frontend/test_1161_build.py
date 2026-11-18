@@ -529,6 +529,20 @@ def _refused_corpus() -> dict[str, str]:
         "auth path template head": "export const zzForm = (zzWhere: string) => `/api/auth/${zzWhere}`;",
         "auth path JSX attribute": 'export const zzForm = <a href="/api/auth/logout">out</a>;',
         "fetch by Reflect.get on globalThis": 'export const zzForm = () => Reflect.get(globalThis, "fetch");',
+        # A DOM object a screen is handed (a React ref's element, an event's target) leads to the globals too.
+        "cookie from an element's document, access": "export const zzForm = (zzEl: HTMLElement) => zzEl.ownerDocument.cookie;",
+        "cookie from an element's document, element access": (
+            'export const zzForm = (zzEl: HTMLElement) => zzEl.ownerDocument["cookie"];'),
+        "cookie from an element's document, nested destructure": (
+            "export const zzForm = (zzEl: HTMLElement) => { const { ownerDocument: { cookie } } = zzEl; return cookie; };"),
+        "cookie from an element's document, assignment destructure": (
+            "export const zzForm = (zzEl: HTMLElement) => { let zzValue: unknown;"
+            " ({ ownerDocument: { cookie: zzValue } } = zzEl); return zzValue; };"),
+        "cookie from an element's document, for-of head": (
+            "export const zzForm = (zzEl: HTMLElement) => { for (const { ownerDocument: { cookie } } of [zzEl])"
+            " { return cookie; } return undefined; };"),
+        "fetch from an element's window": (
+            'export const zzForm = (zzEl: HTMLElement) => zzEl.ownerDocument.defaultView?.fetch("/x");'),
         # PR2's other half: a module outside the shell reaches it through the provider alone.
         "an import of a shell module other than the provider": 'import { makeLoad } from "../../shell/load";\nexport const zzForm = makeLoad;',
         "a side-effect import of a shell module": 'import "../../shell/attempt";\nexport const zzForm = 1;',
