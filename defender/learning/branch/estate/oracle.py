@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import functools
 import hashlib
 import json
@@ -760,12 +761,15 @@ class Oracle:
         held: list[list[Any]] = [history]
 
         async def attempt() -> tuple[bool, Any]:
-            # Each attempt runs on an event loop of its own (`_run_coroutine`), and the agent's
-            # model outlives it. Entered, the model's HTTP client closes with this loop and the
+            # Each attempt runs on an event loop of its own (`_run_coroutine`), and the agents'
+            # models outlive it. Entered, a model's HTTP client closes with this loop and the
             # next entry builds a fresh one; a connection kept alive from a closed loop failed
-            # the next attempt's request ("Event loop is closed"). Outside the deadline, so the
-            # client closes after a cut-off attempt too.
-            async with self._oracle_agent:
+            # the next attempt's request ("Event loop is closed"). The agents close here, outside
+            # the deadline: closed inside a cut-off run, the client stayed open, and the next
+            # loop reused it. The verifier enters on first use (`_verify`).
+            async with contextlib.AsyncExitStack() as entered:
+                run.entered = entered
+                await entered.enter_async_context(self._oracle_agent)
                 with capture_run_messages() as messages:
                     held.append(messages)
                     return await _within_deadline(run, lambda: self._oracle_agent.run(
@@ -1210,12 +1214,14 @@ class Oracle:
             *([_BRANCH_POINT_LINE.format(point=point)] if point else []),
             _LIVE_ANSWER_LINE if run.live else _RECORDED_ANSWER_LINE, *framed])
         try:
-            # Entered for this loop only, as the oracle's agent is (`_attempt`).
-            async with self._verifier_agent:
-                result = await self._verifier_agent.run(
-                    context, deps=_Run(door=self.door, deadline=self.turn_deadline,
-                                       waits=run.waits, ours=run.ours),
-                    usage_limits=UsageLimits(request_limit=_VERIFIER_STEPS))
+            # Entered on the attempt's loop and closed with the attempt (`_attempt`), not here:
+            # the turn deadline can cut this run off.
+            assert run.entered is not None, "the verifier runs inside an oracle attempt"
+            await run.entered.enter_async_context(self._verifier_agent)
+            result = await self._verifier_agent.run(
+                context, deps=_Run(door=self.door, deadline=self.turn_deadline, waits=run.waits,
+                          ours=run.ours),
+                usage_limits=UsageLimits(request_limit=_VERIFIER_STEPS))
         except _VerifierGaveUp as gave_up:
             return {"passed": False, "reason": str(gave_up)}
         except (UnexpectedModelBehavior, UsageLimitExceeded):

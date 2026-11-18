@@ -9,6 +9,7 @@ wait. The fake provider keeps connections alive, as a real one does, so the clie
 """
 from __future__ import annotations
 
+import dataclasses
 import json
 from pathlib import Path
 from typing import Any
@@ -68,11 +69,22 @@ def _anthropic_model(url: str, monkeypatch: pytest.MonkeyPatch) -> Any:
     return providers.ANTHROPIC.build_model(S.PRICED_MODEL)
 
 
+#: The attempt deadline on the real clock, generous enough for a loaded runner, and a hang past it.
+DEADLINE, HANG = 3.0, 6.0
+
+
+def _hung(answer: P.WireAnswer) -> P.WireAnswer:
+    return dataclasses.replace(answer, delay=HANG)
+
+
+@pytest.mark.parametrize("hung", [None, "oracle", "verifier"], ids=["no-hang", "oracle-hangs", "verifier-hangs"])
 @pytest.mark.parametrize(("answer", "build"),
                          [(_openai_tool_call, _openai_model), (_anthropic_tool_call, _anthropic_model)],
                          ids=["openai-compatible", "anthropic"])
 def test_one_world_s_oracle_serves_successive_calls_through_one_client(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, answer: Any, build: Any) -> None:
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, answer: Any, build: Any, hung: str | None) -> None:
+    """`hung`: that endpoint's first request hangs past the deadline, which cuts its attempt off; the world's next
+    attempt and calls must still get through the same model's client."""
     from pydantic_ai.models import override_allow_model_requests
 
     for var in P._PROXY_VARS:   # a proxy in the environment would carry the requests to 127.0.0.1 elsewhere
@@ -85,14 +97,21 @@ def test_one_world_s_oracle_serves_successive_calls_through_one_client(
     def real(url: str) -> Any:
         return providers.BuiltModel(providers.with_retries(build(url, monkeypatch), timeline.policy()), None)
 
-    with (P.FakeProvider([answer(_submit(rows)) for _, rows in CALLS], keep_alive=True) as oracle_end,
-          P.FakeProvider([answer(VERDICT)], keep_alive=True) as verifier_end):
+    submits = [answer(_submit(rows)) for _, rows in CALLS]
+    verdict = answer(VERDICT)
+    oracle_answers = {None: submits, "oracle": [_hung(submits[0]), *submits],
+                      "verifier": [submits[0], *submits]}[hung]
+    verifier_answers = [_hung(verdict), verdict] if hung == "verifier" else [verdict]
+    with (P.FakeProvider(oracle_answers, keep_alive=True) as oracle_end,
+          P.FakeProvider(verifier_answers, keep_alive=True) as verifier_end):
         reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=real(oracle_end.url),
-                               verifier=real(verifier_end.url), retry_cap=1)
+                               verifier=real(verifier_end.url), retry_cap=2, turn_deadline=DEADLINE)
         with override_allow_model_requests(True):
             served = [S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q=q) for q, _ in CALLS]
 
     assert served == [rows for _, rows in CALLS]
     assert timeline.waits == [], f"the retrier waited {timeline.waits}: a request failed before it was answered"
-    assert (len(oracle_end.hits), len(verifier_end.hits)) == (len(CALLS), len(CALLS)), (
-        f"{len(oracle_end.hits)} oracle and {len(verifier_end.hits)} verifier requests for {len(CALLS)} calls")
+    verifications = len(CALLS) + (hung == "verifier")
+    assert (len(oracle_end.hits), len(verifier_end.hits)) == (len(oracle_answers), verifications), (
+        f"{len(oracle_end.hits)} oracle and {len(verifier_end.hits)} verifier requests; expected "
+        f"{len(oracle_answers)} and {verifications}")

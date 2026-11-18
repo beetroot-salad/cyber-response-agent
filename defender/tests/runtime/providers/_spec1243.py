@@ -503,6 +503,8 @@ class WireAnswer:
     status: int
     body: Mapping[str, Any]
     headers: Mapping[str, str] = field(default_factory=dict)
+    #: Real seconds the endpoint waits before it answers: a request hung past its caller's deadline.
+    delay: float = 0.0
 
 
 def wire_error(status: int, *, retry_after: str | None = None) -> WireAnswer:
@@ -535,6 +537,8 @@ class FakeProvider:
                     owner.hits.append(self.path)
                     owner.hit_times.append(time.monotonic())
                     answer = owner.answers[min(len(owner.hits), len(owner.answers)) - 1]
+                if answer.delay:
+                    time.sleep(answer.delay)
                 payload = json.dumps(answer.body).encode("utf-8")
                 self.send_response(answer.status)
                 self.send_header("content-type", "application/json")
