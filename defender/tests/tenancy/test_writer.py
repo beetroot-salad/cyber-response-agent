@@ -330,15 +330,30 @@ def test_767_narrative_is_the_rendered_lines_not_the_summary(tmp_path, monkeypat
     assert ELLIPSIS not in wire, "a narrative well under the bound was cut anyway"
 
 
+def _filling(filler: str, count: int = 6) -> tuple[tuple, tuple]:
+    """Ceiling and baseline entries of `filler` text whose rendered lines fill each column's aggregate bound (from the
+    constants): the largest record the bounds allow."""
+    from defender.records import closing as C
+
+    def sized(make, bound: int) -> tuple:
+        probes = [make(i, "x") for i in range(count)]
+        lines = [C.ceiling_line(p) if isinstance(p, C.CeilingEntry) else C.baseline_line(p) for p in probes]
+        each = (bound - (count - 1) - sum(len(line) - 1 for line in lines)) // count
+        return tuple(make(i, filler * each) for i in range(count))
+
+    ceiling = sized(lambda i, text: R.ceiling_entry(text, ref=f"l-00{i}"), C.CEILING_LINES_BOUND)
+    baselines = sized(lambda _i, text: R.baseline_entry(text), C.BASELINE_LINES_BOUND)
+    return ceiling, baselines
+
+
 @pytest.mark.parametrize(("why", "filler"), [("two-byte characters", "é"), ("four-byte characters", "🜁")])
 def test_767_comment_body_is_bounded_on_the_wire(tmp_path, monkeypatch, why, filler):
     """The whole wire body (tag line included) is at most 4096 UTF-8 bytes, cut on a whole character with a visible
-    ellipsis, however large the record's lines. O7."""
-    from defender.records import closing as C
-
+    ellipsis, however large the record's lines (both columns at their aggregate bounds). O7."""
     _setup(monkeypatch, tmp_path)
-    entries = tuple(R.ceiling_entry(filler * C.NOTE_BOUND, ref=f"l-00{n}") for n in range(4))
-    run_dir = make_run(tmp_path, name=f"run-{why.replace(' ', '-')}", ceiling=entries)
+    ceiling, baselines = _filling(filler)
+    entries = (*ceiling, *baselines)
+    run_dir = make_run(tmp_path, name=f"run-{why.replace(' ', '-')}", ceiling=ceiling, baselines=baselines)
     store = _store(tmp_path)
     record(run_dir, store)
 
