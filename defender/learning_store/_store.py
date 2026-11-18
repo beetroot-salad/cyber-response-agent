@@ -89,6 +89,10 @@ class ItemRefused(Exception):
     """The database will never take this item (a NUL character jsonb refuses): waiting cannot cure it."""
 
 
+#: The outcomes that set an item aside, each carrying the cause code picked for it.
+_SET_ASIDE = frozenset({"skipped", "held", "dead"})
+
+
 @dataclasses.dataclass(frozen=True)
 class Outcome:
     """What a curator decided for one item (D1); the store applies it when the batch enters review or ends. A held,
@@ -97,6 +101,10 @@ class Outcome:
     name: str
     reason: str | None = None
     cause: ItemCause | None = None
+
+    def __post_init__(self) -> None:
+        if self.name in _SET_ASIDE and self.cause is None:
+            raise ValueError(f"a {self.name} outcome is built with its cause: Outcome.{self.name}(cause, detail)")
 
     @classmethod
     def waiting(cls) -> Outcome:
@@ -1015,8 +1023,8 @@ class LearningStore(FeedbackVerbs):
                 values = self._deferral()
             elif out.name == "declined":
                 values = self._decline()
-            elif out.name in {"skipped", "held", "dead"}:
-                values = {"status": out.name, "cause": out.cause or "unrecorded", "reason": out.reason}
+            elif out.name in _SET_ASIDE:
+                values = {"status": out.name, "cause": out.cause, "reason": out.reason}
             elif out.name == "published":
                 values = {"status": "published", "cause": None, "reason": None}
             else:
@@ -1027,7 +1035,7 @@ class LearningStore(FeedbackVerbs):
             if default.name == "waiting":
                 values = self._waiting()
             else:
-                values = {"status": default.name, "cause": default.cause or "unrecorded", "reason": default.reason}
+                values = {"status": default.name, "cause": default.cause, "reason": default.reason}
             await s.execute(update(_I).where(*rest).values(**values, updated_at=func.now()))
 
     def _waiting(self) -> dict[str, Any]:

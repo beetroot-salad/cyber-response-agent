@@ -614,6 +614,16 @@ async def test_o4_the_database_refuses_a_cause_without_its_state_and_a_state_wit
         execute(dsn, good, (target,) if "%s" in good else ())
 
 
+@pytest.mark.parametrize("name", ["held", "dead", "skipped"])
+async def test_o4_an_outcome_that_sets_an_item_aside_cannot_be_made_without_its_cause(name):
+    """Code always picks the cause: a held, dead or skipped outcome built without one is refused where it is built, never
+    stored as `unrecorded`. (O4)"""
+    outcome = store_mod().Outcome
+    with pytest.raises(ValueError, match=name):
+        outcome(name, "set aside")
+    assert getattr(outcome, name)("curator_held", "set aside").cause == "curator_held"
+
+
 # --- O5: the parked list's fields -----------------------------------------------------------------------------------
 
 
