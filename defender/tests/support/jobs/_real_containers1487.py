@@ -15,9 +15,10 @@ job runs it (the job image is built there, `defender-job:latest`).
 
 Every program leaves one JSON file in the tenant's own folder, `obs1487/<name>.json`, read here. Container processes are
 observed through `/proc` (every process's command line and environment, the connection table); the host judges them
-(`database_held`). The database's address is given to the program in a file it reads and deletes at once (a connect
-needs it): the scan covers processes and the connection table, not files, and a program that kept the file would be
-no evidence, so nothing here counts the file."""
+(`database_held`). The database's address is given to each program in a file of its own (`db-target-<name>.json`),
+which it reads and deletes at once (a connect needs it): the containers of one flow (the learning job's, then the
+post-step's) each find theirs. The scan covers processes and the connection table, not files, and a program that kept
+the file would be no evidence, so nothing here counts the file."""
 from __future__ import annotations
 
 import json
@@ -31,6 +32,8 @@ from urllib.parse import urlsplit
 
 CHILD = Path(__file__).resolve().with_name("_real_container_child1487.py")
 OBS = "obs1487"
+#: The programs, by the name each leaves its observations under (`leave`) and reads its database address for.
+PROGRAMS = ("learning", "post-step", "reach")
 
 #: Shared by every program: what the container can reach, as plain data. Python 3.11 (the job image), product code only.
 OBSERVE = r'''
@@ -43,14 +46,14 @@ def _read(path):
     except OSError:
         return None
 
-def observe(tenant):
+def observe(tenant, name):
     from defender import job_socket
     folder = Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant
     seen = {"env": dict(os.environ), "socket_env": job_socket.SOCKET_ENV, "folder": str(folder)}
     seen["procs"] = [{"pid": int(d.name), "cmdline": _read(d / "cmdline"), "environ": _read(d / "environ")}
                      for d in Path("/proc").iterdir() if d.name.isdigit()]
     seen["tcp"] = [_read("/proc/net/tcp"), _read("/proc/net/tcp6")]
-    target = folder / "obs1487" / "db-target.json"
+    target = folder / "obs1487" / ("db-target-" + name + ".json")
     try:
         found = json.loads(target.read_text(encoding="utf-8"))
         target.unlink()
@@ -77,7 +80,7 @@ def leave(folder, name, seen):
 
 LEARNING = OBSERVE + r'''
 tenant, job = sys.argv[1], sys.argv[2]
-folder, seen = observe(tenant)
+folder, seen = observe(tenant, "learning")
 try:
     rows = json.loads((folder / "obs1487" / "rows.json").read_text(encoding="utf-8"))
     from defender import tenancy
@@ -94,7 +97,7 @@ leave(folder, "learning", seen)
 
 POST_STEP = OBSERVE + r'''
 tenant = sys.argv[1]
-folder, seen = observe(tenant)
+folder, seen = observe(tenant, "post-step")
 try:
     from defender.learning.branch import post_step
     from defender.learning.branch.container import JobContainer
@@ -120,7 +123,7 @@ leave(folder, "post-step", seen)
 
 REACH = OBSERVE + r'''
 tenant = sys.argv[1]
-folder, seen = observe(tenant)
+folder, seen = observe(tenant, "reach")
 try:
     ids = json.loads((folder / "obs1487" / "ids.json").read_text(encoding="utf-8"))
     from defender.learning.branch.container import JobContainer
@@ -162,13 +165,15 @@ def compiled() -> None:
 def prepare(root: Path, tenant: str, dsn: str, *, rows: list[dict[str, Any]] | None = None,
             ids: dict[str, str] | None = None) -> Path:
     """The tenant's `obs1487` folder (written by the container's user: it is under the tenant's own folder), holding the
-    database address the programs dial (`db-target.json`), the learning job's rows and the batch ids a reach program
-    names."""
+    database address each program dials (`db-target-<program>.json`, one per program), the learning job's rows and the
+    batch ids a reach program names."""
     folder = root / tenant / OBS
     folder.mkdir(parents=True, exist_ok=True)
     folder.chmod(0o777)
     parts = urlsplit(dsn)
-    (folder / "db-target.json").write_text(json.dumps({"host": parts.hostname, "port": parts.port or 5432}), encoding="utf-8")
+    for program in PROGRAMS:  # one each: a program deletes its own once read, so the flow's next container finds its own
+        (folder / f"db-target-{program}.json").write_text(json.dumps({"host": parts.hostname, "port": parts.port or 5432}),
+                                                          encoding="utf-8")
     if rows is not None:
         (folder / "rows.json").write_text(json.dumps(rows), encoding="utf-8")
     if ids is not None:

@@ -66,9 +66,10 @@ def flow(tmp_path, monkeypatch, migrated_database):  # noqa: F811
 
 
 def _row(job: str) -> dict:
-    from defender.tests.support.learning.core._store1278 import finding
+    """A defender finding the job's judge could have held (`<job>/w-b/0/0`): one the worker's screen admits."""
+    from defender.tests.support.jobs._findings1487 import defender_row
 
-    return finding(f"{job}/w-b/0/0", run_id=job)
+    return defender_row(job)
 
 
 def _job_row(flow) -> dict:
