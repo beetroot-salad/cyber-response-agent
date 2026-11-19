@@ -185,8 +185,9 @@ def _validate_world_row(row: dict[str, Any], *, episode_dir: Path | None = None)
 #: The longest finding id a job's findings may carry, in UTF-8 bytes of the whole id (its `<job id>/` included): well
 #: below the store's index-row limit, so an id the screen passes is one the store can key (#1487 r5.1 item 2).
 FINDING_ID_MAX_BYTES = 1024
-#: The largest finding row a job's findings may carry, in UTF-8 bytes of the row's JSON (`json.dumps` as it stands,
-#: measured by `job_lane.findings_text_bytes`, the cap's own measure) (#1487 r5.1 item 2).
+#: The largest finding row a job's findings may carry, in UTF-8 bytes of the row's JSON written as UTF-8
+#: (`ensure_ascii=False`: one encoding for every bound, the findings text's own included), measured by
+#: `job_lane.findings_text_bytes`, the cap's own measure (#1487 r5.1 item 2).
 FINDING_ROW_MAX_BYTES = 1024 * 1024
 
 #: Each findings channel's rule, by the learning store's kind (the keys of a job's findings text).
@@ -221,7 +222,7 @@ def _screen_row(rule: Any, row: object, prefix: str) -> None:
 
     if not isinstance(row, dict):
         raise JudgeRefused(f"a findings row is a {type(row).__name__}, not an object")
-    if findings_text_bytes(json.dumps(row)) > FINDING_ROW_MAX_BYTES:
+    if findings_text_bytes(json.dumps(row, ensure_ascii=False)) > FINDING_ROW_MAX_BYTES:
         raise JudgeRefused(f"a findings row is over {FINDING_ROW_MAX_BYTES} bytes of JSON")
     finding_id = row.get("finding_id")
     if not isinstance(finding_id, str) or not finding_id.startswith(prefix) or finding_id == prefix:
@@ -607,4 +608,4 @@ def held_findings(episode: formats.Episode) -> dict[str, Any]:
         if malformed:
             return findings_field(None)
         held[_store_kind(channel)] = rows
-    return findings_field(json.dumps(held))
+    return findings_field(json.dumps(held, ensure_ascii=False))

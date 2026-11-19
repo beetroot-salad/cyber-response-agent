@@ -48,8 +48,10 @@ Stop the API, the workers, the learning drains and the lifecycle service, then r
 job `completed`, and the post-step only runs the author's tick. The migration moves every learning job still marked
 `pending` (its findings possibly never published, since #1170 a post-step in a job container could not reach the
 database) to `refused`, and logs how many per tenant: these jobs' findings are not recovered. Rebuild the job image and
-upgrade the worker and the job host together. Old `<job>.post-step.json` and `<job>.post-step-pending.json` files in a
-tenant's runs folder are no longer read.
+upgrade the worker and the job host together. Delete the old `<job>.post-step.json` and `<job>.post-step-pending.json` files from each
+tenant's runs folder (`<data root>/<tenant>/runs/`) before starting the new code: the runs listing refuses them, and
+the migration cannot reach the data root. For example `find <data root>/*/runs -maxdepth 1 \( -name '*.post-step.json'
+-o -name '*.post-step-pending.json' \) -delete`.
 
 ## Upgrade from before #1161
 
