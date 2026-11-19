@@ -94,3 +94,102 @@ def test_r52_a_post_step_told_to_stop_exits_0(scene, monkeypatch):
         assert container.stopping.wait(30), "premise: the stop reached the container"
 
     assert _post_step(scene, body, rc=143) == 0
+
+
+# --- G6: the helper's answer over every state of the work-waits class ------------------------------------------------
+
+#: The phases a batch is in, each made by the store's own verbs (`_batch_in`).
+_PHASES = ("working", "in_review", "needs_person", "ended")
+#: The author lane's own item kinds: a waiting one at threshold 1 is a claim the post-step's author tick would make.
+_AUTHOR_KINDS = ("finding", "questioner_finding", "feedback_instruction")
+
+
+def _lanes() -> tuple[str, ...]:
+    """Every lane the store knows: the author lane, the lanes its tick reconciles, and any it does not (none today:
+    `LANES == AUTHOR_DRAIN_RECONCILES`, so the class has no unreconciled lane; a new lane joins it here)."""
+    from defender.jobs.learning_models import LANES
+
+    return tuple(LANES)
+
+
+def _cells() -> list[Any]:
+    """Lane x phase x abandon request x claimable findings, plus the store with no batch. An abandon request is only
+    recorded on a parked batch (`request_abandon` refuses any other phase), so it is crossed with `needs_person` alone."""
+    cells = [pytest.param(None, None, False, f, id=f"no-batch-{'findings' if f else 'empty'}") for f in (True, False)]
+    for lane in _lanes():
+        for phase in _PHASES:
+            for asked in ((False, True) if phase == "needs_person" else (False,)):
+                for found in (True, False):
+                    cells.append(pytest.param(lane, phase, asked, found, id="-".join(
+                        [lane, phase, "abandon-asked" if asked else "no-request", "findings" if found else "none"])))
+    return cells
+
+
+def _batch_in(scene: Any, lane: str, phase: str, *, asked: bool) -> None:
+    """One batch of `lane` brought to `phase` by the store's own verbs; ended with its items held, so its end leaves
+    nothing a claim could take (no item back to waiting, no replacement due)."""
+    from defender.learning_store import Outcome, Why
+    from defender.tests.support.learning.core._declared870 import shim_row
+
+    tenant = scene.tenant
+    if lane == "author":
+        _publish(scene, "s/w/0/0")
+        held = call(scene.dsn, "claim", tenant, lane, owner="g6", thresholds={"finding": 1})
+    elif lane == "lead_author":
+        call(scene.dsn, "add_pitfall", tenant, shim_row("g6-run:1"))
+        held = call(scene.dsn, "claim", tenant, lane, owner="g6", thresholds={"pitfall": 1})
+    else:
+        tick = call(scene.dsn, "begin_feedback_tick", tenant, owner="g6")
+        held = call(scene.dsn, "claim_registry", tick)
+    assert held is not None, "premise: the lane's batch was claimed"
+    assert held.lane == lane, "premise: the batch is of its lane"
+    if phase == "in_review":
+        call(scene.dsn, "in_review", held, 41, {})
+    elif phase == "needs_person":
+        call(scene.dsn, "needs_person", tenant, str(held.batch_id), Why.batch("foreign_pr", "by hand"))
+        if asked:
+            call(scene.dsn, "request_abandon", tenant, str(held.batch_id), actor="u-g6")
+    elif phase == "ended":
+        call(scene.dsn, "end_no_commits", held, {(k, key): Outcome.held("curator_held", "g6") for k, key, _ in held.items})
+    [(now,)] = execute(scene.dsn, "SELECT phase FROM learning.batches WHERE id = %s", (str(held.batch_id),))
+    assert now == phase, f"premise: the batch is {phase}"
+
+
+def _waiting_author_items(scene: Any) -> int:
+    [(n,)] = execute(scene.dsn, "SELECT count(*) FROM learning.work_items WHERE tenant_id = %s AND status = 'waiting' "
+                                "AND kind = ANY(%s)", (scene.tenant, list(_AUTHOR_KINDS)))
+    return int(n)
+
+
+def _expected_waits(lane: str | None, phase: str | None, asked: bool, found: bool) -> bool:
+    """The rule as `work_waiting`'s docstring states it, for the author lane reconciling `AUTHOR_DRAIN_RECONCILES`: a batch
+    of the author lane working; a batch of a reconciled lane in review, or parked with a person's abandon request; or a
+    claim the author lane would make, by the claim's rules: something due, and the lane not busy (a batch of it working,
+    or an authoring batch of it not ended)."""
+    from defender.learning.core.drains import AUTHOR_DRAIN_RECONCILES
+
+    if lane is not None:
+        if lane == "author" and phase == "working":
+            return True
+        if lane in AUTHOR_DRAIN_RECONCILES and (phase == "in_review" or (phase == "needs_person" and asked)):
+            return True
+    author_busy = lane == "author" and phase != "ended"
+    return found and not author_busy
+
+
+@pytest.mark.parametrize(("lane", "phase", "asked", "found"), _cells())
+def test_g6_the_helper_answers_work_waits_exactly_when_the_rule_does(scene, monkeypatch, lane, phase, asked, found):
+    """Every state of the class (a batch of each lane in each phase, with or without a person's abandon request, with or
+    without author findings due): the real helper over a real store exits `WORK_WAITS` exactly when the rule of
+    `learning_store.tick.work_waiting` says work waits, `NOTHING_WAITS` otherwise. (Amendment r5.2, r5.3)"""
+    from defender import job_host
+
+    R.settings_env(monkeypatch, threshold=1)
+    if lane is not None:
+        _batch_in(scene, lane, phase, asked=asked)
+    if found:
+        _publish(scene, "s/w/0/9")
+    assert _waiting_author_items(scene) == (1 if found else 0), "premise: only the planted finding is due"
+
+    expected = job_host.WORK_WAITS if _expected_waits(lane, phase, asked, found) else job_host.NOTHING_WAITS
+    assert _post_step(scene) == expected

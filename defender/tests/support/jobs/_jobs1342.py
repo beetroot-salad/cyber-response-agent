@@ -294,14 +294,14 @@ CHILD_SCRIPT = textwrap.dedent("""
     term = spec.get("term", "default")
     if term == "ignore":
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
-    elif term in ("mark", "finish"):
+    elif term in ("mark", "finish", "exit"):
         def on_term(*_):
             Path(fill(spec["term_mark"])).touch()
             if term == "finish":  # #1343 B11: a child that completes on its own as the SIGTERM lands
                 sealing()  # it completes: the run's exit seals its ledger before the records are left
                 leave_records()
             event("end")
-            os._exit(0)
+            os._exit(spec.get("exit", 0) if term == "exit" else 0)  # `exit`: a helper that answers as it is stopped
         signal.signal(signal.SIGTERM, on_term)
     grandchild = None
     if spec.get("grandchild"):
@@ -408,7 +408,7 @@ class ScriptedChild:
     `files` (text), `binary` (hex), `sparse` (`{head, size}`), `links` (symlink targets) and `dirs`
     name what the child leaves in the runs container (`padded`: `{head, size}`, the head then spaces
     up to `size` bytes, so a document that stays valid however much of it is read); `term` is how it takes SIGTERM (`default`,
-    `ignore`, `mark`: touch `term_mark` and exit with nothing written, or `finish`: touch it, write its records, exit 0); `grandchild` starts a `sleep` in its group.
+    `ignore`, `mark`: touch `term_mark` and exit with nothing written, `finish`: touch it, write its records, exit 0, or `exit`: touch it and exit with `exit`); `grandchild` starts a `sleep` in its group.
     `die_by`: in place of exiting, it dies by that signal, sent to itself."""
 
     where: Path

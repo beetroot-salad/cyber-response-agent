@@ -302,3 +302,44 @@ def test_r54_the_post_step_limit_is_a_positive_setting_defaulting_to_four_hours(
     with pytest.raises(ValueError, match="post-step limit"):
         Worker(SimpleNamespace(), data_root=tmp_path, clock=lambda: NOW, post_step_limit=0,
                frontend_origin=FRONTEND_ORIGIN)
+
+
+#: Why the worker signals a post-step: its own stop, or the post-step running past `post_step_limit`.
+_SIGNALLED_BY = ("the-workers-stop", "the-post-step-limit")
+
+
+@pytest.mark.parametrize("status", ["NOTHING_WAITS", "WORK_WAITS"])
+@pytest.mark.parametrize("reason", _SIGNALLED_BY)
+@pg
+async def test_g8_a_signalled_post_step_leaves_the_clock_not_idle_whatever_it_answers(
+        world, reason, status):  # noqa: F811 — the imported fixture
+    """The post-step hangs; the worker signals it (its own stop, or the post-step past its limit), and the helper's
+    stand-in catches the SIGTERM and exits with an answer status, either one. Its answer predates nothing it was told,
+    so it is not read: the tenant's clock is not idle, though nothing waits in the store. (Flow 3: a stop leaves the
+    clock not idle; Amendment r5.4: so does a post-step ended at its limit)"""
+    from defender import job_host
+    from defender.tests.jobs.test_1344_learning_jobs import _stop_serving
+    from defender.tests.support.jobs._worker1342 import _FAST
+
+    dsn = world["dsn"]
+    termed = world["tmp"] / "termed"
+    post = post_child(world, wait_for=world["tmp"] / "never", term="exit", term_mark=str(termed),
+                      exit=getattr(job_host, status))
+    async with job_store(dsn) as store:
+        job = await queued_job(world, store, ticket="J-1")
+        if reason == "the-post-step-limit":
+            await asyncio.wait_for(learning_worker(
+                world, store, job=job_child(world, files={END: FAILED}), post=post, post_step_limit=3.0,
+                stop_grace=20).drain(), timeout=60)
+        else:
+            serving = asyncio.create_task(learning_worker(
+                world, store, job=job_child(world, files={END: FAILED}), post=post, **_FAST).serve())
+            try:
+                await _until(lambda: ("start", job) in post.events(), "the post-step's container to start")
+            finally:
+                _stop_serving(serving)
+                await asyncio.wait_for(serving, timeout=60)
+
+    assert post.handed == [(job, "failed")], "premise: the post-step ran"
+    assert termed.exists(), "premise: the stand-in caught the SIGTERM and exited with its answer"
+    assert _idle(dsn) is False, "a signalled post-step's answer was read"
