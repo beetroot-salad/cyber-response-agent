@@ -125,8 +125,6 @@ def _port(value: str) -> int:
     return int(value)
 
 
-
-
 def artifact_domain(value: str) -> str:
     """A bare lowercase hostname (dot-separated labels of ASCII letters, digits and hyphens): no scheme, port, path,
     wildcard or surrounding text. The one owner of the artifact domain's shape (S5)."""

@@ -4,7 +4,6 @@ on top (a realm path, an origin's lack of one) and names its setting in the refu
 
 from __future__ import annotations
 
-import ipaddress
 import re
 import urllib.parse
 
@@ -33,29 +32,13 @@ _LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", re.ASCII)
 
 
 def is_hostname(value: str) -> bool:
-    """A bare lowercase hostname: dot-separated labels of ASCII letters, digits and inner hyphens, no empty label
-    (a trailing dot included). The one hostname rule, for the artifact domain and an origin's host alike (#1566)."""
-    return bool(value) and all(_LABEL.fullmatch(label) for label in value.split("."))
-
-
-def _host_as_browsers_write_it(host: str) -> bool:
-    """`host` (as urlsplit gives it, brackets removed) is an IPv6 address in compressed form, a dotted-decimal IPv4
-    address, or a hostname whose last label is not a number: a browser reads `1.2.3` or `999.1.1.1` as an IPv4
-    address (rewritten or refused), so such a host never comes back as it was written (#1566)."""
-    if ":" in host:
-        if "%" in host or "." in host:  # a zone (`fe80::1%eth0`) or a dotted tail (`::ffff:1.2.3.4`): browsers write neither
-            return False
-        try:
-            return ipaddress.IPv6Address(host).compressed == host
-        except ValueError:
-            return False
-    last = host.rsplit(".", 1)[-1]
-    if last.isdigit() or last.startswith("0x"):
-        try:
-            return str(ipaddress.IPv4Address(host)) == host
-        except ValueError:
-            return False
-    return is_hostname(host)
+    """A bare lowercase domain name: dot-separated labels of ASCII letters, digits and inner hyphens, no empty label
+    (a trailing dot included), the last starting with a letter. A browser reads a host whose last label starts with a
+    digit as an IPv4 address and rewrites or refuses it; one that starts with a letter it keeps as written. No IP
+    address, then, and nothing to mimic of the browser's parser. The one hostname rule, for the artifact domain and an
+    origin's host alike (#1566)."""
+    labels = value.split(".")
+    return all(_LABEL.fullmatch(label) for label in labels) and labels[-1][:1].isalpha()
 
 
 def check_origin(value: str) -> str:
@@ -69,10 +52,10 @@ def check_origin(value: str) -> str:
     host = parts.hostname or ""
     if not host.isascii():
         raise ValueError("must name its host in ASCII (an internationalized name in its xn-- form), as a browser sends it")
-    if not _host_as_browsers_write_it(host):
-        raise ValueError("must name a lowercase hostname (letters, digits, inner hyphens, no empty label), a dotted-"
-                         "decimal IPv4 address or an IPv6 address in its compressed form, as a browser sends it")
-    netloc = f"[{host}]" if ":" in host else host
+    if not is_hostname(host):
+        raise ValueError("must name a domain: lowercase labels of letters, digits and inner hyphens, the last starting "
+                         "with a letter (no IP address)")
+    netloc = host
     if parts.port is not None and parts.port != _DEFAULT_PORTS[parts.scheme]:
         netloc += f":{parts.port}"
     canonical = f"{parts.scheme}://{netloc}"

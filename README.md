@@ -178,7 +178,8 @@ cd defender && .venv/bin/python -m pytest tests/ -q -m "not llm and not live"
 ```
 
 The `llm`/`live` markers gate tests that make a real (metered) model request or need live
-infrastructure; CI runs `-m "not llm and not live"`.
+infrastructure; CI's test job runs `-m "not llm and not live"`, and its `keycloak-live` job runs the
+live Keycloak checks against the dev compose Keycloak.
 
 ## Repository Conventions
 

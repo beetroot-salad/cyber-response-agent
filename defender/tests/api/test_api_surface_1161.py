@@ -99,13 +99,13 @@ def test_origin_refuses_what_a_browser_would_not_send(text: str) -> None:
 
 @pytest.mark.parametrize("text", [
     "http://a_b.test", "http://-a.test", "http://a-.test", "http://a..test", "http://x.test.", "http://a%20b.test",
-    "http://999.1.1.1", "http://1.2.3", "http://0x7f.0.0.1", "http://0x7f", "http://a.0x1f", "http://127.000.0.1", "http://127.1",
-    "http://[2001:0db8::1]", "http://[2001:db8:0:0:0:0:0:1]", "http://[::ffff:1.2.3.4]", "http://[fe80::1%eth0]",
-    "http://[fe80::1%25eth0]",
+    "http://127.0.0.1:8000", "http://10.0.0.1", "http://999.1.1.1", "http://1.2.3", "http://0x7f", "http://a.0x1f",
+    "http://app.0xyz", "http://a.1b", "http://[::1]:8000", "https://[2001:db8::1]", "http://[::ffff:102:304]",
 ])
-def test_origin_refuses_a_host_that_is_not_a_hostname_or_a_canonical_address(text: str) -> None:
-    """The host is a hostname by the artifact domain's rule, a dotted-decimal IPv4 address, or an IPv6 address in its
-    compressed form, so a setting that no browser's `Origin` could equal fails at start, not at the first request. (#1566)"""
+def test_origin_refuses_a_host_that_is_not_a_domain_name(text: str) -> None:
+    """The host is a domain name: the hostname rule, its last label starting with a letter. No IP address, and nothing
+    a browser could read as one (a last label starting with a digit), so the browser's `Origin` is the host as
+    written and a setting no `Origin` could equal fails at start. (#1566)"""
     from defender.api_server._settings import origin
 
     with pytest.raises(ValueError):  # noqa: PT011 — the type is the contract; the message names the fix
@@ -113,11 +113,11 @@ def test_origin_refuses_a_host_that_is_not_a_hostname_or_a_canonical_address(tex
 
 
 @pytest.mark.parametrize("text", [
-    "http://127.0.0.1:8000", "http://10.0.0.1", "http://[::1]:8000", "https://[2001:db8::1]", "https://a-b.c9.example",
-    "https://xn--bcher-kva.example", "http://localhost:8000", "https://9a.example",
+    "https://a-b.c9.example", "https://xn--bcher-kva.example", "http://localhost:8000", "https://9a.example",
+    "https://app.x0", "https://0x.example",
 ])
-def test_origin_accepts_hostnames_and_canonical_addresses(text: str) -> None:
-    """Control for the refusals above: the forms a browser writes. (#1566)"""
+def test_origin_accepts_a_domain_name_whose_last_label_starts_with_a_letter(text: str) -> None:
+    """Control for the refusals above: digits anywhere but at the start of the last label. (#1566)"""
     from defender.api_server._settings import origin
 
     assert origin(text) == text
@@ -134,7 +134,7 @@ def test_artifact_domain_accepts_a_bare_lowercase_hostname(text: str) -> None:
 @pytest.mark.parametrize("text", [
     "", " ", "Artifacts.Defender.Test", "https://artifacts.defender.test", "artifacts.defender.test:8443", "*.defender.test",
     "artifacts.defender.test/", "artifacts.defender.test/x", " artifacts.defender.test", "artifacts.defender.test\n",
-    ".defender.test", "a..test", "-a.test", "a_b.test", "bücher.example", "a b.test",
+    ".defender.test", "a..test", "-a.test", "a_b.test", "bücher.example", "a b.test", "10.0.0.1", "a.0x1f",
 ])
 def test_artifact_domain_refuses_anything_but_a_bare_lowercase_hostname(text: str) -> None:
     """Scheme, port, wildcard, path, case, spaces, non-ASCII: `ValueError`. (S5)"""
