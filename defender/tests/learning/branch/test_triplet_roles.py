@@ -781,6 +781,26 @@ def _plan_specific_mutations() -> list[M.Mutation]:
     ]
 
 
+def _valid_seat_variants(base: list[dict]) -> list[tuple[str, list[dict]]]:
+    """Each in-vocabulary other value of a seat's `disposition_declared` and `label_basis`, one
+    seat at a time. Appended after `M.variants` (so the seeded pairs stay as they were): these are
+    replies the checks must accept, and they keep each seat's accepting side above the floor."""
+    from defender import _vocab
+    from defender.records._family import LABEL_BASES
+
+    dispositions = [v for v in _vocab.DISPOSITION_VALUES if v != _vocab.HOST_ONLY_DISPOSITION]
+    out: list[tuple[str, list[dict]]] = []
+    for seat in (1, 2):
+        for field, vocabulary in (("disposition_declared", dispositions), ("label_basis", sorted(LABEL_BASES))):
+            for value in vocabulary:
+                if value == base[seat][field]:
+                    continue
+                replies = copy.deepcopy(base)
+                replies[seat][field] = value
+                out.append((f"seat {seat} {field}={value}", replies))
+    return out
+
+
 def _outcome(tmp_path, replies: list[dict]):
     """('refused', message) or ('accepted', family) for one variant of the three-call script."""
     agent = T.FakeAgent(*copy.deepcopy(replies))
@@ -815,8 +835,12 @@ def _silently_dropped(replies: list[dict], family: dict) -> list[str]:
     """Every key a reply carried that the family does not hold unchanged. A seat's `axis` over the
     plan's is composition (the seat's value wins), not a drop."""
     gone: list[str] = []
-    plan, seats = replies[0], replies[1:]
+    plan, scripted = replies[0], replies[1:]
     worlds = family["worlds"]
+    assert len(worlds) - 1 <= len(scripted), (
+        f"the family holds {len(worlds) - 1} non-base worlds but only {len(scripted)} seats were "
+        "scripted: the harness cannot account for a world no seat reply stands behind")
+    seats = scripted[:len(worlds) - 1]  # only the seats that were called (a plan may drop a world)
     held = {"base_story": family["base_story"], "discriminator": family["discriminator"]}
     for key, value in plan.items():
         if key in held:
@@ -850,6 +874,7 @@ def test_p1_every_reply_is_refused_or_composes_a_family_the_gate_accepts_with_no
     base = _valid_script()
     identities = (None, T.fixture_world_id("injected"))
     cases = M.variants(base, seed=1579, pairs=150, extra=_plan_specific_mutations(), identities=identities)
+    cases += _valid_seat_variants(base)
     accepted = refused = 0
     per_call = {0: [0, 0], 1: [0, 0], 2: [0, 0]}
     failures: list[str] = []

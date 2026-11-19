@@ -333,17 +333,45 @@ def test_the_revision_and_check_prompts_ask_for_the_tool_not_a_yaml_document(tmp
 
 # P1 over a revision: any reply the check accepts is kept with every key held; every other is refused
 
+import builtins  # noqa: E402
 import copy  # noqa: E402
 import logging  # noqa: E402
+import re  # noqa: E402
 
 from defender.records.formats import FamilyError  # noqa: E402
 
 from defender.tests.support.learning.core import _reply_mutations1579 as M  # noqa: E402
 
 
-def _revision_outcome(tmp_path: Path, revision: dict, index: int):
-    """('dropped', None) or ('kept', world b) for one variant of the revision reply. The re-check
-    is scripted clean, so a refusal of the revision is the only cause of a drop."""
+#: The only exception classes a drop for a refused reply may name (the domain refusals).
+_DOMAIN_REFUSALS = {"FamilyError", "ReplyUnusable"}
+_BUILTIN_EXCEPTIONS = {name for name, obj in vars(builtins).items()
+                       if isinstance(obj, type) and issubclass(obj, BaseException)
+                       and not issubclass(obj, Warning)}
+
+
+def _other_exceptions(text: str) -> list[str]:
+    """Every exception class `text` names besides the domain refusals: any builtin exception, any
+    other `*Error` / `*Exception` name, and `RunUnprocessable`. The #1561 handler catches every
+    exception, so a drop that logs one of these is a host failure, not a refusal of the reply."""
+    named = set(re.findall(r"\b\w+(?:Error|Exception)\b", text))
+    named |= {name for name in _BUILTIN_EXCEPTIONS if re.search(rf"\b{name}\b", text)}
+    named |= set(re.findall(r"\bRunUnprocessable\b", text))
+    return sorted(named - _DOMAIN_REFUSALS)
+
+
+def _warning_text(caplog) -> str:
+    formatter = logging.Formatter()
+    return " ".join(formatter.format(r) for r in caplog.records if r.levelno >= logging.WARNING)
+
+
+def _revision_outcome(tmp_path: Path, revision: dict, index: int, caplog):
+    """('dropped', None), ('host failure', names) or ('kept', world b) for one variant of the
+    revision reply. The re-check is scripted clean, so a refusal of the revision is the only
+    honest cause of a drop: a drop whose log names another exception class (a `TypeError` in the
+    check on a wrong-typed value, say) is a host failure the broad handler swallowed."""
+    caplog.set_level(logging.WARNING)
+    caplog.clear()
     family, _agent, check, recorded = _run(
         tmp_path / f"v{index}", questioner_replies=[*three_replies(), copy.deepcopy(revision)],
         check_replies=[_conflict("b", "f1"), {"conflicts": []}])
@@ -352,12 +380,13 @@ def _revision_outcome(tmp_path: Path, revision: dict, index: int):
         assert not entry["revised"], "a dropped revision is recorded as rebuilt"
         assert check.calls == 1, "a dropped revision was re-checked"
         assert _labels(family) == ["a", "c"]
-        return "dropped", None
+        host = _other_exceptions(_warning_text(caplog))
+        return ("host failure", host) if host else ("dropped", None)
     assert check.calls == 2
     return "kept", family
 
 
-def test_p1_every_revision_is_refused_or_kept_with_every_key_held_and_the_gate_satisfied(tmp_path):
+def test_p1_every_revision_is_refused_or_kept_with_every_key_held_and_the_gate_satisfied(tmp_path, caplog):
     """Mutations at every level of a valid revision (its four seat keys and facts, each fact, its
     entities; null and blank included): the world is dropped (#1561), or kept with every key the
     revision carried held unchanged and a family the manifest gate accepts. F4: a `disposition_declared`
@@ -367,7 +396,10 @@ def test_p1_every_revision_is_refused_or_kept_with_every_key_held_and_the_gate_s
     kept = dropped = 0
     failures: list[str] = []
     for index, (label, replies) in enumerate(cases):
-        outcome, family = _revision_outcome(tmp_path, replies[0], index)
+        outcome, family = _revision_outcome(tmp_path, replies[0], index, caplog)
+        if outcome == "host failure":
+            failures.append(f"{label}: dropped by a host failure ({family}), not refused as a reply")
+            continue
         if outcome == "dropped":
             dropped += 1
             continue
@@ -394,9 +426,9 @@ _F4_REVISIONS = {
 
 
 @pytest.mark.parametrize("case", list(_F4_REVISIONS))
-def test_a_revision_the_manifest_gate_would_refuse_drops_its_world_here(tmp_path, case):
+def test_a_revision_the_manifest_gate_would_refuse_drops_its_world_here(tmp_path, case, caplog):
     """F4: facts alone passed the old check and the family was refused later at the gate."""
-    outcome, _world = _revision_outcome(tmp_path, _F4_REVISIONS[case](), 0)
+    outcome, _world = _revision_outcome(tmp_path, _F4_REVISIONS[case](), 0, caplog)
 
     assert outcome == "dropped"
 
@@ -428,7 +460,7 @@ def _logged_revision_fault(tmp_path, caplog, fault):
                     record_revisions=recorded.append)
     assert _labels(family) == ["a", "c"], "the world a failed revision named was kept"
     assert recorded[0][0]["dropped"]
-    return " ".join(r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING)
+    return _warning_text(caplog)
 
 
 def test_a_host_exception_in_a_revisions_check_degrades_and_is_not_logged_as_an_unusable_reply(tmp_path, caplog):
@@ -458,3 +490,14 @@ def test_a_revision_the_call_gave_up_on_is_not_logged_as_a_host_failure(tmp_path
 
     assert "facts must not be empty" in text, text
     assert "RunUnprocessable" not in text
+
+
+def test_the_refusal_classifier_reads_a_host_bug_as_a_host_failure_and_a_refusal_as_one(tmp_path, caplog):
+    """Control for the P1 property's drop check, through the same classifier: the host bug's log
+    names `RuntimeError` (a host failure), the exhausted revision's names none."""
+    bug = _logged_revision_fault(tmp_path / "bug", caplog, lambda: (_HostBug(), 1))
+    caplog.clear()
+    refusal = _logged_revision_fault(tmp_path / "refusal", caplog, lambda: TY.unusable("facts must not be empty"))
+
+    assert "RuntimeError" in _other_exceptions(bug), bug
+    assert _other_exceptions(refusal) == [], refusal

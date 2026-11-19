@@ -20,7 +20,8 @@ def new_list() -> list[str]:
 
 
 def drain() -> list[str]:
-    """Every unmodelled input recorded since the last drain (and forget the registry)."""
+    """Every unmodelled input recorded since the last drain (each list emptied, still registered)."""
     seen = [entry for entries in _LISTS for entry in entries]
-    _LISTS.clear()
+    for entries in _LISTS:
+        entries.clear()
     return seen

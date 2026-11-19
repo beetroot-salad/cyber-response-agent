@@ -147,7 +147,7 @@ def test_1008_the_judges_deny_reason_is_its_own_and_names_no_program(tmp_path):
     # #1579: both refusals now tell the model to answer by calling the output tool; that
     # instruction is the one clause this guard allows the two to share.
     for reason in (questioner_reason, policy.deny_reason):
-        assert re.search(r"\bcall\w*\b.*\btool\b", reason, re.IGNORECASE | re.DOTALL), (
+        assert _TOOL_INSTRUCTION.search(reason), (
             f"the tool instruction this guard excludes is not in both reasons: {reason!r}")
 
     def own_sentences(reason: str) -> str:
@@ -224,12 +224,15 @@ def test_1008_bind_refuses_the_judges_definition_by_its_deps_type_name(tmp_path)
 # ---- #1579 O4: every model-facing text of both roles asks for the tool call, not a YAML document ----
 
 QUESTIONER_DIR = T.DEFENDER / "learning" / "branch" / "questioner"
-#: The YAML-document reply clause, in every spelling the old texts used. Only the reply-format
-#: instruction is retired (design r3.1 "Removals"); an illustrative example is not pinned either way.
-_YAML_REPLY_CLAUSE = re.compile(
-    r"one YAML (?:document|mapping)|not inside a code fence|nothing before or after|"
-    r"no prose around", re.IGNORECASE)
-_TOOL_INSTRUCTION = re.compile(r"\bcall\w*\b.{0,80}\btool\b", re.IGNORECASE | re.DOTALL)
+#: The retired reply-format clause, in every spelling the old texts used ("one YAML document",
+#: "as one YAML reply document", "one bare document", ...): no model-facing text carries the word
+#: YAML or "bare" at all (case-sensitive: a lowercase `family.yaml#` pointer is a file name, not
+#: the clause).
+_RETIRED_CLAUSE = re.compile(r"\bYAML\b|\bbare\b")
+#: The instruction to answer through the tool, in any wording ("call the tool", "use the answer tool").
+_TOOL_INSTRUCTION = re.compile(
+    r"\b(?:call\w*|us(?:e|ing)|invok\w*|submit\w*|answer\w*|repl(?:y|ying)|respond\w*|return\w*)\b"
+    r".{0,80}\btool\b", re.IGNORECASE | re.DOTALL)
 _UNKNOWN_KEYS_REFUSED = re.compile(
     r"unknown.{0,60}\brefus|refus.{0,60}unknown", re.IGNORECASE | re.DOTALL)
 
@@ -279,14 +282,15 @@ def test_1579_every_model_facing_text_asks_for_the_tool_call_not_a_yaml_document
     model to answer by calling the tool."""
     text = _model_facing_text(name, tmp_path)
 
-    leftovers = sorted({m.group(0) for m in _YAML_REPLY_CLAUSE.finditer(text)})
-    assert leftovers == [], f"{name} still asks for a YAML document ({leftovers})"
+    leftovers = sorted({m.group(0) for m in _RETIRED_CLAUSE.finditer(text)})
+    assert leftovers == [], f"{name} still carries the retired reply-format clause ({leftovers})"
     assert _TOOL_INSTRUCTION.search(text), f"{name} never tells the model to call the tool"
 
 
 @pytest.mark.parametrize("name", ["judge:world-task", "judge:family-task"])
 def test_1579_the_judge_task_text_says_unknown_keys_are_refused(name, tmp_path):
-    """The judge's reply is closed (D2): its prompt says an unknown key is refused."""
-    text = _model_facing_text(name, tmp_path)
+    """The judge's reply is closed (D2): its prompt says an unknown key is refused, in the standing
+    role text and that scope's task text together."""
+    text = _model_facing_text("judge:role.md", tmp_path) + "\n" + _model_facing_text(name, tmp_path)
 
-    assert _UNKNOWN_KEYS_REFUSED.search(text), f"{name} does not say unknown keys are refused"
+    assert _UNKNOWN_KEYS_REFUSED.search(text), f"{name} (with role.md) does not say unknown keys are refused"
