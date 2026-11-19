@@ -186,16 +186,18 @@ async def test_o3_a_completed_investigation_with_no_gather_ends_its_job_skipped_
     assert not list((flow["marks"] / "family").glob("sibling-*")), "a sibling started with no fork point"
 
 
-async def test_l5_a_source_whose_session_store_is_of_another_version_ends_skipped_history_unreadable_not_in_a_crash(
+async def test_l5_a_source_whose_session_store_is_of_another_version_ends_failed_launch_refused_not_in_a_crash(
         migrated_database, tmp_path, monkeypatch, request):  # noqa: F811
-    """The source's database carries a format version current code refuses: typed `skipped`/`history_unreadable` with the type in the message, before any sibling; the intact flow above is the control. (O3, L5, Old history)"""
+    """The source's database carries a format version current code refuses: `failed`/`launch_refused` with the `schema-version` kind's fixed wording, before any sibling, as every source whose closing record cannot be looked at (owner decision, #1534: no backwards compatibility; no longer `skipped`/`history_unreadable`); the intact flow above is the control. (O3, L5, Old history, V-LOOK)"""
+    from defender.tests.support.storage import _readers1534 as R
 
     flow = await _run_flow(migrated_database, tmp_path, monkeypatch, request, investigate_mode="investigate", damage="store-version")
 
     assert row(migrated_database, flow["investigation"])["stage"] == "completed"
     assert (flow["marks"] / "family" / "runs").is_file(), "premise: the family step started and damaged the store"
     (job,) = _jobs(migrated_database, flow["investigation"])
-    assert (job["status"], job["reason"]) == ("skipped", "history_unreadable"), job
-    assert "UnknownSchemaVersion" in (job["message"] or ""), "the message names the refusal type"
+    assert (job["status"], job["reason"]) == ("failed", "launch_refused"), job
+    assert R.names_only("schema-version", job["message"] or ""), job
+    assert str(tmp_path) not in (job["message"] or ""), "the fault's detail (a path) reached the job's message"
     assert not list((flow["marks"] / "family").glob("sibling-*")), "a sibling started on a history that cannot be read"
     assert _queued_findings(migrated_database, flow["tenant"]) == []
