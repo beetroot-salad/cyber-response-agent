@@ -282,7 +282,9 @@ CHILD_SCRIPT = textwrap.dedent("""
             planting.clear()
 
     def served(request):
-        # Child setup never catches: the planter's error is raised here, reaching the child's stderr.
+        # True once the planter answered that it planted. False when no planter answers at all: none is listening, or its
+        # process went away before answering (the connection refused, closed or reset), so this child plants itself. The
+        # planter's own error is raised here (child setup never catches), reaching the child's stderr.
         import socket
         name = spec.get("planter")
         if not name:
@@ -290,15 +292,15 @@ CHILD_SCRIPT = textwrap.dedent("""
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
             try:
                 conn.connect(name)
+                conn.sendall(json.dumps(request).encode("utf-8") + b"\\n")
+                reply = b""
+                while not reply.endswith(b"\\n"):
+                    part = conn.recv(65536)
+                    if not part:
+                        return False
+                    reply += part
             except OSError:
                 return False
-            conn.sendall(json.dumps(request).encode("utf-8") + b"\\n")
-            reply = b""
-            while not reply.endswith(b"\\n"):
-                part = conn.recv(65536)
-                if not part:
-                    raise RuntimeError("the planter closed the connection without answering")
-                reply += part
         answer = json.loads(reply)
         if answer.get("error"):
             raise RuntimeError(f"the planter failed:\\n{answer['error']}")
@@ -611,6 +613,9 @@ class ScriptedChild:
     #: `marks/wrote-<n>` (its text: how long the append took) and waiting for `marks/go-<n>`. With
     #: `"per_run": True` its case id (so database) is derived from its run id, so two runs never share one.
     sessions: dict[str, Any] | None = None
+    #: The planter that plants this child's closing record (`planter`): this process's unless named. A worker run in its
+    #: own process names the test process's, so stopping or killing that worker never interrupts a plant.
+    planter_name: str | None = None
 
     def __post_init__(self) -> None:
         self.where.mkdir(parents=True, exist_ok=True)
@@ -622,7 +627,7 @@ class ScriptedChild:
 
     def spec_dict(self) -> dict[str, Any]:
         return {
-            "runs": str(self.runs), "worktree": str(WORKTREE), "closing_key": CLOSING_KEY, "planter": planter(),
+            "runs": str(self.runs), "worktree": str(WORKTREE), "closing_key": CLOSING_KEY, "planter": self.planter_name or planter(),
             "seen_dir": str(self.seen_dir), "events": str(self.events_path),
             "files": self.files, "binary": self.binary, "sparse": self.sparse, "padded": self.padded, "links": self.links,
             "dirs": self.dirs, "exit": self.exit, "term": self.term, "term_mark": self.term_mark,

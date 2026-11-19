@@ -28,6 +28,7 @@ from defender.tests.support.jobs._jobs1342 import (
     closing_plan,
     job_end,
     job_store,
+    planter,
     register_tenant,
     row,
 )
@@ -64,7 +65,8 @@ def _gone(pid: int) -> bool:
 def worker_process(tmp_path: Path, config: dict) -> Iterator[subprocess.Popen]:
     ready = tmp_path / "worker-ready"
     path = tmp_path / "worker.json"
-    path.write_text(json.dumps({**config, "ready": str(ready)}), encoding="utf-8")
+    # The children's closing records are planted by this process (`planter`), never by the worker this test may stop or kill.
+    path.write_text(json.dumps({**config, "ready": str(ready), "planter": planter()}), encoding="utf-8")
     proc = subprocess.Popen(  # noqa: S603 — the test's own worker process
         [sys.executable, str(SUPPORT / "_worker_proc1342.py"), str(path)],
         env=_env(Path(config["data_root"]), config["dsn"]), cwd=str(WORKTREE), stderr=subprocess.PIPE)
