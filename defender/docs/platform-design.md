@@ -275,7 +275,8 @@ learning_jobs(
 
 ### 2.6 API surface
 
-Frontend reads + a small write path, all tenant-scoped. **Three flat resource families** (`alerts`,
+Frontend reads + a small write path, all tenant-scoped. Paths in this design are relative to `/api`: the ingress
+sends `/api` to the API and every other path to the frontend (#1161). **Three flat resource families** (`alerts`,
 `investigations`, `learning-jobs`/`lessons`). Each entity has a global id and a flat canonical read.
 Creation is a flat verb with the parent as a **required body field** (Stripe-style): investigation-create
 takes `alert_id`, learning-job-create takes `investigation_id`. List scoping is a query-param filter, not a

@@ -52,7 +52,7 @@ docker run --rm --env-file .env \
     defender-runtime python3 defender/run.py <alert.json> --tenant <tenant-uuid>
 ```
 
-`<tenant-uuid>` is the id the lifecycle's `POST /admin/tenants` answered, an `active` tenant (a
+`<tenant-uuid>` is the id the lifecycle's `POST /api/admin/tenants` answered, an `active` tenant (a
 tenant id is an opaque UUID, not a name like `playground`). The network is the compose project's
 default one: `name:` in `docker-compose.yml` plus `_default` (`docker network ls` shows it). The DSN
 and the trust folder are the dev stack's (`defender/docs/development-operations.md`, "Host process

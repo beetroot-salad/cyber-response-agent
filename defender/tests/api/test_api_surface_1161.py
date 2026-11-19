@@ -97,6 +97,32 @@ def test_origin_refuses_what_a_browser_would_not_send(text: str) -> None:
         origin(text)
 
 
+@pytest.mark.parametrize("text", [
+    "http://a_b.test", "http://-a.test", "http://a-.test", "http://a..test", "http://x.test.", "http://a%20b.test",
+    "http://999.1.1.1", "http://1.2.3", "http://0x7f.0.0.1", "http://0x7f", "http://a.0x1f", "http://127.000.0.1", "http://127.1",
+    "http://[2001:0db8::1]", "http://[2001:db8:0:0:0:0:0:1]", "http://[::ffff:1.2.3.4]", "http://[fe80::1%eth0]",
+    "http://[fe80::1%25eth0]",
+])
+def test_origin_refuses_a_host_that_is_not_a_hostname_or_a_canonical_address(text: str) -> None:
+    """The host is a hostname by the artifact domain's rule, a dotted-decimal IPv4 address, or an IPv6 address in its
+    compressed form, so a setting that no browser's `Origin` could equal fails at start, not at the first request. (#1566)"""
+    from defender.api_server._settings import origin
+
+    with pytest.raises(ValueError):  # noqa: PT011 — the type is the contract; the message names the fix
+        origin(text)
+
+
+@pytest.mark.parametrize("text", [
+    "http://127.0.0.1:8000", "http://10.0.0.1", "http://[::1]:8000", "https://[2001:db8::1]", "https://a-b.c9.example",
+    "https://xn--bcher-kva.example", "http://localhost:8000", "https://9a.example",
+])
+def test_origin_accepts_hostnames_and_canonical_addresses(text: str) -> None:
+    """Control for the refusals above: the forms a browser writes. (#1566)"""
+    from defender.api_server._settings import origin
+
+    assert origin(text) == text
+
+
 @pytest.mark.parametrize("text", ["artifacts.defender.test", "localhost", "a.b.c.example", "xn--bcher-kva.example", "a-b.example"])
 def test_artifact_domain_accepts_a_bare_lowercase_hostname(text: str) -> None:
     """`artifact_domain()` returns the hostname. (S5)"""

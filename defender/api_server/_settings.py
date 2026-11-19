@@ -16,7 +16,7 @@ from sqlalchemy.exc import ArgumentError
 
 from defender._io import read_text_utf8
 from defender._url import check_origin as origin
-from defender._url import split_http_url
+from defender._url import is_hostname, split_http_url
 from defender._yaml import safe_load
 from defender.credential_proxy import SecretSettings, store_policies
 from defender.kit.faults import ConfigFault
@@ -125,13 +125,12 @@ def _port(value: str) -> int:
     return int(value)
 
 
-_LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", re.ASCII)
 
 
 def artifact_domain(value: str) -> str:
     """A bare lowercase hostname (dot-separated labels of ASCII letters, digits and hyphens): no scheme, port, path,
     wildcard or surrounding text. The one owner of the artifact domain's shape (S5)."""
-    if not value or not all(_LABEL.fullmatch(label) for label in value.split(".")):
+    if not is_hostname(value):
         raise ValueError("must be a bare lowercase hostname: no scheme, port, path, wildcard or empty label")
     return value
 
