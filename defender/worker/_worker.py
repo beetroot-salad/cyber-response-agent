@@ -199,6 +199,14 @@ def _exit_words(returncode: int) -> str:
             else f"exited with code {returncode}")
 
 
+def _post_step_answer(returncode: int | None) -> bool | None:
+    """Whether work still waits, as a post-step's helper said it by its exit status (#1487 Amendment r5.2): None for any
+    status that is neither answer, which is never "nothing waits"."""
+    from defender.job_host import NOTHING_WAITS, WORK_WAITS
+
+    return None if returncode is None else {NOTHING_WAITS: False, WORK_WAITS: True}.get(returncode)
+
+
 def _helper_failure(returncode: int, held: Held) -> int | None:
     """The helper's exit status when the job's helper itself failed (#1170), else None: any status but 0, which the
     helper gives exactly when it served the job to its end, whatever its container's status (the helper logs that).
@@ -342,10 +350,8 @@ class Worker:
         self._learning_check_interval = learning_check_interval
         self._checks_resume_at = 0.0
         # A completed job's findings screen (#1487 r5.1 items 6, 11): `learning.judge.enqueue.screen_findings` unless
-        # one is handed in, loaded at its first use. The learning store the worker asks whether work still waits
-        # (Flow 3): one per `drain`/`serve`, on the job store's database, made at its first question.
+        # one is handed in, loaded at its first use.
         self._screen_findings = screen_findings
-        self._learning_store: Any = None
         self._store = store
         self._data_root = data_root if isinstance(data_root, DataRoot) else data_root_from_path(data_root)
         self._child_argv = child_argv
@@ -432,7 +438,6 @@ class Worker:
                 raise
         finally:
             await _end_tasks(services)
-            await self._close_learning_store()
 
     async def _claim_until_done(self, stop: asyncio.Event | None, wake: asyncio.Event) -> None:
         while stop is None or not stop.is_set():
@@ -1134,9 +1139,10 @@ class Worker:
         hold `holder` (amendment 1): a child in the one supervision registry, handed nothing. A
         job's post-step first holds the tenant's check clock; when another post-step holds it, this
         one does not start and the tenant is checked at the next claim instead (amendment 3).
-        Either kind restarts the tenant's check clock when it ends, idle only when, once its child
-        exited, the learning store answered that no work waits (#1487 O7, Flow 3); a post-step that
-        cannot start, a stop, or a question that fails leaves it not idle."""
+        Either kind restarts the tenant's check clock when it ends, idle only when its helper exited
+        saying that no work waits (#1487 O7, Flow 3, Amendment r5.2: the helper asks the learning
+        store once the container exited); a post-step that cannot start, a stop, or any other exit
+        leaves it not idle."""
         post_step = self._post_step_argv
         assert post_step is not None  # a worker with learning slots has it (constructor)
         if holder is None:
@@ -1155,7 +1161,7 @@ class Worker:
             proc = await self._run_child(held, lambda: post_step(launch))
             if proc is None:
                 return
-            waiting = None if held.signalled or self._stopping else await self._work_waiting(tenant)
+            waiting = None if held.signalled or self._stopping else _post_step_answer(proc.returncode)
             idle = waiting is False
             announce("learning_post_step", actor=SYSTEM, tenant_id=tenant,
                      target=job if job is not None else tenant,
@@ -1164,43 +1170,6 @@ class Worker:
         finally:
             self._held.pop(key, None)
             await self._end_check(tenant, holder, idle=idle)
-
-    async def _work_waiting(self, tenant: str) -> bool | None:
-        """Whether the learning store holds work a post-step of `tenant` could act on (#1487 Flow 3,
-        `learning_store.tick.lane_waiting`): the author drain's reconcile lanes, and the thresholds
-        read from this worker's environment now. None when the question fails (logged): an unknown
-        answer is never "nothing waits"."""
-        try:
-            from defender.learning.core.drains import AUTHOR_DRAIN_RECONCILES
-            from defender.learning.core.store_tick import thresholds
-            from defender.learning_store.tick import lane_waiting
-
-            async with asyncio.timeout(self._store_call_limit):  # not `wait_for`: on 3.11 it can lose a cancel
-                return bool(await lane_waiting(self._learning(), tenant, reconcile_lanes=AUTHOR_DRAIN_RECONCILES,
-                                               thresholds=thresholds()))
-        except Exception as fault:  # noqa: BLE001 — an unknown answer keeps the tenant's checks running
-            self._note_store_fault(fault)
-            _logger.warning("tenant %s: whether learning work still waits could not be told; its checks go on",
-                            tenant, exc_info=True)
-            return None
-
-    def _learning(self) -> Any:
-        """The learning store this worker asks (#1487 Flow 3), on its job store's database, made once
-        with the learning store's own settings (`store_knobs`)."""
-        if self._learning_store is None:
-            from defender.learning.core.store_tick import store_knobs
-            from defender.learning_store import LearningStore
-
-            self._learning_store = LearningStore(self._store.dsn, **store_knobs())
-        return self._learning_store
-
-    async def _close_learning_store(self) -> None:
-        store, self._learning_store = self._learning_store, None
-        if store is not None:
-            try:
-                await store.close()
-            except Exception:  # noqa: BLE001 — a pool that will not close leaks nothing a later drain reuses
-                _logger.warning("the learning store's connections could not be closed", exc_info=True)
 
     async def _end_check(self, tenant: str, holder: str, *, idle: bool) -> None:
         """Let go of the hold `holder` on the tenant's check clock, restarting it (amendment 3). A

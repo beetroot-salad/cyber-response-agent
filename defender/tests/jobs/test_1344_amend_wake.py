@@ -35,8 +35,8 @@ pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
 
 
 class CheckChild(PostStepChild):
-    """`post_step_argv` for a family-less post-step (no job): records `(None, tenant)`. It hands over and answers
-    nothing (#1487 O7: no list, no record)."""
+    """`post_step_argv` for a family-less post-step (no job): records `(None, tenant)`. It is handed nothing and leaves
+    no record (#1487 O7); as the helper, it answers whether work waits by its exit status (Amendment r5.2)."""
 
     def __call__(self, launch) -> list[str]:
         assert launch.job_id is None, "premise: this stand-in only serves family-less launches"

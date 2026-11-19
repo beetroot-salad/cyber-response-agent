@@ -17,7 +17,12 @@ Split into:
 
 The client side (`ask`, `Refused`, `SOCKET_ENV`, `JOB_LABEL`, `IMAGE_ENV`) lives in `defender.job_socket`, low in the
 import order so every in-container caller can use it; this door re-exports it. `main` is served lazily, so importing
-this package for the client does not load the helper's stack."""
+this package for the client does not load the helper's stack.
+
+A post-step's helper that served its job to its end answers whether work still waits by its exit status (#1487
+Amendment r5.2): `NOTHING_WAITS` or `WORK_WAITS`, asked of the learning store it bound once the container exited.
+Any other status, 0 included (a stopped post-step, a question that failed, one ended before its container), says
+nothing about it: the worker never reads it as "nothing waits"."""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -28,7 +33,12 @@ from defender.lazy_door import lazy_door
 if TYPE_CHECKING:
     from defender.job_host._main import main as main
 
-__all__ = ["IMAGE_ENV", "JOB_LABEL", "SOCKET_ENV", "Refused", "ask", "main"]
+__all__ = ["IMAGE_ENV", "JOB_LABEL", "NOTHING_WAITS", "SOCKET_ENV", "WORK_WAITS", "Refused", "ask", "main"]
+
+#: A served post-step's exit status when the learning store answered that no work waits for a post-step of its tenant.
+NOTHING_WAITS = 10
+#: A served post-step's exit status when the learning store answered that work still waits.
+WORK_WAITS = 11
 
 #: Each name this door serves lazily, and the submodule that defines it.
 _HOMES: dict[str, str] = {"main": "_main"}

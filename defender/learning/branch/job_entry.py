@@ -62,7 +62,6 @@ from defender.records.job_lane import (
     JobLaneRefused,
     LearningEnd,
     LearningProgress,
-    findings_rows,
     sibling_cost,
     unreadable_findings,
 )
@@ -158,11 +157,11 @@ class _Job:
                 _logger.warning(f"job {self.job_id}: the siblings' cost read as {cost!r}, which is no cost")
         self.progress()
 
-    def judged(self, graded: Any, held: Callable[[], dict[str, Any]]) -> None:
+    def judged(self, graded: Any, held: Callable[[], tuple[dict[str, Any], int]]) -> None:
         """The judge's pass returned: the ending is `completed`, decided here, before anything
         else (from now on a SIGTERM is ignored), its findings `unreadable` until read (#1487 Flow 1
         step 1). `held()` then reads the findings the pass left in the episode as the record's
-        findings field (`enqueue.held_findings`: `ok` with their text, `malformed` or `over_cap`),
+        findings field and its row count (`enqueue.held_findings`: `ok` with their text, `malformed` or `over_cap`),
         which replaces `unreadable` only once it has returned; a read that fails keeps
         `unreadable`, and the ending stands either way."""
         not_graded = getattr(graded, "not_graded", None)
@@ -172,8 +171,7 @@ class _Job:
         if threading.current_thread() is threading.main_thread():
             signal.signal(signal.SIGTERM, signal.SIG_IGN)
         try:
-            found = held()
-            count = findings_rows(found)
+            found, count = held()
         except Exception as unreadable:  # noqa: BLE001 — the findings are the record's, the ending stands
             _logger.warning(f"job {self.job_id}: the findings could not be read ({type(unreadable).__name__})")
             return

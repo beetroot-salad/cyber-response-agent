@@ -1113,9 +1113,9 @@ def _grade_job(runs: RunsRepository[Tenant], *, episode_id: str, judge: Any, lan
     lane.judged(graded, functools.partial(_held_findings, runs, episode_id))
 
 
-def _held_findings(runs: RunsRepository[Tenant], episode_id: str) -> dict[str, Any]:
-    """The findings a job's judge left in its episode, as its end record's findings field (#1487,
-    `enqueue.held_findings`), through the repository's walk."""
+def _held_findings(runs: RunsRepository[Tenant], episode_id: str) -> tuple[dict[str, Any], int]:
+    """The findings a job's judge left in its episode, as its end record's findings field and the rows it holds
+    (#1487, `enqueue.held_findings`), through the repository's walk."""
     from defender.learning.judge.enqueue import held_findings
 
     with runs.episode_files(episode_id) as episode:

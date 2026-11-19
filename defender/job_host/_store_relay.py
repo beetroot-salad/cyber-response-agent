@@ -5,14 +5,18 @@ answered after the stop signal (the relay itself refuses new leases then). The h
 the adapter is over the learning store at the helper's own database address (the worker's environment, which `_spawn`
 passes it), bound to the claim's tenant, the author lane, an owner of the helper's and the thresholds and store settings
 of that environment. The wire and the batch-reference registry are `learning_store.tick_port`'s; one `TickRelay` per
-session, made at its first store request and closed with what the post-step opened."""
+session, made at its first store request and closed with what the post-step opened. Once the container exits, the same
+adapter answers whether work still waits (`answer_waiting`, #1487 Amendment r5.2), the helper's exit status."""
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any
 
 from ._container import STOP_GRACE
 from ._session import Registry, Session
+
+_logger = logging.getLogger(__name__)
 
 
 def _bound_adapter(session: Session, opened: Any) -> Any:
@@ -42,6 +46,20 @@ def _relay(session: Session) -> Any:
             state.relay = TickRelay(lambda: _bound_adapter(session, state.opened), signalled=session.signalled.is_set,
                                     stop_window=STOP_GRACE, reconcile_lanes=AUTHOR_DRAIN_RECONCILES)
         return state.relay
+
+
+def answer_waiting(session: Session) -> bool | None:
+    """Whether the tenant's store holds work a post-step could act on (`learning_store.tick.work_waiting`), asked through
+    the session's relay adapter (the tenant, the author lane and the thresholds it bound); None when the question fails,
+    logged: an unknown answer is never "nothing waits"."""
+    from defender.learning_store.tick import work_waiting
+
+    try:
+        return work_waiting(_relay(session).adapter())
+    except Exception:  # noqa: BLE001 — an unknown answer keeps the tenant's checks running
+        _logger.warning("post-step of %s: whether learning work still waits could not be told; its checks go on",
+                        session.job_id or session.tenant_id, exc_info=True)
+        return None
 
 
 def _store_handler(name: str) -> Any:

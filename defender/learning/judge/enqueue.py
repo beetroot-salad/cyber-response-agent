@@ -592,9 +592,10 @@ class EpisodeFindings:
         return str(getattr(self._episode, self._record(channel)).path)
 
 
-def held_findings(episode: formats.Episode) -> dict[str, Any]:
-    """A completed job's findings field for its end record (#1487 Flow 1 step 1): every row its episode holds, by
-    the store's kind, as `{"state": "ok", "text": <the rows as JSON text>}`, checked with the worker's own bounded
+def held_findings(episode: formats.Episode) -> tuple[dict[str, Any], int]:
+    """A completed job's findings field for its end record (#1487 Flow 1 step 1), and the rows it holds (0 when it
+    refuses them), from one parse: every row its episode holds, by the store's kind, as
+    `{"state": "ok", "text": <the rows as JSON text>}`, checked with the worker's own bounded
     parser (`job_lane.findings_field`); `{"state": "over_cap"}` for text over `FINDINGS_CAP_BYTES`;
     `{"state": "malformed"}` when a held line is not a row or the text fails the parser. Never a single row
     dropped: one failure refuses them all. A held record that cannot be read raises (`OSError`): the entry then

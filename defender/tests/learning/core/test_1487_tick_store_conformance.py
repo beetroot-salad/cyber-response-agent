@@ -261,8 +261,9 @@ def _field_names(value: Any) -> set[str]:
 @pytest.mark.parametrize("impl", R.IMPLS)
 def test_p2_the_held_keeps_todays_fields_and_the_batch_view_drops_the_token_and_the_lease_owner(scene, start, impl):
     """`Held` has every field today's has; the listed batch has every field of today's view but the token and the lease
-    owner, in both implementations; the settings are numbers. (Shapes)"""
-    from defender.learning_store import BatchView, Held
+    owner, and the listed item every field of today's item but its payload, in both implementations; the settings are
+    numbers. (Shapes; #1487 review: the listing carries no finding text)"""
+    from defender.learning_store import BatchView, Held, WorkItem
 
     R.reset_learning(scene.dsn)
     R.seed_work(scene.dsn, scene.tenant)
@@ -272,6 +273,7 @@ def test_p2_the_held_keeps_todays_fields_and_the_batch_view_drops_the_token_and_
     with cm as store:
         held = store.claim()
         views = store.batches()
+        items = store.work()
         renew_every, ceiling = store.renew_every, store.generation_ceiling
     if helper is not None:
         helper.close()
@@ -281,6 +283,9 @@ def test_p2_the_held_keeps_todays_fields_and_the_batch_view_drops_the_token_and_
     assert views
     for view in views:
         assert _field_names(view) == {f.name for f in dataclasses.fields(BatchView)} - {"token", "lease_owner"}
+    assert items
+    for item in items:
+        assert _field_names(item) == {f.name for f in dataclasses.fields(WorkItem)} - {"payload"}
     assert float(renew_every) == R.RENEW
     assert int(ceiling) == 3
 
@@ -292,8 +297,9 @@ _TAGS = {"a_bytes": {"$bytes": "AAAA"}, "a_type": {"$type": "Held", "batch_id": 
 
 def test_p2_a_payload_that_looks_like_a_wire_tag_comes_back_as_the_data_it_is(scene, start):
     """A finding whose payload holds `{"$bytes": ...}` and other tag-shaped values (the job socket's own bytes tag among
-    them) reaches the tick as exactly the dicts and strings the adapter returns, in a claim's items and in `work()`:
-    nothing decodes a type from model text. (Wire)"""
+    them) reaches the tick as exactly the dicts and strings the adapter returns in a claim's items: nothing decodes a
+    type from model text. `work()` lists the item without its payload in both. (Wire; #1487 review: the listing carries
+    no finding text)"""
     row = {**finding("tag/w/0/0"), **_TAGS}
     results = {}
     for impl in R.IMPLS:
@@ -312,8 +318,8 @@ def test_p2_a_payload_that_looks_like_a_wire_tag_comes_back_as_the_data_it_is(sc
     for impl, (items, held) in results.items():
         [item] = items
         [(_kind, _key, payload)] = held.items
-        for where in (item.payload, payload):
-            assert {k: where[k] for k in _TAGS} == _TAGS, (impl, where)
+        assert {k: payload[k] for k in _TAGS} == _TAGS, (impl, payload)
+        assert not hasattr(item, "payload"), (impl, item)
     canon = R.Canon()
     assert canon(results["port"]) == R.Canon()(results["adapter"])
     assert canon(results["adapter"])  # control: the comparison saw something

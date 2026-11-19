@@ -1,5 +1,5 @@
 """#1278 A4 Wake, as #1487 Flow 3 moves it: one `feedback_instruction` item (threshold 1) or a not-ended registry batch
-makes the worker's waiting predicate (`defender.learning_store.tick.lane_waiting`) true. Store state built with the store's
+makes the post-step's waiting predicate (`defender.learning_store.tick.work_waiting`) true. Store state built with the store's
 own verbs, as `test_1344_amend_post_step.py` does."""
 from __future__ import annotations
 

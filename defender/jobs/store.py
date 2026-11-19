@@ -1003,7 +1003,7 @@ async def _store_findings(s: AsyncSession, tenant_id: str, job_id: str, state: s
     else:
         inserted = await insert_findings(s, tenant_id, findings, source_run=job_id)
         if inserted.stored:
-            return {"publish_state": "done", "findings_count": sum(len(rows) for rows in findings.values())}
+            return {"publish_state": "done", "findings_count": inserted.added}
         kind = f"refused at the insert: {inserted.why}"
     if findings is not None:
         _logger.warning("learning job %s: its findings are refused (%s); the job ends completed and none of them is "

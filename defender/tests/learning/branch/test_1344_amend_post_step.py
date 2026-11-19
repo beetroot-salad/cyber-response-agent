@@ -1,16 +1,15 @@
-"""#1344 amendment 1 and #1278 Wake, as #1487 Flow 3 moves them: the family-less post-step's CLI form, and the worker's
-"work still waiting" question, now an async predicate in `defender.learning_store.tick` over the learning store with the
-reconcile lanes and the thresholds passed as values (`learning_store` may not import `defender.learning`). The post-step
-writes no record, so what it leaves waiting is read from the store alone. Store state is built with the store's own
-verbs, a real PostgreSQL. The post-step's own behaviour (no record, no hand-over, no database) is
-`test_1344_post_step.py`; the worker's use of the predicate is `tests/jobs/test_1487_post_step_waiting.py`."""
+"""#1344 amendment 1 and #1278 Wake, as #1487 Flow 3 moves them: the family-less post-step's CLI form, and the
+"work still waiting" question, a predicate in `defender.learning_store.tick` (`work_waiting`) over the tick's store,
+which the post-step's helper asks with the adapter it bound (the tenant, the author lane, the thresholds; Amendment
+r5.2). The post-step writes no record, so what it leaves waiting is read from the store alone. Store state is built with
+the store's own verbs, a real PostgreSQL. The post-step's own behaviour (no record, no hand-over, no database) is
+`test_1344_post_step.py`; the helper's answer and the worker's reading of it are
+`tests/jobs/test_1487_post_step_waiting.py`."""
 from __future__ import annotations
 
 import re
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-import anyio
 import pytest
 
 from defender.learning.branch import post_step
@@ -23,14 +22,11 @@ from defender.tests.support.learning.core._store1278 import (
     call,
     finding,
     lapse_lease,
-    learning_store,
 )
 from defender.tests.support.shared._postgres1339 import execute, migrated_database  # noqa: F401 — fixture
 
 pytestmark = pytest.mark.postgres
 
-#: The lanes the author tick reconciles (`AUTHOR_DRAIN_RECONCILES`), spelled out as the worker passes them.
-RECONCILES = (AUTHOR_LANE, LEAD_LANE, "feedback")
 TENANT = T1
 
 
@@ -48,16 +44,15 @@ def thresholds_of(finding_at: int = 1) -> dict[str, int]:
             "feedback_instruction": 1}
 
 
-def waiting_of(dsn: str, tenant: str, *, finding_at: int = 1, reconcile_lanes=RECONCILES) -> bool:
-    """`lane_waiting` over a store of its own, from sync code, the lanes and thresholds handed in as values."""
-    from defender.learning_store.tick import lane_waiting
+def waiting_of(dsn: str, tenant: str, *, finding_at: int = 1) -> bool:
+    """`work_waiting` over the tick's store as the helper binds it: an adapter over a store of its own, bound to the
+    tenant, the author lane and the thresholds handed in."""
+    from defender.learning_store import blocking
+    from defender.learning_store.tick import StoreAdapter, work_waiting
 
-    async def go() -> bool:
-        async with learning_store(dsn) as store:
-            return await lane_waiting(store, tenant, reconcile_lanes=reconcile_lanes, thresholds=thresholds_of(finding_at))
-
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(anyio.run, go).result()
+    with blocking(dsn) as store:
+        return work_waiting(StoreAdapter(store, tenant=tenant, lane=AUTHOR_LANE, owner="post-step:test",
+                                         thresholds=thresholds_of(finding_at)))
 
 
 def test_a1_without_a_job_the_argv_parses_as_a_family_less_post_step():
@@ -186,22 +181,21 @@ def test_o7_flow3_the_predicate_is_true_exactly_when_the_stores_state_gives_the_
 
 
 @pytest.mark.parametrize(("finding_at", "waiting"), [(2, True), (3, False)])
-def test_o7_flow3_the_thresholds_are_the_values_the_caller_passes(migrated_database, finding_at, waiting):  # noqa: F811
+def test_o7_flow3_the_thresholds_are_those_its_store_was_bound_to(migrated_database, finding_at, waiting):  # noqa: F811
     """Two queued findings: at threshold 2 the author gate opens, so work waits; at 3 it stays shut. The predicate reads
-    the thresholds it is handed, not a setting of its own. (O7, Flow 3)"""
+    the thresholds its store was bound to, not a setting of its own. (O7, Flow 3)"""
     _queued(migrated_database, TENANT, "f1", "f2")
     assert waiting_of(migrated_database, TENANT, finding_at=finding_at) is waiting
 
 
-@pytest.mark.parametrize("reconcile_lanes", [RECONCILES, (AUTHOR_LANE, "feedback")], ids=["with-lead", "without-lead"])
 @pytest.mark.parametrize(("settled", "waiting"), [(False, True), (True, False)], ids=["abandon-asked", "abandon-settled"])
-def test_o7_flow3_the_reconcile_lanes_are_the_values_the_caller_passes(  # noqa: F811 — the imported fixture
-        migrated_database, reconcile_lanes, settled, waiting):  # noqa: F811
-    """A lead-lane batch a person asked to abandon is a batch not yet ended, so work waits whichever reconcile lanes
-    the caller names; once a tick has carried the abandon out, nothing waits, whichever lanes. Since #1537 no ended
-    batch is left for a tick to close, so the lanes passed add nothing a not-ended batch does not. (O7, Flow 3)"""
+def test_o7_flow3_another_lanes_batch_a_person_asked_to_abandon_keeps_work_waiting(  # noqa: F811 — the imported fixture
+        migrated_database, settled, waiting):  # noqa: F811
+    """A lead-lane batch a person asked to abandon is a batch not yet ended, so work waits though the predicate is bound
+    to the author lane; once a tick has carried the abandon out, nothing waits. Since #1537 no ended batch is left for a
+    tick to close, so the lanes the tick reconciles add nothing a not-ended batch does not. (O7, Flow 3)"""
     _abandon_asked(migrated_database, TENANT, LEAD_LANE, settled=settled)
-    assert waiting_of(migrated_database, TENANT, reconcile_lanes=reconcile_lanes) is waiting
+    assert waiting_of(migrated_database, TENANT) is waiting
 
 
 # --- Wake: every batch not yet ended, whatever its lane and phase ---------------------------------------------------------

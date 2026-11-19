@@ -355,20 +355,26 @@ async def insert_findings(s: AsyncSession, tenant: str, channels: Mapping[str, S
         added = 0
         async with s.begin_nested():
             for kind, rows in channels.items():
-                for row in rows:
-                    added += len((await s.execute(_finding_insert(tenant, kind, row, source_run))).all())
+                for start in range(0, len(rows), _INSERT_CHUNK):
+                    chunk = rows[start:start + _INSERT_CHUNK]
+                    added += len((await s.execute(_findings_insert(tenant, kind, chunk, source_run))).all())
     except Exception as fault:  # noqa: BLE001 — classified: content refuses, an outage is raised again
         return FindingsInsert(False, why=_refusal_of(fault))
     return FindingsInsert(True, added=added)
 
 
-def _finding_insert(tenant: str, kind: str, row: Mapping[str, Any], source_run: str) -> Any:
-    """One finding as a `waiting` item keyed by its `finding_id`, the conflict on an id held for good doing nothing."""
+#: Rows per INSERT: each row binds 14 values, and the driver takes at most 32767 per statement.
+_INSERT_CHUNK = 1000
+
+
+def _findings_insert(tenant: str, kind: str, rows: Sequence[Mapping[str, Any]], source_run: str) -> Any:
+    """`rows` as `waiting` items in one statement, each keyed by its `finding_id`, the conflict on an id held for good
+    doing nothing; returns the keys it added."""
     table = cast(Table, WorkItemRow.__table__)
-    return pg_insert(table).values(
+    return pg_insert(table).values([dict(
         tenant_id=TenantId(tenant), kind=kind, item_key=row["finding_id"], payload=dict(row), source_run=source_run,
         status="waiting", reason=None, fault=None, batch_id=None, attempts=0, deferrals=0, offers_declined=0,
-        coalesce_key=None, mistake_key=None, enqueued_at=func.now(), updated_at=func.now(),
+        coalesce_key=None, mistake_key=None, enqueued_at=func.now(), updated_at=func.now()) for row in rows],
     ).on_conflict_do_nothing(index_elements=["tenant_id", "kind", "item_key"]).returning(table.c.item_key)
 
 

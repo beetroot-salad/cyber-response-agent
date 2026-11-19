@@ -3,7 +3,9 @@
 
 The port has no semantics of its own (P2): every call is one request, and the helper answers it through a
 `tick.StoreAdapter` it bound itself (the claim's tenant, the author lane, its own owner and thresholds), so the port
-returns what the adapter returns and raises what it raises. The helper adds exactly three things:
+returns what the adapter returns and raises what it raises of the exceptions the tick handles (`CROSSING`, matched by
+exact type, so a fault in the helper's own code never passes as one); any other is the outage `StoreUnavailable`. The
+helper adds exactly three things:
 
 - it binds the trusted values: no request has a field for a tenant, lane, owner, threshold, `by` or setting;
 - it refuses a batch reference it did not issue this session with `ForeignBatch` (`TickRelay`'s registry): an id from
@@ -35,8 +37,8 @@ from defender.job_socket import Refused
 from defender.records.formats import BatchId, TenantId, WorkItemId
 from defender.records.learning_causes import BATCH_CAUSES, ITEM_CAUSES, Why
 
-from ._store import CommitRecord, Held, LaneBusy, LaneWork, LeaseLost, NotLapsed, Outcome, Stop, TenantInactive, WorkItem
-from .tick import ForeignBatch, ListedBatch, StoreAdapter, StoreUnavailable
+from ._store import CommitRecord, Held, LaneBusy, LaneWork, LeaseLost, NotLapsed, Outcome, Stop, TenantInactive
+from .tick import ForeignBatch, ListedBatch, ListedItem, StoreAdapter, StoreUnavailable
 
 __all__ = ["CROSSING", "REQUESTS", "SETTINGS", "TickPort", "TickRelay"]
 
@@ -165,10 +167,10 @@ LISTED = _Record(ListedBatch, {
     "pr_number": OPT_INT, "replaces": OPT_BATCH, "generation": INT, "refusals": INT, "last_checked": OPT_TIME,
     "reason": OPT_TEXT, "created_at": TIME, "ended_at": OPT_TIME, "lapsed": BOOL, "cause": OPT_TEXT,
     "parked_at": OPT_TIME, "abandon_requested_at": OPT_TIME, "abandon_requested_by": OPT_TEXT})
-WORK_ITEM = _Record(WorkItem, {
+LISTED_ITEM = _Record(ListedItem, {
     "id": _id(WorkItemId), "kind": TEXT, "key": TEXT, "status": TEXT, "reason": OPT_TEXT, "fault": OPT_TEXT,
     "batch_id": OPT_BATCH, "pr_number": OPT_INT, "attempts": INT, "deferrals": INT, "offers_declined": INT,
-    "coalesce_key": OPT_TEXT, "mistake_key": OPT_TEXT, "payload": PAYLOAD, "source_run": OPT_TEXT,
+    "coalesce_key": OPT_TEXT, "mistake_key": OPT_TEXT, "source_run": OPT_TEXT,
     "enqueued_at": TIME, "updated_at": TIME, "cause": OPT_TEXT})
 LANE_WORK = _Record(LaneWork, {
     "busy": BOOL, "claimable": BOOL, "replaces": OPT_BATCH, "replaces_pr": OPT_INT, "replaces_generation": INT})
@@ -199,7 +201,7 @@ def _settings_decode(v: Any) -> dict[str, Any]:
 REFUSALS = _rows(2, INT, TEXT)
 #: Each verb's answer, by request name.
 ANSWERS: dict[str, Codec] = {
-    "store.batches": _list_of(LISTED), "store.lane_work": LANE_WORK.codec, "store.work": _list_of(WORK_ITEM),
+    "store.batches": _list_of(LISTED), "store.lane_work": LANE_WORK.codec, "store.work": _list_of(LISTED_ITEM),
     "store.commit_record": _list_of(COMMIT), "store.claim": _optional(HELD.codec), "store.take_over": HELD.codec,
     "store.note_refusal": ((lambda v: REFUSALS[0]([v])[0]), (lambda v: REFUSALS[1]([v])[0])),
     "store.end_review": BOOL, "store.settle_abandon": BOOL, SETTINGS: ((lambda v: dict(v)), _settings_decode)}
@@ -292,7 +294,7 @@ class TickPort:
     def lane_work(self) -> LaneWork:
         return self._verb("store.lane_work")
 
-    def work(self, *, statuses: Sequence[str] | None = None, kind: str | None = None) -> list[WorkItem]:
+    def work(self, *, statuses: Sequence[str] | None = None, kind: str | None = None) -> list[ListedItem]:
         return self._verb("store.work", statuses=None if statuses is None else list(statuses), kind=kind)
 
     def commit_record(self) -> list[CommitRecord]:

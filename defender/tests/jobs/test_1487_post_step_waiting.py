@@ -1,10 +1,11 @@
-"""#1487 O7 and Flow 3: "work still waiting" is the worker's own question. After a post-step's container exits the worker
-answers the waiting predicate from its store (`defender.learning_store.tick.lane_waiting`, the reconcile lanes and the
-thresholds from the worker's own environment); the post-step writes no record and the worker reads none, a failed
-predicate leaves the tenant's clock not idle, and the pending set, its hand-over and the record retire. The predicate's own
-truth table is `tests/learning/branch/test_1344_amend_post_step.py`; the armed-while-held mark is
-`test_1344_amend_checks.py`. Real database, scripted children as `test_1344_learning_jobs.py`; the worker reaches the
-learning schema in the database its job store is on."""
+"""#1487 O7 and Flow 3, as Amendment r5.2 places the question: "work still waiting" is answered by the post-step's helper,
+which asks the learning store it bound once the container exits and says it by its exit status (`job_host.NOTHING_WAITS`,
+`WORK_WAITS`); the worker reads that status and opens no learning store. The post-step writes no record and the worker
+reads none, any other status (a failed question, a stop) leaves the tenant's clock not idle, and the pending set, its
+hand-over and the record retire. The predicate's own truth table is `tests/learning/branch/test_1344_amend_post_step.py`;
+the helper's answer over a real store is `test_1487_helper_waiting.py`; the armed-while-held mark is
+`test_1344_amend_checks.py`. Real database, scripted children as `test_1344_learning_jobs.py`: the post-step's stand-in
+answers as the helper does, from the store, unless a case sets its status."""
 from __future__ import annotations
 
 import asyncio
@@ -61,8 +62,8 @@ _STATES = {
 @pg
 async def test_o7_after_a_jobs_post_step_the_clock_goes_idle_exactly_when_the_store_holds_nothing_waiting(
         world, monkeypatch, state):  # noqa: F811 — the imported fixture
-    """The job ends and its post-step exits 0, leaving no record: the tenant's clock is idle exactly when the
-    predicate over the store, with the worker's own thresholds, says nothing waits. (O7, Flow 3)"""
+    """The job ends and its post-step exits with its answer, leaving no record: the tenant's clock is idle exactly when
+    the predicate over the store, with the thresholds of the worker's environment, says nothing waits. (O7, Flow 3)"""
     prepare, threshold, waits = _STATES[state]
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", threshold)
     dsn = world["dsn"]
@@ -89,8 +90,8 @@ _LEFT_BY_THE_POST_STEP = {
 async def test_o7_the_question_is_asked_after_the_post_step_exits_and_sees_what_it_left(
         world, monkeypatch, left):  # noqa: F811 — the imported fixture
     """The post-step's container runs (held open); while it runs, the store gains what its tick would leave (a finding
-    published, a batch left in review); then it exits. The worker's answer reads the store as the container left it: not
-    idle. The control leaves nothing: idle. (O7, Flow 3: "after a post-step's container exits, the worker answers")"""
+    published, a batch left in review); then it exits. The answer reads the store as the container left it: not idle.
+    The control leaves nothing: idle. (O7, Flow 3, r5.2: the question is asked once the post-step's container exited)"""
     leave, threshold, waits = _LEFT_BY_THE_POST_STEP[left]
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", threshold)
     dsn = world["dsn"]
@@ -113,10 +114,9 @@ async def test_o7_the_question_is_asked_after_the_post_step_exits_and_sees_what_
 
 
 @pg
-async def test_o7_the_worker_asks_one_learning_store_made_once_and_closed_when_it_stops(world):  # noqa: F811
-    """Two jobs, two post-steps, two answers: the worker builds one learning store for them all and closes it once its
-    drain ends. (Data model: "the worker keeps one long-lived `LearningStore`")"""
-    from defender.learning.core.store_tick import thresholds
+async def test_r52_the_worker_opens_no_learning_store(world):  # noqa: F811 — the imported fixture
+    """Two jobs, two post-steps, two answers: the worker builds no learning store for them; the answers are its helpers'.
+    (Amendment r5.2: the worker keeps no long-lived `LearningStore`)"""
     from defender.learning_store import LearningStore
     from defender.tests.support.tenancy._host1214 import counting_calls
 
@@ -125,17 +125,43 @@ async def test_o7_the_worker_asks_one_learning_store_made_once_and_closed_when_i
     async with job_store(dsn) as store:
         jobs = [await queued_job(world, store, ticket=f"J-{n}") for n in (1, 2)]
         worker = learning_worker(world, store, job=job_child(world, files={END: FAILED}), post=post)
-        with counting_calls(built=LearningStore.__init__, closed=LearningStore.close, asked=thresholds) as calls:
+        with counting_calls(built=LearningStore.__init__) as calls:
             await worker.drain()
 
     assert sorted(h[0] for h in post.handed) == sorted(jobs), "premise: both post-steps ran"
-    # the thresholds are read once per question (Amendment r5.1 item 10); `close` is a coroutine, whose every resumption
-    # the profile hook also counts, so the stores it closed are told apart by the store itself
-    assert calls.counts["asked"] >= 2, "premise: the worker asked after each post-step"
-    assert calls.counts["built"] == 1, "a learning store was built per question, not kept"
-    [kept] = [seen["self"] for seen in calls.locals["built"]]
-    closed = {id(seen["self"]) for seen in calls.locals["closed"]}
-    assert closed == {id(kept)}, "the worker's one learning store was not closed when its drain ended"
+    assert calls.counts["built"] == 0, "the worker built a learning store of its own"
+
+
+#: The helper's exit status, whether the store holds work, and whether the clock goes idle: the status alone decides.
+_STATUSES = {
+    "nothing-waits-over-a-store-with-work": ("NOTHING_WAITS", True, True),
+    "work-waits-over-an-empty-store": ("WORK_WAITS", False, False),
+    "served-without-an-answer": (0, False, False),
+    "a-failed-helper": (1, False, False),
+}
+
+
+@pytest.mark.parametrize("case", _STATUSES)
+@pg
+async def test_r52_the_clock_goes_idle_exactly_when_the_helper_exits_saying_nothing_waits(
+        world, monkeypatch, case):  # noqa: F811 — the imported fixture
+    """The worker reads the helper's exit status, never the store: `NOTHING_WAITS` makes the clock idle though the store
+    holds work; `WORK_WAITS`, a plain 0 or a failure leaves it not idle though the store holds none. (Amendment r5.2,
+    O7: an unknown answer is never "nothing waits")"""
+    from defender import job_host
+
+    status, store_has_work, idle = _STATUSES[case]
+    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
+    dsn = world["dsn"]
+    if store_has_work:
+        _finding_waits(dsn, "a/w-b/0/0")
+    post = post_child(world, exit=getattr(job_host, status) if isinstance(status, str) else status)
+    async with job_store(dsn) as store:
+        job = await queued_job(world, store, ticket="J-1")
+        await learning_worker(world, store, job=job_child(world, files={END: FAILED}), post=post).drain()
+
+    assert post.handed == [(job, "failed")], "premise: the post-step ran"
+    assert _idle(dsn) is idle
 
 
 @pytest.mark.parametrize("record", OLD_RECORD)

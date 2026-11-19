@@ -234,7 +234,7 @@ def _prepare_post_step(session: Session, hold: contextlib.ExitStack) -> Prepared
     facts = {"kind": POST_STEP, "tenant": session.tenant_id, "job": session.job_id, "tenant_state": "active",
              "forge_origin": wiring.origin if wiring is not None else None,
              "forge_repo": wiring.repo if wiring is not None else None}
-    return Prepared(launch=facts, command=list(command), state=state, cleanup=cleanup)
+    return Prepared(launch=facts, command=list(command), state=state, cleanup=cleanup, exited=_post_step_exited)
 
 
 def _discard_batches(state: _PostStep) -> None:
@@ -283,6 +283,20 @@ def _post_step_end(session: Session, cause: str) -> None:
     """A post-step stopped, refused or not started before its container writes no record (r4.1)."""
     _logger.info("post-step of %s ended before its container (%s); no record is written",
                  session.job_id or session.tenant_id, cause)
+
+
+def _post_step_exited(session: Session, _rc: int) -> None:
+    """After a post-step's container: whether work still waits, the helper's exit status (#1487 Flow 3, Amendment r5.2).
+    Asked of the store the tick's relay bound (made now if the tick asked nothing), before the cleanup closes it. A
+    stopped post-step, or a question that fails (logged), leaves the status 0, which the worker reads as unknown."""
+    from . import NOTHING_WAITS, WORK_WAITS
+    from ._store_relay import answer_waiting
+
+    if session.signalled.is_set():
+        return
+    waiting = answer_waiting(session)
+    if waiting is not None:
+        session.served_status = WORK_WAITS if waiting else NOTHING_WAITS
 
 
 def _learning_exited(session: Session, rc: int) -> None:

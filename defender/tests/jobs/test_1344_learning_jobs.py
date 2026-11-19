@@ -107,12 +107,18 @@ class JobChild(ScriptedChild):
 class PostStepChild(ScriptedChild):
     """`post_step_argv`: records the job the worker started it for and that job's row as the child starts (`handed`:
     `(job id or None, status)`). The worker hands it no list of jobs and reads no record from it (#1487 O7): whatever a
-    test makes it leave in `files` is a file the worker must not read."""
+    test makes it leave in `files` is a file the worker must not read. As the helper does (#1487 Amendment r5.2), it
+    exits with its answer whether work still waits, asked of the store once it ran; given an `exit`, or `answers=False`,
+    it exits with `exit` instead."""
 
-    def __init__(self, *a, dsn: str, **kw) -> None:
+    def __init__(self, *a, dsn: str, answers: bool = True, **kw) -> None:
         super().__init__(*a, **kw)
         self.dsn = dsn
+        self.answers = answers and "exit" not in kw
         self.handed: list[tuple[str | None, str | None]] = []
+
+    def spec_dict(self) -> dict:
+        return {**super().spec_dict(), "answer_waiting": {"dsn": self.dsn} if self.answers else None}
 
     def __call__(self, launch) -> list[str]:
         status = None if launch.job_id is None else job_row(self.dsn, launch.job_id)["status"]

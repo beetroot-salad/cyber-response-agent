@@ -1,4 +1,4 @@
-"""The author tick's store (#1487 Flow 2, P2) and the worker's "work still waiting" predicate (Flow 3).
+"""The author tick's store (#1487 Flow 2, P2) and the post-step's "work still waiting" predicate (Flow 3).
 
 `TickStore` is what the tick calls: the learning store's verbs with no tenant, lane, owner, threshold, `by` or settings
 argument, since a step of the tick never chooses who or what it acts for (P1). It has two implementations:
@@ -11,10 +11,11 @@ argument, since a step of the tick never chooses who or what it acts for (P1). I
 The port has no semantics of its own: each call returns what the adapter returns and raises what it raises. The one
 outage exception is `StoreUnavailable` (an `Exception`, never an `OSError`, which the tick reads as a forge fault);
 `ForeignBatch` is the port's refusal of a batch reference its helper did not issue, which only hostile input reaches.
-A listed batch is a `ListedBatch`: the store's view without its fencing token and lease owner, which the tick never reads.
+A listed batch is a `ListedBatch`: the store's view without its fencing token and lease owner, which the tick never reads;
+a listed item is a `ListedItem`: the store's item without its payload, which only a claim or take-over carries.
 
-`lane_waiting` is Flow 3's predicate over the async store, for the worker after a post-step's container exits: the reconcile
-lanes and the thresholds are values its caller passes, since this package may not import `defender.learning`.
+`work_waiting` is Flow 3's predicate over a `TickStore`, which the helper asks with the adapter it bound once a post-step's
+container exits (Amendment r5.2): the tenant, lane and thresholds are the adapter's.
 
 Importing this module loads no `defender.learning` module and no database driver (`tests/api/test_api_loads.py`)."""
 from __future__ import annotations
@@ -24,13 +25,12 @@ import datetime as _dt
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Protocol, TypeVar
 
-from defender.jobs.learning_models import AUTHOR_LANE
-from defender.records.formats import BatchId, TenantId
+from defender.records.formats import BatchId, TenantId, WorkItemId
 from defender.records.learning_causes import BatchCause, ItemCause, Why
 
 from ._store import BatchView, CommitRecord, Held, LaneWork, Outcome, WorkItem, parked_blocks_lane
 
-__all__ = ["ForeignBatch", "ListedBatch", "StoreAdapter", "StoreUnavailable", "TickStore", "lane_waiting"]
+__all__ = ["ForeignBatch", "ListedBatch", "ListedItem", "StoreAdapter", "StoreUnavailable", "TickStore", "work_waiting"]
 
 _T = TypeVar("_T")
 #: The curators' outcomes by `(kind, key)`, as the store applies them.
@@ -95,6 +95,35 @@ class ListedBatch:
         return parked_blocks_lane(self.kind)
 
 
+@dataclasses.dataclass(frozen=True)
+class ListedItem:
+    """An item as the tick lists it: the store's `WorkItem` without its payload. The tick reads an item's kind, key,
+    status and batch from the listing; the payloads it authors from come with its claim (`Held.items`), so a listing of
+    every open item never carries every finding's text (#1487 review: the job socket's message bound)."""
+
+    id: WorkItemId
+    kind: str
+    key: str
+    status: str
+    reason: str | None
+    fault: str | None
+    batch_id: BatchId | None
+    pr_number: int | None
+    attempts: int
+    deferrals: int
+    offers_declined: int
+    coalesce_key: str | None
+    mistake_key: str | None
+    source_run: str | None
+    enqueued_at: _dt.datetime
+    updated_at: _dt.datetime
+    cause: ItemCause | None = None
+
+    @classmethod
+    def of(cls, item: WorkItem) -> ListedItem:
+        return cls(**{f.name: getattr(item, f.name) for f in dataclasses.fields(cls)})
+
+
 class TickStore(Protocol):
     """The tick's store: the census of the verbs it calls, each bound to one tenant, lane, owner and set of thresholds by
     whoever built it. A holder's verb takes the `Held` its claim or take-over returned (only its batch id and token are
@@ -110,7 +139,7 @@ class TickStore(Protocol):
 
     def lane_work(self) -> LaneWork: ...
 
-    def work(self, *, statuses: Sequence[str] | None = None, kind: str | None = None) -> list[WorkItem]: ...
+    def work(self, *, statuses: Sequence[str] | None = None, kind: str | None = None) -> list[ListedItem]: ...
 
     def commit_record(self) -> list[CommitRecord]: ...
 
@@ -193,8 +222,8 @@ class StoreAdapter:
     def lane_work(self) -> LaneWork:
         return self._call(self._store.lane_work, self.tenant, self.lane, thresholds=self.thresholds)
 
-    def work(self, *, statuses: Sequence[str] | None = None, kind: str | None = None) -> list[WorkItem]:
-        return self._call(self._store.work, self.tenant, statuses=statuses, kind=kind)
+    def work(self, *, statuses: Sequence[str] | None = None, kind: str | None = None) -> list[ListedItem]:
+        return [ListedItem.of(i) for i in self._call(self._store.work, self.tenant, statuses=statuses, kind=kind)]
 
     def commit_record(self) -> list[CommitRecord]:
         return self._call(self._store.commit_record, self.tenant)
@@ -251,17 +280,14 @@ class StoreAdapter:
                           published=published, held=held)
 
 
-async def lane_waiting(  # lint-dup: ok — the worker's async predicate (Flow 3); store_tick's sync one is the host's (r5.1 12)
-        store: Any, tenant: str, *, reconcile_lanes: Sequence[str], thresholds: Mapping[str, int]) -> bool:
-    """Whether a post-step's author tick, reconciling `reconcile_lanes`, could act now or later without a person (#1278
-    Wake, #1487 Flow 3), read from the async store `store`: any batch of the tenant not yet ended, whatever its lane or
-    phase (its lease may lapse, its PR change, a person release it or ask for its abandon, which a tick carries out), or
-    a claim the author lane would make at `thresholds` (`lane_work`, the claim's own rules: lead-lane items alone are no
-    post-step's work). Every in-review or abandon-requested batch of a reconciled lane is a batch not ended, so the
-    lanes named add nothing today: since #1537 no ended batch is left for a tick to close."""
-    del reconcile_lanes  # every reconciled batch the tick selects is one not ended (see above)
-    for batch in await store.batches(str(tenant)):
-        if batch.phase != "ended":
-            return True
-    work = await store.lane_work(str(tenant), AUTHOR_LANE, thresholds=dict(thresholds))
+def work_waiting(store: TickStore) -> bool:
+    """Whether a post-step's author tick could act now or later without a person (#1278 Wake, #1487 Flow 3), asked of the
+    tick's own store `store` (its tenant, lane and thresholds bound): any batch of the tenant not yet ended, whatever its
+    lane or phase (its lease may lapse, its PR change, a person release it or ask for its abandon, which a tick carries
+    out), or a claim the bound lane would make (`lane_work`, the claim's own rules: lead-lane items alone are no
+    post-step's work). An in-review or abandon-requested batch of a reconciled lane is a batch not ended, so the
+    reconciled lanes add nothing: since #1537 no ended batch is left for a tick to close."""
+    if any(batch.phase != "ended" for batch in store.batches()):
+        return True
+    work = store.lane_work()
     return bool(work.claimable and not work.busy)

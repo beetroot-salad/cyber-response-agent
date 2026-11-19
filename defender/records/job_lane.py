@@ -353,29 +353,23 @@ def findings_of(found: object) -> tuple[dict[str, Any] | None, str | None]:
     return parse_findings_text(found["text"])
 
 
-def findings_field(text: str | None) -> dict[str, Any]:
-    """The end record's findings field for the findings `text` the entry built: `{"state": "ok", "text": text}` when
-    `parse_findings_text` accepts it, the worker's own check run first; `over_cap` over the cap; `malformed` for any
-    other refusal, or for `text` None (a held row that was not one)."""
+def findings_field(text: str | None) -> tuple[dict[str, Any], int]:
+    """The end record's findings field for the findings `text` the entry built, and how many rows it holds (0 when it
+    refuses them; the entry's own count, which only a person reads: the worker counts the rows it stores), from one
+    parse: `{"state": "ok", "text": text}` when `parse_findings_text` accepts it, the worker's own check run first;
+    `over_cap` over the cap; `malformed` for any other refusal, or for `text` None (a held row that was not one)."""
     if text is None:
-        return {"state": FINDINGS_MALFORMED}
-    _channels, why = parse_findings_text(text)
-    if why is not None:
-        return {"state": FINDINGS_OVER_CAP if why == FINDINGS_OVER_CAP else FINDINGS_MALFORMED}
-    return {"state": FINDINGS_OK, "text": text}
+        return {"state": FINDINGS_MALFORMED}, 0
+    channels, why = parse_findings_text(text)
+    if channels is None:
+        return {"state": FINDINGS_OVER_CAP if why == FINDINGS_OVER_CAP else FINDINGS_MALFORMED}, 0
+    return {"state": FINDINGS_OK, "text": text}, sum(len(rows) for rows in channels.values() if isinstance(rows, list))
 
 
 def unreadable_findings() -> dict[str, Any]:
     """The findings field of a completed end whose findings could not be read: `unreadable`, written first and kept
     unless the read succeeds."""
     return {"state": FINDINGS_UNREADABLE}
-
-
-def findings_rows(found: object) -> int:
-    """How many rows a findings field holds as `findings_of` reads it (0 when it refuses them): the entry's own
-    count, which only a person reads (the worker counts the rows it stores)."""
-    channels, _why = findings_of(found)
-    return 0 if channels is None else sum(len(rows) for rows in channels.values() if isinstance(rows, list))
 
 
 def _run_id(raw: object) -> RunId:

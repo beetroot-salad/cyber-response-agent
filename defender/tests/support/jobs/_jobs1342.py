@@ -233,7 +233,8 @@ class VisibleAtEmit(logging.Handler):
 #: what it was given (argv, environment, process group, whether the launch files existed) in
 #: `<seen_dir>/<id>.json`, appends `start <id>` / `end <id>` to the events file, optionally waits for
 #: a release file, writes the spec's host records (paths relative to the runs container, `{id}`
-#: expanded) and exits with the spec's code. It never decides an outcome.
+#: expanded) and exits with the spec's code. It never decides an outcome. With `answer_waiting` it stands in for a
+#: post-step's helper: it exits with that helper's answer whether work still waits, asked of the store at its end.
 CHILD_SCRIPT = textwrap.dedent("""
     import json, os, signal, subprocess, sys, time
     from pathlib import Path
@@ -381,6 +382,19 @@ CHILD_SCRIPT = textwrap.dedent("""
         if die_by != signal.SIGKILL:
             signal.signal(die_by, signal.SIG_DFL)
         os.kill(os.getpid(), die_by)
+    answer = spec.get("answer_waiting")
+    if answer:  # a post-step helper's stand-in: its exit status says whether work waits (#1487 Amendment r5.2)
+        from defender.job_host import NOTHING_WAITS, WORK_WAITS
+        from defender.learning.core.store_tick import AUTHOR_LANE, thresholds
+        from defender.learning_store import blocking
+        from defender.learning_store.tick import StoreAdapter, work_waiting
+        try:
+            with blocking(answer["dsn"]) as store:
+                waits = work_waiting(StoreAdapter(store, tenant=argv[argv.index("--tenant") + 1], lane=AUTHOR_LANE,
+                                                  owner="post-step:stand-in", thresholds=thresholds()))
+        except Exception:  # noqa: BLE001 - as the helper: a question that fails answers nothing
+            sys.exit(0)
+        sys.exit(WORK_WAITS if waits else NOTHING_WAITS)
     sys.exit(spec.get("exit", 0))
 """)
 
