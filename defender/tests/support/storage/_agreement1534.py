@@ -343,7 +343,7 @@ def questioner(root: Path, plan: Plan, *, monkeypatch, **_: Any) -> Read:
     est = S.estate(root)
     directory = _LooksUpFirst(lambda: est.directory(tenant_id=S.FIXTURE_TENANT), lambda: C.for_run(fixture_run(source())))
     got = S.launch(root, est, calls=calls, questioner=agent, source_closing=plan.fields(), source_fault=fault,
-                   directory=directory, oracle=S.oracle(then=S.submit(_BASE, S.EMPTY_CLAIM)), verifier=S.passing_verifier())
+                   directory=directory, oracle=S.oracle(then=S.submit()), verifier=S.passing_verifier())
     slots, run = [got.message], fixture_run(source())
     family = got.ep / "family.yaml"
     if family.is_file():

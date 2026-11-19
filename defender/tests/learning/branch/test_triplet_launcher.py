@@ -148,14 +148,14 @@ def test_1534_the_source_runs_closing_record_supplies_world_as_declared_disposit
 def _member_launch(tmp_path, member):
     run = S.launch(tmp_path, S.estate(tmp_path), calls=_calls(), questioner=_silent_on_the_base_disposition(),
                    source_closing={"disposition": member},
-                   oracle=S.oracle(then=S.submit(_BASE, S.EMPTY_CLAIM)), verifier=S.passing_verifier())
+                   oracle=S.oracle(then=S.submit()), verifier=S.passing_verifier())
     return run.rc, run.spawn, run.ep, run.message
 
 
 def test_1534_a_source_that_never_closed_gives_no_disposition_and_the_family_is_refused_naming_the_field(tmp_path):
     """No record and a silent questioner leaves the field absent, so the launch is refused by the field's name. (V-SOURCE)"""
     run = S.launch(tmp_path, S.estate(tmp_path), calls=_calls(), questioner=_silent_on_the_base_disposition(),
-                   oracle=S.oracle(then=S.submit(_BASE, S.EMPTY_CLAIM)), verifier=S.passing_verifier())
+                   oracle=S.oracle(then=S.submit()), verifier=S.passing_verifier())
     assert run.rc != 0, (run.rc, run.message)
     assert "disposition_declared" in run.message, (run.rc, run.message)
 
@@ -170,7 +170,7 @@ def test_1534_a_source_whose_record_could_not_be_looked_at_refuses_the_job_befor
     agent = _silent_on_the_base_disposition()
     run = S.launch(tmp_path, S.estate(tmp_path), calls=_calls(), questioner=agent,
                    source_closing={"disposition": "benign"}, source_fault=fault,
-                   oracle=S.oracle(then=S.submit(_BASE, S.EMPTY_CLAIM)), verifier=S.passing_verifier())
+                   oracle=S.oracle(then=S.submit()), verifier=S.passing_verifier())
     assert run.rc != 0
     assert run.message.rstrip().endswith(C.FAULT_WORDING[kind]), (
         f"the refusal is not the kind's wording alone (the fault's detail follows it): {run.message!r}")
