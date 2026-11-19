@@ -181,7 +181,10 @@ on — a discriminator no single query could settle makes the episode unreadable
 however good the worlds are) and the **family**: world A, the control, with no
 facts, plus one-axis counterfactuals, each a short list of **world facts** in
 natural language ("alice obtained a TGT and logged on to db-1 at 15:22Z"). The
-questioner writes facts, never telemetry.
+questioner writes facts, never telemetry. A reply whose text is not YAML is asked
+again (#1579): every questioner call of one family counts its unparsable replies on
+one breaker, and the third refuses the family (at the premise check or a revision,
+it fails that call alone); an alias or a second document is refused at once.
 
 **2. `Step.PREFLIGHT`** calibrates. The original run's calls are replayed through
 each world's oracle and verifier before any sibling starts. A world that cannot

@@ -321,7 +321,7 @@ def _refused_before_the_first_sibling(tmp_path, monkeypatch, cause: str, data_ro
     from defender.tests.learning.oracle.live_contracts.test_preflight_and_outcome import _family
 
     if cause == _QUESTIONER_UNUSABLE:
-        return run_entry(tmp_path, questioner=Watch("worlds: [unclosed, {facts: "))
+        return run_entry(tmp_path, questioner=Watch(*["worlds: [unclosed, {facts: "] * 3))  # #1579: the breaker trips on the third
     if cause == "no fact world":
         return run_entry(tmp_path, questioner=Watch(*S.questioner_for(_family(facts_b=[], facts_c=[])).replies))
     if cause == "no original call":

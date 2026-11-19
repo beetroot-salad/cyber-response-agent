@@ -26,8 +26,15 @@ from defender.skills.invlang.parser import scan_fences
 
 _logger = logging.getLogger(__name__)
 
-#: One model call per seat, no retries: a retry loop would spend money with no operator present.
+#: One model request per call. A reply whose text is not YAML is asked again as a new call
+#: (#1579), bounded by `MALFORMED_REPLY_LIMIT` across the whole family, not by this limit.
 QUESTIONER_REQUEST_LIMIT = 1
+
+#: #1579: the unparsable replies one family authoring tolerates. Every questioner call of the
+#: family (call 1, each seat, the premise check and re-check, each revision) counts on one breaker;
+#: the reply that reaches this limit trips it, and an open breaker asks no further call. So a
+#: family pays at most `MALFORMED_REPLY_LIMIT - 1` re-asks.
+MALFORMED_REPLY_LIMIT = 3
 
 #: The untrusted frame tag every captured artifact this role sees is wrapped in.
 UNTRUSTED_TAG = "untrusted"
@@ -235,6 +242,12 @@ def _capture_sections(*, leads: Any, alert: Any, frontier: str, samples: Any = N
     )
 
 
+class _ReplyUnparsable(BranchError):
+    """A reply whose text is not YAML syntax: a random fault of free-form output, so asked
+    again (#1579). An alias, a second document, a too-deep nesting or a non-mapping is refused
+    as before."""
+
+
 def _reply_document(reply: Any, *, what: str) -> dict[str, Any]:
     """One model reply as a mapping.
 
@@ -261,6 +274,10 @@ def _reply_document(reply: Any, *, what: str) -> dict[str, Any]:
                 f"{what}: the questioner's reply is not one bare document: {shape}") from shape
         try:
             doc = _yaml.safe_load(text)
+        except (yaml.scanner.ScannerError, yaml.parser.ParserError) as e:
+            # Syntax only: an alias, a second document or a too-deep nesting is refused at once.
+            raise _ReplyUnparsable(
+                f"{what}: the questioner's reply is not a YAML document: {e}") from e
         except yaml.YAMLError as e:
             raise BranchError(f"{what}: the questioner's reply is not a YAML document: {e}") from e
     if not isinstance(doc, dict):
@@ -273,6 +290,46 @@ def _reply_document(reply: Any, *, what: str) -> dict[str, Any]:
             isinstance(world, dict) and "world_id" in world for world in worlds)):
         raise BranchError(f"{what}: world_id is host-assigned; author descriptive fields only")
     return dict(doc)
+
+
+class _Breaker:
+    """#1579: one family authoring's count of unparsable replies, over every questioner call."""
+
+    def __init__(self, limit: int = MALFORMED_REPLY_LIMIT) -> None:
+        self.limit = limit
+        self.failures = 0
+
+    def asker(self, seam: Any) -> Any:
+        """`seam` (`invoke` or `premise_check`) as `ask(prompt, *, agent_id, what) -> document`."""
+        def ask(prompt: str, *, agent_id: str, what: str) -> dict[str, Any]:
+            return self.ask_raw(seam, prompt, agent_id=agent_id, what=what)[1]
+        return ask
+
+    def ask_raw(self, seam: Any, prompt: str, *, agent_id: str,
+                what: str) -> tuple[Any, dict[str, Any]]:
+        """The reply that parsed, as the model gave it, and its document."""
+        attempt = 0
+        while True:
+            if self.failures >= self.limit:
+                raise BranchError(
+                    f"{what}: not asked: {self.failures} questioner replies of this family did "
+                    "not parse, and the breaker is open")
+            # A re-ask is its own call, with an id no first ask has (`questioner:check:2` is
+            # the re-check's): calls sharing an id overwrite each other's trace.
+            reply = seam(prompt if attempt == 0 else f"{prompt}\n{_prompt('retry.md')}",
+                         role=AgentRole.QUESTIONER,
+                         agent_id=agent_id if attempt == 0 else f"{agent_id}:retry{attempt}")
+            try:
+                return reply, _reply_document(reply, what=what)
+            except _ReplyUnparsable as unparsable:
+                self.failures += 1
+                attempt += 1
+                if self.failures >= self.limit:
+                    raise BranchError(
+                        f"{unparsable} (reply {self.failures} of this family that did not "
+                        "parse: the breaker is open)") from unparsable.__cause__
+                _logger.warning(f"{what}: the reply did not parse ({self.failures} of "
+                                f"{self.limit}); asked again")
 
 
 def _captured_disposition(source_run_dir: Path) -> str | None:
@@ -460,9 +517,8 @@ def _conflicts(check: Any, *, family: dict[str, Any], worlds: Sequence[dict[str,
     """The check's conflicts by world label. A reply the host cannot read raises: the caller
     keeps the family as authored (`author_family`)."""
     labels = {str(w.get("label")) for w in worlds}
-    reply = check(_premise_prompt(family=family, worlds=worlds, prebranch=prebranch),
-                  role=AgentRole.QUESTIONER, agent_id=agent_id)
-    doc = _reply_document(reply, what="the premise check")
+    doc = check(_premise_prompt(family=family, worlds=worlds, prebranch=prebranch),
+                agent_id=agent_id, what="the premise check")
     found: dict[str, list[dict]] = {}
     for entry in doc.get("conflicts") or ():
         if isinstance(entry, dict) and str(entry.get("label")) in labels:
@@ -492,10 +548,10 @@ def _rebuilt(world: dict[str, Any], conflicts: list[dict], *, invoke: Any,  # no
     returns facts the family would refuse."""
     seat = str(world.get("role"))
     try:
-        reply = invoke(_world_prompt(seat, axis=world.get("axis"), family_reply=family_reply,
-                                     header=header, capture=capture, revision=conflicts),
-                       role=AgentRole.QUESTIONER, agent_id=f"questioner:{seat.lower()}:revise")
-        authored = _reply_document(reply, what=f"the revision of seat {seat}")
+        authored = invoke(_world_prompt(seat, axis=world.get("axis"), family_reply=family_reply,
+                                        header=header, capture=capture, revision=conflicts),
+                          agent_id=f"questioner:{seat.lower()}:revise",
+                          what=f"the revision of seat {seat}")
     except Exception as failed:  # noqa: BLE001 — a rebuild that fails drops its world alone
         _logger.warning(f"seat {seat}'s revision failed ({failed!r}); its world is dropped")
         return None
@@ -606,7 +662,8 @@ def author_family(  # noqa: PLR0913 — one keyword per captured input plus `les
     prebranch: Sequence[dict[str, Any]] = (),
     record_revisions: Any = None,
 ) -> dict[str, Any]:
-    """Author one family document: one family call plus one call per planned world.
+    """Author one family document: one family call plus one call per planned world, each
+    asked again when its reply is not YAML, under one breaker for the whole family (#1579).
 
     With `premise_check` (a seam like `invoke`), the worlds are then held to `prebranch`, the
     source run's pre-branch calls with their recorded answers (#1561): a world contradicting them
@@ -616,12 +673,12 @@ def author_family(  # noqa: PLR0913 — one keyword per captured input plus `les
     # Rendered once for all calls; framing is per call because the salt is.
     capture = _capture_sections(leads=leads, alert=alert, frontier=frontier, samples=samples,
                                 lessons=lessons, served_systems=served)
-    family_reply = invoke(
-        _family_prompt(header, capture),
-        role=AgentRole.QUESTIONER,
-        agent_id="questioner",
-    )
-    family = _reply_document(family_reply, what="call 1 (the base story and discriminator)")
+    breaker = _Breaker()
+    ask = breaker.asker(invoke)
+    # The reply as given, not its document: the seats are shown call 1's own text.
+    family_reply, family = breaker.ask_raw(invoke, _family_prompt(header, capture),
+                                           agent_id="questioner",
+                                           what="call 1 (the base story and discriminator)")
     axes = family.get("axes")
     axes = list(axes) if isinstance(axes, list) else []
 
@@ -629,7 +686,7 @@ def author_family(  # noqa: PLR0913 — one keyword per captured input plus `les
     worlds: list[dict[str, Any]] = [_base_world(family, Path(source_run_dir))]
     for seat_index, plan in enumerate(planned):
         seat = _seat_letter(seat_index)
-        reply = invoke(
+        authored = ask(
             _world_prompt(
                 seat,
                 axis=plan.get("axis") if plan.get("axis") is not None else (
@@ -638,10 +695,9 @@ def author_family(  # noqa: PLR0913 — one keyword per captured input plus `les
                 header=header,
                 capture=capture,
             ),
-            role=AgentRole.QUESTIONER,
             agent_id=f"questioner:{seat.lower()}",
+            what=f"the call authoring seat {seat}",
         )
-        authored = _reply_document(reply, what=f"the call authoring seat {seat}")
         # Plan underneath, only seat-authored fields on top, role last: otherwise a seat that
         # echoed the prompt's example facts would assert a difference nobody planned.
         world = {**plan,
@@ -651,7 +707,7 @@ def author_family(  # noqa: PLR0913 — one keyword per captured input plus `les
 
     if premise_check is not None:
         kept, revisions = _held_to_history(
-            worlds[1:], check=premise_check, invoke=invoke, family=family,
+            worlds[1:], check=breaker.asker(premise_check), invoke=ask, family=family,
             family_reply=family_reply, header=header, capture=capture, prebranch=prebranch)
         worlds = [worlds[0], *kept]
         if record_revisions is not None:

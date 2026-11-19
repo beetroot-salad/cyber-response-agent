@@ -617,7 +617,8 @@ def test_question_writer_model_returns_a_family_that_does_not_parse(tmp_path, re
     """The launch stops with a reason, keeps the episode, records `refused`, and replays and starts nothing."""
     est = S.estate(tmp_path)
     if reply == "broken-document":
-        questioner = S.FakeAgent("worlds: [unclosed, {facts: ")
+        # #1579: an unparsable reply is asked again; the third trips the family's breaker.
+        questioner = S.FakeAgent(*["worlds: [unclosed, {facts: "] * 3)
     else:
         doc = _family()
         doc["worlds"][1]["facts"] = "alice did it"
