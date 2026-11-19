@@ -55,7 +55,7 @@ CASE = "a1" * 16
 
 
 #: A `report.md` that says `inconclusive`: planted beside a record, it must change nothing (#1534: no dual read).
-GOOD = GOLDEN_REPORT.read_text(encoding="utf-8")  # lint-run-records: ok — a decoy the worker must not read
+GOOD = GOLDEN_REPORT.read_text(encoding="utf-8")  # lint-run-records: ok — a decoy the worker must not read  # lint-report-file: ok — the golden fixture's file, a decoy
 
 
 SONNET_IN, SONNET_OUT, HAIKU_IN = 3.0, 15.0, 1.0  # USD per million tokens (configuration/_pricing.py)

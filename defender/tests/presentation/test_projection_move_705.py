@@ -54,7 +54,7 @@ def _driven_run(tmp_path: Path, *, run_id: str, text: str = "done"):
     (run_dir, store, replay)."""
     run_dir = materialize(tmp_path, GOLDEN, run_id=run_id)
     inv = (GOLDEN / "investigation.md").read_text()
-    rep = (GOLDEN / "report.md").read_text()
+    rep = (GOLDEN / "report.md").read_text()  # lint-report-file: ok — the golden fixture's recorded transcript file
     scripted = [
         Turn(tool_calls=[("write_file", {"path": model_path(run_dir / "investigation.md", run_dir=run_dir),
                                          "content": inv})]),

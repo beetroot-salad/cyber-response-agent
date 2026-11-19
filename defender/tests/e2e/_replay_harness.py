@@ -328,7 +328,7 @@ def materialize(tmp_path: Path, golden: Path, *, run_id: str = REPLAY_RUN_ID) ->
 
 def golden_disposition(golden: Path = GOLDEN) -> str:
     """The disposition the golden's recorded run closed with, read off the fixture's recorded verdict line."""
-    found = re.search(r"^disposition:\s*(\w+)", (golden / "report.md").read_text(encoding="utf-8"), re.M)
+    found = re.search(r"^disposition:\s*(\w+)", (golden / "report.md").read_text(encoding="utf-8"), re.M)  # lint-report-file: ok — the golden fixture's recorded transcript file, test data and not a run's
     assert found is not None, f"the golden {golden.name} records no disposition"
     return found.group(1)
 

@@ -547,15 +547,24 @@ def test_1255_a_worlds_oracle_is_not_told_a_closing_comment_the_source_never_pos
     from defender.tests.support.runtime.engine import _spec767 as S767
     from defender.tests.support.shared.contracts._spec1077 import fixture_run
 
+    from defender.records import closing
+
     marker = "CLOSING-NOTE-1255: alice's db-1 logon was the TGT abuse; account disabled"
     source_dir = S767.make_run(tmp_path / "runs", name=S24.SOURCE_RUN_ID,
                                disposition="malicious", body=marker)
-    assert marker in (source_dir / "report.md").read_text(encoding="utf-8"), (
-        "fixture: the source's report does not carry the narrative marker")
+    looked = closing.for_run(fixture_run(source_dir))
+    assert isinstance(looked, closing.Record), f"fixture: the source has no closing record: {looked!r}"
+    assert looked.record.disposition == "malicious", looked
+    assert [e.note for e in looked.record.ceiling_test] == [marker], (
+        "fixture: the source's closing record does not carry the narrative marker")
+    # The comment the source would have posted is the tag, the word and its screen link (#1471 P-6): the link is
+    # the part unique to the source run.
+    link = S767.ticket_link_for(source_dir)
     if post == "post-failed":
         store = S767.FakeStore(tmp_path / "store", status="500")
         S767.record(source_dir, store)
         assert len(store.comment_payloads) == 1, "fixture: the source never attempted its comment"
+        assert link in store.wire_body(), "fixture: the attempted comment does not carry the source's link"
         assert S767.receipt(source_dir).get("ok") is False, (
             f"fixture: the receipt does not record a failed post: {S767.receipt(source_dir)}")
     else:
@@ -576,8 +585,11 @@ def test_1255_a_worlds_oracle_is_not_told_a_closing_comment_the_source_never_pos
     assert tag not in inbound, (
         f"the oracle was handed a closing comment ({post}): the source's tag line, though the "
         "source wrote nothing to the ticket")
+    assert link not in inbound, (
+        f"the oracle was handed the comment the source would have posted ({post}): its screen link, though the "
+        "source wrote nothing to the ticket")
     assert marker not in inbound, (
-        f"the oracle was handed the source's report narrative as its closing comment ({post}), "
+        f"the oracle was handed the source's closing record narrative as its closing comment ({post}), "
         "though the source wrote nothing to the ticket")
 
 
