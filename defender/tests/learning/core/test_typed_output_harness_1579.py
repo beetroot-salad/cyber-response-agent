@@ -67,6 +67,8 @@ def test_the_script_ends_a_run_at_the_framework_bound():
 
 
 def test_a_scripted_exception_is_raised_from_the_model():
-    with pytest.raises(Exception) as raised:
+    from pydantic_ai.exceptions import ModelHTTPError
+
+    with pytest.raises(ModelHTTPError) as raised:
         _run(TY.http_413())
-    assert getattr(raised.value, "status_code", None) == 413
+    assert raised.value.status_code == 413

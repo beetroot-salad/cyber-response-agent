@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+from typing import Any
 
 import pytest
 import yaml
@@ -17,6 +18,7 @@ pytest.importorskip('pydantic_ai')
 from defender.tests.support.shared._locations_1210 import location_path
 from defender.records._episode_handle import Episode
 from defender.tests.support.learning.branch import _triplet_947 as T
+from defender.tests.support.learning.core import _typed_output1579 as TY
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.systems.verbs import VerbContext  # noqa: E402
 from defender.kit.faults import UpstreamFault  # noqa: E402
@@ -35,10 +37,33 @@ def _questioner():
     return T.mod("learning.branch.questioner")
 
 
+def _plan(**over) -> dict:
+    """Call 1's reply as the prompt asks for it (#1579: closed keys, no base-world entry, no
+    `axes`, no `base_label_basis`, no id): the base story, the base disposition, the
+    discriminator and the planned worlds' label, axis and facts."""
+    doc = {"base_story": "the captured story", "base_disposition": "benign",
+           "discriminator": {"predicate": "p"},
+           "worlds": [{"label": "b", "axis": "a1", "facts": [T.fact("f1")]},
+                      {"label": "c", "axis": "a2", "facts": [T.fact("f2")]}]}
+    doc.update(over)
+    return doc
+
+
+def _seat(**over) -> dict:
+    """A seat's reply: the four keys it authors."""
+    doc = {"story": "story b", "axis": "a1", "disposition_declared": "malicious",
+           "label_basis": "policy-rule"}
+    doc.update(over)
+    return doc
+
+
+def _seat_c() -> dict:
+    return _seat(story="story c", axis="a2")
+
+
 def _authoring_agent() -> T.FakeAgent:
     """Answers the three authoring calls: the family plan, then seats `b` and `c`."""
-    return T.FakeAgent(T.declaration(T.family_doc()), T.declaration(T.world_doc("b")),
-                       T.declaration(T.world_doc("c")))
+    return T.FakeAgent(_plan(), _seat(), _seat_c())
 
 
 def _author(tmp_path, agent, **inputs):
@@ -80,8 +105,9 @@ def test_947_role_preflight_runs_once_for_the_family_and_again_in_each_sibling(t
     data_root = location_path(T.current_tenant().data_root)
     before = set(data_root.glob("*/episodes/*"))
     spawn = T.FakeSpawn()
-    worlds = [T.base_world(), T.world_doc("b", facts=[]), T.world_doc("c", facts=[])]
-    questioner = T.FakeAgent(T.declaration(T.family_doc(worlds=worlds)), *[T.declaration(w) for w in worlds[1:]])
+    questioner = T.FakeAgent(
+        _plan(worlds=[{"label": "b", "axis": "a1", "facts": []}, {"label": "c", "axis": "a2", "facts": []}]),
+        _seat(), _seat_c())
     rc = entry.main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID)],
                   preflight=lambda model, **_kw: seen.append("family") or 0,
                   spawn=spawn, live_tree=T.source_capture(), questioner=questioner,
@@ -145,8 +171,7 @@ def test_947_questioner_inputs_are_wrapped_untrusted(tmp_path):
 
 
 def test_947_call_one_output_is_rewrapped_before_it_seeds_calls_two_and_three(tmp_path):
-    steered = T.family_doc(base_story="STEERED-BY-A-PAYLOAD")
-    agent = T.FakeAgent(T.declaration(steered), T.declaration(T.world_doc("b")), T.declaration(T.world_doc("c")))
+    agent = T.FakeAgent(_plan(base_story="STEERED-BY-A-PAYLOAD"), _seat(), _seat_c())
     _author(tmp_path, agent)
     # Without this the loop below could iterate an empty list and pass vacuously.
     assert len(agent.prompts) == 3, "the two world-authoring calls never ran"
@@ -163,22 +188,6 @@ def test_947_the_questioner_screens_the_source_document_before_reading_it(tmp_pa
     with pytest.raises(T.refusals()) as refusal:
         _questioner().read_frontier(src, fences_at=4)
     assert "investigation.md" in str(refusal.value)
-
-
-# the reply as TEXT, which is what a raw model actually hands back
-
-
-def test_947_a_fenced_yaml_reply_is_read_as_the_document_it_holds(tmp_path):
-    """A questioner reply arrives inside a ```yaml fence and is still read as its document."""
-    fenced = [f"```yaml\n{yaml.safe_dump(T.declaration(doc), sort_keys=False)}```"
-              for doc in (T.family_doc(), T.world_doc("b"), T.world_doc("c"))]
-    agent = T.FakeAgent(*fenced)
-    composed = _author(tmp_path, agent)
-    assert agent.calls == 3, "an abort on call 1 leaves the seat-authoring calls unmade"
-    # The COMPOSED document, not merely "no exception": a `_reply_document` that silently
-    # returned an empty mapping would still compose three worlds and still raise nothing.
-    assert composed["base_story"] == "the captured story"
-    assert [w["label"] for w in composed["worlds"]] == ["a", "b", "c"]
 
 
 def test_947_the_prompts_facts_example_parses_through_the_real_loader():
@@ -288,23 +297,23 @@ def test_947_a_served_system_the_capture_never_asked_is_still_named(tmp_path):
     pytest.param("plan-top", True, T.fixture_world_id("injected"), id="plan-top-uuid-host-id"),
 ])
 def test_questioner_replies_cannot_supply_host_world_ids(tmp_path, scope, supplied, identity):
-    family = T.declaration(T.family_doc())
-    seat = T.declaration(T.world_doc("b"))
+    family = _plan()
+    seat = _seat()
     if supplied:
         target = seat
         if scope == "plan":
-            target = family["worlds"][1]
+            target = family["worlds"][0]
         elif scope == "plan-top":
             target = family
         target["world_id"] = identity
-    agent = T.FakeAgent(family, seat, T.declaration(T.world_doc("c")))
+    agent = T.FakeAgent(family, seat, _seat_c())
     episode = T.episode(tmp_path)
     before = {path.relative_to(episode): path.read_bytes()
               for path in episode.rglob("*") if path.is_file()}
     args = dict(source_run_dir=tmp_path, episode_dir=episode, invoke=agent,
                 leads=[], alert={}, frontier="")
     if supplied:
-        with pytest.raises(_questioner().BranchError, match="host-assigned"):
+        with pytest.raises(_questioner().BranchError, match="world_id"):
             _questioner().author_family(**args)
         assert agent.calls == (1 if scope.startswith("plan") else 2), (
             "the rejected reply still spent another model call")
@@ -581,3 +590,368 @@ def test_947_a_driven_pinned_source_fault_reaches_neither_surface_with_a_known_i
     for leak in (T.fixture_world_id("a"), PINNED_EPISODE, ROSTER["c"]):
         assert leak not in seen, f"{leak!r} reached the model on the fault channel"
         assert leak not in digests, f"{leak!r} was persisted into the queries table"
+
+
+# #1579: every rule the host applies to a reply is checked where the call can still fix it. Under a
+# seam fake the call site's re-check is the only run of it: a refusal there is that call's
+# `ReplyUnusable`, which `author_family` turns into `BranchError` (the launcher's `family_unusable`).
+
+
+def _refused(tmp_path, agent, *, token: str, calls: int, where: str) -> None:
+    """`author_family` refuses: `BranchError` naming the call (`where`) and the rule (`token`), after
+    `calls` model calls, so a plan the manifest would refuse costs no seat."""
+    with pytest.raises(_questioner().BranchError) as raised:
+        _author(tmp_path, agent)
+    message = str(raised.value)
+    assert token in message, f"the refusal does not name its rule ({token!r}): {message}"
+    assert re.search(where, message), f"the refusal does not name the call ({where!r}): {message}"
+    assert agent.calls == calls, f"{agent.calls} calls were paid; the refusal came after {calls}"
+
+
+def test_a_valid_plan_and_seats_compose_the_family(tmp_path):
+    """Positive control for the refusals below, on the same channel: the base disposition is the
+    plan's, the seat's axis supersedes the planned one, the roles are the seats'."""
+    agent = T.FakeAgent(_plan(), _seat(axis="a1 refined"), _seat_c())
+
+    family = _author(tmp_path, agent)
+
+    assert agent.calls == 3
+    assert [(w["label"], w["role"]) for w in family["worlds"]] == [("a", "A"), ("b", "B"), ("c", "C")]
+    assert family["worlds"][0]["disposition_declared"] == "benign"
+    assert [w["axis"] for w in family["worlds"]] == [None, "a1 refined", "a2"]
+    assert [f["fact_id"] for f in family["worlds"][1]["facts"]] == ["f1"]
+
+
+def test_a_plan_without_a_base_disposition_takes_the_source_reports(tmp_path):
+    """The base disposition falls back to the source report's, in-call, as the host composes it."""
+    (tmp_path / "report.md").write_text(T.report_text("malicious"), encoding="utf-8")
+    plan = _plan()
+    del plan["base_disposition"]
+
+    family = _author(tmp_path, T.FakeAgent(plan, _seat(), _seat_c()))
+
+    assert family["worlds"][0]["disposition_declared"] == "malicious"
+
+
+def _without(key: str, doc: dict) -> dict:
+    return {k: v for k, v in doc.items() if k != key}
+
+
+def _world_entry(**over) -> dict:
+    return {"label": "b", "axis": "a1", "facts": [T.fact("f1")], **over}
+
+
+#: id -> (a call-1 reply, a token of the host rule's reason). Each is refused at call 1.
+_PLAN_REFUSALS = {
+    "missing base_story": (lambda: _without("base_story", _plan()), "base_story"),
+    "blank base_story": (lambda: _plan(base_story=""), "base_story"),
+    "missing discriminator": (lambda: _without("discriminator", _plan()), "predicate"),
+    "blank discriminator predicate": (lambda: _plan(discriminator={"predicate": "  "}), "predicate"),
+    "unknown key in the discriminator": (lambda: _plan(discriminator={"predicate": "p", "why": "x"}), "why"),
+    "empty worlds": (lambda: _plan(worlds=[]), "worlds"),
+    "worlds missing": (lambda: _without("worlds", _plan()), "worlds"),
+    "duplicate labels": (lambda: _plan(worlds=[_world_entry(), _world_entry(axis="a2")]), "twice"),
+    "base disposition outside the vocabulary": (lambda: _plan(base_disposition="maybe"), "disposition"),
+    "base disposition the host records": (lambda: _plan(base_disposition="unresolved"), "disposition"),
+    "no base disposition and no report": (lambda: _without("base_disposition", _plan()), "disposition"),
+    "unknown key in a planned world": (lambda: _plan(worlds=[_world_entry(zz_planned="x"), _world_entry(label="c")]),
+                                       "zz_planned"),
+    "planned world without facts": (lambda: _plan(worlds=[_without("facts", _world_entry()),
+                                                         _world_entry(label="c")]), "facts"),
+    "planned world with an empty axis": (lambda: _plan(worlds=[_world_entry(axis=""),
+                                                               _world_entry(label="c")]), "axis"),
+    "a fact without entities": (lambda: _plan(worlds=[_world_entry(facts=[{"fact_id": "f1", "statement": "s"}]),
+                                                      _world_entry(label="c")]), "entities"),
+    "call-1 key never asked for: axes": (lambda: _plan(axes=["a1", "a2"]), "axes"),
+    "call-1 key never asked for: base_label_basis": (lambda: _plan(base_label_basis="judgment"),
+                                                     "base_label_basis"),
+    "call-1 key never asked for: unknown": (lambda: _plan(bogus_top=1), "bogus_top"),
+    "a base-world entry among the plan": (lambda: _plan(worlds=[{"label": "a", "role": "A", "axis": None,
+                                                                "facts": []}, _world_entry()]), "role"),
+    "world_id on the plan": (lambda: _plan(world_id=T.fixture_world_id("x")), "world_id"),
+    "world_id in a planned world": (lambda: _plan(worlds=[_world_entry(world_id=T.fixture_world_id("x")),
+                                                          _world_entry(label="c")]), "world_id"),
+}
+
+
+@pytest.mark.parametrize("case", list(_PLAN_REFUSALS))
+def test_a_plan_the_host_would_refuse_is_refused_at_call_1_before_any_seat_is_paid(tmp_path, case):
+    """P1/P4: the plan check refuses each (P1 names `base_story`, empty `worlds`, duplicate
+    labels, the blank predicate, a bad base disposition, an unknown key); one `BranchError` at call 1."""
+    build, token = _PLAN_REFUSALS[case]
+
+    _refused(tmp_path, T.FakeAgent(build(), _seat(), _seat_c()), token=token, calls=1,
+             where=r"call 1|questioner\b")
+
+
+#: id -> (a seat B reply, a token of the reason). Each is refused at seat B; seat C is never paid.
+_SEAT_REFUSALS = {
+    "extra key: facts": (lambda: _seat(facts=[T.fact("f9")]), "facts"),
+    "extra key: label": (lambda: _seat(label="z"), "label"),
+    "extra key: role": (lambda: _seat(role="C"), "role"),
+    "extra key: unknown": (lambda: _seat(bogus=1), "bogus"),
+    "world_id": (lambda: _seat(world_id=T.fixture_world_id("x")), "world_id"),
+    "missing story": (lambda: _without("story", _seat()), "story"),
+    "story not text": (lambda: _seat(story=["x"]), "story"),
+    "disposition outside the vocabulary": (lambda: _seat(disposition_declared="maybe"), "disposition_declared"),
+    "missing disposition": (lambda: _without("disposition_declared", _seat()), "disposition_declared"),
+    "empty axis": (lambda: _seat(axis=""), "axis"),
+    "label_basis outside the vocabulary": (lambda: _seat(label_basis="vibes"), "label_basis"),
+}
+
+
+@pytest.mark.parametrize("case", list(_SEAT_REFUSALS))
+def test_a_seat_reply_the_world_rule_refuses_is_refused_at_the_seat_and_the_next_seat_is_not_paid(tmp_path, case):
+    """P1: a seat's closed keys (story, axis, disposition_declared, label_basis) and the world rule
+    on the composed world; an extra key is refused, not discarded, as are the host's own ids."""
+    build, token = _SEAT_REFUSALS[case]
+
+    _refused(tmp_path, T.FakeAgent(_plan(), build(), _seat_c()), token=token, calls=2,
+             where=r"seat B|questioner:b")
+
+
+def test_a_call_the_runner_gave_up_on_refuses_the_episode_naming_the_call_and_the_reason(tmp_path):
+    """P3 at call 1: `ReplyUnusable` is the episode's `BranchError` (the launcher's `family_unusable`)."""
+    agent = T.FakeAgent(TY.unusable("base_story must be a non-empty string"), _seat(), _seat_c())
+
+    _refused(tmp_path, agent, token="base_story must be a non-empty string", calls=1,
+             where=r"call 1|questioner\b")
+
+
+def test_a_seat_the_runner_gave_up_on_refuses_the_episode_and_no_later_seat_is_paid(tmp_path):
+    """P3 at a seat: `ReplyUnusable` at seat B is `BranchError` naming it and the reason; seat C is
+    never called."""
+    agent = T.FakeAgent(_plan(), TY.unusable("story must be a string"), _seat_c())
+
+    _refused(tmp_path, agent, token="story must be a string", calls=2, where=r"seat B|questioner:b")
+
+
+_HOST_FAULTS = {
+    "provider failure": lambda: TY.unprocessable("provider down", cause=TimeoutError("slow")),
+    "host bug": lambda: TypeError("a bug in the host's check"),
+    "connection reset": lambda: RuntimeError("connection reset"),
+}
+
+
+@pytest.mark.parametrize("fault", list(_HOST_FAULTS))
+@pytest.mark.parametrize("at", ["call 1", "seat B"])
+def test_a_host_exception_at_call_1_or_a_seat_is_not_the_episodes_family_refusal(tmp_path, at, fault):
+    """P5: a transport, provider or host fault keeps today's path — the exception propagates as
+    itself, not as `BranchError` (so not `family_unusable`; the launcher's generic abort takes it)."""
+    raised = _HOST_FAULTS[fault]()
+    replies = [raised, _seat(), _seat_c()] if at == "call 1" else [_plan(), raised, _seat_c()]
+    agent = T.FakeAgent(*replies)
+
+    with pytest.raises(type(raised)) as caught:
+        _author(tmp_path, agent)
+
+    assert not isinstance(caught.value, _questioner().BranchError)
+    assert agent.calls == (1 if at == "call 1" else 2)
+
+
+def test_the_seat_prompt_no_longer_claims_extras_are_discarded_or_asks_for_a_yaml_document(tmp_path):
+    """O4/P1: world.md's 'discarded' sentence and the one-bare-YAML-document clauses are gone (a
+    key the seat adds is refused, so the prompt must not say it is dropped)."""
+    agent = _authoring_agent()
+    _author(tmp_path, agent)
+
+    for prompt in agent.prompts[:2]:
+        assert "one YAML document" not in prompt
+        assert "call the tool" in prompt.lower()
+    assert "is discarded" not in agent.prompts[1]
+
+
+# P1 as a property over the three-call script: any reply the checks accept composes into a family
+# the manifest gate accepts and drops no key the model wrote; every other reply is refused.
+
+import copy  # noqa: E402
+import random  # noqa: E402
+
+
+def _valid_script() -> list[dict]:
+    return [_plan(), _seat(), _seat_c()]
+
+
+def _containers(replies: list[dict]) -> list[tuple]:
+    """Paths (reply index, *keys) of every mapping in the script: a reply, a planned world, a fact,
+    the discriminator."""
+    out: list[tuple] = []
+
+    def walk(value, path):
+        if isinstance(value, dict):
+            out.append(path)
+            for key, inner in value.items():
+                walk(inner, (*path, key))
+        elif isinstance(value, list):
+            for i, inner in enumerate(value):
+                walk(inner, (*path, i))
+
+    for i, reply in enumerate(replies):
+        walk(reply, (i,))
+    return out
+
+
+def _at(replies: list, path: tuple):
+    node = replies
+    for step in path:
+        node = node[step]
+    return node
+
+
+def _single_mutations(replies: list[dict]) -> list[tuple[str, Any]]:
+    """(label, mutation) over every mapping and every key of the script: drop a key, add an unknown
+    key, add `world_id` (null and a uuid), blank a value, give it the wrong type, a duplicate label,
+    an empty fact list; and the valid ones (reword a text, reorder a mapping's keys)."""
+    rows: list[tuple[str, Any]] = []
+    containers = _containers(replies)
+    for path in containers:
+        rows.append((f"unknown key in {path}", lambda r, p=path: _at(r, p).__setitem__("zz_extra", "x")))
+        for identity in (None, T.fixture_world_id("injected")):
+            rows.append((f"world_id={identity!r} in {path}",
+                         lambda r, p=path, v=identity: _at(r, p).__setitem__("world_id", v)))
+        rows.append((f"reorder {path}", lambda r, p=path: _reorder(r, p)))
+        for key, value in list(_at(replies, path).items()):
+            rows.append((f"drop {path}.{key}", lambda r, p=path, k=key: _at(r, p).pop(k)))
+            blank = "" if isinstance(value, str) else [] if isinstance(value, list) else {} if isinstance(
+                value, dict) else ""
+            rows.append((f"blank {path}.{key}", lambda r, p=path, k=key, v=blank: _at(r, p).__setitem__(k, v)))
+            for wrong in (5, True, ["x"], {"k": 1}):
+                if wrong != value:
+                    rows.append((f"{path}.{key}={wrong!r}",
+                                 lambda r, p=path, k=key, v=wrong: _at(r, p).__setitem__(k, v)))
+            if isinstance(value, str):
+                rows.append((f"reword {path}.{key}",
+                             lambda r, p=path, k=key: _at(r, p).__setitem__(k, _at(r, p)[k] + " (reworded)")))
+    rows.append(("duplicate label", lambda r: r[0]["worlds"][1].__setitem__("label", r[0]["worlds"][0]["label"])))
+    rows.append(("empty facts", lambda r: r[0]["worlds"][0].__setitem__("facts", [])))
+    rows.append(("identity", lambda r: None))
+    return rows
+
+
+def _reorder(replies: list, path: tuple) -> None:
+    node = _at(replies, path)
+    items = list(node.items())
+    node.clear()
+    node.update(reversed(items))
+
+
+def _outcome(tmp_path, replies: list[dict]):
+    """('refused', message) or ('accepted', family) for one variant of the three-call script."""
+    agent = T.FakeAgent(*copy.deepcopy(replies))
+    try:
+        family = _questioner().author_family(
+            source_run_dir=tmp_path, episode_dir=_EPISODE_DIRS.setdefault(tmp_path, T.episode(tmp_path)),
+            invoke=agent, leads=[], alert={}, frontier="")
+    except _questioner().BranchError as refusal:
+        return "refused", str(refusal)
+    return "accepted", family
+
+
+#: One episode dir per test's `tmp_path`: a variant composes against it and writes nothing.
+_EPISODE_DIRS: dict = {}
+
+
+def _dropped_from_plan(plan: dict, seats: list[dict], worlds: list[dict]) -> list[str]:
+    gone: list[str] = []
+    entries = plan["worlds"]
+    if not (isinstance(entries, list) and len(entries) == len(worlds) - 1
+            and all(isinstance(entry, dict) for entry in entries)):
+        return ["call 1 worlds (not the planned list of mappings)"]
+    for i, entry in enumerate(entries):
+        for field, planned in entry.items():
+            superseded = field == "axis" and "axis" in seats[i]
+            if worlds[1 + i].get(field, "<absent>") != planned and not superseded:
+                gone.append(f"call 1 worlds[{i}].{field}")
+    return gone
+
+
+def _silently_dropped(replies: list[dict], family: dict) -> list[str]:
+    """Every key a reply carried that the family does not hold unchanged. A seat's `axis` over the
+    plan's is composition (the seat's value wins), not a drop."""
+    gone: list[str] = []
+    plan, seats = replies[0], replies[1:]
+    worlds = family["worlds"]
+    held = {"base_story": family["base_story"], "discriminator": family["discriminator"]}
+    for key, value in plan.items():
+        if key in held:
+            if held[key] != value:
+                gone.append(f"call 1 {key}")
+        elif key == "base_disposition":
+            # An empty one is as good as absent: the source report's stands (design gap, see the brief).
+            if value not in ("", None) and worlds[0].get("disposition_declared") != value:
+                gone.append("call 1 base_disposition")
+        elif key == "worlds":
+            gone += _dropped_from_plan(plan, seats, worlds)
+        else:
+            gone.append(f"call 1 {key}")
+    for i, seat in enumerate(seats):
+        gone += [f"seat {i} {field}" for field, value in seat.items()
+                 if worlds[1 + i].get(field, "<absent>") != value]
+    return gone
+
+
+def _gate(family: dict) -> None:
+    """The manifest gate the launcher runs on the authored half (`accept_family`), with the
+    launcher's own derived fields."""
+    doc = T.family_doc(worlds=family["worlds"], base_story=family["base_story"],
+                       discriminator=family["discriminator"])
+    _family_mod().accept_family(doc)
+
+
+def test_p1_every_reply_is_refused_or_composes_a_family_the_gate_accepts_with_no_key_dropped(tmp_path):
+    """P1 over single mutations of a valid three-call script and a seeded sample of pairs: a reply
+    is refused in-call (`BranchError`) or composes a family `accept_family` takes with every key
+    of every reply held unchanged. Floors keep both sides non-vacuous."""
+    (tmp_path / "report.md").write_text(T.report_text("malicious"), encoding="utf-8")
+    base = _valid_script()
+    singles = _single_mutations(base)
+    rng = random.Random(1579)
+    variants = [(label, [mut]) for label, mut in singles]
+    for _ in range(150):
+        (l1, m1), (l2, m2) = rng.sample(singles, 2)
+        variants.append((f"{l1} + {l2}", [m1, m2]))
+    accepted = refused = 0
+    failures: list[str] = []
+    for label, mutations in variants:
+        replies = copy.deepcopy(base)
+        try:
+            for mutate in mutations:
+                mutate(replies)
+        except (KeyError, IndexError, TypeError, AttributeError):
+            continue  # a second mutation whose target the first removed: not a variant
+        outcome, got = _outcome(tmp_path, replies)
+        if outcome == "refused":
+            refused += 1
+            continue
+        accepted += 1
+        dropped = _silently_dropped(replies, got)
+        if dropped:
+            failures.append(f"{label}: accepted but dropped {dropped}")
+            continue
+        try:
+            _gate(got)
+        except _family_mod().FamilyError as late:
+            failures.append(f"{label}: accepted but the manifest gate refuses it: {late}")
+    assert not failures, "\n".join(failures[:15]) + f"\n({len(failures)} of {len(variants)} variants)"
+    assert accepted >= 12, f"only {accepted} accepted variants: the accepting side is vacuous"
+    assert refused >= 50, f"only {refused} refused variants: the refusing side is vacuous"
+
+
+#: Review r2's counterexamples, each of which the pre-#1579 host accepted or dropped silently.
+_R2_COUNTEREXAMPLES = {
+    "base_disposition maybe": _PLAN_REFUSALS["base disposition outside the vocabulary"],
+    "missing base_story": _PLAN_REFUSALS["missing base_story"],
+    "empty worlds": _PLAN_REFUSALS["empty worlds"],
+    "unknown key inside a planned world": _PLAN_REFUSALS["unknown key in a planned world"],
+}
+
+
+@pytest.mark.parametrize("case", list(_R2_COUNTEREXAMPLES))
+def test_p1_review_r2_counterexamples_are_refused_not_composed(tmp_path, case):
+    """Each counterexample is `BranchError` at call 1, never a family. (The revision's `facts: []`
+    is `test_premise_check_1561.py::test_a_revision_the_call_cannot_use_drops_its_world`.)"""
+    build, token = _R2_COUNTEREXAMPLES[case]
+    outcome, got = _outcome(tmp_path, [build(), _seat(), _seat_c()])
+
+    assert outcome == "refused", f"composed a family: {got}"
+    assert token in got

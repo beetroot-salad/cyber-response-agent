@@ -228,6 +228,42 @@ def trace_rows(agent_id: str, *, prompt: str = "the framed prompt", reply: str =
     return [request, reply_row]
 
 
+def typed_trace_rows(agent_id: str, *, args: Any, retry: str | None = None,
+                     tool: str = "answer", text: str | None = None) -> list[dict[str, Any]]:
+    """A typed (output-tool) call's rows in `RequestLogger`'s own shape (read off a real
+    ScriptedCalls trace, #1579): the `request` row; a `response` row whose only part is a
+    `tool-call` carrying `args` (a mapping, or the raw JSON text of a malformed call); and, when
+    `retry` is given, the next `request` row carrying a `retry-prompt` part with that text and a
+    final `response` row whose part is `text` (default: another tool call)."""
+    rows = trace_rows(agent_id, response=False)
+    call_id = "pyd_ai_0123456789abcdef"
+
+    def response(seq: int, part: dict[str, Any]) -> dict[str, Any]:
+        return {"event_type": "message", "agent_id": agent_id, "seq": seq, "id": f"{agent_id}#{seq}",
+                "kind": "response", "model": MODEL, "duration_ms": 1_000.0,
+                "usage": {"input_tokens": 1_000, "output_tokens": 100,
+                          "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0},
+                "message": {"parts": [part], "model_name": MODEL, "kind": "response",
+                            "timestamp": "2026-09-09T17:16:11Z", "finish_reason": None}}
+
+    rows.append(response(1, {"tool_name": tool, "args": args, "tool_call_id": call_id,
+                             "part_kind": "tool-call"}))
+    if retry is not None:
+        rows.append({"event_type": "message", "agent_id": agent_id, "seq": 2, "id": f"{agent_id}#2",
+                     "kind": "request",
+                     "message": {"parts": [{"content": retry, "tool_name": tool,
+                                            "tool_call_id": call_id,
+                                            "timestamp": "2026-09-09T17:16:12Z",
+                                            "part_kind": "retry-prompt"}],
+                                 "timestamp": "2026-09-09T17:16:12Z", "kind": "request",
+                                 "instructions": "You are the seat."}})
+        part = ({"content": text, "part_kind": "text"} if text is not None else
+                {"tool_name": tool, "args": {"word": "yes"}, "tool_call_id": call_id,
+                 "part_kind": "tool-call"})
+        rows.append(response(3, part))
+    return rows
+
+
 def trace_stem(agent_id: str) -> str:
     """`<agent_id with ':'->'_'>_trace` — the writer's own rule, spelled once."""
     return f"{agent_id.replace(':', '_')}_trace"

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from defender.tests.support.learning.judge._memory_store import MemoryStore
 from defender.tests.support.learning.branch import _triplet_947 as T
+from defender.tests.support.learning.core import _typed_output1579 as TY
 
 import json
 import threading
@@ -612,29 +613,67 @@ def _empty_grant_estate(tmp_path: Path) -> S.Estate:
     return S.estate(tmp_path, withheld=tuple((s, v) for s in S.SYSTEMS for v in S.READ_VERBS))
 
 
-@pytest.mark.parametrize("reply", ["broken-document", "facts-bare-string"])
+def _r3_plan() -> dict:
+    """Call 1's reply as the prompt asks for it (#1579: no base-world entry, no id)."""
+    return {"base_story": "the captured story", "base_disposition": "malicious",
+            "discriminator": {"predicate": "p"},
+            "worlds": [{"label": "b", "axis": "who", "facts": [_FACT_B]},
+                       {"label": "c", "axis": "when", "facts": [_FACT_C]}]}
+
+
+def _r3_seat(story: str) -> dict:
+    return {"story": story, "axis": "who", "disposition_declared": "malicious", "label_basis": "policy-rule"}
+
+
+@pytest.mark.parametrize("reply", ["call-1-unusable", "seat-unusable", "facts-bare-string"])
 def test_question_writer_model_returns_a_family_that_does_not_parse(tmp_path, reply):
-    """The launch stops with a reason, keeps the episode, records `refused`, and replays and starts nothing."""
+    """The launch stops with a reason, keeps the episode, records `refused`, and replays and starts nothing.
+    #1579 P3: a call the runner gave up on (`ReplyUnusable`) at call 1 or a seat is this refusal, with
+    the call's reason in the outcome; a plan the in-call rules refuse reaches it the same way."""
     est = S.estate(tmp_path)
-    if reply == "broken-document":
-        questioner = S.FakeAgent("worlds: [unclosed, {facts: ")
+    reason = "base_story must be a non-empty string"
+    if reply == "call-1-unusable":
+        questioner = S.FakeAgent(TY.unusable(reason), _r3_seat("b"), _r3_seat("c"))
+    elif reply == "seat-unusable":
+        reason = "story must be a string"
+        questioner = S.FakeAgent(_r3_plan(), TY.unusable(reason), _r3_seat("c"))
     else:
-        doc = _family()
-        doc["worlds"][1]["facts"] = "alice did it"
-        questioner = S.questioner_for(doc)
+        plan = _r3_plan()
+        plan["worlds"][0]["facts"] = "alice did it"
+        reason = "facts"
+        questioner = S.FakeAgent(plan, _r3_seat("b"), _r3_seat("c"))
     oracle = S.oracle()
     run = _launch(tmp_path, est, questioner=questioner, oracle=oracle, verifier=S.verifier())
 
     assert run.rc != 0, "stopped"
     assert run.message, "stopped with an operator message"
-    assert questioner.calls >= 1, "the question-writer did run"
+    assert questioner.calls == (2 if reply == "seat-unusable" else 1), "a seat was paid after the family was refused"
     assert run.ep.is_dir(), "the episode directory is kept"
     outcome = S.read_outcome(run.ep)
     assert outcome is not None
     assert outcome["outcome"] == "refused"
-    assert outcome["reason"]
+    assert reason in outcome["reason"], outcome["reason"]
+    assert "could not be used" in run.message, "the family's own refusal, not the generic abort"
     assert oracle.requests == 0
     assert est.calls() == []
+    assert run.spawn.launches == []
+
+
+@pytest.mark.parametrize("fault", [lambda: TY.unprocessable("provider down", cause=TimeoutError("slow")),
+                                   lambda: TypeError("a bug in the host's check")],
+                         ids=["provider-failure", "host-bug"])
+def test_a_host_exception_at_the_question_writer_is_the_generic_abort_not_a_refused_family(tmp_path, fault):
+    """#1579 P5: `RunUnprocessable` / a host bug at call 1 keeps today's path (`aborted ... no sibling
+    started`), writing no `refused` outcome: it is not `family_unusable`."""
+    est = S.estate(tmp_path)
+    questioner = S.FakeAgent(fault())
+    run = _launch(tmp_path, est, questioner=questioner, oracle=S.oracle(), verifier=S.verifier())
+
+    assert run.rc != 0
+    assert "aborted" in run.message, run.message
+    assert "no sibling started" in run.message
+    assert "could not be used" not in run.message
+    assert S.read_outcome(run.ep) is None
     assert run.spawn.launches == []
 
 

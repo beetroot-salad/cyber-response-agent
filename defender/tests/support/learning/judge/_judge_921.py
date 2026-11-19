@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
 
+import copy
 import json
 import os
 from collections.abc import Iterable, Mapping
@@ -42,6 +43,7 @@ from defender.tests.support.learning.branch._triplet_947 import (  # noqa: F401 
 
 from defender.tests.support.storage._alert_plant import plant_alert, plant_source_copy  # noqa: E402
 from defender import _yaml
+from defender.tests.support.learning.core import _typed_output1579 as TY
 
 #: The system the fixtures' worlds query and the default reply blames. One of
 #: `_triplet_947.SERVED_SYSTEMS`, so the host's `lead-set` rule admits a reply naming it.
@@ -607,20 +609,34 @@ def family_reply(*, verdict_word: str | None = None, findings: list[dict] | None
 FAMILY_AGENT_PREFIX = "judge:family:"
 
 
-def as_reply_text(doc: dict, *, malformed: str | None = None) -> str:
-    """A `JudgeReply` document as the bare text a model seam returns, the one shape the parser
-    accepts (#1018). `malformed=` names a broken shape: `"not-a-mapping"` or
-    `"lookalike-bucket"`. (A fenced reply is a refusal; tests pinning it build the text
-    themselves.)
+def as_reply_text(doc: dict, *, malformed: str | None = None) -> Any:
+    """#1579: replies are mappings; name kept for its callers. A `JudgeReply` document as the
+    mapping a model seam returns (a typed reply is never text). `malformed=` names a broken
+    shape: `"not-a-mapping"` (a list, which the call-site check refuses) or
+    `"lookalike-bucket"` (a mapping with a bucket no vocabulary admits).
     """
 
     if malformed == "not-a-mapping":
-        return _yaml.safe_dump(["gradable", "no findings"])
+        return ["gradable", "no findings"]
     if malformed == "lookalike-bucket":
         doc = dict(doc)
         investigator, _world = _filed([dict(finding_doc(), bucket="Lead-Set")])
         doc["investigator_findings"] = investigator
-    return _yaml.safe_dump(doc, sort_keys=True)
+    return copy.deepcopy(dict(doc))
+
+
+def delivered(value: Any) -> Any:
+    """What a judge fake does with one scripted `value`, as the real seam would answer: a
+    mapping (or a non-mapping the call-site check must refuse) is `(copy, 1)` — one request; a
+    tuple is `(mapping, requests)` as scripted; an exception instance is raised (an exhausted
+    draw is `TY.unusable(reason, requests=3)`). Text is a stale script: replies are mappings."""
+    if isinstance(value, BaseException):
+        raise value
+    if isinstance(value, tuple):
+        return value
+    if isinstance(value, (Mapping, list)):
+        return copy.deepcopy(dict(value) if isinstance(value, Mapping) else value), 1
+    raise AssertionError("#1579: script a mapping, not text")
 
 
 # --------------------------------------------------------------------------------------
@@ -632,19 +648,19 @@ def as_reply_text(doc: dict, *, malformed: str | None = None) -> str:
 class FakeJudge:
     """The judge's model seam (`judge=`) — a recording, fault-injecting stand-in for one call."""
 
-    replies: list[str] = field(default_factory=list)
+    replies: list[Any] = field(default_factory=list)
     fault: Fault = CLEAN
     #: A default reply for scenarios whose subject is not the reply's content.
-    default: str | None = None
+    default: Any = None
     #: The reply to the family-scope call (`judge:family:<n>`), which then never draws on
     #: `replies`/`default`; `None` routes the family call like any other.
-    family_default: str | None = None
+    family_default: Any = None
     prompts: list[str] = field(default_factory=list)
     agent_ids: list[str] = field(default_factory=list)
     kwargs: list[dict] = field(default_factory=list)
 
     def __call__(self, prompt: str, *, role: Any = None, agent_id: str = "judge",
-                 **kw: Any) -> str:
+                 **kw: Any) -> Any:
         self.prompts.append(prompt)
         self.agent_ids.append(agent_id)
         self.kwargs.append({"role": role, "agent_id": agent_id, **kw})
@@ -653,24 +669,21 @@ class FakeJudge:
         if self.fault.raise_after is not None and len(self.prompts) > self.fault.raise_after:
             raise self._unprocessable(f"judge ({agent_id}) did not complete", "TimeoutError")
         if self.family_default is not None and str(agent_id).startswith(FAMILY_AGENT_PREFIX):
-            return self.family_default
+            return delivered(self.family_default)
         if self.replies:
-            return self.replies.pop(0)
+            return delivered(self.replies.pop(0))
         if self.default is not None:
-            return self.default
+            return delivered(self.default)
         raise AssertionError(f"FakeJudge ran out of replies at call {len(self.prompts)}")
 
     @staticmethod
     def _unprocessable(message: str, cause: str) -> BaseException:
-        """The one class both failure modes surface as, with `__cause__` attached: only the
-        message prefix and the cause tell a timeout from a transport fault, so a draw handler
-        cannot branch on type.
+        """The one class both failure modes surface as, with `__cause__` attached and the call's
+        request count (1: a fake's call is one request): only the message prefix and the cause
+        tell a timeout from a transport fault, so a draw handler cannot branch on type.
         """
-        unprocessable = sym("learning.core.config", "RunUnprocessable")
         inner: BaseException = TimeoutError() if cause == "TimeoutError" else RuntimeError(cause)
-        raised = unprocessable(f"{message}: {inner!r}")
-        raised.__cause__ = inner
-        return raised
+        return TY.unprocessable(f"{message}: {inner!r}", requests=1, cause=inner)
 
     @property
     def calls(self) -> int:

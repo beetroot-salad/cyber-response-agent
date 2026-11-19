@@ -312,3 +312,34 @@ def test_1025_a_usage_block_with_a_negative_or_overflowing_count_is_unpriced(tmp
     assert "$nan" not in stages, stages
     assert "$-" not in page.text_of("sec-verdict")
     assert E.SAMPLE.total_cost in page.text_of("sec-verdict"), "positive control: the sample total"
+
+
+# --- #1579: a typed call's tool-call reply and its retry prompt render -------------------------
+
+def test_1579_control_a_text_part_reply_still_renders(tmp_path):
+    ep = E.sample_episode(tmp_path)
+    E.write_trace(ep.dir, "questioner:d", reply="TEXT-REPLY-MARKER")
+    assert "TEXT-REPLY-MARKER" in render(ep).text_of("tx-questioner_d_trace")
+
+
+@pytest.mark.parametrize("args", [{"word": "ARGS-MARKER", "n": 7}, '{"word": "ARGS-MARKER", "unterminated'],
+                         ids=["mapping", "raw-malformed-json"])
+def test_1579_a_response_row_whose_part_is_a_tool_call_renders_its_arguments(tmp_path, args):
+    """The typed reply IS the tool call's arguments: a trace whose response carries no text part
+    must still show what the model answered, mapping or malformed text alike."""
+    ep = E.sample_episode(tmp_path)
+    E.write_trace(ep.dir, "questioner:d", rows=E.typed_trace_rows("questioner:d", args=args))
+    block = render(ep).text_of("tx-questioner_d_trace")
+    assert "ARGS-MARKER" in block, block
+
+
+def test_1579_a_requests_retry_prompt_renders_and_so_does_the_corrected_answer(tmp_path):
+    """The re-ask is part of the call: the reason the model was sent shows between its attempts."""
+    ep = E.sample_episode(tmp_path)
+    rows = E.typed_trace_rows("questioner:d", args={"word": "FIRST-ATTEMPT"},
+                              retry="RETRY-REASON-MARKER", text="FINAL-TEXT-MARKER")
+    E.write_trace(ep.dir, "questioner:d", rows=rows)
+    block = render(ep).text_of("tx-questioner_d_trace")
+    assert "RETRY-REASON-MARKER" in block, block
+    assert "FINAL-TEXT-MARKER" in block, "control: the later text part renders"
+    assert "FIRST-ATTEMPT" in block, block

@@ -8,8 +8,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from defender.tests.learning.branch.test_questioner_corpus_samples import author, three_replies
+from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.learning.branch import _world_1007 as W
+from defender.tests.support.learning.core import _typed_output1579 as TY
 
 PREBRANCH = [{"call": {"system": "elastic", "verb": "alerts", "params": {"limit": 10}},
               "answer": {"total": 6, "hits": [{"rule": "authorized_keys modification",
@@ -96,24 +100,79 @@ def test_a_world_that_still_conflicts_after_its_revision_is_dropped(tmp_path):
     assert entry["conflicts_after"]
 
 
-def test_a_revision_with_no_usable_facts_drops_the_world(tmp_path):
+#: A revision the in-call check refuses (`facts` present and non-empty, then the world rule): under a
+#: fake the call site's re-check refuses it, which is the call's `ReplyUnusable`, and the revision
+#: drops its world (#1561). Built lazily: `TY.unusable` resolves a symbol #1579 adds.
+_BAD_REVISIONS = {
+    "facts absent": lambda: {"story": "only a story"},
+    "facts empty": lambda: {**_revision(), "facts": []},
+    "fact without entities": lambda: {"story": "b rebuilt", "facts": [
+        {"fact_id": "f1r", "statement": "s"}]},
+    "extra key": lambda: {**_revision(), "role": "B"},
+    "world_id": lambda: {**_revision(), "world_id": T.fixture_world_id("b")},
+    "retries exhausted": lambda: TY.unusable("facts must not be empty"),
+}
+
+
+@pytest.mark.parametrize("bad", list(_BAD_REVISIONS))
+def test_a_revision_the_call_cannot_use_drops_its_world(tmp_path, bad):
+    """P1/P3 at a revision (review r2's `facts: []` counterexample among them): facts are
+    non-empty and well-formed in-call; the exhausted revision drops its world, never the family."""
     family, _agent, check, recorded = _run(
-        tmp_path, questioner_replies=[*three_replies(), {"story": "only a story"}],
+        tmp_path, questioner_replies=[*three_replies(), _BAD_REVISIONS[bad]()],
         check_replies=[_conflict("c", "f2")])
 
     assert _labels(family) == ["a", "b"]
-    assert check.calls == 1
+    assert check.calls == 1, "a re-check ran over a world that was never rebuilt"
     assert recorded[0][0]["dropped"]
     assert not recorded[0][0]["revised"]
 
 
-def test_an_unreadable_check_reply_changes_nothing(tmp_path):
-    family, agent, _check, recorded = _run(
-        tmp_path, questioner_replies=three_replies(), check_replies=["not yaml: [unclosed"])
+_UNUSABLE_CHECK_REPLIES = {
+    "retries exhausted": lambda: TY.unusable("conflicts must be a list"),
+    "conflicts not a list": lambda: {"conflicts": "none"},
+    "unknown key beside a real conflict": lambda: {**_conflict("b", "f1"), "bogus": 1},
+    "world_id": lambda: {**_conflict("b", "f1"), "world_id": T.fixture_world_id("b")},
+    "provider failure": lambda: TY.unprocessable("provider down", cause=TimeoutError("slow")),
+    "host bug": lambda: TypeError("a bug in the host's check"),
+}
+
+
+@pytest.mark.parametrize("bad", list(_UNUSABLE_CHECK_REPLIES))
+def test_a_check_that_cannot_be_used_names_no_world(tmp_path, bad):
+    """P3/P5: a check the call exhausted or the in-call rules refuse, a provider failure and a
+    host bug alike leave the family as authored (#1561); the conflict beside the refused part
+    is not acted on (no revision call, no second check)."""
+    family, agent, check, recorded = _run(
+        tmp_path, questioner_replies=three_replies(), check_replies=[_UNUSABLE_CHECK_REPLIES[bad]()])
 
     assert _labels(family) == ["a", "b", "c"]
-    assert agent.calls == 3
+    assert agent.calls == 3, "a world was revised on a check the host could not use"
+    assert check.calls == 1
     assert recorded == [[]]
+
+
+def test_a_check_reply_naming_a_real_and_an_unknown_world_drops_the_unknown_and_revises_the_real(tmp_path):
+    """P4: `z` is dropped, `b` is revised — the check reply is not refused whole."""
+    both = {"conflicts": [*_conflict("z", "f9")["conflicts"], *_conflict("b", "f1")["conflicts"]]}
+    family, agent, check, recorded = _run(
+        tmp_path, questioner_replies=[*three_replies(), _revision()],
+        check_replies=[both, {"conflicts": []}])
+
+    assert [f["fact_id"] for f in next(w for w in family["worlds"] if w["label"] == "b")["facts"]] == ["f1r"]
+    assert _labels(family) == ["a", "b", "c"]
+    assert agent.agent_ids[-1] == "questioner:b:revise"
+    assert agent.calls == 4, "the unknown world got a revision, or the real one did not"
+    assert check.calls == 2
+    assert [e["label"] for e in recorded[0]] == ["b"]
+
+
+def test_a_check_naming_only_unknown_worlds_changes_nothing(tmp_path):
+    family, agent, check, recorded = _run(
+        tmp_path, questioner_replies=three_replies(), check_replies=[_conflict("z", "f9")])
+
+    assert _labels(family) == ["a", "b", "c"]
+    assert (agent.calls, check.calls, recorded) == (3, 1, [[]])
 
 
 def test_without_a_check_seam_the_family_is_authored_as_before(tmp_path):
@@ -198,13 +257,24 @@ def test_a_check_that_faults_leaves_the_family_as_authored(tmp_path):
     assert recorded == [[]]
 
 
-def test_a_revision_that_faults_drops_only_its_world(tmp_path):
+_REVISION_FAULTS = {
+    "timeout": lambda: TimeoutError("the revision timed out"),
+    "provider failure": lambda: TY.unprocessable("provider down", cause=TimeoutError("slow")),
+    "host bug": lambda: TypeError("a bug in the host's check"),
+    "retries exhausted": lambda: TY.unusable("facts must not be empty"),
+}
+
+
+@pytest.mark.parametrize("fault", list(_REVISION_FAULTS))
+def test_a_revision_that_faults_drops_only_its_world(tmp_path, fault):
+    """#1561 stands for a host exception (`RunUnprocessable`, a `TypeError`) at a revision; P3: an
+    exhausted revision (`ReplyUnusable`) drops its world too, caught before the generic handler."""
     replies = iter(three_replies())
 
     def questioner(prompt, **kwargs):
         if kwargs.get("agent_id", "").endswith(":revise"):
-            raise TimeoutError("the revision timed out")
-        return next(replies)
+            raise _REVISION_FAULTS[fault]()
+        return W.FakeAgent(next(replies))(prompt, **kwargs)
 
     paths = W.loop_paths(tmp_path)
     check = W.FakeAgent(_conflict("b", "f1"))
@@ -225,12 +295,13 @@ def test_a_world_fact_may_not_take_the_oracles_reserved_fork_name():
         parse_facts([{"fact_id": "fork", "statement": "s", "entities": ["web-1"]}], "w")
 
 
-def test_a_re_check_that_faults_drops_the_rebuilt_world_and_records_it(tmp_path):
+@pytest.mark.parametrize("bad", list(_UNUSABLE_CHECK_REPLIES))
+def test_a_re_check_that_cannot_be_used_drops_the_rebuilt_world_and_records_it(tmp_path, bad):
     """A rebuild the second check never confirmed is not kept, and is not replaced by the world
-    the first check found false."""
+    the first check found false. P3: an exhausted re-check is a failed one, whatever its cause."""
     family, _agent, _check, recorded = _run(
         tmp_path, questioner_replies=[*three_replies(), _revision()],
-        check_replies=[_conflict("b", "f1"), "not yaml: [unclosed"])
+        check_replies=[_conflict("b", "f1"), _UNUSABLE_CHECK_REPLIES[bad]()])
 
     assert _labels(family) == ["a", "c"]
     [entry] = recorded[0]
@@ -246,3 +317,15 @@ def test_no_prebranch_evidence_skips_the_check(tmp_path):
 
     assert _labels(family) == ["a", "b", "c"]
     assert check.calls == 0
+
+
+def test_the_revision_and_check_prompts_ask_for_the_tool_not_a_yaml_document(tmp_path):
+    """O4: neither prompt still tells the model to write one bare YAML document."""
+    _family, agent, check, _recorded = _run(
+        tmp_path, questioner_replies=[*three_replies(), _revision()],
+        check_replies=[_conflict("b", "f1"), {"conflicts": []}])
+
+    assert agent.agent_ids[-1] == "questioner:b:revise"
+    for prompt in (agent.prompts[-1], check.prompts[0]):
+        assert "one YAML document" not in prompt
+        assert "call the tool" in prompt.lower()

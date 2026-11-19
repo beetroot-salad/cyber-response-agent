@@ -306,7 +306,7 @@ class Watch:
                              f"; it made {[(s.event, s.who, s.kind) for s in self.seen]}")
 
     def __call__(self, prompt: str, **kw: Any) -> str:
-        label, n, _attempt = self.judge.coordinate(kw.get("agent_id", "judge"))
+        label, n = self.judge.coordinate(kw.get("agent_id", "judge"))
         self.snap("call", label, None)
         action = self.at_call.pop((label, n), None) if label is not None else None
         if action is not None:

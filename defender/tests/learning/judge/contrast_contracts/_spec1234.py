@@ -7,6 +7,7 @@ from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 
 import contextlib
+import copy
 import importlib
 import json
 import os
@@ -20,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from defender import _yaml
+from defender.tests.support.learning.core import _typed_output1579 as TY
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S24
@@ -1088,9 +1090,17 @@ def family_reply(*, world: Sequence[dict] = (), passes: bool = True,
     return doc
 
 
-def as_text(doc: Any) -> str:
-    """A reply document as the BARE text a model seam returns (#1018: one bare document)."""
-    return doc if isinstance(doc, str) else _yaml.safe_dump(doc, sort_keys=False)
+def as_text(doc: Any) -> Any:
+    """#1579: replies are mappings; name kept for its callers. What a judge fake answers for a
+    scripted `doc`: `(mapping, 1)`, a `(mapping, requests)` tuple as scripted, an exception
+    instance raised. Text is a stale script and fails loudly."""
+    if isinstance(doc, BaseException):
+        raise doc
+    if isinstance(doc, tuple):
+        return doc
+    if isinstance(doc, Mapping):
+        return copy.deepcopy(dict(doc)), 1
+    raise AssertionError("#1579: script a mapping, not text")
 
 
 #: A world reply with nothing to queue (bucket `none`, no findings) — the default answer of a
@@ -1100,9 +1110,10 @@ QUIET_FAMILY = family_reply()
 
 
 def validate(doc: Any, *, scope: str = "world", reachable_systems: Any = SYSTEMS, **kw: Any) -> Any:
-    """`run.validate_reply(text, scope=, reachable_systems=)` over a reply document — the unit
-    door for reply-shape demands (the pass's own re-ask is pinned through `grade`)."""
-    return sym(JUDGE_RUN, "validate_reply")(as_text(doc), scope=scope,
+    """`run.validate_reply(mapping, scope=, reachable_systems=)` over a reply mapping — the unit
+    door for reply-shape demands (#1579: the mapping-level half; the pass's in-call re-ask is
+    pinned through the real seam, its call-site check through `grade`)."""
+    return sym(JUDGE_RUN, "validate_reply")(doc, scope=scope,
                                             reachable_systems=reachable_systems, **kw)
 
 
@@ -1168,29 +1179,32 @@ def pre_change_world_row(fid: str, **over: Any) -> dict:
 # --------------------------------------------------------------------------------------
 
 
-def parse_agent_id(agent_id: str) -> tuple[str | None, int | None, int]:
-    """`judge:<label>:<n>[:<attempt>]` -> `(label, n, attempt)`; `(None, None, 0)` otherwise."""
+def parse_agent_id(agent_id: str) -> tuple[str | None, int | None]:
+    """`judge:<label>:<n>` -> `(label, n)`; `(None, None)` otherwise (#1579: one call per draw,
+    so an id with an attempt suffix is no judge call at all)."""
     parts = str(agent_id).split(":")
-    if len(parts) < 3 or parts[0] != "judge":
-        return None, None, 0
+    if len(parts) != 3 or parts[0] != "judge":
+        return None, None
     try:
-        n = int(parts[2])
-        attempt = int(parts[3]) if len(parts) > 3 else 0
+        return parts[1], int(parts[2])
     except ValueError:
-        return parts[1], None, 0
-    return parts[1], n, attempt
+        return parts[1], None
 
 
 @dataclass
 class RoutedJudge:
     """The judge's model seam (`judge=`): each call is answered by the reply routed to its
-    world, draw and attempt, and RECORDED (prompt, agent id, kwargs)."""
+    world and draw, and RECORDED (prompt, agent id, kwargs). A reply is a mapping, a
+    `(mapping, requests)` tuple, or an exception instance to raise (`TY.unusable(...)`)."""
 
     replies: dict[Any, Any] = field(default_factory=dict)
     default: Any = None
     family_default: Any = None
     fail: set[Any] = field(default_factory=set)
     overflow: set[Any] = field(default_factory=set)
+    #: The request count an `overflow` call carries: 1 is a first request refused for its size
+    #: (A23 stops later draws); 2 or more is a re-ask's longer history (that draw alone fails).
+    overflow_requests: int = 1
     prompts: list[str] = field(default_factory=list)
     agent_ids: list[str] = field(default_factory=list)
     kwargs: list[dict] = field(default_factory=list)
@@ -1201,21 +1215,21 @@ class RoutedJudge:
         self.world_labels = {identity: label for label, identity in world_ids.items()}
 
     def coordinate(self, agent_id: str):
-        identity, draw, attempt = parse_agent_id(agent_id)
-        return self.world_labels.get(identity, identity), draw, attempt
+        identity, draw = parse_agent_id(agent_id)
+        return self.world_labels.get(identity, identity), draw
 
     def __call__(self, prompt: str, *, role: Any = None, agent_id: str = "judge",
-                 **kw: Any) -> str:
+                 **kw: Any) -> Any:
         with self._lock:
             self.prompts.append(prompt)
             self.agent_ids.append(agent_id)
             self.kwargs.append({"role": role, "agent_id": agent_id, **kw})
-        label, n, attempt = self.coordinate(agent_id)
+        label, n = self.coordinate(agent_id)
         if agent_id in self.fail or label in self.fail or (label, n) in self.fail:
             raise self._unprocessable(agent_id, RuntimeError("TransportFault"))
         if agent_id in self.overflow or label in self.overflow or (label, n) in self.overflow:
-            raise self._unprocessable(agent_id, self._too_large())
-        for key in ((label, n, attempt), (label, n), label):
+            raise self._unprocessable(agent_id, self._too_large(), self.overflow_requests)
+        for key in ((label, n), label):
             if key in self.replies:
                 value = self.replies[key]
                 if isinstance(value, list):
@@ -1231,19 +1245,14 @@ class RoutedJudge:
         raise AssertionError(f"RoutedJudge: no reply routed for {agent_id}")
 
     @staticmethod
-    def _unprocessable(agent_id: str, inner: BaseException) -> BaseException:
-        unprocessable = sym(CONFIG, "RunUnprocessable")
-        raised = unprocessable(f"judge ({agent_id}) failed: {inner!r}")
-        raised.__cause__ = inner
-        return raised
+    def _unprocessable(agent_id: str, inner: BaseException, requests: int = 1) -> BaseException:
+        return TY.unprocessable(f"judge ({agent_id}) failed: {inner!r}", requests=requests,
+                                cause=inner)
 
     @staticmethod
     def _too_large() -> BaseException:
         """The provider's answer to an over-long prompt (status 413)."""
-        http_error = importlib.import_module("pydantic_ai.exceptions").ModelHTTPError
-        return http_error(status_code=413, model_name="judge-model",
-                          body={"error": {"type": "request_too_large",
-                                          "message": "prompt is too long"}})
+        return TY.http_413()
 
     @property
     def calls(self) -> int:
@@ -1257,11 +1266,11 @@ class RoutedJudge:
         return bool(self.calls_for(label))
 
     def prompt_for(self, label: str) -> str:
-        """The prompt handed to world `label`'s first call (draw 0, attempt 0)."""
+        """The prompt handed to world `label`'s first call (draw 0)."""
         for agent, prompt in zip(self.agent_ids, self.prompts, strict=True):
-            if self.coordinate(agent) == (label, 0, 0):
+            if self.coordinate(agent) == (label, 0):
                 return prompt
-        raise AssertionError(f"RoutedJudge: no call for {(label, 0, 0)}; "
+        raise AssertionError(f"RoutedJudge: no call for {(label, 0)}; "
                              f"calls were {self.agent_ids}")
 
     def prompts_for(self, label: str) -> list[str]:
