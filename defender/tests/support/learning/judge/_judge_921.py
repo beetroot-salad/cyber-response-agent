@@ -517,8 +517,10 @@ def fault_arm(episode_dir: Path, label: str, kind: str):
     elif kind == "pointer-unreadable":
         pointer.write_text("{not json", encoding="utf-8")
     elif kind == "database-missing":
-        pointer.write_text(json.dumps({"case_id": _SOURCE_CASE, "store_path": str(folder / "gone.db")}),
-                           encoding="utf-8")
+        from defender.records.session_store import CLOSING_RECORD_MARKER
+
+        pointer.write_text(json.dumps({"case_id": _SOURCE_CASE, "store_path": str(folder / "gone.db"),
+                                       CLOSING_RECORD_MARKER: True}), encoding="utf-8")
     elif kind == "legacy-link":
         from defender.records.session_store._schema import _LEGACY_LINK_NAME
 
@@ -540,6 +542,11 @@ def fault_database(episode_dir: Path, kind: str) -> Path:
 
     database = arm_database(episode_dir)
     if kind == "recorded-before-1534":
+        # Every arm recorded before #1534: pointers without the closing-record mark, a database without the table.
+        from defender.tests.support.storage._readers1534 import unmark_pointer
+
+        for pointer in (Path(episode_dir) / "runs").glob("*.session-pointer.json"):
+            unmark_pointer(pointer)
         V.drop_table(database)
     elif kind == "schema-version":
         conn = sqlite3.connect(database)

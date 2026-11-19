@@ -513,7 +513,7 @@ def _plant_store(runs: Path, run_id: str, plan: dict[str, Any], case: str, fault
             session_store.seal_ledger(handle, run_id)
         if plan.get("fields") is not None:
             R.V.plant(handle, R.V.a_record(run_id, **{**R.valid_fields(plan["fields"]["disposition"]), **plan["fields"]}))
-    R.break_database(session_db(runs, case), run_id, fault)
+    R.break_database(session_db(runs, case), run_id, fault, pointer=runs / f"{run_id}.session-pointer.json")
     if plan.get("then"):
         import sqlite3
 
@@ -899,7 +899,9 @@ def knowledge_record_of(kind: str, commit: str, *, stale_kind: str | None = None
 def session_pointer(case_id: str, *, session_id: str | None = None) -> str:
     """The pointer as `write_case_pointer` writes it, its `store_path` deliberately elsewhere:
     the reader locates the database from the case id, never from this string."""
-    body = {"case_id": case_id, "store_path": "/nonexistent/elsewhere.db"}
+    from defender.records.session_store import CLOSING_RECORD_MARKER
+
+    body = {"case_id": case_id, "store_path": "/nonexistent/elsewhere.db", CLOSING_RECORD_MARKER: True}
     if session_id is not None:
         body["session_id"] = session_id
     return json.dumps(body)

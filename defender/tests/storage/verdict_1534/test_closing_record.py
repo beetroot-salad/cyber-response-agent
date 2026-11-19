@@ -559,13 +559,40 @@ def test_v_look_a_database_at_another_schema_version_is_schema_version(tmp_path,
     _assert_fault(C.for_run(V.handle(run_dir)), "schema-version", database)
 
 
-def test_v_look_a_database_without_the_table_is_recorded_before_1534_and_the_read_does_not_make_it(tmp_path):
-    """No `closing_record` table: `recorded-before-1534`, a fault and not an absence; the reader leaves it absent. (V-LOOK)"""
+def test_v_look_a_run_whose_pointer_predates_1534_is_recorded_before_1534_in_a_database_that_has_the_table(tmp_path):
+    """A run recorded before #1534 shares its case's database with a later run, whose open added the table: the old run
+    is `recorded-before-1534`, never `NeverClosed`; the later, marked run with no row is `NeverClosed`. (r3.3 N1)"""
+    from defender.records import closing as C
+
+    old, database = V.closed_run(tmp_path, None, run_name="closing-1534-old")
+    V.unmark(old)
+    later, same = V.closed_run(tmp_path, None, run_name="closing-1534-later")
+    assert same == database, "premise: both runs are in the case's one database"
+    _assert_fault(C.for_run(V.handle(old)), "recorded-before-1534", database)
+    assert isinstance(C.for_run(V.handle(later)), C.NeverClosed)
+
+
+def test_v_look_a_row_wins_over_a_missing_marker(tmp_path):
+    """An unmarked pointer whose run has a row reads the row: the marker only says what a missing row means. (r3.3 N1)"""
+    from defender.records import closing as C
+
+    run_dir, _database = V.closed_run(tmp_path, {})
+    V.unmark(run_dir)
+    assert isinstance(C.for_run(V.handle(run_dir)), C.Record)
+
+
+@pytest.mark.parametrize("marked", [True, False], ids=["marked", "unmarked"])
+def test_v_look_a_database_without_the_table_is_a_fault_and_the_read_does_not_make_it(tmp_path, marked):
+    """No `closing_record` table: a marked run's database got the table when it opened, so its absence is
+    `store-unreadable`; an unmarked run is `recorded-before-1534`. Never an absence; the reader leaves the table
+    absent. (V-LOOK, r3.3 N1)"""
     from defender.records import closing as C
 
     run_dir, database = V.closed_run(tmp_path, {})
     V.drop_table(database)
-    _assert_fault(C.for_run(V.handle(run_dir)), "recorded-before-1534", database)
+    if not marked:
+        V.unmark(run_dir)
+    _assert_fault(C.for_run(V.handle(run_dir)), "store-unreadable" if marked else "recorded-before-1534", database)
     conn = sqlite3.connect(database)
     try:
         assert conn.execute("SELECT 1 FROM sqlite_master WHERE name = ?", (V.TABLE,)).fetchone() is None

@@ -296,6 +296,22 @@ def test_a_grounding_refusal_is_reported_once_on_a_benign_document() -> None:
     )
 
 
+def test_a_baseline_repeated_up_to_what_treatment_removes_is_a_repeat() -> None:
+    """Two rows that differ only by an invisible character or doubled spaces are the same line once the record treats
+    them: refused as a repeat, never stored twice. (#1534 r3.3 N3)"""
+    doubled = scene.document(
+        rows=scene.consult_block(
+            scene.consultation_row(result="1500 CA-bundle rewrites over 30d"),
+            scene.consultation_row(result="1500  CA-bun\u200bdle rewrites over 30d"),
+        ),
+        settled=False,
+    )
+    assert any("repeats an earlier baseline" in e for e in _errors(doubled)), (
+        "a repeat that differs only by an invisible character and a doubled space was accepted"
+    )
+    assert len(_receipts(doubled)) == 1
+
+
 def test_a_repeated_baseline_row_does_not_render_twice() -> None:
     doubled = scene.document(
         rows=scene.consult_block(scene.consultation_row(), scene.consultation_row()),

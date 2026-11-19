@@ -1151,7 +1151,8 @@ def test_1534_a_record_that_cannot_be_looked_up_fails_the_render_and_saves_no_pa
     control = _run_handle_1165(run)
     assert _closing_headline(_page(run)), "positive control: the same run renders while its record reads"
     pointer = json.loads(control.observability.session_pointer.read_result().text)
-    R.break_database(Path(pointer["store_path"]), run.name, fault)
+    R.break_database(Path(pointer["store_path"]), run.name, fault,
+                     pointer=Path(control.observability.session_pointer.path))
 
     with pytest.raises(VisualizeFailed) as failed:
         save_page(_run_handle_1165(run))

@@ -397,6 +397,35 @@ def test_v_text_the_forced_close_cuts_baselines_to_the_aggregate(tmp_path):
     assert len("\n".join([*lines, lines[-1]])) > C.BASELINE_LINES_BOUND
 
 
+#: Ceiling rows a parse takes and no gate checked: empty, half-written, control and invisible characters.
+_MALFORMED_CEILING = ("state=", "state=query-empty ref=", "cap=x", "state=nothing-to-try cap= note=", "= = =",
+                      "state=query-failed ref=l-zz note=\x01\x02", "state=nothing-to-try cap=\u200b",
+                      "state=nothing-to-try cap=fake-system-000.fake-verb note=a",
+                      "state=nothing-to-try cap=fake-system-000.fake-verb note=a")
+
+
+def _malformed_baselines() -> str:
+    rows = [scene.consultation_row(window="garbage"), scene.consultation_row(window="2026-01-01T00:00:00Z/"),
+            scene.consultation_row(window="9999-12-31T23:59:59-23:59/9999-12-31T23:59:59-23:59"),
+            scene.consultation_row(anchor_id="\x00", result="", reasoning="\u200b"),
+            scene.consultation_row(), scene.consultation_row()]
+    return scene.document(rows=scene.consult_block(*rows), settled=False)
+
+
+@pytest.mark.parametrize("which", ["ceiling", "baselines"])
+def test_v_fields_the_forced_close_over_malformed_rows_still_commits_its_record(tmp_path, which):
+    """The forced close skips every gate, so its walkers meet rows nothing checked: each is dropped or kept, and the
+    record is written, never `ForcedCloseFailed` for want of a valid row. (r3 "never a failed build", r3.3 N3)"""
+    from defender.records import closing as C
+
+    doc = B.forced_doc(ceiling=_MALFORMED_CEILING) if which == "ceiling" else _malformed_baselines()
+    rec = B.forced_close(tmp_path, doc).record
+
+    assert (rec.disposition, rec.cause) == (HOST, C.CAUSE_NOT_REVIEWED)
+    assert len(set(rec.ceiling_test)) == len(rec.ceiling_test), "the record kept a repeated receipt"
+    assert len(set(rec.runtime_evidence)) == len(rec.runtime_evidence), "the record kept a repeated baseline"
+
+
 _GRID = [(d, name) for d in sorted(set(DISPOSITION_VALUES) - {HOST}) for name in B.CASE_NAMES]
 _IDS = [f"{d}-{name}" for d, name in _GRID]
 

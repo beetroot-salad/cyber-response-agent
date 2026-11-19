@@ -129,8 +129,19 @@ def corrupt(database: Path, run_id: str, column: str, value: Any) -> None:
         conn.close()
 
 
+def unmark(run_dir: Path) -> None:
+    """`run_dir`'s pointer as code before #1534 wrote it: the same case and path, without the closing-record marker
+    (amendment r3.3 N1). The run then reads as recorded before #1534 whatever its database holds."""
+    import json
+
+    pointer = handle(run_dir).observability.session_pointer
+    body = json.loads(pointer.read_result().text)
+    body.pop("closing_record", None)
+    pointer.write(json.dumps(body))
+
+
 def drop_table(database: Path) -> None:
-    """A database as it stood before #1534: no `closing_record` table."""
+    """A database without the `closing_record` table (as it stood before #1534)."""
     conn = sqlite3.connect(database, timeout=30)
     try:
         conn.execute(f"DROP TABLE IF EXISTS {TABLE}")

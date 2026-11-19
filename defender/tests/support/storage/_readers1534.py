@@ -90,7 +90,8 @@ def plant_run(run_dir: Path, fields: dict[str, Any] | None = None, *, fault: str
         if fields is not None:
             V.plant(store, V.a_record(run_dir.name, **fields))
         database = Path(store.path)
-    break_database(database, run_dir.name, fault, invalid_as=invalid_as, at_query=at_query)
+    break_database(database, run_dir.name, fault, invalid_as=invalid_as, at_query=at_query,
+                   pointer=Path(handle.observability.session_pointer.path))
     return database
 
 
@@ -111,20 +112,39 @@ def fault_run(run_dir: Path, fault: str | None, *, invalid_as: str | None = None
             os.symlink("elsewhere", Path(run_dir) / _LEGACY_LINK_NAME)
     else:
         break_database(Path(json.loads(pointer.read_result().text)["store_path"]), Path(run_dir).name, fault, invalid_as=invalid_as,
-                       at_query=at_query)
+                       at_query=at_query, pointer=Path(pointer.path))
+
+
+def unmark_pointer(pointer: Path) -> None:
+    """The pointer file at `pointer` as code before #1534 wrote it: without the closing-record mark."""
+    from defender.records.session_store import CLOSING_RECORD_MARKER
+
+    body = json.loads(Path(pointer).read_text(encoding="utf-8"))
+    body.pop(CLOSING_RECORD_MARKER, None)
+    Path(pointer).write_text(json.dumps(body), encoding="utf-8")
 
 
 def break_database(database: Path, run_id: str, fault: str | None, *, invalid_as: str | None = None,
-                   at_query: bool = False) -> None:
+                   at_query: bool = False, pointer: Path | None = None) -> None:
     """Apply `fault` to an existing database by a real primitive. `at_query` makes `store-unreadable` a read-time error of
-    the record's query (a VIEW over a missing table) in a file that opens and whose other tables read."""
+    the record's query (a VIEW over a missing table) in a file that opens and whose other tables read. `recorded-before-1534`
+    is a run as code before #1534 left it: `pointer` (the run's pointer file, required for it) without the closing-record
+    mark and no row for it, in a database a later run of the case gave the table (amendment r3.3 N1)."""
     if fault is None:
         return
     if fault == "database-missing":
         for leftover in (database, Path(f"{database}-wal"), Path(f"{database}-shm")):
             leftover.unlink(missing_ok=True)
     elif fault == "recorded-before-1534":
-        V.drop_table(database)
+        assert pointer is not None, "a run recorded before #1534 is its pointer's fact: pass the run's pointer"
+        unmark_pointer(pointer)
+        # The table stays: a later run of the case added it, which is what the mark exists for (r3.3 N1).
+        conn = sqlite3.connect(database, timeout=30)
+        try:
+            conn.execute(f"DELETE FROM {V.TABLE} WHERE run_id = ?", (run_id,))  # noqa: S608
+            conn.commit()
+        finally:
+            conn.close()
     elif fault == "row-invalid":
         V.corrupt(database, run_id, "disposition", invalid_as or "no-such-disposition")
     elif fault == "store-unreadable" and at_query:
