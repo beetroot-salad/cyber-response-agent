@@ -284,6 +284,8 @@ def _ceiling_entries(receipts: tuple[CeilingReceipt, ...]) -> tuple[closing.Ceil
         except ValueError as refused:
             _dropped("ceiling receipt", receipt.raw, refused)
             continue
+        if entry in kept:  # a repeat once treated (the forced close skips the gates): one line
+            continue
         if closing.ceiling_lines_length((*kept, entry)) > closing.CEILING_LINES_BOUND:
             break
         kept.append(entry)
@@ -301,6 +303,8 @@ def _baseline_entries(receipts: tuple[RuntimeEvidenceReceipt, ...]) -> tuple[clo
                 reasoning=receipt.reasoning)
         except (ValueError, OverflowError) as refused:  # the build never fails
             _dropped("baseline", receipt.window, refused)
+            continue
+        if entry in kept:  # a repeat once treated (the forced close skips the gates): one line
             continue
         if closing.baseline_lines_length((*kept, entry)) > closing.BASELINE_LINES_BOUND:
             break

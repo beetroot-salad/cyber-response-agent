@@ -4,27 +4,28 @@
 absence. Each kind has fixed outward wording (`FAULT_WORDING`); `detail` names what was found
 (paths included) and goes to the log only.
 
-Routes, one per kind of holder, all ending in `read_database`: the run handle (`for_run`, the
-database its host-written pointer recorded), the job lane (the database derived from the
-pointer's case id, `job_lane`), and an episode's run view (roster -> arm run -> `for_run`)."""
+Routes, one per kind of holder, all ending in `from_pointer` and `read_database`: the run handle
+(`for_run`, the pointer beside its folder), the job lane (the pointer through its held view,
+`job_lane`), and an episode's run view (roster -> arm run -> `for_run`). Every route parses the
+pointer with `session_store.parse_case_pointer`; each route names its database by its own rule."""
 from __future__ import annotations
 
 import json
 import os
 import sqlite3
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 from defender._model import model
-from defender.records._run_id import refuse_bad_case_id
 from defender.records._store_errors import StoreError
 
 from ._record import BaselineEntry, CeilingEntry, ClosingRecord
 
 if TYPE_CHECKING:
     from defender.records._handle import Run
+    from defender.records.session_store import CasePointer
 
 
 TABLE = "closing_record"
@@ -77,7 +78,8 @@ class Record:
 
 @model(frozen=True)
 class NeverClosed:
-    """The run has no closing record: no pointer, or the database's table has no row for it."""
+    """The run has no closing record: no pointer, or a pointer marked as keeping the record in its database and no
+    row there for the run."""
 
 
 @model(frozen=True)
@@ -111,28 +113,22 @@ def fault(kind: str, detail: str, *, run_id: object = "") -> CouldNotLook:
 
 
 def for_run(run: Run) -> Lookup:
-    """The run-handle route: the database the run's host-written pointer recorded."""
+    """The run-handle route: the run's pointer, read beside its folder, and the database it recorded. The recorded
+    path, not one derived from the run's own folder: a branch arm's folder is in its episode while its database is
+    its source's."""
     run_id = str(run.id)
     pointer = run.observability.session_pointer
     try:
         read = pointer.read_result()
     except OSError as e:
         return fault(POINTER_UNREADABLE, f"the session pointer {pointer.path} cannot be read: {e!r}", run_id=run_id)
-    if read.absent:
-        # The pre-#1235 link is consulted only when no pointer sits beside the folder: it lives
-        # in the box-writable folder, so it never outranks the host's pointer.
-        from defender.records.session_store import _LEGACY_LINK_NAME
+    # The pre-#1235 link lives in the box-writable folder, so `from_pointer` consults it only when no pointer sits
+    # beside the folder: it never outranks the host's pointer.
+    from defender.records.session_store import _LEGACY_LINK_NAME
 
-        if os.path.lexists(Path(run.run_dir) / _LEGACY_LINK_NAME):
-            return fault(LEGACY_LINK, f"{run.run_dir} holds a pre-#1235 link and no pointer", run_id=run_id)
-        return NeverClosed()
-    if read.text is None:
-        return fault(POINTER_UNREADABLE, f"the session pointer {pointer.path} cannot be read: {read.reason}",
-                     run_id=run_id)
-    database = _pointer_database(read.text)
-    if isinstance(database, str):
-        return fault(POINTER_UNREADABLE, f"the session pointer {pointer.path} {database}", run_id=run_id)
-    return read_database(database, run_id)
+    return from_pointer(
+        read, where=str(pointer.path), run_id=run_id, locate=lambda found: found.store_path,
+        legacy_link=lambda: os.path.lexists(Path(run.run_dir) / _LEGACY_LINK_NAME))
 
 
 def for_run_dir(run_dir: Path) -> Lookup:
@@ -143,26 +139,33 @@ def for_run_dir(run_dir: Path) -> Lookup:
     return for_run(run_of_folder(Path(run_dir)))
 
 
-def _pointer_database(text: str) -> Path | str:
-    """The database a pointer's text names, or why it names none usable."""
+def from_pointer(read: Any, *, where: str, run_id: str, locate: Callable[[CasePointer], Path],
+                 legacy_link: Callable[[], bool]) -> Lookup:
+    """What every route does once it holds the pointer's read (`read`: `absent`, `text`, `reason`): no pointer is
+    `NeverClosed` (or `legacy-link`, when `legacy_link()` finds a pre-#1235 link); a pointer is parsed by
+    `session_store.parse_case_pointer`, and `locate` names its database (the route's rule: the run handle's recorded path, the job
+    lane's path derived from the case id). `locate` raising `StoreError` is `pointer-unreadable`."""
+    from defender.records import session_store as ss
+
+    if read.absent:
+        if legacy_link():
+            return fault(LEGACY_LINK, f"run {run_id} holds a pre-#1235 link and no pointer", run_id=run_id)
+        return NeverClosed()
+    if read.text is None:
+        return fault(POINTER_UNREADABLE, f"the session pointer {where} cannot be read: {read.reason}", run_id=run_id)
     try:
-        data = json.loads(text)
-    except ValueError as e:
-        return f"is not JSON ({e})"
-    if not isinstance(data, dict):
-        return "is not a JSON object"
-    store_path = data.get("store_path")
-    if not isinstance(store_path, str) or not store_path:
-        return "names no store_path"
-    try:
-        refuse_bad_case_id(data.get("case_id"))
+        pointer = ss.parse_case_pointer(read.text)
+        database = locate(pointer)
     except StoreError as e:
-        return f"names no usable case id ({e})"
-    return Path(store_path)
+        return fault(POINTER_UNREADABLE, f"the session pointer {where} {e}", run_id=run_id)
+    return read_database(database, run_id, marked=pointer.keeps_closing_record)
 
 
-def read_database(database: Path, run_id: str) -> Lookup:
-    """The row read every route ends in: `run_id`'s closing record in `database`."""
+def read_database(database: Path, run_id: str, *, marked: bool) -> Lookup:
+    """The row read every route ends in: `run_id`'s closing record in `database`. `marked`: the run's pointer says it
+    keeps its record there (r3.3 N1). A row always wins; with no row, an unmarked run was recorded before #1534, and a
+    marked run never closed, unless its database lacks the table its own open made (then the database is not the
+    one the run wrote)."""
     from defender.records import session_store as ss
 
     database = Path(database)
@@ -171,10 +174,13 @@ def read_database(database: Path, run_id: str) -> Lookup:
     try:
         with ss.open_store_for_read(database) as store:
             conn = store.connection
-            if conn.execute("SELECT 1 FROM sqlite_master WHERE name = ?", (TABLE,)).fetchone() is None:
-                return fault(RECORDED_BEFORE_1534, f"{database} has no {TABLE} table", run_id=run_id)
-            row = conn.execute(
-                f"SELECT {', '.join(_COLUMNS)} FROM {TABLE} WHERE run_id = ?", (run_id,)).fetchone()  # noqa: S608
+            row = None
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE name = ?", (TABLE,)).fetchone() is not None:
+                row = conn.execute(
+                    f"SELECT {', '.join(_COLUMNS)} FROM {TABLE} WHERE run_id = ?", (run_id,)).fetchone()  # noqa: S608
+            elif marked:
+                return fault(STORE_UNREADABLE, f"{database} has no {TABLE} table, though run {run_id}'s pointer "
+                                               "says it keeps its record there", run_id=run_id)
     except ss.UnknownSchemaVersion as e:
         return fault(SCHEMA_VERSION_KIND, f"{database}: {e}", run_id=run_id)
     except FileNotFoundError as e:
@@ -182,6 +188,9 @@ def read_database(database: Path, run_id: str) -> Lookup:
     except (OSError, sqlite3.Error, StoreError) as e:
         return fault(STORE_UNREADABLE, f"{database}: {e!r}", run_id=run_id)
     if row is None:
+        if not marked:
+            return fault(RECORDED_BEFORE_1534, f"run {run_id}'s pointer carries no closing-record mark and "
+                                               f"{database} holds no row for it", run_id=run_id)
         return NeverClosed()
     try:
         return Record(record=_row_record(run_id, dict(zip(_COLUMNS, row, strict=True))))

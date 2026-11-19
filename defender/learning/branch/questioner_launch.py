@@ -313,9 +313,9 @@ def _author(  # noqa: PLR0913 — the step's inputs
 
 def source_closing_of(source: Run) -> Any:
     """The source run's closing-record lookup (#1534), read before anything opens the source's
-    store as a writer: such an open creates the table an older database lacks, which would turn
-    a fault into an absence. Raising on it is `source_disposition_of`'s, later, so the launch's
-    own source checks (a source gone, a store of another version) still answer first."""
+    store as a writer: such an open creates a database where a missing one was, which would turn
+    `database-missing` into an absence. Raising on it is `source_disposition_of`'s; the launch
+    calls that at once, after only the source's tenant-stamp check."""
     from defender.records import closing
 
     return closing.for_run(source)

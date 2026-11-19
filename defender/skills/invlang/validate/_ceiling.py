@@ -368,8 +368,10 @@ def _walk_ceiling_rows(companion: CompanionBody, rows: Any) -> _CeilingWalk:
             # Silent: a row not even shaped like a receipt states nothing to price. The
             # aggregate "no receipt pays" message carries the guidance if nothing else pays.
             continue
+        # Compared as the record keeps it (`closing.treat`): rows differing only by what
+        # treatment removes are one gap.
         identity = (
-            receipt.state, receipt.ref if receipt.ref is not None else (receipt.cap or ""),
+            receipt.state, closing.treat(receipt.ref if receipt.ref is not None else (receipt.cap or ""), None),
         )
         if identity in seen:
             errors.append(

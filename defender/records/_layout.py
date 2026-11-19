@@ -609,9 +609,12 @@ _PAYLOAD_SHAPES = (
     re.compile(rf"{TICKET_READS_MARKER}/[0-9]+\.json"),
 )
 
-#: The case's answer key: the finished investigation, its disposition, and the query record.
+#: The case's answer key in a run folder: the finished investigation and the query record.
 #: The learning loop stages these into a run root that must withhold them from the reader
 #: (`permission.files.names_case_answer_key`). `alert.json` is the case input, not the key.
+#: The disposition is the closing record in the session database, outside every run folder
+#: (#1534). The file that held it before #1534 is not named: the only confined agents are the
+#: curators, and nothing, before #1534 or since, stages that file into a curator's call folder.
 CASE_ANSWER_KEY_NAMES = frozenset(
     {INVESTIGATION, SOURCE_REFS, EXECUTED_QUERIES}
 )

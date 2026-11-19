@@ -109,8 +109,8 @@ def _closing_disposition(run: Run) -> str:
     """This case's disposition cell for the trace table, from the run's closing record (#1534):
     its disposition; the unknown placeholder for a run that never closed (an in-progress run
     included); for a record that could not be looked up, the fault's fixed wording, so the row
-    reads as a fault and never as a disposition or as unknown (OD10). The lookup logs the
-    fault's detail; nothing here prints it. One bad record costs only its row. Cached per handle:
+    reads as a fault and never as a disposition or as unknown (OD10). The fault's detail is
+    shown nowhere: this CLI's log is its stderr, an outward slot (OD19). One bad record costs only its row. Cached per handle:
     `--all` asks once per lesson."""
     found = closing.for_run(run)
     if isinstance(found, closing.Record):

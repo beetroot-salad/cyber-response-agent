@@ -19,25 +19,36 @@ from ._lookup import ARM_REFUSED, ROSTER_GONE, CouldNotLook, Lookup, NeverClosed
 
 def roster_fault(episode_runs: Any) -> CouldNotLook | None:
     """`roster-gone` when the episode's arm roster is absent or refused, else `None`."""
+    found = _arms(episode_runs)
+    return found if isinstance(found, CouldNotLook) else None
+
+
+def _arms(episode_runs: Any) -> dict[str, Any] | CouldNotLook:
+    """The episode's roster, read and checked against its manifest once, or `roster-gone`."""
     try:
         arms = episode_runs.arm_ids()
     except (RunRefused, TenantRefused, OSError, ValueError) as refused:
         return fault(ROSTER_GONE, f"episode {episode_runs.episode_id}: {refused}")
     if arms is None:
         return fault(ROSTER_GONE, f"episode {episode_runs.episode_id} has no arm roster")
-    return None
+    return arms
 
 
 def for_world(episode_runs: Any, world_id: str) -> Lookup:
     """World `world_id`'s closing record through the episode view `episode_runs`: its arm's
     record, `NeverClosed`, or `CouldNotLook` (`roster-gone`, `arm-refused` or any kind the
-    run-handle route answers for the arm)."""
-    if (gone := roster_fault(episode_runs)) is not None:
-        return gone
-    try:
-        arm = episode_runs.arm_id(world_id)
-    except RunRefused as refused:
-        return fault(ROSTER_GONE, f"episode {episode_runs.episode_id}: {refused}")
+    run-handle route answers for the arm). The roster is read once, and the arm taken from that
+    read: a second read could disagree with the first."""
+    arms = _arms(episode_runs)
+    if isinstance(arms, CouldNotLook):
+        return arms
+    arm = arms.get(world_id)
+    if arm is None:
+        # A world the roster does not name: the view's own refusal, read as before.
+        try:
+            arm = episode_runs.arm_id(world_id)
+        except RunRefused as refused:
+            return fault(ROSTER_GONE, f"episode {episode_runs.episode_id}: {refused}")
     if not episode_runs.present:
         return fault(ARM_REFUSED, f"episode {episode_runs.episode_id}: the arm container is "
                                   f"{episode_runs.state} ({episode_runs.unreadable_reason or 'gone'})",

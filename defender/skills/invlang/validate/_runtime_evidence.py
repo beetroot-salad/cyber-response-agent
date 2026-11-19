@@ -154,8 +154,10 @@ def _walk_runtime_evidence_rows(companion: CompanionBody) -> _BaselineWalk:
         )
         # Deduplicated as in `_walk_ceiling_rows`: a repeat renders twice and spends the
         # column's budget twice. The identity is the whole rendered line, not the addressing cells:
-        # `anchor_id` is optional, so two measurements by one lead over one window are legal.
-        identity = tuple(_cell(row, cell) for cell in _RENDERED_BASELINE_CELLS)
+        # `anchor_id` is optional, so two measurements by one lead over one window are legal. Each
+        # cell is compared as the record keeps it (`closing.treat`), so rows that differ only by
+        # what treatment removes (an invisible character, doubled spaces) are one row.
+        identity = tuple(closing.treat(_cell(row, cell), None) for cell in _RENDERED_BASELINE_CELLS)
         if identity in seen:
             errors.append(
                 f"{where}: repeats an earlier baseline verbatim — a second copy measures "

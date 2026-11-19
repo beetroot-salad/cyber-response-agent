@@ -558,25 +558,19 @@ class JobLane:
         return api_knowledge(UNREADABLE)
 
     def closing_disposition(self, run_id: object) -> Any:
-        """The run's closing record through the job-lane route (#1534): the database its pointer's
-        case id derives (`session_database`), never the pointer's stored path. `NeverClosed` with no
-        pointer (a pre-#1235 link instead is `legacy-link`); a pointer that does not parse is
-        `pointer-unreadable`. Returns `closing.Record | NeverClosed | CouldNotLook`."""
+        """The run's closing record through the job-lane route (#1534): the pointer read through the held view, then
+        the closing lookup's own `from_pointer`, which the run-handle route uses too, with this lane's rule for the
+        database: derived from the pointer's case id, never its stored path. Returns `closing.Record | NeverClosed | CouldNotLook`."""
         from defender.records import closing
+        from defender.records.session_store import _LEGACY_LINK_NAME
 
         run_id = _run_id(run_id)
-        try:
-            located = self.session_database(run_id)
-        except CostUnreadable as bad:
-            return closing.fault(closing.POINTER_UNREADABLE, str(bad), run_id=run_id)
-        if located is None:
-            from defender.records.session_store import _LEGACY_LINK_NAME
-
-            if not self._held.view().read(PurePosixPath(str(run_id)) / _LEGACY_LINK_NAME).absent:
-                return closing.fault(closing.LEGACY_LINK, f"run {run_id} holds a pre-#1235 link and no pointer",
-                                     run_id=run_id)
-            return closing.NeverClosed()
-        return closing.read_database(located[0], str(run_id))
+        view = self._held.view()
+        where = self._paths(run_id).session_pointer()
+        return closing.from_pointer(
+            view.read(where.name), where=str(where), run_id=str(run_id),
+            locate=lambda pointer: SessionPaths(RunsBase(self._runs)).session_db(pointer.case_id),
+            legacy_link=lambda: not view.read(PurePosixPath(str(run_id)) / _LEGACY_LINK_NAME).absent)
 
     # -- cost -------------------------------------------------------------------------------------
 
@@ -592,17 +586,14 @@ class JobLane:
             if read.absent:
                 return None
             raise CostUnreadable(f"run {run_id}: its session pointer cannot be read ({read.reason})")
-        obj, unreadable = _io.load_json_artifact(read.text)
-        if unreadable is not None or not isinstance(obj, dict) or not isinstance(obj.get("case_id"), str):
-            raise CostUnreadable(f"run {run_id}: its session pointer names no case")
-        session_id = obj.get("session_id")
-        if session_id is not None and not isinstance(session_id, str):
-            raise CostUnreadable(f"run {run_id}: its session pointer names no usable session")
+        from defender.records import session_store
+
         try:
-            database = SessionPaths(RunsBase(self._runs)).session_db(obj["case_id"])
+            pointer = session_store.parse_case_pointer(read.text)
+            database = SessionPaths(RunsBase(self._runs)).session_db(pointer.case_id)
         except StoreError as bad:
-            raise CostUnreadable(f"run {run_id}: its session pointer's case id is refused: {bad}") from None
-        return database, session_id or None
+            raise CostUnreadable(f"run {run_id}: its session pointer {bad}") from None
+        return database, pointer.session_id
 
     def cost(self, run_id: object) -> RunCost:
         """What the run spent: the sum of the spend ledger's rows for this run id in the database

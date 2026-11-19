@@ -96,7 +96,11 @@ from ._tree import (
     _walk_parents as _walk_parents,
 )
 from ._pointers import (
+    CLOSING_RECORD_MARKER as CLOSING_RECORD_MARKER,
+    CasePointer as CasePointer,
+    PointerUnreadable as PointerUnreadable,
     _case_pointer as _case_pointer,
+    parse_case_pointer as parse_case_pointer,
     refuse_legacy_link as refuse_legacy_link,
     resolve_session_id as resolve_session_id,
     resolve_store_path as resolve_store_path,

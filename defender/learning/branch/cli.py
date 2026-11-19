@@ -820,12 +820,12 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
         tenant, roster = verdict.tenant, verdict.systems.roster
         runs = tenant.tenant.runs_repository()
         source = _open_launch_source(runs, ns.source_run_id)
-        # World A's declared disposition is the source's closing record (#1534), looked up first
-        # of all and refused here on any fault, with the kind's wording: a writer's open of the
-        # source's store (the fork pick, the branch clock) creates the table an older database
-        # lacks, or a database where a missing one was, which would turn a fault into an absence.
-        source_disposition = _declared_or_refused(source_closing_of(source))
         _source_stamp_agrees(source, tenant.tenant_id)
+        # World A's declared disposition is the source's closing record (#1534), refused here on
+        # any fault with the kind's wording, and looked up before any writer opens the source's
+        # store (the fork pick, the branch clock): that open creates a database where a missing
+        # one was, which would turn `database-missing` into an absence.
+        source_disposition = _declared_or_refused(source_closing_of(source))
         if lane is not None and lane.pick is not None:
             # The job's fork point (O3): picked here, once the source is open and its stamp
             # agrees, before anything is spent.
