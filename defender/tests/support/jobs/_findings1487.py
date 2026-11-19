@@ -37,9 +37,11 @@ def world_row(job: str, n: int = 0, **over: Any) -> dict[str, Any]:
 
 
 def text_of(finding: list | Any = (), questioner: list | Any = ()) -> str:
-    """The findings text object: each channel's rows under the store's kind names."""
+    """The findings text object: each channel's rows under the store's kind names, written as the entry writes it (raw
+    UTF-8, `ensure_ascii=False`: one encoding for the text and every bound)."""
     return json.dumps({FINDING: finding if not isinstance(finding, tuple) else list(finding),
-                       QUESTIONER: questioner if not isinstance(questioner, tuple) else list(questioner)})
+                       QUESTIONER: questioner if not isinstance(questioner, tuple) else list(questioner)},
+                      ensure_ascii=False)
 
 
 def ok(finding: Any = (), questioner: Any = ()) -> dict[str, Any]:
@@ -203,16 +205,19 @@ OUTAGE_FAULTS = [_closed, _interface, _pool_timeout, _invalidated]
 OUTAGE_FAULT_IDS = ["connection-closed", "interface-error", "pool-timeout", "connection-invalidated"]
 
 
-def row_of_json_bytes(row: dict[str, Any], size: int, *, compact: bool = False) -> dict[str, Any]:
-    """`row` with its `finding` text padded (ASCII) so that its JSON measures exactly `size` bytes by
+def row_of_json_bytes(row: dict[str, Any], size: int, *, compact: bool = False, filler: str = "y") -> dict[str, Any]:
+    """`row` with its `finding` text padded with `filler` (1 to 4 UTF-8 bytes; ASCII `y` takes up what a whole filler
+    cannot) so that its JSON, written as UTF-8 (`ensure_ascii=False`), measures exactly `size` bytes by
     `findings_text_bytes`: with `json.dumps`' default separators, or the compact ones."""
     from defender.records.job_lane import findings_text_bytes
 
     def measure(r: dict[str, Any]) -> int:
-        return findings_text_bytes(json.dumps(r, separators=(",", ":")) if compact else json.dumps(r))
+        return findings_text_bytes(json.dumps(r, separators=(",", ":"), ensure_ascii=False) if compact
+                                   else json.dumps(r, ensure_ascii=False))
 
     padded = dict(row, finding="")
-    padded["finding"] = "y" * (size - measure(padded))
+    budget, width = size - measure(padded), len(filler.encode())
+    padded["finding"] = filler * (budget // width) + "y" * (budget % width)
     assert measure(padded) == size, "premise: the padding measures exactly"
     return padded
 

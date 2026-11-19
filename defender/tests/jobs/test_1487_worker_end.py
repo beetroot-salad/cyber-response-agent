@@ -662,6 +662,45 @@ async def test_o2_findings_over_the_cap_are_refused_at_the_cap_not_before_and_ne
     _refused_whole(dsn, far)
 
 
+@pytest.mark.parametrize("filler", F.MULTIBYTE_FILLERS, ids=["2-byte", "3-byte", "4-byte"])
+async def test_o2_multibyte_findings_at_the_row_bound_and_the_cap_are_stored_and_one_byte_over_refuses_the_job(
+        world, filler):  # noqa: F811
+    """One encoding, UTF-8 bytes (owner, 2026-11-19), through the worker's end write: a row of 2-, 3- or 4-byte
+    characters whose JSON written as UTF-8 is exactly `FINDING_ROW_MAX_BYTES` is stored, one byte more refuses the job;
+    raw UTF-8 findings text of such characters exactly `FINDINGS_CAP_BYTES` long is stored, one byte more is refused.
+    (O2; Data model: the cap; amendment r5.1 item 2)"""
+    from defender.learning.judge.enqueue import FINDING_ROW_MAX_BYTES
+    from defender.records.job_lane import FINDINGS_CAP_BYTES, findings_text_bytes
+
+    def row_at(size):
+        def make(job):
+            row = F.row_of_json_bytes(F.defender_row(job, 0), size, filler=filler)
+            assert findings_text_bytes(json.dumps(row)) > FINDING_ROW_MAX_BYTES, "premise: over the bound in escapes"
+            return F.record(findings=F.ok([row]))
+        return make
+
+    rows_in_text = 27  # each 300 000 UTF-8 bytes, within the row bound by any measure; together just under the cap
+
+    def text_at(extra):
+        def make(job):
+            base = F.text_of([F.row_of_json_bytes(F.defender_row(job, n), 300_000, filler=filler)
+                              for n in range(rows_in_text)])
+            text = base + " " * (FINDINGS_CAP_BYTES - findings_text_bytes(base) + extra)
+            assert filler in text, "premise: the text is raw UTF-8"
+            assert "\\u" not in text, "premise: the text holds no escapes"
+            assert len(text) < FINDINGS_CAP_BYTES, "premise: within the cap in characters"
+            return F.record(findings={"state": "ok", "text": text})
+        return make
+
+    at_row, over_row, at_cap, over_cap = await _run(
+        world, [row_at(FINDING_ROW_MAX_BYTES), row_at(FINDING_ROW_MAX_BYTES + 1), text_at(0), text_at(1)], slots=4)
+    dsn = world["dsn"]
+    assert (job_row(dsn, at_row)["publish_state"], len(_stored(dsn, at_row))) == ("done", 1)
+    _refused_whole(dsn, over_row)
+    assert (job_row(dsn, at_cap)["publish_state"], len(_stored(dsn, at_cap))) == ("done", rows_in_text)
+    _refused_whole(dsn, over_cap)
+
+
 async def test_o2_a_row_and_an_id_at_their_bounds_are_stored_and_one_byte_over_refuses_the_job(world):  # noqa: F811
     """Through the worker's end write: a job whose rows are an id of exactly `FINDING_ID_MAX_BYTES` UTF-8 bytes
     (ASCII, and 2-, 3- and 4-byte characters) and a row whose JSON is exactly `FINDING_ROW_MAX_BYTES` stores all of them in

@@ -147,9 +147,10 @@ def _raw_text_of_utf8_bytes(filler: str, size: int) -> str:
 @pytest.mark.parametrize("filler", MULTIBYTE_FILLERS, ids=["2-byte", "3-byte", "4-byte"])
 @pytest.mark.parametrize("bound", ["text-cap", "row-bound"])
 def test_o2_the_findings_cap_and_the_row_bound_count_utf8_bytes_not_characters(bound, filler):
-    """Multi-byte text over a bound in UTF-8 bytes but within it in characters is refused; text at the 8 MiB cap, and a
-    row far within the row bound by any measure, are accepted. (Data model: the cap is UTF-8 bytes; amendment r5.1
-    item 2: the row bound is UTF-8 bytes of the row's JSON)"""
+    """One encoding, UTF-8 bytes, for both bounds (owner, 2026-11-19): multi-byte findings text of exactly 8 MiB parses,
+    one byte more is `over_cap`; a multi-byte row whose JSON written as UTF-8 is exactly `FINDING_ROW_MAX_BYTES` is
+    screened clean, one byte more is refused. The over cases are within the bound in characters, the at-bound row over it
+    in `\\uXXXX` escapes. (Data model: the cap; amendment r5.1 item 2: the row bound)"""
     if bound == "text-cap":
         from defender.records.job_lane import FINDINGS_CAP_BYTES, FINDINGS_OVER_CAP, parse_findings_text
 
@@ -167,15 +168,10 @@ def test_o2_the_findings_cap_and_the_row_bound_count_utf8_bytes_not_characters(b
     screen, refused = _screen()
     _, row_max = _bounds()
     row = defender_row(JOB, 0)
-    # Over in real UTF-8 bytes (so also over when non-ASCII is measured as escapes), within it in characters.
-    over = dict(row, finding=filler * (row_max // len(filler.encode()) + 1))
-    raw = json.dumps(over, ensure_ascii=False)
-    assert len(raw) <= row_max < findings_text_bytes(raw), "premise: within the bound in characters, over it in bytes"
-    assert findings_text_bytes(json.dumps(over)) > row_max, "premise: over it with escapes too"
+    at = row_of_json_bytes(row, row_max, filler=filler)
+    over = row_of_json_bytes(row, row_max + 1, filler=filler)
+    assert findings_text_bytes(json.dumps(at)) > row_max, "premise: the at-bound row is over the bound in escapes"
+    assert len(json.dumps(over, ensure_ascii=False)) <= row_max, "premise: the over row is within it in characters"
+    screen("finding", [at], JOB)
     with pytest.raises(refused):
         screen("finding", [over], JOB)
-    # Far within the bound whether non-ASCII is measured as UTF-8 bytes or as escapes: accepted.
-    under = dict(row, finding=filler * (row_max // 24))
-    assert max(findings_text_bytes(json.dumps(under)), findings_text_bytes(json.dumps(under, ensure_ascii=False))) \
-        < row_max, "premise: within the bound by either measure"
-    screen("finding", [under], JOB)

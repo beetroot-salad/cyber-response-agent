@@ -8,7 +8,7 @@ import json
 import pytest
 
 from defender.tests.learning.branch.test_1344_job_lane import choose, run_entry, sink_files
-from defender.tests.support.jobs._findings1487 import FINDING, QUESTIONER, defender_row, world_row
+from defender.tests.support.jobs._findings1487 import FINDING, MULTIBYTE_FILLERS, QUESTIONER, defender_row, world_row
 
 
 def _holding(defender=1, questioner=1, *, after=None):
@@ -118,6 +118,49 @@ def test_p4_held_findings_over_the_cap_read_over_cap_with_no_text(tmp_path):
     found = _findings(run_entry(tmp_path, grade=grade))
     assert found["state"] == "over_cap", found
     assert "text" not in found
+
+
+@pytest.mark.parametrize("filler", MULTIBYTE_FILLERS, ids=["2-byte", "3-byte", "4-byte"])
+@pytest.mark.parametrize("size", ["within-the-cap-in-utf8", "over-the-cap-in-utf8"])
+def test_p4_non_ascii_rows_travel_unescaped_and_count_their_utf8_bytes_toward_the_cap(tmp_path, filler, size):
+    """Held rows of 2-, 3- or 4-byte characters travel in the end record's findings text as the raw characters, never
+    `\\uXXXX` escapes, and count their UTF-8 bytes toward the 8 MiB cap: about 6 MiB of them (over the cap were they
+    escaped) is `ok` with the rows as held; about 9 MiB is `over_cap`. One encoding, UTF-8 bytes (owner, 2026-11-19).
+    (P4, Data model: the cap; Flow 1 step 1)"""
+    from defender.records.job_lane import FINDINGS_CAP_BYTES, findings_text_bytes
+
+    count = {"within-the-cap-in-utf8": 7, "over-the-cap-in-utf8": 10}[size]
+    per_row = 900_000 // len(filler.encode())  # 900 000 UTF-8 bytes of characters a row, within the row bound
+
+    def rows(job):
+        return [dict(defender_row(job, n), finding=filler * per_row) for n in range(count)]
+
+    def grade(runs, episode_id, **kw):
+        from defender.learning.core.state import FINDINGS
+        from defender.learning.judge import grade_episode
+        from defender.learning.judge.enqueue import EpisodeFindings
+
+        graded = grade_episode(runs, episode_id, **kw)
+        with runs.episode_files(episode_id) as episode:
+            EpisodeFindings(episode).append(FINDINGS, rows(str(episode_id)), dedup_key="finding_id")
+        return graded
+
+    ran = run_entry(tmp_path, grade=grade)
+    held = {FINDING: rows(ran.ep.name), QUESTIONER: []}
+    raw, escaped = (findings_text_bytes(json.dumps(held, ensure_ascii=ascii_)) for ascii_ in (False, True))
+    found = _findings(ran)
+    if size == "over-the-cap-in-utf8":
+        assert raw > FINDINGS_CAP_BYTES, "premise: over the cap in UTF-8 bytes"
+        assert found["state"] == "over_cap", found.get("state")
+        assert "text" not in found
+        return
+    assert raw < FINDINGS_CAP_BYTES < escaped, "premise: within the cap in UTF-8 bytes, over it in escapes"
+    assert found["state"] == "ok", found.get("state")
+    text = found["text"]
+    assert filler in text, "the findings text does not hold the raw characters"
+    assert "\\u" not in text, "the findings text holds \\uXXXX escapes"
+    assert findings_text_bytes(text) < FINDINGS_CAP_BYTES
+    assert json.loads(text) == held
 
 
 def test_flow1_an_ending_other_than_completed_carries_no_held_rows(tmp_path):
