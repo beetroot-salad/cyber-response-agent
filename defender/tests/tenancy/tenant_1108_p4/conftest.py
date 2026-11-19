@@ -59,10 +59,12 @@ def _short_roots_removed() -> Iterator[None]:
 
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     """A case that requests `tick_impl` and drives the tick (it has the `world`) runs over each implementation, unless it
-    is marked `own_store`: that one runs once, over the adapter."""
+    is marked `own_store`: that one runs once, over the adapter. A module that names `ONLY_TICK_IMPLS` runs its cases over
+    those implementations alone: one slice of a case too slow for one file (each file runs on one worker), its other
+    implementations in a sibling module."""
     if ("tick_impl" in metafunc.fixturenames and "world" in metafunc.fixturenames
             and not hasattr(metafunc.function, "own_store")):
-        metafunc.parametrize("tick_impl", TICK_IMPLS, indirect=True)
+        metafunc.parametrize("tick_impl", getattr(metafunc.module, "ONLY_TICK_IMPLS", TICK_IMPLS), indirect=True)
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:

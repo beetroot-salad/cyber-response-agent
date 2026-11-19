@@ -22,6 +22,10 @@ from defender.tests.tenancy.tenant_1108_p4 import test_1278_feedback as _1278_fe
 
 pytestmark = [pytest.mark.postgres, pytest.mark.usefixtures("tick_impl")]  # the tick over each store implementation (conftest)
 
+#: The adapter's cases only: each port case is too slow to share a file (one worker), so each has a sibling of its own
+#: (`..._reviews.py`, `..._pull.py`), holding this function over its one slice (conftest `ONLY_TICK_IMPLS`).
+ONLY_TICK_IMPLS = ("adapter",)
+
 world = _1278_feedback.world  # the fixture, from `test_1278_feedback`
 
 # --- H15 counting: every status the forge can answer, against a model of the design's rule ------------------------------
