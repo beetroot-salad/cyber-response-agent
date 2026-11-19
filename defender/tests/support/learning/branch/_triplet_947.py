@@ -11,7 +11,7 @@ import os
 import re
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -214,6 +214,14 @@ class FakeAgent:
         if not self.replies:
             raise AssertionError(f"FakeAgent ran out of replies at call {len(self.prompts)}")
         reply = self.replies.pop(0)
+        # #1579: a typed seam returns (accepted mapping, request count). A scripted mapping is
+        # an answer accepted at its first request; a scripted tuple names its own count; a
+        # scripted exception is the call's ending (`ReplyUnusable`, `RunUnprocessable`). A str
+        # is returned as-is: the comparator's seam still answers in text.
+        if isinstance(reply, BaseException):
+            raise reply
+        if isinstance(reply, Mapping):
+            return (dict(reply), 1)
         return reply
 
     @property
