@@ -9,6 +9,8 @@ from defender.tests.support.learning.branch import _triplet_947 as T
 
 import json
 
+import re
+
 import pytest
 
 from defender.records._episode_handle import Episode
@@ -329,3 +331,23 @@ def test_921_the_lesson_commit_is_pinned_once_per_pass_and_allow_dirty_is_a_cave
     lessons = _lessons_view(J.render_at(dirty, "b", git_show=J.FakeGitShow(bodies={})))
     assert "dirty" in lessons.lower(), (
         "an allow_dirty family's lesson view claims a reproducibility it does not have")
+
+
+@pytest.mark.parametrize("confidence", ["high", "medium", "low"])
+def test_1545_a_benign_records_confidence_is_not_in_the_judges_prompt(tmp_path, confidence):
+    """The judged world's benign record carrying a confidence renders exactly the prompt the same episode renders with
+    none (owner ruling: the confidence is not in the judge prompt). (#1545 over #1534)"""
+    def prompt(kind: str, **more) -> str:
+        ep = J.accepted_episode(tmp_path / kind, dispositions={"a": "benign", "b": "benign", "c": "malicious"},
+                                ledgers={"b": [J.oracle_row("b")], "c": []})
+        J.set_closing(ep, "b", disposition="benign", **more)
+        # The frames' nonce is drawn per render: two renders differ only there, so it is normalized.
+        return re.sub(r"run-[0-9a-f]{16}-", "run-<nonce>-", _world_prompt(ep).replace(str(tmp_path / kind), "<root>"))
+
+    with_confidence, without = prompt("with", confidence=confidence), prompt("without")
+    assert "committed disposition: benign" in without, "premise: the judged world's record is in its prompt"
+    import difflib
+
+    assert with_confidence == without, "the confidence changed the judge's prompt: " + "\n".join(
+        line for line in difflib.unified_diff(without.splitlines(), with_confidence.splitlines(), lineterm="")
+        if line[:1] in "+-")

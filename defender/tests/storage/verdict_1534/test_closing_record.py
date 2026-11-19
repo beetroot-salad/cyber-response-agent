@@ -637,3 +637,80 @@ def test_v_look_a_stored_row_outside_the_vocabulary_or_breaking_the_invariant_is
     V.corrupt(database, run_dir.name, column, value)
 
     _assert_fault(C.for_run(V.handle(run_dir)), "row-invalid", database)
+
+
+# --- #1545 over #1534: a benign close's committed confidence ---------------------------------------------------------
+# Owner ruling: the record carries a nullable `confidence`, set only beside `benign` and only to a `CONFIDENCE_VALUES`
+# member; the record type refuses anything else, so a stored row that breaks it reads `row-invalid`.
+
+def _standing(disposition: str) -> dict:
+    from defender.records import closing as C
+
+    cause = {"unresolved": C.CAUSE_NOT_REVIEWED, "inconclusive": C.CAUSE_CEILING_EXAMINED}.get(
+        disposition, C.CAUSE_STORY_SETTLED)
+    return {"outcome": C.STANDS, "cause": cause, "failure_kind": None, "draft": None, "disposition": disposition}
+
+
+def test_v_fields_a_confidence_builds_exactly_beside_benign_and_only_from_the_vocabulary():
+    """Every disposition x (none, each `CONFIDENCE_VALUES` member, values outside it): the record builds exactly when the
+    confidence is none, or a member beside `benign`; a forced close of a benign draft carries none. (V-FIELDS, #1545)"""
+    from defender._vocab import BENIGN_DISPOSITION, CONFIDENCE_VALUES, DISPOSITION_VALUES
+    from defender.records import closing as C
+
+    assert BENIGN_DISPOSITION in DISPOSITION_VALUES
+    wrong = []
+    for disposition in DISPOSITION_VALUES:
+        for confidence in (None, *CONFIDENCE_VALUES, "certain", "", CONFIDENCE_VALUES[0].upper(), f" {CONFIDENCE_VALUES[0]}"):
+            want = confidence is None or (disposition == BENIGN_DISPOSITION and confidence in CONFIDENCE_VALUES)
+            try:
+                built = _record(**_standing(disposition), confidence=confidence)
+            except ValueError:
+                built = None
+            if (built is not None) != want:
+                wrong.append((disposition, confidence, "built" if built is not None else "refused"))
+            elif built is not None:
+                assert built.confidence == confidence
+    assert wrong == []
+    forced = {"outcome": C.FORCED_INCONCLUSIVE, "cause": C.CAUSE_EVIDENCE_CANNOT_DISCRIMINATE, "failure_kind": None,
+              "draft": BENIGN_DISPOSITION, "disposition": "unresolved"}
+    assert _record(**forced).confidence is None
+    with pytest.raises(ValueError, match="confidence"):
+        _record(**forced, confidence=CONFIDENCE_VALUES[0])
+
+
+@pytest.mark.parametrize("confidence", ["high", "medium", "low"])
+def test_v_look_a_benign_records_confidence_reads_back_through_the_lookup(tmp_path, confidence):
+    """A benign record with each confidence reads back as `Record` with that confidence, equal to what was written; one
+    with none reads none. (V-LOOK, #1545)"""
+    from defender._vocab import CONFIDENCE_VALUES
+    from defender.records import closing as C
+
+    assert set(CONFIDENCE_VALUES) == {"high", "medium", "low"}, "the parametrization follows the vocabulary"
+    run_dir, _db = V.closed_run(tmp_path, {"disposition": "benign", "confidence": confidence})
+    got = C.for_run(V.handle(run_dir))
+    assert isinstance(got, C.Record), got
+    assert got.record.confidence == confidence
+    assert got.record == V.a_record(run_dir.name, disposition="benign", confidence=confidence)
+
+    bare, _db = V.closed_run(tmp_path / "bare", {"disposition": "benign"})
+    got = C.for_run(V.handle(bare))
+    assert isinstance(got, C.Record), got
+    assert got.record.confidence is None
+
+
+@pytest.mark.parametrize(("disposition", "stored"), [
+    ("benign", "certain"), ("benign", "HIGH"), ("benign", ""), ("malicious", "high"), ("unresolved", "low")],
+    ids=["off-vocabulary", "wrong-case", "empty", "beside-malicious", "beside-unresolved"])
+def test_v_look_a_stored_confidence_the_record_refuses_is_row_invalid(tmp_path, disposition, stored):
+    """The `confidence` column of a valid row set outside the vocabulary, or set at all beside another disposition,
+    reads `row-invalid`; the uncorrupted row reads `Record`. (V-LOOK, #1545)"""
+    from defender.records import closing as C
+
+    fields = {"disposition": disposition, **({"cause": C.CAUSE_NOT_REVIEWED, "summary": "cut short"}
+                                            if disposition == "unresolved" else {})}
+    run_dir, database = V.closed_run(tmp_path, fields)
+    assert isinstance(C.for_run(V.handle(run_dir)), C.Record), "premise: the uncorrupted row reads"
+
+    V.corrupt(database, run_dir.name, "confidence", stored)
+
+    _assert_fault(C.for_run(V.handle(run_dir)), "row-invalid", database)

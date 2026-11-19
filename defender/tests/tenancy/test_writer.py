@@ -206,6 +206,31 @@ def test_767_the_summary_is_not_in_the_comment(tmp_path, monkeypatch):
     assert V.MARKUP_SUMMARY not in store.wire_body()
 
 
+@pytest.mark.parametrize("confidence", ["high", "medium", "low"])
+def test_1545_a_benign_records_confidence_is_not_in_the_comment(tmp_path, monkeypatch, confidence):
+    """A benign record carrying a confidence posts exactly the comment the same run posts with none: the word and the
+    link (#1471 P-6; owner ruling: the confidence is not on the ticket). (#1545 over #1534)"""
+    from defender.records import closing as C
+
+    _setup(monkeypatch, tmp_path)
+
+    def posted(kind: str, **more) -> str:
+        run_dir = tmp_path / kind / fixture_uuid("run-1545")
+        run_dir.mkdir(parents=True)
+        R.plant_run(run_dir, {**R.valid_fields("benign"), **more}, sessions_base=run_dir.parent)
+        plant_alert(run_dir, ALERT, mapping=ALERT_MAPPING)
+        looked = C.for_run(_run_handle_1165(run_dir))
+        assert isinstance(looked, C.Record), looked
+        assert looked.record.confidence == more.get("confidence"), "premise: the record holds the confidence"
+        store = _store(tmp_path / kind)
+        _record_linked(run_dir, store, _P6_LINK)
+        return store.wire_body()
+
+    with_confidence, without = posted("with", confidence=confidence), posted("without")
+    assert with_confidence == without, "the confidence changed the comment"
+    assert without.endswith(f"benign\n{_P6_LINK}"), without
+
+
 def _record_linked(run_dir, store, link: str) -> None:
     """Drive `record_case_ticket` with `link` (C-7), whatever link the shared driver defaults to."""
     ticket_writer.record_case_ticket(

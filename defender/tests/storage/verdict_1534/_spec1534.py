@@ -119,7 +119,7 @@ def scalar_rows(database: Path, run_id: str) -> list[tuple]:
 
 def corrupt(database: Path, run_id: str, column: str, value: Any) -> None:
     """Set one scalar column of `run_id`'s stored row to `value` (an out-of-vocabulary or invariant-breaking row)."""
-    assert column in SCALAR_COLUMNS, column
+    assert column in (*SCALAR_COLUMNS, "confidence"), column
     conn = sqlite3.connect(database, timeout=30)
     try:
         conn.execute("PRAGMA ignore_check_constraints = ON")  # reach the reader's own check, not the schema's

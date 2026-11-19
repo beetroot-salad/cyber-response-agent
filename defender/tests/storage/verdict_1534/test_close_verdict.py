@@ -5,6 +5,7 @@ Entry: the real close (`_spec923.close`) over MAIN deps from `_spec1534.closing_
 forced close (`_spec1534.drive_forced_close`). Read back through the run-handle lookup (`closing.for_run`)."""
 from __future__ import annotations
 
+import re
 import threading
 import time
 
@@ -573,3 +574,66 @@ def test_v_nofile_the_layout_no_longer_names_report_md():
     from defender.records import RUN_LAYOUT
 
     assert not hasattr(RUN_LAYOUT, "report")
+
+
+# --- #1545 over #1534: the close records the confidence it committed --------------------------------------------------
+
+def _benign_doc(route: str, stated: str | None) -> str:
+    """A benign companion whose record earns a known ceiling (#1545, `test_benign_confidence`'s scenes), the model stating
+    `stated`: `authorized` earns medium, `authorized+baseline` high, `searched-empty` low."""
+    from defender.tests.invlang.validation import test_benign_confidence as T
+
+    if route == "searched-empty":
+        return T._doc(T._exhausted_rows(), confidence=stated, attacker_gain="none")
+    return T._doc(scene.authorized_rows(baseline=route == "authorized+baseline"), confidence=stated)
+
+
+@pytest.mark.parametrize(("route", "stated", "committed"), [
+    ("authorized", "high", "medium"),
+    ("authorized+baseline", "high", "high"),
+    ("authorized+baseline", "low", "low"),
+    ("searched-empty", "high", "low"),
+], ids=["record-caps-the-model", "both-high", "model-claims-less", "no-record-route"])
+def test_1545_a_benign_close_records_the_confidence_it_committed_not_the_one_the_model_stated(
+        tmp_path, route, stated, committed):
+    """A reviewed benign close that stands records the lower of the model's confidence and the record's ceiling, read
+    back through the lookup; where the two differ, the stated one is not what is kept. (#1545, owner ruling)"""
+    from defender.records import closing as C
+
+    done = B.close_run(tmp_path, "benign", _benign_doc(route, stated))
+
+    assert (done.record.disposition, done.record.outcome) == ("benign", C.STANDS), done.record
+    assert done.record.confidence == committed, done.record
+
+
+@pytest.mark.parametrize("disposition", [d for d in DISPOSITION_VALUES if d not in (HOST, "benign")])
+def test_1545_a_close_of_another_disposition_records_no_confidence_though_the_model_stated_one(tmp_path, disposition):
+    """A model close of any disposition but benign records no confidence, though its `conclude` states one. (#1545)"""
+    doc = S.pays_every_price(disposition)
+    assert re.search(r"^confidence\s+high$", doc, re.M), "premise: the close states a confidence"
+
+    done = B.close_run(tmp_path, disposition, doc)
+
+    assert done.record.disposition == disposition, done.record
+    assert done.record.confidence is None, done.record
+
+
+def test_1545_an_overridden_benign_draft_and_the_hosts_forced_close_record_no_confidence(tmp_path):
+    """A benign draft the review could not finish commits `unresolved` with no confidence (the draft's earned one is
+    not kept), and the host's forced close over the same document records none. Control: the same document's benign
+    close that stands records its confidence. (#1545)"""
+    from defender.records import closing as C
+
+    doc = _benign_doc("authorized+baseline", "high")
+    control = B.close_run(tmp_path / "control", "benign", doc)
+    assert control.record.confidence == "high", "control: the document's benign close records a confidence"
+
+    broken = B.close_run(tmp_path / "broken", "benign", doc,
+                         stages=S9.recording(faults={"composer": S9.raises(RuntimeError("down"))}))
+    assert (broken.record.disposition, broken.record.outcome, broken.record.drafted_disposition) == (
+        HOST, C.FORCED_INCONCLUSIVE, "benign"), broken.record
+    assert broken.record.confidence is None, broken.record
+
+    forced = B.forced_close(tmp_path / "forced", doc)
+    assert forced.record.disposition == HOST, forced.record
+    assert forced.record.confidence is None, forced.record

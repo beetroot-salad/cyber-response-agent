@@ -1088,6 +1088,26 @@ def test_1534_an_overridden_close_shows_the_review_status_and_the_drafted_dispos
     assert "gate-forced" not in control
 
 
+@pytest.mark.parametrize("confidence", ["high", "medium", "low"])
+def test_1545_a_benign_close_shows_its_committed_confidence_and_a_close_without_one_shows_none(
+        tmp_path, monkeypatch, confidence):
+    """The run page's headline shows a benign record's confidence; the same benign record with none shows no
+    confidence word. (#1545 over #1534, V-PAGE)"""
+    import re
+
+    from defender._vocab import CONFIDENCE_VALUES
+    from defender.tests.support.storage import _readers1534 as R
+
+    assert confidence in CONFIDENCE_VALUES
+    headline = _closing_headline(_page_of(tmp_path, monkeypatch, {**R.valid_fields("benign"), "confidence": confidence}))
+    control = _closing_headline(_page_of(tmp_path / "control", monkeypatch, R.valid_fields("benign")))
+    assert "disp-badge disp-benign" in headline
+    assert "disp-badge disp-benign" in control
+    assert re.search(rf"\b{confidence}\b", headline), f"the page does not show the confidence {confidence!r}"
+    assert not any(re.search(rf"\b{c}\b", control) for c in CONFIDENCE_VALUES), (
+        "positive control: a record with no confidence shows none")
+
+
 def test_1534_a_failed_review_shows_its_failure_kind(tmp_path, monkeypatch):
     """A review that could not finish: the gate badge carries the failure kind, as the report's frontmatter did. (V-PAGE)"""
     from defender.records import closing as C
