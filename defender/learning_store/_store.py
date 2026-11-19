@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from defender.database import async_engine, newest_first_query, sessions
 from defender.jobs.errors import Conflict, NotFound
+from defender.jobs.learning_check import arm_learning_check
 from defender.records.formats import BatchId, CommitId, TenantId, WorkItemId
 from defender.records.learning_causes import BatchCause, ItemCause, Why
 from defender.tenancy.models import TenantRecord
@@ -41,7 +42,6 @@ from defender.jobs.learning_models import (
     WorkItemRow,
     insert_findings,
     refuse_unholdable,
-    refuse_unkeyed,
 )
 
 #: The epoch: the expiry a released batch's lease carries, so the store's one lapsed test selects it whatever the grace.
@@ -435,12 +435,11 @@ class LearningStore(FeedbackVerbs):
                                kind: str) -> tuple[int, int]:
         """Queue `rows` as `kind`: `(added, duplicates)`. A finding id is unique for good (O14). The insert is the
         worker's own (`jobs.learning_models.insert_findings`): whatever it refuses is `ItemRefused` with nothing of
-        the call stored; an outage propagates."""
+        the call stored; an outage propagates, and so does `FindingsNotStored` (an insert error neither the rows nor an
+        outage explains). The rows are screened there, once; only `run_id` is screened here."""
         if LANE_OF.get(kind) != AUTHOR_LANE:
             raise ValueError(f"not a findings kind: {kind}")
-        refuse_unholdable([run_id, *rows])
-        for row in rows:
-            refuse_unkeyed(row)
+        refuse_unholdable(run_id)
         async with self._sessions.begin() as s:
             await self._require_active(s, tenant)
             inserted = await insert_findings(s, tenant, {kind: rows}, source_run=run_id)
@@ -824,7 +823,8 @@ class LearningStore(FeedbackVerbs):
         """A person's release: a held item starts afresh (every count at 0: attempts, deferrals and curator declines; cause
         and detail cleared) and waits again, or is skipped as superseded when a fresher request for its case already
         waits. `NotFound` for an item not
-        the tenant's; `Conflict` naming its status when it is not held."""
+        the tenant's; `Conflict` naming its status when it is not held. The release wakes the tenant's check clock in the
+        same transaction (#1487 Amendment r5.3): a held item kept none running."""
         async with self._sessions.begin() as s:
             await _settle_requests(s, tenant)
             row = (await s.execute(select(_I).where(_I.c.tenant_id == TenantId(tenant), _I.c.id == WorkItemId(item_id))
@@ -837,6 +837,7 @@ class LearningStore(FeedbackVerbs):
                                                     _I.c.item_key == row.item_key)
                                    .values(**_to_waiting(), **_FRESH_COUNTS, updated_at=func.now())
                                    .returning(_I.c.status))).scalar_one()
+            await arm_learning_check(s, tenant, mark_held=True)
             return Acted(id=str(row.id), state=now, cause=row.cause, detail=row.reason)
 
     async def release_batch(self, tenant: str, batch_id: str, *, actor: str) -> Acted:
@@ -845,7 +846,8 @@ class LearningStore(FeedbackVerbs):
         already lapsed, so the next recovery pass takes it over as it would a crashed holder's batch. A pending abandon
         request is withdrawn: the release is the person's later word (and the way out of a request the forge never lets
         settle). `NotFound`; `Conflict` for a batch not parked, parked for another cause, or while another batch is
-        working on its lane."""
+        working on its lane. The release wakes the tenant's check clock in the same transaction (#1487 Amendment r5.3):
+        the parked batch kept none running."""
         try:
             async with self._sessions.begin() as s:
                 row = await self._parked_batch(s, tenant, batch_id)
@@ -864,6 +866,7 @@ class LearningStore(FeedbackVerbs):
                     values = {**cleared, "phase": "working", "lease_owner": f"released:{actor}", "lease_expiry": _EPOCH,
                               "fencing_token": row.fencing_token + 1}
                 await s.execute(update(_B).where(_B.c.id == row.id).values(**values))
+                await arm_learning_check(s, tenant, mark_held=True)
                 return Acted(id=str(row.id), state=values["phase"], cause=row.cause, detail=row.reason)
         except IntegrityError as raced:
             if _violates(raced, "batches_one_"):
@@ -873,7 +876,9 @@ class LearningStore(FeedbackVerbs):
     async def request_abandon(self, tenant: str, batch_id: str, *, actor: str) -> AbandonAsked:
         """A person asks for a parked batch to be abandoned. Only the request is recorded: what the batch's PR is on the
         forge is the loop's to read, and it ends the batch (`settle_abandon`); a release withdraws it first. `NotFound`;
-        `Conflict` for a batch not parked or already requested."""
+        `Conflict` for a batch not parked or already requested. The request wakes the tenant's check clock in the same
+        transaction (#1487 Amendment r5.3): a parked batch keeps no clock running, so the request is what brings a tick
+        to carry it out."""
         async with self._sessions.begin() as s:
             row = await self._parked_batch(s, tenant, batch_id)
             if row.abandon_requested_at is not None:
@@ -881,6 +886,7 @@ class LearningStore(FeedbackVerbs):
             at = (await s.execute(update(_B).where(_B.c.id == row.id).values(
                 abandon_requested_at=func.clock_timestamp(), abandon_requested_by=actor)
                 .returning(_B.c.abandon_requested_at))).scalar_one()
+            await arm_learning_check(s, tenant, mark_held=True)
             return AbandonAsked(id=str(row.id), state="needs_person", cause=row.cause, detail=row.reason, at=at)
 
     async def _parked_batch(self, s: AsyncSession, tenant: str, batch_id: str) -> Any:

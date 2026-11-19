@@ -47,12 +47,14 @@ def thresholds_of(finding_at: int = 1) -> dict[str, int]:
 def waiting_of(dsn: str, tenant: str, *, finding_at: int = 1) -> bool:
     """`work_waiting` over the tick's store as the helper binds it: an adapter over a store of its own, bound to the
     tenant, the author lane and the thresholds handed in."""
+    from defender.learning.core.drains import AUTHOR_DRAIN_RECONCILES
     from defender.learning_store import blocking
     from defender.learning_store.tick import StoreAdapter, work_waiting
 
     with blocking(dsn) as store:
         return work_waiting(StoreAdapter(store, tenant=tenant, lane=AUTHOR_LANE, owner="post-step:test",
-                                         thresholds=thresholds_of(finding_at)))
+                                         thresholds=thresholds_of(finding_at)), AUTHOR_LANE,
+                            reconcile_lanes=AUTHOR_DRAIN_RECONCILES)
 
 
 def test_a1_without_a_job_the_argv_parses_as_a_family_less_post_step():
@@ -191,14 +193,14 @@ def test_o7_flow3_the_thresholds_are_those_its_store_was_bound_to(migrated_datab
 @pytest.mark.parametrize(("settled", "waiting"), [(False, True), (True, False)], ids=["abandon-asked", "abandon-settled"])
 def test_o7_flow3_another_lanes_batch_a_person_asked_to_abandon_keeps_work_waiting(  # noqa: F811 — the imported fixture
         migrated_database, settled, waiting):  # noqa: F811
-    """A lead-lane batch a person asked to abandon is a batch not yet ended, so work waits though the predicate is bound
-    to the author lane; once a tick has carried the abandon out, nothing waits. Since #1537 no ended batch is left for a
-    tick to close, so the lanes the tick reconciles add nothing a not-ended batch does not. (O7, Flow 3)"""
+    """A lead-lane batch a person asked to abandon is work for the post-step's author tick, which settles requests on
+    every lane it reconciles, though the predicate is bound to the author lane; once a tick has carried the abandon out,
+    nothing waits. (O7, Flow 3, #1537 O3)"""
     _abandon_asked(migrated_database, TENANT, LEAD_LANE, settled=settled)
     assert waiting_of(migrated_database, TENANT) is waiting
 
 
-# --- Wake: every batch not yet ended, whatever its lane and phase ---------------------------------------------------------
+# --- Wake: a batch a post-step's tick can move (Amendment r5.3) -----------------------------------------------------------
 
 
 def _lane_batch(dsn: str, tenant: str, lane: str, phase: str) -> None:
@@ -230,15 +232,22 @@ WAKE_LANES = ("author", "lead_author", "revert", "feedback")
 WAKE_PHASES = ("working", "in_review", "needs_person")
 
 
+#: The author lane's own batches (a revert batch is the author lane's) can be recovered by a post-step's tick.
+_OWN_LANE = {"author", "revert"}
+
+
 @pytest.mark.parametrize("lane", WAKE_LANES)
 @pytest.mark.parametrize("phase", WAKE_PHASES)
-def test_o7_flow3_a_batch_of_any_lane_in_any_phase_but_ended_makes_the_predicate_true(migrated_database, lane, phase):  # noqa: F811
-    """With nothing else queued and every threshold above what exists, a not-yet-ended batch of any lane, working, in
-    review or waiting for a person, keeps the tenant waiting: its lease, PR or release may still change what a tick must
-    do. (O7, Flow 3, Wake)"""
+def test_r53_a_batch_wakes_exactly_when_a_post_steps_tick_can_move_it(migrated_database, lane, phase):  # noqa: F811
+    """With nothing else queued and every threshold above what exists: a working batch of the author lane (its lease may
+    lapse into a take-over) and an in-review batch of any lane (its PR may change) keep the tenant waiting. A working
+    batch of another lane is its own drain's, and a batch waiting for a person with no request is no tick's to move:
+    neither keeps a clock running; a person's request or release wakes the tenant instead. (O7, Flow 3, Wake,
+    Amendment r5.3)"""
     _lane_batch(migrated_database, TENANT, lane, phase)
 
-    assert waiting_of(migrated_database, TENANT, finding_at=5) is True
+    waits = phase == "in_review" or (phase == "working" and lane in _OWN_LANE)
+    assert waiting_of(migrated_database, TENANT, finding_at=5) is waits
 
 
 def test_wake_the_lanes_and_phases_above_are_every_one_the_schema_allows(migrated_database):  # noqa: F811 — the imported fixture

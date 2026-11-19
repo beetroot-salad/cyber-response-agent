@@ -333,11 +333,13 @@ async def insert_findings(s: AsyncSession, tenant: str, channels: Mapping[str, S
     """Insert, in the transaction `s` is in, each channel's rows (`{kind: rows}`, author-lane kinds) as
     `waiting` items of `tenant` from `source_run`, all under one savepoint: every row is stored, or, refused, none of
     any channel (the savepoint rolled back, the transaction usable). The caller holds the tenant's state for the
-    transaction. Refused: a row PostgreSQL could never hold or with no finding id (`refuse_unholdable`,
-    `refuse_unkeyed`); an error of SQLSTATE class 22, 23 or 54; any other `Exception` that is not an outage (a
-    deterministic database error such as a missing permission, or a fault in this code), logged. An outage
+    transaction. Refused, for their content: a row PostgreSQL could never hold, with no finding id, or that the screens
+    cannot read (`refuse_unholdable`, `refuse_unkeyed`); an error of SQLSTATE class 22, 23 or 54. An outage
     (`jobs.is_outage`: a lost connection, deadlock, lock timeout, cancel, full disk) propagates, for the caller to
-    retry whole. A `BaseException` (a cancellation) is never caught."""
+    retry whole. Any other `Exception` at the insert (a deterministic database error such as a missing permission, or
+    a fault in this code) says nothing about the findings: it is `FindingsNotStored`, raised from it, which the
+    worker retries in place as it does an outage (#1487 Amendment r5.3). A `BaseException` (a cancellation) is never
+    caught."""
     for kind in channels:
         if LANE_OF.get(kind) != AUTHOR_LANE:
             raise ValueError(f"not a findings kind: {kind}")
@@ -379,7 +381,9 @@ def _findings_insert(tenant: str, kind: str, rows: Sequence[Mapping[str, Any]], 
 
 
 def _refusal_of(fault: Exception) -> str:
-    """The refusal `fault` makes of an insert, in P4's order; an outage is raised again."""
+    """The refusal `fault` makes of an insert, in P4's order: content refuses; an outage is raised again; anything else
+    is `FindingsNotStored`, raised from it."""
+    from defender.jobs.errors import FindingsNotStored
     from defender.jobs.store import is_outage
 
     code = _sqlstate(fault)
@@ -387,9 +391,8 @@ def _refusal_of(fault: Exception) -> str:
         return f"the database refused a finding (SQLSTATE {code})"
     if is_outage(fault):
         raise fault
-    _logger.error("storing findings failed with %s, which waiting cannot cure; they are refused", type(fault).__name__,
-                  exc_info=fault)
-    return f"storing the findings failed ({type(fault).__name__}" + (f", SQLSTATE {code})" if code else ")")
+    raise FindingsNotStored(f"storing the findings failed ({type(fault).__name__}"
+                            + (f", SQLSTATE {code})" if code else ")")) from fault
 
 
 def _sqlstate(fault: BaseException) -> str | None:

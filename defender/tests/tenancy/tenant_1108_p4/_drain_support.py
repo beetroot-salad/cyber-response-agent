@@ -217,7 +217,7 @@ def author_drain(t: Any, paths: Any, *, trigger: Any, box: BoxSpy, mint: bool = 
     a fresh identity over its issuer fake (login skipped) unless the case passes others; `directory=`
     is `t.directory` (#1214 Flow 4: the tenant is admitted from the directory) unless the case passes one. The tick's store
     is `tick_store`'s: the adapter, or (the case run over `conftest.tick_impl`'s `port`) the port over a real helper. The
-    store is bound inside the stage, as the host entry binds it (`cli._host_author_drain` under `_run_stage`): a refusal
+    store is bound inside the stage, as the host entry binds it (`drains._store_tick` under `_run_stage`): a refusal
     while binding it (a malformed threshold) is the stage's exit 2, not an exception out of the runner."""
     seams.setdefault("client", t.forge.client)
     seams.setdefault("directory", t.directory)

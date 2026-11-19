@@ -1,6 +1,7 @@
 """#1487 (design r5, Data model): the finding insert moves down into `jobs`, and the operator lane's
-`publish_findings` raises `ItemRefused` (with the refusal's message) whenever the shared insert reports `refused`,
-whatever its class (amendment r5.1 item 7); an outage still propagates. Real database."""
+`publish_findings` raises `ItemRefused` (with the refusal's message) whenever the shared insert reports `refused` for
+the findings' content (amendment r5.1 item 7); an outage still propagates, and so does an error that neither the
+content nor an outage explains, as `FindingsNotStored` (Amendment r5.3). Real database."""
 from __future__ import annotations
 
 import pytest
@@ -24,9 +25,8 @@ def _rows():
 
 
 @pytest.mark.parametrize("sqlstate", F.REFUSED_SQLSTATES)
-def test_an_error_the_database_gives_at_the_insert_that_waiting_cannot_cure_raises_item_refused_and_stores_none(
-        dsn, sqlstate):
-    """The worker's refusal set (data 22, integrity 23, limits 54, permission 42501), at the second row: `ItemRefused`
+def test_an_error_the_content_causes_at_the_insert_raises_item_refused_and_stores_none(dsn, sqlstate):
+    """The worker's refusal set (data 22, integrity 23, limits 54), at the second row: `ItemRefused`
     with the refusal's message, and the first row of the call is not stored either. (r5.1 item 7; the same errors as
     the worker's end write, `_findings1487.REFUSED_SQLSTATES`)"""
     from defender.learning_store import ItemRefused
@@ -38,15 +38,29 @@ def test_an_error_the_database_gives_at_the_insert_that_waiting_cannot_cure_rais
     assert F.all_items(dsn) == []
 
 
-@pytest.mark.parametrize("exc", F.REFUSED_EXCEPTIONS, ids=lambda e: type(e).__name__)
-def test_a_non_database_exception_in_the_insert_raises_item_refused_and_stores_none(dsn, exc):
-    """The worker's non-database exceptions (`_findings1487.REFUSED_EXCEPTIONS`) at the insert statement: `ItemRefused`,
-    nothing stored. (r5.1 item 7: refused "whatever its class")"""
-    from defender.learning_store import ItemRefused
+@pytest.mark.parametrize("sqlstate", F.UNSTORED_SQLSTATES)
+def test_r53_a_database_error_neither_content_nor_outage_raises_findings_not_stored_and_stores_none(dsn, sqlstate):
+    """A permission error at the second row: `FindingsNotStored`, not `ItemRefused`, nothing stored, and the same call
+    then succeeds. (Amendment r5.3)"""
+    from defender.jobs import FindingsNotStored
 
-    with F.statement_fault(exc) as hit, pytest.raises(ItemRefused):
+    F.trigger_fault(dsn, "learning.work_items", sqlstate, when="NEW.item_key LIKE '%/1'", once=True)
+    with pytest.raises(FindingsNotStored):
+        call(dsn, "publish_findings", T1, "run", _rows(), kind="finding")
+    assert F.all_items(dsn) == []
+    assert call(dsn, "publish_findings", T1, "run", _rows(), kind="finding") == (2, 0)
+
+
+@pytest.mark.parametrize("exc", F.UNSTORED_EXCEPTIONS, ids=lambda e: type(e).__name__)
+def test_r53_a_non_database_exception_in_the_insert_raises_findings_not_stored_and_stores_none(dsn, exc):
+    """The worker's non-database exceptions (`_findings1487.UNSTORED_EXCEPTIONS`) at the insert statement:
+    `FindingsNotStored`, raised from the fault, nothing stored. (Amendment r5.3)"""
+    from defender.jobs import FindingsNotStored
+
+    with F.statement_fault(exc) as hit, pytest.raises(FindingsNotStored) as raised:
         call(dsn, "publish_findings", T1, "run", _rows(), kind="finding")
     assert hit, "premise: the insert statement was reached"
+    assert isinstance(raised.value.__cause__, type(exc)), "raised from the fault"
     assert F.all_items(dsn) == []
 
 

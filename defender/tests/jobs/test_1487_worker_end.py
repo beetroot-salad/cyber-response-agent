@@ -250,10 +250,9 @@ async def test_o2_a_job_ending_refused_does_not_pause_the_workers_claims(world):
 
 
 @pytest.mark.parametrize("sqlstate", F.REFUSED_SQLSTATES)
-async def test_o2_p4_an_insert_error_the_content_causes_or_that_waiting_cannot_cure_refuses_the_findings(
-        world, sqlstate):  # noqa: F811
-    """Data (22), integrity (23), limits (54) and a deterministic permission error: the findings are refused whole, the
-    completed ending stands, no retry. (O2, P4)"""
+async def test_o2_p4_an_insert_error_the_content_causes_refuses_the_findings(world, sqlstate):  # noqa: F811
+    """Data (22), integrity (23), limits (54): the findings are refused whole, the completed ending stands, no retry.
+    (O2, P4)"""
     dsn = world["dsn"]
     child = F.child_class()(world["tmp"] / "job", world["runs"])
     child.records = {}
@@ -267,21 +266,49 @@ async def test_o2_p4_an_insert_error_the_content_causes_or_that_waiting_cannot_c
     _refused_whole(dsn, job)
 
 
-@pytest.mark.parametrize("exc", F.REFUSED_EXCEPTIONS, ids=lambda e: type(e).__name__)
-async def test_o2_p4_an_exception_in_the_insert_refuses_the_findings_and_the_ending_stands(world, exc):  # noqa: F811
-    """A non-database error raised in the insert path: refused, completed, nothing stored, no retry. (O2, P4)"""
+def _stored_in_place(dsn: str, job: str) -> None:
+    """The findings stored, `done`, by the job's first and only attempt: the end write was retried, not the job."""
+    row = job_row(dsn, job)
+    assert (row["status"], row["publish_state"]) == ("completed", "done"), row
+    assert len(_stored(dsn, job)) == 3
+    assert len(jobs_of(dsn, _inv(dsn, job))) == 1, "the job was run again, not its end write retried"
+
+
+@pytest.mark.parametrize("sqlstate", F.UNSTORED_SQLSTATES)
+async def test_r53_a_database_error_neither_content_nor_outage_retries_the_end_in_place(world, sqlstate, caplog):  # noqa: F811
+    """A permission error at the first insert says nothing about the findings: they are not refused, the job is not
+    run again; its end write is retried in place, logged as an error, and stores them. (Amendment r5.3)"""
     dsn = world["dsn"]
     child = F.child_class()(world["tmp"] / "job", world["runs"])
     child.records = {}
     async with job_store(dsn) as store:
         job = await queued_job(world, store, ticket="J-1")
         child.records[job] = _both(job)
-        with F.statement_fault(exc) as hit:
+        F.trigger_fault(dsn, ITEMS, sqlstate, once=True)
+        await asyncio.wait_for(learning_worker(
+            world, store, job=child, post=F.quiet_post_class()(world["tmp"] / "post", world["runs"]),
+            slots=2, learning_slots=1).drain(), timeout=120)
+    assert F.fault_fired(dsn)
+    _stored_in_place(dsn, job)
+    assert any(r.levelname == "ERROR" and "could not be stored" in r.getMessage() for r in caplog.records), caplog.text
+
+
+@pytest.mark.parametrize("exc", F.UNSTORED_EXCEPTIONS, ids=lambda e: type(e).__name__)
+async def test_r53_an_exception_in_the_insert_retries_the_end_in_place(world, exc):  # noqa: F811
+    """A non-database error raised in the insert path at the first try: not refused, not a new attempt; the end write
+    is retried and the findings stored. (Amendment r5.3)"""
+    dsn = world["dsn"]
+    child = F.child_class()(world["tmp"] / "job", world["runs"])
+    child.records = {}
+    async with job_store(dsn) as store:
+        job = await queued_job(world, store, ticket="J-1")
+        child.records[job] = _both(job)
+        with F.statement_fault(exc, once=True) as hit:
             await asyncio.wait_for(learning_worker(
                 world, store, job=child, post=F.quiet_post_class()(world["tmp"] / "post", world["runs"]),
                 slots=2, learning_slots=1).drain(), timeout=120)
     assert hit, "premise: the insert statement was reached"
-    _refused_whole(dsn, job)
+    _stored_in_place(dsn, job)
 
 
 def _blocked_on_items(dsn: str) -> bool:

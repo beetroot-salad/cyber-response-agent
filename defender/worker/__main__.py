@@ -4,7 +4,8 @@ Reads `DEFENDER_API_FRONTEND_ORIGIN` (the API's own origin setting, which a flag
 (default 3), `DEFENDER_WORKER_LEARNING_SLOTS` (default min(1, slots - 1)) and
 `DEFENDER_WORKER_LEARNING_CHECK_SECONDS` (default 300: how long a tenant goes without a post-step
 before a family-less one checks it, #1344 amendment 1). Refuses a build stamp that is not a
-commit (empty, a tag, a branch name: the marker reader's grammar), bad settings and a job network
+commit (empty, a tag, a branch name: the marker reader's grammar), bad settings (with learning slots, the learning
+store's thresholds, attempt ceiling and lease timings too) and a job network
 (`DEFENDER_JOB_NETWORK`) that is not a bridge network made for the jobs before any work, refuses a second worker on the same data root without
 touching the first one's code copy, replaces the code copy, runs every child from it, and serves
 until SIGTERM or SIGINT (exit 0). A refusal is a nonzero exit naming its cause on stderr."""
@@ -23,7 +24,14 @@ from defender.box import run_docker
 from defender.jobs import JobStore
 from defender.tenancy import data_root_from_path
 
-from ._start import WorkerStartRefused, check_job_network, hold_start_lock, read_settings, refresh_code_copy
+from ._start import (
+    WorkerStartRefused,
+    check_job_network,
+    check_learning_settings,
+    hold_start_lock,
+    read_settings,
+    refresh_code_copy,
+)
 from ._worker import Worker, job_entry_argv, post_step_argv, run_argv_in
 
 _logger = logging.getLogger(__name__)
@@ -54,6 +62,8 @@ async def _serve_until_stopped(settings, copy: Path) -> None:  # noqa: ANN001 â€
 def main() -> int:
     try:
         settings = read_settings(os.environ)
+        if settings.learning_slots:
+            check_learning_settings()
         check_job_network(os.environ, run_docker)
         lock = hold_start_lock(settings.root)
         copy = refresh_code_copy(settings.root, source=_SOURCE, environ=os.environ)

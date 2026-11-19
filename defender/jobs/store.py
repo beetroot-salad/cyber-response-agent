@@ -46,6 +46,7 @@ from defender.records.job_facts import EXPIRED, LEASE_LAPSED, OFFBOARD_MESSAGE, 
 
 from .audit import SYSTEM, announce
 from .errors import Conflict, NotFound, OffboardNotSettled, UnknownReference, UnstorableText
+from .learning_check import arm_learning_check
 from defender.tenancy.models import AlertMappingRow, CaseVersionRow, TenantRecord
 from defender.tenancy.models import offboard as _tenancy_offboard
 from defender.tenancy.models import share_tenant
@@ -150,17 +151,11 @@ class JobStore:
         self, dsn: str, *, clock: Callable[[], _dt.datetime], lease: float = LEASE_SECONDS, max_connections: int = 10,
         learning_max_age: float = LEARNING_MAX_AGE_SECONDS,
     ) -> None:
-        self._dsn = dsn
         self._engine = async_engine(dsn, max_connections=max_connections)
         self._sessions = sessions(self._engine)
         self._clock = clock
         self._lease = _dt.timedelta(seconds=lease)
         self._learning_max_age = _dt.timedelta(seconds=learning_max_age)
-
-    @property
-    def dsn(self) -> str:
-        """The database this store is on: the learning store's too (#1487: the worker asks it whether work waits)."""
-        return self._dsn
 
     @property
     def lease_seconds(self) -> float:
@@ -550,7 +545,7 @@ class JobStore:
                     investigation_id=record.investigation_id,
                     request_key=f"{AUTO_REQUEST_KEY_PREFIX}{record.investigation_id}", attempt=1, trigger="auto",
                     status="queued", created_at=self._clock()))
-                await self._arm_check(s, record.tenant_id)
+                await arm_learning_check(s, record.tenant_id)
         detail = f"stage={stage}" + (f" reason={failure_reason}" if failure_reason else "")
         announce("investigation.finish", actor=SYSTEM, tenant_id=tenant_id, target=investigation_id, detail=detail)
         return record
@@ -735,7 +730,7 @@ class JobStore:
                         investigation_id=lapsed.investigation_id, request_key=lapsed.request_key,
                         attempt=lapsed.attempt + 1, trigger=lapsed.trigger, status="queued",
                         created_at=lapsed.created_at))
-                    await self._arm_check(s, lapsed.tenant_id)
+                    await arm_learning_check(s, lapsed.tenant_id)
         except _Refused:
             return _TakeOver(old_id, tenant, "", None, refused=True, of_learning=True)
         return _TakeOver(old_id, tenant, reason, retry_id, of_learning=True)
@@ -780,7 +775,7 @@ class JobStore:
                 request_key=client_request_id, attempt=1, trigger="explicit", status="queued",
                 created_at=self._clock())
             s.add(row)
-            await self._arm_check(s, tenant_id)
+            await arm_learning_check(s, tenant_id)
             record = learning_job_record(row)
         announce("learning_job.start", actor=actor, tenant_id=tenant_id, target=record.learning_job_id,
                  detail=f"investigation {investigation_id}; trigger=explicit", credential_id=credential_id)
@@ -866,7 +861,8 @@ class JobStore:
         of rows stored, or, refused there, for a tenant not `active`, or with no findings, `refused`
         and nothing of the job stored, logged with its kind; then the tenant's check clock armed,
         marked when a post-step holds it. An outage at the insert raises, the whole end with it, for
-        the caller to retry. `findings` is only a `completed` end's."""
+        the caller to retry, and so does `FindingsNotStored` (an insert error neither the content nor
+        an outage explains, #1487 Amendment r5.3). `findings` is only a `completed` end's."""
         if status not in LEARNING_TERMINAL:
             raise ValueError(f"{status!r} is not a terminal status")
         if findings is not None and status != "completed":
@@ -892,7 +888,7 @@ class JobStore:
                 .values(**values).returning(LearningJobRow).execution_options(synchronize_session=False))
             ).scalars().one()
             if status == "completed":
-                await self._arm_check(s, tenant_id, ended_completed=True)
+                await arm_learning_check(s, tenant_id, mark_held=True)
             record = learning_job_record(row)
         announce("learning_job.finish", actor=SYSTEM, tenant_id=tenant_id, target=learning_job_id,
                  detail=f"status={status}" + (f" reason={reason}" if reason else "")
@@ -920,20 +916,6 @@ class JobStore:
             return None if row is None else learning_job_record(row)
 
     # --- the family-less check clock (#1344 amendment 3) ---------------------------------------
-
-    @staticmethod
-    async def _arm_check(s: AsyncSession, tenant_id: str, *, ended_completed: bool = False) -> None:
-        """Make the tenant's check clock not idle, creating it from now when there is none: a job
-        was queued, or one ended `completed`. Its time is left as it is. A `completed` end
-        (`ended_completed`) also marks a clock a post-step holds, live or lapsed (#1487 O7), never
-        clearing a mark already set; the hold's end then makes the tenant due at once. The
-        queue-time arms leave the mark as it is."""
-        insert = pg_insert(LearningCheckRow).values(tenant_id=tenant_id, checked_at=func.now(), idle=False,
-                                                    armed_while_held=False)
-        armed: dict[str, Any] = {"idle": False}
-        if ended_completed:
-            armed["armed_while_held"] = LearningCheckRow.armed_while_held | LearningCheckRow.holder.is_not(None)
-        await s.execute(insert.on_conflict_do_update(index_elements=[LearningCheckRow.tenant_id], set_=armed))
 
     async def claim_learning_check(self, interval: float, holder: str) -> str | None:
         """Hold, as `holder`, the most overdue tenant due a family-less check, or `None`: an
@@ -963,7 +945,7 @@ class JobStore:
             state = (await s.execute(select(TenantRecord.state).where(TenantRecord.id == tenant_id))).scalar()
             if state in _BEING_REMOVED:
                 return False
-            await self._arm_check(s, tenant_id)
+            await arm_learning_check(s, tenant_id)
             held = (await s.execute(
                 update(LearningCheckRow).where(LearningCheckRow.tenant_id == tenant_id, _unheld())
                 .values(checking_until=self._lease_end(), holder=holder, armed_while_held=False)

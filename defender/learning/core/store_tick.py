@@ -1138,24 +1138,8 @@ def _stop_after_work(stop_box: Callable[..., None], box: Any, *, work_ok: bool, 
         _logger.error(f"{label}: the batch's box could not be torn down after a failed batch: {e!r}")
 
 
-def lane_waiting(store: Any, tenant_id: str, lane: str, *, tick_thresholds: Mapping[str, int] | None = None,
-                 reconcile_lanes: Sequence[str] | None = None) -> bool:
-    """Whether a tick of `lane` (reconciling `reconcile_lanes`, by default its own) could act now or later without a
-    person (G-T1): a batch of its lane working (to recover should its lease lapse), one of a reconciled lane in review
-    (its PR may change), a parked one with a person's abandon request (its tick carries it out), or a claim the store
-    would make (`lane_work`, the claim's own rules). A batch waiting for a person with no request is none of these: no
-    tick moves it, so it keeps no check clock running."""
-    reconciled = set(reconcile_lanes or (lane,))
-    for b in store.batches(tenant_id):
-        if (b.lane == lane and b.phase == "working") or (
-                b.lane in reconciled and (b.phase == "in_review" or b.abandon_pending)):
-            return True
-    work = store.lane_work(tenant_id, lane, thresholds=dict(tick_thresholds or thresholds()))
-    return bool(work.claimable and not work.busy)
-
-
 __all__ = ["AUTHOR_LANE", "CORPUS_OF", "DSN_ENV", "FEEDBACK_LANE", "GRACE_ENV", "Holding", "LEAD_LANE", "LEASE_ENV", "RENEW_ENV",
            "Refused", "STOP_PUSH_SECONDS", "Tick", "TickStopped", "classified_refusal", "closed_with_feedback",
-           "framed_feedback", "forge_refuses", "http_status", "lane_waiting", "live_changes_requested", "opened_store",
+           "framed_feedback", "forge_refuses", "http_status", "live_changes_requested", "opened_store",
            "opened_tick_store",
            "owner_name", "refusal_cause", "store_knobs", "thresholds"]

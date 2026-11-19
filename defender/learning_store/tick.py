@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import dataclasses
 import datetime as _dt
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from typing import Any, Protocol, TypeVar
 
 from defender.records.formats import BatchId, TenantId, WorkItemId
@@ -280,14 +280,17 @@ class StoreAdapter:
                           published=published, held=held)
 
 
-def work_waiting(store: TickStore) -> bool:
-    """Whether a post-step's author tick could act now or later without a person (#1278 Wake, #1487 Flow 3), asked of the
-    tick's own store `store` (its tenant, lane and thresholds bound): any batch of the tenant not yet ended, whatever its
-    lane or phase (its lease may lapse, its PR change, a person release it or ask for its abandon, which a tick carries
-    out), or a claim the bound lane would make (`lane_work`, the claim's own rules: lead-lane items alone are no
-    post-step's work). An in-review or abandon-requested batch of a reconciled lane is a batch not ended, so the
-    reconciled lanes add nothing: since #1537 no ended batch is left for a tick to close."""
-    if any(batch.phase != "ended" for batch in store.batches()):
-        return True
+def work_waiting(store: TickStore, lane: str, *, reconcile_lanes: Collection[str] | None = None) -> bool:
+    """Whether a tick of `lane` (reconciling `reconcile_lanes`, by default its own) could act now or later without a
+    person (G-T1, #1487 Flow 3), asked of the tick's store `store`, bound to the tenant, `lane` and the thresholds: a
+    batch of its lane working (to recover should its lease lapse), one of a reconciled lane in review (its PR may
+    change) or parked with a person's abandon request (its tick carries it out), or a claim the bound lane would make
+    (`lane_work`, the claim's own rules). A batch waiting for a person with no request is none of these: no tick moves
+    it, so it keeps no check clock running; the request, once recorded, wakes the tenant (Amendment r5.3)."""
+    reconciled = set(reconcile_lanes or (lane,))
+    for b in store.batches():
+        if (b.lane == lane and b.phase == "working") or (
+                b.lane in reconciled and (b.phase == "in_review" or b.abandon_pending)):
+            return True
     work = store.lane_work()
     return bool(work.claimable and not work.busy)

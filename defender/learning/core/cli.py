@@ -113,18 +113,6 @@ def main(argv: list[str], *, directory: TenantDirectory | None = None) -> int:
         return _drain_admitted(ns, admitted.directory, LoopPaths.for_tenant(admitted.tenant))
 
 
-def _host_author_drain(paths: LoopPaths, records: TenantDirectory) -> int:
-    """The author drain on the host: its tick's store the adapter over the host's store, bound here to the tenant and
-    the author lane (#1487 Flow 2)."""
-    from defender.learning.core.config import AUTHOR_DRAIN_LABEL, FatalConfigError
-    from defender.learning.core.store_tick import AUTHOR_LANE, opened_tick_store
-
-    if paths.tenant is None:
-        raise FatalConfigError("the drain delivers to a tenant's repository: no tenant is selected")
-    with opened_tick_store(str(paths.tenant.id), AUTHOR_LANE, AUTHOR_DRAIN_LABEL) as store:
-        return author_drain(paths, directory=records, store=store)
-
-
 def _drain_admitted(ns: argparse.Namespace, records: TenantDirectory, paths: LoopPaths) -> int:
     """`main` under the tenant's host acceptance: the stage, over the admitted tenant's records
     and loop paths."""
@@ -134,7 +122,7 @@ def _drain_admitted(ns: argparse.Namespace, records: TenantDirectory, paths: Loo
         return 1
 
     if ns.author_drain:
-        return _run_stage(lambda: _host_author_drain(paths, records))
+        return _run_stage(lambda: author_drain(paths, directory=records))
 
     if ns.lead_author_drain:
         return _run_stage(lambda: lead_author_drain(paths, directory=records))

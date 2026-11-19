@@ -385,13 +385,15 @@ CHILD_SCRIPT = textwrap.dedent("""
     answer = spec.get("answer_waiting")
     if answer:  # a post-step helper's stand-in: its exit status says whether work waits (#1487 Amendment r5.2)
         from defender.job_host import NOTHING_WAITS, WORK_WAITS
+        from defender.learning.core.drains import AUTHOR_DRAIN_RECONCILES
         from defender.learning.core.store_tick import AUTHOR_LANE, thresholds
         from defender.learning_store import blocking
         from defender.learning_store.tick import StoreAdapter, work_waiting
         try:
             with blocking(answer["dsn"]) as store:
                 waits = work_waiting(StoreAdapter(store, tenant=argv[argv.index("--tenant") + 1], lane=AUTHOR_LANE,
-                                                  owner="post-step:stand-in", thresholds=thresholds()))
+                                                  owner="post-step:stand-in", thresholds=thresholds()),
+                                     AUTHOR_LANE, reconcile_lanes=AUTHOR_DRAIN_RECONCILES)
         except Exception:  # noqa: BLE001 - as the helper: a question that fails answers nothing
             sys.exit(0)
         sys.exit(WORK_WAITS if waits else NOTHING_WAITS)

@@ -2,7 +2,8 @@
 data root, and the code copy its children and their boxes run from.
 
 Order: the settings are read and judged first (a build stamp that is not a commit, bad slots, a job network that is
-not a bridge network made for the jobs: `check_job_network`), so a refused start touches nothing; then an exclusive kernel lock on the data root, so a refused second worker never
+not a bridge network made for the jobs: `check_job_network`; with learning slots, a malformed learning store setting:
+`check_learning_settings`), so a refused start touches nothing; then an exclusive kernel lock on the data root, so a refused second worker never
 touches the first one's live copy; then the copy is replaced. The lock lives as long as the process
 (the kernel drops it with the descriptor), across containers that share the mount.
 
@@ -142,6 +143,22 @@ def read_settings(environ: Mapping[str, str]) -> Settings:
         raise WorkerStartRefused(f"{DATA_ROOT_ENV}={raw_root!r} is not a folder")
     return Settings(dsn=dsn, root=root, build_commit=commit, slots=slots, learning_slots=learning,
                     learning_check_seconds=check, frontend_origin=frontend_origin(environ))
+
+
+def check_learning_settings() -> None:
+    """The learning store's settings in this process's environment, judged once before any work when the worker has
+    learning slots (#1487 Amendment r5.3): each kind's threshold, the attempt ceiling and the lease timings, read as
+    the tick reads them (`store_tick.thresholds`, `store_knobs`). The post-step's helper inherits this environment and
+    binds them to the tick's store, so a malformed value is this start's refusal, never a post-step's failure.
+    `WorkerStartRefused` naming the setting."""
+    from defender.learning.core.config import FatalConfigError
+    from defender.learning.core.store_tick import store_knobs, thresholds
+
+    try:
+        thresholds()
+        store_knobs()
+    except FatalConfigError as bad:
+        raise WorkerStartRefused(str(bad)) from None
 
 
 #: The option docker sets on its own default bridge network, which reaches whatever the host reaches.

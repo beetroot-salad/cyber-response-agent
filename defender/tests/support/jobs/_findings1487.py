@@ -165,8 +165,12 @@ def raising_screen(exc: BaseException):
 
 # One error set for both lanes that insert findings (the worker's end write and the operator lane's `publish_findings`),
 # so the two cannot drift: what each lane must treat as a refusal, and what as an outage (design r5.1 items 4, 7).
-REFUSED_SQLSTATES = ["22001", "22021", "22P02", "23502", "23505", "23514", "54000", "54001", "42501"]
-REFUSED_EXCEPTIONS = [RuntimeError("boom"), ValueError("v"), KeyError("k"), MemoryError()]
+#: The insert errors the findings' content causes: refused (P4).
+REFUSED_SQLSTATES = ["22001", "22021", "22P02", "23502", "23505", "23514", "54000", "54001"]
+#: Insert errors that say nothing about the findings, neither content nor outage: a deterministic database error and
+#: faults in the insert's code. `FindingsNotStored`, retried in place (#1487 Amendment r5.3).
+UNSTORED_SQLSTATES = ["42501"]
+UNSTORED_EXCEPTIONS = [RuntimeError("boom"), ValueError("v"), KeyError("k"), MemoryError()]
 OUTAGE_SQLSTATES = ["40P01", "55P03", "57014", "53100"]
 OUTAGE_IDS = ["deadlock", "lock-timeout", "cancel", "disk-full"]
 

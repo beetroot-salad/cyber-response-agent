@@ -5,8 +5,8 @@ amendment 1): the worker's check of a tenant whose last post-step left work wait
 a reviewer's verdict, a retained delivery or findings at threshold are not left waiting for the tenant's next alert.
 
 It runs the author drain's tick once and returns its exit status (#1487). It publishes nothing (a learning job's findings
-are stored by the worker with its ending), writes no record and hands nothing over: whether work is still waiting is the
-worker's own question of the store once the container has exited (Flow 3). The tick's store is the job container's port
+are stored by the worker with its ending), writes no record and hands nothing over: whether work is still waiting is
+asked by the helper once the container has exited, and said by its exit status (Flow 3, Amendment r5.2). The tick's store is the job container's port
 (`JobContainer.tick_store()`, Amendment 1): each store step is a request the helper answers with the trusted values bound
 on its side, so nothing here holds a database address or opens a database.
 

@@ -37,9 +37,10 @@ fence as an investigation; the worker copies the entry's progress record onto th
 renewal loop, and decides the row from the end record alone. A `completed` record's findings
 (#1487) are screened by the worker and stored by the row's own end write, in its transaction, or
 refused whole while the ending stands. After a job whose child started, a post-step child runs the
-drain gate, in the same slot and the same supervision registry, with no lease of its own; once it
-exits, the worker asks the learning store itself whether work still waits (Flow 3), and the
-tenant's check clock goes idle only when it answers no.
+drain gate, in the same slot and the same supervision registry, with no lease of its own. Its helper
+says by its exit status whether work still waits (Flow 3, #1487 Amendment r5.2: `job_host.NOTHING_WAITS`
+or `WORK_WAITS`); the worker opens no learning store, and the tenant's check clock goes idle only on
+`NOTHING_WAITS`.
 
 A family-less post-step (#1344 amendment 1) wakes a tenant no family has followed for a while: a
 worker with learning slots, not stopping, checks each `active` tenant with learning jobs once its
@@ -67,7 +68,7 @@ from typing import TYPE_CHECKING, Any
 
 from defender import _log
 from defender._url import check_origin
-from defender.jobs import LearningProgress, is_outage, is_refusal
+from defender.jobs import FindingsNotStored, LearningProgress, is_outage, is_refusal
 from defender.jobs.audit import SYSTEM, announce
 from defender.box import CLAIM_ENV, container_name
 from defender.execution import kill_group, wait_group_gone
@@ -1023,7 +1024,10 @@ class Worker:
         findings = None
         if end.status == job_lane.LEARNING_COMPLETED:
             findings = await asyncio.to_thread(self._accepted_findings, job, end.findings)
-        return LearningOutcome(end.status, end.reason, end.message, end, findings), True
+        # The progress the end write reads is the record's cost and stage, not its findings text: the parsed rows stand
+        # in for it, and the text is not kept alive through the end write's retries.
+        progress = dataclasses.replace(end, findings=None)
+        return LearningOutcome(end.status, end.reason, end.message, progress, findings), True
 
     def _accepted_findings(self, job: str, found: object) -> dict[str, Any] | None:
         """A completed record's findings as the end write stores them, `{kind: rows}`, or None, refused (#1487 Flow 1
@@ -1191,9 +1195,13 @@ class Worker:
         take-over that re-runs the job: it is written again with less (`_lesser_ends`). Any other
         failure decides nothing about the job: it is logged and the row left to lapse, as it is
         when even the barest end is refused. During a deliberate stop an outage gets one try: the
-        stop gives up on it (B11)."""
+        stop gives up on it (B11). A learning job's findings the store could not store for a reason
+        neither their content nor an outage explains (`FindingsNotStored`, #1487 Amendment r5.3) are
+        retried the same way, logged once as an error, without pausing claims: only the job's slot
+        waits."""
         what = _what(held)
         key = _key(held)
+        told: set[str] = set()
         attempts: list[Any] = (_lesser_learning_ends(end) if isinstance(end, LearningOutcome)
                                else _lesser_ends(end))
         once = self._learning_end_once if isinstance(end, LearningOutcome) else self._end_once
@@ -1209,21 +1217,42 @@ class Worker:
                     if is_refusal(fault):
                         _logger.error("%s: the store refused its end (%s)", what, _what_end(attempt), exc_info=True)
                         break
-                    if not is_outage(fault):
-                        _logger.exception("%s: its end could not be recorded and is dropped; its "
-                                          "lease will lapse and it will be taken over", what)
+                    if not self._end_retries(what, key, fault, stopping=tried_stopping, told=told):
                         return
-                    self._note_store_fault(fault)
-                    if tried_stopping:
-                        _logger.warning("%s: its end could not be recorded while stopping; "
-                                        "its lease will lapse on its own", what, exc_info=True)
-                        return
-                    self._end_failing.add(key)
-                    _logger.warning("%s: its end could not be recorded (%s); retrying", what, fault)
                 with contextlib.suppress(TimeoutError):
                     await asyncio.wait_for(self._stop_signal.wait(), timeout=END_RETRY_DELAY)
         _logger.error("%s: the store refused even its barest end; it is dropped, and its "
                       "lease will lapse and it will be taken over", what)
+
+    def _end_retries(self, what: str, key: str, fault: Exception, *, stopping: bool, told: set[str]) -> bool:
+        """Whether a failed end write that the store did not refuse is tried again, logged: an outage pauses claims while
+        it lasts (B5); findings not stored for a reason neither their content nor an outage explains
+        (`FindingsNotStored`) are logged once as an error and pause nothing but the job's slot. During a deliberate
+        stop neither is tried again (B11). Anything else is dropped: the row lapses into a take-over."""
+        unstored = isinstance(fault, FindingsNotStored)
+        if not (unstored or is_outage(fault)):
+            _logger.exception("%s: its end could not be recorded and is dropped; its "
+                              "lease will lapse and it will be taken over", what)
+            return False
+        if unstored:
+            if "unstored" not in told:
+                _logger.error("%s: its findings could not be stored (%s), which neither their content nor an outage "
+                              "explains; its end is retried until it is stored", what, fault,
+                              exc_info=fault.__cause__ or fault)
+                told.add("unstored")
+            if stopping:
+                _logger.warning("%s: its findings could not be stored while stopping; its lease will lapse and the "
+                                "job will be run again", what)
+                return False
+            return True
+        self._note_store_fault(fault)
+        if stopping:
+            _logger.warning("%s: its end could not be recorded while stopping; "
+                            "its lease will lapse on its own", what, exc_info=True)
+            return False
+        self._end_failing.add(key)
+        _logger.warning("%s: its end could not be recorded (%s); retrying", what, fault)
+        return True
 
     async def _end_once(self, held: Held, end: End) -> None:
         """One try: the terminal stage (or hand-back) if the row is still `running`, else the

@@ -271,9 +271,10 @@ def _validate_merge_mode() -> None:
 
 
 def _validate_tick_settings() -> None:
-    """The tick's own settings read once at its start (#1487): a malformed attempt ceiling or threshold is the stage's
-    `FatalConfigError` (exit 2) before anything is claimed, whoever bound the store the tick is handed (a host
-    entry's adapter reads them as it binds; a caller's own store, or the post-step's port, never shows them here)."""
+    """The tick's own settings read once at its start (#1487), before its store is bound: a malformed attempt ceiling or
+    threshold in this process's environment is the stage's `FatalConfigError` (exit 2) before anything is claimed.
+    Through the post-step's port the values that count are the helper's, inherited from the worker, which judged them
+    at its start (`worker._start.check_learning_settings`, Amendment r5.3)."""
     from defender.learning.core.config import author_max_attempts
     from defender.learning.core.store_tick import thresholds
 
@@ -531,7 +532,7 @@ def author_drain(  # noqa: PLR0913 — the stage's seams: the author step, the f
     stop_box: Callable[..., None] = box_mod.stop_box,
     make_model: Callable[..., Any] | None = None,
     container: Any = None,
-    store: TickStore,
+    store: TickStore | None = None,
 ) -> int:
     """The lessons lane's tick into the selected tenant's repository over the learning store (#1278):
     reconcile every batch in review (every lane, D9; the feedback lane's registry batches too, A4), recover a
@@ -543,9 +544,9 @@ def author_drain(  # noqa: PLR0913 — the stage's seams: the author step, the f
     names); `client` the forge's HTTP client; `identity` the tenant's delivery credential, else minted
     through its live generation (`credential_config`, `issuer_transport`); `start_box`/`stop_box` the
     batch's box (default `TenantDelivery.start_batch_box`); `make_model` the curators' model (default their own).
-    `store` is the tick's store (#1487 Flow 2, `learning_store.tick.TickStore`), bound by the caller to the tenant and
-    the author lane: a host entry's adapter (`store_tick.opened_tick_store`), or the post-step's port over its helper
-    (`JobContainer.tick_store()`). It is never chosen here."""
+    `store` is the tick's store (#1487 Flow 2, `learning_store.tick.TickStore`) bound by the caller to the tenant and
+    the author lane (the post-step's port over its helper, `JobContainer.tick_store()`); left out, the drain binds the
+    host's own (`store_tick.opened_tick_store`) inside its stage, after its settings are judged."""
     _validate_merge_mode()
     _validate_tick_settings()
     records, credential, relay = _drain_sources(container, directory=directory, identity=identity)

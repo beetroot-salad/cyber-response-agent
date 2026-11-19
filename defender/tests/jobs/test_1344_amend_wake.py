@@ -3,8 +3,8 @@
 A worker with learning slots, not stopping, starts a family-less post-step for an `active` tenant with learning jobs
 once that tenant has gone `learning_check_interval` without a post-step (amendment 3: its clock is a row in the store,
 started by the tenant's first queued job, and stops while the tenant's last post-step left nothing waiting). The
-check is learning-class and is picked before a queued job; since #1487 it is handed nothing and leaves no record (the
-worker asks the store whether work still waits, `test_1487_post_step_waiting.py`). Real database, scripted children, as `test_1344_learning_jobs`."""
+check is learning-class and is picked before a queued job; since #1487 it is handed nothing and leaves no record (its
+helper says by its exit status whether work still waits, `test_1487_post_step_waiting.py`). Real database, scripted children, as `test_1344_learning_jobs`."""
 from __future__ import annotations
 
 import asyncio
