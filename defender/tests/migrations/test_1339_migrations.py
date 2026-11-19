@@ -426,9 +426,9 @@ def test_the_jobs_columns_are_the_designed_ones_without_server_defaults(migrated
 
 @pytest.mark.postgres
 def test_the_jobs_constraints_are_exactly_the_designed_ones(migrated_database):
-    """PKs, the tenant FK, the alert uniques, the composite FK, the attempt unique, a stage CHECK, #1343's lease CHECK and #1377's
-    lower-limit-needs-a-cost CHECK; no other constraint (#1342 M10; #1377 S4: the job row enforces it; #1471 r9 R9-1: no
-    outcome-word CHECK)."""
+    """PKs, the tenant FK, the alert uniques, the composite FK, the attempt unique; on alerts the stored outcome's two CHECKs
+    and on investigations five CHECKs (stage, lease, lower-limit-needs-a-cost, completed-has-a-disposition, disposition value);
+    no other constraint (#1342 M10; #1377 S4; #1471 r9 R9-1; #1581)."""
     alerts = _jobs_constraints(migrated_database, "alerts")
     assert [(kind, cols) for kind, cols, _ in alerts if kind != "c"] == sorted([
         ("f", ("tenant_id",)), ("p", ("id",)), ("u", ("id", "tenant_id")),
@@ -455,6 +455,14 @@ def test_the_jobs_constraints_are_exactly_the_designed_ones(migrated_database):
     [lease] = [d for d in checks if "lease_expires_at" in d]
     assert "lease_expires_at" in lease
     assert "'running'" in lease  # (#1343: second CHECK; conflict updated)
+
+
+@pytest.mark.postgres
+def test_neither_jobs_table_has_a_trigger(migrated_database):
+    """`jobs.alerts` and `jobs.investigations` carry no trigger: the stored outcome is the store's, not the table's. (#1581 r3.1)"""
+    assert execute(migrated_database, """
+        SELECT t.relname, g.tgname FROM pg_trigger g JOIN pg_class t ON t.oid = g.tgrelid JOIN pg_namespace n ON n.oid = t.relnamespace
+        WHERE n.nspname = 'jobs' AND t.relname IN ('alerts', 'investigations') AND NOT g.tgisinternal""") == []
 
 
 @pytest.mark.postgres

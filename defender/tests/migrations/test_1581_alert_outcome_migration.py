@@ -126,28 +126,30 @@ def _plant_refusable(dsn: str, *, nulls: int, off_vocabulary: int) -> None:
     _investigation(dsn, _alert(dsn, "clean"), "k1", "completed", "benign", T0)
     for n in range(nulls):
         _investigation(dsn, _alert(dsn, f"null-{n}"), "k1", "completed", None, T0)
-    for n, stage in zip(range(off_vocabulary), ("completed", "failed", "aborted", "unparseable"), strict=False):
+    stages = ("completed", "failed", "aborted", "unparseable")
+    for n in range(off_vocabulary):
+        stage = stages[n % len(stages)]
         _investigation(dsn, _alert(dsn, f"off-{n}"), "k1", stage, "unsanctioned-benign", T0)
 
 
-@pytest.mark.parametrize(("nulls", "off_vocabulary"), [(2, 0), (0, 3), (2, 3)])
+@pytest.mark.parametrize(("nulls", "off_vocabulary"), [(6, 0), (0, 5), (6, 5)])
 def test_the_upgrade_refuses_over_completed_rows_without_a_disposition_or_off_vocabulary_ones_and_changes_nothing(
         empty_database, nulls, off_vocabulary):
     """From the prior revision, with completed rows lacking a disposition, rows whose disposition is not one of the five
-    codes, or both, the upgrade fails naming each count that is not zero, the database stays at the prior revision, no
+    codes, or both, the upgrade fails with a RuntimeError naming both counts, zero included, each beside its noun, the database stays at the prior revision, no
     column or index appears and every row is as it was. (refusal; 0012's precedent)"""
     dsn = empty_database
     _plant_refusable(dsn, nulls=nulls, off_vocabulary=off_vocabulary)
     before = execute(dsn, "SELECT id, stage, disposition FROM jobs.investigations ORDER BY id")
     indexes = execute(dsn, "SELECT indexname FROM pg_indexes WHERE schemaname = 'jobs' ORDER BY indexname")
 
-    with pytest.raises(Exception) as refused:  # noqa: PT011 — the design names no error type, only that it stops and names the counts
+    with pytest.raises(RuntimeError) as refused:
         _upgrade_to(dsn, _revision())
 
     message = str(refused.value)
-    for count in (nulls, off_vocabulary):
-        if count:
-            assert re.search(rf"\b{count}\b", message), f"the {count} is not named: {message}"
+    # Planted counts (6, 5, 0) share no digit with each other or with the revision ids; a count's noun follows it with no digit between.
+    for count, noun in ((nulls, r"disposition"), (off_vocabulary, r"codes?|vocabular|outside|five")):
+        assert re.search(rf"\b{count}\b\D{{0,80}}?(?:{noun})", message, re.IGNORECASE), f"{count} is not named beside its noun: {message}"
     assert _version(dsn) == [(_prior(),)]
     assert not COLUMNS & _alert_columns(dsn)
     assert execute(dsn, "SELECT indexname FROM pg_indexes WHERE schemaname = 'jobs' ORDER BY indexname") == indexes

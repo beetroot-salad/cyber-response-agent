@@ -1,10 +1,11 @@
 // Accepting an invitation, the shell's second write (alert list design O11, Flows "Shell, accept"): success is a full
 // load of the accepted tenant's alerts address by `assign` (never `replace`: Back returns to Home), a 401 is the
-// shell's sign-in round trip back to /home, and only a 404 (`gone`) and any other failure (`failed`) come back to the
-// caller. Each case asserts the whole effect log, as load.test.ts does.
+// shell's sign-in round trip back to /home, and the caller gets the shell's Outcome shape (r3.1, like signOut's
+// SignOutResult): `{kind:"left"}` after either navigation, `{kind:"not-open"}` for a 404, `{kind:"error"}` for any
+// other status, no answer or a non-JSON success, and `{kind:"gone"}` when the load was superseded. Each case asserts
+// the whole effect log, as load.test.ts does.
 // FORCED CHOICE: the load-level entry is `load.client.acceptInvitation(id)` beside `signOut`; the design names only the
-// action a screen holds (`useActions().acceptInvitation`). Its promise value for success and 401 is unspecified, so
-// those cases assert only that it is not `gone` or `failed`.
+// action a screen holds (`useActions().acceptInvitation`).
 import { describe, expect, it } from "vitest";
 import { makeLoad } from "./load";
 
@@ -61,9 +62,6 @@ function accepting(answer: (request: Request) => Promise<Response>) {
   return { load, log, requests, assigned, accept, settled };
 }
 
-const kindOf = (result: unknown): unknown =>
-  typeof result === "object" && result !== null && "kind" in result ? result.kind : result;
-
 describe("accepting an invitation", () => {
   it("POSTs the invitation's accept route once and, on success, assigns the accepted tenant's alerts address", async () => {
     const { log, requests, assigned, accept, settled } = accepting(() =>
@@ -75,41 +73,36 @@ describe("accepting an invitation", () => {
     ]);
     expect(log).toEqual(["fetch", "assign"]);
     expect(assigned.map((url) => new URL(url, ORIGIN).href)).toEqual([`${ORIGIN}/t/${TENANT}/alerts`]);
-    expect([kindOf(result)]).not.toContainEqual("gone");
-    expect([kindOf(result)]).not.toContainEqual("failed");
+    expect(result).toEqual({ kind: "left" });
   });
 
-  it("on a 401 makes the shell's one sign-in round trip back to /home, and tells the caller neither gone nor failed", async () => {
+  it("on a 401 makes the shell's one sign-in round trip back to /home, and tells the caller it left", async () => {
     const { log, assigned, accept, settled } = accepting(() => Promise.resolve(json(401, { detail: "no session" })));
     const result = await settled(accept());
     expect(log).toEqual(["fetch", "record", "assign"]);
     const [login] = assigned.map((url) => new URL(url, ORIGIN));
     expect([login?.pathname, login?.searchParams.get("return")]).toEqual(["/api/auth/login", "/home"]);
-    expect([kindOf(result)]).not.toContainEqual("gone");
-    expect([kindOf(result)]).not.toContainEqual("failed");
+    expect(result).toEqual({ kind: "left" });
   });
 
-  it("answers gone for a 404, the invitation no longer open, and navigates nowhere", async () => {
+  it("answers not-open for a 404, the invitation no longer open, and navigates nowhere", async () => {
     const { log, accept, settled } = accepting(() => Promise.resolve(json(404, { detail: "no invitation" })));
-    expect(await settled(accept())).toEqual({ kind: "gone" });
+    expect(await settled(accept())).toEqual({ kind: "not-open" });
     expect(log).toEqual(["fetch"]);
   });
 
-  it.each([400, 403, 409, 422, 429, 500, 502, 503])(
-    "answers failed for a %i, and navigates nowhere",
-    async (status) => {
-      const { log, accept, settled } = accepting(() => Promise.resolve(json(status, { detail: "x" })));
-      expect(await settled(accept())).toEqual({ kind: "failed" });
-      expect(log).toEqual(["fetch"]);
-    },
-  );
+  it.each([400, 403, 409, 422, 429, 500, 502, 503])("answers error for a %i, and navigates nowhere", async (status) => {
+    const { log, accept, settled } = accepting(() => Promise.resolve(json(status, { detail: "x" })));
+    expect(await settled(accept())).toEqual({ kind: "error" });
+    expect(log).toEqual(["fetch"]);
+  });
 
-  it("answers failed when no answer comes, or a success is not JSON, and sends nothing a second time", async () => {
+  it("answers error when no answer comes, or a success is not JSON, and sends nothing a second time", async () => {
     const down = accepting(() => Promise.reject(new TypeError("Failed to fetch")));
-    expect(await down.settled(down.accept())).toEqual({ kind: "failed" });
+    expect(await down.settled(down.accept())).toEqual({ kind: "error" });
     expect(down.log).toEqual(["fetch"]);
     const html = accepting(() => Promise.resolve(new Response("<html>", { status: 200 })));
-    expect(await html.settled(html.accept())).toEqual({ kind: "failed" });
+    expect(await html.settled(html.accept())).toEqual({ kind: "error" });
     expect(html.log).toEqual(["fetch"]);
   });
 
@@ -119,7 +112,7 @@ describe("accepting an invitation", () => {
     const call = accept();
     load.supersede();
     held.forEach((answer) => answer(json(200, { tenant_id: TENANT })));
-    await settled(call);
+    expect(await settled(call)).toEqual({ kind: "gone" });
     expect(log).toEqual(["fetch"]);
   });
 });

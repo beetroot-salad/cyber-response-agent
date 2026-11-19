@@ -1671,7 +1671,7 @@ def test_alert_list_o2_none_reaches_the_port_as_the_no_outcome_marker_never_the_
     assert kwargs["outcome"] != "none"
 
 
-@pytest.mark.parametrize("value", ["evil", "NONE", "None", "Benign", "benign,malicious", "unsanctioned-benign", " benign", "false_positive"])
+@pytest.mark.parametrize("value", ["evil", "NONE", "None", "Benign", "benign,malicious", "unsanctioned-benign", " benign", "false_positive", ""])
 def test_alert_list_o2_a_value_outside_the_six_is_a_422_about_outcome_and_no_port_call(value: str) -> None:
     """A value that is not exactly one of the five codes or `none` is refused as the `outcome` query value (not the
     undeclared-name refusal) before the store; control: `benign` is served. (O2)"""
@@ -1696,13 +1696,18 @@ def test_alert_list_o2_a_cursor_is_bound_to_the_outcome_filter() -> None:
     for params in ({"outcome": "malicious", "cursor": under_benign}, {"outcome": "none", "cursor": under_benign},
                    {"cursor": under_benign}, {"outcome": "benign", "cursor": under_none}, {"cursor": under_none}):
         assert api.client.get(f"{T}/alerts", headers=AUTH, params=params).status_code == 422, params
+        assert "the filters changed" in api.client.get(f"{T}/alerts", headers=AUTH, params=params).text, params
     assert len(api.ports.calls) == served
 
 
 def test_alert_list_o2_a_cursor_minted_without_the_filter_is_refused_under_one() -> None:
-    """The other way: an unfiltered cursor is refused under `outcome`. (O2)"""
+    """The other way: an unfiltered cursor is refused under `outcome` as a changed filter, and pages on unfiltered. (O2)"""
     api = _filtered_cursor_api()
     plain = _cursor(api, f"{T}/alerts")
     served = len(api.ports.calls)
-    assert api.client.get(f"{T}/alerts", headers=AUTH, params={"outcome": "benign", "cursor": plain}).status_code == 422
+    assert api.client.get(f"{T}/alerts", headers=AUTH, params={"limit": 1, "cursor": plain}).status_code == 200, "control: under no filter it pages on"
+    served = len(api.ports.calls)
+    refused = api.client.get(f"{T}/alerts", headers=AUTH, params={"outcome": "benign", "cursor": plain})
+    assert refused.status_code == 422
+    assert "the filters changed" in refused.text
     assert len(api.ports.calls) == served

@@ -3813,7 +3813,8 @@ async def _three_each(store: Any) -> dict[str, list[str]]:
 
 async def test_1083_the_store_lists_one_tenants_rows_as_its_own_record_types_with_ties_by_id_descending(dsn):
     """Each list answers the tenant's rows only, as records, in `(time, id)` descending; the other tenant's list holds its own. (#1083 Data)"""
-    from defender.jobs import InvestigationRecord, LearningJobRecord, StoredAlert
+    from defender.jobs import InvestigationRecord, LearningJobRecord
+    from defender.jobs.models import StoredAlertSummary
 
     async with job_store(dsn) as store:
         ids = await _three_each(store)
@@ -3822,7 +3823,12 @@ async def test_1083_the_store_lists_one_tenants_rows_as_its_own_record_types_wit
         investigations = await store.list_investigations(T1, alert_id=None, after=None, limit=50)
         jobs = await store.list_learning_jobs(T1, investigation_id=None, after=None, limit=50)
         theirs = await store.list_alerts(T2, **window)
-    assert not any(isinstance(a, StoredAlert) for a in alerts), "#1581 O3: the list's record is the summary, which has no `raw` (conflict, updated)"
+    assert alerts
+    assert all(isinstance(a, StoredAlertSummary) for a in alerts), "#1581 O3: the list's record is the summary (conflict, updated)"
+    for a in alerts:
+        assert hasattr(a, "outcome")
+        assert hasattr(a, "latest_status")
+        assert not any(hasattr(a, name) for name in ("raw", "outcome_investigation_id", "outcome_created_at")), a
     assert all(isinstance(i, InvestigationRecord) for i in investigations)
     assert all(isinstance(j, LearningJobRecord) for j in jobs)
     assert [a.alert_id for a in alerts] == sorted(ids["alerts"], reverse=True)
@@ -4323,8 +4329,12 @@ async def test_o10_a_finish_to_completed_without_a_disposition_is_refused_and_st
         alert = await an_alert(store, T1)
         inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="setup")
         assert await store.claim() is not None
-        with pytest.raises(Exception):  # noqa: B017, PT011 — the design says the table refuses it, not with what error the store answers
+        with pytest.raises(Exception) as refused:  # noqa: PT011 — the classification is what is under test
             await store.finish(T1, inv.investigation_id, stage="completed", cost_usd=0.0)
+        from defender.jobs import is_outage, is_refusal
+
+        assert is_refusal(refused.value), repr(refused.value)
+        assert not is_outage(refused.value), repr(refused.value)
         assert row(dsn, inv.investigation_id)["stage"] == "running"
         assert stored_copy(dsn, alert.alert_id) == (None, None, None)
         assert await store.finish(T1, inv.investigation_id, stage="completed", disposition="benign", cost_usd=0.0) is not None

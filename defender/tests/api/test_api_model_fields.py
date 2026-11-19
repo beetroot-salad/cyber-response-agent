@@ -120,6 +120,8 @@ def test_o14_the_summary_has_a_description_and_neither_severity_nor_rule():
     assert set(models.Alert.model_fields) == LISTED | {"raw"}
     summary = _alert(outcome=None, latest_status=None)
     assert models.AlertSummary(**summary).model_dump()["description"] == "d"
+    assert models.AlertSummary.model_fields["outcome"].is_required()
+    assert models.AlertSummary.model_fields["latest_status"].is_required()
     assert models.AlertSummary(**summary).model_dump()["outcome"] is None, "a null outcome is carried, not dropped"
     with pytest.raises(ValidationError):
         models.AlertSummary(**{k: v for k, v in summary.items() if k != "description"})
@@ -392,7 +394,9 @@ def test_ap4_the_published_document_enumerates_the_dispositions_on_the_summary_t
         prop = schemas[schema]["properties"][field]
         assert sorted(_enum_of(prop)) == sorted(DISPOSITION_VALUES), (schema, prop)
         assert any(b.get("type") == "null" for b in prop.get("anyOf", [])) or None in prop.get("enum", []), "null stays allowed"
+    assert {"outcome", "latest_status"} <= set(schemas["AlertSummary"]["required"]), "required, though nullable (O2 r3.1)"
     status = schemas["AlertSummary"]["properties"]["latest_status"]
+    assert any(b.get("type") == "null" for b in status.get("anyOf", [])) or None in status.get("enum", []), "latest_status is nullable"
     assert sorted(_enum_of(status)) == sorted(typing.get_args(models.InvestigationStatus))
     [parameter] = [p for p in doc["paths"][API + "/tenants/{tenant_id}/alerts"]["get"]["parameters"] if p["name"] == "outcome"]
     assert sorted(_enum_of(parameter["schema"])) == sorted([*DISPOSITION_VALUES, "none"])

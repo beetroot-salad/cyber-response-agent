@@ -129,7 +129,9 @@ class _Hits(dict):
 async def _step(dsn: str, read: Reader, store: Any, rng: random.Random, clock: Clock, alerts: list[str], keys: list[int], hits: _Hits) -> None:  # noqa: C901, PLR0912 — one arm per store operation
     from defender.jobs import Conflict, NotFound
 
-    rows = read.rows("SELECT id, alert_id, stage, request_key, attempt FROM jobs.investigations")
+    order = {alert_id: n for n, alert_id in enumerate(alerts)}  # stable keys, so a seed replays whatever order the database answers in
+    rows = sorted(read.rows("SELECT id, alert_id, stage, request_key, attempt FROM jobs.investigations"),
+                  key=lambda r: (order.get(r[1], len(order)), r[3], r[4]))
     running = [r for r in rows if r[2] == "running"]
     live = [r for r in rows if r[2] in {"queued", "running"}]
     ended = [r for r in rows if r[2] not in {"queued", "running"}]
@@ -196,9 +198,15 @@ async def test_ap1_after_any_sequence_of_store_operations_the_stored_outcome_is_
             keys = [seed * 1000]
             alerts = [await _alert(store, f"G-{seed}-{n}", NOW - n * HOUR) for n in range(3)]
             for step in range(STEPS):
-                await _step(dsn, read, store, rng, clock, alerts, keys, hits)
-                for alert_id in alerts:
-                    _agrees(read, alert_id, f"seed {seed}, step {step}")
+                try:
+                    await _step(dsn, read, store, rng, clock, alerts, keys, hits)
+                    for alert_id in alerts:
+                        _agrees(read, alert_id, f"seed {seed}, step {step}")
+                except BaseException:
+                    print(f"AP1 failed at seed {seed}, step {step}")  # noqa: T201 — pytest shows it with the failure
+                    for alert_id in alerts:
+                        print(f"  alert {alert_id}: {investigations_of(read, alert_id)}")  # noqa: T201
+                    raise
             listed = {a.alert_id: a for a in await store.list_alerts(T1, **WINDOW)}
             for alert_id in alerts:
                 rows = investigations_of(read, alert_id)

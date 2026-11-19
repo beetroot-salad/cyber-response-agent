@@ -337,17 +337,23 @@ describe("firedLabel (O5)", () => {
     ["2026-06-15T12:00:00Z", /^15 Jun$/],
     ["2026-07-15T12:00:00Z", /^15 Jul$/],
     ["2026-08-15T12:00:00Z", /^15 Aug$/],
-    ["2026-09-15T12:00:00Z", /^15 Sept?$/],
+    ["2026-09-15T12:00:00Z", /^15 Sep$/],
     ["2026-10-15T12:00:00Z", /^15 Oct$/],
   ])("writes %s, a day of this year, as day and month with no year", (fired, expected) => {
     expect(firedLabel(fired, { now: NOW, timeZone: PARIS }).day).toMatch(expected);
   });
 
+  it("writes the day unpadded, in a fixed English three-letter month, as today's date or with the year", () => {
+    expect(firedLabel("2026-09-05T12:00:00Z", { now: NOW, timeZone: PARIS }).day).toBe("5 Sep");
+    expect(firedLabel("2026-03-01T12:00:00Z", { now: NOW, timeZone: PARIS }).day).toBe("1 Mar");
+    expect(firedLabel("2025-09-05T12:00:00Z", { now: NOW, timeZone: PARIS }).day).toBe("5 Sep 2025");
+  });
+
   it("adds the year when it is not the current year, the current year being the zone's", () => {
-    expect(firedLabel("2025-12-20T12:00:00Z", { now: NOW, timeZone: PARIS }).day).toMatch(/^20 Dec,? 2025$/);
+    expect(firedLabel("2025-12-20T12:00:00Z", { now: NOW, timeZone: PARIS }).day).toMatch(/^20 Dec 2025$/);
     // 31 December 23:30Z is already 2027 in Paris: there, 20 December 2026 is last year though UTC says it is not.
     const newYear = new Date("2026-12-31T23:30:00Z");
-    expect(firedLabel("2026-12-20T12:00:00Z", { now: newYear, timeZone: PARIS }).day).toMatch(/^20 Dec,? 2026$/);
+    expect(firedLabel("2026-12-20T12:00:00Z", { now: newYear, timeZone: PARIS }).day).toMatch(/^20 Dec 2026$/);
     expect(firedLabel("2026-12-20T12:00:00Z", { now: newYear, timeZone: "UTC" }).day).toBe("20 Dec");
   });
 
@@ -443,6 +449,54 @@ describe("readFilters, the times (O7)", () => {
       outcome: "none",
       after: null,
       before: at("2026-11-12T07:00:00Z"),
+    });
+  });
+});
+
+describe("readFilters, impossible calendar times (O7)", () => {
+  // The last day of each month of 2026, and of February 2028 (a leap year): that day is valid, the next one is not.
+  const LAST_DAYS: readonly [string, number][] = [
+    ["2026-01", 31],
+    ["2026-02", 28],
+    ["2026-03", 31],
+    ["2026-04", 30],
+    ["2026-05", 31],
+    ["2026-06", 30],
+    ["2026-07", 31],
+    ["2026-08", 31],
+    ["2026-09", 30],
+    ["2026-10", 31],
+    ["2026-11", 30],
+    ["2026-12", 31],
+    ["2028-02", 29],
+  ];
+  const day = (month: string, d: number): string => `${month}-${String(d).padStart(2, "0")}T12:00`;
+
+  it.each(LAST_DAYS)(
+    "reads the last day of %s (the %ith) and refuses the day after, in both time keys",
+    (month, last) => {
+      for (const key of ["fired_after", "fired_before"]) {
+        expect(read(PARIS, [key, day(month, last)]), `${key} ${day(month, last)}`).not.toBe("invalid");
+        expect(read(PARIS, [key, day(month, last + 1)]), `${key} ${day(month, last + 1)}`).toBe("invalid");
+      }
+    },
+  );
+
+  it.each(["2026-00-10T12:00", "2026-13-10T12:00", "2026-11-00T12:00", "2026-11-12T24:00", "2026-11-12T12:60"])(
+    "refuses %s, a field out of range",
+    (text) => {
+      expect(read(PARIS, ["fired_after", text])).toBe("invalid");
+      expect(read(PARIS, ["fired_before", text], ["tz", NEW_YORK])).toBe("invalid");
+    },
+  );
+
+  it("ignores query keys it does not know, and reads fired_after later than fired_before as a valid window", () => {
+    const filters = valid(read(PARIS, ["colour", "red"], ["outcome", "benign"], ["utm_source", "x"]));
+    expect(filters).toEqual({ outcome: "benign", after: null, before: null });
+    expect(valid(read(PARIS, ["fired_after", "2026-12-01T00:00"], ["fired_before", "2026-01-01T00:00"]))).toEqual({
+      outcome: null,
+      after: at("2026-11-30T23:00:00Z"),
+      before: at("2025-12-31T23:00:00Z"),
     });
   });
 });
