@@ -16,12 +16,29 @@ import uuid
 from collections.abc import Mapping, Sequence
 from typing import Any, cast
 
-from sqlalchemy import Table, Text, and_, case, collate, delete, exists, false, func, literal, or_, select, true, update
+from sqlalchemy import (
+    Table,
+    Text,
+    and_,
+    case,
+    collate,
+    delete,
+    exists,
+    false,
+    func,
+    literal,
+    or_,
+    select,
+    true,
+    tuple_,
+    update,
+)
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from defender.database import async_engine, newest_first_query, sessions
+from defender.job_socket import MAX_MESSAGE
 from defender.jobs.errors import Conflict, NotFound
 from defender.jobs.learning_check import arm_learning_check
 from defender.records.formats import BatchId, CommitId, TenantId, WorkItemId
@@ -60,6 +77,11 @@ DEFAULT_RENEW_SECONDS = 30.0
 DEFAULT_MAX_ATTEMPTS = 3
 DEFAULT_GENERATION_CEILING = 3
 DEFAULT_REFUSAL_CEILING = 3
+#: How much item payload one claim takes (#1487 Amendment r5.4), counted as PostgreSQL's JSON text of each payload
+#: (`octet_length(payload::text)`, which already writes a control character as its six-byte escape). The claim crosses
+#: the job socket whole, as ASCII JSON, where a non-ASCII character takes at most three times its UTF-8 bytes: a quarter
+#: of the socket's message cap keeps the largest claim under it with room for the envelope.
+DEFAULT_CLAIM_BYTES = MAX_MESSAGE // 4
 
 
 _I = cast(Table, WorkItemRow.__table__)
@@ -379,12 +401,15 @@ class LearningStore(FeedbackVerbs):
     """Async store over PostgreSQL schema `learning`; tenant id is the first argument of every verb (a holder's verb
     takes its proof instead). #1414's feedback verbs are `FeedbackVerbs` (A4)."""
 
-    def __init__(self, dsn: str, *, lease: float = DEFAULT_LEASE_SECONDS, grace: float = DEFAULT_GRACE_SECONDS,
+    def __init__(  # noqa: PLR0913 — the store's knobs, each with its default
+            self, dsn: str, *, lease: float = DEFAULT_LEASE_SECONDS, grace: float = DEFAULT_GRACE_SECONDS,
                  renew_every: float = DEFAULT_RENEW_SECONDS, max_attempts: int = DEFAULT_MAX_ATTEMPTS,
                  generation_ceiling: int = DEFAULT_GENERATION_CEILING,
-                 refusal_ceiling: int = DEFAULT_REFUSAL_CEILING, max_connections: int = 10) -> None:
+                 refusal_ceiling: int = DEFAULT_REFUSAL_CEILING, claim_bytes: int = DEFAULT_CLAIM_BYTES,
+                 max_connections: int = 10) -> None:
         self.lease, self.grace, self.renew_every = lease, grace, renew_every
         self.max_attempts = max_attempts
+        self.claim_bytes = claim_bytes
         self.generation_ceiling, self.refusal_ceiling = generation_ceiling, refusal_ceiling
         self._engine = async_engine(dsn, max_connections=max_connections)
         self._sessions = sessions(self._engine)
@@ -578,7 +603,9 @@ class LearningStore(FeedbackVerbs):
         """Start a working batch on `lane` over what is due, in one transaction (P2'); `None` when nothing is due.
 
         A replacement due (items still in a batch that closed with feedback) goes first and takes only those items;
-        otherwise every waiting item of each kind at or over its threshold (pitfalls: distinct `mistake_key`s, not rows)."""
+        otherwise the waiting items of each kind at or over its threshold (pitfalls: distinct `mistake_key`s, not rows),
+        oldest first, up to `claim_bytes` of payload and always at least one (#1487 Amendment r5.4): the rest wait for
+        the next claim. A replacement takes the items of a batch a claim already bounded."""
         if lane not in LANES:
             raise ValueError(f"not a lane: {lane}")
         kinds = [k for k, ln in LANE_OF.items() if ln == lane]
@@ -679,7 +706,10 @@ class LearningStore(FeedbackVerbs):
             replaces=replaces, generation=generation, refusals=0, created_at=func.now()))
         if kinds:
             where = [_I.c.tenant_id == TenantId(tenant), _I.c.kind.in_(kinds)]
-            where += [_I.c.status == "in_batch", _I.c.batch_id == only_batch] if only_batch else [_I.c.status == "waiting"]
+            if only_batch:
+                where += [_I.c.status == "in_batch", _I.c.batch_id == only_batch]
+            else:
+                where += [_I.c.status == "waiting", tuple_(_I.c.kind, _I.c.item_key).in_(self._within_budget(tenant, kinds))]
             rows = (await s.execute(update(_I).where(*where).values(
                 status="in_batch", batch_id=batch_id, attempts=_I.c.attempts + 1, updated_at=func.now())
                 .returning(_I.c.kind, _I.c.item_key, _I.c.payload, _I.c.enqueued_at))).all()
@@ -689,6 +719,17 @@ class LearningStore(FeedbackVerbs):
                       for r in sorted(rows, key=lambda r: (r.kind, r.enqueued_at, r.item_key)))
         return Held(tenant_id=TenantId(tenant), batch_id=batch_id, lane=lane, kind=kind, branch=branch, token=1,
                     owner=owner, items=items, replaces=replaces, feedback_pr=feedback_pr)
+
+    def _within_budget(self, tenant: str, kinds: list[str]) -> Any:
+        """The `(kind, item_key)` of the tenant's waiting items of `kinds` a claim takes: oldest first (enqueue time,
+        then kind and key), while their payloads' running total stays within `claim_bytes`, and the oldest one
+        whatever its size."""
+        size = func.octet_length(_I.c.payload.cast(Text))
+        sized = select(_I.c.kind, _I.c.item_key, size.label("size"), func.sum(size).over(
+            order_by=(_I.c.enqueued_at, _I.c.kind, _I.c.item_key)).label("upto")).where(
+            _I.c.tenant_id == TenantId(tenant), _I.c.kind.in_(kinds), _I.c.status == "waiting").subquery()
+        return select(sized.c.kind, sized.c.item_key).where(
+            or_(sized.c.upto <= self.claim_bytes, sized.c.upto == sized.c.size))
 
     async def claim_revert(self, tenant: str, *, owner: str) -> Held:
         """A revert batch (no items): needs the working rule only; an open author PR does not block it."""

@@ -38,6 +38,8 @@ class Held:
     #: A post-step's hold on its tenant's check clock (#1344 amendment 3): the token the
     #: renewal extends it by. None for a row, and for a post-step that holds nothing yet.
     check_holder: str | None = None
+    #: A post-step the worker ended because it ran past `post_step_limit` (#1487 Amendment r5.4).
+    overran: bool = False
     group_left: bool = False
     #: The fence's ender tasks, held so the event loop's weak reference is not their only one.
     enders: list[asyncio.Task[None]] = field(default_factory=list)

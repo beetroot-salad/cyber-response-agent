@@ -94,6 +94,11 @@ END_RETRY_DELAY = 1.0
 #: (#1344 amendment 1), in seconds.
 LEARNING_CHECK_INTERVAL = 300.0
 
+#: How long a post-step may run before the worker ends it as it would at a stop (#1487 Amendment r5.4), in seconds:
+#: well past a long authoring tick, so that only a hang (a database that never answers, a container that never exits)
+#: meets it.
+POST_STEP_LIMIT = 4 * 3600.0
+
 #: The per-job host helper (#1170 H7): every job of every kind is its child, started with `-m` from the
 #: code tree's root (the worker's code copy, as `child_cwd`).
 JOB_HOST_MODULE = "defender.job_host"
@@ -308,6 +313,8 @@ class Worker:
     working directory of every child (the code copy, for `-m` starts). `learning_check_interval`
     (seconds, above 0) is how long a tenant goes without a post-step before a family-less one
     checks it (amendment 1); each tenant's clock starts at the start of `serve` or `drain`.
+    `post_step_limit` (seconds, above 0) is how long a post-step runs before the worker ends it, SIGTERM then SIGKILL
+    after `stop_grace`, and leaves its tenant's clock not idle (#1487 Amendment r5.4).
     `screen_findings(kind, rows, job_id)` (#1487) screens a completed job's findings, channel by
     channel, before its end write; it refuses by raising, and defaults to the channel rules' door,
     `learning.judge.enqueue.screen_findings`."""
@@ -326,6 +333,7 @@ class Worker:
         post_step_argv: Callable[[PostStepLaunch], list[str]] | None = None,
         child_cwd: Path | None = None,
         learning_check_interval: float = LEARNING_CHECK_INTERVAL,
+        post_step_limit: float = POST_STEP_LIMIT,
         wait_group: Callable[[int], bool] = wait_group_gone,
         screen_findings: Callable[[str, object, str], object] | None = None,
     ) -> None:
@@ -341,6 +349,9 @@ class Worker:
             raise ValueError("a worker with learning slots needs both the learning and the post-step child commands")
         if not learning_check_interval > 0:
             raise ValueError(f"the learning check interval must be above 0 seconds, not {learning_check_interval!r}")
+        if not post_step_limit > 0:
+            raise ValueError(f"the post-step limit must be above 0 seconds, not {post_step_limit!r}")
+        self._post_step_limit = post_step_limit
         self._learning_slots = learning_slots
         self._learning_argv = learning_argv
         self._post_step_argv = post_step_argv
@@ -1146,7 +1157,7 @@ class Worker:
         Either kind restarts the tenant's check clock when it ends, idle only when its helper exited
         saying that no work waits (#1487 O7, Flow 3, Amendment r5.2: the helper asks the learning
         store once the container exited); a post-step that cannot start, a stop, or any other exit
-        leaves it not idle."""
+        leaves it not idle, a post-step ended for running past `post_step_limit` included."""
         post_step = self._post_step_argv
         assert post_step is not None  # a worker with learning slots has it (constructor)
         if holder is None:
@@ -1162,10 +1173,11 @@ class Worker:
         try:
             self._held[key] = held
             launch = PostStepLaunch(job, tenant, os.getpid())
-            proc = await self._run_child(held, lambda: post_step(launch))
+            proc = await self._run_child(held, lambda: post_step(launch), watch=self._post_step_deadline)
             if proc is None:
                 return
-            waiting = None if held.signalled or self._stopping else _post_step_answer(proc.returncode)
+            stopped = held.signalled or held.overran or self._stopping
+            waiting = None if stopped else _post_step_answer(proc.returncode)
             idle = waiting is False
             announce("learning_post_step", actor=SYSTEM, tenant_id=tenant,
                      target=job if job is not None else tenant,
@@ -1174,6 +1186,14 @@ class Worker:
         finally:
             self._held.pop(key, None)
             await self._end_check(tenant, holder, idle=idle)
+
+    async def _post_step_deadline(self, held: Held) -> None:
+        """Beside a post-step's child: once it has run `post_step_limit`, end it as a stop would (#1487 Amendment r5.4),
+        logged. Its answer is then unknown, so its tenant's clock stays not idle."""
+        await asyncio.sleep(self._post_step_limit)
+        held.overran = True
+        _logger.error("%s: the post-step ran past its limit of %gs; ending it", _what(held), self._post_step_limit)
+        await self._end_child(held)
 
     async def _end_check(self, tenant: str, holder: str, *, idle: bool) -> None:
         """Let go of the hold `holder` on the tenant's check clock, restarting it (amendment 3). A

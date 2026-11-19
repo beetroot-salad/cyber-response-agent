@@ -3,7 +3,8 @@
 Reads `DEFENDER_API_FRONTEND_ORIGIN` (the API's own origin setting, which a flagged job's ticket comment links to; refused without it, #1471 W9), `DEFENDER_DATABASE_DSN`, `DEFENDER_DATA_ROOT`, `DEFENDER_BUILD_COMMIT`, `DEFENDER_WORKER_SLOTS`
 (default 3), `DEFENDER_WORKER_LEARNING_SLOTS` (default min(1, slots - 1)) and
 `DEFENDER_WORKER_LEARNING_CHECK_SECONDS` (default 300: how long a tenant goes without a post-step
-before a family-less one checks it, #1344 amendment 1). Refuses a build stamp that is not a
+before a family-less one checks it, #1344 amendment 1) and `DEFENDER_WORKER_POST_STEP_SECONDS` (default 14400: how
+long a post-step runs before the worker ends it, #1487 Amendment r5.4). Refuses a build stamp that is not a
 commit (empty, a tag, a branch name: the marker reader's grammar), bad settings (with learning slots, the learning
 store's thresholds, attempt ceiling and lease timings too) and a job network
 (`DEFENDER_JOB_NETWORK`) that is not a bridge network made for the jobs before any work, refuses a second worker on the same data root without
@@ -51,7 +52,8 @@ async def _serve_until_stopped(settings, copy: Path) -> None:  # noqa: ANN001 â€
             store, data_root=data_root_from_path(settings.root), child_argv=run_argv_in(copy),
             slots=settings.slots, clock=_CLOCK, learning_slots=settings.learning_slots,
             learning_argv=job_entry_argv, post_step_argv=post_step_argv, child_cwd=copy,
-            learning_check_interval=float(settings.learning_check_seconds), frontend_origin=settings.frontend_origin)
+            learning_check_interval=float(settings.learning_check_seconds),
+            post_step_limit=float(settings.post_step_seconds), frontend_origin=settings.frontend_origin)
         _logger.info("the worker serves build %s: %d slot(s), %d for learning, children from %s",
                      settings.build_commit, settings.slots, settings.learning_slots, copy)
         await worker.serve()

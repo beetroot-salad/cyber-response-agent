@@ -252,3 +252,53 @@ def test_o7_the_pending_set_its_hand_over_and_the_record_are_gone():
     for name in ("write_post_step", "read_post_step", "write_post_step_pending", "read_post_step_pending"):
         assert not hasattr(job_lane.JobLane, name), name
     assert not {".post-step.json", ".post-step-pending.json"} & set(_layout.ACCEPTED_SIDECAR_SUFFIXES)
+
+
+@pg
+async def test_r54_a_post_step_past_its_limit_is_ended_and_leaves_the_clock_not_idle(world, caplog):  # noqa: F811
+    """A post-step that hangs (it waits a minute for a file that never comes) is ended once it has run the worker's
+    `post_step_limit`, logged as an error, and its tenant's clock is not idle though nothing waits in the store. The
+    control, the same post-step with no hang, goes idle. (Amendment r5.4)"""
+    dsn = world["dsn"]
+    post = post_child(world, wait_for=world["tmp"] / "never")
+    async with job_store(dsn) as store:
+        job = await queued_job(world, store, ticket="J-1")
+        started = asyncio.get_running_loop().time()
+        await asyncio.wait_for(learning_worker(
+            world, store, job=job_child(world, files={END: FAILED}), post=post, post_step_limit=1.0, stop_grace=2).drain(),
+            timeout=40)
+        took = asyncio.get_running_loop().time() - started
+
+    assert post.handed == [(job, "failed")], "premise: the post-step ran"
+    assert took < 30, f"the post-step ran {took:.1f}s, past its 1s limit and the stop grace"
+    assert _idle(dsn) is False, "a post-step ended at its limit was read as nothing waiting"
+    assert any(r.levelname == "ERROR" and "past its limit" in r.getMessage() for r in caplog.records), caplog.text
+
+    execute(dsn, "UPDATE jobs.learning_checks SET idle = FALSE WHERE tenant_id = %s", (T1,))
+    control = post_child(world, name="control")
+    async with job_store(dsn) as store:
+        await queued_job(world, store, ticket="J-2")
+        await learning_worker(world, store, job=job_child(world, name="again", files={END: FAILED}), post=control,
+                              post_step_limit=30.0).drain()
+    assert _idle(dsn) is True, "control: the same post-step within its limit answers, and nothing waits"
+
+
+def test_r54_the_post_step_limit_is_a_positive_setting_defaulting_to_four_hours(tmp_path):
+    """`DEFENDER_WORKER_POST_STEP_SECONDS`: default 14400; 0, negative or not a number refuses the start; a worker
+    refuses a limit of 0 or below. (Amendment r5.4)"""
+    from types import SimpleNamespace
+
+    from defender.tests.support.jobs._jobs1342 import FRONTEND_ORIGIN, NOW
+    from defender.worker import Worker, WorkerStartRefused
+    from defender.worker._start import read_settings
+
+    environ = {"DEFENDER_BUILD_COMMIT": "c" * 40, "DEFENDER_DATABASE_DSN": "postgresql://x/y",
+               "DEFENDER_DATA_ROOT": str(tmp_path), "DEFENDER_API_FRONTEND_ORIGIN": FRONTEND_ORIGIN}
+    assert read_settings(environ).post_step_seconds == 4 * 3600
+    assert read_settings({**environ, "DEFENDER_WORKER_POST_STEP_SECONDS": "90"}).post_step_seconds == 90
+    for raw in ("0", "-5", "soon"):
+        with pytest.raises(WorkerStartRefused, match="POST_STEP"):
+            read_settings({**environ, "DEFENDER_WORKER_POST_STEP_SECONDS": raw})
+    with pytest.raises(ValueError, match="post-step limit"):
+        Worker(SimpleNamespace(), data_root=tmp_path, clock=lambda: NOW, post_step_limit=0,
+               frontend_origin=FRONTEND_ORIGIN)
