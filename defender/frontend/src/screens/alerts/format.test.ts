@@ -253,6 +253,14 @@ const TRANSITIONS: readonly string[] = [
   "Pacific/Apia 2011-12-31T01:00 2011-12-30T11:00Z",
 ];
 
+/** A table row's three space-separated fields; a row of any other shape is a broken table. */
+const fields = (row: string): [string, string, string] => {
+  const [zone, time, instant, ...rest] = row.split(" ");
+  if (zone === undefined || time === undefined || instant === undefined || rest.length > 0)
+    throw new Error(`malformed row: ${row}`);
+  return [zone, time, instant];
+};
+
 const ORDINARY: readonly string[] = [
   "UTC 2026-01-15T00:00 2026-01-15T00:00Z",
   "UTC 2026-06-30T23:59 2026-06-30T23:59Z",
@@ -514,12 +522,12 @@ describe("readFilters, wall times near a clock change (O7)", () => {
   });
 
   it.each(TRANSITIONS)("resolves %s the way `compatible` does, and never calls a wall time invalid", (row) => {
-    const [zone, time, instant] = row.split(" ") as [string, string, string];
+    const [zone, time, instant] = fields(row);
     expect(valid(read(PARIS, ["fired_before", time], ["tz", zone])).before).toBe(at(instant));
   });
 
   it.each(ORDINARY)("reads %s", (row) => {
-    const [zone, time, instant] = row.split(" ") as [string, string, string];
+    const [zone, time, instant] = fields(row);
     expect(valid(read("UTC", ["fired_after", time], ["tz", zone])).after).toBe(at(instant));
   });
 });
