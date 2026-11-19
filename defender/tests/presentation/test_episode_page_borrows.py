@@ -63,15 +63,20 @@ def test_1025_a_permission_denied_trace_or_tool_trace_is_that_slots_refusal_neve
 
 @NOT_ROOT
 def test_1025_a_world_directory_with_no_search_permission_is_that_worlds_refusal(tmp_path):
-    """`worlds/<label>/` chmod 000: that world's archive block reads its refusal and every other
-    section renders."""
-    ep = E.sample_episode(tmp_path)
+    """`worlds/<label>/` chmod 000: that world's leads block, which reads the world directory, reads its refusal, and
+    every other section renders. The world's closing-record slot is not read from that directory (#1534: the record is
+    the arm's, through the episode's run view, and the archive no longer holds a `report.md`), so it still shows the
+    record."""
+    closed = "benign"  # not the world's declared `malicious`: the slot can only have it from the arm's record
+    ep = E.sample_episode(tmp_path, closings={E.GRADED_WORLD: {"disposition": closed}})
     with _restoring([ep.world(E.GRADED_WORLD)], 0):
         page = render(ep)
     assert page.by_id, "no page"
-    assert "Permission denied" in page.text_of(f"world-{E.GRADED_WORLD}") or \
-        "could not be read" in page.text_of(f"world-{E.GRADED_WORLD}"), \
-        page.text_of(f"world-{E.GRADED_WORLD}")
+    leads = page.text_of(f"leads-{E.GRADED_WORLD}")
+    assert "world directory unreadable" in leads, leads
+    assert "Permission denied" in leads, leads
+    slot = page.section(f"world-{E.GRADED_WORLD}").find_all(cls="w-report")[0].text()
+    assert slot == f"closing record: {closed}", slot
     assert f"f-{E.GRADED_WORLD}-0-0" not in page.ids  # its draws are unreadable too
     assert f"f-{E.PASSTHROUGH_WORLD}-0-0" in page.ids
 
