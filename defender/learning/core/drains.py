@@ -272,6 +272,17 @@ def _validate_merge_mode() -> None:
     merge_mode()
 
 
+def _validate_tick_settings() -> None:
+    """The tick's own settings read once at its start (#1487): a malformed attempt ceiling or threshold is the stage's
+    `FatalConfigError` (exit 2) before anything is claimed, whoever bound the store the tick is handed (a host
+    entry's adapter reads them as it binds; a caller's own store, or the post-step's port, never shows them here)."""
+    from defender.learning.core.config import author_max_attempts
+    from defender.learning.core.store_tick import thresholds
+
+    author_max_attempts()
+    thresholds()
+
+
 #: The tick's refusal while it opens its tenant delivery or starts its batch (`store_tick.Refused`): the
 #: stage's one-line `FatalConfigError`, or, when transient, a skipped tick.
 _Refused = Refused
@@ -547,6 +558,7 @@ def author_drain(  # noqa: PLR0913 — the stage's seams: the author step, the f
     the author lane: a host entry's adapter (`store_tick.opened_tick_store`), or the post-step's port over its helper
     (`JobContainer.tick_store()`). It is never chosen here."""
     _validate_merge_mode()
+    _validate_tick_settings()
     records, credential, relay = _drain_sources(container, directory=directory, identity=identity)
     # The lane's label reaches its work step bound into the DEFAULT seam, so an injected seam
     # keeps its call shape (#1134).
@@ -597,12 +609,16 @@ def lead_author_drain(  # noqa: PLR0913 — the stage's seams (OD4, OD16): two s
     stop_box: Callable[..., None] = box_mod.stop_box,
     git_timeout: float = GIT_TIMEOUT_SECONDS,
     make_model: Callable[..., Any] | None = None,
+    store: TickStore | None = None,
 ) -> int:
     """The lead-author lane's tick over the learning store (operator-only, A2 D9): reconcile the lane's
     batches in review, recover a lapsed one, then claim its pitfalls and curation requests and author
     them; its delivery seams as `author_drain`'s. `git_timeout` is bound into the DEFAULT work steps only
-    (the lanes' own bounded reads, #1175)."""
+    (the lanes' own bounded reads, #1175). `store` is the tick's store (#1487 Flow 2, `learning_store.tick.TickStore`)
+    bound by the caller to the tenant and the lead lane; left out, the drain binds the host's own
+    (`store_tick.opened_tick_store`) inside its stage."""
     _validate_merge_mode()
+    _validate_tick_settings()
     records = _drain_directory(directory)
     # Read every configured value before a batch, box or agent exists, so a malformed setting
     # refuses the tick rather than a commit.
@@ -631,7 +647,7 @@ def lead_author_drain(  # noqa: PLR0913 — the stage's seams (OD4, OD16): two s
         return _open_delivery(paths, directory=records, client=client, identity=identity,
                               credential_config=credential_config, issuer_transport=issuer_transport)
 
-    return _store_tick(paths, store=None, lane=LEAD_LANE, label=LEAD_AUTHOR_DRAIN_LABEL, open_delivery=open_delivery,
+    return _store_tick(paths, store=store, lane=LEAD_LANE, label=LEAD_AUTHOR_DRAIN_LABEL, open_delivery=open_delivery,
                  author_work=lambda work_paths, **kw: _store_lead_work(work_paths, lead_step, pitfalls_step, **kw),
                  start_box=start_box, stop_box=stop_box, reconcile_lanes=(LEAD_LANE,),
                  before_claim=read_systems if reads_systems else None)
