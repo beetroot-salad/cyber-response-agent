@@ -27,6 +27,7 @@ from defender.tests.support.jobs._jobs1342 import (
     NOW,
     T1,
     T2,
+    TITLE,
     JobsAudit,
     VisibleAtEmit,
     accounting_written,
@@ -4094,3 +4095,93 @@ async def test_1471_w1_a_lapse_retry_carries_its_requests_flag(dsn, flagged):
     assert retry.record.update_ticket is flagged
     assert execute(dsn, "SELECT update_ticket FROM jobs.investigations WHERE id = %s",
                    (retry.record.investigation_id,)) == [(flagged,)], "the stored column of the retry"
+
+
+# --- alert list: each alert's outcome and latest status (O1), the outcome filter (O2), no raw (O3) ---------------------
+#
+# FORCED CHOICE (the design names the summary record but not its name, export or field spellings): the store's list
+# answers records with `outcome` and `latest_status` (the wire's words; the store's own column is `stage`), and no
+# `raw`; it is not a `StoredAlert`. `list_alerts` gains a keyword `outcome`: None = unfiltered, a disposition, or the
+# string "none" (no completed investigation) — the design leaves the store's spelling of "none" vs "unfiltered" open.
+
+_HOUR = dt.timedelta(hours=1)
+
+
+async def _ended(store: Any, clock: Clock, alert_id: str, key: str, *, stage: str, disposition: str | None = None) -> None:
+    """An investigation of `alert_id` created at the clock's time, claimed and ended `stage`; the clock then moves an hour,
+    so each later investigation of an alert is strictly newer by `created_at` (ids are random uuid4s)."""
+    inv, _ = await store.create_investigation(T1, alert_id, key, actor="setup")
+    claimed = await store.claim()
+    assert claimed is not None
+    assert claimed.record.investigation_id == inv.investigation_id, "premise: it was the one queued"
+    await store.finish(T1, inv.investigation_id, stage=stage, disposition=disposition, cost_usd=0.0,
+                       failure_reason="no_report" if stage == "failed" else None)
+    clock.at += _HOUR
+
+
+async def _outcome_world(store: Any, clock: Clock) -> dict[str, str]:
+    """T1's alerts, newest fired first: `rerun` (completed malicious, then completed benign, then a running rerun),
+    `failed` (one failed investigation), `quiet` (none). `fired_at` 1h apart, so the list's order is theirs."""
+    fired = {"rerun": NOW - _HOUR, "failed": NOW - 2 * _HOUR, "quiet": NOW - 3 * _HOUR}
+    ids = {}
+    for name, at in fired.items():
+        stored = await store.insert_alert(T1, vendor="elastic", vendor_ticket_id=f"O-{name}", fired_at=at, changed_at=at,
+                                          received_at=at, raw=ALERT_BYTES)
+        ids[name] = stored.alert_id
+    await _ended(store, clock, ids["rerun"], "k1", stage="completed", disposition="malicious")
+    await _ended(store, clock, ids["rerun"], "k2", stage="completed", disposition="benign")
+    await _ended(store, clock, ids["failed"], "k1", stage="failed")
+    rerun, _ = await store.create_investigation(T1, ids["rerun"], "k3", actor="setup")
+    claimed = await store.claim()
+    assert claimed is not None
+    assert claimed.record.investigation_id == rerun.investigation_id, "premise: the rerun runs"
+    return ids
+
+
+async def test_alert_list_o1_each_listed_alert_carries_its_newest_completed_outcome_and_newest_status(dsn):
+    """`outcome` is the newest completed investigation's disposition (a running rerun does not hide it, a newer completed
+    one replaces an older); `latest_status` is the newest investigation's status; both null with no investigation. (O1)"""
+    clock = Clock()
+    async with store_with(dsn, clock) as store:
+        ids = await _outcome_world(store, clock)
+        listed = await store.list_alerts(T1, fired_after=None, fired_before=None, outcome=None, after=None, limit=50)
+    assert [(a.alert_id, a.outcome, a.latest_status) for a in listed] == [
+        (ids["rerun"], "benign", "running"),
+        (ids["failed"], None, "failed"),
+        (ids["quiet"], None, None),
+    ]
+
+
+async def test_alert_list_o2_the_outcome_filter_applies_before_paging(dsn):
+    """`outcome="none"` with `limit=1` answers the newest alert with no completed investigation (not an empty page);
+    a disposition answers only alerts whose outcome it is; a disposition held only by an older investigation does not
+    match. (O2)"""
+    clock = Clock()
+    async with store_with(dsn, clock) as store:
+        ids = await _outcome_world(store, clock)
+        window: dict[str, Any] = {"fired_after": None, "fired_before": None, "after": None}
+        first_none = await store.list_alerts(T1, outcome="none", limit=1, **window)
+        all_none = await store.list_alerts(T1, outcome="none", limit=50, **window)
+        benign = await store.list_alerts(T1, outcome="benign", limit=50, **window)
+        malicious = await store.list_alerts(T1, outcome="malicious", limit=50, **window)
+    assert [a.alert_id for a in first_none] == [ids["failed"]]
+    assert [a.alert_id for a in all_none] == [ids["failed"], ids["quiet"]]
+    assert [a.alert_id for a in benign] == [ids["rerun"]]
+    assert malicious == [], "the older completed `malicious` is not the alert's outcome"
+
+
+async def test_alert_list_o3_the_listed_record_has_no_raw_and_the_single_read_keeps_it(dsn):
+    """The list's record carries no `raw` field and is not a `StoredAlert`; `get_alert` still answers the exact bytes. (O3, #1507)
+    FORCED CHOICE: "selects no raw column" is observed here only through the record's fields; whether (and how) a test
+    pins the SQL itself (a statement log, `pg_stat_statements`, an engine event) is not decided by the design."""
+    from defender.jobs import StoredAlert
+
+    async with job_store(dsn) as store:
+        alert = await an_alert(store, T1)
+        [listed] = await store.list_alerts(T1, fired_after=None, fired_before=None, outcome=None, after=None, limit=5)
+        single = await store.get_alert(T1, alert.alert_id)
+    assert not isinstance(listed, StoredAlert)
+    assert not hasattr(listed, "raw")
+    assert (listed.alert_id, listed.title) == (alert.alert_id, TITLE)
+    assert single is not None
+    assert single.raw == ALERT_BYTES
