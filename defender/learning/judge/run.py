@@ -445,8 +445,9 @@ def _finding_doc(finding: InvestigatorFinding | WorldFinding | Gap) -> dict[str,
 _DECISION_GLOSSARY = (
     "HOW EACH CALL WAS ANSWERED. Every call names one of these decision words:\n"
     "- `passthrough`: the live system's own answer, unchanged.\n"
-    "- `oracle`: an answer changed so this world's facts show in it. Its claim says what was "
-    "added, removed or changed, and its verifier verdict whether an independent check passed. "
+    "- `oracle`: an answer changed so this world's facts show in it. Its claim lists each "
+    "change the host applied (added, removed or replaced, with the fact it serves and the row "
+    "before and after), and its verifier verdict whether an independent check passed. "
     "\"claim unavailable\" means no claim was stored for that call: never treat such an answer "
     "as verified.\n"
     "- `real-error`: the live system answered with an error, and the investigator saw that "

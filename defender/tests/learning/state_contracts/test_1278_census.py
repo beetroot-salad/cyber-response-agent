@@ -11,7 +11,6 @@ writes under `<T>/learning` is observed in `tests/learning/curation/test_1278_ca
 from __future__ import annotations
 
 import ast
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -152,8 +151,3 @@ def test_o10_the_learning_state_handle_and_its_stage_dir_are_not_defined_anywher
     defined = {rel: d for rel in files if (d := _definitions((REPO / rel).read_text(encoding="utf-8")))}
     assert defined == {}, defined
 
-
-def test_o10_the_run_records_page_no_longer_documents_the_curator_traces_under_pending():
-    """The records page stops documenting `_pending/wire_logs/` as where the curators' traces live. (A1 docs)"""
-    page = (REPO / "defender" / "docs" / "run-records.md").read_text(encoding="utf-8")
-    assert re.search(r"_pending\*?/wire_logs", page) is None

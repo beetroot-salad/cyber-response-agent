@@ -14,6 +14,7 @@ import yaml
 from defender import _yaml
 from defender.configuration import env_str
 from defender._io import read_guarded, read_text_utf8
+from defender.records.formats import FamilyError, parse_facts
 from defender.records import RunPaths
 from defender._untrusted import message_salt
 from defender.learning._prompt import section_text, stage_user_message, titled_section
@@ -344,21 +345,26 @@ def _family_prompt(header: str, capture: _Capture) -> str:
     )
 
 
-def _world_prompt(seat: str, *, axis: Any, family_reply: Any, header: str,
-                  capture: _Capture) -> str:
+def _world_prompt(seat: str, *, axis: Any, family_reply: Any, header: str,  # noqa: PLR0913 — the seat, its plan and the capture, plus a revision's conflict
+                  capture: _Capture, revision: Any = None) -> str:
     """The prompt for one world-authoring seat.
 
     `family_reply` is re-wrapped as untrusted (Call 1 read attacker-influenced text), in this
     message's own salt, minted after the reply exists so Call 1's model has never seen it."""
     seeded = section_text(family_reply)
-    salt = message_salt(seeded, capture.leads, capture.alert, capture.frontier, capture.samples)
+    conflict = section_text(revision) if revision is not None else ""
+    salt = message_salt(seeded, capture.leads, capture.alert, capture.frontier, capture.samples,
+                        conflict)
     axis_line = f"Your axis, as call 1 named it: {axis}\n" if axis is not None else ""
+    # A revision has its own prompt: it returns the facts that `world.md` tells a seat never to.
     return (
-        f"{_prompt('world.md')}\n"
+        f"{_prompt('world.md' if revision is None else 'revise.md')}\n"
         f"## Your seat\n\nYou are authoring the world in seat {seat}.\n{axis_line}\n"
-        f"{header}\n"
+        + f"{header}\n"
         + stage_user_message(
             salt,
+            *([titled_section("Conflict with what the run already saw", conflict, salt=salt,
+                              tag=UNTRUSTED_TAG)] if revision is not None else []),
             titled_section(f"Call 1's output (seat {seat} authors against this)", seeded,
                            salt=salt, tag=UNTRUSTED_TAG),
             titled_section(_TITLES["leads"], capture.leads, salt=salt, tag=UNTRUSTED_TAG),
@@ -402,6 +408,155 @@ SEAT_AUTHORED_FIELDS: frozenset[str] = frozenset({"story", "axis", "disposition_
                                                   "label_basis"})
 
 
+#: The most characters one pre-branch answer, and all of them together, take in the check.
+_PREBRANCH_ANSWER_CAP = 4000
+_PREBRANCH_TOTAL_CAP = 60_000
+
+
+def _prebranch_section(prebranch: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The pre-branch calls and their recorded answers as the check reads them, newest first,
+    each answer cut to its cap and the whole within its total."""
+    out: list[dict[str, Any]] = []
+    total = 0
+    for entry in reversed(list(prebranch)):
+        text = section_text(entry.get("answer"))
+        if len(text) > _PREBRANCH_ANSWER_CAP:
+            text = f"{text[:_PREBRANCH_ANSWER_CAP]} ... [cut: {len(text)} characters]"
+        if total + len(text) > _PREBRANCH_TOTAL_CAP:
+            break
+        total += len(text)
+        out.append({"call": entry.get("call"), "answer": text})
+    return out
+
+
+def _premise_prompt(*, family: dict[str, Any], worlds: Sequence[dict[str, Any]],
+                    prebranch: Sequence[dict[str, Any]]) -> str:
+    story = section_text({"base_story": family.get("base_story"),
+                          "discriminator": family.get("discriminator")})
+    shown = section_text([{k: w.get(k) for k in ("label", "axis", "facts")} for w in worlds])
+    calls = section_text(_prebranch_section(prebranch))
+    salt = message_salt(story, shown, calls)
+    return (f"{_prompt('premise.md')}\n"
+            + stage_user_message(
+                salt,
+                titled_section("The base story", story, salt=salt, tag=UNTRUSTED_TAG),
+                titled_section("The worlds", shown, salt=salt, tag=UNTRUSTED_TAG),
+                titled_section("The calls the run made before the branch point, with their "
+                               "answers", calls, salt=salt, tag=UNTRUSTED_TAG)))
+
+
+def _conflicts(check: Any, *, family: dict[str, Any], worlds: Sequence[dict[str, Any]],
+               prebranch: Sequence[dict[str, Any]], agent_id: str) -> dict[str, list[dict]]:
+    """The check's conflicts by world label. A reply the host cannot read raises: the caller
+    keeps the family as authored (`author_family`)."""
+    labels = {str(w.get("label")) for w in worlds}
+    reply = check(_premise_prompt(family=family, worlds=worlds, prebranch=prebranch),
+                  role=AgentRole.QUESTIONER, agent_id=agent_id)
+    doc = _reply_document(reply, what="the premise check")
+    found: dict[str, list[dict]] = {}
+    for entry in doc.get("conflicts") or ():
+        if isinstance(entry, dict) and str(entry.get("label")) in labels:
+            found.setdefault(str(entry["label"]), []).append(
+                {k: entry.get(k) for k in ("fact_id", "evidence")})
+    return found
+
+
+def _revised_facts(authored: dict[str, Any], *, seat: str) -> list[dict[str, Any]] | None:
+    """A revision's facts, held to the family's own rule for a world's facts (`parse_facts`),
+    or None: a revision whose facts would not parse drops its world, never the family."""
+    facts = authored.get("facts")
+    if not (isinstance(facts, list) and facts):
+        return None
+    try:
+        parse_facts(facts, f"the revision of seat {seat}")
+    except FamilyError as refused:
+        _logger.warning(f"seat {seat}'s revised facts are refused ({refused}); its world is "
+                        "dropped")
+        return None
+    return [dict(f) for f in facts]
+
+
+def _rebuilt(world: dict[str, Any], conflicts: list[dict], *, invoke: Any,  # noqa: PLR0913 — the world, its conflicts and what its seat was shown
+             family_reply: Any, header: str, capture: _Capture) -> dict[str, Any] | None:
+    """`world` as its seat rebuilds it against `conflicts`, or None when the rebuild fails or
+    returns facts the family would refuse."""
+    seat = str(world.get("role"))
+    try:
+        reply = invoke(_world_prompt(seat, axis=world.get("axis"), family_reply=family_reply,
+                                     header=header, capture=capture, revision=conflicts),
+                       role=AgentRole.QUESTIONER, agent_id=f"questioner:{seat.lower()}:revise")
+        authored = _reply_document(reply, what=f"the revision of seat {seat}")
+    except Exception as failed:  # noqa: BLE001 — a rebuild that fails drops its world alone
+        _logger.warning(f"seat {seat}'s revision failed ({failed!r}); its world is dropped")
+        return None
+    facts = _revised_facts(authored, seat=seat)
+    if facts is None:
+        return None
+    return {**world, **{k: v for k, v in authored.items() if k in SEAT_AUTHORED_FIELDS},
+            "facts": facts}
+
+
+def _still_conflicting(check: Any, rebuilt: dict[str, dict[str, Any]], *,
+                       family: dict[str, Any],
+                       prebranch: Sequence[dict[str, Any]]) -> dict[str, list[dict]]:
+    """The second check over the rebuilt worlds. One that fails confirms none of them."""
+    try:
+        return _conflicts(check, family=family, worlds=list(rebuilt.values()),
+                          prebranch=prebranch, agent_id="questioner:check:2")
+    except Exception as failed:  # noqa: BLE001 — an unconfirmed rebuild is not kept
+        _logger.warning(f"the premise re-check failed ({failed!r}); the rebuilt worlds are "
+                        "dropped")
+        return {label: [] for label in rebuilt}
+
+
+def _held_to_history(  # noqa: C901, PLR0913 — one rule over each failure path; the worlds, the two seams and what the seats were shown
+        worlds: list[dict[str, Any]], *, check: Any, invoke: Any, family: dict[str, Any],
+        family_reply: Any, header: str, capture: _Capture,
+        prebranch: Sequence[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict]]:
+    """#1561: the authored worlds checked against the run's pre-branch answers, settled world by
+    world under one rule: a world the check never named is kept as authored; a named world is
+    kept only once its seat's rebuild passed the second check; anything else drops it. So a
+    failure anywhere (no evidence, a first check that faults or cannot be read, a rebuild or a
+    second check that does) never refuses the family and never keeps a world found false.
+    Returns the worlds kept and the record of each world the check named."""
+    if not prebranch:
+        return worlds, []
+    try:
+        conflicts = _conflicts(check, family=family, worlds=worlds, prebranch=prebranch,
+                               agent_id="questioner:check")
+    except Exception as failed:  # noqa: BLE001 — a check that fails names no world
+        _logger.warning(f"the premise check failed ({failed!r}); no world is named")
+        return worlds, []
+    record: dict[str, dict] = {}
+    rebuilt: dict[str, dict[str, Any]] = {}
+    for world in worlds:
+        label = str(world.get("label"))
+        if label not in conflicts:
+            continue
+        record[label] = {"label": label, "conflicts": conflicts[label], "revised": False,
+                         "dropped": True, "original_facts": world.get("facts")}
+        world_rebuilt = _rebuilt(world, conflicts[label], invoke=invoke,
+                                 family_reply=family_reply, header=header, capture=capture)
+        if world_rebuilt is not None:
+            record[label]["revised"] = True
+            rebuilt[label] = world_rebuilt
+    if rebuilt:
+        still = _still_conflicting(check, rebuilt, family=family, prebranch=prebranch)
+        for label in rebuilt:
+            if label in still:
+                record[label]["conflicts_after"] = still[label]
+            else:
+                record[label]["dropped"] = False
+    out: list[dict[str, Any]] = []
+    for world in worlds:
+        label = str(world.get("label"))
+        if label not in record:
+            out.append(world)
+        elif not record[label]["dropped"]:
+            out.append(rebuilt[label])
+    return out, list(record.values())
+
+
 def _planned_worlds(family: dict[str, Any]) -> list[dict[str, Any]]:
     """The non-base worlds Call 1 planned, in order.
 
@@ -438,10 +593,17 @@ def author_family(  # noqa: PLR0913 — one keyword per captured input plus `les
     samples: Any = None,
     lessons: Any = None,
     source_disposition: str | None = None,
+    premise_check: Any = None,
+    prebranch: Sequence[dict[str, Any]] = (),
+    record_revisions: Any = None,
 ) -> dict[str, Any]:
     """Author one family document: one family call plus one call per planned world.
     `source_disposition` is the source run's committed disposition (its closing record), or
-    `None` when it never closed."""
+    `None` when it never closed.
+
+    With `premise_check` (a seam like `invoke`), the worlds are then held to `prebranch`, the
+    source run's pre-branch calls with their recorded answers (#1561): a world contradicting them
+    is revised once by its seat or dropped, and `record_revisions(entries)` is handed what was."""
     served = list(dict.fromkeys(served_systems))
     header = _measurement_header(Path(source_run_dir), Path(episode_dir), served)
     # Rendered once for all calls; framing is per call because the salt is.
@@ -479,6 +641,14 @@ def author_family(  # noqa: PLR0913 — one keyword per captured input plus `les
                  **{k: v for k, v in authored.items() if k in SEAT_AUTHORED_FIELDS},
                  "role": seat}
         worlds.append(world)
+
+    if premise_check is not None:
+        kept, revisions = _held_to_history(
+            worlds[1:], check=premise_check, invoke=invoke, family=family,
+            family_reply=family_reply, header=header, capture=capture, prebranch=prebranch)
+        worlds = [worlds[0], *kept]
+        if record_revisions is not None:
+            record_revisions(revisions)
 
     return {
         "base_story": family.get("base_story"),

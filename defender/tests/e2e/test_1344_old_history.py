@@ -185,8 +185,7 @@ def _launch_over_the_old_run(tmp_path: Path, **seams):
     seams.setdefault("live_tree", T.source_capture())
     seams.setdefault("roster", est.roster())
     seams.setdefault("judge", S.FakeJudge(default="bucket: none\nsystems: []\nfindings: []\n"))
-    captured = json.loads((old.run_dir / "gather_raw" / LEAD / "0.json").read_text(encoding="utf-8"))
-    seams.setdefault("oracle", S.oracle(then=S.submit(captured, S.EMPTY_CLAIM)).model)
+    seams.setdefault("oracle", S.oracle(then=S.submit()).model)
     seams.setdefault("verifier", S.passing_verifier().model)
     seams.setdefault("directory", est.launch_directory(tenant.id))
     from defender.cli.learning import branch as cli

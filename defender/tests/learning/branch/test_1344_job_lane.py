@@ -22,7 +22,7 @@ import pytest
 
 from defender.records._episode_handle import Episode
 from defender.records.formats import BASE_ROLE, load_family
-from defender.tests.learning.branch.test_triplet_launcher import _BASE, _calls, _launch
+from defender.tests.learning.branch.test_triplet_launcher import _calls, _launch
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.jobs._jobs1342 import register_tenant
@@ -135,7 +135,7 @@ def run_entry(  # noqa: PLR0913 — one keyword per seam a scenario may replace
     seams = dict(
         questioner=asking, preflight=preflight or S.no_preflight, live_tree=live_tree or T.source_capture(),
         roster=est.roster(), judge=grading,
-        oracle=(oracle or S.oracle(then=S.submit(_BASE, S.EMPTY_CLAIM))).model,
+        oracle=(oracle or S.oracle(then=S.submit())).model,
         verifier=S.passing_verifier().model, directory=est.launch_directory(tenant), spawn=siblings,
         candidates=candidates if candidates is not None else choose(T.BRANCH_MESSAGE_ID))
     if grade is not None:

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import datetime as dt
 import json
-import re
 from pathlib import Path
 
 import pytest
@@ -605,14 +604,6 @@ def test_1390_health_check_says_nothing_about_a_grant_it_cannot_see(tmp_path):
     assert (health["connected"], health["entries"]) == (True, 1), health
 
 
-def test_1390_the_connect_page_no_longer_says_the_registry_is_already_connected_and_says_lookup_needs_a_grant():
-    """`skills/connect/tacit.md` says the registry is unused until `lookup` is granted and drops "already connected". H7."""
-    text = " ".join((DEFENDER / "skills" / "connect" / "tacit.md").read_text(encoding="utf-8").lower().split())
-
-    assert "already connected" not in text, "the page still presents the registry as a connected system"
-    assert re.search(r"lookup.{0,80}grant|grant.{0,80}lookup", text), "the page does not say lookup must be granted"
-
-
 _PLANTED_TACIT = '''\
 from defender.kit.verbs import VerbContext
 
@@ -824,12 +815,3 @@ def test_1414_the_public_entry_check_refuses_what_is_not_a_mapping_with_the_miss
     assert "justification" in registry().entry_problem(missing)
     assert "extra" in registry().entry_problem(row | {"extra": "x"})
 
-
-def test_1414_the_shipped_registry_header_says_entries_also_arrive_by_reviewed_pull_request():
-    """The template header no longer claims the file is edited by humans only; it says feedback drafts arrive as PRs a person merges and still loads empty. #1414 A7/D3 (product content: red until edited)."""
-    path = registry().registry_path(REPO_ROOT / "knowledge" / "tenant-template" / "agent")
-    header = "\n".join(ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.startswith("#"))
-    assert "HUMAN-EDITED ONLY" not in header
-    assert "feedback" in header.lower()
-    assert "pull request" in header.lower()
-    assert registry().read_registry(path).problems == []

@@ -77,8 +77,8 @@ def _arm_drive(tmp_path: Path, label: str) -> tuple[Path, Path]:
     est = S24.estate(tmp_path, withheld=(WITHHELD,))
     est.answer("idp", "query", BOB, BOB_BASE)
     ep = S24.episode_v2(tmp_path, base_rows=[S24.captured("idp", "query", ALICE, BASE_ALICE)])
-    oracle = S34.Routed({"user:alice": S24.oracle(then=S24.submit(BASE_ALICE, S24.EMPTY_CLAIM)),
-                         "user:bob": S24.oracle(then=S24.submit(BOB_BASE, S24.EMPTY_CLAIM))},
+    oracle = S34.Routed({"user:alice": S24.oracle(then=S24.submit()),
+                         "user:bob": S24.oracle(then=S24.submit())},
                         name="oracle-1255", last_wins=True)
     reg = S24.sandboxed_registry(ep, label, est, oracle=oracle, verifier=S24.passing_verifier())
     run_dir, _gather = W.drive_lead(tmp_path / "arm", verbs=reg, est=est, turns=[

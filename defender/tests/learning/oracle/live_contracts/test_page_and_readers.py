@@ -68,7 +68,13 @@ def _oracle_row(label: str = "b", *, q: str = "user:alice", payload: object = No
     return S.ledger_row(S.ORACLE_DECISION, label=label, params=S.query_params(q),
                         payload=payload if payload is not None else {"rows": [{"user": "alice"}]},
                         base_digest=S.digest('{"rows": []}'),
-                        claim=S.claim(added=[S.added("fg-1", "f1")]),
+                        claim={"query": {"system": "idp", "verb": "query",
+                                         "params": S.query_params(q)},
+                               "base": "recorded",
+                               "changes": [{"op": "add", "path": "/rows/-", "fact_id": "f1",
+                                            "forged_id": "fg-1", "table": "rows",
+                                            "row_index": 0, "row_after": {"user": "alice"}}],
+                               "entity_refs": [], "proofs": []},
                         verifier_verdict={"passed": True, "reason": "present"}, attempts=1)
 
 

@@ -11,7 +11,6 @@ from typing import Any
 import pytest
 
 from defender._io import read_jsonl_rows
-from defender.learning.branch.estate.oracle import BASE_HANDLE
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _stream1412 as W
@@ -169,7 +168,7 @@ def test_1449_an_arms_new_question_is_read_live_through_the_proxy_and_served_by_
     monkeypatch.setenv(S.KNOB_RATE, "1e6")
     tenant_id, source = C.record_source(tmp_path)
     time.sleep(1.1)
-    oracle = S.oracle(then=S.submit(BASE_HANDLE, S.EMPTY_CLAIM))
+    oracle = S.oracle(then=S.submit())
     arm_clock = C.FakeClock(C.ARM_START)
     gather = C.script(arm_clock, (10, C.query("host-state", "proc-tree", {"host": "web-1"})),
                       (0, _summary("Summary: captured the process tree.")))

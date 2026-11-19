@@ -816,6 +816,7 @@ hard engineering for the write path.
 `_loop_validate.py`), serves simple polling endpoints, and matches the `playground_ticket_cli.py`
 precedent. A bun/TS gateway would force re-implementing the artifact→contract transform for no benefit; it
 earns its keep only if the frontend grows into a real SPA — not yet justified.
+The frontend has since become a browser app (`defender/frontend/`, #1540): that is a browser app built and checked with Bun, not a gateway. The API stays FastAPI, and Bun runs only build and dev commands.
 
 ---
 

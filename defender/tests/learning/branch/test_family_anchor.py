@@ -73,7 +73,7 @@ class Launch:
     #: The fixture tenant's estate: pre-flight replays the source's one captured call through
     #: it, under the tenant's own gather grant.
     estate: Any
-    oracle: Any = field(default_factory=lambda: S.oracle(then=S.submit(BASE, S.EMPTY_CLAIM)))
+    oracle: Any = field(default_factory=lambda: S.oracle(then=S.submit()))
     verifier: Any = field(default_factory=S.passing_verifier)
     #: The judge's model seam, scripted: an ACCEPTED family is graded at the tail of the
     #: launch, and left to its production value that grade is a real model call.

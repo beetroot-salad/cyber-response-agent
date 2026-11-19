@@ -29,6 +29,9 @@ FAMILY_NAME = "family.yaml"
 ARM_ROSTER_NAME = "arms.json"
 REVIEW_NAME = "review.yaml"
 SAMPLES_NAME = "samples.yaml"
+#: The question-writer's check of its worlds against the source run's pre-branch answers, and
+#: what it revised or dropped (#1561): written once, before the family is accepted.
+WORLD_REVISIONS_NAME = "world_revisions.yaml"
 JUDGE_NAME = "judge.yaml"
 TIMING_NAME = "timing.json"
 STAGED_NAME = "staged.yaml"
@@ -311,6 +314,10 @@ class EpisodeLayout:
         return PurePosixPath(SAMPLES_NAME)
 
     @property
+    def world_revisions(self) -> PurePosixPath:
+        return PurePosixPath(WORLD_REVISIONS_NAME)
+
+    @property
     def judge(self) -> PurePosixPath:
         return PurePosixPath(JUDGE_NAME)
 
@@ -479,9 +486,15 @@ class OracleStorePaths:
         (M12=A: the row stays frozen; the collision is recorded for the judge)."""
         return Path(self.root) / COLLISIONS_FILENAME
 
+    @property
+    def servings(self) -> Path:
+        """Every verified serving of this world, sibling and pre-flight alike: its call, code,
+        changes and served answer, for later calls to reuse (#1543)."""
+        return Path(self.root) / "servings.jsonl"
+
     def all(self) -> tuple[Path, ...]:
         return (self.forged, self.facts, self.answers, self.ledger, self.base, self.trace,
-                self.collisions)
+                self.collisions, self.servings)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -530,6 +543,10 @@ class EpisodePaths:
     @property
     def samples(self) -> Path:
         return self.episode_dir / LAYOUT.samples
+
+    @property
+    def world_revisions(self) -> Path:
+        return self.episode_dir / LAYOUT.world_revisions
 
     @property
     def judge(self) -> Path:

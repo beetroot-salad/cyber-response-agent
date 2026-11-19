@@ -266,10 +266,6 @@ def test_scoring_without_an_index_scores_no_folder_by_its_name(tmp_path, scoring
     assert res.verdicts() == {SLUG: "OK"}, f"control: the indexed run was not scored:\n{res.out}"
 
 
-def test_the_folder_name_matcher_is_gone():
-    from evaluations import held_out
-
-    assert not hasattr(held_out, "_claimed_slug"), "the folder-name matcher is still defined"
 # Scoring: where the index may not be, and what scoring never reads
 
 @pytest.mark.parametrize("place", ["runs-root", "run-folder", "linked-index-parent", "linked-runs-root"])

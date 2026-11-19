@@ -8,7 +8,9 @@ from typing import Any
 import pytest
 
 from defender.tests.frontend._flow1161 import (
+    until,
     FAILED,
+    HOME,
     RETRY,
     api_calls,
     logins,
@@ -25,6 +27,7 @@ from defender.tests.support.frontend._browser1161 import run_async
 
 VOCABULARY = ["prelogin-missing", "login-attempt-invalid", "unknown-account", "otp-required", "unavailable",
               "bad-request", "error", "session-lost", "sign-in-left", "session-refused", "storage-unavailable"]
+
 
 
 @pytest.mark.parametrize("code", VOCABULARY)
@@ -55,7 +58,7 @@ def test_1161_b8_an_unknown_or_missing_reason_renders_as_error(world, context, r
 
 @pytest.mark.parametrize(("ret", "expect"), [("", None), ("&return=%2F", "/"), ("&return=%2Fnowhere", "/nowhere"),
                                               ("&return=%2F%3Fx%3D1", "/?x=1")],
-                         ids=["none", "root", "non-member", "with-query"])
+                         ids=["none", "root-refused", "non-member", "with-query"])
 def test_1161_b4_the_retry_passes_its_addresss_return_on_unchanged_for_the_api_to_judge(
         world, context, requests, ret, expect):
     """The failed screen keeps no copy of the rule: what it was given goes to `/api/auth/login`. (B1, P2)"""
@@ -63,13 +66,18 @@ def test_1161_b4_the_retry_passes_its_addresss_return_on_unchanged_for_the_api_t
     page.goto(f"{world.origin}/sign-in-failed?reason=unavailable{ret}")
     screen(page, FAILED)
     page.locator(RETRY).click()
-    if expect in (None, "/"):
-        screen(page, "root")
-        assert where(page) == ("/", {})
+    if expect is None:
+        screen(page, HOME)
+        assert where(page) == ("/home", {})
     else:
-        page.wait_for_function("location.pathname === '/sign-in-failed' && location.search.includes('bad-request')")
+        until(page, "location.pathname === '/sign-in-failed' && location.search.includes('bad-request')")
         assert where(page) == ("/sign-in-failed", {"reason": "bad-request"})
     assert logins(requests, world.origin) == [expect]
+    if expect == "/":  # F4: the root is not returnable, so the API refuses it, and the refusal's retry lands home
+        page.locator(RETRY).click()
+        screen(page, HOME)
+        assert where(page) == ("/home", {})
+        assert logins(requests, world.origin) == ["/", None]
 
 
 CALLBACK_REASONS = [
@@ -108,39 +116,40 @@ def test_1161_b8_an_administrator_without_a_second_factor_is_otp_required_and_wi
     ops = run_async(link_account, world.dsn, OPS)
     world.front.queue(Choice(account=ops, amr=("pwd",)))
     page = context.new_page()
-    page.goto(f"{world.origin}/")
+    page.goto(f"{world.origin}/home")
     screen(page, FAILED)
     assert reason(page) == "otp-required"
-    assert navigations_to(requests, world.origin, "/sign-in-failed") == [{"reason": "otp-required", "return": "/"}]
+    assert navigations_to(requests, world.origin, "/sign-in-failed") == [{"reason": "otp-required", "return": "/home"}]
     assert not signed_in(context)
     world.front.queue(Choice(account=ops, amr=("pwd", "otp")))
     page.locator(RETRY).click()
-    screen(page, "root")
+    screen(page, HOME)
+    assert where(page) == ("/home", {})
     assert signed_in(context)
 
 
 @pytest.mark.parametrize("url", ["/api/auth/login?x=1", "/api/auth/login?return=%2Fnowhere", "/api/auth/login?return=",
                                  "/api/auth/login?return=%2F&return=%2F"],
                          ids=["undeclared", "refused-return", "empty-return", "repeated-return"])
-def test_1161_b2_bad_request_shows_its_reason_with_no_return_and_the_retry_lands_on_the_root(
+def test_1161_b2_bad_request_shows_its_reason_with_no_return_and_the_retry_lands_on_the_home(
         world, context, requests, url):
-    """A malformed sign-in start: `bad-request`, no `return`; its retry lands on the root. (B2, B4, B8)"""
+    """A malformed sign-in start: `bad-request`, no `return`; its retry lands on `/home`. (B2, B4, B8; F4's fallback)"""
     page = context.new_page()
     page.goto(f"{world.origin}{url}")
     screen(page, FAILED)
     assert reason(page) == "bad-request"
     assert where(page) == ("/sign-in-failed", {"reason": "bad-request"})
     page.locator(RETRY).click()
-    screen(page, "root")
-    assert where(page) == ("/", {})
+    screen(page, HOME)
+    assert where(page) == ("/home", {})
     assert logins(requests, world.origin)[-1] is None
     assert signed_in(context)
 
 
 def test_1161_b4_a_sign_in_start_with_a_judged_return_goes_to_the_provider_not_the_failed_screen(
         world, context, requests: Any):
-    """Positive control for `bad-request`: `return=/` is judged fine and signs in. (B2)"""
+    """Positive control for `bad-request`: `return=/home` is judged fine and signs in. (B2, F4)"""
     page = context.new_page()
-    page.goto(f"{world.origin}/api/auth/login?return=%2F")
-    screen(page, "root")
+    page.goto(f"{world.origin}/api/auth/login?return=%2Fhome")
+    screen(page, HOME)
     assert navigations_to(requests, world.origin, "/sign-in-failed") == []

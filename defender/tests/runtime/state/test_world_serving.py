@@ -37,13 +37,18 @@ BOB_LIVE = {"total": 1, "rows": [{"user": "bob", "host": "db-live-1255", "event_
                                   "action": "logon"}]}
 BOB_AT_FORK = {"total": 1, "rows": [{"user": "bob", "host": "db-fork-1255", "event_id": "e-200",
                                      "action": "logon"}]}
-BOB_CHANGE = S24.claim(changed=[S24.changed("bob", "host", "db-live-1255", "db-fork-1255")])
+#: The fact a control world's reconstruction names: it holds no fact (`facts: []`), and a change
+#: back to the branch point names the reserved `fork` (#1543).
+CONTROL_FACT = "fork"
+#: The control world's reconstruction of bob's host at the fork, as a patch on the live base.
+BOB_CHANGE = S24.handin(S24.op_test("/rows/0/host", "db-live-1255"),
+                        S24.op_replace("/rows/0/host", "db-fork-1255", fact_id=CONTROL_FACT))
 
 CASE = {"entity": "CASE-1255"}
 ANALYST_NOTE = {"comment_id": "c-1", "author": "soc-analyst", "body": "escalated for triage"}
 CLOSING_MARKER = "CLOSING-NOTE-1255: verdict malicious, account disabled"
 TICKET_AT_FORK = {"ticket": "CASE-1255", "status": "open", "comments": [ANALYST_NOTE]}
-#: The side query a removal of the closing comment is claimed with: it selects that comment.
+#: The proof a removal of the closing comment is handed in with: it selects that comment.
 CLOSING_SIDE = S24.query_params("comment_id:c-2")
 
 _PRE_1255_DECISIONS = frozenset({"base", "passthrough", "refused", "fault", "captured", "oracle",
@@ -55,16 +60,17 @@ def _roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return W.configure_roots(tmp_path, monkeypatch)
 
 
-def _resorted(payload: Any) -> Any:
-    """Return equal JSON with sorted keys to detect unintended reserialization."""
-    return json.loads(json.dumps(payload, sort_keys=True))
+def _serving(answer: Any) -> dict:
+    """A hand-in that would replace the whole answer with `answer` (for world b's fact f1): what an
+    oracle asked where it must not be would serve."""
+    return S24.handin(S24.op_replace("", answer, fact_id="f1"))
 
 
 def _routed_passing(*answers: tuple[dict, Any]) -> Any:
-    """Route oracle calls to equal answers with sorted keys."""
-    return S34.Routed({params["q"]: S24.oracle(then=S24.submit(_resorted(answer),
-                                                                S24.EMPTY_CLAIM))
-                       for params, answer in answers}, name="oracle-1255", last_wins=True)
+    """Route each call's oracle to an empty patch: the base served unchanged, so any change to
+    the adapter's bytes is the host's own reserialization."""
+    return S34.Routed({params["q"]: S24.oracle(then=S24.submit())
+                       for params, _answer in answers}, name="oracle-1255", last_wins=True)
 
 
 def _closing_comment() -> dict:
@@ -88,10 +94,12 @@ def _ticket_after_close(est: Any) -> dict:
     return comment
 
 
-def _removing_closing_comment() -> Any:
-    """Serve the ticket with the post-fork closing comment removed."""
-    return S24.oracle(then=S24.submit(TICKET_AT_FORK, S24.claim(removed=[S24.removed(
-        _closing_comment(), system="siem-x", verb="query", params=CLOSING_SIDE, count=1)])))
+def _removing_closing_comment(fact_id: str = CONTROL_FACT) -> Any:
+    """Serve the ticket with the post-fork closing comment removed, proven by `CLOSING_SIDE`."""
+    return S24.oracle(then=S24.submit(S24.handin(
+        S24.op_test("/comments/1/comment_id", "c-2"),
+        S24.op_remove("/comments/1", fact_id=fact_id),
+        proofs=[S24.proof("siem-x", "query", CLOSING_SIDE)])))
 
 
 def _assert_reconstructed(decision: Any, where: str) -> None:
@@ -211,7 +219,7 @@ def test_1255_the_control_world_answers_a_question_the_source_never_asked_throug
     est = S24.estate(tmp_path)
     est.answer("idp", "query", BOB, BOB_ANSWER)
     ep = S24.episode_v2(tmp_path, base_rows=[S24.captured("idp", "query", ALICE, ALICE_ANSWER)])
-    fact_oracle = S24.oracle(then=S24.submit(_resorted(BOB_ANSWER), S24.EMPTY_CLAIM))
+    fact_oracle = S24.oracle(then=S24.submit())
     fact_world = S24.sandboxed_registry(ep, "b", est, oracle=fact_oracle,
                                         verifier=S24.passing_verifier())
     assert S24.call(fact_world, "idp", "query", est.ctx(tmp_path / "run-b"), **BOB) == BOB_ANSWER
@@ -219,7 +227,7 @@ def test_1255_the_control_world_answers_a_question_the_source_never_asked_throug
         assert needle in fact_oracle.all_seen(), f"positive control: {needle!r} not in b's inbound"
     reads_before = len(est.calls("idp", "query"))
 
-    oracle = S24.oracle(then=S24.submit(_resorted(BOB_ANSWER), S24.EMPTY_CLAIM))
+    oracle = S24.oracle(then=S24.submit())
     control = S24.sandboxed_registry(ep, "a", est, oracle=oracle,
                                      verifier=S24.passing_verifier())
     ctx = est.ctx(tmp_path / "run")
@@ -256,7 +264,7 @@ def test_1255_the_control_world_serves_its_oracles_changed_answer_never_the_base
     reads_before = len(est.calls("idp", "query"))
 
     ep = S24.episode_v2(tmp_path / "branch", base_rows=[])
-    oracle = S24.oracle(then=S24.submit(BOB_AT_FORK, BOB_CHANGE))
+    oracle = S24.oracle(then=S24.submit(BOB_CHANGE))
     control = S24.sandboxed_registry(ep, "a", est, oracle=oracle,
                                      verifier=S24.passing_verifier())
     arm_dir, arm = W.drive_lead(tmp_path / "arm", verbs=control, est=est, turns=list(turns))
@@ -344,7 +352,7 @@ def test_1255_a_pre_fork_question_with_no_recording_is_reconstructed_at_the_fork
     _ticket_after_close(est)  # after the fork the source closed its case
     prebranch = frozenset(request_key(r["system"], r["verb"], r["params"]) for r in source_rows)
     reads_before = len(est.calls("siem-x", "lookup"))
-    oracle = _removing_closing_comment()
+    oracle = _removing_closing_comment(CONTROL_FACT if label == "a" else "f1")
     world = S24.sandboxed_registry(ep, label, est, oracle=oracle,
                                    verifier=S24.passing_verifier(), prebranch=prebranch)
     try:
@@ -377,8 +385,9 @@ def test_1255_the_judge_reads_a_control_worlds_reconstructed_answer_as_baseline(
     est = S34.Estate1234(tmp_path / "estate", withheld=(WITHHELD,))
     est.answer("idp", "query", CAROL, carol_live)
     control_oracle = S34.Routed(
-        {CAROL["q"]: S24.oracle(then=S24.submit(carol_at_fork, S24.claim(changed=[
-            S24.changed("carol", "host", "web-live-1255", "web-fork-1255")])))},
+        {CAROL["q"]: S24.oracle(then=S24.submit(S24.handin(
+            S24.op_test("/rows/0/host", "web-live-1255"),
+            S24.op_replace("/rows/0/host", "web-fork-1255", fact_id=CONTROL_FACT))))},
         default=S34.passing_oracle(), name="oracle-a", last_wins=True)
     built = S34.real_family(tmp_path, {"a": S34.RealWorld(
         "a", disposition="benign", oracle=control_oracle,
@@ -440,14 +449,14 @@ def test_1255_a_control_world_whose_oracle_cannot_serve_never_falls_back_to_a_li
     ep = S24.episode_v2(tmp_path, base_rows=[S24.captured("idp", "query", ALICE, ALICE_ANSWER)])
     knobs: dict[str, Any] = {}
     if cause == "budget":
-        oracle = S24.oracle(then=S24.submit(_resorted(BOB_ANSWER), S24.EMPTY_CLAIM))
+        oracle = S24.oracle(then=S24.submit())
         knobs["budget"] = 0
     elif cause == "retries":
         oracle = S24.oracle(then=S24.text_only("I could not reconstruct this answer."))
         knobs["retry_cap"] = 2
     else:
         oracle = S24.oracle(S24.run_query("idp", "lookup", _SIDE_LOOKUP),
-                            then=S24.submit(_resorted(BOB_ANSWER), S24.EMPTY_CLAIM))
+                            then=S24.submit())
     control = S24.sandboxed_registry(ep, "a", est, oracle=oracle,
                                      verifier=S24.passing_verifier(), **knobs)
     if cause == "fault":
@@ -489,7 +498,7 @@ def test_1255_a_worlds_oracle_is_given_the_sources_own_closing_ticket_comment(
     est = S24.estate(tmp_path)
     est.answer("idp", "query", BOB, BOB_ANSWER)
     ep = S24.episode_v2(tmp_path, base_rows=[S24.captured("idp", "query", ALICE, ALICE_ANSWER)])
-    oracle = S24.oracle(then=S24.submit(_resorted(BOB_ANSWER), S24.EMPTY_CLAIM))
+    oracle = S24.oracle(then=S24.submit())
     world = W.world_registry_with_source(ep, label, est, source_run=fixture_run(source_dir),
                                          oracle=oracle, verifier=S24.passing_verifier())
     S24.call(world, "idp", "query", est.ctx(tmp_path / "run"), **BOB)
@@ -527,8 +536,9 @@ def test_1385_a_removed_comment_is_oracle_only_when_it_names_a_fact_entity(
     side = S24.query_params(f"comment_id:{gone['comment_id']}")
     est.answer("siem-x", "query", side, {"rows": [gone]})
     served = TICKET_AT_FORK
-    oracle = S24.oracle(S24.submit(served, S24.claim(removed=[S24.removed(
-        gone, system="siem-x", verb="query", params=side, count=1)])))
+    oracle = S24.oracle(S24.submit(S24.handin(
+        S24.op_remove("/comments/1", fact_id="f1"),
+        proofs=[S24.proof("siem-x", "query", side)])))
     ep = S24.episode_v2(tmp_path, base_rows=[])
     world = W.world_registry_with_source(ep, "b", est, source_run=fixture_run(source_dir),
                                          oracle=oracle, verifier=S24.passing_verifier())
@@ -574,7 +584,7 @@ def test_1255_a_worlds_oracle_is_not_told_a_closing_comment_the_source_never_pos
     est = S24.estate(tmp_path)
     est.answer("idp", "query", BOB, BOB_ANSWER)
     ep = S24.episode_v2(tmp_path, base_rows=[S24.captured("idp", "query", ALICE, ALICE_ANSWER)])
-    oracle = S24.oracle(then=S24.submit(_resorted(BOB_ANSWER), S24.EMPTY_CLAIM))
+    oracle = S24.oracle(then=S24.submit())
     world = W.world_registry_with_source(ep, label, est, source_run=fixture_run(source_dir),
                                          oracle=oracle, verifier=S24.passing_verifier())
     S24.call(world, "idp", "query", est.ctx(tmp_path / "run"), **BOB)
@@ -610,7 +620,7 @@ def test_1255_every_refusal_the_control_world_can_give_reads_as_a_natural_runs(
     natural_dir, natural = W.drive_lead(tmp_path / "natural", verbs=S24.plain_registry(est),
                                         est=est, turns=list(turns))
     ep = S24.episode_v2(tmp_path / "branch", base_rows=[])
-    oracle = S24.oracle(then=S24.submit({"canary": "1255"}, S24.EMPTY_CLAIM))
+    oracle = S24.oracle(then=S24.submit(_serving({"canary": "1255"})))
     control = S24.sandboxed_registry(ep, "a", est, oracle=oracle,
                                      verifier=S24.passing_verifier())
     arm_dir, arm = W.drive_lead(tmp_path / "arm", verbs=control, est=est, turns=list(turns))
@@ -653,7 +663,7 @@ def test_1390_no_world_serves_the_registry_through_its_oracle(tmp_path: Path) ->
     forged = {"matched": {**TACIT_ENTRY, "id": "tk-forged-by-the-oracle", "host_scope": "db-2.corp"}}
 
     for label, params, expected in (("a", SANCTIONED, TACIT_ENTRY), ("b", UNSANCTIONED, None)):
-        oracle = S24.oracle(then=S24.submit(forged, S24.EMPTY_CLAIM))
+        oracle = S24.oracle(then=S24.submit(_serving(forged)))
         world = S24.sandboxed_registry(ep, label, est, oracle=oracle,
                                        verifier=S24.passing_verifier())
 
@@ -687,7 +697,7 @@ def test_1390_a_lookup_the_source_run_recorded_is_rerun_against_the_pinned_regis
         S24.captured("tacit-knowledge", "lookup", UNSANCTIONED, stale),
         S24.captured("idp", "query", ALICE, ALICE_ANSWER)])
     est.answer("idp", "query", ALICE, {"rows": ["not what the record says"]})
-    oracle = S24.oracle(then=S24.submit(stale, S24.EMPTY_CLAIM))
+    oracle = S24.oracle(then=S24.submit(_serving(stale)))
     world = S24.sandboxed_registry(ep, "a", est, oracle=oracle, verifier=S24.passing_verifier(),
                                    tenant=pinned)
     ctx = VerbContext(defender_dir=est.defender_dir, run_dir=tmp_path / "run", env={}, tenant=pinned)
@@ -716,7 +726,7 @@ def test_1390_health_check_of_the_registry_is_never_oracle_served_either(tmp_pat
     forged = {"system": "tacit-knowledge", "connected": True, "entries": 99}
 
     for label in ("a", "b"):
-        oracle = S24.oracle(then=S24.submit(forged, S24.EMPTY_CLAIM))
+        oracle = S24.oracle(then=S24.submit(_serving(forged)))
         world = S24.sandboxed_registry(ep, label, est, oracle=oracle,
                                        verifier=S24.passing_verifier())
 
@@ -748,7 +758,7 @@ def test_1390_a_platform_served_verb_is_always_run_never_answered_from_the_world
     est = S24.TacitEstate(tmp_path / "estate")
     est.write_registry(json.dumps({"entries": [TACIT_ENTRY]}))
     ep = S24.episode_v2(tmp_path, base_rows=[])
-    oracle = S24.oracle(then=S24.submit({}, S24.EMPTY_CLAIM))
+    oracle = S24.oracle(then=S24.submit(_serving({})))
     world = S24.sandboxed_registry(ep, "a", est, oracle=oracle, verifier=S24.passing_verifier())
     asked = _PLATFORM_ASKS_1390[verb]
     seeded = {"served": {"seeded": "SEEDED-1390"}, "decision": PASSTHROUGH}

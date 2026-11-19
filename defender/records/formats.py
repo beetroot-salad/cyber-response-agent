@@ -65,6 +65,7 @@ if TYPE_CHECKING:
     )
     from defender.records._family import (
         BASE_ROLE as BASE_ROLE,
+        FORK_FACT_ID as FORK_FACT_ID,
         Family as Family,
         FamilyError as FamilyError,
         ManifestPredatesOracle as ManifestPredatesOracle,
@@ -74,6 +75,7 @@ if TYPE_CHECKING:
         label_for_world_id as label_for_world_id,
         load_family as load_family,
         load_manifest_document as load_manifest_document,
+        parse_facts as parse_facts,
         parse_family as parse_family,
         resume_world_from as resume_world_from,
         runnable_worlds as runnable_worlds,
@@ -173,7 +175,7 @@ _HOMES: dict[str, str] = {
     **dict.fromkeys(("UNCHANGED_LEAD", "UNCHANGED_NOTICE", "artifact_names", "committed_investigation_reason", "encodable_or_reason", "needs_baseline", "register_invlang_validator", "render_diagnostic", "utf8_len", "validate_artifact",), "_artifact_schema"),
     **dict.fromkeys(("AppendRecord", "Episode", "EpisodeRefused", "refuse_bad_episode_id",), "_episode_handle"),
     **dict.fromkeys(("EpisodePaths", "LAYOUT", "OracleStorePaths", "WORLD_LEAVES", "WorldPaths",), "_episode_paths"),
-    **dict.fromkeys(("BASE_ROLE", "Family", "FamilyError", "ManifestPredatesOracle", "ResumeWorld", "accept_family", "family_identities", "label_for_world_id", "load_family", "load_manifest_document", "parse_family", "resume_world_from", "runnable_worlds", "world_id_for", "write_family",), "_family"),
+    **dict.fromkeys(("BASE_ROLE", "FORK_FACT_ID", "Family", "FamilyError", "ManifestPredatesOracle", "ResumeWorld", "accept_family", "family_identities", "label_for_world_id", "load_family", "load_manifest_document", "parse_facts", "parse_family", "resume_world_from", "runnable_worlds", "world_id_for", "write_family",), "_family"),
     **dict.fromkeys(("PinUnreadable", "pin_text", "read_pin",), "_knowledge_pin"),
     **dict.fromkeys(("FRESH", "OPERATOR", "TRANSIENT", "api_knowledge", "knowledge_status", "read_knowledge_status",), "_knowledge_status"),
     **dict.fromkeys(("DataRoot", "DraftsRoot", "EpisodesRoot", "ExportsRoot", "KnowledgeLock", "LegacyEpisodesRoot", "LegacyRunsRoot", "RunsBase", "ScratchRoot", "SessionsRoot", "TenantRecord", "TenantRoot", "WorktreesRoot", "unwrap_data_root", "unwrap_drafts_root", "unwrap_episodes_root", "unwrap_exports_root", "unwrap_knowledge_lock", "unwrap_runs_base", "unwrap_scratch_root", "unwrap_tenant_root", "unwrap_worktrees_root",), "_locations"),

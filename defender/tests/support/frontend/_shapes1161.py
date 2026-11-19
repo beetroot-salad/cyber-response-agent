@@ -1,4 +1,4 @@
-"""#1161 piece 1, test-only: S2's piece-1 shapes as the test writes them, a seeded member generator for each, B3's
+"""#1161 piece 1 (as amended by #1540 r3.1), test-only: S2's shapes as the test writes them, a seeded member generator for each, B3's
 near-miss generator, and a classifier from the shape text alone (shape name or None), never from code under test.
 
 Membership (S2): the whole string matches a shape, ASCII, case-sensitive, no decoding, normalising or trailing-`/`
@@ -26,9 +26,11 @@ class Shape:
         return re.compile(re.escape(self.template).replace(re.escape("{uuid}"), UUID))
 
 
-#: Piece 1's shapes (S2). Piece 2 adds the opener.
+#: S2's shapes with #1540's amendments: `root` (the public landing page) is non-returnable, `home` is returnable. Piece 2
+#: adds the opener.
 SHAPES = (
-    Shape("root", "/", True),
+    Shape("root", "/", False),
+    Shape("home", "/home", True),
     Shape("investigation", "/t/{uuid}/investigations/{uuid}", True),
     Shape("sign-in-failed", "/sign-in-failed", False),
 )
@@ -152,7 +154,8 @@ HEX = "0123456789abcdef"
 
 
 def _listed(placeholders: object = None, shapes: object = None, alphabets: object = None) -> dict[str, object]:
-    base_shapes = [{"name": "root", "template": "/", "returnable": True},
+    base_shapes = [{"name": "root", "template": "/", "returnable": False},
+                   {"name": "home", "template": "/home", "returnable": True},
                    {"name": "investigation", "template": "/t/{uuid}/investigations/{uuid}", "returnable": True},
                    {"name": "sign-in-failed", "template": "/sign-in-failed", "returnable": False}]
     return {"alphabets": {"hex": HEX} if alphabets is None else alphabets,

@@ -36,7 +36,7 @@ def test_preflight_never_reads_an_episode_through_a_link(tmp_path, monkeypatch, 
     real = episode_at(tmp_path / "elsewhere", linked_id)
     episodes.mkdir(parents=True, exist_ok=True)
     os.symlink(real, episodes / linked_id, target_is_directory=True)
-    oracle = S.oracle(then=S.submit(P.BASE_ANSWER, S.EMPTY_CLAIM))
+    oracle = S.oracle(then=S.submit())
 
     err = R.raised(cli.preflight_replay, episodes / linked_id, source=source,
                    roster=est.roster(), tenant=est.run_tenant(), oracle=oracle.model,
@@ -48,7 +48,7 @@ def test_preflight_never_reads_an_episode_through_a_link(tmp_path, monkeypatch, 
 
     walked_id = R.new_id()
     walked = episode_at(episodes, walked_id)
-    control = S.oracle(then=S.submit(P.BASE_ANSWER, S.EMPTY_CLAIM))
+    control = S.oracle(then=S.submit())
     runs = R.tenant(data_root, P.LAUNCH_TENANT).runs_repository()
     with runs.episode(walked_id) as view:
         cli.preflight_replay(view.episode, source=source, roster=est.roster(),

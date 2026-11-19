@@ -1,5 +1,6 @@
 """Regressions for the #1224 oracle loop: turn/deadline handling, frozen forged rows,
-accounting and pricing, pre-flight worlds, pre-branch calls, esql forging checks."""
+accounting and pricing, pre-flight worlds, pre-branch calls, esql forging checks. Hand-ins are
+JSON Patches on the call's base (#1543)."""
 from __future__ import annotations
 
 from defender.tests.support.tenancy._host1214 import TEST_TENANT
@@ -26,7 +27,12 @@ from typing import Any
 import pytest
 
 from defender.learning.branch.estate import oracle as oracle_mod
-from defender.learning.branch.estate.checks import CheckStore, RealData, check_submission
+from defender.learning.branch.estate.checks import (
+    CheckStore,
+    RealData,
+    check_submission,
+    parse_handin,
+)
 from defender.systems.verbs import CALL_DELIVERY, CallDelivery
 from defender.box._oracle import OracleBox, stop_oracle_box
 from defender.box._spec import BoxSpec, _DockerTransport
@@ -87,21 +93,21 @@ class ProviderLikeModel:
             for n, (name, args) in enumerate(self.replies.pop(0))])
 
 
-def _with_undeclared(rows: dict) -> dict:
-    extra = {**rows["rows"][0], "event_id": "e-999"}
-    return {**rows, "rows": [*rows["rows"], extra]}
-
-
-_FORGE = ("forge", {"forged_id": "fg-1", "fact_id": "f1", "system": "idp",
-                    "row": {"user": "alice", "event_id": "e-9001"}})
+#: A hand-in the host refuses: an add that names no forged row (no forged_id).
+_REFUSED = {"patch": [{"op": "add", "path": "/rows/-", "fact_id": "f1",
+                       "value": {**ALICE_ROWS["rows"][0], "event_id": "e-999"}}]}
+#: The empty patch: the base served unchanged.
+_UNCHANGED = {"patch": []}
+#: A tool call the host answers without ending the attempt.
+_RECORD = ("record_fact", {"entity": "alice", "field": "department", "value": "finance"})
 
 
 def test_a_tool_called_after_a_refused_submit_is_still_answered(tmp_path):
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     model = ProviderLikeModel(
-        [("submit", {"served": _with_undeclared(ALICE_ROWS), "claim": S.EMPTY_CLAIM}), _FORGE],
-        [("submit", {"served": ALICE_ROWS, "claim": S.EMPTY_CLAIM})])
+        [("submit", _REFUSED), _RECORD],
+        [("submit", _UNCHANGED)])
     reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=model,
                            verifier=S.passing_verifier(), retry_cap=3)
 
@@ -118,9 +124,9 @@ def test_a_tool_called_after_submit_is_answered_but_not_run(tmp_path):
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     est.answer("idp", "lookup", {"entity": "alice"}, LOOKUP_ALICE)
     model = ProviderLikeModel(
-        [("submit", {"served": _with_undeclared(ALICE_ROWS), "claim": S.EMPTY_CLAIM}),
+        [("submit", _REFUSED),
          ("run_query", {"system": "idp", "verb": "lookup", "params": {"entity": "alice"}})],
-        [("submit", {"served": ALICE_ROWS, "claim": S.EMPTY_CLAIM})])
+        [("submit", _UNCHANGED)])
     reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=model,
                            verifier=S.passing_verifier(), retry_cap=3)
 
@@ -136,8 +142,8 @@ def test_a_tool_called_after_one_that_ended_the_attempt_is_still_answered(tmp_pa
     def no_box() -> Any:
         raise RuntimeError("docker is not reachable")
 
-    model = ProviderLikeModel([("python", {"code": "print(1)"}), _FORGE],
-                              [("submit", {"served": ALICE_ROWS, "claim": S.EMPTY_CLAIM})])
+    model = ProviderLikeModel([("python", {"code": "print(1)"}), _RECORD],
+                              [("submit", _UNCHANGED)])
     reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=model, box=no_box,
                            verifier=S.passing_verifier(), retry_cap=3)
 
@@ -150,7 +156,7 @@ def test_a_tool_called_after_one_that_ended_the_attempt_is_still_answered(tmp_pa
 def test_a_hung_verifier_is_cut_off_by_the_turn_deadline(tmp_path):
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
-    o = S.oracle(S.submit(ALICE_ROWS, S.EMPTY_CLAIM))
+    o = S.oracle(S.submit())
     hung = S.verifier(then=S.verdict(True), fault=S.Fault(delay=5.0))
     reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o, verifier=hung,
                            retry_cap=1, turn_deadline=0.5)
@@ -180,17 +186,17 @@ def test_a_call_after_the_world_went_unservable_reports_the_failing_call(tmp_pat
     assert (later.value.reason, later.value.detail) == (first.value.reason, first.value.detail)
 
 
-def test_the_advisory_check_resolves_the_base_handle_as_submit_does(tmp_path):
+def test_the_advisory_check_of_an_empty_patch_passes_as_submit_does(tmp_path):
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
-    o = S.oracle(S.check(oracle_mod.BASE_HANDLE, S.EMPTY_CLAIM),
-                 S.submit(oracle_mod.BASE_HANDLE, S.EMPTY_CLAIM))
+    o = S.oracle(S.check(), S.submit())
     reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o,
                            verifier=S.passing_verifier(), retry_cap=1)
 
     assert S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice") == ALICE_ROWS
     told = _tool_result(o.messages[1], "check")
     assert "passes the host checks" in told, told
+    assert "base answer unchanged" in told, told
 
 
 def test_an_oracle_side_query_runs_in_the_context_of_the_call_whose_turn_it_is(tmp_path):
@@ -199,7 +205,7 @@ def test_an_oracle_side_query_runs_in_the_context_of_the_call_whose_turn_it_is(t
     est.answer("idp", "query", BOB, BOB_ROWS)
     est.answer("idp", "lookup", {"entity": "alice"}, LOOKUP_ALICE)
     o = S.oracle(S.run_query("idp", "lookup", {"entity": "alice"}),
-                 S.submit(ALICE_ROWS, S.EMPTY_CLAIM), S.submit(BOB_ROWS, S.EMPTY_CLAIM),
+                 S.submit(), S.submit(),
                  fault=S.Fault(delay=0.6))
     reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o,
                            verifier=S.passing_verifier(), retry_cap=1)
@@ -266,11 +272,15 @@ _FROZEN = {"forged_id": "fg-1", "fact_id": "F", "system": "s",
 _SEEN_SINCE = RealData(answers=[("s", {"rows": [{**_REAL_ROW, "src_ip": "10.0.0.1"}]})])
 
 
+def _add(path: str, row: Any, forged_id: str = "fg-1", fact_id: str = "F", **kw: Any) -> dict:
+    """A hand-in adding one forged row at `path`."""
+    return S.handin(S.op_add(path, row, forged_id=forged_id, fact_id=fact_id), **kw)
+
+
 def _shape_failures(*, frozen: dict, staged: dict) -> list[str]:
     store = CheckStore(frozen=frozen, staged=staged, facts={}, rerun=lambda *_a: {})
     failures = check_submission(
-        {"rows": [_REAL_ROW]}, {"rows": [_REAL_ROW, _FROZEN["row"]]},
-        {"added": [{"forged_id": "fg-1", "fact_id": "F"}]},
+        {"rows": [_REAL_ROW]}, _add("/rows/-", _FROZEN["row"]),
         world=SimpleNamespace(facts=[SimpleNamespace(fact_id="F")]), store=store,
         real_data=_SEEN_SINCE)
     return [f for f in failures if f.startswith("check 2")]
@@ -302,7 +312,7 @@ def test_the_verifier_is_shown_a_large_unchanged_answer_once_and_capped(tmp_path
     est.answer("idp", "query", ALICE, big)
     v = S.passing_verifier()
     reg = S.world_registry(S.episode_v2(tmp_path), "b", est, verifier=v, retry_cap=1,
-                           oracle=S.oracle(S.submit(oracle_mod.BASE_HANDLE, S.EMPTY_CLAIM)))
+                           oracle=S.oracle(S.submit()))
 
     assert S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice") == big
     shown = v.seen[0]
@@ -336,7 +346,7 @@ def test_a_slow_tool_is_cut_off_by_the_attempt_deadline(tmp_path):
         return SimpleNamespace(sandboxed=True, name="slow-box", run_parsed=run_parsed,
                                docker=docker, clock_file=None)
 
-    o = S.oracle(S.python("print('slow')"), S.submit(ALICE_ROWS, S.EMPTY_CLAIM))
+    o = S.oracle(S.python("print('slow')"), S.submit())
     reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o, box=slow_box,
                            verifier=S.passing_verifier(), retry_cap=2, turn_deadline=deadline)
 
@@ -351,7 +361,7 @@ def test_a_slow_tool_is_cut_off_by_the_attempt_deadline(tmp_path):
 def test_an_unpriced_model_is_refused_before_any_request(tmp_path):
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
-    model = ProviderLikeModel([("submit", {"served": ALICE_ROWS, "claim": S.EMPTY_CLAIM})],
+    model = ProviderLikeModel([("submit", _UNCHANGED)],
                               name="no-such-model")
 
     with pytest.raises(oracle_mod.OraclePricingError):
@@ -371,7 +381,7 @@ def test_an_undelivered_control_world_call_leaves_no_row(tmp_path):
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     ep = S.episode_v2(tmp_path)
-    reg = S.sandboxed_registry(ep, "a", est, S.oracle(then=S.submit(ALICE_ROWS, S.EMPTY_CLAIM)),
+    reg = S.sandboxed_registry(ep, "a", est, S.oracle(then=S.submit()),
                                S.passing_verifier())
     delivery = CallDelivery()
     delivery.abandoned = True
@@ -404,10 +414,8 @@ def test_a_forged_row_can_be_added_to_an_esql_answer(tmp_path):
     base = est.answer("idp", "query", ALICE, _esql(_ESQL_ROWS))
     row = ["2026-03-01T11:00:00Z", "alice", "e-9f01", "db-1"]
     served = _esql([*_ESQL_ROWS, row])
-    o = S.oracle(S.Move("forge", {"forged_id": "fg-1", "fact_id": "f1", "system": "idp",
-                                  "row": row}),
-                 S.submit(served, S.claim(added=[S.added("fg-1", "f1")],
-                                          counts=[S.counted("*", base=2, added_=1, served=3)])))
+    o = S.oracle(S.submit(S.handin(S.op_add("/values/-", row, forged_id="fg-1", fact_id="f1"),
+                                   S.op_replace("/row_count", 3, fact_id="f1"))))
     reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o,
                            verifier=S.passing_verifier(), retry_cap=1)
 
@@ -418,25 +426,28 @@ def test_a_forged_row_can_be_added_to_an_esql_answer(tmp_path):
         [c["name"] for c in _ESQL_COLUMNS], row, strict=True))
 
 
-def _checks(base: Any, served: Any, claim: dict, *, staged: dict | None = None,
+def _checks(base: Any, handin: dict, *, staged: dict | None = None,
             frozen: dict | None = None, rerun: Any = None, real: list | None = None) -> list[str]:
     store = CheckStore(frozen=frozen or {}, staged=staged or {}, facts={},
                        rerun=rerun or (lambda *_a: {}))
-    return check_submission(base, served, claim,
+    return check_submission(base, handin,
                             world=SimpleNamespace(facts=[SimpleNamespace(fact_id="F")]),
                             store=store, real_data=RealData(answers=real or [("s", base)]))
 
 
 def test_an_esql_side_query_selects_its_rows_not_its_columns():
+    """A proof (check 5) over an ES|QL answer selects its value arrays, zipped, never its
+    `columns` list: it backs a removal of one of those rows, and not of a row it lacks."""
     base = _esql(_ESQL_ROWS)
-    served = _esql(_ESQL_ROWS[:1])
-    side = {"system": "s", "verb": "esql", "params": {"query": "FROM logs-* | WHERE host == 1"}}
-    claim = {"removed": [{"row": _ESQL_ROWS[1], "side_query": side, "count": 2}],
-             "counts": [{"group": "*", "base": 2, "added": 0, "removed": 1, "served": 1}]}
+    proof = S.proof("s", "esql", {"query": "FROM logs-* | WHERE host == 1"})
+    handin = S.handin(S.op_remove("/values/1", fact_id="F"),
+                      S.op_replace("/row_count", 1, fact_id="F"), proofs=[proof])
 
-    failures = _checks(base, served, claim, rerun=lambda *_a: _esql(_ESQL_ROWS))
+    failures = _checks(base, handin, rerun=lambda *_a: _esql(_ESQL_ROWS))
 
     assert failures == [], failures
+    lacking = _checks(base, handin, rerun=lambda *_a: _esql(_ESQL_ROWS[:1]))
+    assert [f for f in lacking if f.startswith("check 5")], lacking
 
 
 def test_esql_answers_projecting_other_columns_are_separate_tables_for_check_2():
@@ -446,9 +457,7 @@ def test_esql_answers_projecting_other_columns_are_separate_tables_for_check_2()
 
     def forged(row: list[Any]) -> list[str]:
         record = {"forged_id": "fg-1", "fact_id": "F", "system": "s", "row": row}
-        claim = {"added": [{"forged_id": "fg-1", "fact_id": "F"}],
-                 "counts": [{"group": "*", "base": 2, "added": 1, "removed": 0, "served": 3}]}
-        return _checks(base, _esql([*_ESQL_ROWS, row]), claim, staged={"fg-1": record},
+        return _checks(base, _add("/values/-", row), staged={"fg-1": record},
                        real=[("s", base), ("s", other)])
 
     assert forged(["2026-03-01T11:00:00Z", "alice", "e-9f01", "db-1"]) == []
@@ -468,9 +477,7 @@ def test_a_nested_real_identifier_reused_by_a_forged_row_fails_check_3():
         row = {"@timestamp": "2026-03-01T09:30:00Z", "event": {"action": "exec"},
                "process": {"name": "curl", "entity_id": entity_id}}
         record = {"forged_id": "fg-1", "fact_id": "F", "system": "s", "row": row}
-        return _checks(base, {"hits": [_REAL_EVENT, row]},
-                       {"added": [{"forged_id": "fg-1", "fact_id": "F"}]},
-                       staged={"fg-1": record})
+        return _checks(base, _add("/hits/-", row), staged={"fg-1": record})
 
     reused = forged(_PROCESS_ID)
     assert any(f.startswith("check 3") and "process.entity_id" in f for f in reused), reused
@@ -478,15 +485,15 @@ def test_a_nested_real_identifier_reused_by_a_forged_row_fails_check_3():
 
 
 def test_a_frozen_row_s_nested_id_collision_is_recorded():
-    from defender.learning.branch.estate.checks import frozen_id_collisions, run_checks
+    from defender.learning.branch.estate.checks import apply_handin, frozen_id_collisions, run_checks
 
     row = {"@timestamp": "2026-03-01T09:30:00Z", "event": {"action": "exec"},
            "process": {"name": "curl", "entity_id": _PROCESS_ID}}
     record = {"forged_id": "fg-1", "fact_id": "F", "system": "s", "row": row}
     store = CheckStore(frozen={"fg-1": record}, staged={}, facts={}, rerun=lambda *_a: {})
     real = RealData(answers=[("s", {"hits": [_REAL_EVENT]})])
-    checked = run_checks({"hits": []}, {"hits": [row]},
-                         {"added": [{"forged_id": "fg-1", "fact_id": "F"}]},
+    handin = parse_handin(_add("/hits/-", row))[0]
+    checked = run_checks(apply_handin({"hits": []}, handin), handin,
                          world=SimpleNamespace(facts=[SimpleNamespace(fact_id="F")]),
                          store=store, real_data=real)
 
@@ -551,7 +558,7 @@ def test_the_python_box_is_stopped_when_the_attempt_that_used_it_ends(tmp_path):
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     box, log = _python_box_factory(tmp_path)
-    o = S.oracle(S.python("print(1)"), S.submit(ALICE_ROWS, S.EMPTY_CLAIM))
+    o = S.oracle(S.python("print(1)"), S.submit())
     reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o, box=box,
                            verifier=S.passing_verifier(), retry_cap=1)
 
@@ -567,7 +574,7 @@ def test_a_deadline_abandoned_python_frame_does_not_share_the_next_attempts_box(
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     box, log = _python_box_factory(tmp_path, slow_first=5.0)
     o = S.oracle(S.python("import time; time.sleep(60)"), S.python("print(2)"),
-                 S.submit(ALICE_ROWS, S.EMPTY_CLAIM))
+                 S.submit())
     reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o, box=box,
                            verifier=S.passing_verifier(), retry_cap=2, turn_deadline=3.0)
 
@@ -613,11 +620,11 @@ def test_an_abandoned_attempts_limiter_wait_does_not_touch_the_next_attempts_clo
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     est.answer("idp", "query", BOB, BOB_ROWS)
     est.answer("idp", "lookup", {"entity": "alice"}, LOOKUP_ALICE)
-    side = [S.removed(row, system="idp", verb="query", params=params, count=1)
-            for row, params in ((ALICE_ROWS["rows"][0], ALICE), (BOB_ROWS["rows"][0], BOB))]
-    o = S.oracle(S.check(ALICE_ROWS, S.claim(removed=side)),
+    # Two proofs: the host check re-runs each, one after the other (check 5).
+    proofs = [S.proof("idp", "query", ALICE), S.proof("idp", "query", BOB)]
+    o = S.oracle(S.check(S.handin(S.op_remove("/rows/0", fact_id="f1"), proofs=proofs)),
                  S.run_query("idp", "lookup", {"entity": "alice"}),
-                 S.submit(ALICE_ROWS, S.EMPTY_CLAIM))
+                 S.submit())
     limiter = _GatedLimiter()
     reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o, limiter=limiter,
                            verifier=S.passing_verifier(), retry_cap=2, turn_deadline=3.0)
@@ -690,7 +697,7 @@ def test_a_failure_closing_the_oracle_mark_does_not_replace_the_unservable_abort
 def test_an_unpriced_verifier_is_refused_before_the_oracles_first_request(tmp_path):
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
-    model = ProviderLikeModel([("submit", {"served": ALICE_ROWS, "claim": S.EMPTY_CLAIM})])
+    model = ProviderLikeModel([("submit", _UNCHANGED)])
     unpriced = ProviderLikeModel([("verdict", {"passed": True, "reason": "ok"})],
                                  name="no-such-verifier-model")
 
@@ -702,7 +709,7 @@ def test_an_unpriced_verifier_is_refused_before_the_oracles_first_request(tmp_pa
 def test_a_failing_trace_write_still_charges_and_is_not_a_model_failure(tmp_path):
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
-    o = S.oracle(S.submit(ALICE_ROWS, S.EMPTY_CLAIM))
+    o = S.oracle(S.submit())
     v = S.passing_verifier()
     reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o, verifier=v, retry_cap=1)
     Path(reg.store.paths.trace).mkdir(parents=True)  # every append to the trace now fails
@@ -719,13 +726,12 @@ _HONEST = {"user": "alice", "event_id": "e-9f01", "action": "tgt", "host": "db-1
            "ts": "2026-07-28T15:20:00Z"}
 
 
-def _forge_and_serve(tmp_path: Path, row: Any, *, system: str = "Elastic") -> tuple[Any, Any]:
+def _forge_and_serve(tmp_path: Path, row: Any) -> tuple[Any, Any]:
+    """Serve the alice call with one forged row added (#1543: the add names no system; the
+    host stamps the call's)."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
-    served = {"rows": [_ALICE_ROW, row]}
-    o = S.oracle(S.Move("forge", {"forged_id": "fg-1", "fact_id": "f1", "system": system,
-                                  "row": row}),
-                 S.submit(served, S.claim(added=[S.added("fg-1", "f1")])))
+    o = S.oracle(S.submit(_add("/rows/-", row, fact_id="f1")))
     reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o,
                            verifier=S.passing_verifier(), retry_cap=1)
     return reg, S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice")
@@ -745,18 +751,16 @@ def test_an_esql_value_array_of_the_wrong_length_is_refused_at_forge(tmp_path):
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, _esql(_ESQL_ROWS))
     short = ["2026-03-01T11:00:00Z", "alice", "e-9f01"]
-    o = S.oracle(S.Move("forge", {"forged_id": "fg-1", "fact_id": "f1", "system": "idp",
-                                  "row": short}),
-                 S.submit(_esql([*_ESQL_ROWS, short]), S.claim(
-                     added=[S.added("fg-1", "f1")],
-                     counts=[S.counted("*", base=2, added_=1, served=3)])))
+    o = S.oracle(S.submit(S.handin(S.op_add("/values/-", short, forged_id="fg-1", fact_id="f1"),
+                                   S.op_replace("/row_count", 3, fact_id="f1"))))
     reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o,
                            verifier=S.passing_verifier(), retry_cap=1)
 
     with pytest.raises(oracle_mod.OracleUnservable) as refused:
         S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice")
-    assert "fg-1" in refused.value.detail, refused.value.detail
-    assert "check 1" in refused.value.detail, refused.value.detail
+    # Refused at the hand-in (#1543): the add that stages the row names its operation.
+    assert "patch operation 0: forge refused" in refused.value.detail, refused.value.detail
+    assert "4 columns" in refused.value.detail, refused.value.detail
     assert "fg-1" not in reg.store.frozen
 
     told = reg.oracle._forge({"forged_id": "fg-2", "fact_id": "f1", "row": short},
@@ -771,9 +775,7 @@ def test_a_nested_esql_value_array_that_does_not_zip_fails_check_2():
 
     def forged(row: list[Any]) -> list[str]:
         record = {"forged_id": "fg-1", "fact_id": "F", "system": "s", "row": row}
-        served = {"result": {**_esql([*_ESQL_ROWS, row]), "row_count": 2}}
-        return _checks(base, served, {"added": [{"forged_id": "fg-1", "fact_id": "F"}]},
-                       staged={"fg-1": record})
+        return _checks(base, _add("/result/values/-", row), staged={"fg-1": record})
 
     short = forged(["2026-03-01T11:00:00Z", "alice", "e-9f01"])
     assert [f for f in short if f.startswith("check 2")], short
@@ -787,7 +789,7 @@ def _two_fact_checks(claimed_fact: str, *, frozen: bool) -> list[str]:
                        facts={}, rerun=lambda *_a: {})
     base = {"rows": [_REAL_ROW]}
     return check_submission(
-        base, {"rows": [_REAL_ROW, row]}, {"added": [{"forged_id": "x1", "fact_id": claimed_fact}]},
+        base, _add("/rows/-", row, forged_id="x1", fact_id=claimed_fact),
         world=SimpleNamespace(facts=[SimpleNamespace(fact_id="f1"), SimpleNamespace(fact_id="f2")]),
         store=store, real_data=RealData(answers=[("s", base)]))
 
@@ -797,31 +799,6 @@ def test_a_forged_row_is_claimed_under_the_fact_it_was_forged_for(frozen):
     wrong = _two_fact_checks("f2", frozen=frozen)
     assert any(f.startswith("check 4") and "'f1', not 'f2'" in f for f in wrong), wrong
     assert _two_fact_checks("f1", frozen=frozen) == []
-
-
-def test_a_star_count_does_not_cover_an_edit_to_a_real_rows_field():
-    base = {"total": 1, "hits": [{"user": "alice", "severity": 1, "risk": 1}]}
-    forged_row = {"user": "bob", "severity": 1, "risk": 1}
-    record = {"forged_id": "fg-1", "fact_id": "F", "system": "s", "row": forged_row}
-    claim = {"added": [{"forged_id": "fg-1", "fact_id": "F"}],
-             "counts": [{"group": "*", "base": 1, "added": 1, "removed": 0, "served": 2}]}
-
-    edited = _checks(base, {"total": 2, "hits": [{"user": "alice", "severity": 2, "risk": 2},
-                                                 forged_row]}, claim, staged={"fg-1": record})
-    unclaimed = sorted(f.split("'")[1] for f in edited if "without a claimed change" in f)
-    assert unclaimed == ["risk", "severity"], edited
-    assert _checks(base, {"total": 2, "hits": [base["hits"][0], forged_row]}, claim,
-                   staged={"fg-1": record}) == []
-
-
-def test_one_count_entry_accounts_for_one_count_cell():
-    base = {"hits": {"total": 1}, "aggregations": {"all": {"value": 1}}}
-    served = {"hits": {"total": 2}, "aggregations": {"all": {"value": 2}}}
-    star = {"group": "*", "base": 1, "added": 1, "removed": 0, "served": 2}
-
-    one = _checks(base, served, {"counts": [star]})
-    assert sum("without a claimed change" in f for f in one) == 1, one
-    assert _checks(base, served, {"counts": [star, dict(star)]}) == []
 
 
 class _NoScan(list):
@@ -835,11 +812,11 @@ def test_a_declared_reference_is_found_by_value_not_by_scanning_every_real_row()
     real.maps = _NoScan(real.maps)
     row = {"user": "alice", "user_id": "u-4410", "event_id": "e-9f01"}
     record = {"forged_id": "fg-1", "fact_id": "F", "system": "s", "row": row}
-    claim = {"added": [{"forged_id": "fg-1", "fact_id": "F"}],
-             "entity_refs": [{"forged_id": "fg-1", "column": "user_id", "entity": "alice"}]}
+    handin = _add("/rows/-", row,
+                  entity_refs=[S.entity_ref("fg-1", "user_id", "alice")])
     store = CheckStore(frozen={}, staged={"fg-1": record}, facts={}, rerun=lambda *_a: {})
 
-    assert check_submission({"rows": []}, {"rows": [row]}, claim,
+    assert check_submission({"rows": []}, handin,
                             world=SimpleNamespace(facts=[SimpleNamespace(fact_id="F")]),
                             store=store, real_data=real) == []
 
@@ -866,8 +843,8 @@ _COLLIDING = {"forged_id": "fg-1", "fact_id": "f1", "system": "idp",
 def _serve_colliding(tmp_path: Path, *, answers_unwritable: bool) -> tuple[Any, Any]:
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
-    served = {"rows": [*ALICE_ROWS["rows"], _COLLIDING["row"]]}
-    o = S.oracle(S.submit(served, S.claim(added=[S.added("fg-1", "f1")])))
+    # fg-1 is frozen: added by its id, the host fills in its row.
+    o = S.oracle(S.submit(S.handin(S.op_add_frozen("/rows/-", forged_id="fg-1", fact_id="f1"))))
     reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o,
                            verifier=S.passing_verifier(), retry_cap=1)
     reg.store.commit(forged=[_COLLIDING], facts=[], answer=None)  # fg-1 frozen, id e-100
@@ -907,7 +884,7 @@ def test_a_failure_closing_the_clock_mark_leaves_no_row_for_the_answer_it_withhe
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     ep = S.episode_v2(tmp_path)
-    o = S.oracle(S.submit(ALICE_ROWS, S.EMPTY_CLAIM))
+    o = S.oracle(S.submit())
     reg = S.world_registry(ep, "b", est, oracle=o, verifier=S.passing_verifier(), retry_cap=1)
     ctx = est.ctx(tmp_path / "inv")
     state = S.run_state(tmp_path / "inv")
@@ -944,7 +921,7 @@ def test_a_limiter_failing_closed_under_an_oracle_query_is_a_failed_attempt(tmp_
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     est.answer("idp", "lookup", {"entity": "alice"}, LOOKUP_ALICE)
     o = S.oracle(S.run_query("idp", "lookup", {"entity": "alice"}),
-                 S.submit(ALICE_ROWS, S.EMPTY_CLAIM))
+                 S.submit())
     limiter = _LimiterFailsOnce()
     reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o, limiter=limiter,
                            verifier=S.passing_verifier(), retry_cap=2)
@@ -957,7 +934,7 @@ def test_a_broken_serving_machine_makes_the_world_unservable_not_a_fault_row(tmp
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     o = S.oracle(S.run_query("idp", "lookup", {"entity": "alice"}),
-                 S.submit(ALICE_ROWS, S.EMPTY_CLAIM))
+                 S.submit())
     reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o,
                            verifier=S.passing_verifier(), retry_cap=3)
 
@@ -1101,7 +1078,7 @@ def _big_rows(user: str, mark: str, n: int = 300) -> dict:
 def test_oversized_family_example_answers_are_capped(tmp_path):
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
-    o = S.oracle(S.submit(ALICE_ROWS, S.EMPTY_CLAIM))
+    o = S.oracle(S.submit())
     reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o,
                            verifier=S.passing_verifier(), retry_cap=1)
     huge = {"hits": [{"_id": f"h-{k}", "msg": _SIX_MARK + "y" * 100} for k in range(6000)]}
@@ -1114,8 +1091,11 @@ def test_oversized_family_example_answers_are_capped(tmp_path):
     assert "past what one request carries" in first
 
 
-def test_a_conversation_past_the_size_budget_restarts_and_keeps_the_frozen_rows(tmp_path,
-                                                                               monkeypatch):
+def test_a_call_starts_fresh_and_a_retry_past_the_size_budget_restarts_keeping_the_frozen_rows(
+        tmp_path, monkeypatch):
+    """#1543: every call starts a fresh conversation, with the world's frozen rows in its prefix
+    (never the earlier call's turns); within one call, a retry whose conversation is past the
+    size budget restarts from that prefix too, the frozen rows and the failure carried in it."""
     monkeypatch.setattr(
         # lint-monkeypatch: ok — the size budget is a module constant with no seam; a small one
         # keeps the scenario fast (the full-size one is ~400k characters a request).
@@ -1125,23 +1105,32 @@ def test_a_conversation_past_the_size_budget_restarts_and_keeps_the_frozen_rows(
     bob = _big_rows("bob", "CALL2MARK")
     est.answer("idp", "query", ALICE, alice)
     est.answer("idp", "query", BOB, bob)
+    # A side read big enough that call 2's first attempt leaves its conversation past the budget.
+    est.answer("idp", "lookup", {"entity": "bob"}, _big_rows("bob", "LOOKMARK"))
     row = {"user": "alice", "event_id": "e-9001", "action": "tgt", "note": "FORGED6"}
     served = {"rows": [*alice["rows"], row]}
-    o = S.oracle(S.forge("fg-1", "f1", "idp", row),
-                 S.submit(served, S.claim(added=[S.added("fg-1", "f1")])),
-                 S.submit(oracle_mod.BASE_HANDLE, S.EMPTY_CLAIM))
+    o = S.oracle(S.submit(_add("/rows/-", row, fact_id="f1")),
+                 S.run_query("idp", "lookup", {"entity": "bob"}),
+                 S.submit(S.handin(S.op_remove("/rows/9999", fact_id="f1"))),
+                 S.submit())
     reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o,
-                           verifier=S.passing_verifier(), retry_cap=1)
+                           verifier=S.passing_verifier(), retry_cap=2)
     ctx = est.ctx(tmp_path / "inv")
 
     assert S.call(reg, "idp", "query", ctx, q="user:alice") == served
     second = o.requests
     assert S.call(reg, "idp", "query", ctx, q="user:bob") == bob
+    assert o.requests == second + 3, o.requests
 
-    restarted = o.seen[second]
-    assert "CALL1MARK" not in restarted, "call 2 carried call 1's conversation past the budget"
-    assert "Telemetry frozen in this world so far" in restarted
-    assert "FORGED6" in restarted, "the restarted conversation lost the frozen row"
+    fresh = S.all_parts_text(o.messages[second])
+    assert "CALL1MARK" not in fresh, "call 2 carried call 1's conversation"
+    assert "Telemetry frozen in this world so far" in fresh
+    assert "FORGED6" in fresh, "the fresh call lost the frozen row"
+    assert "LOOKMARK" in S.all_parts_text(o.messages[second + 1])
+    retry = S.all_parts_text(o.messages[second + 2])
+    assert "LOOKMARK" not in retry, "the retry past the size budget did not restart"
+    assert "FORGED6" in retry, "the restarted retry lost the frozen row"
+    assert "cannot apply" in retry, "the restarted retry lost the failed attempt"
     assert reg.oracle._in_conversation == 1
 
 
@@ -1189,7 +1178,7 @@ def test_python_code_the_box_wire_cannot_carry_fails_that_call_only(tmp_path):
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     box, log = _python_box_factory(tmp_path)
-    o = S.oracle(S.python("print('a\x00b')"), S.submit(ALICE_ROWS, S.EMPTY_CLAIM))
+    o = S.oracle(S.python("print('a\x00b')"), S.submit())
     reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o, box=box,
                            verifier=S.passing_verifier(), retry_cap=1)
 
@@ -1198,24 +1187,6 @@ def test_python_code_the_box_wire_cannot_carry_fails_that_call_only(tmp_path):
     assert "python refused" in told, told
     assert "NUL" in told, told
     assert log.names == [], "a box was started for code that cannot reach it"
-
-
-def test_a_star_count_cannot_claim_an_ordinary_field_of_a_document():
-    base = {"user": {"name": "alice", "failed_logins": 3}}
-    served = {"user": {"name": "alice", "failed_logins": 10}}
-    for group in ("*", "failed_logins"):
-        claim = {"counts": [{"group": group, "base": 3, "added": 7, "removed": 0,
-                             "served": 10}]}
-        failures = _checks(base, served, claim)
-        assert any(f.startswith("check 1") and "failed_logins" in f for f in failures), (
-            group, failures)
-    changed = {"changed": [{"entity": "alice", "field": "failed_logins", "old": 3, "new": 10}]}
-    assert _checks(base, served, changed) == []
-    # Still count cells: a count-named answer, and an ES total that carries its relation.
-    count = {"counts": [{"group": "*", "base": 3, "added": 7, "removed": 0, "served": 10}]}
-    assert _checks({"count": 3}, {"count": 10}, count) == []
-    assert _checks({"hits": {"total": {"value": 3, "relation": "eq"}}},
-                   {"hits": {"total": {"value": 10, "relation": "eq"}}}, count) == []
 
 
 def test_an_unexpected_error_in_one_preflight_world_stops_the_others(tmp_path):
@@ -1229,7 +1200,7 @@ def test_an_unexpected_error_in_one_preflight_world_stops_the_others(tmp_path):
                                  S.captured("idp", "query", BOB, BOB_ROWS)])
     (ep / "oracle").mkdir(exist_ok=True)
     (ep / "oracle" / T.world_id(ep, "b")).write_text("not a folder", encoding="utf-8")
-    o = S.oracle(S.submit(ALICE_ROWS, S.EMPTY_CLAIM), S.submit(BOB_ROWS, S.EMPTY_CLAIM),
+    o = S.oracle(S.submit(), S.submit(),
                  fault=S.Fault(delay=1.5))
 
     # Pre-flight takes the walked view's held episode. The view is opened OUTSIDE the raises
@@ -1251,13 +1222,12 @@ def test_an_unexpected_error_in_one_preflight_world_stops_the_others(tmp_path):
 _PB_BASE = {"rows": [{"action": "logon", "event_id": "e-100", "user": "alice"}]}
 _PB_FORGED = {"action": "tgt-issued", "event_id": "e-9001", "user": "alice"}
 _PB_CHANGED = {"rows": [*_PB_BASE["rows"], _PB_FORGED]}
-_PB_CLAIM = S.claim(added=[S.added("fg-1", "f1")])
 _PB_REFUSAL = "made before the branch point; serve its base answer unchanged"
 
 
 def _pb_change() -> list:
     """One attempt that forges fact f1's row onto the alice answer and submits the change."""
-    return [S.forge("fg-1", "f1", "idp", _PB_FORGED), S.submit(_PB_CHANGED, _PB_CLAIM)]
+    return [S.submit(_add("/rows/-", _PB_FORGED, fact_id="f1"))]
 
 
 def _pb_registry(tmp_path: Path, o: Any, v: Any, *, prebranch: bool, retry_cap: int = 3) -> Any:
@@ -1275,7 +1245,7 @@ def _pb_registry(tmp_path: Path, o: Any, v: Any, *, prebranch: bool, retry_cap: 
 
 
 def test_a_sibling_s_changed_answer_to_a_pre_branch_call_is_refused_and_retried(tmp_path):
-    o = S.oracle(*_pb_change(), S.submit(_PB_BASE, S.EMPTY_CLAIM))
+    o = S.oracle(*_pb_change(), S.submit())
     v = S.passing_verifier()
     reg, ctx = _pb_registry(tmp_path, o, v, prebranch=True)
 
@@ -1290,7 +1260,7 @@ def test_a_sibling_s_changed_answer_to_a_pre_branch_call_is_refused_and_retried(
 
 
 def test_an_oracle_that_only_changes_a_pre_branch_call_makes_it_unservable(tmp_path):
-    o = S.oracle(*_pb_change(), then=S.submit(_PB_CHANGED, _PB_CLAIM))
+    o = S.oracle(*_pb_change(), then=_pb_change()[0])
     v = S.passing_verifier()
     reg, ctx = _pb_registry(tmp_path, o, v, prebranch=True, retry_cap=2)
 
@@ -1348,9 +1318,7 @@ _ES_ALERT = {"@timestamp": "2026-03-01T09:01:00Z", "event": {"kind": "alert"},
 def _hits_check(row: dict) -> list[str]:
     base = {"hits": [_ES_EVENT, _ES_ALERT]}
     record = {"forged_id": "fg-1", "fact_id": "F", "system": "s", "row": row}
-    failures = _checks(base, {"hits": [_ES_EVENT, _ES_ALERT, row]},
-                       {"added": [{"forged_id": "fg-1", "fact_id": "F"}]},
-                       staged={"fg-1": record})
+    failures = _checks(base, _add("/hits/-", row), staged={"fg-1": record})
     return [f for f in failures if f.startswith("check 2")]
 
 
@@ -1384,9 +1352,7 @@ def test_only_columns_named_as_ids_are_id_columns():
 def _ids_check(real_rows: list[dict], forged: dict) -> list[str]:
     base = {"rows": real_rows}
     record = {"forged_id": "fg-1", "fact_id": "F", "system": "s", "row": forged}
-    failures = _checks(base, {"rows": [*real_rows, forged]},
-                       {"added": [{"forged_id": "fg-1", "fact_id": "F"}]},
-                       staged={"fg-1": record})
+    failures = _checks(base, _add("/rows/-", forged), staged={"fg-1": record})
     return [f for f in failures if f.startswith("check 3")]
 
 
@@ -1405,14 +1371,14 @@ def test_a_forged_id_collides_only_with_a_real_identifier():
 
 
 def test_a_frozen_row_records_only_collisions_with_real_identifiers():
-    from defender.learning.branch.estate.checks import frozen_id_collisions, run_checks
+    from defender.learning.branch.estate.checks import apply_handin, frozen_id_collisions, run_checks
 
     row = {"pid": 1, "user_id": "u-9", "total": 2}
     record = {"forged_id": "fg-1", "fact_id": "F", "system": "s", "row": row}
     store = CheckStore(frozen={"fg-1": record}, staged={}, facts={}, rerun=lambda *_a: {})
     real = RealData(answers=[("s", {"rows": [{"pid": 5, "user_id": "u-9", "total": 1}]})])
-    checked = run_checks({"rows": []}, {"rows": [row]},
-                         {"added": [{"forged_id": "fg-1", "fact_id": "F"}]},
+    handin = parse_handin(_add("/rows/-", row))[0]
+    checked = run_checks(apply_handin({"rows": []}, handin), handin,
                          world=SimpleNamespace(facts=[SimpleNamespace(fact_id="F")]),
                          store=store, real_data=real)
     found = frozen_id_collisions(checked, store=store, real_data=real)
@@ -1422,7 +1388,7 @@ def test_a_frozen_row_records_only_collisions_with_real_identifiers():
 def test_a_recorded_pre_branch_call_is_told_only_to_serve_it_unchanged(tmp_path):
     """#1385 review: a recorded pre-branch call's framing is the pre-branch line alone, never
     also the recorded-base line that invites editing it where the world's facts reach."""
-    o = S.oracle(S.submit(_PB_BASE, S.EMPTY_CLAIM))
+    o = S.oracle(S.submit())
     reg, ctx = _pb_registry(tmp_path, o, S.passing_verifier(), prebranch=True)
 
     assert S.call(reg, "idp", "query", ctx, **ALICE) == _PB_BASE
@@ -1443,7 +1409,7 @@ def test_a_pre_branch_call_the_recording_lacks_is_re_asked_like_an_unrecorded_on
     est.answer("idp", "query", ALICE, live)
     est.answer("idp", "query", bounded, _PB_BASE)
     o = S.oracle(S.re_ask(S.re_asked(system="idp", verb="query", params=bounded)),
-                 S.submit(_PB_BASE, S.EMPTY_CLAIM))
+                 S.submit())
     reg = S.world_registry(S.episode_v2(tmp_path, base_rows=None), "b", est, oracle=o,
                            verifier=S.passing_verifier(),
                            prebranch={request_key("idp", "query", ALICE)})

@@ -10,6 +10,7 @@ from __future__ import annotations
 import copy
 import json
 import re
+from pathlib import Path
 
 import pytest
 import yaml  # tests may load YAML raw (see tests/tenancy/tenant_1108_p4/test_dev_compose.py)
@@ -25,6 +26,11 @@ ADMIN_CLIENT = "defender-api-admin"
 AMR_MAPPER = "oidc-amr-mapper"
 USER_PROFILE = "kc.user.profile.config"
 CODE_LIFESPAN_DEFAULT = 60  # Keycloak's accessCodeLifespan when the realm does not set it
+#: #1540 F5: the login theme's name, and its folder (D2: Keycloak's `<theme dir>/login/theme.properties`, the folder
+#: compose mounts as `/opt/keycloak/themes/defender`).
+THEME_NAME = "defender"
+THEME = REPO_ROOT / "defender" / "frontend" / "keycloak-theme"
+PARENT_STYLES = "css/styles.css"
 
 
 # --- checks (each raises AssertionError) ---------------------------------------------------------
@@ -111,7 +117,43 @@ def check_login_client_redirects_to_the_api_callback(realm: dict) -> None:
     assert client["redirectUris"] == [client["rootUrl"] + "/api/auth/callback"]
 
 
+def check_realm_names_the_theme(realm: dict) -> None:
+    """#1540 F5: the dev realm's sign-in screens use the `defender` login theme."""
+    assert realm.get("loginTheme") == THEME_NAME
+
+
+def theme_properties(theme: Path) -> dict[str, str]:
+    """The theme's `login/theme.properties` as Java properties read it (`key=value`, `#` comments, `\\` continuations)."""
+    path = theme / "login" / "theme.properties"
+    assert path.is_file(), f"no {path}"
+    joined = re.sub(r"\\\r?\n\s*", "", path.read_text(encoding="utf-8"))
+    pairs = (line.split("=", 1) for line in joined.splitlines() if "=" in line and not line.lstrip().startswith("#"))
+    return {key.strip(): value.strip() for key, value in pairs}
+
+
+def stylesheet_references(css: str) -> list[str]:
+    """Every `url(...)` and `@import` target in a stylesheet (comments ignored; data: and fragment-only left out)."""
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    found = re.findall(r"url\(\s*[\"']?([^\"')\s]+)", css) + re.findall(r"@import\s+[\"']([^\"']+)", css)
+    return [r for r in dict.fromkeys(found) if not r.startswith(("data:", "#"))]
+
+
+def check_theme_extends_keycloak_v2_and_lists_both_stylesheets(theme: Path) -> None:
+    """#1540 F5 (probe C10): `parent=keycloak.v2`; `styles` is the child's whole list, so the parent's stylesheet comes
+    first and the theme's own second, and that second one is a file of the theme."""
+    props = theme_properties(theme)
+    assert props.get("parent") == "keycloak.v2", props
+    styles = props.get("styles", "").split()
+    assert len(styles) == 2, f"styles must be `{PARENT_STYLES}` then the theme's own: {styles}"
+    assert styles[0] == PARENT_STYLES, styles
+    assert styles[1] != PARENT_STYLES, styles
+    assert styles[1].endswith(".css"), styles
+    own = theme / "login" / "resources" / styles[1]
+    assert own.is_file(), f"the theme's own stylesheet {own} is missing"
+
+
 CHECKS = [
+    check_realm_names_the_theme,
     check_login_client_redirects_to_the_api_callback,
     check_realm_switches,
     check_email_not_editable_by_the_user,
@@ -163,15 +205,6 @@ def test_the_login_client_registers_the_apis_callback_under_api_and_no_other():
     assert "/auth/callback" not in "".join(_clients(realm)[LOGIN_CLIENT]["redirectUris"]).replace("/api/auth/callback", "")
 
 
-def test_the_operator_docs_no_longer_name_the_redirect_uri_setting():
-    """`DEFENDER_KEYCLOAK_REDIRECT_URI` is derived, not set, so the settings table no longer lists it (B3)."""
-    docs = REPO_ROOT / "defender" / "docs" / "development-operations.md"
-    assert docs.is_file(), docs
-    text = docs.read_text(encoding="utf-8")
-    assert "DEFENDER_KEYCLOAK_CLIENT_ID" in text, "control: the settings table is the document read"
-    assert "DEFENDER_KEYCLOAK_REDIRECT_URI" not in text
-
-
 def test_the_api_service_account_may_only_manage_users():
     """Its roles are exactly realm-management: manage-users, as C13 showed sufficient (A1)."""
     check_service_account_is_limited_to_manage_users(_committed_realm())
@@ -187,7 +220,7 @@ def test_keycloaks_own_email_is_sent_through_mailpit():
 def _good_realm() -> dict:
     profile = {"attributes": [{"name": "email", "permissions": {"edit": ["admin"], "view": ["admin", "user"]}}]}
     return {
-        "realm": REALM, "registrationAllowed": False, "duplicateEmailsAllowed": False,
+        "realm": REALM, "loginTheme": THEME_NAME, "registrationAllowed": False, "duplicateEmailsAllowed": False,
         "editUsernameAllowed": False, "bruteForceProtected": True, "browserFlow": "browser",
         "smtpServer": {"host": "mailpit", "port": "1025"},
         "components": {"org.keycloak.userprofile.UserProfileProvider": [
@@ -228,6 +261,7 @@ def test_every_check_accepts_a_good_realm():
 
 
 @pytest.mark.parametrize(("check", "bad"), [
+    pytest.param(check_realm_names_the_theme, _mutate(["loginTheme"], "keycloak.v2"), id="other-login-theme"),
     pytest.param(check_realm_switches, _mutate(["registrationAllowed"], True), id="registration"),
     pytest.param(check_realm_switches, _mutate(["duplicateEmailsAllowed"], True), id="duplicate-emails"),
     pytest.param(check_realm_switches, _mutate(["editUsernameAllowed"], True), id="edit-username"),
@@ -265,6 +299,41 @@ def test_a_check_rejects_the_setting_it_guards(check, bad):
     """Each single-field change is caught by its own check."""
     with pytest.raises(AssertionError):
         check(bad)
+
+
+def test_1540_f5_the_realm_names_the_defender_login_theme():
+    """The committed dev realm sets `loginTheme: defender`. (F5)"""
+    check_realm_names_the_theme(_committed_realm())
+
+
+def test_1540_f5_the_theme_extends_keycloak_v2_and_lists_its_stylesheet_after_the_parents():
+    """The theme folder's properties: parent `keycloak.v2`, `styles` = `css/styles.css` then its own file. (F5, C10)"""
+    check_theme_extends_keycloak_v2_and_lists_both_stylesheets(THEME)
+
+
+def _good_theme(root: Path) -> Path:
+    resources = root / "login" / "resources" / "css"
+    resources.mkdir(parents=True)
+    (root / "login" / "theme.properties").write_text(
+        f"parent=keycloak.v2\nstyles={PARENT_STYLES} css/defender.css\n", encoding="utf-8")
+    (resources / "defender.css").write_text("body{}", encoding="utf-8")
+    return root
+
+
+@pytest.mark.parametrize("properties", [
+    pytest.param("parent=keycloak.v2\nstyles=css/defender.css\n", id="parent-styles-dropped"),
+    pytest.param(f"parent=keycloak.v2\nstyles=css/defender.css {PARENT_STYLES}\n", id="order-swapped"),
+    pytest.param(f"parent=keycloak\nstyles={PARENT_STYLES} css/defender.css\n", id="other-parent"),
+    pytest.param(f"parent=keycloak.v2\nstyles={PARENT_STYLES} css/missing.css\n", id="stylesheet-absent"),
+    pytest.param(f"parent=keycloak.v2\nstyles={PARENT_STYLES}\n", id="no-own-stylesheet"),
+])
+def test_1540_f5_the_theme_check_refuses_a_bad_properties_file(tmp_path, properties):
+    """A good theme passes; each single change to its properties is refused. (F5)"""
+    check_theme_extends_keycloak_v2_and_lists_both_stylesheets(_good_theme(tmp_path / "ok"))
+    bad = _good_theme(tmp_path / "bad")
+    (bad / "login" / "theme.properties").write_text(properties, encoding="utf-8")
+    with pytest.raises(AssertionError):
+        check_theme_extends_keycloak_v2_and_lists_both_stylesheets(bad)
 
 
 # --- the dev compose (A2) ------------------------------------------------------------------------

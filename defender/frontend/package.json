@@ -3,12 +3,42 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "The Defender app shell and screens (#1161): TypeScript, built to static files in dist/.",
+  "description": "The Defender app (#1161, #1540): React screens built by Vite to static files in dist/, commands run by Bun.",
+  "defender": {
+    "inputs": [
+      "../api/addresses.json",
+      "../api/openapi.json"
+    ]
+  },
   "scripts": {
-    "build": "node build.mjs"
+    "generate": "bun scripts/run.mjs generate",
+    "build": "bun scripts/run.mjs build",
+    "check": "bun scripts/run.mjs check",
+    "test": "bun scripts/run.mjs generate && vitest run",
+    "dev": "bun scripts/run.mjs generate && vite",
+    "lint": "eslint . && prettier --check src scripts \"*.mjs\" && knip",
+    "format": "prettier --write src scripts \"*.mjs\""
+  },
+  "dependencies": {
+    "@tanstack/react-query": "5.107.1",
+    "openapi-fetch": "0.17.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
   },
   "devDependencies": {
-    "esbuild": "0.28.2",
-    "typescript": "5.9.3"
+    "@eslint/js": "10.0.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.3.0",
+    "eslint": "10.14.0",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "17.13.0",
+    "knip": "6.44.1",
+    "openapi-typescript": "7.13.0",
+    "prettier": "3.9.10",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.72.1",
+    "vite": "8.3.8",
+    "vitest": "5.1.0"
   }
 }

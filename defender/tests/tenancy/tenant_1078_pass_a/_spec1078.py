@@ -414,7 +414,7 @@ def serving_oracle() -> dict[str, Any]:
     fact world calibrates and the family is accepted."""
     from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 
-    return {"oracle": S.oracle(then=S.submit(SOURCE_ANSWER, S.EMPTY_CLAIM)).model,
+    return {"oracle": S.oracle(then=S.submit()).model,
             "verifier": S.passing_verifier().model}
 
 

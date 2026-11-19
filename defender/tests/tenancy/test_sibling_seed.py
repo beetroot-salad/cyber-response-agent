@@ -148,7 +148,7 @@ def _main(src: Path, *, stamp_tenant: str | None, roster: Any = None,
             spawn=spawn, questioner=O.questioner_for() if questioner is None else questioner,
             preflight=O.no_preflight,
             live_tree=P.source_capture(tenant_id=stamp_tenant), roster=roster,
-            oracle=O.oracle(then=O.submit(_BASE, O.EMPTY_CLAIM)).model,
+            oracle=O.oracle(then=O.submit()).model,
             verifier=O.passing_verifier().model)
     except (Exception, SystemExit) as refused:  # noqa: BLE001 — a refusal is an outcome here
         outcome = refused

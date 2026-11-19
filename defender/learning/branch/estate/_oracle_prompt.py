@@ -58,12 +58,9 @@ def family_salt(bodies: list[str]) -> str:
 
 
 
-#: The most text of one answer a request carries; a larger one is shown as its head (N10),
-#: and the oracle submits `BASE_HANDLE` as `served` to serve a large base unchanged.
+#: The most text of one answer a request carries; a larger one is shown as its head (N10). The
+#: whole answer is saved for the oracle's code, and its patch applies to the whole of it.
 _CONTEXT_CAP = 200_000
-
-
-BASE_HANDLE = "$BASE"
 
 
 
@@ -123,8 +120,8 @@ def _base_text(base: Any, cap: int = _CONTEXT_CAP) -> str:
     framed = _framed("The real base answer", base, cap)
     if len(canonical_json(base)) <= cap:
         return framed
-    return (f"To serve the base answer unchanged, submit served = {BASE_HANDLE!r} with an "
-            f"empty claim.\n{framed}")
+    return ("The whole base answer is saved for your code (inputs/index.json names it); an "
+            f"empty patch serves it unchanged.\n{framed}")
 
 
 
