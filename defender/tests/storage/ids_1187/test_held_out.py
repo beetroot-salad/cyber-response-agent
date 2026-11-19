@@ -39,16 +39,20 @@ def _fixtures(root: Path, truths: dict[str, str]) -> Path:
 
 
 def _run(runs: Path, run_id: str | None = None, *, says: str | None,
-         record: bool = True) -> Path:
-    """Create a run with an alert record and an optional disposition report."""
-    from defender.records import RunPaths
+         record: bool = True, fault: str | None = None) -> Path:
+    """Create a run with an alert record and its closing record: `says` its disposition, or (None) a store with the table and
+    no row; `fault` breaks where the record is read (#1534). A folder named by a slug, not a run id, gets its record through a
+    handle built at that folder (scoring must never reach it)."""
+    from defender.records import Run, RunPaths
+    from defender.tests.support.shared._fixture_uuid import is_fixture_uuid_shape
+    from defender.tests.support.shared._locations_1210 import fixture_runs_base
+    from defender.tests.support.storage import _readers1534 as R
 
     run_dir = S.make_run(runs, run_id)
-    paths = RunPaths(run_dir)
     if not record:
-        paths.alert_record.unlink()
-    if says is not None:
-        paths.report.write_text(P.T.report_text(says), encoding="utf-8")
+        RunPaths(run_dir).alert_record.unlink()
+    handle = None if is_fixture_uuid_shape(run_dir.name) else Run(run_dir, runs_base=fixture_runs_base(runs))
+    R.plant_run(run_dir, None if says is None else R.valid_fields(says), fault=fault, run=handle)
     return run_dir
 
 
@@ -190,9 +194,31 @@ def test_a_row_naming_an_absent_or_recordless_run_scores_wrong_not_not_run(tmp_p
     for slug in ("absent-case", "recordless-case"):
         assert NO_RUN_RECORD in failures.get(slug, ""), (
             f"{slug} is not in the {NO_RUN_RECORD!r} bucket:\n{res.out}")
-    assert "report.md" in failures.get("no-report-case", ""), res.out
+    assert failures.get("no-report-case"), res.out  # CONFLICT-UPDATED (#1534): a failure row, no longer naming `report.md`
+    assert "report.md" not in failures["no-report-case"], res.out
     assert NO_RUN_RECORD not in failures.get("no-report-case", ""), res.out
     assert "scored-case" not in failures, res.out
+
+
+@pytest.mark.parametrize("fault", ["database-missing", "row-invalid", "recorded-before-1534"])
+def test_1534_a_run_whose_record_cannot_be_looked_up_is_a_fault_row_naming_the_kind(tmp_path, scoring, fault):
+    """`CouldNotLook` is a failure row for that case carrying the kind's wording (wrong, not unknown), beside a case that
+    scores; a `report.md` beside a record is not read. (V-READERS, held-out; OD10)"""
+    from defender.tests.support.storage import _readers1534 as R
+
+    runs, index, _ = scoring
+    fixtures = _fixtures(tmp_path / "fixtures", {"faulted-case": "benign", "scored-case": "benign", "decoy-case": "benign"})
+    faulted = _run(runs, says="benign", fault=fault)
+    scored = _run(runs, says="benign")
+    decoy = _run(runs, says="malicious")
+    (decoy / "report.md").write_text("---\ndisposition: benign\n---\n", encoding="utf-8")  # lint-run-records: ok — a decoy the scorer must not read
+    _index(index, fixtures, ("faulted-case", faulted.name), ("scored-case", scored.name), ("decoy-case", decoy.name))
+
+    res = _score(runs, index, fixtures)
+    res.assert_score({"faulted-case": "WRONG", "scored-case": "OK", "decoy-case": "WRONG"}, (1, 3))
+    assert R.names_only(fault, res.failures().get("faulted-case", "")), res.out
+    assert str(tmp_path) not in res.out, "the lookup's detail (a path) reached the report"
+    assert "scored-case" not in res.failures(), res.out
 
 
 def test_an_index_from_the_old_launcher_scores_past_its_knowledge_pin_line(tmp_path, scoring):

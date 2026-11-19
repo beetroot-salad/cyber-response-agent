@@ -1528,9 +1528,21 @@ class Drive:
         return p.read_text(encoding="utf-8") if p.is_file() else ""
 
     @property
-    def report(self) -> str | None:
-        p = RunPaths(self._dir()).report
-        return p.read_text(encoding="utf-8") if p.is_file() else None
+    def closing(self) -> Any:
+        """The run's closing record through the run-handle lookup: a `Record`, `NeverClosed` or `CouldNotLook`."""
+        from defender.records import closing
+        from defender.tests.support.shared.contracts._spec1077 import fixture_run
+
+        return closing.for_run(fixture_run(self._dir()))
+
+    @property
+    def closed(self) -> Any:
+        """The run's `ClosingRecord`, or None when it never closed; a fault in the lookup fails the reader loudly."""
+        from defender.records import closing
+
+        found = self.closing
+        assert not isinstance(found, closing.CouldNotLook), f"the closing record could not be read: {found.kind}"
+        return found.record if isinstance(found, closing.Record) else None
 
     @property
     def record(self) -> dict[str, Any]:

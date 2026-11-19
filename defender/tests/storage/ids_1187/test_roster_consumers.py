@@ -434,7 +434,7 @@ def test_r8_the_archive_writes_no_run_dir_pointer(data_root):
     with runs.episode(episode_id) as view:
         archive.archive_episode(view.episode, {T.world_id(ep, "b"): ep / "runs" / roster[T.world_id(ep, "b")]})
     world = ep / "worlds" / T.world_id(ep, "b")
-    assert (world / "report.md").is_file(), "the control failed: nothing was archived"
+    assert (world / "investigation.md").is_file(), "the control failed: nothing was archived"
     assert not os.path.lexists(world / "run_dir"), "the archive wrote the run_dir pointer"
 
 
@@ -469,10 +469,10 @@ def test_a_launch_verifies_finished_arms_by_roster_id_archives_no_pointer_and_pa
     finished = [label for label in _spawn_worlds(spawn) if label != "c"]
     for label in finished:
         world = ep / "worlds" / T.world_id(ep, label)
-        assert (world / "report.md").is_file(), f"finished world {label} was not archived"
+        assert (world / "investigation.md").is_file(), f"finished world {label} was not archived"
         assert not os.path.lexists(world / "run_dir"), f"world {label}: a run_dir pointer"
     assert (ep / "runs" / roster[T.world_id(ep, "c")]).is_dir(), "the control failed: c left no arm"
-    assert not (ep / "worlds" / T.world_id(ep, "c") / "report.md").exists(), "VERIFY opened an unfinished arm"
+    assert not (ep / "worlds" / T.world_id(ep, "c") / "investigation.md").exists(), "VERIFY opened an unfinished arm"
 
     page = ep / E.PAGE_NAME
     assert page.is_file(), "the launcher rendered no page"
@@ -622,8 +622,8 @@ def test_a_launch_rosters_every_manifest_world_and_starts_only_the_servable_ones
     assert len(set(roster.values())) == len(roster), f"two labels share an id: {roster}"
     assert sorted(_spawn_worlds(spawn)) == ["a", "b"], f"started {_spawn_worlds(spawn)}"
     for label in ("a", "b"):
-        assert (ep / "worlds" / T.world_id(ep, label) / "report.md").is_file(), f"{label} was not archived"
-    assert not (ep / "worlds" / T.world_id(ep, "c") / "report.md").exists(), "the unservable world was archived"
+        assert (ep / "worlds" / T.world_id(ep, label) / "investigation.md").is_file(), f"{label} was not archived"
+    assert not (ep / "worlds" / T.world_id(ep, "c") / "investigation.md").exists(), "the unservable world was archived"
 
 
 @pytest.mark.parametrize("variable", ["unset", "decoy"])
@@ -845,21 +845,16 @@ def test_the_comparator_prompt_never_carries_a_roster_arm_id(data_root):
 
 
 def test_the_episode_readers_take_the_walked_view_and_no_path(data_root):
+    """`episode.verdicts` is gone (#1534: a world's verdict is its arm's closing record); `delta_o` still takes only the view."""
     ep, episode_id, _roster = _episode(data_root)
     _outcome(ep)
     J.comparable_family_stamp(ep)
-    want = {"a": "benign", "b": "malicious", "c": "false-positive"}
-    for label, disposition in want.items():
-        T.archived_world(ep, label, disposition=disposition)
+    for label in ("a", "b", "c"):
+        T.archived_world(ep, label)
     T.base_capture(ep, [T.captured_row(key="k1")])
     episode_mod = T.mod("learning.branch.episode")
-    runs = R.tenant(data_root).runs_repository()
 
-    with runs.episode(episode_id) as view:
-        got = episode_mod.verdicts(view)
-    assert got == want, f"verdicts through the walked view: {got!r}"
-
-    assert R.raised(episode_mod.verdicts, ep) is not None, "verdicts answered through a bare path"
+    assert not hasattr(episode_mod, "verdicts"), "the retired `episode.verdicts` is still exported"
     asked = T.FakeAgent("mutation")
     assert R.raised(episode_mod.delta_o, ep, invoke=asked) is not None, (
         "delta_o answered through a bare path")

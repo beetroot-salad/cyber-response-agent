@@ -24,6 +24,7 @@ import pytest
 from defender import _vocab
 from defender.records import _knowledge_status, run_end
 from defender.investigation import ticket_writer
+from defender.tenancy import case_ticket
 from defender.tests.jobs import test_job_helper as _H1471
 from defender.tests.support.jobs._container_entry1170 import enter
 from defender.tests.support.jobs._job_helper import ContainerStandIn, helper_scene
@@ -2054,26 +2055,49 @@ def _case_store(tmp_path: Path, monkeypatch: Any) -> Any:
     return S1107.ProxyStandIn(tmp_path / "proxy-1471", [S1107.answer('{"id": 1}', "201")]).install(monkeypatch)
 
 
-def _report_1471(disposition: str, cause: str, *, evidence: str = NARRATIVE_1471) -> str:
-    """A report as the close tool renders it (`render_report`): its cause one of the seven it may write."""
-    from defender.investigation import close_tool
+def _closing_1471(disposition: str, *, filled: bool = False) -> dict[str, Any]:
+    """The fields of a closing record the host could write for `disposition` (#1534, `_readers1534.valid_fields`), its
+    summary the model's account `NARRATIVE_1471` and one ceiling note and one baseline result beside it; `filled`: each
+    of those at its bound (`SUMMARY_BOUND`, `NOTE_BOUND`, `RESULT_BOUND`), the largest model text the record holds."""
+    from defender.records import closing
+    from defender.tests.support.storage import _readers1534 as R
 
-    return close_tool.render_report(disposition, outcome="holds", cause=cause, evidence=evidence)
+    def text(bound: int) -> str:
+        return (NARRATIVE_1471 + " " + "x" * bound)[:bound] if filled else NARRATIVE_1471
+
+    return {**R.valid_fields(disposition), "summary": text(closing.SUMMARY_BOUND),
+            "ceiling_test": (R.ceiling_entry(text(closing.NOTE_BOUND)),),
+            "runtime_evidence": (R.baseline_entry(text(closing.RESULT_BOUND)),)}
 
 
-def _reporting_lifecycle(ran: Ran, *, report: str | None, stale: str | None = None, closes: bool = True,
+def _reporting_lifecycle(ran: Ran, *, closed: dict[str, Any] | None, fault: str | None = None,
+                         stale: str | None = None, closes: bool = True, seen: dict[str, Any] | None = None,
                          **summary_kw: Any):
-    """`verified_lifecycle` whose investigation leaves `report` in the run folder (None: no report), the host's record of
-    knowledge saying `stale` ("transient" or "operator": stale; None: as the helper wrote it), and ends as
-    `summary_kw` says (`truncated_by`, `closed_before_cut`). `stale` may also be "fresh", "pinned" or "unreadable" (a
-    stamp naming a source over a corrupt host record)."""
+    """`verified_lifecycle` whose investigation leaves the run's closing record of `closed` fields (`_closing_1471`;
+    None: a run that never closed, no record) behind the run's pointer, `fault` (a `_readers1534` kind) where it is read,
+    the host's record of knowledge saying `stale` ("transient" or "operator": stale; None: as the helper wrote it), and
+    ends as `summary_kw` says (`truncated_by`, `closed_before_cut`). `stale` may also be "fresh", "pinned" or
+    "unreadable" (a stamp naming a source over a corrupt host record). `seen`, when given, receives the lookup as
+    the record step will meet it (`seen["looked"]`)."""
+    from defender.records import closing
+    from defender.tests.support.storage import _readers1534 as R
     from defender.tests.tenancy.tenant_1108_p4 import test_stale_visibility as V
 
     closes_ = _investigate(ran, closes=closes, **summary_kw)
 
     def investigate(*, run: Any = None, **kw: Any) -> dict[str, Any]:
-        if report is not None:
-            (run.run_dir / "report.md").write_text(report, encoding="utf-8")
+        if closed is not None or fault is not None:
+            R.plant_run(run.run_dir, closed, fault=fault, run=run)
+            looked = closing.for_run(run)
+            if seen is not None:
+                seen["looked"] = looked
+            if fault is None:  # premise: the record the step reads is the one planted, model text included
+                assert isinstance(looked, closing.Record), looked
+                assert looked.record.disposition == closed["disposition"], looked
+                assert NARRATIVE_1471 in (looked.record.summary or ""), looked
+            else:
+                assert isinstance(looked, closing.CouldNotLook), looked
+                assert looked.kind == fault, looked
         if stale == "unreadable":
             V.plant_unreadable_host_record(run.run_dir, "corrupt")
         elif stale in _knowledge_status.STALE_KINDS:
@@ -2134,10 +2158,9 @@ def _text_1471(call: dict[str, Any]) -> str:
 
 def _assert_p6_1471(call: dict[str, Any], *, run_id: str, link: str, parts: list[str], stale: str | None = None) -> None:
     """P-6, over a recorded comment request: the tag line first; then, in order, the stale sentence (when stale), the
-    disposition word or the escalation or unreadable sentence, and the link, last; nothing the report said, anywhere in
-    the payload."""
+    disposition word or the escalation or never-closed sentence, and the link, last; nothing the closing record's model
+    text or cause said, anywhere in the payload (#1534)."""
     from defender.investigation import close_tool
-    from defender.tenancy import case_ticket
 
     body, payload = _text_1471(call), str(call["body"])
 
@@ -2150,24 +2173,19 @@ def _assert_p6_1471(call: dict[str, Any], *, run_id: str, link: str, parts: list
     assert not any(ch.isalnum() for ch in body.split(link, 1)[1]), f"text follows the link: {body}"
     assert ("Knowledge notice" in body) == (sentence is not None), body
     for said in (*close_tool.REPORT_CAUSES, NARRATIVE_1471, "Disposition recorded by the close gate"):
-        assert said not in payload, f"the report's own text reached the ticket ({said!r}): {payload}"
+        assert said not in payload, f"the record's own text reached the ticket ({said!r}): {payload}"
 
 
 @pytest.mark.parametrize("disposition", _vocab.DISPOSITION_VALUES)
 def test_1471_w2_p6_a_flagged_job_with_a_verdict_posts_one_comment_with_its_tag_disposition_and_screen_link(
         ticket_scene, tmp_path, monkeypatch, disposition):
     """The alert's ticket receives one comment: the agent tag naming the investigation, the disposition, and
-    `<origin>/t/<tenant>/investigations/<investigation>`, with no cause sentence and none of the report's body, sent under
-    the write pass naming that ticket; the receipt says `commented`. (W2, W3, P-6)"""
-    from defender.investigation import close_tool
-
+    `<origin>/t/<tenant>/investigations/<investigation>`, with no cause sentence and none of the closing record's model
+    text, sent under the write pass naming that ticket; the receipt says `commented`. (W2, W3, P-6, #1534)"""
     store = _case_store(tmp_path, monkeypatch)
-    causes = close_tool.REPORT_CAUSES
     signer = _H1471.make_signer()
 
-    run_id, ran, link, comments = _job_1471(
-        ticket_scene, store, signer=signer,
-        report=_report_1471(disposition, causes[_vocab.DISPOSITION_VALUES.index(disposition) % len(causes)]))
+    run_id, ran, link, comments = _job_1471(ticket_scene, store, signer=signer, closed=_closing_1471(disposition))
 
     assert ran.raised is None, ran.message
     assert ticket_scene.job_end(run_id) == SETTLED, ran.message  # premise: the run ended with its report committed
@@ -2188,7 +2206,7 @@ def test_1471_w2_a_flagged_job_that_ended_escalated_without_a_verdict_posts_the_
     the receipt says `escalated`. (W2, P-6)"""
     store = _case_store(tmp_path, monkeypatch)
 
-    run_id, ran, link, comments = _job_1471(ticket_scene, store, report=None, closes=False, truncated_by=exit_class)
+    run_id, ran, link, comments = _job_1471(ticket_scene, store, closed=None, closes=False, truncated_by=exit_class)
 
     assert ran.raised is None, ran.message
     assert len(comments) == 1, store.requests()
@@ -2199,17 +2217,17 @@ def test_1471_w2_a_flagged_job_that_ended_escalated_without_a_verdict_posts_the_
 
 
 @pytest.mark.parametrize(("exit_class", "status", "marker"), [
-    (None, "commented", "No disposition could be recorded"),
+    (None, "commented", case_ticket.NEVER_CLOSED_COMMENT_BODY),
     *[(e, "escalated", f"exit: {e}") for e in sorted(run_end.FORCED_CLOSE_EXITS)],
 ])
-def test_1471_w2_a_flagged_job_whose_report_is_unreadable_posts_the_unreadable_or_escalation_sentence_and_the_link(
+def test_1471_w2_a_flagged_job_that_never_closed_posts_the_never_closed_or_escalation_sentence_and_the_link(
         ticket_scene, tmp_path, monkeypatch, exit_class, status, marker):
-    """An unreadable report posts the unreadable sentence and the link (the escalation sentence when the forced close
-    that wrote it failed): never the report's own text. (W2, P-6)"""
+    """A run with no closing record (`NeverClosed`, #1534: what an unreadable report was) posts the never-closed
+    sentence and the link (the escalation sentence when the forced close that would have written it failed, M4 iv).
+    (W2, P-6)"""
     store = _case_store(tmp_path, monkeypatch)
 
-    run_id, ran, link, comments = _job_1471(
-        ticket_scene, store, report=f"no front matter\n{NARRATIVE_1471}\n", truncated_by=exit_class)
+    run_id, ran, link, comments = _job_1471(ticket_scene, store, closed=None, closes=False, truncated_by=exit_class)
 
     assert ran.raised is None, ran.message
     assert len(comments) == 1, store.requests()
@@ -2220,16 +2238,13 @@ def test_1471_w2_a_flagged_job_whose_report_is_unreadable_posts_the_unreadable_o
 
 
 @pytest.mark.parametrize("exit_class", sorted(run_end.FORCED_CLOSE_EXITS))
-def test_1471_w2_a_flagged_job_force_closed_with_a_readable_report_posts_its_disposition_and_the_link(
+def test_1471_w2_a_flagged_job_force_closed_with_a_closing_record_posts_its_disposition_and_the_link(
         ticket_scene, tmp_path, monkeypatch, exit_class):
-    """A forced close (`request-limit`, `retry-exhausted`) that left a readable `unresolved` report is commented with
-    that disposition and the link, receipt `commented`, not the escalation sentence. (W2, P-6)"""
-    from defender.investigation import close_tool
-
+    """A forced close (`request-limit`, `retry-exhausted`) that left an `unresolved` closing record is commented with
+    that disposition and the link, receipt `commented`, not the escalation sentence. (W2, P-6, #1534)"""
     store = _case_store(tmp_path, monkeypatch)
 
-    run_id, ran, link, comments = _job_1471(
-        ticket_scene, store, report=_report_1471("unresolved", close_tool.CAUSE_STORY_SETTLED), truncated_by=exit_class)
+    run_id, ran, link, comments = _job_1471(ticket_scene, store, closed=_closing_1471("unresolved"), truncated_by=exit_class)
 
     assert ran.raised is None, ran.message
     assert len(comments) == 1, store.requests()
@@ -2241,18 +2256,44 @@ def test_1471_w2_a_flagged_job_force_closed_with_a_readable_report_posts_its_dis
     assert (receipt["status"], receipt["ok"]) == ("commented", True), receipt
 
 
+@pytest.mark.parametrize("fault", ["database-missing", "row-invalid", "recorded-before-1534"])
+@pytest.mark.parametrize("exit_class", [None, *sorted(run_end.FORCED_CLOSE_EXITS)])
+def test_1534_a_flagged_job_whose_closing_record_cannot_be_looked_up_posts_nothing_and_receipts_the_kinds_wording(
+        ticket_scene, tmp_path, monkeypatch, exit_class, fault):
+    """`CouldNotLook` on an exit that reads the record (a clean one, or a forced close): the job posts no comment and
+    its receipt is an `error` carrying the kind's fixed wording only, never the lookup's detail. Whether the write pass
+    is signed before the lookup is not decided here. Control: the same scene with a record posts. (V-LOOK, M4 iii)"""
+    from defender.tests.support.storage import _readers1534 as R
+
+    store = _case_store(tmp_path, monkeypatch)
+    _id, _ran, _link, control = _job_1471(ticket_scene, store, closed=_closing_1471("benign"))
+    assert len(control) == 1, "control: a job with a closing record posts"
+
+    seen: dict[str, Any] = {}
+    run_id, ran, _link, comments = _job_1471(
+        ticket_scene, store, closed=_closing_1471("benign"), fault=fault, truncated_by=exit_class, seen=seen)
+
+    assert ran.raised is None, ran.message
+    assert comments == [], f"a comment was posted for a record nobody could read ({fault}): {comments}"
+    receipt = _receipt_1471(ticket_scene, run_id)
+    assert receipt is not None, "no receipt"
+    assert (receipt["key"], receipt["status"], receipt["ok"]) == (TICKET_1471, "error", False), receipt
+    assert R.names_only(fault, receipt["reason"] or ""), receipt
+    assert seen["looked"].detail, "premise: the lookup holds a detail to withhold"
+    assert not [v for v in receipt.values() if isinstance(v, str) and seen["looked"].detail in v], (
+        "the lookup's detail reached the receipt")
+
+
 @pytest.mark.parametrize("stale", ["transient", "operator"])
 def test_1471_p6_a_stale_runs_comment_opens_with_the_tag_then_the_stale_sentence_then_the_disposition_then_the_link(
         ticket_scene, tmp_path, monkeypatch, stale):
     """The host's knowledge record says the run used stale knowledge: its sentence sits between the tag and the
     disposition, and the link is last. Control: the fresh comment of the same run has none. (P-6)"""
-    from defender.investigation import close_tool
-
     store = _case_store(tmp_path, monkeypatch)
-    report = _report_1471("benign", close_tool.CAUSE_STORY_SETTLED)
+    closed = _closing_1471("benign")
 
-    run_id, ran, link, comments = _job_1471(ticket_scene, store, report=report, stale=stale)
-    fresh_id, _fresh_ran, fresh_link, fresh = _job_1471(ticket_scene, store, report=report)
+    run_id, ran, link, comments = _job_1471(ticket_scene, store, closed=closed, stale=stale)
+    fresh_id, _fresh_ran, fresh_link, fresh = _job_1471(ticket_scene, store, closed=closed)
 
     assert ran.raised is None, ran.message
     assert len(comments) == len(fresh) == 1, store.requests()
@@ -2262,19 +2303,16 @@ def test_1471_p6_a_stale_runs_comment_opens_with_the_tag_then_the_stale_sentence
 
 
 def _closed_set_1471() -> list[tuple[str, dict[str, Any]]]:
-    """Every way a flagged job comments, by its closed-set input: each disposition, each escalated exit, an unreadable
-    report, each forced-close exit with an unreadable report."""
-    huge = "x" * 20_000  # the report's text, which the comment never holds: a comment that did would lose its end
-    from defender.investigation import close_tool
-
+    """Every way a flagged job comments, by its closed-set input: each disposition, each escalated exit, a run that
+    never closed, each forced-close exit with and without a closing record. Each record's model text is at its bounds:
+    a comment that held it would lose its end."""
     return [
-        *[(f"verdict-{d}", dict(report=_report_1471(d, close_tool.CAUSE_STORY_SETTLED, evidence=huge)))
-          for d in _vocab.DISPOSITION_VALUES],
-        *[(f"escalated-{e}", dict(report=None, closes=False, truncated_by=e)) for e in sorted(run_end.ESCALATED_EXITS)],
-        ("unreadable", dict(report=f"no front matter\n{huge}\n")),
-        *[(f"forced-close-readable-{e}", dict(report=_report_1471("unresolved", close_tool.CAUSE_STORY_SETTLED, evidence=huge),
-                                              truncated_by=e)) for e in sorted(run_end.FORCED_CLOSE_EXITS)],
-        *[(f"forced-close-unreadable-{e}", dict(report=f"no front matter\n{huge}\n", truncated_by=e))
+        *[(f"verdict-{d}", dict(closed=_closing_1471(d, filled=True))) for d in _vocab.DISPOSITION_VALUES],
+        *[(f"escalated-{e}", dict(closed=None, closes=False, truncated_by=e)) for e in sorted(run_end.ESCALATED_EXITS)],
+        ("never-closed", dict(closed=None, closes=False)),
+        *[(f"forced-close-recorded-{e}", dict(closed=_closing_1471("unresolved", filled=True), truncated_by=e))
+          for e in sorted(run_end.FORCED_CLOSE_EXITS)],
+        *[(f"forced-close-never-closed-{e}", dict(closed=None, closes=False, truncated_by=e))
           for e in sorted(run_end.FORCED_CLOSE_EXITS)],
     ]
 
@@ -2282,8 +2320,8 @@ def _closed_set_1471() -> list[tuple[str, dict[str, Any]]]:
 @pytest.mark.parametrize("stale", [None, *_KNOWLEDGE_STATES])
 def test_1471_p6_the_comment_of_every_closed_set_combination_fits_the_wire_bound_with_its_link_intact(
         ticket_scene, tmp_path, monkeypatch, stale):
-    """Over every ending and every knowledge state (none, fresh, pinned, each stale kind, unreadable), report 20 000
-    bytes: each comment is within `WIRE_BOUND_BYTES`, uncut, with its stale sentence and whole link. (P-6)"""
+    """Over every ending and every knowledge state (none, fresh, pinned, each stale kind, unreadable), the record's model
+    text at its bounds    bytes: each comment is within `WIRE_BOUND_BYTES`, uncut, with its stale sentence and whole link. (P-6)"""
     from defender.tenancy.case_ticket import WIRE_BOUND_BYTES
 
     store = _case_store(tmp_path, monkeypatch)
@@ -2306,13 +2344,13 @@ def test_1471_w2_a_flagged_job_that_ended_silently_or_faulted_in_teardown_posts_
     """A silent ending (`SILENT_EXITS`) or a faulted teardown leaves the ticket alone, leaves no receipt and signs no
     write pass. Control: a verdict job in the same scene, same store, comments. (W2)"""
     store = _case_store(tmp_path, monkeypatch)
-    report = _report_1471("benign", "the challenge review ran and left nothing about the finding unsettled")
-    _id, _ran, _link, control = _job_1471(ticket_scene, store, report=report)
+    closed = _closing_1471("benign")
+    _id, _ran, _link, control = _job_1471(ticket_scene, store, closed=closed)
     assert len(control) == 1, "control: a verdict job posts"
     signer = _H1471.make_signer()
     kw: dict[str, Any] = (
         dict(lifecycle=_lost_box_lifecycle(stop=_teardown_fault)) if ending == "teardown-faulted"
-        else dict(report=None, closes=False, truncated_by=ending))
+        else dict(closed=None, closes=False, truncated_by=ending))
 
     run_id, ran, _link, comments = _job_1471(ticket_scene, store, signer=signer, **kw)
 
@@ -2368,16 +2406,15 @@ class _OrderWatch1471:
 
 def _g7_endings() -> list[Any]:
     """Every lifecycle outcome the record step tells apart, with whether the ticket gets a comment."""
-    verdict = _report_1471("benign", "the challenge review ran and left nothing about the finding unsettled")
-    unreadable = f"no front matter\n{NARRATIVE_1471}\n"
+    verdict = _closing_1471("benign")
     return [
-        pytest.param("posts", dict(report=verdict), id="verdict"),
-        *[pytest.param("posts", dict(report=None, closes=False, truncated_by=e), id=f"escalated-{e}")
+        pytest.param("posts", dict(closed=verdict), id="verdict"),
+        *[pytest.param("posts", dict(closed=None, closes=False, truncated_by=e), id=f"escalated-{e}")
           for e in sorted(run_end.ESCALATED_EXITS)],
-        pytest.param("posts", dict(report=unreadable), id="unreadable"),
-        *[pytest.param("posts", dict(report=unreadable, truncated_by=e), id=f"unreadable-forced-close-{e}")
+        pytest.param("posts", dict(closed=None, closes=False), id="never-closed"),
+        *[pytest.param("posts", dict(closed=None, closes=False, truncated_by=e), id=f"never-closed-forced-close-{e}")
           for e in sorted(run_end.FORCED_CLOSE_EXITS)],
-        *[pytest.param("silent", dict(report=None, closes=False, truncated_by=e), id=f"silent-{e}")
+        *[pytest.param("silent", dict(closed=None, closes=False, truncated_by=e), id=f"silent-{e}")
           for e in sorted(run_end.SILENT_EXITS)],
         pytest.param("silent", "teardown-faulted", id="teardown-faulted"),
         pytest.param("raises", "raises", id="raises"),
@@ -2388,7 +2425,7 @@ def _g7_endings() -> list[Any]:
 def test_1471_w2_the_write_pass_ask_and_the_post_follow_a_lifecycle_that_returned_and_precede_the_page_save(
         ticket_scene, tmp_path, monkeypatch, kind, ending):
     """A flagged job asks for its write pass and posts only after a lifecycle that returned and ended with a comment
-    (verdict, escalated, unreadable), the ask first, both before the page is saved; the saved page shows the receipt
+    (verdict, escalated, never closed), the ask first, both before the page is saved; the saved page shows the receipt
     line iff a receipt exists. A silent ending, a faulted teardown or a lifecycle that raises asks, posts and receipts
     nothing, and a raised exception reaches the caller. (W2, Flow, P-6, W7)"""
     store = _case_store(tmp_path, monkeypatch)
@@ -2494,15 +2531,15 @@ def test_1471_w5_x2_a_flagged_job_whose_case_system_is_faulty_asks_for_no_write_
     record at fault. Control: the same tenant's job before the fault asks and posts. (W5, X2, R9-3)"""
     store = _case_store(tmp_path, monkeypatch)
     watch = _OrderWatch1471(ticket_scene, store, monkeypatch)
-    report = _report_1471("benign", "the challenge review ran and left nothing about the finding unsettled")
-    _id, _ran, _link, control = _job_1471(ticket_scene, store, report=report)
+    closed = _closing_1471("benign")
+    _id, _ran, _link, control = _job_1471(ticket_scene, store, closed=closed)
     assert len(control) == 1, "control: the unfaulted job posts"
     assert watch.order() == ["ask"], "control: the unfaulted job asks for its write pass"
     watch.events.clear()
     signer = _H1471.make_signer()
     pointer = _case_system_fault_1471(ticket_scene, monkeypatch, fault)
 
-    run_id, ran, _link, comments = _job_1471(ticket_scene, store, signer=signer, report=report)
+    run_id, ran, _link, comments = _job_1471(ticket_scene, store, signer=signer, closed=closed)
 
     assert ran.raised is None, ran.message
     assert ticket_scene.job_end(run_id) == SETTLED, ran.message
@@ -2527,7 +2564,7 @@ def test_1471_w4_an_unflagged_job_posts_nothing_is_never_signed_a_write_pass_and
 
     run_id, ran, _link, comments = _job_1471(
         ticket_scene, store, flagged=False, record=record, signer=signer,
-        report=_report_1471("benign", "the challenge review ran and left nothing about the finding unsettled"))
+        closed=_closing_1471("benign"))
 
     assert ran.raised is None, ran.message
     assert ticket_scene.job_end(run_id) == SETTLED, ran.message
@@ -2551,7 +2588,7 @@ def test_1471_w5_a_write_that_cannot_be_signed_lets_the_flagged_run_go_on_with_t
 
     run_id, ran, _link, comments = _job_1471(
         scene, store, signer=signer,
-        report=_report_1471("benign", "the challenge review ran and left nothing about the finding unsettled"))
+        closed=_closing_1471("benign"))
 
     assert ran.raised is None, ran.message
     assert scene.job_end(run_id) == SETTLED, ran.message  # the read grant is empty: no read sign refuses the job
@@ -2576,7 +2613,7 @@ def test_1471_w5_an_alert_that_names_no_ticket_keeps_its_own_receipt_reason_not_
 
     run_id, ran, _link, comments = _job_1471(
         ticket_scene, store, alert=ALERT_BYTES, signer=signer,
-        report=_report_1471("benign", "the challenge review ran and left nothing about the finding unsettled"))
+        closed=_closing_1471("benign"))
 
     assert ran.raised is None, ran.message
     assert comments == [], comments
@@ -2598,7 +2635,7 @@ def test_1471_p5_a_launch_record_rewritten_after_the_worker_wrote_it_steers_neit
 
     run_id, ran, link, comments = _job_1471(
         ticket_scene, store, record=forged,
-        report=_report_1471("malicious", "the challenge review ran and left nothing about the finding unsettled"))
+        closed=_closing_1471("malicious"))
 
     assert ran.raised is None, ran.message
     assert len(comments) == 1, f"the rewritten record unflagged the job or stopped it: {store.requests()}"
@@ -2617,7 +2654,7 @@ def test_1471_p5_an_alert_swapped_after_the_worker_wrote_it_with_the_record_dige
 
     run_id, ran, _link, comments = _job_1471(
         ticket_scene, store, alert=_H1471.OTHER_KEYED_ALERT_1471, digest=worker_digest,
-        report=_report_1471("benign", "the challenge review ran and left nothing about the finding unsettled"))
+        closed=_closing_1471("benign"))
 
     assert ran.raised is None, ran.message
     assert ran.calls["lifecycle"] == 0, "the run went ahead on bytes the worker's digest does not name"

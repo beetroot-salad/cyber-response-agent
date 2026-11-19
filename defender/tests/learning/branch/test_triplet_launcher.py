@@ -117,6 +117,67 @@ def test_947_launcher_returns_episode_dir_and_status(tmp_path):
     assert (ep / "worlds").is_dir()
 
 
+def _silent_on_the_base_disposition():
+    """A questioner whose family says nothing about world A's disposition, so only the source's record can supply it."""
+    doc = S.family_v2()
+    doc["worlds"][0].pop("disposition_declared")
+    return S.questioner_for(doc)
+
+
+def _declared_a(ep):
+    import yaml
+
+    worlds = yaml.safe_load((ep / "family.yaml").read_text(encoding="utf-8"))["worlds"]
+    return next(w for w in worlds if w.get("role") == "A")["disposition_declared"]
+
+
+def _closable():
+    from defender._vocab import DISPOSITION_VALUES, HOST_ONLY_DISPOSITION
+
+    return [d for d in DISPOSITION_VALUES if d != HOST_ONLY_DISPOSITION]
+
+
+@pytest.mark.parametrize("member", _closable())
+def test_1534_the_source_runs_closing_record_supplies_world_as_declared_disposition_for_every_member(tmp_path, member):
+    """Whatever disposition the source closed with is world A's declared one when the questioner is silent. (V-SOURCE)"""
+    rc, _spawn, ep, message = _member_launch(tmp_path, member)
+    assert rc == 0, message
+    assert _declared_a(ep) == member
+
+
+def _member_launch(tmp_path, member):
+    run = S.launch(tmp_path, S.estate(tmp_path), calls=_calls(), questioner=_silent_on_the_base_disposition(),
+                   source_closing={"disposition": member},
+                   oracle=S.oracle(then=S.submit()), verifier=S.passing_verifier())
+    return run.rc, run.spawn, run.ep, run.message
+
+
+def test_1534_a_source_that_never_closed_gives_no_disposition_and_the_family_is_refused_naming_the_field(tmp_path):
+    """No record and a silent questioner leaves the field absent, so the launch is refused by the field's name. (V-SOURCE)"""
+    run = S.launch(tmp_path, S.estate(tmp_path), calls=_calls(), questioner=_silent_on_the_base_disposition(),
+                   oracle=S.oracle(then=S.submit()), verifier=S.passing_verifier())
+    assert run.rc != 0, (run.rc, run.message)
+    assert "disposition_declared" in run.message, (run.rc, run.message)
+
+
+@pytest.mark.parametrize(("fault", "kind"), [("recorded-before-1534", "recorded-before-1534"),
+                                          ("pointer-unreadable", "pointer-unreadable")])
+def test_1534_a_source_whose_record_could_not_be_looked_at_refuses_the_job_before_any_model_call(
+        tmp_path, fault, kind):
+    """`CouldNotLook` refuses the questioner job with the kind's wording and spends no model call. (V-LOOK)"""
+    from defender.records import closing as C
+
+    agent = _silent_on_the_base_disposition()
+    run = S.launch(tmp_path, S.estate(tmp_path), calls=_calls(), questioner=agent,
+                   source_closing={"disposition": "benign"}, source_fault=fault,
+                   oracle=S.oracle(then=S.submit()), verifier=S.passing_verifier())
+    assert run.rc != 0
+    assert run.message.rstrip().endswith(C.FAULT_WORDING[kind]), (
+        f"the refusal is not the kind's wording alone (the fault's detail follows it): {run.message!r}")
+    assert agent.calls == 0, "the questioner was called although the source's record could not be looked at"
+    assert str(tmp_path.parent) not in run.message, "the fault's detail (a path) reached the refusal"
+
+
 def test_947_un_nameable_episode_token_is_refused_before_the_questioner_runs(tmp_path):
     """An episode whose token cannot be rendered nameable is refused before the questioner is
     called at all: the refusal costs no model call and no primed capture."""

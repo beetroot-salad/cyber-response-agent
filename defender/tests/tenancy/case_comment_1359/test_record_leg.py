@@ -11,6 +11,9 @@ from typing import Any
 
 import pytest
 
+from defender import _vocab
+from defender.records import run_end
+
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, ensure_d9_tenant
 from defender.tests.support.shared.contracts._spec1077 import fixture_run
@@ -57,13 +60,16 @@ def _pass(run_dir: Path, system: str = "ticket", key: str = C.TICKET_KEY) -> str
 
 
 def _run(tmp_path: Path, root: Path, shim: S.ProxyStandIn, *, key: str | None = C.TICKET_KEY, summary: dict[str, Any] | None = None,
-         roster: Any = None, system: str = "ticket") -> tuple[Path, Any]:
+         roster: Any = None, system: str = "ticket", before: Any = None) -> tuple[Path, Any]:
     """Plant the run (its alert naming `key`) and drive `record_case_ticket` over the tenant planted at `root`, handing
     it the link, `shim`'s address and a pass naming the key (none when the alert names none: the container asks for none
-    then, W5); `roster` stands in the case system's adapters. Returns `(run dir, the tenant record)`."""
+    then, W5); `roster` stands in the case system's adapters; `before(run_dir)` plants the run's closing record (none
+    planted: a run that never closed). Returns `(run dir, the tenant record)`."""
     run_dir = _run_dir(tmp_path)
     run_dir.mkdir(parents=True, exist_ok=True)
     C.plant_record(run_dir, key=key)
+    if before is not None:
+        before(run_dir)
     record = S.resolve(root)
     kw: dict[str, Any] = {}
     if roster is not None:
@@ -657,3 +663,68 @@ def test_1471_review_a_crash_judging_the_case_at_run_start_is_held_as_a_fault_no
 
     assert isinstance(got, case_system.CaseSettingsFault), got
     assert "AttributeError" in str(got), got
+
+
+# ======================================================================================
+# #1534: the record step reads the run's closing record (`closing.for_run`); a record it cannot look up posts nothing.
+# ======================================================================================
+
+@pytest.mark.parametrize("fault", [pytest.param(k, id=k) for k in (
+    "database-missing", "pointer-unreadable", "store-unreadable", "schema-version", "recorded-before-1534", "row-invalid")])
+@pytest.mark.parametrize("exit_class", [None, *sorted(run_end.FORCED_CLOSE_EXITS)])
+def test_1414_a_record_that_could_not_be_looked_up_posts_no_comment_on_any_reading_exit(
+        tmp_path, monkeypatch, capsys, exit_class, fault):
+    """A `CouldNotLook` on an exit that reads the record (a clean one, or a forced close, where it also loses the
+    escalation note: M4 iii): no call to the store; a warning naming the kind and carrying the lookup's detail, in the
+    log only; an `error` receipt with the kind's fixed wording and no other kind's, never the detail. (V-LOOK, M4 iii)"""
+    from defender.records import closing
+    from defender.tests.support.storage import _readers1534 as R
+
+    assert fault in R.KINDS_BY_FAULT, "the fault list is the readers' own"
+    root, _folder = _world(tmp_path)
+    shim = _shim(tmp_path, monkeypatch)
+    run_dir, _record = _run(tmp_path, root, shim, summary={"truncated_by": exit_class, "closed_before_cut": False},
+                            before=lambda d: R.plant_run(d, R.valid_fields("benign"), fault=fault, sessions_base=d.parent))
+
+    looked = closing.for_run(fixture_run(run_dir))
+    assert isinstance(looked, closing.CouldNotLook), f"premise: the fault reads as {fault}: {looked!r}"
+    assert looked.kind == fault, looked
+    assert looked.detail, "premise: the lookup holds a detail to withhold"
+    assert shim.requests() == [], f"a comment was posted for a record nobody could read: {shim.requests()}"
+    got = S.receipt(run_dir)
+    assert got is not None, "no receipt"
+    assert (got["key"], got["status"], got["ok"], got["url"]) == (C.TICKET_KEY, C.ERROR, False, None), got
+    assert R.names_only(fault, got["reason"] or ""), got
+    assert not [v for v in got.values() if isinstance(v, str) and looked.detail in v], (
+        "the lookup's detail reached the receipt")
+    err = capsys.readouterr().err
+    assert "WARN" in err, err
+    assert fault in err, f"the warning does not name the kind: {err}"
+    assert looked.detail in err, f"the lookup's detail did not reach the log: {err}"
+
+
+@pytest.mark.parametrize("exit_class", [None, *sorted(run_end.FORCED_CLOSE_EXITS)])
+@pytest.mark.parametrize("disposition", _vocab.DISPOSITION_VALUES)
+def test_1414_a_record_that_can_be_looked_up_does_comment(tmp_path, monkeypatch, exit_class, disposition):
+    """Positive control for the fault test, and the comment a recorded disposition posts on every exit that reads the
+    record (a forced close included: its record, not the escalation note): once, `commented`, the body below the tag
+    exactly the disposition and the link (#1471 P-6), which a run with no record (the never-closed sentence) cannot
+    pass. (V-LOOK, O7)"""
+    from defender.records import closing
+    from defender.tests.support.storage import _readers1534 as R
+
+    root, _folder = _world(tmp_path)
+    shim = _shim(tmp_path, monkeypatch)
+    run_dir, _record = _run(tmp_path, root, shim, summary={"truncated_by": exit_class, "closed_before_cut": False},
+                            before=lambda d: R.plant_run(d, R.valid_fields(disposition), sessions_base=d.parent))
+
+    looked = closing.for_run(fixture_run(run_dir))
+    assert isinstance(looked, closing.Record), f"premise: the run's closing record reads back: {looked!r}"
+    assert looked.record.disposition == disposition, looked
+    calls = C.comment_calls(shim)
+    assert len(calls) == 1, shim.requests()
+    tag = S.mod("tenancy.case_ticket").agent_comment_tag(run_dir.name)
+    assert str(calls[0]["body"]["body"]) == f"{tag}\n{disposition}\n{_link(run_dir)}", calls[0]["body"]
+    got = S.receipt(run_dir)
+    assert got is not None, "no receipt"
+    assert (got["status"], got["ok"]) == (C.COMMENTED, True), got

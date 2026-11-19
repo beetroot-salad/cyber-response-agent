@@ -80,9 +80,10 @@ def test_1255_twin_records_every_role_and_read_scope(twin, layout):
     for stage in ("support", "ablation", "composer"):
         assert counts.get((f"review:{stage}", None)) == 1, counts
     last = [r for r in natural["requests"] if r["role"] == "main"][-1]
-    for name in ("investigation.md", "executed_queries.jsonl", f"gather_summaries/{W.LEAD}.md",
-                 "report.md"):
+    for name in ("investigation.md", "executed_queries.jsonl", f"gather_summaries/{W.LEAD}.md"):
         assert name in last["files"], (name, sorted(last["files"]))
+    assert "report.md" not in last["files"], (
+        "MAIN's gate admits a `report.md`: the verdict is a closing record in the run's database, not a file (V-NOFILE)")
     assert "provenance.json" not in last["files"], "MAIN's gate admits provenance.json"
     assert not any(n.startswith("gather_raw/") for n in last["files"]), (
         "MAIN's gate admits a raw payload", sorted(last["files"]))

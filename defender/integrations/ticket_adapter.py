@@ -71,9 +71,9 @@ def key_pattern(ctx: VerbContext) -> str:
     """This environment's ticket-key grammar, as an unanchored regex source string.
 
     A verb rather than an import so consumers reach it through the registry seam (and tests
-    can fake it). Consumers anchor it themselves. The screen using it lives at the consumer
-    (the benign judge's `get_closed_ticket`), which owes a retry-class response with no store
-    attempt, whereas a fault raised here is an exit-code envelope.
+    can fake it). Consumers anchor it themselves, and the screen using it lives at the consumer,
+    which owes a retry-class response with no store attempt, whereas a fault raised here is an
+    exit-code envelope.
     """
     return _config(ctx)["KEY_PATTERN"]
 
@@ -123,7 +123,7 @@ def list_tickets(
     """Tickets, filterable.
 
     `require_closed` pins status=closed regardless of `status`, so a duplicate `--status open`
-    cannot widen the offline benign judge's scoped list to the in-flight ticket. It is
+    cannot widen the learning judge's scoped list to the in-flight ticket. It is
     `wrapper_only`: the judge's tool hard-codes it off the model-facing schema. Gather must not
     set it, or it would drop the open siblings it is meant to correlate.
     """

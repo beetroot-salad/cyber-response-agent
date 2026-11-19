@@ -12,30 +12,29 @@ from pathlib import Path
 import pytest
 
 from defender._io import read_jsonl_rows
+from defender._vocab import DISPOSITION_VALUES
 from defender.records import RunPaths
 from defender.presentation import visualize_data as d
 from defender.configuration._pricing import usage_cost
-from defender.presentation.visualize_run import render_page
 from defender.records import SessionPaths
-from defender.tests.support.jobs._jobs1342 import REFUSED, SPEND_LEDGER, UNSEEN, insert_spend, seal_at
+from defender.tests.support.jobs._jobs1342 import REFUSED, SPEND_LEDGER, UNSEEN, insert_spend
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
+from defender.tests.support.presentation._page1534 import (
+    _BIG,
+    _GATHER_LEDGER,
+    _HAIKU_USAGE,
+    _LEDGER,
+    _MAIN_LEDGER,
+    _OTHER_RUNS_LEDGER,
+    _SEALED,
+    _USAGE,
+    _build_run,
+    _page,
+)
 
-_USAGE = {"input_tokens": 100, "output_tokens": 800, "cache_read_input_tokens": 5000, "cache_creation_input_tokens": 200}
 
-_SESSION = "9f2c1ab84e7d4f0e9c3b5a6d7e8f0a1b"
 
-_HAIKU_USAGE = {"input_tokens": 50, "output_tokens": 300, "cache_read_input_tokens": 1000, "cache_creation_input_tokens": 0}
-_BIG = {"input_tokens": 400_000, "output_tokens": 50_000, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
 
-#: The run's spend ledger as the host wrote it (#1377 r6 S5), by requesting agent (r7): a row for every response the request
-#: log shows (four MAIN turns, one lead's) and one MAIN response the request log never held. Rows of another run in the same
-#: database are planted too.
-_MAIN_LEDGER = [("claude-sonnet-4-6", _USAGE)] * 4 + [("claude-sonnet-4-6", _BIG)]
-#: The lead's and the lenses' ledger rows differ from what the request log shows for them, so a bar or figure built from the log fails.
-_LEDGER_ONLY_GATHER_USAGE = {"input_tokens": 90, "output_tokens": 700, "cache_read_input_tokens": 3000, "cache_creation_input_tokens": 100}
-_GATHER_LEDGER = [("claude-haiku-4-5", _LEDGER_ONLY_GATHER_USAGE)]
-_LEDGER = _MAIN_LEDGER + _GATHER_LEDGER
-_OTHER_RUNS_LEDGER = [("claude-sonnet-4-6", _BIG)] * 3
 _REVIEW_LENSES = ("support", "ablation", "composer")
 _LEDGER_ONLY_REVIEW_USAGE = {"input_tokens": 300, "output_tokens": 1500, "cache_read_input_tokens": 9000, "cache_creation_input_tokens": 0}
 _REVIEW_LEDGER = [("kimi-k3", _LEDGER_ONLY_REVIEW_USAGE)] * len(_REVIEW_LENSES)
@@ -48,118 +47,11 @@ def _priced(rows: list) -> float:
 assert _priced(_GATHER_LEDGER) != pytest.approx(_priced([("claude-haiku-4-5", _HAIKU_USAGE)]), abs=1e-6), "premise: the lead's ledger differs from its request log"
 assert _priced(_REVIEW_LEDGER) != pytest.approx(_priced([("kimi-k3", _USAGE)] * 3), abs=1e-6), "premise: the lenses' ledger differs from their request log"
 
-_TURNS = [
-    (1, "main#1", "ORIENT", "## ORIENT\n\nOriented on the alert: ssh auth anomaly.\n", None),
-    (3, "main#5", "PLAN", "## ORIENT\n\nOriented.\n\n## PLAN\n\nPlanning to gather ssh auth + identity.\n", "l-001"),
-    (5, "main#11", "GATHER", "## PLAN\n\nPlanned.\n\n## GATHER\n\nGathered measurements from elastic.\n", None),
-    (7, "main#19", "REPORT", "## GATHER\n\nGathered.\n\n## REPORT\n\nDisposition: malicious — confirmed pivot.\n", None),
-]
-
-_FULL_INVESTIGATION = (
-    "## ORIENT\n\nOriented on the alert: ssh auth anomaly.\n\n"
-    "## PLAN\n\nPlanning to gather ssh auth + identity.\n\n"
-    "## GATHER\n\nGathered measurements from elastic.\n\n"
-    "## REPORT\n\nDisposition: malicious — confirmed pivot.\n"
-)
 
 
-def _seed_session_store(run: Path, messages: list[dict]) -> None:
-    """A real session store seeded from the same `messages` the fixture writes to the wire log, and holding the run's spend
-    ledger (`_LEDGER`, beside another run's rows): the page reads its headline from the run's own store (#1377 r6 S5)."""
-    from pydantic_ai.messages import ModelMessagesTypeAdapter
-
-    from defender.records import session_store as ss
-
-    # One database per call: pytest's 30-character tmp names repeat across parametrized cases, and a shared file would pool ledger rows.
-    with ss.open_store(case_id=f"visualize-runtime-fixture-{uuid.uuid4().hex}",
-                       sessions=SessionPaths(fixture_runs_base(run.parent))) as store:
-        ss.write_case_pointer(_run_handle_1165(run), case_id=store.case_id, store_path=store.path)
-        sessions: dict[str, str] = {}
-        for rec in messages:
-            agent_id = rec.get("agent_id", "main")
-            if agent_id not in sessions:
-                sessions[agent_id] = store.new_session(agent_id=agent_id)
-            session_id = sessions[agent_id]
-            message = ModelMessagesTypeAdapter.validate_python([rec["message"]])[0]
-            store.append(session_id, [message], agent_id=agent_id)
-        store_path = store.path
-    insert_spend(store_path, run.name, _MAIN_LEDGER, agent_id="main")
-    insert_spend(store_path, run.name, _GATHER_LEDGER, agent_id="gather:l-001")
-    insert_spend(store_path, fixture_uuid("another run"), _OTHER_RUNS_LEDGER)
 
 
-def _build_run(tmp: Path) -> Path:
-    # A run id is a canonical UUID, so the folder is `fixture_uuid(<label>)`.
-    run = tmp / fixture_uuid("run")
-    (run / "gather_raw" / "l-001").mkdir(parents=True)
 
-    (run / "investigation.md").write_text(_FULL_INVESTIGATION)
-    (run / "report.md").write_text(
-        "---\ncase_id: t\ndisposition: malicious\nconfidence: high\n---\nConfirmed root-ssh pivot from 10.0.0.5.\n"
-    )
-    (run / "alert.json").write_text(json.dumps({"rule": "ssh-auth"}))
-
-    trace: list[dict] = []
-    messages: list[dict] = []
-    seq = 0
-
-    def write_call(i: int, content: str) -> dict:
-        return {"type": "tool_use", "name": "write_file", "id": f"w{i}", "input": {"path": "investigation.md", "content": content}}
-
-    for i, (coord_seq, wire_id, _phase, content, lead) in enumerate(_TURNS):
-        coord = f"{_SESSION}/main#{coord_seq}"
-        blocks = [write_call(i, content)]
-        if lead:
-            blocks.append({
-                "type": "tool_use", "name": "gather", "id": f"g{i}",
-                "input": {"lead_id": lead, "system": "elastic", "goal": "confirm pivot", "what_to_summarize": ["auth"]},
-            })
-        trace.append({
-            "type": "assistant", "timestamp": f"2026-06-26T14:0{i}:00+00:00",
-            "message": {"id": coord, "model": "claude-sonnet-4-6",
-                        "usage": _USAGE, "content": blocks},
-        })
-        trace.append({
-            "type": "user", "timestamp": f"2026-06-26T14:0{i}:30+00:00",
-            "message": {"content": [{"type": "tool_result", "tool_name": "write_file"}]},
-        })
-        parts = [{"part_kind": "tool-call", "tool_name": b["name"], "tool_call_id": b["id"], "args": b["input"]} for b in blocks]
-        messages.append({
-            "agent_id": "main", "seq": seq, "id": wire_id, "kind": "response",
-            "model": "claude-sonnet-4-6", "usage": _USAGE, "duration_ms": 2000.0,
-            "message": {"kind": "response", "parts": parts},
-        })
-        seq += 1
-        returns = [{"part_kind": "tool-return", "tool_name": b["name"], "tool_call_id": b["id"], "content": f"ok {b['name']}"} for b in blocks]
-        messages.append({"agent_id": "main", "seq": seq, "id": f"r{seq}", "kind": "request", "message": {"kind": "request", "parts": returns}})
-        seq += 1
-
-    messages.append({"agent_id": "main", "seq": seq, "id": f"r{seq}", "kind": "request",
-                     "message": {"kind": "request", "parts": [{"part_kind": "retry-prompt", "tool_name": "bash", "content": "Denied: raw adapter from main loop."}]}})
-    messages.append({"agent_id": "gather:l-001", "seq": 0, "id": "gather:l-001#0", "kind": "response",
-                     "model": "claude-haiku-4-5", "usage": {"input_tokens": 50, "output_tokens": 300, "cache_read_input_tokens": 1000, "cache_creation_input_tokens": 0},
-                     "duration_ms": 1500.0, "message": {"kind": "response", "parts": [{"part_kind": "text", "content": "summary"}]}})
-
-    trace.append({"type": "result", "duration_ms": 90000, "duration_api_ms": 80000,
-                  "total_cost_usd": 0.5, "total_cost_is_lower_limit": False, "num_turns": 4, "usage": _USAGE})
-
-    (run / "tool_trace.jsonl").write_text("".join(json.dumps(e) + "\n" for e in trace))
-    wire = RunPaths(run).wire_log
-    wire.parent.mkdir(parents=True, exist_ok=True)
-    wire.write_text("".join(json.dumps(m) + "\n" for m in messages))
-    _seed_session_store(run, messages)
-
-    queries = [
-        {"lead_id": "l-001", "seq": 0, "system": "elastic", "verb": "search", "query_id": "elastic.ssh-auth",
-         "params": {"user": "root"}, "exit_code": 0, "payload_status": "ok", "payload_path": "gather_raw/l-001/0.json"},
-        {"lead_id": "l-001", "seq": 1, "system": "elastic", "verb": "search", "query_id": "elastic.ssh-pivot",
-         "params": {"src": "10.0.0.5"}, "exit_code": 0, "payload_status": "ok", "payload_path": "gather_raw/l-001/1.json"},
-    ]
-    (run / "executed_queries.jsonl").write_text("".join(json.dumps(q) + "\n" for q in queries))
-    (run / "gather_raw" / "l-001.lead.json").write_text(json.dumps({"goal": "confirm pivot", "what_to_summarize": ["auth"]}))
-    (run / "gather_raw" / "l-002.lead.json").write_text(json.dumps({"goal": "check identity", "what_to_summarize": ["status"]}))
-    (run / "gather_raw" / "l-001" / "0.json").write_text(json.dumps({"hits": 1}))
-    return run
 
 
 def _run_ledger(run: Path):
@@ -376,7 +268,6 @@ def test_run_health(tmp_path):
     assert any("retr" in det for det in health["details"])
 
 
-_SEALED: set[Path] = set()
 
 
 @pytest.fixture(autouse=True)
@@ -385,15 +276,6 @@ def _no_seals_carried_between_tests():
     _SEALED.clear()
 
 
-def _page(run: Path, *, sealed: bool = True) -> str:
-    """The run's page through the post-run step's own entry: it holds the `Run` (the host's handle on the run's store), and
-    nothing else is handed in. r7.3 T1: the ledger is sealed first (once per run, as a run that ended without a failed write
-    leaves it); `sealed=False` is a run whose seal never landed (a failed write, a kill)."""
-    if sealed and run not in _SEALED:
-        _SEALED.add(run)
-        pointer = _run_handle_1165(run).observability.session_pointer.read_result().text
-        seal_at(fixture_runs_base(run.parent), json.loads(pointer)["case_id"], run.name)
-    return render_page(_run_handle_1165(run))
 
 
 def _headline(html: str) -> str:
@@ -1159,3 +1041,136 @@ def test_a_repeated_planning_name_is_one_loop(tmp_path):
     assert health["loops"] == 1, (
         f"the repeated planning header was counted as its own loop: {health['loops']}"
     )
+
+
+# --- #1534: the headline shows the run's closing record ------------------------------------------------------------
+
+def _closing_headline(html: str) -> str:
+    import re
+
+    found = re.search(r'<section class="headline headline-runtime">(.*?)</section>', html, flags=re.S)
+    assert found is not None, "no headline box"
+    return found.group(1)
+
+
+def _page_of(tmp_path, monkeypatch, closing=None, **kw) -> str:
+    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
+    return _page(_build_run(tmp_path, closing, **kw))
+
+
+@pytest.mark.parametrize("disposition", DISPOSITION_VALUES)
+def test_1534_the_headline_shows_the_records_disposition_and_its_summary_escaped(tmp_path, monkeypatch, disposition):
+    """Every member of `DISPOSITION_VALUES`: its badge, then the summary HTML-escaped; no raw markup. (V-PAGE)"""
+    from defender.tests.storage.verdict_1534 import _spec1534 as V
+    from defender.tests.support.storage import _readers1534 as R
+
+    headline = _closing_headline(_page_of(tmp_path, monkeypatch, R.valid_fields(disposition)))
+    assert f"disp-badge disp-{disposition}" in headline
+    assert "The pivot from the bastion is &lt;b&gt;confirmed&lt;/b&gt; by the second login &amp; the sudo chain." in headline
+    assert "<b>confirmed</b>" not in headline
+    assert V.MARKUP_SUMMARY not in headline
+
+
+def test_1534_an_overridden_close_shows_the_review_status_and_the_drafted_disposition(tmp_path, monkeypatch):
+    """A forced-inconclusive close: `unresolved` committed, the review's status, and the disposition the model drafted. (V-PAGE)"""
+    from defender.records import closing as C
+
+    forced = {"disposition": "unresolved", "outcome": C.FORCED_INCONCLUSIVE, "cause": C.CAUSE_EVIDENCE_CANNOT_DISCRIMINATE,
+              "drafted_disposition": "benign"}
+    headline = _closing_headline(_page_of(tmp_path, monkeypatch, forced))
+    assert "disp-badge disp-unresolved" in headline
+    assert "gate-forced" in headline, "the review status of an overridden close"
+    assert "benign" in headline, "the drafted disposition is not shown"
+
+    control = _closing_headline(_page_of(tmp_path / "control", monkeypatch,
+                                         {"disposition": "unresolved", "cause": C.CAUSE_NOT_REVIEWED}))
+    assert "benign" not in control, "positive control: a close that was not overridden names no draft"
+    assert "gate-forced" not in control
+
+
+@pytest.mark.parametrize("confidence", ["high", "medium", "low"])
+def test_1545_a_benign_close_shows_its_committed_confidence_and_a_close_without_one_shows_none(
+        tmp_path, monkeypatch, confidence):
+    """The run page's headline shows a benign record's confidence; the same benign record with none shows no
+    confidence word. (#1545 over #1534, V-PAGE)"""
+    import re
+
+    from defender._vocab import CONFIDENCE_VALUES
+    from defender.tests.support.storage import _readers1534 as R
+
+    assert confidence in CONFIDENCE_VALUES
+    headline = _closing_headline(_page_of(tmp_path, monkeypatch, {**R.valid_fields("benign"), "confidence": confidence}))
+    control = _closing_headline(_page_of(tmp_path / "control", monkeypatch, R.valid_fields("benign")))
+    assert "disp-badge disp-benign" in headline
+    assert "disp-badge disp-benign" in control
+    assert re.search(rf"\b{confidence}\b", headline), f"the page does not show the confidence {confidence!r}"
+    assert not any(re.search(rf"\b{c}\b", control) for c in CONFIDENCE_VALUES), (
+        "positive control: a record with no confidence shows none")
+
+
+def test_1534_a_failed_review_shows_its_failure_kind(tmp_path, monkeypatch):
+    """A review that could not finish: the gate badge carries the failure kind, as the report's frontmatter did. (V-PAGE)"""
+    from defender.records import closing as C
+
+    fields = {"disposition": "unresolved", "outcome": C.FORCED_INCONCLUSIVE, "cause": C.CAUSE_REVIEW_INCOMPLETE,
+              "failure_kind": C.TIMEOUT, "drafted_disposition": "malicious"}
+    headline = _closing_headline(_page_of(tmp_path, monkeypatch, fields))
+    assert "gate-fault" in headline
+    assert C.TIMEOUT in headline
+
+
+def test_1534_a_run_that_never_closed_is_not_completed(tmp_path, monkeypatch):
+    """`NeverClosed` (a table, no row): the unknown disposition, no summary, none of the vocabulary's badges. (V-PAGE, V-READERS)"""
+    from defender._vocab import UNKNOWN_DISPOSITION
+
+    headline = _closing_headline(_page_of(tmp_path, monkeypatch, record=False))
+    assert f"disp-{UNKNOWN_DISPOSITION}" in headline
+    assert not any(f"disp-{d}" in headline for d in DISPOSITION_VALUES)
+    assert "confirmed" not in headline
+
+
+def test_1534_a_report_beside_the_record_is_never_read(tmp_path, monkeypatch):
+    """A `report.md` that says another disposition, planted beside the record, changes nothing on the page. (V-NOFILE)"""
+    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
+    run = _build_run(tmp_path, {"disposition": "benign"})
+    (run / "report.md").write_text("---\ndisposition: malicious\n---\nDECOY\n", encoding="utf-8")  # lint-run-records: ok — a decoy the page must not read
+    headline = _closing_headline(_page(run))
+    assert "disp-badge disp-benign" in headline
+    assert "DECOY" not in headline
+
+
+@pytest.mark.parametrize("fault", ["database-missing", "recorded-before-1534", "row-invalid"])
+def test_1534_a_record_that_cannot_be_looked_up_fails_the_render_and_saves_no_page(tmp_path, monkeypatch, fault):
+    """`CouldNotLook`: the post-run step's save raises `VisualizeFailed`, the chain carries the kind's wording and no path, and
+    no page is saved. (V-PAGE, V-READERS)"""
+    from defender.presentation.visualize_run import VisualizeFailed, save_page
+    from defender.tests.support.storage import _readers1534 as R
+
+    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
+    run = _build_run(tmp_path)
+    control = _run_handle_1165(run)
+    assert _closing_headline(_page(run)), "positive control: the same run renders while its record reads"
+    pointer = json.loads(control.observability.session_pointer.read_result().text)
+    R.break_database(Path(pointer["store_path"]), run.name, fault,
+                     pointer=Path(control.observability.session_pointer.path))
+
+    with pytest.raises(VisualizeFailed) as failed:
+        save_page(_run_handle_1165(run))
+    chain, link = [], failed.value
+    while link is not None:
+        chain.append(str(link))
+        link = link.__cause__ or link.__context__
+    assert R.names(fault, " | ".join(chain)), chain
+    assert str(tmp_path) not in " | ".join(chain), "the lookup's detail reached the failure"
+    assert not _run_handle_1165(run).observability.runtime_html.path.exists(), "a page was saved for a run that could not be read"
+
+
+def test_1534_the_render_takes_the_lookup_result_and_refuses_to_run_without_it(tmp_path):
+    """`render_runtime_page` has no default for the lookup result: calling it without raises `TypeError`. (V-PAGE)"""
+    from defender.presentation.visualize_run import LedgerCost, render_runtime_page
+    from defender.tests.support.presentation._page1534 import render_unclosed
+
+    run = _build_run(tmp_path)
+    with pytest.raises(TypeError):
+        render_runtime_page(run, cost=LedgerCost(None))
+    assert render_unclosed(run, cost=LedgerCost(None)), "positive control: handed a result it renders"

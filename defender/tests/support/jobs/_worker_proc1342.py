@@ -17,7 +17,7 @@ def _child(config: dict):
     if config["child"] == "scripted":
         return ScriptedChild(Path(config["where"]), Path(config["runs"]), files=config.get("files", {}),
                              wait_for=Path(config["wait_for"]) if config.get("wait_for") else None,
-                             **config.get("options", {}))
+                             planter_name=config.get("planter"), **config.get("options", {}))
     entry, marks = config["entry"], config["marks"]
     return lambda launch: [sys.executable, entry, marks, config["commit"], config["containers"], "--job",
                            launch.investigation_id, "--tenant", launch.tenant_id,

@@ -338,20 +338,6 @@ def test_ordinary_investigation_write_keeps_committed_history(tmp_path):
     assert record.path.read_text() == committed + "# new prose\n"
 
 
-def test_report_schema_checks_proposed_text_without_reading_existing_baseline(tmp_path):
-    """Report writes validate against None, so undecodable old content can be replaced."""
-    io = S.RecordingIo()
-    record = run_at(tmp_path, io=io).documents.report
-    record.path.write_bytes(b"\xff")
-    valid = S.report_text("reviewed conclusion\n")
-    record.write(valid)
-    assert record.path.read_text() == valid
-    assert "rooted_read" not in io.ops, "report validation must not inspect its old document"
-    with pytest.raises(ValueError, match="report"):
-        record.write("no disposition frontmatter\n")
-    assert record.path.read_text() == valid
-
-
 def test_ticket_delete_succeeds_when_missing_and_unlinks_only_a_leaf_alias(tmp_path):
     """Receipt cleanup has missing_ok semantics and safely removes a leaf symlink."""
     run = run_at(tmp_path)

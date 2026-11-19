@@ -129,7 +129,7 @@ def _strip_unquoted(text: str, target: str, replacement: str) -> str:
     `cat P 2<CR>>/dev/null` into an allowed fd-2 redirect.
 
     Known gap: the reason text says "remove the invisible character" while the edit tested is
-    replacement by a space, so e.g. `cat<CR>/run/report.md` is named but removing the character
+    replacement by a space, so e.g. `cat<CR>/run/investigation.md` is named but removing the character
     still fails."""
     out: list[str] = []
     quote: str | None = None

@@ -99,7 +99,6 @@ def _lessons(folder: Path) -> Path:
 def _uuid_runs(runs: Path) -> frozenset[str]:
     """Create two UUID runs with sidecars and distinct loaded lessons."""
     loaded = S.make_run(runs, sidecars=True)
-    (loaded / "report.md").write_text("---\ndisposition: benign\n---\nbody\n", encoding="utf-8")
     (loaded / "lessons_loaded.jsonl").write_text(
         json.dumps({"lesson_name": LESSON, "ts": "2026-06-05T00:00:00+00:00"}) + "\n",
         encoding="utf-8")

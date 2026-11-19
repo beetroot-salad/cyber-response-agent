@@ -54,8 +54,9 @@ comment to its case (its disposition and a link to its screen); a person closes 
   `provider-down` / `box-lost` / `box-output-limit` / `proxy-access` → no call at all (the case stays open). Anything else → the record off the report. A run whose model
   had already closed when the cut landed (`closed_before_cut`) records its own verdict.
 
-- **Anti-corruption boundary.** `report.md` (+ the run's alert record) is the internal case model;
-  the ticket is the external one. `tenancy/case_ticket.py` renders the fixed comment; the drivers and the report schema never bind to ticket field names.
+- **Anti-corruption boundary.** The run's closing record (+ its alert record) is the internal case
+  model; the ticket is the external one. `tenancy/case_ticket.py` renders the fixed comment; the
+  drivers and the record never bind to ticket field names.
 
 - **One transport.** The comment goes through the shared adapter transport's host write entry
   (`kit.transport.host_write`, through the proxy: any 2xx is success, a 4xx is an

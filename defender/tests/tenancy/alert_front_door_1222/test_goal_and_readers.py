@@ -588,7 +588,7 @@ def test_p011_alert_fits_main_but_not_the_correlation_model(tmp_path: Path) -> N
         history = "\n".join(s.text for s in d.main.seen)
         for detail in ("request refused by provider", "ModelHTTPError"):
             assert detail not in history, f"the refusal's error text reached MAIN: {detail!r}"
-        assert d.report is not None, "the run did not reach report.md"
+        assert d.closed is not None, "the run left no closing record"
         endings[size] = prose(d) - prose(runs[size, "answered"])
     assert endings["small"], (
         "MAIN's opening message says nothing more when the provider refused the lead than when "

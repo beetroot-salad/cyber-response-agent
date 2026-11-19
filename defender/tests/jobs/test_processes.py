@@ -21,12 +21,14 @@ import pytest
 
 from defender.tests.support.jobs._jobs1342 import (
     DEFENDER,
-    GOLDEN_REPORT,
+    CLOSING_KEY,
     T1,
     WORKTREE,
     an_alert,
+    closing_plan,
     job_end,
     job_store,
+    planter,
     register_tenant,
     row,
 )
@@ -63,7 +65,8 @@ def _gone(pid: int) -> bool:
 def worker_process(tmp_path: Path, config: dict) -> Iterator[subprocess.Popen]:
     ready = tmp_path / "worker-ready"
     path = tmp_path / "worker.json"
-    path.write_text(json.dumps({**config, "ready": str(ready)}), encoding="utf-8")
+    # The children's closing records are planted by this process (`planter`), never by the worker this test may stop or kill.
+    path.write_text(json.dumps({**config, "ready": str(ready), "planter": planter()}), encoding="utf-8")
     proc = subprocess.Popen(  # noqa: S603 — the test's own worker process
         [sys.executable, str(SUPPORT / "_worker_proc1342.py"), str(path)],
         env=_env(Path(config["data_root"]), config["dsn"]), cwd=str(WORKTREE), stderr=subprocess.PIPE)
@@ -89,12 +92,11 @@ async def test_o15_a_worker_in_another_process_runs_what_this_one_queued(migrate
     runs = root / T1 / "runs"
     runs.mkdir(parents=True)
     release = tmp_path / "release"
-    golden = GOLDEN_REPORT.read_text(encoding="utf-8")
     async with job_store(dsn) as store:
         alert = await an_alert(store, T1)
         config = {"dsn": dsn, "data_root": str(root), "child": "scripted", "where": str(tmp_path / "child"),
                   "runs": str(runs), "wait_for": str(release), "containers": str(tmp_path / "containers"),
-                  "files": {"{id}.job-end.json": job_end(), "{id}/report.md": golden}}
+                  "files": {"{id}.job-end.json": job_end(), CLOSING_KEY: closing_plan("a1" * 16, {"disposition": "inconclusive"})}}
         with worker_process(tmp_path, config) as proc:
             # M10/D-p: the worker is up and idle for a few poll intervals before anything is queued.
             await anyio.sleep(IDLE_BEFORE_QUEUING)

@@ -74,7 +74,6 @@ unreachable by root containment rather than by a named deny.
 | kind | table | path | denied to | archived as | sub-collection | note |
 |---|---|---|---|---|---|---|
 | alert | 1 | `alert_input/alert.json` | — (deliberately not in the answer key, `records/_layout.py`, the comment on `CASE_ANSWER_KEY_NAMES`) | alert.json | run.facts.alert | input copied by the host, into the run's read-only input directory beside its record (#1222) |
-| report | 1 | `report.md` | confined | report.md | run.documents.report | the close tool is its only writer; no role holds a write grant for it (`close_tool.py:1`) |
 | investigation | 1 | `investigation.md` | confined | investigation.md | run.documents.investigation | seeds (lead-0, branch resume) write it before the first turn; the document tool during |
 | queries | 1 | `executed_queries.jsonl` | confined | staged as a table | run.tables.queries | append-only; the gather lane's denial rows land here too |
 | gather_raw | 1 | `gather_raw/<lead>/<seq>.json` | shape | staged as a table | run.tables.payloads | by-ref payloads; the model reaches them by the bash `cat` lane only |
@@ -121,7 +120,7 @@ unreachable by root containment rather than by a named deny.
 ## 5. The archive projection (`<episode>/worlds/<world UUID>/`)
 
 `learning/branch/archive.archive_episode` copies **exactly** the set `_single_files` declares:
-`report.md`, `investigation.md`, `provenance.json`, the scrub verdict (as `scrub_verdict.json`),
+`investigation.md`, `provenance.json`, the scrub verdict (as `scrub_verdict.json`),
 the run-end record (as `run_end.json`), `lessons_loaded.jsonl`, `alert.json`; plus the
 `gather_summaries/` directory, the two tables (`executed_queries.jsonl` and `gather_raw/`)
 through `lead_repository.stage_tables`, and a `run_dir` text pointer (never a link). Every read

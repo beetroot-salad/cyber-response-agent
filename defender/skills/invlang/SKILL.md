@@ -451,7 +451,7 @@ Two uses, and they are different:
 - **A baseline** (`anchor_kind: runtime-evidence`, `grounding:
   telemetry-baseline`). How often this estate does the alerted thing, over
   what window, with what scope, and whether anything adverse fell inside
-  it. It rides into `report.md`'s body for whoever reads the closed case,
+  it. It rides into the closing record for whoever reads the closed case,
   and it never authorizes anything: it cannot discharge a contract. What
   it does buy is confidence: it is how a `benign` close shows the actor
   behaved like itself, which `high` needs, and which `low` needs when no
@@ -459,8 +459,8 @@ Two uses, and they are different:
   alerted event; a pattern that begins with the incident is the incident.
   That comparison needs the alerted moment, so a document with no
   parseable `when` on any `:E prologue.edges` row cannot carry a baseline
-  at all. Because `result` and `reasoning` are published verbatim, they
-  may not contain `</report>`, and the accumulated baselines are bounded —
+  at all. `result` and `reasoning` are published as written (links
+  defanged), each is bounded, and the accumulated baselines are bounded —
   state the recurrence and its scope, not every occurrence.
   Do not write one as probative when the live hypothesis's own predictions
   turn on novelty or rarity — the same evidence cannot both test for an
@@ -541,7 +541,7 @@ summary                "Login matched established bastion usage"
 ```
 
 - `disposition` — closed vocab (`enum disposition`), and the SAME keywords
-  `report.md`'s frontmatter carries — FIVE of them, `unresolved` the fifth.
+  the closing record carries — FIVE of them, `unresolved` the fifth.
   A value outside the enum is denied on write; there is no `escalate`
   keyword — an escalation is `termination.category exhaustion-escalation`
   with `disposition inconclusive`. `unresolved` is a member of the enum
@@ -616,12 +616,14 @@ summary                "Login matched established bastion usage"
 
       ceiling_test  state=nothing-to-try cap=sandbox.detonate note=confirming ?post-install-implant would require sandbox detonation, and neither is in the runtime tool surface
 
-  `note` is free text FOR THE ANALYST reading the report — explain the
-  gap in your own words. Only `state`/`ref`/`cap` are checked against the
-  transcript, and it rides into the report BODY, not the frontmatter —
-  but the notes across every receipt are bounded in total, so keep each
-  one to what the gap actually needs: an oversized note is refused before
-  the close, not after. Two rows claiming the SAME `(state, ref)`
+  `note` is free text FOR THE ANALYST reading the closing record — explain
+  the gap in your own words. Only `state`/`ref`/`cap` are checked against
+  the transcript; the note and any `cap` ride into the closing record's
+  ceiling-test entries as written (links and dotted names defanged, so
+  `sandbox.detonate` reads `sandbox[.]detonate`) — but each note, each
+  `cap` (64 characters) and the receipts together are bounded, so keep
+  each one to what the gap actually needs: an oversized note or `cap` is
+  refused before the close, not after. Two rows claiming the SAME `(state, ref)`
   or `(state, cap)` do not pay for two gaps. Omit the row (or write
   `none`) when nothing was out of reach. `ceiling_rationale` is the
   companion scalar: why concluding anyway is sound despite those gaps.

@@ -41,6 +41,25 @@ they start, the learning drains, the lifecycle service) refuses a database whose
 migration may lock the tables it changes until it commits. So: stop the API, the workers, the learning drains and the
 lifecycle service; run migrations; start the new code. The notes below say only what an upgrade needs beyond that.
 
+## Upgrade from before #1534
+
+A run's disposition is its closing record, a row of the `closing_record` table in the run's session database; nothing
+writes or reads `report.md` any more. There is no jobs-database migration: the disposition column and `no_report` are
+unchanged. Once:
+
+1. Stop the workers, the learning drains and every running job, then rebuild the job image on every execution host
+   (`docker build -f .devcontainer/Dockerfile.job -t defender-job:latest .` from the repository root, or the image
+   `DEFENDER_JOB_IMAGE` names). An old job image writes `report.md` and no record, and its session pointer carries no
+   closing-record mark: a new worker reading such a run (its job end says the close committed) fails it `unparseable`,
+   worded as recorded before closing records were kept.
+2. Drain or abandon queued learning jobs and in-flight episodes first: their source runs and arms were recorded before
+   #1534, so the questioner and the judge refuse them.
+
+Afterwards every run made before #1534 reads as a fault wherever it is read, including after a later run of the same case
+adds the table to its database: a run's own pointer, not its database, says whether it keeps a closing record. Its run
+page will not re-render, the trace CLI and held-out scoring show a fault row for it, and an old episode's judge pass
+refuses. Nothing is converted.
+
 ## Upgrade from before #1161
 
 Every API route is under `/api` (`/api/me`, `/api/admin/tenants/<T>/resume`, `/api/openapi.json`); nothing answers at

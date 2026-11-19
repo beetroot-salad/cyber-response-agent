@@ -37,7 +37,9 @@ from ._ledger import (  # noqa: F401
     run_spend as run_spend,
     seal_ledger as seal_ledger,
 )
+from ._closing import write_closing_record as write_closing_record
 from ._schema import (
+    ClosingRecordExists as ClosingRecordExists,
     CyclicParentChain as CyclicParentChain,
     DDL as DDL,
     HEAD_MOVE_REASONS as HEAD_MOVE_REASONS,
@@ -94,7 +96,11 @@ from ._tree import (
     _walk_parents as _walk_parents,
 )
 from ._pointers import (
+    CLOSING_RECORD_MARKER as CLOSING_RECORD_MARKER,
+    CasePointer as CasePointer,
+    PointerUnreadable as PointerUnreadable,
     _case_pointer as _case_pointer,
+    parse_case_pointer as parse_case_pointer,
     refuse_legacy_link as refuse_legacy_link,
     resolve_session_id as resolve_session_id,
     resolve_store_path as resolve_store_path,

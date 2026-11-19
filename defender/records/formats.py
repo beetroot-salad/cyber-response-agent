@@ -39,7 +39,6 @@ if TYPE_CHECKING:
         verify_input_bytes as verify_input_bytes,
     )
     from defender.records._artifact_schema import (
-        REPORT_CLOSE_DELIMITER as REPORT_CLOSE_DELIMITER,
         UNCHANGED_LEAD as UNCHANGED_LEAD,
         UNCHANGED_NOTICE as UNCHANGED_NOTICE,
         artifact_names as artifact_names,
@@ -50,7 +49,6 @@ if TYPE_CHECKING:
         render_diagnostic as render_diagnostic,
         utf8_len as utf8_len,
         validate_artifact as validate_artifact,
-        validate_report as validate_report,
     )
     from defender.records._episode_handle import (
         AppendRecord as AppendRecord,
@@ -131,15 +129,6 @@ if TYPE_CHECKING:
         is_build_commit as is_build_commit,
         read_provenance as read_provenance,
     )
-    from defender.records._report import (
-        ReportRead as ReportRead,
-        ReportUnreadable as ReportUnreadable,
-        UNKNOWN_DISPOSITION as UNKNOWN_DISPOSITION,
-        parse_report_text as parse_report_text,
-        read_report as read_report,
-        repeats_disposition as repeats_disposition,
-        require_report as require_report,
-    )
     from defender.records._run_id import (
         OID as OID,
         RUN_ID_ALLOWED as RUN_ID_ALLOWED,
@@ -183,7 +172,7 @@ if TYPE_CHECKING:
 #: Each name this door serves, and the submodule that defines it.
 _HOMES: dict[str, str] = {
     **dict.fromkeys(("ALERT_BYTE_CAP", "ALERT_MAPPING_MISSING", "DISPLAY_CAPS", "AlertFacts", "AlertMapping", "AlertMappingFault", "AlertRecord", "AlertRefused", "AlertReplaced", "MAPPING_KEYS", "admit", "case_key_of", "check_mapping", "derive_display", "derive_facts", "digest_of", "parse_alert_record", "ticket_of_record", "read_operator_alert", "read_record", "record_beside", "record_text", "unrecorded_facts", "verified_alert", "verified_document", "verified_input", "verify_input_bytes", "REFUSE_SIZE",), "_alert_input"),  # lint-run-records: ok — the submodule `records/_alert_input.py`, not the run folder of that name
-    **dict.fromkeys(("REPORT_CLOSE_DELIMITER", "UNCHANGED_LEAD", "UNCHANGED_NOTICE", "artifact_names", "committed_investigation_reason", "encodable_or_reason", "needs_baseline", "register_invlang_validator", "render_diagnostic", "utf8_len", "validate_artifact", "validate_report",), "_artifact_schema"),
+    **dict.fromkeys(("UNCHANGED_LEAD", "UNCHANGED_NOTICE", "artifact_names", "committed_investigation_reason", "encodable_or_reason", "needs_baseline", "register_invlang_validator", "render_diagnostic", "utf8_len", "validate_artifact",), "_artifact_schema"),
     **dict.fromkeys(("AppendRecord", "Episode", "EpisodeRefused", "refuse_bad_episode_id",), "_episode_handle"),
     **dict.fromkeys(("EpisodePaths", "LAYOUT", "OracleStorePaths", "WORLD_LEAVES", "WorldPaths",), "_episode_paths"),
     **dict.fromkeys(("BASE_ROLE", "FORK_FACT_ID", "Family", "FamilyError", "ManifestPredatesOracle", "ResumeWorld", "accept_family", "family_identities", "label_for_world_id", "load_family", "load_manifest_document", "parse_facts", "parse_family", "resume_world_from", "runnable_worlds", "world_id_for", "write_family",), "_family"),
@@ -191,7 +180,6 @@ _HOMES: dict[str, str] = {
     **dict.fromkeys(("FRESH", "OPERATOR", "TRANSIENT", "api_knowledge", "knowledge_status", "read_knowledge_status",), "_knowledge_status"),
     **dict.fromkeys(("DataRoot", "DraftsRoot", "EpisodesRoot", "ExportsRoot", "KnowledgeLock", "LegacyEpisodesRoot", "LegacyRunsRoot", "RunsBase", "ScratchRoot", "SessionsRoot", "TenantRecord", "TenantRoot", "WorktreesRoot", "unwrap_data_root", "unwrap_drafts_root", "unwrap_episodes_root", "unwrap_exports_root", "unwrap_knowledge_lock", "unwrap_runs_base", "unwrap_scratch_root", "unwrap_tenant_root", "unwrap_worktrees_root",), "_locations"),
     **dict.fromkeys(("BUILD_COMMIT_ENV", "CODE_COPY_MARKER", "KnowledgeRevision", "ORIGIN_CODE_COPY", "RunProvenance", "capture_tree", "is_build_commit", "read_provenance",), "_provenance"),
-    **dict.fromkeys(("ReportRead", "ReportUnreadable", "UNKNOWN_DISPOSITION", "parse_report_text", "read_report", "repeats_disposition", "require_report",), "_report"),
     **dict.fromkeys(("OID", "RUN_ID_ALLOWED", "is_valid_run_id", "run_id_fault", "uuid_id_fault",), "_run_id"),
     **dict.fromkeys(("BranchError", "holds_content", "inherited_artifact_names", "lead_dirs", "refuse_seeded_run_dir",), "_seeded"),
     **dict.fromkeys(("parse_mapping",), "_alert_mapping_file"),

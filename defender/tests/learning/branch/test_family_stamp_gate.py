@@ -161,7 +161,7 @@ def test_verify_family_records_why_it_withheld_the_stamp_and_the_judge_names_it(
     assert judge.calls == 0
 
 
-def test_the_episode_readers_refuse_a_stampless_family(tmp_path):
+def test_the_episode_reader_refuses_a_stampless_family(tmp_path):
     readers = T.mod("learning.branch.episode")
     ep = T.episode(tmp_path)
     with Episode.open(ep) as episode:
@@ -169,14 +169,12 @@ def test_the_episode_readers_refuse_a_stampless_family(tmp_path):
     for w in ("a", "b"):
         T.archived_world(ep, w)
     _withhold(ep)
-    for reader in (readers.delta_o, readers.verdicts):
-        with pytest.raises(T.refusals()) as bad:
-            J.through_view(ep, reader)
-        assert "not comparable" in str(bad.value), reader.__name__
-        assert WITHHELD in str(bad.value), reader.__name__
+    with pytest.raises(T.refusals()) as bad:
+        J.through_view(ep, readers.delta_o)
+    assert "not comparable" in str(bad.value)
+    assert WITHHELD in str(bad.value)
 
     J.comparable_family_stamp(ep)
-    assert set(J.through_view(ep, readers.verdicts)) == {"a", "b"}
     J.through_view(ep, readers.delta_o)
 
 

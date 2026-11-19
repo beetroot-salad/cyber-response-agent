@@ -14,10 +14,6 @@ from defender.hooks.budget_enforcer import DEFAULT_LIMITS  # noqa: E402
 from defender.records import RunPaths  # noqa: E402
 from defender.investigation import challenge_gate  # noqa: E402
 from defender.records import session_store  # noqa: E402
-from defender.investigation.close_tool import (  # noqa: E402
-    CAUSE_NOTHING_LEFT_TO_ASK,
-    CAUSE_TURN_BUDGET_SPENT,
-)
 from defender.systems.verb_grant import VerbGrant  # noqa: E402
 from defender.systems.verbs import VerbRegistry  # noqa: E402
 from defender.kit.faults import TransportFault  # noqa: E402
@@ -213,12 +209,23 @@ def _gap_on(target: str):
         ask={"target": target, "prose": "measure what it did"}))
 
 
-@pytest.mark.parametrize(("state", "target", "extra_turns", "cause"), [
-    ("rounds", "v-001", 1, CAUSE_TURN_BUDGET_SPENT),
-    ("raised asks", "h-001", 2, CAUSE_NOTHING_LEFT_TO_ASK),
+def _closing_of(driven):
+    """The run's closing record through the run-handle lookup (a record, or the lookup's own word for why not)."""
+    from defender.records import closing
+    from defender.tests.support.shared.contracts._spec1077 import fixture_run
+
+    return closing.for_run(fixture_run(driven.run_dir))
+
+
+@pytest.mark.parametrize(("state", "target", "extra_turns", "cause_name"), [
+    ("rounds", "v-001", 1, "CAUSE_TURN_BUDGET_SPENT"),
+    ("raised asks", "h-001", 2, "CAUSE_NOTHING_LEFT_TO_ASK"),
 ], ids=["rounds", "raised-asks"])
 def test_d2_the_challenge_gates_rounds_and_raised_asks_are_restored(
-        tmp_path, state, target, extra_turns, cause):
+        tmp_path, state, target, extra_turns, cause_name):
+    from defender.records import closing
+
+    cause = getattr(closing, cause_name)
     bounds = challenge_gate.Bounds(extra_turns=extra_turns)
     stages = _gap_on(target)
     head = CHUNKS[0] + CHUNKS[1]
@@ -229,8 +236,9 @@ def test_d2_the_challenge_gates_rounds_and_raised_asks_are_restored(
         review_stages=stages, bounds=bounds)
     first = S.read_text(source.paths.review_record(1))
     assert '"challenged"' in first, f"the source's first close was not challenged: {first[:200]}"
-    report = S.read_text(source.paths.report)
-    assert cause in report, f"the source's second close was not forced for `{cause}`: {report}"
+    closed = _closing_of(source)
+    assert isinstance(closed, closing.Record), f"the source left no closing record: {closed!r}"
+    assert closed.record.cause == cause, f"the source's second close was not forced for `{cause}`: {closed.record}"
     point = S.tool_calling_responses(source.store)[2]  # the fence appended after the challenge
 
     arm = S.drive_arm(tmp_path, S.spec_for(source, point), S.Recorder([S.close(), S.done()]),
@@ -239,10 +247,13 @@ def test_d2_the_challenge_gates_rounds_and_raised_asks_are_restored(
     _arm_launched(arm)
     assert S.read_bytes(arm.paths.review_record(1)) == S.read_bytes(source.paths.review_record(1)), (
         "the arm's review_record.1.json is not the source's — the arm's gate re-ran round 1")
-    assert S.read_text(arm.paths.report), (f"the arm's close was not forced for `{cause}`: "
-        f"{S.read_text(arm.paths.report)[:300] or '(no report: the close was challenged again)'}")
-    assert cause in S.read_text(arm.paths.report), (f"the arm's close was not forced for `{cause}`: "
-        f"{S.read_text(arm.paths.report)[:300] or '(no report: the close was challenged again)'}")
+    forced = _closing_of(arm)
+    assert isinstance(forced, closing.Record), (
+        f"the arm's close was not forced for `{cause}`: {forced!r} (a record is absent when the close was challenged again)")
+    assert forced.record.cause == cause, f"the arm's close was not forced for `{cause}`: {forced.record}"
+    assert forced.record.run_id == arm.run_dir.name != source.run_dir.name, (
+        "the arm's row is its own, beside the source's in the source's database")
+    assert closed.record.run_id == source.run_dir.name
 
 
 class _Withholding(FakeVerbs):

@@ -119,7 +119,7 @@ class Investigation(BaseModel):
     attempt: int = Field(description="Which attempt of the request this is; the first is 1.")
     disposition: str | None = Field(
         default=None,
-        description="Set once the investigation completes with a readable report.",
+        description="Set once the investigation completes: the disposition its closing record holds.",
         json_schema_extra={"enum": [*DISPOSITION_VALUES, None]},
     )
     cost_usd: float | None = Field(
@@ -137,10 +137,12 @@ class Investigation(BaseModel):
     failure_reason: str | None = Field(
         default=None,
         description="Set when the investigation failed or was aborted: a fixed reason such as "
-                    "`setup_refused`, `no_report`, `worker_error`, `cancelled`, `tenant_offboarded` (its tenant was offboarded), `lease_lapsed` (its worker "
+                    "`setup_refused`, `no_report` (the run committed no close, so it left no closing record), `worker_error`, `cancelled`, `tenant_offboarded` (its tenant was offboarded), `lease_lapsed` (its worker "
                     "was lost; a retry follows) or `retry_cap` (lost on the last of its attempts).")
     failure_message: str | None = Field(
-        default=None, description="Our own words on why it failed; never model or run output.")
+        default=None,
+        description="Our own words on why it failed or, when the status is `unparseable`, on why its closing "
+                    "record could not be read; never model or run output.")
     update_ticket: bool = Field(description="Whether this investigation posts its outcome to its ticket.")
     artifacts: list[str] = Field(
         default_factory=list,

@@ -52,10 +52,6 @@ def test_close_gate_does_not_fail_open_without_the_validator(unregistered):
         schema.committed_investigation_reason("anything")
 
 
-def test_report_gate_needs_no_validator(unregistered):
-    assert schema.validate_report("not frontmatter") is not None
-
-
 @pytest.mark.parametrize("module", [
     "defender.investigation.permission",    # the model's writes
     "defender.investigation.tools",         # the document tools

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from defender.tests.support.runtime.engine._spec992 import is_closed, never_closed
+
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _writer_run_1165
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
@@ -68,10 +70,11 @@ def test_a_close_over_an_error_severity_document_commits_nothing_and_names_the_r
     message = str(exc.value)
 
     assert "close blocked" in message
-    assert not (run / "report.md").exists(), "the close committed a report anyway"
+    assert never_closed(run), "the close committed a report anyway"
     assert "refined twice in this write" in message
     assert "fix_row" in message
-    assert "publishes" in message, "say why a close is the moment this is checked"
+    assert "closing record" in message, "say why a close is the moment this is checked (it commits the closing record)"
+    assert "report" not in message, "the refusal still names the retired report (#1534 V-NOFILE)"
 
 
 def test_the_same_document_without_the_defect_closes(tmp_path):
@@ -80,7 +83,7 @@ def test_the_same_document_without_the_defect_closes(tmp_path):
 
     _close(deps, "inconclusive")
 
-    assert (run / "report.md").is_file()
+    assert is_closed(run)
 
 
 def test_the_frameworks_forced_close_is_exempt(tmp_path):
@@ -100,7 +103,7 @@ def test_the_frameworks_forced_close_is_exempt(tmp_path):
         forced=True,
     ))
 
-    assert (run / "report.md").is_file(), "the framework must always be able to close"
+    assert is_closed(run), "the framework must always be able to close"
 
 
 def test_an_unreadable_document_closes_unresolved_not_the_models_verdict(tmp_path):
@@ -158,7 +161,7 @@ def test_an_io_fault_reading_the_companion_is_refused_not_overruled(tmp_path):
     assert verdict.code == EXIT_RAISED_EXPECTED, verdict.describe()
     assert "could not be read" in verdict.message, verdict.describe()
     assert "retry" in verdict.message.lower(), verdict.describe()
-    assert not (run / "report.md").exists(), "the refusal committed a report"
+    assert never_closed(run), "the refusal committed a report"
     assert record_files(run) == [], "the refusal wrote a review record"
     assert trace_files(run) == [], "the refusal wrote trace rows"
 
@@ -268,7 +271,7 @@ def test_a_committed_unfenced_header_does_not_make_the_run_unclosable(tmp_path):
 
     _close(deps, "inconclusive")
 
-    assert (run / "report.md").is_file()
+    assert is_closed(run)
 
 
 def test_an_error_severity_row_is_repairable_rather_than_a_dead_end(tmp_path):
@@ -291,7 +294,7 @@ def test_an_error_severity_row_is_repairable_rather_than_a_dead_end(tmp_path):
 
     assert committed_document_refusal(read_companion(deps)) is None
     _close(deps, "inconclusive")
-    assert (run / "report.md").is_file()
+    assert is_closed(run)
 
 
 def test_the_repair_set_is_widened_by_severity_and_not_by_scope(tmp_path):

@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Annotated, Any
 from pydantic import SkipValidation
 
 from defender.records import formats
+from defender.records.closing import ClosingRecord
 from defender._io import Bound
 from defender.records.formats import LAYOUT, WORLD_LEAVES, OracleStorePaths
 from defender.hooks.record_lesson_load import (
@@ -150,7 +151,9 @@ class JudgeInput:
     leads: dict[str, dict[str, Any]] = field(default_factory=dict)
     lessons: list[dict[str, Any]] = field(default_factory=list)
     document_text: str = ""
-    report_text: str = ""
+    #: The world's closing record (#1534), read through its arm; `None` off an archive-only
+    #: read. Its host fields are shown as host text and its entries' lines framed.
+    closing: Annotated[ClosingRecord | None, SkipValidation] = None
     #: The per-system samples record, one section per system (O16).
     samples_text: str = ""
     #: Served system -> where its section of real answers ends in `samples_text`: a system is
@@ -372,20 +375,24 @@ def render(  # noqa: PLR0913 — the keyword tail is the per-pass hand-over that
     episode_dir: Path, world_label: str, *,
     git_show: Any = None, lessons_commit: str | None = None, payload_cap: int | None = None,
     facts: WorldFacts | None = None, samples: dict[str, Any] | None = None,
-    manifest: dict[str, Any] | None = None, bound: Bound,
+    manifest: dict[str, Any] | None = None, bound: Bound, episode_runs: Any,
     family_text: list[Any] | None = None, runs: RunSet | None = None,
     knowledge: KnowledgeBodies | None = None,
 ) -> JudgeContext:
     """The judge's computed context for one planted world (design M2, derived on read, P-b):
     the computed header, contrast table, fact surfaces and aligned lead rows of the focus and
     every reference run, the reference runs' compressed sections, the focus world's own views,
-    the noise, and the questioner inputs (samples record, base story)."""
+    the noise, and the questioner inputs (samples record, base story).
+
+    `episode_runs` is the episode's run view (#1534), required: each run's verdict is its arm's
+    closing record, read through it, never off the archive tree."""
     episode_dir = Path(episode_dir)
     doc = manifest if manifest is not None else read_manifest(
         bound, expected_episode_id=episode_dir.name)
     record, failed = family_status(bound, doc)
     if runs is None:
-        runs = read_run_set(bound, doc, episode_dir=episode_dir, failed=failed)
+        runs = read_run_set(bound, doc, episode_dir=episode_dir, failed=failed,
+                            episode_runs=episode_runs)
     if family_text is None:
         family_text = render_family_text(record, failed)
     samples_doc = read_samples_record(bound) if samples is None else samples
@@ -429,8 +436,6 @@ def _render_bound_world(  # noqa: C901, PLR0913, PLR0915 — see `render`
     # add every lead with a refusal (but not a lead with a file and nothing else).
     by_id = record.leads
     lead_ids |= {lid for lid, lead in by_id.items() if has_refusals(lead)}
-
-    report_text = record.report.text
 
     samples_doc = read_samples_record(bound) if samples is None else samples
     samples_text, samples_ends = _render_samples(samples_doc, served_systems_of(doc))
@@ -486,7 +491,7 @@ def _render_bound_world(  # noqa: C901, PLR0913, PLR0915 — see `render`
         world_label=world_label,
         discriminator=discriminator_of(doc),
         leads=leads, lessons=lessons, document_text=text,
-        report_text=report_text, samples_text=samples_text, samples_ends=samples_ends,
+        closing=record.closing, samples_text=samples_text, samples_ends=samples_ends,
         oracle_text=render_oracle_store(bound, world_id),
     )
 
@@ -609,8 +614,8 @@ def contrast_row(calls: list[dict[str, Any]], run: WorldFacts) -> dict[str, Any]
 @model
 class RunView:
     """One run's block of the computed context: its header facts (manifest and archived
-    report), its contrast row and joined call list, and what its reference section shows (its
-    leads, report and calls, A24) — each call's served answer and an altered call's claim and
+    closing record), its contrast row and joined call list, and what its reference section shows
+    (its leads, closing record and calls, A24) — each call's served answer and an altered call's claim and
     verifier verdict keyed by its call number."""
 
     label: str
@@ -627,7 +632,8 @@ class RunView:
     #: Every lead the run's calls or gather summaries name, sorted, with its goal (`None`: the
     #: lead's record names none).
     lead_goals: dict[str, Any]
-    report_text: str
+    #: The run's closing record (#1534): the reached verdict and the entries the prompt shows.
+    closing: Annotated[ClosingRecord | None, SkipValidation]
     #: Call number -> the answer its ledger partner records (`payload_text`; `None`: none).
     answers: dict[int, Any] = field(default_factory=dict)
     #: Call number -> an `oracle` partner's (or a re-asked one's) `claim`, `verifier_verdict` and
@@ -656,11 +662,11 @@ def run_view(doc: dict[str, Any], runs: RunSet, label: str) -> RunView:
     return RunView(
         label=label, world_id=run.token, role=entry.get("role"), story=entry.get("story"), axis=entry.get("axis"),
         declared=entry.get("disposition_declared"), label_basis=entry.get("label_basis"),
-        reached=run.report.disposition,
+        reached=run.closing.disposition if run.closing is not None else None,
         facts=[f for f in entry.get("facts") or () if isinstance(f, dict)],
         contrast=contrast_row(calls, run), calls=calls,
         lead_goals={lead: run.leads[lead].goal if lead in run.leads else None for lead in leads},
-        report_text=run.report.text, answers=answers, claims=claims)
+        closing=run.closing, answers=answers, claims=claims)
 
 
 def fact_surfaces(doc: dict[str, Any], runs: RunSet, labels: list[str]) -> list[dict[str, Any]]:
