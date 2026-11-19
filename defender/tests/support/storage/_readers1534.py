@@ -59,7 +59,8 @@ def plant_run(run_dir: Path, fields: dict[str, Any] | None = None, *, fault: str
               case_id: str | None = None, sessions_base: Path | None = None, invalid_as: str | None = None,
               at_query: bool = False, run: Any = None) -> Path | None:
     """`run_dir`'s session pointer, a real store behind it, and (when `fields` is not None) the run's closing record;
-    then `fault` applied (`KINDS_BY_FAULT`), or `NO_POINTER` for a run that never opened a store. `fields=None` is a
+    then `fault` applied (`KINDS_BY_FAULT`), or `NO_POINTER` for a run that never opened a store (any pointer already
+    beside the folder removed, as for `LEGACY_LINK`). `fields=None` is a
     run with a pointer and a table but no row. `invalid_as` is the value a `row-invalid` fault leaves in the disposition
     column. `run` is the folder's handle when its name is not a fixture id (`fixture_run`'s). Returns the database (None
     when no pointer or an unreadable one)."""
@@ -68,6 +69,10 @@ def plant_run(run_dir: Path, fields: dict[str, Any] | None = None, *, fault: str
 
     run_dir = Path(run_dir)
     handle = fixture_run(run_dir) if run is None else run
+    if fault in (NO_POINTER, LEGACY_LINK):
+        # Neither run opened a store, so neither has a pointer: one a fixture planted before this call (a populated run
+        # folder carries one) would answer the lookup instead.
+        Path(handle.observability.session_pointer.path).unlink(missing_ok=True)
     if fault == NO_POINTER:
         return None
     if fault == LEGACY_LINK:

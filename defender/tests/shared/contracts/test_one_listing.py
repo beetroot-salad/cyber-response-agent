@@ -367,6 +367,14 @@ def _layout_plant() -> str:
     return f"from defender.records import {name}\n"
 
 
+def _artifact_write_plant() -> str:
+    """An unvalidated write of the artifact the lint gates, taken from its own `ARTIFACT_LITERALS` (#1534 retired the
+    second artifact it once watched, so a spelled name would go stale with it)."""
+    name = sorted(load_lint_gate("lint_ungated_artifact_write",
+                                 name="lint_ungated_artifact_write_1191").ARTIFACT_LITERALS)[0]
+    return f'def write_1191(d):\n    (d / "{name}").write_text("x", encoding="utf-8")\n'
+
+
 def _real_door() -> dict[str, str]:
     """The run-layout lint reads its layout universe from the swept tree: the real door's
     modules, copied."""
@@ -428,8 +436,7 @@ PLANTS: dict[str, Plant] = {
         "    return json.loads(text)\n",
         support=lambda: {"evaluations/inert_1191.py": ""}),
     "lint_monkeypatch": Plant(MONKEYPATCH_PLANT, support=lambda: {"evaluations/inert_1191.py": ""}),
-    "lint_ungated_artifact_write": Plant(
-        'def write_1191(d):\n    (d / "report.md").write_text("x", encoding="utf-8")\n'),
+    "lint_ungated_artifact_write": Plant(_artifact_write_plant),
     "lint_unsafe_jsonl_io": Plant(JSONL_PLANT),
     "lint_unanchored_default": Plant(
         "FALLBACK_1191 = 3\n\n\ndef pick_1191(x=None):\n"
