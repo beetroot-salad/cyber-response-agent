@@ -203,6 +203,53 @@ jobs:
           --shard ${{ matrix.shard }}/8
           --ignore tests/e2e/test_box_boundary_e2e.py
 
+  # #1566: the `live` Keycloak checks (#1161 C38 and B8, #1540 F5, #1307's programs-realm facts) against the dev
+  # compose stack's own Keycloak: the same image pin, realm exports, sign-in theme and PostgreSQL the dev container
+  # starts, from `.devcontainer/docker-compose.yml` itself, so CI and dev cannot drift apart. Every realm is imported
+  # fresh here, where a long-lived dev Keycloak keeps the realm it first imported. Its own job, so the eight `test`
+  # shards don't each start a Keycloak. Once the URL names a Keycloak these tests fail rather than skip.
+  keycloak-live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Sync defender venv
+        working-directory: defender
+        run: uv sync --extra dev --extra api --locked
+
+      - name: Install Chromium for Playwright
+        working-directory: defender
+        run: uv run --locked playwright install --with-deps chromium
+
+      # The compose file reads the repo's `.env` (secrets for other services, gitignored); Keycloak needs none of it.
+      # `up keycloak` starts only it and what it depends on (PostgreSQL, Mailpit).
+      - name: Start the dev compose Keycloak
+        run: |
+          touch .env
+          docker compose -f .devcontainer/docker-compose.yml up -d keycloak
+          timeout 180 sh -c 'until curl -sf -o /dev/null http://localhost:8080/realms/defender-programs/.well-known/openid-configuration; do sleep 2; done'
+
+      - name: Run the live Keycloak checks
+        working-directory: defender
+        # Same enforcing posture as every CI pytest over tests/ (#631 D11).
+        env:
+          DEFENDER_BUDGET_ENFORCE: "1"
+          DEFENDER_LIVE_KEYCLOAK_URL: http://localhost:8080
+        run: >-
+          uv run pytest -m live -v -rs
+          tests/identity/test_live_keycloak_1161.py tests/identity/test_1307_keycloak_live.py
+
+      - name: Keycloak's log
+        if: failure()
+        run: docker compose -f .devcontainer/docker-compose.yml logs keycloak | tail -200
+
   # The #540 boundary suite on a NATIVE daemon — the same collection the `test` job used to
   # carry inline. It moved out here for wall clock alone: 27 tests that each start a real
   # gVisor box cost 61s, the largest single file in the suite, and pytest-xdist cannot shrink

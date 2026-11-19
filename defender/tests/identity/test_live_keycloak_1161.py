@@ -1,7 +1,8 @@
 # ruff: noqa: PT018 — each compound assert states one fact about one response
 """#1161 B8, D6 on the real dev Keycloak (`live`): two sign-ins of one browser in either order (C38, D6's reopening
 trigger), an OTP sign-in's `amr`, and the account shapes `FakeKeycloak` models without having observed them (the credential
-list, the user `GET` and `PUT`). Rerun on a Keycloak upgrade; skipped in CI (`-m 'not live'`).
+list, the user `GET` and `PUT`). CI's `keycloak-live` job runs it against the dev compose Keycloak (#1566). With
+`DEFENDER_LIVE_KEYCLOAK_URL` unset it skips; once it names a Keycloak, a missing Playwright fails rather than skips.
 
 Inputs (test-only environment; the realm is the committed export, whose client secrets and redirect URI are read from it):
 
@@ -191,7 +192,7 @@ class _Answers(http.server.BaseHTTPRequestHandler):
 @pytest.fixture
 def browser(live: Live) -> Iterator[Browser]:
     """A Chromium, and a listener on the registered callback's address (held under a file lock: one test at a time)."""
-    sync_api = pytest.importorskip("playwright.sync_api", reason="Playwright is needed for the live sign-in")
+    from playwright import sync_api  # a named Keycloak with no Playwright is a failure, never a skip (#1566)
     callback = urllib.parse.urlsplit(live.callback)
     with open(os.path.join(tempfile.gettempdir(), "defender-live-1161-callback.lock"), "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)

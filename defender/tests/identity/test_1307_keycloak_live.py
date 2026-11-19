@@ -1,14 +1,11 @@
 """#1307 live: the Keycloak facts the design rests on (C21, C22, C26, C27, listing pages, secret read-back), against the
-dev compose Keycloak with realm `defender-programs` imported (`live`; CI skips it, `-m "not live and not gate"`).
+dev compose Keycloak with realm `defender-programs` imported (`live`). CI's `keycloak-live` job runs it (#1566).
 
-CANNOT RUN YET: the programs realm export (`.devcontainer/keycloak/realm-defender-programs.json`) and its compose mount are
-committed by the code stage (the offline checks in `test_1307_programs_realm_export.py` are red until then). Owner: code stage
-runs this file once the compose imports the realm, and records the answers (a failure here is the probe answering).
-
-Inputs (test-only environment; the tests skip cleanly when the first two are unset):
+Inputs (test-only environment). With the URL unset the tests skip; once it names a Keycloak, one that does not answer
+fails rather than skips:
 
     DEFENDER_LIVE_KEYCLOAK_URL             base URL, e.g. http://keycloak:8080 (from the dev container)
-    DEFENDER_LIVE_PROGRAMS_ADMIN_SECRET    the dev secret of the API's programs-realm admin client in the export
+    DEFENDER_LIVE_PROGRAMS_ADMIN_SECRET    default: the programs-realm admin client's secret in the committed export
     DEFENDER_LIVE_PROGRAMS_REALM           default defender-programs
     DEFENDER_LIVE_PROGRAMS_ADMIN_CLIENT    default defender-api-programs-admin
     DEFENDER_LIVE_PROGRAMS_AUDIENCE        default defender-api-programs
@@ -28,10 +25,11 @@ from collections.abc import Iterator
 import httpx
 import pytest
 
+from defender._git import REPO_ROOT
+
 pytestmark = pytest.mark.live
 
 URL = os.environ.get("DEFENDER_LIVE_KEYCLOAK_URL", "").rstrip("/")
-ADMIN_SECRET = os.environ.get("DEFENDER_LIVE_PROGRAMS_ADMIN_SECRET", "")
 REALM = os.environ.get("DEFENDER_LIVE_PROGRAMS_REALM", "defender-programs")
 ADMIN_CLIENT = os.environ.get("DEFENDER_LIVE_PROGRAMS_ADMIN_CLIENT", "defender-api-programs-admin")
 AUDIENCE = os.environ.get("DEFENDER_LIVE_PROGRAMS_AUDIENCE", "defender-api-programs")
@@ -39,15 +37,21 @@ PEOPLE_REALM = "defender"
 LIFESPAN = 300
 
 
+def _export_admin_secret() -> str:
+    """The admin client's secret as the committed programs-realm export holds it (what the dev Keycloak imported)."""
+    realm = json.loads((REPO_ROOT / ".devcontainer" / "keycloak" / "realm-defender-programs.json").read_text(encoding="utf-8"))
+    return str(next(c for c in realm["clients"] if c["clientId"] == ADMIN_CLIENT)["secret"])
+
+
+ADMIN_SECRET = os.environ.get("DEFENDER_LIVE_PROGRAMS_ADMIN_SECRET") or _export_admin_secret()
+
+
 @pytest.fixture(scope="module")
 def kc() -> Iterator[httpx.Client]:
-    if not (URL and ADMIN_SECRET):
-        pytest.skip("DEFENDER_LIVE_KEYCLOAK_URL and DEFENDER_LIVE_PROGRAMS_ADMIN_SECRET are not set (no live Keycloak)")
+    if not URL:
+        pytest.skip("DEFENDER_LIVE_KEYCLOAK_URL is not set (no live Keycloak)")
     with httpx.Client(base_url=URL, timeout=10) as client:
-        try:
-            client.get(f"/realms/{REALM}/.well-known/openid-configuration").raise_for_status()
-        except httpx.TransportError:
-            pytest.skip(f"no Keycloak answers at {URL}")
+        client.get(f"/realms/{REALM}/.well-known/openid-configuration").raise_for_status()
         yield client
 
 
