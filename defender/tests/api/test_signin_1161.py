@@ -65,6 +65,11 @@ def _state(url: str) -> str:
     return urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)["state"][0]
 
 
+def _near_miss(state: str) -> str:
+    """`state` with its last character changed: our shape, one character from an open attempt's (#1566)."""
+    return state[:-1] + ("b" if state[-1] == "a" else "a")
+
+
 def _arrive(world: World, browser: Any, state: str | None, *, code: str | None = "c-1", who: str = ME,
             amr: tuple[str, ...] = ("pwd",), account_id: str | None = None,
             extra: tuple[tuple[str, str], ...] = ()) -> Any:
@@ -285,12 +290,12 @@ def test_the_callback_ignores_unknown_parameters_and_takes_the_last_of_a_repeate
     state = world.begin_signin(browser, RET)
     world.signin.answers["c-ann"] = VerifiedSignIn(account_id=world.signin.account_for(ANN), name="A", amr=("pwd",))
     world.signin.answers["c-bob"] = VerifiedSignIn(account_id=world.signin.account_for(BOB), name="B", amr=("pwd",))
-    done = browser.get(CALLBACK, params=[("state", "junk"), ("state", state), ("code", "c-ann"), ("code", "c-bob")])
+    done = browser.get(CALLBACK, params=[("state", "j" * 43), ("state", state), ("code", "c-ann"), ("code", "c-bob")])
     assert location(done) == RET
     assert me(browser)["user"]["email"] == BOB  # the last `code`
     other = world.client()
     state2 = world.begin_signin(other, RET)
-    refused = other.get(CALLBACK, params=[("state", state2), ("state", "junk"), ("code", "c-ann")])
+    refused = other.get(CALLBACK, params=[("state", state2), ("state", "j" * 43), ("code", "c-ann")])
     assert failed(refused) == ("prelogin-missing", {})  # the last `state` names no attempt
 
 
@@ -532,7 +537,7 @@ def test_the_service_refuses_as_a_value_with_the_reason_and_the_return_only_this
     for cookie in (None, "", "junk", "a.b.c", other.cookie_value):  # missing, expired and another attempt's read alike
         got = _refusal(world, state, "c", cookie)
         assert (got.reason, got.return_path) == ("prelogin-missing", None), cookie
-    for junk_state in ("", "not-the-state", _state(other.url)):
+    for junk_state in ("", "n" * 43, _state(other.url)):
         got = _refusal(world, junk_state, "c", start.cookie_value)
         assert (got.reason, got.return_path) == ("prelogin-missing", None), junk_state
     assert not world.signin.finished, "nothing was exchanged for a callback with no cookie of its attempt"
@@ -666,7 +671,7 @@ def test_a_sign_in_start_clears_attempt_cookies_that_name_no_open_attempt() -> N
     world.clock.advance(_dt.timedelta(minutes=10))
     live = world.call(world.service.begin_signin, RET)
     held = {old.cookie_name: old.cookie_value, live.cookie_name: live.cookie_value,
-            attempt_cookie("u" * 43): "x" * 43, attempt_cookie("a" * 43): live.cookie_value,
+            attempt_cookie("u" * 43): "x" * 43, attempt_cookie(_near_miss(_state(live.url))): live.cookie_value,
             attempt_cookie("m" * 43): "not a token!", "__Host-defender_session": "s"}
     wrong = world.call(world.service.begin_signin, RET)
     held[wrong.cookie_name] = "y" * 43

@@ -234,11 +234,14 @@ jobs:
         run: |
           touch .env
           docker compose -f .devcontainer/docker-compose.yml up -d keycloak
-          timeout 180 sh -c 'until curl -sf -o /dev/null http://localhost:8080/realms/defender-programs/.well-known/openid-configuration; do sleep 2; done'
+          for realm in defender defender-programs; do
+            timeout 180 sh -c "until curl -sf -o /dev/null http://localhost:8080/realms/$realm/.well-known/openid-configuration; do sleep 2; done"
+          done
 
       - name: Run the live Keycloak checks
         working-directory: defender
-        # Same enforcing posture as every CI pytest over tests/ (#631 D11).
+        # Same enforcing posture as every CI pytest over tests/ (#631 D11). `CI` (set by Actions) turns an unset URL
+        # into a failure, so this job cannot pass by skipping.
         env:
           DEFENDER_BUDGET_ENFORCE: "1"
           DEFENDER_LIVE_KEYCLOAK_URL: http://localhost:8080

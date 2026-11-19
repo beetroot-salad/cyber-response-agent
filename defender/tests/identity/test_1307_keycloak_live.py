@@ -25,7 +25,8 @@ from collections.abc import Iterator
 import httpx
 import pytest
 
-from defender._git import REPO_ROOT
+from defender._io import read_text_utf8
+from defender.tests.identity.test_1307_programs_realm_export import PROGRAMS_EXPORT
 
 pytestmark = pytest.mark.live
 
@@ -37,18 +38,22 @@ PEOPLE_REALM = "defender"
 LIFESPAN = 300
 
 
-def _export_admin_secret() -> str:
-    """The admin client's secret as the committed programs-realm export holds it (what the dev Keycloak imported)."""
-    realm = json.loads((REPO_ROOT / ".devcontainer" / "keycloak" / "realm-defender-programs.json").read_text(encoding="utf-8"))
-    return str(next(c for c in realm["clients"] if c["clientId"] == ADMIN_CLIENT)["secret"])
-
-
-ADMIN_SECRET = os.environ.get("DEFENDER_LIVE_PROGRAMS_ADMIN_SECRET") or _export_admin_secret()
+def _admin_secret() -> str:
+    """`DEFENDER_LIVE_PROGRAMS_ADMIN_SECRET`, else the admin client's secret in the committed programs-realm export
+    (what the dev Keycloak imported). Read only once a test runs against a Keycloak, never at import."""
+    if secret := os.environ.get("DEFENDER_LIVE_PROGRAMS_ADMIN_SECRET"):
+        return secret
+    clients = json.loads(read_text_utf8(PROGRAMS_EXPORT))["clients"]
+    found = [c["secret"] for c in clients if c["clientId"] == ADMIN_CLIENT]
+    assert found, f"set DEFENDER_LIVE_PROGRAMS_ADMIN_SECRET: the export has no client {ADMIN_CLIENT!r}"
+    return str(found[0])
 
 
 @pytest.fixture(scope="module")
 def kc() -> Iterator[httpx.Client]:
     if not URL:
+        if os.environ.get("CI"):  # CI's keycloak-live job: a check that cannot run is a failure (#1566)
+            pytest.fail("DEFENDER_LIVE_KEYCLOAK_URL is not set in CI")
         pytest.skip("DEFENDER_LIVE_KEYCLOAK_URL is not set (no live Keycloak)")
     with httpx.Client(base_url=URL, timeout=10) as client:
         client.get(f"/realms/{REALM}/.well-known/openid-configuration").raise_for_status()
@@ -71,7 +76,7 @@ def _claims(token: str) -> dict:
 @pytest.fixture
 def admin(kc: httpx.Client) -> httpx.Client:
     """The API's own programs-realm admin client, as the adapter will use it."""
-    response = _grant(kc, ADMIN_CLIENT, ADMIN_SECRET)
+    response = _grant(kc, ADMIN_CLIENT, _admin_secret())
     assert response.status_code == 200, response.text
     kc.headers["Authorization"] = f"Bearer {response.json()['access_token']}"
     yield kc

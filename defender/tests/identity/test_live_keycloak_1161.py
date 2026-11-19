@@ -110,6 +110,8 @@ class Live:
 def live() -> Live:
     url = os.environ.get("DEFENDER_LIVE_KEYCLOAK_URL")
     if not url:
+        if os.environ.get("CI"):  # CI's keycloak-live job: a check that cannot run is a failure (#1566)
+            pytest.fail("DEFENDER_LIVE_KEYCLOAK_URL is not set in CI")
         pytest.skip("set DEFENDER_LIVE_KEYCLOAK_URL (the dev Keycloak with the defender realm imported)")
     return Live(url)
 
