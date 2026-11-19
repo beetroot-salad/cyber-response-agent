@@ -695,7 +695,8 @@ def test_1414_a_record_that_could_not_be_looked_up_posts_no_comment_on_any_readi
     assert got is not None, "no receipt"
     assert (got["key"], got["status"], got["ok"], got["url"]) == (C.TICKET_KEY, C.ERROR, False, None), got
     assert R.names_only(fault, got["reason"] or ""), got
-    assert looked.detail not in json.dumps(got), "the lookup's detail reached the receipt"
+    assert not [v for v in got.values() if isinstance(v, str) and looked.detail in v], (
+        "the lookup's detail reached the receipt")
     err = capsys.readouterr().err
     assert "WARN" in err, err
     assert fault in err, f"the warning does not name the kind: {err}"

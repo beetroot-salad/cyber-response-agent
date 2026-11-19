@@ -57,7 +57,7 @@ def test_a_looped_parent_keeps_the_os_own_words_and_blames_no_leaf(tmp_path):
     """`ELOOP` is relabelled "aliased entry" only when the entry AT the name is the link."""
     looped = tmp_path / "b"
     looped.symlink_to("b")
-    text, err = _io.read_guarded(looped / "report.md")
+    text, err = _io.read_guarded(looped / "report.md")  # lint-report-file: ok — an arbitrary file name the bounded-read primitive is tested on
     assert text is None
     assert "symbolic link" in (err or "").lower(), err
     assert _io.ALIAS_READ_REFUSAL not in (err or ""), err

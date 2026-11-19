@@ -2071,12 +2071,14 @@ def _closing_1471(disposition: str, *, filled: bool = False) -> dict[str, Any]:
 
 
 def _reporting_lifecycle(ran: Ran, *, closed: dict[str, Any] | None, fault: str | None = None,
-                         stale: str | None = None, closes: bool = True, **summary_kw: Any):
+                         stale: str | None = None, closes: bool = True, seen: dict[str, Any] | None = None,
+                         **summary_kw: Any):
     """`verified_lifecycle` whose investigation leaves the run's closing record of `closed` fields (`_closing_1471`;
     None: a run that never closed, no record) behind the run's pointer, `fault` (a `_readers1534` kind) where it is read,
     the host's record of knowledge saying `stale` ("transient" or "operator": stale; None: as the helper wrote it), and
     ends as `summary_kw` says (`truncated_by`, `closed_before_cut`). `stale` may also be "fresh", "pinned" or
-    "unreadable" (a stamp naming a source over a corrupt host record)."""
+    "unreadable" (a stamp naming a source over a corrupt host record). `seen`, when given, receives the lookup as
+    the record step will meet it (`seen["looked"]`)."""
     from defender.records import closing
     from defender.tests.support.storage import _readers1534 as R
     from defender.tests.tenancy.tenant_1108_p4 import test_stale_visibility as V
@@ -2087,6 +2089,8 @@ def _reporting_lifecycle(ran: Ran, *, closed: dict[str, Any] | None, fault: str 
         if closed is not None or fault is not None:
             R.plant_run(run.run_dir, closed, fault=fault, run=run)
             looked = closing.for_run(run)
+            if seen is not None:
+                seen["looked"] = looked
             if fault is None:  # premise: the record the step reads is the one planted, model text included
                 assert isinstance(looked, closing.Record), looked
                 assert looked.record.disposition == closed["disposition"], looked
@@ -2265,8 +2269,9 @@ def test_1534_a_flagged_job_whose_closing_record_cannot_be_looked_up_posts_nothi
     _id, _ran, _link, control = _job_1471(ticket_scene, store, closed=_closing_1471("benign"))
     assert len(control) == 1, "control: a job with a closing record posts"
 
+    seen: dict[str, Any] = {}
     run_id, ran, _link, comments = _job_1471(
-        ticket_scene, store, closed=_closing_1471("benign"), fault=fault, truncated_by=exit_class)
+        ticket_scene, store, closed=_closing_1471("benign"), fault=fault, truncated_by=exit_class, seen=seen)
 
     assert ran.raised is None, ran.message
     assert comments == [], f"a comment was posted for a record nobody could read ({fault}): {comments}"
@@ -2274,7 +2279,9 @@ def test_1534_a_flagged_job_whose_closing_record_cannot_be_looked_up_posts_nothi
     assert receipt is not None, "no receipt"
     assert (receipt["key"], receipt["status"], receipt["ok"]) == (TICKET_1471, "error", False), receipt
     assert R.names_only(fault, receipt["reason"] or ""), receipt
-    assert str(ticket_scene.runs) not in json.dumps(receipt), "the lookup's detail (a path) reached the receipt"
+    assert seen["looked"].detail, "premise: the lookup holds a detail to withhold"
+    assert not [v for v in receipt.values() if isinstance(v, str) and seen["looked"].detail in v], (
+        "the lookup's detail reached the receipt")
 
 
 @pytest.mark.parametrize("stale", ["transient", "operator"])

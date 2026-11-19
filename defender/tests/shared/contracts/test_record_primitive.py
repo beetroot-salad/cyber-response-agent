@@ -250,10 +250,10 @@ def test_1049_a_name_that_is_not_a_sequence_of_plain_components_cannot_be_constr
             assert R.SECRET not in message, (bad, message)
     assert len(rec.opens) == before, "an inexpressible name reached an open"
     with pytest.raises(ValueError):  # noqa: PT011 - d-06 asserts the message; here only that no open follows
-        bound.read("worlds/w/report.md", errors="bogus")
+        bound.read("worlds/w/report.md", errors="bogus")  # lint-report-file: ok — an arbitrary file name the bounded-read primitive is tested on
     assert len(rec.opens) == before
 
-    assert R.state(bound.read("worlds/w/report.md")) == "absent"
+    assert R.state(bound.read("worlds/w/report.md")) == "absent"  # lint-report-file: ok — an arbitrary file name the bounded-read primitive is tested on
     assert R.state(bound.read("gather_summaries/l-0.md")) == "absent"
     R.write_bytes(root / "gather_summaries" / "a" / "b.md", "deepened\n")
     assert bound.read("gather_summaries/a/b.md").text == "deepened\n"
@@ -271,7 +271,7 @@ def test_1049_every_component_is_opened_no_follow_from_the_previous_handle_and_t
     rec = R.RecordingOs()
     bound = R.bind(root, os_=rec)
     R.write_bytes(root / "worlds" / "b" / "report.md", "---\ndisposition: benign\n---\n")
-    read = bound.read("worlds/b/report.md")
+    read = bound.read("worlds/b/report.md")  # lint-report-file: ok — an arbitrary file name the bounded-read primitive is tested on
     assert R.state(read) == "present"
     steps = rec.component_opens
     assert [str(o[0]) for o in steps] == ["worlds", "b", "report.md"], steps
@@ -324,7 +324,7 @@ def test_1049_every_component_is_opened_no_follow_from_the_previous_handle_and_t
 
     # nothing cached: the same name, re-walked, sees the entry's shape now
     R.plant_link(root / "worlds" / "b" / "report.md", root / "plain.md")
-    assert R.refusal(bound.read("worlds/b/report.md"), "worlds/b/report.md") == R.ALIAS
+    assert R.refusal(bound.read("worlds/b/report.md"), "worlds/b/report.md") == R.ALIAS  # lint-report-file: ok — an arbitrary file name the bounded-read primitive is tested on
 
     assert R.io()._STEP_FLAGS & os.O_PATH, "the primitive's step is no longer an O_PATH handle"
     assert R.io()._ROOT_FLAGS & os.O_PATH, "the root handle is no longer O_PATH"

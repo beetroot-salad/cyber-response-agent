@@ -33,8 +33,11 @@ RETIRED_NAMES = frozenset({"read_report", "parse_report", "parse_report_text", "
 RETIRED_CONSTANTS = frozenset({"REPORT_NAME"})
 #: A path literal that ends in the file's name (`"report.md"`, `"runs/x/report.md"`).
 PATH_LITERAL = re.compile(r"(?:^|/)report\.md$")
-#: The calls that read a path: `p.read_text()`, `p.read_bytes()`, `p.open()`, and `open(p)` / `os.open(p)`.
+#: The calls that read a path: `p.read_text()`, `p.read_bytes()`, `p.open()`, and `open(p)` / `os.open(p)`; a reader
+#: function handed the path as its first argument is any call whose name starts with one of `READER_PREFIXES`
+#: (`_io.read_guarded(p)`, `read_jsonl_rows(p)`, `parse_report(p)`).
 READ_CALLS = frozenset({"read_text", "read_bytes", "open"})
+READER_PREFIXES = ("read", "parse", "load")
 _SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
 #: The census file itself is the one exemption by path; every other deliberate decoy or absence line carries `EXEMPT`.
 CENSUS_FILE = "defender/tests/storage/verdict_1534/test_report_file_gone.py"
@@ -75,11 +78,11 @@ def named_lines(source: str) -> list[str]:
     return [ln for ln in source.splitlines() if NAMED_FILE.search(ln) and EXEMPT not in ln]
 
 
-def reaches(source: str, *, constants: bool = False) -> list[str]:
+def reaches(source: str, *, constants: bool = False, tree: ast.Module | None = None) -> list[str]:
     """The lines of Python `source` that reach the retired file: an import of `records._report` or of a retired name, a
     retired reader or type by name, or (with `constants`) the file-name literal or constant."""
     lines = source.splitlines()
-    tree = ast.parse(source)
+    tree = tree or ast.parse(source)
     docstrings = {id(n.body[0].value) for n in ast.walk(tree)
                   if isinstance(n, ast.Module | ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) and n.body
                   and isinstance(n.body[0], ast.Expr) and isinstance(n.body[0].value, ast.Constant)}
@@ -110,22 +113,24 @@ def _path_literal(node: ast.AST) -> bool:
 
 
 def _joined(node: ast.AST) -> bool:
-    """`base / "report.md"`, `base.joinpath(..., "report.md")` or `Path(".../report.md")`."""
+    """`base / "report.md"`, `base.joinpath(..., "report.md")`, `os.path.join(base, "report.md")` or
+    `Path(".../report.md")`. A file name held in a string constant first (`NAME = "report.md"`; `base / NAME`) is not
+    followed: no test spells it that way."""
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
         return _path_literal(node.right)
     if isinstance(node, ast.Call) and node.args:
         func = node.func
-        if (isinstance(func, ast.Attribute) and func.attr == "joinpath") or (
+        if (isinstance(func, ast.Attribute) and func.attr in ("joinpath", "join")) or (
                 isinstance(func, ast.Name) and func.id in ("Path", "PurePath")):
             return _path_literal(node.args[-1])
     return False
 
 
-def path_bindings(source: str) -> set[str]:
+def path_bindings(source: str, tree: ast.Module | None = None) -> set[str]:
     """The module-level names `source` binds to a path that ends in the file's name (`GOLDEN = base / "report.md"`):
     another module that imports one reads the file through it."""
     found: set[str] = set()
-    for node in ast.parse(source).body:
+    for node in (tree or ast.parse(source)).body:
         if isinstance(node, ast.Assign) and _joined(node.value):
             found |= {t.id for t in node.targets if isinstance(t, ast.Name)}
         elif isinstance(node, ast.AnnAssign) and node.value is not None and _joined(node.value) and isinstance(
@@ -150,7 +155,8 @@ def _enclosing_scopes(tree: ast.Module) -> Any:
 
 
 def _read_target(call: ast.Call) -> ast.AST | None:
-    """The path a call reads: `p` of `p.read_text()`, `p.read_bytes()`, `p.open()`, `open(p)` or `os.open(p)`."""
+    """The path a call reads: `p` of `p.read_text()`, `p.read_bytes()`, `p.open()`, `open(p)`, `os.open(p)`, or a
+    reader function's first argument (`READER_PREFIXES`)."""
     func = call.func
     module_open = isinstance(func, ast.Attribute) and func.attr == "open" and isinstance(
         func.value, ast.Name) and func.value.id in ("os", "io")
@@ -158,33 +164,38 @@ def _read_target(call: ast.Call) -> ast.AST | None:
         return call.args[0]
     if isinstance(func, ast.Attribute) and func.attr in READ_CALLS and not module_open:
         return func.value
+    name = func.id if isinstance(func, ast.Name) else func.attr if isinstance(func, ast.Attribute) else ""
+    if name.lstrip("_").startswith(READER_PREFIXES) and call.args:
+        return call.args[0]
     return None
 
 
-def reads_named_file(source: str, bound: frozenset[str] | set[str] = frozenset()) -> list[str]:
+def reads_named_file(source: str, bound: frozenset[str] | set[str] = frozenset(), tree: ast.Module | None = None) -> list[str]:
     """The lines of Python `source` that read a path ending in the file's name: the join or literal read in place
     (`(run / "report.md").read_text()`, `open("report.md")`), or a name bound to one in the same or an enclosing scope,
     at module level, or in `bound` (another module's `path_bindings`), read later. Writes, links and existence checks
     are not reads: tests plant decoys and assert absences that way."""
     lines = source.splitlines()
-    tree = ast.parse(source)
-    scopes = _enclosing_scopes(tree)
+    tree = tree or ast.parse(source)
+    nodes = list(ast.walk(tree))
+    joins = [n for n in nodes if isinstance(n, ast.Assign) and _joined(n.value)]
+    scopes = _enclosing_scopes(tree) if joins else (lambda _node: [tree])  # the parent map only where a name is bound
     local: dict[ast.AST, set[str]] = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign) and _joined(node.value):
-            local.setdefault(scopes(node)[0], set()).update(t.id for t in node.targets if isinstance(t, ast.Name))
-    named = path_bindings(source) | set(bound)
+    for node in joins:
+        local.setdefault(scopes(node)[0], set()).update(t.id for t in node.targets if isinstance(t, ast.Name))
+    named = path_bindings(source, tree) | set(bound)
+    any_local = set().union(*local.values())
 
     def a_path(node: ast.AST | None, at: ast.AST) -> bool:
         if node is None:
             return False
         if isinstance(node, ast.Name):
-            return node.id in named or any(node.id in local.get(s, ()) for s in scopes(at))
+            return node.id in named or (node.id in any_local and any(node.id in local.get(s, ()) for s in scopes(at)))
         if isinstance(node, ast.Attribute):
             return node.attr in named
         return _joined(node) or _path_literal(node)
 
-    found = {node.lineno for node in ast.walk(tree) if isinstance(node, ast.Call) and a_path(_read_target(node), node)}
+    found = {node.lineno for node in nodes if isinstance(node, ast.Call) and a_path(_read_target(node), node)}
     return [lines[n - 1] for n in sorted(found) if EXEMPT not in lines[n - 1]]
 
 
@@ -199,6 +210,9 @@ def test_v_nofile_the_read_detector_finds_each_read_form_and_skips_writes_and_ab
                    'with open(run / "report.md") as f:\n    pass',
                    'x = os.open("report.md", os.O_RDONLY)',
                    'x = io.open(run / "report.md").read()',
+                   'text, err = _io.read_guarded(looped / "report.md")',
+                   'rows = read_jsonl_rows(os.path.join(run, "report.md"))',
+                   'x = parse_report(run / "report.md")',
                    'with (run / "report.md").open() as f:\n    pass',
                    'def f(run):\n    p = run / "report.md"\n    return p.read_text()',
                    'def f(run):\n    p = run / "report.md"\n    def g():\n        return p.read_text()\n    return g',
@@ -215,6 +229,8 @@ def test_v_nofile_the_read_detector_finds_each_read_form_and_skips_writes_and_ab
                    'x = (run / "investigation.md").read_text()',
                    'x = (run / "report.md.staged").read_text()',
                    'x = (run / "final-report.md").read_text()',
+                   'x = _io.read_guarded(run / "investigation.md")',
+                   'reader = run / "report.md"',
                    'def f(run):\n    p = run / "report.md"\n    p.write_text("x")\ndef g(p):\n    return p.read_text()',
                    'def f():\n    """Reads report.md."""\n    return 1',
                    f'x = (run / "report.md").read_text()  {EXEMPT} — a fixture file'):
@@ -261,10 +277,11 @@ def test_v_nofile_no_test_or_evaluation_code_reaches_the_retired_file():
     files = [rel for rel in _tracked("defender/tests/*.py", "evaluations/*.py") if rel != CENSUS_FILE]
     assert len(files) >= _PRODUCT_FLOOR, f"the walk found only {len(files)} test and evaluation files"
     texts = {rel: (REPO / rel).read_text(encoding="utf-8") for rel in files}
-    bound = set().union(*(path_bindings(text) for text in texts.values()))
+    trees = {rel: ast.parse(text) for rel, text in texts.items()}
+    bound = set().union(*(path_bindings(texts[rel], trees[rel]) for rel in texts))
     found = {}
     for rel, text in texts.items():
-        if hits := [*reaches(text), *reads_named_file(text, bound)]:
+        if hits := [*reaches(text, tree=trees[rel]), *reads_named_file(text, bound, trees[rel])]:
             found[rel] = hits
     assert found == {}, f"{len(found)} test or evaluation file(s) still reach the retired file: {found}"
 
