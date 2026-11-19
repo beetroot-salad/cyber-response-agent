@@ -41,8 +41,9 @@ concurrency:
 # 7.5-11.5 minutes, two of them within 35 seconds of the bound, so the bound went to 15 rather than a ninth shard;
 # and on 2026-11-19 PR #1575 (#1487) ran every tick test over both the in-process store and the port, which added about
 # 2,000 seconds of file cost, so two shards were cancelled at 15 with every test that reported passing and the bound went
-# to 20 with the cost table raised for those files),
-# and a stall that burns the gVisor step's full 5-minute bound still lands inside 20, so the
+# to 20 with the cost table raised for those files; the two heaviest port cases then each ran 11-12 minutes on one worker,
+# and the one scheduled last was cut off at 20, so the bound went to 25),
+# and a stall that burns the gVisor step's full 5-minute bound still lands inside 25, so the
 # step's own timeout fires first and names the command. Raising the step bound without raising
 # this one inverts that and hands every stall to GitHub's generic job cancel.
 jobs:
@@ -58,7 +59,7 @@ jobs:
   test:
     name: test (shard ${{ matrix.shard }}/8)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
