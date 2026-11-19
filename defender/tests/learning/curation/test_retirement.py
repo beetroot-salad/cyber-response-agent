@@ -27,14 +27,16 @@ def _main_deps(tmp_path: Path):
     (run_dir / "alert.json").write_bytes((GOLDEN / "alert.json").read_bytes())
     dfn = tmp_path / "defender"
     dfn.mkdir(exist_ok=True)
-    return _with_live_run_1165(bind(MAIN_DEF, run_dir, defender_dir=dfn), run=_live_run_1165(run_dir)), run_dir
+    from defender.tests.support.runtime.engine._spec923 import with_session_store
+
+    deps = _with_live_run_1165(bind(MAIN_DEF, run_dir, defender_dir=dfn), run=_live_run_1165(run_dir))
+    return with_session_store(deps, tmp_path), run_dir
 
 
 def test_797_a_confident_close_fails_closed_when_no_stage_is_bound(tmp_path):
     """A confident disposition reviewed through an UNBOUND bundle commits `inconclusive`, and
     says on disk that the MACHINERY is what failed."""
     pytest.importorskip("pydantic_ai")
-    from defender._frontmatter import split_frontmatter
     from defender.investigation.close_tool import (
         CAUSE_REVIEW_INCOMPLETE,
         FORCED_INCONCLUSIVE,
@@ -55,9 +57,11 @@ def test_797_a_confident_close_fails_closed_when_no_stage_is_bound(tmp_path):
         f"the override names {result.failure_kind!r}, not a stage error"
     )
 
-    fm, _raw, _body = split_frontmatter((run_dir / "report.md").read_text(encoding="utf-8"))
+    from defender.tests.support.runtime.engine._spec923 import committed
+
+    fm = committed(run_dir)
     assert fm["disposition"] == "unresolved", (
-        f"report.md committed {fm['disposition']!r} unreviewed"
+        f"the closing record committed {fm['disposition']!r} unreviewed"
     )
     assert fm["outcome"] == FORCED_INCONCLUSIVE
     assert fm["failure_kind"] == STAGE_ERROR
@@ -76,9 +80,7 @@ def test_797_a_confident_close_fails_closed_when_no_stage_is_bound(tmp_path):
     assert bypass.failure_kind == STAGE_ERROR, (
         "an inconclusive close with no reviewer is not a stage error"
     )
-    bypass_fm, _r, _b = split_frontmatter(
-        (bypass_dir / "report.md").read_text(encoding="utf-8")
-    )
+    bypass_fm = committed(bypass_dir)
     assert bypass_fm["disposition"] == "unresolved"
     assert bypass_fm["failure_kind"] == STAGE_ERROR
     bypass_record = json.loads(

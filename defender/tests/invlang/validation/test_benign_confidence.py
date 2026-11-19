@@ -8,8 +8,6 @@ from __future__ import annotations
 
 import pytest
 
-from defender.investigation.close_tool import render_report
-from defender.records._artifact_schema import validate_report
 from defender.skills.invlang.parser import parse_dense_companion
 from defender.skills.invlang.validate import (
     benign_confidence_ceiling,
@@ -147,21 +145,27 @@ def test_an_open_contract_is_not_a_searched_one():
     assert benign_confidence_ceiling(_companion(doc)) is None
 
 
-# ------------------------------------------------------------------ the report
+# ------------------------------------------------------------------ the closing record
+# #1534 retired `report.md`: the committed confidence rides the run's closing record (`confidence`, set only beside
+# `benign`, one of `CONFIDENCE_VALUES`). The record's own type is the check `validate_report` was; the close, the
+# lookup and the readers are pinned in `tests/storage/verdict_1534/test_closing_record.py` and `test_close_verdict.py`.
 
 
-def test_the_report_carries_the_committed_confidence():
-    body = render_report("benign", outcome="stands", cause="c", confidence="medium")
-    assert "confidence: medium\n" in body
-    assert validate_report(body) is None
+def _record(disposition: str, confidence: str | None):
+    from defender.tests.storage.verdict_1534 import _spec1534 as V
+    from defender.tests.support.storage import _readers1534 as R
+
+    return V.a_record("run-1545", **R.valid_fields(disposition), confidence=confidence)
+
+
+def test_the_record_carries_the_committed_confidence():
+    assert _record("benign", "medium").confidence == "medium"
 
 
 @pytest.mark.parametrize(
     ("disposition", "confidence"),
     [("malicious", "high"), ("benign", "certain")],
 )
-def test_the_report_refuses_a_confidence_off_benign_or_off_vocabulary(disposition, confidence):
-    body = render_report(disposition, outcome="stands", cause="c", confidence=confidence)
-    reason = validate_report(body)
-    assert reason is not None
-    assert "confidence" in reason
+def test_the_record_refuses_a_confidence_off_benign_or_off_vocabulary(disposition, confidence):
+    with pytest.raises(ValueError, match="confidence"):
+        _record(disposition, confidence)

@@ -1,5 +1,8 @@
 """Disposition vocabulary reaches the model as a schema enum, and the host still gates: sync entry and tool lane refuse near-misses and escape invisible characters."""
 from __future__ import annotations
+
+from defender.tests.support.runtime.engine._spec992 import closing_record, is_closed, never_closed
+from defender.tests.storage.verdict_1534 import _spec1534 as V
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 from dataclasses import replace as _with_fixture_run_1165
@@ -43,7 +46,10 @@ def _deps(tmp_path: Path):
     (run_dir / "investigation.md").write_bytes((GOLDEN / "investigation.md").read_bytes())
     dfn = tmp_path / "defender"
     dfn.mkdir(exist_ok=True)
-    return _with_fixture_run_1165(bind(MAIN_DEF, run_dir, defender_dir=dfn), run=_fixture_run_1165(run_dir)), run_dir
+    from defender.tests.support.runtime.engine._spec923 import with_session_store
+
+    deps = _with_fixture_run_1165(bind(MAIN_DEF, run_dir, defender_dir=dfn), run=_fixture_run_1165(run_dir))
+    return with_session_store(deps, tmp_path), run_dir
 
 
 
@@ -127,7 +133,7 @@ def test_the_sync_host_entry_refuses_every_near_miss(tmp_path, disposition):
         close_investigation(deps, disposition, stages=_stages())
 
     assert "disposition must be exactly one of" in str(excinfo.value)
-    assert not (run_dir / "report.md").exists(), (
+    assert never_closed(run_dir), (
         f"{disposition!r} committed a disposition through the sync host entry"
     )
 
@@ -140,7 +146,7 @@ def test_the_tool_lane_refuses_a_value_outside_the_vocabulary(tmp_path):
     assert "disposition must be exactly one of" in seen, (
         f"the model was never told why its close was refused. Saw: {seen!r}"
     )
-    assert not (run_dir / "report.md").exists(), (
+    assert never_closed(run_dir), (
         "an out-of-vocabulary disposition committed a report through the tool lane"
     )
 
@@ -153,11 +159,8 @@ def test_a_member_of_the_vocabulary_commits_through_the_tool_lane(tmp_path):
     assert "disposition must be exactly one of" not in seen, (
         f"a member of the vocabulary was refused on the tool lane. Saw: {seen!r}"
     )
-    report = run_dir / "report.md"
-    assert report.exists(), "a valid disposition did not commit through the tool lane"
-    assert "disposition: inconclusive" in report.read_text(encoding="utf-8"), (
-        f"the committed report does not carry the disposition: {report.read_text()!r}"
-    )
+    assert is_closed(run_dir), "a valid disposition did not commit through the tool lane"
+    assert closing_record(run_dir).disposition == "inconclusive"
 
 
 # The refusal distinguishes an invisible character from a valid value.
@@ -181,7 +184,7 @@ def test_the_refusal_escapes_an_invisible_character_rather_than_echoing_it(tmp_p
         "the refusal echoes the laced value raw, so the model reads its own rejected answer "
         f"as identical to a valid one: {message!r}"
     )
-    assert not (run_dir / "report.md").exists()
+    assert never_closed(run_dir)
 
     # The same text, on the lane the model actually reads it from.
     script, tool_run_dir = _drive_tool(tmp_path / "tool", disposition=LACED)
@@ -193,7 +196,7 @@ def test_the_refusal_escapes_an_invisible_character_rather_than_echoing_it(tmp_p
         "the model was handed the laced value raw, so its rejected answer reads as identical "
         f"to a valid one: {seen!r}"
     )
-    assert not (tool_run_dir / "report.md").exists()
+    assert never_closed(tool_run_dir)
 
 
 # The close's two writes (review record, report) are both attempted; only the report's fault is the close's (#1342 r4 M2, r5).
@@ -216,61 +219,63 @@ def _warned_about_turn_1(caplog) -> list[str]:
             if r.levelno >= logging.WARNING and re.search(r"turn\W*1\b", r.getMessage(), re.IGNORECASE)]
 
 
-REASON = "frontmatter: key 'x' is missing\nbody: section 'Why' is empty\nbody: section 'Evidence' is empty"
 
 
-def test_a_schema_refused_report_is_the_closes_refusal_whatever_the_record_write_did(tmp_path):
-    """The validator refuses the body and the review record cannot be written either: the model is told the validator's whole (multi-line) reason, the very message a close with a healthy record gives, and nothing of the record's fault. (M2)"""
-    def refusing(*_a):
-        return REASON
+def test_a_refused_close_is_the_closes_refusal_whatever_the_record_write_did(tmp_path):
+    """The close's gate refuses the document and the review record cannot be written either: the model is told the very
+    message a close with a healthy record gives, and nothing of the record's fault. (M2; the report validator is retired, #1534)"""
+    from defender.tests.support.runtime.engine._spec923 import gapless
 
-    healthy_deps, _ = _deps(tmp_path / "healthy")
+    healthy_deps, healthy_dir = _deps(tmp_path / "healthy")
+    (healthy_dir / "investigation.md").write_text(gapless(), encoding="utf-8")
     with pytest.raises(ModelRetry) as healthy:
-        close_investigation(healthy_deps, "inconclusive", stages=_stages(), validator=refusing)
+        close_investigation(healthy_deps, "inconclusive", stages=_stages())
 
     deps, run_dir = _deps(tmp_path / "faulty")
+    (run_dir / "investigation.md").write_text(gapless(), encoding="utf-8")
     record = _a_directory_where_the_review_record_goes(run_dir)
     with pytest.raises(ModelRetry) as excinfo:
-        close_investigation(deps, "inconclusive", stages=_stages(), validator=refusing)
+        close_investigation(deps, "inconclusive", stages=_stages())
 
     message = str(excinfo.value)
-    assert REASON in message, f"the model was not given the validator's whole reason: {message!r}"
+    assert "close blocked" in message, f"fixture control: the gate refused the document: {message!r}"
     assert message == str(healthy.value), f"the record's fault changed what the model was told: {message!r}"
     assert record.name not in message
-    assert not (run_dir / "report.md").exists()
+    assert never_closed(run_dir)
 
 
-def test_a_report_the_close_wrote_stays_final_when_the_record_write_failed(tmp_path):
-    """The report commits and the review record cannot be written: the close stands, so a second close is refused as already closed and neither the report nor the record is touched. (M2: terminality follows the report alone)"""
+def test_a_closing_record_the_close_wrote_stays_final_when_the_review_record_write_failed(tmp_path):
+    """The closing record commits and the review record cannot be written: the close stands, so a second close is refused as already closed and neither the closing record nor the review record is touched. (M2: terminality follows the closing record alone)"""
     deps, run_dir = _deps(tmp_path)
     record = _a_directory_where_the_review_record_goes(run_dir)
     close_investigation(deps, "inconclusive", stages=_stages())
-    report = (run_dir / "report.md").read_bytes()
-    assert b"disposition: inconclusive" in report
+    committed = closing_record(run_dir)
+    assert committed.disposition == "inconclusive"
 
     with pytest.raises(ModelRetry) as excinfo:
         close_investigation(deps, "benign", stages=_stages())
 
     assert "already closed" in str(excinfo.value), f"a second close was not refused as a closed one: {excinfo.value!s}"
-    assert (run_dir / "report.md").read_bytes() == report, "the second close overwrote the committed report"
+    assert closing_record(run_dir) == committed, "the second close overwrote the committed record"
     assert record.is_dir(), "the second close replaced the directory in the record's place"
     assert not any(record.iterdir()), "the second close wrote the review record"
 
 
-def test_a_report_that_cannot_be_written_is_the_error_raised_not_the_records(tmp_path, caplog):
-    """Both writes fail: the error raised is the report's (it names `report.md`), not the review record's, and the lost record is still logged at WARNING or above naming its turn. (M2, D-x)"""
+def test_a_closing_record_that_cannot_be_written_is_the_error_raised_not_the_review_records(tmp_path, caplog):
+    """Both writes fail (a row already stands for the run): the error raised is the closing record's, not the review record's, and the lost record is still logged at WARNING or above naming its turn. (M2, D-x)"""
     import logging
+
+    from defender.records.session_store import ClosingRecordExists
 
     deps, run_dir = _deps(tmp_path)
     record = _a_directory_where_the_review_record_goes(run_dir)
-    (run_dir / "report.md").mkdir()
+    V.plant(deps.session_store, V.a_record(run_dir.name))
 
-    with caplog.at_level(logging.INFO), pytest.raises(OSError) as excinfo:  # noqa: PT011 — the platform's own error for a directory in the way
+    with caplog.at_level(logging.INFO), pytest.raises(ClosingRecordExists) as excinfo:
         close_investigation(deps, "inconclusive", stages=_stages())
 
-    assert "report.md" in str(excinfo.value), f"not the report's fault: {excinfo.value!r}"
     assert record.name not in str(excinfo.value), f"the record's fault was raised: {excinfo.value!r}"
-    assert _warned_about_turn_1(caplog), "the lost review record was not logged (WARNING or above, naming turn 1) when the report failed too"
+    assert _warned_about_turn_1(caplog), "the lost review record was not logged (WARNING or above, naming turn 1) when the closing record failed too"
 
 
 def test_a_review_record_that_cannot_be_written_is_logged_at_warning_or_above_naming_its_turn_and_the_close_stands(
@@ -284,7 +289,7 @@ def test_a_review_record_that_cannot_be_written_is_logged_at_warning_or_above_na
     with caplog.at_level(logging.INFO):
         result = close_investigation(deps, "inconclusive", stages=_stages())
 
-    assert (run_dir / "report.md").is_file()
+    assert is_closed(run_dir)
     assert result.record_path is None
     assert _warned_about_turn_1(caplog), \
         f"nothing at WARNING or above names the turn whose record was lost: {[r.getMessage() for r in caplog.records]}"
@@ -299,5 +304,5 @@ def test_a_review_record_that_is_written_logs_no_record_fault_warning(tmp_path, 
     with caplog.at_level(logging.INFO):
         close_investigation(deps, "inconclusive", stages=_stages())
 
-    assert (run_dir / "report.md").is_file()
+    assert is_closed(run_dir)
     assert _warned_about_turn_1(caplog) == []

@@ -154,13 +154,6 @@ def _host_rows(tmp_path: Path) -> Path:
     return path
 
 
-def _host_report(tmp_path: Path) -> Path:
-    path = tmp_path / "host" / "outside-report.md"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(S.report_text("benign", body=HOST_SECRET), encoding="utf-8")
-    return path
-
-
 def _names_run(entry: dict, label: str) -> bool:
     """A found-gap entry belongs to run `label` (its run spelled `S.found_run`: the label)."""
     return entry.get(S.COINED["found.run"]) == S.found_run(label)
@@ -269,10 +262,6 @@ def _to_host_rows(path: Path, tmp_path: Path) -> Any:
     return S.plant_symlink(path, _host_rows(tmp_path))
 
 
-def _to_host_report(path: Path, tmp_path: Path) -> Any:
-    return S.plant_symlink(path, _host_report(tmp_path))
-
-
 def _hard_linked(path: Path, tmp_path: Path) -> Any:
     return S.plant_hardlink(path, _host_rows(tmp_path))
 
@@ -283,10 +272,6 @@ def _torn(path: Path, _tmp_path: Path) -> Any:
 
 def _fifo(path: Path, _tmp_path: Path) -> Any:
     return S.plant_fifo(path)
-
-
-def _second_key(path: Path, _tmp_path: Path) -> Any:
-    return S.second_disposition(path)
 
 
 def _undecodable(path: Path, _tmp_path: Path) -> Any:
@@ -309,15 +294,6 @@ _READS: dict[str, tuple[Callable[[str, S.CallRow], dict] | None, Damage | None, 
     "two-table-rows-sharing-one-call-id": (
         lambda label, first: {"calls": _shared_id_calls(label, first)}, None,
         _file("executed_queries.jsonl")),
-    "report-with-no-usable-disposition": (
-        lambda _l, _f: {"report": S.report_text("Benign", body="The control closed.")}, None,
-        _file("report.md")),
-    "report-with-a-look-alike-disposition": (
-        lambda _l, _f: {"report": S.report_text("m\u0430licious", body="Cyrillic a.")}, None,
-        _file("report.md")),
-    "report-with-a-second-disposition-key": (None, _on("report.md", _second_key),
-                                             _file("report.md")),
-    "report-is-a-symlink": (None, _on("report.md", _to_host_report), _file("report.md")),
     "alert-is-a-fifo": (None, _on("alert.json", _fifo), _file("alert.json")),
     "oracle-store-is-a-symlink": (None, _on("oracle", _to_host_rows), _file("forged.jsonl")),
     "oracle-store-is-a-hard-link": (None, _on("oracle", _hard_linked), _file("forged.jsonl")),
@@ -401,8 +377,7 @@ def test_1234_control_cut_short_stamps_the_family_not_graded(tmp_path, cut):
 
 
 @pytest.mark.parametrize("case", [
-    "report-with-no-usable-disposition", "report-with-a-look-alike-disposition",
-    "report-with-a-second-disposition-key", "report-is-a-symlink", "alert-is-a-fifo",
+    "alert-is-a-fifo",
     "ledger-row-without-a-call-id", "two-table-rows-sharing-one-call-id"])
 def test_1234_control_malformed_stamps_the_family_not_graded(tmp_path, case):
     built, names = _damaged(tmp_path, case, CTL, _triad_ctl, _CTL_FIRST)
@@ -470,9 +445,7 @@ def test_1234_control_declared_verdict_outside_the_vocabulary(tmp_path):
 
 def test_1234_control_pushed_to_an_unusable_close_by_the_alert(tmp_path):
     for name, over, named in (
-            ("closed-without-a-headline",
-             {"report": "The alert said the case was closed upstream; no verdict.\n"},
-             "report.md"),
+            ("never-closed", {"reached": None}, CTL),
             ("cut-short", {"run_end": dict(CUT_SHORT)}, CUT_WORD)):
         built = _build(tmp_path, name, _triad_ctl(a=over))
         judge = S.judge({"b": _finding_reply("b", CTL), "c": _finding_reply("c", CTL)})
@@ -485,25 +458,46 @@ def test_1234_control_pushed_to_an_unusable_close_by_the_alert(tmp_path):
             f"{name}: the page does not show the stamp {reason!r}")
 
 
-@pytest.mark.parametrize("damage", ["report-is-a-symlink", "report-is-undecodable"])
-def test_1234_malformed_planted_report_does_not_refuse_the_episode(tmp_path, damage):
-    built = _build(tmp_path, damage, S.triad())
-    report = built.world_dir("c") / "report.md"
-    if damage == "report-is-a-symlink":
-        S.plant_symlink(report, _host_report(tmp_path))
-    else:
-        _undecodable(report, tmp_path)
+@pytest.mark.parametrize("kind", J.ARM_FAULTS)
+def test_1234_a_world_whose_closing_record_cannot_be_looked_at_does_not_refuse_the_episode(tmp_path, kind):
+    """World c's `CouldNotLook` leaves it ungradable (not malformed) with the kind's wording; b still grades. (V-LOOK)"""
+    from defender.records import closing as C
+
+    built = _build(tmp_path, kind, S.triad())
+    J.fault_arm(built.ep, "c", kind)
     judge = S.judge()
 
     S.grade(built, judge)
 
-    _assert_malformed(built, "c", "report.md")
+    row = S.row(built, "c")
+    assert row.get("ungradable") is True, row
+    assert row.get(MALFORMED) is not True, row
+    assert C.FAULT_WORDING[kind] in str(row.get(UNGRADABLE_REASON)), row
     assert not judge.called("c")
-    assert judge.called("b"), "b was not graded beside the malformed c"
+    assert judge.called("b"), "b was not graded beside the unreadable c"
     assert _shows(judge.prompt_for("b"), "a"), "b was not graded against the control"
-    _assert_no_host_text(built, judge)
-    with pytest.raises(S.sym(S.EPISODE_MOD, "EpisodeError")):
-        J.through_view(built.ep, S.mod(S.EPISODE_MOD).verdicts)
+    assert "closing-1534-source" not in S.record_text(built), "the database's name reached judge.yaml"
+
+
+@pytest.mark.parametrize("kind", [*J.ARM_FAULTS, "never-closed"])
+def test_1234_a_control_whose_closing_record_cannot_be_looked_at_stamps_the_family_not_graded(tmp_path, kind):
+    """The control's missing or unreadable record stamps the family, naming the control (and the kind's wording for
+    a fault); a fault is worded, an absence is not. (V-LOOK, V-READERS)"""
+    from defender.records import closing as C
+
+    built = _build(tmp_path, kind, _triad_ctl(**({"a": {"reached": None}} if kind == "never-closed" else {})))
+    if kind != "never-closed":
+        J.fault_arm(built.ep, CTL, kind)
+    judge = S.judge({"b": _finding_reply("b", CTL), "c": _finding_reply("c", CTL)})
+
+    S.grade(built, judge)
+
+    reason = _assert_stamped(built, judge, CTL)
+    wording = {C.FAULT_WORDING[k] for k in C.FAULT_KINDS}
+    if kind == "never-closed":
+        assert not any(w in reason for w in wording), f"an absence was worded as a fault: {reason!r}"
+    else:
+        assert C.FAULT_WORDING[kind] in reason, f"the stamp does not carry the kind's wording: {reason!r}"
 
 
 @pytest.mark.parametrize("case", [

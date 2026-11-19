@@ -43,6 +43,7 @@ from defender.learning.branch.container import JobContainer, NotInContainer, sig
 from defender.learning.branch.endings import (
     ENTRY_ERROR,
     HISTORY_UNREADABLE,
+    LAUNCH_REFUSED,
     NO_FORK_POINT,
     SOURCE_UNAVAILABLE,
     JobEnding,
@@ -230,10 +231,11 @@ def _candidates_of(source: Run, candidates: Callable[..., Any]) -> Any:
     """`candidates(store, source)` over the source's own session store, opened here.
 
     A source whose session pointer is absent is a run recorded before #1235 (its link still
-    inside the folder: `LegacyRunLink`, `skipped: history_unreadable`) or one whose store is gone
+    inside the folder: `LegacyRunLink`, `failed: launch_refused`) or one whose store is gone
     (`failed: source_unavailable`), as is a pointer naming a database that is not there. Only a
-    typed refusal of the history is `history_unreadable`, its message naming the refusal's type: a
-    store format's (`session_store.StoreError`), or the one read of MAIN's session refusing the
+    typed refusal of the history is `history_unreadable`, its message naming the refusal's type
+    (a legacy link or a store of another schema version is `failed: launch_refused` with that
+    kind's fixed wording instead, as at the launcher): a store format's (`session_store.StoreError`), or the one read of MAIN's session refusing the
     store (`branch.BranchError`: no single root session; each fork point's own admission refusal
     is the candidates' and never raises). Anything else propagates, and the entry records
     `failed: entry_error`."""
@@ -263,7 +265,15 @@ def _candidates_of(source: Run, candidates: Callable[..., Any]) -> Any:
 
 
 def _history_unreadable(refusal: BaseException) -> JobEnding:
-    """`skipped: history_unreadable` for a typed format refusal, its message naming the type."""
+    """`skipped: history_unreadable` for a typed format refusal, its message naming the type; a
+    legacy link or another schema version is `failed: launch_refused` with the kind's wording."""
+    from defender.records import closing
+
+    for kind, refused in (("legacy-link", session_store.LegacyRunLink),
+                          ("schema-version", session_store.UnknownSchemaVersion)):
+        if isinstance(refusal, refused):
+            wording = closing.FAULT_WORDING[kind]
+            return ending(f"[learning job] {wording}", reason=LAUNCH_REFUSED, brief=wording, cause=refusal)
     brief = (f"the source run's session history cannot be read by current code "
              f"({type(refusal).__name__})")
     return ending(f"[learning job] {brief}", reason=HISTORY_UNREADABLE, brief=brief, cause=refusal)

@@ -55,7 +55,6 @@ ALERT = "alert.json"
 ALERT_INPUT_DIRNAME = "alert_input"
 #: The run's record, beside the alert: its byte digest and the three facts derived at run start.
 ALERT_RECORD = _alert_input.RECORD_FILE
-REPORT = "report.md"
 INVESTIGATION = "investigation.md"
 EXECUTED_QUERIES = "executed_queries.jsonl"
 SOURCE_REFS = "source_refs.yaml"
@@ -187,10 +186,6 @@ class RunLayout:
     @property
     def alert_record(self) -> PurePosixPath:
         return self.alert_input_dir / ALERT_RECORD
-
-    @property
-    def report(self) -> PurePosixPath:
-        return PurePosixPath(REPORT)
 
     @property
     def investigation(self) -> PurePosixPath:
@@ -367,10 +362,6 @@ class RunPaths:
     @property
     def alert_record(self) -> Path:
         return self.run_dir / RUN_LAYOUT.alert_record
-
-    @property
-    def report(self) -> Path:
-        return self.run_dir / RUN_LAYOUT.report
 
     @property
     def investigation(self) -> Path:
@@ -605,11 +596,14 @@ _PAYLOAD_SHAPES = (
     re.compile(rf"{TICKET_READS_MARKER}/[0-9]+\.json"),
 )
 
-#: The case's answer key: the finished investigation, its disposition, and the query record.
+#: The case's answer key in a run folder: the finished investigation and the query record.
 #: The learning loop stages these into a run root that must withhold them from the reader
 #: (`permission.files.names_case_answer_key`). `alert.json` is the case input, not the key.
+#: The disposition is the closing record in the session database, outside every run folder
+#: (#1534). The file that held it before #1534 is not named: the only confined agents are the
+#: curators, and nothing, before #1534 or since, stages that file into a curator's call folder.
 CASE_ANSWER_KEY_NAMES = frozenset(
-    {INVESTIGATION, REPORT, SOURCE_REFS, EXECUTED_QUERIES}
+    {INVESTIGATION, SOURCE_REFS, EXECUTED_QUERIES}
 )
 
 

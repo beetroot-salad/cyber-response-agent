@@ -108,6 +108,8 @@ from defender.learning.branch.questioner_launch import (
     _SAMPLES_PER_VERB as _SAMPLES_PER_VERB,
     _SAMPLE_CAP as _SAMPLE_CAP,
     _author as _author,
+    source_closing_of as source_closing_of,
+    source_disposition_of as source_disposition_of,
     _fence_count as _fence_count,
     _joined_leads as _joined_leads,
     _logger as _logger,
@@ -284,6 +286,29 @@ def _prime_once(
         f"primed {report.primed} captured row(s) into {episode.served_base.path}; "
         f"{report.skipped} skipped ({report}) — a skipped key is read live per world rather "
         "than replayed")
+
+
+#: The job's ending for a source-lookup fault of the source's store itself, beside the kind's
+#: wording: its reason. Every other kind, a store of another schema version and a pre-#1235 link
+#: included (no backward compatibility), ends `launch_refused`.
+_SOURCE_STORE_ENDINGS = {
+    "database-missing": (SOURCE_UNAVAILABLE, None),
+}
+
+
+def _declared_or_refused(found: Any) -> str | None:
+    """`source_disposition_of`, its refusal as the launch's ending: the kind's wording, never the
+    lookup's detail (a path)."""
+    from defender.records import closing
+
+    try:
+        return source_disposition_of(found)
+    except branch.BranchError as unreadable:
+        wording = found.wording if isinstance(found, closing.CouldNotLook) else str(unreadable)
+        kind = found.kind if isinstance(found, closing.CouldNotLook) else None
+        reason, refused_as = _SOURCE_STORE_ENDINGS.get(kind or "", (LAUNCH_REFUSED, None))
+        brief = wording if refused_as is None else f"{wording} ({refused_as})"
+        raise ending(f"[branch] {unreadable}", reason=reason, brief=brief) from None
 
 
 def _open_launch_source(runs: RunsRepository[Tenant], source_run_id: str) -> Run:
@@ -796,6 +821,11 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
         runs = tenant.tenant.runs_repository()
         source = _open_launch_source(runs, ns.source_run_id)
         _source_stamp_agrees(source, tenant.tenant_id)
+        # World A's declared disposition is the source's closing record (#1534), refused here on
+        # any fault with the kind's wording, and looked up before any writer opens the source's
+        # store (the fork pick, the branch clock): that open creates a database where a missing
+        # one was, which would turn `database-missing` into an absence.
+        source_disposition = _declared_or_refused(source_closing_of(source))
         if lane is not None and lane.pick is not None:
             # The job's fork point (O3): picked here, once the source is open and its stamp
             # agrees, before anything is spent.
@@ -855,7 +885,8 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
                 # in its own questioner scripts every call it makes.
                 checker = author if questioner is None else premise_check
                 return _run_episode(
-                    ns, source=source, source_stamp=checked.source_stamp,
+                    ns, source=source, source_disposition=source_disposition,
+                    source_stamp=checked.source_stamp,
                     launch_waived=checked.waived, episode=episode, view=view,
                     questioner=author, premise_check=checker, spawn=spawn, judge=judge,
                     lessons_dir=questioner_lessons_dir,
@@ -878,8 +909,8 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
 
 
 def _run_episode(  # noqa: PLR0913, PLR0912, PLR0915, C901 — the episode's whole identity plus its seams
-    ns: argparse.Namespace, *, source: Run, source_stamp: dict, launch_waived: Sequence[str] = (),
-    episode: Episode,
+    ns: argparse.Namespace, *, source: Run, source_stamp: dict, source_disposition: str | None,
+    launch_waived: Sequence[str] = (), episode: Episode,
     view: EpisodeRuns, questioner: Any, spawn: Any, lessons_dir: Path, judge: Any = None,
     premise_check: Any = None,
     tenant: RunTenant, runs: RunsRepository[Tenant], served: Sequence[str], oracle: Any,
@@ -911,7 +942,8 @@ def _run_episode(  # noqa: PLR0913, PLR0912, PLR0915, C901 — the episode's who
     stage(Step.QUESTIONER)
     with clock.step(Step.QUESTIONER):
         try:
-            family = _author(ns, source=source, episode=episode, questioner=questioner,
+            family = _author(ns, source=source, source_disposition=source_disposition,
+                             episode=episode, questioner=questioner,
                              lessons_dir=lessons_dir, served=served,
                              reachable=reachable_systems(tenant.grants.gather),
                              premise_check=premise_check)

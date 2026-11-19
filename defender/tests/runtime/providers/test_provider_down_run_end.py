@@ -578,7 +578,7 @@ def test_1447_a_lead_refused_for_its_setup_ends_the_run_and_a_400_only_the_lead(
     if ends_run:
         assert ended == run_end.TRUNCATED_BY_PROVIDER_REJECTED, (
             f"a lead's {status} ended the run {ended!r}, not provider-rejected")
-        assert not d.paths.report.exists(), "a provider-rejected run wrote report.md"
+        P.assert_no_closing_record(d.folder, "a provider-rejected run")
         assert d.rc == 7, f"run.py exited {d.rc!r} on a provider-rejected run, not 7"
     else:
         assert ended is None, f"a lead's {status} ended the whole run {ended!r}; only the lead ends"

@@ -32,14 +32,16 @@ def _fixture_set(root: Path, truths: dict[str, str]) -> Path:
 
 
 def _run(runs: Path, name: str | None = None, *, says: str | None = None) -> Path:
-    """A recorded run folder `<runs>/<name>` (a fresh UUID by default), with a `report.md`
-    carrying `says` when given."""
+    """A recorded run folder `<runs>/<name>` (a fresh UUID by default), its closing record carrying `says` when given
+    (#1534). A folder that is not a run id (a decoy named after a slug) takes no record: it is never opened."""
+    from defender.tests.support.shared._fixture_uuid import is_fixture_uuid_shape
+    from defender.tests.support.storage import _readers1534 as R
+
     run_dir = runs / (name or str(uuid.uuid4()))
     run_dir.mkdir(parents=True)
     plant_alert(run_dir)
-    if says is not None:
-        (run_dir / "report.md").write_text(
-            f"---\ndisposition: {says}\noutcome: stands\n---\nbody\n", encoding="utf-8")
+    if says is not None and is_fixture_uuid_shape(run_dir.name):
+        R.plant_run(run_dir, R.valid_fields(says))
     return run_dir
 
 

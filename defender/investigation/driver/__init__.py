@@ -330,7 +330,7 @@ async def _drive_agent(  # noqa: PLR0913, PLR0912, PLR0915, C901 — the loop's 
         _flush_run_end(run, store, session_id, truncated_by)
     # The run-end record is taken before the forced close sets `closed`, and written always
     # (a clean run records `truncated_by: null`). It is how readers tell a model verdict from a
-    # host-forced one, so if it cannot be written no forced report is written either; that is
+    # host-forced one, so if it cannot be written no forced record is written either; that is
     # named in the exit reason only when a forced close was actually owed.
     end = run_end.RunEnd(truncated_by, challenge_gate.ReviewState.of(deps).closed)
     written = _write_run_end_sidecar(deps, end)
@@ -357,7 +357,7 @@ def _write_run_end_sidecar(deps: AgentDeps, end: run_end.RunEnd) -> bool:
     """Write the host-side run-end sidecar beside `deps.run_dir`; `True` on success.
 
     Best-effort: a failure is logged and reported so the forced close can refuse to write a
-    report with no record beside it.
+    closing record with no run-end record beside it.
     """
     try:
         run_end.write_sidecar(run_of(deps), end)
@@ -368,12 +368,13 @@ def _write_run_end_sidecar(deps: AgentDeps, end: run_end.RunEnd) -> bool:
 
 
 #: Exits where the model was stopped before closing but the run still says something about the
-#: case (request ceiling, tool-retry budget): the host closes `unresolved` so a report.md exists.
+#: case (request ceiling, tool-retry budget): the host closes `unresolved` so a closing record
+#: exists.
 #:
 #: Circuit-breaker, budget-kill, store and failed call-record (`served_ledger`,
 #: `executed_queries`) exits are excluded: they are infrastructure faults,
-#: not findings, and downstream readers treat any report.md as a verdict (the ticket lane
-#: closes the ticket, the scorer counts `unresolved` as wrong). Those runs end with no report.
+#: not findings, and downstream readers treat any closing record as a verdict (the ticket lane
+#: closes the ticket, the scorer counts `unresolved` as wrong). Those runs end with no record.
 #: The set lives in `run_end` because the ticket lane keys on it without importing this module.
 _CUT_SHORT_WITH_A_MODEL_STILL_OWED_A_CLOSE = run_end.FORCED_CLOSE_EXITS
 
@@ -382,7 +383,7 @@ async def _close_a_run_cut_short(
     deps: AgentDeps, bounds: challenge_gate.Bounds, exit_reason: str | None,
 ) -> str | None:
     """The host's `unresolved` close for a run cut short on a model-owned exit, so every such
-    run ends with a report.md. Keyed on the exit class in one place rather than per handler.
+    run ends with a closing record. Keyed on the exit class in one place rather than per handler.
 
     Returns the exit reason to record: the caller's, or `ForcedCloseFailed` so a failed forced
     close is distinguishable downstream. A run that already closed keeps its decision.
@@ -816,6 +817,9 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
             run_state=state,
             run=run,
             review_state={} if review_state is None else review_state,
+            # The close writes the closing record through the run's open store (#1534), which
+            # stays open past the forced close of a run cut short (C8).
+            session_store=store,
         )
 
         agent_run, end, exit_reason = await _drive_agent(

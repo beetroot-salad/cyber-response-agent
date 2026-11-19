@@ -35,10 +35,10 @@ def test_921_finding_whose_pointers_all_miss_the_episode_is_dropped_and_counted(
     ep = _episode(tmp_path)
     reply = J.as_reply_text(J.reply_doc(findings=[
         J.finding_doc(topic="kept",
-                      evidence=[f"worlds/{T.fixture_world_id('b')}/investigation.md", f"worlds/{T.fixture_world_id('a')}/report.md"]),
+                      evidence=[f"worlds/{T.fixture_world_id('b')}/investigation.md", f"worlds/{T.fixture_world_id('a')}/closing"]),
         J.finding_doc(topic="dropped-nowhere", evidence=["there was no evidence, really"]),
         J.finding_doc(topic="dropped-sibling",
-                      evidence=[f"worlds/{T.fixture_world_id('c')}/investigation.md", f"worlds/{T.fixture_world_id('c')}/report.md"]),
+                      evidence=[f"worlds/{T.fixture_world_id('c')}/investigation.md", f"worlds/{T.fixture_world_id('c')}/closing"]),
     ]))
     _grade(tmp_path, ep, J.FakeJudge(default=reply), draws=1)
 
@@ -54,7 +54,7 @@ def test_921_finding_whose_pointers_all_miss_the_episode_is_dropped_and_counted(
 
 def test_921_pointer_resolving_nowhere_is_recorded_on_the_finding(tmp_path):
     ep = _episode(tmp_path)
-    resolving = [f"worlds/{T.fixture_world_id('b')}/investigation.md", f"worlds/{T.fixture_world_id('a')}/report.md"]
+    resolving = [f"worlds/{T.fixture_world_id('b')}/investigation.md", f"worlds/{T.fixture_world_id('a')}/closing"]
     filed = [*resolving, "the analyst simply never looked at the holding system",
              "https://example.invalid/runs/abc"]
     reply = J.as_reply_text(J.reply_doc(findings=[J.finding_doc(evidence=filed)]))
@@ -80,7 +80,7 @@ def test_921_a_pointer_climbing_out_of_the_episode_does_not_count_as_resolving(t
         J.finding_doc(topic="dotdot", evidence=[f"worlds/{T.fixture_world_id('b')}/../../../outside.md"]),
         J.finding_doc(topic="absolute", evidence=[str(outside)]),
         J.finding_doc(topic="symlink", evidence=[f"oracle/{T.fixture_world_id('b')}/notes.jsonl"]),
-        J.finding_doc(topic="in-tree", evidence=[f"worlds/{T.fixture_world_id('b')}/report.md", f"worlds/{T.fixture_world_id('a')}/report.md"]),
+        J.finding_doc(topic="in-tree", evidence=[f"worlds/{T.fixture_world_id('b')}/closing", f"worlds/{T.fixture_world_id('a')}/closing"]),
     ]))
     _grade(tmp_path, ep, J.FakeJudge(default=reply), draws=1)
 
@@ -154,8 +154,8 @@ def test_921_no_model_authored_text_reaches_the_prompt_unframed(tmp_path):
         markers["summary"] + "\n", encoding="utf-8")
     (ep / "worlds" / T.world_id(ep, "b") / "investigation.md").write_text(
         J.investigation_document("b") + f"\n{markers['document']}\n", encoding="utf-8")
-    (ep / "worlds" / T.world_id(ep, "b") / "report.md").write_text(
-        J.report_text("malicious", body=markers["report"]), encoding="utf-8")
+    J.set_closing(ep, "b", disposition="malicious", ceiling_test=(J.ceiling_note(markers["report"]),),
+                  summary="MARKER-RECORD-SUMMARY")
     import yaml
     doc = yaml.safe_load((ep / "family.yaml").read_text(encoding="utf-8"))
     for world in doc["worlds"]:
@@ -172,6 +172,7 @@ def test_921_no_model_authored_text_reaches_the_prompt_unframed(tmp_path):
 
     for what, marker in {**markers, "lesson": "MARKER-LESSON-BODY"}.items():
         J.assert_wrapped_untrusted(prompt, marker, f"the {what} body")
+    assert "MARKER-RECORD-SUMMARY" not in prompt, "the closing record's summary reached the judge's prompt (OD7)"
 
 
 def test_921_framed_summary_is_carried_and_the_frame_is_the_one_the_module_ships(tmp_path):

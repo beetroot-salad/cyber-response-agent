@@ -102,7 +102,7 @@ def graded_episode(tmp_path: Path, t):
 
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
-    (ep / "worlds" / J.world_id(ep, "b") / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
+    J.set_closing(ep, "b", disposition="benign")  # world b reached benign: the judge reads its arm's closing record
     with blocking(os.environ[ST.DSN_ENV]) as store:
         J.grade_at(
             ep, judge=J.FakeJudge(

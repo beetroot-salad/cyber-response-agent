@@ -14,6 +14,10 @@ from typing import Any
 from defender.configuration import env_int
 from defender._model import model
 from defender.records import Run
+from defender.records.closing import (
+    CAUSE_CEILING_EXAMINED, CAUSE_EVIDENCE_CANNOT_DISCRIMINATE, CAUSE_NOTHING_LEFT_TO_ASK, CAUSE_REVIEW_INCOMPLETE,
+    CAUSE_STORY_SETTLED, CAUSE_TURN_BUDGET_SPENT, FORCED_INCONCLUSIVE, STAGE_ERROR, STANDS, TIMEOUT, UNREADABLE,
+)
 from defender.providers import ProviderDown
 from defender.investigation.tools._deps import run_of
 from defender._untrusted import wrap_fresh
@@ -139,7 +143,7 @@ class StageRequest:
 @model
 class StageOutcome:
     text: str | None
-    #: `None` when the call completed, otherwise a member of `close_tool.FAILURE_KINDS`.
+    #: `None` when the call completed, otherwise a member of `records.closing.FAILURE_KINDS`.
     failure_kind: str | None
     detail: str | None = None
 
@@ -149,8 +153,6 @@ class StageOutcome:
 
 
 async def _call_stage(role: str, stage_fn, request: StageRequest) -> StageOutcome:
-    # Deferred: close_tool imports this module at module scope.
-    from .close_tool import STAGE_ERROR, TIMEOUT
 
     try:
         text = await asyncio.wait_for(stage_fn(request), timeout=request.timeout)
@@ -223,9 +225,9 @@ def _mark_traces_incomplete(deps: Any, round_no: int, reason: str) -> None:
 class GateVerdict:
     """One gate attempt's classification.
 
-    `cause` is the host's own sentence (one of `close_tool.REPORT_CAUSES`), never composed from
+    `cause` is the host's own sentence (one of `records.closing.CAUSES`), never composed from
     a stage reply. `detail` is the only field that may quote a stage, so it goes to the review
-    record and never to report.md."""
+    record and never to the closing record."""
 
     outcome: str
     disposition: str
@@ -291,7 +293,6 @@ def _fail(role: str, outcome: StageOutcome, *, turns_used: int) -> GateVerdict:
     """The verdict for a review that failed to deliver. The override is the same for every
     disposition; the failure kind comes from the stage outcome. `turns_used` is the run's
     count, since a challenged close reviews again."""
-    from .close_tool import CAUSE_REVIEW_INCOMPLETE, FORCED_INCONCLUSIVE
 
     return GateVerdict(
         outcome=FORCED_INCONCLUSIVE, disposition=HOST_ONLY_DISPOSITION,
@@ -306,8 +307,7 @@ def review_cannot_run(deps: Any, reason: str) -> GateVerdict:
 
     The trace-marker write is contained here, unlike elsewhere: this arm is reached on a fault
     in the run dir itself, where the write is likely to fail too, and an `OSError` escaping the
-    tool would end the run with no report.md."""
-    from .close_tool import STAGE_ERROR
+    tool would end the run with no closing record."""
 
     state = ReviewState.of(deps)
     try:
@@ -326,7 +326,6 @@ async def _dispatch(
     """Look the stage up, build its request, and call it, all inside the fault arm: a partial
     stage bundle or a render that raises over the model-authored companion is a review that
     cannot run, not an exception for the driver."""
-    from .close_tool import STAGE_ERROR
 
     try:
         stage_fn = stages.stage(role)
@@ -354,17 +353,9 @@ def _route(
     raised-ask state and the cap, none of which a review role sees. `disposition` only decides
     what a stands/challenged verdict carries and which cause a `holds` earns; the override
     arms are the same for every disposition."""
-    from .close_tool import (
-        CAUSE_CEILING_EXAMINED,
-        CAUSE_EVIDENCE_CANNOT_DISCRIMINATE,
-        CAUSE_NOTHING_LEFT_TO_ASK,
-        CAUSE_STORY_SETTLED,
-        CAUSE_TURN_BUDGET_SPENT,
-        CHALLENGED,
-        FORCED_INCONCLUSIVE,
-        NO_CAUSE,
-        STANDS,
-    )
+    # Deferred: close_tool imports this module at module scope. (The committed vocabulary is
+    # the record's, imported at the top.)
+    from .close_tool import CHALLENGED, NO_CAUSE
 
     def _verdict(outcome, verdict_disposition, cause, detail, *, material=()) -> GateVerdict:
         return GateVerdict(
@@ -400,7 +391,7 @@ def _route(
 
     state.raised_asks[target] = mentions_now
     state.turns += 1
-    # NO_CAUSE: this attempt commits no report.md.
+    # NO_CAUSE: this attempt commits no closing record.
     return _verdict(
         CHALLENGED, disposition, NO_CAUSE, review.review,
         material=((target, review.ask.prose),),
@@ -416,7 +407,6 @@ async def challenge_gate(
     `disposition` is the close's own argument; the gate never re-derives it from the
     companion. `companion` is the close's single parse of `investigation.md`, handed in rather
     than re-read so every reader on the close judges the same object."""
-    from .close_tool import STAGE_ERROR, UNREADABLE
     from .review.projector import (
         EmptyInvestigation,
         ablation_target,

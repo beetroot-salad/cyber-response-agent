@@ -275,7 +275,8 @@ learning_jobs(
 
 ### 2.6 API surface
 
-Frontend reads + a small write path, all tenant-scoped. **Three flat resource families** (`alerts`,
+Frontend reads + a small write path, all tenant-scoped. Paths in this design are relative to `/api`: the ingress
+sends `/api` to the API and every other path to the frontend (#1161). **Three flat resource families** (`alerts`,
 `investigations`, `learning-jobs`/`lessons`). Each entity has a global id and a flat canonical read.
 Creation is a flat verb with the parent as a **required body field** (Stripe-style): investigation-create
 takes `alert_id`, learning-job-create takes `investigation_id`. List scoping is a query-param filter, not a
@@ -321,7 +322,7 @@ model/prompt-bundle id if it varies independently of the image. `lessons_corpus_
 
 ### 2.9 Artifact link resolution
 
-Superseded by #1161 (design r8) and the deployment design §5. People open generated pages through a
+Superseded by the design on #1161 and the deployment design §5. People open generated pages through a
 frontend page opener: the API issues a short-lived grant for one page of an owner's accepted output, and
 a separate artifact server on the artifact domain exchanges it for a cookie covering that page only. The
 artifact server serves only names on its closed list of page names; reports, raw query results and other

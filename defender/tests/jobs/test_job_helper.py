@@ -793,7 +793,7 @@ def test_a6_the_helper_makes_the_run_folder_and_the_run_copy_owned_by_itself_and
     assert got == {"run_folder": True, "owner": os.getpid()}
     assert not copy.exists(), "the helper left the run copy it made"
     assert listing(copy.parent) == [], "the helper left a temporary in the run-knowledge folder"
-    assert (run / "report.md").read_text(encoding="utf-8") == "the report", "the run's output did not survive the helper"
+    assert (run / "report.md").read_text(encoding="utf-8") == "the report", "the run's output did not survive the helper"  # lint-report-file: ok — an arbitrary file the stand-in job wrote
 
 
 # --- H10: links in helper-made folders ------------------------------------------------------------------------------

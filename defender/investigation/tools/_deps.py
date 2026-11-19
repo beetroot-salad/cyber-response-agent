@@ -17,6 +17,7 @@ from defender._paths import PATHS
 
 
 from defender.records import Run
+from defender.records.session_store import StoreHandle
 from defender import box as box_mod
 from ..run_state import RunState, run_time_iso
 from .. import permission
@@ -141,6 +142,11 @@ class AgentDeps:
     #: `tenant`: the object is shared, never rebuilt by a deps copy.
     run: Annotated[Run | None, SkipValidation] = field(kw_only=True, default=None)
     run_state: Annotated[RunState | None, SkipValidation] = field(kw_only=True, default=None)
+    #: The run's open session store (#1534), which the close writes the closing record into. Set
+    #: by the driver on MAIN's deps for the run's lifetime, as it hands the store to the spend
+    #: ledger; `None` for every other role, and a close over `None` is a wiring fault
+    #: (`close_tool.NoSessionStore`). `SkipValidation`: the handle holds a live connection.
+    session_store: Annotated[StoreHandle | None, SkipValidation] = field(kw_only=True, default=None)
 
     role: ClassVar[AgentRole] = AgentRole.MAIN
 

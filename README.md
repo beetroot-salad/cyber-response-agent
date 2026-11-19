@@ -122,12 +122,12 @@ Live runs additionally need a provider API key (Anthropic by default; Fireworks 
 ## Running The Agent
 
 Every run names its tenant, and there is no default (#1078). A tenant is created through the
-platform API, not by hand (#1214): an administrator posts `POST /admin/tenants` (202, the new
+platform API, not by hand (#1214): an administrator posts `POST /api/admin/tenants` (202, the new
 tenant's URL in `Location`), and `python -m defender.lifecycle serve` (dev: the management service
 and the host actor in one process) creates its repository from the committed template, its bot and
 credentials, and the clone and empty learning state under `$DEFENDER_DATA_ROOT/<id>/`, then marks it
-`active`. Follow it with `GET /admin/tenants/<id>`; a failed step is recorded there and resumed with
-`POST /admin/tenants/<id>/resume`. Every host entry point (`run.py`, the drains, `tenant.py
+`active`. Follow it with `GET /api/admin/tenants/<id>`; a failed step is recorded there and resumed with
+`POST /api/admin/tenants/<id>/resume`. Every host entry point (`run.py`, the drains, `tenant.py
 check|update|propose`) works only for an `active` tenant, reading the tenant records from
 `DEFENDER_DATABASE_DSN`; see
 [Host process settings](defender/docs/development-operations.md#host-process-settings-1214).
@@ -135,7 +135,7 @@ check|update|propose`) works only for an `active` tenant, reading the tenant rec
 ```bash
 export DEFENDER_DATA_ROOT=/path/outside/the/checkout
 export DEFENDER_DATABASE_DSN=<the tenant database>
-export TENANT_ID=<the id POST /admin/tenants answered>
+export TENANT_ID=<the id POST /api/admin/tenants answered>
 python3 defender/cli/tenant.py check "$TENANT_ID"   # the tenant admitted and its folder accepted
 ```
 
@@ -178,7 +178,8 @@ cd defender && .venv/bin/python -m pytest tests/ -q -m "not llm and not live"
 ```
 
 The `llm`/`live` markers gate tests that make a real (metered) model request or need live
-infrastructure; CI runs `-m "not llm and not live"`.
+infrastructure; CI's test job runs `-m "not llm and not live"`, and its `keycloak-live` job runs the
+live Keycloak checks against the dev compose Keycloak.
 
 ## Repository Conventions
 

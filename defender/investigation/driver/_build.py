@@ -175,7 +175,7 @@ def _gather_bash_shapes(roots: ResolvedRoots) -> tuple[Any, ...]:
 
 
 def _main_write_shape(roots: ResolvedRoots) -> tuple[Any, ...]:
-    # report.md is not on the allow-list; the close tool is its only writer.
+    # Only investigation.md: the disposition is the closing record, which the close tool writes.
     return permission.build_named_write_allow(
         roots.run_dir, (RUN_LAYOUT.investigation.name,))
 

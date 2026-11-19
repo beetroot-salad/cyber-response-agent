@@ -170,7 +170,7 @@ def family() -> int:
         """The scripted judge. Its finding contrasts the worlds' reports by the world ids this launch minted, so the
         reply is written when the judge is first asked (a pointer naming no archived world is dropped unresolved)."""
         if not scripted:
-            evidence = [f"worlds/{T.world_id(episode, label)}/report.md" for label in ("a", "b", "c")]
+            evidence = [f"worlds/{T.world_id(episode, label)}/closing" for label in ("a", "b", "c")]
             finding = J.finding_doc(bucket="lead-quality", subject="defender", topic="the lead was never revisited",
                                     evidence=evidence)
             world = J.reply_doc(findings=[finding])

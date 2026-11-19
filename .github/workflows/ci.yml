@@ -207,6 +207,56 @@ jobs:
           --shard ${{ matrix.shard }}/8
           --ignore tests/e2e/test_box_boundary_e2e.py
 
+  # #1566: the `live` Keycloak checks (#1161 C38 and B8, #1540 F5, #1307's programs-realm facts) against the dev
+  # compose stack's own Keycloak: the same image pin, realm exports, sign-in theme and PostgreSQL the dev container
+  # starts, from `.devcontainer/docker-compose.yml` itself, so CI and dev cannot drift apart. Every realm is imported
+  # fresh here, where a long-lived dev Keycloak keeps the realm it first imported. Its own job, so the eight `test`
+  # shards don't each start a Keycloak. Once the URL names a Keycloak these tests fail rather than skip.
+  keycloak-live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Sync defender venv
+        working-directory: defender
+        run: uv sync --extra dev --extra api --locked
+
+      - name: Install Chromium for Playwright
+        working-directory: defender
+        run: uv run --locked playwright install --with-deps chromium
+
+      # The compose file reads the repo's `.env` (secrets for other services, gitignored); Keycloak needs none of it.
+      # `up keycloak` starts only it and what it depends on (PostgreSQL, Mailpit).
+      - name: Start the dev compose Keycloak
+        run: |
+          touch .env
+          docker compose -f .devcontainer/docker-compose.yml up -d keycloak
+          for realm in defender defender-programs; do
+            timeout 180 sh -c "until curl -sf -o /dev/null http://localhost:8080/realms/$realm/.well-known/openid-configuration; do sleep 2; done"
+          done
+
+      - name: Run the live Keycloak checks
+        working-directory: defender
+        # Same enforcing posture as every CI pytest over tests/ (#631 D11). `CI` (set by Actions) turns an unset URL
+        # into a failure, so this job cannot pass by skipping.
+        env:
+          DEFENDER_BUDGET_ENFORCE: "1"
+          DEFENDER_LIVE_KEYCLOAK_URL: http://localhost:8080
+        run: >-
+          uv run pytest -m live -v -rs
+          tests/identity/test_live_keycloak_1161.py tests/identity/test_1307_keycloak_live.py
+
+      - name: Keycloak's log
+        if: failure()
+        run: docker compose -f .devcontainer/docker-compose.yml logs keycloak | tail -200
+
   # The #540 boundary suite on a NATIVE daemon — the same collection the `test` job used to
   # carry inline. It moved out here for wall clock alone: 27 tests that each start a real
   # gVisor box cost 61s, the largest single file in the suite, and pytest-xdist cannot shrink
@@ -896,7 +946,7 @@ jobs:
 
       # A module importing another module's closed vocabulary and re-deriving the membership
       # test itself instead of calling the normalizer that ships beside it (#785). The six
-      # interpreters of report.md's disposition each looked fine alone; they disagreed only
+      # interpreters of the old report file's disposition each looked fine alone; they disagreed only
       # BETWEEN themselves, and five had silently dropped the #722 zero-width strip on a field
       # attacker-influenced by construction. A vocabulary is watched only once its owner
       # defines an answer for it, so the gate arms itself as later folds land. No disposition
@@ -1029,7 +1079,7 @@ jobs:
         run: defender/.venv/bin/python tooling/lint/lint_unaccounted_selection.py
 
       # An invariant enforced at a gate, and then believed of the ARTIFACT. `_artifact_schema`
-      # owns what a well-formed investigation.md / report.md is, and the permission gate
+      # owns what a well-formed investigation.md is, and the permission gate
       # applies it to every write a MODEL makes — which made "a committed investigation
       # parses" true of the verbs the agent writes through, and false of two writers nobody
       # had censused: the harness seeding a `:L findings` row before MAIN's first turn (#964),

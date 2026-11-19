@@ -19,16 +19,15 @@ from defender.investigation.close_tool import (
     CAUSE_TURN_BUDGET_SPENT,
     CHALLENGED,
     FORCED_INCONCLUSIVE,
-    REPORT_CAUSES,
     STAGE_ERROR,
     STANDS,
     TIMEOUT,
     UNREADABLE,
-    render_report,
 )
 from defender.investigation.review.reply import ASK_PROSE_MAX
 from defender.investigation.review_roles import ReviewStages
 from defender.tests.support.runtime.engine import _spec923
+from defender.tests.storage.verdict_1534 import _spec1534 as V
 from defender.tests.support.learning.curation._frames680 import frame_salt_of
 from defender.tests.support.sandbox._spec791 import (  # noqa: F401 — session-scoped autouse guard
     worktree_package_guard,
@@ -37,6 +36,9 @@ from defender.tests.support.runtime.engine._spec992 import (
     bounds,
     ceiling_companion,
     CEILING_EXAMINED,
+    closing_lookup,
+    closing_record,
+    committed_receipts,
     close_with,
     CONFIDENT,
     CONFIDENT_QUESTION,
@@ -46,16 +48,17 @@ from defender.tests.support.runtime.engine._spec992 import (
     gap,
     holds,
     host_text,
+    is_closed,
+    never_closed,
     non_utf8_companion,
-    priced_block,
+    priced_receipts,
     raises,
     receipt_note_lines,
     record,
     record_files,
     recording,
     replies,
-    report_parts,
-    report_text,
+    record_text,
     review_state,
     SHIPPED_CAUSES,
     sleeps,
@@ -84,7 +87,7 @@ def test_gap_with_ask_challenges_inconclusive(tmp_path):
         deps, run_dir = _fresh(tmp_path, name)
         result = close_with(deps, GAP, recording(gap(target, "the process identity")))
         assert result.outcome == CHALLENGED, (name, result)
-        assert not (run_dir / "report.md").exists()
+        assert never_closed(run_dir)
         state = review_state(deps)
         assert state.turns == 1
         assert target in state.raised_asks
@@ -117,15 +120,17 @@ def test_gap_with_ask_challenges_inconclusive(tmp_path):
 
 def test_holds_commits_inconclusive_ceiling_examined(tmp_path):
     """A composer `holds` commits `inconclusive` with the ceiling-examined cause; review prose
-    disputing the receipts rides only in the record's framed `detail`, never in report.md."""
+    disputing the receipts rides only in the record's framed `detail`, never in the closing record."""
     deps, run_dir = _fresh(tmp_path, "holds")
     result = close_with(deps, GAP, recording(holds()))
     assert (result.outcome, result.cause, result.failure_kind) == (STANDS, CEILING_EXAMINED, None)
     fm = frontmatter(run_dir)
     assert (fm["disposition"], fm["outcome"], fm["cause"]) == (GAP, STANDS, CEILING_EXAMINED)
-    assert "failure_kind" not in fm
+    assert fm["failure_kind"] is None
     assert record(run_dir, 1)["verdict"] == STANDS
-    assert CEILING_EXAMINED in REPORT_CAUSES
+    from defender.records import closing as C
+
+    assert CEILING_EXAMINED in C.CAUSE_SENTENCES.values()
 
     dispute = "the l-006 receipt overstates the ceiling; Zeek was reachable through the proxy"
     deps, run_dir = _fresh(tmp_path, "dispute")
@@ -134,7 +139,7 @@ def test_holds_commits_inconclusive_ceiling_examined(tmp_path):
     rec = record(run_dir, 1)
     assert dispute in rec["detail"]
     assert frame_salt_of(rec["detail"], "untrusted")
-    assert dispute not in report_text(run_dir)
+    assert dispute not in record_text(run_dir)
 
 
 def test_null_ask_gap_overrides_cannot_discriminate(tmp_path):
@@ -155,7 +160,7 @@ def test_null_ask_gap_overrides_cannot_discriminate(tmp_path):
         assert (fm["disposition"], fm["outcome"], fm["cause"]) == (
             UNRESOLVED, FORCED_INCONCLUSIVE, CAUSE_EVIDENCE_CANNOT_DISCRIMINATE,
         )
-        assert "failure_kind" not in fm
+        assert fm["failure_kind"] is None
         for role in _ALL_ROLES:
             assert not any(row.get("incomplete") for row in trace_rows(run_dir, role)), role
 
@@ -342,8 +347,8 @@ def test_override_arms_route_inconclusive_and_confident_alike(tmp_path):
             name, result, control,
         )
         if result.outcome == CHALLENGED:
-            assert not (run_dir / "report.md").exists(), name
-            assert not (twin_dir / "report.md").exists(), name
+            assert never_closed(run_dir), name
+            assert never_closed(twin_dir), name
         elif result.outcome == STANDS:
             assert _spec923.committed_verdict(run_dir) == GAP, name
             assert _spec923.committed_verdict(twin_dir) == CONFIDENT, name
@@ -359,10 +364,12 @@ def test_override_arms_route_inconclusive_and_confident_alike(tmp_path):
 
 
 def test_ceiling_held_inconclusive_commits_the_seventh_cause_and_a_confident_holds_does_not(tmp_path):
-    """`REPORT_CAUSES` is the six original sentences plus `CEILING_EXAMINED`, which only a held
+    """The cause sentences are the six original ones plus `CEILING_EXAMINED`, which only a held
     `inconclusive` commits: a confident `holds` commits `CAUSE_STORY_SETTLED`, no other arm it."""
     expected_causes = (*SHIPPED_CAUSES, CEILING_EXAMINED)
-    assert expected_causes == REPORT_CAUSES, REPORT_CAUSES
+    from defender.records import closing as C
+
+    assert sorted(expected_causes) == sorted(C.CAUSE_SENTENCES.values()), C.CAUSE_SENTENCES
 
     deps, run_dir = _fresh(tmp_path, "ceiling-held")
     held = close_with(deps, GAP, recording(holds()))
@@ -372,7 +379,7 @@ def test_ceiling_held_inconclusive_commits_the_seventh_cause_and_a_confident_hol
     deps, run_dir = _fresh(tmp_path, "confident-holds")
     stood = close_with(deps, CONFIDENT, recording(holds()))
     assert (stood.outcome, stood.cause) == (STANDS, CAUSE_STORY_SETTLED)
-    assert CEILING_EXAMINED not in report_text(run_dir)
+    assert CEILING_EXAMINED not in record_text(run_dir)
 
     for name, drive in _arms():
         if name == "holds":
@@ -381,7 +388,7 @@ def test_ceiling_held_inconclusive_commits_the_seventh_cause_and_a_confident_hol
         result = drive(deps, GAP)
         assert result.cause != CEILING_EXAMINED, name
         if result.outcome == STANDS:
-            assert CEILING_EXAMINED not in report_text(run_dir), name
+            assert CEILING_EXAMINED not in record_text(run_dir), name
 
 
 def test_challenged_inconclusive_re_closed_as_a_confident_disposition(tmp_path):
@@ -419,9 +426,8 @@ def test_challenged_inconclusive_re_closed_with_a_new_receipt_for_the_asked_targ
     assert "l-003" in second.prompt("composer")
     assert "query-empty" in second.prompt("composer")
     assert (stood.outcome, stood.cause) == (STANDS, CEILING_EXAMINED)
-    head, _body = report_parts(run_dir)
-    assert head.endswith(priced_block(expanded)), head
-    assert "l-003" in head
+    assert committed_receipts(run_dir) == priced_receipts(expanded)
+    assert "l-003" in {ref for _state, ref, _cap in committed_receipts(run_dir)}
 
     deps, run_dir = _fresh(tmp_path, "re-ask", sparse_companion())
     assert close_with(deps, GAP, recording(gap("l-003"))).outcome == CHALLENGED
@@ -453,21 +459,19 @@ def test_record_numbering_contiguity_across_mixed_arms(tmp_path):
 
 
 def test_terminal_report_reflects_final_attempt_only(tmp_path):
-    """After two challenges and a standing third, report.md carries only the final verdict; history
+    """After two challenges and a standing third, the closing record carries only the final verdict; history
     lives in the numbered records, the trace rounds and the run page's attempt list."""
-    from defender.presentation.visualize_primitives import parse_report
     from defender.presentation.visualize_runtime import render_review_gate
 
     _deps, run_dir = _three_attempts(tmp_path)
     fm = frontmatter(run_dir)
     assert (fm["disposition"], fm["outcome"], fm["cause"]) == (GAP, STANDS, CEILING_EXAMINED)
-    text = report_text(run_dir)
-    assert CHALLENGED not in text
-    assert set(fm) <= {"disposition", "outcome", "cause", "ceiling_test"}, sorted(fm)
+    assert CHALLENGED not in record_text(run_dir)
+    assert set(fm) <= {"disposition", "outcome", "cause", "failure_kind", "drafted_disposition", "ceiling_test"}, sorted(fm)
     assert record_files(run_dir) == [1, 2, 3]
     for role in trace_files(run_dir):
         assert {row["round"] for row in trace_rows(run_dir, role)} == {0, 1, 2}, role
-    html, _n = render_review_gate(run_dir, parse_report(run_dir))
+    html, _n = render_review_gate(run_dir, closing=closing_lookup(run_dir))
     assert "3 close attempts" in html
 
 
@@ -494,15 +498,14 @@ def test_stale_receipts_across_reclose_after_more_investigation(tmp_path):
     at that attempt, re-priced, not carried over from the first parse."""
     before = sparse_companion()
     after = sparse_companion(_spec923.PAYING_ROW, _spec923.SECOND_PAYING_ROW)
-    assert priced_block(before) != priced_block(after)
+    assert priced_receipts(before) != priced_receipts(after)
 
     deps, run_dir = _fresh(tmp_path, "re-priced", before)
     assert close_with(deps, GAP, recording(gap("l-003"))).outcome == CHALLENGED
     (run_dir / "investigation.md").write_text(after, encoding="utf-8")
     assert close_with(deps, GAP, recording(holds())).outcome == STANDS
-    head, body = report_parts(run_dir)
-    assert head.endswith(priced_block(after)), head
-    assert len(receipt_note_lines(body)) == 2
+    assert committed_receipts(run_dir) == priced_receipts(after)
+    assert len(receipt_note_lines(run_dir)) == 2
 
 
 def _observed(deps, run_dir: Path, drive: Callable[[Any], Any]) -> Any:
@@ -513,7 +516,7 @@ def _observed(deps, run_dir: Path, drive: Callable[[Any], Any]) -> Any:
         seen: Any = (result.outcome, result.cause, result.failure_kind, [m.ask for m in result.material])
     except Exception as e:  # noqa: BLE001 — the exception CLASS is the row's observable
         seen = ("raised", type(e).__name__)
-    return seen, record_files(run_dir), (run_dir / "report.md").exists()
+    return seen, record_files(run_dir), is_closed(run_dir)
 
 
 def test_fault_handling_parity_with_a_confident_close(tmp_path):
@@ -527,7 +530,7 @@ def test_fault_handling_parity_with_a_confident_close(tmp_path):
     def _as_dir(run_dir: Path, name: str) -> None:
         (run_dir / name).mkdir(parents=True)
 
-    rows: list[tuple[str, str | None, Callable[[Path], None] | None, Callable[[Any, str], Any]]] = [
+    rows: list[tuple[str, str | None, Callable[[Any, Path], None] | None, Callable[[Any, str], Any]]] = [
         ("ask-at-prose-cap", None, None,
          lambda deps, d: close_with(deps, d, recording(gap("l-004", "x" * ASK_PROSE_MAX)))),
         ("ask-over-prose-cap", None, None,
@@ -536,11 +539,12 @@ def test_fault_handling_parity_with_a_confident_close(tmp_path):
          lambda deps, d: close_with(deps, d, recording(gap("L-004")))),
         ("extra-keys", None, None, lambda deps, d: close_with(deps, d, recording(json.dumps(
             {"finding": "holds", "review": "r", "bogus_extra_field": 123})))),
-        ("report-write-fails-after-record", None, lambda run: _as_dir(run, "report.md"),
+        ("closing-write-refused-after-the-review-record", None,
+         lambda deps, run: V.plant(deps.session_store, V.a_record(run.name)),
          lambda deps, d: close_with(deps, d, recording(holds()))),
-        ("record-write-fails-before-report", None, lambda run: _as_dir(run, "review_record.1.json"),
+        ("record-write-fails-before-report", None, lambda _deps, run: _as_dir(run, "review_record.1.json"),
          lambda deps, d: close_with(deps, d, recording(holds()))),
-        ("one-trace-append-fails", None, lambda run: _as_dir(run, "wire_logs/review_support_trace.jsonl"),
+        ("one-trace-append-fails", None, lambda _deps, run: _as_dir(run, "wire_logs/review_support_trace.jsonl"),
          lambda deps, d: close_with(deps, d, recording(holds()))),
         ("null-ask-with-the-pool-spent", None, None, lambda deps, d: (
             close_with(deps, d, recording(gap("l-004")), bounds=one_turn),
@@ -566,7 +570,7 @@ def test_fault_handling_parity_with_a_confident_close(tmp_path):
         for d in (GAP, CONFIDENT):
             deps, run_dir = _fresh(tmp_path, f"{name}-{d}", companion)
             if plant is not None:
-                plant(run_dir)
+                plant(deps, run_dir)
             seen[d] = _observed(deps, run_dir, lambda deps, drive=drive, d=d: drive(deps, d))
         assert seen[GAP][1:] == seen[CONFIDENT][1:], (name, seen)
         gap_seen, confident_seen = seen[GAP][0], seen[CONFIDENT][0]
@@ -586,15 +590,11 @@ def test_fault_handling_parity_with_a_confident_close(tmp_path):
     assert close_with(deps, GAP, recording(holds())).outcome == STANDS
     assert review_state(deps).disposition == GAP
 
-    # A malformed-but-plausible receipt row renders exactly as `render_report` renders it.
-    from defender.investigation.review.projector import parse_investigation
-    from defender.skills.invlang.validate import conclude_ceiling_test_rows
+    # A malformed-but-plausible receipt row is stored as the note it is: treated, intact, not read as a document.
+    from defender.records import closing as C
 
-    doc = sparse_companion(plausible)
-    deps, run_dir = _fresh(tmp_path, "plausible-row", doc)
+    deps, run_dir = _fresh(tmp_path, "plausible-row", sparse_companion(plausible))
     assert close_with(deps, GAP, recording(holds())).outcome == STANDS
-    receipts = conclude_ceiling_test_rows(parse_investigation(doc))
-    expected = render_report(GAP, outcome=STANDS, cause=CEILING_EXAMINED, ceiling_test=receipts)
-    assert receipt_note_lines(report_parts(run_dir)[1]) == receipt_note_lines(
-        expected.partition("---\n")[2].partition("---\n")[2],
-    )
+    note = plausible.partition("note=")[2]
+    assert [e.note for e in closing_record(run_dir).ceiling_test] == [C.treat(note, None)]
+    assert frontmatter(run_dir)["disposition"] == GAP

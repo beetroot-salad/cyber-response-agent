@@ -214,9 +214,8 @@ def _call(q: str, system: str = "idp") -> dict:
 
 
 def _sibling_says(ep: Path, label: str, disposition: str) -> None:
-    """The sibling's archived verdict (the close gate's report shape)."""
-    (Path(ep) / "worlds" / T.world_id(Path(ep), label) / "report.md").write_text(
-        J.report_text(disposition), encoding="utf-8")
+    """The sibling's verdict: its arm's closing record (planted at the first read of the episode)."""
+    J.set_closing(Path(ep), label, disposition=disposition)
 
 
 def _replaced(field_: str, before: Any, after: Any, *, q: str = "user:alice") -> dict:

@@ -10,8 +10,9 @@ record of its shape parses as no record (`None`), which the worker treats like a
 The worker writes a job's launch record and alert file here before it starts the child; the
 child's job entry opens the same door first thing — before tenant acceptance, so a refusal there
 still leaves its job-end record — checks the launch record, and writes the job-end record as it
-exits; the worker then reads the job-end record, the knowledge record, the session pointer and
-the report through it, and the run's cost from the session database the pointer names.
+exits; the worker then reads the job-end record, the knowledge record and the session pointer
+through it, and the run's closing record and cost from the session database the pointer's case id
+derives.
 
 `<data root>/<T>/runs` is held no-follow from the tenant's folder and never made (#1342 R1: tenant
 setup makes it): absent, a link or anything but a folder is `JobLaneRefused`. Every read is a
@@ -37,7 +38,7 @@ from defender.records.job_facts import (  # noqa: F401 — the worker's reasons,
     BOX_NOT_STARTED, BOX_START_FAILED, BOX_STARTED, SETUP_CRASHED, SETUP_DONE, SETUP_REFUSED,
 )
 from defender.records._knowledge_status import UNREADABLE, api_knowledge, knowledge_status
-from defender.records._layout import RUN_LAYOUT, RunPaths, SessionPaths
+from defender.records._layout import RunPaths, SessionPaths
 from defender.records._locations import DataRoot, RunsBase, unwrap_data_root
 from defender.records._store_errors import StoreError
 from defender.records._tenant_id import TenantId, TenantRefused
@@ -555,14 +556,20 @@ class JobLane:
         what the worker records when the read itself faults (#1396)."""
         return api_knowledge(UNREADABLE)
 
-    def report_disposition(self, run_id: object) -> str | None:
-        """The disposition of the run's `report.md`, read no-follow and size-limited, or `None`
-        when there is no readable report or it names no disposition."""
-        from defender.records._report import parse_report_text
+    def closing_disposition(self, run_id: object) -> Any:
+        """The run's closing record through the job-lane route (#1534): the pointer read through the held view, then
+        the closing lookup's own `from_pointer`, which the run-handle route uses too, with this lane's rule for the
+        database: derived from the pointer's case id, never its stored path. Returns `closing.Record | NeverClosed | CouldNotLook`."""
+        from defender.records import closing
+        from defender.records.session_store import _LEGACY_LINK_NAME
 
-        name = PurePosixPath(str(_run_id(run_id))) / RUN_LAYOUT.report
-        read = self._held.view().read(name)
-        return None if read.text is None else parse_report_text(read.text).disposition
+        run_id = _run_id(run_id)
+        view = self._held.view()
+        where = self._paths(run_id).session_pointer()
+        return closing.from_pointer(
+            view.read(where.name), where=str(where), run_id=str(run_id),
+            locate=lambda pointer: SessionPaths(RunsBase(self._runs)).session_db(pointer.case_id),
+            legacy_link=lambda: not view.read(PurePosixPath(str(run_id)) / _LEGACY_LINK_NAME).absent)
 
     # -- cost -------------------------------------------------------------------------------------
 
@@ -578,17 +585,14 @@ class JobLane:
             if read.absent:
                 return None
             raise CostUnreadable(f"run {run_id}: its session pointer cannot be read ({read.reason})")
-        obj, unreadable = _io.load_json_artifact(read.text)
-        if unreadable is not None or not isinstance(obj, dict) or not isinstance(obj.get("case_id"), str):
-            raise CostUnreadable(f"run {run_id}: its session pointer names no case")
-        session_id = obj.get("session_id")
-        if session_id is not None and not isinstance(session_id, str):
-            raise CostUnreadable(f"run {run_id}: its session pointer names no usable session")
+        from defender.records import session_store
+
         try:
-            database = SessionPaths(RunsBase(self._runs)).session_db(obj["case_id"])
+            pointer = session_store.parse_case_pointer(read.text)
+            database = SessionPaths(RunsBase(self._runs)).session_db(pointer.case_id)
         except StoreError as bad:
-            raise CostUnreadable(f"run {run_id}: its session pointer's case id is refused: {bad}") from None
-        return database, session_id or None
+            raise CostUnreadable(f"run {run_id}: its session pointer {bad}") from None
+        return database, pointer.session_id
 
     def cost(self, run_id: object) -> RunCost:
         """What the run spent: the sum of the spend ledger's rows for this run id in the database

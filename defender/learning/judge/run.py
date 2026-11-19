@@ -463,7 +463,7 @@ def _pointer_rules() -> str:
     return (
         "EVERY EVIDENCE POINTER IS EPISODE-RELATIVE, never prose and never a quotation, optionally "  # lint-run-records: ok — the pointer grammar the model writes; it must spell each record's own name (A1)
         "with a `#fragment`. World UUIDs are listed in the computed headers; labels name plan entries only:\n"
-        "- a run's conduct: `worlds/<world-uuid>/report.md`, `worlds/<world-uuid>/investigation.md`, "
+        "- a run's conduct: `worlds/<world-uuid>/closing` (its closing record), `worlds/<world-uuid>/investigation.md`, "
         "`worlds/<world-uuid>/gather_summaries/<lead>.md`, `worlds/<world-uuid>/executed_queries.jsonl#<row>` "
         "and its served answers `served/<world-uuid>.jsonl#<row>` (row = 0-based line index);\n"
         "- a run's built layer: `oracle/<world-uuid>/forged.jsonl#<row>`;\n"

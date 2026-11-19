@@ -186,12 +186,11 @@ def _assert_continued(d: S.Drive, what: str, *, requests: int | None = None) -> 
 
 
 def _assert_closed(d: S.Drive, what: str) -> None:
-    """report.md closes with MAIN's `inconclusive`."""
-    report = d.report
-    assert report is not None, f"{what}: the run never wrote report.md ({d.summary!r})"
-    meta, _body = S.sym("_frontmatter", "parse_frontmatter")(report)
-    assert meta.get("disposition") == "inconclusive", (
-        f"{what}: report.md closes {meta.get('disposition')!r}, MAIN closed 'inconclusive'")
+    """The run's closing record is MAIN's `inconclusive`."""
+    record = d.closed
+    assert record is not None, f"{what}: the run never closed ({d.summary!r})"
+    assert record.disposition == "inconclusive", (
+        f"{what}: the record closes {record.disposition!r}, MAIN closed 'inconclusive'")
 
 
 def _stopped_loudly(d: S.Drive) -> bool:

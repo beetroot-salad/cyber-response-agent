@@ -526,5 +526,5 @@ def test_p112_case_ticket_opened_then_recorded_after_the_alert(tmp_path: Path) -
 
     d = _ticketed(tmp_path, alert=S.generic_alert(rule_id=RULE_ID), main=main,
                          mapping=S.DEFAULT_MAPPING_GENERIC, before=remember)
-    assert d.report is not None, "the run never closed, so the record leg had no report"
+    assert d.closed is not None, "the run never closed, so the record leg had no closing record"
     assert d.recorded("signature") == RULE_ID

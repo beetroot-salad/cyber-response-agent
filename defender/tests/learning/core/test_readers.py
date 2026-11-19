@@ -1,70 +1,93 @@
-"""#923 - a malformed committed verdict is marked, never coerced, by every reader of a finished run."""
+"""#923/#1534 - every reader of a finished run's closing record agrees on it: a disposition, an absence, or a fault in its own slot."""
 from __future__ import annotations
 
-from pathlib import Path
+import logging
 
-from defender.tests.support.runtime.engine._spec923 import finished_run
-from defender.tests.support.runtime.engine._spec767 import posted_comment_body
+import pytest
+
 from defender.tests.support.sandbox._spec791 import (  # noqa: F401 — session-scoped autouse guard
     worktree_package_guard,
 )
+from defender.tests.support.storage import _agreement1534 as A
+from defender.tests.support.storage import _readers1534 as R
 
 
-def _reader_answers(run_dir: Path) -> dict[str, tuple[str, object]]:
-    """Every consumer of a finished run's committed verdict, DRIVEN, with a refusal captured rather than raised"""
-    from defender.records._report import read_report
-    from evaluations.held_out import predicted_disposition
-    from defender.learning.core.validate import normalize_disposition
-    from defender.cli.learning.trace_lesson import _report_disposition
+def test_the_plans_plant_every_lookup_kind_a_run_handle_can_meet():
+    """The planted faults and the episode-only kinds are exactly the lookup's kinds, and every disposition is planted."""
+    from defender._vocab import DISPOSITION_VALUES
+    from defender.records import closing as C
 
-    report = run_dir / "report.md"
-
-    def call(fn):
-        try:
-            return ("ok", fn())
-        except Exception as e:  # noqa: BLE001 — the refusal's TYPE is the observation
-            return ("refused", type(e).__name__)
-
-    return {
-        "report_reader": call(lambda: read_report(report).disposition),
-        "learning_validate": call(lambda: normalize_disposition(report)),
-        "held_out": call(lambda: predicted_disposition(run_dir)),
-        # #1359: the lane is observed where it leaves the host, as the disposition head of the
-        # comment the record leg posts (a verdict it cannot read leaves the one host sentence). The
-        # comment below the tag is the word (or sentence) on its first line, then the link (#1471 P-6).
-        "ticket_lane": call(lambda: posted_comment_body(run_dir, run_dir.parent).split("\n", 1)[0]),
-        "trace_lesson": call(lambda: _report_disposition(run_dir)),
-    }
+    plans = [A.plan(label) for label in A.plan_labels()]
+    planted = {R.LEGACY_LINK if p.fault == R.LEGACY_LINK else p.fault for p in plans if p.kind == A.ANSWER_FAULT}
+    assert planted | set(A.EPISODE_ONLY) == set(C.FAULT_KINDS), "a lookup kind is neither planted nor placed on the episode route"
+    assert not planted & set(A.EPISODE_ONLY)
+    assert {p.disposition for p in plans if p.kind == A.ANSWER_DISPOSITION} == set(DISPOSITION_VALUES)
+    drafted = [p for p in plans if p.extra.get("drafted_disposition") not in (None, p.disposition)]
+    assert drafted, "no plan's drafted disposition differs from the committed one"
 
 
-def test_a_malformed_committed_verdict_is_marked_not_coerced(tmp_path):
-    """A committed verdict that is not a member of the vocabulary is never coerced into the member it resembles."""
-    from defender.records._report import read_report
+def _planted(plan: A.Plan, found) -> None:
+    """The plant made what the plan means, read back through the lookup (a control on the fixture, not on the reader)."""
+    from defender.records import closing as C
+
+    if plan.kind == A.ANSWER_DISPOSITION:
+        assert isinstance(found, C.Record), found
+        assert found.record.disposition == plan.disposition, found
+        assert found.record.drafted_disposition == plan.extra.get("drafted_disposition"), found
+    elif plan.kind == A.ANSWER_NEVER:
+        assert isinstance(found, C.NeverClosed), found
+    else:
+        assert isinstance(found, C.CouldNotLook), found
+        assert found.kind == plan.fault, found
+        assert found.detail, "a fault with an empty detail proves nothing about where the detail goes"
+
+
+@pytest.mark.parametrize("label", A.plan_labels())
+@pytest.mark.parametrize("reader", A.READERS)
+def test_every_reader_of_a_run_agrees_with_the_lookup(reader, label, tmp_path, monkeypatch, capsys, caplog):
+    """Each record, absence and fault kind reads the same in every reader; a fault in its slot by its wording, the lookup's
+    own detail in no outward slot (and in the log of a reader that has one). (V-READERS, V-LOOK, OD19)"""
+    from defender.records import closing as C
+
+    caplog.set_level(logging.DEBUG)
+    plan = A.plan(label)
+    got = A.read(reader, tmp_path / reader, plan, monkeypatch, capsys)
+    found = got.found if got.found is not None else C.for_run(got.run)
+    _planted(plan, found)
+    answer, seen = got.answer, f"{label} via {reader}: {got.answer}"
+    if A.refused_before(reader, plan):
+        assert answer[0] == A.ANSWER_FAULT, seen
+    elif reader == "feedback" and plan.kind != A.ANSWER_DISPOSITION:
+        assert answer == (A.ANSWER_UNREADABLE, ""), seen
+    elif plan.kind == A.ANSWER_DISPOSITION:
+        assert answer == (A.ANSWER_DISPOSITION, plan.disposition), seen
+    elif plan.kind == A.ANSWER_NEVER:
+        assert answer[0] == A.ANSWER_NEVER, seen
+        assert not any(w in " ".join(got.slots) for w in C.FAULT_WORDING.values()), f"an absence was worded as a fault: {seen}"
+    elif reader == "worker":
+        assert answer == (A.ANSWER_FAULT, plan.fault), seen
+    else:
+        assert answer[0] == A.ANSWER_FAULT, seen
+        assert R.names_only(plan.fault, answer[1]), seen
+    if isinstance(found, C.CouldNotLook):
+        for slot in got.slots:
+            assert found.detail not in slot, f"the lookup's detail reached an outward slot: {seen}"
+            assert R.DETAIL_MARK not in slot, f"the database's path reached an outward slot: {seen}"
+        if reader in A.LOGGED and not A.refused_before(reader, plan):
+            assert found.detail in caplog.text, f"the detail of {plan.fault} reached no log: {seen}"
+
+
+@pytest.mark.parametrize("reader", A.READERS)
+def test_a_malformed_committed_verdict_is_marked_not_coerced(reader, tmp_path, monkeypatch, capsys):
+    """A stored disposition outside the vocabulary reads as any other invalid row, never as the member it resembles."""
     from defender.tests.support.runtime.engine._spec923 import MALFORMED_MEMBER_SPELLINGS, NOT_A_MEMBER
 
-    unknown = _reader_answers(finished_run(tmp_path / "unknown", disposition=NOT_A_MEMBER))
+    def answer(label, spelling):
+        plan = A.Plan(label, fault="row-invalid", invalid_as=spelling)
+        got = A.read(reader, tmp_path / label, plan, monkeypatch, capsys).answer
+        return got[0], A.fault_kinds_named(got[1]) if got[0] == A.ANSWER_FAULT and reader != "worker" else got[1]
 
+    unknown = answer("unknown", NOT_A_MEMBER)
+    assert unknown[0] != A.ANSWER_DISPOSITION, unknown
     for i, spelling in enumerate(MALFORMED_MEMBER_SPELLINGS):
-        run_dir = finished_run(tmp_path / f"malformed-{i}", disposition=spelling)
-        answers = _reader_answers(run_dir)
-        assert answers == unknown, (
-            f"{spelling!r} is read differently from a value that was never a member: "
-            f"{ {k: v for k, v in answers.items() if unknown[k] != v} }"
-        )
-        assert not any(v == ("ok", "malicious") for v in answers.values()), (
-            f"a reader coerced {spelling!r} into the member it resembles: {answers}"
-        )
-        reason = read_report(run_dir / "report.md").reason or ""
-        assert repr(spelling) in reason or spelling in reason, (
-            f"the run is refused without quoting what it actually held ({reason!r}) — a person "
-            f"asked to judge a malformed verdict cannot see an invisible character described "
-            f"in prose"
-        )
-
-    # THE PAIRED POSITIVE CONTROL: the clean spelling, same fixture, same readers.
-    clean = _reader_answers(finished_run(tmp_path / "clean", disposition="malicious"))
-    assert clean != unknown, "the readers answer the same for a real verdict and a garbage one"
-    for name, (status, value) in clean.items():
-        assert (status, value) == ("ok", "malicious"), (
-            f"{name} does not read an ordinary committed verdict back: {(status, value)}"
-        )
+        assert answer(f"malformed-{i}", spelling) == unknown, f"{spelling!r} reads differently from a value that was never a member"

@@ -95,7 +95,7 @@ def build_scoped_write_allow(root: Path, *, suffix: str = "") -> re.Pattern[str]
 
 def build_named_write_allow(root: Path, names: tuple[str, ...]) -> tuple[re.Pattern[str], ...]:
     """One anchored pattern per name admitting exactly `<root>/<name>`. A suffix filter
-    would also admit `gather_raw/evil.md` or `sub/report.md` at depth, since `decide_write`
+    would also admit `gather_raw/evil.md` or `sub/notes.md` at depth, since `decide_write`
     applies no path shapes."""
     base = re.escape(str(root.resolve()))
     return tuple(re.compile(base + "/" + re.escape(name)) for name in names)
@@ -182,10 +182,10 @@ def decide_read(
         return Decision(False, PROVENANCE_DENY_REASON)
     if names_branching_page(rp):
         return Decision(False, BRANCHING_PAGE_DENY_REASON)
-    # The case's answer key (investigation.md, report.md, ...) can be staged into a confined
+    # The case's answer key (investigation.md, executed_queries.jsonl, ...) can be staged into a confined
     # agent's own run dir, and a rerun over the same run id finds it already there. Denied only
     # under `read_confine` because the unconfined judge grades exactly these files. Keyed on the
-    # run-dir root, not the basename, so a lesson named `report.md` stays readable. The bash lane
+    # run-dir root, not the basename, so a lesson named `investigation.md` stays readable. The bash lane
     # needs no twin: no confined agent holds a file-opening grant spanning its run dir.
     if policy.read_confine and not admitted and names_case_answer_key(rp, rd):
         return Decision(False, ANSWER_KEY_DENY_REASON)
@@ -372,7 +372,7 @@ def decide_write(
         )
 
     # Keyed on the operand resolving to the run-dir root, not on `path.name`: a symlink alias
-    # to report.md faces the same validator, and a same-named lesson in a curator corpus is
+    # to investigation.md faces the same validator, and a same-named lesson in a curator corpus is
     # left alone.
     artifact = next(
         (n for n in formats.artifact_names() if _is_run_dir_file(rp, run_dir, n)), None
@@ -414,8 +414,3 @@ def _is_run_dir_file(rp: Path, run_dir: Path, name: str) -> bool:
         return rp == run_dir.resolve() / name
     except RESOLVE_ERRORS:
         return False
-
-
-def _decide_report_write(proposed_text: str) -> Decision:
-    """`formats.validate_report` as a `Decision`; tests drive this directly."""
-    return _as_decision(formats.validate_report(proposed_text))

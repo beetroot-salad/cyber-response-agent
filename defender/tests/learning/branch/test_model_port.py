@@ -142,25 +142,6 @@ def test_validate_params_names_every_problem_once_in_one_refusal():
     assert "'require_closed' takes" not in refusal
 
 
-def test_validate_report_names_every_problem_in_one_refusal():
-    """A report wrong two ways — no disposition AND the judge's close delimiter in its body —
-    comes back as one refusal naming both, not the first alone."""
-    from defender.records._artifact_schema import REPORT_CLOSE_DELIMITER, validate_report
-
-    refusal = validate_report(f"---\ncase_id: c1\n---\nbody {REPORT_CLOSE_DELIMITER}\n")
-    assert refusal is not None
-    assert "must carry a top-level `disposition`" in refusal
-    assert f"contains the literal {REPORT_CLOSE_DELIMITER!r}" in refusal
-    # A malformed frontmatter is still its own gate AHEAD of the batch — there is nothing to
-    # check a disposition against until the parse succeeds — so it is the whole refusal.
-    malformed = validate_report(f"---\n: [\n---\nbody {REPORT_CLOSE_DELIMITER}\n")
-    assert malformed is not None
-    assert malformed.startswith("report.md frontmatter is malformed")
-    assert "disposition" not in malformed
-    assert "contains the literal" not in malformed
-    assert validate_report("---\ndisposition: benign\n---\nbody\n") is None
-
-
 def test_a_domain_exception_raised_inside_a_model_validator_reaches_the_caller_unconverted():
     """`_model`'s convention: a domain exception that is not a `ValueError` propagates out of a
     validator as ITSELF; pydantic wraps only `ValueError`/`AssertionError`."""

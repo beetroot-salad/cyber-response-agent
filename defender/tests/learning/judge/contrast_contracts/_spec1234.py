@@ -351,7 +351,7 @@ def found_run(label: str) -> str:
 # --------------------------------------------------------------------------------------
 
 
-def conduct(label: str, leaf: str = "report.md", frag: str | None = None) -> str:
+def conduct(label: str, leaf: str = "closing", frag: str | None = None) -> str:
     """A conduct pointer into world `label`'s archive (`worlds/<X>/<leaf>[#frag]`): report,
     investigation, gather summaries, query-table rows."""
     return f"worlds/{T.fixture_world_id(label)}/{leaf}" + (f"#{frag}" if frag is not None else "")
@@ -484,7 +484,9 @@ class World:
     facts: list[dict] | None = None
     declared: str = "malicious"
     reached: Any = AUTO
-    report: str | None = None
+    #: Extra `ClosingRecord` fields for this world's closing record (`reached=None`: no record, `NeverClosed`). The
+    #: world's `marker(label, 'report')` rides in a ceiling entry's note, the closing record's model text.
+    closing: dict | None = None
     investigation: Any = AUTO
     calls: list[CallRow] | None = None
     forged: list[dict] | None = None
@@ -568,7 +570,7 @@ class Built:
     def oracle_path(self, label: str, leaf: str = "forged.jsonl") -> Path:
         return self.ep / "oracle" / self.world_ids[label] / leaf
 
-    def conduct(self, label: str, leaf: str = "report.md", frag: str | None = None) -> str:
+    def conduct(self, label: str, leaf: str = "closing", frag: str | None = None) -> str:
         path = f"worlds/{self.world_ids[label]}/{leaf}"
         return path if frag is None else f"{path}#{frag}"
 
@@ -722,13 +724,6 @@ def _write_table(world_dir: Path, written: list[tuple[CallRow, dict]]) -> None:
 
 def _write_texts(wd: Path, w: World) -> None:
     """The world's text artifacts, each carrying its marker."""
-    reached = w.declared if w.reached is AUTO else w.reached
-    if w.report is not None:
-        (wd / "report.md").write_text(w.report, encoding="utf-8")
-    elif reached is not None:
-        (wd / "report.md").write_text(report_text(
-            reached, body=f"World {w.label} closed {reached}. {marker(w.label, 'report')}"),
-            encoding="utf-8")
     investigation = (investigation_document(w.label) + f"\n{marker(w.label, 'investigation')}\n"
                      if w.investigation is AUTO else w.investigation)
     if investigation is not None:
@@ -830,6 +825,33 @@ def _archive_world(ep: Path, w: World, *, inherited: list[CallRow]) -> None:
         _write_store(ep, w)
 
 
+def closing_fields(label: str, reached: str, **over: Any) -> dict:
+    """The `ClosingRecord` fields a world closes with: its reached disposition, and the world's report marker in one
+    ceiling entry's note (a record's model text, which the judge frames as untrusted)."""
+    from defender.records import closing as C
+
+    note = C.CeilingEntry(state=sorted(C.CEILING_STATES)[0], ref=None, cap=None,
+                          note=f"World {label} closed {reached}. {marker(label, 'report')}")
+    return {"disposition": reached, "ceiling_test": (note,), **over}
+
+
+def _closing_fields(w: World) -> dict | None:
+    """World `w`'s closing fields (`None`: it never closed)."""
+    reached = w.declared if w.reached is AUTO else w.reached
+    return None if reached is None else closing_fields(w.label, reached, **(w.closing or {}))
+
+
+def close_arm(arm: Any, source: Path, reached: str, label: str) -> None:
+    """A driven arm's closing record, written into the database its pointer names (the source's: arms fork into it)."""
+    import json as _json
+
+    from defender.tests.storage.verdict_1534 import _spec1534 as V
+
+    case_id = _json.loads(Path(arm.observability.session_pointer.path).read_text(encoding="utf-8"))["case_id"]
+    with V.run_store(Path(source).parent, case_id) as store:
+        V.plant(store, J._record_for(str(arm.id), closing_fields(label, reached)))
+
+
 def family(tmp_path: Path, worlds: Sequence[World] | None = None, *,  # noqa: PLR0913 — one switch per archived input
            inherited: Sequence[CallRow] = (), outcome: str | None = "accepted",
            not_replayable: Iterable[Mapping] = (), drift: Iterable[Mapping] = (),
@@ -872,6 +894,8 @@ def family(tmp_path: Path, worlds: Sequence[World] | None = None, *,  # noqa: PL
                            drift=drift, family_stamp=family_stamp, **extra)
     if any(w.archived for w in worlds):
         T.plant_roster(ep)
+    J.closing_plan(ep, tmp_path, {
+        w.label: _closing_fields(w) for w in worlds if w.archived})
     return Built(ep=ep, worlds={w.label: w for w in worlds},
                  world_ids={w["label"]: w["world_id"] for w in doc["worlds"]}, inherited=list(inherited))
 
@@ -938,18 +962,6 @@ def tear_jsonl(path: Path) -> Path:
     """Append a torn (unterminated, unparseable) line to a JSONL record."""
     with Path(path).open("a", encoding="utf-8") as fh:
         fh.write('{"system": "idp", "verb"')
-    return Path(path)
-
-
-def second_disposition(path: Path) -> Path:
-    """Rewrite a report.md so its frontmatter carries two top-level `disposition:` keys, a
-    headline two readers could resolve differently."""
-    Path(path).write_text(
-        "---\n"
-        "disposition: benign\n"
-        "outcome: stands\n"
-        "disposition: malicious\n"
-        "---\nTwo headlines.\n", encoding="utf-8")
     return Path(path)
 
 
@@ -1373,8 +1385,11 @@ def render_context(where: Any, label: str, *, payload_cap: int = 20000) -> Any:
     fam = mod(JUDGE_FAMILY)
     rnd = mod(JUDGE_RENDER)
     outcome = mod(OUTCOME)
-    with J.episode_runs_for(ep).episode_files(ep.name) as episode:
+    repository = J.episode_runs_for(ep)
+    with repository.episode_files(ep.name) as episode:
         bound = episode.view()
+        # The episode's run view (#1534): each run's verdict is its arm's closing record, read through it.
+        view = repository.episode(ep.name, held=episode)
         manifest = fam.read_manifest(bound, expected_episode_id=ep.name)
         samples = fam.read_samples_record(bound)
         try:
@@ -1383,11 +1398,11 @@ def render_context(where: Any, label: str, *, payload_cap: int = 20000) -> Any:
         except outcome.OutcomeUnreadable:
             pre, failed = None, {}
         world = next(w for w in manifest["worlds"] if w["label"] == label)
-        _row, facts = fam.read_world(bound, world, episode_dir=ep)
+        _row, facts = fam.read_world(bound, world, episode_dir=ep, episode_runs=view)
         return rnd.render(ep, label, git_show=FakeGitShow(),
                           payload_cap=payload_cap, facts=facts, lessons_commit=None,
                           manifest=manifest, samples=samples,
-                          family_text=rnd.render_family_text(pre, failed), bound=bound)
+                          family_text=rnd.render_family_text(pre, failed), bound=bound, episode_runs=view)
 
 
 # --------------------------------------------------------------------------------------
@@ -1812,9 +1827,7 @@ class InProcessSiblings:
             out = harness.drive(run_dir, run_id=run_dir.name, main=main, gather=gather,
                                 verbs=reg, tenant=self.est.place(), resume=spec)
             if script.disposition is not None:
-                (run_dir / "report.md").write_text(report_text(
-                    script.disposition, body=f"World {label} closed. {marker(label, 'report')}"),
-                    encoding="utf-8")
+                close_arm(kw["run"], src, script.disposition, label)
             (run_dir / "provenance.json").write_text(json.dumps(provenance_record()),
                                                      encoding="utf-8")
             if script.scrub:
@@ -1858,7 +1871,7 @@ class RealBuilt:
     def episode_id(self) -> str:
         return self.ep.name
 
-    def conduct(self, label: str, leaf: str = "report.md", frag: str | None = None) -> str:
+    def conduct(self, label: str, leaf: str = "closing", frag: str | None = None) -> str:
         path = f"worlds/{self.world_ids[label]}/{leaf}"
         return path if frag is None else f"{path}#{frag}"
 
