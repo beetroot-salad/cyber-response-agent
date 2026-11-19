@@ -1,36 +1,52 @@
 # ruff: noqa: PT018 — each compound assert states one fact about one page
-"""Alert list design: the alerts screen (O5, O6, O7), its address (O4), Home's links and no-tenant text (O8) and the
-product's name (O9), in the pinned Chromium through the repo's ingress over the real API.
+"""Alert list design (#1581) in the pinned Chromium through the repo's ingress over the real API: the alerts screen
+(O5, O6, O7, O12), its address (O4), Home (O8, O11) and the product's name (O9).
 
-The browser's zone is Europe/Paris (UTC+1 in November) and its clock is fixed at `BROWSER_NOW` (16:00 there), so
-"Today"/"Yesterday" and local times are stated, not computed. `world` already holds one alert of A, `T-1161`, fired
-`_NOW` (12:00Z), whose one investigation completed `malicious`.
+The browser's zone is Europe/Paris unless a test says otherwise (UTC+1 on 1 November) and its clock is fixed at
+`BROWSER_NOW` (16:00 there), so "Today"/"Yesterday" and local times are stated, not computed. `world` already holds
+one alert of A, `T-1161`, fired 12:00Z, whose one investigation completed `malicious`.
 
-Markers: `data-screen="alerts"` is the shape's name (the convention every screen follows, B3). The rest are this
-sketch's FORCED CHOICES (the design names none): `data-state` (`ready`, `empty`, `no-match`, `invalid`), each row
-`[data-row="alert"]` with `[data-field=fired-time|fired-day|ticket|vendor|title|status]`, `[data-action="load-more"]`,
-`[data-action="clear-filters"]` (the X and the empty state's clear link), `[data-action="apply"]`, and the form's fields
-by their query names (`outcome`, `fired_after`, `fired_before`)."""
+Markers: `data-screen="alerts"` is the shape's name (the convention every screen follows). The rest are FORCED CHOICES
+(the design names none): `data-state` (O12's seven values), each row `[data-row="alert"]` with
+`[data-field=fired-time|fired-day|ticket|vendor|title|status]`, `[data-action="load-more"]`,
+`[data-action="clear-filters"]` (the X and the empty state's clear link), `[data-action="apply"]`, the form's fields by
+their query names (`outcome`, `fired_after`, `fired_before`, and the hidden `tz`), and Home's buttons by their role and
+name. Nothing in this file has run: Chromium and Caddy are not installed where it was written."""
 from __future__ import annotations
 
 import datetime as dt
 import urllib.parse
 from typing import Any
 
-from defender.tests.frontend._flow1161 import api_calls, logins, screen, settle, sign_in, where
+import pytest
+
+from defender.tests.frontend._flow1161 import (
+    RECONNECT,
+    VISIBLE,
+    api_calls,
+    logins,
+    navigations_to,
+    screen,
+    settle,
+    shown,
+    sign_in,
+    where,
+)
 from defender.tests.frontend.conftest import WAIT_MS, requests_of
-from defender.tests.support.api._server1083 import A, B, BOB
+from defender.tests.support.api._server1083 import A, ANN, B, BOB
 from defender.tests.support.api._signin1161 import link_account
 from defender.tests.support.frontend._browser1161 import path_is, run_async
 from defender.tests.support.jobs._jobs1342 import ALERT_BYTES, PADDED_ALERT_BYTES, TITLE
 
 ZONE = "Europe/Paris"
+NEW_YORK = "America/New_York"
 BROWSER_NOW = "2026-11-01T15:00:00Z"
 ALERTS = f"/t/{A}/alerts"
+ALERTS_OF_B = f"/t/{B}/alerts"
 READ = f"/api/tenants/{A}/alerts"
+UNKNOWN_TENANT = "0b6f1c1e-3c55-4a4e-9a51-000000000000"
 NO_TITLE = "No title — the alert mapping had no title entry when this alert arrived"
-#: FORCED CHOICE: the screen's page size. The design gives none ("Per page: up to 201 alerts" in Performance reads as
-#: `limit=200`; the API's default is 50). These cases assume the screen sends no `limit`, so a page is the API's 50.
+CODES = {"benign", "false-positive", "inconclusive", "malicious", "unresolved"}
 PAGE = 50
 
 
@@ -38,10 +54,17 @@ def _at(text: str) -> dt.datetime:
     return dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
 
 
-async def _seed(dsn: str, tenant: str, alerts: list[tuple[str, str, bytes, list[str]]]) -> dict[str, str]:
-    """Each `(ticket, fired_at, raw, investigations)` stored for `tenant`; `investigations` are, oldest first, each
-    investigation's end: `completed:<disposition>`, `failed`, `running` or `queued` (the last two only last). The store's
-    clock moves a minute per write, so "newest" is by `created_at` (ids are random); it starts after the world's seed."""
+def _plain(text: str) -> str:
+    """Whitespace collapsed and typographic apostrophes straightened: the design writes `'`, the mock `’`."""
+    return " ".join(text.replace("’", "'").split())
+
+
+async def _seed(dsn: str, tenant: str, alerts: list[tuple[str, str, bytes, list[str]]],
+                world_investigation: str | None = None) -> None:
+    """Each `(ticket, fired_at, raw, ends)` stored for `tenant` through the store's own API; `ends` are, oldest first,
+    each investigation's end: `completed:<disposition>`, `failed`, `unparseable`, `aborted`, `running` or `queued` (the
+    last two only last). `T-1161` is the world's own alert (found through its investigation): only investigations are
+    added to it. The store's clock moves a minute per write, so "newest" is by `created_at`."""
     from defender.jobs import JobStore
 
     at = [_at("2026-11-01T13:00:00Z")]
@@ -51,36 +74,85 @@ async def _seed(dsn: str, tenant: str, alerts: list[tuple[str, str, bytes, list[
         return at[0]
 
     store = JobStore(dsn, clock=clock)
-    ids: dict[str, str] = {}
+    queued: list[tuple[str, str]] = []  # created last: a claim takes the oldest queued row of any alert
     try:
         for ticket, fired, raw, ends in alerts:
-            if ticket == "T-1161":  # the world's own alert: only add investigations to it
-                [found] = [a for a in await store.list_alerts(tenant, fired_after=None, fired_before=None, after=None, limit=200)
-                           if a.vendor_ticket_id == ticket]
-                alert_id = str(found.alert_id)
+            if ticket == "T-1161":
+                assert world_investigation is not None, "premise: the world's investigation names its alert"
+                known = await store.get_investigation(tenant, world_investigation)
+                assert known is not None
+                alert_id = str(known.alert_id)
             else:
-                alert_id = str((await store.insert_alert(tenant, vendor="elastic", vendor_ticket_id=ticket, fired_at=_at(fired),
-                                                         changed_at=_at(fired), received_at=_at(fired), raw=raw)).alert_id)
-            ids[ticket] = alert_id
+                alert_id = str((await store.insert_alert(
+                    tenant, vendor="elastic", vendor_ticket_id=ticket, fired_at=_at(fired), changed_at=_at(fired),
+                    received_at=_at(fired), raw=raw)).alert_id)
             for n, end in enumerate(ends):
-                inv, _ = await store.create_investigation(tenant, alert_id, f"seed-{n}", actor="seed")
                 if end == "queued":
+                    queued.append((alert_id, f"seed-{n}"))
+                    continue
+                inv, _ = await store.create_investigation(tenant, alert_id, f"seed-{n}", actor="seed")
+                if end == "aborted":
+                    await store.cancel_investigation(tenant, inv.investigation_id, actor="seed")
                     continue
                 claimed = await store.claim()
                 assert claimed is not None and claimed.record.investigation_id == inv.investigation_id, "premise"
                 if end == "running":
                     continue
                 stage, _, disposition = end.partition(":")
-                await store.finish(tenant, inv.investigation_id, stage=stage, disposition=disposition or None, cost_usd=0.0,
-                                   failure_reason="no_report" if stage == "failed" else None)
+                await store.finish(tenant, inv.investigation_id, stage=stage, disposition=disposition or None,
+                                   cost_usd=0.0, failure_reason="no_report" if stage == "failed" else None)
+        for alert_id, key in queued:
+            await store.create_investigation(tenant, alert_id, key, actor="seed")
     finally:
         await store.close()
+
+
+def _more(world: Any, count: int, *, prefix: str = "T-more") -> None:
+    """`count` alerts with no investigation, fired a minute apart from 1 October (oldest is `<prefix>-000`)."""
+    base = _at("2026-10-01T00:00:00Z")
+    run_async(_seed, world.dsn, A, [
+        (f"{prefix}-{n:03d}", (base + dt.timedelta(minutes=n)).isoformat(), ALERT_BYTES, []) for n in range(count)])
+
+
+async def _person(dsn: str, email: str, member_of: tuple[str, ...] = (),
+                  invited_to: tuple[str, ...] = ()) -> dict[str, str]:
+    """An active person (made when new) with a membership in each of `member_of` and an open invitation to each of
+    `invited_to`, through the identity repository's own operations; the invitations' ids by tenant. An active person's
+    sign-in accepts nothing, so an invitation stays open until it is accepted here."""
+    from defender.identity.postgres import PostgresIdentityRepository
+    from defender.tests.support.identity._seed1496 import seed_user
+
+    repo = PostgresIdentityRepository(dsn)
+    now = dt.datetime.now(dt.UTC)
+    try:
+        user = await repo.user_by_email(email) or await seed_user(
+            repo, email, created_at=now, status="active", display_name=email)
+        for tenant in member_of:
+            row = await repo.ensure_invitation(user.id, tenant, invited_by=None, now=now)
+            assert row is not None and await repo.accept_invitation(row.id, now=now), "premise: a member"
+        ids: dict[str, str] = {}
+        for tenant in invited_to:
+            row = await repo.ensure_invitation(user.id, tenant, invited_by=None, now=now)
+            assert row is not None, "premise: an open invitation"
+            ids[tenant] = str(row.id)
+    finally:
+        await repo.close()
     return ids
 
 
-def _context(browser: Any, world: Any, account: str | None = None) -> Any:
-    """A guarded context in `ZONE`, signed in (as Ann unless `account` is given)."""
-    ctx = browser.new_context(timezone_id=ZONE)
+async def _revoke(dsn: str, invitation_id: str) -> None:
+    from defender.identity.postgres import PostgresIdentityRepository
+
+    repo = PostgresIdentityRepository(dsn)
+    try:
+        assert await repo.revoke_invitation(invitation_id), "premise: the invitation was open"
+    finally:
+        await repo.close()
+
+
+def _signed_in(browser: Any, world: Any, *, account: str | None = None, zone: str = ZONE) -> Any:
+    """A guarded context in `zone`, signed in as Ann unless `account` is given."""
+    ctx = browser.new_context(timezone_id=zone)
     ctx.set_default_timeout(WAIT_MS)
     if account is not None:
         world.front.sign_in_as(account)
@@ -88,16 +160,33 @@ def _context(browser: Any, world: Any, account: str | None = None) -> Any:
     return ctx
 
 
-def _open(world: Any, ctx: Any, address: str) -> Any:
+def _carol(world: Any, browser: Any, member_of: tuple[str, ...] = (),
+           invited_to: tuple[str, ...] = ()) -> tuple[Any, dict[str, str]]:
+    """A signed-in context of `carol@c.example` (no tenant unless `member_of`) and her open invitations' ids."""
+    email = "carol@c.example"
+    ids = run_async(_person, world.dsn, email, member_of, invited_to)
+    return _signed_in(browser, world, account=run_async(link_account, world.dsn, email)), ids
+
+
+def _open(world: Any, ctx: Any, address: str, *, state: str | None = "ready") -> Any:
     page = ctx.new_page()
     page.clock.set_fixed_time(BROWSER_NOW)
     page.goto(f"{world.origin}{address}")
     screen(page, "alerts")
+    if state is not None:
+        _state(page, state)
     return page
 
 
 def _state(page: Any, state: str) -> None:
     page.locator(f'[data-screen="alerts"][data-state="{state}"]').wait_for()
+
+
+def _home(world: Any, ctx: Any) -> Any:
+    page = ctx.new_page()
+    page.goto(f"{world.origin}/home")
+    screen(page, "home")
+    return page
 
 
 def _rows(page: Any) -> list[tuple[str, ...]]:
@@ -106,198 +195,528 @@ def _rows(page: Any) -> list[tuple[str, ...]]:
             for row in page.locator('[data-row="alert"]').all()]
 
 
-def _reads(requests: Any, origin: str, path: str) -> list[dict[str, str]]:
-    """The query of each GET of `path` the pages sent, in order."""
+def _tickets(page: Any) -> list[str]:
+    return [row[2] for row in _rows(page)]
+
+
+def _reads(requests: Any, origin: str, path: str = READ) -> list[dict[str, str]]:
+    """The query of each GET of exactly `path` the pages sent, in order."""
     return [dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(r.url).query, keep_blank_values=True))
-            for r in requests if r.method == "GET" and r.url.startswith(origin) and path_is(r.url, path)
+            for r in requests if r.method == "GET" and r.url.startswith(origin)
             and urllib.parse.urlsplit(r.url).path == path]
 
 
-# --- O5, O9: the rows ------------------------------------------------------------------------------------------------
+def _instant(text: str | None) -> dt.datetime | None:
+    return None if text is None else _at(text)
+
+
+def _holding(ctx: Any, matches: Any) -> list[Any]:
+    """Route every request `matches` selects into the returned list instead of the network, held until the test
+    `continue_()`s it."""
+    held: list[Any] = []
+    ctx.route(matches, lambda route: held.append(route))
+    return held
+
+
+def _until_held(page: Any, held: list[Any], count: int = 1) -> None:
+    for _ in range(WAIT_MS // 50):
+        if len(held) >= count:
+            return
+        page.wait_for_timeout(50)
+    raise AssertionError(f"{len(held)} of {count} requests were ever held")
+
+
+def _no_defender(page: Any) -> None:
+    """O9: nothing a person reads says Defender: the visible text, in any letter case, and the tab's title."""
+    shown_text = f"{page.locator('body').inner_text()}\n{page.title()}"
+    assert "defender" not in shown_text.lower()
+
+
+# --- O5, O9, AP4: the rows -------------------------------------------------------------------------------------------
 
 def test_alert_list_o5_o9_rows_show_local_fired_time_ticket_title_and_one_status_newest_first(world, browser):
-    """Newest first: the local time over Today/Yesterday/the date, the ticket over its vendor, the title or the no-title
-    text, and the outcome when one is known (a queued rerun does not hide it), else the newest investigation's state in
-    the screen's words. One read; no Load more, no X; the page says Sluice, never Defender. (O5, O9)"""
+    """Newest first: zone time over Today/Yesterday/the date, ticket over vendor, title or the no-title text, and one
+    status: the outcome when known (a queued rerun does not hide it), else the newest investigation's state in the
+    screen's words. One read, no Load more, no X; Sluice never Defender. (O5, O9)"""
     run_async(_seed, world.dsn, A, [
+        ("T-queued", "2026-11-01T14:00:00Z", ALERT_BYTES, ["queued"]),
         ("T-run", "2026-11-01T11:00:00Z", ALERT_BYTES, ["running"]),
-        ("T-none", "2026-10-31T22:30:00Z", PADDED_ALERT_BYTES, []),  # 23:30 in Paris, the day before; no `rule.description`
+        ("T-none", "2026-10-31T22:30:00Z", PADDED_ALERT_BYTES, []),  # 23:30 in Paris the day before; no title
         ("T-old", "2026-10-30T08:05:00Z", ALERT_BYTES, ["failed"]),
-        ("T-1161", "", b"", ["queued"]),  # last: a rerun queued over the completed `malicious` (a claim would take it)
-    ])
-    ctx = _context(browser, world)
+        ("T-1161", "", b"", ["queued"]),  # a rerun queued over the completed `malicious`
+    ], world.investigation)
+    ctx = _signed_in(browser, world)
     mark = len(requests_of(ctx))
     page = _open(world, ctx, ALERTS)
-    _state(page, "ready")
     assert _rows(page) == [
+        ("15:00", "Today", "T-queued", "elastic", TITLE, "queued"),
         ("13:00", "Today", "T-1161", "elastic", TITLE, "malicious"),
         ("12:00", "Today", "T-run", "elastic", TITLE, "investigating"),
         ("23:30", "Yesterday", "T-none", "elastic", NO_TITLE, "not investigated"),
-        # FORCED CHOICE: the date line before yesterday (the design says "the date"); ISO is one candidate.
-        ("09:05", "2026-10-30", "T-old", "elastic", TITLE, "failed"),
+        ("09:05", "30 Oct", "T-old", "elastic", TITLE, "failed"),
     ]
     settle(page)
-    assert [c for c in api_calls(requests_of(ctx)[mark:], world.origin) if c[1] == READ] == [("GET", READ)]
+    assert len(_reads(requests_of(ctx)[mark:], world.origin)) == 1
     assert page.locator('[data-action="load-more"]').count() == 0
     assert page.locator('[data-action="clear-filters"]').count() == 0
+    assert page.locator("thead th").count() == 4
     assert page.title() == "Sluice"
-    assert "Defender" not in page.locator("body").inner_text()
+    _no_defender(page)
 
 
-# --- O5, O7: filtering is a full load with the filters in the address ------------------------------------------------
+def test_alert_list_o5_ap4_the_status_column_names_each_outcome_and_each_state(world, browser):
+    """Each of the five outcome codes shows as itself; with no outcome, `latest_status` shows null as "not
+    investigated", queued as "queued", running as "investigating", aborted as "cancelled", failed and unparseable
+    as "failed"; an earlier outcome stays under a newer aborted rerun. (O5, AP4)"""
+    ends = {"T-benign": ["completed:benign"], "T-fp": ["completed:false-positive"],
+            "T-inc": ["completed:inconclusive"], "T-mal": ["completed:malicious"], "T-unres": ["completed:unresolved"],
+            "T-null": [], "T-queued": ["queued"], "T-running": ["running"], "T-aborted": ["aborted"],
+            "T-failed": ["failed"], "T-unparse": ["unparseable"],
+            "T-rerun": ["completed:benign", "aborted"], "T-rerun-failed": ["completed:inconclusive", "failed"]}
+    base = _at("2026-10-31T00:00:00Z")
+    run_async(_seed, world.dsn, A, [
+        (ticket, (base + dt.timedelta(minutes=n)).isoformat(), ALERT_BYTES, e) for n, (ticket, e) in enumerate(ends.items())])
+    page = _open(world, _signed_in(browser, world), ALERTS)
+    status = {row[2]: row[5] for row in _rows(page)}
+    assert status == {
+        "T-benign": "benign", "T-fp": "false-positive", "T-inc": "inconclusive", "T-mal": "malicious",
+        "T-unres": "unresolved", "T-null": "not investigated", "T-queued": "queued", "T-running": "investigating",
+        "T-aborted": "cancelled", "T-failed": "failed", "T-unparse": "failed", "T-rerun": "benign",
+        "T-rerun-failed": "inconclusive", "T-1161": "malicious"}
+    assert {s for s in status.values() if s in CODES} == CODES, "positive control: every code was seeded and shown"
 
-def test_alert_list_o5_o7_apply_submits_the_filters_as_a_full_load_and_the_x_links_to_the_bare_path(world, browser):
-    """Choosing an outcome and Apply loads the same path with every field in the query (empty ones too); the read
-    carries the outcome; only matching rows show; the form shows the chosen value; the X links to the bare path. (O5, O7)"""
-    run_async(_seed, world.dsn, A, [("T-none", "2026-11-01T11:00:00Z", ALERT_BYTES, [])])
-    ctx = _context(browser, world)
+
+def test_alert_list_o5_a_year_other_than_the_current_one_is_written_with_the_date(world, browser):
+    """An alert fired in 2025 shows its date with the year; one of this year shows none. (O5)"""
+    run_async(_seed, world.dsn, A, [("T-2025", "2025-12-20T12:00:00Z", ALERT_BYTES, []),
+                                    ("T-2026", "2026-10-20T12:00:00Z", ALERT_BYTES, [])])
+    page = _open(world, _signed_in(browser, world), ALERTS)
+    days = {row[2]: row[1] for row in _rows(page)}
+    assert days["T-2026"] == "20 Oct"
+    assert days["T-2025"] in {"20 Dec 2025", "20 Dec, 2025"}
+
+
+# --- O5, O7, AP4: filtering is a full load with the filters in the address --------------------------------------------
+
+def test_alert_list_o5_o7_the_outcome_menu_offers_all_the_five_codes_and_no_outcome_yet(world, browser):
+    """The Outcome menu: All (empty value), the five codes by their own names, and "No outcome yet" (value `none`). (O5, AP4)"""
+    page = _open(world, _signed_in(browser, world), ALERTS)
+    options = page.locator('select[name="outcome"] option')
+    values = [o.get_attribute("value") for o in options.all()]
+    labels = [o.inner_text().strip() for o in options.all()]
+    assert values[0] == "" and labels[0] == "All"
+    assert values[-1] == "none" and labels[-1] == "No outcome yet"
+    assert sorted(values[1:-1]) == sorted(CODES) and labels[1:-1] == values[1:-1]
+
+
+def test_alert_list_o5_o7_apply_is_a_full_load_that_sends_every_field_and_the_viewers_zone(world, browser):
+    """Choosing an outcome and times and Apply loads the same path with every field in the query, `tz` the viewer's
+    zone; the read carries the instants; only matching rows show; the form shows the values; the X links to the bare
+    path. (O5, O7)"""
+    run_async(_seed, world.dsn, A, [("T-a", "2026-11-01T11:30:00Z", ALERT_BYTES, []),
+                                    ("T-b", "2026-11-01T12:45:00Z", ALERT_BYTES, []),
+                                    ("T-c", "2026-11-01T13:30:00Z", ALERT_BYTES, [])])
+    ctx = _signed_in(browser, world)
     page = _open(world, ctx, ALERTS)
-    _state(page, "ready")
+    assert page.locator('[data-action="clear-filters"]').count() == 0
+    assert page.locator('input[name="tz"]').input_value() == ZONE
     mark = len(requests_of(ctx))
-    page.locator('select[name="outcome"]').select_option("malicious")
+    page.locator('input[name="fired_after"]').fill("2026-11-01T13:30")  # 12:30Z
+    page.locator('input[name="fired_before"]').fill("2026-11-01T14:15")  # 13:15Z
     with page.expect_navigation():
         page.locator('[data-action="apply"]').click()
     screen(page, "alerts")
     _state(page, "ready")
-    assert where(page) == (ALERTS, {"outcome": "malicious", "fired_after": "", "fired_before": ""})
-    assert [r[2] for r in _rows(page)] == ["T-1161"]
-    # FORCED CHOICE: which parameters the read carries beyond `outcome` (empty filters omitted? a `limit`?).
-    assert [q.get("outcome") for q in _reads(requests_of(ctx)[mark:], world.origin, READ)] == ["malicious"]
-    # FORCED CHOICE: the design does not say the form is filled from the address after the load (the mock shows it).
-    assert page.locator('select[name="outcome"]').input_value() == "malicious"
+    want = {"outcome": "", "fired_after": "2026-11-01T13:30", "fired_before": "2026-11-01T14:15", "tz": ZONE}
+    assert where(page) == (ALERTS, want)
+    assert navigations_to(requests_of(ctx)[mark:], world.origin, ALERTS)[-1] == want, "a document load, not history"
+    assert _tickets(page) == ["T-b"]
+    [read] = _reads(requests_of(ctx)[mark:], world.origin)
+    assert read.get("outcome") in (None, "")
+    assert _instant(read.get("fired_after")) == _at("2026-11-01T12:30:00Z")
+    assert _instant(read.get("fired_before")) == _at("2026-11-01T13:15:00Z")
+    assert page.locator('input[name="fired_after"]').input_value() == "2026-11-01T13:30"
+    assert page.locator('input[name="fired_before"]').input_value() == "2026-11-01T14:15"
     assert page.locator('[data-action="clear-filters"]').get_attribute("href") == ALERTS
 
 
-# --- O5: Load more ---------------------------------------------------------------------------------------------------
+@pytest.mark.parametrize(("choice", "kept"), [("malicious", ["T-1161"]), ("none", ["T-run", "T-none"]),
+                                              ("benign", [])])
+def test_alert_list_o5_o7_the_outcome_menu_filters_the_rows_the_read_returns(world, browser, choice, kept):
+    """An outcome chosen and applied is in the address and the read, and the rows are those the API sends for it: a
+    code matches its alerts, "No outcome yet" those with no completed investigation. (O5, O7, O2)"""
+    run_async(_seed, world.dsn, A, [("T-run", "2026-11-01T11:00:00Z", ALERT_BYTES, ["running"]),
+                                    ("T-none", "2026-10-31T11:00:00Z", ALERT_BYTES, [])])
+    ctx = _signed_in(browser, world)
+    page = _open(world, ctx, ALERTS)
+    mark = len(requests_of(ctx))
+    page.locator('select[name="outcome"]').select_option(choice)
+    with page.expect_navigation():
+        page.locator('[data-action="apply"]').click()
+    screen(page, "alerts")
+    _state(page, "ready" if kept else "no-match")
+    assert where(page)[1]["outcome"] == choice
+    assert _tickets(page) == kept
+    assert [q.get("outcome") for q in _reads(requests_of(ctx)[mark:], world.origin)] == [choice]
+    assert page.locator('select[name="outcome"]').input_value() == choice
 
-def _fifty_more(world: Any) -> None:
-    run_async(_seed, world.dsn, A, [(f"T-more-{n:02d}", f"2026-10-01T{n // 6:02d}:{(n % 6) * 10:02d}:00Z", ALERT_BYTES, [])
-                                    for n in range(PAGE)])
+
+def test_alert_list_o7_a_link_written_in_another_zone_keeps_its_instants_and_refills_in_the_viewers(world, browser):
+    """A Paris link opened in New York selects the same instants, shows them in New York's wall time with `tz` New
+    York, and Apply keeps the instants. (O7)"""
+    run_async(_seed, world.dsn, A, [("T-in", "2026-11-11T23:30:00Z", ALERT_BYTES, []),
+                                    ("T-out", "2026-11-11T22:30:00Z", ALERT_BYTES, [])])
+    ctx = _signed_in(browser, world, zone=NEW_YORK)
+    mark = len(requests_of(ctx))
+    page = _open(world, ctx, f"{ALERTS}?outcome=&fired_after=2026-11-12T00:00&fired_before=&tz={ZONE}")
+    assert _tickets(page) == ["T-in"]  # 00:00 in Paris is 23:00Z: T-in (23:30Z) is in, T-out (22:30Z) is not
+    paris_midnight = _at("2026-11-11T23:00:00Z")
+    assert [_instant(q.get("fired_after")) for q in _reads(requests_of(ctx)[mark:], world.origin)] == [paris_midnight]
+    assert page.locator('input[name="fired_after"]').input_value() == "2026-11-11T18:00"  # 18:00 in New York
+    assert page.locator('input[name="fired_before"]').input_value() == ""
+    assert page.locator('input[name="tz"]').input_value() == NEW_YORK
+    mark = len(requests_of(ctx))
+    with page.expect_navigation():
+        page.locator('[data-action="apply"]').click()
+    screen(page, "alerts")
+    _state(page, "ready")
+    assert where(page) == (ALERTS, {"outcome": "", "fired_after": "2026-11-11T18:00", "fired_before": "",
+                                    "tz": NEW_YORK})
+    assert _tickets(page) == ["T-in"]
+    assert [_instant(q.get("fired_after")) for q in _reads(requests_of(ctx)[mark:], world.origin)] == [paris_midnight]
 
 
-def test_alert_list_o5_load_more_reads_the_next_page_with_its_cursor_and_appends_the_rows(world, browser):
-    """With one alert more than a page: a page of rows and Load more; a click sends one read with the cursor and appends
-    the last row; Load more is gone once `next_cursor` is null. (O5)"""
-    _fifty_more(world)
-    ctx = _context(browser, world)
+def test_alert_list_o7_a_link_without_tz_reads_its_times_in_the_viewers_zone(world, browser):
+    """With no `tz`, the same wall time is a different instant in each viewer's zone. (O7)"""
+    run_async(_seed, world.dsn, A, [("T-1", "2026-11-11T23:30:00Z", ALERT_BYTES, [])])
+    address = f"{ALERTS}?fired_after=2026-11-12T00:00"
+    in_paris = _open(world, _signed_in(browser, world), address)
+    in_new_york = _open(world, _signed_in(browser, world, zone=NEW_YORK), address, state="no-match")
+    assert _tickets(in_paris) == ["T-1"]  # 23:00Z
+    assert _tickets(in_new_york) == []  # 05:00Z the next day: after the alert
+
+
+# --- O5, O12: Load more ----------------------------------------------------------------------------------------------
+
+def test_alert_list_o5_load_more_chains_each_page_by_the_cursor_the_last_one_gave(world, browser):
+    """101 alerts: 50 rows and Load more; each click is one read with a new cursor and appends 50, then 1; Load more
+    goes when `next_cursor` is null; no row twice, newest first throughout; no later stimulus repeats a read. (O5, usePagedRead)"""
+    _more(world, PAGE * 2)
+    ctx = _signed_in(browser, world)
     mark = len(requests_of(ctx))
     page = _open(world, ctx, ALERTS)
-    _state(page, "ready")
+    assert page.locator('[data-row="alert"]').count() == PAGE
+    for expected in (PAGE * 2, PAGE * 2 + 1):
+        page.locator('[data-action="load-more"]').click()
+        page.locator('[data-row="alert"]').nth(expected - 1).wait_for()
+        assert page.locator('[data-row="alert"]').count() == expected
+    assert page.locator('[data-action="load-more"]').count() == 0
+    tickets = _tickets(page)
+    assert tickets == ["T-1161"] + [f"T-more-{n:03d}" for n in range(PAGE * 2 - 1, -1, -1)]
+    page.evaluate(VISIBLE)
+    page.evaluate(RECONNECT)
+    settle(page)
+    reads = _reads(requests_of(ctx)[mark:], world.origin)
+    cursors = [q.get("cursor") for q in reads]
+    assert len(reads) == 3 and cursors[0] is None and all(cursors[1:]) and cursors[1] != cursors[2]
+
+
+def test_alert_list_o5_load_more_under_a_filter_sends_the_filter_with_every_cursor(world, browser):
+    """Under `outcome=none` 51 rows make two pages, and both reads carry the filter; the world's malicious alert is in
+    neither. (O5, O2)"""
+    _more(world, PAGE + 1, prefix="T-none")
+    ctx = _signed_in(browser, world)
+    mark = len(requests_of(ctx))
+    page = _open(world, ctx, f"{ALERTS}?outcome=none&fired_after=&fired_before=&tz={ZONE}")
     assert page.locator('[data-row="alert"]').count() == PAGE
     page.locator('[data-action="load-more"]').click()
     page.locator('[data-row="alert"]').nth(PAGE).wait_for()
     settle(page)
-    assert page.locator('[data-row="alert"]').count() == PAGE + 1
-    assert _rows(page)[-1][2] == "T-more-00", "the oldest alert, appended last"
-    assert page.locator('[data-action="load-more"]').count() == 0
-    reads = _reads(requests_of(ctx)[mark:], world.origin, READ)
-    assert len(reads) == 2 and "cursor" not in reads[0] and reads[1].get("cursor")
+    assert page.locator('[data-row="alert"]').count() == PAGE + 1 and "T-1161" not in _tickets(page)
+    reads = _reads(requests_of(ctx)[mark:], world.origin)
+    assert [q.get("outcome") for q in reads] == ["none", "none"] and [bool(q.get("cursor")) for q in reads] == [False, True]
 
 
-def test_alert_list_o5_a_failed_later_page_keeps_the_rows_and_says_to_reload(world, browser):
-    """A 500 to the Load more read: the rows shown stay and the screen says to reload; no read is repeated. (Flows)"""
-    _fifty_more(world)
-    ctx = _context(browser, world)
-    ctx.route(lambda u: path_is(u, READ) and "cursor=" in u, lambda route: route.fulfill(status=500, body="x"))
+@pytest.mark.parametrize("failure", ["500", "not-json"])
+def test_alert_list_o5_a_failed_later_page_keeps_the_rows_says_to_reload_and_is_not_retried(world, browser, failure):
+    """A later page answered 500 or with a body that is not JSON: the 50 rows stay and the screen stays `ready` (not
+    the error screen), "Couldn't load more alerts. Reload the page to try again." shows under them, and no read with
+    that cursor is sent again, whatever the tab or network does. (O5, O11, usePagedRead)"""
+    _more(world, PAGE)
+    ctx = _signed_in(browser, world)
+    answer = {"500": dict(status=500, body="x"), "not-json": dict(status=200, body="<html>")}[failure]
+    ctx.route(lambda u: path_is(u, READ) and "cursor=" in u, lambda route: route.fulfill(**answer))
+    mark = len(requests_of(ctx))
     page = _open(world, ctx, ALERTS)
-    _state(page, "ready")
     page.locator('[data-action="load-more"]').click()
     page.get_by_text("Couldn't load more alerts. Reload the page to try again.").wait_for()
+    page.evaluate(VISIBLE)
+    page.evaluate(RECONNECT)
+    settle(page)
     assert page.locator('[data-row="alert"]').count() == PAGE
+    assert shown(page) == "alerts" and page.locator('[data-screen="alerts"]').first.get_attribute("data-state") == "ready"
+    assert len([q for q in _reads(requests_of(ctx)[mark:], world.origin) if q.get("cursor")]) == 1
+    assert page.get_by_text("Couldn't load more alerts. Reload the page to try again.").count() == 1
 
 
-# --- O6: empty states ------------------------------------------------------------------------------------------------
+# --- O6, O7, O12: empty states, the X, and an address the screen cannot read ------------------------------------------
 
-def test_alert_list_o6_a_tenant_with_no_alerts_shows_no_alerts_yet(world, browser):
-    """Bob's tenant B holds no alert: "No alerts yet", no rows. (O6, board 2)
-    FORCED CHOICE: whether the filter bar shows here (board 2 has none; the design names only the text)."""
-    ctx = _context(browser, world, account=world.accounts[BOB])
-    page = _open(world, ctx, f"/t/{B}/alerts")
-    _state(page, "empty")
+def test_alert_list_o6_o12_a_tenant_with_no_alerts_and_no_filter_says_no_alerts_yet(world, browser):
+    """Bob's tenant B holds no alert: `empty`, "No alerts yet", no rows and no filter bar. (O6, O12)"""
+    page = _open(world, _signed_in(browser, world, account=world.accounts[BOB]), ALERTS_OF_B, state="empty")
     assert page.get_by_text("No alerts yet").count() == 1
-    assert page.locator('[data-row="alert"]').count() == 0
+    assert page.locator('[data-row="alert"]').count() == 0 and page.locator('select[name="outcome"]').count() == 0
+    assert page.locator('[data-action="clear-filters"]').count() == 0
+    _no_defender(page)
 
 
-def test_alert_list_o6_filters_matching_nothing_keep_the_bar_and_header_and_offer_a_clear_link(world, browser):
-    """`outcome=benign` matches nothing in A: the filter bar and the table header stay, with one "No alerts match these
-    filters" row and a link to the bare path. (O6, board 3)"""
-    ctx = _context(browser, world)
-    page = _open(world, ctx, f"{ALERTS}?outcome=benign&fired_after=&fired_before=")
-    _state(page, "no-match")
+def test_alert_list_o6_o12_filters_matching_nothing_keep_the_bar_and_header_and_offer_a_clear_link(world, browser):
+    """`outcome=benign` matches nothing in A: `no-match`, the filter bar and header stay, one "No alerts match these
+    filters" row, and clear links to the bare path. (O6, O12)"""
+    page = _open(world, _signed_in(browser, world), f"{ALERTS}?outcome=benign&fired_after=&fired_before=&tz={ZONE}",
+                 state="no-match")
     assert page.get_by_text("No alerts match these filters").count() == 1
-    assert page.locator('select[name="outcome"]').count() == 1
-    assert page.locator("thead th").count() == 4
-    assert ALERTS in [link.get_attribute("href") for link in page.locator('[data-action="clear-filters"]').all()]
+    assert page.locator('select[name="outcome"]').input_value() == "benign"
+    assert page.locator("thead th").count() == 4 and page.locator('[data-action="apply"]').count() == 1
+    assert page.locator('[data-row="alert"]').count() == 0
+    assert {link.get_attribute("href") for link in page.locator('[data-action="clear-filters"]').all()} == {ALERTS}
+    _no_defender(page)
 
 
-# --- O7: an address the screen cannot read ---------------------------------------------------------------------------
+def test_alert_list_o7_the_x_shows_only_when_an_outcome_or_a_time_is_set_and_tz_alone_sets_nothing(world, browser):
+    """The X (clear all) shows for an outcome, for a time after, for a time before; an all-empty submit, no query, and a
+    lone `tz` show none, and a lone `tz` on an empty tenant is `empty`, not `no-match`. (O7, O6)"""
+    ctx = _signed_in(browser, world)
+    for query in ("outcome=malicious", "fired_after=2026-01-01T00:00", "fired_before=2027-01-01T00:00"):
+        page = _open(world, ctx, f"{ALERTS}?{query}")
+        assert page.locator('[data-action="clear-filters"]').count() == 1, query
+        assert page.locator('[data-action="clear-filters"]').get_attribute("href") == ALERTS
+        page.close()
+    for query in ("", "?outcome=&fired_after=&fired_before=&tz=", "?tz=Asia/Tokyo", f"?tz={ZONE}"):
+        page = _open(world, ctx, f"{ALERTS}{query}")
+        assert page.locator('[data-action="clear-filters"]').count() == 0, query
+        assert _tickets(page) == ["T-1161"], query
+        page.close()
+    carol, _ = _carol(world, browser, (B,))
+    page = _open(world, carol, f"{ALERTS_OF_B}?tz=Asia/Tokyo", state="empty")
+    assert page.locator('[data-action="clear-filters"]').count() == 0
 
-def test_alert_list_o7_an_invalid_filter_address_sends_no_read_and_is_not_rewritten(world, browser):
-    """`outcome=evil`: "These filters aren't valid" with the clear link; no alerts read; the address stays. (O7)"""
-    ctx = _context(browser, world)
+
+@pytest.mark.parametrize("query", [
+    "outcome=evil", "outcome=Malicious", "fired_after=2026-11-12", "fired_before=2026-11-12T00:00:00",
+    "tz=Mars/Phobos", "tz=Mars/Phobos&fired_after=2026-11-12T00:00",
+    "outcome=benign&outcome=benign", "outcome=&outcome=benign", "fired_after=2026-11-12T00:00&fired_after=2026-11-12T00:00",
+    "fired_before=&fired_before=", f"tz={ZONE}&tz={ZONE}"])
+def test_alert_list_o7_o12_an_address_the_screen_cannot_read_is_invalid_sends_no_read_and_is_not_rewritten(
+        world, browser, query):
+    """Each address of an invalid kind (an unknown outcome or time format or zone, or a key twice): `invalid`, "These
+    filters aren't valid" with the clear link only (no filter bar), no alerts read, the address as it was. (O7, O12)"""
+    ctx = _signed_in(browser, world)
     mark = len(requests_of(ctx))
-    page = _open(world, ctx, f"{ALERTS}?outcome=evil")
-    _state(page, "invalid")
-    assert page.get_by_text("These filters aren't valid").count() == 1
+    page = _open(world, ctx, f"{ALERTS}?{query}", state="invalid")
+    assert _plain(page.locator("body").inner_text()).count("These filters aren't valid") == 1
     assert page.locator('[data-action="clear-filters"]').first.get_attribute("href") == ALERTS
+    assert page.locator('select[name="outcome"]').count() == 0 and page.locator('[data-row="alert"]').count() == 0
     settle(page)
     assert [c for c in api_calls(requests_of(ctx)[mark:], world.origin) if c[1] == READ] == []
-    assert where(page) == (ALERTS, {"outcome": "evil"})
+    assert page.evaluate("location.pathname + location.search") == f"{ALERTS}?{query}"
+    assert len(navigations_to(requests_of(ctx)[mark:], world.origin, ALERTS)) == 1, "the address was not left or rewritten"
+    _no_defender(page)
+
+
+def test_alert_list_o12_loading_then_ready_while_the_first_page_is_read(world, browser):
+    """While page 1's read is held the screen is `loading`; once it is answered, `ready` with its rows. (O12)"""
+    ctx = _signed_in(browser, world)
+    held = _holding(ctx, lambda u: path_is(u, READ))
+    page = _open(world, ctx, ALERTS, state="loading")
+    _until_held(page, held)
+    assert page.locator('[data-row="alert"]').count() == 0
+    held[0].continue_()
+    _state(page, "ready")
+    assert _tickets(page) == ["T-1161"]
+
+
+def test_alert_list_o12_not_available_when_page_one_answers_a_non_member_a_missing_tenant_403_or_404(world, browser):
+    """Bob reading A's alerts and Ann reading a tenant that does not exist (the real API), and a page-1 read answered
+    403 or 404 (intercepted): each `not-available`, never the error screen. (O12)"""
+    bob = _signed_in(browser, world, account=world.accounts[BOB])
+    _open(world, bob, ALERTS, state="not-available")
+    ann = _signed_in(browser, world, account=world.accounts[ANN])
+    _open(world, ann, f"/t/{UNKNOWN_TENANT}/alerts", state="not-available")
+    for status in (403, 404):
+        ctx = _signed_in(browser, world, account=world.accounts[ANN])
+        ctx.route(lambda u: path_is(u, READ), lambda route, s=status: route.fulfill(status=s, body="{}"))
+        page = _open(world, ctx, ALERTS, state="not-available")
+        assert page.locator('[data-row="alert"]').count() == 0, status
+        _no_defender(page)
+
+
+@pytest.mark.parametrize("answer", [dict(status=500, body="x"), dict(status=200, body="<html>")],
+                         ids=["500", "not-json"])
+def test_alert_list_o12_failed_when_page_one_fails_otherwise(world, browser, answer):
+    """Page 1 answered 500, or with a body that is not JSON: the screen is `failed` and still the alerts screen. (O12)"""
+    ctx = _signed_in(browser, world)
+    ctx.route(lambda u: path_is(u, READ), lambda route: route.fulfill(**answer))
+    page = _open(world, ctx, ALERTS, state="failed")
+    assert page.locator('[data-row="alert"]').count() == 0
+    _no_defender(page)
 
 
 # --- O4: the address through sign-in ---------------------------------------------------------------------------------
 
 def test_alert_list_o4_signed_out_the_alerts_address_returns_to_its_path_without_the_query(world, context, requests):
-    """Signed out, a filtered alerts address goes through sign-in and comes back to the path; the query is dropped (C6,
-    D-Q's recommended v1). (O4)"""
+    """Signed out, a filtered alerts address goes through sign-in and comes back to the path; the query is dropped, and
+    the screen then reads the alerts. (O4)"""
     page = context.new_page()
-    page.goto(f"{world.origin}{ALERTS}?outcome=malicious")
+    page.goto(f"{world.origin}{ALERTS}?outcome=malicious&tz={ZONE}")
     screen(page, "alerts")
+    _state(page, "ready")
     assert logins(requests, world.origin) == [ALERTS]
     assert where(page) == (ALERTS, {})
+    assert _tickets(page) == ["T-1161"]
 
 
-# --- O8: Home --------------------------------------------------------------------------------------------------------
+# --- O8, O9: Home ----------------------------------------------------------------------------------------------------
 
-def test_alert_list_o8_home_links_each_of_the_persons_tenants_to_its_alerts(world, context):
-    """Ann (tenant A only): one link to A's alerts address, which opens the alerts screen. No invite-only text. (O8)
-    FORCED CHOICE (D-T, open): the link's label; only its target is asserted."""
+def test_alert_list_o8_home_links_a_persons_one_tenant_as_alerts_and_it_opens_the_screen(world, context):
+    """Ann (tenant A only): one link labelled "Alerts" to A's alerts address, which opens the alerts screen; no
+    invite-only text, no invitation line, no Defender. (O8, O9)"""
     sign_in(world, context)
-    page = context.new_page()
-    page.goto(f"{world.origin}/home")
-    screen(page, "home")
-    links = page.locator(f'a[href="{ALERTS}"]')
-    assert links.count() == 1
-    assert "invite-only" not in page.locator("body").inner_text()
+    page = _home(world, context)
+    links = page.locator('a[href^="/t/"]')
+    assert [(link.get_attribute("href"), _plain(link.inner_text())) for link in links.all()] == [(ALERTS, "Alerts")]
+    text = _plain(page.locator("body").inner_text())
+    assert "invite-only" not in text and "invited to a team" not in text
+    _no_defender(page)
     links.click()
     screen(page, "alerts")
 
 
-async def _tenantless(dsn: str, email: str) -> str:
-    """An active person with no membership and no invitation; returns their sign-in account."""
-    from defender.identity.postgres import PostgresIdentityRepository
-    from defender.tests.support.identity._seed1496 import seed_user
-
-    repo = PostgresIdentityRepository(dsn)
-    try:
-        await seed_user(repo, email, created_at=dt.datetime.now(dt.UTC), status="active", display_name=email)
-    finally:
-        await repo.close()
-    return await link_account(dsn, email)
+def test_alert_list_o8_home_labels_each_of_several_tenants_alerts_with_the_tenant_id(world, browser):
+    """Ann in A and B: one link each, "Alerts — <tenant id>". (O8)"""
+    run_async(_person, world.dsn, ANN, (B,))
+    page = _home(world, _signed_in(browser, world))
+    found = {link.get_attribute("href"): _plain(link.inner_text()) for link in page.locator('a[href^="/t/"]').all()}
+    assert found == {ALERTS: f"Alerts — {A}", ALERTS_OF_B: f"Alerts — {B}"}
 
 
-def test_alert_list_o8_o9_home_with_no_tenant_says_sluice_is_invite_only(world, context):
-    """A person with no tenant and no invitation: the invite-only text naming their email, and no alerts link. (O8, O9)
-    FORCED CHOICES: the design's text has a straight apostrophe and stops at the email; the mock's has a typographic
-    one and adds "Once they do, the invitation appears here."; this case asserts the design's sentences only."""
-    email = "carol@c.example"
-    world.front.sign_in_as(run_async(_tenantless, world.dsn, email))
-    sign_in(world, context)
-    page = context.new_page()
-    page.goto(f"{world.origin}/home")
-    screen(page, "home")
-    text = " ".join(page.locator("body").inner_text().split())
-    assert ("You haven't been added to a team yet. Sluice is invite-only. "
-            f"Ask your administrator to invite {email}.") in text
+def test_alert_list_o8_home_lists_each_open_invitation_with_an_accept_button_and_no_invite_only_text(world, browser):
+    """Carol, in no tenant, invited to A and B: one "You've been invited to a team." line and one Accept button per
+    invitation, no alerts link, no invite-only text. (O8, O9)"""
+    carol, _ = _carol(world, browser, (), (A, B))
+    page = _home(world, carol)
+    page.get_by_role("button", name="Accept", exact=True).first.wait_for()
+    text = _plain(page.locator("body").inner_text())
+    assert text.count("You've been invited to a team") == 2
+    assert page.get_by_role("button", name="Accept", exact=True).count() == 2
+    assert "invite-only" not in text and page.locator('a[href^="/t/"]').count() == 0
+    _no_defender(page)
+
+
+def test_alert_list_o8_home_shows_the_tenants_alerts_link_then_the_invitation_line(world, browser):
+    """Ann in A and invited to B: the alerts link, then the invitation line with its button. (O8)"""
+    run_async(_person, world.dsn, ANN, (), (B,))
+    page = _home(world, _signed_in(browser, world))
+    page.get_by_role("button", name="Accept", exact=True).wait_for()
+    text = _plain(page.locator("body").inner_text())
+    assert text.index("Alerts") < text.index("You've been invited to a team") and "invite-only" not in text
+
+
+def test_alert_list_o8_o9_home_with_no_tenant_and_no_invitation_says_sluice_is_invite_only(world, browser):
+    """A person with no tenant and no invitation: the invite-only text naming their email, and no alerts link or
+    Accept button. (O8, O9)"""
+    carol, _ = _carol(world, browser)
+    page = _home(world, carol)
+    text = _plain(page.locator("body").inner_text())
+    assert "You haven't been added to a team yet" in text
+    assert "Sluice is invite-only. Ask your administrator to invite carol@c.example." in text
     assert page.locator('a[href^="/t/"]').count() == 0
-    assert "Defender" not in text
+    assert page.get_by_role("button", name="Accept", exact=True).count() == 0
+    _no_defender(page)
+
+
+# --- O11: accept an invitation ---------------------------------------------------------------------------------------
+
+def _accepts(requests: Any) -> list[str]:
+    return [r.url for r in requests if r.method == "POST" and path_is(r.url, "/api/auth/invitations")
+            and urllib.parse.urlsplit(r.url).path.endswith("/accept")]
+
+
+def test_alert_list_o11_accept_is_disabled_in_flight_then_loads_the_tenants_alerts_and_back_returns_home(world, browser):
+    """Accept sends one POST and the button is disabled until it is answered; the success is a full load of the
+    accepted tenant's alerts address (now readable by Carol), and Back returns to /home. (O11)"""
+    carol, _ = _carol(world, browser, (), (B,))
+    held = _holding(carol, lambda u: u.startswith(world.origin) and urllib.parse.urlsplit(u).path.endswith("/accept"))
+    page = _home(world, carol)
+    button = page.get_by_role("button", name="Accept", exact=True)
+    mark = len(requests_of(carol))
+    button.click()
+    _until_held(page, held)
+    assert button.is_disabled()
+    held[0].continue_()
+    screen(page, "alerts")
+    _state(page, "empty")
+    assert where(page) == (ALERTS_OF_B, {})
+    assert navigations_to(requests_of(carol)[mark:], world.origin, ALERTS_OF_B) == [{}], "a full load, not in-document"
+    assert len(_accepts(requests_of(carol)[mark:])) == 1
+    page.go_back()
+    screen(page, "home")
+    assert where(page) == ("/home", {})
+
+
+def test_alert_list_o11_a_401_makes_the_sign_in_round_trip_back_to_home_with_the_invitation_open(world, browser):
+    """An accept answered 401 (the session gone) takes the shell's one sign-in and comes back to /home, where the
+    invitation is still open: nothing was accepted, and the accept is not sent again. (O11)"""
+    carol, _ = _carol(world, browser, (), (B,))
+    page = _home(world, carol)
+    button = page.get_by_role("button", name="Accept", exact=True)
+    button.wait_for()
+    carol.clear_cookies()
+    mark = len(requests_of(carol))
+    button.click()
+    for _ in range(WAIT_MS // 100):
+        if logins(requests_of(carol)[mark:], world.origin):
+            break
+        page.wait_for_timeout(100)
+    screen(page, "home")
+    page.get_by_role("button", name="Accept", exact=True).wait_for()
+    settle(page)
+    assert logins(requests_of(carol)[mark:], world.origin) == ["/home"]
+    assert where(page) == ("/home", {}) and len(_accepts(requests_of(carol)[mark:])) == 1
+    assert page.get_by_role("button", name="Accept", exact=True).count() == 1
+
+
+def test_alert_list_o11_a_404_says_the_invitation_is_no_longer_open_and_removes_the_button(world, browser):
+    """The invitation withdrawn after Home loaded: Accept answers 404, "This invitation is no longer open." shows under
+    the invitation, its button is gone, and the screen stays Home. (O11)"""
+    carol, ids = _carol(world, browser, (), (B,))
+    page = _home(world, carol)
+    button = page.get_by_role("button", name="Accept", exact=True)
+    button.wait_for()
+    run_async(_revoke, world.dsn, ids[B])
+    button.click()
+    page.get_by_text("This invitation is no longer open.").wait_for()
+    assert page.get_by_role("button", name="Accept", exact=True).count() == 0
+    assert "You've been invited to a team" in _plain(page.locator("body").inner_text())
+    assert shown(page) == "home" and where(page)[0] == "/home"
+
+
+@pytest.mark.parametrize("failure", ["403", "500", "network"])
+def test_alert_list_o11_any_other_failure_says_to_reload_and_is_not_the_error_screen(world, browser, failure):
+    """An accept answered 403 or 500, or not answered at all: "Couldn't accept the invitation. Reload the page to try
+    again." under the invitation, and the screen stays Home, not the error screen. (O11)"""
+    carol, _ = _carol(world, browser, (), (B,))
+
+    def refuse(route: Any) -> None:
+        if failure == "network":
+            route.abort("aborted")
+        else:
+            route.fulfill(status=int(failure), body="{}")
+
+    carol.route(lambda u: u.startswith(world.origin) and urllib.parse.urlsplit(u).path.endswith("/accept"), refuse)
+    page = _home(world, carol)
+    page.get_by_role("button", name="Accept", exact=True).click()
+    page.get_by_text("Couldn't accept the invitation. Reload the page to try again.").wait_for()
+    settle(page)
+    assert shown(page) == "home" and where(page)[0] == "/home"
+    assert len(_accepts(requests_of(carol))) == 1

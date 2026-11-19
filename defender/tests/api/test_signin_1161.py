@@ -181,6 +181,24 @@ def test_the_address_reader_agrees_with_the_shape_text_on_the_generated_set() ->
     assert wrong[:10] == []
 
 
+def test_the_alerts_address_is_a_returnable_shape_and_sign_in_returns_to_its_path_only() -> None:
+    """`/t/<uuid>/alerts` is the `alerts` shape and returnable, so `/api/auth/login` starts sign-in for it; the same path with
+    a query is no member, and is refused as a return target (the query is not carried through sign-in). (O4)"""
+    from defender.api import addresses
+    from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
+    path = f"/t/{fixture_uuid('tenant:1581-alerts')}/alerts"
+    assert addresses.match(path) == "alerts"
+    assert "alerts" in addresses.RETURNABLE
+    assert addresses.match(f"{path}?outcome=benign") is None
+    world = World(tenants={T1: [ANN]})
+    browser = world.client(raise_errors=False)
+    assert browser.get(LOGIN, params={"return": path}).status_code == 302
+    browser.cookies.clear()
+    answer = browser.get(LOGIN, params={"return": f"{path}?outcome=benign"})
+    assert (answer.status_code, answer.headers.get("location")) == (303, BAD_REQUEST)
+
+
 def test_the_shape_files_uuid_placeholder_matches_exactly_what_the_records_uuid_text_does() -> None:
     """The address file's uuid pieces (`hex` runs of 8-4-4-4-12) and `_run_id._UUID_TEXT` accept the same strings:
     each record id, and none of the near misses below. (S2, R14; the file holds pieces, not a regex: amended)"""

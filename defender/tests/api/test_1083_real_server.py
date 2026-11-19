@@ -179,42 +179,75 @@ async def test_o6_alerts_list_newest_first_by_window_with_a_cursor_and_read_one(
     assert (one.json()["raw"], one.json()["title"], one.json()["description"]) == (ALERT_BYTES.decode(), TITLE, DESCRIPTION)
 
 
-@pytest.mark.postgres
-async def test_alert_list_o1_o2_each_listed_alert_carries_its_outcome_and_latest_status_and_filters_by_outcome(served):
-    """`outcome` and `latest_status` on every item; `?outcome=` narrows before paging, its cursor is bound to it, and a
-    value outside the six is a 422 about `outcome` (not the API-wide unknown-parameter refusal). (O1, O2)"""
+async def _judged_alerts(dsn: str) -> list[str]:
+    """Five alerts of tenant A, newest fired first, through the store's own writes: the first completed `malicious` with a
+    queued rerun over it, the second never investigated, the third completed `benign`, the fourth only failed, the fifth
+    never investigated. `created_at` moves with a clock, because "newest" is by it and ids are random."""
     from defender.jobs import JobStore
 
-    reviewed, quiet, older_quiet = await _alerts(served.dsn, A, NOON, NOON - dt.timedelta(hours=1), NOON - dt.timedelta(hours=2))
+    ids = await _alerts(dsn, A, *(NOON - n * dt.timedelta(hours=1) for n in range(5)))
     at = [NOON]
-    store = JobStore(served.dsn, clock=lambda: at[0])  # a moving clock: "newest" is by `created_at`, ids are random
+    store = JobStore(dsn, clock=lambda: at[0])
     try:
-        done, _ = await store.create_investigation(A, reviewed, "first", actor="seed")
-        await store.claim()
-        await store.finish(A, done.investigation_id, stage="completed", disposition="malicious", cost_usd=0.0)
-        at[0] += dt.timedelta(minutes=5)
-        await store.create_investigation(A, reviewed, "rerun", actor="seed")  # queued over a known outcome
+        async def end(alert_id: str, key: str, **ending: Any) -> None:
+            inv, _ = await store.create_investigation(A, alert_id, key, actor="seed")
+            assert (await store.claim()).record.investigation_id == inv.investigation_id
+            await store.finish(A, inv.investigation_id, cost_usd=0.0, **ending)
+            at[0] += dt.timedelta(minutes=5)
+
+        await end(ids[0], "first", stage="completed", disposition="malicious")
+        await end(ids[2], "only", stage="completed", disposition="benign")
+        await end(ids[3], "only", stage="failed", failure_reason="worker_error")
+        await store.create_investigation(A, ids[0], "rerun", actor="seed")  # queued over a known outcome
     finally:
         await store.close()
-    ann = served.ann(write=False)
+    return ids
 
-    listed = (await served.client.get(f"/api/tenants/{A}/alerts", headers=ann)).json()
+
+@pytest.mark.postgres
+async def test_alert_list_o1_each_listed_alert_carries_its_outcome_and_latest_status(served):
+    """Every item has `outcome` and `latest_status` (null spelled out), read through the real store: a rerun queued over a
+    completed investigation keeps the outcome; a failed one has a status and no outcome; no item carries `raw`. (O1, O3)"""
+    ids = await _judged_alerts(served.dsn)
+    listed = (await served.client.get(f"/api/tenants/{A}/alerts", headers=served.ann(write=False))).json()
     assert [(a["alert_id"], a["outcome"], a["latest_status"]) for a in listed["items"]] == [
-        (reviewed, "malicious", "queued"), (quiet, None, None), (older_quiet, None, None)]
+        (ids[0], "malicious", "queued"), (ids[1], None, None), (ids[2], "benign", "completed"),
+        (ids[3], None, "failed"), (ids[4], None, None)]
+    assert all("raw" not in item for item in listed["items"])
+    one = (await served.client.get(f"/api/tenants/{A}/alerts/{ids[0]}", headers=served.ann(write=False))).json()
+    assert "outcome" not in one, "the single read is unchanged"
+    assert "latest_status" not in one, "the single read is unchanged"
 
-    malicious = (await served.client.get(f"/api/tenants/{A}/alerts", headers=ann, params={"outcome": "malicious"})).json()
-    assert ([a["alert_id"] for a in malicious["items"]], malicious["next_cursor"]) == ([reviewed], None)
-    first = (await served.client.get(f"/api/tenants/{A}/alerts", headers=ann, params={"outcome": "none", "limit": 1})).json()
-    assert [a["alert_id"] for a in first["items"]] == [quiet]
-    second = (await served.client.get(f"/api/tenants/{A}/alerts", headers=ann,
-                                      params={"outcome": "none", "limit": 1, "cursor": first["next_cursor"]})).json()
-    assert [a["alert_id"] for a in second["items"]] == [older_quiet]
 
-    moved = await served.client.get(f"/api/tenants/{A}/alerts", headers=ann,
-                                    params={"outcome": "benign", "limit": 1, "cursor": first["next_cursor"]})
-    assert moved.status_code == 422
-    assert "the filters changed" in moved.text
-    unknown = await served.client.get(f"/api/tenants/{A}/alerts", headers=ann, params={"outcome": "evil"})
+@pytest.mark.postgres
+async def test_alert_list_o2_the_outcome_filter_narrows_before_paging_with_a_cursor_bound_to_it(served):
+    """`?outcome=` answers only matching alerts in the same order, `none` pages one at a time without an empty page, a
+    window narrows inside it, a cursor refuses another filter (422) and a value outside the six is a 422 about `outcome`,
+    not the undeclared-name refusal. (O2)"""
+    ids = await _judged_alerts(served.dsn)
+    ann = served.ann(write=False)
+    url = f"/api/tenants/{A}/alerts"
+
+    async def ids_of(**params: Any) -> tuple[list[str], str | None]:
+        body = (await served.client.get(url, headers=ann, params=params)).json()
+        return [a["alert_id"] for a in body["items"]], body["next_cursor"]
+
+    assert await ids_of(outcome="malicious") == ([ids[0]], None)
+    assert await ids_of(outcome="benign") == ([ids[2]], None)
+    assert await ids_of(outcome="unresolved") == ([], None)
+    assert (await ids_of(outcome="none"))[0] == [ids[1], ids[3], ids[4]]
+    first, cursor = await ids_of(outcome="none", limit=1)
+    assert first == [ids[1]]
+    second, cursor2 = await ids_of(outcome="none", limit=1, cursor=cursor)
+    third, last = await ids_of(outcome="none", limit=1, cursor=cursor2)
+    assert (second, third, last) == ([ids[3]], [ids[4]], None)
+    assert (await ids_of(outcome="none", fired_after=(NOON - dt.timedelta(minutes=210)).isoformat()))[0] == [ids[1], ids[3]]
+
+    for params in ({"outcome": "benign"}, {"outcome": "malicious"}, {}):
+        moved = await served.client.get(url, headers=ann, params={"limit": 1, "cursor": cursor, **params})
+        assert moved.status_code == 422, params
+        assert "the filters changed" in moved.text
+    unknown = await served.client.get(url, headers=ann, params={"outcome": "evil"})
     assert unknown.status_code == 422
     assert [(tuple(e["loc"]), e["type"] == "extra_forbidden") for e in unknown.json()["errors"]] == [(("query", "outcome"), False)]
 

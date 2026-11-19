@@ -108,7 +108,7 @@ ALERT = Alert(
     alert_id="a1000000-0000-4000-8000-000000000001", vendor="tickets", vendor_ticket_id="T-1", title="t", description="d",
     fired_at=T0, changed_at=T0, received_at=T0, raw='{"id": "a1000000-0000-4000-8000-000000000001"}',
 )
-SUMMARY = AlertSummary.model_validate(ALERT.model_dump(exclude={"raw"}))
+SUMMARY = AlertSummary.model_validate({**ALERT.model_dump(exclude={"raw"}), "outcome": None, "latest_status": None})  # #1581: the list adds the two (conflict, updated)
 
 
 class Clock:
