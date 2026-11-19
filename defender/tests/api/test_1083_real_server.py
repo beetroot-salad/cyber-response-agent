@@ -20,6 +20,7 @@ import anyio
 import httpx
 import pytest
 
+from defender._git import REPO_ROOT
 from defender.tests.support.api._openbao1470 import ScriptedOpenBao
 from defender.tests.support.api._server1083 import (
     A,
@@ -567,6 +568,17 @@ async def test_o8_the_real_servers_openapi_declares_the_501_on_exactly_the_lesso
 
 
 @pytest.mark.postgres
+async def test_1540_f3_the_committed_api_document_is_what_the_real_server_serves(served):
+    """`defender/api/openapi.json`, which the frontend generates its types from, equals the document the app serves when
+    the real server composes it over its real dependencies: an API change that alters a shape fails here until the
+    document is regenerated (`python -m defender.api.openapi_document`). (#1540 F3, grounding C3)"""
+    committed = json.loads((REPO_ROOT / "defender" / "api" / "openapi.json").read_text(encoding="utf-8"))
+    served_document = (await served.client.get("/api/openapi.json")).json()
+    assert committed == served_document, (
+        "defender/api/openapi.json is stale: run `python -m defender.api.openapi_document` and commit the result")
+
+
+@pytest.mark.postgres
 async def test_o8_a_real_process_serves_the_same_openapi_document_as_the_app(served):
     """A started program answers `/openapi.json` declaring the 501s, equal to the in-process app's document. (O8, Am-2)"""
     child = Child.faked(environment(served.tmp_path, dsn=served.dsn, port=free_port()))
@@ -975,11 +987,11 @@ def _failed(r: httpx.Response) -> tuple[str, dict[str, str]]:
 
 
 @pytest.mark.postgres
-@pytest.mark.parametrize("back", [TICKET_PATH, "/", None], ids=["investigation", "root", "absent"])
+@pytest.mark.parametrize("back", [TICKET_PATH, "/home", None], ids=["investigation", "home", "absent"])
 async def test_1161_p2_sign_in_lands_on_its_return_path_byte_for_byte_and_opens_a_session(served, back):
-    """The callback 303s to exactly the judged return path (the root when absent) and opens a working session. (P2, B4)"""
+    """The callback 303s to exactly the judged return path (`/home` when absent) and opens a working session. (P2, B4)"""
     r = await _signed_in(served, back)
-    assert _landing(r) == (back or "/")
+    assert _landing(r) == (back or "/home")
     session = set_cookies(r)[SESSION_COOKIE]
     me = await served.client.get("/api/me", headers=person(session.value))
     assert me.status_code == 200, me.text
@@ -988,9 +1000,9 @@ async def test_1161_p2_sign_in_lands_on_its_return_path_byte_for_byte_and_opens_
 
 @pytest.mark.postgres
 @pytest.mark.parametrize("back", [
-    "", "t/a", "//evil.example/x", "/\\evil.example/x", "https://evil.example/x", "/t/\x01x", "/api", "/api/me",
+    "", "/", "t/a", "//evil.example/x", "/\\evil.example/x", "https://evil.example/x", "/t/\x01x", "/api", "/api/me",
     TICKET_PATH + "?from=ticket", TICKET_PATH + "/", TICKET_PATH.upper(), "/sign-in-failed",
-], ids=["empty", "relative", "scheme-relative", "backslash", "absolute", "control", "api", "api-route", "query",
+], ids=["empty", "root", "relative", "scheme-relative", "backslash", "absolute", "control", "api", "api-route", "query",
         "trailing-slash", "case", "failed-screen"])
 async def test_1161_b2_a_refused_return_path_is_a_bad_request_and_starts_nothing(served, back):
     """A present `return` P2 refuses: 303 to `/sign-in-failed?reason=bad-request`, no cookie, no provider redirect. (B2, B4)"""

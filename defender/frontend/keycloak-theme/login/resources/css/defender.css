@@ -1,0 +1,32 @@
+/* The product's look over Keycloak 26.4's PatternFly v5 markup. `tokens.css` and `../img/illustration.svg` live here,
+   in the theme, and the app imports these same files (PR5): there is one copy, and this folder alone is the theme. */
+@import "tokens.css";
+
+body,
+.pf-v5-c-login {
+  background: var(--app-paper);
+  color: var(--app-ink);
+}
+.pf-v5-c-login__container {
+  background-image: url("../img/illustration.svg");
+  background-repeat: no-repeat;
+  background-position: top 2rem center;
+  background-size: 9rem;
+  padding-top: 12rem;
+}
+.pf-v5-c-login__main {
+  background: var(--app-raised);
+  border: 1px solid var(--app-line);
+  border-radius: 0.75rem;
+}
+.pf-v5-c-login__main-header h1,
+#kc-page-title {
+  color: var(--app-ink);
+}
+.pf-v5-c-button.pf-m-primary {
+  background-color: var(--app-accent);
+  color: var(--app-accent-ink);
+}
+.pf-v5-c-form-control {
+  border-color: var(--app-line);
+}

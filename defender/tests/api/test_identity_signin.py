@@ -103,7 +103,7 @@ def test_r7_2_the_sign_in_callback_accepts_the_identity_providers_own_extra_para
 
 
 def test_sign_in_ends_in_a_host_session_cookie_and_me_names_the_user() -> None:
-    """login -> callback -> 303 to the root path (whatever the query asks), HttpOnly Secure Lax cookie, /me (flow 2, O6, DC-6)."""
+    """login -> callback -> 303 to the fallback home path (whatever the query asks), HttpOnly Secure Lax cookie, /me (flow 2, O6, DC-6)."""
     world = World(tenants={T1: [ANN]})
     browser = world.client()
     callback = world.sign_in_response(browser, ANN, name="Ann Example", extra={
@@ -112,7 +112,7 @@ def test_sign_in_ends_in_a_host_session_cookie_and_me_names_the_user() -> None:
     assert finished.nonce == started.nonce
     assert pkce_challenge(finished.code_verifier) == started.code_challenge
     assert callback.status_code == 303
-    assert location(callback) == "/"  # a path: no open redirect, no absolute URL (S1, B3); no `return` was judged, so the root
+    assert location(callback) == "/home"  # a path: no open redirect, no absolute URL (S1, B3); no `return` was judged, so the fallback home (F4)
     attrs = cookie_attributes(set_cookie(callback, SESSION_COOKIE) or "")
     assert {"httponly", "secure"} <= set(attrs)
     assert (attrs["samesite"].lower(), attrs["path"]) == ("lax", "/")
@@ -196,7 +196,7 @@ def test_the_callback_refusals_are_303s_to_the_failed_screen_naming_three_reason
         assert is_cleared(set_cookie(response, attempt_cookie(state) or "") or "")
     ok = world.client()
     r_ok = world.sign_in_response(ok, ME)  # positive control
-    assert location(r_ok) == "/"
+    assert location(r_ok) == "/home"
     assert ok.cookies.get(SESSION_COOKIE)
     assert is_cleared(set_cookie(r_ok, attempt_cookie(world.signin.started[-1].state) or "") or "")
 
@@ -211,7 +211,7 @@ def test_a_state_mismatch_does_not_exchange_the_code(state: str | None) -> None:
     assert failed(refused) == ("prelogin-missing", {})
     assert len(world.signin.finished) == before
     assert SESSION_COOKIE not in browser.cookies
-    assert location(world.sign_in_response(world.client(), ANN)) == "/"  # control
+    assert location(world.sign_in_response(world.client(), ANN)) == "/home"  # control
 
 
 def test_a_token_that_fails_verification_is_a_303_that_opens_no_session_and_clears_the_prelogin_cookie() -> None:
@@ -220,11 +220,11 @@ def test_a_token_that_fails_verification_is_a_303_that_opens_no_session_and_clea
     browser = world.client(raise_errors=False)
     world.signin.refuse_signins = 1
     refused = world.sign_in_response(browser, ANN)
-    assert failed(refused) == ("login-attempt-invalid", {"return": "/"})  # the attempt's cookie carries the root (B2, B4)
+    assert failed(refused) == ("login-attempt-invalid", {"return": "/home"})  # the attempt's cookie carries the fallback home (B2, B4, F4)
     assert set_cookie(refused, SESSION_COOKIE) is None
     assert SESSION_COOKIE not in browser.cookies
     assert is_cleared(set_cookie(refused, attempt_cookie(world.signin.started[-1].state) or "") or "")
-    assert location(world.sign_in_response(world.client(), ANN)) == "/"  # control
+    assert location(world.sign_in_response(world.client(), ANN)) == "/home"  # control
 
 
 def test_the_pkce_verifier_is_a_verifier_rfc_7636_accepts() -> None:
@@ -248,7 +248,7 @@ def test_a_callback_the_provider_cannot_serve_opens_no_session_and_still_clears_
         world.signin.raise_on_has_otp = SignInUnavailable("keycloak is down")
         failed_response = world.sign_in_response(browser, OPS, amr=("pwd",))
     assert world.signin.every_call[-1] == where  # control: the failure was the one scripted
-    assert failed(failed_response) == ("unavailable", {"return": "/"})  # the attempt's cookie carries the root (B2, B4)
+    assert failed(failed_response) == ("unavailable", {"return": "/home"})  # the attempt's cookie carries the fallback home (B2, B4, F4)
     assert set_cookie(failed_response, SESSION_COOKIE) is None
     assert SESSION_COOKIE not in browser.cookies
     cleared = set_cookie(failed_response, attempt_cookie(world.signin.started[-1].state) or "")
@@ -264,7 +264,7 @@ def test_the_prelogin_cookie_is_gone_after_the_callback_and_a_second_callback_is
     assert name is not None
     assert browser.cookies.get(name)
     first = world.sign_in_response(browser, ANN, begin=False, state=state)
-    assert location(first) == "/"
+    assert location(first) == "/home"
     assert name not in browser.cookies
     again = world.sign_in_response(browser, ANN, begin=False, state=state)
     never_started = world.sign_in_response(world.client(), ANN, begin=False)

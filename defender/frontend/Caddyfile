@@ -17,11 +17,31 @@ http://:{$DEFENDER_INGRESS_LISTEN_PORT} {
 			Content-Security-Policy "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self' https://*.{$DEFENDER_ARTIFACT_DOMAIN}"
 			Referrer-Policy "strict-origin-when-cross-origin"
 			X-Content-Type-Options "nosniff"
-			# Fixed file names (`/app.js`): a browser revalidates each load, so a deploy never runs an old app on a new API.
-			Cache-Control "no-cache"
 		}
+		# A file Vite wrote under /assets/ is named by its content, so a name never serves other bytes: kept for good.
+		# Everything else (index.html, which names those files, and the unhashed files) is revalidated on every load,
+		# so a browser never runs a cached app against a newer API. A missing /assets/ path is a 404 (a page asking for a
+		# script must not get the app's HTML), and is not kept; every other path is the app.
+		@hashed {
+			path /assets/*
+			file
+		}
+		@revalidated {
+			not {
+				path /assets/*
+				file
+			}
+		}
+		header @hashed Cache-Control "public, max-age=31536000, immutable"
+		header @revalidated Cache-Control "no-cache"
 		root * {$DEFENDER_INGRESS_FRONTEND_DIR}
-		try_files {path} /index.html
-		file_server
+		@assets path /assets/*
+		handle @assets {
+			file_server
+		}
+		handle {
+			try_files {path} /index.html
+			file_server
+		}
 	}
 }

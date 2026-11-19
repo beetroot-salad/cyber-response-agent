@@ -8,7 +8,19 @@ from typing import Any
 
 import pytest
 
-from defender.tests.frontend._flow1161 import api_calls, logins, screen, settle, shown, sign_in, where
+from defender.tests.frontend._flow1161 import (
+    api_calls,
+    RECONNECT,
+    VISIBLE,
+    logins,
+    repeated_api_gets,
+    screen,
+    settle,
+    shown,
+    sign_in,
+    where,
+)
+from defender.tests.frontend.conftest import guard_csp, requests_of
 from defender.tests.support.api._server1083 import A, BOB
 from defender.tests.support.frontend import _shapes1161 as S
 from defender.tests.support.frontend._browser1161 import path_is, run_async
@@ -111,14 +123,14 @@ def test_1161_b3_every_returnable_member_reaches_the_app_at_its_own_pathname_sig
     for value in values:
         with_context = browser.new_context()
         with_context.set_default_timeout(30_000)
-        seen: list[Any] = []
-        with_context.on("request", lambda r, seen=seen: seen.append(r))
+        seen = requests_of(with_context)  # the guarded context's own log
         try:
             page = with_context.new_page()
             page.goto(f"{world.origin}{value}")
             screen(page, shape)
             assert where(page) == (value, {}), value
             assert logins(seen, world.origin) == [value], value
+            assert guard_csp(with_context) == [], value
         finally:
             with_context.close()
     sign_in(world, context)
@@ -126,3 +138,45 @@ def test_1161_b3_every_returnable_member_reaches_the_app_at_its_own_pathname_sig
         page = _open(world, context, value)
         screen(page, shape)
         assert where(page) == (value, {}), value
+
+
+@pytest.mark.parametrize("phase", ["signed-out", "signed-in"])
+@pytest.mark.parametrize("shape", sorted(s.name for s in S.SHAPES if not s.returnable))
+def test_1540_f4_a_member_of_a_non_returnable_shape_shows_its_screen_with_no_api_call_or_sign_in(
+        world, context, requests, shape, phase):
+    """Signed out or in, a member of a shape the shape list marks non-returnable shows its own screen, makes no API
+    call and starts no sign-in. (F4's rule, B1.2, B3)"""
+    if phase == "signed-in":
+        sign_in(world, context)
+    for value in [m for s in S.SHAPES if s.name == shape for m in S.members(s, 1540, 2)]:
+        mark = len(requests)
+        page = _open(world, context, value)
+        screen(page, shape)
+        settle(page)
+        assert where(page) == (value, {}), value
+        assert [r.url for r in requests[mark:] if path_is(r.url, "/api") and r.url.startswith(world.origin)] == [], value
+        assert logins(requests[mark:], world.origin) == [], value
+        page.close()
+
+
+# --- #1540 Am-5: no load repeats an API read, whatever the page or the network does -------------------------------------
+
+@pytest.mark.parametrize("stimulus", ["visible", "reconnect", "server-error"])
+def test_1540_am5_a_loaded_investigation_screen_sends_no_api_get_twice_whatever_the_page_or_network_does(
+        world, context, requests, stimulus):
+    """After the screen is up, the tab turning visible, the network dropping and returning, or a 500 left a second to
+    retry: no GET to `/api/*` repeats within the load, and the read was sent. (Am-5 point 5)"""
+    read = f"/api/tenants/{A}/investigations/{world.investigation}"
+    sign_in(world, context)
+    if stimulus == "server-error":
+        context.route(lambda u: path_is(u, read), lambda route: route.fulfill(status=500, body="x"))
+    mark = len(requests)
+    page = _open(world, context, world.screen())
+    screen(page, "investigation")
+    page.locator(f'[data-screen="investigation"][data-state="{"error" if stimulus == "server-error" else "ready"}"]').wait_for()
+    if stimulus != "server-error":
+        page.evaluate(VISIBLE if stimulus == "visible" else RECONNECT)
+    settle(page, 2000)
+    assert [c for c in api_calls(requests[mark:], world.origin) if c == ("GET", read)] == [("GET", read)], \
+        "positive control: the screen's read was sent, once"
+    assert repeated_api_gets(requests) == []

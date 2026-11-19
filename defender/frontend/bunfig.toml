@@ -1,0 +1,4 @@
+[run]
+# `bun run` runs every package binary (vitest, vite) on Bun, even where its first line asks for node: the pinned Bun is
+# the only runtime the frontend's commands use, whatever node is installed beside it (#1540 F6).
+bun = true

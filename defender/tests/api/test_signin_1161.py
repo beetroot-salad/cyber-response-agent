@@ -96,16 +96,28 @@ def test_a_returnable_member_is_accepted_and_sign_in_lands_on_it_byte_for_byte(p
     assert set_cookie(landed, SESSION_COOKIE)
 
 
-def test_an_absent_return_gives_the_root() -> None:
-    """No `return` parameter: sign-in lands on `/`. (P2, B2)"""
+def test_an_absent_return_gives_home() -> None:
+    """No `return` parameter: sign-in lands on `/home`, the one fallback constant. (P2, B2, F4)"""
     world = World(tenants={T1: [ANN]})
-    assert location(world.sign_in_response(world.client(), ANN)) == "/"
+    assert location(world.sign_in_response(world.client(), ANN)) == "/home"
+
+
+def test_1540_the_root_is_refused_as_a_return_and_home_is_accepted() -> None:
+    """`return=/` is a 303 `bad-request` (the root is no longer returnable); `return=/home` starts at the provider. (F4, P2)"""
+    world = World(tenants={T1: [ANN]})
+    refused = world.client().get(LOGIN, params={"return": "/"})
+    assert failed(refused) == ("bad-request", {})
+    assert refused.headers["location"] == BAD_REQUEST
+    assert not refused.headers.get_list("set-cookie")
+    started = world.client().get(LOGIN, params={"return": "/home"})  # control: the judged one starts
+    assert started.status_code == 302
+    assert started.headers["location"].startswith(SIGNIN_URL)
 
 
 @pytest.mark.parametrize("query", [
     [("return", "")],
     [("return", RET), ("return", RET)],
-    [("return", "/"), ("return", RET)],
+    [("return", "/home"), ("return", RET)],
     [("return", RET), ("x", "1")],
     [("x", "1")],
     [("Return", RET)],
@@ -122,10 +134,10 @@ def test_a_refused_or_malformed_start_is_a_303_bad_request_with_no_return(query:
 
 
 def test_a_return_is_decoded_once() -> None:
-    """`%2F` is `/` once; `%252F` is the text `%2F`, a non-member. (P2)"""
+    """`%2Fhome` is `/home` once; `%252Fhome` is the text `%2Fhome`, a non-member. (P2)"""
     world = World(tenants={T1: [ANN]})
-    once = world.client().get(f"{LOGIN}?return=%2F")
-    twice = world.client().get(f"{LOGIN}?return=%252F")
+    once = world.client().get(f"{LOGIN}?return=%2Fhome")
+    twice = world.client().get(f"{LOGIN}?return=%252Fhome")
     assert once.status_code == 302
     assert failed(twice) == ("bad-request", {})
 
@@ -731,6 +743,6 @@ def test_the_address_reader_compiles_the_lists_the_table_starts_from() -> None:
 
     from defender.tests.support.frontend._shapes1161 import _listed
 
-    assert addresses._compile(_listed())[1][1].fullmatch(RET)
-    assert addresses._compile(_listed({"uuid": [["word", 1, 3]]}, alphabets={"word": "ab1-"}))[1][1].fullmatch(
-        "/t/a-1/investigations/b")
+    assert dict(addresses._compile(_listed()))["investigation"].fullmatch(RET)
+    assert dict(addresses._compile(_listed({"uuid": [["word", 1, 3]]}, alphabets={"word": "ab1-"})))[
+        "investigation"].fullmatch("/t/a-1/investigations/b")

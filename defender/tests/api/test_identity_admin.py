@@ -62,7 +62,7 @@ def test_an_administrator_without_a_code_is_refused_and_setup_is_required_when_t
     world.signin.has_otp_answers[account] = has_code
     browser = world.client()
     refused = world.sign_in_response(browser, OPS, amr=("pwd",))
-    assert failed(refused) == ("otp-required", {"return": "/"})
+    assert failed(refused) == ("otp-required", {"return": "/home"})
     assert SESSION_COOKIE not in browser.cookies
     assert world.signin.otp_required == ([] if has_code else [account])
     world.signin.has_otp_answers[account] = True
