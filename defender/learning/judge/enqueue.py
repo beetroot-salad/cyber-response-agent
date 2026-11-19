@@ -473,10 +473,10 @@ def check_disposition_entry(entry: dict[str, Any]) -> dict[str, Any]:
 
 __all__ = [
     "DrawnRows", "DrawsSkipReport", "EnqueueReport", "FINDING_ID_MAX_BYTES", "FINDING_ROW_MAX_BYTES", "FindingsSink",
-    "LANE_DEFENDER", "LANE_UNQUEUEABLE", "held_findings", "screen_findings",
-    "LANE_WORLD", "LEDGER_LANES", "StoreFindings", "WORLD_LABEL_DOUBTED", "append_rows", "append_rows_report",
-    "append_world_rows", "append_world_rows_report", "build_finding_row", "check_disposition_entry", "defender_lane_blocked",
-    "disposition_entry", "draws_on_disk", "draws_on_disk_report", "enqueue_report",
+    "LANE_DEFENDER", "LANE_UNQUEUEABLE", "LANE_WORLD", "LEDGER_LANES", "StoreFindings", "WORLD_LABEL_DOUBTED",
+    "append_rows", "append_rows_report", "append_world_rows", "append_world_rows_report", "build_finding_row",
+    "check_disposition_entry", "defender_lane_blocked", "disposition_entry", "draws_on_disk", "draws_on_disk_report",
+    "enqueue_report", "held_findings", "screen_findings",
 ]
 
 

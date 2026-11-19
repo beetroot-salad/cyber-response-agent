@@ -52,13 +52,20 @@ def answer_waiting(session: Session) -> bool | None:
     """Whether the tenant's store holds work a post-step's author tick could act on (`learning_store.tick.work_waiting`
     over the author lane and the lanes its tick reconciles), asked through the session's relay adapter (the tenant, the
     author lane and the thresholds it bound); None when the question fails, logged: an unknown answer is never
-    "nothing waits"."""
+    "nothing waits". The relay answers no store request from then on, and a request still being answered then (one that may
+    yet commit) makes the answer unknown too."""
     try:
         from defender.learning.core.drains import AUTHOR_DRAIN_RECONCILES
         from defender.learning.core.store_tick import AUTHOR_LANE
         from defender.learning_store.tick import work_waiting
 
-        return work_waiting(_relay(session).adapter(), AUTHOR_LANE, reconcile_lanes=AUTHOR_DRAIN_RECONCILES)
+        relay = _relay(session)
+        if not relay.close():
+            _logger.warning("post-step of %s: a store request was still being answered when its container exited, so "
+                            "whether learning work still waits cannot be told; its checks go on",
+                            session.job_id or session.tenant_id)
+            return None
+        return work_waiting(relay.adapter(), AUTHOR_LANE, reconcile_lanes=AUTHOR_DRAIN_RECONCILES)
     except Exception:  # noqa: BLE001 — an unknown answer keeps the tenant's checks running
         _logger.warning("post-step of %s: whether learning work still waits could not be told; its checks go on",
                         session.job_id or session.tenant_id, exc_info=True)

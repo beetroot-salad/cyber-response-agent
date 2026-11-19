@@ -17,6 +17,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any, cast
 
 from sqlalchemy import (
+    BigInteger,
     Table,
     Text,
     and_,
@@ -77,11 +78,18 @@ DEFAULT_RENEW_SECONDS = 30.0
 DEFAULT_MAX_ATTEMPTS = 3
 DEFAULT_GENERATION_CEILING = 3
 DEFAULT_REFUSAL_CEILING = 3
-#: How much item payload one claim takes (#1487 Amendment r5.4), counted as PostgreSQL's JSON text of each payload
-#: (`octet_length(payload::text)`, which already writes a control character as its six-byte escape). The claim crosses
-#: the job socket whole, as ASCII JSON, where a non-ASCII character takes at most three times its UTF-8 bytes: a quarter
-#: of the socket's message cap keeps the largest claim under it with room for the envelope.
-DEFAULT_CLAIM_BYTES = MAX_MESSAGE // 4
+#: A claimed item's bytes at most, in the post-step's claim answer (#1487 Amendment r5.4): the port sends each item as a
+#: row of its kind, its key and its payload's JSON text (`tick_port.ITEMS`), inside the job socket's ASCII JSON. Per byte
+#: of PostgreSQL's JSON text of the payload, the payload takes at most 7/2 there: a non-ASCII character of n UTF-8 bytes
+#: is escaped once by the payload's own JSON text (`\u00e9`, 6 bytes for 2) and its backslash again by the message's
+#: (7). Quotes and backslashes take 2, and a control character is already its escape in PostgreSQL's text. The key takes
+#: at most 3 per byte (escaped once), and the row's brackets, quotes and commas are within `CLAIM_ROW_FRAMING`.
+CLAIM_PAYLOAD_RATIO = (7, 2)
+CLAIM_KEY_RATIO = 3
+CLAIM_ROW_FRAMING = 16
+#: How much one claim may take, counted as the bound above summed over its items: the socket's message cap, less room
+#: for the answer's envelope (the batch's own fields), so the largest claim crosses the socket.
+DEFAULT_CLAIM_BYTES = MAX_MESSAGE - 1024 * 1024
 
 
 _I = cast(Table, WorkItemRow.__table__)
@@ -604,8 +612,8 @@ class LearningStore(FeedbackVerbs):
 
         A replacement due (items still in a batch that closed with feedback) goes first and takes only those items;
         otherwise the waiting items of each kind at or over its threshold (pitfalls: distinct `mistake_key`s, not rows),
-        oldest first, up to `claim_bytes` of payload and always at least one (#1487 Amendment r5.4): the rest wait for
-        the next claim. A replacement takes the items of a batch a claim already bounded."""
+        oldest first, up to `claim_bytes` of their size on the job socket (`CLAIM_PAYLOAD_RATIO`) and always at least
+        one (#1487 Amendment r5.4): the rest wait for the next claim. A replacement takes the items of a batch a claim already bounded."""
         if lane not in LANES:
             raise ValueError(f"not a lane: {lane}")
         kinds = [k for k, ln in LANE_OF.items() if ln == lane]
@@ -722,9 +730,12 @@ class LearningStore(FeedbackVerbs):
 
     def _within_budget(self, tenant: str, kinds: list[str]) -> Any:
         """The `(kind, item_key)` of the tenant's waiting items of `kinds` a claim takes: oldest first (enqueue time,
-        then kind and key), while their payloads' running total stays within `claim_bytes`, and the oldest one
-        whatever its size."""
-        size = func.octet_length(_I.c.payload.cast(Text))
+        then kind and key), while the running total of their size on the job socket (`CLAIM_PAYLOAD_RATIO`) stays
+        within `claim_bytes`, and the oldest one whatever its size."""
+        times, per = CLAIM_PAYLOAD_RATIO
+        payload = func.octet_length(_I.c.payload.cast(Text)).cast(BigInteger)
+        size = ((payload * times + (per - 1)) / per + func.octet_length(_I.c.item_key).cast(BigInteger) * CLAIM_KEY_RATIO
+                + func.octet_length(_I.c.kind) + CLAIM_ROW_FRAMING)
         sized = select(_I.c.kind, _I.c.item_key, size.label("size"), func.sum(size).over(
             order_by=(_I.c.enqueued_at, _I.c.kind, _I.c.item_key)).label("upto")).where(
             _I.c.tenant_id == TenantId(tenant), _I.c.kind.in_(kinds), _I.c.status == "waiting").subquery()

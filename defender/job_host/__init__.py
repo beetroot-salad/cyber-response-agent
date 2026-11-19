@@ -31,9 +31,10 @@ from defender.job_socket import IMAGE_ENV, JOB_LABEL, SOCKET_ENV, Refused, ask
 from defender.lazy_door import lazy_door
 
 if TYPE_CHECKING:
+    from defender.job_host._container import STOP_GRACE as STOP_GRACE
     from defender.job_host._main import main as main
 
-__all__ = ["IMAGE_ENV", "JOB_LABEL", "NOTHING_WAITS", "SOCKET_ENV", "WORK_WAITS", "Refused", "ask", "main"]
+__all__ = ["IMAGE_ENV", "JOB_LABEL", "NOTHING_WAITS", "SOCKET_ENV", "STOP_GRACE", "WORK_WAITS", "Refused", "ask", "main"]
 
 #: A served post-step's exit status when the learning store answered that no work waits for a post-step of its tenant.
 NOTHING_WAITS = 10
@@ -41,6 +42,6 @@ NOTHING_WAITS = 10
 WORK_WAITS = 11
 
 #: Each name this door serves lazily, and the submodule that defines it.
-_HOMES: dict[str, str] = {"main": "_main"}
+_HOMES: dict[str, str] = {"main": "_main", "STOP_GRACE": "_container"}
 
 __getattr__ = lazy_door(globals(), _HOMES)

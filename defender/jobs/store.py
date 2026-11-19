@@ -858,7 +858,7 @@ class JobStore:
         in this order: the tenant's share lock, first; the fence; then `findings` (`{kind: rows}`,
         already screened by the worker; `None`: the worker refused them) inserted as the job's
         under a savepoint (`learning_models.insert_findings`), publish state `done` and the count
-        of rows stored, or, refused there, for a tenant not `active`, or with no findings, `refused`
+        of rows stored, or, refused there, for a tenant not `active`, or with `findings` `None`, `refused`
         and nothing of the job stored, logged with its kind; then the tenant's check clock armed,
         marked when a post-step holds it. An outage at the insert raises, the whole end with it, for
         the caller to retry, and so does `FindingsNotStored` (an insert error neither the content nor

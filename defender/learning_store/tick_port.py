@@ -472,6 +472,8 @@ class TickRelay:
         self._reconciled = frozenset(reconcile_lanes)
         self._lock = threading.Lock()
         self._issued = _Issued()
+        self._in_flight = 0
+        self._closed = False
 
     def adapter(self) -> StoreAdapter:
         with self._lock:
@@ -483,6 +485,10 @@ class TickRelay:
         """`{"value": ...}`, the adapter's answer in its declared shape; or `Refused`: `bad-fields`, a crossing store
         exception (`store-raised`), a foreign reference (`store-foreign`), anything else an outage."""
         verb = _VERBS[name]
+        with self._lock:
+            if self._closed:
+                raise Refused(f"{name}: the post-step's container has exited", UNAVAILABLE)
+            self._in_flight += 1
         try:
             value = verb(self, fields)
         except Refused:
@@ -491,17 +497,32 @@ class TickRelay:
             raise Refused(str(foreign), FOREIGN) from None
         except Exception as raised:  # noqa: BLE001 — every other fault is the one outage exception at the port
             raise _crossed(name, raised) from None
+        finally:
+            with self._lock:
+                self._in_flight -= 1
         return {"value": ANSWERS.get(name, NONE)[0](value)}
+
+    def close(self) -> bool:
+        """Answer no request from now on (the container has exited); True when none is still being answered, so what the
+        store holds is all the session will do. A request still in flight may yet commit (a claim, say), so the
+        caller's question about the store then has no answer."""
+        with self._lock:
+            self._closed = True
+            return self._in_flight == 0
 
     # -- the registry --------------------------------------------------------------------------------------------
 
     def leased(self, fields: Mapping[str, Any]) -> Held:
-        """The `Held` a holder's verb acts with: this session's lease of the batch, with the token the tick presents."""
+        """The `Held` a holder's verb acts with: this session's lease of the batch, with the token the tick presents. A
+        token no later than this session's lease is the tick's own (a stale one the store then fences, as in process); a
+        later one was never this session's (another holder's lease since), so the batch is foreign."""
         batch, token = _field_text(fields["batch"], "batch"), _wire_int(fields["token"], "token")
         with self._lock:
             held = self._issued.leased.get(batch)
         if held is None:
             raise ForeignBatch(f"batch {batch} is not leased by this session")
+        if token > held.token:
+            raise ForeignBatch(f"batch {batch} is not leased by this session at token {token}")
         return dataclasses.replace(held, token=token)
 
     def issued(self, fields: Mapping[str, Any], *, other_lanes: bool) -> str:

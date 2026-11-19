@@ -247,8 +247,9 @@ class LearningEnd:
     `failed`; never run text), and the final pick, stage, findings count and sibling cost.
 
     `findings` (#1487) is the record's one optional field, the job's findings as the entry read
-    them (`{state, text}`, `findings_of`): `None` when the record carries none. The envelope never
-    looks inside it, so no value of it makes the record unreadable; the worker reads it after the
+    them (`{state, text}`, `findings_of`): `None` when the record carries none. The envelope judges
+    no field of it, so no shape of it makes the record unreadable (the record's one JSON nesting
+    bound still covers it, as every record's does); the worker reads it after the
     envelope, and only for a `completed` end. The envelope's own `findings_count` is the entry's
     figure, which the worker does not copy (it counts the rows it stored)."""
 

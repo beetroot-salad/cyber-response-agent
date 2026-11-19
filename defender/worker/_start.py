@@ -154,18 +154,24 @@ def read_settings(environ: Mapping[str, str]) -> Settings:
 
 def check_learning_settings() -> None:
     """The learning store's settings in this process's environment, judged once before any work when the worker has
-    learning slots (#1487 Amendment r5.3): each kind's threshold, the attempt ceiling and the lease timings, read as
-    the tick reads them (`store_tick.thresholds`, `store_knobs`). The post-step's helper inherits this environment and
+    learning slots (#1487 Amendment r5.3): each kind's threshold, the attempt ceiling and the lease timings, read and
+    judged as the tick reads them (`store_tick.thresholds`, `store_knobs`), and the lease against the job container's
+    stop window, which the post-step's port otherwise refuses inside the container. The post-step's helper inherits this environment and
     binds them to the tick's store, so a malformed value is this start's refusal, never a post-step's failure.
     `WorkerStartRefused` naming the setting."""
+    from defender.job_host import STOP_GRACE
     from defender.learning.core.config import FatalConfigError
-    from defender.learning.core.store_tick import store_knobs, thresholds
+    from defender.learning.core.store_tick import LEASE_ENV, store_knobs, thresholds
+    from defender.learning_store import DEFAULT_LEASE_SECONDS
 
     try:
         thresholds()
-        store_knobs()
+        lease = store_knobs().get("lease", DEFAULT_LEASE_SECONDS)
     except FatalConfigError as bad:
         raise WorkerStartRefused(str(bad)) from None
+    if not lease > STOP_GRACE:
+        raise WorkerStartRefused(f"{LEASE_ENV} ({lease:g} s) must be longer than the job container's stop window "
+                                 f"({STOP_GRACE:g} s): a batch its stop could not reach would never lapse to recovery")
 
 
 #: The option docker sets on its own default bridge network, which reaches whatever the host reaches.

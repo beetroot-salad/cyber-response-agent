@@ -107,11 +107,24 @@ def _seconds(name: str) -> float | None:
 
 
 def store_knobs() -> dict[str, Any]:
-    knobs: dict[str, Any] = {"max_attempts": author_max_attempts()}
+    """The learning store's settings from the environment, judged whole: an attempt ceiling of at least 1 (0 would give
+    every item up at its first give-back), and a renewal sooner than the lease and its grace run out (else a live
+    holder's batch may be taken over between its renewals). `FatalConfigError` naming the setting."""
+    from defender.learning_store import DEFAULT_GRACE_SECONDS, DEFAULT_LEASE_SECONDS, DEFAULT_RENEW_SECONDS
+
+    attempts = author_max_attempts()
+    if attempts < 1:
+        raise FatalConfigError(f"LEARNING_AUTHOR_MAX_ATTEMPTS={attempts} must be at least 1")
+    knobs: dict[str, Any] = {"max_attempts": attempts}
     for key, env in (("lease", LEASE_ENV), ("grace", GRACE_ENV), ("renew_every", RENEW_ENV)):
         value = _seconds(env)
         if value is not None:
             knobs[key] = value
+    lease, grace = knobs.get("lease", DEFAULT_LEASE_SECONDS), knobs.get("grace", DEFAULT_GRACE_SECONDS)
+    renew = knobs.get("renew_every", DEFAULT_RENEW_SECONDS)
+    if not renew < lease + grace:
+        raise FatalConfigError(f"{RENEW_ENV} ({renew:g} s) must be shorter than {LEASE_ENV} plus {GRACE_ENV} "
+                               f"({lease:g} s + {grace:g} s): a holder renews before its batch may be taken over")
     return knobs
 
 

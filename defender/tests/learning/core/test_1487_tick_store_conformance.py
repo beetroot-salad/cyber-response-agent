@@ -421,8 +421,9 @@ def test_o6_the_port_refuses_to_start_when_the_lease_is_not_longer_than_the_stop
                                                                                       lease, starts):
     """A lease of 10 s or of 22 s (the stop window) is refused at the port's start with a `ValueError` naming both
     durations (amendment 4); any lease longer than the window starts: 22.001 s, 22.5 s, 23 s. A batch the unwind could
-    not reach then lapses to recovery. (O6)"""
-    R.settings_env(monkeypatch, lease=lease)
+    not reach then lapses to recovery. (O6) The renewal stays at the lease (no renewal within it), which the store's
+    settings allow: they refuse one no sooner than the lease and its grace."""
+    R.settings_env(monkeypatch, lease=lease, renew=lease)
     helper = start()
     if starts:
         assert helper.port() is not None
@@ -526,6 +527,26 @@ def test_o5_an_id_issued_while_live_is_refused_once_it_lapses_until_the_next_lis
     held = port.take_over(str(view.id))
     port.renew(held)
     assert lease_seconds_left(scene.dsn, str(operator.batch_id)) > 0
+
+
+def test_o5_a_lease_verb_with_a_token_later_than_this_sessions_lease_is_foreign(scene, start):
+    """This session took a batch over, lost it, and another holder took it over in turn: every lease verb presenting the
+    other holder's token (later than this session's lease) raises `ForeignBatch` and moves nothing, the other holder's
+    lease standing. The control, this session's own token before it lost the batch, renews. (O5, Batch references)"""
+    import dataclasses
+
+    E = _exceptions()
+    operator = _operator_batch(scene.dsn, scene.tenant, lapsed=True)
+    port = start().port()
+    [view] = port.batches()
+    held = port.take_over(str(view.id))
+    port.renew(held)  # control: this session's own token is its lease's
+
+    lapse_lease(scene.dsn, str(operator.batch_id))
+    other = call(scene.dsn, "take_over", scene.tenant, str(operator.batch_id), owner="operator-host-drain")
+    assert other.token > held.token, "premise: the other holder's lease is later"
+    _refused(E, _holder_verbs(port, dataclasses.replace(held, token=other.token)), scene.dsn, scene.tenant)
+    assert call(scene.dsn, "batches", scene.tenant)[0].lease_owner == "operator-host-drain"
 
 
 def test_o5_a_listed_lapsed_batch_is_acted_on_by_id_but_its_lease_verbs_need_this_sessions_lease(scene, start):
