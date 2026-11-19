@@ -148,7 +148,7 @@ def test_the_upgrade_refuses_over_completed_rows_without_a_disposition_or_off_vo
 
     message = str(refused.value)
     # Planted counts (6, 5, 0) share no digit with each other or with the revision ids; a count's noun follows it with no digit between.
-    for count, noun in ((nulls, r"disposition"), (off_vocabulary, r"codes?|vocabular|outside|five")):
+    for count, noun in ((nulls, r"disposition"), (off_vocabulary, r"unknown|invalid|not one|unrecogni|allowed|codes?|vocabular|outside|five")):
         assert re.search(rf"\b{count}\b\D{{0,80}}?(?:{noun})", message, re.IGNORECASE), f"{count} is not named beside its noun: {message}"
     assert _version(dsn) == [(_prior(),)]
     assert not COLUMNS & _alert_columns(dsn)

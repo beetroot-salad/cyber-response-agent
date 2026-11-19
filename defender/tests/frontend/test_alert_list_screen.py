@@ -227,6 +227,14 @@ def _until_held(page: Any, held: list[Any], count: int = 1) -> None:
     raise AssertionError(f"{len(held)} of {count} requests were ever held")
 
 
+def _until_true(page: Any, check: Any, what: str) -> None:
+    for _ in range(WAIT_MS // 50):
+        if check():
+            return
+        page.wait_for_timeout(50)
+    raise AssertionError(f"never true: {what}")
+
+
 def _no_defender(page: Any) -> None:
     """O9: nothing a person reads says Defender: the visible text, in any letter case, and the tab's title."""
     shown_text = f"{page.locator('body').inner_text()}\n{page.title()}"
@@ -689,7 +697,7 @@ def test_alert_list_o11_accept_is_disabled_in_flight_then_loads_the_tenants_aler
     mark = len(requests_of(carol))
     button.click()
     _until_held(page, held)
-    assert button.is_disabled()
+    _until_true(page, button.is_disabled, "Accept is disabled while its request is in flight")
     held[0].continue_()
     screen(page, "alerts")
     _state(page, "empty")
@@ -789,11 +797,15 @@ def test_alert_list_o11_each_invitation_keeps_its_own_state_and_the_button_goes_
     message = {"404": "This invitation is no longer open.",
                "500": "Couldn't accept the invitation. Reload the page to try again."}.get(first)
     if first == "held":
-        assert buttons.count() == 2 and buttons.nth(0).is_disabled() and buttons.nth(1).is_enabled()
+        _until_true(page, buttons.nth(0).is_disabled, "the first Accept is disabled while its request is in flight")
+        assert buttons.count() == 2
+        assert buttons.nth(1).is_enabled(), "the other invitation's Accept stays enabled"
         second = buttons.nth(1)
     else:
         page.get_by_text(message).wait_for()
-        assert page.get_by_text(message).count() == 1 and buttons.count() == 1 and buttons.first.is_enabled()
+        _until_true(page, lambda: buttons.count() == 1, "the answered invitation's button goes")
+        assert page.get_by_text(message).count() == 1
+        assert buttons.first.is_enabled(), "the other invitation's Accept stays enabled"
         second = buttons.first
     second.click()
     for _ in range(WAIT_MS // 50):

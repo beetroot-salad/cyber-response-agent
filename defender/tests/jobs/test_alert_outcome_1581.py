@@ -129,7 +129,7 @@ class _Hits(dict):
 async def _step(dsn: str, read: Reader, store: Any, rng: random.Random, clock: Clock, alerts: list[str], keys: list[int], hits: _Hits) -> None:  # noqa: C901, PLR0912 — one arm per store operation
     from defender.jobs import Conflict, NotFound
 
-    order = {alert_id: n for n, alert_id in enumerate(alerts)}  # stable keys, so a seed replays whatever order the database answers in
+    order = {alert_id: n for n, alert_id in enumerate(alerts)}  # stable keys, so the choice does not depend on row order; claim() still breaks created_at ties by random id, so a seed does not fully replay
     rows = sorted(read.rows("SELECT id, alert_id, stage, request_key, attempt FROM jobs.investigations"),
                   key=lambda r: (order.get(r[1], len(order)), r[3], r[4]))
     running = [r for r in rows if r[2] == "running"]
