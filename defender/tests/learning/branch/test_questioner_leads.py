@@ -314,7 +314,7 @@ def test_m2_the_launcher_hands_the_questioner_the_named_projection(tmp_path, lau
     rc = T.mod("cli.learning.branch").main(
         ["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID)],
         spawn=T.FakeSpawn(), questioner=questioner,
-        oracle=S.oracle(then=S.submit(answer, S.EMPTY_CLAIM)).model,
+        oracle=S.oracle(then=S.submit()).model,
         verifier=S.passing_verifier().model, roster=est.roster(),
         judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc(bucket="none", systems=[]))),
         preflight=S.no_preflight, live_tree=T.source_capture(),

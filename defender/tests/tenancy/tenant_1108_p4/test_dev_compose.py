@@ -9,6 +9,7 @@ the dev CA, and the client config file's name.
 """
 from __future__ import annotations
 
+import copy
 import re
 from pathlib import Path
 
@@ -18,6 +19,7 @@ import yaml  # tests may load YAML raw (tooling/lint/lint_raw_yaml.py excludes t
 
 from defender import _git
 from defender._git import REPO_ROOT
+from defender.tests.identity.test_identity_realm_export import THEME, THEME_NAME, stylesheet_references, theme_properties
 
 COMPOSE = REPO_ROOT / ".devcontainer" / "docker-compose.yml"
 COMPOSE_DIR = COMPOSE.parent
@@ -298,3 +300,165 @@ def test_the_credential_proxy_mounts_the_whole_data_root_and_no_tenant_folder_A2
     mounted = [h for h in hosts if _under(h, data_root)]
     assert data_root in mounted, "control: the data root is mounted whole"
     assert mounted == [data_root], f"mounts below the data root: {mounted}"
+
+
+# ---------------------------------------------------------------------------------------------
+# #1540 F5/PR5: Keycloak's sign-in theme, whole, holding the product's look the app imports
+# ---------------------------------------------------------------------------------------------
+
+FRONTEND = REPO_ROOT / "defender" / "frontend"
+THEME_IN_KEYCLOAK = f"/opt/keycloak/themes/{THEME_NAME}"
+_BUILD_OUTPUTS = {"node_modules", "dist", "dist-builds", "generated"}
+
+
+def _theme_stylesheet(theme: Path) -> Path:
+    """The theme's own stylesheet: the second entry of `styles` (the first is the parent's)."""
+    return theme / "login" / "resources" / theme_properties(theme)["styles"].split()[1]
+
+
+def _files_below(root: Path, skip: Path | None = None) -> list[Path]:
+    return [p for p in root.rglob("*") if p.is_file() and not (_BUILD_OUTPUTS & set(p.relative_to(root).parts))
+            and not (skip and _under(p, skip))]
+
+
+def theme_looks(theme: Path = THEME) -> list[Path]:
+    """The files the theme's own stylesheet references (`url()`, `@import`), resolved: the product's look (the tokens,
+    the illustration), each a file of the theme folder."""
+    stylesheet = _theme_stylesheet(theme)
+    return [(stylesheet.parent / re.split(r"[?#]", ref)[0]).resolve()
+            for ref in stylesheet_references(stylesheet.read_text(encoding="utf-8"))]
+
+
+def twins_of(sources: list[Path], frontend: Path) -> list[tuple[Path, Path]]:
+    """(source, twin) for every non-empty file below `frontend` (build outputs aside) that is byte-identical to a source
+    and is not that source itself."""
+    found = []
+    for source in sources:
+        content = source.read_bytes()
+        found += [(source, other) for other in _files_below(frontend)
+                  if other.resolve() != source.resolve() and other.stat().st_size == len(content) and content
+                  and other.read_bytes() == content]
+    return found
+
+
+def check_theme_is_mounted_whole_and_holds_its_looks(compose: dict, compose_dir: Path, theme: Path) -> None:
+    """F5/PR5, read statically: compose mounts the theme folder at Keycloak's themes dir and mounts nothing into it (the
+    folder alone is the theme); every Keycloak bind source exists; each `url()`/`@import` of the theme's stylesheet
+    resolves to a non-empty file of the theme folder."""
+    keycloak = compose["services"]["keycloak"]
+    mounts = [(source, target) for kind, source, target in _mounts(keycloak) if kind == "bind"]
+    hosts = {target: (compose_dir / source).resolve() for source, target in mounts}
+    missing = [f"{s} -> {t}" for s, t in mounts if not (compose_dir / s).exists()]
+    assert not missing, f"mount sources that do not exist: {missing}"
+    assert hosts.get(THEME_IN_KEYCLOAK) == theme.resolve(), f"the theme folder is not mounted at {THEME_IN_KEYCLOAK}: {hosts}"
+    inside = sorted(t for t in hosts if t.startswith(THEME_IN_KEYCLOAK + "/"))
+    assert inside == [], f"PR5: the theme folder is the whole theme; these are mounted into it: {inside}"
+    looks = theme_looks(theme)
+    assert looks, "control: the theme's stylesheet references its look"
+    for look in looks:
+        assert _under(look, theme.resolve()), f"{look}: the stylesheet reaches outside the theme"
+        assert look.is_file(), f"{look}: referenced by the theme's stylesheet, but absent"
+        assert look.stat().st_size, f"{look}: referenced by the theme's stylesheet, but empty"
+
+
+def test_1540_f5_the_dev_compose_mounts_the_theme_whole_and_it_holds_its_looks():
+    """Keycloak gets the theme folder alone, and every file its stylesheet uses is there and not empty. (F5, PR5)"""
+    check_theme_is_mounted_whole_and_holds_its_looks(_compose(), COMPOSE_DIR, THEME)
+
+
+def _good_world(root: Path) -> tuple[dict, Path, Path]:
+    """A synthetic repo: `.devcontainer/` (compose dir), and a theme folder holding its stylesheet and two looks."""
+    compose_dir = root / ".devcontainer"
+    theme = root / "frontend" / "keycloak-theme"
+    resources = theme / "login" / "resources"
+    (resources / "css").mkdir(parents=True)
+    (resources / "img").mkdir()
+    compose_dir.mkdir()
+    (theme / "login" / "theme.properties").write_text("parent=keycloak.v2\nstyles=css/styles.css css/own.css\n")
+    (resources / "css" / "own.css").write_text(
+        '/* url(gone.png) */\n@import "tokens.css";\n.a{background:url("../img/art.svg?v=1")} .b{background:url(data:x)}\n')
+    (resources / "img" / "art.svg").write_text("<svg>art</svg>")
+    (resources / "css" / "tokens.css").write_text(":root{--c:red}")
+    compose = {"services": {"keycloak": {"volumes": [f"../frontend/keycloak-theme:{THEME_IN_KEYCLOAK}:ro"]}}}
+    return compose, compose_dir, theme
+
+
+def test_1540_f5_the_theme_check_accepts_a_good_world_and_refuses_each_break(tmp_path):
+    """Positive control, then single breaks: no folder mount, a missing source, a file mounted into the theme, a
+    dangling reference, an empty look. (F5, PR5)"""
+    compose, compose_dir, theme = _good_world(tmp_path)
+    check_theme_is_mounted_whole_and_holds_its_looks(compose, compose_dir, theme)
+    css = theme / "login" / "resources" / "css" / "own.css"
+    tokens = theme / "login" / "resources" / "css" / "tokens.css"
+    volumes = compose["services"]["keycloak"]["volumes"]
+
+    def broken(*, volumes_: list[str] | None = None, css_: str | None = None, tokens_: str | None = None) -> None:
+        bad = copy.deepcopy(compose)
+        bad["services"]["keycloak"]["volumes"] = volumes_ if volumes_ is not None else volumes
+        originals = css.read_text(), tokens.read_text()
+        if css_ is not None:
+            css.write_text(css_)
+        if tokens_ is not None:
+            tokens.write_text(tokens_)
+        try:
+            with pytest.raises(AssertionError):
+                check_theme_is_mounted_whole_and_holds_its_looks(bad, compose_dir, theme)
+        finally:
+            css.write_text(originals[0])
+            tokens.write_text(originals[1])
+
+    broken(volumes_=[])  # the theme folder is not mounted
+    broken(volumes_=[volumes[0].replace(THEME_IN_KEYCLOAK, "/opt/keycloak/themes/other")])
+    broken(volumes_=[*volumes, "../gone.svg:/opt/keycloak/data/x.svg:ro"])  # a source that is not there
+    (tmp_path / "frontend" / "art.svg").write_text("<svg>art</svg>")
+    broken(volumes_=[*volumes, f"../frontend/art.svg:{THEME_IN_KEYCLOAK}/login/resources/img/art.svg:ro"])  # PR5
+    broken(css_=css.read_text().replace("tokens.css", "colours.css"))  # a reference nothing provides
+    broken(css_=css.read_text().replace("tokens.css", "../../../../art.svg"))  # a reference outside the theme
+    broken(tokens_="")  # an empty placeholder where the look should be
+
+
+def test_1540_pr5_no_file_of_the_frontend_is_a_twin_of_a_look_of_the_theme():
+    """Every file the theme's stylesheet uses exists once under `defender/frontend/`: no byte-identical copy of it
+    anywhere there, so the app keeps no copy of the illustration or the tokens and imports the theme's. (PR5)"""
+    looks = theme_looks()
+    assert len(looks) >= 2, f"the illustration and the tokens are the theme's looks: {looks}"
+    assert twins_of(looks, FRONTEND) == []
+
+
+def test_1540_pr5_the_twin_search_finds_a_copy_anywhere_under_the_frontend_and_ignores_the_source_itself(tmp_path):
+    """Self-test of the search: a copy in the app's own folders is found, build outputs and the source are not. (PR5)"""
+    frontend = tmp_path / "frontend"
+    (frontend / "src" / "assets").mkdir(parents=True)
+    (frontend / "dist").mkdir()
+    (frontend / "dist-builds").mkdir()
+    art = frontend / "art.svg"
+    art.write_text("<svg>art</svg>")
+    (frontend / "other.svg").write_text("<svg>other</svg>")
+    assert twins_of([art], frontend) == []
+    (frontend / "dist" / "built.svg").write_text("<svg>art</svg>")
+    (frontend / "dist-builds" / "built.svg").write_text("<svg>art</svg>")
+    assert twins_of([art], frontend) == [], "a build output is not a copy"
+    twin = frontend / "src" / "assets" / "again.svg"
+    twin.write_text("<svg>art</svg>")
+    assert twins_of([art], frontend) == [(art, twin)]
+
+
+_CUSTOM_PROPERTY = re.compile(r"(--[A-Za-z0-9_-]+)\s*:")
+
+
+def test_1540_pr5_the_tokens_are_declared_once():
+    """No file of the frontend besides the theme's tokens file declares a custom property that file declares (names read
+    from it), so no near copy of the look survives. (PR5)"""
+    sheets = [look for look in theme_looks() if look.suffix == ".css"]
+    assert sheets, "the tokens are a stylesheet the theme's own stylesheet imports"
+    names = {name for sheet in sheets for name in _CUSTOM_PROPERTY.findall(sheet.read_text(encoding="utf-8"))}
+    assert names, f"control: the tokens declare custom properties: {sheets}"
+    declared_again = []
+    for other in _files_below(FRONTEND):
+        if other.resolve() in sheets:
+            continue
+        text = other.read_bytes().decode("utf-8", errors="ignore")
+        again = sorted(names & set(_CUSTOM_PROPERTY.findall(text)))
+        if again:
+            declared_again.append(f"{other.relative_to(FRONTEND)}: {again}")
+    assert declared_again == [], f"PR5: the tokens are declared again outside their one file: {declared_again}"

@@ -728,6 +728,7 @@ def _handed_records(container: JobContainer) -> Any:
 
 def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, then the episode, in order
     ns: argparse.Namespace, *, lane: JobLaneHooks | None, spawn: Any = None, questioner: Any = None,
+    premise_check: Any = None,
     preflight: Callable[..., int], render_page: PageRenderer | None = None, judge: Any = None,
     lessons_dir: Path | None = None,
     live_tree: Callable[[], formats.RunProvenance] | None = None,
@@ -850,10 +851,14 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
                 # The claimed episode's view: its arm container and roster are made only once the
                 # first sibling is about to start (`start_runs`).
                 author = seams.model_seam(episode.dir) if questioner is None else questioner
+                # The premise check (#1561) runs on the production seam only: a caller handing
+                # in its own questioner scripts every call it makes.
+                checker = author if questioner is None else premise_check
                 return _run_episode(
                     ns, source=source, source_stamp=checked.source_stamp,
                     launch_waived=checked.waived, episode=episode, view=view,
-                    questioner=author, spawn=spawn, judge=judge, lessons_dir=questioner_lessons_dir,
+                    questioner=author, premise_check=checker, spawn=spawn, judge=judge,
+                    lessons_dir=questioner_lessons_dir,
                     tenant=tenant, runs=runs, served=served, oracle=oracle,
                     verifier=verifier, roster=roster, started=started,
                     knowledge_commit=pinned.commit, render_page=render_page,
@@ -876,6 +881,7 @@ def _run_episode(  # noqa: PLR0913, PLR0912, PLR0915, C901 — the episode's who
     ns: argparse.Namespace, *, source: Run, source_stamp: dict, launch_waived: Sequence[str] = (),
     episode: Episode,
     view: EpisodeRuns, questioner: Any, spawn: Any, lessons_dir: Path, judge: Any = None,
+    premise_check: Any = None,
     tenant: RunTenant, runs: RunsRepository[Tenant], served: Sequence[str], oracle: Any,
     verifier: Any, roster: Any, started: threading.Event, render_page: PageRenderer | None,
     knowledge_commit: str | None = None, signer: Any = None, proxy_url: str | None = None,
@@ -907,7 +913,8 @@ def _run_episode(  # noqa: PLR0913, PLR0912, PLR0915, C901 — the episode's who
         try:
             family = _author(ns, source=source, episode=episode, questioner=questioner,
                              lessons_dir=lessons_dir, served=served,
-                             reachable=reachable_systems(tenant.grants.gather))
+                             reachable=reachable_systems(tenant.grants.gather),
+                             premise_check=premise_check)
         except (FamilyError, branch.BranchError) as unparsed:
             # N05 / M05=A: nothing to calibrate, for a reason that belongs to no world.
             outcome_mod.write_outcome(

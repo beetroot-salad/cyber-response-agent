@@ -79,3 +79,21 @@ CI also runs the jscpd Python-duplication gate; read the workflow for its curren
 - **A render list is not a key set.** A sequence that records *what happened in what order* and a key set that names *the distinct things* are different values — spelling them with one name hides the confusion at every call site. Where both are wanted, derive them separately at the one place the list is built (`dict.fromkeys(...)` keeps the order) and give the deduped one its own name. Walking the raw list to patch a table already keyed by it patches one bucket per appearance (#956).
 - **Read invlang fences through one helper.** `skills/invlang/parser.scan_fences` is the only thing that decides which bytes of an `investigation.md` are invlang content; it hands back what the fences ORPHAN (`orphaned_headers`) alongside what they hold, so a reader cannot take the content and drop the complement without saying so. Three readers used to derive that split independently and all three dropped it in silence — content outside a fence never reaches the tokenizer, so it cannot even raise a `ParseWarning`, and a run's whole PLAN section parsed to an empty companion that every hypothesis-side rule then passed vacuously (#932). The same rule applies one level down: selecting from a mixed cell with `[t for t in xs if SOME_ID_RE.fullmatch(t)]` drops whatever matches neither namespace, which is how a qualified `h-001.ac1` in a `:L findings` `tests` cell reached no rule at all — classify exhaustively and report the residue. The suppression must state where the complement goes.
 - **Every writer of the two model-authored artifacts meets their schema.** `records/_artifact_schema.py` owns what a well-formed `investigation.md` / `report.md` IS, and `permission.decide_write` applies it to every write a MODEL makes — which is what made "a committed investigation parses" true, and true only of the verbs the agent writes through. Three writers sat outside that set: the harness seeding lead-0's declaring row before MAIN's first turn (#964), the turn-N branch seeding a sibling's whole document from a fence-boundary prefix (a valid source does not guarantee a valid prefix — the reference rules are order-independent), and `close_investigation`, the one verb that PUBLISHES, which validated the report it wrote and never the companion it published (#961). The general shape is worth recognising on sight: **an invariant enforced at a gate, and then believed of the artifact** — a gate can only promise something about the paths that run through it. The gate asks co-occurrence, not dataflow: it cannot tell whether the validated text is the written text, cannot see a write split across two functions, and cannot see the consumer half of #961 at all — those are `tests/runtime/permissions/test_ungated_artifact_write.py`'s. Suppress by naming which gate covers that write instead.
+
+### The frontend (`defender/frontend/`)
+
+The Python gates above don't read it. Its own two run in the CI `lint` job's frontend steps, from `defender/frontend/`:
+
+- `bun run check`: the type check and the source check (`scripts/source-check.mjs`, #1540 F8): no `any`, no cast but
+  `as const` (a shell cast needs a `// trust:` line), and the screens' boundary. Part of the build.
+- `bun run lint`, separate from the build so a style rule never masks the build's own refusal:
+  - ESLint (`eslint.config.mjs`). In `src/`, type-aware: a promise nobody handles, a switch that misses a case, a
+    method handed on without its object, React's hook rules. Everywhere: a function over 60 lines, nesting over 3
+    deep, more than 4 parameters, a comment line over 120 characters, an empty `catch`.
+  - Prettier's layout at 120 columns (`bun run format` applies it).
+  - knip: an export, a file or a dependency nothing uses.
+
+There is no baseline and no suppression: ESLint ignores `eslint-disable` comments (`noInlineConfig`). A finding is
+fixed, or the rule is changed in `eslint.config.mjs` with the reason beside it. Stale comments, unclear names and code
+in the wrong module stay with review.
+

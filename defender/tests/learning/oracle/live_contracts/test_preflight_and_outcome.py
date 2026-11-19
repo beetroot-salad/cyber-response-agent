@@ -39,11 +39,11 @@ _BASE = {"rows": [_ROW]}
 #: World b's forged telemetry for fact f1 (the real row's columns, as check 2 requires).
 _FORGED_B = {"user": "alice", "event_id": "e-1224-f1", "action": "logon", "host": "db-1",
              "ts": "2026-07-28T15:22:00Z"}
-_CHANGED_B = {"rows": [_ROW, _FORGED_B]}
+#: World b's hand-in serving `_FORGED_B` for fact f1.
+_ADD_B = S.handin(S.op_add("/rows/-", _FORGED_B, forged_id="fg-b-1", fact_id="f1"))
 #: World c's forged telemetry for fact f2.
 _FORGED_C = {"user": "bob", "event_id": "e-1224-c1", "action": "password-reset",
              "host": "10.0.0.9", "ts": "2026-07-28T15:30:00Z"}
-_CHANGED_C = {"rows": [_ROW, _FORGED_C]}
 #: A live answer that differs from the recording.
 _DRIFTED = {"rows": [{**_ROW, "event_id": "e-drift-77"}]}
 
@@ -87,8 +87,8 @@ def _family(*, facts_b: list[dict] | None = None, facts_c: list[dict] | None = N
 
 
 def _passing(*, fault: S.Fault = S.CLEAN) -> S.ScriptedModel:
-    """An oracle that serves the base unchanged with an empty claim, for every call."""
-    return S.oracle(then=S.submit(_BASE, S.EMPTY_CLAIM), fault=fault)
+    """An oracle that serves the base unchanged (an empty patch), for every call."""
+    return S.oracle(then=S.submit(), fault=fault)
 
 
 def _failing(*, fault: S.Fault = S.CLEAN) -> S.ScriptedModel:
@@ -106,12 +106,11 @@ def _on_post(double: Any, *, name: str, extra: Mapping[str, Any] | None = None) 
 
 
 def _forging_b() -> S.Routed:
-    """World b's pre-flight: forge f1's telemetry, record a fact and serve the forged row on
-    the POST-branch call only; every pre-branch call is served unchanged."""
+    """World b's pre-flight: record a fact and serve f1's forged row on the POST-branch call
+    only; every pre-branch call is served unchanged."""
     return _on_post(S.oracle(
-        S.forge("fg-b-1", "f1", "idp", _FORGED_B),
         S.record_fact("alice", "logon_host", "db-1"),
-        S.submit(_CHANGED_B, S.claim(added=[S.added("fg-b-1", "f1")]))), name="oracle-b")
+        S.submit(_ADD_B)), name="oracle-b")
 
 
 
@@ -428,7 +427,7 @@ def test_the_launchers_preflight_builds_its_oracle_side_for_the_source_runs_tena
     daemon = FakeDaemon(tmp_path / "daemon")
     daemon.install(monkeypatch)
     est = S.estate(tmp_path)
-    oracle = _by_world(*[S.oracle(S.python("print('checked')"), then=S.submit(_BASE, S.EMPTY_CLAIM))
+    oracle = _by_world(*[S.oracle(S.python("print('checked')"), then=S.submit())
                          for _ in range(2)])
     _base, src = S.source_run(tmp_path, est, calls=_calls())
     tenant = src.parent.parent.name
@@ -453,7 +452,7 @@ def test_the_launchers_calibration_serving_is_built_for_the_source_runs_tenant(t
     monkeypatch.setenv("DEFENDER_BOX_RUNTIME", "runc")
     FakeDaemon(tmp_path / "daemon").install(monkeypatch)
     est = S.estate(tmp_path)
-    worlds = [S.oracle(S.python("print('checked')"), then=S.submit(_BASE, S.EMPTY_CLAIM)) for _ in range(2)]
+    worlds = [S.oracle(S.python("print('checked')"), then=S.submit()) for _ in range(2)]
     oracle = _by_world(*worlds)
     _base, src = S.source_run(tmp_path, est, calls=_calls())
     tenant = src.parent.parent.name
@@ -503,8 +502,7 @@ def test_1224_sibling_first_issue_of_an_original_call_is_a_fresh_oracle_turn(tmp
     assert S.oracle_rows(run.ep, "b", "answers") == [], "pre-flight caches no served answer"
     assert S.ledger_rows(run.ep, "b") == [], "pre-flight writes no world-ledger row"
 
-    sib = S.oracle(S.submit(_CHANGED_B, S.claim(added=[S.added("fg-b-1", "f1")])),
-                   S.submit(_BASE, S.EMPTY_CLAIM))
+    sib = S.oracle(S.submit(_ADD_B), S.submit())
     sv = S.passing_verifier()
     reg = S.world_registry(run.ep, "b", est, oracle=sib, verifier=sv)
     ctx = est.ctx(tmp_path / "sibling-b")
@@ -674,7 +672,7 @@ def test_1224_the_siblings_base_answer_is_the_recording_not_a_live_answer(tmp_pa
     assert "e-drift-77" not in _store_text(run.ep, under=S.ORACLE_DIRNAME)
 
     est.answer("idp", "query", _Q1, {"rows": [{**_ROW, "event_id": "e-later-88"}]})
-    sib = S.oracle(S.submit(_BASE, S.EMPTY_CLAIM))
+    sib = S.oracle(S.submit())
     reg = S.world_registry(run.ep, "b", est, oracle=sib, verifier=S.passing_verifier())
     S.call(reg, "idp", "query", est.ctx(tmp_path / "sibling-b"), **_Q1)
 
@@ -810,7 +808,7 @@ def test_input_original_run_repeats_a_call(tmp_path):
     assert len(idp_rows) == 1
     assert "e-100" in idp_rows[0]["payload_text"]
 
-    sib = S.oracle(S.submit(_BASE, S.EMPTY_CLAIM))
+    sib = S.oracle(S.submit())
     reg = S.world_registry(run.ep, "b", est, oracle=sib, verifier=S.passing_verifier())
     ctx = est.ctx(tmp_path / "sibling-b")
     first = _text(S.call(reg, "idp", "query", ctx, **_Q1))
@@ -985,8 +983,8 @@ def test_1224_preflight_world_fails_after_some_calls_verified(tmp_path, monkeypa
     monkeypatch.setenv(S.KNOB_RETRY_CAP, "1")
     est = S.estate(tmp_path)
     late = S.post_branch_call(q="user:alice host:db-2", payload=_BASE)
-    forging_c = S.oracle(S.forge("fg-c-1", "f2", "idp", _FORGED_C),
-                         S.submit(_CHANGED_C, S.claim(added=[S.added("fg-c-1", "f2")])))
+    forging_c = S.oracle(S.submit(S.handin(
+        S.op_add("/rows/-", _FORGED_C, forged_id="fg-c-1", fact_id="f2"))))
     oc = _on_post(forging_c, name="oracle-c", extra={late.params["q"]: _failing()})
     oracle = _by_world(_passing(), oc)
     run = _launch(tmp_path, est, calls=[*_calls_post(), late], oracle=oracle,
@@ -1081,10 +1079,10 @@ def test_conc_34_preflight_worlds_forge_for_one_original_call(tmp_path):
     est = S.estate(tmp_path)
     shared_b = {**_FORGED_B, "event_id": "e-1224-shared"}
     shared_c = {**_FORGED_C, "event_id": "e-1224-shared"}
-    fb = S.oracle(S.forge("fg-b-1", "f1", "idp", shared_b),
-                  S.submit({"rows": [_ROW, shared_b]}, S.claim(added=[S.added("fg-b-1", "f1")])))
-    fc = S.oracle(S.forge("fg-c-1", "f2", "idp", shared_c),
-                  S.submit({"rows": [_ROW, shared_c]}, S.claim(added=[S.added("fg-c-1", "f2")])))
+    fb = S.oracle(S.submit(S.handin(
+        S.op_add("/rows/-", shared_b, forged_id="fg-b-1", fact_id="f1"))))
+    fc = S.oracle(S.submit(S.handin(
+        S.op_add("/rows/-", shared_c, forged_id="fg-c-1", fact_id="f2"))))
     oracle = _by_world(_on_post(fb, name="oracle-b"), _on_post(fc, name="oracle-c"))
     run = _launch(tmp_path, est, calls=_calls_post(), oracle=oracle,
                   verifier=S.passing_verifier())
@@ -1115,7 +1113,8 @@ def test_1224_sibling_reissues_an_original_call_preflight_served_changed(tmp_pat
     frozen = S.oracle_rows(run.ep, "b", "forged")
     assert [r["forged_id"] for r in frozen] == ["fg-b-1"]
 
-    sib = S.oracle(S.submit(_CHANGED_B, S.claim(added=[S.added("fg-b-1", "f1")])))
+    sib = S.oracle(S.submit(S.handin(
+        S.op_add_frozen("/rows/-", forged_id="fg-b-1", fact_id="f1"))))
     sv = S.passing_verifier()
     reg = S.world_registry(run.ep, "b", est, oracle=sib, verifier=sv)
     ctx = est.ctx(tmp_path / "sibling-b")

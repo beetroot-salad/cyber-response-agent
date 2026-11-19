@@ -13,7 +13,7 @@ import logging
 
 
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 
 from pathlib import Path
 
@@ -194,9 +194,62 @@ def _sample_text(source_answer: Path | None) -> str | None:
 
 
 
+def prebranch_answers(keys: Collection[str], base_rows: Iterable[Mapping[str, Any]]) -> list[dict]:
+    """The calls the source run made before the branch point (`keys`: their request keys, as
+    `prebranch_calls` derives them), each with the answer the primed base recording's rows
+    (`base_rows`) hold for it, in recorded order (#1561): what the investigator's inherited
+    transcript already shows. A call after the branch point is never evidence."""
+    from defender.learning.branch.ledger import request_key
+
+    if not keys:
+        return []
+    out: list[dict] = []
+    seen: set[str] = set()
+    for row in base_rows:
+        system, verb, params = row.get("system"), row.get("verb"), row.get("params") or {}
+        if not (isinstance(system, str) and isinstance(row.get("payload_text"), str)):
+            continue
+        key = request_key(system, str(verb), params)
+        if key not in keys or key in seen:
+            continue
+        seen.add(key)
+        try:
+            answer: Any = json.loads(row["payload_text"])
+        except ValueError:
+            answer = row["payload_text"]
+        out.append({"call": {"system": system, "verb": verb, "params": params}, "answer": answer})
+    return out
+
+
+def _prebranch_evidence(source: Run, branch_message_id: int, episode: Episode) -> list[dict]:
+    """The premise check's evidence (`prebranch_answers`), or none when it cannot be read: with
+    no evidence the check names no world, so the family is authored as it would be without it."""
+    from defender.learning.branch.estate.registry import prebranch_calls
+
+    from defender._io import read_jsonl_rows
+
+    try:
+        keys = prebranch_calls(source, branch_message_id)
+        return prebranch_answers(keys, read_jsonl_rows(episode.served_base.path) if keys else [])
+    except Exception as unread:  # noqa: BLE001 — evidence that cannot be read is no evidence
+        _logger.warning(f"the run's pre-branch answers could not be read ({unread!r}); the "
+                        "premise check is skipped")
+        return []
+
+
+def write_world_revisions(episode: Episode, entries: list[dict]) -> None:
+    """Write `world_revisions.yaml` (#1561): each world the premise check named, its conflicts,
+    and whether it was revised or dropped. Written only when the check named one."""
+    if entries:
+        episode.world_revisions.write(_yaml.safe_dump({"worlds": entries}, sort_keys=False,
+                                                     allow_unicode=True,
+                                                     default_flow_style=False))
+
+
 def _author(  # noqa: PLR0913 — the step's inputs
     ns: argparse.Namespace, *, source: Run, episode: Episode, questioner: Any,
     lessons_dir: Path, served: Sequence[str], reachable: Sequence[str],
+    premise_check: Any = None,
 ) -> Family:
     """`Step.QUESTIONER`: the questioner authors the family, and it is validated before anything
     reads it.
@@ -231,6 +284,10 @@ def _author(  # noqa: PLR0913 — the step's inputs
         served_systems=tuple(served),
         samples=samples,
         lessons=lessons,
+        premise_check=premise_check,
+        prebranch=(_prebranch_evidence(source, ns.branch_message_id, episode)
+                   if premise_check is not None else ()),
+        record_revisions=lambda entries: write_world_revisions(episode, entries),
     )
     # The source is named by its id alone (O1(c), declared change 9): no run-folder path is
     # written into the manifest.

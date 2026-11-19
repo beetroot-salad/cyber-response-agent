@@ -399,7 +399,7 @@ def control_oracle(base: Mapping[str, Any]) -> dict[str, Any]:
     family's recording empty). It serves `base` back unchanged with an empty claim, so the row
     stays `passthrough`, in a sandboxed box. Whether the turn is TAKEN is pinned in
     `test_world_serving.py`."""
-    return {"oracle": S24.oracle(then=S24.submit(dict(base), S24.EMPTY_CLAIM)).model,
+    return {"oracle": S24.oracle(then=S24.submit()).model,
             "verifier": S24.passing_verifier().model, "box": S24.sandboxed_box()[0]}
 
 

@@ -1,5 +1,6 @@
 {"alphabets": {"hex": "0123456789abcdef"},
  "placeholders": {"uuid": [["hex", 8], "-", ["hex", 4], "-", ["hex", 4], "-", ["hex", 4], "-", ["hex", 12]]},
- "shapes": [{"name": "root", "template": "/", "returnable": true},
+ "shapes": [{"name": "root", "template": "/", "returnable": false},
+            {"name": "home", "template": "/home", "returnable": true},
             {"name": "investigation", "template": "/t/{uuid}/investigations/{uuid}", "returnable": true},
             {"name": "sign-in-failed", "template": "/sign-in-failed", "returnable": false}]}

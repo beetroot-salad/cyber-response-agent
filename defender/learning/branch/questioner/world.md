@@ -36,6 +36,11 @@ each asserting their own facts, compose into a family whose arms are not a compa
 anything. Anything else you return is discarded, so restating the id or the facts only makes
 your document disagree with the family it will be composed into.
 
+Your world resumes the investigation at its branch point, and every answer the run got before it
+stays in the investigator's transcript unchanged: a fact that denies one of those answers makes a
+world the investigator can see is false. Vary what the run had not settled, or how what it saw is
+explained, never what it saw.
+
 Your `axis` elaborates the one call 1 planned for this seat; your `story` is what makes that
 axis and its facts a world an investigator could land in. Change the least that makes your axis
 true, and tell it only through things the served systems named in the measurement section could

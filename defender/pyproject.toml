@@ -43,6 +43,9 @@ runtime = [
     # A maturin-built Rust abi3 wheel with zero Python dependencies, so it is a
     # platform-specific binary like duckdb, not a pure-Python drop-in.
     "toons>=0.7,<0.8",
+    # jsonpatch — RFC 6902 JSON Patch: the branch oracle hands in its changes to a call's base
+    # answer as a patch the host applies (#1543), rather than the whole served answer.
+    "jsonpatch>=1.33",
     # duckdb — the engine behind the `defender-sql` shim
     # (investigation/sql_engine/sql.py), the gather subagent's aggregation
     # fallback for filter-only sources (no server-side aggregation of their

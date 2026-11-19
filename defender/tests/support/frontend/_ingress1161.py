@@ -1,14 +1,28 @@
-"""#1161 piece 1, test-only: the built frontend behind the repo's ingress, started through its launcher (B9, S5, B11).
+"""#1161 piece 1 (as amended by #1540 r3.1), test-only: the built frontend behind the repo's ingress, started through its
+launcher (B9, S5, B11).
 
 The launcher is `python -m defender.api_server.ingress` (the record's chosen name), which finds `caddy` on PATH. Its
 four inputs are `DEFENDER_INGRESS_LISTEN`, `DEFENDER_ARTIFACT_DOMAIN`, `DEFENDER_INGRESS_API_UPSTREAM`
 (`host:port`) and `DEFENDER_INGRESS_FRONTEND_DIR`; nothing else is passed. Missing tools and a missing frontend or
 launcher fail loudly (B11), never skip.
 
-- `require_tools()`: fails naming every missing tool (node, npm, caddy, playwright and its Chromium).
-- `build_frontend()`: `npm ci && npm run build` in a copy of `defender/frontend/` outside the checkout, kept by the hash
-  of its sources (a file lock per hash keeps runs and xdist workers from building it twice); returns that copy's `dist/`,
-  beside its `node_modules/`.
+- `require_tools()`: fails naming every missing tool (bun, caddy, playwright and its Chromium).
+- `frontend_inputs(frontend=FRONTEND)`: PR6's list as absolute paths: the files outside `defender/frontend/` the build
+  reads, from `package.json`'s `defender.inputs` (paths relative to the frontend folder, e.g. `../api/addresses.json`).
+  Fails when the key is missing or names a file that is not there.
+- `copy_frontend(dest_root, *, inputs_override=None, node_modules_from=None)`: THE copy helper, used by every test that
+  copies the frontend. Copies `defender/frontend/` (without `node_modules`, `dist`, `generated`) to
+  `dest_root/defender/frontend` and each declared input to the same place relative to the repo root (so
+  `../api/addresses.json` lands at `dest_root/defender/api/addresses.json`); returns the copy's frontend folder.
+  `inputs_override` maps a declared input path (the string as `package.json` writes it) to replacement bytes, or to
+  None to leave that input out; a key that is not a declared input fails. `node_modules_from` is a `node_modules`
+  folder (see `node_modules_of`) to symlink into the copy. A test edits the copy's `src/` (or any file) after the call.
+- `run_bun(frontend_copy, *args, timeout=600)`: `bun <args>` in the copy, output captured, never raising on a non-zero
+  exit (`returncode`, `stdout`, `stderr` are the observation).
+- `build_frontend()`: `bun install --frozen-lockfile` then `bun run build` in a `copy_frontend` copy outside the
+  checkout, kept by the hash of the frontend files, every declared input and `bun --version` (a file lock per hash
+  keeps runs and xdist workers from building it twice); returns that copy's `dist/`, beside its `node_modules/`
+  (`node_modules_of(dist)`).
 - `ingress(upstream, frontend_dir, ...)`: the launcher running; yields the origin `http://localhost:<port>`.
 - `launcher_env(...)` and `run_launcher(env)`: for the launcher's refusals."""
 from __future__ import annotations
@@ -17,6 +31,7 @@ import contextlib
 import fcntl
 import hashlib
 import importlib.util
+import json
 import os
 import shutil
 import signal
@@ -39,7 +54,7 @@ START_TIMEOUT = 30.0
 
 def require_tools() -> None:
     """Fail (AssertionError, never a skip) naming every tool the browser tests need that is missing."""
-    missing = [f"{tool} (on PATH)" for tool in ("node", "npm", "caddy") if shutil.which(tool) is None]
+    missing = [f"{tool} (on PATH)" for tool in ("bun", "caddy") if shutil.which(tool) is None]
     if importlib.util.find_spec("playwright") is None:
         missing.append("the playwright Python package")
     elif not _chromium_present():
@@ -59,11 +74,67 @@ def _chromium_present() -> bool:
 
 
 #: What a build writes or installs in the frontend folder; never part of what a build is made from.
-_BUILD_OUTPUTS = ("node_modules", "dist", "generated")
-#: A build (with its `node_modules`, about 35 MB) unused this long is deleted by the next build; a staging folder left
+_BUILD_OUTPUTS = ("node_modules", "dist", "dist-builds", "dist-link-*", "generated")
+#: A build (with its `node_modules`) unused this long is deleted by the next build; a staging folder left
 #: by a killed build, after a day. Only by age, never "not the current one": a build another run serves stays.
 _KEEP_BUILD = 7 * 24 * 3600
 _KEEP_STAGING = 24 * 3600
+
+
+def frontend_inputs(frontend: Path = FRONTEND) -> list[Path]:
+    """PR6: the files outside `frontend` that the build reads, from `package.json`'s `defender.inputs` (paths relative
+    to `frontend`), as absolute paths in declared order. Fails loudly when the key is missing or a file is absent."""
+    package = json.loads((frontend / "package.json").read_text())
+    declared = (package.get("defender") or {}).get("inputs")
+    well_formed = isinstance(declared, list) and bool(declared) and all(isinstance(d, str) for d in declared)
+    assert well_formed, (
+        f"PR6: {frontend / 'package.json'} must name the build's inputs in `defender.inputs` (a list of paths "
+        f"relative to the frontend folder); found {declared!r}")
+    assert isinstance(declared, list)  # narrows for the type checker; `well_formed` said why
+    paths = [Path(os.path.normpath(frontend / d)) for d in declared]
+    missing = [str(p) for p in paths if not p.is_file()]
+    assert not missing, f"PR6: declared build inputs that are not files: {missing}"
+    return paths
+
+
+def _declared(frontend: Path) -> dict[str, Path]:
+    declared = json.loads((frontend / "package.json").read_text())["defender"]["inputs"]
+    return dict(zip(declared, frontend_inputs(frontend), strict=True))
+
+
+def copy_frontend(dest_root: Path, *, inputs_override: Mapping[str, bytes | None] | None = None,
+                  node_modules_from: Path | None = None, frontend: Path = FRONTEND) -> Path:
+    """The one copy of the frontend a test makes: see the module docstring. Returns `dest_root/defender/frontend`."""
+    declared = _declared(frontend)
+    override = dict(inputs_override or {})
+    unknown = sorted(set(override) - set(declared))
+    assert not unknown, f"not declared build inputs: {unknown} (declared: {sorted(declared)})"
+    root = frontend.parent.parent  # the folder the declared paths are relative to, from the repo root
+    copy = dest_root / frontend.relative_to(root)
+    shutil.copytree(frontend, copy, ignore=shutil.ignore_patterns(*_BUILD_OUTPUTS))
+    for name, source in declared.items():
+        target = dest_root / source.relative_to(root)
+        if name in override and override[name] is None:
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if name in override:
+            target.write_bytes(override[name])  # type: ignore[arg-type]
+        else:
+            shutil.copy2(source, target)
+    if node_modules_from is not None:
+        (copy / "node_modules").symlink_to(node_modules_from)
+    return copy
+
+
+def node_modules_of(dist: Path) -> Path:
+    """The `node_modules` folder beside a `build_frontend()` result's frontend copy, for `node_modules_from`."""
+    return dist.parent / "node_modules"
+
+
+def run_bun(frontend_copy: Path, *args: str, timeout: float = 600) -> subprocess.CompletedProcess[str]:
+    """`bun <args>` in `frontend_copy`, output captured; a non-zero exit is returned, not raised."""
+    return subprocess.run(["bun", *args], cwd=frontend_copy, capture_output=True, text=True, check=False,
+                          timeout=timeout)
 
 
 def _prune(builds: Path, keep: Path) -> None:
@@ -80,42 +151,38 @@ def _prune(builds: Path, keep: Path) -> None:
                 shutil.rmtree(entry, ignore_errors=True)
 
 
-def _build_key(frontend: Path, shape_list: Path) -> str:
-    """A hash of everything a build reads: the frontend's files as they are on disk (not only committed ones), the shape
-    list and the Node version."""
+def _build_key(frontend: Path) -> str:
+    """A hash of everything a build reads: the frontend's files as they are on disk (not only committed ones), every
+    declared input and Bun's version."""
     digest = hashlib.sha256()
-    node = subprocess.run(["node", "--version"], capture_output=True, text=True, check=False).stdout.strip()
-    digest.update(node.encode() + b"\0")
+    bun = subprocess.run(["bun", "--version"], capture_output=True, text=True, check=False).stdout.strip()
+    digest.update(bun.encode() + b"\0")
     files = sorted(p for p in frontend.rglob("*")
                    if p.is_file() and not set(p.relative_to(frontend).parts) & set(_BUILD_OUTPUTS))
-    for path in [*files, shape_list]:
-        digest.update(str(path.relative_to(frontend.parent)).encode() + b"\0" + path.read_bytes() + b"\0")
+    for path in [*files, *frontend_inputs(frontend)]:
+        digest.update(str(path.relative_to(frontend.parent.parent)).encode() + b"\0" + path.read_bytes() + b"\0")
     return digest.hexdigest()[:24]
 
 
 def build_frontend(frontend: Path = FRONTEND) -> Path:
-    """The frontend built to static files; its `dist/`. The build runs in a copy of the frontend and the shape list
-    (`npm ci && npm run build` there), in a folder outside the checkout named by the hash of what it was made from, and
-    is moved into place whole: the checkout is never written, a finished build is never changed, and another run
-    serving one is never disturbed. A run whose sources match a finished build reuses it."""
+    """The frontend built to static files; its `dist/`. The build runs in a `copy_frontend` copy
+    (`bun install --frozen-lockfile && bun run build` there), in a folder outside the checkout named by the hash of what
+    it was made from, and is moved into place whole: the checkout is never written, a finished build is never changed,
+    and another run serving one is never disturbed. A run whose sources match a finished build reuses it."""
     assert (frontend / "package.json").is_file(), f"no frontend at {frontend} (#1161 B8)"
-    shape_list = frontend.parent / "api" / "addresses.json"
     builds = Path(tempfile.gettempdir()) / "defender-frontend-builds"
     builds.mkdir(exist_ok=True)
-    done = builds / _build_key(frontend, shape_list)
+    done = builds / _build_key(frontend)
     dist = done / "defender" / "frontend" / "dist"
     with open(builds / f"{done.name}.lock", "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         if not done.exists():
             staging = Path(tempfile.mkdtemp(prefix=f"{done.name}-", dir=builds))
             try:
-                copy = staging / "defender" / "frontend"
-                shutil.copytree(frontend, copy, ignore=shutil.ignore_patterns(*_BUILD_OUTPUTS))
-                (staging / "defender" / "api").mkdir()
-                shutil.copy2(shape_list, staging / "defender" / "api" / "addresses.json")
-                for argv in (["npm", "ci", "--no-audit", "--no-fund"], ["npm", "run", "build"]):
-                    ran = subprocess.run(argv, cwd=copy, capture_output=True, text=True, check=False)
-                    assert ran.returncode == 0, f"`{' '.join(argv)}` failed:\n{ran.stdout[-2000:]}\n{ran.stderr[-2000:]}"
+                copy = copy_frontend(staging, frontend=frontend)
+                for args in (["install", "--frozen-lockfile"], ["run", "build"]):
+                    ran = run_bun(copy, *args)
+                    assert ran.returncode == 0, f"`bun {' '.join(args)}` failed:\n{ran.stdout[-2000:]}\n{ran.stderr[-2000:]}"
                 staging.rename(done)
             finally:
                 shutil.rmtree(staging, ignore_errors=True)

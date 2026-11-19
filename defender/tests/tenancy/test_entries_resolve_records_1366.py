@@ -166,7 +166,7 @@ def _branch_launch(env: Env, relation: str) -> Seen:
     launched = O.launch(
         env.tmp_path, est, calls=[O.Call("idp", "query", O.query_params("user:alice"), base),
                                   O.Call("siem-x", "lookup", lookup, base)],
-        oracle=O.oracle(then=O.submit(base, O.EMPTY_CLAIM)), verifier=O.passing_verifier(), directory=directory)
+        oracle=O.oracle(then=O.submit()), verifier=O.passing_verifier(), directory=directory)
 
     manifest = launched.ep / "family.yaml"
     served = (frozenset(yaml.safe_load(manifest.read_text(encoding="utf-8"))["served_systems"])

@@ -1,5 +1,14 @@
 """#1161 the frontend's browser and ingress checks: the pinned Chromium, the running world (API child, ingress,
-provider front channel) and the Q6 cookie-less request. Tools missing is a failure, never a skip (B11)."""
+provider front channel) and the Q6 cookie-less request. Tools missing is a failure, never a skip (B11).
+
+Guards (#1540 F8, Am-5): the guarded context (`GuardedContext`) is the one owner of every suite-wide browser guard, and
+`browser.new_context()` is the only way a test gets a context, so every context carries all of them and checks them when it
+closes, however a test opens it (fixture, its own, the dev server's):
+- CSP: no `securitypolicyviolation` in any page. `guard_csp(context)` looks up the list (each entry
+  "<directive> <blocked> @ <document>"); a test that triggers a violation on purpose asserts it, then clears the list.
+- No repeat: no load sent the same `GET` to `/api/*` twice. `requests_of(context)` looks up the context's request log; a test
+  that repeats a read on purpose asserts it, then clears the log.
+A new suite-wide guard goes into `GuardedContext`, not into an opt-in fixture."""
 from __future__ import annotations
 
 import dataclasses
@@ -11,6 +20,7 @@ from typing import Any
 import httpx
 import pytest
 
+from defender.tests.frontend._flow1161 import assert_no_repeat
 from defender.tests.support.api._server1083 import (
     A,
     ANN,
@@ -24,7 +34,13 @@ from defender.tests.support.api._server1083 import (
 )
 from defender.tests.support.api._signin1161 import FrontChannel, link_account
 from defender.tests.support.frontend import _ingress1161 as ingress_harness
-from defender.tests.support.frontend._browser1161 import Intercepted, record_requests, run_async, without_cookies_once
+from defender.tests.support.frontend._browser1161 import (
+    Intercepted,
+    RequestLog,
+    record_requests,
+    run_async,
+    without_cookies_once,
+)
 from defender.tests.support.jobs._jobs1342 import ALERT_BYTES, job_store, register_tenant
 from defender.tests.support.shared._postgres1339 import (  # noqa: F401 — fixtures for this directory
     migrated_database,
@@ -32,18 +48,90 @@ from defender.tests.support.shared._postgres1339 import (  # noqa: F401 — fixt
 
 
 WAIT_MS = 30_000
+#: Reports a violation to Python. A binding (not an in-page array) survives navigations and closed tabs.
+_CSP_BINDING = "__defenderCspViolation"
+_CSP_LISTENER = ("window.addEventListener('securitypolicyviolation', e => window." + _CSP_BINDING +
+                 "(e.violatedDirective + ' ' + e.blockedURI + ' @ ' + e.documentURI), true);")
 _NOW = dt.datetime(2026, 11, 1, 12, tzinfo=dt.UTC)
+
+
+class GuardedContext:
+    """A Playwright browser context with every suite-wide guard installed: every other attribute is the real context's.
+    `violations` is the live CSP list and `requests` the live request log; `close()` closes it, then fails on either."""
+
+    def __init__(self, context: Any) -> None:
+        self._context = context
+        self.violations: list[str] = []
+        self.requests: RequestLog = record_requests(context)
+        self.closed = False
+        context.expose_binding(_CSP_BINDING, lambda source, message: self.violations.append(str(message)))
+        context.add_init_script(_CSP_LISTENER)
+
+    @property
+    def playwright_context(self) -> Any:
+        """The real context: what `page.context` returns for its pages."""
+        return self._context
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._context, name)
+
+    def close(self) -> None:
+        if not self.closed:
+            for page in self._context.pages:  # let a report still in flight arrive
+                page.wait_for_timeout(100)
+                break
+            self._context.close()
+            self.closed = True
+        assert not self.violations, f"F8: the page broke the ingress's CSP: {self.violations}"
+        assert_no_repeat(self.requests)
+
+
+def guard_csp(context: Any) -> list[str]:
+    """The live list of CSP violations any page of `context` (one the `browser` fixture made) has reported, across
+    navigations and closed tabs. Not an installer: the fixture installed the guard when it made the context."""
+    # Duck-typed: pytest imports this file as `conftest` and tests import it as `defender.tests.frontend.conftest`, so
+    # there are two `GuardedContext` classes and `isinstance` would refuse the other module's.
+    violations = getattr(context, "violations", None)
+    assert isinstance(violations, list), "guard_csp: the context was not made by the `browser` fixture"
+    return violations
+
+
+def requests_of(context: Any) -> RequestLog:
+    """The live log of every request any page of `context` (one the `browser` fixture made) has made, in order."""
+    log = getattr(context, "requests", None)
+    assert isinstance(log, RequestLog), "requests_of: the context was not made by the `browser` fixture"
+    return log
+
+
+class GuardedBrowser:
+    """The pinned Chromium, whose every context carries F8's guard."""
+
+    def __init__(self, chromium: Any) -> None:
+        self._chromium = chromium
+        self.made: list[GuardedContext] = []
+
+    def new_context(self, **options: Any) -> GuardedContext:
+        made = GuardedContext(self._chromium.new_context(**options))
+        self.made.append(made)
+        return made
+
+    def new_page(self, **options: Any) -> Any:
+        """A page of a guarded context of its own: Playwright's own `new_page` would open an unguarded one."""
+        return self.new_context(**options).new_page()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._chromium, name)
 
 
 @pytest.fixture(scope="session")
 def browser_tools() -> None:
-    """Node, npm, Caddy, Playwright and its Chromium are all present, or the test fails (B11)."""
+    """Bun, Caddy, Playwright and its Chromium are all present, or the test fails (B11)."""
     ingress_harness.require_tools()
 
 
 @pytest.fixture(scope="session")
 def built_frontend(browser_tools: None) -> Path:
-    """The frontend's `dist/`, built outside the checkout once per set of sources (`npm ci && npm run build`); fails when
+    """The frontend's `dist/`, built outside the checkout once per set of sources (`bun install --frozen-lockfile && bun run build`); fails when
     the build does. Its `node_modules/` is beside it."""
     return ingress_harness.build_frontend()
 
@@ -63,7 +151,7 @@ def playwright_(browser_tools: None) -> Iterator[Any]:
 
 
 @pytest.fixture(scope="module")
-def browser(playwright_: Any) -> Iterator[Any]:
+def chromium_(playwright_: Any) -> Iterator[Any]:
     """The pinned headless Chromium."""
     chromium = playwright_.chromium.launch()
     try:
@@ -73,8 +161,26 @@ def browser(playwright_: Any) -> Iterator[Any]:
 
 
 @pytest.fixture
-def context(browser: Any) -> Iterator[Any]:
-    """A fresh browser profile (no cookies, no storage), `WAIT_MS` default timeout."""
+def browser(chromium_: Any) -> Iterator[GuardedBrowser]:
+    """The browser whose every context fails its test on any CSP violation (F8), checked when the context closes; a context
+    the test leaves open is closed (and so checked) at the test's end."""
+    guarded = GuardedBrowser(chromium_)
+    try:
+        yield guarded
+    finally:
+        failures: list[AssertionError] = []
+        for made in guarded.made:
+            try:
+                made.close()
+            except AssertionError as error:
+                failures.append(error)
+        if failures:
+            raise failures[0]
+
+
+@pytest.fixture
+def context(browser: GuardedBrowser) -> Iterator[GuardedContext]:
+    """A fresh browser profile (no cookies, no storage), `WAIT_MS` default timeout; the test errors on any CSP violation."""
     ctx = browser.new_context()
     ctx.set_default_timeout(WAIT_MS)
     try:
@@ -84,9 +190,9 @@ def context(browser: Any) -> Iterator[Any]:
 
 
 @pytest.fixture
-def requests(context: Any) -> list[Any]:
-    """Every request `context` makes, in order."""
-    return record_requests(context)
+def requests(context: Any) -> RequestLog:
+    """Every request `context` makes, in order: the context's own log (its close checks it, Am-5)."""
+    return requests_of(context)
 
 
 @pytest.fixture

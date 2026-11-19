@@ -1,9 +1,10 @@
-"""The ledger label of a changed answer, over a generated family of facts, claims and cuts (#1385 A1).
+"""The ledger label of a changed answer, over a generated family of facts, changes and cuts (#1385 A1).
 
 One test, many inputs: a verified answer that differs from the live base is `oracle` when the
 difference shows the world's facts, `reconstructed` when it does not, `passthrough` when it is
 the base. The inputs are generated from a seed and defined by membership in the class (facts of
-several entities; removed, changed and dropped entries of any nesting), never by an attacker's
+several entities; removed, replaced and dropped rows of any nesting, as the host renders a
+hand-in's changes (#1543)), never by an attacker's
 particular instance. The expected label comes from a reference walk written here, apart from the
 code under test.
 
@@ -91,11 +92,12 @@ def _expected(case: _Case) -> str:
     names = {n for fact in case.facts for n in _entities_of(fact)}
     if not names:
         return RECONSTRUCTED
-    if case.claim["added"]:
+    entries = case.changes["changes"]
+    if any(e["op"] == "add" for e in entries):
         return S.ORACLE_DECISION
-    if any(isinstance(e["entity"], str) and e["entity"] in names for e in case.claim["changed"]):
-        return S.ORACLE_DECISION
-    if any(s in names for e in case.claim["removed"] for s in _strings(e["row"])):
+    shown = [e.get(k) for e in entries if e["op"] in ("remove", "replace")
+             for k in ("row_before", "row_after", "before", "after")]
+    if any(s in names for value in shown for s in _strings(value)):
         return S.ORACLE_DECISION
     if any(s in names for row in case.dropped for s in _strings(row)):
         return S.ORACLE_DECISION
@@ -117,7 +119,8 @@ class _Case:
     facts: list[Any]
     base: Any
     served: Any
-    claim: dict
+    #: The hand-in's changes as the host renders them (`render_changes`, #1543).
+    changes: dict
     re_asked: ReAsked | None
     #: Rows the live base has that the re-asked answer lacks (what the cut dropped), by
     #: construction.
@@ -186,7 +189,7 @@ class _Rows:
         return {"event_id": ident, "action": "logon", "host": "gw-1", "detail": cell}, chain
 
     def removed(self, planted: str | None, depth: int) -> tuple[Any, tuple[str, ...]]:
-        """A removed entry's row: a table row, or any other nesting a claim could quote."""
+        """A removed entry's row: a table row, or any other nesting a rendering could show."""
         inner, chain = _embed(self.rng, _filler(self.rng) if planted is None else planted, depth)
         pick = self.rng.randrange(4)
         if pick == 0:
@@ -217,6 +220,23 @@ def _facts(rng: random.Random) -> tuple[list[Any], list[list[str]]]:
     return facts, entities
 
 
+def _replaced(rng: random.Random, n: int, here: str | None, names: set[str]) -> dict:
+    """A replace as rendered: inside a row (row before and after) or a bare value (before and
+    after), `here` (or a decoy) planted on either side. The field and path it names may be an
+    entity's name, which shows no entity: only the values before and after the change count."""
+    planted, _chain = _embed(rng, here if here is not None else
+                             rng.choice([_filler(rng), _filler(rng), 7, None]), rng.randint(0, 3))
+    plain = _filler(rng)
+    sides = (planted, plain) if rng.random() < 0.5 else (plain, planted)
+    key = rng.choice(sorted(names)) if names and rng.random() < 0.3 else "detail"
+    if rng.random() < 0.5:
+        before, after = ({"event_id": f"ev-c{n}", key: side} for side in sides)
+        return {"op": "replace", "path": f"/rows/{n}/{key}", "fact_id": "f0", "field": key,
+                "row_before": before, "row_after": after}
+    return {"op": "replace", "path": f"/{key}", "fact_id": "f0", "before": sides[0],
+            "after": sides[1]}
+
+
 def _case(rng: random.Random, serial: int) -> _Case:  # noqa: C901 — one generator, one arm per site
     facts, facts_entities = _facts(rng)
     names = {e for es in facts_entities for e in es}
@@ -245,18 +265,15 @@ def _case(rng: random.Random, serial: int) -> _Case:  # noqa: C901 — one gener
     changed: list[dict] = []
     for n in range(count["changed"]):
         here = target if (site == "changed" and n == at["changed"]) else None
-        # An entity's name in the other cells of the entry is no entity of it.
-        other = rng.choice(sorted(names)) if names and rng.random() < 0.3 else _filler(rng)
-        entity: Any = here if here is not None else rng.choice([_filler(rng), _filler(rng), 7, None])
-        changed.append({"entity": entity, "field": other, "old": other, "new": other})
+        changed.append(_replaced(rng, n, here, names))
         index = n if here is not None else index
     removed: list[dict] = []
     for n in range(count["removed"]):
         here = target if (site == "removed" and n == at["removed"]) else None
         depth = rng.randint(1, 4)
         row, row_chain = rows.removed(here, depth)
-        removed.append({"row": row, "side_query": {"system": "idp", "verb": "query", "params": {}},
-                        "count": 1})
+        removed.append({"op": "remove", "path": f"/rows/{n}", "fact_id": "f0",
+                        "row_before": row, "proven": False})
         if here is not None:
             index, nest, chain = n, depth, row_chain
     dropped: list[Any] = []
@@ -293,23 +310,29 @@ def _case(rng: random.Random, serial: int) -> _Case:  # noqa: C901 — one gener
         served = {**base, "edited": True}
     if rng.random() < 0.05:
         served = base
-    claim = {"added": [{"forged_id": "fg-1", "fact_id": "f0"}] if rng.random() < 0.08 else [],
-             "removed": removed, "changed": changed, "counts": [], "entity_refs": []}
-    return _Case(facts, base, served, claim, re_asked, dropped,
+    added = ([{"op": "add", "path": "/rows/-", "fact_id": "f0", "forged_id": "fg-1",
+               "row_after": {"event_id": "fg-1", "detail": _filler(rng)}}]
+             if rng.random() < 0.08 else [])
+    entries = [*added, *removed, *changed]
+    rng.shuffle(entries)
+    changes = {"query": {"system": "idp", "verb": "query", "params": {}}, "base": "live",
+               "changes": entries, "entity_refs": [], "proofs": []}
+    return _Case(facts, base, served, changes, re_asked, dropped,
                  plan=(site, mode, index, fact_i, ent_j, nest, chain, esql, replace_all))
 
 
 def test_1385_the_label_follows_what_the_difference_shows_of_the_worlds_facts():
-    """For generated facts, claims and cuts the label is `passthrough` for the base, `oracle` when
-    a forged row, a `changed` entry on a fact entity, or a removed or dropped row with a string
-    equal to a fact entity (at any depth) is shown, else `reconstructed`; a near miss (substring,
-    superstring, case variant, empty) never counts, nor does a world without facts (T2, A1)."""
+    """For generated facts, changes and cuts the label is `passthrough` for the base, `oracle` when
+    a forged row is added, or a removed or replaced row or value (before or after the change), or
+    a dropped row, holds a string equal to a fact entity (at any depth), else `reconstructed`; a
+    near miss (substring, superstring, case variant, empty) never counts, nor does a world
+    without facts (T2, A1, #1543)."""
     rng = random.Random(SEED)
     cases = [_case(rng, n) for n in range(CASES)]
     seen: Counter[str] = Counter()
     wrong: list[str] = []
     for n, case in enumerate(cases):
-        got = served_label(case.base, case.served, case.claim, case.facts, case.re_asked)
+        got = served_label(case.base, case.served, case.changes, case.facts, case.re_asked)
         want = _expected(case)
         site, mode, index, fact_i, ent_j, nest, chain, esql, replace_all = case.plan
         if want == S.ORACLE_DECISION:
@@ -330,7 +353,7 @@ def test_1385_the_label_follows_what_the_difference_shows_of_the_worlds_facts():
             seen[f"near:{site}"] += 1
         if got != want:
             wrong.append(f"case {n}: label {got!r}, expected {want!r}; plan={case.plan}; "
-                         f"facts={[_entities_of(f) for f in case.facts]}; claim={case.claim}; "
+                         f"facts={[_entities_of(f) for f in case.facts]}; changes={case.changes}; "
                          f"dropped={case.dropped}")
     assert not wrong, f"{len(wrong)} of {CASES} labels differ from the reference:\n" + "\n".join(wrong[:3])
     # The generated family reaches every kind of site a wrong rule could hide in.
@@ -427,14 +450,15 @@ def _column_cases(rng: random.Random) -> list[tuple[str, Any, Any]]:
 
 def _refused_scene(tmp_path, base: Any, answer: Any, re_ask: Any, *, unreadable: bool = False):
     """A live capped base, a real system that answers any other question with `answer`, and an
-    oracle that re-asks with `re_ask`: `(scene, oracle)`. The oracle then submits the answer the
-    re-ask would make its base, then the base honestly."""
+    oracle that re-asks with `re_ask`: `(scene, oracle)`. The oracle then submits an empty patch
+    that tests its base is the answer the re-ask would make it (so it is served only were the
+    re-ask admitted), then the base honestly (#1543)."""
     live = [("idp", "query", CAPPED, base)]
     sc = H._scene(tmp_path, live=live)
     sc.est.answer("idp", "query", None, answer)
     if unreadable:
         sc.est.fail("idp", "query", BOUNDED)
-    o = S.oracle(S.re_ask(re_ask), S.submit(answer, S.EMPTY_CLAIM), S.submit(base, S.EMPTY_CLAIM))
+    o = S.oracle(S.re_ask(re_ask), S.submit(S.handin(S.op_test("", answer))), S.submit())
     return sc, o
 
 
@@ -475,7 +499,7 @@ def test_1385_a_re_ask_is_admitted_only_whole_and_readable_and_keeps_the_calls_c
     # answer, is admitted whole.
     sc = H._scene(tmp_path / "control", live=[("idp", "query", CAPPED, H.ES_CAPPED),
                                               ("idp", "query", BOUNDED, H.ES_BOUNDED)])
-    o = S.oracle(S.re_ask(_valid()), S.submit(H.ES_BOUNDED, S.EMPTY_CLAIM))
+    o = S.oracle(S.re_ask(_valid()), S.submit(S.handin(S.op_test("", H.ES_BOUNDED))))
     assert sc.call(sc.registry(o), "idp", "query", **CAPPED) == H.ES_BOUNDED
     H._spent(o)
     assert o.submissions() == 1, "positive control: a valid re-ask was refused"
@@ -526,15 +550,18 @@ def _text(payload: Any) -> str:
     return json.dumps(payload, sort_keys=True)
 
 
-def _attempts_reusing_ids(rows: list[dict], base_rows: tuple,
-                          re_ask: dict | None = None) -> list[S.Move]:
+def _honest(fid: str, *, row: dict = H.FORGED_ROW, fact_id: str = "f1") -> list[S.Move]:
+    """Submit the base plus one forged row for a fact: one add appended to its rows (#1543)."""
+    return [S.submit(S.handin(S.op_add("/rows/-", row, forged_id=fid, fact_id=fact_id)))]
+
+
+def _attempts_reusing_ids(rows: list[dict], re_ask: dict | None = None) -> list[S.Move]:
     """One attempt per real row, each re-asking first when `re_ask` is given: a forged row that
     reuses that row's id."""
     out: list[S.Move] = []
     for i, real in enumerate(rows):
         out += [*([S.re_ask(re_ask)] if re_ask else []),
-                *H._honest(f"fg-r{i}", row={**H.FORGED_ROW, "event_id": real["event_id"]},
-                           base_rows=base_rows)]
+                *_honest(f"fg-r{i}", row={**H.FORGED_ROW, "event_id": real["event_id"]})]
     return out
 
 
@@ -556,9 +583,9 @@ def test_1385_the_kept_re_asked_base_is_what_the_host_read_and_is_real_data_befo
     ask = S.re_asked(system="idp", verb="query", params=Q2)
     o = S.oracle(
         S.re_ask(S.re_asked(system="idp", verb="query", params=Q1)),
-        S.submit({"rows": r1}, S.EMPTY_CLAIM),
-        *_attempts_reusing_ids(r2, tuple(r2), ask),
-        S.re_ask(ask), *H._honest("fg-1", row=H.FORGED_ROW, base_rows=tuple(r2)))
+        S.submit(),
+        *_attempts_reusing_ids(r2, ask),
+        S.re_ask(ask), *_honest("fg-1"))
     v = S.verifier(S.verdict(False, "the first re-ask drops what the question asked for"),
                    then=S.verdict(True))
     reg = sc.registry(o, v, retry_cap=len(r2) + 4)
@@ -582,9 +609,8 @@ def test_1385_the_kept_re_asked_base_is_what_the_host_read_and_is_real_data_befo
     assert store.base.get(key) == _text({"rows": r2}), "the reloaded store lost the kept base"
     assert ("idp", _text({"rows": r2})) in store.base_answers, (
         "the reloaded store does not index the kept base as real data")
-    again = S.oracle(*_attempts_reusing_ids(r2, (BOB_ROW,)),
-                     *H._honest("fg-2", row={**H.FORGED_ROW, "event_id": "e-9f02"},
-                                base_rows=(BOB_ROW,)))
+    again = S.oracle(*_attempts_reusing_ids(r2),
+                     *_honest("fg-2", row={**H.FORGED_ROW, "event_id": "e-9f02"}))
     reg2 = sc.registry(again, retry_cap=len(r2) + 3)
     assert sc.call(reg2, "idp", "query", **BOB_CAPPED) == {
         "rows": [BOB_ROW, {**H.FORGED_ROW, "event_id": "e-9f02"}]}
@@ -642,20 +668,19 @@ def test_1385_a_re_ask_is_shown_wherever_a_served_call_is_read_and_its_dropped_r
     """A `reconstructed` call cut by a re-ask (a live-only row D dropped, an older row B brought
     in, the question Q) carries the question and D as dropped — never B — at every reader: the
     committed answer, the world ledger (also for a repeat served from the store after a reload),
-    the reloaded store, the judge's prompt, and the verifier's prompt, whose base section and `$BASE`
-    expansion hold B and not D (T2, O4, A3, A4)."""
+    the reloaded store, the judge's prompt, and the verifier's prompt, whose base section holds B
+    and not D; an empty patch serves the re-asked base (T2, O4, A3, A4, #1543)."""
     sc = H._scene(tmp_path, live=[("idp", "query", LIVE_ONLY, {"rows": [ROW_D, ROW_K]}),
                                   ("idp", "query", RE_ASK_Q, {"rows": [ROW_K, ROW_B]})])
     asked = S.re_asked(system="idp", verb="query", params=RE_ASK_Q)
-    o = S.oracle(S.re_ask(asked),
-                 S.submit(S.sym("learning.branch.estate._oracle_prompt", "BASE_HANDLE"),
-                          S.EMPTY_CLAIM))
+    o = S.oracle(S.re_ask(asked), S.submit())
     verifier = S.passing_verifier()
     reg = sc.registry(o, verifier)
 
-    # serve: `$BASE` is the re-asked answer, so the call is answered with B and without D.
+    # serve: the patch applies to the re-asked answer, so the call is answered with B and
+    # without D.
     served = sc.call(reg, "idp", "query", **LIVE_ONLY)
-    assert served == {"rows": [ROW_K, ROW_B]}, "`$BASE` did not stand for the re-asked answer"
+    assert served == {"rows": [ROW_K, ROW_B]}, "the empty patch did not serve the re-asked answer"
     H._spent(o)
     assert o.submissions() == 1
 
@@ -716,12 +741,10 @@ def test_1385_a_re_ask_is_shown_wherever_a_served_call_is_read_and_its_dropped_r
 
 def _served_after_re_ask(tmp_path: Any, live: list[dict], re_asked_rows: list[dict]) -> Any:
     """World b serving the dan call over a live base of `live`, re-asked to `re_asked_rows` and
-    served as the re-asked answer (`$BASE`)."""
+    served as the re-asked answer (an empty patch)."""
     sc = H._scene(tmp_path, live=[("idp", "query", LIVE_ONLY, {"rows": live}),
                                   ("idp", "query", RE_ASK_Q, {"rows": re_asked_rows})])
-    o = S.oracle(S.re_ask(S.re_asked(system="idp", verb="query", params=RE_ASK_Q)),
-                 S.submit(S.sym("learning.branch.estate._oracle_prompt", "BASE_HANDLE"),
-                          S.EMPTY_CLAIM))
+    o = S.oracle(S.re_ask(S.re_asked(system="idp", verb="query", params=RE_ASK_Q)), S.submit())
     assert sc.call(sc.registry(o, S.passing_verifier()), "idp", "query", **LIVE_ONLY) == {
         "rows": re_asked_rows}
     H._spent(o)
@@ -759,16 +782,14 @@ def test_1385_review_a_ledger_row_keeps_a_bounded_cut_and_the_store_the_whole(
 
 
 def test_1385_review_a_re_asked_esql_answer_echoes_the_calls_own_query(tmp_path):
-    """An ES|QL answer echoes the query it ran. Served as `$BASE`, the re-asked answer echoes the
+    """An ES|QL answer echoes the query it ran. Served unchanged, the re-asked answer echoes the
     investigator's query, never the bounded one (which names the branch point); the verifier is
     still shown the re-ask's question."""
     echo, bounded_echo = "FROM logs-* | LIMIT 2", f'FROM logs-* | WHERE @timestamp <= "{S.AS_OF}"'
     asked, bounded = CAPPED, BOUNDED
     sc = H._scene(tmp_path, live=[("idp", "query", asked, {"query": echo, **H.ES_CAPPED}),
                                   ("idp", "query", bounded, {"query": bounded_echo, **H.ES_BOUNDED})])
-    o = S.oracle(S.re_ask(S.re_asked(system="idp", verb="query", params=bounded)),
-                 S.submit(S.sym("learning.branch.estate._oracle_prompt", "BASE_HANDLE"),
-                          S.EMPTY_CLAIM))
+    o = S.oracle(S.re_ask(S.re_asked(system="idp", verb="query", params=bounded)), S.submit())
     verifier = S.passing_verifier()
 
     served = sc.call(sc.registry(o, verifier), "idp", "query", **asked)

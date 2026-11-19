@@ -30,9 +30,13 @@ BASE_ALICE = {"rows": [ALICE_ROW]}
 #: (check 3).
 FORGED = {"action": "tgt-issued", "event_id": "e-9001", "user": "alice"}
 SERVED_ALICE = {"rows": [ALICE_ROW, FORGED]}
-CLAIM_ALICE = S.claim(added=[S.added("fg-1", "f1")])
-#: A submission that adds a row its claim does not declare.
-UNDECLARED = {"rows": [ALICE_ROW, {"action": "logon", "event_id": "e-7777", "user": "alice"}]}
+#: The same row served again by its id, once it is frozen in the world.
+AGAIN_ALICE = S.handin(S.op_add_frozen("/rows/-", forged_id="fg-1", fact_id="f1"))
+#: A hand-in that slips in a row no `add` declares (it replaces the list with one row more):
+#: check 1 refuses it.
+UNDECLARED = S.handin(S.op_replace(
+    "/rows", [ALICE_ROW, {"action": "logon", "event_id": "e-7777", "user": "alice"}],
+    fact_id="f1"))
 
 BOB_BASE = {"rows": [{"action": "logon", "event_id": "e-200", "user": "bob"}]}
 EDR_BASE = {"events": [{"event_id": "x-7", "host": "db-1", "process": "sshd",
@@ -47,13 +51,10 @@ def _text(payload: Any) -> str:
     return json.dumps(payload, sort_keys=True, default=str)
 
 
-def _forged_moves(fid: str = "fg-1", fact_id: str = "f1", *, system: str = "idp",
-                  row: dict | None = None, served: Any = None) -> list:
-    """One oracle turn that forges fact telemetry and submits the base plus that row."""
+def _forged_moves(fid: str = "fg-1", fact_id: str = "f1", *, row: dict | None = None) -> list:
+    """One oracle turn that submits the base plus one forged row of fact telemetry."""
     row = FORGED if row is None else row  # lint-default: ok — a test builder's fresh per-call double or fixture, never a shared instance
-    served = SERVED_ALICE if served is None else served  # lint-default: ok — a test builder's fresh per-call double or fixture, never a shared instance
-    return [S.forge(fid, fact_id, system, row),
-            S.submit(served, S.claim(added=[S.added(fid, fact_id)]))]
+    return [S.submit(S.handin(S.op_add("/rows/-", row, forged_id=fid, fact_id=fact_id)))]
 
 
 def _episode(tmp_path: Path, *, doc: dict | None = None,
@@ -277,7 +278,7 @@ def test_1224_served_verb_returns_the_verified_answer_and_rows_it(tmp_path):
     est = S.estate(tmp_path)
     ep = _episode(tmp_path, captured=[("idp", "query", ALICE, BASE_ALICE),
                                       ("siem-x", "lookup", SIEM_ALICE, SIEM_BASE)])
-    oracle = S.oracle(*_forged_moves(), S.submit(SIEM_BASE, S.EMPTY_CLAIM))
+    oracle = S.oracle(*_forged_moves(), S.submit())
     verifier = S.passing_verifier()
     reg = S.sandboxed_registry(ep, "b", est, oracle=oracle, verifier=verifier)
     ctx = est.ctx(tmp_path / "run")
@@ -333,12 +334,12 @@ def test_1224_n_failed_attempts_raise_oracle_unservable(tmp_path, failing):
     ep = _episode(tmp_path, captured=[("idp", "query", ALICE, BASE_ALICE),
                                       ("siem-x", "lookup", SIEM_ALICE, SIEM_BASE)])
     if failing == "host-check":
-        oracle = S.oracle(S.submit(SIEM_BASE, S.EMPTY_CLAIM),
-                          then=S.submit(UNDECLARED, S.EMPTY_CLAIM))
+        oracle = S.oracle(S.submit(),
+                          then=S.submit(UNDECLARED))
         verifier = S.passing_verifier()
     else:
-        oracle = S.oracle(S.submit(SIEM_BASE, S.EMPTY_CLAIM),
-                          then=S.submit(BASE_ALICE, S.EMPTY_CLAIM))
+        oracle = S.oracle(S.submit(),
+                          then=S.submit())
         verifier = S.verifier(S.verdict(True),
                               then=S.verdict(False, "fact f1's TGT for alice is missing"))
     reg = S.sandboxed_registry(ep, "b", est, oracle=oracle, verifier=verifier, retry_cap=3)
@@ -395,9 +396,7 @@ def test_1224_oracle_row_carries_call_digest_answer_claim_verdict_and_attempts(t
     est.answer("idp", "query", BOB, BOB_BASE)
     reason = "fact f1's TGT for alice at 15:22Z is present and plausible"
     forged_bob = {"action": "tgt-issued", "event_id": "e-9002", "user": "bob"}
-    oracle = S.oracle(S.submit(UNDECLARED, S.EMPTY_CLAIM), *_forged_moves(),
-                      *_forged_moves("fg-2", row=forged_bob,
-                                     served={"rows": [*BOB_BASE["rows"], forged_bob]}))
+    oracle = S.oracle(S.submit(UNDECLARED), *_forged_moves(), *_forged_moves("fg-2", row=forged_bob))
     verifier = S.verifier(S.verdict(True, reason), then=S.verdict(True))
     reg = S.sandboxed_registry(ep, "b", est, oracle=oracle, verifier=verifier)
 
@@ -408,7 +407,8 @@ def test_1224_oracle_row_carries_call_digest_answer_claim_verdict_and_attempts(t
     assert row["source"] == S.ORACLE_DECISION
     assert (row["system"], row["verb"], _asked(row)) == ("idp", "query", ALICE)
     assert json.loads(row["payload_text"]) == SERVED_ALICE
-    assert {"forged_id": "fg-1", "fact_id": "f1"} in row["claim"]["added"]
+    assert any((c.get("op"), c.get("forged_id"), c.get("fact_id")) == ("add", "fg-1", "f1")
+               for c in row["claim"]["changes"]), row["claim"]
     assert reason in json.dumps(row["verifier_verdict"])
     assert row["attempts"] == 2, "one failed check-1 attempt, then the verified one"
 
@@ -418,7 +418,7 @@ def test_1224_oracle_row_carries_call_digest_answer_claim_verdict_and_attempts(t
     assert digest not in (None, "", [], {}), f"the oracle row carries no base digest: {row}"
     forged_c = {"action": "password-reset", "event_id": "e-9101", "user": "bob"}
     world_c = S.sandboxed_registry(ep, "c", est, verifier=S.passing_verifier(), oracle=S.oracle(
-        *_forged_moves("fg-c1", "f2", row=forged_c, served={"rows": [ALICE_ROW, forged_c]})))
+        *_forged_moves("fg-c1", "f2", row=forged_c)))
     S.call(world_c, "idp", "query", est.ctx(tmp_path / "run-c"), **ALICE)
     rows_c = _rows_for(ep, "c", "idp", "query", ALICE)
     assert [r["source"] for r in rows_c] == [S.ORACLE_DECISION]
@@ -438,7 +438,7 @@ def test_1224_world_with_no_facts_serves_every_base_as_passthrough(tmp_path):
     est = S.estate(tmp_path)
     ep = _episode(tmp_path)
     est.answer("idp", "query", BOB, BOB_BASE)
-    control_oracle = S.oracle(S.submit(BOB_BASE, S.EMPTY_CLAIM))
+    control_oracle = S.oracle(S.submit())
     control = S.sandboxed_registry(ep, "a", est, oracle=control_oracle,
                                    verifier=S.passing_verifier())
     ctx = est.ctx(tmp_path / "run")
@@ -466,7 +466,7 @@ def test_1224_unchanged_answer_in_a_fact_world_still_passes_the_verifier(tmp_pat
     """An unchanged submission is rowed `passthrough` only once the verifier passes it; a failing verdict sends it back."""
     est = S.estate(tmp_path)
     ep = _episode(tmp_path)
-    oracle = S.oracle(S.submit(BASE_ALICE, S.EMPTY_CLAIM), S.submit(BASE_ALICE, S.EMPTY_CLAIM))
+    oracle = S.oracle(S.submit(), S.submit())
     verifier = S.verifier(S.verdict(False, "fact f1's TGT logon should show in this window"),
                           S.verdict(True))
     reg = S.sandboxed_registry(ep, "b", est, oracle=oracle, verifier=verifier)
@@ -520,14 +520,12 @@ def test_1385_a_cut_is_oracle_only_for_what_it_shows_of_the_worlds_facts(
     est.answer("idp", "query", _CAPPED, {"rows": [dropped, _KEPT]})
     at_branch = {"rows": [_KEPT, older]}
     est.answer("idp", "query", _BOUNDED, at_branch)
-    served, claim = at_branch, S.claim()
-    moves = [S.re_ask(_RE_ASK)]
+    served, handin = at_branch, S.EMPTY
     if forge:
         served = {"rows": [*at_branch["rows"], _FACT_ROW]}
-        claim = S.claim(added=[S.added("fg-1", "f1")])
-        moves.append(S.forge("fg-1", "f1", "idp", _FACT_ROW))
+        handin = S.handin(S.op_add("/rows/-", _FACT_ROW, forged_id="fg-1", fact_id="f1"))
     ep = _episode(tmp_path, captured=[])
-    oracle = S.oracle(*moves, S.submit(served, claim))
+    oracle = S.oracle(S.re_ask(_RE_ASK), S.submit(handin))
     reg = S.sandboxed_registry(ep, label, est, oracle=oracle, verifier=S.passing_verifier())
 
     assert S.call(reg, "idp", "query", est.ctx(tmp_path / "run"), **_CAPPED) == served
@@ -539,15 +537,14 @@ def test_1385_a_cut_is_oracle_only_for_what_it_shows_of_the_worlds_facts(
                                                   ("bob", "reconstructed")],
                          ids=["fact-entity", "other-entity"])
 def test_1385_a_changed_entry_is_oracle_only_on_a_fact_entity(tmp_path, entity, expected):
-    """A `changed` entry on an entity a fact names labels the answer `oracle`; on any other
-    entity it is `reconstructed` (T2, O4)."""
+    """A replaced value in a row naming an entity a fact names labels the answer `oracle`; on
+    any other entity it is `reconstructed` (T2, O4)."""
     est = S.estate(tmp_path)
     record = {"entity": entity, "risk": "low", "record_id": "r-0001"}
     est.answer("siem-x", "lookup", {"entity": entity}, record)
     served = {**record, "risk": "high"}
     ep = _episode(tmp_path, captured=[])
-    oracle = S.oracle(S.submit(served, S.claim(changed=[S.changed(entity, "risk", "low",
-                                                                  "high")])))
+    oracle = S.oracle(S.submit(S.handin(S.op_replace("/risk", "high", fact_id="f1"))))
     reg = S.sandboxed_registry(ep, "b", est, oracle=oracle, verifier=S.passing_verifier())
 
     assert S.call(reg, "siem-x", "lookup", est.ctx(tmp_path / "run"), entity=entity) == served
@@ -558,14 +555,14 @@ def test_1385_a_changed_entry_is_oracle_only_on_a_fact_entity(tmp_path, entity, 
 def test_1385_a_fact_the_oracle_records_on_an_undeclared_entity_does_not_make_a_change_oracle(
         tmp_path):
     """The label reads the family's declared facts: a `record_fact` on `bob`, a name no fact
-    declares, and a `changed` entry on him leave the answer `reconstructed` (A1)."""
+    declares, and a replaced value on him leave the answer `reconstructed` (A1)."""
     est = S.estate(tmp_path)
     record = {"entity": "bob", "risk": "low", "record_id": "r-0001"}
     est.answer("siem-x", "lookup", {"entity": "bob"}, record)
     served = {**record, "risk": "high"}
     ep = _episode(tmp_path, captured=[])
     oracle = S.oracle(S.record_fact("bob", "risk", "high"),
-                      S.submit(served, S.claim(changed=[S.changed("bob", "risk", "low", "high")])))
+                      S.submit(S.handin(S.op_replace("/risk", "high", fact_id="f1"))))
     reg = S.sandboxed_registry(ep, "b", est, oracle=oracle, verifier=S.passing_verifier())
 
     assert S.call(reg, "siem-x", "lookup", est.ctx(tmp_path / "run"), entity="bob") == served
@@ -578,10 +575,10 @@ def test_1224_served_answer_is_recorded_and_screened_as_real_data(tmp_path):
     est = _TicketEstate(tmp_path / "estate")
     est.answer("ticket", "list-tickets", TICKETS, TICKETS_BASE)
     forged = {"key": "INC-9001", "status": "open", "summary": "alice TGT anomaly on db-1"}
-    served = {"tickets": [SELF_TICKET, OTHER_TICKET, forged], "total": 3}
-    claim = S.claim(added=[S.added("fg-t1", "f1")], counts=[S.counted("total", base=2, added_=1)])
+    handin = S.handin(S.op_add("/tickets/-", forged, forged_id="fg-t1", fact_id="f1"),
+                      S.op_replace("/total", 3, fact_id="f1"))
     ep = _ticket_episode(tmp_path)
-    oracle = S.oracle(S.forge("fg-t1", "f1", "ticket", forged), S.submit(served, claim))
+    oracle = S.oracle(S.submit(handin))
     reg = S.sandboxed_registry(ep, "b", est, oracle=oracle, verifier=S.passing_verifier())
 
     run_dir, _gather = _ticket_drive(tmp_path / "branch", est, reg)
@@ -602,7 +599,7 @@ def test_1224_two_worlds_asking_one_call_get_their_own_served_answers(tmp_path):
     forged_c = {"action": "password-reset", "event_id": "e-9002", "user": "alice"}
     served_c = {"rows": [ALICE_ROW, forged_c]}
     oracle_b = S.oracle(*_forged_moves())
-    oracle_c = S.oracle(*_forged_moves("fg-c1", "f2", row=forged_c, served=served_c))
+    oracle_c = S.oracle(*_forged_moves("fg-c1", "f2", row=forged_c))
     reg_b = S.sandboxed_registry(ep, "b", est, oracle=oracle_b, verifier=S.passing_verifier())
     reg_c = S.sandboxed_registry(ep, "c", est, oracle=oracle_c, verifier=S.passing_verifier())
     ctx_b, ctx_c = est.ctx(tmp_path / "run-b"), est.ctx(tmp_path / "run-c")
@@ -624,7 +621,7 @@ def test_1224_two_worlds_asking_one_call_get_their_own_served_answers(tmp_path):
 def test_1224_fact_names_an_entity_no_real_answer_contains(tmp_path):
     """An invented entity reads the same on every system: each call takes a verified turn; check 4 refuses a contradiction."""
     est = S.estate(tmp_path)
-    # The world's fact names the invented entity: a `changed` entry on it is shown (#1385 A1).
+    # The world's fact names the invented entity: a replaced value on it is shown (#1385 A1).
     doc = S.family_v2(worlds=[
         S.control_world("a"),
         S.world_v2("b", facts=[S.fact("f1", "ghost-7 exists on every system", ("ghost-7",))]),
@@ -635,12 +632,11 @@ def test_1224_fact_names_an_entity_no_real_answer_contains(tmp_path):
     est.answer("idp", "lookup", ghost, {"entity": "ghost-7", "found": False})
     est.answer("edr", "lookup", ghost, {"entity": "ghost-7", "found": False})
     exists = {"entity": "ghost-7", "found": True}
-    found = S.claim(changed=[S.changed("ghost-7", "found", False, True)])
+    found = S.handin(S.op_replace("/found", True, fact_id="f1"))
     oracle = S.oracle(
-        S.record_fact("ghost-7", "found", True), S.submit(exists, found),       # idp
-        S.submit({"entity": "ghost-7", "found": "no"},                          # edr, attempt 1
-                 S.claim(changed=[S.changed("ghost-7", "found", False, "no")])),
-        S.submit(exists, found))                                                # edr, attempt 2
+        S.record_fact("ghost-7", "found", True), S.submit(found),               # idp
+        S.submit(S.handin(S.op_replace("/found", "no", fact_id="f1"))),          # edr, attempt 1
+        S.submit(found))                                                        # edr, attempt 2
     verifier = S.passing_verifier()
     reg = S.sandboxed_registry(ep, "b", est, oracle=oracle, verifier=verifier)
     ctx = est.ctx(tmp_path / "run")
@@ -672,7 +668,7 @@ def test_p098_real_error_on_a_call_the_worlds_facts_cover(tmp_path):
     real_dir, _, real_state = S.drive_gather_run(tmp_path / "real", verbs=S.plain_registry(est),
                                                  tenant=est.place(), gather_turns=turns())
     ep = _episode(tmp_path / "branch", captured=[])
-    oracle = S.oracle(S.submit(BOB_BASE, S.EMPTY_CLAIM))
+    oracle = S.oracle(S.submit())
     reg = S.sandboxed_registry(ep, "b", est, oracle=oracle, verifier=S.passing_verifier())
     branch_dir, _, branch_state = S.drive_gather_run(tmp_path / "branch", verbs=reg,
                                                      tenant=est.place(), gather_turns=turns())
@@ -695,7 +691,7 @@ def test_input_same_call_with_params_in_a_different_key_order(tmp_path):
     est = S.estate(tmp_path)
     ep = _episode(tmp_path)
     est.answer("idp", "query", ALICE, BASE_ALICE)  # what a live read of the respelled call gets
-    oracle = S.oracle(*_forged_moves(), S.submit(SERVED_ALICE, CLAIM_ALICE))
+    oracle = S.oracle(*_forged_moves(), S.submit(AGAIN_ALICE))
     reg = S.sandboxed_registry(ep, "b", est, oracle=oracle, verifier=S.passing_verifier())
     ctx = est.ctx(tmp_path / "run")
 
@@ -738,7 +734,7 @@ def test_base_answer_is_a_non_answer_body(tmp_path, body):
     ctx = est.ctx(tmp_path / "run")
 
     # The control world's live base goes through its oracle too, framed the same way.
-    control_oracle = S.oracle(S.submit(payload, S.EMPTY_CLAIM))
+    control_oracle = S.oracle(S.submit())
     control = S.sandboxed_registry(ep, "a", est, oracle=control_oracle,
                                    verifier=S.passing_verifier())
     assert _text(S.call(control, "idp", "query", ctx, **BOB)) == _text(payload)
@@ -747,7 +743,7 @@ def test_base_answer_is_a_non_answer_body(tmp_path, body):
     if marker is not None:
         S.assert_wrapped_untrusted(control_oracle.seen[0], marker, f"the {body} base body")
 
-    oracle = S.oracle(S.submit(payload, S.EMPTY_CLAIM))
+    oracle = S.oracle(S.submit())
     reg = S.sandboxed_registry(ep, "b", est, oracle=oracle, verifier=S.passing_verifier())
     assert _text(S.call(reg, "idp", "query", ctx, **BOB)) == _text(payload)
     assert _decisions(ep, "b") == [S.PASSTHROUGH]
@@ -757,7 +753,8 @@ def test_base_answer_is_a_non_answer_body(tmp_path, body):
 
 
 def test_input_base_answer_is_larger_than_the_oracle_context(tmp_path):
-    """An answer past one request's cap is worked over a handle and served whole; a truncated one is never served."""
+    """An answer past one request's cap is worked over a handle and the empty patch serves it whole; a patch
+    built on a wrong guess of what the handle holds (its `test` fails) is never served."""
     est = S.estate(tmp_path)
     ep = _episode(tmp_path, captured=[])
     everyone = S.query_params("*")
@@ -773,8 +770,9 @@ def test_input_base_answer_is_larger_than_the_oracle_context(tmp_path):
         assert len(_text(answer)) > cap, "the base answer fits one request: nothing to test"
     est.answer("idp", "query", everyone, big)
     est.answer("idp", "query", hosts, big_hosts)
-    truncated = {"rows": big_hosts["rows"][:10]}
-    oracle = S.oracle(S.submit(big, S.EMPTY_CLAIM), then=S.submit(truncated, S.EMPTY_CLAIM))
+    guessed = S.handin(S.op_test("/rows/4999/user", "h00010"),
+                       S.op_remove("/rows/4999", fact_id="f1"))
+    oracle = S.oracle(S.submit(), then=S.submit(guessed))
     reg = S.sandboxed_registry(ep, "b", est, oracle=oracle, verifier=S.passing_verifier(), retry_cap=2)
     ctx = est.ctx(tmp_path / "run")
 
@@ -784,6 +782,8 @@ def test_input_base_answer_is_larger_than_the_oracle_context(tmp_path):
 
     with pytest.raises(S.unservable_cls()):
         S.call(reg, "idp", "query", ctx, **hosts)
+    assert "patch operation 0 (test" in oracle.seen[-1]
+    assert "cannot apply" in oracle.seen[-1]
     assert _rows_for(ep, "b", "idp", "query", hosts) == []
     assert _stored(ep, "b", "idp", "query", hosts) == []
     assert [r["source"] for r in S.ledger_rows(ep, "b")] == [S.PASSTHROUGH]
@@ -802,7 +802,7 @@ def test_p019_base_answer_has_a_single_enormous_string_value(tmp_path, shape):
     est = S.estate(tmp_path)
     ep = _episode(tmp_path, captured=[])
     est.answer("idp", "query", BOB, base)
-    oracle = S.oracle(S.submit(base, S.EMPTY_CLAIM))
+    oracle = S.oracle(S.submit())
     reg = S.sandboxed_registry(ep, "b", est, oracle=oracle, verifier=S.passing_verifier())
     ctx = est.ctx(tmp_path / "run")
 
@@ -831,7 +831,7 @@ def test_p021_base_answer_values_with_control_characters_nul_bidi_and_zero_width
     est = S.estate(tmp_path)
     ep = _episode(tmp_path, captured=[])
     est.answer("idp", "query", BOB, base)
-    oracle = S.oracle(S.submit(base, S.EMPTY_CLAIM))
+    oracle = S.oracle(S.submit())
     reg = S.sandboxed_registry(ep, "b", est, oracle=oracle, verifier=S.passing_verifier())
 
     served = S.call(reg, "idp", "query", est.ctx(tmp_path / "run"), **BOB)
@@ -859,7 +859,7 @@ def test_input_call_params_cannot_be_stored(tmp_path):
     real_dir, real_gather = S.drive_gather(tmp_path / "real", verbs=S.plain_registry(est),
                                            tenant=est.place(), gather_turns=turns())
     ep = _episode(tmp_path / "branch")
-    oracle = S.oracle(S.submit(BASE_ALICE, S.EMPTY_CLAIM))
+    oracle = S.oracle(S.submit())
     verifier = S.passing_verifier()
     reg = S.sandboxed_registry(ep, "b", est, oracle=oracle, verifier=verifier)
     branch_dir, branch_gather = S.drive_gather(tmp_path / "branch", verbs=reg,
@@ -897,7 +897,7 @@ def test_input_denied_or_undeclared_call_in_a_fact_world(tmp_path):
     real_dir, _ = S.drive_gather(tmp_path / "real", verbs=S.plain_registry(est),
                                  tenant=est.place(), gather_turns=turns())
     ep = _episode(tmp_path / "branch")
-    oracle = S.oracle(S.submit(BASE_ALICE, S.EMPTY_CLAIM))
+    oracle = S.oracle(S.submit())
     verifier = S.passing_verifier()
     reg = S.sandboxed_registry(ep, "b", est, oracle=oracle, verifier=verifier)
     branch_dir, _ = S.drive_gather(tmp_path / "branch", verbs=reg, tenant=est.place(),
@@ -936,7 +936,7 @@ def test_conc_19_oracle_side_query_beside_investigator_calls(tmp_path):
     est.answer("idp", "lookup", checked, {"entity": "carol", "found": True})
     est.fail("siem-x", "lookup", SIEM_ALICE, fault="UpstreamFault", detail="siem-x: 503")
     oracle = S.oracle(S.run_query("edr", "query", explored), *_forged_moves(),   # alice
-                      S.submit(EDR_BASE, S.EMPTY_CLAIM))                          # edr db-1
+                      S.submit())                          # edr db-1
     verifier = S.verifier(S.run_query("idp", "lookup", checked), S.verdict(True),
                           then=S.verdict(True))
     reg = S.sandboxed_registry(ep, "b", est, oracle=oracle, verifier=verifier)
@@ -1021,7 +1021,7 @@ def test_torn_last_line_in_the_forged_store_at_resume(tmp_path):
         + "\n" + '{"actor": "verif', encoding="utf-8")
     forged_2 = {"action": "tgt-renewed", "event_id": "e-9002", "user": "alice"}
     served_2 = {"rows": [ALICE_ROW, forged_2]}
-    oracle = S.oracle(*_forged_moves("fg-2", row=forged_2, served=served_2))
+    oracle = S.oracle(*_forged_moves("fg-2", row=forged_2))
     reg = S.sandboxed_registry(ep, "b", est, oracle=oracle, verifier=S.passing_verifier())
     ctx = est.ctx(tmp_path / "run")
 
@@ -1066,7 +1066,7 @@ def test_input_oracle_budget_is_zero_or_unreadable(tmp_path, monkeypatch):
     monkeypatch.setenv(S.KNOB_BUDGET, "0")
     launch = S.launch(tmp_path / "launch", S.estate(tmp_path / "launch"),
                       calls=[S.Call("idp", "query", ALICE, BASE_ALICE)],
-                      oracle=S.oracle(then=S.submit(BASE_ALICE, S.EMPTY_CLAIM)),
+                      oracle=S.oracle(then=S.submit()),
                       verifier=S.passing_verifier(), judge=S.FakeJudge(default=S.judge_reply()))
     outcome = S.read_outcome(launch.ep)
     assert outcome is not None
@@ -1081,7 +1081,7 @@ def test_conc_25_one_worlds_served_answer_beside_another_worlds_base_read(tmp_pa
     est = S.estate(tmp_path)
     ep = _episode(tmp_path)
     family_before = (ep / "served" / "base.jsonl").read_bytes()
-    oracle_c, verifier_c = S.oracle(S.submit(BASE_ALICE, S.EMPTY_CLAIM)), S.passing_verifier()
+    oracle_c, verifier_c = S.oracle(S.submit()), S.passing_verifier()
     regs = {"b": S.sandboxed_registry(ep, "b", est, oracle=S.oracle(*_forged_moves()),
                            verifier=S.passing_verifier()),
             "c": S.sandboxed_registry(ep, "c", est, oracle=oracle_c, verifier=verifier_c)}
@@ -1121,6 +1121,9 @@ def test_conc_25_one_worlds_served_answer_beside_another_worlds_base_read(tmp_pa
 #: (`user:alice`) contains the other, so `_CallRouted` tells the two replayed calls apart.
 POST_Q = "tgt:alice"
 POST_BASE = {"rows": [{"action": "logon", "event_id": "e-300", "user": "alice"}]}
+#: The default family's fact worlds' facts (`S.family_v2`): b's f1, c's f2.
+_FACT_STATEMENTS = {f["fact_id"]: f["statement"]
+                    for w in S.family_v2()["worlds"] for f in w.get("facts") or ()}
 
 
 @pytest.mark.parametrize("edited_call", ["pre-branch", "neither", "post-branch"])
@@ -1129,13 +1132,15 @@ def test_1224_world_fact_covers_a_call_the_investigator_made_before_the_branch_p
     """A pre-branch call is fixed: a world changing its answer fails pre-flight; changing a post-branch call is allowed."""
     monkeypatch.setenv(S.KNOB_RETRY_CAP, "1")
     est = S.estate(tmp_path)
-    claim = S.claim(changed=[S.changed("alice", "action", "logon", "tgt-issued")])
 
-    def answering(base: dict, *, edit: bool) -> S.ScriptedModel:
+    def answering(base: dict, *, edit: bool) -> Any:
         if not edit:
-            return S.oracle(then=S.submit(base, S.EMPTY_CLAIM))
-        edited = {"rows": [dict(row, action="tgt-issued") for row in base["rows"]]}
-        return S.oracle(then=S.submit(edited, claim))
+            return S.oracle(then=S.submit())
+        # Each fact world names its own fact: the edit is routed by the world's fact statement.
+        return _CallRouted({statement: S.oracle(then=S.submit(S.handin(*(
+            S.op_replace(f"/rows/{i}/action", "tgt-issued", fact_id=fact_id)
+            for i in range(len(base["rows"]))))))
+            for fact_id, statement in _FACT_STATEMENTS.items()})
 
     pre = answering(BASE_ALICE, edit=edited_call == "pre-branch")
     post = answering(POST_BASE, edit=edited_call == "post-branch")
@@ -1175,7 +1180,7 @@ def test_1224_unservable_call_and_the_world_ledger(tmp_path, cause):
     est.fail("siem-x", "lookup", SIEM_ALICE, fault="UpstreamFault", detail="siem-x: 503")
     knobs: dict[str, Any] = {"retry_cap": 2}
     if cause == "checks":
-        oracle = S.oracle(then=S.submit(UNDECLARED, S.EMPTY_CLAIM))
+        oracle = S.oracle(then=S.submit(UNDECLARED))
     elif cause == "exception":
         # Every oracle request fails as the provider client fails after its retries.
         oracle = S.oracle(then=S.raising(S.OUTAGE))

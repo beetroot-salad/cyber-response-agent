@@ -124,7 +124,7 @@ def _launch(scene: Scene, *, argv_extra=(), **seams) -> Launch:
     seams.setdefault("preflight", S.no_preflight)
     seams.setdefault("roster", scene.est.roster())
     seams.setdefault("judge", S.FakeJudge(default="bucket: none\nsystems: []\nfindings: []\n"))
-    seams.setdefault("oracle", S.oracle(then=S.submit(_BASE, S.EMPTY_CLAIM)).model)
+    seams.setdefault("oracle", S.oracle(then=S.submit()).model)
     seams.setdefault("verifier", S.passing_verifier().model)
     message = ""
     argv = ["--tenant", scene.t.tenant_id, scene.src.name, str(T.BRANCH_MESSAGE_ID), *argv_extra]

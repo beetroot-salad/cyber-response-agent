@@ -20,6 +20,7 @@ import hmac
 import http.server
 import json
 import os
+import re
 import struct
 import tempfile
 import threading
@@ -33,6 +34,7 @@ import httpx
 import pytest
 
 from defender._git import REPO_ROOT
+from defender.tests.identity.test_identity_realm_export import THEME, THEME_NAME, stylesheet_references, theme_properties
 
 pytestmark = pytest.mark.live
 
@@ -261,3 +263,26 @@ def test_1161_the_credential_list_and_user_record_have_the_shapes_the_fake_model
     assert put.status_code == 204, (put.status_code, put.text)
     assert httpx.get(url, headers=live.admin).json()["requiredActions"] == ["CONFIGURE_TOTP"]
     assert httpx.get(f"{live.users}/{uuid.uuid4()}/credentials", headers=live.admin).status_code == 404  # an unknown id
+
+
+def test_1540_f5_the_dev_login_page_links_the_theme_stylesheet_and_serves_it_and_its_images(live):
+    """The dev realm's login page links the parent's stylesheet then the theme's own, each answers 200, and so does
+    every file the theme's stylesheet references (the illustration, the tokens). (F5, C10)"""
+    state, nonce, challenge = "1540", "1540", _pkce()[1]
+    page = httpx.get(live.authorize_url(state, nonce, challenge), follow_redirects=True)
+    assert page.status_code == 200, page.text[:300]
+    parent_styles, own = theme_properties(THEME)["styles"].split()
+    tags = [t for t in re.findall(r"<link\b[^>]*>", page.text) if 'rel="stylesheet"' in t]
+    served = [urllib.parse.urlsplit(m.group(1)).path for t in tags if (m := re.search(r'href="([^"]+)"', t))]
+    ends = {name: [p for p in served if p.endswith(f"/login/{THEME_NAME}/{name}")] for name in (parent_styles, own)}
+    assert all(ends.values()), f"the login page links {served}; expected the theme's {parent_styles} and {own}"
+    order = [p for p in served if p in {ends[parent_styles][0], ends[own][0]}]
+    assert order == [ends[parent_styles][0], ends[own][0]], order
+    sheet_url = live.base + ends[own][0]
+    sheet = httpx.get(sheet_url)
+    assert sheet.status_code == 200, (sheet_url, sheet.status_code)
+    assert httpx.get(live.base + ends[parent_styles][0]).status_code == 200
+    refs = stylesheet_references(sheet.text)
+    assert refs, "the theme's stylesheet references its illustration and tokens"
+    answers = {ref: httpx.get(urllib.parse.urljoin(sheet_url, ref)).status_code for ref in refs}
+    assert set(answers.values()) == {200}, answers

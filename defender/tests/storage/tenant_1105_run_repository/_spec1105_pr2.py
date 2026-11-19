@@ -185,7 +185,7 @@ def drive_launch(est: Any, argv: list[str], *, spawn: Any = None, judge: Any = N
     seams.setdefault("preflight", S.no_preflight)
     seams.setdefault("live_tree", T.source_capture())
     seams.setdefault("roster", est.roster())
-    seams.setdefault("oracle", S.oracle(then=S.submit(BASE_ANSWER, S.EMPTY_CLAIM)).model)
+    seams.setdefault("oracle", S.oracle(then=S.submit()).model)
     seams.setdefault("verifier", S.passing_verifier().model)
     from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
 

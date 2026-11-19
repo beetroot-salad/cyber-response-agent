@@ -186,7 +186,7 @@ def family() -> int:
     # do (`directory_for_argv`), the signature is a stand-in's, and the proxy's address is one nothing answers at
     # (`PROXY_URL`). Every call the source made is in its capture, so pre-flight reads nothing live through it.
     seams = dict(questioner=S.questioner_for(), preflight=S.no_preflight, live_tree=T.source_capture(),
-                 judge=judge, oracle=S.oracle(then=S.submit(_captured(runs, source), S.EMPTY_CLAIM)).model,
+                 judge=judge, oracle=S.oracle(then=S.submit()).model,
                  verifier=S.passing_verifier().model, directory=directory_for_argv(argv), spawn=sibling,
                  signer=FakeSigner("flow1344"), proxy_url=PROXY_URL)
     (marks / "runs").write_text(str(runs), encoding="utf-8")

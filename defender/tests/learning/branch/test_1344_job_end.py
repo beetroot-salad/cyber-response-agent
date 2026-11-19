@@ -394,7 +394,7 @@ def _our_failure(tmp_path, monkeypatch, data_root, cause):
     with P.rig(tmp_path, monkeypatch, data_root, bao_type=P.ScriptedBao if scripted else A.OpenBaoStandIn,
                credential_set=cause != "no credential set stored for the read system") as r, \
             A.proxy_for(r.t, r.store) as (url, _tap):
-        oracle, extra = S.oracle(then=S.submit(r.idp.payload, S.EMPTY_CLAIM)), {}
+        oracle, extra = S.oracle(then=S.submit()), {}
         if cause == "a re-sign fails mid-pass":
             # The first sign succeeds at the live read; the read then takes the held token's whole life (the holder's
             # clock is the test's), so the first lookup's re-sign is the one OpenBao refuses.
@@ -512,7 +512,7 @@ def test_1449_a_token_that_can_no_longer_be_signed_stops_the_family_before_the_n
         early = cause == "offboarded during pre-flight"
         spawn = BreaksSigningAfter(after="a", breaks=(lambda: None) if cause == "records intact" or early
                                    else breaks)
-        oracle = BreaksSigningWhenAsked(then=S.submit(r.idp.payload, S.EMPTY_CLAIM),
+        oracle = BreaksSigningWhenAsked(then=S.submit(),
                                         breaks=breaks if early else (lambda: None))
         run = S.launch(tmp_path, r.est, calls=r.calls, after_source=r.after_source, oracle=oracle,
                        verifier=S.passing_verifier(), spawn=spawn, argv_extra=("--job-id", JOB),
@@ -551,7 +551,7 @@ def test_1449_in_a_job_container_the_launcher_makes_no_records_check_of_its_own(
     with P.rig(tmp_path, monkeypatch, data_root) as r, A.proxy_for(r.t, r.store) as (url, _tap):
         spawn = J.FakeSibling()
         ran = run_entry(tmp_path, estate=lambda _root: r.est, calls=r.calls, after_source=r.after_source,
-                        oracle=S.oracle(then=S.submit(r.idp.payload, S.EMPTY_CLAIM)), issuer_transport=r.bao,
+                        oracle=S.oracle(then=S.submit()), issuer_transport=r.bao,
                         directory=r.records, proxy_url=url, helper_grant=("crm", "idp"), spawn=spawn)
     assert spawn.worlds == ["a", "b", "c"], spawn.worlds
     _ended(ran, "completed", None)
@@ -783,7 +783,7 @@ def _stop_during_preflight(*_a, **_k):
 
 
 def _oracle_stopped() -> S.ScriptedModel:
-    return TermAtFirstAnswer(then=S.submit(_BASE, S.EMPTY_CLAIM), name="oracle")
+    return TermAtFirstAnswer(then=S.submit(), name="oracle")
 
 
 STOP_SEAMS = {

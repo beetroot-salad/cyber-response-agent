@@ -66,7 +66,7 @@ def _launch(tmp_path, *, spawn=None, argv_extra=(), oracle=None, verifier=None, 
     """Drive one episode through the real launcher over `_spec1224`'s fixture tenant."""
     run = S.launch(
         tmp_path, S.estate(tmp_path), calls=_calls(), spawn=spawn, argv_extra=argv_extra,
-        oracle=oracle if oracle is not None else S.oracle(then=S.submit(_BASE, S.EMPTY_CLAIM)),
+        oracle=oracle if oracle is not None else S.oracle(then=S.submit()),
         verifier=verifier if verifier is not None else S.passing_verifier(), **seams)
     return run.rc, run.spawn, run.ep, run.message
 
