@@ -1,14 +1,11 @@
 """#1307 live: the Keycloak facts the design rests on (C21, C22, C26, C27, listing pages, secret read-back), against the
-dev compose Keycloak with realm `defender-programs` imported (`live`; CI skips it, `-m "not live and not gate"`).
+dev compose Keycloak with realm `defender-programs` imported (`live`). CI's `keycloak-live` job runs it (#1566).
 
-CANNOT RUN YET: the programs realm export (`.devcontainer/keycloak/realm-defender-programs.json`) and its compose mount are
-committed by the code stage (the offline checks in `test_1307_programs_realm_export.py` are red until then). Owner: code stage
-runs this file once the compose imports the realm, and records the answers (a failure here is the probe answering).
-
-Inputs (test-only environment; the tests skip cleanly when the first two are unset):
+Inputs (test-only environment). With the URL unset the tests skip; once it names a Keycloak, one that does not answer
+fails rather than skips:
 
     DEFENDER_LIVE_KEYCLOAK_URL             base URL, e.g. http://keycloak:8080 (from the dev container)
-    DEFENDER_LIVE_PROGRAMS_ADMIN_SECRET    the dev secret of the API's programs-realm admin client in the export
+    DEFENDER_LIVE_PROGRAMS_ADMIN_SECRET    default: the programs-realm admin client's secret in the committed export
     DEFENDER_LIVE_PROGRAMS_REALM           default defender-programs
     DEFENDER_LIVE_PROGRAMS_ADMIN_CLIENT    default defender-api-programs-admin
     DEFENDER_LIVE_PROGRAMS_AUDIENCE        default defender-api-programs
@@ -28,10 +25,12 @@ from collections.abc import Iterator
 import httpx
 import pytest
 
+from defender._io import read_text_utf8
+from defender.tests.identity.test_1307_programs_realm_export import PROGRAMS_EXPORT
+
 pytestmark = pytest.mark.live
 
 URL = os.environ.get("DEFENDER_LIVE_KEYCLOAK_URL", "").rstrip("/")
-ADMIN_SECRET = os.environ.get("DEFENDER_LIVE_PROGRAMS_ADMIN_SECRET", "")
 REALM = os.environ.get("DEFENDER_LIVE_PROGRAMS_REALM", "defender-programs")
 ADMIN_CLIENT = os.environ.get("DEFENDER_LIVE_PROGRAMS_ADMIN_CLIENT", "defender-api-programs-admin")
 AUDIENCE = os.environ.get("DEFENDER_LIVE_PROGRAMS_AUDIENCE", "defender-api-programs")
@@ -39,15 +38,25 @@ PEOPLE_REALM = "defender"
 LIFESPAN = 300
 
 
+def _admin_secret() -> str:
+    """`DEFENDER_LIVE_PROGRAMS_ADMIN_SECRET`, else the admin client's secret in the committed programs-realm export
+    (what the dev Keycloak imported). Read only once a test runs against a Keycloak, never at import."""
+    if secret := os.environ.get("DEFENDER_LIVE_PROGRAMS_ADMIN_SECRET"):
+        return secret
+    clients = json.loads(read_text_utf8(PROGRAMS_EXPORT))["clients"]
+    found = [c["secret"] for c in clients if c["clientId"] == ADMIN_CLIENT]
+    assert found, f"set DEFENDER_LIVE_PROGRAMS_ADMIN_SECRET: the export has no client {ADMIN_CLIENT!r}"
+    return str(found[0])
+
+
 @pytest.fixture(scope="module")
 def kc() -> Iterator[httpx.Client]:
-    if not (URL and ADMIN_SECRET):
-        pytest.skip("DEFENDER_LIVE_KEYCLOAK_URL and DEFENDER_LIVE_PROGRAMS_ADMIN_SECRET are not set (no live Keycloak)")
+    if not URL:
+        if os.environ.get("CI"):  # CI's keycloak-live job: a check that cannot run is a failure (#1566)
+            pytest.fail("DEFENDER_LIVE_KEYCLOAK_URL is not set in CI")
+        pytest.skip("DEFENDER_LIVE_KEYCLOAK_URL is not set (no live Keycloak)")
     with httpx.Client(base_url=URL, timeout=10) as client:
-        try:
-            client.get(f"/realms/{REALM}/.well-known/openid-configuration").raise_for_status()
-        except httpx.TransportError:
-            pytest.skip(f"no Keycloak answers at {URL}")
+        client.get(f"/realms/{REALM}/.well-known/openid-configuration").raise_for_status()
         yield client
 
 
@@ -67,7 +76,7 @@ def _claims(token: str) -> dict:
 @pytest.fixture
 def admin(kc: httpx.Client) -> httpx.Client:
     """The API's own programs-realm admin client, as the adapter will use it."""
-    response = _grant(kc, ADMIN_CLIENT, ADMIN_SECRET)
+    response = _grant(kc, ADMIN_CLIENT, _admin_secret())
     assert response.status_code == 200, response.text
     kc.headers["Authorization"] = f"Bearer {response.json()['access_token']}"
     yield kc

@@ -227,7 +227,7 @@ def _serving_requests(seeded: Any) -> list[tuple[tuple[str, str], str, dict[str,
 
     fill = {"tenant_id": A, "key": "report.md", "system_id": "tix"}
     bodies = {**BODIES, ("POST", API + "/admin/tenants/{}/invitations"): {"email": "new@a.example"}}
-    query = {("GET", API + "/auth/callback"): {"code": "c", "state": "s"},
+    query = {("GET", API + "/auth/callback"): {"code": "c", "state": "s" * 43},  # #1566: our shape, so the lookup runs
              # #1470: a record delete names the version it replaces
              ("DELETE", API + "/tenants/{tenant_id}/case-record"): {"replaces": 1},
              ("DELETE", API + "/tenants/{tenant_id}/systems/{system_id}"): {"replaces": 1}}

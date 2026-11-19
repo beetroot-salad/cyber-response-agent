@@ -182,7 +182,7 @@ def test_the_callback_refusals_are_303s_to_the_failed_screen_naming_three_reason
     unknown = world.client()
     r_unknown = world.sign_in_response(unknown, ME, account_id="kc-not-ours")
     mismatch = world.client()
-    r_mismatch = world.sign_in_response(mismatch, ME, state="not-the-state")
+    r_mismatch = world.sign_in_response(mismatch, ME, state="n" * 43)  # our shape, not this attempt's
     no_cookie = world.client()
     r_no_cookie = world.sign_in_response(no_cookie, ME, begin=False)
     no_code = world.client()
@@ -201,7 +201,7 @@ def test_the_callback_refusals_are_303s_to_the_failed_screen_naming_three_reason
     assert is_cleared(set_cookie(r_ok, attempt_cookie(world.signin.started[-1].state) or "") or "")
 
 
-@pytest.mark.parametrize("state", ["not-the-state", "", None], ids=["other", "empty", "missing"])
+@pytest.mark.parametrize("state", ["n" * 43, "", None], ids=["other", "empty", "missing"])  # "other": our shape, not this attempt's
 def test_a_state_mismatch_does_not_exchange_the_code(state: str | None) -> None:
     """The state must name this attempt's cookie before the code is exchanged; an empty or missing state names none: 303 `prelogin-missing` (flow 2; B4)."""
     world = World(tenants={T1: [ANN]})

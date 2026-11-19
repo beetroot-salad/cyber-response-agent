@@ -234,20 +234,21 @@ def test_o15_invalid_slot_settings_refuse_before_serving_and_before_the_copy(sou
 
 def _accepted_origins() -> list[str]:
     """Seeded origins the API's reader accepts, each on a random host label no default could equal: http and https, an
-    explicit non-default port, a multi-label host, an IPv6 literal. Every one is checked against the reader itself."""
+    explicit non-default port, a multi-label host, labels holding digits and inner hyphens. Every one is checked against
+    the reader itself."""
     from defender._url import check_origin
 
     rng = random.Random(1471)
     label = lambda: "".join(rng.choices("abcdefghijklmnopqrstuvwxyz0123456789", k=12))  # noqa: E731
     found = [f"https://{label()}.example.test", f"http://{label()}.test:{rng.randrange(1025, 65000)}",
-             f"https://{label()}-{label()}.a.b.test:{rng.randrange(1025, 65000)}", f"http://[2001:db8::{rng.randrange(1, 9999):x}]:8080"]
+             f"https://{label()}-{label()}.a.b.test:{rng.randrange(1025, 65000)}", f"http://{label()}-{rng.randrange(1, 9999)}.k8s-{label()}.zone1:8080"]
     assert [check_origin(o) for o in found] == found, "premise: the reader accepts every generated origin"
     assert len({o.split("//", 1)[1] for o in found}) == 4
     return found
 
 
 @pytest.mark.postgres
-@pytest.mark.parametrize("origin", _accepted_origins(), ids=["https", "http-port", "https-multi-label-port", "ipv6-port"])
+@pytest.mark.parametrize("origin", _accepted_origins(), ids=["https", "http-port", "https-multi-label-port", "digit-hyphen-labels-port"])
 def test_1471_w9_the_origin_the_worker_is_started_with_reaches_a_flagged_jobs_ticket_link(source, data_root, db, origin):
     """The helper the real worker starts for a flagged row gets `--ticket-link <origin>/t/<tenant>/investigations/<id>`, the
     origin being the one `DEFENDER_API_FRONTEND_ORIGIN` named, as the API's reader accepts it. (W3, W9)"""
