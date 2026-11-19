@@ -13,7 +13,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from defender.jobs import InvestigationRecord, JobStore, LearningJobRecord, StoredAlert
+from defender._vocab import Disposition, NoOutcome
+from defender.jobs import InvestigationRecord, JobStore, LearningJobRecord, StoredAlert, StoredAlertSummary
 from defender.records.formats import MAPPING_KEYS, AlertId, InvestigationId, LearningJobId, TenantId, check_mapping
 from defender.records.formats import AlertMapping as StoredAlertMapping
 from defender.tenancy import TenantRecord
@@ -36,7 +37,7 @@ def _by_name(model: type[BaseModel], record: object, *, but: frozenset[str] = fr
     return {name: getattr(record, name) for name in model.model_fields if name not in but}
 
 
-def _alert_summary(alert: StoredAlert) -> AlertSummary:
+def _alert_summary(alert: StoredAlertSummary) -> AlertSummary:
     return AlertSummary(**_by_name(AlertSummary, alert))
 
 
@@ -69,10 +70,10 @@ class JobStorePorts:
 
     async def list_alerts(
         self, tenant_id: TenantId, *, fired_after: _dt.datetime | None, fired_before: _dt.datetime | None,
-        after: TimePosition | None, limit: int,
+        outcome: Disposition | NoOutcome | None, after: TimePosition | None, limit: int,
     ) -> list[AlertSummary]:
         found = await self._store.list_alerts(
-            tenant_id, fired_after=fired_after, fired_before=fired_before, after=after, limit=limit)
+            tenant_id, fired_after=fired_after, fired_before=fired_before, outcome=outcome, after=after, limit=limit)
         return [_alert_summary(alert) for alert in found]
 
     async def get_alert(self, tenant_id: TenantId, alert_id: AlertId) -> Alert | None:

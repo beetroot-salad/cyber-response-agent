@@ -8,10 +8,10 @@
 // typed. Answers are trusted to match the document, which CI checks against the real server.
 import { QueryClient } from "@tanstack/react-query";
 import createClient, { createQuerySerializer, type MaybeOptionalInit } from "openapi-fetch";
-import { literalAddress } from "../addresses";
+import { addressOf, literalAddress } from "../addresses";
 import type { paths } from "../generated/api";
 import { decideUnauthorized, type FailedReason, type Source, type Taken } from "./decision";
-import type { Outcome, Person, ReadBody, ReadKey, ReadParams, ReadResult } from "./types";
+import type { AcceptResult, Outcome, Person, ReadBody, ReadKey, ReadParams, ReadResult } from "./types";
 
 export interface Effects {
   /** The page's `fetch`, given the request the typed client made. */
@@ -49,12 +49,18 @@ interface Client {
   readonly read: <K extends ReadKey>(key: K, params: ReadParams<K>) => Promise<ReadResult<K>>;
   /** `POST /api/auth/logout`: 2xx or 401 (already signed out) leaves by replace; anything else is the error state. */
   readonly signOut: () => Promise<SignOutResult>;
+  /** `POST /api/invitations/{id}/accept` (its 401 is B1's for a later call): on success, a full load of the accepted
+   * tenant's alerts address by `assign`, so Back returns to the page that accepted; 404 is `not-open`; anything else is
+   * the caller's to show (`error`), never the error state. */
+  readonly acceptInvitation: (id: string) => Promise<AcceptResult>;
 }
 
 /** Whether a load may still show anything, and its one way of navigating away. */
 interface Exit {
   /** Neither leaving nor superseded: the one check before the load shows anything. */
   readonly mayShow: () => boolean;
+  /** Leaving by a navigation of its own, and not superseded. */
+  readonly left: () => boolean;
   /** A newer load is the page's: whatever this one reports is ignored. */
   readonly supersede: () => void;
   /** Navigate away by `navigate`: nothing (and false) when the load is already leaving or superseded. Once the
@@ -130,6 +136,7 @@ function makeExit(): Exit {
   const mayShow = (): boolean => !leaving && !superseded;
   return {
     mayShow,
+    left: () => leaving && !superseded,
     supersede: () => {
       superseded = true;
     },
@@ -221,6 +228,23 @@ function clientOver(api: Readonly<Record<On401, Api>>, exit: Exit, effects: Effe
       if (!(response.ok || response.status === 401)) return { kind: "error" };
       return exit.leave(() => {
         effects.replace(literalAddress("root"));
+      })
+        ? { kind: "left" }
+        : { kind: "gone" };
+    },
+    acceptInvitation: async (id) => {
+      const sent = await send(exit, () =>
+        api.later.POST("/api/invitations/{invitation_id}/accept", { params: { path: { invitation_id: id } } }),
+      );
+      // A 401 is gone by the time it gets here, with B1's sign-in under way: the load left, not superseded.
+      if (sent.kind === "gone") return exit.left() ? { kind: "left" } : sent;
+      if (sent.kind !== "answer") return sent;
+      const { data, response } = sent.answer;
+      if (response.status === 404) return { kind: "not-open" };
+      if (response.status !== 200 || data === undefined) return { kind: "error" };
+      const alerts = addressOf("alerts", [data.tenant_id]);
+      return exit.leave(() => {
+        effects.assign(alerts);
       })
         ? { kind: "left" }
         : { kind: "gone" };

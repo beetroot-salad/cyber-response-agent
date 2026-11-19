@@ -49,6 +49,7 @@ function accepting(answer: (request: Request) => Promise<Response>) {
       },
     },
   });
+  // trust: the test reaches the shell's accept call through the shape it promises, before the types are generated
   const accept = (): Promise<unknown> => (load.client as unknown as Accepting).acceptInvitation(INVITATION);
   /** What the call came to, after every effect it schedules has run: its value, or "pending" when it never resolved. */
   const settled = async (call: Promise<unknown>): Promise<unknown> => {
@@ -69,7 +70,7 @@ describe("accepting an invitation", () => {
     );
     const result = await settled(accept());
     expect(requests.map((r) => [r.method, r.url])).toEqual([
-      ["POST", `${ORIGIN}/api/auth/invitations/${INVITATION}/accept`],
+      ["POST", `${ORIGIN}/api/invitations/${INVITATION}/accept`],
     ]);
     expect(log).toEqual(["fetch", "assign"]);
     expect(assigned.map((url) => new URL(url, ORIGIN).href)).toEqual([`${ORIGIN}/t/${TENANT}/alerts`]);

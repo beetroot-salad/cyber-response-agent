@@ -683,7 +683,7 @@ def test_alert_list_o8_o9_home_with_no_tenant_and_no_invitation_says_sluice_is_i
 # --- O11: accept an invitation ---------------------------------------------------------------------------------------
 
 def _accepts(requests: Any) -> list[str]:
-    return [r.url for r in requests if r.method == "POST" and path_is(r.url, "/api/auth/invitations")
+    return [r.url for r in requests if r.method == "POST" and path_is(r.url, "/api/invitations")
             and urllib.parse.urlsplit(r.url).path.endswith("/accept")]
 
 

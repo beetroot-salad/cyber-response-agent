@@ -14,6 +14,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from defender._model import model
+from defender._vocab import DISPOSITION_VALUES, Disposition
 from defender.database import Base, IdColumn
 from defender.records.formats import AlertId, InvestigationId, LearningJobId, TenantId
 from defender.tenancy.models import SCHEMA as TENANCY_SCHEMA
@@ -32,6 +33,11 @@ def _quoted(values: tuple[str, ...]) -> str:
     return ", ".join(repr(v) for v in values)
 
 
+#: The alert's outcome copy is all set or all null (#1581).
+OUTCOME_COPY_WHOLE = ("(outcome IS NULL) = (outcome_investigation_id IS NULL) "
+                      "AND (outcome IS NULL) = (outcome_created_at IS NULL)")
+
+
 class AlertRow(Base, kw_only=True):
     __tablename__ = "alerts"
     __table_args__ = (
@@ -40,6 +46,10 @@ class AlertRow(Base, kw_only=True):
         UniqueConstraint("tenant_id", "id"),
         UniqueConstraint("tenant_id", "vendor", "vendor_ticket_id"),
         Index("alerts_newest_first", "tenant_id", text("fired_at DESC"), text("id DESC")),
+        # #1581: the outcome filter is a range of this index; `outcome IS NULL` uses it too.
+        Index("alerts_outcome_newest_first", "tenant_id", "outcome", text("fired_at DESC"), text("id DESC")),
+        CheckConstraint(OUTCOME_COPY_WHOLE, name="outcome_copy_whole"),
+        CheckConstraint(f"outcome IN ({_quoted(DISPOSITION_VALUES)})", name="outcome"),
         {"schema": SCHEMA},
     )
 
@@ -55,6 +65,14 @@ class AlertRow(Base, kw_only=True):
     title: Mapped[str | None] = mapped_column(Text)
     description: Mapped[str | None] = mapped_column(Text)
     raw: Mapped[bytes] = mapped_column(LargeBinary)
+    #: A copy of O1's answer (#1581 AP1): the disposition of the alert's newest `completed` investigation by
+    #: `(created_at, id)`, with that investigation's id and `created_at` (its source); all three null when none has
+    #: completed. Only the store's `finish` and investigation delete write them (`store.py`), each with one conditional
+    #: update judged against the stored source. The investigations own the facts; this exists so the list's outcome
+    #: filter is an index range.
+    outcome: Mapped[str | None] = mapped_column(Text, default=None)
+    outcome_investigation_id: Mapped[InvestigationId | None] = mapped_column(IdColumn(InvestigationId), default=None)
+    outcome_created_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
 
 
 class InvestigationRow(Base, kw_only=True):
@@ -65,6 +83,9 @@ class InvestigationRow(Base, kw_only=True):
         CheckConstraint(f"stage IN ({_quoted(STAGES)})", name="stage"),
         CheckConstraint("stage <> 'running' OR lease_expires_at IS NOT NULL", name="running_has_a_lease"),
         CheckConstraint("NOT cost_is_lower_limit OR cost_usd IS NOT NULL", name="lower_limit_has_a_cost"),
+        # #1581 O10: a completed investigation always has a disposition, one of the vocabulary's.
+        CheckConstraint("stage <> 'completed' OR disposition IS NOT NULL", name="completed_has_a_disposition"),
+        CheckConstraint(f"disposition IN ({_quoted(DISPOSITION_VALUES)})", name="disposition"),
         Index("investigations_one_live_per_alert", "tenant_id", "alert_id", unique=True,
               postgresql_where=text(f"stage IN ({_quoted(LIVE)})")),
         Index("investigations_newest_first", "tenant_id", text("created_at DESC"), text("id DESC")),
@@ -175,8 +196,8 @@ class LearningCheckRow(Base, kw_only=True):
 
 
 @model(frozen=True)
-class StoredAlert:
-    """An alert as read. `raw` is the exact bytes inserted."""
+class _AlertFields:
+    """The fields every read of an alert carries: the list's (`StoredAlertSummary`) and the single read's (`StoredAlert`)."""
 
     alert_id: AlertId
     tenant_id: TenantId
@@ -187,7 +208,23 @@ class StoredAlert:
     received_at: _dt.datetime
     title: str | None
     description: str | None
+
+
+@model(frozen=True)
+class StoredAlert(_AlertFields):
+    """An alert as read alone. `raw` is the exact bytes inserted."""
+
     raw: bytes
+
+
+@model(frozen=True)
+class StoredAlertSummary(_AlertFields):
+    """An alert as listed (#1581): no `raw` (#1507), and what its investigations concluded. `outcome` is the stored copy
+    of the newest completed investigation's disposition; `latest_status` the newest investigation's stage; each None
+    when there is no such investigation."""
+
+    outcome: Disposition | None
+    latest_status: str | None
 
 
 @model(frozen=True)
