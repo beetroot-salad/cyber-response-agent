@@ -289,12 +289,10 @@ def _prime_once(
 
 
 #: The job's ending for a source-lookup fault of the source's store itself, beside the kind's
-#: wording: its reason, and the type current code refuses that store with (named, as the launch's
-#: own store checks name it). Every other kind ends `launch_refused`.
+#: wording: its reason. Every other kind, a store of another schema version and a pre-#1235 link
+#: included (no backward compatibility), ends `launch_refused`.
 _SOURCE_STORE_ENDINGS = {
     "database-missing": (SOURCE_UNAVAILABLE, None),
-    "schema-version": (HISTORY_UNREADABLE, "UnknownSchemaVersion"),
-    "legacy-link": (HISTORY_UNREADABLE, "LegacyRunLink"),
 }
 
 
