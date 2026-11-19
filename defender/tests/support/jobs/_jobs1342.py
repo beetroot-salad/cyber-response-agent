@@ -450,6 +450,7 @@ CHILD_SCRIPT = textwrap.dedent("""
         os.kill(os.getpid(), die_by)
     answer = spec.get("answer_waiting")
     if answer:  # a post-step helper's stand-in: its exit status says whether work waits (#1487 Amendment r5.2)
+        sys.path.insert(0, spec["worktree"])  # this checkout's `defender`, whatever the child's path
         from defender.job_host import NOTHING_WAITS, WORK_WAITS
         from defender.learning.core.drains import AUTHOR_DRAIN_RECONCILES
         from defender.learning.core.store_tick import AUTHOR_LANE, thresholds
