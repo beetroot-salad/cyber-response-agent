@@ -202,7 +202,8 @@ table. Per call, in order: the world's own stored answer (a repeated call is
 served byte for byte); else the call's base answer — the family's recording, or
 one live read, unbounded: the adapter is told neither the branch point nor the run clock, and the
 oracle applies the cut (#1385); a real error passes through as itself
-(`real-error`). A world with no facts is served its base (`passthrough`).
+(`real-error`). A world with no facts is served its recorded base as is (`passthrough`); a
+live base still takes an oracle turn, which applies the cut.
 Otherwise the world's **oracle** (`estate/oracle.py`, `AgentRole.ORACLE`) takes
 one turn, in which it serves the world as it stood at the branch point: for a system that takes a
 query it makes a **re-ask** with its `re_ask` tool (the call's own question, edited to end there):
