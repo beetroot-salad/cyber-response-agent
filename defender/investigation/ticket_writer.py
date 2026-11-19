@@ -136,8 +136,8 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
     a roster of its own. `link` is the investigation screen's address, which the worker built: the comment's last part.
 
     `ask_pass` (a job, #1471 W5) asks for the write pass when no `request_token` was handed: only once the run will
-    comment, its case system is usable and its alert names a ticket, so a silent ending or a keyless alert signs
-    nothing. It answers the token and the proxy's address, or the receipt reason it got none."""
+    comment, its case system is usable, its alert names a ticket and its closing record was looked up, so a silent
+    ending, a keyless alert or a record that cannot be looked up signs nothing. It answers the token and the proxy's address, or the receipt reason it got none."""
     run_dir = run.run_dir
     key = ""
     try:
@@ -155,15 +155,8 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
         if not key:
             _leg_refused(run, key, REASON_NO_TICKET)
             return
-        if not request_token and ask_pass is not None:
-            asked = ask_pass()
-            if isinstance(asked, str):
-                _leg_refused(run, key, asked)
-                return
-            request_token, proxy_url = asked
-        if not request_token:  # every case system is reached through the credential proxy
-            _leg_refused(run, key, REASON_NO_TOKEN)
-            return
+        # The record is looked up before the write pass is asked for (#1534): a run whose record
+        # cannot be looked up posts nothing, so it is signed no pass.
         try:
             if escalated(truncated_by, closed_before_cut):
                 body, word = _escalation_body(str(truncated_by), link), RECEIPT_ESCALATED
@@ -175,6 +168,15 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
             _logger.warning(f"record {key or run_dir.name}: the closing record could not be looked up "
                             f"({e.kind}): {e.detail}")
             _leg_refused(run, key, e.wording)
+            return
+        if not request_token and ask_pass is not None:
+            asked = ask_pass()
+            if isinstance(asked, str):
+                _leg_refused(run, key, asked)
+                return
+            request_token, proxy_url = asked
+        if not request_token:  # every case system is reached through the credential proxy
+            _leg_refused(run, key, REASON_NO_TOKEN)
             return
         _post_comment(run, target, key, body, word,
                       _verb_context(tenant, defender_dir, run_dir, env, request_token, proxy_url))
