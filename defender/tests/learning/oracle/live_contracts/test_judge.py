@@ -673,8 +673,8 @@ def test_input_judge_gives_an_unservable_world_a_bucket(tmp_path):
     def plant(ep: Path, label: str) -> None:
         draws = ep / "worlds" / T.world_id(ep, label) / "judge"
         draws.mkdir(parents=True, exist_ok=True)
-        (draws / "0.yaml").write_text(_text(_world_reply(
-            "lead-set", ("idp",), findings=[_finding(f"{label}-planted", bucket="lead-set")])),
+        (draws / "0.yaml").write_text(_yaml.safe_dump(_text(_world_reply(
+            "lead-set", ("idp",), findings=[_finding(f"{label}-planted", bucket="lead-set")]))),
             encoding="utf-8")
 
     one = tmp_path / "one"

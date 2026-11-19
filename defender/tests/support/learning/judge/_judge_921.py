@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from defender.tests.support.learning.core import _unmodelled1579 as _unmodelled
 from defender.tests.support.learning.branch._triplet_947 import (  # noqa: F401 — re-exported vocabulary
     CLEAN,
     EPISODE_ID,
@@ -625,17 +626,20 @@ def as_reply_text(doc: dict, *, malformed: str | None = None) -> Any:
     return copy.deepcopy(dict(doc))
 
 
-def delivered(value: Any) -> Any:
+def delivered(value: Any, unmodelled: list[str] | None = None, agent_id: str = "") -> Any:
     """What a judge fake does with one scripted `value`, as the real seam would answer: a
     mapping (or a non-mapping the call-site check must refuse) is `(copy, 1)` — one request; a
     tuple is `(mapping, requests)` as scripted; an exception instance is raised (an exhausted
-    draw is `TY.unusable(reason, requests=3)`). Text is a stale script: replies are mappings."""
+    draw is `TY.unusable(reason, requests=3)`). Text is a stale script: replies are mappings
+    (R7: recorded on `unmodelled`, so a draw loop's containment cannot hide it)."""
     if isinstance(value, BaseException):
         raise value
     if isinstance(value, tuple):
         return value
     if isinstance(value, (Mapping, list)):
         return copy.deepcopy(dict(value) if isinstance(value, Mapping) else value), 1
+    if unmodelled is not None:
+        unmodelled.append(f"{agent_id}: a {type(value).__name__} reply to a typed call")
     raise AssertionError("#1579: script a mapping, not text")
 
 
@@ -658,6 +662,8 @@ class FakeJudge:
     prompts: list[str] = field(default_factory=list)
     agent_ids: list[str] = field(default_factory=list)
     kwargs: list[dict] = field(default_factory=list)
+    #: R7: inputs this fake does not model, asserted empty at teardown (conftest).
+    unmodelled: list[str] = field(default_factory=_unmodelled.new_list, repr=False)
 
     def __call__(self, prompt: str, *, role: Any = None, agent_id: str = "judge",
                  **kw: Any) -> Any:
@@ -669,11 +675,12 @@ class FakeJudge:
         if self.fault.raise_after is not None and len(self.prompts) > self.fault.raise_after:
             raise self._unprocessable(f"judge ({agent_id}) did not complete", "TimeoutError")
         if self.family_default is not None and str(agent_id).startswith(FAMILY_AGENT_PREFIX):
-            return delivered(self.family_default)
+            return delivered(self.family_default, self.unmodelled, agent_id)
         if self.replies:
-            return delivered(self.replies.pop(0))
+            return delivered(self.replies.pop(0), self.unmodelled, agent_id)
         if self.default is not None:
-            return delivered(self.default)
+            return delivered(self.default, self.unmodelled, agent_id)
+        self.unmodelled.append(f"{agent_id}: nothing scripted")
         raise AssertionError(f"FakeJudge ran out of replies at call {len(self.prompts)}")
 
     @staticmethod

@@ -497,3 +497,72 @@ def test_1579_a_text_script_is_refused_loudly_by_the_fake():
     judge = J.FakeJudge(default="bucket: lead-set\n")
     with pytest.raises(AssertionError, match="script a mapping"):
         judge("prompt", agent_id="judge:x:0")
+    assert judge.unmodelled, "the text script was not recorded for the teardown check (R7)"
+    judge.unmodelled.clear()
+
+
+# --------------------------------------------------------------------------------------
+# P1 for the judge's reply: refused, or filed with every key held unchanged (any nesting level).
+# --------------------------------------------------------------------------------------
+
+import copy  # noqa: E402
+
+from defender.tests.support.learning.core import _reply_mutations1579 as M  # noqa: E402
+
+
+def _rich_world_reply() -> dict:
+    """A valid world reply with every list populated: an investigator finding, a world finding, a gap."""
+    gap = {"what": "the box could not reach okta", "how": "no grant", "evidence": ["family.yaml#discriminator"],
+           "kept_facts_from_investigator": False}
+    return J.reply_doc(findings=[J.finding_doc(), J.finding_doc(subject="world", bucket="mislabelled")],
+                       gaps=[gap])
+
+
+def _rich_family_reply() -> dict:
+    return J.family_reply(findings=[J.finding_doc(subject="world", bucket="mislabelled")])
+
+
+@pytest.mark.parametrize(("scope", "build", "floors"), [
+    pytest.param("b", _rich_world_reply, (12, 80), id="world"),
+    pytest.param("family", _rich_family_reply, (8, 40), id="family"),
+])
+def test_p1_every_judge_reply_is_refused_or_filed_with_every_key_held(tmp_path, scope, build, floors):
+    """Variants of a valid reply (mutations at every mapping, key and list element at every depth,
+    null and blank included), one draw each, answered by a seam fake. Each draw is exactly one of:
+    malformed (no draw file, counted once) or filed, with the draw document holding every key the
+    reply carried, type-strict. A draw that crashed (a `failure_reason` document) is a host
+    failure on model input, never an acceptable outcome."""
+    ep = _episode(tmp_path)
+    token = T.world_id(ep, "b")
+    base = build()
+    cases = M.variants([base], seed=921, pairs=60, identities=(None, T.fixture_world_id("injected")))
+    valid = {"b": _rich_world_reply(), "c": J.reply_doc(), "family": _rich_family_reply()}
+
+    def judge(prompt, *, role=None, agent_id="judge", **_kw):
+        scope_id, _, draw = agent_id.removeprefix("judge:").rpartition(":")
+        mine = "b" if scope_id == token else scope_id if scope_id == "family" else "c"
+        reply = cases[int(draw)][1][0] if mine == scope else valid[mine]
+        return copy.deepcopy(reply), 1
+
+    _grade(tmp_path, ep, judge, draws=len(cases))
+
+    filed = refused = 0
+    failures: list[str] = []
+    for n, (label, replies) in enumerate(cases):
+        path = ep / "judge" / f"{n}.yaml" if scope == "family" else ep / "worlds" / token / "judge" / f"{n}.yaml"
+        if not path.is_file():
+            refused += 1
+            continue
+        doc = J.draw_doc(ep, scope, n)
+        if "failure_reason" in doc:
+            failures.append(f"{label}: the draw crashed: {doc['failure_reason']}")
+            continue
+        filed += 1
+        lost = [k for k, v in replies[0].items() if not M.same(doc.get(k, "<absent>"), v)]
+        if lost:
+            failures.append(f"{label}: filed but dropped or changed {lost}")
+    assert not failures, "\n".join(failures[:15]) + f"\n({len(failures)} of {len(cases)} variants)"
+    row = _row(ep) if scope == "b" else J.judge_record(ep)["family"]
+    assert (row["completed_draws"], row["malformed_replies"]) == (filed, refused), row
+    assert filed >= floors[0], f"only {filed} filed variants: the accepting side is vacuous"
+    assert refused >= floors[1], f"only {refused} refused variants: the refusing side is vacuous"

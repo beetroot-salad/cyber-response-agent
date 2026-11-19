@@ -228,40 +228,57 @@ def trace_rows(agent_id: str, *, prompt: str = "the framed prompt", reply: str =
     return [request, reply_row]
 
 
+def typed_call_rows(agent_id: str, attempts: list[dict[str, Any]], *, tool: str = "answer",
+                    prompt: str = "the framed prompt") -> list[dict[str, Any]]:
+    """A typed (output-tool) call's rows as `RequestLogger.log` writes them (captured from a real
+    two- and three-request call through `build_stage_agent` and a real logger, #1579; the
+    drift guard is `test_1579_the_fixture_has_the_shape_a_real_request_logger_writes`).
+
+    Every request re-emits its whole history as `request` rows, then adds one `response` row. The
+    re-emitted earlier response keeps `message.kind == "response"` under an outer `kind: request`
+    and carries no model or usage; a retry prompt is re-emitted by every later request.
+
+    `attempts`: per request, `{"args": <mapping or raw malformed JSON text>}` (a tool call) or
+    `{"text": str}`, and `"retry"`: the reason sent back after it (absent on the last attempt)."""
+    first = trace_rows(agent_id, prompt=prompt, response=False)[0]
+    history: list[dict[str, Any]] = [first["message"]]
+    rows: list[dict[str, Any]] = []
+    ts = "2026-09-09T17:16:11Z"
+
+    def row(kind: str, message: dict[str, Any], **extra: Any) -> dict[str, Any]:
+        seq = len(rows)
+        return {"event_type": "message", "agent_id": agent_id, "seq": seq, "id": f"{agent_id}#{seq}",
+                "kind": kind, **extra, "message": message}
+
+    for n, attempt in enumerate(attempts):
+        rows += [row("request", message) for message in history]
+        call_id = f"pyd_ai_{n:016x}"
+        part = ({"content": attempt["text"], "part_kind": "text"} if "text" in attempt else
+                {"tool_name": tool, "args": attempt["args"], "tool_call_id": call_id,
+                 "part_kind": "tool-call"})
+        response = {"parts": [part], "model_name": MODEL, "timestamp": ts, "kind": "response",
+                    "finish_reason": None}
+        rows.append(row("response", response, model=MODEL, duration_ms=1_000.0,
+                        usage={"input_tokens": 1_000, "output_tokens": 100,
+                               "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}))
+        history.append(response)
+        if attempt.get("retry") is not None:
+            history.append({"parts": [{"content": attempt["retry"],
+                                       "tool_name": tool if "args" in attempt else None,
+                                       "tool_call_id": call_id, "timestamp": ts,
+                                       "part_kind": "retry-prompt"}],
+                            "timestamp": ts, "kind": "request", "instructions": "You are the seat."})
+    return rows
+
+
 def typed_trace_rows(agent_id: str, *, args: Any, retry: str | None = None,
                      tool: str = "answer", text: str | None = None) -> list[dict[str, Any]]:
-    """A typed (output-tool) call's rows in `RequestLogger`'s own shape (read off a real
-    ScriptedCalls trace, #1579): the `request` row; a `response` row whose only part is a
-    `tool-call` carrying `args` (a mapping, or the raw JSON text of a malformed call); and, when
-    `retry` is given, the next `request` row carrying a `retry-prompt` part with that text and a
-    final `response` row whose part is `text` (default: another tool call)."""
-    rows = trace_rows(agent_id, response=False)
-    call_id = "pyd_ai_0123456789abcdef"
-
-    def response(seq: int, part: dict[str, Any]) -> dict[str, Any]:
-        return {"event_type": "message", "agent_id": agent_id, "seq": seq, "id": f"{agent_id}#{seq}",
-                "kind": "response", "model": MODEL, "duration_ms": 1_000.0,
-                "usage": {"input_tokens": 1_000, "output_tokens": 100,
-                          "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0},
-                "message": {"parts": [part], "model_name": MODEL, "kind": "response",
-                            "timestamp": "2026-09-09T17:16:11Z", "finish_reason": None}}
-
-    rows.append(response(1, {"tool_name": tool, "args": args, "tool_call_id": call_id,
-                             "part_kind": "tool-call"}))
+    """One typed call: a tool-call attempt with `args`; with `retry`, the reason sent back and a
+    final attempt whose part is `text` (default: another tool call)."""
+    attempts: list[dict[str, Any]] = [{"args": args, "retry": retry}]
     if retry is not None:
-        rows.append({"event_type": "message", "agent_id": agent_id, "seq": 2, "id": f"{agent_id}#2",
-                     "kind": "request",
-                     "message": {"parts": [{"content": retry, "tool_name": tool,
-                                            "tool_call_id": call_id,
-                                            "timestamp": "2026-09-09T17:16:12Z",
-                                            "part_kind": "retry-prompt"}],
-                                 "timestamp": "2026-09-09T17:16:12Z", "kind": "request",
-                                 "instructions": "You are the seat."}})
-        part = ({"content": text, "part_kind": "text"} if text is not None else
-                {"tool_name": tool, "args": {"word": "yes"}, "tool_call_id": call_id,
-                 "part_kind": "tool-call"})
-        rows.append(response(3, part))
-    return rows
+        attempts.append({"text": text} if text is not None else {"args": {"word": "yes"}})
+    return typed_call_rows(agent_id, attempts, tool=tool)
 
 
 def trace_stem(agent_id: str) -> str:

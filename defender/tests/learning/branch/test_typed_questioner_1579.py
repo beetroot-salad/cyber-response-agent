@@ -14,6 +14,7 @@ pytest.importorskip("pydantic_ai")
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 
 from defender.investigation import observe  # noqa: E402
+from defender.learning._prompt import section_text  # noqa: E402
 from defender.records import WIRE_LOG_NAMES  # noqa: E402
 from defender.tests.support.learning.branch import _triplet_947 as T  # noqa: E402
 from defender.tests.support.learning.core import _typed_output1579 as TY  # noqa: E402
@@ -91,8 +92,7 @@ def test_call_1_is_fixed_in_call_and_the_seats_are_shown_the_accepted_document_a
     assert (b["role"], b["story"], [f["fact_id"] for f in b["facts"]]) == ("B", "story b", ["f1"])
     for seat in (1, 2):
         prompt = calls.user_prompt(seat)
-        assert '"base_story": "the captured story"' in prompt, "call 1 is not re-shown as its JSON document"
-        assert '"predicate": "p"' in prompt
+        assert section_text(_plan()) in prompt, "call 1 is not re-shown as the stage's rendering of its accepted mapping"
         assert "REFUSED-ATTEMPT" not in prompt, "the seat was shown the refused attempt"
     assert TY.response_records(_trace(episode, "questioner")) == 2
 
@@ -167,8 +167,13 @@ def test_a_seat_that_answers_in_prose_three_times_refuses_the_episode_and_seat_c
     assert calls.request_counts() == [1, TY.MAX_REQUESTS], "seat C was asked after B was refused"
     message = str(raised.value)
     assert "seat B" in message or "questioner:b" in message, message
-    assert calls.reasons_sent(1)[-1].split("\n\n")[0] in message, (
-        f"the last reason the model was sent is not in the refusal: {message}")
+    # C14: the reason is the exhaustion's cause (the last attempt's refusal as the check or the
+    # framework worded it), not the retry prompt's "Validation feedback:" wrapper.
+    sent = calls.reasons_sent(1)[-1]
+    core = sent.removeprefix("Validation feedback:\n").split("\n\nFix the errors")[0].strip()
+    assert core, f"no reason text in the retry prompt the model was sent: {sent!r}"
+    assert core in message, f"the last attempt's reason is not in the refusal: {message}"
+    assert "Validation feedback" not in message, message
 
 
 # the premise check, a revision and the re-check

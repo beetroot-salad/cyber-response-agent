@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import dataclasses
 import difflib
+import re
 
 import pytest
 
@@ -143,11 +144,17 @@ def test_1008_the_judges_deny_reason_is_its_own_and_names_no_program(tmp_path):
     assert "episode" in policy.deny_reason.casefold(), (
         f"the judge's refusal never names the episode it grades: {policy.deny_reason!r}")
 
-    shape_clause = "bare, not inside a code fence, with nothing before or after it"
+    # #1579: both refusals now tell the model to answer by calling the output tool; that
+    # instruction is the one clause this guard allows the two to share.
     for reason in (questioner_reason, policy.deny_reason):
-        assert shape_clause in reason, (
-            "the shape clause this guard excludes is not in both reasons")
-    own_words = [r.replace(shape_clause, "") for r in (questioner_reason, policy.deny_reason)]
+        assert re.search(r"\bcall\w*\b.*\btool\b", reason, re.IGNORECASE | re.DOTALL), (
+            f"the tool instruction this guard excludes is not in both reasons: {reason!r}")
+
+    def own_sentences(reason: str) -> str:
+        return " ".join(part for part in re.split(r"(?<=[.!?])\s+", reason)
+                        if not re.search(r"\btool\b", part, re.IGNORECASE))
+
+    own_words = [own_sentences(r) for r in (questioner_reason, policy.deny_reason)]
     overlap = difflib.SequenceMatcher(None, own_words[0], own_words[1], autojunk=False)
     longest = overlap.find_longest_match(0, len(own_words[0]), 0, len(own_words[1]))
     shared = own_words[0][longest.a:longest.a + longest.size]
@@ -212,3 +219,74 @@ def test_1008_bind_refuses_the_judges_definition_by_its_deps_type_name(tmp_path)
         f"the refusal does not name the deps type it refused: {message}")
     assert "JUDGE_DEF" in message, (
         f"the refusal does not name the definition it refused: {message}")
+
+
+# ---- #1579 O4: every model-facing text of both roles asks for the tool call, not a YAML document ----
+
+QUESTIONER_DIR = T.DEFENDER / "learning" / "branch" / "questioner"
+#: The YAML-document reply clause, in every spelling the old texts used. Only the reply-format
+#: instruction is retired (design r3.1 "Removals"); an illustrative example is not pinned either way.
+_YAML_REPLY_CLAUSE = re.compile(
+    r"one YAML (?:document|mapping)|not inside a code fence|nothing before or after|"
+    r"no prose around", re.IGNORECASE)
+_TOOL_INSTRUCTION = re.compile(r"\bcall\w*\b.{0,80}\btool\b", re.IGNORECASE | re.DOTALL)
+_UNKNOWN_KEYS_REFUSED = re.compile(
+    r"unknown.{0,60}\brefus|refus.{0,60}unknown", re.IGNORECASE | re.DOTALL)
+
+
+def _judge_task_texts(tmp_path) -> dict[str, str]:
+    """The host-written task text of the judge's two prompt kinds, read off the prompts a real
+    grading pass sends (the untrusted frames, which carry run data, are cut out)."""
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
+    judge = J.scripted_judge()
+    J.grade_at(ep, judge=judge, draws=1, store=MemoryStore())
+    by_id = dict(zip(judge.agent_ids, judge.prompts, strict=True))
+    world = by_id[f"judge:{T.fixture_world_id('b')}:0"]
+    family = by_id["judge:family:0"]
+    return {"judge:world-task": T.outside_untrusted_frames(world),
+            "judge:family-task": T.outside_untrusted_frames(family)}
+
+
+def _model_facing_text(name: str, tmp_path) -> str:
+    kind, _, which = name.partition(":")
+    if name == "questioner:deny-reason":
+        return T.sym("learning.branch.questioner", "_QUESTIONER_DENY_REASON")
+    if name == "judge:deny-reason":
+        return _judge_def().deny_reason
+    if name == "judge:role.md":
+        return JUDGE_ROLE_PROMPT.read_text(encoding="utf-8")
+    if kind == "questioner":
+        return (QUESTIONER_DIR / which).read_text(encoding="utf-8")
+    return _judge_task_texts(tmp_path)[name]
+
+
+_TEXTS = [
+    *(f"questioner:{p.name}" for p in sorted(QUESTIONER_DIR.glob("*.md"))),
+    "questioner:deny-reason", "judge:role.md", "judge:deny-reason",
+    "judge:world-task", "judge:family-task",
+]
+
+
+def test_1579_the_questioner_prompt_set_is_the_five_files_the_census_expects():
+    """The enumeration is not vacuous: a new questioner prompt file joins the cases by glob."""
+    assert [t for t in _TEXTS if t.endswith(".md") and t.startswith("questioner")] == [
+        f"questioner:{n}" for n in ("family.md", "premise.md", "revise.md", "role.md", "world.md")]
+
+
+@pytest.mark.parametrize("name", _TEXTS)
+def test_1579_every_model_facing_text_asks_for_the_tool_call_not_a_yaml_document(name, tmp_path):
+    """O4: no text of either role asks for a YAML document, fence or bare reply; each tells the
+    model to answer by calling the tool."""
+    text = _model_facing_text(name, tmp_path)
+
+    leftovers = sorted({m.group(0) for m in _YAML_REPLY_CLAUSE.finditer(text)})
+    assert leftovers == [], f"{name} still asks for a YAML document ({leftovers})"
+    assert _TOOL_INSTRUCTION.search(text), f"{name} never tells the model to call the tool"
+
+
+@pytest.mark.parametrize("name", ["judge:world-task", "judge:family-task"])
+def test_1579_the_judge_task_text_says_unknown_keys_are_refused(name, tmp_path):
+    """The judge's reply is closed (D2): its prompt says an unknown key is refused."""
+    text = _model_facing_text(name, tmp_path)
+
+    assert _UNKNOWN_KEYS_REFUSED.search(text), f"{name} does not say unknown keys are refused"

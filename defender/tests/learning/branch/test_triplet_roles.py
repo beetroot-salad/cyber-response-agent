@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
 
 import pytest
 import yaml
@@ -765,74 +764,21 @@ def test_the_seat_prompt_no_longer_claims_extras_are_discarded_or_asks_for_a_yam
 # the manifest gate accepts and drops no key the model wrote; every other reply is refused.
 
 import copy  # noqa: E402
-import random  # noqa: E402
+
+from defender.tests.support.learning.core import _reply_mutations1579 as M  # noqa: E402
 
 
 def _valid_script() -> list[dict]:
     return [_plan(), _seat(), _seat_c()]
 
 
-def _containers(replies: list[dict]) -> list[tuple]:
-    """Paths (reply index, *keys) of every mapping in the script: a reply, a planned world, a fact,
-    the discriminator."""
-    out: list[tuple] = []
-
-    def walk(value, path):
-        if isinstance(value, dict):
-            out.append(path)
-            for key, inner in value.items():
-                walk(inner, (*path, key))
-        elif isinstance(value, list):
-            for i, inner in enumerate(value):
-                walk(inner, (*path, i))
-
-    for i, reply in enumerate(replies):
-        walk(reply, (i,))
-    return out
-
-
-def _at(replies: list, path: tuple):
-    node = replies
-    for step in path:
-        node = node[step]
-    return node
-
-
-def _single_mutations(replies: list[dict]) -> list[tuple[str, Any]]:
-    """(label, mutation) over every mapping and every key of the script: drop a key, add an unknown
-    key, add `world_id` (null and a uuid), blank a value, give it the wrong type, a duplicate label,
-    an empty fact list; and the valid ones (reword a text, reorder a mapping's keys)."""
-    rows: list[tuple[str, Any]] = []
-    containers = _containers(replies)
-    for path in containers:
-        rows.append((f"unknown key in {path}", lambda r, p=path: _at(r, p).__setitem__("zz_extra", "x")))
-        for identity in (None, T.fixture_world_id("injected")):
-            rows.append((f"world_id={identity!r} in {path}",
-                         lambda r, p=path, v=identity: _at(r, p).__setitem__("world_id", v)))
-        rows.append((f"reorder {path}", lambda r, p=path: _reorder(r, p)))
-        for key, value in list(_at(replies, path).items()):
-            rows.append((f"drop {path}.{key}", lambda r, p=path, k=key: _at(r, p).pop(k)))
-            blank = "" if isinstance(value, str) else [] if isinstance(value, list) else {} if isinstance(
-                value, dict) else ""
-            rows.append((f"blank {path}.{key}", lambda r, p=path, k=key, v=blank: _at(r, p).__setitem__(k, v)))
-            for wrong in (5, True, ["x"], {"k": 1}):
-                if wrong != value:
-                    rows.append((f"{path}.{key}={wrong!r}",
-                                 lambda r, p=path, k=key, v=wrong: _at(r, p).__setitem__(k, v)))
-            if isinstance(value, str):
-                rows.append((f"reword {path}.{key}",
-                             lambda r, p=path, k=key: _at(r, p).__setitem__(k, _at(r, p)[k] + " (reworded)")))
-    rows.append(("duplicate label", lambda r: r[0]["worlds"][1].__setitem__("label", r[0]["worlds"][0]["label"])))
-    rows.append(("empty facts", lambda r: r[0]["worlds"][0].__setitem__("facts", [])))
-    rows.append(("identity", lambda r: None))
-    return rows
-
-
-def _reorder(replies: list, path: tuple) -> None:
-    node = _at(replies, path)
-    items = list(node.items())
-    node.clear()
-    node.update(reversed(items))
+def _plan_specific_mutations() -> list[M.Mutation]:
+    """The mutations only call 1's plan has: a duplicate label, an empty fact list."""
+    return [
+        ("duplicate label", lambda r: r[0]["worlds"][1].__setitem__("label", r[0]["worlds"][0]["label"])),
+        ("empty facts", lambda r: r[0]["worlds"][0].__setitem__("facts", [])),
+        ("identity", lambda r: None),
+    ]
 
 
 def _outcome(tmp_path, replies: list[dict]):
@@ -860,7 +806,7 @@ def _dropped_from_plan(plan: dict, seats: list[dict], worlds: list[dict]) -> lis
     for i, entry in enumerate(entries):
         for field, planned in entry.items():
             superseded = field == "axis" and "axis" in seats[i]
-            if worlds[1 + i].get(field, "<absent>") != planned and not superseded:
+            if not M.same(worlds[1 + i].get(field, "<absent>"), planned) and not superseded:
                 gone.append(f"call 1 worlds[{i}].{field}")
     return gone
 
@@ -874,11 +820,11 @@ def _silently_dropped(replies: list[dict], family: dict) -> list[str]:
     held = {"base_story": family["base_story"], "discriminator": family["discriminator"]}
     for key, value in plan.items():
         if key in held:
-            if held[key] != value:
+            if not M.same(held[key], value):
                 gone.append(f"call 1 {key}")
         elif key == "base_disposition":
-            # An empty one is as good as absent: the source report's stands (design gap, see the brief).
-            if value not in ("", None) and worlds[0].get("disposition_declared") != value:
+            # E4: a blank or null one is refused; only an ABSENT key takes the report's.
+            if not M.same(worlds[0].get("disposition_declared"), value):
                 gone.append("call 1 base_disposition")
         elif key == "worlds":
             gone += _dropped_from_plan(plan, seats, worlds)
@@ -886,40 +832,33 @@ def _silently_dropped(replies: list[dict], family: dict) -> list[str]:
             gone.append(f"call 1 {key}")
     for i, seat in enumerate(seats):
         gone += [f"seat {i} {field}" for field, value in seat.items()
-                 if worlds[1 + i].get(field, "<absent>") != value]
+                 if not M.same(worlds[1 + i].get(field, "<absent>"), value)]
     return gone
 
 
 def _gate(family: dict) -> None:
-    """The manifest gate the launcher runs on the authored half (`accept_family`), with the
-    launcher's own derived fields."""
-    doc = T.family_doc(worlds=family["worlds"], base_story=family["base_story"],
-                       discriminator=family["discriminator"])
-    _family_mod().accept_family(doc)
+    M.gate(family)
 
 
 def test_p1_every_reply_is_refused_or_composes_a_family_the_gate_accepts_with_no_key_dropped(tmp_path):
-    """P1 over single mutations of a valid three-call script and a seeded sample of pairs: a reply
-    is refused in-call (`BranchError`) or composes a family `accept_family` takes with every key
-    of every reply held unchanged. Floors keep both sides non-vacuous."""
+    """P1 over single mutations (every mapping, key and list element at every depth: a reply, a
+    planned world, a fact, its entities, the discriminator; null and blank included, E4) of a valid
+    three-call script and a seeded sample of pairs: a reply is refused in-call (`BranchError`) or
+    composes a family `accept_family` takes with every key of every reply held unchanged. Floors on
+    both sides, and on each call kind's own mutations, keep it non-vacuous."""
     (tmp_path / "report.md").write_text(T.report_text("malicious"), encoding="utf-8")
     base = _valid_script()
-    singles = _single_mutations(base)
-    rng = random.Random(1579)
-    variants = [(label, [mut]) for label, mut in singles]
-    for _ in range(150):
-        (l1, m1), (l2, m2) = rng.sample(singles, 2)
-        variants.append((f"{l1} + {l2}", [m1, m2]))
+    identities = (None, T.fixture_world_id("injected"))
+    cases = M.variants(base, seed=1579, pairs=150, extra=_plan_specific_mutations(), identities=identities)
     accepted = refused = 0
+    per_call = {0: [0, 0], 1: [0, 0], 2: [0, 0]}
     failures: list[str] = []
-    for label, mutations in variants:
-        replies = copy.deepcopy(base)
-        try:
-            for mutate in mutations:
-                mutate(replies)
-        except (KeyError, IndexError, TypeError, AttributeError):
-            continue  # a second mutation whose target the first removed: not a variant
+    for label, replies in cases:
         outcome, got = _outcome(tmp_path, replies)
+        touched = [i for i in per_call if not M.same(replies[i], base[i])]
+        side = 1 if outcome == "refused" else 0
+        for i in touched:
+            per_call[i][side] += 1
         if outcome == "refused":
             refused += 1
             continue
@@ -932,9 +871,22 @@ def test_p1_every_reply_is_refused_or_composes_a_family_the_gate_accepts_with_no
             _gate(got)
         except _family_mod().FamilyError as late:
             failures.append(f"{label}: accepted but the manifest gate refuses it: {late}")
-    assert not failures, "\n".join(failures[:15]) + f"\n({len(failures)} of {len(variants)} variants)"
+    assert not failures, "\n".join(failures[:15]) + f"\n({len(failures)} of {len(cases)} variants)"
     assert accepted >= 12, f"only {accepted} accepted variants: the accepting side is vacuous"
-    assert refused >= 50, f"only {refused} refused variants: the refusing side is vacuous"
+    assert refused >= 100, f"only {refused} refused variants: the refusing side is vacuous"
+    for i, (ok, bad) in per_call.items():
+        assert ok >= 3, f"call {i} has {ok} accepted variants: its accepting side is vacuous"
+        assert bad >= 20, f"call {i} has {bad} refused variants: its refusing side is vacuous"
+
+
+@pytest.mark.parametrize("blank", ["", None], ids=["blank", "null"])
+def test_a_blank_or_null_base_disposition_is_refused_even_when_the_report_could_fill_it(tmp_path, blank):
+    """E4: the report fallback applies only when the key is ABSENT (control:
+    `test_a_plan_without_a_base_disposition_takes_the_source_reports`)."""
+    (tmp_path / "report.md").write_text(T.report_text("malicious"), encoding="utf-8")
+
+    _refused(tmp_path, T.FakeAgent(_plan(base_disposition=blank), _seat(), _seat_c()),
+             token="disposition", calls=1, where=r"call 1|questioner\b")
 
 
 #: Review r2's counterexamples, each of which the pre-#1579 host accepted or dropped silently.

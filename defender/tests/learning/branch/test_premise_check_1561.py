@@ -329,3 +329,132 @@ def test_the_revision_and_check_prompts_ask_for_the_tool_not_a_yaml_document(tmp
     for prompt in (agent.prompts[-1], check.prompts[0]):
         assert "one YAML document" not in prompt
         assert "call the tool" in prompt.lower()
+
+
+# P1 over a revision: any reply the check accepts is kept with every key held; every other is refused
+
+import copy  # noqa: E402
+import logging  # noqa: E402
+
+from defender.records.formats import FamilyError  # noqa: E402
+
+from defender.tests.support.learning.core import _reply_mutations1579 as M  # noqa: E402
+
+
+def _revision_outcome(tmp_path: Path, revision: dict, index: int):
+    """('dropped', None) or ('kept', world b) for one variant of the revision reply. The re-check
+    is scripted clean, so a refusal of the revision is the only cause of a drop."""
+    family, _agent, check, recorded = _run(
+        tmp_path / f"v{index}", questioner_replies=[*three_replies(), copy.deepcopy(revision)],
+        check_replies=[_conflict("b", "f1"), {"conflicts": []}])
+    [entry] = recorded[0]
+    if entry["dropped"]:
+        assert not entry["revised"], "a dropped revision is recorded as rebuilt"
+        assert check.calls == 1, "a dropped revision was re-checked"
+        assert _labels(family) == ["a", "c"]
+        return "dropped", None
+    assert check.calls == 2
+    return "kept", family
+
+
+def test_p1_every_revision_is_refused_or_kept_with_every_key_held_and_the_gate_satisfied(tmp_path):
+    """Mutations at every level of a valid revision (its four seat keys and facts, each fact, its
+    entities; null and blank included): the world is dropped (#1561), or kept with every key the
+    revision carried held unchanged and a family the manifest gate accepts. F4: a `disposition_declared`
+    outside the vocabulary or a blank axis is refused in-call, not left for the manifest gate."""
+    base = [_revision()]
+    cases = M.variants(base, seed=1561, pairs=60, identities=(None, T.fixture_world_id("b")))
+    kept = dropped = 0
+    failures: list[str] = []
+    for index, (label, replies) in enumerate(cases):
+        outcome, family = _revision_outcome(tmp_path, replies[0], index)
+        if outcome == "dropped":
+            dropped += 1
+            continue
+        kept += 1
+        world = next(w for w in family["worlds"] if w["label"] == "b")
+        try:
+            M.gate(family)
+        except FamilyError as late:
+            failures.append(f"{label}: kept but the manifest gate refuses it: {late}")
+            continue
+        lost = [key for key, value in replies[0].items() if not M.same(world.get(key, "<absent>"), value)]
+        if lost:
+            failures.append(f"{label}: kept but dropped or changed {lost}")
+    assert not failures, "\n".join(failures[:15]) + f"\n({len(failures)} of {len(cases)} variants)"
+    assert kept >= 8, f"only {kept} kept variants: the accepting side is vacuous"
+    assert dropped >= 40, f"only {dropped} dropped variants: the refusing side is vacuous"
+
+
+_F4_REVISIONS = {
+    "disposition outside the vocabulary": lambda: {**_revision(), "disposition_declared": "maybe"},
+    "blank axis": lambda: {**_revision(), "axis": ""},
+    "label_basis outside the vocabulary": lambda: {**_revision(), "label_basis": "vibes"},
+}
+
+
+@pytest.mark.parametrize("case", list(_F4_REVISIONS))
+def test_a_revision_the_manifest_gate_would_refuse_drops_its_world_here(tmp_path, case):
+    """F4: facts alone passed the old check and the family was refused later at the gate."""
+    outcome, _world = _revision_outcome(tmp_path, _F4_REVISIONS[case](), 0)
+
+    assert outcome == "dropped"
+
+
+class _HostBug(dict):
+    """A reply mapping that raises a host-side error whenever the call site's check reads it."""
+
+    def _boom(self, *_a, **_k):
+        raise RuntimeError("HOST-BUG-MARKER")
+
+    __getitem__ = __iter__ = __len__ = __contains__ = get = keys = items = values = _boom
+
+
+def _logged_revision_fault(tmp_path, caplog, fault):
+    caplog.set_level(logging.WARNING)
+    questioner_replies = iter(three_replies())
+
+    def questioner(prompt, **kwargs):
+        if kwargs.get("agent_id", "").endswith(":revise"):
+            raised = fault()
+            if isinstance(raised, BaseException):
+                raise raised
+            return raised
+        return W.FakeAgent(next(questioner_replies))(prompt, **kwargs)
+
+    recorded: list[list[dict]] = []
+    family = author(tmp_path, W.loop_paths(tmp_path), invoke=questioner,
+                    premise_check=W.FakeAgent(_conflict("b", "f1")), prebranch=PREBRANCH,
+                    record_revisions=recorded.append)
+    assert _labels(family) == ["a", "c"], "the world a failed revision named was kept"
+    assert recorded[0][0]["dropped"]
+    return " ".join(r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING)
+
+
+def test_a_host_exception_in_a_revisions_check_degrades_and_is_not_logged_as_an_unusable_reply(tmp_path, caplog):
+    """P5: a host error inside the revision's check (here: the mapping the fake hands back raises
+    when the call site's check reads it; test-only poison) drops the world as #1561 does, and the
+    log never calls it `ReplyUnusable`."""
+    text = _logged_revision_fault(tmp_path, caplog, lambda: (_HostBug(), 1))
+
+    assert "HOST-BUG-MARKER" in text, f"the failure was not logged: {text!r}"
+    assert "ReplyUnusable" not in text
+
+
+def test_a_run_unprocessable_at_a_revision_is_logged_by_that_name(tmp_path, caplog):
+    """P5: what the runner raises for a host exception in the check (`RunUnprocessable`) is logged as
+    that class (an imposed spelling: the exception's own name), and never as `ReplyUnusable`."""
+    text = _logged_revision_fault(
+        tmp_path, caplog, lambda: TY.unprocessable("the revision's check failed", requests=1))
+
+    assert "RunUnprocessable" in text, text
+    assert "ReplyUnusable" not in text
+
+
+def test_a_revision_the_call_gave_up_on_is_not_logged_as_a_host_failure(tmp_path, caplog):
+    """Control for the two above: an exhausted revision (`ReplyUnusable`) is the one the log may
+    name so, and it never reads as `RunUnprocessable`."""
+    text = _logged_revision_fault(tmp_path, caplog, lambda: TY.unusable("facts must not be empty"))
+
+    assert "facts must not be empty" in text, text
+    assert "RunUnprocessable" not in text

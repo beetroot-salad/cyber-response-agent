@@ -22,6 +22,7 @@ from typing import Any
 
 from defender import _yaml
 from defender.tests.support.learning.core import _typed_output1579 as TY
+from defender.tests.support.learning.core import _unmodelled1579 as _unmodelled
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S24
@@ -1090,16 +1091,18 @@ def family_reply(*, world: Sequence[dict] = (), passes: bool = True,
     return doc
 
 
-def as_text(doc: Any) -> Any:
+def as_text(doc: Any, unmodelled: list[str] | None = None, agent_id: str = "") -> Any:
     """#1579: replies are mappings; name kept for its callers. What a judge fake answers for a
     scripted `doc`: `(mapping, 1)`, a `(mapping, requests)` tuple as scripted, an exception
-    instance raised. Text is a stale script and fails loudly."""
+    instance raised. Text is a stale script and fails loudly (R7: and is recorded on `unmodelled`)."""
     if isinstance(doc, BaseException):
         raise doc
     if isinstance(doc, tuple):
         return doc
     if isinstance(doc, Mapping):
         return copy.deepcopy(dict(doc)), 1
+    if unmodelled is not None:
+        unmodelled.append(f"{agent_id}: a {type(doc).__name__} reply to a typed call")
     raise AssertionError("#1579: script a mapping, not text")
 
 
@@ -1210,6 +1213,8 @@ class RoutedJudge:
     kwargs: list[dict] = field(default_factory=list)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
     world_labels: dict[str, str] = field(default_factory=dict, repr=False)
+    #: R7: inputs this fake does not model, asserted empty at teardown (conftest).
+    unmodelled: list[str] = field(default_factory=_unmodelled.new_list, repr=False)
 
     def bind_worlds(self, world_ids: Mapping[str, str]) -> None:
         self.world_labels = {identity: label for label, identity in world_ids.items()}
@@ -1234,14 +1239,16 @@ class RoutedJudge:
                 value = self.replies[key]
                 if isinstance(value, list):
                     if not value:
+                        self.unmodelled.append(f"{agent_id}: nothing scripted")
                         raise AssertionError(
                             f"RoutedJudge: replies[{key!r}] ran out at {agent_id}")
                     value = value.pop(0)
-                return as_text(value)
+                return as_text(value, self.unmodelled, agent_id)
         if label == FAMILY and self.family_default is not None:
-            return as_text(self.family_default)
+            return as_text(self.family_default, self.unmodelled, agent_id)
         if label != FAMILY and self.default is not None:
-            return as_text(self.default)
+            return as_text(self.default, self.unmodelled, agent_id)
+        self.unmodelled.append(f"{agent_id}: nothing scripted")
         raise AssertionError(f"RoutedJudge: no reply routed for {agent_id}")
 
     @staticmethod

@@ -186,7 +186,7 @@ def _launch_over_the_old_run(tmp_path: Path, **seams):
     seams.setdefault("preflight", S.no_preflight)
     seams.setdefault("live_tree", T.source_capture())
     seams.setdefault("roster", est.roster())
-    seams.setdefault("judge", S.FakeJudge(default="bucket: none\nsystems: []\nfindings: []\n"))
+    seams.setdefault("judge", S.quiet_judge())
     seams.setdefault("oracle", S.oracle(then=S.submit()).model)
     seams.setdefault("verifier", S.passing_verifier().model)
     seams.setdefault("directory", est.launch_directory(tenant.id))

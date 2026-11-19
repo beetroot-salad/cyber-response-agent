@@ -163,4 +163,24 @@ def test_1579_a_size_failure_on_a_re_ask_fails_that_draw_alone(tmp_path):
     row = _row(ep)
     assert row["completed_draws"] == 1, row
     assert row.get("draws_failed_reason"), row
-    assert [p.name for p in J.draw_files(ep, "b")] == ["1.yaml"]
+    assert [p.name for p in J.draw_files(ep, "b")] == ["0.yaml", "1.yaml"]
+    assert J.draw_doc(ep, "b", 0).get("failure_reason"), "the failed draw's document names its failure"
+    assert "failure_reason" not in J.draw_doc(ep, "b", 1)
+
+
+def test_1579_a5_a_discipline_bucket_for_a_world_never_shown_its_facts_is_refused_in_the_call(tmp_path):
+    """A5 through the real seam: world c has no oracle answer in its ledger, so `analyze-discipline`
+    is refused in the call with the reason and the corrected reply is the draw; world b, shown its
+    facts, files the same bucket at its first request (the control)."""
+    ep = _episode(tmp_path)
+    discipline = J.reply_doc(bucket="analyze-discipline")
+    calls = TY.ScriptedCalls([discipline], [discipline, J.reply_doc()], [J.family_reply()])
+
+    _grade(ep, calls)
+
+    assert calls.request_counts() == [1, 2, 1]
+    assert "never shown its facts" in " ".join(calls.reasons_sent(1)), calls.reasons_sent(1)
+    assert J.draw_doc(ep, "b", 0)["bucket"] == "analyze-discipline"
+    assert J.draw_doc(ep, "c", 0)["bucket"] == "lead-set"
+    assert (_row(ep, "c")["completed_draws"], _row(ep, "c")["malformed_replies"]) == (1, 1)
+    assert _row(ep, "b")["malformed_replies"] == 0
