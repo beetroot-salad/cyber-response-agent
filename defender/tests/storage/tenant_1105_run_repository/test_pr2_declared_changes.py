@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+from defender.records import RunPaths
+from defender.records._episode_paths import LAYOUT
 from defender.tests.support.presentation import _episode_1025 as E
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
 from defender.tests.storage.tenant_1105_run_repository import _spec1105_pr2 as P
@@ -197,6 +199,10 @@ def test_dc4_the_page_roster_is_the_manifests_arms_and_no_stray(tmp_path, d9_ten
     assert "not declared in the manifest" not in page.text
 
 
+#: Planted only outside the container; an archived file holding it was read through the arm's link.
+OUTSIDE_MARK = "OUTSIDE-THE-CONTAINER"
+
+
 class _LinkingSibling(P.J.FakeSibling):
     """`FakeSibling` whose arm `b` (at its roster id) is materialised OUTSIDE the container, with
     a link left at its name: the one arm-entry shape a host (never a box: seccomp) can leave."""
@@ -216,8 +222,9 @@ class _LinkingSibling(P.J.FakeSibling):
         if arm.is_dir() and not arm.is_symlink():
             target = self.outside / arm.name
             shutil.move(str(arm), str(target))
-            (target / "report.md").write_text(
-                P.T.report_text("benign", extra="OUTSIDE-THE-CONTAINER"), encoding="utf-8")
+            # Marked in a leaf the archive copies (#1534: it no longer copies a `report.md`).
+            with RunPaths(target).investigation.open("a", encoding="utf-8") as fh:
+                fh.write(f"\n{OUTSIDE_MARK}\n")
             os.symlink(target, arm)
         return rc
 
@@ -235,7 +242,7 @@ def test_dc5_an_arm_entry_that_is_a_link_is_never_archived(tmp_path, monkeypatch
         "the double left no link at arm b's name: the scene this test is about was not built")
     archived = [p for p in (ep / "worlds").rglob("*") if p.is_file()] if (
         ep / "worlds").is_dir() else []
-    leaked = [p for p in archived if b"OUTSIDE-THE-CONTAINER" in p.read_bytes()]
+    leaked = [p for p in archived if OUTSIDE_MARK.encode("utf-8") in p.read_bytes()]
     assert leaked == [], f"the link's target was archived: {leaked}"
 
     control_root = tmp_path / "control"
@@ -245,7 +252,9 @@ def test_dc5_an_arm_entry_that_is_a_link_is_never_archived(tmp_path, monkeypatch
     est2, src2 = P.launch_source(control_root)
     clean = P.drive_launch(est2, P.launch_argv(P.LAUNCH_TENANT, src2))
     assert _launched(clean), f"the control did not launch: {clean.message!r}"
-    assert (_the_launched_episode() / "worlds" / P.T.world_id(_the_launched_episode(), "b") / "report.md").is_file()
+    control = _the_launched_episode()
+    assert (control / LAYOUT.world(P.T.world_id(control, "b")).investigation).is_file(), (
+        "the control archived no investigation for arm b: the leaf the marker rides in is not one the archive copies")
 
 
 def test_dc6_a_sibling_over_an_absent_container_is_refused(tmp_path):
