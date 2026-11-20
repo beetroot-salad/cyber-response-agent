@@ -1492,10 +1492,10 @@ def _container_systems(  # noqa: PLR0913 — the tenant, its copy and records, t
     catalog this container reads, its grants narrowed to them, then judged by the adapters' own
     settings checks. The judgement runs adapter code, so it is the container's, never the
     helper's (#1170 O5, N7)."""
-    roster = roster if roster is not None else _run_roster(DEFENDER_DIR)
+    read = roster if roster is not None else _run_roster(DEFENDER_DIR)
     tenant = _resolve_run_tenant(accepted, dispatches_lead_zero=dispatches_lead_zero, records=records,
-                                 copy=copy, catalog=_Catalog(roster))
-    verdict = _tenant_verdict(tenant, roster)
+                                 copy=copy, catalog=_Catalog(read))
+    verdict = _tenant_verdict(tenant, read)
     systems = _judge_start(verdict.tenant, defender_dir=DEFENDER_DIR, roster=verdict.systems.roster,
                            known_ids=known_ids, catalog=verdict.systems.catalog.roster)
     return verdict.tenant, systems

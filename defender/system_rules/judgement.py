@@ -51,9 +51,9 @@ def located_access(text: str, *, system: str, catalog: Catalog | None, adapter: 
         declaration = parse_access(text, system=system)
     except ConfigFault as fault:
         raise ConfigFault(_relocated(str(fault), system, locator)) from None
-    adapter = system if adapter is None else adapter
-    if catalog is not None and adapter in catalog:
-        why = reads_fault(declaration, catalog.entry(adapter).reads, adapter=adapter)
+    named = system if adapter is None else adapter
+    if catalog is not None and named in catalog:
+        why = reads_fault(declaration, catalog.entry(named).reads, adapter=named)
         if why is not None:
             raise ConfigFault(f"{locator.part(system, 'access')}: {why}")
     return declaration
