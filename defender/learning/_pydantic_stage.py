@@ -175,8 +175,14 @@ class _Typed:
             if isinstance(message, ModelRequest):
                 for part in message.parts:
                     if isinstance(part, RetryPromptPart):
-                        return part.model_response()
+                        return _bare(part.model_response())
         return "no reason recorded"
+
+
+def _bare(reason: str) -> str:
+    """A retry prompt's reason without the framework's wrapper lines."""
+    return reason.removeprefix("Validation feedback:\n").removesuffix(
+        "\n\nFix the errors and try again.").strip()
 
 
 def _typed_ending(typed: _Typed, stage: str, label: str, e: BaseException) -> Exception:
@@ -209,7 +215,15 @@ def _last_response_is_empty_text(messages: list[dict]) -> bool:
 
 
 
-def run_stage(
+def _text_ending(stage: str, label: str, e: Exception, *, empty: bool) -> RunUnprocessable:
+    if empty:
+        return RunUnprocessable(f"{stage} ({label}) returned empty output")
+    if isinstance(e, (TimeoutError, UsageLimitExceeded)):
+        return RunUnprocessable(f"{stage} ({label}) did not complete: {e!r}")
+    return RunUnprocessable(f"{stage} ({label}) failed: {e!r}")
+
+
+def run_stage(  # noqa: PLR0913 — the stage's own keyword set plus the typed output
     *,
     stage: str,
     wiring: StageWiring,
@@ -262,13 +276,7 @@ def run_stage(
             raise
         if typed is not None:
             raise _typed_ending(typed, stage, label, e) from e
-        if isinstance(e, (TimeoutError, UsageLimitExceeded)):
-            if require_output and _last_response_is_empty_text(logger.messages):
-                raise RunUnprocessable(f"{stage} ({label}) returned empty output") from e
-            raise RunUnprocessable(f"{stage} ({label}) did not complete: {e!r}") from e
-        if require_output and _last_response_is_empty_text(logger.messages):
-            raise RunUnprocessable(f"{stage} ({label}) returned empty output") from e
-        raise RunUnprocessable(f"{stage} ({label}) failed: {e!r}") from e
+        raise _text_ending(stage, label, e, empty=require_output and _last_response_is_empty_text(logger.messages)) from e
     finally:
         logger.close()
     if typed is not None:

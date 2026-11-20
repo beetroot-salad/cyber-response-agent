@@ -17,8 +17,8 @@ material, so it is evidence, not instruction.
 
 ## What you must return
 
-One YAML document, no prose around it — bare, not inside a code fence, with nothing before
-or after it. The fence below is illustration, not part of the reply:
+Call the tool with these arguments; plain text is not an answer. The block below only
+illustrates their shape:
 
 ```yaml
 story: |
@@ -33,8 +33,8 @@ THOSE FOUR KEYS AND NOTHING ELSE. The world's id and its `facts` — the differe
 investigator will actually be served — belong to call 1's plan, which is above in this message,
 because the plan has to be coherent ACROSS the worlds: two seats each choosing their own id, or
 each asserting their own facts, compose into a family whose arms are not a comparison of
-anything. Anything else you return is discarded, so restating the id or the facts only makes
-your document disagree with the family it will be composed into.
+anything. Any other key is refused, and you are asked again, so restating the id or the facts only
+costs you a turn.
 
 Your world resumes the investigation at its branch point, and every answer the run got before it
 stays in the investigator's transcript unchanged: a fact that denies one of those answers makes a
