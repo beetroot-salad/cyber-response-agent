@@ -36,6 +36,9 @@ def _rows(user: str, mark: str, n: int = ROWS) -> dict:
 
 
 BIG_ALICE = _rows("alice", "BASEMARK")
+#: The row the verifier's tests remove carries a value longer than a shown change keeps (2,000
+#: characters), so only a whole changes file holds it as the base does.
+BIG_ALICE["rows"][-1]["note"] += "y" * 3000
 BIG_BOB = _rows("bob", "READMARK")
 
 
@@ -93,7 +96,8 @@ index = json.load(open("inputs/index.json"))
 served = json.load(open("inputs/" + index["served"]))
 base = json.load(open("inputs/" + index["base"]))
 print("SERVED-ROWS", len(served["rows"]), "BASE-ROWS", len(base["rows"]))
-print("CHANGES", json.load(open("inputs/" + index["changes"]))["changes"][0]["op"])
+change = json.load(open("inputs/" + index["changes"]))["changes"][0]
+print("CHANGES", change["op"], "WHOLE", change["row_before"] == base["rows"][-1])
 print("KEYS", sorted(index))
 """
 
@@ -113,7 +117,7 @@ def test_the_verifier_judges_a_large_answer_by_a_view_and_checks_every_row_with_
     assert len(verifier.seen) >= 2, "the verifier's python got no reply"
     reply = verifier.seen[1]
     assert f"SERVED-ROWS {ROWS - 1} BASE-ROWS {ROWS}" in reply, reply[-2000:]
-    assert "CHANGES remove" in reply, reply[-2000:]
+    assert "CHANGES remove WHOLE True" in reply, f"the changes file is not whole: {reply[-2000:]}"
 
 
 def test_the_verifiers_box_is_its_own_and_holds_none_of_the_oracles_reads(tmp_path):

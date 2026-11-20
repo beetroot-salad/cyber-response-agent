@@ -109,6 +109,29 @@ def test_deadline_stops_the_verifiers_box_and_settles_its_worker_before_removal(
     assert worker.removed()
 
 
+def test_closing_the_oracle_mid_attempt_stops_the_verifiers_box_too():
+    """The sibling ending under a running attempt (`Oracle.close`) stops both of its boxes."""
+    from types import SimpleNamespace
+
+    from defender.learning.branch.estate.oracle import Oracle
+
+    stopped: list[str] = []
+
+    class _Owner(_AttemptBox):
+        def __init__(self, name):
+            super().__init__(lambda: None)
+            self.name = name
+
+        def cancel(self):
+            stopped.append(self.name)
+
+    run = _Run(door=None, deadline=10, box=_Owner("oracle"), verifier_box=_Owner("verifier"))
+
+    Oracle.close(SimpleNamespace(_live_run=run))
+
+    assert stopped == ["oracle", "verifier"]
+
+
 @pytest.mark.parametrize("main_fails", [False, True])
 def test_direct_tool_task_cancellation_cannot_discard_a_fatal_worker(main_fails):
     fault = box.BoxOutputLimitExceeded()

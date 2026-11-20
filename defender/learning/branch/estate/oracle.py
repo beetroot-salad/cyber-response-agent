@@ -369,8 +369,8 @@ from defender.learning.branch.estate._oracle_prompt import (
 #: Twice the per-answer cap: at ~3 characters a token (JSON is denser than prose) that is
 #: ~135k tokens, which leaves an attempt room for its own tool results and the model's replies
 #: within a 256k-token window. An answer the model's code can read whole (the base, a read, a
-#: re-ask, and what the verifier judges) is shown as a view of at most about `_VIEW_CAP`, so
-#: these caps now bind only on the text no file holds (facts, frozen rows, family examples). A
+#: re-ask, and what the verifier judges) is shown as a view of about `_VIEW_CAP`; the other
+#: parts (facts, frozen rows, similar servings, family examples) still share these caps. A
 #: conversation already past it restarts from its prefix before the next call or attempt
 #: (`Oracle._oversized`), and a fresh start is fitted to it (`_shares`).
 _PROMPT_BUDGET = 2 * _CONTEXT_CAP
@@ -542,7 +542,7 @@ class Oracle:
         #: The earlier servings of this world most like the call being served (`serve`).
         self._similar: list[dict] = []
         #: The python box of the attempt running now, if it has one (`close` stops it).
-        self._live_box: _AttemptBox | None = None
+        self._live_run: _Run | None = None
         self.explored: list[tuple[str, Any]] = []
         self.unservable: OracleUnservable | None = None
         #: Both roles' pricing rows, settled here, before any request: a role whose model has
@@ -700,11 +700,12 @@ class Oracle:
         self.unservable = stop
 
     def close(self) -> None:
-        """Stop the box of an attempt still running (the sibling is ending under it). Every
-        attempt stops its own box as it ends, so none is left otherwise."""
-        live = self._live_box
+        """Stop the boxes of an attempt still running (the sibling is ending under it): its own
+        and its verifier's. Every attempt removes its boxes as it ends, so none is left otherwise."""
+        live = self._live_run
         if live is not None:
-            live.cancel()
+            for box in live.boxes:
+                box.cancel()
 
     def _family_block(self) -> str:
         """The family's base story, branch point and example answers: the same bytes for every
@@ -795,7 +796,10 @@ class Oracle:
         failures = "\n".join(self._failures)
         base_text = canonical_json(base)
         sizes = [len(_text_of(value)) for _label, value in items]
-        sizes += [len(failures), len(canonical_json(dict(params))), len(base_text)]
+        # A base past `_VIEW_CAP` is shown as its view (`_base_text`): the rest of the budget is
+        # the other parts' to share.
+        shown = len(base_text) if len(base_text) <= _VIEW_CAP else 2 * _VIEW_CAP
+        sizes += [len(failures), len(canonical_json(dict(params))), shown]
         *caps, fail_cap, params_cap, base_cap = _shares(sizes, _PROMPT_BUDGET - len(family))
         framed = [_framed(label, value, cap) for (label, value), cap in zip(items, caps,
                                                                               strict=True)]
@@ -860,7 +864,7 @@ class Oracle:
                     return await _within_deadline(run, lambda: self._oracle_agent.run(
                         message_history=history, deps=run))
 
-        self._live_box = box
+        self._live_run = run
         try:
             in_time, result = _run_coroutine(attempt)
         except _AttemptOver as over:
@@ -877,7 +881,7 @@ class Oracle:
         finally:
             # Owned Python work (the verifier's included) has settled before either box's
             # container and scratch are removed.
-            self._live_box = None
+            self._live_run = None
             run.stop_boxes()
         if not in_time:
             self._conversation = _settled(held[-1])
@@ -1048,13 +1052,13 @@ class Oracle:
             raise _ArgumentRefused("the code holds a NUL or text that is not valid UTF-8 (a "
                                    "lone surrogate), which cannot reach the box") from None
         if run.box is None:
-            raise _AttemptFailed("python runs only in an oracle attempt's own box")
+            raise _AttemptFailed("python runs only in its run's own box")
         try:
             box = run.box.get()
         except _AttemptFailed:
             raise
         except Exception as exc:  # noqa: BLE001 — no sandboxed box: the attempt fails (M18=A)
-            raise _AttemptFailed("python needs the oracle's sandboxed box, and it could not "
+            raise _AttemptFailed("python needs a sandboxed box, and it could not "
                                  "start") from exc
         if not getattr(box, "sandboxed", False):
             run.box.lost(box)
@@ -1269,7 +1273,7 @@ class Oracle:
         named = {entry["forged_id"] for entry in handin.added}
         run.attempt.forged = {fid: row for fid, row in run.attempt.forged.items() if fid in named}
         changes = self._rendered(run, applied, handin, checked.proven)
-        verdict = await self._verify(run, served, shown_changes(changes))
+        verdict = await self._verify(run, served, shown_changes(changes), whole=changes)
         if not verdict.get("passed"):
             return self._verdict([f"the verifier failed the answer: "
                                   f"{wrap_fresh(str(verdict.get('reason') or ''), 'untrusted')}"])
@@ -1280,7 +1284,8 @@ class Oracle:
     def _verdict(self, failures: list[str]) -> str:
         return "Submission refused:\n" + "\n".join(failures)
 
-    async def _verify(self, run: _Run, served: Any, changes: dict) -> dict:
+    async def _verify(self, run: _Run, served: Any, changes: dict, *,
+                      whole: dict | None = None) -> dict:
         """The verifier's pass, in a cold context of its own, under the attempt's deadline.
         Where the call was re-asked it is shown the re-asked answer as the base, the re-ask's
         question, and the rows it dropped from the live answer (#1385 A4)."""
@@ -1302,12 +1307,14 @@ class Oracle:
         # answer is shown as a bounded view, and its python reads the whole from these files.
         saved = [_saved("base", None, run.base if re_asked is None else re_asked.answer),
                  _saved("served", None, served), _saved("changes", None, changes)]
+        # The changes are shown cut for length (`shown_changes`); its box holds them whole.
+        saved[2]["answer"] = changes if whole is None else whole
         if re_asked is not None:
             saved.append(_saved("dropped", None, re_asked.dropped))
         name = {e["kind"]: e["name"] for e in saved}
 
-        def answer(label: str, kind: str) -> tuple[str, Any]:
-            value = next(e["answer"] for e in saved if e["kind"] == kind)
+        def answer(label: str, kind: str, shown: Any = None) -> tuple[str, Any]:
+            value = next(e["answer"] for e in saved if e["kind"] == kind) if shown is None else shown
             view = _view(value, f"saved for your python as {_INPUTS}/{name[kind]} "
                                 f"(`{kind}` in {_INPUTS}/index.json)")
             return (label, value) if view is None else (label, view)
@@ -1327,7 +1334,7 @@ class Oracle:
             ("The world's frozen telemetry (rows earlier answers froze)", frozen),
             ("This hand-in's forged rows", handed),
             ("The world's recorded facts", recorded),
-            answer("The hand-in's changes, as the host applied them", "changes"),
+            answer("The hand-in's changes, as the host applied them", "changes", changes),
             *([] if attempt.code is None else [
                 ("The code that built the served answer (untrusted; judge the answer, not the "
                  "code)", _without_comments(attempt.code))]),
