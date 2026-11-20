@@ -261,7 +261,7 @@ def _refuse_discipline(bucket: str, where: str, shown_its_facts: bool | None) ->
             f"{' and '.join(sorted(DISCIPLINE_BUCKETS))} are unavailable to it")
 
 
-def _closed(raw: dict[str, Any], allowed: tuple[str, ...], where: str) -> None:
+def _closed_to_keys(raw: dict[str, Any], allowed: tuple[str, ...], where: str) -> None:
     """Every key of `raw` is one `allowed` names: a reply is closed at every level, so a key the
     prompt never asks for is refused here, not dropped later."""
     extra = [str(k) for k in raw if k not in allowed]
@@ -285,7 +285,7 @@ def _parse_investigator(raw: Any, index: int, *, shown_its_facts: bool | None,
         raise JudgeRefused(
             f"{where} carries the retired {RETIRED_INVESTIGATOR_FIELD!r} list — an "
             f"investigator finding's pointers are {CONTRAST_EVIDENCE!r} alone (A1)")
-    _closed(raw, _INVESTIGATOR_KEYS, where)
+    _closed_to_keys(raw, _INVESTIGATOR_KEYS, where)
     bucket = raw.get("bucket")
     if not isinstance(bucket, str) or bucket not in INVESTIGATOR_BUCKETS:
         raise JudgeRefused(
@@ -312,7 +312,7 @@ def _parse_world_finding(raw: Any, index: int) -> WorldFinding:
     where = f"{WORLD_FINDINGS}[{index}]"
     if not isinstance(raw, dict):
         raise JudgeRefused(f"{where} is not a mapping")
-    _closed(raw, _WORLD_FINDING_KEYS, where)
+    _closed_to_keys(raw, _WORLD_FINDING_KEYS, where)
     bucket = raw.get("bucket")
     if not is_world_finding_bucket(bucket):
         raise JudgeRefused(
@@ -329,7 +329,7 @@ def _parse_gap(raw: Any, index: int) -> Gap:
     where = f"{GAPS}[{index}]"
     if not isinstance(raw, dict):
         raise JudgeRefused(f"{where} is not a mapping")
-    _closed(raw, _GAP_KEYS, where)
+    _closed_to_keys(raw, _GAP_KEYS, where)
     if not isinstance(raw.get(KEPT_FACTS), bool):
         raise JudgeRefused(f"{where}.{KEPT_FACTS}={raw.get(KEPT_FACTS)!r} must be a boolean")
     return Gap(what=_reply_text(raw, GAP_WHAT, where), how=_reply_text(raw, GAP_HOW, where),
@@ -391,7 +391,7 @@ def validate_reply(doc: Any, *, scope: str = "world", reachable_systems: Any = N
         if carried:
             raise JudgeRefused(f"the family reply carries {carried} — the family call files "
                                "family-scope world findings only")
-    _closed(doc, top, "the judge's reply")
+    _closed_to_keys(doc, top, "the judge's reply")
     tables = [_require_list(doc, key) for key in PASS_TABLES]
     noise = doc.get("noise_floor_note", "")
     if not isinstance(noise, str):

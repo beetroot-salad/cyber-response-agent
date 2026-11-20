@@ -385,28 +385,28 @@ _REVISION_SCHEMA: dict[str, Any] = {"type": "object", "properties": {
 _CHECK_SCHEMA = {"type": "object", "properties": {"conflicts": {"type": "array"}}}
 
 
-def _refuse(why: object) -> ModelRetry:
+def _retry_with(why: object) -> ModelRetry:
     return ModelRetry(str(why))
 
 
-def _closed(mapping: Any, allowed: frozenset[str], *, what: str) -> dict[str, Any]:
+def _closed_to(mapping: Any, allowed: frozenset[str], *, what: str) -> dict[str, Any]:
     """`mapping` as a dict whose keys are all in `allowed`: every call kind is closed, so a key
     the model wrote is refused in-call, never dropped later."""
     if not isinstance(mapping, dict):
-        raise _refuse(f"{what} must be a mapping, got {type(mapping).__name__}")
+        raise _retry_with(f"{what} must be a mapping, got {type(mapping).__name__}")
     if "world_id" in mapping:
-        raise _refuse("world_id is host-assigned; author descriptive fields only")
+        raise _retry_with("world_id is host-assigned; author descriptive fields only")
     extra = sorted(str(k) for k in mapping if k not in allowed)
     if extra:
-        raise _refuse(f"{what} has key(s) {', '.join(extra)} that this call does not take; "
+        raise _retry_with(f"{what} has key(s) {', '.join(extra)} that this call does not take; "
                       f"it takes only {', '.join(sorted(allowed))}")
     return mapping
 
 
 def _planned_entry(entry: Any) -> dict[str, Any]:
     if isinstance(entry, dict) and "world_id" in entry:
-        raise _refuse("world_id is host-assigned; author descriptive fields only")
-    return _closed(entry, _PLANNED_KEYS, what="a planned world")
+        raise _retry_with("world_id is host-assigned; author descriptive fields only")
+    return _closed_to(entry, _PLANNED_KEYS, what="a planned world")
 
 
 def _placeholder_world(plan: dict[str, Any], role: str) -> dict[str, Any]:
@@ -419,10 +419,10 @@ def _plan_check(source_disposition: str | None) -> Any:
     """Call 1's check: everything call 1 decides, composed and run through the manifest gate's
     rules, so a plan the gate would refuse is refused while call 1 can still fix it."""
     def check(reply: Any) -> None:
-        family = _closed(reply, _PLAN_KEYS, what="the plan")
+        family = _closed_to(reply, _PLAN_KEYS, what="the plan")
         entries = family.get("worlds")
         if not isinstance(entries, list) or not entries:
-            raise _refuse("worlds must be a non-empty list of the worlds you plan")
+            raise _retry_with("worlds must be a non-empty list of the worlds you plan")
         planned = [_planned_entry(entry) for entry in entries]
         worlds = [_base_world(family, source_disposition),
                   *(_placeholder_world(plan, _seat_letter(i)) for i, plan in enumerate(planned))]
@@ -430,31 +430,31 @@ def _plan_check(source_disposition: str | None) -> Any:
             check_composed_worlds(base_story=family.get("base_story"),
                                   discriminator=family.get("discriminator"), worlds=worlds)
         except FamilyError as refused:
-            raise _refuse(refused) from refused
+            raise _retry_with(refused) from refused
     return check
 
 
 def _seat_check(plan: dict[str, Any], seat: str) -> Any:
     def check(reply: Any) -> None:
-        authored = _closed(reply, SEAT_AUTHORED_FIELDS, what=f"seat {seat}'s reply")
+        authored = _closed_to(reply, SEAT_AUTHORED_FIELDS, what=f"seat {seat}'s reply")
         try:
             check_composed_world({**plan, **authored, "role": seat}, where=f"seat {seat}")
         except FamilyError as refused:
-            raise _refuse(refused) from refused
+            raise _retry_with(refused) from refused
     return check
 
 
 def _revision_check(world: dict[str, Any], seat: str) -> Any:
     def check(reply: Any) -> None:
-        authored = _closed(reply, _REVISION_KEYS, what=f"seat {seat}'s revision")
+        authored = _closed_to(reply, _REVISION_KEYS, what=f"seat {seat}'s revision")
         facts = authored.get("facts")
         if not (isinstance(facts, list) and facts):
-            raise _refuse("facts must be present and non-empty: the facts the run's answers "
+            raise _retry_with("facts must be present and non-empty: the facts the run's answers "
                           "contradicted are never kept")
         try:
             check_composed_world({**world, **authored}, where=f"the revision of seat {seat}")
         except FamilyError as refused:
-            raise _refuse(refused) from refused
+            raise _retry_with(refused) from refused
     return check
 
 
@@ -462,12 +462,12 @@ def _premise_check(reply: Any) -> None:
     """The conflicts list's shape. Entries naming an unknown label, or carrying other keys, are
     dropped by the reader, not refused (P4): refusing a whole check for a stray label would
     exhaust it and keep a contradicted world."""
-    doc = _closed(reply, frozenset({"conflicts"}), what="the premise check")
+    doc = _closed_to(reply, frozenset({"conflicts"}), what="the premise check")
     if not isinstance(doc.get("conflicts"), list):
-        raise _refuse("conflicts must be a list (empty when nothing conflicts)")
+        raise _retry_with("conflicts must be a list (empty when nothing conflicts)")
 
 
-def _ask(invoke: Any, prompt: str, *, agent_id: str, name: str, description: str,
+def _ask_typed(invoke: Any, prompt: str, *, agent_id: str, name: str, description: str,
          schema: dict, check: Any) -> dict[str, Any]:
     """One typed call: the accepted mapping, after the call site runs the same check on what the
     seam returned. In production that repeats a deterministic check; under a test fake it is the
@@ -512,7 +512,7 @@ def _conflicts(check: Any, *, family: dict[str, Any], worlds: Sequence[dict[str,
     """The check's conflicts by world label. A call that cannot be answered raises: the caller
     keeps the family as authored (`author_family`)."""
     labels = {str(w.get("label")) for w in worlds}
-    doc = _ask(check, _premise_prompt(family=family, worlds=worlds, prebranch=prebranch),
+    doc = _ask_typed(check, _premise_prompt(family=family, worlds=worlds, prebranch=prebranch),
                agent_id=agent_id, name="conflicts",
                description="Report the worlds whose facts the run's earlier answers contradict.",
                schema=_CHECK_SCHEMA, check=_premise_check)
@@ -530,7 +530,7 @@ def _rebuilt(world: dict[str, Any], conflicts: list[dict], *, invoke: Any,  # no
     reply the call cannot get right, or a host failure, drops this world alone."""
     seat = str(world.get("role"))
     try:
-        authored = _ask(
+        authored = _ask_typed(
             invoke, _world_prompt(seat, axis=world.get("axis"), family_reply=family_reply,
                                   header=header, capture=capture, revision=conflicts),
             agent_id=f"questioner:{seat.lower()}:revise", name="revision",
@@ -619,11 +619,11 @@ def _seat_letter(index: int) -> str:
     return WORLD_SEATS[index] if index < len(WORLD_SEATS) else chr(ord("B") + index)
 
 
-def _call(what: str, invoke: Any, prompt: str, **spec: Any) -> dict[str, Any]:
+def _call_or_refuse_episode(what: str, invoke: Any, prompt: str, **spec: Any) -> dict[str, Any]:
     """A call the family cannot be composed without: one that cannot be answered refuses the
     episode, naming the call and the last reason."""
     try:
-        return _ask(invoke, prompt, **spec)
+        return _ask_typed(invoke, prompt, **spec)
     except ReplyUnusable as unusable:
         raise BranchError(
             f"{what}: the questioner's reply was unusable after {unusable.requests} requests: "
@@ -660,7 +660,7 @@ def author_family(  # noqa: PLR0913 — one keyword per captured input plus `les
     # Rendered once for all calls; framing is per call because the salt is.
     capture = _capture_sections(leads=leads, alert=alert, frontier=frontier, samples=samples,
                                 lessons=lessons, served_systems=served)
-    family = _call(
+    family = _call_or_refuse_episode(
         "call 1 (the base story and discriminator)", invoke, _family_prompt(header, capture),
         agent_id="questioner", name="plan",
         description="Return the base story, base disposition, discriminator and planned worlds.",
@@ -671,7 +671,7 @@ def author_family(  # noqa: PLR0913 — one keyword per captured input plus `les
     worlds: list[dict[str, Any]] = [_base_world(family, source_disposition)]
     for seat_index, plan in enumerate(_planned_worlds(family)):
         seat = _seat_letter(seat_index)
-        authored = _call(
+        authored = _call_or_refuse_episode(
             f"the call authoring seat {seat}", invoke,
             _world_prompt(seat, axis=plan.get("axis"), family_reply=family_reply, header=header,
                           capture=capture),
