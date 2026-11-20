@@ -179,6 +179,12 @@ jobs:
         # a four-core runner. `loadfile` keeps each file's tests on one worker, so
         # module-scoped fixtures and the per-file tmp git repos behave as they did serially.
         #
+        # `-n 12`, not `auto` (4 workers on the 4-core runner): the heavy files here are wall-clock
+        # bound, not CPU bound (e.g. tenancy/tenant_1108_p4/test_r6_publish_stop.py is ~577s of
+        # `time.sleep` waits around real subprocesses), so a worker blocked in a sleep leaves its core
+        # idle. Three workers per core keeps the cores busy and cuts a shard's wall time without a
+        # ninth shard. If timing-sensitive tests flake, lower this before adding shards.
+        #
         # Two deselections, neither of which drops a check from CI:
         #   -m "not gate"  — nine tests that re-run a repo-wide lint gate over the real tree
         #                    (~50s of CPU between them). They run in the `lint` job instead,
@@ -203,7 +209,7 @@ jobs:
           DEFENDER_TEST_OPENBAO_CONTAINER: defender-openbao
         run: >-
           uv run pytest tests/ -v -m "not live and not gate"
-          -n auto --dist loadfile --durations=25
+          -n 12 --dist loadfile --durations=25
           --shard ${{ matrix.shard }}/8
           --ignore tests/e2e/test_box_boundary_e2e.py
 
