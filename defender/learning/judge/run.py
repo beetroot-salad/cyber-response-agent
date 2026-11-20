@@ -562,7 +562,7 @@ def _world_task(ctx: JudgeContext) -> str:
         f"{_pointer_rules()}"
         "Before findings, run three passes and report each as its own table: correlations, "
         "scope_checks, derivations. Cap any table at 20 rows.\n\n"
-        "Call the verdict tool with your reply; it takes exactly these keys and no others: bucket, systems, noise_floor_note, correlations, scope_checks, derivations, "
+        "Call the verdict tool with your reply; it takes exactly these keys and no others (an unknown key is refused, and you are asked again): bucket, systems, noise_floor_note, correlations, scope_checks, derivations, "
         f"{INVESTIGATOR_FINDINGS}, {WORLD_FINDINGS}, {GAPS}.\n"
     )
     return task
@@ -584,7 +584,7 @@ def _build_family_prompt(manifest: dict[str, Any], runs: RunSet, noise: list[Any
         f"{_guidance(WORLD_FINDING_BUCKETS, _WORLD_FINDING_GUIDANCE, 'world-finding bucket')}\n"
         f"{_DECISION_GLOSSARY}"
         f"{_pointer_rules()}"
-        "Call the verdict tool with your reply; it takes exactly these keys and no others: "
+        "Call the verdict tool with your reply; it takes exactly these keys and no others (an unknown key is refused, and you are asked again): "
         f"noise_floor_note, correlations, scope_checks, derivations, {WORLD_FINDINGS} (each: "
         f"bucket, systems — the systems the flaw is about, each once — claim, root_cause, "
         f"anchor, topic, {EVIDENCE}).\n"
