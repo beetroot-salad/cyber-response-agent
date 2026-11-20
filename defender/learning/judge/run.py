@@ -374,7 +374,7 @@ def validate_reply(doc: Any, *, scope: str = "world", reachable_systems: Any = N
     if not isinstance(doc, dict):
         raise JudgeRefused(
             f"the judge's reply must be a mapping (got {type(doc).__name__})")
-    top = ("noise_floor_note", *PASS_TABLES, WORLD_FINDINGS)
+    top: tuple[str, ...] = ("noise_floor_note", *PASS_TABLES, WORLD_FINDINGS)
     if scope != "family":
         top = (*top, *_WORLD_ONLY_KEYS)
     unwritable = unwritable_value(doc)

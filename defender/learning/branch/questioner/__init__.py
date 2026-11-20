@@ -372,16 +372,15 @@ _PLAN_KEYS = frozenset({"base_story", "base_disposition", "discriminator", "worl
 _PLANNED_KEYS = frozenset({"label", "axis", "facts"})
 _REVISION_KEYS = SEAT_AUTHORED_FIELDS | {"facts"}
 
-_OBJECT = {"type": "object"}
-_PLAN_SCHEMA = {"type": "object", "properties": {
+_PLAN_SCHEMA: dict[str, Any] = {"type": "object", "properties": {
     "base_story": {"type": "string"}, "base_disposition": {"type": "string"},
     "discriminator": {"type": "object", "properties": {"predicate": {"type": "string"}}},
     "worlds": {"type": "array", "items": {"type": "object", "properties": {
         "label": {"type": "string"}, "axis": {"type": "string"}, "facts": {"type": "array"}}}}}}
-_SEAT_SCHEMA = {"type": "object", "properties": {
+_SEAT_SCHEMA: dict[str, Any] = {"type": "object", "properties": {
     "story": {"type": "string"}, "axis": {"type": "string"},
     "disposition_declared": {"type": "string"}, "label_basis": {"type": "string"}}}
-_REVISION_SCHEMA = {"type": "object", "properties": {
+_REVISION_SCHEMA: dict[str, Any] = {"type": "object", "properties": {
     **_SEAT_SCHEMA["properties"], "facts": {"type": "array"}}}
 _CHECK_SCHEMA = {"type": "object", "properties": {"conflicts": {"type": "array"}}}
 

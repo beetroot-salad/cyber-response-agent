@@ -5,7 +5,7 @@ import logging
 import functools
 from collections.abc import Callable
 from dataclasses import replace
-from typing import Any, ClassVar, NamedTuple, Protocol
+from typing import Any, ClassVar, NamedTuple, Protocol, overload
 
 from defender._text import is_content_less
 from defender.box import BoxOutputLimitExceeded
@@ -225,6 +225,22 @@ def _text_ending(stage: str, label: str, e: Exception, *, empty: bool) -> RunUnp
     if isinstance(e, (TimeoutError, UsageLimitExceeded)):
         return RunUnprocessable(f"{stage} ({label}) did not complete: {e!r}")
     return RunUnprocessable(f"{stage} ({label}) failed: {e!r}")
+
+
+@overload
+def run_stage(
+    *, stage: str, wiring: StageWiring, ctx: StageContext, deps: RoleDeps,
+    make_model: MakeModel = ..., require_output: bool = ..., tools: Any = ..., verbs: Any = ...,
+    output: None = ...,
+) -> str: ...
+
+
+@overload
+def run_stage(
+    *, stage: str, wiring: StageWiring, ctx: StageContext, deps: RoleDeps,
+    make_model: MakeModel = ..., require_output: bool = ..., tools: Any = ..., verbs: Any = ...,
+    output: TypedOutput,
+) -> Accepted: ...
 
 
 def run_stage(  # noqa: PLR0913 — the stage's own keyword set plus the typed output
