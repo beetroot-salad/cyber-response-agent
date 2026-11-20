@@ -170,6 +170,28 @@ def test_o5_o6_pre_flight_asks_for_a_fresh_pass_naming_the_learning_job_each_tim
     assert all(m != "rw" for p in signer.payloads for _s, m in A.claims_of_payload(p)["grant"])
 
 
+@pytest.mark.parametrize(("reads", "granted"), J.GRANT_ROWS_1504)
+def test_1504_o3_a_learning_job_is_passed_no_system_whose_reads_differ_from_its_adapters(
+        tmp_path, monkeypatch, migrated_database, reads, granted):
+    """The learning pre-flight's pass names the proxied systems except one whose non-GET reads differ from its adapter's
+    list; the exact record, and GET or HEAD reads, are granted. (O3, C15)"""
+    from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
+
+    job_id = str(uuid.uuid4())
+    signer, got = make_signer(), {}
+
+    def job(c) -> int:
+        got["token"] = c.request("pass", id=job_id)["token"]
+        return 0
+
+    with J.helper_scene(tmp_path, monkeypatch, migrated_database, proxied=("identity", "cmdb"),
+                        records=J.cmdb_listing(reads)) as listed:
+        run_kind(listed, "learning", job, job_id=job_id, signer=signer)
+
+    assert sorted(A.grant_of(claims_of(signer, got["token"]))) == granted
+
+
+
 def test_a6_a_learning_job_is_passed_and_boxed_only_for_ids_the_helper_holds_for_it(scene):
     """The learning job's own id is answered for `pass`; the source run, a stranger's id, a host path and a `..` id are
     refused for `pass` and `box.start`, signing and creating nothing. (A6, O9)"""

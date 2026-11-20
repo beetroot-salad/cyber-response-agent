@@ -519,6 +519,32 @@ def test_o5_a_pass_is_the_helpers_alone_granted_and_proxied_systems_only_its_exp
         assert sorted(tuple(g) for g in launch["grant"]) == A.grant_of(claims), launch["grant"]
 
 
+@pytest.mark.parametrize(("reads", "granted"), J.GRANT_ROWS_1504)
+def test_1504_o3_the_helper_passes_no_system_whose_reads_differ_from_its_adapters(
+        tmp_path, monkeypatch, migrated_database, reads, granted):
+    """An investigation's launch grant and its pass name the proxied systems except one whose non-GET reads differ from
+    its adapter's list; the exact record, and GET or HEAD reads, are granted. (O3, C15)"""
+    from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
+
+    with helper_scene(tmp_path, monkeypatch, migrated_database, proxied=("identity", "cmdb"),
+                      records=J.cmdb_listing(reads)) as listed:
+        inv, argv = _investigation(listed)
+        signer, got = make_signer(), {}
+
+        def job(c) -> int:
+            got["launch"] = c.request("launch")
+            got["token"] = c.request("pass", id=inv)["token"]
+            return 0
+
+        docker = ContainerStandIn(job)
+        ran = drive_helper(listed, argv, docker=docker, signer=signer)
+
+        assert ran.raised is None, ran.raised
+        assert docker.job_error is None, docker.job_error
+        assert sorted(tuple(g) for g in got["launch"]["grant"]) == granted, got["launch"]["grant"]
+        assert sorted(A.grant_of(claims_of(signer, got["token"]))) == granted
+
+
 def test_o6_a_job_holding_the_row_gets_a_fresh_pass_each_time_it_asks(scene):
     """While the helper serves, each `pass` is signed anew for the same investigation: two asks, two distinct tokens, the
     second's expiry no earlier. (O6 refresh while held)"""

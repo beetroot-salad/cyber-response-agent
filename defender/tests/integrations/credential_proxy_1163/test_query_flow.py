@@ -519,8 +519,8 @@ def test_1391_o3_each_elastic_request_is_captured_once_and_reaches_the_proxy_onc
     sent = [urlsplit(r.url)[:3] for r in capture.requests]
     assert sent == [urlsplit(up.url)._replace(path=s.path.split("?")[0])[:3] for s in up.seen], (
         "a capture names a URL other than the one sent")
-    for request in capture.requests:
-        confine_read_endpoint(request.system, request.url, method=request.method)
+    for request in capture.requests:  # #1504 (conflict update): in-process, a GET/HEAD is judged and every other method passes on
+        assert confine_read_endpoint(request.system, request.url, method=request.method) == request.url
 
 
 @pytest.mark.parametrize(("verb", "kw", "timeout"), [

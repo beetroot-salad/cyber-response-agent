@@ -321,10 +321,11 @@ def _compare():
 
 
 def test_947_count_endpoint_is_absent_from_the_elastic_adapter_allowlist(tmp_path):
-    """The allowlist is the three Elasticsearch reads; Kibana's `/api/status` is gone. #1391 O3 D2."""
+    """The in-process allowlist is the one GET read (the searches are the record's declared reads, the proxy's to judge);
+    Kibana's `/api/status` is gone. #1391 O3 D2; #1504 (conflict update: the POST entries leave)."""
     confinement = T.mod("integrations.confinement")
     allow = set(confinement.READ_ENDPOINT_ALLOWLIST["elastic"])
-    assert allow == {("/*/_search", "POST"), ("/_query", "POST"), ("/_cluster/health", "GET")}
+    assert allow == {("/_cluster/health", "GET")}
 
 
 # the comparator

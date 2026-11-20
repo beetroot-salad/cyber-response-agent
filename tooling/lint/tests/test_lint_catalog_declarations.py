@@ -1,8 +1,11 @@
-"""Tests for the lint_catalog_declarations gate (#1366 K2, K8, C1).
+"""Tests for the lint_catalog_declarations gate (#1366 K2, K8, C1; #1504 O1, O5, O6, O7).
 
 The catalog is read cold: every catalog adapter and connect's example declare module-level `PREFIX`,
-`REQUIRED_CONFIG_KEYS`, `PATH_KEYS`, `DISPLAY_NAME` and `EXAMPLE`; an adapter offering a comment action declares
-`comment_route`; no declared settings key is secret-named. The gate is loaded inside each test, so a missing lint is
+`REQUIRED_CONFIG_KEYS`, `PATH_KEYS`, `DISPLAY_NAME`, `EXAMPLE` and (#1504 O1) `READ_ROUTES`, the non-GET reads it sends
+(explicit empty for none, upper-case non-GET/HEAD method, `/` path without `?`/`#`, no duplicates, empty when it declares
+a comment route); an adapter offering a comment action declares `comment_route`; no declared settings key is secret-named;
+a reference `<module stem>.md` with non-empty `## Credential` and `## Pitfalls` sits beside each (#1504 O5, O6; connect's
+example too, O7: it is the seed a generated adapter is copied from). The gate is loaded inside each test, so a missing lint is
 a red per test and not a collection error. Interface (invented by this contract): `main(["--root", <repo-shaped
 tree>])` -> exit 0 clean, 1 findings (each line names the module's repo-relative path and the constant or key), 2
 when the scan saw no adapter.
@@ -19,7 +22,11 @@ from _by_path import load_lint_gate
 REPO = Path(__file__).resolve().parents[3]
 ADAPTERS = "defender/integrations"
 EXAMPLE_ADAPTER = "defender/skills/connect/examples/example_adapter.py"
-CONSTANTS = ("PREFIX", "REQUIRED_CONFIG_KEYS", "PATH_KEYS", "DISPLAY_NAME", "EXAMPLE")
+CONSTANTS = ("PREFIX", "REQUIRED_CONFIG_KEYS", "PATH_KEYS", "DISPLAY_NAME", "EXAMPLE", "READ_ROUTES")
+#: FORCED (#1504, mirrored from `defender/tests/systems/_reads1504.py`, which this tree cannot import): the reads
+#: constant is `READ_ROUTES`; the reference is `<module stem>.md` beside the module with level-2 headings `Credential` and
+#: `Pitfalls`, a section being empty when no non-blank line precedes the next heading.
+SECTIONS = ("Credential", "Pitfalls")
 
 GOOD = {
     "PREFIX": 'PREFIX = "WIDGET"',
@@ -27,6 +34,7 @@ GOOD = {
     "PATH_KEYS": 'PATH_KEYS = ("TABLE",)',
     "DISPLAY_NAME": 'DISPLAY_NAME = "Widget"',
     "EXAMPLE": "EXAMPLE = False",
+    "READ_ROUTES": "READ_ROUTES = ()",
 }
 COMMENT_ACTION = "def add_case_comment(ctx, *, key, body):\n    return None\n"
 
@@ -36,7 +44,7 @@ def _gate():
 
 
 def _module(**override: str | None) -> str:
-    """An adapter's text: the five declarations, each replaced by `override[name]` or left out when it is None."""
+    """An adapter's text: the six declarations, each replaced by `override[name]` or left out when it is None."""
     lines = [override.get(name, GOOD[name]) for name in CONSTANTS]
     return "SYSTEM = \"widget\"\n" + "\n".join(line for line in lines if line is not None) + "\n"
 
@@ -49,8 +57,27 @@ def _tree(tmp_path: Path, files: dict[str, str]) -> Path:
     return tmp_path
 
 
-def _run(tmp_path: Path, files: dict[str, str], capsys) -> tuple[int, str]:
-    root = _tree(tmp_path, files)
+def _reference(**bodies: str | None) -> str:
+    """A reference's text: each section with `bodies[name]` (a default line when not given; None leaves the section out)."""
+    parts = ["# Widget\n"]
+    for name in SECTIONS:
+        body = bodies.get(name, f"What the {name.lower()} takes.\n")
+        if body is not None:
+            parts.append(f"## {name}\n\n{body}")
+    return "\n".join(parts)
+
+
+def _with_references(files: dict[str, str]) -> dict[str, str]:
+    """`files` plus a good reference beside each adapter module that has none (the example included)."""
+    out = dict(files)
+    for rel in files:
+        if (rel.startswith(f"{ADAPTERS}/") and rel.endswith("_adapter.py") and rel.count("/") == 2) or rel == EXAMPLE_ADAPTER:
+            out.setdefault(rel.removesuffix(".py") + ".md", _reference())
+    return out
+
+
+def _run(tmp_path: Path, files: dict[str, str], capsys, *, referenced: bool = True) -> tuple[int, str]:
+    root = _tree(tmp_path, _with_references(files) if referenced else files)
     capsys.readouterr()
     rc = _gate().main(["--root", str(root)])
     said = capsys.readouterr()
@@ -76,7 +103,7 @@ def test_a_tree_whose_adapters_declare_everything_is_clean(tmp_path, capsys):
 @pytest.mark.parametrize("name", CONSTANTS)
 @pytest.mark.parametrize("where", [f"{ADAPTERS}/widget_adapter.py", EXAMPLE_ADAPTER], ids=["catalog", "connect-example"])
 def test_an_adapter_lacking_a_declaration_is_reported_naming_it_and_the_constant(tmp_path, capsys, where, name):
-    """Each of the five constants, missing, is a finding on that module naming the constant. (#1366 K2, O2)"""
+    """Each of the six constants, missing, is a finding on that module naming the constant. (#1366 K2, O2; #1504 O1)"""
     rc, out = _run(tmp_path, {where: _module(**{name: None})}, capsys)
     assert rc == 1, out
     assert _lines_naming(out, where, name), out
@@ -89,7 +116,9 @@ def test_an_adapter_lacking_a_declaration_is_reported_naming_it_and_the_constant
     ("REQUIRED_CONFIG_KEYS", "REQUIRED_CONFIG_KEYS = _keys()"),
     ("PATH_KEYS", "PATH_KEYS = _keys()"),
     ("PREFIX", 'if True:\n    PREFIX = "WIDGET"'),
-], ids=["prefix-call", "name-call", "example-call", "keys-call", "path-keys-call", "prefix-not-module-level"])
+    ("READ_ROUTES", "READ_ROUTES = _routes()"),
+], ids=["prefix-call", "name-call", "example-call", "keys-call", "path-keys-call", "prefix-not-module-level",
+        "reads-call"])
 def test_a_declaration_that_is_not_readable_without_running_the_module_is_reported(tmp_path, capsys, name, text):
     """A constant computed by a call, or defined under a condition, cannot be read cold: reported. (#1366 K2)"""
     rc, out = _run(tmp_path, {f"{ADAPTERS}/widget_adapter.py": _module(**{name: text})}, capsys)
@@ -117,6 +146,107 @@ def test_an_adapter_offering_a_comment_action_without_a_route_is_reported(tmp_pa
     assert _lines_naming(out, "silent_adapter.py", "comment_route"), out
     assert not _lines_naming(out, "routed_adapter.py"), out
     assert not _lines_naming(out, "plain_adapter.py"), out
+
+
+# #1504 O1: the declared non-GET reads, held in shape
+
+ROUTES_GOOD = 'READ_ROUTES = (("POST", "/*/_search"), ("POST", "/_query"), ("PUT", "/a/*/b"))'
+
+
+@pytest.mark.parametrize("where", [f"{ADAPTERS}/widget_adapter.py", EXAMPLE_ADAPTER], ids=["catalog", "connect-example"])
+@pytest.mark.parametrize("text", [
+    "READ_ROUTES = ()", ROUTES_GOOD, 'READ_ROUTES: tuple[tuple[str, str], ...] = (("POST", "/lookup"),)',
+], ids=["explicit-empty", "routes-with-star", "annotated"])
+def test_a_well_shaped_reads_declaration_is_clean(tmp_path, capsys, where, text):
+    """Positive control: an explicit empty list, routes with `*` segments, an annotated list. (#1504 O1)"""
+    rc, out = _run(tmp_path, {where: _module(READ_ROUTES=text)}, capsys)
+    assert rc == 0, out
+
+
+@pytest.mark.parametrize("where", [f"{ADAPTERS}/widget_adapter.py", EXAMPLE_ADAPTER], ids=["catalog", "connect-example"])
+@pytest.mark.parametrize("text", [
+    'READ_ROUTES = (("post", "/lookup"),)',
+    'READ_ROUTES = (("GET", "/lookup"),)',
+    'READ_ROUTES = (("HEAD", "/lookup"),)',
+    'READ_ROUTES = (("POST", "lookup"),)',
+    'READ_ROUTES = (("POST", ""),)',
+    'READ_ROUTES = (("POST", "/lookup?x=1"),)',
+    'READ_ROUTES = (("POST", "/lookup#top"),)',
+    'READ_ROUTES = (("POST", "/lookup"), ("POST", "/lookup"))',
+    'READ_ROUTES = ("POST /lookup",)',
+    'READ_ROUTES = (("POST", "/lookup", "extra"),)',
+    'READ_ROUTES = (("POST", 7),)',
+    'READ_ROUTES = "POST /lookup"',
+], ids=["lower-case-method", "get", "head", "no-leading-slash", "empty-path", "query-in-path", "fragment-in-path",
+        "duplicate", "one-string", "triple", "non-text-path", "bare-string"])
+def test_a_reads_declaration_of_the_wrong_shape_is_reported_naming_the_constant(tmp_path, capsys, where, text):
+    """Each way a route list breaks the access declaration's route shape, or repeats a route, is a finding naming
+    `READ_ROUTES` on that module. (#1504 O1)"""
+    rc, out = _run(tmp_path, {where: _module(READ_ROUTES=text)}, capsys)
+    assert rc == 1, out
+    assert _lines_naming(out, where, "READ_ROUTES"), out
+
+
+def test_an_adapter_with_a_comment_route_declaring_reads_is_reported_and_one_declaring_none_is_clean(tmp_path, capsys):
+    """A comment route beside a non-empty `READ_ROUTES` is a finding (a case system has only GET reads); beside `()` it
+    is clean. (#1504 O1, C1)"""
+    comment = COMMENT_ACTION + "def comment_route(settings):\n    return ('POST', '/c/*')\n"
+    files = {f"{ADAPTERS}/case_adapter.py": _module(READ_ROUTES=ROUTES_GOOD) + comment,
+             f"{ADAPTERS}/quiet_adapter.py": _module() + comment}
+    rc, out = _run(tmp_path, files, capsys)
+    assert rc == 1, out
+    assert _lines_naming(out, "case_adapter.py", "READ_ROUTES"), out
+    assert not _lines_naming(out, "quiet_adapter.py"), out
+
+
+# #1504 O5, O6, O7: the reference beside each adapter
+
+WIDGET_REFERENCE = f"{ADAPTERS}/widget_adapter.md"
+EXAMPLE_REFERENCE = "defender/skills/connect/examples/example_adapter.md"
+
+
+@pytest.mark.parametrize("bodies", [
+    {}, {"Credential": "None known.\n", "Pitfalls": "None known.\n"},
+    {"Pitfalls": "- one\n- two\n"},
+], ids=["both-filled", "none-known", "a-list"])
+def test_an_adapter_whose_reference_holds_both_sections_is_clean(tmp_path, capsys, bodies):
+    """Positive control: a reference whose Credential and Pitfalls hold text, `None known.` included. (#1504 O5, O6)"""
+    rc, out = _run(tmp_path, {f"{ADAPTERS}/widget_adapter.py": _module(), WIDGET_REFERENCE: _reference(**bodies)}, capsys)
+    assert rc == 0, out
+
+
+@pytest.mark.parametrize(("where", "reference"), [
+    (f"{ADAPTERS}/widget_adapter.py", WIDGET_REFERENCE), (EXAMPLE_ADAPTER, EXAMPLE_REFERENCE),
+], ids=["catalog", "connect-example"])
+def test_an_adapter_with_no_reference_is_a_finding_naming_the_module_and_the_reference(tmp_path, capsys, where, reference):
+    """No `<stem>.md` beside the module (the example's included) is a finding naming the reference it lacks. (#1504 O6, O7)"""
+    rc, out = _run(tmp_path, {where: _module()}, capsys, referenced=False)
+    assert rc == 1, out
+    assert _lines_naming(out, reference), out
+
+
+@pytest.mark.parametrize(("where", "reference"), [
+    (f"{ADAPTERS}/widget_adapter.py", WIDGET_REFERENCE), (EXAMPLE_ADAPTER, EXAMPLE_REFERENCE),
+], ids=["catalog", "connect-example"])
+@pytest.mark.parametrize(("bodies", "named"), [
+    ({"Pitfalls": None}, "Pitfalls"), ({"Credential": None}, "Credential"),
+    ({"Credential": "\n"}, "Credential"), ({"Pitfalls": "   \n\n"}, "Pitfalls"),
+], ids=["no-pitfalls", "no-credential", "empty-credential", "blank-pitfalls"])
+def test_a_reference_lacking_a_section_or_leaving_one_empty_is_a_finding_naming_it(
+        tmp_path, capsys, where, reference, bodies, named):
+    """A reference without `## <section>`, or with one holding only blank lines, is a finding naming the reference and
+    the section. (#1504 O6)"""
+    rc, out = _run(tmp_path, {where: _module(), reference: _reference(**bodies)}, capsys, referenced=False)
+    assert rc == 1, out
+    assert _lines_naming(out, reference, named), out
+
+
+def test_a_section_heading_of_another_level_is_not_the_section(tmp_path, capsys):
+    """`### Credential` (level 3) does not satisfy the `## Credential` section. (#1504 O6)"""
+    text = "# Widget\n\n### Credential\n\nSome text.\n\n## Pitfalls\n\nNone known.\n"
+    rc, out = _run(tmp_path, {f"{ADAPTERS}/widget_adapter.py": _module(), WIDGET_REFERENCE: text}, capsys, referenced=False)
+    assert rc == 1, out
+    assert _lines_naming(out, WIDGET_REFERENCE, "Credential"), out
 
 
 # K8: a declared key that would hold a secret
@@ -154,8 +284,8 @@ def test_a_scan_that_saw_no_adapter_proves_nothing(tmp_path, capsys):
 
 
 def test_the_checkout_is_clean(capsys):
-    """The product's own catalog and connect's example pass: every adapter declares all five, case adapters declare
-    their route, no key is secret-named. (#1366 K2, K8, C1)"""
+    """The product's own catalog and connect's example pass: every adapter declares all six, a reference sits beside each, case
+    adapters declare their route, no key is secret-named. (#1366 K2, K8, C1)"""
     capsys.readouterr()
     rc = _gate().main([])
     said = capsys.readouterr()
