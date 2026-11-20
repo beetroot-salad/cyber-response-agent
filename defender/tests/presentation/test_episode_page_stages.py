@@ -145,7 +145,12 @@ def test_1025_each_questioner_and_judge_trace_renders_a_labelled_block_family_fi
         block = launched.text_of(f"tx-{stem}")
         row = json.loads((launch.episode_dir / "wire_logs" / name).read_text(encoding="utf-8"))
         assert " ".join(row["prompt"][:60].split()) in block, (stem, block[:200])
-        assert " ".join((row["reply"] or "")[:40].split()) in block, (stem, block[:200])
+        # #1579: an accepted draw's framed `reply` is the validated MAPPING (null when refused);
+        # the page shows it as its JSON text.
+        reply = row["reply"]
+        assert reply is None or isinstance(reply, dict), (stem, type(reply))
+        shown = json.dumps(reply, ensure_ascii=False) if isinstance(reply, dict) else ""
+        assert " ".join(shown[:40].split()) in block, (stem, block[:200])
 
 
 def test_1025_what_the_header_wall_covers(tmp_path):

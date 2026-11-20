@@ -581,7 +581,7 @@ def test_1234_hostile_pointer_text_in_a_dropped_finding_reaches_the_ledger_and_p
     assert set(S.record(built)) == set(S.record(plain)), "no host field changes"
     assert set(S.row(built, "b")) == set(S.row(plain, "b"))
 
-    sent = [_yaml.safe_load(r["reply"]) for r in S.wire_log_records(built)
+    sent = [r["reply"] for r in S.wire_log_records(built)
             if r.get("agent_id") == f"judge:{T.fixture_world_id('b')}:0" and r.get("reply")]
     assert sent, "the draw's wire-log record is there"
     assert sent[0][S.INVESTIGATOR][0][S.CONTRAST][0] == hostile, "the wire log keeps it as data"

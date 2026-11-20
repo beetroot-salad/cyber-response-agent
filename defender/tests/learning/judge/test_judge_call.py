@@ -474,7 +474,7 @@ def test_1579_a_family_reply_with_a_key_it_may_not_file_is_malformed(tmp_path, m
 
     control = J.FakeJudge(default=J.as_reply_text(J.reply_doc()),
                           family_default=J.as_reply_text(J.family_reply()))
-    other = _episode(tmp_path, root=tmp_path / "control")
+    other = _episode(tmp_path, root=T.tenant_episodes(tmp_path / "control"))
     _grade(tmp_path, other, control, draws=1)
     assert J.judge_record(other)["family"]["completed_draws"] == 1
 

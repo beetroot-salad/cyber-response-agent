@@ -185,7 +185,8 @@ def _filed(ep: Path, label: str) -> list[dict]:
     """Every finding world `label`'s draws filed (a world row carries no findings; the draw
     documents hold the three filed lists), draw by draw in filing order."""
     out: list[dict] = []
-    for n in range(len(J.draw_files(ep, label))):
+    # A refused draw leaves no file, so the written draws' indices are not contiguous (#1579).
+    for n in sorted(int(p.stem) for p in J.draw_files(ep, label)):
         doc = J.draw_doc(ep, label, n)
         for key in ("investigator_findings", "world_findings", "gaps"):
             out.extend(f for f in doc.get(key) or [] if isinstance(f, dict))
@@ -254,7 +255,7 @@ def _page(ep: Path) -> tuple[str | None, str | None]:
     return Path(path).read_text(encoding="utf-8"), None
 
 
-def _validate(text: str, *, scope: str = "world") -> Any:
+def _validate(text: Any, *, scope: str = "world") -> Any:
     return S.sym(S.JUDGE_RUN, "validate_reply")(text, scope=scope)
 
 
@@ -821,14 +822,16 @@ def test_judge_reply_leaves_a_world_out(tmp_path):
               _text(_world_reply(findings=b_own))],
         "c": [_text(no_bucket)],
         "d": [_text(no_bucket), _text(_world_reply("lead-set", ("edr",)))]})
-    _grade(tmp_path, ep, judge)
+    # #1579: each draw is ONE call (re-asks happen inside it), so the scripted refused reply is
+    # draw 0 and the valid one draw 1; a refused draw files nothing.
+    _grade(tmp_path, ep, judge, draws=2)
 
     rec, rows = _record(ep), _rows(ep)
     assert rows.get("b", {}).get("bucket") == "lead-quality", "the positive control: b ungraded"
     assert rows.get("c", {}).get("bucket") is None, (
         f"code supplied a bucket for a world no valid reply answered: {rows.get('c')!r}")
     assert rows.get("d", {}).get("bucket") == "lead-set", (
-        "an invalid reply was not retried: world d's valid retry was never recorded")
+        "world d's valid draw after its refused one was never recorded")
 
     # The foreign world "z": positive controls first (the channels the negatives read are live).
     assert {"b-defender", "b-world-lane"} <= _topics(_filed(ep, "b")), (
@@ -847,7 +850,9 @@ def test_judge_reply_leaves_a_world_out(tmp_path):
     assert not [r for r in queued if "/z/" in str(r.get("finding_id"))], (
         "a queue row's finding id files a finding under the foreign world z")
 
-    twice = _text(_world_reply("lead-set", ("idp",))) + "bucket: lead-quality\n"
+    # #1579: a reply is a mapping, which cannot repeat a key; the bucket named twice is the
+    # bucket given as two words.
+    twice = {**_text(_world_reply("lead-set", ("idp",))), "bucket": ["lead-set", "lead-quality"]}
     with pytest.raises(S.judge_refused_cls()):
         _validate(twice)
 

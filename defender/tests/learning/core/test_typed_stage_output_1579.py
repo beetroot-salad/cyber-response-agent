@@ -250,6 +250,29 @@ def test_p5_the_same_fault_on_a_re_ask_counts_two_requests(tmp_path):
     assert any(getattr(c, "status_code", None) == 413 for c in _causes(raised.value))
 
 
+def _provider_fault():
+    from pydantic_ai.exceptions import UnexpectedModelBehavior
+
+    return UnexpectedModelBehavior("Invalid response from OpenAI chat completions endpoint")
+
+
+@pytest.mark.parametrize(("make_script", "sent"), [
+    (lambda: [_provider_fault()], 1),
+    (lambda: [{"word": "no"}, _provider_fault()], 2),
+], ids=["on-request-one", "on-a-re-ask"])
+def test_p5_a_provider_raised_unexpected_model_behavior_is_run_unprocessable_not_reply_unusable(
+        tmp_path, make_script, sent):
+    """Only the call running out of attempts is `ReplyUnusable` (the model's failure). A provider's
+    own `UnexpectedModelBehavior` (a malformed body) is the provider's: `RunUnprocessable`,
+    counting every request sent, the failed one included."""
+    calls = TY.ScriptedCalls(make_script())
+    with pytest.raises(RunUnprocessable) as raised:
+        _stage(tmp_path, calls)
+    assert not isinstance(raised.value, TY.reply_unusable())
+    assert raised.value.requests == sent
+    assert calls.request_counts() == [sent]
+
+
 # ---------------------------------------------------------------------------------------------
 # Wall clock: a typed call's bound is (1 + N) x the stage's single-request timeout.
 # ---------------------------------------------------------------------------------------------
