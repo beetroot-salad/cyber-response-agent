@@ -31,7 +31,10 @@ CONTEXT = "context"
 _MAX_POINTER = 1024
 
 #: A run's conduct leaves, and its non-conduct (context) leaves, relative to `worlds/<X>/`.
-_CONDUCT_LEAVES = frozenset({str(WORLD_LEAVES.report), str(WORLD_LEAVES.investigation)})
+_CONDUCT_LEAVES = frozenset({str(WORLD_LEAVES.investigation)})
+#: A run's closing record (#1534), cited as `worlds/<X>/closing`: no file in the archive, it
+#: resolves for a run in scope whose record the pass read.
+CLOSING_LEAF = "closing"
 _CONTEXT_LEAVES = frozenset({str(WORLD_LEAVES.alert), str(WORLD_LEAVES.provenance),
                              str(WORLD_LEAVES.run_end), str(WORLD_LEAVES.lessons_loaded)})
 _TABLE_LEAF = str(WORLD_LEAVES.executed_queries)
@@ -120,6 +123,8 @@ def _world_pointer(scope: PointerScope, pointer: str, parts: list[str],
     label, run = match
     if run is None or not leaf:
         return None
+    if leaf == CLOSING_LEAF:
+        return Resolution(pointer=pointer, kind=CONDUCT, run=label) if run.closing is not None else None
     if leaf in _CONDUCT_LEAVES:
         name = f"{LAYOUT.world(world_id).dir}/{leaf}"
         return Resolution(pointer=pointer, kind=CONDUCT, run=label) \

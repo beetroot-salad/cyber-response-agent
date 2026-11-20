@@ -77,8 +77,9 @@ class JobLaneHooks:
     - `stage(name)`: a step is starting.
     - `sibling_ended(view, world_ids)`: a sibling has exited; `view` is the episode's
       `EpisodeRuns`, `world_ids` the worlds of every sibling that has run so far.
-    - `judged(grade, count)`: the judge's pass returned `grade`; from here the ending is
-      decided. `count()` reads how many findings the pass left in the episode.
+    - `judged(grade, held)`: the judge's pass returned `grade`; from here the ending is
+      decided. `held()` reads the findings the pass left in the episode, as the end record's
+      findings field (#1487).
     - `grade`: the judge's entry (`learning.judge.grade_episode` when `None`)."""
 
     job_id: str

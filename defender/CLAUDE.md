@@ -44,12 +44,45 @@ lifecycle service; run migrations; start the new code. The notes below say only 
 ## Upgrade from before #1581
 
 Stop the API and the workers first, as in "Upgrading" above: an old worker would complete investigations without
-keeping the alert's stored outcome. Run migrations (revision `0023_alert_outcome`). It gives `jobs.alerts` its stored
+keeping the alert's stored outcome. Run migrations (revision `0024_alert_outcome`). It gives `jobs.alerts` its stored
 outcome (filled from each alert's newest completed investigation) and the index the alert list's outcome filter reads,
 and refuses a completed investigation with no disposition, or any disposition outside the five codes. It stops,
 changing nothing, while any such row exists, naming how many of each; no production investigation has run, so no
 remediation is written for them. A list cursor issued before the upgrade is refused once (422, "the filters changed"):
 its client starts again from page 1.
+
+## Upgrade from before #1487
+
+Stop the API, the workers, the learning drains and the lifecycle service, then run migrations (revision
+`0023_findings_at_job_end`). A learning job's findings are now stored by the worker in the transaction that records the
+job `completed`, and the post-step only runs the author's tick. The migration moves every learning job still marked
+`pending` (its findings possibly never published, since #1170 a post-step in a job container could not reach the
+database) to `refused`, and logs how many per tenant: these jobs' findings are not recovered. Rebuild the job image and
+upgrade the worker and the job host together. Delete the old `<job>.post-step.json` and `<job>.post-step-pending.json` files from each
+tenant's runs folder (`<data root>/<tenant>/runs/`), and any half-written copy a crash left beside them
+(`<job>.post-step.json.staged-<hex>`), before starting the new code: the runs listing refuses them, and the migration
+cannot reach the data root. For example `find <data root>/*/runs -maxdepth 1 \( -name '*.post-step.json' -o -name
+'*.post-step-pending.json' -o -name '*.post-step.json.staged-*' -o -name '*.post-step-pending.json.staged-*' \)
+-delete`.
+
+## Upgrade from before #1534
+
+A run's disposition is its closing record, a row of the `closing_record` table in the run's session database; nothing
+writes or reads `report.md` any more. There is no jobs-database migration: the disposition column and `no_report` are
+unchanged. Once:
+
+1. Stop the workers, the learning drains and every running job, then rebuild the job image on every execution host
+   (`docker build -f .devcontainer/Dockerfile.job -t defender-job:latest .` from the repository root, or the image
+   `DEFENDER_JOB_IMAGE` names). An old job image writes `report.md` and no record, and its session pointer carries no
+   closing-record mark: a new worker reading such a run (its job end says the close committed) fails it `unparseable`,
+   worded as recorded before closing records were kept.
+2. Drain or abandon queued learning jobs and in-flight episodes first: their source runs and arms were recorded before
+   #1534, so the questioner and the judge refuse them.
+
+Afterwards every run made before #1534 reads as a fault wherever it is read, including after a later run of the same case
+adds the table to its database: a run's own pointer, not its database, says whether it keeps a closing record. Its run
+page will not re-render, the trace CLI and held-out scoring show a fault row for it, and an old episode's judge pass
+refuses. Nothing is converted.
 
 ## Upgrade from before #1161
 

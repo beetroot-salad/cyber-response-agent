@@ -108,16 +108,18 @@ def _unexpected_sigterm(_signum, _frame):
 def run_entry(  # noqa: PLR0913 — one keyword per seam a scenario may replace
         tmp_path, *, candidates=None, spawn=None, judge=None, questioner=None, live_tree=None,
         oracle=None, fix_source=None, job=JOB, grade=None, preflight=None, after_source=None,
-        estate=None, calls=None, **extra) -> Ran:
+        estate=None, calls=None, source_closing=None, source_fault=None, **extra) -> Ran:
     """The job entry in-process over `_spec1224`'s fixture tenant (or `estate`, made at `tmp_path`), the source run
     holding `calls` (default: `_calls()`); every paid seam a recording double. `extra` seams (the launcher's
-    `proxy_url`, `issuer_transport`, `directory`, ...) are handed as given, over the defaults."""
+    `proxy_url`, `issuer_transport`, `directory`, ...) are handed as given, over the defaults. `source_closing` and
+    `source_fault` plant the source's closing record and a fault on its lookup (`_triplet_947.runs_base`, #1534)."""
     from defender.tests.support.jobs._socket_standin1170 import SocketStandIn, handed_records
     from defender.tests.support.jobs._socket_standin1170 import materialise as materialise_export
     from defender.tests.support.jobs._socket_standin1170 import passes as helper_passes
 
     est = estate(tmp_path) if estate is not None else S.estate(tmp_path)
-    _base, src = S.source_run(tmp_path, est, calls=_calls() if calls is None else calls, after_source=after_source)
+    _base, src = S.source_run(tmp_path, est, calls=_calls() if calls is None else calls, after_source=after_source,
+                              source_closing=source_closing, source_fault=source_fault)
     if fix_source is not None:
         fix_source(src)
     tenant = src.parent.parent.name
@@ -601,6 +603,7 @@ class SpendingSibling(J.FakeSibling):
     def _bill(self, label: str, usage: dict) -> None:
         from defender.records import SessionPaths
         from defender.records import session_store as ss
+        from defender.tests.storage.verdict_1534 import _spec1534 as V
         from defender.tests.support.shared._locations_1210 import fixture_runs_base
         from defender.tests.support.shared.contracts._spec1077 import fixture_run
 
@@ -616,6 +619,7 @@ class SpendingSibling(J.FakeSibling):
             _row(store, arm, usage)
             ss.write_case_pointer(fixture_run(self.episode_dir / "runs" / arm), case_id=case_id,
                                   store_path=store.path, session_id=fork)
+            V.plant(store, J._record_for(arm, {}))  # the sibling's closing: the judge reads each arm's record
 
 
 def _label_of(argv: list[str]) -> str | None:
@@ -710,33 +714,6 @@ def test_judge_modes_the_job_lane_writes_the_episode_and_the_operator_lane_the_s
     assert sunk, f"the job's findings are in no file the judge added to the episode: {sorted(new)}"
     assert any(json.loads(line)["subject_topic"] == "the lead was never revisited"
                for p in sunk for line in p.read_text(encoding="utf-8").splitlines() if line.strip())
-
-
-def test_d5_a_jobs_findings_publish_once_even_after_an_author_consumed_them(tmp_path, store_dsn):
-    """Publishing fills the store; a second publish adds nothing, nor does one after the finding is published
-    by a merge. (D5, O14, L-C19; the store's finding id is unique for good)"""
-    ep, _new = _graded_episode(tmp_path, store_dsn, job_lane=True)
-    from defender.learning.judge.enqueue import publish_episode_findings
-
-    def publish(store) -> None:
-        # The episode reached as the post-step reaches it: by id, through its tenant's runs repository.
-        with J.episode_runs_for(ep).episode_files(ep.name) as episode:
-            publish_episode_findings(episode, store=store, tenant_id=S.FIXTURE_TENANT)
-
-    with blocking(store_dsn) as store:
-        publish(store)
-        rows = _queue(store_dsn)
-        assert rows, "the episode's findings never reached the store"
-        publish(store)
-        assert _queue(store_dsn) == rows, "a crash's republish doubled the queue"
-
-        claim = store.claim(S.FIXTURE_TENANT, "author", owner="host-a", thresholds=ONE)
-        store.in_review(claim, 7, {})
-        store.end_review(S.FIXTURE_TENANT, claim.batch_id, expect_phase="in_review", outcome="merged",
-                         published=[(kind, key) for kind, key, _payload in claim.items], held=[])
-        publish(store)
-        assert _queue(store_dsn) == rows, "a published finding came back"
-        assert {i.status for i in store.work(S.FIXTURE_TENANT)} == {"published"}
 
 
 def test_d5_dedup_is_by_the_store_on_both_kinds_and_holds_past_every_end(tmp_path, store_dsn):

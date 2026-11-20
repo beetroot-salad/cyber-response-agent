@@ -55,7 +55,6 @@ ALERT = "alert.json"
 ALERT_INPUT_DIRNAME = "alert_input"
 #: The run's record, beside the alert: its byte digest and the three facts derived at run start.
 ALERT_RECORD = _alert_input.RECORD_FILE
-REPORT = "report.md"
 INVESTIGATION = "investigation.md"
 EXECUTED_QUERIES = "executed_queries.jsonl"
 SOURCE_REFS = "source_refs.yaml"
@@ -138,13 +137,11 @@ _RECORD_VERSIONS_SUFFIX = ".record-versions.json"
 _LAUNCH_SUFFIX = ".launch.json"
 _LAUNCH_ALERT_SUFFIX = ".alert.json"
 _JOB_END_SUFFIX = ".job-end.json"
-#: A learning job's three host-held records (#1344), beside the runs, keyed by the job id: the
-#: entry's progress (replaced whole), its end (create-only) and the post-step's; and the jobs the
-#: worker hands a post-step to publish (replaced whole before each start, #1446 review).
+#: A learning job's two host-held records (#1344), beside the runs, keyed by the job id: the
+#: entry's progress (replaced whole) and its end (create-only). The post-step's record and the
+#: worker's hand-over to it retired with the pending set (#1487).
 _LEARNING_PROGRESS_SUFFIX = ".learning-progress.json"
 _LEARNING_END_SUFFIX = ".learning-end.json"
-_POST_STEP_SUFFIX = ".post-step.json"
-_POST_STEP_PENDING_SUFFIX = ".post-step-pending.json"
 #: The sidecar names that mean "this id was used" (#1279 O8): run setup refuses an id with any of
 #: them beside its folder (`sidecar_names`). The accounting-failures name reserved, see above.
 USED_SIDECAR_SUFFIXES = (RUN_END_SIDECAR_SUFFIX, SCRUB_VERDICT_SUFFIX, ACCOUNTING_FAILURES_SUFFIX,
@@ -156,8 +153,7 @@ USED_SIDECAR_SUFFIXES = (RUN_END_SIDECAR_SUFFIX, SCRUB_VERDICT_SUFFIX, ACCOUNTIN
 #: written before the run folder exists and do not mean "used": the child's setup goes on over
 #: them. `USED_SIDECAR_SUFFIXES` is a subset (#1342).
 ACCEPTED_SIDECAR_SUFFIXES = (*USED_SIDECAR_SUFFIXES, _LAUNCH_SUFFIX, _LAUNCH_ALERT_SUFFIX,
-                             _LEARNING_PROGRESS_SUFFIX, _LEARNING_END_SUFFIX, _POST_STEP_SUFFIX,
-                             _POST_STEP_PENDING_SUFFIX)
+                             _LEARNING_PROGRESS_SUFFIX, _LEARNING_END_SUFFIX)
 #: The tail a sidecar write's staged file carries before its rename (`_io.staged_leaf`:
 #: `.staged-` and lowercase hex digits; one or more, #1105 DV-5).
 _STAGED_TAIL = re.compile(r"\.staged-[0-9a-f]+\Z")
@@ -190,10 +186,6 @@ class RunLayout:
     @property
     def alert_record(self) -> PurePosixPath:
         return self.alert_input_dir / ALERT_RECORD
-
-    @property
-    def report(self) -> PurePosixPath:
-        return PurePosixPath(REPORT)
 
     @property
     def investigation(self) -> PurePosixPath:
@@ -372,10 +364,6 @@ class RunPaths:
         return self.run_dir / RUN_LAYOUT.alert_record
 
     @property
-    def report(self) -> Path:
-        return self.run_dir / RUN_LAYOUT.report
-
-    @property
     def investigation(self) -> Path:
         return self.run_dir / RUN_LAYOUT.investigation
 
@@ -525,16 +513,6 @@ class RunPaths:
         """A learning job's end record (#1344): how the job entry ended, written create-only."""
         return self._container(runs_base) / f"{self.run_dir.name}{_LEARNING_END_SUFFIX}"
 
-    def post_step(self, runs_base: RunsBase | None = None) -> Path:
-        """The post-step's record (#1344) for the job it followed: the pending jobs it
-        published and refused."""
-        return self._container(runs_base) / f"{self.run_dir.name}{_POST_STEP_SUFFIX}"
-
-    def post_step_pending(self, runs_base: RunsBase | None = None) -> Path:
-        """The jobs the worker hands a post-step to publish (#1446 review), written whole
-        before the post-step starts, under the same key as its record."""
-        return self._container(runs_base) / f"{self.run_dir.name}{_POST_STEP_PENDING_SUFFIX}"
-
     def session_pointer(self, runs_base: RunsBase | None = None) -> Path:
         """The run -> case link: which case's session store this run belongs to. Beside the
         run folder, so the box cannot rewrite it (#1235)."""
@@ -618,11 +596,14 @@ _PAYLOAD_SHAPES = (
     re.compile(rf"{TICKET_READS_MARKER}/[0-9]+\.json"),
 )
 
-#: The case's answer key: the finished investigation, its disposition, and the query record.
+#: The case's answer key in a run folder: the finished investigation and the query record.
 #: The learning loop stages these into a run root that must withhold them from the reader
 #: (`permission.files.names_case_answer_key`). `alert.json` is the case input, not the key.
+#: The disposition is the closing record in the session database, outside every run folder
+#: (#1534). The file that held it before #1534 is not named: the only confined agents are the
+#: curators, and nothing, before #1534 or since, stages that file into a curator's call folder.
 CASE_ANSWER_KEY_NAMES = frozenset(
-    {INVESTIGATION, REPORT, SOURCE_REFS, EXECUTED_QUERIES}
+    {INVESTIGATION, SOURCE_REFS, EXECUTED_QUERIES}
 )
 
 

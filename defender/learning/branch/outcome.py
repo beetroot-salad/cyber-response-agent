@@ -178,7 +178,7 @@ def not_comparable_reason(bound: Bound) -> str | None:
     A family stamp that cannot be read (refused, torn, not the stamp's shape) counts as absent:
     an unreadable stamp certifies nothing. The reason names the missing stamp and
     `verify_family`'s recorded reason (`write_not_comparable`). Shared by the judge's grading
-    gate and the episode readers (`episode.verdicts`, `episode.delta_o`)."""
+    gate and the episode reader (`episode.delta_o`)."""
     # Lazy: the archive module pulls the run repository in, which this record module must not.
     from defender.learning.branch.archive import read_family_stamp
 

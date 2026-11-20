@@ -19,7 +19,7 @@ import shutil
 import socket
 import tempfile
 import threading
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -30,9 +30,13 @@ class SocketStandIn:
     """A job socket answering `launch` and `answers`; use as a context manager (it serves until closed)."""
 
     def __init__(self, tenant: str, *, launch: Mapping[str, Any] | None = None,
-                 answers: Mapping[str, Callable[[dict[str, Any]], dict[str, Any]]] | None = None) -> None:
+                 answers: Mapping[str, Callable[[dict[str, Any]], dict[str, Any]]] | None = None,
+                 forward: Callable[..., dict[str, Any]] | None = None) -> None:
         self.launch = {"tenant": tenant, "tenant_state": "active", "proxy_url": None, **(launch or {})}
         self.answers = dict(answers or {})
+        #: A job-socket client (`ask(name, **fields)`, e.g. a real helper's `PostStepHelper.ask`) every request this stand-in
+        #: has no answer for is passed to; its answer or typed refusal is returned as it came. Decides nothing here.
+        self.forward = forward
         self.asked: list[tuple[str, dict[str, Any]]] = []
         self._folder = Path(tempfile.mkdtemp(prefix="j", dir="/tmp"))
         self.path = self._folder / "job.sock"
@@ -45,8 +49,14 @@ class SocketStandIn:
         self._thread.start()
 
     def environ(self) -> dict[str, str]:
-        """This process's environment with the job socket named: the container's, as the entry reads it."""
-        return {**os.environ, job_socket.SOCKET_ENV: str(self.path)}
+        """This process's environment with the job socket named, as the entry reads it. Not the container's whole
+        environment: a caller that needs that filters this process's environment as the helper does
+        (`job_host._container`)."""
+        return {**os.environ, **self.environ_delta()}
+
+    def environ_delta(self) -> dict[str, str]:
+        """What a job container's environment adds for its socket."""
+        return {job_socket.SOCKET_ENV: str(self.path)}
 
     def requests(self, name: str) -> list[dict[str, Any]]:
         return [fields for asked, fields in self.asked if asked == name]
@@ -74,6 +84,8 @@ class SocketStandIn:
                     answer: Any = {"ok": dict(self.launch)}
                 elif name in self.answers:
                     answer = {"ok": self.answers[name](dict(fields))}
+                elif self.forward is not None:
+                    answer = {"ok": self.forward(name, **fields)}
                 else:
                     raise job_socket.Refused(f"the stand-in answers no {name!r}", "unknown-request")
             except job_socket.Refused as refused:
@@ -92,6 +104,29 @@ class SocketStandIn:
 
     def __exit__(self, *_exc: object) -> None:
         self.close()
+
+
+class StubPort:
+    """The tick's store where the case does not look at it (`stubbed_port`): any use of it is a failure of the case, which
+    stubbed the tick that would have used it."""
+
+    def __getattr__(self, name: str) -> Any:
+        raise AssertionError(f"the case stubbed its tick, yet the tick's store was used: {name}")
+
+
+@contextlib.contextmanager
+def stubbed_port() -> Iterator[StubPort]:
+    """For a case that stubs the post-step's tick and whose subject is not the store (#1487 Amendment 1: `post_step.main`
+    hands its tick `JobContainer.tick_store()`, whose construction asks the helper for the settings, and this stand-in has
+    no helper behind it): the port is a `StubPort` for the length of the run. The real port is the conformance suite's,
+    and a case that wants it forwards to a real helper (`SocketStandIn(forward=)`) instead."""
+    from unittest import mock
+
+    from defender.learning.branch.container import JobContainer
+
+    stub = StubPort()
+    with mock.patch.object(JobContainer, "tick_store", return_value=stub, create=True):
+        yield stub
 
 
 def materialise(tenant_id: str) -> Callable[[dict[str, Any]], dict[str, Any]]:

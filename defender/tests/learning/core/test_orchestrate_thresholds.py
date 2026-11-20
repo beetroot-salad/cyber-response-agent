@@ -108,25 +108,32 @@ def _set_status(dsn, tenant_id, prefix, status, *, deferrals=0):
 def test_881_the_wake_gate_counts_what_a_tick_could_take(world, monkeypatch):  # noqa: F811 — the imported fixture
     """The author wake gate fires for five waiting findings, not for rows a tick would only hold again; a deferred row (it
     may land on the next tick) is still work. (design r8 Schema statuses: held is not waiting; G-T1)"""
-    from defender.learning.core import drains
+    from defender.learning.core.drains import AUTHOR_DRAIN_RECONCILES
+    from defender.learning.core.store_tick import AUTHOR_LANE, thresholds
+    from defender.learning_store.tick import work_waiting
+    from defender.tests.support.jobs._relay1487 import adapter_store
     from defender.tests.support.learning.curation._drain719 import finding_row
 
     w = world
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "5")
     tid = w.t.tenant_id
 
+    def waits() -> bool:
+        with adapter_store(w.dsn, str(tid), lane=AUTHOR_LANE, thresholds=thresholds()) as store:
+            return work_waiting(store, AUTHOR_LANE, reconcile_lanes=AUTHOR_DRAIN_RECONCILES)
+
     def seed(prefix: str, n: int) -> None:
         call(w.dsn, "publish_findings", tid, "run-1", [finding_row(f"{prefix}/b/0/{i}", run_id=f"run-{prefix}") for i in range(n)], kind="finding")
 
     seed("held", 5)
     _set_status(w.dsn, tid, "held", "held")
-    assert drains.author_work_waiting(w.paths) is False, "the wake gate fired for five rows already held for a person"
+    assert waits() is False, "the wake gate fired for five rows already held for a person"
 
     seed("one", 1)
-    assert drains.author_work_waiting(w.paths) is False, "one waiting row beside five held ones is one row of work, not six"
+    assert waits() is False, "one waiting row beside five held ones is one row of work, not six"
 
     seed("five", 5)
-    assert drains.author_work_waiting(w.paths) is True, "five waiting rows must wake the drain, however many held ones sit beside them"
+    assert waits() is True, "five waiting rows must wake the drain, however many held ones sit beside them"
 
     _set_status(w.dsn, tid, "five", "waiting", deferrals=1)
-    assert drains.author_work_waiting(w.paths) is True, "deferred rows were subtracted from the wake gate"
+    assert waits() is True, "deferred rows were subtracted from the wake gate"

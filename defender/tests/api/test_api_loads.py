@@ -84,6 +84,15 @@ def test_p1_the_lifted_store_loads_no_learning_and_no_driver():
     assert [m for name in ("defender.learning", "psycopg") for m in _found(modules, name)] == []
 
 
+def test_1487_the_stores_tick_module_loads_no_learning_and_no_driver():
+    """`defender.learning_store.tick` (the waiting predicate, the tick's store interface, the adapter) imports no
+    `defender.learning` module and no `psycopg`: the lanes and thresholds the predicate needs are passed as values, and the
+    interface is typed against the store alone. (#1487 Flow 3, the design's import rule)"""
+    modules = _loaded("defender.learning_store.tick")
+    assert "defender.learning_store.tick" in modules, "premise: the module imported"
+    assert [m for name in ("defender.learning", "psycopg") for m in _found(modules, name)] == []
+
+
 def test_p1_the_learning_and_driver_probe_sees_a_load():
     """Positive control for the case above: a `defender.learning` module and `psycopg` are reported when imported. (P1)"""
     assert _found(_loaded("defender.learning.roles"), "defender.learning")
@@ -227,7 +236,7 @@ def _serving_requests(seeded: Any) -> list[tuple[tuple[str, str], str, dict[str,
 
     fill = {"tenant_id": A, "key": "report.md", "system_id": "tix"}
     bodies = {**BODIES, ("POST", API + "/admin/tenants/{}/invitations"): {"email": "new@a.example"}}
-    query = {("GET", API + "/auth/callback"): {"code": "c", "state": "s"},
+    query = {("GET", API + "/auth/callback"): {"code": "c", "state": "s" * 43},  # #1566: our shape, so the lookup runs
              # #1470: a record delete names the version it replaces
              ("DELETE", API + "/tenants/{tenant_id}/case-record"): {"replaces": 1},
              ("DELETE", API + "/tenants/{tenant_id}/systems/{system_id}"): {"replaces": 1}}

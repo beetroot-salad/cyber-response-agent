@@ -44,8 +44,9 @@ just need a crisp "here's the rule, here's the source file."
 - Understanding the offline learning loop (fork a finished run → question
   → stage → replay-review → run the family → judge → queue → curate) and how
   lessons feed back
-- Seeing the layout of a run dir — `investigation.md`, `report.md`,
-  `executed_queries.jsonl`, `gather_raw/` — and the contracts each artifact carries
+- Seeing the layout of a run dir — `investigation.md`,
+  `executed_queries.jsonl`, `gather_raw/` — and the closing record in the session
+  database, and the contracts each carries
 - Understanding how skills, per-system references, and lessons compose at
   runtime
 - Looking up the invlang block surface the agent writes into

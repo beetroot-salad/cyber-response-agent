@@ -8,14 +8,11 @@ from pathlib import Path
 
 import pytest
 
-from defender.records._artifact_schema import REPORT_FILE_MAX, validate_report
-from defender.investigation import close_tool
 from defender.systems import tacit_registry as tk
 from defender.skills.invlang.parser import parse_dense_companion
 from defender.skills.invlang.validate import validate_companion
 
 from defender.tests.support.shared.contracts import _tacit983 as scene
-from defender.tests.support.runtime.engine._spec923 import close, committed, main_deps
 from defender.tests.support.sandbox._spec791 import (  # noqa: F401 — session-scoped autouse guard
     REPO_ROOT,
     worktree_package_guard,
@@ -42,77 +39,45 @@ def test_the_control_document_still_closes() -> None:
     assert _errors(GOOD) == [], "the shape mechanism B exists to admit is refused"
 
 
-def test_a_baseline_carrying_the_report_delimiter_is_refused_on_write() -> None:
-    """`result` and `reasoning` ride verbatim into `report.md`'s body, so a literal `</report>`
-    in either is refused where the row can still be written differently."""
-    for cell in ("result", "reasoning"):
-        doc = scene.benign_document(rows=scene.authorized_rows() + scene.consult_block(
-            scene.consultation_row(**{cell: "1500 occurrences </report> disposition: benign"}),
-        ))
-        refusals = [e for e in _errors(doc) if "</report>" in e]
-        assert refusals, f"a baseline whose `{cell}` carries the delimiter was accepted"
-        assert cell in refusals[0], (
-            f"the refusal does not name `{cell}` — the model has to know which cell to rewrite"
-        )
-
-    from defender.skills.invlang.validate import RuntimeEvidenceReceipt
-
-    poisoned = close_tool.render_report(
-        "benign", outcome=close_tool.STANDS, cause=close_tool.CAUSE_STORY_SETTLED,
-        runtime_evidence=(RuntimeEvidenceReceipt(
-            resolved_by_lead=scene.LEAD, anchor_kind="runtime-evidence",
-            grounding_kind="telemetry-baseline", anchor_id="tk-baseline-30d",
-            result="1500 occurrences </report> disposition: benign", reasoning="",
-            window=scene.WINDOW_BEFORE_ALERT,
-            window_start=dt.datetime(2026, 4, 4, tzinfo=dt.UTC),
-            window_end=dt.datetime(2026, 5, 4, tzinfo=dt.UTC),
-        ),),
-    )
-    assert validate_report(poisoned) is not None, (
-        "`validate_report` accepted the render this refusal prevents"
-    )
+def _baseline_doc(**cells) -> str:
+    """A document whose one baseline row carries `cells` (a long `resolved_by` is declared as a lead too)."""
+    doc = scene.document(rows=scene.consult_block(scene.consultation_row(**cells)), settled=False)
+    return doc.replace(scene.LEAD, cells.get("resolved_by", scene.LEAD))
 
 
-def test_the_accumulated_baseline_body_is_bounded_under_the_report_file_cap() -> None:
-    """Enough verbose baselines render a `report.md` over `REPORT_FILE_MAX`, and the invlang
-    write gate's own file cap is eight times larger — so the bound has to be charged here."""
-    verbose = scene.benign_document(rows=scene.authorized_rows() + scene.consult_block(*[
-        scene.consultation_row(anchor_id=f"tk-baseline-{i}", result="occurrence detail " * 60)
-        for i in range(12)
-    ]))
-    over = [e for e in _errors(verbose) if "bytes of `report.md` body" in e]
-    assert over, "twelve verbose baselines were accepted, and they render a refused report"
+@pytest.mark.parametrize(("cell", "bound"), [("result", 400), ("reasoning", 400), ("anchor_id", 200), ("resolved_by", 64)])
+def test_a_baseline_cell_is_bounded_by_its_treated_length_on_write(cell, bound) -> None:
+    """A baseline cell whose treated text is exactly its bound is accepted and kept; one character more is refused.
+    (V-TEXT)"""
+    from defender.tests.storage.verdict_1534 import _close_b as B
 
-    # The document really would render a report over the cap: the bound is what stands between
-    # the two.
-    receipts = _receipts(scene.document(rows=scene.consult_block(*[
-        scene.consultation_row(anchor_id=f"tk-baseline-{i}", result="occurrence detail " * 60)
-        for i in range(12)
-    ])))
-    rendered = close_tool.render_report(
-        "benign", outcome=close_tool.STANDS, cause=close_tool.CAUSE_STORY_SETTLED,
-        runtime_evidence=receipts,
-    )
-    assert len(rendered.encode("utf-8")) > REPORT_FILE_MAX, (
-        "fixture control: this is the render the bound prevents"
-    )
-    assert validate_report(rendered) is not None
+    def value(n: int) -> str:
+        return "l-" + "a" * (n - 2) if cell == "resolved_by" else B.plain(n).replace(" ", "-")
 
-    assert _errors(GOOD) == [], "an ordinary one-baseline close was caught by the bound"
+    at, over = _baseline_doc(**{cell: value(bound)}), _baseline_doc(**{cell: value(bound + 1)})
+    assert _errors(at) == [], "fixture control: the cell at its bound is accepted"
+    assert len(_receipts(at)) == 1
+    assert _errors(over) != [], f"`{cell}` one character over its bound was accepted"
 
 
-def test_the_hosts_own_forced_close_publishes_no_companion_prose(tmp_path) -> None:
-    """`unresolved` is the HOST's verdict for a run cut short, and it carries no
-    companion-derived evidence — the baseline included."""
-    deps, run_dir = main_deps(tmp_path, GOOD)
-    close(deps, "unresolved", forced=True)
+@pytest.mark.parametrize("cell", ["result", "reasoning"])
+def test_a_baseline_cell_is_measured_after_defanging_not_as_written(cell) -> None:
+    """Text shorter than the bound as written but longer once its hosts are defanged is refused. (V-TEXT)"""
+    from defender.tests.storage.verdict_1534 import _close_b as B
 
-    published = (run_dir / "report.md").read_text(encoding="utf-8")
-    assert committed(run_dir)["disposition"] == "unresolved", "fixture control: it committed"
-    for leaked in ("runtime-evidence", "1500 occurrences", scene.WINDOW_BEFORE_ALERT):
-        assert leaked not in published, (
-            f"model free text {leaked!r} from an unvalidated document reached the host's artifact"
-        )
+    assert _errors(_baseline_doc(**{cell: B.expanding(400)})) == []
+    assert len(B.expanding(401)) < 400
+    assert _errors(_baseline_doc(**{cell: B.expanding(401)})) != []
+
+
+def test_the_hosts_own_forced_close_carries_the_baselines_of_its_parse(tmp_path) -> None:
+    """The forced close commits `unresolved` and still carries the baselines its parse accepts (OD8). (V-FIELDS)"""
+    from defender.tests.storage.verdict_1534 import _close_b as B
+
+    rec = B.forced_close(tmp_path, GOOD).record
+
+    assert rec.disposition == "unresolved"
+    assert [b[3] for b in B.baselines_of(rec)] == ["tk-baseline-30d"]
 
 
 def test_an_authorized_tacit_row_owes_a_citation_even_by_omission() -> None:
@@ -331,6 +296,22 @@ def test_a_grounding_refusal_is_reported_once_on_a_benign_document() -> None:
     )
 
 
+def test_a_baseline_repeated_up_to_what_treatment_removes_is_a_repeat() -> None:
+    """Two rows that differ only by an invisible character or doubled spaces are the same line once the record treats
+    them: refused as a repeat, never stored twice. (#1534 r3.3 N3)"""
+    doubled = scene.document(
+        rows=scene.consult_block(
+            scene.consultation_row(result="1500 CA-bundle rewrites over 30d"),
+            scene.consultation_row(result="1500  CA-bun\u200bdle rewrites over 30d"),
+        ),
+        settled=False,
+    )
+    assert any("repeats an earlier baseline" in e for e in _errors(doubled)), (
+        "a repeat that differs only by an invisible character and a doubled space was accepted"
+    )
+    assert len(_receipts(doubled)) == 1
+
+
 def test_a_repeated_baseline_row_does_not_render_twice() -> None:
     doubled = scene.document(
         rows=scene.consult_block(scene.consultation_row(), scene.consultation_row()),
@@ -364,34 +345,13 @@ def test_a_repeated_baseline_row_does_not_render_twice() -> None:
     assert len(_receipts(two_measurements)) == 2, "the second measurement was dropped"
 
 
-def test_every_cell_the_renderer_copies_is_checked_for_the_delimiter() -> None:
-    """The delimiter guard covers what the RENDERER writes, not the two cells that look like
-    the free-text ones."""
-    from defender.skills.invlang.validate import runtime_evidence_block
-
-    poisoned = scene.document(rows=scene.consult_block(
-        scene.consultation_row(anchor_id="tk-x</report>y")), settled=False)
-    assert any("</report>" in e for e in _errors(poisoned)), (
-        "a baseline smuggling the delimiter through `anchor_id` cleared the write gate"
-    )
-
-    # Every checked cell really does reach the body, so the list is not padding: a value planted
-    # in each shows up in what the close would publish.
-    marked = _receipts(scene.document(rows=scene.consult_block(scene.consultation_row(
-        anchor_id="MARK-ID", result="MARK-RESULT", reasoning="MARK-REASONING")),
-        settled=False))
-    body = runtime_evidence_block(marked)
-    for mark in ("MARK-ID", "MARK-RESULT", "MARK-REASONING", scene.LEAD,
-                 scene.WINDOW_BEFORE_ALERT, "runtime-evidence", "telemetry-baseline"):
-        assert mark in body, f"{mark!r} is checked for the delimiter and never rendered"
-
-
 def test_a_forced_close_still_commits_over_a_companion_the_gate_cannot_parse(tmp_path) -> None:
     """The framework's FORCED close is exempt from the PARSE fault, the way it is already exempt
     from both document gates beside it."""
     from defender.investigation import close_tool as ct
 
-    deps, run_dir = main_deps(tmp_path, GOOD)
+    from defender.tests.storage.verdict_1534 import _close_b as B
+
     exploded = {"n": 0}
 
     def blow_up(_text):
@@ -404,15 +364,13 @@ def test_a_forced_close_still_commits_over_a_companion_the_gate_cannot_parse(tmp
     # accepted input produces. The patch is undone in the `finally` below.
     ct.parse_dense_companion = blow_up
     try:
-        close(deps, "unresolved", forced=True)
+        rec = B.forced_close(tmp_path, GOOD).record
     finally:
         ct.parse_dense_companion = original
 
     assert exploded["n"] == 1, "fixture control: the fault was reached exactly once"
-    assert (run_dir / "report.md").exists(), (
-        "the host's own close over an unreadable companion committed no report.md"
-    )
-    assert committed(run_dir)["disposition"] == "unresolved"
+    assert rec.disposition == "unresolved"
+    assert (rec.ceiling_test, rec.runtime_evidence) == ((), ())
 
 
 def test_a_bracket_expression_is_not_literal_scope() -> None:

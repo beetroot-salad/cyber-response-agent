@@ -1,14 +1,12 @@
-"""The baseline consultation's carrier into report.md through the close fields."""
+"""The baseline consultation's carrier into the closing record through the close fields (#1534)."""
 
 from __future__ import annotations
-from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 
 import dataclasses
 import datetime as dt
 import json
 
-from defender._frontmatter import split_frontmatter
 from defender.investigation import close_tool
 from defender.tests.support.shared.contracts import _tacit983 as scene
 from defender.tests.support.runtime.engine._spec767 import posted_comment_body, ticket_link_for
@@ -31,13 +29,6 @@ def _receipts(text: str):
     return conclude_runtime_evidence_rows(parse_dense_companion(text)[0])
 
 BENIGN_DOC = scene.benign_document(rows=scene.authorized_rows(baseline=True))
-
-
-def _body(report: str) -> str:
-    """The report's BODY — everything past the frontmatter, read through the shared splitter
-    rather than by counting `---` fences (`lint-frontmatter`)."""
-    _fm, _raw, body = split_frontmatter(report)
-    return body
 
 
 def test_runtime_evidence_receipt_carries_the_rows_parsed_fields():
@@ -97,80 +88,69 @@ def test_runtime_evidence_rows_project_off_the_consultation_bucket():
     )
 
 
-def test_runtime_evidence_consultation_lands_in_report_body():
-    """A close renders one body line per qualifying `:R consultations` row, never into the capped
-    frontmatter (the whole-close half is `e2e/test_tacit_authz_e2e.py`)."""
+def _closed(tmp_path, disposition, companion):
+    """The real close of `companion` (a composer that holds) and its closing record, read back through the lookup."""
+    from defender.tests.storage.verdict_1534 import _close_b as B
+
+    return B.close_run(tmp_path, disposition, companion)
+
+
+def _line_of(entry) -> str:
+    from defender.records import closing as C
+
+    return C.baseline_line(entry)
+
+
+def test_runtime_evidence_consultation_lands_in_the_closing_record(tmp_path):
+    """A close stores one baseline entry per qualifying `:R consultations` row, each rendered to one line carrying its
+    window, anchor, lead and count; a close with no baseline stores none (the whole-close half is `e2e/test_tacit_authz_e2e.py`)."""
     receipts = _receipts(BENIGN_DOC)
     assert len(receipts) == 1, "fixture control: the document carries one qualifying consultation"
     (receipt,) = receipts
 
-    report = close_tool.render_report(
-        "benign", outcome=close_tool.STANDS, cause=close_tool.CAUSE_STORY_SETTLED,
-        runtime_evidence=receipts,
-    )
-    _fm, frontmatter, body = split_frontmatter(report)
-
-    assert body.count("runtime-evidence") == len(receipts), (
-        "not one body line per receipt — a close with two baselines would render one of them"
-    )
-    for field in (receipt.window, receipt.anchor_id, receipt.resolved_by_lead):
-        assert field in body, f"{field!r} was parsed into the receipt and never rendered"
-    assert "1500 occurrences over 30d" in body, (
-        "the occurrence count did not reach the body — `result` is the only place the design "
+    closed = _closed(tmp_path / "with", "benign", BENIGN_DOC)
+    (entry,) = closed.record.runtime_evidence
+    line = _line_of(entry)
+    assert line.count("runtime-evidence") == 1
+    assert (_utc(entry.window_start), _utc(entry.window_end)) == (receipt.window_start, receipt.window_end)
+    for field in (scene.WINDOW_BEFORE_ALERT, receipt.anchor_id, receipt.resolved_by_lead):
+        assert field in line, f"{field!r} was parsed into the receipt and never rendered"
+    assert "1500 occurrences over 30d" in line, (
+        "the occurrence count did not reach the line — `result` is the only place the design "
         "leaves for it, since `:R consultations` gains no columns"
     )
 
-    assert "runtime-evidence" not in (frontmatter or ""), (
-        "the baseline reached the FRONTMATTER — that block is under a 512-byte cap and a size "
-        "cap on ungated model text is itself a gate; the note lane is the body"
-    )
-
-    without = close_tool.render_report(
-        "benign", outcome=close_tool.STANDS, cause=close_tool.CAUSE_STORY_SETTLED,
-    )
-    assert "runtime-evidence" not in without, (
-        "a close with no baseline rendered one — the default has to be the empty tuple"
+    without = _closed(tmp_path / "without", "benign", scene.benign_document(rows=scene.authorized_rows()))
+    assert without.record.runtime_evidence == (), (
+        "a close with no baseline stored one — the default has to be the empty tuple"
     )
 
 
-def test_baseline_context_stays_in_the_report_and_off_the_recorded_comment(tmp_path):
-    """The baseline rides the report body; the ticket comment carries nothing of the report but its
-    disposition and the screen link (#1471 P-6). The report half is `test_runtime_evidence_consultation_lands_in_report_body`."""
-    receipts = _receipts(BENIGN_DOC)
-    report = close_tool.render_report(
-        "benign", outcome=close_tool.STANDS, cause=close_tool.CAUSE_STORY_SETTLED,
-        runtime_evidence=receipts,
-    )
-    assert "1500 occurrences" in _body(report), "fixture control: the body carries the baseline"
-    run_dir = tmp_path / fixture_uuid("case-983")
-    (run_dir / "gather_raw").mkdir(parents=True)
-    (run_dir / "alert.json").write_text(
+def test_baseline_context_stays_in_the_record_and_off_the_recorded_comment(tmp_path):
+    """The closing record keeps the baseline line; the ticket comment carries nothing of the record but its
+    disposition and the screen link (#1471 P-6). (#1359, OD15)"""
+    closed = _closed(tmp_path / "close", "benign", BENIGN_DOC)
+    assert "1500 occurrences" in _line_of(closed.record.runtime_evidence[0]), "fixture control: the record carries the baseline"
+    (closed.run_dir / "alert.json").write_text(
         json.dumps({"rule": {"id": "5710", "key": "spec.rule"},
                     "timestamp": "2026-05-05T03:42:11Z"}),
         encoding="utf-8",
     )
-    (run_dir / "report.md").write_text(report, encoding="utf-8")
-    (run_dir / "investigation.md").write_text(BENIGN_DOC, encoding="utf-8")
 
     # #1359: observed at the record leg's posted comment (below the agent tag line).
-    wire = posted_comment_body(run_dir, tmp_path)
+    wire = posted_comment_body(closed.run_dir, tmp_path)
     for crossed in ("runtime-evidence", "1500 occurrences", scene.WINDOW_BEFORE_ALERT):
-        assert crossed not in wire, f"{crossed!r} reached the outbound comment, which carries no report text"
-    assert wire == f"benign\n{ticket_link_for(run_dir)}", wire
+        assert crossed not in wire, f"{crossed!r} reached the outbound comment, which carries no record text"
+    assert wire == f"benign\n{ticket_link_for(closed.run_dir)}", wire
 
 
+def test_the_projection_and_the_record_read_one_set(tmp_path):
+    """What `conclude_runtime_evidence_rows` hands back is what the close stores: two rows
+    differing in every cell expose a collapsed, duplicated or canned entry."""
+    from defender.tests.storage.verdict_1534 import _close_b as B
 
-def test_the_projection_and_the_render_read_one_set():
-    """What `conclude_runtime_evidence_rows` hands back is what `render_report` writes: two rows
-    differing in every cell expose a collapsed, duplicated or canned render."""
-    doc = scene.document(
-        rows=scene.consult_block(
-            scene.consultation_row(),
-            scene.consultation_row(
-                anchor_id=ANCHOR_90D, result=RESULT_90D, window=WINDOW_90D),
-        ),
-        settled=False,
-    )
+    rows = [scene.consultation_row(), scene.consultation_row(anchor_id=ANCHOR_90D, result=RESULT_90D, window=WINDOW_90D)]
+    doc = scene.document(rows=scene.consult_block(*rows), settled=False)
     receipts = _receipts(doc)
     assert len(receipts) == 2, "fixture control: two qualifying consultations"
 
@@ -185,19 +165,15 @@ def test_the_projection_and_the_render_read_one_set():
         "both receipts carry one window — a canned value, not two parses"
     )
 
-    body = _body(close_tool.render_report(
-        "inconclusive", outcome=close_tool.STANDS, cause=close_tool.CAUSE_NOT_REVIEWED,
-        runtime_evidence=receipts,
-    ))
-    assert body.count("runtime-evidence") == 2
-    for receipt in receipts:
-        assert receipt.anchor_id in body, (
-            f"{receipt.anchor_id} was dropped on the way into the body"
-        )
-        assert receipt.window in body, (
+    closed = _closed(tmp_path, "malicious", B.baseline_document("malicious", rows))
+    entries = closed.record.runtime_evidence
+    assert [e.anchor_id for e in entries] == [r.anchor_id for r in receipts], "an entry was dropped or reordered"
+    for entry, receipt in zip(entries, receipts, strict=True):
+        assert (_utc(entry.window_start), _utc(entry.window_end)) == (receipt.window_start, receipt.window_end), (
             f"{receipt.anchor_id}'s window was dropped, or replaced by its sibling's"
         )
-    assert "4100 occurrences over 90d" in body, "the second baseline's count never rendered"
+        assert receipt.window in _line_of(entry)
+    assert "4100 occurrences over 90d" in _line_of(entries[1]), "the second baseline's count never stored"
 
 
 def test_close_fields_carries_the_baseline_on_every_disposition():

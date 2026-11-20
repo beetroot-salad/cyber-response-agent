@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 
+from defender.tests.support.storage import _readers1534 as R
 from defender.tests.support.storage._alert_plant import plant_alert
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.tenancy.tenant_1078_pass_a import _spec1078 as H
@@ -41,7 +42,7 @@ def _scored_run(runs: Path, disposition: str, run_id: str) -> Path:
     run = runs / run_id
     run.mkdir(parents=True, exist_ok=True)
     plant_alert(run, {"rule": {"id": SLUG}})
-    (run / "report.md").write_text(T.report_text(disposition), encoding="utf-8")
+    R.plant_run(run, R.valid_fields(disposition), sessions_base=runs)  # held-out scores the run's closing record
     return run
 
 

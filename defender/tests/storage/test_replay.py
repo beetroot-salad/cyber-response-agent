@@ -5,6 +5,7 @@ from defender.tests.support.shared._locations_1210 import fixture_runs_base, loc
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import json
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -172,14 +173,15 @@ def test_a_failed_observability_write_is_recorded_and_does_not_fail_the_run(tmp_
     assert _read_rows(trace.path) == [{"row": 2}]
     assert clean.partial_failures == ()
 
-    # THE CONTRAST: the SAME obstruction on a decision-bearing write (the run's report, which
-    # the verdict is read from) fails loudly rather than being recorded and shrugged off.
-    report = S.member(clean, "documents", "report")
-    report.path.mkdir(parents=True)
-    with pytest.raises(OSError, match="non-plain or aliased"):
-        report.write(S.report_text("# the contrast\n"))
+    # THE CONTRAST: the SAME obstruction on a decision-bearing record (the run's session
+    # database, which holds the closing record the verdict is read from, #1534) fails loudly
+    # rather than being recorded and shrugged off.
+    database = S.member(clean, "session", "session_db", *S.member_args("session_db"))
+    database.path.mkdir(parents=True)
+    with pytest.raises(sqlite3.Error), database.open():
+        pass
     assert clean.partial_failures == (), (
-        "a failed report write was recorded as a partial failure and shrugged off")
+        "a failed session-database open was recorded as a partial failure and shrugged off")
 
 
 # who wrote each wire-log line

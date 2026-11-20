@@ -194,6 +194,27 @@ CREATE TABLE IF NOT EXISTS spend_ledger_seal (
     last_row_id INTEGER
 ) STRICT;
 
+-- closing_record (#1534): one row per closed run, written last by the close step, keyed by the
+-- run id (a branch arm joins its source's database, and each run keeps its own row; a second
+-- write for a run is refused). Host columns hold closed-vocabulary values the record type checks
+-- on read; `ceiling_test` and `runtime_evidence` are JSON arrays of the entries; `summary` and the
+-- entries' text parts are model text, treated once when the record was built; `confidence` is a
+-- benign close's committed confidence (#1545), NULL otherwise. No vocabulary CHECK:
+-- the record type (`records.closing`) is the one owner of the words, and a reader reads a row
+-- outside them as `row-invalid`.
+CREATE TABLE IF NOT EXISTS closing_record (
+    run_id TEXT PRIMARY KEY,
+    disposition TEXT NOT NULL,
+    outcome TEXT NOT NULL,
+    cause TEXT NOT NULL,
+    failure_kind TEXT,
+    drafted_disposition TEXT,
+    ceiling_test TEXT NOT NULL,
+    runtime_evidence TEXT NOT NULL,
+    summary TEXT,
+    confidence TEXT
+) STRICT;
+
 -- gather_boundary — the danger-lens surface, scoped to each session's PATH from its
 -- recorded head (#753 / FK16). `session_id` names the session whose conversation the row
 -- is on, NOT the session that happens to own the row: a fork therefore sees the prefix it
@@ -290,6 +311,12 @@ def _refuse_stale_version(conn: sqlite3.Connection) -> None:
     version = conn.execute("PRAGMA user_version").fetchone()[0]
     if version != SCHEMA_VERSION:
         raise UnknownSchemaVersion(f"store reports schema version {version}")
+
+
+
+
+class ClosingRecordExists(StoreError):
+    """A second closing record for a run that already has one (#1534 V-ONE): the first stands."""
 
 
 

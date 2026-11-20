@@ -433,16 +433,17 @@ class BoxLifecycleRecorder:
 
 # run_dir / learning setup for driving the run cycle.
 def make_run_dir(tmp_path: Path, *, disposition: str = "inconclusive") -> Path:
-    """A finished run dir: alert, report.md (its disposition picks which legs dispatch),
-    investigation.md and gather_raw/ holding one result for read-back."""
-    run_dir = tmp_path / "inv-665"
+    """A finished run dir: alert, a closing record of `disposition` (in a store behind the run's pointer, beside the
+    runs folder `tmp_path`), investigation.md and gather_raw/ holding one result for read-back."""
+    from defender.tests.support.shared._fixture_uuid import fixture_uuid
+    from defender.tests.support.storage import _readers1534 as R
+
+    run_dir = tmp_path / fixture_uuid("inv-665")
     run_dir.mkdir(parents=True)
     (run_dir / "gather_raw").mkdir()
     (run_dir / "gather_raw" / "fixture.json").write_text("{}\n", encoding="utf-8")
     plant_alert(run_dir, {"rule": {"key": "spec.rule"}})
-    (run_dir / "report.md").write_text(
-        f"---\ndisposition: {disposition}\n---\n\nspec run\n", encoding="utf-8"
-    )
+    R.plant_run(run_dir, R.valid_fields(disposition), sessions_base=tmp_path)
     (run_dir / "investigation.md").write_text("+ spec investigation\n", encoding="utf-8")
     return run_dir
 

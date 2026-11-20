@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any, NamedTuple, TypeVar
 
-from defender.records.formats import WORLD_LEAVES
+from defender.records import closing
 from defender._untrusted import message_salt, wrap
 from defender.learning._prompt import host_heading, stage_user_message
 from defender.learning.branch.ledger import ORACLE, normalized_source
@@ -169,9 +169,34 @@ def _run_header_block(run: RunView) -> Block:
     return (f"run {run.label}", [
         f"storage world UUID: {run.world_id}\n",
         "its manifest entry (role, story, axis, declared verdict, label basis): ",
-        _run(_entry(run)), f"\nreached verdict (its archived {WORLD_LEAVES.report}): ",
-        _run(run.reached) if run.reached is not None
-        else "none (its report names no disposition)", "\n", *_fact_parts(run.facts)])
+        _run(_entry(run)), "\nreached verdict (its closing record's committed disposition): ",
+        # A vocabulary member the host committed, so host text, never the drafted one.
+        run.reached if run.reached is not None
+        else "none (no closing record was read)", "\n", *_fact_parts(run.facts)])
+
+
+def closing_parts(record: closing.ClosingRecord | None) -> list[Part]:
+    """A run's closing record as the prompt shows it (#1534): its host fields as host text (the
+    committed disposition, the outcome, the cause's sentence, the failure kind and the drafted
+    disposition, every one a host vocabulary member), then every ceiling receipt's and baseline's
+    line, each framed (it carries model text). The summary is never shown (OD7)."""
+    if record is None:
+        return ["(no closing record was read)\n"]
+    parts: list[Part] = [
+        f"committed disposition: {record.disposition}; outcome: {record.outcome}; cause: "
+        f"{closing.CAUSE_SENTENCES[record.cause]}; failure kind: {record.failure_kind or 'none'}; "
+        f"drafted disposition: {record.drafted_disposition or 'none (the committed one)'}\n",
+        "ceiling receipts:\n"]
+    for receipt in record.ceiling_test:
+        parts += ["- ", _run(closing.ceiling_line(receipt)), "\n"]
+    if not record.ceiling_test:
+        parts.append("none\n")
+    parts.append("runtime-evidence baselines:\n")
+    for baseline in record.runtime_evidence:
+        parts += ["- ", _run(closing.baseline_line(baseline)), "\n"]
+    if not record.runtime_evidence:
+        parts.append("none\n")
+    return parts
 
 
 def _call_ref(entry: dict[str, Any]) -> list[Part]:
@@ -304,16 +329,15 @@ def _call_line(entry: dict[str, Any]) -> list[Part]:
 
 def _reference_block(run: RunView, focus_answers: dict[str, Any],
                      calls: list[dict[str, Any]]) -> Block:
-    """A reference run's compressed section (M3 section 5, A24): its leads, its report and its
-    call list; a call's answer is shown in full only where it differs from the judged world's
+    """A reference run's compressed section (M3 section 5, A24): its leads, its closing record
+    and its call list; a call's answer is shown in full only where it differs from the judged world's
     matched call (same system, verb and params) or the judged world made no such call."""
     parts: list[Part] = ["leads:\n"]
     for lead, goal in run.lead_goals.items():
         parts += ["- lead ", _run(lead), ", its goal: ", _run(goal), "\n"]
     if not run.lead_goals:
         parts.append("none recorded\n")
-    parts += [f"its {WORLD_LEAVES.report}: ", _run(run.report_text) if run.report_text
-              else "(empty)", "\ncalls:\n"]
+    parts += ["its closing record:\n", *closing_parts(run.closing), "calls:\n"]
     for entry in calls:
         parts += _call_line(entry)
         answer = run.answers.get(entry["call"]) if entry.get("call") is not None else None
@@ -378,7 +402,7 @@ FOCUS_VIEW_TITLES: dict[str, str] = {
     "leads": "VIEW 3: per-lead chain (goal, params, payload, refused, summary, resolutions)",
     "lessons": "VIEW 4: lessons that reached it (body at its recorded commit)",
     "document": "its own investigation.md",  # lint-run-records: ok — a label naming the record for the model
-    "report": "its own report.md",  # lint-run-records: ok — a label naming the record for the model
+    "report": "its own closing record (host fields, then every entry's line)",
     "samples": "real example answers per served system (the samples record)",
     "oracle": "its frozen telemetry and identifier collisions (its built layer)",
 }
@@ -393,7 +417,7 @@ def _focus_views(ctx: JudgeContext) -> dict[str, Block]:
         "leads": [RunText(_render_leads(focus.leads))],
         "lessons": [RunText(_render_lessons(focus.lessons))],
         "document": [RunText(focus.document_text)],
-        "report": [RunText(focus.report_text)],
+        "report": closing_parts(focus.closing),
         "samples": [RunText(focus.samples_text)],
         "oracle": [RunText(focus.oracle_text)],
     }

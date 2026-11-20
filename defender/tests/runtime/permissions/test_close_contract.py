@@ -2,6 +2,8 @@
 tool lane and the driver's forced closes."""
 from __future__ import annotations
 
+from defender.tests.support.runtime.engine._spec992 import closing_record, committed_receipts, never_closed, priced_receipts
+
 import asyncio
 import json
 from pathlib import Path
@@ -38,7 +40,6 @@ from defender.tests.support.runtime.engine._spec992 import (
     record_files,
     recording,
     refusal,
-    report_text,
     review_state,
     sparse_companion,
     trace_files,
@@ -89,7 +90,7 @@ def test_inconclusive_close_return_contract(tmp_path):
     assert fm["outcome"] == STANDS
     assert fm["cause"] in STANDING_CAUSES, fm["cause"]
     assert fm["cause"] != CAUSE_NOT_REVIEWED
-    assert "failure_kind" not in fm, "a review that completed is not a machinery failure"
+    assert fm["failure_kind"] is None, "a review that completed is not a machinery failure"
     rec = record(run_dir, 1)
     assert rec["verdict"] == STANDS
     assert rec["reviewed_disposition"] == GAP
@@ -116,7 +117,7 @@ def test_inconclusive_close_return_contract(tmp_path):
     deps, run_dir = deps_over(tmp_path / "challenged", ceiling_companion())
     challenged = close_investigation(deps, GAP, stages=recording(gap("l-005")).bundle())
     assert challenged.outcome == CHALLENGED
-    assert not (run_dir / "report.md").exists(), "a challenged close committed a report"
+    assert never_closed(run_dir), "a challenged close committed a report"
     assert record(run_dir, 1)["verdict"] == CHALLENGED
     assert "l-005" in challenged.message
     assert frame_salt_of(challenged.message, "untrusted"), "the ask reached the run unframed"
@@ -197,18 +198,18 @@ def test_gates_ahead_of_the_review_spend_no_stage(tmp_path):
         refusal(deps, GAP, stages)
         assert stages.calls == [], f"{name}: the refused close spent {stages.calls}"
         assert trace_files(run_dir) == [], f"{name}: a trace row was written"
-        assert not (run_dir / "report.md").exists(), f"{name}: a refused close committed"
+        assert never_closed(run_dir), f"{name}: a refused close committed"
 
     # Already closed: the terminal check sits ahead of the price and the review.
     stages = recording(holds())
     deps, run_dir = deps_over(tmp_path / "terminal", ceiling_companion())
     assert close_with(deps, GAP, stages).outcome == STANDS
-    committed = report_text(run_dir)
+    committed = closing_record(run_dir)
     dispatched = len(stages.calls)
     text = refusal(deps, GAP, stages)
     assert "already closed" in text
     assert len(stages.calls) == dispatched, "the second attempt spent a stage"
-    assert report_text(run_dir) == committed, "report.md was re-written"
+    assert closing_record(run_dir) == committed, "the closing record was re-written"
 
     # Positive control: on a paid close the same bundle IS dispatched.
     stages = recording(holds())
@@ -302,9 +303,9 @@ def test_driver_forced_unresolved_survives_after_a_challenged_inconclusive(tmp_p
     assert fm["disposition"] == HOST_ONLY_DISPOSITION
     assert fm["outcome"] == STANDS
     assert fm["cause"] == CAUSE_NOT_REVIEWED
-    assert "ceiling_test" not in fm, "a forced `unresolved` carried the receipts"
-    assert "ceiling_test (" not in report_text(run_dir)
-    assert "ceiling_test" in (run_dir / "investigation.md").read_text(encoding="utf-8")
+    document = (run_dir / "investigation.md").read_text(encoding="utf-8")
+    assert "ceiling_test" in document
+    assert committed_receipts(run_dir) == priced_receipts(document), "the forced close dropped the parse's receipts"
     assert record(run_dir, 1) == challenged_record, "the challenged record was overwritten"
     for role, rows in challenged_rows.items():
         assert trace_rows(run_dir, role)[: len(rows)] == rows, f"{role}'s rows were lost"
@@ -371,7 +372,7 @@ def test_budget_kill_and_circuit_breaker_are_not_closed_as_a_verdict(tmp_path):
         assert end.truncated_by not in driver._CUT_SHORT_WITH_A_MODEL_STILL_OWED_A_CLOSE
         assert stages.calls == [], f"a forced close dispatched {stages.calls}"
         assert review_state(deps).closed is False, f"{expected_reason} was closed as a verdict"
-        assert not (run_dir / "report.md").exists(), f"{expected_reason} wrote a report.md"
+        assert never_closed(run_dir), f"{expected_reason} committed a record"
         assert record(run_dir, 1) == challenged_record, "the challenged record was overwritten"
 
 

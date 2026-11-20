@@ -97,6 +97,8 @@ class PublishedTenant:
     scratch: Path
     export: Any
     p3: tuple = field(repr=False)
+    #: What the running case carries on its tenant (a mutable holder in a frozen record), e.g. `_drain_support.CARRIED`.
+    carried: dict = field(default_factory=dict, repr=False)
 
     @property
     def tenant_id(self) -> str:

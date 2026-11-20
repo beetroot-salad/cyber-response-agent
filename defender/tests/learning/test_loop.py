@@ -153,15 +153,16 @@ def test_lead_author_drain_runs_pitfalls_after_the_requests(world, monkeypatch):
 @pytest.mark.postgres
 def test_the_lead_lane_wakes_at_the_pitfalls_threshold(world, monkeypatch):  # noqa: F811 — the imported fixture
     """The lead lane has work for pitfalls only at `LEARNING_PITFALLS_THRESHOLD` (digest-less rows stay distinct mistakes)."""
-    from defender.learning.core.store_tick import LEAD_LANE, lane_waiting
-    from defender.learning_store import blocking
+    from defender.learning.core.store_tick import LEAD_LANE, thresholds
+    from defender.learning_store.tick import work_waiting
+    from defender.tests.support.jobs._relay1487 import adapter_store
 
     w = world
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
 
     def waiting() -> bool:
-        with blocking(w.dsn) as store:
-            return lane_waiting(store, w.t.tenant_id, LEAD_LANE)
+        with adapter_store(w.dsn, w.t.tenant_id, lane=LEAD_LANE, thresholds=thresholds()) as store:
+            return work_waiting(store, LEAD_LANE)
 
     assert waiting() is False
     call(w.dsn, "add_pitfall", w.t.tenant_id, {"pitfall_id": "r:0", "system": "elastic"})

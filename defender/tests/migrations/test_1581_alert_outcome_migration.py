@@ -1,4 +1,4 @@
-"""#1581: the revision `0023_alert_outcome` (found by its suffix, never by number) gives `jobs.alerts` the stored outcome
+"""#1581: the revision `0024_alert_outcome` (found by its suffix, never by number) gives `jobs.alerts` the stored outcome
 (`outcome`, `outcome_investigation_id`, `outcome_created_at`, all null or all set, `outcome` one of the five codes), an
 index over `(tenant_id, outcome, fired_at DESC, id DESC)`, and `jobs.investigations` the checks `completed_has_a_disposition`
 and a disposition value check (O10). The upgrade backfills each alert from its newest completed investigation, and refuses,

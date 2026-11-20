@@ -44,6 +44,13 @@ def _unreachable_run(folder: Path, run_id: RunId, fault: TenantRefused) -> RunUn
     return refused
 
 
+def run_of_folder(run_dir: Path) -> Run:
+    """The `Run` of the run folder `run_dir`, under its parent as the runs folder, with no read:
+    for a view or a scorer handed a folder rather than a handle (#1534's closing lookup)."""
+    run_dir = Path(run_dir)
+    return Run.under(RunsBase(run_dir.parent), run_dir.name)
+
+
 def _at_entry(view: _io.Bound, folder: Path, tenant_id: TenantId, run_id: RunId,
               io: Any) -> Run | RunRefused:
     """The run at `<folder>/<run_id>` of the held folder `view` reads, judged from its own entry

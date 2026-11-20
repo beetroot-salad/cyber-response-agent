@@ -7,13 +7,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from defender._io import iter_plain_jsonl_rows
-from defender.records.formats import ReportRead
+from defender.records import closing as closing_record
 from defender.records import GATE_METADATA_KEY, RUN_LAYOUT, RunPaths
 # From `agent_role`, not `review_roles`: the latter pulls in the whole runtime (pydantic-ai
 # included), and `cli/learning/lessons_page.py` imports this package just for the page CSS.
 from defender._agent_role import GATHER_AGENT_ID_PREFIX, REVIEW_AGENT_ID_PREFIX
 from defender.presentation.visualize_data import phase_verb
-from defender.presentation.visualize_primitives import parse_report
+from defender.presentation.visualize_primitives import closing_of_dir
 
 if TYPE_CHECKING:
     from defender.records.session_store import LedgerRead
@@ -342,7 +342,7 @@ def run_health(
     messages: list[dict],
     phase_order: list[str],
     leads: list | None = None,
-    report: ReportRead | None = None,
+    closing: closing_record.Lookup | None = None,
 ) -> dict:
     retries = _count_retries(messages)
     dead_ends = _dead_end_count(_safe_joined(run_dir) if leads is None else leads)
@@ -350,10 +350,10 @@ def run_health(
     # are one loop.
     loops = sum(1 for p in dict.fromkeys(phase_order) if phase_verb(p) == "PLAN")
     turns = _turn_count(events)
-    # "Completed" means the run reached REPORT: the frontmatter has a `disposition` key, valid
-    # or not, so a malformed headline is not mistaken for a truncated run.
-    read = parse_report(run_dir) if report is None else report
-    completed = bool(read.frontmatter.get("disposition"))
+    # "Completed" means the run holds a closing record (#1534); `closing` is the page's one
+    # lookup, made here only for a caller that has none.
+    found = closing_of_dir(run_dir) if closing is None else closing
+    completed = isinstance(found, closing_record.Record)
 
     if not completed:
         level, label = "bad", "incomplete"

@@ -16,8 +16,9 @@ from pathlib import Path
 import pytest
 
 from defender.tests.support.jobs._jobs1342 import (
+    CLOSING_KEY,
     GOLDEN_REPORT,
-    MALICIOUS_REPORT,
+    closing_plan,
     T1,
     T2,
     WORKER_LOGGER,
@@ -53,7 +54,8 @@ MARKER = "ATTACKER-TEXT-1342"
 CASE = "a1" * 16
 
 
-GOOD = GOLDEN_REPORT.read_text(encoding="utf-8")  # disposition: inconclusive
+#: A `report.md` that says `inconclusive`: planted beside a record, it must change nothing (#1534: no dual read).
+GOOD = GOLDEN_REPORT.read_text(encoding="utf-8")  # lint-run-records: ok — a decoy the worker must not read  # lint-report-file: ok — the golden fixture's file, a decoy
 
 
 SONNET_IN, SONNET_OUT, HAIKU_IN = 3.0, 15.0, 1.0  # USD per million tokens (configuration/_pricing.py)
@@ -104,10 +106,16 @@ def _child(world: dict, **kw) -> ScriptedChild:
     return ScriptedChild(world["tmp"] / "child", world["runs"], **kw)
 
 
+def closing(disposition: str | None = "inconclusive", *, fault: str | None = None, then: str | None = None) -> str:
+    """The plan a child follows to leave the run's closing record (`disposition` None: the table and no row); `then` is SQL
+    it runs on the database afterwards (`closing_plan`)."""
+    return closing_plan(CASE, None if disposition is None else {"disposition": disposition}, fault=fault, then=then)
+
+
 def _committed(**overrides) -> dict[str, str]:
-    """Host records for a run whose report the host committed and whose tree the scrub walked.
+    """Host records for a run the host committed and whose tree the scrub walked: its closing record is `inconclusive`.
     An override of `None` leaves that record out (a shape whose file the case makes another way)."""
-    files = {"{id}.job-end.json": job_end(), "{id}/report.md": GOOD,
+    files = {"{id}.job-end.json": job_end(), CLOSING_KEY: closing(),
              "{id}.knowledge-source.json": knowledge_record(COMMIT), **overrides}
     return {name: text for name, text in files.items() if text is not None}
 
@@ -157,7 +165,6 @@ def _job_end_with(**changes) -> str:
 MARKED_REPORT = GOOD + f"\n{MARKER}\n"
 
 
-HEADER = "---\ndisposition: benign\n---\n"
 
 
 CASES = {
@@ -265,33 +272,17 @@ CASES = {
     # rule 4
     "4-completed-inconclusive": _spec(files=_committed(), expect=("completed", None, "inconclusive")),
     "4-completed-malicious-whatever-the-exit": _spec(
-        files=_committed(**{"{id}/report.md": MALICIOUS_REPORT.read_text(encoding="utf-8") + f"\n{MARKER}\n"}),
-        exit=4, expect=("completed", None, "malicious")),
-    "4-no-front-matter": _spec(files=_committed(**{"{id}/report.md": f"no front matter {MARKER}\n"}),
-                               expect=("unparseable", None, None)),
-    "4-no-disposition": _spec(
-        files=_committed(**{"{id}/report.md": f"---\ncase_id: x\n---\n{MARKER}\n"}),
-        expect=("unparseable", None, None)),
-    "4-disposition-outside-the-vocabulary": _spec(
-        files=_committed(**{"{id}/report.md": f"---\ndisposition: sorta-bad\n---\n{MARKER}\n"}),
-        expect=("unparseable", None, None)),
-    "4-two-dispositions": _spec(
-        files=_committed(**{"{id}/report.md": f"---\ndisposition: benign\ndisposition: malicious\n---\n{MARKER}\n"}),
-        expect=("unparseable", None, None)),
-    "4-report-missing": _spec(files=_committed(**{"{id}/report.md": None, "{id}/notes.md": MARKER}),
-                              expect=("unparseable", None, None)),
-    "4-report-is-a-directory": _spec(files=_committed(**{"{id}/report.md": None, "{id}/notes.md": MARKER}),
-                                     dirs=["{id}/report.md"], expect=("unparseable", None, None)),
-    "4-report-not-utf8": _spec(
-        files=_committed(**{"{id}/report.md": None, "{id}/notes.md": MARKER}),
-        binary={"{id}/report.md": (HEADER + "\n").encode().hex() + "fffe"},
-        expect=("unparseable", None, None)),
-    "4-report-oversize": _spec(
-        files=_committed(**{"{id}/report.md": None, "{id}/notes.md": MARKER}),
-        sparse={"{id}/report.md": [HEADER, 70 * 1024 * 1024]}, expect=("unparseable", None, None)),
-    "4-report-symlinked": _spec(
-        files=_committed(**{"{id}/report.md": None, "{id}/notes.md": MARKER}),
-        links={"{id}/report.md": str(GOLDEN_REPORT)}, expect=("unparseable", None, None)),
+        files=_committed(**{CLOSING_KEY: closing("malicious")}), exit=4, expect=("completed", None, "malicious")),
+    "4-completed-beside-a-contrary-report": _spec(
+        files=_committed(**{CLOSING_KEY: closing("malicious"), "{id}/report.md": GOOD}),
+        expect=("completed", None, "malicious")),
+    "4-never-closed": _spec(files=_committed(**{CLOSING_KEY: closing(None)}), expect=("unparseable", None, None)),
+    "4-never-closed-no-pointer": _spec(files=_committed(**{CLOSING_KEY: closing(None, fault="no-pointer")}),
+                                       expect=("unparseable", None, None)),
+    "4-report-only": _spec(files=_committed(**{CLOSING_KEY: None, "{id}/report.md": GOOD}),
+                           expect=("unparseable", None, None)),
+    "4-record-unreadable": _spec(files=_committed(**{CLOSING_KEY: closing(fault="row-invalid")}),
+                                 expect=("unparseable", None, None)),  # a fault in reading the record (V-READERS, worker)
     # rule 4 after an abnormal child end whose facts are both true (r5 C2: the driver raised after a clean close)
     "4-completed-when-the-child-died-after-both-facts": _spec(files=_committed(), exit=1,
                                                               expect=("completed", None, "inconclusive")),

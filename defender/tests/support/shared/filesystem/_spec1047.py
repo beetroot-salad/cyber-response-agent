@@ -18,7 +18,6 @@ from defender.tests.support.learning.judge._judge_921 import (  # noqa: F401 —
     episode,
     grade,
     mod,
-    report_text,
     rows,
     runs_base,
     scripted_judge,
@@ -157,9 +156,9 @@ def _family_view_of(prompt: str) -> dict[str, str]:
     noise = prompt.split("## NOISE CONTEXT", 1)[-1]
     view: dict[str, str] = {}
     for label, block in re.findall(r"(?ms)^### run (\S+)\n(.*?)(?=^### run |\Z)", header):
-        reached = re.search(r"reached verdict \(its archived report\.md\): <(run-[0-9a-f]+)-"
-                            r"untrusted>\n(.*?)\n</\1-untrusted>", block, re.S)
-        view[label] = f"verdict={reached.group(2)!r}" if reached else block.strip()
+        # The reached verdict is a vocabulary member the host committed: host text, not a framed run (#1534).
+        reached = re.search(r"reached verdict \([^)]*\): (?!none )(\S+)\n", block)
+        view[label] = f"verdict={reached.group(1)!r}" if reached else block.strip()
     for label in re.findall(r"(?m)^- world (\S+): ", noise):
         assert label not in view, f"world {label} is both a usable run and excluded: {prompt}"
         view[label] = "NOT JUDGED"
@@ -334,7 +333,7 @@ def receipt(run_dir: Path) -> dict | None:
 
 
 def closed_run_dir(tmp_path: Path, *, disposition: str = "malicious", report: bool = True) -> Path:
-    """A finished run dir as `run.py`'s tail meets it: an alert, and a committed `report.md`
+    """A finished run dir as `run.py`'s tail meets it: an alert, and a closing record
     unless `report=False`. The folder is the run's id, so a test reads it as `run_dir.name`.
 
     `report=False` is the shape the three no-report exit classes leave, and a forced-close
@@ -349,7 +348,10 @@ def closed_run_dir(tmp_path: Path, *, disposition: str = "malicious", report: bo
                           "timestamp": "2026-09-16T11:00:00Z", "alert_id": CASE_KEY},
                 mapping=ALERT_MAPPING)
     if report:
-        (run_dir / "report.md").write_text(report_text(disposition), encoding="utf-8")
+        from defender.tests.support.storage import _readers1534 as R
+
+        # The committed close is the run's closing record in a store behind its pointer (#1534), not a `report.md`.
+        R.plant_run(run_dir, R.valid_fields(disposition), sessions_base=run_dir.parent)
     return run_dir
 
 
@@ -433,26 +435,4 @@ def salt_run_dir(run_dir: Path, value: str = "request-limit") -> list[Path]:
         path = run_dir / name
         path.write_text(json.dumps(record_doc(value)), encoding="utf-8")
         planted.append(path)
-    # And the one surface that is not JSON: the report's frontmatter, which `validate_report`
-    # admits an unknown key into.
-    report = run_dir / "report.md"
-    if report.is_file():
-        report.write_text(report_text("malicious", extra=f"truncated_by: {value}\n"),
-                          encoding="utf-8")
-        planted.append(report)
     return planted
-
-
-def plant_frontmatter(world_dir: Path, extra: str, *, raw: str | bytes | None = None) -> Path:
-    """Rewrite an archived world's `report.md` with `extra` spliced into its frontmatter.
-
-    `validate_report` accepts an unknown frontmatter key, and the judge reads the archived copy
-    of a file the box could write: this is the forgery the design must make inert."""
-    path = Path(world_dir) / "report.md"
-    if raw is None:
-        path.write_text(report_text("malicious", extra=extra), encoding="utf-8")
-    elif isinstance(raw, bytes):
-        path.write_bytes(raw)
-    else:
-        path.write_text(raw, encoding="utf-8")
-    return path

@@ -4,6 +4,7 @@ on top (a realm path, an origin's lack of one) and names its setting in the refu
 
 from __future__ import annotations
 
+import re
 import urllib.parse
 
 
@@ -27,6 +28,17 @@ def split_http_url(value: str, *, query: bool = False) -> urllib.parse.SplitResu
 
 
 _DEFAULT_PORTS = {"http": 80, "https": 443}
+_LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", re.ASCII)
+
+
+def is_hostname(value: str) -> bool:
+    """A bare lowercase domain name: dot-separated labels of ASCII letters, digits and inner hyphens, no empty label
+    (a trailing dot included), the last starting with a letter. A browser reads a host whose last label starts with a
+    digit as an IPv4 address and rewrites or refuses it; one that starts with a letter it keeps as written. No IP
+    address, then, and nothing to mimic of the browser's parser. The one hostname rule, for the artifact domain and an
+    origin's host alike (#1566)."""
+    labels = value.split(".")
+    return all(_LABEL.fullmatch(label) for label in labels) and labels[-1][:1].isalpha()
 
 
 def check_origin(value: str) -> str:
@@ -40,7 +52,10 @@ def check_origin(value: str) -> str:
     host = parts.hostname or ""
     if not host.isascii():
         raise ValueError("must name its host in ASCII (an internationalized name in its xn-- form), as a browser sends it")
-    netloc = f"[{host}]" if ":" in host else host
+    if not is_hostname(host):
+        raise ValueError("must name a domain: lowercase labels of letters, digits and inner hyphens, the last starting "
+                         "with a letter (no IP address)")
+    netloc = host
     if parts.port is not None and parts.port != _DEFAULT_PORTS[parts.scheme]:
         netloc += f":{parts.port}"
     canonical = f"{parts.scheme}://{netloc}"

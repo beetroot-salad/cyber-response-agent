@@ -126,7 +126,7 @@ et al. (feedback-loop debt, which starts accruing once lessons feed back).
 ## Loop Shape
 
 ```text
-Completed run dir (alert.json + investigation.md + report.md
+Completed run dir (alert.json + investigation.md + the closing record
                    + executed_queries.jsonl + gather_raw/)
         │
         ▼
@@ -393,7 +393,7 @@ $DEFENDER_DATA_ROOT/<tenant>/episodes/<episode uuid>/
   served/base.jsonl           # the capture, primed before pre-flight
   served/<world UUID>.jsonl  # every response served that world, with its decision
   worlds/<world UUID>/
-    report.md  investigation.md  alert.json  provenance.json
+    investigation.md  alert.json  provenance.json
     executed_queries.jsonl  gather_raw/  gather_summaries/
     lessons_loaded.jsonl  scrub_verdict.json
     judge/<n>.yaml            # one per judge draw

@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 from defender._vocab import CONFIDENCE_VALUES, DISPOSITION_VALUES
+from defender.records import closing
 
 # The one vocabulary here that invlang does not own: `disposition` is also validated in
-# `report.md`, so it is imported from the project-wide vocabulary rather than restated.
+# the closing record, so it is imported from the project-wide vocabulary rather than restated.
 DISPOSITION: tuple[str, ...] = DISPOSITION_VALUES
 
 #: The four buckets: the closed set a `:T resolutions` `after` cell is judged against
@@ -57,13 +58,8 @@ RELATIONS: tuple[str, ...] = (
     "attempted_auth", "governs",
 )
 
-ANCHOR_KINDS: tuple[str, ...] = (
-    "iam-policy", "gpo", "cap-rule", "change-mgmt",
-    "data-classification-policy", "k8s-policy", "federation-policy",
-    "endpoint-policy", "approved-source-list", "runtime-evidence",
-    "tacit-knowledge",
-    "other",
-)
+#: The anchor kinds live with the closing record, whose baseline entries carry one (#1534).
+ANCHOR_KINDS: tuple[str, ...] = closing.ANCHOR_KINDS
 
 #: `:R authz`' `basis` cell on an `indeterminate` verdict: why the question is unsettled.
 #:
@@ -76,7 +72,7 @@ AUTHZ_INDET_BASIS: tuple[str, ...] = ("retry", "exhausted")
 #: `:R consultations`' `grounding` cell. `past-case` is excluded: grounding a baseline on a
 #: past case is precedent-by-similarity. (The authorization side conversely excludes
 #: `telemetry-baseline`: a statistical pattern is context, never a verdict.)
-CONSULTATION_GROUNDING: tuple[str, ...] = ("org-authority", "telemetry-baseline")
+CONSULTATION_GROUNDING: tuple[str, ...] = closing.GROUNDING_KINDS
 
 #: The outcome of a `tacit-knowledge` `:R consultations` lookup, as the first token of its
 #: `result` cell (`hit: ...` / `miss: ...`). Closed so the validator can refuse a `miss` row

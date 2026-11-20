@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.runtime.engine._spec992 import is_closed
+
 import pytest
 
 from defender.tests.support.invlang.validation._invlang_warn_836 import (
@@ -284,7 +286,7 @@ def test_the_repair_window_is_closable_while_the_run_is_still_taking_turns(tmp_p
         stages=_review_bundle.bundle(composer=_review_bundle.composer_reply("holds")),
         bounds=challenge_gate.default_bounds(),
     )
-    assert (run / "report.md").is_file()
+    assert is_closed(run)
 
 
 # the gate the repair itself faces

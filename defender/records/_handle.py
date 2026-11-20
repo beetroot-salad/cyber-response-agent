@@ -15,7 +15,6 @@ from defender.records import _alert_input
 from defender.records import _artifact_schema
 from defender.records import _episode_paths
 from defender.records import _provenance
-from defender.records import _report
 from defender import _io as _real_io
 from defender.records import _layout
 from defender.records._id import RunId
@@ -30,7 +29,7 @@ GROUPS = ("tables", "facts", "documents", "observability", "session")
 GROUP_MEMBERS: dict[str, tuple[str, ...]] = {
     "tables": ("queries", "policy_denials", "leads", "payloads", "ticket_reads", "call_join"),
     "facts": ("alert", "alert_record", "provenance", "run_end", "scrub_verdict"),
-    "documents": ("investigation", "report", "gather_summaries", "lead_author"),
+    "documents": ("investigation", "gather_summaries", "lead_author"),
     "observability": (
         "wire_log", "review_trace", "tool_trace", "review_record",
         "lessons_loaded", "ticket_write", "runtime_html", "box_sentinel", "session_pointer",
@@ -42,7 +41,7 @@ MEMBER_ACCESSOR: dict[str, str] = {
     "payloads": "payload", "ticket_reads": "ticket_read",
     "alert": "alert", "alert_record": "alert_record", "provenance": "provenance", "run_end": "run_end_sidecar",
     "scrub_verdict": "scrub_verdict",
-    "investigation": "investigation", "report": "report",
+    "investigation": "investigation",
     "gather_summaries": "gather_summary", "lead_author": "lead_author",
     "wire_log": "wire_log", "review_trace": "review_trace",
     "tool_trace": "tool_trace",
@@ -60,7 +59,7 @@ MEMBER_VERB: dict[str, str | None] = {
     "queries": "append", "policy_denials": "append", "leads": "write", "payloads": "write",
     "ticket_reads": "write",
     "alert": "write", "alert_record": "write", "provenance": "write", "run_end": "write", "scrub_verdict": "write",
-    "investigation": "write", "report": "write", "gather_summaries": "write",
+    "investigation": "write", "gather_summaries": "write",
     "lead_author": None,
     "wire_log": "append", "review_trace": "append",
     "tool_trace": "append", "review_record": "write", "lessons_loaded": "append",
@@ -92,9 +91,8 @@ _SIDECAR_MEMBERS = ("run_end", "scrub_verdict", "ticket_write", "session_pointer
 #: Written once through the exclusive lane (a second lead claim must collide). The scrub
 #: verdict is a fact too but is rewritten, so it uses `replace` like every other `write`.
 _WRITE_ONCE_MEMBERS = frozenset({"alert", "alert_record", "provenance", "leads"})
-#: The two model-authored documents, held to their content schema at every write.
-_SCHEMA_GATED_MEMBERS = {"investigation": RUN_LAYOUT.investigation.name,
-                         "report": RUN_LAYOUT.report.name}
+#: The model-authored document, held to its content schema at every write.
+_SCHEMA_GATED_MEMBERS = {"investigation": RUN_LAYOUT.investigation.name}
 
 #: Members whose owner accessor takes a caller-supplied component: `run.<group>.<name>` answers
 #: a callable taking the same positional args and returning the `RecordHandle`.
@@ -318,8 +316,6 @@ class RunRecord:
     parent_run_id: str | None
     fork_turn: int | None
     exit_class: str | None
-    disposition: str | None
-    review_outcome: str | None
     faults: tuple[str, ...] = ()
 
 
@@ -506,7 +502,6 @@ class Run:
         # would make `alert_ref` hash bytes outside the run).
         prov = self._provenance(faults)
         exit_class = self._exit_class(owner, faults) if self.runs_base is not None else None
-        disposition, review_outcome = self._report_fields()
         alert_ref = self._alert_ref()
         return RunRecord(
             tenant_id=prov.tenant_id if prov is not None else None,
@@ -520,8 +515,6 @@ class Run:
             parent_run_id=prov.parent_run_id if prov is not None else None,
             fork_turn=prov.fork_turn if prov is not None else None,
             exit_class=exit_class,
-            disposition=disposition,
-            review_outcome=review_outcome,
             faults=tuple(faults),
         )
 
@@ -582,14 +575,6 @@ class Run:
             return None
         return rec.truncated_by
 
-    def _report_fields(self) -> tuple[str | None, str | None]:
-        report_text, _reason = self._io.rooted_read(self.run_dir, RUN_LAYOUT.report)
-        if report_text is None:
-            return None, None
-        read = _report.parse_report_text(report_text)
-        fm = read.frontmatter
-        outcome = fm.get("outcome") if isinstance(fm, dict) else None
-        return read.disposition, (outcome if isinstance(outcome, str) else None)
 
 def case_ref_of_digest(digest: str) -> str:
     """The curation key a run is known by: `case-<the alert's sha256 digest>[:16]`, the digest
@@ -609,7 +594,7 @@ def case_ref(alert_bytes: bytes) -> str:
 #: The copied set, each name from its owner: run-dir names from `_layout`, the archive's
 #: re-homed sidecar names from `_episode_paths`.
 _ARCHIVED_WORLD_NAMES: dict[str, str] = {
-    "report": _layout.REPORT, "investigation": _layout.INVESTIGATION,
+    "investigation": _layout.INVESTIGATION,
     "provenance": _layout.PROVENANCE,
     "scrub_verdict": _episode_paths.ARCHIVED_SCRUB_VERDICT_NAME,
     "run_end": _episode_paths.ARCHIVED_RUN_END_NAME,

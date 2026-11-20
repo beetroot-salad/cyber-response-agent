@@ -1,17 +1,14 @@
-"""The two derived readers: what each world concluded, and where the worlds differ."""
+"""The derived reader of where an episode's worlds differ (`delta_o`). What each world
+concluded is its arm's closing record (#1534), read through the episode view
+(`records.closing.for_world`); no archived file carries it."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from typing import Any
 
-import yaml
 
-from defender import _yaml
-from defender._frontmatter import parse_frontmatter_or_none
 from defender._io import Bound
-from defender.records.formats import repeats_disposition
-from defender._vocab import DISPOSITION_ENUM, normalized_disposition
 from defender.records.formats import LAYOUT
 from defender.learning.branch import outcome as outcome_mod
 from defender.learning.branch.comparator import DELTA_SEAT, Verdict, canonical, compare
@@ -88,28 +85,6 @@ def _archived_labels(bound: Bound, family: Family) -> list[str]:
         raise EpisodeError(str(refused)) from refused
 
 
-# ---------------------------------------------------------------------------------------
-# verdicts
-# ---------------------------------------------------------------------------------------
-
-
-def _declared_disposition(text: str) -> Any:
-    """The `disposition` value an archived report declares, raw and unjudged.
-
-    Frontmatter first (via `_frontmatter`); a fence-less document whose head is a YAML mapping
-    is read as that mapping. Anything else yields `None`, reported as no disposition rather than
-    a bad one.
-    """
-    frontmatter = parse_frontmatter_or_none(text)
-    if frontmatter is None:
-        try:
-            loaded = _yaml.safe_load(text)
-        except yaml.YAMLError:
-            return None
-        frontmatter = loaded if isinstance(loaded, dict) else {}
-    return frontmatter.get("disposition")
-
-
 def _walked(view: EpisodeRuns) -> Bound:
     """The no-follow reader over the episode folder `view` holds — the walked handle, never a
     path re-bound by its spelling. Anything but an episode view is a `TypeError`."""
@@ -117,55 +92,6 @@ def _walked(view: EpisodeRuns) -> Bound:
         raise TypeError(f"the episode readers take the episode's walked view "
                         f"(`runs.episode(episode_id)`), not {type(view).__name__}")
     return view.episode.view()
-
-
-def verdicts(view: EpisodeRuns) -> dict[str, str]:
-    """Each archived world's disposition, keyed by world label, read through the episode's
-    walked view.
-
-    Read from each world's own archived `report.md`, never a run dir. Judged by
-    `_vocab.normalized_disposition`, which owns the vocabulary including zero-width stripping
-    that a local `in DISPOSITION_ENUM` would miss.
-
-    A value outside the vocabulary refuses, naming it: a headline that cannot be read is not the
-    same as no headline.
-    """
-    bound = _walked(view)
-    family = load_family(bound, expected_episode_id=view.episode_id)
-    return _verdicts(bound, family)
-
-
-def _verdicts(bound: Bound, family: Family) -> dict[str, str]:
-    _refuse_incomplete(bound, family)
-    out: dict[str, str] = {}
-    for label in _archived_labels(bound, family):
-        name = LAYOUT.world(family.world(label).world_id).report
-        # Absent and unreadable differ. The archive deliberately archives a world with no
-        # report (a sibling that died before writing one), even on an accepted episode, so it
-        # is skipped rather than taking every other world's headline down. A present but
-        # unreadable report still refuses, decided by the bound reader's own open.
-        rec = bound.read(name)
-        if rec.absent:
-            continue
-        if rec.refusal is not None:
-            raise EpisodeError(
-                f"world {label!r} is archived without a readable report — {rec.refusal} — "
-                "the archived report is the only place this reader may learn what that "
-                "sibling concluded")
-        assert rec.text is not None, "present per the state check above"
-        if repeats_disposition(rec.text):
-            # YAML keeps the last copy silently: a report with two headlines has none (A19).
-            raise EpisodeError(
-                f"world {label!r} is archived with a report ({name}) carrying a second "
-                "disposition key — the last copy would win silently, so it declares none")
-        raw = _declared_disposition(rec.text)
-        disposition = normalized_disposition(raw)
-        if disposition is None:
-            raise EpisodeError(
-                f"world {label!r} declares disposition {raw!r}, which is outside the shipped "
-                f"vocabulary {sorted(DISPOSITION_ENUM)}")
-        out[label] = disposition
-    return out
 
 
 # ---------------------------------------------------------------------------------------
@@ -314,5 +240,4 @@ def _delta_o(bound: Bound, view: EpisodeRuns,
 __all__ = [
     "EpisodeError",
     "delta_o",
-    "verdicts",
 ]

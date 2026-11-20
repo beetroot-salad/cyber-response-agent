@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 
 from defender.tests.learning.judge.contrast_contracts import _spec1234 as S
+from defender.tests.support.learning.judge import _judge_921 as J
 
 
 @pytest.fixture(autouse=True)
@@ -341,8 +342,7 @@ def test_1234_world_prompt_carries_control_and_every_gradable_sibling_as_referen
 _UNGRADABLE = {
     "o5-failed": ({"world_record": "did not finish"}, "did not finish"),
     "cut-short": ({"run_end": {"truncated_by": "budget", "closed_before_cut": False}}, "budget"),
-    "malformed": ({"report": ("---\ndisposition: benign\noutcome: stands\ndisposition: malicious\n"
-                              f"---\nWorld wx closed. {S.marker('wx', 'report')}\n")}, "report"),
+    "record-unreadable": ({}, "row-invalid"),
 }
 
 
@@ -352,6 +352,11 @@ def test_1234_ungradable_planted_world_is_in_no_reference_set(tmp_path: Path, ki
     wx = {"role": "D", "calls": [_call("l-777", params=_q(f"user:alice {S.marker('wx', 'call')}"))],
           **fields}
     built = _family(tmp_path, _triad(wx=wx))
+    if kind == "record-unreadable":
+        from defender.records import closing as C
+
+        J.fault_arm(built.ep, "wx", "row-invalid")
+        reason_word = C.FAULT_WORDING["row-invalid"]
     judge = _graded(built)
     for label in (WB, WC, S.FAMILY):
         assert judge.called(label), f"no call was made for {label}"
@@ -517,7 +522,7 @@ def test_1234_reference_file_links_to_an_ungradable_worlds_oracle_store(
     wx = {"role": "D", "world_record": "oracle unservable"}
     built = _family(tmp_path, _triad(wx=wx))
     target = built.oracle_path("wx")
-    report = built.world_dir(WC) / "report.md"
+    report = built.world_dir(WC) / "investigation.md"
     if link == "symlink":
         S.plant_symlink(report, os.path.relpath(target, report.parent))
     else:
@@ -531,11 +536,11 @@ def test_1234_reference_file_links_to_an_ungradable_worlds_oracle_store(
     assert S.marker("wx", "forged-f-wx") in built.oracle_path("wx").read_text(encoding="utf-8"), (
         "fixture: the excluded world's store does not carry the marker the prompts are read for")
     assert S.marker("wx", "forged-f-wx") not in judge.prompt_for(S.FAMILY)
-    # Refused as a link: wc's report did not read, so wc is malformed, named by the file.
+    # Refused as a link: wc's investigation did not read, so wc is malformed, named by the file.
     assert not judge.called(WC), "the linked reference run was judged as if its report read"
     reason = S.row(built, WC).get(S.COINED["row.ungradable_reason"])
     assert isinstance(reason, str), f"wc's row names no reason: {reason!r}"
-    assert "report.md" in reason, f"wc's row does not name report.md: {reason!r}"
+    assert "investigation.md" in reason, f"wc's row does not name investigation.md: {reason!r}"
     # The positive control: the control's archive still reaches b's prompt as a reference.
     assert S.marker(CTL, "report") in _reference_blocks(judge.prompt_for(WB), WB)[CTL]
 

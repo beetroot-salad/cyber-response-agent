@@ -19,7 +19,7 @@ from defender.learning.judge._errors import JudgeRefused  # noqa: E402
 
 from defender.records.formats import Episode  # noqa: E402
 from defender._io import Bound, NotPlainEntry
-from defender.records import WIRE_LOG_NAMES  # noqa: E402
+from defender.records import WIRE_LOG_NAMES, closing  # noqa: E402
 from defender.records.formats import LAYOUT  # noqa: E402
 from defender.learning.branch import outcome as outcome_mod  # noqa: E402
 from defender.learning.judge import calls as calls_mod  # noqa: E402
@@ -346,7 +346,8 @@ def grade_episode(  # noqa: PLR0913 — the orchestration's whole configuration 
                 else enqueue_mod.StoreFindings(store, str(runs.tenant.id), Path(episode.dir).name))
             return _grade_episode(episode, judge=resolved_judge, draws=configured,
                                   git_show=git_show, state=sink, tenant=runs.tenant,
-                                  job_lane=job_lane)
+                                  job_lane=job_lane,
+                                  episode_runs=_judged_episode_runs(runs, episode_id, episode))
     except JudgeRefused:
         raise
     # Every input-driven failure arrives as `JudgeRefused`, which is what the launcher catches.
@@ -363,6 +364,18 @@ def _open_episode(runs: RunsRepository[Tenant], episode_id: str) -> Episode:
         return runs.episode_files(episode_id)
     except FileNotFoundError as missing:
         raise JudgeRefused(f"episode {episode_id}: no such episode directory") from missing
+    except (OSError, ValueError, TenantRefused) as refused:
+        raise JudgeRefused(f"episode {episode_id}: {refused}") from refused
+
+
+def _judged_episode_runs(runs: RunsRepository[Tenant], episode_id: str, episode: Episode) -> Any:
+    """The pass's episode run view over its held episode (`runs.episode(id, held=...)`): where
+    each world's arm, and so its closing record, is found (#1534). Adopted, so the pass's
+    handle stays the one owner."""
+    from defender.records.formats import TenantRefused
+
+    try:
+        return runs.episode(episode_id, held=episode)
     except (OSError, ValueError, TenantRefused) as refused:
         raise JudgeRefused(f"episode {episode_id}: {refused}") from refused
 
@@ -388,14 +401,15 @@ def _refuse_queueing(prior: EpisodeGrade) -> None:
 
 def _grade_episode(  # noqa: PLR0913 — the pass's whole configuration, one keyword each
     episode: Episode, *, judge: Any, draws: int, git_show: Any, state: enqueue_mod.FindingsSink,
-    tenant: Any = None, job_lane: bool = False,
+    episode_runs: Any, tenant: Any = None, job_lane: bool = False,
 ) -> EpisodeGrade:
     # A not-graded stamp never short-circuits, so a repaired episode can still be graded. A
     # recorded grade — a stamp's included, which carries the committed rows it met — is carried
     # row by row: `queued` rows are final, a `queueing` row refuses the grade (after the gates,
     # so a stamp pass still writes its stamp), every other row is re-graded (A6).
     return _Pass(episode, judge=judge, draws=draws, git_show=git_show, state=state,
-                 prior=read_grade(episode), tenant=tenant, job_lane=job_lane).grade()
+                 prior=read_grade(episode), tenant=tenant, job_lane=job_lane,
+                 episode_runs=episode_runs).grade()
 
 
 def _label_of(finding_id: str) -> str | None:
@@ -457,8 +471,10 @@ class _Pass:
 
     def __init__(self, episode: Episode, *, judge: Any, draws: int, git_show: Any,  # noqa: PLR0913 — the pass's whole configuration
                  state: enqueue_mod.FindingsSink, prior: EpisodeGrade | None, tenant: Any = None,
-                 job_lane: bool = False) -> None:
+                 job_lane: bool = False, episode_runs: Any) -> None:
         self.episode = episode
+        #: The episode's run view (#1534): each world's verdict is its arm's closing record.
+        self.episode_runs = episode_runs
         #: A learning job's pass (#1344): a pass whose every judge call raised is its failure.
         self.job_lane = job_lane
         #: Judge calls of this pass that completed a draw, and that raised (`_count_draws`).
@@ -533,7 +549,13 @@ class _Pass:
         not_comparable = outcome_mod.not_comparable_reason(bound)
         if not_comparable is not None:
             return _stamp_not_graded(episode, NOT_COMPARABLE, not_comparable, found_gaps=found, prior=self.prior)
-        runs = read_run_set(bound, manifest, episode_dir=episode.dir, failed=failed)
+        # Every world's verdict is its arm's closing record, found through the arm roster: with
+        # no roster there is no verdict to read for any world, so the pass refuses whole, before
+        # any model call or write (#1534 OD12). The wording is fixed; the detail is logged.
+        if (gone := closing.roster_fault(self.episode_runs)) is not None:
+            raise JudgeRefused(f"episode {Path(episode.dir).name}: {gone.wording}")
+        runs = read_run_set(bound, manifest, episode_dir=episode.dir, failed=failed,
+                            episode_runs=self.episode_runs)
         if runs.control not in runs.usable:
             return _stamp_not_graded(
                 episode, CONTROL_UNUSABLE,
@@ -632,7 +654,8 @@ class _Pass:
                 lessons_commit=self.lessons_commit, knowledge=self.knowledge,
                 payload_cap=self.cap,
                 facts=self.run_set.usable[label], samples=self.samples, manifest=self.manifest,
-                bound=self.bound, family_text=self.noise, runs=self.run_set)
+                bound=self.bound, family_text=self.noise, runs=self.run_set,
+                episode_runs=self.episode_runs)
             prompt, placed = run_mod._build_prompt(ctx, self.manifest)
             self.episode.world(self.run_set.usable[label].token).draws.ensure()
         except (JudgeRefused, OSError, ValueError, TimeoutError) as world_failed:

@@ -518,3 +518,103 @@ def test_duration_ms_is_refused_at_the_boundary_unless_a_finite_real_number(tmp_
     store.append(session_id, [message], agent_id="main", duration_ms=3)
     store.append(session_id, [message], agent_id="main", duration_ms=12.5)
     assert sql(store, "SELECT COUNT(*) FROM message")[0][0] == 3
+
+
+# the closing record's table (#1534)
+
+def _closing_rows(database, run_id):
+    from defender.tests.storage.verdict_1534 import _spec1534 as V
+
+    return V.scalar_rows(database, run_id)
+
+
+def test_v_one_a_second_closing_record_for_a_run_is_refused_and_the_first_row_is_unchanged(tmp_path):
+    """A second write for the run raises `ClosingRecordExists`; its row is as first written and the store still writes. (V-ONE)"""
+    from defender.tests.storage.verdict_1534 import _spec1534 as V
+    from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
+    ss = store_mod()
+    run_id, other = fixture_uuid("closing-1534-once"), fixture_uuid("closing-1534-once-other")
+    with V.run_store(runs_base(tmp_path), "c1534") as store:
+        V.plant(store, V.a_record(run_id, disposition="malicious", summary="first"))
+        before = _closing_rows(store.path, run_id)
+        assert len(before) == 1
+        with pytest.raises(ss.ClosingRecordExists):
+            V.plant(store, V.a_record(run_id, disposition="benign", summary="second"))
+        assert _closing_rows(store.path, run_id) == before
+        V.plant(store, V.a_record(other))
+        assert len(_closing_rows(store.path, other)) == 1
+    assert issubclass(ss.ClosingRecordExists, ss.StoreError)
+
+
+def test_v_one_the_database_itself_refuses_a_second_row_for_a_run_written_around_the_store(tmp_path):
+    """A raw duplicate INSERT from a second connection raises `IntegrityError` and leaves one row; another run's copy lands. (V-ONE)"""
+    from defender.tests.storage.verdict_1534 import _spec1534 as V
+    from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
+    run_id, other = fixture_uuid("closing-1534-raw"), fixture_uuid("closing-1534-raw-other")
+    with V.run_store(runs_base(tmp_path), "c1534") as store:
+        V.plant(store, V.a_record(run_id))
+        database = store.path
+    conn = sqlite3.connect(database, timeout=30, isolation_level=None)
+    try:
+        copy = f"INSERT INTO {V.TABLE} SELECT * FROM {V.TABLE} WHERE run_id = ?"  # noqa: S608
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(copy, (run_id,))
+        conn.execute(f"CREATE TEMP TABLE c AS SELECT * FROM {V.TABLE} WHERE run_id = ?", (run_id,))  # noqa: S608
+        conn.execute("UPDATE c SET run_id = ?", (other,))
+        conn.execute(f"INSERT INTO {V.TABLE} SELECT * FROM c")  # noqa: S608
+    finally:
+        conn.close()
+    assert len(_closing_rows(database, run_id)) == 1
+    assert len(_closing_rows(database, other)) == 1
+
+
+def test_v_one_runs_that_share_a_database_each_keep_their_own_row(tmp_path):
+    """A source and an arm written to one database: two rows, each its own. (V-ONE)"""
+    from defender.tests.storage.verdict_1534 import _spec1534 as V
+    from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
+    source, arm = fixture_uuid("closing-1534-src"), fixture_uuid("closing-1534-arm")
+    with V.run_store(runs_base(tmp_path), "c1534") as store:
+        V.plant(store, V.a_record(source, disposition="malicious"))
+        V.plant(store, V.a_record(arm, disposition="benign"))
+        assert [r[1] for r in _closing_rows(store.path, source)] == ["malicious"]
+        assert [r[1] for r in _closing_rows(store.path, arm)] == ["benign"]
+
+
+def test_c3_a_writer_open_creates_the_closing_table_without_a_version_bump_and_a_reader_open_does_not(tmp_path):
+    """The table appears on a writer open at the unchanged schema version and survives a reopen; a reader open makes none. (C3)"""
+    from defender.tests.storage.verdict_1534 import _spec1534 as V
+    from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
+    ss = store_mod()
+    run_id = fixture_uuid("closing-1534-c3")
+
+    def tables(path):
+        conn = sqlite3.connect(path)
+        try:
+            return {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}, \
+                conn.execute("PRAGMA user_version").fetchone()[0]
+        finally:
+            conn.close()
+
+    with V.run_store(runs_base(tmp_path), "c1534") as store:
+        database = store.path
+        V.plant(store, V.a_record(run_id))
+    present, version = tables(database)
+    assert V.TABLE in present
+    assert version == ss.SCHEMA_VERSION == 2
+
+    with V.run_store(runs_base(tmp_path), "c1534"):
+        pass
+    assert len(_closing_rows(database, run_id)) == 1, "a reopen lost or rewrote the row"
+
+    V.drop_table(database)
+    with ss.open_store_for_read(database):
+        pass
+    assert V.TABLE not in tables(database)[0], "a read open made the table"
+    with V.run_store(runs_base(tmp_path), "c1534"):
+        pass
+    assert V.TABLE in tables(database)[0], "a writer open did not make the table"
+    assert tables(database)[1] == ss.SCHEMA_VERSION

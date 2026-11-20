@@ -13,7 +13,8 @@ pytest.importorskip("pydantic_ai")
 
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.investigation import observe  # noqa: E402
-from defender.presentation.visualize_run import LedgerCost, render_runtime_page  # noqa: E402
+from defender.presentation.visualize_run import LedgerCost  # noqa: E402
+from defender.tests.support.presentation._page1534 import render_unclosed  # noqa: E402
 from defender.tests.support.learning.curation._verb_authorization_632 import (  # noqa: E402
     DONE,
     ScopedFakeVerbs,
@@ -147,7 +148,7 @@ def test_a_denial_is_visible_in_the_rendered_run_html(tmp_path: Path):
     assert r.denials, "the drive produced no denial to render"
 
     # r7.2 P1: the page takes its cost as an argument; this test is about the denial rows, so the cost is the unknown one.
-    html = render_runtime_page(r.run_dir, cost=LedgerCost(None))
+    html = render_unclosed(r.run_dir, cost=LedgerCost(None))
     visible = _visible_html(html)
 
     assert "esql" in visible, \

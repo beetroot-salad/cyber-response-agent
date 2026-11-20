@@ -16,14 +16,32 @@ import uuid
 from collections.abc import Mapping, Sequence
 from typing import Any, cast
 
-from sqlalchemy import Table, Text, and_, case, collate, delete, exists, false, func, literal, or_, select, true, update
+from sqlalchemy import (
+    BigInteger,
+    Table,
+    Text,
+    and_,
+    case,
+    collate,
+    delete,
+    exists,
+    false,
+    func,
+    literal,
+    or_,
+    select,
+    true,
+    tuple_,
+    update,
+)
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from defender._text import postgres_cannot_hold
 from defender.database import async_engine, newest_first_query, sessions
+from defender.job_socket import MAX_MESSAGE
 from defender.jobs.errors import Conflict, NotFound
+from defender.jobs.learning_check import arm_learning_check
 from defender.records.formats import BatchId, CommitId, TenantId, WorkItemId
 from defender.records.learning_causes import BatchCause, ItemCause, Why
 from defender.tenancy.models import TenantRecord
@@ -38,7 +56,10 @@ from defender.jobs.learning_models import (
     BatchRow,
     CommitChangeRow,
     CommitRow,
+    ItemRefused,
     WorkItemRow,
+    insert_findings,
+    refuse_unholdable,
 )
 
 #: The epoch: the expiry a released batch's lease carries, so the store's one lapsed test selects it whatever the grace.
@@ -57,6 +78,18 @@ DEFAULT_RENEW_SECONDS = 30.0
 DEFAULT_MAX_ATTEMPTS = 3
 DEFAULT_GENERATION_CEILING = 3
 DEFAULT_REFUSAL_CEILING = 3
+#: A claimed item's bytes at most, in the post-step's claim answer (#1487 Amendment r5.4): the port sends each item as a
+#: row of its kind, its key and its payload's JSON text (`tick_port.ITEMS`), inside the job socket's ASCII JSON. Per byte
+#: of PostgreSQL's JSON text of the payload, the payload takes at most 7/2 there: a non-ASCII character of n UTF-8 bytes
+#: is escaped once by the payload's own JSON text (`\u00e9`, 6 bytes for 2) and its backslash again by the message's
+#: (7). Quotes and backslashes take 2, and a control character is already its escape in PostgreSQL's text. The key takes
+#: at most 3 per byte (escaped once), and the row's brackets, quotes and commas are within `CLAIM_ROW_FRAMING`.
+CLAIM_PAYLOAD_RATIO = (7, 2)
+CLAIM_KEY_RATIO = 3
+CLAIM_ROW_FRAMING = 16
+#: How much one claim may take, counted as the bound above summed over its items: the socket's message cap, less room
+#: for the answer's envelope (the batch's own fields), so the largest claim crosses the socket.
+DEFAULT_CLAIM_BYTES = MAX_MESSAGE - 1024 * 1024
 
 
 _I = cast(Table, WorkItemRow.__table__)
@@ -83,10 +116,6 @@ class LaneBusy(Exception):
 
 class TenantInactive(Exception):
     """The tenant is not active: no new batch and no new findings (O6)."""
-
-
-class ItemRefused(Exception):
-    """The database will never take this item (a NUL character jsonb refuses): waiting cannot cure it."""
 
 
 #: The outcomes that set an item aside, each carrying the cause code picked for it.
@@ -322,22 +351,6 @@ def _checked_since_request(last_checked: _dt.datetime | None, requested: _dt.dat
     return last_checked if last_checked >= requested else None
 
 
-def _refuse_unholdable(value: Any) -> None:
-    """Refuse, before anything is written, a value PostgreSQL could never hold (`postgres_cannot_hold`): every store
-    verb screens all the text it was given."""
-    why = postgres_cannot_hold(value)
-    if why is not None:
-        raise ItemRefused(why)
-
-
-def _refuse_unkeyed(row: Mapping[str, Any]) -> None:
-    """A finding's key is its `finding_id` as the judge made it: a string with something in it. A missing, null,
-    numeric or empty one would be keyed `'None'`, `'5'` or `''`, and a later row could collide with the made-up key."""
-    key = row.get("finding_id")
-    if not isinstance(key, str) or not key.strip():
-        raise ItemRefused(f"a finding row carries no string finding_id (got {key!r})")
-
-
 def _items_with_pr() -> Any:
     """Every item column and its batch's PR (none when it has no batch)."""
     return select(_I, _B.c.pr_number).select_from(_I.outerjoin(_B, _I.c.batch_id == _B.c.id))
@@ -396,12 +409,15 @@ class LearningStore(FeedbackVerbs):
     """Async store over PostgreSQL schema `learning`; tenant id is the first argument of every verb (a holder's verb
     takes its proof instead). #1414's feedback verbs are `FeedbackVerbs` (A4)."""
 
-    def __init__(self, dsn: str, *, lease: float = DEFAULT_LEASE_SECONDS, grace: float = DEFAULT_GRACE_SECONDS,
+    def __init__(  # noqa: PLR0913 — the store's knobs, each with its default
+            self, dsn: str, *, lease: float = DEFAULT_LEASE_SECONDS, grace: float = DEFAULT_GRACE_SECONDS,
                  renew_every: float = DEFAULT_RENEW_SECONDS, max_attempts: int = DEFAULT_MAX_ATTEMPTS,
                  generation_ceiling: int = DEFAULT_GENERATION_CEILING,
-                 refusal_ceiling: int = DEFAULT_REFUSAL_CEILING, max_connections: int = 10) -> None:
+                 refusal_ceiling: int = DEFAULT_REFUSAL_CEILING, claim_bytes: int = DEFAULT_CLAIM_BYTES,
+                 max_connections: int = 10) -> None:
         self.lease, self.grace, self.renew_every = lease, grace, renew_every
         self.max_attempts = max_attempts
+        self.claim_bytes = claim_bytes
         self.generation_ceiling, self.refusal_ceiling = generation_ceiling, refusal_ceiling
         self._engine = async_engine(dsn, max_connections=max_connections)
         self._sessions = sessions(self._engine)
@@ -450,22 +466,23 @@ class LearningStore(FeedbackVerbs):
 
     async def publish_findings(self, tenant: str, run_id: str, rows: Sequence[Mapping[str, Any]], *,
                                kind: str) -> tuple[int, int]:
-        """Queue `rows` as `kind`: `(added, duplicates)`. A finding id is unique for good (O14)."""
+        """Queue `rows` as `kind`: `(added, duplicates)`. A finding id is unique for good (O14). The insert is the
+        worker's own (`jobs.learning_models.insert_findings`): whatever it refuses is `ItemRefused` with nothing of
+        the call stored; an outage propagates, and so does `FindingsNotStored` (an insert error neither the rows nor an
+        outage explains). The rows are screened there, once; only `run_id` is screened here."""
         if LANE_OF.get(kind) != AUTHOR_LANE:
             raise ValueError(f"not a findings kind: {kind}")
-        _refuse_unholdable([run_id, *rows])
-        for row in rows:
-            _refuse_unkeyed(row)
-        added = 0
+        refuse_unholdable(run_id)
         async with self._sessions.begin() as s:
             await self._require_active(s, tenant)
-            for row in rows:
-                added += await self._insert_item(s, tenant, kind, row["finding_id"], dict(row), source_run=run_id)
-        return added, len(rows) - added
+            inserted = await insert_findings(s, tenant, {kind: rows}, source_run=run_id)
+            if not inserted.stored:
+                raise ItemRefused(inserted.why or "the store refused a finding")
+        return inserted.added, len(rows) - inserted.added
 
     async def add_pitfall(self, tenant: str, row: Mapping[str, Any]) -> bool:
         """Queue one pitfall occurrence; a repeated pitfall id is ignored, a keyless row is keyed by its digest."""
-        _refuse_unholdable(row)
+        refuse_unholdable(row)
         key = str(row["pitfall_id"]) if row.get("pitfall_id") else digest(dict(row))
         mistake = mistake_key_of(row, key)
         async with self._sessions.begin() as s:
@@ -475,7 +492,7 @@ class LearningStore(FeedbackVerbs):
 
     async def enqueue_request(self, tenant: str, run_id: str, case_id: str, spec: Mapping[str, Any]) -> bool:
         """File a curation request for `case_id`; the later run wins: an older waiting request is skipped, superseded."""
-        _refuse_unholdable([run_id, case_id, spec])
+        refuse_unholdable([run_id, case_id, spec])
         async with self._sessions.begin() as s:
             await self._require_active(s, tenant)
             await _settle_requests(s, tenant)
@@ -594,7 +611,9 @@ class LearningStore(FeedbackVerbs):
         """Start a working batch on `lane` over what is due, in one transaction (P2'); `None` when nothing is due.
 
         A replacement due (items still in a batch that closed with feedback) goes first and takes only those items;
-        otherwise every waiting item of each kind at or over its threshold (pitfalls: distinct `mistake_key`s, not rows)."""
+        otherwise the waiting items of each kind at or over its threshold (pitfalls: distinct `mistake_key`s, not rows),
+        oldest first, up to `claim_bytes` of their size on the job socket (`CLAIM_PAYLOAD_RATIO`) and always at least
+        one (#1487 Amendment r5.4): the rest wait for the next claim. A replacement takes the items of a batch a claim already bounded."""
         if lane not in LANES:
             raise ValueError(f"not a lane: {lane}")
         kinds = [k for k, ln in LANE_OF.items() if ln == lane]
@@ -695,7 +714,10 @@ class LearningStore(FeedbackVerbs):
             replaces=replaces, generation=generation, refusals=0, created_at=func.now()))
         if kinds:
             where = [_I.c.tenant_id == TenantId(tenant), _I.c.kind.in_(kinds)]
-            where += [_I.c.status == "in_batch", _I.c.batch_id == only_batch] if only_batch else [_I.c.status == "waiting"]
+            if only_batch:
+                where += [_I.c.status == "in_batch", _I.c.batch_id == only_batch]
+            else:
+                where += [_I.c.status == "waiting", tuple_(_I.c.kind, _I.c.item_key).in_(self._within_budget(tenant, kinds))]
             rows = (await s.execute(update(_I).where(*where).values(
                 status="in_batch", batch_id=batch_id, attempts=_I.c.attempts + 1, updated_at=func.now())
                 .returning(_I.c.kind, _I.c.item_key, _I.c.payload, _I.c.enqueued_at))).all()
@@ -705,6 +727,20 @@ class LearningStore(FeedbackVerbs):
                       for r in sorted(rows, key=lambda r: (r.kind, r.enqueued_at, r.item_key)))
         return Held(tenant_id=TenantId(tenant), batch_id=batch_id, lane=lane, kind=kind, branch=branch, token=1,
                     owner=owner, items=items, replaces=replaces, feedback_pr=feedback_pr)
+
+    def _within_budget(self, tenant: str, kinds: list[str]) -> Any:
+        """The `(kind, item_key)` of the tenant's waiting items of `kinds` a claim takes: oldest first (enqueue time,
+        then kind and key), while the running total of their size on the job socket (`CLAIM_PAYLOAD_RATIO`) stays
+        within `claim_bytes`, and the oldest one whatever its size."""
+        times, per = CLAIM_PAYLOAD_RATIO
+        payload = func.octet_length(_I.c.payload.cast(Text)).cast(BigInteger)
+        size = ((payload * times + (per - 1)) / per + func.octet_length(_I.c.item_key).cast(BigInteger) * CLAIM_KEY_RATIO
+                + func.octet_length(_I.c.kind) + CLAIM_ROW_FRAMING)
+        sized = select(_I.c.kind, _I.c.item_key, size.label("size"), func.sum(size).over(
+            order_by=(_I.c.enqueued_at, _I.c.kind, _I.c.item_key)).label("upto")).where(
+            _I.c.tenant_id == TenantId(tenant), _I.c.kind.in_(kinds), _I.c.status == "waiting").subquery()
+        return select(sized.c.kind, sized.c.item_key).where(
+            or_(sized.c.upto <= self.claim_bytes, sized.c.upto == sized.c.size))
 
     async def claim_revert(self, tenant: str, *, owner: str) -> Held:
         """A revert batch (no items): needs the working rule only; an open author PR does not block it."""
@@ -839,7 +875,8 @@ class LearningStore(FeedbackVerbs):
         """A person's release: a held item starts afresh (every count at 0: attempts, deferrals and curator declines; cause
         and detail cleared) and waits again, or is skipped as superseded when a fresher request for its case already
         waits. `NotFound` for an item not
-        the tenant's; `Conflict` naming its status when it is not held."""
+        the tenant's; `Conflict` naming its status when it is not held. The release wakes the tenant's check clock in the
+        same transaction (#1487 Amendment r5.3): a held item kept none running."""
         async with self._sessions.begin() as s:
             await _settle_requests(s, tenant)
             row = (await s.execute(select(_I).where(_I.c.tenant_id == TenantId(tenant), _I.c.id == WorkItemId(item_id))
@@ -852,6 +889,7 @@ class LearningStore(FeedbackVerbs):
                                                     _I.c.item_key == row.item_key)
                                    .values(**_to_waiting(), **_FRESH_COUNTS, updated_at=func.now())
                                    .returning(_I.c.status))).scalar_one()
+            await arm_learning_check(s, tenant, mark_held=True)
             return Acted(id=str(row.id), state=now, cause=row.cause, detail=row.reason)
 
     async def release_batch(self, tenant: str, batch_id: str, *, actor: str) -> Acted:
@@ -860,7 +898,8 @@ class LearningStore(FeedbackVerbs):
         already lapsed, so the next recovery pass takes it over as it would a crashed holder's batch. A pending abandon
         request is withdrawn: the release is the person's later word (and the way out of a request the forge never lets
         settle). `NotFound`; `Conflict` for a batch not parked, parked for another cause, or while another batch is
-        working on its lane."""
+        working on its lane. The release wakes the tenant's check clock in the same transaction (#1487 Amendment r5.3):
+        the parked batch kept none running."""
         try:
             async with self._sessions.begin() as s:
                 row = await self._parked_batch(s, tenant, batch_id)
@@ -879,6 +918,7 @@ class LearningStore(FeedbackVerbs):
                     values = {**cleared, "phase": "working", "lease_owner": f"released:{actor}", "lease_expiry": _EPOCH,
                               "fencing_token": row.fencing_token + 1}
                 await s.execute(update(_B).where(_B.c.id == row.id).values(**values))
+                await arm_learning_check(s, tenant, mark_held=True)
                 return Acted(id=str(row.id), state=values["phase"], cause=row.cause, detail=row.reason)
         except IntegrityError as raced:
             if _violates(raced, "batches_one_"):
@@ -888,7 +928,9 @@ class LearningStore(FeedbackVerbs):
     async def request_abandon(self, tenant: str, batch_id: str, *, actor: str) -> AbandonAsked:
         """A person asks for a parked batch to be abandoned. Only the request is recorded: what the batch's PR is on the
         forge is the loop's to read, and it ends the batch (`settle_abandon`); a release withdraws it first. `NotFound`;
-        `Conflict` for a batch not parked or already requested."""
+        `Conflict` for a batch not parked or already requested. The request wakes the tenant's check clock in the same
+        transaction (#1487 Amendment r5.3): a parked batch keeps no clock running, so the request is what brings a tick
+        to carry it out."""
         async with self._sessions.begin() as s:
             row = await self._parked_batch(s, tenant, batch_id)
             if row.abandon_requested_at is not None:
@@ -896,6 +938,7 @@ class LearningStore(FeedbackVerbs):
             at = (await s.execute(update(_B).where(_B.c.id == row.id).values(
                 abandon_requested_at=func.clock_timestamp(), abandon_requested_by=actor)
                 .returning(_B.c.abandon_requested_at))).scalar_one()
+            await arm_learning_check(s, tenant, mark_held=True)
             return AbandonAsked(id=str(row.id), state="needs_person", cause=row.cause, detail=row.reason, at=at)
 
     async def _parked_batch(self, s: AsyncSession, tenant: str, batch_id: str) -> Any:
