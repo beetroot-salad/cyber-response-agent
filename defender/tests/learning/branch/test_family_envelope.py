@@ -1,4 +1,9 @@
-"""YAML aliases are refused at load anywhere in the family manifest and in model replies."""
+"""YAML aliases are refused at load anywhere in the family manifest.
+
+Retired (#1579 O4): the questioner-reply arms (an aliased call 1 or seat reply refused as malformed
+YAML, a parsed reply with shared parts refused like an alias). A typed reply is a tool call's JSON
+arguments, so no reply text is parsed as YAML and a reply cannot carry an alias; the on-disk trust
+boundary tested below is unchanged."""
 from __future__ import annotations
 
 import json
@@ -330,113 +335,3 @@ def test_write_family_writes_a_shared_object_longhand_and_it_loads_back(tmp_path
         "write_family wrote YAML anchors/aliases, which the manifest loader refuses"
     assert yaml.safe_load(text) == doc
     assert load(path) == parse_family(doc)
-
-
-# ── at the questioner: an aliased reply is malformed YAML ───────────────────────────────────
-
-
-def _questioner():
-    return T.mod("learning.branch.questioner")
-
-
-def _fenced(text: str) -> str:
-    """The questioner fixture's own fenced shape (`test_947`/`test_1018`)."""
-    return f"```yaml\n{text}```"
-
-
-def _shared_facts_doc() -> dict:
-    """The family reply with world c's planned fact the SAME object as world b's."""
-    doc = T.family_doc()
-    doc["worlds"][2]["facts"] = [doc["worlds"][1]["facts"][0]]
-    return doc
-
-
-def _author(tmp_path: Path, agent: T.FakeAgent) -> dict:
-    return _questioner().author_family(
-        source_run_dir=tmp_path, episode_dir=T.episode(tmp_path),
-        invoke=agent, leads=[], alert={}, frontier="")
-
-
-def _seats() -> tuple[str, str]:
-    return (_fenced(yaml.safe_dump(T.declaration(T.world_doc("b")), sort_keys=False)),
-            _fenced(yaml.safe_dump(T.declaration(T.world_doc("c")), sort_keys=False)))
-
-
-_ALIASED_REPLIES: dict[str, Callable[[], str]] = {
-    # Block style, as a model writes it, with the anchor PyYAML itself names.
-    "reused-anchor": lambda: yaml.safe_dump(_shared_facts_doc(), sort_keys=False),
-    "cyclic-anchor": lambda: family_text(
-        '&a [{"fact_id": "f1", "statement": "s", "entities": *a}]') + "\n",
-}
-
-
-@pytest.mark.parametrize("kind", list(_ALIASED_REPLIES))
-def test_a_questioner_reply_carrying_a_yaml_alias_is_refused_naming_call_1(tmp_path, kind):
-    text = _ALIASED_REPLIES[kind]()
-    assert _has_alias(text), "the reply carries no alias, so this arm tests nothing"
-    agent = T.FakeAgent(_fenced(text), *_seats())
-
-    err = raised(lambda: _author(tmp_path, agent))
-
-    assert err is not None, "an aliased questioner reply was accepted"
-    assert isinstance(err, T.sym("investigation.branch", "BranchError")), \
-        f"refused with {type(err).__name__}, not BranchError: {str(err)[:200]}"
-    assert "call 1" in str(err)
-    assert isinstance(err.__cause__, yaml.YAMLError), \
-        f"refused, but not as malformed YAML (cause: {type(err.__cause__).__name__})"
-    assert agent.calls == 1, "seat calls were paid against a refused family"
-
-
-def _cyclic_facts_doc() -> dict:
-    doc = T.family_doc()
-    loop: dict[str, Any] = {"fact_id": "f1", "statement": "s"}
-    loop["entities"] = [loop]
-    _world_b(doc)["facts"] = [loop]
-    return doc
-
-
-@pytest.mark.parametrize("build", [_shared_facts_doc, _cyclic_facts_doc],
-                         ids=["shared", "cyclic"])
-def test_a_parsed_questioner_reply_with_shared_parts_is_refused_like_an_alias(tmp_path, build):
-    agent = T.FakeAgent(build(), T.declaration(T.world_doc("b")), T.declaration(T.world_doc("c")))
-
-    err = raised(lambda: _author(tmp_path, agent))
-
-    assert isinstance(err, T.sym("investigation.branch", "BranchError")), \
-        f"refused with {type(err).__name__}, not BranchError: {str(err)[:200]}"
-    assert "call 1" in str(err)
-    assert isinstance(err.__cause__, _yaml.AliasRefused)
-    assert agent.calls == 1, "seat calls were paid against a refused family"
-
-
-#: Seat B's reply (call 2) with its story's text reused as its axis through an alias.
-_SEAT_B_ALIASED = ("story: &s a story\naxis: *s\n"
-                   "disposition_declared: malicious\nlabel_basis: policy-rule\n")
-#: Seat B's reply carrying the bomb under a key the questioner never reads — so no check of
-#: the COMPOSED world would ever see it; only the loader can refuse it.
-_SEAT_B_BOMB = ("story: a story\naxis: an axis\n"
-                "disposition_declared: malicious\nlabel_basis: policy-rule\n"
-                "scratch: {" + _bomb_members() + "}\n")
-
-_ALIASED_SEAT_REPLIES = {"reused-scalar": _SEAT_B_ALIASED, "bomb-in-an-unread-key": _SEAT_B_BOMB}
-
-
-def _family_reply() -> str:
-    return _fenced(yaml.safe_dump(T.declaration(T.family_doc()), sort_keys=False))
-
-
-@pytest.mark.parametrize("kind", list(_ALIASED_SEAT_REPLIES))
-def test_a_seat_reply_carrying_a_yaml_alias_is_refused_naming_the_seat(tmp_path, kind):
-    text = _ALIASED_SEAT_REPLIES[kind]
-    assert _has_alias(text), "the reply carries no alias, so this arm tests nothing"
-    agent = T.FakeAgent(_family_reply(), _fenced(text), _seats()[1])
-
-    err = raised(lambda: _author(tmp_path, agent))
-
-    assert err is not None, "an aliased seat reply was accepted"
-    assert isinstance(err, T.sym("investigation.branch", "BranchError")), \
-        f"refused with {type(err).__name__}, not BranchError: {str(err)[:200]}"
-    assert "seat B" in str(err), f"the refusal does not name seat B: {str(err)[:200]}"
-    assert isinstance(err.__cause__, yaml.YAMLError), \
-        f"refused, but not as malformed YAML (cause: {type(err.__cause__).__name__})"
-    assert agent.calls == 2, "the questioner went on to seat C after refusing seat B"

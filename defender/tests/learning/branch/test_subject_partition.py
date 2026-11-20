@@ -29,11 +29,11 @@ def world_row(**over) -> dict:
     return S.world_row(over.pop("finding_id", FID), **over)
 
 
-def world_reply(**kw) -> str:
-    """A world-scope reply's TEXT carrying the given filed lists (bucket `none` by default)."""
+def world_reply(**kw) -> dict:
+    """A world-scope reply's MAPPING (#1579: replies are mappings) carrying the given filed lists (bucket `none` by default)."""
     kw.setdefault("bucket", S.NO_BUCKET)
     kw.setdefault("systems", [])
-    return S.as_text(S.world_reply(**kw))
+    return S.world_reply(**kw)
 
 
 def test_world_row_refused_at_the_defender_appender(tmp_path):
@@ -178,8 +178,26 @@ def test_a_defender_subject_row_cannot_reach_the_questioner_curator(tmp_path):
 
 def test_a_model_supplied_world_is_ignored_and_the_draws_own_directory_wins(
         tmp_path, monkeypatch):
-    """`world` is stamped from the draw's own world directory; a model-supplied `world` is ignored."""
-    built = W.contrast_family(tmp_path, monkeypatch)
+    """`world` is stamped from the draw's own world directory. #1579: a finding is a closed
+    shape, so a model-supplied `world` key is no longer ignored but refuses the draw; the
+    control (clean findings) pins the stamp, the faulted run pins that the key reached no row."""
+    built = W.contrast_family(tmp_path / "control", monkeypatch)
+    judge = S.judge({
+        "b": S.world_reply(S.NO_BUCKET, [], world=[S.wf()]),
+        "c": S.world_reply(S.NO_BUCKET, [], world=[S.wf(evidence=[S.plan_ptr("c")])])})
+
+    S.grade(built, judge)
+
+    rows = [r for r in S.questioner_queue() if r["provenance"] == "model"]
+    assert {r["world"] for r in rows} == {"b", "c"}, (
+        f"the stamp did not come from the draws' own directories: {[r['world'] for r in rows]}")
+    for row in rows:
+        assert row["finding_id"].split("/")[1] == row["world"], (
+            f"row {row['finding_id']} is stamped for world {row['world']!r} — the id and the "
+            "stamp name different worlds")
+
+    before = list(S.questioner_queue())
+    built = W.contrast_family(tmp_path / "supplied", monkeypatch)
     judge = S.judge({
         "b": S.world_reply(S.NO_BUCKET, [], world=[S.wf(world="c")]),
         "c": S.world_reply(S.NO_BUCKET, [], world=[S.wf(evidence=[S.plan_ptr("c")],
@@ -187,22 +205,22 @@ def test_a_model_supplied_world_is_ignored_and_the_draws_own_directory_wins(
 
     S.grade(built, judge)
 
-    rows = [r for r in S.questioner_queue() if r["provenance"] == "model"]
-    assert {r["world"] for r in rows} == {"b", "c"}, (
-        f"the model's own `world` value reached the row: {[r['world'] for r in rows]}")
-    for row in rows:
-        assert row["finding_id"].split("/")[1] == row["world"], (
-            f"row {row['finding_id']} is stamped for world {row['world']!r} — the id and the "
-            "stamp name different worlds")
+    rows = [r for r in S.questioner_queue() if r not in before]
+    assert rows == [], f"a finding carrying the model's own `world` reached the queue: {rows}"
+    for label in ("b", "c"):
+        assert S.row(built, label).get("malformed_replies") == 1, (
+            f"world {label}'s reply with a `world` key was not refused: {S.row(built, label)}")
 
 
 def test_a_family_findings_identity_is_minted_by_the_pass_not_by_the_model(
         tmp_path, monkeypatch):
-    """A family finding is keyed on `(episode, "family", draw, index)`."""
-    built = W.contrast_family(tmp_path, monkeypatch)
+    """A family finding is keyed on `(episode, "family", draw, index)`. #1579: a model-chosen
+    `finding_id` is a key the closed finding shape refuses (the draw is malformed, no row
+    carries it); the control with no such key pins the minted identity."""
+    built = W.contrast_family(tmp_path / "control", monkeypatch)
     judge = S.judge({S.FAMILY: S.family_reply(world=[
         S.wf("unreachable", evidence=[S.plan_ptr()]),
-        S.wf("incoherent", evidence=[S.plan_ptr()], finding_id="model-chosen")])})
+        S.wf("incoherent", evidence=[S.plan_ptr()])])})
 
     S.grade(built, judge)
 
@@ -215,6 +233,18 @@ def test_a_family_findings_identity_is_minted_by_the_pass_not_by_the_model(
         assert draw.isdigit(), f"{fid}'s draw coordinate is {draw!r}"
         assert index.isdigit(), f"{fid}'s finding index is {index!r}"
     assert len(set(ids)) == len(ids), f"two family findings share one id: {ids}"
+
+    built = W.contrast_family(tmp_path / "chosen", monkeypatch)
+    judge = S.judge({S.FAMILY: S.family_reply(world=[
+        S.wf("unreachable", evidence=[S.plan_ptr()]),
+        S.wf("incoherent", evidence=[S.plan_ptr()], finding_id="model-chosen")])})
+
+    S.grade(built, judge)
+
+    chosen = [r for r in S.questioner_queue() if "model-chosen" in str(r.get("finding_id"))]
+    assert chosen == [], f"a model-chosen finding id reached the queue: {chosen}"
+    assert [r["finding_id"] for r in S.questioner_queue()
+            if "/family/" in r["finding_id"]] == ids, "the refused family reply still filed rows"
 
 
 def test_a_world_row_missing_systems_or_subject_is_refused_at_the_appender(tmp_path):

@@ -145,7 +145,12 @@ def test_1025_each_questioner_and_judge_trace_renders_a_labelled_block_family_fi
         block = launched.text_of(f"tx-{stem}")
         row = json.loads((launch.episode_dir / "wire_logs" / name).read_text(encoding="utf-8"))
         assert " ".join(row["prompt"][:60].split()) in block, (stem, block[:200])
-        assert " ".join((row["reply"] or "")[:40].split()) in block, (stem, block[:200])
+        # #1579: an accepted draw's framed `reply` is the validated MAPPING (null when refused);
+        # the page shows it as its JSON text.
+        reply = row["reply"]
+        assert reply is None or isinstance(reply, dict), (stem, type(reply))
+        shown = json.dumps(reply, ensure_ascii=False) if isinstance(reply, dict) else ""
+        assert " ".join(shown[:40].split()) in block, (stem, block[:200])
 
 
 def test_1025_what_the_header_wall_covers(tmp_path):
@@ -312,3 +317,123 @@ def test_1025_a_usage_block_with_a_negative_or_overflowing_count_is_unpriced(tmp
     assert "$nan" not in stages, stages
     assert "$-" not in page.text_of("sec-verdict")
     assert E.SAMPLE.total_cost in page.text_of("sec-verdict"), "positive control: the sample total"
+
+
+# --- #1579: a typed call's tool-call reply and its retry prompt render -------------------------
+
+def test_1579_control_a_text_part_reply_still_renders(tmp_path):
+    ep = E.sample_episode(tmp_path)
+    E.write_trace(ep.dir, "questioner:d", reply="TEXT-REPLY-MARKER")
+    assert "TEXT-REPLY-MARKER" in render(ep).text_of("tx-questioner_d_trace")
+
+
+@pytest.mark.parametrize("args", [{"word": "ARGS-MARKER", "n": 7}, '{"word": "ARGS-MARKER", "unterminated'],
+                         ids=["mapping", "raw-malformed-json"])
+def test_1579_a_response_row_whose_part_is_a_tool_call_renders_its_arguments(tmp_path, args):
+    """The typed reply IS the tool call's arguments: a trace whose response carries no text part
+    must still show what the model answered, mapping or malformed text alike."""
+    ep = E.sample_episode(tmp_path)
+    E.write_trace(ep.dir, "questioner:d", rows=E.typed_trace_rows("questioner:d", args=args))
+    block = render(ep).text_of("tx-questioner_d_trace")
+    assert "ARGS-MARKER" in block, block
+
+
+def test_1579_a_requests_retry_prompt_renders_and_so_does_the_corrected_answer(tmp_path):
+    """The re-ask is part of the call: the reason the model was sent shows between its attempts,
+    and the history each later request re-emits is not rendered a second time."""
+    ep = E.sample_episode(tmp_path)
+    rows = E.typed_trace_rows("questioner:d", args={"word": "FIRST-ATTEMPT"},
+                              retry="RETRY-REASON-MARKER", text="FINAL-TEXT-MARKER")
+    E.write_trace(ep.dir, "questioner:d", rows=rows)
+    block = render(ep).text_of("tx-questioner_d_trace")
+    assert "RETRY-REASON-MARKER" in block, block
+    assert "FINAL-TEXT-MARKER" in block, "control: the later text part renders"
+    assert "FIRST-ATTEMPT" in block, block
+    assert block.count("FIRST-ATTEMPT") == 1, "the re-emitted first response was rendered again"
+
+
+def test_1579_a_three_request_call_renders_each_prompt_attempt_and_reason_once(tmp_path):
+    """The third request re-emits the first reason and both earlier attempts: each shows once."""
+    ep = E.sample_episode(tmp_path)
+    attempts = [{"args": {"word": "ATTEMPT-ONE"}, "retry": "REASON-ONE"},
+                {"args": '{"word": "ATTEMPT-TWO", "unterminated', "retry": "REASON-TWO"},
+                {"text": "ATTEMPT-THREE"}]
+    rows = E.typed_call_rows("questioner:d", attempts, prompt="PROMPT-MARKER")
+    E.write_trace(ep.dir, "questioner:d", rows=rows)
+    block = render(ep).text_of("tx-questioner_d_trace")
+    for marker in ("PROMPT-MARKER", "ATTEMPT-ONE", "REASON-ONE", "ATTEMPT-TWO", "REASON-TWO", "ATTEMPT-THREE"):
+        assert block.count(marker) == 1, f"{marker} rendered {block.count(marker)} times: {block}"
+
+
+def test_1579_a_repeated_refusal_under_a_reused_call_id_renders_both_times(tmp_path):
+    """A provider that numbers tool calls per turn reuses one id: two identical refusals are two
+    re-asks, and the page shows both, each where it was sent."""
+    ep = E.sample_episode(tmp_path)
+    attempts = [{"args": {"word": "ATTEMPT-ONE"}, "retry": "SAME-REASON"},
+                {"args": {"word": "ATTEMPT-TWO"}, "retry": "SAME-REASON"},
+                {"args": {"word": "ATTEMPT-THREE"}}]
+    rows = E.typed_call_rows("questioner:d", attempts)
+    for row in rows:
+        for part in row["message"]["parts"]:
+            if "tool_call_id" in part:
+                part["tool_call_id"] = "call_0"
+    E.write_trace(ep.dir, "questioner:d", rows=rows)
+    block = render(ep).text_of("tx-questioner_d_trace")
+    assert block.count("SAME-REASON") == 2, block
+    assert block.index("ATTEMPT-ONE") < block.index("SAME-REASON") < block.index("ATTEMPT-TWO")
+
+
+def test_1579_an_exhausted_calls_last_reason_renders_after_its_last_attempt(tmp_path):
+    ep = E.sample_episode(tmp_path)
+    attempts = [{"args": {"word": "ATTEMPT-ONE"}, "retry": "REASON-ONE"},
+                {"args": {"word": "ATTEMPT-TWO"}}]
+    rows = E.typed_call_rows("questioner:d", attempts)
+    rows.append({"event_type": "final_refusal", "kind": "final_refusal",
+                 "reason": "LAST-REASON", "agent_id": "questioner:d"})
+    E.write_trace(ep.dir, "questioner:d", rows=rows)
+    block = render(ep).text_of("tx-questioner_d_trace")
+    assert block.count("LAST-REASON") == 1, block
+    assert block.index("ATTEMPT-TWO") < block.index("LAST-REASON")
+
+
+def test_1579_the_fixture_has_the_shape_a_real_request_logger_writes(tmp_path):
+    """Drift guard (#1579 F12): a real `RequestLogger` over a bare agent scripted with `ScriptedCalls`
+    (two requests: a refused tool call, then a corrected one) writes the rows `E.typed_call_rows`
+    builds, as (kind, message kind, part kinds)."""
+    import asyncio
+
+    from pydantic_ai import ModelRetry
+    from pydantic_ai.models import override_allow_model_requests
+    from pydantic_ai.output import ToolOutput
+
+    from defender.investigation import observe
+    from defender.learning._pydantic_stage import StageWiring, build_stage_agent
+    from defender.learning.branch.questioner import QuestionerDeps
+    from defender.tests.support.learning.core import _typed_output1579 as TY
+
+    def check(word: str) -> dict:
+        if word == "FIRST":
+            raise ModelRetry("REASON")
+        return {"word": word}
+
+    prompt_path = tmp_path / "role.md"
+    prompt_path.write_text("You are the seat.", encoding="utf-8")
+    calls = TY.ScriptedCalls([{"word": "FIRST"}, {"word": "SECOND"}])
+    logger = observe.RequestLogger(tmp_path / "real_trace.jsonl")
+    wiring = StageWiring(prompt_path=prompt_path, model="m", effort=None, trace_name="t",
+                         label="questioner:d")
+    agent = build_stage_agent(QuestionerDeps, wiring, logger, make_model=calls)
+    try:
+        with override_allow_model_requests(False):
+            asyncio.run(agent.run("PROMPT", deps=QuestionerDeps(), retries=2,
+                                  output_type=[ToolOutput(check, name="answer")]))
+    finally:
+        logger.close()
+
+    def shape(rows):
+        return [(r["kind"], r["message"]["kind"], [p["part_kind"] for p in r["message"]["parts"]])
+                for r in rows]
+
+    built = E.typed_call_rows("questioner:d", [{"args": {"word": "FIRST"}, "retry": "REASON"},
+                                               {"args": {"word": "SECOND"}}], prompt="PROMPT")
+    assert shape(logger.messages) == shape(built)
