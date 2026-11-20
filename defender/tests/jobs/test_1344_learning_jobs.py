@@ -15,10 +15,12 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy import func
 
 from defender.jobs import Conflict, UnknownReference
-from defender.jobs.models import LEARNING_TRIGGERS
+from defender.jobs.models import LEARNING_TRIGGERS, InvestigationRow
 from defender.jobs.store import is_refusal
+from defender.records.formats import InvestigationId
 from defender.tests.support.jobs._worker1342 import _FAST, _child, _committed, _queued, _run_one, _until, _worker
 from defender.tests.support.jobs._jobs1342 import (
     FRONTEND_ORIGIN,
@@ -144,13 +146,20 @@ def learning_worker(world: dict, store, *, job, post, inv=None, **kw):
 
 
 async def completed_investigation(store, *, ticket: str, key: str = "k1", tenant: str = T1) -> str:
-    """An investigation brought to `completed` by the store's own claim and finish: its job queued."""
+    """An investigation brought to `completed` by the store's own finish: its job queued, its tenant's check armed.
+
+    The row is planted already `running`, never `queued`, under a lease no test outlives: a serving worker started
+    before this call can neither claim it nor take it over, so this is safe to call at any point in a test (#1597).
+    The store's claim picks whichever queued row is oldest, so claiming here would race any worker that is serving."""
     alert = await an_alert(store, tenant, ticket=ticket)
-    inv, _ = await store.create_investigation(tenant, alert.alert_id, key, actor="u-1")
-    claim = await store.claim()
-    assert claim.record.investigation_id == inv.investigation_id, "premise: nothing else was queued"
-    await store.finish(tenant, inv.investigation_id, stage="completed", disposition="malicious", cost_usd=0.0)
-    return inv.investigation_id
+    investigation_id = InvestigationId.mint()
+    async with store._tx() as s:
+        s.add(InvestigationRow(
+            id=investigation_id, tenant_id=tenant, alert_id=alert.alert_id, request_key=key, attempt=1,
+            stage="running", created_at=NOW, started_at=NOW, lease_expires_at=func.now() + dt.timedelta(hours=1),
+            cost_usd=0.0, update_ticket=False))
+    assert await store.finish(tenant, investigation_id, stage="completed", disposition="malicious", cost_usd=0.0)
+    return str(investigation_id)
 
 
 async def queued_job(world: dict, store, *, ticket: str, tenant: str = T1) -> str:
