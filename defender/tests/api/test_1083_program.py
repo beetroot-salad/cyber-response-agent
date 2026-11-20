@@ -8,6 +8,7 @@ import asyncio
 import socket
 import time
 import urllib.parse
+from contextlib import AbstractAsyncContextManager
 from pathlib import Path
 
 import httpx
@@ -395,12 +396,20 @@ async def test_a_step_that_never_answers_refuses_naming_itself_and_closes_what_w
     """A probe whose discovery is accepted and never answered refuses once the step's deadline passes, naming the
     step, and both sign-in adapters are closed. (Am-3 promise 1; #1498 review)"""
     from defender.api_server import Settings, StartRefused, serving
-    from defender.api_server._program import _Steps
+    from defender.api_server._program import STEP_SECONDS, _Steps
+
+    class StalledStepShort(_Steps):
+        """The short deadline on the stalled step only: a loaded runner can outlast 0.5 s on any other step, and the
+        refusal would then name that one. (#1590)"""
+
+        def step(self, name: str) -> AbstractAsyncContextManager[None]:
+            self._within = 0.5 if name == "the sign-in realm probe" else STEP_SECONDS
+            return super().step(name)
 
     keycloak = FakeKeycloak([Fail(SIGNIN_REALM, "discovery", "stall")])
     settings = Settings.from_environ(environment(tmp_path, dsn=migrated_database))
-    with pytest.raises(StartRefused, match="the sign-in realm probe did not finish within 0.5 s"):
-        async with serving(settings, transport=keycloak, openbao_transport=ScriptedOpenBao(), steps=_Steps(within=0.5)):
+    with pytest.raises(StartRefused, match="^the sign-in realm probe did not finish within 0.5 s$"):
+        async with serving(settings, transport=keycloak, openbao_transport=ScriptedOpenBao(), steps=StalledStepShort()):
             pytest.fail("the stalled probe should have refused")
     assert keycloak.closes == 2
     assert _backends_left(migrated_database) == 0

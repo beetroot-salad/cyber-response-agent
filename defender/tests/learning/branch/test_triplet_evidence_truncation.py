@@ -101,11 +101,10 @@ ACCOUNT = "the source run's own account\n"
 
 
 ACCOUNTS = {
-    "report": lambda paths: paths.report,
     "tool trace": lambda paths: paths.tool_trace,
     "wire log": lambda paths: paths.wire_log,
-    "budget.json": lambda paths: paths.report.parent / "budget.json",
-    "circuit_breaker.json": lambda paths: paths.report.parent / "circuit_breaker.json",
+    "budget.json": lambda paths: paths.tool_trace.parent / "budget.json",
+    "circuit_breaker.json": lambda paths: paths.tool_trace.parent / "circuit_breaker.json",
 }
 
 

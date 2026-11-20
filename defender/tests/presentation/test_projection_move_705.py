@@ -54,7 +54,7 @@ def _driven_run(tmp_path: Path, *, run_id: str, text: str = "done"):
     (run_dir, store, replay)."""
     run_dir = materialize(tmp_path, GOLDEN, run_id=run_id)
     inv = (GOLDEN / "investigation.md").read_text()
-    rep = (GOLDEN / "report.md").read_text()
+    rep = (GOLDEN / "report.md").read_text()  # lint-report-file: ok — the golden fixture's recorded transcript file
     scripted = [
         Turn(tool_calls=[("write_file", {"path": model_path(run_dir / "investigation.md", run_dir=run_dir),
                                          "content": inv})]),
@@ -133,6 +133,7 @@ def test_the_moved_projection_still_parses_as_replay_harness_turns(tmp_path):
 def test_the_moved_projection_preserves_the_runtime_html_event_stream(tmp_path):
     """`runtime.html` renders from the store-derived events; `message.id` takes the re-minted `{session_id}/…` form."""
     from defender.presentation import visualize_run
+    from defender.tests.support.presentation._page1534 import render_unclosed
 
     run_dir, store, replay = _driven_run(tmp_path, run_id="runtime-html")
     session_id = sql(store, "SELECT session_id FROM session ORDER BY rowid")[0][0]
@@ -141,7 +142,7 @@ def test_the_moved_projection_preserves_the_runtime_html_event_stream(tmp_path):
 
     # r7.2 P1: the page takes its cost as an argument; this run's own ledger, read as the post-run step reads it.
     cost = visualize_run.LedgerCost(ss.read_ledger(store, run_dir.name))
-    page = visualize_run.render_runtime_page(run_dir, cost=cost)
+    page = render_unclosed(run_dir, cost=cost)
     assert page.strip(), "runtime.html rendered empty"
 
     events = [json.loads(line) for line in
@@ -291,8 +292,16 @@ def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, 
     # and the post-run step surfaces it rather than swallowing it to stderr
     with pytest.raises(run_common.VisualizeFailed) as raised:
         _visualize(run_dir)
-    assert str(run_dir) in str(raised.value), (
-        "the surfaced failure must name the run dir it could not render")
+    if breakage == "missing-pointer":
+        assert str(run_dir) in str(raised.value), (
+            "the surfaced failure must name the run dir it could not render")
+    else:
+        # #1534 OD19: the closing-record lookup reads `database-missing`, and the surfaced failure
+        # carries only that kind's fixed wording, never the detail that names the store path.
+        from defender.records import closing
+
+        assert closing.FAULT_WORDING["database-missing"] in str(raised.value), str(raised.value)
+        assert str(body["store_path"]) not in str(raised.value), str(raised.value)
     assert not (run_dir / "runtime.html").is_file(), (
         "a failed render must not leave a page behind that a reader would trust")
 

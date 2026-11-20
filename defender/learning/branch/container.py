@@ -13,6 +13,7 @@ answers the rest over the job socket (`job_socket`). This module is that side's 
 - `JobContainer.box(kind, id)`: a box the helper starts (O9: the request names a kind and an id, never a path);
 - `JobContainer.materialised_export(commit)`: the export of a commit, materialised by the helper (the container
   writes no export and takes no knowledge lock, P-A);
+- `JobContainer.tick_store()`: the author tick's store, each verb a request the helper answers (#1487 Flow 2);
 - `JobContainer.records()` / `.forge_credential()`: the post-step's drain's tenant records (its publish outcomes
   written by the helper, `record.*`) and forge credential (tokens minted by the helper, `forge.token`), so the drain
   runs unchanged with no database login and no forge login (O3, O4);
@@ -124,6 +125,14 @@ class JobContainer:
 
     def forge_credential(self) -> _SocketForgeCredential:
         return _SocketForgeCredential(self.ask, str(self.launch.get("tenant")))
+
+    def tick_store(self) -> Any:
+        """The post-step tick's store (#1487 Flow 2): `learning_store.tick_port.TickPort` over this job socket, its
+        settings asked of the helper now. It has no lifecycle of its own; a helper that cannot answer is the store's
+        `StoreUnavailable`, and a lease not longer than the stop window a `ValueError`."""
+        from defender.learning_store.tick_port import TickPort
+
+        return TickPort(self.ask)
 
 
 @dataclass(frozen=True)

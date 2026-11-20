@@ -250,7 +250,7 @@ def test_a6_a_sibling_gets_its_worlds_roster_id_a_folder_in_the_episode_and_an_o
     # Beside each sibling's run: its knowledge-source record and (#1366 O6) its record of the versions the job read.
     assert [p.name for p in sorted((planted.dir / "runs").iterdir()) if not p.is_dir()] == \
         sorted(f"{run}{suffix}" for run in made for suffix in (".knowledge-source.json", ".record-versions.json"))
-    assert (planted.dir / "runs" / got["copies"][0]["run"] / "report.md").read_text(encoding="utf-8") == "sibling output"
+    assert (planted.dir / "runs" / got["copies"][0]["run"] / "report.md").read_text(encoding="utf-8") == "sibling output"  # lint-report-file: ok — an arbitrary file the stand-in job wrote
 
 
 def test_a6_a_sibling_that_names_a_run_id_is_answered_its_worlds_roster_id_all_the_same(scene):

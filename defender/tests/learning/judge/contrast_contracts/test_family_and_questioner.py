@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 
 from defender.tests.learning.judge.contrast_contracts import _spec1234 as S
+from defender.tests.support.learning.judge import _judge_921 as J
 
 
 @pytest.fixture(autouse=True)
@@ -383,7 +384,7 @@ def test_1234_family_prompt_lists_each_unusable_world_once_and_never_as_a_refere
         tmp_path: Path, kind: str) -> None:
     built = S.family(tmp_path, _lead_triad(zulu=_unusable_world(kind)))
     if kind == "malformed":
-        S.second_disposition(built.world_dir("zulu") / "report.md")
+        J.fault_arm(built.ep, "zulu", "row-invalid")
     judge = S.judge()
     S.grade(built, judge, draws=1)
 

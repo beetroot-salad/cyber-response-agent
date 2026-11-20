@@ -235,28 +235,24 @@ def test_1224_episode_page_counts_oracle_rows_without_a_malformed_row_note(tmp_p
 
 
 def test_1224_episode_readers_refuse_unusable_refused_and_no_record(tmp_path):
-    verdicts = S.sym(S.EPISODE, "verdicts")
     delta_o = S.sym(S.EPISODE, "delta_o")
     refusal = S.sym(S.EPISODE, "EpisodeError")
 
     for word in ("unusable", "refused"):
         ep = S.judged_episode(tmp_path / word, outcome=None)
         S.outcome_record(ep, word, reason=f"the family is {word}")
-        for reader in (verdicts, delta_o):
-            with pytest.raises(refusal) as refused:
-                J.through_view(ep, reader)
-            assert word in str(refused.value), f"{reader.__name__} did not name {word!r}"
+        with pytest.raises(refusal) as refused:
+            J.through_view(ep, delta_o)
+        assert word in str(refused.value), f"delta_o did not name {word!r}"
 
     absent = S.judged_episode(tmp_path / "absent", outcome=None)
     torn = S.judged_episode(tmp_path / "torn", outcome=None)
     (torn / S.OUTCOME_NAME).write_text("outcome: [accep", encoding="utf-8")
     for ep in (absent, torn):
-        for reader in (verdicts, delta_o):
-            with pytest.raises(refusal) as refused:
-                J.through_view(ep, reader)
-            assert "no record" in str(refused.value).lower() or S.OUTCOME_NAME in str(
-                refused.value), f"{reader.__name__} did not report the missing record"
+        with pytest.raises(refusal) as refused:
+            J.through_view(ep, delta_o)
+        assert "no record" in str(refused.value).lower() or S.OUTCOME_NAME in str(
+            refused.value), "delta_o did not report the missing record"
 
     accepted = S.judged_episode(tmp_path / "accepted")
-    assert set(J.through_view(accepted, verdicts)) == {"a", "b", "c"}
     J.through_view(accepted, delta_o)

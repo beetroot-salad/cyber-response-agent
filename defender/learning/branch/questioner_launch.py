@@ -247,8 +247,8 @@ def write_world_revisions(episode: Episode, entries: list[dict]) -> None:
 
 
 def _author(  # noqa: PLR0913 — the step's inputs
-    ns: argparse.Namespace, *, source: Run, episode: Episode, questioner: Any,
-    lessons_dir: Path, served: Sequence[str], reachable: Sequence[str],
+    ns: argparse.Namespace, *, source: Run, source_disposition: str | None, episode: Episode,
+    questioner: Any, lessons_dir: Path, served: Sequence[str], reachable: Sequence[str],
     premise_check: Any = None,
 ) -> Family:
     """`Step.QUESTIONER`: the questioner authors the family, and it is validated before anything
@@ -284,6 +284,7 @@ def _author(  # noqa: PLR0913 — the step's inputs
         served_systems=tuple(served),
         samples=samples,
         lessons=lessons,
+        source_disposition=source_disposition,
         premise_check=premise_check,
         prebranch=(_prebranch_evidence(source, ns.branch_message_id, episode)
                    if premise_check is not None else ()),
@@ -308,6 +309,29 @@ def _author(  # noqa: PLR0913 — the step's inputs
     return family
 
 
+
+
+def source_closing_of(source: Run) -> Any:
+    """The source run's closing-record lookup (#1534), read before anything opens the source's
+    store as a writer: such an open creates a database where a missing one was, which would turn
+    `database-missing` into an absence. Raising on it is `source_disposition_of`'s; the launch
+    calls that at once, after only the source's tenant-stamp check."""
+    from defender.records import closing
+
+    return closing.for_run(source)
+
+
+def source_disposition_of(found: Any) -> str | None:
+    """World A's declared disposition when the questioner names none, from the source's lookup
+    (`source_closing_of`), before any model call: a source that never closed gives none (the
+    family is then refused naming `disposition_declared`); one whose record could not be looked
+    at refuses the launch with the lookup's fixed wording (its detail is logged, never shown)."""
+    from defender.records import closing
+
+    if isinstance(found, closing.CouldNotLook):
+        raise branch.BranchError("world A's declared disposition comes from the source run's "
+                                 f"closing record. {found.wording}")
+    return found.record.disposition if isinstance(found, closing.Record) else None
 
 
 def _fence_count(source: Run, branch_message_id: int, *, as_of: Any) -> int:

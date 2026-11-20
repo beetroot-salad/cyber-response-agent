@@ -13,9 +13,8 @@ from pydantic_ai import ModelRetry
 
 from defender.configuration import env_str
 from defender._io import read_guarded, read_text_utf8
-from defender.records.formats import (
-    FamilyError, check_composed_world, check_composed_worlds, read_report)
-from defender.records import RunPaths, artifact_file
+from defender.records.formats import FamilyError, check_composed_world, check_composed_worlds
+from defender.records import RunPaths
 from defender._untrusted import message_salt
 from defender.learning._prompt import section_text, stage_user_message, titled_section
 from defender.learning._pydantic_stage import TypedOutput
@@ -237,29 +236,18 @@ def _capture_sections(*, leads: Any, alert: Any, frontier: str, samples: Any = N
     )
 
 
-def _captured_disposition(source_run_dir: Path) -> str | None:
-    """The disposition the source run itself published in `report.md`, or `None`.
-
-    Screened with `artifact_file` first: the source run dir is a prior box's rw bind, and
-    `read_report` follows symlinks. An unreadable report is not an error here; `parse_family`
-    names the field if no source supplies it."""
-    report = RunPaths(source_run_dir).report
-    if not artifact_file(report):
-        return None
-    return read_report(report).disposition
-
-
-def _base_world(family: dict[str, Any], report_disposition: str | None) -> dict[str, Any]:
+def _base_world(family: dict[str, Any], source_disposition: str | None) -> dict[str, Any]:
     """World A, composed rather than authored by a call of its own.
 
     No facts, a null axis and the base role are imposed, never read from a reply: they make A
     the control, and a fact would change the world the others are measured against.
 
     The declared disposition is call 1's `base_disposition` when that key is present (a blank
-    or null one is refused by the world rule, never replaced), else the source run's
-    `report.md`. If both are silent the key is left absent so the world rule refuses."""
+    or null one is refused by the world rule, never replaced), else the disposition the source
+    run's closing record committed (`source_disposition`, read by the launcher before any model
+    call; #1534). If both are silent the key is left absent so the world rule refuses."""
     world: dict[str, Any] = {"story": family.get("base_story")}
-    declared = family.get("base_disposition", report_disposition)
+    declared = family.get("base_disposition", source_disposition)
     if declared is not None or "base_disposition" in family:
         world["disposition_declared"] = declared
     world.update({
@@ -428,7 +416,7 @@ def _placeholder_world(plan: dict[str, Any], role: str) -> dict[str, Any]:
     return {"story": "", "disposition_declared": "benign", **plan, "role": role}
 
 
-def _plan_check(report_disposition: str | None) -> Any:
+def _plan_check(source_disposition: str | None) -> Any:
     """Call 1's check: everything call 1 decides, composed and run through the manifest gate's
     rules, so a plan the gate would refuse is refused while call 1 can still fix it."""
     def check(reply: Any) -> None:
@@ -437,7 +425,7 @@ def _plan_check(report_disposition: str | None) -> Any:
         if not isinstance(entries, list) or not entries:
             raise _refuse("worlds must be a non-empty list of the worlds you plan")
         planned = [_planned_entry(entry) for entry in entries]
-        worlds = [_base_world(family, report_disposition),
+        worlds = [_base_world(family, source_disposition),
                   *(_placeholder_world(plan, _seat_letter(i)) for i, plan in enumerate(planned))]
         try:
             check_composed_worlds(base_story=family.get("base_story"),
@@ -654,11 +642,16 @@ def author_family(  # noqa: PLR0913 — one keyword per captured input plus `les
     served_systems: Sequence[str] = (),
     samples: Any = None,
     lessons: Any = None,
+    source_disposition: str | None = None,
     premise_check: Any = None,
     prebranch: Sequence[dict[str, Any]] = (),
     record_revisions: Any = None,
 ) -> dict[str, Any]:
     """Author one family document: one family call plus one call per planned world.
+    `source_disposition` is the source run's committed disposition (its closing record), or
+    `None` when it never closed.
+    `source_disposition` is the source run's committed disposition (its closing record), or
+    `None` when it never closed.
 
     With `premise_check` (a seam like `invoke`), the worlds are then held to `prebranch`, the
     source run's pre-branch calls with their recorded answers (#1561): a world contradicting them
@@ -668,16 +661,15 @@ def author_family(  # noqa: PLR0913 — one keyword per captured input plus `les
     # Rendered once for all calls; framing is per call because the salt is.
     capture = _capture_sections(leads=leads, alert=alert, frontier=frontier, samples=samples,
                                 lessons=lessons, served_systems=served)
-    report_disposition = _captured_disposition(Path(source_run_dir))
     family = _call(
         "call 1 (the base story and discriminator)", invoke, _family_prompt(header, capture),
         agent_id="questioner", name="plan",
         description="Return the base story, base disposition, discriminator and planned worlds.",
-        schema=_PLAN_SCHEMA, check=_plan_check(report_disposition))
+        schema=_PLAN_SCHEMA, check=_plan_check(source_disposition))
     # The seats are shown call 1's accepted document, rendered as JSON.
     family_reply = family
 
-    worlds: list[dict[str, Any]] = [_base_world(family, report_disposition)]
+    worlds: list[dict[str, Any]] = [_base_world(family, source_disposition)]
     for seat_index, plan in enumerate(_planned_worlds(family)):
         seat = _seat_letter(seat_index)
         authored = _call(

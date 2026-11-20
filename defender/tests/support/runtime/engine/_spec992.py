@@ -308,32 +308,68 @@ def record_files(run_dir: Path) -> list[int]:
 
 
 def frontmatter(run_dir: Path) -> dict:
-    """The committed report's frontmatter through the shared accessor."""
+    """The committed close's fields (`_spec923.committed`) read from the closing record."""
     return _spec923.committed(run_dir)
 
 
-def report_text(run_dir: Path) -> str:
-    return (run_dir / "report.md").read_text(encoding="utf-8")
+def closing_lookup(run_dir: Path) -> Any:
+    """The run's closing record through the one lookup (`closing.for_run`): `Record`, `NeverClosed` or `CouldNotLook`."""
+    from defender.records import closing as C
+    from defender.tests.storage.verdict_1534 import _spec1534 as V
+
+    return C.for_run(V.handle(run_dir))
 
 
-def report_parts(run_dir: Path) -> tuple[str, str]:
-    """`(raw frontmatter block, body)` of the committed report, as bytes on disk."""
-    text = report_text(run_dir)
-    head, _, rest = text.partition("---\n")[2].partition("---\n")
-    return head, rest
+def is_closed(run_dir: Path) -> bool:
+    """Whether the run holds a closing record (the old "report.md exists")."""
+    from defender.records import closing as C
+
+    return isinstance(closing_lookup(run_dir), C.Record)
 
 
-def receipt_note_lines(body: str) -> list[str]:
-    return [line for line in body.splitlines() if line.startswith("ceiling_test (")]
+def never_closed(run_dir: Path) -> bool:
+    """Whether the lookup says `NeverClosed`: a refused or challenged close left no record."""
+    from defender.records import closing as C
+
+    return isinstance(closing_lookup(run_dir), C.NeverClosed)
 
 
-def priced_block(companion_text: str) -> str:
-    """What the price gate's own parse of `companion_text` renders as the frontmatter receipt
-    block: the bytes the reviewed commit must carry."""
+def closing_record(run_dir: Path) -> Any:
+    from defender.records import closing as C
+
+    found = closing_lookup(run_dir)
+    assert isinstance(found, C.Record), f"{run_dir.name} has no readable closing record: {found!r}"
+    return found.record
+
+
+def record_text(run_dir: Path) -> str:
+    """Everything the record says in words: its causes and summary and every entry's rendered line (the old whole report text)."""
+    from defender.records import closing as C
+
+    rec = closing_record(run_dir)
+    lines = [rec.disposition, rec.outcome, C.CAUSE_SENTENCES[rec.cause], rec.summary or ""]
+    lines += [C.ceiling_line(e) for e in rec.ceiling_test] + [C.baseline_line(e) for e in rec.runtime_evidence]
+    return "\n".join(lines)
+
+
+def receipt_note_lines(run_dir: Path) -> list[str]:
+    """The narrative's receipt lines: the record's ceiling entries that carry a note, rendered by the one renderer."""
+    from defender.records import closing as C
+
+    return [C.ceiling_line(e) for e in closing_record(run_dir).ceiling_test if e.note]
+
+
+def committed_receipts(run_dir: Path) -> list[tuple]:
+    """The record's receipts as `(state, ref, cap)`, in order."""
+    return [(e.state, e.ref, e.cap) for e in closing_record(run_dir).ceiling_test]
+
+
+def priced_receipts(companion_text: str) -> list[tuple]:
+    """What the price gate's own parse of `companion_text` finds as receipts, `(state, ref, cap)`: what the reviewed commit must carry."""
     from defender.investigation.review.projector import parse_investigation
-    from defender.skills.invlang.validate import ceiling_test_block, conclude_ceiling_test_rows
+    from defender.skills.invlang.validate import conclude_ceiling_test_rows
 
-    return ceiling_test_block(conclude_ceiling_test_rows(parse_investigation(companion_text)))
+    return [(r.state, r.ref, r.cap) for r in conclude_ceiling_test_rows(parse_investigation(companion_text))]
 
 
 def citable(companion_text: str) -> frozenset[str]:
@@ -366,20 +402,13 @@ def pre_change_inconclusive_dir(tmp_path: Path) -> Path:
     Current code cannot produce one, so it is written by hand."""
     from defender.records import RunPaths
 
-    run_dir = tmp_path / "historical"
+    from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
+    run_dir = tmp_path / fixture_uuid("historical")
     (run_dir / "gather_raw").mkdir(parents=True)
     run_dir.joinpath("investigation.md").write_text(ceiling_companion(), encoding="utf-8")
     run_dir.joinpath("alert.json").write_text(
         json.dumps({"rule": {"id": "5710", "key": "spec.rule"}, "timestamp": "2026-05-25T15:27:22Z"}),
-        encoding="utf-8",
-    )
-    run_dir.joinpath("report.md").write_text(
-        "---\ndisposition: inconclusive\noutcome: stands\n"
-        f"cause: {SHIPPED_CAUSES[0]}\n"
-        "ceiling_test:\n- state: query-empty\n  ref: l-004\n- state: query-failed\n  ref: l-006\n"
-        "---\nDisposition recorded by the close gate. outcome=stands.\n"
-        f"ceiling_test (query-empty, l-004): {V2SSHD_NOTE}; process identity of the SSH "
-        "initiator on office-ws-1 is unresolvable\n",
         encoding="utf-8",
     )
     RunPaths(run_dir).review_record(1).write_text(json.dumps({
@@ -390,79 +419,6 @@ def pre_change_inconclusive_dir(tmp_path: Path) -> Path:
     return run_dir
 
 
-def parsed_report(run_dir: Path) -> Any:
-    from defender.presentation.visualize_primitives import parse_report
-
-    return parse_report(run_dir)
-
-
-# ---------------------------------------------------------------------------------------
-# The note-cap ladder.
-# ---------------------------------------------------------------------------------------
-
-#: Note sizes, doubling, from well under any sane bound to past the whole-file cap
-#: (`_artifact_schema.REPORT_FILE_MAX` = 8192), so a test can check that the first refusal is
-#: the price gate's and never the commit's, whatever the bound.
-NOTE_LADDER: tuple[int, ...] = (128, 256, 512, 1024, 2048, 4096, 8192, 9000)
-
-
-def note_text(note_len: int) -> str:
-    """`note_len` characters of analyst-facing prose for a receipt's note."""
-    return ("the EDR collector returned HTTP 503 and every retry did too; " * 400)[:note_len]
-
-
-def noted_companion(note_len: int) -> str:
-    """`_spec923.paid()` with a receipt whose note is `note_len` characters of prose."""
-    return sparse_companion(f"state=query-failed ref=l-002 note={note_text(note_len)}")
-
-
-#: How many `query-failed` leads the wide companion declares — enough that the block cap, not
-#: the lead count, bounds how many receipts pay.
-_WIDE_LEAD_COUNT = 16
-
-
-def _wide_leads() -> str:
-    rows = ["l-001|1|sshd-auth-events-detail|v-001|||elastic|30d"]
-    rows += [
-        f"l-{n:03d}|1|collector-{n:03d}|v-001|collector {n:03d} returned HTTP 503||elastic|30d"
-        for n in range(2, 2 + _WIDE_LEAD_COUNT)
-    ]
-    return (
-        "```invlang\n"
-        ":L findings [id|loop|name|target|fail_reason|tests|system|window]\n"
-        + "".join(f"{row}\n" for row in rows) + "```\n"
-    )
-
-
-def wide_companion(receipts: int, note: str) -> str:
-    """`_spec923`'s prologue and lead result over a WIDE `:L findings` table: `receipts`
-    distinct paying `query-failed` receipts (one per failed lead) each carrying `note`."""
-    assert 1 <= receipts <= _WIDE_LEAD_COUNT
-    rows = tuple(f"state=query-failed ref=l-{n:03d} note={note}" for n in range(2, 2 + receipts))
-    return _spec923.doc(_spec923.PROLOGUE, _wide_leads(), _spec923.LEAD_RESULT, _spec923.conclude(
-        disposition=GAP, confidence="medium", **{"termination.category": "data-ceiling"},
-        summary='"could not settle the actor"', ceiling_test=rows,
-    ))
-
-
-def receipts_at_block_cap() -> int:
-    """The largest number of distinct `ref=` receipts the price gate's FRONTMATTER block cap
-    admits (`_MAX_CEILING_FRONTMATTER_BYTES` over the rendered block) — computed against the
-    real renderer, never assumed."""
-    from defender.investigation.review.projector import parse_investigation
-    from defender.skills.invlang.validate import ceiling_test_block, conclude_ceiling_test_rows
-    from defender.skills.invlang.validate._gating import _MAX_CEILING_FRONTMATTER_BYTES
-
-    best = 0
-    for n in range(1, _WIDE_LEAD_COUNT + 1):
-        block = ceiling_test_block(conclude_ceiling_test_rows(parse_investigation(wide_companion(n, "x"))))
-        if len(block.encode("utf-8")) > _MAX_CEILING_FRONTMATTER_BYTES:
-            break
-        best = n
-    assert 0 < best < _WIDE_LEAD_COUNT, best
-    return best
-
-
 __all__ = [
     "CEILING_EXAMINED",
     "CEILING_QUESTION_MARKERS",
@@ -471,7 +427,6 @@ __all__ = [
     "CONFIDENT_QUESTION_PHRASES",
     "FRAME_RE",
     "GAP",
-    "NOTE_LADDER",
     "RECORD_ID_PREFIXES",
     "SHIPPED_CAUSES",
     "V2SSHD_NOTE",
@@ -491,26 +446,25 @@ __all__ = [
     "host_text",
     "non_utf8_companion",
     "normalized",
-    "note_text",
-    "noted_companion",
-    "parsed_report",
     "pre_change_inconclusive_dir",
-    "priced_block",
+    "priced_receipts",
     "raises",
     "receipt_note_lines",
-    "receipts_at_block_cap",
+    "committed_receipts",
+    "closing_lookup",
+    "closing_record",
+    "is_closed",
+    "never_closed",
+    "record_text",
     "record",
     "record_files",
     "recording",
     "refusal",
     "replies",
-    "report_parts",
-    "report_text",
     "review_state",
     "reviewed_inconclusive_dir",
     "sleeps",
     "sparse_companion",
     "trace_files",
     "trace_rows",
-    "wide_companion",
 ]

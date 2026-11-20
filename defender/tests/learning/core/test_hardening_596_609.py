@@ -16,10 +16,9 @@ from defender.knowledge._corpus import iter_lessons
 from defender._frontmatter import (
     parse_frontmatter_or_none,
 )
-from defender.learning.core.config import RunUnprocessable
-from defender.learning.core.validate import normalize_disposition
 from defender.tests.support.storage._alert_plant import plant_alert
 from defender.tests.support.learning.retrieval._lessons_corpus import accepted_trace_tenant, trace_main
+from defender.tests.support.storage import _readers1534 as R
 
 
 def _load_tl():
@@ -76,16 +75,14 @@ def _mk_lesson(lessons: Path, stem: str, *, body_frontmatter: str) -> Path:
 
 
 def _mk_run(runs: Path, name: str, *, disposition: str, loads: list[dict],
-            raw: bool = False) -> Path:
+            raw: bool = False, fault: str | None = None, invalid_as: str | None = None) -> Path:
     rd = runs / (name if raw else C(name))
     rd.mkdir(parents=True)
     plant_alert(rd)
-    (rd / "report.md").write_text(
-        f"---\ndisposition: {disposition}\n---\nbody\n", encoding="utf-8"
-    )
     (rd / "lessons_loaded.jsonl").write_text(
         "".join(json.dumps(r) + "\n" for r in loads), encoding="utf-8"
     )
+    R.plant_run(rd, R.valid_fields(disposition), fault=fault, invalid_as=invalid_as)  # its closing record (#1534)
     return rd
 
 
@@ -177,16 +174,6 @@ def test_d_b9_named_flood_lesson_still_traces(tmp_path, capsys):
 
 
 
-def test_d_b10_learn_normalize_disposition_flood_is_run_unprocessable(tmp_path):
-    rp = tmp_path / "report.md"
-    rp.write_text("---\ndescription: [unclosed\n---\nbody\n", encoding="utf-8")
-    with pytest.raises(RunUnprocessable):
-        normalize_disposition(rp)
-    rp.write_text(_flood_doc(_flow_flood()), encoding="utf-8")
-    with pytest.raises(RunUnprocessable):
-        normalize_disposition(rp)
-
-
 def test_d_a1_all_marks_unparseable_created_at_row(tmp_path, capsys):
     row, _ = _all_row(tmp_path, "name: L\ndescription: real desc\ncreated_at: not-a-date", capsys)
     cols = row.split("\t")
@@ -266,11 +253,13 @@ def test_d_a10_echo_is_clamped_to_80_chars(tmp_path, capsys):
 
 
 def test_d_a13_named_rows_flatten_disposition_and_ts(tmp_path, capsys):
+    """A stored disposition outside the vocabulary (tab and newline in it) is the run's fault row, one line of four cells,
+    in the kind's own words; the hostile ts is flattened. (V-READERS, trace CLI)"""
     tl = _load_tl()
     lessons = tmp_path / "lessons"
     _mk_lesson(lessons, "L", body_frontmatter="name: L\ndescription: d")
     runs = _tenant_runs(tmp_path)
-    _mk_run(runs, "case-a", disposition='"ben\\tign\\nX"',
+    _mk_run(runs, "case-a", disposition="benign", fault="row-invalid", invalid_as="ben\tign\nX",
             loads=[{"lesson_name": "L", "ts": "2026-06-05\t00:00:00+00:00"}])
     rc = trace_main(tl, ["L", "--lessons-dir", str(lessons), "--tenant", runs.parent.name])
     cap = capsys.readouterr()
@@ -279,9 +268,11 @@ def test_d_a13_named_rows_flatten_disposition_and_ts(tmp_path, capsys):
     assert len(lines) == 2
     row = lines[1]
     assert row.count("\t") == 3
-    assert row.split("\t") == [C("case-a"), "?", "2026-06-05 00:00:00+00:00", "unknown"]
+    cells = row.split("\t")
+    assert (cells[0], cells[2], cells[3]) == (C("case-a"), "2026-06-05 00:00:00+00:00", "unknown")
+    assert R.names_only("row-invalid", cells[1]), cells[1]
     # Positive control on the SAME column: a well-formed disposition still renders, so the
-    # `?` above is the hostile value being refused, not the column having gone dead.
+    # fault wording above is the hostile value being refused, not the column having gone dead.
     _mk_run(runs, "case-b", disposition="benign",
             loads=[{"lesson_name": "L", "ts": "2026-06-06T00:00:00+00:00"}])
     assert trace_main(tl, ["L", "--lessons-dir", str(lessons), "--tenant", runs.parent.name]) == 0

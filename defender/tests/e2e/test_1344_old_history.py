@@ -18,8 +18,6 @@ from pathlib import Path
 
 import pytest
 
-from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — fixture
-
 pytestmark = pytest.mark.e2e
 
 DEFENDER = Path(__file__).resolve().parents[2]
@@ -199,24 +197,17 @@ def _launch_over_the_old_run(tmp_path: Path, **seams):
     return old, tenant, rc, spawn, est
 
 
-def test_the_launcher_reads_the_old_run_primes_the_oracle_from_its_capture_and_starts_siblings(tmp_path, caplog, monkeypatch, migrated_database):  # noqa: F811 — the imported fixture
-    """Obligation: Old history, launcher. The old capture primes the base tier and the questioner's family starts. (#1278: the
-    judge pass files its findings in the learning store, so the launcher's process has a migrated database to reach.)"""
+def test_the_launcher_refuses_an_old_run_that_has_no_closing_record_and_starts_nothing(tmp_path):
+    """Obligation: Old history, launcher (#1534, owner decision d). A run made before closing records were kept is refused: no
+    questioner call, no sibling."""
     from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 
-    monkeypatch.setenv("DEFENDER_DATABASE_DSN", migrated_database)
     questioner = S.questioner_for()
-    old, tenant, rc, spawn, _est = _launch_over_the_old_run(tmp_path, questioner=questioner)
-    episodes = S.tenant_episodes(tenant.id)
-    made = sorted(p for p in episodes.iterdir() if p.is_dir()) if episodes.is_dir() else []
-    assert rc in (0, None), f"the launcher refused the old run (rc={rc}); episodes: {made}"
-    (episode,) = made
-    base = S.base_rows(episode)
-    assert {(r["system"], r["verb"]) for r in base} == {("elastic", "alerts"), ("elastic", "query")}, base
-    assert all(r["source"] == "captured" for r in base)
-    assert questioner.calls >= 1, "the questioner never ran on the old run"
-    assert len(spawn.worlds) == 3, f"siblings started: {spawn.worlds}"
-    assert not [r for r in caplog.records if "judge pass failed" in r.getMessage()], "the judge pass failed"
+    old, _tenant, rc, spawn, _est = _launch_over_the_old_run(tmp_path, questioner=questioner)
+    assert rc not in (0, None), "the launcher accepted a source run that has no closing record"
+    assert "closing record" in str(rc), f"the refusal does not say why: {rc!r}"
+    assert questioner.calls == 0, "the questioner ran over a source whose closing record could not be read"
+    assert not spawn.worlds, f"siblings started over a refused source: {spawn.worlds}"
 
 
 def test_the_fork_candidates_of_the_old_run_are_its_one_admitted_gather(tmp_path):
@@ -253,18 +244,13 @@ def _family_child(tmp_path: Path) -> tuple[Old, dict | None, subprocess.Complete
         return old, (json.loads(record.read_text(encoding="utf-8")) if record.is_file() else None), done
 
 
-def test_the_job_entry_over_the_old_run_ends_completed_or_typed_skipped_never_in_a_crash(tmp_path):
-    """Obligation: Old history, outcome table. `completed` (forked at row 10) or `skipped` history_unreadable/no_fork_point; never entry_error/failed."""
+def test_the_job_entry_over_the_old_run_ends_failed_launch_refused_never_in_a_crash(tmp_path):
+    """Obligation: Old history, outcome table (#1534, owner decision d). A source that predates closing records ends
+    `failed` / `launch_refused`, not `entry_error` and not a completion."""
     before = hashlib.sha256(FIXTURE.read_bytes()).hexdigest()
     old, end, done = _family_child(tmp_path)
     assert hashlib.sha256(FIXTURE.read_bytes()).hexdigest() == before
 
     assert end is not None, f"the entry left no end record (rc={done.returncode}):\n{done.stderr[-2000:]}"
-    assert end["status"] in ("completed", "skipped"), end
-    if end["status"] == "skipped":
-        assert end["reason"] in ("history_unreadable", "no_fork_point"), end
-        assert end["message"], "a typed skip names its cause"
-    else:
-        assert end["reason"] is None, end
-        assert end["fork_message_id"] == str(old.gather), end
-        assert end["findings_count"] >= 1, end
+    assert (end["status"], end["reason"]) == ("failed", "launch_refused"), end
+    assert end["message"], "a refusal names its cause"

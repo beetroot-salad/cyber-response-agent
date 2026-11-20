@@ -25,3 +25,10 @@ class UnstorableText(ValueError):
 class OffboardNotSettled(RuntimeError):
     """An offboard kept finding live jobs of the tenant after every one it ended (new rows inserted behind its
     passes). The whole transaction is rolled back: the tenant is unchanged and the request can be repeated."""
+
+
+class FindingsNotStored(Exception):
+    """Storing a job's findings failed for a reason neither their content nor an outage explains: a deterministic
+    database error such as a missing permission, or a fault in the insert's code (#1487 Amendment r5.3). The findings
+    are not refused, and the job is not run again: the worker retries its end write in place until it succeeds or the
+    worker stops. Names the cause, never a finding's text."""

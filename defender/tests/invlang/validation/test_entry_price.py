@@ -1,6 +1,8 @@
 """#923 — the ENTRY PRICE on `inconclusive`, at the close and the write gate, and its hardenings."""
 from __future__ import annotations
 
+from defender.tests.support.runtime.engine._spec992 import closing_record, is_closed, never_closed
+
 import pytest
 
 from defender._vocab import DISPOSITION_ENUM
@@ -40,7 +42,7 @@ def _refusal(tmp_path, companion: str, **kw) -> str:
     deps, run_dir = main_deps(tmp_path, companion)
     with pytest.raises(ModelRetry) as e:
         close(deps, GAP_MEMBER, **kw)
-    assert not (run_dir / "report.md").exists(), "a refused close still committed a report"
+    assert never_closed(run_dir), "a refused close still committed a report"
     return str(e.value)
 
 
@@ -77,7 +79,7 @@ def test_an_inconclusive_close_naming_a_receipt_commits(tmp_path):
     result = close(deps, GAP_MEMBER)
 
     assert result.outcome == "stands"
-    assert (run_dir / "report.md").is_file(), "the payable close was refused"
+    assert is_closed(run_dir), "the payable close was refused"
     frontmatter = committed(run_dir)
     assert frontmatter["disposition"] == GAP_MEMBER
     rows = frontmatter.get("ceiling_test")
@@ -85,13 +87,8 @@ def test_an_inconclusive_close_naming_a_receipt_commits(tmp_path):
     assert {"state": "query-failed", "ref": "l-002"} in rows, (
         f"the model's receipt did not reach the committed frontmatter as structure ({rows!r})"
     )
-    assert "note" not in rows[0], (
-        "the free-text note rode into the frontmatter instead of the body"
-    )
-    body = (run_dir / "report.md").read_text(encoding="utf-8").split("---\n", 2)[-1]
-    assert "EDR execve logs for web-1" in body, (
-        "the receipt's human-facing note did not reach the report BODY"
-    )
+    notes = [e.note for e in closing_record(run_dir).ceiling_test]
+    assert any("EDR execve logs for web-1" in n for n in notes), "the receipt's human-facing note did not reach the record"
 
 
 def test_neither_none_nor_a_blank_row_pays_the_inconclusive_price(tmp_path):
@@ -112,7 +109,7 @@ def test_a_close_owing_the_price_is_refused_before_any_stage_is_called(tmp_path)
     assert stages.calls == [], (
         f"the refused close spent {stages.calls} — the price gate runs behind the review"
     )
-    assert not (run_dir / "report.md").exists()
+    assert never_closed(run_dir)
 
     # The paired control: the same bundle on a PAID close does get dispatched, so the empty
     # list above is the ordering and not a bundle nothing ever calls.
@@ -158,7 +155,7 @@ def test_a_bare_host_row_does_not_pay_where_a_receipt_does(tmp_path):
         document = paid(row)
         deps, run_dir = main_deps(tmp_path / name, document)
         assert close(deps, GAP_MEMBER).outcome == "stands", why
-        assert (run_dir / "report.md").is_file(), why
+        assert is_closed(run_dir), why
         assert validate_companion(document, None) == [], f"{why} (at the write gate)"
 
     # And the price is not a blanket refusal of the keyword: the ModelRetry above is raised for
@@ -169,7 +166,7 @@ def test_a_bare_host_row_does_not_pay_where_a_receipt_does(tmp_path):
         close(deps2, GAP_MEMBER)
     except ModelRetry as e:  # pragma: no cover — a failure message, not a branch
         pytest.fail(f"one paying row beside a non-paying one still owes: {e}")
-    assert (run2 / "report.md").is_file()
+    assert is_closed(run2)
 
 
 def test_a_receipt_contradicting_its_own_lead_does_not_pay(tmp_path):
@@ -210,7 +207,7 @@ def test_a_lead_resolved_purely_from_absent_data_still_anchors_a_receipt(tmp_pat
     )
     deps, run_dir = main_deps(tmp_path, document)
     assert close(deps, GAP_MEMBER).outcome == "stands"
-    assert (run_dir / "report.md").is_file()
+    assert is_closed(run_dir)
 
     # The paired negative: the SAME resolution shape, but the lead ALSO retrieved something
     # (an observation) — now it must NOT anchor a receipt, because data actually came back.
@@ -258,7 +255,7 @@ def test_a_non_identifier_shaped_cap_does_not_pay_and_is_refused_at_the_write_ga
 
     deps, run_dir = main_deps(tmp_path / "legit-cap", paid(CAPABILITY_ROW))
     assert close(deps, GAP_MEMBER).outcome == "stands"
-    assert (run_dir / "report.md").is_file()
+    assert is_closed(run_dir)
 
 
 def test_a_non_identifier_shaped_ref_does_not_pay(tmp_path):
@@ -297,7 +294,7 @@ def test_a_confusable_spelling_of_the_empty_marker_does_not_pay(tmp_path):
     non_ascii = paid("state=query-failed ref=l-002 note=auditd execve logs on wéb-1 not retrieved")
     deps, run_dir = main_deps(tmp_path / "non-ascii-control", non_ascii)
     assert close(deps, GAP_MEMBER).outcome == "stands"
-    assert (run_dir / "report.md").is_file()
+    assert is_closed(run_dir)
     assert validate_companion(non_ascii, None) == []
 
 
@@ -308,7 +305,7 @@ def test_the_same_gap_row_written_twice_does_not_pay_for_two_gaps(tmp_path):
 
     deps, run_dir = main_deps(tmp_path / "distinct", paid(PAYING_ROW, SECOND_PAYING_ROW))
     assert close(deps, GAP_MEMBER).outcome == "stands"
-    assert (run_dir / "report.md").is_file(), "two distinct gaps were refused"
+    assert is_closed(run_dir), "two distinct gaps were refused"
 
     # And the write gate agrees, per collection site: distinctness pinned at the close alone
     # leaves the document that reaches every downstream reader unconstrained.
@@ -330,4 +327,4 @@ def test_the_accumulated_gap_text_is_bounded(tmp_path):
 
     deps, run_dir = main_deps(tmp_path / "ordinary", paid(PAYING_ROW))
     assert close(deps, GAP_MEMBER).outcome == "stands"
-    assert (run_dir / "report.md").is_file(), "an ordinary one-row receipt hit the bound"
+    assert is_closed(run_dir), "an ordinary one-row receipt hit the bound"

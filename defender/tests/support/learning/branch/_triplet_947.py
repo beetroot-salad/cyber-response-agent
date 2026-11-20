@@ -482,12 +482,16 @@ def tenant_episodes(data_root: Path) -> Path:
     return location_path(set_up_tenant(Path(data_root), current_tenant().id).episodes)
 
 
-def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
+def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,  # noqa: PLR0913 — one keyword per scenario knob
               tenant_id: str | None = None, recorded: bool | None = None,
               pre_snapshot: bool = False,
               land_calls: Callable[[Path], None] | None = None,
-              published: bool = False) -> tuple[Path, Path]:
+              published: bool = False, source_closing: dict | None = None,
+              source_fault: str | None = None) -> tuple[Path, Path]:
     """A runs base holding ONE ordinary finished run. Returns (base, source_run_dir).
+
+    `source_closing` plants the source's closing record (fields over a valid one) in its database; `source_fault`
+    (a `_readers1534` fault, or a dict of `fault_run`'s arguments) is then applied where that lookup reads (#1534).
 
     `published=True` sets the tenant up as published, so the source's default knowledge stamp
     (`scene_knowledge`) names a commit its clone holds, as a branch launch over it needs."""
@@ -523,7 +527,7 @@ def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
     # an ordinary run from an episode's contents.
     (src / "provenance.json").write_text(
         json.dumps(provenance_record(tenant_id=tenant_id)), encoding="utf-8")
-    seed_source_session(base, src, pre_snapshot=pre_snapshot)
+    seed_source_session(base, src, pre_snapshot=pre_snapshot, closing=source_closing, fault=source_fault)
     return base, src
 
 
@@ -556,7 +560,8 @@ def _source_handle(src: Path) -> Any:
     return Run(src, runs_base=fixture_runs_base(src.parent))
 
 
-def seed_source_session(base: Path, src: Path, *, pre_snapshot: bool = False) -> None:
+def seed_source_session(base: Path, src: Path, *, pre_snapshot: bool = False, closing: dict | None = None,
+                        fault: str | dict | None = None) -> None:
     """Give the source run the session store a branch is actually taken from."""
     from defender.records import RunPaths, SessionPaths
 
@@ -586,6 +591,15 @@ def seed_source_session(base: Path, src: Path, *, pre_snapshot: bool = False) ->
             from defender.tests.support.runtime.state._fork_snapshot_plant import plant_fork_snapshots
 
             plant_fork_snapshots(store, session_id, src)
+        if closing is not None:
+            from defender.tests.storage.verdict_1534 import _spec1534 as V
+            from defender.tests.support.learning.judge import _judge_921 as J
+
+            V.plant(store, J._record_for(src.name, closing))
+    if fault is not None:  # a `_readers1534` fault, or a dict of `fault_run`'s arguments
+        from defender.tests.support.storage import _readers1534 as R
+
+        R.fault_run(src, **({"fault": fault} if isinstance(fault, str) else fault))
 
 
 def capture_call(run_dir: Path, *, system: str = "elastic", verb: str = "query",
@@ -771,12 +785,12 @@ def report_text(disposition: str, *, extra: str = "", body: str = "") -> str:
 def archived_world(episode_dir: Path, label: str, *, disposition: str = "malicious",
                    scrub_ran: bool = True, commit: str | None = "deadbee",
                    dirty: bool | None = False, unavailable: str | None = None) -> Path:
-    """One archived `worlds/<X>/` directory with every artifact the archive writes. No `run_dir`
+    """One archived `worlds/<X>/` directory with every artifact the archive writes (the verdict is not one: it is the
+    arm's closing record, `_judge_921.set_closing`; `disposition` is kept for old callers and unused). No `run_dir`
     pointer (the arm roster supersedes it): a scenario about an old archive's leftover pointer
     plants one itself."""
     w = episode_dir / "worlds" / world_id(episode_dir, label)
     (w / "gather_raw").mkdir(parents=True, exist_ok=True)
-    (w / "report.md").write_text(report_text(disposition), encoding="utf-8")
     (w / "investigation.md").write_text(f"# world {label}\n", encoding="utf-8")
     (w / "executed_queries.jsonl").write_text("", encoding="utf-8")
     (w / "provenance.json").write_text(
@@ -852,12 +866,16 @@ def sibling_run_dir(  # noqa: PLR0913 — one keyword per stamp field a scenario
                     scrub_ran: bool = True,
                     commit: str | None = "deadbee", dirty: bool | None = False,
                     unavailable: str | None = None,
-                    model: str = "m-1", stamp: bool = True, **record: Any) -> Path:
-    """A finished sibling run dir plus its scrub-verdict SIDECAR, under `base`."""
+                    model: str = "m-1", stamp: bool = True, closed: bool = True, **record: Any) -> Path:
+    """A finished sibling run dir plus its scrub-verdict SIDECAR, under `base`. `closed` (default) plants the arm's
+    `malicious` closing record in a store of its own behind its pointer (#1534); no `report.md`."""
     base = Path(base)
     run_dir = base / (arm_id if arm_id is not None else _arm_name(base, label))
     (run_dir / "gather_raw").mkdir(parents=True, exist_ok=True)
-    (run_dir / "report.md").write_text(report_text("malicious"), encoding="utf-8")
+    if closed:
+        from defender.tests.support.storage import _readers1534 as R
+
+        R.plant_run(run_dir, R.valid_fields("malicious"), sessions_base=base)
     (run_dir / "investigation.md").write_text(f"# world {label}\n", encoding="utf-8")
     (run_dir / "executed_queries.jsonl").write_text("", encoding="utf-8")
     if stamp:

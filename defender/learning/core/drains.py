@@ -35,13 +35,14 @@ from defender.learning.core.store_tick import (
     Refused,
     Tick,
     classified_refusal,
-    lane_waiting,
-    opened_store,
+    opened_tick_store,
 )
 from defender.learning_store import Stop
 
 if TYPE_CHECKING:
     import datetime
+
+    from defender.learning_store.tick import TickStore
 
     import httpx
 
@@ -269,6 +270,18 @@ def _validate_merge_mode() -> None:
     merge_mode()
 
 
+def _validate_tick_settings() -> None:
+    """The tick's own settings read once at its start (#1487), before its store is bound: a malformed attempt ceiling or
+    threshold in this process's environment is the stage's `FatalConfigError` (exit 2) before anything is claimed.
+    Through the post-step's port the values that count are the helper's, inherited from the worker, which judged them
+    at its start (`worker._start.check_learning_settings`, Amendment r5.3)."""
+    from defender.learning.core.config import author_max_attempts
+    from defender.learning.core.store_tick import thresholds
+
+    author_max_attempts()
+    thresholds()
+
+
 #: The tick's refusal while it opens its tenant delivery or starts its batch (`store_tick.Refused`): the
 #: stage's one-line `FatalConfigError`, or, when transient, a skipped tick.
 _Refused = Refused
@@ -445,17 +458,8 @@ def _run_of(payload: dict, tenant: Tenant | None) -> Run | Exception:
 
 
 #: The lanes the author drain's tick reconciles (in review, PRs to close): its own, the lead lane's and the feedback
-#: lane's. Its wake test (`author_work_waiting`) asks of the same lanes.
+#: lane's.
 AUTHOR_DRAIN_RECONCILES = (AUTHOR_LANE, LEAD_LANE, FEEDBACK_LANE)
-
-
-def author_work_waiting(paths: LoopPaths) -> bool:
-    """Whether `author_drain` could act now or later without a person (#1344 amendment 3, G-T1; `lane_waiting` over the
-    lanes it reconciles). What a post-step reports as still waiting."""
-    if paths.tenant is None:
-        return False
-    with opened_store() as store:
-        return lane_waiting(store, str(paths.tenant.id), AUTHOR_LANE, reconcile_lanes=AUTHOR_DRAIN_RECONCILES)
 
 
 def _refusing(entry: Callable[[], int]) -> int:
@@ -497,14 +501,17 @@ def _tick_systems(paths: LoopPaths, records: TenantDirectory) -> TenantSystems:
         raise _Refused(f"the product checkout's adapters could not be read: {unreadable}") from None
 
 
-def _store_tick(paths: LoopPaths, *, lane: str, label: DrainLabel, open_delivery: Callable[..., Any],
-          author_work: Callable[..., None], start_box: Callable[..., Any] | None, stop_box: Callable[..., None],
-          **fields: Any) -> int:
-    """One lane's `store_tick.Tick` over the opened store; `fields` its further fields (`reconcile_lanes`,
-    `before_claim`)."""
+def _store_tick(paths: LoopPaths, *, store: TickStore | None, lane: str, label: DrainLabel,
+                open_delivery: Callable[..., Any], author_work: Callable[..., None],
+                start_box: Callable[..., Any] | None, stop_box: Callable[..., None], **fields: Any) -> int:
+    """One lane's `store_tick.Tick` over `store` (#1487 Flow 2: the tick's store, bound to the tenant and `lane`), or,
+    with none, over the host's store opened and bound here (`opened_tick_store`); `fields` its further fields
+    (`reconcile_lanes`, `before_claim`)."""
     if paths.tenant is None:
         raise FatalConfigError("the drain delivers to a tenant's repository: no tenant is selected")
-    with opened_store() as store:
+    with contextlib.ExitStack() as stack:
+        if store is None:
+            store = stack.enter_context(opened_tick_store(str(paths.tenant.id), lane, label))
         tick = Tick(paths=paths, lane=lane, label=label, store=store, open_delivery=open_delivery,
                     author_work=author_work, start_box=start_box, stop_box=stop_box,
                     **fields)
@@ -525,6 +532,7 @@ def author_drain(  # noqa: PLR0913 — the stage's seams: the author step, the f
     stop_box: Callable[..., None] = box_mod.stop_box,
     make_model: Callable[..., Any] | None = None,
     container: Any = None,
+    store: TickStore | None = None,
 ) -> int:
     """The lessons lane's tick into the selected tenant's repository over the learning store (#1278):
     reconcile every batch in review (every lane, D9; the feedback lane's registry batches too, A4), recover a
@@ -535,8 +543,12 @@ def author_drain(  # noqa: PLR0913 — the stage's seams: the author step, the f
     `directory` is the tenant records (else the ones `DEFENDER_DATABASE_DSN`
     names); `client` the forge's HTTP client; `identity` the tenant's delivery credential, else minted
     through its live generation (`credential_config`, `issuer_transport`); `start_box`/`stop_box` the
-    batch's box (default `TenantDelivery.start_batch_box`); `make_model` the curators' model (default their own)."""
+    batch's box (default `TenantDelivery.start_batch_box`); `make_model` the curators' model (default their own).
+    `store` is the tick's store (#1487 Flow 2, `learning_store.tick.TickStore`) bound by the caller to the tenant and
+    the author lane (the post-step's port over its helper, `JobContainer.tick_store()`); left out, the drain binds the
+    host's own (`store_tick.opened_tick_store`) inside its stage, after its settings are judged."""
     _validate_merge_mode()
+    _validate_tick_settings()
     records, credential, relay = _drain_sources(container, directory=directory, identity=identity)
     # The lane's label reaches its work step bound into the DEFAULT seam, so an injected seam
     # keeps its call shape (#1134).
@@ -549,7 +561,7 @@ def author_drain(  # noqa: PLR0913 — the stage's seams: the author step, the f
                               credential_config=credential_config, issuer_transport=issuer_transport,
                               relay=relay)
 
-    return _store_tick(paths, lane=AUTHOR_LANE, label=AUTHOR_DRAIN_LABEL, open_delivery=open_delivery,
+    return _store_tick(paths, store=store, lane=AUTHOR_LANE, label=AUTHOR_DRAIN_LABEL, open_delivery=open_delivery,
                  author_work=lambda work_paths, **kw: _store_curators(work_paths, seam, **kw),
                  start_box=start_box, stop_box=stop_box, reconcile_lanes=AUTHOR_DRAIN_RECONCILES)
 
@@ -587,12 +599,16 @@ def lead_author_drain(  # noqa: PLR0913 — the stage's seams (OD4, OD16): two s
     stop_box: Callable[..., None] = box_mod.stop_box,
     git_timeout: float = GIT_TIMEOUT_SECONDS,
     make_model: Callable[..., Any] | None = None,
+    store: TickStore | None = None,
 ) -> int:
     """The lead-author lane's tick over the learning store (operator-only, A2 D9): reconcile the lane's
     batches in review, recover a lapsed one, then claim its pitfalls and curation requests and author
     them; its delivery seams as `author_drain`'s. `git_timeout` is bound into the DEFAULT work steps only
-    (the lanes' own bounded reads, #1175)."""
+    (the lanes' own bounded reads, #1175). `store` is the tick's store (#1487 Flow 2, `learning_store.tick.TickStore`)
+    bound by the caller to the tenant and the lead lane; left out, the drain binds the host's own
+    (`store_tick.opened_tick_store`) inside its stage."""
     _validate_merge_mode()
+    _validate_tick_settings()
     records = _drain_directory(directory)
     # Read every configured value before a batch, box or agent exists, so a malformed setting
     # refuses the tick rather than a commit.
@@ -621,7 +637,7 @@ def lead_author_drain(  # noqa: PLR0913 — the stage's seams (OD4, OD16): two s
         return _open_delivery(paths, directory=records, client=client, identity=identity,
                               credential_config=credential_config, issuer_transport=issuer_transport)
 
-    return _store_tick(paths, lane=LEAD_LANE, label=LEAD_AUTHOR_DRAIN_LABEL, open_delivery=open_delivery,
+    return _store_tick(paths, store=store, lane=LEAD_LANE, label=LEAD_AUTHOR_DRAIN_LABEL, open_delivery=open_delivery,
                  author_work=lambda work_paths, **kw: _store_lead_work(work_paths, lead_step, pitfalls_step, **kw),
                  start_box=start_box, stop_box=stop_box, reconcile_lanes=(LEAD_LANE,),
                  before_claim=read_systems if reads_systems else None)

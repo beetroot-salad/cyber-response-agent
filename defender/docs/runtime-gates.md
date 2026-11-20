@@ -45,9 +45,8 @@ hooks). The gates:
   (the actor's pinned script) now closes its `--corpus`, checking the operand *after*
   `resolve()` against the corpus it serves (#776); `defender-lessons --show`, a shim grant
   rather than a pins_path one, has always held the same line the same way.
-  (The benign judge's closed-ticket read was a third such exemption; #672
-  moved it off bash into two typed host-side tools, so no ticket shape rides any bash lane
-  now.) Containment is **positive enumeration**: main cannot
+  (A closed-ticket read was once a third such exemption; it was retired with the old
+  learning pipeline, so no ticket shape rides any bash lane now.) Containment is **positive enumeration**: main cannot
   read `gather_raw` because that shape is not in its list — there is no `RAW_MARKER`
   substring clamp over the command text any more — and the read tool enforces the SAME
   tuple OBJECT the `cat` grant carries as its scope (`AgentPolicy.read_allow`), so
@@ -64,7 +63,7 @@ hooks). The gates:
   - **A confined agent's own run dir is not a hole in its confine** (#850 F-19) —
     the gray-box actor's `run_dir` IS the learning run dir, and the loop STAGES the
     finished case into it: `persist._copy_shared_inputs` writes investigation.md,
-    report.md and source_refs.yaml there, `lead_repository.stage_tables` writes
+    and source_refs.yaml there, `lead_repository.stage_tables` writes
     executed_queries.jsonl and the whole `gather_raw/` tree. A run dir is an
     unconditional read root and the actor declares no shapes over it, so the
     `gather_raw` carve-out closed the payloads while the case's own reasoning and

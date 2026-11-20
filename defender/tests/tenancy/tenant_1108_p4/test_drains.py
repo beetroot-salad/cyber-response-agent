@@ -63,6 +63,8 @@ from defender.tests.tenancy.tenant_1108_p4._drain_support import (
     owner_record,
     process_start,
     product_repo,
+    tick_store,
+    own_store,
     product_state,
     queue,
     queued_run,
@@ -81,6 +83,7 @@ from defender.tests.tenancy.tenant_1108_p4._support import (
 
 
 postgres = pytest.mark.postgres
+pytestmark = pytest.mark.usefixtures("tick_impl")  # the tick over each store implementation (conftest); `postgres` is per case
 
 
 @pytest.fixture
@@ -580,6 +583,7 @@ def test_od16_the_author_drain_hands_its_curators_the_ticks_batch_and_product_ro
     assert not draft.is_relative_to(product)
 
 
+@own_store("the lead lane's tick has no port (#1546): it never reaches the author lane's")
 @postgres
 def test_od16_the_lead_drain_hands_both_steps_the_ticks_batch_and_product_rooted_paths(
         world, monkeypatch, caplog):  # noqa: F811 — the imported fixture
@@ -699,7 +703,8 @@ def _default_box_tick(w: Any, monkeypatch: Any, drain: str, label: str) -> tuple
         def trigger(*_a: Any, **_k: Any) -> None:
             ran.append("curator")
 
-        return run_stage(lambda: drains().author_drain(paths, trigger_author=trigger, **seams)), ran
+        with tick_store(t, "author", seams) as store:  # #1487: the tick is handed its store
+            return run_stage(lambda: drains().author_drain(paths, trigger_author=trigger, store=store, **seams)), ran
     paths, _run, _step = _lead_tick(w, monkeypatch, label)
 
     def lead(*_a: Any, **_k: Any) -> None:

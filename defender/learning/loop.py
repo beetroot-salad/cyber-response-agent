@@ -29,9 +29,6 @@ from defender.learning.core.drains import (  # noqa: E402
 from defender.learning.core.persist import (  # noqa: E402
     derive_alert_rule_key,
 )
-from defender.learning.core.validate import (  # noqa: E402
-    normalize_disposition,
-)
 
 #: A facade: the two authoring drains, the CLI, and the helpers other packages import through
 #: this name rather than reaching into `core/`.
@@ -39,7 +36,6 @@ __all__ = [
     "RunAlreadyLive", "RunUnprocessable", "StageAbort", "LoopPaths",
     "author_drain", "lead_author_drain",  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
     "main",
-    "normalize_disposition",
     "derive_alert_rule_key",
     "lead_repository",
 ]

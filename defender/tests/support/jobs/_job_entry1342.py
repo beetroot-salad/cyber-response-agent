@@ -60,9 +60,7 @@ class _FaultsAfterClose(RH.ReplayFn):
 
 
 def _replay_lifecycle(*, fault_after_close: bool = False):
-    from defender.records.formats import parse_report_text
-
-    disposition = parse_report_text((GOLDEN / "report.md").read_text(encoding="utf-8")).disposition
+    disposition = RH.golden_disposition(GOLDEN)
     turns = [
         RH.Turn(tool_calls=[("append_block", {"text": (GOLDEN / "investigation.md").read_text(encoding="utf-8")})]),
         RH.Turn(tool_calls=[("close_investigation", {"disposition": disposition})]),
@@ -169,11 +167,10 @@ def _priced_lifecycle(*, ledger_fault: bool, raises: bool = False, dies: bool = 
     from pydantic_ai.models import override_allow_model_requests
 
     from defender.investigation import driver
-    from defender.records.formats import parse_report_text
     from defender.tests.e2e._replay_harness import FakeVerbs
     from defender.tests.e2e.test_query_tool import DONE, q
 
-    disposition = parse_report_text((GOLDEN / "report.md").read_text(encoding="utf-8")).disposition
+    disposition = RH.golden_disposition(GOLDEN)
     from defender.tests.support.jobs._jobs1342 import SPEND_LEDGER
 
     refuse = _ledger_trigger(f"CREATE TRIGGER IF NOT EXISTS refuse_spend BEFORE INSERT ON {SPEND_LEDGER} "

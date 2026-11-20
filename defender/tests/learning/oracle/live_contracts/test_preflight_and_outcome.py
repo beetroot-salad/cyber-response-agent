@@ -958,7 +958,7 @@ def test_outcome_record_is_cut_short_by_a_launcher_crash(tmp_path, state):
     # The reader takes the episode's walked view, opened outside `pytest.raises` so a view
     # that cannot be opened fails as itself rather than satisfying the refusal.
     with J.walked_view(ep) as view, pytest.raises(error) as refused:
-        S.sym(S.EPISODE, "verdicts")(view)
+        S.sym(S.EPISODE, "delta_o")(view)
     assert S.OUTCOME_NAME in str(refused.value)
 
     judge = S.FakeJudge(default="unused")
@@ -979,17 +979,17 @@ def test_1224_archive_fails_after_the_siblings_ran(tmp_path, episodes_root):
     are), its link target is not archived, and the outcome record stays as written."""
     est = S.estate(tmp_path)
     outside = tmp_path / "outside-the-tree.md"
-    outside.write_text("MARKER-1224-NOT-THE-REPORT\n", encoding="utf-8")
+    outside.write_text("MARKER-1224-NOT-THE-DOCUMENT\n", encoding="utf-8")
     linked: list[Path] = []
 
     def link_cs_report(world: str) -> None:
         if world != "c":
             return
         tree = spawn.eps[-1] / "runs" / S.T.read_roster(spawn.eps[-1])[S.T.world_id(spawn.eps[-1], world)]
-        report = tree / "report.md"
-        report.unlink()
-        report.symlink_to(outside)
-        linked.append(report)
+        document = tree / "investigation.md"  # a file the archive copies; the closing record is in the database (#1534)
+        document.unlink()
+        document.symlink_to(outside)
+        linked.append(document)
 
     spawn = _Spawn(root=episodes_root, plant=True, hook=link_cs_report)
     judge = _launch_judge()
@@ -1012,8 +1012,8 @@ def test_1224_archive_fails_after_the_siblings_ran(tmp_path, episodes_root):
     assert not S.judge_called_for(judge, T.world_id(run.ep, "c")), "the world whose archive failed was graded"
     assert not _judge_rows(run.ep).get("c", {}).get("findings"), "world c carries findings"
     archived = _snapshot(run.ep / "worlds") if (run.ep / "worlds").is_dir() else {}
-    assert not [n for n, body in archived.items() if "MARKER-1224-NOT-THE-REPORT" in body], (
-        "the link's target was archived as world c's report")
+    assert not [n for n, body in archived.items() if "MARKER-1224-NOT-THE-DOCUMENT" in body], (
+        "the link's target was archived as world c's document")
 
 
 def test_1224_preflight_world_fails_after_some_calls_verified(tmp_path, monkeypatch):

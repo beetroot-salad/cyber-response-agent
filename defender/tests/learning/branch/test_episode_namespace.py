@@ -86,7 +86,7 @@ def test_long_label_worlds_launch_and_keep_uuid_artifacts(tmp_path, length):
     wid = T.world_id(run.ep, label)
     assert wid != T.fixture_world_id(label), "the host trusted a test declaration's ID"
     for path in (run.ep / "served" / f"{wid}.jsonl", run.ep / "oracle" / wid,
-                 run.ep / "worlds" / wid / "report.md"):
+                 run.ep / "worlds" / wid / "investigation.md"):
         assert path.exists(), path
     assert not any(label in str(path.relative_to(run.ep)) for path in run.ep.rglob("*"))
 

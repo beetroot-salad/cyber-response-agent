@@ -389,25 +389,6 @@ def test_1025_a_finding_row_refuses_an_unknown_field():
     assert row.topic is None
 
 
-def test_1025_an_absent_archived_report_is_decided_after_the_guarded_read(tmp_path):
-    """Absence is decided from the bound walk's own open, never via `read_report` (which follows a planted link)."""
-    family = E.mod("learning.judge.family")
-    bound = E.mod("_io").bind(tmp_path)
-    got = family.read_archived_report(bound, "report.md")
-    assert got.disposition is None, got
-    assert got.absent is True, got
-    target = tmp_path / "elsewhere.md"
-    target.write_text("---\ndisposition: malicious\n---\nnot this world's\n", encoding="utf-8")
-    (tmp_path / "report.md").symlink_to(target)
-    got = family.read_archived_report(bound, "report.md")
-    assert got.disposition is None, got
-    assert "aliased" in got.reason, got
-    assert "not this world" not in got.body
-    # Structurally, since the race itself cannot be staged: the reader never delegates to
-    # `read_report` on any branch.
-    assert "read_report" not in family.read_archived_report.__code__.co_names
-
-
 NOT_ROOT = pytest.mark.skipif(
     os.geteuid() == 0, reason="root ignores permission bits — CI runs non-root (defender/CLAUDE.md)")
 
@@ -417,22 +398,21 @@ def _world(page: E.Page, label: str) -> str:
 
 
 def test_1025_a_short_relative_episode_dir_name_scrubs_only_itself(tmp_path):
-    """Rendered from `re` (a substring of `report.md` and `read`), the refusal still reads whole:
+    """Rendered from `re` (a substring of `investigation.md` and `read`), the refusal still reads whole:
     the reader formats the relative name and never holds the root, so nothing is scrubbed (#1049)."""
     ep = E.sample_episode(tmp_path)
     copy = E.copy_episode(ep, tmp_path / "re" / ep.dir.name)
     short = copy.dir
-    (short / "worlds" / T.world_id(short, E.GRADED_WORLD) / "report.md").unlink()
-    (short / "worlds" / T.world_id(short, E.GRADED_WORLD) / "report.md").mkdir()
+    (short / "worlds" / T.world_id(short, E.GRADED_WORLD) / "investigation.md").unlink()
+    (short / "worlds" / T.world_id(short, E.GRADED_WORLD) / "investigation.md").mkdir()
     with contextlib.chdir(tmp_path):
         page = render(short)
-    world = _world(page, E.GRADED_WORLD)
-    assert "report.md could not be read" in world, world
+    world = page.text_of(f"leads-{E.GRADED_WORLD}")
     assert "<episode>port" not in world, world
     assert "<episode>ad" not in world, world
-    assert f"worlds/{T.fixture_world_id(E.GRADED_WORLD)}/report.md" in world, world
+    assert f"worlds/{T.fixture_world_id(E.GRADED_WORLD)}/investigation.md" in world, world
     # said bare — never as a quoted filename cut down from an absolute path
-    assert f"'worlds/{T.fixture_world_id(E.GRADED_WORLD)}/report.md'" not in world, world
+    assert f"'worlds/{T.fixture_world_id(E.GRADED_WORLD)}/investigation.md'" not in world, world
     assert "re/worlds" not in page.raw
 
 

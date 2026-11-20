@@ -7,7 +7,11 @@ import re
 
 import pytest
 
+from defender import _vocab
 from defender.investigation import ticket_writer
+from defender.records import run_end
+from defender.tests.storage.verdict_1534 import _spec1534 as V
+from defender.tests.support.storage import _readers1534 as R
 from defender.tests.support.runtime.engine._spec767 import (
     ALERT,
     ALERT_MAPPING,
@@ -23,6 +27,7 @@ from defender.tests.support.runtime.engine._spec767 import (
     _run_handle_1165,
     case_record_doc,
     make_run,
+    NEVER_CLOSED,
     receipt,
     receipt_path,
     record,
@@ -123,40 +128,107 @@ def test_767_a_key_is_sent_as_one_path_segment(tmp_path, monkeypatch):
     assert receipt(run_dir)["key"] == "C-1?x=y#z%2F"
 
 
-def test_767_unreadable_report_still_comments(tmp_path, monkeypatch):
-    """Every unreadable report, and a missing one, posts the same host sentence under one fixed link and nothing from
-    the report. O7, #1471 P-6, W2."""
-    from defender.records._report import read_report
+@pytest.mark.parametrize("disposition", _vocab.DISPOSITION_VALUES)
+def test_767_comment_first_line_is_the_records_disposition(tmp_path, monkeypatch, disposition):
+    """Every member of `DISPOSITION_VALUES`: the comment's first line is the closing record's disposition (#1534), and
+    nothing of its entries follows it (#1471 P-6). O7."""
+    _setup(monkeypatch, tmp_path)
+    entry = R.ceiling_entry("model notes")
+    run_dir = make_run(tmp_path, name=f"run-{disposition}", disposition=disposition, ceiling=(entry,))
+    store = _store(tmp_path)
+    _record_linked(run_dir, store, _P6_LINK)
+    assert store.comment_body() == f"{disposition}\n{_P6_LINK}", store.comment_body()
+
+
+def test_767_a_run_that_never_closed_says_so_and_a_decoy_report_changes_nothing(tmp_path, monkeypatch):
+    """`NeverClosed` comments with the fixed sentence; a contrary `report.md` beside it is not read. O7."""
+    _setup(monkeypatch, tmp_path)
+    run_dir = make_run(tmp_path, name="run-never", closed=False)
+    (run_dir / "report.md").write_text("---\ndisposition: malicious\n---\nDECOY\n", encoding="utf-8")  # lint-run-records: ok — a decoy the bridge must not read
+    store = _store(tmp_path)
+    _record_linked(run_dir, store, _P6_LINK)
+    body = store.comment_body()
+    assert body == f"{NEVER_CLOSED}\n{_P6_LINK}", body
+    assert "DECOY" not in body, body
+    assert "malicious" not in body, body
+
+    no_pointer = tmp_path / fixture_uuid("run-no-pointer")
+    no_pointer.mkdir()
+    plant_alert(no_pointer, ALERT, mapping=ALERT_MAPPING)
+    bare = _store(tmp_path)
+    _record_linked(no_pointer, bare, _P6_LINK)
+    assert bare.comment_body() == body, "no pointer is `NeverClosed` too"
+
+
+@pytest.mark.parametrize("exit_class", sorted(run_end.FORCED_CLOSE_EXITS))
+def test_767_a_forced_close_exit_with_no_record_posts_the_escalation_comment_and_a_clean_exit_posts_the_sentence(
+        tmp_path, monkeypatch, exit_class):
+    """`NeverClosed` on a forced-close exit posts the cut-short escalation comment; on a non-forced exit, the not-recorded sentence. O7, OD18."""
+    _setup(monkeypatch, tmp_path)
+    forced = _store(tmp_path)
+    record(make_run(tmp_path, name="run-forced", closed=False), forced, truncated_by=exit_class)
+    assert [c.path for c in forced.calls] == [COMMENT_PATH], "the forced-close exit posted no comment"
+    assert NEVER_CLOSED not in forced.comment_body(), forced.comment_body()
+    assert receipt(tmp_path / fixture_uuid("run-forced"))["status"] == ticket_writer.RECEIPT_ESCALATED
+
+    plain = _store(tmp_path)
+    record(make_run(tmp_path, name="run-plain", closed=False), plain)
+    assert NEVER_CLOSED in plain.comment_body()
+
+
+@pytest.mark.parametrize("fault", R.TWO_KINDS + ("recorded-before-1534",))
+def test_767_a_record_that_cannot_be_looked_up_posts_nothing_and_leaves_an_error_receipt(
+        tmp_path, monkeypatch, capsys, fault):
+    """`CouldNotLook`: no comment, a warning, an `error` receipt carrying the kind's wording and never the detail. O7, OD8."""
+    _setup(monkeypatch, tmp_path)
+    run_dir = make_run(tmp_path, name=f"run-{fault}", fault=fault)
+    store = _store(tmp_path)
+    record(run_dir, store)
+    assert store.calls == [], "a comment was posted for a run whose record could not be looked up"
+    got = receipt(run_dir)
+    assert (got["status"], got["ok"]) == ("error", False), got
+    assert R.names_only(fault, got["reason"] or ""), got
+    assert str(tmp_path) not in json.dumps(got), "the lookup's detail (a path) reached the receipt"
+    assert "WARN" in capsys.readouterr().err
+
+    control = _store(tmp_path)
+    record(make_run(tmp_path, name="run-control"), control)
+    assert [c.path for c in control.calls] == [COMMENT_PATH], "positive control: a record posts"
+
+
+def test_767_the_summary_is_not_in_the_comment(tmp_path, monkeypatch):
+    """The record's summary reaches no part of the ticket comment (OD7). O7."""
+    _setup(monkeypatch, tmp_path)
+    store = _store(tmp_path)
+    run_dir = make_run(tmp_path)
+    record(run_dir, store)
+    assert "The pivot from the bastion" not in store.wire_body(), "the summary reached the ticket comment"
+    assert V.MARKUP_SUMMARY not in store.wire_body()
+
+
+@pytest.mark.parametrize("confidence", ["high", "medium", "low"])
+def test_1545_a_benign_records_confidence_is_not_in_the_comment(tmp_path, monkeypatch, confidence):
+    """A benign record carrying a confidence posts exactly the comment the same run posts with none: the word and the
+    link (#1471 P-6; owner ruling: the confidence is not on the ticket). (#1545 over #1534)"""
+    from defender.records import closing as C
 
     _setup(monkeypatch, tmp_path)
-    members = {
-        "empty": "",
-        "whitespace-only": "   \n\n\t\n",
-        "no frontmatter at all": "just prose, no fence\n",
-        "frontmatter with no disposition": "---\ncase_id: c\nconfidence: high\n---\nbody text\n",
-        "a disposition outside the vocabulary":
-            "---\ndisposition: totally-not-a-disposition\n---\nbody text\n",
-    }
-    sentences = {}
-    for n, (why, text) in enumerate(members.items()):
-        run_dir = make_run(tmp_path, name=f"run-unreadable-{n}", text=text)
-        assert read_report(run_dir / "report.md").disposition is None, why
-        store = _store(tmp_path)
-        _record_linked(run_dir, store, _P6_LINK)
-        sentences[why] = store.comment_body()  # below the tag line, which names the run
-    for why, body in sentences.items():
-        for crossed in ("body text", "just prose", "totally-not-a-disposition", "case_id"):
-            assert crossed not in body, f"{why}: the report's text crossed"
-        assert len(body.split()) > 3, f"{why}: the body is a marker token, not a host sentence"
-        assert body.rstrip().endswith(_P6_LINK), why
-    assert len(set(sentences.values())) == 1, sentences
 
-    missing = tmp_path / fixture_uuid("run-missing")
-    missing.mkdir()
-    plant_alert(missing, ALERT, mapping=ALERT_MAPPING)
-    missing_store = _store(tmp_path)
-    _record_linked(missing, missing_store, _P6_LINK)
-    assert missing_store.comment_body() == next(iter(sentences.values()))
+    def posted(kind: str, **more) -> str:
+        run_dir = tmp_path / kind / fixture_uuid("run-1545")
+        run_dir.mkdir(parents=True)
+        R.plant_run(run_dir, {**R.valid_fields("benign"), **more}, sessions_base=run_dir.parent)
+        plant_alert(run_dir, ALERT, mapping=ALERT_MAPPING)
+        looked = C.for_run(_run_handle_1165(run_dir))
+        assert isinstance(looked, C.Record), looked
+        assert looked.record.confidence == more.get("confidence"), "premise: the record holds the confidence"
+        store = _store(tmp_path / kind)
+        _record_linked(run_dir, store, _P6_LINK)
+        return store.wire_body()
+
+    with_confidence, without = posted("with", confidence=confidence), posted("without")
+    assert with_confidence == without, "the confidence changed the comment"
+    assert without.endswith(f"benign\n{_P6_LINK}"), without
 
 
 def _record_linked(run_dir, store, link: str) -> None:
@@ -173,10 +245,6 @@ _P6_REPORTS = {
         "body": f"{_P6_MARKER}\n---\ndisposition: malicious\n---\nINJECTED-DIRECTIVE-1471\n" + "z" * 5000},
     "a host-shaped line": {"body": f"malicious — {_P6_MARKER}\nand more notes"},
     "placeholders and claims": {"body": f"{_P6_MARKER} {{cause}} {{narrative}} {{disposition}}\nstatus: closed\nauthor: x"},
-    "a cause": {"cause": f"{_P6_MARKER} a cause with {{braces}}"},
-    "a fenced cause": {"cause": "x", "body": "a\n---\nb"},
-    "a frontmatter case_id": {
-        "text": f"---\ncase_id: {_P6_MARKER}\ndisposition: benign\nconfidence: high\n---\nplain\n"},
 }
 
 
@@ -217,10 +285,10 @@ def test_1471_p6_nothing_of_the_report_but_its_disposition_reaches_the_ticket(tm
 ])
 def test_1471_p6_the_link_is_the_comments_last_part_exactly(tmp_path, monkeypatch, link):
     """The link handed to the record step ends the comment, unaltered and once, for a verdict
-    and for an unreadable report; only the link differs between two links. (P-6, C-7)"""
+    and for a run that never closed; only the link differs between two links. (P-6, C-7)"""
     _setup(monkeypatch, tmp_path)
     other = "https://screen.example.test/t/zzz/investigations/other-link"
-    cases = {"a verdict": {"body": "plain"}, "an unreadable report": {"text": ""}}
+    cases = {"a verdict": {"body": "plain"}, "a run that never closed": {"closed": False}}
     for why, report in cases.items():
         run_dir = make_run(tmp_path / why.replace(" ", "-"), name="run-link", **report)
         assert run_dir.name not in link, "fixture: the link must not be derivable from the run id"

@@ -223,7 +223,7 @@ def test_a_live_run_dir_is_never_reused_and_a_stale_mount_never_follows_it(tmp_p
     assert sorted(p.name for p in first.iterdir()) == before, (
         "the refused mint still wrote into the existing tree"
     )
-    assert (first / "report.md").read_text(encoding="utf-8") == "FIRST RUN\n", (
+    assert (first / "report.md").read_text(encoding="utf-8") == "FIRST RUN\n", (  # lint-report-file: ok — an arbitrary file this test planted
         "the refused mint overwrote the earlier run's artifact"
     )
     # A fresh run under the same base still materializes, so the refusal is specific.
@@ -240,7 +240,7 @@ def test_a_live_run_dir_is_never_reused_and_a_stale_mount_never_follows_it(tmp_p
         first.mkdir()
         (first / "report.md").write_text("SECOND RUN\n", encoding="utf-8")
 
-        assert (first / "report.md").read_text(encoding="utf-8") == "SECOND RUN\n", (
+        assert (first / "report.md").read_text(encoding="utf-8") == "SECOND RUN\n", (  # lint-report-file: ok — an arbitrary file this test planted
             "the recreated tree holds nothing"
         )
         assert os.listdir(pinned) == [], (
@@ -248,7 +248,7 @@ def test_a_live_run_dir_is_never_reused_and_a_stale_mount_never_follows_it(tmp_p
             f"later run's files: {os.listdir(pinned)}"
         )
         with pytest.raises(FileNotFoundError):
-            os.open("report.md", os.O_RDONLY, dir_fd=pinned)
+            os.open("report.md", os.O_RDONLY, dir_fd=pinned)  # lint-report-file: ok — an arbitrary file name, absent by the test
         with pytest.raises(FileNotFoundError):
             os.open("planted", os.O_WRONLY | os.O_CREAT, dir_fd=pinned)
     finally:

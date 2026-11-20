@@ -80,11 +80,12 @@ class RunSet:
 
 
 def read_run_set(bound: Bound, manifest: dict[str, Any], *, episode_dir: Path,
-                 failed: dict[str, dict[str, Any]]) -> RunSet:
+                 failed: dict[str, dict[str, Any]], episode_runs: Any) -> RunSet:
     """Every world of `manifest` through the one usability read (`family.read_world`), the
     control included; an O5-failed world gets its failed row and no read. A world whose query
     table's inherited rows differ from the family's (`calls.table_refusals`, A21) is malformed
-    whatever its own read says."""
+    whatever its own read says. Each world's verdict is its arm's closing record, through the
+    episode's run view `episode_runs`."""
     control = family_mod.control_world(manifest)
     worlds = [control, *family_mod.non_control_worlds(manifest)]
     usable: dict[str, WorldFacts] = {}
@@ -96,7 +97,8 @@ def read_run_set(bound: Bound, manifest: dict[str, Any], *, episode_dir: Path,
         if label in failed:
             rows[label] = failed_row(world, failed[label])
         else:
-            rows[label], facts = family_mod.read_world(bound, world, episode_dir=episode_dir)
+            rows[label], facts = family_mod.read_world(bound, world, episode_dir=episode_dir,
+                                                          episode_runs=episode_runs)
             if facts is not None and label in edited:
                 # A table that reads whole but whose inherited rows differ from the family's
                 # is a failed read too (A21): only the family's tables together can show it.

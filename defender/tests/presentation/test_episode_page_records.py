@@ -264,26 +264,16 @@ def _refused():
 
 
 def test_1025_grade_episode_reads_world_archive_through_the_same_screen_as_the_page(tmp_path):
-    family = E.mod("learning.judge.family")
     ep = J.accepted_episode(tmp_path, ledgers={"b": [E.served_row("b", "oracle")], "c": []})
     outside = tmp_path / "outside"
     outside.mkdir()
-    (outside / "report.md").write_text(T.report_text("benign", body="OUTSIDE-REPORT-BODY"), encoding="utf-8")
     (outside / "investigation.md").write_text("# OUTSIDE-INVESTIGATION\n", encoding="utf-8")
-    E.plant_link(ep / "worlds" / T.world_id(ep, "b") / "report.md", outside / "report.md")
-    bound = E.mod("_io").bind(ep)
-    facts = family.read_world_facts(bound, "b", world_id=T.world_id(ep, "b"))
-    assert facts.report.disposition is None
-    assert "OUTSIDE-REPORT-BODY" not in facts.report.text
     E.plant_link(ep / "worlds" / T.world_id(ep, "c") / "investigation.md", outside / "investigation.md")
-    with pytest.raises(_refused()):
-        family.read_world_facts(bound, "c", world_id=T.world_id(ep, "c"))
 
     grade = J.grade_at(
         ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())), store=MemoryStore())
     rows = J.rows(grade)
-    assert rows["b"].get("ungradable"), rows["b"]
-    assert "report.md" in rows["b"]["ungradable_reason"], rows["b"]
+    assert not rows["b"].get("ungradable"), "control: the intact sibling is graded"
     assert rows["c"].get("ungradable"), rows["c"]
     assert "investigation.md" in rows["c"]["ungradable_reason"], rows["c"]
     written = (ep / "judge.yaml").read_text(encoding="utf-8")
@@ -303,12 +293,9 @@ def test_1025_judge_render_reads_world_archive_through_the_same_screen_as_the_pa
 
     ep = J.accepted_episode(tmp_path / "linked",
                             ledgers={"b": [E.served_row("b", "oracle")], "c": []})
-    outside = tmp_path / "outside-report.md"
-    outside.write_text(T.report_text("benign", body="OUTSIDE-REPORT-BODY"), encoding="utf-8")
-    E.plant_link(ep / "worlds" / T.world_id(ep, "c") / "report.md", outside)
+    J.fault_arm(ep, "c", "arm-refused")
     rendered = J.render_at(ep, "b")
-    assert "OUTSIDE-REPORT-BODY" not in repr(rendered.__dict__)
-    assert "c" not in rendered.contrast_rows, "the linked world is a reference run"
+    assert "c" not in rendered.contrast_rows, "the unreadable world is a reference run"
 
 
 def test_1025_grade_episode_still_grades_an_episode_whose_samples_yaml_is_malformed(tmp_path):

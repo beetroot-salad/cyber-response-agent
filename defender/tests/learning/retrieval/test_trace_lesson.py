@@ -44,14 +44,16 @@ def _opened(tl) -> list:
     return tl.tenant_runs(accepted_trace_tenant(TID))  # C1: the tracer's helpers take the accepted tenant
 
 
-def _mk_run(runs: Path, name: str, *, disposition: str, loads: list[dict]):
+def _mk_run(runs: Path, name: str, *, disposition: str, loads: list[dict], closed: bool = True, fault: str | None = None):
     """A finished run of case `name` (a label). Its folder, and so its case id, is
     `fixture_uuid(name)`: the tracer refuses any entry in `<T>/runs` that is not a UUID.
     Assertions spell the id as `C(<label>)`."""
     rd = runs / C(name)
     rd.mkdir(parents=True)
     plant_alert(rd)
-    (rd / "report.md").write_text(f"---\ndisposition: {disposition}\n---\nbody\n")
+    from defender.tests.support.storage import _readers1534 as R
+
+    R.plant_run(rd, R.valid_fields(disposition) if closed else None, fault=fault)  # #1534: its closing record, not a report.md
     (rd / "lessons_loaded.jsonl").write_text(
         "".join(json.dumps(r) + "\n" for r in loads)
     )
@@ -195,33 +197,62 @@ def test_trace_reports_the_cases_a_lesson_was_loaded_into(
         assert f"{C(label)}\t{disposition}" in out
 
 
-def test_undecodable_report_degrades_to_unknown_disposition(tmp_path, capsys):
+def _rows(out: str) -> dict[str, str]:
+    """The trace table's rows by case id: `{case id: the rest of the line}`."""
+    return {line.split("\t")[0]: line for line in out.splitlines() if "\t" in line}
+
+
+@pytest.mark.parametrize("fault", ["database-missing", "row-invalid", "recorded-before-1534"])
+def test_1534_a_run_whose_record_cannot_be_looked_up_is_a_fault_row_naming_the_kind(tmp_path, capsys, fault):
+    """`CouldNotLook` is that run's row carrying the kind's wording, never a disposition or "unknown"; the other runs'
+    rows are untouched. (V-READERS, trace CLI; OD10)"""
+    from defender._vocab import UNKNOWN_DISPOSITION
+    from defender.tests.support.storage import _readers1534 as R
+
     tl = _load()
+    _mk_lesson(tmp_path / "lessons", "L", body_frontmatter="name: L\ndescription: d\ncreated_at: 2026-06-04")
     runs = _tenant_runs_dir(tmp_path)
-    broken = _mk_run(runs, "case-a", disposition="benign",
-                     loads=[{"lesson_name": "L", "ts": "2026-06-05T00:00:00+00:00"}])
-    (broken / "report.md").write_bytes(b"---\ndisposition: benign\n---\n\xff")
-    _mk_run(runs, "case-b", disposition="malicious",
-            loads=[{"lesson_name": "L", "ts": "2026-06-06T00:00:00+00:00"}])
+    load = [{"lesson_name": "L", "ts": "2026-06-05T00:00:00+00:00"}]
+    _mk_run(runs, "case-a", disposition="benign", loads=load, fault=fault)
+    _mk_run(runs, "case-b", disposition="malicious", loads=load)
+
+    rc = trace_main(tl, ["L", "--lessons-dir", str(tmp_path / "lessons"), "--tenant", TID])
+    cap = capsys.readouterr()
+    assert rc == 0, cap.err
+    rows = _rows(cap.out)
+    assert R.names_only(fault, rows[C("case-a")]), rows[C("case-a")]
+    assert UNKNOWN_DISPOSITION not in rows[C("case-a")].split("\t")[1:2]
+    assert f"{C('case-b')}\tmalicious" in cap.out, "positive control: the other run's row reads"
+    assert str(tmp_path) not in cap.out + cap.err, "the lookup's detail (a path) reached the output"
+
+
+def test_1534_a_run_that_never_closed_is_unknown_and_a_record_beside_a_contrary_report_is_its_disposition(tmp_path, capsys):
+    """`NeverClosed` is the unknown disposition, as an absent report was; a `report.md` beside a record changes nothing. (V-READERS, trace CLI)"""
+    from defender._vocab import UNKNOWN_DISPOSITION
+
+    tl = _load()
+    _mk_lesson(tmp_path / "lessons", "L", body_frontmatter="name: L\ndescription: d\ncreated_at: 2026-06-04")
+    runs = _tenant_runs_dir(tmp_path)
+    load = [{"lesson_name": "L", "ts": "2026-06-05T00:00:00+00:00"}]
+    _mk_run(runs, "case-a", disposition="benign", loads=load, closed=False)
+    never_pointed = _mk_run(runs, "case-b", disposition="benign", loads=load, fault="no-pointer")
+    both = _mk_run(runs, "case-c", disposition="benign", loads=load)
+    (both / "report.md").write_text("---\ndisposition: malicious\n---\nDECOY\n", encoding="utf-8")  # lint-run-records: ok — a decoy the tracer must not read
+    assert never_pointed.is_dir()
 
     hits = tl.in_context_cases("L", None, _opened(tl))
-    err = capsys.readouterr().err
-    # The runs are walked in id order (`all_runs`), so the expected rows are in id order too.
-    assert [(h.case_id, h.disposition) for h in hits] == sorted(
-        [(C("case-a"), "?"), (C("case-b"), "malicious")])
-    assert f"{C('case-a')}/report.md" in err
+    assert sorted((h.case_id, h.disposition) for h in hits) == sorted([
+        (C("case-a"), UNKNOWN_DISPOSITION), (C("case-b"), UNKNOWN_DISPOSITION), (C("case-c"), "benign")])
 
 
-def test_all_survives_undecodable_report(tmp_path, capsys):
-    """The same property at the seam a user drives: ``--all`` over a runs dir containing an
-    undecodable report exits 0 and still prints every lesson's row."""
+def test_1534_all_survives_a_run_whose_record_cannot_be_looked_up(tmp_path, capsys):
+    """``--all`` over a run with an unreadable record exits 0 and still prints every lesson's row. (V-READERS, trace CLI)"""
     tl = _load()
     _mk_lesson(tmp_path / "lessons", "L",
                body_frontmatter="name: L\ndescription: d\ncreated_at: 2026-06-04")
     runs = _tenant_runs_dir(tmp_path)
-    rd = _mk_run(runs, "case-a", disposition="benign",
-                 loads=[{"lesson_name": "L", "ts": "2026-06-05T00:00:00+00:00"}])
-    (rd / "report.md").write_bytes(b"---\ndisposition: benign\n---\n\xff")
+    _mk_run(runs, "case-a", disposition="benign", fault="row-invalid",
+            loads=[{"lesson_name": "L", "ts": "2026-06-05T00:00:00+00:00"}])
 
     rc = trace_main(tl, ["--all", "--lessons-dir", str(tmp_path / "lessons"), "--tenant", TID])
     assert rc == 0, capsys.readouterr().err
@@ -317,3 +348,38 @@ def test_named_path_unreadable_lesson_is_still_an_error(tmp_path, capsys):
     cap = capsys.readouterr()
     assert rc == 1
     assert "cannot read undecodable.md" in cap.err
+
+
+def test_1534_a_data_root_moved_after_a_run_fails_its_page_rerender_and_shows_a_fault_row_in_the_trace(
+        tmp_path, capsys, caplog):
+    """The pointer's stored path is stale after the move: the CLI re-render exits 1 naming `database-missing`, and the trace has a
+    fault row for that run beside the readable one. (V-LOOK residual, V-PAGE, trace CLI)"""
+    import shutil
+
+    from defender.presentation import visualize_run
+    from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
+    from defender.tests.support.storage import _readers1534 as R
+    from defender.tests.support.tenancy._active1214 import active_directory
+
+    tl = _load()
+    _mk_lesson(tmp_path / "lessons", "L", body_frontmatter="name: L\ndescription: d\ncreated_at: 2026-06-04")
+    load = [{"lesson_name": "L", "ts": "2026-06-05T00:00:00+00:00"}]
+    old = tmp_path / "old-root" / TID
+    _mk_run(old / "runs", "case-a", disposition="benign", loads=load)
+    runs = _tenant_runs_dir(tmp_path)
+    for entry in (old / "runs").iterdir():
+        shutil.move(str(entry), runs / entry.name)
+    shutil.copytree(old / "sessions", tmp_path / "data" / TID / "sessions", dirs_exist_ok=True)
+    shutil.rmtree(tmp_path / "old-root")
+    _mk_run(runs, "case-b", disposition="malicious", loads=load)
+
+    caplog.set_level("ERROR")
+    rc = visualize_run.main(["visualize_run.py", "--tenant", TID, C("case-a")],
+                            directory=active_directory(current_data_root(), TID))
+    assert rc == 1
+    assert R.names(R.KINDS_BY_FAULT[0], caplog.text), caplog.text
+
+    assert trace_main(tl, ["L", "--lessons-dir", str(tmp_path / "lessons"), "--tenant", TID]) == 0
+    rows = _rows(capsys.readouterr().out)
+    assert R.names_only("database-missing", rows[C("case-a")]), rows[C("case-a")]
+    assert f"{C('case-b')}\tmalicious" in "\n".join(rows.values()), "positive control: a run whose database is where its pointer says"

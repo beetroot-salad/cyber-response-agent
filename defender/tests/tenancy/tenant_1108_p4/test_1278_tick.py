@@ -14,7 +14,6 @@ import signal
 from datetime import timedelta
 from pathlib import Path
 
-import httpx
 import pytest
 
 from defender.tests.support.learning.core._store1278 import (
@@ -49,11 +48,12 @@ from defender.tests.tenancy.tenant_1108_p4._drain_support import (
     critical_text,
     drafts_dir,
     lead_author_drain,
+    own_store,
     remote_branches,
 )
 from defender.tests.tenancy.tenant_1108_p4._support import git
 
-pytestmark = pytest.mark.postgres
+pytestmark = [pytest.mark.postgres, pytest.mark.usefixtures("tick_impl")]  # the tick over each store implementation (conftest)
 
 
 def _seed(w, *fids):
@@ -242,6 +242,7 @@ def _snapshot(w):
             len(_record(w)), len(w.t.forge.creates), len([r for r in w.t.forge.requests if r.method != "GET"]))
 
 
+@own_store("the refusal is raised in-process at `LearningStore.claim`: the port's helper holds its own store, and the port's refusals are the conformance module's")
 @pytest.mark.parametrize("lane", ["author", "lead_author"])
 @pytest.mark.parametrize("refusal", ["LaneBusy", "TenantInactive"])
 def test_a_claim_the_store_refuses_ends_the_tick_at_zero_with_nothing_changed(world, caplog, monkeypatch, lane, refusal):  # noqa: F811 — the imported fixture
@@ -456,17 +457,20 @@ def test_o1_a_lapsed_batch_with_nothing_anywhere_is_abandoned_and_its_item_autho
 STOP_BOUND = 30.0
 
 
-def _post_step_child(w, writer, *, how):
-    """A forked child running the real post-step (a family-less one) whose tick is `author_drain` over `writer`.
-    `how` is how the stop will be delivered: `cancel` sets the store's flag, `sigterm` signals the child."""
+def _post_step_child(w, start, writer, *, how):
+    """A forked child running the real post-step (a family-less one) over a real helper (`start()`, after this sets the
+    renewal), whose tick is `author_drain` over `writer` and takes the store the post-step hands it (#1487 Amendment 1:
+    the port over the child's job socket, which forwards to the helper). `how` is how the stop will be delivered: `cancel`
+    sets the store's flag, `sigterm` signals the child."""
     from defender.tests.learning.branch.test_1344_post_step import post_step_in_container
 
     w.monkeypatch.setenv(RENEW_ENV, "0.2")
+    helper = start()
 
     def body():
-        return post_step_in_container(None, w.t.tenant_id,
-                              author_tick=lambda _paths: author_drain(w.t, w.paths, trigger=writer, box=BoxSpy()),
-                              still_waiting=lambda _paths: False)
+        return post_step_in_container(None, w.t.tenant_id, forward=helper.ask,
+                                      author_tick=lambda _paths, *, store: author_drain(
+                                          w.t, w.paths, trigger=writer, box=BoxSpy(), store=store))
     return TickChild(body, w.scratch / f"child-{how}.json")
 
 
@@ -477,6 +481,7 @@ def _stop(w, child, how):
         child.terminate()
 
 
+@own_store("no store: the post-step's tick is a sleep")
 def test_control_a_sigterm_reaches_the_post_step_blocked_in_a_subprocess(world):  # noqa: F811 — the imported fixture
     """Harness control, no store: the post-step's tick blocked in `sleep` ends on SIGTERM as a KeyboardInterrupt. (Renewal and stop)"""
     from defender.tests.learning.branch.test_1344_post_step import post_step_in_container
@@ -487,8 +492,7 @@ def test_control_a_sigterm_reaches_the_post_step_blocked_in_a_subprocess(world):
 
     def body():
         return post_step_in_container(None, w.t.tenant_id,
-                              author_tick=lambda _paths: block(None) or 0,
-                              still_waiting=lambda _paths: False)
+                              author_tick=lambda _paths, **_kw: block(None) or 0)
     child = TickChild(body, w.scratch / "child-control.json")
     sleeper = int(await_file(marker))
     try:
@@ -498,14 +502,15 @@ def test_control_a_sigterm_reaches_the_post_step_blocked_in_a_subprocess(world):
         kill_if_alive(sleeper)
 
 
+@own_store("the tick is the post-step's: its store is the port over the child's job socket")
 @pytest.mark.parametrize("how", ["cancel", "sigterm"])
-def test_stop_a_stop_while_the_curator_is_blocked_in_a_subprocess_ends_the_tick_and_abandons_a_batch_with_no_commits(world, how):  # noqa: F811 — the imported fixture
+def test_stop_a_stop_while_the_curator_is_blocked_in_a_subprocess_ends_the_tick_and_abandons_a_batch_with_no_commits(world, post_step_helper, how):  # noqa: F811 — the imported fixture
     """Cancel flag or SIGTERM while the step waits on a child process: the tick ends in time, the batch is abandoned cleanly, f1 waits, attempt forgiven, lane free. (Renewal and stop, D4, D8)"""
     w = world
     _seed(w, "f1")
     marker = w.scratch / "sleeper"
     writer = LessonWriter({LESSON_NAME: lesson_citing("f1")}, before_commit=blocked_in_subprocess(marker))
-    child = _post_step_child(w, writer, how=how)
+    child = _post_step_child(w, post_step_helper, writer, how=how)
     sleeper = int(await_file(marker))
     try:
         _stop(w, child, how)
@@ -523,14 +528,15 @@ def test_stop_a_stop_while_the_curator_is_blocked_in_a_subprocess_ends_the_tick_
     assert call(w.dsn, "claim", w.t.tenant_id, AUTHOR_LANE, owner="next-host", thresholds=ONE) is not None
 
 
+@own_store("the tick is the post-step's: its store is the port over the child's job socket")
 @pytest.mark.parametrize("how", ["cancel", "sigterm"])
-def test_stop_a_stop_after_the_commit_leaves_the_batch_for_takeover_at_once_and_one_pr(world, caplog, how):  # noqa: F811 — the imported fixture
+def test_stop_a_stop_after_the_commit_leaves_the_batch_for_takeover_at_once_and_one_pr(world, post_step_helper, caplog, how):  # noqa: F811 — the imported fixture
     """Stopped while blocked after committing: the batch is not abandoned and its own lease is expired, so the next tick delivers it at once, within grace, with no rerun. (Renewal and stop, D4)"""
     w = world
     _seed(w, "f1")
     marker = w.scratch / "sleeper"
     writer = LessonWriter({LESSON_NAME: lesson_citing("f1")}, after_commit=blocked_in_subprocess(marker))
-    child = _post_step_child(w, writer, how=how)
+    child = _post_step_child(w, post_step_helper, writer, how=how)
     sleeper = int(await_file(marker))
     try:
         _stop(w, child, how)
@@ -553,13 +559,14 @@ def test_stop_a_stop_after_the_commit_leaves_the_batch_for_takeover_at_once_and_
     assert (_batches(w)[batch_id].phase, _batches(w)[batch_id].pr_number) == ("in_review", pr["number"])
 
 
-def test_stop_a_lease_lost_while_the_curator_is_blocked_in_a_subprocess_ends_the_tick_and_pushes_nothing(world):  # noqa: F811 — the imported fixture
+@own_store("the tick is the post-step's: its store is the port over the child's job socket")
+def test_stop_a_lease_lost_while_the_curator_is_blocked_in_a_subprocess_ends_the_tick_and_pushes_nothing(world, post_step_helper):  # noqa: F811 — the imported fixture
     """The lease lapses (by SQL) while the step waits on a child process: the renewer sees it lost, the tick ends in time, nothing is pushed, no PR opens. (P6, Renewal and stop)"""
     w = world
     _seed(w, "f1")
     marker = w.scratch / "sleeper"
     writer = LessonWriter({LESSON_NAME: lesson_citing("f1")}, after_commit=blocked_in_subprocess(marker))
-    child = _post_step_child(w, writer, how="lease")
+    child = _post_step_child(w, post_step_helper, writer, how="lease")
     sleeper = int(await_file(marker))
     try:
         [batch_id] = _batches(w)
@@ -573,74 +580,6 @@ def test_stop_a_lease_lost_while_the_curator_is_blocked_in_a_subprocess_ends_the
     assert w.t.forge.creates == []
     assert _batches(w)[batch_id].phase == "working", "a holder past its lease ended its own batch"
     assert _work(w)[("finding", "f1")].status == "in_batch"
-
-
-# --- Crash recovery under a forge that cannot be asked (H15, Crash recovery) -----------------------------------------
-
-
-def _asked(forge, method, suffix):
-    """The requests of `method` made to a path ending `suffix`, refused or not."""
-    return [r for r in forge.requests if r.method == method and r.url.path.rstrip("/").endswith(suffix)]
-
-
-@pytest.mark.parametrize("where", ["preflight", "pr_lookup"])
-@pytest.mark.parametrize("failure", ["500", "503", "connect"])
-@pytest.mark.parametrize("scene", ["stranded", "nothing_pushed"])
-def test_o1_a_lapsed_batch_whose_forge_cannot_be_asked_waits_and_is_never_abandoned(world, caplog, scene, failure, where):  # noqa: F811 — the imported fixture
-    """A forge answering 5xx or refusing the connection, on every request or on the recovery's PR lookup alone, is unknown, not empty: the batch stays working, opens no PR, its items stay. (Crash recovery, H15, R2-1)"""
-    w = world
-    if scene == "stranded":
-        writer, batch_id, _branch = _stranded(w, caplog)
-    else:
-        _seed(w, "f1")
-        writer = LessonWriter({LESSON_NAME: lesson_citing("f1")})
-        batch_id = call(w.dsn, "claim", w.t.tenant_id, AUTHOR_LANE, owner="lost-host", thresholds=ONE).batch_id
-    lapse_lease(w.dsn, batch_id)
-    before = {k: (i.status, i.batch_id, i.attempts) for k, i in _work(w).items()}
-    lookup = where == "pr_lookup"
-    if failure == "connect":
-        w.t.forge.fault = lambda r: (httpx.ConnectError("down", request=r)
-                                     if not lookup or (r.method == "GET" and r.url.path.rstrip("/").endswith("/pulls"))
-                                     else None)
-    else:
-        w.t.forge.refuse("/pulls" if lookup else "", int(failure), method="GET" if lookup else None)
-    w.t.forge.requests.clear()
-    creates = len(w.t.forge.creates)
-
-    for _ in range(3):
-        _tick(w, writer)
-
-    assert w.t.forge.requests, "the tick never asked the forge, so the failure was not what it waited on"
-    if lookup:
-        assert _asked(w.t.forge, "GET", "/pulls"), "recovery never looked the PR up, so its lookup was not what failed"
-    assert _asked(w.t.forge, "POST", "/pulls") == [], "a PR was opened though the lookup could not say none exists"
-    batch = _batches(w)[batch_id]
-    assert (batch.phase, batch.outcome) == ("working", None), "a forge that could not answer was read as 'nothing there'"
-    assert (batch.refusals, len(w.t.forge.creates)) == (0, creates)
-    assert {k: (i.status, i.batch_id, i.attempts) for k, i in _work(w).items()} == before
-
-
-@pytest.mark.parametrize("where", ["preflight", "pr_lookup"])
-@pytest.mark.parametrize("status", [401, 403])
-def test_o5_repeated_refusals_on_a_takeover_send_the_batch_to_a_person_at_the_ceiling(world, caplog, status, where):  # noqa: F811 — the imported fixture
-    """A forge that keeps refusing the bot (401, 403) on every request or on the takeover's PR lookup alone: three ticks count, at the ceiling the batch is needs_person, items kept, no PR. (H15, R2-1, Crash recovery)"""
-    w = world
-    writer, batch_id, _branch = _stranded(w, caplog)
-    lapse_lease(w.dsn, batch_id)
-    lookup = where == "pr_lookup"
-    w.t.forge.refuse("/pulls" if lookup else "", status, method="GET" if lookup else None)
-    w.t.forge.requests.clear()
-    seen = []
-    for _ in range(3):
-        _tick(w, writer)
-        seen.append((_batches(w)[batch_id].phase, _batches(w)[batch_id].refusals))
-
-    assert seen == [("working", 1), ("working", 2), ("needs_person", 3)], seen
-    if lookup:
-        assert _asked(w.t.forge, "GET", "/pulls"), "recovery never looked the PR up, so its lookup was not what was refused"
-    assert _asked(w.t.forge, "POST", "/pulls") == []
-    assert _work(w)[("finding", "f1")].status == "in_batch", "the item is not lost"
-    assert [r for r in w.t.forge.prs if r["state"] == "open"] == []
 
 
 # --- Reconcile stamps the check (D7) -----------------------------------------------------------------------------

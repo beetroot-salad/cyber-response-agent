@@ -254,7 +254,7 @@ def test_world_labels_do_not_bound_artifact_paths(tmp_path, length):
         episode.world_record(wid).create("world: accepted\n")
         episode.world(wid).dir.ensure()
         episode.world(wid).draw(0).write("bucket: caught\n")
-        paths = [LAYOUT.world(wid).dir / "report.md", LAYOUT.oracle_dir(wid) / "facts.jsonl"]
+        paths = [LAYOUT.world(wid).dir / "investigation.md", LAYOUT.oracle_dir(wid) / "facts.jsonl"]
         for relative in paths:
             path = tmp_path / T.EPISODE_ID / relative
             path.parent.mkdir(parents=True, exist_ok=True)
