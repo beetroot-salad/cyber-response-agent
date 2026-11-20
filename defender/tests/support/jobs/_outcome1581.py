@@ -96,6 +96,42 @@ def statements(store: Any) -> Iterator[list[str]]:
         event.remove(engine, "before_cursor_execute", record)
 
 
+#: One plan node as PostgreSQL's `EXPLAIN (FORMAT JSON)` writes it.
+PlanNode = dict[str, Any]
+
+
+def alert_reads(plan: PlanNode, *, above: tuple[str, ...] = ()) -> list[tuple[PlanNode, tuple[str, ...]]]:
+    """Every node of the plan, at any depth and in any kind of child (a sub-plan, a lateral side, a join input), that reads
+    the `jobs.alerts` table (by its relation name and schema, whatever the alias), each with the node types on the path from
+    the root down to just above it: what reads the page and what sits between that read and the top, in whatever form the
+    listed `latest_status` lookup takes."""
+    found = [(plan, above)] if plan.get("Relation Name") == "alerts" and plan.get("Schema", "jobs") == "jobs" else []
+    for child in plan.get("Plans", []):
+        found += alert_reads(child, above=(*above, plan["Node Type"]))
+    return found
+
+
+@contextlib.contextmanager
+def planned(store: Any) -> Iterator[list[PlanNode]]:
+    """For every `SELECT` `store`'s engine runs while the block runs, the plan PostgreSQL chooses for it, by an `EXPLAIN` of
+    the very statement with its parameters on the same connection."""
+    from sqlalchemy import event
+
+    engine = store._engine.sync_engine
+    seen: list[PlanNode] = []
+
+    def explain(conn: Any, cursor: Any, statement: str, parameters: Any, context: Any, executemany: bool) -> None:
+        if statement.lstrip().upper().startswith("SELECT"):
+            cursor.execute("EXPLAIN (FORMAT JSON) " + statement, parameters)
+            seen.append(cursor.fetchall()[0][0][0]["Plan"])
+
+    event.listen(engine, "before_cursor_execute", explain)
+    try:
+        yield seen
+    finally:
+        event.remove(engine, "before_cursor_execute", explain)
+
+
 @contextlib.asynccontextmanager
 async def holding(dsn: str, statement: str, params: tuple[Any, ...] = ()) -> AsyncIterator[None]:
     """`statement` (a locking `SELECT`) run on a raw connection in an open transaction, committed on exit."""

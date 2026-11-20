@@ -16,7 +16,9 @@ name. Nothing in this file has run: Chromium and Caddy are not installed where i
 from __future__ import annotations
 
 import datetime as dt
+import itertools
 import urllib.parse
+import zoneinfo
 from typing import Any
 
 import pytest
@@ -151,9 +153,10 @@ async def _revoke(dsn: str, invitation_id: str) -> None:
         await repo.close()
 
 
-def _signed_in(browser: Any, world: Any, *, account: str | None = None, zone: str = ZONE) -> Any:
-    """A guarded context in `zone`, signed in as Ann unless `account` is given."""
-    ctx = browser.new_context(timezone_id=zone)
+def _signed_in(browser: Any, world: Any, *, account: str | None = None, zone: str = ZONE,
+               locale: str | None = None) -> Any:
+    """A guarded context in `zone` (and in `locale` when given), signed in as Ann unless `account` is given."""
+    ctx = browser.new_context(timezone_id=zone, **({} if locale is None else {"locale": locale}))
     ctx.set_default_timeout(WAIT_MS)
     if account is not None:
         world.front.sign_in_as(account)
@@ -316,6 +319,34 @@ def test_alert_list_o5_dates_are_unpadded_with_fixed_english_months_and_the_year
     assert days["T-2025"] == "20 Dec 2025"
     assert days["T-sep-5"] == "5 Sep" and days["T-sep-25"] == "25 Sep"
     assert days["T-sep-5-2025"] == "5 Sep 2025"
+
+
+THAI = "th-TH-u-nu-thai"
+
+
+def test_alert_list_o5_o7_a_browser_whose_default_locale_has_another_calendar_digits_and_month_names_changes_nothing(
+        world, browser):
+    """A context whose default locale is Thai (Buddhist calendar, Thai digits, Thai month names, asserted from the page's own
+    `resolvedOptions()`): rows show English months and Latin digits, the year the Gregorian one, and a link's times read
+    and refill as in any browser. (O5, O7)"""
+    run_async(_seed, world.dsn, A, [("T-2025", "2025-12-20T12:00:00Z", ALERT_BYTES, []),
+                                    ("T-sep-5", "2026-09-05T12:00:00Z", ALERT_BYTES, []),
+                                    ("T-in", "2026-11-11T23:30:00Z", ALERT_BYTES, []),
+                                    ("T-out", "2026-11-11T22:30:00Z", ALERT_BYTES, [])])
+    ctx = _signed_in(browser, world, locale=THAI)
+    page = _open(world, ctx, ALERTS)
+    calendar, digits, month, year = page.evaluate(
+        "() => [new Intl.DateTimeFormat().resolvedOptions().calendar, new Intl.DateTimeFormat().resolvedOptions().numberingSystem,"
+        " new Date(0).toLocaleString(undefined, {month: 'short', timeZone: 'UTC'}),"
+        " new Date(0).toLocaleString(undefined, {year: 'numeric', timeZone: 'UTC'})]")
+    assert calendar != "gregory" and digits != "latn" and month != "Jan" and year != "1970", "premise: a default locale unlike en-US"
+    days = {row[2]: row[:2] for row in _rows(page)}
+    assert days["T-sep-5"] == ("14:00", "5 Sep") and days["T-2025"] == ("13:00", "20 Dec 2025")
+    assert days["T-in"] == ("00:30", "12 Nov")
+    linked = _open(world, ctx, f"{ALERTS}?fired_after=2026-11-11T18:00&tz={NEW_YORK}")
+    assert _tickets(linked) == ["T-in"]  # 18:00 in New York is 23:00Z
+    assert linked.locator('input[name="fired_after"]').input_value() == "2026-11-12T00:00"  # Paris, Latin digits
+    assert linked.locator('input[name="tz"]').input_value() == ZONE
 
 
 # --- O5, O7, AP4: filtering is a full load with the filters in the address --------------------------------------------
@@ -493,6 +524,156 @@ def test_alert_list_o5_a_failed_later_page_keeps_the_rows_says_to_reload_and_is_
     assert len([q for q in _reads(requests_of(ctx)[mark:], world.origin) if q.get("cursor")]) == 1
     assert page.get_by_text("Couldn't load more alerts. Reload the page to try again.").count() == 1
     assert page.locator('[data-action="load-more"]').count() == 0
+
+
+LATER_FAILED = "Couldn't load more alerts. Reload the page to try again."
+
+
+#: Answers 200 with a JSON content type to a later page's read that are not a page of alerts (#1581 G8): not a
+#: `{items, next_cursor}` object, an `items` that is not a list, a `next_cursor` that is neither text nor null, an entry that
+#: is not an alert, and text that is not JSON at all.
+NOT_A_PAGE = {
+    "empty object": "{}", "null": "null", "an array": "[]", "a string": '"page"', "a number": "3",
+    "items a number": '{"items":3,"next_cursor":null}', "items an object": '{"items":{},"next_cursor":null}',
+    "items missing": '{"next_cursor":null}', "next_cursor missing": '{"items":[]}',
+    "next_cursor a number": '{"items":[],"next_cursor":7}',
+    "an entry null": '{"items":[null],"next_cursor":null}', "an entry a number": '{"items":[3],"next_cursor":null}',
+    "an entry an empty object": '{"items":[{}],"next_cursor":null}',
+    "an entry with mistyped fields": '{"items":[{"alert_id":5,"fired_at":7,"ticket":null}],"next_cursor":null}',
+    "html with a JSON type": "<html>", "an empty body with a JSON type": "",
+}
+
+
+@pytest.mark.parametrize("body", NOT_A_PAGE.values(), ids=NOT_A_PAGE.keys())
+def test_alert_list_o5_a_later_page_answered_200_with_a_body_that_is_not_a_page_is_that_pages_failure_never_thrown(
+        world, browser, body):
+    """The second page's read answered 200 with a body that is not a page of alerts: the screen shows exactly the rows of
+    page 1 (the same ones, in the same order), "Couldn't load more alerts. Reload the page to try again." once, no Load more,
+    and stays `ready` rather than the error screen. Design r3.1 (Flows, shell `usePagedRead`): a later page's failure,
+    fault included, is returned as that page's state and never thrown, so the rows already shown stay; and "A later page
+    that is not a page ... stays that page's state" (owner ruling: keep the Flows promise). (O5, G8)"""
+    _more(world, PAGE)
+    ctx = _signed_in(browser, world)
+    ctx.route(lambda u: path_is(u, READ) and "cursor=" in u,
+              lambda route: route.fulfill(status=200, content_type="application/json", body=body))
+    page = _open(world, ctx, ALERTS)
+    first = _rows(page)
+    assert len(first) == PAGE
+    page.locator('[data-action="load-more"]').click()
+    page.get_by_text(LATER_FAILED).wait_for()
+    settle(page)
+    assert _rows(page) == first
+    assert shown(page) == "alerts" and page.locator('[data-screen="alerts"]').first.get_attribute("data-state") == "ready"
+    assert page.get_by_text(LATER_FAILED).count() == 1 and page.locator('[data-action="load-more"]').count() == 0
+
+
+def _load_all_pages(page: Any) -> int:
+    """Press Load more until it goes or a later page fails, waiting for each page; the number of presses."""
+    presses = 0
+    while page.locator('[data-action="load-more"]').count() == 1:
+        before = page.locator('[data-row="alert"]').count()
+        page.locator('[data-action="load-more"]').click()
+        presses += 1
+        _until_true(page, lambda rows=before: page.locator('[data-row="alert"]').count() > rows
+                    or page.get_by_text(LATER_FAILED).count() == 1, "the next page, or its failure")
+        if page.get_by_text(LATER_FAILED).count() == 1:
+            break
+    return presses
+
+
+def test_alert_list_o2_o5_o6_o7_every_set_of_filters_pages_to_exactly_its_rows_and_matching_nothing_is_no_match(
+        world, browser):
+    """For every non-empty subset of the form's filter fields (read from the form, so a new field must be given a value
+    here): with more than one page of matching alerts and others that match some of the filters but not all, page 1 and
+    every Load more show exactly the matching rows, newest first, and never "Couldn't load more"; with values that match
+    nothing, the screen is `no-match` with the filter bar and its one row, never "No alerts yet". (O2, O5, O6, O7)"""
+    outcomes = ("malicious", "benign")
+    places = {"below": "2026-08-01T00:00:00Z", "in": "2026-09-01T00:00:00Z", "above": "2026-10-01T00:00:00Z"}
+    records = [("T-1161", _at("2026-11-01T12:00:00Z"), "malicious")]  # the world's own alert
+    alerts = []
+    for outcome, (place, start) in itertools.product(outcomes, places.items()):
+        for n in range(PAGE + 1):
+            fired = _at(start) + dt.timedelta(minutes=n + 100 * outcomes.index(outcome))  # no two alike
+            ticket = f"T-{outcome}-{place}-{n:02d}"
+            records.append((ticket, fired, outcome))
+            alerts.append((ticket, fired.isoformat(), ALERT_BYTES, [f"completed:{outcome}"]))
+    run_async(_seed, world.dsn, A, alerts)
+    paris = zoneinfo.ZoneInfo(ZONE)
+    matching = {"outcome": "malicious", "fired_after": "2026-08-20T00:00", "fired_before": "2026-09-20T00:00"}
+    nothing = {"outcome": "unresolved", "fired_after": "2030-01-01T00:00", "fired_before": "2000-01-01T00:00"}
+
+    def expected(keys: tuple[str, ...]) -> list[str]:
+        """The tickets the filters in `keys` keep, newest first, from the seed alone."""
+        kept = [(fired, ticket) for ticket, fired, outcome in records
+                if ("outcome" not in keys or outcome == matching["outcome"])
+                and ("fired_after" not in keys
+                     or fired >= dt.datetime.fromisoformat(matching["fired_after"]).replace(tzinfo=paris))
+                and ("fired_before" not in keys
+                     or fired < dt.datetime.fromisoformat(matching["fired_before"]).replace(tzinfo=paris))]
+        return [ticket for _, ticket in sorted(kept, reverse=True)]
+
+    ctx = _signed_in(browser, world)
+    first = _open(world, ctx, ALERTS)
+    controls = first.locator('form[data-form="filters"] [name]').evaluate_all("els => els.map(e => [e.name, e.type])")
+    first.close()
+    names = {name for name, _ in controls}
+    fields = sorted(matching)
+    assert set(fields) <= names, f"the form lacks a control for a filter: {sorted(set(fields) - names)}"
+    assert ["tz", "hidden"] in controls, f"the form carries the zone as a hidden field: {controls}"
+    subsets = [keys for size in range(1, len(fields) + 1) for keys in itertools.combinations(fields, size)]
+    assert len(subsets) == 2 ** len(fields) - 1
+    failures: list[str] = []
+    for keys in subsets:
+        assert len(expected(keys)) > PAGE, f"premise: {keys} must page"
+        try:
+            address = urllib.parse.urlencode({**{k: matching[k] if k in keys else "" for k in fields}, "tz": ZONE})
+            page = _open(world, ctx, f"{ALERTS}?{address}")
+            presses = _load_all_pages(page)
+            if _tickets(page) != expected(keys) or presses < 1 or page.get_by_text(LATER_FAILED).count():
+                failures.append(f"{keys}: {len(_tickets(page))} rows after {presses} presses, "
+                                f"{len(expected(keys))} expected, later page failed: {page.get_by_text(LATER_FAILED).count()}")
+            page.close()
+            address = urllib.parse.urlencode({**{k: nothing[k] if k in keys else "" for k in fields}, "tz": ZONE})
+            page = _open(world, ctx, f"{ALERTS}?{address}", state="no-match")
+            if (page.get_by_text("No alerts match these filters").count() != 1 or page.locator('[data-row="alert"]').count()
+                    or page.locator('select[name="outcome"]').count() != 1 or page.get_by_text("No alerts yet").count()):
+                failures.append(f"{keys}: matching nothing did not show the no-match row with the filter bar")
+            page.close()
+        except Exception as error:  # noqa: BLE001 — a timeout is that subset's failure, and the rest still run
+            failures.append(f"{keys}: {type(error).__name__}")
+    assert failures == []
+
+
+def test_alert_list_o5_a_later_page_that_fails_keeps_every_row_of_the_pages_before_it_whichever_page_it_is(
+        world, browser):
+    """201 alerts make five pages. With the read of page k answered 500, for each k from 2 to 5: the rows of pages 1 to
+    k-1 stay (never fewer), the failure line shows once, Load more is gone, and the screen stays `ready`. (O5, usePagedRead)"""
+    _more(world, PAGE * 4)
+    ctx = _signed_in(browser, world)
+    state = {"cursors": 0, "fail_at": 0}
+
+    def answer(route: Any) -> None:
+        state["cursors"] += 1
+        if state["cursors"] == state["fail_at"]:
+            route.fulfill(status=500, body="x")
+        else:
+            route.continue_()
+
+    ctx.route(lambda u: path_is(u, READ) and "cursor=" in u, answer)
+    pages = 5
+    for k in range(2, pages + 1):
+        state.update(cursors=0, fail_at=k - 1)
+        page = _open(world, ctx, ALERTS)
+        for shown_pages in range(1, k - 1):
+            page.locator('[data-action="load-more"]').click()
+            page.locator('[data-row="alert"]').nth(PAGE * (shown_pages + 1) - 1).wait_for()
+        page.locator('[data-action="load-more"]').click()
+        page.get_by_text(LATER_FAILED).wait_for()
+        settle(page)
+        assert page.locator('[data-row="alert"]').count() == PAGE * (k - 1), f"failing page {k}"
+        assert page.get_by_text(LATER_FAILED).count() == 1 and page.locator('[data-action="load-more"]').count() == 0
+        assert page.locator('[data-screen="alerts"]').first.get_attribute("data-state") == "ready"
+        page.close()
 
 
 # --- O6, O7, O12: empty states, the X, and an address the screen cannot read ------------------------------------------
