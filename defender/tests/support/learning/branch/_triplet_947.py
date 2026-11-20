@@ -11,13 +11,14 @@ import os
 import re
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from defender import _yaml
 
+from defender.tests.support.learning.core import _unmodelled1579 as _unmodelled
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 DEFENDER = Path(__file__).resolve().parents[4]
@@ -86,6 +87,30 @@ def world_id(episode_dir: Path, label: str) -> str:
     matches = [world for world in doc["worlds"] if world["label"] == label]
     assert len(matches) == 1, (label, matches)
     return matches[0]["world_id"]
+
+
+def plan_reply(doc: dict) -> dict:
+    """Call 1's reply as the prompt asks for it (#1579, closed keys): the base story, the base
+    disposition, the discriminator and the planned (non-base) worlds' label, axis and facts. No
+    launcher key, no base-world entry, no `axes`, no id."""
+    base = next((w for w in doc["worlds"] if w.get("role") == "A"), {})
+    plan: dict[str, Any] = {"base_story": doc["base_story"], "discriminator": doc["discriminator"],
+                            "worlds": [{"label": w["label"], "axis": w["axis"], "facts": w["facts"]}
+                                       for w in doc["worlds"] if w.get("role") != "A"]}
+    if "disposition_declared" in base:
+        plan["base_disposition"] = base["disposition_declared"]
+    return plan
+
+
+def seat_reply(world: dict) -> dict:
+    """A seat's reply: the four keys it authors (story, axis, disposition_declared, label_basis)."""
+    return {k: world[k] for k in ("story", "axis", "disposition_declared", "label_basis")}
+
+
+def authoring_replies(doc: dict) -> list[dict]:
+    """The question-writer's replies for a fixture family `doc`: call 1's plan, then one seat per
+    non-base world (`author_family`'s protocol)."""
+    return [plan_reply(doc), *(seat_reply(w) for w in doc["worlds"] if w.get("role") != "A")]
 
 
 def declaration(doc: dict) -> dict:
@@ -203,6 +228,8 @@ class FakeAgent:
         self.prompts: list[str] = []
         self.kwargs: list[dict[str, Any]] = []
         self.agent_ids: list[str] = []
+        #: R7: inputs this fake does not model, asserted empty at teardown (conftest).
+        self.unmodelled = _unmodelled.new_list()
 
     def __call__(self, prompt: str, **kw: Any) -> Any:
         self.prompts.append(prompt)
@@ -212,8 +239,26 @@ class FakeAgent:
         if self.fault.raise_after is not None and len(self.prompts) > self.fault.raise_after:
             raise RuntimeError("model provider degraded mid-fan-out")
         if not self.replies:
+            self.unmodelled.append(f"call {len(self.prompts)} ({kw.get('agent_id')}): nothing scripted")
             raise AssertionError(f"FakeAgent ran out of replies at call {len(self.prompts)}")
         reply = self.replies.pop(0)
+        # #1579: a typed seam returns (accepted mapping, request count). A scripted mapping is
+        # an answer accepted at its first request; a scripted tuple names its own count; a
+        # scripted exception is the call's ending (`ReplyUnusable`, `RunUnprocessable`). A str
+        # is the comparator's text answer: legal only for a call made without `output=`.
+        if isinstance(reply, BaseException):
+            raise reply
+        # A questioner call is typed whether or not the (pre-#1579) seam says so; the comparator's
+        # (`comparator:`) is the one text call.
+        typed = kw.get("output") is not None or str(kw.get("agent_id", "")).startswith("questioner")
+        if isinstance(reply, str):
+            if typed:
+                self.unmodelled.append(
+                    f"call {len(self.prompts)} ({kw.get('agent_id')}): a text reply to a typed call")
+                raise AssertionError("#1579: script a mapping, not text, for a typed call")
+            return reply
+        if isinstance(reply, Mapping):
+            return (dict(reply), 1)
         return reply
 
     @property
