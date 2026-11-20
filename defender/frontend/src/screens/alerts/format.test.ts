@@ -6,7 +6,7 @@
 // `after` and `before`; any other answer is Invalid, and an instant may be a `Date`, an ISO string or epoch ms.
 // Expected instants come from Python's `zoneinfo` (fold=0, which PEP 495 defines as Temporal's `compatible`), not from
 // this module's own arithmetic.
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AddressQuery } from "../../shell/provider";
 import { firedLabel, readFilters } from "./format";
 
@@ -357,6 +357,11 @@ describe("firedLabel (O5)", () => {
     expect(firedLabel("2025-09-05T12:00:00Z", { now: NOW, timeZone: PARIS }).day).toBe("5 Sep 2025");
   });
 
+  it("writes a fired time on a later day of the zone than now as its date, never Today", () => {
+    // 12 November, eleven days after `NOW` in Paris: only the zone's current day is Today.
+    expect(firedLabel("2026-11-12T12:00:00Z", { now: NOW, timeZone: PARIS })).toEqual({ time: "13:00", day: "12 Nov" });
+  });
+
   it("adds the year when it is not the current year, the current year being the zone's", () => {
     expect(firedLabel("2025-12-20T12:00:00Z", { now: NOW, timeZone: PARIS }).day).toMatch(/^20 Dec 2025$/);
     // 31 December 23:30Z is already 2027 in Paris: there, 20 December 2026 is last year though UTC says it is not.
@@ -533,14 +538,19 @@ describe("readFilters, wall times near a clock change (O7)", () => {
 });
 
 describe("readFilters, the addresses it refuses (O7)", () => {
-  it.each([["Mars/Phobos"], ["Nowhere"], ["Europe/Nowhere"], ["UTC+1x"]])(
-    "refuses the zone %s the browser does not know, with times set or not",
-    (zone) => {
-      expect(read(PARIS, ["tz", zone])).toBe("invalid");
-      expect(read(PARIS, ["tz", zone], ["outcome", "malicious"])).toBe("invalid");
-      expect(read(PARIS, ["tz", zone], ["fired_after", "2026-11-12T00:00"])).toBe("invalid");
-    },
-  );
+  it.each([
+    ["Mars/Phobos"],
+    ["Nowhere"],
+    ["Europe/Nowhere"],
+    ["UTC+1x"],
+    // Temporal alone reads these ISO date-times as a zone; a `tz` is a zone, not a time.
+    ["2026-01-01T00:00Z"],
+    ["2026-07-01T00:00+01:00[Europe/Paris]"],
+  ])("refuses the zone %s the browser does not know, with times set or not", (zone) => {
+    expect(read(PARIS, ["tz", zone])).toBe("invalid");
+    expect(read(PARIS, ["tz", zone], ["outcome", "malicious"])).toBe("invalid");
+    expect(read(PARIS, ["tz", zone], ["fired_after", "2026-11-12T00:00"])).toBe("invalid");
+  });
 
   it("refuses any of the four keys given twice, even with the same value or an empty one", () => {
     const given: Record<string, string> = {
@@ -557,5 +567,47 @@ describe("readFilters, the addresses it refuses (O7)", () => {
     }
     // Positive control: a key the screen does not read may repeat.
     expect(valid(read(PARIS, ["x", "1"], ["x", "2"], ["outcome", "benign"])).outcome).toBe("benign");
+  });
+});
+
+describe("readFilters, the instant's text (O7)", () => {
+  it("writes an instant as toISOString does, with its milliseconds", () => {
+    // 02:30 on 29 March is skipped in Paris; `compatible` makes it 03:30 (+02:00), which is 01:30Z.
+    const result = readFilters(address(["fired_after", "2026-03-29T02:30"], ["tz", PARIS]), "UTC");
+    expect(result).toMatchObject({ kind: "filters", after: "2026-03-29T01:30:00.000Z", before: null });
+  });
+});
+
+describe("the dates come from the pinned polyfill, never the global Temporal (r3.4)", () => {
+  const native: unknown = Reflect.get(globalThis, "Temporal");
+  afterEach(() => {
+    Reflect.set(globalThis, "Temporal", native);
+    vi.resetModules();
+  });
+
+  it("answers readFilters, wallTime and firedLabel the same while the global Temporal throws on every use", async () => {
+    Reflect.set(
+      globalThis,
+      "Temporal",
+      new Proxy(
+        {},
+        {
+          get: () => {
+            throw new Error("the global Temporal was read");
+          },
+        },
+      ),
+    );
+    // A fresh load of the module, so a global read once when it loads is stubbed too.
+    vi.resetModules();
+    const fresh = await import("./format");
+    const filters = fresh.readFilters(address(["fired_after", "2026-11-12T10:00"], ["tz", PARIS]), "UTC");
+    expect(filters).toMatchObject({ kind: "filters", after: "2026-11-12T09:00:00.000Z" });
+    expect(fresh.readFilters(address(["tz", "Mars/Phobos"]), "UTC")).toEqual({ kind: "invalid" });
+    expect(fresh.wallTime("2026-11-01T12:00:00Z", PARIS)).toBe("2026-11-01T13:00");
+    expect(fresh.firedLabel("2026-10-31T22:30:00Z", { now: NOW, timeZone: PARIS })).toEqual({
+      time: "23:30",
+      day: "Yesterday",
+    });
   });
 });

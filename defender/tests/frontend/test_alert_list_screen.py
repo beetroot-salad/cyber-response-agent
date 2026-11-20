@@ -27,6 +27,7 @@ from defender.tests.frontend._flow1161 import (
     RECONNECT,
     VISIBLE,
     api_calls,
+    await_aborted,
     logins,
     navigations_to,
     screen,
@@ -38,7 +39,7 @@ from defender.tests.frontend._flow1161 import (
 from defender.tests.frontend.conftest import WAIT_MS, requests_of
 from defender.tests.support.api._server1083 import A, ANN, B, BOB
 from defender.tests.support.api._signin1161 import link_account
-from defender.tests.support.frontend._browser1161 import path_is, run_async
+from defender.tests.support.frontend._browser1161 import abort_login_navigation, path_is, run_async
 from defender.tests.support.jobs._jobs1342 import ALERT_BYTES, PADDED_ALERT_BYTES, TITLE
 
 ZONE = "Europe/Paris"
@@ -828,6 +829,34 @@ def test_alert_list_o12_error_when_page_one_fails_otherwise(world, browser, answ
     page = _open(world, ctx, ALERTS, state="error")
     assert page.locator('[data-row="alert"]').count() == 0
     _no_defender(page)
+
+
+def test_alert_list_o4_o12_a_401_on_page_one_reads_as_loading_while_the_sign_in_navigation_goes_nowhere_never_as_error(world, browser):
+    """Page 1 answered 401 starts the navigation to sign-in; while it is not followed (aborted, so the document stays)
+    the screen is `loading`, with no rows, and is never `error` or `not-available`. (O4, O12)"""
+    ctx = _signed_in(browser, world)
+    ctx.route(lambda u: path_is(u, READ), lambda route: route.fulfill(status=401, body="{}"))
+    aborted = abort_login_navigation(ctx)
+    page = ctx.new_page()
+    page.goto(f"{world.origin}{ALERTS}")
+    screen(page, "alerts")
+    await_aborted(page, aborted)
+    for _ in range(10):  # the read answers `gone` meanwhile; give a wrong state time to show itself
+        assert page.locator('[data-screen="alerts"]').get_attribute("data-state") == "loading"
+        page.wait_for_timeout(50)
+    assert page.locator('[data-row="alert"]').count() == 0
+
+
+def test_alert_list_o5_load_more_appends_every_page_of_a_long_list_and_drops_none(world, browser):
+    """451 alerts (nine pages of 50 with the world's own): pressing Load more until it goes leaves every row on the
+    screen, each once, newest first, so no number of pages evicts an earlier one. (O5)"""
+    _more(world, PAGE * 9)
+    ctx = _signed_in(browser, world)
+    page = _open(world, ctx, ALERTS)
+    assert _load_all_pages(page) == 9
+    tickets = _tickets(page)
+    assert len(tickets) == PAGE * 9 + 1 and len(set(tickets)) == len(tickets)
+    assert tickets == ["T-1161"] + [f"T-more-{n:03d}" for n in range(PAGE * 9 - 1, -1, -1)]
 
 
 # --- O4: the address through sign-in ---------------------------------------------------------------------------------
