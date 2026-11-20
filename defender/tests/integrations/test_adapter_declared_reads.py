@@ -160,9 +160,23 @@ def _findings(catalog: Catalog, adapter: str, declared: tuple[tuple[str, str], .
                 found.append(f"{adapter} {tool} sent {request.method} {path}, which its declared reads do not list")
     for method, pattern in declared:
         alone = _declaration(adapter, ((method, pattern),))
-        if not any(_admits(alone, adapter, m, p) for m, p in sent):
+        admitted = [p for m, p in sent if _admits(alone, adapter, m, p)]
+        if not admitted:
             found.append(f"{adapter} declares {method} {pattern}, which no tool sends")
+        found += _broader(adapter, method, pattern, admitted)
     return found
+
+
+def _broader(adapter: str, method: str, pattern: str, admitted: list[str]) -> list[str]:
+    """A finding for each `*` segment of the declared `pattern` at which the sent paths it admits hold fewer than two
+    distinct values: there the route is broader than anything the tools send (O2, r5: each `*` stands where the sent
+    requests differ, so the drive fixtures send at least two values there)."""
+    if not admitted:
+        return []
+    return [f"{adapter} declares {method} {pattern}, broader than what its tools send: its `*` segment {i} stands only "
+            f"for {sorted(values)}"
+            for i, segment in enumerate(pattern.split("/")) if segment == "*"
+            for values in [{p.split("/")[i] for p in admitted}] if len(values) < 2]
 
 
 def _admits(declaration: Any, adapter: str, method: str, path: str) -> bool:
@@ -263,3 +277,24 @@ def test_1504_o2_control_a_tool_that_raises_before_sending_is_a_finding_not_sent
     with _proxy() as proxy_url:
         found = _findings(catalog, "widget", (), {("widget", "lookup"): {"value": "x"}}, proxy_url, tmp_path)
     assert [f for f in found if "lookup" in f and "raised before sending" in f], found
+
+
+def test_1504_o2_no_listed_route_is_broader_than_what_the_tools_send(tmp_path):
+    """Every `*` in every adapter's listed route stands where the requests its tools send differ (the fixtures send at
+    least two values there: Elastic's two indexes); a list naming `POST /*/*` for Elastic's searches, which only ever end
+    in `_search`, is a finding naming the route as broader, and so is the search route when only one index is searched.
+    (O2, r5)"""
+    catalog = Catalog.of_checkout(DEFENDER)
+    over_broad = ("POST", "/*/*")
+    with _proxy() as proxy_url:
+        real = [line for a in catalog.adapter_ids
+                for line in _findings(catalog, a, X.declared_reads(a), DRIVE, proxy_url, tmp_path) if "broader" in line]
+        planted = _findings(catalog, "elastic", (over_broad, X.ELASTIC_READS[1]), DRIVE, proxy_url, tmp_path)
+        one_index = {k: v for k, v in DRIVE.items() if k != ("elastic", "alerts")}
+        single = _findings(catalog, "elastic", X.ELASTIC_READS, one_index, proxy_url, tmp_path)
+    assert real == [], real
+    assert [f for f in planted if "broader" in f and X.shown(over_broad) in f], planted
+    assert not [f for f in planted if "do not list" in f or "no tool sends" in f], (
+        "premise: the over-broad list admits every search and each route is sent", planted)
+    assert [f for f in single if "broader" in f and X.shown(X.ELASTIC_READS[0]) in f], (
+        "control: with only the events index searched, the search route's `*` stands for one value", single)

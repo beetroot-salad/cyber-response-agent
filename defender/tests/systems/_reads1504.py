@@ -34,6 +34,11 @@ SECTIONS = ("Credential", "Pitfalls")
 #: The lint that holds the reference present (O5). FORCED: an extension of the catalog declarations gate, not a new one.
 REFERENCE_GATE = "lint_catalog_declarations"
 
+#: The validator's row for the reads (O4, given only the system): FORCED: the row says `reads`, and for an adapter that
+#: declares none it says `none` (the code stage corrects the words here).
+READS_ROW_WORD = "reads"
+NO_READS_WORD = "none"
+
 #: The declared reads the design's census (C3) finds today, spelled in the route syntax.
 ELASTIC_READS = (("POST", "/*/_search"), ("POST", "/_query"))
 THREAT_INTEL_READS = (("POST", "/lookup"),)
