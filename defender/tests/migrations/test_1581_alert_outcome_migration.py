@@ -56,7 +56,7 @@ def _investigation(dsn: str, alert: str, key: str, stage: str, disposition: str 
     lease = "now() + interval '30 seconds'" if stage == "running" else "NULL"
     execute(dsn, "INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, stage, created_at, "
                  "disposition, cost_usd, cost_is_lower_limit, update_ticket, lease_expires_at) "
-                 f"VALUES (%s, %s, %s, %s, 1, %s, %s, %s, 0, false, false, {lease})",  # noqa: S608
+                 f"VALUES (%s, %s, %s, %s, 1, %s, %s, %s, 0, false, false, {lease})",  # noqa: S608 — test-built SQL: the lease clause is a literal of this file
             (inv_id, tenant, alert, key, stage, created_at, disposition))
     return inv_id
 
@@ -178,7 +178,7 @@ def _head_investigation(dsn: str, alert: str, stage: str, disposition: str | Non
     lease = "now() + interval '30 seconds'" if stage == "running" else "NULL"
     execute(dsn, "INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, stage, created_at, "
                  "disposition, cost_usd, cost_is_lower_limit, update_ticket, lease_expires_at) "
-                 f"VALUES (%s, %s, %s, %s, 1, %s, %s, %s, 0, false, false, {lease})",  # noqa: S608
+                 f"VALUES (%s, %s, %s, %s, 1, %s, %s, %s, 0, false, false, {lease})",  # noqa: S608 — test-built SQL: the lease clause is a literal of this file
             (inv, T1, alert, key, stage, T0, disposition))
     return inv
 
@@ -225,7 +225,7 @@ def test_the_alert_columns_hold_all_or_none_of_the_three_and_only_the_five_codes
     execute(at_head, "UPDATE jobs.alerts SET outcome = NULL, outcome_investigation_id = NULL, outcome_created_at = NULL")
     for partial in ("outcome = 'malicious'", f"outcome_investigation_id = '{inv}'", "outcome_created_at = now()"):
         with pytest.raises(psycopg.errors.CheckViolation):
-            execute(at_head, f"UPDATE jobs.alerts SET {partial}")  # noqa: S608
+            execute(at_head, f"UPDATE jobs.alerts SET {partial}")  # noqa: S608 — test-built SQL: the partial SET is a literal of this file
     with pytest.raises(psycopg.errors.CheckViolation):
         execute(at_head, set_all, ("unsanctioned-benign", inv, T0, alert))
     assert execute(at_head, "SELECT outcome FROM jobs.alerts") == [(None,)]

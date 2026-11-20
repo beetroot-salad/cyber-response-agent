@@ -162,7 +162,7 @@ async def _finish_one(store: Any, rng: random.Random, tenant: str, inv_id: str, 
     return ending
 
 
-async def _life(dsn: str, store: Any, read: Reader, rng: random.Random, clock: Clock, tenant: str, alert_id: str, keys: list[int],  # noqa: PLR0913
+async def _life(dsn: str, store: Any, read: Reader, rng: random.Random, clock: Clock, tenant: str, alert_id: str, keys: list[int],  # noqa: PLR0913 — the generator threads its whole world
                 alerts: int, hits: _Hits, check: Any, *, advance: tuple[bool, bool] | None = None, ending: Ending | None = None) -> tuple[str, Ending] | None:
     """One request's whole life on an alert with no live investigation, the clock standing still between its writes unless
     `advance` says to move it before the request and between its claim and its end (by chance, about half the time, when not
@@ -193,7 +193,7 @@ async def _life(dsn: str, store: Any, read: Reader, rng: random.Random, clock: C
     return key, ended
 
 
-async def _lives(dsn: str, store: Any, read: Reader, rng: random.Random, clock: Clock, tenant: str, alert_id: str,  # noqa: PLR0913
+async def _lives(dsn: str, store: Any, read: Reader, rng: random.Random, clock: Clock, tenant: str, alert_id: str,  # noqa: PLR0913 — the generator threads its whole world
                  keys: list[int], alerts: int, hits: _Hits, check: Any, *, trio: bool, endings: list[Ending] | None) -> list[Ending]:
     """A life on the alert, or (`trio`) three completed lives, the first two made at one clock reading and the second ended
     later, the third made later and then deleted: the two left tie on `created_at` and end in the order of their ids half the
@@ -410,7 +410,7 @@ async def test_ap1_after_any_sequence_of_store_operations_each_tenants_listing_i
                 except BaseException:
                     print(f"AP1 failed at seed {seed}, step {step}")  # noqa: T201 — pytest shows it with the failure
                     for _, alert_id in alerts:
-                        print(f"  alert {alert_id}: {investigations_of(read, alert_id)}")  # noqa: T201
+                        print(f"  alert {alert_id}: {investigations_of(read, alert_id)}")  # noqa: T201 — pytest shows it with the failure
                     raise
     finally:
         read.close()
@@ -511,9 +511,9 @@ async def test_ap1_a_finish_and_a_take_over_of_one_lapsed_row_never_deadlock_and
         running = await _running(store, alert_id, "k1")
         lapse_lease(dsn, running)
         async with holding(dsn, "SELECT id FROM jobs.alerts WHERE id = %s FOR UPDATE", (alert_id,)):
-            start_finish = lambda: asyncio.ensure_future(  # noqa: E731
+            start_finish = lambda: asyncio.ensure_future(  # noqa: E731 — a named thunk the race starts later
                 store.finish(T1, running, stage="completed", disposition="malicious", cost_usd=0.0))
-            start_takeover = lambda: asyncio.ensure_future(store.take_over())  # noqa: E731
+            start_takeover = lambda: asyncio.ensure_future(store.take_over())  # noqa: E731 — a named thunk the race starts later
             first = (start_finish if finish_first else start_takeover)()
             await _settled(dsn, first)
             second = (start_takeover if finish_first else start_finish)()
