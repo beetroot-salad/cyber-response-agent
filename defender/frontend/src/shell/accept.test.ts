@@ -103,11 +103,14 @@ describe("accepting an invitation", () => {
     expect(log).toEqual(["fetch"]);
   });
 
-  it.each([400, 403, 409, 422, 429])("answers refused for a %i (r3.3: any 4xx but 401 and 404), and navigates nowhere", async (status) => {
-    const { log, accept, settled } = accepting(() => Promise.resolve(json(status, { detail: "x" })));
-    expect(await settled(accept())).toEqual({ kind: "refused" });
-    expect(log).toEqual(["fetch"]);
-  });
+  it.each([400, 403, 409, 422, 429])(
+    "answers refused for a %i (r3.3: any 4xx but 401 and 404), and navigates nowhere",
+    async (status) => {
+      const { log, accept, settled } = accepting(() => Promise.resolve(json(status, { detail: "x" })));
+      expect(await settled(accept())).toEqual({ kind: "refused" });
+      expect(log).toEqual(["fetch"]);
+    },
+  );
 
   it.each([500, 502, 503])("answers error for a %i, and navigates nowhere", async (status) => {
     const { log, accept, settled } = accepting(() => Promise.resolve(json(status, { detail: "x" })));
