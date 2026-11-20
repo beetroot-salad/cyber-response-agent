@@ -279,3 +279,164 @@ def test_1504_o3_a_changed_case_system_record_shows_the_read_check_not_the_cover
     second_write = ("POST", "/tickets/*/transitions")
     cover = list(judge(tenant(writes=(comment, second_write)), before))
     assert [f for f in cover if "unable to take the comment" in f and X.shown(second_write) in f], cover
+
+
+# --- #1504 O3 (contract repair r3): the exact-set rule over generated records, and an unreadable list -------------------
+
+#: Planted adapters' lists for the generated sweep: one route, a `*` route beside a PUT, none, and the unusual verbs.
+SWEEP_LISTS: dict[str, tuple[tuple[str, str], ...]] = {
+    "widgeta": (("POST", "/lookup"),),
+    "widgetb": (("POST", "/*/_search"), ("PUT", "/items/*")),
+    "widgetc": (),
+    "widgetd": (("OPTIONS", "/a/b"), ("TRACE", "/t"), ("CONNECT", "/c"), ("DELETE", "/*"), ("PATCH", "/p/*")),
+}
+UNUSUAL_VERBS = ("POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE", "CONNECT")
+
+
+def _respelled(route: tuple[str, str]) -> list[tuple[tuple[str, str], str]]:
+    """`route` spelled otherwise, each with its kind: path case, a trailing `/`, a doubled `/`, another segment, another
+    verb, and the method in lower case (which the route parser refuses)."""
+    method, path = route
+    *head, last = path.split("/")
+    other = "x" if last == "*" else "*" if last else "seg"
+    found = [((method, path.upper()), "case"), ((method, path.swapcase()), "case"), ((method, path + "/"), "trailing"),
+             ((method, "/" + path), "doubled"), ((method, path.replace("/", "//")), "doubled"),
+             ((method, "/".join([*head, other])), "segment"), ((method.lower(), path), "lower-method")]
+    found += [((verb, path), "verb") for verb in UNUSUAL_VERBS if verb != method]
+    return [(r, kind) for r, kind in found if r != route]
+
+
+def _sweep_cases(listed: tuple[tuple[str, str], ...], rng: Any) -> list[tuple[tuple[tuple[str, str], ...], str]]:
+    """Generated record reads for an adapter declaring `listed`, each with what it varies: the list exactly (shuffled,
+    repeated, with GET and HEAD routes beside it, the read methods in lower case too), the list with one respelled route
+    added or substituted, and seeded random draws over the whole pool."""
+    reads_beside = [("GET", "/_cluster/health"), ("HEAD", "/lookup"), ("GET", "/*/_search"), *(
+        (m, p) for _, p in listed for m in ("GET", "HEAD"))]
+    pool = [*listed, *reads_beside, ("get", "/lookup"), ("head", "/lookup"), ("PUT", "/items/*"), ("POST", "/lookup"),
+            *(r for route in listed for r, _ in _respelled(route)),
+            *(r for r, _ in _respelled(("POST", "/lookup")))]
+    cases = []
+    for n in range(4):
+        exact = [*listed, *rng.sample(reads_beside, k=rng.randint(0, len(reads_beside))), *listed[: n % 2]]
+        rng.shuffle(exact)
+        cases.append((tuple(exact), "exact"))
+    for route in listed:
+        for spelled, kind in _respelled(route):
+            cases.append(((*listed, spelled), f"added-{kind}"))
+            cases.append((tuple(spelled if r == route else r for r in listed), f"substituted-{kind}"))
+    for spelled, kind in _respelled(("POST", "/lookup")):
+        cases.append(((*listed, spelled), f"added-{kind}"))
+    for _ in range(40):
+        cases.append((tuple(rng.sample(pool, k=rng.randint(0, min(6, len(pool))))), "random"))
+    return cases
+
+
+def _names_route(fault: str, route: tuple[str, str]) -> bool:
+    """`fault` names `route` as a whole (`METHOD path`, not a prefix of a longer path or a part of a longer method)."""
+    import re
+
+    shown = re.escape(X.shown(route))
+    return re.search(rf"(?<![A-Za-z]){shown}(?=$|[\s,;)`'\"])", fault) is not None
+
+
+def test_1504_o3_a_record_is_accepted_exactly_when_its_non_get_reads_are_its_adapters_list(tmp_path):
+    """Over generated records (respelled routes, unusual verbs, read methods beside the list): a record is accepted iff the
+    set of its routes whose method is not a read method is its adapter's list; a refusal names each missing route as
+    missing and each extra one as extra. A record the route parser refuses (a lower-case method) is refused. (O3)"""
+    import importlib
+    import random
+
+    from defender.kit.faults import ConfigFault
+    from defender.tenancy import parse_access
+    from defender.tenancy.models import SystemRecord, TenantRecords
+
+    door = importlib.import_module("defender.credential_proxy")
+    is_read = getattr(door, "is_read_method", None) or (lambda method: method in ("GET", "HEAD"))
+    rng = random.Random(1504)
+    judge = rules("judge_records")
+    adapters: list[tuple[str, tuple[tuple[str, str], ...], Any, dict[str, str]]] = [
+        ("elastic", X.ELASTIC_READS, _catalog(), _sample("elastic"))]
+    for name, listed in SWEEP_LISTS.items():
+        catalog = rules("Catalog").of_checkout(X.plant_adapter(tmp_path / name, name, reads=repr(listed)))
+        adapters.append((name, listed, catalog, {f"{name.upper()}_TIMEOUT_SEC": "10"}))
+    seen: dict[str, set[bool]] = {}
+    for name, listed, catalog, settings in adapters:
+        for reads, kind in _sweep_cases(listed, rng):
+            access = R.declaration(f"https://{name}.example", reads=reads)
+            record = SystemRecord(system_id=name, version=1, adapter_id=name, settings=settings, access=access)
+            faults = list(judge(TenantRecords(systems={name: record}), None, catalog=catalog))
+            case = (name, kind, reads, faults)
+            try:
+                parse_access(access, system=name)
+            except ConfigFault:  # the route parser's refusal: the record is refused, not judged for reads
+                assert faults, case
+                seen.setdefault("parse-refused", set()).add(True)
+                continue
+            held = {(m, p) for m, p in reads if not is_read(m)}
+            accepted = held == set(listed)
+            seen.setdefault(kind, set()).add(accepted)
+            if accepted:
+                assert faults == [], case
+                continue
+            assert faults, case
+            assert all(RECORDS.part(name, "access") in f for f in faults), case
+            for route in set(listed) - held:
+                assert [f for f in faults if _names_route(f, route) and X.MISSING_WORD in f], (route, case)
+            for route in held - set(listed):
+                assert [f for f in faults if _names_route(f, route) and X.EXTRA_WORD in f], (route, case)
+    assert seen.get("exact") == {True}, seen
+    assert seen.get("parse-refused") == {True}, seen
+    for kind in ("case", "trailing", "doubled", "segment", "verb"):
+        assert False in seen.get(f"added-{kind}", set()) | seen.get(f"substituted-{kind}", set()), (kind, seen)
+    assert seen.get("random") == {True, False}, seen
+
+
+def _validate_in(checkout: Path, system: str) -> tuple[list[str], str]:
+    """Connect's validator given only `system`, over the checkout `checkout` (`DEFENDER_DIR`): its failure rows and output."""
+    import os
+    import subprocess
+    import sys
+
+    repo = Path(__file__).resolve().parents[3]
+    done = subprocess.run([sys.executable, "-m", "defender.skills.connect.validate_scaffold", system], cwd=repo,
+                          env={**os.environ, "PYTHONPATH": str(repo), "DEFENDER_DIR": str(checkout)},
+                          capture_output=True, text=True, timeout=120, check=False)
+    out = done.stdout + done.stderr
+    assert "Traceback" not in out, out
+    return [line for line in out.splitlines() if "[✗]" in line], out
+
+
+@pytest.mark.parametrize(("reads_source", "readable"), [
+    pytest.param(None, False, id="no-list-declared"),
+    pytest.param("tuple([('POST', '/widgets/_find')])", False, id="not-a-literal"),
+    pytest.param("(('POST', '/widgets/_find', 'more'),)", False, id="a-route-of-three-parts"),
+    pytest.param("('POST', '/widgets/_find')", False, id="a-bare-route-not-a-tuple-of-routes"),
+    pytest.param("(('POST', 7),)", False, id="a-path-not-text"),
+    pytest.param("'POST /widgets/_find'", False, id="a-string"),
+    pytest.param("()", True, id="control-an-empty-literal"),
+])
+def test_1504_o3_an_adapter_without_a_readable_list_refuses_even_a_record_with_no_non_get_reads(
+        tmp_path, reads_source, readable):
+    """An adapter whose list is missing, not a literal, or a literal not of `(method, path)` text pairs: a record of it
+    listing no non-GET read is refused at its system by the judgement, held as a ConfigFault by the run's record builder,
+    and connect's validator fails a row naming the list; an empty literal list accepts the same record. (O3, O4)"""
+    from defender.kit.faults import ConfigFault
+    from defender.systems.run_tenant import record_settings
+
+    checkout = X.plant_adapter(tmp_path / "checkout", "widget", reads=reads_source)
+    catalog = rules("Catalog").of_checkout(checkout)
+    for reads in ((), (("GET", "/widgets/*"), ("HEAD", "/widgets"))):
+        records = _planted_record("widget", reads)
+        faults = list(rules("judge_records")(records, None, catalog=catalog))
+        access = record_settings(records, catalog=catalog)["access"]["widget"]
+        if readable:
+            assert faults == [], (reads, faults)
+            assert not isinstance(access, ConfigFault), access
+            continue
+        assert faults, (reads_source, reads)
+        assert all(RECORDS.system("widget") in f for f in faults), faults
+        assert isinstance(access, ConfigFault), access
+        assert RECORDS.system("widget") in str(access), str(access)
+    failed, out = _validate_in(checkout, "widget")
+    naming = [line for line in failed if X.READS_CONSTANT in line]
+    assert bool(naming) is not readable, out
