@@ -193,7 +193,8 @@ def _answer_framed(label: str, value: Any, saved_as: str, cap: int = _CONTEXT_CA
 def _base_text(base: Any, cap: int = _CONTEXT_CAP) -> str:
     framed = _answer_framed("The real base answer", base,
                             "saved for your code (inputs/index.json names it as `base`)", cap)
-    if len(canonical_json(base)) <= _view_size(canonical_json(base), cap):
+    text = _text_of(base)
+    if len(text) <= _view_size(text, cap):
         return framed
     return f"An empty patch serves the whole base answer unchanged.\n{framed}"
 

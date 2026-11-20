@@ -206,9 +206,9 @@ def test_a_verifiers_large_python_output_is_cut_so_its_steps_cannot_fill_its_con
     assert f"BASEMARK-{ROWS - 2:05d}" in reply, "the cut output lost its tail"
 
 
-def test_every_change_of_a_large_hand_in_reaches_the_verifier(tmp_path):
-    """The changes are shown as before (each already cut for length): the verifier sees every
-    one it judges, not a view that drops some."""
+def test_the_changes_reach_the_verifier_as_before_not_as_a_view(tmp_path):
+    """The changes are shown as before (each cut for length, all within their own cap): forty of
+    them, well past a view's size, all reach the verifier, none dropped by a view."""
     n = 40
     removals = [S.op_remove(f"/rows/{k}", fact_id="f1") for k in range(n - 1, -1, -1)]
     verifier = S.passing_verifier()

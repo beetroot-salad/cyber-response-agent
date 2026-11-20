@@ -1058,9 +1058,10 @@ class Oracle:
             raise _AttemptFailed("python needs a sandboxed box, and it could not "
                                  "start") from exc
         if not getattr(box, "sandboxed", False):
-            run.box.lost(box)
-            raise _AttemptFailed("python needs a sandboxed box; the run's box is not "
-                                 "sandboxed, and its code never runs on the host")
+            refused = _AttemptFailed("python needs a sandboxed box; the run's box is not "
+                                     "sandboxed, and its code never runs on the host")
+            run.box.refuse(box, refused)
+            raise refused
         unsaved = _place(run, box)
         cwd = getattr(box, "scratch", None) or _BOX_CWD
         try:
@@ -1330,8 +1331,8 @@ class Oracle:
             ("The world's frozen telemetry (rows earlier answers froze)", frozen),
             ("This hand-in's forged rows", handed),
             ("The world's recorded facts", recorded),
-            # Shown as before, each change already cut for length (`shown_changes`), so every
-            # change reaches the verifier; its box holds them whole.
+            # Shown as before, each change cut for length and the whole within `shown_changes`'s
+            # own cap (past it, a count of those not shown); its box holds them whole.
             (f"The hand-in's changes, as the host applied them (saved whole for your python as "
              f"{_INPUTS}/{name['changes']})", changes),
             *([] if attempt.code is None else [

@@ -177,10 +177,36 @@ def test_a_box_that_could_not_start_is_not_started_again_for_its_run():
 
     owned = _AttemptBox(factory)
 
-    for _ in range(3):
-        with pytest.raises(box.BoxStartRefused, match="runtime is down"):
+    with pytest.raises(box.BoxStartRefused, match="runtime is down"):
+        owned.get()
+    for _ in range(2):
+        with pytest.raises(_AttemptFailed, match="could not start") as later:
             owned.get()
+        assert isinstance(later.value.__cause__, box.BoxStartRefused)
     assert len(starts) == 1
+
+
+def test_a_box_that_started_unsandboxed_is_not_started_again_for_its_run():
+    """A box that is not sandboxed never serves: refused once, no other box is started for the
+    run (the verifier's python goes on after a failed call, and would start one each time)."""
+    starts: list[int] = []
+    owned = _AttemptBox(lambda: starts.append(1) or object())
+
+    started = owned.get()
+    owned.refuse(started, _AttemptFailed("not sandboxed"))
+
+    with pytest.raises(_AttemptFailed, match="could not start"):
+        owned.get()
+    assert len(starts) == 1
+
+
+def test_boxes_made_after_the_attempts_boxes_were_removed_are_born_ended():
+    boxes = _AttemptBoxes(lambda: pytest.fail("a box started after the attempt ended"))
+    boxes.new()
+
+    assert boxes.stop() == []
+    with pytest.raises(_AttemptFailed, match="already ended"):
+        boxes.new().get()
 
 
 def test_a_run_given_only_a_box_owns_it_so_its_deadline_stops_it():

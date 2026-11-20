@@ -92,7 +92,7 @@ class _AttemptBox:
             if self._box is not None:
                 return self._box
             if self._refused is not None:
-                raise self._refused
+                raise _AttemptFailed("its box could not start earlier in this run") from self._refused
         try:
             box = self._factory()  # outside the lock: a slow start never holds up `stop`
         except Exception as exc:
@@ -110,6 +110,13 @@ class _AttemptBox:
             _stop_box(box)
             return self.get()
         return box
+
+    def refuse(self, box: Any, why: Exception) -> None:
+        """`box` started but can never serve (it is not sandboxed): it goes, and no other box is
+        started for this run, as when one could not start."""
+        with self._lock:
+            self._refused = why
+        self.lost(box)
 
     def lost(self, box: Any) -> None:
         """`box` died under a frame or cannot serve: the next `python` call starts a fresh one."""
@@ -183,7 +190,10 @@ class _AttemptBoxes:
         return self._each(lambda box: box.cancel())
 
     def stop(self) -> list[BaseException]:
-        """Remove every box (its container and scratch): only once its Python workers settled."""
+        """Remove every box (its container and scratch): only once its Python workers settled.
+        The attempt's boxes end here: any made from now on is born ended."""
+        with self._lock:
+            self._cancelled = True
         return self._each(lambda box: box.stop())
 
 
