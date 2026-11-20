@@ -114,7 +114,7 @@ def test_the_layout_lint_follows_a_layout_name_through_a_relay_module(tmp_path):
     _plant(root, "learning/relay.py", "from defender.records import ALERT, RUN_LAYOUT\n")
     _plant(root, "learning/probe_relay.py",
            "from defender.learning import relay as ep\n\n\n"
-           "def f(d):\n    return d / ep.ALERT, ep.RUN_LAYOUT.report\n")
+           "def f(d):\n    return d / ep.ALERT, ep.RUN_LAYOUT.investigation\n")
     shown = [f.display for f in _lint().scan(root, allow_list=[])]
     hits = [d for d in shown if "learning/probe_relay.py" in d]
     assert any("ALERT" in d for d in hits), shown

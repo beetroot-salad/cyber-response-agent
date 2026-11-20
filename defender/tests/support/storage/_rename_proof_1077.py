@@ -30,7 +30,6 @@ def main(root: Path) -> int:
     run_dir.mkdir(parents=True)
 
     # Write one of everything the archive projects, each at the accessor that names it.
-    run.report.write_text("---\ndisposition: benign\n---\n\nbody\n", encoding="utf-8")
     run.investigation.write_text("# investigation\n", encoding="utf-8")
     run.provenance.write_text(json.dumps({"commit": "abc"}), encoding="utf-8")
     run.alert.parent.mkdir(parents=True, exist_ok=True)
@@ -55,7 +54,6 @@ def main(root: Path) -> int:
     # THE ROUND TRIP: every record the archive projected, read back through the accessor that
     # names it — never a path this script composed.
     for label, path, want in (
-        ("report", world.report, "body"),
         ("investigation", world.investigation, "# investigation"),
         ("provenance", world.provenance, "abc"),
         ("alert", world.alert, "a1"),
@@ -68,17 +66,11 @@ def main(root: Path) -> int:
     # And through the BOUND readers, which address by the owner's RELATIVE form: a relative
     # name carries no root a dataflow gate can trace.
     with bind(episode_dir) as bound:
-        rec = bound.read(LAYOUT.world(WORLD_ID).report)
-        assert rec.text is not None, f"bound read of the report failed: {rec.reason}"
-        assert "body" in rec.text, "the bound read returned the wrong bytes"
+        rec = bound.read(LAYOUT.world(WORLD_ID).investigation)
+        assert rec.text is not None, f"bound read of the investigation failed: {rec.reason}"
+        assert "# investigation" in rec.text, "the bound read returned the wrong bytes"
         summaries = bound.under(LAYOUT.world(WORLD_ID).gather_summaries).entries()
         assert summaries.files() == ["l-001.md"], summaries.files()
-
-    from defender.learning.judge import family
-
-    with bind(episode_dir) as bound:
-        read = family.read_archived_report(bound, LAYOUT.world(WORLD_ID).report)
-        assert read.disposition == "benign", f"the judge read no disposition: {read.reason}"
 
     # Say which tree this loaded: `python -m` puts the CWD first on `sys.path`, so a harness
     # setting only PYTHONPATH would silently drive the real package and pass, exercising

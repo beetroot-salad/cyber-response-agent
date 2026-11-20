@@ -31,10 +31,11 @@ from defender.tests.learning.branch.test_1344_job_lane import (
 from defender.tests.learning.branch.test_triplet_launcher import _BASE
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 from defender.tests.support.learning.branch import _triplet_947 as T
+from defender.tests.support.learning.core import _typed_output1579 as TY
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
-_FIELDS = {"status", "reason", "message", "fork_message_id", "stage", "findings_count", "sibling_cost_usd"}
+_FIELDS = {"status", "reason", "message", "fork_message_id", "stage", "sibling_cost_usd"}  # #1589: no findings count
 _GOOD_REPLY = J.as_reply_text(J.reply_doc(bucket="none", systems=[]))
 
 
@@ -99,7 +100,9 @@ def _wrong_session_store_version(src: Path) -> None:
 def _ended(ran, status: str, reason: str | None) -> dict:
     end = ran.end
     assert end is not None, f"no end record (the entry exited {ran.exit!r})"
-    assert set(end) == _FIELDS, set(end) ^ _FIELDS
+    assert set(end) - {"findings"} == _FIELDS, set(end) ^ _FIELDS  # #1487: `findings` rides a `completed` record
+    if status == "completed":
+        assert "findings" in end, "a completed record carries its findings state"
     assert (end["status"], end["reason"]) == (status, reason), end
     return end
 
@@ -133,7 +136,7 @@ def test_a_judge_verdict_that_grades_nothing_is_still_completed_with_the_word_in
     }[verdict]()
     ran = run_entry(tmp_path, spawn=spawn)
     end = _ended(ran, "completed", None)
-    assert end["findings_count"] == 0
+    assert "findings_count" not in end  # #1589
     assert verdict in (end["message"] or "")
     assert ran.judge.calls == 0, "a verdict that grades nothing still bought a judge call"
 
@@ -183,12 +186,18 @@ def test_no_fork_point_names_each_kind_of_refusal_the_candidates_carry_and_never
     assert last_kind <= words(both), f"the last kind met is not named: {both!r}"
 
 
-def test_a_session_store_of_another_version_ends_skipped_history_unreadable_naming_the_type(tmp_path):
-    """The real refusal of a store this code cannot read: skipped for good, the type named, cheaply. (r5 table, L5)"""
+def test_a_session_store_of_another_version_ends_failed_launch_refused_with_the_kinds_wording(tmp_path):
+    """A source whose session database is at a schema version this code does not read ends like every other source
+    whose closing record cannot be looked at: `failed`/`launch_refused`, the `schema-version` kind's fixed wording and
+    no other kind's, nothing spent. No backwards compatibility for a pre-#1534 source (owner decision, #1534); it is no
+    longer `skipped`/`history_unreadable`. (r5 table, L5, V-LOOK)"""
+    from defender.tests.support.storage import _readers1534 as R
+
     broken = run_entry(tmp_path, fix_source=_wrong_session_store_version)
-    message = _failed_with(broken, "skipped", "history_unreadable")
-    assert "UnknownSchemaVersion" in message
+    message = _failed_with(broken, "failed", "launch_refused")
+    assert R.names_only("schema-version", message), message
     assert "99" not in message, "the store's own text reached the message"
+    assert str(tmp_path) not in message, "the fault's detail (a path) reached the job's message"
     assert (broken.questioner.calls, broken.spawn.launches) == (0, [])
 
 
@@ -321,7 +330,7 @@ def _refused_before_the_first_sibling(tmp_path, monkeypatch, cause: str, data_ro
     from defender.tests.learning.oracle.live_contracts.test_preflight_and_outcome import _family
 
     if cause == _QUESTIONER_UNUSABLE:
-        return run_entry(tmp_path, questioner=Watch("worlds: [unclosed, {facts: "))
+        return run_entry(tmp_path, questioner=Watch(TY.unusable("base_story must be a non-empty string")))
     if cause == "no fact world":
         return run_entry(tmp_path, questioner=Watch(*S.questioner_for(_family(facts_b=[], facts_c=[])).replies))
     if cause == "no original call":
@@ -565,6 +574,33 @@ def test_knowledge_the_tenant_cannot_pin_ends_failed_launch_refused(tmp_path):
     assert (ran.questioner.calls, ran.spawn.launches) == (0, [])
 
 
+_UNLOOKABLE = ["recorded-before-1534", "pointer-unreadable"]
+
+
+@pytest.mark.parametrize("fault", _UNLOOKABLE)
+def test_1534_a_source_whose_closing_record_cannot_be_looked_at_ends_failed_launch_refused(tmp_path, fault):
+    """A source recorded before #1534 (or with an unreadable pointer) refuses the job before any spend. (OD6, V-LOOK, owner decision d)"""
+    ran = run_entry(tmp_path, source_closing={"disposition": "benign"}, source_fault=fault)
+    _failed_with(ran, "failed", "launch_refused")
+    assert (ran.questioner.calls, ran.spawn.launches) == (0, [])
+
+
+def test_1534_a_source_with_a_readable_closing_record_completes_the_job(tmp_path):
+    """The positive control of the refusals above: the same source, record planted and nothing broken. (V-LOOK)"""
+    _ended(run_entry(tmp_path, source_closing={"disposition": "benign"}), "completed", None)
+
+
+@pytest.mark.parametrize("fault", _UNLOOKABLE)
+def test_1534_the_refused_jobs_message_carries_the_kinds_wording_and_no_path(tmp_path, fault):
+    """The end record's message is the kind's fixed wording, never the lookup's detail (a path). (V-LOOK, OD19)"""
+    from defender.records import closing as C
+
+    message = _failed_with(run_entry(tmp_path, source_closing={"disposition": "benign"}, source_fault=fault),
+                           "failed", "launch_refused")
+    assert C.FAULT_WORDING[fault] in message, message
+    assert str(tmp_path) not in message, "the fault's detail (a path) reached the job's message"
+
+
 @pytest.mark.parametrize("knowledge", [T.NO_KNOWLEDGE_KEY, "unversioned"], ids=["not recorded", "unversioned"])
 def test_knowledge_no_commit_proves_ends_failed_launch_refused(tmp_path, knowledge):
     """A source whose stamp records no knowledge commit, or says unversioned: refused before any spend. (r5 table)"""
@@ -620,18 +656,21 @@ def test_a_source_that_is_gone_ends_failed_source_unavailable(tmp_path, gone):
     assert ran.spawn.launches == []
 
 
-def test_a_source_recorded_before_1235_ends_skipped_history_unreadable_naming_the_type(tmp_path):
-    """No session pointer beside the folder, but the pre-#1235 link inside it: current code will never read that
-    history, so it is skipped for good, the refusal's type named and nothing spent; not `source_unavailable`.
-    (r5 table, L5)"""
+def test_a_source_recorded_before_1235_ends_failed_launch_refused_with_the_kinds_wording(tmp_path):
+    """No session pointer beside the folder, but the pre-#1235 link inside it: it ends like every other source whose
+    closing record cannot be looked at, `failed`/`launch_refused` with the `legacy-link` kind's fixed wording and no
+    other kind's, nothing spent; not `source_unavailable`, and no longer `skipped`/`history_unreadable` (owner
+    decision, #1534: no backwards compatibility for pre-#1235 sources). (r5 table, L5, V-LOOK)"""
+    from defender.tests.support.storage import _readers1534 as R
+
     def legacy(src: Path) -> None:
         pointer = _session_pointer(src)
         (src / "session_store_pointer.json").write_text(pointer.read_text(encoding="utf-8"), encoding="utf-8")
         pointer.unlink()
 
     ran = run_entry(tmp_path, fix_source=legacy)
-    message = _failed_with(ran, "skipped", "history_unreadable")
-    assert "LegacyRunLink" in message
+    message = _failed_with(ran, "failed", "launch_refused")
+    assert R.names_only("legacy-link", message), message
     assert str(tmp_path) not in message, "the launcher's text reached the message"
     assert (ran.questioner.calls, ran.spawn.launches) == (0, [])
 
@@ -881,3 +920,43 @@ def test_a_sigterm_after_the_judge_returned_is_still_completed(tmp_path):
     assert len(records) == 1, f"premise: the entry left one end record, not {records}: {done.stderr[-2000:]}"
     ended = json.loads(records[0].read_text(encoding="utf-8"))
     assert (ended["status"], ended["reason"]) == ("completed", None), ended
+
+
+def _plan_of(authored) -> dict:
+    """Call 1's reply as the prompt asks for it, from the fixture family's authored half."""
+    return {"base_story": "the captured story", "base_disposition": "malicious",
+            "discriminator": {"predicate": "p"},
+            "worlds": [{"label": w["label"], "axis": w["axis"], "facts": w["facts"]}
+                       for w in authored["worlds"] if w.get("role") != "A"]}
+
+
+@pytest.mark.parametrize("at", ["call 1", "seat"])
+def test_a_reply_unusable_at_call_1_or_a_seat_ends_skipped_family_unusable_with_nothing_started(tmp_path, at):
+    """#1579 P3: the runner gave up on the question-writer's call 1 or a seat: the family's own
+    refusal, `skipped: family_unusable`, nothing started — the same ending as any unusable family."""
+    plan = _plan_of(T.declaration(S.family_v2()))
+    replies = [TY.unusable("base_story must be a non-empty string")] if at == "call 1" else [
+        plan, TY.unusable("story must be a string")]
+
+    ran = run_entry(tmp_path, questioner=Watch(*replies))
+
+    _failed_with(ran, "skipped", "family_unusable")
+    assert ran.spawn.launches == []
+    assert ran.questioner.calls == len(replies)
+
+
+@pytest.mark.parametrize("at", ["call 1", "seat"])
+@pytest.mark.parametrize("fault", [lambda: TY.unprocessable("provider down", cause=TimeoutError("slow")),
+                                   lambda: TypeError("a bug in the host's check")],
+                         ids=["provider-failure", "host-bug"])
+def test_a_host_exception_at_call_1_or_a_seat_ends_failed_entry_error_not_family_unusable(tmp_path, at, fault):
+    """#1579 P5: a provider failure (`RunUnprocessable`) or a host bug at call 1 or a seat keeps
+    today's ending (`failed: entry_error`, as an untyped fault), never `skipped: family_unusable`."""
+    raised = fault()
+    plan = _plan_of(T.declaration(S.family_v2()))
+    replies = [raised] if at == "call 1" else [plan, raised]
+
+    ran = run_entry(tmp_path, questioner=Watch(*replies))
+
+    _failed_with(ran, "failed", "entry_error")
+    assert ran.spawn.launches == []

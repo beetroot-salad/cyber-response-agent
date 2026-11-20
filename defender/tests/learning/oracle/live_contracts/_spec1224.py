@@ -1294,7 +1294,7 @@ def judged_episode(tmp_path: Path, *, doc: dict | None = None,
     base recording, every world archived under `worlds/<X>/` (`J.archived_judge_world`), the
     world ledgers with the query-table rows they answered (`write_call_table`), each planted
     world's oracle store directory, and pre-flight's outcome record (`outcome=None` writes
-    none)."""
+    none). Each world's arm closes with the disposition its manifest declares (`J.closing_plan`, #1534)."""
     ep = episode_v2(tmp_path, doc=doc, root=root, episode_id=episode_id, base_rows=[
         captured("idp", "query", query_params("user:alice"),
                  {"rows": [{"user": "alice", "event_id": "e-100", "action": "logon"}]})])
@@ -1319,6 +1319,7 @@ def judged_episode(tmp_path: Path, *, doc: dict | None = None,
         outcome_record(ep, outcome)
     if labels:
         T.plant_roster(ep)
+        J.closing_plan(ep, tmp_path, {label: {"disposition": declared.get(label, "malicious")} for label in labels})
     return ep
 
 
@@ -1632,7 +1633,8 @@ def default_calls() -> list[Call]:
 
 def source_run(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = None,
                tenant_id: str = FIXTURE_TENANT,
-               after_source: Callable[[Path], None] | None = None) -> tuple[Path, Path]:
+               after_source: Callable[[Path], None] | None = None,
+               source_closing: dict | None = None, source_fault: str | None = None) -> tuple[Path, Path]:
     """A runs base on the fixture tenant holding ONE finished source run whose captured calls
     are `calls` (default `default_calls()`), each also answered by the live estate with the
     same payload — so a clean replay finds no drift. Returns `(runs base, source run dir)`."""
@@ -1652,7 +1654,8 @@ def source_run(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = No
         if after_source is not None:
             after_source(src)
 
-    base, src = location_path(T.runs_base)(tmp_path, tenant_id=tenant_id, land_calls=land)
+    base, src = location_path(T.runs_base)(
+        tmp_path, tenant_id=tenant_id, land_calls=land, source_closing=source_closing, source_fault=source_fault)
     for seq, c in enumerate(post):
         T.capture_call(src, system=c.system, verb=c.verb, params=dict(c.params),
                        payload=c.payload, lead=POST_BRANCH_LEAD, seq=seq)
@@ -1684,17 +1687,22 @@ def _dispatch_after_branch_point(base: Path, src: Path, lead: str) -> None:
         ], agent_id="main")
 
 
+def quiet_judge() -> FakeJudge:
+    """A judge double whose mapping reply grades nothing (bucket `none`, nothing filed): the
+    default for a scenario whose subject is not the judge (#1579: a typed reply is a mapping)."""
+    return FakeJudge(default=J.reply_doc(findings=[], bucket="none", systems=[]))
+
+
 def questioner_for(doc: dict | None = None) -> FakeAgent:
-    """The question-writer double: call 1 answers the family, then one call per authored seat
-    (`author_family`'s protocol), each reply a document."""
+    """The question-writer double: call 1 answers the plan, then one call per planned world's seat
+    (`author_family`'s protocol), each reply a mapping (#1579: what the prompt asks for)."""
     doc = doc if doc is not None else family_v2()  # lint-default: ok — a test builder's fresh per-call double or fixture, never a shared instance
-    authored = T.declaration(doc)
-    seats = [w for w in authored["worlds"] if w.get("role") != "A"]
-    return FakeAgent(authored, *seats)
+    return FakeAgent(*T.authoring_replies(doc))
 
 
-def launch(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = None,
+def launch(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = None,  # noqa: PLR0913 — one keyword per scenario knob
            after_source: Callable[[Path], None] | None = None,
+           source_closing: dict | None = None, source_fault: str | None = None,
            spawn: Any = None, argv_extra: Iterable[str] = (),
            oracle: ScriptedModel | None = None, verifier: ScriptedModel | None = None,
            **seams: Any) -> Launch:
@@ -1702,7 +1710,8 @@ def launch(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = None,
     (`rc`, `message` — the `sys.exit` text of a refusal, else "" —, `spawn`, `ep`). Every seam
     not named defaults to a recording double; the role preflight is neutralised
     (`no_preflight`) for every scenario not about it."""
-    _base, src = source_run(tmp_path, est, calls=calls, after_source=after_source)
+    _base, src = source_run(tmp_path, est, calls=calls, after_source=after_source,
+                            source_closing=source_closing, source_fault=source_fault)
     spawn = spawn if spawn is not None else FakeSpawn()  # lint-default: ok — a test builder's fresh per-call double or fixture, never a shared instance
     seams.setdefault("questioner", questioner_for())
     seams.setdefault("preflight", no_preflight)
@@ -1710,7 +1719,7 @@ def launch(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = None,
     seams.setdefault("roster", est.roster())
     # The judge runs at the end of an accepted launch; a scenario not about it must never reach
     # a real provider, so the default is a recording double whose reply grades nothing.
-    seams.setdefault("judge", FakeJudge(default="bucket: none\nsystems: []\nfindings: []\n"))
+    seams.setdefault("judge", quiet_judge())
     if oracle is not None:
         seams["oracle"] = oracle.model
     if verifier is not None:

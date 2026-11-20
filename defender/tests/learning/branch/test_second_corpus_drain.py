@@ -21,6 +21,7 @@ from defender.tests.support.learning.core._store1278 import (  # noqa: E402
     call, lesson_citing, migrated_database, world)  # noqa: F401 — fixtures
 from defender.tests.support.learning.curation import _drain719 as D  # noqa: E402
 from defender.tests.support.learning.judge import _gate_1278 as G  # noqa: E402
+from defender.tests.support.learning.judge import _judge_921 as J  # noqa: E402
 from defender.tests.learning.judge.contrast_contracts import _spec1234 as S  # noqa: E402
 from defender.learning.core.state import FINDINGS, QUESTIONER_FINDINGS  # noqa: E402
 from defender.tests.tenancy.tenant_1108_p4._drain_support import (  # noqa: E402
@@ -88,7 +89,7 @@ def defender_queue_row(fid: str = "ep-1/b/0/1", **extra) -> dict:
     row = dict(D.finding_row(fid, run_id="ep-1", direction="family"),
                subject=W.SUBJECT_DEFENDER, type="lead-set",
                subject_anchor="l-001", subject_topic="coverage",
-               contrast_evidence=[f"worlds/{T.fixture_world_id('b')}/report.md", f"worlds/{T.fixture_world_id('a')}/report.md"],
+               contrast_evidence=[f"worlds/{T.fixture_world_id('b')}/closing", f"worlds/{T.fixture_world_id('a')}/closing"],
                on_verdict_path=True, world_label_doubted=False,
                source_run_dir="episodes/ep-1/worlds/b")
     row.pop("judge_outcome", None)          # a row carrying the retired name is held (#1234)
@@ -252,6 +253,7 @@ def test_nothing_lands_outside_the_declared_write_set(tmp_path, monkeypatch):
     """A graded pass writes nothing outside the declared episode artifacts, and its rows go to the store."""
     built = W.contrast_family(tmp_path, monkeypatch)
     ep = built.ep
+    J.ensure_closings(ep)  # the fixture's own arm records and pointers, planted before the pass is measured
     before = {p.relative_to(ep) for p in ep.rglob("*") if p.is_file()}
     judge = S.judge({"b": S.world_reply("lead-quality", ["idp"], investigator=[S.inv()],
                                         world=[S.wf("mislabelled")])})

@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 
 from defender.tests.learning.judge.contrast_contracts import _spec1234 as S
+from defender.tests.support.learning.judge import _judge_921 as J
 
 DEFENDER = S.LANES["defender"]
 QUESTIONER = S.LANES["questioner"]
@@ -191,8 +192,8 @@ def _boundary(built: Any, where: str) -> tuple[Path, str, str]:
     pointer is filed). The manifest is its own branch (`_manifest_case`)."""
     if where == "conduct":
         return built.world_dir("c") / "investigation.md", S.conduct("c", "investigation.md"), HALF
-    if where == "report":
-        return built.world_dir("c") / "report.md", S.conduct("c"), HALF
+    if where == "closing":
+        return built.world_dir("c") / "closing", S.conduct("c"), HALF
     if where == "oracle":
         return built.oracle_path("c"), S.oracle_ptr("c"), RIDE
     if where == "served":
@@ -214,8 +215,6 @@ def _damage(tmp_path: Path, path: Path, kind: str) -> None:
         _plant_device(path)
     elif kind == "torn":
         S.tear_jsonl(path)
-    elif kind == "second_disposition":
-        S.second_disposition(path)
     elif kind == "symlink":
         S.plant_symlink(path, S.scratch_copy(tmp_path, path, f"symlinked-{path.name}"))
     elif kind == "hardlink":
@@ -233,7 +232,9 @@ def _cell(tmp_path: Path, where: str, kind: str | None) -> tuple[dict, dict, Any
     probe read back, what it must read back, the family, and the damaged path."""
     built = S.family(tmp_path)
     path, pointer, filed = _boundary(built, where)
-    if kind is not None:
+    if kind == "unreadable_closing":
+        J.fault_arm(built.ep, "c", "row-invalid")
+    elif kind is not None:
         _damage(tmp_path, path, kind)
     return (_probe(built, pointer, filed),
             _probe_expected(pointer, filed, resolves=kind is None), built, path)
@@ -244,6 +245,14 @@ def _c_row_names(built: Any, path: Path) -> bool:
     row_c = S.row(built, "c")
     said = row_c.get(MALFORMED) or row_c.get(UNGRADABLE)
     return bool(said) and path.name in str(row_c.get("ungradable_reason", ""))
+
+
+def _family_before_the_manifest_is_damaged(tmp_path: Path) -> Any:
+    """The family with its arms' closing records already planted: planting reads the manifest (#1534), so it
+    cannot wait for the first read of the episode once the manifest is the damaged file."""
+    built = S.family(tmp_path)
+    J.ensure_closings(built.ep)
+    return built
 
 
 def _manifest_case(built: Any) -> dict[str, Any]:
@@ -370,7 +379,7 @@ def _no_follow_case(tmp_path: Path, case: str, *, damaged: bool) -> tuple[Any, s
                                                 "closed_before_cut": False}}}.get(case, {})
         built = S.family(tmp_path, _with_d(**(over if damaged else {})))
         if damaged and case == "malformed_world":
-            S.second_disposition(built.world_dir("d") / "report.md")
+            J.fault_arm(built.ep, "d", "row-invalid")
         return built, S.conduct("d", _INVESTIGATION)
     built = S.family(tmp_path)
     c_dir = built.world_dir("c")
@@ -379,7 +388,7 @@ def _no_follow_case(tmp_path: Path, case: str, *, damaged: bool) -> tuple[Any, s
     # case -> (the damage planted, the pointer when damaged, the plain twin's pointer)
     plant, damaged_pointer, plain_pointer = {
         "leaf_symlink_inside_episode": (
-            lambda: S.plant_symlink(c_dir / _SUMMARY, "../report.md"), summary, summary),
+            lambda: S.plant_symlink(c_dir / _SUMMARY, "../investigation.md"), summary, summary),
         "table_symlink": (
             lambda: _damage(tmp_path, built.table_path("c"), "symlink"), row, row),
         "under_linked_directory": (
@@ -433,7 +442,7 @@ def test_1234_contrast_pointer_naming_a_reference_worlds_judge_draw(
     for label in ("b", "c"):
         (judged_before.world_dir(label) / "judge").mkdir(parents=True, exist_ok=True)
         (judged_before.world_dir(label) / "judge" / "0.yaml").write_text(
-            S.as_text(S.QUIET), encoding="utf-8")
+            S._yaml.safe_dump(S.QUIET, sort_keys=False), encoding="utf-8")
         (judged_before.ep / "wire_logs" / framed(f"judge:{label}:0")).write_text(
             json.dumps({"agent_id": f"judge:{label}:0", "prompt": "p", "reply": "r"}) + "\n",
             encoding="utf-8")
@@ -462,7 +471,7 @@ def test_1234_pointer_naming_judge_yaml_or_a_wire_log_record(tmp_path: Path) -> 
         return ["judge.yaml", S.conduct(other, "judge/0.yaml"), "wire_logs/x_framed_trace.jsonl",
                 "world_records/d.yaml", "not_comparable.yaml", "served/base.jsonl",
                 "served/base.jsonl#0", "staged.yaml", "review.yaml", "provenance.json",
-                "runs/_tenant.json", "runs/20260728t161845z-sibling-b/report.md"]
+                "runs/_tenant.json", "runs/20260728t161845z-sibling-b/closing"]
 
     own_context = S.conduct("b", "provenance.json")
     _run(built, {
@@ -557,7 +566,7 @@ def test_1234_am_reference_half_in_a_run_outside_the_reference_set(tmp_path: Pat
     else:
         built = S.family(tmp_path, _with_d())
         if d_state == "malformed_world":
-            S.second_disposition(built.world_dir("d") / "report.md")
+            J.fault_arm(built.ep, "d", "row-invalid")
     _run(built, {"b": _reply(investigator=[
         _inv([S.conduct("b"), S.conduct("d", "investigation.md")], tag="d-conduct"),
         _inv([S.conduct("b"), built.served("d", 0)], tag="d-served"),
@@ -579,7 +588,7 @@ def test_1234_pointer_into_an_excluded_worlds_oracle_store(tmp_path: Path, d_sta
     built = S.family(tmp_path, S.triad(a={"calls": [S.CallRow()], "oracle": True},
                                        d=_d_spec(**over)))
     if d_state == "malformed_world":
-        S.second_disposition(built.world_dir("d") / "report.md")
+        J.fault_arm(built.ep, "d", "row-invalid")
     pair = [S.conduct("b"), S.conduct("a")]
     _run(built, {"b": _reply(
         investigator=[_inv([*pair, S.oracle_ptr("d"), S.oracle_ptr("a")], tag="rides")],
@@ -595,9 +604,9 @@ def test_1234_pointer_into_an_excluded_worlds_oracle_store(tmp_path: Path, d_sta
 
 #: Hostile pointers: empty, whitespace, only a fragment, absolute, home-relative, a URL, a glob,
 #: an embedded newline, an embedded NUL, and one far longer than any path.
-_HOSTILE = ["", "   ", "#worlds/b", "/etc/passwd", f"~/worlds/{T.fixture_world_id('b')}/report.md",
-            f"https://example.com/worlds/{T.fixture_world_id('b')}/report.md", "worlds/*/report.md",
-            f"worlds/{T.fixture_world_id('b')}/report.md\nworlds/{T.fixture_world_id('a')}/report.md", f"worlds/{T.fixture_world_id('b')}/report.md\x00",
+_HOSTILE = ["", "   ", "#worlds/b", "/etc/passwd", f"~/worlds/{T.fixture_world_id('b')}/closing",
+            f"https://example.com/worlds/{T.fixture_world_id('b')}/closing", "worlds/*/closing",
+            f"worlds/{T.fixture_world_id('b')}/closing\nworlds/{T.fixture_world_id('a')}/closing", f"worlds/{T.fixture_world_id('b')}/closing\x00",
             f"worlds/{T.fixture_world_id('b')}/" + "x" * 5000 + ".md"]
 
 
@@ -619,12 +628,12 @@ def test_1234_pointer_with_hostile_syntax(tmp_path: Path) -> None:
 # The undamaged manifest twin is the oversize test's `manifest-plain-twin` row.
 @pytest.mark.parametrize("link", ["to_a_byte_copy_of_itself", "to_a_reference_runs_report"])
 def test_1234_manifest_replaced_by_a_link_and_cited_as_design(tmp_path: Path, link: str) -> None:
-    built = S.family(tmp_path)
+    built = _family_before_the_manifest_is_damaged(tmp_path)
     manifest = built.ep / "family.yaml"
     if link == "to_a_byte_copy_of_itself":
         S.plant_symlink(manifest, S.scratch_copy(tmp_path, manifest, "manifest-copy.yaml"))
     elif link == "to_a_reference_runs_report":
-        S.plant_symlink(manifest, f"worlds/{T.fixture_world_id('c')}/report.md")
+        S.plant_symlink(manifest, f"worlds/{T.fixture_world_id('c')}/closing")
     assert _manifest_case(built) == _manifest_expected(damaged=True)
 
 
@@ -636,7 +645,7 @@ _FIVE = ("manifest", "conduct", "oracle", "served", "table")
 def test_1234_an_oversize_file_is_refused_by_name_on_every_read_cell(tmp_path: Path, where: str,
                                                                      damaged: bool) -> None:
     if where == "manifest":
-        built = S.family(tmp_path)
+        built = _family_before_the_manifest_is_damaged(tmp_path)
         if damaged:
             S.plant_oversize(built.ep / "family.yaml")
         assert _manifest_case(built) == _manifest_expected(damaged=damaged)
@@ -652,7 +661,7 @@ def test_1234_an_oversize_file_is_refused_by_name_on_every_read_cell(tmp_path: P
 def test_1234_pointer_naming_a_fifo_or_directory_does_not_resolve_and_does_not_hang(
         tmp_path: Path, where: str, kind: str) -> None:
     if where == "manifest":
-        built = S.family(tmp_path)
+        built = _family_before_the_manifest_is_damaged(tmp_path)
         _damage(tmp_path, built.ep / "family.yaml", kind)
         assert _manifest_case(built) == _manifest_expected(damaged=True)
         return
@@ -660,17 +669,27 @@ def test_1234_pointer_naming_a_fifo_or_directory_does_not_resolve_and_does_not_h
     assert seen == expected
 
 
-_MALFORMED_CELLS = {"table": "torn", "oracle": "torn", "report": "second_disposition"}
+_MALFORMED_CELLS = {"table": "torn", "oracle": "torn", "closing": "unreadable_closing"}
 
 
 @pytest.mark.parametrize(("where", "damaged"), [
     *[pytest.param(where, True, id=f"{where}-malformed") for where in sorted(_MALFORMED_CELLS)],
     # The table and oracle cells' undamaged twins are the oversize test's.
-    pytest.param("report", False, id="report-plain-twin")])
+    pytest.param("closing", False, id="closing-plain-twin")])
 def test_1234_pointer_into_a_file_the_reader_refuses_as_malformed_does_not_resolve(
         tmp_path: Path, where: str, damaged: bool) -> None:
     seen, expected, built, path = _cell(tmp_path, where,
                                         _MALFORMED_CELLS[where] if damaged else None)
+    if where == "closing":
+        from defender.records import closing as C
+
+        row_c = S.row(built, "c")
+        said = damaged and row_c.get("ungradable") is True and C.FAULT_WORDING["row-invalid"] in str(
+            row_c.get(UNGRADABLE, ""))
+        assert (seen, bool(said)) == (expected, damaged)
+        # a record that could not be looked at is a fault, not a malformed archive
+        assert row_c.get(MALFORMED) is not True
+        return
     assert (seen, _c_row_names(built, path)) == (expected, damaged)
 
 

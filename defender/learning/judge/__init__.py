@@ -19,7 +19,7 @@ from defender.learning.judge._errors import JudgeRefused  # noqa: E402
 
 from defender.records.formats import Episode  # noqa: E402
 from defender._io import Bound, NotPlainEntry
-from defender.records import WIRE_LOG_NAMES  # noqa: E402
+from defender.records import WIRE_LOG_NAMES, closing  # noqa: E402
 from defender.records.formats import LAYOUT  # noqa: E402
 from defender.learning.branch import outcome as outcome_mod  # noqa: E402
 from defender.learning.judge import calls as calls_mod  # noqa: E402
@@ -83,10 +83,9 @@ from defender.learning.judge._grade_record import (
 )
 
 
-#: How many times one draw asks again after a reply the validator refused (N22: an invalid
-#: reply is retried as a whole). A failed CALL is not retried here — the model client already
-#: retried it (M03), and a bare re-run grades the world later.
-_REPLY_ATTEMPTS = 3
+#: How many times one draw's call asks again after a reply its check refused (#1579): the call
+#: sends at most 1 + this many requests, inside the one call. A failed CALL is not re-asked.
+_REPLY_RETRIES = 2
 
 
 def _judge_model() -> str:
@@ -135,7 +134,8 @@ def _run_world_draws(  # noqa: C901, PLR0913 — one loop over draws and their b
     draw. Returns `(completed_draws, draw documents by index, malformed replies, the last
     refusal's reason)`. A judge call that raises costs only its draw, in either lane: a
     learning job's pass fails only when every call it made raised (`_Pass._refuse_graded_nothing`)."""
-    from defender.learning.core.config import StageWiring
+    from defender.learning._pydantic_stage import Accepted, TypedOutput
+    from defender.learning.core.config import ReplyUnusable, StageWiring
     from defender._agent_role import AgentRole
 
     if (scope == "family") != (world_id is None):
@@ -155,43 +155,58 @@ def _run_world_draws(  # noqa: C901, PLR0913 — one loop over draws and their b
             # prompt, which would only be refused again.
             break
         sink = world.draw(n) if world is not None else episode.family_draw(n)
-        doc: dict[str, Any] | None = None
-        for attempt in range(_REPLY_ATTEMPTS):
-            agent_id = f"judge:{scope_id}:{n}" if attempt == 0 else f"judge:{scope_id}:{n}:{attempt}"
-            wiring = StageWiring(
-                prompt_path=run_mod._ROLE_PROMPT, model=model, effort=effort,
-                trace_name=WIRE_LOG_NAMES.agent_trace(agent_id), label=agent_id)
-            try:
-                reply_text = judge(prompt, role=AgentRole.JUDGE, agent_id=agent_id,
-                                   wiring=wiring)
-            # Every class: `run_stage` re-raises `StageAbort`/`FatalConfigError` unwrapped and
-            # an injected seam may raise anything; one bad call must not discard the other
-            # worlds.
-            except Exception as failed:  # noqa: BLE001 — one draw's blast radius
-                # Writable whatever the exception carried (a lone surrogate would fail the
-                # draw file's write far from its cause).
-                reason = f"{type(failed).__name__}: {failed}".encode(
-                    "utf-8", "backslashreplace").decode("utf-8")
-                doc = {"failure_reason": reason}
-                _write_wire_log(episode, agent_id=agent_id, prompt=prompt,
-                                reply=None, failure=reason)
-                too_large = _is_size_failure(failed)
-                break
-            _write_wire_log(episode, agent_id=agent_id, prompt=prompt,
-                            reply=reply_text, failure=None)
-            try:
-                reply = run_mod.validate_reply(reply_text, scope=scope,
-                                               reachable_systems=reachable_systems,
-                                               shown_its_facts=shown_its_facts)
-            except JudgeRefused as refused:
-                malformed += 1
-                refusal = str(refused)
-                continue
-            doc = run_mod.draw_document(reply, scope=scope)
+        agent_id = f"judge:{scope_id}:{n}"
+        wiring = StageWiring(
+            prompt_path=run_mod._ROLE_PROMPT, model=model, effort=effort,
+            trace_name=WIRE_LOG_NAMES.agent_trace(agent_id), label=agent_id)
+        output = TypedOutput(
+            name="verdict", description="File your verdict: the reply the task describes.",
+            schema=run_mod.reply_schema(scope), retries=_REPLY_RETRIES,
+            check=run_mod.reply_check(scope=scope, reachable_systems=reachable_systems,
+                                      shown_its_facts=shown_its_facts))
+        doc, sent, failure = None, None, None
+        requests, refused = 1, 0
+        try:
+            reply = judge(prompt, role=AgentRole.JUDGE, agent_id=agent_id, wiring=wiring,
+                          output=output)
+            accepted = reply if isinstance(reply, Accepted) else (
+                Accepted(*reply) if isinstance(reply, tuple) else Accepted(reply, 1))
+            requests, refused, sent = accepted.requests, accepted.refused, accepted.mapping
+            # The call site runs the same check: one owner. Under a seam fake it is the only run.
+            doc = run_mod.draw_document(
+                run_mod.validate_reply(sent, scope=scope, reachable_systems=reachable_systems,
+                                       shown_its_facts=shown_its_facts), scope=scope)
+        except ReplyUnusable as unusable:
+            requests, refused, refusal = unusable.requests, unusable.refused, unusable.reason
+            failure = refusal
+        except JudgeRefused as refused_here:
+            # The call site's check refused what a fake returned: the last reply is refused too.
+            refused += 1
+            refusal = failure = str(refused_here)
+        # Every class: `run_stage` re-raises `StageAbort`/`FatalConfigError` unwrapped and an
+        # injected seam may raise anything; one bad call must not discard the other worlds.
+        except Exception as failed:  # noqa: BLE001 — one draw's blast radius
+            # The runner's failure says how many requests went out and how many replies it
+            # refused first; anything else keeps what the call got to.
+            requests = getattr(failed, "requests", requests)
+            refused = getattr(failed, "refused", refused)
+            # Writable whatever the exception carried (a lone surrogate would fail the draw
+            # file's write far from its cause).
+            reason = f"{type(failed).__name__}: {failed}".encode(
+                "utf-8", "backslashreplace").decode("utf-8")
+            doc = {"failure_reason": reason}
+            failure = reason
+            # A23: a 413 on the first request is the prompt's own size; on a re-ask the history
+            # grew, so it says nothing about the next draw.
+            too_large = _is_size_failure(failed) and requests == 1
+        else:
             completed += 1
-            break
+        malformed += refused
+        _write_wire_log(episode, agent_id=agent_id, prompt=prompt,
+                        reply=sent, failure=failure)
         if doc is None:
-            # Every ask refused: nothing is written (the raw replies are on the wire log), and
+            # Every ask refused: nothing is written (each refused reply is on the call's own
+            # trace), and
             # an earlier pass's file at this index is removed so the page never shows it as
             # this pass's.
             try:
@@ -220,12 +235,15 @@ def _is_size_failure(failed: BaseException) -> bool:
 
 
 def _write_wire_log(
-    episode: Episode, *, agent_id: str, prompt: str, reply: str | None, failure: str | None,
+    episode: Episode, *, agent_id: str, prompt: str, reply: Any, failure: str | None,
 ) -> None:
-    """The judge's wire-log record — the whole framed prompt and reply verbatim, one file per
-    call, under `wire_logs/` so the existing wire-log policy denial covers it. Written here
-    because the injected `judge=` seam carries no logger. Its own file name, never the
-    wiring's `trace_name` (which `run_stage` streams to)."""
+    """The judge's wire-log record — the whole framed prompt and the reply the seam returned
+    (its tool arguments, before the host shapes them into the draw document, kept beside the
+    failure when the call site refused it; `None` when the call accepted none, its refused
+    replies being on the call's own trace), one file per call,
+    under `wire_logs/` so the existing wire-log policy denial covers it. Written here because
+    the injected `judge=` seam carries no logger. Its own file name, never the wiring's
+    `trace_name` (which `run_stage` streams to)."""
     name = WIRE_LOG_NAMES.agent_framed_trace(agent_id)
     row = {"agent_id": agent_id, "prompt": prompt, "reply": reply, "failure": failure,
            "wire_log_written_at": name}
@@ -274,15 +292,17 @@ def _stamp_not_graded(episode: Episode, word: str, reason: str, *,  # noqa: PLR0
     return record
 
 
-def _default_judge_seam(episode_dir: Path) -> Any:
-    """The production `(prompt, *, role, agent_id, wiring) -> str` for every judge call:
+def _default_judge_seam(episode_dir: Path, *, make_model: Any = None) -> Any:
+    """The production `(prompt, *, role, agent_id, wiring, output) -> Accepted` for every judge call:
     `run_stage` under the judge's own deny-all role. `wiring` comes from the caller.
 
     `deps=JudgeDeps()` decides the role (`build_stage_agent` reads `type(deps).role`); the
     `role` kwarg is ignored. Imports are inside `invoke` so passes that never call the model
     skip the provider import."""
+    extra = {} if make_model is None else {"make_model": make_model}
+
     def invoke(prompt: str, *, role: Any = None, agent_id: str = "judge", wiring: Any = None,
-               **_kw: Any) -> str:
+               output: Any = None, **_kw: Any) -> Any:
         from defender.learning._pydantic_stage import run_stage
         from defender.learning.core.config import StageContext, subagent_timeout
         from defender.learning.judge.run import JudgeDeps
@@ -296,6 +316,8 @@ def _default_judge_seam(episode_dir: Path) -> Any:
             ctx=StageContext(learning_run_dir=Path(episode_dir), user=prompt, request_limit=1,
                              wall_clock_timeout=subagent_timeout()),
             deps=JudgeDeps(),
+            output=output,
+            **extra,
         )
 
     return invoke
@@ -346,7 +368,8 @@ def grade_episode(  # noqa: PLR0913 — the orchestration's whole configuration 
                 else enqueue_mod.StoreFindings(store, str(runs.tenant.id), Path(episode.dir).name))
             return _grade_episode(episode, judge=resolved_judge, draws=configured,
                                   git_show=git_show, state=sink, tenant=runs.tenant,
-                                  job_lane=job_lane)
+                                  job_lane=job_lane,
+                                  episode_runs=_judged_episode_runs(runs, episode_id, episode))
     except JudgeRefused:
         raise
     # Every input-driven failure arrives as `JudgeRefused`, which is what the launcher catches.
@@ -363,6 +386,18 @@ def _open_episode(runs: RunsRepository[Tenant], episode_id: str) -> Episode:
         return runs.episode_files(episode_id)
     except FileNotFoundError as missing:
         raise JudgeRefused(f"episode {episode_id}: no such episode directory") from missing
+    except (OSError, ValueError, TenantRefused) as refused:
+        raise JudgeRefused(f"episode {episode_id}: {refused}") from refused
+
+
+def _judged_episode_runs(runs: RunsRepository[Tenant], episode_id: str, episode: Episode) -> Any:
+    """The pass's episode run view over its held episode (`runs.episode(id, held=...)`): where
+    each world's arm, and so its closing record, is found (#1534). Adopted, so the pass's
+    handle stays the one owner."""
+    from defender.records.formats import TenantRefused
+
+    try:
+        return runs.episode(episode_id, held=episode)
     except (OSError, ValueError, TenantRefused) as refused:
         raise JudgeRefused(f"episode {episode_id}: {refused}") from refused
 
@@ -388,14 +423,15 @@ def _refuse_queueing(prior: EpisodeGrade) -> None:
 
 def _grade_episode(  # noqa: PLR0913 — the pass's whole configuration, one keyword each
     episode: Episode, *, judge: Any, draws: int, git_show: Any, state: enqueue_mod.FindingsSink,
-    tenant: Any = None, job_lane: bool = False,
+    episode_runs: Any, tenant: Any = None, job_lane: bool = False,
 ) -> EpisodeGrade:
     # A not-graded stamp never short-circuits, so a repaired episode can still be graded. A
     # recorded grade — a stamp's included, which carries the committed rows it met — is carried
     # row by row: `queued` rows are final, a `queueing` row refuses the grade (after the gates,
     # so a stamp pass still writes its stamp), every other row is re-graded (A6).
     return _Pass(episode, judge=judge, draws=draws, git_show=git_show, state=state,
-                 prior=read_grade(episode), tenant=tenant, job_lane=job_lane).grade()
+                 prior=read_grade(episode), tenant=tenant, job_lane=job_lane,
+                 episode_runs=episode_runs).grade()
 
 
 def _label_of(finding_id: str) -> str | None:
@@ -457,8 +493,10 @@ class _Pass:
 
     def __init__(self, episode: Episode, *, judge: Any, draws: int, git_show: Any,  # noqa: PLR0913 — the pass's whole configuration
                  state: enqueue_mod.FindingsSink, prior: EpisodeGrade | None, tenant: Any = None,
-                 job_lane: bool = False) -> None:
+                 job_lane: bool = False, episode_runs: Any) -> None:
         self.episode = episode
+        #: The episode's run view (#1534): each world's verdict is its arm's closing record.
+        self.episode_runs = episode_runs
         #: A learning job's pass (#1344): a pass whose every judge call raised is its failure.
         self.job_lane = job_lane
         #: Judge calls of this pass that completed a draw, and that raised (`_count_draws`).
@@ -533,7 +571,13 @@ class _Pass:
         not_comparable = outcome_mod.not_comparable_reason(bound)
         if not_comparable is not None:
             return _stamp_not_graded(episode, NOT_COMPARABLE, not_comparable, found_gaps=found, prior=self.prior)
-        runs = read_run_set(bound, manifest, episode_dir=episode.dir, failed=failed)
+        # Every world's verdict is its arm's closing record, found through the arm roster: with
+        # no roster there is no verdict to read for any world, so the pass refuses whole, before
+        # any model call or write (#1534 OD12). The wording is fixed; the detail is logged.
+        if (gone := closing.roster_fault(self.episode_runs)) is not None:
+            raise JudgeRefused(f"episode {Path(episode.dir).name}: {gone.wording}")
+        runs = read_run_set(bound, manifest, episode_dir=episode.dir, failed=failed,
+                            episode_runs=self.episode_runs)
         if runs.control not in runs.usable:
             return _stamp_not_graded(
                 episode, CONTROL_UNUSABLE,
@@ -632,7 +676,8 @@ class _Pass:
                 lessons_commit=self.lessons_commit, knowledge=self.knowledge,
                 payload_cap=self.cap,
                 facts=self.run_set.usable[label], samples=self.samples, manifest=self.manifest,
-                bound=self.bound, family_text=self.noise, runs=self.run_set)
+                bound=self.bound, family_text=self.noise, runs=self.run_set,
+                episode_runs=self.episode_runs)
             prompt, placed = run_mod._build_prompt(ctx, self.manifest)
             self.episode.world(self.run_set.usable[label].token).draws.ensure()
         except (JudgeRefused, OSError, ValueError, TimeoutError) as world_failed:

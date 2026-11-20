@@ -1,7 +1,11 @@
-"""The learning loop's reply parsing, and its two drains' plumbing over the learning store.
+"""The learning loop's two drains' plumbing over the learning store.
 
 #1278 moved the drains' queues, markers, locks and quarantine into the store (design r8 Flows, Locks, Schema). The tests below
 drive the real `author_drain` / `lead_author_drain` tick over the real store and read items back from it.
+
+Retired from this file (#1579 O4): the five `reply_document_text` tests (plain document, whole-string fence, trailing close tag,
+dangling fence, thinking prelude). No model reply is parsed as YAML text any more; the function and the facade's re-export are
+gone, and a reply's shape is the typed call's (`branch/test_typed_questioner_1579.py`, `judge/test_typed_judge_1579.py`).
 
 Retired from this file (design r8 Locks, Schema "Retired files"):
 - `test_rotate_preserves_concurrent_appends`: a file queue's rotation under concurrent appends; the append locks and the
@@ -28,52 +32,6 @@ Retired with deleted files (their plumbing is the file queue's, design r8 Schema
 from __future__ import annotations
 
 import pytest
-import yaml
-
-from defender._yaml import safe_load
-from defender.learning import loop
-
-
-def test_reply_document_text_passes_through_plain_yaml():
-    """A bare document comes back stripped and otherwise unchanged."""
-    assert loop.reply_document_text("outcome: caught\nconfidence: high\n") == (
-        "outcome: caught\nconfidence: high"
-    )
-
-
-def test_reply_document_text_unwraps_a_whole_string_yaml_fence():
-    """Exactly one fenced block, nothing around it, is the document it holds (the parser's one
-    deliberate leniency)."""
-    fenced = "```yaml\noutcome: caught\n```\n"
-    assert loop.reply_document_text(fenced) == "outcome: caught"
-
-
-def test_reply_document_text_leaves_a_trailing_close_tag_for_the_loader_to_refuse():
-    text = "outcome: caught\nconfidence: high\n</content>\n"
-    assert loop.reply_document_text(text) == text.strip()
-    with pytest.raises(yaml.YAMLError):
-        safe_load(loop.reply_document_text(text))
-
-
-def test_reply_document_text_refuses_a_dangling_close_fence():
-    """A lone column-0 ``` after a plain document is a fence inside the reply: `MalformedReply`,
-    not a trim."""
-    text = "outcome: caught\nconfidence: high\n```\n"
-    with pytest.raises(loop.MalformedReply):
-        loop.reply_document_text(text)
-
-
-def test_reply_document_text_strips_thinking_prelude():
-    """A column-0 `</thinking>` line ends a prelude that has no opening tag (a shape recorded
-    live)."""
-    text = (
-        "outcome: caught\n(reasoning trace…)\n</thinking>\n"
-        "outcome: survived\nconfidence: high\n"
-    )
-    assert loop.reply_document_text(text) == "outcome: survived\nconfidence: high"
-
-
-
 
 # --- the drains over the store ---------------------------------------------------------------------------------------------
 
@@ -153,15 +111,16 @@ def test_lead_author_drain_runs_pitfalls_after_the_requests(world, monkeypatch):
 @pytest.mark.postgres
 def test_the_lead_lane_wakes_at_the_pitfalls_threshold(world, monkeypatch):  # noqa: F811 — the imported fixture
     """The lead lane has work for pitfalls only at `LEARNING_PITFALLS_THRESHOLD` (digest-less rows stay distinct mistakes)."""
-    from defender.learning.core.store_tick import LEAD_LANE, lane_waiting
-    from defender.learning_store import blocking
+    from defender.learning.core.store_tick import LEAD_LANE, thresholds
+    from defender.learning_store.tick import work_waiting
+    from defender.tests.support.jobs._relay1487 import adapter_store
 
     w = world
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
 
     def waiting() -> bool:
-        with blocking(w.dsn) as store:
-            return lane_waiting(store, w.t.tenant_id, LEAD_LANE)
+        with adapter_store(w.dsn, w.t.tenant_id, lane=LEAD_LANE, thresholds=thresholds()) as store:
+            return work_waiting(store, LEAD_LANE)
 
     assert waiting() is False
     call(w.dsn, "add_pitfall", w.t.tenant_id, {"pitfall_id": "r:0", "system": "elastic"})

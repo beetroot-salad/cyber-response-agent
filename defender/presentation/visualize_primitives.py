@@ -19,7 +19,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 ASSETS = Path(__file__).resolve().parent / "assets"
 CSS = read_text_utf8(ASSETS / "styles.css")
 
-from defender.records.formats import ReportRead, read_report  # noqa: E402
+from defender.records import closing  # noqa: E402
 from defender.records import RunPaths  # noqa: E402
 
 
@@ -132,15 +132,9 @@ def fmt_duration(ms: float | int) -> str:
 
 
 
-def parse_report(run_dir: Path) -> ReportRead:
-    """This run's report, via the shared accessor. Typed rather than a merged dict, so the
-    model's frontmatter keys cannot collide with the view's and no page invents its own
-    reading of an invalid disposition."""
-    return read_report(RunPaths(run_dir).report)
-
-
-
-
+def closing_of_dir(run_dir: Path) -> closing.Lookup:
+    """The closing record of the run in `run_dir` (#1534): for a view handed a folder rather than a `Run`."""
+    return closing.for_run_dir(Path(run_dir))
 
 
 def render_alert_block(run_dir: Path, *, open_: bool = False, anchor: str = "sec-alert") -> str:

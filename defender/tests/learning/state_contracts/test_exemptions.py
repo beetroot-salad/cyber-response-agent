@@ -24,7 +24,6 @@ from defender import run as run_py
 from defender import run_common
 from defender.learning.branch import cli as branch_cli
 from defender.box import _scrub as scrub_mod
-from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.learning.core import _state1135 as S
 from defender.tests.support.learning.core._store1278 import DSN_ENV, call, migrated_database  # noqa: F401 — fixture
 from defender.tests.support.learning.judge import _judge_921 as J
@@ -126,7 +125,7 @@ def test_e3_a_store_that_cannot_take_the_findings_leaves_the_launch_unaffected(
         tmp_path, monkeypatch, caplog, migrated_database, how):  # noqa: F811 — the imported fixture
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
-    (ep / "worlds" / T.world_id(ep, "b") / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
+    J.set_closing(ep, "b", disposition="benign")
     tenant_id = ep.parent.parent.name
     monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     _store_that_cannot_take(how, migrated_database, monkeypatch)
@@ -149,7 +148,7 @@ def test_e3_a_store_that_cannot_take_the_findings_leaves_the_launch_unaffected(
     # pass that stopped between its append and its commit, and is refused a re-run) grades through and queues its rows.
     control = J.accepted_episode(tmp_path / "control", ledgers={"b": [J.oracle_row("b")], "c": []},
                                  dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
-    (control / "worlds" / T.world_id(control, "b") / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
+    J.set_closing(control, "b", disposition="benign")
     control_tenant = control.parent.parent.name
     monkeypatch.setenv(DSN_ENV, migrated_database)
     _register(migrated_database, control_tenant)

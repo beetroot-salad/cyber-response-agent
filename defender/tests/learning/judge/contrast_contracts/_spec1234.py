@@ -7,6 +7,7 @@ from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 
 import contextlib
+import copy
 import importlib
 import json
 import os
@@ -20,6 +21,8 @@ from pathlib import Path
 from typing import Any
 
 from defender import _yaml
+from defender.tests.support.learning.core import _typed_output1579 as TY
+from defender.tests.support.learning.core import _unmodelled1579 as _unmodelled
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S24
@@ -351,7 +354,7 @@ def found_run(label: str) -> str:
 # --------------------------------------------------------------------------------------
 
 
-def conduct(label: str, leaf: str = "report.md", frag: str | None = None) -> str:
+def conduct(label: str, leaf: str = "closing", frag: str | None = None) -> str:
     """A conduct pointer into world `label`'s archive (`worlds/<X>/<leaf>[#frag]`): report,
     investigation, gather summaries, query-table rows."""
     return f"worlds/{T.fixture_world_id(label)}/{leaf}" + (f"#{frag}" if frag is not None else "")
@@ -484,7 +487,9 @@ class World:
     facts: list[dict] | None = None
     declared: str = "malicious"
     reached: Any = AUTO
-    report: str | None = None
+    #: Extra `ClosingRecord` fields for this world's closing record (`reached=None`: no record, `NeverClosed`). The
+    #: world's `marker(label, 'report')` rides in a ceiling entry's note, the closing record's model text.
+    closing: dict | None = None
     investigation: Any = AUTO
     calls: list[CallRow] | None = None
     forged: list[dict] | None = None
@@ -568,7 +573,7 @@ class Built:
     def oracle_path(self, label: str, leaf: str = "forged.jsonl") -> Path:
         return self.ep / "oracle" / self.world_ids[label] / leaf
 
-    def conduct(self, label: str, leaf: str = "report.md", frag: str | None = None) -> str:
+    def conduct(self, label: str, leaf: str = "closing", frag: str | None = None) -> str:
         path = f"worlds/{self.world_ids[label]}/{leaf}"
         return path if frag is None else f"{path}#{frag}"
 
@@ -722,13 +727,6 @@ def _write_table(world_dir: Path, written: list[tuple[CallRow, dict]]) -> None:
 
 def _write_texts(wd: Path, w: World) -> None:
     """The world's text artifacts, each carrying its marker."""
-    reached = w.declared if w.reached is AUTO else w.reached
-    if w.report is not None:
-        (wd / "report.md").write_text(w.report, encoding="utf-8")
-    elif reached is not None:
-        (wd / "report.md").write_text(report_text(
-            reached, body=f"World {w.label} closed {reached}. {marker(w.label, 'report')}"),
-            encoding="utf-8")
     investigation = (investigation_document(w.label) + f"\n{marker(w.label, 'investigation')}\n"
                      if w.investigation is AUTO else w.investigation)
     if investigation is not None:
@@ -830,6 +828,33 @@ def _archive_world(ep: Path, w: World, *, inherited: list[CallRow]) -> None:
         _write_store(ep, w)
 
 
+def closing_fields(label: str, reached: str, **over: Any) -> dict:
+    """The `ClosingRecord` fields a world closes with: its reached disposition, and the world's report marker in one
+    ceiling entry's note (a record's model text, which the judge frames as untrusted)."""
+    from defender.records import closing as C
+
+    note = C.CeilingEntry(state=sorted(C.CEILING_STATES)[0], ref=None, cap=None,
+                          note=f"World {label} closed {reached}. {marker(label, 'report')}")
+    return {"disposition": reached, "ceiling_test": (note,), **over}
+
+
+def _closing_fields(w: World) -> dict | None:
+    """World `w`'s closing fields (`None`: it never closed)."""
+    reached = w.declared if w.reached is AUTO else w.reached
+    return None if reached is None else closing_fields(w.label, reached, **(w.closing or {}))
+
+
+def close_arm(arm: Any, source: Path, reached: str, label: str) -> None:
+    """A driven arm's closing record, written into the database its pointer names (the source's: arms fork into it)."""
+    import json as _json
+
+    from defender.tests.storage.verdict_1534 import _spec1534 as V
+
+    case_id = _json.loads(Path(arm.observability.session_pointer.path).read_text(encoding="utf-8"))["case_id"]
+    with V.run_store(Path(source).parent, case_id) as store:
+        V.plant(store, J._record_for(str(arm.id), closing_fields(label, reached)))
+
+
 def family(tmp_path: Path, worlds: Sequence[World] | None = None, *,  # noqa: PLR0913 — one switch per archived input
            inherited: Sequence[CallRow] = (), outcome: str | None = "accepted",
            not_replayable: Iterable[Mapping] = (), drift: Iterable[Mapping] = (),
@@ -872,6 +897,8 @@ def family(tmp_path: Path, worlds: Sequence[World] | None = None, *,  # noqa: PL
                            drift=drift, family_stamp=family_stamp, **extra)
     if any(w.archived for w in worlds):
         T.plant_roster(ep)
+    J.closing_plan(ep, tmp_path, {
+        w.label: _closing_fields(w) for w in worlds if w.archived})
     return Built(ep=ep, worlds={w.label: w for w in worlds},
                  world_ids={w["label"]: w["world_id"] for w in doc["worlds"]}, inherited=list(inherited))
 
@@ -938,18 +965,6 @@ def tear_jsonl(path: Path) -> Path:
     """Append a torn (unterminated, unparseable) line to a JSONL record."""
     with Path(path).open("a", encoding="utf-8") as fh:
         fh.write('{"system": "idp", "verb"')
-    return Path(path)
-
-
-def second_disposition(path: Path) -> Path:
-    """Rewrite a report.md so its frontmatter carries two top-level `disposition:` keys, a
-    headline two readers could resolve differently."""
-    Path(path).write_text(
-        "---\n"
-        "disposition: benign\n"
-        "outcome: stands\n"
-        "disposition: malicious\n"
-        "---\nTwo headlines.\n", encoding="utf-8")
     return Path(path)
 
 
@@ -1088,9 +1103,19 @@ def family_reply(*, world: Sequence[dict] = (), passes: bool = True,
     return doc
 
 
-def as_text(doc: Any) -> str:
-    """A reply document as the BARE text a model seam returns (#1018: one bare document)."""
-    return doc if isinstance(doc, str) else _yaml.safe_dump(doc, sort_keys=False)
+def as_text(doc: Any, unmodelled: list[str] | None = None, agent_id: str = "") -> Any:
+    """#1579: replies are mappings; name kept for its callers. What a judge fake answers for a
+    scripted `doc`: `(mapping, 1)`, a `(mapping, requests)` tuple as scripted, an exception
+    instance raised. Text is a stale script and fails loudly (R7: and is recorded on `unmodelled`)."""
+    if isinstance(doc, BaseException):
+        raise doc
+    if isinstance(doc, tuple):
+        return doc
+    if isinstance(doc, Mapping):
+        return copy.deepcopy(dict(doc)), 1
+    if unmodelled is not None:
+        unmodelled.append(f"{agent_id}: a {type(doc).__name__} reply to a typed call")
+    raise AssertionError("#1579: script a mapping, not text")
 
 
 #: A world reply with nothing to queue (bucket `none`, no findings) — the default answer of a
@@ -1100,9 +1125,10 @@ QUIET_FAMILY = family_reply()
 
 
 def validate(doc: Any, *, scope: str = "world", reachable_systems: Any = SYSTEMS, **kw: Any) -> Any:
-    """`run.validate_reply(text, scope=, reachable_systems=)` over a reply document — the unit
-    door for reply-shape demands (the pass's own re-ask is pinned through `grade`)."""
-    return sym(JUDGE_RUN, "validate_reply")(as_text(doc), scope=scope,
+    """`run.validate_reply(mapping, scope=, reachable_systems=)` over a reply mapping — the unit
+    door for reply-shape demands (#1579: the mapping-level half; the pass's in-call re-ask is
+    pinned through the real seam, its call-site check through `grade`)."""
+    return sym(JUDGE_RUN, "validate_reply")(doc, scope=scope,
                                             reachable_systems=reachable_systems, **kw)
 
 
@@ -1168,82 +1194,84 @@ def pre_change_world_row(fid: str, **over: Any) -> dict:
 # --------------------------------------------------------------------------------------
 
 
-def parse_agent_id(agent_id: str) -> tuple[str | None, int | None, int]:
-    """`judge:<label>:<n>[:<attempt>]` -> `(label, n, attempt)`; `(None, None, 0)` otherwise."""
+def parse_agent_id(agent_id: str) -> tuple[str | None, int | None]:
+    """`judge:<label>:<n>` -> `(label, n)`; `(None, None)` otherwise (#1579: one call per draw,
+    so an id with an attempt suffix is no judge call at all)."""
     parts = str(agent_id).split(":")
-    if len(parts) < 3 or parts[0] != "judge":
-        return None, None, 0
+    if len(parts) != 3 or parts[0] != "judge":
+        return None, None
     try:
-        n = int(parts[2])
-        attempt = int(parts[3]) if len(parts) > 3 else 0
+        return parts[1], int(parts[2])
     except ValueError:
-        return parts[1], None, 0
-    return parts[1], n, attempt
+        return parts[1], None
 
 
 @dataclass
 class RoutedJudge:
     """The judge's model seam (`judge=`): each call is answered by the reply routed to its
-    world, draw and attempt, and RECORDED (prompt, agent id, kwargs)."""
+    world and draw, and RECORDED (prompt, agent id, kwargs). A reply is a mapping, a
+    `(mapping, requests)` tuple, or an exception instance to raise (`TY.unusable(...)`)."""
 
     replies: dict[Any, Any] = field(default_factory=dict)
     default: Any = None
     family_default: Any = None
     fail: set[Any] = field(default_factory=set)
     overflow: set[Any] = field(default_factory=set)
+    #: The request count an `overflow` call carries: 1 is a first request refused for its size
+    #: (A23 stops later draws); 2 or more is a re-ask's longer history (that draw alone fails).
+    overflow_requests: int = 1
     prompts: list[str] = field(default_factory=list)
     agent_ids: list[str] = field(default_factory=list)
     kwargs: list[dict] = field(default_factory=list)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
     world_labels: dict[str, str] = field(default_factory=dict, repr=False)
+    #: R7: inputs this fake does not model, asserted empty at teardown (conftest).
+    unmodelled: list[str] = field(default_factory=_unmodelled.new_list, repr=False)
 
     def bind_worlds(self, world_ids: Mapping[str, str]) -> None:
         self.world_labels = {identity: label for label, identity in world_ids.items()}
 
     def coordinate(self, agent_id: str):
-        identity, draw, attempt = parse_agent_id(agent_id)
-        return self.world_labels.get(identity, identity), draw, attempt
+        identity, draw = parse_agent_id(agent_id)
+        return self.world_labels.get(identity, identity), draw
 
     def __call__(self, prompt: str, *, role: Any = None, agent_id: str = "judge",
-                 **kw: Any) -> str:
+                 **kw: Any) -> Any:
         with self._lock:
             self.prompts.append(prompt)
             self.agent_ids.append(agent_id)
             self.kwargs.append({"role": role, "agent_id": agent_id, **kw})
-        label, n, attempt = self.coordinate(agent_id)
+        label, n = self.coordinate(agent_id)
         if agent_id in self.fail or label in self.fail or (label, n) in self.fail:
             raise self._unprocessable(agent_id, RuntimeError("TransportFault"))
         if agent_id in self.overflow or label in self.overflow or (label, n) in self.overflow:
-            raise self._unprocessable(agent_id, self._too_large())
-        for key in ((label, n, attempt), (label, n), label):
+            raise self._unprocessable(agent_id, self._too_large(), self.overflow_requests)
+        for key in ((label, n), label):
             if key in self.replies:
                 value = self.replies[key]
                 if isinstance(value, list):
                     if not value:
+                        self.unmodelled.append(f"{agent_id}: nothing scripted")
                         raise AssertionError(
                             f"RoutedJudge: replies[{key!r}] ran out at {agent_id}")
                     value = value.pop(0)
-                return as_text(value)
+                return as_text(value, self.unmodelled, agent_id)
         if label == FAMILY and self.family_default is not None:
-            return as_text(self.family_default)
+            return as_text(self.family_default, self.unmodelled, agent_id)
         if label != FAMILY and self.default is not None:
-            return as_text(self.default)
+            return as_text(self.default, self.unmodelled, agent_id)
+        self.unmodelled.append(f"{agent_id}: nothing scripted")
         raise AssertionError(f"RoutedJudge: no reply routed for {agent_id}")
 
     @staticmethod
-    def _unprocessable(agent_id: str, inner: BaseException) -> BaseException:
-        unprocessable = sym(CONFIG, "RunUnprocessable")
-        raised = unprocessable(f"judge ({agent_id}) failed: {inner!r}")
-        raised.__cause__ = inner
-        return raised
+    def _unprocessable(agent_id: str, inner: BaseException, requests: int = 1) -> BaseException:
+        return TY.unprocessable(f"judge ({agent_id}) failed: {inner!r}", requests=requests,
+                                cause=inner)
 
     @staticmethod
     def _too_large() -> BaseException:
         """The provider's answer to an over-long prompt (status 413)."""
-        http_error = importlib.import_module("pydantic_ai.exceptions").ModelHTTPError
-        return http_error(status_code=413, model_name="judge-model",
-                          body={"error": {"type": "request_too_large",
-                                          "message": "prompt is too long"}})
+        return TY.http_413()
 
     @property
     def calls(self) -> int:
@@ -1257,11 +1285,11 @@ class RoutedJudge:
         return bool(self.calls_for(label))
 
     def prompt_for(self, label: str) -> str:
-        """The prompt handed to world `label`'s first call (draw 0, attempt 0)."""
+        """The prompt handed to world `label`'s first call (draw 0)."""
         for agent, prompt in zip(self.agent_ids, self.prompts, strict=True):
-            if self.coordinate(agent) == (label, 0, 0):
+            if self.coordinate(agent) == (label, 0):
                 return prompt
-        raise AssertionError(f"RoutedJudge: no call for {(label, 0, 0)}; "
+        raise AssertionError(f"RoutedJudge: no call for {(label, 0)}; "
                              f"calls were {self.agent_ids}")
 
     def prompts_for(self, label: str) -> list[str]:
@@ -1373,8 +1401,11 @@ def render_context(where: Any, label: str, *, payload_cap: int = 20000) -> Any:
     fam = mod(JUDGE_FAMILY)
     rnd = mod(JUDGE_RENDER)
     outcome = mod(OUTCOME)
-    with J.episode_runs_for(ep).episode_files(ep.name) as episode:
+    repository = J.episode_runs_for(ep)
+    with repository.episode_files(ep.name) as episode:
         bound = episode.view()
+        # The episode's run view (#1534): each run's verdict is its arm's closing record, read through it.
+        view = repository.episode(ep.name, held=episode)
         manifest = fam.read_manifest(bound, expected_episode_id=ep.name)
         samples = fam.read_samples_record(bound)
         try:
@@ -1383,11 +1414,11 @@ def render_context(where: Any, label: str, *, payload_cap: int = 20000) -> Any:
         except outcome.OutcomeUnreadable:
             pre, failed = None, {}
         world = next(w for w in manifest["worlds"] if w["label"] == label)
-        _row, facts = fam.read_world(bound, world, episode_dir=ep)
+        _row, facts = fam.read_world(bound, world, episode_dir=ep, episode_runs=view)
         return rnd.render(ep, label, git_show=FakeGitShow(),
                           payload_cap=payload_cap, facts=facts, lessons_commit=None,
                           manifest=manifest, samples=samples,
-                          family_text=rnd.render_family_text(pre, failed), bound=bound)
+                          family_text=rnd.render_family_text(pre, failed), bound=bound, episode_runs=view)
 
 
 # --------------------------------------------------------------------------------------
@@ -1812,9 +1843,7 @@ class InProcessSiblings:
             out = harness.drive(run_dir, run_id=run_dir.name, main=main, gather=gather,
                                 verbs=reg, tenant=self.est.place(), resume=spec)
             if script.disposition is not None:
-                (run_dir / "report.md").write_text(report_text(
-                    script.disposition, body=f"World {label} closed. {marker(label, 'report')}"),
-                    encoding="utf-8")
+                close_arm(kw["run"], src, script.disposition, label)
             (run_dir / "provenance.json").write_text(json.dumps(provenance_record()),
                                                      encoding="utf-8")
             if script.scrub:
@@ -1858,7 +1887,7 @@ class RealBuilt:
     def episode_id(self) -> str:
         return self.ep.name
 
-    def conduct(self, label: str, leaf: str = "report.md", frag: str | None = None) -> str:
+    def conduct(self, label: str, leaf: str = "closing", frag: str | None = None) -> str:
         path = f"worlds/{self.world_ids[label]}/{leaf}"
         return path if frag is None else f"{path}#{frag}"
 

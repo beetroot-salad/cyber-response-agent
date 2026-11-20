@@ -90,7 +90,7 @@ def exit_code_of(truncated_by: object) -> int:
     return 0 if found is None else found.exit_code
 
 #: Exits where the model spent its budget without closing, so the host writes an `unresolved`
-#: report (otherwise the run dead-letters for a missing report.md). Shared by the driver's
+#: record (otherwise the run dead-letters for a missing closing record). Shared by the driver's
 #: forced close and the ticket lane, so a failed forced close still escalates. The driver
 #: explains why the breaker, budget kill and store exits are absent.
 FORCED_CLOSE_EXITS = frozenset({TRUNCATED_BY_REQUEST_LIMIT, TRUNCATED_BY_RETRY_EXHAUSTED})

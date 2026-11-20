@@ -13,6 +13,8 @@ from typing import Any
 
 from defender import _yaml
 from defender.tests.learning.judge.contrast_contracts import _spec1234 as S
+from defender.tests.support.learning.core import _typed_output1579 as TY
+from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 
@@ -306,7 +308,7 @@ class Watch:
                              f"; it made {[(s.event, s.who, s.kind) for s in self.seen]}")
 
     def __call__(self, prompt: str, **kw: Any) -> str:
-        label, n, _attempt = self.judge.coordinate(kw.get("agent_id", "judge"))
+        label, n = self.judge.coordinate(kw.get("agent_id", "judge"))
         self.snap("call", label, None)
         action = self.at_call.pop((label, n), None) if label is not None else None
         if action is not None:
@@ -558,7 +560,7 @@ def test_1234_control_check_fails_on_rerun_after_first_pass_queued_rows(tmp_path
     queues = S.queue_bytes()
     assert S.marker(B, "kept") in queues[0]
 
-    (built.world_dir(CONTROL) / "report.md").unlink()
+    J.fault_arm(built.ep, CONTROL, "pointer-unreadable")
     stamp_pass = S.judge()
     S.grade(built, stamp_pass)
 
@@ -566,22 +568,22 @@ def test_1234_control_check_fails_on_rerun_after_first_pass_queued_rows(tmp_path
     stamp = json.dumps(record.get(STAMP))
     assert record.get(STAMP), f"no not-graded stamp: {sorted(record)}"
     assert CONTROL in stamp, f"the stamp names neither control nor cause: {stamp}"
-    assert "report.md" in stamp, f"the stamp does not name the control's missing report: {stamp}"
+    from defender.records import closing as closing_mod
+
+    assert closing_mod.FAULT_WORDING["pointer-unreadable"] in stamp, f"the stamp does not word the control's unreadable record: {stamp}"
     assert stamp_pass.calls == 0
     assert _row(record, B) == graded, "the stamp did not carry bravo's row verbatim"
     assert S.queue_bytes() == queues
 
     left = _left_queueing(tmp_path, EP2, spare="ep2-alias")
     queueing = _row(S.record(left), B)
-    report = left.world_dir(CONTROL) / "report.md"
-    text = report.read_text(encoding="utf-8")
-    report.unlink()
+    heal = J.fault_arm(left.ep, CONTROL, "pointer-unreadable")
     S.grade(left, S.judge())
     stamped = S.record(left)
     assert stamped.get(STAMP), f"no stamp over the queueing row: {sorted(stamped)}"
     assert _row(stamped, B) == queueing, "the stamp did not carry the queueing row verbatim"
     assert B in json.dumps(stamped.get(STAMP)), "the stamp does not name the queueing world"
-    report.write_text(text, encoding="utf-8")
+    heal()
     refused = S.grade_refused(left, S.judge())
     assert B in str(refused), f"the next grade pass does not refuse naming bravo: {refused}"
 
@@ -694,16 +696,14 @@ def test_1234_not_graded_stamp_then_the_control_is_repaired(tmp_path):
     S.grade(built, S.judge({B: _reply(inv=[_inv(B, "kept")])}, fail={C}))
     graded = _row(S.record(built), B)
     assert graded.get(S.STATE_KEY) == S.QUEUED
-    report = built.world_dir(CONTROL) / "report.md"
-    text = report.read_text(encoding="utf-8")
-    S.second_disposition(report)
+    heal = J.fault_arm(built.ep, CONTROL, "pointer-unreadable")
     S.grade(built, S.judge())
     stamp = S.record(built).get(STAMP)
     assert stamp, "the malformed control did not stamp the family not graded"
     reason = str(_field(stamp, "reason") or "")
     assert reason, stamp
 
-    report.write_text(text, encoding="utf-8")
+    heal()
     S.grade(built, S.judge({C: _reply(inv=[_inv(C, "repaired")])}))
 
     record = S.record(built)
@@ -718,7 +718,7 @@ def test_1234_not_graded_stamp_then_the_control_is_repaired(tmp_path):
 def test_1234_bare_rerun_grades_only_the_world_with_no_completed_draw(tmp_path):
     """The re-run grades only world C; B's and D's draw files, rows and judge.yaml rows are untouched."""
     built = _built(tmp_path, B, C, D)
-    refused_every_ask = "this text is not a reply document"
+    refused_every_ask = TY.unusable("the reply is not an accepted draw")
     S.grade(built, S.judge({B: _reply(inv=[_inv(B, "b")]), C: refused_every_ask,
                             D: _reply(inv=[_inv(D, "d")])}))
     first = S.record(built)

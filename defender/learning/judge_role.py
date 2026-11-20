@@ -24,8 +24,7 @@ _JUDGE_DENY_REASON = (
     "call began, and the world under grading — with the control it is compared against — was "
     "rendered into the prompt you already hold. There is no path left to resolve and no "
     "system left to ask, and a grade that reached for more would be grading something other "
-    "than what was served. Answer from the prompt, as one YAML reply document — bare, not "
-    "inside a code fence, with nothing before or after it."
+    "than what was served. Answer from the prompt, by calling the verdict tool with your reply."
 )
 
 

@@ -12,7 +12,6 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender._frontmatter import parse_frontmatter  # noqa: E402
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.systems import circuit_breaker  # noqa: E402
 from defender.investigation.lead_zero import RESERVED_LEAD_IDS  # noqa: E402
@@ -29,6 +28,7 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
     GOLDEN_AB3,
     FakeVerbs,
     VerbRecorder,
+    committed_disposition,
     drive,
     materialize,
 )
@@ -221,12 +221,9 @@ class _Run:
         return _answer_to(self.router.seen(lead), turn, f"{lead}'s turn {turn}")
 
     @property
-    def report_disposition(self) -> str | None:
-        path = self.run_dir / "report.md"
-        if not path.is_file():
-            return None
-        meta, _body = parse_frontmatter(path.read_text(encoding="utf-8"))
-        return meta.get("disposition")
+    def closing_disposition(self) -> str | None:
+        """The disposition of the run's closing record; None when the run never closed."""
+        return committed_disposition(self.run_dir)
 
 
 def _answer_to(seen: list, turn: int, what: str) -> str:
@@ -498,8 +495,8 @@ def test_three_unconfigured_systems_never_charge_and_the_run_reaches_its_close(t
         f"the run did not end normally (RunAborted?): {run.summary.get('exit_reason')!r}"
     assert run.summary.get("truncated_by") is None, \
         f"the run was cut short: {run.summary.get('truncated_by')!r}"
-    assert run.report_disposition == "inconclusive", \
-        f"the run never reached its close (report.md: {run.report_disposition!r})"
+    assert run.closing_disposition == "inconclusive", \
+        f"the run never reached its close (closing record: {run.closing_disposition!r})"
 
     for system in THREE_DOWN:
         assert run.calls_to(system) == [], \
@@ -576,7 +573,7 @@ def test_configured_systems_that_fail_still_trip_and_abort_the_run(tmp_path):
     assert circuit_breaker.is_tripped(run.state, "cmdb"), f"cmdb must trip: {run.breaker}"
     assert run.summary.get("exit_reason") == "RunAborted", \
         f"{limit} configured failures must abort the run: {run.summary!r}"
-    assert run.report_disposition is None, "an aborted run reached its close"
+    assert run.closing_disposition is None, "an aborted run reached its close"
 
     refused = run.main_answer(1)
     assert "tripped" in refused.lower(), \

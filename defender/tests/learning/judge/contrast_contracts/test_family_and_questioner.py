@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 
 from defender.tests.learning.judge.contrast_contracts import _spec1234 as S
+from defender.tests.support.learning.judge import _judge_921 as J
 
 
 @pytest.fixture(autouse=True)
@@ -53,8 +54,9 @@ def _b_with_blocked_calls() -> list[S.CallRow]:
             S.fault_call()]
 
 
-def _asks(judge: S.RoutedJudge, label: str) -> list[tuple[Any, Any, int]]:
-    """`(label, draw, attempt)` of every model call the fake recorded for `label`, in order."""
+def _asks(judge: S.RoutedJudge, label: str) -> list[tuple[Any, Any]]:
+    """`(label, draw)` of every model call the fake recorded for `label`, in order (#1579: a
+    draw is one call; there is no attempt)."""
     return [judge.coordinate(a) for a in judge.calls_for(label)]
 
 
@@ -113,13 +115,16 @@ def test_1234_family_reply_is_family_scope_world_findings_only(tmp_path: Path,
     old_shape = S.family_reply(world=[finding], **{retired: carried})
     judge = S.judge({S.FAMILY: [old_shape, S.family_reply(world=[finding])]})
 
-    S.grade(built, judge, draws=1)
+    S.grade(built, judge, draws=2)
 
-    assert _asks(judge, S.FAMILY) == [(S.FAMILY, 0, 0), (S.FAMILY, 0, 1)], (
-        f"the reply carrying {retired!r} must be refused and draw 0 asked again once; the "
-        f"family calls were {judge.calls_for(S.FAMILY)}")
-    assert S.draw_files(built, S.FAMILY), "the family's accepted draw wrote no draw document"
-    doc = S.draw_doc(built, S.FAMILY, 0)
+    # #1579 (conflict updated): a refused reply is its draw's malformed end, never asked again.
+    assert _asks(judge, S.FAMILY) == [(S.FAMILY, 0), (S.FAMILY, 1)], (
+        f"each family draw is one call; the family calls were {judge.calls_for(S.FAMILY)}")
+    assert [p.name for p in S.draw_files(built, S.FAMILY)] == ["1.yaml"], (
+        f"the reply carrying {retired!r} was kept, or the control draw was not")
+    assert S.family_row(built).get("malformed_replies") == 1, S.family_row(built)
+    assert S.family_row(built).get("completed_draws") == 1, S.family_row(built)
+    doc = S.draw_doc(built, S.FAMILY, 1)
     findings = doc.get(S.WORLD_FINDINGS)
     assert isinstance(findings, list), f"the family draw document holds {findings!r}"
     assert len(findings) == 1, f"the family draw document holds {findings!r}, not one finding"
@@ -225,7 +230,7 @@ def test_1234_family_call_runs_once_and_a_rerun_only_without_a_completed_draw(
     S.rewrite_record(no_row, lambda doc: doc.pop(S.FAMILY_ROW, None))
     asked = S.judge(family_default=first)
     S.grade(no_row, asked, draws=1)
-    assert _asks(asked, S.FAMILY) == [(S.FAMILY, 0, 0)], (
+    assert _asks(asked, S.FAMILY) == [(S.FAMILY, 0)], (
         f"a family with no row must be asked once: {asked.calls_for(S.FAMILY)}")
     assert not asked.called("b"), "a `queued` world was re-graded"
     assert not asked.called("c"), "a `queued` world was re-graded"
@@ -315,7 +320,7 @@ def test_1234_family_call_failed_while_every_world_completed(tmp_path: Path,
     retry = S.judge(family_default=S.family_reply(world=[design]))
     S.grade(built, retry, draws=1)
 
-    assert _asks(retry, S.FAMILY) == [(S.FAMILY, 0, 0)], (
+    assert _asks(retry, S.FAMILY) == [(S.FAMILY, 0)], (
         f"the family must be asked again on the next run: {retry.calls_for(S.FAMILY)}")
     assert not retry.called("b"), "a `queued` world was re-graded"
     assert not retry.called("c"), "a `queued` world was re-graded"
@@ -353,7 +358,7 @@ def test_1234_family_call_faults_after_the_worlds_rows_were_queued(tmp_path: Pat
     retry = S.judge(family_default=S.family_reply(world=[design]))
     S.grade(built, retry, draws=1)
 
-    assert _asks(retry, S.FAMILY) == [(S.FAMILY, 0, 0)]
+    assert _asks(retry, S.FAMILY) == [(S.FAMILY, 0)]
     assert not retry.called("b"), "a `queued` world was re-graded"
     assert not retry.called("c"), "a `queued` world was re-graded"
     assert S.family_row(built).get(S.STATE_KEY) == S.QUEUED, S.family_row(built)
@@ -379,7 +384,7 @@ def test_1234_family_prompt_lists_each_unusable_world_once_and_never_as_a_refere
         tmp_path: Path, kind: str) -> None:
     built = S.family(tmp_path, _lead_triad(zulu=_unusable_world(kind)))
     if kind == "malformed":
-        S.second_disposition(built.world_dir("zulu") / "report.md")
+        J.fault_arm(built.ep, "zulu", "row-invalid")
     judge = S.judge()
     S.grade(built, judge, draws=1)
 

@@ -66,8 +66,8 @@ OUTCOME_REASON = "pre-flight calibrated every world against the live estate"
 SYSTEM = "elastic"
 #: The default `contrast_evidence` of a sample defender finding: each sibling's report and the
 #: control's, so whichever sibling's draw files it, it rests on a two-run conduct pair.
-SAMPLE_CONTRAST = (f"worlds/{T.fixture_world_id(GRADED_WORLD)}/report.md", f"worlds/{T.fixture_world_id(PASSTHROUGH_WORLD)}/report.md",
-                   f"worlds/{T.fixture_world_id(CONTROL)}/report.md")
+SAMPLE_CONTRAST = (f"worlds/{T.fixture_world_id(GRADED_WORLD)}/closing", f"worlds/{T.fixture_world_id(PASSTHROUGH_WORLD)}/closing",
+                   f"worlds/{T.fixture_world_id(CONTROL)}/closing")
 
 
 @dataclass(frozen=True)
@@ -228,6 +228,59 @@ def trace_rows(agent_id: str, *, prompt: str = "the framed prompt", reply: str =
     return [request, reply_row]
 
 
+def typed_call_rows(agent_id: str, attempts: list[dict[str, Any]], *, tool: str = "answer",
+                    prompt: str = "the framed prompt") -> list[dict[str, Any]]:
+    """A typed (output-tool) call's rows as `RequestLogger.log` writes them (captured from a real
+    two- and three-request call through `build_stage_agent` and a real logger, #1579; the
+    drift guard is `test_1579_the_fixture_has_the_shape_a_real_request_logger_writes`).
+
+    Every request re-emits its whole history as `request` rows, then adds one `response` row. The
+    re-emitted earlier response keeps `message.kind == "response"` under an outer `kind: request`
+    and carries no model or usage; a retry prompt is re-emitted by every later request.
+
+    `attempts`: per request, `{"args": <mapping or raw malformed JSON text>}` (a tool call) or
+    `{"text": str}`, and `"retry"`: the reason sent back after it (absent on the last attempt)."""
+    first = trace_rows(agent_id, prompt=prompt, response=False)[0]
+    history: list[dict[str, Any]] = [first["message"]]
+    rows: list[dict[str, Any]] = []
+    ts = "2026-09-09T17:16:11Z"
+
+    def row(kind: str, message: dict[str, Any], **extra: Any) -> dict[str, Any]:
+        seq = len(rows)
+        return {"event_type": "message", "agent_id": agent_id, "seq": seq, "id": f"{agent_id}#{seq}",
+                "kind": kind, **extra, "message": message}
+
+    for n, attempt in enumerate(attempts):
+        rows += [row("request", message) for message in history]
+        call_id = f"pyd_ai_{n:016x}"
+        part = ({"content": attempt["text"], "part_kind": "text"} if "text" in attempt else
+                {"tool_name": tool, "args": attempt["args"], "tool_call_id": call_id,
+                 "part_kind": "tool-call"})
+        response = {"parts": [part], "model_name": MODEL, "timestamp": ts, "kind": "response",
+                    "finish_reason": None}
+        rows.append(row("response", response, model=MODEL, duration_ms=1_000.0,
+                        usage={"input_tokens": 1_000, "output_tokens": 100,
+                               "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}))
+        history.append(response)
+        if attempt.get("retry") is not None:
+            history.append({"parts": [{"content": attempt["retry"],
+                                       "tool_name": tool if "args" in attempt else None,
+                                       "tool_call_id": call_id, "timestamp": ts,
+                                       "part_kind": "retry-prompt"}],
+                            "timestamp": ts, "kind": "request", "instructions": "You are the seat."})
+    return rows
+
+
+def typed_trace_rows(agent_id: str, *, args: Any, retry: str | None = None,
+                     tool: str = "answer", text: str | None = None) -> list[dict[str, Any]]:
+    """One typed call: a tool-call attempt with `args`; with `retry`, the reason sent back and a
+    final attempt whose part is `text` (default: another tool call)."""
+    attempts: list[dict[str, Any]] = [{"args": args, "retry": retry}]
+    if retry is not None:
+        attempts.append({"text": text} if text is not None else {"args": {"word": "yes"}})
+    return typed_call_rows(agent_id, attempts, tool=tool)
+
+
 def trace_stem(agent_id: str) -> str:
     """`<agent_id with ':'->'_'>_trace` — the writer's own rule, spelled once."""
     return f"{agent_id.replace(':', '_')}_trace"
@@ -330,10 +383,11 @@ def run_dir(episode_dir: Path, label: str, *, cost: float | Any = 0.25,  # noqa:
     """`runs/<arm id>/` — the sibling's run dir at the id the episode's arm roster holds for
     `label` (read-only), or at `arm_id` when given (a stray arm no roster entry names), plus its
     scrub sidecar (`_triplet_947.sibling_run_dir`), with `tool_trace.jsonl` ending in a result
-    event and the `runtime.html` the run's own visualizer leaves."""
+    event and the `runtime.html` the run's own visualizer leaves. Its closing record is the episode's closing plan's
+    (`J.ensure_closings`, through the arm's pointer): no store of its own, which would replace that pointer."""
     runs = Path(episode_dir) / "runs"
     runs.mkdir(parents=True, exist_ok=True)
-    rd = T.sibling_run_dir(runs, label, arm_id=arm_id)
+    rd = T.sibling_run_dir(runs, label, arm_id=arm_id, closed=False)
     write_tool_trace(rd, [
         {"type": "assistant", "message": {"content": [{"type": "text", "text": "hello"}]}},
         result_event(cost=cost, duration_ms=duration_ms),
@@ -480,7 +534,7 @@ def _world_findings_rows(label: str = GRADED_WORLD) -> list[dict[str, Any]]:
     rows = [finding(subject="defender", bucket=b, claim=f"defender claim {i}",
                     root_cause=f"defender root cause {i}", topic=f"defender topic {i}",
                     anchor=f"l-00{i + 1}",
-                    evidence=[f"worlds/{T.fixture_world_id(label)}/report.md", f"worlds/{T.fixture_world_id(CONTROL)}/report.md"])
+                    evidence=[f"worlds/{T.fixture_world_id(label)}/closing", f"worlds/{T.fixture_world_id(CONTROL)}/closing"])
             for i, b in enumerate(SIBLING_BUCKETS[label])]
     rows.append(finding(subject="world", bucket=SIBLING_WORLD_BUCKET,
                         claim="the fact never reached the defender as a readable answer",
@@ -673,17 +727,19 @@ class Episode:
         return self.dir / name
 
 
-def sample_episode(tmp_path: Path, *, root: Path | None = None, judge: bool = True,  # noqa: PLR0913, C901 — one switch per record so a scenario about a record's absence names exactly that record
+def sample_episode(tmp_path: Path, *, root: Path | None = None, judge: bool = True,  # noqa: PLR0913, PLR0912, C901 — one switch per record so a scenario about a record's absence names exactly that record
                    family_draw: bool = True, traces: bool = True, runs: bool = True,
                    timing: bool = False, stamp: bool = True, samples: bool = True,
-                   extra_worlds: tuple[dict[str, Any], ...] = ()) -> Episode:
+                   extra_worlds: tuple[dict[str, Any], ...] = (),
+                   closings: dict[str, dict[str, Any] | None] | None = None) -> Episode:
     """The fresh-authkeys-SHAPED episode, suite-built, every record through its writer.
 
     Switches turn a record off for the scenarios about its absence; `timing=True` adds the
     every-step `timing.json` a post-prep launch leaves (the archives predate it).
     `extra_worlds` are further manifest worlds that NEVER STARTED: in the manifest before the
     RUNS step, so the arm roster names them (one entry per manifest world), with no archive, no
-    ledger and no arm folder."""
+    ledger and no arm folder. `closings` is label -> the `ClosingRecord` fields that world's arm closed with (None: it never
+    closed), declared before the build's first read plants the records (#1534: a record is write-once)."""
     manifest = sample_manifest()
     manifest["worlds"].extend(dict(w) for w in extra_worlds)
     ep = J.accepted_episode(
@@ -697,6 +753,11 @@ def sample_episode(tmp_path: Path, *, root: Path | None = None, judge: bool = Tr
                                            verifier_verdict={"passed": True,
                                                              "reason": "present"},
                                            attempts=1)]})
+    for label, fields in (closings or {}).items():
+        if fields is None:
+            J.no_closing(ep, label)
+        else:
+            J.set_closing(ep, label, **fields)
     # the manifest the sample carries: base story, a real axis per sibling, the control's null
     T.write_family(ep, manifest)
     # An archived, judged episode reached RUNS: `runs/` and its arm roster naming every manifest
@@ -734,6 +795,8 @@ def sample_episode(tmp_path: Path, *, root: Path | None = None, judge: bool = Tr
     if runs:
         for label in WORLDS:
             run_dir(ep, label, cost=SAMPLE.run_cost[label], duration_ms=SAMPLE.run_ms[label])
+    else:
+        J.plan_of(ep).arm_folders = False
     if timing:
         write_timing(ep, every_step())
     if stamp:

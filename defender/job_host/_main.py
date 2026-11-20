@@ -4,7 +4,8 @@ In order: tied to the worker (its parent; `--parent-pid`), the kind's host half 
 admission, ..., the first pass, the run folder), the job socket in its per-claim folder, the job container started
 attached as this process's child, the socket served until the container exits, then everything the job had removed
 by its claim's label, what the helper made removed, and the lock released. The helper exits 0 once it served the job to
-its end, whatever the container's own status (logged); any other exit is the helper's own failure.
+its end, whatever the container's own status (logged), a post-step with its answer whether work still waits (#1487
+Amendment r5.2); any other exit is the helper's own failure.
 
 An ending decided before the container starts is written by the helper in the kind's vocabulary (A3): a setup
 refusal; a job that cannot be started confined (no socket, an image missing, a refusing runtime, or the helper
@@ -32,12 +33,14 @@ import uuid
 from collections.abc import Iterator
 from typing import Any
 
-from . import _common, _investigation, _learning
+from . import _common, _investigation, _learning, _store_relay
 from ._container import (
     STOP_GRACE,
     job_container_name,
     make_socket_folder,
     container_launch,
+    owner_folder,
+    record_owner,
     socket_folder,
     socket_path,
     start,
@@ -60,6 +63,7 @@ def registry() -> Registry:
     _common.register_common(built)
     _investigation.register_investigation(built)
     _learning.register(built)
+    _store_relay.register_store(built)
     return built
 
 
@@ -184,6 +188,8 @@ def _finish(session: Session, proc: Any, server: Server | None, hold: contextlib
         shutil.rmtree(socket_folder(session), ignore_errors=True)
         if session.prepared is not None:
             session.prepared.cleanup.close()
+        if session.recorded:  # last: until it goes, the worker leaves the claim's folders to this helper (#1557 O5)
+            shutil.rmtree(owner_folder(session), ignore_errors=True)
     finally:
         hold.close()
 
@@ -197,6 +203,7 @@ def _start(session: Session, spec: KindSpec, signals: _Signals, hold: contextlib
     proc = None
     try:
         try:
+            record_owner(session)  # before any claim folder is made (#1557 O5)
             session.prepared = spec.prepare(session, hold)
             path = socket_path(session)
             try:
@@ -256,7 +263,7 @@ def _run(session: Session, spec: KindSpec, signals: _Signals) -> int:
         _say_unreached(session, rc, server)
         if session.prepared is not None and session.prepared.exited is not None:
             session.prepared.exited(session, rc)
-        return 0
+        return session.served_status
     finally:
         signals.raising = False
         _finish(session, proc, server, hold)
@@ -267,8 +274,10 @@ def main(argv: list[str], *, docker: Any = None, signer: Any = None, publish: An
     """The helper for one job (module doc). `docker` is the docker seam (the box package's real one by default),
     `signer` the request signer (the tenant's sign login), `publish` the launch-time publish (the real child),
     `forge` the forge credential's builder (the learning kinds'), `command` a container command line in place of the
-    kind's entry, `client` the forge client the drain's delivery uses (a new one by default). Returns 0 once the helper served the job to its end (its container ran and exited, whatever its status, or the
-    helper wrote the ending it decided before the container), else non-zero: the worker reads any other status, with
+    kind's entry, `client` the forge client the drain's delivery uses (a new one by default). Returns 0 once the helper
+    served the job to its end (its container ran and exited, whatever its status, or the helper wrote the ending it
+    decided before the container), or, for a post-step whose container exited, its answer whether work still waits
+    (`NOTHING_WAITS`, `WORK_WAITS`; #1487 Amendment r5.2); else another status: the worker reads any other status, with
     no end record, as the helper's own failure (`worker._helper_failure`)."""
     from defender import tenancy
     from defender._parent_tie import require_parent, tie_to_parent

@@ -1,6 +1,9 @@
 """The derived repair window (warn_diagnostics) and the append/close gate that keeps it closed while a row is flagged."""
 from __future__ import annotations
 
+from defender.tests.support.runtime.engine._spec992 import closing_record, is_closed, never_closed
+from defender.tests.storage.verdict_1534 import _spec1534 as V
+
 import asyncio
 
 import pytest
@@ -198,14 +201,14 @@ def test_window_derivation_failure_does_not_wedge_the_run(tmp_path):
 
     # the close path — the run stays closable
     _close(deps, "inconclusive")
-    assert (run / "report.md").is_file()
+    assert is_closed(run)
 
     # ...and the control: a readable flagged document DOES refuse the close.
     deps2, run2 = main_deps(tmp_path / "control")
     seed_investigation(run2, WARN_DOC)
     with pytest.raises(ModelRetry):
         _close(deps2, "inconclusive")
-    assert not (run2 / "report.md").exists()
+    assert never_closed(run2)
 
 
 # the accept path
@@ -253,7 +256,7 @@ def test_close_gate_precedes_every_disposition_branch(tmp_path):
         with pytest.raises(ModelRetry) as exc:
             _close(deps, disposition)
         assert WARN_ROW in str(exc.value), disposition
-        assert not (run / "report.md").exists(), disposition
+        assert never_closed(run), disposition
 
     with pytest.raises(ModelRetry) as exc:
         _close(deps, "not-a-disposition")
@@ -306,14 +309,14 @@ def test_a_flagged_row_refuses_append_and_close_naming_the_row_and_its_repairs_a
         assert "use: l-001|v-001|class|svc.config-mgmt" not in text
         assert "no `class` alternative is offered here" in text
     assert inv.read_bytes() == before
-    assert not (run / "report.md").exists()
+    assert never_closed(run)
 
     # ...positive control, the complementary condition: window closed, both writes land.
     deps2, run2 = main_deps(tmp_path / "control")
     seed_investigation(run2, PROLOGUE + attr_block(REPAIRED_ROW))
     _tool_append_block(deps2, CLEAN_BLOCK)
     _close(deps2, "inconclusive")
-    assert (run2 / "report.md").is_file()
+    assert is_closed(run2)
     assert CLEAN_BLOCK.strip() in (run2 / "investigation.md").read_text(encoding="utf-8")
 
 
@@ -368,7 +371,7 @@ def test_close_gate_distinguishes_model_invoked_from_framework_invoked(tmp_path)
     with pytest.raises(ModelRetry) as exc:
         _close(deps, "inconclusive")
     assert WARN_ROW in str(exc.value)
-    assert not (run / "report.md").exists()
+    assert never_closed(run)
 
     deps2, run2 = main_deps(tmp_path / "framework")
     seed_investigation(run2, WARN_DOC)
@@ -376,21 +379,21 @@ def test_close_gate_distinguishes_model_invoked_from_framework_invoked(tmp_path)
 
     assert exit_reason == "UnexpectedModelBehavior", "the forced-close limb never ran"
     assert truncated_by is not None
-    assert (run2 / "report.md").is_file(), "the framework's forced close was gated too"
+    assert is_closed(run2), "the framework's forced close was gated too"
 
 
 def test_forced_close_failure_is_distinguishable_from_a_committed_close(tmp_path):
     deps_ok, run_ok = main_deps(tmp_path / "commits")
     seed_investigation(run_ok, PROLOGUE)
     _run, _t_ok, exit_ok = _drive_to_retry_exhaustion(deps_ok)
-    assert (run_ok / "report.md").is_file()
+    assert is_closed(run_ok)
 
     deps_bad, run_bad = main_deps(tmp_path / "refused")
     seed_investigation(run_bad, PROLOGUE)
-    (run_bad / "report.md").mkdir()
+    V.plant(deps_bad.session_store, V.a_record(run_bad.name, summary="planted"))
     _run, _t_bad, exit_bad = _drive_to_retry_exhaustion(deps_bad)
 
-    assert not (run_bad / "report.md").is_file(), "the fault never reached the commit"
+    assert closing_record(run_bad).summary == "planted", "the fault never reached the commit"
     assert exit_bad != exit_ok, (
         "a forced close that FAILED is indistinguishable from one that committed — the "
         f"handler swallowed it (both report {exit_ok!r})"

@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 
 from defender.tests.support.shared.filesystem import _spec1047 as S
+from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.shared._locations_1210 import location_path
 from defender.records._episode_handle import Episode
@@ -80,25 +81,21 @@ def test_an_exit_class_the_table_does_not_name_takes_the_report_driven_fallback(
     assert unmapped.notes == []
 
 
-def test_a_run_with_no_exit_class_and_no_usable_report_records_that_and_proposes_nothing(
+def test_a_run_with_no_exit_class_and_no_closing_record_records_that_it_never_closed_and_proposes_nothing(
         tmp_path):
-    for name, write in (
-        ("absent", None),
-        ("no-frontmatter", "just some prose, no headline anywhere\n"),
-        ("bad-headline", S.report_text("not-a-disposition")),
-    ):
-        run_dir = S.closed_run_dir(tmp_path / name, report=False)
-        if write is not None:
-            (run_dir / "report.md").write_text(write, encoding="utf-8")
-        fake = S.record_ticket(run_dir, truncated_by=None)
-        assert fake.transitions == [], f"{name}: an unusable report still closed the ticket"
-        assert len(fake.records) == 1, f"{name}: an unusable report left the ticket in silence"
-        assert S.UNREADABLE_MARK in fake.records[0].text(), (
-            f"{name}: the record proposes something off a report that yields no disposition")
-        for word in S.sym("_vocab", "DISPOSITION_VALUES"):
-            assert word not in fake.records[0].text().lower(), (
-                f"{name}: an unreadable report's record names a disposition ({word!r})")
-        assert (S.receipt(run_dir) or {}).get("ok") is True
+    """A run with no record and no exit class posts the never-closed sentence and proposes nothing. (V-READERS)"""
+    from defender.tests.support.runtime.engine._spec767 import NEVER_CLOSED
+
+    run_dir = S.closed_run_dir(tmp_path / "absent", report=False)
+    fake = S.record_ticket(run_dir, truncated_by=None)
+    assert fake.transitions == [], "a run with no record still closed the ticket"
+    assert len(fake.records) == 1, "a run with no record left the ticket in silence"
+    assert NEVER_CLOSED in fake.records[0].text(), (
+        f"the record is not the never-closed sentence: {fake.records[0].text()!r}")
+    for word in S.sym("_vocab", "DISPOSITION_VALUES"):
+        assert word not in fake.records[0].text().lower(), (
+            f"a run with no record names a disposition ({word!r})")
+    assert (S.receipt(run_dir) or {}).get("ok") is True
 
 
 # the exit class and a genuine model verdict, together
@@ -137,7 +134,7 @@ def test_a_forced_close_set_exit_whose_own_forced_close_failed_leaves_the_ticket
         decided = S.closed_run_dir(tmp_path / f"{exit_class}-decided", report=False)
         both = S.record_ticket(decided, truncated_by=exit_class, closed_before_cut=True)
         assert both.records == [], (
-            f"{exit_class}: a run that had closed but left no report.md still recorded a verdict")
+            f"{exit_class}: a run that had closed but left no closing record still recorded a verdict")
         assert len(both.notes) == 1, (
             f"{exit_class}: `closed_before_cut=True` swallowed the escalation of a failed "
             "forced close")
@@ -171,7 +168,6 @@ def test_no_planted_file_under_the_run_dir_changes_which_comment_record_case_tic
         clean = S.closed_run_dir(tmp_path / f"clean-{exit_class}", disposition="unresolved")
         salted = S.closed_run_dir(tmp_path / f"salted-{exit_class}", disposition="unresolved")
         S.salt_run_dir(salted, value="request-limit")
-        (salted / "report.md").write_text(S.report_text("unresolved"), encoding="utf-8")
         a = S.record_ticket(clean, truncated_by=exit_class)
         b = S.record_ticket(salted, truncated_by=exit_class)
         assert [(c.path.split("/")[-1], c.body) for c in a.calls] == \
@@ -181,6 +177,10 @@ def test_no_planted_file_under_the_run_dir_changes_which_comment_record_case_tic
 
 def test_a_forged_session_store_pointer_file_is_never_consulted_by_the_ticket_lane_for_any_exit_class(
         tmp_path):
+    """A pointer-shaped file inside the box-writable run folder is no input; the host-written sidecar is, and a damaged
+    one is a fault (no comment, an `error` receipt in the kind's words), never a reason to post. (V-LOOK, C10, OD8)"""
+    from defender.tests.support.storage import _readers1534 as R
+
     in_folder_name = "session_store_pointer.json"
 
     def addresses(run_dir: Path) -> dict[str, Path]:
@@ -194,26 +194,38 @@ def test_a_forged_session_store_pointer_file_is_never_consulted_by_the_ticket_la
         "not-json": "{{{ not json at all",
         "empty": "",
     }
+    posted = []
     for exit_class in (*S.vocabulary(), None):
         control = S.record_ticket(
             S.closed_run_dir(tmp_path / f"control-{exit_class}", disposition="unresolved"),
             truncated_by=exit_class)
-        for where in ("in-folder", "sidecar"):
-            for name, content in forgeries.items():
-                run_dir = S.closed_run_dir(tmp_path / f"{where}-{name}-{exit_class}",
-                                           disposition="unresolved")
-                addresses(run_dir)[where].write_text(content, encoding="utf-8")
-                fake = S.record_ticket(run_dir, truncated_by=exit_class)
-                assert [c.path.split("/")[-1] for c in fake.calls] == \
-                       [c.path.split("/")[-1] for c in control.calls], (
-                    f"{exit_class}/{where}/{name}: a forged case pointer moved the ticket lane")
+        paths = [c.path.split("/")[-1] for c in control.calls]
+        posted.append(bool(paths))
+        for name, content in forgeries.items():
+            run_dir = S.closed_run_dir(tmp_path / f"in-folder-{name}-{exit_class}", disposition="unresolved")
+            addresses(run_dir)["in-folder"].write_text(content, encoding="utf-8")
+            fake = S.record_ticket(run_dir, truncated_by=exit_class)
+            assert [c.path.split("/")[-1] for c in fake.calls] == paths, (
+                f"{exit_class}/in-folder/{name}: a forged case pointer in the run folder moved the ticket lane")
+
+            damaged = S.closed_run_dir(tmp_path / f"sidecar-{name}-{exit_class}", disposition="unresolved")
+            addresses(damaged)["sidecar"].write_text(content, encoding="utf-8")
+            fake = S.record_ticket(damaged, truncated_by=exit_class)
+            seen = [c.path.split("/")[-1] for c in fake.calls]
+            if seen != paths:  # the lane looked the record up: a fault posts nothing
+                assert seen == [], f"{exit_class}/sidecar/{name}: a damaged sidecar still posted {seen}"
+                receipt = json.dumps(S.receipt(damaged))
+                assert R.names_only("pointer-unreadable", receipt), (
+                    f"{exit_class}/sidecar/{name}: the receipt does not carry the fault kind's wording: {receipt}")
+    assert any(posted), "positive control: no exit class posted a comment for its control run"
 
     for where in ("in-folder", "sidecar"):
         dangling = S.closed_run_dir(tmp_path / f"dangling-{where}", disposition="unresolved")
+        addresses(dangling)[where].unlink(missing_ok=True)  # the planted sidecar is the one to dangle
         addresses(dangling)[where].symlink_to(tmp_path / "nowhere.json")
-        assert len(S.record_ticket(dangling, truncated_by="request-limit").records) == 1, (
-            f"a dangling symlink at the case pointer's {where} address stopped the ticket lane, "
-            "so something is reading it")
+        records = len(S.record_ticket(dangling, truncated_by="request-limit").records)
+        assert records == (1 if where == "in-folder" else 0), (
+            f"a dangling symlink at the case pointer's {where} address: {records} record(s)")
 
 
 def test_a_forged_ticket_write_receipt_claiming_prior_closure_does_not_suppress_the_real_record_or_note_call(
@@ -255,13 +267,9 @@ def test_no_exit_class_transitions_the_ticket(tmp_path):
     assert seen_writes, "the control failed: no drive wrote anything, so the census is empty"
 
 
-#: The host's forced close as `_close_a_run_cut_short` leaves it: an `unresolved` report.
-FORCED_REPORT = S.report_text("unresolved")
-
-
 def _forced_close(episode_dir):
-    """Overwrite world b's archived report with the host's forced `unresolved` close."""
-    (episode_dir / "worlds" / T.world_id(episode_dir, "b") / "report.md").write_text(FORCED_REPORT, encoding="utf-8")
+    """World b's arm holds the host's forced `unresolved` close (cause: not reviewed)."""
+    J.set_closing(episode_dir, "b", disposition="unresolved")
 
 
 # the third row shape
@@ -303,29 +311,26 @@ def test_a_cut_short_world_does_not_reach_the_family_call_as_a_verdict(tmp_path)
 
 def test_the_third_row_shape_keeps_the_two_tiers_separable(tmp_path):
     ep = S.cut_short_episode(tmp_path, cut={"b": "request-limit"})
-    (ep / "worlds" / T.world_id(ep, "c") / "report.md").unlink()
+    J.no_closing(ep, "c")
     graded = S.graded(ep)
     assert "malformed" not in graded["b"], "the cut-short row claims tier 2"
     assert graded["c"].get("ungradable") is True
     assert graded["c"].get("malformed") is not True, (
         "an absent input was recorded as a malformed one")
     assert graded["c"].get("cut_short") is None, (
-        "a world ungradable for an absent report acquired a cut_short key")
+        "a world ungradable for an absent closing record acquired a cut_short key")
 
 
-def test_an_aborted_budget_or_store_world_names_its_exit_not_a_missing_report(tmp_path):
+def test_an_aborted_budget_or_store_world_names_its_exit_not_a_missing_closing_record(tmp_path):
     for exit_class in S.NO_REPORT_EXITS:
         ep = S.cut_short_episode(tmp_path / exit_class, cut={"b": exit_class})
-        (ep / "worlds" / T.world_id(ep, "b") / "report.md").unlink()
+        J.no_closing(ep, "b")
         row = S.graded(ep)["b"]
         assert row.get("cut_short") == exit_class, (
             f"{exit_class}: the row does not name the exit class")
         reason = row.get("ungradable_reason") or ""
         assert exit_class in reason, (
-            f"{exit_class}: the generic missing-report reason won: {reason!r}")
-        assert "report.md" not in reason, (
-            f"{exit_class}: the reason blames a missing report.md for a class that never "
-            "writes one")
+            f"{exit_class}: the generic missing-input reason won: {reason!r}")
 
 
 # a model that closed, and a run cut short afterwards
@@ -352,9 +357,6 @@ def test_a_world_whose_model_closed_and_was_then_cut_short(tmp_path):
 
 def test_the_record_must_distinguish_a_host_written_close_from_the_models_own(tmp_path):
     ep = S.cut_short_episode(tmp_path, cut={"b": "aborted", "c": "aborted"}, closed=("c",))
-    for label in ("b", "c"):
-        (ep / "worlds" / T.world_id(ep, label) / "report.md").write_text(
-            S.report_text("malicious"), encoding="utf-8")
     graded = S.graded(ep)
     assert graded["b"].get("cut_short") == "aborted", (
         "the world whose model never closed was not filed as cut short")
@@ -423,8 +425,9 @@ def test_a_cut_short_world_and_a_malformed_world_in_the_same_episode(tmp_path):
         dispositions={"a": "benign", "b": "malicious", "c": "malicious", "d": "malicious"},
         ledgers={"b": [S.staged_row("b")], "c": [], "d": []},
         cut={"b": "request-limit"})
-    (ep / "worlds" / T.world_id(ep, "c") / "report.md").write_text(
-        S.report_text("not-a-disposition"), encoding="utf-8")
+    (ep / "worlds" / T.world_id(ep, "c") / "investigation.md").write_text(
+        "# investigation c\n\n```invlang\n:T resolutions\n"
+        "h-001  open → held    [l-001 r1 severe ⟂ e-001 :: cut off here\n", encoding="utf-8")
     graded = S.graded(ep)
     assert graded["b"].get("cut_short") == "request-limit"
     assert "malformed" not in graded["b"], "the cut-short row claims tier 2"
@@ -476,7 +479,6 @@ def test_no_file_a_box_can_write_is_an_input_to_was_this_run_cut_short(tmp_path)
         S.closed_run_dir(tmp_path / "ticket-clean", disposition="benign"), truncated_by=None)
     salted = S.closed_run_dir(tmp_path / "ticket-salted", disposition="benign")
     S.salt_run_dir(salted, value="aborted")
-    (salted / "report.md").write_text(S.report_text("benign"), encoding="utf-8")
     forged_ticket = S.record_ticket(salted, truncated_by=None)
     assert [(c.path.split("/")[-1], c.body) for c in forged_ticket.calls] == \
            [(c.path.split("/")[-1], c.body) for c in control_ticket.calls], (
@@ -533,27 +535,6 @@ def test_a_file_named_like_the_archived_run_end_record_planted_anywhere_under_th
     assert S.graded(ep)["b"].get("cut_short") == "aborted"
 
 
-# report frontmatter — the surface the first design would have trusted
-
-
-def _frontmatter_row(tmp_path, name, extra=None):
-    """One episode whose world b carries a planted `report.md`, graded."""
-    ep = S.cut_short_episode(tmp_path / name)
-    S.plant_frontmatter(ep / "worlds" / T.world_id(ep, "b"), extra=extra or "")
-    return _rows_and_word(ep)
-
-
-def test_grading_given_a_planted_truncated_by_frontmatter_line_with_a_valid_value(tmp_path):
-    """A `truncated_by:` line spliced into world b's report frontmatter, which the report
-    validator admits, changes nothing for any vocabulary member."""
-    control_rows, control_word = _rows_and_word(S.cut_short_episode(tmp_path / "control"))
-    for member in S.vocabulary():
-        rows, word = _frontmatter_row(tmp_path, f"valid-{member}",
-                                      extra=f"truncated_by: {member}\n")
-        assert rows == control_rows, f"{member}: a planted valid member moved the grade"
-        assert word == control_word, f"{member}: a planted valid member moved the word"
-
-
 # the owner's input channel, and whose world a record is about
 
 
@@ -597,7 +578,6 @@ def test_no_box_writable_files_content_is_ever_fed_as_the_value_argument_to_the_
     clean_run = S.closed_run_dir(tmp_path / "ticket-clean", disposition="unresolved")
     forged_run = S.closed_run_dir(tmp_path / "ticket-forged", disposition="unresolved")
     S.salt_run_dir(forged_run, value="request-limit")
-    (forged_run / "report.md").write_text(S.report_text("unresolved"), encoding="utf-8")
     a = S.record_ticket(clean_run, truncated_by="aborted")
     b = S.record_ticket(forged_run, truncated_by="aborted")
     assert [c.path.split("/")[-1] for c in a.calls] == [c.path.split("/")[-1] for c in b.calls]

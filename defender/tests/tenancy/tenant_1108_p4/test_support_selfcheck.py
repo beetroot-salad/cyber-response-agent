@@ -2,10 +2,12 @@
 tenant through P3. It pins the machinery, nothing about P4 behaviour."""
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 
 import pytest
 
+from defender.tests.support.learning.core._store1278 import TickChild, migrated_database, world  # noqa: F401 — fixtures
 from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.tenancy import _tenants1106 as tenants
@@ -136,3 +138,76 @@ def test_1366_the_handoff_locator_helper_keeps_the_punctuation_around_the_file(s
     handoff = H.handoff_lines("  x " + sentence.format(loc=f"/tmp/h/cmdb/{H.FILES[part]}"), key, "cmdb", part)
 
     assert any(store in line for line in handoff), (store, handoff)
+
+
+
+@pytest.mark.postgres
+def test_the_port_self_check_counts_the_requests_the_helper_received_whichever_process_asked(world, tmp_path):  # noqa: F811 — the imported fixture
+    """`TickImpl.unreached` (the self-check `conftest.tick_impl` runs at the end of each `[port]` case) is the helper's own
+    count of the requests its socket received (counted at dispatch, a refused one included): a tick in a forked
+    child counts, a helper nobody asked does not, and a case that started no helper reached nothing. It pins the harness, nothing about the port."""
+    from defender.tests.tenancy.tenant_1108_p4._drain_support import TickImpl
+
+    adapter = TickImpl("adapter", world, tmp_path, world.monkeypatch)
+    assert adapter.unreached() is None, "the adapter has no port to reach"
+    port = TickImpl("port", world, tmp_path, world.monkeypatch)
+    assert "started no helper" in port.unreached()
+
+    port.prestart()
+    helper, owned = port.take()
+    assert not owned, "the prestarted helper is left to `close`"
+
+    def ask_from_the_child() -> int:
+        with contextlib.suppress(Exception):  # the helper refuses what it does not serve; it counted the request
+            helper.ask("selfcheck.no-such-request")
+        return 0
+
+    assert TickChild(ask_from_the_child, tmp_path / "child.json").wait() == {"rc": 0}
+    port.release(helper)
+    assert port.received == [["selfcheck.no-such-request"]]
+    assert port.unreached() is None
+
+    port._start()  # noqa: SLF001 — a second helper nobody asks
+    port.close()
+    assert port.received[1] == []
+    assert "1 of 2 helper(s)" in port.unreached()
+
+
+def test_adopt_scene_refuses_a_data_root_the_short_root_provider_did_not_make_before_any_helper_starts(tmp_path, monkeypatch):
+    """The helper's job socket is `<data root>/.job-sockets/<claim>/job.sock` (root + 55 bytes, refused at 108): whether a root
+    fits must not depend on the machine or the case's position on its worker. `adopt_scene` refuses a root of pytest's default
+    shape at once, naming the root, the socket path's length and the remedy, whatever its length here."""
+    import time
+    from types import SimpleNamespace
+
+    from defender.tests.support.jobs._relay1487 import adopt_scene
+    from defender.tests.support.jobs._short_root import NotAShortRoot
+
+    long_root = tmp_path / "data-root100"  # pytest's own shape: `/tmp/pytest-of-<user>/pytest-N/popen-gwN/test-x0/...`
+    started = time.monotonic()
+    with pytest.raises(NotAShortRoot) as refused:
+        adopt_scene(SimpleNamespace(data_root=long_root, tenant_id="t"), "postgresql://unused", monkeypatch)
+    assert time.monotonic() - started < 5, "the refusal must be at once, not a helper's start timeout"
+    text = str(refused.value)
+    for named in (str(long_root), str(len(str(long_root)) + 55), "short_root()"):
+        assert named in text, (named, text)
+    assert not long_root.exists(), "nothing was made under the refused root"
+    # A short root that merely happens to be short is refused too: the check is the provider, not a length measured here.
+    shorty = SimpleNamespace(data_root=Path("/tmp/x"), tenant_id="t")
+    with pytest.raises(NotAShortRoot):
+        adopt_scene(shorty, "postgresql://unused", monkeypatch)
+
+
+@pytest.mark.postgres
+def test_adopt_scene_over_the_cases_own_data_root_starts_a_helper(world, tmp_path):  # noqa: F811 — the imported fixture
+    """Control for the refusal above: this case requests nothing but `world`, and its data root is the folder's short one, so
+    a helper starts over it (its socket path is root + 55 bytes, far under the limit)."""
+    from defender.tests.support.jobs._relay1487 import PostStepHelper, adopt_scene
+    from defender.tests.support.jobs._short_root import socket_path_length
+
+    assert socket_path_length(world.t.data_root) < 80, world.t.data_root
+    helper = PostStepHelper(adopt_scene(world.t, world.dsn, world.monkeypatch), tmp_path)
+    try:
+        assert Path(helper.socket).exists()
+    finally:
+        helper.close()

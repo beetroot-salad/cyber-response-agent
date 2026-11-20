@@ -7,8 +7,8 @@ High-level answer to "what is the defender and how does it work?"
 The **defender** (`defender/`) is an alert-triage agent. Given an `alert.json`, a single-agent ReAct loop investigates
 the alert and emits the audit trail (`investigation.md`), the two live
 lead/query tables (`executed_queries.jsonl` + `gather_raw/`, the contract
-surface for the offline learning loop), and `report.md` (disposition + one
-paragraph). It is **learning-loop
+surface for the offline learning loop), and the closing record (disposition,
+the host's cause and a summary, a row in the run's session database). It is **learning-loop
 first** — the point is to iterate fast on the learning loop, not to harden a
 runtime.
 
@@ -73,7 +73,7 @@ gate?" is now an ordinary design question. What runs today, and why:
   `content/runtime-loop.md` §The close is gated.
 - **The artifact schema** (`records/_artifact_schema.py`, applied by
   `permission.decide_write`) — every write a *model* makes to
-  `investigation.md` / `report.md` has to meet the schema, which is what makes
+  `investigation.md` has to meet the schema, which is what makes
   "a committed investigation parses" true. The learning loop cannot read an
   artifact that does not parse, so this is the one gate the loop bought
   for itself.

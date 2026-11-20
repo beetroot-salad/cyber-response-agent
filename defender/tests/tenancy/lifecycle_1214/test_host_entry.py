@@ -141,7 +141,7 @@ def _the_learning_store_is_reached_not_used(monkeypatch) -> None:
     none of the refusals a control must not show, and a refused one never gets as far."""
     import contextlib
 
-    from defender.learning.core import drains, store_tick
+    from defender.learning.core import store_tick
 
     class Unreached:
         def __getattr__(self, name: str) -> Any:
@@ -151,8 +151,7 @@ def _the_learning_store_is_reached_not_used(monkeypatch) -> None:
     def opened_store():
         yield Unreached()
 
-    monkeypatch.setattr(store_tick, "opened_store", opened_store)  # lint-monkeypatch: ok — the host entry opens its store through this module-level door; no seam carries a stand-in store to it
-    monkeypatch.setattr(drains, "opened_store", opened_store)  # lint-monkeypatch: ok — the drain opens its store through this module-level door; no seam carries a stand-in store to it
+    monkeypatch.setattr(store_tick, "opened_store", opened_store)  # lint-monkeypatch: ok — the host entry and the drain open their store through this module-level door; no seam carries a stand-in store to it
 
 
 # --- run start -------------------------------------------------------------------------------------

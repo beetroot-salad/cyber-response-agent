@@ -1382,9 +1382,10 @@ def _held_lead_drain(s: TenantLeadScene, monkeypatch: Any
     from defender.tests.support.tenancy import _systems1366 as R
 
     directory = s.t.directory_with(records=R.added(R.fixture_records(), "wazuh"))
-    got = _p4_caught(lambda: drains.lead_author_drain(
-        s.paths, client=s.t.forge.client, identity=s.t.vault.identity(), directory=directory,
-        start_box=start))
+    with tick_store(s.t, "lead_author") as store:  # #1487: the tick is handed its store
+        got = _p4_caught(lambda: drains.lead_author_drain(
+            s.paths, client=s.t.forge.client, identity=s.t.vault.identity(), directory=directory,
+            start_box=start, store=store))
     [request] = start.requests
     X.no_path_docker(daemon)
     return got, daemon.calls_from_the_first_stop(request.name)
@@ -1457,7 +1458,7 @@ def _production_tenant_lead_scene(tmp_path: Path, monkeypatch: Any, data_root: P
         yield s, daemon
 
 
-from defender.tests.tenancy.tenant_1108_p4._drain_support import _p4_caught  # noqa: E402 — #1108 P4's shared seam check
+from defender.tests.tenancy.tenant_1108_p4._drain_support import _p4_caught, tick_store  # noqa: E402 — #1108 P4's shared seam check
 
 
 def _production_lead_drain(s: TenantLeadScene, daemon: X.FakeDaemon,
@@ -1472,9 +1473,10 @@ def _production_lead_drain(s: TenantLeadScene, daemon: X.FakeDaemon,
     seams: dict[str, Any] = {}
     if daemon.tripwire is not None:
         seams["start_box"] = partial(box_mod.start_box, docker=daemon)
-    got = _p4_caught(lambda: drains.lead_author_drain(
-        s.paths, run_lead_author=lanes.run_lead, run_pitfalls=lanes.run_pitfalls,
-        client=s.t.forge.client, identity=s.t.vault.identity(), directory=s.t.directory, **seams))
+    with tick_store(s.t, "lead_author") as store:  # #1487: the tick is handed its store
+        got = _p4_caught(lambda: drains.lead_author_drain(
+            s.paths, run_lead_author=lanes.run_lead, run_pitfalls=lanes.run_pitfalls,
+            client=s.t.forge.client, identity=s.t.vault.identity(), directory=s.t.directory, store=store, **seams))
     return got, lanes
 
 

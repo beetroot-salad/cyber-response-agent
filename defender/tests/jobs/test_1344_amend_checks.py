@@ -8,16 +8,16 @@ post-steps of one tenant ever run together, on one worker or two. Real database,
 from __future__ import annotations
 
 import asyncio
-import json
 from pathlib import Path
 
 import pytest
 
-from defender.records.job_lane import PostStepRecord
-from defender.tests.jobs.test_1344_amend_wake import CheckChild, _either, _strand, _tenant_dirs
+from defender.tests.jobs.test_1344_amend_wake import CheckChild, _either, _end_completed, _idle, _tenant_dirs, _work_waits
 from defender.tests.jobs.test_1344_learning_jobs import (
     END,
     _stop_serving,
+    completed_investigation,
+    investigation_of,
     job_child,
     job_row,
     learning_end,
@@ -110,7 +110,7 @@ async def test_a3_an_idle_end_stops_the_clock_until_a_job_arms_it_again(world):
         await queued_job(world, store, ticket="J-1")
         _age(dsn, 2 * HOUR)
         assert await store.claim_learning_check(HOUR, "h1") == T1
-        assert await store.end_learning_check(T1, "h1", idle=True, handed=()) is True
+        assert await store.end_learning_check(T1, "h1", idle=True) is True
         _age(dsn, 100 * HOUR)
         assert await store.claim_learning_check(HOUR, "h2") is None, "an idle tenant was checked"
         await queued_job(world, store, ticket="J-2")
@@ -118,20 +118,207 @@ async def test_a3_an_idle_end_stops_the_clock_until_a_job_arms_it_again(world):
         assert await store.claim_learning_check(HOUR, "h3") == T1
 
 
-async def test_a3_an_end_that_finds_a_pending_job_it_was_not_handed_makes_the_tenant_due_at_once(world):
-    """A job ended with findings while a check of its tenant ran: the check's end, though its own record says nothing
-    waits, leaves the tenant due at once and not idle, so that job is not stranded. (amendment 3)"""
+async def _running_job(store, *, ticket: str) -> str:
+    """A learning job of T1 claimed by the store's own claim, so it is running."""
+    await completed_investigation(store, ticket=ticket, key=ticket)
+    return (await store.claim_learning_job()).record.learning_job_id
+
+
+async def _finish(store, job: str, status: str) -> None:
+    """The job's one end write through the store, as the worker makes it."""
+    reason = {"completed": None, "failed": "judge_failed", "skipped": "no_fork_point"}[status]
+    await store.finish_learning_job(T1, job, status=status, reason=reason, message=None if status == "completed" else "m",
+                                    progress=None)
+
+
+async def _held_by(world, store, holder: str = "h1") -> str:
+    """A running job of T1 and the tenant's clock held by `holder` (a check claimed after the interval)."""
+    job = await _running_job(store, ticket="J-1")
+    _age(world["dsn"], 2 * HOUR)
+    assert await store.claim_learning_check(HOUR, holder) == T1, "premise: the check was claimed"
+    return job
+
+
+async def test_o7_an_end_of_a_hold_that_a_completed_job_ended_beside_makes_the_tenant_due_at_once_not_idle(world):
+    """A job ends `completed` while a check holds its tenant's clock: the hold's end, though it says idle, leaves the
+    tenant not idle and due at once, and the mark is spent (the next hold's idle end stands). (O7, armed-while-held mark)"""
     dsn = world["dsn"]
     async with job_store(dsn) as store:
-        job = await queued_job(world, store, ticket="J-1")
+        job = await _held_by(world, store)
+        await _finish(store, job, "completed")
+
+        assert await store.end_learning_check(T1, "h1", idle=True) is True
+        assert _clock(dsn) == {"idle": False, "held": False, "holder": None}
+        assert await store.claim_learning_check(HOUR, "h2") == T1, "not due at once"
+        assert await store.end_learning_check(T1, "h2", idle=True) is True
+        assert _clock(dsn)["idle"] is True, "the mark outlived the hold it was set for"
+
+
+async def test_o7_a_completed_end_with_no_hold_sets_no_mark(world):
+    """The control of the case above: the job ends `completed` while nothing holds the clock; the next check's idle end
+    stands. (O7)"""
+    dsn = world["dsn"]
+    async with job_store(dsn) as store:
+        job = await _running_job(store, ticket="J-1")
+        await _finish(store, job, "completed")
+        assert _clock(dsn)["idle"] is False, "a completed end arms the clock"
         _age(dsn, 2 * HOUR)
         assert await store.claim_learning_check(HOUR, "h1") == T1
-        _strand(dsn, job)  # ended `completed`, findings `pending`, after the check was handed its list
-        assert await store.end_learning_check(T1, "h1", idle=True, handed=()) is True
-        assert _clock(dsn)["idle"] is False
+        assert await store.end_learning_check(T1, "h1", idle=True) is True
+        assert _clock(dsn)["idle"] is True
+
+
+async def test_o7_a_completed_end_after_the_hold_ended_idle_arms_the_clock_again(world):
+    """The hold ends idle first, the job ends `completed` after it: the clock is not idle again. (O7)"""
+    dsn = world["dsn"]
+    async with job_store(dsn) as store:
+        job = await _held_by(world, store)
+        assert await store.end_learning_check(T1, "h1", idle=True) is True
+        assert _clock(dsn)["idle"] is True, "premise"
+        await _finish(store, job, "completed")
+    assert _clock(dsn)["idle"] is False
+
+
+@pytest.mark.parametrize("status", ["failed", "skipped"])
+async def test_o7_only_a_completed_end_sets_the_mark(world, status):
+    """A job ending `failed` or `skipped` beside a check sets no mark: the hold's idle end stands. (O7)"""
+    dsn = world["dsn"]
+    async with job_store(dsn) as store:
+        job = await _held_by(world, store)
+        await _finish(store, job, status)
+        assert await store.end_learning_check(T1, "h1", idle=True) is True
+    assert _clock(dsn)["idle"] is True
+
+
+async def test_o7_a_lapsed_hold_still_takes_the_mark_and_its_late_end_makes_the_tenant_due(world):
+    """The hold's lease lapsed and nobody took it: a job ending `completed` still sets the mark, and the holder's late
+    end leaves the tenant not idle. (O7: set when the check row has a holder, live or lapsed)"""
+    dsn = world["dsn"]
+    async with job_store(dsn) as store:
+        job = await _held_by(world, store)
+        _lapse(dsn)
+        await _finish(store, job, "completed")
+
+        assert await store.end_learning_check(T1, "h1", idle=True) is True
+    assert _clock(dsn)["idle"] is False
+
+
+@pytest.mark.parametrize("taken_by", ["a family-less claim", "a job's own hold"])
+async def test_o7_a_new_hold_clears_the_mark(world, taken_by):
+    """The mark was set under a hold that lapsed; the next post-step takes the clock afresh and reads the store itself,
+    so its idle end stands. (O7: cleared on a new hold)"""
+    dsn = world["dsn"]
+    async with job_store(dsn) as store:
+        job = await _held_by(world, store)
+        await _finish(store, job, "completed")
+        _lapse(dsn)
+        if taken_by == "a family-less claim":
+            assert await store.claim_learning_check(HOUR, "h2") == T1
+        else:
+            assert await store.hold_learning_check(T1, "h2") is True
+        assert await store.end_learning_check(T1, "h2", idle=True) is True
+    assert _clock(dsn)["idle"] is True
+
+
+@pytest.mark.parametrize("arm", ["a job queued", "a take-over retry", "an explicit start"])
+async def test_o7_the_queue_time_arms_do_not_set_the_mark(world, arm):
+    """While a check holds the clock, a job queued, a lapsed job's take-over retry or an explicit start arm the clock
+    but set no mark: the hold's idle end stands. (O7: queue-time arms do not set it)"""
+    dsn = world["dsn"]
+    async with job_store(dsn) as store:
+        job = await _held_by(world, store)
+        if arm == "a job queued":
+            await completed_investigation(store, ticket="J-2", key="k2")
+        elif arm == "a take-over retry":
+            execute(dsn, "UPDATE jobs.learning_jobs SET lease_expires_at = now() - interval '1 second' WHERE id = %s", (job,))
+            assert await store.take_over() == [job]
+        else:
+            await store.create_learning_job(T1, investigation_of(dsn, job), "req-1", actor="u-1")
+        assert await store.end_learning_check(T1, "h1", idle=True) is True
+    assert _clock(dsn)["idle"] is True, f"{arm} set the mark"
+
+
+@pytest.mark.parametrize("arm", ["a job queued", "a take-over retry", "an explicit start"])
+async def test_o7_a_queue_time_arm_after_the_mark_leaves_it_for_the_hold_s_end(world, arm):
+    """A job ended `completed` while a check held the clock (the mark is set); then a job is queued, a lapsed job is
+    retried, or a job is started explicitly: none of these spends the mark, so the hold's idle end still leaves the
+    tenant not idle and due at once. (O7: only a hold's end spends the mark; queue-time arms leave it)"""
+    dsn = world["dsn"]
+    async with job_store(dsn) as store:
+        job = await _running_job(store, ticket="J-1")
+        other = await _running_job(store, ticket="J-2")
+        _age(dsn, 2 * HOUR)
+        assert await store.claim_learning_check(HOUR, "h1") == T1, "premise: the check was claimed"
+        await _finish(store, job, "completed")
+        if arm == "a job queued":
+            await completed_investigation(store, ticket="J-3", key="k3")
+        elif arm == "a take-over retry":
+            execute(dsn, "UPDATE jobs.learning_jobs SET lease_expires_at = now() - interval '1 second' WHERE id = %s",
+                    (other,))
+            assert await store.take_over() == [other], "premise: the lapsed job was retried"
+        else:
+            await store.create_learning_job(T1, investigation_of(dsn, other), "req-1", actor="u-1")
+
+        assert await store.end_learning_check(T1, "h1", idle=True) is True
+        assert _clock(dsn) == {"idle": False, "held": False, "holder": None}, f"{arm} spent the mark"
+        assert await store.claim_learning_check(HOUR, "h2") == T1, f"after {arm} the tenant was not due at once"
+
+
+def _finish_elsewhere(dsn: str, job: str) -> None:
+    """`job`'s `completed` end write through a store of its own, on a thread and event loop of its own: another
+    worker's end write, run to its commit while the caller waits. Bounded, so a wait on a lock fails rather than hangs."""
+    import threading
+
+    failed: list[BaseException] = []
+
+    async def go() -> None:
+        async with job_store(dsn) as elsewhere:
+            await _finish(elsewhere, job, "completed")
+
+    def run() -> None:
+        try:
+            asyncio.run(go())
+        except BaseException as fault:  # noqa: BLE001 — carried to the caller
+            failed.append(fault)
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    thread.join(timeout=30)
+    assert not thread.is_alive(), "the other worker's completed end did not finish within 30 s (it waited on a lock)"
+    assert not failed, failed
+
+
+async def test_o7_a_completed_end_that_lands_while_the_hold_ends_is_never_lost(world):
+    """Another worker's `completed` end commits just before the hold's end writes the clock (after anything the hold's
+    end read first): the clock is not idle and the tenant due at once. The mark is read and the clock written in one
+    statement on the locked row, so no read can go stale between them. (O7, data model: one statement)"""
+    import threading
+
+    from sqlalchemy import event
+    from sqlalchemy.engine import Engine
+
+    dsn = world["dsn"]
+    caller = threading.get_ident()
+    injected: list[str] = []
+
+    def before(_conn, _cursor, statement, _parameters, _context, _many):
+        # the hold's end writes the clock row; the completed end lands just before that write, as a race would put it
+        if (threading.get_ident() == caller and not injected
+                and statement.lstrip().startswith("UPDATE jobs.learning_checks") and "holder" in statement):
+            injected.append(statement)
+            _finish_elsewhere(dsn, job)
+
+    async with job_store(dsn) as store:
+        job = await _held_by(world, store)
+        event.listen(Engine, "before_cursor_execute", before)
+        try:
+            assert await store.end_learning_check(T1, "h1", idle=True) is True
+        finally:
+            event.remove(Engine, "before_cursor_execute", before)
+        assert injected, "premise: the completed end was injected before the hold's end wrote the clock"
+        assert job_row(dsn, job)["status"] == "completed", "premise: the other worker's end landed"
+        assert _clock(dsn) == {"idle": False, "held": False, "holder": None}, "the completed end's wake was lost"
         assert await store.claim_learning_check(HOUR, "h2") == T1, "not due at once"
-        assert await store.end_learning_check(T1, "h2", idle=True, handed=(job,)) is True
-        assert _clock(dsn)["idle"] is True, "control: a job it was handed does not hold the clock open"
 
 
 def _clock_row(dsn: str, tenant: str = T1) -> tuple | None:
@@ -200,39 +387,27 @@ async def test_a3_only_the_holder_renews_or_lets_go_and_a_late_renewal_nobody_ov
         _lapse(dsn)
         assert await store.claim_learning_check(HOUR, "h2") == T1
         assert await store.renew((), checks={"h1", "h2"}) == ["h2"]
-        assert await store.end_learning_check(T1, "h1", idle=True, handed=()) is False
+        assert await store.end_learning_check(T1, "h1", idle=True) is False
         assert _clock(dsn) == {"idle": False, "held": True, "holder": "h2"}
-        assert await store.end_learning_check(T1, "h2", idle=False, handed=()) is True
+        assert await store.end_learning_check(T1, "h2", idle=False) is True
         assert _clock(dsn) == {"idle": False, "held": False, "holder": None}
-
-
-@pytest.mark.parametrize(("text", "waiting"), [
-    ('{"published": [], "refused": []}', True),
-    ('{"published": [], "refused": [], "waiting": false}', False),
-    ('{"published": [], "refused": [], "waiting": true}', True),
-    ('{"published": [], "refused": [], "waiting": 0}', None),
-])
-def test_a3_a_post_step_record_without_waiting_says_work_may_wait(text, waiting):
-    """An absent `waiting` is the safe reading (work may wait); a non-boolean one is no record. (amendment 3)"""
-    record = PostStepRecord.parse(text)
-    assert (None if record is None else record.waiting) == waiting
 
 
 # -- the worker --------------------------------------------------------------------------------------------------
 
 
-async def test_a3_a_job_ending_during_its_tenant_s_check_starts_no_second_post_step_and_the_next_check_publishes_it(
-        world):
-    """L=2. A check of T1 runs (held open); T1's job J runs in the other slot and ends with findings. J's own post-step
-    does not start beside the check; once the check ends, the next claim checks T1 again, handed J. (amendment 3)"""
+async def test_a3_a_job_ending_during_its_tenant_s_check_starts_no_second_post_step_and_the_next_check_follows_it(world):
+    """L=2. A check of T1 runs (held open); T1's job J runs in the other slot and ends `completed`. J's own post-step
+    does not start beside the check; once the check ends, its tenant is due at once and not idle though the store holds
+    nothing waiting (the armed-while-held mark), so a second check follows. (amendment 3, O7)"""
     dsn = world["dsn"]
     release = world["tmp"] / "release-check"
     check = CheckChild(world["tmp"] / "check", world["runs"], dsn=dsn, wait_for=release)
     follow = post_child(world)
     async with job_store(dsn) as store:
-        stranded = await queued_job(world, store, ticket="J-0")
-        _strand(dsn, stranded)
-        worker = learning_worker(world, store, job=job_child(world, files={END: learning_end("completed", findings=1)}),
+        earlier = await queued_job(world, store, ticket="J-0")
+        _end_completed(dsn, earlier)
+        worker = learning_worker(world, store, job=job_child(world, files={END: learning_end("completed")}),
                                  post=_either(follow, check), learning_check_interval=0.5, learning_slots=2, **_FAST)
         serving = asyncio.create_task(worker.serve())
         try:
@@ -243,31 +418,30 @@ async def test_a3_a_job_ending_during_its_tenant_s_check_starts_no_second_post_s
             assert follow.handed == [], "J's post-step started beside its tenant's check"
             assert len(check.handed) == 1
             release.touch()
-            await _until(lambda: job_row(dsn, job)["publish_state"] == "done", "J published by the next check")
+            await _until(lambda: len(check.handed) == 2, "the next check, after the held one ended")
         finally:
             release.touch()
             _stop_serving(serving)
             await asyncio.wait_for(serving, timeout=15)
-    assert check.handed[0] == (None, [stranded], T1)
-    assert check.handed[1] == (None, [job], T1)
+    assert check.handed == [(None, T1), (None, T1)]
     assert follow.handed == []
 
 
 async def test_a3_a_post_step_that_leaves_nothing_waiting_stops_its_tenant_s_checks(world):
-    """A job's post-step answers `waiting: false` and publishes all it was handed: no family-less check follows,
-    however many intervals pass. (amendment 3; `test_a1_a_job_s_own_post_step_restarts_its_tenant_s_clock` is the
-    control, its record without the flag)"""
+    """A job's post-step ends with nothing waiting in the store: no family-less check follows, however many intervals
+    pass, and the clock is idle. (amendment 3, O7; `test_a1_a_job_s_own_post_step_restarts_its_tenant_s_clock` is the
+    control, work still waiting)"""
     dsn = world["dsn"]
     check = CheckChild(world["tmp"] / "check", world["runs"], dsn=dsn)
+    follow = post_child(world)
     async with job_store(dsn) as store:
         job = await queued_job(world, store, ticket="J-1")
         _no_check_until_a_post_step_ends(dsn)
-        follow = post_child(world, record_text=json.dumps({"published": [job], "refused": [], "waiting": False}))
-        worker = learning_worker(world, store, job=job_child(world, files={END: learning_end("completed", findings=1)}),
+        worker = learning_worker(world, store, job=job_child(world, files={END: learning_end("completed")}),
                                  post=_either(follow, check), learning_check_interval=0.3, **_FAST)
         serving = asyncio.create_task(worker.serve())
         try:
-            await _until(lambda: job_row(dsn, job)["publish_state"] == "done", "the job's own post-step")
+            await _until(lambda: ("end", job) in follow.events() and _idle(dsn), "the job's own post-step, then an idle clock")
             await asyncio.sleep(1.5)
         finally:
             _stop_serving(serving)
@@ -276,24 +450,24 @@ async def test_a3_a_post_step_that_leaves_nothing_waiting_stops_its_tenant_s_che
     assert _clock(dsn) == {"idle": True, "held": False, "holder": None}
 
 
-async def test_a3_a_post_step_that_leaves_a_handed_job_pending_keeps_its_tenant_s_checks(world):
-    """`waiting: false`, but a job it was handed is in neither list (a queue-level failure): the tenant is not idle,
-    and a check follows within the interval. (amendment 3)"""
+async def test_a3_a_post_step_that_leaves_work_waiting_keeps_its_tenant_s_checks(world, monkeypatch):
+    """A job's post-step ends with work the author gate would act on in the store: the tenant is not idle, and a check
+    follows within the interval. (amendment 3, O7, Flow 3)"""
     dsn = world["dsn"]
+    _work_waits(dsn, monkeypatch)
     check = CheckChild(world["tmp"] / "check", world["runs"], dsn=dsn)
     async with job_store(dsn) as store:
-        job = await queued_job(world, store, ticket="J-1")
+        await queued_job(world, store, ticket="J-1")
         _no_check_until_a_post_step_ends(dsn)
-        follow = post_child(world, record_text=json.dumps({"published": [], "refused": [], "waiting": False}))
-        worker = learning_worker(world, store, job=job_child(world, files={END: learning_end("completed", findings=1)}),
-                                 post=_either(follow, check), learning_check_interval=0.3, **_FAST)
+        worker = learning_worker(world, store, job=job_child(world, files={END: learning_end("completed")}),
+                                 post=_either(post_child(world), check), learning_check_interval=0.3, **_FAST)
         serving = asyncio.create_task(worker.serve())
         try:
             await _until(lambda: check.handed, "the family-less check")
         finally:
             _stop_serving(serving)
             await asyncio.wait_for(serving, timeout=15)
-    assert check.handed[0] == (None, [job], T1)
+    assert check.handed[0] == (None, T1)
 
 
 async def test_a3_the_worker_renews_a_running_check_s_hold_so_no_second_check_starts_beside_it(world):
@@ -304,7 +478,7 @@ async def test_a3_the_worker_renews_a_running_check_s_hold_so_no_second_check_st
     check = CheckChild(world["tmp"] / "check", world["runs"], dsn=dsn, wait_for=release)
     async with job_store(dsn, lease=1.0) as store:
         stranded = await queued_job(world, store, ticket="J-0")
-        _strand(dsn, stranded)
+        _end_completed(dsn, stranded)
         worker = learning_worker(world, store, job=job_child(world), post=_either(post_child(world), check),
                                  learning_check_interval=0.3, learning_slots=2, **_FAST)
         serving = asyncio.create_task(worker.serve())
@@ -325,9 +499,9 @@ async def test_a3_the_worker_renews_a_running_check_s_hold_so_no_second_check_st
 
 @pytest.mark.parametrize("offboarded", [True, False], ids=["offboarded", "control-active"])
 async def test_1360_o6_a_running_job_ended_by_the_offboarding_is_followed_by_no_post_step(world, offboarded):
-    """No post-step child, no hand-off record in the tenant's runs after the offboard commit; the control tenant stays active and gets both. (#1360 O6)"""
+    """No post-step child after the offboard commit; the control tenant stays active and gets one; neither leaves a post-step file in the runs. (#1360 O6)"""
     dsn, release, mark = world["dsn"], world["tmp"] / "release", world["tmp"] / "term-{id}"
-    jobs = job_child(world, files={END: learning_end("completed", findings=1)}, wait_for=release, term="finish",
+    jobs = job_child(world, files={END: learning_end("completed")}, wait_for=release, term="finish",
                      term_mark=str(mark))
     post = post_child(world)
     async with job_store(dsn) as store:
@@ -345,10 +519,8 @@ async def test_1360_o6_a_running_job_ended_by_the_offboarding_is_followed_by_no_
             await asyncio.wait_for(draining, timeout=60)
 
     assert (job_row(dsn, job)["status"], job_row(dsn, job)["reason"]) == ("skipped", "tenant_offboarded")
-    handoffs = [p.name for p in world["runs"].iterdir() if "post-step" in p.name]
+    assert [p.name for p in world["runs"].iterdir() if "post-step" in p.name] == [], "a post-step file reached the runs"
     if offboarded:
         assert post.handed == [], "a post-step was started for a tenant being removed"
-        assert handoffs == [], "the post-step hand-off wrote into the removed tenant's runs"
     else:
         assert [h[0] for h in post.handed] == [job], "control: the same flow launches its post-step"
-        assert handoffs != []

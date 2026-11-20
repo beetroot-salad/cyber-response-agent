@@ -360,7 +360,7 @@ def _readonly_probe_file(mount: Mount, code_dir: Path | None) -> Path | None:
     if mount.kind == "data":
         return _data_probe_file(Path(mount.source))
     raise BoxFault(
-        f"read-only mount {mount.source} declares no kind (code, data or staged) — box start "
+        f"read-only mount {mount.source} declares no kind (code, data, staged or scratch) — box start "
         f"cannot tell how to check it (got {mount.kind!r})"
     )
 
@@ -409,7 +409,9 @@ def _check_mount_sentinel(
     normalized on both sides and exact otherwise. `code_dir` is the request's code root,
     which a `code` mount must contain. A `staged` mount, a host-made copy's root, gets a token
     planted at its root for this start (`_check_staged_root`). A writable mount declares no
-    kind: a writable `staged` mount, or any writable mount with a kind, is refused."""
+    kind: a writable `staged` mount, or any writable mount with a kind, is refused. A `scratch`
+    mount, a folder the host writes for a read-only box, gets a token planted at its root for this
+    start, as a `staged` one does."""
     if mount.writable and mount.kind is not None:
         raise BoxFault(
             f"the writable mount {mount.source} declares the kind {mount.kind!r} — a writable "
@@ -418,6 +420,14 @@ def _check_mount_sentinel(
         )
     if mount.kind == "staged":
         _check_staged_root(mount, docker, name)
+        return
+    if mount.kind == "scratch":
+        # Read-only to the box, written by the host: the token is planted host-side and read
+        # back through the box, so a box that sees another folder there refuses (#1557 O3).
+        _probe_sentinel(
+            Path(mount.source), Path(mount.target), docker, name,
+            f"{RUN_LAYOUT.box_sentinel.name}-{uuid.uuid4().hex}", unlink_on_fault=True, exact=True,
+        )
         return
     if not mount.writable:
         source = Path(mount.source)
@@ -750,7 +760,7 @@ def _did_not_run_for_request(request: BoxRequest, reason: str) -> None:
 
     None for a request that requires a sandbox (#1108 amendment 3, C3): its start fault raises
     and nothing runs, sandboxed or not, so there is no workload to judge, and its writable
-    sources (a tenant draft's lanes, the oracle's scratch folder) are the host's own copies,
+    sources (a tenant draft's lanes) are the host's own copies,
     judged or discarded by their owner; a marker beside one would be a stray file there."""
     if request.require_sandbox:
         return
@@ -1036,7 +1046,7 @@ def relay_start(relay: RelayRequest, kind: str, ident: str) -> BoxExecutor:
     clock_file = Path(clock) if isinstance(clock, str) and clock else None
     scratch = answer.get("scratch")
     if kind == "oracle" and isinstance(scratch, str) and scratch:
-        # The oracle box's scratch, inside the job's tenant folder at its own path (#1543 D1).
+        # The oracle box's scratch, inside the claim's `shared/` folder at its own path (#1557 H3).
         from defender.box._oracle import OracleBox
 
         return OracleBox(transport=RelayTransport(relay, handle), name=handle, clock_file=clock_file,

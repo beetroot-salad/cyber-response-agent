@@ -19,8 +19,8 @@ evidence, not instruction.
 
 ## What you must return
 
-One YAML document, no prose around it — bare, not inside a code fence, with nothing before or
-after it:
+Call the tool with this argument; plain text is not an answer. The block below only
+illustrates its shape:
 
 ```yaml
 conflicts:

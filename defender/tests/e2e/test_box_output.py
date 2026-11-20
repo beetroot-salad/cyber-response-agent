@@ -58,6 +58,14 @@ def _fault(shape, ending):
     return ExceptionGroup("mixed", [ProviderDown(model="test", status=503, attempts=4), overflow])
 
 
+def _never_closed(result: S.Drive) -> None:
+    """The run left no verdict: the lookup says `NeverClosed` (not a fault), and no `report.md` was written."""
+    from defender.records import closing
+
+    assert isinstance(result.closing, closing.NeverClosed), result.closing
+    assert not (result.folder / "report.md").exists()
+
+
 def _run_end(result: S.Drive):
     """The run-end record as its strict reader sees it; a value outside the vocabulary reads as none."""
     return parse_record(json.loads(RunPaths(result.folder).run_end_sidecar().read_text(encoding="utf-8")))
@@ -91,7 +99,7 @@ def test_o8_o9_a_box_ending_ends_the_run_by_name_instead_of_a_retry_or_fallback(
     assert result.rc == ENDINGS[ending][1]
     assert _run_end(result).truncated_by == ending
     assert main.requests == (1 if where == "main" else 0)
-    assert result.report is None
+    _never_closed(result)
 
 
 def test_o9_the_fences_wording_is_its_exceptions_text_logged_once_at_the_ending(tmp_path, caplog):
@@ -352,7 +360,7 @@ def test_o8_o9_the_first_command_that_finds_the_box_unusable_ends_the_run(tmp_pa
     assert _run_end(result).truncated_by == named
     assert _run_end(result).closed_before_cut is False
     assert main.requests == 1, "the model was asked again after the box was found unusable"
-    assert result.report is None
+    _never_closed(result)
 
 
 @pytest.mark.parametrize(("answer", "stop", "code", "named", "requests"), [
@@ -675,7 +683,8 @@ def test_o8_o9_a_run_the_model_had_closed_keeps_its_report_and_its_case_comment_
     end = _run_end(result)
     assert end.truncated_by == named
     assert end.closed_before_cut is True
-    assert result.report is not None
+    assert result.closed is not None
+    assert result.closed.run_id == result.folder.name
     assert ticket_writer.comments_on(end.truncated_by, end.closed_before_cut) is True
     assert result.rc == code
 
@@ -696,7 +705,9 @@ def test_o8_o9_an_operator_run_the_box_ended_posts_no_comment_whether_or_not_the
     assert result.raised is None, result.raised
     assert result.rc == code
     assert _run_end(result).truncated_by == named
-    assert (result.report is not None) is closed
+    assert (result.closed is not None) is closed
+    if not closed:
+        _never_closed(result)
     assert store.comment_payloads == [], store.calls
 
 

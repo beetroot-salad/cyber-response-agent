@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Ungated artifact write: flag a function under ``defender/`` that writes one of the two
-model-authored artifacts (``investigation.md``, ``report.md``) without that artifact's content
-schema being applied anywhere in the same function.
+"""Ungated artifact write: flag a function under ``defender/`` that writes the model-authored
+artifact (``investigation.md``) without its content schema being applied anywhere in the same
+function. (The second artifact this once watched, the run's headline file, is retired by #1534:
+the close writes a closing record into the session database instead.)
 
 ``defender/records/_artifact_schema.py`` owns what a well-formed artifact is, and the permission gate
 applies it to every write a model makes. That makes "a committed investigation parses" true
@@ -15,11 +16,11 @@ What it flags — under ``defender/``, production code only. A function containi
 - a write — a call resolved by origin to ``defender._io``'s ``write_guarded`` /
   ``open_guarded`` / ``append_jsonl``, or the duck-typed
   ``<x>.write_text(...)`` / ``<x>.write_bytes(...)`` (the receiver is a Path value);
-- a gated artifact name — the literals ``"investigation.md"`` / ``"report.md"``, the constant
-  spellings of them, or the ``RunPaths`` accessors for them;
+- a gated artifact name — the literal ``"investigation.md"``, its constant spelling, or the
+  ``RunPaths`` accessor for it;
 
 and no validation — a call whose resolved callee ends in ``validate_artifact``,
-``validate_investigation``, ``validate_report``, ``committed_investigation_reason``,
+``validate_investigation``, ``committed_investigation_reason``,
 ``decide_write``, or ``validator`` (the close's injected schema seam, a parameter with no
 import to resolve).
 
@@ -36,7 +37,7 @@ What it does not see — read this before treating a green run as proof:
   held by ``tests/runtime/permissions/test_ungated_artifact_write.py`` and by review.
 - Artifacts reached through a computed name.
 
-So a clean run means "no writer of these two artifacts is missing their schema in its own
+So a clean run means "no writer of the artifact is missing its schema in its own
 frame", not "every path that publishes them is gated".
 
 The baseline ships empty, so an entry is a chosen regression. Mark a deliberate site with
@@ -68,17 +69,17 @@ SUPPRESS_MARKERS = ("lint-artifact-gate: ok",)
 #: `records/_artifact_schema.py` elsewhere under the scope is not waved through.
 CANONICAL_MODULE = "records/_artifact_schema.py"
 
-#: The two artifacts as spelled in code: bare filenames, and the constant spellings a writer
+#: The artifact as spelled in code: the bare filename, and the constant spelling a writer
 #: might use instead. `_artifact_schema` does not export those constants (nothing outside the
 #: owner may hold a record name), but they stay here because a writer may re-introduce one.
-ARTIFACT_LITERALS = frozenset({"investigation.md", "report.md"})
+ARTIFACT_LITERALS = frozenset({"investigation.md"})
 ARTIFACT_CONSTS = frozenset({  # lint-stale-ref: ok — spellings this gate WATCHES FOR, not ones it resolves
-    "INVESTIGATION_NAME", "REPORT_NAME"})
+    "INVESTIGATION_NAME"})
 
 def _artifact_accessors() -> frozenset[str]:
-    """`RunPaths`' accessors for the two schema'd artifacts, derived from the owner: every
-    public accessor resolving to one of `ARTIFACT_LITERALS`. Only the two model-authored
-    documents have a content schema, so accessors for other records are never included.
+    """`RunPaths`' accessors for the schema'd artifact, derived from the owner: every
+    public accessor resolving to one of `ARTIFACT_LITERALS`. Only the model-authored
+    document has a content schema, so accessors for other records are never included.
     Matched as bare attribute names because the receiver is a value — `rp.investigation` has
     no resolvable origin."""
     if str(REPO_ROOT) not in sys.path:
@@ -117,7 +118,6 @@ WRITE_METHODS = frozenset({"write_text", "write_bytes"})
 VALIDATOR_NAMES = frozenset({
     "validate_artifact",
     "validate_investigation",
-    "validate_report",
     "committed_investigation_reason",
     "decide_write",
     "validator",
@@ -212,7 +212,7 @@ def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
             fingerprint=fingerprint,
             display=(
                 f"{rel}:{writes[0].lineno}: {node.name}() writes a gated artifact "
-                f"(investigation.md / report.md) with no content schema applied in the same "
+                f"(investigation.md) with no content schema applied in the same "
                 f"function — route it through permission.decide_write, or call "
                 f"_artifact_schema.validate_artifact and OBEY the reason it returns"
             ),
@@ -234,7 +234,7 @@ def _scan(root: Path) -> list[Finding]:
 
 HEADER = (
     "lint_ungated_artifact_write baseline — functions under defender/ that write "
-    "investigation.md or report.md with no content schema applied in the same frame "
+    "investigation.md with no content schema applied in the same frame "
     "(#961, #964). Fingerprint is file:function (no line number), file relative to the scan "
     "scope. CI fails on a fingerprint absent here. This baseline ships EMPTY — both known "
     "sites were fixed when the gate landed, so an entry in it is a regression someone chose. "
@@ -263,7 +263,7 @@ def main(
         print(f"lint_ungated_artifact_write: {exc}", file=sys.stderr)
         return 2
     print(
-        "Every writer of investigation.md / report.md meets the content schema in its own "
+        "Every writer of investigation.md meets the content schema in its own "
         "frame — #961 (the close published a document it never validated) and #964 (the "
         "harness seeded rows past the gate) were both writers nobody had censused, under an "
         "invariant everybody had inherited."

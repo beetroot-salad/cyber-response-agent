@@ -38,8 +38,12 @@ concurrency:
 # two at 12 minutes, so it went to six; and again on 2026-11-16: one of six shards ran past 12 minutes on main
 # and twice on PR #1535 with every test that reported passing, while the others ran 7-10 minutes, so it went to
 # eight and the cost table was refreshed from a green run of that PR; and on 2026-11-18 PR #1562's eight shards ran
-# 7.5-11.5 minutes, two of them within 35 seconds of the bound, so the bound went to 15 rather than a ninth shard),
-# and a stall that burns the gVisor step's full 5-minute bound still lands inside 15, so the
+# 7.5-11.5 minutes, two of them within 35 seconds of the bound, so the bound went to 15 rather than a ninth shard;
+# and on 2026-11-19 PR #1575 (#1487) ran every tick test over both the in-process store and the port, which added about
+# 2,000 seconds of file cost, so two shards were cancelled at 15 with every test that reported passing and the bound went
+# to 20 with the cost table raised for those files; the two heaviest port cases then each ran 11-12 minutes on one worker,
+# and the one scheduled last was cut off at 20, so the bound went to 25),
+# and a stall that burns the gVisor step's full 5-minute bound still lands inside 25, so the
 # step's own timeout fires first and names the command. Raising the step bound without raising
 # this one inverts that and hands every stall to GitHub's generic job cancel.
 jobs:
@@ -55,7 +59,7 @@ jobs:
   test:
     name: test (shard ${{ matrix.shard }}/8)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -942,7 +946,7 @@ jobs:
 
       # A module importing another module's closed vocabulary and re-deriving the membership
       # test itself instead of calling the normalizer that ships beside it (#785). The six
-      # interpreters of report.md's disposition each looked fine alone; they disagreed only
+      # interpreters of the old report file's disposition each looked fine alone; they disagreed only
       # BETWEEN themselves, and five had silently dropped the #722 zero-width strip on a field
       # attacker-influenced by construction. A vocabulary is watched only once its owner
       # defines an answer for it, so the gate arms itself as later folds land. No disposition
@@ -1075,7 +1079,7 @@ jobs:
         run: defender/.venv/bin/python tooling/lint/lint_unaccounted_selection.py
 
       # An invariant enforced at a gate, and then believed of the ARTIFACT. `_artifact_schema`
-      # owns what a well-formed investigation.md / report.md is, and the permission gate
+      # owns what a well-formed investigation.md is, and the permission gate
       # applies it to every write a MODEL makes — which made "a committed investigation
       # parses" true of the verbs the agent writes through, and false of two writers nobody
       # had censused: the harness seeding a `:L findings` row before MAIN's first turn (#964),

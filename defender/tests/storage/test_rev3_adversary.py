@@ -49,8 +49,10 @@ def test_the_already_primed_check_follows_the_held_root_not_the_path(tmp_path):
     assert not watch.read.is_set(), "the capture was read: the check looked at the old path"
 
 
-@pytest.mark.parametrize("reader", ["verdicts", "delta_o"])
-def test_a_linked_outcome_record_holding_accepted_is_refused_by_both_readers(tmp_path, reader):
+#: The episode's readers that gate on its outcome record. `verdicts` was the other until #1534 removed it (no product
+#: caller: what each world concluded is its arm's closing record, read through the episode view; design r3, V-READERS).
+@pytest.mark.parametrize("reader", ["delta_o"])
+def test_a_linked_outcome_record_holding_accepted_is_refused_by_every_reader(tmp_path, reader):
     episode = T.mod("learning.branch.episode")
     doc = T.family_doc(worlds=[T.base_world(), T.world_doc("b")])
     ep = T.episode(tmp_path, doc=doc)

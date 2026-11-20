@@ -21,16 +21,19 @@ VOCABULARY = sorted({*_vocab.DISPOSITION_VALUES, *run_end.ESCALATED_EXITS, "unre
 #: Words the setting refuses: other exit classes (silent ones, forced-close ones), a made-up word, other spellings.
 REFUSED_WORDS = ["escalated", "budget", "store", "request-limit", "provider-down", "Benign", "false_positive"]
 
-UNPARSABLE = "this is no report, and has no front matter\n"
+#: How a run whose record cannot be looked up ends: its row fails validation (a `CouldNotLook`); `None` is a run that never closed.
+UNREADABLE_FAULT = "row-invalid"
 
 
 @dataclass(frozen=True)
 class Plan:
-    """How a run ends: its exit class and the report it leaves (`None`: none planted beyond the default)."""
+    """How a run ends: its exit class and the closing record it leaves: `disposition`, or a `_readers1534` fault where the
+    record is read (`fault`), or no record at all (`closed=False`)."""
 
     truncated_by: str | None
     disposition: str
-    report: str | None = None
+    fault: str | None = None
+    closed: bool = True
 
 
 def plan_for(outcome: str) -> Plan:
@@ -38,8 +41,17 @@ def plan_for(outcome: str) -> Plan:
     if outcome in run_end.ESCALATED_EXITS:
         return Plan(truncated_by=outcome, disposition="benign")
     if outcome == "unreadable":
-        return Plan(truncated_by=None, disposition="benign", report=UNPARSABLE)
+        return Plan(truncated_by=None, disposition="benign", fault=UNREADABLE_FAULT)
     return Plan(truncated_by=None, disposition=outcome)
+
+
+def plant_plan(run_dir: Path, plan: Plan) -> None:
+    """The run's closing record as `plan` says, in place of `populate_run_dir`'s `report.md` (removed: no dual read)."""
+    from defender.tests.support.storage import _readers1534 as R
+
+    (run_dir / "report.md").unlink(missing_ok=True)
+    fields = R.valid_fields(plan.disposition) if plan.closed else None
+    R.plant_run(run_dir, fields, fault=plan.fault)
 
 
 def lookup_row(lead: str, seq: int, params: dict, *, exit_code: int = 0, system: str = "tacit-knowledge",
@@ -92,8 +104,7 @@ class FeedbackTail(SpecTail):
         if self.raises is not None:
             raise self.raises
         populate_run_dir(run_dir, disposition=self.plan.disposition)
-        if self.plan.report is not None:
-            (run_dir / "report.md").write_text(self.plan.report, encoding="utf-8")
+        plant_plan(run_dir, self.plan)
         if self.box_planted is not None:
             (run_dir / "executed_queries.jsonl").write_text(self.box_planted, encoding="utf-8")
         self.run_state = next((v for v in kw.values() if isinstance(v, RunState)), None)

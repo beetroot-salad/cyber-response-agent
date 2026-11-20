@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import pytest
 
-from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.learning.curation import _drain719 as D
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.judge._memory_store import MemoryStore
@@ -49,7 +48,7 @@ def test_1135_the_e2e_spine_replay_reaches_the_corpus_unchanged(world, monkeypat
 
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
-    (ep / "worlds" / T.world_id(ep, "b") / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
+    J.set_closing(ep, "b", disposition="benign")
     sink = MemoryStore()
     J.grade_at(ep, judge=J.FakeJudge(  # the family-scope call files family findings only
         default=J.as_reply_text(J.reply_doc()), family_default=J.as_reply_text(J.family_reply())), draws=1, store=sink)

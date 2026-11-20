@@ -68,6 +68,7 @@ from defender.tests.support.tenancy._mapping1345 import mapping_value
 from defender.tests.support.jobs._jobs1342 import (  # noqa: E402
     accounting_written,
 )
+from defender.tests.support.jobs._jobs1342 import CLOSING_KEY
 from defender.tests.support.jobs._worker1342 import (
     CASE,
     COMMIT,
@@ -84,6 +85,7 @@ from defender.tests.support.jobs._worker1342 import (
     _StoreWhoseFinishFails,
     _child,
     _committed,
+    closing,
     _gone,
     _handed_back,
     _job_end_with,
@@ -410,8 +412,9 @@ async def test_o8_a_run_that_crashed_still_has_its_spend_recorded(world):
 async def test_o8_no_session_pointer_costs_nothing(world, caplog):
     """No pointer (the store was never opened) → cost 0 and exact, not unknown. (O8 cost, S4)"""
     caplog.set_level(logging.INFO, logger=WORKER_LOGGER)
-    inv, stored = await _run_one(world, _child(world, files=_committed()))
-    assert stored["stage"] == "completed"
+    files = {"{id}.job-end.json": job_end(setup="crashed", box="not_started", report_committed=False, scrub_verified=False)}
+    inv, stored = await _run_one(world, _child(world, files=files))  # CONFLICT-UPDATED (#1534): a committed run always has a pointer
+    assert (stored["stage"], stored["failure_reason"]) == ("failed", "no_report")
     assert (stored["cost_usd"], lower_limit(world["dsn"], inv)) == (0, False)
     assert not _warned(caplog, inv), "a run with no pointer logged a cost fault"
 
@@ -455,12 +458,25 @@ async def test_o8_a_cost_read_fault_keeps_the_stage_and_leaves_cost_unknown(worl
         if fault == "pointed-session-not-in-database":
             pointer = session_pointer(CASE, session_id="no-such-session")
         then = {"stale-schema-version": "PRAGMA user_version = 4242", "no-ledger-table": "DROP TABLE spend_ledger"}.get(fault)
-    child = _child(world, files=_committed(**{"{id}.session-pointer.json": pointer}))
-    inv, stored = await _run_spent(world, child, spend, then=then)
+    # The spec says there is no database: the child plants none. `then` runs after the child planted the record: its writer
+    # open would recreate a dropped table (B2).
+    plan = closing(fault="database-missing") if fault == "no-database" else closing(then=then)
+    child = _child(world, files=_committed(**{"{id}.session-pointer.json": pointer, CLOSING_KEY: plan}))
+    inv, stored = await _run_spent(world, child, spend)
 
-    assert (stored["stage"], stored["disposition"]) == ("completed", "inconclusive")
+    # CONFLICT-UPDATED (#1534): the disposition is read through the same pointer and database, so a fault there costs it too.
+    if fault in ("no-ledger-table", "no-main-session", "pointed-session-not-in-database"):
+        assert (stored["stage"], stored["disposition"]) == ("completed", "inconclusive")
+    else:
+        assert (stored["stage"], stored["disposition"]) == ("unparseable", None)
     assert (stored["cost_usd"], lower_limit(world["dsn"], inv)) == (None, False)
     assert _warned(caplog, inv), "the cost fault was not logged"
+    kind = {"pointer-not-json": "pointer-unreadable", "no-database": "database-missing",
+            "database-will-not-open": "store-unreadable", "stale-schema-version": "schema-version"}.get(fault)
+    if kind:
+        from defender.records import closing as C
+
+        assert C.FAULT_WORDING[kind] in (stored["failure_message"] or ""), stored["failure_message"]
 
 
 async def test_o8_a_conversation_payload_the_reader_cannot_parse_does_not_make_the_cost_unknown(world):
@@ -483,12 +499,12 @@ async def test_o8_a_session_pointer_of_the_wrong_shape_keeps_the_stage_and_leave
                "a case id that is a number": json.dumps({"case_id": 5, "store_path": "/nonexistent/elsewhere.db"})}[shape]
     inv, stored = await _run_one(world, _child(world, files=_committed(**{"{id}.session-pointer.json": pointer})))
 
-    assert (stored["stage"], stored["disposition"]) == ("completed", "inconclusive")
+    assert (stored["stage"], stored["disposition"]) == ("unparseable", None)  # CONFLICT-UPDATED (#1534): pointer-unreadable
     assert (stored["cost_usd"], lower_limit(world["dsn"], inv)) == (None, False)
     assert _warned(caplog, inv), "the cost fault was not logged"
 
 
-_DONE, _NO_REPORT = ("completed", None), ("failed", "no_report")
+_DONE, _NO_REPORT, _UNREADABLE = ("completed", None), ("failed", "no_report"), ("unparseable", None)
 
 
 @pytest.mark.parametrize(("ending", "ledger", "expect"), [
@@ -507,7 +523,8 @@ _DONE, _NO_REPORT = ("completed", None), ("failed", "no_report")
     ("no job-end, exit 77", "sealed, no rows", (*_NO_REPORT, 0.0, False)),  # a run that made no request and sealed: exactly 0
     ("no job-end, exit 77", "unsealed, no rows", (*_NO_REPORT, 0.0, True)),  # opened its store, never sealed
     ("clean", "sealed, no rows", (*_DONE, 0.0, False)),
-    ("clean", "unreadable database", (*_DONE, None, False)),
+    # #1534: the closing record is read from the same database, so a clean run's unreadable one is `unparseable` (V-READERS).
+    ("clean", "unreadable database", (*_UNREADABLE, None, False)),
     ("no job-end, exit 77", "unreadable database", (*_NO_REPORT, None, False)),
     ("clean", "no ledger table", (*_DONE, None, False)),
     ("no job-end, exit 77", "no pointer", (*_NO_REPORT, 0.0, False)),  # the store was never opened: no ledger, exactly 0 (a different case from an unsealed one)
@@ -522,17 +539,22 @@ async def test_s2_s4_the_final_cost_and_its_lower_limit_mark_follow_the_flag_tab
         files["{id}.session-pointer.json"] = session_pointer(CASE)
     # The `exit N` of a case is its container's; its helper served the job either way and exits 0 (#1170), so the
     # worker sees 0 for every case, as the flag table's own rule says: the mark is not read from an exit code.
+    if ledger == "no ledger table":  # dropped after the child planted the record: its writer open would recreate it (B2)
+        files[CLOSING_KEY] = closing(then="DROP TABLE spend_ledger")
     child = _child(world, files=files, exit=0)
     if ledger == "unreadable database":
         _break_database(world["runs"], CASE)
     spend = {"sealed rows": _LEDGER, "unsealed rows": _LEDGER, "sealed, no rows": [], "unsealed, no rows": [], "no ledger table": _LEDGER}.get(ledger)
-    inv, _ = await _run_spent(world, child, spend, sealed=not ledger.startswith("unsealed"),
-                              then="DROP TABLE spend_ledger" if ledger == "no ledger table" else None)
+    inv, _ = await _run_spent(world, child, spend, sealed=not ledger.startswith("unsealed"))
     stored = row(world["dsn"], inv)
 
     assert (stored["stage"], stored["failure_reason"], stored["cost_usd"], lower_limit(world["dsn"], inv)) == (
         expect[0], expect[1], None if expect[2] is None else pytest.approx(expect[2]), expect[3])
-    if expect[1] is None:
+    if expect[:2] == _UNREADABLE:
+        from defender.records import closing as C
+
+        assert C.FAULT_WORDING["store-unreadable"] in (stored["failure_message"] or ""), stored["failure_message"]
+    elif expect[1] is None:
         assert stored["failure_message"] is None, stored["failure_message"]
     else:
         assert stored["failure_message"], "a failed row carries our own message"
@@ -1131,11 +1153,11 @@ async def test_o6_an_unexpected_fault_at_any_seam_ends_that_row_worker_error_and
 
 @pytest.mark.parametrize("fault_type", [RuntimeError, KeyError, TypeError, AssertionError, AttributeError,
                                         IndexError, _NobodyPlannedThis])
-@pytest.mark.parametrize("seam", ["report-disposition", "lane-cost", "lane-knowledge", "lane-close"])
+@pytest.mark.parametrize("seam", ["closing-disposition", "lane-cost", "lane-knowledge", "lane-close"])
 async def test_1396_an_unexpected_fault_after_the_ending_is_decided_keeps_that_ending(
         world, caplog, seam, fault_type):
     """A fault nobody planned for once the host committed a report and the scrub walked the tree:
-    reading the report's disposition ends the row `unparseable`, as an unreadable disposition
+    reading the closing record's disposition ends the row `unparseable`, as an unreadable disposition
     does; reading cost or knowledge, or closing the lane, keeps the decided stage and disposition,
     and the value that could not be read is unknown (cost null; knowledge the unreadable shape,
     never "no run"). Never `worker_error`; the fault is logged as an error, and another row still
@@ -1146,13 +1168,13 @@ async def test_1396_an_unexpected_fault_after_the_ending_is_decided_keeps_that_e
     async with job_store(world["dsn"]) as store:
         bad = await _queued(store, ticket="T-1", key="k1")
         good = await _queued(store, ticket="T-2", key="k2")
-        method = {"report-disposition": "report_disposition", "lane-cost": "cost",
+        method = {"closing-disposition": "closing_disposition", "lane-cost": "cost",
                   "lane-knowledge": "knowledge", "lane-close": "close"}[seam]
         await _worker(world, store, child, open_lane=_lanes_failing(bad, method, fault)).drain()
 
     stored = row(world["dsn"], bad)
     assert (stored["stage"], stored["disposition"], stored["failure_reason"]) == (
-        ("unparseable", None, None) if seam == "report-disposition" else ("completed", "inconclusive", None))
+        ("unparseable", None, None) if seam == "closing-disposition" else ("completed", "inconclusive", None))
     assert stored["cost_usd"] == (None if seam == "lane-cost" else 0)
     assert lower_limit(world["dsn"], bad) is False, "an unknown cost was marked as a lower limit"
     assert stored["knowledge"] == (STALE_OPERATOR if seam == "lane-knowledge" else _knowledge("current", COMMIT))
@@ -1385,6 +1407,8 @@ async def test_m1_a_symlinked_or_oversize_host_record_is_unreadable_not_followed
 
     if which == "job-end":  # unreadable = absent: rule 1
         assert (stored["stage"], stored["failure_reason"]) == ("failed", "no_report")
+    elif which == "pointer":  # CONFLICT-UPDATED (#1534): pointer-unreadable costs the disposition too
+        assert (stored["stage"], stored["disposition"]) == ("unparseable", None)
     else:
         assert (stored["stage"], stored["disposition"]) == ("completed", "inconclusive")
     if which == "knowledge":

@@ -63,41 +63,22 @@ def test_1025_a_permission_denied_trace_or_tool_trace_is_that_slots_refusal_neve
 
 @NOT_ROOT
 def test_1025_a_world_directory_with_no_search_permission_is_that_worlds_refusal(tmp_path):
-    """`worlds/<label>/` chmod 000: that world's archive block reads its refusal and every other
-    section renders."""
-    ep = E.sample_episode(tmp_path)
+    """`worlds/<label>/` chmod 000: that world's leads block, which reads the world directory, reads its refusal, and
+    every other section renders. The world's closing-record slot is not read from that directory (#1534: the record is
+    the arm's, through the episode's run view, and the archive no longer holds a `report.md`), so it still shows the
+    record."""
+    closed = "benign"  # not the world's declared `malicious`: the slot can only have it from the arm's record
+    ep = E.sample_episode(tmp_path, closings={E.GRADED_WORLD: {"disposition": closed}})
     with _restoring([ep.world(E.GRADED_WORLD)], 0):
         page = render(ep)
     assert page.by_id, "no page"
-    assert "Permission denied" in page.text_of(f"world-{E.GRADED_WORLD}") or \
-        "could not be read" in page.text_of(f"world-{E.GRADED_WORLD}"), \
-        page.text_of(f"world-{E.GRADED_WORLD}")
+    leads = page.text_of(f"leads-{E.GRADED_WORLD}")
+    assert "world directory unreadable" in leads, leads
+    assert "Permission denied" in leads, leads
+    slot = page.section(f"world-{E.GRADED_WORLD}").find_all(cls="w-report")[0].text()
+    assert slot == f"closing record: {closed}", slot
     assert f"f-{E.GRADED_WORLD}-0-0" not in page.ids  # its draws are unreadable too
     assert f"f-{E.PASSTHROUGH_WORLD}-0-0" in page.ids
-
-
-@NOT_ROOT
-def test_1025_an_unreadable_report_md_is_named_as_unreadable_not_as_an_alias(tmp_path):
-    """A mode-000 `report.md` reads "could not be read" with the errno; a symlinked one gets the alias
-    refusal exactly once."""
-    family = E.mod("learning.judge.family")
-    ep = E.sample_episode(tmp_path)
-    bound = E.mod("_io").bind(ep.dir)
-    report = ep.world(E.GRADED_WORLD) / "report.md"
-    with _restoring([report], 0):
-        got = family.read_archived_report(bound, f"worlds/{T.fixture_world_id(E.GRADED_WORLD)}/report.md")
-    assert got.disposition is None
-    assert "Permission denied" in got.reason, got.reason
-    assert "aliased" not in got.reason, got.reason
-
-    target = tmp_path / "elsewhere.md"
-    target.write_text("---\ndisposition: benign\n---\n", encoding="utf-8")
-    link = ep.world(E.PASSTHROUGH_WORLD) / "report.md"
-    link.unlink()
-    link.symlink_to(target)
-    got = family.read_archived_report(bound, f"worlds/{T.fixture_world_id(E.PASSTHROUGH_WORLD)}/report.md")
-    assert got.disposition is None
-    assert got.reason.count("non-plain or aliased") == 1, got.reason
 
 
 def test_1025_the_ledgers_malformed_row_count_is_the_judges_own(tmp_path):

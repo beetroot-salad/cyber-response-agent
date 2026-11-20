@@ -72,8 +72,13 @@ L3_SUMMARY = ("Window bound 2026-05-25T13:00:00Z..2026-05-25T17:00:00Z, anchored
 LANE_SYSTEMS = frozenset({"elastic"})
 #: The questioner's leads-section title (`questioner._capture_sections`, as test_1032 spells it).
 QUESTIONER_LEADS_TITLE = "The joined leads at the branch point"
-#: A minimal questioner reply that lets `author_family` compose (the prompt is the observation).
-QUESTIONER_REPLY = "base_story: s07\ndiscriminator: s07\nbase_disposition: benign\n"
+#: A minimal questioner reply that lets `author_family` compose (the prompt is the observation):
+#: call 1's plan as the prompt asks for it (#1579), then the one planned world's seat.
+QUESTIONER_REPLIES = (
+    {"base_story": "s07", "base_disposition": "benign", "discriminator": {"predicate": "s07"},
+     "worlds": [{"label": "b", "axis": "s07", "facts": [T.fact("f1")]}]},
+    {"story": "s07", "axis": "s07", "disposition_declared": "malicious", "label_basis": "policy-rule"},
+)
 #: The six keys of the Dispatch block (`tools_gather._gather_prompt`), in order.
 DISPATCH_KEYS = ("defender_dir", "run_dir", "lead_id", "system", "goal", "what_to_summarize")
 
@@ -332,11 +337,8 @@ class _Views:
         lr = S.mod("learning.lead_repository")
         cli = S.mod("learning.branch.cli")
         questioner = S.mod("learning.branch.questioner")
-        prompts: list[str] = []
-
-        def invoke(prompt: str, **_kw: Any) -> str:
-            prompts.append(prompt)
-            return QUESTIONER_REPLY
+        invoke = T.FakeAgent(*QUESTIONER_REPLIES)
+        prompts = invoke.prompts
 
         questioner.author_family(
             source_run_dir=self.run_dir, episode_dir=self.tmp / "questioner-episode",
@@ -588,7 +590,7 @@ def test_p011_alert_fits_main_but_not_the_correlation_model(tmp_path: Path) -> N
         history = "\n".join(s.text for s in d.main.seen)
         for detail in ("request refused by provider", "ModelHTTPError"):
             assert detail not in history, f"the refusal's error text reached MAIN: {detail!r}"
-        assert d.report is not None, "the run did not reach report.md"
+        assert d.closed is not None, "the run left no closing record"
         endings[size] = prose(d) - prose(runs[size, "answered"])
     assert endings["small"], (
         "MAIN's opening message says nothing more when the provider refused the lead than when "

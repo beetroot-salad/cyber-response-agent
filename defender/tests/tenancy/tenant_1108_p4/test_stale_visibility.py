@@ -23,6 +23,7 @@ from typing import Any
 import pytest
 
 from defender.tests.support.runtime.engine._spec767 import (
+    NEVER_CLOSED,
     FakeStore,
     case_record_doc,
     make_run,
@@ -141,10 +142,10 @@ def _ws(text: str) -> str:
 #: aborted arm of `record_case_ticket`): run-dir report text (None: a readable verdict) and the
 #: exit class handed in.
 BRANCHES = {
-    "verdict": {"text": None, "truncated_by": None},
-    "unreadable": {"text": "just prose, no fence\n", "truncated_by": None},
-    "escalation-aborted": {"text": None, "truncated_by": "aborted"},
-    "escalation-forced-close": {"text": "just prose, no fence\n", "truncated_by": "request-limit"},
+    "verdict": {"closed": True, "truncated_by": None},
+    "unreadable": {"closed": False, "truncated_by": None},
+    "escalation-aborted": {"closed": True, "truncated_by": "aborted"},
+    "escalation-forced-close": {"closed": False, "truncated_by": "request-limit"},
 }
 
 
@@ -166,15 +167,13 @@ def _store(tmp_path: Path) -> FakeStore:
 
 
 def _posted(tmp_path: Path, branch: str, source: dict[str, Any], *, label: str,
-            body: str | None = None) -> tuple[str, str]:
+            body: str | None = None, **entries: Any) -> tuple[str, str]:
     """Drive the real writer over a fresh run dir on `branch` with `source` as the run's
     knowledge source; return (the comment body below the agent tag, the whole wire body), as the
     store fake received them."""
     spec = BRANCHES[branch]
-    report_kw: dict[str, Any] = {}
-    if spec["text"] is not None:
-        report_kw["text"] = spec["text"]
-    elif body is not None:
+    report_kw: dict[str, Any] = {"closed": spec["closed"], **entries}
+    if body is not None:
         report_kw["body"] = body
     run_dir = make_run(tmp_path, name=f"s-c-{branch}-{label}", **report_kw)
     write_host_record(run_dir, source)
@@ -284,7 +283,7 @@ def test_o_warn_fresh_and_pinned_runs_post_exactly_todays_comment(
     body, _ = _posted(tmp_path, branch, knowledge_source(kind), label=kind)
     expected = {
         "verdict": TODAYS_VERDICT_BODY,
-        "unreadable": f"{case_ticket.UNREADABLE_COMMENT_BODY}\n{LINK}",
+        "unreadable": f"{NEVER_CLOSED}\n{LINK}",
         "escalation-aborted": f"{case_ticket.ESCALATION_COMMENT_BODY.format(exit='aborted')}\n{LINK}",
         "escalation-forced-close": f"{case_ticket.ESCALATION_COMMENT_BODY.format(exit='request-limit')}\n{LINK}",
     }[branch]
@@ -364,8 +363,7 @@ def test_run_main_hands_a_stale_publish_outcome_to_the_page_and_record(
             for path in sorted(root.rglob("*")) if root.is_dir() else ():
                 if path.is_file() and not path.is_symlink():
                     box_readable[str(path)] = path.read_bytes()
-        write_report(run_dir)
-        S1107.seed_session_store(run_dir)
+        write_report(run_dir)  # its store and pointer are the page's too (#1534): a second store would replace the pointer
 
     alert = S1107.plant_alert(tmp_path / "alert")
     rec = S1107.RunRecorder(tmp_path / "unused" / "s-c-wiring", before_lifecycle=before_lifecycle)

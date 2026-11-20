@@ -244,8 +244,9 @@ def drive_arm(  # noqa: PLR0913 — one keyword per seam an arm scenario varies
         review_stages: Any = None, defender_dir: Path | None = None,
         name: str = "arm", run_id: str = "arm-1255",
         before: Callable[[Path], None] | None = None) -> Driven:
-    """Resume spec through the real driver, preserving launch refusals in the result."""
-    run_dir = materialize_alert(root / name, alert_doc())
+    """Resume spec through the real driver, preserving launch refusals in the result. The arm's run id is its own
+    (the source's database holds one closing record per run id, #1534)."""
+    run_dir = materialize_alert(root / name, alert_doc(), label=f"run:{name}")
     if before is not None:
         before(run_dir)
     rec = VerbRecorder()

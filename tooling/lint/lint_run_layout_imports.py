@@ -122,7 +122,7 @@ CATEGORIES: Mapping[str, Sequence[str]] = {
         "learning/branch/archive.py", "learning/branch/questioner/__init__.py",
         "learning/leads/lead_author/__init__.py",
         # F-09: the tracer walks the tenant's runs by id (J8), then reads each opened run's
-        # report from the folder it was handed (`_report_disposition(run.run_dir)`).
+        # lessons-loaded rows from the folder it was handed (`run.run_dir`).
         "cli/learning/trace_lesson.py",
         # #1108 P4: the map's CLI opens the run by id (J8), then reads the host-held knowledge
         # record beside the folder it was handed (`RunPaths.knowledge_source`, U12).
@@ -174,7 +174,7 @@ _STAR_SOURCES = frozenset({_DOOR, "defender.records._episode_paths", "defender.r
 _OPTIONAL = frozenset({"Optional"})
 _UNION = frozenset({"Union"})
 _CONTAINERS = frozenset({
-    "list", "List", "Sequence", "MutableSequence", "Iterable", "Iterator", "Collection",
+    "list", "List", "Sequence", "MutableSequence", "Iterable", "Iterator", "Collection",  # lint-stale-ref: ok — a typing container name this lint matches in annotations, not a repo symbol
     "tuple", "Tuple", "set", "Set", "frozenset", "FrozenSet", "AbstractSet", "Generator",
     "AsyncIterable", "AsyncIterator",
 })

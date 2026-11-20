@@ -39,8 +39,11 @@ JSON_NESTING_LIMIT = 100
 
 #: A string literal or a bracket. A string with no closing quote runs to the end of the text:
 #: the match can never fail, so the scan never backs up and restarts at a later quote, which on
-#: an unclosed run of escaped quotes made the scan quadratic in the text's length.
-_JSON_TOKEN = re.compile(r'"(?:[^"\\]|\\.)*"?|[\[\]{}]')
+#: an unclosed run of escaped quotes made the scan quadratic in the text's length. The literal's
+#: body is the unrolled loop with possessive repeats: `(?:[^"\\]|\\.)*` kept a backtrack entry per
+#: character, so one 8 MiB literal (a findings text inside its end record) cost gigabytes; the two
+#: alternatives never overlap, so giving nothing back matches exactly the same tokens.
+_JSON_TOKEN = re.compile(r'"[^"\\]*+(?:\\.[^"\\]*+)*+"?|[\[\]{}]')
 
 
 

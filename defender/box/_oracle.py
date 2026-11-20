@@ -10,7 +10,7 @@ import os
 import secrets
 import shutil
 import tempfile
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any
@@ -69,7 +69,9 @@ def _make_runner(folder: Path | None = None) -> Path:
 def oracle_box_request(scratch: Path, runner: Path, *, env: Mapping[str, str],
                        tenant_id: str, data_root: Path) -> BoxRequest:
     """The oracle box's request: the runner read-only at the checkout's path as the box's
-    `code` mount, the scratch folder writable, no env of the caller's, labelled with the tenant
+    `code` mount, the scratch folder read-only at its own path as a `scratch` mount (the host
+    writes the saved reads there; the box's own files go under its `/tmp`, #1557 O1), no env of
+    the caller's, labelled with the tenant
     it serves (`tenant_id`, #1214 O4: the tenant's teardown removes it), and carrying the data root its box check runs
     under (`data_root`, #1469). It requires a sandbox
     (#1108 amendment 3, C3): a start fault raises, never an unsandboxed fallback, and leaves
@@ -77,7 +79,7 @@ def oracle_box_request(scratch: Path, runner: Path, *, env: Mapping[str, str],
     return BoxRequest(
         name=f"defender-oracle-{secrets.token_hex(6)}",
         mounts=(Mount(source=runner, target=CHECKOUT, writable=False, kind="code"),
-                Mount(source=scratch, target=scratch, writable=True)),
+                Mount(source=scratch, target=scratch, kind="scratch")),
         workdir=CHECKOUT, env={}, spec=BoxSpec.from_env(env), require_sandbox=True,
         tenant_id=tenant_id, data_root=data_root,
     )
@@ -97,8 +99,7 @@ def _on_path(path: str | None) -> DockerFn:
 
 
 def start_oracle_box(*, env: Mapping[str, str], tenant_id: str, data_root: Path, folder: Path | None = None,  # noqa: PLR0913 — the start's identity, its two folders and its seam
-                     docker: DockerFn | None = None, scratch_folder: Path | None = None,
-                     judge: Callable[[Path], None] | None = None) -> Any:
+                     docker: DockerFn | None = None, scratch_folder: Path | None = None) -> Any:
     """Start the oracle's sandboxed box for `tenant_id`; `data_root` is the data root its entry point resolved, where the
     box check runs (#1469); `env` is the process environment handed
     in (its `PATH` finds the `docker` binary, its box knobs size the container). `folder` is
@@ -106,10 +107,8 @@ def start_oracle_box(*, env: Mapping[str, str], tenant_id: str, data_root: Path,
     root, for a job's helper), else the host's temporary folder. `docker` is the docker seam the
     box is started and run through, used as given (a job's helper passes its own); None, the
     real one with `env`'s `PATH`. `scratch_folder`: where the scratch folder is made instead of
-    `folder` (#1543 D1: a job's helper makes it inside the job's tenant folder, so the job's own
-    process can save the oracle's reads into it). `judge`: asked of the scratch folder once it is
-    made and before the box starts over it (the helper's no-link judgement: a folder the job can
-    write is judged at the last moment before docker binds it)."""
+    `folder` (#1557 H3: a job's helper makes it inside the claim's `shared/` folder, which the job's
+    container mounts, so the job's own process can save the oracle's reads into it)."""
     runner = _make_runner(folder)
     try:
         scratch = Path(tempfile.mkdtemp(prefix="defender-oracle-", dir=scratch_folder or folder))
@@ -121,12 +120,6 @@ def start_oracle_box(*, env: Mapping[str, str], tenant_id: str, data_root: Path,
         shutil.rmtree(scratch, ignore_errors=True)
         shutil.rmtree(runner, ignore_errors=True)
 
-    if judge is not None:
-        try:
-            judge(scratch)
-        except BaseException:
-            discard()
-            raise
     request = oracle_box_request(scratch, runner, env=env, tenant_id=tenant_id, data_root=data_root)
     if docker is None:
         docker = _on_path(env.get("PATH"))

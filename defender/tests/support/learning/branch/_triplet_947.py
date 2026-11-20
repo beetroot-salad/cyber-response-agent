@@ -11,13 +11,14 @@ import os
 import re
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from defender import _yaml
 
+from defender.tests.support.learning.core import _unmodelled1579 as _unmodelled
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 DEFENDER = Path(__file__).resolve().parents[4]
@@ -86,6 +87,30 @@ def world_id(episode_dir: Path, label: str) -> str:
     matches = [world for world in doc["worlds"] if world["label"] == label]
     assert len(matches) == 1, (label, matches)
     return matches[0]["world_id"]
+
+
+def plan_reply(doc: dict) -> dict:
+    """Call 1's reply as the prompt asks for it (#1579, closed keys): the base story, the base
+    disposition, the discriminator and the planned (non-base) worlds' label, axis and facts. No
+    launcher key, no base-world entry, no `axes`, no id."""
+    base = next((w for w in doc["worlds"] if w.get("role") == "A"), {})
+    plan: dict[str, Any] = {"base_story": doc["base_story"], "discriminator": doc["discriminator"],
+                            "worlds": [{"label": w["label"], "axis": w["axis"], "facts": w["facts"]}
+                                       for w in doc["worlds"] if w.get("role") != "A"]}
+    if "disposition_declared" in base:
+        plan["base_disposition"] = base["disposition_declared"]
+    return plan
+
+
+def seat_reply(world: dict) -> dict:
+    """A seat's reply: the four keys it authors (story, axis, disposition_declared, label_basis)."""
+    return {k: world[k] for k in ("story", "axis", "disposition_declared", "label_basis")}
+
+
+def authoring_replies(doc: dict) -> list[dict]:
+    """The question-writer's replies for a fixture family `doc`: call 1's plan, then one seat per
+    non-base world (`author_family`'s protocol)."""
+    return [plan_reply(doc), *(seat_reply(w) for w in doc["worlds"] if w.get("role") != "A")]
 
 
 def declaration(doc: dict) -> dict:
@@ -203,6 +228,8 @@ class FakeAgent:
         self.prompts: list[str] = []
         self.kwargs: list[dict[str, Any]] = []
         self.agent_ids: list[str] = []
+        #: R7: inputs this fake does not model, asserted empty at teardown (conftest).
+        self.unmodelled = _unmodelled.new_list()
 
     def __call__(self, prompt: str, **kw: Any) -> Any:
         self.prompts.append(prompt)
@@ -212,8 +239,26 @@ class FakeAgent:
         if self.fault.raise_after is not None and len(self.prompts) > self.fault.raise_after:
             raise RuntimeError("model provider degraded mid-fan-out")
         if not self.replies:
+            self.unmodelled.append(f"call {len(self.prompts)} ({kw.get('agent_id')}): nothing scripted")
             raise AssertionError(f"FakeAgent ran out of replies at call {len(self.prompts)}")
         reply = self.replies.pop(0)
+        # #1579: a typed seam returns (accepted mapping, request count). A scripted mapping is
+        # an answer accepted at its first request; a scripted tuple names its own count; a
+        # scripted exception is the call's ending (`ReplyUnusable`, `RunUnprocessable`). A str
+        # is the comparator's text answer: legal only for a call made without `output=`.
+        if isinstance(reply, BaseException):
+            raise reply
+        # A questioner call is typed whether or not the (pre-#1579) seam says so; the comparator's
+        # (`comparator:`) is the one text call.
+        typed = kw.get("output") is not None or str(kw.get("agent_id", "")).startswith("questioner")
+        if isinstance(reply, str):
+            if typed:
+                self.unmodelled.append(
+                    f"call {len(self.prompts)} ({kw.get('agent_id')}): a text reply to a typed call")
+                raise AssertionError("#1579: script a mapping, not text, for a typed call")
+            return reply
+        if isinstance(reply, Mapping):
+            return (dict(reply), 1)
         return reply
 
     @property
@@ -437,12 +482,16 @@ def tenant_episodes(data_root: Path) -> Path:
     return location_path(set_up_tenant(Path(data_root), current_tenant().id).episodes)
 
 
-def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
+def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,  # noqa: PLR0913 — one keyword per scenario knob
               tenant_id: str | None = None, recorded: bool | None = None,
               pre_snapshot: bool = False,
               land_calls: Callable[[Path], None] | None = None,
-              published: bool = False) -> tuple[Path, Path]:
+              published: bool = False, source_closing: dict | None = None,
+              source_fault: str | None = None) -> tuple[Path, Path]:
     """A runs base holding ONE ordinary finished run. Returns (base, source_run_dir).
+
+    `source_closing` plants the source's closing record (fields over a valid one) in its database; `source_fault`
+    (a `_readers1534` fault, or a dict of `fault_run`'s arguments) is then applied where that lookup reads (#1534).
 
     `published=True` sets the tenant up as published, so the source's default knowledge stamp
     (`scene_knowledge`) names a commit its clone holds, as a branch launch over it needs."""
@@ -478,7 +527,7 @@ def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
     # an ordinary run from an episode's contents.
     (src / "provenance.json").write_text(
         json.dumps(provenance_record(tenant_id=tenant_id)), encoding="utf-8")
-    seed_source_session(base, src, pre_snapshot=pre_snapshot)
+    seed_source_session(base, src, pre_snapshot=pre_snapshot, closing=source_closing, fault=source_fault)
     return base, src
 
 
@@ -511,7 +560,8 @@ def _source_handle(src: Path) -> Any:
     return Run(src, runs_base=fixture_runs_base(src.parent))
 
 
-def seed_source_session(base: Path, src: Path, *, pre_snapshot: bool = False) -> None:
+def seed_source_session(base: Path, src: Path, *, pre_snapshot: bool = False, closing: dict | None = None,
+                        fault: str | dict | None = None) -> None:
     """Give the source run the session store a branch is actually taken from."""
     from defender.records import RunPaths, SessionPaths
 
@@ -541,6 +591,15 @@ def seed_source_session(base: Path, src: Path, *, pre_snapshot: bool = False) ->
             from defender.tests.support.runtime.state._fork_snapshot_plant import plant_fork_snapshots
 
             plant_fork_snapshots(store, session_id, src)
+        if closing is not None:
+            from defender.tests.storage.verdict_1534 import _spec1534 as V
+            from defender.tests.support.learning.judge import _judge_921 as J
+
+            V.plant(store, J._record_for(src.name, closing))
+    if fault is not None:  # a `_readers1534` fault, or a dict of `fault_run`'s arguments
+        from defender.tests.support.storage import _readers1534 as R
+
+        R.fault_run(src, **({"fault": fault} if isinstance(fault, str) else fault))
 
 
 def capture_call(run_dir: Path, *, system: str = "elastic", verb: str = "query",
@@ -726,12 +785,12 @@ def report_text(disposition: str, *, extra: str = "", body: str = "") -> str:
 def archived_world(episode_dir: Path, label: str, *, disposition: str = "malicious",
                    scrub_ran: bool = True, commit: str | None = "deadbee",
                    dirty: bool | None = False, unavailable: str | None = None) -> Path:
-    """One archived `worlds/<X>/` directory with every artifact the archive writes. No `run_dir`
+    """One archived `worlds/<X>/` directory with every artifact the archive writes (the verdict is not one: it is the
+    arm's closing record, `_judge_921.set_closing`; `disposition` is kept for old callers and unused). No `run_dir`
     pointer (the arm roster supersedes it): a scenario about an old archive's leftover pointer
     plants one itself."""
     w = episode_dir / "worlds" / world_id(episode_dir, label)
     (w / "gather_raw").mkdir(parents=True, exist_ok=True)
-    (w / "report.md").write_text(report_text(disposition), encoding="utf-8")
     (w / "investigation.md").write_text(f"# world {label}\n", encoding="utf-8")
     (w / "executed_queries.jsonl").write_text("", encoding="utf-8")
     (w / "provenance.json").write_text(
@@ -807,12 +866,16 @@ def sibling_run_dir(  # noqa: PLR0913 — one keyword per stamp field a scenario
                     scrub_ran: bool = True,
                     commit: str | None = "deadbee", dirty: bool | None = False,
                     unavailable: str | None = None,
-                    model: str = "m-1", stamp: bool = True, **record: Any) -> Path:
-    """A finished sibling run dir plus its scrub-verdict SIDECAR, under `base`."""
+                    model: str = "m-1", stamp: bool = True, closed: bool = True, **record: Any) -> Path:
+    """A finished sibling run dir plus its scrub-verdict SIDECAR, under `base`. `closed` (default) plants the arm's
+    `malicious` closing record in a store of its own behind its pointer (#1534); no `report.md`."""
     base = Path(base)
     run_dir = base / (arm_id if arm_id is not None else _arm_name(base, label))
     (run_dir / "gather_raw").mkdir(parents=True, exist_ok=True)
-    (run_dir / "report.md").write_text(report_text("malicious"), encoding="utf-8")
+    if closed:
+        from defender.tests.support.storage import _readers1534 as R
+
+        R.plant_run(run_dir, R.valid_fields("malicious"), sessions_base=base)
     (run_dir / "investigation.md").write_text(f"# world {label}\n", encoding="utf-8")
     (run_dir / "executed_queries.jsonl").write_text("", encoding="utf-8")
     if stamp:

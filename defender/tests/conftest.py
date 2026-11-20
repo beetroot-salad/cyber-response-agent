@@ -74,6 +74,18 @@ def _close_test_worlds() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
+def _close_main_stores() -> Iterator[None]:
+    """The session stores `_spec923.main_deps` opened for MAIN deps are closed when the test ends (#1534): the
+    deps carry them open, so no caller needs a fixture of its own. Only when the module was imported."""
+    yield
+    import sys
+
+    spec = sys.modules.get("defender.tests.support.runtime.engine._spec923")
+    if spec is not None:
+        spec.close_main_stores()
+
+
+@pytest.fixture(autouse=True)
 def _held_capabilities(checkout_roster):
     """Every test starts with the `nothing-to-try` gate holding the real checkout's roster, as a
     production process does at start, and ends with it released, so a test that pointed the gate
@@ -249,7 +261,7 @@ def write_finding(
         "citations": [{"source": "investigation", "quote": "..."}],
         "source_run_dir": f"episodes/{run_id}",
         # The three fields `_gate_family` reads as a family row's ground truth (#1234).
-        "contrast_evidence": ["worlds/b/report.md", "worlds/a/report.md"],
+        "contrast_evidence": ["worlds/b/closing", "worlds/a/closing"],
         "on_verdict_path": True,
         "world_label_doubted": False,
     }
@@ -331,3 +343,16 @@ def _records_planted(request):
     _triplet_947.PLANT_RECORDS = not own
     yield
     _triplet_947.PLANT_RECORDS = False
+
+
+@pytest.fixture(autouse=True)
+def _no_unmodelled_model_input():
+    """#1579 R7: a model-seam fake records an input it does not model (a text reply to a typed
+    call, a call with nothing scripted); the test fails here even if production swallowed the
+    fake's exception."""
+    from defender.tests.support.learning.core import _unmodelled1579
+
+    _unmodelled1579.drain()
+    yield
+    left = _unmodelled1579.drain()
+    assert left == [], f"a model-seam fake met input it does not model: {left}"

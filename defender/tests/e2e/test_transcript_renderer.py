@@ -25,7 +25,7 @@ def golden_replay(run_dir: Path) -> ReplayFn:
     """The scripted model of `driven_run`: write the golden work log and report into `run_dir`,
     then end on `MARKER` — so a page that carries `MARKER` is a page of THIS run."""
     investigation = (GOLDEN / "investigation.md").read_text(encoding="utf-8")
-    report = (GOLDEN / "report.md").read_text(encoding="utf-8")
+    report = (GOLDEN / "report.md").read_text(encoding="utf-8")  # lint-report-file: ok — the golden fixture's recorded transcript file
     return ReplayFn([
         Turn(tool_calls=[("write_file", {"path": model_path(run_dir / "investigation.md", run_dir=run_dir),
                                          "content": investigation})]),

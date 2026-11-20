@@ -67,7 +67,8 @@ _ORACLE_TOOLS: tuple[tuple[str, str, dict], ...] = (
     ("record_fact", "Record the value a fact fixes for an entity's field.",
      _schema({"entity": {"type": "string"}, "field": {"type": "string"}, "value": _ANY},
              ["entity", "field", "value"])),
-    ("python", "Run Python in the oracle's sandboxed scratch box.",
+    ("python", "Run Python in the oracle's sandboxed scratch box. It runs in a folder holding the "
+     "saved reads (`inputs/`), which is read-only: write any file of your own under `/tmp`.",
      _schema({"code": {"type": "string"}}, ["code"])),
     ("re_ask", "Re-ask a live call's own question bounded at the branch point; its answer "
      "becomes this attempt's base.", _schema({"system": {"type": "string"},
@@ -75,13 +76,15 @@ _ORACLE_TOOLS: tuple[tuple[str, str, dict], ...] = (
                                               "params": {"type": "object"}},
                                              ["system", "verb", "params"])),
     ("check", "Run the host checks on a draft hand-in and see its changes: `code` (run in your "
-     "box; prints the {patch, entity_refs, proofs} document) or those fields. Keeps nothing.",
+     "box, as python runs: its folder is read-only; prints the {patch, entity_refs, proofs} "
+     "document) or those fields. Keeps nothing.",
      _HANDIN_SCHEMA),
 )
 
 
-_SUBMIT = ("submit", "Hand in the answer and end the turn: `code` (run in your box; prints the "
-           "{patch, entity_refs, proofs} document) or those fields.", _HANDIN_SCHEMA)
+_SUBMIT = ("submit", "Hand in the answer and end the turn: `code` (run in your box, as python "
+           "runs: its folder is read-only; prints the {patch, entity_refs, proofs} document) or "
+           "those fields.", _HANDIN_SCHEMA)
 
 
 _VERDICT = ("verdict", "Pass or fail the served answer, with a reason.",

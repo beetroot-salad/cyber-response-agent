@@ -7,6 +7,7 @@ seams (an unboxed executor handed through the lifecycle's `start_box` seam, neve
 a replay model closing with the golden's disposition). The row is read back from the database."""
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import shutil
@@ -15,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from defender.tests.e2e._replay_harness import priced_billed, priced_cost
+from defender.tests.e2e._replay_harness import committed_record, golden_disposition, priced_billed, priced_cost
 from defender.tests.support.presentation import _cost_page_1377 as C
 from defender.tests.support.jobs._job_helper import helper_child, no_proxy_records
 from defender.tests.support.jobs._jobs1342 import (
@@ -49,7 +50,6 @@ def short_root():
 async def test_o16_a_replay_through_the_worker_lane_completes_with_its_disposition(
         migrated_database, tmp_path, monkeypatch, short_root, line_ends):  # noqa: F811
     """queued → completed with the golden's disposition, cost read from its sessions, knowledge current at the published commit; the run holds the alert's exact bytes, CRLF, padding whitespace, decomposed text and a U+FEFF inside a value included. (O16, r5 C1/C2: the real driver's review state is what the record's `report_committed` reads)"""
-    from defender.records.formats import parse_report_text
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
     root = short_root
@@ -57,7 +57,7 @@ async def test_o16_a_replay_through_the_worker_lane_completes_with_its_dispositi
     monkeypatch.setenv("DEFENDER_DATABASE_DSN", migrated_database)  # the child reads tenant records here (r6 R6-2)
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
     golden = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-v2sshd"
-    disposition = parse_report_text((golden / "report.md").read_text(encoding="utf-8")).disposition
+    disposition = golden_disposition(golden)
     golden_bytes = (golden / "alert.json").read_bytes()
     if line_ends == "CRLF":
         golden_bytes = golden_bytes.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
@@ -106,7 +106,9 @@ async def test_o16_a_replay_through_the_worker_lane_completes_with_its_dispositi
             "a clean replay's cost is a number read from the ledger, exact")
         assert stored["cost_usd"] > 0, "r7.1: a number, not $0: the stand-in is built under priced names"
         assert stored["knowledge"] == {"status": "current", "commit": t.commit, "stale_kind": None}
-        assert (runs / inv.investigation_id / "report.md").is_file()
+        closed = committed_record(runs / inv.investigation_id)
+        assert closed is not None, "the replay's close left no closing record in the run's session database"
+        assert closed.disposition == disposition, closed
         assert (runs / f"{inv.investigation_id}.job-end.json").is_file()
         assert Path(runs / f"{inv.investigation_id}.launch.json").is_file()
         assert json.loads((runs / f"{inv.investigation_id}.job-end.json").read_text(encoding="utf-8")) == {
@@ -149,7 +151,7 @@ async def test_o8_a_raise_after_the_real_drivers_close_still_records_the_report_
         runs = root / t.tenant_id / "runs"
         end = json.loads((runs / f"{inv.investigation_id}.job-end.json").read_text(encoding="utf-8"))
         assert (tmp_path / "marks" / "fault-raised").is_file(), "premise: the driver made a request after the close and it raised"
-        assert (runs / inv.investigation_id / "report.md").is_file(), "premise: the report was committed before the fault"
+        assert committed_record(runs / inv.investigation_id) is not None, "premise: the closing record was committed before the fault"
         assert (end["setup"], end["box"]) == ("done", "started"), end
         assert end["report_committed"] is True, end
         assert row.stage == "completed", "both facts held, so rule 4 reads the committed report (r5 C2, D-h superseded)"
@@ -378,7 +380,8 @@ async def test_s2a_s5_r7_a_request_the_run_never_saw_the_end_of_marks_the_job_th
 
 async def test_s3_a_ledger_write_that_fails_in_review_leaves_the_verdict_and_report_and_marks_the_sum(
         migrated_database, tmp_path, monkeypatch, short_root):  # noqa: F811
-    """Ledger inserts refused during the review (a real SQLite fault): same ending and report as the control; the sum lacks the review, is marked, and the child logs ERROR. (S3, S2, S5)"""
+    """Ledger inserts refused during the review (a real SQLite fault): same ending and closing record as the control; the sum lacks the review, is marked, and the child logs ERROR. (S3, S2, S5)"""
+    from defender.records import closing
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
     root = short_root
@@ -413,9 +416,11 @@ async def test_s3_a_ledger_write_that_fails_in_review_leaves_the_verdict_and_rep
         assert (got[control]["stage"], got[control]["disposition"]) == ("completed", "inconclusive"), "premise: the control"
         assert (got[faulted]["stage"], got[faulted]["disposition"], got[faulted]["failure_reason"]) == (
             "completed", "inconclusive", None), "a forced verdict reads `unresolved`"
-        report = {i: (runs / i / "report.md").read_text(encoding="utf-8").replace(i, "<id>") for i in ids}
-        assert report[faulted] == report[control]
-        assert "outcome: stands" in report[faulted], "premise: the review's own outcome reached the report (a forced verdict reads `unresolved`)"
+        records = {i: committed_record(runs / i) for i in ids}
+        assert all(r is not None for r in records.values()), "premise: both runs left a closing record"
+        by_run = {i: {k: v for k, v in dataclasses.asdict(r).items() if k != "run_id"} for i, r in records.items()}
+        assert by_run[faulted] == by_run[control]
+        assert records[faulted].outcome == closing.STANDS, "premise: the review's own outcome reached the record (a forced verdict reads `unresolved`)"
         lacking_review = _priced_spend(main=4, gather=3)  # the review's three responses are lost
         assert got[faulted]["cost_usd"] == pytest.approx(lacking_review, rel=1e-9)
         assert lower_limit(migrated_database, faulted) is True

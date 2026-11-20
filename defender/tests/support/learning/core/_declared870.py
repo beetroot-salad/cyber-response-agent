@@ -247,11 +247,12 @@ def pitfall_items(w) -> dict[str, Any]:
 
 def lead_wakes(w) -> bool:
     """Whether the lead lane's wake gate (the store's claim rule at the env thresholds) finds work for the world's tenant."""
-    from defender.learning.core.store_tick import LEAD_LANE, lane_waiting
-    from defender.learning_store import blocking
+    from defender.learning.core.store_tick import LEAD_LANE, thresholds
+    from defender.learning_store.tick import work_waiting
+    from defender.tests.support.jobs._relay1487 import adapter_store
 
-    with blocking(w.dsn) as store:
-        return lane_waiting(store, w.t.tenant_id, LEAD_LANE)
+    with adapter_store(w.dsn, w.t.tenant_id, lane=LEAD_LANE, thresholds=thresholds()) as store:
+        return work_waiting(store, LEAD_LANE)
 
 
 def queue_ids(paths) -> list[str]:

@@ -20,6 +20,7 @@ from defender import _io
 from defender.records._episode_paths import LAYOUT
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.judge._memory_store import MemoryStore
+from defender.tests.support.learning.core import _typed_output1579 as TY
 from defender.tests.support.storage import _spec1133 as S
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.learning.branch.test_triplet_capture_prime import append_call, call_row, source_run
@@ -448,10 +449,8 @@ def test_r2_a_linked_or_non_directory_folder_on_the_way_is_not_the_leaf_class(tm
 # ---- a linked folder at the judge's stale-draw removal ----------------------------------
 
 def _draw0_asks() -> list[str]:
-    """Every ask of world `b`'s draw 0: the first and its re-asks after a refused reply
-    (`judge._REPLY_ATTEMPTS` asks per draw)."""
-    attempts = J.mod("learning.judge")._REPLY_ATTEMPTS
-    return [f"judge:{T.fixture_world_id('b')}:0", *(f"judge:{T.fixture_world_id('b')}:0:{a}" for a in range(1, attempts))]
+    """Every call of world `b`'s draw 0: ONE (#1579: re-asks happen inside the call)."""
+    return [f"judge:{T.fixture_world_id('b')}:0"]
 
 
 class SwappingJudge:
@@ -461,19 +460,19 @@ class SwappingJudge:
 
     def __init__(self, act: Any = None) -> None:
         self.good = J.as_reply_text(J.reply_doc())
-        self.bad = J.as_reply_text(J.reply_doc(), malformed="lookalike-bucket")
+        self.bad = TY.unusable("lookalike-bucket")
         self.act = act
         self.agent_ids: list[str] = []
 
     def __call__(self, prompt: str, *, role: Any = None, agent_id: str = "judge",
-                 **kw: Any) -> str:
+                 **kw: Any) -> Any:
         self.agent_ids.append(agent_id)
         if agent_id in _draw0_asks():
             if self.act is not None:
                 act, self.act = self.act, None
                 act()
-            return self.bad
-        return self.good
+            raise self.bad
+        return self.good, 1
 
     def called_for(self, label: str) -> list[str]:
         return [a for a in self.agent_ids if a.startswith(f"judge:{T.fixture_world_id(label)}:")]

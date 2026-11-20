@@ -1,0 +1,259 @@
+"""#1487 test support: findings in a learning job's end record and the worker's end write over a real database.
+
+Builders for the rows the channel rules admit (premise-checked by the tests), the end record as the entry writes it,
+a scripted learning child that leaves a record per job, and real faults for the end transaction: a database trigger
+that raises a chosen SQLSTATE on a table (once or always) and a statement-level exception hook. Nothing here decides
+what the target does with any of them."""
+from __future__ import annotations
+
+import contextlib
+import json
+import sys
+from collections.abc import Iterator
+from pathlib import Path
+from typing import Any
+
+from defender.tests.support.shared._postgres1339 import execute
+
+END = "{id}.learning-end.json"
+FINDING, QUESTIONER = "finding", "questioner_finding"
+_ABSENT = object()
+_ANCHORED = {"subject_anchor": "the lead", "subject_topic": "the lead was never revisited"}
+
+
+def defender_row(job: str, n: int = 0, **over: Any) -> dict[str, Any]:
+    """A defender finding the job's judge could have held: id `<job>/w-b/0/<n>`, admitted by `_validate_row`."""
+    from defender.tests.support.learning.curation._drain719 import finding_row
+
+    return finding_row(f"{job}/w-b/0/{n}", run_id=job, subject="defender", **{**_ANCHORED, **over})
+
+
+def world_row(job: str, n: int = 0, **over: Any) -> dict[str, Any]:
+    """A questioner finding the job's judge could have held: id `<job>/w-c/0/<n>`, admitted by `_validate_world_row`."""
+    from defender.tests.support.learning.curation._spec773 import world_row as make
+
+    return make(f"{job}/w-c/0/{n}", run_id=job, direction="world", type="mislabelled",
+                citations=["family.yaml#worlds"], **{**_ANCHORED, **over})
+
+
+def text_of(finding: list | Any = (), questioner: list | Any = ()) -> str:
+    """The findings text object: each channel's rows under the store's kind names, written as the entry writes it (raw
+    UTF-8, `ensure_ascii=False`: one encoding for the text and every bound)."""
+    return json.dumps({FINDING: finding if not isinstance(finding, tuple) else list(finding),
+                       QUESTIONER: questioner if not isinstance(questioner, tuple) else list(questioner)},
+                      ensure_ascii=False)
+
+
+def ok(finding: Any = (), questioner: Any = ()) -> dict[str, Any]:
+    return {"state": "ok", "text": text_of(finding, questioner)}
+
+
+def record(status: str = "completed", reason: str | None = None, *, findings: Any = _ABSENT, count: Any = _ABSENT,
+           message: str | None = None, cost: float = 0.0) -> str:
+    """The learning end record (the interface's whole shape) with the `findings` field as given, or without it; `count`
+    is the `findings_count` an entry before #1589 still writes (absent unless given)."""
+    body: dict[str, Any] = {"status": status, "reason": reason, "message": message, "fork_message_id": "m-1",
+                            "stage": "judge", "sibling_cost_usd": cost}
+    if count is not _ABSENT:
+        body["findings_count"] = count
+    if findings is not _ABSENT:
+        body["findings"] = findings
+    return json.dumps(body)
+
+
+def child_class():
+    """`RecordsChild`: a scripted learning child leaving the record in `.records[job id]`, one spec file per launch (so
+    concurrent launches never read each other's)."""
+    from defender.tests.jobs.test_1344_learning_jobs import JobChild
+    from defender.tests.support.shared.filesystem._handoff import write_whole
+
+    class RecordsChild(JobChild):
+        records: dict[str, str]
+
+        def __call__(self, launch: Any) -> list[str]:
+            spec = self.spec_dict()
+            spec["files"] = {END: self.records[launch.job_id]}
+            path = self.where / f"spec-{launch.job_id}.json"
+            write_whole(path, json.dumps(spec))
+            return [sys.executable, str(self.script), str(path), "--job", launch.job_id,
+                    "--tenant", launch.tenant_id, "--parent-pid", str(launch.parent_pid)]
+
+    return RecordsChild
+
+
+def quiet_post_class():
+    """A post-step stand-in that leaves nothing and exits 0, asking nothing of the launch but the job and tenant."""
+    from defender.tests.support.jobs._jobs1342 import ScriptedChild
+
+    class QuietPost(ScriptedChild):
+        def __call__(self, launch: Any) -> list[str]:
+            from defender.tests.support.shared.filesystem._handoff import write_whole
+
+            write_whole(self.spec, json.dumps(self.spec_dict()))
+            return [sys.executable, str(self.script), str(self.spec), "--job", launch.job_id,
+                    "--tenant", launch.tenant_id, "--parent-pid", str(launch.parent_pid)]
+
+    return QuietPost
+
+
+# --- real faults ------------------------------------------------------------------------------------------
+
+
+def trigger_fault(dsn: str, table: str, sqlstate: str, *, when: str = "TRUE", once: bool = False,
+                  name: str = "f1487") -> None:
+    """A trigger on `table` (before an insert or update of a row matching `when`) raising `sqlstate`: every time, or
+    the first time only (a sequence, which a rolled-back transaction does not rewind)."""
+    seq = f"public.{name}_seq"
+    execute(dsn, f"CREATE SEQUENCE {seq}")
+    raising = f"RAISE EXCEPTION 'injected {sqlstate}' USING ERRCODE = '{sqlstate}';"
+    body = f"IF nextval('{seq}') = 1 THEN {raising} END IF;" if once else raising
+    execute(dsn, f"CREATE FUNCTION public.{name}() RETURNS trigger LANGUAGE plpgsql AS $f$ BEGIN {body} "  # noqa: S608
+                 "RETURN NEW; END $f$")
+    execute(dsn, f"CREATE TRIGGER {name} BEFORE INSERT OR UPDATE ON {table} FOR EACH ROW WHEN ({when}) "  # noqa: S608
+                 f"EXECUTE FUNCTION public.{name}()")
+
+
+def fault_fired(dsn: str, name: str = "f1487") -> bool:
+    """Whether a `once` trigger has raised (its sequence has been drawn from)."""
+    [(called,)] = execute(dsn, f"SELECT is_called FROM public.{name}_seq")
+    return bool(called)
+
+
+@contextlib.contextmanager
+def statement_fault(exc: BaseException, *, containing: str = "INSERT INTO learning.work_items",
+                    once: bool = False) -> Iterator[list[str]]:
+    """Every statement run through an engine that contains `containing` raises `exc` first (not a database error: the
+    way a bug in the insert path would surface), or only the first such statement (`once`). Yields the statements it
+    raised for."""
+    from sqlalchemy import event
+    from sqlalchemy.engine import Engine
+
+    hit: list[str] = []
+
+    def before(_conn, _cursor, statement, _parameters, _context, _many):
+        if containing in statement and not (once and hit):
+            hit.append(statement)
+            raise exc
+
+    event.listen(Engine, "before_cursor_execute", before)
+    try:
+        yield hit
+    finally:
+        event.remove(Engine, "before_cursor_execute", before)
+
+
+def work_items(dsn: str, job: str) -> list[tuple[str, str, str, str]]:
+    """`(tenant, kind, key, status)` of every item whose `source_run` is `job`."""
+    return [tuple(r) for r in execute(dsn, "SELECT tenant_id, kind, item_key, status FROM learning.work_items "
+                                           "WHERE source_run = %s ORDER BY kind, item_key", (job,))]
+
+
+def all_items(dsn: str) -> list[tuple[str, str, str]]:
+    return [tuple(r) for r in execute(dsn, "SELECT tenant_id, kind, item_key FROM learning.work_items "
+                                           "ORDER BY tenant_id, kind, item_key")]
+
+
+def raising_screen(exc: BaseException):
+    """A findings screen for the worker's `screen_findings=` keyword: every call records itself in `.called` and raises
+    `exc`. Injected through the worker's construction, so nothing is patched."""
+    called: list[tuple[Any, ...]] = []
+
+    def screen(*args: Any, **_kw: Any) -> None:
+        called.append(args)
+        raise exc
+
+    screen.called = called  # type: ignore[attr-defined]
+    return screen
+
+
+# One error set for both lanes that insert findings (the worker's end write and the operator lane's `publish_findings`),
+# so the two cannot drift: what each lane must treat as a refusal, and what as an outage (design r5.1 items 4, 7).
+#: The insert errors the findings' content causes: refused (P4).
+REFUSED_SQLSTATES = ["22001", "22021", "22P02", "23502", "23505", "23514", "54000", "54001"]
+#: Insert errors that say nothing about the findings, neither content nor outage: a deterministic database error and
+#: faults in the insert's code. `FindingsNotStored`, retried in place (#1487 Amendment r5.3).
+UNSTORED_SQLSTATES = ["42501"]
+UNSTORED_EXCEPTIONS = [RuntimeError("boom"), ValueError("v"), KeyError("k"), MemoryError()]
+OUTAGE_SQLSTATES = ["40P01", "55P03", "57014", "53100"]
+OUTAGE_IDS = ["deadlock", "lock-timeout", "cancel", "disk-full"]
+
+
+def _closed() -> BaseException:
+    import psycopg
+    from sqlalchemy.exc import OperationalError
+
+    return OperationalError("INSERT", {}, psycopg.OperationalError("consuming input failed: the connection is closed"))
+
+
+def _interface() -> BaseException:
+    import psycopg
+    from sqlalchemy.exc import InterfaceError
+
+    return InterfaceError("INSERT", {}, psycopg.InterfaceError("the connection is lost"))
+
+
+def _pool_timeout() -> BaseException:
+    from sqlalchemy.exc import TimeoutError as PoolTimeout
+
+    return PoolTimeout("QueuePool limit of size 10 overflow 0 reached, connection timed out, timeout 30.00")
+
+
+def _invalidated() -> BaseException:
+    import psycopg
+    from sqlalchemy.exc import DBAPIError
+
+    return DBAPIError("INSERT", {}, psycopg.DatabaseError("server closed the connection unexpectedly"),
+                      connection_invalidated=True)
+
+
+# Outages that carry no SQLSTATE (design r5 P4: "a lost connection ... pool timeout"), as the driver and the pool raise
+# them; each call makes a fresh exception. Both lanes: the worker retries them, the operator lane lets them propagate.
+OUTAGE_FAULTS = [_closed, _interface, _pool_timeout, _invalidated]
+OUTAGE_FAULT_IDS = ["connection-closed", "interface-error", "pool-timeout", "connection-invalidated"]
+
+
+def row_of_json_bytes(row: dict[str, Any], size: int, *, compact: bool = False, filler: str = "y") -> dict[str, Any]:
+    """`row` with its `finding` text padded with `filler` (1 to 4 UTF-8 bytes; ASCII `y` takes up what a whole filler
+    cannot) so that its JSON, written as UTF-8 (`ensure_ascii=False`), measures exactly `size` bytes by
+    `findings_text_bytes`: with `json.dumps`' default separators, or the compact ones."""
+    from defender.records.job_lane import findings_text_bytes
+
+    def measure(r: dict[str, Any]) -> int:
+        return findings_text_bytes(json.dumps(r, separators=(",", ":"), ensure_ascii=False) if compact
+                                   else json.dumps(r, ensure_ascii=False))
+
+    padded = dict(row, finding="")
+    budget, width = size - measure(padded), len(filler.encode())
+    padded["finding"] = filler * (budget // width) + "y" * (budget % width)
+    assert measure(padded) == size, "premise: the padding measures exactly"
+    return padded
+
+
+def id_of_utf8_bytes(job: str, size: int, filler: str = "x") -> str:
+    """`<job>/` plus `filler` repeated so that the whole id is exactly `size` UTF-8 bytes (`filler` of 1 to 4 bytes; an ASCII
+    pad takes up what a whole filler cannot)."""
+    head = f"{job}/"
+    width = len(filler.encode())
+    body = size - len(head.encode())
+    assert body >= 0
+    pad = filler * (body // width) + "x" * (body % width)
+    assert len((head + pad).encode()) == size
+    return head + pad
+
+
+#: Fillers of 2, 3 and 4 UTF-8 bytes (one character each): the ids a character count and a byte count tell apart.
+MULTIBYTE_FILLERS = ("\u00e9", "\u20ac", "\U0001f600")
+
+
+def id_over_in_bytes_only(job: str, bound: int, filler: str) -> str:
+    """The shortest `<job>/` plus `filler`s id whose UTF-8 bytes exceed `bound` while its characters do not: over the bound
+    by one byte count, within it by a character count. Asserts both measures."""
+    head = f"{job}/"
+    pad = filler * ((bound - len(head.encode())) // len(filler.encode()) + 1)
+    made = head + pad
+    assert len(made) <= bound < len(made.encode()), (len(made), len(made.encode()), bound)
+    return made
+
+
+def path_of(runs: Path, job: str) -> Path:
+    return runs / END.format(id=job)

@@ -179,7 +179,7 @@ def test_947_one_identity_gate_refuses_every_bad_world_identity_before_launch(tm
     base, src = location_path(T.runs_base)(tmp_path, published=True)  # a branch launch pins a published tenant's commit
     for worlds, _needle in bad_families:
         spawn = T.FakeSpawn()
-        questioner = T.FakeAgent(T.declaration(T.family_doc(worlds=worlds)), *[T.declaration(w) for w in worlds[1:]])
+        questioner = T.FakeAgent(*T.authoring_replies(T.family_doc(worlds=worlds)))
         with pytest.raises(T.refusals()) as refused:
             T.mod("cli.learning.branch").main(
                 ["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID)],
@@ -254,7 +254,7 @@ def test_world_labels_do_not_bound_artifact_paths(tmp_path, length):
         episode.world_record(wid).create("world: accepted\n")
         episode.world(wid).dir.ensure()
         episode.world(wid).draw(0).write("bucket: caught\n")
-        paths = [LAYOUT.world(wid).dir / "report.md", LAYOUT.oracle_dir(wid) / "facts.jsonl"]
+        paths = [LAYOUT.world(wid).dir / "investigation.md", LAYOUT.oracle_dir(wid) / "facts.jsonl"]
         for relative in paths:
             path = tmp_path / T.EPISODE_ID / relative
             path.parent.mkdir(parents=True, exist_ok=True)

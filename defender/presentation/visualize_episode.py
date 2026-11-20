@@ -19,7 +19,7 @@ from defender.records.formats import TenantRefused
 from defender.records.formats import Episode, EpisodeRefused
 from defender._io import Bound
 from defender.records.formats import LAYOUT, EpisodePaths
-from defender.records import RUN_LAYOUT, WIRE_LOG_NAMES, RunRefused
+from defender.records import RUN_LAYOUT, WIRE_LOG_NAMES, RunRefused, closing
 from defender.learning.branch import archive
 from defender.learning.branch import outcome as outcome_mod
 from defender.learning.branch import timing as timing_mod
@@ -251,7 +251,7 @@ def _load_episode(episode_dir: Path, bound: Bound, view: EpisodeRuns) -> _Episod
     if ep.roster_rec.ok and ep.roster_rec.value is not None:
         _load_arms(ep, view, ep.roster_rec.value)
     for w in nameable_worlds:
-        w.archive = _load_world_archive(bound, ep.world_id(w.label))
+        w.archive = _load_world_archive(bound, ep.world_id(w.label), closing=_closing_of(ep, view, w.label))
     for item in ep.sectioned:
         entry = ep.entries.get(item.label)
         ep.leads[item.label] = (_load_world_leads(ep, bound, item.label)
@@ -371,14 +371,22 @@ def _result_event(run: Bound) -> _ResultEvent:
     return _ResultEvent(cost, wall, "ok")
 
 
-def _load_world_archive(bound: Bound, world_id: str) -> _WorldArchive:
+def _closing_of(ep: _Episode, view: EpisodeRuns, label: str) -> closing.Lookup:
+    """World `label`'s closing record through the episode view (#1534, `closing.for_world`). An
+    episode with no roster that also has no archived world and no judge output never reached
+    RUNS: its worlds read as never closed, not as `roster-gone`."""
+    if not ep.roster_rec.present and not ep.archived_world_dirs and not ep.grade_rec.present:
+        return closing.NeverClosed()
+    return closing.for_world(view, ep.world_id(label))
+
+
+def _load_world_archive(bound: Bound, world_id: str, *, closing: closing.Lookup) -> _WorldArchive:
     # No pre-check of `worlds/<world-uuid>`: each leaf reads through the bind and reports its own
     # absent/refused state, whichever path component was missing or a link.
     world_rel = LAYOUT.world(world_id)
-    report = family.read_archived_report(bound, world_rel.report)
     investigation = bound.read(world_rel.investigation)
     return _WorldArchive(
-        report=report,
+        closing=closing,
         investigation_present=not investigation.absent,
         provenance=family.json_mapping(bound, world_rel.provenance),
         scrub=family.json_mapping(bound, world_rel.scrub_verdict))

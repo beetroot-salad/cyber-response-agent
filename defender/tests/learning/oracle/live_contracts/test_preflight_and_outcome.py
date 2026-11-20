@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from defender.tests.support.learning.judge._memory_store import MemoryStore
 from defender.tests.support.learning.branch import _triplet_947 as T
+from defender.tests.support.learning.core import _typed_output1579 as TY
 
 import json
 import threading
@@ -230,7 +231,7 @@ def _main(src: Path, est: S.Estate, *, doc: dict | None = None, spawn: Any = Non
     seams.setdefault("preflight", S.no_preflight)
     seams.setdefault("live_tree", S.T.source_capture())
     seams.setdefault("roster", est.roster())
-    seams.setdefault("judge", S.FakeJudge())
+    seams.setdefault("judge", S.quiet_judge())  # a scenario not about the judge: each draw is one call, so script a reply that grades nothing
     seams.setdefault("directory", est.directory(tenant_id=src.parent.parent.name))  # C9: one seeded active directory, the estate's records
     S.R.assert_records_within_roster(seams["directory"], src.parent.parent.name, seams["roster"])  # the roster stands for the catalog
     if oracle is not None:
@@ -612,29 +613,67 @@ def _empty_grant_estate(tmp_path: Path) -> S.Estate:
     return S.estate(tmp_path, withheld=tuple((s, v) for s in S.SYSTEMS for v in S.READ_VERBS))
 
 
-@pytest.mark.parametrize("reply", ["broken-document", "facts-bare-string"])
+def _r3_plan() -> dict:
+    """Call 1's reply as the prompt asks for it (#1579: no base-world entry, no id)."""
+    return {"base_story": "the captured story", "base_disposition": "malicious",
+            "discriminator": {"predicate": "p"},
+            "worlds": [{"label": "b", "axis": "who", "facts": [_FACT_B]},
+                       {"label": "c", "axis": "when", "facts": [_FACT_C]}]}
+
+
+def _r3_seat(story: str) -> dict:
+    return {"story": story, "axis": "who", "disposition_declared": "malicious", "label_basis": "policy-rule"}
+
+
+@pytest.mark.parametrize("reply", ["call-1-unusable", "seat-unusable", "facts-bare-string"])
 def test_question_writer_model_returns_a_family_that_does_not_parse(tmp_path, reply):
-    """The launch stops with a reason, keeps the episode, records `refused`, and replays and starts nothing."""
+    """The launch stops with a reason, keeps the episode, records `refused`, and replays and starts nothing.
+    #1579 P3: a call the runner gave up on (`ReplyUnusable`) at call 1 or a seat is this refusal, with
+    the call's reason in the outcome; a plan the in-call rules refuse reaches it the same way."""
     est = S.estate(tmp_path)
-    if reply == "broken-document":
-        questioner = S.FakeAgent("worlds: [unclosed, {facts: ")
+    reason = "base_story must be a non-empty string"
+    if reply == "call-1-unusable":
+        questioner = S.FakeAgent(TY.unusable(reason), _r3_seat("b"), _r3_seat("c"))
+    elif reply == "seat-unusable":
+        reason = "story must be a string"
+        questioner = S.FakeAgent(_r3_plan(), TY.unusable(reason), _r3_seat("c"))
     else:
-        doc = _family()
-        doc["worlds"][1]["facts"] = "alice did it"
-        questioner = S.questioner_for(doc)
+        plan = _r3_plan()
+        plan["worlds"][0]["facts"] = "alice did it"
+        reason = "facts"
+        questioner = S.FakeAgent(plan, _r3_seat("b"), _r3_seat("c"))
     oracle = S.oracle()
     run = _launch(tmp_path, est, questioner=questioner, oracle=oracle, verifier=S.verifier())
 
     assert run.rc != 0, "stopped"
     assert run.message, "stopped with an operator message"
-    assert questioner.calls >= 1, "the question-writer did run"
+    assert questioner.calls == (2 if reply == "seat-unusable" else 1), "a seat was paid after the family was refused"
     assert run.ep.is_dir(), "the episode directory is kept"
     outcome = S.read_outcome(run.ep)
     assert outcome is not None
     assert outcome["outcome"] == "refused"
-    assert outcome["reason"]
+    assert reason in outcome["reason"], outcome["reason"]
+    assert "could not be used" in run.message, "the family's own refusal, not the generic abort"
     assert oracle.requests == 0
     assert est.calls() == []
+    assert run.spawn.launches == []
+
+
+@pytest.mark.parametrize("fault", [lambda: TY.unprocessable("provider down", cause=TimeoutError("slow")),
+                                   lambda: TypeError("a bug in the host's check")],
+                         ids=["provider-failure", "host-bug"])
+def test_a_host_exception_at_the_question_writer_is_the_generic_abort_not_a_refused_family(tmp_path, fault):
+    """#1579 P5: `RunUnprocessable` / a host bug at call 1 keeps today's path (`aborted ... no sibling
+    started`), writing no `refused` outcome: it is not `family_unusable`."""
+    est = S.estate(tmp_path)
+    questioner = S.FakeAgent(fault())
+    run = _launch(tmp_path, est, questioner=questioner, oracle=S.oracle(), verifier=S.verifier())
+
+    assert run.rc != 0
+    assert "aborted" in run.message, run.message
+    assert "no sibling started" in run.message
+    assert "could not be used" not in run.message
+    assert S.read_outcome(run.ep) is None
     assert run.spawn.launches == []
 
 
@@ -919,7 +958,7 @@ def test_outcome_record_is_cut_short_by_a_launcher_crash(tmp_path, state):
     # The reader takes the episode's walked view, opened outside `pytest.raises` so a view
     # that cannot be opened fails as itself rather than satisfying the refusal.
     with J.walked_view(ep) as view, pytest.raises(error) as refused:
-        S.sym(S.EPISODE, "verdicts")(view)
+        S.sym(S.EPISODE, "delta_o")(view)
     assert S.OUTCOME_NAME in str(refused.value)
 
     judge = S.FakeJudge(default="unused")
@@ -940,17 +979,17 @@ def test_1224_archive_fails_after_the_siblings_ran(tmp_path, episodes_root):
     are), its link target is not archived, and the outcome record stays as written."""
     est = S.estate(tmp_path)
     outside = tmp_path / "outside-the-tree.md"
-    outside.write_text("MARKER-1224-NOT-THE-REPORT\n", encoding="utf-8")
+    outside.write_text("MARKER-1224-NOT-THE-DOCUMENT\n", encoding="utf-8")
     linked: list[Path] = []
 
     def link_cs_report(world: str) -> None:
         if world != "c":
             return
         tree = spawn.eps[-1] / "runs" / S.T.read_roster(spawn.eps[-1])[S.T.world_id(spawn.eps[-1], world)]
-        report = tree / "report.md"
-        report.unlink()
-        report.symlink_to(outside)
-        linked.append(report)
+        document = tree / "investigation.md"  # a file the archive copies; the closing record is in the database (#1534)
+        document.unlink()
+        document.symlink_to(outside)
+        linked.append(document)
 
     spawn = _Spawn(root=episodes_root, plant=True, hook=link_cs_report)
     judge = _launch_judge()
@@ -973,8 +1012,8 @@ def test_1224_archive_fails_after_the_siblings_ran(tmp_path, episodes_root):
     assert not S.judge_called_for(judge, T.world_id(run.ep, "c")), "the world whose archive failed was graded"
     assert not _judge_rows(run.ep).get("c", {}).get("findings"), "world c carries findings"
     archived = _snapshot(run.ep / "worlds") if (run.ep / "worlds").is_dir() else {}
-    assert not [n for n, body in archived.items() if "MARKER-1224-NOT-THE-REPORT" in body], (
-        "the link's target was archived as world c's report")
+    assert not [n for n, body in archived.items() if "MARKER-1224-NOT-THE-DOCUMENT" in body], (
+        "the link's target was archived as world c's document")
 
 
 def test_1224_preflight_world_fails_after_some_calls_verified(tmp_path, monkeypatch):

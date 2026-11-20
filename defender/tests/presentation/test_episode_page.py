@@ -52,7 +52,7 @@ def _plant_shared_arms(built: E.Episode) -> None:
     E.plant_raw(built.dir / "samples.yaml", "{\n  [")                    # parse arm
     E.plant_raw(built.dir / "provenance.json", '{"a": 1}')               # shape arm
     E.plant_link(built.dir / "timing.json", built.dir / "family.yaml")    # OSError-shaped
-    E.plant_link(built.world(E.PASSTHROUGH_WORLD) / "report.md", built.dir / "family.yaml")
+    J.fault_arm(built.dir, E.PASSTHROUGH_WORLD, "pointer-unreadable")                      # a closing-record fault
     (built.dir / _ledger_name(E.PASSTHROUGH_WORLD)).unlink()                 # absent ledger
     E.plant_link(built.dir / _ledger_name(E.CONTROL), built.dir / "family.yaml")  # aliased ledger
     passthrough_summaries = built.world(E.PASSTHROUGH_WORLD) / "gather_summaries"
@@ -154,8 +154,10 @@ def test_1049_every_planted_refusal_is_said_in_its_own_slot(tmp_path):
     assert R.ALIAS in stages, stages
 
     passthrough_report = page.section(f"world-{E.PASSTHROUGH_WORLD}").find_all(cls="w-report")[0].text()
-    assert f'worlds/{T.fixture_world_id(E.PASSTHROUGH_WORLD)}/report.md' in passthrough_report, passthrough_report
-    assert R.ALIAS in passthrough_report, passthrough_report
+    from defender.records import closing as C
+
+    assert C.FAULT_WORDING["pointer-unreadable"] in passthrough_report, passthrough_report
+    assert str(one.dir) not in passthrough_report, passthrough_report
     graded_leads = _leads(page, E.GRADED_WORLD)
     assert "investigation record unavailable" in graded_leads, graded_leads
     assert f'worlds/{T.fixture_world_id(E.GRADED_WORLD)}/investigation.md' in graded_leads, graded_leads
@@ -180,8 +182,6 @@ def test_1049_every_planted_refusal_is_said_in_its_own_slot(tmp_path):
 
     for label in (LINKED_WORLD, DANGLING_WORLD):
         world = _world(page, label)
-        assert f'worlds/{T.fixture_world_id(label)}/report.md' in world, (label, world)
-        assert R.ALIAS in world, (label, world)
         assert "not archived" not in world, (label, world)
         # The leads block is refused ONCE, at the directory: a `worlds/<w>` that is not a real
         # directory rosters nothing beneath it, so the one sentence names `worlds/<w>` itself.
@@ -274,19 +274,15 @@ def test_1049_investigation_present_and_archived_are_read_off_the_readers_states
 
     graded = _world(page, E.GRADED_WORLD)
     assert 'investigation.md: not archived' in graded, graded
-    assert 'report.md: not archived' not in graded, graded
     graded_leads = _leads(page, E.GRADED_WORLD)
     assert "investigation record unavailable" not in graded_leads, graded_leads
     assert f"summary of l-001 for {E.GRADED_WORLD}" in graded_leads, graded_leads
 
     passthrough = _world(page, E.PASSTHROUGH_WORLD)
-    assert 'report.md: not archived' in passthrough, passthrough
     assert 'investigation.md: not archived' in passthrough, passthrough
     assert "not archived" in _leads(page, E.PASSTHROUGH_WORLD)
 
     linked = _world(page, E.CONTROL)
-    assert f'worlds/{T.fixture_world_id(E.CONTROL)}/report.md' in linked, linked
-    assert R.ALIAS in linked, linked
     assert "not archived" not in linked, linked
     linked_leads = _leads(page, E.CONTROL)
     assert f'worlds/{T.fixture_world_id(E.CONTROL)}' in linked_leads, linked_leads  # the directory's own refusal, said once
