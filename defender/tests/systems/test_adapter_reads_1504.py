@@ -87,6 +87,8 @@ def _validate_over(checkout: Path | None, system: str) -> str:
 
 def _planted(tmp_path: Path) -> tuple[Path, Any]:
     checkout = X.plant_adapter(tmp_path / "planted", "widget", reads=repr(PLANTED_READS))
+    (checkout / "integrations" / "widget_adapter.md").write_text(
+        "## Credential\n\nNone known.\n\n## Pitfalls\n\nNone known.\n", encoding="utf-8")  # O5: only the reads vary
     return checkout, rules("Catalog").of_checkout(checkout)
 
 

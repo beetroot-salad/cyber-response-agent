@@ -234,8 +234,8 @@ def test_flow6_connect_never_tells_the_model_to_write_tenant_knowledge_into_the_
     assert hits == [], "connect still homes tenant knowledge in the product repo:\n" + "\n".join(hits)
 
 
-#: #1504 O4: the reads-printing form, the validator given the system and nothing else (no `--` flag after it on the line).
-_READS_ONLY_CALL = re.compile(r"validate_scaffold\.py\s+\{system\}(?![^\n]*\s--)")
+#: #1504 O4: the reads-printing form, the validator given the system and no flag after it.
+_READS_ONLY_CALL = re.compile(r"validate_scaffold\.py\s+\{system\}(?!\s+--)")
 
 
 def test_flow6_connect_routes_the_tenant_half_through_propose_and_keeps_the_adapter_in_product():
