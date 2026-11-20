@@ -125,11 +125,11 @@ def _fitted(items: list[tuple[str, Any]], budget: int) -> list[str]:
 
 #: The most of one answer a prompt shows whole: gather's own in-context ceiling, chosen there
 #: because a larger answer is re-read on every request. A larger answer is shown as gather shows
-#: it (`_view`), and the whole of it is a saved file the model's code reads.
+#: it (`_bounded_view`), and the whole of it is a saved file the model's code reads.
 _VIEW_CAP = PASSTHROUGH_MAX_BYTES_DEFAULT
 
 
-def _view(value: Any, saved_as: str) -> str | None:
+def _bounded_view(value: Any, saved_as: str) -> str | None:
     """`value` as a bounded view when its text is past `_VIEW_CAP`, else None: gather's walk of
     the answer (`payload_view.walk`: every scalar kept, its lists and long strings shortened,
     each dropped region marked where it was dropped), headed by its size and the file `saved_as`
@@ -158,8 +158,8 @@ def _view(value: Any, saved_as: str) -> str | None:
 
 def _answer_framed(label: str, value: Any, saved_as: str, cap: int = _CONTEXT_CAP) -> str:
     """An answer the model's code can read whole from a saved file (`saved_as`), framed as
-    untrusted data: whole when it is small, else as its bounded view (`_view`)."""
-    view = _view(value, saved_as)
+    untrusted data: whole when it is small, else as its bounded view (`_bounded_view`)."""
+    view = _bounded_view(value, saved_as)
     if view is None:
         return _framed(label, value, cap)
     return f"{label}:\n{wrap_fresh(view, 'untrusted')}"
