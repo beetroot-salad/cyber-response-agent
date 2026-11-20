@@ -52,10 +52,12 @@ from defender.tenancy.models import offboard as _tenancy_offboard
 from defender.tenancy.models import share_tenant
 
 from .models import (
+    ALERT_LISTING_COLUMNS,
     LEARNING_TERMINAL,
     LIVE,
     TERMINAL,
     is_terminal,
+    AlertListing,
     AlertRow,
     Claim,
     InvestigationRecord,
@@ -66,6 +68,7 @@ from .models import (
     LearningJobRow,
     LearningProgress,
     StoredAlert,
+    alert_listing,
     investigation_record,
     learning_job_record,
     stored_alert,
@@ -219,18 +222,19 @@ class JobStore:
     async def list_alerts(
         self, tenant_id: TenantId, *, fired_after: _dt.datetime | None, fired_before: _dt.datetime | None,
         after: tuple[_dt.datetime, str] | None, limit: int,
-    ) -> list[StoredAlert]:
+    ) -> list[AlertListing]:
         """Up to `limit` of the tenant's alerts with `fired_after <= fired_at < fired_before` (a bound left `None`
-        is open), newest first by `(fired_at, id)` descending, strictly after the position `after` when given."""
-        query = select(AlertRow).where(AlertRow.tenant_id == tenant_id)
+        is open), newest first by `(fired_at, id)` descending, strictly after the position `after` when given. Never
+        reads an alert's `raw` (#1507): `get_alert` is the read that carries it."""
+        query = select(*ALERT_LISTING_COLUMNS).where(AlertRow.tenant_id == tenant_id)
         if fired_after is not None:
             query = query.where(AlertRow.fired_at >= fired_after)
         if fired_before is not None:
             query = query.where(AlertRow.fired_at < fired_before)
         query = newest_first_query(query, AlertRow.fired_at, AlertRow.id, after, limit)
         async with self._tx() as s:
-            rows: Sequence[Any] = (await s.execute(query)).scalars().all()
-        return [stored_alert(row) for row in rows]
+            rows: Sequence[Any] = (await s.execute(query)).all()
+        return [alert_listing(row) for row in rows]
 
     # --- the alert mapping (#1345) ------------------------------------------------------
 

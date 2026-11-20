@@ -178,6 +178,21 @@ class LearningCheckRow(Base, kw_only=True):
 
 
 @model(frozen=True)
+class AlertListing:
+    """An alert as a list shows it: every stored field but `raw`, which a list never reads (#1507)."""
+
+    alert_id: AlertId
+    tenant_id: TenantId
+    vendor: str
+    vendor_ticket_id: str
+    fired_at: _dt.datetime
+    changed_at: _dt.datetime
+    received_at: _dt.datetime
+    title: str | None
+    description: str | None
+
+
+@model(frozen=True)
 class StoredAlert:
     """An alert as read. `raw` is the exact bytes inserted."""
 
@@ -278,6 +293,19 @@ def learning_job_record(row: LearningJobRow) -> LearningJobRecord:
         fork_message_id=row.fork_message_id, sibling_cost_usd=row.sibling_cost_usd,
         findings_count=row.findings_count, publish_state=row.publish_state, created_at=row.created_at,
         started_at=row.started_at, finished_at=row.finished_at, reason=row.reason, message=row.message)
+
+
+#: The columns an alert list selects: every column but `raw` (#1507).
+ALERT_LISTING_COLUMNS = (AlertRow.id, AlertRow.tenant_id, AlertRow.vendor, AlertRow.vendor_ticket_id, AlertRow.fired_at,
+                         AlertRow.changed_at, AlertRow.received_at, AlertRow.title, AlertRow.description)
+
+
+def alert_listing(row: Any) -> AlertListing:
+    """An `AlertListing` from a row of `ALERT_LISTING_COLUMNS`."""
+    return AlertListing(
+        alert_id=row.id, tenant_id=row.tenant_id, vendor=row.vendor, vendor_ticket_id=row.vendor_ticket_id,
+        fired_at=row.fired_at, changed_at=row.changed_at, received_at=row.received_at, title=row.title,
+        description=row.description)
 
 
 def stored_alert(row: AlertRow) -> StoredAlert:

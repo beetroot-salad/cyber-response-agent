@@ -24,6 +24,8 @@ import pytest
 
 from defender.tests.support.jobs._jobs1342 import (
     ALERT_BYTES,
+    ALERT_BYTES_DESCRIPTION,
+    ALERT_BYTES_TITLE,
     NOW,
     T1,
     T2,
@@ -3785,7 +3787,8 @@ async def test_1360_o4_an_offboard_that_meets_an_uncommitted_create_waits_for_it
 # FORCED CHOICE FC-13 (the design names the reads, not their signatures): `list_alerts(tenant_id, *, fired_after,
 # fired_before, after, limit)`, `list_investigations(tenant_id, *, alert_id, after, limit)`, `list_learning_jobs(tenant_id,
 # *, investigation_id, after, limit)` and `get_learning_job(tenant_id, learning_job_id)`, each tenant-first, answering the
-# store's own records (`StoredAlert`, `InvestigationRecord`, `LearningJobRecord`); `after` is `(time, id)`, as the ports'.
+# store's own records (`AlertListing`, which has no `raw` (#1507), `InvestigationRecord`, `LearningJobRecord`); `after` is
+# `(time, id)`, as the ports'.
 # The ports' ordering and window rules are pinned through the adapter (`tests/api/test_1083_port_contract.py`); here
 # only what is the store's: tenant keying, the filters, and the record types.
 
@@ -3807,7 +3810,7 @@ async def _three_each(store: Any) -> dict[str, list[str]]:
 
 async def test_1083_the_store_lists_one_tenants_rows_as_its_own_record_types_with_ties_by_id_descending(dsn):
     """Each list answers the tenant's rows only, as records, in `(time, id)` descending; the other tenant's list holds its own. (#1083 Data)"""
-    from defender.jobs import InvestigationRecord, LearningJobRecord, StoredAlert
+    from defender.jobs import AlertListing, InvestigationRecord, LearningJobRecord
 
     async with job_store(dsn) as store:
         ids = await _three_each(store)
@@ -3816,7 +3819,7 @@ async def test_1083_the_store_lists_one_tenants_rows_as_its_own_record_types_wit
         investigations = await store.list_investigations(T1, alert_id=None, after=None, limit=50)
         jobs = await store.list_learning_jobs(T1, investigation_id=None, after=None, limit=50)
         theirs = await store.list_alerts(T2, **window)
-    assert all(isinstance(a, StoredAlert) for a in alerts)
+    assert all(isinstance(a, AlertListing) for a in alerts)
     assert all(isinstance(i, InvestigationRecord) for i in investigations)
     assert all(isinstance(j, LearningJobRecord) for j in jobs)
     assert [a.alert_id for a in alerts] == sorted(ids["alerts"], reverse=True)
@@ -3824,6 +3827,52 @@ async def test_1083_the_store_lists_one_tenants_rows_as_its_own_record_types_wit
     assert [j.learning_job_id for j in jobs] == sorted((j.learning_job_id for j in jobs), reverse=True)
     assert sorted(j.investigation_id for j in jobs) == sorted(ids["investigations"]), "one auto job per ended investigation"
     assert [a.alert_id for a in theirs] == ids["theirs"][:1], "control: the other tenant lists its own"
+
+
+def _selected(statement: str) -> str:
+    """The select list of a SQL statement: what comes before its first `FROM`, whatever whitespace surrounds it."""
+    head, found, _ = statement.partition("FROM")
+    assert found, f"no FROM: {statement!r}"
+    assert head.lstrip().startswith("SELECT"), f"not a select: {statement!r}"
+    return head
+
+
+async def test_1507_the_alert_list_never_reads_an_alerts_raw_payload(dsn):
+    """Intent (#1507): a list of alerts shows each alert's summary fields and never reads or holds its `raw` payload;
+    the single-alert read still carries it. The check is on what the database is asked for, not only on what comes back."""
+    from sqlalchemy import event
+
+    fired, changed, received = NOW, NOW + dt.timedelta(minutes=1), NOW + dt.timedelta(minutes=2)
+    async with job_store(dsn) as store:
+        stored = await store.insert_alert(T1, vendor="elastic", vendor_ticket_id="T-1507", fired_at=fired,
+                                          changed_at=changed, received_at=received, raw=ALERT_BYTES)
+        asked: list[str] = []
+        event.listen(store._engine.sync_engine, "before_cursor_execute",
+                     lambda _conn, _cursor, statement, *_rest: asked.append(statement))
+        listed = await store.list_alerts(T1, fired_after=None, fired_before=None, after=None, limit=50)
+        list_asked, asked[:] = [s for s in asked if "alerts" in s], []
+        single = await store.get_alert(T1, stored.alert_id)
+        single_asked = [s for s in asked if "alerts" in s]
+
+    assert single is not None
+    assert single.raw == ALERT_BYTES, "control: the single read carries the payload"
+    assert any("jobs.alerts.raw" in _selected(s) for s in single_asked), "control: the capture sees a select of raw"
+    assert list_asked, "control: the capture saw the list's query"
+    assert not any("jobs.alerts.raw" in _selected(s) for s in list_asked), f"the list selected raw: {list_asked}"
+    [one] = listed
+    assert not hasattr(one, "raw"), f"a list record holds the payload: {one!r}"
+    assert (one.alert_id, one.tenant_id, one.vendor, one.vendor_ticket_id, one.fired_at, one.changed_at,
+            one.received_at, one.title, one.description) == (
+        stored.alert_id, T1, "elastic", "T-1507", fired, changed, received, ALERT_BYTES_TITLE, ALERT_BYTES_DESCRIPTION)
+
+
+def test_1507_an_alert_listing_is_every_stored_alert_field_but_raw():
+    """A field added to alerts reaches the list too: the listing and its select are all of the alert but `raw` (#1507)."""
+    from defender.jobs import AlertListing, StoredAlert
+    from defender.jobs.models import ALERT_LISTING_COLUMNS, AlertRow
+
+    assert {f.name for f in dataclasses.fields(AlertListing)} == {f.name for f in dataclasses.fields(StoredAlert)} - {"raw"}
+    assert {c.key for c in ALERT_LISTING_COLUMNS} == {c.key for c in AlertRow.__table__.columns} - {"raw"}
 
 
 async def test_1083_the_store_lists_filter_by_alert_and_by_investigation_and_page_strictly_after_a_position(dsn):
