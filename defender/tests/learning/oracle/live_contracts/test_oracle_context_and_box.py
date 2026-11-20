@@ -1524,3 +1524,54 @@ def test_1557_o1_the_python_tool_says_the_saved_reads_are_read_only_and_own_file
     for name in ("python", "check", "submit"):
         assert re.search(r"read[- ]only", texts[name], re.IGNORECASE), \
             f"the {name} tool does not say its code's folder is read-only: {texts[name]!r}"
+
+
+#: Wording that tells a model a served answer may keep real events after the branch point
+#: (#1583): the line both models were shown read "No real answer is cut there: a live answer
+#: may hold events after it", and both read it as leave to serve them.
+_LEAVE_TO_SERVE_LATER_ROWS = re.compile(
+    r"no real answer is cut|answer may hold events after it|does not cut real answers at the branch point"
+    r"|every answer is served as the world stood at it|nothing real past it is served"
+    r"|it is re-asked bounded there",
+    re.IGNORECASE)
+#: A system of record is served as it stands today (#1385 D6): told to both models, so neither
+#: back-dates one by guesswork.
+_RECORD_SYSTEM_SERVED_AS_TODAY = re.compile(
+    r"system of record's live base is its state today", re.IGNORECASE)
+#: The rule both models must be told (#1385 O3/H3): a query system's answer, served from a live
+#: base, holds no real row dated after the branch point.
+_QUERY_ANSWER_HOLDS_NONE_LATER = re.compile(
+    r"query[^.]*\bno real row dated after the branch point", re.IGNORECASE)
+
+
+def test_1583_oracle_and_verifier_are_told_a_live_query_answer_holds_no_row_after_the_branch_point(
+        tmp_path):
+    """A live call in a world with facts: neither the oracle nor the verifier is told a served
+    answer may keep real events after the branch point, and both are told that a query system's
+    answer served from a live base holds none (#1385 O3; #1583: both models served and passed
+    uncut live answers on the old line)."""
+    est = _estate(tmp_path)
+    est.answer("idp", "query", Q_BOB, _answer(_row("e-200", user="bob")))
+    ep = _episode(tmp_path)
+    o = S.oracle(_passthrough())
+    v = S.passing_verifier()
+    reg = S.sandboxed_registry(ep, "b", est, o, v)
+
+    _ask(reg, est, tmp_path, "idp", "query", Q_BOB)
+
+    for who, seen in (("oracle", o.all_seen()), ("verifier", v.all_seen())):
+        assert seen, f"the {who} was never consulted on the live call"
+        leave = _LEAVE_TO_SERVE_LATER_ROWS.search(seen)
+        assert leave is None, f"the {who} is told later rows may stay: {leave.group(0)!r}"
+        assert _QUERY_ANSWER_HOLDS_NONE_LATER.search(seen), (
+            f"the {who} is not told a live query answer holds no real row dated after the "
+            "branch point")
+        assert _RECORD_SYSTEM_SERVED_AS_TODAY.search(seen), (
+            f"the {who} is not told a system of record's live base is served as it stands today")
+    # The verifier's own failing rule is O3's: it fails a later real row on a query system's
+    # live answer, not on a system of record's (served as it stands today, #1385 D6).
+    rule = re.search(r"[^.]*fail an answer that serves a real row\s+dated after the branch point",
+                     v.all_seen())
+    assert rule, "the verifier is not told to fail a later real row on a live answer"
+    assert "query" in rule.group(0), (
+        f"the verifier's rule is not limited to a query system: {rule.group(0)!r}")

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Iterable, Iterator, Mapping, MutableMapping, MutableSequence, MutableSet
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -149,35 +149,6 @@ def safe_dump(data: Any, **kwargs: Any) -> str:
         return yaml.dump(data, Dumper=_TreeDumper, **kwargs)
     except RecursionError as e:
         raise AliasRefused("the value holds itself (or nests too deep to write)") from e
-
-
-def refuse_shared(value: Any) -> None:
-    """Refuse, as `AliasRefused`, a value whose parts are shared or cyclic — what `safe_load`
-    would have refused as an alias — for a document that arrives already parsed.
-
-    Iterative and identity-keyed, so a cycle or a deep value ends the walk rather than the
-    stack. Only mutable containers count: a shared string, number or tuple is the same value
-    wherever it appears."""
-    seen: set[int] = set()
-    stack: list[Any] = [value]
-    while stack:
-        node = stack.pop()
-        if isinstance(node, Mapping):
-            children: Iterable[Any] = node.values()
-        elif isinstance(node, (list, tuple, set, frozenset)):
-            children = node
-        else:
-            continue
-        # Only a mutable container can be shared in a way that matters: Python hands back the
-        # one empty tuple wherever one appears. An immutable one is still walked, so a list
-        # reached twice through it is found.
-        if isinstance(node, (MutableMapping, MutableSequence, MutableSet)):
-            if id(node) in seen:
-                raise AliasRefused(
-                    "the document holds one value in two places (or inside itself); write each "
-                    "value out in full")
-            seen.add(id(node))
-        stack.extend(children)
 
 
 class Readings(NamedTuple):

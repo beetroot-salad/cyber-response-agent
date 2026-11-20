@@ -32,10 +32,11 @@ def author(tmp_path: Path, paths, *, invoke, lessons=None, leads=CAPTURED_LEADS,
 
 
 def three_replies():
-    """Call 1's family document and two seat documents — the fan-out's own shape."""
+    """Call 1's family document and two seat documents — the fan-out's own shape. Call 1 carries
+    no `axes` or `base_label_basis`, which the prompt never asks for (#1579: refused in-call); it
+    names the base disposition, which the fixture's bare-line `report.md` does not supply."""
     return [
-        {"base_story": "s", "discriminator": {"predicate": "p"},
-         "axes": ["a1", "a2"],
+        {"base_story": "s", "base_disposition": "malicious", "discriminator": {"predicate": "p"},
          "worlds": [{"label": "b", "axis": "a1", "facts": [W.fact("f1")]},
                     {"label": "c", "axis": "a2", "facts": [W.fact("f2")]}]},
         {"story": "b", "axis": "a1", "disposition_declared": "malicious",

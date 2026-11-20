@@ -180,10 +180,8 @@ def test_1234_world_bucket_is_an_investigator_bucket_or_none(tmp_path: Path) -> 
     replies: dict[Any, Any] = {
         ("b", n): S.world_reply(bucket, [] if bucket == S.NO_BUCKET else ["idp"])
         for n, bucket in enumerate(admitted)}
-    replies[("c", 0)] = [S.world_reply(S.OBSERVABILITY, ["edr"]),
-                         S.world_reply("lead-quality", ["edr"])]
-    replies[("c", 1)] = [S.world_reply("fact-story-gap", ["edr"]),
-                         S.world_reply("lead-quality", ["edr"])]
+    replies[("c", 0)] = S.world_reply(S.OBSERVABILITY, ["edr"])
+    replies[("c", 1)] = S.world_reply("fact-story-gap", ["edr"])
     seam = S.judge(replies)
 
     S.grade(built, seam, draws=len(admitted))
@@ -191,14 +189,14 @@ def test_1234_world_bucket_is_an_investigator_bucket_or_none(tmp_path: Path) -> 
     assert seam.calls_for("b") == [f"judge:{T.fixture_world_id('b')}:{n}" for n in range(len(admitted))]
     for n, bucket in enumerate(admitted):
         assert S.draw_doc(built, "b", n).get(BUCKET) == bucket
+    # #1579 (conflict updated): a refused bucket is its draw's malformed end, never asked again.
     asked_c = seam.calls_for("c")
-    assert f"judge:{T.fixture_world_id('c')}:0:1" in asked_c, asked_c
-    assert f"judge:{T.fixture_world_id('c')}:1:1" in asked_c, asked_c
-    assert S.draw_doc(built, "c", 0).get(BUCKET) == "lead-quality"
-    assert S.draw_doc(built, "c", 1).get(BUCKET) == "lead-quality"
+    assert asked_c == [f"judge:{T.fixture_world_id('c')}:{n}" for n in range(len(admitted))], asked_c
+    assert [p.stem for p in S.draw_files(built, "c")] == [str(n) for n in range(2, len(admitted))]
+    assert S.row(built, "c").get(S.EXISTING["row.malformed_replies"]) == 2, S.row(built, "c")
     recorded = [d.get(BUCKET) for d in S.row(built, "c").get(S.COINED["row.draws"]) or []
                 if isinstance(d, Mapping)]
-    assert "lead-quality" in recorded, f"c's row records none of its draws' buckets: {recorded}"
+    assert recorded, f"c's row records none of its draws' buckets: {recorded}"
     assert S.OBSERVABILITY not in recorded, recorded
     assert "fact-story-gap" not in recorded, recorded
 
@@ -216,18 +214,20 @@ def test_1234_investigator_finding_requires_contrast_evidence_and_on_verdict_pat
     built = S.family(tmp_path)
     seam = S.judge({
         "b": [S.world_reply(investigator=[_without(_inv("b"), S.CONTRAST)]),
-              S.world_reply(investigator=[_inv("b", claim="b asked again")])],
+              S.world_reply(investigator=[_inv("b", claim="b's second draw")])],
         "c": [S.world_reply("lead-quality", ["edr"], investigator=[_inv("c", on_path="yes")]),
               S.world_reply("lead-quality", ["edr"],
-                            investigator=[_inv("c", claim="c asked again")])],
+                            investigator=[_inv("c", claim="c's second draw")])],
     })
 
-    S.grade(built, seam)
+    S.grade(built, seam, draws=2)
 
-    assert seam.calls_for("b") == [f"judge:{T.fixture_world_id('b')}:0", f"judge:{T.fixture_world_id('b')}:0:1"]
-    assert seam.calls_for("c") == [f"judge:{T.fixture_world_id('c')}:0", f"judge:{T.fixture_world_id('c')}:0:1"]
-    assert _draw_claims(built, "b", 0, S.INVESTIGATOR) == ["b asked again"]
-    assert _draw_claims(built, "c", 0, S.INVESTIGATOR) == ["c asked again"]
+    # #1579 (conflict updated): the refused reply is draw 0's malformed end; draw 1 is the control.
+    for label in ("b", "c"):
+        assert seam.calls_for(label) == [f"judge:{built.world_ids[label]}:0", f"judge:{built.world_ids[label]}:1"]
+        assert [p.name for p in S.draw_files(built, label)] == ["1.yaml"]
+        assert S.row(built, label).get(S.EXISTING["row.malformed_replies"]) == 1, S.row(built, label)
+        assert _draw_claims(built, label, 1, S.INVESTIGATOR) == [f"{label}'s second draw"]
 
     # At the validator: each malformed variant refused, naming its field; the control admitted.
     S.validate(S.world_reply(investigator=[_inv("b")]))  # the control
@@ -251,13 +251,15 @@ def test_1234_world_finding_bucket_is_unreachable_incoherent_or_mislabelled(
         S.world_reply(world=[S.wf("mislabelled", systems=["idp"], evidence=[built.plan("b")],
                                   claim="idp named once")])]})
 
-    S.grade(built, seam)
+    S.grade(built, seam, draws=2)
 
-    # Refused and asked again — never de-duplicated into the first reply.
-    assert seam.calls_for("b") == [f"judge:{T.fixture_world_id('b')}:0", f"judge:{T.fixture_world_id('b')}:0:1"]
-    landed = _by_claim(S.draw_doc(built, "b", 0).get(S.WORLD_FINDINGS), "idp named once")
+    # #1579 (conflict updated): refused as draw 0's malformed end — never de-duplicated into it.
+    assert seam.calls_for("b") == [f"judge:{T.fixture_world_id('b')}:0", f"judge:{T.fixture_world_id('b')}:1"]
+    assert [p.name for p in S.draw_files(built, "b")] == ["1.yaml"]
+    assert S.row(built, "b").get(S.EXISTING["row.malformed_replies"]) == 1, S.row(built, "b")
+    landed = _by_claim(S.draw_doc(built, "b", 1).get(S.WORLD_FINDINGS), "idp named once")
     assert landed.get("systems") == ["idp"]
-    assert "idp named twice" not in _draw_claims(built, "b", 0, S.WORLD_FINDINGS)
+    assert "idp named twice" not in _draw_claims(built, "b", 1, S.WORLD_FINDINGS)
 
     # At the validator: the three buckets admitted; every other bucket and systems shape refused.
     for bucket in S.WORLD_FINDING_BUCKETS:
@@ -281,10 +283,13 @@ def test_1234_deployment_gap_names_what_how_and_evidence(tmp_path: Path) -> None
         S.world_reply(world=[beside], gaps=[_without(good, S.KEPT_FACTS)]),
         S.world_reply(world=[beside], gaps=[good])]})
 
-    S.grade(built, seam)
+    S.grade(built, seam, draws=2)
 
-    assert seam.calls_for("b") == [f"judge:{T.fixture_world_id('b')}:0", f"judge:{T.fixture_world_id('b')}:0:1"]
-    doc = S.draw_doc(built, "b", 0)
+    # #1579 (conflict updated): the gap missing its flag is draw 0's malformed end.
+    assert seam.calls_for("b") == [f"judge:{T.fixture_world_id('b')}:0", f"judge:{T.fixture_world_id('b')}:1"]
+    assert [p.name for p in S.draw_files(built, "b")] == ["1.yaml"]
+    assert S.row(built, "b").get(S.EXISTING["row.malformed_replies"]) == 1, S.row(built, "b")
+    doc = S.draw_doc(built, "b", 1)
     gaps = [g for g in (doc.get(S.GAPS) or []) if isinstance(g, Mapping)]
     assert len(gaps) == 1, doc.get(S.GAPS)
     assert gaps[0].get(S.COINED["gap.what"]) == what
@@ -314,9 +319,12 @@ def test_1234_lead_set_refused_when_world_systems_include_no_served_system(
         S.world_reply("lead-set", ["siem-x"], investigator=[_inv("b", "lead-set")]),
         S.world_reply("lead-quality", ["siem-x"], investigator=[_inv("b", "lead-quality")])]})
 
-    S.grade(built, seam)
+    S.grade(built, seam, draws=2)
 
-    assert seam.calls_for("b") == [f"judge:{T.fixture_world_id('b')}:0", f"judge:{T.fixture_world_id('b')}:0:1"]
+    # #1579 (conflict updated): the lead-set reply is draw 0's malformed end; draw 1 is the control.
+    assert seam.calls_for("b") == [f"judge:{T.fixture_world_id('b')}:0", f"judge:{T.fixture_world_id('b')}:1"]
+    assert [p.name for p in S.draw_files(built, "b")] == ["1.yaml"]
+    assert S.row(built, "b").get(S.EXISTING["row.malformed_replies"]) == 1, S.row(built, "b")
     assert S.row(built, "b").get(BUCKET) == "lead-quality"
     assert [r.get("type") for r in _queued(built, "b")] == ["lead-quality"]
 
@@ -363,13 +371,11 @@ def test_1234_discipline_bucket_for_a_world_never_shown_its_facts(tmp_path: Path
     seam = S.judge({
         "b": S.world_reply("analyze-discipline", ["idp"],
                            investigator=[_inv("b", "analyze-discipline", claim="b, shown")]),
-        "c": [S.world_reply("analyze-discipline", ["edr"],
-                            investigator=[_inv("c", claim="c, discipline at world level")]),
-              S.world_reply("lead-quality", ["edr"], investigator=[_inv("c", claim="c, again")])],
-        "d": [S.world_reply("lead-quality", ["idp"],
-                            investigator=[_inv("d", "decision-discipline",
-                                               claim="d, discipline on a finding")]),
-              S.world_reply("lead-quality", ["idp"], investigator=[_inv("d", claim="d, again")])],
+        "c": S.world_reply("analyze-discipline", ["edr"],
+                           investigator=[_inv("c", claim="c, discipline at world level")]),
+        "d": S.world_reply("lead-quality", ["idp"],
+                           investigator=[_inv("d", "decision-discipline",
+                                              claim="d, discipline on a finding")]),
     })
 
     S.grade(built, seam)
@@ -378,19 +384,16 @@ def test_1234_discipline_bucket_for_a_world_never_shown_its_facts(tmp_path: Path
     assert seam.calls_for("b") == [f"judge:{T.fixture_world_id('b')}:0"]
     assert S.row(built, "b").get(BUCKET) == "analyze-discipline"
     assert [r.get("type") for r in _queued(built, "b")] == ["analyze-discipline"]
-    # The worlds never shown their facts are refused and asked again, at world level and on a
-    # finding alike; no discipline word survives on any surface the pass writes.
-    discipline = {"analyze-discipline", "decision-discipline"}
+    # #1579 (conflict updated): the worlds never shown their facts are refused, at world level
+    # and on a finding alike, as their one draw's malformed end (one call, no draw file); no
+    # discipline word survives on any surface the pass writes.
     for label in ("c", "d"):
-        assert seam.calls_for(label) == [f"judge:{built.world_ids[label]}:0", f"judge:{built.world_ids[label]}:0:1"]
+        assert seam.calls_for(label) == [f"judge:{built.world_ids[label]}:0"]
+        assert S.draw_files(built, label) == []
         row = S.row(built, label)
-        assert row.get(BUCKET) == "lead-quality"
-        assert _draw_claims(built, label, 0, S.INVESTIGATOR) == [f"{label}, again"]
-        doc = S.draw_doc(built, label, 0)
-        assert not discipline & set(_strings({BUCKET: doc.get(BUCKET),
-                                              "f": doc.get(S.INVESTIGATOR)})), doc
-        queued = _queued(built, label)
-        assert [r.get("type") for r in queued] == ["lead-quality"], queued
+        assert row.get(S.EXISTING["row.malformed_replies"]) == 1, row
+        assert row.get(BUCKET) is None, row
+        assert _queued(built, label) == []
 
 
 def test_1234_world_finding_systems_carry_hostile_text(tmp_path: Path) -> None:
@@ -406,16 +409,18 @@ def test_1234_world_finding_systems_carry_hostile_text(tmp_path: Path) -> None:
         S.world_reply(world=[S.wf("mislabelled", systems=["idp"], evidence=[built.plan("b")],
                                   claim="clean systems")])]})
 
-    S.grade(built, seam)
+    S.grade(built, seam, draws=2)
 
-    assert seam.calls_for("b") == [f"judge:{T.fixture_world_id('b')}:0", f"judge:{T.fixture_world_id('b')}:0:1"]
+    # #1579 (conflict updated): the hostile name is draw 0's malformed end.
+    assert seam.calls_for("b") == [f"judge:{T.fixture_world_id('b')}:0", f"judge:{T.fixture_world_id('b')}:1"]
+    assert [p.name for p in S.draw_files(built, "b")] == ["1.yaml"]
     # The clean name reaches the questioner row (the control); the hostile text reaches no
     # queue and no draw document.
     assert [r.get("systems") for r in _queued(built, "b", questioner=True)] == [["idp"]]
     defender_text, questioner_text = S.queue_bytes()
     assert mark not in defender_text
     assert mark not in questioner_text
-    assert not any(mark in s for s in _strings(S.draw_doc(built, "b", 0)))
+    assert not any(mark in s for s in _strings(S.draw_doc(built, "b", 1)))
 
     # At the validator: every hostile name refused, naming the field; a clean name admitted.
     S.validate(S.world_reply(world=[S.wf("mislabelled", systems=["idp"])]))  # the control
@@ -446,10 +451,14 @@ def test_1234_evidence_pointers_and_contrast_pair_disagree(tmp_path: Path) -> No
         S.world_reply(investigator=[_without(_inv("b", claim="no contrast list"), S.CONTRAST)]),
         S.world_reply(investigator=filed)]})
 
-    S.grade(built, seam)
+    S.grade(built, seam, draws=2)
 
-    assert seam.calls_for("b") == [f"judge:{T.fixture_world_id('b')}:0", f"judge:{T.fixture_world_id('b')}:0:1"]
-    fid = [built.finding_id("b", 0, i) for i in range(len(filed))]
+    # #1579 (conflict updated): the reply without its contrast list is draw 0's malformed end;
+    # the unresolved pointers of draw 1 stay drops (P4), never a malformed draw.
+    assert seam.calls_for("b") == [f"judge:{T.fixture_world_id('b')}:0", f"judge:{T.fixture_world_id('b')}:1"]
+    assert [p.name for p in S.draw_files(built, "b")] == ["1.yaml"]
+    assert S.row(built, "b").get(S.EXISTING["row.malformed_replies"]) == 1, S.row(built, "b")
+    fid = [built.finding_id("b", 1, i) for i in range(len(filed))]
     assert S.lane_of(built, fid[0]) == S.LANES["defender"]
     assert S.lane_of(built, fid[1]) == S.LANES["dropped_unresolved"]
     assert S.lane_of(built, fid[2]) == S.LANES["dropped_no_pair"]

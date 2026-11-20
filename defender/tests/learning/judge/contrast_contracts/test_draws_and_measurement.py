@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from defender.tests.learning.judge.contrast_contracts import _spec1234 as S
+from defender.tests.support.learning.core import _typed_output1579 as TY
 
 #: A world row's measurement fields, spelled once through the shared vocabulary.
 MEASURED = S.COINED["row.measured"]
@@ -18,9 +19,8 @@ BUCKET = S.RULED["reply.bucket"]
 ROW_SYSTEMS = S.RULED["row.systems"]
 
 
-#: Not YAML: refused by any reply validator, so the draw asks again and, refused on every ask,
-#: completes nothing.
-MALFORMED = "bucket: [unterminated"
+#: #1579: a mapping the validator refuses (a lookalike bucket); replies are never text.
+MALFORMED = S.world_reply("Lead-Quality", ["idp"])
 
 LQ = "lead-quality"
 
@@ -297,6 +297,8 @@ def test_1234_world_with_some_malformed_draws_and_some_completed(tmp_path):
 
     b, c = S.row(built, "b"), S.row(built, "c")
     assert b.get(COMPLETED) == 1, b
+    assert b.get(S.EXISTING["row.malformed_replies"]) == 2, b
+    assert c.get(S.EXISTING["row.malformed_replies"]) == 1, c
     assert b.get(BUCKET) == LQ, b
     assert b.get(ROW_SYSTEMS) == ["idp"], b
     assert not b.get(DISAGREE), b
@@ -310,4 +312,45 @@ def test_1234_world_with_some_malformed_draws_and_some_completed(tmp_path):
     assert not rerun.called("b"), rerun.agent_ids
     assert not rerun.called("c"), rerun.agent_ids
     assert S.row(built, "b").get(COMPLETED) == 1
+    assert S.row(built, "c").get(COMPLETED) == 2
+
+
+@pytest.mark.parametrize("requests_sent", [1, 2])
+def test_1579_a_size_failure_stops_later_draws_only_when_it_was_the_first_request(
+        tmp_path, requests_sent):
+    """A23 narrowed (P5): a 413 on request 1 stops the later draws; a 413 on a re-ask (longer
+    history) fails that draw alone as a transport failure and the later draws still run."""
+    built = S.family(tmp_path)
+    judge = S.judge({"b": _lq("b")}, overflow={("b", 0)}, overflow_requests=requests_sent)
+
+    S.grade(built, judge, draws=3)
+
+    b = S.row(built, "b")
+    assert b.get(S.EXISTING["row.draws_failed_reason"]), f"the failure is not recorded: {b}"
+    if requests_sent == 1:
+        assert judge.calls_for("b") == [f"judge:{built.world_ids['b']}:0"], judge.agent_ids
+        assert b.get(COMPLETED) == 0, b
+    else:
+        assert judge.calls_for("b") == [f"judge:{built.world_ids['b']}:{n}" for n in range(3)]
+        assert b.get(COMPLETED) == 2, b
+        assert [p.stem for p in S.draw_files(built, "b")] == ["0", "1", "2"]
+    assert S.row(built, "c").get(COMPLETED) == 3, "a size failure in b cost world c its draws"
+
+
+def test_1579_an_exhausted_draw_is_not_a_crashed_call_in_the_measurement(tmp_path):
+    """O6: `ReplyUnusable` on every draw of b, with the count of an exhausted call: b is not
+    measured, names no `draws_failed_reason`, and c is graded."""
+    built = S.family(tmp_path)
+    exhausted = TY.unusable("the judge's reply carries no bucket for its world",
+                            requests=TY.MAX_REQUESTS)
+    judge = S.judge({"b": [exhausted, exhausted]})
+
+    S.grade(built, judge, draws=2)
+
+    b = S.row(built, "b")
+    assert b.get(COMPLETED) == 0, b
+    assert b.get(S.EXISTING["row.malformed_replies"]) == 2 * TY.MAX_REQUESTS, b
+    assert not b.get(S.EXISTING["row.draws_failed_reason"]), b
+    assert b.get(MEASURED) is False, b
+    assert "no bucket for its world" in str(b.get(NOT_MEASURED_REASON)), b
     assert S.row(built, "c").get(COMPLETED) == 2
