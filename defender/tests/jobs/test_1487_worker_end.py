@@ -97,8 +97,8 @@ async def test_1589_the_finish_audit_names_how_many_rows_the_end_stored(world, c
     [again] = await _run(world, [lambda j: F.record(findings=F.ok(), count="not a count")], ticket="again")
     [refused] = await _run(world, [lambda j: F.record(findings={"state": "malformed"})], ticket="refused")
     details = {e.target: e.detail for e in audit.events() if e.action == "learning_job.finish"}
-    assert details[first] == "status=completed findings=done stored=3", details
-    assert details[again] == "status=completed findings=done stored=0", details
+    assert details[first] == "status=completed findings=done added=3", details
+    assert details[again] == "status=completed findings=done added=0", details
     assert details[refused] == "status=completed findings=refused", details
 
 

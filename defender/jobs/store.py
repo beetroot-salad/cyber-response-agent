@@ -894,7 +894,7 @@ class JobStore:
         announce("learning_job.finish", actor=SYSTEM, tenant_id=tenant_id, target=learning_job_id,
                  detail=f"status={status}" + (f" reason={reason}" if reason else "")
                  + (f" findings={record.publish_state}" if status == "completed" else "")
-                 + (f" stored={stored}" if stored is not None else ""))
+                 + (f" added={stored}" if stored is not None else ""))
         return record
 
     async def hand_back_learning_job(

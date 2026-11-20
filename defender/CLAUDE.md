@@ -44,9 +44,14 @@ lifecycle service; run migrations; start the new code. The notes below say only 
 ## Upgrade from before #1589
 
 Run migrations (revision `0024_drop_findings_count`): it drops `jobs.learning_jobs.findings_count`, which nothing
-decided on. A job's stored findings carry its id (`source_run`), and the finish audit event of a completed job whose
-findings were stored names how many rows its end added (`stored=N`); a refused one names none. A job image built before #1589 still writes a `findings_count` into its end record; the
-worker accepts it and ignores its value, so the image need not be rebuilt at the same time.
+decided on. A job's stored findings carry its id (`source_run`): that is the lasting record of what its end stored.
+The finish audit event of a completed job whose findings were stored also names how many rows its end added
+(`added=N`; a refused one names none), but an audit event can be lost in a crash just after the commit.
+
+Rebuild the job image only after the old workers are stopped, then at any time after the upgrade. A worker from
+before #1589 needs the `findings_count` field in a job's end record, which an image built from this code no longer
+writes: an old worker reads such a record as no end record and fails the job, its findings never stored. A new worker
+accepts a record from an older image, its `findings_count` ignored, so the image need not be rebuilt at once.
 
 ## Upgrade from before #1557
 
