@@ -39,6 +39,8 @@ class AdoptionForge(ForgeHTTP):
     def __init__(self, *a, **k):
         super().__init__(*a, **k)
         self.after_listing = None
+        #: `"5xx"` or `"dropped"`: the next create is applied by the forge but its reply is lost (a 503 / a cut connection).
+        self.lose_reply = None
 
     # -- the probes' answers ---------------------------------------------------------------------------------------
     def _create(self, body):
@@ -53,7 +55,13 @@ class AdoptionForge(ForgeHTTP):
         row = self._row(number, body["head"], sha=sha)
         row["user"] = {"login": self.login}
         row["body"] = body.get("body", "")
-        return httpx.Response(201, json=self.add_pr(row))
+        created = self.add_pr(row)
+        lost, self.lose_reply = self.lose_reply, None
+        if lost == "dropped":
+            raise httpx.ReadError("the connection was cut after the forge applied the create")
+        if lost:
+            return httpx.Response(503, json={"message": "the reply was lost"})
+        return httpx.Response(201, json=created)
 
     @staticmethod
     def _row(number, branch, *, sha=None, state="open", merged=False, deleted=False):

@@ -1,6 +1,5 @@
 """#1471 P-8, P-9, A5: base files are adapter-level content rendered under the system name, named by a content digest, and every
-shipped set passes connect's scaffold validator. No case here fixes how the digest is framed (the design leaves its widths open): the
-digest is asserted by property."""
+shipped set passes connect's scaffold validator. One literal case pins the framing (surface §7); the other digest cases assert properties."""
 from __future__ import annotations
 
 import dataclasses
@@ -73,6 +72,19 @@ def test_the_digest_is_64_lowercase_hex_and_the_branch_is_its_first_16(tmp_path)
     assert digest == digest.lower()
     assert int(digest, 16) >= 0
     assert _base().branch_of("elastic", digest) == f"adopt/elastic/{digest[:16]}"
+
+
+def test_the_digest_and_branch_of_a_small_rendering_are_these_literals():
+    """SHA-256 over 4-byte big-endian length-framed paths (UTF-8, byte order: `B` before `a`, `é` last) and contents; literals computed once by hand. (P-9, surface §7)"""
+    rendering = {
+        "agent/skills/a/z.md": b"z\n",
+        "agent/\u00e9.md": b"caf\xc3\xa9\xff",
+        "agent/a.md": b"",
+        "agent/B.md": b"upper\r\n",
+    }
+    digest = _base().digest(rendering)
+    assert digest == "07a52cc8f756a4e762fe3209c7b590aa16366ba03a628363ae181668c1cebeae"
+    assert _base().branch_of("acme", digest) == "adopt/acme/07a52cc8f756a4e7"
 
 
 def test_the_digest_ignores_the_order_the_files_were_listed_in():

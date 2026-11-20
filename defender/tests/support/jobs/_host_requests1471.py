@@ -8,14 +8,48 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import shutil
 import sys
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from defender.tests.support.jobs._jobs1342 import NOW, ScriptedChild, knowledge_record_of, make_worker
 from defender.tests.support.shared._postgres1339 import execute
 from defender.tests.support.shared.filesystem._handoff import write_whole
+
+DEFENDER = Path(__file__).resolve().parents[3]
+#: The adapter whose planted checkout declares `BASE_FILES`, and one that declares none there (§7: base files are the adapter's).
+SHIPS_BASE_FILES = "identity"
+NO_BASE_FILES = "ticket"
+_PLANTED = {
+    "skills/{system}/SKILL.md": b"---\nname: defender-{system}\ndescription: planted\n---\nbody\n",
+    "skills/gather/queries/{system}/by-user.md": b"---\nid: {system}.by-user\nverb: x\n---\n",
+}
+
+
+def plant_checkout(root: Path) -> Path:
+    """A code tree (a copy of `integrations/`) whose `SHIPS_BASE_FILES` adapter declares `BASE_FILES` and whose others declare none.
+    The server's catalog reads `$DEFENDER_DIR`, so a test points it here before the server starts (sort-3 1a)."""
+    shutil.copytree(DEFENDER / "integrations", root / "integrations", ignore=shutil.ignore_patterns("__pycache__"))
+    adapter = root / "integrations" / f"{SHIPS_BASE_FILES}_adapter.py"
+    adapter.write_text(adapter.read_text(encoding="utf-8") + f'\nBASE_FILES = "base-files/{SHIPS_BASE_FILES}"\n', encoding="utf-8")
+    for rel, data in _PLANTED.items():
+        target = root / "integrations" / "base-files" / SHIPS_BASE_FILES / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+    return root
+
+
+@pytest.fixture
+def planted_checkout(tmp_path, monkeypatch) -> Path:
+    """`plant_checkout` under `tmp_path`, set as `$DEFENDER_DIR` (`setenv`, not `setattr`)."""
+    root = plant_checkout(tmp_path / "checkout")
+    monkeypatch.setenv("DEFENDER_DIR", str(root))
+    return root
+
 
 COMMIT = "c" * 40
 MARK = "CONTAINER-TEXT-1471"
@@ -34,7 +68,7 @@ STEPS_WITH_KNOWLEDGE = ("knowledge_copy", "run_tenant", "roster", "tenant_verdic
 READINESS_STEPS = (*STEPS_WITHOUT_KNOWLEDGE, *STEPS_WITH_KNOWLEDGE)
 READINESS_HELPER_REASONS = ("start_failed", "worker_error")
 READINESS_CONTAINER_REASONS = ("census_unavailable", "handover")
-WARNING_KINDS = ("case_system", "system_down", "grant_ignored", "verb_undecided", "verb_undeclared", "verb_unreasoned",
+WARNING_KINDS = ("case_system", "system_down", "grant_ignored", "verb_undecided", "verb_undeclared",
                  "tacit_registry", "tacit_grant", "feedback_setting", "retired_file")
 ADOPTION_OUTCOMES = ("opened", "already_open", "rejected", "nothing_to_adopt")
 WITH_NUMBER = ("opened", "already_open", "rejected")

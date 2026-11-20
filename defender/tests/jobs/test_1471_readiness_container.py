@@ -22,6 +22,7 @@ from defender.tests.support.jobs._readiness1471 import (
     judged_by_an_investigation,
     listed_runs,
     norm,
+    planted_code_tree,
     readiness,
     readiness_scene,
 )
@@ -152,6 +153,25 @@ def test_r4_c9_a_grant_the_verdict_ignores_is_a_warning_with_the_verdicts_own_re
         assert {w["kind"] for w in warnings} == {"grant_ignored"}, warnings
 
 
+def test_r4_a_grant_on_a_system_the_catalog_lacks_is_refused_at_the_systems_step_not_warned_of(
+        tmp_path, monkeypatch, migrated_database):
+    """A grant naming a system no adapter exists for is kept by the verdict and refused by the systems check (surface §5,
+    B6): `refused` at `systems` with the run's own sentence, where a grant on a catalog system with no enabled record is a
+    `grant_ignored` warning. (R4, R13-1.4)"""
+    def edit(d: dict[str, Any]) -> None:
+        d["nonesuchsys"] = {"health-check": {"roles": ["gather"]}}
+
+    with readiness_scene(tmp_path, monkeypatch, migrated_database, proxied=ALL, files=_table(edit)) as scene:
+        premise = judged_by_an_investigation(scene, monkeypatch)
+        assert not premise["started"], f"premise: the launch is refused: {premise}"
+        assert "nonesuchsys" in (premise["exit"] or ""), premise
+        ran = readiness(scene)
+
+        sentence = assert_refused_shape(ran.result(), "systems")
+        assert "nonesuchsys" in sentence, sentence
+        assert isinstance(ran.knowledge, dict)
+
+
 # --- the census: one planted fault per kind -----------------------------------------------------------------------------
 
 def _table(edit: Any) -> dict[str, Any]:
@@ -187,7 +207,7 @@ def test_r4_r13_3_each_census_gap_of_the_published_copy_is_a_warning_of_its_kind
         assert judged_by_an_investigation(scene, monkeypatch)["started"], "premise: the investigation launches"
         warnings = _warnings(readiness(scene))
 
-        assert {w["kind"] for w in warnings} == {kind}, warnings
+        assert [w["kind"] for w in warnings] == [kind], f"exactly one warning, as the census has one line: {warnings}"
         if needle:
             assert needle in _of(warnings, kind), warnings
 
@@ -217,7 +237,7 @@ def test_r13_3_a_verb_left_undecided_on_a_system_the_tenant_has_no_record_of_is_
 def test_r13_3_a_withheld_verb_with_no_reason_is_the_launchs_refusal_not_a_census_warning(
         tmp_path, monkeypatch, migrated_database):
     """The grant table loader refuses a `roles: []` row with no reason, so it reads `refused` at `run_tenant`; no table
-    that loads can leave `verb_unreasoned` to the census (design gap, reported). (R13-3)"""
+    that loads can leave `verb_unreasoned` to the census (R13-3, sort-3 group 2)"""
     def edit(d: dict[str, Any]) -> None:
         d["cmdb"]["list-roles"] = {"roles": []}
 
@@ -336,3 +356,56 @@ def test_r13_1_4_launch_facts_saying_the_tenant_is_not_active_are_refused_at_the
 
         assert_refused_shape(ran.result(), "container_tenant")
         assert isinstance(ran.knowledge, dict)
+
+
+def test_r13_1_4_launch_facts_saying_active_over_a_tenant_folder_the_container_refuses_are_refused_at_container_tenant(
+        tmp_path, monkeypatch, migrated_database):
+    """The container's own read of its tenant folder (the one it mounts) refuses it though the helper's admission passed:
+    `refused` at `container_tenant`, carrying the knowledge record; the same route over the sound folder reads `ready`.
+    (R13-1.4, C5)"""
+    from defender import run as run_py
+    from defender import tenancy
+
+    def entering(scene: Any, rid: str, damage: bool) -> Any:
+        def container(c: Any) -> int:
+            if damage:
+                (scene.root / scene.tenant / "knowledge" / "stray-1471.txt").write_text("not a tenant file", encoding="utf-8")
+            return int(run_py.readiness_main(["--readiness", rid, "--tenant", scene.tenant], environ=c.env))
+        return container
+
+    with readiness_scene(tmp_path / "ctl", monkeypatch, migrated_database, proxied=ALL) as scene:
+        rid = str(uuid.uuid4())
+        assert readiness(scene, rid=rid, container=entering(scene, rid, False)).result()["outcome"] == "ready"
+    with readiness_scene(tmp_path, monkeypatch, migrated_database, proxied=ALL) as scene:
+        rid = str(uuid.uuid4())
+        ran = readiness(scene, rid=rid, container=entering(scene, rid, True))
+
+        assert ran.facts is not None
+        assert ran.facts["tenant_state"] == "active", "the helper's admission passed: its facts say active"
+        with pytest.raises(tenancy.TenantRefused):
+            tenancy.accept_tenant(tenancy.resolve_data_root(), scene.tenant, defender_dir=run_py.DEFENDER_DIR, clone_tree=False)
+        assert_refused_shape(ran.result(), "container_tenant")
+        assert isinstance(ran.knowledge, dict), "a refusal at a container step carries the helper's knowledge record"
+
+
+@pytest.mark.parametrize("blind", [True, False], ids=["blind-adapter", "readable-tree"])
+def test_r13_3_a_census_that_cannot_be_taken_is_failed_census_unavailable_never_ready_over_an_untaken_census(
+        tmp_path, monkeypatch, migrated_database, blind):
+    """The container's code tree holds an adapter the cold verb reader sees no verb in (recorded by no system of the
+    tenant, so the launch itself is clean): `{failed, census_unavailable}`; the readable copy of the same tree reads
+    `ready`. Driven through `readiness_main(defender_dir=)`. (R13-3, surface §4)"""
+    from defender.cli import _tenant_census
+
+    tree = planted_code_tree(tmp_path / "tree", blind=blind)
+    if blind:
+        with pytest.raises(_tenant_census.CensusUnavailable):
+            _tenant_census.take_census(tree)
+    else:
+        assert _tenant_census.take_census(tree).systems, "premise: the copy is censused"
+    with readiness_scene(tmp_path, monkeypatch, migrated_database, proxied=ALL) as scene:
+        ran = readiness(scene, defender_dir=tree)
+
+        if blind:
+            assert ran.result() == {"outcome": "failed", "reason": "census_unavailable"}, ran.said()
+        else:
+            assert _warnings(ran) == [], ran.said()

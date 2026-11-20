@@ -37,7 +37,7 @@ HELPER_STEPS = ("tenant", "records", "alert_mapping", "publish", "knowledge_copy
 CONTAINER_STEPS = ("container_tenant", "systems")
 AFTER_PUBLISH = ("knowledge_copy", "run_tenant", "roster", "tenant_verdict", "signing", "first_pass", *CONTAINER_STEPS)
 WARNING_KINDS = frozenset({"case_system", "system_down", "grant_ignored", "verb_undecided", "verb_undeclared",
-                           "verb_unreasoned", "tacit_registry", "tacit_grant", "feedback_setting", "retired_file"})
+                           "tacit_registry", "tacit_grant", "feedback_setting", "retired_file"})
 #: Words that name an operator command: an admin reads our sentences too (#1470 O11, C9).
 OPERATOR_WORDS = ("tenant.py", "tenant check", "tenant update", "tenant propose")
 
@@ -94,11 +94,12 @@ class Investigated:
         return self.docker.job_ran and self.end is None
 
 
-def investigate(scene: HelperScene, *, signer: Any = None, **seams: Any) -> Investigated:
+def investigate(scene: HelperScene, *, signer: Any = None, docker: ContainerStandIn | None = None,
+                **seams: Any) -> Investigated:
     """The helper for a planted investigation of the scene's tenant. Green at the base: a premise, never the subject."""
     inv = str(uuid.uuid4())
     scene.plant(inv)
-    docker = ContainerStandIn(lambda c: 0)
+    docker = docker if docker is not None else ContainerStandIn(lambda c: 0)
     err = io.StringIO()
     with contextlib.redirect_stderr(err):
         ran = drive_helper(scene, scene.argv("investigation", inv), docker=docker,
@@ -153,15 +154,18 @@ class Readied:
         return record
 
 
-def entry_of(scene: HelperScene, rid: str, done: Readied, *, roster: Any = None) -> Callable[[Any], int]:
-    """The container's process: `run.readiness_main` over the container's own environment."""
+def entry_of(scene: HelperScene, rid: str, done: Readied, *, roster: Any = None,
+             defender_dir: Path | None = None) -> Callable[[Any], int]:
+    """The container's process: `run.readiness_main` over the container's own environment, reading `defender_dir` (the
+    one code tree its census and roster read, surface §4) when given."""
+    tree = {} if defender_dir is None else {"defender_dir": defender_dir}
 
     def run(container: Any) -> int:
         from defender import run as run_py
 
         try:
             done.container_rc = int(run_py.readiness_main(["--readiness", rid, "--tenant", scene.tenant],
-                                                          environ=container.env, roster=roster))
+                                                          environ=container.env, roster=roster, **tree))
             return done.container_rc
         except SystemExit as exited:
             done.container_exit = exited
@@ -175,10 +179,10 @@ def entry_of(scene: HelperScene, rid: str, done: Readied, *, roster: Any = None)
 
 def readiness(scene: HelperScene, *, signer: Any = None, docker: ContainerStandIn | None = None, rid: str | None = None,
               container: Callable[[Any], int] | None = None, roster: Any = None, publish: Callable[..., str] | None = None,
-              ) -> Readied:
+              defender_dir: Path | None = None) -> Readied:
     """The helper for a readiness check of the scene's tenant (kind `readiness`, job id `rid`), its container the real
     `readiness_main` unless `container(Container) -> rc` says otherwise. `publish` is the launch-time publish seam
-    (default: `fresh` at the published commit). Never raises for the subject's absence: the caller reads `.result()`."""
+    (default: `fresh` at the published commit). `defender_dir`: the code tree the container entry reads. Never raises for the subject's absence: the caller reads `.result()`."""
     rid = rid or str(uuid.uuid4())
     done = Readied(scene, rid, HelperRan(), ContainerStandIn(), "")
     stand_in = docker if docker is not None else ContainerStandIn()
@@ -186,7 +190,7 @@ def readiness(scene: HelperScene, *, signer: Any = None, docker: ContainerStandI
     def captured(c: Any) -> int:
         with contextlib.suppress(Exception):
             done.facts = c.request("launch")
-        return (container or entry_of(scene, rid, done, roster=roster))(c)
+        return (container or entry_of(scene, rid, done, roster=roster, defender_dir=defender_dir))(c)
 
     stand_in.job = captured
     done.docker = stand_in
@@ -197,6 +201,32 @@ def readiness(scene: HelperScene, *, signer: Any = None, docker: ContainerStandI
                                 signer=signer if signer is not None else make_signer(), **seams)
     done.err = err.getvalue()
     return done
+
+
+# --- test-only doubles and planted trees ----------------------------------------------------------------------------
+
+class ExplodingDocker(ContainerStandIn):
+    """A docker seam whose attached `docker run` raises a plain exception (not `OSError`, which the helper reads as a start
+    failure): an unexpected crash in the helper's setup, after its host half. Nothing is started."""
+
+    def _run(self, argv: list[str], cli_env: dict[str, str] | None = None) -> Any:
+        raise RuntimeError("docker exploded (1471 test double)")
+
+
+def planted_code_tree(root: Path, *, blind: bool = False) -> Path:
+    """A copy of the checkout's `integrations/` as a code tree at `root`; with `blind`, one more adapter, recorded by no
+    system of any tenant, whose `VERBS` is built rather than a literal, so the cold verb reader sees no verb in it and
+    no census can be taken over the tree (as `case_comment_1359/test_adapter_roster.py` builds one)."""
+    import shutil
+
+    from defender._paths import process_defender_dir
+
+    shutil.copytree(process_defender_dir() / "integrations", root / "integrations",
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    if blind:
+        (root / "integrations" / "blindsys_adapter.py").write_text(
+            "def health_check(ctx):\n    return {}\n\n\nVERBS = dict(a=health_check)\n", encoding="utf-8")
+    return root
 
 
 # --- shared assertions and scene pieces -----------------------------------------------------------------------------

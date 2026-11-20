@@ -135,21 +135,39 @@ def test_the_upgrade_leaves_non_active_tenants_and_absent_tenant_folders_alone(w
     assert not (world.data_root / gone).exists(), "a tenant folder was made for a tenant that has none here"
 
 
-def test_a_link_at_one_tenants_runs_refuses_that_tenant_and_the_others_are_still_made(world, tmp_path):
-    """A linked `<T>/runs` is refused for that tenant (named), left as found; the other tenants are made (R13-0)."""
-    linked, other = world.active_tenant(), world.active_tenant()
-    _without_runs(world, linked, other)
-    elsewhere = tmp_path / "elsewhere"
-    elsewhere.mkdir()
-    _runs(world, linked).symlink_to(elsewhere)
-    refused: Exception | None = None
+def _link_runs(world, tmp_path, *tenants: str) -> list:
+    targets = []
+    for n, tenant in enumerate(tenants):
+        elsewhere = tmp_path / f"elsewhere{n}"
+        elsewhere.mkdir()
+        _runs(world, tenant).symlink_to(elsewhere)
+        targets.append(elsewhere)
+    return targets
+
+
+def _refusal(world) -> str:
+    """The text of the one error `make_runs_folders` raises (its type is not fixed); fails if it returns."""
     try:
         _make(world)
-    except Exception as exc:  # noqa: BLE001 — how the refusal surfaces (raise at the end or report) is not settled
-        refused = exc
-    assert _runs(world, other).is_dir() and not _runs(world, other).is_symlink()
-    assert _runs(world, linked).is_symlink() and list(elsewhere.iterdir()) == []
-    assert refused is not None and linked in str(refused), "the link was neither refused nor named"
+    except ImportError:
+        raise  # the function is missing: that is the red, not a refusal
+    except Exception as exc:  # noqa: BLE001 — the exception type is not fixed
+        return str(exc)
+    raise AssertionError("make_runs_folders returned over a refused tenant")
+
+
+def test_links_at_runs_refuse_those_tenants_after_the_others_are_made_and_the_error_names_every_one(world, tmp_path):
+    """The sweep finishes, then raises once naming each refused tenant; links are left as found, others made (R13-0)."""
+    linked, other, linked2 = world.active_tenant(), world.active_tenant(), world.active_tenant()
+    _without_runs(world, linked, other, linked2)
+    targets = _link_runs(world, tmp_path, linked, linked2)
+    message = _refusal(world)
+    assert linked in message and linked2 in message, "a refused tenant was not named"
+    assert other not in message, "a tenant that was made is named as refused"
+    assert _runs(world, other).is_dir() and not _runs(world, other).is_symlink(), "the sweep stopped at the first refusal"
+    for tenant, target in zip((linked, linked2), targets, strict=True):
+        assert _runs(world, tenant).is_symlink() and list(target.iterdir()) == []
+    assert linked in _refusal(world), "a rerun did not refuse again"
 
 
 def _lifecycle_env(monkeypatch, world, tmp_path) -> None:
@@ -182,6 +200,35 @@ def test_the_lifecycle_command_make_runs_folders_makes_them_and_exits_zero(world
     _lifecycle_env(monkeypatch, world, tmp_path)
     assert entry.main(["make-runs-folders"]) == 0
     assert _runs(world, tenant).is_dir()
+
+
+def test_the_lifecycle_command_make_runs_folders_exits_non_zero_naming_a_refused_tenant(world, tmp_path, monkeypatch, capsys, caplog):
+    """A linked `<T>/runs` makes `make-runs-folders` exit non-zero with text naming that tenant; the other is made (R13-0)."""
+    from defender.lifecycle import __main__ as entry
+    from defender.tests.support.tenancy._host1214 import LIFECYCLE_MARK
+
+    monkeypatch.setenv(LIFECYCLE_MARK, "")
+    monkeypatch.delenv(LIFECYCLE_MARK)
+    linked, other = world.active_tenant(), world.active_tenant()
+    _without_runs(world, linked, other)
+    _link_runs(world, tmp_path, linked)
+    _lifecycle_env(monkeypatch, world, tmp_path)
+    code: object = 0
+    text = ""
+    capsys.readouterr()
+    caplog.clear()  # setup logs carry the tenant ids; only the command's own output counts
+    try:
+        code = entry.main(["make-runs-folders"])
+    except SystemExit as exc:  # argparse's own "invalid choice" is SystemExit(2) too: the tenant must be named
+        code = exc.code
+        text = str(exc.code)
+    except Exception as exc:  # noqa: BLE001 — an escaping error is a non-zero exit; its text must name the tenant
+        code, text = "raised", str(exc)
+    captured = capsys.readouterr()
+    text += captured.out + captured.err + caplog.text
+    assert code not in (0, None), "the command succeeded over a refused tenant"
+    assert linked in text, "the non-zero exit does not name the refused tenant"
+    assert _runs(world, other).is_dir()
 
 
 # --- a missing runs folder fails loudly -----------------------------------------------------------------------------
@@ -232,7 +279,7 @@ def test_a_lifecycle_made_tenants_first_readiness_check_is_claimed_without_a_lan
     tenant = world.active_tenant()
     marker = tmp_path / "helper-started"
 
-    def helper(launch) -> list[str]:
+    def readiness_argv(launch) -> list[str]:
         return [sys.executable, "-c", "import pathlib, sys; pathlib.Path(sys.argv[1]).touch()", str(marker)]
 
     idle = ScriptedChild(tmp_path / "child", _runs(world, tenant))
@@ -240,7 +287,7 @@ def test_a_lifecycle_made_tenants_first_readiness_check_is_claimed_without_a_lan
     async def run():
         async with job_store(world.dsn) as store:
             request, _ = await store.create_readiness(tenant, actor="u-1")
-            await make_worker(store, world.data_root, idle, readiness_argv=helper).drain()
+            await make_worker(store, world.data_root, idle, readiness_argv=readiness_argv).drain()
             return await store.get_host_request(tenant, request.request_id, kind="readiness")
 
     stored = asyncio.run(run())

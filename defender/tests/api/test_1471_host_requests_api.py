@@ -9,19 +9,22 @@ from typing import Any
 import httpx
 import pytest
 
-from defender.tests.support.api._config1470 import TICKET, TOKEN, problem_text
+from defender.tests.support.api._config1470 import TICKET, TOKEN, ScriptedOpenBao, problem_text, served_config
 from defender.tests.support.api._server1083 import A, B, person
 from defender.tests.support.jobs._host_requests1471 import (
     ADOPTION,
     FRESH,
     KNOWLEDGE,
+    NO_BASE_FILES,
     READINESS,
+    SHIPS_BASE_FILES,
     adopted,
     host_child,
     host_row,
     host_rows,
     host_worker,
     plant,
+    planted_checkout,  # noqa: F401 (fixture)
     refused,
 )
 from defender.tests.support.jobs._jobs1342 import JobsAudit, job_store, register_tenant
@@ -29,6 +32,14 @@ from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.shared._postgres1339 import execute
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
+
+@pytest.fixture
+async def scripted(request, migrated_database: str, tmp_path):
+    """The real server started over a planted checkout (`$DEFENDER_DIR`), so which adapter ships base files is the test's."""
+    request.getfixturevalue("planted_checkout")  # before the server builds its catalog
+    async with served_config(migrated_database, tmp_path, scripted=ScriptedOpenBao()) as configured:
+        yield configured
+
 
 C = fixture_uuid("1471:tenant-c")
 UNKNOWN = "00000000-0000-4000-8000-0000000014a1"
@@ -67,19 +78,11 @@ def id_of(kind: str, body: Mapping[str, Any]) -> str:
 
 
 def carried_with_base_files() -> str:
-    from defender.system_rules.catalog import Catalog
-
-    found = [e.adapter_id for e in Catalog.of_checkout().entries() if getattr(e, "base_files", None) is not None]
-    assert found, "premise: at least one carried adapter ships base files (A3 is untestable otherwise)"
-    return found[0]
+    return SHIPS_BASE_FILES
 
 
 def carried_without_base_files() -> str:
-    from defender.system_rules.catalog import Catalog
-
-    found = [e.adapter_id for e in Catalog.of_checkout().entries() if getattr(e, "base_files", None) is None]
-    assert found, "premise: a carried adapter ships no base files"
-    return TICKET if TICKET in found else found[0]
+    return NO_BASE_FILES
 
 
 def forge_origin(dsn: str, tenant: str) -> str:

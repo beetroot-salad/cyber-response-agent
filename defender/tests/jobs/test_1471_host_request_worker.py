@@ -86,7 +86,7 @@ def _bad(stored: dict) -> None:
 @pytest.mark.parametrize("exit_status", [0, EXIT])
 async def test_r13_1_5_a_ready_record_decides_whatever_the_helpers_exit(world, exit_status):
     """A `ready` record completes the request with its warnings and the knowledge record's status, exit 0 or not. (R13-1.5)"""
-    warnings = [warning("case_system", "the case system is absent"), warning("verb_unreasoned", "grep is withheld")]
+    warnings = [warning("case_system", "the case system is absent"), warning("verb_undecided", "grep is withheld")]
     rid, stored, child = await _readiness(world, ready(warnings), FRESH, exit=exit_status)
     assert child.started() == [rid]
     assert (stored["stage"], stored["failure_reason"]) == ("completed", None)
@@ -478,7 +478,7 @@ async def test_r13_6_a_worker_with_a_host_request_cap_below_one_is_refused(world
     """`Worker(host_request_slots=<1)` raises `ValueError` naming the setting; 1 builds. (R13-6)"""
     async with job_store(world["dsn"]) as store:
         host_worker(world, store, host_request_slots=1)
-        with pytest.raises(ValueError, match="host.request"):
+        with pytest.raises(ValueError, match="at least one host-request slot"):
             host_worker(world, store, host_request_slots=bad)
 
 

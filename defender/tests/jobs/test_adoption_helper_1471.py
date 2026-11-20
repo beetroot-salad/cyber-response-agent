@@ -83,6 +83,7 @@ def test_the_container_is_handed_the_tenant_the_system_and_the_rendering(scene, 
         return 0
 
     ran, _, _ = _run(scene, job_id, SYSTEM, job)
+    assert "facts" in got, f"premise: the container never ran (the helper's rc {ran.rc!r}): the adoption kind is not served"
     facts = got["facts"]
     assert (facts["kind"], facts["job"], facts["tenant"], facts["tenant_state"], facts["system"]) == (
         "adoption", job_id, scene.tenant, "active", SYSTEM)
@@ -122,6 +123,7 @@ def test_an_adoption_helper_answers_launch_and_forge_token_and_nothing_else(scen
     ran = drive_helper(scene, _argv(scene, job_id, SYSTEM), docker=docker, signer=signer, forge=forge)
     assert ran.raised is None
     assert docker.job_error is None, (ran.raised, docker.job_error)
+    assert "launch" in got, f"premise: the container never ran (the helper's rc {ran.rc!r}): the adoption kind is not served"
     assert got["launch"]
     assert got["token"].get("token"), "control: the kind's own requests were refused"
     assert forge.built == [scene.tenant]
@@ -159,8 +161,24 @@ def test_the_helper_never_reads_the_tenants_own_files_for_the_rendering(scene, c
     (scene.t.clone / "agent" / "skills" / "identity").mkdir(parents=True, exist_ok=True)
     (scene.t.clone / "agent" / "skills" / "identity" / "SKILL.md").write_bytes(b"the tenant's own text\n")
     got = {}
-    _run(scene, str(uuid.uuid4()), SYSTEM, lambda c: (got.update(f=c.request("launch")), 0)[1])
+    ran, _, _ = _run(scene, str(uuid.uuid4()), SYSTEM, lambda c: (got.update(f=c.request("launch")), 0)[1])
+    assert "f" in got, f"premise: the container never ran (the helper's rc {ran.rc!r}): the adoption kind is not served"
     assert base64.b64decode(got["f"]["rendering"]["agent/skills/identity/SKILL.md"]) == EXPECTED["agent/skills/identity/SKILL.md"]
+
+
+def test_a_tenant_still_creating_is_failed_tenant_not_active_and_no_container_starts(scene, checkout):
+    """The tenant admission at claim refuses a tenant that is not active: one `{failed, tenant_not_active}` record, no container; the active tenant's run is the control. (A3, R13-1.2)"""
+    from defender.tests.support.jobs._jobs1342 import restate_tenant
+
+    control = str(uuid.uuid4())
+    _, ran_docker, _ = _run(scene, control, SYSTEM, lambda c: (c.request("launch"), 0)[1])
+    assert ran_docker.boxes, "control: an active tenant's adoption is handed over"
+    restate_tenant(scene.dsn, scene.tenant, state="creating", data_root=scene.root)
+    job_id = str(uuid.uuid4())
+    _, docker, _ = _run(scene, job_id, SYSTEM)
+    assert _record(scene, job_id) == {"outcome": "failed", "reason": "tenant_not_active"}
+    assert not docker.boxes
+    assert docker.creates() == []
 
 
 def test_the_helper_refuses_an_adoption_with_no_system_named(scene, checkout):

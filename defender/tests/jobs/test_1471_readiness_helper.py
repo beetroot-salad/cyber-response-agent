@@ -18,6 +18,7 @@ from defender.tests.support.jobs._readiness1471 import (
     AFTER_PUBLISH,
     PUBLISH_CANARY,
     assert_refused_shape,
+    ExplodingDocker,
     grants_text,
     investigate,
     listed_runs,
@@ -40,12 +41,12 @@ class Fault:
     needle: str
     files: dict[str, Any] = dataclasses.field(default_factory=dict)
     records: Callable[[Any], Any] | None = None
-    prepare: Callable[[Any, Any], None] | None = None
+    prepare: Callable[[Any, Any, Path], None] | None = None
     sealed: bool = False
 
 
 def _offboarding(state: str) -> Callable[[Any, Any], None]:
-    def go(scene: Any, _mp: Any) -> None:
+    def go(scene: Any, _mp: Any, _tmp: Path) -> None:
         from defender.tests.support.jobs._jobs1342 import restate_tenant
 
         restate_tenant(scene.dsn, scene.tenant, state=state, data_root=scene.root)
@@ -76,8 +77,22 @@ def _disable_elastic(spec: Any) -> Any:
     return R.edited(spec, "elastic", enabled=False)
 
 
-def _unmap(scene: Any, _mp: Any) -> None:
+def _unmap(scene: Any, _mp: Any, _tmp: Path) -> None:
     scene.unmap()
+
+
+def _no_adapters_tree(_scene: Any, mp: Any, tmp: Path) -> None:
+    """The process's code tree is a folder with no `integrations/`: the adapters roster cannot be read."""
+    tree = tmp / "no-adapters-tree"
+    tree.mkdir()
+    mp.setenv("DEFENDER_DIR", str(tree))
+
+
+def _damaged_export(scene: Any, _mp: Any, _tmp: Path) -> None:
+    """A link planted in the kept export the publish names, which a run's copy of it refuses whole."""
+    stray = next(p for p in (scene.root / scene.tenant / "exports" / scene.t.commit / "agent").rglob("*") if p.is_file())
+    stray.unlink()
+    stray.symlink_to("/etc/passwd")
 
 
 FAULTS: dict[str, Fault] = {
@@ -90,6 +105,8 @@ FAULTS: dict[str, Fault] = {
                                      files={"settings/verb-grants.yaml": grants_text(_withheld_without_reason)}),
     "every_query_grant_ignored": Fault("tenant_verdict", "were ignored", records=_disable_elastic,
                                        files={"settings/verb-grants.yaml": grants_text(_only_elastic_queries)}),
+    "damaged_kept_export": Fault("knowledge_copy", "could not be copied", prepare=_damaged_export),
+    "unreadable_adapters_tree": Fault("roster", "cannot be read", prepare=_no_adapters_tree),
     "sealed_signer": Fault("first_pass", "could not be signed", sealed=True),
 }
 
@@ -134,7 +151,7 @@ def test_p1_each_tenant_level_step_refuses_a_readiness_with_the_sentence_an_inve
     fault = FAULTS[name]
     with _scene([fault], tmp_path, monkeypatch, migrated_database) as scene:
         if fault.prepare is not None:
-            fault.prepare(scene, monkeypatch)
+            fault.prepare(scene, monkeypatch, tmp_path)
         _premise_refused(scene, [fault])
         ran = readiness(scene, signer=_signer(fault.sealed), container=lambda c: 0)
 
@@ -165,7 +182,7 @@ def test_p1_the_first_refusing_step_in_the_launch_order_is_the_result_and_nothin
     with _scene([a, b], tmp_path, monkeypatch, migrated_database) as scene:
         for f in (a, b):
             if f.prepare is not None:
-                f.prepare(scene, monkeypatch)
+                f.prepare(scene, monkeypatch, tmp_path)
         _premise_refused(scene, [a, b])
         ran = readiness(scene, signer=_signer(True), container=lambda c: 0)
 
@@ -265,13 +282,14 @@ def test_r13_1_2_the_helper_writes_the_knowledge_record_for_the_source_it_settle
         assert set(known) >= {"kind", "commit", "stale_kind", "reason"}, known
 
 
-def test_r13_1_2_the_knowledge_record_is_create_only_and_a_fault_writing_it_is_never_a_refusal_or_a_ready(
+def test_r13_1_2_a_knowledge_record_that_cannot_be_written_is_a_crash_with_no_record_and_no_container(
         tmp_path, monkeypatch, migrated_database):
-    """A knowledge record already there is kept byte for byte; the check does not go on to a container, and whatever the
-    helper then records is `failed`, not `refused` or `ready`. (R13-1.2)"""
+    """A knowledge record already there is kept byte for byte (create-only); the write fault propagates as a crash: the
+    helper exits non-zero, writes no readiness record and starts no container. (R13-1.2, surface §5)"""
     with readiness_scene(tmp_path, monkeypatch, migrated_database) as scene:
         control = readiness(scene, container=lambda c: 0)
         assert control.docker.job_ran, f"control: with no record in the way the container starts: {control.said()}"
+        assert control.ran.rc == 0, control.said()
         rid = str(uuid.uuid4())
         planted = '{"kind": "pinned", "commit": "' + "0" * 40 + '", "stale_kind": null, "reason": null}\n'
         (scene.runs / f"{rid}.knowledge-source.json").write_text(planted, encoding="utf-8")
@@ -280,10 +298,24 @@ def test_r13_1_2_the_knowledge_record_is_create_only_and_a_fault_writing_it_is_n
         assert (scene.runs / f"{rid}.knowledge-source.json").read_text(encoding="utf-8") == planted, (
             f"the helper replaced a knowledge record: {ran.said()}")
         assert ran.docker.boxes == [], "a container was started over a knowledge record that could not be written"
-        record = ran.record
-        assert record is None or record["outcome"] == "failed", f"not a failure: {record!r}"
-        assert ran.ran.raised is not None or ran.ran.rc != 0 or record is not None, (
-            "the fault went unreported: no record and a clean exit reads as no_record")
+        assert ran.record is None, f"a crash writes no readiness record: {ran.said()}"
+        assert ran.ran.raised is not None or ran.ran.rc not in (0, None), f"a clean exit reads as no_record: {ran.said()}"
+
+
+def test_r13_1_2_an_unexpected_crash_in_the_helpers_setup_ends_the_check_failed_worker_error_with_no_container(
+        tmp_path, monkeypatch, migrated_database):
+    """An exception the helper does not expect, raised by its docker seam when the container is started, is the helper's
+    own `{failed, worker_error}`, no container, the helper served to its end (rc 0); a real investigation's setup ends
+    crashed the same way. (R13-1.2)"""
+    with readiness_scene(tmp_path, monkeypatch, migrated_database) as scene:
+        inv = investigate(scene, docker=ExplodingDocker())
+        assert getattr(inv.end, "setup", None) == "crashed", f"premise: an unexpected crash is the job's setup crashed: {inv.end!r}"
+        ran = readiness(scene, docker=ExplodingDocker(), container=lambda c: 0)
+
+        assert ran.result() == {"outcome": "failed", "reason": "worker_error"}, ran.said()
+        assert ran.docker.boxes == [], "a container was started after a crash"
+        assert ran.ran.raised is None
+        assert ran.ran.rc == 0, f"the record is the helper's own: {ran.said()}"
 
 
 # --- R12-1 and C9: signing ---------------------------------------------------------------------------------------------

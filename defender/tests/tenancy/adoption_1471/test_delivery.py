@@ -49,6 +49,7 @@ def _land(repo, tmp_path, files, *, attributes=None):
     def edit(writer):
         if attributes is not None:
             (writer / ".gitattributes").write_text(attributes, encoding="utf-8")
+            git(writer, "add", ".gitattributes")
         for path, data in files.items():
             oid = git_bytes(writer, "hash-object", "-w", "--no-filters", "--stdin", data=data).decode().strip()
             git(writer, "update-index", "--add", "--cacheinfo", f"100644,{oid},{path}")
@@ -68,8 +69,9 @@ def _nothing_sent(http, repo):
 
 
 @pytest.fixture
-def forge():
-    return AdoptionForge()
+def forge(repo):
+    """The forge double over `repo`'s remote from the start, so a case can plant PRs before the step opens the repository."""
+    return AdoptionForge(remote=repo[1])
 
 
 def test_a_fresh_offer_is_one_commit_off_the_fetched_main_pushed_and_opened_once(repo, forge, tmp_path):
@@ -276,41 +278,40 @@ def test_a_racers_branch_with_another_tree_and_no_pr_fails_and_is_left_alone(rep
     record = _adopt(repo, forge)
     assert tips
     assert record.outcome == "failed"
-    assert getattr(record, "reason", None), "a failed result carries a fixed reason"
+    assert record.reason == "delivery_failed"
     assert forge.creates == []
     assert git(repo[1], "rev-parse", f"refs/heads/{BRANCH}") == tips["racer"]
 
 
-def test_a_409_on_create_is_told_apart_by_status_and_answered_by_steps_1_to_4(repo, forge, tmp_path):
-    """A racer opens the head's PR between our push and our create (G-A12: 409): `already_open` with its number, not `failed`. (A3 recovery)"""
+def _racer_opens_first(forge):
     seen = {}
 
     def racer(request):
         if request.method == "POST" and request.url.path.endswith("/pulls") and not seen:
             seen["number"] = forge.plant(BRANCH)
     forge.on_request = racer
+
+
+@pytest.mark.parametrize(("setup", "outcome"), [
+    (lambda forge: None, "opened"),
+    (lambda forge: forge.refuse("/pulls", 503, method="POST", times=1), "opened"),
+    (lambda forge: forge.refuse("/pulls", 503, method="POST"), "failed"),
+    (lambda forge: setattr(forge, "lose_reply", "5xx"), "already_open"),
+    (lambda forge: setattr(forge, "lose_reply", "dropped"), "already_open"),
+    (_racer_opens_first, "already_open"),
+], ids=["created", "refused-once-then-created", "refused-always", "applied-reply-5xx", "applied-reply-dropped", "racer-409"])
+def test_after_a_refused_or_lost_create_the_outcome_is_what_the_listing_shows_else_failed(repo, forge, setup, outcome):
+    """One rule: a PR names the branch -> `already_open` with its number; none and a retried create lands -> `opened`; else `failed`/`delivery_failed`; never a second PR. (A3 recovery, G-A12)"""
+    setup(forge)
     record = _adopt(repo, forge)
-    assert seen, "premise: the racer ran before our create"
-    assert _outcome(record) == ("already_open", seen["number"])
-    assert [r["number"] for r in forge.prs if r["head"]["label"] == BRANCH] == [seen["number"]]
-
-
-def test_a_create_refused_once_is_recovered_by_opening_on_the_pushed_tip(repo, forge):
-    """The create fails (503) once after our push; the branch holds the rendering, so the PR opens on it. (A3 recovery)"""
-    forge.refuse("/pulls", 503, method="POST", times=1)
-    record = _adopt(repo, forge)
-    [pr] = [r for r in forge.prs if r["head"]["label"] == BRANCH]
-    assert _outcome(record) == ("opened", pr["number"])
-
-
-def test_a_create_that_keeps_failing_is_failed_with_no_pr_and_no_second_commit(repo, forge):
-    """Every create refused: `failed` (a fixed reason), the pushed branch is not rewritten, no PR exists. (A3 failed)"""
-    forge.refuse("/pulls", 503, method="POST")
-    record = _adopt(repo, forge)
-    assert record.outcome == "failed"
-    assert getattr(record, "reason", None)
-    assert [r for r in forge.prs if r["head"]["label"] == BRANCH] == []
-    assert len(commits_between(repo[1], main_tip(repo[1]), f"refs/heads/{BRANCH}")) == 1
+    listed = [r["number"] for r in forge.prs if r["head"]["label"] == BRANCH]
+    assert record.outcome == outcome
+    assert len(listed) == (0 if outcome == "failed" else 1), listed
+    if outcome == "failed":
+        assert record.reason == "delivery_failed"
+    else:
+        assert _outcome(record) == (outcome, listed[0])
+    assert len(commits_between(repo[1], main_tip(repo[1]), f"refs/heads/{BRANCH}")) == 1, "a second commit was made"
 
 
 # --- A4 -----------------------------------------------------------------------------------------------------------------
