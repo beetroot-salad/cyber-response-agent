@@ -79,19 +79,24 @@ def normalize_endpoint(url: str) -> str:
     return "/" + "/".join(resolved)
 
 
+#: The methods the proxy admits with no declared route, the only ones judged in-process (its `READ_METHODS`: the layers
+#: below the proxy cannot import it).
+_JUDGED_METHODS = ("GET", "HEAD")
+#: The GET reads a system may make in-process. A request of any other method is not judged here: the proxy enforces
+#: exactly the non-GET routes the system's record declares (#1504 O3), tied to the adapter's own list by a test (O2).
 READ_ENDPOINT_ALLOWLIST = ReadEndpointAllowlist({
     "elastic": (
-        ("/*/_search", "POST"),
-        ("/_query", "POST"),
         ("/_cluster/health", "GET"),
     ),
 })
 
 
 def confine_read_endpoint(system: str, url: str, *, method: str) -> str:
-    """Refuse a request whose resolved, normalized target is not a declared read endpoint for
-    `system` under `method`. Checked against REAL requests via the capture seam, never against
-    the allowlist's own entries."""
+    """Refuse a GET or HEAD whose resolved, normalized target is not a declared read endpoint for `system` under
+    `method`. Any other method passes: the credential proxy judges it against the record's declared reads (#1504).
+    Checked against REAL requests via the capture seam, never against the allowlist's own entries."""
+    if method not in _JUDGED_METHODS:
+        return url
     path = normalize_endpoint(url)
     entries = READ_ENDPOINT_ALLOWLIST.get(system, ())
     if not any(m == method and fnmatch.fnmatchcase(path, pattern) for pattern, m in entries):

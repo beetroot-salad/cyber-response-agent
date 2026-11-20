@@ -4,14 +4,19 @@
 Every catalog adapter (`defender/integrations/*_adapter.py`) and connect's example adapter
 (`defender/skills/connect/examples/example_adapter.py`) declare, at module level and readable without running the
 module, `PREFIX` (text), `REQUIRED_CONFIG_KEYS` and `PATH_KEYS` (tuples of key names, prefix stripped; empty where
-none), `DISPLAY_NAME` (non-blank text) and `EXAMPLE` (a bool: a lab stub). The operator's catalog listing and the record
+none), `DISPLAY_NAME` (non-blank text), `EXAMPLE` (a bool: a lab stub) and `READ_ROUTES` (#1504 O1: the non-GET
+`(method, path)` routes its tools send, an explicit `()` for none). The operator's catalog listing and the record
 judgement read them so. Accepted spellings: a literal, an alias of another module-level declaration
 (`PATH_KEYS = REQUIRED_CONFIG_KEYS`), an annotation (`X: tuple[str, ...] = ()`), and a keys tuple that splats a shared
 template beside literals (`(*transport.REQUIRED_CONFIG_KEYS_TEMPLATE, "TABLE")`). A call, an expression or a definition
 under a condition is a finding.
 
 An adapter offering the host's comment action (`add_case_comment`, defined or imported at module level) also declares
-`comment_route` (C1, K5): the route the store's cover rule judges a record against.
+`comment_route` (C1, K5): the route the store's cover rule judges a record against; such an adapter declares no
+`READ_ROUTES` (a case system takes no non-GET read, the proxy's one-ticket write rule).
+
+#1504 O5, O6: a reference `<module stem>.md` sits beside each adapter module (connect's example, the seed a generated
+adapter is copied from, included) with a non-empty `## Credential` and a non-empty `## Pitfalls` section.
 
 K8: no declared settings key is named like a secret (`TOKEN`, `PASSWORD`, `PASSWD`, `SECRET`, `CREDENTIAL`, `API_KEY`,
 `APIKEY`, or a `*_SECRET_REF` reference, each also under a trailing `_ENV`, as connect's retired scan read it): a
@@ -35,10 +40,18 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 ADAPTERS = "defender/integrations"
 EXAMPLE_ADAPTER = "defender/skills/connect/examples/example_adapter.py"
 ADAPTER_SUFFIX = "_adapter.py"
+READS = "READ_ROUTES"
+#: The reference's two sections, each a level-2 heading (O5).
+SECTIONS = ("Credential", "Pitfalls")
+#: The route shape the access declaration's parser requires (`tenancy/_access.py` `_routes`, C17): an upper-case method,
+#: a path from `/` with no `?` or `#`. GET and HEAD need no declared route at the proxy, so they are never listed.
+_METHOD = re.compile(r"[A-Z]+\Z")
+_PROXY_READ_METHODS = ("GET", "HEAD")
 
 TEXT, FLAG, KEYS = "text", "flag", "keys"
 #: Each declaration and the kind of literal it must be.
-DECLARATIONS = {"PREFIX": TEXT, "REQUIRED_CONFIG_KEYS": KEYS, "PATH_KEYS": KEYS, "DISPLAY_NAME": TEXT, "EXAMPLE": FLAG}
+DECLARATIONS = {"PREFIX": TEXT, "REQUIRED_CONFIG_KEYS": KEYS, "PATH_KEYS": KEYS, "DISPLAY_NAME": TEXT, "EXAMPLE": FLAG,
+                READS: "routes"}
 COMMENT_ACTION, COMMENT_ROUTE = "add_case_comment", "comment_route"
 #: A secret-named key (K8): the name ends in a secret word, or is a reference to a secret, either one optionally
 #: under the retired `_ENV` suffix (connect's old rule judged the key with `_ENV` stripped: `API_TOKEN_ENV` is a secret).
@@ -108,6 +121,30 @@ def _value(node: ast.expr, assigned: dict[str, ast.expr], depth: int = 0) -> obj
     return _UNREAD
 
 
+def _route_faults(value: object) -> list[str]:
+    """Why a `READ_ROUTES` value is not a tuple of `(method, path)` routes of the access declaration's shape, each a
+    non-GET/HEAD method, none repeated (O1); empty when it is."""
+    if not isinstance(value, tuple):
+        return ["is not a tuple of (method, path) routes"]
+    faults: list[str] = []
+    seen: set[object] = set()
+    for route in value:
+        if not (isinstance(route, tuple) and len(route) == 2 and all(isinstance(part, str) for part in route)):
+            faults.append(f"holds {route!r}, which is not a (method, path) pair of text")
+            continue
+        method, path = route
+        if not _METHOD.match(method):
+            faults.append(f"holds {route!r}, whose method is not upper-case letters")
+        elif method in _PROXY_READ_METHODS:
+            faults.append(f"holds {route!r}: the proxy passes a {method} without a declared route")
+        if not path.startswith("/") or "?" in path or "#" in path:
+            faults.append(f"holds {route!r}, whose path does not start with `/` or holds `?` or `#`")
+        if route in seen:
+            faults.append(f"holds {route!r} twice")
+        seen.add(route)
+    return faults
+
+
 def _shaped(kind: str, value: object) -> bool:
     if kind == TEXT:
         return isinstance(value, str) and bool(value.strip())
@@ -129,6 +166,12 @@ def scan_file(path: Path, rel: str) -> list[str]:
                             "without running it)")
             continue
         value = _value(assigned[name], assigned)
+        if value is not _UNREAD and kind == "routes":
+            findings.extend(f"{rel}: {name} {why}" for why in _route_faults(value))
+            if COMMENT_ROUTE in defined and value:
+                findings.append(f"{rel}: {name} is not empty, but the adapter declares a {COMMENT_ROUTE}: a case system "
+                                "takes no non-GET read")
+            continue
         if value is _UNREAD or not _shaped(kind, value):
             findings.append(f"{rel}: {name} is not readable without running the module: declare it as a {kind} "
                             "literal (or an alias of one) at module level")
@@ -141,7 +184,27 @@ def scan_file(path: Path, rel: str) -> list[str]:
     if COMMENT_ACTION in defined and COMMENT_ROUTE not in defined:
         findings.append(f"{rel}: offers {COMMENT_ACTION} but declares no {COMMENT_ROUTE}(settings): the route the "
                         "comment is sent on must be declared")
-    return findings
+    return findings + _reference_findings(path, rel)
+
+
+def _reference_findings(path: Path, rel: str) -> list[str]:
+    """O5, O6: the reference `<module stem>.md` beside the module exists and holds a non-empty section per heading."""
+    shown = Path(rel).with_suffix(".md").as_posix()
+    try:
+        text = path.with_suffix(".md").read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        return [f"{shown}: the adapter's reference cannot be read ({type(e).__name__}): every adapter ships one beside "
+                f"its module, with a `## {SECTIONS[0]}` and a `## {SECTIONS[1]}` section"]
+    bodies: dict[str, list[str]] = {}
+    current: list[str] | None = None
+    for line in text.splitlines():
+        heading = re.match(r"(#{1,6})\s+(.*?)\s*\Z", line)
+        if heading:
+            current = bodies.setdefault(heading.group(2), []) if len(heading.group(1)) == 2 else None
+        elif current is not None:
+            current.append(line)
+    return [f"{shown}: has no non-empty `## {name}` section (write `None known.` when there is nothing to say)"
+            for name in SECTIONS if not any(line.strip() for line in bodies.get(name, []))]
 
 
 def scan(root: Path) -> tuple[int, list[str]]:

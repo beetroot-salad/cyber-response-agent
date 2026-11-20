@@ -107,8 +107,10 @@ def _definition(role: AgentRole, admitted: Admitted | None) -> AgentDefinition:
     # gather's grant narrowed to them, as run start narrows it.
     try:
         records = admitted.directory.current_records(admitted.tenant.id)
-        run = run_tenant_mod.run_tenant_for(admitted.tenant, dispatches_lead_zero=False, records=records)
-        verdict = run_tenant_mod.tenant_systems(run, Catalog.of_checkout(PATHS.defender_dir))
+        catalog = Catalog.of_checkout(PATHS.defender_dir)
+        run = run_tenant_mod.run_tenant_for(admitted.tenant, dispatches_lead_zero=False, records=records,
+                                            catalog=catalog)
+        verdict = run_tenant_mod.tenant_systems(run, catalog)
     except (run_tenant_mod.TenantRefused, RegistryError) as refusal:
         sys.exit(f"defender-policy: {refusal}")
     run_tenant_mod.warn_ignored(verdict)

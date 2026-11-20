@@ -126,7 +126,7 @@ def _case_findings(tenant_id: TenantId, records: TenantRecords, catalog: Catalog
     """The case record judged as run start judges it, over the tenant's systems (C3, O1). No case record: none."""
     if records.case is None:
         return []
-    record = _CaseRecordOf(agent=agent, records=records, **record_settings(records))
+    record = _CaseRecordOf(agent=agent, records=records, **record_settings(records, catalog=catalog))
     try:
         case_system.judge_case_system(record, defender_dir=defender_dir,
                                       roster=TenantSystems.of(records, catalog).roster)

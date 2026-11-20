@@ -17,10 +17,11 @@ no `before` (`check`), everything is judged."""
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from defender.credential_proxy import is_read_method
 from defender.kit.access import AccessDeclaration, Route, ticket_write_fault
 from defender.kit.faults import ConfigFault, ConfigFaults
 from defender.kit.settings import RECORDS, Locator, Part, SystemConfig
@@ -36,13 +37,50 @@ _NO_AGENT = Path("/nonexistent-agent-root")
 
 # --- the tenant record an adapter's check reads ---------------------------------------------------------------------
 
-def located_access(text: str, *, system: str, locator: Locator = RECORDS) -> AccessDeclaration:
+def located_access(text: str, *, system: str, catalog: Catalog | None, adapter: str | None = None,
+                   locator: Locator = RECORDS) -> AccessDeclaration:
     """`system`'s access declaration parsed from its stored `text` (K4), or the `ConfigFault` naming it by `locator`
-    (`tenancy.parse_access` names the retired file; a record names itself, DC6)."""
+    (`tenancy.parse_access` names the retired file; a record names itself, DC6).
+
+    THE parse of a stored declaration whose result decides a system's usability (#1504 C14): given the `catalog` the
+    caller holds, a catalog record's non-GET reads must also be exactly its adapter's list (`reads_fault`, O3), else the
+    fault is that record's access fault. `adapter` is the record's adapter id (the system id when not given); a record
+    whose adapter the catalog lacks is skipped here (refused elsewhere). `catalog=None` is a raw parse, for a caller
+    that only wants the declaration (the credential slot, so a credential write is not blocked by a mismatch)."""
     try:
-        return parse_access(text, system=system)
+        declaration = parse_access(text, system=system)
     except ConfigFault as fault:
         raise ConfigFault(_relocated(str(fault), system, locator)) from None
+    adapter = system if adapter is None else adapter
+    if catalog is not None and adapter in catalog:
+        why = reads_fault(declaration, catalog.entry(adapter).reads, adapter=adapter)
+        if why is not None:
+            raise ConfigFault(f"{locator.part(system, 'access')}: {why}")
+    return declaration
+
+
+def reads_fault(declaration: AccessDeclaration, listed: Sequence[tuple[str, str]] | None, *, adapter: str) -> str | None:
+    """Why `declaration`'s non-GET reads are not exactly its adapter's `listed` routes (#1504 O3), as a clause naming each
+    missing and each extra route, or None when they are the same set. The methods the proxy admits with no declaration
+    (`is_read_method`) are not judged. `listed` None: the adapter declares no list readable cold, so nothing can be judged
+    against it, which is refused (principle 2)."""
+    if listed is None:
+        return (f"the adapter `{adapter}` declares no READ_ROUTES list readable without running it, so this record's "
+                "read routes cannot be judged")
+    held = {(r.method, r.path) for r in declaration.reads if not is_read_method(r.method)}
+    want = set(listed)
+    missing = [r for r in listed if r not in held]
+    extra = sorted(held - want)
+    if not missing and not extra:
+        return None
+    parts = [f"{word}: {', '.join(f'{m} {p}' for m, p in routes)}"
+             for word, routes in (("missing", dict.fromkeys(missing)), ("extra", extra)) if routes]
+    return (f"its read routes other than GET and HEAD must be exactly the ones the adapter `{adapter}` sends "
+            f"({_shown_routes(listed)}); {'; '.join(parts)}")
+
+
+def _shown_routes(routes: Sequence[tuple[str, str]]) -> str:
+    return ", ".join(f"{m} {p}" for m, p in routes) or "none"
 
 
 def _relocated(text: str, system: str, locator: Locator) -> str:
@@ -61,11 +99,12 @@ class RecordTenant:
     agent: Path = _NO_AGENT
 
     @classmethod
-    def of(cls, records: Mapping[str, SystemRecord], *, locator: Locator = RECORDS) -> RecordTenant:
+    def of(cls, records: Mapping[str, SystemRecord], *, catalog: Catalog, locator: Locator = RECORDS) -> RecordTenant:
         access: dict[str, AccessDeclaration | ConfigFault] = {}
         for system, record in records.items():
             try:
-                access[system] = located_access(record.access, system=system, locator=locator)
+                access[system] = located_access(record.access, system=system, catalog=_catalog_of(record, catalog),
+                                                adapter=record.adapter_id, locator=locator)
             except ConfigFault as fault:
                 access[system] = fault
         return cls(systems={s: SystemConfig(r.settings) for s, r in records.items()}, access=access,
@@ -147,6 +186,11 @@ def judge_records(after: TenantRecords, before: TenantRecords | None = None, *, 
     return faults + _case_faults(after, before, catalog=adapters, locator=locator, broken=broken)
 
 
+def _catalog_of(record: SystemRecord, catalog: Catalog) -> Catalog | None:
+    """`catalog` when `record` is a catalog record (a custom reference is refused elsewhere), else None: no list to judge."""
+    return None if record.custom_ref is not None else catalog
+
+
 def _the_catalog(catalog: Catalog | None) -> Catalog:
     """The catalog handed in, else the running checkout's."""
     return Catalog.of_checkout() if catalog is None else catalog
@@ -185,15 +229,20 @@ def _settings_faults(record: SystemRecord, *, catalog: Catalog, locator: Locator
     check = getattr(module, "check_settings", None)
     if not callable(check):
         return [f"{locator.system(system)}: its adapter declares no `check_settings`"]
+    tenant = RecordTenant.of({system: record}, catalog=catalog, locator=locator)
+    held = tenant.access[system]
+    # The record's own access fault is reported here, not left to the adapter's check to re-raise (#1504 O3: an adapter
+    # whose check never reads the access would otherwise accept a record the run holds as down).
+    faults = [_located(str(held), system, locator)] if isinstance(held, ConfigFault) else []
     try:
-        check(RecordTenant.of({system: record}, locator=locator))
-    except ConfigFaults as faults:
-        return [_located(text, system, locator) for text in faults.faults]
+        check(tenant)
+    except ConfigFaults as found:
+        faults += [_located(text, system, locator) for text in found.faults]
     except ConfigFault as fault:
-        return [_located(str(fault), system, locator)]
+        faults.append(_located(str(fault), system, locator))
     except Exception as e:  # noqa: BLE001 — a check that crashes is the adapter's defect
-        return [f"{locator.system(system)}: its adapter's `check_settings` raised {type(e).__name__}"]
-    return []
+        faults.append(f"{locator.system(system)}: its adapter's `check_settings` raised {type(e).__name__}")
+    return list(dict.fromkeys(faults))
 
 
 #: The parts of a record a fault may name (DC6).

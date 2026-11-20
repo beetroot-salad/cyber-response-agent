@@ -6,7 +6,8 @@ the shim, never the script directly — see `../../bin/README.md` for the
 shim contract and `../../docs/system-skill-shape.md` for the per-system
 knowledge an adapter is paired with.
 
-(Every file here is an adapter `*_adapter.py`, or `confinement.py`, Elastic's own
+(Every file here is an adapter `*_adapter.py`, its reference `*_adapter.md` (what its credential needs and the
+configuration mistakes no check refuses, #1504), or `confinement.py`, Elastic's own
 endpoint and index confinement; the shared transport they import is `kit/transport.py`. The gather pipe-tools, run-dir tooling, and analytics that used
 to share this dir now live under `investigation/`, `presentation/`,
 and the repo-root `scripts/` tree.)
@@ -35,6 +36,8 @@ second one.
   route check is the system's guard (#1163 A6); only Elastic adds its own endpoint
   and index confinement before sending (P3). host-state is HTTP too: an
   endpoint-security product's query API (#1391 O5).
+- **Reads — declared, exactly.** An adapter declares `READ_ROUTES`, the non-GET `(method, path)` routes its tools
+  send (`()` for none), and a record's `reads` equals it; a test drives every tool to hold it true (#1504).
 - **Auth — the proxy's.** An adapter never holds a credential: the declaration
   names the scheme (bearer, basic, header, OAuth client credentials) and the proxy
   injects the credential stored for the tenant and system.

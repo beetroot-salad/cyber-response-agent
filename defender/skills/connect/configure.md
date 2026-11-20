@@ -5,6 +5,13 @@ Nothing is generated. `SKILL.md` is the entrypoint and owns the common steps (th
 knowledge, validation, the handoff); this file is only how you configure the adapter for one
 tenant.
 
+## The adapter's reference
+
+Before anything else, read the reference beside the adapter (`defender/integrations/{system}_adapter.md`; the
+same text is the `reference` field of `GET /adapters`). Its **Credential** section says what access the
+credential needs and which scheme and fields it holds; its **Pitfalls** section lists the configuration
+mistakes no check refuses. Say both to the maintainer, and act on a pitfall as it says.
+
 ## Settings — `config.env`
 
 `GET /adapters` lists every key the adapter reads, prefixed (`JIRA_SERVICE_DESK`, `SERVICENOW_TABLE`,
@@ -23,9 +30,11 @@ its `access` and change the base, scheme and routes.
 
 - **Reads.** The proxy admits every `GET` and `HEAD` under the base, so a read that uses either
   needs no route. List a read route only for a read sent with another method (a search sent as
-  `POST`, for example). Nothing prints a catalog adapter's reads yet: find them in its module
-  (`defender/integrations/{system}_adapter.py`, the method and path of each `transport.request`
-  call), or copy them from another tenant's record of the same system.
+  `POST`, for example), and list **exactly** the ones the adapter declares: the store refuses a record
+  whose non-GET reads differ from its adapter's, naming each missing and each extra route. Run the
+  validator with only the system (`python3 defender/skills/connect/validate_scaffold.py {system}`):
+  it prints them, and `GET /adapters` carries the same list in the `reads` field. Never write them
+  from memory.
 - **Writes.** Only the routes the adapter writes to. For a case system that is its comment
   route, which depends on the settings: run the validator with `--case` (`SKILL.md` step 6) and
   copy the route it prints — `the comment the host sends: <METHOD> <path>` — into `writes`.
@@ -33,15 +42,13 @@ its `access` and change the base, scheme and routes.
 
 ## Credential
 
-The adapter's module docstring and its health check say what access the credential needs (for
-example, a read-only user plus the privilege its health check calls). Say it to the maintainer.
+The reference's **Credential** section says what access the credential needs (the adapter's
+module docstring and its health check say more). Say it to the maintainer.
 The tenant admin stores the credential (`PUT /systems/{system}/credentials`); you tell them its
 fields. It holds exactly the fields the record's auth scheme reads: a `basic` scheme reads
 `username` and `password`; a `bearer` or `header` scheme reads the one field `access.yaml` names;
 `oauth-client-credentials` reads `client_id` and `client_secret` (`adapter.md` → "Credentials").
-A secret field holds at least 16 characters. For Jira Cloud,
-`basic` is the account's email as `username` and an API token as `password`. Say which fields;
-never ask for, or accept, a value.
+A secret field holds at least 16 characters. Say which fields; never ask for, or accept, a value.
 
 ## A case system — the run-end comment
 
@@ -64,11 +71,10 @@ maintainer which field. If the stored mapping already maps `case_key` to it, the
 change. Otherwise give the tenant admin the one line to change: `PUT /alert-mapping` replaces the
 whole mapping, so they edit the mapping `GET /alert-mapping` answers, never write one from scratch.
 
-- **ServiceNow addresses a record only by its `sys_id`** (a 32-character hex id), never by its
-  number (`INC0012345`): the adapter does not look a number up. The alert automation must put
-  the `sys_id` in the field. If the maintainer shows a sample alert whose field holds a number,
-  stop and say so — the comment would fail on every run.
-- **Jira** takes the issue key (`ABC-123`).
+- The adapter's reference says which identifier the system wants in that field (ServiceNow's
+  `sys_id`, Jira's issue key). If the maintainer shows a sample alert whose field holds a different
+  one (for ServiceNow, a number such as `INC0012345`), stop and say so — the comment would fail on
+  every run.
 
 **The check.** A write: one comment on a ticket the maintainer names as disposable, and the
 control is that ticket's comments not carrying it before the check runs (`SKILL.md` step 3).

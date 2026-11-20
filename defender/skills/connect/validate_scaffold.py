@@ -268,6 +268,23 @@ def _judge_with_case(system: str, settings, access: str, case: Path, catalog: Ca
     return judge_records(records, catalog=catalog, locator=locator)
 
 
+def _report_reads(report: Report, defender: Path, system: str) -> None:
+    """The non-GET reads the adapter declares (`READ_ROUTES`, #1504 O4), given only the system: before any `access.yaml`
+    exists, so the agent writes exactly these under `reads` (the store refuses a record whose reads differ)."""
+    try:
+        reads = Catalog.of_checkout(defender).entry(system).reads
+    except Exception:  # noqa: BLE001 — an adapter the catalog cannot list is reported by the registry check
+        return
+    if reads is None:
+        report.add(FAIL, "the adapter declares no READ_ROUTES list readable without running it: its non-GET reads "
+                         "cannot be listed")
+    elif reads:
+        report.add(PASS, "the reads access.yaml lists, exactly (every request the adapter sends that is not a GET): "
+                   + ", ".join(f"{method} {path}" for method, path in reads))
+    else:
+        report.add(PASS, "the adapter sends only GET requests: access.yaml lists no read route")
+
+
 def _report_comment_route(report: Report, catalog: Catalog, system: str, settings) -> None:
     """The comment route the adapter sends for the handoff's settings, relative to the base, when it offers one and the
     settings can build it (a fault building it is the settings' own, reported above)."""
@@ -368,6 +385,7 @@ def main() -> None:
     print(f"validate_scaffold: {system}\n")
     report = Report()
     verbs = check_registry(report, defender, system)
+    _report_reads(report, defender, system)
     # The handoff is judged with no tenant and no database: it is not a tenant's yet (#1366 O11).
     if args.handoff is None:
         report.add(WARN, "the handoff (config.env, access.yaml) not checked — give the folder with --handoff <dir>")

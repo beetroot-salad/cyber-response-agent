@@ -278,7 +278,7 @@ class RecordStore:
         if named is None or named.credential_generation != newest.credential_generation:
             raise Stale(f"system {system}", current_version=newest.version, named=for_version)
         try:
-            declaration = located_access(newest.access, system=system)
+            declaration = located_access(newest.access, system=system, catalog=None)
         except ConfigFault as fault:
             raise Judged([str(fault)]) from None
         return CredentialSlot(generation=newest.credential_generation, auth=declaration.auth)

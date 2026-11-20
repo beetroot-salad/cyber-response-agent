@@ -203,6 +203,23 @@ read-write pass) for a write — or it is refused. Ask the tenant admin for a
 sibling's (`GET /systems` answers each system's `access` text;
 ticket's is a worked one) and change the base, scheme and routes.
 
+## Declared reads, and the reference
+
+Two things ship with the adapter module, both read without running it:
+
+- **`READ_ROUTES`**, a module-level tuple of `(method, path)` routes: every request the adapter's tools send
+  with a method other than `GET` or `HEAD` (a search sent as `POST`, for example), spelled as the access
+  declaration spells a route (`*` stands for one segment). `()` when every request is a `GET`; it is declared
+  explicitly, never left out. A record's `reads` must be exactly this list: the store refuses a record
+  with a missing or an extra route, and a test drives each tool through the transport and fails when a
+  request is not listed or a listed route is sent by no tool. An adapter that offers a comment action (a
+  case system) declares none.
+- **A reference**, `{system}_adapter.md` beside the module (seed: `examples/example_adapter.md`), with a
+  `## Credential` section (what access the credential needs, its scheme and fields) and a `## Pitfalls`
+  section (configuration mistakes nothing refuses). It never restates routes, settings keys or a rule code
+  already refuses; a section with nothing to say reads `None known.`. `configure.md` has the agent read
+  it, and `GET /adapters` serves it.
+
 ## Credentials
 
 The tenant admin stores a system's credential in the secret store

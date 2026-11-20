@@ -23,7 +23,8 @@ from defender.kit.verbs import COMMENT_ACTION
 from defender.system_rules.registry import RosterRead, fresh_adapter_module, read_roster
 
 #: The module constants every catalog adapter declares, read cold (K2).
-DECLARATIONS = ("PREFIX", "REQUIRED_CONFIG_KEYS", "PATH_KEYS", "DISPLAY_NAME", "EXAMPLE", "SAMPLE_SETTINGS")
+DECLARATIONS = ("PREFIX", "REQUIRED_CONFIG_KEYS", "PATH_KEYS", "DISPLAY_NAME", "EXAMPLE", "SAMPLE_SETTINGS",
+                "READ_ROUTES")
 #: The adapter function that declares the comment route (C1).
 COMMENT_ROUTE = "comment_route"
 #: The shared keys template an adapter's keys may splat (`*transport.REQUIRED_CONFIG_KEYS_TEMPLATE`).
@@ -46,6 +47,13 @@ class CatalogEntry:
     tools: frozenset[str]
     unparsed: str | None = None
     sample_settings: Mapping[str, str] | None = None
+    #: The adapter's `READ_ROUTES` (#1504 O1): the non-GET `(method, path)` routes its tools send, `()` for none. None
+    #: when the module declares none or one not readable cold: a record of it cannot be judged, so it is refused (O3).
+    reads: tuple[tuple[str, str], ...] | None = None
+    #: The text of the reference beside the module, `<module stem>.md` (#1504 O5), read with the entry so the API's
+    #: catalog, built whole at start, serves it without a file read; None when no such file can be read (the catalog
+    #: lint holds one present).
+    reference: str | None = None
 
     @property
     def stored_keys(self) -> tuple[str, ...]:
@@ -113,7 +121,8 @@ class Catalog:
                 display_name=_nonblank(values.get("DISPLAY_NAME")), example=values.get("EXAMPLE") is True,
                 prefix=_nonblank(values.get("PREFIX")), required_keys=_keys(values.get("REQUIRED_CONFIG_KEYS")),
                 path_keys=_keys(values.get("PATH_KEYS")) or (), tools=self._roster.declared_verbs(adapter_id),
-                unparsed=unparsed, sample_settings=_text_map(values.get("SAMPLE_SETTINGS")))
+                unparsed=unparsed, sample_settings=_text_map(values.get("SAMPLE_SETTINGS")),
+                reads=_route_pairs(values.get("READ_ROUTES")), reference=_reference_text(path.with_suffix(".md")))
             self._entries[adapter_id] = made
             return made
 
@@ -246,6 +255,26 @@ def _keys(value: object) -> tuple[str, ...] | None:
     if isinstance(value, tuple) and all(isinstance(v, str) for v in value):
         return value
     return None
+
+
+def _reference_text(path: Path) -> str | None:
+    """The reference at `path` (the adapter module's `<stem>.md`), or None when it cannot be read."""
+    try:
+        return read_bytes_capped(path).decode("utf-8")
+    except (OSError, ValueError):
+        return None
+
+
+def _route_pairs(value: object) -> tuple[tuple[str, str], ...] | None:
+    """`value` as a tuple of `(method, path)` text pairs, else None (not declared, or not a literal list of routes)."""
+    if not isinstance(value, tuple):
+        return None
+    routes = []
+    for route in value:
+        if not (isinstance(route, tuple) and len(route) == 2 and all(isinstance(part, str) for part in route)):
+            return None
+        routes.append((route[0], route[1]))
+    return tuple(routes)
 
 
 def _text_map(value: object) -> Mapping[str, str] | None:

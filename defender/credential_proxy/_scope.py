@@ -21,6 +21,13 @@ from defender.credential_proxy._tokens import READ_WRITE
 #: Methods that are reads under any base (O3).
 READ_METHODS = ("GET", "HEAD")
 _METHOD = re.compile(r"[A-Z]{1,16}")
+
+
+def is_read_method(method: str) -> bool:
+    """True for a method the proxy admits as a read with no declared route (GET, HEAD, O3): the one question of which
+    methods need a declaration, which the record judgement asks too (#1504 O3)."""
+    return method in READ_METHODS
+
 _DEFAULT_PORT = {"http": 80, "https": 443}
 #: What a segment is split on once decoded: a server may read either as a separator.
 _SEPARATOR = re.compile(r"[/\\]")
@@ -77,7 +84,7 @@ def check_route(declaration: AccessDeclaration, system: str, method: str, path: 
     other method is judged by `_ticket_write` alone: there is no write without a ticket."""
     if not _METHOD.fullmatch(method):
         raise Refused(CONFIG, f"{method[:20]!r} is not an upper-case HTTP method", origin=ORIGIN_REQUEST)
-    if method in READ_METHODS:
+    if is_read_method(method):
         return
     if mode == READ_WRITE:
         if ticket is None:
@@ -129,4 +136,4 @@ def _route_pattern_matches(pattern: str, path: str) -> bool:
     return True
 
 
-__all__ = ["READ_METHODS", "Target", "check_route", "locate"]
+__all__ = ["READ_METHODS", "is_read_method", "Target", "check_route", "locate"]

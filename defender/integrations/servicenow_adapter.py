@@ -43,6 +43,8 @@ SAMPLE_SETTINGS = {"SERVICENOW_TIMEOUT_SEC": "10", "SERVICENOW_TABLE": "incident
 #: TABLE goes in the comment's path, but as a literal of the declared route (`comment_route`
 #: judges it), not a value the transport fills.
 PATH_KEYS: tuple[str, ...] = ()
+#: The non-GET routes this adapter's tools send, read cold (#1504 O1): none, every request it makes is a GET.
+READ_ROUTES: tuple[tuple[str, str], ...] = ()
 
 #: A table name is one path segment: letters, digits and underscores.
 _TABLE_NAME = re.compile(r"[A-Za-z0-9_]+")

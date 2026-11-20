@@ -31,6 +31,8 @@ REQUIRED_CONFIG_KEYS = (*transport.REQUIRED_CONFIG_KEYS_TEMPLATE,)
 SAMPLE_SETTINGS = {"CHANGE_MGMT_TIMEOUT_SEC": "10"}
 #: No setting goes in a request path.
 PATH_KEYS: tuple[str, ...] = ()
+#: The non-GET routes this adapter's tools send, read cold (#1504 O1): none, every request it makes is a GET.
+READ_ROUTES: tuple[tuple[str, str], ...] = ()
 STATUSES = ("planned", "approved", "in_progress", "implemented", "cancelled")
 ISO_UTC_RE = re.compile(
     r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$"
