@@ -140,7 +140,7 @@ def _refusal(world) -> str:
     raise AssertionError("make_runs_folders returned over a refused tenant")
 
 
-def test_the_upgrade_leaves_non_active_tenants_and_absent_tenant_folders_alone(world):
+def test_the_upgrade_leaves_non_active_tenants_alone_and_refuses_an_active_tenant_with_no_folder(world):
     """A tenant not `active` is left alone and unnamed; an active one with no `<T>` here is refused, named, and gets no
     folder, after the others are made (R13-0, surface 7b)."""
     import shutil

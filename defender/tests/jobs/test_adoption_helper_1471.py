@@ -216,3 +216,9 @@ def test_a_runs_folder_holding_the_helpers_failure_record_still_lists(scene, che
     assert _record(scene, job_id) == {"outcome": "failed", "reason": "system_gone"}, "premise: the helper wrote its record"
     accepted = tenancy.accept_tenant(tenancy.resolve_data_root(), scene.tenant, defender_dir=process_defender_dir(), clone_tree=False)
     assert [str(r) for r in accepted.runs_repository().list()] == []
+
+    from defender.tests.support.shared._locations_1210 import location_path
+
+    (location_path(accepted.tenant_root) / "runs" / f"{uuid.uuid4()}.unknown.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(Exception, match="unknown.json"):  # noqa: PT011 — the listing's own sentence names the file
+        accepted.runs_repository().list()

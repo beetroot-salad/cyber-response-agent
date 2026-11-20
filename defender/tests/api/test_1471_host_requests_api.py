@@ -284,6 +284,15 @@ async def test_r2_each_stage_is_served_with_the_fields_it_has(scripted):
         assert (served[stage]["failure_reason"], served[stage]["failure_message"]) == (None, None), stage
 
 
+async def test_d7_a_sentence_holding_markup_is_served_byte_for_byte(scripted):
+    """A stored sentence with `<`, `&` and `"` is served unchanged: no escaping, stripping or rewriting; escaping is the page's. (D7, P-2)"""
+    sentence = 'system "a<b>&c" is not a well-formed name'
+    result = {"outcome": "refused", "step": "tenant", "sentence": sentence, "knowledge": None}
+    rid = plant(scripted.dsn, A, "readiness", stage="completed", result=result)
+    resp = await poll(scripted, "readiness", rid)
+    assert resp.json()["result"]["sentence"] == sentence
+
+
 # --- R13-2: live fields -----------------------------------------------------------------------------------------------
 
 async def test_r13_2_credential_presence_is_asked_on_completed_polls_only_and_lists_systems_without_a_set(scripted):

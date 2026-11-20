@@ -148,10 +148,20 @@ def test_r13_6_the_real_argv_functions_build_the_helpers_command_for_each_kind()
     assert readiness_argv(ReadinessLaunch("req-1", T1, 4242)) == [
         *base, "--kind", "readiness", "--job", "req-1", "--tenant", T1, "--parent-pid", "4242"]
     assert adoption_argv(AdoptionLaunch("req-2", T1, 4242, SYSTEM)) == [
-        *base, "--kind", "adoption", "--job", "req-2", "--tenant", T1, "--system", SYSTEM, "--parent-pid", "4242"]
+        *base, "--kind", "adoption", "--job", "req-2", "--tenant", T1, "--parent-pid", "4242", "--system", SYSTEM]
 
 
 # --- readiness validation -----------------------------------------------------------------------------------------------
+
+MARKUP = 'system "a<b>&c" is not a well-formed name'
+
+
+async def test_d7_a_sentence_holding_markup_is_stored_byte_for_byte(world):
+    """A record's sentence with `<`, `&` and `"` is stored unchanged: no escaping, stripping or rewriting; escaping is the page's. (D7, P-2)"""
+    _, stored, _ = await _readiness(world, refused("tenant", MARKUP))
+    assert stored["stage"] == "completed"
+    assert stored["result"]["sentence"] == MARKUP
+
 
 @pytest.mark.parametrize("step", STEPS_WITHOUT_KNOWLEDGE)
 async def test_r13_1_5_a_refusal_before_the_publish_carries_no_knowledge_and_the_knowledge_record_is_not_read(world, step):

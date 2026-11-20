@@ -98,7 +98,6 @@ def test_a_fresh_offer_is_one_commit_off_the_fetched_main_pushed_and_opened_once
 def test_the_commit_holds_the_rendered_bytes_whatever_mains_attributes_say(repo, forge, tmp_path):
     """Blobs are the render's bytes (CRLF, `$Id$`, non-UTF-8) under `eol=crlf` and `ident` on main; mode 100644. (P-9 commit)"""
     _land(repo, tmp_path, {}, attributes="* text eol=crlf\n*.md ident\n")
-    git(repo[0].knowledge, "fetch", "origin")
     assert _outcome(_adopt(repo, forge))[0] == "opened"
     tip = git(repo[1], "rev-parse", f"refs/heads/{BRANCH}")
     assert blobs_at(repo[1], tip, RENDERING) == RENDERING

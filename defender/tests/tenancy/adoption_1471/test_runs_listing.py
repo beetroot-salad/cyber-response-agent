@@ -1,7 +1,9 @@
 """#1471 R13-1.7: every record the adoption container writes into `<T>/runs` is one the tenant's runs listing serves (its suffix is an accepted
-sidecar), whatever the outcome. The same check the readiness writers get (`jobs/test_1471_readiness_*`); the stray-suffix control shows the
+sidecar), whatever the outcome. The same check the readiness writers get (`jobs/test_1471_readiness_*`); the unknown-suffix control (a run id with an unknown suffix) shows the
 listing does refuse a folder holding a record it does not know."""
 from __future__ import annotations
+
+import uuid
 
 import pytest
 
@@ -24,7 +26,7 @@ def test_a_runs_folder_holding_the_adoption_record_still_lists(repo, forge, tmp_
 
     from defender.tests.support.shared._locations_1210 import location_path
 
-    stray = location_path(repo[0].tenant_root) / "runs" / "stray.unknown.json"
+    stray = location_path(repo[0].tenant_root) / "runs" / f"{uuid.uuid4()}.unknown.json"
     stray.write_text("{}", encoding="utf-8")
-    with pytest.raises(Exception, match="stray"):  # noqa: PT011 — the listing's own sentence names the file
+    with pytest.raises(Exception, match="unknown.json"):  # noqa: PT011 — the listing's own sentence names the file
         _listed(repo)
