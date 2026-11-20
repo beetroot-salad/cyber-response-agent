@@ -325,6 +325,7 @@ def _deps(ports: Any) -> tuple[ApiDeps, dict[str, str]]:
         alerts=ports, investigations=ports, learning_jobs=ports, learning_work=ports, lessons=ports,
         systems=ports, writes=ports, secrets=ports, checker=ports, artifact_links=ports, offboarding=ports,
         alert_mapping=ports, audit=ports,  # FC-11 and the audit-only port (Am-5: every construction site)
+        **({"host_requests": ports} if "host_requests" in {f.name for f in dataclasses.fields(ApiDeps)} else {}),  # #1471
     ), users
 
 

@@ -1,6 +1,6 @@
 """#1214 r10.1 repair: what every host entry point does at its boundary, one table for all of them (O-A1, O-A2, A1).
 
-Entries: run start, a sibling run, drain start, the connect verbs, the episode launcher and the ten commands of
+Entries: run start, a sibling run, drain start, the episode launcher and the ten commands of
 `H.COMMANDS`. Each refusal is a non-zero exit with its words on the error stream; the tenant's folder is untouched
 before the state is judged; the hold lasts while the command works; a folder fault is refused for its folder.
 """
@@ -89,15 +89,11 @@ Entry = Callable[[Any], Outcome]
 def _entries(tmp_path: Path) -> dict[str, Entry]:
     """name -> `entry(directory) -> Outcome`, each the real `main` of an entry point for `TENANT`."""
     from defender import run as run_py
-    from defender.cli import tenant as connect
     from defender.learning.branch import cli as branch_cli
     from defender.learning.core import cli as drain_cli
 
     alert = tmp_path / "alert.json"
     alert.write_text('{"rule": {"id": "r-1214"}, "alert_timestamp": "2026-10-28T00:00:00Z"}', encoding="utf-8")
-    staged = tmp_path / "staged"
-    (staged / "skills").mkdir(parents=True)
-    (staged / "skills" / "note.md").write_text("note\n", encoding="utf-8")
 
     def run_seams() -> dict[str, Any]:
         calls = _Calls()
@@ -117,16 +113,12 @@ def _entries(tmp_path: Path) -> dict[str, Entry]:
             ["--tenant", TENANT, H.RUN_ID, "1"], directory=d, spawn=_Calls().hook("spawn", 0),
             preflight=_Calls().hook("preflight", 0), render_page=_Calls().hook("render_page", None))),
     }
-    for verb in ("update", "check", "propose"):
-        argv = [verb, TENANT, *([str(staged)] if verb == "propose" else [])]
-        entries[f"connect_{verb}"] = lambda d, argv=argv: _invoke(lambda: connect.main(argv, directory=d))
     for name, (_module, argv) in H.COMMANDS.items():
         entries[name] = lambda d, name=name, argv=argv: _invoke(lambda: H.command_main(name)(argv(TENANT), directory=d))
     return entries
 
 
-ENTRY_NAMES = ["run_start", "sibling_run", "drain_start", "launcher", "connect_update", "connect_check",
-               "connect_propose", *H.COMMANDS]
+ENTRY_NAMES = ["run_start", "sibling_run", "drain_start", "launcher", *H.COMMANDS]
 
 
 def _directory(data_root: Path, condition: str) -> Any:
@@ -158,7 +150,7 @@ def _says(text: str, condition: str) -> str | None:
 
 
 def test_every_entry_point_can_be_driven_here(tmp_path):
-    """Control: the table covers the run, sibling, drain, launcher, connect verbs and all ten commands (r10 A1)."""
+    """Control: the table covers the run, sibling, drain, launcher, and all ten commands (r10 A1)."""
     assert set(_entries(tmp_path)) == set(ENTRY_NAMES)
 
 

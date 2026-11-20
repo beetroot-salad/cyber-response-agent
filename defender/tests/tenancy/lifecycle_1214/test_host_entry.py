@@ -344,44 +344,14 @@ def test_drain_start_builds_its_directory_from_the_database_address(data_root, m
 
 # --- the connect command ---------------------------------------------------------------------------
 
-@pytest.fixture
-def staged(tmp_path) -> Path:
-    folder = tmp_path / "staged"
-    (folder / "skills").mkdir(parents=True)
-    (folder / "skills" / "note.md").write_text("note\n", encoding="utf-8")
-    return folder
-
-
-@pytest.mark.parametrize("verb", ["update", "check", "propose"])
-@pytest.mark.parametrize("state", ["creating", "offboarding", "offboarded"])
-def test_the_connect_command_refuses_a_tenant_that_is_not_active(data_root, staged, verb, state):
-    """`update`, `check`, `propose` refuse a non-active tenant (exit 1, `[tenant.py]`, the state); active passes (Flow 4, P3)."""
-    command = [verb, TENANT, *([str(staged)] if verb == "propose" else [])]
-    admitted = _connect(command, active_directory(data_root, TENANT))
-    if verb == "check":
-        assert _admits(admitted), admitted
-    else:  # `update`/`propose` go on to delivery, which may refuse later for its own reasons (FRR-1)
-        assert not any(word in admitted.lower() for word in NOT_A_REFUSAL_OF_STATE), admitted
-    refused = _connect(command, active_directory(data_root, TENANT, state=state))
-    assert refused.startswith("1\n"), refused
-    _has(refused, "[tenant.py]", state)
-
-
-@pytest.mark.parametrize("verb", ["update", "check", "propose"])
-def test_the_connect_command_with_no_directory_and_no_database_address_refuses(data_root, staged, monkeypatch, verb):
-    """Fails closed: no directory, no address -> exit 1 naming the address (Flow 4)."""
-    monkeypatch.delenv(DSN_ENV, raising=False)
-    command = [verb, TENANT, *([str(staged)] if verb == "propose" else [])]
-    refused = _connect(command)
-    assert refused.startswith("1\n"), refused
-    _has(refused, DSN_ENV)
-
-
-@pytest.mark.parametrize("retired", ["setup", "scaffold", "new-id", "migrate"])
-def test_the_connect_command_has_only_update_propose_and_check(data_root, retired):
-    """`setup`, `scaffold`, `new-id`, `migrate` are retired with the on-disk row; `check` still runs (F-12, RC-9, O6)."""
+@pytest.mark.parametrize("retired", ["setup", "scaffold", "new-id", "migrate", "update", "propose"])
+def test_the_connect_command_has_only_check_folder(data_root, tmp_path, retired):
+    """`setup`, `scaffold`, `new-id`, `migrate` are retired with the on-disk row and `update`, `propose` with the API's
+    requests (B3, A6); `check --folder` still runs, and `check <id>` is a usage error. (F-12, RC-9, O6)"""
     directory = active_directory(data_root, TENANT)
-    assert _admits(_connect(["check", TENANT], directory)), "control: a kept subcommand is not an invalid choice"
+    kept = _connect(["check", "--folder", str(tmp_path)], directory)
+    assert "invalid choice" not in kept, "control: a kept subcommand is not an invalid choice"
+    _has(_connect(["check", TENANT], directory), "usage")
     text = _connect([retired, TENANT], directory)
     _has(text, "invalid choice", f"'{retired}'")
 

@@ -73,29 +73,6 @@ def _bind_missing_secret(t, tmp_path) -> Path:
     return missing
 
 
-@pytest.mark.parametrize("command", ["update", "propose"])
-def test_r6_tenant_cli_logs_in_from_the_secret_file_the_generation_records(p4_tenant, tmp_path, capsys,
-                                                                           command):
-    """With a forge-wired tenant, each command mints from the live generation's recorded host secret
-    file: one that is not there is refused naming THAT path (there is no default), exit 1."""
-    t = p4_tenant
-    missing = _bind_missing_secret(t, tmp_path)
-    argv = {"update": ["update", t.tenant_id],
-            "propose": ["propose", t.tenant_id, str(_staged(tmp_path))]}[command]
-    capsys.readouterr()
-    rc = _tenant_cli().main(argv, directory=t.directory)
-    said = capsys.readouterr()
-    assert rc == 1, said
-    assert str(missing) in said.err, said.err
-
-
-def _staged(tmp_path) -> Path:
-    staged = tmp_path / "staged" / "lessons"
-    staged.mkdir(parents=True)
-    (staged / "r6.md").write_text("---\nname: r6\n---\nbody\n", encoding="utf-8")
-    return staged.parent
-
-
 @pytest.mark.postgres
 def test_r6_revert_lesson_logs_in_from_the_secret_file_the_generation_records(
         world, tmp_path, caplog):  # noqa: F811 — the imported fixture

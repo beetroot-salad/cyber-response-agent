@@ -49,11 +49,15 @@ ROUTE_FLOOR = 20
 
 def route_table_deps() -> ApiDeps:
     """Dependencies enough to build the app and read its route table: no identity service is needed to list routes."""
+    import dataclasses
+
     store = Refusing("route table only (#1496)")
-    return ApiDeps(
-        alerts=store, investigations=store, learning_jobs=store, learning_work=store, lessons=store, systems=store, writes=store,
-        secrets=store, checker=store, artifact_links=store, offboarding=store, alert_mapping=store, audit=store,
-        identity=None, frontend_origin=FRONTEND_ORIGIN, tenants=None)  # type: ignore[arg-type]
+    ports = {name: store for name in ("alerts", "investigations", "learning_jobs", "learning_work", "lessons", "systems",
+                                      "writes", "secrets", "checker", "artifact_links", "offboarding", "alert_mapping",
+                                      "audit", "host_requests")}  # #1471: the host-requests port, once ApiDeps has it
+    known = {f.name for f in dataclasses.fields(ApiDeps)}
+    return ApiDeps(**{k: v for k, v in ports.items() if k in known},  # type: ignore[arg-type]
+                   identity=None, frontend_origin=FRONTEND_ORIGIN, tenants=None)
 
 
 @functools.lru_cache(maxsize=1)

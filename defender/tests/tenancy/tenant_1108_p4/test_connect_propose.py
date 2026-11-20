@@ -1,7 +1,6 @@
 """#1108 P4 flow 6, connect's two-repo split: the adapter is staged in the product repo; the system
 skill, seed queries and tacit entries in a host directory shaped like the tenant's `agent/`, which
-`tenant.py propose` turns into a commit-maker PR touching `agent/` only (files added or replaced,
-nothing deleted: connect proposes one system's files, never the corpus); `validate_scaffold.py
+the product's adoption request carries (#1471 A6: `tenant.py propose` is removed); `validate_scaffold.py
 --staged` checks that tenant half. Plus connect's model-facing instructions for the split (the
 generic model-text lint is `test_model_text.py`'s).
 """
@@ -16,16 +15,14 @@ from pathlib import Path
 from collections.abc import Mapping
 from typing import Any
 
-import pytest
 
 from defender._git import REPO_ROOT
 from defender.tests.tenancy.tenant_1108_p4._support import (
     DEFENDER,
     FIXTURE_AGENT,
-    bind_forge,
     git,
 )
-from defender.tests.tenancy.tenant_1108_p4._drain_support import product_repo, remote_branches, touched
+from defender.tests.tenancy.tenant_1108_p4._drain_support import product_repo
 
 SYSTEM = "acme-cmdb"
 CONNECT = DEFENDER / "skills" / "connect"
@@ -50,11 +47,6 @@ def _stage(root: Path, files: Mapping[str, str | bytes]) -> Path:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(content.encode() if isinstance(content, str) else content)
     return root
-
-
-def _propose(t: Any, staged: Path) -> int:
-    with t.admitted() as admitted:
-        return _tenant_cli().propose(admitted, staged, client=t.forge.client, identity=t.vault.identity())
 
 
 def _product_trace(repo: Path = REPO_ROOT) -> dict:
@@ -86,65 +78,6 @@ def test_control_the_product_trace_sees_the_systems_files_and_a_connect_branch(t
     assert _product_trace(repo)["status"] == ""
     git(repo, "branch", f"connect/{SYSTEM}")
     assert _product_trace(repo)["refs"] == f"refs/heads/connect/{SYSTEM}"
-
-
-# ---------------------------------------------------------------------------------------------
-# tenant.py propose
-# ---------------------------------------------------------------------------------------------
-
-
-def test_flow6_propose_turns_a_staged_directory_into_one_agent_only_pr_on_the_tenant_forge(
-        p4_tenant, tmp_path, capsys):
-    """`propose` commits exactly the staged files under `agent/` on a branch off the origin's
-    `main` and opens one PR against `main`; the clone stays clean on `main`, and the product
-    checkout gains neither the system's files nor a `connect/` branch."""
-    t = p4_tenant
-    bind_forge(t)
-    staged = _stage(tmp_path / "staged", STAGED_FILES)
-    main = t.origin_main()
-    product = _product_trace()
-
-    rc = _propose(t, staged)
-
-    assert rc == 0, capsys.readouterr()
-    new = {b: tip for b, tip in remote_branches(t.remote, prefix="").items() if b != "main"}
-    assert len(new) == 1, new
-    (branch, tip), = new.items()
-    assert git(t.remote, "merge-base", tip, "refs/heads/main") == main
-    assert touched(t.remote, main, tip) == sorted(f"agent/{rel}" for rel in STAGED_FILES)
-    for rel, content in STAGED_FILES.items():
-        assert git(t.remote, "show", f"{tip}:agent/{rel}") + "\n" == content, rel
-    assert [(c["head"], c["base"]) for c in t.forge.creates] == [(branch, "main")]
-    assert git(t.clone, "symbolic-ref", "HEAD") == "refs/heads/main"
-    assert git(t.clone, "status", "--porcelain", "--untracked-files=all") == ""
-    assert _product_trace() == product
-
-
-@pytest.mark.parametrize("plant", ["tenant-id", "symlink"])
-def test_flow6_propose_refuses_a_staged_entry_a_change_set_cannot_carry(p4_tenant, tmp_path,
-                                                                      capsys, plant):
-    """A staged `.tenant-id` or link refuses the whole directory, naming the entry; nothing is
-    committed, pushed or opened. Control: the previous case, without the plant."""
-    t = p4_tenant
-    bind_forge(t)
-    staged = _stage(tmp_path / "staged", STAGED_FILES)
-    entry = {"tenant-id": ".tenant-id", "symlink": f"skills/{SYSTEM}/linked.md"}[plant]
-    if plant == "tenant-id":
-        (staged / entry).write_text("00000000-0000-0000-0000-000000000000\n", encoding="utf-8")
-    else:
-        os.symlink("/etc/passwd", staged / entry)
-    refs = git(t.remote, "for-each-ref", "--format=%(refname) %(objectname)")
-    clone_refs = git(t.clone, "for-each-ref", "--format=%(refname) %(objectname)")
-    capsys.readouterr()
-
-    rc = _propose(t, staged)
-
-    said = capsys.readouterr()
-    assert rc != 0
-    assert Path(entry).name in said.err + said.out, said
-    assert t.forge.creates == []
-    assert git(t.remote, "for-each-ref", "--format=%(refname) %(objectname)") == refs
-    assert git(t.clone, "for-each-ref", "--format=%(refname) %(objectname)") == clone_refs
 
 
 # ---------------------------------------------------------------------------------------------
@@ -234,14 +167,13 @@ def test_flow6_connect_never_tells_the_model_to_write_tenant_knowledge_into_the_
     assert hits == [], "connect still homes tenant knowledge in the product repo:\n" + "\n".join(hits)
 
 
-def test_flow6_connect_routes_the_tenant_half_through_propose_and_keeps_the_adapter_in_product():
-    """Connect's main page and its tacit route both hand the tenant half to `tenant.py
-    propose` (a staged directory, never a branch of the product repo), every scaffold-validator
-    call for a system with a tenant half passes the staged directory, and the adapter is still written into the product repo's
-    `defender/integrations/`."""
+def test_flow6_connect_no_longer_routes_the_tenant_half_through_propose_and_keeps_the_adapter_in_product():
+    """Connect's main page and its tacit route name no `tenant.py propose` (A6; the banned-command scan in
+    `test_tenant_cli.py` covers every shipped page), every scaffold-validator call for a system with a tenant half passes
+    the staged directory, and the adapter is still written into the product repo's `defender/integrations/`."""
     docs = _connect_docs()
-    for name in ("SKILL.md", "tacit.md"):
-        assert re.search(r"tenant\.py propose\b", docs[name]), f"{name} never routes through propose"
+    for name, text in docs.items():
+        assert not re.search(r"tenant\.py\s+propose\b", text), f"{name} still routes through propose"
     assert "defender/integrations/{system}_adapter.py" in docs["SKILL.md"]
     calls = [line for text in docs.values() for line in text.splitlines()
              if "validate_scaffold.py" in line and "{system}" in line]

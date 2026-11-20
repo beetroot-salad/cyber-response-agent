@@ -1,0 +1,257 @@
+"""#1471 slice B machinery: the readiness helper (`job_host`, kind `readiness`) and the readiness container entry
+(`run.readiness_main`) driven over the helper scene, and the premise runs that show what a real investigation of the
+same tenant does. NO test functions; every unbuilt name is imported lazily, so a missing one is a red at its call.
+
+Names (test-surface.md §4, §5): the helper's `--kind readiness --job <id> --tenant <T>`, the container's
+`run.readiness_main(["--readiness", id, "--tenant", T], *, environ, roster)`, and the records `<runs>/<id>.readiness.json`
+and `<runs>/<id>.knowledge-source.json`, read here as raw JSON so the record shapes are the contract's, not a class's."""
+from __future__ import annotations
+
+import contextlib
+import io
+import json
+import uuid
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+from defender.tests.support.jobs import _job_helper as J
+from defender.tests.support.jobs._job_helper import (
+    ContainerStandIn,
+    HelperRan,
+    HelperScene,
+    drive_helper,
+    helper_scene,
+    make_signer,
+)
+
+#: A text the publish child's reply might carry (a forge reply, a host path): P-2 says it never reaches the admin.
+PUBLISH_CANARY = "FORGE-REPLY-CANARY-1471 /srv/forge/secret-path"
+
+#: `READINESS_STEPS` (surface §5) and the warning kinds (§5), spelled once as literals.
+HELPER_STEPS = ("tenant", "records", "alert_mapping", "publish", "knowledge_copy", "run_tenant", "roster",
+                "tenant_verdict", "signing", "first_pass")
+CONTAINER_STEPS = ("container_tenant", "systems")
+AFTER_PUBLISH = ("knowledge_copy", "run_tenant", "roster", "tenant_verdict", "signing", "first_pass", *CONTAINER_STEPS)
+WARNING_KINDS = frozenset({"case_system", "system_down", "grant_ignored", "verb_undecided", "verb_undeclared",
+                           "verb_unreasoned", "tacit_registry", "tacit_grant", "feedback_setting", "retired_file"})
+#: Words that name an operator command: an admin reads our sentences too (#1470 O11, C9).
+OPERATOR_WORDS = ("tenant.py", "tenant check", "tenant update", "tenant propose")
+
+
+@contextlib.contextmanager
+def readiness_scene(tmp_path: Path, monkeypatch: Any, dsn: str, *, proxied: tuple[str, ...] = ("identity", "ticket"),
+                    files: dict[str, Any] | None = None, records: Callable[[Any], Any] | None = None
+                    ) -> Iterator[HelperScene]:
+    """`helper_scene` whose tenant's records are `records(default_spec)` when given: the tenant's records dropped and
+    seeded again through the store (first versions), so a case can disable a system, break a case record or leave the
+    tenant with none. `files` are written over the published fixture as `helper_scene` does."""
+    from defender.tests.support.tenancy import _systems1366 as R
+
+    with helper_scene(tmp_path, monkeypatch, dsn, proxied=proxied, files=files) as scene:
+        if records is not None:
+            R.drop_records(dsn, scene.tenant)
+            R.seed_postgres_records(dsn, scene.tenant, records(J.proxied_records(proxied)))
+        yield scene
+
+
+def grants_text(edit: Callable[[dict[str, Any]], None]) -> str:
+    """The fixture's verb-grants table with `edit(dispositions)` applied, as the text to publish."""
+    from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
+
+    doc = yaml.safe_load((H.FIXTURE / "settings" / "verb-grants.yaml").read_text(encoding="utf-8"))
+    edit(doc["dispositions"])
+    return yaml.safe_dump(doc, sort_keys=False)
+
+
+def read_json(path: Path) -> Any:
+    """`path`'s JSON, or None when there is no such file."""
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+
+
+# --- the premise run: a real investigation over the same scene ------------------------------------------------------
+
+@dataclass
+class Investigated:
+    """One helper run of an investigation (a stand-in container that does nothing): what setup decided, and why."""
+
+    inv: str
+    ran: HelperRan
+    docker: ContainerStandIn
+    err: str
+    end: Any
+
+    @property
+    def refused(self) -> bool:
+        return getattr(self.end, "setup", None) == "refused"
+
+    @property
+    def started(self) -> bool:
+        """Setup went through: the helper started its container, and the container (which does nothing) wrote no end."""
+        return self.docker.job_ran and self.end is None
+
+
+def investigate(scene: HelperScene, *, signer: Any = None, **seams: Any) -> Investigated:
+    """The helper for a planted investigation of the scene's tenant. Green at the base: a premise, never the subject."""
+    inv = str(uuid.uuid4())
+    scene.plant(inv)
+    docker = ContainerStandIn(lambda c: 0)
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        ran = drive_helper(scene, scene.argv("investigation", inv), docker=docker,
+                           signer=signer if signer is not None else make_signer(), **seams)
+    assert ran.raised is None, ran.raised
+    return Investigated(inv, ran, docker, err.getvalue(), scene.end(inv))
+
+
+# --- the subject: readiness ---------------------------------------------------------------------------------------
+
+@dataclass
+class Readied:
+    """One helper-and-container run of a readiness check."""
+
+    scene: HelperScene
+    rid: str
+    ran: HelperRan
+    docker: ContainerStandIn
+    err: str
+    container_exit: BaseException | None = None
+    container_raised: BaseException | None = None
+    container_rc: int | None = None
+    facts: dict[str, Any] | None = None
+    extra: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def record_path(self) -> Path:
+        return self.scene.runs / f"{self.rid}.readiness.json"
+
+    @property
+    def knowledge_path(self) -> Path:
+        return self.scene.runs / f"{self.rid}.knowledge-source.json"
+
+    @property
+    def record(self) -> Any:
+        return read_json(self.record_path)
+
+    @property
+    def knowledge(self) -> Any:
+        return read_json(self.knowledge_path)
+
+    def said(self) -> str:
+        """Everything a failing case should show: the record, the helper's stderr, a container fault."""
+        return (f"record={self.record!r}; helper rc={self.ran.rc!r} raised={self.ran.raised!r}; "
+                f"container exit={self.container_exit!r} raised={self.container_raised!r}; "
+                f"docker.job_error={self.docker.job_error!r}; stderr tail={self.err[-1500:]!r}")
+
+    def result(self) -> dict[str, Any]:
+        """The one readiness record, asserted present first: the point where a missing helper or container is red."""
+        record = self.record
+        assert isinstance(record, dict), f"no readiness record was written: {self.said()}"
+        return record
+
+
+def entry_of(scene: HelperScene, rid: str, done: Readied, *, roster: Any = None) -> Callable[[Any], int]:
+    """The container's process: `run.readiness_main` over the container's own environment."""
+
+    def run(container: Any) -> int:
+        from defender import run as run_py
+
+        try:
+            done.container_rc = int(run_py.readiness_main(["--readiness", rid, "--tenant", scene.tenant],
+                                                          environ=container.env, roster=roster))
+            return done.container_rc
+        except SystemExit as exited:
+            done.container_exit = exited
+            return exited.code if isinstance(exited.code, int) else 1
+        except BaseException as crashed:  # noqa: BLE001 — kept for the case to name
+            done.container_raised = crashed
+            return 99
+
+    return run
+
+
+def readiness(scene: HelperScene, *, signer: Any = None, docker: ContainerStandIn | None = None, rid: str | None = None,
+              container: Callable[[Any], int] | None = None, roster: Any = None, publish: Callable[..., str] | None = None,
+              ) -> Readied:
+    """The helper for a readiness check of the scene's tenant (kind `readiness`, job id `rid`), its container the real
+    `readiness_main` unless `container(Container) -> rc` says otherwise. `publish` is the launch-time publish seam
+    (default: `fresh` at the published commit). Never raises for the subject's absence: the caller reads `.result()`."""
+    rid = rid or str(uuid.uuid4())
+    done = Readied(scene, rid, HelperRan(), ContainerStandIn(), "")
+    stand_in = docker if docker is not None else ContainerStandIn()
+
+    def captured(c: Any) -> int:
+        with contextlib.suppress(Exception):
+            done.facts = c.request("launch")
+        return (container or entry_of(scene, rid, done, roster=roster))(c)
+
+    stand_in.job = captured
+    done.docker = stand_in
+    seams: dict[str, Any] = {} if publish is None else {"publish": publish}
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        done.ran = drive_helper(scene, scene.argv("readiness", rid), docker=stand_in,
+                                signer=signer if signer is not None else make_signer(), **seams)
+    done.err = err.getvalue()
+    return done
+
+
+# --- shared assertions and scene pieces -----------------------------------------------------------------------------
+
+def norm(text: str) -> str:
+    return " ".join(text.lower().split())
+
+
+def assert_refused_shape(record: Any, step: str) -> str:
+    """`record` is exactly `{outcome: refused, step, sentence}` (R13-1.2/.3: no `knowledge`, no `commit`) at `step`, its
+    sentence non-empty text naming no operator command (P-2, C9); the sentence."""
+    assert isinstance(record, dict), f"no readiness record: {record!r}"
+    assert set(record) == {"outcome", "step", "sentence"}, f"not the refused shape: {record!r}"
+    assert record["outcome"] == "refused", record
+    assert record["step"] == step, f"refused at {record['step']!r}, not {step!r}: {record!r}"
+    sentence = record["sentence"]
+    assert isinstance(sentence, str)
+    assert sentence.strip(), f"an empty sentence: {record!r}"
+    named = [w for w in OPERATOR_WORDS if w in sentence]
+    assert not named, f"an admin is told to run an operator command {named}: {sentence!r}"
+    return sentence
+
+
+def listed_runs(scene: HelperScene) -> list[str]:
+    """The tenant's runs as its runs repository lists them (a folder holding an entry it does not serve refuses)."""
+    from defender import tenancy
+    from defender._paths import process_defender_dir
+
+    accepted = tenancy.accept_tenant(tenancy.resolve_data_root(), scene.tenant, defender_dir=process_defender_dir(),
+                                     clone_tree=False)
+    return [str(r) for r in accepted.runs_repository().list()]
+
+
+def judged_by_an_investigation(scene: HelperScene, monkeypatch: Any) -> dict[str, Any]:
+    """What a real investigation's container judges of the scene's tenant at its start (the premise for the systems check
+    and the case verdict): `{"started": bool, "down": {system: reason}, "exit": text|None, "case": verdict}`. Green at the base."""
+    from defender import run as run_py
+    from defender.investigation.challenge_gate import ReviewState
+    from defender.kit.access import PROXY_URL_ENV
+    from defender.systems import case_system
+    from defender.tests.support.jobs._container_entry1170 import enter
+
+    monkeypatch.setenv(PROXY_URL_ENV, "http://proxy.invalid")
+    inv, seen = str(uuid.uuid4()), {"down": {}, "case": None, "ran": False}
+    scene.plant(inv)
+
+    def lifecycle(**kw: Any) -> dict[str, Any]:
+        seen["ran"] = True
+        seen["down"] = {n: c.reason for n, c in kw["systems"].down.items()}
+        seen["case"] = case_system.case_verdict(kw["tenant"], defender_dir=run_py.DEFENDER_DIR, roster=kw["systems"].roster)
+        facts = kw["job_facts"]
+        facts.box, facts.scrub_verified = "started", True
+        facts.review_state["state"] = ReviewState(closed=True)
+        return {"output": "x", "requests": 0, "truncated_by": None, "closed_before_cut": False, "exit_reason": None}
+
+    got = enter(scene, inv, lifecycle=lifecycle, preflight=lambda *a, **k: 0, visualize=lambda *a, **k: None)
+    return {"started": seen["ran"], "down": seen["down"], "case": seen["case"],
+            "exit": None if got.exit is None else str(got.exit.code)}

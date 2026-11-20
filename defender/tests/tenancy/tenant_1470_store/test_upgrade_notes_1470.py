@@ -8,7 +8,7 @@ from pathlib import Path
 from defender.tests.support.tenancy import _records1470 as K
 
 NOTES = Path(__file__).resolve().parents[3] / "CLAUDE.md"
-REMOVED = tuple(sorted(K.REMOVED_COMMANDS - {"systems", "catalog", "import"}))  # plain words are checked as `tenant.py <word>`
+REMOVED = tuple(sorted(c for c in K.REMOVED_COMMANDS if "-" in c))  # plain words are checked as `tenant.py <word>`
 
 
 def _section(issue: str) -> str:
