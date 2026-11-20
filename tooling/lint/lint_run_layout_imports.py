@@ -174,7 +174,7 @@ _STAR_SOURCES = frozenset({_DOOR, "defender.records._episode_paths", "defender.r
 _OPTIONAL = frozenset({"Optional"})
 _UNION = frozenset({"Union"})
 _CONTAINERS = frozenset({
-    "list", "List", "Sequence", "MutableSequence", "Iterable", "Iterator", "Collection",
+    "list", "List", "Sequence", "MutableSequence", "Iterable", "Iterator", "Collection",  # lint-stale-ref: ok — a typing container name this lint matches in annotations, not a repo symbol
     "tuple", "Tuple", "set", "Set", "frozenset", "FrozenSet", "AbstractSet", "Generator",
     "AsyncIterable", "AsyncIterator",
 })
