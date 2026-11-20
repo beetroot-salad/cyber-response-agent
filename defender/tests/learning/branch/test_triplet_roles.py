@@ -596,11 +596,11 @@ def test_947_a_driven_pinned_source_fault_reaches_neither_surface_with_a_known_i
 # `ReplyUnusable`, which `author_family` turns into `BranchError` (the launcher's `family_unusable`).
 
 
-def _refused(tmp_path, agent, *, token: str, calls: int, where: str) -> None:
+def _refused(tmp_path, agent, *, token: str, calls: int, where: str, **inputs) -> None:
     """`author_family` refuses: `BranchError` naming the call (`where`) and the rule (`token`), after
     `calls` model calls, so a plan the manifest would refuse costs no seat."""
     with pytest.raises(_questioner().BranchError) as raised:
-        _author(tmp_path, agent)
+        _author(tmp_path, agent, **inputs)
     message = str(raised.value)
     assert token in message, f"the refusal does not name its rule ({token!r}): {message}"
     assert re.search(where, message), f"the refusal does not name the call ({where!r}): {message}"
@@ -621,13 +621,12 @@ def test_a_valid_plan_and_seats_compose_the_family(tmp_path):
     assert [f["fact_id"] for f in family["worlds"][1]["facts"]] == ["f1"]
 
 
-def test_a_plan_without_a_base_disposition_takes_the_source_reports(tmp_path):
-    """The base disposition falls back to the source report's, in-call, as the host composes it."""
-    (tmp_path / "report.md").write_text(T.report_text("malicious"), encoding="utf-8")
+def test_a_plan_without_a_base_disposition_takes_the_sources_disposition(tmp_path):
+    """The base disposition falls back to the `source_disposition` the launcher passes, in-call."""
     plan = _plan()
     del plan["base_disposition"]
 
-    family = _author(tmp_path, T.FakeAgent(plan, _seat(), _seat_c()))
+    family = _author(tmp_path, T.FakeAgent(plan, _seat(), _seat_c()), source_disposition="malicious")
 
     assert family["worlds"][0]["disposition_declared"] == "malicious"
 
@@ -652,7 +651,7 @@ _PLAN_REFUSALS = {
     "duplicate labels": (lambda: _plan(worlds=[_world_entry(), _world_entry(axis="a2")]), "twice"),
     "base disposition outside the vocabulary": (lambda: _plan(base_disposition="maybe"), "disposition"),
     "base disposition the host records": (lambda: _plan(base_disposition="unresolved"), "disposition"),
-    "no base disposition and no report": (lambda: _without("base_disposition", _plan()), "disposition"),
+    "no base disposition and no source disposition": (lambda: _without("base_disposition", _plan()), "disposition"),
     "unknown key in a planned world": (lambda: _plan(worlds=[_world_entry(zz_planned="x"), _world_entry(label="c")]),
                                        "zz_planned"),
     "planned world without facts": (lambda: _plan(worlds=[_without("facts", _world_entry()),
@@ -807,7 +806,8 @@ def _outcome(tmp_path, replies: list[dict]):
     try:
         family = _questioner().author_family(
             source_run_dir=tmp_path, episode_dir=_EPISODE_DIRS.setdefault(tmp_path, T.episode(tmp_path)),
-            invoke=agent, leads=[], alert={}, frontier="")
+            invoke=agent, leads=[], alert={}, frontier="",
+            source_disposition="malicious")
     except _questioner().BranchError as refusal:
         return "refused", str(refusal)
     return "accepted", family
@@ -870,7 +870,6 @@ def test_p1_every_reply_is_refused_or_composes_a_family_the_gate_accepts_with_no
     three-call script and a seeded sample of pairs: a reply is refused in-call (`BranchError`) or
     composes a family `accept_family` takes with every key of every reply held unchanged. Floors on
     both sides, and on each call kind's own mutations, keep it non-vacuous."""
-    (tmp_path / "report.md").write_text(T.report_text("malicious"), encoding="utf-8")
     base = _valid_script()
     identities = (None, T.fixture_world_id("injected"))
     cases = M.variants(base, seed=1579, pairs=150, extra=_plan_specific_mutations(), identities=identities)
@@ -905,13 +904,11 @@ def test_p1_every_reply_is_refused_or_composes_a_family_the_gate_accepts_with_no
 
 
 @pytest.mark.parametrize("blank", ["", None], ids=["blank", "null"])
-def test_a_blank_or_null_base_disposition_is_refused_even_when_the_report_could_fill_it(tmp_path, blank):
-    """E4: the report fallback applies only when the key is ABSENT (control:
-    `test_a_plan_without_a_base_disposition_takes_the_source_reports`)."""
-    (tmp_path / "report.md").write_text(T.report_text("malicious"), encoding="utf-8")
-
+def test_a_blank_or_null_base_disposition_is_refused_even_when_the_source_could_fill_it(tmp_path, blank):
+    """E4: the `source_disposition` fallback applies only when the key is ABSENT (control:
+    `test_a_plan_without_a_base_disposition_takes_the_sources_disposition`)."""
     _refused(tmp_path, T.FakeAgent(_plan(base_disposition=blank), _seat(), _seat_c()),
-             token="disposition", calls=1, where=r"call 1|questioner\b")
+             token="disposition", calls=1, where=r"call 1|questioner\b", source_disposition="malicious")
 
 
 #: Review r2's counterexamples, each of which the pre-#1579 host accepted or dropped silently.
