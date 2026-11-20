@@ -70,11 +70,12 @@ def _version(dsn: str) -> list[tuple[str]]:
     return execute(dsn, "SELECT version_num FROM public.alembic_version")  # type: ignore[return-value]
 
 
-def test_the_revision_sits_directly_on_the_learning_causes_revision_and_is_the_head():
-    """`_alert_outcome` is built on `_learning_causes` and nothing is built on it yet. (data model)"""
+def test_the_revision_sits_directly_on_the_findings_at_job_end_revision_and_is_the_head():
+    """`_alert_outcome` is built on `_findings_at_job_end` (#1487, merged to main after the contract) and nothing is built
+    on it yet. (data model)"""
     from defender.migrations import head
 
-    assert revisions.down_of(_revision()) == revisions.by_suffix("_learning_causes")
+    assert revisions.down_of(_revision()) == revisions.by_suffix("_findings_at_job_end")
     assert head() == _revision()
 
 
