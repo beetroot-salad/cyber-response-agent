@@ -3,6 +3,8 @@ accounting and pricing, pre-flight worlds, pre-branch calls, esql forging checks
 JSON Patches on the call's base (#1543)."""
 from __future__ import annotations
 
+import json
+
 from defender.tests.support.tenancy._host1214 import TEST_TENANT
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.tenancy import _tenants1106 as T1106
@@ -1105,29 +1107,32 @@ def test_a_call_starts_fresh_and_a_retry_past_the_size_budget_restarts_keeping_t
     bob = _big_rows("bob", "CALL2MARK")
     est.answer("idp", "query", ALICE, alice)
     est.answer("idp", "query", BOB, bob)
-    # A side read big enough that call 2's first attempt leaves its conversation past the budget.
-    est.answer("idp", "lookup", {"entity": "bob"}, _big_rows("bob", "LOOKMARK"))
+    # Python output that leaves call 2's first attempt's conversation past the budget: no one
+    # tool result can (a read is a bounded view, a python reply bounded too), so several replies
+    # together do.
+    looks = 10
+    box, _log = S.sandboxed_box(out=json.dumps(_big_rows("bob", "LOOKMARK")).encode())
     row = {"user": "alice", "event_id": "e-9001", "action": "tgt", "note": "FORGED6"}
     served = {"rows": [*alice["rows"], row]}
     o = S.oracle(S.submit(_add("/rows/-", row, fact_id="f1")),
-                 S.run_query("idp", "lookup", {"entity": "bob"}),
+                 *[S.python("print(open('bob.json').read())")] * looks,
                  S.submit(S.handin(S.op_remove("/rows/9999", fact_id="f1"))),
                  S.submit())
     reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o,
-                           verifier=S.passing_verifier(), retry_cap=2)
+                           verifier=S.passing_verifier(), retry_cap=2, box=box)
     ctx = est.ctx(tmp_path / "inv")
 
     assert S.call(reg, "idp", "query", ctx, q="user:alice") == served
     second = o.requests
     assert S.call(reg, "idp", "query", ctx, q="user:bob") == bob
-    assert o.requests == second + 3, o.requests
+    assert o.requests == second + looks + 2, o.requests
 
     fresh = S.all_parts_text(o.messages[second])
     assert "CALL1MARK" not in fresh, "call 2 carried call 1's conversation"
     assert "Telemetry frozen in this world so far" in fresh
     assert "FORGED6" in fresh, "the fresh call lost the frozen row"
     assert "LOOKMARK" in S.all_parts_text(o.messages[second + 1])
-    retry = S.all_parts_text(o.messages[second + 2])
+    retry = S.all_parts_text(o.messages[second + looks + 1])
     assert "LOOKMARK" not in retry, "the retry past the size budget did not restart"
     assert "FORGED6" in retry, "the restarted retry lost the frozen row"
     assert "cannot apply" in retry, "the restarted retry lost the failed attempt"
@@ -1459,7 +1464,8 @@ def test_oracle_and_verifier_tool_schemas_as_sent_accept_the_arguments_they_exis
 
     monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
     built = build_for_effort(model_name, "medium")
-    tools = [*oracle_mod._ORACLE_TOOLS, oracle_mod._SUBMIT, oracle_mod._VERDICT]
+    tools = [*oracle_mod._ORACLE_TOOLS, oracle_mod._SUBMIT, oracle_mod._VERDICT,
+             *oracle_mod._VERIFIER_TOOLS]
     assert {name for name, _about, _schema in tools} == set(_ARGUMENTS_A_MODEL_SENDS), (
         "a tool was added or renamed: give it the arguments a model must be able to send")
     for name, about, schema in tools:

@@ -80,6 +80,8 @@ class _AttemptBox:
         self._lock = threading.Lock()
         self._box: Any = None
         self._ended = False
+        #: Why the box could not start, once it could not: it is not tried again.
+        self._refused: Exception | None = None
         #: The saved reads already written into the current box's scratch, by file name (#1543 O1).
         self.placed: set[str] = set()
 
@@ -89,7 +91,16 @@ class _AttemptBox:
                 raise _AttemptFailed("the attempt has already ended")
             if self._box is not None:
                 return self._box
-        box = self._factory()  # outside the lock: a slow start never holds up `stop`
+            if self._refused is not None:
+                raise _AttemptFailed("its box could not start earlier in this run") from self._refused
+        try:
+            box = self._factory()  # outside the lock: a slow start never holds up `stop`
+        except Exception as exc:
+            # A box that could not start is not started again for this run: every later call
+            # gets the same refusal at once, rather than another container start each.
+            with self._lock:
+                self._refused = exc
+            raise
         with self._lock:
             keep = not self._ended and self._box is None
             if keep:
@@ -99,6 +110,13 @@ class _AttemptBox:
             _stop_box(box)
             return self.get()
         return box
+
+    def refuse(self, box: Any, why: Exception) -> None:
+        """`box` started but can never serve (it is not sandboxed): it goes, and no other box is
+        started for this run, as when one could not start."""
+        with self._lock:
+            self._refused = why
+        self.lost(box)
 
     def lost(self, box: Any) -> None:
         """`box` died under a frame or cannot serve: the next `python` call starts a fresh one."""
@@ -127,6 +145,56 @@ class _AttemptBox:
             _stop_box(box)
 
 
+
+
+class _AttemptBoxes:
+    """Every python box of one oracle attempt: the oracle's own, and a fresh one for each of its
+    verifications (each judges in a cold context). They are made here, and stopped through one
+    path whatever ends the attempt (its deadline, the sibling closing under it, or its end): a
+    box made once the attempt was cancelled is born ended and never starts a container."""
+
+    def __init__(self, factory: Callable[[], Any]) -> None:
+        self._factory = factory
+        self._lock = threading.Lock()
+        self._made: list[_AttemptBox] = []
+        self._cancelled = False
+
+    def new(self) -> _AttemptBox:
+        return self.adopt(_AttemptBox(self._factory))
+
+    def adopt(self, box: _AttemptBox) -> _AttemptBox:
+        """Own `box` from now on: it is stopped with the attempt's, or born ended if the attempt
+        was already cancelled."""
+        with self._lock:
+            self._made.append(box)
+            if self._cancelled:
+                box.cancel()  # nothing started yet: it only marks the box ended
+        return box
+
+    def _each(self, act: Callable[[_AttemptBox], None]) -> list[BaseException]:
+        with self._lock:
+            made = list(self._made)
+        failures: list[BaseException] = []
+        for box in made:
+            try:
+                act(box)
+            except BaseException as exc:  # noqa: BLE001 — one box's failure never spares another
+                failures.append(exc)
+        return failures
+
+    def cancel(self) -> list[BaseException]:
+        """Stop execution in every box, keeping each for its workers to settle, and end the
+        attempt's boxes: any made from now on is born ended. Returns what each stop raised."""
+        with self._lock:
+            self._cancelled = True
+        return self._each(lambda box: box.cancel())
+
+    def stop(self) -> list[BaseException]:
+        """Remove every box (its container and scratch): only once its Python workers settled.
+        The attempt's boxes end here: any made from now on is born ended."""
+        with self._lock:
+            self._cancelled = True
+        return self._each(lambda box: box.stop())
 
 
 @dataclass
@@ -160,8 +228,14 @@ class _Run:
     live: bool = False
     #: Whether the call is a recorded pre-branch call, served unchanged: never re-asked.
     fixed: bool = False
-    #: The oracle attempt's python box (`None` for the verifier, which runs no python).
+    #: This run's python box: the oracle attempt's own, or on a verifier's run that verification's,
+    #: which is never the oracle's (it judges in a cold context).
     box: _AttemptBox | None = None
+    #: Every box of the oracle attempt (`_AttemptBoxes`), this run's among them; the verifier's run
+    #: shares its attempt's. `None` only on a run that runs no python.
+    boxes: _AttemptBoxes | None = None
+    #: Whether this is a verifier's run: its saved files are what it judges (`_place`).
+    verifying: bool = False
     #: Asked of a submission before its checks (`Oracle.serve`'s `gate`).
     gate: Callable[[Any], str | None] | None = None
     #: The agents entered on the oracle attempt's event loop, closed with the attempt outside its deadline
@@ -169,6 +243,12 @@ class _Run:
     entered: contextlib.AsyncExitStack | None = None
     #: Python workers are owned by the attempt even when its tool coroutine is cancelled.
     _box_workers: list[asyncio.Task[Any]] = field(default_factory=list, repr=False)
+
+    def __post_init__(self) -> None:
+        # A run's box is always owned by an attempt's boxes, so no stop path can miss it.
+        if self.box is not None and self.boxes is None:
+            self.boxes = _AttemptBoxes(self.box._factory)
+            self.boxes.adopt(self.box)
 
     @property
     def against(self) -> Any:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 
 import hashlib
+import json
 
 
 
@@ -12,6 +13,7 @@ import hashlib
 
 
 from collections.abc import Callable
+from dataclasses import dataclass
 
 
 
@@ -22,6 +24,12 @@ from typing import Any
 
 
 from defender._untrusted import wrap_fresh
+from defender.investigation.payload_view import (
+    ELISION_PREFIX,
+    passthrough_max_bytes,
+    payload_text_of,
+    walk,
+)
 
 
 
@@ -107,23 +115,106 @@ def _framed(label: str, value: Any, cap: int = _CONTEXT_CAP) -> str:
 
 
 def _fitted(items: list[tuple[str, Any]], budget: int) -> list[str]:
-    """Each `(label, value)` framed, together within `budget` (`_shares`)."""
-    texts = [_text_of(value) for _label, value in items]
-    caps = _shares([len(t) for t in texts], budget)
-    return [_framed(label, text, cap) for (label, _v), text, cap in zip(items, texts, caps,
-                                                                        strict=True)]
+    """Each `(label, value)` framed, together within `budget` (`_shares`): a `_Saved` answer
+    sized as the most of it a prompt shows (`_view_size`), and shown within its share."""
+    texts = [_text_of(v.value if isinstance(v, _Saved) else v) for _label, v in items]
+    sizes = [_view_size(t, _CONTEXT_CAP) if isinstance(v, _Saved) else len(t)
+             for (_label, v), t in zip(items, texts, strict=True)]
+    caps = _shares(sizes, budget)
+    return [_answer_framed(label, v.value, v.saved_as, cap) if isinstance(v, _Saved)
+            else _framed(label, text, cap)
+            for (label, v), text, cap in zip(items, texts, caps, strict=True)]
 
 
+
+
+def _view_cap() -> int:
+    """The most of one answer, or of one python reply, a prompt shows whole: gather's own
+    in-context ceiling (`passthrough_max_bytes`, which its setting moves), chosen there because
+    a larger answer is re-read on every request. A larger one is shown as a bounded view."""
+    return passthrough_max_bytes()
+
+
+@dataclass(frozen=True)
+class _Saved:
+    """An answer the model's code can read whole from a saved file (`saved_as` names where),
+    so a prompt shows it as a bounded view once it is past its share (`_answer_framed`)."""
+
+    value: Any
+    saved_as: str
+
+
+def _view_size(text: str, cap: int) -> int:
+    """At most how much of an answer of `text` a prompt shows under `cap`: all of it, or a view
+    of `_view_cap()` (its heading included), whichever is less."""
+    return min(len(text), _view_cap(), cap)
+
+
+def _bounded_view(value: Any, saved_as: str, cap: int = _CONTEXT_CAP) -> str | None:
+    """`value` as a bounded view within `min(cap, _view_cap())` characters, heading included,
+    when its text is past that, else None: gather's walk of the answer (`payload_view.walk`:
+    every scalar kept, its lists and long strings shortened, each dropped region marked where it
+    was dropped), headed by its size and the file `saved_as` that holds it whole. Text that is
+    not JSON, or whose walk overruns, is shown as its head, marked."""
+    text = _text_of(value)
+    size = min(cap, _view_cap())
+    if len(text) <= size:
+        return None
+    heading = (f"It is {len(text)} characters, past what a request shows whole, so this is a "
+               f"bounded view: each region it drops is marked `{ELISION_PREFIX} …>>` where it was "
+               f"dropped, and is absent from this text only. The whole answer is {saved_as}: read "
+               "its rows, counts and row indexes (which a patch's paths name) from that file with "
+               "code, never off this view.\n")
+    room = max(size - len(heading), 0)
+    obj: Any = value
+    if isinstance(value, str):
+        try:
+            obj = json.loads(value)
+        except ValueError:
+            obj = None
+    body = None
+    if obj is not None:
+        walked, _elisions = walk(obj, room)
+        body = payload_text_of(walked)
+    if body is None or len(body) > room:
+        body = text[:room] + f" {ELISION_PREFIX} the text past {room} of {len(text)} characters>>"
+    return heading + body
+
+
+def _answer_framed(label: str, value: Any, saved_as: str, cap: int = _CONTEXT_CAP) -> str:
+    """An answer the model's code can read whole from a saved file (`saved_as`), framed as
+    untrusted data: whole when it fits `cap` and `_view_cap()`, else as its bounded view."""
+    view = _bounded_view(value, saved_as, cap)
+    if view is None:
+        return _framed(label, value, cap)
+    return f"{label}:\n{wrap_fresh(view, 'untrusted')}"
 
 
 def _base_text(base: Any, cap: int = _CONTEXT_CAP) -> str:
-    framed = _framed("The real base answer", base, cap)
-    if len(canonical_json(base)) <= cap:
+    framed = _answer_framed("The real base answer", base,
+                            "saved for your code (inputs/index.json names it as `base`)", cap)
+    text = _text_of(base)
+    if len(text) <= _view_size(text, cap):
         return framed
-    return ("The whole base answer is saved for your code (inputs/index.json names it); an "
-            f"empty patch serves it unchanged.\n{framed}")
+    return f"An empty patch serves the whole base answer unchanged.\n{framed}"
 
 
+def _cut_output(name: str, text: str, cap: int) -> str:
+    """A python reply's `name` stream within `cap`: whole, or its head and tail around a mark
+    saying what was cut and how to read the rest (it is not saved)."""
+    if len(text) <= cap:
+        return text
+    half = max(cap // 2, 0)
+    return (f"{text[:half]}\n{ELISION_PREFIX} {len(text) - 2 * half} of {len(text)} characters of "
+            f"{name}: past what a reply shows whole. Write a large result to a file under /tmp and "
+            f"print the parts you need>>\n{text[len(text) - half:] if half else ''}")
+
+
+def _python_reply(rc: int, out: str, err: str) -> str:
+    """A python run's reply, its two streams together within `_view_cap()` (`_shares`)."""
+    out_cap, err_cap = _shares([len(out), len(err)], _view_cap())
+    return "\n".join([f"exit {rc}", _framed("stdout", _cut_output("stdout", out, out_cap)),
+                      _framed("stderr", _cut_output("stderr", err, err_cap))])
 
 
 def _output_function(fn: Callable[..., Any], schema: dict) -> Callable[..., Any]:

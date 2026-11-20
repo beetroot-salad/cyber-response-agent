@@ -73,7 +73,9 @@ _ORACLE_TOOLS: tuple[tuple[str, str, dict], ...] = (
      _schema({"entity": {"type": "string"}, "field": {"type": "string"}, "value": _ANY},
              ["entity", "field", "value"])),
     ("python", "Run Python in the oracle's sandboxed scratch box. It runs in a folder holding the "
-     "saved reads (`inputs/`), which is read-only: write any file of your own under `/tmp`.",
+     "saved reads (`inputs/`), which is read-only: write any file of your own under `/tmp`. Output "
+     "past what a reply shows whole is cut to its head and tail: print what you need, not whole "
+     "answers.",
      _schema({"code": {"type": "string"}}, ["code"])),
     ("re_ask", "Re-ask a live call's own question bounded at the branch point; its answer "
      "becomes this attempt's base.", _schema({"system": {"type": "string"},
@@ -84,6 +86,19 @@ _ORACLE_TOOLS: tuple[tuple[str, str, dict], ...] = (
      "box, as python runs: its folder is read-only; prints the {patch, entity_refs, proofs} "
      "document) or those fields. Keeps nothing.",
      _HANDIN_SCHEMA),
+)
+
+
+#: The verifier's function tools (#1385's checks read the whole answer): its own reads, and
+#: Python in a sandboxed box of its own, never the oracle's.
+_VERIFIER_TOOLS: tuple[tuple[str, str, dict], ...] = (
+    _ORACLE_TOOLS[0],
+    ("python", "Run Python in your own sandboxed box. It runs in a folder holding what you judge, "
+     "whole (`inputs/index.json` names each file: `base`, `served`, `changes`, `dropped` where the "
+     "call was re-asked, and `reads`, your own `run_query` answers), which is read-only: write any "
+     "file of your own under `/tmp`. Output past what a reply shows whole is cut to its head and "
+     "tail: print what you need, not whole answers.", _schema({"code": {"type": "string"}},
+                                                              ["code"])),
 )
 
 
