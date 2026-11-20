@@ -118,7 +118,8 @@ def _declaration(adapter: str, reads: tuple[tuple[str, str], ...]) -> Any:
 def _sent(catalog: Catalog, adapter: str, tool: str, kwargs: Mapping[str, Any], proxy_url: str,
           tmp_path: Path) -> tuple[list[CapturedRequest], list[str]]:
     """The requests `tool` made through the capture seam, and the findings if the call could not be driven (a settings or
-    confinement refusal, or any fault before a request is captured, is a finding, never read as "sent nothing")."""
+    confinement refusal, or any fault before a request is captured, is a finding, never read as "sent nothing"). Limit: the
+    stand-in answers `{}`, so a request a tool would send only after reading a real reply is not seen."""
     entry = catalog.entry(adapter)
     settings = SystemConfig(entry.sample_settings or {})
     tenant = RecordTenant(systems={adapter: settings}, access={adapter: _declaration(adapter, ())}, agent=tmp_path)
@@ -256,7 +257,8 @@ def test_1504_o2_control_a_tool_that_raises_before_sending_is_a_finding_not_sent
     (folder / "widget_adapter.py").write_text(
         "from defender.kit.faults import UpstreamFault\n\n\n"
         "def lookup(ctx, *, value):\n    raise UpstreamFault('raised before any request')\n\n\n"
-        "VERBS = {'lookup': lookup}\n", encoding="utf-8")
+        "VERBS = {'lookup': lookup}\n"
+        "READ_ROUTES = ()\n", encoding="utf-8")
     catalog = Catalog.of_checkout(tmp_path / "checkout")
     with _proxy() as proxy_url:
         found = _findings(catalog, "widget", (), {("widget", "lookup"): {"value": "x"}}, proxy_url, tmp_path)

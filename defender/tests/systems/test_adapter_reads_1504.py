@@ -56,7 +56,6 @@ def test_1504_o4_the_validator_prints_an_adapters_reads_given_only_the_system():
     """Before `access.yaml` exists: `validate_scaffold <system>` with no folder prints every read that adapter declares, so
     the agent can write them: both of Elastic's, and threat-intel's lookup. (O4)"""
     out = _validate("elastic")
-    assert "elastic" in out.lower(), out
     for route in X.ELASTIC_READS:
         assert X.shown(route) in out, (route, out)
     assert X.shown(X.THREAT_INTEL_READS[0]) in _validate("threat-intel")

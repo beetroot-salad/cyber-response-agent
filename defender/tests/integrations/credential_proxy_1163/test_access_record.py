@@ -135,15 +135,32 @@ def test_1504_o3_a_system_whose_non_get_reads_differ_from_its_adapters_is_down_a
     assert "cmdb" in granted, f"positive control: the other granted systems stay in the grant: {granted}"
 
 
-def test_1504_o3_the_same_systems_with_exactly_their_adapters_reads_are_up_and_in_the_read_grant(tmp_path, data_root):
-    """Control: Elastic with both searches, plus a GET and a HEAD read listed beside them, is up and granted. (O3)"""
-    access = R1366.declaration(ELASTIC_BASE, scheme="basic", reads=(SEARCH, QUERY, ("GET", "/_cluster/health"),
-                                                                    ("HEAD", "/logs-*")))
-    judged, record = _judged(tmp_path, data_root, "elastic", access)
+@pytest.mark.parametrize("system", ["elastic", "identity"])
+def test_1504_o3_the_same_systems_with_exactly_their_adapters_reads_are_up_and_in_the_read_grant(
+        tmp_path, data_root, system):
+    """Control: each system of the mismatch rows with exactly its adapter's reads (plus a GET and a HEAD read) is up,
+    parsed and in both read passes. (O3)"""
+    beside = (("GET", "/_cluster/health"), ("HEAD", "/logs-*"))
+    access = R1366.declaration(ELASTIC_BASE, scheme="basic", reads=(SEARCH, QUERY, *beside)) if system == "elastic" \
+        else H.declaration(BASE, reads=beside)
+    judged, record = _judged(tmp_path, data_root, system, access)
     assert judged.down == {}, judged.down
-    assert {"elastic", "cmdb"} <= set(system_status.read_grant(record, judged.down))
-    assert isinstance(record.access["elastic"], AccessDeclaration)
-    assert "elastic" in run_common.proxied_reads(record), "positive control on the job helper's channel"
+    assert {system, "cmdb"} <= set(system_status.read_grant(record, ()))
+    assert isinstance(record.access[system], AccessDeclaration)
+    assert system in run_common.proxied_reads(record), "positive control on the job helper's channel"
+
+
+@pytest.mark.parametrize("builder", ["run_tenant_for", "record_settings"])
+def test_1504_o3_the_run_record_builder_takes_its_callers_catalog_and_has_no_default_of_its_own(builder):
+    """The builder judges reads against the catalog its caller read, never a fresh file read of its own: `catalog` is
+    a parameter with no default. (O3, r4 "the list comes from the catalog the caller holds")"""
+    import inspect
+
+    from defender.systems import run_tenant
+
+    parameter = inspect.signature(getattr(run_tenant, builder)).parameters.get("catalog")
+    assert parameter is not None, f"{builder} takes no catalog"
+    assert parameter.default is inspect.Parameter.empty, f"{builder}'s catalog defaults to {parameter.default!r}"
 
 
 @pytest.mark.parametrize(("reads", "refused"), [pytest.param((), False, id="exact"),

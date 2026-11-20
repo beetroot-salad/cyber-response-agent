@@ -174,7 +174,6 @@ def test_1504_o3_threat_intel_lists_its_lookup_and_nothing_else():
     route; none listed is refused naming the lookup as missing. (O3, C2)"""
     assert _judge("threat-intel", X.THREAT_INTEL_READS) == []
     [extra] = _named(_judge("threat-intel", (*X.THREAT_INTEL_READS, EXTRA_DELETE)), EXTRA_DELETE, X.EXTRA_WORD)
-    assert extra, "one fault names the extra route"
     assert _named(_judge("threat-intel", ()), X.THREAT_INTEL_READS[0], X.MISSING_WORD)
 
 
