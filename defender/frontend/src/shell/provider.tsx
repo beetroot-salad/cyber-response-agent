@@ -4,6 +4,7 @@
 import { useQueries, useQuery, type QueryClient } from "@tanstack/react-query";
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { valuesOf, type ShapeName, type ShapeValues } from "../addresses";
+import { isPageOf } from "./page";
 import type { AcceptResult, Gone, Person, ReadBody, ReadKey, ReadParams, ReadResult } from "./types";
 
 // The shell's types a screen may need, from the one module screens import the shell through.
@@ -130,8 +131,9 @@ export interface PagedRead<K extends PagedKey> {
   readonly first: ScreenRead<K>;
   /** The items of every page loaded so far, in order. */
   readonly items: readonly ItemOf<K>[];
-  /** The last later page's state: loading, failed (any failure, a fault of the shell's included), or null when there
-   * is none or it was read. A failed page stays failed for the load: it is not read again. */
+  /** The last later page's state: loading, failed (any failure, a fault of the shell's or an answer that is not a
+   * page included), or null when there is none or it was read. A failed page stays failed for the load: it is not
+   * read again. */
   readonly later: "loading" | "failed" | null;
   /** Read the next page and append it: only while the last page read has a next cursor and none has failed. */
   readonly more: (() => void) | null;
@@ -146,9 +148,18 @@ function withCursor<K extends PagedKey>(params: ReadParams<K>, cursor: string): 
   return { ...given, query: { ...query, cursor } } as ReadParams<K>;
 }
 
-/** A paged read's answer as its page. */
+/** A paged read's answer as its page. Page 1's is trusted to match the document (PR3), as every read's is. */
 function pageOf<K extends PagedKey>(body: ReadBody<K>): Page<ItemOf<K>> {
   // trust: K's body is a page of its items (PagedKey)
+  return body as Page<ItemOf<K>>;
+}
+
+/** A later page's answer as its page, or null when it is not one: not what the document says `key`'s 200 body is,
+ * its items' field types included (`isPageOf`). So an answer that is not a page is that page's failure, never a fault
+ * thrown while the rows already shown are drawn. */
+function laterPageOf<K extends PagedKey>(key: K, body: ReadBody<K>): Page<ItemOf<K>> | null {
+  if (!isPageOf(key, body)) return null;
+  // trust: checked above against the document's schema for K's body, a page of its items (PagedKey)
   return body as Page<ItemOf<K>>;
 }
 
@@ -183,10 +194,13 @@ export function usePagedRead<K extends PagedKey>(key: K, params: ReadParams<K>):
     if (result.status === "pending" || (result.status === "success" && result.data.kind === "gone")) {
       later = "loading";
     } else if (result.status === "success" && result.data.kind === "ok") {
-      const page = pageOf<K>(result.data.body);
-      items.push(...page.items);
-      next = page.next_cursor;
-      continue;
+      const page = laterPageOf(key, result.data.body);
+      if (page !== null) {
+        items.push(...page.items);
+        next = page.next_cursor;
+        continue;
+      }
+      later = "failed"; // an answer that is not a page
     } else {
       later = "failed";
     }

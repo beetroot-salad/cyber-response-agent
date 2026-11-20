@@ -14,13 +14,17 @@
 //    test file into the app, and no `/api/auth/` path in a string. That last one is a guard against an accident, not a
 //    boundary: a string can be built any way.
 // 5. Outside the shell, the markup the browser sends requests for: an address attribute (`src`, `href`, `action`, ...)
-//    is a path written out from the root and not under `/api`, an imported asset's URL, or made by `src/addresses.ts`
-//    (which makes only the app's own addresses). What could carry an address past that is refused: a spread onto an
-//    HTML element, raw HTML, an inline style, and React's element-making functions called directly. So a screen's
-//    markup makes the browser request no API path: the shell's client, and its 401 policy, sends every one.
+//    is a path written out from the root that the browser, from any address the app serves, resolves on the app's
+//    origin and not to `/api` or under it (dot segments, `\`, percent-escapes and JSX entities read as the browser and
+//    the server read them; each address of a `srcSet` or `ping` list alike), an imported asset's URL, or made by
+//    `src/addresses.ts` (which makes only the app's own addresses). What could carry an address past that is refused:
+//    a spread onto an HTML element, raw HTML, an inline style, and React's element-making functions called directly.
+//    So a screen's markup makes the browser request no API path: the shell's client, and its 401 policy, sends every
+//    one.
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
+import { sampleAddresses } from "./generate.mjs";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const AUTH_PREFIX = "/api/auth/";
@@ -210,12 +214,81 @@ function importOf(made, file, identifier) {
   return { declaration, specifier, target: resolve(made, file, specifier) };
 }
 
+/** Where a literal address is resolved from: an origin of its own, the app's served from it. */
+const ORIGIN = "https://app.invalid";
+/** The entities a JSX string may spell an address with that `decodeJsx` reads; any other is refused. */
+const NAMED_ENTITIES = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
+/** A `srcSet` candidate's width or density, which is not an address. */
+const DESCRIPTOR = /^\d+(\.\d+)?[wx]$/i;
+
+/** A JSX string as the element gets it (the JSX compile decodes HTML entities in it), or null when it holds an entity
+ * not read here. */
+function decodeJsx(text) {
+  let unknown = false;
+  const decoded = text.replace(/&(#x[0-9a-f]+|#[0-9]+|[a-z][a-z0-9]*);/gi, (entity, name) => {
+    const lower = name.toLowerCase();
+    if (lower.startsWith("#")) {
+      const code = lower.startsWith("#x") ? parseInt(lower.slice(2), 16) : parseInt(lower.slice(1), 10);
+      if (code <= 0x10ffff) return String.fromCodePoint(code);
+    } else if (Object.hasOwn(NAMED_ENTITIES, name)) {
+      return NAMED_ENTITIES[name];
+    }
+    unknown = true;
+    return entity;
+  });
+  return unknown ? null : decoded;
+}
+
+/** True when `pathname` names `/api` or a path under it, as a server matching its first segment, in any case, reads
+ * it. */
+function namesApi(pathname) {
+  const first = pathname.split(/[/\\]/).find((segment) => segment !== "");
+  return first !== undefined && first.toLowerCase() === "api";
+}
+
+/** True when `text`, requested by the browser from `address`, stays on the app's origin and reaches no path at or under
+ * `/api`: resolved as the browser resolves it (dot segments, `\`, tabs and newlines), then with its percent-escapes
+ * decoded as a server decodes them, and again until nothing changes. An address the browser or a server cannot read
+ * is refused. */
+function staysOffApiFrom(text, address) {
+  try {
+    const base = new URL(address, ORIGIN);
+    let url = new URL(text, base);
+    // The parser escapes what decoding gave back (a space, say), so a path can come round again: then it is done.
+    const seen = new Set();
+    while (!seen.has(url.pathname)) {
+      seen.add(url.pathname);
+      if (url.origin !== base.origin || namesApi(url.pathname)) return false;
+      const decoded = decodeURIComponent(url.pathname);
+      if (decoded === url.pathname) return true;
+      if (namesApi(decoded)) return false;
+      url = new URL(decoded, base);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** True for a literal address the browser requests or navigates to that is an app address (rule 5): a path written out
+ * from the root that stays off `/api`, or a fragment. */
+function literalAppAddress(text, addresses) {
+  if (text.startsWith("#")) return true;
+  return text.startsWith("/") && !text.startsWith("//") && addresses.every((address) => staysOffApiFrom(text, address));
+}
+
 /** True for an address attribute's value that can only be an app address or an asset (rule 5). */
-function appAddress(made, file, value) {
+function appAddress({ made, file, addresses }, attribute, value) {
   if (value === undefined) return true;
   if (ts.isStringLiteral(value)) {
-    const text = value.text;
-    return (text.startsWith("/") && !text.startsWith("//") && !/^\/api(\/|$)/i.test(text)) || text.startsWith("#");
+    const text = decodeJsx(value.text);
+    if (text === null) return false;
+    // `srcSet` and `ping` hold lists of addresses: each must be one (a `srcSet` candidate's descriptor aside).
+    if (attribute === "srcSet" || attribute === "ping") {
+      const tokens = text.split(/[\s,]+/).filter((token) => token !== "" && !DESCRIPTOR.test(token));
+      return tokens.length > 0 && tokens.every((token) => literalAppAddress(token, addresses));
+    }
+    return literalAppAddress(text, addresses);
   }
   if (!ts.isJsxExpression(value) || !value.expression) return false;
   const expression = value.expression;
@@ -279,6 +352,7 @@ function checkImport(made, file, node, report) {
 /** Rules 4 and 5, the boundary, over the files outside the shell in the screens' compile: the problems found. */
 function boundary(made) {
   const problems = [];
+  const addresses = sampleAddresses();
   for (const file of sourcesOf(made, false)) {
     const report = reporterFor(file, problems, ` ${SCREENS_HINT}`);
     const visit = (node) => {
@@ -286,7 +360,7 @@ function boundary(made) {
         const attribute = node.name.getText(file);
         if (OPAQUE_ATTRIBUTES.has(attribute))
           report(node, `outside the shell, no \`${attribute}\`: it could carry an address past the markup rule`);
-        if (ADDRESS_ATTRIBUTES.has(attribute) && !appAddress(made, file, node.initializer)) {
+        if (ADDRESS_ATTRIBUTES.has(attribute) && !appAddress({ made, file, addresses }, attribute, node.initializer)) {
           report(
             node,
             `outside the shell, \`${attribute}\` is a path written out from the root (not under /api), an imported asset, or made by src/addresses.ts`,
