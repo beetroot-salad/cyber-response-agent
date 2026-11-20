@@ -344,6 +344,26 @@
             "title": "Lab Example",
             "type": "boolean"
           },
+          "reads": {
+            "description": "The non-GET routes this adapter's tools send: a record's `reads` holds exactly these (#1504 O3); empty when every request is a GET.",
+            "items": {
+              "$ref": "#/components/schemas/CatalogRead"
+            },
+            "title": "Reads",
+            "type": "array"
+          },
+          "reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The adapter's configuration reference (Markdown: what its credential needs and the known configuration mistakes), verbatim; null when none can be read.",
+            "title": "Reference"
+          },
           "sample_settings": {
             "anyOf": [
               {
@@ -373,9 +393,30 @@
           "display_name",
           "settings_keys",
           "sample_settings",
-          "lab_example"
+          "lab_example",
+          "reads",
+          "reference"
         ],
         "title": "CatalogAdapter",
+        "type": "object"
+      },
+      "CatalogRead": {
+        "description": "One non-GET read route of an adapter, in the access declaration's own shape (`method`, `path`, `*` = one segment),\nso an admin copies it into a record's `reads` as it is (#1504 O4).",
+        "properties": {
+          "method": {
+            "title": "Method",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "method",
+          "path"
+        ],
+        "title": "CatalogRead",
         "type": "object"
       },
       "Credential": {
