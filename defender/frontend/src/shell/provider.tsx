@@ -1,8 +1,8 @@
 // The load in React (#1540 Am-5, Am-7): the provider, and the hooks that are a screen's only way to the session, the
 // address, the server and the shell's actions. A screen has no other way to the network, storage or the address (PR2);
 // the screens' own compile and the source check enforce it (F8).
-import { useQueries, useQuery, type QueryClient } from "@tanstack/react-query";
-import { createContext, useContext, useState, type ReactNode } from "react";
+import { useInfiniteQuery, useQuery, type QueryClient } from "@tanstack/react-query";
+import { createContext, useContext, type ReactNode } from "react";
 import { valuesOf, type ShapeName, type ShapeValues } from "../addresses";
 import { isPageOf } from "./page";
 import type { AcceptResult, Gone, Person, ReadBody, ReadKey, ReadParams, ReadResult } from "./types";
@@ -154,65 +154,59 @@ function pageOf<K extends PagedKey>(body: ReadBody<K>): Page<ItemOf<K>> {
   return body as Page<ItemOf<K>>;
 }
 
-/** A later page's answer as its page, or null when it is not one: not what the document says `key`'s 200 body is,
- * its items' field types included (`isPageOf`). So an answer that is not a page is that page's failure, never a fault
- * thrown while the rows already shown are drawn. */
-function laterPageOf<K extends PagedKey>(key: K, body: ReadBody<K>): Page<ItemOf<K>> | null {
-  if (!isPageOf(key, body)) return null;
-  // trust: checked above against the document's schema for K's body, a page of its items (PagedKey)
-  return body as Page<ItemOf<K>>;
-}
+/** Page 1's page parameter: no cursor. */
+const FIRST_PAGE: string | null = null;
+
+/** A later page's answer that is not a page of the read's items, or not the page at all: that page's failure. */
+class LaterPageFailed extends Error {}
 
 /**
- * A typed GET of a paged read, page by page (alert list design, Flows "Shell, paged read"). Page 1 is read as `useRead`
- * reads it (a fault of its own goes to the boundary). Each later page is one more read, with the cursor the page
- * before it gave, sent at most once per load; the shell holds the cursors, and a screen never sees one. A later page's
- * failure, a fault included, is that page's state and never thrown, so the rows already shown stay.
+ * A typed GET of a paged read, page by page (alert list design, Flows "Shell, paged read"; r3.4: TanStack Query's
+ * infinite query). Page 1 is read as `useRead` reads it (a fault of its own goes to the boundary). Each later page is
+ * one more page of the same entry, keyed `[key, params]`, with the cursor the page before it gave, sent at most once
+ * per load (the once-per-load client never refetches or retries); the entry holds the cursors, so a change of `params`
+ * starts from page 1 again, and a screen never sees one. A later page's failure, a fault or an answer that is not a
+ * page included, is that page's state and never thrown, so the rows already shown stay.
  */
 export function usePagedRead<K extends PagedKey>(key: K, params: ReadParams<K>): PagedRead<K> {
   const { read, queryClient } = useShell();
-  const [cursors, setCursors] = useState<readonly string[]>([]);
-  const pages = [params, ...cursors.map((cursor) => withCursor(params, cursor))];
-  const results = useQueries(
-    { queries: pages.map((page) => ({ queryKey: [key, page], queryFn: () => read(key, page) })) },
+  const result = useInfiniteQuery(
+    {
+      queryKey: [key, params],
+      initialPageParam: FIRST_PAGE,
+      queryFn: async ({ pageParam }): Promise<ReadResult<K>> => {
+        if (pageParam === null) return read(key, params);
+        const answer = await read(key, withCursor(params, pageParam));
+        if (answer.kind === "gone") return answer;
+        if (answer.kind !== "ok" || !isPageOf(key, answer.body)) throw new LaterPageFailed();
+        return answer;
+      },
+      getNextPageParam: (last) => (last.kind === "ok" ? (pageOf<K>(last.body).next_cursor ?? undefined) : undefined),
+    },
     queryClient,
   );
-  const [firstResult, ...laterResults] = results;
-  if (firstResult === undefined) throw new Error("a paged read has a first page");
-  if (firstResult.status === "error") throw firstResult.error; // the read's own fault: the boundary shows the error state
-  const first: ScreenRead<K> =
-    firstResult.status === "pending" || firstResult.data.kind === "gone" ? { kind: "loading" } : firstResult.data;
+  if (result.data === undefined) {
+    if (result.status === "error") throw result.error; // page 1's own fault: the boundary shows the error state
+    return { first: { kind: "loading" }, items: [], later: null, more: null };
+  }
+  const [firstAnswer, ...laterAnswers] = result.data.pages;
+  if (firstAnswer === undefined) throw new Error("a paged read has a first page");
+  const first: ScreenRead<K> = firstAnswer.kind === "gone" ? { kind: "loading" } : firstAnswer;
   const items: ItemOf<K>[] = [];
-  let next: string | null = null;
-  let later: PagedRead<K>["later"] = null;
-  if (first.kind === "ok") {
-    const page = pageOf<K>(first.body);
-    items.push(...page.items);
-    next = page.next_cursor;
+  for (const answer of [firstAnswer, ...laterAnswers]) {
+    if (answer.kind === "ok") items.push(...pageOf<K>(answer.body).items);
   }
-  for (const result of laterResults) {
-    if (result.status === "pending" || (result.status === "success" && result.data.kind === "gone")) {
-      later = "loading";
-    } else if (result.status === "success" && result.data.kind === "ok") {
-      const page = laterPageOf(key, result.data.body);
-      if (page !== null) {
-        items.push(...page.items);
-        next = page.next_cursor;
-        continue;
-      }
-      later = "failed"; // an answer that is not a page
-    } else {
-      later = "failed";
-    }
-    next = null;
-    break;
-  }
-  const cursor = next;
+  const lastAnswer = laterAnswers.at(-1);
+  const later: PagedRead<K>["later"] = result.isFetchNextPageError
+    ? "failed"
+    : result.isFetchingNextPage || lastAnswer?.kind === "gone"
+      ? "loading"
+      : null;
   const more =
-    cursor === null
-      ? null
-      : () => {
-          setCursors((held) => (held.includes(cursor) ? held : [...held, cursor]));
-        };
+    first.kind === "ok" && result.hasNextPage && later === null
+      ? () => {
+          void result.fetchNextPage({ cancelRefetch: false });
+        }
+      : null;
   return { first, items, later, more };
 }
