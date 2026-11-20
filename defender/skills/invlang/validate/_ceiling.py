@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import re
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 
 from typing import Any
 
-from defender import _yaml
 
 
 from defender._model import model
+from defender.records import closing
 
 
 
@@ -21,7 +21,6 @@ from defender.skills.invlang.parser import is_conclude_empty_marker
 from defender.skills.invlang.schema import CompanionBody, FindingRecord
 from defender.skills.invlang.validate._refs import _leads
 
-from defender.skills.invlang.validate._runtime_evidence import _REPORT_CLOSE_DELIMITER as _REPORT_CLOSE_DELIMITER
 
 
 
@@ -68,18 +67,17 @@ def _row_renders_as_empty_marker(value: object) -> bool:
 #: `access-denied` / `out-of-retention` need a host-side signal that tells them apart from
 #: `query-failed` mechanically (e.g. a distinct `error_class` for a permission refusal, or an
 #: adapter reporting before-retention) before they can be added.
-CEILING_QUERY_FAILED = "query-failed"
+CEILING_QUERY_FAILED = closing.CEILING_QUERY_FAILED
 
 
-CEILING_QUERY_EMPTY = "query-empty"
+CEILING_QUERY_EMPTY = closing.CEILING_QUERY_EMPTY
 
 
-CEILING_NOTHING_TO_TRY = "nothing-to-try"
+CEILING_NOTHING_TO_TRY = closing.CEILING_NOTHING_TO_TRY
 
 
-CEILING_STATES: tuple[str, ...] = (
-    CEILING_QUERY_FAILED, CEILING_QUERY_EMPTY, CEILING_NOTHING_TO_TRY,
-)
+#: The closed states live with the closing record, whose ceiling entries carry one (#1534).
+CEILING_STATES: tuple[str, ...] = closing.CEILING_STATES
 
 
 
@@ -102,10 +100,9 @@ class CeilingReceipt:
     """One parsed `ceiling_test` row.
 
     `state`/`ref`/`cap` are the structured half, mechanically checked against this run's own
-    transcript, and the only part that goes into the report frontmatter (`ceiling_test_block`).
-    `note` is free text for the human analyst: checked only for the report delimiter and a total
-    size bound, rendered into the report body, and passed verbatim (inside the untrusted frame)
-    to the ceiling review composer."""
+    transcript. `note` is free text for the human analyst: checked only for its treated size
+    (`_entry_bounds`), carried into the closing record, and passed verbatim (inside the untrusted
+    frame) to the ceiling review composer."""
 
     state: str
     ref: str | None
@@ -239,31 +236,6 @@ def _cap_is_identifier_shaped(cap: str) -> bool:
 
 
 
-def ceiling_test_block(receipts: Sequence[CeilingReceipt]) -> str:
-    """@owns ceiling_test
-
-    The `ceiling_test:` frontmatter block for `receipts` — `ref`/`state`/`cap` only, never the
-    `note`. The one renderer, so the gate that bounds it (`_check_inconclusive_gating`) and
-    `close_tool.render_report`, which emits it, measure the same bytes. Dumped through PyYAML
-    because `ref`/`cap` are model-cited tokens in a host-owned file."""
-    if not receipts:
-        return ""
-    rows: list[dict[str, str]] = []
-    for r in receipts:
-        row: dict[str, str] = {"state": r.state}
-        if r.ref is not None:
-            row["ref"] = r.ref
-        if r.cap is not None:
-            row["cap"] = r.cap
-        rows.append(row)
-    return _yaml.safe_dump(
-        {"ceiling_test": rows},
-        allow_unicode=True, default_flow_style=False, sort_keys=False, width=10**9,
-    )
-
-
-
-
 def _check_lead_anchored_receipt(companion: CompanionBody, receipt: CeilingReceipt) -> str | None:
     """The `query-failed`/`query-empty` half of `_check_ceiling_receipt`: `ref` must name a lead
     this run dispatched whose own retrieval came back with nothing, and the state must match
@@ -363,12 +335,6 @@ def _check_ceiling_receipt(companion: CompanionBody, receipt: CeilingReceipt) ->
             f"`ceiling_test` row {receipt.raw!r}: `state={receipt.state}` is not one of "
             f"{CEILING_STATES}"
         )
-    if _REPORT_CLOSE_DELIMITER in receipt.note:
-        return (
-            f"`ceiling_test` row {receipt.raw!r}: the `note` carries the literal "
-            f"{_REPORT_CLOSE_DELIMITER!r}, which the committed report may not carry — "
-            f"rewrite the note without it"
-        )
     if receipt.state in _LEAD_ANCHORED_STATES:
         return _check_lead_anchored_receipt(companion, receipt)
     return _check_nothing_to_try_receipt(receipt)
@@ -380,8 +346,8 @@ def _check_ceiling_receipt(companion: CompanionBody, receipt: CeilingReceipt) ->
 class _CeilingWalk:
     """One walk of a `:T conclude.ceiling_test` list: the paying rows (document order, deduped)
     and every row-level complaint. Shared by the gate (`_check_inconclusive_gating`) and the
-    report reader (`conclude_ceiling_test_rows`), so a row the gate refused never reaches
-    `report.md` and one it accepted is never dropped."""
+    record builder (`conclude_ceiling_test_rows`), so a row the gate refused never reaches
+    the closing record and one it accepted is never dropped."""
 
     paying: tuple[CeilingReceipt, ...]
     errors: tuple[str, ...]
@@ -402,8 +368,10 @@ def _walk_ceiling_rows(companion: CompanionBody, rows: Any) -> _CeilingWalk:
             # Silent: a row not even shaped like a receipt states nothing to price. The
             # aggregate "no receipt pays" message carries the guidance if nothing else pays.
             continue
+        # Compared as the record keeps it (`closing.treat`): rows differing only by what
+        # treatment removes are one gap.
         identity = (
-            receipt.state, receipt.ref if receipt.ref is not None else (receipt.cap or ""),
+            receipt.state, closing.treat(receipt.ref if receipt.ref is not None else (receipt.cap or ""), None),
         )
         if identity in seen:
             errors.append(
@@ -422,64 +390,17 @@ def _walk_ceiling_rows(companion: CompanionBody, rows: Any) -> _CeilingWalk:
 
 
 
-#: Bound on the frontmatter receipt block (`ref`/`state`/`cap` only). Charged on the rendered
-#: block (`ceiling_test_block`) because PyYAML quoting changes the size, and a measurement that
-#: disagrees with the renderer can pass here what the commit refuses. Well under
-#: `_artifact_schema.REPORT_FRONTMATTER_MAX` (512); it guards against an unreasonable number of
-#: receipts rather than any one receipt's size.
-_MAX_CEILING_FRONTMATTER_BYTES = 300
-
-
-
-#: Bound on the rendered `ceiling_test` note lines in the report body (`ceiling_note_block`).
-#: Without it a large note passes this gate and then strands the run at
-#: `_artifact_schema.validate_report`'s whole-file cap, after the review has been spent. Sized
-#: like `_MAX_RUNTIME_EVIDENCE_BODY_BYTES`: 300 + 2048 + 2048 stays well under
-#: `_artifact_schema.REPORT_FILE_MAX` (8192).
-_MAX_CEILING_NOTE_BYTES = 2048
-
-
-
-
-def ceiling_note_block(receipts: Sequence[CeilingReceipt]) -> str:
-    """The `report.md` body lines for the receipts' notes: one per receipt that has one, naming
-    its state and its `ref` or `cap`, then the free text. The one renderer, so the bounding gate
-    and `close_tool.render_report` measure the same bytes. Each line starts with a newline;
-    empty when no receipt has a note."""
-    return "".join(
-        f"\nceiling_test ({r.state}, {r.ref or r.cap}): {r.note}" for r in receipts if r.note
-    )
-
-
-
-
 def _check_inconclusive_gating(companion: CompanionBody) -> list[str]:
     """`inconclusive` owes at least one `ceiling_test` row that is a valid receipt.
 
     A `query-failed`/`query-empty` receipt must `ref` a lead this run dispatched whose own
     retrieval is consistent with the state; a `nothing-to-try` receipt must `cap` a capability
-    absent from the closed verb roster. Rows must be distinct, and the rendered frontmatter and
-    note text are bounded. Collected at both the write gate and the close via
+    absent from the closed verb roster. Rows must be distinct; their size is bounded for every
+    disposition by `_entry_bounds`. Collected at both the write gate and the close via
     `_DISPOSITION_GATES`."""
     conclude = companion.get("conclude") or {}
     walk = _walk_ceiling_rows(companion, conclude.get("ceiling_test"))
     errors = [f"disposition inconclusive blocked: {e}" for e in walk.errors]
-    total_bytes = len(ceiling_test_block(walk.paying).encode("utf-8"))
-    if total_bytes > _MAX_CEILING_FRONTMATTER_BYTES:
-        errors.append(
-            f"disposition inconclusive blocked: the accumulated `ceiling_test` receipts are "
-            f"{total_bytes} bytes, over the {_MAX_CEILING_FRONTMATTER_BYTES}-byte bound — "
-            f"name fewer, more specific gaps rather than every one in full"
-        )
-    note_bytes = len(ceiling_note_block(walk.paying).encode("utf-8"))
-    if note_bytes > _MAX_CEILING_NOTE_BYTES:
-        errors.append(
-            f"disposition inconclusive blocked: the accumulated `ceiling_test` notes render "
-            f"{note_bytes} bytes of `report.md` body, over the {_MAX_CEILING_NOTE_BYTES}-byte "
-            f"bound — shorten the "
-            f"notes; they are free text for the human analyst, never required to make a "
-            f"receipt pay"
-        )
     if not walk.paying:
         errors.append(
             "disposition inconclusive blocked: no `ceiling_test` row is a receipt that pays "
@@ -497,9 +418,8 @@ def _check_inconclusive_gating(companion: CompanionBody) -> list[str]:
 def conclude_ceiling_test_rows(companion: CompanionBody) -> tuple[CeilingReceipt, ...]:
     """The `:T conclude.ceiling_test` receipts that pay, in document order.
 
-    Public because `report.md` is written from the close's disposition argument and never
-    re-reads the companion, so the close carries these into the report itself. Uses the gate's
-    own walk so the rows that ship are exactly the rows the gate priced and bounded.
+    Public because the close builds its closing record from the parse it already made, for every
+    disposition. Uses the gate's own walk so the rows that ship are exactly the rows it priced.
 
     Takes the parsed companion: the close has already parsed it once, inside the guard that
     turns a parse fault into a refusal (`_refuse_if_entry_price_is_owed`)."""

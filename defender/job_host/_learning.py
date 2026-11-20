@@ -23,8 +23,8 @@ oracle's box, its bind folders in a per-claim folder under the data root, never 
 lock and admission (waiting as today). Its requests: `batch.start(lanes=)`, the drain's publish and draft, made here
 (the draft owned by this helper, C23), its id minted here; `forge.token(min_validity=)`, a fresh token of the tenant's
 forge credential, for at most 150 s (C25: fail closed above it); `record.published(commit=)` and
-`record.refusal(kind=, reason=)`, the drain's publish outcomes written to the tenant records (O3, O4). Box: `batch`,
-over a draft this helper made.
+`record.refusal(kind=, reason=)`, the drain's publish outcomes written to the tenant records (O3, O4); and the tick's
+store, `store.*` (#1487 Flow 2, `_store_relay`). Box: `batch`, over a draft this helper made.
 
 **Endings before the container** (A3, r4.1): a learning job's in the learning entry's own words (setup refused:
 `failed: launch_refused`; cannot be started confined or the helper crashed: `failed: entry_error`; a busy lock or a
@@ -49,7 +49,7 @@ from typing import TYPE_CHECKING, Any
 from defender import _io
 from defender.credential_proxy import PASS_LIFETIME_SEC
 from defender import job_socket
-from defender.job_socket import Refused
+from defender.job_socket import SCRATCH_ROOT, Refused
 
 from ._common import answer_pass, first_pass, grant, mirror_run_page, settle_knowledge, start_run_box
 from ._session import DOCKER_DID_NOT_RUN, HandBack, KindSpec, Prepared, Registry, Session, SetupRefused, setup_step
@@ -64,10 +64,11 @@ LEARNING, POST_STEP = "learning", "post-step"
 LOCK_WAIT_SECONDS = 30.0
 #: Where under the data root each claim's scratch folder lives (oracle boxes' binds): outside
 #: every tenant's folder, the job socket's folder and host `/tmp` (C21).
-SCRATCH = ".job-scratch"
-#: Where under a learning job's episode folder its oracle boxes' scratch folders live (#1543 D1): inside the tenant's
-#: folder, so the job's own process writes the oracle's saved reads into them.
-ORACLE_SCRATCH = ".oracle-scratch"
+SCRATCH = SCRATCH_ROOT
+#: The claim scratch folder's one subfolder the job container mounts read-write, where its oracle boxes' scratch
+#: folders are made, so the job's own process writes the oracle's saved reads into them (#1557 H3, amending #1543
+#: D1). The rest of the claim folder (the boxes' runners) is not mounted into the job.
+SHARED = "shared"
 _COMMIT = re.compile(r"[0-9a-f]{40}([0-9a-f]{24})?")
 
 
@@ -105,6 +106,13 @@ class _PostStep:
     credential: Any = None
     delivery: Any = None
     batches: dict[str, Any] = field(default_factory=dict)
+    #: The tick's store relay (`_store_relay`), made at the first store request.
+    relay: Any = None
+
+
+def post_step_state(session: Session) -> _PostStep:
+    """The post-step's state, or `Refused` (`internal`) before it is set up."""
+    return _state(session, _PostStep)
 
 
 def _state(session: Session, kind: type) -> Any:
@@ -154,6 +162,17 @@ def _scratch(session: Session, cleanup: contextlib.ExitStack) -> Path:
     return folder
 
 
+def _shared(scratch: Path) -> Path:
+    """`<claim scratch>/shared/`, mode 0700: the job container's read-write mount (`SHARED`)."""
+    folder = scratch / SHARED
+    try:
+        _io.guarded_mkdir(folder, base=scratch)
+        folder.chmod(0o700)
+    except (OSError, ValueError) as e:
+        raise SetupRefused(f"the claim's shared folder {folder} could not be made: {e}") from None
+    return folder
+
+
 def _prepare_learning(session: Session, hold: contextlib.ExitStack) -> Prepared:
     from defender import run_common
     from defender.records.formats import TenantRefused
@@ -187,8 +206,7 @@ def _prepare_learning(session: Session, hold: contextlib.ExitStack) -> Prepared:
     cleanup = contextlib.ExitStack()
     try:
         scratch = _scratch(session, cleanup)
-        # The oracle boxes' scratch inside the episode folder (#1543 D1) goes at the helper's end, as the claim's does.
-        cleanup.callback(shutil.rmtree, _oracle_scratch(session), ignore_errors=True)
+        shared = _shared(scratch)
     except BaseException:
         cleanup.close()
         raise
@@ -202,7 +220,7 @@ def _prepare_learning(session: Session, hold: contextlib.ExitStack) -> Prepared:
              "grant": [[s, "r"] for s in reads], "pass_lifetime": PASS_LIFETIME_SEC,
              "records": current.as_wire()}
     return Prepared(launch=facts, command=list(command), passes=passes, state=state, cleanup=cleanup,
-                    exited=_learning_exited)
+                    exited=_learning_exited, shared=shared)
 
 
 def _remove_copies(state: _Learning) -> None:
@@ -227,7 +245,7 @@ def _prepare_post_step(session: Session, hold: contextlib.ExitStack) -> Prepared
     facts = {"kind": POST_STEP, "tenant": session.tenant_id, "job": session.job_id, "tenant_state": "active",
              "forge_origin": wiring.origin if wiring is not None else None,
              "forge_repo": wiring.repo if wiring is not None else None}
-    return Prepared(launch=facts, command=list(command), state=state, cleanup=cleanup)
+    return Prepared(launch=facts, command=list(command), state=state, cleanup=cleanup, exited=_post_step_exited)
 
 
 def _discard_batches(state: _PostStep) -> None:
@@ -276,6 +294,20 @@ def _post_step_end(session: Session, cause: str) -> None:
     """A post-step stopped, refused or not started before its container writes no record (r4.1)."""
     _logger.info("post-step of %s ended before its container (%s); no record is written",
                  session.job_id or session.tenant_id, cause)
+
+
+def _post_step_exited(session: Session, _rc: int) -> None:
+    """After a post-step's container: whether work still waits, the helper's exit status (#1487 Flow 3, Amendment r5.2).
+    Asked of the store the tick's relay bound (made now if the tick asked nothing), before the cleanup closes it. A
+    stopped post-step, or a question that fails (logged), leaves the status 0, which the worker reads as unknown."""
+    from . import NOTHING_WAITS, WORK_WAITS
+    from ._store_relay import answer_waiting
+
+    if session.signalled.is_set():
+        return
+    waiting = answer_waiting(session)
+    if waiting is not None:
+        session.served_status = WORK_WAITS if waiting else NOTHING_WAITS
 
 
 def _learning_exited(session: Session, rc: int) -> None:
@@ -486,31 +518,20 @@ def _sibling_box(session: Session, ident: str) -> Any:
     return start_run_box(session, sibling.run_dir, sibling.copy)
 
 
-def _oracle_scratch(session: Session) -> Path:
-    """`<T>/episodes/<job id>/.oracle-scratch`: where the job's oracle boxes' scratch folders are made (#1543 D1)."""
-    if session.tenant_folder is None:
-        raise Refused("the job's tenant is not accepted yet", "internal")
-    return session.tenant_folder / EPISODES / str(session.job_id) / ORACLE_SCRATCH
-
-
 def _oracle_box(session: Session, _ident: str) -> Any:
     """The oracle's box (#1224): its runner made in a fresh folder under the claim's scratch folder (C21: never host
-    `/tmp`), removed with it at the helper's end; its scratch made inside the job's own episode folder (#1543 D1), so
-    the job's process can save the oracle's reads where its code reads them. The scratch is judged from `<T>/` down
-    with no link followed, before the start and again once it is made."""
+    `/tmp`), removed with it at the helper's end; its scratch made inside the claim's `shared/` folder (#1557 H3),
+    which the job container mounts, so the job's process can save the oracle's reads where its code reads them. The
+    box binds the scratch read-only. Nothing is made in the tenant's folder."""
     from defender import box
 
     state = _state(session, _Learning)
     folder = state.scratch / f"oracle-{uuid.uuid4().hex[:12]}"
     _io.guarded_mkdir(folder, base=state.scratch)
-    holder = _oracle_scratch(session)
-    session.judge_binds([holder], must_exist=False)  # a link on the way is `confinement`, before anything is made
-    _io.guarded_mkdir(holder, base=holder.parents[2])  # from `<T>/` down, no link followed
-    session.judge_binds([holder])
     try:
         return box.start_oracle_box(env=os.environ, tenant_id=session.tenant_id, folder=folder,
-                                    docker=session.docker, data_root=session.root_folder, scratch_folder=holder,
-                                    judge=lambda scratch: session.judge_binds([scratch]))
+                                    docker=session.docker, data_root=session.root_folder,
+                                    scratch_folder=state.scratch / SHARED)
     except box.BoxStartRefused as refused:
         raise box.BoxFault(str(refused)) from None
 

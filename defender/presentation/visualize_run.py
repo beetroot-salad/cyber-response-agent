@@ -12,10 +12,10 @@ from typing import TYPE_CHECKING, Any, Literal
 if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
 
+from defender._vocab import UNKNOWN_DISPOSITION
 from defender.records import formats
 from defender._io import load_json_artifact, read_guarded, read_jsonl_rows, read_text_utf8
-from defender.records.formats import ReportRead
-from defender.records import RunPaths
+from defender.records import RunPaths, closing as closing_record
 from defender.learning import lead_repository
 from defender.presentation.publisher import NoPublishRoot, Publisher
 from defender.presentation._page_failed import VisualizeFailed
@@ -45,7 +45,6 @@ from defender.presentation.visualize_primitives import (
     CSS,
     esc,
     fmt_duration,
-    parse_report,
     UsageParser,
     UsageRefused,
     render_alert_block,
@@ -98,10 +97,16 @@ def render_page(run: Run) -> str:
     is handed nothing else, so a re-render reads what the run's first render read.
 
     The store must resolve: a run dir copied without its store pointer would otherwise render a
-    complete-looking page for a run whose record cannot be found. It fails before a page exists.
+    complete-looking page for a run whose record cannot be found. It fails before a page exists,
+    and so does a run whose closing record could not be looked up (#1534): `VisualizeFailed`
+    carrying only the fault's fixed wording; its detail, which may name a path, is logged.
     """
+    found = closing_record.for_run(run)
+    if isinstance(found, closing_record.CouldNotLook):
+        _logger.warning("the closing record of %s could not be looked up (%s): %s", run.id, found.kind, found.detail)
+        raise VisualizeFailed(found.wording)
     cost = _ledger_cost(run)
-    return render_runtime_page(run.run_dir, cost=cost)
+    return render_runtime_page(run.run_dir, cost=cost, closing=found)
 
 
 def _ledger_cost(run: Run) -> LedgerCost:
@@ -130,6 +135,8 @@ def save_page(run: Run) -> str:
     (#1170 A10)."""
     try:
         page = render_page(run)
+    except VisualizeFailed:
+        raise  # the closing record's fault, its fixed wording only: no path is added to it
     except Exception as e:
         raise VisualizeFailed(f"the page for {run.run_dir} could not be rendered") from e
     record = run.observability.runtime_html
@@ -205,43 +212,51 @@ def _byline(parts: list[str]) -> str:
 _HEALTH_ICON = {"good": "✓", "warn": "⚠", "bad": "✗"}
 
 
-def _gate_badge_html(report: ReportRead) -> str:
-    """The review gate's outcome, beside the disposition it produced.
+def _gate_badge_html(closing: closing_record.Lookup) -> str:
+    """The review gate's outcome, beside the disposition it produced, read from the run's closing
+    record (#1534), so the headline agrees with what the learning loop and judge read. None when
+    the run has no record.
 
-    Read from report.md's frontmatter (the gate writes `outcome`/`cause`/`failure_kind` there),
-    so the headline agrees with what the learning loop and judge read.
-
-    The outcome alone is not enough: the bypass arm also writes `outcome: stands` ("committed
+    The outcome alone is not enough: the bypass arm also records `outcome: stands` ("committed
     unchanged"), so the cause distinguishes a bypass from a review that held.
     """
-    outcome = str(report.frontmatter.get("outcome", "") or "")
-    if not outcome:
+    if not isinstance(closing, closing_record.Record):
         return ""
+    record = closing.record
     vocab = close_vocabulary()
-    kind = report.frontmatter.get("failure_kind")
-    if kind:
-        cls, label = "gate-fault", f"gate: {outcome} ({kind})"
-    elif str(report.frontmatter.get("cause", "") or "") == vocab.not_reviewed_cause:
+    if record.failure_kind:
+        cls, label = "gate-fault", f"gate: {record.outcome} ({record.failure_kind})"
+    elif record.cause == vocab.not_reviewed_cause:
         cls, label = "gate-skip", "gate: not reviewed"
     else:
-        cls = {vocab.stands: "gate-stands", vocab.forced: "gate-forced"}.get(outcome, "gate-other")
-        label = f"gate: {outcome}"
+        cls = {vocab.stands: "gate-stands", vocab.forced: "gate-forced"}.get(record.outcome, "gate-other")
+        label = f"gate: {record.outcome}"
     return f'<a class="gate-badge {cls}" href="#sec-review">{esc(label)}</a>'
 
 
 def render_runtime_headline(
     run_dir: Path,
-    report: ReportRead,
+    closing: closing_record.Lookup,
     health: dict,
     leads: list,
 ) -> str:
-    disposition = report.disposition_or_unknown
-    # `close_tool.render_report` does not write `confidence`, so show it only when present.
-    confidence = report.frontmatter.get("confidence")
-    conf_html = (
-        f'<span class="an-conf">confidence: {esc(str(confidence))}</span>' if confidence else ""
+    """The headline: the record's disposition, the review's status (and, for an overridden close,
+    the disposition the model drafted), a benign close's confidence, and the record's summary, escaped. A run with no record
+    shows the unknown disposition and no summary."""
+    record = closing.record if isinstance(closing, closing_record.Record) else None
+    disposition = record.disposition if record is not None else UNKNOWN_DISPOSITION
+    drafted_html = (
+        f'<span class="an-drafted">drafted: {esc(record.drafted_disposition)}</span>'
+        if record is not None and record.drafted_disposition else ""
     )
-    body = report.body.strip() or "(no report body)"
+    conf_html = (
+        f'<span class="an-conf">confidence: {esc(record.confidence)}</span>'
+        if record is not None and record.confidence else ""
+    )
+    if record is None:
+        body = "(the run has no closing record)"
+    else:
+        body = record.summary or "(no summary)"
 
     icon = _HEALTH_ICON.get(health["level"], "•")
     detail = (
@@ -259,12 +274,13 @@ def render_runtime_headline(
     <div class="fold-card card-analysis">
       <div class="an-top">
         <span class="disp-badge disp-{esc(disposition)}">{esc(disposition)}</span>
+        {_gate_badge_html(closing)}
+        {drafted_html}
         {conf_html}
-        {_gate_badge_html(report)}
       </div>
       <div class="an-health">{health_html}</div>
       <div class="an-cols">
-        <div class="an-report">{esc(body)}</div>
+        <div class="an-summary">{esc(body)}</div>
         <div class="an-leads">{_lead_summary(leads)}</div>
       </div>
     </div>
@@ -497,15 +513,16 @@ def _headline_cost(cost: LedgerCost) -> str:
     return "unknown"
 
 
-def render_runtime_page(run_dir: Path, *, cost: LedgerCost) -> str:
+def render_runtime_page(run_dir: Path, *, cost: LedgerCost, closing: closing_record.Lookup) -> str:
     """The run's page. The ticket line shows whenever the run has a receipt (#1471 W7), as the job's own report (r9).
 
-    `cost` is the ledger's one read, required: every dollar on the page comes from it (#1377 r7.2 P1)."""
+    `cost` is the ledger's one read, required: every dollar on the page comes from it (#1377 r7.2 P1).
+    `closing` is the run's closing-record lookup, required likewise (#1534): the headline, the
+    health and the review gate read it, and nothing on the page reads a disposition elsewhere."""
     case_id = run_dir.name
     events = read_jsonl_rows(RunPaths(run_dir).tool_trace)
     messages = load_messages(run_dir)
     _, n_tool_calls = _stats(events)
-    report = parse_report(run_dir)
     leads = sorted(lead_repository.joined(run_dir), key=_lead_sort_key)
 
     raw_phases = normalize_phase_names(split_investigation_phases(run_dir))
@@ -548,7 +565,7 @@ def render_runtime_page(run_dir: Path, *, cost: LedgerCost) -> str:
     entries = build_transcript(
         messages, transcript_phase_map(events, tags, messages), phase_order)
     tools = tool_usage(events, messages)
-    health = run_health(run_dir, events, messages, phase_order, leads=leads, report=report)
+    health = run_health(run_dir, events, messages, phase_order, leads=leads, closing=closing)
     md = run_metadata(run_dir, events, messages)
 
     wall_ms = sum(e.get("duration_ms") or 0 for e in events if e.get("type") == "result")
@@ -577,7 +594,7 @@ def render_runtime_page(run_dir: Path, *, cost: LedgerCost) -> str:
     )
     transcript_html, n_tx, tx_phases = render_runtime_transcript(entries, tools, phases)
     leads_html, n_leads = render_runtime_leads_queries(run_dir, leads)
-    review_html, n_reviewed = render_review_gate(run_dir, report, review_by_lens)
+    review_html, n_reviewed = render_review_gate(run_dir, closing, review_by_lens)
 
     stats_html = (
         f'<span class="ts-cost">{_headline_cost(cost)}</span>'
@@ -601,7 +618,7 @@ def render_runtime_page(run_dir: Path, *, cost: LedgerCost) -> str:
   {render_runtime_toc(phases, n_tx, n_leads, tx_phases, leads, n_reviewed)}
   <article class="content content-runtime">
     {render_knowledge_banner(run_dir)}
-    {render_runtime_headline(run_dir, report, health, leads)}
+    {render_runtime_headline(run_dir, closing, health, leads)}
     {render_ticket_line(run_dir)}
     {_render_policy_denials_section(run_dir)}
     {metrics_html}

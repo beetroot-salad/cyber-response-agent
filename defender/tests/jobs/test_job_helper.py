@@ -738,8 +738,9 @@ def _tree(root: Path) -> dict[str, str]:
 def test_a6_h9_a_helper_run_leaves_on_the_data_root_only_its_run_folder_its_records_and_the_empty_socket_parent(scene):
     """The data root after a helper's run, against before it: what was added is the run folder `<T>/runs/<inv>/` and what
     the job wrote in it, the run's records beside it (`<T>/runs/<inv>.*`) and the shared socket parent `.job-sockets/`,
-    empty (the claim's socket folder is gone, so no later claim finds one), beside the tenant lock's own files (no holder
-    left) and the empty run-copy parent; nothing was removed. (A6, H9)"""
+    empty (the claim's socket folder is gone, so no later claim finds one), and the shared owner-record parent
+    `.job-owners/`, empty likewise (#1557 O5), beside the tenant lock's own files (no holder left) and the empty run-copy
+    parent; nothing was removed. (A6, H9)"""
     inv, argv = _investigation(scene)
     tenant_runs = (scene.runs).relative_to(scene.root)
     before = _tree(scene.root)
@@ -757,6 +758,9 @@ def test_a6_h9_a_helper_run_leaves_on_the_data_root_only_its_run_folder_its_reco
     assert sorted(set(before) - set(after)) == [], "the helper removed what it did not make"
     added = {p: kind for p, kind in after.items() if p not in before}
     assert added.get(".job-sockets") == "dir", f"control: the shared socket parent was made: {sorted(added)}"
+    assert added.get(".job-owners") == "dir", f"control: the shared owner-record parent was made: {sorted(added)}"
+    assert listing(scene.root / ".job-sockets") == [], "a claim's socket folder outlived the helper"
+    assert listing(scene.root / ".job-owners") == [], "a claim's owner record outlived the helper"
     run = str(tenant_runs / inv)
     # #1214's own: the tenant's lock file and its holder folder, left with no holder recorded; the run copies' parent,
     # left empty (the copy itself is gone).
@@ -764,11 +768,46 @@ def test_a6_h9_a_helper_run_leaves_on_the_data_root_only_its_run_folder_its_reco
     owned = {".host-locks", locks, f"{locks}/lock", f"{locks}/processes", f"{scene.tenant}/run-knowledge"}
     assert listing(scene.root / locks / "processes") == [], "a holder record outlived the helper"
     assert listing(scene.root / scene.tenant / "run-knowledge") == [], "a run copy outlived the helper"
-    stray = sorted(p for p in added if p != ".job-sockets" and p not in owned and p != run
+    stray = sorted(p for p in added if p not in (".job-sockets", ".job-owners") and p not in owned and p != run
                    and not p.startswith(run + "/") and not (p.startswith(run + ".") and "/" not in p[len(run):]))
-    assert stray == [], f"the helper left behind more than the run folder, its records and the socket parent: {stray}"
+    assert stray == [], f"the helper left behind more than the run folder, its records and the shared parents: {stray}"
     assert added[run] == "dir"
     assert all(kind != "link" for kind in added.values()), added
+
+
+def test_1557_o5_the_helper_records_itself_for_its_claim_outside_every_bind_while_it_runs_and_removes_the_record_last(
+        scene):
+    """While the job runs: `<root>/.job-owners/<claim>/` holds one owner record, naming the helper's process, for the
+    claim whose socket folder the job is served from, and the job container binds no folder of it. After: the record is
+    gone, with the claim's socket folder. (#1557 O5 r9: the worker removes a claim's folders only once that helper is
+    gone)"""
+    from defender.tests.tenancy.tenant_1108_p4._drain_support import owner_record
+
+    inv, argv = _investigation(scene)
+    owners = scene.root / ".job-owners"
+    got: dict = {}
+
+    def job(c) -> int:
+        got["claims"] = listing(owners) if owners.is_dir() else []
+        if len(got["claims"]) == 1:
+            claim = got["claims"][0]
+            got["pid"] = owner_record(owners / claim)["pid"]
+            got["socket"] = (scene.root / ".job-sockets" / claim).is_dir()
+        (scene.runs / inv / "report.md").write_text("the report", encoding="utf-8")
+        return 0
+
+    docker = ContainerStandIn(job)
+    ran = drive_helper(scene, argv, docker=docker, signer=make_signer())
+
+    assert ran.raised is None, ran.raised
+    assert docker.job_error is None, docker.job_error
+    assert len(got["claims"]) == 1, f"O5 r9: the helper recorded no single claim of its own: {got['claims']}"
+    assert got["pid"] == os.getpid(), f"O5 r9: the claim's record names another process: {got['pid']}"
+    assert got["socket"], "O5 r9: the record is not for the claim the job's socket folder is made for"
+    binds = " ".join(" ".join(a) for a in (*docker.log, *docker.calls) if len(a) > 1 and a[1] in ("create", "run"))
+    assert str(scene.root / ".job-sockets") in binds, "control: the job container's binds are what is searched"
+    assert str(owners) not in binds, "O5 r9: the job container binds a helper's record"
+    assert listing(owners) == [], "O5 r9: the helper's record outlived it"
 
 
 def test_a6_the_helper_makes_the_run_folder_and_the_run_copy_owned_by_itself_and_removes_the_copy_at_the_end(scene):
@@ -793,7 +832,7 @@ def test_a6_the_helper_makes_the_run_folder_and_the_run_copy_owned_by_itself_and
     assert got == {"run_folder": True, "owner": os.getpid()}
     assert not copy.exists(), "the helper left the run copy it made"
     assert listing(copy.parent) == [], "the helper left a temporary in the run-knowledge folder"
-    assert (run / "report.md").read_text(encoding="utf-8") == "the report", "the run's output did not survive the helper"
+    assert (run / "report.md").read_text(encoding="utf-8") == "the report", "the run's output did not survive the helper"  # lint-report-file: ok — an arbitrary file the stand-in job wrote
 
 
 # --- H10: links in helper-made folders ------------------------------------------------------------------------------
@@ -1347,7 +1386,10 @@ def test_d4_a_job_container_that_exits_nonzero_without_the_server_ever_accepting
         assert "#1469" in text, (where, text)
     # #1492: the helper exits 0 once it served the job to its end, whatever the container's own status; that status is
     # what the helper logs ("its container exited with status N"), and the remedy adds to it without changing either.
-    assert ran.rc == 0, f"the helper's exit followed the container's status: {ran.rc}"
+    # A post-step's helper exits with its answer instead (#1487 r5.2): this scene's store holds nothing waiting.
+    from defender.job_host import NOTHING_WAITS
+
+    assert ran.rc == (NOTHING_WAITS if kind == "post-step" else 0), f"the helper's exit followed the container's status: {ran.rc}"
     assert "its container exited with status 7" in err, err
     written = {name: n for name, n in calls.counts.items() if n}
     assert not written, f"the helper wrote a job-lane record of its own: {written}"

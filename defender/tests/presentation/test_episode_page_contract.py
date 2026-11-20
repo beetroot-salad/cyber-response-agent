@@ -384,12 +384,12 @@ def test_1025_the_standalone_script_runs_with_no_pythonpath_from_any_cwd(tmp_pat
 
 def _unhealthy(ep: E.Episode) -> None:
     """Every refusal sentence the page can render, planted at once: undecodable bytes at the
-    episode-root records, a link at a world's report, a torn document at another's
+    episode-root records, an unreadable arm pointer at a world's closing record, a torn document at another's
     investigation, the served ledger gone for a third, a bad timing document."""
     for name in ("outcome.yaml", "samples.yaml", "provenance.json"):
         E.plant_raw(ep.dir / name, b"\xff\xfe\x00 not text")
     E.plant_raw(ep.dir / "timing.json", b"[not the record")
-    E.plant_link(ep.world(E.GRADED_WORLD) / "report.md", ep.dir / "family.yaml")
+    J.fault_arm(ep.dir, E.GRADED_WORLD, "pointer-unreadable")
     E.plant_raw(ep.world(E.PASSTHROUGH_WORLD) / "investigation.md", b"\xff\xfe\x00 not text")
     (ep.dir / "served" / f"{T.fixture_world_id(E.CONTROL)}.jsonl").unlink()
     E.plant_link(ep.dir / "served" / f"{T.fixture_world_id(E.GRADED_WORLD)}.jsonl",
@@ -417,7 +417,9 @@ def test_1025_an_unhealthy_episode_renders_no_absolute_path_and_byte_identically
                  "provenance record unreadable"):
         assert slot in records, records
     assert "timing record unreadable" in page.text_of("sec-stages")
-    assert "could not be read" in page.section(f"world-{E.GRADED_WORLD}").find_all(
+    from defender.records import closing as C
+
+    assert C.FAULT_WORDING["pointer-unreadable"] in page.section(f"world-{E.GRADED_WORLD}").find_all(
         cls="w-report")[0].text()
     assert "investigation record unavailable" in page.text_of(f"leads-{E.PASSTHROUGH_WORLD}")
     assert "served ledger: absent" in page.text_of(f"leads-{E.CONTROL}")

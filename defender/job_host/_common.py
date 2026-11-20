@@ -76,7 +76,8 @@ def _box_start(session: Session, fields: dict[str, Any], *, registry: Registry) 
     scratch = getattr(executor, "scratch", None)
     answer = {"handle": handle, "clock_file": str(clock) if clock is not None else None}
     if scratch is not None:
-        # An oracle box's scratch, inside the job's tenant folder (#1543 D1): the job saves its reads there.
+        # An oracle box's scratch, inside the claim's `shared/` folder the job mounts (#1557 H3): the job saves its
+        # reads there.
         answer["scratch"] = str(scratch)
     return answer
 

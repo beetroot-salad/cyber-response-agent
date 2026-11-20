@@ -127,6 +127,85 @@ def test_1025_the_world_block_shows_the_verdict_line_and_the_stored_bucket_never
     assert "analyze-discipline" not in graded, graded
 
 
+def test_1534_a_worlds_slot_shows_the_disposition_its_arm_closed_with_and_the_siblings_keep_theirs(tmp_path):
+    """A record in the arm's database shows as its disposition in that world's slot, read through the roster. (V-READERS)"""
+    ep = E.sample_episode(tmp_path, closings={E.GRADED_WORLD: {"disposition": "false-positive"}})
+    page = render(ep)
+    assert "false-positive" in _world(page, E.GRADED_WORLD), _world(page, E.GRADED_WORLD)
+    assert "false-positive" not in _world(page, E.PASSTHROUGH_WORLD), "the record leaked into the sibling's slot"
+    assert "benign" in _world(page, E.PASSTHROUGH_WORLD), _world(page, E.PASSTHROUGH_WORLD)
+
+
+def test_1534_an_overridden_close_shows_the_committed_disposition_in_its_slot_never_the_drafted_one(tmp_path):
+    """A forced-inconclusive record shows what the host committed, not the draft it overrode. (V-READERS, V-FIELDS)"""
+    from defender.records import closing as C
+
+    overridden = {"disposition": "unresolved", "outcome": C.FORCED_INCONCLUSIVE, "cause": C.CAUSE_REVIEW_INCOMPLETE,
+                  "failure_kind": C.TIMEOUT, "drafted_disposition": "false-positive"}
+    page = render(E.sample_episode(tmp_path, closings={E.GRADED_WORLD: overridden}))
+    world = _world(page, E.GRADED_WORLD)
+    assert "unresolved" in world, world
+    assert "false-positive" not in world, f"the slot shows the drafted disposition: {world}"
+    control = render(E.sample_episode(tmp_path / "control", closings={E.GRADED_WORLD: {"disposition": "false-positive"}}))
+    assert "false-positive" in _world(control, E.GRADED_WORLD), "control: a committed false-positive did not show"
+
+
+def test_1534_a_world_that_never_closed_shows_no_record_and_no_fault_wording(tmp_path):
+    """`NeverClosed` reads as an absence: no record, and no kind's wording. (V-READERS)"""
+    from defender.records import closing as C
+
+    ep = E.sample_episode(tmp_path, closings={E.GRADED_WORLD: None})
+    world = _world(render(ep), E.GRADED_WORLD).lower()
+    assert "no record" in world, world
+    assert not [w for w in C.FAULT_WORDING.values() if w.lower() in world], "an absence was worded as a fault"
+
+
+def test_1534_one_arm_never_set_up_with_the_container_present_reads_no_record_not_a_fault(tmp_path):
+    """A single `RunAbsent` arm (folder gone, container and roster present) is `NeverClosed` in its slot; the sibling keeps its record. (V-READERS, L-9)"""
+    from defender.records import closing as C
+
+    ep = E.sample_episode(tmp_path)
+    J.drop_arm_folder(ep.dir, E.GRADED_WORLD)
+    page = render(ep)
+    world = _world(page, E.GRADED_WORLD).lower()
+    assert "no record" in world, world
+    assert not [w for w in C.FAULT_WORDING.values() if w.lower() in world], "an arm never set up was worded as a fault"
+    assert "benign" in _world(page, E.PASSTHROUGH_WORLD), "control: the sibling's record did not show"
+
+
+@pytest.mark.parametrize("kind", J.ARM_FAULTS)
+def test_1534_a_world_whose_record_could_not_be_looked_at_shows_the_kinds_wording_in_its_slot(tmp_path, kind):
+    """`CouldNotLook` shows `FAULT_WORDING[kind]` in that world's slot only, with no database detail. (V-LOOK)"""
+    from defender.records import closing as C
+
+    ep = E.sample_episode(tmp_path)
+    J.fault_arm(ep.dir, E.GRADED_WORLD, kind)
+    page = render(ep)
+    assert C.FAULT_WORDING[kind] in _world(page, E.GRADED_WORLD), _world(page, E.GRADED_WORLD)
+    assert C.FAULT_WORDING[kind] not in _world(page, E.PASSTHROUGH_WORLD), "the fault leaked into the sibling's slot"
+    assert "benign" in _world(page, E.PASSTHROUGH_WORLD), "control: the sibling's record did not show"
+    for token in ("closing-1534-source", "gone.db"):
+        assert token not in page.raw, f"the fault's detail ({token}) reached the page"
+
+
+def test_1534_a_missing_roster_reads_roster_gone_where_a_world_archive_or_judge_output_exists(tmp_path):
+    """No roster, archive and judge output present: each rendered world reads `roster-gone`; with neither, it is an
+    absence and the page never says `roster-gone`. (V-LOOK)"""
+    from defender.records import closing as C
+
+    ep = E.sample_episode(tmp_path)
+    J.drop_roster(ep.dir)
+    page = render(ep)
+    for label in (E.PASSTHROUGH_WORLD, E.GRADED_WORLD):
+        assert C.FAULT_WORDING["roster-gone"] in _world(page, label), (label, _world(page, label))
+
+    bare = E.sample_episode(tmp_path / "bare")
+    shutil.rmtree(bare.dir / "worlds")
+    (bare.dir / "judge.yaml").unlink()
+    J.drop_roster(bare.dir)
+    assert C.FAULT_WORDING["roster-gone"] not in render(bare).raw, "an episode with no archive and no judge output read as a fault"
+
+
 def test_1025_world_chips_carry_the_judge_models_systems_and_every_draws_answer_and_never_a_default(
         tmp_path):
     ep = E.sample_episode(tmp_path)

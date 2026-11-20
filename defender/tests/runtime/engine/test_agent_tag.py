@@ -16,6 +16,7 @@ from defender.tests.support.runtime.engine._spec767 import (
     CASE_KEY,
     COMMENTS_SUFFIX,
     ELLIPSIS,
+    NEVER_CLOSED,
     TICKETS_PATH,
     WIRE_BOUND_BYTES,
     FakeStore,
@@ -91,10 +92,10 @@ def test_1221_the_tag_is_one_plain_line_naming_the_run():
     ("arm", "report_kw", "record_kw", "expected_rest"),
     [
         ("the record", {"body": NARRATIVE}, {}, "benign"),
-        ("the unreadable report", {"text": ""}, {}, case_ticket.UNREADABLE_COMMENT_BODY),
+        ("a run that never closed", {"closed": False}, {}, NEVER_CLOSED),
         ("the escalation note (aborted)", {"body": NARRATIVE}, {"truncated_by": "aborted"},
          case_ticket.ESCALATION_COMMENT_BODY.format(exit="aborted")),
-        ("the escalation note (a forced close that left no report)", {"text": ""},
+        ("the escalation note (a forced close that left no record)", {"closed": False},
          {"truncated_by": "request-limit"},
          case_ticket.ESCALATION_COMMENT_BODY.format(exit="request-limit")),
     ],
@@ -138,9 +139,9 @@ def test_1221_the_tag_names_the_run_not_the_case_key(tmp_path):
     ("arm", "report_kw", "record_kw"),
     [
         ("the record", {"body": NARRATIVE}, {}),
-        ("the unreadable report", {"text": ""}, {}),
+        ("a run that never closed", {"closed": False}, {}),
         ("the escalation note (aborted)", {"body": NARRATIVE}, {"truncated_by": "aborted"}),
-        ("the escalation note (a forced close that left no report)", {"text": ""},
+        ("the escalation note (a forced close that left no record)", {"closed": False},
          {"truncated_by": "request-limit"}),
     ],
 )

@@ -6,6 +6,7 @@ from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.support.learning.branch import _triplet_947 as T
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -106,44 +107,143 @@ def test_921_resolution_moved_needs_a_row_past_fences_at_with_before_ne_after(tm
     assert unmoved.get("ungradable") is not True
 
 
-def test_921_verdict_is_read_off_the_archived_report_against_the_manifest(tmp_path):
-    ep = J.accepted_episode(tmp_path,
-                            dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
-    (ep / "worlds" / T.world_id(ep, "b") / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
+#: Text that must never reach a world's row or the written record: where the database sits, and a pointer's target.
+_DETAIL_TOKENS = ("closing-1534-source", "gone.db")
+
+
+def _leaks(ep, row) -> list[str]:
+    """Which planted detail tokens appear in `row` or the written `judge.yaml`."""
+    said = json.dumps(row) + (ep / "judge.yaml").read_text(encoding="utf-8")
+    return [token for token in _DETAIL_TOKENS if token in said]
+
+
+def test_921_each_worlds_verdict_is_its_arms_closing_record_read_through_the_roster(tmp_path):
+    """Reached is the arm's committed record, not the archive tree's and not the source's own row. (OD5, V-LOOK)"""
+    from defender.tests.storage.verdict_1534 import _spec1534 as V
+    ep = J.accepted_episode(tmp_path, dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
+    J.set_closing(ep, "b", disposition="benign")
+    # A leftover report in the archive tree disagrees with b's record, and the source run holds its own row in the same
+    # database: neither is b's.
+    (ep / "worlds" / T.world_id(ep, "b") / "report.md").write_text(  # lint-run-records: ok — a planted decoy
+        "---\ndisposition: malicious\n---\n", encoding="utf-8")
+    database = J.arm_database(ep)
+    with V.run_store(tmp_path / "closing-source-runs", "closing-1534-source") as store:
+        V.plant(store, V.a_record(T.SOURCE_RUN_ID, disposition="malicious"))
+    assert database == Path(store.path)
+
     rows = _rows(ep)
+    assert rows["b"]["verdict"] == "benign", rows["b"]
+    assert rows["b"]["declared"] == "malicious", rows["b"]
+    assert rows["c"]["verdict"] == rows["c"]["declared"] == "malicious", rows["c"]
+    assert not rows["b"].get("ungradable"), rows
+    assert not rows["c"].get("ungradable"), rows
 
-    assert rows["b"]["verdict"] == "benign"
-    assert rows["b"]["declared"] == "malicious"
-    assert rows["c"]["verdict"] == rows["c"]["declared"] == "malicious"
 
-    # The vocabulary is read through the shipped normalizer, and that normalizer coerces
-    # nothing: a zero-width-laced headline renders as `malicious` to a human and is NOT one.
-    (ep / "worlds" / T.world_id(ep, "c") / "report.md").write_text(
-        J.report_text("mali​cious"), encoding="utf-8")
-    laced = _rows(ep)
-    assert laced["c"].get("malformed") is True, (
-        "a laced headline that renders as `malicious` graded as a clean one")
-    assert laced["b"].get("ungradable") is not True, (
-        "world c's laced headline cost world b its grade")
+def test_921_reached_is_the_committed_disposition_never_the_drafted_one(tmp_path):
+    """A forced-inconclusive close whose draft equals the declared disposition still reads `unresolved`. (V-FIELDS)"""
+    from defender.records import closing as C
 
-    # Positive control on the same drive: the same world with a CLEAN headline grades, so the
-    # exclusion above cannot pass on a reader that excludes everything.
-    (ep / "worlds" / T.world_id(ep, "c") / "report.md").write_text(
-        J.report_text("malicious"), encoding="utf-8")
-    assert _rows(ep)["c"]["verdict"] == "malicious"
+    ep = J.accepted_episode(tmp_path, dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
+    J.set_closing(ep, "b", disposition="unresolved", outcome=C.FORCED_INCONCLUSIVE,
+                  cause=C.CAUSE_EVIDENCE_CANNOT_DISCRIMINATE, drafted_disposition="malicious")
+    rows = _rows(ep)
+    assert rows["b"]["verdict"] == "unresolved", rows["b"]
+    assert rows["b"]["declared"] == "malicious", rows["b"]
+    assert rows["c"]["verdict"] == "malicious", rows["c"]
+
+
+def test_921_a_world_that_never_closed_is_ungradable_as_a_missing_input_not_malformed_and_wears_no_fault_wording(
+        tmp_path):
+    """`NeverClosed` leaves the world ungradable without `malformed`, beside a graded sibling. (V-READERS)"""
+    from defender.records import closing as C
+
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
+    J.no_closing(ep, "b")
+    grade = _grade(ep)
+    row = J.rows(grade)["b"]
+    assert row["ungradable"] is True, row
+    assert row.get("malformed") is not True, row
+    assert row.get("ungradable_reason"), "the exclusion carries no reason"
+    assert "closing record" in row["ungradable_reason"], row["ungradable_reason"]
+    assert "b" not in grade.graded_worlds
+    assert not any(wording in json.dumps(row) for wording in C.FAULT_WORDING.values()), (
+        "an absence was worded as a fault")
+    assert J.rows(grade)["c"].get("ungradable") is not True, "the sibling lost its grade to b's absence"
+
+    # One arm whose folder is gone, with the container and roster present, never ran: absent, not a fault.
+    gone = J.accepted_episode(tmp_path / "arm-folder-gone", ledgers={"b": [J.oracle_row("b")], "c": []})
+    J.drop_arm_folder(gone, "b")
+    gone_row = J.rows(_grade(gone))["b"]
+    assert gone_row["ungradable"] is True, gone_row
+    assert gone_row.get("malformed") is not True, gone_row
+    assert not any(wording in json.dumps(gone_row) for wording in C.FAULT_WORDING.values()), gone_row
+
+
+@pytest.mark.parametrize("kind", ["row-invalid", "pointer-unreadable", "database-missing", "legacy-link",
+                                  "arm-refused"])
+def test_921_an_arm_that_could_not_be_looked_at_is_ungradable_with_its_kinds_wording_and_no_detail(tmp_path, kind):
+    """A `CouldNotLook` arm: ungradable, not `malformed`, `FAULT_WORDING[kind]`, no path outward; siblings grade. (V-LOOK)"""
+    from defender.records import closing as C
+
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
+    control = _rows(J.accepted_episode(tmp_path / "control", ledgers={"b": [J.oracle_row("b")], "c": []}))
+    assert control["b"].get("ungradable") is not True, "the intact twin did not grade"
+
+    J.fault_arm(ep, "b", kind)
+    grade = _grade(ep)
+    row = J.rows(grade)["b"]
+    assert row["ungradable"] is True, row
+    assert row.get("malformed") is not True, row
+    assert C.FAULT_WORDING[kind] in row["ungradable_reason"], (kind, row)
+    assert not [other for other in set(C.FAULT_WORDING.values()) - {C.FAULT_WORDING[kind]}
+                if other in row["ungradable_reason"]], "another kind's wording rode along"
+    assert _leaks(ep, row) == [], f"the fault's detail reached the outward record: {_leaks(ep, row)}"
+    assert J.rows(grade)["c"].get("ungradable") is not True, "b's fault cost world c its grade"
+
+
+@pytest.mark.parametrize("kind", ["recorded-before-1534", "schema-version", "store-unreadable"])
+def test_921_a_database_that_cannot_be_read_leaves_every_world_ungradable_with_its_kinds_wording(tmp_path, kind):
+    """A database fault is every arm's: each non-control world is ungradable with the kind's wording. (V-LOOK)"""
+    from defender.records import closing as C
+
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
+    J.fault_database(ep, kind)
+    rows = _rows(ep)
+    for label in ("b", "c"):
+        assert rows[label]["ungradable"] is True, rows[label]
+        assert rows[label].get("malformed") is not True, rows[label]
+        assert C.FAULT_WORDING[kind] in rows[label]["ungradable_reason"], (kind, rows[label])
+        assert _leaks(ep, rows[label]) == []
+
+
+@pytest.mark.parametrize("how", ["roster-gone", "arm-container-gone"])
+def test_921_a_missing_roster_refuses_the_whole_pass_and_a_gone_arm_container_leaves_every_world_unlooked(
+        tmp_path, how):
+    """No roster: the pass is refused with the kind's wording and asks the model nothing; roster present, container
+    gone: `arm-refused` for every world. (OD12, V-LOOK)"""
+    from defender.records import closing as C
+
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
+    judge = J.scripted_judge()
+    if how == "roster-gone":
+        J.drop_roster(ep)
+        with pytest.raises(J.refusals()) as raised:
+            J.grade(ep, judge=judge)
+        assert C.FAULT_WORDING["roster-gone"] in str(raised.value)
+        assert judge.prompts == [], "the judge was asked about a family whose roster is gone"
+        assert not (ep / "judge.yaml").exists()
+        return
+    J.drop_arm_container(ep)
+    rows = J.rows(J.grade(ep, judge=judge))
+    for label in ("b", "c"):
+        assert rows[label]["ungradable"] is True, rows[label]
+        assert rows[label].get("malformed") is not True, rows[label]
+        assert C.FAULT_WORDING["arm-refused"] in rows[label]["ungradable_reason"], rows[label]
 
 
 def test_921_a_world_missing_an_input_is_ungradable_named_and_excluded_from_the_verdict_word(
         tmp_path):
     import yaml
-
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
-    (ep / "worlds" / T.world_id(ep, "b") / "report.md").unlink()
-    grade = _grade(ep)
-    row = J.rows(grade)["b"]
-    assert row["ungradable"] is True
-    assert "report.md" in json.dumps(row), "the missing input is not named on the record"
-    assert "b" not in grade.graded_worlds
 
     fresh = J.accepted_episode(tmp_path / "gone-investigation",
                                ledgers={"b": [J.oracle_row("b")], "c": []})
@@ -177,10 +277,6 @@ def test_921_a_malformed_input_excludes_its_own_world_loudly_and_grades_the_rest
         return rows["b"]
 
     for name, mutate in (
-        ("vocab", lambda ep: (ep / "worlds" / T.world_id(ep, "b") / "report.md").write_text(
-            J.report_text("probably-bad"), encoding="utf-8")),
-        ("unreadable", lambda ep: (ep / "worlds" / T.world_id(ep, "b") / "report.md").write_bytes(
-            b"\xff\xfe\x00not utf-8")),
         ("truncated", lambda ep: (ep / "worlds" / T.world_id(ep, "b") / "investigation.md").write_text(
             "# investigation b\n\n```invlang\n:T resolutions\n"
             "h-001  open → held    [l-001 r1 severe ⟂ e-001 :: cut off here\n",
@@ -202,14 +298,6 @@ def test_921_a_malformed_input_excludes_its_own_world_loudly_and_grades_the_rest
     assert "gather_summaries" in said, (
         "a world left short by a mid-copy fault was excluded without naming the input that was "
         "short")
-
-    # An ABSENT input is tier 1 and is NOT marked malformed — the two tiers stay separable.
-    absent = J.accepted_episode(tmp_path / "absent", ledgers={"b": [J.oracle_row("b")], "c": []})
-    (absent / "worlds" / T.world_id(absent, "b") / "report.md").unlink()
-    gone = _rows(absent)["b"]
-    assert gone.get("ungradable") is True, "an absent report.md still graded"
-    assert gone.get("malformed") is not True, (
-        "an absent input was recorded as a malformed one")
 
 
 def test_921_two_world_entries_under_one_label_are_refused_at_manifest_load(tmp_path):

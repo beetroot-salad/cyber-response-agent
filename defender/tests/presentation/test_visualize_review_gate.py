@@ -9,7 +9,6 @@ from pathlib import Path
 from defender.records import RunPaths
 from defender.investigation.challenge_gate import REVIEW_ROLES
 from defender.presentation import visualize_data as d
-from defender.presentation.visualize_primitives import parse_report
 from defender.presentation.visualize_runtime import render_review_gate
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
@@ -23,14 +22,27 @@ def _framed(text: str) -> str:
     return wrap(text, "untrusted", _SALT)
 
 
-def _write_report(run: Path, *, disposition: str, outcome: str, cause: str,
-                  failure_kind: str | None = None) -> None:
-    kind = f"failure_kind: {failure_kind}\n" if failure_kind else ""
-    (run / "report.md").write_text(
-        f"---\ndisposition: {disposition}\noutcome: {outcome}\ncause: {cause}\n{kind}---\n"
-        f"Disposition recorded by the close gate. outcome={outcome}.\n",
-        encoding="utf-8",
-    )
+def _closing(run: Path, *, disposition: str, outcome: str, cause: str, failure_kind: str | None = None,
+             drafted: str | None = None) -> object:
+    """The lookup result the page is handed for a run whose closing record has these fields (#1534: no `report.md`)."""
+    from defender.records import closing as C
+    from defender.tests.storage.verdict_1534 import _spec1534 as V
+
+    return C.Record(V.a_record(run.name, disposition=disposition, outcome=outcome, cause=cause,
+                               failure_kind=failure_kind, drafted_disposition=drafted))
+
+
+def _stands(run: Path, disposition: str = "malicious") -> object:
+    from defender.records import closing as C
+
+    return _closing(run, disposition=disposition, outcome=C.STANDS, cause=C.CAUSE_STORY_SETTLED)
+
+
+def _forced(run: Path, *, drafted: str, cause: str, failure_kind: str | None = None) -> object:
+    from defender.records import closing as C
+
+    return _closing(run, disposition="unresolved", outcome=C.FORCED_INCONCLUSIVE, cause=cause,
+                    failure_kind=failure_kind, drafted=drafted)
 
 
 def _trace_row(run: Path, role: str, round_no: int, row: dict, reply: str | None = None) -> None:
@@ -46,10 +58,6 @@ def _challenged_then_stands(tmp_path: Path) -> Path:
     # A run id is a canonical UUID, so the folder is `fixture_uuid(<label>)`.
     run = tmp_path / fixture_uuid("run")
     run.mkdir()
-    _write_report(
-        run, disposition="malicious", outcome="stands",
-        cause="the challenge review ran and left nothing about the finding unsettled",
-    )
     (run / RunPaths(run).review_record(1).name).write_text(json.dumps({
         "verdict": "challenged", "reviewed_disposition": "malicious",
         "detail": _framed("the pivot rests on one edge nothing independently measured"),
@@ -72,7 +80,7 @@ def _challenged_then_stands(tmp_path: Path) -> Path:
 
 def test_renders_every_attempt_with_its_verdict(tmp_path):
     run = _challenged_then_stands(tmp_path)
-    html, n = render_review_gate(run, parse_report(run))
+    html, n = render_review_gate(run, closing=_stands(run))
 
     assert n == 2, "both close attempts are reviewed attempts"
     assert "attempt 1" in html
@@ -85,7 +93,7 @@ def test_renders_every_attempt_with_its_verdict(tmp_path):
 
 def test_role_traces_land_under_their_attempt_despite_the_round_offset(tmp_path):
     run = _challenged_then_stands(tmp_path)
-    html, _ = render_review_gate(run, parse_report(run))
+    html, _ = render_review_gate(run, closing=_stands(run))
 
     for role in REVIEW_ROLES:
         assert f'>{role}<' in html, f"{role} has no card"
@@ -107,38 +115,36 @@ def test_prose_reply_survives_the_row_reader(tmp_path):
     assert all("support reading" not in json.dumps(r) for r in rows), (
         "fixture no longer exercises the skipped-line path"
     )
-    html, _ = render_review_gate(run, parse_report(run))
+    html, _ = render_review_gate(run, closing=_stands(run))
     assert "support reading r0" in html
 
 
 def test_forced_inconclusive_shows_the_disposition_the_gate_moved(tmp_path):
     run = tmp_path / fixture_uuid("run")
     run.mkdir()
-    _write_report(
-        run, disposition="inconclusive", outcome="forced-inconclusive",
-        cause="the forced-turn budget was spent without settling what the challenge review raised",
-    )
+    from defender.records import closing as C
+
+    closing = _forced(run, drafted="malicious", cause=C.CAUSE_TURN_BUDGET_SPENT)
     (run / RunPaths(run).review_record(1).name).write_text(json.dumps({
         "verdict": "forced-inconclusive", "reviewed_disposition": "malicious",
         "detail": _framed("the authz edge is still unmeasured"), "failure_kind": None,
     }), encoding="utf-8")
     _trace_row(run, "support", 0, {"ok": True}, _framed("support reading"))
 
-    html, _ = render_review_gate(run, parse_report(run))
+    html, _ = render_review_gate(run, closing=closing)
     assert "rv-forced" in html
-    # Both halves of the move, so the page never implies the investigator chose inconclusive.
+    # Both halves of the move, so the page never implies the investigator chose the committed disposition.
     assert "malicious" in html
-    assert "inconclusive" in html
+    assert "unresolved" in html
     assert "rv-arrow" in html
 
 
 def test_failed_review_is_named_as_machinery_not_a_finding(tmp_path):
     run = tmp_path / fixture_uuid("run")
     run.mkdir()
-    _write_report(
-        run, disposition="inconclusive", outcome="forced-inconclusive",
-        cause="the challenge review did not complete", failure_kind="timeout",
-    )
+    from defender.records import closing as C
+
+    closing = _forced(run, drafted="benign", cause=C.CAUSE_REVIEW_INCOMPLETE, failure_kind=C.TIMEOUT)
     (run / RunPaths(run).review_record(1).name).write_text(json.dumps({
         "verdict": "forced-inconclusive", "reviewed_disposition": "benign",
         "detail": _framed("support: support timed out after 450s"), "failure_kind": "timeout",
@@ -146,7 +152,7 @@ def test_failed_review_is_named_as_machinery_not_a_finding(tmp_path):
     for role in REVIEW_ROLES:
         _trace_row(run, role, 0, {"incomplete": True, "reason": _framed("support timed out")})
 
-    html, _ = render_review_gate(run, parse_report(run))
+    html, _ = render_review_gate(run, closing=closing)
     assert "failure_kind: timeout" in html
     assert "rv-failnote" in html, "a broken review must not read as a finding about the case"
     assert "incomplete" in html
@@ -158,15 +164,14 @@ def test_skipped_ablation_is_not_reported_as_ok(tmp_path):
     those apart, exactly as the gate's own writer does."""
     run = tmp_path / fixture_uuid("run")
     run.mkdir()
-    _write_report(run, disposition="benign", outcome="stands",
-                  cause="the challenge review ran and left nothing about the finding unsettled")
+    closing = _stands(run, "benign")
     (run / RunPaths(run).review_record(1).name).write_text(json.dumps({
         "verdict": "stands", "reviewed_disposition": "benign", "detail": "", "failure_kind": None,
     }), encoding="utf-8")
     _trace_row(run, "ablation", 0, {"skipped": "no strong belief movement cites an edge to withhold"})
     _trace_row(run, "support", 0, {"ok": True}, _framed("support reading"))
 
-    html, _ = render_review_gate(run, parse_report(run))
+    html, _ = render_review_gate(run, closing=closing)
     assert "rr-skip" in html
     assert "no strong belief movement" in html
 
@@ -178,9 +183,9 @@ def test_the_headline_badge_does_not_claim_a_review_that_never_ran(tmp_path):
 
     run = tmp_path / fixture_uuid("run")
     run.mkdir()
-    _write_report(run, disposition="inconclusive", outcome="stands",
-                  cause="the disposition was recorded without a challenge review")
-    badge = _gate_badge_html(parse_report(run))
+    from defender.records import closing as C
+
+    badge = _gate_badge_html(_closing(run, disposition="unresolved", outcome=C.STANDS, cause=C.CAUSE_NOT_REVIEWED))
     assert "not reviewed" in badge
     assert "gate-stands" not in badge
 
@@ -190,21 +195,19 @@ def test_a_framed_reply_keeps_its_paragraph_breaks(tmp_path):
     multi-paragraph reading into one run-on block on the surface that exists to show it."""
     run = tmp_path / fixture_uuid("run")
     run.mkdir()
-    _write_report(run, disposition="benign", outcome="stands", cause="x")
     (run / RunPaths(run).review_record(1).name).write_text(json.dumps({
         "verdict": "stands", "reviewed_disposition": "benign", "detail": "", "failure_kind": None,
     }), encoding="utf-8")
     _trace_row(run, "support", 0, {"ok": True}, _framed("para one\n\npara two"))
 
-    html, _ = render_review_gate(run, parse_report(run))
+    html, _ = render_review_gate(run, closing=_stands(run, "benign"))
     assert "para one\n\npara two" in html
 
 
 def test_no_records_is_an_unfinished_run_not_a_clean_one(tmp_path):
     run = tmp_path / fixture_uuid("run")
     run.mkdir()
-    _write_report(run, disposition="benign", outcome="stands", cause="x")
-    html, n = render_review_gate(run, parse_report(run))
+    html, n = render_review_gate(run, closing=_stands(run, "benign"))
     assert n == 0
     assert "no review record" in html
 
@@ -212,7 +215,7 @@ def test_no_records_is_an_unfinished_run_not_a_clean_one(tmp_path):
 def test_the_gate_s_spend_renders_split_by_lens(tmp_path):
     run = _challenged_then_stands(tmp_path)
     html, _ = render_review_gate(
-        run, parse_report(run), {"support": 0.02, "ablation": 0.015, "composer": 0.065},
+        run, _stands(run), {"support": 0.02, "ablation": 0.015, "composer": 0.065},
     )
 
     assert "review spend $0.1000" in html, "the gate's total is not the sum of its lenses"
@@ -222,10 +225,10 @@ def test_the_gate_s_spend_renders_split_by_lens(tmp_path):
 
 def test_a_gate_that_called_no_model_shows_no_spend_line(tmp_path):
     run = _challenged_then_stands(tmp_path)
-    report = parse_report(run)
+    closing = _stands(run)
 
     for costs in (None, {}, {"support": 0.0, "ablation": 0.0, "composer": 0.0}):
-        html, _ = render_review_gate(run, report, costs)
+        html, _ = render_review_gate(run, closing, costs)
         assert "review spend" not in html, f"a spend line rendered for {costs!r}"
 
 

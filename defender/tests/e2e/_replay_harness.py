@@ -326,6 +326,29 @@ def materialize(tmp_path: Path, golden: Path, *, run_id: str = REPLAY_RUN_ID) ->
     return run_dir
 
 
+def golden_disposition(golden: Path = GOLDEN) -> str:
+    """The disposition the golden's recorded run closed with, read off the fixture's recorded verdict line."""
+    found = re.search(r"^disposition:\s*(\w+)", (golden / "report.md").read_text(encoding="utf-8"), re.M)  # lint-report-file: ok — the golden fixture's recorded transcript file, test data and not a run's
+    assert found is not None, f"the golden {golden.name} records no disposition"
+    return found.group(1)
+
+
+def committed_record(run_dir: Path) -> Any:
+    """The run's closing record (`closing.for_run`), or None when it never closed; a lookup fault fails the test."""
+    from defender.records import closing as C
+    from defender.tests.support.shared.contracts._spec1077 import fixture_run
+
+    found = C.for_run(fixture_run(run_dir))
+    assert not isinstance(found, C.CouldNotLook), f"{run_dir.name}: the closing record could not be looked up: {found!r}"
+    return found.record if isinstance(found, C.Record) else None
+
+
+def committed_disposition(run_dir: Path) -> str | None:
+    """The disposition of the run's closing record, or None when it never closed."""
+    record = committed_record(run_dir)
+    return record.disposition if record is not None else None
+
+
 def plant_alert(run_dir: Path, raw: bytes) -> None:
     """The alert and its record in the run's input directory, as `materialize_run` leaves them
     (the committed tenants' mapping derives the facts)."""

@@ -1,7 +1,6 @@
 """#921 — the judge's wire log, which holds the framed prompt, is unreadable from a box."""
 from __future__ import annotations
 
-from defender.tests.support.learning.branch import _triplet_947 as T
 
 from pathlib import Path
 from types import SimpleNamespace
@@ -27,7 +26,6 @@ def test_921_the_wire_log_holding_the_framed_prompt_is_not_reachable_from_a_box(
     traces = J.wire_logs(ep)
     assert traces, "the judge left no wire log at all; there is nothing to deny"
 
-    T.plant_roster(ep)
     runs = ep / "runs"
     run_dir = J.sibling_run_dir(runs, "b")
     dfn = tmp_path / "defender"

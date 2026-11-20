@@ -3,13 +3,13 @@
 The tick's gate, the claim's pre-check and the post-step's wake each kept their own copy of "is the lane busy, is
 anything due" beside the claim's SQL, and the copies disagreed: keyless pitfalls counted as one mistake in the copies
 and as several in the claim, and a batch waiting for a person kept a tenant's checks running though no tick moves it.
-`LearningStore.lane_work` is the claim's own rules with nothing claimed; `lane_waiting` asks it."""
+`LearningStore.lane_work` is the claim's own rules with nothing claimed; `learning_store.tick.work_waiting` asks it
+(over the tick's store, the adapter here)."""
 from __future__ import annotations
 
 import pytest
 
 from defender.learning.core.drains import AUTHOR_DRAIN_RECONCILES
-from defender.learning.core.store_tick import lane_waiting
 from defender.tests.support.jobs._jobs1342 import register_tenant
 from defender.tests.support.learning.core._release1537 import request, why
 from defender.tests.support.learning.core._store1278 import AUTHOR_LANE, LEAD_LANE
@@ -28,6 +28,14 @@ def store(migrated_database):
     register_tenant(migrated_database, BLUE)
     with blocking(migrated_database) as s:
         yield s
+
+
+def lane_waiting(store, tenant: str, lane: str, *, tick_thresholds: dict, reconcile_lanes=None) -> bool:
+    """`work_waiting` over the adapter on `store`, bound to `tenant`, `lane` and `tick_thresholds`, as a tick binds it."""
+    from defender.learning_store.tick import StoreAdapter, work_waiting
+
+    adapter = StoreAdapter(store, tenant=tenant, lane=lane, owner="wake-test", thresholds=dict(tick_thresholds))
+    return work_waiting(adapter, lane, reconcile_lanes=reconcile_lanes)
 
 
 def _keyless_pitfall(n: int) -> dict:

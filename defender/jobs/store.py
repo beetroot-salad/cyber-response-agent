@@ -20,7 +20,7 @@ from collections.abc import AsyncIterator, Callable, Collection, Mapping, Sequen
 from contextlib import asynccontextmanager
 from typing import Any
 
-from sqlalchemy import case, delete, func, select, update
+from sqlalchemy import case, delete, false, func, literal, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import DataError, DBAPIError, IntegrityError, InterfaceError, InternalError, OperationalError
 from sqlalchemy.exc import TimeoutError as PoolTimeout
@@ -46,15 +46,18 @@ from defender.records.job_facts import EXPIRED, LEASE_LAPSED, OFFBOARD_MESSAGE, 
 
 from .audit import SYSTEM, announce
 from .errors import Conflict, NotFound, OffboardNotSettled, UnknownReference, UnstorableText
+from .learning_check import arm_learning_check
 from defender.tenancy.models import AlertMappingRow, CaseVersionRow, TenantRecord
 from defender.tenancy.models import offboard as _tenancy_offboard
 from defender.tenancy.models import share_tenant
 
 from .models import (
+    ALERT_LISTING_COLUMNS,
     LEARNING_TERMINAL,
     LIVE,
     TERMINAL,
     is_terminal,
+    AlertListing,
     AlertRow,
     Claim,
     InvestigationRecord,
@@ -65,6 +68,7 @@ from .models import (
     LearningJobRow,
     LearningProgress,
     StoredAlert,
+    alert_listing,
     investigation_record,
     learning_job_record,
     stored_alert,
@@ -135,8 +139,8 @@ def _refuse_unstorable_text(**fields: str) -> None:
             raise UnstorableText(f"{name} holds a NUL or a lone surrogate, which PostgreSQL text cannot hold")
 
 
-#: A check clock's time that makes it due whatever the interval: a post-step that ends with a
-#: job's findings `pending` it was not handed leaves the clock so (amendment 3).
+#: A check clock's time that makes it due whatever the interval: a hold's end leaves the clock so
+#: when a job ended `completed` while the hold stood (amendment 3, #1487 O7).
 _DUE_AT_ONCE = _dt.datetime(1970, 1, 1, tzinfo=_dt.UTC)
 
 
@@ -218,18 +222,19 @@ class JobStore:
     async def list_alerts(
         self, tenant_id: TenantId, *, fired_after: _dt.datetime | None, fired_before: _dt.datetime | None,
         after: tuple[_dt.datetime, str] | None, limit: int,
-    ) -> list[StoredAlert]:
+    ) -> list[AlertListing]:
         """Up to `limit` of the tenant's alerts with `fired_after <= fired_at < fired_before` (a bound left `None`
-        is open), newest first by `(fired_at, id)` descending, strictly after the position `after` when given."""
-        query = select(AlertRow).where(AlertRow.tenant_id == tenant_id)
+        is open), newest first by `(fired_at, id)` descending, strictly after the position `after` when given. Never
+        reads an alert's `raw` (#1507): `get_alert` is the read that carries it."""
+        query = select(*ALERT_LISTING_COLUMNS).where(AlertRow.tenant_id == tenant_id)
         if fired_after is not None:
             query = query.where(AlertRow.fired_at >= fired_after)
         if fired_before is not None:
             query = query.where(AlertRow.fired_at < fired_before)
         query = newest_first_query(query, AlertRow.fired_at, AlertRow.id, after, limit)
         async with self._tx() as s:
-            rows: Sequence[Any] = (await s.execute(query)).scalars().all()
-        return [stored_alert(row) for row in rows]
+            rows: Sequence[Any] = (await s.execute(query)).all()
+        return [alert_listing(row) for row in rows]
 
     # --- the alert mapping (#1345) ------------------------------------------------------
 
@@ -544,7 +549,7 @@ class JobStore:
                     investigation_id=record.investigation_id,
                     request_key=f"{AUTO_REQUEST_KEY_PREFIX}{record.investigation_id}", attempt=1, trigger="auto",
                     status="queued", created_at=self._clock()))
-                await self._arm_check(s, record.tenant_id)
+                await arm_learning_check(s, record.tenant_id)
         detail = f"stage={stage}" + (f" reason={failure_reason}" if failure_reason else "")
         announce("investigation.finish", actor=SYSTEM, tenant_id=tenant_id, target=investigation_id, detail=detail)
         return record
@@ -729,7 +734,7 @@ class JobStore:
                         investigation_id=lapsed.investigation_id, request_key=lapsed.request_key,
                         attempt=lapsed.attempt + 1, trigger=lapsed.trigger, status="queued",
                         created_at=lapsed.created_at))
-                    await self._arm_check(s, lapsed.tenant_id)
+                    await arm_learning_check(s, lapsed.tenant_id)
         except _Refused:
             return _TakeOver(old_id, tenant, "", None, refused=True, of_learning=True)
         return _TakeOver(old_id, tenant, reason, retry_id, of_learning=True)
@@ -774,7 +779,7 @@ class JobStore:
                 request_key=client_request_id, attempt=1, trigger="explicit", status="queued",
                 created_at=self._clock())
             s.add(row)
-            await self._arm_check(s, tenant_id)
+            await arm_learning_check(s, tenant_id)
             record = learning_job_record(row)
         announce("learning_job.start", actor=actor, tenant_id=tenant_id, target=record.learning_job_id,
                  detail=f"investigation {investigation_id}; trigger=explicit", credential_id=credential_id)
@@ -846,35 +851,52 @@ class JobStore:
 
     async def finish_learning_job(  # noqa: PLR0913 — the end record's values
         self, tenant_id: str, learning_job_id: str, *, status: str, reason: str | None, message: str | None,
-        progress: LearningProgress | None, findings_count: int = 0,
+        progress: LearningProgress | None, findings: Mapping[str, Sequence[Mapping[str, Any]]] | None = None,
     ) -> LearningJobRecord | None:
         """Record the one terminal status of a running, not handed-back learning job (the fence,
-        O2): `completed` sets its findings `pending`. `progress` is the end record's final pick,
-        stage and sibling cost; `None` keeps what the running row was last given. `None` when it
-        changed nothing (the row moved, was deleted or handed back)."""
+        O2). `progress` is the end record's final pick, stage and sibling cost; `None` keeps what
+        the running row was last given. `None` when it changed nothing (the row moved, was deleted
+        or handed back).
+
+        A `completed` end stores the job's findings with it (#1487 Flow 1 step 3), one transaction
+        in this order: the tenant's share lock, first; the fence; then `findings` (`{kind: rows}`,
+        already screened by the worker; `None`: the worker refused them) inserted as the job's
+        under a savepoint (`learning_models.insert_findings`), publish state `done` and the count
+        of rows stored, or, refused there, for a tenant not `active`, or with `findings` `None`, `refused`
+        and nothing of the job stored, logged with its kind; then the tenant's check clock armed,
+        marked when a post-step holds it. An outage at the insert raises, the whole end with it, for
+        the caller to retry, and so does `FindingsNotStored` (an insert error neither the content nor
+        an outage explains, #1487 Amendment r5.3). `findings` is only a `completed` end's."""
         if status not in LEARNING_TERMINAL:
             raise ValueError(f"{status!r} is not a terminal status")
+        if findings is not None and status != "completed":
+            raise ValueError(f"a {status} end stores no findings")
         values: dict[str, Any] = {
             "status": status, "reason": reason, "message": message, "finished_at": self._clock(),
-            "lease_expires_at": None, "findings_count": findings_count,
-            "publish_state": "pending" if status == "completed" else "none"}
+            "lease_expires_at": None, "findings_count": 0, "publish_state": "none"}
         if progress is not None:
             values.update(fork_message_id=progress.fork_message_id, stage=progress.stage,
                           sibling_cost_usd=progress.sibling_cost_usd)
         async with self._tx() as s:
-            row = (await s.execute(
-                update(LearningJobRow).where(
-                    LearningJobRow.tenant_id == tenant_id, LearningJobRow.id == learning_job_id,
-                    LearningJobRow.status == "running", LearningJobRow.finished_at.is_(None))
-                .values(**values).returning(LearningJobRow).execution_options(synchronize_session=False))
-            ).scalars().first()
-            if row is None:
+            state = await share_tenant(s, TenantId(tenant_id)) if status == "completed" else None
+            fenced = (await s.execute(select(LearningJobRow.id).where(
+                LearningJobRow.tenant_id == tenant_id, LearningJobRow.id == learning_job_id,
+                LearningJobRow.status == "running", LearningJobRow.finished_at.is_(None))
+                .with_for_update())).scalar()
+            if fenced is None:
                 return None
             if status == "completed":
-                await self._arm_check(s, tenant_id)
+                values.update(await _store_findings(s, tenant_id, learning_job_id, state, findings))
+            row = (await s.execute(
+                update(LearningJobRow).where(LearningJobRow.id == learning_job_id)
+                .values(**values).returning(LearningJobRow).execution_options(synchronize_session=False))
+            ).scalars().one()
+            if status == "completed":
+                await arm_learning_check(s, tenant_id, mark_held=True)
             record = learning_job_record(row)
         announce("learning_job.finish", actor=SYSTEM, tenant_id=tenant_id, target=learning_job_id,
-                 detail=f"status={status}" + (f" reason={reason}" if reason else ""))
+                 detail=f"status={status}" + (f" reason={reason}" if reason else "")
+                 + (f" findings={record.publish_state}" if status == "completed" else ""))
         return record
 
     async def hand_back_learning_job(
@@ -897,23 +919,7 @@ class JobStore:
             ).scalars().first()
             return None if row is None else learning_job_record(row)
 
-    async def pending_publish(self, tenant_id: str) -> list[str]:
-        """The tenant's `completed` jobs whose findings wait to be published (O14), oldest end first."""
-        async with self._tx() as s:
-            found = (await s.execute(select(LearningJobRow.id).where(
-                LearningJobRow.tenant_id == tenant_id, LearningJobRow.status == "completed",
-                LearningJobRow.publish_state == "pending")
-                .order_by(LearningJobRow.finished_at, LearningJobRow.id))).scalars().all()
-        return [str(i) for i in found]
-
     # --- the family-less check clock (#1344 amendment 3) ---------------------------------------
-
-    @staticmethod
-    async def _arm_check(s: AsyncSession, tenant_id: str) -> None:
-        """Make the tenant's check clock not idle, creating it from now when there is none: a job
-        was queued, or one ended with findings to publish. Its time is left as it is."""
-        await s.execute(pg_insert(LearningCheckRow).values(tenant_id=tenant_id, checked_at=func.now(), idle=False)
-                        .on_conflict_do_update(index_elements=[LearningCheckRow.tenant_id], set_={"idle": False}))
 
     async def claim_learning_check(self, interval: float, holder: str) -> str | None:
         """Hold, as `holder`, the most overdue tenant due a family-less check, or `None`: an
@@ -930,7 +936,7 @@ class JobStore:
         async with self._tx() as s:
             held = (await s.execute(
                 update(LearningCheckRow).where(LearningCheckRow.tenant_id == due.scalar_subquery())
-                .values(checking_until=self._lease_end(), holder=holder)
+                .values(checking_until=self._lease_end(), holder=holder, armed_while_held=False)
                 .returning(LearningCheckRow.tenant_id).execution_options(synchronize_session=False))).scalar()
         return None if held is None else str(held)
 
@@ -943,51 +949,52 @@ class JobStore:
             state = (await s.execute(select(TenantRecord.state).where(TenantRecord.id == tenant_id))).scalar()
             if state in _BEING_REMOVED:
                 return False
-            await self._arm_check(s, tenant_id)
+            await arm_learning_check(s, tenant_id)
             held = (await s.execute(
                 update(LearningCheckRow).where(LearningCheckRow.tenant_id == tenant_id, _unheld())
-                .values(checking_until=self._lease_end(), holder=holder)
+                .values(checking_until=self._lease_end(), holder=holder, armed_while_held=False)
                 .returning(LearningCheckRow.tenant_id).execution_options(synchronize_session=False))).scalar()
         return held is not None
 
-    async def end_learning_check(self, tenant_id: str, holder: str, *, idle: bool, handed: Collection[str]) -> bool:
-        """`holder`'s post-step of the tenant ended, handed the jobs `handed`: the hold is let go
-        and the clock restarts now, idle as `idle` says. A `pending` job it was not handed (one
-        that ended while it ran) makes the tenant due at once instead, never idle. False, changing
-        nothing, when the hold is no longer `holder`'s."""
+    async def end_learning_check(self, tenant_id: str, holder: str, *, idle: bool) -> bool:
+        """`holder`'s post-step of the tenant ended: the hold is let go and the clock restarts now,
+        idle as `idle` says (the worker's answer to "is work still waiting", Flow 3). A job that
+        ended `completed` while the hold stood (its mark, #1487 O7) makes the tenant due at once
+        instead, never idle, and the mark is spent: read and written in one statement on the
+        locked row. False, changing nothing, when the hold is no longer `holder`'s."""
+        marked = LearningCheckRow.armed_while_held
         async with self._tx() as s:
-            unhanded = (await s.execute(select(LearningJobRow.id).where(
-                LearningJobRow.tenant_id == tenant_id, LearningJobRow.status == "completed",
-                LearningJobRow.publish_state == "pending", LearningJobRow.id.notin_(set(handed))).limit(1))
-            ).first() is not None
-            clock: dict[str, Any] = ({"checked_at": _DUE_AT_ONCE, "idle": False} if unhanded
-                                     else {"checked_at": func.now(), "idle": idle})
             ended = (await s.execute(
                 update(LearningCheckRow).where(LearningCheckRow.tenant_id == tenant_id,
                                                LearningCheckRow.holder == holder)
-                .values(**clock, checking_until=None, holder=None)
+                .values(checked_at=case((marked, literal(_DUE_AT_ONCE)), else_=func.now()),
+                        idle=case((marked, false()), else_=literal(idle)), armed_while_held=False,
+                        checking_until=None, holder=None)
                 .returning(LearningCheckRow.tenant_id).execution_options(synchronize_session=False))).scalar()
         return ended is not None
 
-    async def record_publish(
-        self, tenant_id: str, *, published: Collection[str], refused: Collection[str],
-    ) -> tuple[int, int]:
-        """A post-step's answer (O8, O14): the named `pending` jobs of this tenant become `done` or
-        `refused`; any other row is left as it is. Returns how many rows each became."""
-        counts = []
-        async with self._tx() as s:
-            for ids, state in ((set(published), "done"), (set(refused) - set(published), "refused")):
-                if not ids:
-                    counts.append(0)
-                    continue
-                moved = (await s.execute(
-                    update(LearningJobRow).where(
-                        LearningJobRow.tenant_id == tenant_id, LearningJobRow.id.in_(ids),
-                        LearningJobRow.status == "completed", LearningJobRow.publish_state == "pending")
-                    .values(publish_state=state).returning(LearningJobRow.id)
-                    .execution_options(synchronize_session=False))).scalars().all()
-                counts.append(len(moved))
-        return counts[0], counts[1]
+
+async def _store_findings(s: AsyncSession, tenant_id: str, job_id: str, state: str | None,
+                          findings: Mapping[str, Sequence[Mapping[str, Any]]] | None) -> dict[str, Any]:
+    """A `completed` end's findings, in its transaction after the fence (#1487 Flow 1 step 3): the row's publish state
+    and count. Stored only for an `active` tenant (its state as the share lock read it) and findings the worker
+    accepted; anything else, or a refusal at the insert, is `refused`, logged with the job and the refusal's kind.
+    An outage at the insert raises."""
+    from .learning_models import insert_findings  # the learning store's tables load only for a learning job's end
+
+    if findings is None:
+        kind = "refused by the worker"  # the worker logged why
+    elif state != "active":
+        kind = f"tenant {state or 'absent'}"
+    else:
+        inserted = await insert_findings(s, tenant_id, findings, source_run=job_id)
+        if inserted.stored:
+            return {"publish_state": "done", "findings_count": inserted.added}
+        kind = f"refused at the insert: {inserted.why}"
+    if findings is not None:
+        _logger.warning("learning job %s: its findings are refused (%s); the job ends completed and none of them is "
+                        "stored", job_id, kind)
+    return {"publish_state": "refused", "findings_count": 0}
 
 
 def _locked_in_id_order(column: Any, *where: Any) -> Any:

@@ -67,18 +67,19 @@ def _escalation_body(truncated_by: str, link: str) -> str:
 
 
 def _comment_body(run: Run, truncated_by: str | None, link: str) -> tuple[str, str]:
-    """The comment text (P-6: the disposition word or the escalation or unreadable sentence, then the screen link) and
-    its receipt word. Every part is a constant, a closed-set word or an id: nothing the report says is carried.
+    """The comment text (P-6: the disposition word or the escalation or not-recorded sentence, then the screen link) and
+    its receipt word. Every part is a constant, a closed-set word or an id: nothing the model wrote is carried.
 
-    An unreadable report (`ReportNotParsable`) gets the fixed unreadable-branch sentence — or,
-    on a forced-close exit, the escalation note, since the host's own forced close failed and
-    there is no verdict."""
+    A run with no closing record (`case_ticket.NeverClosed`) gets the fixed not-recorded sentence —
+    or, on a forced-close exit, the escalation note, since the host's own forced close failed and
+    there is no verdict. A record that could not be looked up (`RecordUnreadable`) propagates to
+    the caller's refusal branch (no call, a warning, an `error` receipt)."""
     try:
         rec = case_ticket.read_case_record(run)
-    except case_ticket.ReportNotParsable:
+    except case_ticket.NeverClosed:
         if truncated_by in run_end.FORCED_CLOSE_EXITS:
             return _escalation_body(str(truncated_by), link), RECEIPT_ESCALATED
-        return f"{case_ticket.unreadable_comment_body()}\n{link}", RECEIPT_COMMENTED
+        return f"{case_ticket.never_closed_comment_body()}\n{link}", RECEIPT_COMMENTED
     return f"{rec.disposition}\n{link}", RECEIPT_COMMENTED
 
 
@@ -95,16 +96,16 @@ def escalated(truncated_by: str | None, closed_before_cut: bool) -> bool:
 
 def run_outcome(run: Run, *, truncated_by: str | None, closed_before_cut: bool) -> str:
     """The word naming how a run ended, as the feedback setting matches it (#1414 O1): the escalated
-    word when the run ended in an escalated exit without a verdict; `unreadable` when the report
-    cannot be parsed; otherwise the report's disposition. It differs from the case ticket on one
-    path, by design (C21): a forced close whose report cannot be parsed is `unreadable` here,
-    while the ticket posts the escalation note for it (`_comment_body`)."""
+    word when the run ended in an escalated exit without a verdict; `unreadable` when the run has
+    no closing record or it could not be looked up; otherwise the record's disposition. It differs
+    from the case ticket on one path, by design (C21): a forced close that left no record is
+    `unreadable` here, while the ticket posts the escalation note for it (`_comment_body`)."""
     truncated_by = run_end.normalized_truncated_by(truncated_by)
     if escalated(truncated_by, closed_before_cut):
         return str(truncated_by)
     try:
         return case_ticket.read_case_record(run).disposition
-    except case_ticket.ReportNotParsable:
+    except (case_ticket.NeverClosed, case_ticket.RecordUnreadable):
         return "unreadable"
 
 
@@ -135,8 +136,8 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
     a roster of its own. `link` is the investigation screen's address, which the worker built: the comment's last part.
 
     `ask_pass` (a job, #1471 W5) asks for the write pass when no `request_token` was handed: only once the run will
-    comment, its case system is usable and its alert names a ticket, so a silent ending or a keyless alert signs
-    nothing. It answers the token and the proxy's address, or the receipt reason it got none."""
+    comment, its case system is usable, its alert names a ticket and its closing record was looked up, so a silent
+    ending, a keyless alert or a record that cannot be looked up signs nothing. It answers the token and the proxy's address, or the receipt reason it got none."""
     run_dir = run.run_dir
     key = ""
     try:
@@ -154,6 +155,20 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
         if not key:
             _leg_refused(run, key, REASON_NO_TICKET)
             return
+        # The record is looked up before the write pass is asked for (#1534): a run whose record
+        # cannot be looked up posts nothing, so it is signed no pass.
+        try:
+            if escalated(truncated_by, closed_before_cut):
+                body, word = _escalation_body(str(truncated_by), link), RECEIPT_ESCALATED
+            else:
+                body, word = _comment_body(run, truncated_by, link)
+        except case_ticket.RecordUnreadable as e:
+            # The record could not be looked up: no call, and the kind's fixed wording on the
+            # receipt; the detail (it may name a path) only in the run's log.
+            _logger.warning(f"record {key or run_dir.name}: the closing record could not be looked up "
+                            f"({e.kind}): {e.detail}")
+            _leg_refused(run, key, e.wording)
+            return
         if not request_token and ask_pass is not None:
             asked = ask_pass()
             if isinstance(asked, str):
@@ -163,10 +178,6 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
         if not request_token:  # every case system is reached through the credential proxy
             _leg_refused(run, key, REASON_NO_TOKEN)
             return
-        if escalated(truncated_by, closed_before_cut):
-            body, word = _escalation_body(str(truncated_by), link), RECEIPT_ESCALATED
-        else:
-            body, word = _comment_body(run, truncated_by, link)
         _post_comment(run, target, key, body, word,
                       _verb_context(tenant, defender_dir, run_dir, env, request_token, proxy_url))
     except Exception as e:  # noqa: BLE001 — a post-step must never break the run

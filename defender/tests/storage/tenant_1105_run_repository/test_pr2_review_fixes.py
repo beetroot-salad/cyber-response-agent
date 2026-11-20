@@ -20,6 +20,7 @@ from defender.tests.support.shared._postgres1339 import migrated_database  # noq
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
 from defender.tests.storage.tenant_1105_run_repository import _spec1105_pr2 as P
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
+from defender.records._episode_paths import LAYOUT, WORLD_LEAVES
 from defender.records._tenant_id import TenantRefused
 
 
@@ -202,7 +203,8 @@ def test_a_a_container_linked_after_the_siblings_ran_is_recorded_and_judged(
     assert sorted(reasons) == sorted(P.T.world_id(ep, label) for label in P.T.WORLDS), reasons
     assert set(reasons.values()) == {"not archived"}, reasons
     assert "judge" in _steps(ep), f"the judge step was not reached after VERIFY: {_steps(ep)}"
-    archived = [q for q in (ep / "worlds").rglob("report.md")] if (ep / "worlds").is_dir() else []
+    # Every sibling left an investigation, the leaf the archive copies (#1534: no longer a `report.md`).
+    archived = [q for q in (ep / "worlds").rglob(WORLD_LEAVES.investigation.name)] if (ep / "worlds").is_dir() else []
     assert archived == [], f"a world was archived through the linked container: {archived}"
 
     control_root = tmp_path / "control"
@@ -215,7 +217,7 @@ def test_a_a_container_linked_after_the_siblings_ran_is_recorded_and_judged(
     assert clean.rc == 0, f"the control did not launch: {clean!r}"
     (ep2,) = P.launched_episodes()
     assert "not archived" not in _world_reasons(ep2).values()
-    assert (ep2 / "worlds" / P.T.world_id(ep2, "b") / "report.md").is_file()
+    assert (ep2 / LAYOUT.world(P.T.world_id(ep2, "b")).investigation).is_file(), "the control archived no investigation"
     assert (ep2 / "judge.yaml").is_file()
     assert clean.judge.prompts
 

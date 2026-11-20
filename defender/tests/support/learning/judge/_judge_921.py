@@ -310,11 +310,278 @@ def accepted_episode(tmp_path: Path, *, root: Path | None = None,  # noqa: PLR09
             # is a malformed world; an empty one is an empty store.
             (ep / "oracle" / world_id(ep, label)).mkdir(parents=True, exist_ok=True)
     outcome_record(ep, outcome, family_stamp=family_stamp)
+    closing_plan(ep, tmp_path, {label: {"disposition": declared[label]} for label in labels})
     from defender.tests.support.learning.branch import _triplet_947
 
     if _triplet_947.PLANT_RECORDS:
         plant_source_copy(ep, ALERT_RAW)
     return ep
+
+
+# --------------------------------------------------------------------------------------
+# The worlds' closing records (#1534): each world's verdict is its arm's row in the shared database, read through
+# the episode's arm roster. A scene declares which records it wants (`closing_plan`, `set_closing`, `no_closing`);
+# they are planted through the production write the first time anything reads the episode (`episode_runs_for`), so a
+# test that plants its own roster or arm folders first keeps them.
+# --------------------------------------------------------------------------------------
+
+
+@dataclass
+class ClosingPlan:
+    """Which closing record each world of one episode gets, and where the one shared database lives."""
+
+    base: Path
+    #: label -> the `ClosingRecord` fields it closed with (`{"disposition": ...}` at least), or `None`: no record.
+    reached: dict[str, dict[str, Any] | None] = field(default_factory=dict)
+    #: Make each arm's run folder (a world whose folder a scene wants absent turns this off).
+    arm_folders: bool = True
+    planted: set[str] = field(default_factory=set)
+
+
+_CLOSING_PLANS: dict[str, ClosingPlan] = {}
+_SOURCE_CASE = "closing-1534-source"
+
+
+def closing_plan(episode_dir: Path, tmp_path: Path,
+                 reached: Mapping[str, dict[str, Any] | None] | None = None, *,
+                 arm_folders: bool = True) -> ClosingPlan:
+    """Declare the closing records `episode_dir`'s worlds get (`reached`: label -> record fields), the source database
+    sitting under `tmp_path` (outside the episode)."""
+    plan = ClosingPlan(base=Path(tmp_path) / "closing-source-runs", reached=dict(reached or {}),
+                       arm_folders=arm_folders)
+    _CLOSING_PLANS[str(Path(episode_dir).absolute())] = plan
+    return plan
+
+
+def plan_of(episode_dir: Path) -> ClosingPlan:
+    """The episode's closing plan; a scene that built none is a fixture bug."""
+    plan = _CLOSING_PLANS.get(str(Path(episode_dir).absolute()))
+    assert plan is not None, f"fixture bug: no closing plan for {episode_dir} (`closing_plan` first)"
+    return plan
+
+
+def set_closing(episode_dir: Path, label: str, **fields: Any) -> None:
+    """World `label` closed with `fields` (`disposition=...`, and any other `ClosingRecord` field); call before the
+    first read of the episode: a record is write-once."""
+    plan = plan_of(episode_dir)
+    assert not plan.planted, "fixture bug: the closing records were already planted; set them before the first read"
+    plan.reached[label] = dict(fields)
+
+
+def no_closing(episode_dir: Path, label: str) -> None:
+    """World `label` never closed: its arm has no record (`NeverClosed`)."""
+    plan = plan_of(episode_dir)
+    assert not plan.planted, "fixture bug: the closing records were already planted; set them before the first read"
+    plan.reached[label] = None
+
+
+def _record_for(arm_id: str, fields: Mapping[str, Any]) -> Any:
+    """A valid `ClosingRecord` for `arm_id`: the first valid shape for the disposition (which cause a host close of it
+    carries), `fields` overriding. The pairing is the fixture's choice of one legal row, not the policy under test."""
+    from defender._vocab import DISPOSITION_VALUES
+    from defender.records import closing as C
+
+    disposition = fields.get("disposition", "malicious")
+    if disposition not in DISPOSITION_VALUES:
+        disposition = "malicious"
+    cause = (C.CAUSE_NOT_REVIEWED if disposition == "unresolved"
+             else C.CAUSE_CEILING_EXAMINED if disposition == "inconclusive" else C.CAUSE_STORY_SETTLED)
+    base: dict[str, Any] = {
+        "run_id": arm_id, "disposition": disposition, "outcome": C.STANDS, "cause": cause,
+        "failure_kind": None, "drafted_disposition": None, "ceiling_test": (), "runtime_evidence": (),
+        "summary": "The pivot from the bastion is confirmed by the second login.",
+    }
+    base.update(fields)
+    base["disposition"] = base["disposition"] if base["disposition"] in DISPOSITION_VALUES else disposition
+    return C.ClosingRecord(**base)
+
+
+def ceiling_note(text: str) -> Any:
+    """One ceiling receipt carrying `text` as its model-written note (any legal state)."""
+    from defender.records import closing as C
+
+    return C.CeilingEntry(state=sorted(C.CEILING_STATES)[0], ref=None, cap=None, note=text)
+
+
+def baseline_entry(**over: Any) -> Any:
+    """One runtime-evidence baseline (any legal anchor and grounding kind), `over` replacing a field."""
+    from defender.records import closing as C
+
+    fields: dict[str, Any] = {
+        "lead": "l-001", "anchor_kind": sorted(C.ANCHOR_KINDS)[0], "grounding_kind": sorted(C.GROUNDING_KINDS)[0],
+        "anchor_id": "alice", "window_start": "2026-07-28T15:00:00Z", "window_end": "2026-07-28T16:00:00Z",
+        "result": "twelve prior logons", "reasoning": "the user logs on daily",
+    }
+    fields.update(over)
+    return C.BaselineEntry(**fields)
+
+
+def ensure_closings(episode_dir: Path) -> None:
+    """Plant the episode's declared closing records, once per world: the arm roster (made if the scene has none), each
+    arm's run folder, one fork of a shared source session, the arm's session pointer naming the database and its
+    fork, and the record, written through the production write. A no-op for an episode with no plan."""
+    from defender.records import Run
+    from defender.records import session_store as ss
+    from defender.tests.storage.verdict_1534 import _spec1534 as V
+    from defender.tests.support.jobs._jobs1342 import _response
+    from defender.tests.support.learning.branch import _triplet_947 as T
+    from defender.tests.support.shared._locations_1210 import fixture_runs_base
+
+    ep = Path(episode_dir).absolute()
+    plan = _CLOSING_PLANS.get(str(ep))
+    if plan is None:
+        return
+    todo = [label for label in plan.reached if label not in plan.planted]
+    if not todo:
+        return
+    plan.planted.update(todo)
+    if not (ep / T.ROSTER_NAME).is_file():
+        T.plant_roster(ep)
+    roster = T.read_roster(ep)
+    with V.run_store(plan.base, _SOURCE_CASE) as store:
+        main = store.new_session(agent_id="main")
+        at = store.append(main, _response("claude-sonnet-4-6", {"input_tokens": 1}), agent_id="main")[-1]
+        armed: dict[str, Any] = {}
+        for label in todo:
+            arm = roster.get(T.world_id(ep, label))
+            if arm is None:
+                continue
+            run_dir = ep / "runs" / arm
+            if plan.arm_folders:
+                (ep / "runs").mkdir(exist_ok=True)
+                run_dir.mkdir(exist_ok=True)
+            if not run_dir.is_dir():
+                continue
+            fork = store.fork(main, at)
+            ss.write_case_pointer(Run.under(fixture_runs_base(ep / "runs"), arm), case_id=store.case_id,
+                                  store_path=store.path, session_id=fork)
+            armed[label] = arm
+        for label, arm in armed.items():
+            fields = plan.reached[label]
+            if fields is not None:
+                V.plant(store, _record_for(arm, fields))
+
+
+def arm_database(episode_dir: Path) -> Path:
+    """The shared database the episode's closing records live in (after `ensure_closings`)."""
+    ensure_closings(episode_dir)
+    from defender.records import SessionPaths
+    from defender.tests.support.shared._locations_1210 import fixture_runs_base
+
+    return Path(SessionPaths(fixture_runs_base(plan_of(episode_dir).base)).session_db(_SOURCE_CASE))
+
+
+def arm_of(episode_dir: Path, label: str) -> str:
+    """The arm run id of world `label` in the episode's roster."""
+    from defender.tests.support.learning.branch import _triplet_947 as T
+
+    return T.roster_arm_id(Path(episode_dir), T.world_id(Path(episode_dir), label))
+
+
+
+#: The per-arm faults `fault_arm` makes, each a real primitive on the arm's own folder, pointer or row (the others'
+#: stay readable), keyed by the `CouldNotLook` kind it must read as.
+ARM_FAULTS = ("row-invalid", "pointer-unreadable", "database-missing", "legacy-link", "arm-refused")
+#: The faults `fault_database` makes on the shared database, which every arm of the episode then reads through.
+DATABASE_FAULTS = ("recorded-before-1534", "schema-version", "store-unreadable")
+
+
+def _arm_run(episode_dir: Path, label: str) -> Any:
+    """The arm's `Run` handle (`Run.under` its container), for its pointer's path."""
+    from defender.records import Run
+    from defender.tests.support.shared._locations_1210 import fixture_runs_base
+
+    return Run.under(fixture_runs_base(Path(episode_dir) / "runs"), arm_of(episode_dir, label))
+
+
+def fault_arm(episode_dir: Path, label: str, kind: str):
+    """World `label`'s arm made unreadable as `kind` (one of `ARM_FAULTS`), after the records are planted. Returns a
+    callable that restores the pointer file (a no-op for the faults that do not touch it)."""
+    import os
+    import shutil
+
+    from defender.tests.storage.verdict_1534 import _spec1534 as V
+
+    ensure_closings(episode_dir)
+    arm, run = arm_of(episode_dir, label), _arm_run(episode_dir, label)
+    folder = Path(episode_dir) / "runs" / arm
+    pointer = Path(run.observability.session_pointer.path)
+    original = pointer.read_text(encoding="utf-8") if pointer.is_file() else None
+
+    def heal() -> None:
+        if original is not None:
+            pointer.write_text(original, encoding="utf-8")
+
+    if kind == "row-invalid":
+        V.corrupt(arm_database(episode_dir), arm, "disposition", "probably-bad")
+    elif kind == "pointer-unreadable":
+        pointer.write_text("{not json", encoding="utf-8")
+    elif kind == "database-missing":
+        from defender.records.session_store import CLOSING_RECORD_MARKER
+
+        pointer.write_text(json.dumps({"case_id": _SOURCE_CASE, "store_path": str(folder / "gone.db"),
+                                       CLOSING_RECORD_MARKER: True}), encoding="utf-8")
+    elif kind == "legacy-link":
+        from defender.records.session_store._schema import _LEGACY_LINK_NAME
+
+        pointer.unlink()
+        os.symlink("elsewhere", folder / _LEGACY_LINK_NAME)
+    elif kind == "arm-refused":
+        shutil.rmtree(folder)
+        folder.symlink_to(Path(episode_dir) / "served")
+    else:
+        raise AssertionError(f"no arm fault {kind!r}")
+    return heal
+
+
+def fault_database(episode_dir: Path, kind: str) -> Path:
+    """The episode's shared database made unreadable as `kind` (one of `DATABASE_FAULTS`); returns its path."""
+    import sqlite3
+
+    from defender.tests.storage.verdict_1534 import _spec1534 as V
+
+    database = arm_database(episode_dir)
+    if kind == "recorded-before-1534":
+        # Every arm recorded before #1534: pointers without the closing-record mark, a database without the table.
+        from defender.tests.support.storage._readers1534 import unmark_pointer
+
+        for pointer in (Path(episode_dir) / "runs").glob("*.session-pointer.json"):
+            unmark_pointer(pointer)
+        V.drop_table(database)
+    elif kind == "schema-version":
+        conn = sqlite3.connect(database)
+        try:
+            conn.execute("PRAGMA user_version = 9999")
+            conn.commit()
+        finally:
+            conn.close()
+    elif kind == "store-unreadable":
+        database.write_bytes(b"this is not a sqlite database " * 64)
+    else:
+        raise AssertionError(f"no database fault {kind!r}")
+    return database
+
+
+def drop_arm_folder(episode_dir: Path, label: str) -> None:
+    """World `label`'s arm folder removed with the container and roster present: the arm is `RunAbsent` (never set up)."""
+    import shutil
+
+    ensure_closings(episode_dir)
+    shutil.rmtree(Path(episode_dir) / "runs" / arm_of(episode_dir, label))
+
+
+def drop_arm_container(episode_dir: Path) -> None:
+    """The arm container (`runs/`) removed with the roster present: every arm is `RunAbsent`."""
+    import shutil
+
+    ensure_closings(episode_dir)
+    shutil.rmtree(Path(episode_dir) / "runs")
+
+
+def drop_roster(episode_dir: Path) -> None:
+    """The arm roster removed: the episode reads as never having reached RUNS."""
+    ensure_closings(episode_dir)
+    (Path(episode_dir) / "arms.json").unlink()
 
 
 def scripted_judge(**kw: Any) -> FakeJudge:
@@ -364,12 +631,13 @@ def episode_tenant_of(episode_dir: Path) -> str:
 def episode_runs_for(episode_dir: Path) -> Any:
     """The runs repository of the tenant holding `episode_dir` (`episode_location`)."""
     data_root, tenant_id = episode_location(episode_dir)
+    ensure_closings(episode_dir)
     return judge_runs(tenant_id, data_root=data_root)
 
 
 def through_view(episode_dir: Path, reader: Any, *args: Any, **kw: Any) -> Any:
     """`reader(view, *args, **kw)` over the episode's walked view (`walked_view`), closed
-    after. The episode's readers (`episode.delta_o`, `episode.verdicts`) take that view, not a
+    after. The episode's readers (`episode.delta_o`) take that view, not a
     `Path`: a bare path carries no tenant to walk."""
     with walked_view(episode_dir) as view:
         return reader(view, *args, **kw)
@@ -386,9 +654,12 @@ def walked_view(episode_dir: Path) -> Any:
 def render_at(episode_dir: Path, label: str, **kw: Any) -> Any:
     """Call the real judge renderer through its repository's walked bound reader."""
     episode_dir = Path(episode_dir)
-    with episode_runs_for(episode_dir).episode_files(episode_dir.name) as episode:
+    repository = episode_runs_for(episode_dir)
+    with repository.episode_files(episode_dir.name) as episode:
+        # The episode's run view is a required argument of the render (#1534); its name is the contract's proposal.
+        view = repository.episode(episode_dir.name, held=episode)
         return mod("learning.judge.render").render(
-            episode_dir, label, bound=episode.view(), **kw)
+            episode_dir, label, bound=episode.view(), episode_runs=view, **kw)
 
 
 def read_manifest_at(episode_dir: Path) -> dict:
@@ -503,7 +774,7 @@ def wire_logs(episode_dir: Path) -> list[Path]:
 #: `accepted_episode` (`a`, `b`, `c`), so whichever world a scripted reply answers, the list
 #: holds the two-run pair the resolver requires (`pointers.Assessment.has_two_run_pair`). A
 #: pointer at a run outside the call's scope is merely unresolved, never the finding's drop.
-DEFAULT_CONTRAST = tuple(f"worlds/{fixture_world_id(label)}/report.md" for label in ("a", "b", "c"))
+DEFAULT_CONTRAST = tuple(f"worlds/{fixture_world_id(label)}/closing" for label in ("a", "b", "c"))
 #: The default world finding's `evidence`: the manifest's discriminator, a plan pointer naming
 #: no run, so the finding routes to the questioner lane from any world's draw.
 DEFAULT_WORLD_EVIDENCE = ("family.yaml#discriminator",)
@@ -729,7 +1000,6 @@ class FakeSibling:
         runs = ep / "runs"
         run_dir = sibling_run_dir(runs, label, arm_id=arm_id, commit=self.commit,
                                   **self.stamp_fields)
-        (run_dir / "report.md").write_text(report_text("malicious"), encoding="utf-8")
         (run_dir / "investigation.md").write_text(
             investigation_document(label), encoding="utf-8")
         summaries = run_dir / "gather_summaries"
@@ -819,6 +1089,8 @@ __all__ = [
     "runs_base",
     "oracle_row", "sibling_run_dir", "staged_row", "sym", "untrusted_frames", "wire_logs", "world_doc",
     "rows", "world_rows", "fixture_world_id", "write_ledger",
+    "ARM_FAULTS", "DATABASE_FAULTS", "baseline_entry", "ceiling_note", "drop_arm_container", "drop_arm_folder", "drop_roster", "fault_arm", "fault_database",
+    "ClosingPlan", "arm_database", "arm_of", "closing_plan", "ensure_closings", "no_closing", "plan_of", "set_closing",
 ]
 
 

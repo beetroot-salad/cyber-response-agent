@@ -161,8 +161,7 @@ async def test_o1_o8_o14_a_completed_investigation_is_learned_from_end_to_end_an
     gate = flow["marks"] / "post-step" / "gate"
     assert gate.is_file(), "the drain gate never ran"
     assert int(gate.read_text(encoding="utf-8")) >= 1, "the gate ran before this job's findings were published"
-    record = json.loads((flow["root"] / flow["tenant"] / "runs" / f"{job['id']}.post-step.json").read_text(encoding="utf-8"))
-    assert record == {"published": [job["id"]], "refused": [], "waiting": False}  # one finding: below the gate's threshold (amendment 3)
+    assert not (flow["root"] / flow["tenant"] / "runs" / f"{job['id']}.post-step.json").exists(), "the post-step wrote a record (#1487 O7: the worker answers 'waiting')"
     assert sorted(p.name for p in (flow["marks"] / "family").glob("sibling-*")), "no sibling ran as a real run"
 
 
@@ -181,21 +180,22 @@ async def test_o3_a_completed_investigation_with_no_gather_ends_its_job_skipped_
     gate = flow["marks"] / "post-step" / "gate"
     assert gate.is_file(), "the job's child started, so the post-step runs the gate whatever the ending"
     assert int(gate.read_text(encoding="utf-8")) == 0
-    record = json.loads((flow["root"] / flow["tenant"] / "runs" / f"{job['id']}.post-step.json").read_text(encoding="utf-8"))
-    assert record == {"published": [], "refused": [], "waiting": False}  # nothing queued (amendment 3)
+    assert not (flow["root"] / flow["tenant"] / "runs" / f"{job['id']}.post-step.json").exists(), "the post-step wrote a record (#1487 O7)"
     assert not list((flow["marks"] / "family").glob("sibling-*")), "a sibling started with no fork point"
 
 
-async def test_l5_a_source_whose_session_store_is_of_another_version_ends_skipped_history_unreadable_not_in_a_crash(
+async def test_l5_a_source_whose_session_store_is_of_another_version_ends_failed_launch_refused_not_in_a_crash(
         migrated_database, tmp_path, monkeypatch, request):  # noqa: F811
-    """The source's database carries a format version current code refuses: typed `skipped`/`history_unreadable` with the type in the message, before any sibling; the intact flow above is the control. (O3, L5, Old history)"""
+    """The source's database carries a format version current code refuses: `failed`/`launch_refused` with the `schema-version` kind's fixed wording, before any sibling, as every source whose closing record cannot be looked at (owner decision, #1534: no backwards compatibility; no longer `skipped`/`history_unreadable`); the intact flow above is the control. (O3, L5, Old history, V-LOOK)"""
+    from defender.tests.support.storage import _readers1534 as R
 
     flow = await _run_flow(migrated_database, tmp_path, monkeypatch, request, investigate_mode="investigate", damage="store-version")
 
     assert row(migrated_database, flow["investigation"])["stage"] == "completed"
     assert (flow["marks"] / "family" / "runs").is_file(), "premise: the family step started and damaged the store"
     (job,) = _jobs(migrated_database, flow["investigation"])
-    assert (job["status"], job["reason"]) == ("skipped", "history_unreadable"), job
-    assert "UnknownSchemaVersion" in (job["message"] or ""), "the message names the refusal type"
+    assert (job["status"], job["reason"]) == ("failed", "launch_refused"), job
+    assert R.names_only("schema-version", job["message"] or ""), job
+    assert str(tmp_path) not in (job["message"] or ""), "the fault's detail (a path) reached the job's message"
     assert not list((flow["marks"] / "family").glob("sibling-*")), "a sibling started on a history that cannot be read"
     assert _queued_findings(migrated_database, flow["tenant"]) == []

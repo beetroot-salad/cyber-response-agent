@@ -11,6 +11,7 @@ from typing import Any, Protocol
 
 from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKeyConstraint, Index, Integer, LargeBinary, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.engine import Row
 from sqlalchemy.orm import Mapped, mapped_column
 
 from defender._model import model
@@ -100,9 +101,9 @@ class InvestigationRow(Base, kw_only=True):
 
 LEARNING_STATUSES = ("queued", "running", "completed", "failed", "skipped")
 LEARNING_TRIGGERS = ("auto", "explicit")
-#: Whether a job's findings reached the queue (#1344): `none` until a `completed` end, then
-#: `pending`; `done` once published; `refused` when they fail validation for good.
-PUBLISH_STATES = ("none", "pending", "done", "refused")
+#: Whether a job's findings reached the queue (#1344, #1487): `none` for a job not ended `completed`; set by the
+#: `completed` end write itself, `done` with its findings stored, or `refused` with none of them stored.
+PUBLISH_STATES = ("none", "done", "refused")
 LEARNING_TERMINAL = ("completed", "failed", "skipped")
 
 
@@ -172,6 +173,24 @@ class LearningCheckRow(Base, kw_only=True):
     checking_until: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
     #: The hold's token, minted by the worker that took it: only it renews or lets go of the hold.
     holder: Mapped[str | None] = mapped_column(Text, default=None)
+    #: A job ended `completed` while a post-step held the row (live or lapsed, #1487 O7): set only by that end's arm,
+    #: cleared by a new hold; the hold's end then makes the tenant due at once, whatever its own post-step found.
+    armed_while_held: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+@model(frozen=True)
+class AlertListing:
+    """An alert as a list shows it: every stored field but `raw`, which a list never reads (#1507)."""
+
+    alert_id: AlertId
+    tenant_id: TenantId
+    vendor: str
+    vendor_ticket_id: str
+    fired_at: _dt.datetime
+    changed_at: _dt.datetime
+    received_at: _dt.datetime
+    title: str | None
+    description: str | None
 
 
 @model(frozen=True)
@@ -275,6 +294,18 @@ def learning_job_record(row: LearningJobRow) -> LearningJobRecord:
         fork_message_id=row.fork_message_id, sibling_cost_usd=row.sibling_cost_usd,
         findings_count=row.findings_count, publish_state=row.publish_state, created_at=row.created_at,
         started_at=row.started_at, finished_at=row.finished_at, reason=row.reason, message=row.message)
+
+
+#: The columns an alert list selects: every column but `raw` (#1507).
+ALERT_LISTING_COLUMNS = tuple(column for column in AlertRow.__table__.columns if column.key != "raw")
+
+
+def alert_listing(row: Row[Any]) -> AlertListing:
+    """An `AlertListing` from a row of `ALERT_LISTING_COLUMNS`, each field the column of its name (`alert_id` is `id`):
+    a column the record lacks, or a field no column fills, is a `TypeError`, never a field left at a default."""
+    values = dict(row._mapping)
+    values["alert_id"] = values.pop("id")
+    return AlertListing(**values)
 
 
 def stored_alert(row: AlertRow) -> StoredAlert:

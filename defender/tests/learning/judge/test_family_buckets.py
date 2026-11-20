@@ -39,7 +39,7 @@ def test_921_world_processing_order_does_not_change_any_per_world_fact(tmp_path)
 def test_921_family_pass_never_reads_served_base_and_never_calls_the_comparator(tmp_path):
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
-    (ep / "worlds" / T.world_id(ep, "b") / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
+    J.set_closing(ep, "b", disposition="benign")
     base = ep / "served" / "base.jsonl"
 
     base.unlink()
@@ -61,7 +61,7 @@ def test_921_family_pass_never_reads_served_base_and_never_calls_the_comparator(
 def test_921_model_findings_explain_a_bucket_and_never_assign_it(tmp_path):
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
-    (ep / "worlds" / T.world_id(ep, "b") / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
+    J.set_closing(ep, "b", disposition="benign")
 
     loud = J.as_reply_text(J.reply_doc(bucket="decision-discipline", findings=[
         J.finding_doc(bucket="lead-set",

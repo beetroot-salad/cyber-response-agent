@@ -233,9 +233,22 @@ class VisibleAtEmit(logging.Handler):
 #: what it was given (argv, environment, process group, whether the launch files existed) in
 #: `<seen_dir>/<id>.json`, appends `start <id>` / `end <id>` to the events file, optionally waits for
 #: a release file, writes the spec's host records (paths relative to the runs container, `{id}`
-#: expanded) and exits with the spec's code. It never decides an outcome.
+#: expanded) and exits with the spec's code. It never decides an outcome. With `answer_waiting` it stands in for a
+#: post-step's helper: it exits with that helper's answer whether work still waits, asked of the store at its end.
+#: A reserved `files` key (#1534): its value is `closing_plan(...)`; the child plants the run's closing record instead of a file.
+CLOSING_KEY = "{id}.closing-plant"
+
+
+def closing_plan(case: str, fields: dict[str, Any] | None, *, fault: str | None = None, unsealed: bool = False,
+                 then: str | None = None) -> str:
+    """The plan for `CLOSING_KEY`: `fields` (a `disposition`, valid fields filled in by the child) or None for a store with
+    the table and no row; `fault` is a `_readers1534` fault; `then` is SQL the child runs on the database after the record is
+    planted (a fault of the store's other tables, which the plant's writer open would otherwise heal)."""
+    return json.dumps({"case": case, "fields": fields, "fault": fault, "unsealed": unsealed, "then": then})
+
+
 CHILD_SCRIPT = textwrap.dedent("""
-    import json, os, signal, subprocess, sys, time
+    import contextlib, json, os, signal, subprocess, sys, time
     from pathlib import Path
 
     spec = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
@@ -243,20 +256,73 @@ CHILD_SCRIPT = textwrap.dedent("""
     runs = Path(spec["runs"])
     run_id = argv[argv.index("--job") + 1]
 
-    def fill(text):
-        return text.replace("{id}", run_id)
+    def fill(text):  # `{claim}`: the claim its worker handed it (#1557: a helper's per-claim folders)
+        return text.replace("{id}", run_id).replace("{claim}", os.environ.get("DEFENDER_BOX_CLAIM", ""))
 
     def event(kind):
         with open(spec["events"], "a", encoding="utf-8") as handle:
             handle.write(f"{kind} {run_id}\\n")
 
+    def plant_closing(plan):
+        # #1534: the run's pointer, a real store and the closing record or the fault `plan` names (`_jobs1342.plant_closing`).
+        # The test process that launched this child plants it while this child waits, when it serves `spec["planter"]`: it
+        # has the store's modules imported already, which cost a child more than the rest of its run. A child no test
+        # process answers (its worker's process is gone) plants it itself, the same way.
+        request = {"spec": spec, "run_id": run_id, "plan": plan, "case": own.get("case")}
+        if not planting and served(request):
+            return
+        sys.path.insert(0, spec["worktree"])
+        from defender.tests.support.jobs._jobs1342 import plant_closing as plant
+        if planting:  # a SIGTERM handler's `leave_records` inside this child's own plant: it already holds the lock
+            plant(**request, locked=True)
+            return
+        planting.append(True)
+        try:
+            plant(**request)
+        finally:
+            planting.clear()
+
+    def served(request):
+        # True once the planter answered that it planted. False when no planter answers at all: none is listening, or its
+        # process went away before answering (the connection refused, closed or reset), so this child plants itself. The
+        # planter's own error is raised here (child setup never catches), reaching the child's stderr.
+        import socket
+        name = spec.get("planter")
+        if not name:
+            return False
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+            try:
+                conn.connect(name)
+                conn.sendall(json.dumps(request).encode("utf-8") + b"\\n")
+                reply = b""
+                while not reply.endswith(b"\\n"):
+                    part = conn.recv(65536)
+                    if not part:
+                        return False
+                    reply += part
+            except OSError:
+                return False
+        answer = json.loads(reply)
+        if answer.get("error"):
+            raise RuntimeError(f"the planter failed:\\n{answer['error']}")
+        return True
+
+    planting = []
+    own = {}  # a live child's (`sessions`) own case: the database its spend wrote and its pointer names
+
     def leave_records():
         for rel in spec.get("dirs", []):
             (runs / fill(rel)).mkdir(parents=True, exist_ok=True)
+        closing = None
         for rel, text in spec.get("files", {}).items():
+            if rel == spec["closing_key"]:
+                closing = json.loads(text)
+                continue
             path = runs / fill(rel)
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text, encoding="utf-8")
+        if closing is not None:
+            plant_closing(closing)
         for rel, hexbytes in spec.get("binary", {}).items():
             path = runs / fill(rel)
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -293,14 +359,14 @@ CHILD_SCRIPT = textwrap.dedent("""
     term = spec.get("term", "default")
     if term == "ignore":
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
-    elif term in ("mark", "finish"):
+    elif term in ("mark", "finish", "exit"):
         def on_term(*_):
             Path(fill(spec["term_mark"])).touch()
             if term == "finish":  # #1343 B11: a child that completes on its own as the SIGTERM lands
                 sealing()  # it completes: the run's exit seals its ledger before the records are left
                 leave_records()
             event("end")
-            os._exit(0)
+            os._exit(spec.get("exit", 0) if term == "exit" else 0)  # `exit`: a helper that answers as it is stopped
         signal.signal(signal.SIGTERM, on_term)
     grandchild = None
     if spec.get("grandchild"):
@@ -347,6 +413,7 @@ CHILD_SCRIPT = textwrap.dedent("""
         import hashlib
         case = hashlib.md5(run_id.encode()).hexdigest() if spend.get("per_run") else spend["case"]  # per run: a retry never shares its parent's database
         (runs / f"{run_id}.session-pointer.json").write_text(session_pointer(case), encoding="utf-8")
+        own["case"] = case
         marks = Path(spend["marks"])
         marks.mkdir(parents=True, exist_ok=True)
         if spend.get("seal", True):
@@ -381,8 +448,145 @@ CHILD_SCRIPT = textwrap.dedent("""
         if die_by != signal.SIGKILL:
             signal.signal(die_by, signal.SIG_DFL)
         os.kill(os.getpid(), die_by)
+    answer = spec.get("answer_waiting")
+    if answer:  # a post-step helper's stand-in: its exit status says whether work waits (#1487 Amendment r5.2)
+        sys.path.insert(0, spec["worktree"])  # this checkout's `defender`, whatever the child's path
+        from defender.job_host import NOTHING_WAITS, WORK_WAITS
+        from defender.learning.core.drains import AUTHOR_DRAIN_RECONCILES
+        from defender.learning.core.store_tick import AUTHOR_LANE, thresholds
+        from defender.learning_store import blocking
+        from defender.learning_store.tick import StoreAdapter, work_waiting
+        try:
+            with blocking(answer["dsn"]) as store:
+                waits = work_waiting(StoreAdapter(store, tenant=argv[argv.index("--tenant") + 1], lane=AUTHOR_LANE,
+                                                  owner="post-step:stand-in", thresholds=thresholds()),
+                                     AUTHOR_LANE, reconcile_lanes=AUTHOR_DRAIN_RECONCILES)
+        except Exception:  # noqa: BLE001 - as the helper: a question that fails answers nothing
+            sys.exit(0)
+        sys.exit(WORK_WAITS if waits else NOTHING_WAITS)
     sys.exit(spec.get("exit", 0))
 """)
+
+
+def plant_closing(*, spec: dict[str, Any], run_id: str, plan: dict[str, Any], case: str | None = None,
+                  locked: bool = False) -> None:
+    """`CHILD_SCRIPT`'s plant of run `run_id`'s closing record as `plan` (`closing_plan`) says, from the child's own `spec`:
+    the pointer (store_path deliberately elsewhere: the worker derives the database from the case id), a real store with a
+    main session and a sealed ledger, and the record or the fault. `case` is a live child's own case (the database its
+    spend wrote and its pointer names); `locked`: the caller already holds the plant lock. Run in the child, or for it by
+    the test process's planter while it waits: either way at the moment the child leaves its records."""
+    from defender.tests.support.storage import _readers1534 as R
+
+    runs = Path(spec["runs"])
+    own = case is not None
+    case = case if own else plan["case"]  # a live child's record goes in the database it wrote and pointed at
+    (runs / run_id).mkdir(exist_ok=True)  # a run that reached its close had its folder (the worker's run-started check)
+    pointer = runs / f"{run_id}.session-pointer.json"
+    fault = plan.get("fault")
+    if fault == "pointer-unreadable":
+        pointer.write_text("{not json", encoding="utf-8")
+        return
+    if fault == R.NO_POINTER:
+        return
+    staged = {rel.replace("{id}", run_id) for part in ("files", "binary", "padded", "sparse", "links")
+              for rel in spec.get(part, {})}
+    if f"{run_id}.session-pointer.json" not in staged and not os.path.lexists(pointer):  # what the spec stages at the pointer's name wins over this default
+        pointer.write_text(session_pointer(case), encoding="utf-8")
+    if fault == "database-missing":
+        return
+    if locked:
+        _plant_store(runs, run_id, plan, case, fault, own=own)
+        return
+    # Children that share a case plant one at a time: a sibling's database half made is not one the spec staged.
+    import fcntl
+
+    with open(runs.parent / ".closing-plant.lock", "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        _plant_store(runs, run_id, plan, case, fault, own=own)
+
+
+def _plant_store(runs: Path, run_id: str, plan: dict[str, Any], case: str, fault: str | None, *, own: bool) -> None:
+    import contextlib
+
+    from defender.records import session_store
+    from defender.records.session_store._write import open_store
+    from defender.tests.support.storage import _readers1534 as R
+
+    fresh = not session_db(runs, case).exists()
+    # Child setup never catches (a swallowed error here reads as "no record", which the no-row controls pass vacuously). The one
+    # thing skipped is the open of a database the spec itself staged before the run (a file at the database's path that
+    # will not open: it declares that nothing can be planted in it); every other error reaches the child's stderr.
+    with contextlib.ExitStack() as stack:
+        try:
+            handle = stack.enter_context(open_store(case_id=case, sessions=_paths(runs)))
+        except Exception:
+            if fresh or own:  # a live child's database is its own, never one the spec staged
+                raise
+            return
+        if fresh:
+            handle.new_session("main")
+        rows = handle.connection.execute("SELECT count(*) FROM spend_ledger WHERE run_id = ?", (run_id,)).fetchone()[0]
+        if rows == 0 and not plan.get("unsealed"):  # a run that wrote no ledger row ended cleanly: its ledger is sealed
+            session_store.seal_ledger(handle, run_id)
+        if plan.get("fields") is not None:
+            R.V.plant(handle, R.V.a_record(run_id, **{**R.valid_fields(plan["fields"]["disposition"]), **plan["fields"]}))
+    R.break_database(session_db(runs, case), run_id, fault, pointer=runs / f"{run_id}.session-pointer.json")
+    if plan.get("then"):
+        import sqlite3
+
+        conn = sqlite3.connect(session_db(runs, case), timeout=30)
+        try:
+            conn.execute(plan["then"])
+            conn.commit()
+        finally:
+            conn.close()
+
+
+#: This process's planter (`planter`): its pid and the abstract socket it serves.
+_PLANTER: dict[str, Any] = {}
+
+
+def planter() -> str:
+    """The abstract socket on which this process plants a launched child's closing record for it (`plant_closing`), one
+    request at a time, started on first use. A child connects, sends its request and waits for the answer: `{}`, or the
+    plant's error. A forked process has none of its parent's threads, so the name carries the pid."""
+    import contextlib
+    import socket
+    import threading
+    import traceback
+    import uuid
+
+    if _PLANTER.get("pid") == os.getpid():
+        return _PLANTER["name"]
+    name = f"\0defender-tests-planter-{os.getpid()}-{uuid.uuid4().hex}"
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(name)
+    server.listen(64)
+
+    def serve() -> None:
+        while True:
+            conn, _ = server.accept()
+            with conn:
+                data = b""
+                with contextlib.suppress(OSError):  # a child gone before its request arrived asked nothing
+                    while not data.endswith(b"\n"):
+                        part = conn.recv(65536)
+                        if not part:
+                            break
+                        data += part
+                if not data.endswith(b"\n"):
+                    continue
+                try:
+                    plant_closing(**json.loads(data))
+                    answer: dict[str, str] = {}
+                except Exception:  # noqa: BLE001 — the child raises it, as its own plant would have
+                    answer = {"error": traceback.format_exc()}
+                with contextlib.suppress(OSError):  # a child gone mid-plant has no one to answer
+                    conn.sendall(json.dumps(answer).encode("utf-8") + b"\n")
+
+    threading.Thread(target=serve, name="jobs1342-planter", daemon=True).start()
+    _PLANTER.update(pid=os.getpid(), name=name)
+    return name
 
 
 @dataclasses.dataclass
@@ -392,7 +596,7 @@ class ScriptedChild:
     `files` (text), `binary` (hex), `sparse` (`{head, size}`), `links` (symlink targets) and `dirs`
     name what the child leaves in the runs container (`padded`: `{head, size}`, the head then spaces
     up to `size` bytes, so a document that stays valid however much of it is read); `term` is how it takes SIGTERM (`default`,
-    `ignore`, `mark`: touch `term_mark` and exit with nothing written, or `finish`: touch it, write its records, exit 0); `grandchild` starts a `sleep` in its group.
+    `ignore`, `mark`: touch `term_mark` and exit with nothing written, `finish`: touch it, write its records, exit 0, or `exit`: touch it and exit with `exit`); `grandchild` starts a `sleep` in its group.
     `die_by`: in place of exiting, it dies by that signal, sent to itself."""
 
     where: Path
@@ -426,6 +630,9 @@ class ScriptedChild:
     #: `marks/wrote-<n>` (its text: how long the append took) and waiting for `marks/go-<n>`. With
     #: `"per_run": True` its case id (so database) is derived from its run id, so two runs never share one.
     sessions: dict[str, Any] | None = None
+    #: The planter that plants this child's closing record (`planter`): this process's unless named. A worker run in its
+    #: own process names the test process's, so stopping or killing that worker never interrupts a plant.
+    planter_name: str | None = None
 
     def __post_init__(self) -> None:
         self.where.mkdir(parents=True, exist_ok=True)
@@ -437,7 +644,8 @@ class ScriptedChild:
 
     def spec_dict(self) -> dict[str, Any]:
         return {
-            "runs": str(self.runs), "seen_dir": str(self.seen_dir), "events": str(self.events_path),
+            "runs": str(self.runs), "worktree": str(WORKTREE), "closing_key": CLOSING_KEY, "planter": self.planter_name or planter(),
+            "seen_dir": str(self.seen_dir), "events": str(self.events_path),
             "files": self.files, "binary": self.binary, "sparse": self.sparse, "padded": self.padded, "links": self.links,
             "dirs": self.dirs, "exit": self.exit, "term": self.term, "term_mark": self.term_mark,
             "grandchild": self.grandchild, "print": self.printed, "die_by": self.die_by,
@@ -708,7 +916,9 @@ def knowledge_record_of(kind: str, commit: str, *, stale_kind: str | None = None
 def session_pointer(case_id: str, *, session_id: str | None = None) -> str:
     """The pointer as `write_case_pointer` writes it, its `store_path` deliberately elsewhere:
     the reader locates the database from the case id, never from this string."""
-    body = {"case_id": case_id, "store_path": "/nonexistent/elsewhere.db"}
+    from defender.records.session_store import CLOSING_RECORD_MARKER
+
+    body = {"case_id": case_id, "store_path": "/nonexistent/elsewhere.db", CLOSING_RECORD_MARKER: True}
     if session_id is not None:
         body["session_id"] = session_id
     return json.dumps(body)

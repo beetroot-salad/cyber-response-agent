@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 import json
+import dataclasses
 from dataclasses import field
 from defender._model import model
 from typing import Annotated, Any
@@ -13,7 +14,8 @@ from pydantic import SkipValidation
 from pathlib import Path, PurePath
 
 from defender._io import Bound
-from defender.records.formats import ReportRead, parse_report_text
+from defender.records import closing
+from defender.records.closing import ClosingRecord
 from defender._vocab import normalized_disposition
 from defender.records.formats import LAYOUT, WORLD_LEAVES, EpisodePaths
 from defender.learning.branch.ledger import (
@@ -314,7 +316,7 @@ def names_one_file(lead_id: object) -> bool:
     """Is `lead_id` a single path component this pass may join into a path?
 
     Lead ids are model-authored (any token in a `:T resolutions` row). A separator or `..` would
-    read out of the graded world — e.g. a sibling's `report.md`, disposition included — into
+    read out of the graded world — e.g. a sibling's `investigation.md` — into
     this world's prompt. The row is still carried as evidence; only the path is refused. NUL is
     barred because the bound primitive raises on it."""
     return (isinstance(lead_id, str) and bool(lead_id) and "\x00" not in lead_id
@@ -417,17 +419,6 @@ def _read_archived_text(bound: Bound, name: str | PurePath, *, world: str, role:
     return rec
 
 
-def _read_verdict(report: ReportRead, *, world: str) -> str:
-    """The world's archived headline as `_report` decided it, or `JudgeRefused`.
-
-    `normalized_disposition` is exact, so a headline laced with e.g. a zero-width character
-    arrives as `None` and is refused rather than coerced."""
-    if report.disposition is None:
-        raise JudgeRefused(
-            f"world {world!r}: {report.reason or 'report.md carries no usable disposition'}")  # lint-run-records: ok — a message naming the record for the model or operator, not a path
-    return report.disposition
-
-
 def _check_gather_summaries(world: Bound, *, label: str, referenced_leads: frozenset[str]) -> None:
     """Refuse a world whose `gather_summaries/` is short of a lead its own document references
     — a partial archive, contained to this world. An absent directory is `_archive_notes`'
@@ -448,8 +439,8 @@ def _check_gather_summaries(world: Bound, *, label: str, referenced_leads: froze
 
 @model(frozen=True)
 class WorldFacts:
-    """One world's archived record (ledger, investigation, report), read once per grading pass
-    and shared between the pass and the render."""
+    """One world's archived record (ledger, investigation) and its arm's closing record, read
+    once per grading pass and shared between the pass and the render."""
 
     #: The host-minted world UUID carried by ledger rows and the run half of call IDs.
     token: str
@@ -459,8 +450,6 @@ class WorldFacts:
     ledger_rows: Annotated[list[dict[str, Any]], SkipValidation]
     malformed_rows: int
     investigation_text: str
-    #: The report as `_report` read it, so no consumer re-decides the headline from the bytes.
-    report: ReportRead
     resolution_moved: bool
     resolutions_by_lead: dict[str, list[dict[str, Any]]]
     #: What reading the document did not land (lines outside every fence, unparseable
@@ -474,6 +463,9 @@ class WorldFacts:
     table_rows: Annotated[list[dict[str, Any]], SkipValidation] = field(default_factory=list)
     forged_rows: Annotated[list[dict[str, Any]], SkipValidation] = field(default_factory=list)
     summary_leads: frozenset[str] = frozenset()
+    #: The world's closing record, read through its arm (`read_world`; #1534). `None` off the
+    #: archive-only reads (`read_world_facts`), which read no verdict.
+    closing: ClosingRecord | None = None
 
     @property
     def referenced_leads(self) -> frozenset[str]:
@@ -485,24 +477,6 @@ def _read_run_end_record(world: Bound) -> RunEnd | None:
     """The archived run-end record, or `None` when absent, unreadable or not a valid record.
     Interpretation is `run_end.parse_record`'s alone, shared with the ticket lane."""
     return parse_record(json_mapping(world, WORLD_LEAVES.run_end))
-
-
-def read_archived_report(bound: Bound, name: str | PurePath) -> ReportRead:
-    """`report.md` through the world-archive screen: a link, hard link or FIFO reads as a
-    report with no headline (never followed); nothing at the name is `ReportRead.absent`.
-
-    Never hands a path to `read_report`, whose `is_file()` + read would follow a link planted
-    between screen and open; the bytes go through `parse_report_text` instead."""
-    rec = bound.read(name)
-    if rec.absent:
-        return ReportRead(disposition=None, reason=None, frontmatter={}, body="", text="",
-                          absent=True)
-    if rec.text is None:
-        return ReportRead(
-            disposition=None,
-            reason=f"{WORLD_LEAVES.report} could not be read: {rec.refusal}",
-            frontmatter={}, body="", text="")
-    return parse_report_text(rec.text)
 
 
 @model(frozen=True)
@@ -552,9 +526,10 @@ def read_world_facts(bound: Bound, label: str, *, world_id: str,  # noqa: PLR091
                      call_records: tuple[list[dict[str, Any]], list[dict[str, Any]]] | None = None,
                      forged_rows: list[dict[str, Any]] | None = None,
                      summary_leads: frozenset[str] = frozenset()) -> WorldFacts:
-    """Read one world's archived record — ledger, then document, then report — for the
-    grading path. Unlike the standalone readers, an absent input refuses here: grading has
-    nothing to return for a world it cannot see."""
+    """Read one world's archived record — ledger, then document — for the grading path. Unlike
+    the standalone readers, an absent input refuses here: grading has nothing to return for a
+    world it cannot see. The verdict is not the archive's: `read_world` reads the arm's closing
+    record."""
     ledger_name = world_ledger_name(world_id)
     if call_records is not None:
         table_rows, ledger_rows = call_records
@@ -571,15 +546,9 @@ def read_world_facts(bound: Bound, label: str, *, world_id: str,  # noqa: PLR091
         raise JudgeRefused(
             f"world {label!r}: {LAYOUT.world(world_id).investigation} could not be read: "
             "nothing is at that name")
-    report = read_archived_report(bound, LAYOUT.world(world_id).report)
-    if report.absent:
-        raise JudgeRefused(
-            f"world {label!r}: {LAYOUT.world(world_id).report} could not be read: "
-            "nothing is at that name")
     return WorldFacts(
         ledger_rows=ledger_rows, malformed_rows=malformed,
         investigation_text=document.investigation_text,
-        report=report,
         resolution_moved=document.resolution_moved,
         resolutions_by_lead=document.resolutions_by_lead,
         unlanded_document_rows=document.unlanded_document_rows,
@@ -614,16 +583,16 @@ def _missing_required_input(bound: Bound, *, world_id: str, declared: Any) -> st
     `None`. Absent is a state, not a refusal (K2): it marks the world ungradable without
     `malformed`. A name that IS listed but is not a plain file (a link, a FIFO, a directory)
     is not missing: the read that follows refuses it as malformed, naming it (A3). An absent
-    world directory means its report is missing; one that exists but cannot be listed decides
-    nothing here — the read refuses it. The served ledger and the alert are not required (no
+    world directory means its investigation is missing; one that exists but cannot be listed
+    decides nothing here — the read refuses it. The verdict is no file here: it is the arm's
+    closing record (`read_world`). The served ledger and the alert are not required (no
     call reached the ledger; the rule key falls back): whether a world ran is its own
     record's to say (S8)."""
     world = bound.under(LAYOUT.world(world_id).dir).entries()
     if world.absent:
-        return str(WORLD_LEAVES.report)
+        return str(WORLD_LEAVES.investigation)
     if world.entries is not None:
-        for leaf in (WORLD_LEAVES.report, WORLD_LEAVES.investigation,
-                     WORLD_LEAVES.executed_queries):
+        for leaf in (WORLD_LEAVES.investigation, WORLD_LEAVES.executed_queries):
             if leaf.name not in world.entries:
                 return str(leaf)
     if not isinstance(declared, str) or not declared:
@@ -631,12 +600,23 @@ def _missing_required_input(bound: Bound, *, world_id: str, declared: Any) -> st
     return None
 
 
+#: The noun a world with no closing record is missing (`NeverClosed`): an absence, worded as one.
+CLOSING_RECORD_NOUN = "closing record"
+
+
 def read_world(  # noqa: PLR0911 — one tier rule, one return per way a world is set aside
-    bound: Bound, world: dict[str, Any], *, episode_dir: Path,
+    bound: Bound, world: dict[str, Any], *, episode_dir: Path, episode_runs: Any = None,
 ) -> tuple[dict[str, Any], WorldFacts | None]:
     """One non-control world's row and archived facts, or the row alone marked `ungradable`
     when the archive cannot be put in front of the judge (cut short, an input missing, a
-    malformed input). Decides no bucket.
+    malformed input) or its verdict cannot be read. Decides no bucket.
+
+    The verdict is the world's arm's closing record, read through the episode's run view
+    `episode_runs` (#1534, `closing.for_world`), after the archive's usability read: a world
+    whose arm never closed is missing its closing record (ungradable, not malformed); one whose
+    record could not be looked at carries the lookup's fixed wording, never its detail. With no
+    view only the archive is read: the row has no verdict, and there is no archive-tree fallback
+    for one. The judge's pass always passes the view (`runs.read_run_set` requires it).
 
     @owns ungradable — the sole producer of a world row's `ungradable`/`ungradable_reason`/
     `malformed` from its archive (the pass adds the O5 failed worlds' rows itself)."""
@@ -688,13 +668,26 @@ def read_world(  # noqa: PLR0911 — one tier rule, one return per way a world i
             absent_ledger_ok=True, call_records=call_records, forged_rows=forged,
             summary_leads=summaries)
         _check_gather_summaries(world_bound, label=label, referenced_leads=facts.referenced_leads)
-        verdict = _read_verdict(facts.report, world=label)
     except JudgeRefused as malformed:
         row["ungradable"] = True
         row["malformed"] = True
         row["ungradable_reason"] = str(malformed)
         return row, None
 
+    if episode_runs is None:
+        # An archive-only read (the page's per-world rows): no verdict is read, none invented.
+        return row, facts
+    found = closing.for_world(episode_runs, world_id)
+    if isinstance(found, closing.NeverClosed):
+        row["ungradable"] = True
+        row["ungradable_reason"] = f"world {label!r} is missing its {CLOSING_RECORD_NOUN}: its arm never closed"
+        return row, None
+    if isinstance(found, closing.CouldNotLook):
+        row["ungradable"] = True
+        row["ungradable_reason"] = f"world {label!r}: {found.wording}"
+        return row, None
+    facts = dataclasses.replace(facts, closing=found.record)
+    verdict = found.record.disposition
     row.update(verdict=verdict, resolution_moved=facts.resolution_moved,
                malformed_rows=facts.malformed_rows, served_nothing=not facts.ledger_rows)
     notes = _archive_notes(world_bound, facts=facts)
@@ -829,7 +822,7 @@ __all__ = [
     "is_gradable_row", "json_mapping", "json_mapping_of", "lead_chain", "leads_by_id", "mapping_key",
     "names_one_file", "non_control_worlds", "read_manifest",
     "refused_entries", "has_refusals", "render_refused", "is_external_refusal",
-    "read_archived_report", "read_investigation_facts", "read_samples_record", "read_world",
+    "read_investigation_facts", "read_samples_record", "read_world",
     "read_world_facts", "read_world_ledger", "scope_params",
     "summary_lead_ids", "world_ledger_name",
     "screened_yaml_mapping",

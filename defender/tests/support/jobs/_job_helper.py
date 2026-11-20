@@ -29,11 +29,9 @@ import ctypes
 import hashlib
 import json
 import os
-import shutil
 import signal
 import subprocess
 import sys
-import tempfile
 import textwrap
 import threading
 import time
@@ -45,6 +43,7 @@ from typing import Any
 
 import pytest
 from defender.tests.e2e._box665 import RecordingDocker
+from defender.tests.support.jobs._short_root import release, short_root
 from defender.tests.support.jobs._jobs1342 import ALERT_BYTES, TITLE, WORKTREE, register_tenant
 from defender.tests.support.tenancy._mapping1345 import FIXTURE_ALERT_MAPPING
 
@@ -586,9 +585,9 @@ def helper_scene(tmp_path: Path, monkeypatch: Any, dsn: str, *, proxied: tuple[s
     from defender.tests.support.tenancy._active1214 import insert_generation
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
-    # A short data root: the job socket lives under it and a unix socket's path holds about 100 bytes, which pytest's
-    # nested temporary folders overrun.
-    outer = Path(tempfile.mkdtemp(prefix="j", dir="/tmp"))
+    # A short data root from the one provider (`_short_root`): the job socket lives under it and a unix socket's path
+    # holds about 100 bytes, which pytest's nested temporary folders overrun.
+    outer = short_root()
     root = outer / ("d" * root_pad) if root_pad else outer
     root.mkdir(exist_ok=True)
     claim = uuid.uuid4().hex
@@ -598,7 +597,7 @@ def helper_scene(tmp_path: Path, monkeypatch: Any, dsn: str, *, proxied: tuple[s
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
     over: dict[str, Any] = dict(files or {})
     with contextlib.ExitStack() as cleanup:
-        cleanup.callback(shutil.rmtree, outer, ignore_errors=True)
+        cleanup.callback(release, outer)
         t = cleanup.enter_context(B.run_tenant(tmp_path, root, files=over))
         # The forge wiring names the fixture's served origin, so the post-step's drain publish reaches it (C23).
         register_tenant(dsn, t.tenant_id, data_root=root, generations=(), alert_mapping=alert_mapping, origin=t.origin,
@@ -881,7 +880,17 @@ _DRIVER = textwrap.dedent("""\
     from defender import job_host
     from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
+    from defender.job_host import _session as S
     cfg = json.loads(sys.argv[1])
+    real_answer = S.Registry.answer
+
+    def answer(self, session, name, fields):
+        # the helper's own count of the requests its socket was asked (one line each, before it answers)
+        with open(cfg["requests"], "a") as out:
+            out.write(str(name) + "\\n")
+        return real_answer(self, session, name, fields)
+
+    S.Registry.answer = answer
     sys.exit(job_host.main(cfg["argv"], signer=A.MarkedSigner(), publish=lambda *a, **k: B.fresh(cfg["commit"])))
 """)
 
@@ -892,7 +901,9 @@ _PARENT = textwrap.dedent("""\
     cfg["argv"] = [str(os.getpid()) if a == "@worker" else a for a in cfg["argv"]]
     child = subprocess.Popen([sys.executable, "-c", sys.argv[2], json.dumps(cfg)])
     print(child.pid, flush=True)
-    child.wait()
+    status = child.wait()
+    with open(cfg["exit"], "w") as out:
+        out.write(str(status))
 """)
 
 
@@ -913,16 +924,59 @@ class ProcessHelper:
         shim.write_text(_SHIM.replace("PYTHON", sys.executable).replace("STATE", str(self.state)), encoding="utf-8")
         shim.chmod(0o755)
         env = child_env({**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}"})
-        cfg = json.dumps({"argv": argv, "commit": scene.t.commit})
+        cfg = json.dumps({"argv": argv, "commit": scene.t.commit, "requests": str(self.state / "requests.log"),
+                          "exit": str(self.state / "helper-exit")})
         command = [sys.executable, "-c", _PARENT, cfg, _DRIVER] if worker else [sys.executable, "-c", _DRIVER, cfg]
         self.proc = subprocess.Popen(command, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                      stderr=subprocess.PIPE)
+        self.worker = worker
         self.worker_pid = self.proc.pid
         self.helper_pid = int(self.proc.stdout.readline()) if worker else self.proc.pid
 
+    def helper_exit(self) -> int | None:
+        """The helper's own exit status once it has exited, else None (under `worker=True` the stand-in parent records it)."""
+        if not self.worker:
+            return self.proc.poll()
+        exit_file = self.state / "helper-exit"
+        return int(exit_file.read_text(encoding="utf-8")) if exit_file.exists() and exit_file.read_text() else None
+
     def container_pid(self, timeout: float = 30.0) -> int:
-        return int(until(lambda: (self.state / "started").exists() and (self.state / "started").read_text(),
-                         "the stand-in container to start", timeout))
+        """The stand-in container's pid once it runs. Stops waiting as soon as the helper has exited (it never will)."""
+        started = self.state / "started"
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if started.exists() and (text := started.read_text()):
+                return int(text)
+            if self.helper_exit() is not None:
+                break
+            time.sleep(0.02)
+        status = self.helper_exit()
+        why = f"the helper exited (status {status})" if status is not None else f"timed out after {timeout}s"
+        raise AssertionError(f"the stand-in container never started: {why} (helper pid {self.helper_pid}, exit status "
+                             f"{status}); its stderr so far:\n{self._stderr_so_far()}")
+
+    def _stderr_so_far(self) -> str:
+        """What the helper has written to stderr that can be read now (never waits: a container the helper started may hold
+        the pipe open)."""
+        stream = self.proc.stderr
+        if stream is None:
+            return ""
+        chunks: list[bytes] = []
+        try:
+            os.set_blocking(stream.fileno(), False)
+            while chunk := stream.read(65536):
+                chunks.append(chunk)
+        except (OSError, ValueError):
+            pass
+        return b"".join(chunks).decode("utf-8", "replace") or "(nothing)"
+
+    def requests(self) -> list[str]:
+        """The name of each request the helper received on its socket, counted at dispatch (before it validates or answers,
+        so a request it then refused is included), the helper's own lifecycle requests (`launch`, `box.*`) left out: the
+        store verbs a tick over the port sent, from whatever process."""
+        log = self.state / "requests.log"
+        names = log.read_text(encoding="utf-8").split() if log.exists() else []
+        return [n for n in names if n != "launch" and not n.startswith("box.")]
 
     def records(self) -> dict[str, dict[str, Any]]:
         return {p.name: json.loads(p.read_text(encoding="utf-8")) for p in (self.state / "containers").glob("*")}

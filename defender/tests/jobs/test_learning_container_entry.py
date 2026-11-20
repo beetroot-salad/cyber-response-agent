@@ -161,26 +161,25 @@ def test_a5_eof_on_stdin_is_sigterm_to_the_learning_job_entry_and_takes_its_sibl
 
 @POST_STEPS
 def test_a6_the_post_step_takes_no_lock_runs_no_admission_opens_no_database_and_makes_no_copy_or_draft(scene, family_less):
-    """Run in the container with the job socket set, the post-step (and the family-less check) writes its record and runs the drain's gate, having taken no host lock, run no admission, opened no database; it made no run copy, draft or publish-status row. (A6, C23, P-C)"""
+    """Run in the container with the job socket set, the post-step (and the family-less check) runs the drain's gate and writes no record, having taken no host lock, run no admission, opened no database; it made no run copy, draft or publish-status row. (A6, C23, P-C, #1487 O7)"""
     from defender.learning.branch import post_step
 
     job_id = None if family_less else str(uuid.uuid4())
-    key = scene.tenant if family_less else job_id
     ticks: list[int] = []
     tenant_folder = scene.root / scene.tenant
     before = (listing(tenant_folder / "run-knowledge"), listing(tenant_folder / "drafts"))
+    runs_before = listing(scene.runs)
 
     def entry(c, seen):
         argv = [*(["--job", job_id] if job_id else []), "--tenant", scene.tenant]
-        return post_step.main(argv, environ=c.env, author_tick=lambda *a, **k: ticks.append(1) or 0,
-                              still_waiting=lambda *a, **k: True)
+        return post_step.main(argv, environ=c.env, author_tick=lambda *a, **k: ticks.append(1) or 0)
 
     with ThreadCalls(_watched()) as calls:
         seen = seen_in_container(scene, "post-step", entry, job_id=job_id, family_less=family_less)
 
     _clean(seen)
     assert ticks == [1], "control: the drain's gate did not run"
-    assert (scene.runs / f"{key}.post-step.json").exists(), "control: the post-step left no record"
+    assert listing(scene.runs) == runs_before, "the post-step wrote a record or a list into the tenant's runs"
     assert _container_side(calls, _watched()) == {k: 0 for k in _watched()}
     assert calls.helper("admission") == 1, "control: the helper admitted the tenant once"
     assert calls.helper("repository") >= 1, "control: the helper's side opens the database"

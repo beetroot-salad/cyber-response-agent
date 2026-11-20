@@ -255,15 +255,16 @@ def test_an_attributed_reducer_lesson_repeated_counts_once_and_two_more_mistakes
 def test_the_wake_gate_counts_what_the_curation_gate_counts(world, monkeypatch):  # noqa: F811 — the imported fixture
     """The lead lane's wake gate (the store claim) is what spins the drain up: eight rows of one mistake do not wake it under
     threshold 3, a second and a third distinct mistake do."""
-    from defender.learning.core.store_tick import LEAD_LANE, lane_waiting
-    from defender.learning_store import blocking
+    from defender.learning.core.store_tick import LEAD_LANE, thresholds
+    from defender.learning_store.tick import work_waiting
+    from defender.tests.support.jobs._relay1487 import adapter_store
 
     w = world
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "3")
 
     def waiting() -> bool:
-        with blocking(w.dsn) as store:
-            return lane_waiting(store, w.t.tenant_id, LEAD_LANE)
+        with adapter_store(w.dsn, w.t.tenant_id, lane=LEAD_LANE, thresholds=thresholds()) as store:
+            return work_waiting(store, LEAD_LANE)
 
     for row in [_row(f"r:l-003:{i}") for i in range(8)]:
         call(w.dsn, "add_pitfall", w.t.tenant_id, row)

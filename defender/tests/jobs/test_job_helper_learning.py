@@ -250,7 +250,7 @@ def test_a6_a_sibling_gets_its_worlds_roster_id_a_folder_in_the_episode_and_an_o
     # Beside each sibling's run: its knowledge-source record and (#1366 O6) its record of the versions the job read.
     assert [p.name for p in sorted((planted.dir / "runs").iterdir()) if not p.is_dir()] == \
         sorted(f"{run}{suffix}" for run in made for suffix in (".knowledge-source.json", ".record-versions.json"))
-    assert (planted.dir / "runs" / got["copies"][0]["run"] / "report.md").read_text(encoding="utf-8") == "sibling output"
+    assert (planted.dir / "runs" / got["copies"][0]["run"] / "report.md").read_text(encoding="utf-8") == "sibling output"  # lint-report-file: ok — an arbitrary file the stand-in job wrote
 
 
 def test_a6_a_sibling_that_names_a_run_id_is_answered_its_worlds_roster_id_all_the_same(scene):
@@ -444,6 +444,72 @@ def test_c21_an_oracle_boxs_bind_sources_are_in_a_folder_per_claim_under_the_dat
             assert not src.exists(), f"the helper left {src} behind"
         sources.append(set(mounts))
     assert not (sources[0] & sources[1]), "two claims bound the same folder"
+
+
+# --- #1557: the oracle's scratch in the claim's folder (H3), read-only to its box (O1), none in the episode (O4) ------
+
+def test_1557_o1_o4_the_oracle_scratch_is_in_the_claims_shared_folder_bound_read_only_and_nothing_is_in_the_episode(scene):
+    """`box.start(kind="oracle")` from a learning job: the answered scratch is inside `.job-scratch/<claim>/shared/`,
+    which the job container mounts read-write at its own path (the claim folder itself, the boxes' runners' home, is
+    not mounted); the box binds the scratch read-only at its own path, with a writable `/tmp` of its own; the episode
+    folder holds no scratch, during the job or after. (#1557 H3, O1, O4)"""
+    job_id = str(uuid.uuid4())
+    episode = scene.root / scene.tenant / "episodes" / job_id
+    shared = scene.root / ".job-scratch" / scene.claim / "shared"
+    got: dict = {}
+
+    def job(c) -> int:
+        episode.mkdir(parents=True, exist_ok=True)  # the job's own episode folder, as the entry makes it
+        got["answer"] = c.request("box.start", kind="oracle", id=job_id)
+        got["episode_during"] = sorted(p.name for p in episode.iterdir())
+        return 0
+
+    docker = ContainerStandIn(job)
+    run_kind(scene, "learning", None, job_id=job_id, docker=docker)
+
+    assert got["answer"], "control: the oracle box was not started"
+    scratch = Path(got["answer"]["scratch"])
+    assert scratch.parent == shared, f"H3: the oracle scratch is not in the claim's shared folder: {scratch}"
+    job_mounts = {m["source"]: m for m in docker.box.mounts}
+    assert str(shared) in job_mounts, f"the job container does not mount the claim's shared folder: {docker.box.mounts}"
+    assert job_mounts[str(shared)]["target"] == str(shared), "the job saves the oracle's reads at their own path"
+    assert not job_mounts[str(shared)]["readonly"], "the job saves the oracle's reads there: it is mounted read-only"
+    assert str(shared.parent) not in job_mounts, "the claim folder (the oracle runners' home) is mounted into the job"
+    (create,) = docker.creates()
+    bound = [m for m in parse_mounts(create) if m["source"] == str(scratch)]
+    assert len(bound) == 1, f"the scratch is bound once: {parse_mounts(create)}"
+    assert bound[0]["target"] == str(scratch), f"the scratch at its own path: {parse_mounts(create)}"
+    assert bound[0]["readonly"], "O1: the oracle box's scratch is bound writable"
+    assert any(t.startswith("/tmp:rw") for t in J.flag_values(create, "--tmpfs")), "O1: the box has no writable /tmp"
+    assert got["episode_during"] == [], f"O4: the job's episode folder holds {got['episode_during']}"
+    assert not (episode / ".oracle-scratch").exists(), "O4: an oracle scratch holder is in the episode folder"
+
+
+def test_1557_o4_a_link_the_job_plants_at_its_episode_folder_steers_no_removal(scene):
+    """The job replaces `episodes/<job>` with a link to another tenant's folder holding a `.oracle-scratch` (and starts
+    an oracle box): once the helper has ended, that folder and what it holds are untouched. (#1557 O4)"""
+    job_id = str(uuid.uuid4())
+    episodes = scene.root / scene.tenant / "episodes"
+    decoy = scene.root / OTHER_TENANT / "episodes" / "victim"
+    (decoy / ".oracle-scratch" / "defender-oracle-x").mkdir(parents=True)
+    (decoy / ".oracle-scratch" / "defender-oracle-x" / "precious.json").write_text("{}", encoding="utf-8")
+    got: dict = {}
+
+    def job(c) -> int:
+        episodes.mkdir(parents=True, exist_ok=True)
+        (episodes / job_id).symlink_to(decoy, target_is_directory=True)
+        try:
+            got["answer"] = c.request("box.start", kind="oracle", id=job_id)
+        except Exception as refused:  # noqa: BLE001 — the decoy is the case; the answer is its control
+            got["answer"] = refused
+        return 0
+
+    run_kind(scene, "learning", None, job_id=job_id, docker=ContainerStandIn(job))
+
+    assert (episodes / job_id).is_symlink(), "control: the job's link is in place"
+    assert (decoy / ".oracle-scratch" / "defender-oracle-x" / "precious.json").read_text(encoding="utf-8") == "{}", \
+        "O4: a removal followed the link the job planted at its episode folder"
+    assert isinstance(got["answer"], dict), f"the oracle box was refused over a link it does not use: {got['answer']!r}"
 
 
 @pytest.mark.parametrize("box", ["sibling-shell", "oracle", "batch"])

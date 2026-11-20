@@ -1,19 +1,18 @@
 """The job lane's door to one tenant's runs container (#1342 M1): every host file the worker and
 the job entry share, keyed by `(data root, tenant id)` and opened without accepting the tenant.
 
-Learning jobs (#1344) share three host-held records here, keyed by the learning job's id and
-written by its children, read by the worker: the job entry's progress record
-(`LearningProgress`, replaced whole), its end record (`LearningEnd`, create-only) and the
-post-step's record (`PostStepRecord`). Each has one parser, and text that is not a record of its
-shape parses as no record (`None`), which the worker treats like an absent one. A family-less
-post-step (#1344 amendment 1: no job to follow) keys its record by the tenant's own id instead
-(`post_step_key`), one record per tenant replaced at each check.
+Learning jobs (#1344) share two host-held records here, keyed by the learning job's id and
+written by the job entry, read by the worker: its progress record (`LearningProgress`, replaced
+whole) and its end record (`LearningEnd`, create-only), which carries the job's findings in an
+optional field of its own (#1487, `findings_of`). Each has one parser, and text that is not a
+record of its shape parses as no record (`None`), which the worker treats like an absent one.
 
 The worker writes a job's launch record and alert file here before it starts the child; the
 child's job entry opens the same door first thing — before tenant acceptance, so a refusal there
 still leaves its job-end record — checks the launch record, and writes the job-end record as it
-exits; the worker then reads the job-end record, the knowledge record, the session pointer and
-the report through it, and the run's cost from the session database the pointer names.
+exits; the worker then reads the job-end record, the knowledge record and the session pointer
+through it, and the run's closing record and cost from the session database the pointer's case id
+derives.
 
 `<data root>/<T>/runs` is held no-follow from the tenant's folder and never made (#1342 R1: tenant
 setup makes it): absent, a link or anything but a folder is `JobLaneRefused`. Every read is a
@@ -26,9 +25,9 @@ import re
 import sqlite3
 import stat
 import sys
-from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
+from typing import Any
 
 from defender import _io
 from defender.records._errors import RunRefused
@@ -39,7 +38,7 @@ from defender.records.job_facts import (  # noqa: F401 — the worker's reasons,
     BOX_NOT_STARTED, BOX_START_FAILED, BOX_STARTED, SETUP_CRASHED, SETUP_DONE, SETUP_REFUSED,
 )
 from defender.records._knowledge_status import UNREADABLE, api_knowledge, knowledge_status
-from defender.records._layout import RUN_LAYOUT, RunPaths, SessionPaths
+from defender.records._layout import RunPaths, SessionPaths
 from defender.records._locations import DataRoot, RunsBase, unwrap_data_root
 from defender.records._store_errors import StoreError
 from defender.records._tenant_id import TenantId, TenantRefused
@@ -149,7 +148,7 @@ class RunCost:
 
     usd: float
     complete: bool
-# -- learning jobs (#1344): the vocabulary and the three records -----------------------------------
+# -- learning jobs (#1344): the vocabulary and the two records -----------------------------------
 
 #: How the job entry ended, in its end record. `stopped` is a hand-back (the worker retries it,
 #: using an attempt); the other three are the row's own terminal statuses.
@@ -182,8 +181,8 @@ MAX_FINDINGS_COUNT = 2**31 - 1
 _PROGRESS_FIELDS = frozenset({"fork_message_id", "stage", "sibling_cost_usd"})
 _END_FIELDS = frozenset({"status", "reason", "message", "fork_message_id", "stage",
                          "findings_count", "sibling_cost_usd"})
-_POST_STEP_FIELDS = frozenset({"published", "refused"})
-_POST_STEP_PENDING_FIELDS = frozenset({"pending"})
+#: The end record's one optional field (#1487): the job's findings, which the envelope never looks inside.
+_FINDINGS_FIELD = "findings"
 
 
 def _optional_text(value: object) -> bool:
@@ -246,7 +245,14 @@ class LearningEnd:
     """The job entry's end record (`<runs>/<job id>.learning-end.json`), written create-only at
     every exit: the status and reason it decided (a reason only for `skipped` and `failed`, one
     of that status's own), a message from the entry's own code (required for `skipped` and
-    `failed`; never run text), and the final pick, stage, findings count and sibling cost."""
+    `failed`; never run text), and the final pick, stage, findings count and sibling cost.
+
+    `findings` (#1487) is the record's one optional field, the job's findings as the entry read
+    them (`{state, text}`, `findings_of`): `None` when the record carries none. The envelope judges
+    no field of it, so no shape of it makes the record unreadable (the record's one JSON nesting
+    bound still covers it, as every record's does); the worker reads it after the
+    envelope, and only for a `completed` end. The envelope's own `findings_count` is the entry's
+    figure, which the worker does not copy (it counts the rows it stored)."""
 
     status: str
     reason: str | None
@@ -255,6 +261,7 @@ class LearningEnd:
     stage: str | None
     findings_count: int = 0
     sibling_cost_usd: float = 0.0
+    findings: Any = None
 
     def __post_init__(self) -> None:
         allowed = _END_REASONS.get(self.status) if isinstance(self.status, str) else None
@@ -270,75 +277,101 @@ class LearningEnd:
             raise ValueError(f"a {self.status} end names why in its message")
 
     def text(self) -> str:
-        return json.dumps({"status": self.status, "reason": self.reason, "message": self.message,
-                           "fork_message_id": self.fork_message_id, "stage": self.stage,
-                           "findings_count": self.findings_count,
-                           "sibling_cost_usd": self.sibling_cost_usd})
+        body: dict[str, Any] = {"status": self.status, "reason": self.reason, "message": self.message,
+                                "fork_message_id": self.fork_message_id, "stage": self.stage,
+                                "findings_count": self.findings_count,
+                                "sibling_cost_usd": self.sibling_cost_usd}
+        if self.findings is not None:  # absent and null read alike: the field is written only when it says something
+            body[_FINDINGS_FIELD] = self.findings
+        return json.dumps(body)
 
     @classmethod
     def parse(cls, text: str) -> LearningEnd | None:
-        """The record `text` holds, or `None` when it is not one the job entry could write."""
-        obj = _record_object(text, _END_FIELDS)
-        if obj is None:
+        """The record `text` holds, or `None` when it is not one the job entry could write: exactly
+        the envelope's fields, with or without `findings`, whose value is not looked at here."""
+        obj, unreadable = _io.load_json_artifact(text)
+        if unreadable is not None or not isinstance(obj, dict) or set(obj) - {_FINDINGS_FIELD} != _END_FIELDS:
             return None
         try:
-            return cls(**{name: obj[name] for name in _END_FIELDS})
+            return cls(**{name: obj[name] for name in _END_FIELDS}, findings=obj.get(_FINDINGS_FIELD))
         except (TypeError, ValueError, OverflowError):
             return None
 
 
-@dataclass(frozen=True)
-class PostStepRecord:
-    """The post-step's record (`<runs>/<key>.post-step.json`, `post_step_key`: the job it
-    followed, or the tenant's own id for a family-less one): the pending jobs whose findings it
-    published and those it refused for good (their rows failed validation). A job in neither
-    stays pending (the learning store could not take them now, or a transient failure).
-    `waiting` (amendment 3, #1278 Wake): whether, after its gate ran, the learning store still
-    holds work a post-step could act on; a record without it says so, which keeps the tenant's
-    check clock running."""
+# -- a completed job's findings, in its end record (#1487) -----------------------------------------
 
-    published: tuple[str, ...] = ()
-    refused: tuple[str, ...] = ()
-    waiting: bool = True
+#: The most findings text one job carries, in UTF-8 bytes of the `text` (`findings_text_bytes`): a generous guess
+#: (owner decision 7), to tighten once real sizes are seen. Over it the findings are refused, never the ending.
+FINDINGS_CAP_BYTES = 8 * 1024 * 1024
 
-    def __post_init__(self) -> None:
-        for ids in (self.published, self.refused):
-            if not isinstance(ids, tuple) or not all(isinstance(i, str) for i in ids):
-                raise ValueError(f"not a post-step record: {self!r}")
-        if set(self.published) & set(self.refused):
-            raise ValueError("a job is published or refused, never both")
-        if not isinstance(self.waiting, bool):
-            raise ValueError(f"not a post-step record: {self!r}")
+#: The findings field's states: `ok` (with the text), or why the entry could not carry them.
+FINDINGS_OK, FINDINGS_OVER_CAP, FINDINGS_UNREADABLE, FINDINGS_MALFORMED = "ok", "over_cap", "unreadable", "malformed"
+FINDINGS_STATES = frozenset({FINDINGS_OK, FINDINGS_OVER_CAP, FINDINGS_UNREADABLE, FINDINGS_MALFORMED})
+#: The findings text's channels: the learning store's kind of each, as the worker inserts them.
+FINDINGS_CHANNELS = ("finding", "questioner_finding")
 
-    def text(self) -> str:
-        # `waiting` is written only when it says something: its absence is the safe reading.
-        return json.dumps({"published": list(self.published), "refused": list(self.refused),
-                           **({} if self.waiting else {"waiting": False})})
-
-    @classmethod
-    def of(cls, published: Sequence[str], refused: Sequence[str], *, waiting: bool = True) -> PostStepRecord:
-        return cls(published=tuple(published), refused=tuple(refused), waiting=waiting)
-
-    @classmethod
-    def parse(cls, text: str) -> PostStepRecord | None:
-        """The record `text` holds, or `None` when it is not one of this shape."""
-        obj = _record_object(text, _POST_STEP_FIELDS) or _record_object(text, _POST_STEP_FIELDS | {"waiting"})
-        if obj is None or not all(isinstance(obj[k], list) for k in _POST_STEP_FIELDS):
-            return None
-        try:
-            return cls.of(obj["published"], obj["refused"], waiting=obj.get("waiting", True))
-        except ValueError:
-            return None
+#: Why a completed record's findings are refused before any row is looked at (`findings_of`): a closed vocabulary
+#: (the state the entry recorded, or what the reader found), so a refusal's log line never carries the job's text.
+FINDINGS_ABSENT, FINDINGS_NOT_A_FIELD, FINDINGS_NOT_JSON, FINDINGS_NOT_AN_OBJECT = (
+    "absent", "not_a_findings_field", "text_not_json", "text_not_an_object")
 
 
-def post_step_key(tenant_id: object, job_id: object | None) -> RunId:
-    """The name a post-step's record is kept under (#1344): the job it followed, or, for a
-    family-less post-step (amendment 1: `job_id` None), the tenant's own id. Both are canonical
-    UUID text, so the name has the job lane's `<id><suffix>` shape; a tenant's id never names a
-    job or a run in its own runs folder, so the two never meet, and the family-less record is one
-    per tenant, replaced at each check rather than one more file per check. The one place the
-    choice is made: the post-step writes, and the worker reads, through it."""
-    return _run_id(str(tenant_id) if job_id is None else job_id)
+def findings_text_bytes(text: str) -> int:
+    """The size of findings text, in UTF-8 bytes: the one measure of the cap, used by the entry and the worker alike,
+    and of a row's and an id's bounds. Total: a lone surrogate (which JSON can carry) counts as the 3 bytes its
+    code point would take, never an error."""
+    return len(text.encode("utf-8", "surrogatepass"))
+
+
+def parse_findings_text(text: str) -> tuple[dict[str, Any] | None, str | None]:
+    """The one bounded parser of findings text, for the entry's own check and the worker's read: `(object, None)`
+    for text of at most `FINDINGS_CAP_BYTES` that decodes (nesting checked before decoding,
+    `load_json_artifact`) to a JSON object of exactly the two channels; else `(None, why)`, `why` one of
+    `FINDINGS_OVER_CAP`, `FINDINGS_NOT_JSON`, `FINDINGS_NOT_AN_OBJECT`. The channels' rows are not looked at."""
+    if findings_text_bytes(text) > FINDINGS_CAP_BYTES:
+        return None, FINDINGS_OVER_CAP
+    obj, unreadable = _io.load_json_artifact(text)
+    if unreadable is not None:
+        return None, FINDINGS_NOT_JSON
+    if not isinstance(obj, dict) or set(obj) != set(FINDINGS_CHANNELS):
+        return None, FINDINGS_NOT_AN_OBJECT
+    return obj, None
+
+
+def findings_of(found: object) -> tuple[dict[str, Any] | None, str | None]:
+    """A completed end record's `findings` field (`LearningEnd.findings`, any JSON value) as the worker reads it:
+    `(channels, None)` only for exactly `{"state": "ok", "text": <text>}` whose text `parse_findings_text` accepts;
+    else `(None, why)`: `FINDINGS_ABSENT`, the state the entry recorded (`over_cap`, `unreadable`, `malformed`),
+    `FINDINGS_NOT_A_FIELD` for any other value, or the parser's refusal."""
+    if found is None:
+        return None, FINDINGS_ABSENT
+    if not isinstance(found, dict) or not isinstance(found.get("state"), str):
+        return None, FINDINGS_NOT_A_FIELD
+    state = found["state"]
+    if state != FINDINGS_OK:
+        return None, state if state in FINDINGS_STATES and set(found) == {"state"} else FINDINGS_NOT_A_FIELD
+    if set(found) != {"state", "text"} or not isinstance(found["text"], str):
+        return None, FINDINGS_NOT_A_FIELD
+    return parse_findings_text(found["text"])
+
+
+def findings_field(text: str | None) -> tuple[dict[str, Any], int]:
+    """The end record's findings field for the findings `text` the entry built, and how many rows it holds (0 when it
+    refuses them; the entry's own count, which only a person reads: the worker counts the rows it stores), from one
+    parse: `{"state": "ok", "text": text}` when `parse_findings_text` accepts it, the worker's own check run first;
+    `over_cap` over the cap; `malformed` for any other refusal, or for `text` None (a held row that was not one)."""
+    if text is None:
+        return {"state": FINDINGS_MALFORMED}, 0
+    channels, why = parse_findings_text(text)
+    if channels is None:
+        return {"state": FINDINGS_OVER_CAP if why == FINDINGS_OVER_CAP else FINDINGS_MALFORMED}, 0
+    return {"state": FINDINGS_OK, "text": text}, sum(len(rows) for rows in channels.values() if isinstance(rows, list))
+
+
+def unreadable_findings() -> dict[str, Any]:
+    """The findings field of a completed end whose findings could not be read: `unreadable`, written first and kept
+    unless the read succeeds."""
+    return {"state": FINDINGS_UNREADABLE}
 
 
 def _run_id(raw: object) -> RunId:
@@ -475,7 +508,7 @@ class JobLane:
         read = self._held.view().read(self._paths(_run_id(run_id)).job_end().name)
         return None if read.text is None else JobEnd.parse(read.text)
 
-    # -- a learning job's three records (#1344) ------------------------------------------------------
+    # -- a learning job's two records (#1344) ------------------------------------------------------
 
     def write_learning_progress(self, job_id: object, progress: LearningProgress) -> None:
         """The progress record, replaced whole (a reader sees the old record or the new one)."""
@@ -497,38 +530,6 @@ class JobLane:
         writes (the worker treats all three alike)."""
         read = self._held.view().read(self._paths(_run_id(job_id)).learning_end().name)
         return None if read.text is None else LearningEnd.parse(read.text)
-
-    def write_post_step(self, job_id: object | None, record: PostStepRecord) -> None:
-        """The post-step's record for the job it followed (`None`: a family-less post-step, kept
-        under the tenant's id, `post_step_key`), replaced whole."""
-        self._held.write(self._paths(post_step_key(self.tenant_id, job_id)).post_step().name,
-                         record.text(), mode="replace")
-
-    def write_post_step_pending(self, job_id: object | None, pending: Sequence[str]) -> None:
-        """The jobs the worker hands the post-step for `job_id` (as `write_post_step` takes it)
-        to publish, replaced whole before it starts: a file, not the command line, so their
-        number never limits the start (#1446 review)."""
-        if not all(isinstance(j, str) for j in pending):
-            raise ValueError("pending job ids are text")
-        self._held.write(self._paths(post_step_key(self.tenant_id, job_id)).post_step_pending().name,
-                         json.dumps({"pending": list(pending)}), mode="replace")
-
-    def read_post_step_pending(self, job_id: object | None) -> tuple[str, ...] | None:
-        """The jobs handed to the post-step for `job_id`, or `None` when the record is absent,
-        unreadable or not of its shape."""
-        read = self._held.view().read(self._paths(post_step_key(self.tenant_id, job_id)).post_step_pending().name)
-        if read.text is None:
-            return None
-        obj = _record_object(read.text, _POST_STEP_PENDING_FIELDS)
-        if obj is None or not isinstance(obj["pending"], list) or not all(isinstance(j, str) for j in obj["pending"]):
-            return None
-        return tuple(obj["pending"])
-
-    def read_post_step(self, job_id: object | None) -> PostStepRecord | None:
-        """The post-step's record (`job_id` as `write_post_step` takes it), or `None` when it is
-        absent, unreadable or not of its shape."""
-        read = self._held.view().read(self._paths(post_step_key(self.tenant_id, job_id)).post_step().name)
-        return None if read.text is None else PostStepRecord.parse(read.text)
 
     # -- what the run left ------------------------------------------------------------------------
 
@@ -555,14 +556,20 @@ class JobLane:
         what the worker records when the read itself faults (#1396)."""
         return api_knowledge(UNREADABLE)
 
-    def report_disposition(self, run_id: object) -> str | None:
-        """The disposition of the run's `report.md`, read no-follow and size-limited, or `None`
-        when there is no readable report or it names no disposition."""
-        from defender.records._report import parse_report_text
+    def closing_disposition(self, run_id: object) -> Any:
+        """The run's closing record through the job-lane route (#1534): the pointer read through the held view, then
+        the closing lookup's own `from_pointer`, which the run-handle route uses too, with this lane's rule for the
+        database: derived from the pointer's case id, never its stored path. Returns `closing.Record | NeverClosed | CouldNotLook`."""
+        from defender.records import closing
+        from defender.records.session_store import _LEGACY_LINK_NAME
 
-        name = PurePosixPath(str(_run_id(run_id))) / RUN_LAYOUT.report
-        read = self._held.view().read(name)
-        return None if read.text is None else parse_report_text(read.text).disposition
+        run_id = _run_id(run_id)
+        view = self._held.view()
+        where = self._paths(run_id).session_pointer()
+        return closing.from_pointer(
+            view.read(where.name), where=str(where), run_id=str(run_id),
+            locate=lambda pointer: SessionPaths(RunsBase(self._runs)).session_db(pointer.case_id),
+            legacy_link=lambda: not view.read(PurePosixPath(str(run_id)) / _LEGACY_LINK_NAME).absent)
 
     # -- cost -------------------------------------------------------------------------------------
 
@@ -578,17 +585,14 @@ class JobLane:
             if read.absent:
                 return None
             raise CostUnreadable(f"run {run_id}: its session pointer cannot be read ({read.reason})")
-        obj, unreadable = _io.load_json_artifact(read.text)
-        if unreadable is not None or not isinstance(obj, dict) or not isinstance(obj.get("case_id"), str):
-            raise CostUnreadable(f"run {run_id}: its session pointer names no case")
-        session_id = obj.get("session_id")
-        if session_id is not None and not isinstance(session_id, str):
-            raise CostUnreadable(f"run {run_id}: its session pointer names no usable session")
+        from defender.records import session_store
+
         try:
-            database = SessionPaths(RunsBase(self._runs)).session_db(obj["case_id"])
+            pointer = session_store.parse_case_pointer(read.text)
+            database = SessionPaths(RunsBase(self._runs)).session_db(pointer.case_id)
         except StoreError as bad:
-            raise CostUnreadable(f"run {run_id}: its session pointer's case id is refused: {bad}") from None
-        return database, session_id or None
+            raise CostUnreadable(f"run {run_id}: its session pointer {bad}") from None
+        return database, pointer.session_id
 
     def cost(self, run_id: object) -> RunCost:
         """What the run spent: the sum of the spend ledger's rows for this run id in the database

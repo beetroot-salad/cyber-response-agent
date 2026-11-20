@@ -92,7 +92,7 @@ section.headline-runtime {
 .hb-label { text-transform: uppercase; font-size: 10px; color: var(--text-dim); letter-spacing: 0.6px; margin-bottom: 8px; }
 .hb-text { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); font-size: 13px; line-height: 1.6; }
 
-/* Two-column headline: disposition tile (narrow) + report.md (wide). */
+/* Two-column headline: disposition tile (narrow) + the closing record's summary (wide). */
 .headline-grid {
   display: grid;
   grid-template-columns: minmax(220px, 280px) 1fr;
@@ -529,7 +529,7 @@ pre.files { font-size: 11px; color: var(--text-dim); }
    page never exceeds the viewport — a fixed lead column ran the goals (and the
    header tabs) off the right edge with no ellipsis. */
 .an-cols { display: grid; grid-template-columns: minmax(0, 80ch) minmax(320px, 1fr); gap: 32px; align-items: start; }
-.an-report { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; color: var(--text); font-size: 14px; }
+.an-summary { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; color: var(--text); font-size: 14px; }
 .an-leads { min-width: 0; }
 @media (max-width: 900px) { .an-cols { grid-template-columns: 1fr; gap: 12px; } }
 .an-sublabel { text-transform: uppercase; font-size: 10px; letter-spacing: 0.7px; color: var(--text-dim); margin: 6px 0 4px; }

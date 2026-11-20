@@ -709,7 +709,7 @@
                 "type": "null"
               }
             ],
-            "description": "Set once the investigation completes with a readable report.",
+            "description": "Set once the investigation completes: the disposition its closing record holds.",
             "enum": [
               "benign",
               "false-positive",
@@ -729,7 +729,7 @@
                 "type": "null"
               }
             ],
-            "description": "Our own words on why it failed; never model or run output.",
+            "description": "Our own words on why it failed or, when the status is `unparseable`, on why its closing record could not be read; never model or run output.",
             "title": "Failure Message"
           },
           "failure_reason": {
@@ -741,7 +741,7 @@
                 "type": "null"
               }
             ],
-            "description": "Set when the investigation failed or was aborted: a fixed reason such as `setup_refused`, `no_report`, `worker_error`, `cancelled`, `tenant_offboarded` (its tenant was offboarded), `lease_lapsed` (its worker was lost; a retry follows) or `retry_cap` (lost on the last of its attempts).",
+            "description": "Set when the investigation failed or was aborted: a fixed reason such as `setup_refused`, `no_report` (the run committed no close, so it left no closing record), `worker_error`, `cancelled`, `tenant_offboarded` (its tenant was offboarded), `lease_lapsed` (its worker was lost; a retry follows) or `retry_cap` (lost on the last of its attempts).",
             "title": "Failure Reason"
           },
           "finished_at": {
