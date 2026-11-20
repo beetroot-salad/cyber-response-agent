@@ -83,6 +83,32 @@ def test_deadline_stops_and_settles_worker_without_accepting_late_result(fault, 
     assert worker.removed()
 
 
+def test_deadline_stops_the_verifiers_box_and_settles_its_worker_before_removal():
+    """The verifier's python runs in a box of its own, its worker owned by the oracle attempt: the
+    attempt's deadline stops that box too, settles the worker, and only then may it be removed."""
+    oracle_box = _Worker()
+    worker = _Worker()
+    run = _Run(door=None, deadline=0.1, box=oracle_box.owner, verifier_box=worker.owner)
+    verifying = _Run(door=None, deadline=10, box=worker.owner, verifying=True,
+                     _box_workers=run._box_workers)
+
+    async def work():
+        return await verifying.box_work(worker.work)
+
+    try:
+        assert anyio.run(_within_deadline, run, work) == (False, None)
+        assert worker.started.is_set()
+        assert worker.finished.is_set()
+        assert not worker.removed(), "the verifier's box was removed before its worker settled"
+        assert not run.has_box_work
+        assert not verifying.has_box_work
+    finally:
+        worker.shutdown.set()
+        worker.owner.stop()
+        oracle_box.owner.stop()
+    assert worker.removed()
+
+
 @pytest.mark.parametrize("main_fails", [False, True])
 def test_direct_tool_task_cancellation_cannot_discard_a_fatal_worker(main_fails):
     fault = box.BoxOutputLimitExceeded()

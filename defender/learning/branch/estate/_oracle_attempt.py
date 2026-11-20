@@ -160,8 +160,15 @@ class _Run:
     live: bool = False
     #: Whether the call is a recorded pre-branch call, served unchanged: never re-asked.
     fixed: bool = False
-    #: The oracle attempt's python box (`None` for the verifier, which runs no python).
+    #: This run's python box: the oracle attempt's own, or on a verifier's run the verifier's,
+    #: which is never the oracle's (it judges in a cold context).
     box: _AttemptBox | None = None
+    #: The verifier's box for this oracle attempt, made on its first verification and started
+    #: on its first `python` call; cancelled and stopped with the attempt's own (`_settle_attempt`,
+    #: `Oracle._attempt`), after the attempt's Python workers settle. `None` until then.
+    verifier_box: _AttemptBox | None = None
+    #: Whether this is a verifier's run: its saved files are what it judges (`_place`).
+    verifying: bool = False
     #: Asked of a submission before its checks (`Oracle.serve`'s `gate`).
     gate: Callable[[Any], str | None] | None = None
     #: The agents entered on the oracle attempt's event loop, closed with the attempt outside its deadline
@@ -169,6 +176,16 @@ class _Run:
     entered: contextlib.AsyncExitStack | None = None
     #: Python workers are owned by the attempt even when its tool coroutine is cancelled.
     _box_workers: list[asyncio.Task[Any]] = field(default_factory=list, repr=False)
+
+    @property
+    def boxes(self) -> list[_AttemptBox]:
+        """This run's boxes: its own and the verifier's for its attempt, where each was made."""
+        return [box for box in (self.box, self.verifier_box) if box is not None]
+
+    def stop_boxes(self) -> None:
+        """Remove each of this run's boxes: only once its Python workers have settled."""
+        for box in self.boxes:
+            box.stop()
 
     @property
     def against(self) -> Any:
