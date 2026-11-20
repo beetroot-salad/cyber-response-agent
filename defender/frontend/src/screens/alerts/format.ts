@@ -1,6 +1,7 @@
 // The alert list's pure pieces (alert list design O5, O7): the fired time as a row shows it, the address's query read
 // once into the filters, and an instant written back as a wall time for the filter form. Each takes its zone (and
 // `firedLabel` the moment "now") from its caller; nothing here reads the browser's clock or zone.
+import { Temporal } from "temporal-polyfill";
 import type { AddressQuery } from "../../shell/provider";
 import { outcomeFilterOf, type OutcomeFilter } from "./outcomes";
 
@@ -22,104 +23,28 @@ const INVALID: Invalid = { kind: "invalid" };
 /** The fixed English month names a date label uses, whatever the browser's language. */
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
 
-const DAY_MS = 86_400_000;
-
-/** A wall-clock date and time, with no zone. `month` is 1 to 12. */
-interface Wall {
-  readonly year: number;
-  readonly month: number;
-  readonly day: number;
-  readonly hour: number;
-  readonly minute: number;
-  readonly second: number;
-}
-
-/** The formatter that writes an instant's wall time in `timeZone`; throws `RangeError` for a zone the browser does not
- * know. Every field numeric and the hour 0 to 23, so the parts read back as numbers. */
-function wallFormat(timeZone: string): Intl.DateTimeFormat {
-  return new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    calendar: "gregory",
-    numberingSystem: "latn",
-    era: "short",
-    year: "numeric",
-    month: "numeric",
-    day: "numeric",
-    hour: "numeric",
-    minute: "numeric",
-    second: "numeric",
-    hourCycle: "h23",
-  });
-}
-
-/** The wall time of the instant `ms` as `format` writes it. */
-function wallAt(format: Intl.DateTimeFormat, ms: number): Wall {
-  const parts = new Map(format.formatToParts(ms).map((part) => [part.type, part.value]));
-  const number = (type: Intl.DateTimeFormatPartTypes): number => {
-    const value = Number(parts.get(type));
-    if (!Number.isInteger(value)) throw new Error(`the zone's ${type} did not read as a number`);
-    return value;
-  };
-  const year = parts.get("era") === "BC" ? 1 - number("year") : number("year");
-  return {
-    year,
-    month: number("month"),
-    day: number("day"),
-    hour: number("hour"),
-    minute: number("minute"),
-    second: number("second"),
-  };
-}
-
-/** The wall time read as if it were UTC, in ms: the arithmetic below compares wall times by it. */
-function asUtc(wall: Wall): number {
-  const date = new Date(0);
-  date.setUTCFullYear(wall.year, wall.month - 1, wall.day); // unlike Date.UTC, not shifted for years 0 to 99
-  date.setUTCHours(wall.hour, wall.minute, wall.second, 0);
-  return date.getTime();
-}
-
-/** The zone's offset from UTC at the instant `ms`, in ms (to the second). */
-function offsetAt(format: Intl.DateTimeFormat, ms: number): number {
-  const whole = Math.floor(ms / 1000) * 1000;
-  return asUtc(wallAt(format, whole)) - whole;
-}
-
-/** The instant a wall time (`local`, as `asUtc` gives it) means in the zone, as Temporal's `compatible` resolves it: a
- * wall time the zone has once is that instant; one it has twice (the clocks went back) is the earlier; one it skipped
- * (the clocks went forward) takes the offset from before the change, so it lands after it. Offsets are probed a day
- * either side, which spans every change a zone has made (Apia skipped a whole day). */
-function instantOf(format: Intl.DateTimeFormat, local: number): number {
-  const before = offsetAt(format, local - DAY_MS);
-  const after = offsetAt(format, local + DAY_MS);
-  const found = [...new Set([before, after])]
-    .map((offset) => local - offset)
-    .filter((instant) => offsetAt(format, instant) === local - instant)
-    .sort((a, b) => a - b);
-  return found[0] ?? local - before;
-}
-
-/** True for a year that has a 29 February. */
-function leap(year: number): boolean {
-  return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
-}
-
-const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31] as const;
-
-/** `YYYY-MM-DDTHH:MM`, the one form a time takes in the address (a `datetime-local` field's value). */
+/** `YYYY-MM-DDTHH:MM`, the one form a time takes in the address (a `datetime-local` field's value). Checked before
+ * Temporal reads it, which would also take seconds, an offset or an annotation. */
 const WALL_TIME = /^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2})$/;
 
+/** The instant `iso` in `timeZone`; throws `RangeError` for a zone Temporal does not know. */
+function zoned(iso: string, timeZone: string): Temporal.ZonedDateTime {
+  return Temporal.Instant.fromEpochMilliseconds(Date.parse(iso)).toZonedDateTimeISO(timeZone);
+}
+
 /** `text` as a wall time, or null when it is not in the address's form or not a real calendar date and time. */
-function wallOf(text: string): Wall | null {
+function wallOf(text: string): Temporal.PlainDateTime | null {
   const found = WALL_TIME.exec(text);
   if (found === null) return null;
   const [year, month, day, hour, minute] = found.slice(1).map(Number);
   if (year === undefined || month === undefined || day === undefined || hour === undefined || minute === undefined)
     return null;
-  if (month < 1 || month > 12 || hour > 23 || minute > 59) return null;
-  const last = month === 2 && leap(year) ? 29 : (DAYS_IN_MONTH[month - 1] ?? 0);
-  if (day < 1 || day > last) return null;
-  return { year, month, day, hour, minute, second: 0 };
+  try {
+    return Temporal.PlainDateTime.from({ year, month, day, hour, minute }, { overflow: "reject" });
+  } catch (error) {
+    if (error instanceof RangeError) return null;
+    throw error;
+  }
 }
 
 /** The single value the address gives `name`: "" when it gives none, null when it gives it more than once. */
@@ -143,18 +68,20 @@ export function readFilters(query: AddressQuery, viewerZone: string): Filters | 
   if (outcomeText === null || afterText === null || beforeText === null || tz === null) return INVALID;
   const outcome = outcomeText === "" ? null : outcomeFilterOf(outcomeText);
   if (outcomeText !== "" && outcome === null) return INVALID;
-  let format: Intl.DateTimeFormat;
+  const zone = tz === "" ? viewerZone : tz;
   try {
-    format = wallFormat(tz === "" ? viewerZone : tz);
+    Temporal.Instant.fromEpochMilliseconds(0).toZonedDateTimeISO(zone);
   } catch (error) {
     if (error instanceof RangeError) return INVALID;
     throw error;
   }
-  /** The instant a time means, null when it is unset, undefined when it can't be read. */
+  /** The instant a time means (a wall time the zone skipped or has twice, as `compatible` resolves it), null when it
+   * is unset, undefined when it can't be read. Written as `toISOString` writes it. */
   const instant = (text: string): string | null | undefined => {
     if (text === "") return null;
     const wall = wallOf(text);
-    return wall === null ? undefined : new Date(instantOf(format, asUtc(wall))).toISOString();
+    if (wall === null) return undefined;
+    return new Date(wall.toZonedDateTime(zone, { disambiguation: "compatible" }).epochMilliseconds).toISOString();
   };
   const after = instant(afterText);
   const before = instant(beforeText);
@@ -171,7 +98,7 @@ const two = (value: number): string => String(value).padStart(2, "0");
 
 /** The instant `iso` as the filter form writes it (`YYYY-MM-DDTHH:MM`) in `timeZone`. */
 export function wallTime(iso: string, timeZone: string): string {
-  const wall = wallAt(wallFormat(timeZone), Date.parse(iso));
+  const wall = zoned(iso, timeZone);
   return `${String(wall.year).padStart(4, "0")}-${two(wall.month)}-${two(wall.day)}T${two(wall.hour)}:${two(wall.minute)}`;
 }
 
@@ -181,11 +108,9 @@ export function firedLabel(
   iso: string,
   { now, timeZone }: { readonly now: Date; readonly timeZone: string },
 ): { readonly time: string; readonly day: string } {
-  const format = wallFormat(timeZone);
-  const fired = wallAt(format, Date.parse(iso));
-  const today = wallAt(format, now.getTime());
-  const dayOf = (wall: Wall): number => asUtc({ ...wall, hour: 0, minute: 0, second: 0 }) / DAY_MS;
-  const daysAgo = dayOf(today) - dayOf(fired);
+  const fired = zoned(iso, timeZone);
+  const today = zoned(now.toISOString(), timeZone);
+  const daysAgo = fired.toPlainDate().until(today.toPlainDate(), { largestUnit: "days" }).days;
   const time = `${two(fired.hour)}:${two(fired.minute)}`;
   if (daysAgo === 0) return { time, day: "Today" };
   if (daysAgo === 1) return { time, day: "Yesterday" };
