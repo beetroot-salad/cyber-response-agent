@@ -48,10 +48,9 @@ decided on. A job's stored findings carry its id (`source_run`): that is the las
 The finish audit event of a completed job whose findings were stored also names how many rows its end added
 (`added=N`; a refused one names none), but an audit event can be lost in a crash just after the commit.
 
-Rebuild the job image only after the old workers are stopped, then at any time after the upgrade. A worker from
-before #1589 needs the `findings_count` field in a job's end record, which an image built from this code no longer
-writes: an old worker reads such a record as no end record and fails the job, its findings never stored. A new worker
-accepts a record from an older image, its `findings_count` ignored, so the image need not be rebuilt at once.
+A job's entry runs from its worker's code copy, not from the job image, so an upgraded worker's jobs write the
+new end record. An end record written before the upgrade and read after it keeps its `findings_count`: the new
+worker ignores it.
 
 ## Upgrade from before #1557
 

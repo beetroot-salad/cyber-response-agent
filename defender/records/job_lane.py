@@ -351,8 +351,8 @@ def findings_of(found: object) -> tuple[dict[str, Any] | None, str | None]:
 
 def findings_field(text: str | None) -> tuple[dict[str, Any], int]:
     """The end record's findings field for the findings `text` the entry built, and how many rows it holds (0 when it
-    refuses them; the entry's own count, which only the job's message carries: the store's finish event names the rows
-    it stored), from one parse: `{"state": "ok", "text": text}` when `parse_findings_text` accepts it, the worker's own check run first;
+    refuses them; the entry's own count, which only the job's message carries: the store's finish event names how many
+    rows its end added), from one parse: `{"state": "ok", "text": text}` when `parse_findings_text` accepts it, the worker's own check run first;
     `over_cap` over the cap; `malformed` for any other refusal, or for `text` None (a held row that was not one)."""
     if text is None:
         return {"state": FINDINGS_MALFORMED}, 0
