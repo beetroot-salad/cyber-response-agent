@@ -212,8 +212,10 @@ in the attempt its answer is the base the patch applies to; a committed re-ask i
 base answer of the world. For a system of record it
 undoes the source run's own later writes (each such change names the reserved fact `fork`) and
 edits the response to the world's facts. It sees the call, the base answer (saved for its code;
-an answer past 8 KB, as gather's in-context ceiling, is shown as gather shows it: its shape, each
-dropped region marked, the whole in the saved file, and so is each of its own reads and re-asks)
+an answer past gather's in-context ceiling (8 KB unless gather's setting moves it), or past its
+share of the prompt's budget, is shown as gather shows it within that size: its shape, each
+dropped region marked, the whole in the saved file; so is each of its own reads and re-asks, and
+a python reply shows its head and tail within the same ceiling)
 and the world's facts, and this world's earlier servings most like the call (how each was made:
 its code and changes, for servings that changed something or ran code; each call starts a fresh
 conversation), may explore real examples through the same
@@ -233,9 +235,12 @@ base's shape, the forged rows to the real columns, ids and recorded facts, and e
 removed row; then a verifier
 (`AgentRole.ORACLE_CHECK`), in its own context and never shown the oracle's
 reasoning, asks whether each covered fact's telemetry is present and plausible. What it judges
-(the base, the served answer, the changes, a re-ask's dropped rows) is shown the same bounded way
-and saved whole in a sandboxed box of its own, never the oracle's, where its `python` checks every
-row; the box starts on its first `python` call and stops with the attempt's own.
+(the base, the served answer, a re-ask's dropped rows) is shown the same bounded way, the changes
+as the oracle saw them (each cut for length), and all of it is saved whole in a sandboxed box of
+its own, never the oracle's, where its `python` checks every row. Every box of an attempt is made
+and stopped by one owner: the box starts on its first `python` call, one that cannot start is not
+tried again, and all stop together when the attempt ends, its deadline passes or the sibling
+closes under it (a box made after that never starts).
 A failure goes back to the oracle and the turn retries; past the cap the world is
 unservable and the sibling aborts with that reason. Each world owns its oracle
 state with one writer; one oracle turn runs at a time per sibling, and the

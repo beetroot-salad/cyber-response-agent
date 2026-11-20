@@ -1107,13 +1107,15 @@ def test_a_call_starts_fresh_and_a_retry_past_the_size_budget_restarts_keeping_t
     bob = _big_rows("bob", "CALL2MARK")
     est.answer("idp", "query", ALICE, alice)
     est.answer("idp", "query", BOB, bob)
-    # Python output big enough that call 2's first attempt leaves its conversation past the budget
-    # (a side read no longer can: it is shown as a bounded view, its whole in a saved file).
+    # Python output that leaves call 2's first attempt's conversation past the budget: no one
+    # tool result can (a read is a bounded view, a python reply bounded too), so several replies
+    # together do.
+    looks = 10
     box, _log = S.sandboxed_box(out=json.dumps(_big_rows("bob", "LOOKMARK")).encode())
     row = {"user": "alice", "event_id": "e-9001", "action": "tgt", "note": "FORGED6"}
     served = {"rows": [*alice["rows"], row]}
     o = S.oracle(S.submit(_add("/rows/-", row, fact_id="f1")),
-                 S.python("print(open('bob.json').read())"),
+                 *[S.python("print(open('bob.json').read())")] * looks,
                  S.submit(S.handin(S.op_remove("/rows/9999", fact_id="f1"))),
                  S.submit())
     reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o,
@@ -1123,14 +1125,14 @@ def test_a_call_starts_fresh_and_a_retry_past_the_size_budget_restarts_keeping_t
     assert S.call(reg, "idp", "query", ctx, q="user:alice") == served
     second = o.requests
     assert S.call(reg, "idp", "query", ctx, q="user:bob") == bob
-    assert o.requests == second + 3, o.requests
+    assert o.requests == second + looks + 2, o.requests
 
     fresh = S.all_parts_text(o.messages[second])
     assert "CALL1MARK" not in fresh, "call 2 carried call 1's conversation"
     assert "Telemetry frozen in this world so far" in fresh
     assert "FORGED6" in fresh, "the fresh call lost the frozen row"
     assert "LOOKMARK" in S.all_parts_text(o.messages[second + 1])
-    retry = S.all_parts_text(o.messages[second + 2])
+    retry = S.all_parts_text(o.messages[second + looks + 1])
     assert "LOOKMARK" not in retry, "the retry past the size budget did not restart"
     assert "FORGED6" in retry, "the restarted retry lost the frozen row"
     assert "cannot apply" in retry, "the restarted retry lost the failed attempt"
