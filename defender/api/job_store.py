@@ -14,7 +14,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from defender._vocab import Disposition, NoOutcome
-from defender.jobs import InvestigationRecord, JobStore, LearningJobRecord, StoredAlert, StoredAlertSummary
+from defender.jobs import AlertListing, InvestigationRecord, JobStore, LearningJobRecord, StoredAlert
 from defender.records.formats import MAPPING_KEYS, AlertId, InvestigationId, LearningJobId, TenantId, check_mapping
 from defender.records.formats import AlertMapping as StoredAlertMapping
 from defender.tenancy import TenantRecord
@@ -37,7 +37,7 @@ def _by_name(model: type[BaseModel], record: object, *, but: frozenset[str] = fr
     return {name: getattr(record, name) for name in model.model_fields if name not in but}
 
 
-def _alert_summary(alert: StoredAlertSummary) -> AlertSummary:
+def _alert_summary(alert: AlertListing) -> AlertSummary:
     return AlertSummary(**_by_name(AlertSummary, alert))
 
 

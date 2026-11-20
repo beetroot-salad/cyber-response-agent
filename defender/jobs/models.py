@@ -11,6 +11,7 @@ from typing import Any, Protocol
 
 from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKeyConstraint, Index, Integer, LargeBinary, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.engine import Row
 from sqlalchemy.orm import Mapped, mapped_column
 
 from defender._model import model
@@ -201,8 +202,10 @@ class LearningCheckRow(Base, kw_only=True):
 
 
 @model(frozen=True)
-class _AlertFields:
-    """The fields every read of an alert carries: the list's (`StoredAlertSummary`) and the single read's (`StoredAlert`)."""
+class AlertListing:
+    """An alert as a list shows it: every stored field but `raw`, which a list never reads (#1507), and what its
+    investigations concluded (#1581). `outcome` is the stored copy of the newest completed investigation's disposition;
+    `latest_status` the newest investigation's stage; each None when there is no such investigation."""
 
     alert_id: AlertId
     tenant_id: TenantId
@@ -213,23 +216,24 @@ class _AlertFields:
     received_at: _dt.datetime
     title: str | None
     description: str | None
-
-
-@model(frozen=True)
-class StoredAlert(_AlertFields):
-    """An alert as read alone. `raw` is the exact bytes inserted."""
-
-    raw: bytes
-
-
-@model(frozen=True)
-class StoredAlertSummary(_AlertFields):
-    """An alert as listed (#1581): no `raw` (#1507), and what its investigations concluded. `outcome` is the stored copy
-    of the newest completed investigation's disposition; `latest_status` the newest investigation's stage; each None
-    when there is no such investigation."""
-
     outcome: Disposition | None
     latest_status: str | None
+
+
+@model(frozen=True)
+class StoredAlert:
+    """An alert as read. `raw` is the exact bytes inserted."""
+
+    alert_id: AlertId
+    tenant_id: TenantId
+    vendor: str
+    vendor_ticket_id: str
+    fired_at: _dt.datetime
+    changed_at: _dt.datetime
+    received_at: _dt.datetime
+    title: str | None
+    description: str | None
+    raw: bytes
 
 
 @model(frozen=True)
@@ -317,6 +321,22 @@ def learning_job_record(row: LearningJobRow) -> LearningJobRecord:
         fork_message_id=row.fork_message_id, sibling_cost_usd=row.sibling_cost_usd,
         findings_count=row.findings_count, publish_state=row.publish_state, created_at=row.created_at,
         started_at=row.started_at, finished_at=row.finished_at, reason=row.reason, message=row.message)
+
+
+#: The columns an alert list selects: every column but `raw` (#1507).
+#: Every alert column a list reads: all but `raw` (#1507) and the two that only keep the stored outcome in step with its
+#: source investigation (#1581), which no read shows. The list's query adds `latest_status` beside them.
+ALERT_LISTING_COLUMNS = tuple(column for column in AlertRow.__table__.columns
+                              if column.key not in ("raw", "outcome_investigation_id", "outcome_created_at"))
+
+
+def alert_listing(row: Row[Any]) -> AlertListing:
+    """An `AlertListing` from a row of `ALERT_LISTING_COLUMNS` and `latest_status`, each field the column of its name
+    (`alert_id` is `id`): a column the record lacks, or a field no column fills, is a `TypeError`, never a field left at
+    a default."""
+    values = dict(row._mapping)
+    values["alert_id"] = values.pop("id")
+    return AlertListing(**values)
 
 
 def stored_alert(row: AlertRow) -> StoredAlert:

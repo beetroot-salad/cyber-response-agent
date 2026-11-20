@@ -53,10 +53,12 @@ from defender.tenancy.models import offboard as _tenancy_offboard
 from defender.tenancy.models import share_tenant
 
 from .models import (
+    ALERT_LISTING_COLUMNS,
     LEARNING_TERMINAL,
     LIVE,
     TERMINAL,
     is_terminal,
+    AlertListing,
     AlertRow,
     Claim,
     InvestigationRecord,
@@ -67,7 +69,7 @@ from .models import (
     LearningJobRow,
     LearningProgress,
     StoredAlert,
-    StoredAlertSummary,
+    alert_listing,
     investigation_record,
     learning_job_record,
     stored_alert,
@@ -130,10 +132,6 @@ def is_outage(fault: BaseException) -> bool:
         return True
     return isinstance(fault, OperationalError | InterfaceError | InternalError | PoolTimeout | OSError)
 
-
-#: The alert list's columns (#1581): the alert's listed fields and its stored outcome, never `raw` (#1507).
-_LISTED = (AlertRow.id, AlertRow.tenant_id, AlertRow.vendor, AlertRow.vendor_ticket_id, AlertRow.fired_at,
-           AlertRow.changed_at, AlertRow.received_at, AlertRow.title, AlertRow.description, AlertRow.outcome)
 
 
 def _latest_status() -> Any:
@@ -271,13 +269,13 @@ class JobStore:
     async def list_alerts(  # noqa: PLR0913 — the list's filters, cursor and page size
         self, tenant_id: TenantId, *, fired_after: _dt.datetime | None, fired_before: _dt.datetime | None,
         outcome: Disposition | NoOutcome | None, after: tuple[_dt.datetime, str] | None, limit: int,
-    ) -> list[StoredAlertSummary]:
+    ) -> list[AlertListing]:
         """Up to `limit` of the tenant's alerts with `fired_after <= fired_at < fired_before` (a bound left `None`
         is open), newest first by `(fired_at, id)` descending, strictly after the position `after` when given.
         `outcome` narrows to the alerts whose stored outcome is that disposition, or (`NoOutcome`) is null, before the
         limit; `None` does not narrow (#1581 O2). Selects no `raw` (#1507); each alert's `latest_status` is its newest
         investigation's stage, one index lookup per row returned."""
-        query = select(*_LISTED, _latest_status()).where(AlertRow.tenant_id == tenant_id)
+        query = select(*ALERT_LISTING_COLUMNS, _latest_status()).where(AlertRow.tenant_id == tenant_id)
         if fired_after is not None:
             query = query.where(AlertRow.fired_at >= fired_after)
         if fired_before is not None:
@@ -295,11 +293,8 @@ class JobStore:
             query = query.order_by(AlertRow.outcome)
         query = newest_first_query(query, AlertRow.fired_at, AlertRow.id, after, limit)
         async with self._tx() as s:
-            rows = (await s.execute(query)).all()
-        return [StoredAlertSummary(
-            alert_id=r.id, tenant_id=r.tenant_id, vendor=r.vendor, vendor_ticket_id=r.vendor_ticket_id, fired_at=r.fired_at,
-            changed_at=r.changed_at, received_at=r.received_at, title=r.title, description=r.description,
-            outcome=r.outcome, latest_status=r.latest_status) for r in rows]
+            rows: Sequence[Any] = (await s.execute(query)).all()
+        return [alert_listing(row) for row in rows]
 
     # --- the alert mapping (#1345) ------------------------------------------------------
 
