@@ -1419,3 +1419,57 @@ def test_a_pre_branch_call_the_recording_lacks_is_re_asked_like_an_unrecorded_on
     assert [c for c in est.calls("idp", "query") if c["params"] == bounded], (
         "the re-ask was never read")
     assert o.submissions() == 1, "the cut answer was refused as a change to a fixed call"
+
+
+# --- the tool schemas the provider receives ------------------------------------------------
+
+#: One argument set per oracle/verifier tool, as a model must be able to send it: a query's
+#: params, a JSON Patch hand-in with its entity refs and proofs, a fact's value. Written from
+#: what each tool exists to take (#1385 re-ask, #1543 hand-in), not from the declared schemas.
+_ARGUMENTS_A_MODEL_SENDS = {
+    "run_query": {"system": "elastic", "verb": "esql",
+                  "params": {"query": "FROM logs-* | WHERE @timestamp < \"2026-11-17T14:51:59Z\""}},
+    "re_ask": {"system": "elastic", "verb": "esql",
+               "params": {"query": "FROM logs-* | WHERE @timestamp < \"2026-11-17T14:51:59Z\""}},
+    "record_fact": {"entity": "alice", "field": "dept", "value": {"name": "finance"}},
+    "python": {"code": "print(1)"},
+    "check": {"patch": [{"op": "add", "path": "/rows/-", "value": {"user": "alice"},
+                         "forged_id": "fg-1", "fact_id": "f1"}],
+              "entity_refs": [{"forged_id": "fg-1", "column": "user", "entity": "alice"}],
+              "proofs": [{"system": "idp", "verb": "query", "params": {"q": "user:alice"}}]},
+    "submit": {"patch": [{"op": "remove", "path": "/rows/0", "fact_id": "f1"}],
+               "entity_refs": [{"forged_id": "fg-1", "column": "user", "entity": "alice"}],
+               "proofs": [{"system": "idp", "verb": "query", "params": {"q": "user:alice"}}]},
+    "verdict": {"passed": True, "reason": "the served answer carries the fact"},
+}
+
+
+@pytest.mark.parametrize("model_name", ["kimi-k3", "glm-5.3", "deepseek-v4.1-flash"])
+def test_oracle_and_verifier_tool_schemas_as_sent_accept_the_arguments_they_exist_to_take(
+        model_name, monkeypatch):
+    """Each oracle and verifier tool, mapped the way the production model sends it to the
+    provider, accepts a query's params and a hand-in's patch operations, entity refs and proofs.
+    The OpenAI-compatible mapping closed every bare `{"type": "object"}` to "no keys", so every
+    re-ask and side query went out with `params: {}` and no re-ask ever became a base."""
+    import jsonschema
+    from pydantic_ai.models import ModelRequestParameters
+    from pydantic_ai.tools import ToolDefinition
+
+    from defender.providers import build_for_effort
+
+    monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
+    built = build_for_effort(model_name, "medium")
+    tools = [*oracle_mod._ORACLE_TOOLS, oracle_mod._SUBMIT, oracle_mod._VERDICT]
+    assert {name for name, _about, _schema in tools} == set(_ARGUMENTS_A_MODEL_SENDS), (
+        "a tool was added or renamed: give it the arguments a model must be able to send")
+    for name, about, schema in tools:
+        definition = ToolDefinition(name=name, description=about, parameters_json_schema=schema)
+        params = built.model.customize_request_parameters(
+            ModelRequestParameters(function_tools=[definition]))
+        sent = built.model._map_tool_definition(params.function_tools[0], built.settings or {})
+        sent_schema = sent["function"]["parameters"]
+        try:
+            jsonschema.validate(_ARGUMENTS_A_MODEL_SENDS[name], sent_schema)
+        except jsonschema.ValidationError as refused:
+            pytest.fail(f"{model_name}: the {name!r} schema the provider receives refuses what "
+                        f"a model must send: {refused.message} (schema: {sent_schema})")
