@@ -361,10 +361,11 @@ def _other_exceptions(text: str) -> list[str]:
 
 
 def _warning_text(caplog) -> str:
-    """Each warning's message and the class of the exception it logged, never its traceback: a
-    refusal logged with a traceback names framework internals that are not the logged failure."""
+    """Each warning's message and the exception it logged (class and text), never its traceback:
+    a refusal logged with a traceback names framework internals that are not the logged failure."""
     return " ".join(
-        f"{r.getMessage()} {r.exc_info[0].__name__ if r.exc_info and r.exc_info[0] else ''}"
+        f"{r.getMessage()} {r.exc_info[0].__name__} {r.exc_info[1]}"
+        if r.exc_info and r.exc_info[0] else r.getMessage()
         for r in caplog.records if r.levelno >= logging.WARNING)
 
 
