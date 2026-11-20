@@ -179,7 +179,7 @@ export function usePagedRead<K extends PagedKey>(key: K, params: ReadParams<K>):
     cursors: [],
   });
   if (held.owner !== owner) setHeld({ owner, cursors: [] }); // drawn again at once, before anything is read
-  const cursors = held.cursors;
+  const cursors = held.owner === owner ? held.cursors : []; // so not even the cache keeps the old cursors here
   const pages = [params, ...cursors.map((cursor) => withCursor(params, cursor))];
   const results = useQueries(
     { queries: pages.map((page) => ({ queryKey: [key, page], queryFn: () => read(key, page) })) },
@@ -220,10 +220,9 @@ export function usePagedRead<K extends PagedKey>(key: K, params: ReadParams<K>):
     cursor === null
       ? null
       : () => {
-          // a press drawn for a read the hook has since left does nothing
-          setHeld((now) =>
-            now.owner !== owner || now.cursors.includes(cursor) ? now : { owner, cursors: [...now.cursors, cursor] },
-          );
+          // only a press drawn for the cursors held now adds one: a second press of it, or one drawn before the hook
+          // left this read (even if it has come back since), does nothing
+          setHeld((now) => (now === held ? { owner, cursors: [...held.cursors, cursor] } : now));
         };
   return { first, items, later, more };
 }

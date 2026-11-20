@@ -34,13 +34,19 @@ function alert(name: string) {
   };
 }
 
+/** The load's own client's options (load.ts): each read sent at most once per load, entries kept for its life. */
+function onceQueryClient(): QueryClient {
+  const once = { retry: false, refetchOnWindowFocus: false, refetchOnReconnect: false, refetchOnMount: false } as const;
+  return new QueryClient({ defaultOptions: { queries: { ...once, staleTime: Infinity, gcTime: Infinity } } });
+}
+
 interface Sent {
   readonly key: string;
   readonly what: string;
   readonly cursor: string | null;
 }
 
-/** A server whose every read has two pages, `<what>-1` and `<what>-2`, page 1 giving the cursor `<key> <what>`. */
+/** A server whose every read has three pages, `<what>-1` to `<what>-3`, the cursor of page n being `<key> <what> n`. */
 function server() {
   const sent: Sent[] = [];
   const read = <K extends ReadKey>(key: K, params: ReadParams<K>): Promise<ReadResult<K>> => {
@@ -49,17 +55,15 @@ function server() {
     const what = query.outcome ?? "all";
     const cursor = query.cursor ?? null;
     sent.push({ key, what, cursor });
-    if (cursor !== null && cursor !== `${key} ${what}`) return Promise.resolve({ kind: "error" }); // the filters changed
-    const body =
-      cursor === null
-        ? { items: [alert(`${what}-1`)], next_cursor: `${key} ${what}` }
-        : { items: [alert(`${what}-2`)], next_cursor: null };
+    if (cursor !== null && !cursor.startsWith(`${key} ${what} `)) return Promise.resolve({ kind: "error" }); // 422
+    const n = cursor === null ? 1 : Number(cursor.split(" ").at(-1));
+    const body = { items: [alert(`${what}-${n}`)], next_cursor: n < 3 ? `${key} ${what} ${n + 1}` : null };
     // trust: the body is a page of the read's items (an alert's, which page 1 of the lessons read is never checked for)
     return Promise.resolve({ kind: "ok", body } as ReadResult<K>);
   };
   const shell: Shell = {
     read,
-    queryClient: new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+    queryClient: onceQueryClient(),
     me: null,
     pathname: "/",
     shape: null,
@@ -67,6 +71,19 @@ function server() {
     actions: { retry: () => undefined, signOut: () => undefined, acceptInvitation: () => Promise.reject(new Error()) },
   };
   return { sent, shell };
+}
+
+/** The cursors of the entries in `shell`'s query cache that were minted for another read than the entry's own. */
+function strayCursors(shell: Shell): string[] {
+  return shell.queryClient
+    .getQueryCache()
+    .getAll()
+    .flatMap((query) => {
+      // trust: every entry is a read's `[key, params]`, as the hook keys them
+      const [key, params] = query.queryKey as [string, { query?: { outcome?: string; cursor?: string } }];
+      const cursor = params.query?.cursor;
+      return cursor === undefined || cursor.startsWith(`${key} ${params.query?.outcome ?? "all"} `) ? [] : [cursor];
+    });
 }
 
 type Read =
@@ -115,7 +132,7 @@ function drawn(start: Read) {
       expect(now().later).toBeNull();
     });
   };
-  return { sent, now, ids, redraw, more };
+  return { sent, shell, now, ids, redraw, more };
 }
 
 /** Drawn for the malicious alerts, with their two pages loaded by one Load more. */
@@ -146,8 +163,9 @@ describe("usePagedRead drops the pages of the read it was drawn for before", () 
     expect(probe.ids()).toEqual(["benign-1", "benign-2"]);
     expect(probe.sent.slice(mark)).toEqual([
       { key: ALERTS, what: "benign", cursor: null },
-      { key: ALERTS, what: "benign", cursor: `${ALERTS} benign` },
+      { key: ALERTS, what: "benign", cursor: `${ALERTS} benign 2` },
     ]);
+    expect(strayCursors(probe.shell)).toEqual([]);
   });
 
   it("returning to the first params shows only their page 1 again", async () => {
@@ -156,12 +174,14 @@ describe("usePagedRead drops the pages of the read it was drawn for before", () 
     await waitFor(() => {
       expect(probe.ids()).toEqual(["benign-1"]);
     });
+    const mark = probe.sent.length;
     probe.redraw({ key: ALERTS, params: alerts("malicious") });
     await waitFor(() => {
       expect(probe.ids()).toEqual(["malicious-1"]);
     });
     expect(probe.now().later).toBeNull();
     expect(probe.now().more).not.toBeNull();
+    expect(probe.sent.slice(mark).filter((read) => read.cursor !== null)).toEqual([]);
   });
 
   it("a new key with the same params after one Load more reads its own page 1, with no old cursor", async () => {
@@ -189,13 +209,33 @@ describe("usePagedRead keeps pages only for the read it is drawn for", () => {
     await waitFor(() => {
       expect(probe.ids()).toEqual(["benign-1"]);
     });
+    await probe.more();
     const mark = probe.sent.length;
     if (stale === null) throw new Error("no Load more under the old params");
     act(stale);
     await new Promise((settled) => setTimeout(settled, 50));
     expect(probe.sent.slice(mark)).toEqual([]);
-    expect(probe.ids()).toEqual(["benign-1"]);
+    expect(probe.ids()).toEqual(["benign-1", "benign-2"]);
     expect(probe.now().later).toBeNull();
+  });
+
+  it("a Load more drawn before the hook left a read and came back does nothing on its return", async () => {
+    const probe = await twoPagesLoaded();
+    const stale = probe.now().more; // holds the cursor of malicious page 3
+    probe.redraw({ key: ALERTS, params: alerts("benign") });
+    await waitFor(() => {
+      expect(probe.ids()).toEqual(["benign-1"]);
+    });
+    probe.redraw({ key: ALERTS, params: alerts("malicious") });
+    await waitFor(() => {
+      expect(probe.ids()).toEqual(["malicious-1"]);
+    });
+    const mark = probe.sent.length;
+    if (stale === null) throw new Error("no Load more before the hook left");
+    act(stale);
+    await new Promise((settled) => setTimeout(settled, 50));
+    expect(probe.sent.slice(mark)).toEqual([]);
+    expect(probe.ids()).toEqual(["malicious-1"]);
   });
 
   it("the same params in a new object keep the pages loaded", async () => {
