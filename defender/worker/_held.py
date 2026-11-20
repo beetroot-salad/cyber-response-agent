@@ -38,6 +38,8 @@ class Held:
     #: A post-step's hold on its tenant's check clock (#1344 amendment 3): the token the
     #: renewal extends it by. None for a row, and for a post-step that holds nothing yet.
     check_holder: str | None = None
+    #: A post-step the worker ended because it ran past `post_step_limit` (#1487 Amendment r5.4).
+    overran: bool = False
     group_left: bool = False
     #: The fence's ender tasks, held so the event loop's weak reference is not their only one.
     enders: list[asyncio.Task[None]] = field(default_factory=list)
@@ -82,10 +84,12 @@ class End:
 class LearningOutcome:
     """What a learning job's holder writes last (#1344): the terminal `status` with its `reason`
     and `message`, or, `status` None, the row handed back. `progress` is the final fork pick,
-    stage and sibling cost (None keeps what the row was last given)."""
+    stage and sibling cost (None keeps what the row was last given). `findings` (#1487) is a
+    `completed` end's findings the worker accepted, `{kind: rows}`, stored with the ending; None
+    for any other end, and for a `completed` one whose findings are refused."""
 
     status: str | None
     reason: str | None = None
     message: str | None = None
     progress: Any = None
-    findings_count: int = 0
+    findings: Any = None

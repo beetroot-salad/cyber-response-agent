@@ -99,7 +99,9 @@ def _wrong_session_store_version(src: Path) -> None:
 def _ended(ran, status: str, reason: str | None) -> dict:
     end = ran.end
     assert end is not None, f"no end record (the entry exited {ran.exit!r})"
-    assert set(end) == _FIELDS, set(end) ^ _FIELDS
+    assert set(end) - {"findings"} == _FIELDS, set(end) ^ _FIELDS  # #1487: `findings` rides a `completed` record
+    if status == "completed":
+        assert "findings" in end, "a completed record carries its findings state"
     assert (end["status"], end["reason"]) == (status, reason), end
     return end
 

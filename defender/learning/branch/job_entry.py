@@ -10,7 +10,9 @@ pick (O3), the questioner, pre-flight, the siblings one at a time with the contr
 judge's job-lane pass. Its passes and boxes are the helper's, asked over the socket. With no job socket (a host shell)
 it does nothing and exits non-zero (A6: there is no host mode). It writes two host-held records the worker copies
 (`records.job_lane`): the progress record (fork, stage, sibling cost), replaced whole as each changes, and the
-create-only end record, written at every exit with the outcome table's status and reason.
+create-only end record, written at every exit with the outcome table's status and reason; a `completed` one carries
+the findings the judge's pass left in the episode (#1487 Flow 1 step 1: `findings`, `ok` with their text, or why not),
+which the worker stores with the job's ending. The entry opens no store.
 
 **The ending.** A reason is never read from message text: every ending the outcome table gives
 the entry is raised typed where it is decided (`endings.JobEnding`), and anything else is
@@ -62,6 +64,7 @@ from defender.records.job_lane import (
     LearningEnd,
     LearningProgress,
     sibling_cost,
+    unreadable_findings,
 )
 
 _logger = logging.getLogger(__name__)
@@ -155,28 +158,35 @@ class _Job:
                 _logger.warning(f"job {self.job_id}: the siblings' cost read as {cost!r}, which is no cost")
         self.progress()
 
-    def judged(self, graded: Any, count: Callable[[], int]) -> None:
+    def judged(self, graded: Any, held: Callable[[], tuple[dict[str, Any], int]]) -> None:
         """The judge's pass returned: the ending is `completed`, decided here, before anything
-        else (from now on a SIGTERM is ignored). `count()` then reads how many findings the pass
-        left in the episode, for the record; a count that fails leaves 0, and the ending stands."""
+        else (from now on a SIGTERM is ignored), its findings `unreadable` until read (#1487 Flow 1
+        step 1). `held()` then reads the findings the pass left in the episode as the record's
+        findings field and its row count (`enqueue.held_findings`: `ok` with their text, `malformed` or `over_cap`),
+        which replaces `unreadable` only once it has returned; a read that fails keeps
+        `unreadable`, and the ending stands either way."""
         not_graded = getattr(graded, "not_graded", None)
         word = None if not_graded is None else getattr(not_graded, "outcome", None)
-        self.decided = self._end(LEARNING_COMPLETED, None, _judged_message(word, None))
+        self.decided = self._end(LEARNING_COMPLETED, None, _judged_message(word, None),
+                                 findings=unreadable_findings())
         if threading.current_thread() is threading.main_thread():
             signal.signal(signal.SIGTERM, signal.SIG_IGN)
         try:
-            self.findings = count()
-        except Exception as unreadable:  # noqa: BLE001 — the count is the record's, the ending stands
-            _logger.warning(f"job {self.job_id}: the findings could not be counted ({unreadable!r})")
+            found, count = held()
+        except Exception as unreadable:  # noqa: BLE001 — the findings are the record's, the ending stands
+            _logger.warning(f"job {self.job_id}: the findings could not be read ({type(unreadable).__name__})")
             return
-        self.decided = self._end(LEARNING_COMPLETED, None, _judged_message(word, self.findings))
+        self.findings = count
+        self.decided = self._end(LEARNING_COMPLETED, None, _judged_message(word, count), findings=found)
 
     # -- the end record ----------------------------------------------------------------------
 
-    def _end(self, status: str, reason: str | None, message: str | None) -> LearningEnd:
+    def _end(self, status: str, reason: str | None, message: str | None, *,
+             findings: dict[str, Any] | None = None) -> LearningEnd:
         cost = self.cost if math.isfinite(self.cost) and self.cost >= 0 else 0.0
         return LearningEnd(status=status, reason=reason, message=message, fork_message_id=self.fork,
-                           stage=self.stage, findings_count=self.findings, sibling_cost_usd=cost)
+                           stage=self.stage, findings_count=self.findings, sibling_cost_usd=cost,
+                           findings=findings)
 
     def ending_for(self, raised: BaseException | None) -> LearningEnd:
         """The end record for an entry that raised `raised` (`None`: it returned)."""

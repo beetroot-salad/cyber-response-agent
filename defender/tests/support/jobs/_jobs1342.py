@@ -233,7 +233,8 @@ class VisibleAtEmit(logging.Handler):
 #: what it was given (argv, environment, process group, whether the launch files existed) in
 #: `<seen_dir>/<id>.json`, appends `start <id>` / `end <id>` to the events file, optionally waits for
 #: a release file, writes the spec's host records (paths relative to the runs container, `{id}`
-#: expanded) and exits with the spec's code. It never decides an outcome.
+#: expanded) and exits with the spec's code. It never decides an outcome. With `answer_waiting` it stands in for a
+#: post-step's helper: it exits with that helper's answer whether work still waits, asked of the store at its end.
 #: A reserved `files` key (#1534): its value is `closing_plan(...)`; the child plants the run's closing record instead of a file.
 CLOSING_KEY = "{id}.closing-plant"
 
@@ -358,14 +359,14 @@ CHILD_SCRIPT = textwrap.dedent("""
     term = spec.get("term", "default")
     if term == "ignore":
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
-    elif term in ("mark", "finish"):
+    elif term in ("mark", "finish", "exit"):
         def on_term(*_):
             Path(fill(spec["term_mark"])).touch()
             if term == "finish":  # #1343 B11: a child that completes on its own as the SIGTERM lands
                 sealing()  # it completes: the run's exit seals its ledger before the records are left
                 leave_records()
             event("end")
-            os._exit(0)
+            os._exit(spec.get("exit", 0) if term == "exit" else 0)  # `exit`: a helper that answers as it is stopped
         signal.signal(signal.SIGTERM, on_term)
     grandchild = None
     if spec.get("grandchild"):
@@ -447,6 +448,22 @@ CHILD_SCRIPT = textwrap.dedent("""
         if die_by != signal.SIGKILL:
             signal.signal(die_by, signal.SIG_DFL)
         os.kill(os.getpid(), die_by)
+    answer = spec.get("answer_waiting")
+    if answer:  # a post-step helper's stand-in: its exit status says whether work waits (#1487 Amendment r5.2)
+        sys.path.insert(0, spec["worktree"])  # this checkout's `defender`, whatever the child's path
+        from defender.job_host import NOTHING_WAITS, WORK_WAITS
+        from defender.learning.core.drains import AUTHOR_DRAIN_RECONCILES
+        from defender.learning.core.store_tick import AUTHOR_LANE, thresholds
+        from defender.learning_store import blocking
+        from defender.learning_store.tick import StoreAdapter, work_waiting
+        try:
+            with blocking(answer["dsn"]) as store:
+                waits = work_waiting(StoreAdapter(store, tenant=argv[argv.index("--tenant") + 1], lane=AUTHOR_LANE,
+                                                  owner="post-step:stand-in", thresholds=thresholds()),
+                                     AUTHOR_LANE, reconcile_lanes=AUTHOR_DRAIN_RECONCILES)
+        except Exception:  # noqa: BLE001 - as the helper: a question that fails answers nothing
+            sys.exit(0)
+        sys.exit(WORK_WAITS if waits else NOTHING_WAITS)
     sys.exit(spec.get("exit", 0))
 """)
 
@@ -579,7 +596,7 @@ class ScriptedChild:
     `files` (text), `binary` (hex), `sparse` (`{head, size}`), `links` (symlink targets) and `dirs`
     name what the child leaves in the runs container (`padded`: `{head, size}`, the head then spaces
     up to `size` bytes, so a document that stays valid however much of it is read); `term` is how it takes SIGTERM (`default`,
-    `ignore`, `mark`: touch `term_mark` and exit with nothing written, or `finish`: touch it, write its records, exit 0); `grandchild` starts a `sleep` in its group.
+    `ignore`, `mark`: touch `term_mark` and exit with nothing written, `finish`: touch it, write its records, exit 0, or `exit`: touch it and exit with `exit`); `grandchild` starts a `sleep` in its group.
     `die_by`: in place of exiting, it dies by that signal, sent to itself."""
 
     where: Path

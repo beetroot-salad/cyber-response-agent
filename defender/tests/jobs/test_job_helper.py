@@ -1347,7 +1347,10 @@ def test_d4_a_job_container_that_exits_nonzero_without_the_server_ever_accepting
         assert "#1469" in text, (where, text)
     # #1492: the helper exits 0 once it served the job to its end, whatever the container's own status; that status is
     # what the helper logs ("its container exited with status N"), and the remedy adds to it without changing either.
-    assert ran.rc == 0, f"the helper's exit followed the container's status: {ran.rc}"
+    # A post-step's helper exits with its answer instead (#1487 r5.2): this scene's store holds nothing waiting.
+    from defender.job_host import NOTHING_WAITS
+
+    assert ran.rc == (NOTHING_WAITS if kind == "post-step" else 0), f"the helper's exit followed the container's status: {ran.rc}"
     assert "its container exited with status 7" in err, err
     written = {name: n for name, n in calls.counts.items() if n}
     assert not written, f"the helper wrote a job-lane record of its own: {written}"

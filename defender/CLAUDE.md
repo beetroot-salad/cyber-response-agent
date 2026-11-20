@@ -41,6 +41,20 @@ they start, the learning drains, the lifecycle service) refuses a database whose
 migration may lock the tables it changes until it commits. So: stop the API, the workers, the learning drains and the
 lifecycle service; run migrations; start the new code. The notes below say only what an upgrade needs beyond that.
 
+## Upgrade from before #1487
+
+Stop the API, the workers, the learning drains and the lifecycle service, then run migrations (revision
+`0023_findings_at_job_end`). A learning job's findings are now stored by the worker in the transaction that records the
+job `completed`, and the post-step only runs the author's tick. The migration moves every learning job still marked
+`pending` (its findings possibly never published, since #1170 a post-step in a job container could not reach the
+database) to `refused`, and logs how many per tenant: these jobs' findings are not recovered. Rebuild the job image and
+upgrade the worker and the job host together. Delete the old `<job>.post-step.json` and `<job>.post-step-pending.json` files from each
+tenant's runs folder (`<data root>/<tenant>/runs/`), and any half-written copy a crash left beside them
+(`<job>.post-step.json.staged-<hex>`), before starting the new code: the runs listing refuses them, and the migration
+cannot reach the data root. For example `find <data root>/*/runs -maxdepth 1 \( -name '*.post-step.json' -o -name
+'*.post-step-pending.json' -o -name '*.post-step.json.staged-*' -o -name '*.post-step-pending.json.staged-*' \)
+-delete`.
+
 ## Upgrade from before #1534
 
 A run's disposition is its closing record, a row of the `closing_record` table in the run's session database; nothing

@@ -904,14 +904,14 @@ def test_1279_o8_setup_refuses_an_existing_run_dir_at_the_arms_id_and_resumes_no
 #: Every suffix that means "this id was used" (#1342 split the layout's list in two), spelled out:
 #: the refusal tests run over THIS list, and the coverage test pins it to the layout's, so a suffix
 #: added there cannot be missed silently. The job lane's launch record and alert file, and a learning
-#: job's three host-held records (#1344, keyed by the job id), are accepted beside a run folder but do
+#: job's two host-held records (#1344, keyed by the job id), are accepted beside a run folder but do
 #: not mean "used".
 ALL_SIDECAR_SUFFIXES = (".run-end.json", ".scrub-verdict.json", ".accounting_failures.json",
                         ".ticket-write.json", ".session-pointer.json", ".call-join.jsonl",
                         ".ticket-comments.jsonl", ".knowledge-source.json", ".job-end.json",
                         ".record-versions.json")  # #1366: the record versions a run read at start (shared-interface)
-LEARNING_RECORD_SUFFIXES = (
-    ".learning-progress.json", ".learning-end.json", ".post-step.json", ".post-step-pending.json")
+#: #1487: the post-step's record and its pending hand-over retired with the pending set.
+LEARNING_RECORD_SUFFIXES = (".learning-progress.json", ".learning-end.json")
 ACCEPTED_ONLY_SIDECAR_SUFFIXES = (".launch.json", ".alert.json", *LEARNING_RECORD_SUFFIXES)
 
 

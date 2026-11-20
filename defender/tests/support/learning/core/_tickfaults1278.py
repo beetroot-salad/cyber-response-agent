@@ -163,8 +163,10 @@ class Scene:
     def run_in_child(self, cast: Cast, tag: str) -> TickChild:
         """The same tick in a forked child (a signal reaches it, never the pytest worker), the renewer fast."""
         from defender.tests.support.learning.core._store1278 import RENEW_ENV
+        from defender.tests.tenancy.tenant_1108_p4._drain_support import prestart_tick_store
 
         self.w.monkeypatch.setenv(RENEW_ENV, "0.2")
+        prestart_tick_store(self.w.t, self.lane)  # over the port: the helper starts here, in the parent, so a signal to the child never strands it
         return TickChild(lambda: _rc(self.run(cast)), self.w.scratch / f"child-{tag}.json")
 
     def branch_tip_on_remote(self, branch: str) -> str | None:

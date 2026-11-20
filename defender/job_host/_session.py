@@ -160,6 +160,9 @@ class Session:
     post_ticket: bool = False
     ticket_link: str | None = None
     signalled: threading.Event = field(default_factory=threading.Event)
+    #: The status the helper exits with once it served the job to its end: 0, or a post-step's answer whether work still
+    #: waits (`job_host.NOTHING_WAITS`, `WORK_WAITS`), which its `exited` sets.
+    served_status: int = 0
     #: Every id this helper minted for the claim (the job's own, a sibling's run, a draft): `pass` and `box.start`
     #: name only these (A6).
     minted: set[str] = field(default_factory=set)

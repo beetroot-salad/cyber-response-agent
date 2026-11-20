@@ -34,21 +34,25 @@ Learning jobs (#1344) share the slots: a worker with a free slot claims the olde
 fewer than `learning_slots` learning-class tasks (family steps and post-steps) run, and otherwise
 the oldest investigation. A job runs as the job entry's child, with the same death tie, stop and
 fence as an investigation; the worker copies the entry's progress record onto the row on its
-renewal loop, and decides the row from the end record alone. After a job whose child started, a
-post-step child publishes the tenant's `pending` findings and runs the drain gate, in the same
-slot and the same supervision registry, with no lease of its own.
+renewal loop, and decides the row from the end record alone. A `completed` record's findings
+(#1487) are screened by the worker and stored by the row's own end write, in its transaction, or
+refused whole while the ending stands. After a job whose child started, a post-step child runs the
+drain gate, in the same slot and the same supervision registry, with no lease of its own. Its helper
+says by its exit status whether work still waits (Flow 3, #1487 Amendment r5.2: `job_host.NOTHING_WAITS`
+or `WORK_WAITS`); the worker opens no learning store, and the tenant's check clock goes idle only on
+`NOTHING_WAITS`.
 
 A family-less post-step (#1344 amendment 1) wakes a tenant no family has followed for a while: a
 worker with learning slots, not stopping, checks each `active` tenant with learning jobs once its
 last post-step (or, before any, the worker's start) is `learning_check_interval` old. That check
-runs the same child without a job, and so the drain's own gate: a retained delivery, an open batch,
-findings at threshold and stranded `pending` findings are each decided there, never by a second
-gate here. An overdue check is claimed before a queued job, within the learning slots, so sustained
-load cannot starve it."""
+runs the same child without a job, and so the drain's own gate: a retained delivery, an open batch
+and findings at threshold are each decided there, never by a second gate here. An overdue check is
+claimed before a queued job, within the learning slots, so sustained load cannot starve it."""
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import datetime as _dt
 import logging
 import os
@@ -64,7 +68,7 @@ from typing import TYPE_CHECKING, Any
 
 from defender import _log
 from defender._url import check_origin
-from defender.jobs import LearningProgress, is_outage, is_refusal
+from defender.jobs import FindingsNotStored, LearningProgress, is_outage, is_refusal
 from defender.jobs.audit import SYSTEM, announce
 from defender.box import CLAIM_ENV, container_name
 from defender.execution import kill_group, wait_group_gone
@@ -89,6 +93,11 @@ END_RETRY_DELAY = 1.0
 #: How long a tenant goes without a post-step before the worker checks it without a family
 #: (#1344 amendment 1), in seconds.
 LEARNING_CHECK_INTERVAL = 300.0
+
+#: How long a post-step may run before the worker ends it as it would at a stop (#1487 Amendment r5.4), in seconds:
+#: well past a long authoring tick, so that only a hang (a database that never answers, a container that never exits)
+#: meets it.
+POST_STEP_LIMIT = 4 * 3600.0
 
 #: The per-job host helper (#1170 H7): every job of every kind is its child, started with `-m` from the
 #: code tree's root (the worker's code copy, as `child_cwd`).
@@ -127,13 +136,12 @@ class LearningLaunch:
 @dataclass(frozen=True)
 class PostStepLaunch:
     """What a post-step child is started for: the job it follows (None: a family-less post-step,
-    #1344 amendment 1), its tenant, the worker's pid, and the tenant's `completed` jobs whose
-    findings wait to be published, its own included."""
+    #1344 amendment 1), its tenant and the worker's pid. It is handed no jobs (#1487: findings are
+    stored with their job's ending)."""
 
     job_id: str | None
     tenant_id: str
     parent_pid: int
-    pending_job_ids: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -188,14 +196,21 @@ def job_entry_argv(launch: LearningLaunch) -> list[str]:
 
 
 def post_step_argv(launch: PostStepLaunch) -> list[str]:
-    """The post-step's child: the helper of kind `post-step`; a family-less one has no `--job`. Its
-    pending jobs are not on the command line: the worker writes them where it reads them (`_hand_pending`)."""
+    """The post-step's child: the helper of kind `post-step`; a family-less one has no `--job`."""
     return _helper_argv("post-step", job=launch.job_id, tenant=launch.tenant_id, parent_pid=launch.parent_pid)
 
 
 def _exit_words(returncode: int) -> str:
     return (f"was killed by signal {-returncode}" if returncode < 0
             else f"exited with code {returncode}")
+
+
+def _post_step_answer(returncode: int | None) -> bool | None:
+    """Whether work still waits, as a post-step's helper said it by its exit status (#1487 Amendment r5.2): None for any
+    status that is neither answer, which is never "nothing waits"."""
+    from defender.job_host import NOTHING_WAITS, WORK_WAITS
+
+    return None if returncode is None else {NOTHING_WAITS: False, WORK_WAITS: True}.get(returncode)
 
 
 def _helper_failure(returncode: int, held: Held) -> int | None:
@@ -317,7 +332,12 @@ class Worker:
     worker has none. Above 0 it needs both `learning_argv` and `post_step_argv`. `child_cwd` is the
     working directory of every child (the code copy, for `-m` starts). `learning_check_interval`
     (seconds, above 0) is how long a tenant goes without a post-step before a family-less one
-    checks it (amendment 1); each tenant's clock starts at the start of `serve` or `drain`."""
+    checks it (amendment 1); each tenant's clock starts at the start of `serve` or `drain`.
+    `post_step_limit` (seconds, above 0) is how long a post-step runs before the worker ends it, SIGTERM then SIGKILL
+    after `stop_grace`, and leaves its tenant's clock not idle (#1487 Amendment r5.4).
+    `screen_findings(kind, rows, job_id)` (#1487) screens a completed job's findings, channel by
+    channel, before its end write; it refuses by raising, and defaults to the channel rules' door,
+    `learning.judge.enqueue.screen_findings`."""
 
     def __init__(  # noqa: PLR0913 — the ratified signature
         self, store: Any, *, data_root: Path | DataRoot,
@@ -333,7 +353,9 @@ class Worker:
         post_step_argv: Callable[[PostStepLaunch], list[str]] | None = None,
         child_cwd: Path | None = None,
         learning_check_interval: float = LEARNING_CHECK_INTERVAL,
+        post_step_limit: float = POST_STEP_LIMIT,
         wait_group: Callable[[int], bool] = wait_group_gone,
+        screen_findings: Callable[[str, object, str], object] | None = None,
     ) -> None:
         try:
             self._frontend_origin = check_origin(frontend_origin)
@@ -347,6 +369,9 @@ class Worker:
             raise ValueError("a worker with learning slots needs both the learning and the post-step child commands")
         if not learning_check_interval > 0:
             raise ValueError(f"the learning check interval must be above 0 seconds, not {learning_check_interval!r}")
+        if not post_step_limit > 0:
+            raise ValueError(f"the post-step limit must be above 0 seconds, not {post_step_limit!r}")
+        self._post_step_limit = post_step_limit
         self._learning_slots = learning_slots
         self._learning_argv = learning_argv
         self._post_step_argv = post_step_argv
@@ -356,6 +381,9 @@ class Worker:
         # this is only when a failed claim of one lets the next claim try again (monotonic).
         self._learning_check_interval = learning_check_interval
         self._checks_resume_at = 0.0
+        # A completed job's findings screen (#1487 r5.1 items 6, 11): `learning.judge.enqueue.screen_findings` unless
+        # one is handed in, loaded at its first use.
+        self._screen_findings = screen_findings
         self._store = store
         self._data_root = data_root if isinstance(data_root, DataRoot) else data_root_from_path(data_root)
         self._child_argv = child_argv
@@ -1024,7 +1052,41 @@ class Worker:
         if end.status == job_lane.LEARNING_STOPPED:  # ends nothing: the job is handed back (#1344 r5)
             return LearningOutcome(None, progress=end), True
         # The record decided the ending, so a stop that landed after it does not override it.
-        return LearningOutcome(end.status, end.reason, end.message, end, end.findings_count), True
+        findings = None
+        if end.status == job_lane.LEARNING_COMPLETED:
+            findings = await asyncio.to_thread(self._accepted_findings, job, end.findings)
+        # The progress the end write reads is the record's cost and stage, not its findings text: the parsed rows stand
+        # in for it, and the text is not kept alive through the end write's retries.
+        progress = dataclasses.replace(end, findings=None)
+        return LearningOutcome(end.status, end.reason, end.message, progress, findings), True
+
+    def _accepted_findings(self, job: str, found: object) -> dict[str, Any] | None:
+        """A completed record's findings as the end write stores them, `{kind: rows}`, or None, refused (#1487 Flow 1
+        step 2), in a thread: anything but `ok` text within the cap that the bounded parser accepts
+        (`job_lane.findings_of`), then each channel's rows through the screen, the first refusal refusing them all.
+        Total: any exception here is a refusal. Each refusal is logged with the job and its kind, never the job's
+        text."""
+        channels: dict[str, Any] | None = None
+        try:
+            channels, why = job_lane.findings_of(found)
+            refusal = f"the record's findings are {why}" if channels is None else self._screened(job, channels)
+        except Exception as failed:  # noqa: BLE001 — reading the findings is total: a fault refuses them
+            refusal = f"reading them failed ({type(failed).__name__})"
+        if refusal is not None or channels is None:
+            _logger.warning("learning job %s: its findings are refused: %s; the job ends completed and none of them "
+                            "is stored", job, refusal)
+            return None
+        return {kind: channels[kind] for kind in job_lane.FINDINGS_CHANNELS}
+
+    def _screened(self, job: str, channels: dict[str, Any]) -> str | None:
+        """Each channel's rows through the screen: why the first one refused (its kind, never its text), or None."""
+        screen = self._screen_findings if self._screen_findings is not None else _default_screen()
+        for kind in job_lane.FINDINGS_CHANNELS:
+            try:
+                screen(kind, channels[kind], job)
+            except Exception as refused:  # noqa: BLE001 — a screen that raises anything refuses
+                return f"the {kind} rows failed the screen ({type(refused).__name__})"
+        return None
 
     async def _progress_loop(self, held: Held) -> None:
         """Every `cost_interval`, read the job entry's progress record into `held.progress`, in a
@@ -1066,8 +1128,10 @@ class Worker:
         else:
             written = await self._store.finish_learning_job(
                 tenant, job, status=end.status, reason=end.reason, message=end.message, progress=end.progress,
-                findings_count=end.findings_count)
+                **({"findings": end.findings} if end.findings is not None else {}))
             what = end.status + (f" ({end.reason})" if end.reason else "")
+            if written is not None and end.status == job_lane.LEARNING_COMPLETED:
+                what += f", findings {written.publish_state} ({written.findings_count} stored)"
         if written is None:
             _logger.info("learning job %s: the row is no longer this worker's; nothing written", job)
         else:
@@ -1097,7 +1161,7 @@ class Worker:
         with _log.log_context(tenant_id=tenant):
             try:
                 if self._stopping:
-                    await self._end_check(tenant, holder, idle=False, handed=())
+                    await self._end_check(tenant, holder, idle=False)
                     return
                 _logger.info("tenant %s: its last post-step left work waiting %gs ago; checking its learning "
                              "without a family", tenant, self._learning_check_interval)
@@ -1107,71 +1171,60 @@ class Worker:
 
     async def _post_step(self, tenant: str, job: str | None, *, holder: str | None = None) -> None:
         """The post-step after `job` (O8, O14), or, with `job` None, a family-less one under the
-        hold `holder` (amendment 1): a child handed the tenant's `pending` jobs, in the one
-        supervision registry, then the publish state of each job its record names. A job's
-        post-step first holds the tenant's check clock; when another post-step holds it, this one
-        does not start and the tenant is checked at the next claim instead (amendment 3). A
-        post-step that cannot start, or leaves no readable record, changes no job's row: its jobs
-        stay `pending` for the next one. Either kind restarts the tenant's check clock when it
-        ends, idle only when its record says nothing waits and every job it was handed moved."""
+        hold `holder` (amendment 1): a child in the one supervision registry, handed nothing. A
+        job's post-step first holds the tenant's check clock; when another post-step holds it, this
+        one does not start and the tenant is checked at the next claim instead (amendment 3).
+        Either kind restarts the tenant's check clock when it ends, idle only when its helper exited
+        saying that no work waits (#1487 O7, Flow 3, Amendment r5.2: the helper asks the learning
+        store once the container exited); a post-step that cannot start, a stop, or any other exit
+        leaves it not idle, a post-step ended for running past `post_step_limit` included."""
         post_step = self._post_step_argv
         assert post_step is not None  # a worker with learning slots has it (constructor)
         if holder is None:
             holder = uuid.uuid4().hex
             if not await self._store.hold_learning_check(tenant, holder):
                 _logger.info("learning job %s: no post-step started: another post-step of its tenant is running "
-                             "(the tenant is checked again once it ends, and this job's findings with it), or the "
-                             "tenant is being removed (nothing new starts for it)", job)
+                             "(the tenant is checked again once it ends), or the tenant is being removed (nothing "
+                             "new starts for it)", job)
                 return
         held = Held(_PostStepOf(tenant, job), kind=POST_STEP, check_holder=holder)
         key = f"{POST_STEP}:{job if job is not None else 'tenant:' + tenant}"
         idle = False
-        pending: tuple[str, ...] = ()
         try:
-            pending = tuple(await self._store.pending_publish(tenant))
             self._held[key] = held
-            launch = PostStepLaunch(job, tenant, os.getpid(), pending)
-            try:
-                await asyncio.to_thread(self._hand_pending, launch)
-            except (job_lane.JobLaneRefused, OSError) as fault:
-                _logger.warning("%s: the jobs it would publish could not be handed to it (%s); not started, "
-                                "and they stay pending", _what(held), fault)
-                return
-            proc = await self._run_child(held, lambda: post_step(launch))
+            launch = PostStepLaunch(job, tenant, os.getpid())
+            proc = await self._run_child(held, lambda: post_step(launch), watch=self._post_step_deadline)
             if proc is None:
                 return
-            answer = await asyncio.to_thread(self._read_learning, tenant, lambda lane: lane.read_post_step(job))
-            if answer is None:
-                _logger.warning("%s: it left no readable record; the jobs it was handed stay pending", _what(held))
-                return
-            # A record left by an earlier check of the tenant is truthful too: a job it names is moved
-            # only while still `pending`, so it can only confirm a publish that happened.
-            published = [j for j in answer.published if j in pending]
-            refused = [j for j in answer.refused if j in pending and j not in published]
-            await self._store.record_publish(tenant, published=published, refused=refused)
-            idle = not answer.waiting and len(published) + len(refused) == len(pending)
+            stopped = held.signalled or held.overran or self._stopping
+            waiting = None if stopped else _post_step_answer(proc.returncode)
+            idle = waiting is False
             announce("learning_post_step", actor=SYSTEM, tenant_id=tenant,
                      target=job if job is not None else tenant,
-                     detail=f"published {len(published)} job(s); refused {len(refused)} job(s)")
+                     detail={True: "work still waits", False: "nothing waits", None: "whether work waits is unknown"}[
+                         waiting])
         finally:
             self._held.pop(key, None)
-            await self._end_check(tenant, holder, idle=idle, handed=pending)
+            await self._end_check(tenant, holder, idle=idle)
 
-    async def _end_check(self, tenant: str, holder: str, *, idle: bool, handed: tuple[str, ...]) -> None:
+    async def _post_step_deadline(self, held: Held) -> None:
+        """Beside a post-step's child: once it has run `post_step_limit`, end it as a stop would (#1487 Amendment r5.4),
+        logged. Its answer is then unknown, so its tenant's clock stays not idle."""
+        await asyncio.sleep(self._post_step_limit)
+        held.overran = True
+        _logger.error("%s: the post-step ran past its limit of %gs; ending it", _what(held), self._post_step_limit)
+        await self._end_child(held)
+
+    async def _end_check(self, tenant: str, holder: str, *, idle: bool) -> None:
         """Let go of the hold `holder` on the tenant's check clock, restarting it (amendment 3). A
         failure is logged: the hold then lapses with its lease and the clock keeps its last time."""
         try:
-            if not await self._store.end_learning_check(tenant, holder, idle=idle, handed=handed):
+            if not await self._store.end_learning_check(tenant, holder, idle=idle):
                 _logger.warning("tenant %s: its check clock was no longer held by this post-step", tenant)
         except Exception as fault:  # noqa: BLE001 — the hold lapses on its own
             self._note_store_fault(fault)
             _logger.warning("tenant %s: its check clock could not be let go; it lapses with its lease", tenant,
                             exc_info=True)
-
-    def _hand_pending(self, launch: PostStepLaunch) -> None:
-        """The post-step's pending jobs, written whole where it reads them (`job_lane`), in a thread."""
-        with self._open_lane(self._data_root, launch.tenant_id) as lane:
-            lane.write_post_step_pending(launch.job_id, launch.pending_job_ids)
 
     # -- the last write ---------------------------------------------------------------------------
 
@@ -1182,9 +1235,13 @@ class Worker:
         take-over that re-runs the job: it is written again with less (`_lesser_ends`). Any other
         failure decides nothing about the job: it is logged and the row left to lapse, as it is
         when even the barest end is refused. During a deliberate stop an outage gets one try: the
-        stop gives up on it (B11)."""
+        stop gives up on it (B11). A learning job's findings the store could not store for a reason
+        neither their content nor an outage explains (`FindingsNotStored`, #1487 Amendment r5.3) are
+        retried the same way, logged once as an error, without pausing claims: only the job's slot
+        waits."""
         what = _what(held)
         key = _key(held)
+        told: set[str] = set()
         attempts: list[Any] = (_lesser_learning_ends(end) if isinstance(end, LearningOutcome)
                                else _lesser_ends(end))
         once = self._learning_end_once if isinstance(end, LearningOutcome) else self._end_once
@@ -1200,21 +1257,42 @@ class Worker:
                     if is_refusal(fault):
                         _logger.error("%s: the store refused its end (%s)", what, _what_end(attempt), exc_info=True)
                         break
-                    if not is_outage(fault):
-                        _logger.exception("%s: its end could not be recorded and is dropped; its "
-                                          "lease will lapse and it will be taken over", what)
+                    if not self._end_retries(what, key, fault, stopping=tried_stopping, told=told):
                         return
-                    self._note_store_fault(fault)
-                    if tried_stopping:
-                        _logger.warning("%s: its end could not be recorded while stopping; "
-                                        "its lease will lapse on its own", what, exc_info=True)
-                        return
-                    self._end_failing.add(key)
-                    _logger.warning("%s: its end could not be recorded (%s); retrying", what, fault)
                 with contextlib.suppress(TimeoutError):
                     await asyncio.wait_for(self._stop_signal.wait(), timeout=END_RETRY_DELAY)
         _logger.error("%s: the store refused even its barest end; it is dropped, and its "
                       "lease will lapse and it will be taken over", what)
+
+    def _end_retries(self, what: str, key: str, fault: Exception, *, stopping: bool, told: set[str]) -> bool:
+        """Whether a failed end write that the store did not refuse is tried again, logged: an outage pauses claims while
+        it lasts (B5); findings not stored for a reason neither their content nor an outage explains
+        (`FindingsNotStored`) are logged once as an error and pause nothing but the job's slot. During a deliberate
+        stop neither is tried again (B11). Anything else is dropped: the row lapses into a take-over."""
+        unstored = isinstance(fault, FindingsNotStored)
+        if not (unstored or is_outage(fault)):
+            _logger.exception("%s: its end could not be recorded and is dropped; its "
+                              "lease will lapse and it will be taken over", what)
+            return False
+        if unstored:
+            if "unstored" not in told:
+                _logger.error("%s: its findings could not be stored (%s), which neither their content nor an outage "
+                              "explains; its end is retried until it is stored", what, fault,
+                              exc_info=fault.__cause__ or fault)
+                told.add("unstored")
+            if stopping:
+                _logger.warning("%s: its findings could not be stored while stopping; its lease will lapse and the "
+                                "job will be run again", what)
+                return False
+            return True
+        self._note_store_fault(fault)
+        if stopping:
+            _logger.warning("%s: its end could not be recorded while stopping; "
+                            "its lease will lapse on its own", what, exc_info=True)
+            return False
+        self._end_failing.add(key)
+        _logger.warning("%s: its end could not be recorded (%s); retrying", what, fault)
+        return True
 
     async def _end_once(self, held: Held, end: End) -> None:
         """One try: the terminal stage (or hand-back) if the row is still `running`, else the
@@ -1262,16 +1340,33 @@ def _lesser_ends(end: End) -> list[End]:
 
 
 def _lesser_learning_ends(end: LearningOutcome) -> list[LearningOutcome]:
-    """`_lesser_ends` for a learning job: the end as decided; then the barest, which keeps the
-    row's copied progress and, for a decided ending, is `worker_error` naming the refusal."""
+    """`_lesser_ends` for a learning job: the end as decided; for a `completed` one carrying
+    findings, the same ending with its findings refused (#1487 Flow 1 step 4: a store that refuses
+    the findings never costs the job its ending); then the barest, which keeps the row's copied
+    progress and, for a decided ending, is `worker_error` naming the refusal."""
+    ends = [end]
+    if end.findings is not None:
+        ends.append(dataclasses.replace(end, findings=None))
     barest = (LearningOutcome(None) if end.status is None else LearningOutcome(
         _FAILED, _WORKER_ERROR, "the store refused the job's ending as decided"))
-    return [end] if barest == end else [end, barest]
+    if barest != ends[-1]:
+        ends.append(barest)
+    return ends
+
+
+def _default_screen() -> Callable[[str, object, str], object]:
+    """The channel rules' one public door (#1487), loaded at its first use."""
+    from defender.learning.judge.enqueue import screen_findings
+
+    return screen_findings
 
 
 def _what_end(end: End | LearningOutcome) -> str:
     if isinstance(end, LearningOutcome):
-        return "a hand-back" if end.status is None else end.status + (f" ({end.reason})" if end.reason else "")
+        if end.status is None:
+            return "a hand-back"
+        what = end.status + (f" ({end.reason})" if end.reason else "")
+        return what + (", findings refused" if end.status == _COMPLETED and end.findings is None else "")
     what = "a hand-back" if end.ending is None else end.ending.stage + (
         f" ({end.ending.failure_reason})" if end.ending.failure_reason else "")
     return f"{what}, cost {end.cost}, knowledge {'kept' if end.knowledge is not None else 'none'}"

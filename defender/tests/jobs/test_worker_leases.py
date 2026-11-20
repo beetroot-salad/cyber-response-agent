@@ -1827,7 +1827,7 @@ async def test_1170_the_worker_starts_a_learning_job_and_its_post_step_as_their_
         flags = dict(zip(rest[::2], rest[1::2], strict=False))
         kind, job = flags["--kind"], flags["--job"]
         launch = (LearningLaunch(job, T1, pid, flags["--source"]) if kind == "learning"
-                  else PostStepLaunch(job, T1, pid, (job,)))
+                  else PostStepLaunch(job, T1, pid))
         return await real_spawn(*(jobs if kind == "learning" else post)(launch), **kw)
 
     async with job_store(world["dsn"]) as store:
@@ -1840,7 +1840,7 @@ async def test_1170_the_worker_starts_a_learning_job_and_its_post_step_as_their_
         [*base, "--kind", "learning", "--job", job, "--tenant", T1, "--source", source, "--parent-pid", str(pid)],
         [*base, "--kind", "post-step", "--job", job, "--tenant", T1, "--parent-pid", str(pid)]]
     assert job_row(world["dsn"], job)["status"] == "completed"
-    assert post_step_argv(PostStepLaunch(None, T1, pid, ())) == [*base, "--kind", "post-step", "--tenant", T1,
+    assert post_step_argv(PostStepLaunch(None, T1, pid)) == [*base, "--kind", "post-step", "--tenant", T1,
                                                                  "--parent-pid", str(pid)]
     assert job_entry_argv(LearningLaunch(job, T1, pid, "src-1")) == [*base, "--kind", "learning", "--job", job, "--tenant", T1,
                                                                        "--source", "src-1", "--parent-pid", str(pid)]

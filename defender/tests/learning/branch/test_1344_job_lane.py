@@ -716,33 +716,6 @@ def test_judge_modes_the_job_lane_writes_the_episode_and_the_operator_lane_the_s
                for p in sunk for line in p.read_text(encoding="utf-8").splitlines() if line.strip())
 
 
-def test_d5_a_jobs_findings_publish_once_even_after_an_author_consumed_them(tmp_path, store_dsn):
-    """Publishing fills the store; a second publish adds nothing, nor does one after the finding is published
-    by a merge. (D5, O14, L-C19; the store's finding id is unique for good)"""
-    ep, _new = _graded_episode(tmp_path, store_dsn, job_lane=True)
-    from defender.learning.judge.enqueue import publish_episode_findings
-
-    def publish(store) -> None:
-        # The episode reached as the post-step reaches it: by id, through its tenant's runs repository.
-        with J.episode_runs_for(ep).episode_files(ep.name) as episode:
-            publish_episode_findings(episode, store=store, tenant_id=S.FIXTURE_TENANT)
-
-    with blocking(store_dsn) as store:
-        publish(store)
-        rows = _queue(store_dsn)
-        assert rows, "the episode's findings never reached the store"
-        publish(store)
-        assert _queue(store_dsn) == rows, "a crash's republish doubled the queue"
-
-        claim = store.claim(S.FIXTURE_TENANT, "author", owner="host-a", thresholds=ONE)
-        store.in_review(claim, 7, {})
-        store.end_review(S.FIXTURE_TENANT, claim.batch_id, expect_phase="in_review", outcome="merged",
-                         published=[(kind, key) for kind, key, _payload in claim.items], held=[])
-        publish(store)
-        assert _queue(store_dsn) == rows, "a published finding came back"
-        assert {i.status for i in store.work(S.FIXTURE_TENANT)} == {"published"}
-
-
 def test_d5_dedup_is_by_the_store_on_both_kinds_and_holds_past_every_end(tmp_path, store_dsn):
     """Publish, end the item as skipped, publish the same id: nothing comes back; a new id does. Both findings kinds.
     (L-C19; replaces the consumed-ledger dedup)"""
