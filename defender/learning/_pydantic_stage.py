@@ -146,7 +146,7 @@ class _Typed:
         args_type = StructuredDict(dict(self.spec.schema))
 
         def answer(ctx: RunContext[Any], args):
-            repeated = _repeated_keys(_raw_args(ctx))
+            repeated = _repeated_keys(_output_call_args(ctx))
             if repeated:
                 raise ModelRetry(f"your reply repeats key(s) {repeated}: give each key once")
             try:
@@ -236,7 +236,7 @@ class _Pairs(list):
     """A JSON object as its key/value pairs in order, repeats kept."""
 
 
-def _raw_args(ctx: RunContext[Any]) -> Any:
+def _output_call_args(ctx: RunContext[Any]) -> Any:
     """The output-tool call's arguments as the model sent them, off the response being checked."""
     for message in reversed(ctx.messages):
         if isinstance(message, ModelResponse):
