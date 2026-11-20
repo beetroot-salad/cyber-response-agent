@@ -172,6 +172,8 @@ class Session:
     prepared: Prepared | None = None
     #: The runtime the job container was launched under (`Launch.runtime`), once it was launched.
     launched_runtime: str | None = None
+    #: This helper made its claim's record (`_container.record_owner`): it removes it last.
+    recorded: bool = False
     boxes: dict[str, Box] = field(default_factory=dict)
     #: The (box kind, id) pairs whose start is under way: reserved under `lock` before the start, so two concurrent
     #: starts of one run's box cannot both pass the one-box-per-id check.

@@ -1,6 +1,7 @@
 """#1557 O5, O6: a job's per-claim folders (`<root>/.job-scratch/<claim>/`, with the job's `shared/` in it, and
 `<root>/.job-sockets/<claim>/`) are gone once the worker has handled the child's exit, however it ended and whatever
-its kind; a worker's start removes whatever a predecessor left under both roots before it claims; a removal that fails
+its kind; a worker's start removes whatever a predecessor left under both roots before it claims, but never while the
+claim's helper still runs (its record under `.job-owners/`, r9); a removal that fails
 is an error naming the folder, and the worker starts anyway.
 
 The children here play a kind's helper (#1170) as `test_1344_learning_jobs` does: a scripted child that leaves the
@@ -10,6 +11,7 @@ folders a helper makes (paths filled with the claim its worker handed it) and th
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import shutil
@@ -18,6 +20,7 @@ from pathlib import Path
 
 import pytest
 
+from defender.tenancy import process_start
 from defender.tests.jobs import test_1344_learning_jobs as _learning
 from defender.tests.jobs.test_1344_learning_jobs import job_child, learning_worker, post_child, queued_job
 from defender.tests.support.jobs._jobs1342 import StandInContainers, job_store, row
@@ -37,6 +40,14 @@ GONE = ("{root}/.job-scratch/{claim}", "{root}/.job-sockets/{claim}")
 #: Claims no live worker holds: what a killed worker's helpers left.
 DEAD = "d" * 32
 STUCK = "e" * 32
+#: A claim whose helper's record names a process gone, and one whose helper still runs (the worker's predecessor's helper,
+#: ending its job after the worker died).
+GONE_HELPER = "c" * 32
+LIVE = "b" * 32
+#: A record alone, its helper gone before it made any folder.
+ORPHAN = "a" * 32
+#: Where a helper records itself before it makes a claim's folders (#1557 O5 r9): never bound into a job or a box.
+OWNER = "{root}/.job-owners/{claim}"
 #: Deep enough that Python 3.11's descriptor-based `shutil.rmtree` gives up (RecursionError).
 DEPTH = 3000
 
@@ -49,6 +60,22 @@ def _plant(root: Path, claim: str) -> None:
     for template in LEFT:
         _fill(template, root, claim).mkdir(parents=True, exist_ok=True)
         (_fill(template, root, claim) / "f.json").write_text("{}", encoding="utf-8")
+
+
+def _record(pid: int, start: str | None) -> str:
+    return json.dumps({"pid": pid, "start": start}) + "\n"
+
+
+#: The record of a process that runs: this test's own.
+ALIVE = _record(os.getpid(), process_start(os.getpid()))
+#: The record of a process gone: pid 1 never started at tick 0.
+DEAD_RECORD = _record(1, "0")
+
+
+def _own(root: Path, claim: str, record: str) -> None:
+    folder = _fill(OWNER, root, claim)
+    folder.mkdir(parents=True)
+    (folder / "owner").write_text(record, encoding="utf-8")
 
 
 def _unremovable(base: Path) -> None:
@@ -97,6 +124,14 @@ async def _serve_one(world: dict, containers: StandInContainers) -> str:
             if not serving.done():
                 os.kill(os.getpid(), signal.SIGTERM)
             await asyncio.wait_for(serving, timeout=60)
+        return inv
+
+
+async def _drain_one(world: dict, containers: StandInContainers) -> str:
+    """`drain()` over one queued row: the row's id."""
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued(store)
+        await _worker(world, store, _child(world, files=_committed()), containers=containers).drain()
         return inv
 
 
@@ -199,3 +234,65 @@ async def test_1557_o6_a_leftover_the_start_cannot_remove_is_an_error_naming_it_
             if base.exists():
                 _clear(base)
         shutil.rmtree(stuck, ignore_errors=True)
+
+
+# --- O5 r9: a claim's folders go once its helper is gone, never while it runs ------------------------------------------
+
+@pytest.mark.anyio
+@pytest.mark.postgres
+@pytest.mark.parametrize("entry", ["serve", "drain"])
+async def test_1557_o5_a_starting_worker_removes_the_folders_of_claims_whose_helper_is_gone_and_keeps_a_live_helpers(
+        world, tmp_path, entry):
+    """Before a worker (serving or draining) claims: a claim with no helper record, one whose record names a process
+    gone, and a gone helper's record alone have their folders and record removed; a claim whose helper still runs (its record names a live process: a
+    killed worker's helper still ending its job) keeps its folders and its record. (O5 r9)"""
+    root = world["root"]
+    for claim in (DEAD, GONE_HELPER, LIVE):
+        _plant(root, claim)
+    _own(root, GONE_HELPER, DEAD_RECORD)
+    _own(root, LIVE, ALIVE)
+    _own(root, ORPHAN, DEAD_RECORD)
+    # A gone helper's record still under its staging name (`tenancy.owned_temporary`, its owner in the name).
+    staging = root / ".job-owners" / f"{'9' * 32}.owner-1-0-deadbeef"
+    staging.mkdir()
+    try:
+        containers = StandInContainers(tmp_path / "containers")
+        inv = await (_serve_one(world, containers) if entry == "serve" else _drain_one(world, containers))
+        assert (row(world["dsn"], inv) or {}).get("stage") == "completed", "premise: the worker ran its row"
+
+        for claim in (DEAD, GONE_HELPER, ORPHAN):
+            left = [str(_fill(t, root, claim)) for t in (*GONE, OWNER) if os.path.lexists(_fill(t, root, claim))]
+            assert left == [], f"O5: {entry}'s start left a gone helper's claim folders: {left}"
+        assert not staging.exists(), f"O5: {entry}'s start left a gone helper's staged record: {staging}"
+        kept = [str(_fill(t, root, LIVE)) for t in (*GONE, OWNER) if not _fill(t, root, LIVE).is_dir()]
+        assert kept == [], f"O5 r9: {entry}'s start removed a live helper's claim folders: {kept}"
+    finally:
+        for template in (*GONE, OWNER):
+            shutil.rmtree(_fill(template, root, LIVE), ignore_errors=True)
+
+
+@pytest.mark.anyio
+@pytest.mark.postgres
+async def test_1557_o5_a_childs_folders_stay_while_its_helper_still_runs_after_the_worker_is_done_with_it(world):
+    """A child whose helper record names a process that still runs (a helper the worker could not end) leaves its
+    folders; once the worker is done with the child they are still there, for that helper, and its record too; the next
+    start removes them once it is gone. (O5 r9)"""
+    root = world["root"]
+    owner = OWNER.replace("{root}", str(root)) + "/owner"
+    leaves = {"dirs": [t.replace("{root}", str(root)) for t in LEFT]}
+    claim = ""
+    try:
+        async with job_store(world["dsn"]) as store:
+            child = _child(world, files=_committed(**{owner: ALIVE}), **leaves)
+            await _queued(store)
+            await _worker(world, store, child).drain()
+        (seen,) = child.seen_all().values()
+        claim = seen["claim"]
+        assert claim, "premise: the worker handed its child a claim"
+        assert _fill(OWNER, root, claim).is_dir(), "control: the child left its helper's record"
+        removed = [str(_fill(t, root, claim)) for t in GONE if not _fill(t, root, claim).is_dir()]
+        assert removed == [], f"O5 r9: the worker removed a live helper's claim folders: {removed}"
+    finally:
+        if claim:
+            for template in (*GONE, OWNER):
+                shutil.rmtree(_fill(template, root, claim), ignore_errors=True)

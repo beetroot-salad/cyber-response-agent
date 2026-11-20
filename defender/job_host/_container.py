@@ -12,12 +12,13 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from defender.job_socket import HELPER_LABEL, IMAGE_ENV, JOB_LABEL, NETWORK_ENV, SOCKET_ENV, SOCKETS_ROOT
+from defender.job_socket import HELPER_LABEL, IMAGE_ENV, JOB_LABEL, NETWORK_ENV, OWNERS_ROOT, SOCKET_ENV, SOCKETS_ROOT
 
 from ._session import Session, StartFailed
 
@@ -41,6 +42,34 @@ _DENIED = frozenset({
 _SECRET_WORDS = re.compile(r"DSN|PASSWORD|PASSWD|SECRET|TOKEN|OPENBAO|VAULT|LOGIN|PRIVATE")
 #: Values that carry a database address.
 _DATABASE_VALUE = re.compile(r"postgres(?:ql)?://", re.IGNORECASE)
+
+
+def owner_folder(session: Session) -> Path:
+    return session.root_folder / OWNERS_ROOT / session.claim
+
+
+def record_owner(session: Session) -> None:
+    """`<root>/.job-owners/<claim>/owner`, naming this helper (`job_socket.OWNERS_ROOT`), before any of the claim's
+    folders is made; `StartFailed` when it cannot be (a claim's record is made once). It is written under an
+    `owned_temporary` name, which names this helper too, and renamed into place whole: no instant shows a worker the
+    claim's record without its owner (#1557 O5)."""
+    from defender.box import make_data_folder
+    from defender.tenancy import owned_temporary, write_owner
+
+    record = owner_folder(session)
+    if os.path.lexists(record):
+        raise StartFailed(f"the claim's helper record {record} exists already: a claim's record is made once")
+    try:
+        staged = make_data_folder(session.root_folder, OWNERS_ROOT, owned_temporary(session.claim), mode=0o700)
+    except OSError as e:
+        raise StartFailed(f"the claim's helper record {record} could not be made: {e}") from None
+    try:
+        write_owner(staged)
+        os.rename(staged, record)
+    except OSError as e:
+        shutil.rmtree(staged, ignore_errors=True)
+        raise StartFailed(f"the claim's helper record {record} could not be written: {e}") from None
+    session.recorded = True
 
 
 def socket_folder(session: Session) -> Path:

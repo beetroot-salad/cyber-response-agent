@@ -26,17 +26,21 @@ from typing import Any
 
 __all__ = [
     "CLAIM_ROOTS", "FORGE_TOKEN_CAP", "HELPER_LABEL", "IMAGE_ENV", "JOB_LABEL", "MAX_MESSAGE", "NETWORK_ENV",
-    "SCRATCH_ROOT", "SOCKETS_ROOT", "SOCKET_ENV", "Refused", "ask",
+    "OWNERS_ROOT", "SCRATCH_ROOT", "SOCKETS_ROOT", "SOCKET_ENV", "Refused", "ask",
     "from_environ", "read_message", "sigterm_on_stdin_eof", "write_message",
 ]
 
 #: Where under the data root each claim's folders live, outside every tenant's folder and host `/tmp`: its scratch
 #: (`<root>/.job-scratch/<claim>/`, a learning job's oracle boxes' folders, C21, #1557 H3) and its socket folder
 #: (`<root>/.job-sockets/<claim>/`, every kind, H9). The helper makes and removes them; the worker removes a claim's
-#: once its child is gone, and at its start whatever a predecessor left (#1557 O5).
+#: once its child is gone, and at its start whatever a predecessor left, each only once its helper is gone (#1557 O5).
 SCRATCH_ROOT = ".job-scratch"
 SOCKETS_ROOT = ".job-sockets"
 CLAIM_ROOTS = (SCRATCH_ROOT, SOCKETS_ROOT)
+#: Where a helper records itself for its claim (`<root>/.job-owners/<claim>/owner`, `tenancy.write_owner`) before it makes
+#: the claim's folders, and removes that record last: bound into no job or box. A claim's folders are the worker's to
+#: remove only once that record's process is gone (#1557 O5 r9: a dead worker's helper still ends its job).
+OWNERS_ROOT = ".job-owners"
 
 #: The in-container variable naming the job socket's path (the same path inside and on the host: the socket's folder is
 #: bound at its own path).

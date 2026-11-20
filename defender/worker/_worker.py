@@ -73,10 +73,10 @@ from defender.jobs import FindingsNotStored, LearningProgress, is_outage, is_ref
 from defender.jobs.audit import SYSTEM, announce
 from defender.box import CLAIM_ENV, container_name
 from defender.execution import kill_group, wait_group_gone
-from defender.job_socket import CLAIM_ROOTS
+from defender.job_socket import CLAIM_ROOTS, OWNERS_ROOT
 from defender.records import job_facts, job_lane
 from defender.records.formats import DataRoot, digest_of
-from defender.tenancy import data_root_for_child, data_root_from_path
+from defender.tenancy import data_root_for_child, data_root_from_path, owner_alive
 
 from ._containers import Containers, DockerContainers
 from ._held import INVESTIGATION, LEARNING, POST_STEP, End, Ending, Held, LearningOutcome
@@ -320,24 +320,36 @@ def _remove_claim_entry(entry: Path) -> None:
 
 
 def _remove_claim_folders(root: Path, claim: str) -> None:
-    """A claim's folders under every claim root (`job_socket.CLAIM_ROOTS`), once its child is gone (#1557 O5)."""
-    for name in CLAIM_ROOTS:
+    """A claim's folders under every claim root (`job_socket.CLAIM_ROOTS`), then its helper's record, once that helper
+    is gone (#1557 O5): a claim whose record names a process that runs is that helper's still, and is left."""
+    record = root / OWNERS_ROOT / claim
+    try:
+        alive = not record.is_symlink() and record.is_dir() and owner_alive(record)
+    except Exception:  # noqa: BLE001 — a record that cannot be read leaves the claim for the next start (O6)
+        _logger.error("the per-job folder %s could not be read; the next worker start tries again", record,
+                      exc_info=True)
+        return
+    if alive:
+        _logger.info("the claim %s's folders are left to its helper, which still runs", claim)
+        return
+    for name in (*CLAIM_ROOTS, OWNERS_ROOT):
         _remove_claim_entry(root / name / claim)
 
 
 def _remove_leftover_claim_folders(root: Path) -> None:
-    """Whatever is under every claim root, at a worker's start: a predecessor's helpers' (#1557 O5)."""
-    for name in CLAIM_ROOTS:
+    """At a worker's start, before it claims: every claim's folders found under a claim root or with a record, by
+    `_remove_claim_folders` (a predecessor's helper still ending its job keeps its own; #1557 O5)."""
+    claims: set[str] = set()
+    for name in (*CLAIM_ROOTS, OWNERS_ROOT):
         try:
-            entries = sorted((root / name).iterdir())
+            claims.update(entry.name for entry in (root / name).iterdir())
         except FileNotFoundError:
             continue
         except OSError:
             _logger.error("the per-job folders under %s could not be listed; the next worker start tries again",
                           root / name, exc_info=True)
-            continue
-        for entry in entries:
-            _remove_claim_entry(entry)
+    for claim in sorted(claims):
+        _remove_claim_folders(root, claim)
 
 
 async def _spawn_outcome(spawn: asyncio.Future[asyncio.subprocess.Process]) -> asyncio.subprocess.Process | None:
@@ -470,7 +482,6 @@ class Worker:
             loop.add_signal_handler(s, stop.set)
         try:
             await self._remove_leftover_job_containers()
-            await asyncio.to_thread(_remove_leftover_claim_folders, data_root_for_child(self._data_root))
             await self._claim_loop(stop=stop)
         finally:
             for s in signals:
@@ -499,6 +510,8 @@ class Worker:
         (a store fault, a cancellation), it stops as a deliberate stop does (`_leave`). The
         renewal runs beside the loop until every row's last write has landed; serving, the
         take-over runs beside it until a stop begins (`_stop`)."""
+        # Before anything is claimed, serving or draining: what a predecessor's gone helpers left (#1557 O5).
+        await asyncio.to_thread(_remove_leftover_claim_folders, data_root_for_child(self._data_root))
         services = self._start_services(takeover=stop is not None)
         wake = asyncio.Event()
         try:
@@ -889,10 +902,10 @@ class Worker:
                         held.group_left = True
                 finally:
                     await self._sweep(what, claim)
-                    # Then the claim's folders, whatever the child's helper left (#1557 O5); never the row's business.
-                    await asyncio.to_thread(_remove_claim_folders, data_root_for_child(self._data_root), claim)
                     if after_sweep is not None:
                         await after_sweep()
+                    # Last, the claim's folders, whatever the child's helper left, once that helper is gone (#1557 O5).
+                    await asyncio.to_thread(_remove_claim_folders, data_root_for_child(self._data_root), claim)
         return proc
 
     async def _sweep(self, what: str, claim: str) -> None:

@@ -46,7 +46,9 @@ lifecycle service; run migrations; start the new code. The notes below say only 
 A learning job's oracle boxes no longer keep their scratch in the tenant's folder: it lives under the claim's folder
 (`<data root>/.job-scratch/<claim>/shared/`), which the job container mounts, and the box binds it read-only. The worker
 now removes a job's `.job-scratch/<claim>/` and `.job-sockets/<claim>/` once its child is gone, and at its start
-whatever is under both; a folder it cannot remove is logged as an error and tried again at the next start. Once, after
+(serving or draining) whatever is under both, each only once the claim's helper no longer runs: a helper records itself
+in `<data root>/.job-owners/<claim>/` first and removes that record last. A helper from before this upgrade writes
+no record, so stop the old worker and let its helpers end (about 30 seconds) before the new one starts. A folder it cannot remove is logged as an error and tried again at the next start. Once, after
 upgrading: remove every `<data root>/<T>/episodes/*/.oracle-scratch` (nothing reaches them any more). Those an oracle
 box wrote are owned by root and need root to remove; until they are gone the tenant's offboarding fails on them.
 
