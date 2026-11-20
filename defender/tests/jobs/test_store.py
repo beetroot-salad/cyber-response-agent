@@ -3854,7 +3854,7 @@ async def test_1507_the_alert_list_never_reads_an_alerts_raw_payload(dsn):
         answered: list[list[str]] = []
         event.listen(store._engine.sync_engine, "after_cursor_execute",
                      lambda _conn, cursor, *_rest: answered.append([c[0] for c in cursor.description or ()]))
-        listed = await store.list_alerts(T1, fired_after=None, fired_before=None, after=None, limit=50)
+        listed = await store.list_alerts(T1, fired_after=None, fired_before=None, outcome=None, after=None, limit=50)
         list_answered, answered[:] = list(answered), []
         single = await store.get_alert(T1, stored.alert_id)
         single_answered = list(answered)
