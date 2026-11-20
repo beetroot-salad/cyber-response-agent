@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import functools
 from collections.abc import Callable
@@ -25,9 +26,9 @@ from defender._model_view import ModelView
 from defender.investigation.driver import MakeModel, build_agent_core
 
 from pydantic_ai import Agent
-from pydantic_ai import ModelRetry, TextOutput, ToolOutput, capture_run_messages
+from pydantic_ai import ModelRetry, RunContext, TextOutput, ToolOutput, capture_run_messages
 from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
-from pydantic_ai.messages import ModelRequest, ModelResponse, RetryPromptPart
+from pydantic_ai.messages import ModelRequest, ModelResponse, RetryPromptPart, ToolCallPart
 from pydantic_ai.usage import UsageLimits
 from defender._io import read_text_utf8
 
@@ -109,6 +110,11 @@ class Accepted(NamedTuple):
     mapping: dict
     requests: int
 
+    @property
+    def refused(self) -> int:
+        """How many of the call's replies were refused: every one before the accepted one."""
+        return self.requests - 1
+
 
 _CALL_THE_TOOL = "Plain text is not an answer: call the tool to give it."
 
@@ -124,10 +130,12 @@ async def _drive(
 
 
 class _Typed:
-    """The state of one typed call: whether the check failed on the host, and the call's history."""
+    """The state of one typed call: whether the check failed on the host, its history, and the
+    logger that counts the requests the model never answered."""
 
-    def __init__(self, spec: TypedOutput) -> None:
+    def __init__(self, spec: TypedOutput, logger: observe.RequestLogger) -> None:
         self.spec = spec
+        self.logger = logger
         self.host_fault = False
         self.history: list[Any] = []
 
@@ -136,7 +144,10 @@ class _Typed:
 
         args_type = StructuredDict(dict(self.spec.schema))
 
-        def answer(args):
+        def answer(ctx: RunContext[Any], args):
+            repeated = _repeated_keys(_raw_args(ctx))
+            if repeated:
+                raise ModelRetry(f"your reply repeats key(s) {repeated}: give each key once")
             try:
                 self.spec.check(args)
             except ModelRetry:
@@ -146,7 +157,7 @@ class _Typed:
                 raise
             return dict(args)
 
-        answer.__annotations__ = {"args": args_type, "return": dict}
+        answer.__annotations__ = {"ctx": RunContext[Any], "args": args_type, "return": dict}
 
         def no_text(_text: str) -> dict:
             raise ModelRetry(_CALL_THE_TOOL)
@@ -167,8 +178,13 @@ class _Typed:
                 retries={"tools": budget, "output": budget},
             )
 
-    def responses(self) -> int:
-        return sum(1 for m in self.history if isinstance(m, ModelResponse))
+    def requests_sent(self) -> int:
+        """How many requests the call sent: one per reply in its history, plus each request the
+        model never answered (it raised, or the wall clock cut it), which the request logger
+        counts before anything else it does. Neither counts a re-ask the request limit stopped
+        or the framework's own trailing messages, and a failed log write changes neither."""
+        replies = sum(1 for m in self.history if isinstance(m, ModelResponse))
+        return replies + self.logger.n_unanswered
 
     def last_reason(self) -> str:
         for message in reversed(self.history):
@@ -185,21 +201,66 @@ def _bare(reason: str) -> str:
         "\n\nFix the errors and try again.").strip()
 
 
+def _repeated_keys(raw: Any) -> list[str]:
+    """Every key the raw tool arguments give twice under the same parent, as `a.b` paths. Parsing
+    keeps the last copy silently, so the check would read one value where the model wrote two.
+    Empty when they are not JSON (the framework refuses those itself) or when the provider handed
+    them over already parsed: the OpenAI-style client the configured models use keeps the raw
+    text, but an Anthropic model's arguments arrive parsed, and there a repeat cannot be seen."""
+    if not isinstance(raw, str):
+        return []
+    found: list[str] = []
+
+    def walk(value: Any, path: str) -> None:
+        if isinstance(value, _Pairs):  # first: a `_Pairs` is a list too
+            seen: set[str] = set()
+            for key, item in value:
+                where = f"{path}.{key}" if path else key
+                if key in seen and where not in found:
+                    found.append(where)
+                seen.add(key)
+                walk(item, where)
+        elif isinstance(value, list):
+            for i, item in enumerate(value):
+                walk(item, f"{path}[{i}]")
+
+    try:
+        walk(json.loads(raw, object_pairs_hook=_Pairs), "")
+    except (ValueError, RecursionError):
+        return []
+    return found
+
+
+class _Pairs(list):
+    """A JSON object as its key/value pairs in order, repeats kept."""
+
+
+def _raw_args(ctx: RunContext[Any]) -> Any:
+    """The output-tool call's arguments as the model sent them, off the response being checked."""
+    for message in reversed(ctx.messages):
+        if isinstance(message, ModelResponse):
+            for part in message.parts:
+                if isinstance(part, ToolCallPart) and part.tool_call_id == ctx.tool_call_id:
+                    return part.args
+            return None
+    return None
+
+
 def _typed_ending(typed: _Typed, stage: str, label: str, e: BaseException) -> Exception:
-    responses = typed.responses()
     # Only the call running out of attempts is the model's failure; any other
     # `UnexpectedModelBehavior` is the provider's (a malformed body, a content filter).
     exhausted = isinstance(e, UsageLimitExceeded) or (
         isinstance(e, UnexpectedModelBehavior) and "Exceeded maximum" in str(e))
     if exhausted and not typed.host_fault:
+        requests = typed.requests_sent()
         reason = typed.last_reason()
         return ReplyUnusable(
-            f"{stage} ({label}) reply unusable after {responses} requests: {reason}",
-            reason=reason, requests=responses)
-    # A host fault in the check came after its request's response; any other failure (transport,
-    # provider, the wall clock) cut a request that was sent and has no response.
+            f"{stage} ({label}) reply unusable after {requests} requests: {reason}",
+            reason=reason, requests=requests)
+    # A transport, provider or host fault, or the wall clock: every request sent counts, the one
+    # it cut included.
     raised = RunUnprocessable(f"{stage} ({label}) failed: {e!r}")
-    raised.requests = responses if typed.host_fault else responses + 1
+    raised.requests = typed.requests_sent()
     return raised
 
 
@@ -273,7 +334,7 @@ def run_stage(  # noqa: PLR0913 — the stage's own keyword set plus the typed o
     )
     logger.bind_ledger(observe.NO_LEDGER)  # a learning stage has its own charge and no spend ledger (#1377)
     _logger.info(f"step={label} engine=pydantic_ai model={wiring.model} effort={wiring.effort}")
-    typed = _Typed(output) if output is not None else None
+    typed = _Typed(output, logger) if output is not None else None
     try:
         try:
             agent = build_stage_agent(
@@ -300,7 +361,7 @@ def run_stage(  # noqa: PLR0913 — the stage's own keyword set plus the typed o
     finally:
         logger.close()
     if typed is not None:
-        return Accepted(dict(result.output), typed.responses())
+        return Accepted(dict(result.output), typed.requests_sent())
     out = str(result.output or "")
     if require_output and is_content_less(out):
         raise RunUnprocessable(f"{stage} ({label}) returned empty output")

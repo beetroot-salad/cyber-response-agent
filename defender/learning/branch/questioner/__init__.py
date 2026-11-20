@@ -46,9 +46,9 @@ _PROMPTS = Path(__file__).resolve().parent
 
 _QUESTIONER_DENY_REASON = (
     "Blocked: the questioner is a pure authoring projection — its entire input is inlined in "
-    "the user prompt by the host and its entire output is the answer tool's arguments. It runs "
-    "no other tools: no data-source adapters, no run-dir reads, no writes, no shell. Call the "
-    "answer tool with your reply; plain text is not an answer."
+    "the user prompt by the host and its entire output is the arguments of the one output tool "
+    "this call offers. It runs no other tools: no data-source adapters, no run-dir reads, no "
+    "writes, no shell. Call that output tool with your reply; plain text is not an answer."
 )
 
 
@@ -647,8 +647,6 @@ def author_family(  # noqa: PLR0913 — one keyword per captured input plus `les
     record_revisions: Any = None,
 ) -> dict[str, Any]:
     """Author one family document: one family call plus one call per planned world.
-    `source_disposition` is the source run's committed disposition (its closing record), or
-    `None` when it never closed.
     `source_disposition` is the source run's committed disposition (its closing record), or
     `None` when it never closed.
 

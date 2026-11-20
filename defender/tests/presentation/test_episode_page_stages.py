@@ -365,6 +365,24 @@ def test_1579_a_three_request_call_renders_each_prompt_attempt_and_reason_once(t
         assert block.count(marker) == 1, f"{marker} rendered {block.count(marker)} times: {block}"
 
 
+def test_1579_a_repeated_refusal_under_a_reused_call_id_renders_both_times(tmp_path):
+    """A provider that numbers tool calls per turn reuses one id: two identical refusals are two
+    re-asks, and the page shows both, each where it was sent."""
+    ep = E.sample_episode(tmp_path)
+    attempts = [{"args": {"word": "ATTEMPT-ONE"}, "retry": "SAME-REASON"},
+                {"args": {"word": "ATTEMPT-TWO"}, "retry": "SAME-REASON"},
+                {"args": {"word": "ATTEMPT-THREE"}}]
+    rows = E.typed_call_rows("questioner:d", attempts)
+    for row in rows:
+        for part in row["message"]["parts"]:
+            if "tool_call_id" in part:
+                part["tool_call_id"] = "call_0"
+    E.write_trace(ep.dir, "questioner:d", rows=rows)
+    block = render(ep).text_of("tx-questioner_d_trace")
+    assert block.count("SAME-REASON") == 2, block
+    assert block.index("ATTEMPT-ONE") < block.index("SAME-REASON") < block.index("ATTEMPT-TWO")
+
+
 def test_1579_the_fixture_has_the_shape_a_real_request_logger_writes(tmp_path):
     """Drift guard (#1579 F12): a real `RequestLogger` over a bare agent scripted with `ScriptedCalls`
     (two requests: a refused tool call, then a corrected one) writes the rows `E.typed_call_rows`

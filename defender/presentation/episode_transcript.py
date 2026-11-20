@@ -340,18 +340,14 @@ def _as_text(value: Any) -> str:
         return str(value)
 
 
-def _retry_entries(row: dict[str, Any], seen: set[str]) -> list[str]:
-    """The retry prompts of one re-emitted request row that were not shown yet."""
+def _retry_entries(row: dict[str, Any] | None) -> list[str]:
+    """The retry prompts one request sent: those of its last message row, the one it added."""
+    if row is None:
+        return []
     _msg, parts = _message_parts(row)
-    out: list[str] = []
-    for part in parts:
-        if isinstance(part, dict) and part.get("part_kind") == "retry-prompt":
-            reason = _as_text(part.get("content"))
-            key = f"{part.get('tool_call_id')}\0{reason}"
-            if key not in seen:
-                seen.add(key)
-                out.append(f'<div class="tx-entry tx-retry">{_uv(reason)}</div>')
-    return out
+    return [f'<div class="tx-entry tx-retry">{_uv(_as_text(part.get("content")))}</div>'
+            for part in parts
+            if isinstance(part, dict) and part.get("part_kind") == "retry-prompt"]
 
 
 def _response_line(text: str, model: Any, usage: Any, duration: Any) -> str:
@@ -425,21 +421,25 @@ def _transcript_block(trace: _Trace) -> str:  # noqa: C901, PLR0912 — one call
                                f'<details><summary>instructions</summary>'
                                f'{_uv(instructions)}</details></div>')
 
-    seen_retries: set[str] = set()
+    # Every request re-emits the call's whole history, one row per message, ending with the
+    # message it adds: only that last row is new, so each retry prompt shows once, where it was
+    # sent (#1579), however the provider numbers its tool calls.
+    newest: dict[str, Any] | None = None
     for row in rows:
         if row.get("kind") == "request":
-            # Every request of a typed call re-emits its whole history, retry prompts included:
-            # each reason is shown once, where it was first sent (#1579).
-            entries_html += _retry_entries(row, seen_retries)
+            newest = row
             continue
         if row.get("kind") != "response":
             continue
+        entries_html += _retry_entries(newest)
+        newest = None
         model = row.get("model")
         usage = row.get("usage")
         duration = _duration(row.get("duration_ms"))
         _msg, parts = _message_parts(row)
         text = _response_text(parts)
         entries_html.append(_response_line(text, model, usage, duration))
+    entries_html += _retry_entries(newest)
     framed_has_response = framed is not None and (framed.get("failure") or framed.get("reply"))
     if not framed_has_response and not has_plain_response:
         entries_html.append(_no_response_html(trace))

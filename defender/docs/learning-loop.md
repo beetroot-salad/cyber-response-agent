@@ -173,7 +173,10 @@ refused unless `--allow-dirty`, which waives dirt and only dirt. A source that
 names no commit refuses on its own, before the live tree is asked.
 
 **1. `Step.QUESTIONER`** (`branch/questioner/`) is a **deny-all** role — no tools,
-its whole input inlined by the host, its whole output one YAML manifest. It is
+its whole input inlined by the host. It answers through typed output (#1579): each
+call offers one output tool, and the host checks the tool's arguments inside the
+call, sending a refused reply back with its reason, up to 1 + 2 requests; text is
+never parsed as an answer. The calls together make the family manifest. It is
 told which systems the tenant serves (`served_systems`, recorded on the manifest
 at launch) and shown real example answers per system from the capture
 (`samples.yaml`). It authors the **discriminator** (the fact the verdict turns
@@ -290,8 +293,11 @@ questioner's definition until then, which is why some older prose pairs the two.
    joined call lists, the contrast table, the fact surfaces. One model call per
    planted world per draw (`JUDGE_DRAWS`, default **1**) into
    `worlds/<world UUID>/judge/<n>.yaml`; the payload is capped (`JUDGE_PAYLOAD_CAP`), and
-   run text reaches the model framed as untrusted data. A failed draw does not
-   unwind the pass.
+   run text reaches the model framed as untrusted data. The judge answers through
+   its `verdict` output tool, checked inside the call the same way as the
+   questioner's (a refused reply is re-asked with its reason, up to 1 + 2
+   requests; every refused reply counts toward the world's `malformed_replies`).
+   A failed draw does not unwind the pass.
 
 3. **What a draw files** — the world's bucket (one of the four investigator
    buckets `lead-set`, `lead-quality`, `analyze-discipline`,

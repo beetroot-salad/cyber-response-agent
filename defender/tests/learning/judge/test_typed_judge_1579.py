@@ -184,3 +184,35 @@ def test_1579_a5_a_discipline_bucket_for_a_world_never_shown_its_facts_is_refuse
     assert J.draw_doc(ep, "c", 0)["bucket"] == "lead-set"
     assert (_row(ep, "c")["completed_draws"], _row(ep, "c")["malformed_replies"]) == (1, 1)
     assert _row(ep, "b")["malformed_replies"] == 0
+
+
+def test_1579_replies_refused_before_a_transport_failure_still_count_as_malformed(tmp_path):
+    """Two refused replies, then the third request fails in transport: the draw fails, and both
+    refusals are on the row."""
+    from pydantic_ai.exceptions import ModelHTTPError
+
+    ep = _episode(tmp_path)
+    down = ModelHTTPError(status_code=503, model_name="scripted", body={})
+    calls = TY.ScriptedCalls([J.reply_doc(**UNREACHABLE), J.reply_doc(**UNREACHABLE), down],
+                             [J.reply_doc()], [J.family_reply()])
+
+    _grade(ep, calls)
+
+    row = _row(ep)
+    assert (row["completed_draws"], row["malformed_replies"]) == (0, 2), row
+    assert _row(ep, "c")["malformed_replies"] == 0
+
+
+def test_1579_a_judge_reply_that_repeats_a_key_is_re_asked(tmp_path):
+    """The bucket given twice: parsing would keep the second; the call refuses it and asks again."""
+    ep = _episode(tmp_path)
+    doc = J.reply_doc()
+    text = json.dumps(doc)[:-1] + ', "bucket": "none"}'
+    calls = TY.ScriptedCalls([TY.BadJSON(text), J.reply_doc()], [J.reply_doc()],
+                             [J.family_reply()])
+
+    _grade(ep, calls)
+
+    assert calls.request_counts() == [2, 1, 1]
+    assert any("bucket" in r for r in calls.reasons_sent(0)), calls.reasons_sent(0)
+    assert (_row(ep)["completed_draws"], _row(ep)["malformed_replies"]) == (1, 1)

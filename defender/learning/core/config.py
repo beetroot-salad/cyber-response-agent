@@ -416,6 +416,12 @@ class RunUnprocessable(Exception):
     #: P5). 1 for a call that never counted them.
     requests: int = 1
 
+    @property
+    def refused(self) -> int:
+        """How many of a typed call's replies were refused before it failed: every request but
+        the one the failure cut or the host's check broke on."""
+        return self.requests - 1
+
 
 class ReplyUnusable(Exception):
     """A typed call (#1579) whose model could not produce a usable reply within its bound: every
@@ -428,6 +434,11 @@ class ReplyUnusable(Exception):
         super().__init__(message)
         self.reason = reason
         self.requests = requests
+
+    @property
+    def refused(self) -> int:
+        """Every reply the call got was refused."""
+        return self.requests
 
 
 class RunAlreadyLive(Exception):

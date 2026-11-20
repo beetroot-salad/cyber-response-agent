@@ -134,7 +134,7 @@ def _run_world_draws(  # noqa: C901, PLR0913 — one loop over draws and their b
     draw. Returns `(completed_draws, draw documents by index, malformed replies, the last
     refusal's reason)`. A judge call that raises costs only its draw, in either lane: a
     learning job's pass fails only when every call it made raised (`_Pass._refuse_graded_nothing`)."""
-    from defender.learning._pydantic_stage import TypedOutput
+    from defender.learning._pydantic_stage import Accepted, TypedOutput
     from defender.learning.core.config import ReplyUnusable, StageWiring
     from defender._agent_role import AgentRole
 
@@ -164,27 +164,32 @@ def _run_world_draws(  # noqa: C901, PLR0913 — one loop over draws and their b
             schema=run_mod.REPLY_SCHEMA, retries=_REPLY_RETRIES,
             check=run_mod.reply_check(scope=scope, reachable_systems=reachable_systems,
                                       shown_its_facts=shown_its_facts))
-        doc, requests, failure = None, 1, None
+        doc, sent, failure = None, None, None
+        requests, refused = 1, 0
         try:
             reply = judge(prompt, role=AgentRole.JUDGE, agent_id=agent_id, wiring=wiring,
                           output=output)
-            mapping, requests = reply if isinstance(reply, tuple) else (reply, 1)
+            accepted = reply if isinstance(reply, Accepted) else (
+                Accepted(*reply) if isinstance(reply, tuple) else Accepted(reply, 1))
+            requests, refused, sent = accepted.requests, accepted.refused, accepted.mapping
             # The call site runs the same check: one owner. Under a seam fake it is the only run.
             doc = run_mod.draw_document(
-                run_mod.validate_reply(mapping, scope=scope, reachable_systems=reachable_systems,
+                run_mod.validate_reply(sent, scope=scope, reachable_systems=reachable_systems,
                                        shown_its_facts=shown_its_facts), scope=scope)
         except ReplyUnusable as unusable:
-            requests, refusal = unusable.requests, unusable.reason
-            malformed += requests
+            requests, refused, refusal = unusable.requests, unusable.refused, unusable.reason
             failure = refusal
-        except JudgeRefused as refused:
-            # The call site's check refused what a fake returned: that draw's malformed end.
-            malformed += requests
-            refusal = failure = str(refused)
+        except JudgeRefused as refused_here:
+            # The call site's check refused what a fake returned: the last reply is refused too.
+            refused += 1
+            refusal = failure = str(refused_here)
         # Every class: `run_stage` re-raises `StageAbort`/`FatalConfigError` unwrapped and an
         # injected seam may raise anything; one bad call must not discard the other worlds.
         except Exception as failed:  # noqa: BLE001 — one draw's blast radius
+            # The runner's failure says how many requests went out and how many replies it
+            # refused first; anything else keeps what the call got to.
             requests = getattr(failed, "requests", requests)
+            refused = getattr(failed, "refused", refused)
             # Writable whatever the exception carried (a lone surrogate would fail the draw
             # file's write far from its cause).
             reason = f"{type(failed).__name__}: {failed}".encode(
@@ -196,11 +201,12 @@ def _run_world_draws(  # noqa: C901, PLR0913 — one loop over draws and their b
             too_large = _is_size_failure(failed) and requests == 1
         else:
             completed += 1
-            malformed += requests - 1
+        malformed += refused
         _write_wire_log(episode, agent_id=agent_id, prompt=prompt,
-                        reply=doc if failure is None else None, failure=failure)
+                        reply=sent if failure is None else None, failure=failure)
         if doc is None:
-            # Every ask refused: nothing is written (the raw replies are on the wire log), and
+            # Every ask refused: nothing is written (each refused reply is on the call's own
+            # trace), and
             # an earlier pass's file at this index is removed so the page never shows it as
             # this pass's.
             try:
@@ -231,10 +237,12 @@ def _is_size_failure(failed: BaseException) -> bool:
 def _write_wire_log(
     episode: Episode, *, agent_id: str, prompt: str, reply: Any, failure: str | None,
 ) -> None:
-    """The judge's wire-log record — the whole framed prompt and reply verbatim, one file per
-    call, under `wire_logs/` so the existing wire-log policy denial covers it. Written here
-    because the injected `judge=` seam carries no logger. Its own file name, never the
-    wiring's `trace_name` (which `run_stage` streams to)."""
+    """The judge's wire-log record — the whole framed prompt and the reply the call accepted
+    (its tool arguments, before the host shapes them into the draw document; `None` when
+    every reply was refused, each of those being on the call's own trace), one file per call,
+    under `wire_logs/` so the existing wire-log policy denial covers it. Written here because
+    the injected `judge=` seam carries no logger. Its own file name, never the wiring's
+    `trace_name` (which `run_stage` streams to)."""
     name = WIRE_LOG_NAMES.agent_framed_trace(agent_id)
     row = {"agent_id": agent_id, "prompt": prompt, "reply": reply, "failure": failure,
            "wire_log_written_at": name}

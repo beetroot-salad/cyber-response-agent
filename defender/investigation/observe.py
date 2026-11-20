@@ -164,6 +164,8 @@ class RequestLogger:
         self.messages: list[dict] = []
         self._seq: dict[str, int] = {}
         self.n_requests = 0
+        #: Requests sent that the model never answered (it raised, or the call was cut).
+        self.n_unanswered = 0
         self._denial_seq = 0
         self._init_spend()
 
@@ -227,7 +229,7 @@ class RequestLogger:
         logger._cap = _max_chars()
         logger.messages = []
         logger._seq = {}
-        logger.n_requests = logger._denial_seq = 0
+        logger.n_requests = logger.n_unanswered = logger._denial_seq = 0
         logger._init_spend()
         logger.ledger = NO_LEDGER if no_ledger else None
         if continuing:
@@ -312,6 +314,7 @@ class RequestLogger:
         outage, a cancel), as `log` writes them before a response. No response record follows: the
         trace shows what was sent and that nothing came back (#1278 A1 O9: a call that reached the
         model and failed still leaves its trace)."""
+        self.n_unanswered += 1
         for dumped in ModelMessagesTypeAdapter.dump_python(request_messages, mode="json"):
             self._emit(agent_id, "request", dumped, self._cap)
 

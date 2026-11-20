@@ -250,6 +250,59 @@ def test_p5_the_same_fault_on_a_re_ask_counts_two_requests(tmp_path):
     assert any(getattr(c, "status_code", None) == 413 for c in _causes(raised.value))
 
 
+def test_p5_a_reply_that_repeats_a_key_is_re_asked_with_the_key_named(tmp_path):
+    """Parsing keeps the last copy of a repeated key, so the check would see `yes` where the model
+    also wrote `no`: the runner refuses the raw arguments, naming the key, in the same call."""
+    calls = TY.ScriptedCalls([TY.BadJSON('{"word": "no", "word": "yes"}'), {"word": "yes"}])
+
+    out, _ = _stage(tmp_path, calls)
+
+    assert out == ({"word": "yes"}, 2)
+    assert any("word" in r and "repeat" in r for r in calls.reasons_sent(0)), calls.reasons_sent(0)
+
+
+def test_p5_a_nested_repeated_key_is_named_by_its_path(tmp_path):
+    calls = TY.ScriptedCalls(
+        [TY.BadJSON('{"word": "yes", "f": [{"a": 1, "a": 2}]}'), {"word": "yes"}])
+
+    _stage(tmp_path, calls)
+
+    assert any("f[0].a" in r for r in calls.reasons_sent(0)), calls.reasons_sent(0)
+
+
+def test_p5_the_wall_clock_during_the_check_counts_only_the_request_answered(tmp_path):
+    """The wall clock runs out while the check reads request 1's reply (a blocking check holds
+    the loop, so the cut may land only once it returns): one request went out, not two, and no
+    reply was refused."""
+    import time
+
+    def slow(_mapping):
+        time.sleep(1.5)
+
+    calls = TY.ScriptedCalls([{"word": "yes"}])
+    with pytest.raises(RunUnprocessable) as raised:
+        _stage(tmp_path, calls, output=TY.typed_output(slow, retries=0), timeout=1)
+    assert not isinstance(raised.value, TY.reply_unusable())
+    assert raised.value.requests == 1
+    assert raised.value.refused == 0
+
+
+def test_p5_every_ending_says_how_many_replies_were_refused(tmp_path):
+    calls = TY.ScriptedCalls([{"word": "no"}, {"word": "yes"}])
+    out, _ = _stage(tmp_path, calls, label="q:ok")
+    assert out.refused == 1
+
+    calls = TY.ScriptedCalls([{"word": "a"}, {"word": "b"}, {"word": "c"}])
+    with pytest.raises(TY.reply_unusable()) as unusable:
+        _stage(tmp_path, calls, label="q:ex")
+    assert (unusable.value.requests, unusable.value.refused) == (TY.MAX_REQUESTS, TY.MAX_REQUESTS)
+
+    calls = TY.ScriptedCalls([{"word": "no"}, {"word": "no"}, TY.http_413()])
+    with pytest.raises(RunUnprocessable) as failed:
+        _stage(tmp_path, calls, label="q:tx")
+    assert (failed.value.requests, failed.value.refused) == (3, 2)
+
+
 def _provider_fault():
     from pydantic_ai.exceptions import UnexpectedModelBehavior
 
