@@ -73,16 +73,16 @@ def _row(job: str) -> dict:
 
 
 def _job_row(flow) -> dict:
-    cols = ("status", "reason", "findings_count", "publish_state")
+    cols = ("status", "reason", "publish_state")
     (found,) = execute(flow["scene"].dsn, f"SELECT {', '.join(cols)} FROM jobs.learning_jobs WHERE id = %s",  # noqa: S608
                        (flow["job"],))
     return dict(zip(cols, found, strict=True))
 
 
 def test_o8a_a_learning_jobs_container_ends_completed_and_the_workers_end_write_stores_its_finding(flow):
-    """(O8a, O1) the end record the container wrote is `completed`; the worker's end write derived the count and stored the finding as the job's."""
+    """(O8a, O1) the end record the container wrote is `completed`; the worker's end write stored the finding as the job's."""
     scene, job = flow["scene"], flow["job"]
-    assert _job_row(flow) == {"status": "completed", "reason": None, "findings_count": 1, "publish_state": "done"}
+    assert _job_row(flow) == {"status": "completed", "reason": None, "publish_state": "done"}
     seen = flow["post_step"]["work_before"]
     assert [row[:2] + row[3:] for row in seen] == [["finding", f"{job}/w-b/0/0", job]], "stored for the tenant, its source run the job"
     assert [row[2] for row in seen] == ["waiting"], "waiting when the post-step's tick looked"

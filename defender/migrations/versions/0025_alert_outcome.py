@@ -16,16 +16,16 @@ three hours on 2026-11-17). No production investigation has run, so no data move
 Stop the API and the workers first (`defender/CLAUDE.md`, "Upgrade from before #1581"): a worker of the old code would
 complete investigations without keeping the copy.
 
-Revision ID: 0024_alert_outcome
-Revises: 0023_findings_at_job_end
+Revision ID: 0025_alert_outcome
+Revises: 0024_drop_findings_count
 
 There is no downgrade.
 """
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0024_alert_outcome"
-down_revision = "0023_findings_at_job_end"
+revision = "0025_alert_outcome"
+down_revision = "0024_drop_findings_count"
 
 SCHEMA = "jobs"
 
