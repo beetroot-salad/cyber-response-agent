@@ -198,14 +198,17 @@ class PostStepHelper:
 
     def close(self) -> None:
         """Stop the helper (`ProcessHelper.close` kills it, so it never cleans up) and take away the claim's socket
-        folder it made (`job_host._container.make_socket_folder`, made exclusively): the next helper of this scene, or
-        an in-process one of the same claim, makes it afresh."""
+        folder it made (`job_host._container.make_socket_folder`, made exclusively) and its record
+        (`job_host._container.record_owner`, made once), as the worker does once a helper is gone (#1557 O5): the next
+        helper of this scene, or an in-process one of the same claim, makes both afresh."""
         from defender.job_host._container import SOCKETS
+        from defender.job_socket import OWNERS_ROOT
 
         try:
             self._process.close()
         finally:
-            shutil.rmtree(self.scene.root / SOCKETS / self.scene.claim, ignore_errors=True)
+            for parent in (SOCKETS, OWNERS_ROOT):
+                shutil.rmtree(self.scene.root / parent / self.scene.claim, ignore_errors=True)
 
 
 def in_post_step(scene: Any, body: Callable[[Any], Any], *, rc: int = 0) -> Any:

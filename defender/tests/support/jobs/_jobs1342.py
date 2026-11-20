@@ -256,8 +256,8 @@ CHILD_SCRIPT = textwrap.dedent("""
     runs = Path(spec["runs"])
     run_id = argv[argv.index("--job") + 1]
 
-    def fill(text):
-        return text.replace("{id}", run_id)
+    def fill(text):  # `{claim}`: the claim its worker handed it (#1557: a helper's per-claim folders)
+        return text.replace("{id}", run_id).replace("{claim}", os.environ.get("DEFENDER_BOX_CLAIM", ""))
 
     def event(kind):
         with open(spec["events"], "a", encoding="utf-8") as handle:

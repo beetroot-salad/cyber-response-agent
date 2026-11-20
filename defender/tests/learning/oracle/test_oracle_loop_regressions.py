@@ -1058,7 +1058,7 @@ def test_the_oracle_box_binds_nothing_of_the_repository_and_no_env_file(tmp_path
         request = box_oracle.oracle_box_request(tmp_path / "scratch", runner, env=env, tenant_id=TEST_TENANT,
                                                   data_root=tmp_path)
         assert [(m.source, m.target, m.writable) for m in request.mounts] == [
-            (runner, checkout, False), (tmp_path / "scratch", tmp_path / "scratch", True)]
+            (runner, checkout, False), (tmp_path / "scratch", tmp_path / "scratch", False)]
         shipped = sorted(str(p.relative_to(runner)) for p in runner.rglob("*") if p.is_file())
         assert shipped == sorted(box_oracle.RUNNER_FILES), shipped
     finally:

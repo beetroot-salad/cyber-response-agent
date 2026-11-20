@@ -39,6 +39,8 @@ from ._container import (
     job_container_name,
     make_socket_folder,
     container_launch,
+    owner_folder,
+    record_owner,
     socket_folder,
     socket_path,
     start,
@@ -186,6 +188,8 @@ def _finish(session: Session, proc: Any, server: Server | None, hold: contextlib
         shutil.rmtree(socket_folder(session), ignore_errors=True)
         if session.prepared is not None:
             session.prepared.cleanup.close()
+        if session.recorded:  # last: until it goes, the worker leaves the claim's folders to this helper (#1557 O5)
+            shutil.rmtree(owner_folder(session), ignore_errors=True)
     finally:
         hold.close()
 
@@ -199,6 +203,7 @@ def _start(session: Session, spec: KindSpec, signals: _Signals, hold: contextlib
     proc = None
     try:
         try:
+            record_owner(session)  # before any claim folder is made (#1557 O5)
             session.prepared = spec.prepare(session, hold)
             path = socket_path(session)
             try:
