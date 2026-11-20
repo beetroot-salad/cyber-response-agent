@@ -1,8 +1,8 @@
 // Accepting an invitation, the shell's second write (alert list design O11, Flows "Shell, accept"): success is a full
 // load of the accepted tenant's alerts address by `assign` (never `replace`: Back returns to Home), a 401 is the
 // shell's sign-in round trip back to /home, and the caller gets the shell's Outcome shape (r3.1, like signOut's
-// SignOutResult): `{kind:"left"}` after either navigation, `{kind:"not-open"}` for a 404, `{kind:"error"}` for any
-// other status, no answer or a non-JSON success, and `{kind:"gone"}` when the load was superseded. Each case asserts
+// SignOutResult): `{kind:"left"}` after either navigation, `{kind:"not-open"}` for a 404, `{kind:"refused"}` for any other
+// 4xx (r3.3: worded "You can't accept this invitation."), `{kind:"error"}` for a 5xx, no answer or a non-JSON success, and `{kind:"gone"}` when the load was superseded. Each case asserts
 // the whole effect log, as load.test.ts does.
 // FORCED CHOICE: the load-level entry is `load.client.acceptInvitation(id)` beside `signOut`; the design names only the
 // action a screen holds (`useActions().acceptInvitation`).
@@ -102,7 +102,13 @@ describe("accepting an invitation", () => {
     expect(log).toEqual(["fetch"]);
   });
 
-  it.each([400, 403, 409, 422, 429, 500, 502, 503])("answers error for a %i, and navigates nowhere", async (status) => {
+  it.each([400, 403, 409, 422, 429])("answers refused for a %i (r3.3: any 4xx but 401 and 404), and navigates nowhere", async (status) => {
+    const { log, accept, settled } = accepting(() => Promise.resolve(json(status, { detail: "x" })));
+    expect(await settled(accept())).toEqual({ kind: "refused" });
+    expect(log).toEqual(["fetch"]);
+  });
+
+  it.each([500, 502, 503])("answers error for a %i, and navigates nowhere", async (status) => {
     const { log, accept, settled } = accepting(() => Promise.resolve(json(status, { detail: "x" })));
     expect(await settled(accept())).toEqual({ kind: "error" });
     expect(log).toEqual(["fetch"]);

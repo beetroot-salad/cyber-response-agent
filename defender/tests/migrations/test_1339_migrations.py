@@ -472,8 +472,9 @@ def test_the_jobs_indexes_are_the_constraints_plus_one_partial_unique_and_the_li
     assert len(alerts) == 5, "#1581: and the outcome index (conflict, updated)"
     assert len([i for i in alerts if "(tenant_id, fired_at DESC, id DESC)" in i]) == 1
     investigations = _jobs_indexes(migrated_database, "investigations")
-    assert len(investigations) == 4
+    assert len(investigations) == 5, "#1581 r3.3: and the `latest_status` index"
     assert len([i for i in investigations if "(tenant_id, created_at DESC, id DESC)" in i]) == 1
+    assert len([i for i in investigations if "(tenant_id, alert_id, created_at DESC, id DESC)" in i]) == 1
     [partial] = [i for i in investigations if "WHERE" in i]
     assert "UNIQUE" in partial
     assert "(tenant_id, alert_id)" in partial
@@ -482,4 +483,4 @@ def test_the_jobs_indexes_are_the_constraints_plus_one_partial_unique_and_the_li
     assert not any(f"'{stage}'" in partial for stage in ("completed", "unparseable", "failed", "aborted"))
 
     execute(migrated_database, "CREATE INDEX extra_1342 ON jobs.investigations (stage)")  # control: the census sees one
-    assert len(_jobs_indexes(migrated_database, "investigations")) == 5
+    assert len(_jobs_indexes(migrated_database, "investigations")) == 6
