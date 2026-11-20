@@ -16,5 +16,13 @@ export default defineConfig({
     strictPort: true,
     ...(upstream ? { proxy: { "/api": { target: `http://${upstream}` } } } : {}),
   },
-  test: { include: ["src/**/*.test.{ts,tsx}"] },
+  // The generated tests (`*.generated.test.ts`, exhaustive oracles) run as their own step, `bun run test:generated`:
+  // the build tests run `bun run test` dozens of times, and these would multiply into minutes there (#1581).
+  test: {
+    include: process.env.GENERATED_TESTS === "1" ? ["src/**/*.generated.test.{ts,tsx}"] : ["src/**/*.test.{ts,tsx}"],
+    exclude:
+      process.env.GENERATED_TESTS === "1"
+        ? ["**/node_modules/**"]
+        : ["**/node_modules/**", "src/**/*.generated.test.{ts,tsx}"],
+  },
 });
