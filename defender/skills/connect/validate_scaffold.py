@@ -282,7 +282,7 @@ def _report_reads(report: Report, defender: Path, system: str) -> None:
         report.add(PASS, "the reads access.yaml lists, exactly (every request the adapter sends that is not a GET): "
                    + ", ".join(f"{method} {path}" for method, path in reads))
     else:
-        report.add(PASS, "the adapter sends only GET requests: access.yaml lists no read route")
+        report.add(PASS, "the adapter sends only GET requests: it declares no non-GET reads (none), so access.yaml lists no read route")
 
 
 def _report_comment_route(report: Report, catalog: Catalog, system: str, settings) -> None:
