@@ -712,7 +712,7 @@ def test_oracle_runner_is_a_code_mount_holding_only_runner_files_and_starts_sand
         request = replace(_oracle.oracle_box_request(scratch, runner, env={}, tenant_id=TEST_TENANT, data_root=tmp_path),
                           spec=box.BoxSpec(rootfs=STOCK_ROOTFS))
         assert [(m.source, m.target, m.kind) for m in request.mounts if not m.writable] == [
-            (runner, _oracle.CHECKOUT, "code")]
+            (runner, _oracle.CHECKOUT, "code"), (scratch, scratch, "scratch")]
         docker = MountedReadDocker()
         executor = start(request, docker)
         try:
@@ -948,3 +948,47 @@ def test_tenant_drain_entry_refuses_a_readonly_mount_without_a_kind(repo, tmp_pa
     with pytest.raises(box.BoxFault, match="(?i)kind"):
         d.start_box(request, docker=daemon)
     assert daemon.names() == []
+
+
+# --- #1557 O1, O3: the oracle's scratch is read-only to its box, and its start proves the box sees it ----------------
+
+#: The staged token's faults, and the token padded: the scratch's read-back is exact, as a staged copy's is.
+_SCRATCH_FAULTS = {**_TOKEN_FAULTS, "token-padded": lambda held: (0, f"  {(held or b'').decode()}\n")}
+
+
+@pytest.mark.parametrize("fault", [None, *sorted(_SCRATCH_FAULTS)])
+def test_1557_the_oracle_scratch_is_bound_read_only_and_its_box_starts_only_on_a_token_planted_for_this_start(
+        tmp_path, start, fault):
+    """The oracle's request binds its scratch read-only at its own path (O1). The start plants a fresh token in the
+    scratch and reads it back through the box, so a box that sees another folder there (another token, nothing, a
+    failed read, extra or missing bytes) is refused before any code runs (O3); the token is gone once the box started,
+    and the saved reads the host placed are untouched."""
+    from defender.box import _oracle
+
+    runner = _oracle._make_runner()
+    try:
+        scratch = tmp_path / "scratch"
+        (scratch / "inputs").mkdir(parents=True)
+        (scratch / "inputs" / "index.json").write_text("{}", encoding="utf-8")
+        request = replace(_oracle.oracle_box_request(scratch, runner, env={}, tenant_id=TEST_TENANT, data_root=tmp_path),
+                          spec=_PINNED)
+        (bound,) = [m for m in request.mounts if Path(m.source) == scratch]
+        assert Path(bound.target) == scratch, "the oracle box's scratch is bound at its own path"
+        assert not bound.writable, "O1: the oracle box's scratch is bound writable"
+        boundary = _Boundary(tmp_path / "daemon", [scratch / "inputs"], root=scratch,
+                             root_reply=None if fault is None else _SCRATCH_FAULTS[fault])
+        if fault is None:
+            executor = start(request, boundary)
+            assert executor.sandboxed
+            [(operand, held)] = [r for r in boundary.root_reads if Path(r[0]).name != "inputs"]
+            assert held, "O3: the token the box read back must be the host's planted, non-empty bytes"
+            assert sorted(p.name for p in scratch.iterdir()) == ["inputs"], "the start's token was left in the scratch"
+            box.stop_box(executor)
+        else:
+            with pytest.raises(box.BoxFault):
+                start(request, boundary)
+            assert boundary.daemon.names() == [], "a refused box was left behind"
+            assert boundary.root_reads, "O3: startup never asked the box for the scratch's token"
+        boundary.assert_never_written()
+    finally:
+        shutil.rmtree(runner, ignore_errors=True)

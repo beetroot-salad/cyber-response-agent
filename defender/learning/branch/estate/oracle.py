@@ -1399,13 +1399,15 @@ def _saved(kind: str, question: Any, answer: Any) -> dict:
 
 def _place(run: _Run, box: Any) -> str:
     """Save every read of the serving not yet in `box`'s scratch, and the index naming them.
-    The host only writes there, never reads back: the box can write the folder too. A save
-    that fails is reported to the oracle and never faults the world. Returns that note, or ''."""
+    The host only writes there, never reads back (the box reads it, read-only, #1557 O1). A
+    save that fails is reported to the oracle and never faults the world. Returns that note, or
+    ''. Called only with the attempt's own box (`run.box` set)."""
     from defender._io import rooted_mkdir, rooted_write
 
     scratch = getattr(box, "scratch", None)
-    if scratch is None or run.box is None:  # `run.box` is set wherever a box runs; the type says otherwise
+    if scratch is None:
         return "Note: this box has no scratch folder; no saved files are there."
+    assert run.box is not None, "the save step runs only in an attempt's own box"
     entries = list(run.saved)
     base = entries[0]["name"] if entries else None
     index = {"base": base, "against": run.attempt.against_file or base,

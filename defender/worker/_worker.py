@@ -56,6 +56,7 @@ import dataclasses
 import datetime as _dt
 import logging
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -72,6 +73,7 @@ from defender.jobs import FindingsNotStored, LearningProgress, is_outage, is_ref
 from defender.jobs.audit import SYSTEM, announce
 from defender.box import CLAIM_ENV, container_name
 from defender.execution import kill_group, wait_group_gone
+from defender.job_socket import CLAIM_ROOTS
 from defender.records import job_facts, job_lane
 from defender.records.formats import DataRoot, digest_of
 from defender.tenancy import data_root_for_child, data_root_from_path
@@ -302,6 +304,42 @@ def _closing_record_or_fault(lane: job_lane.JobLane, inv: str) -> Any:
     return found
 
 
+def _remove_claim_entry(entry: Path) -> None:
+    """Remove one entry under a claim root by plain removal (a folder's links are removed, never followed); one
+    already gone counts as removed. Any other failure is an error naming it, left for the next start (#1557 O6)."""
+    try:
+        if entry.is_dir() and not entry.is_symlink():
+            shutil.rmtree(entry)
+        else:
+            entry.unlink()
+    except FileNotFoundError:
+        pass
+    except Exception:  # noqa: BLE001 — what a job left may defeat removal (a deep tree: RecursionError); logged
+        _logger.error("the per-job folder %s could not be removed; the next worker start tries again", entry,
+                      exc_info=True)
+
+
+def _remove_claim_folders(root: Path, claim: str) -> None:
+    """A claim's folders under every claim root (`job_socket.CLAIM_ROOTS`), once its child is gone (#1557 O5)."""
+    for name in CLAIM_ROOTS:
+        _remove_claim_entry(root / name / claim)
+
+
+def _remove_leftover_claim_folders(root: Path) -> None:
+    """Whatever is under every claim root, at a worker's start: a predecessor's helpers' (#1557 O5)."""
+    for name in CLAIM_ROOTS:
+        try:
+            entries = sorted((root / name).iterdir())
+        except FileNotFoundError:
+            continue
+        except OSError:
+            _logger.error("the per-job folders under %s could not be listed; the next worker start tries again",
+                          root / name, exc_info=True)
+            continue
+        for entry in entries:
+            _remove_claim_entry(entry)
+
+
 async def _spawn_outcome(spawn: asyncio.Future[asyncio.subprocess.Process]) -> asyncio.subprocess.Process | None:
     """The child a cancelled row's spawn made, waiting for the spawn to finish however many
     further cancels arrive (r7 D-ac: a child made after the cancel is still this row's to end);
@@ -432,6 +470,7 @@ class Worker:
             loop.add_signal_handler(s, stop.set)
         try:
             await self._remove_leftover_job_containers()
+            await asyncio.to_thread(_remove_leftover_claim_folders, data_root_for_child(self._data_root))
             await self._claim_loop(stop=stop)
         finally:
             for s in signals:
@@ -850,6 +889,8 @@ class Worker:
                         held.group_left = True
                 finally:
                     await self._sweep(what, claim)
+                    # Then the claim's folders, whatever the child's helper left (#1557 O5); never the row's business.
+                    await asyncio.to_thread(_remove_claim_folders, data_root_for_child(self._data_root), claim)
                     if after_sweep is not None:
                         await after_sweep()
         return proc

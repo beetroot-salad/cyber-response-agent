@@ -17,12 +17,12 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from defender.job_socket import HELPER_LABEL, IMAGE_ENV, JOB_LABEL, NETWORK_ENV, SOCKET_ENV
+from defender.job_socket import HELPER_LABEL, IMAGE_ENV, JOB_LABEL, NETWORK_ENV, SOCKET_ENV, SOCKETS_ROOT
 
 from ._session import Session, StartFailed
 
 #: Where under the data root each claim's socket folder lives: outside every tenant's folder and outside `/tmp` (H9).
-SOCKETS = ".job-sockets"
+SOCKETS = SOCKETS_ROOT
 SOCKET_NAME = "job.sock"
 #: A unix socket's path holds at most this many bytes, its terminating NUL included (`sun_path`).
 _SUN_PATH = 108
@@ -208,6 +208,13 @@ def container_launch(session: Session, socket: Path, command: list[str], environ
         # Read-write (a connect needs no write on the folder, but the code bind is the one read-only bind, A7);
         # the folder holds only the socket, made and removed by the helper.
         "--mount", f"type=bind,source={sockets},target={sockets}",
+    ]
+    shared = session.prepared.shared if session.prepared is not None else None
+    if shared is not None:
+        # The kind's job-writable folder outside the tenant's (a learning job's `shared/`, where it saves the oracle's
+        # reads for its boxes, #1557 H3), read-write at its own path.
+        argv += ["--mount", f"type=bind,source={shared},target={shared}"]
+    argv += [
         "--workdir", str(session.defender_dir.parent),
     ]
     keys = provider_keys(environ)

@@ -1511,3 +1511,16 @@ def test_overflow_cleanup_crossing_deadline_is_settled_before_attempt_can_retry(
         assert removed_before_settlement.count(True) == 0
     finally:
         release_cleanup.set()
+
+
+def test_1557_o1_the_python_tool_says_the_saved_reads_are_read_only_and_own_files_go_under_tmp():
+    """The oracle's box binds its scratch read-only (#1557 O1), so the python tool it is offered says so and names
+    `/tmp` for the files its own code makes; the hand-in tools, whose `code` runs in the same box and folder, say the
+    folder is read-only too."""
+    from defender.learning.branch.estate._oracle_tools import _ORACLE_TOOLS, _SUBMIT
+
+    texts = {name: text for name, text, _schema in (*_ORACLE_TOOLS, _SUBMIT)}
+    assert "/tmp" in texts["python"], f"the python tool does not send the oracle's own files to /tmp: {texts['python']!r}"
+    for name in ("python", "check", "submit"):
+        assert re.search(r"read[- ]only", texts[name], re.IGNORECASE), \
+            f"the {name} tool does not say its code's folder is read-only: {texts[name]!r}"
