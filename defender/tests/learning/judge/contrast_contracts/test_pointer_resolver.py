@@ -442,7 +442,7 @@ def test_1234_contrast_pointer_naming_a_reference_worlds_judge_draw(
     for label in ("b", "c"):
         (judged_before.world_dir(label) / "judge").mkdir(parents=True, exist_ok=True)
         (judged_before.world_dir(label) / "judge" / "0.yaml").write_text(
-            S.as_text(S.QUIET), encoding="utf-8")
+            S._yaml.safe_dump(S.QUIET, sort_keys=False), encoding="utf-8")
         (judged_before.ep / "wire_logs" / framed(f"judge:{label}:0")).write_text(
             json.dumps({"agent_id": f"judge:{label}:0", "prompt": "p", "reply": "r"}) + "\n",
             encoding="utf-8")

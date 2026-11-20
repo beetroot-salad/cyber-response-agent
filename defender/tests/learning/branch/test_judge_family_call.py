@@ -46,16 +46,23 @@ def test_the_family_call_is_shown_every_world(tmp_path, monkeypatch):
 
 
 def test_the_family_reply_may_not_name_a_world(tmp_path, monkeypatch):
-    """A family-level finding may not attribute itself to a world: the pass owns identity."""
-    built = family_episode(tmp_path, monkeypatch)
-    judge = S.judge({S.FAMILY: S.family_reply(world=[family_finding(world="b")])})
+    """A family-level finding may not attribute itself to a world: the pass owns identity.
+    #1579: a finding is a closed shape, so a `world` key refuses the draw (no row carries it);
+    the control without the key reaches the queue stamped with a null `world`."""
+    built = family_episode(tmp_path / "control", monkeypatch)
+    S.grade(built, S.judge({S.FAMILY: S.family_reply(world=[family_finding()])}))
+    control = family_rows(S.questioner_queue())
+    assert control, "the family finding reached no queue row, so the stamp below proves nothing"
+    assert {r["world"] for r in control} == {None}, (
+        f"a family finding carried a world onto the queue: {control}")
 
-    S.grade(built, judge)
+    built = family_episode(tmp_path / "named", monkeypatch)
+    result = S.grade(built, S.judge({S.FAMILY: S.family_reply(world=[family_finding(world="b")])}))
 
     rows = family_rows(S.questioner_queue())
-    assert rows, "the family finding reached no queue row, so the stamp below proves nothing"
-    assert {r["world"] for r in rows} == {None}, (
-        f"a family finding carried the model's own world onto the queue: {rows}")
+    assert rows == control, (
+        f"a family finding carrying the model's own world reached a queue row: {rows}")
+    assert (result.family or {}).get("malformed_replies") == 1, result.family
 
 
 def test_the_family_reply_admits_a_family_level_finding(tmp_path, monkeypatch):

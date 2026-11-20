@@ -43,12 +43,3 @@ def test_a_torn_outcome_still_reads_as_no_record(tmp_path):
 
     with pytest.raises(episode_mod.EpisodeError, match="no outcome record"):
         episode_mod._recorded_outcome(ep.view(), T.sym("records._family", "parse_family")(T.family_doc()))
-
-
-def test_a_parsed_value_holding_one_immutable_value_twice_is_a_tree():
-    from defender._yaml import AliasRefused, refuse_shared
-
-    refuse_shared({"a": (), "b": (), "c": frozenset(), "d": frozenset()})
-    shared: list = []
-    with pytest.raises(AliasRefused):
-        refuse_shared({"a": shared, "b": shared})

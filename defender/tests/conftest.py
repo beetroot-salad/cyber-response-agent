@@ -343,3 +343,16 @@ def _records_planted(request):
     _triplet_947.PLANT_RECORDS = not own
     yield
     _triplet_947.PLANT_RECORDS = False
+
+
+@pytest.fixture(autouse=True)
+def _no_unmodelled_model_input():
+    """#1579 R7: a model-seam fake records an input it does not model (a text reply to a typed
+    call, a call with nothing scripted); the test fails here even if production swallowed the
+    fake's exception."""
+    from defender.tests.support.learning.core import _unmodelled1579
+
+    _unmodelled1579.drain()
+    yield
+    left = _unmodelled1579.drain()
+    assert left == [], f"a model-seam fake met input it does not model: {left}"

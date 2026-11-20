@@ -357,6 +357,9 @@ class StageContext:
 
 
 def subagent_timeout() -> int:
+    """One request's wall clock, in seconds. A typed call (the questioner's and the judge's,
+    #1579) may send 1 + its retries requests, so its wall clock is that many times this: 3x by
+    default, 1350 s before a stuck call is cut."""
     return env_int("LEARNING_SUBAGENT_TIMEOUT_SECONDS", 450)
 
 
@@ -412,7 +415,33 @@ class StageAbort(Exception):
 
 
 class RunUnprocessable(Exception):
-    pass
+    #: How many model requests the call sent before it failed, the failed one included (#1579
+    #: P5). 1 for a call that never counted them.
+    requests: int = 1
+
+    @property
+    def refused(self) -> int:
+        """How many of a typed call's replies were refused before it failed: every request but
+        the one the failure cut or the host's check broke on."""
+        return self.requests - 1
+
+
+class ReplyUnusable(Exception):
+    """A typed call (#1579) whose model could not produce a usable reply within its bound: every
+    attempt was refused. Not a `RunUnprocessable`: that stays for transport, provider and host
+    faults, so a host bug is never read as a model failure.
+
+    `reason` is the last refused attempt's; `requests` is how many the call sent."""
+
+    def __init__(self, message: str, *, reason: str, requests: int) -> None:
+        super().__init__(message)
+        self.reason = reason
+        self.requests = requests
+
+    @property
+    def refused(self) -> int:
+        """Every reply the call got was refused."""
+        return self.requests
 
 
 class RunAlreadyLive(Exception):
