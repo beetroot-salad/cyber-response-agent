@@ -97,7 +97,6 @@ class _Job:
         self.fork: str | None = None
         self.stage: str | None = None
         self.cost = 0.0
-        self.findings = 0
         #: An ending decided before the entry ends, which no later signal overrides: the job's
         #: `no_fork_point`, or `completed` once the judge's pass returned.
         self.decided: LearningEnd | None = None
@@ -176,7 +175,6 @@ class _Job:
         except Exception as unreadable:  # noqa: BLE001 — the findings are the record's, the ending stands
             _logger.warning(f"job {self.job_id}: the findings could not be read ({type(unreadable).__name__})")
             return
-        self.findings = count
         self.decided = self._end(LEARNING_COMPLETED, None, _judged_message(word, count), findings=found)
 
     # -- the end record ----------------------------------------------------------------------
@@ -185,7 +183,7 @@ class _Job:
              findings: dict[str, Any] | None = None) -> LearningEnd:
         cost = self.cost if math.isfinite(self.cost) and self.cost >= 0 else 0.0
         return LearningEnd(status=status, reason=reason, message=message, fork_message_id=self.fork,
-                           stage=self.stage, findings_count=self.findings, sibling_cost_usd=cost,
+                           stage=self.stage, sibling_cost_usd=cost,
                            findings=findings)
 
     def ending_for(self, raised: BaseException | None) -> LearningEnd:

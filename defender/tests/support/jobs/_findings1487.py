@@ -48,11 +48,14 @@ def ok(finding: Any = (), questioner: Any = ()) -> dict[str, Any]:
     return {"state": "ok", "text": text_of(finding, questioner)}
 
 
-def record(status: str = "completed", reason: str | None = None, *, findings: Any = _ABSENT, count: int = 0,
+def record(status: str = "completed", reason: str | None = None, *, findings: Any = _ABSENT, count: Any = _ABSENT,
            message: str | None = None, cost: float = 0.0) -> str:
-    """The learning end record (the interface's whole shape) with the `findings` field as given, or without it."""
+    """The learning end record (the interface's whole shape) with the `findings` field as given, or without it; `count`
+    is the `findings_count` an entry before #1589 still writes (absent unless given)."""
     body: dict[str, Any] = {"status": status, "reason": reason, "message": message, "fork_message_id": "m-1",
-                            "stage": "judge", "findings_count": count, "sibling_cost_usd": cost}
+                            "stage": "judge", "sibling_cost_usd": cost}
+    if count is not _ABSENT:
+        body["findings_count"] = count
     if findings is not _ABSENT:
         body["findings"] = findings
     return json.dumps(body)

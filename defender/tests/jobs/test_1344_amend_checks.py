@@ -407,7 +407,7 @@ async def test_a3_a_job_ending_during_its_tenant_s_check_starts_no_second_post_s
     async with job_store(dsn) as store:
         earlier = await queued_job(world, store, ticket="J-0")
         _end_completed(dsn, earlier)
-        worker = learning_worker(world, store, job=job_child(world, files={END: learning_end("completed", findings=1)}),
+        worker = learning_worker(world, store, job=job_child(world, files={END: learning_end("completed")}),
                                  post=_either(follow, check), learning_check_interval=0.5, learning_slots=2, **_FAST)
         serving = asyncio.create_task(worker.serve())
         try:
@@ -437,7 +437,7 @@ async def test_a3_a_post_step_that_leaves_nothing_waiting_stops_its_tenant_s_che
     async with job_store(dsn) as store:
         job = await queued_job(world, store, ticket="J-1")
         _no_check_until_a_post_step_ends(dsn)
-        worker = learning_worker(world, store, job=job_child(world, files={END: learning_end("completed", findings=1)}),
+        worker = learning_worker(world, store, job=job_child(world, files={END: learning_end("completed")}),
                                  post=_either(follow, check), learning_check_interval=0.3, **_FAST)
         serving = asyncio.create_task(worker.serve())
         try:
@@ -459,7 +459,7 @@ async def test_a3_a_post_step_that_leaves_work_waiting_keeps_its_tenant_s_checks
     async with job_store(dsn) as store:
         await queued_job(world, store, ticket="J-1")
         _no_check_until_a_post_step_ends(dsn)
-        worker = learning_worker(world, store, job=job_child(world, files={END: learning_end("completed", findings=1)}),
+        worker = learning_worker(world, store, job=job_child(world, files={END: learning_end("completed")}),
                                  post=_either(post_child(world), check), learning_check_interval=0.3, **_FAST)
         serving = asyncio.create_task(worker.serve())
         try:
@@ -501,7 +501,7 @@ async def test_a3_the_worker_renews_a_running_check_s_hold_so_no_second_check_st
 async def test_1360_o6_a_running_job_ended_by_the_offboarding_is_followed_by_no_post_step(world, offboarded):
     """No post-step child after the offboard commit; the control tenant stays active and gets one; neither leaves a post-step file in the runs. (#1360 O6)"""
     dsn, release, mark = world["dsn"], world["tmp"] / "release", world["tmp"] / "term-{id}"
-    jobs = job_child(world, files={END: learning_end("completed", findings=1)}, wait_for=release, term="finish",
+    jobs = job_child(world, files={END: learning_end("completed")}, wait_for=release, term="finish",
                      term_mark=str(mark))
     post = post_child(world)
     async with job_store(dsn) as store:

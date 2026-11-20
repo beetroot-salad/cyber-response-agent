@@ -1185,7 +1185,7 @@ class Worker:
                 **({"findings": end.findings} if end.findings is not None else {}))
             what = end.status + (f" ({end.reason})" if end.reason else "")
             if written is not None and end.status == job_lane.LEARNING_COMPLETED:
-                what += f", findings {written.publish_state} ({written.findings_count} stored)"
+                what += f", findings {written.publish_state}"
         if written is None:
             _logger.info("learning job %s: the row is no longer this worker's; nothing written", job)
         else:
