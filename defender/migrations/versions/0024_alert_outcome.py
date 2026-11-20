@@ -38,7 +38,7 @@ def upgrade() -> None:
     missing: int = bind.execute(sa.text(
         f"SELECT count(*) FROM {SCHEMA}.investigations WHERE stage = 'completed' AND disposition IS NULL")).scalar_one()
     unknown: int = bind.execute(sa.text(
-        f"SELECT count(*) FROM {SCHEMA}.investigations WHERE disposition NOT IN ({_CODES})")).scalar_one()  # noqa: S608
+        f"SELECT count(*) FROM {SCHEMA}.investigations WHERE disposition NOT IN ({_CODES})")).scalar_one()  # noqa: S608 — SCHEMA and the frozen codes only
     if missing or unknown:
         raise RuntimeError(
             f"{missing} completed investigation(s) in jobs.investigations with no disposition and {unknown} investigation(s) "
@@ -60,7 +60,7 @@ def upgrade() -> None:
         FROM (SELECT DISTINCT ON (alert_id) alert_id, id, disposition, created_at
               FROM {SCHEMA}.investigations WHERE stage = 'completed'
               ORDER BY alert_id, created_at DESC, id DESC) AS n
-        WHERE a.id = n.alert_id""")  # noqa: S608
+        WHERE a.id = n.alert_id""")  # noqa: S608 — SCHEMA only
     op.create_check_constraint(
         op.f("ck_alerts_outcome_copy_whole"), "alerts",
         "(outcome IS NULL) = (outcome_investigation_id IS NULL) AND (outcome IS NULL) = (outcome_created_at IS NULL)",

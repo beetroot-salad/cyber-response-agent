@@ -229,13 +229,30 @@ function importOf(made, file, identifier) {
 
 /** Where a literal address is resolved from: an origin of its own, the app's served from it. */
 const ORIGIN = "https://app.invalid";
-/** The entities a JSX string may spell an address with that `decodeJsx` reads; any other is refused. */
-const NAMED_ENTITIES = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
+/** Each named entity's text as the JSX compile writes it, or null for a name it leaves as written: learned from the
+ * compiler (`jsxEntityText`), once per name. */
+const JSX_ENTITIES = new Map();
 /** A `srcSet` candidate's width or density, which is not an address. */
 const DESCRIPTOR = /^\d+(\.\d+)?[wx]$/i;
 
+/** The text the JSX compile writes for the named entity `&name;` in an attribute string, or null when it leaves the
+ * entity as written. The compile's own table (the XHTML one every JSX compiler shares), asked of the compiler rather
+ * than copied, so the check reads a string as the element gets it. */
+function jsxEntityText(name) {
+  if (!JSX_ENTITIES.has(name)) {
+    const emitted = ts.transpileModule(`<a b="&${name};" />`, {
+      compilerOptions: { jsx: ts.JsxEmit.React },
+      reportDiagnostics: false,
+    }).outputText;
+    const literal = /\{ b: (".*") \}/.exec(emitted);
+    const text = literal ? JSON.parse(literal[1]) : null;
+    JSX_ENTITIES.set(name, text === null || text === `&${name};` ? null : text);
+  }
+  return JSX_ENTITIES.get(name);
+}
+
 /** A JSX string as the element gets it (the JSX compile decodes HTML entities in it), or null when it holds an entity
- * not read here. */
+ * the compile leaves as written: a browser might read it otherwise, so the string is refused rather than guessed at. */
 function decodeJsx(text) {
   let unknown = false;
   const decoded = text.replace(/&(#x[0-9a-f]+|#[0-9]+|[a-z][a-z0-9]*);/gi, (entity, name) => {
@@ -243,8 +260,9 @@ function decodeJsx(text) {
     if (lower.startsWith("#")) {
       const code = lower.startsWith("#x") ? parseInt(lower.slice(2), 16) : parseInt(lower.slice(1), 10);
       if (code <= 0x10ffff) return String.fromCodePoint(code);
-    } else if (Object.hasOwn(NAMED_ENTITIES, name)) {
-      return NAMED_ENTITIES[name];
+    } else {
+      const named = jsxEntityText(name);
+      if (named !== null) return named;
     }
     unknown = true;
     return entity;
@@ -313,10 +331,16 @@ function staysOffApiFrom(text, address) {
   return resolution(text, address) === "off";
 }
 
+/** A character without which a string outside an address attribute is a word, not an address: a bare `api` resolves
+ * to `/api` only where the browser requests it, and an ordinary word (`title="API"`) stays allowed. */
+const ADDRESS_SIGN = /[/\\.%:\t\n\r]/;
+
 /** True when the browser could resolve `text`, as a whole or any of its words that holds a slash, from any address the
- * app serves to `/api` or under it (rule 5, every attribute). */
-function couldReachApi(text, addresses) {
-  const candidates = [text, ...text.split(/[\s,]+/).filter((word) => word !== text && /[/\\]/.test(word))];
+ * app serves to `/api` or under it (rule 5, every attribute). Outside an address attribute (`address` false) the whole
+ * string is tried only when it holds an `ADDRESS_SIGN`. */
+function couldReachApi(text, addresses, address) {
+  const whole = address || ADDRESS_SIGN.test(text) ? [text] : [];
+  const candidates = [...whole, ...text.split(/[\s,]+/).filter((word) => word !== text && /[/\\]/.test(word))];
   return candidates.some((candidate) => addresses.some((address) => resolution(candidate, address) === "api"));
 }
 
@@ -456,7 +480,7 @@ function boundary(made) {
         for (const text of attributeStrings(node.initializer)) {
           if (text === null)
             report(node, `outside the shell, \`${attribute}\` holds an entity the markup rule does not read`);
-          else if (couldReachApi(text, addresses))
+          else if (couldReachApi(text, addresses, ADDRESS_ATTRIBUTES.has(key)))
             report(node, `outside the shell, \`${attribute}\` holds a string the browser could resolve to /api`);
         }
         if (ADDRESS_ATTRIBUTES.has(key) && !appAddress({ made, file, addresses }, key, node.initializer)) {
