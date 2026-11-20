@@ -187,7 +187,11 @@ def _bare(reason: str) -> str:
 
 def _typed_ending(typed: _Typed, stage: str, label: str, e: BaseException) -> Exception:
     responses = typed.responses()
-    if isinstance(e, (UsageLimitExceeded, UnexpectedModelBehavior)) and not typed.host_fault:
+    # Only the call running out of attempts is the model's failure; any other
+    # `UnexpectedModelBehavior` is the provider's (a malformed body, a content filter).
+    exhausted = isinstance(e, UsageLimitExceeded) or (
+        isinstance(e, UnexpectedModelBehavior) and "Exceeded maximum" in str(e))
+    if exhausted and not typed.host_fault:
         reason = typed.last_reason()
         return ReplyUnusable(
             f"{stage} ({label}) reply unusable after {responses} requests: {reason}",
