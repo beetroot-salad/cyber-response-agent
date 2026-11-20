@@ -1,4 +1,4 @@
-"""#1581: the revision `0023_alert_outcome` (found by its suffix, never by number) gives `jobs.alerts` the stored outcome
+"""#1581: the revision `0025_alert_outcome` (found by its suffix, never by number) gives `jobs.alerts` the stored outcome
 (`outcome`, `outcome_investigation_id`, `outcome_created_at`, all null or all set, `outcome` one of the five codes), an
 index over `(tenant_id, outcome, fired_at DESC, id DESC)`, and `jobs.investigations` the checks `completed_has_a_disposition`
 and a disposition value check (O10). The upgrade backfills each alert from its newest completed investigation, and refuses,
@@ -70,12 +70,14 @@ def _version(dsn: str) -> list[tuple[str]]:
     return execute(dsn, "SELECT version_num FROM public.alembic_version")  # type: ignore[return-value]
 
 
-def test_the_revision_sits_directly_on_the_learning_causes_revision_and_is_the_head():
-    """`_alert_outcome` is built on `_learning_causes` and nothing is built on it yet. (data model)"""
-    from defender.migrations import head
+def test_the_revision_sits_directly_on_the_drop_findings_count_revision_and_on_the_one_line_to_the_head():
+    """`_alert_outcome` is built on `_drop_findings_count` (#1589, merged to main after the contract), and is the head
+    or an ancestor of it on a single line. (data model)"""
+    from defender.migrations import head, heads
 
-    assert revisions.down_of(_revision()) == revisions.by_suffix("_learning_causes")
-    assert head() == _revision()
+    assert revisions.down_of(_revision()) == revisions.by_suffix("_drop_findings_count")
+    assert heads() == (head(),)
+    assert _revision() == head() or _revision() in revisions.ancestors(head())
 
 
 # --- the backfill ------------------------------------------------------------------------------------------------------
