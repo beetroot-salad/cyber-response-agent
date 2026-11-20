@@ -23,6 +23,7 @@ from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 from defender.systems import system_status
 from defender.systems.verb_grant import GrantError
 from defender.systems.verbs import read_roster
+from defender.tests.systems import _reads1504 as X
 
 
 #: The settings check every adapter declares.
@@ -396,7 +397,8 @@ def _planted_source(system: str, probe: Path, *, outside: Path | None = None,
         "",
         f"VERBS = {{{spec['verb']!r}: {spec['fn']}}}",
     ]
-    return "\n".join([*head, "", *body]) + "\n"
+    # #1504 O1/O3: the stand-in declares its real adapter's reads, which the tenant's record of it carries.
+    return "\n".join([*head, "", *body]) + "\n" + X.reads_declaration(system)
 
 
 def planted_tree(root: Path, probe: Path, sources: dict[str, str] | None = None, *,

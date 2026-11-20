@@ -5,6 +5,8 @@ the lint that holds it. NO test functions."""
 from __future__ import annotations
 
 import importlib
+import textwrap
+from pathlib import Path
 from typing import Any
 
 #: The module constant each catalog adapter declares (O1): a tuple of `(method, path)` routes, non-GET only, `()` for
@@ -37,6 +39,13 @@ ELASTIC_READS = (("POST", "/*/_search"), ("POST", "/_query"))
 THREAT_INTEL_READS = (("POST", "/lookup"),)
 
 
+def reads_declaration(system: str) -> str:
+    """The source line a planted stand-in for catalog adapter `system` appends to declare the reads its real adapter does
+    (O1): a tenant's record of it carries those, so a stand-in without them would have its record refused (O3). Test data."""
+    reads = {"elastic": ELASTIC_READS, "threat-intel": THREAT_INTEL_READS}.get(system, ())
+    return f"\n{READS_CONSTANT} = {reads!r}\n"
+
+
 def adapter(name: str) -> Any:
     """The catalog adapter module `name` (its system id)."""
     return importlib.import_module(f"defender.integrations.{name.replace('-', '_')}_adapter")
@@ -50,3 +59,25 @@ def declared_reads(name: str) -> tuple[tuple[str, str], ...]:
 def shown(route: tuple[str, str]) -> str:
     """A route as a fault or a printed row names it: `METHOD path`."""
     return f"{route[0]} {route[1]}"
+
+
+def plant_adapter(root: Path, name: str, *, reads: str | None, check: str = "return None") -> Path:
+    """A checkout holding `<name>_adapter.py`: cold declarations, `reads` spelled as the source of its list constant (None:
+    no list declared) and a `check_settings` whose body is `check`. Test data for a catalog the caller holds."""
+    folder = root / "integrations"
+    folder.mkdir(parents=True)
+    prefix = name.upper()
+    (folder / f"{name}_adapter.py").write_text(textwrap.dedent(f'''\
+        PREFIX = "{prefix}"
+        REQUIRED_CONFIG_KEYS = ("TIMEOUT_SEC",)
+        DISPLAY_NAME = "{name}"
+        EXAMPLE = False
+        SAMPLE_SETTINGS = {{"{prefix}_TIMEOUT_SEC": "10"}}
+        VERBS = {{}}
+        {READS_CONSTANT + " = " + reads if reads is not None else ""}
+
+
+        def check_settings(tenant):
+            {check}
+        '''))
+    return root

@@ -7,7 +7,6 @@ import http.server
 import json
 import threading
 from collections.abc import Iterator, Mapping
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +19,7 @@ from defender.integrations.confinement import CapturedRequest, TransportCapture
 from defender.kit.faults import AdapterFault, ConfigFault, ConfinementFault
 from defender.kit.proxy_client import REPLY_CONTENT_TYPE, FinalRecord, encode_body, encode_final
 from defender.kit.settings import SystemConfig
+from defender.system_rules import RecordTenant
 from defender.system_rules.catalog import Catalog
 from defender.systems.verbs import VerbContext
 from defender.tenancy import parse_access
@@ -106,15 +106,6 @@ def _proxy() -> Iterator[str]:
         thread.join(10)
 
 
-@dataclass(frozen=True)
-class _Tenant:
-    """The run's record as a verb reads it: one system's settings and its access declaration."""
-
-    systems: Mapping[str, Any]
-    access: Mapping[str, Any]
-    agent: Path
-
-
 def _base(adapter: str) -> str:
     return f"https://{adapter}.example"
 
@@ -127,10 +118,10 @@ def _declaration(adapter: str, reads: tuple[tuple[str, str], ...]) -> Any:
 def _sent(catalog: Catalog, adapter: str, tool: str, kwargs: Mapping[str, Any], proxy_url: str,
           tmp_path: Path) -> tuple[list[CapturedRequest], list[str]]:
     """The requests `tool` made through the capture seam, and the findings if the call could not be driven (a settings or
-    confinement refusal is the fixture's fault, never read as "sent nothing"; any other fault follows the first request)."""
+    confinement refusal, or any fault before a request is captured, is a finding, never read as "sent nothing")."""
     entry = catalog.entry(adapter)
     settings = SystemConfig(entry.sample_settings or {})
-    tenant = _Tenant(systems={adapter: settings}, access={adapter: _declaration(adapter, ())}, agent=tmp_path)
+    tenant = RecordTenant(systems={adapter: settings}, access={adapter: _declaration(adapter, ())}, agent=tmp_path)
     capture = TransportCapture()
     ctx = VerbContext(defender_dir=DEFENDER, run_dir=tmp_path / "run", env={}, tenant=tenant, capture=capture,
                       proxy_url=proxy_url, request_token=TOKEN)
@@ -138,8 +129,10 @@ def _sent(catalog: Catalog, adapter: str, tool: str, kwargs: Mapping[str, Any], 
         catalog.module(adapter).VERBS[tool](ctx, **kwargs)
     except (ConfigFault, ConfinementFault) as refused:
         return capture.requests, [f"{adapter} {tool}: its drive fixture was refused before it was sent: {refused}"]
-    except AdapterFault:
-        pass  # the stand-in answers `{}`: a later shape fault follows the request the seam already holds
+    except AdapterFault as raised:
+        if not capture.requests:  # a fault before any request: not "sent nothing"
+            return capture.requests, [f"{adapter} {tool}: raised before sending any request: {raised}"]
+        # the stand-in answers `{}`: a later shape fault follows the request the seam already holds
     return capture.requests, []
 
 
@@ -254,3 +247,17 @@ def test_1504_o2_the_stand_in_replies_in_the_proxys_framing(tmp_path):
     assert refused == []
     assert [(r.system, r.method, json.dumps(r.url)) for r in requests] == [
         ("threat-intel", "POST", json.dumps("https://threat-intel.example/lookup"))]
+
+
+def test_1504_o2_control_a_tool_that_raises_before_sending_is_a_finding_not_sent_nothing(tmp_path):
+    """A tool that raises an `AdapterFault` before any request is captured is reported as raising, so it cannot hide a POST. (O2)"""
+    folder = tmp_path / "checkout" / "integrations"
+    folder.mkdir(parents=True)
+    (folder / "widget_adapter.py").write_text(
+        "from defender.kit.faults import UpstreamFault\n\n\n"
+        "def lookup(ctx, *, value):\n    raise UpstreamFault('raised before any request')\n\n\n"
+        "VERBS = {'lookup': lookup}\n", encoding="utf-8")
+    catalog = Catalog.of_checkout(tmp_path / "checkout")
+    with _proxy() as proxy_url:
+        found = _findings(catalog, "widget", (), {("widget", "lookup"): {"value": "x"}}, proxy_url, tmp_path)
+    assert [f for f in found if "lookup" in f and "raised before sending" in f], found

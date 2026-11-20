@@ -5,7 +5,11 @@ from __future__ import annotations
 
 import pytest
 
+from defender import run_common
 from defender._paths import adapters_under
+from defender.kit.access import AccessDeclaration
+from defender.kit.faults import ConfigFault
+from defender.system_rules import Catalog
 from defender.systems import system_status
 from defender.systems.verbs import read_roster
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
@@ -95,11 +99,12 @@ ELASTIC_BASE = "https://elasticsearch.example:9200"
 SEARCH, QUERY = ("POST", "/*/_search"), ("POST", "/_query")
 
 
-def _judged(tmp_path, data_root, system: str, access: str):
-    """`system`'s record planted with `access` over the fixture's records, and the run's judgement and tenant record."""
+def _judged(tmp_path, data_root, system: str, access: str, *, catalog=None):
+    """`system`'s record planted with `access` over the fixture's records, and the run's judgement and tenant record
+    (built over `catalog`, none: the checkout's)."""
     files = R1366.import_files(**H.access_files(system, access))
     with published_tenant(tmp_path / "forge", root=data_root, files=files) as t:
-        record = T.run_record(t)
+        record = T.run_record(t, catalog=catalog)
         roster = read_roster(adapters_under(DEFENDER))
         return system_status.judge_run(roster, record, defender_dir=DEFENDER), record
 
@@ -112,8 +117,8 @@ def _judged(tmp_path, data_root, system: str, access: str):
 ])
 def test_1504_o3_a_system_whose_non_get_reads_differ_from_its_adapters_is_down_at_run_start_and_in_no_read_pass(
         tmp_path, data_root, system, reads, named, route):
-    """Run start's judgement: the system is down with the reason (access part, the word, the route); read_grant leaves it
-    out while the other granted systems stay up and in the grant. (O3)"""
+    """Run start: the record holds the access fault, the system is down with the reason, and neither read pass names it
+    while the other granted systems stay in the grant. (O3)"""
     access = R1366.declaration(ELASTIC_BASE, scheme="basic", reads=reads) if system == "elastic" else H.declaration(
         BASE, reads=reads)
     judged, record = _judged(tmp_path, data_root, system, access)
@@ -121,8 +126,12 @@ def test_1504_o3_a_system_whose_non_get_reads_differ_from_its_adapters_is_down_a
     reason = judged.down[system].reason
     for needle in (f"system {system} access", named, f"{route[0]} {route[1]}"):
         assert needle in reason, reason
+    assert isinstance(record.access[system], ConfigFault), record.access[system]  # held at the parse, not only judged
+    for needle in (f"system {system} access", f"{route[0]} {route[1]}"):
+        assert needle in str(record.access[system]), str(record.access[system])
+    assert system not in system_status.read_grant(record, ())
+    assert system not in run_common.proxied_reads(record), "the job helper's grant subtracts no down system"
     granted = system_status.read_grant(record, judged.down)
-    assert system not in granted
     assert "cmdb" in granted, f"positive control: the other granted systems stay in the grant: {granted}"
 
 
@@ -133,11 +142,13 @@ def test_1504_o3_the_same_systems_with_exactly_their_adapters_reads_are_up_and_i
     judged, record = _judged(tmp_path, data_root, "elastic", access)
     assert judged.down == {}, judged.down
     assert {"elastic", "cmdb"} <= set(system_status.read_grant(record, judged.down))
+    assert isinstance(record.access["elastic"], AccessDeclaration)
+    assert "elastic" in run_common.proxied_reads(record), "positive control on the job helper's channel"
 
 
 @pytest.mark.parametrize(("reads", "refused"), [pytest.param((), False, id="exact"),
                                                  pytest.param((("POST", "/search"),), True, id="a-non-get-read")])
-def test_1504_o3_a_case_only_system_with_a_non_get_read_has_no_case_verdict_target_naming_its_access(
+def test_1504_o3_a_case_system_with_a_non_get_read_has_no_case_verdict_target_naming_its_access(
         tmp_path, data_root, reads, refused):
     """The case verdict (run start's and the record step's): the ticket system listing a non-GET read is a
     `CaseSettingsFault` at its access part naming the route; with none the verdict is its target. (O3)"""
@@ -177,3 +188,27 @@ def test_1504_o3_run_main_holds_a_system_with_a_non_get_read_its_adapter_does_no
     if down:
         for needle in ("system identity access", "POST /identity/_find", X.EXTRA_WORD):
             assert needle in life["systems"].down["identity"].reason
+
+
+@pytest.mark.parametrize("reads", [pytest.param((SEARCH, QUERY), id="the-checkouts-list"),
+                                   pytest.param((("POST", "/only/_find"),), id="the-planted-list")])
+def test_1504_o3_the_run_record_builder_judges_reads_against_the_catalog_it_is_handed_not_the_checkouts(
+        tmp_path, data_root, reads):
+    """The builder takes the adapter's list from the catalog passed to it (here one whose elastic lists `POST /only/_find`):
+    the checkout's pair is an access fault outside both read passes; the planted route parses and is granted. (O3)"""
+    only = ("POST", "/only/_find")
+    planted = Catalog.of_checkout(X.plant_adapter(tmp_path / "held", "elastic", reads=repr((only,))))
+    _, record = _judged(tmp_path, data_root, "elastic", R1366.declaration(ELASTIC_BASE, scheme="basic", reads=reads),
+                        catalog=planted)
+    held = record.access["elastic"]
+    if reads == (only,):
+        assert isinstance(held, AccessDeclaration), held
+        assert "elastic" in system_status.read_grant(record, ())
+        assert "elastic" in run_common.proxied_reads(record)
+        return
+    assert isinstance(held, ConfigFault), held
+    assert "system elastic access" in str(held)
+    for needle in (X.shown(only), X.MISSING_WORD, X.shown(SEARCH), X.shown(QUERY), X.EXTRA_WORD):
+        assert needle in str(held), str(held)
+    assert "elastic" not in system_status.read_grant(record, ())
+    assert "elastic" not in run_common.proxied_reads(record)

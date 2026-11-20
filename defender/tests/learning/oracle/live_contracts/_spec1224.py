@@ -242,6 +242,7 @@ from defender.kit import faults
 
 _STATE = Path({state!r})
 SYSTEM = {system!r}
+READ_ROUTES = ()  # #1504 O1: no non-GET read; a record of it with a declaration is judged against this
 
 
 def check_settings(*_a, **_k):

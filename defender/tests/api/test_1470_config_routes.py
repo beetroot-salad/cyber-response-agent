@@ -322,7 +322,7 @@ async def test_d8_a_write_is_judged_over_the_catalog_built_at_start_reading_no_a
     folder = checkout / "integrations"
     write_broken_adapter(folder, counter)
     shutil.copy(REPO / "defender/integrations/ticket_adapter.py", folder / "ticket_adapter.py")
-    shutil.copy(REPO / "defender/integrations/ticket_adapter.md", folder / "ticket_adapter.md")  # #1504 O5: its reference
+    (folder / "ticket_adapter.md").write_text("## Credential\n\nNone known.\n\n## Pitfalls\n\nNone known.\n")  # #1504 O5
     monkeypatch.setenv("DEFENDER_DIR", str(checkout))
     saved_path = list(sys.path)  # the copied adapter puts its checkout's parent on sys.path when imported
     try:

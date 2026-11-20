@@ -11,7 +11,7 @@ from defender.tests.systems import _reads1504 as X
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
 
 
-async def test_1504_o2_the_store_refuses_a_system_whose_reads_miss_one_of_its_adapters_naming_it(scripted):
+async def test_1504_o3_the_store_refuses_a_system_whose_reads_miss_one_of_its_adapters_naming_it(scripted):
     """`PUT /systems/elastic` with only the search read is 422, a fault naming the missing `POST /_query`. (O3)"""
     access = R.declaration("https://elasticsearch.example:9200", scheme="basic", reads=X.ELASTIC_READS[:1])
     refused = await scripted.put_system(ELASTIC, 0, settings=ELASTIC_SETTINGS, access=access)

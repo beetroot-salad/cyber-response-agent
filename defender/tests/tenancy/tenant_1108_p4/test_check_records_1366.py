@@ -483,7 +483,7 @@ CASE_ROUTE = ("POST", "/rest/*/comment")
 CASE_ADAPTER = (
     "from defender.kit import transport\n\n"
     "PREFIX = 'HELPDESK'\nREQUIRED_CONFIG_KEYS = ('TIMEOUT_SEC',)\nPATH_KEYS = ()\n"
-    "DISPLAY_NAME = 'Help desk'\nEXAMPLE = {}\n\n\n"
+    "DISPLAY_NAME = 'Help desk'\nEXAMPLE = {}\nREAD_ROUTES = ()\n\n\n"
     "def check_settings(tenant):\n"
     "    transport.check_settings_of(tenant, 'helpdesk', 'HELPDESK')\n\n\n"
     "def comment_route(settings):\n    return ('POST', '/rest/*/comment')\n\n\n"

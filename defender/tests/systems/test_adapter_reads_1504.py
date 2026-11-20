@@ -41,9 +41,7 @@ def test_1504_o1_the_catalog_reads_the_declared_reads_without_running_the_module
     assert tuple(getattr(catalog.entry("widget"), X.ENTRY_FIELD)) == (("POST", "/widgets/_find"),)
 
 
-# --- O2: a record's reads must be exactly its adapter's ---------------------------------------------------------------
-
-# --- O3: connect's validator prints the reads given only the system --------------------------------------------------
+# --- O4: connect's validator prints the reads given only the system --------------------------------------------------
 
 def _validate(*args: str) -> str:
     done = subprocess.run([sys.executable, "-m", "defender.skills.connect.validate_scaffold", *args], cwd=REPO,
@@ -54,9 +52,11 @@ def _validate(*args: str) -> str:
     return out
 
 
-def test_1504_o3_the_validator_prints_an_adapters_reads_given_only_the_system():
-    """Before `access.yaml` exists: `validate_scaffold elastic` with no folder prints each declared read (relative to
-    the base), so the agent can write them. (O3; the run's other rows, e.g. the unstaged tenant half, are not judged)"""
+def test_1504_o4_the_validator_prints_an_adapters_reads_given_only_the_system():
+    """Before `access.yaml` exists: `validate_scaffold <system>` with no folder prints every read that adapter declares, so
+    the agent can write them: both of Elastic's, and threat-intel's lookup. (O4)"""
     out = _validate("elastic")
-    rows = [line for line in out.splitlines() if all(X.shown(r) in line for r in X.ELASTIC_READS)]
-    assert rows, out
+    assert "elastic" in out.lower(), out
+    for route in X.ELASTIC_READS:
+        assert X.shown(route) in out, (route, out)
+    assert X.shown(X.THREAT_INTEL_READS[0]) in _validate("threat-intel")
