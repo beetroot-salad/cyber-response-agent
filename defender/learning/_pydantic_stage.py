@@ -5,13 +5,14 @@ import logging
 import functools
 from collections.abc import Callable
 from dataclasses import replace
-from typing import Any, ClassVar, Protocol
+from typing import Any, ClassVar, NamedTuple, Protocol
 
 from defender._text import is_content_less
 from defender.box import BoxOutputLimitExceeded
 from defender._exception_groups import carried
 from defender.learning.core.config import (
     FatalConfigError,
+    ReplyUnusable,
     RunUnprocessable,
     StageAbort,
     StageContext,
@@ -24,7 +25,9 @@ from defender._model_view import ModelView
 from defender.investigation.driver import MakeModel, build_agent_core
 
 from pydantic_ai import Agent
-from pydantic_ai.exceptions import UsageLimitExceeded
+from pydantic_ai import ModelRetry, TextOutput, ToolOutput, capture_run_messages
+from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
+from pydantic_ai.messages import ModelRequest, ModelResponse, RetryPromptPart
 from pydantic_ai.usage import UsageLimits
 from defender._io import read_text_utf8
 
@@ -84,13 +87,110 @@ def build_stage_agent(
     )
 
 
+class TypedOutput(NamedTuple):
+    """One typed call (#1579): the model answers through an output tool named `name` whose
+    arguments are described by `schema` (the shape only; `check` is the owner of validity).
+
+    `check(mapping)` returns to accept the tool's arguments, raises `pydantic_ai.ModelRetry(reason)`
+    to refuse them (the reason goes back to the model, inside the same call), and any other
+    exception is a host error. At most `retries` re-asks: the call sends at most 1 + `retries`
+    requests."""
+
+    name: str
+    description: str
+    schema: dict
+    check: Callable[[Any], None]
+    retries: int
+
+
+class Accepted(NamedTuple):
+    """A typed call's accepted reply and how many requests it took."""
+
+    mapping: dict
+    requests: int
+
+
+_CALL_THE_TOOL = "Plain text is not an answer: call the tool to give it."
+
+
 async def _drive(
-    agent: Agent[Any, str], user: str, deps: RoleDeps, request_limit: int, timeout: int
+    agent: Agent[Any, Any], user: str, deps: RoleDeps, request_limit: int, timeout: int,
+    **extra: Any,
 ):
     return await asyncio.wait_for(
-        agent.run(user, deps=deps, usage_limits=UsageLimits(request_limit=request_limit)),
+        agent.run(user, deps=deps, usage_limits=UsageLimits(request_limit=request_limit), **extra),
         timeout=timeout,
     )
+
+
+class _Typed:
+    """The state of one typed call: whether the check failed on the host, and the call's history."""
+
+    def __init__(self, spec: TypedOutput) -> None:
+        self.spec = spec
+        self.host_fault = False
+        self.history: list[Any] = []
+
+    def output_type(self) -> list[Any]:
+        from pydantic_ai import StructuredDict
+
+        args_type = StructuredDict(dict(self.spec.schema))
+
+        def answer(args):
+            try:
+                self.spec.check(args)
+            except ModelRetry:
+                raise
+            except BaseException:
+                self.host_fault = True
+                raise
+            return dict(args)
+
+        answer.__annotations__ = {"args": args_type, "return": dict}
+
+        def no_text(_text: str) -> dict:
+            raise ModelRetry(_CALL_THE_TOOL)
+
+        return [ToolOutput(answer, name=self.spec.name, description=self.spec.description),
+                TextOutput(no_text)]
+
+    async def drive(self, agent: Any, user: str, deps: Any, timeout: int):
+        bound = 1 + self.spec.retries
+        # The retry budgets are only a backstop: the request limit is the one bound, so every
+        # order of refusals ends the same way and the history ends with the last refusal.
+        budget = bound + 1
+        with capture_run_messages() as messages:
+            self.history = messages
+            return await _drive(
+                agent, user, deps, bound, timeout * bound,
+                output_type=self.output_type(),
+                retries={"tools": budget, "output": budget},
+            )
+
+    def responses(self) -> int:
+        return sum(1 for m in self.history if isinstance(m, ModelResponse))
+
+    def last_reason(self) -> str:
+        for message in reversed(self.history):
+            if isinstance(message, ModelRequest):
+                for part in message.parts:
+                    if isinstance(part, RetryPromptPart):
+                        return part.model_response()
+        return "no reason recorded"
+
+
+def _typed_ending(typed: _Typed, stage: str, label: str, e: BaseException) -> Exception:
+    responses = typed.responses()
+    if isinstance(e, (UsageLimitExceeded, UnexpectedModelBehavior)) and not typed.host_fault:
+        reason = typed.last_reason()
+        return ReplyUnusable(
+            f"{stage} ({label}) reply unusable after {responses} requests: {reason}",
+            reason=reason, requests=responses)
+    # A host fault in the check came after its request's response; any other failure (transport,
+    # provider, the wall clock) cut a request that was sent and has no response.
+    raised = RunUnprocessable(f"{stage} ({label}) failed: {e!r}")
+    raised.requests = responses if typed.host_fault else responses + 1
+    return raised
 
 
 def _last_response_is_empty_text(messages: list[dict]) -> bool:
@@ -119,9 +219,15 @@ def run_stage(
     require_output: bool = True,
     tools: Any = None,
     verbs: Any = None,
-) -> str:
+    output: TypedOutput | None = None,
+) -> str | Accepted:
     """Drive one in-process stage. `wiring` is how the stage is configured, `ctx` is what
-    this spawn is about."""
+    this spawn is about.
+
+    With `output`, the call is typed (#1579) and the runner alone owns its ending: it returns
+    `Accepted(mapping, requests)`, raises `ReplyUnusable` when the model's attempts ran out, or
+    `RunUnprocessable` for any other failure (transport, provider, timeout, a host error in
+    the check). Both carry `requests`."""
     label = wiring.label
     from defender.investigation.tools import AgentDeps
 
@@ -133,6 +239,7 @@ def run_stage(
     )
     logger.bind_ledger(observe.NO_LEDGER)  # a learning stage has its own charge and no spend ledger (#1377)
     _logger.info(f"step={label} engine=pydantic_ai model={wiring.model} effort={wiring.effort}")
+    typed = _Typed(output) if output is not None else None
     try:
         try:
             agent = build_stage_agent(
@@ -142,23 +249,30 @@ def run_stage(
             )
         except ValueError as e:
             raise FatalConfigError(f"{stage} ({label}) misconfigured: {e}") from e
-        result = asyncio.run(
-            _drive(agent, ctx.user, deps, ctx.request_limit, ctx.wall_clock_timeout)
-        )
-    except (TimeoutError, UsageLimitExceeded) as e:
-        if require_output and _last_response_is_empty_text(logger.messages):
-            raise RunUnprocessable(f"{stage} ({label}) returned empty output") from e
-        raise RunUnprocessable(f"{stage} ({label}) did not complete: {e!r}") from e
+        if typed is not None:
+            result = asyncio.run(typed.drive(agent, ctx.user, deps, ctx.wall_clock_timeout))
+        else:
+            result = asyncio.run(
+                _drive(agent, ctx.user, deps, ctx.request_limit, ctx.wall_clock_timeout)
+            )
     except (StageAbort, FatalConfigError):
         raise
     except Exception as e:
         if carried(e, BoxOutputLimitExceeded) is not None:
             raise
+        if typed is not None:
+            raise _typed_ending(typed, stage, label, e) from e
+        if isinstance(e, (TimeoutError, UsageLimitExceeded)):
+            if require_output and _last_response_is_empty_text(logger.messages):
+                raise RunUnprocessable(f"{stage} ({label}) returned empty output") from e
+            raise RunUnprocessable(f"{stage} ({label}) did not complete: {e!r}") from e
         if require_output and _last_response_is_empty_text(logger.messages):
             raise RunUnprocessable(f"{stage} ({label}) returned empty output") from e
         raise RunUnprocessable(f"{stage} ({label}) failed: {e!r}") from e
     finally:
         logger.close()
+    if typed is not None:
+        return Accepted(dict(result.output), typed.responses())
     out = str(result.output or "")
     if require_output and is_content_less(out):
         raise RunUnprocessable(f"{stage} ({label}) returned empty output")

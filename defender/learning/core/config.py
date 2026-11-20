@@ -412,7 +412,22 @@ class StageAbort(Exception):
 
 
 class RunUnprocessable(Exception):
-    pass
+    #: How many model requests the call sent before it failed, the failed one included (#1579
+    #: P5). 1 for a call that never counted them.
+    requests: int = 1
+
+
+class ReplyUnusable(Exception):
+    """A typed call (#1579) whose model could not produce a usable reply within its bound: every
+    attempt was refused. Not a `RunUnprocessable`: that stays for transport, provider and host
+    faults, so a host bug is never read as a model failure.
+
+    `reason` is the last refused attempt's; `requests` is how many the call sent."""
+
+    def __init__(self, message: str, *, reason: str, requests: int) -> None:
+        super().__init__(message)
+        self.reason = reason
+        self.requests = requests
 
 
 class RunAlreadyLive(Exception):
