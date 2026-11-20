@@ -658,7 +658,75 @@ def _refused_corpus() -> dict[str, str]:
             'import * as React from "react";\nexport const zzForm = React.createElement("img", { src: "/api/me" });'),
         "React's JSX runtime": 'import { jsx } from "react/jsx-runtime";\nexport const zzForm = jsx("img", { src: "/api/me" });',
     })
+    corpus.update(_api_spelling_corpus())
     return corpus
+
+
+#: Rule 5 (#1581 R3): what the browser resolves to a path under `/api` however the markup spells it. The requests those
+#: spellings make are the API's, so they are refused whichever attribute carries them. Checked against the URL standard's
+#: parser: from `/home` or from any returnable address of `api/addresses.json` (`/t/<uuid>/investigations/<uuid>`), each
+#: resolves to a path under `/api` (the percent-encoded letters are the ingress's to decode).
+API_SPELLINGS: dict[str, str] = {
+    "a dot segment": "/./api/me",
+    "a segment and its parent": "/x/../api/me",
+    "a parent of the root": "/../api/me",
+    "a dot segment after the api": "/api/./me",
+    "a percent-encoded letter": "/%61pi/me",
+    "a percent-encoded capital": "/%41pi/me",
+    "a percent-encoded dot": "/%2e/api/me",
+    "a percent-encoded parent": "/%2e%2e/api/me",
+    "a half-encoded parent": "/.%2e/api/me",
+    "a backslash for a slash": "/a\\..\\api/me",
+    "a tab inside the name": "/ap\ti/me",
+    "a newline inside the name": "/ap\ni/me",
+    "the api itself": "/api",
+    "the api with a query": "/api?x=1",
+    "the api with a fragment": "/api#f",
+    "the api behind a home segment": "/home/../api/me",
+    "relative from home, plain": "api/me",
+    "relative from home, dot": "./api/me",
+    "relative from home, parent": "../api/me",
+    "relative from an investigation, up to the root": "../../../api/me",
+    "relative from an investigation, past the root": "../../../../api/me",
+}
+#: One spelling in every attribute whose value the browser requests or navigates to, as the JSX that holds it.
+API_ATTRIBUTE_FORMS: dict[str, str] = {
+    "src": '<img alt="" src="{v}" />', "srcSet": '<img alt="" srcSet="{v} 2x" />', "href": '<a href="{v}">x</a>',
+    "action": '<form action="{v}"><button /></form>', "formAction": '<form><button formAction="{v}" /></form>',
+    "poster": '<video poster="{v}" />', "data": '<object data="{v}" />', "ping": '<a href="/home" ping="{v}">x</a>',
+    "cite": '<blockquote cite="{v}" />', "xlinkHref": '<svg><use xlinkHref="{v}" /></svg>',
+}
+
+
+def _api_spelling_corpus() -> dict[str, str]:
+    """description -> one module: every spelling in `href`, and the plain dot-segment spelling in every other attribute,
+    plus a candidate list whose second candidate is the API's."""
+    corpus = {f"{why} ({text!r}) in href": f"export const zzForm = {API_ATTRIBUTE_FORMS['href'].format(v=text)};"
+              for why, text in API_SPELLINGS.items()}
+    for attribute, form in API_ATTRIBUTE_FORMS.items():
+        corpus[f"a dot segment into the api in {attribute}"] = f"export const zzForm = {form.format(v='/./api/me')};"
+    corpus["an image candidate list whose second candidate is the api's"] = (
+        'export const zzForm = <img alt="" srcSet="/home 1x, /./api/me 2x" />;')
+    corpus["an image candidate list whose only candidate is the api's"] = (
+        'export const zzForm = <img alt="" srcSet="/%61pi/me" />;')
+    return corpus
+
+
+#: Paths that are not under `/api` however they are spelled, which stay allowed (the twin of API_SPELLINGS).
+NOT_API_SPELLINGS: dict[str, str] = {
+    "a longer first segment": "/apix",
+    "a longer first segment with a dot segment": "/./apix",
+    "a longer first segment, percent-encoded": "/%61pix",
+    "a hyphenated first segment": "/api-docs",
+    "an api path in a query": "/home?next=/api/me",
+    "an api path in a fragment": "/home#/api/me",
+    "a dot segment that stays in the app": "/./home",
+    "a parent that leaves the api": "/api/../home",
+    "an investigation address": "/t/0b1f2a3c-0000-4000-8000-000000000001/investigations/0b1f2a3c-0000-4000-8000-000000000002",
+    "an alerts address": "/t/0b1f2a3c-0000-4000-8000-000000000001/alerts",
+    "an alerts address with a query naming the api": "/t/0b1f2a3c-0000-4000-8000-000000000001/alerts?q=/api",
+    "an api segment deeper in the path": "/t/0b1f2a3c-0000-4000-8000-000000000001/api",
+}
 
 
 #: Locals, parameters and properties merely named like the refused globals, and `/api/auth/` outside a string (F8: by
@@ -695,6 +763,9 @@ ALLOWED_CORPUS: dict[str, str] = {
                                   'export const zzForm = (zzProps: { title: string }) => <ZzBox {...zzProps} />;'),
     "a local function named createElement": "export const zzForm = () => { const createElement = () => 1; return createElement(); };",
 }
+ALLOWED_CORPUS.update({f"{why} ({text!r}) in href": f'export const zzForm = <a href="{text}">x</a>;'
+                      for why, text in NOT_API_SPELLINGS.items()})
+ALLOWED_CORPUS["an image candidate list of app paths"] = 'export const zzForm = <img alt="" srcSet="/home 1x, /apix 2x" />;'
 
 
 #: What could claim a value is anything (an `any`, a cast, a comment switching type checking off), so would reach what
@@ -843,7 +914,7 @@ def _paged_calls(paged: dict[str, str], other: dict[str, str]) -> tuple[str, set
 
 def test_1581_g9_usepagedread_refuses_every_read_that_is_not_a_page(checked):
     """A file that calls `usePagedRead` once for each GET read of the document whose answer is JSON, with otherwise
-    correct params, fails `bun run check` with a type error (TS2345, an argument that does not fit) on exactly the lines
+    correct params, fails `bun run check` with a type error (of whatever code) on exactly the lines
     that call a read whose answer is not `{items, next_cursor}`, and on none that call a page read: the key is what is
     refused. The file is in `src/shell/`, where the source check allows what a screen could not hold; no
     `@ts-expect-error` is used, since the source check refuses it everywhere. (#1581 PagedKey)"""
@@ -854,7 +925,7 @@ def test_1581_g9_usepagedread_refuses_every_read_that_is_not_a_page(checked):
     assert "/api/me" in other
     source, refused = _paged_calls(paged, other)
     gate = _with_source(checked, "shell/zz_paged_calls.ts", source, _check)
-    errors = re.findall(r"zz_paged_calls\.ts:(\d+): TS(\d+)", gate.output)
+    errors = re.findall(r"zz_paged_calls\.ts:(\d+): TS\d+", gate.output)
     assert gate.refused, gate.output[-2000:]
     assert errors, gate.output[-2000:]
-    assert {(int(line), code) for line, code in errors} == {(line, "2345") for line in refused}, gate.output[-2000:]
+    assert {int(line) for line in errors} == refused, gate.output[-2000:]

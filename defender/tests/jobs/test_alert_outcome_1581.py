@@ -308,15 +308,23 @@ async def _step(dsn: str, read: Reader, store: Any, rng: random.Random, clock: C
                         raise result  # a deadlock or any other failure is a failure of the invariant
         elif op in {"cycle", "trio"}:
             # The life, or the three lives, then the same ending(s) for the twin alert of the other tenant (the alerts come in
-            # pairs, one per tenant), so both tenants hold the same outcomes at once about as often as not.
+            # pairs, one per tenant), so both tenants hold the same outcomes at once.
+            # The dispositions go round the five by turns (a trio's three lives take three of them), so every outcome is
+            # given to both twins again and again whatever the draws; only the stage a cycle ends in, which alert goes
+            # first and whether the twin follows are chance.
             first = rng.randrange(len(alerts))
-            endings: list[Ending] | None = None
-            for index in (first, first ^ 1) if rng.random() < 0.6 else (first,):
+            hits.hit("rounds")
+            turn = hits["rounds"] * 3
+            dispositions = [DISPOSITION_VALUES[(turn + n) % len(DISPOSITION_VALUES)] for n in range(3)]
+            stage = rng.choice(["completed"] * 7 + ["unparseable", "failed", "aborted"])
+            endings: list[Ending] | None = (
+                [("completed", d) for d in dispositions] if op == "trio" else [(stage, dispositions[0] if stage == "completed" else None)]
+            )
+            for index in (first, first ^ 1) if rng.random() < 0.8 else (first,):
                 tenant, alert_id = alerts[index]
                 if not [r for r in live if r[1] == alert_id]:
-                    lives = await _lives(dsn, store, read, rng, clock, tenant, alert_id, keys, len(alerts), hits, check,
+                    await _lives(dsn, store, read, rng, clock, tenant, alert_id, keys, len(alerts), hits, check,
                                          trio=op == "trio", endings=endings)
-                    endings = endings or lives
     except (Conflict, NotFound):
         pass  # a refused operation changes nothing: the invariant still has to hold
 

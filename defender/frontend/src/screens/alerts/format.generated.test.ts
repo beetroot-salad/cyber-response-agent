@@ -7,6 +7,12 @@
 // writing. Each part states a premise with a minimum count, so a generator that stops reaching the cases a wrong
 // formula differs on fails loudly instead of passing.
 //
+// The default run is deliberately small enough to be cheap, because the build tests run this suite many times: a
+// chosen set of zones (every kind of offset: whole hours, half and three-quarter hours, Lord Howe's half-hour change,
+// both hemispheres, zones that skip a day), every month and every hour, every century year and the years around 0 and
+// 10000, and the clock changes of those zones in 2025 (found once per file). `FORMAT_FULL=1` walks every instant, zone
+// and year the browser knows instead (minutes), for local use.
+//
 // The same parts run again under a default locale that differs from en-US in calendar (Buddhist), numbering system
 // (Thai digits) and month names (Thai), because O5 promises English months "whatever the browser's language" and O7's
 // reading depends on Latin digits in the Gregorian calendar. The runtime's own default stays en-US here, so the Thai
@@ -19,8 +25,10 @@ const DAY_MS = 86_400_000;
 const MINUTE_MS = 60_000;
 const HOUR_MS = 3_600_000;
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-/** Each part walks thousands of instants and zones: a test timeout that allows for it. */
-const SLOW = 120_000;
+/** The full walk takes minutes; the default run takes seconds. */
+declare const process: { readonly env: Readonly<Record<string, string | undefined>> };
+const FULL_RUN = process.env.FORMAT_FULL === "1";
+const SLOW = FULL_RUN ? 1_200_000 : 60_000;
 const THAI = "th-TH-u-ca-buddhist-nu-thai";
 
 // --- the oracles ---------------------------------------------------------------------------------------------------
@@ -118,17 +126,71 @@ function readAfter(text: string, zone: string): number | "invalid" {
 // --- how much each run covers --------------------------------------------------------------------------------------
 
 interface Scale {
-  /** Every nth zone of the browser's list is walked. */
-  readonly zoneStride: number;
+  /** The zones whose instants are refilled: all of the browser's, or the chosen ones. */
+  readonly zones: readonly string[];
+  /** The zones whose clock changes are tried: all of the browser's, or the chosen ones. */
+  readonly changeZones: readonly string[];
   /** Years whose 29 February is tried: every one, or the ones a leap rule can differ on. */
   readonly allYears: boolean;
+  /** The years whose whole month-and-day grid is tried. */
+  readonly gridYears: readonly number[];
+  /** Years of the dense UTC refill. */
+  readonly denseYears: readonly number[];
   /** Clock changes tried of each kind. */
   readonly changes: number;
 }
-const FULL: Scale = { zoneStride: 1, allYears: true, changes: 20 };
-const SAMPLE: Scale = { zoneStride: 12, allYears: false, changes: 4 };
-
 const ZONES = Intl.supportedValuesOf("timeZone");
+const known = (zones: readonly string[]): string[] => zones.filter((zone) => ZONES.includes(zone));
+
+/** Zones that differ in the ways a wrong formula does: northern and southern clock changes, half-hour and
+ * three-quarter-hour offsets, a 30-minute change (Lord Howe), a 45-minute offset (Kathmandu, Chatham), a date line
+ * crossing (Apia, Kiritimati), a zone that never changes (Tokyo, Kolkata) and UTC. */
+const CHOSEN = known([
+  "UTC",
+  "Europe/Paris",
+  "Europe/London",
+  "America/New_York",
+  "America/Havana",
+  "Australia/Lord_Howe",
+  "Australia/Sydney",
+  "Pacific/Auckland",
+  "Pacific/Chatham",
+  "America/St_Johns",
+  "America/Santiago",
+  "Asia/Kathmandu",
+  "Asia/Kolkata",
+  "Asia/Tokyo",
+  "Pacific/Apia",
+  "Pacific/Kiritimati",
+]);
+const CHOSEN_CHANGING = CHOSEN.filter((zone) => !["UTC", "Asia/Kolkata", "Asia/Tokyo"].includes(zone));
+
+const FULL: Scale = {
+  zones: ZONES,
+  changeZones: ZONES,
+  allYears: true,
+  gridYears: [0, 4, 100, 1900, 2000, 2024, 2100, 9999],
+  denseYears: [1000, 1583, 1900, 2000, 2100, 9000],
+  changes: 20,
+};
+const DEFAULT: Scale = {
+  zones: CHOSEN,
+  changeZones: CHOSEN_CHANGING,
+  allYears: false,
+  gridYears: [1900, 2000],
+  denseYears: [1000, 1900, 2000, 2100],
+  changes: 4,
+};
+/** The same, a little smaller: the second pass is under a default locale and needs only to see the locale leak. */
+const DEFAULT_THAI: Scale = {
+  ...DEFAULT,
+  zones: known(["UTC", "Europe/Paris", "Australia/Lord_Howe", "Asia/Kathmandu"]),
+  gridYears: [2000, 2100],
+  denseYears: [1900, 2000],
+  changes: 2,
+};
+/** What each part runs at: the full walk on request, the chosen sample otherwise. */
+const SCALE: Scale = FULL_RUN ? FULL : DEFAULT;
 
 // --- validity (O7): which field strings are a real date and time -----------------------------------------------------
 
@@ -154,7 +216,7 @@ function gridOf(year: number): Fields[] {
 }
 
 function validityCases(scale: Scale): Fields[] {
-  const years = scale.allYears ? [0, 4, 100, 1900, 2000, 2024, 2100, 9999] : [1900, 2000, 2024];
+  const years = scale.gridYears;
   return [
     ...leapYears(scale).map((year) => ({ ...midnight(year, 2, 29), hour: 12 })),
     ...years.flatMap((year) => gridOf(year)),
@@ -175,8 +237,8 @@ function checkValidity(scale: Scale): void {
   expect(wrong.slice(0, 10), `${wrong.length} field strings read differently from a real date`).toEqual([]);
   // premise: the strings that tell a leap rule apart (century years that are not leap, those divisible by 400) and
   // both answers are reached
-  expect(seen.century).toBeGreaterThanOrEqual(scale.allYears ? 70 : 8);
-  expect(seen.fourHundred).toBeGreaterThanOrEqual(scale.allYears ? 25 : 3);
+  expect(seen.century).toBeGreaterThanOrEqual(70);
+  expect(seen.fourHundred).toBeGreaterThanOrEqual(25);
   expect(seen.valid).toBeGreaterThan(1000);
   expect(seen.invalid).toBeGreaterThan(1000);
 }
@@ -197,8 +259,7 @@ function refillInstants(zoneIndex: number): number[] {
 }
 
 /** Every month of years that stress the calendar, at every hour, in UTC. */
-function denseInstants(): number[] {
-  const years = [1000, 1583, 1900, 2000, 2100, 9000];
+function denseInstants(years: readonly number[]): number[] {
   return years.flatMap((year) =>
     Array.from({ length: 12 * 24 }, (_, index) =>
       utcMs({ year, month: 1 + Math.floor(index / 24), day: 15, hour: index % 24, minute: 7, second: 0 }),
@@ -232,11 +293,10 @@ function refillOne(zone: string, ms: number, into: Refill): void {
 
 function checkRefill(scale: Scale): void {
   const into: Refill = { wrong: [], months: new Map(), hours: new Map(), exact: 0, total: 0 };
-  const zones = ZONES.map((zone, index) => [zone, index] as const).filter(
-    ([, index]) => index % scale.zoneStride === 0,
-  );
+  // the instants a zone gets depend on its place in the browser's list, as they always have
+  const zones = scale.zones.map((zone) => [zone, Math.max(0, ZONES.indexOf(zone))] as const);
   for (const [zone, index] of zones) refillInstants(index).forEach((ms) => refillOne(zone, ms, into));
-  denseInstants().forEach((ms) => refillOne("UTC", ms, into));
+  denseInstants(scale.denseYears).forEach((ms) => refillOne("UTC", ms, into));
   expect(into.wrong.slice(0, 10), `${into.wrong.length} instants did not refill`).toEqual([]);
   // premises: every month and every hour of the day is written, the single-digit ones included, and nearly every
   // instant reads back exactly (the repeated hour is the only exception)
@@ -265,7 +325,17 @@ function changeBetween(zone: string, before: number, low: number, high: number):
 }
 
 /** The zone's clock changes in `year`, found by comparing its offset at each noon UTC and narrowing to the minute. */
+const found = new Map<string, Change[]>();
 function changesIn(zone: string, year: number): Change[] {
+  const key = `${zone} ${year}`;
+  const cached = found.get(key);
+  if (cached !== undefined) return cached;
+  const changes = findChanges(zone, year);
+  found.set(key, changes);
+  return changes;
+}
+
+function findChanges(zone: string, year: number): Change[] {
   const start = utcMs({ ...midnight(year, 1, 1), hour: 12 });
   const offsets = Array.from({ length: 367 }, (_, day) => offsetOf(zone, start + day * DAY_MS));
   return offsets.flatMap((after, day) => {
@@ -279,10 +349,12 @@ function changesIn(zone: string, year: number): Change[] {
 const NAMED = ["Europe/Paris", "America/New_York", "Australia/Lord_Howe", "America/Havana", "Europe/London"];
 
 /** Up to `count` changes of the given kind, the named zones first and the rest spread over the browser's list. */
-function changesOfKind(forward: boolean, count: number): Change[] {
+function changesOfKind(forward: boolean, scale: Scale): Change[] {
+  const count = scale.changes;
   const wanted = (change: Change): boolean => change.delta > 0 === forward;
   const named = NAMED.flatMap((zone) => changesIn(zone, 2025).filter(wanted));
-  const rest = ZONES.filter((zone) => !NAMED.includes(zone)).flatMap((zone) => changesIn(zone, 2025).filter(wanted));
+  const others = named.length >= count ? [] : scale.changeZones.filter((zone) => !NAMED.includes(zone));
+  const rest = others.flatMap((zone) => changesIn(zone, 2025).filter(wanted));
   const stride = Math.max(1, Math.floor(rest.length / Math.max(1, count - named.length)));
   return [...named, ...rest.filter((_, index) => index % stride === 0)].slice(0, count);
 }
@@ -333,18 +405,30 @@ function labelOne(zone: string, fired: number, now: number, into: Labels): void 
     );
 }
 
-/** Every label from `now` back four days in half hours, for the nows an hour either side of each local midnight. */
-function labelsAround({ zone, at }: Change, into: Labels): void {
+/** The rows a label is tried on from one `now`. The full walk takes every half hour back about two days; the default
+ * takes the instants where a label can differ: either side of every local midnight in reach (the boundary of a day, an
+ * hour either way), the middle of each day, and a day and two days back from now (where a 24-hour shortcut stops
+ * agreeing with the calendar). */
+function firedFor(zone: string, now: number, at: number, full: boolean): number[] {
+  if (full) return Array.from({ length: 101 }, (_, back) => now - back * 30 * MINUTE_MS);
+  const half = 30 * MINUTE_MS;
+  const boundaries = midnightsAround(zone, at).flatMap((m) => [-2, -1, 0, 1, 2].map((k) => m + k * half));
+  const middles = midnightsAround(zone, at).map((m) => m + 12 * HOUR_MS);
+  const back = [0, 1, 2, 24 * 2, 24 * 2 + 1, 24 * 2 - 1, 48 * 2].map((k) => now - k * half);
+  return [...boundaries, ...middles, ...back].filter((fired) => fired <= now);
+}
+
+/** Every label from each `now` an hour either side of each local midnight. */
+function labelsAround({ zone, at }: Change, full: boolean, into: Labels): void {
   const nows = midnightsAround(zone, at).flatMap((m) => [m, m + 30 * MINUTE_MS, m - 30 * MINUTE_MS]);
-  for (const now of nows)
-    for (let back = 0; back <= 100; back++) labelOne(zone, now - back * 30 * MINUTE_MS, now, into);
+  for (const now of nows) for (const fired of firedFor(zone, now, at, full)) labelOne(zone, fired, now, into);
 }
 
 function checkLabels(scale: Scale): void {
   for (const forward of [true, false]) {
-    const changes = changesOfKind(forward, scale.changes);
+    const changes = changesOfKind(forward, scale);
     const into: Labels = { wrong: [], traps: 0 };
-    for (const change of changes) labelsAround(change, into);
+    for (const change of changes) labelsAround(change, scale === FULL, into);
     const kind = forward ? "23-hour (clocks forward)" : "25-hour (clocks back)";
     expect(into.wrong.slice(0, 10), `${into.wrong.length} labels wrong around ${kind} days`).toEqual([]);
     // premises: enough clock changes of this kind, and enough labels where "now less 24 hours" is the wrong "yesterday"
@@ -359,21 +443,21 @@ describe("the calendar arithmetic, over every instant, zone and clock", () => {
   it(
     "reads a field string as a time exactly when it is a real date (every year's 29 February among them)",
     () => {
-      checkValidity(FULL);
+      checkValidity(SCALE);
     },
     SLOW,
   );
   it(
     "writes every instant as the form's wall time and reads it back, in every zone, month and hour",
     () => {
-      checkRefill(FULL);
+      checkRefill(SCALE);
     },
     SLOW,
   );
   it(
     "labels the day by the zone's calendar around every kind of 23- and 25-hour day",
     () => {
-      checkLabels(FULL);
+      checkLabels(SCALE);
     },
     SLOW,
   );
@@ -423,21 +507,21 @@ describe("the same arithmetic when the browser's default locale is not en-US", (
   it(
     "reads a field string as a time exactly when it is a real date",
     () => {
-      checkValidity(SAMPLE);
+      checkValidity(DEFAULT_THAI);
     },
     SLOW,
   );
   it(
     "writes every instant as the form's wall time and reads it back",
     () => {
-      checkRefill(SAMPLE);
+      checkRefill(DEFAULT_THAI);
     },
     SLOW,
   );
   it(
     "labels the day by the zone's calendar, with English months",
     () => {
-      checkLabels(SAMPLE);
+      checkLabels(DEFAULT_THAI);
     },
     SLOW,
   );

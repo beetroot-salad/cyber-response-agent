@@ -13,7 +13,7 @@ import pytest
 
 from defender._vocab import DISPOSITION_VALUES
 from defender.tests.support.jobs._jobs1342 import NOW, T1, T2, register_tenant
-from defender.tests.support.jobs._outcome1581 import no_outcome, planned, spine
+from defender.tests.support.jobs._outcome1581 import alert_reads, no_outcome, planned
 from defender.tests.support.shared._postgres1339 import execute
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
@@ -45,7 +45,8 @@ async def test_o2_the_outcome_filter_reads_each_page_from_the_outcome_index_with
     migrated_database: str,
 ) -> None:
     """Over two tenants, `none` rare in the first (0.2%) and common in the second (10%), the statement for each of the six
-    `outcome` values, first page and a later one, is a read of `alerts_outcome_newest_first` and nothing sorts the page;
+    `outcome` values, first page and a later one, reads `jobs.alerts` by `alerts_outcome_newest_first` only, with no Sort between that read and the top Limit, however the
+    `latest_status` lookup is written;
     control: without the leading order the planner walks `alerts_newest_first` for the rare `none`. (O2 Performance, C8b)"""
     from defender.jobs import JobStore
 
@@ -58,7 +59,7 @@ async def test_o2_the_outcome_filter_reads_each_page_from_the_outcome_index_with
 
     [(control,)] = execute(dsn, "EXPLAIN (FORMAT JSON) SELECT id FROM jobs.alerts WHERE tenant_id = %s AND outcome IS NULL "
                                 "ORDER BY fired_at DESC, id DESC LIMIT 51", (T1,))
-    walked = [i for _, i in spine(control[0]["Plan"]) if i]
+    walked = [n.get("Index Name") for n, _ in alert_reads(control[0]["Plan"])]
     assert walked == [NEWEST_FIRST], f"control: with no leading order the planner walks the newest-first index for the rare none: {walked}"
 
     store = JobStore(dsn, clock=lambda: dt.datetime.fromtimestamp(NOW.timestamp(), dt.UTC))
@@ -71,9 +72,13 @@ async def test_o2_the_outcome_filter_reads_each_page_from_the_outcome_index_with
                     with planned(store) as plans:
                         await store.list_alerts(tenant, outcome=outcome, after=after, **PAGE)
                     assert len(plans) == 1, f"premise: one statement: {plans}"
-                    nodes = plans[0]
-                    where = f"tenant {tenant}, outcome {outcome!r}, after {after}: {nodes}"
-                    assert not [n for n, _ in nodes if "Sort" in n], where
-                    assert [i for _, i in nodes if i] == [OUTCOME_NEWEST_FIRST], where
+                    reads = alert_reads(plans[0])
+                    where = f"tenant {tenant}, outcome {outcome!r}, after {after}: {reads}"
+                    # the page is read from jobs.alerts once, by the outcome index, and the top Limit takes it with
+                    # nothing between that sorts: however the statement looks up each row's latest_status
+                    assert [n.get("Index Name") for n, _ in reads] == [OUTCOME_NEWEST_FIRST], where
+                    [(_, above)] = reads
+                    assert above[:1] == ("Limit",), where
+                    assert not [t for t in above if "Sort" in t], where
     finally:
         await store.close()

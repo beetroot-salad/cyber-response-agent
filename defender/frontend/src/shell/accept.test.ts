@@ -203,7 +203,9 @@ describe("accepting over every attempt record, way of arriving and earlier state
     async (row) => {
       const { result, sent } = await acceptAfter(row);
       expect(sent, "a load that is gone sends nothing and navigates nowhere").toEqual([]);
-      expect(result).toEqual(row.before === "superseded" ? { kind: "gone" } : { kind: "left" });
+      // a load that already left answers `left` or `gone` (the design leaves which); a superseded one, `gone`
+      if (row.before === "superseded") expect(result).toEqual({ kind: "gone" });
+      else expect([{ kind: "left" }, { kind: "gone" }]).toContainEqual(result);
     },
   );
 

@@ -529,6 +529,44 @@ def test_alert_list_o5_a_failed_later_page_keeps_the_rows_says_to_reload_and_is_
 LATER_FAILED = "Couldn't load more alerts. Reload the page to try again."
 
 
+#: Answers 200 with a JSON content type to a later page's read that are not a page of alerts (#1581 G8): not a
+#: `{items, next_cursor}` object, an `items` that is not a list, a `next_cursor` that is neither text nor null, an entry that
+#: is not an alert, and text that is not JSON at all.
+NOT_A_PAGE = {
+    "empty object": "{}", "null": "null", "an array": "[]", "a string": '"page"', "a number": "3",
+    "items a number": '{"items":3,"next_cursor":null}', "items an object": '{"items":{},"next_cursor":null}',
+    "items missing": '{"next_cursor":null}', "next_cursor missing": '{"items":[]}',
+    "next_cursor a number": '{"items":[],"next_cursor":7}',
+    "an entry null": '{"items":[null],"next_cursor":null}', "an entry a number": '{"items":[3],"next_cursor":null}',
+    "an entry an empty object": '{"items":[{}],"next_cursor":null}',
+    "an entry with mistyped fields": '{"items":[{"alert_id":5,"fired_at":7,"ticket":null}],"next_cursor":null}',
+    "html with a JSON type": "<html>", "an empty body with a JSON type": "",
+}
+
+
+@pytest.mark.parametrize("body", NOT_A_PAGE.values(), ids=NOT_A_PAGE.keys())
+def test_alert_list_o5_a_later_page_answered_200_with_a_body_that_is_not_a_page_is_that_pages_failure_never_thrown(
+        world, browser, body):
+    """The second page's read answered 200 with a body that is not a page of alerts: the screen shows exactly the rows of
+    page 1 (the same ones, in the same order), "Couldn't load more alerts. Reload the page to try again." once, no Load more,
+    and stays `ready` rather than the error screen. Design r3.1 (Flows, shell `usePagedRead`): a later page's failure,
+    fault included, is returned as that page's state and never thrown, so the rows already shown stay; and "A later page
+    that is not a page ... stays that page's state" (owner ruling: keep the Flows promise). (O5, G8)"""
+    _more(world, PAGE)
+    ctx = _signed_in(browser, world)
+    ctx.route(lambda u: path_is(u, READ) and "cursor=" in u,
+              lambda route: route.fulfill(status=200, content_type="application/json", body=body))
+    page = _open(world, ctx, ALERTS)
+    first = _rows(page)
+    assert len(first) == PAGE
+    page.locator('[data-action="load-more"]').click()
+    page.get_by_text(LATER_FAILED).wait_for()
+    settle(page)
+    assert _rows(page) == first
+    assert shown(page) == "alerts" and page.locator('[data-screen="alerts"]').first.get_attribute("data-state") == "ready"
+    assert page.get_by_text(LATER_FAILED).count() == 1 and page.locator('[data-action="load-more"]').count() == 0
+
+
 def _load_all_pages(page: Any) -> int:
     """Press Load more until it goes or a later page fails, waiting for each page; the number of presses."""
     presses = 0
@@ -571,15 +609,17 @@ def test_alert_list_o2_o5_o6_o7_every_set_of_filters_pages_to_exactly_its_rows_a
                 and ("fired_after" not in keys
                      or fired >= dt.datetime.fromisoformat(matching["fired_after"]).replace(tzinfo=paris))
                 and ("fired_before" not in keys
-                     or fired <= dt.datetime.fromisoformat(matching["fired_before"]).replace(tzinfo=paris))]
+                     or fired < dt.datetime.fromisoformat(matching["fired_before"]).replace(tzinfo=paris))]
         return [ticket for _, ticket in sorted(kept, reverse=True)]
 
     ctx = _signed_in(browser, world)
     first = _open(world, ctx, ALERTS)
-    names = first.locator('form[data-form="filters"] [name]').evaluate_all("els => els.map(e => e.name)")
+    controls = first.locator('form[data-form="filters"] [name]').evaluate_all("els => els.map(e => [e.name, e.type])")
     first.close()
-    fields = sorted(set(names) - {"tz"})
-    assert fields == sorted(matching), f"a filter field the test has no values for: {fields}"
+    names = {name for name, _ in controls}
+    fields = sorted(matching)
+    assert set(fields) <= names, f"the form lacks a control for a filter: {sorted(set(fields) - names)}"
+    assert ["tz", "hidden"] in controls, f"the form carries the zone as a hidden field: {controls}"
     subsets = [keys for size in range(1, len(fields) + 1) for keys in itertools.combinations(fields, size)]
     assert len(subsets) == 2 ** len(fields) - 1
     failures: list[str] = []

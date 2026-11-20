@@ -96,33 +96,34 @@ def statements(store: Any) -> Iterator[list[str]]:
         event.remove(engine, "before_cursor_execute", record)
 
 
-#: One node of a plan's main spine: (node type, index name or None).
-Node = tuple[str, str | None]
+#: One plan node as PostgreSQL's `EXPLAIN (FORMAT JSON)` writes it.
+PlanNode = dict[str, Any]
 
 
-def spine(plan: dict[str, Any]) -> list[Node]:
-    """The nodes of the plan's main line, from the root down through every child that is not a sub-plan: what reads and
-    orders the page itself, without the per-row lookups of the listed `latest_status`."""
-    nodes = [(plan["Node Type"], plan.get("Index Name"))]
+def alert_reads(plan: PlanNode, *, above: tuple[str, ...] = ()) -> list[tuple[PlanNode, tuple[str, ...]]]:
+    """Every node of the plan, at any depth and in any kind of child (a sub-plan, a lateral side, a join input), that reads
+    the `jobs.alerts` table (by its relation name and schema, whatever the alias), each with the node types on the path from
+    the root down to just above it: what reads the page and what sits between that read and the top, in whatever form the
+    listed `latest_status` lookup takes."""
+    found = [(plan, above)] if plan.get("Relation Name") == "alerts" and plan.get("Schema", "jobs") == "jobs" else []
     for child in plan.get("Plans", []):
-        if child.get("Parent Relationship") not in {"SubPlan", "InitPlan"}:
-            nodes += spine(child)
-    return nodes
+        found += alert_reads(child, above=(*above, plan["Node Type"]))
+    return found
 
 
 @contextlib.contextmanager
-def planned(store: Any) -> Iterator[list[list[Node]]]:
-    """For every `SELECT` `store`'s engine runs while the block runs, the spine of the plan PostgreSQL chooses for it, by an
-    `EXPLAIN` of the very statement with its parameters on the same connection."""
+def planned(store: Any) -> Iterator[list[PlanNode]]:
+    """For every `SELECT` `store`'s engine runs while the block runs, the plan PostgreSQL chooses for it, by an `EXPLAIN` of
+    the very statement with its parameters on the same connection."""
     from sqlalchemy import event
 
     engine = store._engine.sync_engine
-    seen: list[list[Node]] = []
+    seen: list[PlanNode] = []
 
     def explain(conn: Any, cursor: Any, statement: str, parameters: Any, context: Any, executemany: bool) -> None:
         if statement.lstrip().upper().startswith("SELECT"):
             cursor.execute("EXPLAIN (FORMAT JSON) " + statement, parameters)
-            seen.append(spine(cursor.fetchall()[0][0][0]["Plan"]))
+            seen.append(cursor.fetchall()[0][0][0]["Plan"])
 
     event.listen(engine, "before_cursor_execute", explain)
     try:
