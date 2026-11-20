@@ -70,6 +70,8 @@ export function readFilters(query: AddressQuery, viewerZone: string): Filters | 
   if (outcomeText !== "" && outcome === null) return INVALID;
   const zone = tz === "" ? viewerZone : tz;
   try {
+    // Both must know it: Temporal also reads an ISO date-time (`2026-01-01T00:00Z`) as its zone, which is not a zone.
+    new Intl.DateTimeFormat("en-US", { timeZone: zone });
     Temporal.Instant.fromEpochMilliseconds(0).toZonedDateTimeISO(zone);
   } catch (error) {
     if (error instanceof RangeError) return INVALID;
