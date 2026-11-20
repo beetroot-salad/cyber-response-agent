@@ -34,7 +34,7 @@ from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
-_FIELDS = {"status", "reason", "message", "fork_message_id", "stage", "findings_count", "sibling_cost_usd"}
+_FIELDS = {"status", "reason", "message", "fork_message_id", "stage", "sibling_cost_usd"}  # #1589: no findings count
 _GOOD_REPLY = J.as_reply_text(J.reply_doc(bucket="none", systems=[]))
 
 
@@ -135,7 +135,7 @@ def test_a_judge_verdict_that_grades_nothing_is_still_completed_with_the_word_in
     }[verdict]()
     ran = run_entry(tmp_path, spawn=spawn)
     end = _ended(ran, "completed", None)
-    assert end["findings_count"] == 0
+    assert "findings_count" not in end  # #1589
     assert verdict in (end["message"] or "")
     assert ran.judge.calls == 0, "a verdict that grades nothing still bought a judge call"
 

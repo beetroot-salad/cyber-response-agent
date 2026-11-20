@@ -139,7 +139,7 @@ investigations(investigation_id PK, tenant_id, alert_id FK, request_key, attempt
        created_at, started_at, finished_at, ...)
 
 learning_jobs(id PK, tenant_id, alert_id FK, investigation_id FK, request_key, attempt, trigger,
-       status, stage, fork_message_id, sibling_cost_usd, findings_count, publish_state,
+       status, stage, fork_message_id, sibling_cost_usd, publish_state,
        reason, message, created_at, started_at, finished_at, lease_expires_at)   -- §2.5 (#1344)
 ```
 
@@ -244,7 +244,6 @@ learning_jobs(
   trigger          auto | explicit,
   status           queued | running | completed | failed | skipped,
   stage, fork_message_id, sibling_cost_usd,   -- progress, copied from the job entry; never resumed from
-  findings_count,
   publish_state    none | done | refused,
   reason, message,                        -- a fixed reason word and our own sentence (O12)
   created_at, started_at, finished_at, lease_expires_at

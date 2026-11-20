@@ -174,15 +174,12 @@ _END_REASONS: dict[str, frozenset[str | None]] = {
     LEARNING_FAILED: frozenset(FAILED_BY_THE_ENTRY),
 }
 
-#: The largest findings count an end record may carry: what the row's `findings_count` column
-#: (a 32-bit `INTEGER`) holds. A larger one is no count, so the record is not one.
-MAX_FINDINGS_COUNT = 2**31 - 1
-
 _PROGRESS_FIELDS = frozenset({"fork_message_id", "stage", "sibling_cost_usd"})
-_END_FIELDS = frozenset({"status", "reason", "message", "fork_message_id", "stage",
-                         "findings_count", "sibling_cost_usd"})
+_END_FIELDS = frozenset({"status", "reason", "message", "fork_message_id", "stage", "sibling_cost_usd"})
 #: The end record's one optional field (#1487): the job's findings, which the envelope never looks inside.
 _FINDINGS_FIELD = "findings"
+#: The findings count an entry before #1589 still writes: accepted whatever its value, and never read.
+_OLD_COUNT_FIELD = "findings_count"
 
 
 def _optional_text(value: object) -> bool:
@@ -245,21 +242,20 @@ class LearningEnd:
     """The job entry's end record (`<runs>/<job id>.learning-end.json`), written create-only at
     every exit: the status and reason it decided (a reason only for `skipped` and `failed`, one
     of that status's own), a message from the entry's own code (required for `skipped` and
-    `failed`; never run text), and the final pick, stage, findings count and sibling cost.
+    `failed`; never run text), and the final pick, stage and sibling cost.
 
     `findings` (#1487) is the record's one optional field, the job's findings as the entry read
     them (`{state, text}`, `findings_of`): `None` when the record carries none. The envelope judges
     no field of it, so no shape of it makes the record unreadable (the record's one JSON nesting
     bound still covers it, as every record's does); the worker reads it after the
-    envelope, and only for a `completed` end. The envelope's own `findings_count` is the entry's
-    figure, which the worker does not copy (it counts the rows it stored)."""
+    envelope, and only for a `completed` end. A record from an entry before #1589 also carries a
+    `findings_count`, which is accepted whatever its value and ignored."""
 
     status: str
     reason: str | None
     message: str | None
     fork_message_id: str | None
     stage: str | None
-    findings_count: int = 0
     sibling_cost_usd: float = 0.0
     findings: Any = None
 
@@ -270,16 +266,12 @@ class LearningEnd:
         if not (_optional_text(self.message) and _optional_text(self.fork_message_id)
                 and _optional_text(self.stage) and _cost(self.sibling_cost_usd)):
             raise ValueError(f"not a learning end record: {self!r}")
-        if not isinstance(self.findings_count, int) or isinstance(self.findings_count, bool) \
-                or not 0 <= self.findings_count <= MAX_FINDINGS_COUNT:
-            raise ValueError(f"not a findings count: {self.findings_count!r}")
         if self.reason is not None and not (self.message or "").strip():
             raise ValueError(f"a {self.status} end names why in its message")
 
     def text(self) -> str:
         body: dict[str, Any] = {"status": self.status, "reason": self.reason, "message": self.message,
                                 "fork_message_id": self.fork_message_id, "stage": self.stage,
-                                "findings_count": self.findings_count,
                                 "sibling_cost_usd": self.sibling_cost_usd}
         if self.findings is not None:  # absent and null read alike: the field is written only when it says something
             body[_FINDINGS_FIELD] = self.findings
@@ -288,9 +280,11 @@ class LearningEnd:
     @classmethod
     def parse(cls, text: str) -> LearningEnd | None:
         """The record `text` holds, or `None` when it is not one the job entry could write: exactly
-        the envelope's fields, with or without `findings`, whose value is not looked at here."""
+        the envelope's fields, with or without `findings` and an older entry's `findings_count`, neither of whose
+        values is looked at here."""
         obj, unreadable = _io.load_json_artifact(text)
-        if unreadable is not None or not isinstance(obj, dict) or set(obj) - {_FINDINGS_FIELD} != _END_FIELDS:
+        if unreadable is not None or not isinstance(obj, dict) \
+                or set(obj) - {_FINDINGS_FIELD, _OLD_COUNT_FIELD} != _END_FIELDS:
             return None
         try:
             return cls(**{name: obj[name] for name in _END_FIELDS}, findings=obj.get(_FINDINGS_FIELD))
@@ -357,8 +351,8 @@ def findings_of(found: object) -> tuple[dict[str, Any] | None, str | None]:
 
 def findings_field(text: str | None) -> tuple[dict[str, Any], int]:
     """The end record's findings field for the findings `text` the entry built, and how many rows it holds (0 when it
-    refuses them; the entry's own count, which only a person reads: the worker counts the rows it stores), from one
-    parse: `{"state": "ok", "text": text}` when `parse_findings_text` accepts it, the worker's own check run first;
+    refuses them; the entry's own count, which only the job's message carries: the store's finish event names how many
+    rows its end added), from one parse: `{"state": "ok", "text": text}` when `parse_findings_text` accepts it, the worker's own check run first;
     `over_cap` over the cap; `malformed` for any other refusal, or for `text` None (a held row that was not one)."""
     if text is None:
         return {"state": FINDINGS_MALFORMED}, 0

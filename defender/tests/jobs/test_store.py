@@ -3170,8 +3170,8 @@ def _plant_queued(dsn: str, kind: str) -> str:
     parent = _plant_investigation(dsn, tenant=T1, alert_id=alert, key="k", attempt=1, stage="completed")
     job = str(uuid.uuid4())
     execute(dsn, "INSERT INTO jobs.learning_jobs (id, tenant_id, alert_id, investigation_id, request_key, attempt, trigger, "
-                 "status, created_at, sibling_cost_usd, findings_count, publish_state) "
-                 "VALUES (%s, %s, %s, %s, 'k-late', 1, 'explicit', 'queued', %s, 0, 0, 'none')", (job, T1, alert, parent, NOW))
+                 "status, created_at, sibling_cost_usd, publish_state) "
+                 "VALUES (%s, %s, %s, %s, 'k-late', 1, 'explicit', 'queued', %s, 0, 'none')", (job, T1, alert, parent, NOW))
     return job
 
 
@@ -3347,8 +3347,8 @@ def _plant_running_pair(dsn: str, investigation_ids: list[str], job_ids: list[st
         execute(dsn, "UPDATE jobs.investigations SET id = %s WHERE id = %s", (parent_id, parent))
         parent = parent_id
         execute(dsn, "INSERT INTO jobs.learning_jobs (id, tenant_id, alert_id, investigation_id, request_key, attempt, trigger, "
-                     "status, created_at, started_at, lease_expires_at, sibling_cost_usd, findings_count, publish_state) "
-                     "VALUES (%s, %s, %s, %s, 'k', 1, 'explicit', 'running', %s, %s, now() + interval '30 seconds', 0, 0, 'none')",
+                     "status, created_at, started_at, lease_expires_at, sibling_cost_usd, publish_state) "
+                     "VALUES (%s, %s, %s, %s, 'k', 1, 'explicit', 'running', %s, %s, now() + interval '30 seconds', 0, 'none')",
                 (job, T1, alert, parent, NOW, NOW))
 
 
