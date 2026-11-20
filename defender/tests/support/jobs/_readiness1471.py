@@ -177,12 +177,14 @@ def entry_of(scene: HelperScene, rid: str, done: Readied, *, roster: Any = None,
     return run
 
 
-def readiness(scene: HelperScene, *, signer: Any = None, docker: ContainerStandIn | None = None, rid: str | None = None,
+def readiness(  # noqa: PLR0913 — one keyword per seam the helper takes
+              scene: HelperScene, *, signer: Any = None, docker: ContainerStandIn | None = None, rid: str | None = None,
               container: Callable[[Any], int] | None = None, roster: Any = None, publish: Callable[..., str] | None = None,
-              defender_dir: Path | None = None) -> Readied:
+              defender_dir: Path | None = None, directory: Any = None) -> Readied:
     """The helper for a readiness check of the scene's tenant (kind `readiness`, job id `rid`), its container the real
     `readiness_main` unless `container(Container) -> rc` says otherwise. `publish` is the launch-time publish seam
-    (default: `fresh` at the published commit). `defender_dir`: the code tree the container entry reads. Never raises for the subject's absence: the caller reads `.result()`."""
+    (default: `fresh` at the published commit). `defender_dir`: the code tree the container entry reads. `directory`: the tenant records the helper is handed (`job_host.main(directory=)`),
+    passed only when given. Never raises for the subject's absence: the caller reads `.result()`."""
     rid = rid or str(uuid.uuid4())
     done = Readied(scene, rid, HelperRan(), ContainerStandIn(), "")
     stand_in = docker if docker is not None else ContainerStandIn()
@@ -195,6 +197,8 @@ def readiness(scene: HelperScene, *, signer: Any = None, docker: ContainerStandI
     stand_in.job = captured
     done.docker = stand_in
     seams: dict[str, Any] = {} if publish is None else {"publish": publish}
+    if directory is not None:
+        seams["directory"] = directory
     err = io.StringIO()
     with contextlib.redirect_stderr(err):
         done.ran = drive_helper(scene, scene.argv("readiness", rid), docker=stand_in,
@@ -204,6 +208,38 @@ def readiness(scene: HelperScene, *, signer: Any = None, docker: ContainerStandI
 
 
 # --- test-only doubles and planted trees ----------------------------------------------------------------------------
+
+class RestatingDirectory:
+    """The real Postgres `TenantDirectory` (as a production host process builds it from `DEFENDER_DATABASE_DSN`), delegating
+    everything; once `admission()` has answered `active` for the scene's tenant it restates the tenant to `state`, so the
+    next real read of the tenant's records refuses (an offboarding racing the check). Records what it was asked."""
+
+    def __init__(self, scene: HelperScene, *, state: str = "offboarding") -> None:
+        from defender import tenancy
+
+        self._real = tenancy.host_directory(None, check_version=lambda _dsn: None)
+        self._scene, self._state = scene, state
+        self.admitted_active = False
+        self.restated = False
+        self.records_asked: list[str] = []
+
+    def admission(self, tenant_id: Any) -> Any:
+        from defender.tests.support.jobs._jobs1342 import restate_tenant
+
+        answer = self._real.admission(tenant_id)
+        if answer[0] == "active" and not self.restated:
+            self.admitted_active = True
+            self.restated = True
+            restate_tenant(self._scene.dsn, self._scene.tenant, state=self._state, data_root=self._scene.root)
+        return answer
+
+    def current_records(self, tenant_id: Any) -> Any:
+        self.records_asked.append(str(tenant_id))
+        return self._real.current_records(tenant_id)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._real, name)
+
 
 class ExplodingDocker(ContainerStandIn):
     """A docker seam whose attached `docker run` raises a plain exception (not `OSError`, which the helper reads as a start

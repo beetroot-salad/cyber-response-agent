@@ -26,6 +26,7 @@ from defender.tests.support.jobs._readiness1471 import (
     readiness,
     requests_other_than,
     readiness_scene,
+    RestatingDirectory,
 )
 
 process_state = J.process_state
@@ -197,6 +198,37 @@ def test_p1_the_first_refusing_step_in_the_launch_order_is_the_result_and_nothin
         assert norm(a.needle) in norm(sentence)
         assert norm(b.needle) not in norm(sentence), f"the later fault was judged too: {sentence!r}"
         assert ran.docker.boxes == []
+
+
+def test_p1_r13_1_the_records_step_premise_an_investigation_of_a_tenant_that_leaves_active_after_admission_is_refused(
+        tmp_path, monkeypatch, migrated_database):
+    """The premise of the `records` case: a real investigation handed the same restating directory is refused naming the
+    tenant's state. (P-1, R13-1, owner decision: the step is tested)"""
+    with readiness_scene(tmp_path, monkeypatch, migrated_database) as scene:
+        directory = RestatingDirectory(scene)
+        inv = investigate(scene, directory=directory)
+        assert directory.admitted_active, "the investigation never admitted the tenant through the directory it was handed"
+        assert inv.refused, f"the investigation was not refused: {inv.end!r}\n{inv.err[-800:]}"
+        assert "offboarding" in norm(inv.err), f"the refusal does not name the tenant's state:\n{inv.err[-800:]}"
+
+
+def test_p1_r13_1_a_tenant_that_leaves_active_after_admission_reads_refused_at_the_records_step(
+        tmp_path, monkeypatch, migrated_database):
+    """An offboarding between admission and the records read is `refused` at `records`, no container, no knowledge record.
+    (P-1, R13-1, owner decision: the step is tested)"""
+    with readiness_scene(tmp_path, monkeypatch, migrated_database) as scene:
+        directory = RestatingDirectory(scene)
+        ran = readiness(scene, container=lambda c: 0, directory=directory)
+
+        assert directory.admitted_active, f"the helper never admitted the tenant through the directory it was handed: {ran.said()}"
+        assert directory.records_asked == [scene.tenant], f"the records were not read through the handed directory: {ran.said()}"
+        sentence = assert_refused_shape(ran.result(), "records")
+        assert "offboarding" in norm(sentence), f"the sentence does not name the tenant's state: {sentence!r}"
+        assert "not active" in norm(sentence), f"the sentence does not say the tenant is not active: {sentence!r}"
+        assert ran.docker.boxes == [], "a container was started for a tenant that left active"
+        assert ran.ran.raised is None
+        assert ran.ran.rc == 0, f"the helper serves a refusal to its end: {ran.said()}"
+        assert ran.knowledge is None, f"the records step is before the publish: {ran.knowledge!r}"
 
 
 def test_p3_a_database_outage_at_admission_reads_refused_at_the_tenant_step_never_failed(

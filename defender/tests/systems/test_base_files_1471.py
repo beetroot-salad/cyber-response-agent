@@ -166,9 +166,9 @@ def _shipping():
     return [e.adapter_id for e in _catalog().entries() if getattr(e, "base_files", None) is not None]
 
 
-@pytest.mark.parametrize("adapter", _shipping() or [pytest.param(None, marks=pytest.mark.skip("no catalog entry ships base files yet"))])
+@pytest.mark.parametrize("adapter", sorted({"elastic"} | set(_shipping())))
 def test_every_shipped_base_file_set_renders_and_passes_the_scaffold_check(tmp_path, adapter):
-    """Each catalog entry that ships base files renders for its own id and passes skill and template checks against its declared verbs. (A5, P-8)"""
+    """Elastic and every entry that ships base files render for their own id and pass the scaffold check against their declared verbs. (A5, P-8)"""
     entry = _catalog().entry(adapter)
     assert entry.base_files.is_dir()
     assert DEFENDER / "integrations" in entry.base_files.parents
@@ -178,6 +178,13 @@ def test_every_shipped_base_file_set_renders_and_passes_the_scaffold_check(tmp_p
     assert f"agent/skills/{adapter}/SKILL.md" in rendering
     assert scaffold_failures(tmp_path, rendering, adapter) == []
     assert not [p for p, d in rendering.items() if b"{system}" in d], "an unfilled system placeholder was shipped"
+
+
+def test_the_elastic_catalog_entry_declares_base_files_under_integrations():
+    """Owner decision (P-8): #1471 ships Elastic's base files, so `elastic` declares a folder under `defender/integrations`. (A5, P-8)"""
+    entry = _catalog().entry("elastic")
+    assert getattr(entry, "base_files", None) is not None, "elastic declares no base files"
+    assert DEFENDER / "integrations" in entry.base_files.parents
 
 
 def test_every_catalog_entry_declares_its_base_files():
