@@ -1,7 +1,7 @@
 // The load in React (#1540 Am-5, Am-7): the provider, and the hooks that are a screen's only way to the session, the
 // address, the server and the shell's actions. A screen has no other way to the network, storage or the address (PR2);
 // the screens' own compile and the source check enforce it (F8).
-import { useQueries, useQuery, type QueryClient } from "@tanstack/react-query";
+import { hashKey, useQueries, useQuery, type QueryClient } from "@tanstack/react-query";
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { valuesOf, type ShapeName, type ShapeValues } from "../addresses";
 import { isPageOf } from "./page";
@@ -171,7 +171,15 @@ function laterPageOf<K extends PagedKey>(key: K, body: ReadBody<K>): Page<ItemOf
  */
 export function usePagedRead<K extends PagedKey>(key: K, params: ReadParams<K>): PagedRead<K> {
   const { read, queryClient } = useShell();
-  const [cursors, setCursors] = useState<readonly string[]>([]);
+  // The cursors belong to the read they were minted for: under another key or params they are dropped, and the read
+  // starts again at its page 1 (#1598). Compared by value, as the query cache compares its keys.
+  const owner = hashKey([key, params]);
+  const [held, setHeld] = useState<{ readonly owner: string; readonly cursors: readonly string[] }>({
+    owner,
+    cursors: [],
+  });
+  if (held.owner !== owner) setHeld({ owner, cursors: [] }); // drawn again at once, before anything is read
+  const cursors = held.cursors;
   const pages = [params, ...cursors.map((cursor) => withCursor(params, cursor))];
   const results = useQueries(
     { queries: pages.map((page) => ({ queryKey: [key, page], queryFn: () => read(key, page) })) },
@@ -212,7 +220,10 @@ export function usePagedRead<K extends PagedKey>(key: K, params: ReadParams<K>):
     cursor === null
       ? null
       : () => {
-          setCursors((held) => (held.includes(cursor) ? held : [...held, cursor]));
+          // a press drawn for a read the hook has since left does nothing
+          setHeld((now) =>
+            now.owner !== owner || now.cursors.includes(cursor) ? now : { owner, cursors: [...now.cursors, cursor] },
+          );
         };
   return { first, items, later, more };
 }
