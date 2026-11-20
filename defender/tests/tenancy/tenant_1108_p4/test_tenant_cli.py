@@ -131,3 +131,104 @@ def test_1471_b3_check_folder_still_judges_a_folder(tmp_path, capsys):
     assert rc == 1, said
     assert "[tenant.py]" in said.err + said.out, said
     assert "stray.txt" in said.err + said.out, said
+
+
+@pytest.mark.parametrize("argv", [["--help"], *([c, "--help"] for c in sorted(KEPT_1470))], ids=lambda a: " ".join(a))
+def test_1470_o11_the_commands_help_text_names_no_removed_command(argv, capsys):
+    """`tenant.py --help` and `check --help` name no removed command (`update`, `propose` and `check <id>` included). (O11, B3)"""
+    with pytest.raises(SystemExit) as helped:
+        _cli().main(argv)
+    assert helped.value.code == 0
+    shown = capsys.readouterr().out
+    assert len(shown) > 100, "premise: help was printed"  # noqa: PLR2004
+    assert [line for line in shown.splitlines() if _NAMES_A_REMOVED_COMMAND.search(line)] == []
+
+
+_DEFENDER = __import__("pathlib").Path(__file__).resolve().parents[3]
+_SHIPPED_SUFFIXES = {".py", ".md", ".yaml", ".yml", ".txt", ".sh", ".toml", ".json"}
+_UPGRADE_NOTES = "## Upgrade from before"
+
+
+def _shipped_lines() -> list[tuple[str, int, str]]:
+    """Every line of shipped text under `defender/` (all but the tests, `docs/archive` and dependencies), less the sections an
+    `## Upgrade from before` heading opens (to the next `## `): the one place a removed command may be named."""
+    found = []
+    for path in sorted(_DEFENDER.rglob("*")):
+        rel = path.relative_to(_DEFENDER).as_posix()
+        if (not path.is_file() or path.is_symlink() or path.suffix not in _SHIPPED_SUFFIXES or rel.startswith("tests/")
+                or rel.startswith("docs/archive/")
+                or any(part in {".venv", "__pycache__", "node_modules"} for part in path.parts)):
+            continue
+        in_upgrade_notes = False
+        for number, line in enumerate(path.read_text("utf-8", errors="replace").splitlines(), 1):
+            if line.startswith("## "):
+                in_upgrade_notes = line.startswith(_UPGRADE_NOTES)
+            if not in_upgrade_notes:
+                found.append((rel, number, line))
+    return found
+
+
+def test_1470_o11_no_shipped_text_outside_the_upgrade_notes_names_a_removed_command():
+    """No refusal, skill, doc, help or code text under `defender/` names a removed subcommand, except in an
+    `## Upgrade from before` section. (O11)"""
+    lines = _shipped_lines()
+    assert len({rel for rel, _, _ in lines}) > 200, "premise: the scan reads the shipped tree"  # noqa: PLR2004
+    assert {"skills", "docs", "cli", "systems"} <= {rel.split("/")[0] for rel, _, _ in lines}, "premise: skills and docs too"
+    naming = [f"{rel}:{n}: {line.strip()[:120]}" for rel, n, line in lines if _NAMES_A_REMOVED_COMMAND.search(line)]
+    assert naming == []
+
+
+def _joined(node: Any) -> str:
+    """A string constant as a reader of the code sees it: implicit concatenation is already one constant in the tree; an
+    f-string's text parts are joined with `{}` where a value goes."""
+    import ast
+
+    if isinstance(node, ast.JoinedStr):
+        return "".join(v.value if isinstance(v, ast.Constant) and isinstance(v.value, str) else "{}" for v in node.values)
+    return node.value
+
+
+def _read_as_a_reader(rel: str, lines: list[str]) -> list[str]:
+    """The texts of one shipped file as a reader sees them, whitespace runs (line breaks included) collapsed: for Python
+    each string constant (implicit concatenation joined) and its comments run together; for anything else its prose,
+    the lines `_shipped_lines` keeps run together."""
+    import ast
+    import io
+    import tokenize
+
+    def collapse(text: str) -> str:
+        return " ".join(text.split())
+
+    source = "\n".join(lines)
+    if not rel.endswith(".py"):
+        return [collapse(source)]
+    tree = ast.parse(source)
+    inner = {id(v) for node in ast.walk(tree) if isinstance(node, ast.JoinedStr) for v in node.values}
+    texts = [collapse(_joined(node)) for node in ast.walk(tree) if id(node) not in inner and (
+        isinstance(node, ast.JoinedStr) or (isinstance(node, ast.Constant) and isinstance(node.value, str)))]
+    comments = [t.string.lstrip("#") for t in tokenize.generate_tokens(io.StringIO(source).readline)
+                if t.type == tokenize.COMMENT]
+    return [*texts, collapse(" ".join(comments))]
+
+
+def test_1470_o11_no_shipped_text_names_a_removed_command_across_a_wrapped_line_or_a_joined_string():
+    """Read as a reader sees it (a string's implicit concatenation joined, prose and comments with line breaks collapsed),
+    no shipped text outside the upgrade notes names a removed subcommand. (O11)"""
+    wrapped = ["run `python3 defender/cli/tenant.py", "catalog <id>`"]
+    joined = ['ERROR = ("the operator runs `tenant.py "', '        "delete-" "system`")']
+    assert [_NAMES_A_REMOVED_COMMAND.search(t) is not None for t in _read_as_a_reader("x.md", wrapped)] == [True], "premise"
+    assert any(_NAMES_A_REMOVED_COMMAND.search(t) for t in _read_as_a_reader("x.py", joined)), "premise: the join"
+    by_file: dict[str, list[str]] = {}
+    for rel, _, line in _shipped_lines():
+        by_file.setdefault(rel, []).append(line)
+    naming = [f"{rel}: ...{found.group(0)}..." for rel, lines in sorted(by_file.items())
+              for text in _read_as_a_reader(rel, lines) for found in _NAMES_A_REMOVED_COMMAND.finditer(text)]
+    assert naming == []
+
+
+def test_1470_o11_the_scan_skips_historical_docs_and_reads_the_rest_of_docs():
+    """`docs/archive` (historical, not shipped) is not scanned; the rest of `docs/` is. (O11)"""
+    files = {rel for rel, _, _ in _shipped_lines()}
+    assert not [rel for rel in files if rel.startswith("docs/archive/")]
+    assert any(rel.startswith("docs/") for rel in files)
+

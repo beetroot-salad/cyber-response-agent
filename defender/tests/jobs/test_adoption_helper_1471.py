@@ -91,29 +91,45 @@ def test_the_container_is_handed_the_tenant_the_system_and_the_rendering(scene, 
     assert rendering == EXPECTED
     assert facts["digest"] == base_files.digest(rendering)
     assert _record(scene, job_id) is None, "the helper wrote a result record of its own for a job that was handed over"
+    from defender.tests.support.shared._postgres1339 import execute
+
+    [(repo, origin)] = execute(scene.dsn, "SELECT repo, origin FROM tenancy.forge_wiring WHERE tenant_id = %s", (scene.tenant,))
+    assert origin, "premise: the scene records forge wiring for the tenant"
+    assert (facts["forge_origin"], facts["forge_repo"]) == (origin, repo), "the launch facts carry the tenant's recorded wiring (surface s4)"
+
+
+def test_the_container_is_started_on_the_adoption_entry_for_this_job_and_tenant(scene, checkout):
+    """The job container's command is `-m defender.adoption --job <id> --tenant <T>`. (surface s4 table)"""
+    job_id = str(uuid.uuid4())
+    _, docker, _ = _run(scene, job_id, SYSTEM, lambda c: (c.request("launch"), 0)[1])
+    assert docker.boxes, "premise: the container never started (the adoption kind is not served)"
+    assert docker.box.argv[-6:] == ["-m", "defender.adoption", "--job", job_id, "--tenant", scene.tenant], docker.box.argv
 
 
 # --- what the helper refuses to do (N-A1) -------------------------------------------------------------------------------------
 
-@pytest.mark.parametrize(("request_name", "fields"), [
-    ("pass", {"id": "<job>"}),
-    ("box.start", {"kind": "shell", "id": "<job>"}),
-    ("batch.start", {"lanes": ["lessons"]}),
-    ("record.published", {"commit": "0123456789abcdef0123456789abcdef01234567"}),
-    ("record.refusal", {"kind": "transient", "reason": "x"}),
-    ("export.materialise", {"commit": "0123456789abcdef0123456789abcdef01234567"}),
-    ("copy.make", {"world": "b"}),
-])
-def test_an_adoption_helper_answers_launch_and_forge_token_and_nothing_else(scene, checkout, request_name, fields):
-    """`launch` and `forge.token` are answered (positive controls); no pass, box, batch, record write or export is, and a refusal changes nothing. (N-A1, R13-1)"""
-    job_id, got = str(uuid.uuid4()), {}
+ADOPTION_ANSWERS = {"launch", "forge.token"}
+
+
+def test_an_adoption_helper_answers_launch_and_forge_token_and_nothing_else(scene, checkout):
+    """The kind's row of C4, generated from the helper's own registry: `launch` and `forge.token` are the only requests answered to an adoption
+    job, and every other registered request name is refused `not-for-kind`, signing, minting and starting nothing. (N-A1, R13-1)"""
+    from defender.job_host._main import registry
+
+    names = {name for name, _kind in registry().handlers}
+    assert names >= ADOPTION_ANSWERS
+    answered = {name for name, kind in registry().handlers if kind == "adoption"}
+    assert answered == ADOPTION_ANSWERS, f"the adoption kind answers {sorted(answered)}"
+    job_id, got = str(uuid.uuid4()), {"refusals": {}}
     signer, forge, docker = make_signer(), ForgeCredentialRecorder(), None
 
     def job(c) -> int:
         got["launch"] = c.request("launch")
         got["token"] = c.request("forge.token", min_validity=60)
         got["before"] = (len(signer.payloads), len(forge.asked), len(docker.creates()))
-        got["refusal"] = c.refused(request_name, **{k: (job_id if v == "<job>" else v) for k, v in fields.items()})
+        for name in sorted(names - ADOPTION_ANSWERS):
+            refusal = c.refused(name)
+            got["refusals"][name] = refusal.code
         got["after"] = (len(signer.payloads), len(forge.asked), len(docker.creates()))
         return 0
 
@@ -124,12 +140,11 @@ def test_an_adoption_helper_answers_launch_and_forge_token_and_nothing_else(scen
     assert ran.raised is None
     assert docker.job_error is None, (ran.raised, docker.job_error)
     assert "launch" in got, f"premise: the container never ran (the helper's rc {ran.rc!r}): the adoption kind is not served"
-    assert got["launch"]
     assert got["token"].get("token"), "control: the kind's own requests were refused"
     assert forge.built == [scene.tenant]
     assert forge.asked, "the forge credential is the tenant's own, minted by the helper"
-    assert got["refusal"] is not None
-    assert got["after"] == (got["before"][0], got["before"][1], got["before"][2]), "a refused request signed, minted or started something"
+    assert got["refusals"] == {name: "not-for-kind" for name in names - ADOPTION_ANSWERS}
+    assert got["after"] == got["before"], "a refused request signed, minted or started something"
     assert not signer.payloads, "an adoption was handed a pass"
 
 
@@ -189,3 +204,15 @@ def test_the_helper_refuses_an_adoption_with_no_system_named(scene, checkout):
     ran = drive_helper(scene, scene.argv("adoption", str(uuid.uuid4())), docker=docker, signer=make_signer(), forge=ForgeCredentialRecorder())
     assert ran.rc not in (0, None) or ran.raised is not None
     assert not docker.boxes
+
+
+def test_a_runs_folder_holding_the_helpers_failure_record_still_lists(scene, checkout):
+    """The helper's own `.adoption.json` (a vanished system) is an accepted sidecar: the tenant's runs listing succeeds and names no run. (R13-1.7)"""
+    from defender import tenancy
+    from defender._paths import process_defender_dir
+
+    job_id = str(uuid.uuid4())
+    _run(scene, job_id, "ghost-system")
+    assert _record(scene, job_id) == {"outcome": "failed", "reason": "system_gone"}, "premise: the helper wrote its record"
+    accepted = tenancy.accept_tenant(tenancy.resolve_data_root(), scene.tenant, defender_dir=process_defender_dir(), clone_tree=False)
+    assert [str(r) for r in accepted.runs_repository().list()] == []

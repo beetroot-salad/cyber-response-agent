@@ -137,6 +137,20 @@ async def test_r13_1_5_each_kind_is_launched_with_its_own_command_and_the_reques
     assert [host_row(world["dsn"], i)["stage"] for i in (r.request_id, a.request_id)] == ["completed", "completed"]
 
 
+def test_r13_6_the_real_argv_functions_build_the_helpers_command_for_each_kind():
+    """`readiness_argv` and `adoption_argv` give exactly the helper command of surface §4, `--system` for adoption only.
+    (R13-6, surface §4)"""
+    import sys
+
+    from defender.worker import AdoptionLaunch, ReadinessLaunch, adoption_argv, readiness_argv
+
+    base = [sys.executable, "-m", "defender.job_host"]
+    assert readiness_argv(ReadinessLaunch("req-1", T1, 4242)) == [
+        *base, "--kind", "readiness", "--job", "req-1", "--tenant", T1, "--parent-pid", "4242"]
+    assert adoption_argv(AdoptionLaunch("req-2", T1, 4242, SYSTEM)) == [
+        *base, "--kind", "adoption", "--job", "req-2", "--tenant", T1, "--system", SYSTEM, "--parent-pid", "4242"]
+
+
 # --- readiness validation -----------------------------------------------------------------------------------------------
 
 @pytest.mark.parametrize("step", STEPS_WITHOUT_KNOWLEDGE)

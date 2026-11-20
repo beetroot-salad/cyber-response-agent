@@ -24,6 +24,7 @@ from defender.tests.support.jobs._readiness1471 import (
     listed_runs,
     norm,
     readiness,
+    requests_other_than,
     readiness_scene,
 )
 
@@ -67,6 +68,10 @@ def _only_elastic_queries(d: dict[str, Any]) -> None:
     d["tacit-knowledge"] = {"health-check": {"roles": ["gather"]}}
 
 
+def _correlation_names_two_queries(d: dict[str, Any]) -> None:
+    d["elastic"]["esql"] = {"roles": ["gather", "lead-zero-correlation"]}
+
+
 def _withheld_without_reason(d: dict[str, Any]) -> None:
     d["cmdb"]["list-roles"] = {"roles": []}
 
@@ -103,6 +108,8 @@ FAULTS: dict[str, Fault] = {
                                     files={"settings/verb-grants.yaml": grants_text(_only_health_checks)}),
     "withheld_without_reason": Fault("run_tenant", "gives no reason",
                                      files={"settings/verb-grants.yaml": grants_text(_withheld_without_reason)}),
+    "correlation_two_query_pairs": Fault("run_tenant", "query verbs",
+                                         files={"settings/verb-grants.yaml": grants_text(_correlation_names_two_queries)}),
     "every_query_grant_ignored": Fault("tenant_verdict", "were ignored", records=_disable_elastic,
                                        files={"settings/verb-grants.yaml": grants_text(_only_elastic_queries)}),
     "damaged_kept_export": Fault("knowledge_copy", "could not be copied", prepare=_damaged_export),
@@ -258,6 +265,53 @@ def test_r3_a_stale_publish_over_a_published_copy_is_no_refusal_and_its_knowledg
         assert ran.record is None, "the helper writes no result record when it serves the job to its container"
 
 
+# --- the publish trigger: the seam is told who asked, and the child's argv carries it ------------------------------------
+
+def _recording_publish(seen: list[dict[str, Any]], commit: str) -> Callable[..., str]:
+    from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
+
+    def publish(*_a: Any, **k: Any) -> str:
+        seen.append(k)
+        return B.fresh(commit)
+    return publish
+
+
+def test_p2_the_launch_time_publish_is_told_its_trigger_readiness_for_a_check_and_launch_time_publish_for_an_investigation(
+        tmp_path, monkeypatch, migrated_database):
+    """The publish seam is called with `trigger="readiness"` by the readiness helper and `"launch-time publish"` by an
+    investigation's, so a readiness publish is recorded as one. (P-2, design §6 Publish trigger)"""
+    with readiness_scene(tmp_path, monkeypatch, migrated_database) as scene:
+        inv_seen: list[dict[str, Any]] = []
+        investigate(scene, publish=_recording_publish(inv_seen, scene.t.commit))
+        assert len(inv_seen) == 1, f"premise: an investigation's launch publishes once: {inv_seen}"
+        assert [k.get("trigger") for k in inv_seen] == ["launch-time publish"], inv_seen
+        seen: list[dict[str, Any]] = []
+        ran = readiness(scene, publish=_recording_publish(seen, scene.t.commit), container=lambda c: 0)
+
+        assert ran.docker.job_ran, ran.said()
+        assert [k.get("trigger") for k in seen] == ["readiness"], seen
+
+
+@pytest.mark.parametrize("trigger", ["readiness", "launch-time publish"])
+def test_p2_the_publish_child_is_handed_the_trigger_it_was_launched_with(tmp_path, trigger):
+    """The launcher's child argv carries the trigger handed in, as its own token or a flag's value, and no other. (P-2)"""
+    from defender.investigation.publish_launch import launch_publish
+
+    argvs: list[list[str]] = []
+
+    def spawn(argv: list[str], **_k: Any) -> Any:
+        argvs.append(list(argv))
+        raise OSError("no child in this test")
+
+    launch_publish("trigger-tenant", data_root=tmp_path, trigger=trigger, spawn=spawn)
+
+    assert len(argvs) == 1, argvs
+    carried = {t.split("=", 1)[-1] for t in argvs[0]}
+    other = ({"readiness", "launch-time publish"} - {trigger}).pop()
+    assert trigger in carried, f"the child's argv does not carry the trigger {trigger!r}: {argvs[0]}"
+    assert other not in carried, argvs[0]
+
+
 # --- R13-1.2: the knowledge record --------------------------------------------------------------------------------------
 
 def test_r13_1_2_the_helper_writes_the_knowledge_record_for_the_source_it_settled_before_its_container_starts(
@@ -364,10 +418,10 @@ def test_r12_1_the_first_read_pass_is_signed_once_under_the_readiness_id_and_thr
 
 @pytest.mark.parametrize("proxied", [("identity",), ()], ids=["grant", "no-grant"])
 @pytest.mark.parametrize("missing", ["no proxy address", "no sign login"])
-def test_r12_1_c9_signing_configuration_is_always_checked_and_its_sentence_is_true_with_no_proxied_system(
+def test_r12_1_c9_signing_configuration_is_always_checked_and_its_sentence_never_says_a_system_is_reached_through_the_proxy(
         tmp_path, monkeypatch, migrated_database, missing, proxied):
-    """No proxy address, or no sign login for the live generation, reads `refused` at `signing` whatever the grant; a
-    tenant with no proxied system is not told a system is reached through the proxy. (R12-1, W5, C9)"""
+    """No proxy address, or no sign login for the live generation, reads `refused` at `signing` whatever the grant; the
+    sentence never says "a system is reached through the credential proxy", proxied system or none. (R12-1, W5, C9)"""
     from defender.kit.access import PROXY_URL_ENV
     from defender.tests.support.shared._postgres1339 import execute
 
@@ -381,8 +435,7 @@ def test_r12_1_c9_signing_configuration_is_always_checked_and_its_sentence_is_tr
         ran = readiness(scene, container=lambda c: 0)
 
         sentence = assert_refused_shape(ran.result(), "signing")
-        if not proxied:
-            assert "a system is reached through the credential proxy" not in sentence, sentence
+        assert "a system is reached through the credential proxy" not in sentence, sentence
         assert "sign" in norm(sentence) or PROXY_URL_ENV in sentence, sentence
         assert ran.docker.boxes == []
 
@@ -392,18 +445,20 @@ def test_r12_1_c9_signing_configuration_is_always_checked_and_its_sentence_is_tr
 def test_c4_a_readiness_container_is_started_for_readiness_is_answered_launch_alone_and_is_handed_the_records(
         tmp_path, monkeypatch, migrated_database):
     """The container's command is the readiness entry for this id; its facts are kind `readiness` for this tenant and id
-    with the commit and records read; every request beyond `launch` is refused for the kind. (C4, R13-1.3, P-1)"""
+    with the commit and records read; every request the helper registers beyond `launch` (read from its registry) is
+    refused for the kind. (C4, R13-1.3, P-1)"""
     from defender import job_host
     from defender.tenancy.record_values import TenantRecords
 
     with readiness_scene(tmp_path, monkeypatch, migrated_database) as scene:
         rid, refusals = str(uuid.uuid4()), {}
+        others = requests_other_than(("launch",))
+        assert {"box.start", "pass", "pass.write_back"} <= set(others), f"premise: the registry's requests: {others}"
 
         def container(c: Any) -> int:
-            for name, fields in (("box.start", {"kind": "shell", "id": rid}), ("pass", {"id": rid}),
-                                 ("pass.write_back", {"id": rid, "ask": "x"})):
+            for name in others:
                 try:
-                    refusals[name] = ("answered", c.request(name, **fields))
+                    refusals[name] = ("answered", c.request(name))
                 except job_host.Refused as refused:
                     refusals[name] = ("refused", refused.code)
             return 0
@@ -423,7 +478,7 @@ def test_c4_a_readiness_container_is_started_for_readiness_is_answered_launch_al
         assert facts["export_commit"] == scene.t.commit
         assert Path(facts["run_copy"]) == scene.root / scene.tenant / "run-knowledge" / rid
         assert set(TenantRecords.handed(facts).systems) == set(J.proxied_records(("identity", "ticket")).systems)
-        assert refusals == {name: ("refused", "not-for-kind") for name in ("box.start", "pass", "pass.write_back")}, refusals
+        assert refusals == {name: ("refused", "not-for-kind") for name in others}, refusals
 
 
 # --- R13-1.2: the helper's own failures -----------------------------------------------------------------------------------
@@ -500,23 +555,25 @@ def test_p1_a_check_runs_each_tenant_level_launch_step_once_in_the_helper_and_no
             "the helper left more than its knowledge record in the runs folder")
 
 
-def test_p2_a_tenant_value_with_markup_and_quotes_yields_a_well_formed_record_of_exactly_its_shape(
+MARKUP = '<img src=x onerror="alert(1)">&'
+
+
+def test_p2_d7_a_tenant_value_with_markup_and_quotes_reaches_the_refusal_sentence_verbatim_in_one_well_formed_record(
         tmp_path, monkeypatch, migrated_database):
-    """A refusal quoting a tenant's own text (D7), here a grant table row naming a system with markup and quotes, is
-    still one valid JSON record of the refused shape: the sentence is ours, and escaping is for the page. (P-2, D7)"""
+    """A grant table naming a system `<img ...>&` is refused at `run_tenant` by a sentence quoting that name verbatim (ours,
+    unescaped: escaping is the page's), stored as one valid JSON record of the refused shape. (P-2, D7)"""
     import json
 
     def edit(d: dict[str, Any]) -> None:
-        _only_health_checks(d)
-        d['<img src=x onerror="alert(1)">&'] = {"query": {"roles": ["gather"]}}
+        d[MARKUP] = {"query": {"roles": ["gather"]}}
 
     with readiness_scene(tmp_path, monkeypatch, migrated_database,
                          files={"settings/verb-grants.yaml": grants_text(edit)}) as scene:
         inv = investigate(scene)
         assert inv.refused, f"premise: the table was not refused: {inv.end!r}\n{inv.err[-500:]}"
+        assert MARKUP in inv.err, f"premise: the investigation's refusal quotes the value: {inv.err[-500:]}"
         ran = readiness(scene, container=lambda c: 0)
         ran.result()
         record = json.loads(ran.record_path.read_text(encoding="utf-8"))
-        assert_refused_shape(record, record["step"])
-        assert record["step"] in ("tenant", "run_tenant", "tenant_verdict", "roster")
-
+        sentence = assert_refused_shape(record, "run_tenant")
+        assert MARKUP in sentence, f"the tenant's value does not reach the sentence verbatim: {sentence!r}"

@@ -247,11 +247,14 @@ def test_r13_3_a_withheld_verb_with_no_reason_is_the_launchs_refusal_not_a_censu
         assert "no reason" in norm(sentence)
 
 
-def test_p2_a_tenant_value_with_markup_in_a_warning_leaves_one_well_formed_record(
+VALUE = '<script>alert("x")</script>&'
+
+
+def test_p2_d7_a_tenant_value_with_markup_in_a_warning_reaches_its_sentence_verbatim_in_one_well_formed_record(
         tmp_path, monkeypatch, migrated_database):
     """The feedback setting quoting `<script>` text is stored as our sentence in valid JSON of exactly the ready shape;
     escaping is the page's. (P-2, D7)"""
-    files = {"settings/feedback.yaml": "open_issue_on: ['<script>alert(\"x\")</script>&']\n"}
+    files = {"settings/feedback.yaml": f"open_issue_on: ['{VALUE}']\n"}
     with readiness_scene(tmp_path, monkeypatch, migrated_database, proxied=ALL, files=files) as scene:
         ran = readiness(scene)
         ran.result()
@@ -259,6 +262,8 @@ def test_p2_a_tenant_value_with_markup_in_a_warning_leaves_one_well_formed_recor
         assert set(record) == {"outcome", "warnings"}
         assert record["outcome"] == "ready", ran.said()
         assert [w["kind"] for w in record["warnings"]] == ["feedback_setting"]
+        assert VALUE in record["warnings"][0]["sentence"], (
+            f"the tenant's value does not reach the warning's sentence verbatim: {record['warnings']}")
 
 
 # --- W8: the case verdict --------------------------------------------------------------------------------------------

@@ -17,6 +17,7 @@ from defender.tests.support.jobs._host_requests1471 import (
     KNOWLEDGE,
     NO_BASE_FILES,
     READINESS,
+    READY_RESULT,
     SHIPS_BASE_FILES,
     adopted,
     host_child,
@@ -247,8 +248,7 @@ async def test_r2_a_poll_for_another_tenants_other_kinds_or_unknown_id_is_404(sc
     """404 for an unknown id, for the other kind's id, and for another tenant's id (under its own path and under A's); 422 for
     a malformed id; the right id is 200. (R2, A2)"""
     other = "adoption" if kind == "readiness" else "readiness"
-    mine = plant(scripted.dsn, A, kind, system=TICKET if kind == "adoption" else None, stage="completed",
-                 result={"outcome": "nothing_to_adopt", "pr_number": None} if kind == "adoption" else None)
+    mine = plant(scripted.dsn, A, kind, system=TICKET if kind == "adoption" else None, stage="completed")
     theirs = plant(scripted.dsn, B, kind, system=TICKET if kind == "adoption" else None)
     assert (await poll(scripted, kind, mine)).status_code == 200
     assert (await poll(scripted, kind, UNKNOWN)).status_code == 404
@@ -293,7 +293,7 @@ async def test_r13_2_credential_presence_is_asked_on_completed_polls_only_and_li
 
     assert (await scripted.put_system(TICKET, 0)).status_code == 201
     assert (await scripted.put_system(ELASTIC, 0, settings=ELASTIC_SETTINGS, access=ELASTIC_ACCESS, enabled=False)).status_code == 201
-    done = plant(scripted.dsn, A, "readiness", stage="completed", result={"outcome": "ready"})
+    done = plant(scripted.dsn, A, "readiness", stage="completed")
     others = [plant(scripted.dsn, A, "readiness"), plant(scripted.dsn, A, "readiness", stage="running"),
               plant(scripted.dsn, A, "readiness", stage="failed", reason="no_record", message="m")]
     scripted.scripted.calls.clear()
@@ -308,7 +308,7 @@ async def test_r13_2_credential_presence_is_asked_on_completed_polls_only_and_li
 async def test_r13_2_a_completed_poll_when_the_secret_store_cannot_answer_is_503_and_other_polls_still_answer(scripted):
     """Sealed: a completed poll is 503 naming the secret store; a queued, running or failed one is 200. Unsealed, 200. (R2, C7)"""
     assert (await scripted.put_system(TICKET, 0)).status_code == 201
-    done = plant(scripted.dsn, A, "readiness", stage="completed", result={"outcome": "ready"})
+    done = plant(scripted.dsn, A, "readiness", stage="completed")
     queued = plant(scripted.dsn, A, "readiness")
     scripted.scripted.sealed = True
     refused_poll = await poll(scripted, "readiness", done)
@@ -324,7 +324,7 @@ async def test_r13_2_a_secret_store_that_refuses_the_apis_login_is_500_naming_it
     import httpx as _httpx
 
     assert (await scripted.put_system(TICKET, 0)).status_code == 201
-    done = plant(scripted.dsn, A, "readiness", stage="completed", result={"outcome": "ready"})
+    done = plant(scripted.dsn, A, "readiness", stage="completed")
     scripted.scripted.answer("GET", "metadata", _httpx.Response(403, json={"errors": ["permission denied"]}), times=1)
     lenient = await scripted.lenient().get(poll_path("readiness", done), headers=scripted.ann(write=False))
     assert lenient.status_code == 500
@@ -335,7 +335,7 @@ async def test_r13_2_once_the_tenant_is_not_active_a_completed_poll_serves_the_k
     """After the offboard (admin route): the kept completed row is served, `systems_without_credentials` null, and the secret
     store is not asked, sealed or not. (R13-2, B1)"""
     assert (await scripted.put_system(TICKET, 0)).status_code == 201
-    done = plant(scripted.dsn, A, "readiness", stage="completed", result={"outcome": "ready"})
+    done = plant(scripted.dsn, A, "readiness", stage="completed")
     assert (await poll(scripted, "readiness", done)).json()["systems_without_credentials"] == [TICKET]
     assert (await scripted.client.post(f"/api/admin/tenants/{A}/offboard", headers=ops(scripted))).status_code == 202
     scripted.scripted.calls.clear()
@@ -343,7 +343,7 @@ async def test_r13_2_once_the_tenant_is_not_active_a_completed_poll_serves_the_k
     kept = await poll(scripted, "readiness", done, admin=True)
     assert kept.status_code == 200, kept.text
     assert (kept.json()["status"], kept.json()["result"], kept.json()["systems_without_credentials"]) == (
-        "completed", {"outcome": "ready"}, None)
+        "completed", READY_RESULT, None)
     assert scripted.scripted.calls == []
 
 

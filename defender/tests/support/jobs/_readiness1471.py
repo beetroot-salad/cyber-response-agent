@@ -285,3 +285,11 @@ def judged_by_an_investigation(scene: HelperScene, monkeypatch: Any) -> dict[str
     got = enter(scene, inv, lifecycle=lifecycle, preflight=lambda *a, **k: 0, visualize=lambda *a, **k: None)
     return {"started": seen["ran"], "down": seen["down"], "case": seen["case"],
             "exit": None if got.exit is None else str(got.exit.code)}
+
+
+def requests_other_than(answered: tuple[str, ...]) -> list[str]:
+    """Every request name the job helper registers for any kind, less `answered`: what a kind answering only those must
+    refuse (`not-for-kind`), read from the helper's own registry so a request added later is in the class."""
+    from defender.job_host import _main
+
+    return sorted({name for name, _kind in _main.registry().handlers} - set(answered))

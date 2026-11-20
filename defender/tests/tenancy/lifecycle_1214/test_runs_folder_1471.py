@@ -119,22 +119,6 @@ def test_the_upgrade_returns_the_made_ids_oldest_first_and_none_for_an_up_to_dat
     assert _make(world) == []
 
 
-def test_the_upgrade_leaves_non_active_tenants_and_absent_tenant_folders_alone(world):
-    """A tenant not `active`, or active with no `<T>` on this host, gets nothing made, no folder created (R13-0)."""
-    import shutil
-
-    gone, control = world.active_tenant(), world.active_tenant()
-    shutil.rmtree(world.data_root / gone)
-    _without_runs(world, control)
-    creating = world.create()
-    _at_prepare(world, creating)
-    folder = world.data_root / creating
-    folder.mkdir(exist_ok=True)
-    assert _make(world) == [control]
-    assert not (folder / "runs").exists(), "a tenant still being created was given a runs folder"
-    assert not (world.data_root / gone).exists(), "a tenant folder was made for a tenant that has none here"
-
-
 def _link_runs(world, tmp_path, *tenants: str) -> list:
     targets = []
     for n, tenant in enumerate(tenants):
@@ -154,6 +138,26 @@ def _refusal(world) -> str:
     except Exception as exc:  # noqa: BLE001 — the exception type is not fixed
         return str(exc)
     raise AssertionError("make_runs_folders returned over a refused tenant")
+
+
+def test_the_upgrade_leaves_non_active_tenants_and_absent_tenant_folders_alone(world):
+    """A tenant not `active` is left alone and unnamed; an active one with no `<T>` here is refused, named, and gets no
+    folder, after the others are made (R13-0, surface 7b)."""
+    import shutil
+
+    gone, control = world.active_tenant(), world.active_tenant()
+    shutil.rmtree(world.data_root / gone)
+    _without_runs(world, control)
+    creating = world.create()
+    _at_prepare(world, creating)
+    folder = world.data_root / creating
+    folder.mkdir(exist_ok=True)
+    message = _refusal(world)
+    assert gone in message, "an active tenant with no folder on the data root was skipped silently"
+    assert control not in message and creating not in message, "a made or non-active tenant is named as refused"
+    assert _runs(world, control).is_dir() and not _runs(world, control).is_symlink(), "the others were not made first"
+    assert not (folder / "runs").exists(), "a tenant still being created was given a runs folder"
+    assert not (world.data_root / gone).exists(), "a tenant folder was made for a tenant that has none here"
 
 
 def test_links_at_runs_refuse_those_tenants_after_the_others_are_made_and_the_error_names_every_one(world, tmp_path):

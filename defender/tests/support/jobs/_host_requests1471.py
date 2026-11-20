@@ -80,6 +80,9 @@ WORKER_REASONS = ("bad_record", "tenant_offboarded", "worker_error", "no_record"
 
 FRESH = knowledge_record_of("fresh", COMMIT)
 FRESH_SERVED = {"status": "current", "commit": COMMIT, "stale_kind": None}
+#: The stored result of a completed row, one valid shape per kind (surface §5): `plant(stage="completed")` defaults to it.
+READY_RESULT = {"outcome": "ready", "knowledge": FRESH_SERVED, "warnings": []}
+ADOPTION_RESULT = {"outcome": "nothing_to_adopt", "pr_number": None}
 STALE_OPERATOR = knowledge_record_of("stale", COMMIT, stale_kind="operator", reason="the forge said no")
 STALE_OPERATOR_SERVED = {"status": "stale", "commit": COMMIT, "stale_kind": "operator"}
 #: Text at the knowledge record's path that is not a status.
@@ -189,8 +192,13 @@ def plant(dsn: str,  # noqa: PLR0913 — a row's columns
           reason: str | None = None, message: str | None = None, requester: str = "u-planted",
           created: dt.datetime = NOW, request_id: str | None = None) -> str:
     """A row as SQL (a state no request can reach quickly: running with a lease, a finished row with a result). Its
-    dedupe key is the surface's spelling: the tenant, or `<tenant>/<system>`."""
+    dedupe key is the surface's spelling: the tenant, or `<tenant>/<system>`. A completed row with no `result` given
+    carries its kind's valid one; `result` is set iff `completed` (surface §2)."""
     import uuid
+
+    if stage == "completed" and result is None:
+        result = READY_RESULT if kind == "readiness" else ADOPTION_RESULT
+    assert (result is not None) == (stage == "completed"), "a planted row's result is set iff it is completed"
 
     request_id = request_id or str(uuid.uuid4())
     key = tenant if kind == "readiness" else f"{tenant}/{system}"

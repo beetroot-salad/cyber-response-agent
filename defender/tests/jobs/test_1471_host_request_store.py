@@ -80,7 +80,7 @@ async def test_r1_a_running_request_does_not_dedupe_and_the_queued_one_then_does
 @pytest.mark.parametrize("ended", ["completed", "failed"])
 async def test_r1_a_finished_request_never_dedupes(world, ended):
     """After a request ends, the next start is a new queued row. (R1, B2)"""
-    plant(world, T1, "readiness", stage=ended, result={"outcome": "ready"} if ended == "completed" else None,
+    plant(world, T1, "readiness", stage=ended,
           reason=None if ended == "completed" else "worker_error", message=None if ended == "completed" else "x")
     async with job_store(world) as store:
         record, created = await store.create_readiness(T1, actor="u-1")
@@ -176,7 +176,7 @@ async def test_the_database_refuses_a_second_queued_row_for_one_kind_and_key_but
     with pytest.raises(psycopg.errors.UniqueViolation):
         plant(world, T1, "readiness")
     plant(world, T1, "readiness", stage="running")
-    plant(world, T1, "readiness", stage="completed", result={"outcome": "ready"})
+    plant(world, T1, "readiness", stage="completed")
     plant(world, T2, "readiness")
     plant(world, T1, "adoption", system=SYSTEM)
     with pytest.raises(psycopg.errors.UniqueViolation):
@@ -217,7 +217,7 @@ async def test_r13_6_claim_takes_the_oldest_queued_row_of_any_kind_and_marks_it_
         ("adoption.claim", older), ("readiness.claim", middle), ("readiness.claim", newest)]
 
 
-async def test_r13_6_claiming_a_host_request_never_takes_an_investigation_or_a_running_row(world):
+async def test_r13_6_claiming_a_host_request_never_takes_a_running_row(world):
     """Only queued host-request rows are claimed. (R13-6)"""
     plant(world, T1, "readiness", stage="running")
     async with job_store(world) as store:
@@ -267,7 +267,7 @@ async def test_b1_offboarding_ends_live_rows_of_both_kinds_failed_tenant_offboar
     finish time set, each announced; a finished row and another tenant's are untouched; no row is deleted. (B1)"""
     q_r = plant(world, T1, "readiness")
     r_a = plant(world, T1, "adoption", system=SYSTEM, stage="running")
-    done = plant(world, T1, "readiness", stage="completed", result={"outcome": "ready"})
+    done = plant(world, T1, "readiness", stage="completed")
     other = plant(world, T2, "readiness")
     before = {r["id"]: r for r in host_rows(world)}
     audit = JobsAudit(caplog)

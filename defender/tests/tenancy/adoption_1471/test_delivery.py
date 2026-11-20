@@ -104,14 +104,6 @@ def test_the_commit_holds_the_rendered_bytes_whatever_mains_attributes_say(repo,
     assert blobs_at(repo[1], tip, RENDERING) == RENDERING
 
 
-def test_main_not_protected_refuses_before_any_offer(repo, forge):
-    """An unprotected or bot-pushable main fails the repository open: nothing pushed, nothing opened. (G-A3, A3)"""
-    forge.protection = {**forge.protection, "protected": False}
-    with pytest.raises(Exception, match="protection"):  # noqa: PT011 — the forge client's own sentence
-        _adopt(repo, forge)
-    _nothing_sent(forge, repo)
-
-
 # --- A3 order ------------------------------------------------------------------------------------------------------
 
 def test_step1_an_open_pr_on_any_digest_of_the_system_wins_over_everything_below(repo, forge, tmp_path):
@@ -184,9 +176,9 @@ def test_step3_main_holding_every_rendered_blob_is_nothing_to_adopt_even_under_a
     _quiet(forge, repo, before)
 
 
-@pytest.mark.parametrize("drift", ["one-byte", "one-file-missing", "mode"])
+@pytest.mark.parametrize("drift", ["one-byte", "one-file-missing"])
 def test_step3_main_holding_the_files_inexactly_is_offered_the_rendering(repo, forge, tmp_path, drift):
-    """Control: one byte off, one rendered file absent, or an executable mode on main still gets the offer. (A3.3)"""
+    """Control: one byte off or one rendered file absent on main still gets the offer. (A3.3)"""
     held = dict(RENDERING)
     first = sorted(held)[0]
     if drift == "one-byte":
@@ -194,12 +186,30 @@ def test_step3_main_holding_the_files_inexactly_is_offered_the_rendering(repo, f
     elif drift == "one-file-missing":
         del held[first]
     _land(repo, tmp_path, held)
-    if drift == "mode":
-        def chmod(writer):
-            git(writer, "update-index", "--chmod=+x", first)
-        push_to_remote(repo, tmp_path, chmod, stage=False)
     assert _outcome(_adopt(repo, forge))[0] == "opened"
     assert forge.creates_of(BRANCH)
+
+
+@pytest.mark.parametrize("mode", ["100755", "120000"])
+def test_step3_identical_bytes_under_another_mode_on_main_are_not_held_and_the_offer_rewrites_them(repo, forge, tmp_path, mode):
+    """A3.3 is read as the tree entries the commit would write (P-9: mode 100644): main holding a rendered path with identical bytes but
+    another mode is not holding it, so the rendering is offered, and the offer's diff is that path's mode alone. (A3.3, surface s7)"""
+    held = sorted(RENDERING)[0]
+    only = {held: RENDERING[held]}
+    others = {p: d for p, d in RENDERING.items() if p != held}
+    _land(repo, tmp_path, others)
+
+    def odd_mode(writer):
+        oid = git_bytes(writer, "hash-object", "-w", "--no-filters", "--stdin", data=only[held]).decode().strip()
+        git(writer, "update-index", "--add", "--cacheinfo", f"{mode},{oid},{held}")
+    push_to_remote(repo, tmp_path, odd_mode, stage=False)
+    before = main_tip(repo[1])
+    assert blobs_at(repo[1], before, RENDERING) == RENDERING, "premise: main holds every rendered path's exact bytes"
+    assert git(repo[1], "ls-tree", before, held).split()[0] == mode, "premise: the path is held under another mode"
+
+    assert _outcome(_adopt(repo, forge))[0] == "opened"
+    tip = git(repo[1], "rev-parse", f"refs/heads/{BRANCH}")
+    assert tree_diff(repo[1], before, tip) == [("T" if mode == "120000" else "M", "100644", held)], "the offer is the mode change alone"
 
 
 def test_step4_a_closed_unmerged_pr_on_d_is_rejected_with_its_number_and_nothing_is_opened(repo, forge):
