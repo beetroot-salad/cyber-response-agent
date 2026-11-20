@@ -564,7 +564,8 @@ def test_a_member_of_two_tenants_reads_and_writes_only_in_the_paths_tenant() -> 
     assert ann.post(f"/api/invitations/{invitation['id']}/accept").status_code == 200
     assert tenants_of(ann) == {T1, T2}
     for tenant, own, foreign in ((T1, ALERT, other), (T2, other, ALERT)):
-        summary = AlertSummary.model_validate(own.model_dump(exclude={"raw"})).model_dump(mode="json")
+        # #1581 O1: a listed alert carries `outcome` and `latest_status`, null while it has no investigation (this one's is made below)
+        summary = AlertSummary.model_validate({**own.model_dump(exclude={"raw"}), "outcome": None, "latest_status": None}).model_dump(mode="json")
         assert items(ann.get(f"/api/tenants/{tenant}/alerts")) == [summary], tenant
         assert ann.get(f"/api/tenants/{tenant}/alerts/{own.alert_id}").json() == own.model_dump(mode="json")
         assert ann.get(f"/api/tenants/{tenant}/alerts/{foreign.alert_id}").status_code == 404, tenant

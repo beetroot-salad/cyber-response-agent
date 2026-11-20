@@ -96,6 +96,41 @@ def statements(store: Any) -> Iterator[list[str]]:
         event.remove(engine, "before_cursor_execute", record)
 
 
+#: One node of a plan's main spine: (node type, index name or None).
+Node = tuple[str, str | None]
+
+
+def spine(plan: dict[str, Any]) -> list[Node]:
+    """The nodes of the plan's main line, from the root down through every child that is not a sub-plan: what reads and
+    orders the page itself, without the per-row lookups of the listed `latest_status`."""
+    nodes = [(plan["Node Type"], plan.get("Index Name"))]
+    for child in plan.get("Plans", []):
+        if child.get("Parent Relationship") not in {"SubPlan", "InitPlan"}:
+            nodes += spine(child)
+    return nodes
+
+
+@contextlib.contextmanager
+def planned(store: Any) -> Iterator[list[list[Node]]]:
+    """For every `SELECT` `store`'s engine runs while the block runs, the spine of the plan PostgreSQL chooses for it, by an
+    `EXPLAIN` of the very statement with its parameters on the same connection."""
+    from sqlalchemy import event
+
+    engine = store._engine.sync_engine
+    seen: list[list[Node]] = []
+
+    def explain(conn: Any, cursor: Any, statement: str, parameters: Any, context: Any, executemany: bool) -> None:
+        if statement.lstrip().upper().startswith("SELECT"):
+            cursor.execute("EXPLAIN (FORMAT JSON) " + statement, parameters)
+            seen.append(spine(cursor.fetchall()[0][0][0]["Plan"]))
+
+    event.listen(engine, "before_cursor_execute", explain)
+    try:
+        yield seen
+    finally:
+        event.remove(engine, "before_cursor_execute", explain)
+
+
 @contextlib.asynccontextmanager
 async def holding(dsn: str, statement: str, params: tuple[Any, ...] = ()) -> AsyncIterator[None]:
     """`statement` (a locking `SELECT`) run on a raw connection in an open transaction, committed on exit."""

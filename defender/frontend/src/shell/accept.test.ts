@@ -7,6 +7,7 @@
 // FORCED CHOICE: the load-level entry is `load.client.acceptInvitation(id)` beside `signOut`; the design names only the
 // action a screen holds (`useActions().acceptInvitation`).
 import { describe, expect, it } from "vitest";
+import { decideUnauthorized, type Decision, type Taken } from "./decision";
 import { makeLoad } from "./load";
 
 const INVITATION = "4f2a8c1e-91b7-4d33-a0c5-6e1f7b2d9a10";
@@ -21,31 +22,40 @@ function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
 
-function accepting(answer: (request: Request) => Promise<Response>) {
+function accepting(
+  answer: (request: Request) => Promise<Response>,
+  start: { readonly taken: Taken; readonly byHistory: boolean } = { taken: { status: "none" }, byHistory: false },
+) {
   const log: string[] = [];
+  /** Every effect with what it was given, as one line each, in order. */
+  const effects: string[] = [];
   const requests: Request[] = [];
   const assigned: string[] = [];
   const load = makeLoad({
-    taken: { status: "none" },
-    byHistory: false,
+    taken: start.taken,
+    byHistory: start.byHistory,
     target: "/home",
     origin: ORIGIN,
     effects: {
       fetch: (request) => {
         log.push("fetch");
+        effects.push("fetch");
         requests.push(request);
         return answer(request);
       },
-      record: () => {
+      record: (target, again) => {
         log.push("record");
+        effects.push(`record ${String(target)} ${String(again)}`);
         return true;
       },
       assign: (url) => {
         log.push("assign");
+        effects.push(`assign ${url}`);
         assigned.push(url);
       },
-      replace: () => {
+      replace: (url) => {
         log.push("replace");
+        effects.push(`replace ${url}`);
       },
     },
   });
@@ -60,7 +70,7 @@ function accepting(answer: (request: Request) => Promise<Response>) {
     await new Promise((resolve) => setTimeout(resolve, 0));
     return result;
   };
-  return { load, log, requests, assigned, accept, settled };
+  return { load, log, effects, requests, assigned, accept, settled };
 }
 
 describe("accepting an invitation", () => {
@@ -116,4 +126,102 @@ describe("accepting an invitation", () => {
     expect(await settled(call)).toEqual({ kind: "gone" });
     expect(log).toEqual(["fetch"]);
   });
+});
+
+// Accept's wiring over every state its choices depend on (#1581 repair, G6): which 401 policy it sends through, and
+// that it leaves only through the load's one exit. Both are invisible to a fresh load with no attempt record, where
+// every wrong choice acts as the right one, so the table crosses the attempt record x how the load was reached x what
+// the load has already done.
+const TAKENS: readonly (readonly [string, Taken])[] = [
+  ["none", { status: "none" }],
+  ["found, first", { status: "found", again: false }],
+  ["found, again", { status: "found", again: true }],
+  ["unavailable", { status: "unavailable" }],
+];
+
+/** What the load has already done before Accept is pressed. */
+type Before = "fresh" | "accepted" | "signed-out" | "sign-in started by me" | "superseded";
+const BEFORES: readonly Before[] = ["fresh", "accepted", "signed-out", "sign-in started by me", "superseded"];
+
+/** The answer for each call the table's loads make: Accept answers from `accepts` in turn, sign-out is a 204, `/api/me`
+ * a 401. */
+function answers(accepts: Response[]): (request: Request) => Promise<Response> {
+  return (request) => {
+    const path = new URL(request.url).pathname;
+    if (path === "/api/auth/logout") return Promise.resolve(new Response(null, { status: 204 }));
+    if (path === "/api/me") return Promise.resolve(json(401, { detail: "no session" }));
+    const next = accepts.shift();
+    if (next === undefined) throw new Error("premise: Accept was sent more often than the row answers");
+    return Promise.resolve(next);
+  };
+}
+
+interface Row {
+  readonly label: string;
+  readonly taken: Taken;
+  readonly byHistory: boolean;
+  readonly before: Before;
+}
+
+const ROWS: readonly Row[] = TAKENS.flatMap(([label, taken]) =>
+  [false, true].flatMap((byHistory) => BEFORES.map((before) => ({ label, taken, byHistory, before }))),
+);
+
+const NO_SESSION = (): Response => json(401, { detail: "no session" });
+
+/** What Accept does on a load in state `before`, and a `later` read does on a twin of the same load (the oracle). */
+async function acceptAfter({ taken, byHistory, before }: Row) {
+  const first = before === "accepted" ? json(200, { tenant_id: TENANT }) : NO_SESSION();
+  const { load, effects, accept, settled } = accepting(answers([first, NO_SESSION()]), { taken, byHistory });
+  if (before === "accepted") expect(await settled(accept())).toEqual({ kind: "left" });
+  if (before === "signed-out") await settled(load.client.signOut());
+  if (before === "sign-in started by me") await settled(load.client.me());
+  if (before === "superseded") load.supersede();
+  const mark = effects.length;
+  const result = await settled(accept());
+  const twin = accepting(answers([]), { taken, byHistory });
+  await twin.settled(twin.load.client.read("/api/me", {}));
+  return { result, sent: effects.slice(mark), twin: twin.effects };
+}
+
+describe("accepting over every attempt record, way of arriving and earlier state of the load", () => {
+  it("covers every combination, and each 401 decision of the shell", () => {
+    expect(new Set(ROWS.map((r) => `${r.label}/${String(r.byHistory)}/${r.before}`)).size).toBe(
+      TAKENS.length * 2 * BEFORES.length,
+    );
+    const decisions = new Set<string>();
+    for (const { taken, byHistory } of ROWS) {
+      const decision = decideUnauthorized({ taken, byHistory, source: "later" });
+      decisions.add(decision.kind === "failed" ? decision.reason : `sign-in ${String(decision.again)}`);
+    }
+    // premise: the 401 table reaches each outcome the shell has for a later call, so no wrong policy hides
+    expect([...decisions].sort()).toEqual(["session-refused", "sign-in false", "sign-in true", "storage-unavailable"]);
+  });
+
+  it.each(ROWS.filter((row) => row.before !== "fresh"))(
+    "taken $label, byHistory=$byHistory, load already $before: sends nothing and navigates nowhere",
+    async (row) => {
+      const { result, sent } = await acceptAfter(row);
+      expect(sent, "a load that is gone sends nothing and navigates nowhere").toEqual([]);
+      expect(result).toEqual(row.before === "superseded" ? { kind: "gone" } : { kind: "left" });
+    },
+  );
+
+  it.each(ROWS.filter((row) => row.before === "fresh"))(
+    "taken $label, byHistory=$byHistory: a 401 is answered as a later call's, by the shell's own decision",
+    async (row) => {
+      const { result, sent, twin } = await acceptAfter(row);
+      expect(result).toEqual({ kind: "left" });
+      expect(sent).toEqual(twin);
+      const decision: Decision = decideUnauthorized({ taken: row.taken, byHistory: row.byHistory, source: "later" });
+      const kinds = sent.map((effect) => effect.split(" ")[0]);
+      if (decision.kind === "failed") {
+        expect(kinds).toEqual(["fetch", "replace"]);
+        expect(new URL(sent[1]?.split(" ")[1] ?? "", ORIGIN).searchParams.get("reason")).toBe(decision.reason);
+      } else {
+        expect(kinds).toEqual(["fetch", "record", "assign"]);
+        expect(sent[1]).toBe(`record /home ${String(decision.again)}`);
+      }
+    },
+  );
 });
