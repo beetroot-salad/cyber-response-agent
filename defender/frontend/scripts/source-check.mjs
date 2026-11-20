@@ -13,14 +13,21 @@
 // 4. Outside the shell: imports from the shell only of `src/shell/provider` (types from anywhere in it), no import of a
 //    test file into the app, and no `/api/auth/` path in a string. That last one is a guard against an accident, not a
 //    boundary: a string can be built any way.
-// 5. Outside the shell, the markup the browser sends requests for: an address attribute (`src`, `href`, `action`, ...)
-//    is a path written out from the root that the browser, from any address the app serves, resolves on the app's
-//    origin and not to `/api` or under it (dot segments, `\`, percent-escapes and JSX entities read as the browser and
-//    the server read them; each address of a `srcSet` or `ping` list alike), an imported asset's URL, or made by
-//    `src/addresses.ts` (which makes only the app's own addresses). What could carry an address past that is refused:
-//    a spread onto an HTML element, raw HTML, an inline style, and React's element-making functions called directly.
-//    So a screen's markup makes the browser request no API path: the shell's client, and its 401 policy, sends every
-//    one.
+// 5. Outside the shell, the markup the browser could send requests for (#1581 r3.3: no attribute list decides it).
+//    Every string a screen writes into an attribute of any element (a JSX string, read with its entities decoded, and
+//    each string and template part of an attribute's expression) is refused when the browser could resolve it, from
+//    any address the app serves, to `/api` or under it: dot segments, `\`, tabs, newlines and percent-escapes read as
+//    the browser and the server read them; the whole string and each of its words that holds a slash alike, so a list
+//    (`srcSet`, `ping`, `imageSrcSet`) is read address by address; and an absolute web address of any host, since the
+//    app's own host is not known here. Ordinary words ("API docs", "/apix") stay allowed. On top of that, an attribute
+//    the browser is known to request or navigate to (`src`, `href`, `action`, ..., matched in any case) must be a path
+//    written out from the root on the app's origin, an imported asset's URL, or made by `src/addresses.ts` (which makes
+//    only the app's own addresses), so an address held in a variable or built in a template is refused there. What
+//    could carry an address past both is refused outright: an attribute that holds HTML or a navigation instruction in
+//    a string (`srcDoc`, raw HTML, a `meta` element's `content` beside `httpEquiv`), an inline style, a spread onto an
+//    HTML element, and React's element-making functions called directly. So a screen's markup makes the browser
+//    request no API path: the shell's client, and its 401 policy, sends every one. Known limit: a bare word with no
+//    slash inside a list attribute the check does not know (`archive="a api"`) is read only as part of the whole.
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
@@ -28,22 +35,28 @@ import { sampleAddresses } from "./generate.mjs";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const AUTH_PREFIX = "/api/auth/";
-/** The attributes whose value the browser requests or navigates to. */
+/** The attributes the browser is known to request or navigate to, whose value must have an address's shape (rule 5),
+ * by `attributeKey`. Not what decides the `/api` refusal: that reads every attribute. */
 const ADDRESS_ATTRIBUTES = new Set([
   "src",
-  "srcSet",
+  "srcset",
   "href",
   "action",
-  "formAction",
+  "formaction",
   "poster",
   "data",
   "ping",
   "cite",
   "background",
-  "xlinkHref",
+  "xlinkhref",
 ]);
-/** Markup that could carry an address past the address-attribute rule. */
-const OPAQUE_ATTRIBUTES = new Set(["dangerouslySetInnerHTML", "style"]);
+/** Address attributes that hold a list of addresses, by `attributeKey`. */
+const LIST_ATTRIBUTES = new Set(["srcset", "ping"]);
+/** Attributes that could carry an address past rule 5's string reading, by `attributeKey`: HTML in a string or object,
+ * and an inline style. */
+const OPAQUE_ATTRIBUTES = new Set(["dangerouslysetinnerhtml", "srcdoc", "style"]);
+/** The web's schemes, whose addresses a browser requests whatever their host. */
+const WEB_SCHEMES = new Set(["http:", "https:", "ws:", "wss:"]);
 /** React's element-making functions and runtimes, which take attributes as a plain object. */
 const ELEMENT_MAKERS = new Set(["createElement", "cloneElement", "jsx", "jsxs", "jsxDEV"]);
 const ELEMENT_RUNTIMES = new Set([
@@ -246,28 +259,105 @@ function namesApi(pathname) {
   return first !== undefined && first.toLowerCase() === "api";
 }
 
-/** True when `text`, requested by the browser from `address`, stays on the app's origin and reaches no path at or under
- * `/api`: resolved as the browser resolves it (dot segments, `\`, tabs and newlines), then with its percent-escapes
- * decoded as a server decodes them, and again until nothing changes. An address the browser or a server cannot read
- * is refused. */
-function staysOffApiFrom(text, address) {
+/** `pathname` with each percent-escape of an ASCII character decoded, the rest left as written: what a server that
+ * decodes what it can reads of a path `decodeURIComponent` refuses. */
+function decodeAscii(pathname) {
+  return pathname.replace(/%([0-7][0-9a-f])/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+}
+
+/** Where `text`, requested by the browser from `address`, resolves: `api` (a path at or under `/api`, on the app's
+ * origin or any host of a web scheme), `off` (the app's origin, off `/api`), `elsewhere` (another origin or scheme) or
+ * `unreadable` (an address the browser cannot parse, or a path whose escapes a server cannot read). Resolved as the
+ * browser resolves it (dot segments, `\`, tabs and newlines), then with its percent-escapes decoded as a server
+ * decodes them, and again until nothing changes. */
+function resolution(text, address) {
+  let base;
+  let url;
   try {
-    const base = new URL(address, ORIGIN);
-    let url = new URL(text, base);
-    // The parser escapes what decoding gave back (a space, say), so a path can come round again: then it is done.
-    const seen = new Set();
-    while (!seen.has(url.pathname)) {
-      seen.add(url.pathname);
-      if (url.origin !== base.origin || namesApi(url.pathname)) return false;
-      const decoded = decodeURIComponent(url.pathname);
-      if (decoded === url.pathname) return true;
-      if (namesApi(decoded)) return false;
-      url = new URL(decoded, base);
-    }
-    return true;
+    base = new URL(address, ORIGIN);
+    url = new URL(text, base);
   } catch {
-    return false;
+    return "unreadable";
   }
+  if (!WEB_SCHEMES.has(url.protocol)) return "elsewhere";
+  let elsewhere = url.origin !== base.origin;
+  let readable = true;
+  // The parser escapes what decoding gave back (a space, say), so a path can come round again: then it is done.
+  const seen = new Set();
+  while (!seen.has(url.pathname)) {
+    seen.add(url.pathname);
+    if (namesApi(url.pathname)) return "api";
+    let decoded;
+    try {
+      decoded = decodeURIComponent(url.pathname);
+    } catch {
+      readable = false;
+      decoded = decodeAscii(url.pathname);
+    }
+    if (decoded === url.pathname) break;
+    if (namesApi(decoded)) return "api";
+    try {
+      url = new URL(decoded, base);
+    } catch {
+      return "unreadable";
+    }
+    if (url.origin !== base.origin) elsewhere = true;
+  }
+  if (elsewhere) return "elsewhere";
+  return readable ? "off" : "unreadable";
+}
+
+/** True when `text`, requested by the browser from `address`, stays on the app's origin and reaches no path at or under
+ * `/api` (`resolution`). An address the browser or a server cannot read is refused. */
+function staysOffApiFrom(text, address) {
+  return resolution(text, address) === "off";
+}
+
+/** True when the browser could resolve `text`, as a whole or any of its words that holds a slash, from any address the
+ * app serves to `/api` or under it (rule 5, every attribute). */
+function couldReachApi(text, addresses) {
+  const candidates = [text, ...text.split(/[\s,]+/).filter((word) => word !== text && /[/\\]/.test(word))];
+  return candidates.some((candidate) => addresses.some((address) => resolution(candidate, address) === "api"));
+}
+
+/** Each string an attribute's value writes: its JSX string, or every string and template part of its expression (an
+ * element inside it is checked as its own markup). `null` stands for a JSX string with an entity not read here. */
+function attributeStrings(value) {
+  if (value === undefined) return [];
+  if (ts.isStringLiteral(value)) return [decodeJsx(value.text)];
+  const strings = [];
+  const walk = (node) => {
+    if (ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node) || ts.isJsxFragment(node)) return;
+    if (
+      ts.isStringLiteralLike(node) ||
+      ts.isTemplateHead(node) ||
+      ts.isTemplateMiddle(node) ||
+      ts.isTemplateTail(node)
+    ) {
+      strings.push(node.text);
+    }
+    ts.forEachChild(node, walk);
+  };
+  walk(value);
+  return strings;
+}
+
+/** An attribute's name as the browser matches it: HTML attribute names in any case, a namespace's `:` and a hyphen
+ * aside (`xlink:href` and `xlinkHref`, `http-equiv` and `httpEquiv`, `SRCDOC` and `srcDoc`). */
+function attributeKey(name) {
+  return name.replace(/[-:]/g, "").toLowerCase();
+}
+
+/** True when the JSX attribute `node` sits on a `meta` element that has an `httpEquiv`: its `content` is a navigation
+ * or header instruction in a string. */
+function onHttpEquivMeta(file, node) {
+  const element = node.parent.parent;
+  return (
+    attributeKey(element.tagName.getText(file)) === "meta" &&
+    node.parent.properties.some(
+      (property) => ts.isJsxAttribute(property) && attributeKey(property.name.getText(file)) === "httpequiv",
+    )
+  );
 }
 
 /** True for a literal address the browser requests or navigates to that is an app address (rule 5): a path written out
@@ -284,7 +374,7 @@ function appAddress({ made, file, addresses }, attribute, value) {
     const text = decodeJsx(value.text);
     if (text === null) return false;
     // `srcSet` and `ping` hold lists of addresses: each must be one (a `srcSet` candidate's descriptor aside).
-    if (attribute === "srcSet" || attribute === "ping") {
+    if (LIST_ATTRIBUTES.has(attribute)) {
       const tokens = text.split(/[\s,]+/).filter((token) => token !== "" && !DESCRIPTOR.test(token));
       return tokens.length > 0 && tokens.every((token) => literalAppAddress(token, addresses));
     }
@@ -358,9 +448,18 @@ function boundary(made) {
     const visit = (node) => {
       if (ts.isJsxAttribute(node)) {
         const attribute = node.name.getText(file);
-        if (OPAQUE_ATTRIBUTES.has(attribute))
+        const key = attributeKey(attribute);
+        if (OPAQUE_ATTRIBUTES.has(key))
           report(node, `outside the shell, no \`${attribute}\`: it could carry an address past the markup rule`);
-        if (ADDRESS_ATTRIBUTES.has(attribute) && !appAddress({ made, file, addresses }, attribute, node.initializer)) {
+        if (key === "content" && onHttpEquivMeta(file, node))
+          report(node, "outside the shell, no `content` on a `meta` with `httpEquiv`: it could carry an address");
+        for (const text of attributeStrings(node.initializer)) {
+          if (text === null)
+            report(node, `outside the shell, \`${attribute}\` holds an entity the markup rule does not read`);
+          else if (couldReachApi(text, addresses))
+            report(node, `outside the shell, \`${attribute}\` holds a string the browser could resolve to /api`);
+        }
+        if (ADDRESS_ATTRIBUTES.has(key) && !appAddress({ made, file, addresses }, key, node.initializer)) {
           report(
             node,
             `outside the shell, \`${attribute}\` is a path written out from the root (not under /api), an imported asset, or made by src/addresses.ts`,

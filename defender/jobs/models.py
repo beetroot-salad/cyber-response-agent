@@ -89,6 +89,8 @@ class InvestigationRow(Base, kw_only=True):
         Index("investigations_one_live_per_alert", "tenant_id", "alert_id", unique=True,
               postgresql_where=text(f"stage IN ({_quoted(LIVE)})")),
         Index("investigations_newest_first", "tenant_id", text("created_at DESC"), text("id DESC")),
+        # #1581: the alert list's `latest_status`, one alert's newest investigation, is the first entry of this index.
+        Index("investigations_alert_newest_first", "tenant_id", "alert_id", text("created_at DESC"), text("id DESC")),
         {"schema": SCHEMA},
     )
 

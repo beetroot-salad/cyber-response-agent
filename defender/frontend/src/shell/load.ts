@@ -50,8 +50,8 @@ interface Client {
   /** `POST /api/auth/logout`: 2xx or 401 (already signed out) leaves by replace; anything else is the error state. */
   readonly signOut: () => Promise<SignOutResult>;
   /** `POST /api/invitations/{id}/accept` (its 401 is B1's for a later call): on success, a full load of the accepted
-   * tenant's alerts address by `assign`, so Back returns to the page that accepted; 404 is `not-open`; anything else is
-   * the caller's to show (`error`), never the error state. */
+   * tenant's alerts address by `assign`, so Back returns to the page that accepted; 404 is `not-open`; any other 4xx
+   * is `refused`; anything else is `error`. Each is the caller's to show, never the error state. */
   readonly acceptInvitation: (id: string) => Promise<AcceptResult>;
 }
 
@@ -241,6 +241,7 @@ function clientOver(api: Readonly<Record<On401, Api>>, exit: Exit, effects: Effe
       if (sent.kind !== "answer") return sent;
       const { data, response } = sent.answer;
       if (response.status === 404) return { kind: "not-open" };
+      if (response.status >= 400 && response.status < 500) return { kind: "refused" };
       if (response.status !== 200 || data === undefined) return { kind: "error" };
       const alerts = addressOf("alerts", [data.tenant_id]);
       return exit.leave(() => {

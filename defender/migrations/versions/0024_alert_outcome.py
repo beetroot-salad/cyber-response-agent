@@ -1,9 +1,10 @@
 """Each alert's outcome, stored on the alert (#1581): `jobs.alerts` gains `outcome` (the disposition of the alert's newest
 `completed` investigation by `(created_at, id)`) and that investigation's id and `created_at` as its source, all three
 null or all set, with an index over `(tenant_id, outcome, fired_at DESC, id DESC)` so the alert list's outcome filter is
-an index range. `jobs.investigations` gains two checks: a `completed` row has a disposition, and a disposition is one of
-the five codes. The investigations still own the facts; the job store keeps the copy (`defender/jobs/store.py`, finish and
-the investigation delete). No trigger.
+an index range. `jobs.investigations` gains an index over `(tenant_id, alert_id, created_at DESC, id DESC)`, so each
+listed alert's newest investigation (its `latest_status`) is one index entry, and two checks: a `completed` row has a
+disposition, and a disposition is one of the five codes. The investigations still own the facts; the job store keeps the
+copy (`defender/jobs/store.py`, finish and the investigation delete). No trigger.
 
 The codes are frozen here as they stand at this revision, so a later change to the vocabulary cannot change what this
 upgrade does.
@@ -69,3 +70,5 @@ def upgrade() -> None:
     op.create_index("alerts_outcome_newest_first", "alerts",
                     ["tenant_id", "outcome", sa.text("fired_at DESC"), sa.text("id DESC")], schema=SCHEMA)
     op.execute(f"ANALYZE {SCHEMA}.alerts")
+    op.create_index("investigations_alert_newest_first", "investigations",
+                    ["tenant_id", "alert_id", sa.text("created_at DESC"), sa.text("id DESC")], schema=SCHEMA)

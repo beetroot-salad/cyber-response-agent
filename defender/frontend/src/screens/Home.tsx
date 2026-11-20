@@ -52,6 +52,7 @@ type Accepting = { readonly kind: "open" } | { readonly kind: "sending" } | Acce
 /** What each answer that is not a success says, under the invitation. */
 const SAID: Readonly<Partial<Record<Accepting["kind"], string>>> = {
   "not-open": "This invitation is no longer open.",
+  refused: "You can't accept this invitation.",
   error: "Couldn't accept the invitation. Reload the page to try again.",
 };
 

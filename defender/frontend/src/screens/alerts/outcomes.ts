@@ -34,9 +34,11 @@ export function outcomeFilterOf(value: string): OutcomeFilter | null {
   return OUTCOME_CODES.find((code) => code === value) ?? null;
 }
 
-/** Where an alert with no outcome stands, by its newest investigation's status. `completed` has none: a completed
- * investigation always has an outcome (O10), so the alert would have one. */
-const STANDING: Readonly<Record<Exclude<InvestigationStatus, "completed">, string>> = {
+/** Where an alert with no outcome stands, by its newest investigation's status. A completed investigation always has
+ * an outcome (O10), so `completed` here is a mistake (a worker left running through the upgrade, or a planted row); it
+ * is drawn, not thrown, so one such row never costs the screen its others (r3.3). */
+const STANDING: Readonly<Record<InvestigationStatus, string>> = {
+  completed: "completed",
   queued: "queued",
   running: "investigating",
   aborted: "cancelled",
@@ -53,6 +55,5 @@ export function statusOf(alert: Pick<AlertSummary, "outcome" | "latest_status">)
   if (alert.outcome !== null) return { word: OUTCOMES[alert.outcome].label, tone: OUTCOMES[alert.outcome].tone };
   const status = alert.latest_status;
   if (status === null) return { word: "not investigated", tone: "muted" };
-  if (status === "completed") throw new Error("a completed investigation left its alert with no outcome");
   return { word: STANDING[status], tone: "muted" };
 }
