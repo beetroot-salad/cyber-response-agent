@@ -709,7 +709,33 @@ def _api_spelling_corpus() -> dict[str, str]:
         'export const zzForm = <img alt="" srcSet="/home 1x, /./api/me 2x" />;')
     corpus["an image candidate list whose only candidate is the api's"] = (
         'export const zzForm = <img alt="" srcSet="/%61pi/me" />;')
+    corpus.update(_any_attribute_corpus())
     return corpus
+
+
+#: Rule 5 has no attribute list (#1581 r3.3): a string a screen writes in ANY attribute is refused when it resolves to the
+#: API, including attributes no list of URL-bearing ones ever had; `srcDoc`, `dangerouslySetInnerHTML` and a `meta`
+#: `httpEquiv` `content` carry HTML or a navigation instruction in a string, so they are refused outright.
+ANY_ATTRIBUTE_FORMS: dict[str, str] = {
+    "imageSrcSet on a link": '<link rel="preload" as="image" imageSrcSet="/api/me 1x" />',
+    "imageSrcSet on a link, a dot segment": '<link rel="preload" as="image" imageSrcSet="/home 1x, /./api/me 2x" />',
+    "a made-up data attribute": '<div data-zz-url="/api/me" />',
+    "a made-up data attribute, a dot segment": '<div data-zz-url="/./api/me" />',
+    "a made-up aria attribute": '<div aria-zz-url="/api/me" />',
+    "aria-label": '<div aria-label="/api/me" />',
+    "title": '<div title="/api/me" />',
+    "a data attribute holding a string expression": '<div data-zz-url={"/api/me"} />',
+    "a data attribute holding a template": '<div data-zz-url={`/api/me`} />',
+    "the content of a refresh meta": '<meta httpEquiv="refresh" content="0;url=/api/me" />',
+    "any content of a refresh meta": '<meta httpEquiv="refresh" content="0" />',
+    "srcDoc": '<iframe srcDoc="<p>hello</p>" />',
+    "srcDoc with no URL in it": '<iframe srcDoc="" />',
+    "dangerouslySetInnerHTML": '<div dangerouslySetInnerHTML={{ __html: "<p>hello</p>" }} />',
+}
+
+
+def _any_attribute_corpus() -> dict[str, str]:
+    return {f"{why} (any attribute)": f"export const zzForm = {form};" for why, form in ANY_ATTRIBUTE_FORMS.items()}
 
 
 #: Paths that are not under `/api` however they are spelled, which stay allowed (the twin of API_SPELLINGS).
@@ -765,6 +791,15 @@ ALLOWED_CORPUS: dict[str, str] = {
 }
 ALLOWED_CORPUS.update({f"{why} ({text!r}) in href": f'export const zzForm = <a href="{text}">x</a>;'
                       for why, text in NOT_API_SPELLINGS.items()})
+ALLOWED_CORPUS.update({
+    "an ordinary string in className": 'export const zzForm = <div className="card wide" />;',
+    "a label naming the API": 'export const zzForm = <div aria-label="API docs" />;',
+    "a title that is a longer first segment": 'export const zzForm = <div title="/apix" />;',
+    "a made-up data attribute holding an app path": 'export const zzForm = <div data-zz-url="/home" />;',
+    "a made-up aria attribute holding words": 'export const zzForm = <div aria-zz-note="see the API" />;',
+    "an image set of app paths on a link": 'export const zzForm = <link rel="preload" as="image" imageSrcSet="/home 1x, /apix 2x" />;',
+    "a meta that is not a refresh": 'export const zzForm = <meta name="description" content="an ordinary description" />;',
+})
 ALLOWED_CORPUS["an image candidate list of app paths"] = 'export const zzForm = <img alt="" srcSet="/home 1x, /apix 2x" />;'
 
 

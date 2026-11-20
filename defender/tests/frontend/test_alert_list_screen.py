@@ -567,6 +567,48 @@ def test_alert_list_o5_a_later_page_answered_200_with_a_body_that_is_not_a_page_
     assert page.get_by_text(LATER_FAILED).count() == 1 and page.locator('[data-action="load-more"]').count() == 0
 
 
+async def _plant_completed_without_outcome(dsn: str, tickets: list[str]) -> None:
+    """For each ticket (its alert already stored), an investigation that is `completed` with its disposition set, written by
+    SQL so the store's own finish does not set the alert's stored outcome: the alert's outcome stays null."""
+    from defender.tests.support.shared._postgres1339 import execute
+
+    for ticket in tickets:
+        execute(dsn, """
+            INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, stage, created_at, finished_at,
+                                             disposition, cost_usd, cost_is_lower_limit, update_ticket)
+            SELECT gen_random_uuid(), tenant_id, id, 'planted', 1, 'completed', now(), now(), 'benign', 0, false, false
+            FROM jobs.alerts WHERE vendor_ticket_id = %s""", (ticket,))
+        [(outcome,)] = execute(dsn, "SELECT outcome FROM jobs.alerts WHERE vendor_ticket_id = %s", (ticket,))
+        assert outcome is None, "premise: the planted alert has no stored outcome"
+
+
+@pytest.mark.parametrize("where_", ["page one", "a later page"])
+def test_alert_list_r33_a_completed_row_with_no_stored_outcome_is_drawn_as_completed_muted_on_page_one_and_on_a_later_page(
+        world, browser, where_):
+    """One alert whose newest investigation is `completed` and whose stored outcome is null (planted by SQL, past the store),
+    among the rows of page 1 or on the second page: every row shows (the world's, the 60 others, in both pages), that row's
+    status reads "completed" with `data-tone="muted"`, the state is `ready`, and Load more of the second page shows no
+    "Couldn't load more". One such row never costs the screen its other rows. (r3.3 A completed row with no stored outcome)"""
+    base = _at("2026-10-01T00:00:00Z")
+    run_async(_seed, world.dsn, A, [
+        (f"T-p-{n:03d}", (base + dt.timedelta(minutes=n)).isoformat(), ALERT_BYTES, []) for n in range(PAGE + 10)])
+    planted = f"T-p-{PAGE + 8:03d}" if where_ == "page one" else "T-p-002"
+    run_async(_plant_completed_without_outcome, world.dsn, [planted])
+    page = _open(world, _signed_in(browser, world), ALERTS)
+    assert page.locator('[data-row="alert"]').count() == PAGE
+    first_page = [t.split("\n")[0].strip() for t in _tickets(page)]
+    assert (planted in first_page) == (where_ == "page one"), "premise: the planted row is where the case says"
+    page.locator('[data-action="load-more"]').click()
+    _until_true(page, lambda: page.locator('[data-row="alert"]').count() == PAGE + 11, "every row of both pages shows")
+    settle(page)
+    assert page.locator('[data-screen="alerts"]').first.get_attribute("data-state") == "ready"
+    assert page.get_by_text(LATER_FAILED).count() == 0
+    row = page.locator('[data-row="alert"]').filter(has=page.locator('[data-field="ticket"]', has_text=planted))
+    assert row.count() == 1
+    cell = row.locator('[data-field="status"]')
+    assert cell.inner_text().strip() == "completed" and cell.get_attribute("data-tone") == "muted"
+
+
 def _load_all_pages(page: Any) -> int:
     """Press Load more until it goes or a later page fails, waiting for each page; the number of presses."""
     presses = 0
@@ -927,10 +969,16 @@ def test_alert_list_o11_a_404_says_the_invitation_is_no_longer_open_and_removes_
     assert shown(page) == "home" and where(page)[0] == "/home"
 
 
-@pytest.mark.parametrize("failure", ["403", "500", "network"])
-def test_alert_list_o11_any_other_failure_says_to_reload_and_is_not_the_error_screen(world, browser, failure):
-    """An accept answered 403 or 500, or not answered at all: "Couldn't accept the invitation. Reload the page to try
-    again." under the invitation, and the screen stays Home, not the error screen. (O11)"""
+RELOAD = "Couldn't accept the invitation. Reload the page to try again."
+REFUSED_ACCEPT = "You can't accept this invitation."
+
+
+@pytest.mark.parametrize(("failure", "message"), [
+    ("403", REFUSED_ACCEPT), ("422", REFUSED_ACCEPT), ("500", RELOAD), ("network", RELOAD)])
+def test_alert_list_o11_accept_refusals_are_worded_by_kind_and_are_not_the_error_screen(world, browser, failure, message):
+    """An accept answered 403 or 422 (any 4xx but 404) reads "You can't accept this invitation."; one answered 500, or not
+    answered at all, reads "Couldn't accept the invitation. Reload the page to try again." (the other wording shows in
+    neither case); under the invitation, the screen stays Home, not the error screen, and the button is gone. (O11, r3.3)"""
     carol, _ = _carol(world, browser, (), (B,))
 
     def refuse(route: Any) -> None:
@@ -942,8 +990,10 @@ def test_alert_list_o11_any_other_failure_says_to_reload_and_is_not_the_error_sc
     carol.route(lambda u: u.startswith(world.origin) and urllib.parse.urlsplit(u).path.endswith("/accept"), refuse)
     page = _home(world, carol)
     page.get_by_role("button", name="Accept", exact=True).click()
-    page.get_by_text("Couldn't accept the invitation. Reload the page to try again.").wait_for()
+    page.get_by_text(message).wait_for()
     settle(page)
+    other = RELOAD if message == REFUSED_ACCEPT else REFUSED_ACCEPT
+    assert page.get_by_text(message).count() == 1 and page.get_by_text(other).count() == 0
     assert shown(page) == "home" and where(page)[0] == "/home"
     assert page.get_by_role("button", name="Accept", exact=True).count() == 0, "the button goes after any failure"
     assert len(_accepts(requests_of(carol))) == 1

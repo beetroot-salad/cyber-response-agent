@@ -82,3 +82,71 @@ async def test_o2_the_outcome_filter_reads_each_page_from_the_outcome_index_with
                     assert not [t for t in above if "Sort" in t], where
     finally:
         await store.close()
+
+
+#: The columns the `latest_status` lookup walks (r3.3): the tenant and alert it is for, then newest first by `(created_at, id)`.
+LOOKUP_COLUMNS = "(tenant_id, alert_id, created_at DESC, id DESC)"
+
+
+def _investigation_reads(plan: dict[str, Any], *, above: tuple[str, ...] = ()) -> list[tuple[dict[str, Any], tuple[str, ...]]]:
+    """Every node reading `jobs.investigations`, at any depth, each with the node types between it and the nearest enclosing
+    sub-plan (or the root when it is not under one): what sits above it in the lookup that is its own."""
+    found = [(plan, above)] if plan.get("Relation Name") == "investigations" and plan.get("Schema", "jobs") == "jobs" else []
+    for child in plan.get("Plans", []):
+        path = () if child.get("Parent Relationship") in ("SubPlan", "InitPlan") else (*above, plan["Node Type"])
+        found += _investigation_reads(child, above=path)
+    return found
+
+
+def _plant_investigations(dsn: str, tenant: str, *, every: int) -> None:
+    """Two investigations (an earlier failed one, a later completed one) for every `every`th alert of the tenant, by SQL."""
+    execute(dsn, f"""
+        INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, stage, created_at, disposition, cost_usd,
+                                         cost_is_lower_limit, update_ticket)
+        SELECT gen_random_uuid(), a.tenant_id, a.id, 'k' || n, n, CASE n WHEN 1 THEN 'failed' ELSE 'completed' END,
+               a.fired_at + n * interval '1 second', CASE n WHEN 1 THEN NULL ELSE 'benign' END, 0, false, false
+        FROM (SELECT *, row_number() OVER (ORDER BY fired_at) AS r FROM jobs.alerts WHERE tenant_id = %s) a,
+             generate_series(1, 2) n
+        WHERE a.r %% {every} = 0""",  # noqa: S608 — constant
+            (tenant,))
+
+
+async def test_r33_every_latest_status_lookup_reads_the_alert_and_created_at_index_with_no_sort_though_most_alerts_have_no_investigation(
+    migrated_database: str,
+) -> None:
+    """Two tenants of 10,000 alerts, one in twenty with investigations (the rest none), `ANALYZE`d: the store's list
+    statement, with no filter and under an outcome filter, reads `jobs.investigations` only through an index whose columns
+    are `(tenant_id, alert_id, created_at DESC, id DESC)` (found by its definition in `pg_indexes`, not by its name), and no
+    Sort sits between that read and its own sub-plan's top. (r3.3 `latest_status` index)"""
+    from defender.jobs import JobStore
+
+    dsn = migrated_database
+    for tenant in (T1, T2):
+        register_tenant(dsn, tenant)
+        _plant(dsn, tenant, none_every=10, malicious_every=5)
+        _plant_investigations(dsn, tenant, every=20)
+    execute(dsn, "ANALYZE jobs.alerts")
+    execute(dsn, "ANALYZE jobs.investigations")
+    [(planted,)] = execute(dsn, "SELECT count(*) FROM jobs.investigations")
+    assert planted == 2 * (PER_TENANT // 20) * 2, "premise: the investigations were planted"
+
+    lookup = [name for (name, definition) in execute(
+        dsn, "SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = 'jobs' AND tablename = 'investigations'")
+        if LOOKUP_COLUMNS in definition]
+    assert len(lookup) == 1, f"one index of jobs.investigations is over {LOOKUP_COLUMNS}: {lookup}"
+
+    store = JobStore(dsn, clock=lambda: dt.datetime.fromtimestamp(NOW.timestamp(), dt.UTC))
+    try:
+        for tenant in (T1, T2):
+            for outcome in (None, no_outcome(), "benign"):
+                with planned(store) as plans:
+                    await store.list_alerts(tenant, outcome=outcome, after=None, **PAGE)
+                assert len(plans) == 1, f"premise: one statement: {plans}"
+                reads = _investigation_reads(plans[0])
+                where = f"tenant {tenant}, outcome {outcome!r}: {reads}"
+                assert reads, f"premise: the statement reads jobs.investigations: {where}"
+                for node, above in reads:
+                    assert node.get("Index Name") in lookup, where
+                    assert not [t for t in above if "Sort" in t], where
+    finally:
+        await store.close()
