@@ -88,7 +88,7 @@ async def test_o1_zero_findings_read_done_and_store_nothing(world):  # noqa: F81
     assert _stored(world["dsn"], job) == []
 
 
-async def test_1589_the_finish_audit_names_how_many_rows_the_end_stored(world, caplog):  # noqa: F811
+async def test_1589_the_finish_audit_names_how_many_rows_the_end_added(world, caplog):  # noqa: F811
     """With the row's count gone (#1589), the number of rows the end write added is in the store's own finish event:
     three rows of a job with three, none of a job with none (its record's old count, not even a number, ignored), and no count
     for a refused one."""

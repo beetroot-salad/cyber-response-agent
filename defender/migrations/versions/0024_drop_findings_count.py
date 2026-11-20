@@ -17,4 +17,3 @@ SCHEMA = "jobs"
 
 def upgrade() -> None:
     op.drop_column("learning_jobs", "findings_count", schema=SCHEMA)
-

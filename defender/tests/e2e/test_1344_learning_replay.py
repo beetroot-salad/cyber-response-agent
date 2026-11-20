@@ -46,7 +46,7 @@ JOB_COLUMNS = ("id", "status", "reason", "message", "fork_message_id", "publish_
 
 
 def _stored_by(dsn: str, job: str) -> int:
-    """How many learning work items the job's end stored: each carries the job as its `source_run`."""
+    """How many learning work items carry the job as their `source_run` (the rows its end added)."""
     return execute(dsn, "SELECT count(*) FROM learning.work_items WHERE source_run = %s", (job,))[0][0]
 
 
