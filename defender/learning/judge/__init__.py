@@ -161,7 +161,7 @@ def _run_world_draws(  # noqa: C901, PLR0913 — one loop over draws and their b
             trace_name=WIRE_LOG_NAMES.agent_trace(agent_id), label=agent_id)
         output = TypedOutput(
             name="verdict", description="File your verdict: the reply the task describes.",
-            schema=run_mod.REPLY_SCHEMA, retries=_REPLY_RETRIES,
+            schema=run_mod.reply_schema(scope), retries=_REPLY_RETRIES,
             check=run_mod.reply_check(scope=scope, reachable_systems=reachable_systems,
                                       shown_its_facts=shown_its_facts))
         doc, sent, failure = None, None, None
@@ -203,7 +203,7 @@ def _run_world_draws(  # noqa: C901, PLR0913 — one loop over draws and their b
             completed += 1
         malformed += refused
         _write_wire_log(episode, agent_id=agent_id, prompt=prompt,
-                        reply=sent if failure is None else None, failure=failure)
+                        reply=sent, failure=failure)
         if doc is None:
             # Every ask refused: nothing is written (each refused reply is on the call's own
             # trace), and
@@ -237,9 +237,10 @@ def _is_size_failure(failed: BaseException) -> bool:
 def _write_wire_log(
     episode: Episode, *, agent_id: str, prompt: str, reply: Any, failure: str | None,
 ) -> None:
-    """The judge's wire-log record — the whole framed prompt and the reply the call accepted
-    (its tool arguments, before the host shapes them into the draw document; `None` when
-    every reply was refused, each of those being on the call's own trace), one file per call,
+    """The judge's wire-log record — the whole framed prompt and the reply the seam returned
+    (its tool arguments, before the host shapes them into the draw document, kept beside the
+    failure when the call site refused it; `None` when the call accepted none, its refused
+    replies being on the call's own trace), one file per call,
     under `wire_logs/` so the existing wire-log policy denial covers it. Written here because
     the injected `judge=` seam carries no logger. Its own file name, never the wiring's
     `trace_name` (which `run_stage` streams to)."""

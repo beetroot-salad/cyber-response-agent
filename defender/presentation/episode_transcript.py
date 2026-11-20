@@ -429,6 +429,11 @@ def _transcript_block(trace: _Trace) -> str:  # noqa: C901, PLR0912 — one call
         if row.get("kind") == "request":
             newest = row
             continue
+        if row.get("kind") == "final_refusal":
+            # The reason the call gave up: refused, with no request left to carry it.
+            entries_html.append(
+                f'<div class="tx-entry tx-retry">{_uv(_as_text(row.get("reason")))}</div>')
+            continue
         if row.get("kind") != "response":
             continue
         entries_html += _retry_entries(newest)

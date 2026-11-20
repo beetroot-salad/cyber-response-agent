@@ -27,7 +27,8 @@ from defender.investigation.driver import MakeModel, build_agent_core
 
 from pydantic_ai import Agent
 from pydantic_ai import ModelRetry, RunContext, TextOutput, ToolOutput, capture_run_messages
-from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
+from pydantic_ai.exceptions import ToolRetryError, UnexpectedModelBehavior, UsageLimitExceeded
+from pydantic import ValidationError
 from pydantic_ai.messages import ModelRequest, ModelResponse, RetryPromptPart, ToolCallPart
 from pydantic_ai.usage import UsageLimits
 from defender._io import read_text_utf8
@@ -247,21 +248,47 @@ def _raw_args(ctx: RunContext[Any]) -> Any:
 
 
 def _typed_ending(typed: _Typed, stage: str, label: str, e: BaseException) -> Exception:
-    # Only the call running out of attempts is the model's failure; any other
-    # `UnexpectedModelBehavior` is the provider's (a malformed body, a content filter).
-    exhausted = isinstance(e, UsageLimitExceeded) or (
-        isinstance(e, UnexpectedModelBehavior) and "Exceeded maximum" in str(e))
-    if exhausted and not typed.host_fault:
+    if _ran_out(e) and not typed.host_fault:
         requests = typed.requests_sent()
         reason = typed.last_reason()
+        # The last refusal was never sent (the limit stopped its request), so no request row
+        # carries it: the trace records it, so the page shows why the call gave up.
+        typed.logger.log_final_refusal(reason=reason, agent_id=label)
         return ReplyUnusable(
             f"{stage} ({label}) reply unusable after {requests} requests: {reason}",
             reason=reason, requests=requests)
     # A transport, provider or host fault, or the wall clock: every request sent counts, the one
     # it cut included.
     raised = RunUnprocessable(f"{stage} ({label}) failed: {e!r}")
-    raised.requests = typed.requests_sent()
+    # At least the one it was making: a failure before any request reached the model (building
+    # the agent, the provider's client) still cost this call its attempt, and never a negative
+    # count of refused replies.
+    raised.requests = max(1, typed.requests_sent())
     return raised
+
+
+#: What the framework raises from under a retry budget it ran out of: the refusal it stopped
+#: re-asking (a check's `ModelRetry`, a schema's `ValidationError`, an unknown tool's retry).
+_REFUSALS = (ModelRetry, ToolRetryError, ValidationError)
+
+
+def _ran_out(e: BaseException) -> bool:
+    """Did the call end because the model ran out of attempts? The request limit, or one of the
+    framework's retry budgets (whatever its wording), which it raises from the refusal it stopped
+    re-asking. Any other `UnexpectedModelBehavior` (a malformed body, a content filter) is the
+    provider's and has no refusal under it."""
+    if isinstance(e, UsageLimitExceeded):
+        return True
+    if not isinstance(e, UnexpectedModelBehavior):
+        return False
+    seen: set[int] = set()
+    cause: BaseException | None = e.__cause__
+    while cause is not None and id(cause) not in seen:
+        if isinstance(cause, _REFUSALS):
+            return True
+        seen.add(id(cause))
+        cause = cause.__cause__
+    return False
 
 
 def _last_response_is_empty_text(messages: list[dict]) -> bool:

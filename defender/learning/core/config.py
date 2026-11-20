@@ -357,6 +357,9 @@ class StageContext:
 
 
 def subagent_timeout() -> int:
+    """One request's wall clock, in seconds. A typed call (the questioner's and the judge's,
+    #1579) may send 1 + its retries requests, so its wall clock is that many times this: 3x by
+    default, 1350 s before a stuck call is cut."""
     return env_int("LEARNING_SUBAGENT_TIMEOUT_SECONDS", 450)
 
 

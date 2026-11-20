@@ -416,18 +416,22 @@ def validate_reply(doc: Any, *, scope: str = "world", reachable_systems: Any = N
 
 #: The shape of the judge's reply as its output tool describes it. A description only: the check
 #: (`validate_reply`) is the owner of validity.
-REPLY_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "properties": {
-        "bucket": {"type": "string"}, "systems": {"type": "array", "items": {"type": "string"}},
-        "noise_floor_note": {"type": "string"},
-        "correlations": {"type": "array"}, "scope_checks": {"type": "array"},
-        "derivations": {"type": "array"},
-        INVESTIGATOR_FINDINGS: {"type": "array", "items": {"type": "object"}},
-        WORLD_FINDINGS: {"type": "array", "items": {"type": "object"}},
-        GAPS: {"type": "array", "items": {"type": "object"}},
-    },
+_REPLY_PROPERTIES: dict[str, Any] = {
+    "bucket": {"type": "string"}, "systems": {"type": "array", "items": {"type": "string"}},
+    "noise_floor_note": {"type": "string"},
+    "correlations": {"type": "array"}, "scope_checks": {"type": "array"},
+    "derivations": {"type": "array"},
+    INVESTIGATOR_FINDINGS: {"type": "array", "items": {"type": "object"}},
+    WORLD_FINDINGS: {"type": "array", "items": {"type": "object"}},
+    GAPS: {"type": "array", "items": {"type": "object"}},
 }
+
+
+def reply_schema(scope: str) -> dict[str, Any]:
+    """The reply's shape for `scope`: a family reply is never offered the world-only keys its
+    check refuses (`_WORLD_ONLY_KEYS`)."""
+    keys = [k for k in _REPLY_PROPERTIES if scope != "family" or k not in _WORLD_ONLY_KEYS]
+    return {"type": "object", "properties": {k: _REPLY_PROPERTIES[k] for k in keys}}
 
 
 def reply_check(*, scope: str, reachable_systems: Any, shown_its_facts: bool | None) -> Any:

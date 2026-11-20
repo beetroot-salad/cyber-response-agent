@@ -303,6 +303,53 @@ def test_p5_every_ending_says_how_many_replies_were_refused(tmp_path):
     assert (failed.value.requests, failed.value.refused) == (3, 2)
 
 
+def test_p5_a_failure_before_any_request_counts_one_request_and_no_refusal(tmp_path):
+    """Building the model fails before anything is sent: the call still cost its one attempt, and
+    its refused count is never negative (it is added to a world's malformed replies)."""
+    def broken(_name, _effort):
+        raise RuntimeError("no client for this model")
+
+    with pytest.raises(RunUnprocessable) as raised:
+        _stage(tmp_path, broken)
+    assert (raised.value.requests, raised.value.refused) == (1, 0)
+
+
+def test_p5_an_exhausted_calls_last_reason_is_on_its_trace(tmp_path):
+    """The last refusal is never sent (the limit stops its re-ask), so the trace records it as
+    the call's final refusal: the page can show why the call gave up."""
+    import json
+
+    calls = TY.ScriptedCalls([{"word": "a"}, {"word": "b"}, {"word": "LAST-ONE"}])
+    with pytest.raises(TY.reply_unusable()):
+        _stage(tmp_path, calls, label="q:fr")
+    trace = observe.stage_trace_path(tmp_path / "lrd", "q_fr_trace.jsonl")
+    rows = [json.loads(line) for line in trace.read_text(encoding="utf-8").splitlines() if line]
+    final = [r for r in rows if r.get("kind") == "final_refusal"]
+    assert len(final) == 1, rows
+    assert "LAST-ONE" in final[0]["reason"], final
+
+
+@pytest.mark.parametrize(("raised", "ran_out"), [
+    ("tool-budget", True), ("output-budget", True), ("provider", False), ("filter", False)])
+def test_p5_running_out_is_told_by_its_cause_not_its_wording(raised, ran_out):
+    """Either retry budget the framework raises from (whatever its message) is the model running
+    out; a provider's own `UnexpectedModelBehavior` carries no refusal under it."""
+    from pydantic_ai.exceptions import ContentFilterError, UnexpectedModelBehavior
+
+    from defender.learning import _pydantic_stage as stage
+
+    def under(message, cause):
+        e = UnexpectedModelBehavior(message)
+        e.__cause__ = cause
+        return e
+
+    e = {"tool-budget": under("Tool 'foo' exceeded max retries count of 4", ModelRetry("unknown")),
+         "output-budget": under("Exceeded maximum output retries (4)", ModelRetry("refused")),
+         "provider": UnexpectedModelBehavior("Invalid response from the endpoint"),
+         "filter": ContentFilterError("filtered")}[raised]
+    assert stage._ran_out(e) is ran_out
+
+
 def _provider_fault():
     from pydantic_ai.exceptions import UnexpectedModelBehavior
 

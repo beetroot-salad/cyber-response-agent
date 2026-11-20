@@ -343,6 +343,15 @@ class RequestLogger:
         self._write_record(rec)
         return rec
 
+    def log_final_refusal(self, *, reason: str, agent_id: str = "main") -> None:
+        """A typed call's last refusal, which ended it: the reply was refused and the request
+        limit stopped the re-ask that would have carried the reason, so no request row has it.
+        Best-effort, like the request records."""
+        rec = {"event_type": "final_refusal", "kind": "final_refusal", "reason": reason,
+               "agent_id": agent_id, "writer_id": writer_id(agent_id)}
+        with contextlib.suppress(Exception):
+            self._write_record(rec)
+
     def log_budget_refusal(self, *, tool_name: str, agent_id: str = "main") -> None:
         rec = {"event_type": "budget_refusal", "kind": "budget_refusal",
                "tool_name": tool_name, "agent_id": agent_id, "writer_id": writer_id(agent_id)}

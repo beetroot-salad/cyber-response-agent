@@ -176,7 +176,9 @@ names no commit refuses on its own, before the live tree is asked.
 its whole input inlined by the host. It answers through typed output (#1579): each
 call offers one output tool, and the host checks the tool's arguments inside the
 call, sending a refused reply back with its reason, up to 1 + 2 requests; text is
-never parsed as an answer. The calls together make the family manifest. It is
+never parsed as an answer. The call's wall clock scales with its requests: three times
+`LEARNING_SUBAGENT_TIMEOUT_SECONDS` (450 s by default), so a stuck questioner or
+judge call waits up to 1350 s before it is cut. The calls together make the family manifest. It is
 told which systems the tenant serves (`served_systems`, recorded on the manifest
 at launch) and shown real example answers per system from the capture
 (`samples.yaml`). It authors the **discriminator** (the fact the verdict turns

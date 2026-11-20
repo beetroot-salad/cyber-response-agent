@@ -216,3 +216,40 @@ def test_1579_a_judge_reply_that_repeats_a_key_is_re_asked(tmp_path):
     assert calls.request_counts() == [2, 1, 1]
     assert any("bucket" in r for r in calls.reasons_sent(0)), calls.reasons_sent(0)
     assert (_row(ep)["completed_draws"], _row(ep)["malformed_replies"]) == (1, 1)
+
+
+def test_1579_the_family_call_is_not_offered_the_world_only_keys_its_check_refuses(tmp_path):
+    """The family reply is refused for carrying `bucket`, `systems`, investigator findings or
+    gaps, so its tool never describes them; a world call's tool still does."""
+    ep = _episode(tmp_path)
+    calls = TY.ScriptedCalls([J.reply_doc()], [J.reply_doc()], [J.family_reply()])
+
+    _grade(ep, calls)
+
+    world = set(calls.offered[0][0].parameters_json_schema["properties"])
+    family = set(calls.offered[2][0].parameters_json_schema["properties"])
+    world_only = {"bucket", "systems", "investigator_findings", "gaps"}
+    assert world_only <= world, world
+    assert not world_only & family, family
+    assert "world_findings" in family
+
+
+def test_1579_a_reply_the_call_site_refuses_is_kept_on_the_framed_wire_log(tmp_path):
+    """A seam's reply refused at the call site has no trace of its own: the framed record keeps
+    it beside the failure."""
+    ep = _episode(tmp_path)
+    b = J.world_id(ep, "b")
+    bad = {**J.reply_doc(), "stray_key": "MARK-STRAY"}
+
+    def judge(_prompt, *, agent_id, **_kw):
+        if agent_id.startswith("judge:family"):
+            return J.family_reply(), 1
+        return (bad if agent_id == f"judge:{b}:0" else J.reply_doc()), 1
+
+    J.grade_at(ep, judge=judge, draws=1, store=MemoryStore())
+
+    path = ep / "wire_logs" / WIRE_LOG_NAMES.agent_framed_trace(f"judge:{b}:0")
+    row = json.loads(path.read_text(encoding="utf-8").splitlines()[-1])
+    assert row["failure"], row
+    assert row["reply"] == bad, row
+    assert _row(ep)["malformed_replies"] == 1

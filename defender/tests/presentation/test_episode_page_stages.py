@@ -383,6 +383,19 @@ def test_1579_a_repeated_refusal_under_a_reused_call_id_renders_both_times(tmp_p
     assert block.index("ATTEMPT-ONE") < block.index("SAME-REASON") < block.index("ATTEMPT-TWO")
 
 
+def test_1579_an_exhausted_calls_last_reason_renders_after_its_last_attempt(tmp_path):
+    ep = E.sample_episode(tmp_path)
+    attempts = [{"args": {"word": "ATTEMPT-ONE"}, "retry": "REASON-ONE"},
+                {"args": {"word": "ATTEMPT-TWO"}}]
+    rows = E.typed_call_rows("questioner:d", attempts)
+    rows.append({"event_type": "final_refusal", "kind": "final_refusal",
+                 "reason": "LAST-REASON", "agent_id": "questioner:d"})
+    E.write_trace(ep.dir, "questioner:d", rows=rows)
+    block = render(ep).text_of("tx-questioner_d_trace")
+    assert block.count("LAST-REASON") == 1, block
+    assert block.index("ATTEMPT-TWO") < block.index("LAST-REASON")
+
+
 def test_1579_the_fixture_has_the_shape_a_real_request_logger_writes(tmp_path):
     """Drift guard (#1579 F12): a real `RequestLogger` over a bare agent scripted with `ScriptedCalls`
     (two requests: a refused tool call, then a corrected one) writes the rows `E.typed_call_rows`
