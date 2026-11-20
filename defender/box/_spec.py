@@ -136,9 +136,11 @@ CODE_CHECK_FILE = "MOUNT_CHECK"
 #: `code` reads back `CODE_CHECK_FILE` under the request's code root; `data` reads back its first
 #: regular file (an empty folder passes, #665 Decision 9); `staged` is the root of a copy the host
 #: made (a drain's draft, a run's knowledge), holding only `agent/` (and a run copy's
-#: `settings/`), with a fresh token planted at its root and read back for each start. Never
+#: `settings/`), with a fresh token planted at its root and read back for each start; `scratch`
+#: is a folder the host writes into and the box only reads (the oracle's saved reads, #1557),
+#: empty or not, with a fresh token planted at its root and read back for each start. Never
 #: inferred from a name or a path. The retired `agent` kind is refused like any other word.
-MountKind = Literal["code", "data", "staged"]
+MountKind = Literal["code", "data", "staged", "scratch"]
 
 
 @dataclass(frozen=True)
