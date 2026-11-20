@@ -1,9 +1,10 @@
 // Accepting an invitation, the shell's second write (alert list design O11, Flows "Shell, accept"): success is a full
 // load of the accepted tenant's alerts address by `assign` (never `replace`: Back returns to Home), a 401 is the
 // shell's sign-in round trip back to /home, and the caller gets the shell's Outcome shape (r3.1, like signOut's
-// SignOutResult): `{kind:"left"}` after either navigation, `{kind:"not-open"}` for a 404, `{kind:"refused"}` for any other
-// 4xx (r3.3: worded "You can't accept this invitation."), `{kind:"error"}` for a 5xx, no answer or a non-JSON success, and `{kind:"gone"}` when the load was superseded. Each case asserts
-// the whole effect log, as load.test.ts does.
+// SignOutResult): `{kind:"left"}` after either navigation, `{kind:"not-open"}` for a 404, `{kind:"refused"}` for
+// any other 4xx (r3.3: worded "You can't accept this invitation."), `{kind:"error"}` for a 5xx, no answer or a
+// non-JSON success, and `{kind:"gone"}` when the load was superseded. Each case asserts the whole effect log, as
+// load.test.ts does.
 // FORCED CHOICE: the load-level entry is `load.client.acceptInvitation(id)` beside `signOut`; the design names only the
 // action a screen holds (`useActions().acceptInvitation`).
 import { describe, expect, it } from "vitest";
