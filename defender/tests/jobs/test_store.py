@@ -3871,22 +3871,31 @@ async def test_1507_the_alert_list_never_reads_an_alerts_raw_payload(dsn):
         stored.alert_id, T1, "elastic", "T-1507", fired, changed, received, ALERT_BYTES_TITLE, ALERT_BYTES_DESCRIPTION)
 
 
-def test_1507_an_alert_listing_is_every_stored_alert_field_but_raw():
-    """A field added to alerts reaches the list too: the listing is the single read less `raw`, field for field (#1507)."""
+def test_1507_an_alert_listing_is_every_stored_alert_field_but_raw_plus_the_two_it_computes_or_carries():
+    """A field added to alerts reaches the list unless deliberately left out: the listing is the single read less `raw`,
+    plus `outcome` (a stored column the single read does not carry) and `latest_status` (the list query's), field for
+    field; the table's two outcome bookkeeping columns are left out of the list. (#1507, #1581 O3)"""
     from defender.jobs import AlertListing, StoredAlert
     from defender.jobs.models import ALERT_LISTING_COLUMNS, AlertRow, alert_listing, stored_alert
 
-    assert {f.name for f in dataclasses.fields(AlertListing)} == {f.name for f in dataclasses.fields(StoredAlert)} - {"raw"}
-    assert "raw" not in {c.key for c in ALERT_LISTING_COLUMNS}
+    stored_fields = {f.name for f in dataclasses.fields(StoredAlert)}
+    assert {f.name for f in dataclasses.fields(AlertListing)} == (stored_fields - {"raw"}) | {"outcome", "latest_status"}
+    every_column = {c.key for c in AlertRow.__table__.columns}
+    assert {c.key for c in ALERT_LISTING_COLUMNS} == every_column - {"raw", "outcome_investigation_id", "outcome_created_at"}
+    assert "outcome" in {c.key for c in ALERT_LISTING_COLUMNS}
     when = [NOW + dt.timedelta(minutes=n) for n in range(3)]
     row = AlertRow(id=fixture_uuid("alert"), tenant_id=T1, vendor="v", vendor_ticket_id="t", fired_at=when[0],
-                   changed_at=when[1], received_at=when[2], title="ti", description="de", raw=b"r")
+                   changed_at=when[1], received_at=when[2], title="ti", description="de", raw=b"r",
+                   outcome="malicious")
 
-    class _Selected:  # a result row of `ALERT_LISTING_COLUMNS`, as the list's query answers it
-        _mapping = {c.key: getattr(row, c.key) for c in ALERT_LISTING_COLUMNS}
+    class _Selected:  # a result row of `ALERT_LISTING_COLUMNS` plus the computed `latest_status`, as the list's query answers it
+        _mapping = {**{c.key: getattr(row, c.key) for c in ALERT_LISTING_COLUMNS}, "latest_status": "completed"}
 
     whole = stored_alert(row)
-    assert dataclasses.asdict(alert_listing(_Selected())) == {  # type: ignore[arg-type]
+    listed = dataclasses.asdict(alert_listing(_Selected()))  # type: ignore[arg-type]
+    assert listed["outcome"] == "malicious"
+    assert listed["latest_status"] == "completed"
+    assert {k: v for k, v in listed.items() if k not in ("outcome", "latest_status")} == {
         f.name: getattr(whole, f.name) for f in dataclasses.fields(whole) if f.name != "raw"}
 
 
