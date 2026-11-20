@@ -3829,14 +3829,6 @@ async def test_1083_the_store_lists_one_tenants_rows_as_its_own_record_types_wit
     assert [a.alert_id for a in theirs] == ids["theirs"][:1], "control: the other tenant lists its own"
 
 
-def _selected(statement: str) -> str:
-    """The select list of a SQL statement: what comes before its first `FROM`, whatever whitespace surrounds it."""
-    head, found, _ = statement.partition("FROM")
-    assert found, f"no FROM: {statement!r}"
-    assert head.lstrip().startswith("SELECT"), f"not a select: {statement!r}"
-    return head
-
-
 async def test_1507_the_alert_list_never_reads_an_alerts_raw_payload(dsn):
     """Intent (#1507): a list of alerts shows each alert's summary fields and never reads or holds its `raw` payload;
     the single-alert read still carries it. The check is on what the database is asked for, not only on what comes back."""
@@ -3846,19 +3838,21 @@ async def test_1507_the_alert_list_never_reads_an_alerts_raw_payload(dsn):
     async with job_store(dsn) as store:
         stored = await store.insert_alert(T1, vendor="elastic", vendor_ticket_id="T-1507", fired_at=fired,
                                           changed_at=changed, received_at=received, raw=ALERT_BYTES)
-        asked: list[str] = []
-        event.listen(store._engine.sync_engine, "before_cursor_execute",
-                     lambda _conn, _cursor, statement, *_rest: asked.append(statement))
+        # The names of the columns each query's answer carries, as the database sends them: any spelling of a query
+        # that reads `raw` (`SELECT *`, an alias, raw SQL) answers a column named `raw`.
+        answered: list[list[str]] = []
+        event.listen(store._engine.sync_engine, "after_cursor_execute",
+                     lambda _conn, cursor, *_rest: answered.append([c[0] for c in cursor.description or ()]))
         listed = await store.list_alerts(T1, fired_after=None, fired_before=None, after=None, limit=50)
-        list_asked, asked[:] = [s for s in asked if "alerts" in s], []
+        list_answered, answered[:] = list(answered), []
         single = await store.get_alert(T1, stored.alert_id)
-        single_asked = [s for s in asked if "alerts" in s]
+        single_answered = list(answered)
 
     assert single is not None
     assert single.raw == ALERT_BYTES, "control: the single read carries the payload"
-    assert any("jobs.alerts.raw" in _selected(s) for s in single_asked), "control: the capture sees a select of raw"
-    assert list_asked, "control: the capture saw the list's query"
-    assert not any("jobs.alerts.raw" in _selected(s) for s in list_asked), f"the list selected raw: {list_asked}"
+    assert any("raw" in names for names in single_answered), f"control: the capture sees raw read: {single_answered}"
+    assert any("vendor_ticket_id" in names for names in list_answered), f"control: the capture saw the list: {list_answered}"
+    assert not any("raw" in names for names in list_answered), f"the list read raw: {list_answered}"
     [one] = listed
     assert not hasattr(one, "raw"), f"a list record holds the payload: {one!r}"
     assert (one.alert_id, one.tenant_id, one.vendor, one.vendor_ticket_id, one.fired_at, one.changed_at,
@@ -3867,12 +3861,22 @@ async def test_1507_the_alert_list_never_reads_an_alerts_raw_payload(dsn):
 
 
 def test_1507_an_alert_listing_is_every_stored_alert_field_but_raw():
-    """A field added to alerts reaches the list too: the listing and its select are all of the alert but `raw` (#1507)."""
+    """A field added to alerts reaches the list too: the listing is the single read less `raw`, field for field (#1507)."""
     from defender.jobs import AlertListing, StoredAlert
-    from defender.jobs.models import ALERT_LISTING_COLUMNS, AlertRow
+    from defender.jobs.models import ALERT_LISTING_COLUMNS, AlertRow, alert_listing, stored_alert
 
     assert {f.name for f in dataclasses.fields(AlertListing)} == {f.name for f in dataclasses.fields(StoredAlert)} - {"raw"}
-    assert {c.key for c in ALERT_LISTING_COLUMNS} == {c.key for c in AlertRow.__table__.columns} - {"raw"}
+    assert "raw" not in {c.key for c in ALERT_LISTING_COLUMNS}
+    when = [NOW + dt.timedelta(minutes=n) for n in range(3)]
+    row = AlertRow(id=fixture_uuid("alert"), tenant_id=T1, vendor="v", vendor_ticket_id="t", fired_at=when[0],
+                   changed_at=when[1], received_at=when[2], title="ti", description="de", raw=b"r")
+
+    class _Selected:  # a result row of `ALERT_LISTING_COLUMNS`, as the list's query answers it
+        _mapping = {c.key: getattr(row, c.key) for c in ALERT_LISTING_COLUMNS}
+
+    whole = stored_alert(row)
+    assert dataclasses.asdict(alert_listing(_Selected())) == {  # type: ignore[arg-type]
+        f.name: getattr(whole, f.name) for f in dataclasses.fields(whole) if f.name != "raw"}
 
 
 async def test_1083_the_store_lists_filter_by_alert_and_by_investigation_and_page_strictly_after_a_position(dsn):

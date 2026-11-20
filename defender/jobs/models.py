@@ -11,6 +11,7 @@ from typing import Any, Protocol
 
 from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKeyConstraint, Index, Integer, LargeBinary, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.engine import Row
 from sqlalchemy.orm import Mapped, mapped_column
 
 from defender._model import model
@@ -296,16 +297,15 @@ def learning_job_record(row: LearningJobRow) -> LearningJobRecord:
 
 
 #: The columns an alert list selects: every column but `raw` (#1507).
-ALERT_LISTING_COLUMNS = (AlertRow.id, AlertRow.tenant_id, AlertRow.vendor, AlertRow.vendor_ticket_id, AlertRow.fired_at,
-                         AlertRow.changed_at, AlertRow.received_at, AlertRow.title, AlertRow.description)
+ALERT_LISTING_COLUMNS = tuple(column for column in AlertRow.__table__.columns if column.key != "raw")
 
 
-def alert_listing(row: Any) -> AlertListing:
-    """An `AlertListing` from a row of `ALERT_LISTING_COLUMNS`."""
-    return AlertListing(
-        alert_id=row.id, tenant_id=row.tenant_id, vendor=row.vendor, vendor_ticket_id=row.vendor_ticket_id,
-        fired_at=row.fired_at, changed_at=row.changed_at, received_at=row.received_at, title=row.title,
-        description=row.description)
+def alert_listing(row: Row[Any]) -> AlertListing:
+    """An `AlertListing` from a row of `ALERT_LISTING_COLUMNS`, each field the column of its name (`alert_id` is `id`):
+    a column the record lacks, or a field no column fills, is a `TypeError`, never a field left at a default."""
+    values = dict(row._mapping)
+    values["alert_id"] = values.pop("id")
+    return AlertListing(**values)
 
 
 def stored_alert(row: AlertRow) -> StoredAlert:
