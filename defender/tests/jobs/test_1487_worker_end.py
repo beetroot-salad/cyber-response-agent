@@ -20,7 +20,7 @@ from defender.tests.jobs.test_1344_learning_jobs import (
     world,  # noqa: F401 — fixture
 )
 from defender.tests.support.jobs import _findings1487 as F
-from defender.tests.support.jobs._jobs1342 import T1, job_store, move_tenant
+from defender.tests.support.jobs._jobs1342 import T1, JobsAudit, job_store, move_tenant
 from defender.tests.support.learning.core._store1278 import call
 from defender.tests.support.shared._postgres1339 import execute
 
@@ -29,7 +29,7 @@ pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
 ITEMS = "learning.work_items"
 
 
-async def _run(world, jobs_with, *, children=None, slots=1, **kw):  # noqa: F811
+async def _run(world, jobs_with, *, children=None, slots=1, ticket="J", **kw):  # noqa: F811
     """Queue one job per `jobs_with(job_id) -> record text`, run the worker to the end of them all; the job ids."""
     child = F.child_class()(world["tmp"] / "job", world["runs"])
     child.records = {}
@@ -37,7 +37,7 @@ async def _run(world, jobs_with, *, children=None, slots=1, **kw):  # noqa: F811
     ids = []
     async with job_store(world["dsn"]) as store:
         for n, make in enumerate(jobs_with):
-            job = await queued_job(world, store, ticket=f"J-{n}")
+            job = await queued_job(world, store, ticket=f"{ticket}-{n}")
             child.records[job] = make(job)
             ids.append(job)
         worker = learning_worker(world, store, job=child, post=post, slots=slots + 1, learning_slots=slots, **kw)
@@ -68,12 +68,12 @@ def _both(job: str):
 
 
 async def test_o1_a_completed_jobs_findings_are_stored_waiting_for_its_tenant_with_its_ending(world):  # noqa: F811
-    """Both channels' rows land `waiting`, tenant and `source_run` the job's, publish state `done`, the count derived
-    from the stored rows (the record's own 99 ignored). (O1, Flow 1 step 3)"""
+    """Both channels' rows land `waiting`, tenant and `source_run` the job's, publish state `done` (the record's
+    old count of 99 ignored, #1589). (O1, Flow 1 step 3)"""
     dsn = world["dsn"]
     [job] = await _run(world, [_both])
     row = job_row(dsn, job)
-    assert (row["status"], row["publish_state"], row["findings_count"]) == ("completed", "done", 3), row
+    assert (row["status"], row["publish_state"]) == ("completed", "done"), row
     assert _stored(dsn, job) == [(T1, "finding", f"{job}/w-b/0/0", "waiting"), (T1, "finding", f"{job}/w-b/0/1", "waiting"),
                                  (T1, "questioner_finding", f"{job}/w-c/0/0", "waiting")]
     [(payload,)] = execute(dsn, "SELECT payload FROM learning.work_items WHERE item_key = %s", (f"{job}/w-c/0/0",))
@@ -81,11 +81,25 @@ async def test_o1_a_completed_jobs_findings_are_stored_waiting_for_its_tenant_wi
 
 
 async def test_o1_zero_findings_read_done_and_store_nothing(world):  # noqa: F811
-    """`ok` with both channels empty: `done`, no rows, count 0. (O1)"""
+    """`ok` with both channels empty: `done`, no rows. (O1)"""
     [job] = await _run(world, [lambda j: F.record(findings=F.ok(), count=5)])
     row = job_row(world["dsn"], job)
-    assert (row["status"], row["publish_state"], row["findings_count"]) == ("completed", "done", 0)
+    assert (row["status"], row["publish_state"]) == ("completed", "done")
     assert _stored(world["dsn"], job) == []
+
+
+async def test_1589_the_finish_audit_names_how_many_rows_the_end_stored(world, caplog):  # noqa: F811
+    """With the row's count gone (#1589), the number of rows the end write added is in the store's own finish event:
+    three rows of a job with three, none of a job with none (its record's old count, not even a number, ignored), and no count
+    for a refused one."""
+    audit = JobsAudit(caplog)
+    [first] = await _run(world, [_both])
+    [again] = await _run(world, [lambda j: F.record(findings=F.ok(), count="not a count")], ticket="again")
+    [refused] = await _run(world, [lambda j: F.record(findings={"state": "malformed"})], ticket="refused")
+    details = {e.target: e.detail for e in audit.events() if e.action == "learning_job.finish"}
+    assert details[first] == "status=completed findings=done stored=3", details
+    assert details[again] == "status=completed findings=done stored=0", details
+    assert details[refused] == "status=completed findings=refused", details
 
 
 @pytest.mark.parametrize("status", ["failed", "skipped"])

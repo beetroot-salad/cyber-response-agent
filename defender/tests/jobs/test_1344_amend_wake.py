@@ -54,7 +54,7 @@ def _either(follow, check):
 def _end_completed(dsn: str, job: str) -> None:
     """End `job` `completed` with its findings stored (`done`): a job nothing runs for any more, its tenant's clock armed
     by its queueing."""
-    execute(dsn, "UPDATE jobs.learning_jobs SET status = 'completed', publish_state = 'done', findings_count = 1, "
+    execute(dsn, "UPDATE jobs.learning_jobs SET status = 'completed', publish_state = 'done', "
                  "finished_at = %s, lease_expires_at = NULL WHERE id = %s", (NOW, job))
 
 
@@ -144,7 +144,7 @@ async def test_a1_a_job_s_own_post_step_restarts_its_tenant_s_clock(world, monke
     follow = post_child(world)
     async with job_store(dsn) as store:
         job = await queued_job(world, store, ticket="J-1")
-        worker = learning_worker(world, store, job=job_child(world, files={END: learning_end("completed", findings=1)}),
+        worker = learning_worker(world, store, job=job_child(world, files={END: learning_end("completed")}),
                                  post=_either(follow, check), learning_check_interval=3.0, **_FAST)
         serving = asyncio.create_task(worker.serve())
         try:

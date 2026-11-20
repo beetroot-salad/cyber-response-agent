@@ -857,8 +857,8 @@ class JobStore:
         A `completed` end stores the job's findings with it (#1487 Flow 1 step 3), one transaction
         in this order: the tenant's share lock, first; the fence; then `findings` (`{kind: rows}`,
         already screened by the worker; `None`: the worker refused them) inserted as the job's
-        under a savepoint (`learning_models.insert_findings`), publish state `done` and the count
-        of rows stored, or, refused there, for a tenant not `active`, or with `findings` `None`, `refused`
+        under a savepoint (`learning_models.insert_findings`), publish state `done` (how many rows
+        it added is in the finish event, not the row), or, refused there, for a tenant not `active`, or with `findings` `None`, `refused`
         and nothing of the job stored, logged with its kind; then the tenant's check clock armed,
         marked when a post-step holds it. An outage at the insert raises, the whole end with it, for
         the caller to retry, and so does `FindingsNotStored` (an insert error neither the content nor
@@ -869,7 +869,7 @@ class JobStore:
             raise ValueError(f"a {status} end stores no findings")
         values: dict[str, Any] = {
             "status": status, "reason": reason, "message": message, "finished_at": self._clock(),
-            "lease_expires_at": None, "findings_count": 0, "publish_state": "none"}
+            "lease_expires_at": None, "publish_state": "none"}
         if progress is not None:
             values.update(fork_message_id=progress.fork_message_id, stage=progress.stage,
                           sibling_cost_usd=progress.sibling_cost_usd)
@@ -881,8 +881,9 @@ class JobStore:
                 .with_for_update())).scalar()
             if fenced is None:
                 return None
+            stored = None
             if status == "completed":
-                values.update(await _store_findings(s, tenant_id, learning_job_id, state, findings))
+                values["publish_state"], stored = await _store_findings(s, tenant_id, learning_job_id, state, findings)
             row = (await s.execute(
                 update(LearningJobRow).where(LearningJobRow.id == learning_job_id)
                 .values(**values).returning(LearningJobRow).execution_options(synchronize_session=False))
@@ -892,7 +893,8 @@ class JobStore:
             record = learning_job_record(row)
         announce("learning_job.finish", actor=SYSTEM, tenant_id=tenant_id, target=learning_job_id,
                  detail=f"status={status}" + (f" reason={reason}" if reason else "")
-                 + (f" findings={record.publish_state}" if status == "completed" else ""))
+                 + (f" findings={record.publish_state}" if status == "completed" else "")
+                 + (f" stored={stored}" if stored is not None else ""))
         return record
 
     async def hand_back_learning_job(
@@ -971,9 +973,9 @@ class JobStore:
 
 
 async def _store_findings(s: AsyncSession, tenant_id: str, job_id: str, state: str | None,
-                          findings: Mapping[str, Sequence[Mapping[str, Any]]] | None) -> dict[str, Any]:
+                          findings: Mapping[str, Sequence[Mapping[str, Any]]] | None) -> tuple[str, int | None]:
     """A `completed` end's findings, in its transaction after the fence (#1487 Flow 1 step 3): the row's publish state
-    and count. Stored only for an `active` tenant (its state as the share lock read it) and findings the worker
+    and how many rows the insert added (`None` when refused; the row keeps no count, #1589). Stored only for an `active` tenant (its state as the share lock read it) and findings the worker
     accepted; anything else, or a refusal at the insert, is `refused`, logged with the job and the refusal's kind.
     An outage at the insert raises."""
     from .learning_models import insert_findings  # the learning store's tables load only for a learning job's end
@@ -985,12 +987,12 @@ async def _store_findings(s: AsyncSession, tenant_id: str, job_id: str, state: s
     else:
         inserted = await insert_findings(s, tenant_id, findings, source_run=job_id)
         if inserted.stored:
-            return {"publish_state": "done", "findings_count": inserted.added}
+            return "done", inserted.added
         kind = f"refused at the insert: {inserted.why}"
     if findings is not None:
         _logger.warning("learning job %s: its findings are refused (%s); the job ends completed and none of them is "
                         "stored", job_id, kind)
-    return {"publish_state": "refused", "findings_count": 0}
+    return "refused", None
 
 
 def _locked_in_id_order(column: Any, *where: Any) -> Any:

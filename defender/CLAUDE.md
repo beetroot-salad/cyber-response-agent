@@ -41,6 +41,13 @@ they start, the learning drains, the lifecycle service) refuses a database whose
 migration may lock the tables it changes until it commits. So: stop the API, the workers, the learning drains and the
 lifecycle service; run migrations; start the new code. The notes below say only what an upgrade needs beyond that.
 
+## Upgrade from before #1589
+
+Run migrations (revision `0024_drop_findings_count`): it drops `jobs.learning_jobs.findings_count`, which nothing
+decided on. A job's stored findings carry its id (`source_run`), and the finish audit event of a completed job whose
+findings were stored names how many rows its end added (`stored=N`); a refused one names none. A job image built before #1589 still writes a `findings_count` into its end record; the
+worker accepts it and ignores its value, so the image need not be rebuilt at the same time.
+
 ## Upgrade from before #1557
 
 A learning job's oracle boxes no longer keep their scratch in the tenant's folder: it lives under the claim's folder

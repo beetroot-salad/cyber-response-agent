@@ -142,7 +142,6 @@ class LearningJobRow(Base, kw_only=True):
     fork_message_id: Mapped[str | None] = mapped_column(Text, default=None)
     #: The siblings' own cost so far, then final: partial, without the questioner, oracle and judge (O13).
     sibling_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
-    findings_count: Mapped[int] = mapped_column(Integer, default=0)
     publish_state: Mapped[str] = mapped_column(Text, default="none")
     started_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
     #: Set at the end; on a `running` row, the mark of a hand-back, which no renewal covers.
@@ -239,7 +238,6 @@ class LearningJobRecord:
     stage: str | None
     fork_message_id: str | None
     sibling_cost_usd: float
-    findings_count: int
     publish_state: str
     created_at: _dt.datetime
     started_at: _dt.datetime | None
@@ -276,7 +274,7 @@ def learning_job_record(row: LearningJobRow) -> LearningJobRecord:
         learning_job_id=row.id, tenant_id=row.tenant_id, alert_id=row.alert_id, investigation_id=row.investigation_id,
         request_key=row.request_key, attempt=row.attempt, trigger=row.trigger, status=row.status, stage=row.stage,
         fork_message_id=row.fork_message_id, sibling_cost_usd=row.sibling_cost_usd,
-        findings_count=row.findings_count, publish_state=row.publish_state, created_at=row.created_at,
+        publish_state=row.publish_state, created_at=row.created_at,
         started_at=row.started_at, finished_at=row.finished_at, reason=row.reason, message=row.message)
 
 
