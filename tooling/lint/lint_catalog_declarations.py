@@ -18,6 +18,8 @@ An adapter offering the host's comment action (`add_case_comment`, defined or im
 #1504 O5, O6: a reference `<module stem>.md` sits beside each adapter module (connect's example, the seed a generated
 adapter is copied from, included) with a non-empty `## Credential` and a non-empty `## Pitfalls` section.
 
+An adapter imports no `proxy_client` (#1504 O2): every request leaves through the transport's capture seam.
+
 K8: no declared settings key is named like a secret (`TOKEN`, `PASSWORD`, `PASSWD`, `SECRET`, `CREDENTIAL`, `API_KEY`,
 `APIKEY`, or a `*_SECRET_REF` reference, each also under a trailing `_ENV`, as connect's retired scan read it): a
 secret is a credential in the secret store, never a setting. This replaces connect's validator scan of a tenant's
@@ -184,7 +186,21 @@ def scan_file(path: Path, rel: str) -> list[str]:
     if COMMENT_ACTION in defined and COMMENT_ROUTE not in defined:
         findings.append(f"{rel}: offers {COMMENT_ACTION} but declares no {COMMENT_ROUTE}(settings): the route the "
                         "comment is sent on must be declared")
+    findings.extend(_bypass_findings(tree, rel))
     return findings + _reference_findings(path, rel)
+
+
+def _bypass_findings(tree: ast.Module, rel: str) -> list[str]:
+    """#1504 O2: an adapter sends through the transport's capture seam, never through the proxy client directly, so the
+    test that matches the sent requests with the declared list sees every request."""
+    out: list[str] = []
+    for node in ast.walk(tree):
+        names = ([a.name for a in node.names] if isinstance(node, ast.Import)
+                 else [node.module or "", *(a.name for a in node.names)] if isinstance(node, ast.ImportFrom) else [])
+        if any("proxy_client" in name.split(".") for name in names):
+            out.append(f"{rel}:{node.lineno}: imports the proxy client; send through `defender.kit.transport`, whose "
+                       "capture seam the declared-reads test watches")
+    return out
 
 
 def _reference_findings(path: Path, rel: str) -> list[str]:
