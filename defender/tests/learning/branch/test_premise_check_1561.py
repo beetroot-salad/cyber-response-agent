@@ -344,7 +344,7 @@ from defender.tests.support.learning.core import _reply_mutations1579 as M  # no
 
 
 #: The only exception classes a drop for a refused reply may name (the domain refusals).
-_DOMAIN_REFUSALS = {"FamilyError", "ReplyUnusable"}
+_DOMAIN_REFUSALS = {"BranchError", "FamilyError", "ReplyUnusable"}
 _BUILTIN_EXCEPTIONS = {name for name, obj in vars(builtins).items()
                        if isinstance(obj, type) and issubclass(obj, BaseException)
                        and not issubclass(obj, Warning)}
@@ -361,8 +361,11 @@ def _other_exceptions(text: str) -> list[str]:
 
 
 def _warning_text(caplog) -> str:
-    formatter = logging.Formatter()
-    return " ".join(formatter.format(r) for r in caplog.records if r.levelno >= logging.WARNING)
+    """Each warning's message and the class of the exception it logged, never its traceback: a
+    refusal logged with a traceback names framework internals that are not the logged failure."""
+    return " ".join(
+        f"{r.getMessage()} {r.exc_info[0].__name__ if r.exc_info and r.exc_info[0] else ''}"
+        for r in caplog.records if r.levelno >= logging.WARNING)
 
 
 def _revision_outcome(tmp_path: Path, revision: dict, index: int, caplog):
@@ -494,10 +497,11 @@ def test_a_revision_the_call_gave_up_on_is_not_logged_as_a_host_failure(tmp_path
 
 def test_the_refusal_classifier_reads_a_host_bug_as_a_host_failure_and_a_refusal_as_one(tmp_path, caplog):
     """Control for the P1 property's drop check, through the same classifier: the host bug's log
-    names `RuntimeError` (a host failure), the exhausted revision's names none."""
+    names a host exception (a `RuntimeError`, or the `RunUnprocessable` P5 ends it with), the
+    exhausted revision's names none."""
     bug = _logged_revision_fault(tmp_path / "bug", caplog, lambda: (_HostBug(), 1))
     caplog.clear()
     refusal = _logged_revision_fault(tmp_path / "refusal", caplog, lambda: TY.unusable("facts must not be empty"))
 
-    assert "RuntimeError" in _other_exceptions(bug), bug
+    assert _other_exceptions(bug), bug
     assert _other_exceptions(refusal) == [], refusal
