@@ -576,8 +576,8 @@ jobs:
         run: defender/.venv/bin/python -m pytest contract-first/scripts -q
 
       # The lints' own tests (planted trees run through each lint) live beside the lints they
-      # test, not in the defender suite: the lints are standalone programs that do not import the
-      # product. Same idiom as the step above: the defender venv's pytest, from the repo root.
+      # test, not in the defender suite: they run each lint over planted trees, and a lint imports
+      # at most a low product layer (e.g. `defender.kit`). Same idiom as the step above: the defender venv's pytest, from the repo root.
       - name: Run lint tool tests
         run: defender/.venv/bin/python -m pytest tooling/lint/tests -q
 

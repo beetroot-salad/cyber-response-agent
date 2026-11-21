@@ -19,7 +19,7 @@ if (_root := str(_Path(__file__).resolve().parents[2])) not in _sys.path:
     _sys.path.insert(0, _root)
 
 from defender._model import model
-from defender.kit.access import READ_METHODS, is_read_method
+from defender.kit.access import is_read_method
 from defender.kit.faults import ConfinementFault
 
 
@@ -33,8 +33,7 @@ class AllowlistError(Exception):
 class ReadEndpointAllowlist(Mapping):
     """A validating `Mapping[system, tuple[(endpoint_pattern, method), ...]]`. Refuses at
     authoring time an entry naming no HTTP method — the method is what separates the ticket
-    store's read from its write on the same path — or one the proxy needs a declaration for
-    (not in `kit.access.READ_METHODS`), which is never judged here (#1504 A6.1)."""
+    store's read from its write on the same path."""
 
     def __init__(self, table: Mapping[str, Iterable[Any]]):
         validated: dict[str, tuple[tuple[str, str], ...]] = {}
@@ -50,12 +49,6 @@ class ReadEndpointAllowlist(Mapping):
                 if not method:
                     raise AllowlistError(
                         f"{system}: read-endpoint entry {entry!r} names no HTTP method"
-                    )
-                if not is_read_method(method):
-                    # `confine_read_endpoint` judges only these: an entry of another method would never be consulted.
-                    raise AllowlistError(
-                        f"{system}: read-endpoint entry {entry!r} names {method}, which is not judged in-process "
-                        f"(only {' and '.join(READ_METHODS)} are; the credential proxy judges the rest)"
                     )
                 built.append((endpoint, method))
             validated[system] = tuple(built)

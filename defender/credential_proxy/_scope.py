@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass
 from urllib.parse import unquote, urlsplit
 
-from defender.kit.access import READ_METHODS, AccessDeclaration, Route, is_read_method, ticket_write_fault
+from defender.kit.access import AccessDeclaration, Route, is_read_method, ticket_write_fault
 from defender.kit.paths import holds_separator, url_form_fault, url_path_fault
 from defender.credential_proxy._refusal import CONFIG, CONFINEMENT, Refused
 from defender.kit.faults import ORIGIN_REQUEST, ORIGIN_SETUP
@@ -129,4 +129,4 @@ def _route_pattern_matches(pattern: str, path: str) -> bool:
     return True
 
 
-__all__ = ["READ_METHODS", "is_read_method", "Target", "check_route", "locate"]
+__all__ = ["is_read_method", "Target", "check_route", "locate"]

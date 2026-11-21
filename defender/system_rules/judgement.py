@@ -222,18 +222,19 @@ def _settings_faults(record: SystemRecord, *, catalog: Catalog, locator: Locator
     """The adapter's own `check_settings` over a tenant record holding `record` (K1), each fault it raises (one, or
     every one a `ConfigFaults` carries: O4) as a located sentence."""
     system = record.system_id
+    # The record's own access fault is reported here, first and from the catalog alone, not left to the adapter's check
+    # to re-raise (#1504 O3: an adapter whose check never reads the access would otherwise accept a record the run holds
+    # as down; A6.2: a record of an adapter that will not load still names its list's reason).
+    tenant = RecordTenant.of({system: record}, catalog=catalog, locator=locator)
+    held = tenant.access[system]
+    faults = [_located(str(held), system, locator)] if isinstance(held, ConfigFault) else []
     try:
         module = catalog.module(record.adapter_id)
     except Exception as e:  # noqa: BLE001 — an adapter that will not import is not usable, not fatal
-        return [f"{locator.system(system)}: its adapter could not be loaded ({type(e).__name__})"]
+        return [*faults, f"{locator.system(system)}: its adapter could not be loaded ({type(e).__name__})"]
     check = getattr(module, "check_settings", None)
     if not callable(check):
-        return [f"{locator.system(system)}: its adapter declares no `check_settings`"]
-    tenant = RecordTenant.of({system: record}, catalog=catalog, locator=locator)
-    held = tenant.access[system]
-    # The record's own access fault is reported here, not left to the adapter's check to re-raise (#1504 O3: an adapter
-    # whose check never reads the access would otherwise accept a record the run holds as down).
-    faults = [_located(str(held), system, locator)] if isinstance(held, ConfigFault) else []
+        return [*faults, f"{locator.system(system)}: its adapter declares no `check_settings`"]
     try:
         check(tenant)
     except ConfigFaults as found:
