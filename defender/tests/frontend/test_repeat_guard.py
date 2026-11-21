@@ -1,7 +1,7 @@
 """#1540 Am-5, the no-repeat guard's own controls: the `browser` fixture's contexts carry it however a test opens them
 (the `context` fixture, its own `browser.new_context()`), so a `GET` to `/api/*` sent twice within one load fails when the
 context closes, and the same two reads across a navigation or a restore do not. A test that repeats on purpose asserts it,
-then clears the log. (The dev server's contexts: `test_1540_dev_server.py`.)"""
+then clears the log. (The dev server's contexts: `test_dev_server.py`.)"""
 from __future__ import annotations
 
 from collections.abc import Callable

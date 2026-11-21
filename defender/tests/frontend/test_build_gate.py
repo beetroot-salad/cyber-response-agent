@@ -1,16 +1,15 @@
 """#1540 F1/F6/F8, #1581 G9: the source check observed through the lint job's gate, one case per form and location (split from
-`test_1161_build.py`)."""
+`test_build.py`)."""
 import json
 import re
 from typing import Any
 
-import pytest
 
 from defender.tests.support.frontend._ingress1161 import FRONTEND
 
 from defender.tests.frontend._gate_support import (  # noqa: F401
     ALLOWED_FORMS, CONTROL, CONTROL_TEST_SOURCE, LOCATION_FORM, LOCATIONS, NEVER_CALLED, REFUSED_FORMS, SCREEN_IMPORT,
-    SHELL_IMPORT, _check, _extension, _gate, _lib_declares_navigation, _unit_tests, _with_source)
+    SHELL_IMPORT, _check, _extension, _gate, _lib_declares_navigation, _unit_tests, _with_files, _with_source)
 
 
 def test_1540_f8_the_gate_passes_on_the_unmodified_tree(checked):
@@ -43,44 +42,53 @@ def test_1540_f6_a_unit_test_file_that_throws_at_load_fails_the_gate(checked):
     assert "zz_fail.test.ts" in failing.output, failing.output[-1500:]
 
 
-@pytest.mark.parametrize("form", REFUSED_FORMS)
-def test_1540_f8_the_source_check_refuses_each_form_outside_the_shell_and_the_shell_may_hold_it(checked, form):
-    """This one form in a screen file fails the gate, naming the file; the same file under `src/shell/` passes it
-    (so it was the source check that refused, not a type error). (F8, PR2)"""
-    name = f"{CONTROL}.{_extension(form)}"
-    outside = _with_source(checked, f"screens/{name}", REFUSED_FORMS[form])
-    assert outside.refused, f"the gate accepted {form}"
-    assert name in outside.output, outside.output[-1500:]
-    if form != "navigation" or _lib_declares_navigation(checked):  # else a type error refuses it in the shell too
-        inside = _with_source(checked, f"shell/{name}", REFUSED_FORMS[form])
-        assert not inside.refused, inside.output[-1500:]
+def test_the_source_check_refuses_every_refused_form_outside_the_shell_and_the_shell_may_hold_it(checked):
+    """Each refused form, one file apiece, under `src/screens/` fails one gate run that names every one of those files;
+    the same files under `src/shell/` pass it (so it was the source check that refused, not a type error). One run per
+    side where a run per form was 21: a form is its own file, found by name. (F8, PR2)"""
+    # `navigation` is a form only if the pinned DOM library declares it; if not, it is a type error, which stops the gate
+    # at `bun run check` before the source check runs and would hide every other file: that one form is run alone.
+    declared = _lib_declares_navigation(checked)
+    batch = [form for form in REFUSED_FORMS if declared or form != "navigation"]
+    names = {form: f"{CONTROL}_{n:02d}.{_extension(form)}" for n, form in enumerate(batch)}
+    outside = _with_files(checked, {f"screens/{name}": REFUSED_FORMS[form] for form, name in names.items()})
+    assert outside.refused, "the gate accepted the refused forms"
+    missed = [form for form, name in names.items() if name not in outside.output]
+    assert missed == [], f"forms the source check did not refuse: {missed}\n{outside.output[-1500:]}"
+    inside = _with_files(checked, {f"shell/{name}": REFUSED_FORMS[form] for form, name in names.items()})
+    assert not inside.refused, inside.output[-1500:]
+    if not declared:
+        alone = _with_source(checked, f"screens/{CONTROL}_nav.ts", REFUSED_FORMS["navigation"])
+        assert alone.refused, "the gate accepted `navigation`"
+        assert f"{CONTROL}_nav.ts" in alone.output, alone.output[-1500:]
 
 
-def test_1540_f8_the_directories_the_location_cases_walk_cover_more_than_one_screen_folder():
+def test_the_directories_the_location_cases_walk_cover_more_than_one_screen_folder():
     """The tree has a directory outside `src/shell/` and `src/generated/` besides `src/` itself, so the per-location
     test below is not a single case. (F8)"""
     assert len(LOCATIONS) > 2, LOCATIONS
 
 
-@pytest.mark.parametrize("location", LOCATIONS.values(), ids=LOCATIONS.keys())
-def test_1540_f8_the_source_check_applies_at_every_location_outside_the_shell(checked, location):
-    """A refused form in a file at this location (`src/`, a directory outside the shell and the generated types, or a
-    fresh one) fails the gate, naming the file. (F8)"""
-    relative = f"{location}/{CONTROL}.ts" if location else f"{CONTROL}.ts"
-    gate = _with_source(checked, relative, LOCATION_FORM)
-    assert gate.refused, f"the gate accepted a refused form at src/{location}"
-    assert f"{CONTROL}.ts" in gate.output, gate.output[-1500:]
+def test_the_source_check_applies_at_every_location_outside_the_shell(checked):
+    """A refused form in a file at each location (`src/`, every directory outside the shell and the generated types, a
+    fresh one) fails one gate run that names every file. (F8)"""
+    names = {description: f"{CONTROL}_{n:02d}.ts" for n, description in enumerate(LOCATIONS)}
+    files = {(f"{location}/" if location else "") + names[description]: LOCATION_FORM
+             for description, location in LOCATIONS.items()}
+    gate = _with_files(checked, files)
+    assert gate.refused, "the gate accepted a refused form"
+    missed = [description for description, name in names.items() if name not in gate.output]
+    assert missed == [], f"locations where the source check did not refuse: {missed}\n{gate.output[-1500:]}"
 
 
-@pytest.mark.parametrize("form", ALLOWED_FORMS)
-def test_1540_f8_the_source_check_allows_what_a_screen_may_hold(checked, form):
+def test_the_source_check_allows_what_a_screen_may_hold(checked):
     """A property named `location`, a path key and an `/api/auth/` comment pass the gate (twin of the refusals: matching
-    is by resolved symbol and by string, never by name in comments). (F8)"""
-    gate = _with_source(checked, f"screens/{CONTROL}.ts", ALLOWED_FORMS[form])
+    is by resolved symbol and by string, never by name in comments). One run for all three. (F8)"""
+    gate = _with_files(checked, {f"screens/{CONTROL}_{n:02d}.ts": text for n, text in enumerate(ALLOWED_FORMS.values())})
     assert not gate.refused, gate.output[-1500:]
 
 
-def test_1540_f8_a_test_file_is_not_exempt_from_the_source_check(checked):
+def test_a_test_file_is_not_exempt_from_the_source_check(checked):
     """A passing unit-test file (the copy's own `decision.test.ts`) outside the shell passes the gate; with a never-called
     `fetch` appended it is refused naming the file; the same file under `src/shell/` passes. (F8)"""
     name = f"{CONTROL}.test.ts"

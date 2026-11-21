@@ -1,10 +1,9 @@
-"""#1540 F8: the corpus of refused and allowed forms, one gate run per corpus (split from `test_1161_build.py`)."""
+"""#1540 F8: the corpus of refused and allowed forms, one gate run per corpus (split from `test_build.py`)."""
 import dataclasses
 import shutil
 from collections.abc import Callable
 from pathlib import Path
 
-import pytest
 
 from defender.tests.support.frontend._ingress1161 import FRONTEND
 
@@ -367,18 +366,32 @@ PLACES = sorted(p.relative_to(FRONTEND / "src").as_posix() for pattern in ("*.ts
                 if not {"shell", "generated"} & set(p.relative_to(FRONTEND / "src").parts) and not p.name.endswith(".d.ts"))
 
 
-@pytest.mark.parametrize("place", PLACES)
-def test_1540_f8_a_refused_form_appended_to_an_existing_source_file_fails_the_gate_naming_that_file_alone(checked, place):
-    """A never-called `fetch` appended to this existing file fails the gate; the output names it and no other file of
-    the tree it left untouched. (F8: every source outside the shell and the generated types)"""
-    assert len({Path(p).name for p in PLACES}) == len(PLACES), f"file names repeat, so naming is ambiguous: {PLACES}"
-    path = checked / "src" / place
-    original = path.read_text(encoding="utf-8")
-    path.write_text(f"{original}\n{NEVER_CALLED}\n", encoding="utf-8")
+def _appended(checked: Path, places: list[str]) -> Gate:
+    """The gate with a never-called `fetch` appended to each existing file of `places`, the files put back after."""
+    originals = {place: (checked / "src" / place).read_text(encoding="utf-8") for place in places}
     try:
-        gate = _gate(checked)
+        for place, original in originals.items():
+            (checked / "src" / place).write_text(f"{original}\n{NEVER_CALLED}\n", encoding="utf-8")
+        return _gate(checked)
     finally:
-        path.write_text(original, encoding="utf-8")
+        for place, original in originals.items():
+            (checked / "src" / place).write_text(original, encoding="utf-8")
+
+
+def test_a_refused_form_appended_to_every_existing_source_file_fails_the_gate_naming_each_of_them(checked):
+    """A never-called `fetch` appended to every existing file outside the shell and the generated types fails one gate run
+    that names each of them. One run where a run per file was one per place. (F8: every source outside the shell)"""
+    assert len({Path(p).name for p in PLACES}) == len(PLACES), f"file names repeat, so naming is ambiguous: {PLACES}"
+    gate = _appended(checked, PLACES)
+    assert gate.refused, "the gate accepted a refused form"
+    missed = [place for place in PLACES if Path(place).name not in gate.output]
+    assert missed == [], f"files holding the form that the gate did not name: {missed}\n{gate.output[-1500:]}"
+
+
+def test_a_refused_form_appended_to_one_existing_source_file_names_that_file_alone(checked):
+    """With the form in one file only, the output names it and no other file of the tree it left untouched. (F8)"""
+    place = PLACES[0]
+    gate = _appended(checked, [place])
     assert gate.refused, f"the gate accepted a refused form in src/{place}"
     assert Path(place).name in gate.output, gate.output[-1500:]
     others = [p for p in PLACES if p != place and Path(p).name in gate.output]

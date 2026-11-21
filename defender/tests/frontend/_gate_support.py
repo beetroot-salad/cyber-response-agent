@@ -1,4 +1,4 @@
-"""Shared by `test_1161_build_gate.py` and `test_1161_build_corpus.py` (split from `test_1161_build.py`, whose gate
+"""Shared by `test_build_gate.py` and `test_build_corpus.py` (split from `test_build.py`, whose gate
 cases were ~750s on one worker): the gate's constants, its runner and the copy helpers."""
 import dataclasses
 import re
@@ -124,6 +124,29 @@ def _with_source(frontend: Path, relative: str, text: str, run: Callable[[Path],
     finally:
         path.unlink()
         for directory in reversed(fresh):
+            directory.rmdir()
+
+
+def _with_files(frontend: Path, files: dict[str, str], run: Callable[[Path], Gate] = _gate) -> Gate:
+    """`run(frontend)` with every `files` entry (path under `src/` -> text) written, the directories each needs made; all
+    of it goes again. One gate run for many cases: a case is its own file, found by name in the output."""
+    src = frontend / "src"
+    made: list[Path] = []
+    written: list[Path] = []
+    try:
+        for relative, text in files.items():
+            path = src / relative
+            for directory in reversed(path.parents):
+                if directory != src and src in directory.parents and not directory.exists():
+                    directory.mkdir()
+                    made.append(directory)
+            path.write_text(text + "\n", encoding="utf-8")
+            written.append(path)
+        return run(frontend)
+    finally:
+        for path in written:
+            path.unlink()
+        for directory in reversed(made):
             directory.rmdir()
 
 
