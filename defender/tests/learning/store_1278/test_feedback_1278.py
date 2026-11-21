@@ -315,7 +315,7 @@ async def test_p8_a_feedback_instruction_item_gets_an_id_of_its_own_and_a_second
     async with learning_store(dsn) as store:
         held, run = await with_issue(store)
         await store.judge_comments(held, run, taken=[comment(1)], judged=[1])
-        await store.publish_findings(BLUE, "run-1", [finding("1")], kind="finding")
+        (await store.publish_finding_channels(BLUE, "run-1", {"finding": [finding("1")]}))["finding"]
         await store.record_decision(held, 1, decision(instruction="do x"), instruction=instruction_row(1, "do x"))
         first = {(i.kind, i.key): i for i in await store.work(BLUE)}
         await store.record_decision(held, 1, decision(instruction="do x"), instruction=instruction_row(1, "do x"))
@@ -403,7 +403,7 @@ async def test_p6_a_registry_batch_is_item_less_holds_its_lane_and_leaves_the_au
         assert (batch.lane, batch.kind, batch.phase) == (FEEDBACK_LANE, "registry", "working")
         with pytest.raises(S.LaneBusy):
             await store.claim_registry(held)
-        await store.publish_findings(BLUE, "run-1", [finding("f1")], kind="finding")
+        (await store.publish_finding_channels(BLUE, "run-1", {"finding": [finding("f1")]}))["finding"]
         assert await store.claim(BLUE, AUTHOR_LANE, owner="host-a", thresholds=ONE) is not None, "the registry batch blocked the author lane"
 
         await store.end_no_commits(registry, {})
@@ -620,7 +620,7 @@ async def test_d5_the_same_key_in_a_finding_and_a_feedback_instruction_is_two_it
     """Finding `101` and instruction `101` are two rows, claimed together; an outcome for one kind moves only that kind's row. (A2 D7/H16 extended: matched per (kind, key), never by key alone)"""
     S = store_mod()
     async with learning_store(dsn) as store:
-        await store.publish_findings(BLUE, "run-1", [finding("101")], kind="finding")
+        (await store.publish_finding_channels(BLUE, "run-1", {"finding": [finding("101")]}))["finding"]
         held, run = await with_issue(store)
         await store.judge_comments(held, run, taken=[comment(101)], judged=[101])
         await store.record_decision(held, 101, decision(instruction="do x"), instruction=instruction_row(101, "do x"))

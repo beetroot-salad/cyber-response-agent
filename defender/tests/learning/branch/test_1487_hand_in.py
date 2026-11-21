@@ -24,9 +24,9 @@ def _holding(defender=1, questioner=1, *, after=None):
         with runs.episode_files(episode_id) as episode:
             sink = EpisodeFindings(episode)
             if defender:
-                sink.append(FINDINGS, [defender_row(job, n) for n in range(defender)], dedup_key="finding_id")
+                sink.append({FINDINGS: [defender_row(job, n) for n in range(defender)]})
             if questioner:
-                sink.append(QUESTIONER_FINDINGS, [world_row(job, n) for n in range(questioner)], dedup_key="finding_id")
+                sink.append({QUESTIONER_FINDINGS: [world_row(job, n) for n in range(questioner)]})
         if after is not None:
             after(episode_id)
         return graded
@@ -111,8 +111,7 @@ def test_p4_held_findings_over_the_cap_read_over_cap_with_no_text(tmp_path):
         with runs.episode_files(episode_id) as episode:
             sink = EpisodeFindings(episode)
             for n in range(5):
-                sink.append(FINDINGS, [dict(big(str(episode_id)), finding_id=f"{episode_id}/w-b/0/{n}")],
-                            dedup_key="finding_id")
+                sink.append({FINDINGS: [dict(big(str(episode_id)), finding_id=f"{episode_id}/w-b/0/{n}")]})
         return graded
 
     found = _findings(run_entry(tmp_path, grade=grade))
@@ -142,7 +141,7 @@ def test_p4_non_ascii_rows_travel_unescaped_and_count_their_utf8_bytes_toward_th
 
         graded = grade_episode(runs, episode_id, **kw)
         with runs.episode_files(episode_id) as episode:
-            EpisodeFindings(episode).append(FINDINGS, rows(str(episode_id)), dedup_key="finding_id")
+            EpisodeFindings(episode).append({FINDINGS: rows(str(episode_id))})
         return graded
 
     ran = run_entry(tmp_path, grade=grade)
@@ -203,3 +202,27 @@ def test_p4_damage_to_one_channels_sink_alone_refuses_both_channels(tmp_path, ch
     found = _findings(run_entry(tmp_path, grade=_holding(2, 2, after=damage_one)))
     assert found["state"] == {"torn-line": "malformed", "unreadable": "unreadable"}[how], found
     assert "text" not in found
+
+
+def test_1565_the_episode_holds_every_row_as_given_and_decides_no_repeat(tmp_path):
+    """The episode's findings record decides no repeat: every row the judge hands it is held, an identical one and one
+    with other content at a held id alike, so the store's insert at the job's end, the one owner of the rule, decides
+    them. (#1565)"""
+    def grade(runs, episode_id, **kw):
+        from defender.learning.core.state import FINDINGS
+        from defender.learning.judge import grade_episode
+        from defender.learning.judge.enqueue import EpisodeFindings
+
+        graded = grade_episode(runs, episode_id, **kw)
+        job = str(episode_id)
+        first, other = defender_row(job, 0), {**defender_row(job, 0), "finding": "a different narrative"}
+        with runs.episode_files(episode_id) as episode:
+            sink = EpisodeFindings(episode)
+            assert sink.append({FINDINGS: [first, dict(first)]}) == {FINDINGS.name: (2, 0)}
+            assert sink.append({FINDINGS: [other]}) == {FINDINGS.name: (1, 0)}
+        return graded
+
+    ran = run_entry(tmp_path, grade=grade)
+    job = ran.ep.name
+    assert json.loads(_findings(ran)["text"])[FINDING] == [
+        defender_row(job, 0), defender_row(job, 0), {**defender_row(job, 0), "finding": "a different narrative"}]

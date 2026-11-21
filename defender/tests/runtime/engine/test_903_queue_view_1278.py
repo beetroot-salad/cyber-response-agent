@@ -46,15 +46,15 @@ def seen(migrated_database, data_root):  # noqa: F811 — the imported fixture
     register_tenant(dsn, BLUE)
     register_tenant(dsn, GREEN)
     with blocking(dsn) as store:
-        store.publish_findings(BLUE, "run-1", [finding(f) for f in ("f1", "f2", "f3", "f4")], kind="finding")
-        store.publish_findings(BLUE, "run-1", [world_finding("q1")], kind="questioner_finding")
-        store.publish_findings(GREEN, "run-2", [finding("g1")], kind="finding")
+        store.publish_finding_channels(BLUE, "run-1", {"finding": [finding(f) for f in ("f1", "f2", "f3", "f4")]})["finding"]
+        store.publish_finding_channels(BLUE, "run-1", {"questioner_finding": [world_finding("q1")]})["questioner_finding"]
+        store.publish_finding_channels(GREEN, "run-2", {"finding": [finding("g1")]})["finding"]
         claim = store.claim(BLUE, AUTHOR_LANE, owner="host-a", thresholds=ONE)
         store.in_review(claim, 7, {("finding", "f1"): _outcome("waiting"), ("finding", "f2"): _outcome("held", "curator_held", SCRIPT),
                                    ("finding", "f3"): _outcome("dead", "malformed_row", "unkeyable")})
-        store.add_pitfall(BLUE, {"schema_version": 1, "pitfall_id": "p1", "source_run": "r", "system": "elastic",
+        bool(store.add_pitfalls(BLUE, [{"schema_version": 1, "pitfall_id": "p1", "source_run": "r", "system": "elastic",
                                  "query_id": "elastic.esql", "goal": "g", "executed_query": "x",
-                                 "stderr_digest": "exit=1; d", "error_class": "agent-fixable"})
+                                 "stderr_digest": "exit=1; d", "error_class": "agent-fixable"}]))
         store.enqueue_request(BLUE, "run-9", "case-9", {"case": "case-9"})
     return dsn, LoopPaths.for_tenant(blue), claim.batch_id
 
@@ -193,10 +193,9 @@ def test_o2_hostile_text_in_every_rendered_string_field_is_escaped_on_the_page(m
         ["finding id", "held id", "dead id", "in-batch id", "questioner id", "request run", "held reason",
          "dead reason", "waiting id"], start=1)}
     with blocking(dsn) as store:
-        store.publish_findings(BLUE, "run-1", [finding(fields[k]) for k in
-                                               ("finding id", "held id", "dead id", "in-batch id", "waiting id")],
-                               kind="finding")
-        store.publish_findings(BLUE, "run-1", [world_finding(fields["questioner id"])], kind="questioner_finding")
+        store.publish_finding_channels(BLUE, "run-1", {"finding": [finding(fields[k]) for k in
+                                               ("finding id", "held id", "dead id", "in-batch id", "waiting id")]})["finding"]
+        store.publish_finding_channels(BLUE, "run-1", {"questioner_finding": [world_finding(fields["questioner id"])]})["questioner_finding"]
         store.enqueue_request(BLUE, fields["request run"], "case-1", {"case": "case-1"})
         claim = store.claim(BLUE, AUTHOR_LANE, owner="host-a", thresholds=ONE)
         outcomes = {("finding", fields["held id"]): _outcome("held", "curator_held", fields["held reason"]),

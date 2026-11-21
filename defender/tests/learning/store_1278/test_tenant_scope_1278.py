@@ -63,7 +63,7 @@ def _pitfall(pid: str) -> dict:
 
 
 async def _publish(store, tenant, *ids, run="run-1"):
-    return await store.publish_findings(tenant, run, [finding(i) for i in ids], kind="finding")
+    return (await store.publish_finding_channels(tenant, run, {"finding": [finding(i) for i in ids]}))["finding"]
 
 
 def snapshot(dsn: str, tenant: str) -> dict[str, list[str]]:
@@ -95,14 +95,14 @@ async def _green_world(store, dsn):
     await store.record_commit(g.review, oid(11), oid(12), oid(13), changes_of("agent/lessons/g.md"))
     await store.in_review(g.review, 7, {})
     g.revert = await store.claim_revert(GREEN, owner="cli")
-    await store.add_pitfall(GREEN, _pitfall("g-pit-1"))
+    bool(await store.add_pitfalls(GREEN, [_pitfall("g-pit-1")]))
     await store.enqueue_request(GREEN, "run-g1", "case-1", {"case": "g"})
     g.lead = await store.claim(GREEN, LEAD_LANE, owner="host-g", thresholds=ONE)
     await store.record_commit(g.lead, oid(21), oid(22), oid(23), changes_of("agent/pitfalls/g.md"))
     await store.in_review(g.lead, 8, {})
     assert await store.end_review(GREEN, g.lead.batch_id, expect_phase="in_review", outcome="closed", published=[], held=[])
     await _publish(store, GREEN, "g-only-waiting-1", "g-only-waiting-2")
-    await store.add_pitfall(GREEN, _pitfall("g-pit-2"))
+    bool(await store.add_pitfalls(GREEN, [_pitfall("g-pit-2")]))
     await store.enqueue_request(GREEN, "run-g2", "case-1", {"case": "g2"})
     g.ids = [str(b.id) for b in await store.batches(GREEN)]
     assert len(g.ids) == 4, "premise: GREEN has four batches"
@@ -119,7 +119,7 @@ async def _blue_world(store):
     await store.end_review(BLUE, spent.batch_id, expect_phase="in_review", outcome="closed", published=[], held=[("finding", "h1")],
                            items_why=why("closed_without_feedback", "the PR closed without feedback"))
     await _publish(store, BLUE, "a1")
-    await store.add_pitfall(BLUE, _pitfall("a-pit"))
+    bool(await store.add_pitfalls(BLUE, [_pitfall("a-pit")]))
     await store.enqueue_request(BLUE, "run-a1", "case-1", {"case": "a"})
     return spent
 
@@ -170,15 +170,16 @@ class Case:
         return dataclasses.replace(held, tenant_id=type(held.tenant_id)(BLUE))
 
 
-async def _publish_findings(c):
+async def _publish_finding_channels(c):
     c.freeze()
-    assert c.seen(await c.store.publish_findings(BLUE, "run-9", [finding("k1"), finding("a1")], kind="finding")) == (1, 1), (
-        "GREEN's k1 made BLUE's k1 a duplicate, or BLUE's a1 was added twice")
+    assert c.seen(await c.store.publish_finding_channels(BLUE, "run-9", {"finding": [finding("k1"), finding("a1")]})) == {
+        "finding": (1, 1)}, "GREEN's k1 made BLUE's k1 a duplicate, or BLUE's a1 was added twice"
 
 
-async def _add_pitfall(c):
+async def _add_pitfalls(c):
     c.freeze()
-    assert c.seen(await c.store.add_pitfall(BLUE, _pitfall("g-pit-1"))) is True, "GREEN's pitfall id made BLUE's a repeat"
+    assert c.seen(await c.store.add_pitfalls(BLUE, [_pitfall("g-pit-1"), _pitfall("g-pit-2")])) == 2, (
+        "GREEN's pitfall ids made BLUE's repeats")
 
 
 async def _enqueue_request(c):
@@ -409,7 +410,8 @@ async def _purge(c):
 
 #: Every public verb of the store and how BLUE calls it. `close` takes no tenant.
 ENTRIES = {
-    "publish_findings": _publish_findings, "add_pitfall": _add_pitfall, "enqueue_request": _enqueue_request,
+    "publish_finding_channels": _publish_finding_channels, "add_pitfalls": _add_pitfalls,
+    "enqueue_request": _enqueue_request,
     "work": _work, "set_aside": _set_aside, "parked": _parked, "item_keys": _item_keys, "lane_work": _lane_work, "batches": _batches,
     "commit_record": _commit_record,
     "claim": _claim, "claim_revert": _claim_revert, "take_over": _take_over,

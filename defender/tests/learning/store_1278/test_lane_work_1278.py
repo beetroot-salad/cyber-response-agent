@@ -53,7 +53,7 @@ def test_keyless_pitfalls_at_threshold_are_work_exactly_when_the_claim_would_tak
     """Five keyless pitfalls are five mistakes to the claim, so at a threshold of three the lead lane has work, and the
     claim takes them. (finding 5)"""
     for n in range(5):
-        store.add_pitfall(BLUE, _keyless_pitfall(n))
+        bool(store.add_pitfalls(BLUE, [_keyless_pitfall(n)]))
     limits = {**ONE, "pitfall": 3}
 
     assert lane_waiting(store, BLUE, LEAD_LANE, tick_thresholds=limits), "the wake test says no work the claim would take"
@@ -64,10 +64,10 @@ def test_keyless_pitfalls_at_threshold_are_work_exactly_when_the_claim_would_tak
 def test_a_batch_waiting_for_a_person_is_no_work_for_any_tick(store):
     """A batch handed to a person, and items waiting behind it, keep no tenant's checks running: no tick moves them,
     and the claim refuses the busy lane. (finding 4)"""
-    store.publish_findings(BLUE, "run-1", [_finding("f1")], kind="finding")
+    store.publish_finding_channels(BLUE, "run-1", {"finding": [_finding("f1")]})["finding"]
     held = store.claim(BLUE, AUTHOR_LANE, owner="o", thresholds=ONE)
     store.needs_person(BLUE, held.batch_id, why("foreign_pr", "an open PR on the prefix that no batch made"))
-    store.publish_findings(BLUE, "run-2", [_finding("f2")], kind="finding")
+    store.publish_finding_channels(BLUE, "run-2", {"finding": [_finding("f2")]})["finding"]
 
     assert not lane_waiting(store, BLUE, AUTHOR_LANE, tick_thresholds=ONE)
     work = store.lane_work(BLUE, AUTHOR_LANE, thresholds=ONE)
@@ -77,7 +77,7 @@ def test_a_batch_waiting_for_a_person_is_no_work_for_any_tick(store):
 def test_a_parked_batch_with_a_pending_abandon_request_is_work_for_a_tick(store, migrated_database):
     """A parked batch a person asked to abandon is a tick's to settle, so the lane has work; unrequested, the same batch
     keeps no tick running. (1537 R8)"""
-    store.publish_findings(BLUE, "run-1", [_finding("f1")], kind="finding")
+    store.publish_finding_channels(BLUE, "run-1", {"finding": [_finding("f1")]})["finding"]
     held = store.claim(BLUE, AUTHOR_LANE, owner="o", thresholds=ONE)
     store.needs_person(BLUE, held.batch_id, why("foreign_pr", "an open PR on the prefix that no batch made"))
     assert not lane_waiting(store, BLUE, AUTHOR_LANE, tick_thresholds=ONE), "control: unrequested, a parked batch is no work"
@@ -112,7 +112,7 @@ def test_an_author_lane_revert_in_review_makes_the_lane_busy_as_the_claim_finds_
     revert itself is work for a tick to reconcile. (finding 9)"""
     held = store.claim_revert(BLUE, owner="o")
     store.in_review(held, 7, {})
-    store.publish_findings(BLUE, "run-1", [_finding("f1")], kind="finding")
+    store.publish_finding_channels(BLUE, "run-1", {"finding": [_finding("f1")]})["finding"]
 
     assert store.lane_work(BLUE, AUTHOR_LANE, thresholds=ONE).busy
     assert lane_waiting(store, BLUE, AUTHOR_LANE, tick_thresholds=ONE), "a revert in review is a tick's to reconcile"

@@ -41,6 +41,15 @@ they start, the learning drains, the lifecycle service) refuses a database whose
 migration may lock the tables it changes until it commits. So: stop the API, the workers, the learning drains and the
 lifecycle service; run migrations; start the new code. The notes below say only what an upgrade needs beyond that.
 
+## Upgrade from before #1565
+
+No migration. The learning store now refuses an item that arrives at a key it already holds with other content
+(findings, pitfalls, curation requests), where it used to drop it silently; the same content is still a no-op. A run's
+pitfalls are filed in one call, refused whole on a clash. From this upgrade on, a curation request retried across an
+upgrade that changes how a run's pitfall rows are built refiles them with other content at their held ids, and is
+refused at every try until it is dead: before such an upgrade, let the lead-author lane finish the requests it holds
+(none `in_batch`).
+
 ## Upgrade from before #1504
 
 A catalog system record's non-GET reads must now be exactly the routes its adapter sends (`READ_ROUTES` in the adapter
