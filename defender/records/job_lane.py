@@ -45,7 +45,7 @@ from defender.records.job_facts import (  # noqa: F401 — the worker's reasons,
     EXITED_WITHOUT_RESULT, EXPIRED, LEASE_LAPSED, RETRY_CAP, WORKER_ERROR,
     BOX_NOT_STARTED, BOX_START_FAILED, BOX_STARTED, SETUP_CRASHED, SETUP_DONE, SETUP_REFUSED,
 )
-from defender.records._knowledge_status import UNREADABLE, _record_status, api_knowledge, knowledge_status
+from defender.records._knowledge_status import PINNED, UNREADABLE, _record_status, api_knowledge, knowledge_status
 from defender.records._layout import RunPaths, SessionPaths
 from defender.records._locations import DataRoot, RunsBase, unwrap_data_root
 from defender.records._store_errors import StoreError
@@ -412,7 +412,7 @@ _READINESS_FIELDS = {REFUSED: frozenset({"outcome", "step", "sentence"}), READY:
 _WARNING_FIELDS = frozenset({"kind", "sentence"})
 
 
-def _sentence(value: object) -> bool:
+def _holds_sentence(value: object) -> bool:
     """A record's sentence: text with something in it that PostgreSQL text can hold. Kept as written (D7)."""
     return isinstance(value, str) and bool(value.strip()) and postgres_can_hold(value)
 
@@ -436,7 +436,7 @@ class ReadinessWarning:
     sentence: str
 
     def __post_init__(self) -> None:
-        if not (isinstance(self.kind, str) and self.kind in READINESS_WARNING_KINDS and _sentence(self.sentence)):
+        if not (isinstance(self.kind, str) and self.kind in READINESS_WARNING_KINDS and _holds_sentence(self.sentence)):
             raise ValueError(f"not a readiness warning: {self!r}")
 
 
@@ -460,7 +460,7 @@ class ReadinessRecord:
     def _holds(self) -> bool:
         if self.outcome == REFUSED:
             return (self.warnings is None and self.reason is None and isinstance(self.step, str)
-                    and self.step in READINESS_STEPS and _sentence(self.sentence))
+                    and self.step in READINESS_STEPS and _holds_sentence(self.sentence))
         if self.outcome == READY:
             return (self.step is None and self.sentence is None and self.reason is None
                     and isinstance(self.warnings, tuple) and all(isinstance(w, ReadinessWarning) for w in self.warnings))
@@ -786,12 +786,16 @@ class JobLane:
 
     def read_request_knowledge(self, request_id: object) -> RequestKnowledge:
         """A host request's knowledge record, with no run-started gate (R13-1.5): `RequestKnowledge.ABSENT` when nothing
-        is at its name, `MALFORMED` when what is there is not a knowledge status, else its status in the API's shape."""
+        is at its name, `MALFORMED` when what is there is not a knowledge status (or is a pinned one), else its status in
+        the API's shape."""
         read = self._held.view().read(self._paths(_run_id(request_id)).knowledge_source().name)
         if read.text is None:
             return RequestKnowledge.ABSENT if read.absent else RequestKnowledge.MALFORMED
         status = _record_status(read.text)
-        return RequestKnowledge.MALFORMED if status is None else RequestKnowledge(api_knowledge(status))
+        # A request's knowledge is never pinned: its helper publishes (surface §2), so a pinned status is no record of it.
+        if status is None or status.kind == PINNED:
+            return RequestKnowledge.MALFORMED
+        return RequestKnowledge(api_knowledge(status))
 
     # -- what the run left ------------------------------------------------------------------------
 
