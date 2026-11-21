@@ -164,6 +164,30 @@ async def test_1565_a_repeat_compares_as_stored_so_a_tuple_is_its_list(dsn):
         assert tuple(await store.publish_findings(BLUE, "run-2", [again], kind="finding")) == (0, 1)
 
 
+async def test_1565_a_repeat_with_a_number_jsonb_rewrites_is_still_the_same_finding(dsn):
+    """jsonb holds `1e23` as the numeric it is and reads it back as an integer: an identical repeat is still a no-op.
+    (#1565 item 1)"""
+    async with learning_store(dsn) as store:
+        await store.publish_findings(BLUE, "run-1", [dict(finding("f1"), score=1e23)], kind="finding")
+        assert tuple(await store.publish_findings(BLUE, "run-2", [dict(finding("f1"), score=1e23)],
+                                                  kind="finding")) == (0, 1)
+
+
+@pytest.mark.parametrize("held_first", [True, False], ids=["held", "in-one-call"])
+async def test_1565_false_and_zero_are_different_content(dsn, held_first):
+    """`false` and `0` are different JSON, though Python finds them equal: the second is a collision. (#1565 item 1)"""
+    first, second = finding("f1"), dict(finding("f1"), world_label_doubted=0)
+    assert first["world_label_doubted"] is False, "premise"
+    async with learning_store(dsn) as store:
+        if held_first:
+            await store.publish_findings(BLUE, "run-1", [first], kind="finding")
+            calls = [[second]]
+        else:
+            calls = [[first, second]]
+        with pytest.raises(store_mod().ItemRefused, match="f1"):
+            await store.publish_findings(BLUE, "run-2", calls[0], kind="finding")
+
+
 async def test_1565_the_same_id_in_another_kind_or_tenant_is_no_collision(dsn):
     """Control: a collision is within one tenant's one kind, the key the store holds. (#1565 item 1)"""
     async with learning_store(dsn) as store:

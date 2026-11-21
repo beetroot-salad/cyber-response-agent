@@ -484,7 +484,8 @@ class StoreFindings:
     """The operator lane's sink (#1278, "Findings arrive"): the judge inserts its rows into the
     learning store directly, as `run_id`'s, for `tenant_id`. `store` is the store's synchronous
     face (`learning_store.blocking`). A finding id is unique for good, so a row the store already
-    holds, whatever became of it, is not inserted again. The insert is conditional on the tenant
+    holds, whatever became of it, is not inserted again; one with other content at a held id is
+    refused (#1565). The insert is conditional on the tenant
     being active (`TenantInactive`); a row the store can never hold (`ItemRefused`) is a
     `JudgeRefused`, though the screen refuses a NUL before any insert."""
 
