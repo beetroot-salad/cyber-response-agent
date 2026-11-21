@@ -62,11 +62,16 @@ function server() {
     read,
     queryClient: onceQueryClient(),
     me: null,
-    repos: new Map(),
     pathname: "/",
     shape: null,
     query: { get: () => null, getAll: () => [] },
-    actions: { retry: () => undefined, signOut: () => undefined, acceptInvitation: () => Promise.reject(new Error()) },
+    actions: {
+      retry: () => undefined,
+      signOut: () => undefined,
+      acceptInvitation: () => Promise.reject(new Error()),
+      mayOpenRepository: () => false,
+      openRepository: () => undefined,
+    },
   };
   return { sent, shell };
 }

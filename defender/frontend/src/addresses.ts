@@ -2,9 +2,7 @@
 // membership meaning the API's reader has: a value is a member when the WHOLE string matches a shape, as ASCII,
 // case-sensitive, with no decoding, normalising or trailing-/ tolerance. The build writes each shape's whole pattern;
 // membership is never judged from a template here (`addressOf` fills one, then checks the result against the shape's
-// pattern). No DOM here: Node loads this file's build. One function makes an address that is not the app's own:
-// `repoLink`, the tenant repository's page on the forge, which only takes a value the shell has checked.
-import type { RepoAddress } from "./shell/provider";
+// pattern). No DOM here: Node loads this file's build.
 import {
   LITERAL_ADDRESSES,
   PATTERNS,
@@ -67,11 +65,4 @@ export function valuesOf<N extends ShapeName>(name: N, value: string): ShapeValu
     if (group === undefined) throw new Error(`${name}'s pattern has no group ${index + 1}`);
     return group;
   });
-}
-
-/** The tenant repository's page on the forge, for a link: the one address this module makes that is not the app's own.
- * It takes only a `RepoAddress`, which only the shell makes, after checking it is an absolute http or https address on
- * another origin (`shell/repo.ts`); a screen gets one from `useRepoAddress`. */
-export function repoLink(address: RepoAddress): string {
-  return address;
 }

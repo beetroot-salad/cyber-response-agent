@@ -41,7 +41,7 @@ from defender.tests.support.api._server1083 import A, ANN, B, BOB
 from defender.tests.support.api._signin1161 import link_account
 from defender.tests.support.frontend._browser1161 import abort_login_navigation, path_is, run_async
 from defender.tests.support.jobs._jobs1342 import ALERT_BYTES, PADDED_ALERT_BYTES, TITLE
-from defender.tests.support.shared._postgres1339 import execute
+from defender.tests.support.tenancy._active1214 import record_repo_page
 
 ZONE = "Europe/Paris"
 NEW_YORK = "America/New_York"
@@ -939,7 +939,10 @@ def test_alert_list_o8_o9_home_with_no_tenant_and_no_invitation_says_sluice_is_i
     _no_defender(page)
 
 
-# --- Home redesign: the top bar's links and the knowledge repo card ---------------------------------------------------
+# --- Home redesign: the top bar's links and the repository address -----------------------------------------------------
+
+FORGE_PAGE = "http://forge.test/tenants/a"
+
 
 def _nav(page: Any) -> list[tuple[str, str | None, str | None]]:
     """The top bar's links, in order: (text, href, aria-current)."""
@@ -948,59 +951,53 @@ def _nav(page: Any) -> list[tuple[str, str | None, str | None]]:
             for link in links]
 
 
-def _repo_page(dsn: str, tenant: str) -> str:
-    [(origin,)] = execute(dsn, "SELECT origin FROM tenancy.forge_wiring WHERE tenant_id = %s", (tenant,))
-    return origin.removesuffix(".git")
-
-
-def _rewire(dsn: str, tenant: str, origin: str | None) -> None:
-    """Record `tenant`'s forge origin by hand, or drop its wiring (`None`)."""
-    if origin is None:
-        execute(dsn, "DELETE FROM tenancy.forge_wiring WHERE tenant_id = %s", (tenant,))
-    else:
-        execute(dsn, "UPDATE tenancy.forge_wiring SET origin = %s WHERE tenant_id = %s", (origin, tenant))
-
-
-def test_home_the_top_bar_links_home_the_tenants_alerts_and_its_repository_and_marks_home(world, context):
-    """Ann (A only), on Home: Home (current), A's Alerts, and A's knowledge repo on the forge; the repo card's "Open
-    repo" is the same page."""
+def test_home_the_top_bar_links_home_the_tenants_alerts_and_its_repository_address_and_marks_home(world, context):
+    """Ann (A only), on Home: Home (current), A's Alerts and A's repository address, all the app's own; the repo
+    card's "Open repo" is the same address."""
     sign_in(world, context)
     page = _home(world, context)
-    repo = _repo_page(world.dsn, A)
+    repo = f"/t/{A}/repo"
     assert _nav(page) == [("Home", "/home", "page"), ("Alerts", ALERTS, None), ("Knowledge repo", repo, None)]
     assert page.locator('main [data-action="open-repo"]').get_attribute("href") == repo
 
 
 def test_home_the_top_bar_on_the_alerts_screen_marks_alerts_and_names_the_tenant_in_the_address(world, browser):
-    """Ann in A and B: on Home the bar has only Home (no tenant in view); on B's alerts its Alerts link is B's,
-    marked current, and the repo link is B's."""
+    """Ann in A and B: on Home the bar has only Home (no tenant in view); on B's alerts its links are B's, Alerts
+    marked current."""
     run_async(_person, world.dsn, ANN, (B,))
     page = _home(world, _signed_in(browser, world))
     assert _nav(page) == [("Home", "/home", "page")]
     page.goto(f"{world.origin}{ALERTS_OF_B}")
     screen(page, "alerts")
     assert _nav(page) == [("Home", "/home", None), ("Alerts", ALERTS_OF_B, "page"),
-                          ("Knowledge repo", _repo_page(world.dsn, B), None)]
+                          ("Knowledge repo", f"/t/{B}/repo", None)]
 
 
-def test_home_a_tenant_without_a_repository_says_so_and_links_no_repository(world, context):
-    """A with no forge wiring: the repo card says it has none, and neither the card nor the bar links one."""
-    _rewire(world.dsn, A, None)
+def test_home_open_repo_sends_the_person_to_the_recorded_page_and_back_returns_home(world, context):
+    """With A's page recorded, "Open repo" lands on the forge's page, which replaced the repository address: Back
+    returns to Home."""
+    record_repo_page(world.dsn, A, FORGE_PAGE)
+    context.route("http://forge.test/**", lambda route: route.fulfill(status=200, body="the forge", content_type="text/plain"))
     sign_in(world, context)
     page = _home(world, context)
-    assert "This tenant has no knowledge repository yet." in _plain(page.locator('main [data-card="repo"]').inner_text())
-    assert page.locator('[data-action="open-repo"]').count() == 0
-    assert [text for text, _, _ in _nav(page)] == ["Home", "Alerts"]
+    page.locator('main [data-action="open-repo"]').click()
+    page.wait_for_url(FORGE_PAGE)
+    page.go_back()
+    screen(page, "home")
+    assert where(page) == ("/home", {})
 
 
-def test_home_a_repository_page_on_the_apps_own_origin_is_never_linked(world, context):
-    """The API serves an http page on the app's own origin (it cannot know that origin); the shell's check refuses it,
-    so no screen links there: the card shows no link and says nothing is there."""
-    _rewire(world.dsn, A, f"{world.origin}/api/me.git")
+@pytest.mark.parametrize("recorded", [None, "ssh://git@forge.test/tenants/a"], ids=["none-recorded", "not-a-web-page"])
+def test_home_the_repository_address_with_nothing_to_open_says_so_and_stays(world, context, recorded):
+    """Nothing recorded, or a value the API will not serve as a page: the address says there is no repository to
+    link to, and the browser goes nowhere."""
+    record_repo_page(world.dsn, A, recorded)
     sign_in(world, context)
-    page = _home(world, context)
-    assert page.locator('a[data-action="open-repo"], header nav a[data-nav="repo"]').count() == 0
-    assert page.locator(f'a[href^="{world.origin}"]').count() == 0
+    page = context.new_page()
+    page.goto(f"{world.origin}/t/{A}/repo")
+    screen(page, "repo")
+    page.get_by_text("This tenant has no repository Sluice can link to.").wait_for()
+    assert where(page) == (f"/t/{A}/repo", {})
 
 
 # --- O11: accept an invitation ---------------------------------------------------------------------------------------

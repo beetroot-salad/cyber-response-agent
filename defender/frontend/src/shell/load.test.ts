@@ -140,3 +140,56 @@ describe("what a read comes to", () => {
     expect(load.mayShow()).toBe(true);
   });
 });
+
+describe("leaving for a tenant's repository (home redesign)", () => {
+  /** A load at `http://app.test` and the addresses it replaced the page with. */
+  function leaving() {
+    const replaced: string[] = [];
+    const effects = {
+      fetch: () => Promise.reject(new Error("no request")),
+      record: () => true,
+      assign: () => undefined,
+      replace: (url: string) => {
+        replaced.push(url);
+      },
+    };
+    const load = makeLoad({
+      taken: { status: "none" },
+      byHistory: false,
+      target: null,
+      origin: "http://app.test",
+      effects,
+    });
+    return { load, replaced };
+  }
+
+  it("replaces the page with an http or https page on another origin, as the browser spells it", () => {
+    const { load, replaced } = leaving();
+    expect(load.repositoryPage("HTTPS://Forge.Example/tenants/a")).toBe("https://forge.example/tenants/a");
+    load.toRepository("HTTPS://Forge.Example/tenants/a");
+    expect(replaced).toEqual(["https://forge.example/tenants/a"]);
+  });
+
+  it("asked again while leaving (an effect run twice), navigates once", () => {
+    const { load, replaced } = leaving();
+    load.toRepository("https://forge.example/a");
+    load.toRepository("https://forge.example/a");
+    expect(replaced).toHaveLength(1);
+  });
+
+  it.each([
+    ["not an address", "tenants/a"],
+    ["a path on the app", "/api/me"],
+    ["ssh", "ssh://git@forge.example/tenants/a.git"],
+    ["javascript", "javascript:alert(1)"],
+    ["a user part", "https://bot@forge.example/tenants/a"],
+    ["a user and password", "https://bot:secret@forge.example/tenants/a"],
+    ["the app's own origin", "http://app.test/api/me"],
+    ["the app's own origin, spelled otherwise", "HTTP://APP.TEST:80/x"],
+  ])("refuses %s and navigates nowhere", (_, address) => {
+    const { load, replaced } = leaving();
+    expect(load.repositoryPage(address)).toBeNull();
+    load.toRepository(address);
+    expect(replaced).toEqual([]);
+  });
+});

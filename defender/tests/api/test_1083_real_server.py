@@ -56,6 +56,7 @@ from defender.tests.support.jobs._jobs1342 import (
     seed_alert_mapping,
 )
 from defender.tests.support.shared._postgres1339 import execute
+from defender.tests.support.tenancy._active1214 import record_repo_page
 from defender.tests.support.tenancy._mapping1345 import FIXTURE_ALERT_MAPPING
 
 pytestmark = pytest.mark.anyio
@@ -1282,42 +1283,44 @@ async def test_1161_b10_no_interactive_docs_page_is_served_whatever_the_environm
         assert [(await client.get(p)).status_code for p in ("/docs", "/redoc", "/docs/oauth2-redirect", "/openapi.json")] == [404] * 4
 
 
-# --- Home redesign: each of a person's tenants carries its repository's page ------------------------------------------
+# --- Home redesign: where a browser opens a tenant's knowledge repository ---------------------------------------------
 
-def _wire(dsn: str, tenant: str, origin: str | None) -> None:
-    """Record `tenant`'s forge origin by hand (as the lab's row is), or drop its wiring (`None`)."""
-    if origin is None:
-        execute(dsn, "DELETE FROM tenancy.forge_wiring WHERE tenant_id = %s", (tenant,))
-    else:
-        execute(dsn, "UPDATE tenancy.forge_wiring SET origin = %s WHERE tenant_id = %s", (origin, tenant))
-
-
-async def _repo_urls(served: Served) -> list[tuple[str, str | None]]:
-    me = await served.client.get("/api/me", headers=served.ann(write=False))
-    assert me.status_code == 200, me.text
-    return [(t["tenant_id"], t["repo_url"]) for t in me.json()["tenants"]]
+async def _repository(served: Served, tenant: str = A) -> httpx.Response:
+    return await served.client.get(f"/api/tenants/{tenant}/repository", headers=served.ann(write=False))
 
 
 @pytest.mark.postgres
-async def test_home_me_serves_each_tenants_repository_page_its_recorded_origin_without_dot_git(served):
-    """The lifecycle's origin `<forge>/<repo>.git` is served as `<forge>/<repo>`, the page a browser opens."""
-    [(origin,)] = execute(served.dsn, "SELECT origin FROM tenancy.forge_wiring WHERE tenant_id = %s", (A,))
-    assert origin.endswith(".git"), origin
-    assert await _repo_urls(served) == [(A, origin.removesuffix(".git"))]
-    _wire(served.dsn, A, "https://forge.example:8443/tenants/a")
-    assert await _repo_urls(served) == [(A, "https://forge.example:8443/tenants/a")]
+@pytest.mark.parametrize("page", ["http://forge.test/tenants/a", "https://forge.example:8443/tenants/a",
+                                  "http://localhost:3000/tenants/a"],
+                         ids=["http", "https-with-port", "the-apps-host-on-another-port"])
+async def test_home_the_repository_read_serves_the_page_the_lifecycle_recorded_on_the_tenant(served, page):
+    """A member reads the tenant row's `repo_url`, as recorded. (The app's own origin is `ORIGIN`; its host on
+    another port is another origin.)"""
+    record_repo_page(served.dsn, A, page)
+    r = await _repository(served)
+    assert r.status_code == 200, r.text
+    assert r.json() == {"repo_url": page}
 
 
 @pytest.mark.postgres
-@pytest.mark.parametrize("origin", [
-    None, "ssh://git@forge.example/tenants/a.git", "git@forge.example:tenants/a.git", "file:///srv/tenants/a.git",
-    "https://bot:secret@forge.example/tenants/a.git", "https://bot@forge.example/tenants/a.git", "https:///tenants/a.git",
-    "https://forge.example/tenants/a.git?x=1", "https://forge.example/tenants/a.git#x", "tenants/a.git",
-    "https://[forge.example/tenants/a.git",
-], ids=["no-wiring", "ssh", "scp", "file", "user-and-password", "user", "no-host", "query", "fragment", "relative",
-        "malformed-host"])
-async def test_home_me_serves_no_repository_page_without_wiring_or_for_an_origin_a_browser_should_not_open(served, origin):
-    """No wiring, or a remote recorded by hand that is not a plain http(s) address with a host and no user part: null,
-    never the origin itself (a user part may carry a credential)."""
-    _wire(served.dsn, A, origin)
-    assert await _repo_urls(served) == [(A, None)]
+@pytest.mark.parametrize("page", [
+    None, "ssh://git@forge.example/tenants/a", "git@forge.example:tenants/a", "file:///srv/tenants/a",
+    "https://bot:secret@forge.example/tenants/a", "https://bot@forge.example/tenants/a", "https:///tenants/a",
+    "https://forge.example/tenants/a?x=1", "https://forge.example/tenants/a#x", "tenants/a", "https://[forge.example/a",
+    f"{ORIGIN}/api/me", f"{ORIGIN.upper()}:80/x",
+], ids=["none-recorded", "ssh", "scp", "file", "user-and-password", "user", "no-host", "query", "fragment", "relative",
+        "malformed-host", "the-apps-own-origin", "the-apps-own-origin-spelled-otherwise"])
+async def test_home_the_repository_read_serves_null_for_none_or_a_page_a_browser_should_not_be_sent_to(served, page):
+    """Nothing recorded, or a value that is not an http(s) page with a host and no user part, query or fragment on
+    another origin than the app's: null, never the value (a user part may carry a credential)."""
+    record_repo_page(served.dsn, A, page)
+    r = await _repository(served)
+    assert r.status_code == 200, r.text
+    assert r.json() == {"repo_url": None}
+
+
+@pytest.mark.postgres
+async def test_home_the_repository_read_of_a_tenant_the_person_is_not_in_is_not_found(served):
+    """Ann is in A only: B's repository read is 404, as every route under another tenant is."""
+    record_repo_page(served.dsn, B, "http://forge.test/tenants/b")
+    assert (await _repository(served, B)).status_code == 404

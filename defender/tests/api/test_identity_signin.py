@@ -122,7 +122,7 @@ def test_sign_in_ends_in_a_host_session_cookie_and_me_names_the_user() -> None:
     assert body["user"] == {"id": world.signin.account_of(ANN).username,  # P-C: username = user id
                             "email": ANN, "display_name": "Ann Example"}
     assert body["kind"] == "person"  # #1307 D10: both /me views carry `kind` (person | program); a session is a person's
-    assert body["tenants"] == [{"tenant_id": T1, "repo_url": None}]  # no forge wiring recorded for T1 here
+    assert body["tenants"] == [{"tenant_id": T1}]
     assert (body["administrator"], body["invitations"]) == (False, [])
 
 

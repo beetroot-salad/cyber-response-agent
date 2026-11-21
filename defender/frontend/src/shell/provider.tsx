@@ -5,11 +5,11 @@ import { useInfiniteQuery, useQuery, type QueryClient } from "@tanstack/react-qu
 import { createContext, useContext, useEffect, useRef, type ReactNode } from "react";
 import { valuesOf, type ShapeName, type ShapeValues } from "../addresses";
 import { isPageOf } from "./page";
-import type { AcceptResult, Gone, Person, ReadBody, ReadKey, ReadParams, ReadResult, RepoAddress } from "./types";
+import type { AcceptResult, Gone, Person, ReadBody, ReadKey, ReadParams, ReadResult } from "./types";
 
 // The shell's types a screen may need, from the one module screens import the shell through.
 export type { FailedReason } from "./decision";
-export type { AcceptResult, CallbackReason, Person, RepoAddress } from "./types";
+export type { AcceptResult, CallbackReason, Person } from "./types";
 
 /** The closed list of actions a screen may take (PR2). Writes and streams will be added here, each with a stated 401
  * policy. */
@@ -22,6 +22,12 @@ export interface Actions {
    * here), on a 401 it signs in again. What it came to is the screen's to show, the server's error included: it is
    * not the error state. */
   readonly acceptInvitation: (id: string) => Promise<AcceptResult>;
+  /** Whether the browser may be sent to `address`, the tenant repository's page the repository read served: an http
+   * or https address with no user part on another origin than the app's. */
+  readonly mayOpenRepository: (address: string) => boolean;
+  /** Send the browser to `address`, replacing this page (Back returns to where the person came from); nothing when
+   * `mayOpenRepository` says no. */
+  readonly openRepository: (address: string) => void;
 }
 
 /** A read-only copy of the address's query. */
@@ -37,8 +43,6 @@ export interface Shell {
   read: <K extends ReadKey>(key: K, params: ReadParams<K>) => Promise<ReadResult<K>>;
   readonly queryClient: QueryClient;
   readonly me: Person | null;
-  /** Each of the person's tenants whose repository page passed the shell's check (`repo.ts`), by tenant id. */
-  readonly repos: ReadonlyMap<string, RepoAddress>;
   /** The address's path and the shape it is a member of (null: the not-found screen). */
   readonly pathname: string;
   readonly shape: ShapeName | null;
@@ -63,13 +67,6 @@ export function useMe(): Person {
   const { me } = useShell();
   if (me === null) throw new Error("this screen needs a session, but the shell asked for none");
   return me;
-}
-
-/** The repository page of `tenant`, one of the signed-in person's tenants, as the shell checked it; null for no
- * tenant, one the person is not in, or one whose page is missing or failed the check. */
-export function useRepoAddress(tenant: string | null): RepoAddress | null {
-  const { repos } = useShell();
-  return tenant === null ? null : (repos.get(tenant) ?? null);
 }
 
 /** The address's read-only query. */

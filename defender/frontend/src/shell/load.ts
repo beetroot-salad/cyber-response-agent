@@ -74,6 +74,12 @@ export interface Load {
   readonly client: Client;
   /** Sign in again from the failed screen: records an attempt when storage allows, then leaves for the sign-in. */
   readonly signIn: (returns: readonly string[]) => void;
+  /** `address`, a tenant repository's page as the API served it, as the browser spells it, when the page may leave
+   * for it: an http or https address with no user part on another origin than the page's (so never one of the app's
+   * own addresses). Otherwise null. */
+  readonly repositoryPage: (address: string) => string | null;
+  /** Leave for `repositoryPage(address)` by replace; nothing when that is null, or the load is already leaving. */
+  readonly toRepository: (address: string) => void;
   readonly supersede: Exit["supersede"];
   readonly mayShow: Exit["mayShow"];
 }
@@ -286,6 +292,18 @@ export function makeLoad(options: LoadOptions): Load {
     }
   }
 
+  function repositoryPage(address: string): string | null {
+    let url: URL;
+    try {
+      url = new URL(address);
+    } catch {
+      return null;
+    }
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    if (url.username !== "" || url.password !== "" || url.origin === new URL(origin).origin) return null;
+    return url.href;
+  }
+
   const wiring: Wiring = { origin, effects, exit, unauthorized };
   const clientWith = (on401: On401): Api => clientFor(on401, wiring);
   return {
@@ -295,6 +313,14 @@ export function makeLoad(options: LoadOptions): Load {
       exit,
       effects,
     ),
+    repositoryPage,
+    toRepository: (address) => {
+      const page = repositoryPage(address);
+      if (page === null) return;
+      exit.leave(() => {
+        effects.replace(page);
+      });
+    },
     signIn: (returns) => {
       // The values are handed to the sign-in route unjudged: the API judges them.
       exit.leave(() => {

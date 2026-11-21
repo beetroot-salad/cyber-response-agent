@@ -648,16 +648,6 @@ def _refused_corpus() -> dict[str, str]:
         "a link to an API path by a relative path": 'export const zzForm = <a href="../api/me">me</a>;',
         "a form posting to an address held in a variable": (
             'const zzWhere = "/home";\nexport const zzForm = <form method="post" action={zzWhere}><button /></form>;'),
-        # The home redesign's one outside address: only through `repoLink`, and only a value the shell checked.
-        "the shell's checked repository page written into href directly": (
-            'import { useRepoAddress } from "../../shell/provider";\n'
-            'export const ZzForm = () => { const zzRepo = useRepoAddress("t"); return <a href={zzRepo ?? "/home"}>r</a>; };'),
-        "a repository page forged by a type assertion": (
-            'import { repoLink } from "../../addresses";\nimport type { RepoAddress } from "../../shell/provider";\n'
-            'export const zzForm = <a href={repoLink("https://evil.example" as RepoAddress)}>r</a>;'),
-        "a repository page forged through unknown": (
-            'import { repoLink } from "../../addresses";\n'
-            'export const zzForm = (zzValue: unknown) => <a href={repoLink(zzValue)}>r</a>;'),
         "a spread onto an HTML element": (
             "export const zzForm = (zzProps: { src: string }) => <img alt=\"\" {...zzProps} />;"),
         "raw HTML": ('export const zzForm = <div dangerouslySetInnerHTML={{ __html: "<img src=/api/me>" }} />;'),
@@ -801,10 +791,6 @@ ALLOWED_CORPUS: dict[str, str] = {
                           'export const zzForm = <img src={zzArt} alt="" />;'),
     "a link made by the addresses module": ('import { literalAddress } from "../../addresses";\n'
                                             'export const zzForm = <a href={literalAddress("home")}>home</a>;'),
-    "the repository page the shell checked, through repoLink": (
-        'import { repoLink } from "../../addresses";\nimport { useRepoAddress } from "../../shell/provider";\n'
-        'export const ZzForm = () => { const zzRepo = useRepoAddress("t");'
-        ' return zzRepo === null ? null : <a href={repoLink(zzRepo)}>repo</a>; };'),
     "a spread onto a component": ("const ZzBox = (zzProps: { title: string }) => <p>{zzProps.title}</p>;\n"
                                   'export const zzForm = (zzProps: { title: string }) => <ZzBox {...zzProps} />;'),
     "a local function named createElement": "export const zzForm = () => { const createElement = () => 1; return createElement(); };",

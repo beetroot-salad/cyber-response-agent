@@ -11,7 +11,6 @@ import * as attempt from "./attempt";
 import { ErrorBoundary, ErrorScreen, raisedByApp, type ErrorKind } from "./errors";
 import { makeLoad, type Effects, type Load } from "./load";
 import { ShellProvider, type AddressQuery, type Shell } from "./provider";
-import { repoAddress } from "./repo";
 import type { CallbackReason, Outcome, Person } from "./types";
 
 const effects: Effects = {
@@ -113,12 +112,6 @@ function shellFor(view: View, load: Load, { routed, address, me }: Opened): Shel
     read: load.client.read,
     queryClient: load.queryClient,
     me,
-    repos: new Map(
-      (me?.tenants ?? []).flatMap(({ tenant_id, repo_url }) => {
-        const checked = repoAddress(repo_url, window.location.origin);
-        return checked === null ? [] : [[tenant_id, checked] as const];
-      }),
-    ),
     pathname: address.pathname,
     shape: routed.shape,
     query,
@@ -128,6 +121,10 @@ function shellFor(view: View, load: Load, { routed, address, me }: Opened): Shel
       },
       signOut: () => {
         runAction(view, load, load.client.signOut());
+      },
+      mayOpenRepository: (address) => load.repositoryPage(address) !== null,
+      openRepository: (address) => {
+        load.toRepository(address);
       },
       // Not `runAction`: its error is the screen's to show beside the invitation, not the error state. A fault of the
       // shell's own still is the error state's.

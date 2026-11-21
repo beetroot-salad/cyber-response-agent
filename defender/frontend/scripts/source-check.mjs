@@ -22,9 +22,7 @@
 //    app's own host is not known here. Ordinary words ("API docs", "/apix") stay allowed. On top of that, an attribute
 //    the browser is known to request or navigate to (`src`, `href`, `action`, ..., matched in any case) must be a path
 //    written out from the root on the app's origin, an imported asset's URL, or made by `src/addresses.ts` (which makes
-//    the app's own addresses, and one other: `repoLink`, the tenant repository's page on the forge we host, which takes
-//    only a `RepoAddress`, a value only the shell makes once it has checked it is on another origin; amended for the
-//    home redesign), so an address held in a variable or built in a template is refused there. What
+//    only the app's own addresses), so an address held in a variable or built in a template is refused there. What
 //    could carry an address past both is refused outright: an attribute that holds HTML or a navigation instruction in
 //    a string (`srcDoc`, raw HTML, a `meta` element's `content` beside `httpEquiv`), an inline style, a spread onto an
 //    HTML element, and React's element-making functions called directly. So a screen's markup makes the browser

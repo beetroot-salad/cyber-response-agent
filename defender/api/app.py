@@ -75,7 +75,7 @@ from .models import (
     SystemCheck,
     SystemPut,
     TenantItem,
-    MeTenant,
+    Repository,
     TenantRef,
 )
 from . import addresses
@@ -543,6 +543,37 @@ async def get_alert(deps: Deps, caller: WorkReader, alert_id: AlertId) -> Alert:
     if alert is None:
         raise _not_found("alert", alert_id)
     return alert
+
+
+repository = _router(prefix="/repository", tags=["repository"], responses=_EVERY_ROUTE)
+
+
+def _browser_page(recorded: str | None, app_origin: str) -> str | None:
+    """`recorded` when a browser may be sent there: http or https, a host, no user part (a credential could ride in
+    it), no query or fragment, and another origin than the app's (so never one of the app's own addresses, `/api`
+    among them). Otherwise None."""
+    if recorded is None:
+        return None
+    try:
+        parts, app = urlsplit(recorded), urlsplit(app_origin)
+        host, port, app_port = parts.hostname, parts.port, app.port
+    except ValueError:
+        return None
+    if parts.scheme not in ("http", "https") or not host or "@" in parts.netloc or parts.query or parts.fragment:
+        return None
+    default = {"http": 80, "https": 443}
+    if (parts.scheme, host, port or default[parts.scheme]) == (
+            app.scheme, app.hostname, app_port or default.get(app.scheme)):
+        return None
+    return recorded
+
+
+@repository.get("")
+async def read_repository(deps: Deps, caller: WorkReader) -> Repository:
+    """Where a browser opens the tenant's knowledge repository: the page the lifecycle recorded on the tenant. The app's
+    `/t/<tenant>/repo` address reads it and sends the person there."""
+    record = await deps.tenants.tenant(caller.tenant_id)
+    return Repository(repo_url=_browser_page(None if record is None else record.repo_url, deps.frontend_origin))
 
 
 investigations = _router(prefix="/investigations", tags=["investigations"], responses=_EVERY_ROUTE)
@@ -1074,22 +1105,6 @@ async def logout(request: Request, deps: Deps, caller: Person) -> Response:
     return response
 
 
-def _repo_page(wiring: _tenancy.ForgeWiring | None) -> str | None:
-    """The tenant repository's page for a browser: the recorded origin without `.git`, when it is an http or https
-    address with a host and no user part (the lifecycle records `<forge url>/<repo>.git`); otherwise None, so a remote
-    recorded by hand (an ssh one, one carrying a user, or one Python cannot even split) is never served as a link."""
-    if wiring is None:
-        return None
-    try:
-        parts = urlsplit(wiring.origin)
-        host = parts.hostname
-    except ValueError:
-        return None
-    if parts.scheme not in ("http", "https") or not host or "@" in parts.netloc or parts.query or parts.fragment:
-        return None
-    return wiring.origin.removesuffix(".git")
-
-
 @auth.get("/me", responses=_IDENTITY)
 async def read_me(deps: Deps, caller: AnyCaller) -> Me | ProgramMe:
     """Who the caller is: a person with their tenants and invitations, or a program with its one tenant
@@ -1102,7 +1117,7 @@ async def read_me(deps: Deps, caller: AnyCaller) -> Me | ProgramMe:
             credential=CredentialRef(id=view.credential.id, expires_at=view.credential.expires_at))
     return Me(
         user=MeUser(id=view.user.id, email=view.user.email, display_name=view.user.display_name),
-        tenants=[MeTenant(tenant_id=t, repo_url=_repo_page(await deps.tenants.forge_wiring(t))) for t in view.tenants],
+        tenants=[TenantRef(tenant_id=t) for t in view.tenants],
         administrator=view.administrator,
         invitations=[InvitationRef(id=i.id, tenant_id=i.tenant_id) for i in view.invitations])
 
@@ -1399,7 +1414,7 @@ def create_app(deps: ApiDeps) -> FastAPI:
     app.add_middleware(_FrontendOriginOnly, origin=deps.frontend_origin)
     in_tenant = _router(prefix="/tenants/{tenant_id}", responses=responses(404))
     for router in (alerts, investigations, learning_jobs, learning_work, lessons, adapters, systems, case_record,
-                   alert_mapping, readiness, adoptions, people, programs):
+                   alert_mapping, readiness, adoptions, people, programs, repository):
         in_tenant.include_router(router)
     for router in (auth, in_tenant, admin):
         app.include_router(router, prefix=API_PREFIX)
