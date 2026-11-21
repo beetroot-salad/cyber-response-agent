@@ -27,11 +27,12 @@ class Shape:
 
 
 #: S2's shapes with #1540's amendments: `root` (the public landing page) is non-returnable, `home` is returnable. Piece 2
-#: adds the opener.
+#: adds the opener; the alert list design adds `alerts`.
 SHAPES = (
     Shape("root", "/", False),
     Shape("home", "/home", True),
     Shape("investigation", "/t/{uuid}/investigations/{uuid}", True),
+    Shape("alerts", "/t/{uuid}/alerts", True),  # alert list design O4
     Shape("sign-in-failed", "/sign-in-failed", False),
 )
 RETURNABLE = frozenset(s.name for s in SHAPES if s.returnable)

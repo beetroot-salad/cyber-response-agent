@@ -41,6 +41,27 @@ they start, the learning drains, the lifecycle service) refuses a database whose
 migration may lock the tables it changes until it commits. So: stop the API, the workers, the learning drains and the
 lifecycle service; run migrations; start the new code. The notes below say only what an upgrade needs beyond that.
 
+## Upgrade from before #1581
+
+Stop the API and the workers first, as in "Upgrading" above: an old worker would complete investigations without
+keeping the alert's stored outcome. Run migrations (revision `0025_alert_outcome`). It gives `jobs.alerts` its stored
+outcome (filled from each alert's newest completed investigation) and the index the alert list's outcome filter reads,
+and refuses a completed investigation with no disposition, or any disposition outside the five codes. It stops,
+changing nothing, while any such row exists, naming how many of each; no production investigation has run, so no
+remediation is written for them. A list cursor issued before the upgrade is refused once (422, "the filters changed"):
+its client starts again from page 1.
+
+## Upgrade from before #1589
+
+Run migrations (revision `0024_drop_findings_count`): it drops `jobs.learning_jobs.findings_count`, which nothing
+decided on. A job's stored findings carry its id (`source_run`): that is the lasting record of what its end stored.
+The finish audit event of a completed job whose findings were stored also names how many rows its end added
+(`added=N`; a refused one names none), but an audit event can be lost in a crash just after the commit.
+
+A job's entry runs from its worker's code copy, not from the job image, so an upgraded worker's jobs write the
+new end record. An end record written before the upgrade and read after it keeps its `findings_count`: the new
+worker ignores it.
+
 ## Upgrade from before #1557
 
 A learning job's oracle boxes no longer keep their scratch in the tenant's folder: it lives under the claim's folder

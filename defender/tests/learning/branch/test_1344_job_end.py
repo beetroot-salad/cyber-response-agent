@@ -31,10 +31,11 @@ from defender.tests.learning.branch.test_1344_job_lane import (
 from defender.tests.learning.branch.test_triplet_launcher import _BASE
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 from defender.tests.support.learning.branch import _triplet_947 as T
+from defender.tests.support.learning.core import _typed_output1579 as TY
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
-_FIELDS = {"status", "reason", "message", "fork_message_id", "stage", "findings_count", "sibling_cost_usd"}
+_FIELDS = {"status", "reason", "message", "fork_message_id", "stage", "sibling_cost_usd"}  # #1589: no findings count
 _GOOD_REPLY = J.as_reply_text(J.reply_doc(bucket="none", systems=[]))
 
 
@@ -135,7 +136,7 @@ def test_a_judge_verdict_that_grades_nothing_is_still_completed_with_the_word_in
     }[verdict]()
     ran = run_entry(tmp_path, spawn=spawn)
     end = _ended(ran, "completed", None)
-    assert end["findings_count"] == 0
+    assert "findings_count" not in end  # #1589
     assert verdict in (end["message"] or "")
     assert ran.judge.calls == 0, "a verdict that grades nothing still bought a judge call"
 
@@ -329,7 +330,7 @@ def _refused_before_the_first_sibling(tmp_path, monkeypatch, cause: str, data_ro
     from defender.tests.learning.oracle.live_contracts.test_preflight_and_outcome import _family
 
     if cause == _QUESTIONER_UNUSABLE:
-        return run_entry(tmp_path, questioner=Watch("worlds: [unclosed, {facts: "))
+        return run_entry(tmp_path, questioner=Watch(TY.unusable("base_story must be a non-empty string")))
     if cause == "no fact world":
         return run_entry(tmp_path, questioner=Watch(*S.questioner_for(_family(facts_b=[], facts_c=[])).replies))
     if cause == "no original call":
@@ -919,3 +920,43 @@ def test_a_sigterm_after_the_judge_returned_is_still_completed(tmp_path):
     assert len(records) == 1, f"premise: the entry left one end record, not {records}: {done.stderr[-2000:]}"
     ended = json.loads(records[0].read_text(encoding="utf-8"))
     assert (ended["status"], ended["reason"]) == ("completed", None), ended
+
+
+def _plan_of(authored) -> dict:
+    """Call 1's reply as the prompt asks for it, from the fixture family's authored half."""
+    return {"base_story": "the captured story", "base_disposition": "malicious",
+            "discriminator": {"predicate": "p"},
+            "worlds": [{"label": w["label"], "axis": w["axis"], "facts": w["facts"]}
+                       for w in authored["worlds"] if w.get("role") != "A"]}
+
+
+@pytest.mark.parametrize("at", ["call 1", "seat"])
+def test_a_reply_unusable_at_call_1_or_a_seat_ends_skipped_family_unusable_with_nothing_started(tmp_path, at):
+    """#1579 P3: the runner gave up on the question-writer's call 1 or a seat: the family's own
+    refusal, `skipped: family_unusable`, nothing started — the same ending as any unusable family."""
+    plan = _plan_of(T.declaration(S.family_v2()))
+    replies = [TY.unusable("base_story must be a non-empty string")] if at == "call 1" else [
+        plan, TY.unusable("story must be a string")]
+
+    ran = run_entry(tmp_path, questioner=Watch(*replies))
+
+    _failed_with(ran, "skipped", "family_unusable")
+    assert ran.spawn.launches == []
+    assert ran.questioner.calls == len(replies)
+
+
+@pytest.mark.parametrize("at", ["call 1", "seat"])
+@pytest.mark.parametrize("fault", [lambda: TY.unprocessable("provider down", cause=TimeoutError("slow")),
+                                   lambda: TypeError("a bug in the host's check")],
+                         ids=["provider-failure", "host-bug"])
+def test_a_host_exception_at_call_1_or_a_seat_ends_failed_entry_error_not_family_unusable(tmp_path, at, fault):
+    """#1579 P5: a provider failure (`RunUnprocessable`) or a host bug at call 1 or a seat keeps
+    today's ending (`failed: entry_error`, as an untyped fault), never `skipped: family_unusable`."""
+    raised = fault()
+    plan = _plan_of(T.declaration(S.family_v2()))
+    replies = [raised] if at == "call 1" else [plan, raised]
+
+    ran = run_entry(tmp_path, questioner=Watch(*replies))
+
+    _failed_with(ran, "failed", "entry_error")
+    assert ran.spawn.launches == []

@@ -4,7 +4,7 @@ job runs it (the job image is built there, `defender-job:latest`).
 
 - `LEARNING`: a learning job's container. It records what it can reach, then writes the job's create-only end record
   with product code (`JobLane.write_learning_end`, `LearningEnd(findings=...)`), `completed` with the findings the host
-  planted for it (`obs1487/rows.json`), under an envelope `findings_count` of 0 that the worker must not copy. The real
+  planted for it (`obs1487/rows.json`). The real
   entry's own read of the episode's held rows is not run here (it is `tests/learning/branch/test_1487_hand_in.py`'s).
 - `POST_STEP`: a post-step container. It records what it can reach, then runs the real `post_step.main` with only its
   tick replaced (no curator is woken: the tick claims and stops): the tick records the store it was handed (it must be the
@@ -86,7 +86,7 @@ try:
     from defender import tenancy
     from defender.records.job_lane import JobLane, LearningEnd
     end = LearningEnd(status="completed", reason=None, message="the judge graded the family: 1 finding(s) wait in the episode",
-                      fork_message_id=None, stage=None, findings_count=0, sibling_cost_usd=0.0,
+                      fork_message_id=None, stage=None, sibling_cost_usd=0.0,
                       findings={"state": "ok", "text": json.dumps({"finding": rows, "questioner_finding": []})})
     with JobLane.open(tenancy.resolve_data_root(), tenant) as lane:
         lane.write_learning_end(job, end)

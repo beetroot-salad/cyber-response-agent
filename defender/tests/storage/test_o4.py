@@ -25,6 +25,7 @@ from defender.tests.support.storage import _spec1133 as S
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.shared.filesystem._umask import umask
 from defender.tests.storage import test_rev3 as R
+from defender.tests.support.learning.core import _typed_output1579 as TY
 from defender.tests.support.learning.core import _state1135
 
 EPISODE_ID = "ep-1133"
@@ -406,29 +407,30 @@ def test_o4_5_a_link_planted_at_the_claim_is_left_in_place_by_its_release(
 class ScriptedJudge:
     """The judge seam (`judge=`): `by_agent[agent_id]` or `default`, recording each call."""
 
-    def __init__(self, by_agent: dict[str, str], default: str) -> None:
+    def __init__(self, by_agent: dict[str, Any], default: Any) -> None:
         self.by_agent = by_agent
         self.default = default
         self.agent_ids: list[str] = []
 
     def __call__(self, prompt: str, *, role: Any = None, agent_id: str = "judge",
-                 **kw: Any) -> str:
+                 **kw: Any) -> Any:
         self.agent_ids.append(agent_id)
-        return self.by_agent.get(agent_id, self.default)
+        reply = self.by_agent.get(agent_id, self.default)
+        if isinstance(reply, BaseException):
+            raise reply  # an exhausted call (the re-asks happen inside the one call)
+        return reply, 1
 
 
 def _draw0_asks() -> list[str]:
-    """Every ask of world `b`'s draw 0: the first and its re-asks after a refused reply
-    (`judge._REPLY_ATTEMPTS` asks per draw)."""
-    attempts = J.mod("learning.judge")._REPLY_ATTEMPTS
-    return [f"judge:{WORLD_B}:0", *(f"judge:{WORLD_B}:0:{a}" for a in range(1, attempts))]
+    """Every call of world `b`'s draw 0: ONE (#1579: re-asks happen inside the call)."""
+    return [f"judge:{WORLD_B}:0"]
 
 
 def _malformed_first() -> ScriptedJudge:
-    """Every ask of draw 0 answered malformed, so the draw writes nothing (its stale file is
-    removed) and each ask counts a malformed reply; every other ask answered well."""
+    """Draw 0's one call exhausted (`ReplyUnusable`, 1 + N requests), so the draw writes nothing
+    (its stale file is removed) and counts 1 + N malformed replies; every other call answered well."""
     good = J.as_reply_text(J.reply_doc())
-    bad = J.as_reply_text(J.reply_doc(), malformed="lookalike-bucket")
+    bad = TY.unusable("lookalike-bucket")
     return ScriptedJudge(dict.fromkeys(_draw0_asks(), bad), default=good)
 
 
@@ -460,7 +462,7 @@ def test_o4_6_a_link_at_a_malformed_draws_name_is_refused_logged_and_left_and_th
     assert outside.read_text(encoding="utf-8") == "findings: [{bucket: planted}]\n"
     assert (draw_dir / "1.yaml").is_file(), "the loop did not go on to write draw 1"
     row = J.world_rows(J.judge_record(ep))["b"]
-    assert (row["malformed_replies"], row["completed_draws"]) == (len(_draw0_asks()), 1), row
+    assert (row["malformed_replies"], row["completed_draws"]) == (TY.MAX_REQUESTS, 1), row
     assert S.warned(caplog, "0.yaml", "aliased"), "the refused draw removal was not logged"
     with _io.bind(ep) as view:
         draws, report = enqueue.draws_on_disk_report(view, WORLD_B)
@@ -525,7 +527,7 @@ def test_s1_any_other_error_removing_a_stale_draw_stops_the_pass_and_keeps_nothi
     with S.open_episode(ep) as episode:
         completed, documents, malformed, _last_refusal = _run_draws(episode, judge)
     assert judge.agent_ids == [*_draw0_asks(), f"judge:{WORLD_B}:1"]
-    assert (completed, malformed) == (1, len(_draw0_asks()))
+    assert (completed, malformed) == (1, TY.MAX_REQUESTS)
     assert sorted(documents) == [1]
     assert not os.path.lexists(draw), "control: the stale plain draw survived"
 
@@ -545,7 +547,7 @@ def test_s1_a_non_plain_draw_is_contained_logged_and_left(tmp_path, caplog, kind
             lambda: _run_draws(episode, judge), fifo=planted.fifo)
     assert judge.agent_ids == [*_draw0_asks(), f"judge:{WORLD_B}:1"], (
         "the loop stopped at a contained row")
-    assert (completed, malformed) == (1, len(_draw0_asks()))
+    assert (completed, malformed) == (1, TY.MAX_REQUESTS)
     assert os.path.lexists(draw), f"the {kind} at the draw's name was removed"
     assert S.warned(caplog, "0.yaml"), "the refused removal was not logged"
 

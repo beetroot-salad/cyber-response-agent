@@ -235,7 +235,7 @@ def _world_queue(paths: Any) -> list[dict]:
 
 
 def test_1224_launcher_records_the_gather_grant_systems_as_served_systems(tmp_path, monkeypatch):
-    """the launcher writes the episode tenant's gather grant systems into family.yaml as served_systems, whatever the question-writer replied."""
+    """the launcher writes the episode tenant's gather grant systems into family.yaml as served_systems (the reply cannot carry the key: #1579 closes call 1)."""
     est = S.estate(tmp_path, systems=(*S.SYSTEMS, "ndr"),
                    withheld=tuple(("ndr", verb) for verb in S.READ_VERBS))
     reply = S.family_v2(served_systems=("cmdb", "elastic", "ndr"))
@@ -332,23 +332,26 @@ def test_1224_question_writer_authors_world_facts_not_telemetry(tmp_path, monkey
         "telemetry": [{"host": "db-1", "event.action": "logon", "user": "carol"}],
     }
     for key, value in bad_shapes.items():
-        bad = S.family_v2()
-        bad["worlds"][1][key] = value
+        bad = S.questioner_for()
+        bad.replies[1][key] = value  # seat B authors a key no world carries (#1579: closed seat)
         oracle = S.oracle(then=S.text_only())
         spawn = S.FakeSpawn()
         refused = _launch(_isolated(tmp_path, monkeypatch, f"bad-{key}"), monkeypatch,
-                          S.estate(tmp_path / f"bad-{key}"), questioner=S.questioner_for(bad),
+                          S.estate(tmp_path / f"bad-{key}"), questioner=bad,
                           oracle=oracle, spawn=spawn)
         assert refused.rc != 0, f"a reply giving world b {key!r} was not refused"
         assert refused.message, f"the refusal of world b's {key!r} names no reason"
-        if key == "overlay":
-            assert S.PREDATES in refused.message, (
-                f"the overlay refusal does not say it predates the oracle: {refused.message!r}")
         written = _manifest(refused.ep) or {}
         assert all(key not in w for w in written.get("worlds", [])), (
             f"a manifest carrying the world's {key!r} was written")
         assert oracle.requests == 0, f"pre-flight spent an oracle turn on a refused {key!r} reply"
         assert spawn.launches == [], f"a sibling started for a refused {key!r} reply"
+
+    # The on-disk trust boundary keeps its own refusal, and says why (the overlay predates the oracle).
+    old = S.family_v2()
+    old["worlds"][1]["overlay"] = bad_shapes["overlay"]
+    with pytest.raises(T.mod("records._family").FamilyError, match=S.PREDATES):
+        T.mod("records._family").parse_family(old)
 
 
 def test_1224_lesson_is_shown_iff_the_tenant_serves_one_of_its_systems(tmp_path):

@@ -17,8 +17,8 @@ instruction. So is the conflict.
 
 ## What you must return
 
-One YAML document, no prose around it — bare, not inside a code fence, with nothing before
-or after it. The fence below is illustration, not part of the reply:
+Call the tool with these arguments; plain text is not an answer. The block below only
+illustrates their shape:
 
 ```yaml
 story: |

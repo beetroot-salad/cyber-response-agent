@@ -15,6 +15,7 @@ from sqlalchemy.engine import Row
 from sqlalchemy.orm import Mapped, mapped_column
 
 from defender._model import model
+from defender._vocab import DISPOSITION_VALUES, Disposition
 from defender.database import Base, IdColumn
 from defender.records.formats import AlertId, InvestigationId, LearningJobId, TenantId
 from defender.tenancy.models import SCHEMA as TENANCY_SCHEMA
@@ -33,6 +34,11 @@ def _quoted(values: tuple[str, ...]) -> str:
     return ", ".join(repr(v) for v in values)
 
 
+#: The alert's outcome copy is all set or all null (#1581).
+OUTCOME_COPY_WHOLE = ("(outcome IS NULL) = (outcome_investigation_id IS NULL) "
+                      "AND (outcome IS NULL) = (outcome_created_at IS NULL)")
+
+
 class AlertRow(Base, kw_only=True):
     __tablename__ = "alerts"
     __table_args__ = (
@@ -41,6 +47,10 @@ class AlertRow(Base, kw_only=True):
         UniqueConstraint("tenant_id", "id"),
         UniqueConstraint("tenant_id", "vendor", "vendor_ticket_id"),
         Index("alerts_newest_first", "tenant_id", text("fired_at DESC"), text("id DESC")),
+        # #1581: the outcome filter is a range of this index; `outcome IS NULL` uses it too.
+        Index("alerts_outcome_newest_first", "tenant_id", "outcome", text("fired_at DESC"), text("id DESC")),
+        CheckConstraint(OUTCOME_COPY_WHOLE, name="outcome_copy_whole"),
+        CheckConstraint(f"outcome IN ({_quoted(DISPOSITION_VALUES)})", name="outcome"),
         {"schema": SCHEMA},
     )
 
@@ -56,6 +66,14 @@ class AlertRow(Base, kw_only=True):
     title: Mapped[str | None] = mapped_column(Text)
     description: Mapped[str | None] = mapped_column(Text)
     raw: Mapped[bytes] = mapped_column(LargeBinary)
+    #: A copy of O1's answer (#1581 AP1): the disposition of the alert's newest `completed` investigation by
+    #: `(created_at, id)`, with that investigation's id and `created_at` (its source); all three null when none has
+    #: completed. Only the store's `finish` and investigation delete write them (`store.py`), each with one conditional
+    #: update judged against the stored source. The investigations own the facts; this exists so the list's outcome
+    #: filter is an index range.
+    outcome: Mapped[str | None] = mapped_column(Text, default=None)
+    outcome_investigation_id: Mapped[InvestigationId | None] = mapped_column(IdColumn(InvestigationId), default=None)
+    outcome_created_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
 
 
 class InvestigationRow(Base, kw_only=True):
@@ -66,9 +84,14 @@ class InvestigationRow(Base, kw_only=True):
         CheckConstraint(f"stage IN ({_quoted(STAGES)})", name="stage"),
         CheckConstraint("stage <> 'running' OR lease_expires_at IS NOT NULL", name="running_has_a_lease"),
         CheckConstraint("NOT cost_is_lower_limit OR cost_usd IS NOT NULL", name="lower_limit_has_a_cost"),
+        # #1581 O10: a completed investigation always has a disposition, one of the vocabulary's.
+        CheckConstraint("stage <> 'completed' OR disposition IS NOT NULL", name="completed_has_a_disposition"),
+        CheckConstraint(f"disposition IN ({_quoted(DISPOSITION_VALUES)})", name="disposition"),
         Index("investigations_one_live_per_alert", "tenant_id", "alert_id", unique=True,
               postgresql_where=text(f"stage IN ({_quoted(LIVE)})")),
         Index("investigations_newest_first", "tenant_id", text("created_at DESC"), text("id DESC")),
+        # #1581: the alert list's `latest_status`, one alert's newest investigation, is the first entry of this index.
+        Index("investigations_alert_newest_first", "tenant_id", "alert_id", text("created_at DESC"), text("id DESC")),
         {"schema": SCHEMA},
     )
 
@@ -143,7 +166,6 @@ class LearningJobRow(Base, kw_only=True):
     fork_message_id: Mapped[str | None] = mapped_column(Text, default=None)
     #: The siblings' own cost so far, then final: partial, without the questioner, oracle and judge (O13).
     sibling_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
-    findings_count: Mapped[int] = mapped_column(Integer, default=0)
     publish_state: Mapped[str] = mapped_column(Text, default="none")
     started_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
     #: Set at the end; on a `running` row, the mark of a hand-back, which no renewal covers.
@@ -180,7 +202,9 @@ class LearningCheckRow(Base, kw_only=True):
 
 @model(frozen=True)
 class AlertListing:
-    """An alert as a list shows it: every stored field but `raw`, which a list never reads (#1507)."""
+    """An alert as a list shows it: every stored field but `raw`, which a list never reads (#1507), and what its
+    investigations concluded (#1581). `outcome` is the stored copy of the newest completed investigation's disposition;
+    `latest_status` the newest investigation's stage; each None when there is no such investigation."""
 
     alert_id: AlertId
     tenant_id: TenantId
@@ -191,6 +215,8 @@ class AlertListing:
     received_at: _dt.datetime
     title: str | None
     description: str | None
+    outcome: Disposition | None
+    latest_status: str | None
 
 
 @model(frozen=True)
@@ -255,7 +281,6 @@ class LearningJobRecord:
     stage: str | None
     fork_message_id: str | None
     sibling_cost_usd: float
-    findings_count: int
     publish_state: str
     created_at: _dt.datetime
     started_at: _dt.datetime | None
@@ -292,17 +317,21 @@ def learning_job_record(row: LearningJobRow) -> LearningJobRecord:
         learning_job_id=row.id, tenant_id=row.tenant_id, alert_id=row.alert_id, investigation_id=row.investigation_id,
         request_key=row.request_key, attempt=row.attempt, trigger=row.trigger, status=row.status, stage=row.stage,
         fork_message_id=row.fork_message_id, sibling_cost_usd=row.sibling_cost_usd,
-        findings_count=row.findings_count, publish_state=row.publish_state, created_at=row.created_at,
+        publish_state=row.publish_state, created_at=row.created_at,
         started_at=row.started_at, finished_at=row.finished_at, reason=row.reason, message=row.message)
 
 
 #: The columns an alert list selects: every column but `raw` (#1507).
-ALERT_LISTING_COLUMNS = tuple(column for column in AlertRow.__table__.columns if column.key != "raw")
+#: Every alert column a list reads: all but `raw` (#1507) and the two that only keep the stored outcome in step with its
+#: source investigation (#1581), which no read shows. The list's query adds `latest_status` beside them.
+ALERT_LISTING_COLUMNS = tuple(column for column in AlertRow.__table__.columns
+                              if column.key not in ("raw", "outcome_investigation_id", "outcome_created_at"))
 
 
 def alert_listing(row: Row[Any]) -> AlertListing:
-    """An `AlertListing` from a row of `ALERT_LISTING_COLUMNS`, each field the column of its name (`alert_id` is `id`):
-    a column the record lacks, or a field no column fills, is a `TypeError`, never a field left at a default."""
+    """An `AlertListing` from a row of `ALERT_LISTING_COLUMNS` and `latest_status`, each field the column of its name
+    (`alert_id` is `id`): a column the record lacks, or a field no column fills, is a `TypeError`, never a field left at
+    a default."""
     values = dict(row._mapping)
     values["alert_id"] = values.pop("id")
     return AlertListing(**values)

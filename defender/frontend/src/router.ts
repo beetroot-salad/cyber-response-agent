@@ -2,6 +2,7 @@
 // screen and a screen with no shape are build errors. What matches no shape is the not-found screen, not a route (PR4).
 import type { ComponentType } from "react";
 import { match, RETURNABLE, type ShapeName } from "./addresses";
+import { Alerts } from "./screens/alerts/Alerts";
 import { Home } from "./screens/Home";
 import { Investigation } from "./screens/Investigation";
 import { NotFound } from "./screens/NotFound";
@@ -12,6 +13,7 @@ const SCREENS: Record<ShapeName, ComponentType> = {
   root: Root,
   home: Home,
   investigation: Investigation,
+  alerts: Alerts,
   "sign-in-failed": SignInFailed,
 };
 

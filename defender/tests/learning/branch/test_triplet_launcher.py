@@ -233,7 +233,7 @@ def test_947_the_launcher_screens_the_source_alert_before_the_questioner_reads_i
     secret.write_text("ROOT-PRIVATE-KEY", encoding="utf-8")
     RunPaths(src).alert.unlink()
     RunPaths(src).alert.symlink_to(secret)
-    agent = T.FakeAgent(T.declaration(T.family_doc()), T.declaration(T.world_doc("b")), T.declaration(T.world_doc("c")))
+    agent = T.FakeAgent(*T.authoring_replies(T.family_doc()))
     with pytest.raises(T.refusals()) as refusal:
         _entry().main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID)],
                     spawn=T.FakeSpawn(), questioner=agent,
@@ -336,7 +336,7 @@ def test_947_any_failure_in_steps_two_to_four_aborts_the_episode(tmp_path):
     spawn = T.FakeSpawn()
     rc, spawn, _ep, message = _launch(
         tmp_path, spawn=spawn,
-        questioner=T.FakeAgent(T.declaration(S.family_v2()), fault=T.Fault(raise_after=1)))
+        questioner=T.FakeAgent(T.plan_reply(S.family_v2()), fault=T.Fault(raise_after=1)))
     assert rc != 0
     assert message, "the abort was not reported as a refusal"
     assert spawn.launches == [], "a sibling started after the abort"

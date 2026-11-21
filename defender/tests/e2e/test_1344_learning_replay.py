@@ -42,7 +42,12 @@ def entry_in_a_code_copy(home: Path) -> Path:
     home.mkdir(parents=True, exist_ok=True)
     copy = refresh_code_copy(home, source=DEFENDER.parent, environ={"DEFENDER_BUILD_COMMIT": COPY_COMMIT})
     return copy / ENTRY
-JOB_COLUMNS = ("id", "status", "reason", "message", "fork_message_id", "findings_count", "publish_state")
+JOB_COLUMNS = ("id", "status", "reason", "message", "fork_message_id", "publish_state")
+
+
+def _stored_by(dsn: str, job: str) -> int:
+    """How many learning work items carry the job as their `source_run` (the rows its end added)."""
+    return execute(dsn, "SELECT count(*) FROM learning.work_items WHERE source_run = %s", (job,))[0][0]
 
 
 def _jobs(dsn: str, investigation: str) -> list[dict]:
@@ -154,7 +159,7 @@ async def test_o1_o8_o14_a_completed_investigation_is_learned_from_end_to_end_an
     (job,) = _jobs(migrated_database, flow["investigation"])
     assert (job["status"], job["reason"]) == ("completed", None), job
     assert job["fork_message_id"] == str(gathers[0]), "the family forked somewhere but at MAIN's gather"
-    assert job["findings_count"] >= 1, job
+    assert _stored_by(migrated_database, job["id"]) >= 1, job  # #1589: the stored rows, not a count on the row
     assert job["publish_state"] == "done", job
     queue = _queued_findings(migrated_database, flow["tenant"])
     assert [r for r in queue if "the lead was never revisited" in json.dumps(r)], "the judge's finding never reached the queue"
@@ -175,7 +180,7 @@ async def test_o3_a_completed_investigation_with_no_gather_ends_its_job_skipped_
     assert flow["gathers"] == ([], []), "premise: MAIN made no gather call"
     (job,) = _jobs(migrated_database, flow["investigation"])
     assert (job["status"], job["reason"]) == ("skipped", "no_fork_point"), job
-    assert job["findings_count"] == 0
+    assert _stored_by(migrated_database, job["id"]) == 0
     assert _queued_findings(migrated_database, flow["tenant"]) == []
     gate = flow["marks"] / "post-step" / "gate"
     assert gate.is_file(), "the job's child started, so the post-step runs the gate whatever the ending"

@@ -15,10 +15,12 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy import func
 
 from defender.jobs import Conflict, UnknownReference
-from defender.jobs.models import LEARNING_TRIGGERS
+from defender.jobs.models import LEARNING_TRIGGERS, InvestigationRow
 from defender.jobs.store import is_refusal
+from defender.records.formats import InvestigationId
 from defender.tests.support.jobs._worker1342 import _FAST, _child, _committed, _queued, _run_one, _until, _worker
 from defender.tests.support.jobs._jobs1342 import (
     FRONTEND_ORIGIN,
@@ -43,7 +45,7 @@ pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
 END = "{id}.learning-end.json"
 PROGRESS = "{id}.learning-progress.json"
 COLUMNS = ("id", "request_key", "attempt", "trigger", "status", "stage", "fork_message_id", "created_at",
-           "reason", "message", "sibling_cost_usd", "findings_count", "publish_state")
+           "reason", "message", "sibling_cost_usd", "publish_state")
 RUN_TEXT = "RUN-TEXT-1344"
 OVER_AGE = NOW - dt.timedelta(hours=25)
 SKIPPED_BY_THE_ENTRY = ("no_fork_point", "history_unreadable", "family_unusable")
@@ -61,12 +63,12 @@ def world(migrated_database: str, tmp_path: Path) -> dict:
     return {"dsn": migrated_database, "root": root, "runs": root / T1 / "runs", "tmp": tmp_path}
 
 
-def learning_end(status: str, reason: str | None = None, *, message: str | None = None, findings: int = 0,
+def learning_end(status: str, reason: str | None = None, *, message: str | None = None,
                  cost: float = 0.0, fork: str | None = "m-1", stage: str | None = "judge") -> str:
-    """The entry's end record, in the interface's whole shape. `findings` is the envelope's own count, which the worker
-    ignores (#1487): a completed record carries `ok` findings with no rows, as a pass that held none."""
+    """The entry's end record, in the interface's whole shape (no findings count since #1589): a completed record
+    carries `ok` findings with no rows, as a pass that held none."""
     body = {"status": status, "reason": reason, "message": message, "fork_message_id": fork,
-            "stage": stage, "findings_count": findings, "sibling_cost_usd": cost}
+            "stage": stage, "sibling_cost_usd": cost}
     if status == "completed":
         body["findings"] = {"state": "ok", "text": json.dumps({"finding": [], "questioner_finding": []})}
     return json.dumps(body)
@@ -144,13 +146,20 @@ def learning_worker(world: dict, store, *, job, post, inv=None, **kw):
 
 
 async def completed_investigation(store, *, ticket: str, key: str = "k1", tenant: str = T1) -> str:
-    """An investigation brought to `completed` by the store's own claim and finish: its job queued."""
+    """An investigation brought to `completed` by the store's own finish: its job queued, its tenant's check armed.
+
+    The row is planted already `running`, never `queued`, under a lease no test outlives: a serving worker started
+    before this call can neither claim it nor take it over, so this is safe to call at any point in a test (#1597).
+    The store's claim picks whichever queued row is oldest, so claiming here would race any worker that is serving."""
     alert = await an_alert(store, tenant, ticket=ticket)
-    inv, _ = await store.create_investigation(tenant, alert.alert_id, key, actor="u-1")
-    claim = await store.claim()
-    assert claim.record.investigation_id == inv.investigation_id, "premise: nothing else was queued"
-    await store.finish(tenant, inv.investigation_id, stage="completed", disposition="malicious", cost_usd=0.0)
-    return inv.investigation_id
+    investigation_id = InvestigationId.mint()
+    async with store._tx() as s:
+        s.add(InvestigationRow(
+            id=investigation_id, tenant_id=tenant, alert_id=alert.alert_id, request_key=key, attempt=1,
+            stage="running", created_at=NOW, started_at=NOW, lease_expires_at=func.now() + dt.timedelta(hours=1),
+            cost_usd=0.0, update_ticket=False))
+    assert await store.finish(tenant, investigation_id, stage="completed", disposition="malicious", cost_usd=0.0)
+    return str(investigation_id)
 
 
 async def queued_job(world: dict, store, *, ticket: str, tenant: str = T1) -> str:
@@ -185,9 +194,8 @@ _ODD_VALUES: dict[str, list] = {
 }
 _NOT_TEXT = ("list", "object", "bool", "negative", "nan", "infinite", "huge", "fraction", "number")
 _NOT_A_COST = ("list", "object", "text", "blank", "bool", "negative", "nan", "infinite", "huge")
-_NOT_A_COUNT = (*_NOT_A_COST, "fraction")
 _PROGRESS_BASE = {"fork_message_id": "m-1", "stage": "judge", "sibling_cost_usd": 0.5}
-_COMPLETED_BASE = json.loads(learning_end("completed", findings=2, cost=0.5))
+_COMPLETED_BASE = json.loads(learning_end("completed", cost=0.5))
 _FAILED_BASE = json.loads(learning_end("failed", "judge_failed", message="the judge failed", cost=0.5))
 #: `(record, its base, field, the kinds of value outside the field's domain, extra values outside it)`.
 _FIELD_DOMAINS = [
@@ -199,7 +207,7 @@ _FIELD_DOMAINS = [
           ("status", (*_NOT_TEXT, "blank", "text"),
            [None, "done", "Completed", *(("skipped", "stopped", "completed") if name == "end-failed" else ("skipped", "failed"))]),
           ("fork_message_id", _NOT_TEXT, []), ("stage", _NOT_TEXT, []),
-          ("findings_count", _NOT_A_COUNT, [None]), ("sibling_cost_usd", _NOT_A_COST, [None]))],
+          ("sibling_cost_usd", _NOT_A_COST, [None]))],
     ("end-completed", _COMPLETED_BASE, "reason", (*_NOT_TEXT, "blank", "text"), ["judge_failed", "no_fork_point"]),
     ("end-completed", _COMPLETED_BASE, "message", _NOT_TEXT, []),
     ("end-failed", _FAILED_BASE, "reason", (*_NOT_TEXT, "blank", "text"), [None, "no_fork_point", "history_unreadable"]),
@@ -328,7 +336,7 @@ async def test_d10_a_job_insert_the_database_refuses_ends_the_investigation_fail
 
 def _end_rows() -> list:
     """Every row of r5's outcome table the entry can write, one record each (cost 0.75 on every one)."""
-    rows = [pytest.param(learning_end("completed", findings=3, cost=0.75), "completed", None, id="completed"),
+    rows = [pytest.param(learning_end("completed", cost=0.75), "completed", None, id="completed"),
             pytest.param(learning_end("completed", message="not comparable", cost=0.75), "completed", None,
                          id="completed-not-comparable")]
     rows += [pytest.param(learning_end("skipped", r, message=f"why {r}", cost=0.75, fork=None, stage="fork"
@@ -354,8 +362,7 @@ async def test_the_end_record_alone_decides_the_row(world, record, status, reaso
     stored = job_row(world["dsn"], job)
     assert (stored["status"], stored["reason"]) == (status, reason), stored
     assert (stored["message"] or None) == want["message"]
-    # #1487: the count is derived from the stored rows (none here), never the record's own figure
-    assert (stored["findings_count"], stored["sibling_cost_usd"]) == (0 if status == "completed" else want["findings_count"], 0.75)
+    assert stored["sibling_cost_usd"] == 0.75
     assert (stored["fork_message_id"], stored["stage"]) == (want["fork_message_id"], want["stage"])
     assert stored["publish_state"] == ("done" if status == "completed" else "none")
     assert RUN_TEXT not in json.dumps(stored, default=str), "run text reached the row"
@@ -364,8 +371,8 @@ async def test_the_end_record_alone_decides_the_row(world, record, status, reaso
 
 
 @pytest.mark.parametrize(("record", "exit_code", "status"), [
-    pytest.param(learning_end("completed", findings=2), 1, "completed", id="completed-though-a-sibling-failed"),
-    pytest.param(learning_end("completed", findings=2), 0, "completed", id="completed-exit-0"),
+    pytest.param(learning_end("completed"), 1, "completed", id="completed-though-a-sibling-failed"),
+    pytest.param(learning_end("completed"), 0, "completed", id="completed-exit-0"),
     pytest.param(learning_end("failed", "judge_failed", message="the judge failed"), 0, "failed", id="judge-crash-exit-0"),
     pytest.param(learning_end("failed", "judge_failed", message="the judge failed"), 9, "failed", id="judge-crash-exit-9"),
 ])
@@ -440,7 +447,7 @@ async def test_an_end_record_the_worker_itself_cannot_read_is_its_own_failure_no
     """The child left a good record, and the worker could not open the runs container or read the record (its own
     fault: no file handles, the container refused): `failed`/`worker_error`, as an investigation's unreadable records
     are, never `exited_without_result`, which says the child left none. (End record, outcome table)"""
-    job_proc = job_child(world, files={END: learning_end("completed", findings=2)})
+    job_proc = job_child(world, files={END: learning_end("completed")})
     async with job_store(world["dsn"]) as store:
         job = await queued_job(world, store, ticket="T-1")
         await learning_worker(world, store, job=job_proc, post=post_child(world),
@@ -509,7 +516,7 @@ async def test_a_job_of_a_tenant_that_is_not_active_fails_as_a_worker_error_with
 
 async def test_a_job_whose_child_cannot_be_spawned_is_a_worker_error_and_the_worker_carries_on(world):
     """An unexecutable learning command ends that row `worker_error` with no post-step; the next job runs. (End record, O8)"""
-    good, post = job_child(world, files={END: learning_end("completed", findings=1)}), post_child(world)
+    good, post = job_child(world, files={END: learning_end("completed")}), post_child(world)
     async with job_store(world["dsn"]) as store:
         bad = await queued_job(world, store, ticket="T-1")
         fine = await queued_job(world, store, ticket="T-2")
@@ -593,7 +600,7 @@ async def test_a_stopped_record_from_a_child_nobody_signalled_is_still_a_hand_ba
 
 
 @pytest.mark.parametrize(("record", "status", "publish"), [
-    pytest.param(learning_end("completed", findings=2), "completed", "done", id="completed"),
+    pytest.param(learning_end("completed"), "completed", "done", id="completed"),
     pytest.param(learning_end("failed", "judge_failed", message="m"), "failed", "none", id="failed"),
     pytest.param(learning_end("skipped", "no_fork_point", message="m", fork=None, stage="fork"), "skipped", "none",
                  id="skipped"),
@@ -831,7 +838,7 @@ async def test_o5_a_job_queued_while_every_slot_is_busy_takes_the_first_freed_sl
 async def test_o5_jobs_investigations_and_post_steps_together_never_run_in_more_than_the_slots(world):
     """slots=2, L=1, two jobs and two investigations queued, post-steps held: the children alive at once, post-steps counted, never pass 2. (O5, O8)"""
     release = world["tmp"] / "release"
-    jobs = JobChild(world["tmp"] / "jobs", world["runs"], files={END: learning_end("completed", findings=1)})
+    jobs = JobChild(world["tmp"] / "jobs", world["runs"], files={END: learning_end("completed")})
     post = PostStepChild(world["tmp"] / "post", world["runs"], dsn=world["dsn"], wait_for=release)
     invs = ScriptedChild(world["tmp"] / "invs", world["runs"], wait_for=release)
     peaks: list[int] = []
@@ -1018,7 +1025,7 @@ async def test_o5_with_no_learning_slot_jobs_stay_queued_however_old(world):
 
 async def test_o5_drain_claims_a_job_queued_by_a_finish_that_happens_during_it(world):
     """One investigation queued, no job yet: drain runs it, then the job its finish queued, and a post-step. (O5, O1)"""
-    jobs = job_child(world, files={END: learning_end("completed", findings=1)})
+    jobs = job_child(world, files={END: learning_end("completed")})
     post = post_child(world)
     async with job_store(world["dsn"]) as store:
         inv = await _queued(store)
@@ -1037,7 +1044,7 @@ async def test_o13_the_progress_record_is_copied_to_the_running_row_and_the_end_
     record's values are the ones that stay. (O3, O13)"""
     dsn = world["dsn"]
     release = world["tmp"] / "release"
-    final = learning_end("completed", findings=3, cost=2.0, fork="m-7", stage="judge")
+    final = learning_end("completed", cost=2.0, fork="m-7", stage="judge")
     job_proc = job_child(world, files={END: final}, wait_for=release)
     async with job_store(dsn) as store:
         job = await queued_job(world, store, ticket="T-1")
@@ -1058,8 +1065,7 @@ async def test_o13_the_progress_record_is_copied_to_the_running_row_and_the_end_
         await asyncio.wait_for(draining, timeout=60)
 
     stored = job_row(dsn, job)
-    assert (stored["status"], stored["stage"], stored["sibling_cost_usd"], stored["findings_count"]) == (
-        "completed", "judge", 2.0, 0)
+    assert (stored["status"], stored["stage"], stored["sibling_cost_usd"]) == ("completed", "judge", 2.0)
     assert stored["fork_message_id"] == "m-7"
 
 
@@ -1109,7 +1115,7 @@ async def test_o5_a_post_step_holds_the_learning_slot(world):
 async def test_o8_renewals_never_end_a_running_post_step(world):
     """A post-step lives through many renewal ticks, though its row has ended: one registry, no fence. (O8, O9)"""
     release, mark = world["tmp"] / "release", world["tmp"] / "post-termed"
-    jobs = job_child(world, files={END: learning_end("completed", findings=1)})
+    jobs = job_child(world, files={END: learning_end("completed")})
     post = post_child(world, wait_for=release, term="mark", term_mark=str(mark))
     async with job_store(world["dsn"]) as store:
         job = await queued_job(world, store, ticket="J-1")
@@ -1130,7 +1136,7 @@ async def test_o8_a_post_step_that_cannot_be_spawned_leaves_its_row_alone_and_th
     tenant's clock is left not idle by the lost one, though the store holds nothing waiting (which a post-step that ran
     would answer idle), so a later check retries. (O8, O7; #1487 Flow 3: only an answered false predicate is idle)"""
     dsn = world["dsn"]
-    ended = job_child(world, files={END: learning_end("completed", findings=1)})
+    ended = job_child(world, files={END: learning_end("completed")})
     good = post_child(world)
     async with job_store(dsn) as store:
         a = await queued_job(world, store, ticket="J-1")
@@ -1154,7 +1160,7 @@ async def test_o8_each_post_step_announces_one_audit_event_for_its_tenant(world,
     came from the retired record, so none is asserted). (O8, #1487 O7)"""
     audit = JobsAudit(caplog)
     dsn = world["dsn"]
-    ended = job_child(world, files={END: learning_end("completed", findings=1)})
+    ended = job_child(world, files={END: learning_end("completed")})
     async with job_store(dsn) as store:
         await queued_job(world, store, ticket="J-1")
         await queued_job(world, store, ticket="J-2")
@@ -1213,7 +1219,7 @@ async def test_o10_delete_removes_the_investigations_queued_attempts_and_leaves_
 
 
 @pytest.mark.parametrize("record", [
-    learning_end("completed", findings=1), learning_end("failed", "judge_failed", message="m"),
+    learning_end("completed"), learning_end("failed", "judge_failed", message="m"),
     learning_end("skipped", "no_fork_point", message="m", fork=None, stage="fork")], ids=["completed", "failed", "skipped"])
 async def test_o10_delete_removes_finished_jobs_and_a_later_post_step_is_unaffected(world, record):
     """Finished jobs go with the investigation; the next job's post-step follows that job alone. (O10)"""
@@ -1443,7 +1449,7 @@ async def test_o1_the_database_refuses_a_second_job_with_the_same_tenant_investi
 
 async def test_o11_an_explicit_job_runs_on_the_same_slots_as_an_auto_one(world):
     """The worker runs an explicit job like an auto one. (O11, O5)"""
-    jobs = job_child(world, files={END: learning_end("completed", findings=1)})
+    jobs = job_child(world, files={END: learning_end("completed")})
     async with job_store(world["dsn"]) as store:
         inv = await completed_investigation(store, ticket="T-1")
         await store.create_learning_job(T1, inv, "client-1", actor="u-1")
@@ -1541,7 +1547,7 @@ async def test_every_child_is_handed_its_own_claim_and_what_its_tree_started_is_
     container carrying it is gone, whatever the child did with it. (#1446 review: nothing a child started outlives it)"""
     where = world["tmp"] / "containers"
     inv_proc = _child(world, files=_committed(), claimed_dir=where, claimed_names=("defender-run-inv",))
-    job_proc = job_child(world, files={END: learning_end("completed", findings=1)}, claimed_dir=where,
+    job_proc = job_child(world, files={END: learning_end("completed")}, claimed_dir=where,
                          claimed_names=("defender-run-sibling-a", "defender-oracle-1"))
     post = post_child(world, claimed_dir=where, claimed_names=("defender-tenant-drain",))
     async with job_store(world["dsn"]) as store:

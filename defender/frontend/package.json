@@ -15,6 +15,7 @@
     "build": "bun scripts/run.mjs build",
     "check": "bun scripts/run.mjs check",
     "test": "bun scripts/run.mjs generate && vitest run",
+    "test:generated": "bun scripts/run.mjs generate && GENERATED_TESTS=1 vitest run",
     "dev": "bun scripts/run.mjs generate && vite",
     "lint": "eslint . && prettier --check src scripts \"*.mjs\" && knip",
     "format": "prettier --write src scripts \"*.mjs\""
@@ -23,13 +24,15 @@
     "@tanstack/react-query": "5.107.1",
     "openapi-fetch": "0.17.0",
     "react": "19.3.1",
-    "react-dom": "19.3.1"
+    "react-dom": "19.3.1",
+    "temporal-polyfill": "1.0.8"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.3.0",
+    "ajv": "8.20.0",
     "eslint": "10.14.0",
     "eslint-plugin-react-hooks": "7.1.1",
     "globals": "17.13.0",

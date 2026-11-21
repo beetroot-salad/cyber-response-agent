@@ -37,10 +37,13 @@ from defender.tests.support.jobs._jobs1342 import (
     lapse_lease,
     lease_left,
     lower_limit,
+    plant_queued_investigation,
     register_tenant,
     row,
     seed_alert_mapping,
 )
+from defender._vocab import DISPOSITION_VALUES
+from defender.tests.support.jobs._outcome1581 import READS_RAW, no_outcome, statements, stored_copy
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.shared._pglocks1339 import blocked, until, until_blocked
 from defender.tests.support.shared._postgres1339 import execute
@@ -95,17 +98,20 @@ def _plant_investigation(  # noqa: PLR0913 — the planted row's columns
     reason, accounted = worked or ("", False)
     execute(dsn, "INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, stage, created_at, "
                  "started_at, finished_at, failure_reason, accounting_written_at, "
-                 f"cost_usd, cost_is_lower_limit, lease_expires_at, update_ticket) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, false, {lease}, %s)",  # noqa: S608
+                 f"cost_usd, cost_is_lower_limit, lease_expires_at, update_ticket, disposition) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, false, {lease}, %s, %s)",  # noqa: S608
             (investigation_id, tenant, alert_id, key, attempt, stage, created_at, NOW if worked else None,
              NOW if worked else None, reason or None, NOW if accounted else None,
-             1.25 if worked else 0, flagged))  # #1471 C-3: no server default, so the INSERT writes `update_ticket`
+             1.25 if worked else 0, flagged,  # #1471 C-3: no server default, so the INSERT writes `update_ticket`
+             "benign" if stage == "completed" else None))  # #1581 O10: the table refuses a completed row with no disposition (conflict, updated)
     return investigation_id
 
 
 def _set_stage(dsn: str, investigation_id: str, stage: str) -> None:
     execute(dsn, "UPDATE jobs.investigations SET stage = %s, lease_expires_at = CASE WHEN %s = 'running' "
-                 "THEN now() + interval '30 seconds' ELSE lease_expires_at END WHERE id = %s",  # #1343: running ⇒ lease
-            (stage, stage, investigation_id))
+                 "THEN now() + interval '30 seconds' ELSE lease_expires_at END, "  # #1343: running ⇒ lease
+                 "disposition = CASE WHEN %s = 'completed' THEN coalesce(disposition, 'benign') ELSE disposition END "
+                 "WHERE id = %s",  # #1581 O10: a completed row always has one (conflict, updated)
+            (stage, stage, stage, investigation_id))
 
 
 def _count(dsn: str, table: str, where: str = "true") -> int:
@@ -2363,7 +2369,7 @@ async def test_o6_the_store_tells_a_value_it_refuses_from_a_read_only_database_o
     running = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=False)
     async with job_store(dsn) as store:
         with pytest.raises(Exception) as refused:  # noqa: PT011 — the classification is what is under test
-            await store.finish(T1, running, stage="completed", knowledge={"bad": "\u0000"})
+            await store.finish(T1, running, stage="completed", disposition="benign", knowledge={"bad": "\u0000"})  # #1581 O10: without one the table would refuse it first (conflict, updated)
     assert is_refusal(refused.value), repr(refused.value)
     assert not is_outage(refused.value), repr(refused.value)
     async with job_store(dsn) as store:
@@ -3164,8 +3170,8 @@ def _plant_queued(dsn: str, kind: str) -> str:
     parent = _plant_investigation(dsn, tenant=T1, alert_id=alert, key="k", attempt=1, stage="completed")
     job = str(uuid.uuid4())
     execute(dsn, "INSERT INTO jobs.learning_jobs (id, tenant_id, alert_id, investigation_id, request_key, attempt, trigger, "
-                 "status, created_at, sibling_cost_usd, findings_count, publish_state) "
-                 "VALUES (%s, %s, %s, %s, 'k-late', 1, 'explicit', 'queued', %s, 0, 0, 'none')", (job, T1, alert, parent, NOW))
+                 "status, created_at, sibling_cost_usd, publish_state) "
+                 "VALUES (%s, %s, %s, %s, 'k-late', 1, 'explicit', 'queued', %s, 0, 'none')", (job, T1, alert, parent, NOW))
     return job
 
 
@@ -3341,8 +3347,8 @@ def _plant_running_pair(dsn: str, investigation_ids: list[str], job_ids: list[st
         execute(dsn, "UPDATE jobs.investigations SET id = %s WHERE id = %s", (parent_id, parent))
         parent = parent_id
         execute(dsn, "INSERT INTO jobs.learning_jobs (id, tenant_id, alert_id, investigation_id, request_key, attempt, trigger, "
-                     "status, created_at, started_at, lease_expires_at, sibling_cost_usd, findings_count, publish_state) "
-                     "VALUES (%s, %s, %s, %s, 'k', 1, 'explicit', 'running', %s, %s, now() + interval '30 seconds', 0, 0, 'none')",
+                     "status, created_at, started_at, lease_expires_at, sibling_cost_usd, publish_state) "
+                     "VALUES (%s, %s, %s, %s, 'k', 1, 'explicit', 'running', %s, %s, now() + interval '30 seconds', 0, 'none')",
                 (job, T1, alert, parent, NOW, NOW))
 
 
@@ -3814,12 +3820,17 @@ async def test_1083_the_store_lists_one_tenants_rows_as_its_own_record_types_wit
 
     async with job_store(dsn) as store:
         ids = await _three_each(store)
-        window: dict[str, Any] = {"fired_after": None, "fired_before": None, "after": None, "limit": 50}
+        window: dict[str, Any] = {"fired_after": None, "fired_before": None, "outcome": None, "after": None, "limit": 50}
         alerts = await store.list_alerts(T1, **window)
         investigations = await store.list_investigations(T1, alert_id=None, after=None, limit=50)
         jobs = await store.list_learning_jobs(T1, investigation_id=None, after=None, limit=50)
         theirs = await store.list_alerts(T2, **window)
-    assert all(isinstance(a, AlertListing) for a in alerts)
+    assert alerts
+    assert all(isinstance(a, AlertListing) for a in alerts), "#1581 O3, #1507: the list record is AlertListing"
+    for a in alerts:
+        assert hasattr(a, "outcome")
+        assert hasattr(a, "latest_status")
+        assert not any(hasattr(a, name) for name in ("raw", "outcome_investigation_id", "outcome_created_at")), a
     assert all(isinstance(i, InvestigationRecord) for i in investigations)
     assert all(isinstance(j, LearningJobRecord) for j in jobs)
     assert [a.alert_id for a in alerts] == sorted(ids["alerts"], reverse=True)
@@ -3843,7 +3854,7 @@ async def test_1507_the_alert_list_never_reads_an_alerts_raw_payload(dsn):
         answered: list[list[str]] = []
         event.listen(store._engine.sync_engine, "after_cursor_execute",
                      lambda _conn, cursor, *_rest: answered.append([c[0] for c in cursor.description or ()]))
-        listed = await store.list_alerts(T1, fired_after=None, fired_before=None, after=None, limit=50)
+        listed = await store.list_alerts(T1, fired_after=None, fired_before=None, outcome=None, after=None, limit=50)
         list_answered, answered[:] = list(answered), []
         single = await store.get_alert(T1, stored.alert_id)
         single_answered = list(answered)
@@ -3860,22 +3871,31 @@ async def test_1507_the_alert_list_never_reads_an_alerts_raw_payload(dsn):
         stored.alert_id, T1, "elastic", "T-1507", fired, changed, received, ALERT_BYTES_TITLE, ALERT_BYTES_DESCRIPTION)
 
 
-def test_1507_an_alert_listing_is_every_stored_alert_field_but_raw():
-    """A field added to alerts reaches the list too: the listing is the single read less `raw`, field for field (#1507)."""
+def test_1507_an_alert_listing_is_every_stored_alert_field_but_raw_plus_the_two_it_computes_or_carries():
+    """A field added to alerts reaches the list unless deliberately left out: the listing is the single read less `raw`,
+    plus `outcome` (a stored column the single read does not carry) and `latest_status` (the list query's), field for
+    field; the table's two outcome bookkeeping columns are left out of the list. (#1507, #1581 O3)"""
     from defender.jobs import AlertListing, StoredAlert
     from defender.jobs.models import ALERT_LISTING_COLUMNS, AlertRow, alert_listing, stored_alert
 
-    assert {f.name for f in dataclasses.fields(AlertListing)} == {f.name for f in dataclasses.fields(StoredAlert)} - {"raw"}
-    assert "raw" not in {c.key for c in ALERT_LISTING_COLUMNS}
+    stored_fields = {f.name for f in dataclasses.fields(StoredAlert)}
+    assert {f.name for f in dataclasses.fields(AlertListing)} == (stored_fields - {"raw"}) | {"outcome", "latest_status"}
+    every_column = {c.key for c in AlertRow.__table__.columns}
+    assert {c.key for c in ALERT_LISTING_COLUMNS} == every_column - {"raw", "outcome_investigation_id", "outcome_created_at"}
+    assert "outcome" in {c.key for c in ALERT_LISTING_COLUMNS}
     when = [NOW + dt.timedelta(minutes=n) for n in range(3)]
     row = AlertRow(id=fixture_uuid("alert"), tenant_id=T1, vendor="v", vendor_ticket_id="t", fired_at=when[0],
-                   changed_at=when[1], received_at=when[2], title="ti", description="de", raw=b"r")
+                   changed_at=when[1], received_at=when[2], title="ti", description="de", raw=b"r",
+                   outcome="malicious")
 
-    class _Selected:  # a result row of `ALERT_LISTING_COLUMNS`, as the list's query answers it
-        _mapping = {c.key: getattr(row, c.key) for c in ALERT_LISTING_COLUMNS}
+    class _Selected:  # a result row of `ALERT_LISTING_COLUMNS` plus the computed `latest_status`, as the list's query answers it
+        _mapping = {**{c.key: getattr(row, c.key) for c in ALERT_LISTING_COLUMNS}, "latest_status": "completed"}
 
     whole = stored_alert(row)
-    assert dataclasses.asdict(alert_listing(_Selected())) == {  # type: ignore[arg-type]
+    listed = dataclasses.asdict(alert_listing(_Selected()))  # type: ignore[arg-type]
+    assert listed["outcome"] == "malicious"
+    assert listed["latest_status"] == "completed"
+    assert {k: v for k, v in listed.items() if k not in ("outcome", "latest_status")} == {
         f.name: getattr(whole, f.name) for f in dataclasses.fields(whole) if f.name != "raw"}
 
 
@@ -4147,3 +4167,236 @@ async def test_1471_w1_a_lapse_retry_carries_its_requests_flag(dsn, flagged):
     assert retry.record.update_ticket is flagged
     assert execute(dsn, "SELECT update_ticket FROM jobs.investigations WHERE id = %s",
                    (retry.record.investigation_id,)) == [(flagged,)], "the stored column of the retry"
+
+
+# --- alert list (#1581): outcome and latest status (O1), the outcome filter (O2), no raw (O3), what the table refuses (O10) ----
+#
+# FORCED CHOICES (the design names the summary record, not its home): the list's records carry `outcome` and `latest_status`
+# and no `raw`; `list_alerts` takes a keyword `outcome` (None = unfiltered, a disposition, or the `NoOutcome` marker, see
+# `_outcome1581.no_outcome`). Every row below reaches `completed` through the store's own claim and finish: a SQL plant
+# bypasses the copy the store keeps (AP1) and would make the list lie.
+
+_WINDOW: dict[str, Any] = {"fired_after": None, "fired_before": None, "outcome": None, "after": None, "limit": 50}
+LOW_ID, HIGH_ID = "00000000-0000-4000-8000-0000000000a1", "ffffffff-ffff-4fff-8fff-0000000000a2"
+
+
+async def _ended(store: Any, clock: Clock, alert_id: str, key: str, *, stage: str, disposition: str | None = None) -> str:
+    """An investigation of `alert_id` created at the clock's time, claimed and ended `stage`; the clock then moves an hour,
+    so each later investigation of an alert is strictly newer by `created_at` (ids are random uuid4s)."""
+    inv, _ = await store.create_investigation(T1, alert_id, key, actor="setup")
+    claimed = await store.claim()
+    assert claimed is not None
+    assert claimed.record.investigation_id == inv.investigation_id, "premise: it was the one queued"
+    await store.finish(T1, inv.investigation_id, stage=stage, disposition=disposition, cost_usd=0.0,
+                       failure_reason="no_report" if stage == "failed" else None)
+    clock.at += HOUR
+    return inv.investigation_id
+
+
+async def _alert_fired(store: Any, name: str, at: dt.datetime) -> str:
+    stored = await store.insert_alert(T1, vendor="elastic", vendor_ticket_id=f"O-{name}", fired_at=at, changed_at=at,
+                                      received_at=at, raw=ALERT_BYTES)
+    return stored.alert_id
+
+
+#: name -> the outcome the fixture below leaves it, newest fired first; `None` is "no completed investigation".
+_OUTCOMES = {"mal": "malicious", "reran": "benign", "fp": "false-positive", "failed": None, "unres": "unresolved",
+             "busy": "inconclusive", "quiet": None, "benign": "benign", "incon": "inconclusive"}
+
+
+async def _filter_world(store: Any, clock: Clock) -> dict[str, str]:
+    """T1's nine alerts, fired an hour apart, newest first as `_OUTCOMES` lists them: one alert per outcome; `reran` completed
+    `malicious` and then `benign` (its outcome the newer); `busy` completed `inconclusive` and has a running rerun; `failed`
+    has one failed investigation; `quiet` none."""
+    ids = {name: await _alert_fired(store, name, NOW - n * HOUR) for n, name in enumerate(_OUTCOMES, 1)}
+    await _ended(store, clock, ids["mal"], "k1", stage="completed", disposition="malicious")
+    await _ended(store, clock, ids["reran"], "k1", stage="completed", disposition="malicious")
+    await _ended(store, clock, ids["reran"], "k2", stage="completed", disposition="benign")
+    await _ended(store, clock, ids["fp"], "k1", stage="completed", disposition="false-positive")
+    await _ended(store, clock, ids["failed"], "k1", stage="failed")
+    await _ended(store, clock, ids["unres"], "k1", stage="completed", disposition="unresolved")
+    await _ended(store, clock, ids["busy"], "k1", stage="completed", disposition="inconclusive")
+    await _ended(store, clock, ids["benign"], "k1", stage="completed", disposition="benign")
+    await _ended(store, clock, ids["incon"], "k1", stage="completed", disposition="inconclusive")
+    rerun, _ = await store.create_investigation(T1, ids["busy"], "k2", actor="setup")
+    claimed = await store.claim()
+    assert claimed is not None
+    assert claimed.record.investigation_id == rerun.investigation_id, "premise: the rerun runs"
+    return ids
+
+
+async def test_alert_list_o1_each_listed_alert_carries_its_newest_completed_outcome_and_newest_status(dsn):
+    """`outcome` is the newest completed investigation's disposition (a running rerun does not hide it, a newer completed
+    one replaces an older); `latest_status` is the newest investigation's status; both null with none. (O1)"""
+    clock = Clock()
+    async with store_with(dsn, clock) as store:
+        ids = await _filter_world(store, clock)
+        listed = await store.list_alerts(T1, **_WINDOW)
+    assert [(a.alert_id, a.outcome, a.latest_status) for a in listed] == [
+        (ids["mal"], "malicious", "completed"), (ids["reran"], "benign", "completed"), (ids["fp"], "false-positive", "completed"),
+        (ids["failed"], None, "failed"), (ids["unres"], "unresolved", "completed"), (ids["busy"], "inconclusive", "running"),
+        (ids["quiet"], None, None), (ids["benign"], "benign", "completed"), (ids["incon"], "inconclusive", "completed")]
+
+
+@pytest.mark.parametrize("earlier", [None, "malicious"])
+@pytest.mark.parametrize("stage", ["queued", "running", "failed", "unparseable", "aborted"])
+async def test_alert_list_o1_a_newer_investigation_in_every_other_stage_sets_latest_status_and_never_the_outcome(dsn, stage, earlier):
+    """After an optional completed investigation, a newer one in each non-completed stage is the `latest_status` and leaves
+    the outcome the earlier completed one's (null when there is none). (O1)"""
+    clock = Clock()
+    async with store_with(dsn, clock) as store:
+        alert_id = await _alert_fired(store, "one", NOW)
+        if earlier:
+            await _ended(store, clock, alert_id, "k1", stage="completed", disposition=earlier)
+        if stage in {"queued", "aborted"}:
+            newer, _ = await store.create_investigation(T1, alert_id, "k2", actor="setup")
+            if stage == "aborted":
+                await store.cancel_investigation(T1, newer.investigation_id, actor="setup")
+        elif stage == "running":
+            await store.create_investigation(T1, alert_id, "k2", actor="setup")
+            assert await store.claim() is not None
+        else:
+            await _ended(store, clock, alert_id, "k2", stage=stage)
+        [listed] = await store.list_alerts(T1, **_WINDOW)
+    assert (listed.outcome, listed.latest_status) == (earlier, stage)
+
+
+@pytest.mark.parametrize("high_stage", ["completed", "failed"])
+@pytest.mark.parametrize("high_first", [True, False])
+async def test_alert_list_o1_investigations_created_at_one_instant_are_ordered_by_id_whichever_ends_first(dsn, high_first, high_stage):
+    """Two investigations with equal `created_at`: the higher id is the newer, so its disposition is the outcome and its
+    status the latest, whichever of them ended last. (O1)"""
+    async with job_store(dsn) as store:
+        alert = await an_alert(store, T1)
+
+        async def run(inv_id: str, key: str, stage: str, disposition: str | None) -> None:
+            plant_queued_investigation(dsn, tenant=T1, alert_id=alert.alert_id, investigation_id=inv_id, key=key)
+            claimed = await store.claim()
+            assert claimed is not None
+            assert claimed.record.investigation_id == inv_id, "premise: the one just planted"
+            await store.finish(T1, inv_id, stage=stage, disposition=disposition, cost_usd=0.0,
+                               failure_reason="no_report" if stage == "failed" else None)
+
+        steps = [(LOW_ID, "k-low", "completed", "benign"),
+                 (HIGH_ID, "k-high", high_stage, "malicious" if high_stage == "completed" else None)]
+        for step in (reversed(steps) if high_first else steps):
+            await run(*step)
+        [listed] = await store.list_alerts(T1, **_WINDOW)
+    assert (listed.outcome, listed.latest_status) == (("malicious" if high_stage == "completed" else "benign"), high_stage)
+
+
+async def test_alert_list_o1_deleting_an_investigation_leaves_the_outcome_of_those_that_remain(dsn):
+    """The outcome is the newest remaining completed investigation's: deleting a request that is not the newest changes
+    nothing, deleting the newest falls back to the next, deleting the last leaves none; a refused delete changes nothing. (O1)"""
+    from defender.jobs import Conflict
+
+    clock = Clock()
+    async with store_with(dsn, clock) as store:
+        alert_id = await _alert_fired(store, "one", NOW)
+        made = {key: await _ended(store, clock, alert_id, key, stage="completed", disposition=d)
+                for key, d in (("k1", "benign"), ("k2", "malicious"), ("k3", "inconclusive"))}
+
+        async def seen() -> tuple[str | None, str | None]:
+            [listed] = await store.list_alerts(T1, **_WINDOW)
+            return listed.outcome, listed.latest_status
+
+        assert await seen() == ("inconclusive", "completed")
+        await store.delete_investigation(T1, made["k2"], actor="u-1")
+        assert await seen() == ("inconclusive", "completed"), "a request that was not the newest"
+        live, _ = await store.create_investigation(T1, alert_id, "k4", actor="setup")
+        with pytest.raises(Conflict):
+            await store.delete_investigation(T1, live.investigation_id, actor="u-1")
+        assert await seen() == ("inconclusive", "queued"), "a refused delete changed nothing"
+        await store.cancel_investigation(T1, live.investigation_id, actor="u-1")
+        await store.delete_investigation(T1, made["k3"], actor="u-1")
+        assert await seen() == ("benign", "aborted"), "the newest completed went: the next newest answers"
+        await store.delete_investigation(T1, made["k1"], actor="u-1")
+        assert await seen() == (None, "aborted"), "the last completed went"
+
+
+_FILTERS = [*DISPOSITION_VALUES, "none"]
+
+
+@pytest.mark.parametrize("limit", [1, 2, 50])
+@pytest.mark.parametrize("outcome", _FILTERS)
+async def test_alert_list_o2_each_outcome_filter_lists_exactly_its_alerts_newest_first_in_pages_with_none_short(dsn, outcome, limit):
+    """`outcome=<disposition>` answers the alerts whose outcome it is (an older completed investigation's does not count; a
+    rerun running over one does), `none` those with no completed investigation; filtering precedes paging, so every page
+    but the last is full and no page is empty. (O2)"""
+    expected = {"malicious": ["mal"], "benign": ["reran", "benign"], "false-positive": ["fp"], "inconclusive": ["busy", "incon"],
+                "unresolved": ["unres"], "none": ["failed", "quiet"]}
+    assert set(expected) == set(_FILTERS), "premise: the fixture holds an alert for every code the vocabulary has"
+    clock = Clock()
+    async with store_with(dsn, clock) as store:
+        ids = await _filter_world(store, clock)
+        marker = no_outcome() if outcome == "none" else outcome
+        pages: list[list[str]] = []
+        after = None
+        while True:
+            page = await store.list_alerts(T1, **{**_WINDOW, "outcome": marker, "limit": limit, "after": after})
+            if not page:
+                break
+            pages.append([a.alert_id for a in page])
+            assert all(a.outcome == (None if outcome == "none" else outcome) for a in page)
+            after = (page[-1].fired_at, page[-1].alert_id)
+    assert [i for p in pages for i in p] == [ids[n] for n in expected[outcome]]
+    assert all(len(p) == limit for p in pages[:-1]), "every page but the last is full"
+
+
+async def test_alert_list_o2_the_outcome_filter_combines_with_the_time_window(dsn):
+    """`outcome` narrows inside `fired_after <= fired_at < fired_before`: an alert outside the window is not listed even
+    when its outcome matches, the bounds' ends as before. (O2)"""
+    clock = Clock()
+    async with store_with(dsn, clock) as store:
+        ids = await _filter_world(store, clock)
+        both = {**_WINDOW, "outcome": "benign"}
+        newer_only = await store.list_alerts(T1, **{**both, "fired_after": NOW - 3 * HOUR})
+        older_only = await store.list_alerts(T1, **{**both, "fired_before": NOW - 2 * HOUR})
+        windowed_none = await store.list_alerts(T1, **{**_WINDOW, "outcome": no_outcome(), "fired_before": NOW - 5 * HOUR})
+    assert [a.alert_id for a in newer_only] == [ids["reran"]]
+    assert [a.alert_id for a in older_only] == [ids["benign"]]
+    assert [a.alert_id for a in windowed_none] == [ids["quiet"]]
+
+
+async def test_alert_list_o3_no_statement_the_list_runs_reads_raw_and_the_single_read_does(dsn):
+    """Across no filter, each kind of outcome filter, a window, a cursor and all together, every statement the list runs
+    leaves `raw` unselected; control: the single-alert read selects it. (O3, #1507)"""
+    clock = Clock()
+    async with store_with(dsn, clock) as store:
+        ids = await _filter_world(store, clock)
+        cursor = (NOW - HOUR, ids["mal"])
+        combos = {
+            "nothing": {}, "a disposition": {"outcome": "malicious"}, "none": {"outcome": no_outcome()},
+            "a window": {"fired_after": NOW - 5 * HOUR, "fired_before": NOW}, "a cursor": {"after": cursor},
+            "all of them": {"outcome": no_outcome(), "fired_after": NOW - 9 * HOUR, "fired_before": NOW, "after": cursor, "limit": 1},
+        }
+        for name, combo in combos.items():
+            with statements(store) as seen:
+                listed = await store.list_alerts(T1, **{**_WINDOW, **combo})
+            assert listed, f"premise ({name}): a page with rows, so a selected `raw` would have been read"
+            assert any("alerts" in s for s in seen), f"premise ({name}): the statements were captured"
+            assert [s for s in seen if READS_RAW.search(s)] == [], name
+        with statements(store) as seen:
+            single = await store.get_alert(T1, ids["mal"])
+        assert any(READS_RAW.search(s) for s in seen), "control: the single read selects `raw`, so the capture can see it"
+    assert single is not None
+    assert single.raw == ALERT_BYTES
+
+
+async def test_o10_a_finish_to_completed_without_a_disposition_is_refused_and_stores_nothing(dsn):
+    """`finish(stage="completed")` with no disposition raises and leaves the investigation running and the alert's outcome
+    null; the same finish with one completes (control). (O10)"""
+    async with job_store(dsn) as store:
+        alert = await an_alert(store, T1)
+        inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="setup")
+        assert await store.claim() is not None
+        with pytest.raises(Exception) as refused:  # noqa: PT011 — the classification is what is under test
+            await store.finish(T1, inv.investigation_id, stage="completed", cost_usd=0.0)
+        from defender.jobs import is_outage, is_refusal
+
+        assert is_refusal(refused.value), repr(refused.value)
+        assert not is_outage(refused.value), repr(refused.value)
+        assert row(dsn, inv.investigation_id)["stage"] == "running"
+        assert stored_copy(dsn, alert.alert_id) == (None, None, None)
+        assert await store.finish(T1, inv.investigation_id, stage="completed", disposition="benign", cost_usd=0.0) is not None
+        assert stored_copy(dsn, alert.alert_id)[:2] == ("benign", inv.investigation_id)

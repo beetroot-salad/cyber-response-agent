@@ -45,18 +45,23 @@ def _schema(properties: dict, required: list[str]) -> dict:
 
 
 _ANY: dict = {}
+def _open_object() -> dict:
+    """An object whose keys the model chooses (a query's params, a patch operation, an entity
+    ref, a proof), declared open and fresh per site: a bare `{"type": "object"}` is closed to
+    "no keys" by the OpenAI-compatible tool mapping, which sent every query with `params: {}`."""
+    return {"type": "object", "additionalProperties": True}
 
 
 _QUERY_SCHEMA = _schema({"system": {"type": "string"}, "verb": {"type": "string"},
-                         "params": {"type": "object"}}, ["system", "verb"])
+                         "params": _open_object()}, ["system", "verb"])
 
 
 #: A hand-in (#1543): `code` alone, whose output is the `{patch, entity_refs, proofs}` document,
 #: or those fields as written. The host judges which.
 _HANDIN_SCHEMA = _schema({"code": {"type": "string"},
-                          "patch": {"type": "array", "items": {"type": "object"}},
-                          "entity_refs": {"type": "array", "items": {"type": "object"}},
-                          "proofs": {"type": "array", "items": {"type": "object"}}}, [])
+                          "patch": {"type": "array", "items": _open_object()},
+                          "entity_refs": {"type": "array", "items": _open_object()},
+                          "proofs": {"type": "array", "items": _open_object()}}, [])
 
 
 
@@ -68,17 +73,32 @@ _ORACLE_TOOLS: tuple[tuple[str, str, dict], ...] = (
      _schema({"entity": {"type": "string"}, "field": {"type": "string"}, "value": _ANY},
              ["entity", "field", "value"])),
     ("python", "Run Python in the oracle's sandboxed scratch box. It runs in a folder holding the "
-     "saved reads (`inputs/`), which is read-only: write any file of your own under `/tmp`.",
+     "saved reads (`inputs/`), which is read-only: write any file of your own under `/tmp`. Output "
+     "past what a reply shows whole is cut to its head and tail: print what you need, not whole "
+     "answers.",
      _schema({"code": {"type": "string"}}, ["code"])),
     ("re_ask", "Re-ask a live call's own question bounded at the branch point; its answer "
      "becomes this attempt's base.", _schema({"system": {"type": "string"},
                                               "verb": {"type": "string"},
-                                              "params": {"type": "object"}},
+                                              "params": _open_object()},
                                              ["system", "verb", "params"])),
     ("check", "Run the host checks on a draft hand-in and see its changes: `code` (run in your "
      "box, as python runs: its folder is read-only; prints the {patch, entity_refs, proofs} "
      "document) or those fields. Keeps nothing.",
      _HANDIN_SCHEMA),
+)
+
+
+#: The verifier's function tools (#1385's checks read the whole answer): its own reads, and
+#: Python in a sandboxed box of its own, never the oracle's.
+_VERIFIER_TOOLS: tuple[tuple[str, str, dict], ...] = (
+    _ORACLE_TOOLS[0],
+    ("python", "Run Python in your own sandboxed box. It runs in a folder holding what you judge, "
+     "whole (`inputs/index.json` names each file: `base`, `served`, `changes`, `dropped` where the "
+     "call was re-asked, and `reads`, your own `run_query` answers), which is read-only: write any "
+     "file of your own under `/tmp`. Output past what a reply shows whole is cut to its head and "
+     "tail: print what you need, not whole answers.", _schema({"code": {"type": "string"}},
+                                                              ["code"])),
 )
 
 

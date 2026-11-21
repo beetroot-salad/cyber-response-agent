@@ -9,13 +9,18 @@ import anyio
 import pytest
 
 from defender import box
-from defender.learning.branch.estate._oracle_attempt import _AttemptBox, _AttemptFailed, _Run
+from defender.learning.branch.estate._oracle_attempt import (
+    _AttemptBox,
+    _AttemptBoxes,
+    _AttemptFailed,
+    _Run,
+)
 from defender.learning.branch.estate.oracle import _within_deadline
 from defender._exception_groups import carried
 
 
 class _Worker:
-    def __init__(self, *, fault=None, stop_fails=False, lost=False, release=None):
+    def __init__(self, *, fault=None, stop_fails=False, lost=False, release=None, boxes=None):
         self.started = threading.Event()
         self.shutdown = threading.Event()
         self.finished = threading.Event()
@@ -24,7 +29,7 @@ class _Worker:
         self.stop_fails = stop_fails
         self.lost = lost
         self.release = release
-        self.owner = _AttemptBox(self.factory)
+        self.owner = _AttemptBox(self.factory) if boxes is None else boxes.adopt(_AttemptBox(self.factory))
 
     def docker(self, argv):
         self.calls.append(argv)
@@ -81,6 +86,136 @@ def test_deadline_stops_and_settles_worker_without_accepting_late_result(fault, 
         worker.shutdown.set()
         worker.owner.stop()
     assert worker.removed()
+
+
+def test_deadline_stops_a_verifications_box_and_settles_its_worker_before_removal():
+    """A verification's python runs in a box of its own, owned with the oracle attempt's and its
+    worker owned by the attempt: the attempt's deadline stops that box too, settles the worker,
+    and only then may it be removed."""
+    oracle_box = _Worker()
+    run = _Run(door=None, deadline=0.1, box=oracle_box.owner)
+    worker = _Worker(boxes=run.boxes)
+    verifying = _Run(door=None, deadline=10, box=worker.owner, boxes=run.boxes, verifying=True,
+                     _box_workers=run._box_workers)
+
+    async def work():
+        return await verifying.box_work(worker.work)
+
+    try:
+        assert anyio.run(_within_deadline, run, work) == (False, None)
+        assert worker.started.is_set()
+        assert worker.finished.is_set()
+        assert not worker.removed(), "the verification's box was removed before its worker settled"
+        assert not run.has_box_work
+        assert not verifying.has_box_work
+    finally:
+        worker.shutdown.set()
+        assert run.boxes.stop() == []
+    assert worker.removed()
+    assert oracle_box.calls == [], "the oracle's box, never started, ran a docker command"
+
+
+class _Recorded(_AttemptBox):
+    """A box that records its cancel, and can fail it."""
+
+    def __init__(self, name, log, *, fails=False):
+        super().__init__(lambda: pytest.fail(f"box {name} was started"))
+        self.name, self.log, self.fails = name, log, fails
+
+    def cancel(self):
+        self.log.append(self.name)
+        super().cancel()
+        if self.fails:
+            raise RuntimeError(f"stopping {self.name} failed")
+
+
+def test_closing_the_oracle_mid_attempt_stops_every_box_even_when_one_stop_fails():
+    """The sibling ending under a running attempt (`Oracle.close`) stops every box the attempt
+    made, through the path its deadline takes: one box whose stop fails spares no other."""
+    from types import SimpleNamespace
+
+    from defender.learning.branch.estate.oracle import Oracle
+
+    stopped: list[str] = []
+    boxes = _AttemptBoxes(lambda: None)
+    run = _Run(door=None, deadline=10, box=boxes.adopt(_Recorded("oracle", stopped, fails=True)),
+               boxes=boxes)
+    boxes.adopt(_Recorded("verification", stopped))
+
+    Oracle.close(SimpleNamespace(_live_run=run))
+
+    assert stopped == ["oracle", "verification"]
+
+
+def test_a_box_made_after_the_oracle_closed_under_its_attempt_is_born_ended():
+    """Closed while the oracle still drafts, before any verification made its box: a box the
+    attempt makes afterwards never starts a container."""
+    from types import SimpleNamespace
+
+    from defender.learning.branch.estate.oracle import Oracle
+
+    started: list[str] = []
+    boxes = _AttemptBoxes(lambda: started.append("box") or pytest.fail("a box started"))
+    run = _Run(door=None, deadline=10, box=boxes.new(), boxes=boxes)
+
+    Oracle.close(SimpleNamespace(_live_run=run))
+    later = boxes.new()
+
+    with pytest.raises(_AttemptFailed, match="already ended"):
+        later.get()
+    assert started == []
+
+
+def test_a_box_that_could_not_start_is_not_started_again_for_its_run():
+    """A box whose start failed answers every later `get` with that failure at once, rather than
+    spending another container start on each python call."""
+    starts: list[int] = []
+
+    def factory():
+        starts.append(1)
+        raise box.BoxStartRefused("the sandbox runtime is down")
+
+    owned = _AttemptBox(factory)
+
+    with pytest.raises(box.BoxStartRefused, match="runtime is down"):
+        owned.get()
+    for _ in range(2):
+        with pytest.raises(_AttemptFailed, match="could not start") as later:
+            owned.get()
+        assert isinstance(later.value.__cause__, box.BoxStartRefused)
+    assert len(starts) == 1
+
+
+def test_a_box_that_started_unsandboxed_is_not_started_again_for_its_run():
+    """A box that is not sandboxed never serves: refused once, no other box is started for the
+    run (the verifier's python goes on after a failed call, and would start one each time)."""
+    starts: list[int] = []
+    owned = _AttemptBox(lambda: starts.append(1) or object())
+
+    started = owned.get()
+    owned.refuse(started, _AttemptFailed("not sandboxed"))
+
+    with pytest.raises(_AttemptFailed, match="could not start"):
+        owned.get()
+    assert len(starts) == 1
+
+
+def test_boxes_made_after_the_attempts_boxes_were_removed_are_born_ended():
+    boxes = _AttemptBoxes(lambda: pytest.fail("a box started after the attempt ended"))
+    boxes.new()
+
+    assert boxes.stop() == []
+    with pytest.raises(_AttemptFailed, match="already ended"):
+        boxes.new().get()
+
+
+def test_a_run_given_only_a_box_owns_it_so_its_deadline_stops_it():
+    run = _Run(door=None, deadline=10, box=_AttemptBox(lambda: None))
+
+    assert run.boxes is not None
+    assert run.boxes.cancel() == []
+    with pytest.raises(_AttemptFailed, match="already ended"):
+        run.box.get()
 
 
 @pytest.mark.parametrize("main_fails", [False, True])

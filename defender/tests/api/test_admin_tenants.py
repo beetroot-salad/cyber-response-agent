@@ -332,7 +332,8 @@ def _seed_jobs(world: World, tenant: str, n: int) -> dict[str, Any]:
         rows[f"inv-{status}"] = world.plant_investigation(tenant, Investigation(
             investigation_id=_uid("b", n, i), alert_id=_uid("a", n, i), status=status, created_at=at, cost_usd=0.0,
             cost_is_lower_limit=False, request_key=f"k{i}", attempt=1, failure_reason=reason, update_ticket=False,
-            finished_at=None if status in LIVE else ended_at))
+            finished_at=None if status in LIVE else ended_at,
+            disposition="benign" if status == "completed" else None))  # #1581 O10: a completed row has one (conflict, updated)
     for i, (status, reason) in enumerate(LEARNING_JOBS):
         rows[f"job-{status}"] = world.plant_learning_job(tenant, LearningJob(
             learning_job_id=_uid("c", n, i), investigation_id=_uid("b", n, 2), alert_id=_uid("a", n, 2), status=status,

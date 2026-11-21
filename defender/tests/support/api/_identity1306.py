@@ -108,7 +108,7 @@ ALERT = Alert(
     alert_id="a1000000-0000-4000-8000-000000000001", vendor="tickets", vendor_ticket_id="T-1", title="t", description="d",
     fired_at=T0, changed_at=T0, received_at=T0, raw='{"id": "a1000000-0000-4000-8000-000000000001"}',
 )
-SUMMARY = AlertSummary.model_validate(ALERT.model_dump(exclude={"raw"}))
+SUMMARY = AlertSummary.model_validate({**ALERT.model_dump(exclude={"raw"}), "outcome": None, "latest_status": None})  # #1581: the list adds the two (conflict, updated)
 
 
 class Clock:
@@ -804,8 +804,8 @@ class World:
         """Plant `job` (the wire model) as its row; its investigation must be planted. Returns it."""
         lease = job.created_at + DAY if job.status == "running" else None
         self._sql("INSERT INTO jobs.learning_jobs (id, tenant_id, alert_id, investigation_id, request_key, attempt, "
-                  "trigger, status, created_at, finished_at, reason, lease_expires_at, sibling_cost_usd, findings_count, "
-                  "publish_state) VALUES (%s, %s, %s, %s, %s, 1, %s, %s, %s, %s, %s, %s, 0, 0, 'none')",
+                  "trigger, status, created_at, finished_at, reason, lease_expires_at, sibling_cost_usd, "
+                  "publish_state) VALUES (%s, %s, %s, %s, %s, 1, %s, %s, %s, %s, %s, %s, 0, 'none')",
                   (job.learning_job_id, tenant, job.alert_id, job.investigation_id, f"k-{job.learning_job_id}",
                    job.trigger, job.status, job.created_at, job.finished_at, job.reason, lease))
         return job
