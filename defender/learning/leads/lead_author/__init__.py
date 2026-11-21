@@ -315,7 +315,8 @@ def run_under_held_queue_lock(  # noqa: PLR0913 — the drain's call shape: the 
 
 def _store_pitfalls(paths: _loop_config.LoopPaths) -> Callable[[list[dict]], int]:
     """Where a run served over the learning store files the pitfalls it collects: the selected
-    tenant's pitfall items (`LearningStore.add_pitfall`, through the store's sync facade)."""
+    tenant's pitfall items, all of the run's in one call (`LearningStore.add_pitfalls`, through the
+    store's sync facade), so a clash at a held pitfall id refuses them all (#1565)."""
     if paths.tenant is None:
         raise LeadAuthorError("lead-author refused: no tenant is selected to file the run's pitfalls for")
     tenant_id = str(paths.tenant.id)
@@ -324,7 +325,7 @@ def _store_pitfalls(paths: _loop_config.LoopPaths) -> Callable[[list[dict]], int
         from defender.learning.core.store_tick import opened_store
 
         with opened_store() as store:
-            return sum(1 for row in rows if store.add_pitfall(tenant_id, row))
+            return int(store.add_pitfalls(tenant_id, rows))
 
     return file_pitfalls
 

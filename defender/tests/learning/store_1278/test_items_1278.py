@@ -201,20 +201,39 @@ async def test_1565_a_collision_names_the_first_colliding_row_of_the_call(dsn):
 async def test_1565_an_id_the_insert_skipped_but_the_store_does_not_hold_is_retried_not_refused(dsn):
     """A key the insert did not add and the store shows no item for says nothing about the content: it is not a
     collision (refused for good) but `ItemNotHeld`, which the findings insert turns into its retried
-    `FindingsNotStored`. (#1565 item 1)"""
+    `FindingsNotStored`. One check covers the whole call, every kind: a collision anywhere in it outranks a missing key
+    before it. (#1565)"""
     from defender.jobs.errors import FindingsNotStored
-    from defender.jobs.learning_models import ItemNotHeld, _refusal_of, refuse_colliding
+    from defender.jobs.learning_models import KeyedItem, _refusal_of, refuse_colliding
+
+    def item(kind, key, payload):
+        return KeyedItem(kind, key, payload)
 
     async with learning_store(dsn) as store:
-        await store.publish_findings(BLUE, "run-1", [finding("f1")], kind="finding")
+        await store.publish_findings(BLUE, "run-1", [world_finding("q1")], kind="questioner_finding")
         async with store._sessions.begin() as s:
-            await refuse_colliding(s, BLUE, "finding", [("f1", finding("f1"))])  # control: a held repeat passes
-            with pytest.raises(ItemNotHeld, match="ghost"):
-                await refuse_colliding(s, BLUE, "finding", [("f1", finding("f1")), ("ghost", finding("ghost"))])
-            with pytest.raises(store_mod().ItemRefused, match="'f1'"):  # a clash outranks a missing key before it
-                await refuse_colliding(s, BLUE, "finding", [("ghost", finding("ghost")), ("f1", finding("f2"))])
+            await refuse_colliding(s, BLUE, [item("questioner_finding", "q1", world_finding("q1"))])  # a repeat
+            with pytest.raises(store_mod().ItemNotHeld, match="ghost"):
+                await refuse_colliding(s, BLUE, [item("questioner_finding", "q1", world_finding("q1")),
+                                                 item("finding", "ghost", finding("ghost"))])
+            with pytest.raises(store_mod().ItemCollision, match="questioner_finding with id 'q1'"):
+                await refuse_colliding(s, BLUE, [item("finding", "ghost", finding("ghost")),
+                                                 item("questioner_finding", "q1", world_finding("q2"))])
     with pytest.raises(FindingsNotStored):
-        _refusal_of(ItemNotHeld("a finding with id 'ghost' was not added"))
+        _refusal_of(store_mod().ItemNotHeld("a finding with id 'ghost' was not added"))
+
+
+async def test_1565_one_call_of_two_kinds_is_one_decision(dsn):
+    """A call carrying both findings kinds is decided whole: a clash in one kind stores nothing of the other. (#1565)"""
+    async with learning_store(dsn) as store:
+        await store.publish_findings(BLUE, "run-1", [world_finding("q1")], kind="questioner_finding")
+        with pytest.raises(store_mod().ItemRefused, match="'q1'"):
+            await store.publish_finding_channels(BLUE, "run-2", {
+                "finding": [finding("f1")], "questioner_finding": [dict(world_finding("q1"), finding="other")]})
+        assert set(await items(store)) == {("questioner_finding", "q1")}
+        assert await store.publish_finding_channels(BLUE, "run-2", {
+            "finding": [finding("f1")], "questioner_finding": [world_finding("q1"), world_finding("q2")]}) == {
+            "finding": (1, 0), "questioner_finding": (1, 1)}
 
 
 async def test_1565_the_same_id_in_another_kind_or_tenant_is_no_collision(dsn):
@@ -258,6 +277,20 @@ async def test_1565_a_pitfall_with_other_content_at_a_held_id_is_refused_and_the
     assert after == {("pitfall", "p1"): rows[0], ("pitfall", "p2"): rows[1]}
 
 
+async def test_1565_a_runs_pitfalls_are_one_call_and_a_clash_stores_none_of_them(dsn):
+    """A run's pitfalls are filed in one call: a clash anywhere in it, held or within it, stores none of its rows, the
+    new ones beside it included. (#1565)"""
+    async with learning_store(dsn) as store:
+        assert await store.add_pitfalls(BLUE, [pitfall("p2")]) == 1
+        with pytest.raises(store_mod().ItemRefused, match="'p2'"):
+            await store.add_pitfalls(BLUE, [pitfall("p1"), pitfall("p2", goal="changed"), pitfall("p3")])
+        with pytest.raises(store_mod().ItemRefused, match="'p4'"):
+            await store.add_pitfalls(BLUE, [pitfall("p1"), pitfall("p4"), pitfall("p4", goal="changed")])
+        assert set(await items(store)) == {("pitfall", "p2")}
+        assert await store.add_pitfalls(BLUE, [pitfall("p1"), pitfall("p2"), pitfall("p3"), pitfall("p1")]) == 2
+        assert set(await items(store)) == {("pitfall", "p1"), ("pitfall", "p2"), ("pitfall", "p3")}
+
+
 async def test_1565_a_curation_request_with_other_content_for_a_filed_run_is_refused(dsn):
     """A run files one request; filing it again as it was is a no-op, with other content a collision: refused, the
     filed one unchanged, and no other request of the case is superseded by it. (#1565)"""
@@ -268,10 +301,25 @@ async def test_1565_a_curation_request_with_other_content_for_a_filed_run_is_ref
         assert await store.enqueue_request(BLUE, "run-9", "case-9", dict(spec)) is False
         with pytest.raises(store_mod().ItemRefused, match="'run-9'"):
             await store.enqueue_request(BLUE, "run-9", "case-9", {**spec, "case_id": "case-10"})
+        with pytest.raises(store_mod().ItemRefused, match="'run-9'"):  # the same spec filed under another case
+            await store.enqueue_request(BLUE, "run-9", "case-10", spec)
         after = await items(store)
     assert {k: (i.payload, i.status) for k, i in after.items()} == {
         ("curation_request", "run-9"): (spec, "waiting"),
         ("curation_request", "run-8"): ({**spec, "run_id": "run-8"}, "waiting")}
+
+
+async def test_1565_refiling_a_superseded_run_changes_nothing(dsn):
+    """A run's request filed again after a later run superseded it is a repeat: the later one stays waiting. (#1565)"""
+    spec = {"case_id": "case-9", "tenant_id": str(BLUE), "run_id": "run-1"}
+    later = {**spec, "run_id": "run-2"}
+    async with learning_store(dsn) as store:
+        assert await store.enqueue_request(BLUE, "run-1", "case-9", spec) is True
+        assert await store.enqueue_request(BLUE, "run-2", "case-9", later) is True
+        assert await store.enqueue_request(BLUE, "run-1", "case-9", dict(spec)) is False
+        after = await items(store)
+    assert {k: i.status for k, i in after.items()} == {
+        ("curation_request", "run-1"): "skipped", ("curation_request", "run-2"): "waiting"}
 
 
 async def test_a_row_with_no_key_takes_a_key_from_its_digest(dsn):

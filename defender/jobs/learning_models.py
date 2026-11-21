@@ -321,13 +321,32 @@ _CONTENT_CLASSES = frozenset({"22", "23", "54"})
 
 @dataclasses.dataclass(frozen=True)
 class FindingsInsert:
-    """What `insert_findings` did: every row stored (`stored`, with `added` of them new; a finding id the store already
-    holds with the same content stays as it is), or none of them (`refused`, the refusal's words in `why`). A finding id
-    held, or given twice, with different content is a collision and refuses them all (#1565)."""
+    """What `insert_findings` did: every row stored (`stored`, with `added` of them new, `added_by_kind` per kind; a
+    finding id the store already holds with the same content stays as it is), or none of them (`refused`, the
+    refusal's words in `why`). A finding id held, or given twice, with different content is a collision and refuses
+    them all (#1565)."""
 
     stored: bool
-    added: int = 0
+    added_by_kind: Mapping[str, int] = dataclasses.field(default_factory=dict)
     why: str | None = None
+
+    @property
+    def added(self) -> int:
+        return sum(self.added_by_kind.values())
+
+
+@dataclasses.dataclass(frozen=True)
+class KeyedItem:
+    """One `waiting` item as a producer files it (#1565): its kind and key, its content, and the columns its producer
+    sets. A repeat is compared on `payload` and `coalesce_key`, what the producer decides; `source_run` (which run sent
+    it) and `mistake_key` (derived from the payload) are not compared."""
+
+    kind: str
+    key: str
+    payload: Mapping[str, Any]
+    source_run: str | None = None
+    coalesce_key: str | None = None
+    mistake_key: str | None = None
 
 
 async def insert_findings(s: AsyncSession, tenant: str, channels: Mapping[str, Sequence[Mapping[str, Any]]], *,
@@ -337,12 +356,12 @@ async def insert_findings(s: AsyncSession, tenant: str, channels: Mapping[str, S
     any channel (the savepoint rolled back, the transaction usable). The caller holds the tenant's state for the
     transaction. Refused, for their content: a row PostgreSQL could never hold, with no finding id, or that the screens
     cannot read (`refuse_unholdable`, `refuse_unkeyed`); a finding id held, by an earlier call or this one, with other
-    content (#1565: a collision, not a retry); an error of SQLSTATE class 22, 23 or 54. An outage
+    content (#1565: a collision, not a retry, `insert_items`); an error of SQLSTATE class 22, 23 or 54. An outage
     (`jobs.is_outage`: a lost connection, deadlock, lock timeout, cancel, full disk) propagates, for the caller to
-    retry whole. Any other `Exception` at the insert (a deterministic database error such as a missing permission, or
-    a fault in this code) says nothing about the findings: it is `FindingsNotStored`, raised from it, which the
-    worker retries in place as it does an outage (#1487 Amendment r5.3). A `BaseException` (a cancellation) is never
-    caught."""
+    retry whole. Any other `Exception` at the insert (a deterministic database error such as a missing permission, a
+    skipped id the store does not show, or a fault in this code) says nothing about the findings: it is
+    `FindingsNotStored`, raised from it, which the worker retries in place as it does an outage (#1487 Amendment
+    r5.3). A `BaseException` (a cancellation) is never caught."""
     for kind in channels:
         if LANE_OF.get(kind) != AUTHOR_LANE:
             raise ValueError(f"not a findings kind: {kind}")
@@ -356,24 +375,32 @@ async def insert_findings(s: AsyncSession, tenant: str, channels: Mapping[str, S
     except Exception as fault:  # noqa: BLE001 — rows the screens cannot even read are refused, never raised
         _logger.error("screening findings failed with %s; they are refused", type(fault).__name__, exc_info=fault)
         return FindingsInsert(False, why=f"screening the findings failed ({type(fault).__name__})")
+    items = [KeyedItem(kind, row["finding_id"], dict(row), source_run=source_run)
+             for kind, rows in channels.items() for row in rows]
     try:
-        added = 0
         async with s.begin_nested():
-            for kind, rows in channels.items():
-                for start in range(0, len(rows), _INSERT_CHUNK):
-                    added += await _insert_chunk(s, tenant, kind, rows[start:start + _INSERT_CHUNK], source_run)
+            added = await insert_items(s, tenant, items)
     except Exception as fault:  # noqa: BLE001 — classified: content refuses, an outage is raised again
         return FindingsInsert(False, why=_refusal_of(fault))
-    return FindingsInsert(True, added=added)
+    return FindingsInsert(True, added_by_kind={kind: added.get(kind, 0) for kind in channels})
 
 
-async def _insert_chunk(s: AsyncSession, tenant: str, kind: str, chunk: Sequence[Mapping[str, Any]],
-                        source_run: str) -> int:
-    """Insert one statement's rows; how many it added. A row it did not add must match what the store holds for its
-    id (`refuse_colliding`)."""
-    added = {str(key) for (key,) in (await s.execute(_findings_insert(tenant, kind, chunk, source_run))).all()}
-    await refuse_colliding(s, tenant, kind, [(row["finding_id"], row) for row in _not_added(chunk, added)])
-    return len(added)
+async def insert_items(s: AsyncSession, tenant: str, items: Sequence[KeyedItem]) -> dict[str, int]:
+    """The one insert of a producer's batch of keyed items (#1565), in the transaction `s` is in: each a `waiting`
+    item of `tenant`, how many each kind added. An item at a key held (by an earlier call, or earlier in this one) is
+    not inserted; once every row is in, `refuse_colliding` checks every item not added, in one read, so the batch is
+    one decision whatever its kinds and size: the same content is a repeat, other content raises `ItemCollision`, a
+    key the store shows no item for `ItemNotHeld`. The caller rolls back on a raise (a transaction or savepoint)."""
+    added: dict[str, int] = {}
+    skipped: list[KeyedItem] = []
+    for start in range(0, len(items), _INSERT_CHUNK):
+        chunk = items[start:start + _INSERT_CHUNK]
+        keys = {(str(kind), str(key)) for kind, key in (await s.execute(_items_insert(tenant, chunk))).all()}
+        for kind, _key in keys:
+            added[kind] = added.get(kind, 0) + 1
+        skipped.extend(_not_added(chunk, keys))
+    await refuse_colliding(s, tenant, skipped)
+    return added
 
 
 class ItemCollision(ItemRefused):
@@ -391,57 +418,61 @@ def _collision_words(kind: str, key: str) -> str:
             "before, or earlier in the same call): a collision, not a retry")
 
 
-def _not_added(rows: Sequence[Mapping[str, Any]], added: set[str]) -> list[Mapping[str, Any]]:
-    """The rows of one insert statement it did not add: each whose id it did not add, and every repeat of an id after
-    the first (the first is the one stored)."""
-    first: set[str] = set()
-    rest: list[Mapping[str, Any]] = []
-    for row in rows:
-        key = row["finding_id"]
-        if key in added and key not in first:
-            first.add(key)
+def _not_added(items: Sequence[KeyedItem], added: set[tuple[str, str]]) -> list[KeyedItem]:
+    """The items of one insert statement it did not add: each whose key it did not add, and every repeat of a key
+    after the first (the first is the one stored)."""
+    first: set[tuple[str, str]] = set()
+    rest: list[KeyedItem] = []
+    for item in items:
+        at = (item.kind, item.key)
+        if at in added and at not in first:
+            first.add(at)
         else:
-            rest.append(row)
+            rest.append(item)
     return rest
 
 
-async def refuse_colliding(s: AsyncSession, tenant: str, kind: str,
-                           items: Sequence[tuple[str, Mapping[str, Any]]]) -> None:
-    """The one rule for an item an insert did not add because its key was held (#1565): `(key, payload)` pairs of
-    `tenant`'s `kind`, read in the transaction `s` is in, after the insert, so the row a concurrent call committed
-    first is the one compared. The same content, as jsonb compares it (`false` is not `0`; `1e23` is its integer), is
-    a repeat and passes; other content raises `ItemCollision`, naming the first such pair in order; else a key the
-    store shows no item for raises `ItemNotHeld`."""
+async def refuse_colliding(s: AsyncSession, tenant: str, items: Sequence[KeyedItem]) -> None:
+    """The one rule for items an insert did not add because their key was held (#1565): read in the transaction `s`
+    is in, after the insert, so the row a concurrent call committed first is the one compared. The same `payload` (as
+    jsonb compares it: `false` is not `0`, `1e23` is its integer) and `coalesce_key` is a repeat and passes; other
+    content raises `ItemCollision`, naming the first such item in order; else a key the store shows no item for raises
+    `ItemNotHeld`."""
     if not items:
         return
     table = cast(Table, WorkItemRow.__table__)
     found = (await s.execute(text(
-        "SELECT g.k, w.item_key IS NULL AS missing "
-        "FROM unnest(CAST(:keys AS text[]), CAST(:docs AS text[])) WITH ORDINALITY AS g(k, d, n) "
-        f"LEFT JOIN {table.fullname} w ON w.tenant_id = CAST(:tenant AS uuid) AND w.kind = :kind AND w.item_key = g.k "
-        "WHERE w.payload IS DISTINCT FROM CAST(g.d AS jsonb) ORDER BY w.item_key IS NULL, g.n LIMIT 1"),  # missing: NULL, distinct
-        {"keys": [str(key) for key, _ in items], "docs": [json.dumps(dict(payload)) for _, payload in items],
-         "tenant": str(TenantId(tenant)), "kind": kind})).first()
+        "SELECT g.t AS kind, g.k AS key, w.item_key IS NULL AS missing "
+        "FROM unnest(CAST(:kinds AS text[]), CAST(:keys AS text[]), CAST(:docs AS text[]), CAST(:groups AS text[])) "
+        "WITH ORDINALITY AS g(t, k, d, c, n) "
+        f"LEFT JOIN {table.fullname} w ON w.tenant_id = CAST(:tenant AS uuid) AND w.kind = g.t AND w.item_key = g.k "
+        # a missing row's payload is NULL, so distinct: it is read, ranked after every collision
+        "WHERE w.payload IS DISTINCT FROM CAST(g.d AS jsonb) OR w.coalesce_key IS DISTINCT FROM g.c "
+        "ORDER BY w.item_key IS NULL, g.n LIMIT 1"),
+        {"kinds": [i.kind for i in items], "keys": [str(i.key) for i in items],
+         "docs": [json.dumps(dict(i.payload)) for i in items], "groups": [i.coalesce_key for i in items],
+         "tenant": str(TenantId(tenant))})).first()
     if found is None:
         return
     if found.missing:
-        raise ItemNotHeld(f"a {kind} with id {found.k!r} was not added, yet the store holds none at that id")
-    raise ItemCollision(_collision_words(kind, found.k))
+        raise ItemNotHeld(f"a {found.kind} with id {found.key!r} was not added, yet the store holds none at that id")
+    raise ItemCollision(_collision_words(found.kind, found.key))
 
 
 #: Rows per INSERT: each row binds 14 values, and the driver takes at most 32767 per statement.
 _INSERT_CHUNK = 1000
 
 
-def _findings_insert(tenant: str, kind: str, rows: Sequence[Mapping[str, Any]], source_run: str) -> Any:
-    """`rows` as `waiting` items in one statement, each keyed by its `finding_id`, the conflict on an id held for good
-    doing nothing; returns the keys it added."""
+def _items_insert(tenant: str, items: Sequence[KeyedItem]) -> Any:
+    """`items` as `waiting` items in one statement, the conflict on a key held for good doing nothing; returns the
+    (kind, key) of each it added."""
     table = cast(Table, WorkItemRow.__table__)
     return pg_insert(table).values([dict(
-        tenant_id=TenantId(tenant), kind=kind, item_key=row["finding_id"], payload=dict(row), source_run=source_run,
+        tenant_id=TenantId(tenant), kind=i.kind, item_key=i.key, payload=dict(i.payload), source_run=i.source_run,
         status="waiting", reason=None, fault=None, batch_id=None, attempts=0, deferrals=0, offers_declined=0,
-        coalesce_key=None, mistake_key=None, enqueued_at=func.now(), updated_at=func.now()) for row in rows],
-    ).on_conflict_do_nothing(index_elements=["tenant_id", "kind", "item_key"]).returning(table.c.item_key)
+        coalesce_key=i.coalesce_key, mistake_key=i.mistake_key, enqueued_at=func.now(), updated_at=func.now())
+        for i in items],
+    ).on_conflict_do_nothing(index_elements=["tenant_id", "kind", "item_key"]).returning(table.c.kind, table.c.item_key)
 
 
 def _refusal_of(fault: Exception) -> str:

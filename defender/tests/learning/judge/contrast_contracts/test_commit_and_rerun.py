@@ -350,6 +350,22 @@ class _WatchedState:
         w.fire(w.after_append, labels, _kind_of(kind), channel)
         return out
 
+    def publish_finding_channels(self, tenant: str, run_id: str, channels: Any) -> Any:
+        """One call for every kind (#1565): each kind's before-append fires, then the one insert, then each after."""
+        w = self._watch
+        calls = []
+        for kind, rows in channels.items():
+            labels = list(dict.fromkeys(_label_of(r) for r in rows))
+            for label in labels:
+                w.snap("append", label, _kind_of(kind))
+            calls.append((labels, _kind_of(kind), _channel(_kind_of(kind))))
+        for labels, kind, channel in calls:
+            w.fire(w.before_append, labels, kind, channel)
+        out = w.real.publish_finding_channels(tenant, run_id, channels)
+        for labels, kind, channel in calls:
+            w.fire(w.after_append, labels, kind, channel)
+        return out
+
 
 def _stopped(built: Any, watch: Watch, **kw: Any) -> BaseException:
     """Run a pass expected to stop at its planted fault; return what stopped it."""
@@ -588,16 +604,20 @@ def test_1234_control_check_fails_on_rerun_after_first_pass_queued_rows(tmp_path
     assert B in str(refused), f"the next grade pass does not refuse naming bravo: {refused}"
 
 
-def test_1234_am_pass_stops_after_queueing_before_or_between_appends(tmp_path):
+def test_1234_am_pass_stops_after_queueing_before_or_after_its_append(tmp_path):
+    """A stop with bravo's row `queueing`, before its rows are appended or after: the record is the same and a rerun
+    refuses naming bravo. Both kinds' rows are one store call (#1565), so no stop falls between them: after it, both
+    queues hold bravo's rows."""
     reply = _reply(inv=[_inv(B, "split")], world=[_design(B, "split-q")])
     rows: dict[str, dict] = {}
-    for episode_id, when in ((S.EPISODE_ID, "before any append"), (EP2, "between appends")):
+    for episode_id, when in ((S.EPISODE_ID, "before any append"), (EP2, "after the append")):
         built = _built(tmp_path, episode_id=episode_id)
         if when == "before any append":
             plant = Refuse(tmp_path / f"spare-{episode_id}", queue="same")
             watch = Watch(built, S.judge({B: reply}), before_append={(B, None): plant})
         else:
-            plant = Refuse(tmp_path / f"spare-{episode_id}", queue="other")
+            # the next write after the one append is the record's `queued`: refused, the row stays `queueing`
+            plant = Refuse(tmp_path / f"spare-{episode_id}", built.ep / "judge.yaml")
             watch = Watch(built, S.judge({B: reply}), after_append={(B, None): plant})
         _stopped(built, watch)
         plant.clear()
@@ -607,8 +627,8 @@ def test_1234_am_pass_stops_after_queueing_before_or_between_appends(tmp_path):
         if when == "before any append":
             assert mine == [[], []], f"rows were appended before the stop: {mine}"
         else:
-            assert sorted(bool(q) for q in mine) == [False, True], (
-                f"the stop between appends left bravo's rows on {[bool(q) for q in mine]}")
+            assert [bool(q) for q in mine] == [True, True], (
+                f"the stop after the one append left bravo's rows on {[bool(q) for q in mine]}")
         record = S.record(built)
         assert _state_of(record, B) == S.QUEUEING, (when, _row(record, B))
         rows[episode_id] = _row(record, B)
@@ -624,7 +644,7 @@ def test_1234_am_pass_stops_after_queueing_before_or_between_appends(tmp_path):
         assert S.queue_bytes() == before
     first, second = (_without(json.dumps(rows[e], sort_keys=True), S.EPISODE_ID, EP2)
                      for e in (S.EPISODE_ID, EP2))
-    assert first == second, "the record tells a stop before the appends from one between them"
+    assert first == second, "the record tells a stop before the append from one after it"
 
 
 def test_1234_rerun_when_draw_files_are_complete_on_disk_but_judge_yaml_is_absent(tmp_path):
@@ -812,7 +832,7 @@ def test_1234_questioner_dedup_and_gate_resolve_per_draw_ids_with_skipped_indexe
     other = _built(tmp_path, episode_id=EP3)
     fid = other.finding_id(B, 0, 0)
     old = S.pre_change_world_row(fid, finding=f"{_claim(B, 'old')} — stopped early")
-    S.sink(S.J.episode_runs_for(other.ep).tenant.id).append(_channel(QUESTIONER_Q), [old], dedup_key="finding_id")
+    S.sink(S.J.episode_runs_for(other.ep).tenant.id).append({_channel(QUESTIONER_Q): [old]})
     assert [r for r in S.questioner_queue() if r.get("finding_id") == fid] == [old], (
         "fixture: the pre-change row sits on the queue at the colliding id")
     assert not (other.ep / "judge.yaml").exists(), "fixture: the pre-change pass left no record"

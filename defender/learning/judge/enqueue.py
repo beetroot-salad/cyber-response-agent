@@ -5,7 +5,7 @@ operator's pass, `StoreFindings`) or the episode's own records (a learning job's
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import field
 from defender._model import model
 from pathlib import Path
@@ -70,8 +70,9 @@ def _refusal_prefix(episode_dir: Path | None) -> str:
 
 
 class FindingsSink(Protocol):
-    """Where a pass's rows go, one channel at a time: the learning store (`StoreFindings`) or a
-    job's episode (`EpisodeFindings`)."""
+    """Where a pass's rows go: the learning store (`StoreFindings`) or a job's episode
+    (`EpisodeFindings`). One commit's rows of every channel arrive in one `append` (#1565), so
+    the store decides them as one call."""
 
     def rows(self, channel: Any) -> list[dict[str, Any]]: ...
 
@@ -79,8 +80,10 @@ class FindingsSink(Protocol):
         """The finding ids `channel` already holds (a row an earlier pass queued)."""
         ...
 
-    def append(self, channel: Any, rows: list[dict[str, Any]], *,
-               dedup_key: str | None = None) -> tuple[int, int]: ...
+    def append(self, channels: Mapping[Any, list[dict[str, Any]]]) -> dict[str, tuple[int, int]]:
+        """Append each channel's rows (`{channel: rows}`) in one call: `(appended, unreadable
+        lines seen)` by channel name, for every channel given."""
+        ...
 
     def describe(self, channel: Any) -> str: ...
 
@@ -250,7 +253,7 @@ def append_rows_report(episode_dir: Path, rows: list[dict[str, Any]], *,
     rows = list(rows)
     for row in rows:
         _validate_row(row, episode_dir=episode_dir)
-    return state.append(FINDINGS, rows, dedup_key="finding_id")
+    return state.append({FINDINGS: rows})[FINDINGS.name]
 
 
 def append_world_rows(episode_dir: Path, rows: list[dict[str, Any]], *,
@@ -263,13 +266,13 @@ def append_world_rows(episode_dir: Path, rows: list[dict[str, Any]], *,
 def append_world_rows_report(episode_dir: Path, rows: list[dict[str, Any]], *,
                              state: FindingsSink) -> tuple[int, int]:
     """Append `rows` to the questioner findings channel through `state`; return `(appended,
-    malformed lines seen)` on that queue, as `append_rows_report` does. A row the sink already
-    holds at its `finding_id` is not appended again; one with other content there is refused
-    by the store (#1565)."""
+    malformed lines seen)` on that queue, as `append_rows_report` does. The store decides a
+    row at a finding id it holds: the same content is not added again, other content is
+    refused (#1565)."""
     rows = list(rows)
     for row in rows:
         _validate_world_row(row, episode_dir=episode_dir)
-    return state.append(QUESTIONER_FINDINGS, rows, dedup_key="finding_id")
+    return state.append({QUESTIONER_FINDINGS: rows})[QUESTIONER_FINDINGS.name]
 
 
 @model
@@ -296,8 +299,8 @@ class EnqueueReport:
 
 
 def _screen_for_store(drawn: DrawnRows, where: str) -> None:
-    """Both kinds' rows screened for what the store can never hold before either is inserted:
-    the store refuses a NUL only per insert, after an earlier kind's rows went in."""
+    """Both kinds' rows screened for what the store can never hold, refused as the judge's own
+    validation (naming the episode and the channel) before the one insert is tried."""
     for channel, rows in ((FINDINGS, drawn.defender), (QUESTIONER_FINDINGS, drawn.world)):
         for row in rows:
             _refuse_unstorable_row(row, where, channel.name)
@@ -327,12 +330,14 @@ def enqueue_report(episode_dir: Path, record: dict[str, Any], *, state: Findings
     if isinstance(state, StoreFindings):
         _screen_for_store(drawn, where)
     report = EnqueueReport()
+    channels = {c: rows for c, rows in ((FINDINGS, drawn.defender), (QUESTIONER_FINDINGS, drawn.world)) if rows}
+    if not channels:
+        return report
+    done = state.append(channels)  # one call: the store refuses a clash in either kind for both (#1565)
     if drawn.defender:
-        report.appended, report.malformed = append_rows_report(
-            episode_dir, drawn.defender, state=state)
+        report.appended, report.malformed = done[FINDINGS.name]
     if drawn.world:
-        report.world_appended, report.world_malformed = append_world_rows_report(
-            episode_dir, drawn.world, state=state)
+        report.world_appended, report.world_malformed = done[QUESTIONER_FINDINGS.name]
     return report
 
 
@@ -502,30 +507,30 @@ class StoreFindings:
         """The keys only (a finding's key is its id), never the tenant's whole history of payloads."""
         return frozenset(self._store.item_keys(self._tenant, _store_kind(channel)))
 
-    def append(self, channel: Any, rows: list[dict[str, Any]], *,
-               dedup_key: str | None = None) -> tuple[int, int]:
-        """Insert `rows` as `channel`'s kind: `(inserted, 0)`. The store decides a repeat by finding id (`dedup_key`
-        is always that): the same content is not inserted again, other content is refused (#1565). An empty append
-        calls nothing."""
-        del dedup_key
-        if not rows:
-            return 0, 0
-        return _insert(self._store, self._tenant, self._run, rows, kind=_store_kind(channel)), 0
+    def append(self, channels: Mapping[Any, list[dict[str, Any]]]) -> dict[str, tuple[int, int]]:
+        """Insert every channel's rows as its kind in one store call: `(inserted, 0)` by channel. The store decides a
+        repeat by finding id: the same content is not inserted again, other content refuses the call, every channel
+        of it (#1565). Rows of no channel call nothing."""
+        names = {getattr(c, "name", None) or "": c for c in channels}
+        by_kind = {_store_kind(c): list(rows) for c, rows in channels.items() if rows}
+        added = _insert(self._store, self._tenant, self._run, by_kind) if by_kind else {}
+        return {name: (added.get(_store_kind(c), 0), 0) for name, c in names.items()}
 
     def describe(self, channel: Any) -> str:
         return f"the learning store ({_store_kind(channel)})"
 
 
-def _insert(store: Any, tenant_id: str, run_id: str, rows: list[dict[str, Any]], *, kind: str) -> int:
-    """`store.publish_findings`, its refusal of an item it can never hold made a `FindingsRefused`;
-    how many rows were new."""
+def _insert(store: Any, tenant_id: str, run_id: str, by_kind: dict[str, list[dict[str, Any]]]) -> dict[str, int]:
+    """`store.publish_finding_channels`, one call for every kind, its refusal (a row it can never
+    hold, or a collision at a held finding id) made a `FindingsRefused`; how many rows of each kind
+    were new."""
     from defender.learning_store import ItemRefused
 
     try:
-        added, _duplicates = store.publish_findings(tenant_id, run_id, rows, kind=kind)
+        counts = store.publish_finding_channels(tenant_id, run_id, by_kind)
     except ItemRefused as refused:
-        raise FindingsRefused(f"the learning store refuses a {kind} row of run {run_id}: {refused}") from None
-    return int(added)
+        raise FindingsRefused(f"the learning store refuses the findings of run {run_id}: {refused}") from None
+    return {kind: int(added) for kind, (added, _duplicates) in counts.items()}
 
 
 # -- the job lane (#1344): findings held in the episode, published once the job's row has ended ---
@@ -571,27 +576,20 @@ class EpisodeFindings:
     def queued_ids(self, channel: Any) -> frozenset[str]:
         return frozenset(r["finding_id"] for r in self.rows(channel) if isinstance(r.get("finding_id"), str))
 
-    def append(self, channel: Any, rows: list[dict[str, Any]], *,
-               dedup_key: str | None = None) -> tuple[int, int]:
-        """Append `rows` to the episode's record for `channel`, dropping only a row the record or an earlier row
-        already holds as the same JSON text at its `dedup_key`: `(appended, unreadable lines seen)`. A row with other
-        content at a held id is kept beside the first, so the store's insert at the job's end, the one owner of that
-        rule, refuses the job's findings (#1565) rather than this record dropping one. An empty append makes nothing."""
-        existing, malformed = self.rows_report(channel)
-        seen = {(r[dedup_key], json.dumps(r)) for r in existing if dedup_key and isinstance(r.get(dedup_key), str)}
-        fresh = []
-        for row in rows:
-            identity = row.get(dedup_key) if dedup_key else None
-            if isinstance(identity, str):
-                held = (identity, json.dumps(row))
-                if held in seen:
-                    continue
-                seen.add(held)
-            fresh.append(row)
-        if fresh:
-            getattr(self._episode, self._record(channel)).append(
-                "".join(json.dumps(row) + "\n" for row in fresh))
-        return len(fresh), malformed
+    def append(self, channels: Mapping[Any, list[dict[str, Any]]]) -> dict[str, tuple[int, int]]:
+        """Append each channel's rows to the episode's record for it, every row as given:
+        `(appended, unreadable lines seen)` by channel. The record decides no repeat: the store's
+        insert at the job's end, the one owner of that rule, stores the same row once and refuses
+        other content at one finding id (#1565). Every channel is checked before any is written;
+        rows of no channel write nothing (the record is still read, for its unreadable lines)."""
+        records = [(channel, self._record(channel), list(rows)) for channel, rows in channels.items()]
+        done: dict[str, tuple[int, int]] = {}
+        for channel, record, rows in records:
+            malformed = self.rows_report(channel)[1]
+            if rows:
+                getattr(self._episode, record).append("".join(json.dumps(row) + "\n" for row in rows))
+            done[channel.name] = (len(rows), malformed)
+        return done
 
     def describe(self, channel: Any) -> str:
         return str(getattr(self._episode, self._record(channel)).path)

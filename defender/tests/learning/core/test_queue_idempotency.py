@@ -176,3 +176,17 @@ def test_a_nul_in_one_channels_row_refuses_the_commits_rows_of_the_other_channel
                                drawn=enqueue.DrawnRows(defender=[defender], world=[world]))
 
     assert (_queued(dsn, FINDINGS), _queued(dsn, QUESTIONER_FINDINGS)) == ([], [])
+
+
+def test_1565_one_commits_two_kinds_go_to_the_store_as_one_call(dsn):
+    """A world commit's defender and questioner rows are one store call: a clash in the questioner rows stores none of
+    the defender rows beside them, and the pass is refused. (#1565)"""
+    held = world_row(finding_id=f"{W.EPISODE_ID}/b/0/1", finding="held")
+    assert _append(dsn, enqueue.append_world_rows_report, [held]) == (1, 0)
+    drawn = enqueue.DrawnRows(defender=[queue_row(finding_id=f"{W.EPISODE_ID}/b/0/0")],
+                              world=[dict(held, finding="other")])
+    with blocking(dsn) as store, pytest.raises(JudgeRefused, match="b/0/1"):
+        enqueue.enqueue_report("episode", {"world": "b"}, state=enqueue.StoreFindings(store, TENANT, "run-1241"),
+                               drawn=drawn)
+    assert _queued(dsn, FINDINGS) == []
+    assert _queued(dsn, QUESTIONER_FINDINGS) == [held]
