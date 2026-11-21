@@ -287,6 +287,28 @@ def test_a_heading_after_a_closed_fence_is_a_section(tmp_path, capsys):
     rc, out = _run(tmp_path, {f"{ADAPTERS}/widget_adapter.py": _module(), WIDGET_REFERENCE: text}, capsys, referenced=False)
     assert rc == 0, out
 
+
+def test_a_fence_line_with_text_after_it_does_not_close_the_fence(tmp_path, capsys):
+    """Only a bare marker closes a fence: ```` ```python ```` inside one leaves it open. (#1504 O6)"""
+    text = "# Widget\n\n## Credential\n\nA token.\n\n```\ncode\n```python\n## Pitfalls\n\nlooks like one\n```\n"
+    rc, out = _run(tmp_path, {f"{ADAPTERS}/widget_adapter.py": _module(), WIDGET_REFERENCE: text}, capsys, referenced=False)
+    assert rc == 1, out
+    assert _lines_naming(out, WIDGET_REFERENCE, "Pitfalls"), out
+
+
+@pytest.mark.parametrize("line", [
+    "```inline``` code",  # a backtick line whose info string holds a backtick is not a fence
+    " ## Pitfalls",  # a heading may be indented up to three spaces
+    "## Pitfalls ##",  # closing hashes are not part of the heading's name
+])
+def test_a_real_pitfalls_heading_is_found(tmp_path, capsys, line):
+    """Each of these leaves a real, non-empty `## Pitfalls` section the lint must find. (#1504 O6)"""
+    pitfalls = f"{line}\n\n## Pitfalls\n\nNone known.\n" if line.startswith("```") else f"{line}\n\nNone known.\n"
+    text = f"# Widget\n\n## Credential\n\nA token.\n\n{pitfalls}"
+    rc, out = _run(tmp_path, {f"{ADAPTERS}/widget_adapter.py": _module(), WIDGET_REFERENCE: text}, capsys, referenced=False)
+    assert rc == 0, out
+
+
 # K8: a declared key that would hold a secret
 
 SECRET_NAMED = ["TOKEN", "API_TOKEN", "PASSWORD", "DB_PASSWD", "CLIENT_SECRET", "SERVICE_CREDENTIAL", "API_KEY",
