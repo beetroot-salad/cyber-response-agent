@@ -143,7 +143,7 @@ def host_worker(world: dict, store: Any, child: HostChild | None = None, *, read
     The investigation command is a scripted child of its own."""
     from defender.tests.support.jobs._worker1342 import _child
 
-    child = child if child is not None else host_child(world)
+    child = child if child is not None else host_child(world)  # lint-default: ok — a test seam resolving its own default
     return make_worker(store, world["root"], investigation if investigation is not None else _child(world, exit=0),
                        readiness_argv=readiness if readiness is not None else child,
                        adoption_argv=adoption if adoption is not None else child, **kw)

@@ -100,7 +100,7 @@ def _readiness_refused(session: Session, facts: LaunchFacts, refused: StepRefuse
     refusal. A refusal of the runs-folder check is no step's (R13-1.1): the helper's own failure."""
     from defender.records import job_lane
 
-    if refused.step not in job_lane.READINESS_STEPS:
+    if not job_lane.is_readiness_step(refused.step):
         raise HelperFault(f"its {refused.step} check refused: {refused}") from None
     if facts.source is not None:
         _write_knowledge(session, facts.source)

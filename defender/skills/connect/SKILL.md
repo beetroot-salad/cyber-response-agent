@@ -272,7 +272,7 @@ git add defender/integrations/{system}_adapter.py \
 go to the tenant's own repo as one pull request, never into this one:
 
 There is no command here that opens that pull request. For a carried adapter that ships base
-files (Elastic in #1471), the tenant admin sends the adoption request
+files (#1471), the tenant admin sends the adoption request
 (`POST /api/tenants/{tenant}/systems/{system}/adoptions`), which opens the pull request on the
 tenant's forge; a human merges it there. For a generated adapter, and for a carried one that
 ships none, leave the staged folder with the handoff folder: the tenant admin or a person

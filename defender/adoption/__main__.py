@@ -127,18 +127,18 @@ def main(argv: list[str], *, environ: Mapping[str, str] | None = None, client: h
     import os
 
     ns = _parse_args(argv)
-    environ = os.environ if environ is None else environ
+    env = os.environ if environ is None else environ
     try:
-        JobContainer.client(environ)
+        JobContainer.client(env)
     except NotInContainer as outside:
         sys.stderr.write(f"[adoption] job {ns.job}: {outside}; nothing was done\n")
         return 2
     try:
-        root = _data_root(environ)
+        root = _data_root(env)
     except TenantRefused as refused:
         sys.stderr.write(f"[adoption] job {ns.job}: {refused}\n")
         return 2
-    record = _outcome(ns, environ, root, client)
+    record = _outcome(ns, env, root, client)
     try:
         with job_lane.JobLane.open(root, ns.tenant) as lane:
             lane.write_adoption(ns.job, record)

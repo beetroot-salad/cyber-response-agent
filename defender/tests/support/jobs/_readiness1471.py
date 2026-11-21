@@ -102,7 +102,7 @@ def investigate(scene: HelperScene, *, signer: Any = None, docker: ContainerStan
     """The helper for a planted investigation of the scene's tenant. Green at the base: a premise, never the subject."""
     inv = str(uuid.uuid4())
     scene.plant(inv)
-    docker = docker if docker is not None else ContainerStandIn(lambda c: 0)
+    docker = docker if docker is not None else ContainerStandIn(lambda c: 0)  # lint-default: ok — a test seam resolving its own default
     err = io.StringIO()
     with contextlib.redirect_stderr(err):
         ran = drive_helper(scene, scene.argv("investigation", inv), docker=docker,

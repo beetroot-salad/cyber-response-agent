@@ -386,6 +386,11 @@ READINESS_STEPS = ("tenant", "records", "alert_mapping", "publish", "knowledge_c
                    "tenant_verdict", "signing", "first_pass", "container_tenant", "systems")
 #: The steps after `publish`: a refusal there carries the knowledge record's status, as `ready` does (R3, R13-1.5).
 READINESS_STEPS_WITH_KNOWLEDGE = frozenset(READINESS_STEPS[READINESS_STEPS.index("publish") + 1:])
+
+
+def is_readiness_step(step: object) -> bool:
+    """Whether `step` is one of a readiness check's refusal steps (`READINESS_STEPS`)."""
+    return isinstance(step, str) and step in READINESS_STEPS
 #: A `ready` record's warning kinds (surface §5, R13-3): one warning per census finding line.
 READINESS_WARNING_KINDS = ("case_system", "system_down", "grant_ignored", "verb_undecided", "verb_undeclared",
                            "tacit_registry", "tacit_grant", "feedback_setting", "retired_file")
