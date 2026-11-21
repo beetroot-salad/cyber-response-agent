@@ -15,8 +15,8 @@
 #   one it started.
 #
 # The sign-in realm registers only `http://localhost:8000/api/auth/callback`, so the app must be at exactly that address
-# in the host's browser. The dev container publishes no port: an attached editor forwards 8000 by itself, and without
-# one the script starts `response-app-forward`, an nginx container on the compose network that publishes it.
+# in the host's browser. docker-compose.yml publishes the dev container's 8000 on the host's 127.0.0.1:8000; a container
+# made before that relies on an attached editor forwarding the port.
 #
 # It checks the one thing the API does not: that the live realm accepts that callback (Keycloak imports the realm file
 # on its first start only). It never migrates the database, starts compose services or changes the realm.
@@ -33,9 +33,8 @@ APP_PORT=8000
 KC=http://keycloak:8080
 KC_REALMS=http://localhost:8080/realms
 KEYCLOAK_CONTAINER=response-keycloak
-FORWARDER=response-app-forward
 DEVCONTAINER=response-devcontainer
-FORWARD_IMAGE=nginx:1.27.5-alpine
+PROBE_IMAGE=nginx:1.27.5-alpine
 # The KV mount the dev OpenBao keeps tenant credentials on (`KV` in playground-issuer/recovery/bao_bootstrap.py).
 KV_MOUNT=tenant-credentials
 
@@ -179,39 +178,23 @@ start_vite() {
     cd "$REPO/defender/frontend"
     [ -d node_modules ] || bun install --frozen-lockfile >"$STATE/bun-install.log" 2>&1 \
       || die "bun install failed: see $STATE/bun-install.log"
-    # Every interface, not Vite's configured localhost: the forwarder reaches the container over the compose network.
+    # Every interface, not Vite's configured localhost: a published port arrives on the container's network address.
     export DEFENDER_INGRESS_API_UPSTREAM="127.0.0.1:$API_PORT"
     launch vite bun run dev --host 0.0.0.0
   )
 }
 
-start_forwarder() {
-  if [ "$(docker inspect -f '{{.State.Running}}' "$FORWARDER" 2>/dev/null)" = true ]; then
-    say "forwarder already running"; return
-  fi
-  # An attached editor (VS Code, the devcontainer CLI) forwards a port the container starts listening on by itself,
-  # shortly after. Then the host's port is already the app's, and a forwarder could not bind it. One container on the
-  # host's network asks for up to 5 seconds.
-  if docker run --rm --network host "$FORWARD_IMAGE" sh -c "for i in 1 2 3 4 5; do \
+# How the host's 127.0.0.1:$APP_PORT reaches the app: published by compose, or forwarded by an attached editor.
+check_host_reach() {
+  [ -n "$(docker port "$DEVCONTAINER" "$APP_PORT" 2>/dev/null)" ] && return
+  # An editor (VS Code, the devcontainer CLI) forwards a port shortly after the container starts listening on it. One
+  # container on the host's network asks for up to 5 seconds.
+  if docker run --rm --network host "$PROBE_IMAGE" sh -c "for i in 1 2 3 4 5; do \
 wget -q -O /dev/null -T 1 http://127.0.0.1:$APP_PORT/ && exit 0; sleep 1; done; exit 1" >/dev/null 2>&1; then
-    say "the host's 127.0.0.1:$APP_PORT already reaches the app (an editor forwards it)"; return
+    say "the host's 127.0.0.1:$APP_PORT reaches the app through the editor's forward"; return
   fi
-  docker rm -f "$FORWARDER" >/dev/null 2>&1 || true
-  local network
-  network="$(docker inspect -f '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}} {{end}}' "$DEVCONTAINER" | awk '{print $1}')"
-  [ -n "$network" ] || die "no network found for $DEVCONTAINER"
-  say "publishing the host's 127.0.0.1:$APP_PORT to $DEVCONTAINER:$APP_PORT ($FORWARDER)"
-  # A plain TCP forward, so Vite's hot-reload websocket and every header pass as they are.
-  docker run -d --name "$FORWARDER" --restart unless-stopped --network "$network" \
-    -p "127.0.0.1:$APP_PORT:$APP_PORT" "$FORWARD_IMAGE" sh -c "cat >/etc/nginx/nginx.conf <<'EOF'
-events {}
-stream {
-  resolver 127.0.0.11 valid=10s;
-  map \$remote_addr \$upstream { default $DEVCONTAINER:$APP_PORT; }
-  server { listen $APP_PORT; proxy_pass \$upstream; }
-}
-EOF
-exec nginx -g 'daemon off;'" >/dev/null
+  say "the host's 127.0.0.1:$APP_PORT does not reach the app: this dev container predates publishing port $APP_PORT. \
+Rebuild it (Dev Containers: Rebuild Container), or forward port $APP_PORT from your editor"
 }
 
 stop_one() {
@@ -231,11 +214,12 @@ status() {
     elif [ "$name" = lifecycle ] && foreign_lifecycle; then echo "lifecycle: another one is running (not this script's)"
     else echo "$name: not running"; fi
   done
-  local forwarder
-  forwarder="$(docker inspect -f '{{.State.Status}}' "$FORWARDER" 2>/dev/null)" || forwarder="absent (not needed while an editor forwards port $APP_PORT)"
-  echo "forwarder: $forwarder"
+  if [ -n "$(docker port "$DEVCONTAINER" "$APP_PORT" 2>/dev/null)" ]; then echo "port $APP_PORT: published by compose"
+  else echo "port $APP_PORT: not published (an editor's forward, or rebuild the dev container)"; fi
 }
 
+# Sourced (a test reads the settings `start_api` passes), it only defines the functions.
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
 case "${1:-}" in
   start)
     check
@@ -246,7 +230,7 @@ case "${1:-}" in
     start_lifecycle
     start_vite && waits+=("vite:$APP_PORT")
     await_ports "${waits[@]+"${waits[@]}"}"
-    start_forwarder
+    check_host_reach
     cat >&2 <<EOF
 [dev-app] ready: http://localhost:$APP_PORT in a browser on the host.
 [dev-app] First sign-in as $ADMIN: open the set-password mail the API sends it, at http://localhost:8025 (Mailpit).
@@ -257,7 +241,6 @@ EOF
     stop_one vite
     stop_one api
     stop_one lifecycle
-    docker rm -f "$FORWARDER" >/dev/null 2>&1 && say "removed $FORWARDER" || true
     ;;
   status) status ;;
   *)
@@ -270,3 +253,4 @@ EOF
     exit 2
     ;;
 esac
+fi
