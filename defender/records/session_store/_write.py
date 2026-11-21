@@ -68,7 +68,7 @@ def _connect_existing(path: Path) -> sqlite3.Connection:
 
 
 
-def _is_blank(conn: sqlite3.Connection) -> bool:
+def _is_uninitialised(conn: sqlite3.Connection) -> bool:
     """No version stamp and no schema object: a database nothing has initialised yet. Read before
     any pragma or DDL, so a refused file stays byte-identical."""
     return (conn.execute("PRAGMA user_version").fetchone()[0] == 0
@@ -462,7 +462,7 @@ def open_store(*, case_id: str, sessions: SessionPaths, create: bool = True) -> 
     logged = path.with_name(path.name + "-wal").exists()
     conn = _bare_connect(path) if create else _connect_existing(path)
     try:
-        fresh = create and not logged and _is_blank(conn)
+        fresh = create and not logged and _is_uninitialised(conn)
         if not fresh:
             _refuse_stale_version(conn)
         _finish_connect(conn)
