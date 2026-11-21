@@ -125,7 +125,7 @@ class Refused:
     return_path: str | None
 
 
-#: What a sign-in `state` (and its token) of ours looks like: exactly what `begin_signin` mints, `token_urlsafe(32)`,
+#: What a sign-in `state` (and its token) of ours looks like: exactly what `pkce.new_secret` mints, `token_urlsafe(32)`,
 #: 43 URL-safe characters. Any other shape names no cookie (#1566).
 _STATE = re.compile(r"[A-Za-z0-9_-]{43}", re.ASCII)
 _ATTEMPT_COOKIE_PREFIX = "__Host-defender_prelogin_"

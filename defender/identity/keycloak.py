@@ -31,6 +31,9 @@ _log = logging.getLogger(__name__)
 #: Our names for what an account must still do, and Keycloak's for the same.
 _REQUIRED_ACTIONS = {"set_password": "UPDATE_PASSWORD", "set_up_otp": "CONFIGURE_TOTP"}
 _TIMEOUT_SECONDS = 10.0
+_ALGORITHM = "RS256"
+#: An admin token is dropped this long before its stated expiry, so a call never carries a dead one.
+_ADMIN_TOKEN_MARGIN = _dt.timedelta(seconds=30)
 
 
 def _cookieless_client(transport: httpx.AsyncBaseTransport | None) -> httpx.AsyncClient:
@@ -38,17 +41,6 @@ def _cookieless_client(transport: httpx.AsyncBaseTransport | None) -> httpx.Asyn
     sign-in page the start check asks for (#1620), which a kept jar would send with every later call."""
     jar = http.cookiejar.CookieJar(policy=http.cookiejar.DefaultCookiePolicy(allowed_domains=[]))
     return httpx.AsyncClient(transport=transport, timeout=_TIMEOUT_SECONDS, cookies=jar)
-
-
-def _same_endpoint(url: str, endpoint: str) -> bool:
-    """Whether `url` is `endpoint` on scheme, host, port (a default one spelled or not) and path."""
-    a, b = urllib.parse.urlsplit(url), urllib.parse.urlsplit(endpoint)
-    defaults = {"http": 80, "https": 443}
-    return ((a.scheme, a.hostname, a.port or defaults.get(a.scheme), a.path)
-            == (b.scheme, b.hostname, b.port or defaults.get(b.scheme), b.path))
-_ALGORITHM = "RS256"
-#: An admin token is dropped this long before its stated expiry, so a call never carries a dead one.
-_ADMIN_TOKEN_MARGIN = _dt.timedelta(seconds=30)
 
 
 def _utc_now() -> _dt.datetime:
@@ -343,34 +335,24 @@ class KeycloakSignIn(_RealmAdmin):
         await self._probe_step("redirect", self._probe_redirect())
 
     async def _probe_redirect(self) -> None:
-        """The realm accepts the browser's sign-in request (#1620): the request `begin_signin` builds, with fresh
-        values, sent on the back channel and not followed. The sign-in page (200) holds. A 400 is the realm refusing
-        the client or its redirect URI, which Keycloak answers alike; a redirect to the redirect URI with `error` is
-        Keycloak refusing a request whose redirect it trusts, so every browser sign-in would end so; anything else is
-        an answer this check cannot read."""
+        """The realm does not refuse the browser's sign-in request (#1620 r3): the request `begin_signin` builds, with
+        fresh values, sent on the back channel and not followed. Keycloak checks the client and the redirect URI before
+        it runs any sign-in flow and refuses either with a 400, so a 400 refuses start, and the sign-in page or any
+        redirect (to the callback, or on to another sign-in provider) means it accepted both; where a redirect points
+        is not read. Anything else is an answer this check cannot read."""
         query = self._signin_query(state=pkce.new_secret(), nonce=pkce.new_secret(),
                                    code_challenge=pkce.challenge(pkce.new_secret()))
         try:
             response = await self._http.get(f"{self._server}/realms/{self._realm}/protocol/openid-connect/auth?{query}")
         except httpx.HTTPError as error:
             raise SignInUnavailable("the sign-in request cannot be sent") from error
-        if response.status_code == httpx.codes.OK:
+        if response.status_code == httpx.codes.OK or response.has_redirect_location:
             return
         if response.status_code == httpx.codes.BAD_REQUEST:
             raise SignInUnavailable(
                 f"the realm refused client {self._client_id} with redirect URI {self._redirect_uri} (an unknown or "
-                "disabled client, or that URI not among its valid redirect URIs)")
-        location = response.headers.get("location", "")
-        if response.is_redirect and _same_endpoint(location, self._redirect_uri):
-            sent = urllib.parse.parse_qs(urllib.parse.urlsplit(location).query)
-            if "error" in sent:
-                described = sent.get("error_description", [""])[0]
-                raise SignInUnavailable(f"the realm sends the sign-in request back to {self._redirect_uri} with error "
-                                        f"{sent['error'][0]}" + (f" ({described})" if described else ""))
-        sent_on = f" to {location}" if response.is_redirect else ""
-        raise SignInUnavailable(
-            f"the sign-in request was answered {response.status_code}{sent_on}, not the sign-in page (a realm whose "
-            "browser flow sends the browser to another sign-in provider first is not supported)")
+                "disabled client, that URI not among its valid redirect URIs, or a proxy in front of the realm)")
+        raise SignInUnavailable(f"the sign-in request was answered {response.status_code}, not the sign-in page")
 
     def _signin_query(self, *, state: str, nonce: str, code_challenge: str) -> str:
         """The browser sign-in request's query: one owner for the browser's URL and the start check's (#1620)."""

@@ -201,9 +201,8 @@ STEP_KINDS: dict[str, tuple[str, ...]] = {
     "token": ("not_found", "server_error", "unreadable", "bad_secret"),
     "admin": ("not_found", "server_error", "no_role"),
     # #1620, observed 2026-11-21 (Keycloak 26.4): `not_registered` is the 400 page for a redirect URI the client does
-    # not list; `callback_error` the redirect to the callback with `error` (a request it refuses but whose redirect it
-    # trusts); `redirect_elsewhere` a redirect to any other address (UNOBSERVED: a flow that sends the browser on).
-    "redirect": ("not_found", "server_error", "not_registered", "callback_error", "redirect_elsewhere"),
+    # not list. A redirect is not a failure (r3): Keycloak redirects only once it accepted the client and the URI.
+    "redirect": ("not_found", "server_error", "not_registered"),
 }
 #: Discovery that never answers: waits until the request is cancelled (the during-start signal case). Not in the
 #: table, because a start that is not signalled never ends.
@@ -411,11 +410,8 @@ class FakeKeycloak(httpx.AsyncBaseTransport):
         if kind == "not_registered" or (self.redirect_uris is not None and redirect not in self.redirect_uris):
             return httpx.Response(400, html="<html><title>Sign in</title>"
                                             "<p id=\"kc-error-message\">Invalid parameter: redirect_uri</p>")
-        if kind == "redirect_elsewhere":
-            return httpx.Response(302, headers={"location": f"{self.issuer(realm)}/broker/elsewhere/login"})
         challenge = params.get("code_challenge", "")
-        if (kind == "callback_error" or params.get("code_challenge_method") != "S256"
-                or not re.fullmatch(r"[A-Za-z0-9._~-]{43,128}", challenge)):
+        if params.get("code_challenge_method") != "S256" or not re.fullmatch(r"[A-Za-z0-9._~-]{43,128}", challenge):
             query = urllib.parse.urlencode({
                 "error": "invalid_request",
                 "error_description": "Invalid parameter: code challenge method is not matching the configured one",

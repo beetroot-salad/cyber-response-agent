@@ -1065,46 +1065,35 @@ async def test_1620_a_400_to_the_sign_in_request_refuses_naming_the_client_the_r
             else FakeKeycloak(signin_client=("another-client", "x")))
     message = await refusal_of(SIGNIN_REALM, fake)
     assert realms_named(message) == {SIGNIN_REALM}, message
-    for named in ("redirect step", CLIENT_ID, REDIRECT_URI, "unknown or disabled client", "valid redirect URI"):
+    for named in ("redirect step", CLIENT_ID, REDIRECT_URI, "unknown or disabled client", "valid redirect URI", "proxy"):
         assert named in message, (named, message)
     listed = FakeKeycloak(redirect_uris=[REDIRECT_URI])
     assert await probe_of(SIGNIN_REALM, listed) is None  # positive control: the listed URI passes
 
 
 @pytest.mark.parametrize("status", [301, 302, 303, 307, 308])
-async def test_1620_a_redirect_to_the_callback_with_an_error_refuses_with_keycloaks_error(status):
-    fake = FakeKeycloak()
-    query = urllib.parse.urlencode({"error": "invalid_request", "error_description": "Missing parameter: code_challenge",
-                                    "state": "s", "iss": f"{FRONT}/realms/{SIGNIN_REALM}"})
-    fake.answers[(SIGNIN_REALM, "redirect")] = lambda request: httpx.Response(
-        status, headers={"location": f"{REDIRECT_URI}?{query}"})
-    message = await refusal_of(SIGNIN_REALM, fake)
-    assert "invalid_request" in message, message
-    assert "Missing parameter: code_challenge" in message, message
-    assert "unknown or disabled client" not in message, message
-
-
 @pytest.mark.parametrize("location", [
-    f"{REDIRECT_URI}x?error=invalid_request", REDIRECT_URI.replace("https://", "http://") + "?error=invalid_request",
-    REDIRECT_URI.replace("api.defender.test", "api.defender.test:8443") + "?error=invalid_request",
-    REDIRECT_URI.replace("api.defender.test", "other.test") + "?error=invalid_request",
-    f"{REDIRECT_URI}?code=abc", f"{REDIRECT_URI}#error=invalid_request", f"{FRONT}/realms/{SIGNIN_REALM}/broker/x/login"])
-
-async def test_1620_any_other_redirect_refuses_without_claiming_a_keycloak_error(location):
-    """Only a redirect to the redirect URI itself (scheme, host, port, path) carrying `error` in its query is
-    Keycloak's error for this request; any other redirect refuses as an answer the step cannot read."""
+    f"{REDIRECT_URI}?error=invalid_request&error_description=Missing+parameter%3A+code_challenge&state=s",
+    f"{FRONT}/realms/{SIGNIN_REALM}/broker/corp/login?client_id=defender-api", "https://elsewhere.test/anything"])
+async def test_1620_any_redirect_means_the_realm_accepted_the_client_and_the_redirect_uri(status, location):
+    """Keycloak checks the client and the redirect URI before any sign-in flow, so a redirect, wherever it points (back
+    to the callback with an error, on to another sign-in provider), means it accepted both: start proceeds (r3)."""
     fake = FakeKeycloak()
-    fake.answers[(SIGNIN_REALM, "redirect")] = lambda request: httpx.Response(302, headers={"location": location})
+    fake.answers[(SIGNIN_REALM, "redirect")] = lambda request: httpx.Response(status, headers={"location": location})
+    assert await probe_of(SIGNIN_REALM, fake) is None
+
+
+async def test_1620_a_3xx_without_a_location_is_not_a_redirect_and_refuses():
+    fake = FakeKeycloak()
+    fake.answers[(SIGNIN_REALM, "redirect")] = lambda request: httpx.Response(302)
     message = await refusal_of(SIGNIN_REALM, fake)
-    assert realms_named(message) == {SIGNIN_REALM}, message
     assert "redirect step" in message, message
-    assert "not the sign-in page" in message, message
-    assert "sends the sign-in request back" not in message, message
-    assert "unknown or disabled client" not in message, message
+    assert "answered 302" in message, message
 
 
 async def test_1620_every_member_of_the_redirect_steps_failure_space_refuses_naming_the_realm_and_the_step():
-    """Every 3xx-5xx status and transport error refuses, naming the realm, the step and (unreached) the address."""
+    """Every 3xx (with no `Location`, so not a redirect) to 5xx status and transport error refuses, naming the realm,
+    the step and (unreached) the address."""
     wrong = []
     for label, answer in _failure_space(FakeKeycloak(), SIGNIN_REALM, "redirect"):
         fake = FakeKeycloak(answers={(SIGNIN_REALM, "redirect"): answer})
@@ -1142,23 +1131,3 @@ async def test_1620_the_stand_in_sets_cookies_a_cookie_keeping_client_would_send
         await client.post(f"/realms/{SIGNIN_REALM}/protocol/openid-connect/token", data={"grant_type": "x"})
     assert len(fake.cookies_sent) == 1, fake.cookies_sent
     assert "AUTH_SESSION_ID=" in fake.cookies_sent[0], fake.cookies_sent
-
-
-async def test_1620_a_redirect_elsewhere_is_named_in_the_refusal():
-    """The operator can tell a realm that sends the browser to another provider from a misbehaving proxy."""
-    elsewhere = f"{FRONT}/realms/{SIGNIN_REALM}/broker/corp/login"
-    fake = FakeKeycloak()
-    fake.answers[(SIGNIN_REALM, "redirect")] = lambda request: httpx.Response(302, headers={"location": elsewhere})
-    message = await refusal_of(SIGNIN_REALM, fake)
-    assert elsewhere in message, message
-    assert "another sign-in provider" in message, message
-
-
-async def test_1620_a_redirect_to_an_address_that_is_not_a_url_refuses_at_the_redirect_step():
-    """A `Location` whose port is not a number is refused by the HTTP client before the step reads it; start still
-    ends naming the step."""
-    fake = FakeKeycloak()
-    fake.answers[(SIGNIN_REALM, "redirect")] = lambda request: httpx.Response(
-        302, headers={"location": "https://api.defender.test:abc/auth/callback?error=invalid_request"})
-    message = await refusal_of(SIGNIN_REALM, fake)
-    assert "redirect step" in message, message

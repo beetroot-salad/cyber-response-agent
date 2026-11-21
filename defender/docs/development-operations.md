@@ -147,8 +147,8 @@ answered to which call and names the settings that answer can come from (a 403: 
 `DEFENDER_API_OPENBAO_TOKEN_FILE`, `DEFENDER_OPENBAO_KV_MOUNT` for the read, and the token's policy; anything else:
 `DEFENDER_OPENBAO_ADDR`), never which one is wrong (#1532), probes each
 realm (discovery names the configured issuer, signing keys fetch, the admin client reads users or clients; the
-sign-in realm then answers the browser's sign-in request with its sign-in page, so it accepts the client and the
-redirect URI `<origin>/api/auth/callback`, #1620) and binds the port before the bootstrap writes anything; a failure
+sign-in realm then does not refuse the browser's sign-in request, so it accepts the client and the redirect URI
+`<origin>/api/auth/callback`, #1620) and binds the port before the bootstrap writes anything; a failure
 ends the program with that step's message on stderr. Not checked at start: the sign-in client's own secret and
 whether an admin role is write-capable (a read-only role passes);
 each surfaces at first use. Lessons and the connection check answer 501 naming their issue (#1082). A stop signal leaves the app and closes every connection.
