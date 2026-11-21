@@ -44,7 +44,8 @@ lifecycle service; run migrations; start the new code. The notes below say only 
 ## Upgrade from before #1504
 
 A catalog system record's non-GET reads must now be exactly the routes its adapter sends (`READ_ROUTES` in the adapter
-module; `GET /adapters` carries them as `reads`, and the adapter's reference as `reference`): Elastic's `POST /*/_search` <!-- lint-shippable: ok — the vendor-specific product integration. -->
+module; `GET /adapters` carries them as `reads`, null beside a `reads_unusable` reason for an adapter with no usable
+list, and the adapter's reference as `reference`): Elastic's `POST /*/_search` <!-- lint-shippable: ok — the vendor-specific product integration. -->
 and `POST /_query`, threat-intel's `POST /lookup`, none for the others. A record with a missing route, an extra one
 (`DELETE /*` listed as a read, or a search narrowed to `POST /logs-*/_search`) is refused by `PUT /systems/<id>` and
 `tenant check`, and at run start the system is down with that reason (no read pass names it, so a case system among them

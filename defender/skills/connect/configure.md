@@ -34,7 +34,9 @@ its `access` and change the base, scheme and routes.
   whose non-GET reads differ from its adapter's, naming each missing and each extra route. Run the
   validator with only the system (`python3 defender/skills/connect/validate_scaffold.py {system}`):
   it prints them, and `GET /adapters` carries the same list in the `reads` field. Never write them
-  from memory.
+  from memory. When the adapter has no usable list, the validator fails its `READ_ROUTES` row with
+  the reason and prints no route, and `GET /adapters` serves `reads: null` with that reason in
+  `reads_unusable`: no record of the system can be saved until the adapter is fixed, so stop and say so.
 - **Writes.** Only the routes the adapter writes to. For a case system that is its comment
   route, which depends on the settings: run the validator with `--case` (`SKILL.md` step 6) and
   copy the route it prints — `the comment the host sends: <METHOD> <path>` — into `writes`.

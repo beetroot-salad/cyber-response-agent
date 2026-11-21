@@ -12,21 +12,14 @@ import re
 from dataclasses import dataclass
 from urllib.parse import unquote, urlsplit
 
-from defender.kit.access import AccessDeclaration, Route, ticket_write_fault
+from defender.kit.access import READ_METHODS, AccessDeclaration, Route, is_read_method, ticket_write_fault
 from defender.kit.paths import holds_separator, url_form_fault, url_path_fault
 from defender.credential_proxy._refusal import CONFIG, CONFINEMENT, Refused
 from defender.kit.faults import ORIGIN_REQUEST, ORIGIN_SETUP
 from defender.credential_proxy._tokens import READ_WRITE
 
-#: Methods that are reads under any base (O3).
-READ_METHODS = ("GET", "HEAD")
+#: An incoming request's method: the request line's shape, not a declared route's (`kit.access.route_shape_fault`).
 _METHOD = re.compile(r"[A-Z]{1,16}")
-
-
-def is_read_method(method: str) -> bool:
-    """True for a method the proxy admits as a read with no declared route (GET, HEAD, O3): the one question of which
-    methods need a declaration, which the record judgement asks too (#1504 O3)."""
-    return method in READ_METHODS
 
 _DEFAULT_PORT = {"http": 80, "https": 443}
 #: What a segment is split on once decoded: a server may read either as a separator.

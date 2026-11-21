@@ -297,8 +297,12 @@ class CatalogAdapter(BaseModel):
     sample_settings: dict[str, str] | None = Field(description="An example value for each stored key; null when the "
                                                                "adapter declares none.")
     lab_example: bool = Field(description="A lab example adapter, not a product integration (D6).")
-    reads: list[CatalogRead] = Field(description="The non-GET routes this adapter's tools send: a record's `reads` holds "
-                                                 "exactly these (#1504 O3); empty when every request is a GET.")
+    reads: list[CatalogRead] | None = Field(description="The non-GET routes this adapter's tools send: a record's `reads` "
+                                                        "holds exactly these (#1504 O3); empty when every request is a GET; "
+                                                        "null when the adapter has no usable list (`reads_unusable` says why).")
+    reads_unusable: str | None = Field(description="Why the adapter has no usable list of non-GET routes (none declared, "
+                                                    "one not readable without running its module, or one naming a route "
+                                                    "that is not usable); null when `reads` is its list (#1504 A6.3).")
     reference: str | None = Field(description="The adapter's configuration reference (Markdown: what its credential needs "
                                               "and the known configuration mistakes), verbatim; null when none can be read.")
 

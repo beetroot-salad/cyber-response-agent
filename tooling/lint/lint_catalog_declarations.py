@@ -39,16 +39,18 @@ from pathlib import Path
 import _astlib
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+# The route rule is the kit's, imported, never reimplemented (#1504 A6.1): the catalog reader judges a list with the same
+# function, so the gate and the reader cannot disagree. `defender.kit` imports nothing else from `defender`.
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from defender.kit.access import READ_METHODS, read_routes_fault  # noqa: E402
 ADAPTERS = "defender/integrations"
 EXAMPLE_ADAPTER = "defender/skills/connect/examples/example_adapter.py"
 ADAPTER_SUFFIX = "_adapter.py"
 READS = "READ_ROUTES"
 #: The reference's two sections, each a level-2 heading (O5).
 SECTIONS = ("Credential", "Pitfalls")
-#: The route shape the access declaration's parser requires (`tenancy/_access.py` `_routes`, C17): an upper-case method,
-#: a path from `/` with no `?` or `#`. GET and HEAD need no declared route at the proxy, so they are never listed.
-_METHOD = re.compile(r"[A-Z]+\Z")
-_PROXY_READ_METHODS = ("GET", "HEAD")
 
 TEXT, FLAG, KEYS = "text", "flag", "keys"
 #: Each declaration and the kind of literal it must be.
@@ -123,30 +125,6 @@ def _value(node: ast.expr, assigned: dict[str, ast.expr], depth: int = 0) -> obj
     return _UNREAD
 
 
-def _route_faults(value: object) -> list[str]:
-    """Why a `READ_ROUTES` value is not a tuple of `(method, path)` routes of the access declaration's shape, each a
-    non-GET/HEAD method, none repeated (O1); empty when it is."""
-    if not isinstance(value, tuple):
-        return ["is not a tuple of (method, path) routes"]
-    faults: list[str] = []
-    seen: set[object] = set()
-    for route in value:
-        if not (isinstance(route, tuple) and len(route) == 2 and all(isinstance(part, str) for part in route)):
-            faults.append(f"holds {route!r}, which is not a (method, path) pair of text")
-            continue
-        method, path = route
-        if not _METHOD.match(method):
-            faults.append(f"holds {route!r}, whose method is not upper-case letters")
-        elif method in _PROXY_READ_METHODS:
-            faults.append(f"holds {route!r}: the proxy passes a {method} without a declared route")
-        if not path.startswith("/") or "?" in path or "#" in path:
-            faults.append(f"holds {route!r}, whose path does not start with `/` or holds `?` or `#`")
-        if route in seen:
-            faults.append(f"holds {route!r} twice")
-        seen.add(route)
-    return faults
-
-
 def _shaped(kind: str, value: object) -> bool:
     if kind == TEXT:
         return isinstance(value, str) and bool(value.strip())
@@ -169,10 +147,12 @@ def scan_file(path: Path, rel: str) -> list[str]:
             continue
         value = _value(assigned[name], assigned)
         if value is not _UNREAD and kind == "routes":
-            findings.extend(f"{rel}: {name} {why}" for why in _route_faults(value))
+            why = read_routes_fault(value)
+            if why is not None:
+                findings.append(f"{rel}: {name} is not a usable list: it {why}")
             if COMMENT_ROUTE in defined and value:
                 findings.append(f"{rel}: {name} is not empty, but the adapter declares a {COMMENT_ROUTE}: a case system "
-                                "takes no non-GET read")
+                                f"takes no read but {' and '.join(READ_METHODS)}")
             continue
         if value is _UNREAD or not _shaped(kind, value):
             findings.append(f"{rel}: {name} is not readable without running the module: declare it as a {kind} "

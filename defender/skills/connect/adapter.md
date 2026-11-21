@@ -210,7 +210,8 @@ Two things ship with the adapter module, both read without running it:
 - **`READ_ROUTES`**, a module-level tuple of `(method, path)` routes: every request the adapter's tools send
   with a method other than `GET` or `HEAD` (a search sent as `POST`, for example), spelled as the access
   declaration spells a route (`*` stands for one segment). `()` when every request is a `GET`; it is declared
-  explicitly, never left out. A record's `reads` must be exactly this list: the store refuses a record
+  explicitly, never left out. It lists no `GET` or `HEAD` route and no route twice: a list that does is
+  not usable, and the catalog reads it as none. A record's `reads` must be exactly this list: the store refuses a record
   with a missing or an extra route, and a test drives each tool through the transport and fails when a
   request is not listed or a listed route is sent by no tool. An adapter that offers a comment action (a
   case system) declares none.

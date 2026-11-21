@@ -21,11 +21,10 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from defender.credential_proxy import is_read_method
-from defender.kit.access import AccessDeclaration, Route, ticket_write_fault
+from defender.kit.access import AccessDeclaration, Route, is_read_method, ticket_write_fault
 from defender.kit.faults import ConfigFault, ConfigFaults
 from defender.kit.settings import RECORDS, Locator, Part, SystemConfig
-from defender.system_rules.catalog import Catalog, route_of
+from defender.system_rules.catalog import Catalog, CatalogEntry, route_of
 from defender.system_rules.registry import is_platform_served
 from defender.tenancy import access_pointer, parse_access
 from defender.tenancy.case_record import CaseTicketError, case_record_text, parse_case_record
@@ -53,20 +52,21 @@ def located_access(text: str, *, system: str, catalog: Catalog | None, adapter: 
         raise ConfigFault(_relocated(str(fault), system, locator)) from None
     named = system if adapter is None else adapter
     if catalog is not None and named in catalog:
-        why = reads_fault(declaration, catalog.entry(named).reads, adapter=named)
+        why = reads_fault(declaration, catalog.entry(named))
         if why is not None:
             raise ConfigFault(f"{locator.part(system, 'access')}: {why}")
     return declaration
 
 
-def reads_fault(declaration: AccessDeclaration, listed: Sequence[tuple[str, str]] | None, *, adapter: str) -> str | None:
-    """Why `declaration`'s non-GET reads are not exactly its adapter's `listed` routes (#1504 O3), as a clause naming each
-    missing and each extra route, or None when they are the same set. The methods the proxy admits with no declaration
-    (`is_read_method`) are not judged. `listed` None: the adapter declares no list readable cold, so nothing can be judged
-    against it, which is refused (principle 2)."""
+def reads_fault(declaration: AccessDeclaration, entry: CatalogEntry) -> str | None:
+    """Why `declaration`'s non-GET reads are not exactly its adapter's (`entry`) listed routes (#1504 O3), as a clause
+    naming each missing and each extra route, or None when they are the same set. The methods the proxy admits with no
+    declaration (`kit.access.is_read_method`) are not judged. An adapter with no usable list (`entry.reads` None) has
+    nothing to judge against, which is refused (principle 2), naming the entry's own reason (A6.2)."""
+    adapter, listed = entry.adapter_id, entry.reads
     if listed is None:
-        return (f"the adapter `{adapter}` declares no READ_ROUTES list readable without running it, so this record's "
-                "read routes cannot be judged")
+        return (f"the adapter `{adapter}` has no usable READ_ROUTES list, so this record's read routes cannot be "
+                f"judged: {entry.reads_unusable}")
     held = {(r.method, r.path) for r in declaration.reads if not is_read_method(r.method)}
     want = set(listed)
     missing = [r for r in listed if r not in held]

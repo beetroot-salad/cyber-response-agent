@@ -272,12 +272,15 @@ def _report_reads(report: Report, defender: Path, system: str) -> None:
     """The non-GET reads the adapter declares (`READ_ROUTES`, #1504 O4), given only the system: before any `access.yaml`
     exists, so the agent writes exactly these under `reads` (the store refuses a record whose reads differ)."""
     try:
-        reads = Catalog.of_checkout(defender).entry(system).reads
+        entry = Catalog.of_checkout(defender).entry(system)
     except Exception:  # noqa: BLE001 — an adapter the catalog cannot list is reported by the registry check
         return
+    reads = entry.reads
     if reads is None:
-        report.add(FAIL, "the adapter declares no READ_ROUTES list readable without running it: its non-GET reads "
-                         "cannot be listed")
+        # The catalog's own reason (#1504 A6.2), whole: for a list that is not usable it names each offending entry, and
+        # nothing else here shows a route, so the agent copies none.
+        report.add(FAIL, f"the adapter has no usable READ_ROUTES list, so its non-GET reads cannot be listed: "
+                         f"{entry.reads_unusable}")
     elif reads:
         report.add(PASS, "the reads access.yaml lists, exactly (every request the adapter sends that is not a GET): "
                    + ", ".join(f"{method} {path}" for method, path in reads))

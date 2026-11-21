@@ -345,12 +345,31 @@
             "type": "boolean"
           },
           "reads": {
-            "description": "The non-GET routes this adapter's tools send: a record's `reads` holds exactly these (#1504 O3); empty when every request is a GET.",
-            "items": {
-              "$ref": "#/components/schemas/CatalogRead"
-            },
-            "title": "Reads",
-            "type": "array"
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CatalogRead"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The non-GET routes this adapter's tools send: a record's `reads` holds exactly these (#1504 O3); empty when every request is a GET; null when the adapter has no usable list (`reads_unusable` says why).",
+            "title": "Reads"
+          },
+          "reads_unusable": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the adapter has no usable list of non-GET routes (none declared, one not readable without running its module, or one naming a route that is not usable); null when `reads` is its list (#1504 A6.3).",
+            "title": "Reads Unusable"
           },
           "reference": {
             "anyOf": [
@@ -395,6 +414,7 @@
           "sample_settings",
           "lab_example",
           "reads",
+          "reads_unusable",
           "reference"
         ],
         "title": "CatalogAdapter",

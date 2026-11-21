@@ -19,6 +19,7 @@ if (_root := str(_Path(__file__).resolve().parents[2])) not in _sys.path:
     _sys.path.insert(0, _root)
 
 from defender._model import model
+from defender.kit.access import READ_METHODS, is_read_method
 from defender.kit.faults import ConfinementFault
 
 
@@ -32,7 +33,8 @@ class AllowlistError(Exception):
 class ReadEndpointAllowlist(Mapping):
     """A validating `Mapping[system, tuple[(endpoint_pattern, method), ...]]`. Refuses at
     authoring time an entry naming no HTTP method — the method is what separates the ticket
-    store's read from its write on the same path."""
+    store's read from its write on the same path — or one the proxy needs a declaration for
+    (not in `kit.access.READ_METHODS`), which is never judged here (#1504 A6.1)."""
 
     def __init__(self, table: Mapping[str, Iterable[Any]]):
         validated: dict[str, tuple[tuple[str, str], ...]] = {}
@@ -48,6 +50,12 @@ class ReadEndpointAllowlist(Mapping):
                 if not method:
                     raise AllowlistError(
                         f"{system}: read-endpoint entry {entry!r} names no HTTP method"
+                    )
+                if not is_read_method(method):
+                    # `confine_read_endpoint` judges only these: an entry of another method would never be consulted.
+                    raise AllowlistError(
+                        f"{system}: read-endpoint entry {entry!r} names {method}, which is not judged in-process "
+                        f"(only {' and '.join(READ_METHODS)} are; the credential proxy judges the rest)"
                     )
                 built.append((endpoint, method))
             validated[system] = tuple(built)
@@ -79,9 +87,6 @@ def normalize_endpoint(url: str) -> str:
     return "/" + "/".join(resolved)
 
 
-#: The methods the proxy admits with no declared route, the only ones judged in-process (its `READ_METHODS`: the layers
-#: below the proxy cannot import it).
-_JUDGED_METHODS = ("GET", "HEAD")
 #: The GET reads a system may make in-process. A request of any other method is not judged here: the proxy enforces
 #: exactly the non-GET routes the system's record declares (#1504 O3), tied to the adapter's own list by a test (O2).
 READ_ENDPOINT_ALLOWLIST = ReadEndpointAllowlist({
@@ -95,7 +100,7 @@ def confine_read_endpoint(system: str, url: str, *, method: str) -> str:
     """Refuse a GET or HEAD whose resolved, normalized target is not a declared read endpoint for `system` under
     `method`. Any other method passes: the credential proxy judges it against the record's declared reads (#1504).
     Checked against REAL requests via the capture seam, never against the allowlist's own entries."""
-    if method not in _JUDGED_METHODS:
+    if not is_read_method(method):  # the methods the proxy admits with no declared route: the only ones judged here
         return url
     path = normalize_endpoint(url)
     entries = READ_ENDPOINT_ALLOWLIST.get(system, ())

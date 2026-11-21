@@ -93,7 +93,8 @@ class ConfigRecords:
     async def list_adapters(self) -> list[CatalogAdapter]:
         return [CatalogAdapter(adapter_id=e.adapter_id, display_name=e.display_name, settings_keys=list(e.stored_keys),
                                sample_settings=None if e.sample_settings is None else dict(e.sample_settings), lab_example=e.example,
-                               reads=[CatalogRead(method=m, path=p) for m, p in e.reads or ()], reference=e.reference)
+                               reads=None if e.reads is None else [CatalogRead(method=m, path=p) for m, p in e.reads],
+                               reads_unusable=e.reads_unusable, reference=e.reference)
                 for e in self._catalog.entries()]
 
     async def list_systems(self, tenant_id: TenantId, *, after: str | None, limit: int) -> list[SystemRecord]:
