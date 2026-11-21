@@ -28,10 +28,12 @@ from defender.identity.models import Role
 from defender.kit.access import CredentialRefused
 from defender.tenancy.record_values import SystemRecord
 from defender.records.formats import (
-    AlertId, BatchId, CredentialId, InvestigationId, LearningJobId, MembershipId, ProgramId, TenantId, UserId, WorkItemId,
+    AlertId, BatchId, CredentialId, HostRequestId, InvestigationId, LearningJobId, MembershipId, ProgramId, TenantId, UserId,
+    WorkItemId,
 )
 
 from .models import (
+    Adoption,
     NO_OUTCOME,
     OutcomeFilter,
     AlertMapping,
@@ -66,6 +68,7 @@ from .models import (
     ProgramCreate,
     ProgramMe,
     ProgramRef,
+    Readiness,
     SavedSystem,
     SetAsideItem,
     System,
@@ -387,12 +390,12 @@ def _caller_with(permission: Permission) -> Callable[..., Any]:
 
 
 @_declares("platform")
-async def _administrator(
-    auth: Annotated[PersonCaller, Depends(_person)], deps: Annotated[ApiDeps, Depends(_deps)],
-) -> PersonCaller:
-    """A platform administrator: a person (a program is refused before the flag is looked at) whose flag is set."""
-    deps.identity.require_administrator(auth)
-    return auth
+async def _administrator(auth: Authed, deps: Annotated[ApiDeps, Depends(_deps)]) -> PersonCaller:
+    """A platform administrator: a person (a program is refused before the flag is looked at) whose flag is set. It declares
+    the category `platform` alone, as a route's one declaration (#1471 C8), so it does not depend on `_person`."""
+    person = await _person(auth)
+    deps.identity.require_administrator(person)
+    return person
 
 
 Deps = Annotated[ApiDeps, Depends(_deps)]
@@ -830,6 +833,106 @@ async def check_system(deps: Deps, caller: ConfigWriter, system_id: SystemPath) 
     return await deps.checker.check(caller.tenant_id, system_id)
 
 
+# --- readiness checks and adoptions of base files (#1471): short requests the host's worker runs ----------------------
+
+
+async def _read_readiness(deps: ApiDeps, tenant_id: TenantId, readiness_id: HostRequestId) -> Readiness:
+    """The check served, with credential presence asked live of a completed one (D10, R13-2): `without_credentials` is
+    null for a tenant that is not active and asks the secret store only of an active one, so a kept row is still read."""
+    saved = await deps.host_requests.get_readiness(tenant_id, readiness_id)
+    if saved is None:
+        raise _not_found("readiness check", readiness_id)
+    missing = await deps.systems.without_credentials(tenant_id) if saved.status == "completed" else None
+    return Readiness(**dict(saved), systems_without_credentials=missing)
+
+
+async def _read_adoption(deps: ApiDeps, tenant_id: TenantId, adoption_id: HostRequestId) -> Adoption:
+    """The adoption served. The pull request's address is built here from the tenant's recorded forge wiring and the
+    number, never taken from the job record (A3); a tenant with no wiring gives none (R13-2)."""
+    saved = await deps.host_requests.get_adoption(tenant_id, adoption_id)
+    if saved is None:
+        raise _not_found("adoption", adoption_id)
+    number = None if saved.result is None else saved.result.pr_number
+    wiring = None if number is None else await deps.tenants.forge_wiring(tenant_id)
+    url = None if wiring is None else f"{wiring.origin.removesuffix('.git')}/pulls/{number}"
+    return Adoption(**dict(saved), pr_url=url)
+
+
+async def _readiness_started(
+    deps: ApiDeps, tenant_id: TenantId, actor: UserId | ProgramId, credential_id: CredentialId | None,
+    request: Request, response: Response, route: str,
+) -> Readiness:
+    saved, created = await deps.host_requests.create_readiness(tenant_id, actor=actor, credential_id=credential_id)
+    if created:
+        _created_at(request, response, route, tenant_id, readiness_id=saved.readiness_id)
+    return Readiness(**dict(saved), systems_without_credentials=None)
+
+
+async def _adoption_started(  # noqa: PLR0913 — who asks, for which system, and where the answer's address is built
+    deps: ApiDeps, tenant_id: TenantId, system_id: str, actor: UserId | ProgramId, credential_id: CredentialId | None,
+    request: Request, response: Response, route: str,
+) -> Adoption:
+    """A1's order: the system is recorded (404), its adapter ships base files (409 naming `no_base_files`), then the store
+    refuses a tenant that is offboarding (409) and dedupes. A tenant that is not active has no known records, so for it the
+    record is the worker's to find at claim (`system_gone`); a `creating` tenant's request is queued, as an
+    investigation's is, and only offboarding is refused, by the store."""
+    try:
+        recorded = await deps.systems.get_system(tenant_id, system_id) is not None
+    except _records.TenantNotActive:
+        recorded = True
+    if not recorded:
+        raise _not_found("system", system_id)
+    if not deps.systems.ships_base_files(system_id):
+        raise Conflict(f"no_base_files: the adapter of system {system_id!r} ships no base files to adopt")
+    saved, created = await deps.host_requests.create_adoption(
+        tenant_id, system_id, actor=actor, credential_id=credential_id)
+    if created:
+        _created_at(request, response, route, tenant_id, adoption_id=saved.adoption_id)
+    return Adoption(**dict(saved), pr_url=None)
+
+
+@systems.post("/{system_id}/adoptions", responses={201: {"model": Adoption}, **responses(404, 409)})
+async def start_adoption(
+    deps: Deps, caller: ConfigWriter, system_id: SystemPath, request: Request, response: Response
+) -> Adoption:
+    """Offer the platform's base files for one of the tenant's recorded systems (enabled or not) as a pull request on the
+    tenant's repository: the adapter's skill and seed query templates, as this release ships them. Refused (409,
+    `no_base_files`) for a system whose adapter ships none. While an adoption of the system is queued it is returned
+    (200); a running one does not count, so asking again queues a new one. Nothing lands until a person merges the pull
+    request, and nothing is granted: an adopted system stays unusable until a person grants its verbs."""
+    return await _adoption_started(deps, caller.tenant_id, system_id, caller.actor_id, caller.credential_id,
+                                   request, response, "get_adoption")
+
+
+readiness = _router(prefix="/readiness", tags=["readiness"], responses=_EVERY_ROUTE)
+
+
+@readiness.post("", responses={201: {"model": Readiness}, **responses(409)})
+async def start_readiness(deps: Deps, caller: ConfigWriter, request: Request, response: Response) -> Readiness:
+    """Ask for a readiness check: a dry run of an investigation's launch, stopped before the run. While a check is queued
+    for the tenant it is returned (200); a running one does not count, so asking again after a fix queues a new one.
+    Poll it by id."""
+    return await _readiness_started(deps, caller.tenant_id, caller.actor_id, caller.credential_id, request, response,
+                                    "get_readiness")
+
+
+@readiness.get("/{readiness_id}", responses={**responses(404), **_SECRET_READ})
+async def get_readiness(deps: Deps, caller: ConfigReader, readiness_id: HostRequestId) -> Readiness:
+    """A readiness check by id. A completed check of an active tenant adds, from the secret store now, the systems with
+    no credential set (503 while the store cannot answer, 500 when it refuses the API)."""
+    return await _read_readiness(deps, caller.tenant_id, readiness_id)
+
+
+adoptions = _router(prefix="/adoptions", tags=["systems"], responses=_EVERY_ROUTE)
+
+
+@adoptions.get("/{adoption_id}", responses=responses(404))
+async def get_adoption(deps: Deps, caller: ConfigReader, adoption_id: HostRequestId) -> Adoption:
+    """An adoption by id. Its pull request's address is built from the tenant's forge wiring; null when there is no number
+    or no wiring."""
+    return await _read_adoption(deps, caller.tenant_id, adoption_id)
+
+
 case_record = _router(prefix="/case-record", tags=["systems"], responses=_EVERY_ROUTE)
 
 
@@ -1160,6 +1263,42 @@ async def admin_invite(deps: Deps, caller: Admin, body: InviteCreate,
     return _invitation(await deps.identity.admin_invite(caller, tenant_id, body.email))
 
 
+async def _known_tenant(deps: ApiDeps, tenant_id: TenantId) -> None:
+    if await deps.tenants.tenant(tenant_id) is None:
+        raise _tenancy.NotFound(f"no tenant {tenant_id}")
+
+
+@admin.post("/tenants/{tenant_id}/readiness", responses={201: {"model": Readiness}, **responses(409)})
+async def admin_start_readiness(
+    deps: Deps, caller: Admin, tenant_id: AdminTenant, request: Request, response: Response
+) -> Readiness:
+    """As the tenant route, for any tenant: the platform administrator is no member and needs none."""
+    await _known_tenant(deps, tenant_id)
+    return await _readiness_started(deps, tenant_id, caller.user.id, None, request, response, "admin_get_readiness")
+
+
+@admin.get("/tenants/{tenant_id}/readiness/{readiness_id}", responses=_SECRET_READ)
+async def admin_get_readiness(deps: Deps, caller: Admin, tenant_id: AdminTenant, readiness_id: HostRequestId) -> Readiness:
+    """Any tenant's readiness check, a request an offboarding ended included."""
+    return await _read_readiness(deps, tenant_id, readiness_id)
+
+
+@admin.post("/tenants/{tenant_id}/systems/{system_id}/adoptions", responses={201: {"model": Adoption}, **responses(409)})
+async def admin_start_adoption(
+    deps: Deps, caller: Admin, tenant_id: AdminTenant, system_id: SystemPath, request: Request, response: Response
+) -> Adoption:
+    """As the tenant route, for any tenant: how a release's changed base files are offered to every tenant."""
+    await _known_tenant(deps, tenant_id)
+    return await _adoption_started(deps, tenant_id, system_id, caller.user.id, None, request, response,
+                                   "admin_get_adoption")
+
+
+@admin.get("/tenants/{tenant_id}/adoptions/{adoption_id}")
+async def admin_get_adoption(deps: Deps, caller: Admin, tenant_id: AdminTenant, adoption_id: HostRequestId) -> Adoption:
+    """Any tenant's adoption."""
+    return await _read_adoption(deps, tenant_id, adoption_id)
+
+
 async def _run_then_close(identity: IdentityService, stop: asyncio.Event) -> None:
     """The background loop (sender and session purge) until `stop`, then the service's close: in one
     task, so nothing closes what the loop uses while it runs, even when the lifespan waiting on it is
@@ -1243,7 +1382,7 @@ def create_app(deps: ApiDeps) -> FastAPI:
     app.add_middleware(_FrontendOriginOnly, origin=deps.frontend_origin)
     in_tenant = _router(prefix="/tenants/{tenant_id}", responses=responses(404))
     for router in (alerts, investigations, learning_jobs, learning_work, lessons, adapters, systems, case_record,
-                   alert_mapping, people, programs):
+                   alert_mapping, readiness, adoptions, people, programs):
         in_tenant.include_router(router)
     for router in (auth, in_tenant, admin):
         app.include_router(router, prefix=API_PREFIX)

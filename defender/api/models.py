@@ -16,7 +16,7 @@ from defender._vocab import Disposition, normalized_disposition
 from defender.identity.models import Email
 from defender.records.learning_causes import BatchCause, ItemCause
 from defender.records.formats import (
-    AlertId, AlertMappingFault, BatchId, CredentialId, InvestigationId, LearningJobId, MembershipId, ProgramId, TenantId, UserId, WorkItemId,
+    AlertId, AlertMappingFault, BatchId, CredentialId, HostRequestId, InvestigationId, LearningJobId, MembershipId, ProgramId, TenantId, UserId, WorkItemId,
     check_mapping,
 )
 
@@ -124,6 +124,92 @@ class InvestigationKnowledge(BaseModel):
         default=None,
         description="Set iff `status` is `stale`: `transient` (a temporary outage) or `operator` "
                     "(awaiting operator action).")
+
+
+#: A host request's stages (#1471 R2): queued, running, then completed with a result or failed with a reason.
+HostRequestStatus = Literal["queued", "running", "completed", "failed"]
+#: The step a readiness check refused at (#1471 P-1, R13-1.4): the helper's steps in their order, then the container's two.
+ReadinessStep = Literal["tenant", "records", "alert_mapping", "publish", "knowledge_copy", "run_tenant", "roster",
+                        "tenant_verdict", "signing", "first_pass", "container_tenant", "systems"]
+#: What a readiness warning is about (#1471 R4).
+WarningKind = Literal["case_system", "system_down", "grant_ignored", "verb_undecided", "verb_undeclared",
+                      "tacit_registry", "tacit_grant", "feedback_setting", "retired_file"]
+AdoptionOutcome = Literal["opened", "already_open", "rejected", "nothing_to_adopt"]
+
+
+class ReadinessWarning(BaseModel):
+    kind: WarningKind
+    sentence: str = Field(description="Our own sentence, as the check wrote it: show it as text (escaped).")
+
+
+class ReadinessRefused(BaseModel):
+    """The check stopped at `step`: a launch of an investigation would be refused there."""
+
+    outcome: Literal["refused"]
+    step: ReadinessStep
+    sentence: str = Field(description="Our own sentence, as the check wrote it: show it as text (escaped).")
+    knowledge: InvestigationKnowledge | None = Field(
+        description="Which revision of the tenant's knowledge the check judged; null when the refusal came at or before "
+                    "the publish step, which gave none.")
+
+
+class ReadinessReady(BaseModel):
+    """Nothing refused the launch; the warnings are what a person should still look at."""
+
+    outcome: Literal["ready"]
+    knowledge: InvestigationKnowledge = Field(description="The revision judged: `knowledge.commit` is the commit.")
+    warnings: list[ReadinessWarning]
+
+
+ReadinessResult = Annotated[ReadinessRefused | ReadinessReady, Field(discriminator="outcome")]
+
+
+class _HostRequestFields(BaseModel):
+    status: HostRequestStatus
+    created_at: Instant
+    started_at: Instant | None
+    finished_at: Instant | None
+    failure_reason: str | None = Field(
+        description="Set when the request failed: a fixed reason such as `worker_error`, `no_record`, `bad_record`, "
+                    "`worker_stopped`, `worker_lost` or `tenant_offboarded`. A request is never retried.")
+    failure_message: str | None = Field(description="Our own words on why it failed; never model or run output.")
+
+
+class SavedReadiness(_HostRequestFields):
+    """A readiness check as the store holds it (#1471 R2): the request and, once it completed, its result."""
+
+    readiness_id: HostRequestId
+    result: ReadinessResult | None = Field(description="Set iff the status is `completed`.")
+
+
+class Readiness(SavedReadiness):
+    """A readiness check as served."""
+
+    systems_without_credentials: list[str] | None = Field(
+        description="On a completed check of an active tenant, asked of the secret store now: the ids of the tenant's "
+                    "systems, disabled ones included, with no credential set at their current generation, sorted. Null "
+                    "for every other poll, and once the tenant is not active.")
+
+
+class AdoptionResult(BaseModel):
+    outcome: AdoptionOutcome
+    pr_number: int | None = Field(description="Set for `opened`, `already_open` and `rejected`: the pull request's number.")
+
+
+class SavedAdoption(_HostRequestFields):
+    """An adoption of a system's base files as the store holds it (#1471 A2)."""
+
+    adoption_id: HostRequestId
+    system_id: str
+    result: AdoptionResult | None = Field(description="Set iff the status is `completed`.")
+
+
+class Adoption(SavedAdoption):
+    """An adoption as served: the pull request's address is built from the tenant's forge wiring."""
+
+    pr_url: str | None = Field(
+        description="The pull request's page on the tenant's forge; null without a number, or when the tenant has no "
+                    "forge wiring.")
 
 
 class Investigation(BaseModel):
